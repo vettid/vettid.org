@@ -4,7 +4,22 @@
       "Bash(cdk init:*)",
       "Bash(node:*)",
       "Bash(npm --version:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(npm run build:*)",
+      "Bash(npx cdk synth)",
+      "Bash(test:*)",
+      "Bash(cat:*)",
+      "Bash(httrack:*)",
+      "Bash(find:*)",
+      "Bash(tree:*)",
+      "Bash(npx cdk deploy)",
+      "Bash(npx cdk:*)",
+      "Bash(dig:*)",
+      "Bash(aws acm list-certificates:*)",
+      "Bash(aws acm describe-certificate:*)",
+      "Bash(aws cloudformation describe-stacks:*)",
+      "Bash(gh repo create:*)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []
