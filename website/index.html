@@ -1,287 +1,175 @@
 <!DOCTYPE html>
 <html lang="en-US">
 <head>
-	<meta charset="UTF-8" />
-	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="description" content="VettID is the world's first open source Personal Security Service (PSS). Own your keys, control your data, and secure your online identity.">
+	<meta name="keywords" content="VettID, security, privacy, encryption, identity, data control, personal security service">
+	<meta name="author" content="The VettID Project">
+
+	<!-- Open Graph / Social Media Meta Tags -->
+	<meta property="og:title" content="The VettID Project – Own Your Keys. Control Your Data.">
+	<meta property="og:description" content="VettID is the world's first open source Personal Security Service (PSS). Own your keys, control your data, and secure your online identity.">
+	<meta property="og:type" content="website">
+	<meta property="og:url" content="https://www.vettid.org/">
+
 	<title>The VettID Project – Own Your Keys. Control Your Data.</title>
-	<link rel="icon" href="/favicon_512-300x300.png" />
-	<style>
-		* {
-			box-sizing: border-box;
-		}
 
-		body {
-			background-color: #2e2d88;
-			color: #FFFFFF;
-			font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-			font-size: 1.125rem;
-			line-height: 1.6;
-			margin: 0;
-			padding: 0;
-		}
+	<!-- Favicon -->
+	<link rel="icon" href="/favicon_512-300x300.png">
 
-		a {
-			color: #FFFFFF;
-			text-decoration: underline;
-		}
-
-		a:hover {
-			color: #ffc125;
-		}
-
-		h1, h2, h3, h4, h5, h6 {
-			color: #fcb900;
-			font-weight: 700;
-		}
-
-		h2 {
-			font-size: clamp(2.25rem, 6vw, 2.75rem);
-			line-height: 1.2;
-			text-align: center;
-		}
-
-		.container {
-			max-width: 1220px;
-			margin: 0 auto;
-			padding: 0 1rem;
-		}
-
-		.content {
-			max-width: 660px;
-			margin: 0 auto;
-		}
-
-		.header {
-			padding: 2rem 0;
-			text-align: center;
-		}
-
-		.logo {
-			display: inline-block;
-		}
-
-		.logo img {
-			width: 180px;
-			height: auto;
-		}
-
-		.logo-text {
-			font-size: 2rem;
-			font-weight: 700;
-			color: #FFFFFF;
-			text-decoration: none;
-		}
-
-		.diagram {
-			text-align: center;
-			margin: 3rem 0;
-		}
-
-		.diagram img {
-			max-width: 100%;
-			height: auto;
-		}
-
-		.spacer {
-			height: 2rem;
-		}
-
-		.spacer-lg {
-			height: 3rem;
-		}
-
-		.text-center {
-			text-align: center;
-		}
-
-		.text-large {
-			font-size: clamp(1.75rem, 3vw, 2.25rem);
-			font-weight: 700;
-		}
-
-		.text-medium {
-			font-size: 1.125rem;
-			font-weight: 700;
-		}
-
-		.highlight {
-			color: #ffc125;
-		}
-
-		.columns {
-			display: flex;
-			flex-wrap: wrap;
-			gap: 2rem;
-			margin: 2rem 0;
-		}
-
-		.column {
-			flex: 1;
-			min-width: 250px;
-		}
-
-		ul {
-			padding-left: 1.5rem;
-		}
-
-		li {
-			margin-bottom: 1rem;
-		}
-
-		.footer {
-			padding: 4rem 0 2rem;
-			text-align: center;
-		}
-
-		.footer a {
-			color: #FFFFFF;
-			text-decoration: none;
-			font-weight: 700;
-		}
-
-		@media (max-width: 781px) {
-			.columns {
-				flex-direction: column;
-			}
-
-			.text-large {
-				font-size: 1.5rem;
-			}
-		}
-	</style>
+	<!-- Stylesheet -->
+	<link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
 	<div class="container">
+		<!-- Header -->
 		<header class="header">
-			<a href="/" class="logo">
-				<img src="/logo_with_white_text.png" alt="The VettID Project" />
+			<a href="/" class="logo" aria-label="VettID Home">
+				<img src="/logo_with_white_text.png" alt="The VettID Project Logo">
 			</a>
 		</header>
 
+		<!-- Main Content -->
 		<main>
 			<div class="spacer-lg"></div>
 
 			<div class="content">
-				<p class="text-center text-large">
-					Online <span class="highlight">Freedom</span> Requires <span class="highlight">Security</span>, <span class="highlight">Privacy</span> and <span class="highlight">Trust</span>.
-				</p>
+				<!-- Hero Section -->
+				<section aria-label="Mission Statement">
+					<p class="text-center text-large">
+						Online <span class="highlight">Freedom</span> Requires <span class="highlight">Security</span>, <span class="highlight">Privacy</span> and <span class="highlight">Trust</span>.
+					</p>
 
-				<p class="text-center text-large">
-					Online <span class="highlight">Security</span>, <span class="highlight">Privacy</span> and <span class="highlight">Trust</span> Requires <span class="highlight">Controlling</span> Your <span class="highlight">Data</span>, <span class="highlight">Secrets</span> and <span class="highlight">Identity</span>.
-				</p>
+					<p class="text-center text-large">
+						Online <span class="highlight">Security</span>, <span class="highlight">Privacy</span> and <span class="highlight">Trust</span> Requires <span class="highlight">Controlling</span> Your <span class="highlight">Data</span>, <span class="highlight">Secrets</span> and <span class="highlight">Identity</span>.
+					</p>
 
-				<p class="text-center text-large">
-					<span class="highlight">Controlling</span> Your Online <span class="highlight">Data</span>, <span class="highlight">Secrets</span> and <span class="highlight">Identity</span> Requires <span class="highlight">VettID</span>!
-				</p>
-
-				<div class="spacer-lg"></div>
-
-				<h2>What is VettID?</h2>
-
-				<p class="text-center text-medium">
-					VettID is the world's first open source Personal Security Service (PSS). VettID provides the core services required to empower people to own and control their data, secrets and identity online. VettID provides the fundamental services to deliver secure, private and trusted experiences.
-				</p>
+					<p class="text-center text-large">
+						<span class="highlight">Controlling</span> Your Online <span class="highlight">Data</span>, <span class="highlight">Secrets</span> and <span class="highlight">Identity</span> Requires <span class="highlight">VettID</span>!
+					</p>
+				</section>
 
 				<div class="spacer-lg"></div>
 
-				<h2>What Does VettID Do?</h2>
+				<!-- What is VettID -->
+				<section aria-labelledby="what-is-vettid">
+					<h2 id="what-is-vettid">What is VettID?</h2>
+					<p class="text-center text-medium">
+						VettID is the world's first open source Personal Security Service (PSS). VettID provides the core services required to empower people to own and control their data, secrets and identity online. VettID provides the fundamental services to deliver secure, private and trusted experiences.
+					</p>
+				</section>
 
-				<p class="text-center text-medium">
-					VettID enables people to control, use and share their most critical online activities and data:
-				</p>
+				<div class="spacer-lg"></div>
 
-				<div class="columns">
-					<div class="column">
-						<p class="text-medium">
-							• <span class="highlight">Online Identity</span><br>
-							• <span class="highlight">Messaging</span><br>
-							• <span class="highlight">Notifications</span><br>
-							• <span class="highlight">Authentication</span><br>
-							• <span class="highlight">Authorization</span>
-						</p>
+				<!-- What Does VettID Do -->
+				<section aria-labelledby="what-does-vettid-do">
+					<h2 id="what-does-vettid-do">What Does VettID Do?</h2>
+					<p class="text-center text-medium">
+						VettID enables people to control, use and share their most critical online activities and data:
+					</p>
+
+					<div class="columns">
+						<div class="column">
+							<p class="text-medium">
+								• <span class="highlight">Online Identity</span><br>
+								• <span class="highlight">Messaging</span><br>
+								• <span class="highlight">Notifications</span><br>
+								• <span class="highlight">Authentication</span><br>
+								• <span class="highlight">Authorization</span>
+							</p>
+						</div>
+
+						<div class="column">
+							<p class="text-medium">
+								• <span class="highlight">Personal Data</span> – name, date of birth, address, phone number, public keys, etc.<br>
+								• <span class="highlight">Private Data</span> – credit cards, drivers license, passport, encryption keys, etc.<br>
+								• <span class="highlight">Secret Data</span> – private keys, seed phrases, etc.
+							</p>
+						</div>
 					</div>
+				</section>
 
-					<div class="column">
-						<p class="text-medium">
-							• <span class="highlight">Personal Data</span> – name, date of birth, address, phone number, public keys, etc.<br>
-							• <span class="highlight">Private Data</span> – credit cards, drivers license, passport, encryption keys, etc.<br>
-							• <span class="highlight">Secret Data</span> – private keys, seed phrases, etc.
-						</p>
+				<div class="spacer-lg"></div>
+
+				<!-- What Makes VettID Unique -->
+				<section aria-labelledby="what-makes-vettid-unique">
+					<h2 id="what-makes-vettid-unique">What Makes VettID Unique?</h2>
+					<p class="text-center text-medium">
+						VettID owners have complete <span class="highlight">control</span> and <span class="highlight">ownership</span> over all of their <span class="highlight">data</span>. A VettID owner's <span class="highlight">data</span> is <span class="highlight">encrypted</span> at rest and in-transit. Every VettID owner <span class="highlight">controls</span> their own <span class="highlight">encryption keys</span>. VettID creates a uniquely <span class="highlight">encrypted connection</span> between the owner and other users or applications for trusted <span class="highlight">event-based communications</span>. VettID owners can add <span class="highlight">new functionality</span> to their PSS with <span class="highlight">custom event handlers</span>.
+					</p>
+				</section>
+
+				<div class="spacer-lg"></div>
+
+				<!-- How Does VettID Work -->
+				<section aria-labelledby="how-does-vettid-work">
+					<h2 id="how-does-vettid-work">How Does VettID Work?</h2>
+					<p class="text-center text-medium">
+						There are 3 components to VettID:
+					</p>
+
+					<p class="text-center text-medium">
+						<span class="highlight">VettID Mobile App</span> – The VettID Mobile App is the owner's hub for secure, private and trusted online activities. The app is how the owner authenticates, manages their data, connects with other users, connects with applications and authorizes transactions. The app is also used to launch trusted apps related to their connections.
+					</p>
+
+					<p class="text-center text-medium">
+						<span class="highlight">VettID Cloud</span> – A cloud service that enables the owner to securely connect to their Private Data Vault. It provides every owner with a MessageSpace for encrypted communication with their connected users and applications.
+					</p>
+
+					<p class="text-center text-medium">
+						<span class="highlight">Private Data Vault</span> – The Private Data Vault is a small virtual server that authenticates the owner, secures their data and uses the owners data in authorized transactions. The Private Data Vault is hosted by VettID in the cloud but under the complete control of the owner. The owner's Private Data Vault retrieves encrypted messages from their MessageSpace, decrypts the messages and executes Event Handlers to act on the message.
+					</p>
+
+					<figure class="diagram">
+						<img src="/VettID.orgCloud.drawio.png" alt="VettID Architecture Diagram showing the relationship between VettID Mobile App, VettID Cloud, and Private Data Vault">
+					</figure>
+				</section>
+
+				<div class="spacer-lg"></div>
+
+				<!-- Why Should I Use VettID -->
+				<section aria-labelledby="why-use-vettid">
+					<h2 id="why-use-vettid">Why Should I Use VettID?</h2>
+
+					<div class="columns">
+						<div class="column">
+							<h2>Individuals</h2>
+							<ul>
+								<li><span class="highlight">Practical Security</span> – VettID provides a high level of security in a manner that is simple to use.</li>
+								<li><span class="highlight">Complete Privacy</span> – VettID owners control their own keys, data and connections. All data is encrypted at rest and in transit.</li>
+								<li><span class="highlight">Trusted Communications</span> – Only your connections are allowed to communicate with you. All communications are verified using PKI.</li>
+								<li><span class="highlight">Total Visibility</span> – Owners have a complete audit trail of all of their authentication, authorization and data sharing activities.</li>
+								<li><span class="highlight">Ultimate Control</span> – Only the VettID owner determines what activities they may perform online.</li>
+							</ul>
+						</div>
+
+						<div class="column">
+							<h2>Developers</h2>
+							<ul>
+								<li><span class="highlight">Remove Risk</span> – Don't reinvent the wheel! VettID provides everything needed to securely authenticate and communicate with owners.</li>
+								<li><span class="highlight">Limit Liability</span> – Developers don't need to create massive databases of PII that are targets for hackers. PII may be retrieved from an owner as needed for transactions.</li>
+								<li><span class="highlight">Eliminate Fraud</span> – VettID creates a closed network among connections and eliminates the potential for phishing, smishing, MITM attacks and identity impersonation.</li>
+								<li><span class="highlight">Reduce Friction</span> – Replace user registration with a VettID connection and automatically onboard new users.</li>
+								<li><span class="highlight">Simplify Security</span> – Eliminate password reuse, credential stuffing and other identity attacks without complicating the user experience.</li>
+							</ul>
+						</div>
 					</div>
-				</div>
+				</section>
 
 				<div class="spacer-lg"></div>
 
-				<h2>What Makes VettID Unique?</h2>
-
-				<p class="text-center text-medium">
-					VettID owners have complete <span class="highlight">control</span> and <span class="highlight">ownership</span> over all of their <span class="highlight">data</span>. A VettID owner's <span class="highlight">data</span> is <span class="highlight">encrypted</span> at rest and in-transit. Every VettID owner <span class="highlight">controls</span> their own <span class="highlight">encryption keys</span>. VettID creates a uniquely <span class="highlight">encrypted connection</span> between the owner and other users or applications for trusted <span class="highlight">event-based communications</span>. VettID owners can add <span class="highlight">new functionality</span> to their PSS with <span class="highlight">custom event handlers</span>.
-				</p>
-
-				<div class="spacer-lg"></div>
-
-				<h2>How Does VettID Work?</h2>
-
-				<p class="text-center text-medium">
-					There are 3 components to VettID:
-				</p>
-
-				<p class="text-center text-medium">
-					<span class="highlight">VettID Mobile App</span> – The VettID Mobile App is the owner's hub for secure, private and trusted online activities. The app is how the owner authenticates, manages their data, connects with other users, connects with applications and authorizes transactions. The app is also used to launch trusted apps related to their connections.
-				</p>
-
-				<p class="text-center text-medium">
-					<span class="highlight">VettID Cloud</span> – A cloud service that enables the owner to securely connect to their Private Data Vault. It provides every owner with a MessageSpace for encrypted communication with their connected users and applications.
-				</p>
-
-				<p class="text-center text-medium">
-					<span class="highlight">Private Data Vault</span> – The Private Data Vault is a small virtual server that authenticates the owner, secures their data and uses the owners data in authorized transactions. The Private Data Vault is hosted by VettID in the cloud but under the complete control of the owner. The owner's Private Data Vault retrieves encrypted messages from their MessageSpace, decrypts the messages and executes Event Handlers to act on the message.
-				</p>
-
-				<div class="diagram">
-					<img src="/VettID.orgCloud.drawio.png" alt="VettID Architecture Diagram" />
-				</div>
-
-				<div class="spacer-lg"></div>
-
-				<h2>Why Should I Use VettID?</h2>
-
-				<div class="columns">
-					<div class="column">
-						<h2>Individuals</h2>
-
-						<ul>
-							<li><span class="highlight">Practical Security</span> – VettID provides a high level of security in a manner that is simple to use.</li>
-							<li><span class="highlight">Complete Privacy</span> – VettID owners control their own keys, data and connections. All data is encrypted at rest and in transit.</li>
-							<li><span class="highlight">Trusted Communications</span> – Only your connections are allowed to communicate with you. All communications are verified using PKI.</li>
-							<li><span class="highlight">Total Visibility</span> – Owners have a complete audit trail of all of their authentication, authorization and data sharing activities.</li>
-							<li><span class="highlight">Ultimate Control</span> – Only the VettID owner determines what activities they may perform online.</li>
-						</ul>
-					</div>
-
-					<div class="column">
-						<h2>Developers</h2>
-
-						<ul>
-							<li><span class="highlight">Remove Risk</span> – Don't reinvent the wheel! VettID provides everything needed to securely authenticate and communicate with owners.</li>
-							<li><span class="highlight">Limit Liability</span> – Developers don't need to create massive databases of PII that are targets for hackers. PII may be retrieved from an owner as needed for transactions.</li>
-							<li><span class="highlight">Eliminate Fraud</span> – VettID creates a closed network among connections and eliminates the potential for phishing, smishing, MITM attacks and identity impersonation.</li>
-							<li><span class="highlight">Reduce Friction</span> – Replace user registration with a VettID connection and automatically onboard new users.</li>
-							<li><span class="highlight">Simplify Security</span> – Eliminate password reuse, credential stuffing and other identity attacks without complicating the user experience.</li>
-						</ul>
-					</div>
-				</div>
-
-				<div class="spacer-lg"></div>
-
-				<h2>How Can I Help?</h2>
-
-				<p class="text-center">
-					The VettID project is currently in development. If you are a developer who would like to help, we need developers experienced with Linux, iOS and Android. We are also looking for a graphic designer to help with this site. If you are interested in helping please email <a href="mailto:info@vettid.org">info@vettid.org</a>!
-				</p>
+				<!-- How Can I Help -->
+				<section aria-labelledby="how-can-i-help">
+					<h2 id="how-can-i-help">How Can I Help?</h2>
+					<p class="text-center">
+						The VettID project is currently in development. If you are a developer who would like to help, we need developers experienced with Linux, iOS and Android. We are also looking for a graphic designer to help with this site. If you are interested in helping please email <a href="mailto:info@vettid.org">info@vettid.org</a>!
+					</p>
+				</section>
 			</div>
 		</main>
 
+		<!-- Footer -->
 		<footer class="footer">
 			<p><a href="/">The VettID Project</a></p>
 			<p><a href="mailto:info@vettid.org">info@vettid.org</a></p>

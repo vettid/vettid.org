@@ -1,0 +1,196 @@
+/* ===================================
+   VettID.org Stylesheet
+   =================================== */
+
+/* ==========================================================================
+   Base Styles
+   ========================================================================== */
+
+* {
+	box-sizing: border-box;
+}
+
+body {
+	background-color: #2e2d88;
+	color: #ffffff;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+	font-size: 1.125rem;
+	line-height: 1.6;
+	margin: 0;
+	padding: 0;
+}
+
+/* ==========================================================================
+   Typography
+   ========================================================================== */
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+	color: #fcb900;
+	font-weight: 700;
+}
+
+h2 {
+	font-size: clamp(2.25rem, 6vw, 2.75rem);
+	line-height: 1.2;
+	text-align: center;
+}
+
+/* ==========================================================================
+   Links
+   ========================================================================== */
+
+a {
+	color: #ffffff;
+	text-decoration: underline;
+	transition: color 0.2s ease;
+}
+
+a:hover,
+a:focus {
+	color: #ffc125;
+}
+
+/* ==========================================================================
+   Layout
+   ========================================================================== */
+
+.container {
+	max-width: 1220px;
+	margin: 0 auto;
+	padding: 0 1rem;
+}
+
+.content {
+	max-width: 660px;
+	margin: 0 auto;
+}
+
+/* ==========================================================================
+   Header
+   ========================================================================== */
+
+.header {
+	padding: 2rem 0;
+	text-align: center;
+}
+
+.logo {
+	display: inline-block;
+}
+
+.logo img {
+	width: 180px;
+	height: auto;
+}
+
+/* ==========================================================================
+   Main Content
+   ========================================================================== */
+
+.diagram {
+	text-align: center;
+	margin: 3rem 0;
+}
+
+.diagram img {
+	max-width: 100%;
+	height: auto;
+}
+
+/* ==========================================================================
+   Utility Classes
+   ========================================================================== */
+
+.spacer {
+	height: 2rem;
+}
+
+.spacer-lg {
+	height: 3rem;
+}
+
+.text-center {
+	text-align: center;
+}
+
+.text-large {
+	font-size: clamp(1.75rem, 3vw, 2.25rem);
+	font-weight: 700;
+}
+
+.text-medium {
+	font-size: 1.125rem;
+	font-weight: 700;
+}
+
+.highlight {
+	color: #ffc125;
+}
+
+/* ==========================================================================
+   Columns Layout
+   ========================================================================== */
+
+.columns {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 2rem;
+	margin: 2rem 0;
+}
+
+.column {
+	flex: 1;
+	min-width: 250px;
+}
+
+/* ==========================================================================
+   Lists
+   ========================================================================== */
+
+ul {
+	padding-left: 1.5rem;
+}
+
+li {
+	margin-bottom: 1rem;
+}
+
+/* ==========================================================================
+   Footer
+   ========================================================================== */
+
+.footer {
+	padding: 4rem 0 2rem;
+	text-align: center;
+}
+
+.footer a {
+	color: #ffffff;
+	text-decoration: none;
+	font-weight: 700;
+}
+
+.footer a:hover,
+.footer a:focus {
+	color: #ffc125;
+	text-decoration: underline;
+}
+
+/* ==========================================================================
+   Responsive Design
+   ========================================================================== */
+
+@media (max-width: 781px) {
+	.columns {
+		flex-direction: column;
+	}
+
+	.text-large {
+		font-size: 1.5rem;
+	}
+}
