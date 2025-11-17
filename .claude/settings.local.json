@@ -19,7 +19,20 @@
       "Bash(aws acm describe-certificate:*)",
       "Bash(aws cloudformation describe-stacks:*)",
       "Bash(gh repo create:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "Bash(git restore:*)",
+      "Bash(chmod:*)",
+      "Bash(pip3 install:*)",
+      "Bash(python3:*)",
+      "Bash(sudo apt-get update:*)",
+      "Bash(sudo apt-get:*)",
+      "Bash(curl:*)",
+      "Bash(sudo ln:*)",
+      "Bash(echo:*)",
+      "Bash(export PATH=\"$HOME/Sites/vettid_tools:$PATH\")",
+      "Bash(v.org:*)"
     ],
     "deny": [],
     "ask": []

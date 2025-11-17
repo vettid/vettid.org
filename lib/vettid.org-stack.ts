@@ -37,19 +37,8 @@ export class VettidOrgStack extends cdk.Stack {
       encryption: s3.BucketEncryption.S3_MANAGED,
       lifecycleRules: [
         {
-          // Transition to Infrequent Access after 30 days
-          transitions: [
-            {
-              storageClass: s3.StorageClass.INFREQUENT_ACCESS,
-              transitionAfter: cdk.Duration.days(30),
-            },
-            {
-              storageClass: s3.StorageClass.GLACIER,
-              transitionAfter: cdk.Duration.days(90),
-            },
-          ],
-          // Delete logs after 1 year
-          expiration: cdk.Duration.days(365),
+          // Delete logs after 30 days
+          expiration: cdk.Duration.days(30),
         },
       ],
       objectOwnership: s3.ObjectOwnership.OBJECT_WRITER,

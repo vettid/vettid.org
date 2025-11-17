@@ -257,13 +257,12 @@ CloudFront logs are typically delivered within 15-60 minutes of the request, but
 
 ## Log Retention
 
-Logs are automatically managed with the following lifecycle:
-- **0-30 days**: Standard storage (frequent access)
-- **30-90 days**: Infrequent Access storage (lower cost)
-- **90-365 days**: Glacier storage (archive)
-- **After 365 days**: Automatically deleted
+Logs are automatically deleted after 30 days to maintain privacy and minimize storage costs.
 
-You can modify these settings in the CDK stack if needed.
+- **0-30 days**: Logs are stored in S3 Standard storage and can be queried via Athena
+- **After 30 days**: Logs are automatically deleted
+
+You can modify this retention period in the CDK stack if needed.
 
 ## Privacy Considerations
 
