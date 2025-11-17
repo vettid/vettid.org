@@ -5,6 +5,8 @@ import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
+import * as glue from 'aws-cdk-lib/aws-glue';
+import * as athena from 'aws-cdk-lib/aws-athena';
 
 export interface VettidOrgStackProps extends cdk.StackProps {
   domainName: string;
@@ -25,6 +27,45 @@ export class VettidOrgStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       encryption: s3.BucketEncryption.S3_MANAGED,
       versioned: true,
+    });
+
+    // S3 bucket for CloudFront access logs
+    const logsBucket = new s3.Bucket(this, 'LogsBucket', {
+      bucketName: `${props.domainName}-logs`,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      lifecycleRules: [
+        {
+          // Transition to Infrequent Access after 30 days
+          transitions: [
+            {
+              storageClass: s3.StorageClass.INFREQUENT_ACCESS,
+              transitionAfter: cdk.Duration.days(30),
+            },
+            {
+              storageClass: s3.StorageClass.GLACIER,
+              transitionAfter: cdk.Duration.days(90),
+            },
+          ],
+          // Delete logs after 1 year
+          expiration: cdk.Duration.days(365),
+        },
+      ],
+      objectOwnership: s3.ObjectOwnership.OBJECT_WRITER,
+    });
+
+    // S3 bucket for Athena query results
+    const athenaResultsBucket = new s3.Bucket(this, 'AthenaResultsBucket', {
+      bucketName: `${props.domainName}-athena-results`,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      lifecycleRules: [
+        {
+          expiration: cdk.Duration.days(30),
+        },
+      ],
     });
 
     // SSL Certificate (must be in us-east-1 for CloudFront)
@@ -62,6 +103,11 @@ export class VettidOrgStack extends cdk.Stack {
       },
       defaultRootObject: 'index.html',
       priceClass: cloudfront.PriceClass.PRICE_CLASS_100,
+      // Enable access logging
+      enableLogging: true,
+      logBucket: logsBucket,
+      logFilePrefix: 'cloudfront/',
+      logIncludesCookies: true,
     };
 
     // Add custom domain configuration if enabled
@@ -82,6 +128,93 @@ export class VettidOrgStack extends cdk.Stack {
       distributionPaths: ['/*'],
     });
 
+    // Create Glue Database for Athena
+    const glueDatabase = new glue.CfnDatabase(this, 'LogsDatabase', {
+      catalogId: this.account,
+      databaseInput: {
+        name: 'vettid_logs',
+        description: 'Database for VettID CloudFront access logs',
+      },
+    });
+
+    // Create Glue Table for CloudFront logs
+    const glueTable = new glue.CfnTable(this, 'CloudFrontLogsTable', {
+      catalogId: this.account,
+      databaseName: glueDatabase.ref,
+      tableInput: {
+        name: 'cloudfront_logs',
+        description: 'CloudFront access logs table',
+        tableType: 'EXTERNAL_TABLE',
+        parameters: {
+          'EXTERNAL': 'TRUE',
+          'skip.header.line.count': '2',
+        },
+        storageDescriptor: {
+          columns: [
+            { name: 'date', type: 'date' },
+            { name: 'time', type: 'string' },
+            { name: 'location', type: 'string' },
+            { name: 'bytes', type: 'bigint' },
+            { name: 'request_ip', type: 'string' },
+            { name: 'method', type: 'string' },
+            { name: 'host', type: 'string' },
+            { name: 'uri', type: 'string' },
+            { name: 'status', type: 'int' },
+            { name: 'referrer', type: 'string' },
+            { name: 'user_agent', type: 'string' },
+            { name: 'query_string', type: 'string' },
+            { name: 'cookie', type: 'string' },
+            { name: 'result_type', type: 'string' },
+            { name: 'request_id', type: 'string' },
+            { name: 'host_header', type: 'string' },
+            { name: 'request_protocol', type: 'string' },
+            { name: 'request_bytes', type: 'bigint' },
+            { name: 'time_taken', type: 'float' },
+            { name: 'xforwarded_for', type: 'string' },
+            { name: 'ssl_protocol', type: 'string' },
+            { name: 'ssl_cipher', type: 'string' },
+            { name: 'response_result_type', type: 'string' },
+            { name: 'http_version', type: 'string' },
+            { name: 'fle_status', type: 'string' },
+            { name: 'fle_encrypted_fields', type: 'int' },
+            { name: 'c_port', type: 'int' },
+            { name: 'time_to_first_byte', type: 'float' },
+            { name: 'x_edge_detailed_result_type', type: 'string' },
+            { name: 'sc_content_type', type: 'string' },
+            { name: 'sc_content_len', type: 'bigint' },
+            { name: 'sc_range_start', type: 'bigint' },
+            { name: 'sc_range_end', type: 'bigint' },
+          ],
+          location: `s3://${logsBucket.bucketName}/cloudfront/`,
+          inputFormat: 'org.apache.hadoop.mapred.TextInputFormat',
+          outputFormat: 'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat',
+          serdeInfo: {
+            serializationLibrary: 'org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe',
+            parameters: {
+              'field.delim': '\t',
+              'serialization.format': '\t',
+            },
+          },
+        },
+      },
+    });
+
+    // Create Athena WorkGroup
+    const athenaWorkGroup = new athena.CfnWorkGroup(this, 'LogsWorkGroup', {
+      name: 'vettid-logs-workgroup',
+      description: 'WorkGroup for querying VettID access logs',
+      workGroupConfiguration: {
+        resultConfiguration: {
+          outputLocation: `s3://${athenaResultsBucket.bucketName}/`,
+          encryptionConfiguration: {
+            encryptionOption: 'SSE_S3',
+          },
+        },
+        enforceWorkGroupConfiguration: true,
+        publishCloudWatchMetricsEnabled: false,
+      },
+    });
+
     // CloudFront distribution domain name output
     this.distributionDomainName = new cdk.CfnOutput(this, 'DistributionDomainName', {
       value: distribution.distributionDomainName,
@@ -98,6 +231,30 @@ export class VettidOrgStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'DistributionId', {
       value: distribution.distributionId,
       description: 'CloudFront distribution ID',
+    });
+
+    // Logs bucket output
+    new cdk.CfnOutput(this, 'LogsBucketName', {
+      value: logsBucket.bucketName,
+      description: 'S3 bucket name for CloudFront access logs',
+    });
+
+    // Athena database output
+    new cdk.CfnOutput(this, 'AthenaDatabase', {
+      value: glueDatabase.ref,
+      description: 'Athena database name for querying logs',
+    });
+
+    // Athena workgroup output
+    new cdk.CfnOutput(this, 'AthenaWorkGroup', {
+      value: athenaWorkGroup.name!,
+      description: 'Athena workgroup for running queries',
+    });
+
+    // Athena results bucket output
+    new cdk.CfnOutput(this, 'AthenaResultsBucketName', {
+      value: athenaResultsBucket.bucketName,
+      description: 'S3 bucket for Athena query results',
     });
   }
 }
