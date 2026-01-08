@@ -72,23 +72,41 @@ export class VettidOrgStack extends cdk.Stack {
       });
     }
 
-    // CloudFront Origin Access Identity
-    const originAccessIdentity = new cloudfront.OriginAccessIdentity(this, 'OAI', {
-      comment: `OAI for ${props.domainName}`,
+    // Security headers policy for CloudFront
+    const securityHeadersPolicy = new cloudfront.ResponseHeadersPolicy(this, 'SecurityHeadersPolicy', {
+      responseHeadersPolicyName: `${props.domainName.replace(/[.]/g, '-')}-security-headers`,
+      securityHeadersBehavior: {
+        contentTypeOptions: { override: true },
+        frameOptions: {
+          frameOption: cloudfront.HeadersFrameOption.DENY,
+          override: true,
+        },
+        referrerPolicy: {
+          referrerPolicy: cloudfront.HeadersReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN,
+          override: true,
+        },
+        strictTransportSecurity: {
+          accessControlMaxAge: cdk.Duration.days(365),
+          includeSubdomains: true,
+          override: true,
+        },
+        xssProtection: {
+          protection: true,
+          modeBlock: true,
+          override: true,
+        },
+      },
     });
 
-    // Grant CloudFront access to S3 bucket
-    websiteBucket.grantRead(originAccessIdentity);
-
-    // CloudFront distribution configuration
+    // CloudFront distribution configuration with Origin Access Control (OAC)
+    // Note: OAC is the modern replacement for OAI and provides better security
     const distributionProps: cloudfront.DistributionProps = {
       defaultBehavior: {
-        origin: origins.S3BucketOrigin.withOriginAccessIdentity(websiteBucket, {
-          originAccessIdentity,
-        }),
+        origin: origins.S3BucketOrigin.withOriginAccessControl(websiteBucket),
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
         allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+        responseHeadersPolicy: securityHeadersPolicy,
       },
       defaultRootObject: 'index.html',
       priceClass: cloudfront.PriceClass.PRICE_CLASS_100,
@@ -97,6 +115,21 @@ export class VettidOrgStack extends cdk.Stack {
       logBucket: logsBucket,
       logFilePrefix: 'cloudfront/',
       logIncludesCookies: true,
+      // Custom error responses for better user experience
+      errorResponses: [
+        {
+          httpStatus: 403,
+          responseHttpStatus: 404,
+          responsePagePath: '/index.html',
+          ttl: cdk.Duration.minutes(5),
+        },
+        {
+          httpStatus: 404,
+          responseHttpStatus: 404,
+          responsePagePath: '/index.html',
+          ttl: cdk.Duration.minutes(5),
+        },
+      ],
     };
 
     // Add custom domain configuration if enabled
@@ -236,7 +269,7 @@ export class VettidOrgStack extends cdk.Stack {
 
     // Athena workgroup output
     new cdk.CfnOutput(this, 'AthenaWorkGroup', {
-      value: athenaWorkGroup.name!,
+      value: 'vettid-logs-workgroup',
       description: 'Athena workgroup for running queries',
     });
 

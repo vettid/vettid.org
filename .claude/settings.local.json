@@ -32,7 +32,9 @@
       "Bash(sudo ln:*)",
       "Bash(echo:*)",
       "Bash(export PATH=\"$HOME/Sites/vettid_tools:$PATH\")",
-      "Bash(v.org:*)"
+      "Bash(v.org:*)",
+      "Bash(aws s3api get-bucket-lifecycle-configuration:*)",
+      "Bash(npm test:*)"
     ],
     "deny": [],
     "ask": []

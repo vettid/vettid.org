@@ -131,6 +131,9 @@ a:focus {
 	max-width: 1220px;
 	margin: 0 auto;
 	padding: 0 var(--spacing-md);
+	min-height: 100vh;
+	display: flex;
+	flex-direction: column;
 }
 
 .content {
@@ -139,52 +142,120 @@ a:focus {
 }
 
 /* ==========================================================================
-   Announcement Banner
+   Coming Soon Banner (Hero)
    ========================================================================== */
 
-.announcement-banner {
-	background: linear-gradient(90deg, var(--color-accent-bright), var(--color-accent));
-	color: var(--color-primary-dark);
-	text-align: center;
-	padding: var(--spacing-sm) var(--spacing-md);
-	border-radius: var(--radius-md);
-	margin-bottom: var(--spacing-md);
-	box-shadow: var(--shadow-md), 0 0 30px rgba(255, 193, 37, 0.4);
-	animation: fadeInDown 0.8s ease-out 0.2s both;
-}
-
-.announcement-banner p {
-	margin: 0;
-	font-size: 1.1rem;
-	font-weight: 500;
+.hero-main {
 	display: flex;
-	flex-wrap: wrap;
 	align-items: center;
 	justify-content: center;
-	gap: var(--spacing-xs) var(--spacing-sm);
+	flex: 1;
+	min-height: 60vh;
+	padding: var(--spacing-lg) 0;
 }
 
-.announcement-banner strong {
-	font-weight: 700;
+.coming-soon-banner {
+	text-align: center;
+	padding: var(--spacing-xl) var(--spacing-lg);
+	max-width: 700px;
+	margin: 0 auto;
+	animation: fadeInUp 1s ease-out 0.3s both;
 }
 
-.banner-cta {
+.coming-soon-content {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--spacing-md);
+}
+
+.coming-soon-badge {
 	display: inline-block;
-	background: var(--color-primary);
-	color: var(--color-text-light) !important;
-	padding: 0.5rem 1.25rem;
-	border-radius: var(--radius-sm);
-	text-decoration: none !important;
-	font-weight: 600;
-	transition: all 0.3s ease;
-	box-shadow: var(--shadow-sm);
+	background: linear-gradient(135deg, var(--color-accent-bright), var(--color-accent));
+	color: var(--color-primary-dark);
+	padding: 0.5rem 1.5rem;
+	border-radius: 50px;
+	font-size: 0.875rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	box-shadow: var(--shadow-md), 0 0 30px rgba(255, 193, 37, 0.5);
+	animation: pulse 2s ease-in-out infinite;
 }
 
-.banner-cta:hover,
-.banner-cta:focus {
-	background: var(--color-primary-dark);
-	transform: translateY(-2px);
-	box-shadow: var(--shadow-md);
+.coming-soon-title {
+	font-family: var(--font-heading);
+	font-size: clamp(2.5rem, 8vw, 4rem);
+	font-weight: 700;
+	line-height: 1.1;
+	color: var(--color-text-light);
+	margin: 0;
+	text-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.coming-soon-subtitle {
+	font-size: clamp(1.125rem, 3vw, 1.5rem);
+	color: var(--color-text-muted);
+	margin: 0;
+	max-width: 500px;
+	line-height: 1.6;
+}
+
+.coming-soon-cta {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.75rem;
+	background: linear-gradient(135deg, var(--color-accent-bright), var(--color-accent));
+	color: var(--color-primary-dark);
+	padding: 1rem 2rem;
+	border-radius: 50px;
+	font-size: 1.125rem;
+	font-weight: 700;
+	text-decoration: none;
+	box-shadow: var(--shadow-lg), 0 0 40px rgba(255, 193, 37, 0.4);
+	transition: all 0.3s ease;
+	position: relative;
+	overflow: hidden;
+}
+
+.coming-soon-cta::before {
+	content: '';
+	position: absolute;
+	top: 0;
+	left: -100%;
+	width: 100%;
+	height: 100%;
+	background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+	transition: left 0.5s ease;
+}
+
+.coming-soon-cta:hover::before {
+	left: 100%;
+}
+
+.coming-soon-cta:hover,
+.coming-soon-cta:focus {
+	transform: translateY(-3px) scale(1.02);
+	box-shadow: var(--shadow-lg), 0 0 60px rgba(255, 193, 37, 0.6);
+	color: var(--color-primary-dark);
+	text-decoration: none;
+}
+
+.coming-soon-cta:hover svg {
+	transform: translateX(4px);
+}
+
+.coming-soon-cta svg {
+	transition: transform 0.3s ease;
+}
+
+@keyframes pulse {
+	0%, 100% {
+		box-shadow: var(--shadow-md), 0 0 30px rgba(255, 193, 37, 0.5);
+	}
+	50% {
+		box-shadow: var(--shadow-md), 0 0 50px rgba(255, 193, 37, 0.8);
+	}
 }
 
 /* ==========================================================================
@@ -360,12 +431,11 @@ li .highlight {
    ========================================================================== */
 
 .footer {
-	padding: var(--spacing-xl) 0 var(--spacing-md);
+	padding: var(--spacing-lg) 0 var(--spacing-md);
 	text-align: center;
-	margin-top: var(--spacing-xl);
-	border-top: 2px solid rgba(255, 255, 255, 0.1);
-	background: rgba(0, 0, 0, 0.2);
-	backdrop-filter: blur(10px);
+	margin-top: auto;
+	border-top: 1px solid rgba(255, 255, 255, 0.1);
+	background: rgba(0, 0, 0, 0.15);
 }
 
 .footer p {
@@ -426,34 +496,19 @@ li .highlight {
 	}
 }
 
-/* Stagger animation for sections */
-section:nth-child(1) {
-	animation: fadeInUp 0.6s ease-out 0.1s both;
+/* Stagger animation for sections using CSS custom properties */
+section {
+	--stagger-delay: 0.1s;
+	animation: fadeInUp 0.6s ease-out calc(var(--section-index, 1) * var(--stagger-delay)) both;
 }
 
-section:nth-child(2) {
-	animation: fadeInUp 0.6s ease-out 0.2s both;
-}
-
-section:nth-child(3) {
-	animation: fadeInUp 0.6s ease-out 0.3s both;
-}
-
-section:nth-child(4) {
-	animation: fadeInUp 0.6s ease-out 0.4s both;
-}
-
-section:nth-child(5) {
-	animation: fadeInUp 0.6s ease-out 0.5s both;
-}
-
-section:nth-child(6) {
-	animation: fadeInUp 0.6s ease-out 0.6s both;
-}
-
-section:nth-child(7) {
-	animation: fadeInUp 0.6s ease-out 0.7s both;
-}
+section:nth-child(1) { --section-index: 1; }
+section:nth-child(2) { --section-index: 2; }
+section:nth-child(3) { --section-index: 3; }
+section:nth-child(4) { --section-index: 4; }
+section:nth-child(5) { --section-index: 5; }
+section:nth-child(6) { --section-index: 6; }
+section:nth-child(7) { --section-index: 7; }
 
 /* ==========================================================================
    Responsive Design
@@ -469,27 +524,16 @@ section:nth-child(7) {
 		width: 160px;
 	}
 
-	.text-large {
-		font-size: 1.25rem;
+	.hero-main {
+		min-height: 50vh;
 	}
 
-	section {
-		padding: var(--spacing-md);
+	.coming-soon-banner {
+		padding: var(--spacing-lg) var(--spacing-md);
 	}
 
-	.columns {
-		grid-template-columns: 1fr;
-	}
-
-	h2 {
-		font-size: 1.75rem;
-	}
-
-	.column h2 {
-		font-size: 1.5rem;
-	}
-
-	.announcement-banner p {
+	.coming-soon-cta {
+		padding: 0.875rem 1.75rem;
 		font-size: 1rem;
 	}
 }
@@ -507,9 +551,22 @@ section:nth-child(7) {
 		width: 140px;
 	}
 
-	section {
-		padding: var(--spacing-sm);
-		margin-bottom: var(--spacing-md);
+	.hero-main {
+		min-height: 40vh;
+	}
+
+	.coming-soon-banner {
+		padding: var(--spacing-md);
+	}
+
+	.coming-soon-badge {
+		font-size: 0.75rem;
+		padding: 0.4rem 1rem;
+	}
+
+	.coming-soon-cta {
+		padding: 0.75rem 1.5rem;
+		font-size: 0.9375rem;
 	}
 }
 
