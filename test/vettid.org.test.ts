@@ -86,12 +86,12 @@ describe('VettidOrgStack', () => {
             Match.objectLike({
               ErrorCode: 403,
               ResponseCode: 404,
-              ResponsePagePath: '/index.html',
+              ResponsePagePath: '/404.html',
             }),
             Match.objectLike({
               ErrorCode: 404,
               ResponseCode: 404,
-              ResponsePagePath: '/index.html',
+              ResponsePagePath: '/404.html',
             }),
           ]),
         },
@@ -167,6 +167,10 @@ describe('VettidOrgStack', () => {
       template.hasResourceProperties('AWS::CloudFront::ResponseHeadersPolicy', {
         ResponseHeadersPolicyConfig: {
           SecurityHeadersConfig: {
+            ContentSecurityPolicy: {
+              ContentSecurityPolicy: Match.stringLikeRegexp("default-src 'none'"),
+              Override: true,
+            },
             ContentTypeOptions: {
               Override: true,
             },
@@ -180,7 +184,23 @@ describe('VettidOrgStack', () => {
               Override: true,
             },
           },
+          CustomHeadersConfig: {
+            Items: Match.arrayWith([
+              Match.objectLike({ Header: 'Permissions-Policy' }),
+            ]),
+          },
         },
+      });
+    });
+
+    test('creates v2 JSON logs Glue table with partition projection', () => {
+      template.hasResourceProperties('AWS::Glue::Table', {
+        TableInput: Match.objectLike({
+          Name: 'cloudfront_logs_v2',
+          Parameters: Match.objectLike({
+            'projection.enabled': 'true',
+          }),
+        }),
       });
     });
   });

@@ -95,7 +95,34 @@ export class VettidOrgStack extends cdk.Stack {
     // Security headers policy for CloudFront
     const securityHeadersPolicy = new cloudfront.ResponseHeadersPolicy(this, 'SecurityHeadersPolicy', {
       responseHeadersPolicyName: `${props.domainName.replace(/[.]/g, '-')}-security-headers`,
+      customHeadersBehavior: {
+        customHeaders: [
+          {
+            header: 'Permissions-Policy',
+            value: 'camera=(), microphone=(), geolocation=(), payment=()',
+            override: true,
+          },
+        ],
+      },
       securityHeadersBehavior: {
+        // Site is fully self-hosted: no external scripts, styles, fonts, or
+        // connections. 'unsafe-inline' styles are required by the per-page
+        // inline <style> blocks; data: images cover the inline SVG noise
+        // texture. There are no inline scripts or event handlers.
+        contentSecurityPolicy: {
+          contentSecurityPolicy: [
+            "default-src 'none'",
+            "script-src 'self'",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data:",
+            "font-src 'self'",
+            "manifest-src 'self'",
+            "base-uri 'none'",
+            "form-action 'none'",
+            "frame-ancestors 'none'",
+          ].join('; '),
+          override: true,
+        },
         contentTypeOptions: { override: true },
         frameOptions: {
           frameOption: cloudfront.HeadersFrameOption.DENY,
@@ -126,6 +153,30 @@ export class VettidOrgStack extends cdk.Stack {
 function handler(event) {
   var request = event.request;
   var uri = request.uri;
+
+  // Canonical host: 301 www -> apex, preserving path and query string
+  var host = request.headers.host && request.headers.host.value;
+  if (host === 'www.${props.domainName}') {
+    var qsParts = [];
+    for (var k in request.querystring) {
+      var entry = request.querystring[k];
+      if (entry.multiValue) {
+        for (var i = 0; i < entry.multiValue.length; i++) {
+          qsParts.push(k + '=' + entry.multiValue[i].value);
+        }
+      } else if (entry.value) {
+        qsParts.push(k + '=' + entry.value);
+      } else {
+        qsParts.push(k);
+      }
+    }
+    var qs = qsParts.length ? '?' + qsParts.join('&') : '';
+    return {
+      statusCode: 301,
+      statusDescription: 'Moved Permanently',
+      headers: { 'location': { value: 'https://${props.domainName}' + uri + qs } }
+    };
+  }
 
   // SECURITY: Block access to sensitive paths (.git, .env, etc.)
   var lowerUri = uri.toLowerCase();
@@ -226,13 +277,13 @@ function handler(event) {
         {
           httpStatus: 403,
           responseHttpStatus: 404,
-          responsePagePath: '/index.html',
+          responsePagePath: '/404.html',
           ttl: cdk.Duration.minutes(5),
         },
         {
           httpStatus: 404,
           responseHttpStatus: 404,
-          responsePagePath: '/index.html',
+          responsePagePath: '/404.html',
           ttl: cdk.Duration.minutes(5),
         },
       ],
@@ -421,6 +472,91 @@ function handler(event) {
             parameters: {
               'field.delim': '\t',
               'serialization.format': '\t',
+            },
+          },
+        },
+      },
+    });
+
+    // Glue table for the standard logging v2 JSON logs, using partition
+    // projection over the cloudfront-v2/{distributionid}/{yyyy}/{MM}/{dd}/{HH}
+    // delivery path so no crawler or ALTER TABLE is ever needed.
+    // Column names are sanitized; SerDe mappings bind them to the JSON keys
+    // that contain parentheses (e.g. "cs(User-Agent)").
+    new glue.CfnTable(this, 'CloudFrontV2LogsTable', {
+      catalogId: this.account,
+      databaseName: glueDatabase.ref,
+      tableInput: {
+        name: 'cloudfront_logs_v2',
+        description: 'CloudFront standard logging v2 (JSON) access logs',
+        tableType: 'EXTERNAL_TABLE',
+        parameters: {
+          'EXTERNAL': 'TRUE',
+          'projection.enabled': 'true',
+          'projection.distributionid.type': 'injected',
+          'projection.log_hour.type': 'date',
+          'projection.log_hour.format': 'yyyy/MM/dd/HH',
+          'projection.log_hour.interval': '1',
+          'projection.log_hour.interval.unit': 'HOURS',
+          'projection.log_hour.range': '2026/08/01/00,NOW',
+          'storage.location.template': `s3://${accessLogsBucket.bucketName}/cloudfront-v2/\${distributionid}/\${log_hour}`,
+        },
+        partitionKeys: [
+          { name: 'distributionid', type: 'string' },
+          { name: 'log_hour', type: 'string' },
+        ],
+        storageDescriptor: {
+          columns: [
+            { name: 'timestamp_ms', type: 'string' },
+            { name: 'date', type: 'string' },
+            { name: 'time', type: 'string' },
+            { name: 'x_edge_location', type: 'string' },
+            { name: 'asn', type: 'string' },
+            { name: 'c_country', type: 'string' },
+            { name: 'c_ip', type: 'string' },
+            { name: 'c_port', type: 'string' },
+            { name: 'cs_method', type: 'string' },
+            { name: 'cs_host', type: 'string' },
+            { name: 'x_host_header', type: 'string' },
+            { name: 'cs_uri_stem', type: 'string' },
+            { name: 'cs_uri_query', type: 'string' },
+            { name: 'cs_protocol', type: 'string' },
+            { name: 'cs_protocol_version', type: 'string' },
+            { name: 'cs_bytes', type: 'string' },
+            { name: 'cs_referer', type: 'string' },
+            { name: 'cs_user_agent', type: 'string' },
+            { name: 'sc_status', type: 'string' },
+            { name: 'sc_bytes', type: 'string' },
+            { name: 'sc_content_type', type: 'string' },
+            { name: 'sc_content_len', type: 'string' },
+            { name: 'sc_range_start', type: 'string' },
+            { name: 'sc_range_end', type: 'string' },
+            { name: 'x_edge_result_type', type: 'string' },
+            { name: 'x_edge_response_result_type', type: 'string' },
+            { name: 'x_edge_detailed_result_type', type: 'string' },
+            { name: 'x_edge_request_id', type: 'string' },
+            { name: 'x_forwarded_for', type: 'string' },
+            { name: 'ssl_protocol', type: 'string' },
+            { name: 'ssl_cipher', type: 'string' },
+            { name: 'time_taken', type: 'string' },
+            { name: 'time_to_first_byte', type: 'string' },
+            { name: 'origin_fbl', type: 'string' },
+            { name: 'origin_lbl', type: 'string' },
+            { name: 'cache_behavior_path_pattern', type: 'string' },
+            { name: 'fle_status', type: 'string' },
+            { name: 'fle_encrypted_fields', type: 'string' },
+          ],
+          location: `s3://${accessLogsBucket.bucketName}/cloudfront-v2/`,
+          inputFormat: 'org.apache.hadoop.mapred.TextInputFormat',
+          outputFormat: 'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat',
+          serdeInfo: {
+            serializationLibrary: 'org.openx.data.jsonserde.JsonSerDe',
+            parameters: {
+              'mapping.timestamp_ms': 'timestamp(ms)',
+              'mapping.cs_host': 'cs(Host)',
+              'mapping.cs_referer': 'cs(Referer)',
+              'mapping.cs_user_agent': 'cs(User-Agent)',
+              'ignore.malformed.json': 'true',
             },
           },
         },

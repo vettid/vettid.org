@@ -9,10 +9,9 @@ Location: United States
 Built with Claude Code by Anthropic
 
 /* SITE */
-Last update: 2026-01-15
+Last update: 2026-08-12
 Language: English
-Standards: HTML5, CSS3, ES2020
-Components: AWS Lambda, DynamoDB, Cognito, CloudFront, S3
-Backend: Node.js 22, TypeScript
+Standards: HTML5, CSS3
+Components: Static site — CloudFront, S3, AWS WAF
 Infrastructure: AWS CDK
-Security: PKCE, JWT, CORS, CSP, Input Validation
+Fonts: Inter, Plus Jakarta Sans (self-hosted, SIL OFL)

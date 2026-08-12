@@ -32,6 +32,12 @@
     }
   }
 
+  // Copy address on click (bound here instead of an inline onclick so the
+  // site can run under a CSP without 'unsafe-hashes')
+  if (addressBox) {
+    addressBox.addEventListener('click', function() { window.copyAddress(); });
+  }
+
   // Copy address function
   window.copyAddress = function() {
     if (!BTC_ADDRESS || BTC_ADDRESS === 'PLACEHOLDER') return;
