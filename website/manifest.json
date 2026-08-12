@@ -1,0 +1,24 @@
+{
+  "name": "VettID",
+  "short_name": "VettID",
+  "description": "VettID — Your personal security platform. Secure. Private. Trusted.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1f1e5c",
+  "theme_color": "#FFC125",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/assets/logo.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "utilities"],
+  "lang": "en-US",
+  "dir": "ltr",
+  "scope": "/",
+  "related_applications": [],
+  "prefer_related_applications": false
+}

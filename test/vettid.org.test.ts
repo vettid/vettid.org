@@ -98,6 +98,25 @@ describe('VettidOrgStack', () => {
       });
     });
 
+    test('associates clean-URL rewrite function with default behavior', () => {
+      template.hasResourceProperties('AWS::CloudFront::Function', {
+        FunctionConfig: Match.objectLike({
+          Runtime: Match.stringLikeRegexp('cloudfront-js'),
+        }),
+      });
+      template.hasResourceProperties('AWS::CloudFront::Distribution', {
+        DistributionConfig: {
+          DefaultCacheBehavior: Match.objectLike({
+            FunctionAssociations: [
+              Match.objectLike({
+                EventType: 'viewer-request',
+              }),
+            ],
+          }),
+        },
+      });
+    });
+
     test('enables access logging', () => {
       template.hasResourceProperties('AWS::CloudFront::Distribution', {
         DistributionConfig: {

@@ -1,0 +1,20 @@
+# VettID security contact info — RFC 9116
+# Human-readable disclosure policy + PGP key: https://vettid.org/security
+
+Contact: mailto:security@vettid.org
+Encryption: https://vettid.org/security
+Policy: https://vettid.org/security
+Preferred-Languages: en
+Canonical: https://vettid.org/.well-known/security.txt
+Expires: 2027-05-25T00:00:00Z
+
+# PGP fingerprint (cross-reference; full armored key on /security):
+# E23A 83D6 7828 2CD7 9E95 E5F7 1523 8C03 B404 DAEB
+#
+# In scope: vault-manager + enclave, mobile apps (Android/iOS),
+# desktop app, agent connector, api.vettid.org, nats.vettid.org,
+# vettid.org web surfaces.
+#
+# Out of scope: DoS against public endpoints, social engineering,
+# scanner-only reports without impact analysis. See /security for
+# full scope + severity + safe-harbor language.

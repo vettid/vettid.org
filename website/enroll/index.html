@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta content="width=device-width, initial-scale=1" name="viewport"/>
+  <meta name="robots" content="noindex"/>
+  <title>Enroll - VettID</title>
+  <link rel="icon" type="image/png" href="/assets/favicon.png"/>
+  <link rel="stylesheet" href="/assets/fonts.css">
+  <link rel="stylesheet" href="/shared/nav.css">
+  <style>
+    :root {
+      --accent: #ffc125;
+      --accent-hover: #ffd940;
+      --border-accent: rgba(255, 193, 37, 0.2);
+      --text: #f5f5f4;
+      --text-muted: #c9c8e8;
+      --bg-card: #28276f;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    :focus:not(:focus-visible) { outline: none; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1f1e5c 0%, #2e2d88 50%, #3f3e9f 100%);
+      background-attachment: fixed;
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    h1 { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+    header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 16px 32px; background: rgba(22,21,63,0.92);
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid rgba(255,193,37,0.1);
+    }
+    .header-logo { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+    .header-logo img { height: 36px; width: 36px; border-radius: 4px; }
+    .header-logo span { color: var(--text); font-weight: 800; letter-spacing: 0.05em; font-size: 1.1rem; }
+
+    main {
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      padding: 120px 24px 60px;
+    }
+    .card {
+      max-width: 520px; width: 100%;
+      background: var(--bg-card);
+      border: 1px solid var(--border-accent);
+      border-radius: 16px;
+      padding: 48px 40px;
+      text-align: center;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(255,193,37,0.15);
+      color: var(--accent);
+      border: 1px solid var(--border-accent);
+      border-radius: 999px;
+      padding: 6px 16px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 24px;
+    }
+    h1 { color: var(--accent); font-size: 1.8rem; margin-bottom: 12px; }
+    .card p { color: var(--text-muted); margin-bottom: 28px; }
+    .btn-home {
+      display: inline-block;
+      background: var(--accent);
+      color: #1f1e5c;
+      text-decoration: none;
+      font-weight: 600;
+      padding: 12px 28px;
+      border-radius: 8px;
+      transition: background 200ms;
+    }
+    .btn-home:hover { background: var(--accent-hover); }
+
+    footer {
+      text-align: center;
+      padding: 24px;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+    footer a { color: var(--text-muted); text-decoration: none; }
+    footer a:hover { color: var(--accent); }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <a href="/" class="header-logo">
+    <img src="/assets/logo.png" alt="VettID">
+    <span>VETTID</span>
+  </a>
+  <button class="nav-toggle" aria-label="Toggle menu" aria-expanded="false">
+    <span></span><span></span><span></span>
+  </button>
+</header>
+<div class="nav-menu" id="navMenu" style="display:none;position:fixed;top:0;right:0;width:280px;height:100%;background:#312f80;padding:80px 20px 40px;z-index:1005;flex-direction:column;gap:8px;">
+  <a href="/" style="display:block;color:#d4d4d4;text-decoration:none;padding:12px 16px;font-size:1rem;">Home</a>
+  <a href="/help" style="display:block;color:#d4d4d4;text-decoration:none;padding:12px 16px;font-size:1rem;">Help Us</a>
+  <a href="/donate" style="display:block;color:#d4d4d4;text-decoration:none;padding:12px 16px;font-size:1rem;">Donate</a>
+  <a href="/pcr" style="display:block;color:#d4d4d4;text-decoration:none;padding:12px 16px;font-size:1rem;">PCR</a>
+  <a href="/votes" style="display:block;color:#d4d4d4;text-decoration:none;padding:12px 16px;font-size:1rem;">Votes</a>
+  <a href="/leash" style="display:block;color:#ffc125;text-decoration:none;padding:12px 16px;font-size:1rem;font-weight:600;">LEASH Demo</a>
+  <a href="/security" style="display:block;color:#d4d4d4;text-decoration:none;padding:12px 16px;font-size:1rem;">Security</a>
+  <a href="/signin" style="display:block;color:#d4d4d4;text-decoration:none;padding:12px 16px;font-size:1rem;">Sign In</a>
+  <a href="/register" style="display:block;background:#ffc125;color:#1f1e5c;text-decoration:none;padding:12px 16px;font-size:1rem;text-align:center;margin-top:16px;border-radius:6px;">Register</a>
+</div>
+<div class="nav-overlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(22,21,63,0.78);z-index:1000;"></div>
+
+<main>
+  <div class="card">
+    <span class="badge">Coming Soon</span>
+    <h1>Enroll</h1>
+    <p>Device enrollment is not yet live on vettid.org. This feature is coming to vettid.org soon.</p>
+    <a href="/" class="btn-home">Back to Home</a>
+  </div>
+</main>
+
+<footer>
+  <p>VettID — <a href="/">Home</a> · <a href="/security">Security</a> · <a href="/donate">Donate</a></p>
+</footer>
+
+<script src="/shared/js/nav.js"></script>
+</body>
+</html>

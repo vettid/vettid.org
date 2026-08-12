@@ -98,6 +98,46 @@ export class VettidOrgStack extends cdk.Stack {
       },
     });
 
+    // Clean-URL rewrite: the S3 REST origin (OAC) does not resolve /security or
+    // /security/ to /security/index.html on its own, so multi-page routes need a
+    // viewer-request rewrite. Also blocks common sensitive-path probes.
+    const htmlRewriteFn = new cloudfront.Function(this, 'HtmlRewriteFn', {
+      code: cloudfront.FunctionCode.fromInline(`
+function handler(event) {
+  var request = event.request;
+  var uri = request.uri;
+
+  // SECURITY: Block access to sensitive paths (.git, .env, etc.)
+  var lowerUri = uri.toLowerCase();
+  if (lowerUri.startsWith('/.git') ||
+      lowerUri.startsWith('/.env') ||
+      lowerUri.startsWith('/.aws') ||
+      lowerUri.startsWith('/.ssh') ||
+      lowerUri.startsWith('/.htaccess') ||
+      lowerUri.startsWith('/wp-admin') ||
+      lowerUri.startsWith('/wp-login')) {
+    return {
+      statusCode: 403,
+      statusDescription: 'Forbidden',
+      headers: { 'content-type': { value: 'text/plain' } },
+      body: { encoding: 'text', data: 'Forbidden' }
+    };
+  }
+
+  // If URI ends with a slash, append index.html
+  if (uri.endsWith('/')) {
+    request.uri = uri + 'index.html';
+  } else if (!uri.includes('.')) {
+    // If URI has no file extension, treat as directory and append /index.html
+    request.uri = uri + '/index.html';
+  }
+
+  return request;
+}
+`),
+      comment: 'Rewrite extensionless URIs to index.html and block sensitive paths',
+    });
+
     // CloudFront distribution configuration with Origin Access Control (OAC)
     // Note: OAC is the modern replacement for OAI and provides better security
     const distributionProps: cloudfront.DistributionProps = {
@@ -107,6 +147,9 @@ export class VettidOrgStack extends cdk.Stack {
         cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
         allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
         responseHeadersPolicy: securityHeadersPolicy,
+        functionAssociations: [
+          { eventType: cloudfront.FunctionEventType.VIEWER_REQUEST, function: htmlRewriteFn },
+        ],
       },
       defaultRootObject: 'index.html',
       priceClass: cloudfront.PriceClass.PRICE_CLASS_100,
