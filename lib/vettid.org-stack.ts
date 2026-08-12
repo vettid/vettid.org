@@ -7,6 +7,9 @@ import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as glue from 'aws-cdk-lib/aws-glue';
 import * as athena from 'aws-cdk-lib/aws-athena';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import * as logs from 'aws-cdk-lib/aws-logs';
+import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 
 export interface VettidOrgStackProps extends cdk.StackProps {
   domainName: string;
@@ -53,6 +56,23 @@ export class VettidOrgStack extends cdk.Stack {
       lifecycleRules: [
         {
           expiration: cdk.Duration.days(30),
+        },
+      ],
+    });
+
+    // S3 bucket for standard logging v2 (JSON) access logs.
+    // Separate from the legacy logs bucket because CloudWatch vended-log
+    // delivery requires a bucket name matching [\w-] (no dots).
+    const accessLogsBucket = new s3.Bucket(this, 'AccessLogsBucket', {
+      bucketName: 'vettid-org-access-logs',
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      lifecycleRules: [
+        {
+          // Raw request logs kept 90 days (logging spec §5: 30-90 days raw)
+          expiration: cdk.Duration.days(90),
         },
       ],
     });
@@ -138,6 +158,47 @@ function handler(event) {
       comment: 'Rewrite extensionless URIs to index.html and block sensitive paths',
     });
 
+    // WAF WebACL in pure-telemetry mode (default allow, no blocking rules).
+    // Its logs are the only CloudFront-compatible source of JA3/JA4 TLS
+    // fingerprints and ordered request header names (logging spec §2).
+    const webAcl = new wafv2.CfnWebACL(this, 'WebAcl', {
+      name: 'vettid-org-telemetry',
+      scope: 'CLOUDFRONT',
+      defaultAction: { allow: {} },
+      rules: [],
+      visibilityConfig: {
+        cloudWatchMetricsEnabled: true,
+        metricName: 'vettid-org-web-acl',
+        sampledRequestsEnabled: true,
+      },
+    });
+
+    // WAF log group name must start with aws-waf-logs-
+    const wafLogGroup = new logs.LogGroup(this, 'WafLogGroup', {
+      logGroupName: 'aws-waf-logs-vettid-org',
+      retention: logs.RetentionDays.THREE_MONTHS,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    new wafv2.CfnLoggingConfiguration(this, 'WafLogging', {
+      resourceArn: webAcl.attrArn,
+      // Log group ARN must be passed without the trailing :* that
+      // logGroup.logGroupArn carries
+      logDestinationConfigs: [
+        this.formatArn({
+          service: 'logs',
+          resource: 'log-group',
+          resourceName: wafLogGroup.logGroupName,
+          arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+        }),
+      ],
+      // Logging spec §5: never log credential-bearing header values
+      redactedFields: [
+        { singleHeader: { Name: 'cookie' } },
+        { singleHeader: { Name: 'authorization' } },
+      ],
+    });
+
     // CloudFront distribution configuration with Origin Access Control (OAC)
     // Note: OAC is the modern replacement for OAI and provides better security
     const distributionProps: cloudfront.DistributionProps = {
@@ -157,7 +218,9 @@ function handler(event) {
       enableLogging: true,
       logBucket: logsBucket,
       logFilePrefix: 'cloudfront/',
-      logIncludesCookies: true,
+      // Logging spec §5: never log Cookie header values
+      logIncludesCookies: false,
+      webAclId: webAcl.attrArn,
       // Custom error responses for better user experience
       errorResponses: [
         {
@@ -184,6 +247,106 @@ function handler(event) {
     }
 
     const distribution = new cloudfront.Distribution(this, 'Distribution', distributionProps);
+
+    // --- CloudFront standard logging v2 (JSON Lines to S3) ---
+    // Runs alongside the legacy TSV logs; delivered via CloudWatch vended-log
+    // delivery (DeliverySource -> DeliveryDestination -> Delivery).
+
+    // Vended-log delivery writes with bucket-owner-full-control from the
+    // delivery.logs.amazonaws.com service principal
+    accessLogsBucket.addToResourcePolicy(new iam.PolicyStatement({
+      sid: 'AWSLogDeliveryWrite',
+      principals: [new iam.ServicePrincipal('delivery.logs.amazonaws.com')],
+      actions: ['s3:PutObject'],
+      resources: [accessLogsBucket.arnForObjects('*')],
+      conditions: {
+        StringEquals: {
+          's3:x-amz-acl': 'bucket-owner-full-control',
+          'aws:SourceAccount': this.account,
+        },
+        ArnLike: {
+          'aws:SourceArn': this.formatArn({
+            service: 'logs',
+            resource: 'delivery-source',
+            resourceName: '*',
+            arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+          }),
+        },
+      },
+    }));
+    accessLogsBucket.addToResourcePolicy(new iam.PolicyStatement({
+      sid: 'AWSLogDeliveryAclCheck',
+      principals: [new iam.ServicePrincipal('delivery.logs.amazonaws.com')],
+      actions: ['s3:GetBucketAcl', 's3:ListBucket'],
+      resources: [accessLogsBucket.bucketArn],
+      conditions: {
+        StringEquals: { 'aws:SourceAccount': this.account },
+      },
+    }));
+
+    const deliverySource = new logs.CfnDeliverySource(this, 'AccessLogDeliverySource', {
+      name: 'vettid-org-cf-access-logs',
+      resourceArn: distribution.distributionArn,
+      logType: 'ACCESS_LOGS',
+    });
+
+    const deliveryDestination = new logs.CfnDeliveryDestination(this, 'AccessLogDeliveryDestination', {
+      name: 'vettid-org-cf-logs-s3',
+      destinationResourceArn: accessLogsBucket.bucketArn,
+      outputFormat: 'json',
+    });
+
+    // Full v2 field set per the logging spec, minus cs(Cookie) (spec §5).
+    // Field names are fixed once shipped (spec §7) — add, never rename.
+    const accessLogDelivery = new logs.CfnDelivery(this, 'AccessLogDelivery', {
+      deliverySourceName: deliverySource.name,
+      deliveryDestinationArn: deliveryDestination.attrArn,
+      recordFields: [
+        'timestamp(ms)',
+        'date',
+        'time',
+        'x-edge-location',
+        'asn',
+        'c-country',
+        'c-ip',
+        'c-port',
+        'cs-method',
+        'cs(Host)',
+        'x-host-header',
+        'cs-uri-stem',
+        'cs-uri-query',
+        'cs-protocol',
+        'cs-protocol-version',
+        'cs-bytes',
+        'cs(Referer)',
+        'cs(User-Agent)',
+        'sc-status',
+        'sc-bytes',
+        'sc-content-type',
+        'sc-content-len',
+        'sc-range-start',
+        'sc-range-end',
+        'x-edge-result-type',
+        'x-edge-response-result-type',
+        'x-edge-detailed-result-type',
+        'x-edge-request-id',
+        'x-forwarded-for',
+        'ssl-protocol',
+        'ssl-cipher',
+        'time-taken',
+        'time-to-first-byte',
+        'origin-fbl',
+        'origin-lbl',
+        'cache-behavior-path-pattern',
+        'fle-status',
+        'fle-encrypted-fields',
+      ],
+      s3SuffixPath: 'cloudfront-v2/{distributionid}/{yyyy}/{MM}/{dd}/{HH}',
+      s3EnableHiveCompatiblePath: false,
+    });
+    accessLogDelivery.node.addDependency(deliverySource);
+    accessLogDelivery.node.addDependency(deliveryDestination);
+    accessLogDelivery.node.addDependency(accessLogsBucket.policy!);
 
     // Deploy website content from ./website directory
     new s3deploy.BucketDeployment(this, 'DeployWebsite', {
@@ -320,6 +483,21 @@ function handler(event) {
     new cdk.CfnOutput(this, 'AthenaResultsBucketName', {
       value: athenaResultsBucket.bucketName,
       description: 'S3 bucket for Athena query results',
+    });
+
+    new cdk.CfnOutput(this, 'AccessLogsBucketName', {
+      value: accessLogsBucket.bucketName,
+      description: 'S3 bucket for CloudFront standard logging v2 (JSON) access logs',
+    });
+
+    new cdk.CfnOutput(this, 'WafLogGroupName', {
+      value: wafLogGroup.logGroupName,
+      description: 'CloudWatch log group with WAF telemetry (JA3/JA4 fingerprints, ordered headers)',
+    });
+
+    new cdk.CfnOutput(this, 'WebAclArn', {
+      value: webAcl.attrArn,
+      description: 'WAF WebACL (telemetry mode) attached to the distribution',
     });
   }
 }

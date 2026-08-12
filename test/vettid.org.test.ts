@@ -117,15 +117,50 @@ describe('VettidOrgStack', () => {
       });
     });
 
-    test('enables access logging', () => {
+    test('enables access logging without cookie values', () => {
       template.hasResourceProperties('AWS::CloudFront::Distribution', {
         DistributionConfig: {
           Logging: Match.objectLike({
             Prefix: 'cloudfront/',
-            IncludeCookies: true,
+            IncludeCookies: false,
           }),
         },
       });
+    });
+
+    test('attaches telemetry WAF WebACL with logging and redaction', () => {
+      template.hasResourceProperties('AWS::WAFv2::WebACL', {
+        Scope: 'CLOUDFRONT',
+        DefaultAction: { Allow: {} },
+      });
+      template.hasResourceProperties('AWS::WAFv2::LoggingConfiguration', {
+        RedactedFields: Match.arrayWith([
+          Match.objectLike({ SingleHeader: { Name: 'cookie' } }),
+          Match.objectLike({ SingleHeader: { Name: 'authorization' } }),
+        ]),
+      });
+      template.hasResourceProperties('AWS::CloudFront::Distribution', {
+        DistributionConfig: Match.objectLike({
+          WebACLId: Match.anyValue(),
+        }),
+      });
+    });
+
+    test('configures standard logging v2 delivery to S3 as JSON', () => {
+      template.hasResourceProperties('AWS::Logs::DeliverySource', {
+        LogType: 'ACCESS_LOGS',
+      });
+      template.hasResourceProperties('AWS::Logs::DeliveryDestination', {
+        OutputFormat: 'json',
+      });
+      template.hasResourceProperties('AWS::Logs::Delivery', {
+        RecordFields: Match.arrayWith(['timestamp(ms)', 'x-edge-location', 'asn', 'c-ip', 'cs-uri-stem', 'cs(Referer)', 'cs(User-Agent)', 'sc-status', 'sc-bytes']),
+      });
+      // Privacy: cookie values must never be captured (spec §5)
+      const deliveries = template.findResources('AWS::Logs::Delivery');
+      for (const d of Object.values(deliveries)) {
+        expect(d.Properties.RecordFields).not.toContain('cs(Cookie)');
+      }
     });
 
     test('configures security headers', () => {
