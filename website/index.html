@@ -183,12 +183,12 @@
     pointer-events: none;
   }
 
-  .hero-logo {
-    width: 140px;
-    height: 140px;
-    border-radius: 20px;
-    margin-bottom: 32px;
-    box-shadow: 0 8px 32px rgba(255,193,37,0.3);
+  .hero-mark {
+    width: 170px;
+    height: auto;
+    color: var(--accent);
+    margin-bottom: 36px;
+    filter: drop-shadow(0 10px 36px rgba(255, 193, 37, 0.35));
     animation: float 6s ease-in-out infinite;
   }
 
@@ -198,7 +198,8 @@
   }
 
   .hero h1 {
-    font-size: 3.5rem;
+    font-size: 4.5rem;
+    letter-spacing: 0.04em;
     font-weight: 800;
     margin-bottom: 16px;
     background: linear-gradient(135deg, #fff 0%, var(--accent) 100%);
@@ -208,7 +209,7 @@
   }
 
   .hero .tagline {
-    font-size: 1.4rem;
+    font-size: 1.6rem;
     color: var(--accent);
     font-weight: 600;
     letter-spacing: 4px;
@@ -956,8 +957,9 @@
 
   /* Responsive */
   @media (max-width: 768px) {
-    .hero h1 { font-size: 2.5rem; }
-    .hero .tagline { font-size: 1rem; letter-spacing: 2px; }
+    .hero-mark { width: 120px; }
+    .hero h1 { font-size: 2.75rem; }
+    .hero .tagline { font-size: 1.1rem; letter-spacing: 2px; }
     .header-logo span { display: none; }
     .security h2, .nitro h2, .zero-knowledge h2, .how-it-works h2, .cooperative h2 { font-size: 2rem; }
     .geo-accent { display: none; }
@@ -1176,7 +1178,19 @@
     Powered by AWS Nitro Enclaves
   </div>
 
-  <img src="/assets/logo.png" alt="VettID" class="hero-logo">
+  <svg class="hero-mark" viewBox="0 0 264 350" role="img" aria-label="VettID rook mark" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <mask id="rook-keyhole">
+        <rect width="264" height="350" fill="white"/>
+        <circle cx="132" cy="190" r="29" fill="black"/>
+        <path d="M119 204 L104 282 Q102 292 112 292 L152 292 Q162 292 160 282 L145 204 Z" fill="black"/>
+      </mask>
+    </defs>
+    <!-- crenellated cap -->
+    <path fill="currentColor" d="M8 0 L47 0 Q55 0 55 8 L55 54 L104 54 L104 8 Q104 0 112 0 L151 0 Q159 0 159 8 L159 54 L208 54 L208 8 Q208 0 216 0 L255 0 Q263 0 263 8 L263 76 Q263 86 254 90 L240 96 L23 96 L9 90 Q0 86 0 76 L0 8 Q0 0 8 0 Z"/>
+    <!-- tapered body with keyhole cutout -->
+    <path fill="currentColor" mask="url(#rook-keyhole)" d="M31 112 Q31 108 35 108 L229 108 Q233 108 233 112 L257 330 Q258 344 245 344 L19 344 Q6 344 7 330 Z"/>
+  </svg>
   <h1>VettID</h1>
   <p class="tagline">Secure. Private. Trusted.</p>
   <p class="subtitle">Your personal security platform &mdash; protecting your identity, your connections, and your AI agents. A member-owned cooperative where even we can't access your data.</p>
