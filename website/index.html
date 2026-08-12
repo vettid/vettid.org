@@ -20,12 +20,12 @@
     --bg-dark: #1f1e5c;
     --bg-pure: #16153f;
     --bg-card: #28276f;
-    --bg-elevated: #312f80;
+    --bg-elevated: #2e2d88;
 
     /* Text colors */
     --text: #f5f5f4;
     --text-muted: #c9c8e8;
-    --text-subtle: #a3a2d0;
+    --text-subtle: #b3b2dd;
 
     /* Border */
     --border-accent: rgba(255, 193, 37, 0.2);
@@ -49,8 +49,7 @@
 
   body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: linear-gradient(135deg, #1f1e5c 0%, #2e2d88 50%, #3f3e9f 100%);
-    background-attachment: fixed;
+    background: #1f1e5c;
     color: var(--text);
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
@@ -277,7 +276,7 @@
   /* Security Section */
   .security {
     padding: 100px 24px;
-    background: linear-gradient(180deg, var(--bg-dark) 0%, #1f1e5c 100%);
+    background: var(--bg-dark);
   }
 
   .security h2 {
@@ -297,14 +296,14 @@
 
   .security-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 32px;
-    max-width: 1200px;
+    max-width: 800px;
     margin: 0 auto;
   }
 
   .security-card {
-    background: linear-gradient(135deg, var(--bg-elevated) 0%, var(--bg-card) 100%);
+    background: var(--bg-card);
     border: 1px solid var(--border-accent);
     border-radius: 12px;
     padding: 32px;
@@ -492,7 +491,7 @@
   }
 
   .nitro-feature {
-    background: var(--accent-muted);
+    background: var(--bg-card);
     border: 1px solid var(--border-accent);
     border-radius: 12px;
     padding: 24px;
@@ -513,7 +512,7 @@
   /* Zero Knowledge Section */
   .zero-knowledge {
     padding: 100px 24px;
-    background: linear-gradient(180deg, #1f1e5c 0%, var(--bg-dark) 100%);
+    background: var(--bg-dark);
   }
 
   .zero-knowledge h2 {
@@ -635,13 +634,14 @@
   /* Values Grid */
   .values-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 24px;
-    margin-top: 50px;
+    max-width: 800px;
+    margin: 50px auto 0;
   }
 
   .value-item {
-    background: var(--accent-muted);
+    background: var(--bg-card);
     border: 1px solid var(--border-accent);
     border-radius: 12px;
     padding: 24px;
@@ -667,7 +667,7 @@
   /* Use Cases Section */
   .use-cases {
     padding: 100px 24px;
-    background: linear-gradient(180deg, var(--bg-dark) 0%, #1f1e5c 100%);
+    background: var(--bg-dark);
   }
 
   .use-cases h2 {
@@ -734,7 +734,7 @@
   .service-highlight {
     max-width: 900px;
     margin: 0 auto;
-    background: linear-gradient(135deg, rgba(255,193,37,0.08) 0%, rgba(255,193,37,0.02) 100%);
+    background: var(--bg-card);
     border: 1px solid rgba(255,193,37,0.3);
     border-radius: 16px;
     padding: 40px;
@@ -775,7 +775,7 @@
   /* How It Works Section */
   .how-it-works {
     padding: 100px 24px;
-    background: linear-gradient(180deg, var(--bg-dark) 0%, #1f1e5c 100%);
+    background: var(--bg-dark);
   }
 
   .how-it-works h2 {
@@ -831,7 +831,7 @@
   .cta {
     padding: 80px 24px;
     text-align: center;
-    background: linear-gradient(135deg, rgba(255,193,37,0.1) 0%, transparent 100%);
+    background: linear-gradient(180deg, rgba(255,193,37,0.06) 0%, transparent 100%);
     border-top: 1px solid rgba(255,193,37,0.1);
   }
 
@@ -868,19 +868,20 @@
   }
 
   footer a {
-    color: var(--accent);
+    color: var(--text-muted);
     text-decoration: none;
+    transition: color var(--duration-normal);
   }
 
   footer a:hover {
-    text-decoration: underline;
+    color: var(--accent);
   }
 
   /* LEASH Banner */
   .leash-banner {
     padding: 80px 24px;
     text-align: center;
-    background: linear-gradient(180deg, var(--bg-dark) 0%, #1f1e5c 50%, var(--bg-dark) 100%);
+    background: var(--bg-pure);
     position: relative;
     overflow: hidden;
     border-top: 1px solid var(--border-accent);
@@ -984,6 +985,10 @@
     .use-cases-grid {
       grid-template-columns: 1fr;
     }
+    .security-grid,
+    .values-grid {
+      grid-template-columns: 1fr;
+    }
     .service-highlight {
       padding: 24px;
     }
@@ -1003,7 +1008,7 @@
   .intro-banner {
     padding: 80px 24px;
     text-align: center;
-    background: linear-gradient(180deg, #16153f 0%, #1f1e5c 50%, #16153f 100%);
+    background: var(--bg-pure);
     position: relative;
     overflow: hidden;
   }
@@ -1079,7 +1084,7 @@
     font-size: 1.6rem;
     font-weight: 600;
     margin-top: 16px;
-    background: linear-gradient(90deg, var(--accent) 0%, #ffd966 50%, var(--accent) 100%);
+    background: linear-gradient(90deg, var(--accent) 0%, #ffd940 50%, var(--accent) 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -1102,6 +1107,12 @@
     <img src="/assets/logo.png" alt="VettID">
     <span>VETTID</span>
   </a>
+  <nav class="desktop-nav">
+    <a href="/security">Security</a>
+    <a href="/donate">Donate</a>
+    <a href="/help">Help Us</a>
+    <a href="/register" class="desktop-nav-cta">Register</a>
+  </nav>
   <button class="nav-toggle" aria-label="Toggle menu" aria-expanded="false">
     <span></span>
     <span></span>
@@ -1109,16 +1120,16 @@
   </button>
 </header>
 <!-- Navigation Menu (outside header to avoid backdrop-filter containing block) -->
-<div class="nav-menu" id="navMenu" style="display:none;position:fixed;top:0;right:0;width:280px;height:100%;background:#312f80;padding:80px 20px 40px;z-index:1005;flex-direction:column;gap:8px;">
-  <a href="/" style="display:block;color:#d4d4d4;text-decoration:none;padding:12px 16px;font-size:1rem;">Home</a>
-  <a href="/help" style="display:block;color:#d4d4d4;text-decoration:none;padding:12px 16px;font-size:1rem;">Help Us</a>
-  <a href="/donate" style="display:block;color:#d4d4d4;text-decoration:none;padding:12px 16px;font-size:1rem;">Donate</a>
-  <a href="/pcr" style="display:block;color:#d4d4d4;text-decoration:none;padding:12px 16px;font-size:1rem;">PCR</a>
-  <a href="/votes" style="display:block;color:#d4d4d4;text-decoration:none;padding:12px 16px;font-size:1rem;">Votes</a>
+<div class="nav-menu" id="navMenu" style="display:none;position:fixed;top:0;right:0;width:280px;height:100%;background:#2e2d88;padding:80px 20px 40px;z-index:1005;flex-direction:column;gap:8px;">
+  <a href="/" style="display:block;color:#c9c8e8;text-decoration:none;padding:12px 16px;font-size:1rem;">Home</a>
+  <a href="/help" style="display:block;color:#c9c8e8;text-decoration:none;padding:12px 16px;font-size:1rem;">Help Us</a>
+  <a href="/donate" style="display:block;color:#c9c8e8;text-decoration:none;padding:12px 16px;font-size:1rem;">Donate</a>
+  <a href="/pcr" style="display:block;color:#c9c8e8;text-decoration:none;padding:12px 16px;font-size:1rem;">PCR</a>
+  <a href="/votes" style="display:block;color:#c9c8e8;text-decoration:none;padding:12px 16px;font-size:1rem;">Votes</a>
   <a href="/leash" style="display:block;color:#ffc125;text-decoration:none;padding:12px 16px;font-size:1rem;font-weight:600;">LEASH Demo</a>
-  <a href="/security" style="display:block;color:#d4d4d4;text-decoration:none;padding:12px 16px;font-size:1rem;">Security</a>
-  <a href="https://github.com/vettid/vettid-agent" target="_blank" rel="noopener noreferrer" style="display:block;color:#d4d4d4;text-decoration:none;padding:12px 16px;font-size:1rem;">Agents</a>
-  <a href="/signin" style="display:block;color:#d4d4d4;text-decoration:none;padding:12px 16px;font-size:1rem;">Sign In</a>
+  <a href="/security" style="display:block;color:#c9c8e8;text-decoration:none;padding:12px 16px;font-size:1rem;">Security</a>
+  <a href="https://github.com/vettid/vettid-agent" target="_blank" rel="noopener noreferrer" style="display:block;color:#c9c8e8;text-decoration:none;padding:12px 16px;font-size:1rem;">Agents</a>
+  <a href="/signin" style="display:block;color:#c9c8e8;text-decoration:none;padding:12px 16px;font-size:1rem;">Sign In</a>
   <a href="/register" style="display:block;background:#ffc125;color:#1f1e5c;text-decoration:none;padding:12px 16px;font-size:1rem;text-align:center;margin-top:16px;border-radius:6px;">Register</a>
 </div>
 <div class="nav-overlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(22,21,63,0.78);z-index:1000;"></div>
@@ -1632,7 +1643,7 @@
     <h2>A <span class="highlight">Cooperative</span> Built for You</h2>
     <p>VettID is not a corporation. We are a member-owned cooperative where every voice matters. Our governance is transparent, our priorities are aligned with yours, and our mission is simple: protect our members.</p>
     <p>When you join VettID, you're not just a customer &mdash; you're an owner with voting rights on how we operate, what services we offer, and how we protect our community.</p>
-    <p style="margin-top: 24px;"><a href="/help" class="btn btn-primary">I Want to Help!</a></p>
+    <p style="margin-top: 24px;"><a href="/help" class="btn btn-outline">I Want to Help!</a></p>
 
     <div class="values-grid">
       <div class="value-item">
@@ -1690,7 +1701,8 @@
 
 <!-- Footer -->
 <footer>
-  <p>&copy; 2026 VettID Cooperative. All rights reserved. | <a href="https://www.vettid.org" target="_blank" rel="noopener noreferrer">vettid.org</a></p>
+  <p style="margin-bottom: 8px;"><a href="/">Home</a> &middot; <a href="/security">Security</a> &middot; <a href="/donate">Donate</a> &middot; <a href="https://github.com/vettid" target="_blank" rel="noopener noreferrer">GitHub</a></p>
+  <p>&copy; 2026 VettID Cooperative. All rights reserved.</p>
 </footer>
 
 <script src="/shared/js/nav.js"></script>

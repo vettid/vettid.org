@@ -25,8 +25,7 @@
 
     body {
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: linear-gradient(135deg, #1f1e5c 0%, #2e2d88 50%, #3f3e9f 100%);
-      background-attachment: fixed;
+      background: #1f1e5c;
       color: var(--text);
       line-height: 1.6;
       -webkit-font-smoothing: antialiased;
@@ -105,19 +104,25 @@
     <img src="/assets/logo.png" alt="VettID">
     <span>VETTID</span>
   </a>
+  <nav class="desktop-nav">
+    <a href="/security">Security</a>
+    <a href="/donate">Donate</a>
+    <a href="/help">Help Us</a>
+    <a href="/register" class="desktop-nav-cta">Register</a>
+  </nav>
   <button class="nav-toggle" aria-label="Toggle menu" aria-expanded="false">
     <span></span><span></span><span></span>
   </button>
 </header>
-<div class="nav-menu" id="navMenu" style="display:none;position:fixed;top:0;right:0;width:280px;height:100%;background:#312f80;padding:80px 20px 40px;z-index:1005;flex-direction:column;gap:8px;">
-  <a href="/" style="display:block;color:#d4d4d4;text-decoration:none;padding:12px 16px;font-size:1rem;">Home</a>
-  <a href="/help" style="display:block;color:#d4d4d4;text-decoration:none;padding:12px 16px;font-size:1rem;">Help Us</a>
-  <a href="/donate" style="display:block;color:#d4d4d4;text-decoration:none;padding:12px 16px;font-size:1rem;">Donate</a>
-  <a href="/pcr" style="display:block;color:#d4d4d4;text-decoration:none;padding:12px 16px;font-size:1rem;">PCR</a>
-  <a href="/votes" style="display:block;color:#d4d4d4;text-decoration:none;padding:12px 16px;font-size:1rem;">Votes</a>
+<div class="nav-menu" id="navMenu" style="display:none;position:fixed;top:0;right:0;width:280px;height:100%;background:#2e2d88;padding:80px 20px 40px;z-index:1005;flex-direction:column;gap:8px;">
+  <a href="/" style="display:block;color:#c9c8e8;text-decoration:none;padding:12px 16px;font-size:1rem;">Home</a>
+  <a href="/help" style="display:block;color:#c9c8e8;text-decoration:none;padding:12px 16px;font-size:1rem;">Help Us</a>
+  <a href="/donate" style="display:block;color:#c9c8e8;text-decoration:none;padding:12px 16px;font-size:1rem;">Donate</a>
+  <a href="/pcr" style="display:block;color:#c9c8e8;text-decoration:none;padding:12px 16px;font-size:1rem;">PCR</a>
+  <a href="/votes" style="display:block;color:#c9c8e8;text-decoration:none;padding:12px 16px;font-size:1rem;">Votes</a>
   <a href="/leash" style="display:block;color:#ffc125;text-decoration:none;padding:12px 16px;font-size:1rem;font-weight:600;">LEASH Demo</a>
-  <a href="/security" style="display:block;color:#d4d4d4;text-decoration:none;padding:12px 16px;font-size:1rem;">Security</a>
-  <a href="/signin" style="display:block;color:#d4d4d4;text-decoration:none;padding:12px 16px;font-size:1rem;">Sign In</a>
+  <a href="/security" style="display:block;color:#c9c8e8;text-decoration:none;padding:12px 16px;font-size:1rem;">Security</a>
+  <a href="/signin" style="display:block;color:#c9c8e8;text-decoration:none;padding:12px 16px;font-size:1rem;">Sign In</a>
   <a href="/register" style="display:block;background:#ffc125;color:#1f1e5c;text-decoration:none;padding:12px 16px;font-size:1rem;text-align:center;margin-top:16px;border-radius:6px;">Register</a>
 </div>
 <div class="nav-overlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(22,21,63,0.78);z-index:1000;"></div>
