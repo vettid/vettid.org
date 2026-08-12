@@ -183,13 +183,38 @@
     pointer-events: none;
   }
 
+  .hero-mark-wrap {
+    position: relative;
+    display: inline-block;
+    margin-bottom: 36px;
+    animation: float 6s ease-in-out infinite;
+  }
+
   .hero-mark {
     width: 170px;
     height: auto;
+    display: block;
     color: var(--accent);
-    margin-bottom: 36px;
     filter: drop-shadow(0 10px 36px rgba(255, 193, 37, 0.35));
-    animation: float 6s ease-in-out infinite;
+  }
+
+  .coming-soon-sticker {
+    position: absolute;
+    top: -14px;
+    right: -92px;
+    transform: rotate(8deg);
+    background: #16153f;
+    color: var(--accent);
+    border: 1.5px solid var(--accent);
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-weight: 800;
+    font-size: 0.8rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 8px 14px;
+    border-radius: 8px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+    white-space: nowrap;
   }
 
   @keyframes float {
@@ -958,6 +983,8 @@
   /* Responsive */
   @media (max-width: 768px) {
     .hero-mark { width: 120px; }
+    .coming-soon-sticker { right: -64px; font-size: 0.7rem; padding: 6px 10px; }
+    .intro-banner .intro-lead { font-size: 1rem; }
     .hero h1 { font-size: 2.75rem; }
     .hero .tagline { font-size: 1.1rem; letter-spacing: 2px; }
     .header-logo span { display: none; }
@@ -1094,6 +1121,18 @@
     letter-spacing: 1px;
   }
 
+  .intro-banner .intro-lead {
+    color: var(--text-muted);
+    font-size: 1.15rem;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
+    line-height: 1.7;
+    max-width: 640px;
+    margin: 28px auto 0;
+    opacity: 1;
+  }
+
   .intro-banner .divider {
     width: 120px;
     height: 2px;
@@ -1170,6 +1209,8 @@
     Powered by AWS Nitro Enclaves
   </div>
 
+  <div class="hero-mark-wrap">
+  <span class="coming-soon-sticker">Coming Soon</span>
   <svg class="hero-mark" viewBox="0 0 264 350" role="img" aria-label="VettID rook mark" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <mask id="rook-keyhole">
@@ -1183,9 +1224,10 @@
     <!-- tapered body with keyhole cutout -->
     <path fill="currentColor" mask="url(#rook-keyhole)" d="M31 112 Q31 108 35 108 L229 108 Q233 108 233 112 L257 330 Q258 344 245 344 L19 344 Q6 344 7 330 Z"/>
   </svg>
+  </div>
   <h1>VettID</h1>
   <p class="tagline">Secure. Private. Trusted.</p>
-  <p class="subtitle">Your personal security platform &mdash; protecting your identity, your connections, and your AI agents. A member-owned cooperative where even we can't access your data.</p>
+  <p class="subtitle">Your personal concierge &mdash; protecting your identity, your connections, and your AI agents. A member-owned cooperative where even we can't access your data.</p>
 </section>
 
 <!-- LEASH Announcement -->
@@ -1206,8 +1248,9 @@
   <div class="intro-banner-content">
     <p>Introducing</p>
     <h2>VettID</h2>
-    <span class="highlight">The World's First Personal Security Service</span>
+    <span class="highlight">Your Personal Concierge for Digital Life</span>
     <div class="divider"></div>
+    <p class="intro-lead">A good concierge holds your keys, watches the door, and acts only on your instructions. VettID does the same for your digital life &mdash; your identity, your secrets, your connections, and your AI agents, all guarded in a vault only you control. Here's what that looks like.</p>
   </div>
 </section>
 
