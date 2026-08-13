@@ -861,33 +861,6 @@
     font-size: 0.95rem;
   }
 
-  /* CTA Section */
-  .cta {
-    padding: 80px 24px;
-    text-align: center;
-    background: linear-gradient(180deg, rgba(255,193,37,0.06) 0%, transparent 100%);
-    border-top: 1px solid rgba(255,193,37,0.1);
-  }
-
-  .cta h2 {
-    font-size: 2rem;
-    margin-bottom: 16px;
-    color: #fff;
-  }
-
-  .cta p {
-    color: var(--text-muted);
-    margin-bottom: 32px;
-    font-size: 1.1rem;
-  }
-
-  .cta-buttons {
-    display: flex;
-    gap: 16px;
-    justify-content: center;
-    flex-wrap: wrap;
-  }
-
   /* Footer */
   footer {
     padding: 40px 24px;
@@ -899,6 +872,12 @@
   footer p {
     color: var(--text-muted);
     font-size: 0.9rem;
+  }
+
+  footer .footer-legal {
+    color: var(--text-subtle);
+    font-size: 0.75rem;
+    margin-top: 12px;
   }
 
   footer a {
@@ -1213,7 +1192,7 @@
       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
       <path d="M9 12l2 2 4-4"/>
     </svg>
-    Powered by AWS Nitro Enclaves
+    Built on AWS Nitro Enclaves
   </div>
 
   <div class="hero-mark-wrap">
@@ -1751,15 +1730,11 @@
 </section>
 
 <!-- CTA Section -->
-<section class="cta">
-  <h2>Ready to Own Your Digital Identity?</h2>
-  <p>Join a community that proves security instead of promising it.</p>
-</section>
-
 <!-- Footer -->
 <footer>
   <p style="margin-bottom: 8px;"><a href="/">Home</a> &middot; <a href="/security">Security</a> &middot; <a href="/donate">Donate</a> &middot; <a href="https://github.com/vettid" target="_blank" rel="noopener noreferrer">GitHub</a></p>
-  <p>&copy; 2026 VettID Cooperative. All rights reserved.</p>
+  <p>&copy; 2026 The VettID Project. All rights reserved.</p>
+  <p class="footer-legal">Amazon Web Services, AWS, and AWS Nitro Enclaves are trademarks of Amazon.com, Inc. or its affiliates.</p>
 </footer>
 
 <script src="/shared/js/nav.js"></script>
