@@ -1525,29 +1525,24 @@
 <section class="cooperative">
   <div class="cooperative-content">
     <svg class="cooperative-icon" viewBox="0 0 100 100">
-      <!-- Multiple towers forming a circle/community -->
-      <g transform="translate(50, 15) scale(0.5)">
-        <path d="M-12 25 L-12 18 L-9 18 L-9 12 L-5 12 L-5 18 L5 18 L5 12 L9 12 L9 18 L12 18 L12 25 L-12 25 Z" fill="#ffc125"/>
-        <path d="M-10 25 L10 25 L12 50 L-12 50 Z" fill="#ffc125"/>
-        <ellipse cx="0" cy="34" rx="4" ry="5" fill="#1f1e5c"/>
-      </g>
-      <g transform="translate(20, 55) scale(0.45)">
-        <path d="M-12 25 L-12 18 L-9 18 L-9 12 L-5 12 L-5 18 L5 18 L5 12 L9 12 L9 18 L12 18 L12 25 L-12 25 Z" fill="#ffc125"/>
-        <path d="M-10 25 L10 25 L12 50 L-12 50 Z" fill="#ffc125"/>
-        <ellipse cx="0" cy="34" rx="4" ry="5" fill="#1f1e5c"/>
-      </g>
-      <g transform="translate(80, 55) scale(0.45)">
-        <path d="M-12 25 L-12 18 L-9 18 L-9 12 L-5 12 L-5 18 L5 18 L5 12 L9 12 L9 18 L12 18 L12 25 L-12 25 Z" fill="#ffc125"/>
-        <path d="M-10 25 L10 25 L12 50 L-12 50 Z" fill="#ffc125"/>
-        <ellipse cx="0" cy="34" rx="4" ry="5" fill="#1f1e5c"/>
-      </g>
-      <g transform="translate(50, 80) scale(0.45)">
-        <path d="M-12 25 L-12 18 L-9 18 L-9 12 L-5 12 L-5 18 L5 18 L5 12 L9 12 L9 18 L12 18 L12 25 L-12 25 Z" fill="#ffc125"/>
-        <path d="M-10 25 L10 25 L12 50 L-12 50 Z" fill="#ffc125"/>
-        <ellipse cx="0" cy="34" rx="4" ry="5" fill="#1f1e5c"/>
-      </g>
-      <!-- Connecting circle -->
+      <defs>
+        <!-- The brand rook (same geometry as the hero mark), centered on its
+             own origin so instances can be placed exactly on the circle -->
+        <g id="coop-rook" transform="scale(0.05) translate(-132, -176)">
+          <path fill="#ffc125" d="M8 0 L47 0 Q55 0 55 8 L55 54 L104 54 L104 8 Q104 0 112 0 L151 0 Q159 0 159 8 L159 54 L208 54 L208 8 Q208 0 216 0 L255 0 Q263 0 263 8 L263 76 Q263 86 254 90 L240 96 L23 96 L9 90 Q0 86 0 76 L0 8 Q0 0 8 0 Z"/>
+          <path fill="#ffc125" d="M31 112 Q31 108 35 108 L229 108 Q233 108 233 112 L257 330 Q258 344 245 344 L19 344 Q6 344 7 330 Z"/>
+          <circle cx="132" cy="190" r="29" fill="#1f1e5c"/>
+          <path d="M119 204 L104 282 Q102 292 112 292 L152 292 Q162 292 160 282 L145 204 Z" fill="#1f1e5c"/>
+        </g>
+      </defs>
+      <!-- Connecting circle (drawn first so rooks sit on top of it) -->
       <circle cx="50" cy="50" r="35" fill="none" stroke="#ffc125" stroke-width="1" stroke-dasharray="4" opacity="0.5"/>
+      <!-- Five rooks at 72-degree intervals, centers exactly on the r=35 circle -->
+      <use href="#coop-rook" transform="translate(50, 15)"/>
+      <use href="#coop-rook" transform="translate(83.29, 39.18)"/>
+      <use href="#coop-rook" transform="translate(70.57, 78.32)"/>
+      <use href="#coop-rook" transform="translate(29.43, 78.32)"/>
+      <use href="#coop-rook" transform="translate(16.71, 39.18)"/>
     </svg>
 
     <h2>A <span class="highlight">Cooperative</span> Built for You</h2>
