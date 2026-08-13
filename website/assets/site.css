@@ -1,49 +1,83 @@
 /**
- * VettID shared site styles — single source of truth for design tokens,
- * page chrome (body, header, footer), and shared primitives.
- * Page-specific styles live in each page's inline <style> block, which
- * loads after this file and can override it.
+ * VettID shared site styles — "Night Watch" design system.
+ * Single source of truth for design tokens, page chrome (body, header,
+ * footer), and shared primitives. Page-specific styles live in each page's
+ * inline <style> block, which loads after this file and can override it.
+ *
+ * Palette anchors (all five load-bearing): indigo #2e2d88, gold #ffc125,
+ * white #ffffff, black #000000, gray #aaaaaa.
+ * Gold policy: gold is the key — mark, actions, boundary lines, evidence
+ * chips. Never ambient glow, never card borders, never gradient text.
  */
 
 :root {
-  /* Brand colors */
-  --accent: #ffc125;
-  --accent-hover: #ffd940;
-  --accent-dark: #a68319;
-  --accent-muted: rgba(255, 193, 37, 0.15);
+  /* Grounds */
+  --ground-0: #000000;          /* footer — the black anchor, verbatim */
+  --ground-1: #0b0b12;          /* primary page ground */
+  --band-indigo: #212062;       /* full-width indigo band ground */
+  --band-light: #f4f4f6;        /* daylight band ground */
 
-  /* Blue ramp: ink -> ground -> surface -> brand */
-  --bg-pure: #16153f;
-  --bg-dark: #1f1e5c;
-  --bg-card: #28276f;
-  --bg-elevated: #2e2d88;
-  --bg-input: #16153f;
+  /* Surfaces */
+  --surface-1: #14142a;         /* card on black ground */
+  --surface-2: #1b1b3a;         /* elevated / hover card */
+  --surface-indigo: #2e2d88;    /* card on indigo band — the indigo anchor */
+  --surface-light: #ffffff;     /* card on light band — the white anchor */
 
-  /* Text colors */
-  --text: #f5f5f4;
-  --text-muted: #c9c8e8;
-  --text-subtle: #b3b2dd;
+  /* Inks on dark */
+  --ink-hi: #f7f7fa;
+  --ink-body: #c9c9d6;
+  --ink-mute: #aaaaaa;          /* the gray anchor, verbatim */
+
+  /* Inks on light */
+  --ink-on-light: #101018;
+  --ink-on-light-mute: #4c4c58;
 
   /* Borders */
-  --border: #403e9c;
-  --border-subtle: rgba(64, 62, 156, 0.5);
-  --border-accent: rgba(255, 193, 37, 0.2);
+  --border-dark: #26263e;
+  --border-indigo: #454399;
+  --border-light: #d9d9df;
 
-  /* Status colors */
-  --success: #22c55e;
-  --warn: #f59e0b;
-  --error: #ef4444;
+  /* Gold */
+  --gold: #ffc125;
+  --gold-hover: #ffd25a;
+  --gold-ink-light: #7f640a;    /* gold-as-text on light grounds (AA) */
+  --gold-wash: rgba(255, 193, 37, 0.08);
+
+  /* Status */
+  --success: #3fd97f;
+  --warn: #ffb020;
+  --error: #ff6b6b;
 
   /* Motion */
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --duration-normal: 200ms;
   --duration-slow: 300ms;
+
+  /* Type */
+  --font-mono: 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
+
+  /* ── Legacy aliases (old token names used throughout page CSS) ── */
+  --accent: var(--gold);
+  --accent-hover: var(--gold-hover);
+  --accent-dark: #7f640a;
+  --accent-muted: var(--gold-wash);
+  --bg-dark: var(--ground-1);
+  --bg-pure: var(--ground-0);
+  --bg-card: var(--surface-1);
+  --bg-elevated: var(--surface-2);
+  --bg-input: #101020;
+  --text: var(--ink-body);
+  --text-muted: var(--ink-mute);
+  --text-subtle: #7c7c88;
+  --border: var(--border-dark);
+  --border-subtle: var(--border-dark);
+  --border-accent: var(--border-dark);  /* kills ambient gold borders site-wide */
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--gold);
   outline-offset: 2px;
 }
 :focus:not(:focus-visible) {
@@ -52,45 +86,66 @@
 
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: #1f1e5c;
-  color: var(--text);
-  line-height: 1.6;
+  background: var(--ground-1);
+  color: var(--ink-body);
+  line-height: 1.65;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Noise texture */
-body::before {
-  content: '';
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  opacity: 0.025;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
-  z-index: -1;
-}
-
 h1, h2, h3, h4, h5, h6 {
   font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: var(--ink-hi);
 }
+
+.mono, .eyebrow {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+/* Battlement rule — the signature device, small gold form */
+.battlement-rule {
+  width: 96px;
+  height: 8px;
+  margin: 34px auto 0;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='8'%3E%3Crect x='0' width='24' height='8' fill='%23ffc125'/%3E%3Crect x='36' width='24' height='8' fill='%23ffc125'/%3E%3Crect x='72' width='24' height='8' fill='%23ffc125'/%3E%3C/svg%3E") no-repeat;
+}
+
+/* Crenellated indigo band — structural form of the signature */
+.band {
+  position: relative;
+  background: var(--band-indigo);
+  padding: 92px 24px;
+  margin: 12px 0;
+}
+.band::before, .band::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 12px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='12'%3E%3Crect width='24' height='12' fill='%23212062'/%3E%3C/svg%3E") repeat-x / 48px 12px;
+}
+.band::before { top: -12px; }
+.band::after { bottom: -12px; transform: scaleX(-1) scaleY(-1); }
 
 /* Header */
 header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 32px;
-  background: rgba(22, 21, 63, 0.92);
+  padding: 14px 32px;
+  background: rgba(11, 11, 18, 0.9);
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   z-index: 100;
   backdrop-filter: blur(10px);
-  border-bottom: 1px solid rgba(255, 193, 37, 0.1);
+  border-bottom: 1px solid var(--border-dark);
 }
 
 .header-logo {
@@ -100,54 +155,81 @@ header {
   text-decoration: none;
 }
 
-.header-logo img {
-  height: 40px;
-  width: 40px;
-  border-radius: 8px;
+.header-logo svg {
+  width: 30px;
+  height: auto;
+  color: var(--gold);
 }
 
 .header-logo span {
-  font-size: 1.4rem;
-  font-weight: 700;
-  color: var(--accent);
-  letter-spacing: 2px;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--ink-hi);
+  letter-spacing: 1px;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+/* Coming Soon chip — lives in the header slot where sign-in/register will
+   eventually go */
+.coming-soon-chip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: var(--gold);
+  color: #101018;
+  padding: 7px 14px;
+  border-radius: 4px;
+  white-space: nowrap;
 }
 
 /* Footer */
 footer {
-  padding: 40px 24px;
+  padding: 48px 24px 40px;
   text-align: center;
-  border-top: 1px solid rgba(255, 193, 37, 0.1);
-  background: #16153f;
+  border-top: 1px solid var(--border-dark);
+  background: var(--ground-0);
+}
+
+footer .battlement-mini {
+  width: 60px;
+  height: 6px;
+  margin: 0 auto 20px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='6'%3E%3Crect x='0' width='12' height='6' fill='%23ffc125'/%3E%3Crect x='24' width='12' height='6' fill='%23ffc125'/%3E%3Crect x='48' width='12' height='6' fill='%23ffc125'/%3E%3C/svg%3E") no-repeat;
 }
 
 footer p {
-  color: var(--text-muted);
+  color: var(--ink-mute);
   font-size: 0.9rem;
 }
 
 footer a {
-  color: var(--text-muted);
+  color: var(--ink-body);
   text-decoration: none;
   transition: color var(--duration-normal);
 }
 
 footer a:hover {
-  color: var(--accent);
+  color: var(--gold);
+  text-decoration: underline;
+}
+
+footer .footer-privacy {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-top: 12px;
+  color: #66666e;
 }
 
 footer .footer-legal {
-  color: var(--text-subtle);
+  color: #66666e;
   font-size: 0.75rem;
-  margin-top: 12px;
+  margin-top: 10px;
 }
 
 @media (max-width: 768px) {
   .header-logo span { display: none; }
-}
-
-footer .footer-privacy {
-  color: var(--text-subtle);
-  font-size: 0.8rem;
-  margin-top: 10px;
+  .coming-soon-chip { font-size: 10px; padding: 6px 10px; }
 }
