@@ -178,15 +178,45 @@ function handler(event) {
     };
   }
 
-  // SECURITY: Block access to sensitive paths (.git, .env, etc.)
-  var lowerUri = uri.toLowerCase();
-  if (lowerUri.startsWith('/.git') ||
-      lowerUri.startsWith('/.env') ||
-      lowerUri.startsWith('/.aws') ||
-      lowerUri.startsWith('/.ssh') ||
-      lowerUri.startsWith('/.htaccess') ||
-      lowerUri.startsWith('/wp-admin') ||
-      lowerUri.startsWith('/wp-login')) {
+  // Normalize before matching so percent-encoded evasions (/%2Egit,
+  // /%252eenv) collapse onto the same rules. Two decode passes handle
+  // double-encoding; invalid sequences fall through undecoded.
+  var norm = uri.toLowerCase();
+  for (var d = 0; d < 2; d++) {
+    if (norm.indexOf('%') === -1) break;
+    try { norm = decodeURIComponent(norm).toLowerCase(); } catch (e) { break; }
+  }
+  // Collapse duplicate slashes so //.git matches too
+  while (norm.indexOf('//') !== -1) { norm = norm.replace('//', '/'); }
+
+  // /.well-known/* is always allowed (RFC 8615: security.txt etc.) and is
+  // deliberately checked before the dotfile blocklist below.
+  var wellKnown = norm.indexOf('/.well-known/') === 0;
+
+  // RFC 9116 legacy location: serve the canonical file for /security.txt
+  if (norm === '/security.txt') {
+    request.uri = '/.well-known/security.txt';
+    return request;
+  }
+
+  // SECURITY: Block hostile-scanner paths. The site is static with no
+  // server-side code, so anything probing for dotfiles, VCS metadata, PHP,
+  // or CMS internals is noise at best.
+  var blockedPrefixes = [
+    '/.git', '/.svn', '/.hg', '/.env', '/.aws', '/.ssh',
+    '/.htaccess', '/.htpasswd', '/.ds_store', '/.idea', '/.vscode',
+    '/wp-admin', '/wp-login', '/wp-content', '/wp-includes',
+    '/phpmyadmin', '/cgi-bin', '/xmlrpc.php'
+  ];
+  var blocked = false;
+  if (!wellKnown) {
+    for (var b = 0; b < blockedPrefixes.length; b++) {
+      if (norm.indexOf(blockedPrefixes[b]) === 0) { blocked = true; break; }
+    }
+    // No PHP exists anywhere on this site
+    if (norm.endsWith('.php')) { blocked = true; }
+  }
+  if (blocked) {
     return {
       statusCode: 403,
       statusDescription: 'Forbidden',
