@@ -135,8 +135,8 @@ h1, h2, h3, h4, h5, h6 {
 /* Header */
 header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 16px;
   padding: 14px 32px;
   background: rgba(11, 11, 18, 0.9);
   position: fixed;
@@ -171,6 +171,8 @@ header {
 
 /* Coming Soon chip — lives in the header slot where sign-in/register will
    eventually go */
+.desktop-nav { margin-left: auto; }
+
 .coming-soon-chip {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -227,6 +229,10 @@ footer .footer-legal {
   color: #66666e;
   font-size: 0.75rem;
   margin-top: 10px;
+}
+
+@media (max-width: 1023px) {
+  .coming-soon-chip { margin-left: auto; }
 }
 
 @media (max-width: 768px) {

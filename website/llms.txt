@@ -13,6 +13,7 @@
 - [Security](https://vettid.org/security): vulnerability disclosure policy,
   scope, severity targets, and PGP key for encrypted reports
 - [Donate](https://vettid.org/donate): support the project (Bitcoin)
+- [Open Source](https://vettid.org/open-source): the full stack is public on GitHub (AGPL-3.0) — enclave, apps, agent connector, infrastructure, and the LEASH proposal
 
 ## Contact
 

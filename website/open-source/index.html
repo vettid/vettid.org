@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Open Source — VettID</title>
+  <meta name="description" content="VettID is open source. Every component — enclave, apps, agent connector, infrastructure — is public and auditable on GitHub." />
+  <link rel="canonical" href="https://vettid.org/open-source"/>
+  <link rel="icon" type="image/png" href="/assets/favicon.png" />
+  <link rel="preload" href="/assets/fonts/inter-regular.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/assets/fonts/plusjakartasans-bold.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/fonts.css" />
+  <link rel="stylesheet" href="/shared/nav.css" />
+  <link rel="stylesheet" href="/assets/site.css">
+  <style>
+    .wrap {
+      max-width: 1160px;
+      margin: 0 auto;
+      padding: 130px 24px 90px;
+    }
+
+    .hero {
+      text-align: center;
+      margin-bottom: 64px;
+    }
+    .hero .eyebrow { display: block; margin-bottom: 18px; }
+    h1 {
+      font-size: clamp(2.25rem, 5vw, 3rem);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 16px;
+    }
+    .hero p {
+      max-width: 680px;
+      margin: 0 auto;
+      color: var(--ink-body);
+      font-size: 1.125rem;
+    }
+    .hero .license {
+      display: inline-block;
+      margin-top: 22px;
+      background: var(--gold-wash);
+      color: var(--gold);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 6px 14px;
+      border-radius: 4px;
+    }
+
+    .why {
+      max-width: 760px;
+      margin: 0 auto 72px;
+      text-align: center;
+      color: var(--ink-body);
+    }
+    .why .battlement-rule { margin-bottom: 34px; }
+
+    h2.section-title {
+      text-align: center;
+      font-size: 1.6rem;
+      font-weight: 800;
+      margin-bottom: 36px;
+    }
+
+    .repo-grid {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 22px;
+    }
+    .repo-card {
+      flex: 0 1 360px;
+      background: var(--surface-1);
+      border: 1px solid var(--border-dark);
+      border-radius: 14px;
+      padding: 26px;
+      text-decoration: none;
+      display: block;
+      transition: all var(--duration-normal) var(--ease-out-expo);
+    }
+    .repo-card:hover {
+      background: var(--surface-2);
+      transform: translateY(-2px);
+    }
+    .repo-card h3 {
+      font-family: var(--font-mono);
+      font-size: 1rem;
+      font-weight: 500;
+      color: var(--gold);
+      margin-bottom: 8px;
+      letter-spacing: 0.02em;
+      word-break: break-all;
+    }
+    .repo-card p {
+      color: var(--ink-body);
+      font-size: 0.92rem;
+      margin-bottom: 14px;
+    }
+    .repo-card .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+    .repo-card .chip {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--ink-mute);
+      border: 1px solid var(--border-dark);
+      border-radius: 4px;
+      padding: 4px 8px;
+    }
+
+    .papers { margin-top: 64px; }
+
+    .org-link {
+      text-align: center;
+      margin-top: 64px;
+    }
+    .org-link a {
+      display: inline-block;
+      border: 1.5px solid var(--gold);
+      color: var(--gold);
+      font-weight: 600;
+      padding: 13px 28px;
+      border-radius: 6px;
+      text-decoration: none;
+      transition: all var(--duration-normal);
+    }
+    .org-link a:hover { background: var(--gold); color: #101018; }
+    .org-link p { margin-top: 14px; color: var(--ink-mute); font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <a href="/" class="header-logo">
+    <svg viewBox="0 0 264 350" fill="currentColor" aria-hidden="true"><defs><mask id="hdr-kh"><rect width="264" height="350" fill="white"/><circle cx="132" cy="190" r="29" fill="black"/><path d="M119 204 L104 282 Q102 292 112 292 L152 292 Q162 292 160 282 L145 204 Z" fill="black"/></mask></defs><path d="M8 0 L47 0 Q55 0 55 8 L55 54 L104 54 L104 8 Q104 0 112 0 L151 0 Q159 0 159 8 L159 54 L208 54 L208 8 Q208 0 216 0 L255 0 Q263 0 263 8 L263 76 Q263 86 254 90 L240 96 L23 96 L9 90 Q0 86 0 76 L0 8 Q0 0 8 0 Z"/><path mask="url(#hdr-kh)" d="M31 112 Q31 108 35 108 L229 108 Q233 108 233 112 L257 330 Q258 344 245 344 L19 344 Q6 344 7 330 Z"/></svg>
+    <span>VETTID</span>
+  </a>
+  <nav class="desktop-nav">
+    <a href="/security">Security</a>
+    <a href="/donate">Donate</a>
+    <a href="/open-source">Open Source</a>
+  </nav>
+  <span class="coming-soon-chip">Coming Soon</span>
+  <button class="nav-toggle" aria-label="Toggle menu" aria-expanded="false">
+    <span></span><span></span><span></span>
+  </button>
+</header>
+<div class="nav-menu" id="navMenu" style="display:none;position:fixed;top:0;right:0;width:280px;height:100%;background:#2e2d88;padding:80px 20px 40px;z-index:1005;flex-direction:column;gap:8px;">
+  <a href="/" style="display:block;color:#c9c9d6;text-decoration:none;padding:12px 16px;font-size:1rem;">Home</a>
+  <a href="/donate" style="display:block;color:#c9c9d6;text-decoration:none;padding:12px 16px;font-size:1rem;">Donate</a>
+  <a href="/security" style="display:block;color:#c9c9d6;text-decoration:none;padding:12px 16px;font-size:1rem;">Security</a>
+  <a href="/open-source" style="display:block;color:#c9c9d6;text-decoration:none;padding:12px 16px;font-size:1rem;">Open Source</a>
+</div>
+<div class="nav-overlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(22,21,63,0.78);z-index:1000;"></div>
+
+<div class="wrap">
+
+  <div class="hero">
+    <span class="eyebrow">Nothing to hide</span>
+    <h1>VettID Is Open Source</h1>
+    <p>A security service you can't inspect is a security service you have to trust. VettID's entire stack &mdash; the enclave code, the apps, the agent connector, even the cloud infrastructure &mdash; is public on GitHub. Read it, audit it, build it yourself, and verify that what we run is what we published.</p>
+    <span class="license">AGPL-3.0 Licensed</span>
+  </div>
+
+  <div class="why">
+    <div class="battlement-rule" style="margin-left:auto;margin-right:auto;"></div>
+    <p>Open source isn't a marketing choice here &mdash; it's load-bearing. VettID's trust model depends on cryptographic attestation: your app verifies the exact code running in the enclave before sharing anything. Attestation only means something when the code being attested is public. The published PCR values on our repositories are how you check that the enclave you're talking to was built from the source you can read.</p>
+  </div>
+
+  <h2 class="section-title">The Stack</h2>
+  <div class="repo-grid">
+    <a class="repo-card" href="https://github.com/vettid/vettid-dev" target="_blank" rel="noopener noreferrer">
+      <h3>vettid-dev</h3>
+      <p>The backend: AWS CDK infrastructure, Lambda handlers, and the Nitro Enclave vault-manager where member secrets live.</p>
+      <div class="chips"><span class="chip">TypeScript</span><span class="chip">Go</span><span class="chip">Nitro Enclave</span></div>
+    </a>
+    <a class="repo-card" href="https://github.com/vettid/vettid-android" target="_blank" rel="noopener noreferrer">
+      <h3>vettid-android</h3>
+      <p>The Android app &mdash; credential handling, vault pairing, and session crypto on your phone.</p>
+      <div class="chips"><span class="chip">Kotlin</span><span class="chip">Jetpack Compose</span></div>
+    </a>
+    <a class="repo-card" href="https://github.com/vettid/vettid-ios" target="_blank" rel="noopener noreferrer">
+      <h3>vettid-ios</h3>
+      <p>The iOS app &mdash; the same member experience, built native for iPhone.</p>
+      <div class="chips"><span class="chip">Swift</span><span class="chip">SwiftUI</span></div>
+    </a>
+    <a class="repo-card" href="https://github.com/vettid/vettid-desktop" target="_blank" rel="noopener noreferrer">
+      <h3>vettid-desktop</h3>
+      <p>The desktop companion &mdash; time-limited, capability-scoped sessions where your phone stays in control.</p>
+      <div class="chips"><span class="chip">Rust</span><span class="chip">Tauri v2</span><span class="chip">Svelte</span></div>
+    </a>
+    <a class="repo-card" href="https://github.com/vettid/vettid-agent" target="_blank" rel="noopener noreferrer">
+      <h3>vettid-agent</h3>
+      <p>The Agent Connector &mdash; a sidecar binary that gives AI agents secure, owner-controlled access to vault secrets. Secrets pass through; they're never cached.</p>
+      <div class="chips"><span class="chip">Go</span><span class="chip">LEASH</span></div>
+    </a>
+    <a class="repo-card" href="https://github.com/vettid/vettid-service-vault" target="_blank" rel="noopener noreferrer">
+      <h3>vettid-service-vault</h3>
+      <p>The integration layer that lets organizations run Service Vaults and connect with members without storing their data.</p>
+      <div class="chips"><span class="chip">Business</span></div>
+    </a>
+    <a class="repo-card" href="https://github.com/vettid/vettid-test-harness" target="_blank" rel="noopener noreferrer">
+      <h3>vettid-test-harness</h3>
+      <p>The end-to-end test suite that exercises the whole platform.</p>
+      <div class="chips"><span class="chip">Playwright</span></div>
+    </a>
+    <a class="repo-card" href="https://github.com/vettid/vettid-healthcare-demo" target="_blank" rel="noopener noreferrer">
+      <h3>vettid-healthcare-demo</h3>
+      <p>Three approaches to patient-record lookup compared side by side: static credentials, IAM tokens, and VettID's organizational vault.</p>
+      <div class="chips"><span class="chip">Demo</span><span class="chip">HIPAA</span></div>
+    </a>
+  </div>
+
+  <div class="papers">
+    <h2 class="section-title">Papers &amp; Proposals</h2>
+    <div class="repo-grid">
+      <a class="repo-card" href="https://github.com/vettid/LEASH" target="_blank" rel="noopener noreferrer">
+        <h3>LEASH</h3>
+        <p>Lightweight Encrypted Agent Secret Handling &mdash; a proposed companion standard to MCP for secure, auditable, human-controlled secret access by AI agents.</p>
+        <div class="chips"><span class="chip">Position Paper</span><span class="chip">Standard</span></div>
+      </a>
+      <a class="repo-card" href="https://github.com/vettid/zero-knowledge-trust" target="_blank" rel="noopener noreferrer">
+        <h3>zero-knowledge-trust</h3>
+        <p>Zero-Knowledge Trust: the next evolution of security for the agentic era &mdash; the thinking behind VettID's architecture.</p>
+        <div class="chips"><span class="chip">Paper</span></div>
+      </a>
+    </div>
+  </div>
+
+  <div class="org-link">
+    <a href="https://github.com/vettid" target="_blank" rel="noopener noreferrer">Browse the VettID organization on GitHub</a>
+    <p>Issues and pull requests welcome. Security findings go to <a href="/security" style="border:none;padding:0;color:var(--ink-mute);text-decoration:underline;">security@vettid.org</a> &mdash; not the public tracker.</p>
+  </div>
+
+</div>
+
+<footer>
+  <div class="battlement-mini"></div>
+  <p style="margin-bottom: 8px;"><a href="/">Home</a> &middot; <a href="/security">Security</a> &middot; <a href="/donate">Donate</a> &middot; <a href="/open-source">Open Source</a> &middot; <a href="https://github.com/vettid" target="_blank" rel="noopener noreferrer">GitHub</a></p>
+  <p>&copy; 2026 The VettID Project. All rights reserved.</p>
+  <p class="footer-privacy">No trackers, no analytics, no third-party resources &mdash; this site loads nothing from anyone but us.</p>
+</footer>
+
+<script src="/shared/js/nav.js"></script>
+</body>
+</html>
