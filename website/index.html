@@ -200,8 +200,9 @@
 
   .coming-soon-sticker {
     position: absolute;
-    top: -14px;
-    right: -92px;
+    z-index: 2;
+    top: -18px;
+    right: -96px;
     transform: rotate(8deg);
     background: #16153f;
     color: var(--accent);
@@ -713,11 +714,17 @@
   }
 
   .use-cases-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    /* Flex instead of grid so a partial last row centers itself */
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
     gap: 24px;
     max-width: 1200px;
     margin: 0 auto 60px;
+  }
+
+  .use-cases-grid .use-case-card {
+    flex: 0 1 368px;
   }
 
   .use-case-card {
@@ -1012,8 +1019,8 @@
       flex-direction: column;
     }
     .use-cases h2 { font-size: 2rem; }
-    .use-cases-grid {
-      grid-template-columns: 1fr;
+    .use-cases-grid .use-case-card {
+      flex-basis: 100%;
     }
     .security-grid,
     .values-grid {
@@ -1227,7 +1234,7 @@
   </div>
   <h1>VettID</h1>
   <p class="tagline">Secure. Private. Trusted.</p>
-  <p class="subtitle">Your personal concierge &mdash; protecting your identity, your connections, and your AI agents. A member-owned cooperative where even we can't access your data.</p>
+  <p class="subtitle">Your personal concierge &mdash; protecting your identity, your connections, and your AI agents. Your identity should be portable. Your devices should be disposable.</p>
 </section>
 
 <!-- LEASH Announcement -->
@@ -1386,6 +1393,17 @@
       </div>
       <h3>Encrypted Agent Messaging</h3>
       <p>Communicate with AI agents through E2E encrypted channels &mdash; not Telegram, not WhatsApp. Messages and approval requests appear in your feed with verified agent identity. No middleman sees the conversation.</p>
+    </div>
+
+    <div class="use-case-card">
+      <div class="use-case-icon">
+        <svg viewBox="0 0 64 64" fill="none">
+          <path d="M32 8c-9 0-16 7-16 16 0 12 16 32 16 32s16-20 16-32c0-9-7-16-16-16z" stroke="#ffc125" stroke-width="2"/>
+          <circle cx="32" cy="24" r="6" stroke="#ffc125" stroke-width="2"/>
+        </svg>
+      </div>
+      <h3>Location on Your Terms</h3>
+      <p>Share your live location with the people you choose, for exactly as long as you choose &mdash; a friend you're meeting, family on a trip. No ad networks tracking you in the background, and you can cut access the moment you're done.</p>
     </div>
   </div>
 
