@@ -73,7 +73,7 @@ describe('VettidOrgStack', () => {
           },
           DefaultRootObject: 'index.html',
           Enabled: true,
-          HttpVersion: 'http2',
+          HttpVersion: 'http2and3',
           PriceClass: 'PriceClass_100',
         },
       });

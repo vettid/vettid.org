@@ -264,6 +264,7 @@ function handler(event) {
         ],
       },
       defaultRootObject: 'index.html',
+      httpVersion: cloudfront.HttpVersion.HTTP2_AND_3,
       priceClass: cloudfront.PriceClass.PRICE_CLASS_100,
       // Enable access logging
       enableLogging: true,
@@ -399,10 +400,25 @@ function handler(event) {
     accessLogDelivery.node.addDependency(deliveryDestination);
     accessLogDelivery.node.addDependency(accessLogsBucket.policy!);
 
-    // Deploy website content from ./website directory
-    new s3deploy.BucketDeployment(this, 'DeployWebsite', {
+    // Deploy website content from ./website in two passes so browsers get
+    // sensible Cache-Control: HTML and metadata revalidate on every visit,
+    // static assets (css/js/fonts/images) cache for a week. The exclude/
+    // include filters also scope each deployment's pruning to its own files.
+    const revalidatePatterns = ['*.html', '*.txt', '*.xml', '*.json'];
+    new s3deploy.BucketDeployment(this, 'DeployWebsiteAssets', {
       sources: [s3deploy.Source.asset('./website')],
       destinationBucket: websiteBucket,
+      exclude: revalidatePatterns,
+      cacheControl: [s3deploy.CacheControl.fromString('public, max-age=604800')],
+      distribution: distribution,
+      distributionPaths: ['/*'],
+    });
+    new s3deploy.BucketDeployment(this, 'DeployWebsiteHtml', {
+      sources: [s3deploy.Source.asset('./website')],
+      destinationBucket: websiteBucket,
+      exclude: ['*'],
+      include: revalidatePatterns,
+      cacheControl: [s3deploy.CacheControl.fromString('no-cache, must-revalidate')],
       distribution: distribution,
       distributionPaths: ['/*'],
     });
