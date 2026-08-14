@@ -1,4 +1,4 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -111,7 +111,8 @@
     }
     .warn-banner strong { color: var(--warn); }
 
-  </style>
+      .mt-16 { margin-top: 16px; }
+</style>
 </head>
 <body>
 
@@ -131,13 +132,13 @@
     <span></span><span></span><span></span>
   </button>
 </header>
-<div class="nav-menu" id="navMenu" style="display:none;position:fixed;top:0;right:0;width:280px;height:100%;background:#2e2d88;padding:80px 20px 40px;z-index:1005;flex-direction:column;gap:8px;">
-  <a href="/" style="display:block;color:#c9c9d6;text-decoration:none;padding:12px 16px;font-size:1rem;">Home</a>
-  <a href="/donate" style="display:block;color:#c9c9d6;text-decoration:none;padding:12px 16px;font-size:1rem;">Donate</a>
-  <a href="/security" style="display:block;color:#c9c9d6;text-decoration:none;padding:12px 16px;font-size:1rem;">Security</a>
-  <a href="/open-source" style="display:block;color:#c9c9d6;text-decoration:none;padding:12px 16px;font-size:1rem;">Open Source</a>
+<div class="nav-menu" id="navMenu">
+  <a href="/">Home</a>
+  <a href="/donate">Donate</a>
+  <a href="/security">Security</a>
+  <a href="/open-source">Open Source</a>
 </div>
-<div class="nav-overlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(22,21,63,0.78);z-index:1000;"></div>
+<div class="nav-overlay"></div>
 
 <div class="wrap">
 
@@ -230,7 +231,7 @@
       <div class="value">Ed25519 (signing) + Curve25519 (encryption)</div>
     </div>
 
-    <p style="margin-top:16px;">Copy the block below and import with <code>gpg --import</code>. The same key is also published to the Proton key directory (auto-fetched by <code>gpg --auto-key-locate wkd security@vettid.org</code>) for cross-verification.</p>
+    <p class="mt-16">Copy the block below and import with <code>gpg --import</code>. The same key is also published to the Proton key directory (auto-fetched by <code>gpg --auto-key-locate wkd security@vettid.org</code>) for cross-verification.</p>
 
     <pre class="pgp-block">-----BEGIN PGP PUBLIC KEY BLOCK-----
 Version: ProtonMail
@@ -273,7 +274,7 @@ dfUPJp1chfcTSDeC7O4JCyaDLFrTpBgfNxobpSgBALaLBd69bz7GrelAbCQa
 
 <footer>
   <div class="battlement-mini"></div>
-  <p style="margin-bottom: 8px;"><a href="/">Home</a> &middot; <a href="/security">Security</a> &middot; <a href="/donate">Donate</a> &middot; <a href="/open-source">Open Source</a> &middot; <a href="https://github.com/vettid" target="_blank" rel="noopener noreferrer">GitHub</a></p>
+  <p class="footer-nav"><a href="/">Home</a> &middot; <a href="/security">Security</a> &middot; <a href="/donate">Donate</a> &middot; <a href="/open-source">Open Source</a> &middot; <a href="https://github.com/vettid" target="_blank" rel="noopener noreferrer">GitHub</a></p>
   <p>&copy; 2026 The VettID Project. All rights reserved.</p>
   <p class="footer-privacy">No trackers, no analytics, no third-party resources &mdash; this site loads nothing from anyone but us.</p>
 </footer>

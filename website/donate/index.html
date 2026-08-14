@@ -1,4 +1,4 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -284,7 +284,8 @@
         font-size: 0.8rem;
       }
     }
-  </style>
+      .is-hidden { display: none; }
+</style>
 </head>
 <body>
 
@@ -307,13 +308,13 @@
   </button>
 </header>
 <!-- Navigation Menu (outside header to avoid backdrop-filter containing block) -->
-<div class="nav-menu" id="navMenu" style="display:none;position:fixed;top:0;right:0;width:280px;height:100%;background:#2e2d88;padding:80px 20px 40px;z-index:1005;flex-direction:column;gap:8px;">
-  <a href="/" style="display:block;color:#c9c9d6;text-decoration:none;padding:12px 16px;font-size:1rem;">Home</a>
-  <a href="/donate" style="display:block;color:#c9c9d6;text-decoration:none;padding:12px 16px;font-size:1rem;">Donate</a>
-  <a href="/security" style="display:block;color:#c9c9d6;text-decoration:none;padding:12px 16px;font-size:1rem;">Security</a>
-  <a href="/open-source" style="display:block;color:#c9c9d6;text-decoration:none;padding:12px 16px;font-size:1rem;">Open Source</a>
+<div class="nav-menu" id="navMenu">
+  <a href="/">Home</a>
+  <a href="/donate">Donate</a>
+  <a href="/security">Security</a>
+  <a href="/open-source">Open Source</a>
 </div>
-<div class="nav-overlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(22,21,63,0.78);z-index:1000;"></div>
+<div class="nav-overlay"></div>
 
 <div class="wrap">
   <div class="card">
@@ -341,11 +342,11 @@
     <div class="btc-section">
       <h2>Donate Bitcoin</h2>
 
-      <div id="qr-container" class="qr-container" style="display: none;">
+      <div id="qr-container" class="qr-container is-hidden">
         <div id="qr-code"></div>
       </div>
 
-      <div id="address-display" style="display: none;">
+      <div id="address-display" class="is-hidden">
         <div class="address-container" id="addressBox">
           <div class="address-label">Bitcoin Address</div>
           <div class="address-value" id="btcAddress"></div>
@@ -385,7 +386,7 @@
 <script src="/donate/js/donate.js"></script>
 <footer>
   <div class="battlement-mini"></div>
-  <p style="margin-bottom: 8px;"><a href="/">Home</a> &middot; <a href="/security">Security</a> &middot; <a href="/donate">Donate</a> &middot; <a href="/open-source">Open Source</a> &middot; <a href="https://github.com/vettid" target="_blank" rel="noopener noreferrer">GitHub</a></p>
+  <p class="footer-nav"><a href="/">Home</a> &middot; <a href="/security">Security</a> &middot; <a href="/donate">Donate</a> &middot; <a href="/open-source">Open Source</a> &middot; <a href="https://github.com/vettid" target="_blank" rel="noopener noreferrer">GitHub</a></p>
   <p>&copy; 2026 The VettID Project. All rights reserved.</p>
   <p class="footer-privacy">No trackers, no analytics, no third-party resources &mdash; this site loads nothing from anyone but us.</p>
 </footer>

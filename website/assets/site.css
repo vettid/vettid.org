@@ -239,3 +239,16 @@ footer .footer-legal {
   .header-logo span { display: none; }
   .coming-soon-chip { font-size: 10px; padding: 6px 10px; }
 }
+
+/* Utilities */
+.visually-hidden {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+footer .footer-nav {
+  margin-bottom: 8px;
+}

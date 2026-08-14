@@ -18,8 +18,8 @@
   if (BTC_ADDRESS && BTC_ADDRESS !== 'PLACEHOLDER' && BTC_ADDRESS.length > 20) {
     // Show address elements
     placeholder.style.display = 'none';
-    qrContainer.style.display = 'inline-block';
-    addressDisplay.style.display = 'block';
+    qrContainer.classList.remove('is-hidden');
+    addressDisplay.classList.remove('is-hidden');
     btcAddressEl.textContent = BTC_ADDRESS;
 
     // Generate QR code
