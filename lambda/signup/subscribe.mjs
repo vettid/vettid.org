@@ -1,7 +1,7 @@
 // POST /api/subscribe — mailing-list opt-in via SES identity verification.
 // Privacy: never log email addresses; log shapes and outcomes only.
 
-import { SESv2Client, CreateEmailIdentityCommand } from '@aws-sdk/client-sesv2';
+import { SESv2Client, CreateEmailIdentityCommand, GetEmailIdentityCommand } from '@aws-sdk/client-sesv2';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
 
@@ -45,6 +45,7 @@ export const handler = async (event) => {
     return ok({ ok: true });
   }
 
+  let alreadyVerified = false;
   try {
     await ses.send(new CreateEmailIdentityCommand({ EmailIdentity: email }));
   } catch (err) {
@@ -52,12 +53,24 @@ export const handler = async (event) => {
       console.log(JSON.stringify({ outcome: 'ses_error', code: err?.name }));
       return ok({ ok: false, error: 'temporary failure, try again later' });
     }
+    // Identity already exists (e.g. verified in an earlier era of this
+    // account) — no new verification email goes out, so confirm directly
+    // if it is already verified.
+    try {
+      const identity = await ses.send(new GetEmailIdentityCommand({ EmailIdentity: email }));
+      alreadyVerified = identity.VerifiedForSendingStatus === true;
+    } catch { /* fall through as pending */ }
   }
 
   const now = new Date();
   await ddb.send(new PutCommand({
     TableName: TABLE,
-    Item: {
+    Item: alreadyVerified ? {
+      email,
+      status: 'confirmed',
+      requestedAt: now.toISOString(),
+      confirmedAt: now.toISOString(),
+    } : {
       email,
       status: 'pending',
       requestedAt: now.toISOString(),
@@ -69,6 +82,6 @@ export const handler = async (event) => {
     if (err?.name !== 'ConditionalCheckFailedException') throw err;
   });
 
-  console.log(JSON.stringify({ outcome: 'pending_created' }));
+  console.log(JSON.stringify({ outcome: alreadyVerified ? 'confirmed_direct' : 'pending_created' }));
   return ok({ ok: true });
 };

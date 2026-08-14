@@ -69,7 +69,7 @@ export class VettidOrgSignupStack extends cdk.Stack {
     table.grantReadWriteData(checkFn);
 
     subscribeFn.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['ses:CreateEmailIdentity'],
+      actions: ['ses:CreateEmailIdentity', 'ses:GetEmailIdentity'],
       resources: ['*'],
     }));
     checkFn.addToRolePolicy(new iam.PolicyStatement({

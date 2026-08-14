@@ -601,7 +601,7 @@ function handler(event) {
           'projection.log_hour.interval': '1',
           'projection.log_hour.interval.unit': 'HOURS',
           'projection.log_hour.range': '2026/08/01/00,NOW',
-          'storage.location.template': `s3://${accessLogsBucket.bucketName}/cloudfront-v2/\${distributionid}/\${log_hour}`,
+          'storage.location.template': `s3://${accessLogsBucket.bucketName}/AWSLogs/${this.account}/CloudFront/cloudfront-v2/\${distributionid}/\${log_hour}`,
         },
         partitionKeys: [
           { name: 'distributionid', type: 'string' },
@@ -648,7 +648,7 @@ function handler(event) {
             { name: 'fle_status', type: 'string' },
             { name: 'fle_encrypted_fields', type: 'string' },
           ],
-          location: `s3://${accessLogsBucket.bucketName}/cloudfront-v2/`,
+          location: `s3://${accessLogsBucket.bucketName}/AWSLogs/${this.account}/CloudFront/cloudfront-v2/`,
           inputFormat: 'org.apache.hadoop.mapred.TextInputFormat',
           outputFormat: 'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat',
           serdeInfo: {
