@@ -8,7 +8,9 @@
     "build": "tsc",
     "watch": "tsc -w",
     "test": "jest",
-    "cdk": "cdk"
+    "cdk": "cdk",
+    "deploy:site": "cdk deploy VettidOrgStack --require-approval never",
+    "deploy:all": "cdk deploy --all --require-approval never"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",
