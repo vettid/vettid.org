@@ -3,6 +3,7 @@ import * as cdk from 'aws-cdk-lib/core';
 import { VettidOrgStack } from '../lib/stacks/web-stack';
 import { VettidOrgDnsStack } from '../lib/stacks/dns-stack';
 import { VettidOrgSignupStack } from '../lib/stacks/signup-stack';
+import { VettidDevRedirectStack } from '../lib/stacks/dev-redirect-stack';
 
 const app = new cdk.App();
 
@@ -33,3 +34,7 @@ new VettidOrgStack(app, 'VettidOrgStack', {
   apiDomain: signup.apiDomain,
   env,
 });
+
+// The whole remaining vettid.dev footprint: a blanket 301 to vettid.org.
+// Deploy only after the old VettIDStack is deleted (alias exclusivity).
+new VettidDevRedirectStack(app, 'VettidDevRedirectStack', { env });
