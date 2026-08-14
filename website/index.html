@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1" name="viewport"/>
-<title>VettID - Secure. Private. Trusted.</title>
+<title>VettID &mdash; Secure. Private. Trusted.</title>
 <link rel="canonical" href="https://vettid.org/"/>
 <link rel="icon" type="image/png" href="/assets/favicon.png"/>
 <!-- Self-hosted fonts: Plus Jakarta Sans for headlines, Inter for body -->
@@ -1035,6 +1035,26 @@
     height: 10px;
   }
 
+  .hero-cta {
+    display: inline-block;
+    margin-top: 26px;
+    border: 1.5px solid var(--gold);
+    color: var(--gold);
+    font-weight: 600;
+    padding: 12px 26px;
+    border-radius: 6px;
+    text-decoration: none;
+    transition: all var(--duration-normal);
+  }
+  .hero-cta:hover { background: var(--gold); color: #101018; }
+
+  .security-deep-dive {
+    text-align: center;
+    margin-top: 40px;
+  }
+  .security-deep-dive a { color: var(--gold); text-decoration: none; }
+  .security-deep-dive a:hover { text-decoration: underline; }
+
   /* Mailing-list signup band */
   .signup {
     padding: 92px 24px;
@@ -1164,7 +1184,9 @@
   </div>
   <h1>VettID</h1>
   <p class="tagline">Secure<b>.</b> Private<b>.</b> Trusted<b>.</b></p>
-  <p class="subtitle">Your personal concierge &mdash; protecting your identity, your connections, and your AI agents. Your identity should be portable. Your devices should be disposable. Privacy should not be a luxury.</p>
+  <p class="subtitle" style="margin-bottom: 14px;">Your personal concierge &mdash; protecting your identity, your connections, and your AI agents.</p>
+  <p class="subtitle">Your identity should be portable. Your devices should be disposable. Privacy should not be a luxury.</p>
+  <a class="hero-cta" href="#signup">Membership opens soon &mdash; join the list</a>
 </section>
 
 <!-- Introducing Banner -->
@@ -1181,7 +1203,7 @@
 <!-- What You Can Do Section -->
 <section class="use-cases">
   <h2>What You Can Do with VettID</h2>
-  <p class="section-subtitle">Your vault isn't just secure storage &mdash; it's a foundation for truly private digital life.</p>
+  <p class="section-subtitle">Your vault isn't just secure storage &mdash; it's a foundation for a truly private digital life.</p>
 
   <div class="use-cases-grid">
     <div class="use-case-card">
@@ -1262,7 +1284,7 @@
         </svg>
       </div>
       <h3>Encrypted Backup</h3>
-      <p>Back up your vault with encryption only you can unlock. Recover your digital life on a new device without exposing your secrets.</p>
+      <p>Back up your vault so only you can unlock it. Recover your digital life on a new device without exposing your secrets.</p>
     </div>
 
     <div class="use-case-card">
@@ -1293,7 +1315,7 @@
         </svg>
       </div>
       <h3>Bitcoin Wallet</h3>
-      <p>Generate and manage Bitcoin wallets inside your hardware-isolated vault. Private keys never leave the enclave. Publish your address to connections, share via QR code, and send BTC directly to peers.</p>
+      <p>Generate and manage Bitcoin wallets inside your hardware-isolated vault. Private keys never leave the enclave. Share your address with connections via QR code and send Bitcoin directly to them.</p>
     </div>
 
     <div class="use-case-card">
@@ -1309,7 +1331,7 @@
         </svg>
       </div>
       <h3>Encrypted Agent Messaging</h3>
-      <p>Communicate with AI agents through E2E encrypted channels &mdash; not Telegram, not WhatsApp. Messages and approval requests appear in your feed with verified agent identity. No middleman sees the conversation.</p>
+      <p>Talk to your AI agents over end-to-end encrypted channels of your own &mdash; no third-party chat app in the loop. Messages and approval requests appear in your feed with verified agent identity.</p>
     </div>
 
     <div class="use-case-card">
@@ -1320,16 +1342,16 @@
         </svg>
       </div>
       <h3>Location on Your Terms</h3>
-      <p>Share your live location with the people you choose, for exactly as long as you choose &mdash; a friend you're meeting, family on a trip. No ad networks tracking you in the background, and you can cut access the moment you're done.</p>
+      <p>Share your live location with the people you choose &mdash; a friend you're meeting, family on a trip &mdash; and cut access the moment you're done. No ad networks tracking you in the background.</p>
     </div>
   </div>
 
   <div class="service-highlight">
     <div class="service-highlight-content">
       <h3>For Businesses: Service Vaults</h3>
-      <p>Organizations can run VettID Service Vaults to interact with members securely. Reduce your risk exposure by never storing sensitive customer data &mdash; access it on-demand from the customer's vault with their explicit consent. Build trust while eliminating the liability of data breaches.</p>
+      <p>Organizations can run VettID Service Vaults to interact with members securely. Reduce your risk exposure by never storing sensitive customer data &mdash; access it on-demand from the customer's vault, with their explicit consent.</p>
       <ul class="service-features">
-        <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Eliminate data breach liability &mdash; you can't leak what you don't store</li>
+        <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Shrink breach exposure &mdash; you can't leak what you don't store</li>
         <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Reduce fraud with verified, customer-controlled identity data</li>
         <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> No data caching &mdash; access on-demand with clear consent</li>
         <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Customers revoke access instantly when they choose</li>
@@ -1343,12 +1365,12 @@
       <h3>For Developers: Agent Connector</h3>
       <p>The VettID Agent Connector is an open-source sidecar binary that gives AI agents secure, owner-controlled access to vault secrets and encrypted messaging. A single command connects your agent to a vault &mdash; the owner defines exactly what it can access, and revocation is instant. The agent never touches encryption keys or credentials.</p>
       <ul class="service-features">
-        <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Zero-trust for the agent &mdash; never holds keys or NATS credentials</li>
+        <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Zero-trust for the agent &mdash; never holds encryption keys or messaging credentials</li>
         <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Owner approves scope, rate limits, and auto-approval rules from their phone</li>
-        <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Secrets pass through, never cached &mdash; revocation is instant</li>
+        <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Secrets pass through, never cached</li>
         <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> E2E encrypted messaging &mdash; agents send messages and approval requests directly to user's feed</li>
         <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Single Go binary with local-only REST and WebSocket API</li>
-        <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Platform-bound credentials &mdash; undecryptable on a different machine</li>
+        <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Platform-bound credentials &mdash; cannot be decrypted on any other machine</li>
         <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Open source (AGPL-3.0) &mdash; <a href="https://github.com/vettid/vettid-agent" target="_blank" rel="noopener noreferrer" style="color: var(--accent); text-decoration: underline;">view on GitHub</a></li>
       </ul>
     </div>
@@ -1361,7 +1383,6 @@
       <ul class="service-features">
         <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Time-bounded sessions with automatic expiry and phone-controlled renewal</li>
         <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Independent access to connections, feeds, messages, and audit logs</li>
-        <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Sensitive operations require real-time phone approval</li>
         <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Machine fingerprinting binds credentials to a specific device</li>
         <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> E2E encrypted &mdash; desktop never holds the vault master key</li>
         <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Open source (AGPL-3.0) &mdash; <a href="https://github.com/vettid/vettid-desktop" target="_blank" rel="noopener noreferrer" style="color: var(--accent); text-decoration: underline;">view on GitHub</a></li>
@@ -1376,7 +1397,7 @@
     <div class="leash-badge">New &mdash; Position Paper</div>
     <h2>LEASH</h2>
     <p class="leash-subtitle">Lightweight Encrypted Agent Secret Handling</p>
-    <p class="leash-desc">MCP has become the universal standard for connecting AI agents to tools, but it has no native mechanism for secure secret management. We're proposing one. LEASH is a companion protocol where secrets never leave the vault, humans approve every access, and every operation is auditable.</p>
+    <p class="leash-desc">MCP (Model Context Protocol) has become the de facto standard for connecting AI agents to tools, but it has no native mechanism for secure secret management. We're proposing one. LEASH is a companion protocol where secrets never leave the vault, humans approve every access, and every operation is auditable.</p>
     <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:12px;">
       <a href="https://github.com/vettid/LEASH" target="_blank" rel="noopener noreferrer" class="btn btn-outline">Read the Position Paper</a>
     </div>
@@ -1386,7 +1407,7 @@
 <!-- Security Section -->
 <section class="security">
   <h2>Security Without Compromise</h2>
-  <p class="section-subtitle">VettID uses cutting-edge hardware security to protect your data. Not through promises, but through cryptographic proof.</p>
+  <p class="section-subtitle">VettID protects your data with hardware isolation and cryptographic proof &mdash; not promises.</p>
 
   <div class="security-grid">
     <div class="security-card">
@@ -1408,7 +1429,7 @@
         <line x1="48" y1="40" x2="56" y2="40" stroke="#ffc125" stroke-width="2"/>
       </svg>
       <h3>Hardware-Isolated Vaults</h3>
-      <p>Your vault runs inside AWS Nitro Enclaves, hardware-isolated environments that even AWS employees cannot access. Your secrets exist only in protected memory.</p>
+      <p>Your vault runs inside AWS Nitro Enclaves, hardware-isolated environments that even AWS employees cannot access. Your secrets are decrypted only in protected memory.</p>
       <span class="tech-tag">Nitro Enclaves</span>
     </div>
 
@@ -1421,7 +1442,7 @@
         <path d="M40 44l3 3 6-6" stroke="#ffc125" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
       <h3>Cryptographic Attestation</h3>
-      <p>Before connecting, your app verifies the exact code running in the enclave. You don't have to trust us, you can mathematically verify it.</p>
+      <p>Before connecting, your app verifies the exact code running in the enclave. You don't have to trust us &mdash; you can verify it mathematically.</p>
       <span class="tech-tag">AWS Attestation</span>
     </div>
 
@@ -1462,7 +1483,7 @@
 <section class="nitro">
   <div class="nitro-content">
     <h2>The Trust Model</h2>
-    <p class="section-subtitle">Traditional services ask you to trust them. VettID uses hardware isolation to make trust unnecessary. Your app verifies the vault before sharing any data.</p>
+    <p class="section-subtitle">Traditional services ask you to trust them. VettID lets you verify instead: your app cryptographically checks the vault before sharing any data.</p>
 
     <div class="nitro-diagram">
       <div class="diagram-title">Security Architecture</div>
@@ -1508,7 +1529,7 @@
     <div class="nitro-features">
       <div class="nitro-feature">
         <h4>Hardware Attestation</h4>
-        <p>AWS Nitro provides cryptographic proof of the exact code running in your vault. Published PCR values let you verify independently.</p>
+        <p>AWS Nitro provides cryptographic proof of the exact code running in your vault. Published attestation measurements (PCR values) let you verify independently.</p>
       </div>
       <div class="nitro-feature">
         <h4>Memory Isolation</h4>
@@ -1520,16 +1541,17 @@
       </div>
     </div>
   </div>
+  <p class="security-deep-dive"><a href="/security">Want the full architecture? Read the security deep-dive.</a></p>
 </section>
 
 <!-- Zero Knowledge Section -->
 <section class="zero-knowledge">
   <h2>What We Can and Can't See</h2>
-  <p class="section-subtitle">Transparency about our access. This isn't a policy choice, it's a technical guarantee enforced by hardware.</p>
+  <p class="section-subtitle">Transparency about our access. This isn't a policy choice &mdash; it's a technical guarantee enforced by hardware.</p>
 
   <div class="zk-grid">
     <div class="zk-column can-see">
-      <h3>What VettID Infrastructure Sees</h3>
+      <h3>What VettID Can See</h3>
       <ul class="zk-list">
         <li>
           <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
@@ -1543,7 +1565,7 @@
             <circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2"/>
             <circle cx="10" cy="10" r="3"/>
           </svg>
-          Message routing metadata (timestamps, sizes)
+          Your messagespace address &mdash; not what flows through it
         </li>
         <li>
           <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
@@ -1562,7 +1584,7 @@
       </ul>
     </div>
     <div class="zk-column cannot-see">
-      <h3>What We Cannot Access</h3>
+      <h3>What VettID Can Never See</h3>
       <ul class="zk-list">
         <li>
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
@@ -1590,7 +1612,7 @@
             <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" transform="scale(0.8) translate(2,2)"/>
             <path d="M9 12l2 2 4-4" transform="scale(0.8) translate(2,2)"/>
           </svg>
-          Contact lists and connections
+          Contact lists stored in your vault
         </li>
         <li>
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
@@ -1660,7 +1682,7 @@
     <div class="step">
       <div class="step-number">1</div>
       <h3>Become a Member</h3>
-      <p>Sign up and select the subscription that fits you.</p>
+      <p>Sign up and choose the membership that fits you.</p>
     </div>
     <div class="step">
       <div class="step-number">2</div>
@@ -1677,7 +1699,7 @@
 
 <!-- CTA Section -->
 <!-- Mailing List Signup -->
-<section class="signup">
+<section class="signup" id="signup">
   <span class="eyebrow">Stay in the loop</span>
   <h2>Be First Through the Gate</h2>
   <p class="signup-lead">Membership opens soon. Leave your email and we'll tell you the moment it does.</p>
@@ -1687,7 +1709,7 @@
     <input type="email" id="signupEmail" name="email" required maxlength="320" placeholder="you@example.com" autocomplete="email">
     <button type="submit" class="signup-btn">Join the List</button>
   </form>
-  <p class="signup-note">You'll receive a verification request from Amazon Web Services (our email provider) &mdash; accepting it confirms your spot. No spam, no sharing, and you can leave anytime.</p>
+  <p class="signup-note">You'll receive a confirmation email from Amazon Web Services (our email provider) &mdash; click it to confirm your spot. No spam, no sharing, and you can leave anytime.</p>
   <p class="signup-status" id="signupStatus" role="status" aria-live="polite"></p>
 </section>
 

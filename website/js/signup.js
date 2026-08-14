@@ -29,7 +29,7 @@
     }).then(function (res) { return res.json(); }).then(function (data) {
       if (data && data.ok) {
         form.style.display = 'none';
-        status.textContent = 'Check your inbox for a verification request from Amazon Web Services — accepting it confirms your spot on the list.';
+        status.textContent = 'Check your inbox for a confirmation email from Amazon Web Services — clicking it confirms your spot on the list.';
       } else {
         status.textContent = (data && data.error) || 'Something went wrong — please try again.';
         status.className = 'signup-status error';
