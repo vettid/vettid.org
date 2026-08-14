@@ -166,9 +166,14 @@ function handler(event) {
     return request;
   }
 
-  // Canonical host: 301 www -> apex, preserving path and query string
+  // Canonical host: 301 www -> apex, preserving path and query string.
+  // DISABLED until the Route53 NS cutover: the apex currently resolves to the
+  // registrar's redirect service (which can't even terminate TLS for the
+  // domain), so redirecting www there strands every visitor. Flip to true
+  // right after the nameservers move.
+  var WWW_REDIRECT_ENABLED = false;
   var host = request.headers.host && request.headers.host.value;
-  if (host === 'www.${props.domainName}') {
+  if (WWW_REDIRECT_ENABLED && host === 'www.${props.domainName}') {
     var qsParts = [];
     for (var k in request.querystring) {
       var entry = request.querystring[k];
