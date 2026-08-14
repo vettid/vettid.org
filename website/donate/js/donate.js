@@ -1,3 +1,6 @@
+// VettID donate page: renders the Bitcoin address QR code (local vendored
+// qrcodejs, no network) and provides click-to-copy. The address is a build
+// constant — no user input enters this script.
 (function() {
   'use strict';
 

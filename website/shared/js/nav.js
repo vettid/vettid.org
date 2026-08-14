@@ -1,3 +1,6 @@
+// VettID shared navigation: hamburger toggle for the slide-out menu.
+// Progressive enhancement only — all navigation works as plain links
+// without this script. No external requests, no storage, no tracking.
 (function() {
   'use strict';
 

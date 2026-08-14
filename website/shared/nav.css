@@ -1,4 +1,8 @@
-/* Shared Navigation Styles */
+/**
+ * VettID shared navigation styles: the hamburger toggle, slide-out menu
+ * chrome, and the desktop inline nav (>=1024px). Loaded by every page
+ * alongside assets/site.css.
+ */
 
 /* Hamburger button - always visible */
 .nav-toggle {
