@@ -8,6 +8,8 @@ import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as ses from 'aws-cdk-lib/aws-ses';
+import * as route53 from 'aws-cdk-lib/aws-route53';
 
 /**
  * Mailing-list signup backed by the SES-verification opt-in pattern:
@@ -24,12 +26,23 @@ import * as logs from 'aws-cdk-lib/aws-logs';
  * subscribed, and the Lambdas log shapes only — never email addresses
  * (logging spec §5).
  */
+export interface VettidOrgSignupStackProps extends cdk.StackProps {
+  /** Route53 zone; enables the vettid.org SES domain identity (DKIM records) */
+  hostedZone: route53.IPublicHostedZone;
+}
+
 export class VettidOrgSignupStack extends cdk.Stack {
   /** Domain of the HTTP API endpoint, for the CloudFront /api/* origin */
   public readonly apiDomain: string;
 
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+  constructor(scope: Construct, id: string, props: VettidOrgSignupStackProps) {
     super(scope, id, props);
+
+    // Verified sending domain: lets the Lambdas send from no-reply@vettid.org.
+    // DKIM CNAMEs land in the Route53 zone automatically.
+    new ses.EmailIdentity(this, 'DomainIdentity', {
+      identity: ses.Identity.publicHostedZone(props.hostedZone),
+    });
 
     const table = new dynamodb.Table(this, 'MailingList', {
       tableName: 'vettid-org-mailing-list',
@@ -51,7 +64,11 @@ export class VettidOrgSignupStack extends cdk.Stack {
       code: lambda.Code.fromAsset('lambda/signup'),
       timeout: cdk.Duration.seconds(10),
       memorySize: 128,
-      environment: { TABLE_NAME: table.tableName },
+      environment: {
+        TABLE_NAME: table.tableName,
+        ADMIN_EMAIL: 'admin@vettid.org',
+        SENDER_EMAIL: 'no-reply@vettid.org',
+      },
       logRetention: logs.RetentionDays.ONE_MONTH,
     });
 
@@ -61,7 +78,11 @@ export class VettidOrgSignupStack extends cdk.Stack {
       code: lambda.Code.fromAsset('lambda/signup'),
       timeout: cdk.Duration.minutes(2),
       memorySize: 128,
-      environment: { TABLE_NAME: table.tableName },
+      environment: {
+        TABLE_NAME: table.tableName,
+        ADMIN_EMAIL: 'admin@vettid.org',
+        SENDER_EMAIL: 'no-reply@vettid.org',
+      },
       logRetention: logs.RetentionDays.ONE_MONTH,
     });
 
@@ -69,11 +90,11 @@ export class VettidOrgSignupStack extends cdk.Stack {
     table.grantReadWriteData(checkFn);
 
     subscribeFn.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['ses:CreateEmailIdentity', 'ses:GetEmailIdentity'],
+      actions: ['ses:CreateEmailIdentity', 'ses:GetEmailIdentity', 'ses:SendEmail'],
       resources: ['*'],
     }));
     checkFn.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['ses:GetEmailIdentity'],
+      actions: ['ses:GetEmailIdentity', 'ses:SendEmail'],
       resources: ['*'],
     }));
 

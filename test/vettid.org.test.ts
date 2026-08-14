@@ -3,6 +3,7 @@ import { Template, Match } from 'aws-cdk-lib/assertions';
 import { VettidOrgStack } from '../lib/stacks/web-stack';
 import { VettidOrgDnsStack } from '../lib/stacks/dns-stack';
 import { VettidOrgSignupStack } from '../lib/stacks/signup-stack';
+import * as route53 from 'aws-cdk-lib/aws-route53';
 
 describe('VettidOrgStack', () => {
   let template: Template;
@@ -282,9 +283,10 @@ describe('VettidOrgSignupStack', () => {
   let template: Template;
   beforeAll(() => {
     const app = new cdk.App();
-    const stack = new VettidOrgSignupStack(app, 'TestSignup', {
-      env: { account: '123456789012', region: 'us-east-1' },
-    });
+    const env = { account: '123456789012', region: 'us-east-1' };
+    const zoneStack = new cdk.Stack(app, 'TestSignupZone', { env });
+    const zone = new route53.PublicHostedZone(zoneStack, 'Zone', { zoneName: 'test.example.com' });
+    const stack = new VettidOrgSignupStack(app, 'TestSignup', { hostedZone: zone, env });
     template = Template.fromStack(stack);
   });
 

@@ -1,7 +1,7 @@
 // POST /api/subscribe — mailing-list opt-in via SES identity verification.
 // Privacy: never log email addresses; log shapes and outcomes only.
 
-import { SESv2Client, CreateEmailIdentityCommand, GetEmailIdentityCommand } from '@aws-sdk/client-sesv2';
+import { SESv2Client, CreateEmailIdentityCommand, GetEmailIdentityCommand, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
 
@@ -10,6 +10,34 @@ const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TABLE = process.env.TABLE_NAME;
 
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
+
+const notifyAdmin = async (email, how) => {
+  // Best-effort: a notification failure must never fail the subscription.
+  // In the SES sandbox this succeeds only once ADMIN_EMAIL is verified.
+  try {
+    await ses.send(new SendEmailCommand({
+      FromEmailAddress: `VettID Mailing List <${process.env.SENDER_EMAIL}>`,
+      Destination: { ToAddresses: [process.env.ADMIN_EMAIL] },
+      Content: {
+        Simple: {
+          Subject: { Data: 'New mailing list subscriber' },
+          Body: {
+            Text: {
+              Data:
+                `A subscriber just confirmed their spot on the vettid.org mailing list.\n\n` +
+                `Email: ${email}\n` +
+                `Confirmed via: ${how}\n` +
+                `At: ${new Date().toISOString()}\n`,
+            },
+          },
+        },
+      },
+    }));
+  } catch (err) {
+    console.log(JSON.stringify({ outcome: 'notify_failed', code: err?.name }));
+  }
+};
+
 
 const ok = (body) => ({
   statusCode: 200,
@@ -81,6 +109,10 @@ export const handler = async (event) => {
   })).catch((err) => {
     if (err?.name !== 'ConditionalCheckFailedException') throw err;
   });
+
+  if (alreadyVerified) {
+    await notifyAdmin(email, 'already-verified identity (instant confirm)');
+  }
 
   console.log(JSON.stringify({ outcome: alreadyVerified ? 'confirmed_direct' : 'pending_created' }));
   return ok({ ok: true });

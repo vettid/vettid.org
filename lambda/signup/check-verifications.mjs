@@ -2,13 +2,41 @@
 // verification succeeded (the user accepted the SES verification email).
 // Privacy: never log email addresses; log counts only.
 
-import { SESv2Client, GetEmailIdentityCommand } from '@aws-sdk/client-sesv2';
+import { SESv2Client, GetEmailIdentityCommand, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 
 const ses = new SESv2Client({});
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TABLE = process.env.TABLE_NAME;
+
+const notifyAdmin = async (email, how) => {
+  // Best-effort: a notification failure must never fail the subscription.
+  // In the SES sandbox this succeeds only once ADMIN_EMAIL is verified.
+  try {
+    await ses.send(new SendEmailCommand({
+      FromEmailAddress: `VettID Mailing List <${process.env.SENDER_EMAIL}>`,
+      Destination: { ToAddresses: [process.env.ADMIN_EMAIL] },
+      Content: {
+        Simple: {
+          Subject: { Data: 'New mailing list subscriber' },
+          Body: {
+            Text: {
+              Data:
+                `A subscriber just confirmed their spot on the vettid.org mailing list.\n\n` +
+                `Email: ${email}\n` +
+                `Confirmed via: ${how}\n` +
+                `At: ${new Date().toISOString()}\n`,
+            },
+          },
+        },
+      },
+    }));
+  } catch (err) {
+    console.log(JSON.stringify({ outcome: 'notify_failed', code: err?.name }));
+  }
+};
+
 
 export const handler = async () => {
   const pending = await ddb.send(new QueryCommand({
@@ -50,6 +78,7 @@ export const handler = async () => {
         ':now': new Date().toISOString(),
       },
     }));
+    await notifyAdmin(item.email, 'SES verification email accepted');
     confirmed += 1;
   }
 

@@ -25,7 +25,7 @@ const dns = new VettidOrgDnsStack(app, 'VettidOrgDnsStack', {
   env,
 });
 
-const signup = new VettidOrgSignupStack(app, 'VettidOrgSignupStack', { env });
+const signup = new VettidOrgSignupStack(app, 'VettidOrgSignupStack', { hostedZone: dns.zone, env });
 
 new VettidOrgStack(app, 'VettidOrgStack', {
   domainName,
