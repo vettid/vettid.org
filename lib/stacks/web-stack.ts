@@ -89,7 +89,9 @@ export class VettidOrgStack extends cdk.Stack {
       certificate = new acm.Certificate(this, 'Certificate', {
         domainName: props.domainName,
         subjectAlternativeNames: [`www.${props.domainName}`],
-        validation: acm.CertificateValidation.fromDns(), // You'll need to manually add DNS records
+        validation: props.hostedZone
+          ? acm.CertificateValidation.fromDns(props.hostedZone)
+          : acm.CertificateValidation.fromDns(),
       });
 
       this.certificateArn = new cdk.CfnOutput(this, 'CertificateArn', {
@@ -167,11 +169,7 @@ function handler(event) {
   }
 
   // Canonical host: 301 www -> apex, preserving path and query string.
-  // DISABLED until the Route53 NS cutover: the apex currently resolves to the
-  // registrar's redirect service (which can't even terminate TLS for the
-  // domain), so redirecting www there strands every visitor. Flip to true
-  // right after the nameservers move.
-  var WWW_REDIRECT_ENABLED = false;
+  var WWW_REDIRECT_ENABLED = true;
   var host = request.headers.host && request.headers.host.value;
   if (WWW_REDIRECT_ENABLED && host === 'www.${props.domainName}') {
     var qsParts = [];
