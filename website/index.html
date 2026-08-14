@@ -917,14 +917,15 @@
   .trust-badge svg { color: var(--gold); }
 
   /* Indigo bands: security + cooperative share the LEASH treatment */
-  .security, .cooperative {
+  .security, .cooperative, .signup {
     background: var(--band-indigo);
     position: relative;
     margin: 12px 0;
     overflow: visible;
   }
   .security::before, .security::after,
-  .cooperative::before, .cooperative::after {
+  .cooperative::before, .cooperative::after,
+  .signup::before, .signup::after {
     content: '';
     position: absolute;
     left: 0;
@@ -935,8 +936,8 @@
     pointer-events: none;
     animation: none;
   }
-  .security::before, .cooperative::before { top: -12px; bottom: auto; transform: none; }
-  .security::after, .cooperative::after { bottom: -12px; top: auto; transform: scaleX(-1) scaleY(-1); }
+  .security::before, .cooperative::before, .signup::before { top: -12px; bottom: auto; transform: none; }
+  .security::after, .cooperative::after, .signup::after { bottom: -12px; top: auto; transform: scaleX(-1) scaleY(-1); }
 
   /* Cards on indigo bands carry the raw brand indigo */
   .security-card, .value-item {
@@ -1033,6 +1034,65 @@
       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='10'%3E%3Cpath d='M0 9 H12 V1 H24 V9 H48' fill='none' stroke='%23ffc125' stroke-width='2'/%3E%3C/svg%3E") repeat-x center / 48px 10px;
     height: 10px;
   }
+
+  /* Mailing-list signup band */
+  .signup {
+    padding: 92px 24px;
+    text-align: center;
+  }
+  .signup .eyebrow { display: block; margin-bottom: 16px; color: var(--gold); }
+  .signup h2 { font-size: clamp(2rem, 4vw, 2.5rem); font-weight: 800; margin-bottom: 12px; }
+  .signup-lead { max-width: 560px; margin: 0 auto 30px; color: #c9c9d6; }
+  .signup-form {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+    max-width: 560px;
+    margin: 0 auto;
+  }
+  .signup-form input[type="email"] {
+    flex: 1 1 300px;
+    background: #191850;
+    border: 1px solid var(--border-indigo);
+    border-radius: 6px;
+    padding: 13px 16px;
+    color: var(--ink-hi);
+    font-family: inherit;
+    font-size: 1rem;
+  }
+  .signup-form input[type="email"]::placeholder { color: #8a89b8; }
+  .signup-form input[type="email"]:focus {
+    outline: none;
+    border-color: var(--gold);
+  }
+  .signup-btn {
+    background: var(--gold);
+    color: #101018;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 1rem;
+    padding: 13px 28px;
+    cursor: pointer;
+    transition: background var(--duration-normal);
+  }
+  .signup-btn:hover { background: var(--gold-hover); }
+  .signup-btn:disabled { opacity: 0.6; cursor: wait; }
+  .signup-hp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+  .signup-note {
+    max-width: 520px;
+    margin: 22px auto 0;
+    font-size: 0.85rem;
+    color: var(--ink-mute);
+  }
+  .signup-status {
+    margin-top: 18px;
+    font-size: 0.95rem;
+    color: var(--gold);
+    min-height: 1.4em;
+  }
+  .signup-status.error { color: var(--error); }
 
   /* How-it-works: outlined step numbers, mono gold numerals */
   .step-number {
@@ -1616,6 +1676,21 @@
 </section>
 
 <!-- CTA Section -->
+<!-- Mailing List Signup -->
+<section class="signup">
+  <span class="eyebrow">Stay in the loop</span>
+  <h2>Be First Through the Gate</h2>
+  <p class="signup-lead">Membership opens soon. Leave your email and we'll tell you the moment it does.</p>
+  <form id="signupForm" class="signup-form" action="/api/subscribe" method="post" novalidate>
+    <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" class="signup-hp">
+    <label for="signupEmail" style="position:absolute;left:-9999px;">Email address</label>
+    <input type="email" id="signupEmail" name="email" required maxlength="320" placeholder="you@example.com" autocomplete="email">
+    <button type="submit" class="signup-btn">Join the List</button>
+  </form>
+  <p class="signup-note">You'll receive a verification request from Amazon Web Services (our email provider) &mdash; accepting it confirms your spot. No spam, no sharing, and you can leave anytime.</p>
+  <p class="signup-status" id="signupStatus" role="status" aria-live="polite"></p>
+</section>
+
 <!-- Footer -->
 <footer>
   <div class="battlement-mini"></div>
@@ -1626,5 +1701,6 @@
 </footer>
 
 <script src="/shared/js/nav.js"></script>
+<script src="/js/signup.js"></script>
 </body>
 </html>

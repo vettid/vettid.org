@@ -6,6 +6,8 @@ import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as glue from 'aws-cdk-lib/aws-glue';
+import * as route53 from 'aws-cdk-lib/aws-route53';
+import * as route53targets from 'aws-cdk-lib/aws-route53-targets';
 import * as athena from 'aws-cdk-lib/aws-athena';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
@@ -14,6 +16,10 @@ import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 export interface VettidOrgStackProps extends cdk.StackProps {
   domainName: string;
   enableCustomDomain?: boolean;
+  /** Route53 zone (from VettidOrgDnsStack); adds apex/www ALIAS records */
+  hostedZone?: route53.IHostedZone;
+  /** Signup HTTP API domain (from VettidOrgSignupStack); adds the /api/* behavior */
+  apiDomain?: string;
 }
 
 export class VettidOrgStack extends cdk.Stack {
@@ -114,11 +120,12 @@ export class VettidOrgStack extends cdk.Stack {
             "default-src 'none'",
             "script-src 'self'",
             "style-src 'self' 'unsafe-inline'",
+            "connect-src 'self'",
             "img-src 'self' data:",
             "font-src 'self'",
             "manifest-src 'self'",
             "base-uri 'none'",
-            "form-action 'none'",
+            "form-action 'self'",
             "frame-ancestors 'none'",
           ].join('; '),
           override: true,
@@ -153,6 +160,11 @@ export class VettidOrgStack extends cdk.Stack {
 function handler(event) {
   var request = event.request;
   var uri = request.uri;
+
+  // API routes pass through untouched (handled by the /api/* behavior)
+  if (uri === '/api' || uri.indexOf('/api/') === 0) {
+    return request;
+  }
 
   // Canonical host: 301 www -> apex, preserving path and query string
   var host = request.headers.host && request.headers.host.value;
@@ -328,7 +340,46 @@ function handler(event) {
       });
     }
 
+    if (props.apiDomain) {
+      Object.assign(distributionProps, {
+        additionalBehaviors: {
+          '/api/*': {
+            origin: new origins.HttpOrigin(props.apiDomain),
+            viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
+            cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+            originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+            allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+            responseHeadersPolicy: securityHeadersPolicy,
+          },
+        },
+      });
+    }
+
     const distribution = new cloudfront.Distribution(this, 'Distribution', distributionProps);
+
+    // ALIAS records once DNS lives in Route53 (harmless before NS cutover).
+    // Also fixes the apex, which previously sat on a registrar redirect IP
+    // instead of CloudFront.
+    if (props.hostedZone) {
+      new route53.ARecord(this, 'ApexAlias', {
+        zone: props.hostedZone,
+        target: route53.RecordTarget.fromAlias(new route53targets.CloudFrontTarget(distribution)),
+      });
+      new route53.AaaaRecord(this, 'ApexAliasV6', {
+        zone: props.hostedZone,
+        target: route53.RecordTarget.fromAlias(new route53targets.CloudFrontTarget(distribution)),
+      });
+      new route53.ARecord(this, 'WwwAlias', {
+        zone: props.hostedZone,
+        recordName: 'www',
+        target: route53.RecordTarget.fromAlias(new route53targets.CloudFrontTarget(distribution)),
+      });
+      new route53.AaaaRecord(this, 'WwwAliasV6', {
+        zone: props.hostedZone,
+        recordName: 'www',
+        target: route53.RecordTarget.fromAlias(new route53targets.CloudFrontTarget(distribution)),
+      });
+    }
 
     // --- CloudFront standard logging v2 (JSON Lines to S3) ---
     // Runs alongside the legacy TSV logs; delivered via CloudWatch vended-log

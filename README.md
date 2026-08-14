@@ -18,9 +18,36 @@ AWS CDK infrastructure and static content for [vettid.org](https://vettid.org).
 
 ## Website
 
-Plain static HTML/CSS/JS in `website/` — no build step. Live pages: `/` (landing), `/security`, `/donate`. All app routes (`/signin`, `/account`, `/register`, `/votes`, `/pcr`, `/help`, `/leash`, `/auth`, `/signout`, `/enroll`) are "coming soon" placeholders until the production backend migrates from vettid.dev.
+Plain static HTML/CSS/JS in `website/` — no build step. Pages: `/` (landing with mailing-list signup), `/security`, `/donate`, `/open-source`, plus `/404.html`. App routes return when the production backend migrates from vettid.dev.
 
-Design tokens: ground `#1f1e5c`, surface `#28276f`, brand `#2e2d88`, ink `#16153f`, border `#403e9c`, gold `#ffc125`. Fonts: Plus Jakarta Sans (headings) + Inter (body), self-hosted.
+Design system: "Night Watch" — ground `#0b0b12`, indigo bands `#212062`, surfaces `#14142a`/`#1b1b3a`/`#2e2d88`, daylight band `#f4f4f6`, gold `#ffc125` (scarce by policy). Tokens in `website/assets/site.css`. Fonts: Plus Jakarta Sans + Inter + IBM Plex Mono, self-hosted.
+
+## Stacks
+
+```
+bin/vettid.org.ts             — app entry, wires all stacks (all us-east-1)
+lib/stacks/dns-stack.ts       — VettidOrgDnsStack: Route53 zone + ProtonMail records
+lib/stacks/web-stack.ts       — VettidOrgStack: site bucket, CloudFront, cert, WAF, logging
+lib/stacks/signup-stack.ts    — VettidOrgSignupStack: mailing list (DynamoDB + Lambda + HTTP API)
+lambda/signup/                — subscribe + verification-sweep handlers (Node 20, no build step)
+```
+
+Deploy order (cross-stack props flow left to right):
+
+```bash
+npx cdk deploy VettidOrgDnsStack VettidOrgSignupStack VettidOrgStack
+```
+
+Conventions for future components (account site, admin site, vault services):
+one stack per component in `lib/stacks/`; stateful resources (tables, data
+buckets, user pools) separated from stateless wiring; cross-stack values as
+explicit props from `bin/vettid.org.ts`, never ad-hoc CFN exports; new
+subdomains and certs come from the Route53 zone.
+
+The mailing list uses SES identity verification as the double opt-in:
+POST /api/subscribe calls CreateEmailIdentity, SES sends its verification
+email, and a 15-minute sweep promotes verified addresses to `confirmed` in
+the `vettid-org-mailing-list` table. Works entirely inside the SES sandbox.
 
 ## Commands
 

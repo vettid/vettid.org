@@ -1,6 +1,8 @@
 import * as cdk from 'aws-cdk-lib/core';
 import { Template, Match } from 'aws-cdk-lib/assertions';
-import { VettidOrgStack } from '../lib/vettid.org-stack';
+import { VettidOrgStack } from '../lib/stacks/web-stack';
+import { VettidOrgDnsStack } from '../lib/stacks/dns-stack';
+import { VettidOrgSignupStack } from '../lib/stacks/signup-stack';
 
 describe('VettidOrgStack', () => {
   let template: Template;
@@ -272,6 +274,56 @@ describe('VettidOrgStack with custom domain', () => {
       DomainName: 'test.example.com',
       SubjectAlternativeNames: ['www.test.example.com'],
       ValidationMethod: 'DNS',
+    });
+  });
+});
+
+describe('VettidOrgSignupStack', () => {
+  let template: Template;
+  beforeAll(() => {
+    const app = new cdk.App();
+    const stack = new VettidOrgSignupStack(app, 'TestSignup', {
+      env: { account: '123456789012', region: 'us-east-1' },
+    });
+    template = Template.fromStack(stack);
+  });
+
+  test('creates retained mailing-list table with TTL and status index', () => {
+    template.hasResource('AWS::DynamoDB::Table', {
+      DeletionPolicy: 'Retain',
+      Properties: Match.objectLike({
+        TimeToLiveSpecification: Match.objectLike({ AttributeName: 'expiresAt', Enabled: true }),
+        GlobalSecondaryIndexes: Match.arrayWith([
+          Match.objectLike({ IndexName: 'status-index' }),
+        ]),
+      }),
+    });
+  });
+
+  test('creates subscribe route and scheduled verification sweep', () => {
+    template.hasResourceProperties('AWS::ApiGatewayV2::Route', {
+      RouteKey: 'POST /api/subscribe',
+    });
+    template.hasResourceProperties('AWS::Events::Rule', {
+      ScheduleExpression: 'rate(15 minutes)',
+    });
+  });
+});
+
+describe('VettidOrgDnsStack', () => {
+  test('replicates ProtonMail records in the hosted zone', () => {
+    const app = new cdk.App();
+    const stack = new VettidOrgDnsStack(app, 'TestDns', {
+      domainName: 'test.example.com',
+      env: { account: '123456789012', region: 'us-east-1' },
+    });
+    const template = Template.fromStack(stack);
+    template.hasResourceProperties('AWS::Route53::RecordSet', {
+      Type: 'MX',
+    });
+    template.hasResourceProperties('AWS::Route53::RecordSet', {
+      Name: '_dmarc.test.example.com.',
+      Type: 'TXT',
     });
   });
 });
