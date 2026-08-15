@@ -60,9 +60,15 @@ npx cdk deploy   # deploy (publishes straight to production)
 
 Local preview: `python3 -m http.server 8080` from `website/`.
 
+## Operations
+
+See `docs/RUNBOOK.md` for deploys, DNS, mailing-list ops, logging, and
+dates to watch. CI (`.github/workflows/ci.yml`) runs build + tests +
+`check:site` on every push and PR.
+
 ## Log analysis
 
-See `LOGS_ANALYSIS_GUIDE.md` for Athena queries against the legacy table. The v2 JSON table (`cloudfront_logs_v2`) requires injected-partition queries, e.g.:
+See `docs/logs-analysis.md` for Athena queries against the legacy table. The v2 JSON table (`cloudfront_logs_v2`) requires injected-partition queries, e.g.:
 
 ```sql
 SELECT * FROM vettid_logs.cloudfront_logs_v2

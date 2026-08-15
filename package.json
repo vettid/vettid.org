@@ -10,7 +10,8 @@
     "test": "jest",
     "cdk": "cdk",
     "deploy:site": "cdk deploy VettidOrgStack --require-approval never",
-    "deploy:all": "cdk deploy --all --require-approval never"
+    "deploy:all": "cdk deploy --all --require-approval never",
+    "check:site": "node scripts/check-site.mjs"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",
@@ -24,5 +25,14 @@
   "dependencies": {
     "aws-cdk-lib": "2.215.0",
     "constructs": "^10.0.0"
+  },
+  "description": "Infrastructure (AWS CDK) and static website for vettid.org",
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vettid/vettid.org.git"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
