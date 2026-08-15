@@ -20,6 +20,8 @@ export interface VettidOrgStackProps extends cdk.StackProps {
   hostedZone?: route53.IHostedZone;
   /** Signup HTTP API domain (from VettidOrgSignupStack); adds the /api/* behavior */
   apiDomain?: string;
+  /** Playbooks origin bucket (from VettidOrgPlaybooksStack); adds the /playbooks/* behavior */
+  playbooksBucket?: s3.IBucket;
 }
 
 export class VettidOrgStack extends cdk.Stack {
@@ -481,9 +483,26 @@ function handler(event) {
       });
     }
 
+    const additionalBehaviors: Record<string, cloudfront.BehaviorOptions> = {};
+    if (props.playbooksBucket) {
+      additionalBehaviors['/playbooks/*'] = {
+        origin: origins.S3BucketOrigin.withOriginAccessControl(props.playbooksBucket),
+        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+        cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
+        allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+        responseHeadersPolicy: securityHeadersPolicy,
+        functionAssociations: [
+          { eventType: cloudfront.FunctionEventType.VIEWER_REQUEST, function: htmlRewriteFn },
+        ],
+      };
+    }
+    if (Object.keys(additionalBehaviors).length > 0) {
+      Object.assign(distributionProps, { additionalBehaviors });
+    }
     if (props.apiDomain) {
       Object.assign(distributionProps, {
         additionalBehaviors: {
+          ...additionalBehaviors,
           '/api/*': {
             origin: new origins.HttpOrigin(props.apiDomain),
             viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,

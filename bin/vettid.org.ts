@@ -4,6 +4,7 @@ import { VettidOrgStack } from '../lib/stacks/web-stack';
 import { VettidOrgDnsStack } from '../lib/stacks/dns-stack';
 import { VettidOrgSignupStack } from '../lib/stacks/signup-stack';
 import { VettidDevRedirectStack } from '../lib/stacks/dev-redirect-stack';
+import { VettidOrgPlaybooksStack } from '../lib/stacks/playbooks-stack';
 
 const app = new cdk.App();
 
@@ -27,11 +28,14 @@ const dns = new VettidOrgDnsStack(app, 'VettidOrgDnsStack', {
 
 const signup = new VettidOrgSignupStack(app, 'VettidOrgSignupStack', { hostedZone: dns.zone, env });
 
+const playbooks = new VettidOrgPlaybooksStack(app, 'VettidOrgPlaybooksStack', { env });
+
 new VettidOrgStack(app, 'VettidOrgStack', {
   domainName,
   enableCustomDomain: true,
   hostedZone: dns.zone,
   apiDomain: signup.apiDomain,
+  playbooksBucket: playbooks.bucket,
   env,
 });
 
