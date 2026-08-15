@@ -10,6 +10,9 @@
 
 - [Home](https://vettid.org/): what VettID does — private connections, identity
   credentials, secure secrets, AI agent access, encrypted backup, and more
+- [Why VettID](https://vettid.org/why): the mission and editorial position — privacy
+  as a right, identity vs. anonymity as different tools, and how the position
+  shapes the architecture
 - [Security](https://vettid.org/security): vulnerability disclosure policy,
   scope, severity targets, and PGP key for encrypted reports
 - [Donate](https://vettid.org/donate): support the project (Bitcoin)
