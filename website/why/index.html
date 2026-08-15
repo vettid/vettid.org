@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Why VettID</title>
+  <meta name="description" content="Why VettID exists, where we stand on privacy and identity, and how that position shapes what we build." />
+  <link rel="canonical" href="https://vettid.org/why"/>
+  <link rel="icon" type="image/png" href="/assets/favicon.png" />
+  <link rel="preload" href="/assets/fonts/inter-regular.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/assets/fonts/plusjakartasans-bold.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/fonts.css" />
+  <link rel="stylesheet" href="/shared/nav.css" />
+  <link rel="stylesheet" href="/assets/site.css">
+  <style>
+    .wrap {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 130px 24px 90px;
+    }
+
+    .hero {
+      text-align: center;
+      margin-bottom: 26px;
+    }
+    .hero .eyebrow { display: block; margin-bottom: 18px; }
+    h1 {
+      font-size: clamp(2.25rem, 5vw, 3rem);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 28px;
+    }
+    .mission {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 1.35rem;
+      font-weight: 700;
+      line-height: 1.45;
+      color: var(--ink-hi);
+    }
+
+    .wrap .battlement-rule { margin: 56px auto; }
+
+    h2 {
+      font-size: 1.7rem;
+      font-weight: 800;
+      letter-spacing: -0.015em;
+      margin: 0 0 18px;
+    }
+    h3 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--gold);
+      margin: 36px 0 12px;
+    }
+    p {
+      color: var(--ink-body);
+      margin-bottom: 18px;
+    }
+    p b { color: var(--ink-hi); }
+    .wrap a { color: var(--gold); text-decoration: none; }
+    .wrap a:hover { text-decoration: underline; }
+
+    /* The credo: the one line the page exists to deliver */
+    .credo {
+      margin: 30px 0;
+      padding: 26px 30px;
+      background: var(--surface-1);
+      border-left: 3px solid var(--gold);
+      border-radius: 0 10px 10px 0;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 1.25rem;
+      font-weight: 700;
+      line-height: 1.5;
+      color: var(--ink-hi);
+    }
+
+    /* "How this shapes what we build" blocks */
+    .build-item { margin-bottom: 26px; }
+    .build-item h3 { margin-top: 0; }
+
+    /* Three-state comparison: the argument, visualized */
+    .states {
+      display: flex;
+      gap: 14px;
+      margin: 30px 0;
+      flex-wrap: wrap;
+    }
+    .state {
+      flex: 1 1 200px;
+      border-radius: 12px;
+      padding: 18px;
+      text-align: center;
+    }
+    .state h4 {
+      font-size: 0.95rem;
+      margin-bottom: 4px;
+    }
+    .state .tagline {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink-mute);
+      display: block;
+      margin-bottom: 12px;
+    }
+    .state ul { list-style: none; padding: 0; margin: 0; }
+    .state li { font-size: 0.85rem; margin-bottom: 6px; color: var(--ink-body); }
+    .state li .yes { color: var(--success); }
+    .state li .no { color: var(--error); }
+    .state.tool { background: var(--surface-2); border: 1px solid var(--gold); }
+    .state.villain { background: transparent; border: 1px dashed var(--border-indigo); }
+    .state.villain h4, .state.villain li { color: var(--ink-mute); }
+
+    /* Build cards */
+    .build-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+      margin: 30px 0;
+    }
+    .build-card {
+      background: var(--surface-1);
+      border: 1px solid var(--border-dark);
+      border-radius: 14px;
+      padding: 24px;
+    }
+    .build-card svg { width: 30px; height: 30px; color: var(--gold); margin-bottom: 12px; }
+    .build-card h3 { margin-top: 0; font-size: 1.05rem; }
+    .build-card p { font-size: 0.92rem; margin-bottom: 0; }
+    @media (max-width: 640px) {
+      .build-grid { grid-template-columns: 1fr; }
+    }
+    .honest {
+      border-left: 3px solid var(--gold);
+      padding-left: 20px;
+      font-style: italic;
+      color: var(--ink-body);
+      margin-top: 30px;
+    }
+    .honest b { font-style: normal; }
+
+    .section-eyebrow { display: block; margin-bottom: 10px; }
+
+    .contact-line {
+      margin-top: 48px;
+      text-align: center;
+      color: var(--ink-body);
+    }
+    .contact-line a { color: var(--gold); text-decoration: none; }
+    .contact-line a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <a href="/" class="header-logo">
+    <svg viewBox="0 0 264 350" fill="currentColor" aria-hidden="true"><defs><mask id="hdr-kh"><rect width="264" height="350" fill="white"/><circle cx="132" cy="190" r="29" fill="black"/><path d="M119 204 L104 282 Q102 292 112 292 L152 292 Q162 292 160 282 L145 204 Z" fill="black"/></mask></defs><path d="M8 0 L47 0 Q55 0 55 8 L55 54 L104 54 L104 8 Q104 0 112 0 L151 0 Q159 0 159 8 L159 54 L208 54 L208 8 Q208 0 216 0 L255 0 Q263 0 263 8 L263 76 Q263 86 254 90 L240 96 L23 96 L9 90 Q0 86 0 76 L0 8 Q0 0 8 0 Z"/><path mask="url(#hdr-kh)" d="M31 112 Q31 108 35 108 L229 108 Q233 108 233 112 L257 330 Q258 344 245 344 L19 344 Q6 344 7 330 Z"/></svg>
+    <span>VETTID</span>
+  </a>
+  <nav class="desktop-nav">
+    <a href="/why">Why VettID</a>
+    <a href="/security">Security</a>
+    <a href="/donate">Donate</a>
+    <a href="/open-source">Open Source</a>
+  </nav>
+  <span class="coming-soon-chip">Coming Soon</span>
+  <button class="nav-toggle" aria-label="Toggle menu" aria-expanded="false">
+    <span></span><span></span><span></span>
+  </button>
+</header>
+<div class="nav-menu" id="navMenu">
+  <a href="/">Home</a>
+  <a href="/why">Why VettID</a>
+  <a href="/donate">Donate</a>
+  <a href="/security">Security</a>
+  <a href="/open-source">Open Source</a>
+</div>
+<div class="nav-overlay"></div>
+
+<div class="wrap">
+
+  <div class="hero">
+    <span class="eyebrow">Our position</span>
+    <h1>Why VettID</h1>
+    <p class="mission">VettID exists to help ordinary people get security, privacy, and trust online &mdash; without needing to become experts.</p>
+  </div>
+
+  <p>The internet asks you to trade your privacy for participation. Every account, every app, every "I agree" hands over a little more of you to someone whose business depends on knowing you better than your friends do. We think that trade is broken. We're building the proof.</p>
+
+  <div class="battlement-rule"></div>
+
+  <span class="eyebrow section-eyebrow">01 &mdash; The position</span>
+  <h2>Where we stand</h2>
+  <p>Most companies stop at a mission statement. We have a position too, and we'd rather you know it up front.</p>
+
+  <h3>"I have nothing to hide"</h3>
+  <p>You've heard it. Maybe you've said it. If you're not doing anything wrong, why worry about privacy?</p>
+  <p>Here's the problem with that line: it gets privacy exactly backwards. Privacy isn't a shield for wrongdoing &mdash; it's a right that belongs to people doing nothing wrong at all. You close the bathroom door. You seal the envelope. You don't read your neighbor's mail. None of that is hiding; it's dignity, and nobody asks you to justify it.</p>
+  <p>We'd take it a step further:</p>
+  <div class="credo">A strong, positive assertion of your identity entitles you to your right to privacy.</div>
+  <p>Read that again, because it inverts how the internet works today. Online, you're constantly asked to prove who you are by surrendering information &mdash; your email, your phone number, your birthday, your browsing habits, whatever the form demands. The more of yourself you give away, the more "trusted" you become, and the less privacy you have left. We think it should work the other way: when you can prove exactly who you are &mdash; no more, no less, on your terms &mdash; you get to keep everything else to yourself. Not because privacy has to be earned &mdash; it never does &mdash; but because proving who you are should cost you nothing else. Being known and being safe should not be opposites.</p>
+
+  <h3>Identity and anonymity are different tools, not enemies</h3>
+  <p>Some of the people we respect most in privacy hold anonymity as a core value. We want to be precise about where we agree and where we differ.</p>
+  <p><b>Anonymity is the right tool against powerful adversaries.</b> Political dissidents, investigative journalists, abuse survivors &mdash; people whose safety depends on not being identified need anonymity, and we defend it without reservation. A world without anonymity is a world where speaking truth to power gets you found.</p>
+  <p><b>But anonymity is the wrong tool for building trusted relationships.</b> Your bank, your doctor, your kid's school &mdash; these relationships require knowing who's on the other end. And sometimes the stakes are closer to home: when the phone rings and a familiar voice says "Grandma, I'm in trouble, I need money" &mdash; is that actually your grandchild? Scammers are already using AI to clone the voices of people you love, and they're counting on one thing: that you have no way to check. Anonymity can't help you in that moment &mdash; it was never designed to. What can is the ability to verify &mdash; to know, not hope, that the person on the other end is who they claim to be.</p>
+  <p>Trust needs accountability, and accountability needs identity. A society that runs on anonymity alone doesn't get more freedom; it hands its infrastructure to whoever is most comfortable being unaccountable.</p>
+  <p><b>Here's the tragedy:</b> the internet we actually got forces everyone into a third thing that is worse than either. Call it surveilled pseudo-identity. You're anonymous enough that no one can vouch for anyone &mdash; scammers thrive, trust is guesswork &mdash; yet surveilled enough that everything you do is collected, correlated, and sold. Everyone loses except the people doing the collecting.</p>
+  <div class="states" role="img" aria-label="Comparison of anonymity, surveilled pseudo-identity, and asserted identity">
+    <div class="state tool">
+      <h4>Anonymity</h4>
+      <span class="tagline">The right tool against power</span>
+      <ul>
+        <li><span class="yes">&#10003;</span> Protection from power</li>
+        <li><span class="no">&#10007;</span> Trust</li>
+        <li>Nothing linked to you</li>
+      </ul>
+    </div>
+    <div class="state villain">
+      <h4>Surveilled pseudo-identity</h4>
+      <span class="tagline">The internet today</span>
+      <ul>
+        <li><span class="no">&#10007;</span> Protection</li>
+        <li><span class="no">&#10007;</span> Trust</li>
+        <li>Everything collected</li>
+      </ul>
+    </div>
+    <div class="state tool">
+      <h4>Asserted identity</h4>
+      <span class="tagline">The right tool for trust</span>
+      <ul>
+        <li><span class="yes">&#10003;</span> Protection from fraud</li>
+        <li><span class="yes">&#10003;</span> Trust</li>
+        <li>You choose what's shared</li>
+      </ul>
+    </div>
+  </div>
+
+  <p>The answer isn't less privacy, and it isn't mandatory anonymity. It's identity architecture where <b>you</b> control what is asserted, to whom, and nothing more.</p>
+
+  <div class="battlement-rule"></div>
+
+  <span class="eyebrow section-eyebrow">02 &mdash; The proof</span>
+  <h2>How this shapes what we build</h2>
+  <p>A position is cheap. Here's how ours is built into VettID &mdash; so as the work goes public, you can check our claims against it.</p>
+
+  <div class="build-grid">
+    <div class="build-card">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="15" r="4"/><path d="M11 12L20 3M16 7l3 3M13 10l2 2"/></svg>
+      <h3>You hold your keys. Not us.</h3>
+      <p>Your credentials live in a vault that only you can unlock. There's no recovery department that can peek inside, no master key in a drawer somewhere, no employee who could hand over your data &mdash; bribed, hacked, or served with a subpoena &mdash; because they can't reach it either. This isn't a policy we promise to follow &mdash; it's an architecture that removes the choice. We couldn't access your vault if we wanted to, and we designed it that way on purpose.</p>
+    </div>
+    <div class="build-card">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="3" width="14" height="18" rx="1"/><path d="M3 21h18M5 3l14 18" stroke-linecap="round"/></svg>
+      <h3>There is no door to knock on.</h3>
+      <p>Most systems protect your data by guarding the doors. We built a vault with no inbound path at all &mdash; nothing on the internet can reach into it, because the architecture doesn't have a way in. Your vault reaches out on your instruction; nothing reaches in. Guarding doors means hoping the guard never fails. Having no door means there's no guard to fail.</p>
+    </div>
+    <div class="build-card">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9 12h6"/></svg>
+      <h3>Prove exactly what's needed, and nothing more.</h3>
+      <p>When you assert your identity through VettID, you decide what gets shared, with whom, for how long. Proving you're over 21 shouldn't require handing over your birthdate, address, and a photo of your license. Strong identity and minimal disclosure aren't opposites &mdash; done right, they're the same feature.</p>
+    </div>
+    <div class="build-card">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 9h13M14 5l4 4-4 4M20 15H7M10 11l-4 4 4 4"/></svg>
+      <h3>Verification runs both ways.</h3>
+      <p>Scams work because verification is one-sided: they can demand you prove yourself, but you can't check them back. VettID connections are mutual &mdash; both ends prove who they are, every time, automatically. That phone call from earlier? In a VettID world, "is this really my grandchild?" has a cryptographic answer, not a hopeful guess.</p>
+    </div>
+  </div>
+
+  <p class="honest"><b>The honest part.</b> Our worldview shapes what we build and which problems we choose to solve. You don't have to share it to check our work &mdash; everything above is architecture, not a promise, and we'd rather earn your trust with work you can verify than with words you have to take on faith. The technical version lives in <a href="/open-source">our code</a> as we publish it, and in the rest of vettid.org.</p>
+
+  <p class="contact-line">Questions, disagreements, or a hole in our argument? We genuinely want to hear it. <a href="mailto:info@vettid.org">Contact &rarr;</a></p>
+
+</div>
+
+<footer>
+  <div class="battlement-mini"></div>
+  <p class="footer-nav"><a href="/">Home</a> &middot; <a href="/why">Why VettID</a> &middot; <a href="/security">Security</a> &middot; <a href="/donate">Donate</a> &middot; <a href="/open-source">Open Source</a> &middot; <a href="https://github.com/vettid" target="_blank" rel="noopener noreferrer">GitHub</a></p>
+  <p>&copy; 2026 The VettID Project. All rights reserved.</p>
+  <p class="footer-privacy">No trackers, no analytics, no third-party resources &mdash; this site loads nothing from anyone but us.</p>
+</footer>
+
+<script src="/shared/js/nav.js"></script>
+</body>
+</html>
