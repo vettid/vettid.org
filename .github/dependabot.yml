@@ -8,6 +8,11 @@ updates:
       aws-cdk:
         patterns:
           - "aws-cdk*"
+    ignore:
+      # CDK's jsii toolchain pins the TypeScript major; bumps to new majors
+      # will fail CI until aws-cdk-lib supports them
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
