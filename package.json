@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "aws-cdk-lib": "2.215.0",
-    "constructs": "^10.0.0"
+    "constructs": "^10.8.1"
   },
   "description": "Infrastructure (AWS CDK) and static website for vettid.org",
   "license": "AGPL-3.0-or-later",
