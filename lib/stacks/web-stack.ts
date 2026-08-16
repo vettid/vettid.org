@@ -254,14 +254,68 @@ function handler(event) {
       comment: 'Rewrite extensionless URIs to index.html and block sensitive paths',
     });
 
-    // WAF WebACL in pure-telemetry mode (default allow, no blocking rules).
-    // Its logs are the only CloudFront-compatible source of JA3/JA4 TLS
-    // fingerprints and ordered request header names (logging spec §2).
+    // WAF WebACL: default allow. Primary job is telemetry — its logs are the
+    // only CloudFront-compatible source of JA3/JA4 TLS fingerprints and
+    // ordered request header names (logging spec §2). One blocking rule:
+    // a per-IP volumetric cap (a real visitor loads the whole site in ~30
+    // requests; 300/5min only ever trips on tooling loops). The AWS
+    // reputation lists run in count mode — observe first, decide from our
+    // own logs whether they should block.
     const webAcl = new wafv2.CfnWebACL(this, 'WebAcl', {
       name: 'vettid-org-telemetry',
       scope: 'CLOUDFRONT',
       defaultAction: { allow: {} },
-      rules: [],
+      rules: [
+        {
+          name: 'rate-limit-per-ip',
+          priority: 0,
+          action: { block: { customResponse: { responseCode: 429 } } },
+          statement: {
+            rateBasedStatement: {
+              limit: 300,
+              aggregateKeyType: 'IP',
+              evaluationWindowSec: 300,
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: 'vettid-org-rate-limit',
+            sampledRequestsEnabled: true,
+          },
+        },
+        {
+          name: 'aws-ip-reputation',
+          priority: 1,
+          overrideAction: { count: {} },
+          statement: {
+            managedRuleGroupStatement: {
+              vendorName: 'AWS',
+              name: 'AWSManagedRulesAmazonIpReputationList',
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: 'vettid-org-ip-reputation',
+            sampledRequestsEnabled: true,
+          },
+        },
+        {
+          name: 'aws-anonymous-ip',
+          priority: 2,
+          overrideAction: { count: {} },
+          statement: {
+            managedRuleGroupStatement: {
+              vendorName: 'AWS',
+              name: 'AWSManagedRulesAnonymousIpList',
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: 'vettid-org-anonymous-ip',
+            sampledRequestsEnabled: true,
+          },
+        },
+      ],
       visibilityConfig: {
         cloudWatchMetricsEnabled: true,
         metricName: 'vettid-org-web-acl',
