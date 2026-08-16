@@ -149,6 +149,28 @@ describe('VettidOrgStack', () => {
       });
     });
 
+    test('rate-limits per IP with 429 and runs reputation lists in count mode', () => {
+      template.hasResourceProperties('AWS::WAFv2::WebACL', {
+        Rules: Match.arrayWith([
+          Match.objectLike({
+            Name: 'rate-limit-per-ip',
+            Action: { Block: { CustomResponse: { ResponseCode: 429 } } },
+            Statement: {
+              RateBasedStatement: Match.objectLike({ Limit: 300, AggregateKeyType: 'IP' }),
+            },
+          }),
+          Match.objectLike({
+            Name: 'aws-ip-reputation',
+            OverrideAction: { Count: {} },
+          }),
+          Match.objectLike({
+            Name: 'aws-anonymous-ip',
+            OverrideAction: { Count: {} },
+          }),
+        ]),
+      });
+    });
+
     test('configures standard logging v2 delivery to S3 as JSON', () => {
       template.hasResourceProperties('AWS::Logs::DeliverySource', {
         LogType: 'ACCESS_LOGS',
