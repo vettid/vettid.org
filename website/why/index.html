@@ -128,9 +128,25 @@
     .build-card svg { width: 30px; height: 30px; color: var(--gold); margin-bottom: 12px; }
     .build-card h3 { margin-top: 0; font-size: 1.05rem; }
     .build-card p { font-size: 0.92rem; margin-bottom: 0; }
+    /* An odd final card spans the row (the 03 grid has three) */
+    .build-grid .build-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
     @media (max-width: 640px) {
       .build-grid { grid-template-columns: 1fr; }
     }
+    /* Second thesis: the credo's sibling — deliberately indigo, not gold */
+    .pull {
+      margin: 30px 0;
+      padding: 22px 28px;
+      background: var(--surface-1);
+      border-left: 3px solid var(--border-indigo);
+      border-radius: 0 10px 10px 0;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 1.15rem;
+      font-weight: 700;
+      line-height: 1.5;
+      color: var(--ink-hi);
+    }
+
     .honest {
       border-left: 3px solid var(--gold);
       padding-left: 20px;
@@ -141,6 +157,7 @@
     .honest b { font-style: normal; }
 
     .section-eyebrow { display: block; margin-bottom: 10px; }
+    .horizon-eyebrow { margin-top: 56px; }
 
     .contact-line {
       margin-top: 48px;
@@ -187,7 +204,7 @@
     <p class="mission">VettID exists to help ordinary people get security, privacy, and trust online &mdash; without needing to become experts.</p>
   </div>
 
-  <p>The internet asks you to trade your privacy for participation. Every account, every app, every "I agree" hands over a little more of you to someone whose business depends on knowing you better than your friends do. We think that trade is broken. We're building the proof.</p>
+  <p>The internet asks you to trade your privacy for participation. Every account, every app, every "I agree" hands over a little more of you to someone whose business depends on knowing you better than your friends do. We think that trade is broken. We're building the alternative.</p>
 
   <div class="battlement-rule"></div>
 
@@ -200,13 +217,14 @@
   <p>Here's the problem with that line: it gets privacy exactly backwards. Privacy isn't a shield for wrongdoing &mdash; it's a right that belongs to people doing nothing wrong at all. You close the bathroom door. You seal the envelope. You don't read your neighbor's mail. None of that is hiding; it's dignity, and nobody asks you to justify it.</p>
   <p>We'd take it a step further:</p>
   <div class="credo">A strong, positive assertion of your identity entitles you to your right to privacy.</div>
-  <p>Read that again, because it inverts how the internet works today. Online, you're constantly asked to prove who you are by surrendering information &mdash; your email, your phone number, your birthday, your browsing habits, whatever the form demands. The more of yourself you give away, the more "trusted" you become, and the less privacy you have left. We think it should work the other way: when you can prove exactly who you are &mdash; no more, no less, on your terms &mdash; you get to keep everything else to yourself. Not because privacy has to be earned &mdash; it never does &mdash; but because proving who you are should cost you nothing else. Being known and being safe should not be opposites.</p>
+  <p>Read that again, because it inverts how the internet works today. Online, you're constantly asked to prove who you are by surrendering information &mdash; your email, your phone number, your birthday, your browsing habits, whatever the form demands. The more of yourself you give away, the more "trusted" you become, and the less privacy you have left. We think it should work the other way: when you can prove exactly who you are &mdash; no more, no less, on your terms &mdash; you get to keep everything else to yourself. Privacy doesn't have to be earned &mdash; proving who you are should cost you nothing else. Being known and being safe should not be opposites.</p>
 
   <h3>Identity and anonymity are different tools, not enemies</h3>
   <p>Some of the people we respect most in privacy hold anonymity as a core value. We want to be precise about where we agree and where we differ.</p>
   <p><b>Anonymity is the right tool against powerful adversaries.</b> Political dissidents, investigative journalists, abuse survivors &mdash; people whose safety depends on not being identified need anonymity, and we defend it without reservation. A world without anonymity is a world where speaking truth to power gets you found.</p>
   <p><b>But anonymity is the wrong tool for building trusted relationships.</b> Your bank, your doctor, your kid's school &mdash; these relationships require knowing who's on the other end. And sometimes the stakes are closer to home: when the phone rings and a familiar voice says "Grandma, I'm in trouble, I need money" &mdash; is that actually your grandchild? Scammers are already using AI to clone the voices of people you love, and they're counting on one thing: that you have no way to check. Anonymity can't help you in that moment &mdash; it was never designed to. What can is the ability to verify &mdash; to know, not hope, that the person on the other end is who they claim to be.</p>
-  <p>Trust needs accountability, and accountability needs identity. A society that runs on anonymity alone doesn't get more freedom; it hands its infrastructure to whoever is most comfortable being unaccountable.</p>
+  <div class="pull">Trust needs accountability, and accountability needs identity.</div>
+  <p>A society that runs on anonymity alone doesn't get more freedom; it hands its infrastructure to whoever is most comfortable being unaccountable.</p>
   <p><b>Here's the tragedy:</b> the internet we actually got forces everyone into a third thing that is worse than either. Call it surveilled pseudo-identity. You're anonymous enough that no one can vouch for anyone &mdash; scammers thrive, trust is guesswork &mdash; yet surveilled enough that everything you do is collected, correlated, and sold. Everyone loses except the people doing the collecting.</p>
   <div class="states" role="img" aria-label="Comparison of anonymity, surveilled pseudo-identity, and asserted identity">
     <div class="state tool">
@@ -266,6 +284,38 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 9h13M14 5l4 4-4 4M20 15H7M10 11l-4 4 4 4"/></svg>
       <h3>Verification runs both ways.</h3>
       <p>Scams work because verification is one-sided: they can demand you prove yourself, but you can't check them back. VettID connections are mutual &mdash; both ends prove who they are, every time, automatically. That phone call from earlier? In a VettID world, "is this really my grandchild?" has a cryptographic answer, not a hopeful guess.</p>
+    </div>
+  </div>
+
+  <span class="eyebrow section-eyebrow horizon-eyebrow">03 &mdash; The horizon</span>
+  <h2>Where this goes</h2>
+  <p>Everything above is defensive &mdash; what can't leak, who can't reach you. But defense isn't the point of the project. This is what the same architecture makes possible:</p>
+
+  <div class="build-grid">
+    <div class="build-card">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="7" cy="12" r="4"/><circle cx="17" cy="12" r="4"/><path d="M11 12h2"/></svg>
+      <h3>Connections you can believe.</h3>
+      <p>A future where the call, the message, and the introduction arrive already proven &mdash; both ends asserted, every time, automatically. The impersonation scam doesn't get harder in that world; it gets pointless. And because assertion is minimal by design, being reachable and provable costs you none of your privacy back.</p>
+    </div>
+    <div class="build-card">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="17" cy="7" r="3"/><path d="M4 20l9.5-10.5M4 20v-4M4 20h4"/></svg>
+      <h3>Agents on a leash &mdash; yours.</h3>
+      <p>AI agents are about to act for everyone, and the internet has no way to know whose agent is whose. Ours will carry credentials you issue: an agent that can prove it acts for you, sees only what you scoped to it, and loses its authority the moment you pull the leash. Delegation without surrender &mdash; that's the only version of the agent future worth building.</p>
+    </div>
+    <div class="build-card">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="10" r="2"/><path d="M12 12v4"/></svg>
+      <h3>Money that behaves like cash.</h3>
+      <p>Digital payment was supposed to be convenient cash. Instead, every purchase became a data point in someone's file on you. Money on your terms means holding your own keys the way you'd hold your own cash &mdash; able to pay, prove you paid, and move on, without your coffee habit becoming a product. The custody problem is the identity problem; solving one solves the other.</p>
+    </div>
+    <div class="build-card">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12l3 3 5-6"/></svg>
+      <h3>Votes you can check with math.</h3>
+      <p>The oldest trust problem there is: prove every voter is eligible, count each one exactly once, keep every ballot secret &mdash; and let anyone verify the count. Those goals sound contradictory only because identity and privacy have been opposites until now. A community that can vote verifiably &mdash; a club, a co-op, a city &mdash; gets to decide things together without trusting a middleman to count honestly.</p>
+    </div>
+    <div class="build-card">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 4a6 6 0 0 1 6 6v4H6v-4a6 6 0 0 1 6-6zM4 18h16M12 2v2"/></svg>
+      <h3>A concierge in your corner.</h3>
+      <p>The digital concierge from our front page, grown into its job: keeping your keys safe without ever holding them, watching the door, flagging the request that smells wrong before you tap it. Guidance that answers to you alone &mdash; because a concierge who reports to someone else isn't a concierge, it's a chaperone.</p>
     </div>
   </div>
 
