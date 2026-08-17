@@ -25,6 +25,11 @@
     .section-nav {
       display: flex; flex-wrap: wrap; justify-content: center; gap: 8px;
       margin: 30px 0 10px;
+      position: sticky; top: 64px; z-index: 5;
+      padding: 12px 0;
+      background: rgba(11, 11, 18, 0.92);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
     }
     .section-nav a {
       font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.06em;
@@ -33,6 +38,8 @@
       border-radius: 999px; padding: 6px 14px;
     }
     .section-nav a:hover { color: var(--gold); border-color: var(--surface-indigo); text-decoration: none; }
+    .section-nav a.active { color: #101018; background: var(--gold); border-color: var(--gold); }
+    .section-nav a.active:hover { color: #101018; text-decoration: none; }
 
     .uc { padding-top: 26px; scroll-margin-top: 90px; }
     .uc + .uc { border-top: 1px solid var(--border-dark); margin-top: 34px; }
@@ -61,7 +68,6 @@
       font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.1em;
       text-transform: uppercase; color: #7c7c88; margin-bottom: 14px;
     }
-    .uc-nav { display: flex; justify-content: space-between; gap: 16px; font-weight: 600; font-size: 0.9rem; }
 
     .uc-close { text-align: center; margin-top: 56px; color: var(--ink-body); }
   </style>
@@ -140,12 +146,12 @@
         <ul>
         <li><span class="yes">✓</span> Both ends prove who they are — automatically, every time</li>
         <li><span class="yes">✓</span> Calls and messages encrypted vault-to-vault, no middleman</li>
+        <li><span class="yes">✓</span> Your own phone-to-vault link is encrypted and proven the same way</li>
         <li><span class="yes">✓</span> Who you know stays yours</li>
         </ul>
       </div>
     </div>
     <p class="uc-status">Status: in build &mdash; design, not yet product</p>
-    <nav class="uc-nav" aria-label="More use cases"><span></span><a href="#service-connections">Service Connections &rarr;</a></nav>
   </section>
   <section class="uc" id="service-connections">
     <div class="uc-head">
@@ -178,7 +184,6 @@
       </div>
     </div>
     <p class="uc-status">Status: in build &mdash; design, not yet product</p>
-    <nav class="uc-nav" aria-label="More use cases"><a href="#private-connections">&larr; Private Connections</a><a href="#identity-credentials">Identity Credentials &rarr;</a></nav>
   </section>
   <section class="uc" id="identity-credentials">
     <div class="uc-head">
@@ -210,7 +215,6 @@
       </div>
     </div>
     <p class="uc-status">Status: in build &mdash; design, not yet product</p>
-    <nav class="uc-nav" aria-label="More use cases"><a href="#service-connections">&larr; Service Connections</a><a href="#secure-secrets">Secure Secrets &rarr;</a></nav>
   </section>
   <section class="uc" id="secure-secrets">
     <div class="uc-head">
@@ -242,7 +246,6 @@
       </div>
     </div>
     <p class="uc-status">Status: in build &mdash; design, not yet product</p>
-    <nav class="uc-nav" aria-label="More use cases"><a href="#identity-credentials">&larr; Identity Credentials</a><a href="#voting">Democratic Voting &rarr;</a></nav>
   </section>
   <section class="uc" id="voting">
     <div class="uc-head">
@@ -276,7 +279,6 @@
       </div>
     </div>
     <p class="uc-status">Status: in build &mdash; design, not yet product</p>
-    <nav class="uc-nav" aria-label="More use cases"><a href="#secure-secrets">&larr; Secure Secrets</a><a href="#encrypted-backup">Encrypted Backup &rarr;</a></nav>
   </section>
   <section class="uc" id="encrypted-backup">
     <div class="uc-head">
@@ -308,7 +310,6 @@
       </div>
     </div>
     <p class="uc-status">Status: in build &mdash; design, not yet product</p>
-    <nav class="uc-nav" aria-label="More use cases"><a href="#voting">&larr; Democratic Voting</a><a href="#ai-agent-access">AI Agent Access &rarr;</a></nav>
   </section>
   <section class="uc" id="ai-agent-access">
     <div class="uc-head">
@@ -344,7 +345,6 @@
       </div>
     </div>
     <p class="uc-status">Status: in build &mdash; design, not yet product</p>
-    <nav class="uc-nav" aria-label="More use cases"><a href="#encrypted-backup">&larr; Encrypted Backup</a><a href="#bitcoin">Bitcoin Wallet &rarr;</a></nav>
   </section>
   <section class="uc" id="bitcoin">
     <div class="uc-head">
@@ -364,20 +364,19 @@
         <ul>
         <li><span class="no">✗</span> Exchange custody: your coins, their keys, their risk</li>
         <li><span class="no">✗</span> Self-custody: a seed phrase one house fire from gone</li>
-        <li><span class="no">✗</span> Sending means addresses copied through chat apps</li>
+        <li><span class="no">✗</span> Sending means addresses copied through chat apps &mdash; interceptable, mistypable</li>
         </ul>
       </div>
       <div class="uc-col uc-with">
         <h4>With VettID</h4>
         <ul>
         <li><span class="yes">✓</span> Keys generated and held in the enclave — they never leave</li>
-        <li><span class="yes">✓</span> Pay your connections directly, address by QR</li>
+        <li><span class="yes">✓</span> Share your address privately through your profile &mdash; connections get it with no one in between and no mistyping</li>
         <li><span class="yes">✓</span> Backed up the same encrypted, provider-blind way</li>
         </ul>
       </div>
     </div>
     <p class="uc-status">Status: in build &mdash; design, not yet product</p>
-    <nav class="uc-nav" aria-label="More use cases"><a href="#ai-agent-access">&larr; AI Agent Access</a><a href="#agent-messaging">Encrypted Agent Messaging &rarr;</a></nav>
   </section>
   <section class="uc" id="agent-messaging">
     <div class="uc-head">
@@ -412,7 +411,6 @@
       </div>
     </div>
     <p class="uc-status">Status: in build &mdash; design, not yet product</p>
-    <nav class="uc-nav" aria-label="More use cases"><a href="#bitcoin">&larr; Bitcoin Wallet</a><a href="#location">Location on Your Terms &rarr;</a></nav>
   </section>
   <section class="uc" id="location">
     <div class="uc-head">
@@ -435,14 +433,13 @@
       <div class="uc-col uc-with">
         <h4>With VettID</h4>
         <ul>
-        <li><span class="yes">✓</span> Share with exactly the people you choose</li>
+        <li><span class="yes">✓</span> Share with exactly the connections &mdash; people and services &mdash; you choose</li>
         <li><span class="yes">✓</span> Cut access the instant you're done</li>
         <li><span class="yes">✓</span> Nobody else in the loop — no networks, no brokers</li>
         </ul>
       </div>
     </div>
     <p class="uc-status">Status: in build &mdash; design, not yet product</p>
-    <nav class="uc-nav" aria-label="More use cases"><a href="#agent-messaging">&larr; Encrypted Agent Messaging</a><span></span></nav>
   </section>
 
   <p class="uc-close">The architecture behind all of this lives on <a href="/security">Security</a>, the reasoning on <a href="/why">Why VettID</a>, and the code on <a href="/open-source">Open Source</a> as we publish it.</p>
@@ -458,5 +455,6 @@
 
 <script src="/shared/js/nav.js"></script>
 
+<script src="/js/use-cases.js"></script>
 </body>
 </html>
