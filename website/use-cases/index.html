@@ -38,10 +38,19 @@
       border-radius: 999px; padding: 6px 14px;
     }
     .section-nav a:hover { color: var(--gold); border-color: var(--surface-indigo); text-decoration: none; }
+    /* While stuck, collapse to one horizontally scrollable row so the bar
+       stays a sliver instead of a wall (matters most on phones) */
+    .section-nav.stuck {
+      flex-wrap: nowrap; justify-content: flex-start;
+      overflow-x: auto; -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .section-nav.stuck::-webkit-scrollbar { display: none; }
+    .section-nav a { flex: 0 0 auto; }
     .section-nav a.active { color: #101018; background: var(--gold); border-color: var(--gold); }
     .section-nav a.active:hover { color: #101018; text-decoration: none; }
 
-    .uc { padding-top: 26px; scroll-margin-top: 90px; }
+    .uc { padding-top: 26px; scroll-margin-top: 132px; }
     .uc + .uc { border-top: 1px solid var(--border-dark); margin-top: 34px; }
     .uc-head { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; }
     .uc-icon svg { width: 44px; height: 44px; display: block; }
