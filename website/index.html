@@ -575,6 +575,12 @@
                 border-color var(--duration-slow) var(--ease-out-expo);
   }
 
+  a.use-case-card { display: block; color: inherit; text-decoration: none; }
+  .uc-more {
+    display: inline-block; margin-top: 12px;
+    font-family: var(--font-mono, monospace); font-size: 0.72rem;
+    letter-spacing: 0.08em; text-transform: uppercase; color: var(--gold, #ffc125);
+  }
   .use-case-card:hover {
     border-color: var(--border-dark);
     transform: translateY(-2px);
@@ -1194,7 +1200,7 @@
   <p class="section-subtitle">Your vault isn't just secure storage &mdash; it's a foundation for a truly private digital life.</p>
 
   <div class="use-cases-grid">
-    <div class="use-case-card">
+    <a class="use-case-card" href="/use-cases#private-connections">
       <div class="use-case-icon">
         <svg viewBox="0 0 64 64" fill="none">
           <circle cx="22" cy="24" r="10" stroke="#ffc125" stroke-width="2"/>
@@ -1205,9 +1211,10 @@
       </div>
       <h3>Private Connections</h3>
       <p>Connect directly with friends and family. Send encrypted messages and make secure calls &mdash; no middleman can read your conversations.</p>
-    </div>
+      <span class="uc-more">Learn more &rarr;</span>
+    </a>
 
-    <div class="use-case-card">
+    <a class="use-case-card" href="/use-cases#service-connections">
       <div class="use-case-icon">
         <svg viewBox="0 0 64 64" fill="none">
           <rect x="8" y="16" width="20" height="32" rx="3" stroke="#ffc125" stroke-width="2"/>
@@ -1219,9 +1226,10 @@
       </div>
       <h3>Service Connections</h3>
       <p>Connect with businesses that run VettID Service Vaults. Share only what you choose, revoke access anytime, and keep full control of your data.</p>
-    </div>
+      <span class="uc-more">Learn more &rarr;</span>
+    </a>
 
-    <div class="use-case-card">
+    <a class="use-case-card" href="/use-cases#identity-credentials">
       <div class="use-case-icon">
         <svg viewBox="0 0 64 64" fill="none">
           <rect x="12" y="8" width="40" height="48" rx="4" stroke="#ffc125" stroke-width="2"/>
@@ -1232,9 +1240,10 @@
       </div>
       <h3>Identity Credentials</h3>
       <p>Store verified credentials in your vault. Prove who you are without revealing more than necessary &mdash; age verification without sharing your birthdate.</p>
-    </div>
+      <span class="uc-more">Learn more &rarr;</span>
+    </a>
 
-    <div class="use-case-card">
+    <a class="use-case-card" href="/use-cases#secure-secrets">
       <div class="use-case-icon">
         <svg viewBox="0 0 64 64" fill="none">
           <rect x="16" y="24" width="32" height="24" rx="4" stroke="#ffc125" stroke-width="2"/>
@@ -1245,9 +1254,10 @@
       </div>
       <h3>Secure Secrets</h3>
       <p>Keep passwords, API keys, and sensitive notes encrypted in your vault. Access them from your phone, protected by hardware security.</p>
-    </div>
+      <span class="uc-more">Learn more &rarr;</span>
+    </a>
 
-    <div class="use-case-card">
+    <a class="use-case-card" href="/use-cases#voting">
       <div class="use-case-icon">
         <svg viewBox="0 0 64 64" fill="none">
           <rect x="8" y="20" width="48" height="32" rx="4" stroke="#ffc125" stroke-width="2"/>
@@ -1260,9 +1270,10 @@
       </div>
       <h3>Democratic Voting</h3>
       <p>Participate in cooperative governance with privacy-preserving votes. Your vote counts, but no one can see how you voted.</p>
-    </div>
+      <span class="uc-more">Learn more &rarr;</span>
+    </a>
 
-    <div class="use-case-card">
+    <a class="use-case-card" href="/use-cases#encrypted-backup">
       <div class="use-case-icon">
         <svg viewBox="0 0 64 64" fill="none">
           <path d="M32 8v12M20 14l6 10M44 14l-6 10" stroke="#ffc125" stroke-width="2"/>
@@ -1273,9 +1284,10 @@
       </div>
       <h3>Encrypted Backup</h3>
       <p>Back up your vault so only you can unlock it. Recover your digital life on a new device without exposing your secrets.</p>
-    </div>
+      <span class="uc-more">Learn more &rarr;</span>
+    </a>
 
-    <div class="use-case-card">
+    <a class="use-case-card" href="/use-cases#ai-agent-access">
       <div class="use-case-icon">
         <svg viewBox="0 0 64 64" fill="none">
           <!-- Brain/circuit icon representing AI agent -->
@@ -1290,9 +1302,10 @@
       </div>
       <h3>AI Agent Access</h3>
       <p>Give your AI agents secure access to vault secrets &mdash; API keys, tokens, and credentials &mdash; without ever exposing them. You approve every connection and control exactly what each agent can see.</p>
-    </div>
+      <span class="uc-more">Learn more &rarr;</span>
+    </a>
 
-    <div class="use-case-card">
+    <a class="use-case-card" href="/use-cases#bitcoin">
       <div class="use-case-icon">
         <svg viewBox="0 0 64 64" fill="none">
           <circle cx="32" cy="28" r="16" stroke="#ffc125" stroke-width="2"/>
@@ -1304,9 +1317,10 @@
       </div>
       <h3>Bitcoin Wallet</h3>
       <p>Generate and manage Bitcoin wallets inside your hardware-isolated vault. Private keys never leave the enclave. Share your address with connections via QR code and send Bitcoin directly to them.</p>
-    </div>
+      <span class="uc-more">Learn more &rarr;</span>
+    </a>
 
-    <div class="use-case-card">
+    <a class="use-case-card" href="/use-cases#agent-messaging">
       <div class="use-case-icon">
         <svg viewBox="0 0 64 64" fill="none">
           <circle cx="20" cy="24" r="8" stroke="#ffc125" stroke-width="2"/>
@@ -1320,9 +1334,10 @@
       </div>
       <h3>Encrypted Agent Messaging</h3>
       <p>Talk to your AI agents over end-to-end encrypted channels of your own &mdash; no third-party chat app in the loop. Messages and approval requests appear in your feed with verified agent identity.</p>
-    </div>
+      <span class="uc-more">Learn more &rarr;</span>
+    </a>
 
-    <div class="use-case-card">
+    <a class="use-case-card" href="/use-cases#location">
       <div class="use-case-icon">
         <svg viewBox="0 0 64 64" fill="none">
           <path d="M32 8c-9 0-16 7-16 16 0 12 16 32 16 32s16-20 16-32c0-9-7-16-16-16z" stroke="#ffc125" stroke-width="2"/>
@@ -1331,7 +1346,8 @@
       </div>
       <h3>Location on Your Terms</h3>
       <p>Share your live location with the people you choose &mdash; a friend you're meeting, family on a trip &mdash; and cut access the moment you're done. No ad networks tracking you in the background.</p>
-    </div>
+      <span class="uc-more">Learn more &rarr;</span>
+    </a>
   </div>
 
   <div class="service-highlight">

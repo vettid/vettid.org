@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Use Cases &mdash; VettID</title>
+  <meta name="description" content="What you'll do with VettID: proven connections, minimal-disclosure credentials, agent access on a leash, verifiable votes, and more — each compared against how the internet works today." />
+  <link rel="canonical" href="https://vettid.org/use-cases"/>
+  <link rel="icon" type="image/png" href="/assets/favicon.png" />
+  <link rel="preload" href="/assets/fonts/inter-regular.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/assets/fonts/plusjakartasans-bold.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/fonts.css" />
+  <link rel="stylesheet" href="/shared/nav.css" />
+  <link rel="stylesheet" href="/assets/site.css">
+  <style>
+    .wrap { max-width: 760px; margin: 0 auto; padding: 130px 24px 90px; }
+    .hero { text-align: center; margin-bottom: 20px; }
+    .hero .eyebrow { display: block; margin-bottom: 18px; }
+    h1 { font-size: clamp(2.1rem, 5vw, 2.8rem); font-weight: 800; letter-spacing: -0.02em; margin-bottom: 18px; }
+    .lead { color: var(--ink-body); text-align: center; max-width: 620px; margin: 0 auto 10px; }
+    .lead b { color: var(--ink-hi); }
+    .wrap a { color: var(--gold); text-decoration: none; }
+    .wrap a:hover { text-decoration: underline; }
+
+    .section-nav {
+      display: flex; flex-wrap: wrap; justify-content: center; gap: 8px;
+      margin: 30px 0 10px;
+    }
+    .section-nav a {
+      font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.06em;
+      text-transform: uppercase; color: var(--ink-mute);
+      background: var(--surface-1); border: 1px solid var(--border-dark);
+      border-radius: 999px; padding: 6px 14px;
+    }
+    .section-nav a:hover { color: var(--gold); border-color: var(--surface-indigo); text-decoration: none; }
+
+    .uc { padding-top: 26px; scroll-margin-top: 90px; }
+    .uc + .uc { border-top: 1px solid var(--border-dark); margin-top: 34px; }
+    .uc-head { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; }
+    .uc-icon svg { width: 44px; height: 44px; display: block; }
+    .uc h2 { font-size: 1.45rem; font-weight: 800; letter-spacing: -0.015em; margin: 0; }
+    .uc-scenario { color: var(--ink-body); margin-bottom: 20px; }
+
+    .uc-strip { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+    .uc-col { border-radius: 12px; padding: 16px 18px; }
+    .uc-col h4 {
+      font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.12em;
+      text-transform: uppercase; margin-bottom: 10px; color: var(--ink-mute);
+    }
+    .uc-col ul { list-style: none; margin: 0; padding: 0; }
+    .uc-col li { font-size: 0.88rem; color: var(--ink-body); margin-bottom: 8px; }
+    .uc-col li:last-child { margin-bottom: 0; }
+    .uc-col .no { color: var(--error); margin-right: 6px; }
+    .uc-col .yes { color: var(--success); margin-right: 6px; }
+    .uc-today { border: 1px dashed var(--border-indigo); }
+    .uc-today li { color: var(--ink-mute); }
+    .uc-with { background: var(--surface-2); border: 1px solid var(--gold); }
+    @media (max-width: 640px) { .uc-strip { grid-template-columns: 1fr; } }
+
+    .uc-status {
+      font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.1em;
+      text-transform: uppercase; color: #7c7c88; margin-bottom: 14px;
+    }
+    .uc-nav { display: flex; justify-content: space-between; gap: 16px; font-weight: 600; font-size: 0.9rem; }
+
+    .uc-close { text-align: center; margin-top: 56px; color: var(--ink-body); }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <a href="/" class="header-logo">
+    <svg viewBox="0 0 264 350" fill="currentColor" aria-hidden="true"><defs><mask id="hdr-kh"><rect width="264" height="350" fill="white"/><circle cx="132" cy="190" r="29" fill="black"/><path d="M119 204 L104 282 Q102 292 112 292 L152 292 Q162 292 160 282 L145 204 Z" fill="black"/></mask></defs><path d="M8 0 L47 0 Q55 0 55 8 L55 54 L104 54 L104 8 Q104 0 112 0 L151 0 Q159 0 159 8 L159 54 L208 54 L208 8 Q208 0 216 0 L255 0 Q263 0 263 8 L263 76 Q263 86 254 90 L240 96 L23 96 L9 90 Q0 86 0 76 L0 8 Q0 0 8 0 Z"/><path mask="url(#hdr-kh)" d="M31 112 Q31 108 35 108 L229 108 Q233 108 233 112 L257 330 Q258 344 245 344 L19 344 Q6 344 7 330 Z"/></svg>
+    <span>VETTID</span>
+  </a>
+  <nav class="desktop-nav">
+    <a href="/why">Why VettID</a>
+    <a href="/security">Security</a>
+    <a href="/donate">Donate</a>
+    <a href="/open-source">Open Source</a>
+  </nav>
+  <span class="coming-soon-chip">Coming Soon</span>
+  <button class="nav-toggle" aria-label="Toggle menu" aria-expanded="false">
+    <span></span><span></span><span></span>
+  </button>
+</header>
+<div class="nav-menu" id="navMenu">
+  <a href="/">Home</a>
+  <a href="/why">Why VettID</a>
+  <a href="/donate">Donate</a>
+  <a href="/security">Security</a>
+  <a href="/open-source">Open Source</a>
+</div>
+<div class="nav-overlay"></div>
+
+<div class="wrap">
+
+  <div class="hero">
+    <span class="eyebrow">Use cases</span>
+    <h1>What you'll do with VettID</h1>
+    <p class="lead">Each of these is the same architecture wearing a different job. <b>No screenshots yet, on purpose</b> &mdash; everything here is in build, and we'd rather show you the real thing than a mockup. What we can show you now is the difference each piece makes.</p>
+  </div>
+
+  <nav class="section-nav" aria-label="Use cases">
+      <a href="#private-connections">Private Connections</a>
+      <a href="#service-connections">Service Connections</a>
+      <a href="#identity-credentials">Identity Credentials</a>
+      <a href="#secure-secrets">Secure Secrets</a>
+      <a href="#voting">Democratic Voting</a>
+      <a href="#encrypted-backup">Encrypted Backup</a>
+      <a href="#ai-agent-access">AI Agent Access</a>
+      <a href="#bitcoin">Bitcoin Wallet</a>
+      <a href="#agent-messaging">Encrypted Agent Messaging</a>
+      <a href="#location">Location on Your Terms</a>
+  </nav>
+
+  <section class="uc" id="private-connections">
+    <div class="uc-head">
+      <div class="uc-icon"><svg viewBox="0 0 64 64" fill="none">
+          <circle cx="22" cy="24" r="10" stroke="#ffc125" stroke-width="2"/>
+          <circle cx="42" cy="24" r="10" stroke="#ffc125" stroke-width="2"/>
+          <path d="M12 48c0-8 6-14 14-14h12c8 0 14 6 14 14" stroke="#ffc125" stroke-width="2" fill="none"/>
+          <path d="M28 36h8" stroke="#ffc125" stroke-width="2"/>
+        </svg></div>
+      <h2>Private Connections</h2>
+    </div>
+    <p class="uc-scenario">Your phone rings and a familiar voice needs something. Today, “who is this really?” is a feeling. A VettID connection is a channel between two vaults — both ends proven every time, end-to-end encrypted, with no platform in the middle reading along or selling the metadata.</p>
+    <div class="uc-strip">
+      <div class="uc-col uc-today">
+        <h4>Today</h4>
+        <ul>
+        <li><span class="no">✗</span> Caller ID and “sounds like them” are the whole check</li>
+        <li><span class="no">✗</span> Messages ride platforms that read, mine, or leak them</li>
+        <li><span class="no">✗</span> Your contact graph is someone's product</li>
+        </ul>
+      </div>
+      <div class="uc-col uc-with">
+        <h4>With VettID</h4>
+        <ul>
+        <li><span class="yes">✓</span> Both ends prove who they are — automatically, every time</li>
+        <li><span class="yes">✓</span> Calls and messages encrypted vault-to-vault, no middleman</li>
+        <li><span class="yes">✓</span> Who you know stays yours</li>
+        </ul>
+      </div>
+    </div>
+    <p class="uc-status">Status: in build &mdash; design, not yet product</p>
+    <nav class="uc-nav" aria-label="More use cases"><span></span><a href="#service-connections">Service Connections &rarr;</a></nav>
+  </section>
+  <section class="uc" id="service-connections">
+    <div class="uc-head">
+      <div class="uc-icon"><svg viewBox="0 0 64 64" fill="none">
+          <rect x="8" y="16" width="20" height="32" rx="3" stroke="#ffc125" stroke-width="2"/>
+          <rect x="36" y="12" width="20" height="40" rx="3" stroke="#ffc125" stroke-width="2"/>
+          <path d="M28 32h8" stroke="#ffc125" stroke-width="2" stroke-dasharray="2"/>
+          <circle cx="18" cy="40" r="3" fill="#ffc125"/>
+          <circle cx="46" cy="44" r="3" fill="#ffc125"/>
+        </svg></div>
+      <h2>Service Connections</h2>
+    </div>
+    <p class="uc-scenario">Every business you deal with keeps its own copy of you — and every copy is a future breach letter. A Service Vault connection inverts it: the business asks, you consent, they see what's needed for the moment and store nothing.</p>
+    <div class="uc-strip">
+      <div class="uc-col uc-today">
+        <h4>Today</h4>
+        <ul>
+        <li><span class="no">✗</span> Same forms, again, into another database</li>
+        <li><span class="no">✗</span> Every service keeps a copy; every copy can leak</li>
+        <li><span class="no">✗</span> “Delete my data” is a request, not a fact</li>
+        </ul>
+      </div>
+      <div class="uc-col uc-with">
+        <h4>With VettID</h4>
+        <ul>
+        <li><span class="yes">✓</span> Data accessed on demand, with your explicit consent</li>
+        <li><span class="yes">✓</span> Nothing stored means nothing to breach</li>
+        <li><span class="yes">✓</span> Revoke access the moment you're done — and it's actually gone</li>
+        </ul>
+      </div>
+    </div>
+    <p class="uc-status">Status: in build &mdash; design, not yet product</p>
+    <nav class="uc-nav" aria-label="More use cases"><a href="#private-connections">&larr; Private Connections</a><a href="#identity-credentials">Identity Credentials &rarr;</a></nav>
+  </section>
+  <section class="uc" id="identity-credentials">
+    <div class="uc-head">
+      <div class="uc-icon"><svg viewBox="0 0 64 64" fill="none">
+          <rect x="12" y="8" width="40" height="48" rx="4" stroke="#ffc125" stroke-width="2"/>
+          <path d="M20 20h24M20 28h24M20 36h16" stroke="#ffc125" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="32" cy="48" r="6" fill="#ffc125" opacity="0.3"/>
+          <path d="M29 48l2 2 4-4" stroke="#ffc125" stroke-width="2"/>
+        </svg></div>
+      <h2>Identity Credentials</h2>
+    </div>
+    <p class="uc-scenario">Proving you're over 21 shouldn't require a stranger keeping your address. Verified credentials live in your vault; when a proof is needed, you show exactly that fact — and the checker learns nothing else, keeps nothing at all.</p>
+    <div class="uc-strip">
+      <div class="uc-col uc-today">
+        <h4>Today</h4>
+        <ul>
+        <li><span class="no">✗</span> “Verify your age” means uploading the whole license</li>
+        <li><span class="no">✗</span> Copies of your ID scattered across databases</li>
+        <li><span class="no">✗</span> Every proof adds to someone's file</li>
+        </ul>
+      </div>
+      <div class="uc-col uc-with">
+        <h4>With VettID</h4>
+        <ul>
+        <li><span class="yes">✓</span> Prove the one fact — over 21, licensed, a member</li>
+        <li><span class="yes">✓</span> Nothing extra revealed, nothing retained</li>
+        <li><span class="yes">✓</span> Your credentials stay in your vault, under your control</li>
+        </ul>
+      </div>
+    </div>
+    <p class="uc-status">Status: in build &mdash; design, not yet product</p>
+    <nav class="uc-nav" aria-label="More use cases"><a href="#service-connections">&larr; Service Connections</a><a href="#secure-secrets">Secure Secrets &rarr;</a></nav>
+  </section>
+  <section class="uc" id="secure-secrets">
+    <div class="uc-head">
+      <div class="uc-icon"><svg viewBox="0 0 64 64" fill="none">
+          <rect x="16" y="24" width="32" height="24" rx="4" stroke="#ffc125" stroke-width="2"/>
+          <path d="M24 24v-6a8 8 0 1116 0v6" stroke="#ffc125" stroke-width="2" fill="none"/>
+          <circle cx="32" cy="36" r="4" fill="#ffc125"/>
+          <path d="M32 40v4" stroke="#ffc125" stroke-width="2"/>
+        </svg></div>
+      <h2>Secure Secrets</h2>
+    </div>
+    <p class="uc-scenario">Passwords in a notes app, API keys in a text file, the important stuff “somewhere.” Your vault keeps secrets in hardware isolation — usable from your phone, readable by no one else, including us.</p>
+    <div class="uc-strip">
+      <div class="uc-col uc-today">
+        <h4>Today</h4>
+        <ul>
+        <li><span class="no">✗</span> Secrets live in apps that sync them somewhere you can't see</li>
+        <li><span class="no">✗</span> A cloud password manager is a promise about someone else's server</li>
+        <li><span class="no">✗</span> One breach exposes everything at once</li>
+        </ul>
+      </div>
+      <div class="uc-col uc-with">
+        <h4>With VettID</h4>
+        <ul>
+        <li><span class="yes">✓</span> Encrypted in a hardware-isolated vault</li>
+        <li><span class="yes">✓</span> Unlocked by you, on your device — no company in the loop</li>
+        <li><span class="yes">✓</span> We couldn't read them if we wanted to — by design</li>
+        </ul>
+      </div>
+    </div>
+    <p class="uc-status">Status: in build &mdash; design, not yet product</p>
+    <nav class="uc-nav" aria-label="More use cases"><a href="#identity-credentials">&larr; Identity Credentials</a><a href="#voting">Democratic Voting &rarr;</a></nav>
+  </section>
+  <section class="uc" id="voting">
+    <div class="uc-head">
+      <div class="uc-icon"><svg viewBox="0 0 64 64" fill="none">
+          <rect x="8" y="20" width="48" height="32" rx="4" stroke="#ffc125" stroke-width="2"/>
+          <path d="M8 32h48" stroke="#ffc125" stroke-width="2"/>
+          <circle cx="20" cy="26" r="3" fill="#ffc125"/>
+          <circle cx="32" cy="26" r="3" fill="#ffc125" opacity="0.5"/>
+          <circle cx="44" cy="26" r="3" fill="#ffc125" opacity="0.3"/>
+          <path d="M20 44h8M36 44h8" stroke="#ffc125" stroke-width="2" stroke-linecap="round"/>
+        </svg></div>
+      <h2>Democratic Voting</h2>
+    </div>
+    <p class="uc-scenario">Eligible, counted exactly once, ballot secret, tally checkable — the goals sound contradictory only when identity and privacy are opposites. In a vault-based vote they're the same mechanism, which is how this project governs itself too.</p>
+    <div class="uc-strip">
+      <div class="uc-col uc-today">
+        <h4>Today</h4>
+        <ul>
+        <li><span class="no">✗</span> Verified voting means showing ID and trusting the count</li>
+        <li><span class="no">✗</span> Anonymous voting means unverifiable results</li>
+        <li><span class="no">✗</span> Communities outsource decisions to whoever holds the ballot box</li>
+        </ul>
+      </div>
+      <div class="uc-col uc-with">
+        <h4>With VettID</h4>
+        <ul>
+        <li><span class="yes">✓</span> Prove eligibility without revealing identity</li>
+        <li><span class="yes">✓</span> One person, one vote — enforced by math</li>
+        <li><span class="yes">✓</span> Anyone can check the count; no one can see your ballot</li>
+        </ul>
+      </div>
+    </div>
+    <p class="uc-status">Status: in build &mdash; design, not yet product</p>
+    <nav class="uc-nav" aria-label="More use cases"><a href="#secure-secrets">&larr; Secure Secrets</a><a href="#encrypted-backup">Encrypted Backup &rarr;</a></nav>
+  </section>
+  <section class="uc" id="encrypted-backup">
+    <div class="uc-head">
+      <div class="uc-icon"><svg viewBox="0 0 64 64" fill="none">
+          <path d="M32 8v12M20 14l6 10M44 14l-6 10" stroke="#ffc125" stroke-width="2"/>
+          <circle cx="32" cy="32" r="16" stroke="#ffc125" stroke-width="2"/>
+          <path d="M24 32h16M32 24v16" stroke="#ffc125" stroke-width="2" opacity="0.5"/>
+          <path d="M16 48l8-8M48 48l-8-8" stroke="#ffc125" stroke-width="2"/>
+        </svg></div>
+      <h2>Encrypted Backup</h2>
+    </div>
+    <p class="uc-scenario">A backup is a copy of your life — which is exactly why most backups are a privacy problem. Your vault backs up encrypted so only you can unlock it: lose the phone, keep the life, and nobody along the way could peek.</p>
+    <div class="uc-strip">
+      <div class="uc-col uc-today">
+        <h4>Today</h4>
+        <ul>
+        <li><span class="no">✗</span> Cloud backups a provider can read, scan, or hand over</li>
+        <li><span class="no">✗</span> Or no backup, and a lost phone is a lost life</li>
+        <li><span class="no">✗</span> Recovery means trusting a support department</li>
+        </ul>
+      </div>
+      <div class="uc-col uc-with">
+        <h4>With VettID</h4>
+        <ul>
+        <li><span class="yes">✓</span> Backups only you can unlock — provider-blind</li>
+        <li><span class="yes">✓</span> Recover everything on a new device, on your own</li>
+        <li><span class="yes">✓</span> No recovery department, because none is needed</li>
+        </ul>
+      </div>
+    </div>
+    <p class="uc-status">Status: in build &mdash; design, not yet product</p>
+    <nav class="uc-nav" aria-label="More use cases"><a href="#voting">&larr; Democratic Voting</a><a href="#ai-agent-access">AI Agent Access &rarr;</a></nav>
+  </section>
+  <section class="uc" id="ai-agent-access">
+    <div class="uc-head">
+      <div class="uc-icon"><svg viewBox="0 0 64 64" fill="none">
+          <!-- Brain/circuit icon representing AI agent -->
+          <circle cx="32" cy="28" r="14" stroke="#ffc125" stroke-width="2"/>
+          <path d="M24 28h4M36 28h4M28 22v4M36 22v4" stroke="#ffc125" stroke-width="2"/>
+          <circle cx="32" cy="28" r="4" fill="#ffc125" opacity="0.3"/>
+          <path d="M22 42h20" stroke="#ffc125" stroke-width="2"/>
+          <path d="M26 42v8M38 42v8" stroke="#ffc125" stroke-width="2"/>
+          <rect x="22" y="50" width="20" height="6" rx="2" stroke="#ffc125" stroke-width="2"/>
+          <path d="M32 42v-2" stroke="#ffc125" stroke-width="2" stroke-dasharray="2"/>
+        </svg></div>
+      <h2>AI Agent Access</h2>
+    </div>
+    <p class="uc-scenario">Agents are useful the moment you hand them credentials — which is the moment things usually go wrong. With VettID, an agent asks, you approve, and it gets scoped access to exactly the secret it needs, revocable the moment you change your mind.</p>
+    <div class="uc-strip">
+      <div class="uc-col uc-today">
+        <h4>Today</h4>
+        <ul>
+        <li><span class="no">✗</span> API keys pasted into configs and prompts</li>
+        <li><span class="no">✗</span> Standing access: the agent (and its logs) hold your keys forever</li>
+        <li><span class="no">✗</span> Revoking means hunting down every copy</li>
+        </ul>
+      </div>
+      <div class="uc-col uc-with">
+        <h4>With VettID</h4>
+        <ul>
+        <li><span class="yes">✓</span> You approve every connection, per agent, per secret</li>
+        <li><span class="yes">✓</span> The agent uses the credential without ever holding it</li>
+        <li><span class="yes">✓</span> Pull the leash once and access is gone everywhere</li>
+        </ul>
+      </div>
+    </div>
+    <p class="uc-status">Status: in build &mdash; design, not yet product</p>
+    <nav class="uc-nav" aria-label="More use cases"><a href="#encrypted-backup">&larr; Encrypted Backup</a><a href="#bitcoin">Bitcoin Wallet &rarr;</a></nav>
+  </section>
+  <section class="uc" id="bitcoin">
+    <div class="uc-head">
+      <div class="uc-icon"><svg viewBox="0 0 64 64" fill="none">
+          <circle cx="32" cy="28" r="16" stroke="#ffc125" stroke-width="2"/>
+          <text x="32" y="34" text-anchor="middle" fill="#ffc125" font-size="18" font-weight="bold">&#8383;</text>
+          <path d="M20 50h24" stroke="#ffc125" stroke-width="2"/>
+          <path d="M24 50v6M40 50v6" stroke="#ffc125" stroke-width="2"/>
+          <rect x="20" y="56" width="24" height="4" rx="1" stroke="#ffc125" stroke-width="1.5"/>
+        </svg></div>
+      <h2>Bitcoin Wallet</h2>
+    </div>
+    <p class="uc-scenario">“Not your keys, not your coins” — but self-custody usually means seed phrases taped in drawers. Your vault generates and holds wallet keys inside the hardware enclave: spendable by you, exportable by no one.</p>
+    <div class="uc-strip">
+      <div class="uc-col uc-today">
+        <h4>Today</h4>
+        <ul>
+        <li><span class="no">✗</span> Exchange custody: your coins, their keys, their risk</li>
+        <li><span class="no">✗</span> Self-custody: a seed phrase one house fire from gone</li>
+        <li><span class="no">✗</span> Sending means addresses copied through chat apps</li>
+        </ul>
+      </div>
+      <div class="uc-col uc-with">
+        <h4>With VettID</h4>
+        <ul>
+        <li><span class="yes">✓</span> Keys generated and held in the enclave — they never leave</li>
+        <li><span class="yes">✓</span> Pay your connections directly, address by QR</li>
+        <li><span class="yes">✓</span> Backed up the same encrypted, provider-blind way</li>
+        </ul>
+      </div>
+    </div>
+    <p class="uc-status">Status: in build &mdash; design, not yet product</p>
+    <nav class="uc-nav" aria-label="More use cases"><a href="#ai-agent-access">&larr; AI Agent Access</a><a href="#agent-messaging">Encrypted Agent Messaging &rarr;</a></nav>
+  </section>
+  <section class="uc" id="agent-messaging">
+    <div class="uc-head">
+      <div class="uc-icon"><svg viewBox="0 0 64 64" fill="none">
+          <circle cx="20" cy="24" r="8" stroke="#ffc125" stroke-width="2"/>
+          <rect x="36" y="16" width="16" height="16" rx="3" stroke="#ffc125" stroke-width="2"/>
+          <path d="M28 28l8 4" stroke="#ffc125" stroke-width="2" stroke-dasharray="3"/>
+          <path d="M12 44c0-6 4-10 8-10h0" stroke="#ffc125" stroke-width="2"/>
+          <rect x="14" y="46" width="28" height="10" rx="3" stroke="#ffc125" stroke-width="2"/>
+          <path d="M20 51h16" stroke="#ffc125" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="44" cy="24" r="4" fill="#ffc125" opacity="0.3"/>
+        </svg></div>
+      <h2>Encrypted Agent Messaging</h2>
+    </div>
+    <p class="uc-scenario">If an agent works for you, its reports shouldn't route through somebody else's chat platform. Agent messages and approval requests arrive in your feed over your own encrypted channel, from an agent whose identity is verified — so “my agent says” actually means your agent said it.</p>
+    <div class="uc-strip">
+      <div class="uc-col uc-today">
+        <h4>Today</h4>
+        <ul>
+        <li><span class="no">✗</span> Agent chatter rides third-party platforms</li>
+        <li><span class="no">✗</span> Approval requests arrive as forgeable emails and links</li>
+        <li><span class="no">✗</span> Anything in the pipe can read the traffic</li>
+        </ul>
+      </div>
+      <div class="uc-col uc-with">
+        <h4>With VettID</h4>
+        <ul>
+        <li><span class="yes">✓</span> Your own end-to-end encrypted channel — no chat app in the loop</li>
+        <li><span class="yes">✓</span> Verified agent identity on every message</li>
+        <li><span class="yes">✓</span> Approvals in your feed, provably from your agent</li>
+        </ul>
+      </div>
+    </div>
+    <p class="uc-status">Status: in build &mdash; design, not yet product</p>
+    <nav class="uc-nav" aria-label="More use cases"><a href="#bitcoin">&larr; Bitcoin Wallet</a><a href="#location">Location on Your Terms &rarr;</a></nav>
+  </section>
+  <section class="uc" id="location">
+    <div class="uc-head">
+      <div class="uc-icon"><svg viewBox="0 0 64 64" fill="none">
+          <path d="M32 8c-9 0-16 7-16 16 0 12 16 32 16 32s16-20 16-32c0-9-7-16-16-16z" stroke="#ffc125" stroke-width="2"/>
+          <circle cx="32" cy="24" r="6" stroke="#ffc125" stroke-width="2"/>
+        </svg></div>
+      <h2>Location on Your Terms</h2>
+    </div>
+    <p class="uc-scenario">“Share my location” shouldn't be a lifestyle. Share live location with the person meeting you, the family on the trip — and end it the moment it's done, with no ad network riding along in the background.</p>
+    <div class="uc-strip">
+      <div class="uc-col uc-today">
+        <h4>Today</h4>
+        <ul>
+        <li><span class="no">✗</span> Location sharing means an app tracking you always</li>
+        <li><span class="no">✗</span> “Only while using” still feeds the ad ecosystem</li>
+        <li><span class="no">✗</span> Turning it off is a settings scavenger hunt</li>
+        </ul>
+      </div>
+      <div class="uc-col uc-with">
+        <h4>With VettID</h4>
+        <ul>
+        <li><span class="yes">✓</span> Share with exactly the people you choose</li>
+        <li><span class="yes">✓</span> Cut access the instant you're done</li>
+        <li><span class="yes">✓</span> Nobody else in the loop — no networks, no brokers</li>
+        </ul>
+      </div>
+    </div>
+    <p class="uc-status">Status: in build &mdash; design, not yet product</p>
+    <nav class="uc-nav" aria-label="More use cases"><a href="#agent-messaging">&larr; Encrypted Agent Messaging</a><span></span></nav>
+  </section>
+
+  <p class="uc-close">The architecture behind all of this lives on <a href="/security">Security</a>, the reasoning on <a href="/why">Why VettID</a>, and the code on <a href="/open-source">Open Source</a> as we publish it.</p>
+
+</div>
+
+<footer>
+  <div class="battlement-mini"></div>
+  <p class="footer-nav"><a href="/">Home</a> &middot; <a href="/why">Why VettID</a> &middot; <a href="/security">Security</a> &middot; <a href="/donate">Donate</a> &middot; <a href="/open-source">Open Source</a> &middot; <a href="https://github.com/vettid" target="_blank" rel="noopener noreferrer">GitHub</a></p>
+  <p>&copy; 2026 The VettID Project. All rights reserved.</p>
+  <p class="footer-privacy">No trackers, no analytics, no third-party resources &mdash; this site loads nothing from anyone but us.</p>
+</footer>
+
+<script src="/shared/js/nav.js"></script>
+
+</body>
+</html>
