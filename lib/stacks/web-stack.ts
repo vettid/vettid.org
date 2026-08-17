@@ -218,13 +218,15 @@ function handler(event) {
   // server-side code, so anything probing for dotfiles, VCS metadata, PHP,
   // or CMS internals is noise at best.
   var blockedPrefixes = [
-    '/.git', '/.svn', '/.hg', '/.env', '/.aws', '/.ssh',
-    '/.htaccess', '/.htpasswd', '/.ds_store', '/.idea', '/.vscode',
     '/wp-admin', '/wp-login', '/wp-content', '/wp-includes',
     '/phpmyadmin', '/cgi-bin', '/xmlrpc.php'
   ];
   var blocked = false;
   if (!wellKnown) {
+    // Any hidden path segment, anywhere (/.git, /.env, /.cursor/mcp.json,
+    // /backup/.ssh) — the site publishes nothing dotted outside /.well-known,
+    // so a universal rule beats enumerating scanner wordlists.
+    if (norm.indexOf('/.') !== -1) { blocked = true; }
     for (var b = 0; b < blockedPrefixes.length; b++) {
       if (norm.indexOf(blockedPrefixes[b]) === 0) { blocked = true; break; }
     }
@@ -253,6 +255,28 @@ function handler(event) {
 `),
       comment: 'Rewrite extensionless URIs to index.html and block sensitive paths',
     });
+
+    // Every real route on the site, as URI prefixes. The probe-paths rate
+    // rule counts requests that match NONE of these — i.e. paths that cannot
+    // exist. Update when a new top-level route ships (directories under
+    // website/ are the source of truth; /playbooks and /api are the
+    // non-static additions).
+    const CONTENT_PREFIXES = [
+      '/why', '/security', '/donate', '/open-source', '/playbooks',
+      '/assets/', '/js/', '/shared/', '/api/', '/.well-known/',
+      '/robots.txt', '/sitemap.xml', '/llms.txt', '/humans.txt',
+      '/manifest.json', '/favicon.ico', '/404', '/index.html',
+    ];
+    const matchUri = (positionalConstraint: string, searchString: string): wafv2.CfnWebACL.StatementProperty => ({
+      byteMatchStatement: {
+        fieldToMatch: { uriPath: {} },
+        positionalConstraint,
+        searchString,
+        textTransformations: [{ priority: 0, type: 'NONE' }],
+      },
+    });
+    const matchUriExactly = (s: string) => matchUri('EXACTLY', s);
+    const matchUriPrefix = (s: string) => matchUri('STARTS_WITH', s);
 
     // WAF WebACL: default allow. Primary job is telemetry — its logs are the
     // only CloudFront-compatible source of JA3/JA4 TLS fingerprints and
@@ -284,8 +308,68 @@ function handler(event) {
           },
         },
         {
-          name: 'aws-ip-reputation',
+          // The 404-rate trigger WAF can't literally have (it never sees
+          // response codes), implemented as its earlier equivalent: a tight
+          // per-IP cap on requests for paths outside the known content
+          // tree. Real visitors make ~zero such requests; wordlist
+          // brute-forcers make hundreds.
+          name: 'rate-limit-probe-paths',
           priority: 1,
+          action: { block: { customResponse: { responseCode: 429 } } },
+          statement: {
+            rateBasedStatement: {
+              limit: 25,
+              aggregateKeyType: 'IP',
+              evaluationWindowSec: 300,
+              scopeDownStatement: {
+                notStatement: {
+                  statement: {
+                    orStatement: {
+                      statements: [
+                        matchUriExactly('/'),
+                        ...CONTENT_PREFIXES.map(matchUriPrefix),
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: 'vettid-org-rate-limit-probes',
+            sampledRequestsEnabled: true,
+          },
+        },
+        {
+          // Multiplexed operators share one TLS fingerprint across rented
+          // IPs (observed: one curl JA4, 43 IPs, 7k+ requests in 3 days) —
+          // per-IP limits structurally can't see them; this can. Limit is
+          // set for today's traffic; popular *browser* JA4s aggregate
+          // thousands of legit users, so revisit the threshold if launch
+          // traffic 429s a mainstream fingerprint.
+          name: 'rate-limit-per-ja4',
+          priority: 2,
+          action: { block: { customResponse: { responseCode: 429 } } },
+          statement: {
+            rateBasedStatement: {
+              limit: 600,
+              aggregateKeyType: 'CUSTOM_KEYS',
+              evaluationWindowSec: 300,
+              customKeys: [
+                { ja4Fingerprint: { fallbackBehavior: 'NO_MATCH' } },
+              ],
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: 'vettid-org-rate-limit-ja4',
+            sampledRequestsEnabled: true,
+          },
+        },
+        {
+          name: 'aws-ip-reputation',
+          priority: 3,
           overrideAction: { count: {} },
           statement: {
             managedRuleGroupStatement: {
@@ -301,7 +385,7 @@ function handler(event) {
         },
         {
           name: 'aws-anonymous-ip',
-          priority: 2,
+          priority: 4,
           overrideAction: { count: {} },
           statement: {
             managedRuleGroupStatement: {

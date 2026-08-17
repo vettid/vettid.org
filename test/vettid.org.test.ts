@@ -160,6 +160,28 @@ describe('VettidOrgStack', () => {
             },
           }),
           Match.objectLike({
+            Name: 'rate-limit-probe-paths',
+            Action: { Block: { CustomResponse: { ResponseCode: 429 } } },
+            Statement: {
+              RateBasedStatement: Match.objectLike({
+                Limit: 25,
+                AggregateKeyType: 'IP',
+                ScopeDownStatement: Match.objectLike({ NotStatement: Match.anyValue() }),
+              }),
+            },
+          }),
+          Match.objectLike({
+            Name: 'rate-limit-per-ja4',
+            Action: { Block: { CustomResponse: { ResponseCode: 429 } } },
+            Statement: {
+              RateBasedStatement: Match.objectLike({
+                Limit: 600,
+                AggregateKeyType: 'CUSTOM_KEYS',
+                CustomKeys: [Match.objectLike({ JA4Fingerprint: Match.anyValue() })],
+              }),
+            },
+          }),
+          Match.objectLike({
             Name: 'aws-ip-reputation',
             OverrideAction: { Count: {} },
           }),
