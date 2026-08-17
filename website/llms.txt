@@ -11,6 +11,7 @@
 - [Home](https://vettid.org/): what VettID does — private connections, identity
   credentials, secure secrets, AI agent access, encrypted backup, and more
 - [Why VettID](https://vettid.org/why): the mission and editorial position — privacy
+- https://vettid.org/use-cases: What you can do with VettID — each use case compared with how the internet works today
   as a right, identity vs. anonymity as different tools, and how the position
   shapes the architecture
 - [Security](https://vettid.org/security): vulnerability disclosure policy,
