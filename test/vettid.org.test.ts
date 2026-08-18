@@ -4,6 +4,7 @@ import { VettidOrgStack } from '../lib/stacks/web-stack';
 import { VettidOrgDnsStack } from '../lib/stacks/dns-stack';
 import { VettidOrgSignupStack } from '../lib/stacks/signup-stack';
 import * as route53 from 'aws-cdk-lib/aws-route53';
+import { VettidOrgPlaybooksStack } from '../lib/stacks/playbooks-stack';
 
 describe('VettidOrgStack', () => {
   let template: Template;
@@ -370,6 +371,30 @@ describe('VettidOrgDnsStack', () => {
     template.hasResourceProperties('AWS::Route53::RecordSet', {
       Name: '_dmarc.test.example.com.',
       Type: 'TXT',
+    });
+  });
+});
+
+describe('VettidOrgPlaybooksStack', () => {
+  test('creates retained private playbooks bucket and web stack wires the behavior', () => {
+    const app = new cdk.App();
+    const env = { account: '123456789012', region: 'us-east-1' };
+    const playbooks = new VettidOrgPlaybooksStack(app, 'TestPlaybooks', { env });
+    const web = new VettidOrgStack(app, 'TestWebWithPlaybooks', {
+      domainName: 'test.example.com',
+      enableCustomDomain: false,
+      playbooksBucket: playbooks.bucket,
+      env,
+    });
+    const pbTemplate = Template.fromStack(playbooks);
+    pbTemplate.hasResource('AWS::S3::Bucket', { DeletionPolicy: 'Retain' });
+    const webTemplate = Template.fromStack(web);
+    webTemplate.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({
+        CacheBehaviors: Match.arrayWith([
+          Match.objectLike({ PathPattern: '/playbooks/*' }),
+        ]),
+      }),
     });
   });
 });
