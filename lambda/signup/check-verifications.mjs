@@ -2,9 +2,9 @@
 // verification succeeded (the user accepted the SES verification email).
 // Privacy: never log email addresses; log counts only.
 
-import { SESv2Client, GetEmailIdentityCommand, SendEmailCommand } from '@aws-sdk/client-sesv2';
+import { SESv2Client, GetEmailIdentityCommand, SendEmailCommand, DeleteEmailIdentityCommand } from '@aws-sdk/client-sesv2';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, QueryCommand, UpdateCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
 
 const ses = new SESv2Client({});
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
@@ -50,6 +50,7 @@ export const handler = async () => {
 
   let confirmed = 0;
   let stillPending = 0;
+  let reclaimed = 0;
 
   for (const item of pending.Items ?? []) {
     let verified = false;
@@ -64,7 +65,24 @@ export const handler = async () => {
     }
 
     if (!verified) {
-      stillPending += 1;
+      // Reclaim identities of subscribers who never verified: once the row's
+      // TTL window has passed (SES links expire in 24h; rows TTL at 3 days),
+      // the identity is dead weight against the account's identity quota.
+      // Delete the SES identity and the row now rather than leaking the
+      // identity and waiting on DynamoDB TTL. Best-effort: a failure just
+      // retries next sweep.
+      const expired = typeof item.expiresAt === 'number' && item.expiresAt < Math.floor(Date.now() / 1000);
+      if (expired) {
+        try {
+          await ses.send(new DeleteEmailIdentityCommand({ EmailIdentity: item.email }));
+          await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { email: item.email } }));
+          reclaimed += 1;
+        } catch (err) {
+          console.log(JSON.stringify({ outcome: 'reclaim_failed', code: err?.name }));
+        }
+      } else {
+        stillPending += 1;
+      }
       continue;
     }
 
@@ -82,6 +100,6 @@ export const handler = async () => {
     confirmed += 1;
   }
 
-  console.log(JSON.stringify({ outcome: 'sweep', confirmed, stillPending }));
-  return { confirmed, stillPending };
+  console.log(JSON.stringify({ outcome: 'sweep', confirmed, stillPending, reclaimed }));
+  return { confirmed, stillPending, reclaimed };
 };

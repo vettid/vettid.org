@@ -86,15 +86,33 @@ export class VettidOrgSignupStack extends cdk.Stack {
       logRetention: logs.RetentionDays.ONE_MONTH,
     });
 
-    table.grantReadWriteData(subscribeFn);
-    table.grantReadWriteData(checkFn);
+    // DynamoDB least privilege (was grantReadWriteData on both):
+    //  - subscribe reads a row by key and writes new rows
+    //  - check queries the status GSI and updates/deletes rows
+    table.grant(subscribeFn, 'dynamodb:GetItem', 'dynamodb:PutItem');
+    table.grant(checkFn, 'dynamodb:UpdateItem', 'dynamodb:DeleteItem');
+    checkFn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:Query'],
+      resources: [`${table.tableArn}/index/*`],
+    }));
 
+    // ses:SendEmail stays on '*' ON PURPOSE. Empirically, scoping it to the
+    // vettid.org domain-identity ARN causes AccessDeniedException on every
+    // send (SES v2 SendEmail does not authorize a display-name sender against
+    // the domain-identity resource the way the docs imply), which silently
+    // kills the admin notifications — the exact breakage this has hit before.
+    // The From address is hardcoded (no-reply@vettid.org) in both Lambdas, so
+    // the residual risk of '*' is a future code change, not live exposure.
+    // The identity actions can't be resource-scoped anyway.
     subscribeFn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['ses:CreateEmailIdentity', 'ses:GetEmailIdentity', 'ses:SendEmail'],
       resources: ['*'],
     }));
+
     checkFn.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['ses:GetEmailIdentity', 'ses:SendEmail'],
+      // DeleteEmailIdentity reclaims identities of subscribers who never
+      // verified (identity-quota-exhaustion guard).
+      actions: ['ses:GetEmailIdentity', 'ses:DeleteEmailIdentity', 'ses:SendEmail'],
       resources: ['*'],
     }));
 

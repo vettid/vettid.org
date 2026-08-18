@@ -37,6 +37,7 @@ export class VettidOrgStack extends cdk.Stack {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
       versioned: true,
     });
 
@@ -46,6 +47,7 @@ export class VettidOrgStack extends cdk.Stack {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
       lifecycleRules: [
         {
           // Delete logs after 30 days
@@ -61,6 +63,7 @@ export class VettidOrgStack extends cdk.Stack {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
       lifecycleRules: [
         {
           expiration: cdk.Duration.days(30),
@@ -380,8 +383,30 @@ function handler(event) {
           },
         },
         {
-          name: 'aws-ip-reputation',
+          // Signup endpoint abuse guard: the /api/* endpoint can trigger an
+          // SES email per request, so it gets a much tighter per-IP cap than
+          // the site-wide 300. A human submits the form once; 20/5min is
+          // generous. Scoped to /api/ so it never touches page traffic.
+          name: 'rate-limit-api',
           priority: 3,
+          action: { block: { customResponse: { responseCode: 429 } } },
+          statement: {
+            rateBasedStatement: {
+              limit: 20,
+              aggregateKeyType: 'IP',
+              evaluationWindowSec: 300,
+              scopeDownStatement: matchUriPrefix('/api/'),
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: 'vettid-org-rate-limit-api',
+            sampledRequestsEnabled: true,
+          },
+        },
+        {
+          name: 'aws-ip-reputation',
+          priority: 4,
           overrideAction: { count: {} },
           statement: {
             managedRuleGroupStatement: {
@@ -397,7 +422,7 @@ function handler(event) {
         },
         {
           name: 'aws-anonymous-ip',
-          priority: 4,
+          priority: 5,
           overrideAction: { count: {} },
           statement: {
             managedRuleGroupStatement: {
