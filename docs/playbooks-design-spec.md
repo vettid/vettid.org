@@ -174,8 +174,10 @@ sources:                                    # real-world grounding
 Body structure (H2s, in order):
 
 1. **What it is** — define the concept in plain language. Two to four paragraphs. Analogies over acronyms.
-2. **Why it's a problem** — the real-world grounding. Reference actual reported events (from `sources`) in summary form. Never sensationalize; the facts are alarming enough. Summarize and cite — do not reproduce article text.
-3. **What you can do** — the best practice, in principle. Ends in a **playbook bridge**: an auto-rendered block listing every playbook sharing a concern tag, styled as "Ready to fix this? →".
+2. **Why it's a problem** — the *mechanism*: how the collection, impersonation, or data-copying actually works. Never sensationalize; the facts are alarming enough.
+3. **What it costs** — the *real-world stakes*: what the mechanism costs actual people. Reference reported events (from `sources`) in summary form — summarize and cite, do not reproduce article text.
+
+The auto-rendered **playbook bridge** ("Ready to fix this? →", every playbook sharing a concern tag) is the article's **only call to action**. There is deliberately no "what you can do" section: imperative advice belongs in playbooks — an article that starts issuing instructions is a playbook with the precision stripped out, and a maintenance drift hazard once the real playbook ships. *(Revised 2026-08-17 from the original three-section structure, which ended with "What you can do.")*
 4. *(Optional)* **Where we stand** — only if the topic touches editorial territory (identity/anonymity). One short paragraph max, clearly voiced, linking to `/why`. Most articles omit this section entirely.
 
 ### 5.3 Anchor articles (launch set)

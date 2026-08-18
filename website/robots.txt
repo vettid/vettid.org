@@ -6,3 +6,4 @@ Allow: /
 
 # Sitemap location
 Sitemap: https://vettid.org/sitemap.xml
+Sitemap: https://vettid.org/playbooks/sitemap.xml
