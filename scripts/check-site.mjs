@@ -48,6 +48,9 @@ for (const file of htmlFiles) {
   for (const m of src.matchAll(/(?:href|src)="(\/[^"#?]*)/g)) {
     const path = m[1];
     if (path === '/') continue;
+    // /playbooks/* is a separate CloudFront origin (vettid-playbooks repo),
+    // not part of this file tree
+    if (path === '/playbooks/' || path.startsWith('/playbooks/')) continue;
     const direct = join(ROOT, path);
     const asIndex = join(ROOT, path, 'index.html');
     if (!existsSync(direct) && !existsSync(asIndex)) {
