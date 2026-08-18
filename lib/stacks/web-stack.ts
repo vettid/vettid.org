@@ -210,6 +210,16 @@ function handler(event) {
   // deliberately checked before the dotfile blocklist below.
   var wellKnown = norm.indexOf('/.well-known/') === 0;
 
+  // Bare /playbooks misses the /playbooks/* behavior (pattern needs the
+  // slash) and would 404 against the main origin — canonicalize it.
+  if (norm === '/playbooks') {
+    return {
+      statusCode: 301,
+      statusDescription: 'Moved Permanently',
+      headers: { 'location': { value: '/playbooks/' } }
+    };
+  }
+
   // RFC 9116 legacy location: serve the canonical file for /security.txt
   if (norm === '/security.txt') {
     request.uri = '/.well-known/security.txt';
