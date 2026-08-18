@@ -485,8 +485,18 @@ function handler(event) {
 
     const additionalBehaviors: Record<string, cloudfront.BehaviorOptions> = {};
     if (props.playbooksBucket) {
+      // Consume the bucket as an import (attributes only): if the origin
+      // helper used the live construct it would write the OAC policy into
+      // the bucket's own stack with this distribution's ARN — a dependency
+      // cycle. The read grant lives in the playbooks stack instead,
+      // account-scoped.
+      const playbooksOrigin = s3.Bucket.fromBucketAttributes(this, 'PlaybooksOrigin', {
+        bucketArn: props.playbooksBucket.bucketArn,
+        bucketName: props.playbooksBucket.bucketName,
+        region: this.region,
+      });
       additionalBehaviors['/playbooks/*'] = {
-        origin: origins.S3BucketOrigin.withOriginAccessControl(props.playbooksBucket),
+        origin: origins.S3BucketOrigin.withOriginAccessControl(playbooksOrigin),
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
         allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,

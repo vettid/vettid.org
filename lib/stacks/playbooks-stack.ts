@@ -1,6 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as iam from 'aws-cdk-lib/aws-iam';
 
 /**
  * Origin bucket for the /playbooks/* section (see docs/playbooks-design-spec.md).
@@ -25,6 +26,19 @@ export class VettidOrgPlaybooksStack extends cdk.Stack {
       encryption: s3.BucketEncryption.S3_MANAGED,
       versioned: true,
     });
+
+    // OAC read grant, scoped to this account rather than one distribution:
+    // a distribution-ARN condition would make this stack depend on the web
+    // stack while the web stack depends on this bucket — a cycle. Account
+    // scoping means "any CloudFront distribution we own", which for public
+    // website content is an acceptable widening.
+    this.bucket.addToResourcePolicy(new iam.PolicyStatement({
+      sid: 'AllowCloudFrontOAC',
+      principals: [new iam.ServicePrincipal('cloudfront.amazonaws.com')],
+      actions: ['s3:GetObject'],
+      resources: [this.bucket.arnForObjects('*')],
+      conditions: { StringEquals: { 'aws:SourceAccount': this.account } },
+    }));
 
     new cdk.CfnOutput(this, 'PlaybooksBucketName', {
       value: this.bucket.bucketName,
