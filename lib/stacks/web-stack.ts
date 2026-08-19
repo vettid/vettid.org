@@ -405,8 +405,35 @@ function handler(event) {
           },
         },
         {
-          name: 'aws-ip-reputation',
+          // Same /api/ endpoint, keyed by JA4 TLS fingerprint: the observed
+          // abusers multiplex one tool across many IPs, which a per-IP limit
+          // can't see but a shared fingerprint can. Threshold is set well
+          // above what a crowd of real browsers (which share a JA4) would
+          // produce at current volume — revisit alongside the site-wide JA4
+          // rule if launch traffic ever 429s a mainstream fingerprint.
+          name: 'rate-limit-api-ja4',
           priority: 4,
+          action: { block: { customResponse: { responseCode: 429 } } },
+          statement: {
+            rateBasedStatement: {
+              limit: 50,
+              aggregateKeyType: 'CUSTOM_KEYS',
+              evaluationWindowSec: 300,
+              customKeys: [
+                { ja4Fingerprint: { fallbackBehavior: 'NO_MATCH' } },
+              ],
+              scopeDownStatement: matchUriPrefix('/api/'),
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: 'vettid-org-rate-limit-api-ja4',
+            sampledRequestsEnabled: true,
+          },
+        },
+        {
+          name: 'aws-ip-reputation',
+          priority: 5,
           overrideAction: { count: {} },
           statement: {
             managedRuleGroupStatement: {
@@ -422,7 +449,7 @@ function handler(event) {
         },
         {
           name: 'aws-anonymous-ip',
-          priority: 5,
+          priority: 6,
           overrideAction: { count: {} },
           statement: {
             managedRuleGroupStatement: {
