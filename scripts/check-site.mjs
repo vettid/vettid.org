@@ -59,6 +59,27 @@ for (const file of htmlFiles) {
   }
 }
 
+// 6. Header/nav chrome is styled ONLY in shared/nav.css — the one copy the
+// playbooks origin also loads. A redefinition anywhere else (site.css, a
+// page <style> block) is exactly how the two sections drift apart.
+const CHROME_SELECTORS = /(?:^|[\s,{}])(?:header\s*\{|header\.site\b|\.header-logo\b|\.coming-soon-chip\b|\.desktop-nav\b|\.nav-toggle\b|\.nav-menu\b|\.nav-overlay\b)/;
+for (const file of walk(ROOT).filter((p) => p.endsWith('.css') || p.endsWith('.html'))) {
+  const rel = file.slice(ROOT.length + 1);
+  if (rel === join('shared', 'nav.css')) continue;
+  let css = file.endsWith('.css') ? readFileSync(file, 'utf8') : '';
+  if (file.endsWith('.html')) {
+    for (const m of readFileSync(file, 'utf8').matchAll(/<style>([\s\S]*?)<\/style>/g)) css += m[1];
+  }
+  // Strip comments, then test rule text (selectors + declarations); the
+  // selector tokens are distinctive enough not to appear in declarations.
+  css = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  for (const line of css.split('\n')) {
+    if (CHROME_SELECTORS.test(line)) {
+      errors.push(`${rel}: styles header/nav chrome ("${line.trim().slice(0, 60)}") — belongs in shared/nav.css only`);
+    }
+  }
+}
+
 if (errors.length) {
   console.error(`check:site FAILED (${errors.length}):`);
   for (const e of errors) console.error(`  ✗ ${e}`);
