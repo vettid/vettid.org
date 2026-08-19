@@ -1,8 +1,78 @@
 /**
- * VettID shared navigation styles: the hamburger toggle, slide-out menu
- * chrome, and the desktop inline nav (>=1024px). Loaded by every page
- * alongside assets/site.css.
+ * VettID shared navigation styles: the header chrome (frame, logo, Coming
+ * Soon chip), the hamburger toggle, slide-out menu chrome, and the desktop
+ * inline nav (>=1024px). Loaded by every page alongside assets/site.css,
+ * AND by /playbooks/* (separate repo, same CloudFront distribution).
+ *
+ * This file is the ONLY place header/nav chrome may be styled. site.css and
+ * the playbooks repo must not redefine these selectors — both repos' check
+ * scripts enforce that. That's what keeps the nav identical across sections.
  */
+
+/* ── Header chrome ──
+   Main-site pages use a bare <header>; playbooks marks it <header class="site">.
+   The element selector covers both (page-top header only — neither site nests
+   <header> elsewhere). var() fallbacks keep this file self-contained. */
+header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 32px;
+  background: rgba(11, 11, 18, 0.9);
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border-dark, #26263e);
+}
+
+.header-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+}
+
+.header-logo svg {
+  width: 30px;
+  height: auto;
+  color: var(--gold, #ffc125);
+}
+
+.header-logo span {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--ink-hi, #f7f7fa);
+  letter-spacing: 1px;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+/* Coming Soon chip — lives in the header slot where sign-in/register will
+   eventually go */
+.desktop-nav { margin-left: auto; }
+
+.coming-soon-chip {
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: var(--gold, #ffc125);
+  color: #101018;
+  padding: 7px 14px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+@media (max-width: 1023px) {
+  .coming-soon-chip { margin-left: auto; }
+}
+
+@media (max-width: 768px) {
+  .header-logo span { display: none; }
+  .coming-soon-chip { font-size: 10px; padding: 6px 10px; }
+}
 
 /* Hamburger button - always visible */
 .nav-toggle {

@@ -132,58 +132,9 @@ h1, h2, h3, h4, h5, h6 {
 .band::before { top: -12px; }
 .band::after { bottom: -12px; transform: scaleX(-1) scaleY(-1); }
 
-/* Header */
-header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 32px;
-  background: rgba(11, 11, 18, 0.9);
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 100;
-  backdrop-filter: blur(10px);
-  border-bottom: 1px solid var(--border-dark);
-}
-
-.header-logo {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  text-decoration: none;
-}
-
-.header-logo svg {
-  width: 30px;
-  height: auto;
-  color: var(--gold);
-}
-
-.header-logo span {
-  font-size: 1.15rem;
-  font-weight: 800;
-  color: var(--ink-hi);
-  letter-spacing: 1px;
-  font-family: 'Plus Jakarta Sans', sans-serif;
-}
-
-/* Coming Soon chip — lives in the header slot where sign-in/register will
-   eventually go */
-.desktop-nav { margin-left: auto; }
-
-.coming-soon-chip {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  background: var(--gold);
-  color: #101018;
-  padding: 7px 14px;
-  border-radius: 4px;
-  white-space: nowrap;
-}
+/* Header chrome (frame, logo, Coming Soon chip) lives in shared/nav.css —
+   the one copy /playbooks/* also loads. Do not restyle it here; the check
+   script fails the build if these selectors reappear. */
 
 /* Footer */
 footer {
@@ -229,15 +180,6 @@ footer .footer-legal {
   color: #66666e;
   font-size: 0.75rem;
   margin-top: 10px;
-}
-
-@media (max-width: 1023px) {
-  .coming-soon-chip { margin-left: auto; }
-}
-
-@media (max-width: 768px) {
-  .header-logo span { display: none; }
-  .coming-soon-chip { font-size: 10px; padding: 6px 10px; }
 }
 
 /* Utilities */
