@@ -89,7 +89,9 @@ export class VettidOrgSignupStack extends cdk.Stack {
     // DynamoDB least privilege (was grantReadWriteData on both):
     //  - subscribe reads a row by key and writes new rows
     //  - check queries the status GSI and updates/deletes rows
-    table.grant(subscribeFn, 'dynamodb:GetItem', 'dynamodb:PutItem');
+    // GetItem/PutItem for subscriber rows; UpdateItem for the atomic
+    // global-send-quota counter (sentinel key in the same table).
+    table.grant(subscribeFn, 'dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem');
     table.grant(checkFn, 'dynamodb:UpdateItem', 'dynamodb:DeleteItem');
     checkFn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['dynamodb:Query'],

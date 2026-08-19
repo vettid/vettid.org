@@ -3,13 +3,44 @@
 
 import { SESv2Client, CreateEmailIdentityCommand, GetEmailIdentityCommand, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 
 const ses = new SESv2Client({});
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TABLE = process.env.TABLE_NAME;
 
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
+
+// Global outbound circuit breaker: a backstop for the WAF per-IP/per-JA4
+// rate limits. Even an actor rotating both IP and fingerprint can't cause
+// more than this many new verification emails per hour, account-wide, which
+// caps the worst-case spam-relay / reputation-burn blast radius. Generous
+// vs. real signup volume; when tripped it's logged so we notice.
+const GLOBAL_HOURLY_CAP = 200;
+
+// Returns true if creating one more identity would exceed the hourly cap.
+// Atomic counter in the same table under a sentinel key ('#' can't begin a
+// real email), self-expiring via TTL. Fails open (returns false) so a
+// counter error never blocks a legitimate signup.
+const overGlobalCap = async () => {
+  const hour = new Date().toISOString().slice(0, 13); // YYYY-MM-DDTHH
+  try {
+    const res = await ddb.send(new UpdateCommand({
+      TableName: TABLE,
+      Key: { email: `#send-quota#${hour}` },
+      UpdateExpression: 'ADD n :one SET expiresAt = if_not_exists(expiresAt, :exp)',
+      ExpressionAttributeValues: {
+        ':one': 1,
+        ':exp': Math.floor(Date.now() / 1000) + 2 * 3600,
+      },
+      ReturnValues: 'UPDATED_NEW',
+    }));
+    return (res.Attributes?.n ?? 0) > GLOBAL_HOURLY_CAP;
+  } catch (err) {
+    console.log(JSON.stringify({ outcome: 'quota_check_failed', code: err?.name }));
+    return false;
+  }
+};
 
 const notifyAdmin = async (email, how) => {
   // Best-effort: a notification failure must never fail the subscription.
@@ -70,6 +101,16 @@ export const handler = async (event) => {
   const existing = await ddb.send(new GetCommand({ TableName: TABLE, Key: { email } }));
   if (existing.Item) {
     console.log(JSON.stringify({ outcome: 'duplicate', status: existing.Item.status }));
+    return ok({ ok: true });
+  }
+
+  // New address = one verification email would go out. Check the global
+  // hourly cap FIRST, and if exceeded, drop silently with the same generic
+  // success — no identity created, no mail sent, no state leaked to the
+  // caller. The WAF limits should make this unreachable in practice; it's
+  // the last backstop against a distributed send flood.
+  if (await overGlobalCap()) {
+    console.log(JSON.stringify({ outcome: 'global_cap_reached' }));
     return ok({ ok: true });
   }
 
