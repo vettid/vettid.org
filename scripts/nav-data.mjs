@@ -31,8 +31,7 @@ export const NAV = [
   },
   {
     label: 'AI',
-    // href becomes '/ai' once the landing page ships (final commit)
-    href: null,
+    href: '/ai',
     children: [
       { label: 'LEASH', href: '/ai/leash' },
       { label: 'AAIF Membership', href: '/ai/aaif' },
@@ -56,9 +55,13 @@ export const NAV = [
 export const FOOTER_LINKS = [
   { label: 'Home', href: '/' },
   { label: 'Why VettID', href: '/why' },
-  { label: 'Use Cases', href: '/use-cases' },
+  { label: 'About', href: '/about' },
+  { label: 'Contact', href: '/contact' },
   { label: 'Playbooks', href: '/playbooks/' },
+  { label: 'Tools We Trust', href: '/tools-we-trust' },
+  { label: 'Use Cases', href: '/use-cases' },
   { label: 'Security', href: '/security' },
+  { label: 'LEASH', href: '/ai/leash' },
   { label: 'Donate', href: '/donate' },
   { label: 'Open Source', href: '/open-source' },
   { label: 'GitHub', href: 'https://github.com/vettid', external: true },

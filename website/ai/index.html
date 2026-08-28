@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Contact VettID</title>
-  <meta name="description" content="How to reach VettID: general inquiries, security reports, and standards discussions. Email is the whole mechanism — no forms, no trackers." />
-  <link rel="canonical" href="https://vettid.org/contact"/>
+  <title>VettID and AI</title>
+  <meta name="description" content="How VettID approaches AI: the LEASH standard, AAIF membership, and full transparency about how we use AI — and how we don't." />
+  <link rel="canonical" href="https://vettid.org/ai"/>
   <link rel="icon" type="image/png" href="/assets/favicon.png" />
   <link rel="preload" href="/assets/fonts/inter-regular.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/assets/fonts/plusjakartasans-bold.woff2" as="font" type="font/woff2" crossorigin>
@@ -14,7 +14,7 @@
   <link rel="stylesheet" href="/assets/site.css">
   <style>
     .wrap {
-      max-width: 640px;
+      max-width: 860px;
       margin: 0 auto;
       padding: 130px 24px 90px;
     }
@@ -28,34 +28,51 @@
       font-size: clamp(2.25rem, 5vw, 3rem);
       font-weight: 800;
       letter-spacing: -0.02em;
+      margin-bottom: 28px;
+    }
+    .mission {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 1.2rem;
+      font-weight: 700;
+      line-height: 1.5;
+      color: var(--ink-hi);
+      max-width: 640px;
+      margin: 0 auto;
     }
 
-    .contact-card {
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .ai-card {
+      display: block;
       background: var(--surface-1);
       border: 1px solid var(--border-dark);
       border-radius: 14px;
-      padding: 26px 28px;
-      margin-bottom: 18px;
+      padding: 26px;
+      text-decoration: none;
+      transition: border-color 150ms;
     }
-    .contact-card h2 {
-      font-size: 1.15rem;
+    .ai-card:hover { border-color: var(--gold); }
+    .ai-card svg { width: 30px; height: 30px; color: var(--gold); margin-bottom: 14px; }
+    .ai-card h2 {
+      font-size: 1.1rem;
       font-weight: 700;
-      color: var(--gold);
+      color: var(--ink-hi);
       margin: 0 0 10px;
     }
-    .contact-card p {
+    .ai-card p {
       color: var(--ink-body);
-      margin: 0;
+      font-size: 0.92rem;
+      margin: 0 0 14px;
     }
-    .contact-card p + p { margin-top: 10px; }
-    .wrap a { color: var(--gold); text-decoration: none; }
-    .wrap a:hover { text-decoration: underline; }
-
-    .no-trackers {
-      margin-top: 40px;
-      text-align: center;
-      color: var(--ink-mute);
-      font-size: 0.95rem;
+    .ai-card .go {
+      color: var(--gold);
+      font-size: 0.92rem;
+    }
+    @media (max-width: 760px) {
+      .card-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -85,7 +102,7 @@
       </div>
     </div>
     <div class="nav-group">
-      <a class="nav-parent" href="/ai" aria-haspopup="true">AI</a>
+      <a class="nav-parent" aria-current="page" href="/ai" aria-haspopup="true">AI</a>
       <div class="nav-drop">
         <a href="/ai/leash">LEASH</a>
         <a href="/ai/aaif">AAIF Membership</a>
@@ -97,7 +114,7 @@
       <div class="nav-drop">
         <a href="/why">Why VettID</a>
         <a href="/about">About</a>
-        <a href="/contact" aria-current="page">Contact</a>
+        <a href="/contact">Contact</a>
       </div>
     </div>
     <a href="/donate">Donate</a>
@@ -125,7 +142,7 @@
   <span class="nav-menu-group">About</span>
   <a class="nav-menu-sub" href="/why">Why VettID</a>
   <a class="nav-menu-sub" href="/about">About</a>
-  <a class="nav-menu-sub" href="/contact" aria-current="page">Contact</a>
+  <a class="nav-menu-sub" href="/contact">Contact</a>
   <a href="/donate">Donate</a>
 </div>
 <div class="nav-overlay"></div>
@@ -134,26 +151,31 @@
 <div class="wrap">
 
   <div class="hero">
-    <span class="eyebrow">Reach us</span>
-    <h1>Contact</h1>
+    <span class="eyebrow">Where we stand on AI</span>
+    <h1>VettID and AI</h1>
+    <p class="mission">Technology should serve people, not extract from them &mdash; AI included. Three places to see what that means in practice:</p>
   </div>
 
-  <div class="contact-card">
-    <h2>General</h2>
-    <p><a href="mailto:info@vettid.org">info@vettid.org</a></p>
+  <div class="card-grid">
+    <a class="ai-card" href="/ai/leash">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="17" cy="7" r="3"/><path d="M4 20l9.5-10.5M4 20v-4M4 20h4"/></svg>
+      <h2>LEASH</h2>
+      <p>A proposed open standard for letting AI agents act on your behalf without ever holding your secrets.</p>
+      <span class="go">Read about LEASH &rarr;</span>
+    </a>
+    <a class="ai-card" href="/ai/aaif">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="6" r="2.5"/><circle cx="5" cy="17" r="2.5"/><circle cx="19" cy="17" r="2.5"/><path d="M10.5 8l-3.5 6.5M13.5 8l3.5 6.5M7.5 17h9"/></svg>
+      <h2>AAIF Membership</h2>
+      <p>Why VettID joined the Agentic AI Foundation: to represent ordinary people in the standards that will govern their agents.</p>
+      <span class="go">Why we're there &rarr;</span>
+    </a>
+    <a class="ai-card" href="/ai/how-we-use-ai">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+      <h2>How We Use AI</h2>
+      <p>AI helps build VettID. AI never sees your data &mdash; and the second part isn't a policy, it's architecture.</p>
+      <span class="go">The full disclosure &rarr;</span>
+    </a>
   </div>
-
-  <div class="contact-card">
-    <h2>Security</h2>
-    <p>Found a vulnerability or have a security concern? See our <a href="/security">security page</a> for reporting details and encrypted-contact options.</p>
-  </div>
-
-  <div class="contact-card">
-    <h2>Standards &amp; partnerships</h2>
-    <p>For LEASH, AAIF, or Zero-Knowledge Trust discussions: <a href="mailto:info@vettid.org">info@vettid.org</a></p>
-  </div>
-
-  <p class="no-trackers">We don't run trackers on this page (or any page). Email is the whole mechanism.</p>
 
 </div>
 
