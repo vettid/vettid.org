@@ -29,15 +29,16 @@ export const NAV = [
       { label: 'Open Source', href: '/open-source' },
     ],
   },
-  // {
-  //   label: 'AI',
-  //   href: '/ai',
-  //   children: [
-  //     { label: 'LEASH', href: '/ai/leash' },
-  //     { label: 'AAIF Membership', href: '/ai/aaif' },
-  //     { label: 'How We Use AI', href: '/ai/how-we-use-ai' },
-  //   ],
-  // },
+  {
+    label: 'AI',
+    // href becomes '/ai' once the landing page ships (final commit)
+    href: null,
+    children: [
+      { label: 'LEASH', href: '/ai/leash' },
+      { label: 'AAIF Membership', href: '/ai/aaif' },
+      { label: 'How We Use AI', href: '/ai/how-we-use-ai' },
+    ],
+  },
   {
     label: 'About',
     href: null,

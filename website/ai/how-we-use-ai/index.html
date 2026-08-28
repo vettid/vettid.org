@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>About VettID</title>
-  <meta name="description" content="Who builds VettID: founder Al Liebl, where the project stands today, and why it's built the way it is." />
-  <link rel="canonical" href="https://vettid.org/about"/>
+  <title>How We Use AI</title>
+  <meta name="description" content="Full transparency: AI helps build VettID. AI never sees member data — and the second part isn't a policy, it's architecture." />
+  <link rel="canonical" href="https://vettid.org/ai/how-we-use-ai"/>
   <link rel="icon" type="image/png" href="/assets/favicon.png" />
   <link rel="preload" href="/assets/fonts/inter-regular.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/assets/fonts/plusjakartasans-bold.woff2" as="font" type="font/woff2" crossorigin>
@@ -25,16 +25,23 @@
     }
     .hero .eyebrow { display: block; margin-bottom: 18px; }
     h1 {
-      font-size: clamp(2.25rem, 5vw, 3rem);
+      font-size: clamp(2rem, 4.5vw, 2.75rem);
       font-weight: 800;
       letter-spacing: -0.02em;
       margin-bottom: 28px;
     }
-    .mission {
+
+    /* The guarantee leads — before any of the "how we use it" detail */
+    .credo {
+      margin: 30px 0;
+      padding: 26px 30px;
+      background: var(--surface-1);
+      border-left: 3px solid var(--gold);
+      border-radius: 0 10px 10px 0;
       font-family: 'Plus Jakarta Sans', sans-serif;
-      font-size: 1.35rem;
+      font-size: 1.25rem;
       font-weight: 700;
-      line-height: 1.45;
+      line-height: 1.5;
       color: var(--ink-hi);
     }
 
@@ -54,19 +61,18 @@
     .wrap a { color: var(--gold); text-decoration: none; }
     .wrap a:hover { text-decoration: underline; }
 
-    /* Current-state list: square gold markers, one claim per line */
-    .stand-list {
+    .guarantee-list {
       list-style: none;
       padding: 0;
       margin: 26px 0;
     }
-    .stand-list li {
+    .guarantee-list li {
       position: relative;
       padding-left: 26px;
       margin-bottom: 16px;
       color: var(--ink-body);
     }
-    .stand-list li::before {
+    .guarantee-list li::before {
       content: '';
       position: absolute;
       left: 0;
@@ -75,23 +81,9 @@
       height: 8px;
       background: var(--gold);
     }
-    .stand-list b { color: var(--ink-hi); }
+    .guarantee-list b { color: var(--ink-hi); }
 
-    /* The line the belief section lands on */
-    .credo {
-      margin: 30px 0;
-      padding: 26px 30px;
-      background: var(--surface-1);
-      border-left: 3px solid var(--gold);
-      border-radius: 0 10px 10px 0;
-      font-family: 'Plus Jakarta Sans', sans-serif;
-      font-size: 1.25rem;
-      font-weight: 700;
-      line-height: 1.5;
-      color: var(--ink-hi);
-    }
-
-    .contact-line {
+    .closing-line {
       margin-top: 48px;
       text-align: center;
       color: var(--ink-body);
@@ -127,14 +119,14 @@
       <div class="nav-drop">
         <a href="/ai/leash">LEASH</a>
         <a href="/ai/aaif">AAIF Membership</a>
-        <a href="/ai/how-we-use-ai">How We Use AI</a>
+        <a href="/ai/how-we-use-ai" aria-current="page">How We Use AI</a>
       </div>
     </div>
     <div class="nav-group">
       <button type="button" class="nav-parent" aria-haspopup="true" aria-expanded="false">About</button>
       <div class="nav-drop">
         <a href="/why">Why VettID</a>
-        <a href="/about" aria-current="page">About</a>
+        <a href="/about">About</a>
         <a href="/contact">Contact</a>
       </div>
     </div>
@@ -158,10 +150,10 @@
   <span class="nav-menu-group">AI</span>
   <a class="nav-menu-sub" href="/ai/leash">LEASH</a>
   <a class="nav-menu-sub" href="/ai/aaif">AAIF Membership</a>
-  <a class="nav-menu-sub" href="/ai/how-we-use-ai">How We Use AI</a>
+  <a class="nav-menu-sub" href="/ai/how-we-use-ai" aria-current="page">How We Use AI</a>
   <span class="nav-menu-group">About</span>
   <a class="nav-menu-sub" href="/why">Why VettID</a>
-  <a class="nav-menu-sub" href="/about" aria-current="page">About</a>
+  <a class="nav-menu-sub" href="/about">About</a>
   <a class="nav-menu-sub" href="/contact">Contact</a>
   <a href="/donate">Donate</a>
 </div>
@@ -171,36 +163,34 @@
 <div class="wrap">
 
   <div class="hero">
-    <span class="eyebrow">Who's behind this</span>
-    <h1>About VettID</h1>
-    <p class="mission">VettID is built and maintained by Al Liebl, its founder and architect.</p>
+    <span class="eyebrow">Transparency</span>
+    <h1>How we use AI &mdash; and how we don't</h1>
   </div>
 
-  <div class="battlement-rule"></div>
-
-  <h2>The short version</h2>
-  <p>I've worked in systems management, identity, physical security, big data, and cloud security since 1997 &mdash; which I've just realized is nearly thirty years, a fact I'm choosing to take gracefully. Along the way that's included time as an industry analyst at Meta Group (I left when Gartner acquired it, so no Gartner badge to claim), and nearly three decades of watching the same pattern repeat: security tools built for experts, and ordinary people left to fend for themselves.</p>
-  <p>VettID is my answer to that pattern. It's a non-custodial identity and communications platform built on Zero-Knowledge Trust: you hold your own keys, and there is no inbound path to your vault &mdash; not for attackers, not for the platform, not for me.</p>
-  <p>If you want the r&eacute;sum&eacute; version, it's on <a href="https://www.linkedin.com/in/alliebl" target="_blank" rel="noopener noreferrer">LinkedIn</a> &mdash; fair warning: unlike this site, that link comes with tracking. Their house, their rules.</p>
+  <div class="credo">The short version: AI helps build VettID. AI never sees your data. The second part isn't a policy &mdash; it's architecture.</div>
 
   <div class="battlement-rule"></div>
 
-  <h2>Where things stand</h2>
-  <p>I'll be straightforward about the current state, because straightforwardness is the whole point:</p>
-  <ul class="stand-list">
-    <li><b>VettID is in active development.</b> The architecture is designed, specified, and being implemented in the open at <a href="https://github.com/vettid" target="_blank" rel="noopener noreferrer">github.com/vettid</a>.</li>
-    <li><b>The legal entity for VettID is in formation</b> &mdash; a short-term situation that this page will be updated to reflect.</li>
-    <li><b>VettID follows security and containment principles</b> similar to those pioneered in the patent portfolio of <a href="https://www.prote.us" target="_blank" rel="noopener noreferrer">Proteus Converged Systems</a>, whose work has been cited as prior art by companies including Intel and PayPal. VettID does not currently use Proteus patents.</li>
-    <li><b>I work full time in the security industry</b> and build VettID in my personal time.</li>
+  <h2>How we use it</h2>
+  <p>VettID is developed with substantial help from AI &mdash; specifically Claude, made by Anthropic. Specifications, code, infrastructure, and much of this website are produced in collaboration between <a href="/about">the founder</a> and AI tooling, with human review, secret scanning, and incremental commits on everything that ships &mdash; you can see the work on <a href="https://github.com/vettid" target="_blank" rel="noopener noreferrer">GitHub</a>. We're telling you this because transparency you have to dig for isn't transparency.</p>
+  <p>We think this is what responsible AI-assisted engineering looks like: the human is accountable, the AI is a collaborator, and the review process is disciplined.</p>
+
+  <div class="battlement-rule"></div>
+
+  <h2>How we don't</h2>
+  <p>No AI system &mdash; ours, Anthropic's, or anyone else's &mdash; processes VettID member data. This is not a promise we ask you to trust; it's a consequence of the architecture you can verify:</p>
+  <ul class="guarantee-list">
+    <li><b>Your vault has no inbound access path.</b> Nothing can reach in &mdash; not an administrator, not an attacker, and not an AI.</li>
+    <li><b>Your keys are yours.</b> VettID is non-custodial: we can't hand your data to an AI because we don't have your data.</li>
+    <li><b>Delegation, not surrender.</b> When AI agents eventually act <i>for</i> you through VettID, they'll do it under <a href="/ai/leash">LEASH</a> &mdash; scoped delegation with zero secret exposure &mdash; not by being handed your credentials.</li>
   </ul>
 
   <div class="battlement-rule"></div>
 
-  <h2>What I believe</h2>
-  <p>I believe technology is a gift from God &mdash; one that can genuinely make people's lives better when it's built with care, and one that harms people when it's built to extract from them. You don't have to share that belief to use VettID, and nothing about the platform asks you to. But it's why I build the way I do:</p>
-  <div class="credo">The user is sovereign, the architecture proves it, and no one &mdash; including me &mdash; gets a copy of your keys.</div>
+  <h2>Where we stand</h2>
+  <p>We think technology &mdash; AI included &mdash; should serve people, not extract from them. The test of that isn't a mission statement; it's whether the architecture makes extraction impossible. That's the test we build to.</p>
 
-  <p class="contact-line">If you want the longer argument for why VettID exists, read <a href="/why">Why VettID</a>. If you want to see the work, it's on <a href="https://github.com/vettid" target="_blank" rel="noopener noreferrer">GitHub</a>. If you want to talk, <a href="/contact">contact me</a>.</p>
+  <p class="closing-line">Who reviews all this work? <a href="/about">About VettID &rarr;</a></p>
 
 </div>
 
