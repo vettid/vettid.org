@@ -17,7 +17,7 @@ export const NAV = [
     href: '/playbooks/',
     children: [
       { label: 'Playbooks', href: '/playbooks/' },
-      // { label: 'Tools We Trust', href: '/tools-we-trust' },
+      { label: 'Tools We Trust', href: '/tools-we-trust' },
     ],
   },
   {
