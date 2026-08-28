@@ -43,7 +43,7 @@ export const NAV = [
     href: null,
     children: [
       { label: 'Why VettID', href: '/why' },
-      // { label: 'About', href: '/about' },
+      { label: 'About', href: '/about' },
       // { label: 'Contact', href: '/contact' },
     ],
   },
