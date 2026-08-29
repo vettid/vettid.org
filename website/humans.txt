@@ -9,7 +9,7 @@ Location: United States
 Built with Claude Code by Anthropic
 
 /* SITE */
-Last update: 2026-08-12
+Last update: 2026-08-29
 Language: English
 Standards: HTML5, CSS3
 Components: Static site — CloudFront, S3, AWS WAF
