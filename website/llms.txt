@@ -11,10 +11,26 @@
 - [Home](https://vettid.org/): what VettID does — private connections, identity
   credentials, secure secrets, AI agent access, encrypted backup, and more
 - [Why VettID](https://vettid.org/why): the mission and editorial position — privacy
-- https://vettid.org/playbooks/: Privacy Playbooks — plain-language articles on security, privacy, anonymity, identity, and trust, plus step-by-step playbooks for phones and accounts
-- https://vettid.org/use-cases: What you can do with VettID — each use case compared with how the internet works today
   as a right, identity vs. anonymity as different tools, and how the position
   shapes the architecture
+- [About](https://vettid.org/about): who builds VettID — founder Al Liebl, current
+  project status, and why it's built the way it is
+- [Contact](https://vettid.org/contact): how to reach VettID — email only, no forms
+- [Playbooks](https://vettid.org/playbooks/): Privacy Playbooks — plain-language
+  articles on security, privacy, anonymity, identity, and trust, plus step-by-step
+  playbooks for phones and accounts
+- [Tools We Trust](https://vettid.org/tools-we-trust): third-party privacy tools we
+  recommend (no affiliations, no affiliate links)
+- [Use Cases](https://vettid.org/use-cases): what you can do with VettID — each use
+  case compared with how the internet works today
+- [AI at VettID](https://vettid.org/ai): the AI section landing
+- [LEASH](https://vettid.org/ai/leash): Lightweight Encrypted Agent Secret Handling —
+  a proposed open standard for AI agents acting on your behalf without holding your
+  secrets; spec at https://github.com/vettid/LEASH
+- [AAIF Membership](https://vettid.org/ai/aaif): VettID's associate membership in the
+  Agentic AI Foundation
+- [How We Use AI](https://vettid.org/ai/how-we-use-ai): AI helps build VettID; AI
+  never sees member data — by architecture, not policy
 - [Security](https://vettid.org/security): vulnerability disclosure policy,
   scope, severity targets, and PGP key for encrypted reports
 - [Donate](https://vettid.org/donate): support the project (Bitcoin)
