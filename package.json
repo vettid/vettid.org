@@ -15,10 +15,10 @@
     "check:site": "node scripts/sync-nav.mjs --check && node scripts/check-site.mjs"
   },
   "devDependencies": {
-    "@types/jest": "^29.5.14",
+    "@types/jest": "^30.0.0",
     "@types/node": "22.7.9",
     "aws-cdk": "2.1136.0",
-    "jest": "^29.7.0",
+    "jest": "^30.4.2",
     "ts-jest": "^29.4.12",
     "ts-node": "^10.9.2",
     "typescript": "~5.6.3"
