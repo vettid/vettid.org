@@ -1,61 +1,79 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta content="width=device-width, initial-scale=1" name="viewport"/>
-  <meta name="robots" content="noindex"/>
-  <title>Page Not Found - VettID</title>
-  <link rel="icon" type="image/png" href="/assets/favicon.png"/>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VettID and AI</title>
+  <meta name="description" content="How VettID approaches AI: the LEASH standard, AAIF membership, and full transparency about how we use AI — and how we don't." />
+  <link rel="canonical" href="https://vettid.org/ai"/>
+  <link rel="icon" type="image/png" href="/assets/favicon.png" />
   <link rel="preload" href="/assets/fonts/inter-regular.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/assets/fonts/plusjakartasans-bold.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/assets/fonts.css">
-  <link rel="stylesheet" href="/shared/nav.css">
+  <link rel="stylesheet" href="/assets/fonts.css" />
+  <link rel="stylesheet" href="/shared/nav.css" />
   <link rel="stylesheet" href="/assets/site.css">
   <style>
-
-    h1 { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-
-    main {
-      min-height: 100vh;
-      display: flex; align-items: center; justify-content: center;
-      padding: 120px 24px 60px;
+    .wrap {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 130px 24px 90px;
     }
-    .card {
-      max-width: 520px; width: 100%;
-      background: var(--bg-card);
-      border: 1px solid var(--border-accent);
-      border-radius: 16px;
-      padding: 48px 40px;
+
+    .hero {
       text-align: center;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+      margin-bottom: 48px;
     }
-    .badge {
-      display: inline-block;
-      background: rgba(255,193,37,0.15);
-      color: var(--accent);
-      border: 1px solid var(--border-accent);
-      border-radius: 999px;
-      padding: 6px 16px;
-      font-size: 0.8rem;
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      margin-bottom: 24px;
+    .hero .eyebrow { display: block; margin-bottom: 18px; }
+    h1 {
+      font-size: clamp(2.25rem, 5vw, 3rem);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 28px;
     }
-    h1 { color: var(--accent); font-size: 1.8rem; margin-bottom: 12px; }
-    .card p { color: var(--text-muted); margin-bottom: 28px; }
-    .btn-home {
-      display: inline-block;
-      background: var(--accent);
-      color: #101018;
-      text-decoration: none;
-      font-weight: 600;
-      padding: 12px 28px;
-      border-radius: 8px;
-      transition: background 200ms;
+    .mission {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 1.2rem;
+      font-weight: 700;
+      line-height: 1.5;
+      color: var(--ink-hi);
+      max-width: 640px;
+      margin: 0 auto;
     }
-    .btn-home:hover { background: var(--accent-hover); }
 
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .ai-card {
+      display: block;
+      background: var(--surface-1);
+      border: 1px solid var(--border-dark);
+      border-radius: 14px;
+      padding: 26px;
+      text-decoration: none;
+      transition: border-color 150ms;
+    }
+    .ai-card:hover { border-color: var(--gold); }
+    .ai-card svg { width: 30px; height: 30px; color: var(--gold); margin-bottom: 14px; }
+    .ai-card h2 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--ink-hi);
+      margin: 0 0 10px;
+    }
+    .ai-card p {
+      color: var(--ink-body);
+      font-size: 0.92rem;
+      margin: 0 0 14px;
+    }
+    .ai-card .go {
+      color: var(--gold);
+      font-size: 0.92rem;
+    }
+    @media (max-width: 760px) {
+      .card-grid { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -84,7 +102,7 @@
       </div>
     </div>
     <div class="nav-group">
-      <a class="nav-parent" href="/ai" aria-haspopup="true">AI</a>
+      <a class="nav-parent" aria-current="page" href="/ai" aria-haspopup="true">AI</a>
       <div class="nav-drop">
         <a href="/ai/leash">LEASH</a>
         <a href="/ai/aaif">AAIF Membership</a>
@@ -130,14 +148,36 @@
 <div class="nav-overlay"></div>
 <!-- /nav:menu -->
 
-<main>
-  <div class="card">
-    <span class="badge">404</span>
-    <h1>Page Not Found</h1>
-    <p>The page you're looking for doesn't exist or has moved.</p>
-    <a href="/" class="btn-home">Back to Home</a>
+<div class="wrap">
+
+  <div class="hero">
+    <span class="eyebrow">Where we stand on AI</span>
+    <h1>VettID and AI</h1>
+    <p class="mission">Technology should serve people, not extract from them &mdash; AI included. Three places to see what that means in practice:</p>
   </div>
-</main>
+
+  <div class="card-grid">
+    <a class="ai-card" href="/ai/leash">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="17" cy="7" r="3"/><path d="M4 20l9.5-10.5M4 20v-4M4 20h4"/></svg>
+      <h2>LEASH</h2>
+      <p>A proposed open standard for letting AI agents act on your behalf without ever holding your secrets.</p>
+      <span class="go">Read about LEASH &rarr;</span>
+    </a>
+    <a class="ai-card" href="/ai/aaif">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="6" r="2.5"/><circle cx="5" cy="17" r="2.5"/><circle cx="19" cy="17" r="2.5"/><path d="M10.5 8l-3.5 6.5M13.5 8l3.5 6.5M7.5 17h9"/></svg>
+      <h2>AAIF Membership</h2>
+      <p>Why VettID joined the Agentic AI Foundation: to represent ordinary people in the standards that will govern their agents.</p>
+      <span class="go">Why we're there &rarr;</span>
+    </a>
+    <a class="ai-card" href="/ai/how-we-use-ai">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+      <h2>How We Use AI</h2>
+      <p>AI helps build VettID. AI never sees your data &mdash; and the second part isn't a policy, it's architecture.</p>
+      <span class="go">The full disclosure &rarr;</span>
+    </a>
+  </div>
+
+</div>
 
 <footer>
   <div class="battlement-mini"></div>

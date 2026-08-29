@@ -11,7 +11,8 @@
     "cdk": "cdk",
     "deploy:site": "cdk deploy VettidOrgStack --require-approval never",
     "deploy:all": "cdk deploy --all --require-approval never",
-    "check:site": "node scripts/check-site.mjs"
+    "sync:nav": "node scripts/sync-nav.mjs",
+    "check:site": "node scripts/sync-nav.mjs --check && node scripts/check-site.mjs"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",
