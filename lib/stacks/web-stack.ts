@@ -276,11 +276,15 @@ function handler(event) {
     // exist. Update when a new top-level route ships (directories under
     // website/ are the source of truth; /playbooks and /api are the
     // non-static additions).
+    // scripts/check-site.mjs fails the build if a website/ directory is
+    // missing here, so a new section can't silently count as probe traffic.
     const CONTENT_PREFIXES = [
       '/why', '/security', '/donate', '/open-source', '/playbooks',
+      '/about', '/ai', '/contact', '/tools-we-trust', '/use-cases',
       '/assets/', '/js/', '/shared/', '/api/', '/.well-known/',
       '/robots.txt', '/sitemap.xml', '/llms.txt', '/humans.txt',
-      '/manifest.json', '/favicon.ico', '/404', '/index.html',
+      '/manifest.json', '/favicon.ico', '/apple-touch-icon',
+      '/404', '/index.html',
     ];
     const matchUri = (positionalConstraint: string, searchString: string): wafv2.CfnWebACL.StatementProperty => ({
       byteMatchStatement: {
