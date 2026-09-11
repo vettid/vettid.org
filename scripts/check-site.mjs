@@ -80,6 +80,27 @@ for (const file of walk(ROOT).filter((p) => p.endsWith('.css') || p.endsWith('.h
   }
 }
 
+// 7. Every top-level entry under website/ is listed in the WAF probe-path
+// allowlist (CONTENT_PREFIXES in web-stack.ts). Anything missing there is
+// counted as scanner traffic, and real visitors to the new section get
+// rate-limited at 25 requests per 5 minutes.
+{
+  const stack = readFileSync(join(ROOT, '..', 'lib', 'stacks', 'web-stack.ts'), 'utf8');
+  const m = stack.match(/const CONTENT_PREFIXES = \[([\s\S]*?)\];/);
+  if (!m) {
+    errors.push('web-stack.ts: CONTENT_PREFIXES not found');
+  } else {
+    const prefixes = [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
+    for (const name of readdirSync(ROOT)) {
+      if (name === 'index.html' || name.startsWith('.')) continue;
+      const route = '/' + name.replace(/\.html$/, '');
+      if (!prefixes.some((p) => route.startsWith(p) || (route + '/').startsWith(p))) {
+        errors.push(`web-stack.ts: CONTENT_PREFIXES is missing ${route} (website/${name})`);
+      }
+    }
+  }
+}
+
 if (errors.length) {
   console.error(`check:site FAILED (${errors.length}):`);
   for (const e of errors) console.error(`  ✗ ${e}`);
