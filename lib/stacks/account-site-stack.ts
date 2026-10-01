@@ -26,6 +26,7 @@ export class VettidOrgAccountSiteStack extends cdk.Stack {
       hostName: hostName(config, 'account'),
       hostedZone,
       sourceDir: 'sites/account',
+      notFoundPage: '404.html',
       apiOriginDomain: readRef(this, config, 'member-api/domain'),
       apiOriginHeaders: {
         'X-Origin-Verify': cdk.SecretValue.secretsManager(originVerifySecretName(config)).unsafeUnwrap(),

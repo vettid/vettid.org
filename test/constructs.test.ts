@@ -141,3 +141,50 @@ describe('StaticSite', () => {
     expect(sourceCounts.sort()).toEqual([1, 2]);
   });
 });
+
+describe('StaticSite branded 404', () => {
+  const stack = new cdk.Stack(new cdk.App(), 'Site404', { env });
+  const zone = route53.HostedZone.fromHostedZoneAttributes(stack, 'Zone', { hostedZoneId: 'Z1', zoneName: 'vettid.org' });
+  new StaticSite(stack, 'S', {
+    hostName: 'account.vettid.org',
+    hostedZone: zone,
+    sourceDir: 'test/fixtures/site',
+    runtimeConfig: { a: 1 },
+    notFoundPage: '404.html',
+  });
+  const t = Template.fromStack(stack);
+  const code = Object.values<any>(t.findResources('AWS::CloudFront::Function'))[0].Properties.FunctionCode as string;
+  // Run the real generated CloudFront Function.
+  // eslint-disable-next-line no-new-func
+  const handler = new Function(`${code}; return handler;`)() as (e: unknown) => any;
+  const req = (uri: string) => handler({ request: { uri, headers: {}, querystring: {} } });
+
+  test.each([
+    ['/', '/index.html'],
+    ['/about', '/about/index.html'],
+    ['/about/', '/about/index.html'],
+    ['/404.html', '/404.html'],
+    ['/config.json', '/config.json'],
+  ])('known path %s is rewritten to %s and passed to S3', (uri, expected) => {
+    const r = req(uri);
+    expect(r.statusCode).toBeUndefined();
+    expect(r.uri).toBe(expected);
+  });
+
+  test.each(['/nope', '/nope/', '/assets/missing.css', '/About'])('unknown path %s gets the branded page with a real 404', (uri) => {
+    const r = req(uri);
+    expect(r.statusCode).toBe(404);
+    expect(r.body.data).toContain('Nothing here.');
+    expect(r.headers['content-security-policy'].value).toContain("script-src 'self'");
+    expect(r.headers['x-frame-options'].value).toBe('DENY');
+  });
+
+  test('stays within the CloudFront Functions size limit', () => {
+    expect(code.length).toBeLessThan(10 * 1024);
+  });
+
+  test('the /api/* behavior has no function, so API errors stay JSON', () => {
+    const dist = Object.values<any>(t.findResources('AWS::CloudFront::Distribution'))[0].Properties.DistributionConfig;
+    expect(dist.CustomErrorResponses).toBeUndefined();
+  });
+});

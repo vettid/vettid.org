@@ -56,6 +56,11 @@ their construct IDs.
 - **Static sites** use `StaticSite`: own host, strict CSP (`script-src 'self'`,
   no inline styles), same-origin `/api/*`, and `/config.json` generated at
   deploy time from CDK tokens.
+  With `notFoundPage`, unknown paths get the site's branded `404.html` with
+  a real 404 status, answered by the viewer-request CloudFront Function from
+  a file list built at synth (distribution-wide error pages are avoided
+  because they would also rewrite the API's JSON errors). The function must
+  stay under 10 KB; synth fails loudly if a site outgrows it.
 - **Guardrails** (`test/app-guardrails.test.ts`, run in CI): ≤ 200 resources
   per stack, no `Fn::ImportValue` outside the grandfathered stacks, and every
   table/user pool retained.
