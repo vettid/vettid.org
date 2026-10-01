@@ -152,6 +152,8 @@ describe('VettidOrgAdminAccessStack', () => {
     const userData = JSON.stringify(t.findResources('AWS::EC2::Instance'));
     expect(userData).toContain('--login-server=https://headscale.example.net');
     expect(userData).toContain('--advertise-exit-node');
+    expect(userData).toContain('--accept-dns=false'); // home DNS is unreachable from AWS
+    expect(userData).toContain('/swapfile'); // dnf is OOM-killed on a nano without swap
     expect(userData).toContain('secretsmanager get-secret-value');
   });
 

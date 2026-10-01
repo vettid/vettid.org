@@ -66,6 +66,10 @@ export class VettidOrgAdminAccessStack extends cdk.Stack {
     const userData = ec2.UserData.forLinux();
     userData.addCommands(
       'set -euo pipefail',
+      // A t4g.nano has 512 MB; dnf's metadata load gets OOM-killed without swap.
+      'if [ ! -f /swapfile ]; then dd if=/dev/zero of=/swapfile bs=1M count=1024 && chmod 600 /swapfile && mkswap /swapfile; fi',
+      'swapon /swapfile || true',
+      "grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap defaults 0 0' >> /etc/fstab",
       // Unattended security updates.
       'dnf install -y dnf-automatic',
       "sed -i 's/^apply_updates = .*/apply_updates = yes/' /etc/dnf/automatic.conf",
@@ -78,7 +82,10 @@ export class VettidOrgAdminAccessStack extends cdk.Stack {
       'systemctl enable --now tailscaled',
       // Join Headscale as an exit node. The key is read at boot, never baked in.
       `KEY=$(aws secretsmanager get-secret-value --region ${config.region} --secret-id ${headscaleKeySecretName(config)} --query SecretString --output text)`,
-      `tailscale up --login-server=${loginServer} --authkey="$KEY" --advertise-exit-node --hostname=${resourceName(config, 'admin-exit')}`,
+      // --accept-dns=false: Headscale's DNS (MagicDNS → the operator's home
+      // resolvers) is unreachable from AWS; the node must keep the VPC resolver
+      // or every lookup — including exit-node traffic — hangs.
+      `tailscale up --login-server=${loginServer} --authkey="$KEY" --advertise-exit-node --accept-dns=false --hostname=${resourceName(config, 'admin-exit')}`,
       'unset KEY',
     );
 
