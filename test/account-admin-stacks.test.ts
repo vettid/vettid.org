@@ -261,3 +261,79 @@ describe('VettidOrgAdminSiteStack', () => {
     expect(csp).toContain("script-src 'self'");
   });
 });
+
+describe('VettidOrgAuthStack member triggers', () => {
+  const t = Template.fromStack(new VettidOrgAuthStack(newApp(), 'Auth2', { config, env }));
+
+  test('member pool wires all three custom-auth triggers', () => {
+    const pool = Object.values<any>(t.findResources('AWS::Cognito::UserPool')).find((p) => p.Properties.UserPoolName === 'vettid-org-members');
+    expect(Object.keys(pool.Properties.LambdaConfig).sort()).toEqual(['CreateAuthChallenge', 'DefineAuthChallenge', 'VerifyAuthChallengeResponse']);
+  });
+
+  test('member client allows a 5-minute window for the PIN step', () => {
+    t.hasResourceProperties('AWS::Cognito::UserPoolClient', { ClientName: 'vettid-org-account-site', AuthSessionValidity: 5 });
+  });
+});
+
+describe('VettidOrgMemberApiStack', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { VettidOrgMemberApiStack } = require('../lib/stacks/member-api-stack');
+  const t = Template.fromStack(new VettidOrgMemberApiStack(newApp(), 'MemberApi', { config, env }));
+
+  test('three route groups + three jobs', () => {
+    t.resourceCountIs('AWS::Lambda::Function', 6);
+    for (const p of ['/api/public', '/api/auth', '/api/account']) {
+      t.hasResourceProperties('AWS::ApiGatewayV2::Route', { RouteKey: `ANY ${p}/{proxy+}` });
+    }
+  });
+
+  test('jobs are scheduled and the mailer reads the members stream', () => {
+    t.hasResourceProperties('AWS::Events::Rule', { ScheduleExpression: 'rate(15 minutes)' });
+    t.hasResourceProperties('AWS::Events::Rule', { ScheduleExpression: 'cron(0 7 * * ? *)' });
+    t.hasResourceProperties('AWS::Lambda::EventSourceMapping', { StartingPosition: 'LATEST', BisectBatchOnFunctionError: true });
+  });
+
+  test('no wildcard DynamoDB access; audit is append-only', () => {
+    const stmts = Object.values<any>(t.findResources('AWS::IAM::Policy')).flatMap((p) => p.Properties.PolicyDocument.Statement);
+    expect(JSON.stringify(stmts)).not.toContain('dynamodb:*');
+    for (const s of stmts.filter((x: any) => JSON.stringify(x.Resource).includes('table/vettid-org-audit'))) {
+      expect([].concat(s.Action)).toEqual(['dynamodb:PutItem']);
+    }
+  });
+
+  test('origin-verify secret is generated, and published API domain feeds the site', () => {
+    t.hasResourceProperties('AWS::SecretsManager::Secret', { Name: 'vettid-org-member-api/origin-verify' });
+    t.hasResourceProperties('AWS::SSM::Parameter', { Name: '/vettid-org/prod/member-api/domain' });
+  });
+});
+
+describe('VettidOrgAccountSiteStack', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { VettidOrgAccountSiteStack } = require('../lib/stacks/account-site-stack');
+  const t = Template.fromStack(new VettidOrgAccountSiteStack(newApp(), 'AccountSite', { config, env }));
+
+  test('/api/* goes to the member API with the origin-verify header, uncached', () => {
+    const dist = Object.values<any>(t.findResources('AWS::CloudFront::Distribution'))[0].Properties.DistributionConfig;
+    expect(dist.Aliases).toEqual(['account.vettid.org']);
+    const api = dist.CacheBehaviors.find((b: any) => b.PathPattern === '/api/*');
+    expect(api.ViewerProtocolPolicy).toBe('https-only');
+    const origin = dist.Origins.find((o: any) => o.Id === api.TargetOriginId);
+    expect(JSON.stringify(origin.OriginCustomHeaders)).toContain('X-Origin-Verify');
+    expect(JSON.stringify(origin.OriginCustomHeaders)).toContain('resolve:secretsmanager:vettid-org-member-api/origin-verify');
+  });
+
+  test('API origin requests forward cookies, CSRF header and viewer address only', () => {
+    t.hasResourceProperties('AWS::CloudFront::OriginRequestPolicy', {
+      OriginRequestPolicyConfig: Match.objectLike({
+        CookiesConfig: { CookieBehavior: 'all' },
+        HeadersConfig: { HeaderBehavior: 'whitelist', Headers: ['Content-Type', 'X-VettID-CSRF', 'CloudFront-Viewer-Address'] },
+      }),
+    });
+  });
+
+  test('CSP: same-origin only', () => {
+    const csp = JSON.stringify(t.findResources('AWS::CloudFront::ResponseHeadersPolicy'));
+    expect(csp).toContain("connect-src 'self';");
+    expect(csp).toContain("script-src 'self'");
+  });
+});

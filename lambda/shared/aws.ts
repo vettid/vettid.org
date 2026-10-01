@@ -26,4 +26,6 @@ export const table = {
   subscriptions: () => env('TABLE_SUBSCRIPTIONS'),
   subscriptionTypes: () => env('TABLE_SUBSCRIPTION_TYPES'),
   audit: () => env('TABLE_AUDIT'),
+  ratelimits: () => env('TABLE_RATELIMITS'),
+  magicLinks: () => env('TABLE_MAGIC_LINKS'),
 };

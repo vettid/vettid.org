@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#0b0b12">
+  <title>Sign in · VettID</title>
+  <link rel="icon" type="image/png" href="/assets/favicon.png">
+  <link rel="stylesheet" href="/assets/fonts.css">
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/js/signin.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="https://vettid.org" aria-label="VettID home (vettid.org)">
+      <img src="/assets/logo-192.png" alt="" width="36" height="36">
+      <span class="brand-name">VETTID</span>
+      <span class="brand-tag">Account</span>
+    </a>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <div class="page-head">
+      <span class="eyebrow">Welcome back</span>
+      <h1>Sign in</h1>
+      <p>Enter your email address and we'll send you a link to sign in. No password needed.</p>
+    </div>
+    <div id="errors" class="msg-region" role="alert" aria-atomic="true"></div>
+    <div id="notices" class="msg-region" role="status" aria-atomic="true"></div>
+    <section class="card" id="signin-card" aria-label="Sign-in form">
+      <form id="signin-form" class="form-grid">
+        <div class="field">
+          <label for="email">Email address</label>
+          <input id="email" name="email" type="email" autocomplete="email" required maxlength="254" spellcheck="false">
+        </div>
+        <div class="actions">
+          <button type="submit" class="btn btn-primary">Email me a sign-in link</button>
+          <span class="muted">New here? <a href="/request/">Request membership</a></span>
+        </div>
+      </form>
+    </section>
+    <section class="card result" id="sent" tabindex="-1" hidden aria-labelledby="sent-title">
+      <h2 id="sent-title">Check your email</h2>
+      <p>Check your email for a sign-in link (valid 15 minutes). If you don't see it: the address must be approved and verified with Amazon SES first.</p>
+      <p class="muted">We sent it to <strong id="sent-to"></strong>. It can take a minute to arrive — check your spam or junk folder too.</p>
+      <div class="actions">
+        <button type="button" class="btn" id="resend">Send another link</button>
+        <button type="button" class="link-btn" id="change-email">Use a different email</button>
+      </div>
+    </section>
+  </main>
+  <footer class="site-footer">
+    <ul>
+      <li><a href="https://vettid.org">vettid.org</a></li>
+      <li><a href="https://vettid.org/security/">Privacy &amp; security</a></li>
+      <li><a href="mailto:support@vettid.org">support@vettid.org</a></li>
+    </ul>
+  </footer>
+</body>
+</html>

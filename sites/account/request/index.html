@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#0b0b12">
+  <title>Request membership · VettID</title>
+  <link rel="icon" type="image/png" href="/assets/favicon.png">
+  <link rel="stylesheet" href="/assets/fonts.css">
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/js/request.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="https://vettid.org" aria-label="VettID home (vettid.org)">
+      <img src="/assets/logo-192.png" alt="" width="36" height="36">
+      <span class="brand-name">VETTID</span>
+      <span class="brand-tag">Account</span>
+    </a>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <div class="page-head">
+      <span class="eyebrow">Join VettID</span>
+      <h1>Request membership</h1>
+      <p>Tell us a little about yourself. If you have an invite code, add it below. Otherwise, someone on our team will review your request.</p>
+    </div>
+    <div id="errors" class="msg-region" role="alert" aria-atomic="true"></div>
+    <div id="notices" class="msg-region" role="status" aria-atomic="true"></div>
+    <section class="card" id="request-card" aria-label="Membership request form">
+      <form id="request-form" class="form-grid">
+        <div class="form-row">
+          <div class="field">
+            <label for="first_name">First name</label>
+            <input id="first_name" name="first_name" type="text" autocomplete="given-name" required maxlength="100">
+          </div>
+          <div class="field">
+            <label for="last_name">Last name</label>
+            <input id="last_name" name="last_name" type="text" autocomplete="family-name" required maxlength="100">
+          </div>
+        </div>
+        <div class="field">
+          <label for="email">Email address</label>
+          <input id="email" name="email" type="email" autocomplete="email" required maxlength="254" spellcheck="false" aria-describedby="email-hint">
+          <p class="hint" id="email-hint">We'll send your sign-in links here.</p>
+        </div>
+        <div class="field">
+          <label for="invite_code">Invite code <span class="optional">(optional)</span></label>
+          <input id="invite_code" name="invite_code" type="text" class="code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="64" aria-describedby="code-hint">
+          <p class="hint" id="code-hint">No code? That's fine — leave this blank and we'll review your request.</p>
+        </div>
+        <div class="check">
+          <input id="consent" name="consent" type="checkbox" required>
+          <label for="consent">VettID will email you. Amazon SES will first send you a verification email — click it so we can reach you (this is also how you opt in).</label>
+        </div>
+        <p class="hint">See how we handle your information: <a href="https://vettid.org/security/">Privacy &amp; security</a>.</p>
+        <div class="actions">
+          <button type="submit" class="btn btn-primary">Request membership</button>
+          <span class="muted">Already have an account? <a href="/signin/">Sign in</a></span>
+        </div>
+      </form>
+    </section>
+    <section class="card result" id="result" tabindex="-1" hidden></section>
+  </main>
+  <footer class="site-footer">
+    <ul>
+      <li><a href="https://vettid.org">vettid.org</a></li>
+      <li><a href="https://vettid.org/security/">Privacy &amp; security</a></li>
+      <li><a href="mailto:support@vettid.org">support@vettid.org</a></li>
+    </ul>
+  </footer>
+</body>
+</html>

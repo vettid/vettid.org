@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0b0b12">
+  <title>Signing in · VettID</title>
+  <link rel="icon" type="image/png" href="/assets/favicon.png">
+  <link rel="stylesheet" href="/assets/fonts.css">
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/js/auth.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="https://vettid.org" aria-label="VettID home (vettid.org)">
+      <img src="/assets/logo-192.png" alt="" width="36" height="36">
+      <span class="brand-name">VETTID</span>
+      <span class="brand-tag">Account</span>
+    </a>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <div class="page-head">
+      <span class="eyebrow">Sign in</span>
+      <h1 id="auth-title">Signing you in…</h1>
+    </div>
+    <div id="errors" class="msg-region" role="alert" aria-atomic="true"></div>
+    <div id="notices" class="msg-region" role="status" aria-atomic="true"></div>
+    <section class="card" id="auth-card" aria-live="polite">
+      <p class="loading" id="auth-status">Checking your sign-in link…</p>
+    </section>
+  </main>
+  <footer class="site-footer">
+    <ul>
+      <li><a href="https://vettid.org">vettid.org</a></li>
+      <li><a href="https://vettid.org/security/">Privacy &amp; security</a></li>
+      <li><a href="mailto:support@vettid.org">support@vettid.org</a></li>
+    </ul>
+  </footer>
+</body>
+</html>

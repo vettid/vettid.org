@@ -13,6 +13,8 @@ export interface ApiFunctionProps {
   readonly timeout?: cdk.Duration;
   readonly memorySize?: number;
   readonly description?: string;
+  /** Fixed physical name; only when something must reference the function by name. */
+  readonly functionName?: string;
 }
 
 /**
@@ -44,6 +46,7 @@ export class ApiFunction extends Construct {
       memorySize: props.memorySize ?? 256,
       timeout: props.timeout ?? cdk.Duration.seconds(10),
       description: props.description,
+      functionName: props.functionName,
       logGroup,
       environment: {
         NODE_OPTIONS: '--enable-source-maps',

@@ -23,6 +23,8 @@ export type SsmRefKey =
   | 'auth/admin-login-domain'
   | 'auth/pin-pepper-secret-arn'
   | 'data/terms-bucket-name'
+  | 'data/members-stream-arn'
+  | 'member-api/domain'
   | 'admin-access/egress-ip'
   | 'admin-access/site-web-acl-arn';
 

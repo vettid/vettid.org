@@ -3,7 +3,9 @@ import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
 import { AppConfig, hostName, resourceName } from '../config';
+import { ApiFunction } from '../constructs/api-function';
 import { publishRef } from '../constructs/ssm-refs';
+import { tableEnv, tableGrant } from '../constructs/table-grants';
 
 export interface VettidOrgAuthStackProps extends cdk.StackProps {
   readonly config: AppConfig;
@@ -15,8 +17,9 @@ export interface VettidOrgAuthStackProps extends cdk.StackProps {
  * Consumers read IDs through SSM refs, never stack exports.
  *
  * Member sign-in is magic link + optional PIN via Cognito custom auth; the
- * challenge triggers are attached in Phase 2 with the member API. Members
- * never use passwords or the hosted UI.
+ * three challenge triggers live here with the pool (in the member API stack
+ * they'd make the two stacks depend on each other). Members never use
+ * passwords or the hosted UI.
  *
  * Admins sign in through the Cognito hosted UI (authorization code + PKCE)
  * with TOTP MFA required. Network-level restriction of the admin pool (WAF
@@ -77,6 +80,7 @@ export class VettidOrgAuthStack extends cdk.Stack {
       authFlows: { custom: true }, // magic link (+ PIN) only
       preventUserExistenceErrors: true,
       enableTokenRevocation: true,
+      authSessionValidity: cdk.Duration.minutes(5), // magic link → PIN step window
       accessTokenValidity: cdk.Duration.minutes(60),
       idTokenValidity: cdk.Duration.minutes(60),
       refreshTokenValidity: cdk.Duration.days(30),
@@ -164,6 +168,23 @@ export class VettidOrgAuthStack extends cdk.Stack {
       generateSecretString: { passwordLength: 64, excludePunctuation: true },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
+
+    // ---- Member custom-auth triggers ----------------------------------------
+    const env = { ...tableEnv(config), PIN_PEPPER_SECRET_ARN: pinPepper.secretArn };
+    const trigger = (id: string, file: string) =>
+      new ApiFunction(this, id, { entry: `lambda/triggers/${file}.ts`, environment: env, timeout: cdk.Duration.seconds(5) }).fn;
+    const define = trigger('DefineAuthChallenge', 'define-auth-challenge');
+    const create = trigger('CreateAuthChallenge', 'create-auth-challenge');
+    const verify = trigger('VerifyAuthChallenge', 'verify-auth-challenge');
+    this.memberPool.addTrigger(cognito.UserPoolOperation.DEFINE_AUTH_CHALLENGE, define);
+    this.memberPool.addTrigger(cognito.UserPoolOperation.CREATE_AUTH_CHALLENGE, create);
+    this.memberPool.addTrigger(cognito.UserPoolOperation.VERIFY_AUTH_CHALLENGE_RESPONSE, verify);
+
+    tableGrant(this, config, define, 'members', ['GetItem']);
+    tableGrant(this, config, verify, 'members', ['GetItem']);
+    tableGrant(this, config, verify, 'magic-links', ['UpdateItem']); // consume a link (conditional)
+    tableGrant(this, config, verify, 'ratelimits', ['GetItem', 'UpdateItem', 'DeleteItem']); // PIN lockout
+    pinPepper.grantRead(verify);
 
     publishRef(this, config, 'auth/member-pool-id', this.memberPool.userPoolId);
     publishRef(this, config, 'auth/member-pool-arn', this.memberPool.userPoolArn);

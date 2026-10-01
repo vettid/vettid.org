@@ -27,6 +27,7 @@ import { cognito, ddb, env, ses, table } from '../shared/aws';
 import { adminHandler } from '../shared/admin-handler';
 import { Router, badRequest, conflict, decodeCursor, encodeCursor, int, notFound, str } from '../shared/http';
 import { inviteCode, nowIso } from '../shared/ids';
+import { emailMarkerKey } from '../shared/members';
 import { MemberItem, MemberView, SubscriptionItem, toMemberView } from '../shared/model';
 
 const PAGE = 50;
@@ -275,6 +276,7 @@ router.on('DELETE', '/admin/members/{user_guid}', async ({ params, actor }) => {
     if (!(e instanceof UserNotFoundException) && (e as Error).name !== 'UserNotFoundException') throw e;
   }
   await ddb.send(new DeleteCommand({ TableName: table.subscriptions(), Key: { user_guid: m.user_guid } }));
+  await ddb.send(new DeleteCommand({ TableName: table.members(), Key: { user_guid: emailMarkerKey(m.email) } }));
   await ddb.send(new DeleteCommand({ TableName: table.members(), Key: { user_guid: m.user_guid } }));
   // The audit stub keeps who/when, not the person's details beyond the address.
   await audit(actor, 'member.delete', m.user_guid, { email: m.email, state: m.state });

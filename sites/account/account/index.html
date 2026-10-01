@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0b0b12">
+  <title>Your account · VettID</title>
+  <link rel="icon" type="image/png" href="/assets/favicon.png">
+  <link rel="stylesheet" href="/assets/fonts.css">
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/js/account.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="https://vettid.org" aria-label="VettID home (vettid.org)">
+      <img src="/assets/logo-192.png" alt="" width="36" height="36">
+      <span class="brand-name">VETTID</span>
+      <span class="brand-tag">Account</span>
+    </a>
+    <div class="who" id="who" hidden>
+      <div class="who-text">
+        <span class="who-name" id="who-name"></span>
+        <span class="who-email" id="who-email"></span>
+      </div>
+      <button type="button" class="btn btn-sm" id="signout">Sign out</button>
+    </div>
+  </header>
+
+  <main id="main" class="wide" tabindex="-1">
+    <div id="errors" class="msg-region" role="alert" aria-atomic="true"></div>
+    <div id="notices" class="msg-region" role="status" aria-atomic="true"></div>
+    <div id="gate" class="card" aria-live="polite">
+      <p class="loading" id="gate-msg">Loading your account…</p>
+    </div>
+    <div id="dash" hidden>
+      <div class="page-head">
+        <span class="eyebrow">Your account</span>
+        <h1 id="hello">Your account</h1>
+      </div>
+      <div class="stack">
+        <section class="card" id="sec-status" aria-labelledby="h-status"></section>
+        <section class="card" id="sec-terms" aria-labelledby="h-terms"></section>
+        <section class="card" id="sec-sub" aria-labelledby="h-sub" hidden></section>
+        <section class="card" id="sec-pin" aria-labelledby="h-pin"></section>
+        <section class="card" id="sec-prefs" aria-labelledby="h-prefs"></section>
+        <section class="card danger" id="sec-cancel" aria-labelledby="h-cancel"></section>
+      </div>
+    </div>
+  </main>
+  <footer class="site-footer">
+    <ul>
+      <li><a href="https://vettid.org">vettid.org</a></li>
+      <li><a href="https://vettid.org/security/">Privacy &amp; security</a></li>
+      <li><a href="mailto:support@vettid.org">support@vettid.org</a></li>
+    </ul>
+  </footer>
+</body>
+</html>
