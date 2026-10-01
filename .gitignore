@@ -38,3 +38,4 @@ local/
 
 # Per-user Claude Code settings (never shared)
 .claude/settings.local.json
+.claude/worktrees/
