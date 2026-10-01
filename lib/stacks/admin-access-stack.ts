@@ -1,11 +1,59 @@
 import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as logs from 'aws-cdk-lib/aws-logs';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import { Construct } from 'constructs';
 import { AppConfig, resourceName } from '../config';
 import { publishRef } from '../constructs/ssm-refs';
+import { WafLogging } from '../constructs/waf-logging';
+
+/** CloudWatch log group for SSM Session Manager transcripts of the exit node. */
+export function ssmSessionLogGroupName(config: AppConfig): string {
+  return config.stage === 'prod' ? '/vettid-org/ssm-sessions' : `/vettid-org/${config.stage}/ssm-sessions`;
+}
+
+/**
+ * nftables table that drops anything the exit node would FORWARD to
+ * link-local / the instance metadata service. Tailnet clients route
+ * everything through this box; without it, a peer could reach
+ * 169.254.169.254 "through" the exit node and lift the instance role's
+ * credentials (IMDSv2 + hop limit 1 is the second layer).
+ *
+ * A separate nft table with its own forward-hook chain at a priority before
+ * the iptables-nft `filter` table: a drop in ANY base chain is final, so no
+ * ACCEPT that tailscaled adds to FORWARD (ts-forward) can bypass it, and it
+ * doesn't depend on rule order when tailscaled re-inserts its chains.
+ */
+const LINK_LOCAL_DROP_NFT = [
+  'table inet vettid_linklocal {',
+  '  chain forward {',
+  '    type filter hook forward priority -10; policy accept;',
+  '    ip daddr 169.254.0.0/16 drop',
+  '    ip6 daddr fd00:ec2::/32 drop',
+  '  }',
+  '}',
+];
+const LINK_LOCAL_DROP_UNIT = [
+  '[Unit]',
+  'Description=Drop forwarded traffic to link-local (instance metadata)',
+  'Before=network-pre.target tailscaled.service',
+  'Wants=network-pre.target',
+  '',
+  '[Service]',
+  'Type=oneshot',
+  'RemainAfterExit=yes',
+  'ExecStartPre=-nft delete table inet vettid_linklocal',
+  'ExecStart=nft -f /etc/nftables/vettid-linklocal.nft',
+  'ExecStop=nft delete table inet vettid_linklocal',
+  '',
+  '[Install]',
+  'WantedBy=multi-user.target',
+];
+/** Shell line writing `lines` to `path` (printf with one %s per line; no quoting surprises). */
+const writeFile = (path: string, lines: string[]) =>
+  `printf '%s\\n' ${lines.map((l) => `'${l.replace(/'/g, `'\\''`)}'`).join(' ')} > ${path}`;
 
 export interface VettidOrgAdminAccessStackProps extends cdk.StackProps {
   readonly config: AppConfig;
@@ -62,6 +110,21 @@ export class VettidOrgAdminAccessStack extends cdk.Stack {
     const keySecret = secretsmanager.Secret.fromSecretNameV2(this, 'HeadscaleKey', headscaleKeySecretName(config));
     keySecret.grantRead(role);
 
+    // Session Manager transcripts. Point the account's Session Manager
+    // preferences at this group (RUNBOOK); the instance role writes them.
+    const sessionLogs = new logs.LogGroup(this, 'SsmSessionLogs', {
+      logGroupName: ssmSessionLogGroupName(config),
+      retention: logs.RetentionDays.THREE_MONTHS,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+    role.addToPolicy(new iam.PolicyStatement({
+      actions: ['logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams'],
+      resources: [sessionLogs.logGroupArn],
+    }));
+    // The SSM agent checks the group exists before streaming; DescribeLogGroups
+    // has no resource-level scoping (read-only metadata).
+    role.addToPolicy(new iam.PolicyStatement({ actions: ['logs:DescribeLogGroups'], resources: ['*'] }));
+
     const userData = ec2.UserData.forLinux();
     userData.addCommands(
       'set -euo pipefail',
@@ -73,6 +136,13 @@ export class VettidOrgAdminAccessStack extends cdk.Stack {
       'dnf install -y dnf-automatic',
       "sed -i 's/^apply_updates = .*/apply_updates = yes/' /etc/dnf/automatic.conf",
       'systemctl enable --now dnf-automatic.timer',
+      // Never forward to link-local (IMDS) — in place before forwarding is on.
+      'dnf install -y nftables',
+      'mkdir -p /etc/nftables',
+      writeFile('/etc/nftables/vettid-linklocal.nft', LINK_LOCAL_DROP_NFT),
+      writeFile('/etc/systemd/system/vettid-linklocal-drop.service', LINK_LOCAL_DROP_UNIT),
+      'systemctl daemon-reload',
+      'systemctl enable --now vettid-linklocal-drop.service',
       // Tailscale from its official repo.
       'dnf config-manager --add-repo https://pkgs.tailscale.com/stable/amazon-linux/2023/tailscale.repo',
       'dnf install -y tailscale',
@@ -101,7 +171,10 @@ export class VettidOrgAdminAccessStack extends cdk.Stack {
       securityGroup: sg,
       role,
       userData,
-      requireImdsv2: true,
+      // IMDSv2 only, and a PUT hop limit of 1: a token request that has been
+      // forwarded (e.g. from a tailnet peer) can't get a response.
+      httpTokens: ec2.HttpTokens.REQUIRED,
+      httpPutResponseHopLimit: 1,
       blockDevices: [
         { deviceName: '/dev/xvda', volume: ec2.BlockDeviceVolume.ebs(8, { encrypted: true, volumeType: ec2.EbsDeviceVolumeType.GP3 }) },
       ],
@@ -152,6 +225,10 @@ export class VettidOrgAdminAccessStack extends cdk.Stack {
     // TOTP MFA; tokens it issues are only usable through the IP-locked site
     // and API.
     const siteAcl = allowOnly('CLOUDFRONT', 'Site', 'vettid-org-admin-site');
+    new WafLogging(this, 'SiteAclLogging', {
+      webAclArn: siteAcl.attrArn,
+      logGroupName: `aws-waf-logs-${resourceName(config, 'admin')}`,
+    });
 
     publishRef(this, config, 'admin-access/egress-ip', eip.ref);
     publishRef(this, config, 'admin-access/site-web-acl-arn', siteAcl.attrArn);

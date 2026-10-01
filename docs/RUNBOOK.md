@@ -97,6 +97,23 @@ Session Manager. Its AMI is pinned in `cdk.context.json` so a new Amazon
 Linux release never replaces it on deploy. The EIP is retained even if the
 stack is deleted.
 
+- **Replacement:** a change to the instance's launch settings (metadata
+  options, launch template) replaces the instance on deploy. A user-data-only
+  change does *not* (it reboots the box, and user data doesn't re-run), so
+  apply such changes by hand over SSM too. A replaced node joins Headscale
+  from scratch — put a fresh pre-auth key in the secret (steps 1–2) *before*
+  deploying, then re-approve its routes (step 4) and delete the old node in
+  Headscale. The EIP re-associates automatically, so allowlists hold.
+- **Metadata:** IMDSv2 only with PUT hop limit 1, and the
+  `vettid-linklocal-drop` systemd unit loads an nftables table that drops
+  anything forwarded to `169.254.0.0/16` — tailnet peers can't reach the
+  instance's metadata/credentials through the exit node. Check with
+  `sudo nft list table inet vettid_linklocal`.
+- **Session logging:** transcripts can go to the `/vettid-org/ssm-sessions`
+  log group (90 days; the instance role may write it). One-time, per account:
+  Systems Manager → Session Manager → Preferences → CloudWatch logging on,
+  group `/vettid-org/ssm-sessions`, "encrypt" off (the group isn't KMS-encrypted).
+
 **Adding an admin:** give them a Headscale node, then
 `scripts/create-admin.sh <email>` (run twice: first sends SES verification,
 second creates the Cognito user, which emails a temporary password). First

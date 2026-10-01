@@ -140,13 +140,11 @@ describe('VettidOrgDataStack', () => {
 describe('VettidOrgAdminAccessStack', () => {
   const t = Template.fromStack(new VettidOrgAdminAccessStack(newApp(), 'AdminAccess', { config, env }));
 
-  test('exit node: t4g.nano, IMDSv2, encrypted disk, SSM-managed', () => {
+  test('exit node: t4g.nano, IMDSv2 with hop limit 1, encrypted disk, SSM-managed', () => {
     t.hasResourceProperties('AWS::EC2::Instance', {
       InstanceType: 't4g.nano',
       BlockDeviceMappings: [Match.objectLike({ Ebs: Match.objectLike({ Encrypted: true, VolumeType: 'gp3' }) })],
-    });
-    t.hasResourceProperties('AWS::EC2::LaunchTemplate', {
-      LaunchTemplateData: { MetadataOptions: { HttpTokens: 'required' } },
+      MetadataOptions: { HttpTokens: 'required', HttpPutResponseHopLimit: 1 },
     });
     t.hasResourceProperties('AWS::IAM::Role', {
       ManagedPolicyArns: [Match.objectLike({ 'Fn::Join': Match.arrayWith([Match.arrayWith([Match.stringLikeRegexp('AmazonSSMManagedInstanceCore')])]) })],
@@ -166,6 +164,40 @@ describe('VettidOrgAdminAccessStack', () => {
     expect(userData).toContain('--accept-dns=false'); // home DNS is unreachable from AWS
     expect(userData).toContain('/swapfile'); // dnf is OOM-killed on a nano without swap
     expect(userData).toContain('secretsmanager get-secret-value');
+  });
+
+  test('never forwards to link-local / IMDS (persistent nftables drop, before forwarding is on)', () => {
+    const userData: string = Object.values<any>(t.findResources('AWS::EC2::Instance'))[0].Properties.UserData['Fn::Base64'];
+    expect(userData).toContain('type filter hook forward priority -10; policy accept;');
+    expect(userData).toContain('ip daddr 169.254.0.0/16 drop');
+    expect(userData).toContain('systemctl enable --now vettid-linklocal-drop.service');
+    expect(userData).toContain("'WantedBy=multi-user.target'");
+    expect(userData.indexOf('vettid-linklocal-drop.service\n')).toBeLessThan(userData.indexOf('net.ipv4.ip_forward'));
+  });
+
+  test('SSM session transcripts: 90-day log group the instance role can write', () => {
+    t.hasResource('AWS::Logs::LogGroup', {
+      DeletionPolicy: 'Retain',
+      Properties: { LogGroupName: '/vettid-org/ssm-sessions', RetentionInDays: 90 },
+    });
+    t.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: ['logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams'],
+            Resource: { 'Fn::GetAtt': [Match.stringLikeRegexp('^SsmSessionLogs'), 'Arn'] },
+          }),
+        ]),
+      },
+    });
+  });
+
+  test('admin site WAF logs to CloudWatch with cookie/authorization redacted', () => {
+    t.hasResourceProperties('AWS::Logs::LogGroup', { LogGroupName: 'aws-waf-logs-vettid-org-admin', RetentionInDays: 90 });
+    t.hasResourceProperties('AWS::WAFv2::LoggingConfiguration', {
+      ResourceArn: { 'Fn::GetAtt': [Match.stringLikeRegexp('^SiteAcl'), 'Arn'] },
+      RedactedFields: [{ SingleHeader: { Name: 'cookie' } }, { SingleHeader: { Name: 'authorization' } }],
+    });
   });
 
   test('egress IP is retained', () => {
