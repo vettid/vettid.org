@@ -264,6 +264,12 @@ describe('VettidOrgStack', () => {
       });
     });
 
+    test('does not send the deprecated X-XSS-Protection header', () => {
+      for (const p of Object.values<any>(template.findResources('AWS::CloudFront::ResponseHeadersPolicy'))) {
+        expect(p.Properties.ResponseHeadersPolicyConfig.SecurityHeadersConfig.XSSProtection).toBeUndefined();
+      }
+    });
+
     test('creates v2 JSON logs Glue table with partition projection', () => {
       template.hasResourceProperties('AWS::Glue::Table', {
         TableInput: Match.objectLike({
@@ -370,12 +376,90 @@ describe('VettidOrgSignupStack', () => {
     });
   });
 
-  test('creates subscribe route and scheduled verification sweep', () => {
+  test('mailing-list table is deletion-protected', () => {
+    template.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'vettid-org-mailing-list',
+      DeletionProtectionEnabled: true,
+    });
+  });
+
+  test('creates subscribe + confirm routes and scheduled verification sweep', () => {
     template.hasResourceProperties('AWS::ApiGatewayV2::Route', {
       RouteKey: 'POST /api/subscribe',
     });
+    template.hasResourceProperties('AWS::ApiGatewayV2::Route', {
+      RouteKey: 'GET /api/subscribe/confirm',
+    });
     template.hasResourceProperties('AWS::Events::Rule', {
       ScheduleExpression: 'rate(15 minutes)',
+    });
+  });
+
+  test('Lambdas use the repo defaults (Node 24, ARM64, explicit log group) — no logRetention custom resource', () => {
+    const fns = Object.values<any>(template.findResources('AWS::Lambda::Function'));
+    expect(fns).toHaveLength(2);
+    for (const fn of fns) {
+      expect(fn.Properties).toMatchObject({ Runtime: 'nodejs24.x', Architectures: ['arm64'] });
+      expect(fn.Properties.LoggingConfig.LogGroup).toBeDefined();
+    }
+    template.resourceCountIs('Custom::LogRetention', 0);
+    expect(JSON.stringify(template.toJSON())).not.toContain('logs:PutRetentionPolicy');
+  });
+
+  test('origin-verify secret is generated under its fixed name and readable by subscribe only', () => {
+    template.hasResourceProperties('AWS::SecretsManager::Secret', {
+      Name: 'vettid-org-signup/origin-verify',
+      GenerateSecretString: Match.objectLike({ PasswordLength: 48 }),
+    });
+    const policies = Object.values<any>(template.findResources('AWS::IAM::Policy'));
+    const readers = policies.filter((p) => JSON.stringify(p).includes('secretsmanager:GetSecretValue'));
+    expect(readers).toHaveLength(1);
+  });
+
+  test('sweep may query only the members email index, and can never delete the domain identity', () => {
+    const json = JSON.stringify(template.toJSON());
+    expect(json).toContain(':table/vettid-org-members/index/email-index');
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Effect: 'Deny',
+            Action: 'ses:DeleteEmailIdentity',
+            Resource: [
+              Match.objectLike({ 'Fn::Join': ['', Match.arrayWith([Match.stringLikeRegexp(':identity/vettid\\.org$')])] }),
+              Match.objectLike({ 'Fn::Join': ['', Match.arrayWith([Match.stringLikeRegexp(':identity/\\*\\.vettid\\.org$')])] }),
+            ],
+          }),
+        ]),
+      },
+    });
+  });
+});
+
+describe('VettidOrgStack /api/* origin (signup API)', () => {
+  test('CloudFront adds X-Origin-Verify from the signup secret', () => {
+    const app = new cdk.App();
+    const stack = new VettidOrgStack(app, 'TestWebWithApi', {
+      domainName: 'test.example.com',
+      enableCustomDomain: false,
+      apiDomain: 'abc123.execute-api.us-east-1.amazonaws.com',
+      env: { account: '123456789012', region: 'us-east-1' },
+    });
+    const t = Template.fromStack(stack);
+    t.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({
+        Origins: Match.arrayWith([
+          Match.objectLike({
+            DomainName: 'abc123.execute-api.us-east-1.amazonaws.com',
+            OriginCustomHeaders: [
+              {
+                HeaderName: 'X-Origin-Verify',
+                HeaderValue: '{{resolve:secretsmanager:vettid-org-signup/origin-verify:SecretString:::}}',
+              },
+            ],
+          }),
+        ]),
+      }),
     });
   });
 });

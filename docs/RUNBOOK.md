@@ -16,7 +16,10 @@ npm run deploy:all                                # everything
   Visitors see HTML changes immediately.
 - Requires an active AWS SSO session (`aws sso login`); us-east-1 only.
 - Stack order when deploying individually: DnsStack → SignupStack → VettidOrgStack
-  (props flow left to right in `lib/app.ts`).
+  (props flow left to right in `lib/app.ts`). SignupStack must go first also
+  because it creates the `vettid-org-signup/origin-verify` secret that
+  VettidOrgStack resolves (by name) into the `/api/*` origin header; until
+  VettidOrgStack is redeployed after it, the signup API answers 403.
 
 ## Stacks
 
@@ -112,12 +115,29 @@ their Headscale node *and* disable/delete the Cognito user.
 
 - Flow: `POST /api/subscribe` → SES `CreateEmailIdentity` (SES's verification
   email IS the double opt-in) → pending row in `vettid-org-mailing-list` →
-  15-min sweep confirms verified addresses. Already-verified addresses confirm
-  instantly.
+  15-min sweep confirms verified addresses.
+- Addresses SES has **already** verified (e.g. VettID members) get no SES mail,
+  so the API sends its own "Confirm your VettID updates subscription" email
+  with a single-use link (`GET /api/subscribe/confirm?t=…`, 48 h; only the
+  token's SHA-256 is stored). Rows wait as `status = pending_link` (never
+  `pending`, which the sweep would auto-confirm); the link 302s to
+  `https://vettid.org/?subscribed=1` (`=0` if stale). Both kinds of mail share
+  the 200/hour global send cap.
+- The API only serves requests carrying CloudFront's `X-Origin-Verify` secret
+  (`vettid-org-signup/origin-verify`), and only `application/json` POSTs (415
+  otherwise). Rotating the secret: update it, then redeploy VettidOrgStack
+  (the Lambda re-reads it within 5 minutes).
+- The sweep reclaims (deletes) SES identities of rows that expired unverified —
+  unless the address belongs to a row in `vettid-org-members` (a pending member
+  may be mid-verification). It can never delete the `vettid.org` domain
+  identity (explicit IAM deny).
 - Every confirmation emails **admin@vettid.org** from `no-reply@vettid.org`
   (SES domain identity, DKIM in the zone).
-- Export subscribers:
-  `aws dynamodb scan --table-name vettid-org-mailing-list --output json`
+- Export subscribers (the table also holds `#…` counter/link rows and
+  unconfirmed rows, so filter):
+  `aws dynamodb scan --table-name vettid-org-mailing-list --filter-expression '#s = :c' --expression-attribute-names '{"#s":"status"}' --expression-attribute-values '{":c":{"S":"confirmed"}}' --output json`
+- The table has deletion protection on (and RETAIN); turn it off in code first
+  if it ever really has to go.
 - **SES is in sandbox**: fine for the opt-in flow (verified recipients only by
   design), but bulk sending to the list requires production access — request it
   in the SES console before the first newsletter.
