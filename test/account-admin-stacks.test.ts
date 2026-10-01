@@ -189,7 +189,7 @@ describe('VettidOrgAdminApiStack', () => {
 
   test('REST API reachable only via its custom domain', () => {
     t.hasResourceProperties('AWS::ApiGateway::RestApi', { DisableExecuteApiEndpoint: true });
-    t.hasResourceProperties('AWS::ApiGateway::DomainName', { DomainName: 'admin-api.vettid.org', SecurityPolicy: 'TLS_1_2' });
+    t.hasResourceProperties('AWS::ApiGateway::DomainName', { DomainName: 'admin-api.vettid.org', SecurityPolicy: 'SecurityPolicy_TLS13_1_2_PFS_PQ_2025_09', EndpointAccessMode: 'STRICT' });
   });
 
   test('resource policy allows only the exit-node egress IP (from SSM)', () => {
@@ -280,8 +280,8 @@ describe('VettidOrgMemberApiStack', () => {
   const { VettidOrgMemberApiStack } = require('../lib/stacks/member-api-stack');
   const t = Template.fromStack(new VettidOrgMemberApiStack(newApp(), 'MemberApi', { config, env }));
 
-  test('three route groups + three jobs', () => {
-    t.resourceCountIs('AWS::Lambda::Function', 6);
+  test('three route groups + link mailer + three jobs', () => {
+    t.resourceCountIs('AWS::Lambda::Function', 7);
     for (const p of ['/api/public', '/api/auth', '/api/account']) {
       t.hasResourceProperties('AWS::ApiGatewayV2::Route', { RouteKey: `ANY ${p}/{proxy+}` });
     }
@@ -299,6 +299,20 @@ describe('VettidOrgMemberApiStack', () => {
     for (const s of stmts.filter((x: any) => JSON.stringify(x.Resource).includes('table/vettid-org-audit'))) {
       expect([].concat(s.Action)).toEqual(['dynamodb:PutItem']);
     }
+  });
+
+  test('functions that may delete SES identities are denied the vettid.org domain identity', () => {
+    const stmts = Object.values<any>(t.findResources('AWS::IAM::Policy')).flatMap((p) => p.Properties.PolicyDocument.Statement);
+    const deletes = stmts.filter((s: any) => ([] as string[]).concat(s.Action).includes('ses:DeleteEmailIdentity'));
+    expect(deletes.some((s: any) => s.Effect === 'Allow')).toBe(true);
+    expect(deletes.some((s: any) => s.Effect === 'Deny' && JSON.stringify(s.Resource).includes('identity/vettid.org'))).toBe(true);
+  });
+
+  test('access log records request metadata only', () => {
+    const stage = Object.values<any>(t.findResources('AWS::ApiGatewayV2::Stage'))[0];
+    const fmt = stage.Properties.AccessLogSettings.Format as string;
+    expect(fmt).toContain('$context.requestId');
+    expect(fmt.toLowerCase()).not.toMatch(/cookie|header|body/);
   });
 
   test('origin-verify secret is generated, and published API domain feeds the site', () => {

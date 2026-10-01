@@ -1,10 +1,14 @@
 import { mockClient } from 'aws-sdk-client-mock';
 import { DeleteObjectsCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
 import { DeleteCommand, DynamoDBDocumentClient, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { PDFDocument } from 'pdf-lib';
 import { checkTermsText, normalizeTermsText, renderTermsPdf, sha256Hex } from '../../lambda/shared/terms-pdf';
 
 process.env.ALLOWED_ORIGIN = 'https://admin.vettid.org';
+process.env.ADMIN_POOL_ID = 'us-east-1_admins';
+process.env.TABLE_RATELIMITS = 'rl';
+process.env.SENDER_EMAIL = 'no-reply@vettid.org';
 process.env.TERMS_BUCKET = 'terms-bucket';
 for (const [k, v] of Object.entries({
   TABLE_MEMBERS: 'members', TABLE_INVITES: 'invites', TABLE_TERMS: 'terms',
@@ -15,6 +19,8 @@ for (const [k, v] of Object.entries({
 const { handler } = require('../../lambda/admin/content');
 const ddb = mockClient(DynamoDBDocumentClient);
 const s3 = mockClient(S3Client);
+const idp = mockClient(CognitoIdentityProviderClient);
+idp.on(AdminGetUserCommand).resolves({ Enabled: true });
 
 const event = (method: string, path: string, body?: unknown) =>
   ({
