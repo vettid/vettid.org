@@ -1,0 +1,6 @@
+{
+  "apiBase": "https://admin-api.vettid.org",
+  "cognitoDomain": "https://vettid-org-admin.auth.us-east-1.amazoncognito.com",
+  "clientId": "REPLACE_WITH_ADMIN_APP_CLIENT_ID",
+  "redirectUri": "https://admin.vettid.org/"
+}

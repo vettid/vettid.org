@@ -30,6 +30,8 @@ npm run deploy:all                                # everything
 | `VettidOrgAuthStack` | Member + admin Cognito pools, clients, groups, admin hosted-UI domain, PIN pepper secret. Stateful. |
 | `VettidOrgDataStack` | Account/admin DynamoDB tables (`vettid-org-*`) + terms PDF bucket. Stateful. |
 | `VettidOrgAdminAccessStack` | Admin tailnet exit node (EC2 + EIP) and the WAF allowlists keyed to its IP (admin login + admin site). |
+| `VettidOrgAdminApiStack` | Admin REST API at admin-api.vettid.org (docs/ADMIN-API.md): exit-node-IP resource policy + Cognito authorizer, 3 route-group Lambdas. |
+| `VettidOrgAdminSiteStack` | Admin SPA at admin.vettid.org (`sites/admin`), behind the exit-node web ACL. |
 
 ## CDK conventions (new stacks)
 

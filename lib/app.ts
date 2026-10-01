@@ -8,6 +8,8 @@ import { VettidOrgPlaybooksStack } from './stacks/playbooks-stack';
 import { VettidOrgAuthStack } from './stacks/auth-stack';
 import { VettidOrgDataStack } from './stacks/data-stack';
 import { VettidOrgAdminAccessStack } from './stacks/admin-access-stack';
+import { VettidOrgAdminApiStack } from './stacks/admin-api-stack';
+import { VettidOrgAdminSiteStack } from './stacks/admin-site-stack';
 
 /**
  * Builds every stack in the vettid.org app. Kept out of bin/ so tests can
@@ -60,7 +62,8 @@ export function buildApp(app: cdk.App): void {
   new VettidDevRedirectStack(app, 'VettidDevRedirectStack', { env });
 
   // ---- Account + admin (docs/ACCOUNT-ADMIN-PLAN.md) ----
-  // Deploy order: Auth, Data → AdminAccess (reads the admin pool ARN via SSM).
+  // Deploy order: Auth, Data → AdminAccess (reads the admin pool ARN via SSM)
+  //   → AdminApi, AdminSite (read pool/client IDs, egress IP, web ACL via SSM).
   new VettidOrgAuthStack(app, 'VettidOrgAuthStack', { config, env });
   new VettidOrgDataStack(app, 'VettidOrgDataStack', { config, env });
   if (config.adminAccess.headscaleLoginServer) {
@@ -71,4 +74,6 @@ export function buildApp(app: cdk.App): void {
       'VettidOrgAdminAccessStack skipped: set context "headscaleLoginServer" in ~/.cdk.json',
     );
   }
+  new VettidOrgAdminApiStack(app, 'VettidOrgAdminApiStack', { config, env });
+  new VettidOrgAdminSiteStack(app, 'VettidOrgAdminSiteStack', { config, env });
 }

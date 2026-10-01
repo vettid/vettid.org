@@ -17,8 +17,10 @@ export interface ApiFunctionProps {
 
 /**
  * The one way this repo defines a Node Lambda: bundled with esbuild, ARM64,
- * Node 24, AWS SDK v3 taken from the runtime, and an explicit log group with
- * bounded retention (no deprecated `logRetention` custom resource).
+ * Node 24, and an explicit log group with bounded retention (no deprecated
+ * `logRetention` custom resource). The AWS SDK is bundled too, at the
+ * versions in package-lock.json: deploys are reproducible, and helpers the
+ * runtime doesn't ship (e.g. the S3 presigner) just work.
  *
  * Keep per-function knobs here few on purpose — differences between
  * functions should be the code and the grants, not the packaging.
@@ -52,8 +54,7 @@ export class ApiFunction extends Construct {
         target: 'node24',
         minify: true,
         sourceMap: true,
-        // The Node 24 runtime ships AWS SDK v3; don't bundle it.
-        externalModules: ['@aws-sdk/*'],
+        externalModules: [],
         // ESM bundles of CJS deps need `require` available.
         banner: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
       },

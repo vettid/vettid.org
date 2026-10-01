@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <title>VettID Admin</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/js/app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="topbar">
+    <span class="brand">VettID Admin</span>
+    <span class="who" id="who" hidden></span>
+    <button type="button" class="btn btn-sm" id="signout" hidden>Sign out</button>
+  </header>
+
+  <section class="gate" id="gate" aria-live="polite">
+    <p id="gate-msg">Loading…</p>
+    <button type="button" class="btn btn-primary" id="gate-signin" hidden>Sign in</button>
+  </section>
+
+  <div class="layout" id="shell" hidden>
+    <nav class="nav" aria-label="Admin sections">
+      <ul>
+        <li><a href="#requests">Requests</a></li>
+        <li><a href="#members">Members</a></li>
+        <li><a href="#invites">Invites</a></li>
+        <li><a href="#terms">Terms</a></li>
+        <li><a href="#subscription-types">Subscription types</a></li>
+        <li><a href="#admins">Admins &amp; audit</a></li>
+      </ul>
+    </nav>
+    <main id="main" tabindex="-1">
+      <div class="error-region" id="errors" role="alert" aria-live="assertive" aria-atomic="true"></div>
+      <div id="view"></div>
+    </main>
+  </div>
+
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+</body>
+</html>
