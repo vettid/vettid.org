@@ -36,7 +36,7 @@ Responses are `Cache-Control: no-store`.
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| POST | `/api/public/request` | `{email, first_name, last_name, invite_code?: string, consent: true}` | `{outcome}` (below) |
+| POST | `/api/public/request` | `{email, first_name, last_name, invite_code?: string, consent: true}` | `{outcome}` (below). Names: letters, spaces, `'’.-`, ≤ 40 chars. Global hourly cap (past it: same answer, nothing created). Requests never email-verified are deleted after 14 days. |
 
 `consent` must be `true`: while SES is in sandbox, we can only email
 addresses that have verified with SES, and that verification **is** the
@@ -59,15 +59,23 @@ Duplicate requests for an address that already exists return
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| POST | `/api/auth/start` | `{email}` | `{ok: true}` always (no existence oracle). If the address belongs to an active account with verified email, a sign-in link is emailed: `https://account.vettid.org/auth/#t=<token>&e=<email>` (valid 15 min, single use). Rate-limited per email and IP. |
+| POST | `/api/auth/start` | `{email}` | `{ok: true}` always, answered **before** any account lookup (no existence oracle, by content or timing). A separate mailer then emails a link if the address belongs to an active account with a verified email: `https://account.vettid.org/auth/#t=<token>&e=<email>` (valid 15 min, single use). Rate-limited per IPv4 address / IPv6 /64, per (address, network), per address (5 sent/hour) and globally. |
 | POST | `/api/auth/verify` | `{email, token}` | `{status: "signed_in"}` (cookies set) or `{status: "pin_required"}` (`vid_pin` set). `401 unauthorized` for a bad/expired/used link. |
-| POST | `/api/auth/pin` | `{pin}` | `{status: "signed_in"}` or `401` (`message` says attempts left / locked). Requires `vid_pin`. |
+| POST | `/api/auth/pin` | `{pin}` | `{status: "signed_in"}` or `401` (`message` says attempts left / locked). Requires a valid (HMAC-signed) `vid_pin`; rate-limited per network. |
 | POST | `/api/auth/refresh` | — | `{ok: true}` (new `vid_id`) or `401` |
 | POST | `/api/auth/signout` | — | `{ok: true}`; revokes the refresh token, clears cookies |
 
 The link token travels in the URL **fragment** (never sent to servers or
-logs); the `/auth/` page reads it, POSTs it to `/api/auth/verify`, and
-removes it from the address bar immediately.
+logs). The `/auth/` page strips it from the address bar immediately and
+only POSTs it to `/api/auth/verify` after the person clicks **Continue**
+(showing which address, and warning if this would switch accounts) — so
+opening a link can't silently sign someone into another account, and email
+link scanners can't burn the single-use token.
+
+Rate limits key on the viewer's IPv4 address or IPv6 **/64**. PINs: 5
+attempts per 15 minutes (reserved atomically before checking), 15 failures
+in a day lock PIN entry for 24 hours; members are emailed when their PIN is
+set, changed, removed or locked.
 
 ## Account (requires `vid_id`)
 

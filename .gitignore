@@ -35,3 +35,7 @@ npm-debug.log*
 
 # Local-only working files (drafts, previews, unannounced plans). Never committed.
 local/
+
+# Per-user Claude Code settings (never shared)
+.claude/settings.local.json
+.claude/worktrees/

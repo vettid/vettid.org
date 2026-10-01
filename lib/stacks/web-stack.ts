@@ -12,6 +12,7 @@ import * as athena from 'aws-cdk-lib/aws-athena';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
+import { SIGNUP_ORIGIN_VERIFY_SECRET_NAME } from './signup-stack';
 
 export interface VettidOrgStackProps extends cdk.StackProps {
   domainName: string;
@@ -151,11 +152,8 @@ export class VettidOrgStack extends cdk.Stack {
           includeSubdomains: true,
           override: true,
         },
-        xssProtection: {
-          protection: true,
-          modeBlock: true,
-          override: true,
-        },
+        // No X-XSS-Protection: the legacy auditor it controlled is gone from
+        // every current browser and could itself be abused; CSP covers it.
       },
     });
 
@@ -580,7 +578,15 @@ function handler(event) {
         additionalBehaviors: {
           ...additionalBehaviors,
           '/api/*': {
-            origin: new origins.HttpOrigin(props.apiDomain),
+            // The signup API rejects requests without this secret, so the
+            // public execute-api URL can't be used to bypass the WAF.
+            // Resolved from Secrets Manager at deploy time (signup stack
+            // creates it — deploy that stack first).
+            origin: new origins.HttpOrigin(props.apiDomain, {
+              customHeaders: {
+                'X-Origin-Verify': cdk.SecretValue.secretsManager(SIGNUP_ORIGIN_VERIFY_SECRET_NAME).unsafeUnwrap(),
+              },
+            }),
             viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
             cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
             originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,

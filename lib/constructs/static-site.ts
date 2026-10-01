@@ -7,6 +7,8 @@ import * as route53targets from 'aws-cdk-lib/aws-route53-targets';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import { Construct } from 'constructs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
 
 export interface StaticSiteProps {
   /** Fully-qualified host, e.g. account.vettid.org. */
@@ -32,16 +34,56 @@ export interface StaticSiteProps {
   readonly connectSrc?: string[];
   /** ARN of a CLOUDFRONT-scope WAF web ACL (us-east-1). */
   readonly webAclArn?: string;
+  /**
+   * Branded 404 page (path inside sourceDir, e.g. '404.html'). Requests for
+   * files the site doesn't contain get this page with a real 404 status,
+   * answered by the viewer-request function from a file list built at synth.
+   * (CloudFront's distribution-wide error pages would also rewrite the API's
+   * JSON errors, so they aren't used.)
+   */
+  readonly notFoundPage?: string;
+}
+
+/** Every file the deployment will put in the bucket, as request paths. */
+function sitePaths(dir: string): string[] {
+  const walk = (d: string): string[] =>
+    readdirSync(d).flatMap((n) => {
+      const p = join(d, n);
+      return statSync(p).isDirectory() ? walk(p) : ['/' + relative(dir, p).split(sep).join('/')];
+    });
+  // Same exclusions as the deployment, so the 404 file list matches the bucket.
+  return walk(dir)
+    .filter((p) => !isExcludedSitePath(p.slice(1)))
+    .sort();
+}
+
+const FUNCTION_CODE_LIMIT = 10 * 1024; // CloudFront Functions hard limit
+
+/**
+ * Local junk that must never be published (or counted as a site file):
+ * dotfiles/dot-directories (editor state, .env, .DS_Store), swap and backup
+ * files, and `*.example.json` config templates. Glob patterns in CDK asset
+ * exclude syntax: a pattern without a slash matches a basename at any depth.
+ */
+export const SITE_EXCLUDE = ['.*', '*.swp', '*~', '*.example.json', '.DS_Store'];
+
+/** True if a site-relative path (e.g. 'js/.app.js.swp') matches SITE_EXCLUDE in any segment. */
+export function isExcludedSitePath(relPath: string): boolean {
+  return relPath
+    .split(/[\\/]/)
+    .some((seg) => seg.startsWith('.') || seg.endsWith('.swp') || seg.endsWith('~') || seg.endsWith('.example.json'));
 }
 
 /**
  * A static site on S3 + CloudFront at its own host name, with the repo's
  * standard security posture: OAC-only bucket, strict CSP with no inline or
  * third-party script, HSTS, TLS 1.2+ (TLS 1.3 viewers negotiate CloudFront's
- * hybrid post-quantum key exchange), and deploy-time generated config.
+ * hybrid post-quantum key exchange), deploy-time generated config, and
+ * CloudFront standard access logs in a private per-site bucket (90 days).
  */
 export class StaticSite extends Construct {
   readonly bucket: s3.Bucket;
+  readonly logBucket: s3.Bucket;
   readonly distribution: cloudfront.Distribution;
 
   constructor(scope: Construct, id: string, props: StaticSiteProps) {
@@ -57,10 +99,39 @@ export class StaticSite extends Construct {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
+    // CloudFront standard (legacy) access logs, as on the public site:
+    // CloudFront writes them with an ACL grant, so the bucket must keep ACLs
+    // enabled (OBJECT_WRITER). Still private (BLOCK_ALL), TLS-only, SSE-S3.
+    // Raw request logs keep 90 days (logging spec §5); cookies never logged.
+    this.logBucket = new s3.Bucket(this, 'LogBucket', {
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      objectOwnership: s3.ObjectOwnership.OBJECT_WRITER,
+      lifecycleRules: [{ expiration: cdk.Duration.days(90) }],
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
     const certificate = new acm.Certificate(this, 'Certificate', {
       domainName: props.hostName,
       validation: acm.CertificateValidation.fromDns(props.hostedZone),
     });
+
+    const csp = [
+      "default-src 'none'",
+      "script-src 'self'",
+      "style-src 'self'",
+      ['connect-src', "'self'", ...(props.connectSrc ?? [])].join(' '),
+      "img-src 'self'",
+      "font-src 'self'",
+      "manifest-src 'self'",
+      "base-uri 'none'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+      // The apps build DOM with createElement/textContent only; with this,
+      // any HTML/script string sink (innerHTML, eval, ...) throws.
+      "require-trusted-types-for 'script'",
+    ].join('; ');
 
     const headers = new cloudfront.ResponseHeadersPolicy(this, 'Headers', {
       comment: `${props.hostName} security headers`,
@@ -77,18 +148,7 @@ export class StaticSite extends Construct {
         // Fully self-hosted: no external scripts/styles/fonts. Unlike the
         // public site, no 'unsafe-inline' styles — these apps use stylesheets only.
         contentSecurityPolicy: {
-          contentSecurityPolicy: [
-            "default-src 'none'",
-            "script-src 'self'",
-            "style-src 'self'",
-            ['connect-src', "'self'", ...(props.connectSrc ?? [])].join(' '),
-            "img-src 'self' data:",
-            "font-src 'self'",
-            "manifest-src 'self'",
-            "base-uri 'none'",
-            "form-action 'self'",
-            "frame-ancestors 'none'",
-          ].join('; '),
+          contentSecurityPolicy: csp,
           override: true,
         },
         contentTypeOptions: { override: true },
@@ -103,20 +163,53 @@ export class StaticSite extends Construct {
     });
 
     // S3 (OAC) doesn't resolve /path or /path/ to /path/index.html by itself.
-    const rewrite = new cloudfront.Function(this, 'Rewrite', {
-      runtime: cloudfront.FunctionRuntime.JS_2_0,
-      comment: 'Clean URLs: /x and /x/ -> /x/index.html',
-      code: cloudfront.FunctionCode.fromInline(`
+    // With notFoundPage, unknown paths are answered here with the branded
+    // page and a real 404 (S3 would say 403 for a missing key).
+    let notFound = '';
+    if (props.notFoundPage) {
+      const files = sitePaths(props.sourceDir);
+      if (props.runtimeConfig) files.push('/config.json');
+      const page = readFileSync(join(props.sourceDir, props.notFoundPage), 'utf8');
+      const fnHeaders = {
+        'content-type': { value: 'text/html; charset=utf-8' },
+        'cache-control': { value: 'no-store' },
+        'content-security-policy': { value: csp },
+        'x-content-type-options': { value: 'nosniff' },
+        'x-frame-options': { value: 'DENY' },
+        'referrer-policy': { value: 'no-referrer' },
+        'strict-transport-security': { value: 'max-age=31536000; includeSubDomains' },
+        'permissions-policy': { value: 'camera=(), microphone=(), geolocation=(), payment=()' },
+      };
+      notFound = `
+  if (!FILES[uri]) {
+    return { statusCode: 404, statusDescription: 'Not Found', headers: ${JSON.stringify(fnHeaders)},
+      body: { encoding: 'text', data: NOT_FOUND } };
+  }
+`;
+      notFound = `var FILES = ${JSON.stringify(Object.fromEntries(files.map((f) => [f, 1])))};
+var NOT_FOUND = ${JSON.stringify(page)};
+@@CHECK@@${notFound}`;
+    }
+    const [decls, check] = notFound ? notFound.split('@@CHECK@@') : ['', ''];
+    const rewriteCode = `${decls}
 function handler(event) {
   var req = event.request;
   var uri = req.uri;
   if (uri.endsWith('/')) {
-    req.uri = uri + 'index.html';
+    uri = uri + 'index.html';
   } else if (uri.lastIndexOf('.') < uri.lastIndexOf('/') + 1) {
-    req.uri = uri + '/index.html';
-  }
+    uri = uri + '/index.html';
+  }${check}
+  req.uri = uri;
   return req;
-}`),
+}`;
+    if (rewriteCode.length > FUNCTION_CODE_LIMIT) {
+      throw new Error(`${props.hostName}: viewer-request function is ${rewriteCode.length} bytes (limit ${FUNCTION_CODE_LIMIT}); shrink the 404 page or the site's file list`);
+    }
+    const rewrite = new cloudfront.Function(this, 'Rewrite', {
+      runtime: cloudfront.FunctionRuntime.JS_2_0,
+      comment: props.notFoundPage ? 'Clean URLs + branded 404 for unknown paths' : 'Clean URLs: /x and /x/ -> /x/index.html',
+      code: cloudfront.FunctionCode.fromInline(rewriteCode),
     });
 
     const additionalBehaviors: Record<string, cloudfront.BehaviorOptions> = {};
@@ -148,6 +241,10 @@ function handler(event) {
       priceClass: cloudfront.PriceClass.PRICE_CLASS_100,
       defaultRootObject: 'index.html',
       webAclId: props.webAclArn,
+      enableLogging: true,
+      logBucket: this.logBucket,
+      logFilePrefix: 'cloudfront/',
+      logIncludesCookies: false, // logging spec §5
       defaultBehavior: {
         origin: origins.S3BucketOrigin.withOriginAccessControl(this.bucket),
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
@@ -168,7 +265,7 @@ function handler(event) {
     // scopes its pruning to its own files. config.json rides in the
     // revalidating pass so it is never stale and never pruned.
     const revalidate = ['*.html', '*.json', '*.txt', '*.xml'];
-    const content = s3deploy.Source.asset(props.sourceDir);
+    const content = s3deploy.Source.asset(props.sourceDir, { exclude: SITE_EXCLUDE });
     new s3deploy.BucketDeployment(this, 'DeployAssets', {
       sources: [content],
       destinationBucket: this.bucket,

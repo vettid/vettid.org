@@ -5,6 +5,7 @@ import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as route53targets from 'aws-cdk-lib/aws-route53-targets';
+import { amazonOnlyCaa } from './dns-stack';
 
 /**
  * The entire remaining vettid.dev footprint: a permanent, contentless
@@ -72,6 +73,20 @@ function handler(event) {
         recordName: record,
         target: route53.RecordTarget.fromAlias(new route53targets.CloudFrontTarget(distribution)),
       });
+    }
+
+    // Only ACM may issue for vettid.dev (its one cert is ACM, no wildcards).
+    amazonOnlyCaa(this, 'Caa', zone);
+
+    // vettid.dev sends no mail: SPF "-all" and DMARC p=reject make spoofed
+    // vettid.dev mail fail everywhere. The zone still has hand-made apex TXT
+    // (old Proton SPF + verification) and _dmarc TXT records from the
+    // vettid-dev era; CloudFormation can't create a record set that already
+    // exists, so these are gated until those are deleted by hand (RUNBOOK):
+    //   npx cdk deploy VettidDevRedirectStack -c vettidDevMailPolicy=true
+    if (this.node.tryGetContext('vettidDevMailPolicy') === true || this.node.tryGetContext('vettidDevMailPolicy') === 'true') {
+      new route53.TxtRecord(this, 'NoMailSpf', { zone, values: ['v=spf1 -all'] });
+      new route53.TxtRecord(this, 'NoMailDmarc', { zone, recordName: '_dmarc', values: ['v=DMARC1; p=reject;'] });
     }
 
     new cdk.CfnOutput(this, 'RedirectDistribution', {

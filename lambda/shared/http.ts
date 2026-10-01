@@ -66,7 +66,11 @@ export class Router<R = Request> {
       pathMatched = true;
       if (r.method !== method.toUpperCase()) continue;
       const params: Record<string, string> = {};
-      r.names.forEach((n, i) => (params[n] = decodeURIComponent(m[i + 1])));
+      try {
+        r.names.forEach((n, i) => (params[n] = decodeURIComponent(m[i + 1])));
+      } catch {
+        throw badRequest('Malformed path');
+      }
       return { handler: r.handler, params };
     }
     return pathMatched ? 'method' : null;

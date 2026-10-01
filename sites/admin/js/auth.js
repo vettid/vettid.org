@@ -93,11 +93,14 @@ export async function start() {
   // Strip ?code/&state from the address bar before doing anything else.
   history.replaceState(null, '', location.pathname);
 
-  if (error) {
-    throw new AuthError(`Sign-in failed: ${params.get('error_description') || error}`);
-  }
+  // Check state FIRST: until it matches, nothing in the URL is ours, so never
+  // echo it (a crafted ?error_description= could put any text on this page).
   if (!pending || !state || pending.state !== state) {
-    throw new AuthError('Sign-in response did not match this browser session (state mismatch). Please sign in again.');
+    throw new AuthError('Sign-in response did not match this browser session. Please sign in again.');
+  }
+  if (error) {
+    const known = { access_denied: 'Sign-in was cancelled or denied.', invalid_request: 'The sign-in request was invalid.', server_error: 'The sign-in service had a problem.', temporarily_unavailable: 'The sign-in service is temporarily unavailable.' };
+    throw new AuthError(known[error] ?? 'Sign-in failed. Please try again.');
   }
 
   setTokens(await tokenRequest({
@@ -182,10 +185,26 @@ function clearSession() {
   tokens = null;
 }
 
-export function signOut() {
+export async function signOut() {
+  const rt = tokens?.refreshToken;
   clearSession();
   sessionStorage.removeItem(PENDING_KEY);
   redirecting = true;
+  // Revoke the refresh token: the hosted-UI /logout below only ends the
+  // Cognito browser session; the refresh token would otherwise stay valid.
+  if (rt) {
+    try {
+      await fetch(`${cfg.cognitoDomain}/oauth2/revoke`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ token: rt, client_id: cfg.clientId }),
+        credentials: 'omit',
+        cache: 'no-store',
+      });
+    } catch {
+      /* sign out locally regardless */
+    }
+  }
   const q = new URLSearchParams({ client_id: cfg.clientId, logout_uri: cfg.redirectUri });
   location.assign(`${cfg.cognitoDomain}/logout?${q}`);
 }

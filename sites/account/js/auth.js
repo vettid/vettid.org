@@ -1,9 +1,12 @@
 // Magic-link landing: /auth/#t=<token>&e=<email>
 // The token lives only in the URL fragment (never sent to servers or logs).
-// We read it, strip it from the address bar immediately, and POST it to
-// /api/auth/verify. If the account has a PIN, we ask for it next.
+// We read it and strip it from the address bar immediately. Nothing is sent
+// until the person clicks "Continue": opening the page alone must not sign
+// anyone in (an attacker could otherwise sign a victim into the attacker's
+// account), and email link scanners that run pages must not burn the
+// single-use token. If the account has a PIN, we ask for it next.
 
-import { publicPost } from './api.js';
+import { get, publicPost } from './api.js';
 import { $, el, fill } from './dom.js';
 import * as ui from './ui.js';
 
@@ -108,6 +111,36 @@ function showPin() {
   input.focus();
 }
 
+/** Ask before using the link; warn if this would switch accounts. */
+async function confirmStep() {
+  title.textContent = 'Sign in to VettID';
+  fill(card, el('p', { class: 'loading' }, 'One moment…'));
+  let current = null;
+  try {
+    current = await get('/api/account/me', { redirect: false });
+  } catch {
+    current = null; // not signed in (the normal case)
+  }
+  if (current?.email && current.email.toLowerCase() === email.toLowerCase()) {
+    title.textContent = "You're already signed in";
+    fill(card,
+      el('p', {}, 'You are already signed in as ', el('strong', {}, current.email), '.'),
+      el('div', { class: 'actions' }, el('a', { class: 'btn btn-primary', href: '/account/' }, 'Go to your account')),
+    );
+    return;
+  }
+  const go = el('button', { type: 'button', class: 'btn btn-primary', on: { click: verify } }, 'Continue');
+  fill(card,
+    el('p', {}, 'Continue signing in as ', el('strong', {}, email), '?'),
+    current?.email
+      ? el('p', { class: 'muted' }, 'You are currently signed in as ', el('strong', {}, current.email), '. Continuing will switch accounts.')
+      : null,
+    el('p', { class: 'muted' }, "If you didn't ask for this sign-in link, close this page."),
+    el('div', { class: 'actions' }, go, el('a', { href: '/' }, 'Cancel')),
+  );
+  go.focus();
+}
+
 function start() {
   const frag = readFragment();
   token = frag.t ?? '';
@@ -115,11 +148,10 @@ function start() {
   // Strip the token from the address bar (and so from history) right away.
   history.replaceState(null, '', location.pathname + location.search);
   ui.clearMessages();
-  title.textContent = 'Signing you in…';
   if (!token || !email) {
     badLink('The link is incomplete. It may have been cut off when it was copied.');
   } else {
-    verify();
+    confirmStep();
   }
 }
 

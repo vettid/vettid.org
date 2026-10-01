@@ -3,18 +3,20 @@ import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, TransactW
 import { AdminAddUserToGroupCommand, AdminCreateUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
 import { CreateEmailIdentityCommand, GetEmailIdentityCommand, SendEmailCommand, SESv2Client } from '@aws-sdk/client-sesv2';
 import { GetSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
+import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 
 Object.assign(process.env, {
   TABLE_MEMBERS: 'members', TABLE_INVITES: 'invites', TABLE_TERMS: 'terms', TABLE_SUBSCRIPTIONS: 'subs',
   TABLE_SUBSCRIPTION_TYPES: 'types', TABLE_AUDIT: 'audit', TABLE_RATELIMITS: 'rl', TABLE_MAGIC_LINKS: 'links',
   MEMBER_POOL_ID: 'us-east-1_pool', MEMBER_CLIENT_ID: 'client', PIN_PEPPER_SECRET_ARN: 'pepper',
   ORIGIN_VERIFY_SECRET_ARN: 'origin', SENDER_EMAIL: 'no-reply@vettid.org', ADMIN_EMAIL: 'admin@vettid.org',
-  ACCOUNT_HOST: 'account.vettid.org',
+  ACCOUNT_HOST: 'account.vettid.org', LINK_MAILER_FN: 'link-mailer',
 });
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const pub = require('../../lambda/member/public');
 const auth = require('../../lambda/member/auth');
+const mailer = require('../../lambda/member/link-mailer');
 const define = require('../../lambda/triggers/define-auth-challenge');
 const verify = require('../../lambda/triggers/verify-auth-challenge');
 const { pinProblem, hashPin, checkPin } = require('../../lambda/shared/pin');
@@ -25,6 +27,7 @@ const ddb = mockClient(DynamoDBDocumentClient);
 const idp = mockClient(CognitoIdentityProviderClient);
 const ses = mockClient(SESv2Client);
 const sm = mockClient(SecretsManagerClient);
+const lam = mockClient(LambdaClient);
 
 const ORIGIN = 'origin-secret-value';
 const ev = (method: string, path: string, body?: unknown, headers: Record<string, string> = {}, cookies: string[] = []) =>
@@ -38,7 +41,8 @@ const ev = (method: string, path: string, body?: unknown, headers: Record<string
   }) as any;
 
 beforeEach(() => {
-  ddb.reset(); idp.reset(); ses.reset(); sm.reset();
+  ddb.reset(); idp.reset(); ses.reset(); sm.reset(); lam.reset();
+  lam.on(InvokeCommand).resolves({});
   sm.on(GetSecretValueCommand, { SecretId: 'origin' }).resolves({ SecretString: ORIGIN });
   sm.on(GetSecretValueCommand, { SecretId: 'pepper' }).resolves({ SecretString: 'pepper-value' });
   ddb.on(UpdateCommand, { TableName: 'rl' }).resolves({ Attributes: { count: 1 } });
@@ -125,24 +129,43 @@ describe('POST /api/public/request', () => {
 });
 
 describe('POST /api/auth/start', () => {
-  const member = { user_guid: 'g1', email: 'm@x.org', first_name: 'M', state: 'member', account_status: 'active', email_verified: true };
-
-  test('eligible member: stores only the token hash and emails a fragment link', async () => {
-    ddb.on(QueryCommand).resolves({ Items: [member] });
+  test('answers immediately and hands off to the async mailer (no account lookup inline)', async () => {
     const res = await auth.handler(ev('POST', '/api/auth/start', { email: 'M@x.org' }));
     expect(JSON.parse(res.body)).toEqual({ ok: true });
+    const inv = lam.commandCalls(InvokeCommand)[0].args[0].input;
+    expect(inv).toMatchObject({ FunctionName: 'link-mailer', InvocationType: 'Event' });
+    expect(JSON.parse(Buffer.from(inv.Payload as Uint8Array).toString())).toEqual({ email: 'm@x.org' });
+    expect(ddb.commandCalls(QueryCommand)).toHaveLength(0); // timing can't depend on the account
+    expect(ses.commandCalls(SendEmailCommand)).toHaveLength(0);
+  });
+
+  test('per (address, network) limit is silent: same answer, no hand-off', async () => {
+    ddb.on(UpdateCommand, { TableName: 'rl' }).resolvesOnce({ Attributes: { count: 1 } }).resolves({ Attributes: { count: 4 } });
+    const res = await auth.handler(ev('POST', '/api/auth/start', { email: 'm@x.org' }));
+    expect(JSON.parse(res.body)).toEqual({ ok: true });
+    expect(lam.commandCalls(InvokeCommand)).toHaveLength(0);
+  });
+});
+
+describe('link mailer (async)', () => {
+  const member = { user_guid: 'g1', email: 'm@x.org', first_name: 'Evil\nhttps://phish', state: 'member', account_status: 'active', email_verified: true };
+
+  test('eligible member: stores only the token hash, emails a fragment link, no member-supplied text', async () => {
+    ddb.on(QueryCommand).resolves({ Items: [member] });
+    await mailer.handler({ email: 'm@x.org' });
     const put = ddb.commandCalls(PutCommand).find((c) => c.args[0].input.TableName === 'links')!.args[0].input.Item!;
     const text = ses.commandCalls(SendEmailCommand)[0].args[0].input.Content!.Simple!.Body!.Text!.Data!;
     const token = /#t=([A-Za-z0-9_-]{43})&e=/.exec(text)![1];
     expect(put.token_hash).toBe(sha256Hex(token));
     expect(JSON.stringify(put)).not.toContain(token);
+    expect(text).not.toContain('phish');
   });
 
   test('flag not yet swept but SES says verified: checks live, records it, sends the link', async () => {
     ddb.on(QueryCommand).resolves({ Items: [{ ...member, email_verified: false }] });
     ses.on(GetEmailIdentityCommand).resolves({ VerifiedForSendingStatus: true });
     ddb.on(UpdateCommand, { TableName: 'members' }).resolves({});
-    await auth.handler(ev('POST', '/api/auth/start', { email: 'm@x.org' }));
+    await mailer.handler({ email: 'm@x.org' });
     expect(ddb.commandCalls(UpdateCommand, { TableName: 'members' })[0].args[0].input.ExpressionAttributeValues).toMatchObject({ ':t': true });
     expect(ses.commandCalls(SendEmailCommand)).toHaveLength(1);
   });
@@ -152,12 +175,56 @@ describe('POST /api/auth/start', () => {
     ['unverified email', [{ ...member, email_verified: false }]],
     ['suspended', [{ ...member, account_status: 'suspended' }]],
     ['still requested', [{ ...member, state: 'requested' }]],
-  ])('%s: same answer, no email', async (_n, items) => {
+  ])('%s: nothing sent', async (_n, items) => {
     ddb.on(QueryCommand).resolves({ Items: items });
     ses.on(GetEmailIdentityCommand).resolves({ VerifiedForSendingStatus: false });
-    const res = await auth.handler(ev('POST', '/api/auth/start', { email: 'm@x.org' }));
-    expect(JSON.parse(res.body)).toEqual({ ok: true });
+    await mailer.handler({ email: 'm@x.org' });
     expect(ses.commandCalls(SendEmailCommand)).toHaveLength(0);
+  });
+
+  test('global hourly cap stops sending', async () => {
+    ddb.on(QueryCommand).resolves({ Items: [member] });
+    ddb.on(UpdateCommand, { TableName: 'rl' }).resolvesOnce({ Attributes: { count: 1 } }).resolves({ Attributes: { count: 999 } });
+    await mailer.handler({ email: 'm@x.org' });
+    expect(ses.commandCalls(SendEmailCommand)).toHaveLength(0);
+  });
+});
+
+describe('POST /api/auth/pin', () => {
+  test('a forged (unsigned) PIN-step cookie is treated as expired and reveals nothing', async () => {
+    const forged = Buffer.from(JSON.stringify({ s: 'x', e: 'victim@x.org' })).toString('base64url');
+    const res = await auth.handler(ev('POST', '/api/auth/pin', { pin: '4826' }, {}, [`vid_pin=${forged}.AAAA`]));
+    expect(res.statusCode).toBe(401);
+    expect(JSON.parse(res.body).message).toMatch(/expired/);
+    expect(idp.calls()).toHaveLength(0);
+    expect(ddb.commandCalls(QueryCommand)).toHaveLength(0);
+  });
+});
+
+describe('public request input', () => {
+  beforeEach(() => {
+    ddb.on(QueryCommand).resolves({ Items: [] });
+    ses.on(GetEmailIdentityCommand).rejects(Object.assign(new Error('nf'), { name: 'NotFoundException' }));
+    ses.on(CreateEmailIdentityCommand).resolves({});
+    ddb.on(TransactWriteCommand).resolves({});
+  });
+
+  test.each(['Visit https://evil.example', 'Al\nSecurity notice', 'R2D2', ''])('rejects name %j', async (first) => {
+    const res = await pub.handler(ev('POST', '/api/public/request', { email: 'a@b.org', first_name: first, last_name: 'L', consent: true }));
+    expect(res.statusCode).toBe(400);
+  });
+
+  test.each(["O'Brien", 'Zoë', 'Jean-Luc', 'José María', '李'])('accepts name %j', async (first) => {
+    const res = await pub.handler(ev('POST', '/api/public/request', { email: 'a@b.org', first_name: first, last_name: 'L', consent: true }));
+    expect(res.statusCode).toBe(200);
+  });
+
+  test('past the global hourly cap: same answer, nothing created', async () => {
+    ddb.on(UpdateCommand, { TableName: 'rl' }).resolvesOnce({ Attributes: { count: 1 } }).resolves({ Attributes: { count: 999 } });
+    const res = await pub.handler(ev('POST', '/api/public/request', { email: 'a@b.org', first_name: 'A', last_name: 'B', consent: true }));
+    expect(JSON.parse(res.body)).toEqual({ outcome: 'pending_approval' });
+    expect(ddb.commandCalls(TransactWriteCommand)).toHaveLength(0);
+    expect(ses.commandCalls(CreateEmailIdentityCommand)).toHaveLength(0);
   });
 });
 
@@ -225,22 +292,36 @@ describe('PIN', () => {
     expect(pinProblem(p)).toBeNull();
   });
 
-  test('hash is peppered and per-user; wrong PIN counts toward lockout', async () => {
+  test('hash is peppered and per-user', async () => {
     const h = await hashPin('g1', '4826');
     expect(h).not.toBe(sha256Hex('4826'));
     expect(await hashPin('g2', '4826')).not.toBe(h);
-
-    ddb.on(GetCommand, { TableName: 'rl' }).resolves({});
-    ddb.on(UpdateCommand, { TableName: 'rl' }).resolves({ Attributes: { count: 1 } });
-    expect(await checkPin('g1', h, '4826')).toEqual({ ok: true });
-    expect(await checkPin('g1', h, '4827')).toEqual({ ok: false, locked: false, attemptsLeft: 4 });
   });
 
-  test('locked after 5 failures even with the right PIN', async () => {
+  test('an attempt is reserved atomically BEFORE comparing (concurrent guesses can\'t overshoot)', async () => {
     const h = await hashPin('g1', '4826');
+    ddb.on(UpdateCommand, { TableName: 'rl' }).resolves({ Attributes: { count: 2 } });
+    expect(await checkPin('g1', h, '4827')).toEqual({ ok: false, locked: false, attemptsLeft: 3, justLocked: false });
+    const reserve = ddb.commandCalls(UpdateCommand, { TableName: 'rl' })[0].args[0].input;
+    expect(reserve.ConditionExpression).toBe('expires_at > :now AND #c < :max');
+    expect(reserve.ExpressionAttributeValues![':max']).toBe(5);
+  });
+
+  test('when no attempt can be reserved the PIN is locked, even if correct', async () => {
+    const h = await hashPin('g1', '4826');
+    const ccf = Object.assign(new Error('c'), { name: 'ConditionalCheckFailedException' });
+    ddb.on(UpdateCommand, { TableName: 'rl' }).rejects(ccf);
+    ddb.on(PutCommand, { TableName: 'rl' }).rejects(ccf);
     ddb.on(GetCommand, { TableName: 'rl' }).resolves({ Item: { count: 5, expires_at: Math.floor(Date.now() / 1000) + 600 } });
-    expect(await checkPin('g1', h, '4826')).toEqual({ ok: false, locked: true, attemptsLeft: 0 });
-    expect(ddb.commandCalls(DeleteCommand)).toHaveLength(0);
+    expect(await checkPin('g1', h, '4826')).toEqual({ ok: false, locked: true, attemptsLeft: 0, justLocked: false });
+  });
+
+  test('a correct PIN clears the counter', async () => {
+    const h = await hashPin('g1', '4826');
+    ddb.on(UpdateCommand, { TableName: 'rl' }).resolves({ Attributes: { count: 1 } });
+    ddb.on(DeleteCommand).resolves({});
+    expect(await checkPin('g1', h, '4826')).toEqual({ ok: true });
+    expect(ddb.commandCalls(DeleteCommand)[0].args[0].input.Key).toEqual({ key: 'pinfail#g1' });
   });
 });
 

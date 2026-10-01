@@ -15,7 +15,6 @@ related:
   - PUSH-GATEWAY.md
   - CALLING-SERVICE.md
   - PQC-MIGRATION.md
-  - SCOPE-1TO1.md
   - RUNBOOK.md
 ---
 
@@ -266,8 +265,8 @@ discovered:
   - Lockout that actually works: counters in `vettid-org-ratelimits` with
     matching grants, TTL-based cooldown, tested in CI (the old one failed
     open silently).
-  - Magic-link tokens: 32 random bytes, single use, 15-min TTL, deleted on
-    use; per-email rate limit via GSI.
+  - Magic-link tokens: 32 random bytes, stored hashed, single use (marked
+    `used_at` atomically), 15-min TTL; sent by an async mailer.
   - PIN enforced server-side for sensitive account actions (PIN change/
     disable, cancel), not by a browser flag.
 - **Session model (one model, not three):** refresh token in an httpOnly,

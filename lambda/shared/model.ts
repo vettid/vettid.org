@@ -54,6 +54,7 @@ export interface MemberView {
   created_at: string;
   updated_at: string;
   terms_version: string | null;
+  pin_enabled: boolean;
   subscription: SubscriptionItem | null;
   voting_rights: boolean;
 }
@@ -86,6 +87,7 @@ export function toMemberView(m: MemberItem, sub: SubscriptionItem | null): Membe
     created_at: m.created_at,
     updated_at: m.updated_at,
     terms_version: m.terms_version ?? null,
+    pin_enabled: !!m.pin_hash,
     subscription: sub,
     voting_rights: hasVotingRights(m, sub),
   };

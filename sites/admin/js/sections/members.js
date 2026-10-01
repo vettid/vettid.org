@@ -75,6 +75,23 @@ export function render(root, { api, ui }) {
           })
         : null;
 
+      const clearPin = m.pin_enabled
+        ? ui.action('Clear PIN', async () => {
+            const ok = await ui.confirm({
+              title: 'Clear sign-in PIN',
+              body: [
+                `Remove the PIN from ${m.email}? They will sign in with the email link only and can set a new PIN themselves.`,
+                'Only do this at the member\'s request after confirming who they are. They are emailed a notice.',
+              ],
+              confirmLabel: 'Clear PIN',
+              tone: 'danger',
+            });
+            if (!ok) return;
+            row.update(await api.post(`/admin/members/${id}/clear-pin`));
+            ui.toast(`Cleared the PIN for ${m.email}.`);
+          })
+        : null;
+
       const remove = ui.action('Delete', async () => {
         const v = await ui.dialog({
           title: 'Delete member permanently',
@@ -99,7 +116,7 @@ export function render(root, { api, ui }) {
         chip(m.account_status, STATUS_TONE[m.account_status] ?? 'mute'),
         subscriptionCell(m.subscription),
         m.voting_rights ? chip('yes', 'ok') : muted('no'),
-        ui.rowActions(suspendOrReinstate, extend, remove),
+        ui.rowActions(suspendOrReinstate, extend, clearPin, remove),
       ];
     },
   });

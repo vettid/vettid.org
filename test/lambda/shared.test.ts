@@ -1,5 +1,5 @@
 import { Router, decodeCursor, encodeCursor, email } from '../../lambda/shared/http';
-import { requireAdmin } from '../../lambda/shared/admin-auth';
+import { requireAdminClaims as requireAdmin } from '../../lambda/shared/admin-auth';
 import { hasVotingRights, SubscriptionItem } from '../../lambda/shared/model';
 import { inviteCode } from '../../lambda/shared/ids';
 
@@ -82,5 +82,25 @@ describe('helpers', () => {
 
   test('invite codes are XXXXX-XXXXX Crockford base32', () => {
     for (let i = 0; i < 50; i++) expect(inviteCode()).toMatch(/^[0-9A-HJKMNP-TV-Z]{5}-[0-9A-HJKMNP-TV-Z]{5}$/);
+  });
+});
+
+describe('rate-limit keys from CloudFront-Viewer-Address', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { rateKeyFromViewer, expandIPv6 } = require('../../lambda/shared/member-http');
+  test.each([
+    ['198.51.100.10:46532', '198.51.100.10'],
+    ['2001:db8:85a3::8a2e:370:7334:443', '2001:0db8:85a3:0000::/64'],
+    ['2001:db8:85a3:0:ffff:ffff:ffff:ffff:5', '2001:0db8:85a3:0000::/64'],
+    ['[2001:db8::1]:443', '2001:0db8:0000:0000::/64'],
+  ])('%s → %s', (v, want) => {
+    expect(rateKeyFromViewer(v, 'fallback')).toBe(want);
+  });
+  test('every address in one /64 shares a key', () => {
+    expect(rateKeyFromViewer('2001:db8:1:2:aaaa::1:1', '')).toBe(rateKeyFromViewer('2001:db8:1:2:bbbb:cccc:dddd:eeee:2', ''));
+  });
+  test('expands :: and embedded IPv4', () => {
+    expect(expandIPv6('::ffff:192.0.2.1')).toEqual(['0000', '0000', '0000', '0000', '0000', 'ffff', 'c000', '0201']);
+    expect(expandIPv6('1::2::3')).toBeNull();
   });
 });

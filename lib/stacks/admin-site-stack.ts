@@ -30,6 +30,7 @@ export class VettidOrgAdminSiteStack extends cdk.Stack {
       hostName: hostName(config, 'admin'),
       hostedZone: hostedZone,
       sourceDir: 'sites/admin',
+      notFoundPage: '404.html',
       webAclArn: readRef(this, config, 'admin-access/site-web-acl-arn'),
       connectSrc: [apiBase, cognitoDomain],
       runtimeConfig: {

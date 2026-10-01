@@ -24,8 +24,13 @@ export const handler: DynamoDBStreamHandler = async (event) => {
           TableName: table.members(),
           Key: { user_guid: m.user_guid },
           UpdateExpression: 'SET welcome_sent = :t',
-          ConditionExpression: 'attribute_not_exists(welcome_sent)',
-          ExpressionAttributeValues: { ':t': true },
+          // Re-check the live row: never recreate a deleted member (an
+          // UpdateItem on a missing key would), nor email someone who has
+          // since been suspended or canceled.
+          ConditionExpression:
+            'attribute_exists(user_guid) AND attribute_not_exists(welcome_sent) AND #s = :reg AND account_status = :active AND email_verified = :t',
+          ExpressionAttributeNames: { '#s': 'state' },
+          ExpressionAttributeValues: { ':t': true, ':reg': 'registered', ':active': 'active' },
         }),
       );
     } catch (e) {
@@ -35,7 +40,7 @@ export const handler: DynamoDBStreamHandler = async (event) => {
     await sendMail(
       m.email,
       'Your VettID account is ready',
-      `Hi ${m.first_name},\n\nYour VettID account is ready. Sign in here — we'll email you a one-time link:\n\n` +
+      `Your VettID account is ready. Sign in here — we'll email you a one-time link:\n\n` +
         `https://${env('ACCOUNT_HOST')}/signin/\n\n` +
         'Once you are in, review and accept the membership terms to become a member.\n\n— VettID\n',
     );

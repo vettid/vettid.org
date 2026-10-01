@@ -5,6 +5,7 @@ import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as logs from 'aws-cdk-lib/aws-logs';
 import * as sources from 'aws-cdk-lib/aws-lambda-event-sources';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
@@ -48,6 +49,26 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     });
     const stage = api.defaultStage!.node.defaultChild as apigwv2.CfnStage;
     stage.defaultRouteSettings = { throttlingRateLimit: 50, throttlingBurstLimit: 100 };
+    // Access log: request metadata only — no headers, cookies or bodies.
+    // ($context.identity.sourceIp is CloudFront's edge, not the viewer.)
+    const accessLogs = new logs.LogGroup(this, 'AccessLogs', {
+      logGroupName: `/vettid-org/${config.stage}/member-api/access`,
+      retention: logs.RetentionDays.THREE_MONTHS,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+    stage.accessLogSettings = {
+      destinationArn: accessLogs.logGroupArn,
+      format: JSON.stringify({
+        requestId: '$context.requestId',
+        time: '$context.requestTime',
+        method: '$context.httpMethod',
+        path: '$context.path',
+        status: '$context.status',
+        bytes: '$context.responseLength',
+        latencyMs: '$context.integrationLatency',
+        error: '$context.integrationErrorMessage',
+      }),
+    };
 
     const memberPoolArn = readRef(this, config, 'auth/member-pool-arn');
     const env = {
@@ -79,6 +100,13 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     const sesIdentity = (fn: lambda.IFunction, actions: string[]) =>
       fn.addToRolePolicy(new iam.PolicyStatement({ actions: actions.map((a) => `ses:${a}`), resources: ['*'] }));
     const g = (fn: lambda.IFunction, t: string, actions: string[], indexes = false) => tableGrant(this, config, fn, t, actions, { indexes });
+    // Functions that may delete SES identities must never delete the domain
+    // identity that all system mail is sent from.
+    const denyDomainIdentityDelete = new iam.PolicyStatement({
+      effect: iam.Effect.DENY,
+      actions: ['ses:DeleteEmailIdentity'],
+      resources: [`arn:${this.partition}:ses:${this.region}:${this.account}:identity/${config.domainName}`, `arn:${this.partition}:ses:${this.region}:${this.account}:identity/*.${config.domainName}`],
+    });
 
     // public: request membership
     g(pub, 'members', ['Query', 'PutItem', 'UpdateItem'], true);
@@ -89,20 +117,32 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     sesIdentity(pub, ['GetEmailIdentity', 'CreateEmailIdentity']);
     pub.addToRolePolicy(sesSend);
 
-    // auth: magic link issue + Cognito custom auth (InitiateAuth etc. are
-    // unauthenticated APIs for a public client — no IAM needed)
-    g(auth, 'members', ['Query', 'UpdateItem'], true); // UpdateItem: live SES-verified flag
-    sesIdentity(auth, ['GetEmailIdentity']);
-    g(auth, 'magic-links', ['PutItem']);
+    // auth: Cognito custom auth (InitiateAuth etc. are unauthenticated APIs
+    // for a public client — no IAM needed); hands link sending to the mailer.
+    g(auth, 'members', ['Query'], true); // PIN lock state for a signed PIN-step cookie
     g(auth, 'ratelimits', ['UpdateItem', 'GetItem']);
-    auth.addToRolePolicy(sesSend);
+
+    // link mailer: invoked asynchronously by /api/auth/start
+    const linkMailer = new ApiFunction(this, 'LinkMailer', {
+      entry: 'lambda/member/link-mailer.ts',
+      environment: env,
+      description: 'Sends magic sign-in links (async, so /api/auth/start timing reveals nothing)',
+    }).fn;
+    g(linkMailer, 'members', ['Query', 'UpdateItem'], true); // UpdateItem: live SES-verified flag
+    g(linkMailer, 'magic-links', ['PutItem']);
+    g(linkMailer, 'ratelimits', ['UpdateItem']);
+    sesIdentity(linkMailer, ['GetEmailIdentity']);
+    linkMailer.addToRolePolicy(sesSend);
+    linkMailer.grantInvoke(auth);
+    auth.addEnvironment('LINK_MAILER_FN', linkMailer.functionName);
 
     // account
     g(account, 'members', ['GetItem', 'UpdateItem']);
     g(account, 'terms', ['Query'], true);
     g(account, 'subscriptions', ['GetItem', 'PutItem']);
     g(account, 'subscription-types', ['Scan']);
-    g(account, 'ratelimits', ['GetItem', 'UpdateItem', 'DeleteItem']);
+    g(account, 'ratelimits', ['GetItem', 'PutItem', 'UpdateItem', 'DeleteItem']); // PIN lockout (atomic reserve)
+    account.addToRolePolicy(sesSend); // PIN change / lockout notices
     g(account, 'audit', ['PutItem']);
     cognitoActions(account, ['AdminAddUserToGroup', 'AdminDisableUser', 'AdminUserGlobalSignOut']);
     account.addToRolePolicy(
@@ -129,6 +169,11 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     g(cleanup, 'members', ['Query', 'DeleteItem'], true);
     g(cleanup, 'subscriptions', ['Query', 'UpdateItem', 'DeleteItem'], true);
     g(cleanup, 'audit', ['PutItem']);
+    // stale-request reclaim: keep identities the mailing list still uses
+    tableGrant(this, config, cleanup, 'mailing-list', ['GetItem']);
+    cleanup.addEnvironment('TABLE_MAILING_LIST', resourceName(config, 'mailing-list'));
+    sesIdentity(cleanup, ['DeleteEmailIdentity']);
+    cleanup.addToRolePolicy(denyDomainIdentityDelete);
     cognitoActions(cleanup, ['AdminDeleteUser']);
     new events.Rule(this, 'CleanupSchedule', {
       schedule: events.Schedule.cron({ minute: '0', hour: '7' }), // 07:00 UTC daily
