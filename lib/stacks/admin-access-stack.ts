@@ -35,7 +35,7 @@ export class VettidOrgAdminAccessStack extends cdk.Stack {
     const { config } = props;
     const loginServer = config.adminAccess.headscaleLoginServer;
     if (!/^https:\/\/[a-z0-9.-]+(:\d+)?\/?$/i.test(loginServer)) {
-      throw new Error('Set context "headscaleLoginServer" (https://...) in cdk.json for the admin exit node');
+      throw new Error('Set context "headscaleLoginServer" (https://...) in ~/.cdk.json (kept out of the repo) for the admin exit node');
     }
 
     // ---- Network: one public subnet, no NAT, nothing inbound but WireGuard.

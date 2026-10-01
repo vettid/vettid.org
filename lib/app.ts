@@ -68,7 +68,7 @@ export function buildApp(app: cdk.App): void {
   } else {
     cdk.Annotations.of(app).addWarningV2(
       'vettid:admin-access-unconfigured',
-      'VettidOrgAdminAccessStack skipped: set context "headscaleLoginServer" in cdk.json',
+      'VettidOrgAdminAccessStack skipped: set context "headscaleLoginServer" in ~/.cdk.json',
     );
   }
 }

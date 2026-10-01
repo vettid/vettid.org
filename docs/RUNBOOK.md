@@ -71,7 +71,10 @@ the `vettid-org-admin-exit` exit node. Off → 403 everywhere.
 2. Store it — run it yourself; the key should not pass through chat or the repo:
    `aws secretsmanager create-secret --name vettid-org-admin-access/headscale-preauth-key --secret-string <key>`
    (`put-secret-value` if it already exists).
-3. `cdk.json` context `headscaleLoginServer` must be the Headscale URL.
+3. Context `headscaleLoginServer` = the Headscale URL, kept **out of the repo**
+   in your user-level `~/.cdk.json`:
+   `{ "context": { "headscaleLoginServer": "https://<headscale host>" } }`.
+   Without it the AdminAccess stack is skipped (with a synth warning).
    Deploy order: `VettidOrgAuthStack VettidOrgDataStack` → `VettidOrgAdminAccessStack`.
 4. Approve the exit-node routes: `headscale nodes list-routes` /
    `headscale nodes approve-routes --identifier <id> --routes 0.0.0.0/0,::/0`
