@@ -10,6 +10,8 @@ import { Construct } from 'constructs';
 import { AppConfig, hostName, resourceName } from '../config';
 import { RestRouteGroup } from '../constructs/rest-route-group';
 import { readRef } from '../constructs/ssm-refs';
+import { tableEnv } from '../constructs/table-grants';
+import * as logs from 'aws-cdk-lib/aws-logs';
 
 export interface VettidOrgAdminApiStackProps extends cdk.StackProps {
   readonly config: AppConfig;
@@ -43,11 +45,33 @@ export class VettidOrgAdminApiStack extends cdk.Stack {
       description: 'VettID admin API (exit-node IP + Cognito admin pool)',
       endpointTypes: [apigw.EndpointType.REGIONAL],
       disableExecuteApiEndpoint: true,
-      cloudWatchRole: false,
+      // Access logging needs the account-level API Gateway CloudWatch role.
+      cloudWatchRole: true,
+      cloudWatchRoleRemovalPolicy: cdk.RemovalPolicy.RETAIN,
       deployOptions: {
         stageName: 'v1',
         throttlingRateLimit: 20,
         throttlingBurstLimit: 40,
+        // Request metadata only — no headers, tokens or bodies.
+        accessLogDestination: new apigw.LogGroupLogDestination(
+          new logs.LogGroup(this, 'AccessLogs', {
+            logGroupName: `/vettid-org/${config.stage}/admin-api/access`,
+            retention: logs.RetentionDays.ONE_YEAR,
+            removalPolicy: cdk.RemovalPolicy.RETAIN,
+          }),
+        ),
+        accessLogFormat: apigw.AccessLogFormat.custom(
+          JSON.stringify({
+            requestId: '$context.requestId',
+            time: '$context.requestTime',
+            ip: '$context.identity.sourceIp',
+            admin: '$context.authorizer.claims.email',
+            method: '$context.httpMethod',
+            path: '$context.path',
+            status: '$context.status',
+            bytes: '$context.responseLength',
+          }),
+        ),
       },
       policy: new iam.PolicyDocument({
         statements: [
@@ -97,7 +121,10 @@ export class VettidOrgAdminApiStack extends cdk.Stack {
       domainName: apiHost,
       certificate,
       endpointType: apigw.EndpointType.REGIONAL,
-      securityPolicy: apigw.SecurityPolicy.TLS_1_2,
+      // TLS 1.3 + 1.2 with forward secrecy and hybrid post-quantum key
+      // exchange (docs/PQC-MIGRATION.md); STRICT rejects SNI/Host mismatches.
+      securityPolicy: apigw.SecurityPolicy.TLS13_1_2_PFS_PQ_2025_09,
+      endpointAccessMode: apigw.EndpointAccessMode.STRICT,
     });
     domain.addBasePathMapping(api, { stage: api.deploymentStage });
     new route53.ARecord(this, 'Alias', {
@@ -110,12 +137,9 @@ export class VettidOrgAdminApiStack extends cdk.Stack {
     const tableName = (t: string) => resourceName(config, t);
     const env = {
       ALLOWED_ORIGIN: siteOrigin,
-      TABLE_MEMBERS: tableName('members'),
-      TABLE_INVITES: tableName('invites'),
-      TABLE_TERMS: tableName('terms'),
-      TABLE_SUBSCRIPTIONS: tableName('subscriptions'),
-      TABLE_SUBSCRIPTION_TYPES: tableName('subscription-types'),
-      TABLE_AUDIT: tableName('audit'),
+      ...tableEnv(config),
+      ADMIN_POOL_ID: readRef(this, config, 'auth/admin-pool-id'), // every route re-checks the admin is still enabled
+      SENDER_EMAIL: config.senderEmail,
     };
 
     const people = new RestRouteGroup(this, 'People', {
@@ -139,7 +163,7 @@ export class VettidOrgAdminApiStack extends cdk.Stack {
       authorizer,
       pathPrefixes: ['/admin/me', '/admin/admins', '/admin/audit'],
       entry: 'lambda/admin/system.ts',
-      environment: { ...env, ADMIN_POOL_ID: readRef(this, config, 'auth/admin-pool-id') },
+      environment: env,
     }).fn;
 
     // ---- least-privilege grants ---------------------------------------------
@@ -151,6 +175,11 @@ export class VettidOrgAdminApiStack extends cdk.Stack {
           resources: withIndexes ? [tableArn(t), `${tableArn(t)}/index/*`] : [tableArn(t)],
         }),
       );
+
+    // Every route re-checks that the calling admin is still enabled.
+    for (const fn of [people, content, system]) {
+      fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['cognito-idp:AdminGetUser'], resources: [readRef(this, config, 'auth/admin-pool-arn')] }));
+    }
 
     // Audit is append-only for every writer; only `system` may read it.
     for (const fn of [people, content, system]) grantTable(fn, 'audit', ['PutItem']);
@@ -208,6 +237,17 @@ export class VettidOrgAdminApiStack extends cdk.Stack {
     people.addToRolePolicy(sesIdentities);
     system.addToRolePolicy(sesIdentities);
     people.addToRolePolicy(new iam.PolicyStatement({ actions: ['ses:DeleteEmailIdentity'], resources: ['*'] }));
+    // ...but never the domain identity all system mail is sent from.
+    people.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.DENY,
+        actions: ['ses:DeleteEmailIdentity'],
+        resources: [`arn:${this.partition}:ses:${this.region}:${this.account}:identity/${config.domainName}`, `arn:${this.partition}:ses:${this.region}:${this.account}:identity/*.${config.domainName}`],
+      }),
+    );
+    // clear-pin: reset the PIN lockout counter and notify the member
+    grantTable(people, 'ratelimits', ['DeleteItem']);
+    people.addToRolePolicy(new iam.PolicyStatement({ actions: ['ses:SendEmail'], resources: ['*'] })); // see signup-stack.ts on why '*'
 
     new cdk.CfnOutput(this, 'ApiUrl', { value: `https://${apiHost}/` });
   }

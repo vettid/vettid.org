@@ -1,4 +1,4 @@
-import { DeleteCommand, GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DeleteCommand, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { ddb, env } from './aws';
 
 const tableName = () => env('TABLE_RATELIMITS');
@@ -63,6 +63,56 @@ export const lockout = {
       );
     });
     return Number(r.Attributes?.count ?? 1);
+  },
+  /**
+   * Atomically reserve one attempt BEFORE checking it, so concurrent guesses
+   * can't all read "under the limit" first. Returns the attempt number
+   * (1..max) or null when the key is locked. The window starts at the first
+   * attempt and lasts `windowSeconds`.
+   */
+  async reserve(key: string, max: number, windowSeconds: number): Promise<number | null> {
+    for (let i = 0; i < 3; i++) {
+      const now = Math.floor(Date.now() / 1000);
+      try {
+        const r = await ddb.send(
+          new UpdateCommand({
+            TableName: tableName(),
+            Key: { key },
+            UpdateExpression: 'ADD #c :one',
+            ConditionExpression: 'expires_at > :now AND #c < :max',
+            ExpressionAttributeNames: { '#c': 'count' },
+            ExpressionAttributeValues: { ':one': 1, ':now': now, ':max': max },
+            ReturnValues: 'UPDATED_NEW',
+          }),
+        );
+        return Number(r.Attributes?.count);
+      } catch (e) {
+        if ((e as Error).name !== 'ConditionalCheckFailedException') throw e;
+      }
+      try {
+        // No live window: start one with this attempt.
+        await ddb.send(
+          new PutCommand({
+            TableName: tableName(),
+            Item: { key, count: 1, expires_at: now + windowSeconds },
+            ConditionExpression: 'attribute_not_exists(#k) OR expires_at <= :now',
+            ExpressionAttributeNames: { '#k': 'key' },
+            ExpressionAttributeValues: { ':now': now },
+          }),
+        );
+        return 1;
+      } catch (e) {
+        if ((e as Error).name !== 'ConditionalCheckFailedException') throw e;
+      }
+      // Live window at or over the limit → locked (unless it just expired; retry).
+      const cur = await ddb.send(new GetCommand({ TableName: tableName(), Key: { key }, ConsistentRead: true }));
+      if (cur.Item && Number(cur.Item.expires_at) > now && Number(cur.Item.count) >= max) return null;
+    }
+    return null;
+  },
+  /** Force a key into the locked state until `until` (epoch seconds). */
+  async lockUntil(key: string, max: number, until: number): Promise<void> {
+    await ddb.send(new PutCommand({ TableName: tableName(), Item: { key, count: max, expires_at: until } }));
   },
   async clear(key: string): Promise<void> {
     await ddb.send(new DeleteCommand({ TableName: tableName(), Key: { key } }));

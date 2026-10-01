@@ -28,6 +28,7 @@ import { adminHandler } from '../shared/admin-handler';
 import { Router, badRequest, conflict, decodeCursor, encodeCursor, int, notFound, str } from '../shared/http';
 import { inviteCode, nowIso } from '../shared/ids';
 import { emailMarkerKey } from '../shared/members';
+import { sendMail } from '../shared/mail';
 import { MemberItem, MemberView, SubscriptionItem, toMemberView } from '../shared/model';
 
 const PAGE = 50;
@@ -35,7 +36,11 @@ const memberPoolId = () => env('MEMBER_POOL_ID');
 
 // ---- helpers --------------------------------------------------------------
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 async function getMember(guid: string): Promise<MemberItem> {
+  // Also keeps email-uniqueness marker rows ("email:<addr>") unreachable.
+  if (!UUID_RE.test(guid)) throw notFound('No such member');
   const r = await ddb.send(new GetCommand({ TableName: table.members(), Key: { user_guid: guid } }));
   if (!r.Item) throw notFound('No such member');
   return r.Item as MemberItem;
@@ -135,6 +140,12 @@ router.on('GET', '/admin/requests', async ({ query }) => {
 router.on('POST', '/admin/requests/{user_guid}/approve', async ({ params, actor }) => {
   const m = await getMember(params.user_guid);
   if (m.state !== 'requested') throw conflict(`Request is ${m.state}, not pending`);
+  // Only approve addresses whose owner has proven control (SES verification):
+  // otherwise anyone could request membership under someone else's address.
+  if (!m.email_verified) {
+    if ((await sesVerified(m.email)) !== true) throw conflict('This address has not completed email verification yet');
+    await update(m.user_guid, {}, { email_verified: true });
+  }
   // Create the Cognito user first: if it fails, the request stays pending.
   try {
     await cognito.send(
@@ -281,6 +292,26 @@ router.on('DELETE', '/admin/members/{user_guid}', async ({ params, actor }) => {
   // The audit stub keeps who/when, not the person's details beyond the address.
   await audit(actor, 'member.delete', m.user_guid, { email: m.email, state: m.state });
   return { ok: true };
+});
+
+router.on('POST', '/admin/members/{user_guid}/clear-pin', async ({ params, actor }) => {
+  const m = await getMember(params.user_guid);
+  requireAccount(m);
+  if (!m.pin_hash) throw conflict('This member has no PIN');
+  const updated = await update(m.user_guid, {}, {}, ['pin_hash']);
+  await ddb.send(new DeleteCommand({ TableName: env('TABLE_RATELIMITS'), Key: { key: `pinfail#${m.user_guid}` } }));
+  await audit(actor, 'member.clear_pin', m.user_guid, { email: m.email });
+  try {
+    await sendMail(
+      m.email,
+      'Your VettID sign-in PIN was removed',
+      'A VettID administrator removed the PIN from your account at your request. You now sign in with the email link only. ' +
+        'You can set a new PIN from your account page.\n\nIf you did not ask for this, contact support@vettid.org right away.\n\n— VettID\n',
+    );
+  } catch (e) {
+    console.error('clear-pin notice failed', (e as Error).name);
+  }
+  return view(updated);
 });
 
 router.on('POST', '/admin/members/{user_guid}/subscription/extend', async ({ params, body, actor }) => {

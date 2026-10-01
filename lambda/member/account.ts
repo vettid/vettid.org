@@ -19,6 +19,7 @@ import { MemberRequest, clearSessionCookies, memberHandler, requireSession } fro
 import { canSignIn, memberByGuid } from '../shared/members';
 import { hasVotingRights, MemberItem, SubscriptionItem } from '../shared/model';
 import { checkPin, hashPin, pinProblem } from '../shared/pin';
+import { sendMail } from '../shared/mail';
 
 const router = new Router<MemberRequest>();
 const poolId = () => env('MEMBER_POOL_ID');
@@ -105,12 +106,32 @@ async function setFields(m: MemberItem, set: Record<string, unknown>, remove: st
   return r.Attributes as MemberItem;
 }
 
+/** Security notices for PIN changes and lockouts; never fail the request over them. */
+async function pinNotice(m: MemberItem, what: 'set' | 'changed' | 'removed' | 'locked') {
+  const body = {
+    set: 'A sign-in PIN was just added to your VettID account.',
+    changed: 'The sign-in PIN on your VettID account was just changed.',
+    removed: 'The sign-in PIN was just removed from your VettID account. Signing in now needs only the email link.',
+    locked: 'Too many incorrect PINs were entered for your VettID account, so PIN entry is temporarily locked.',
+  }[what];
+  try {
+    await sendMail(
+      m.email,
+      what === 'locked' ? 'VettID: PIN entry locked' : 'VettID: your sign-in PIN changed',
+      `${body}\n\nIf this wasn't you, contact support@vettid.org right away — an administrator can help secure your account.\n\n— VettID\n`,
+    );
+  } catch (e) {
+    console.error('pin notice failed', (e as Error).name);
+  }
+}
+
 async function requirePin(m: MemberItem, pin: unknown) {
   if (!m.pin_hash) return;
   if (typeof pin !== 'string' || !/^\d{4,8}$/.test(pin)) throw badRequest('Enter your current PIN');
   const r = await checkPin(m.user_guid, m.pin_hash, pin);
   if (!r.ok) {
-    throw new HttpError(403, 'forbidden', r.locked ? 'Too many incorrect PINs; try again in 15 minutes.' : `Incorrect PIN. ${r.attemptsLeft} attempts left.`);
+    if (r.justLocked) await pinNotice(m, 'locked');
+    throw new HttpError(403, 'forbidden', r.locked ? 'Too many incorrect PINs; PIN entry is locked for now.' : `Incorrect PIN. ${r.attemptsLeft} attempts left.`);
   }
 }
 
@@ -234,6 +255,7 @@ router.on('POST', '/api/account/pin', async (req) => {
   if (m.pin_hash) await requirePin(m, req.body.current_pin);
   const updated = await setFields(m, { pin_hash: await hashPin(m.user_guid, pin as string) });
   await audit(m.email, m.pin_hash ? 'member.pin_change' : 'member.pin_enable', m.user_guid);
+  await pinNotice(m, m.pin_hash ? 'changed' : 'set');
   return me(updated);
 });
 
@@ -243,6 +265,7 @@ router.on('DELETE', '/api/account/pin', async (req) => {
   await requirePin(m, req.body.current_pin);
   const updated = await setFields(m, {}, ['pin_hash']);
   await audit(m.email, 'member.pin_disable', m.user_guid);
+  await pinNotice(m, 'removed');
   return me(updated);
 });
 

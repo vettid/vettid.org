@@ -13,7 +13,8 @@ endpoint is disabled). Reachable **only** from the admin exit node's egress IP
 ## Conventions
 
 - **Auth:** `Authorization: Bearer <id_token>` from the admin pool (hosted UI,
-  code + PKCE). The caller must be in the `admin` group, else `403`.
+  code + PKCE). The caller must be in the `admin` group, and is re-checked
+  as still **enabled** in Cognito on every request (cached 60 s), else `403`.
 - **CORS:** origin `https://admin.vettid.org` only; headers `Authorization`,
   `Content-Type`.
 - **Bodies:** JSON in, JSON out. Times are ISO-8601 UTC strings.
@@ -42,6 +43,7 @@ interface Member {
   created_at: string;
   updated_at: string;
   terms_version: string | null;   // accepted terms version, if any
+  pin_enabled: boolean;
   subscription: Subscription | null;
   voting_rights: boolean;         // member + active paid subscription
 }
@@ -61,7 +63,7 @@ interface Subscription {
 | Method | Path | Body | Returns |
 |---|---|---|---|
 | GET | `/admin/requests` | — | `{items: Member[], cursor}` — state `requested`, oldest first |
-| POST | `/admin/requests/{user_guid}/approve` | — | `Member` (now `registered`; Cognito user created) |
+| POST | `/admin/requests/{user_guid}/approve` | — | `Member` (now `registered`; Cognito user created). `409` until the address has completed SES verification (checked live). |
 | POST | `/admin/requests/{user_guid}/reject` | `{reason?: string}` | `Member` (now `rejected`) |
 | POST | `/admin/requests/{user_guid}/resend-verification` | — | `{ok: true}` |
 | GET | `/admin/members?state=&status=&q=` | — | `{items: Member[], cursor}`. `state` ∈ registered/member (default both); `status` ∈ active/suspended/canceled; `q` = email prefix |
@@ -69,6 +71,7 @@ interface Subscription {
 | POST | `/admin/members/{user_guid}/suspend` | `{reason: string}` | `Member` |
 | POST | `/admin/members/{user_guid}/reinstate` | — | `Member` |
 | DELETE | `/admin/members/{user_guid}` | — | `{ok: true}` (permanent; Cognito user + data removed, audit kept) |
+| POST | `/admin/members/{user_guid}/clear-pin` | — | `Member` — removes the PIN and its lockout; the member is emailed a notice. Audited. |
 | POST | `/admin/members/{user_guid}/subscription/extend` | `{days: number}` (1–366) | `Member` |
 | GET | `/admin/invites` | — | `{items: Invite[], cursor}` |
 | POST | `/admin/invites` | `{max_uses: number (1–1000), expires_in_days: number (1–365), note?: string}` | `Invite` |

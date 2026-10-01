@@ -67,13 +67,27 @@ async function create(item: MemberItem, inviteCode: string | null): Promise<'ok'
   }
 }
 
+/**
+ * Names are shown to admins and (never) interpolated into member email, but
+ * keep them to plain name characters anyway: letters (any script), spaces,
+ * apostrophes, hyphens and periods; no URLs, digits or control characters.
+ */
+function personName(body: Record<string, unknown>, key: string): string {
+  const v = str(body, key, { max: 40 });
+  if (!/^[\p{L}\p{M}][\p{L}\p{M} '’.-]*$/u.test(v)) throw badRequest(`${key.replace('_', ' ')} may only contain letters, spaces, apostrophes, hyphens and periods`);
+  return v;
+}
+
+/** Account-wide cap on new requests per hour (each one creates an SES identity). */
+const GLOBAL_REQUESTS_PER_HOUR = 50;
+
 router.on('POST', '/api/public/request', async ({ body, ip }) => {
   const limit = await hit(`req#ip#${ip}`, 5, 3600);
   if (!limit.allowed) throw new RateLimited(limit.retryAfter);
 
   const addr = normEmail(str(body, 'email', { max: 254 }));
-  const first_name = str(body, 'first_name', { max: 80 });
-  const last_name = str(body, 'last_name', { max: 80 });
+  const first_name = personName(body, 'first_name');
+  const last_name = personName(body, 'last_name');
   const code = str(body, 'invite_code', { optional: true, max: 20 }).toUpperCase().replace(/[^0-9A-Z]/g, '');
   if (body.consent !== true) throw badRequest('Please agree to receive email from VettID');
   const inviteCode = code.length === 10 ? `${code.slice(0, 5)}-${code.slice(5)}` : null;
@@ -81,6 +95,13 @@ router.on('POST', '/api/public/request', async ({ body, ip }) => {
   // No existence oracle: an existing address gets the same answer as a new
   // request without a code.
   if (await memberByEmail(addr)) return { outcome: 'pending_approval' };
+
+  // Global cap: past it, answer as usual but create nothing (no SES identity,
+  // no row). Protects the account's SES identity quota and the admin inbox.
+  if (!(await hit('req#global', GLOBAL_REQUESTS_PER_HOUR, 3600)).allowed) {
+    console.warn(JSON.stringify({ msg: 'global membership-request cap reached' }));
+    return { outcome: inviteCode ? 'registered' : 'pending_approval' };
+  }
 
   const now = nowIso();
   const verified = (await sesStatus(addr)) === 'verified';

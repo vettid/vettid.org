@@ -22,6 +22,7 @@ export type MemberRequest = {
   query: Record<string, string>;
   body: Record<string, unknown>;
   cookies: Record<string, string>;
+  /** Rate-limit key for the viewer: IPv4 address, or the IPv6 /64. */
   ip: string;
   event: APIGatewayProxyEventV2;
   /** Cookies to set on the response (complete Set-Cookie values). */
@@ -99,11 +100,39 @@ async function verifyOrigin(event: APIGatewayProxyEventV2): Promise<void> {
   if (a.length !== b.length || !timingSafeEqual(a, b)) throw new HttpError(403, 'forbidden', 'Forbidden');
 }
 
-/** Viewer IP from CloudFront (`CloudFront-Viewer-Address: ip:port`). */
-function viewerIp(event: APIGatewayProxyEventV2): string {
-  const v = event.headers['cloudfront-viewer-address'];
-  if (v) return v.includes('.') ? v.slice(0, v.lastIndexOf(':')) : v.replace(/^\[?([^\]]+)\]?:\d+$/, '$1');
-  return event.requestContext.http.sourceIp;
+/** Expand an IPv6 address to 8 full hextets (handles "::" and embedded IPv4). */
+export function expandIPv6(addr: string): string[] | null {
+  let a = addr.toLowerCase().replace(/%.*$/, '');
+  const v4 = /(\d+\.\d+\.\d+\.\d+)$/.exec(a);
+  if (v4) {
+    const o = v4[1].split('.').map(Number);
+    if (o.some((n) => n > 255)) return null;
+    a = a.slice(0, -v4[1].length) + ((o[0] << 8) | o[1]).toString(16) + ':' + ((o[2] << 8) | o[3]).toString(16);
+  }
+  const halves = a.split('::');
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const fill = halves.length === 2 ? 8 - head.length - tail.length : 0;
+  if (fill < 0) return null;
+  const parts = [...head, ...Array(fill).fill('0'), ...tail];
+  if (parts.length !== 8 || parts.some((p) => !/^[0-9a-f]{1,4}$/.test(p))) return null;
+  return parts.map((p) => p.padStart(4, '0'));
+}
+
+/**
+ * Rate-limit identity of the viewer, from CloudFront-Viewer-Address
+ * ("ip:port"). IPv4 is used as-is; IPv6 is reduced to its /64 — a single
+ * host commonly owns a whole /64, so per-address limits would be
+ * meaningless.
+ */
+export function rateKeyFromViewer(viewerAddress: string | undefined, fallback: string): string {
+  // Always "address:port" (IPv6 unbracketed, e.g. 2001:db8::1:443).
+  const v = viewerAddress ?? '';
+  const ip = v.includes(':') ? v.slice(0, v.lastIndexOf(':')).replace(/^\[|\]$/g, '') : fallback;
+  if (!ip.includes(':')) return ip;
+  const h = expandIPv6(ip);
+  return h ? `${h.slice(0, 4).join(':')}::/64` : ip;
 }
 
 // ---- session verification ------------------------------------------------------
@@ -190,7 +219,7 @@ export function memberHandler(router: Router<MemberRequest>) {
         query: (event.queryStringParameters ?? {}) as Record<string, string>,
         body,
         cookies: parseCookies(event),
-        ip: viewerIp(event),
+        ip: rateKeyFromViewer(event.headers['cloudfront-viewer-address'], event.requestContext.http.sourceIp),
         event,
         setCookies,
       });

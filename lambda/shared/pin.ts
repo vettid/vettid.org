@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { env } from './aws';
-import { lockout } from './ratelimit';
+import { hit, lockout } from './ratelimit';
 import { secret } from './secrets';
 
 /**
@@ -33,20 +33,36 @@ export async function hashPin(guid: string, pin: string): Promise<string> {
   return createHmac('sha256', pepper).update(`${guid}:${pin}`).digest('hex');
 }
 
-export type PinCheck = { ok: true } | { ok: false; locked: boolean; attemptsLeft: number };
+export const PIN_DAILY_MAX_FAILURES = 15;
+export const PIN_LONG_LOCK_SECONDS = 24 * 3600;
+const dailyKey = (guid: string) => `pinfailday#${guid}`;
 
-/** Constant-time check with lockout: 5 failures → locked for 15 minutes. */
+export type PinCheck =
+  | { ok: true }
+  | { ok: false; locked: boolean; attemptsLeft: number; justLocked: boolean };
+
+/**
+ * Constant-time check with a lockout that holds under concurrency: an attempt
+ * is reserved atomically before the comparison (5 per 15 minutes), and 15
+ * failures in a day escalate to a 24-hour lock. `justLocked` is true on the
+ * attempt that triggered a lock, so callers can notify the member.
+ */
 export async function checkPin(guid: string, storedHash: string, pin: string): Promise<PinCheck> {
-  const failures = await lockout.failures(lockKey(guid));
-  if (failures >= PIN_MAX_FAILURES) return { ok: false, locked: true, attemptsLeft: 0 };
+  const n = await lockout.reserve(lockKey(guid), PIN_MAX_FAILURES, PIN_LOCK_SECONDS);
+  if (n === null) return { ok: false, locked: true, attemptsLeft: 0, justLocked: false };
   const given = Buffer.from(await hashPin(guid, String(pin)), 'hex');
   const stored = Buffer.from(storedHash, 'hex');
   if (given.length === stored.length && timingSafeEqual(given, stored)) {
-    if (failures) await lockout.clear(lockKey(guid));
+    await lockout.clear(lockKey(guid));
     return { ok: true };
   }
-  const n = await lockout.fail(lockKey(guid), PIN_LOCK_SECONDS);
-  return { ok: false, locked: n >= PIN_MAX_FAILURES, attemptsLeft: Math.max(0, PIN_MAX_FAILURES - n) };
+  const daily = await hit(dailyKey(guid), PIN_DAILY_MAX_FAILURES, 86400);
+  if (!daily.allowed) {
+    await lockout.lockUntil(lockKey(guid), PIN_MAX_FAILURES, Math.floor(Date.now() / 1000) + PIN_LONG_LOCK_SECONDS);
+    return { ok: false, locked: true, attemptsLeft: 0, justLocked: daily.count === PIN_DAILY_MAX_FAILURES + 1 };
+  }
+  const locked = n >= PIN_MAX_FAILURES;
+  return { ok: false, locked, attemptsLeft: Math.max(0, PIN_MAX_FAILURES - n), justLocked: locked };
 }
 
 export async function pinLockState(guid: string): Promise<{ locked: boolean; attemptsLeft: number }> {
