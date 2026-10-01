@@ -79,7 +79,7 @@ removes it from the address bar immediately.
 | POST | `/api/account/subscription/cancel` | — | `Me` |
 | POST | `/api/account/pin` | `{pin, current_pin?}` | `Me` — set (no current) or change (`current_pin` required). 4–8 digits, not trivially weak |
 | DELETE | `/api/account/pin` | `{current_pin}` | `Me` — disable |
-| POST | `/api/account/preferences` | `{email_updates: boolean}` | `Me` |
+| POST | `/api/account/preferences` | `{email_updates?: boolean, pin_prompt_dismissed?: boolean}` (at least one) | `Me` |
 | POST | `/api/account/cancel` | `{confirm: "CANCEL", pin?}` | `{ok: true}` — `pin` required if a PIN is set. Account disabled now, deleted after 7 days; cookies cleared |
 
 ```ts
@@ -101,8 +101,9 @@ interface Me {
     paid: boolean; started_at: string; expires_at: string;
   } | null;
   voting_rights: boolean;
+  email_verified: boolean;          // always true once signed in (links need it)
   pin_enabled: boolean;
-  preferences: { email_updates: boolean };
+  preferences: { email_updates: boolean; pin_prompt_dismissed: boolean };
   created_at: string;
 }
 

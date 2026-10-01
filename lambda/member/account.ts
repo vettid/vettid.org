@@ -72,8 +72,9 @@ async function me(m: MemberItem) {
     },
     subscription: sub,
     voting_rights: hasVotingRights(m, sub),
+    email_verified: !!m.email_verified,
     pin_enabled: !!m.pin_hash,
-    preferences: { email_updates: m.email_updates !== false },
+    preferences: { email_updates: m.email_updates !== false, pin_prompt_dismissed: !!m.pin_prompt_dismissed },
     created_at: m.created_at,
   };
 }
@@ -249,8 +250,14 @@ router.on('DELETE', '/api/account/pin', async (req) => {
 
 router.on('POST', '/api/account/preferences', async (req) => {
   const m = await loadMember(req);
-  if (typeof req.body.email_updates !== 'boolean') throw badRequest('email_updates must be true or false');
-  const updated = await setFields(m, { email_updates: req.body.email_updates });
+  const set: Record<string, boolean> = {};
+  for (const k of ['email_updates', 'pin_prompt_dismissed'] as const) {
+    if (req.body[k] === undefined) continue;
+    if (typeof req.body[k] !== 'boolean') throw badRequest(`${k} must be true or false`);
+    set[k] = req.body[k] as boolean;
+  }
+  if (!Object.keys(set).length) throw badRequest('Nothing to update');
+  const updated = await setFields(m, set);
   return me(updated);
 });
 

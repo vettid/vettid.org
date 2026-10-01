@@ -232,3 +232,37 @@ describe('PIN', () => {
     expect(ddb.commandCalls(DeleteCommand)).toHaveLength(0);
   });
 });
+
+describe('POST /api/account/preferences', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const account = require('../../lambda/member/account');
+  // Session verification is exercised elsewhere; here we stub the verifier.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const memberHttp = require('../../lambda/shared/member-http');
+
+  beforeEach(() => {
+    jest.spyOn(memberHttp, 'requireSession').mockResolvedValue({ email: 'm@x.org', user_guid: 'g1' });
+    ddb.on(GetCommand, { TableName: 'members' }).resolves({ Item: { user_guid: 'g1', email: 'm@x.org', state: 'registered', account_status: 'active', email_verified: true } });
+    ddb.on(QueryCommand).resolves({ Items: [] });
+    ddb.on(GetCommand, { TableName: 'subs' }).resolves({});
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  test('records "skip for now" on the PIN step and reports it in Me', async () => {
+    ddb.on(UpdateCommand, { TableName: 'members' }).resolves({
+      Attributes: { user_guid: 'g1', email: 'm@x.org', state: 'registered', account_status: 'active', email_verified: true, pin_prompt_dismissed: true },
+    });
+    const res = await account.handler(ev('POST', '/api/account/preferences', { pin_prompt_dismissed: true }));
+    expect(res.statusCode).toBe(200);
+    const me = JSON.parse(res.body);
+    expect(me.preferences).toEqual({ email_updates: true, pin_prompt_dismissed: true });
+    expect(me.email_verified).toBe(true);
+    const upd = ddb.commandCalls(UpdateCommand, { TableName: 'members' })[0].args[0].input;
+    expect(Object.values(upd.ExpressionAttributeNames!)).toContain('pin_prompt_dismissed');
+  });
+
+  test('rejects empty and non-boolean updates', async () => {
+    expect((await account.handler(ev('POST', '/api/account/preferences', {}))).statusCode).toBe(400);
+    expect((await account.handler(ev('POST', '/api/account/preferences', { email_updates: 'yes' }))).statusCode).toBe(400);
+  });
+});
