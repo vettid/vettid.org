@@ -173,7 +173,7 @@ export class VettidOrgAdminApiStack extends cdk.Stack {
       }),
     );
 
-    grantTable(content, 'terms', ['Scan', 'GetItem', 'PutItem', 'Query', 'UpdateItem'], true);
+    grantTable(content, 'terms', ['Scan', 'GetItem', 'PutItem', 'Query', 'UpdateItem', 'DeleteItem'], true); // Delete: drafts only (enforced in code)
     grantTable(content, 'subscription-types', ['Scan', 'PutItem', 'UpdateItem']);
     const termsBucketName = readRef(this, config, 'data/terms-bucket-name');
     content.addToRolePolicy(

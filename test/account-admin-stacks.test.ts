@@ -220,6 +220,14 @@ describe('VettidOrgAdminApiStack', () => {
     });
   });
 
+  test('content Lambda can do everything its terms routes need', () => {
+    const stmts = Object.values<any>(t.findResources('AWS::IAM::Policy'))
+      .flatMap((p) => p.Properties.PolicyDocument.Statement)
+      .filter((s: any) => JSON.stringify(s.Resource).includes('table/vettid-org-terms'));
+    const actions = stmts.flatMap((s: any) => [].concat(s.Action));
+    for (const a of ['Scan', 'GetItem', 'PutItem', 'Query', 'UpdateItem', 'DeleteItem']) expect(actions).toContain(`dynamodb:${a}`);
+  });
+
   test('audit is append-only for writers (no Update/Delete on the audit table)', () => {
     const policies = JSON.stringify(t.findResources('AWS::IAM::Policy'));
     const auditStmts = Object.values<any>(t.findResources('AWS::IAM::Policy'))

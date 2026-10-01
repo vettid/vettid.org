@@ -74,6 +74,13 @@ describe('admin terms routes', () => {
     expect(puts[0].Body).toBe('Hello.\n\nWorld.');
     const auditPut = ddb.commandCalls(PutCommand).find((c) => c.args[0].input.TableName === 'audit')!;
     expect(auditPut.args[0].input.Item).toMatchObject({ action: 'terms.create', actor: 'al@vettid.org' });
+
+    // published_at is the status-index sort key: a draft must omit it, not
+    // store NULL (DynamoDB rejects NULL index keys; the mock wouldn't).
+    const stored = ddb.commandCalls(PutCommand).find((c) => c.args[0].input.TableName === 'terms')!.args[0].input.Item!;
+    expect(stored).not.toHaveProperty('published_at');
+    expect(stored).not.toHaveProperty('published_by');
+    expect(item.published_at).toBeNull(); // API shape unchanged
   });
 
   test('unrenderable characters are rejected with their code points, nothing stored', async () => {

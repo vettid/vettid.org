@@ -33,9 +33,13 @@ interface TermsItem {
   chars: number;
   created_at: string;
   created_by: string;
-  published_at: string | null;
-  published_by: string | null;
+  // Absent (never null) until published: published_at is the status-index
+  // sort key, and DynamoDB rejects a NULL index key.
+  published_at?: string;
+  published_by?: string;
 }
+
+const termsView = (t: TermsItem) => ({ ...t, published_at: t.published_at ?? null, published_by: t.published_by ?? null });
 
 const router = new Router();
 
@@ -44,7 +48,7 @@ const router = new Router();
 router.on('GET', '/admin/terms', async ({ query }) => {
   // Versions are few; scan + sort newest first.
   const r = await ddb.send(new ScanCommand({ TableName: table.terms(), Limit: 200, ExclusiveStartKey: decodeCursor(query.cursor) }));
-  const items = ((r.Items ?? []) as TermsItem[]).sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const items = ((r.Items ?? []) as TermsItem[]).sort((a, b) => b.created_at.localeCompare(a.created_at)).map(termsView);
   return { items, cursor: encodeCursor(r.LastEvaluatedKey) };
 });
 
@@ -76,12 +80,10 @@ router.on('POST', '/admin/terms', async ({ body, actor }) => {
     chars: text.length,
     created_at: now,
     created_by: actor,
-    published_at: null,
-    published_by: null,
   };
   await ddb.send(new PutCommand({ TableName: table.terms(), Item: item, ConditionExpression: 'attribute_not_exists(version_id)' }));
   await audit(actor, 'terms.create', version_id, { title, sha256: textSha, chars: text.length });
-  return item;
+  return termsView(item);
 });
 
 async function getTerms(version: string): Promise<TermsItem> {
@@ -131,7 +133,7 @@ router.on('POST', '/admin/terms/{version_id}/publish', async ({ params, actor })
     }),
   );
   await audit(actor, 'terms.publish', t.version_id, { sha256: t.sha256, superseded: (current.Items ?? []).map((c) => c.version_id) });
-  return { ...t, status: 'current', published_at: now, published_by: actor };
+  return termsView({ ...t, status: 'current', published_at: now, published_by: actor });
 });
 
 router.on('DELETE', '/admin/terms/{version_id}', async ({ params, actor }) => {
