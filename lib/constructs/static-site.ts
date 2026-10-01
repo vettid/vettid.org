@@ -7,6 +7,8 @@ import * as route53targets from 'aws-cdk-lib/aws-route53-targets';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import { Construct } from 'constructs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
 
 export interface StaticSiteProps {
   /** Fully-qualified host, e.g. account.vettid.org. */
@@ -32,7 +34,27 @@ export interface StaticSiteProps {
   readonly connectSrc?: string[];
   /** ARN of a CLOUDFRONT-scope WAF web ACL (us-east-1). */
   readonly webAclArn?: string;
+  /**
+   * Branded 404 page (path inside sourceDir, e.g. '404.html'). Requests for
+   * files the site doesn't contain get this page with a real 404 status,
+   * answered by the viewer-request function from a file list built at synth.
+   * (CloudFront's distribution-wide error pages would also rewrite the API's
+   * JSON errors, so they aren't used.)
+   */
+  readonly notFoundPage?: string;
 }
+
+/** Every file the deployment will put in the bucket, as request paths. */
+function sitePaths(dir: string): string[] {
+  const walk = (d: string): string[] =>
+    readdirSync(d).flatMap((n) => {
+      const p = join(d, n);
+      return statSync(p).isDirectory() ? walk(p) : ['/' + relative(dir, p).split(sep).join('/')];
+    });
+  return walk(dir).sort();
+}
+
+const FUNCTION_CODE_LIMIT = 10 * 1024; // CloudFront Functions hard limit
 
 /**
  * A static site on S3 + CloudFront at its own host name, with the repo's
@@ -62,6 +84,19 @@ export class StaticSite extends Construct {
       validation: acm.CertificateValidation.fromDns(props.hostedZone),
     });
 
+    const csp = [
+      "default-src 'none'",
+      "script-src 'self'",
+      "style-src 'self'",
+      ['connect-src', "'self'", ...(props.connectSrc ?? [])].join(' '),
+      "img-src 'self' data:",
+      "font-src 'self'",
+      "manifest-src 'self'",
+      "base-uri 'none'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+    ].join('; ');
+
     const headers = new cloudfront.ResponseHeadersPolicy(this, 'Headers', {
       comment: `${props.hostName} security headers`,
       customHeadersBehavior: {
@@ -77,18 +112,7 @@ export class StaticSite extends Construct {
         // Fully self-hosted: no external scripts/styles/fonts. Unlike the
         // public site, no 'unsafe-inline' styles — these apps use stylesheets only.
         contentSecurityPolicy: {
-          contentSecurityPolicy: [
-            "default-src 'none'",
-            "script-src 'self'",
-            "style-src 'self'",
-            ['connect-src', "'self'", ...(props.connectSrc ?? [])].join(' '),
-            "img-src 'self' data:",
-            "font-src 'self'",
-            "manifest-src 'self'",
-            "base-uri 'none'",
-            "form-action 'self'",
-            "frame-ancestors 'none'",
-          ].join('; '),
+          contentSecurityPolicy: csp,
           override: true,
         },
         contentTypeOptions: { override: true },
@@ -103,20 +127,52 @@ export class StaticSite extends Construct {
     });
 
     // S3 (OAC) doesn't resolve /path or /path/ to /path/index.html by itself.
-    const rewrite = new cloudfront.Function(this, 'Rewrite', {
-      runtime: cloudfront.FunctionRuntime.JS_2_0,
-      comment: 'Clean URLs: /x and /x/ -> /x/index.html',
-      code: cloudfront.FunctionCode.fromInline(`
+    // With notFoundPage, unknown paths are answered here with the branded
+    // page and a real 404 (S3 would say 403 for a missing key).
+    let notFound = '';
+    if (props.notFoundPage) {
+      const files = sitePaths(props.sourceDir);
+      if (props.runtimeConfig) files.push('/config.json');
+      const page = readFileSync(join(props.sourceDir, props.notFoundPage), 'utf8');
+      const fnHeaders = {
+        'content-type': { value: 'text/html; charset=utf-8' },
+        'cache-control': { value: 'no-store' },
+        'content-security-policy': { value: csp },
+        'x-content-type-options': { value: 'nosniff' },
+        'x-frame-options': { value: 'DENY' },
+        'referrer-policy': { value: 'no-referrer' },
+        'strict-transport-security': { value: 'max-age=31536000; includeSubDomains' },
+      };
+      notFound = `
+  if (!FILES[uri]) {
+    return { statusCode: 404, statusDescription: 'Not Found', headers: ${JSON.stringify(fnHeaders)},
+      body: { encoding: 'text', data: NOT_FOUND } };
+  }
+`;
+      notFound = `var FILES = ${JSON.stringify(Object.fromEntries(files.map((f) => [f, 1])))};
+var NOT_FOUND = ${JSON.stringify(page)};
+@@CHECK@@${notFound}`;
+    }
+    const [decls, check] = notFound ? notFound.split('@@CHECK@@') : ['', ''];
+    const rewriteCode = `${decls}
 function handler(event) {
   var req = event.request;
   var uri = req.uri;
   if (uri.endsWith('/')) {
-    req.uri = uri + 'index.html';
+    uri = uri + 'index.html';
   } else if (uri.lastIndexOf('.') < uri.lastIndexOf('/') + 1) {
-    req.uri = uri + '/index.html';
-  }
+    uri = uri + '/index.html';
+  }${check}
+  req.uri = uri;
   return req;
-}`),
+}`;
+    if (rewriteCode.length > FUNCTION_CODE_LIMIT) {
+      throw new Error(`${props.hostName}: viewer-request function is ${rewriteCode.length} bytes (limit ${FUNCTION_CODE_LIMIT}); shrink the 404 page or the site's file list`);
+    }
+    const rewrite = new cloudfront.Function(this, 'Rewrite', {
+      runtime: cloudfront.FunctionRuntime.JS_2_0,
+      comment: props.notFoundPage ? 'Clean URLs + branded 404 for unknown paths' : 'Clean URLs: /x and /x/ -> /x/index.html',
+      code: cloudfront.FunctionCode.fromInline(rewriteCode),
     });
 
     const additionalBehaviors: Record<string, cloudfront.BehaviorOptions> = {};
