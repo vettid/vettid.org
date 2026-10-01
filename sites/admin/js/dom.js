@@ -51,7 +51,7 @@ export function chip(text, tone = 'mute') {
 }
 
 export function mono(text, extraClass = '') {
-  return el('code', { class: `mono ${extraClass}`.trim() }, text ?? '—');
+  return el('code', { class: `mono ${extraClass}`.trim(), title: text || null }, text ?? '—');
 }
 
 export function muted(text) {

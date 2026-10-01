@@ -42,6 +42,7 @@ async function boot() {
   $('gate').hidden = true;
   $('dash').hidden = false;
   renderAll();
+  selectTab(tabFromHash(), { focus: false });
 }
 
 /** Accept a fresh Me from the API, re-render, and put focus somewhere sensible. */
@@ -55,12 +56,22 @@ function setMe(next, { focus, notice } = {}) {
   subTypesState = 'idle';
   renderAll();
   if (notice) ui.showNotice(notice);
-  if (focus) $(focus)?.focus();
+  if (focus) reveal(focus);
   return undefined;
+}
+
+/** Focus an element by id, switching to the tab that contains it. */
+function reveal(id) {
+  const node = $(id);
+  if (!node) return;
+  const panel = node.closest('[role="tabpanel"]');
+  if (panel?.hidden) selectTab(panel.id.replace('panel-', ''), { focus: false });
+  node.focus();
 }
 
 function renderAll() {
   renderHeader();
+  renderChecklist();
   renderStatus();
   renderTerms();
   renderSubscription();
@@ -107,12 +118,53 @@ function days(n) {
 
 const shortHash = (h) => (h ? `${String(h).slice(0, 12)}…` : '');
 
+// ── Tabs (#overview | #membership | #security | #settings) ─────────────
+
+const TABS = ['overview', 'membership', 'security', 'settings'];
+
+function tabFromHash() {
+  const h = location.hash.replace(/^#/, '');
+  return TABS.includes(h) ? h : 'overview';
+}
+
+function selectTab(name, { focus = true } = {}) {
+  for (const t of TABS) {
+    const on = t === name;
+    const tab = $(`tab-${t}`);
+    tab.setAttribute('aria-selected', String(on));
+    tab.tabIndex = on ? 0 : -1;
+    $(`panel-${t}`).hidden = !on;
+  }
+  const want = `#${name}`;
+  if (location.hash !== want) history.replaceState(null, '', location.pathname + location.search + want);
+  if (focus) $(`tab-${name}`).focus();
+}
+
+for (const t of TABS) {
+  $(`tab-${t}`).addEventListener('click', () => selectTab(t));
+}
+$('tabs').addEventListener('keydown', (e) => {
+  const i = TABS.indexOf(tabFromHash());
+  let next = null;
+  if (e.key === 'ArrowRight') next = TABS[(i + 1) % TABS.length];
+  else if (e.key === 'ArrowLeft') next = TABS[(i - 1 + TABS.length) % TABS.length];
+  else if (e.key === 'Home') next = TABS[0];
+  else if (e.key === 'End') next = TABS[TABS.length - 1];
+  if (!next) return;
+  e.preventDefault();
+  selectTab(next);
+});
+window.addEventListener('hashchange', () => {
+  if (me) selectTab(tabFromHash(), { focus: false });
+});
+
 // ── Header ──────────────────────────────────────────────────────────────
 
 function renderHeader() {
   $('who-name').textContent = fullName();
   $('who-email').textContent = me.email;
   $('who').hidden = false;
+  $('signout').hidden = false;
   $('hello').textContent = me.first_name ? `Hi, ${me.first_name}` : 'Your account';
 }
 
@@ -128,7 +180,141 @@ $('signout').addEventListener('click', (e) => {
   }, { busyLabel: 'Signing out…' });
 });
 
-// ── 1. Status ───────────────────────────────────────────────────────────
+// ── Overview: getting-started checklist ─────────────────────────────────
+
+let showSteps = false; // expand the checklist after "You're all set"
+
+function goPin() {
+  if (!me.pin_enabled) pinMode = 'enable';
+  renderPin();
+  reveal('h-pin');
+  $('sec-pin').querySelector('form input')?.focus();
+}
+
+function steps() {
+  const member = me.state === 'member';
+  const tm = me.terms ?? {};
+  const termsDone = !!tm.current_version && !tm.needs_acceptance && !!tm.accepted_version;
+  const pinSkipped = !me.pin_enabled && !!me.preferences?.pin_prompt_dismissed;
+  const btn = (label, fn, primary = true) => el('button', { type: 'button', class: `btn btn-sm ${primary ? 'btn-primary' : ''}`.trim(), on: { click: fn } }, label);
+
+  return [
+    {
+      key: 'email',
+      title: 'Verify your email',
+      done: me.email_verified !== false,
+      text: 'Done — you signed in with the link we emailed you.',
+      actionable: true,
+    },
+    {
+      key: 'pin',
+      title: 'Protect your sign-in with a PIN',
+      badge: 'Recommended',
+      done: !!me.pin_enabled,
+      skipped: pinSkipped,
+      text: me.pin_enabled
+        ? 'Your PIN is on.'
+        : "With a PIN, someone who gets into your email still can't get into VettID.",
+      actionable: true,
+      actions: me.pin_enabled
+        ? null
+        : pinSkipped
+          ? [btn('Set one up anyway', goPin, false)]
+          : [btn('Set up a PIN', goPin), el('button', { type: 'button', class: 'link-btn', on: { click: skipPin } }, 'Skip for now')],
+    },
+    {
+      key: 'terms',
+      title: 'Accept the membership terms',
+      done: termsDone,
+      text: termsDone
+        ? `You accepted version ${tm.accepted_version}.`
+        : !tm.current_version
+          ? "The terms aren't published yet. We'll ask you to accept them here once they are."
+          : member
+            ? 'The terms have been updated. Please review the new version.'
+            : 'Read and accept the terms to become a member.',
+      actionable: !!tm.current_version,
+      actions: !termsDone && tm.current_version ? [btn('Review the terms', () => reveal('h-terms'))] : null,
+    },
+    {
+      key: 'trial',
+      title: 'Start your free trial',
+      done: !!me.subscription,
+      text: me.subscription
+        ? `${me.subscription.type_name}: ${(SUB_STATUS[me.subscription.status] ?? [me.subscription.status])[0].toLowerCase()}.`
+        : member
+          ? 'Try VettID free. Nothing to pay.'
+          : 'Available once you accept the membership terms.',
+      actionable: member,
+      actions: !me.subscription && member ? [btn('Choose your trial', () => reveal('h-sub'))] : null,
+    },
+    {
+      key: 'vote',
+      title: 'Voting rights',
+      done: !!me.voting_rights,
+      text: me.voting_rights ? 'You can vote.' : 'Needs an active paid subscription. Payments coming soon.',
+      actionable: false,
+    },
+  ];
+}
+
+async function skipPin(e) {
+  const next = await ui.busy(e.currentTarget, () => post('/api/account/preferences', { pin_prompt_dismissed: true }));
+  if (next) await setMe(next, { focus: 'h-checklist', notice: 'Skipped for now. You can set up a PIN any time under Security.' });
+}
+
+// Only the current step gets the gold primary button.
+function secondary(node) {
+  node.classList?.remove('btn-primary');
+  return node;
+}
+
+function renderChecklist() {
+  const sec = $('sec-checklist');
+  const list = steps();
+  const doneCount = list.filter((s) => s.done).length;
+  const current = list.find((s) => s.actionable && !s.done && !s.skipped && s.actions);
+  const allSet = list.every((s) => !s.actionable || s.done || s.skipped);
+
+  const progress = el('div', { class: 'progress' },
+    el('span', { class: 'progress-bar', 'aria-hidden': 'true' }, list.map((s) => el('span', { class: s.done ? 'on' : null }))),
+    el('span', {}, `${doneCount} of ${list.length} done`),
+  );
+
+  const head = sectionHead('h-checklist', 'Getting started');
+
+  if (allSet && !showSteps) {
+    fill(sec, head,
+      el('div', { class: 'all-set' },
+        el('span', { class: 'all-set-text' }, el('span', { class: 'step-mark', 'aria-hidden': 'true' }, '✓'), el('p', {}, "You're all set.")),
+        el('button', { type: 'button', class: 'link-btn', 'aria-expanded': 'false', on: { click: () => { showSteps = true; renderChecklist(); $('steps-toggle')?.focus(); } }, id: 'steps-toggle' }, 'Show steps'),
+      ),
+    );
+    return;
+  }
+
+  const items = list.map((s, i) => {
+    const state = s.done ? 'done' : s.skipped ? 'skipped' : s === current ? 'current' : 'todo';
+    const stateText = { done: 'Done', skipped: 'Skipped', current: 'Next step', todo: s.actionable ? 'To do' : 'Not available yet' }[state];
+    return el('li', { class: `step is-${state}`, 'aria-current': s === current ? 'step' : null },
+      el('span', { class: 'step-mark', 'aria-hidden': 'true' }, s.done ? '✓' : s.skipped ? '–' : String(i + 1)),
+      el('div', {},
+        el('h3', {}, s.title, s.badge && !s.done ? chip(s.badge, 'accent') : null,
+          el('span', { class: 'step-state' }, `· ${stateText}`)),
+        el('p', {}, s.text),
+        s.actions ? el('div', { class: 'actions' }, s === current ? s.actions : s.actions.map(secondary)) : null,
+      ),
+    );
+  });
+
+  fill(sec, head, progress, el('ol', { class: 'checklist' }, items),
+    allSet
+      ? el('div', { class: 'actions' }, el('button', { type: 'button', class: 'link-btn', id: 'steps-toggle', 'aria-expanded': 'true', on: { click: () => { showSteps = false; renderChecklist(); $('steps-toggle')?.focus(); } } }, 'Hide steps'))
+      : null,
+  );
+}
+
+// ── Overview: status summary ────────────────────────────────────────────
 
 function renderStatus() {
   const member = me.state === 'member';
@@ -136,7 +322,7 @@ function renderStatus() {
 
   let subSummary;
   if (!sub) {
-    subSummary = el('span', {}, 'None', el('span', { class: 'muted' }, member ? 'You can choose one below.' : 'Available once you become a member.'));
+    subSummary = el('span', {}, 'None');
   } else {
     const ends = subIsLive(sub) ? 'Ends ' : 'Ended ';
     subSummary = el('span', {},
@@ -149,31 +335,15 @@ function renderStatus() {
     ? el('span', {}, chip('Yes', 'ok'))
     : el('span', {}, chip('Not yet', 'mute'), el('span', { class: 'muted' }, 'Voting requires an active paid subscription.'));
 
-  let next = null;
-  if (me.terms?.needs_acceptance) {
-    next = member
-      ? 'Our membership terms have been updated. Please review and accept the new version below.'
-      : 'Next step: read and accept the membership terms below to become a member.';
-  } else if (!member && !me.terms?.current_version) {
-    next = "Your account is set up. Membership terms aren't published yet — once they are, you can accept them here to become a member.";
-  } else if (member && !subIsLive(sub)) {
-    next = 'Next step: choose a subscription below.';
-  }
-
   fill($('sec-status'),
     sectionHead('h-status', 'Status'),
     facts([
-      ['Name', fullName() || '—'],
-      ['Email', me.email],
-      ['Membership', el('span', {},
-        member ? chip('Member', 'ok') : chip('Registered', 'warn'),
-        el('span', { class: 'muted' }, member ? "You're a VettID member." : 'You have an account. Accepting the membership terms makes you a member.'),
-      )],
+      ['Membership', member ? chip('Member', 'ok') : chip('Registered', 'warn')],
       ['Subscription', subSummary],
       ['Voting rights', voting],
+      ['Email', me.email],
       ['Joined', date(me.created_at)],
     ]),
-    next ? el('p', { class: 'next-step' }, next) : null,
   );
 }
 
@@ -317,8 +487,10 @@ function renderTerms() {
     terms = null;
     termsOpen = false;
     await setMe(next, {
-      focus: 'h-status',
-      notice: wasMember ? 'Thank you — you have accepted the updated terms.' : "Thank you — you're now a VettID member.",
+      focus: wasMember ? 'h-terms' : 'h-sub',
+      notice: wasMember
+        ? 'Thank you — you have accepted the updated terms.'
+        : "Thank you — you're now a VettID member. Next: start your free trial below.",
     });
   });
 
@@ -342,17 +514,21 @@ async function loadSubTypes() {
     subTypesState = 'error';
     ui.showError(err);
   }
+  // Re-rendering replaces the section's nodes; keep focus where it was.
+  const refocus = document.activeElement?.id;
   renderSubscription();
+  if (refocus && !document.activeElement?.id) $(refocus)?.focus();
 }
 
 function renderSubscription() {
   const sec = $('sec-sub');
   if (me.state !== 'member') {
-    sec.hidden = true;
-    sec.replaceChildren();
+    fill(sec,
+      sectionHead('h-sub', 'Subscription'),
+      el('p', {}, "Subscriptions open up once you've accepted the membership terms above."),
+    );
     return;
   }
-  sec.hidden = false;
   const sub = me.subscription;
 
   if (subIsLive(sub)) {
@@ -471,6 +647,7 @@ function renderPin() {
   fill(sec,
     sectionHead('h-pin', 'Sign-in PIN',
       "A PIN is an optional second step. After you click the sign-in link we email you, we'll also ask for your PIN — so someone who gets into your email still can't get into your VettID account."),
+    el('p', { class: 'muted' }, 'How signing in works: we email you a one-time link. If you have a PIN, we ask for it after you click the link.'),
     el('p', {}, on ? chip('PIN on', 'ok') : chip('PIN off', 'mute'), ' ',
       on ? "You'll be asked for your PIN each time you sign in." : 'Signing in only needs the email link.'),
     pinMode ? null : el('div', { class: 'actions' }, buttons),

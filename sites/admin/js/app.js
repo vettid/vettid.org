@@ -24,6 +24,11 @@ const CONFIG_KEYS = ['apiBase', 'cognitoDomain', 'clientId', 'redirectUri'];
 
 const $ = (id) => document.getElementById(id);
 
+function setWho(email) {
+  $('who').textContent = email;
+  $('who').title = email; // full value when the header truncates it
+}
+
 function showGate(message, canSignIn) {
   $('shell').hidden = true;
   $('gate').hidden = false;
@@ -45,8 +50,10 @@ function route(ctx, { focus }) {
   let id = location.hash.slice(1);
   if (!Object.hasOwn(ROUTES, id)) id = DEFAULT_ROUTE;
   for (const a of document.querySelectorAll('.nav a')) {
-    if (a.getAttribute('href') === `#${id}`) a.setAttribute('aria-current', 'page');
-    else a.removeAttribute('aria-current');
+    if (a.getAttribute('href') === `#${id}`) {
+      a.setAttribute('aria-current', 'page');
+      a.scrollIntoView({ block: 'nearest', inline: 'nearest' }); // narrow tab strip
+    } else a.removeAttribute('aria-current');
   }
   if (focus) ui.clearError(); // on first render keep any /admin/me error visible
   const view = $('view');
@@ -86,7 +93,7 @@ async function main() {
 
   $('gate').hidden = true;
   $('shell').hidden = false;
-  $('who').textContent = session.email;
+  setWho(session.email);
   $('who').hidden = false;
   $('signout').hidden = false;
   $('signout').addEventListener('click', () => auth.signOut());
@@ -96,7 +103,7 @@ async function main() {
     const me = await api.get('/admin/me');
     if (me?.email) {
       ctx.me.email = me.email;
-      $('who').textContent = me.email;
+      setWho(me.email);
     }
   } catch (err) {
     ui.showError(ui.errorText(err));

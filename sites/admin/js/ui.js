@@ -21,6 +21,9 @@ export function showError(message) {
     el('p', {}, message),
     el('button', { type: 'button', class: 'btn btn-sm', on: { click: clearError } }, 'Dismiss'),
   );
+  // On a phone the action that failed may be far below the region.
+  const r = errorRegion.getBoundingClientRect();
+  if (r.top < 0 || r.bottom > window.innerHeight) errorRegion.scrollIntoView({ block: 'nearest' });
 }
 
 export function clearError() {
@@ -101,6 +104,7 @@ export function dialog({ title, body = [], fields = [], confirmLabel = 'Confirm'
         value: f.value,
         maxlength: f.maxlength,
         autocomplete: f.autocomplete ?? 'off',
+        inputmode: f.type === 'number' ? 'numeric' : undefined,
         spellcheck: 'false',
       };
       const input = f.type === 'textarea' ? el('textarea', { ...attrs, rows: 3 }) : el('input', { ...attrs, type: f.type ?? 'text' });
@@ -158,8 +162,12 @@ export function pagedList({ columns, makePager, row, emptyText = 'Nothing here y
   const tbody = el('tbody');
   const status = el('p', { class: 'list-status muted' });
   const more = el('button', { type: 'button', class: 'btn', hidden: true }, 'Load more');
-  const table = el('table', { class: 'data' },
-    el('thead', {}, el('tr', {}, columns.map((c) => el('th', { scope: 'col' }, c)))),
+  // Explicit roles keep table semantics when narrow screens restyle rows as
+  // cards (display:block drops them in some browsers). Each cell carries its
+  // column name in data-label, which the card layout shows via CSS ::before.
+  tbody.setAttribute('role', 'rowgroup');
+  const table = el('table', { class: 'data', role: 'table' },
+    el('thead', { role: 'rowgroup' }, el('tr', { role: 'row' }, columns.map((c) => el('th', { scope: 'col', role: 'columnheader' }, c)))),
     tbody,
   );
   const wrap = el('div', { class: 'table-wrap', hidden: true }, table);
@@ -182,11 +190,15 @@ export function pagedList({ columns, makePager, row, emptyText = 'Nothing here y
         syncEmpty();
       },
     };
-    tr.replaceChildren(...row(item, ctl).map((cell, i) => el('td', { 'data-col': columns[i] }, cell)));
+    tr.replaceChildren(...row(item, ctl).map((cell, i) => el('td', {
+      role: 'cell',
+      'data-label': columns[i],
+      class: columns[i] === 'Actions' ? 'cell-actions' : null,
+    }, cell)));
   }
 
   function makeRow(item) {
-    const tr = el('tr');
+    const tr = el('tr', { role: 'row' });
     fill(tr, item);
     return tr;
   }

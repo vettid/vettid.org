@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0b0b12" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f4f4f6" media="(prefers-color-scheme: light)">
+  <title>How VettID membership works · VettID</title>
+  <link rel="icon" type="image/png" href="/assets/favicon.png">
+  <script src="/js/theme-init.js"></script>
+  <link rel="stylesheet" href="/assets/fonts.css">
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/js/theme.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="https://vettid.org" aria-label="VettID home (vettid.org)">
+      <svg class="brand-mark" viewBox="0 0 264 350" fill="currentColor" aria-hidden="true" focusable="false"><defs><mask id="hdr-kh"><rect width="264" height="350" fill="white"/><circle cx="132" cy="190" r="29" fill="black"/><path d="M119 204 L104 282 Q102 292 112 292 L152 292 Q162 292 160 282 L145 204 Z" fill="black"/></mask></defs><path d="M8 0 L47 0 Q55 0 55 8 L55 54 L104 54 L104 8 Q104 0 112 0 L151 0 Q159 0 159 8 L159 54 L208 54 L208 8 Q208 0 216 0 L255 0 Q263 0 263 8 L263 76 Q263 86 254 90 L240 96 L23 96 L9 90 Q0 86 0 76 L0 8 Q0 0 8 0 Z"/><path mask="url(#hdr-kh)" d="M31 112 Q31 108 35 108 L229 108 Q233 108 233 112 L257 330 Q258 344 245 344 L19 344 Q6 344 7 330 Z"/></svg>
+      <span class="brand-name">VETTID</span>
+      <span class="brand-tag">Account</span>
+    </a>
+    <div class="header-tools">
+      <button type="button" class="theme-btn" id="theme-toggle" hidden></button>
+    </div>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <div class="page-head">
+      <span class="eyebrow">Guide</span>
+      <h1>How VettID membership works</h1>
+      <p>From asking to join to voting rights, step by step. It takes a few minutes, and most of it happens in your email.</p>
+    </div>
+    <ol class="guide">
+      <li class="card guide-step">
+        <span class="step-num" aria-hidden="true">1</span>
+        <div>
+          <h2>Request membership</h2>
+          <p>Fill in the <a href="/request/">request form</a> with your name and email. If a member or our team gave you an invite code, add it. No code is fine too.</p>
+          <p>Right after you send the form, you'll get an email from <strong>Amazon Web Services</strong> titled “Email Address Verification Request”. VettID sends email through Amazon's email service (Amazon SES), and it will only deliver to addresses that have confirmed they want our mail. <strong>Click the link in that email</strong> — it's how you opt in, and without it we can't send you anything, not even a sign-in link.</p>
+        </div>
+      </li>
+      <li class="card guide-step">
+        <span class="step-num" aria-hidden="true">2</span>
+        <div>
+          <h2>Approval</h2>
+          <p>With a valid invite code, your account is ready straight away. Without one, someone on our team reviews your request, and we'll email you when your account is ready.</p>
+        </div>
+      </li>
+      <li class="card guide-step">
+        <span class="step-num" aria-hidden="true">3</span>
+        <div>
+          <h2>Sign in</h2>
+          <p>There's no password. On the <a href="/signin/">sign-in page</a>, enter your email and we'll send you a link. Each link works once and expires after 15 minutes.</p>
+          <p><strong>Never share a sign-in link</strong> — anyone who opens it can sign in as you. VettID will never ask you to forward one.</p>
+        </div>
+      </li>
+      <li class="card guide-step">
+        <span class="step-num" aria-hidden="true">4</span>
+        <div>
+          <h2>Set a PIN <span class="chip chip-accent">Recommended</span></h2>
+          <p>A PIN of 4 to 8 digits adds a second step after the email link. If someone ever gets into your email, they still can't get into your VettID account without it. You can set one up in your account under Security.</p>
+        </div>
+      </li>
+      <li class="card guide-step">
+        <span class="step-num" aria-hidden="true">5</span>
+        <div>
+          <h2>Accept the membership terms</h2>
+          <p>Read the membership terms in your account and accept them to become a member. You can also download them as a PDF.</p>
+          <p>When you accept, we record which version you accepted and its fingerprint (a SHA-256 hash of the exact text), so there's never any doubt about what you agreed to. If the terms change, we'll ask you to review the new version.</p>
+        </div>
+      </li>
+      <li class="card guide-step">
+        <span class="step-num" aria-hidden="true">6</span>
+        <div>
+          <h2>Start your free trial</h2>
+          <p>Once you're a member, you can start a free trial from your account. There's nothing to pay, and each person can use a free trial once.</p>
+        </div>
+      </li>
+      <li class="card guide-step">
+        <span class="step-num" aria-hidden="true">7</span>
+        <div>
+          <h2>Voting rights</h2>
+          <p>Voting rights come with an active paid subscription. Payments are coming soon — we'll let you know when they're available.</p>
+        </div>
+      </li>
+    </ol>
+    <div class="stack guide-extra">
+      <section class="card" aria-labelledby="g-cancel">
+        <h2 id="g-cancel">Cancel any time</h2>
+        <p>You can cancel your account from Settings whenever you like. It's switched off right away and permanently deleted after 7 days. Changed your mind? Email <a href="mailto:support@vettid.org">support@vettid.org</a> within those 7 days and we can restore it.</p>
+      </section>
+      <section class="card" aria-labelledby="g-keys">
+        <h2 id="g-keys">You hold your keys. Not us.</h2>
+        <p>Your keys stay on your device, under your control. VettID helps keep them safe, but never holds them.</p>
+      </section>
+    </div>
+    <div class="actions">
+      <a class="btn btn-primary" href="/request/">Request membership</a>
+      <a class="btn" href="/signin/">Sign in</a>
+    </div>
+  </main>
+  <footer class="site-footer">
+    <ul>
+      <li><a href="https://vettid.org">vettid.org</a></li>
+      <li><a href="https://vettid.org/security/">Privacy &amp; security</a></li>
+      <li><a href="mailto:support@vettid.org">support@vettid.org</a></li>
+    </ul>
+  </footer>
+</body>
+</html>

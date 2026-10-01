@@ -15,7 +15,7 @@ function byAt(by, at) {
 
 export function render(root, { api, ui }) {
   const title = el('input', { type: 'text', name: 'title', required: true, maxlength: 200, autocomplete: 'off', placeholder: 'e.g. VettID Membership Terms, October 2026' });
-  const text = el('textarea', { name: 'text', rows: 16, required: true, maxlength: MAX_CHARS, class: 'mono', placeholder: 'Paste the terms here. Separate paragraphs with a blank line.' });
+  const text = el('textarea', { name: 'text', rows: 16, required: true, maxlength: MAX_CHARS, class: 'mono terms-text', placeholder: 'Paste the terms here. Separate paragraphs with a blank line.' });
   const count = el('span', { class: 'muted' }, '0 characters');
   const file = el('input', { type: 'file', accept: '.txt,.md,text/plain' });
   const submit = el('button', { type: 'submit', class: 'btn btn-primary' }, 'Create draft');

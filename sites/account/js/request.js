@@ -65,6 +65,10 @@ function awsSteps(email) {
   );
 }
 
+function guideLink() {
+  return el('p', { class: 'guide-link' }, el('a', { href: '/guide/' }, 'What happens next? Read the step-by-step guide ', el('span', { 'aria-hidden': 'true' }, '→')));
+}
+
 function showResult(outcome, email) {
   if (outcome === 'registered') {
     fill(result,
@@ -72,6 +76,7 @@ function showResult(outcome, email) {
       el('p', {}, 'Check your inbox for the Amazon Web Services verification email and click it; then sign in.'),
       awsSteps(email),
       el('div', { class: 'actions' }, el('a', { class: 'btn btn-primary', href: '/signin/' }, 'Sign in')),
+      guideLink(),
     );
   } else {
     // "pending_approval" (and anything unexpected) — an admin will review.
@@ -81,6 +86,7 @@ function showResult(outcome, email) {
       awsSteps(email),
       el('p', { class: 'muted' }, "Once you're approved, come back and sign in with this email address."),
       el('div', { class: 'actions' }, el('a', { class: 'btn', href: '/' }, 'Back to start')),
+      guideLink(),
     );
   }
   card.hidden = true;
