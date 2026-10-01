@@ -42,6 +42,11 @@ export interface StaticSiteProps {
    * JSON errors, so they aren't used.)
    */
   readonly notFoundPage?: string;
+  /**
+   * Edge gate: requests under `pathPrefix` without `cookie` are redirected
+   * (302) to `redirectTo`. UX only — the API enforces the real session.
+   */
+  readonly requireCookie?: { pathPrefix: string; cookie: string; redirectTo: string };
 }
 
 /** Every file the deployment will put in the bucket, as request paths. */
@@ -191,14 +196,23 @@ var NOT_FOUND = ${JSON.stringify(page)};
 @@CHECK@@${notFound}`;
     }
     const [decls, check] = notFound ? notFound.split('@@CHECK@@') : ['', ''];
+    const gate = props.requireCookie
+      ? `var GATE = ${JSON.stringify({ prefix: props.requireCookie.pathPrefix, cookie: props.requireCookie.cookie, to: props.requireCookie.redirectTo })};`
+      : 'var GATE = null;';
     const rewriteCode = `${decls}
+${gate}
 function handler(event) {
   var req = event.request;
+
   var uri = req.uri;
   if (uri.endsWith('/')) {
     uri = uri + 'index.html';
   } else if (uri.lastIndexOf('.') < uri.lastIndexOf('/') + 1) {
     uri = uri + '/index.html';
+  }
+  // Gate on the normalized path, so /account and /account/ are both covered.
+  if (GATE && uri.indexOf(GATE.prefix) === 0 && !(req.cookies && req.cookies[GATE.cookie])) {
+    return { statusCode: 302, statusDescription: 'Found', headers: { location: { value: GATE.to }, 'cache-control': { value: 'no-store' } } };
   }${check}
   req.uri = uri;
   return req;

@@ -231,7 +231,8 @@ describe('public request input', () => {
 describe('auth cookies', () => {
   test('signout clears all session cookies with Secure/HttpOnly/SameSite=Strict and no Domain', async () => {
     const res = await auth.handler(ev('POST', '/api/auth/signout'));
-    expect(res.cookies).toHaveLength(4); // id, refresh (/api), legacy refresh (/api/auth), pin
+    expect(res.cookies).toHaveLength(5); // id, refresh (/api), legacy refresh (/api/auth), pin, presence (/)
+    expect(res.cookies).toContain('vid_s=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Strict');
     expect(res.cookies).toContain('vid_rt=; Path=/api/auth; Max-Age=0; Secure; HttpOnly; SameSite=Strict');
     for (const c of res.cookies) {
       expect(c).toMatch(/Max-Age=0; Secure; HttpOnly; SameSite=Strict$/);

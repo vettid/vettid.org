@@ -87,6 +87,8 @@ export class VettidOrgAccountSiteStack extends cdk.Stack {
       hostedZone,
       sourceDir: 'sites/account',
       notFoundPage: '404.html',
+      // Signed-out visitors never get the account page shell (see COOKIES.present).
+      requireCookie: { pathPrefix: '/account/', cookie: 'vid_s', redirectTo: '/signin/' },
       webAclArn: webAcl.attrArn,
       apiOriginDomain: readRef(this, config, 'member-api/domain'),
       apiOriginHeaders: {
