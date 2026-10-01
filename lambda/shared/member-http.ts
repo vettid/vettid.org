@@ -34,9 +34,10 @@ export type MemberRequest = {
 const SESSION_COOKIE_BASE = 'Secure; HttpOnly; SameSite=Strict';
 
 export const cookie = {
-  set(name: string, value: string, path: string, maxAgeSeconds: number): string {
+  set(name: string, value: string, path: string, maxAgeSeconds: number, opts: { scriptReadable?: boolean } = {}): string {
     if (!/^[A-Za-z0-9._~+/=-]*$/.test(value)) throw new Error(`Refusing to set cookie ${name} with unsafe characters`);
-    return `${name}=${value}; Path=${path}; Max-Age=${maxAgeSeconds}; ${SESSION_COOKIE_BASE}`;
+    const base = opts.scriptReadable ? 'Secure; SameSite=Strict' : SESSION_COOKIE_BASE;
+    return `${name}=${value}; Path=${path}; Max-Age=${maxAgeSeconds}; ${base}`;
   },
   clear(name: string, path: string): string {
     return `${name}=; Path=${path}; Max-Age=0; ${SESSION_COOKIE_BASE}`;
@@ -49,9 +50,11 @@ export const COOKIES = {
   // an expired ID token in-request — see requireSession.
   refresh: { name: 'vid_rt', path: '/api' },
   pin: { name: 'vid_pin', path: '/api/auth' },
-  // Not a credential: tells the site's CloudFront function that someone is
-  // probably signed in, so /account/ can redirect signed-out visitors at the
-  // edge (the real session cookies are scoped to /api and can't be seen there).
+  // Not a credential (value is just "1"): tells the site's CloudFront function
+  // — and the pages' scripts — that someone is probably signed in, so
+  // signed-out visitors are redirected at the edge and pages skip the
+  // "am I signed in?" API probe. The real session cookies are httpOnly and
+  // scoped to /api.
   present: { name: 'vid_s', path: '/' },
 } as const;
 
@@ -169,7 +172,7 @@ export async function requireSession(req: MemberRequest): Promise<Session> {
   // Self-healing presence cookie (sessions from before it existed, or after
   // it expired): any authenticated call re-sets it.
   const ensurePresent = (sess: Session) => {
-    if (!req.cookies[COOKIES.present.name]) req.setCookies.push(cookie.set(COOKIES.present.name, '1', COOKIES.present.path, 30 * 86400));
+    if (!req.cookies[COOKIES.present.name]) req.setCookies.push(cookie.set(COOKIES.present.name, '1', COOKIES.present.path, 30 * 86400, { scriptReadable: true }));
     return sess;
   };
   if (token) {

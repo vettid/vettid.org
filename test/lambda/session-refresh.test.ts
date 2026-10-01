@@ -32,7 +32,7 @@ test('a valid ID token needs no refresh', async () => {
 test('a valid session missing the presence cookie gets it re-set (edge gate self-heals)', async () => {
   const r = req({ vid_id: 'good-1' });
   await requireSession(r);
-  expect(r.setCookies).toEqual(['vid_s=1; Path=/; Max-Age=2592000; Secure; HttpOnly; SameSite=Strict']);
+  expect(r.setCookies).toEqual(['vid_s=1; Path=/; Max-Age=2592000; Secure; SameSite=Strict']); // script-readable hint, not a credential
 });
 
 test('an expired ID token is renewed in-request from the refresh cookie (no 401)', async () => {

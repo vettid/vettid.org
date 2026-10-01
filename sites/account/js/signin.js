@@ -1,7 +1,7 @@
 // Sign in: POST /api/auth/start {email}. The API always says ok (no account
 // oracle), so the confirmation copy explains why a link might not arrive.
 
-import { get, publicPost } from './api.js';
+import { get, hasSessionHint, publicPost } from './api.js';
 import { $, param } from './dom.js';
 import * as ui from './ui.js';
 
@@ -29,7 +29,7 @@ const reason = Object.keys(reasons).find((k) => param(k) === '1');
 if (reason) {
   ui.showNotice(reasons[reason], reason === 'canceled' ? 'warn' : 'info');
   history.replaceState(null, '', location.pathname);
-} else {
+} else if (hasSessionHint()) {
   // Already signed in? Skip the form.
   get('/api/account/me', { redirect: false }).then(
     () => location.replace('/account/'),

@@ -117,3 +117,16 @@ export const del = (path, body, opts) => request('DELETE', path, { ...opts, body
 
 /** Unauthenticated calls (public + /api/auth/*): no refresh, no redirect. */
 export const publicPost = (path, body) => request('POST', path, { body, auth: false });
+
+/**
+ * True if the non-secret presence cookie (vid_s=1) says a session probably
+ * exists. Pages use it to skip the "am I signed in?" probe for visitors who
+ * clearly aren't; the API still decides for real.
+ */
+export function hasSessionHint() {
+  try {
+    return /(?:^|;\s*)vid_s=1(?:;|$)/.test(document.cookie);
+  } catch {
+    return false;
+  }
+}
