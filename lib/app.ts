@@ -5,6 +5,9 @@ import { VettidOrgDnsStack } from './stacks/dns-stack';
 import { VettidOrgSignupStack } from './stacks/signup-stack';
 import { VettidDevRedirectStack } from './stacks/dev-redirect-stack';
 import { VettidOrgPlaybooksStack } from './stacks/playbooks-stack';
+import { VettidOrgAuthStack } from './stacks/auth-stack';
+import { VettidOrgDataStack } from './stacks/data-stack';
+import { VettidOrgAdminAccessStack } from './stacks/admin-access-stack';
 
 /**
  * Builds every stack in the vettid.org app. Kept out of bin/ so tests can
@@ -13,7 +16,7 @@ import { VettidOrgPlaybooksStack } from './stacks/playbooks-stack';
  * Stack groups (see docs/ACCOUNT-ADMIN-PLAN.md §3):
  *  - public site: Dns, Signup, Playbooks, VettidOrgStack, VettidDevRedirect
  *    (pre-existing; their construct IDs must not change)
- *  - stateful:  Auth, Data, AdminNet          (rarely deployed, RETAIN)
+ *  - stateful:  Auth, Data, AdminAccess       (rarely deployed, RETAIN)
  *  - stateless: MemberApi, AccountSite, AdminApi, AdminSite
  *  Stateful → stateless references go through SSM (lib/constructs/ssm-refs.ts),
  *  never CloudFormation exports.
@@ -55,4 +58,17 @@ export function buildApp(app: cdk.App): void {
   // The whole remaining vettid.dev footprint: a blanket 301 to vettid.org.
   // Deploy only after the old VettIDStack is deleted (alias exclusivity).
   new VettidDevRedirectStack(app, 'VettidDevRedirectStack', { env });
+
+  // ---- Account + admin (docs/ACCOUNT-ADMIN-PLAN.md) ----
+  // Deploy order: Auth, Data → AdminAccess (reads the admin pool ARN via SSM).
+  new VettidOrgAuthStack(app, 'VettidOrgAuthStack', { config, env });
+  new VettidOrgDataStack(app, 'VettidOrgDataStack', { config, env });
+  if (config.adminAccess.headscaleLoginServer) {
+    new VettidOrgAdminAccessStack(app, 'VettidOrgAdminAccessStack', { config, env });
+  } else {
+    cdk.Annotations.of(app).addWarningV2(
+      'vettid:admin-access-unconfigured',
+      'VettidOrgAdminAccessStack skipped: set context "headscaleLoginServer" in cdk.json',
+    );
+  }
 }

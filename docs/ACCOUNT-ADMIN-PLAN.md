@@ -99,9 +99,9 @@ rebuilt smaller in Night Watch rather than restyled 5k-line files.
 
 | Stack | Kind | Contents | Deploys |
 |---|---|---|---|
-| `VettidOrgAuthStack` | stateful | Member pool + admin pool (RETAIN + deletionProtection), groups, app clients, managed-login domains, SES (vettid.org domain identity) for Cognito email; regional WAF ACL on the **admin** pool (IP allowlist) | rarely |
+| `VettidOrgAuthStack` | stateful | Member pool + admin pool (RETAIN + deletionProtection), groups, app clients, admin hosted-UI domain, PIN pepper, SES (vettid.org domain identity) for Cognito email | rarely |
 | `VettidOrgDataStack` | stateful | DynamoDB tables (§3.4), terms PDF bucket; all RETAIN + PITR + deletionProtection | rarely |
-| `VettidOrgAdminNetStack` | stateful-ish | Small VPC (1 public subnet, no NAT), t4g.nano Tailscale node joined to Headscale as exit node, Elastic IP, SSM-only management (no SSH), auth key from Secrets Manager | rarely |
+| `VettidOrgAdminAccessStack` | stateful-ish | Small VPC (1 public subnet, no NAT), t4g.nano Tailscale node joined to Headscale as exit node, Elastic IP (retained), SSM-only management (no SSH), pre-auth key from Secrets Manager; **all** admin WAF allowlists (regional ACL on the admin pool, CloudFront ACL for the admin site) | rarely |
 | `VettidOrgMemberApiStack` | stateless | HttpApi + route-group Lambdas (`auth`, `register`, `account`, `membership`) + scheduled jobs (account cleanup) + registration stream mailer; JWT verified in-handler with `aws-jwt-verify` | often |
 | `VettidOrgAccountSiteStack` | stateless | Bucket, cert, CloudFront at account.vettid.org, `/api/*` → member API **same-origin** (the signup pattern: no CORS, host-only `SameSite=Strict` cookies), CSP `script-src 'self'`, generated config | often |
 | `VettidOrgAdminApiStack` | stateless | Regional REST API at `admin-api.vettid.org`, resource policy `aws:SourceIp = <exit-node EIP>`, Cognito admin-pool authorizer, ~3 route-group Lambdas | often |
@@ -165,7 +165,7 @@ admin laptop/phone ──WireGuard (tailnet)──▶ AWS exit node (EIP) ──
                                                                 └─▶ admin managed login (Cognito)
 ```
 
-- **Exit node in AWS** (`VettidOrgAdminNetStack`): t4g.nano, Elastic IP,
+- **Exit node in AWS** (`VettidOrgAdminAccessStack`): t4g.nano, Elastic IP,
   Tailscale joined to your Headscale with `--advertise-exit-node`; approve the
   route in Headscale. Pre-auth key lives in Secrets Manager; instance managed
   by SSM Session Manager only (no inbound ports at all — Tailscale is
@@ -354,7 +354,7 @@ Data & logic
 (incl. missing PlaybooksStack).
 
 **Phase 1 — Auth, data, admin** (2–3 PRs)
-AuthStack + DataStack → AdminNetStack (exit node; verify from tailnet) →
+AuthStack + DataStack → AdminAccessStack (exit node + WAF allowlists; verify from tailnet) →
 AdminApiStack + AdminSiteStack (requests, members, invites, terms,
 subscription types, admins, audit). Bootstrap the first admin via a script
 (`AdminCreateUser` + add to group). Acceptance: admin reachable only with the
