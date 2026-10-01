@@ -379,4 +379,41 @@ describe('VettidOrgAccountSiteStack', () => {
     expect(csp).toContain("connect-src 'self';");
     expect(csp).toContain("script-src 'self'");
   });
+
+  test('distribution sits behind its own CLOUDFRONT web ACL (default allow)', () => {
+    t.hasResourceProperties('AWS::WAFv2::WebACL', { Name: 'vettid-org-account', Scope: 'CLOUDFRONT', DefaultAction: { Allow: {} } });
+    t.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({ WebACLId: { 'Fn::GetAtt': [Match.stringLikeRegexp('^WebAcl'), 'Arn'] } }),
+    });
+  });
+
+  test('per-IP rate limits: 30/5min on /api/public + /api/auth, 300/5min on all /api; IP reputation counts', () => {
+    const acl = Object.values<any>(t.findResources('AWS::WAFv2::WebACL'))[0].Properties;
+    const rule = (name: string) => acl.Rules.find((r: any) => r.Name === name);
+    const prefixes = (stmt: any): string[] =>
+      stmt.OrStatement ? stmt.OrStatement.Statements.flatMap(prefixes) : [stmt.ByteMatchStatement.SearchString];
+
+    const auth = rule('rate-limit-auth');
+    expect(auth.Action).toEqual({ Block: { CustomResponse: { ResponseCode: 429 } } });
+    expect(auth.Statement.RateBasedStatement).toMatchObject({ Limit: 30, AggregateKeyType: 'IP', EvaluationWindowSec: 300 });
+    expect(prefixes(auth.Statement.RateBasedStatement.ScopeDownStatement)).toEqual(['/api/public/', '/api/auth/']);
+
+    const api = rule('rate-limit-api');
+    expect(api.Statement.RateBasedStatement).toMatchObject({ Limit: 300, AggregateKeyType: 'IP', EvaluationWindowSec: 300 });
+    expect(prefixes(api.Statement.RateBasedStatement.ScopeDownStatement)).toEqual(['/api/']);
+
+    const rep = rule('aws-ip-reputation');
+    expect(rep.OverrideAction).toEqual({ Count: {} });
+    expect(rep.Statement.ManagedRuleGroupStatement.Name).toBe('AWSManagedRulesAmazonIpReputationList');
+  });
+
+  test('WAF logs to CloudWatch (90 days) with cookie/authorization redacted', () => {
+    t.hasResource('AWS::Logs::LogGroup', {
+      DeletionPolicy: 'Retain',
+      Properties: { LogGroupName: 'aws-waf-logs-vettid-org-account', RetentionInDays: 90 },
+    });
+    t.hasResourceProperties('AWS::WAFv2::LoggingConfiguration', {
+      RedactedFields: [{ SingleHeader: { Name: 'cookie' } }, { SingleHeader: { Name: 'authorization' } }],
+    });
+  });
 });

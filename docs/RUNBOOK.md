@@ -57,8 +57,11 @@ their construct IDs.
   1-month log group) and served through `HttpRouteGroup`: one function per
   route *group* (`ANY /api/<group>/{proxy+}`), routing in the handler.
 - **Static sites** use `StaticSite`: own host, strict CSP (`script-src 'self'`,
-  no inline styles), same-origin `/api/*`, and `/config.json` generated at
-  deploy time from CDK tokens.
+  no inline styles, no `data:` images, Trusted Types required — build DOM with
+  `createElement`/`textContent`, never HTML strings), same-origin `/api/*`,
+  `/config.json` generated at deploy time from CDK tokens, and CloudFront
+  access logs in a private per-site bucket (90 days). Dotfiles, `*.swp`, `*~`
+  and `*.example.json` under the site directory are never deployed.
 - **Guardrails** (`test/app-guardrails.test.ts`, run in CI): ≤ 200 resources
   per stack, no `Fn::ImportValue` outside the grandfathered stacks, and every
   table/user pool retained.
@@ -168,6 +171,12 @@ their Headscale node *and* disable/delete the Cognito user.
 - WAF telemetry (JA3/JA4 fingerprints, ordered headers, cookie/auth redacted) →
   CloudWatch group `aws-waf-logs-vettid-org` (90-day). Join to CloudFront logs
   on request ID.
+- account.vettid.org: its web ACL (`vettid-org-account`; per-IP 30/5 min on
+  `/api/public/*` + `/api/auth/*`, 300/5 min on `/api/*`, IP reputation in
+  count mode) logs to `aws-waf-logs-vettid-org-account`; admin.vettid.org's
+  allowlist ACL logs to `aws-waf-logs-vettid-org-admin` (both 90-day,
+  cookie/authorization redacted). Their CloudFront access logs (TSV) land in
+  each site stack's `LogBucket` under `cloudfront/` (90-day).
 - See `docs/logs-analysis.md` for Athena queries; the capture spec is
   `~/VettID/vettid-org-logging-spec.md`.
 
