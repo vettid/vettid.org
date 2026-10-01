@@ -68,12 +68,14 @@ export class VettidOrgAuthStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
-    // Cognito treats an EMPTY WriteAttributes list as "every standard
-    // attribute is writable" by the client's tokens (UpdateUserAttributes
-    // with a user's own access token). So the clients list exactly one
-    // attribute nothing reads or relies on — `locale` — which is the closest
-    // Cognito allows to "nothing writable". Never add email or custom:*.
-    const writeNothingMeaningful = () => new cognito.ClientAttributes().withStandardAttributes({ locale: true });
+    // Writable attributes: Cognito treats an EMPTY list as "every standard
+    // attribute is writable", and it rejects any client that can't write the
+    // pool's required attributes. So each client may write exactly `email`
+    // (the only required attribute). Members: email changes need
+    // verification first (keepOriginal) and the account API refuses a
+    // token whose email no longer matches our records, so a member can at
+    // worst lock themselves out. Never add custom:* (user_guid binds data).
+    const writeEmailOnly = () => new cognito.ClientAttributes().withStandardAttributes({ email: true });
 
     new cognito.CfnUserPoolGroup(this, 'MemberGroupRegistered', {
       userPoolId: this.memberPool.userPoolId,
@@ -102,7 +104,7 @@ export class VettidOrgAuthStack extends cdk.Stack {
       readAttributes: new cognito.ClientAttributes()
         .withStandardAttributes({ email: true, emailVerified: true })
         .withCustomAttributes('user_guid'),
-      writeAttributes: writeNothingMeaningful(),
+      writeAttributes: writeEmailOnly(),
     });
 
     // ---- Admins ---------------------------------------------------------
@@ -170,8 +172,11 @@ export class VettidOrgAuthStack extends cdk.Stack {
       refreshTokenValidity: cdk.Duration.hours(8), // one working session
       readAttributes: new cognito.ClientAttributes().withStandardAttributes({ email: true, emailVerified: true }),
       // vettid-dev let admins write custom:admin_type (self-escalation).
-      // Only the inert `locale` is writable here (see writeNothingMeaningful).
-      writeAttributes: writeNothingMeaningful(),
+      // A hosted-UI client must be able to write the pool's required
+      // attributes (Cognito rejects the client otherwise), so `email` is
+      // listed — but it is immutable on this pool, so nothing is actually
+      // writable. Never add custom:* here.
+      writeAttributes: new cognito.ClientAttributes().withStandardAttributes({ email: true }),
     });
 
     // ---- PIN pepper -----------------------------------------------------

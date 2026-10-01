@@ -39,7 +39,7 @@ describe('VettidOrgAuthStack', () => {
       GenerateSecret: false,
       PreventUserExistenceErrors: 'ENABLED',
       // Empty would mean "all standard attributes writable" to Cognito.
-      WriteAttributes: ['locale'],
+      WriteAttributes: ['email'],
       AllowedOAuthFlows: Match.absent(),
       CallbackURLs: Match.absent(),
     });
@@ -67,7 +67,7 @@ describe('VettidOrgAuthStack', () => {
       ClientName: 'vettid-org-admin-site',
       AllowedOAuthFlows: ['code'],
       CallbackURLs: ['https://admin.vettid.org/'],
-      WriteAttributes: ['locale'],
+      WriteAttributes: ['email'], // immutable on the admin pool
     });
     t.hasResourceProperties('AWS::Cognito::UserPoolDomain', { Domain: 'vettid-org-admin' });
   });
