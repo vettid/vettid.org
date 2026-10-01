@@ -31,7 +31,8 @@
   --gold-hover: #ffd25a;
   --ink-on-gold: #101018;
 
-  --accent: #ffc125;             /* logo mark, current-step marker, active tab */
+  --brand-mark: #ffc125;         /* the rook: brand gold in every theme */
+  --accent: #ffc125;             /* current-step marker, active tab */
   --on-accent: #101018;
   --accent-text: #ffc125;        /* gold-as-text */
   --focus: #ffc125;
@@ -242,7 +243,7 @@ code, .mono {
   width: 26px;
   height: auto;
   flex: none;
-  color: var(--accent);
+  color: var(--brand-mark);
 }
 .brand-name {
   font-family: var(--font-head);
@@ -255,7 +256,7 @@ code, .mono {
   font-size: 11px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--accent-text);
   padding-left: 12px;
   border-left: 1px solid var(--border);
   white-space: nowrap;
