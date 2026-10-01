@@ -1,0 +1,4 @@
+# Test vectors in protocol specs (fixed test-only seeds / placeholder push token) — not secrets
+docs/PUSH-GATEWAY.md:generic-api-key:197
+docs/PUSH-GATEWAY.md:generic-api-key:203
+docs/RELAY-PROTOCOL.md:generic-api-key:443
