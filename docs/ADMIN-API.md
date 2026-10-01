@@ -88,9 +88,10 @@ interface Invite {
 | Method | Path | Body | Returns |
 |---|---|---|---|
 | GET | `/admin/terms` | — | `{items: Terms[], cursor}` newest first |
-| POST | `/admin/terms` | `{title: string}` | `{terms: Terms, upload_url: string}` — then `PUT` the PDF to `upload_url` with `Content-Type: application/pdf` (≤ 10 MB, URL valid 15 min) |
+| POST | `/admin/terms` | `{title: string, text: string}` (≤ 200,000 chars) | `Terms` (draft). The text is normalized (line endings, trailing spaces, runs of blank lines) and stored; a PDF is generated from it. `400` lists any characters the PDF font can't render |
 | POST | `/admin/terms/{version_id}/publish` | — | `Terms` (becomes `current`; previous current → `superseded`) |
-| GET | `/admin/terms/{version_id}/download-url` | — | `{url: string}` (5 min) |
+| DELETE | `/admin/terms/{version_id}` | — | `{ok: true}` — drafts only |
+| GET | `/admin/terms/{version_id}/download-url` | — | `{url: string}` to the generated PDF (5 min) |
 | GET | `/admin/subscription-types` | — | `{items: SubscriptionType[], cursor}` |
 | POST | `/admin/subscription-types` | `{name, description, duration_days (1–3660), is_trial: boolean, paid: boolean}` | `SubscriptionType` |
 | POST | `/admin/subscription-types/{type_id}/enable` | — | `SubscriptionType` |
@@ -100,7 +101,9 @@ interface Invite {
 interface Terms {
   version_id: string; title: string;
   status: 'draft' | 'current' | 'superseded';
-  sha256: string | null;           // set at publish
+  sha256: string;                  // of the normalized text — what members accept
+  pdf_sha256: string;              // of the generated PDF
+  chars: number;
   created_at: string; created_by: string;
   published_at: string | null; published_by: string | null;
 }
@@ -111,7 +114,9 @@ interface SubscriptionType {
 }
 ```
 
-Terms uploads go straight to S3 (`*.s3.amazonaws.com`) from the browser.
+Terms are authored as plain text (paragraphs separated by blank lines); the
+server renders the PDF. The browser never talks to S3 except to open a
+presigned download link.
 
 ## System
 

@@ -31,13 +31,7 @@ export class VettidOrgAdminSiteStack extends cdk.Stack {
       hostedZone: hostedZone,
       sourceDir: 'sites/admin',
       webAclArn: readRef(this, config, 'admin-access/site-web-acl-arn'),
-      connectSrc: [
-        apiBase,
-        cognitoDomain,
-        // Terms PDFs upload straight to S3 via presigned PUT.
-        'https://*.s3.amazonaws.com',
-        `https://*.s3.${config.region}.amazonaws.com`,
-      ],
+      connectSrc: [apiBase, cognitoDomain],
       runtimeConfig: {
         apiBase,
         cognitoDomain,

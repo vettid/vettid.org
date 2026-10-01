@@ -96,19 +96,3 @@ export function pager(path, query = {}) {
     },
   };
 }
-
-/** PUT a file to a presigned S3 URL (no bearer; the URL is the credential). */
-export async function uploadPdf(uploadUrl, file) {
-  let res;
-  try {
-    res = await fetch(uploadUrl, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/pdf' },
-      body: file,
-      credentials: 'omit',
-    });
-  } catch {
-    throw new ApiError(0, 'upload_failed', 'Upload to storage failed (network error).');
-  }
-  if (!res.ok) throw new ApiError(res.status, 'upload_failed', `Upload to storage failed (HTTP ${res.status}).`);
-}

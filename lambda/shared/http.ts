@@ -96,7 +96,8 @@ export function json(status: number, body: unknown): APIGatewayProxyResult {
 export function parseBody(event: APIGatewayProxyEvent): Record<string, unknown> {
   if (!event.body) return {};
   const raw = event.isBase64Encoded ? Buffer.from(event.body, 'base64').toString('utf8') : event.body;
-  if (raw.length > 64 * 1024) throw badRequest('Body too large');
+  // Largest legitimate body is a membership terms text (≤ 200k chars).
+  if (raw.length > 512 * 1024) throw badRequest('Body too large');
   try {
     const v = JSON.parse(raw);
     if (v === null || typeof v !== 'object' || Array.isArray(v)) throw new Error();

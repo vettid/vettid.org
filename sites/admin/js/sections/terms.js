@@ -1,21 +1,12 @@
-// 4. Terms — upload a new version (PDF), publish drafts, download.
+// 4. Terms — write or load plain text; the API renders the PDF. Preview,
+// publish or delete drafts; download any version.
 
 import { el, chip, mono, muted, time } from '../dom.js';
 
-const MAX_BYTES = 10 * 1024 * 1024;
+const MAX_CHARS = 200_000;
+const MAX_FILE_BYTES = 1024 * 1024;
 const LINK_TTL_MS = 4.5 * 60 * 1000; // download URLs live 5 min
 const STATUS_TONE = { draft: 'warn', current: 'ok', superseded: 'mute' };
-
-async function checkPdf(file) {
-  if (!file) return 'Choose a PDF file.';
-  if (file.type && file.type !== 'application/pdf') return `That file is ${file.type}, not a PDF.`;
-  if (!/\.pdf$/i.test(file.name)) return 'The file must have a .pdf extension.';
-  if (file.size > MAX_BYTES) return `The PDF is ${(file.size / 1048576).toFixed(1)} MB; the limit is 10 MB.`;
-  if (file.size === 0) return 'The file is empty.';
-  const magic = await file.slice(0, 5).text();
-  if (magic !== '%PDF-') return 'That file does not look like a PDF (missing %PDF header).';
-  return null;
-}
 
 function byAt(by, at) {
   if (!at) return muted('—');
@@ -24,23 +15,48 @@ function byAt(by, at) {
 
 export function render(root, { api, ui }) {
   const title = el('input', { type: 'text', name: 'title', required: true, maxlength: 200, autocomplete: 'off', placeholder: 'e.g. VettID Membership Terms, October 2026' });
-  const file = el('input', { type: 'file', name: 'file', accept: 'application/pdf,.pdf', required: true });
-  const submit = el('button', { type: 'submit', class: 'btn btn-primary' }, 'Upload draft');
-  const progress = el('p', { class: 'muted', hidden: true }, 'Uploading…');
+  const text = el('textarea', { name: 'text', rows: 16, required: true, maxlength: MAX_CHARS, class: 'mono', placeholder: 'Paste the terms here. Separate paragraphs with a blank line.' });
+  const count = el('span', { class: 'muted' }, '0 characters');
+  const file = el('input', { type: 'file', accept: '.txt,.md,text/plain' });
+  const submit = el('button', { type: 'submit', class: 'btn btn-primary' }, 'Create draft');
   const form = el('form', { class: 'card form-grid' },
     el('h3', {}, 'New version'),
     ui.field('Title', title),
-    ui.field('PDF (max 10 MB)', file),
-    el('div', { class: 'form-actions' }, submit, progress),
+    ui.field('Load from a text file (optional)', file),
+    ui.field('Terms text', text),
+    el('div', { class: 'form-actions' }, submit, count),
   );
 
+  const updateCount = () => {
+    count.textContent = `${text.value.length.toLocaleString()} characters`;
+  };
+  text.addEventListener('input', updateCount);
+
+  // Reading happens locally; nothing is sent until "Create draft".
+  file.addEventListener('change', async () => {
+    const f = file.files[0];
+    if (!f) return;
+    try {
+      if (f.size > MAX_FILE_BYTES) throw new Error('That file is over 1 MB; terms text should be far smaller.');
+      const content = await f.text();
+      if (content.includes('\u0000')) throw new Error('That does not look like a text file.');
+      text.value = content;
+      if (!title.value.trim()) title.value = f.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ');
+      updateCount();
+    } catch (err) {
+      ui.showError(err.message);
+    } finally {
+      file.value = '';
+    }
+  });
+
   const list = ui.pagedList({
-    columns: ['Title', 'Version', 'Status', 'SHA-256', 'Created', 'Published', 'Actions'],
+    columns: ['Title', 'Version', 'Status', 'Text SHA-256', 'Created', 'Published', 'Actions'],
     emptyText: 'No terms versions yet.',
     makePager: () => api.pager('/admin/terms'),
     row: (t, row) => {
       const id = api.seg(t.version_id);
-      const download = ui.action('Get download link', async (btn) => {
+      const download = ui.action(t.status === 'draft' ? 'Preview PDF' : 'Get PDF link', async (btn) => {
         const { url } = await api.get(`/admin/terms/${id}/download-url`);
         if (new URL(url).protocol !== 'https:') throw new Error('Download URL was not https.');
         const link = el('a', { class: 'btn btn-sm', href: url, target: '_blank', rel: 'noopener noreferrer' }, 'Open PDF');
@@ -55,7 +71,7 @@ export function render(root, { api, ui }) {
               title: 'Publish terms',
               body: [
                 `Publish "${t.title}" as the current terms?`,
-                'The current version becomes superseded. Every member will have to accept this new version; the SHA-256 of the PDF is fixed at publish.',
+                'The current version becomes superseded, and every member will have to accept this one. Published terms cannot be edited or deleted.',
               ],
               confirmLabel: 'Publish',
             });
@@ -65,6 +81,15 @@ export function render(root, { api, ui }) {
             list.reload(); // the previously current version changed too
           })
         : null;
+      const remove = t.status === 'draft'
+        ? ui.action('Delete draft', async () => {
+            const ok = await ui.confirm({ title: 'Delete draft', body: [`Delete the draft "${t.title}"?`], confirmLabel: 'Delete' });
+            if (!ok) return;
+            await api.del(`/admin/terms/${id}`);
+            ui.toast('Draft deleted.');
+            row.remove();
+          })
+        : null;
       return [
         t.title,
         mono(t.version_id),
@@ -72,7 +97,7 @@ export function render(root, { api, ui }) {
         t.sha256 ? el('code', { class: 'mono', title: t.sha256 }, `${t.sha256.slice(0, 12)}…`) : muted('—'),
         byAt(t.created_by, t.created_at),
         byAt(t.published_by, t.published_at),
-        ui.rowActions(publish, download),
+        ui.rowActions(download, publish, remove),
       ];
     },
   });
@@ -80,26 +105,17 @@ export function render(root, { api, ui }) {
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     ui.busy(form, async () => {
-      const pdf = file.files[0];
-      const problem = await checkPdf(pdf);
-      if (problem) throw new Error(problem);
-      const { terms, upload_url: uploadUrl } = await api.post('/admin/terms', { title: title.value.trim() });
+      if (!text.value.trim()) throw new Error('The terms text is empty.');
+      const terms = await api.post('/admin/terms', { title: title.value.trim(), text: text.value });
       list.prepend(terms);
-      progress.hidden = false;
-      try {
-        await api.uploadPdf(uploadUrl, pdf);
-      } catch (err) {
-        throw new Error(`Draft "${terms.title}" was created, but the PDF upload failed: ${err.message} Do not publish it; create a new version instead.`);
-      } finally {
-        progress.hidden = true;
-      }
       form.reset();
-      ui.toast('Draft uploaded. Review it, then Publish.');
+      updateCount();
+      ui.toast('Draft created. Preview the PDF, then Publish.');
     });
   });
 
   root.append(
-    ui.sectionHead('Terms', 'Members must accept the current version to become members. Drafts are not visible to members until published.'),
+    ui.sectionHead('Terms', 'Members must accept the current version to become members. The text is the official version (its SHA-256 is what members accept); the PDF is generated from it.'),
     form,
     list.node,
   );
