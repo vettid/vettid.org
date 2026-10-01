@@ -272,22 +272,23 @@ code, .mono {
 .theme-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-height: 36px;
-  min-width: 36px;
-  padding: 6px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  justify-content: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
   background: transparent;
   color: var(--ink-hi);
-  font-size: 0.85rem;
-  font-weight: 600;
   cursor: pointer;
+  transition: background 200ms var(--ease);
 }
-.theme-btn:hover { background: var(--surface-2); }
+.theme-btn:hover,
+.theme-btn:focus-visible { background: var(--surface-2); }
 .theme-icon {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
@@ -730,6 +731,22 @@ input.pin {
   color: var(--ink-hi);
   border-bottom-color: var(--accent);
 }
+.tab { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-family: var(--font-body);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+}
 .tab:focus-visible { outline-offset: -2px; }
 .tabpanel:focus { outline: none; }
 
@@ -846,10 +863,27 @@ input.pin {
   .site-header { padding: 10px var(--gutter); gap: 10px; }
   .brand { gap: 8px; }
   .brand-tag { padding-left: 8px; font-size: 10px; letter-spacing: 0.08em; }
-  .theme-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .theme-btn { padding: 6px 8px; }
-  .tabs { gap: 0; }
-  .tab { flex: 1 1 auto; padding: 10px 4px; font-size: 0.85rem; }
+  /* Four tabs (one with a badge) don't fit one row at phone width: 2x2 grid. */
+  .tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    border-bottom: none;
+    overflow: visible;
+  }
+  .tab {
+    margin: 0;
+    padding: 8px 6px;
+    font-size: 0.9rem;
+    border: 1px solid var(--border);
+    border-bottom-width: 3px;
+    border-radius: var(--radius-sm);
+  }
+  .tab[aria-selected='true'] {
+    background: var(--surface-1);
+    border-color: var(--border);
+    border-bottom-color: var(--accent);
+  }
   .guide-step { grid-template-columns: 1fr; gap: 10px; }
   .who-text { display: none; }
   main { padding: 32px var(--gutter) 48px; }

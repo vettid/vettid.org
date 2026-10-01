@@ -71,6 +71,7 @@ function reveal(id) {
 
 function renderAll() {
   renderHeader();
+  renderTabs();
   renderChecklist();
   renderStatus();
   renderTerms();
@@ -118,13 +119,29 @@ function days(n) {
 
 const shortHash = (h) => (h ? `${String(h).slice(0, 12)}…` : '');
 
-// ── Tabs (#overview | #membership | #security | #settings) ─────────────
+// ── Tabs (#start | #membership | #security | #settings) ─────────────────
+// The first tab is labelled "Getting started" while actionable steps remain
+// and "Overview" once they're done; its hash stays #start (#overview is an
+// alias kept for old links).
 
-const TABS = ['overview', 'membership', 'security', 'settings'];
+const TABS = ['start', 'membership', 'security', 'settings'];
+const HASH_ALIASES = { overview: 'start' };
 
 function tabFromHash() {
-  const h = location.hash.replace(/^#/, '');
-  return TABS.includes(h) ? h : 'overview';
+  const raw = location.hash.replace(/^#/, '');
+  const h = HASH_ALIASES[raw] ?? raw;
+  return TABS.includes(h) ? h : 'start';
+}
+
+/** Badge + label on the first tab, from the checklist's pending count. */
+function renderTabs() {
+  const left = pendingSteps().length;
+  const label = left ? 'Getting started' : 'Overview';
+  $('tab-start-label').textContent = label;
+  const badge = $('tab-start-badge');
+  badge.textContent = left ? String(left) : '';
+  badge.hidden = !left;
+  $('tab-start').setAttribute('aria-label', left ? `${label}, ${left} step${left === 1 ? '' : 's'} left` : label);
 }
 
 function selectTab(name, { focus = true } = {}) {
@@ -258,6 +275,11 @@ function steps() {
   ];
 }
 
+/** Actionable steps not yet done or skipped (voting never counts). */
+function pendingSteps() {
+  return steps().filter((s) => s.actionable && !s.done && !s.skipped);
+}
+
 async function skipPin(e) {
   const next = await ui.busy(e.currentTarget, () => post('/api/account/preferences', { pin_prompt_dismissed: true }));
   if (next) await setMe(next, { focus: 'h-checklist', notice: 'Skipped for now. You can set up a PIN any time under Security.' });
@@ -274,7 +296,7 @@ function renderChecklist() {
   const list = steps();
   const doneCount = list.filter((s) => s.done).length;
   const current = list.find((s) => s.actionable && !s.done && !s.skipped && s.actions);
-  const allSet = list.every((s) => !s.actionable || s.done || s.skipped);
+  const allSet = pendingSteps().length === 0;
 
   const progress = el('div', { class: 'progress' },
     el('span', { class: 'progress-bar', 'aria-hidden': 'true' }, list.map((s) => el('span', { class: s.done ? 'on' : null }))),
@@ -286,7 +308,7 @@ function renderChecklist() {
   if (allSet && !showSteps) {
     fill(sec, head,
       el('div', { class: 'all-set' },
-        el('span', { class: 'all-set-text' }, el('span', { class: 'step-mark', 'aria-hidden': 'true' }, '✓'), el('p', {}, "You're all set.")),
+        el('span', { class: 'all-set-text' }, el('span', { class: 'step-mark', 'aria-hidden': 'true' }, '✓'), el('p', {}, me.state === 'member' ? "You're all set." : "Nothing to do right now. We'll let you know when the membership terms are ready.")),
         el('button', { type: 'button', class: 'link-btn', 'aria-expanded': 'false', on: { click: () => { showSteps = true; renderChecklist(); $('steps-toggle')?.focus(); } }, id: 'steps-toggle' }, 'Show steps'),
       ),
     );
