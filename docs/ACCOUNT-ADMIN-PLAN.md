@@ -15,7 +15,6 @@ related:
   - PUSH-GATEWAY.md
   - CALLING-SERVICE.md
   - PQC-MIGRATION.md
-  - SCOPE-1TO1.md
   - RUNBOOK.md
 ---
 

@@ -7,7 +7,6 @@ owner: Al Liebl (Mesmer)
 component: calling-service (optional, media plane only)
 related:
   - PQC-MIGRATION.md
-  - SCOPE-1TO1.md
   - RELAY-PROTOCOL.md
   - PUSH-GATEWAY.md
 classification: public (no secrets; safe for github.com/vettid)
@@ -23,7 +22,7 @@ video calling between VettID connections. The service is a blind forwarder of
 end-to-end encrypted media frames. It is deployed by vettid.org for its own
 users and is available, unchanged, to any self-hosted deployment.
 
-Scope is **1:1 only** (see SCOPE-1TO1.md). Group calling, and therefore any
+Scope is **1:1 only**. Group calling, and therefore any
 SFU role, is explicitly out of scope for this service and belongs to a future
 group service built *on* VettID connections, not *in* VettID.
 
@@ -52,7 +51,7 @@ Mirroring the relay's narrow-job discipline, the calling service will never:
    therefore structurally excluded, not merely deferred).
 5. Retain per-call metadata beyond operational minimums (ephemeral
    allocations; no call-detail records).
-6. Act as an SFU or any multiparty media router (relocated per SCOPE-1TO1.md).
+6. Act as an SFU or any multiparty media router (out of scope: 1:1 only).
 
 Any proposed feature that conflicts with this list is a new service, not an
 extension of this one.
@@ -194,4 +193,3 @@ service.
 - coturn `use-auth-secret` time-limited credential mechanism
 - SFrame (IETF draft), WebRTC encoded transforms / insertable streams
 - PQC-MIGRATION.md §5.1 (hybrid KEM), §5.2 (hybrid signatures)
-- SCOPE-1TO1.md (scope boundary; SFU relocation)

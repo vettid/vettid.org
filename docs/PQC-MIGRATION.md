@@ -10,7 +10,6 @@ related:
   - RELAY-PROTOCOL.md
   - PUSH-GATEWAY.md
   - CALLING-SERVICE.md
-  - SCOPE-1TO1.md
 changelog:
   - 0.2.0: calling media encryption added to Phase 2 (SFrame over hybrid KEM,
     closes the DTLS-SRTP gap); open question 3 resolved via QR claim-check
