@@ -182,3 +182,75 @@ describe('VettidOrgAdminAccessStack', () => {
     expect(() => new VettidOrgAdminAccessStack(bare, 'X', { config: loadConfig(bare.node), env })).toThrow(/headscaleLoginServer/);
   });
 });
+
+describe('VettidOrgAdminApiStack', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { VettidOrgAdminApiStack } = require('../lib/stacks/admin-api-stack');
+  const t = Template.fromStack(new VettidOrgAdminApiStack(newApp(), 'AdminApi', { config, env }));
+
+  test('REST API reachable only via its custom domain', () => {
+    t.hasResourceProperties('AWS::ApiGateway::RestApi', { DisableExecuteApiEndpoint: true });
+    t.hasResourceProperties('AWS::ApiGateway::DomainName', { DomainName: 'admin-api.vettid.org', SecurityPolicy: 'TLS_1_2' });
+  });
+
+  test('resource policy allows only the exit-node egress IP (from SSM)', () => {
+    const api = Object.values<any>(t.findResources('AWS::ApiGateway::RestApi'))[0];
+    const stmt = api.Properties.Policy.Statement;
+    expect(stmt).toHaveLength(1);
+    expect(stmt[0].Effect).toBe('Allow');
+    expect(JSON.stringify(stmt[0].Condition)).toContain('aws:SourceIp');
+    expect(JSON.stringify(t.toJSON().Parameters)).toContain('/vettid-org/prod/admin-access/egress-ip');
+  });
+
+  test('every non-OPTIONS method uses the Cognito authorizer', () => {
+    const methods = Object.values<any>(t.findResources('AWS::ApiGateway::Method'));
+    const real = methods.filter((m) => m.Properties.HttpMethod !== 'OPTIONS');
+    expect(real.length).toBeGreaterThanOrEqual(16); // 8 prefixes × (prefix + proxy)
+    for (const m of real) expect(m.Properties.AuthorizationType).toBe('COGNITO_USER_POOLS');
+  });
+
+  test('three route-group Lambdas, Node 24 on ARM', () => {
+    t.resourceCountIs('AWS::Lambda::Function', 3);
+    t.allResourcesProperties('AWS::Lambda::Function', { Runtime: 'nodejs24.x', Architectures: ['arm64'] });
+  });
+
+  test('gateway-generated errors carry CORS so the UI can explain 401/403', () => {
+    t.hasResourceProperties('AWS::ApiGateway::GatewayResponse', {
+      ResponseType: 'DEFAULT_4XX',
+      ResponseParameters: Match.objectLike({ 'gatewayresponse.header.Access-Control-Allow-Origin': "'https://admin.vettid.org'" }),
+    });
+  });
+
+  test('audit is append-only for writers (no Update/Delete on the audit table)', () => {
+    const policies = JSON.stringify(t.findResources('AWS::IAM::Policy'));
+    const auditStmts = Object.values<any>(t.findResources('AWS::IAM::Policy'))
+      .flatMap((p) => p.Properties.PolicyDocument.Statement)
+      .filter((s: any) => JSON.stringify(s.Resource).includes('table/vettid-org-audit'));
+    expect(auditStmts.length).toBeGreaterThan(0);
+    for (const s of auditStmts) {
+      for (const a of [].concat(s.Action)) expect(['dynamodb:PutItem', 'dynamodb:Query']).toContain(a);
+    }
+    expect(policies).not.toContain('dynamodb:*');
+  });
+});
+
+describe('VettidOrgAdminSiteStack', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { VettidOrgAdminSiteStack } = require('../lib/stacks/admin-site-stack');
+  const t = Template.fromStack(new VettidOrgAdminSiteStack(newApp(), 'AdminSite', { config, env }));
+
+  test('admin.vettid.org distribution sits behind the exit-node web ACL', () => {
+    t.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({
+        Aliases: ['admin.vettid.org'],
+        WebACLId: Match.objectLike({ Ref: Match.stringLikeRegexp('SsmParameterValue.*adminaccess.*sitewebaclarn') }),
+      }),
+    });
+  });
+
+  test('CSP permits only self, the admin API, the admin login, and S3 uploads', () => {
+    const csp = JSON.stringify(t.findResources('AWS::CloudFront::ResponseHeadersPolicy'));
+    expect(csp).toContain("connect-src 'self' https://admin-api.vettid.org https://vettid-org-admin.auth.us-east-1.amazoncognito.com");
+    expect(csp).toContain("script-src 'self'");
+  });
+});

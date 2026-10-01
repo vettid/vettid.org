@@ -15,10 +15,17 @@
     "check:site": "node scripts/sync-nav.mjs --check && node scripts/check-site.mjs"
   },
   "devDependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.1144.0",
+    "@aws-sdk/client-dynamodb": "^3.1144.0",
+    "@aws-sdk/client-s3": "^3.1144.0",
+    "@aws-sdk/client-sesv2": "^3.1144.0",
+    "@aws-sdk/lib-dynamodb": "^3.1144.0",
+    "@aws-sdk/s3-request-presigner": "^3.1144.0",
     "@types/aws-lambda": "^8.10.164",
     "@types/jest": "^30.0.0",
     "@types/node": "26.5.0",
     "aws-cdk": "2.1140.0",
+    "aws-sdk-client-mock": "^4.1.0",
     "esbuild": "^0.28.2",
     "jest": "^30.5.1",
     "ts-jest": "^29.4.12",

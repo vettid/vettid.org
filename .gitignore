@@ -1,6 +1,7 @@
 *.js
 !jest.config.js
 !website/**/*.js
+!sites/**/*.js
 *.d.ts
 node_modules
 
