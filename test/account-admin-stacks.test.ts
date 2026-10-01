@@ -32,13 +32,24 @@ describe('VettidOrgAuthStack', () => {
     t.hasResourceProperties('AWS::Cognito::UserPoolGroup', { GroupName: 'member' });
   });
 
-  test('member client allows custom auth (magic link + PIN) only, nothing writable', () => {
+  test('member client allows custom auth (magic link + PIN) only, no OAuth, nothing meaningful writable', () => {
     t.hasResourceProperties('AWS::Cognito::UserPoolClient', {
       ClientName: 'vettid-org-account-site',
       ExplicitAuthFlows: ['ALLOW_CUSTOM_AUTH', 'ALLOW_REFRESH_TOKEN_AUTH'],
       GenerateSecret: false,
       PreventUserExistenceErrors: 'ENABLED',
-      WriteAttributes: [],
+      // Empty would mean "all standard attributes writable" to Cognito.
+      WriteAttributes: ['locale'],
+      AllowedOAuthFlows: Match.absent(),
+      CallbackURLs: Match.absent(),
+    });
+  });
+
+  test('member pool keeps the original email until a change is verified', () => {
+    t.hasResourceProperties('AWS::Cognito::UserPool', {
+      UserPoolName: 'vettid-org-members',
+      AutoVerifiedAttributes: ['email'],
+      UserAttributeUpdateSettings: { AttributesRequireVerificationBeforeUpdate: ['email'] },
     });
   });
 
@@ -56,7 +67,7 @@ describe('VettidOrgAuthStack', () => {
       ClientName: 'vettid-org-admin-site',
       AllowedOAuthFlows: ['code'],
       CallbackURLs: ['https://admin.vettid.org/'],
-      WriteAttributes: [],
+      WriteAttributes: ['locale'],
     });
     t.hasResourceProperties('AWS::Cognito::UserPoolDomain', { Domain: 'vettid-org-admin' });
   });
@@ -129,13 +140,11 @@ describe('VettidOrgDataStack', () => {
 describe('VettidOrgAdminAccessStack', () => {
   const t = Template.fromStack(new VettidOrgAdminAccessStack(newApp(), 'AdminAccess', { config, env }));
 
-  test('exit node: t4g.nano, IMDSv2, encrypted disk, SSM-managed', () => {
+  test('exit node: t4g.nano, IMDSv2 with hop limit 1, encrypted disk, SSM-managed', () => {
     t.hasResourceProperties('AWS::EC2::Instance', {
       InstanceType: 't4g.nano',
       BlockDeviceMappings: [Match.objectLike({ Ebs: Match.objectLike({ Encrypted: true, VolumeType: 'gp3' }) })],
-    });
-    t.hasResourceProperties('AWS::EC2::LaunchTemplate', {
-      LaunchTemplateData: { MetadataOptions: { HttpTokens: 'required' } },
+      MetadataOptions: { HttpTokens: 'required', HttpPutResponseHopLimit: 1 },
     });
     t.hasResourceProperties('AWS::IAM::Role', {
       ManagedPolicyArns: [Match.objectLike({ 'Fn::Join': Match.arrayWith([Match.arrayWith([Match.stringLikeRegexp('AmazonSSMManagedInstanceCore')])]) })],
@@ -155,6 +164,40 @@ describe('VettidOrgAdminAccessStack', () => {
     expect(userData).toContain('--accept-dns=false'); // home DNS is unreachable from AWS
     expect(userData).toContain('/swapfile'); // dnf is OOM-killed on a nano without swap
     expect(userData).toContain('secretsmanager get-secret-value');
+  });
+
+  test('never forwards to link-local / IMDS (persistent nftables drop, before forwarding is on)', () => {
+    const userData: string = Object.values<any>(t.findResources('AWS::EC2::Instance'))[0].Properties.UserData['Fn::Base64'];
+    expect(userData).toContain('type filter hook forward priority -10; policy accept;');
+    expect(userData).toContain('ip daddr 169.254.0.0/16 drop');
+    expect(userData).toContain('systemctl enable --now vettid-linklocal-drop.service');
+    expect(userData).toContain("'WantedBy=multi-user.target'");
+    expect(userData.indexOf('vettid-linklocal-drop.service\n')).toBeLessThan(userData.indexOf('net.ipv4.ip_forward'));
+  });
+
+  test('SSM session transcripts: 90-day log group the instance role can write', () => {
+    t.hasResource('AWS::Logs::LogGroup', {
+      DeletionPolicy: 'Retain',
+      Properties: { LogGroupName: '/vettid-org/ssm-sessions', RetentionInDays: 90 },
+    });
+    t.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: ['logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams'],
+            Resource: { 'Fn::GetAtt': [Match.stringLikeRegexp('^SsmSessionLogs'), 'Arn'] },
+          }),
+        ]),
+      },
+    });
+  });
+
+  test('admin site WAF logs to CloudWatch with cookie/authorization redacted', () => {
+    t.hasResourceProperties('AWS::Logs::LogGroup', { LogGroupName: 'aws-waf-logs-vettid-org-admin', RetentionInDays: 90 });
+    t.hasResourceProperties('AWS::WAFv2::LoggingConfiguration', {
+      ResourceArn: { 'Fn::GetAtt': [Match.stringLikeRegexp('^SiteAcl'), 'Arn'] },
+      RedactedFields: [{ SingleHeader: { Name: 'cookie' } }, { SingleHeader: { Name: 'authorization' } }],
+    });
   });
 
   test('egress IP is retained', () => {
@@ -349,5 +392,42 @@ describe('VettidOrgAccountSiteStack', () => {
     const csp = JSON.stringify(t.findResources('AWS::CloudFront::ResponseHeadersPolicy'));
     expect(csp).toContain("connect-src 'self';");
     expect(csp).toContain("script-src 'self'");
+  });
+
+  test('distribution sits behind its own CLOUDFRONT web ACL (default allow)', () => {
+    t.hasResourceProperties('AWS::WAFv2::WebACL', { Name: 'vettid-org-account', Scope: 'CLOUDFRONT', DefaultAction: { Allow: {} } });
+    t.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({ WebACLId: { 'Fn::GetAtt': [Match.stringLikeRegexp('^WebAcl'), 'Arn'] } }),
+    });
+  });
+
+  test('per-IP rate limits: 30/5min on /api/public + /api/auth, 300/5min on all /api; IP reputation counts', () => {
+    const acl = Object.values<any>(t.findResources('AWS::WAFv2::WebACL'))[0].Properties;
+    const rule = (name: string) => acl.Rules.find((r: any) => r.Name === name);
+    const prefixes = (stmt: any): string[] =>
+      stmt.OrStatement ? stmt.OrStatement.Statements.flatMap(prefixes) : [stmt.ByteMatchStatement.SearchString];
+
+    const auth = rule('rate-limit-auth');
+    expect(auth.Action).toEqual({ Block: { CustomResponse: { ResponseCode: 429 } } });
+    expect(auth.Statement.RateBasedStatement).toMatchObject({ Limit: 30, AggregateKeyType: 'IP', EvaluationWindowSec: 300 });
+    expect(prefixes(auth.Statement.RateBasedStatement.ScopeDownStatement)).toEqual(['/api/public/', '/api/auth/']);
+
+    const api = rule('rate-limit-api');
+    expect(api.Statement.RateBasedStatement).toMatchObject({ Limit: 300, AggregateKeyType: 'IP', EvaluationWindowSec: 300 });
+    expect(prefixes(api.Statement.RateBasedStatement.ScopeDownStatement)).toEqual(['/api/']);
+
+    const rep = rule('aws-ip-reputation');
+    expect(rep.OverrideAction).toEqual({ Count: {} });
+    expect(rep.Statement.ManagedRuleGroupStatement.Name).toBe('AWSManagedRulesAmazonIpReputationList');
+  });
+
+  test('WAF logs to CloudWatch (90 days) with cookie/authorization redacted', () => {
+    t.hasResource('AWS::Logs::LogGroup', {
+      DeletionPolicy: 'Retain',
+      Properties: { LogGroupName: 'aws-waf-logs-vettid-org-account', RetentionInDays: 90 },
+    });
+    t.hasResourceProperties('AWS::WAFv2::LoggingConfiguration', {
+      RedactedFields: [{ SingleHeader: { Name: 'cookie' } }, { SingleHeader: { Name: 'authorization' } }],
+    });
   });
 });

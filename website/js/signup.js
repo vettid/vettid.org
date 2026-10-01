@@ -1,5 +1,6 @@
-// Mailing-list signup: POST to the same-origin API, SES sends the
-// verification email, accepting it confirms the subscription.
+// Mailing-list signup: POST to the same-origin API, which sends a
+// confirmation email (SES's verification email, or — for an address SES has
+// already verified — a VettID link); accepting it confirms the subscription.
 (function () {
   'use strict';
 
@@ -29,7 +30,7 @@
     }).then(function (res) { return res.json(); }).then(function (data) {
       if (data && data.ok) {
         form.style.display = 'none';
-        status.textContent = 'Check your inbox for a confirmation email from Amazon Web Services — clicking it confirms your spot on the list.';
+        status.textContent = 'Check your inbox for a confirmation email (from VettID or Amazon Web Services) — clicking its link confirms your spot on the list.';
       } else {
         status.textContent = (data && data.error) || 'Something went wrong — please try again.';
         status.className = 'signup-status error';

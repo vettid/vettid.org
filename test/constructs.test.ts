@@ -3,7 +3,7 @@ import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import { Template, Match } from 'aws-cdk-lib/assertions';
 import { HttpRouteGroup } from '../lib/constructs/route-group';
-import { StaticSite } from '../lib/constructs/static-site';
+import { SITE_EXCLUDE, StaticSite, isExcludedSitePath } from '../lib/constructs/static-site';
 import { publishRef, readRef, ssmParamName } from '../lib/constructs/ssm-refs';
 import { hostName, loadConfig, resourceName } from '../lib/config';
 
@@ -129,6 +129,53 @@ describe('StaticSite', () => {
         }),
       }),
     });
+  });
+
+  test('CSP: no data: images, Trusted Types required for script sinks', () => {
+    const csp: string = Object.values<any>(template.findResources('AWS::CloudFront::ResponseHeadersPolicy'))[0]
+      .Properties.ResponseHeadersPolicyConfig.SecurityHeadersConfig.ContentSecurityPolicy.ContentSecurityPolicy;
+    expect(csp).toContain("img-src 'self';");
+    expect(csp).not.toContain('data:');
+    expect(csp).toContain("require-trusted-types-for 'script'");
+  });
+
+  test('access logs go to a private, TLS-only, 90-day, retained per-site bucket (no cookies)', () => {
+    const buckets = template.findResources('AWS::S3::Bucket');
+    const [logId, logBucket] = Object.entries<any>(buckets).find(([, b]) => b.Properties.OwnershipControls)!;
+    expect(logBucket.DeletionPolicy).toBe('Retain');
+    expect(logBucket.Properties).toMatchObject({
+      OwnershipControls: { Rules: [{ ObjectOwnership: 'ObjectWriter' }] },
+      PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true },
+      BucketEncryption: { ServerSideEncryptionConfiguration: [{ ServerSideEncryptionByDefault: { SSEAlgorithm: 'AES256' } }] },
+      LifecycleConfiguration: { Rules: [{ ExpirationInDays: 90, Status: 'Enabled' }] },
+    });
+    const policies = Object.values<any>(template.findResources('AWS::S3::BucketPolicy'));
+    const logPolicy = policies.find((p) => p.Properties.Bucket.Ref === logId)!;
+    expect(JSON.stringify(logPolicy)).toContain('aws:SecureTransport');
+    template.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({
+        Logging: { Bucket: { 'Fn::GetAtt': [logId, 'RegionalDomainName'] }, IncludeCookies: false, Prefix: 'cloudfront/' },
+      }),
+    });
+  });
+
+  test('dev junk is excluded from deployment (CDK asset globs) and from site paths, consistently', () => {
+    const root = '/repo/sites/x';
+    const strategy = cdk.IgnoreStrategy.glob(root, SITE_EXCLUDE);
+    // Asset staging walks the tree and skips an ignored directory's whole
+    // subtree, so a path is excluded if it or any ancestor is ignored.
+    const glob = {
+      ignores: (abs: string) =>
+        abs.slice(root.length + 1).split('/').some((_, i, segs) => strategy.ignores(`${root}/${segs.slice(0, i + 1).join('/')}`)),
+    };
+    const junk = ['.env', '.DS_Store', 'js/.app.js.swp', 'app.js.swp', 'index.html~', 'config.example.json', '.git/config', 'a/.idea/x.xml'];
+    const real = ['index.html', 'js/app.js', 'config.json', 'assets/logo.svg', 'styles.css', 'about/index.html'];
+    for (const rel of junk) {
+      expect({ rel, asset: glob.ignores(`${root}/${rel}`), walker: isExcludedSitePath(rel) }).toEqual({ rel, asset: true, walker: true });
+    }
+    for (const rel of real) {
+      expect({ rel, asset: glob.ignores(`${root}/${rel}`), walker: isExcludedSitePath(rel) }).toEqual({ rel, asset: false, walker: false });
+    }
   });
 
   test('A and AAAA aliases point the host at CloudFront', () => {

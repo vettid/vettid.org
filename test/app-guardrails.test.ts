@@ -47,6 +47,7 @@ describe('app guardrails', () => {
         'VettidOrgAuthStack',
         'VettidOrgDataStack',
         'VettidOrgAdminAccessStack',
+        'VettidOrgAuditStack',
       ]),
     );
   });
@@ -58,6 +59,21 @@ describe('app guardrails', () => {
   test.each(templates.map((t) => [t.name, t.json]))('%s uses no CloudFormation imports unless grandfathered', (name, json) => {
     if (STACKS_ALLOWED_TO_IMPORT.has(name)) return;
     expect(JSON.stringify(json)).not.toContain('Fn::ImportValue');
+  });
+
+  test('stateful stacks have termination protection on', () => {
+    const protectedStacks = stacks.filter((s) => s.terminationProtection).map((s) => s.stackName).sort();
+    expect(protectedStacks).toEqual(
+      [
+        'VettidOrgAdminAccessStack',
+        'VettidOrgAuditStack',
+        'VettidOrgAuthStack',
+        'VettidOrgDataStack',
+        'VettidOrgDnsStack',
+        'VettidOrgPlaybooksStack',
+        'VettidOrgSignupStack',
+      ],
+    );
   });
 
   test.each(templates.map((t) => [t.name, t.json]))('%s retains every stateful resource', (_name, json) => {

@@ -58,10 +58,22 @@ export class VettidOrgAuthStack extends cdk.Stack {
       },
       accountRecovery: cognito.AccountRecovery.NONE, // no passwords to recover
       mfa: cognito.Mfa.OFF, // the PIN is the second factor, enforced in custom auth
+      // An email change only takes effect once the new address is verified
+      // (AttributesRequireVerificationBeforeUpdate); until then the old,
+      // verified address stays the sign-in identity. Needs email auto-verify,
+      // which the email sign-in alias turns on.
+      keepOriginal: { email: true },
       email,
       deletionProtection: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
+
+    // Cognito treats an EMPTY WriteAttributes list as "every standard
+    // attribute is writable" by the client's tokens (UpdateUserAttributes
+    // with a user's own access token). So the clients list exactly one
+    // attribute nothing reads or relies on — `locale` — which is the closest
+    // Cognito allows to "nothing writable". Never add email or custom:*.
+    const writeNothingMeaningful = () => new cognito.ClientAttributes().withStandardAttributes({ locale: true });
 
     new cognito.CfnUserPoolGroup(this, 'MemberGroupRegistered', {
       userPoolId: this.memberPool.userPoolId,
@@ -78,6 +90,9 @@ export class VettidOrgAuthStack extends cdk.Stack {
       userPoolClientName: resourceName(config, 'account-site'),
       generateSecret: false,
       authFlows: { custom: true }, // magic link (+ PIN) only
+      // No hosted UI / OAuth for members: CDK otherwise defaults the client to
+      // the code + implicit flows with an example.com callback.
+      disableOAuth: true,
       preventUserExistenceErrors: true,
       enableTokenRevocation: true,
       authSessionValidity: cdk.Duration.minutes(5), // magic link → PIN step window
@@ -87,7 +102,7 @@ export class VettidOrgAuthStack extends cdk.Stack {
       readAttributes: new cognito.ClientAttributes()
         .withStandardAttributes({ email: true, emailVerified: true })
         .withCustomAttributes('user_guid'),
-      writeAttributes: new cognito.ClientAttributes(), // nothing user-writable
+      writeAttributes: writeNothingMeaningful(),
     });
 
     // ---- Admins ---------------------------------------------------------
@@ -154,8 +169,9 @@ export class VettidOrgAuthStack extends cdk.Stack {
       idTokenValidity: cdk.Duration.minutes(30),
       refreshTokenValidity: cdk.Duration.hours(8), // one working session
       readAttributes: new cognito.ClientAttributes().withStandardAttributes({ email: true, emailVerified: true }),
-      // vettid-dev let admins write custom:admin_type (self-escalation). Nothing is writable here.
-      writeAttributes: new cognito.ClientAttributes(),
+      // vettid-dev let admins write custom:admin_type (self-escalation).
+      // Only the inert `locale` is writable here (see writeNothingMeaningful).
+      writeAttributes: writeNothingMeaningful(),
     });
 
     // ---- PIN pepper -----------------------------------------------------
@@ -183,7 +199,7 @@ export class VettidOrgAuthStack extends cdk.Stack {
     tableGrant(this, config, define, 'members', ['GetItem']);
     tableGrant(this, config, verify, 'members', ['GetItem']);
     tableGrant(this, config, verify, 'magic-links', ['UpdateItem']); // consume a link (conditional)
-    tableGrant(this, config, verify, 'ratelimits', ['GetItem', 'UpdateItem', 'DeleteItem']); // PIN lockout
+    tableGrant(this, config, verify, 'ratelimits', ['GetItem', 'PutItem', 'UpdateItem', 'DeleteItem']); // PIN lockout
     pinPepper.grantRead(verify);
 
     publishRef(this, config, 'auth/member-pool-id', this.memberPool.userPoolId);

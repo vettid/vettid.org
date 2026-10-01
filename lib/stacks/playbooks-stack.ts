@@ -24,6 +24,7 @@ export class VettidOrgPlaybooksStack extends cdk.Stack {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
       versioned: true,
     });
 

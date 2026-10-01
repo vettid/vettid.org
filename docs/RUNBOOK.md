@@ -16,9 +16,16 @@ npm run deploy:all                                # everything
   Visitors see HTML changes immediately.
 - Requires an active AWS SSO session (`aws sso login`); us-east-1 only.
 - Stack order when deploying individually: DnsStack → SignupStack → VettidOrgStack
-  (props flow left to right in `lib/app.ts`).
+  (props flow left to right in `lib/app.ts`). SignupStack must go first also
+  because it creates the `vettid-org-signup/origin-verify` secret that
+  VettidOrgStack resolves (by name) into the `/api/*` origin header; until
+  VettidOrgStack is redeployed after it, the signup API answers 403.
 
 ## Stacks
+
+Stateful stacks (Dns, Signup, Playbooks, Auth, Data, AdminAccess) have
+CloudFormation termination protection on (`lib/app.ts`); deleting one means
+turning that off in code (or the console) first.
 
 | Stack | Owns |
 |---|---|
@@ -54,8 +61,11 @@ their construct IDs.
   1-month log group) and served through `HttpRouteGroup`: one function per
   route *group* (`ANY /api/<group>/{proxy+}`), routing in the handler.
 - **Static sites** use `StaticSite`: own host, strict CSP (`script-src 'self'`,
-  no inline styles), same-origin `/api/*`, and `/config.json` generated at
-  deploy time from CDK tokens.
+  no inline styles, no `data:` images, Trusted Types required — build DOM with
+  `createElement`/`textContent`, never HTML strings), same-origin `/api/*`,
+  `/config.json` generated at deploy time from CDK tokens, and CloudFront
+  access logs in a private per-site bucket (90 days). Dotfiles, `*.swp`, `*~`
+  and `*.example.json` under the site directory are never deployed.
   With `notFoundPage`, unknown paths get the site's branded `404.html` with
   a real 404 status, answered by the viewer-request CloudFront Function from
   a file list built at synth (distribution-wide error pages are avoided
@@ -99,6 +109,23 @@ Session Manager. Its AMI is pinned in `cdk.context.json` so a new Amazon
 Linux release never replaces it on deploy. The EIP is retained even if the
 stack is deleted.
 
+- **Replacement:** a change to the instance's launch settings (metadata
+  options, launch template) replaces the instance on deploy. A user-data-only
+  change does *not* (it reboots the box, and user data doesn't re-run), so
+  apply such changes by hand over SSM too. A replaced node joins Headscale
+  from scratch — put a fresh pre-auth key in the secret (steps 1–2) *before*
+  deploying, then re-approve its routes (step 4) and delete the old node in
+  Headscale. The EIP re-associates automatically, so allowlists hold.
+- **Metadata:** IMDSv2 only with PUT hop limit 1, and the
+  `vettid-linklocal-drop` systemd unit loads an nftables table that drops
+  anything forwarded to `169.254.0.0/16` — tailnet peers can't reach the
+  instance's metadata/credentials through the exit node. Check with
+  `sudo nft list table inet vettid_linklocal`.
+- **Session logging:** transcripts can go to the `/vettid-org/ssm-sessions`
+  log group (90 days; the instance role may write it). One-time, per account:
+  Systems Manager → Session Manager → Preferences → CloudWatch logging on,
+  group `/vettid-org/ssm-sessions`, "encrypt" off (the group isn't KMS-encrypted).
+
 **Adding an admin:** give them a Headscale node, then
 `scripts/create-admin.sh <email>` (run twice: first sends SES verification,
 second creates the Cognito user, which emails a temporary password). First
@@ -112,17 +139,48 @@ their Headscale node *and* disable/delete the Cognito user.
 - ProtonMail records (MX/SPF/DKIM/DMARC) live in the DnsStack — change mail
   config in code, not the console.
 - ACM certs auto-validate through the zones; renewals are hands-off.
+- Both zones carry CAA records allowing only Amazon (ACM) to issue, no
+  wildcards (`issuewild ";"`), violation reports to security@vettid.org. A
+  wildcard or non-ACM cert would need `amazonOnlyCaa` (dns-stack.ts) changed first.
+- vettid.org DMARC is `p=quarantine` with aggregate reports to admin@vettid.org.
+- vettid.dev sends no mail. Its intended policy is SPF `v=spf1 -all` + DMARC
+  `p=reject` (VettidDevRedirectStack), but the zone still holds hand-made
+  vettid-dev-era records at the same names (apex TXT with the old Proton SPF +
+  verification, `_dmarc` `p=none`), so those two records are behind a context
+  flag. To switch: delete the apex TXT and `_dmarc` TXT in the console (and,
+  if vettid.dev mail is truly retired, the Proton MX/DKIM and the old SES
+  `_amazonses` / `*._domainkey` records), then
+  `npx cdk deploy VettidDevRedirectStack -c vettidDevMailPolicy=true` — and
+  keep passing the flag on every later deploy of that stack (or make it the
+  default in code).
 
 ## Mailing list
 
 - Flow: `POST /api/subscribe` → SES `CreateEmailIdentity` (SES's verification
   email IS the double opt-in) → pending row in `vettid-org-mailing-list` →
-  15-min sweep confirms verified addresses. Already-verified addresses confirm
-  instantly.
+  15-min sweep confirms verified addresses.
+- Addresses SES has **already** verified (e.g. VettID members) get no SES mail,
+  so the API sends its own "Confirm your VettID updates subscription" email
+  with a single-use link (`GET /api/subscribe/confirm?t=…`, 48 h; only the
+  token's SHA-256 is stored). Rows wait as `status = pending_link` (never
+  `pending`, which the sweep would auto-confirm); the link 302s to
+  `https://vettid.org/?subscribed=1` (`=0` if stale). Both kinds of mail share
+  the 200/hour global send cap.
+- The API only serves requests carrying CloudFront's `X-Origin-Verify` secret
+  (`vettid-org-signup/origin-verify`), and only `application/json` POSTs (415
+  otherwise). Rotating the secret: update it, then redeploy VettidOrgStack
+  (the Lambda re-reads it within 5 minutes).
+- The sweep reclaims (deletes) SES identities of rows that expired unverified —
+  unless the address belongs to a row in `vettid-org-members` (a pending member
+  may be mid-verification). It can never delete the `vettid.org` domain
+  identity (explicit IAM deny).
 - Every confirmation emails **admin@vettid.org** from `no-reply@vettid.org`
   (SES domain identity, DKIM in the zone).
-- Export subscribers:
-  `aws dynamodb scan --table-name vettid-org-mailing-list --output json`
+- Export subscribers (the table also holds `#…` counter/link rows and
+  unconfirmed rows, so filter):
+  `aws dynamodb scan --table-name vettid-org-mailing-list --filter-expression '#s = :c' --expression-attribute-names '{"#s":"status"}' --expression-attribute-values '{":c":{"S":"confirmed"}}' --output json`
+- The table has deletion protection on (and RETAIN); turn it off in code first
+  if it ever really has to go.
 - **SES is in sandbox**: fine for the opt-in flow (verified recipients only by
   design), but bulk sending to the list requires production access — request it
   in the SES console before the first newsletter.
@@ -136,6 +194,12 @@ their Headscale node *and* disable/delete the Cognito user.
 - WAF telemetry (JA3/JA4 fingerprints, ordered headers, cookie/auth redacted) →
   CloudWatch group `aws-waf-logs-vettid-org` (90-day). Join to CloudFront logs
   on request ID.
+- account.vettid.org: its web ACL (`vettid-org-account`; per-IP 30/5 min on
+  `/api/public/*` + `/api/auth/*`, 300/5 min on `/api/*`, IP reputation in
+  count mode) logs to `aws-waf-logs-vettid-org-account`; admin.vettid.org's
+  allowlist ACL logs to `aws-waf-logs-vettid-org-admin` (both 90-day,
+  cookie/authorization redacted). Their CloudFront access logs (TSV) land in
+  each site stack's `LogBucket` under `cloudfront/` (90-day).
 - See `docs/logs-analysis.md` for Athena queries; the capture spec is
   `~/VettID/vettid-org-logging-spec.md`.
 

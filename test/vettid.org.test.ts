@@ -5,6 +5,16 @@ import { VettidOrgDnsStack } from '../lib/stacks/dns-stack';
 import { VettidOrgSignupStack } from '../lib/stacks/signup-stack';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import { VettidOrgPlaybooksStack } from '../lib/stacks/playbooks-stack';
+import { VettidDevRedirectStack } from '../lib/stacks/dev-redirect-stack';
+
+const AMAZON_CAA = [
+  '0 issue "amazon.com"',
+  '0 issue "amazontrust.com"',
+  '0 issue "awstrust.com"',
+  '0 issue "amazonaws.com"',
+  '0 issuewild ";"',
+  '0 iodef "mailto:security@vettid.org"',
+];
 
 describe('VettidOrgStack', () => {
   let template: Template;
@@ -264,6 +274,12 @@ describe('VettidOrgStack', () => {
       });
     });
 
+    test('does not send the deprecated X-XSS-Protection header', () => {
+      for (const p of Object.values<any>(template.findResources('AWS::CloudFront::ResponseHeadersPolicy'))) {
+        expect(p.Properties.ResponseHeadersPolicyConfig.SecurityHeadersConfig.XSSProtection).toBeUndefined();
+      }
+    });
+
     test('creates v2 JSON logs Glue table with partition projection', () => {
       template.hasResourceProperties('AWS::Glue::Table', {
         TableInput: Match.objectLike({
@@ -370,12 +386,90 @@ describe('VettidOrgSignupStack', () => {
     });
   });
 
-  test('creates subscribe route and scheduled verification sweep', () => {
+  test('mailing-list table is deletion-protected', () => {
+    template.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'vettid-org-mailing-list',
+      DeletionProtectionEnabled: true,
+    });
+  });
+
+  test('creates subscribe + confirm routes and scheduled verification sweep', () => {
     template.hasResourceProperties('AWS::ApiGatewayV2::Route', {
       RouteKey: 'POST /api/subscribe',
     });
+    template.hasResourceProperties('AWS::ApiGatewayV2::Route', {
+      RouteKey: 'GET /api/subscribe/confirm',
+    });
     template.hasResourceProperties('AWS::Events::Rule', {
       ScheduleExpression: 'rate(15 minutes)',
+    });
+  });
+
+  test('Lambdas use the repo defaults (Node 24, ARM64, explicit log group) — no logRetention custom resource', () => {
+    const fns = Object.values<any>(template.findResources('AWS::Lambda::Function'));
+    expect(fns).toHaveLength(2);
+    for (const fn of fns) {
+      expect(fn.Properties).toMatchObject({ Runtime: 'nodejs24.x', Architectures: ['arm64'] });
+      expect(fn.Properties.LoggingConfig.LogGroup).toBeDefined();
+    }
+    template.resourceCountIs('Custom::LogRetention', 0);
+    expect(JSON.stringify(template.toJSON())).not.toContain('logs:PutRetentionPolicy');
+  });
+
+  test('origin-verify secret is generated under its fixed name and readable by subscribe only', () => {
+    template.hasResourceProperties('AWS::SecretsManager::Secret', {
+      Name: 'vettid-org-signup/origin-verify',
+      GenerateSecretString: Match.objectLike({ PasswordLength: 48 }),
+    });
+    const policies = Object.values<any>(template.findResources('AWS::IAM::Policy'));
+    const readers = policies.filter((p) => JSON.stringify(p).includes('secretsmanager:GetSecretValue'));
+    expect(readers).toHaveLength(1);
+  });
+
+  test('sweep may query only the members email index, and can never delete the domain identity', () => {
+    const json = JSON.stringify(template.toJSON());
+    expect(json).toContain(':table/vettid-org-members/index/email-index');
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Effect: 'Deny',
+            Action: 'ses:DeleteEmailIdentity',
+            Resource: [
+              Match.objectLike({ 'Fn::Join': ['', Match.arrayWith([Match.stringLikeRegexp(':identity/vettid\\.org$')])] }),
+              Match.objectLike({ 'Fn::Join': ['', Match.arrayWith([Match.stringLikeRegexp(':identity/\\*\\.vettid\\.org$')])] }),
+            ],
+          }),
+        ]),
+      },
+    });
+  });
+});
+
+describe('VettidOrgStack /api/* origin (signup API)', () => {
+  test('CloudFront adds X-Origin-Verify from the signup secret', () => {
+    const app = new cdk.App();
+    const stack = new VettidOrgStack(app, 'TestWebWithApi', {
+      domainName: 'test.example.com',
+      enableCustomDomain: false,
+      apiDomain: 'abc123.execute-api.us-east-1.amazonaws.com',
+      env: { account: '123456789012', region: 'us-east-1' },
+    });
+    const t = Template.fromStack(stack);
+    t.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({
+        Origins: Match.arrayWith([
+          Match.objectLike({
+            DomainName: 'abc123.execute-api.us-east-1.amazonaws.com',
+            OriginCustomHeaders: [
+              {
+                HeaderName: 'X-Origin-Verify',
+                HeaderValue: '{{resolve:secretsmanager:vettid-org-signup/origin-verify:SecretString:::}}',
+              },
+            ],
+          }),
+        ]),
+      }),
     });
   });
 });
@@ -394,6 +488,35 @@ describe('VettidOrgDnsStack', () => {
     template.hasResourceProperties('AWS::Route53::RecordSet', {
       Name: '_dmarc.test.example.com.',
       Type: 'TXT',
+      ResourceRecords: ['"v=DMARC1; p=quarantine; rua=mailto:admin@vettid.org"'],
+    });
+    template.hasResourceProperties('AWS::Route53::RecordSet', {
+      Name: 'test.example.com.',
+      Type: 'CAA',
+      ResourceRecords: AMAZON_CAA,
+    });
+  });
+});
+
+describe('VettidDevRedirectStack', () => {
+  const build = (context: Record<string, unknown> = {}) =>
+    Template.fromStack(new VettidDevRedirectStack(new cdk.App({ context }), 'TestDevRedirect', {
+      env: { account: '123456789012', region: 'us-east-1' },
+    }));
+
+  test('CAA restricts issuance to Amazon; mail-policy records stay off until the old ones are removed', () => {
+    const t = build();
+    t.hasResourceProperties('AWS::Route53::RecordSet', { Type: 'CAA', ResourceRecords: AMAZON_CAA });
+    expect(Object.values<any>(t.findResources('AWS::Route53::RecordSet')).filter((r) => r.Properties.Type === 'TXT')).toHaveLength(0);
+  });
+
+  test('with vettidDevMailPolicy: SPF -all and DMARC reject (redirect-only domain sends no mail)', () => {
+    const t = build({ vettidDevMailPolicy: 'true' });
+    t.hasResourceProperties('AWS::Route53::RecordSet', { Type: 'TXT', ResourceRecords: ['"v=spf1 -all"'] });
+    t.hasResourceProperties('AWS::Route53::RecordSet', {
+      Type: 'TXT',
+      Name: Match.stringLikeRegexp('^_dmarc\\.'),
+      ResourceRecords: ['"v=DMARC1; p=reject;"'],
     });
   });
 });
@@ -411,6 +534,13 @@ describe('VettidOrgPlaybooksStack', () => {
     });
     const pbTemplate = Template.fromStack(playbooks);
     pbTemplate.hasResource('AWS::S3::Bucket', { DeletionPolicy: 'Retain' });
+    pbTemplate.hasResourceProperties('AWS::S3::BucketPolicy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({ Effect: 'Deny', Condition: { Bool: { 'aws:SecureTransport': 'false' } } }),
+        ]),
+      },
+    });
     const webTemplate = Template.fromStack(web);
     webTemplate.hasResourceProperties('AWS::CloudFront::Distribution', {
       DistributionConfig: Match.objectLike({

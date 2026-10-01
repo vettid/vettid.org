@@ -12,6 +12,7 @@ import { VettidOrgAdminApiStack } from './stacks/admin-api-stack';
 import { VettidOrgAdminSiteStack } from './stacks/admin-site-stack';
 import { VettidOrgMemberApiStack } from './stacks/member-api-stack';
 import { VettidOrgAccountSiteStack } from './stacks/account-site-stack';
+import { VettidOrgAuditStack } from './stacks/audit-stack';
 
 /**
  * Builds every stack in the vettid.org app. Kept out of bin/ so tests can
@@ -37,18 +38,24 @@ export function buildApp(app: cdk.App): void {
 
   const domainName = config.domainName;
 
+  // Stacks holding state (zone, pools, tables, buckets, the exit node + EIP)
+  // can't be deleted without first turning this off in code — a stray
+  // `cdk destroy` fails instead of orphaning or deleting them.
+  const stateful = { env, terminationProtection: true };
+
   // Deploy order: SignupStack and DnsStack first, then VettidOrgStack
-  // (the web stack consumes both via props).
+  // (the web stack consumes both via props, and resolves the signup
+  // stack's origin-verify secret by name at deploy time).
   //   npx cdk deploy VettidOrgDnsStack VettidOrgSignupStack VettidOrgStack
 
   const dns = new VettidOrgDnsStack(app, 'VettidOrgDnsStack', {
     domainName,
-    env,
+    ...stateful,
   });
 
-  const signup = new VettidOrgSignupStack(app, 'VettidOrgSignupStack', { hostedZone: dns.zone, env });
+  const signup = new VettidOrgSignupStack(app, 'VettidOrgSignupStack', { hostedZone: dns.zone, ...stateful });
 
-  const playbooks = new VettidOrgPlaybooksStack(app, 'VettidOrgPlaybooksStack', { env });
+  const playbooks = new VettidOrgPlaybooksStack(app, 'VettidOrgPlaybooksStack', stateful);
 
   new VettidOrgStack(app, 'VettidOrgStack', {
     domainName,
@@ -67,10 +74,10 @@ export function buildApp(app: cdk.App): void {
   // Deploy order: Auth, Data → AdminAccess (reads the admin pool ARN via SSM)
   //   → AdminApi, AdminSite (read pool/client IDs, egress IP, web ACL via SSM)
   //   → MemberApi → AccountSite (reads the API domain + origin secret).
-  new VettidOrgAuthStack(app, 'VettidOrgAuthStack', { config, env });
-  new VettidOrgDataStack(app, 'VettidOrgDataStack', { config, env });
+  new VettidOrgAuthStack(app, 'VettidOrgAuthStack', { config, ...stateful });
+  new VettidOrgDataStack(app, 'VettidOrgDataStack', { config, ...stateful });
   if (config.adminAccess.headscaleLoginServer) {
-    new VettidOrgAdminAccessStack(app, 'VettidOrgAdminAccessStack', { config, env });
+    new VettidOrgAdminAccessStack(app, 'VettidOrgAdminAccessStack', { config, ...stateful });
   } else {
     cdk.Annotations.of(app).addWarningV2(
       'vettid:admin-access-unconfigured',
@@ -81,4 +88,7 @@ export function buildApp(app: cdk.App): void {
   new VettidOrgAdminSiteStack(app, 'VettidOrgAdminSiteStack', { config, env });
   new VettidOrgMemberApiStack(app, 'VettidOrgMemberApiStack', { config, env });
   new VettidOrgAccountSiteStack(app, 'VettidOrgAccountSiteStack', { config, env });
+
+  // ---- Account-level audit & detection (CloudTrail, GuardDuty, alerts) ----
+  new VettidOrgAuditStack(app, 'VettidOrgAuditStack', { config, ...stateful });
 }

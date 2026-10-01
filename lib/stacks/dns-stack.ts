@@ -2,6 +2,26 @@ import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 
+/**
+ * CAA: only Amazon (ACM) may issue certificates for the zone, and nobody may
+ * issue wildcards (we use none). Violations are reported to security@.
+ * Shared with the vettid.dev zone (VettidDevRedirectStack).
+ */
+export function amazonOnlyCaa(scope: Construct, id: string, zone: route53.IHostedZone): route53.CaaRecord {
+  return new route53.CaaRecord(scope, id, {
+    zone,
+    values: [
+      ...['amazon.com', 'amazontrust.com', 'awstrust.com', 'amazonaws.com'].map((value) => ({
+        flag: 0,
+        tag: route53.CaaTag.ISSUE,
+        value,
+      })),
+      { flag: 0, tag: route53.CaaTag.ISSUEWILD, value: ';' },
+      { flag: 0, tag: route53.CaaTag.IODEF, value: 'mailto:security@vettid.org' },
+    ],
+  });
+}
+
 export interface VettidOrgDnsStackProps extends cdk.StackProps {
   domainName: string;
 }
@@ -55,8 +75,13 @@ export class VettidOrgDnsStack extends cdk.Stack {
     new route53.TxtRecord(this, 'Dmarc', {
       zone: this.zone,
       recordName: '_dmarc',
-      values: ['v=DMARC1; p=quarantine'],
+      // Aggregate reports to admin@ (same domain: no external-destination
+      // authorization record needed).
+      values: ['v=DMARC1; p=quarantine; rua=mailto:admin@vettid.org'],
     });
+
+    // Only ACM may issue for vettid.org (all certs here are ACM, none wildcard).
+    amazonOnlyCaa(this, 'Caa', this.zone);
 
     new cdk.CfnOutput(this, 'NameServers', {
       value: cdk.Fn.join(', ', this.zone.hostedZoneNameServers ?? []),
