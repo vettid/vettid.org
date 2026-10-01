@@ -91,7 +91,8 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
 
     // auth: magic link issue + Cognito custom auth (InitiateAuth etc. are
     // unauthenticated APIs for a public client — no IAM needed)
-    g(auth, 'members', ['Query'], true);
+    g(auth, 'members', ['Query', 'UpdateItem'], true); // UpdateItem: live SES-verified flag
+    sesIdentity(auth, ['GetEmailIdentity']);
     g(auth, 'magic-links', ['PutItem']);
     g(auth, 'ratelimits', ['UpdateItem', 'GetItem']);
     auth.addToRolePolicy(sesSend);

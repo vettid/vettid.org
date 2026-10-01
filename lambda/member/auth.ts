@@ -15,9 +15,10 @@ import {
   type RespondToAuthChallengeCommandOutput,
   RevokeTokenCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
-import { PutCommand } from '@aws-sdk/lib-dynamodb';
+import { GetEmailIdentityCommand } from '@aws-sdk/client-sesv2';
+import { PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { randomBytes } from 'node:crypto';
-import { cognito, ddb, env, table } from '../shared/aws';
+import { cognito, ddb, env, ses } from '../shared/aws';
 import { HttpError, Router, email as normEmail, str } from '../shared/http';
 import { nowIso } from '../shared/ids';
 import { sendMail } from '../shared/mail';
@@ -74,6 +75,31 @@ function outcome(req: MemberRequest, out: ChallengeOutput, emailAddr: string) {
 
 const isAuthFailure = (e: unknown) => ['NotAuthorizedException', 'UserNotFoundException', 'CodeMismatchException', 'ExpiredCodeException'].includes((e as Error).name);
 
+/**
+ * The stored `email_verified` flag is refreshed by a 15-minute sweep; someone
+ * who clicks the SES verification and signs in right away would otherwise
+ * get no link. Check SES live and record the result.
+ */
+async function verifiedNow(guid: string, addr: string): Promise<boolean> {
+  try {
+    const id = await ses.send(new GetEmailIdentityCommand({ EmailIdentity: addr }));
+    if (!id.VerifiedForSendingStatus) return false;
+  } catch (e) {
+    if ((e as Error).name === 'NotFoundException') return false;
+    throw e;
+  }
+  await ddb.send(
+    new UpdateCommand({
+      TableName: env('TABLE_MEMBERS'),
+      Key: { user_guid: guid },
+      UpdateExpression: 'SET email_verified = :t, updated_at = :n',
+      ConditionExpression: 'attribute_exists(user_guid)',
+      ExpressionAttributeValues: { ':t': true, ':n': nowIso() },
+    }),
+  );
+  return true;
+}
+
 // ---- start: email a link --------------------------------------------------------
 
 router.on('POST', '/api/auth/start', async ({ body, ip }) => {
@@ -84,7 +110,7 @@ router.on('POST', '/api/auth/start', async ({ body, ip }) => {
   const byEmail = await hit(`start#email#${addr}`, 3, 900);
 
   const m = await memberByEmail(addr);
-  if (byEmail.allowed && canSignIn(m) && m.email_verified) {
+  if (byEmail.allowed && canSignIn(m) && (m.email_verified || (await verifiedNow(m.user_guid, addr)))) {
     const token = randomBytes(32).toString('base64url');
     const now = Math.floor(Date.now() / 1000);
     await ddb.send(

@@ -138,6 +138,15 @@ describe('POST /api/auth/start', () => {
     expect(JSON.stringify(put)).not.toContain(token);
   });
 
+  test('flag not yet swept but SES says verified: checks live, records it, sends the link', async () => {
+    ddb.on(QueryCommand).resolves({ Items: [{ ...member, email_verified: false }] });
+    ses.on(GetEmailIdentityCommand).resolves({ VerifiedForSendingStatus: true });
+    ddb.on(UpdateCommand, { TableName: 'members' }).resolves({});
+    await auth.handler(ev('POST', '/api/auth/start', { email: 'm@x.org' }));
+    expect(ddb.commandCalls(UpdateCommand, { TableName: 'members' })[0].args[0].input.ExpressionAttributeValues).toMatchObject({ ':t': true });
+    expect(ses.commandCalls(SendEmailCommand)).toHaveLength(1);
+  });
+
   test.each([
     ['unknown address', []],
     ['unverified email', [{ ...member, email_verified: false }]],
@@ -145,6 +154,7 @@ describe('POST /api/auth/start', () => {
     ['still requested', [{ ...member, state: 'requested' }]],
   ])('%s: same answer, no email', async (_n, items) => {
     ddb.on(QueryCommand).resolves({ Items: items });
+    ses.on(GetEmailIdentityCommand).resolves({ VerifiedForSendingStatus: false });
     const res = await auth.handler(ev('POST', '/api/auth/start', { email: 'm@x.org' }));
     expect(JSON.parse(res.body)).toEqual({ ok: true });
     expect(ses.commandCalls(SendEmailCommand)).toHaveLength(0);
