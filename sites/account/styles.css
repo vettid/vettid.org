@@ -32,6 +32,14 @@
   --ink-on-gold: #101018;
 
   --brand-mark: #ffc125;         /* the rook: brand gold in every theme */
+  /* email-preference switch */
+  --switch-off-track: var(--surface-2);
+  --switch-off-edge: var(--border-strong);
+  --switch-off-knob: var(--ink-mute);
+  --switch-on-track: var(--gold);
+  --switch-on-edge: var(--ink-on-gold);
+  --switch-on-knob: var(--ink-on-gold);
+  --switch-knob-shadow: none;
   --accent: #ffc125;             /* current-step marker, active tab */
   --on-accent: #101018;
   --accent-text: #ffc125;        /* gold-as-text */
@@ -84,6 +92,13 @@
     --accent: #2e2d88;
     --on-accent: #ffffff;
     --accent-text: #7f640a;
+    --switch-off-track: #dcdde4;
+    --switch-off-edge: #b4b5c0;
+    --switch-off-knob: #ffffff;
+    --switch-on-track: #ffc125;
+    --switch-on-edge: #c99a12;
+    --switch-on-knob: #ffffff;
+    --switch-knob-shadow: 0 1px 3px rgba(16, 16, 24, 0.35);
     --focus: #2e2d88;
     --link: #2e2d88;
     --link-hover: #4a48b5;
@@ -121,6 +136,13 @@
   --accent: #2e2d88;
   --on-accent: #ffffff;
   --accent-text: #7f640a;
+  --switch-off-track: #dcdde4;
+  --switch-off-edge: #b4b5c0;
+  --switch-off-knob: #ffffff;
+  --switch-on-track: #ffc125;
+  --switch-on-edge: #c99a12;
+  --switch-on-knob: #ffffff;
+  --switch-knob-shadow: 0 1px 3px rgba(16, 16, 24, 0.35);
   --focus: #2e2d88;
   --link: #2e2d88;
   --link-hover: #4a48b5;
@@ -544,8 +566,8 @@ input.pin {
   width: 48px;
   height: 28px;
   border-radius: 14px;
-  background: var(--surface-2);
-  border: 2px solid var(--border-strong);
+  background: var(--switch-off-track);
+  border: 2px solid var(--switch-off-edge);
   cursor: pointer;
   transition: background 200ms var(--ease);
 }
@@ -557,11 +579,12 @@ input.pin {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: var(--ink-mute);
+  background: var(--switch-off-knob);
+  box-shadow: var(--switch-knob-shadow);
   transition: transform 200ms var(--ease);
 }
-.toggle input[type='checkbox']:checked { background: var(--gold); border-color: var(--ink-on-gold); }
-.toggle input[type='checkbox']:checked::after { transform: translateX(20px); background: var(--ink-on-gold); }
+.toggle input[type='checkbox']:checked { background: var(--switch-on-track); border-color: var(--switch-on-edge); }
+.toggle input[type='checkbox']:checked::after { transform: translateX(20px); background: var(--switch-on-knob); }
 .toggle input[type='checkbox']:disabled { cursor: progress; }
 
 /* ── Messages ───────────────────────────────────────────── */
