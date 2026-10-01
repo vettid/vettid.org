@@ -25,6 +25,10 @@ export interface MemberItem {
   reject_reason?: string;
   suspend_reason?: string;
   delete_after?: string; // set on cancel; cleanup job deletes after this
+  terms_sha256?: string; // hash of the accepted terms text
+  email_updates?: boolean; // default true
+  pin_prompt_dismissed?: boolean; // "skip for now" on the Getting started PIN step
+  welcome_sent?: boolean; // "you can sign in" email delivered
 }
 
 /** Row in vettid-org-subscriptions (one per member). */

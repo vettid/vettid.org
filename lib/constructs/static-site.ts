@@ -26,6 +26,8 @@ export interface StaticSiteProps {
    * auth cookies be host-only + SameSite=Strict.
    */
   readonly apiOriginDomain?: string;
+  /** Extra headers CloudFront adds to /api/* origin requests (e.g. an origin-verify secret). */
+  readonly apiOriginHeaders?: Record<string, string>;
   /** Extra CSP connect-src sources beyond 'self' (e.g. a Cognito or API host). */
   readonly connectSrc?: string[];
   /** ARN of a CLOUDFRONT-scope WAF web ACL (us-east-1). */
@@ -119,11 +121,19 @@ function handler(event) {
 
     const additionalBehaviors: Record<string, cloudfront.BehaviorOptions> = {};
     if (props.apiOriginDomain) {
+      // Forward only what the API uses: cookies (session), query strings, the
+      // CSRF and content-type headers, and the viewer's address (rate limits).
+      const apiRequests = new cloudfront.OriginRequestPolicy(this, 'ApiOriginRequests', {
+        comment: `${props.hostName} /api/*`,
+        cookieBehavior: cloudfront.OriginRequestCookieBehavior.all(),
+        queryStringBehavior: cloudfront.OriginRequestQueryStringBehavior.all(),
+        headerBehavior: cloudfront.OriginRequestHeaderBehavior.allowList('Content-Type', 'X-VettID-CSRF', 'CloudFront-Viewer-Address'),
+      });
       additionalBehaviors['/api/*'] = {
-        origin: new origins.HttpOrigin(props.apiOriginDomain),
+        origin: new origins.HttpOrigin(props.apiOriginDomain, { customHeaders: props.apiOriginHeaders }),
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
         cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
-        originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+        originRequestPolicy: apiRequests,
         allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
         responseHeadersPolicy: headers,
       };

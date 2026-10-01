@@ -125,5 +125,6 @@ export class VettidOrgDataStack extends cdk.Stack {
     });
 
     publishRef(this, config, 'data/terms-bucket-name', this.termsBucket.bucketName);
+    publishRef(this, config, 'data/members-stream-arn', this.tables.members.tableStreamArn!);
   }
 }

@@ -5,7 +5,7 @@ import { el, chip, mono, muted, time } from '../dom.js';
 export function render(root, { api, ui }) {
   const name = el('input', { type: 'text', name: 'name', required: true, maxlength: 100, autocomplete: 'off' });
   const description = el('textarea', { name: 'description', rows: 2, maxlength: 500 });
-  const duration = el('input', { type: 'number', name: 'duration_days', min: 1, max: 3660, value: '30', required: true });
+  const duration = el('input', { type: 'number', name: 'duration_days', inputmode: 'numeric', min: 1, max: 3660, value: '30', required: true });
   const isTrial = el('input', { type: 'checkbox', name: 'is_trial', checked: true });
   const paid = el('input', { type: 'checkbox', name: 'paid' });
   const form = el('form', { class: 'card form-grid' },

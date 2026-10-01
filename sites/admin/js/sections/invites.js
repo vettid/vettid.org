@@ -14,8 +14,8 @@ async function copy(ui, code) {
 }
 
 export function render(root, { api, ui }) {
-  const maxUses = el('input', { type: 'number', name: 'max_uses', min: 1, max: 1000, value: '1', required: true });
-  const days = el('input', { type: 'number', name: 'expires_in_days', min: 1, max: 365, value: '30', required: true });
+  const maxUses = el('input', { type: 'number', name: 'max_uses', inputmode: 'numeric', min: 1, max: 1000, value: '1', required: true });
+  const days = el('input', { type: 'number', name: 'expires_in_days', inputmode: 'numeric', min: 1, max: 365, value: '30', required: true });
   const note = el('input', { type: 'text', name: 'note', maxlength: 200, autocomplete: 'off', placeholder: 'Who or what this is for' });
   const submit = el('button', { type: 'submit', class: 'btn btn-primary' }, 'Create invite');
   const form = el('form', { class: 'card form-grid' },

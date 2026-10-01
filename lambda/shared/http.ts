@@ -27,13 +27,13 @@ export interface Request {
   event: APIGatewayProxyEvent;
 }
 
-export type RouteHandler = (req: Request) => Promise<unknown>;
+export type RouteHandler<R = Request> = (req: R) => Promise<unknown>;
 
-interface Route {
+interface Route<R> {
   method: string;
   pattern: RegExp;
   names: string[];
-  handler: RouteHandler;
+  handler: RouteHandler<R>;
 }
 
 /**
@@ -41,10 +41,10 @@ interface Route {
  * style templates, path params URL-decoded. Handlers return a JSON-able value
  * (200) or throw HttpError.
  */
-export class Router {
-  private readonly routes: Route[] = [];
+export class Router<R = Request> {
+  private readonly routes: Route<R>[] = [];
 
-  on(method: string, template: string, handler: RouteHandler): this {
+  on(method: string, template: string, handler: RouteHandler<R>): this {
     const names: string[] = [];
     const pattern = new RegExp(
       '^' +
@@ -58,7 +58,7 @@ export class Router {
     return this;
   }
 
-  match(method: string, path: string): { handler: RouteHandler; params: Record<string, string> } | 'method' | null {
+  match(method: string, path: string): { handler: RouteHandler<R>; params: Record<string, string> } | 'method' | null {
     let pathMatched = false;
     for (const r of this.routes) {
       const m = r.pattern.exec(path);

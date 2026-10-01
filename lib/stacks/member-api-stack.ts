@@ -1,0 +1,156 @@
+import * as cdk from 'aws-cdk-lib';
+import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as events from 'aws-cdk-lib/aws-events';
+import * as targets from 'aws-cdk-lib/aws-events-targets';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as sources from 'aws-cdk-lib/aws-lambda-event-sources';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import { Construct } from 'constructs';
+import { AppConfig, hostName, resourceName } from '../config';
+import { ApiFunction } from '../constructs/api-function';
+import { HttpRouteGroup } from '../constructs/route-group';
+import { publishRef, readRef } from '../constructs/ssm-refs';
+import { tableEnv, tableGrant } from '../constructs/table-grants';
+
+export interface VettidOrgMemberApiStackProps extends cdk.StackProps {
+  readonly config: AppConfig;
+}
+
+/** Secret CloudFront adds to every /api/* request (X-Origin-Verify). */
+export const originVerifySecretName = (config: AppConfig) => `${resourceName(config, 'member-api')}/origin-verify`;
+
+/**
+ * Stateless: the member API (docs/MEMBER-API.md), served same-origin behind
+ * account.vettid.org. Three route groups (public, auth, account) plus the
+ * background jobs: SES-verification sweep, daily cleanup/expiry, and the
+ * members-stream welcome mailer.
+ *
+ * The HTTP API's execute-api URL is public; every handler rejects requests
+ * without CloudFront's origin-verify header, so the API is only usable via
+ * the site (and client IPs used for rate limits can't be spoofed).
+ */
+export class VettidOrgMemberApiStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props: VettidOrgMemberApiStackProps) {
+    super(scope, id, props);
+    const { config } = props;
+
+    const originSecret = new secretsmanager.Secret(this, 'OriginVerify', {
+      secretName: originVerifySecretName(config),
+      description: 'Header value CloudFront adds to account-site /api/* requests; the member API rejects requests without it.',
+      generateSecretString: { passwordLength: 48, excludePunctuation: true },
+    });
+
+    const api = new apigwv2.HttpApi(this, 'Api', {
+      apiName: resourceName(config, 'member-api'),
+      description: 'VettID member API (behind account.vettid.org CloudFront)',
+    });
+    const stage = api.defaultStage!.node.defaultChild as apigwv2.CfnStage;
+    stage.defaultRouteSettings = { throttlingRateLimit: 50, throttlingBurstLimit: 100 };
+
+    const memberPoolArn = readRef(this, config, 'auth/member-pool-arn');
+    const env = {
+      ...tableEnv(config),
+      MEMBER_POOL_ID: readRef(this, config, 'auth/member-pool-id'),
+      MEMBER_CLIENT_ID: readRef(this, config, 'auth/member-client-id'),
+      PIN_PEPPER_SECRET_ARN: readRef(this, config, 'auth/pin-pepper-secret-arn'),
+      TERMS_BUCKET: readRef(this, config, 'data/terms-bucket-name'),
+      ORIGIN_VERIFY_SECRET_ARN: originSecret.secretArn,
+      SENDER_EMAIL: config.senderEmail,
+      ADMIN_EMAIL: config.adminEmail,
+      ACCOUNT_HOST: hostName(config, 'account'),
+    };
+
+    const group = (id: string, pathPrefix: string, entry: string) => {
+      const fn = new HttpRouteGroup(this, id, { api, pathPrefix, entry, environment: env }).fn;
+      originSecret.grantRead(fn);
+      return fn;
+    };
+    const pub = group('Public', '/api/public', 'lambda/member/public.ts');
+    const auth = group('Auth', '/api/auth', 'lambda/member/auth.ts');
+    const account = group('Account', '/api/account', 'lambda/member/account.ts');
+
+    const cognitoActions = (fn: lambda.IFunction, actions: string[]) =>
+      fn.addToRolePolicy(new iam.PolicyStatement({ actions: actions.map((a) => `cognito-idp:${a}`), resources: [memberPoolArn] }));
+    // ses:SendEmail stays resources:['*'] — scoping it to the domain identity
+    // makes every send fail (see signup-stack.ts / RUNBOOK).
+    const sesSend = new iam.PolicyStatement({ actions: ['ses:SendEmail'], resources: ['*'] });
+    const sesIdentity = (fn: lambda.IFunction, actions: string[]) =>
+      fn.addToRolePolicy(new iam.PolicyStatement({ actions: actions.map((a) => `ses:${a}`), resources: ['*'] }));
+    const g = (fn: lambda.IFunction, t: string, actions: string[], indexes = false) => tableGrant(this, config, fn, t, actions, { indexes });
+
+    // public: request membership
+    g(pub, 'members', ['Query', 'PutItem', 'UpdateItem'], true);
+    g(pub, 'invites', ['UpdateItem']);
+    g(pub, 'ratelimits', ['UpdateItem']);
+    g(pub, 'audit', ['PutItem']);
+    cognitoActions(pub, ['AdminCreateUser', 'AdminAddUserToGroup']);
+    sesIdentity(pub, ['GetEmailIdentity', 'CreateEmailIdentity']);
+    pub.addToRolePolicy(sesSend);
+
+    // auth: magic link issue + Cognito custom auth (InitiateAuth etc. are
+    // unauthenticated APIs for a public client — no IAM needed)
+    g(auth, 'members', ['Query', 'UpdateItem'], true); // UpdateItem: live SES-verified flag
+    sesIdentity(auth, ['GetEmailIdentity']);
+    g(auth, 'magic-links', ['PutItem']);
+    g(auth, 'ratelimits', ['UpdateItem', 'GetItem']);
+    auth.addToRolePolicy(sesSend);
+
+    // account
+    g(account, 'members', ['GetItem', 'UpdateItem']);
+    g(account, 'terms', ['Query'], true);
+    g(account, 'subscriptions', ['GetItem', 'PutItem']);
+    g(account, 'subscription-types', ['Scan']);
+    g(account, 'ratelimits', ['GetItem', 'UpdateItem', 'DeleteItem']);
+    g(account, 'audit', ['PutItem']);
+    cognitoActions(account, ['AdminAddUserToGroup', 'AdminDisableUser', 'AdminUserGlobalSignOut']);
+    account.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['s3:GetObject'],
+        resources: [cdk.Fn.join('', ['arn:', this.partition, ':s3:::', env.TERMS_BUCKET, '/terms/*'])],
+      }),
+    );
+    account.addToRolePolicy(new iam.PolicyStatement({ actions: ['secretsmanager:GetSecretValue'], resources: [env.PIN_PEPPER_SECRET_ARN] }));
+
+    // ---- background jobs --------------------------------------------------------
+    const job = (id: string, entry: string, timeout = cdk.Duration.minutes(5)) =>
+      new ApiFunction(this, id, { entry, environment: env, timeout }).fn;
+
+    const verifications = job('VerificationsJob', 'lambda/jobs/verifications.ts');
+    g(verifications, 'members', ['Query', 'UpdateItem'], true);
+    sesIdentity(verifications, ['GetEmailIdentity']);
+    new events.Rule(this, 'VerificationsSchedule', {
+      schedule: events.Schedule.rate(cdk.Duration.minutes(15)),
+      targets: [new targets.LambdaFunction(verifications)],
+    });
+
+    const cleanup = job('CleanupJob', 'lambda/jobs/cleanup.ts');
+    g(cleanup, 'members', ['Query', 'DeleteItem'], true);
+    g(cleanup, 'subscriptions', ['Query', 'UpdateItem', 'DeleteItem'], true);
+    g(cleanup, 'audit', ['PutItem']);
+    cognitoActions(cleanup, ['AdminDeleteUser']);
+    new events.Rule(this, 'CleanupSchedule', {
+      schedule: events.Schedule.cron({ minute: '0', hour: '7' }), // 07:00 UTC daily
+      targets: [new targets.LambdaFunction(cleanup)],
+    });
+
+    const mailer = job('MembersStreamMailer', 'lambda/jobs/members-stream.ts', cdk.Duration.seconds(30));
+    g(mailer, 'members', ['UpdateItem']);
+    mailer.addToRolePolicy(sesSend);
+    const membersTable = dynamodb.Table.fromTableAttributes(this, 'MembersTable', {
+      tableName: resourceName(config, 'members'),
+      tableStreamArn: readRef(this, config, 'data/members-stream-arn'),
+    });
+    mailer.addEventSource(
+      new sources.DynamoEventSource(membersTable, {
+        startingPosition: lambda.StartingPosition.LATEST,
+        batchSize: 10,
+        retryAttempts: 3,
+        bisectBatchOnError: true,
+      }),
+    );
+
+    publishRef(this, config, 'member-api/domain', cdk.Fn.select(2, cdk.Fn.split('/', api.apiEndpoint)));
+  }
+}
