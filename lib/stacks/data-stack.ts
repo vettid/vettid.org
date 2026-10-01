@@ -2,7 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
-import { AppConfig, hostName, resourceName } from '../config';
+import { AppConfig, resourceName } from '../config';
 import { publishRef } from '../constructs/ssm-refs';
 
 export interface VettidOrgDataStackProps extends cdk.StackProps {
@@ -112,17 +112,10 @@ export class VettidOrgDataStack extends cdk.Stack {
       ],
     });
 
-    // Membership terms PDFs. Admins upload via presigned PUT from the admin
-    // site (hence CORS); members get short-lived presigned GET URLs.
+    // Membership terms: the source text and the PDF generated from it
+    // (terms/<version>.txt|.pdf), written only by the admin API. Members get
+    // short-lived presigned GET URLs.
     this.termsBucket = new s3.Bucket(this, 'TermsBucket', {
-      cors: [
-        {
-          allowedOrigins: [`https://${hostName(config, 'admin')}`],
-          allowedMethods: [s3.HttpMethods.PUT],
-          allowedHeaders: ['content-type'],
-          maxAge: 3600,
-        },
-      ],
       bucketName: `${resourceName(config, 'terms')}-${this.account}`,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,

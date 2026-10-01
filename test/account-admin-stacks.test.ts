@@ -247,9 +247,9 @@ describe('VettidOrgAdminSiteStack', () => {
     });
   });
 
-  test('CSP permits only self, the admin API, the admin login, and S3 uploads', () => {
+  test('CSP permits only self, the admin API and the admin login', () => {
     const csp = JSON.stringify(t.findResources('AWS::CloudFront::ResponseHeadersPolicy'));
-    expect(csp).toContain("connect-src 'self' https://admin-api.vettid.org https://vettid-org-admin.auth.us-east-1.amazoncognito.com");
+    expect(csp).toContain("connect-src 'self' https://admin-api.vettid.org https://vettid-org-admin.auth.us-east-1.amazoncognito.com;");
     expect(csp).toContain("script-src 'self'");
   });
 });

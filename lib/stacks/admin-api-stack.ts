@@ -130,7 +130,8 @@ export class VettidOrgAdminApiStack extends cdk.Stack {
       authorizer,
       pathPrefixes: ['/admin/terms', '/admin/subscription-types'],
       entry: 'lambda/admin/content.ts',
-      timeout: cdk.Duration.seconds(30), // hashes up to 10 MB PDFs at publish
+      timeout: cdk.Duration.seconds(30), // renders the terms PDF on create
+      memorySize: 512,
       environment: { ...env, TERMS_BUCKET: readRef(this, config, 'data/terms-bucket-name') },
     }).fn;
     const system = new RestRouteGroup(this, 'System', {

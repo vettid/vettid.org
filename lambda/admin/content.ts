@@ -3,26 +3,34 @@
  *   /admin/terms/*  /admin/subscription-types/*
  * Contract: docs/ADMIN-API.md.
  */
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { DeleteObjectsCommand, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { GetCommand, PutCommand, QueryCommand, ScanCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
-import { createHash, randomBytes } from 'node:crypto';
-import type { Readable } from 'node:stream';
+import { DeleteCommand, GetCommand, PutCommand, QueryCommand, ScanCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { randomBytes } from 'node:crypto';
 import { audit } from '../shared/audit';
 import { adminHandler } from '../shared/admin-handler';
 import { ddb, env, s3, table } from '../shared/aws';
 import { Router, badRequest, bool, conflict, decodeCursor, encodeCursor, int, notFound, str } from '../shared/http';
 import { nowIso } from '../shared/ids';
+import { checkTermsText, normalizeTermsText, renderTermsPdf, sha256Hex } from '../shared/terms-pdf';
 
-const MAX_PDF_BYTES = 10 * 1024 * 1024;
+const MAX_TEXT_CHARS = 200_000;
 const bucket = () => env('TERMS_BUCKET');
 const pdfKey = (version: string) => `terms/${version}.pdf`;
+const textKey = (version: string) => `terms/${version}.txt`;
 
+/**
+ * Terms are authored as plain text. The text (normalized) is the source of
+ * truth: `sha256` is its hash and is what a member's acceptance records. The
+ * PDF is generated from it at creation and stored alongside.
+ */
 interface TermsItem {
   version_id: string;
   title: string;
   status: 'draft' | 'current' | 'superseded';
-  sha256: string | null;
+  sha256: string; // of the normalized text
+  pdf_sha256: string;
+  chars: number;
   created_at: string;
   created_by: string;
   published_at: string | null;
@@ -42,59 +50,49 @@ router.on('GET', '/admin/terms', async ({ query }) => {
 
 router.on('POST', '/admin/terms', async ({ body, actor }) => {
   const title = str(body, 'title', { max: 200 });
+  const text = normalizeTermsText(str(body, 'text', { max: MAX_TEXT_CHARS }));
+  if (!text) throw badRequest('text is empty');
+  const bad = await checkTermsText(text + title);
+  if (bad.length) {
+    const shown = bad.slice(0, 10).map((c) => `"${c}" (U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')})`);
+    throw badRequest(`These characters can't be rendered in the PDF; replace them and try again: ${shown.join(', ')}${bad.length > 10 ? ', …' : ''}`);
+  }
+
   const now = nowIso();
-  // e.g. 2026-10-01T153012-3f9a — sortable, readable in audit and file names.
+  // e.g. 2026-10-01T153012-3f9a: sortable, readable in audit and file names.
   const version_id = `${now.slice(0, 19).replace(/:/g, '')}-${randomBytes(2).toString('hex')}`;
+  const textSha = sha256Hex(text);
+  const pdf = await renderTermsPdf({ title, versionId: version_id, text, textSha256: textSha });
+
+  await s3.send(new PutObjectCommand({ Bucket: bucket(), Key: textKey(version_id), Body: text, ContentType: 'text/plain; charset=utf-8' }));
+  await s3.send(new PutObjectCommand({ Bucket: bucket(), Key: pdfKey(version_id), Body: pdf, ContentType: 'application/pdf' }));
+
   const item: TermsItem = {
     version_id,
     title,
     status: 'draft',
-    sha256: null,
+    sha256: textSha,
+    pdf_sha256: sha256Hex(pdf),
+    chars: text.length,
     created_at: now,
     created_by: actor,
     published_at: null,
     published_by: null,
   };
   await ddb.send(new PutCommand({ TableName: table.terms(), Item: item, ConditionExpression: 'attribute_not_exists(version_id)' }));
-  const upload_url = await getSignedUrl(
-    s3,
-    new PutObjectCommand({ Bucket: bucket(), Key: pdfKey(version_id), ContentType: 'application/pdf' }),
-    { expiresIn: 900 },
-  );
-  await audit(actor, 'terms.create', version_id, { title });
-  return { terms: item, upload_url };
+  await audit(actor, 'terms.create', version_id, { title, sha256: textSha, chars: text.length });
+  return item;
 });
 
-async function sha256Of(stream: Readable): Promise<{ hash: string; head: Buffer }> {
-  const h = createHash('sha256');
-  let head = Buffer.alloc(0);
-  for await (const chunk of stream) {
-    const b = chunk as Buffer;
-    if (head.length < 5) head = Buffer.concat([head, b.subarray(0, 5 - head.length)]);
-    h.update(b);
-  }
-  return { hash: h.digest('hex'), head };
+async function getTerms(version: string): Promise<TermsItem> {
+  const r = await ddb.send(new GetCommand({ TableName: table.terms(), Key: { version_id: version } }));
+  if (!r.Item) throw notFound('No such terms version');
+  return r.Item as TermsItem;
 }
 
 router.on('POST', '/admin/terms/{version_id}/publish', async ({ params, actor }) => {
-  const r = await ddb.send(new GetCommand({ TableName: table.terms(), Key: { version_id: params.version_id } }));
-  const t = r.Item as TermsItem | undefined;
-  if (!t) throw notFound('No such terms version');
+  const t = await getTerms(params.version_id);
   if (t.status !== 'draft') throw conflict(`Version is ${t.status}`);
-
-  let size: number;
-  try {
-    size = (await s3.send(new HeadObjectCommand({ Bucket: bucket(), Key: pdfKey(t.version_id) }))).ContentLength ?? 0;
-  } catch {
-    throw conflict('No PDF uploaded for this version yet');
-  }
-  if (size > MAX_PDF_BYTES) {
-    await s3.send(new DeleteObjectCommand({ Bucket: bucket(), Key: pdfKey(t.version_id) }));
-    throw badRequest('PDF exceeds 10 MB; upload a smaller file');
-  }
-  const obj = await s3.send(new GetObjectCommand({ Bucket: bucket(), Key: pdfKey(t.version_id) }));
-  const { hash, head } = await sha256Of(obj.Body as Readable);
-  if (head.toString('latin1') !== '%PDF-') throw badRequest('Uploaded file is not a PDF');
 
   const current = await ddb.send(
     new QueryCommand({
@@ -123,22 +121,40 @@ router.on('POST', '/admin/terms/{version_id}/publish', async ({ params, actor })
           Update: {
             TableName: table.terms(),
             Key: { version_id: t.version_id },
-            UpdateExpression: 'SET #s = :c, sha256 = :h, published_at = :n, published_by = :a',
+            UpdateExpression: 'SET #s = :c, published_at = :n, published_by = :a',
             ConditionExpression: '#s = :d',
             ExpressionAttributeNames: { '#s': 'status' },
-            ExpressionAttributeValues: { ':c': 'current', ':h': hash, ':n': now, ':a': actor, ':d': 'draft' },
+            ExpressionAttributeValues: { ':c': 'current', ':n': now, ':a': actor, ':d': 'draft' },
           },
         },
       ],
     }),
   );
-  await audit(actor, 'terms.publish', t.version_id, { sha256: hash, superseded: (current.Items ?? []).map((c) => c.version_id) });
-  return { ...t, status: 'current', sha256: hash, published_at: now, published_by: actor };
+  await audit(actor, 'terms.publish', t.version_id, { sha256: t.sha256, superseded: (current.Items ?? []).map((c) => c.version_id) });
+  return { ...t, status: 'current', published_at: now, published_by: actor };
+});
+
+router.on('DELETE', '/admin/terms/{version_id}', async ({ params, actor }) => {
+  const t = await getTerms(params.version_id);
+  if (t.status !== 'draft') throw conflict('Only drafts can be deleted; published terms are a permanent record');
+  await ddb.send(
+    new DeleteCommand({
+      TableName: table.terms(),
+      Key: { version_id: t.version_id },
+      ConditionExpression: '#s = :d',
+      ExpressionAttributeNames: { '#s': 'status' },
+      ExpressionAttributeValues: { ':d': 'draft' },
+    }),
+  );
+  await s3.send(
+    new DeleteObjectsCommand({ Bucket: bucket(), Delete: { Objects: [{ Key: pdfKey(t.version_id) }, { Key: textKey(t.version_id) }] } }),
+  );
+  await audit(actor, 'terms.delete_draft', t.version_id, { title: t.title });
+  return { ok: true };
 });
 
 router.on('GET', '/admin/terms/{version_id}/download-url', async ({ params }) => {
-  const r = await ddb.send(new GetCommand({ TableName: table.terms(), Key: { version_id: params.version_id } }));
-  if (!r.Item) throw notFound('No such terms version');
+  await getTerms(params.version_id);
   const url = await getSignedUrl(
     s3,
     new GetObjectCommand({
