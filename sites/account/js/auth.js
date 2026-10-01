@@ -6,7 +6,7 @@
 // account), and email link scanners that run pages must not burn the
 // single-use token. If the account has a PIN, we ask for it next.
 
-import { get, publicPost } from './api.js';
+import { get, hasSessionHint, publicPost } from './api.js';
 import { $, el, fill } from './dom.js';
 import * as ui from './ui.js';
 
@@ -116,10 +116,12 @@ async function confirmStep() {
   title.textContent = 'Sign in to VettID';
   fill(card, el('p', { class: 'loading' }, 'One moment…'));
   let current = null;
-  try {
-    current = await get('/api/account/me', { redirect: false });
-  } catch {
-    current = null; // not signed in (the normal case)
+  if (hasSessionHint()) {
+    try {
+      current = await get('/api/account/me', { redirect: false });
+    } catch {
+      current = null; // not signed in (the normal case)
+    }
   }
   if (current?.email && current.email.toLowerCase() === email.toLowerCase()) {
     title.textContent = "You're already signed in";

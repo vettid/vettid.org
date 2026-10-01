@@ -38,6 +38,7 @@ function setSession(req: MemberRequest, out: { IdToken?: string; RefreshToken?: 
     req.setCookies.push(
       cookie.set(COOKIES.refresh.name, out.RefreshToken, COOKIES.refresh.path, 30 * 86400),
       cookie.clear(COOKIES.refresh.name, LEGACY_REFRESH_PATH),
+      cookie.set(COOKIES.present.name, '1', COOKIES.present.path, 30 * 86400, { scriptReadable: true }),
     );
   }
   req.setCookies.push(cookie.clear(COOKIES.pin.name, COOKIES.pin.path));

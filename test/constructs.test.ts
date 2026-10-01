@@ -235,3 +235,33 @@ describe('StaticSite branded 404', () => {
     expect(dist.CustomErrorResponses).toBeUndefined();
   });
 });
+
+describe('StaticSite edge gate (requireCookie)', () => {
+  const stack = new cdk.Stack(new cdk.App(), 'SiteGate', { env });
+  const zone = route53.HostedZone.fromHostedZoneAttributes(stack, 'Zone', { hostedZoneId: 'Z1', zoneName: 'vettid.org' });
+  new StaticSite(stack, 'S', {
+    hostName: 'account.vettid.org',
+    hostedZone: zone,
+    sourceDir: 'test/fixtures/site',
+    notFoundPage: '404.html',
+    requireCookie: { pathPrefix: '/about/', cookie: 'vid_s', redirectTo: '/signin/' },
+  });
+  const code = Object.values<any>(Template.fromStack(stack).findResources('AWS::CloudFront::Function'))[0].Properties.FunctionCode as string;
+  // eslint-disable-next-line no-new-func
+  const handler = new Function(`${code}; return handler;`)() as (e: unknown) => any;
+  const req = (uri: string, cookies: Record<string, unknown> = {}) => handler({ request: { uri, headers: {}, querystring: {}, cookies } });
+
+  test.each(['/about', '/about/', '/about/index.html'])('signed-out %s is redirected before anything is served', (uri) => {
+    const r = req(uri);
+    expect(r.statusCode).toBe(302);
+    expect(r.headers.location.value).toBe('/signin/');
+  });
+
+  test('with the presence cookie the page is served', () => {
+    expect(req('/about/', { vid_s: { value: '1' } }).uri).toBe('/about/index.html');
+  });
+
+  test('paths outside the prefix are unaffected', () => {
+    expect(req('/').uri).toBe('/index.html');
+  });
+});

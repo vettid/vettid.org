@@ -34,9 +34,10 @@ export type MemberRequest = {
 const SESSION_COOKIE_BASE = 'Secure; HttpOnly; SameSite=Strict';
 
 export const cookie = {
-  set(name: string, value: string, path: string, maxAgeSeconds: number): string {
+  set(name: string, value: string, path: string, maxAgeSeconds: number, opts: { scriptReadable?: boolean } = {}): string {
     if (!/^[A-Za-z0-9._~+/=-]*$/.test(value)) throw new Error(`Refusing to set cookie ${name} with unsafe characters`);
-    return `${name}=${value}; Path=${path}; Max-Age=${maxAgeSeconds}; ${SESSION_COOKIE_BASE}`;
+    const base = opts.scriptReadable ? 'Secure; SameSite=Strict' : SESSION_COOKIE_BASE;
+    return `${name}=${value}; Path=${path}; Max-Age=${maxAgeSeconds}; ${base}`;
   },
   clear(name: string, path: string): string {
     return `${name}=; Path=${path}; Max-Age=0; ${SESSION_COOKIE_BASE}`;
@@ -49,6 +50,12 @@ export const COOKIES = {
   // an expired ID token in-request — see requireSession.
   refresh: { name: 'vid_rt', path: '/api' },
   pin: { name: 'vid_pin', path: '/api/auth' },
+  // Not a credential (value is just "1"): tells the site's CloudFront function
+  // — and the pages' scripts — that someone is probably signed in, so
+  // signed-out visitors are redirected at the edge and pages skip the
+  // "am I signed in?" API probe. The real session cookies are httpOnly and
+  // scoped to /api.
+  present: { name: 'vid_s', path: '/' },
 } as const;
 
 /** Where vid_rt lived before 2026-10-01; cleared alongside the current path. */
@@ -61,6 +68,7 @@ export function clearSessionCookies(): string[] {
     cookie.clear(COOKIES.refresh.name, COOKIES.refresh.path),
     cookie.clear(COOKIES.refresh.name, LEGACY_REFRESH_PATH),
     cookie.clear(COOKIES.pin.name, COOKIES.pin.path),
+    cookie.clear(COOKIES.present.name, COOKIES.present.path),
   ];
 }
 
@@ -161,9 +169,15 @@ async function verifyIdToken(token: string): Promise<Session> {
  */
 export async function requireSession(req: MemberRequest): Promise<Session> {
   const token = req.cookies[COOKIES.id.name];
+  // Self-healing presence cookie (sessions from before it existed, or after
+  // it expired): any authenticated call re-sets it.
+  const ensurePresent = (sess: Session) => {
+    if (!req.cookies[COOKIES.present.name]) req.setCookies.push(cookie.set(COOKIES.present.name, '1', COOKIES.present.path, 30 * 86400, { scriptReadable: true }));
+    return sess;
+  };
   if (token) {
     try {
-      return await verifyIdToken(token);
+      return ensurePresent(await verifyIdToken(token));
     } catch {
       /* expired or invalid: try the refresh token below */
     }
@@ -178,7 +192,7 @@ export async function requireSession(req: MemberRequest): Promise<Session> {
     if (!idToken) throw new Error('no id token');
     const session = await verifyIdToken(idToken);
     req.setCookies.push(cookie.set(COOKIES.id.name, idToken, COOKIES.id.path, out.AuthenticationResult?.ExpiresIn ?? 3600));
-    return session;
+    return ensurePresent(session);
   } catch {
     req.setCookies.push(...clearSessionCookies());
     throw new HttpError(401, 'unauthorized', 'Session expired');
