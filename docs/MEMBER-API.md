@@ -14,14 +14,16 @@ forwards `/api/*` to an HTTP API). No CORS anywhere.
 - The browser never sees a token. Sign-in sets **httpOnly, Secure,
   SameSite=Strict, host-only** cookies:
   - `vid_id` — Cognito ID token (Path `/api`, ~60 min)
-  - `vid_rt` — refresh token (Path `/api/auth`, 30 days)
+  - `vid_rt` — refresh token (Path `/api`, 30 days)
   - `vid_pin` — pending PIN step (Path `/api/auth`, 5 min, only mid sign-in)
 - Every **state-changing** request (`POST`/`DELETE`) must send header
   `X-VettID-CSRF: 1` (a custom header cross-site forms can't send; belt and
   braces with SameSite=Strict). Missing → `403 csrf`.
-- When an authenticated call returns `401`, the client calls
-  `POST /api/auth/refresh` once and retries; if that also fails, the user is
-  signed out (send them to `/signin/`).
+- An expired `vid_id` is renewed **server-side, in the same request**, from
+  `vid_rt` (a fresh `vid_id` comes back in `Set-Cookie`), so normal use never
+  sees a 401. If a call still returns `401` (refresh token expired or
+  revoked), the client may try `POST /api/auth/refresh` once, then signs the
+  user out (send them to `/signin/`).
 
 ## Conventions
 

@@ -15,7 +15,7 @@ import { audit } from '../shared/audit';
 import { cognito, ddb, env, s3, table } from '../shared/aws';
 import { HttpError, Router, badRequest, conflict, forbidden, notFound, str } from '../shared/http';
 import { nowIso } from '../shared/ids';
-import { COOKIES, MemberRequest, cookie, memberHandler, requireSession } from '../shared/member-http';
+import { MemberRequest, clearSessionCookies, memberHandler, requireSession } from '../shared/member-http';
 import { canSignIn, memberByGuid } from '../shared/members';
 import { hasVotingRights, MemberItem, SubscriptionItem } from '../shared/model';
 import { checkPin, hashPin, pinProblem } from '../shared/pin';
@@ -270,10 +270,7 @@ router.on('POST', '/api/account/cancel', async (req) => {
   await cognito.send(new AdminDisableUserCommand({ UserPoolId: poolId(), Username: m.email }));
   await cognito.send(new AdminUserGlobalSignOutCommand({ UserPoolId: poolId(), Username: m.email }));
   await audit(m.email, 'member.cancel', m.user_guid, { delete_after: deleteAfter });
-  req.setCookies.push(
-    cookie.clear(COOKIES.id.name, COOKIES.id.path),
-    cookie.clear(COOKIES.refresh.name, COOKIES.refresh.path),
-  );
+  req.setCookies.push(...clearSessionCookies());
   return { ok: true };
 });
 

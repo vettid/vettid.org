@@ -1,7 +1,8 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
+import { InitiateAuthCommand } from '@aws-sdk/client-cognito-identity-provider';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import { timingSafeEqual } from 'node:crypto';
-import { env } from './aws';
+import { cognito, env } from './aws';
 import { HttpError, Router, badRequest } from './http';
 import { secret } from './secrets';
 
@@ -43,9 +44,24 @@ export const cookie = {
 
 export const COOKIES = {
   id: { name: 'vid_id', path: '/api' },
-  refresh: { name: 'vid_rt', path: '/api/auth' },
+  // Scoped to /api (not just /api/auth) so any authenticated call can renew
+  // an expired ID token in-request — see requireSession.
+  refresh: { name: 'vid_rt', path: '/api' },
   pin: { name: 'vid_pin', path: '/api/auth' },
 } as const;
+
+/** Where vid_rt lived before 2026-10-01; cleared alongside the current path. */
+export const LEGACY_REFRESH_PATH = '/api/auth';
+
+/** Set-Cookie values that end a session (all paths, incl. legacy). */
+export function clearSessionCookies(): string[] {
+  return [
+    cookie.clear(COOKIES.id.name, COOKIES.id.path),
+    cookie.clear(COOKIES.refresh.name, COOKIES.refresh.path),
+    cookie.clear(COOKIES.refresh.name, LEGACY_REFRESH_PATH),
+    cookie.clear(COOKIES.pin.name, COOKIES.pin.path),
+  ];
+}
 
 function parseCookies(event: APIGatewayProxyEventV2): Record<string, string> {
   const out: Record<string, string> = {};
@@ -99,18 +115,43 @@ export interface Session {
   user_guid: string;
 }
 
-/** Verify the `vid_id` cookie (Cognito ID token for the member pool). */
+async function verifyIdToken(token: string): Promise<Session> {
+  verifier ??= CognitoJwtVerifier.create({ userPoolId: env('MEMBER_POOL_ID'), tokenUse: 'id', clientId: env('MEMBER_CLIENT_ID') });
+  const claims = await verifier.verify(token);
+  const guid = String(claims['custom:user_guid'] ?? '');
+  const email = String(claims.email ?? '').toLowerCase();
+  if (!guid || !email) throw new Error('missing claims');
+  return { email, user_guid: guid };
+}
+
+/**
+ * Verify the `vid_id` cookie (Cognito ID token, member pool). If it is
+ * missing or expired but the refresh cookie is valid, renew it in this same
+ * request and set the new cookie on the response — the client never sees a
+ * 401 just because the hour rolled over.
+ */
 export async function requireSession(req: MemberRequest): Promise<Session> {
   const token = req.cookies[COOKIES.id.name];
-  if (!token) throw new HttpError(401, 'unauthorized', 'Not signed in');
-  verifier ??= CognitoJwtVerifier.create({ userPoolId: env('MEMBER_POOL_ID'), tokenUse: 'id', clientId: env('MEMBER_CLIENT_ID') });
+  if (token) {
+    try {
+      return await verifyIdToken(token);
+    } catch {
+      /* expired or invalid: try the refresh token below */
+    }
+  }
+  const rt = req.cookies[COOKIES.refresh.name];
+  if (!rt) throw new HttpError(401, 'unauthorized', token ? 'Session expired' : 'Not signed in');
   try {
-    const claims = await verifier.verify(token);
-    const guid = String(claims['custom:user_guid'] ?? '');
-    const email = String(claims.email ?? '').toLowerCase();
-    if (!guid || !email) throw new Error('missing claims');
-    return { email, user_guid: guid };
+    const out = await cognito.send(
+      new InitiateAuthCommand({ ClientId: env('MEMBER_CLIENT_ID'), AuthFlow: 'REFRESH_TOKEN_AUTH', AuthParameters: { REFRESH_TOKEN: rt } }),
+    );
+    const idToken = out.AuthenticationResult?.IdToken;
+    if (!idToken) throw new Error('no id token');
+    const session = await verifyIdToken(idToken);
+    req.setCookies.push(cookie.set(COOKIES.id.name, idToken, COOKIES.id.path, out.AuthenticationResult?.ExpiresIn ?? 3600));
+    return session;
   } catch {
+    req.setCookies.push(...clearSessionCookies());
     throw new HttpError(401, 'unauthorized', 'Session expired');
   }
 }

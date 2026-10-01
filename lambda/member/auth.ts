@@ -15,13 +15,13 @@ import {
   type RespondToAuthChallengeCommandOutput,
   RevokeTokenCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
-import { PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { PutCommand } from '@aws-sdk/lib-dynamodb';
 import { randomBytes } from 'node:crypto';
 import { cognito, ddb, env, table } from '../shared/aws';
 import { HttpError, Router, email as normEmail, str } from '../shared/http';
 import { nowIso } from '../shared/ids';
 import { sendMail } from '../shared/mail';
-import { COOKIES, MemberRequest, RateLimited, cookie, memberHandler } from '../shared/member-http';
+import { COOKIES, LEGACY_REFRESH_PATH, MemberRequest, RateLimited, clearSessionCookies, cookie, memberHandler } from '../shared/member-http';
 import { canSignIn, memberByEmail } from '../shared/members';
 import { pinLockState } from '../shared/pin';
 import { hit } from '../shared/ratelimit';
@@ -35,7 +35,12 @@ const unauthorized = (m: string) => new HttpError(401, 'unauthorized', m);
 function setSession(req: MemberRequest, out: { IdToken?: string; RefreshToken?: string; ExpiresIn?: number }) {
   if (!out.IdToken) throw new Error('No ID token in auth result');
   req.setCookies.push(cookie.set(COOKIES.id.name, out.IdToken, COOKIES.id.path, out.ExpiresIn ?? 3600));
-  if (out.RefreshToken) req.setCookies.push(cookie.set(COOKIES.refresh.name, out.RefreshToken, COOKIES.refresh.path, 30 * 86400));
+  if (out.RefreshToken) {
+    req.setCookies.push(
+      cookie.set(COOKIES.refresh.name, out.RefreshToken, COOKIES.refresh.path, 30 * 86400),
+      cookie.clear(COOKIES.refresh.name, LEGACY_REFRESH_PATH),
+    );
+  }
   req.setCookies.push(cookie.clear(COOKIES.pin.name, COOKIES.pin.path));
 }
 
@@ -176,7 +181,7 @@ router.on('POST', '/api/auth/refresh', async (req) => {
     return { ok: true };
   } catch (e) {
     if (isAuthFailure(e)) {
-      req.setCookies.push(cookie.clear(COOKIES.id.name, COOKIES.id.path), cookie.clear(COOKIES.refresh.name, COOKIES.refresh.path));
+      req.setCookies.push(...clearSessionCookies());
       throw unauthorized('Session expired');
     }
     throw e;
@@ -192,11 +197,7 @@ router.on('POST', '/api/auth/signout', async (req) => {
       console.warn('revoke failed', (e as Error).name); // sign out locally regardless
     }
   }
-  req.setCookies.push(
-    cookie.clear(COOKIES.id.name, COOKIES.id.path),
-    cookie.clear(COOKIES.refresh.name, COOKIES.refresh.path),
-    cookie.clear(COOKIES.pin.name, COOKIES.pin.path),
-  );
+  req.setCookies.push(...clearSessionCookies());
   return { ok: true };
 });
 
