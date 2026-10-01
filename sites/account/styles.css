@@ -32,13 +32,14 @@
   --ink-on-gold: #101018;
 
   --brand-mark: #ffc125;         /* the rook: brand gold in every theme */
+  --brand-keyhole: #101018;      /* solid keyhole (not a cut-out) so it stays dark on light grounds */
   /* email-preference switch */
   --switch-off-track: var(--surface-2);
   --switch-off-edge: var(--border-strong);
   --switch-off-knob: var(--ink-mute);
-  --switch-on-track: var(--gold);
-  --switch-on-edge: var(--ink-on-gold);
-  --switch-on-knob: var(--ink-on-gold);
+  --switch-on-track: #3fd97f;
+  --switch-on-edge: #2fb36a;
+  --switch-on-knob: #0b0b12;
   --switch-knob-shadow: none;
   --accent: #ffc125;             /* current-step marker, active tab */
   --on-accent: #101018;
@@ -95,8 +96,8 @@
     --switch-off-track: #dcdde4;
     --switch-off-edge: #b4b5c0;
     --switch-off-knob: #ffffff;
-    --switch-on-track: #ffc125;
-    --switch-on-edge: #c99a12;
+    --switch-on-track: #22a35a;
+    --switch-on-edge: #187a37;
     --switch-on-knob: #ffffff;
     --switch-knob-shadow: 0 1px 3px rgba(16, 16, 24, 0.35);
     --focus: #2e2d88;
@@ -139,8 +140,8 @@
   --switch-off-track: #dcdde4;
   --switch-off-edge: #b4b5c0;
   --switch-off-knob: #ffffff;
-  --switch-on-track: #ffc125;
-  --switch-on-edge: #c99a12;
+  --switch-on-track: #22a35a;
+  --switch-on-edge: #187a37;
   --switch-on-knob: #ffffff;
   --switch-knob-shadow: 0 1px 3px rgba(16, 16, 24, 0.35);
   --focus: #2e2d88;
@@ -267,6 +268,7 @@ code, .mono {
   flex: none;
   color: var(--brand-mark);
 }
+.brand-mark .brand-keyhole { fill: var(--brand-keyhole); }
 .brand-name {
   font-family: var(--font-head);
   font-weight: 800;
