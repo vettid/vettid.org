@@ -3,7 +3,7 @@
 // every website/**/*.html page between <!-- nav:* --> markers; `npm run
 // check:site` fails if any page drifts from it.
 //
-// Rules encoded here (see WEBSITE-EXPANSION-PLAN.md §5):
+// Rules encoded here (see local/WEBSITE-EXPANSION-PLAN.md §5):
 // - "Privacy Resources" parent label itself links to /playbooks/ — the
 //   playbooks must never be more than one interaction away.
 // - Parents without a natural landing page get `href: null` and render as

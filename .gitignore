@@ -32,5 +32,6 @@ npm-debug.log*
 *.tmp
 *.temp
 .cache/
-design-previews/
-WEBSITE-EXPANSION-PLAN.md
+
+# Local-only working files (drafts, previews, unannounced plans). Never committed.
+local/
