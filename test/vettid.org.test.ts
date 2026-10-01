@@ -5,6 +5,16 @@ import { VettidOrgDnsStack } from '../lib/stacks/dns-stack';
 import { VettidOrgSignupStack } from '../lib/stacks/signup-stack';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import { VettidOrgPlaybooksStack } from '../lib/stacks/playbooks-stack';
+import { VettidDevRedirectStack } from '../lib/stacks/dev-redirect-stack';
+
+const AMAZON_CAA = [
+  '0 issue "amazon.com"',
+  '0 issue "amazontrust.com"',
+  '0 issue "awstrust.com"',
+  '0 issue "amazonaws.com"',
+  '0 issuewild ";"',
+  '0 iodef "mailto:security@vettid.org"',
+];
 
 describe('VettidOrgStack', () => {
   let template: Template;
@@ -478,6 +488,35 @@ describe('VettidOrgDnsStack', () => {
     template.hasResourceProperties('AWS::Route53::RecordSet', {
       Name: '_dmarc.test.example.com.',
       Type: 'TXT',
+      ResourceRecords: ['"v=DMARC1; p=quarantine; rua=mailto:admin@vettid.org"'],
+    });
+    template.hasResourceProperties('AWS::Route53::RecordSet', {
+      Name: 'test.example.com.',
+      Type: 'CAA',
+      ResourceRecords: AMAZON_CAA,
+    });
+  });
+});
+
+describe('VettidDevRedirectStack', () => {
+  const build = (context: Record<string, unknown> = {}) =>
+    Template.fromStack(new VettidDevRedirectStack(new cdk.App({ context }), 'TestDevRedirect', {
+      env: { account: '123456789012', region: 'us-east-1' },
+    }));
+
+  test('CAA restricts issuance to Amazon; mail-policy records stay off until the old ones are removed', () => {
+    const t = build();
+    t.hasResourceProperties('AWS::Route53::RecordSet', { Type: 'CAA', ResourceRecords: AMAZON_CAA });
+    expect(Object.values<any>(t.findResources('AWS::Route53::RecordSet')).filter((r) => r.Properties.Type === 'TXT')).toHaveLength(0);
+  });
+
+  test('with vettidDevMailPolicy: SPF -all and DMARC reject (redirect-only domain sends no mail)', () => {
+    const t = build({ vettidDevMailPolicy: 'true' });
+    t.hasResourceProperties('AWS::Route53::RecordSet', { Type: 'TXT', ResourceRecords: ['"v=spf1 -all"'] });
+    t.hasResourceProperties('AWS::Route53::RecordSet', {
+      Type: 'TXT',
+      Name: Match.stringLikeRegexp('^_dmarc\\.'),
+      ResourceRecords: ['"v=DMARC1; p=reject;"'],
     });
   });
 });
@@ -495,6 +534,13 @@ describe('VettidOrgPlaybooksStack', () => {
     });
     const pbTemplate = Template.fromStack(playbooks);
     pbTemplate.hasResource('AWS::S3::Bucket', { DeletionPolicy: 'Retain' });
+    pbTemplate.hasResourceProperties('AWS::S3::BucketPolicy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({ Effect: 'Deny', Condition: { Bool: { 'aws:SecureTransport': 'false' } } }),
+        ]),
+      },
+    });
     const webTemplate = Template.fromStack(web);
     webTemplate.hasResourceProperties('AWS::CloudFront::Distribution', {
       DistributionConfig: Match.objectLike({

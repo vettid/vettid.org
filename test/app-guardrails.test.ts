@@ -60,6 +60,20 @@ describe('app guardrails', () => {
     expect(JSON.stringify(json)).not.toContain('Fn::ImportValue');
   });
 
+  test('stateful stacks have termination protection on', () => {
+    const protectedStacks = stacks.filter((s) => s.terminationProtection).map((s) => s.stackName).sort();
+    expect(protectedStacks).toEqual(
+      [
+        'VettidOrgAdminAccessStack',
+        'VettidOrgAuthStack',
+        'VettidOrgDataStack',
+        'VettidOrgDnsStack',
+        'VettidOrgPlaybooksStack',
+        'VettidOrgSignupStack',
+      ],
+    );
+  });
+
   test.each(templates.map((t) => [t.name, t.json]))('%s retains every stateful resource', (_name, json) => {
     for (const [id, res] of Object.entries<any>(json.Resources ?? {})) {
       if (STATEFUL_TYPES.includes(res.Type)) {

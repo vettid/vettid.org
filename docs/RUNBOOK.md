@@ -23,6 +23,10 @@ npm run deploy:all                                # everything
 
 ## Stacks
 
+Stateful stacks (Dns, Signup, Playbooks, Auth, Data, AdminAccess) have
+CloudFormation termination protection on (`lib/app.ts`); deleting one means
+turning that off in code (or the console) first.
+
 | Stack | Owns |
 |---|---|
 | `VettidOrgDnsStack` | Route53 zone for vettid.org + ProtonMail mail records |
@@ -130,6 +134,20 @@ their Headscale node *and* disable/delete the Cognito user.
 - ProtonMail records (MX/SPF/DKIM/DMARC) live in the DnsStack — change mail
   config in code, not the console.
 - ACM certs auto-validate through the zones; renewals are hands-off.
+- Both zones carry CAA records allowing only Amazon (ACM) to issue, no
+  wildcards (`issuewild ";"`), violation reports to security@vettid.org. A
+  wildcard or non-ACM cert would need `amazonOnlyCaa` (dns-stack.ts) changed first.
+- vettid.org DMARC is `p=quarantine` with aggregate reports to admin@vettid.org.
+- vettid.dev sends no mail. Its intended policy is SPF `v=spf1 -all` + DMARC
+  `p=reject` (VettidDevRedirectStack), but the zone still holds hand-made
+  vettid-dev-era records at the same names (apex TXT with the old Proton SPF +
+  verification, `_dmarc` `p=none`), so those two records are behind a context
+  flag. To switch: delete the apex TXT and `_dmarc` TXT in the console (and,
+  if vettid.dev mail is truly retired, the Proton MX/DKIM and the old SES
+  `_amazonses` / `*._domainkey` records), then
+  `npx cdk deploy VettidDevRedirectStack -c vettidDevMailPolicy=true` — and
+  keep passing the flag on every later deploy of that stack (or make it the
+  default in code).
 
 ## Mailing list
 
