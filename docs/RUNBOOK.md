@@ -16,7 +16,7 @@ npm run deploy:all                                # everything
   Visitors see HTML changes immediately.
 - Requires an active AWS SSO session (`aws sso login`); us-east-1 only.
 - Stack order when deploying individually: DnsStack → SignupStack → VettidOrgStack
-  (props flow left to right in `bin/vettid.org.ts`).
+  (props flow left to right in `lib/app.ts`).
 
 ## Stacks
 
@@ -25,7 +25,35 @@ npm run deploy:all                                # everything
 | `VettidOrgDnsStack` | Route53 zone for vettid.org + ProtonMail mail records |
 | `VettidOrgStack` | Site bucket, CloudFront, cert, WAF telemetry, all logging |
 | `VettidOrgSignupStack` | Mailing list: DynamoDB, Lambdas, HTTP API, SES domain identity |
+| `VettidOrgPlaybooksStack` | Playbooks origin bucket (served at `/playbooks/*` by VettidOrgStack; content deployed from the vettid-playbooks repo) |
 | `VettidDevRedirectStack` | The entire vettid.dev footprint: blanket 301 → vettid.org. Permanent. |
+
+## CDK conventions (new stacks)
+
+Applies to everything added from the account/admin work onward
+(docs/ACCOUNT-ADMIN-PLAN.md §3); the stacks above are grandfathered and keep
+their construct IDs.
+
+- **App wiring** lives in `lib/app.ts` (`bin/` only calls `buildApp`).
+  Config — stage, domain, region, sender/admin email — comes from
+  `lib/config.ts`; `-c stage=<name>` exists for a future staging account and
+  defaults to `prod`. Physical names come from `resourceName()`
+  (`vettid-org-<thing>`); hosts from `hostName()`.
+- **Stateful vs stateless.** Pools and tables go in stateful stacks
+  (Auth, Data) with `RemovalPolicy.RETAIN`; APIs and sites go in stateless
+  stacks that deploy freely.
+- **No CloudFormation exports between them.** Producers call `publishRef()`,
+  consumers `readRef()` (`lib/constructs/ssm-refs.ts`, params under
+  `/vettid-org/<stage>/…`). Deploy the producer first.
+- **Lambdas** are defined only through `ApiFunction` (Node 24, ARM64, esbuild,
+  1-month log group) and served through `HttpRouteGroup`: one function per
+  route *group* (`ANY /api/<group>/{proxy+}`), routing in the handler.
+- **Static sites** use `StaticSite`: own host, strict CSP (`script-src 'self'`,
+  no inline styles), same-origin `/api/*`, and `/config.json` generated at
+  deploy time from CDK tokens.
+- **Guardrails** (`test/app-guardrails.test.ts`, run in CI): ≤ 200 resources
+  per stack, no `Fn::ImportValue` outside the grandfathered stacks, and every
+  table/user pool retained.
 
 ## DNS
 
