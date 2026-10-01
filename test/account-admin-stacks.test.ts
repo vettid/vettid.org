@@ -32,13 +32,24 @@ describe('VettidOrgAuthStack', () => {
     t.hasResourceProperties('AWS::Cognito::UserPoolGroup', { GroupName: 'member' });
   });
 
-  test('member client allows custom auth (magic link + PIN) only, nothing writable', () => {
+  test('member client allows custom auth (magic link + PIN) only, no OAuth, nothing meaningful writable', () => {
     t.hasResourceProperties('AWS::Cognito::UserPoolClient', {
       ClientName: 'vettid-org-account-site',
       ExplicitAuthFlows: ['ALLOW_CUSTOM_AUTH', 'ALLOW_REFRESH_TOKEN_AUTH'],
       GenerateSecret: false,
       PreventUserExistenceErrors: 'ENABLED',
-      WriteAttributes: [],
+      // Empty would mean "all standard attributes writable" to Cognito.
+      WriteAttributes: ['locale'],
+      AllowedOAuthFlows: Match.absent(),
+      CallbackURLs: Match.absent(),
+    });
+  });
+
+  test('member pool keeps the original email until a change is verified', () => {
+    t.hasResourceProperties('AWS::Cognito::UserPool', {
+      UserPoolName: 'vettid-org-members',
+      AutoVerifiedAttributes: ['email'],
+      UserAttributeUpdateSettings: { AttributesRequireVerificationBeforeUpdate: ['email'] },
     });
   });
 
@@ -56,7 +67,7 @@ describe('VettidOrgAuthStack', () => {
       ClientName: 'vettid-org-admin-site',
       AllowedOAuthFlows: ['code'],
       CallbackURLs: ['https://admin.vettid.org/'],
-      WriteAttributes: [],
+      WriteAttributes: ['locale'],
     });
     t.hasResourceProperties('AWS::Cognito::UserPoolDomain', { Domain: 'vettid-org-admin' });
   });
