@@ -27,6 +27,9 @@ npm run deploy:all                                # everything
 | `VettidOrgSignupStack` | Mailing list: DynamoDB, Lambdas, HTTP API, SES domain identity |
 | `VettidOrgPlaybooksStack` | Playbooks origin bucket (served at `/playbooks/*` by VettidOrgStack; content deployed from the vettid-playbooks repo) |
 | `VettidDevRedirectStack` | The entire vettid.dev footprint: blanket 301 → vettid.org. Permanent. |
+| `VettidOrgAuthStack` | Member + admin Cognito pools, clients, groups, admin hosted-UI domain, PIN pepper secret. Stateful. |
+| `VettidOrgDataStack` | Account/admin DynamoDB tables (`vettid-org-*`) + terms PDF bucket. Stateful. |
+| `VettidOrgAdminAccessStack` | Admin tailnet exit node (EC2 + EIP) and the WAF allowlists keyed to its IP (admin login + admin site). |
 
 ## CDK conventions (new stacks)
 
@@ -54,6 +57,43 @@ their construct IDs.
 - **Guardrails** (`test/app-guardrails.test.ts`, run in CI): ≤ 200 resources
   per stack, no `Fn::ImportValue` outside the grandfathered stacks, and every
   table/user pool retained.
+
+## Admin access (Headscale exit node)
+
+Admin (site, API, and the Cognito admin login) only answers requests from
+the exit node's Elastic IP. To use admin: connect to the tailnet and select
+the `vettid-org-admin-exit` exit node. Off → 403 everywhere.
+
+**First-time setup** (and after replacing the instance):
+
+1. On the Headscale server, create a pre-auth key:
+   `headscale preauthkeys create --user <user> --expiration 1h`
+2. Store it — run it yourself; the key should not pass through chat or the repo:
+   `aws secretsmanager create-secret --name vettid-org-admin-access/headscale-preauth-key --secret-string <key>`
+   (`put-secret-value` if it already exists).
+3. Context `headscaleLoginServer` = the Headscale URL, kept **out of the repo**
+   in your user-level `~/.cdk.json`:
+   `{ "context": { "headscaleLoginServer": "https://<headscale host>" } }`.
+   Without it the AdminAccess stack is skipped (with a synth warning).
+   Deploy order: `VettidOrgAuthStack VettidOrgDataStack` → `VettidOrgAdminAccessStack`.
+4. Approve the exit-node routes: `headscale nodes list-routes` /
+   `headscale nodes approve-routes --identifier <id> --routes 0.0.0.0/0,::/0`
+   (Headscale < 0.26: `headscale routes list` / `headscale routes enable -r <id>`;
+   or an `autoApprovers.exitNode` entry in the Headscale policy).
+5. The instance joins at first boot. If it didn't (key expired/missing):
+   `aws ssm start-session --target <ExitNodeInstanceId>` then re-run the
+   `tailscale up --login-server=... --authkey=... --advertise-exit-node` line.
+
+The node patches itself (dnf-automatic) and has no SSH; admin it with SSM
+Session Manager. Its AMI is pinned in `cdk.context.json` so a new Amazon
+Linux release never replaces it on deploy. The EIP is retained even if the
+stack is deleted.
+
+**Adding an admin:** give them a Headscale node, then
+`scripts/create-admin.sh <email>` (run twice: first sends SES verification,
+second creates the Cognito user, which emails a temporary password). First
+sign-in sets a password and enrolls TOTP. **Removing an admin:** delete
+their Headscale node *and* disable/delete the Cognito user.
 
 ## DNS
 

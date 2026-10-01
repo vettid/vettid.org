@@ -23,7 +23,8 @@ export type SsmRefKey =
   | 'auth/admin-login-domain'
   | 'auth/pin-pepper-secret-arn'
   | 'data/terms-bucket-name'
-  | 'admin-net/egress-ip';
+  | 'admin-access/egress-ip'
+  | 'admin-access/site-web-acl-arn';
 
 export function ssmParamName(config: AppConfig, key: SsmRefKey): string {
   return `/vettid-org/${config.stage}/${key}`;

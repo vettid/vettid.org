@@ -2,5 +2,14 @@
   "hosted-zone:account=449757308783:domainName=vettid.dev:region=us-east-1": {
     "Id": "/hostedzone/Z00991121F3R2RFDL6PAP",
     "Name": "vettid.dev."
-  }
+  },
+  "availability-zones:account=449757308783:region=us-east-1": [
+    "us-east-1a",
+    "us-east-1b",
+    "us-east-1c",
+    "us-east-1d",
+    "us-east-1e",
+    "us-east-1f"
+  ],
+  "ssm:account=449757308783:parameterName=/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-arm64:region=us-east-1": "ami-0ae8605ed708e3c3e"
 }

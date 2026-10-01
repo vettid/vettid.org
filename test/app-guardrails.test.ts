@@ -23,7 +23,7 @@ function synthAll(): cdk.Stack[] {
   const prev = process.env.CDK_DEFAULT_ACCOUNT;
   process.env.CDK_DEFAULT_ACCOUNT = '123456789012';
   try {
-    const app = new cdk.App();
+    const app = new cdk.App({ context: { headscaleLoginServer: 'https://headscale.example.net' } });
     buildApp(app);
     return app.node.children.filter((c): c is cdk.Stack => c instanceof cdk.Stack);
   } finally {
@@ -38,7 +38,16 @@ describe('app guardrails', () => {
 
   test('app synthesizes the expected stacks', () => {
     expect(templates.map((t) => t.name)).toEqual(
-      expect.arrayContaining(['VettidOrgDnsStack', 'VettidOrgSignupStack', 'VettidOrgPlaybooksStack', 'VettidOrgStack', 'VettidDevRedirectStack']),
+      expect.arrayContaining([
+        'VettidOrgDnsStack',
+        'VettidOrgSignupStack',
+        'VettidOrgPlaybooksStack',
+        'VettidOrgStack',
+        'VettidDevRedirectStack',
+        'VettidOrgAuthStack',
+        'VettidOrgDataStack',
+        'VettidOrgAdminAccessStack',
+      ]),
     );
   });
 

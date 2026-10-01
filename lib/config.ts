@@ -23,6 +23,14 @@ export interface AppConfig {
    * (see signup-stack.ts — scoping them silently breaks every send).
    */
   readonly senderEmail: string;
+  readonly adminAccess: {
+    /**
+     * Headscale control server the AWS exit node joins (tailscale
+     * --login-server). Not secret; the pre-auth key is, and lives only in
+     * Secrets Manager (see VettidOrgAdminAccessStack).
+     */
+    readonly headscaleLoginServer: string;
+  };
 }
 
 const PROD_STAGE = 'prod';
@@ -38,6 +46,9 @@ export function loadConfig(node: Node): AppConfig {
     region: 'us-east-1',
     adminEmail: 'admin@vettid.org',
     senderEmail: 'no-reply@vettid.org',
+    adminAccess: {
+      headscaleLoginServer: String(node.tryGetContext('headscaleLoginServer') ?? ''),
+    },
   };
 }
 
