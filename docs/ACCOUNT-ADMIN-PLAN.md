@@ -101,7 +101,7 @@ rebuilt smaller in Night Watch rather than restyled 5k-line files.
 |---|---|---|---|
 | `VettidOrgAuthStack` | stateful | Member pool + admin pool (RETAIN + deletionProtection), groups, app clients, admin hosted-UI domain, PIN pepper, SES (vettid.org domain identity) for Cognito email | rarely |
 | `VettidOrgDataStack` | stateful | DynamoDB tables (§3.4), terms PDF bucket; all RETAIN + PITR + deletionProtection | rarely |
-| `VettidOrgAdminAccessStack` | stateful-ish | Small VPC (1 public subnet, no NAT), t4g.nano Tailscale node joined to Headscale as exit node, Elastic IP (retained), SSM-only management (no SSH), pre-auth key from Secrets Manager; **all** admin WAF allowlists (regional ACL on the admin pool, CloudFront ACL for the admin site) | rarely |
+| `VettidOrgAdminAccessStack` | stateful-ish | Small VPC (1 public subnet, no NAT), t4g.nano Tailscale node joined to Headscale as exit node, Elastic IP (retained), SSM-only management (no SSH), pre-auth key from Secrets Manager; the admin-site CloudFront WAF allowlist | rarely |
 | `VettidOrgMemberApiStack` | stateless | HttpApi + route-group Lambdas (`auth`, `register`, `account`, `membership`) + scheduled jobs (account cleanup) + registration stream mailer; JWT verified in-handler with `aws-jwt-verify` | often |
 | `VettidOrgAccountSiteStack` | stateless | Bucket, cert, CloudFront at account.vettid.org, `/api/*` → member API **same-origin** (the signup pattern: no CORS, host-only `SameSite=Strict` cookies), CSP `script-src 'self'`, generated config | often |
 | `VettidOrgAdminApiStack` | stateless | Regional REST API at `admin-api.vettid.org`, resource policy `aws:SourceIp = <exit-node EIP>`, Cognito admin-pool authorizer, ~3 route-group Lambdas | often |
@@ -170,14 +170,18 @@ admin laptop/phone ──WireGuard (tailnet)──▶ AWS exit node (EIP) ──
   route in Headscale. Pre-auth key lives in Secrets Manager; instance managed
   by SSM Session Manager only (no inbound ports at all — Tailscale is
   outbound-initiated). Unattended security updates on.
-- **Three locks, all keyed to the EIP:**
+- **Two locks, both keyed to the EIP:**
   1. Admin site: WAF IPSet rule on the admin distribution (change the IP
      without a redeploy).
   2. Admin API: REST API resource policy `aws:SourceIp`. (HttpApi can't take
      WAF or a resource policy and its `execute-api` URL is always public —
      hence REST, called directly with CORS.)
-  3. Admin login: regional WAF ACL associated with the **admin user pool**, so
-     even the Cognito login endpoints refuse non-tailnet sources.
+
+  *Dropped on first deploy:* a regional WAF on the admin user pool. The
+  classic hosted UI makes some calls (first-login "set new password") from
+  Cognito's own servers, so an IP allowlist there blocks legitimate
+  sign-ins. The login relies on MFA; its tokens only work through the two
+  locks above.
 - **Plus identity:** admin pool with TOTP MFA required, single `admin` group,
   no user-writable attributes, PKCE + verified `state`, tokens in memory only.
 - **Usage:** turn on the "aws-admin" exit node in the Tailscale client → admin
@@ -380,9 +384,9 @@ relay. Separately: payments for paid subscriptions, and the voting feature.
 |---|---|
 | Cognito Essentials (both pools, < 10k MAU) | $0 |
 | AWS exit node (t4g.nano + EIP + 8 GB gp3) | ~$7 |
-| WAF: admin CloudFront ACL + regional ACL on admin pool | ~$12 |
+| WAF: admin CloudFront ACL | ~$6 |
 | DynamoDB on-demand, Lambda, API Gateway at launch volumes | ~$1–3 |
-| **Total** | **~$20/mo** on top of today's ~$8 |
+| **Total** | **~$14/mo** on top of today's ~$8 |
 
 The admin CloudFront rule could instead be added to the existing telemetry ACL
 (host-scoped) to save ~$5.

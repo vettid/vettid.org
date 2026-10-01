@@ -161,8 +161,8 @@ describe('VettidOrgAdminAccessStack', () => {
     t.hasResource('AWS::EC2::EIP', { DeletionPolicy: 'Retain' });
   });
 
-  test('both web ACLs block by default and allow only the egress IP set', () => {
-    for (const scope of ['REGIONAL', 'CLOUDFRONT']) {
+  test('site web ACL blocks by default and allows only the egress IP set', () => {
+    for (const scope of ['CLOUDFRONT']) {
       t.hasResourceProperties('AWS::WAFv2::WebACL', {
         Scope: scope,
         DefaultAction: { Block: {} },
@@ -171,10 +171,9 @@ describe('VettidOrgAdminAccessStack', () => {
     }
   });
 
-  test('regional ACL is attached to the admin pool via its SSM-published ARN', () => {
-    const assoc = JSON.stringify(t.findResources('AWS::WAFv2::WebACLAssociation'));
-    expect(assoc).toContain('Ref');
-    expect(JSON.stringify(t.toJSON().Parameters)).toContain('/vettid-org/prod/auth/admin-pool-arn');
+  test('no WAF on the admin user pool (hosted UI calls from Cognito IPs)', () => {
+    t.resourceCountIs('AWS::WAFv2::WebACLAssociation', 0);
+    t.resourceCountIs('AWS::WAFv2::WebACL', 1);
   });
 
   test('refuses to synth without a Headscale login server', () => {

@@ -5,7 +5,7 @@ import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import { Construct } from 'constructs';
 import { AppConfig, resourceName } from '../config';
-import { publishRef, readRef } from '../constructs/ssm-refs';
+import { publishRef } from '../constructs/ssm-refs';
 
 export interface VettidOrgAdminAccessStackProps extends cdk.StackProps {
   readonly config: AppConfig;
@@ -21,10 +21,9 @@ export function headscaleKeySecretName(config: AppConfig): string {
  *
  *  - a Tailscale exit node in AWS, joined to the operator's Headscale, with a
  *    fixed Elastic IP. Admins turn this exit node on to use admin.
- *  - WAF allowlists keyed to that IP: a REGIONAL web ACL associated with the
- *    admin Cognito pool (hosted-UI login), and a CLOUDFRONT web ACL that the
- *    admin site stack attaches. The admin API's resource policy reads the
- *    same IP from SSM.
+ *  - a CLOUDFRONT web ACL allowing only that IP, attached by the admin site
+ *    stack. The admin API's resource policy reads the same IP from SSM.
+ *    (The admin Cognito pool deliberately has no WAF — see below.)
  *
  * Kept apart from the auth stack so a change to the admin network never
  * touches the user pools.
@@ -121,7 +120,7 @@ export class VettidOrgAdminAccessStack extends cdk.Stack {
     const egressCidr = cdk.Fn.join('', [eip.ref, '/32']);
 
     // ---- WAF allowlists keyed to the egress IP.
-    const allowOnly = (scope: 'REGIONAL' | 'CLOUDFRONT', idPrefix: string, metric: string) => {
+    const allowOnly = (scope: 'CLOUDFRONT', idPrefix: string, metric: string) => {
       const ipSet = new wafv2.CfnIPSet(this, `${idPrefix}IpSet`, {
         name: resourceName(config, `admin-${scope.toLowerCase()}`),
         scope,
@@ -146,12 +145,12 @@ export class VettidOrgAdminAccessStack extends cdk.Stack {
       });
     };
 
-    const loginAcl = allowOnly('REGIONAL', 'Login', 'vettid-org-admin-login');
-    new wafv2.CfnWebACLAssociation(this, 'LoginAclAssoc', {
-      resourceArn: readRef(this, config, 'auth/admin-pool-arn'),
-      webAclArn: loginAcl.attrArn,
-    });
-
+    // No WAF on the admin user pool: the classic hosted UI makes some calls
+    // (e.g. the first-login "set new password" step) from Cognito's own
+    // servers, so an IP allowlist there blocks legitimate sign-ins (found on
+    // first deploy: blocked from 50.17.x.x, an AWS address). The pool keeps
+    // TOTP MFA; tokens it issues are only usable through the IP-locked site
+    // and API.
     const siteAcl = allowOnly('CLOUDFRONT', 'Site', 'vettid-org-admin-site');
 
     publishRef(this, config, 'admin-access/egress-ip', eip.ref);

@@ -29,7 +29,7 @@ npm run deploy:all                                # everything
 | `VettidDevRedirectStack` | The entire vettid.dev footprint: blanket 301 → vettid.org. Permanent. |
 | `VettidOrgAuthStack` | Member + admin Cognito pools, clients, groups, admin hosted-UI domain, PIN pepper secret. Stateful. |
 | `VettidOrgDataStack` | Account/admin DynamoDB tables (`vettid-org-*`) + terms PDF bucket. Stateful. |
-| `VettidOrgAdminAccessStack` | Admin tailnet exit node (EC2 + EIP) and the WAF allowlists keyed to its IP (admin login + admin site). |
+| `VettidOrgAdminAccessStack` | Admin tailnet exit node (EC2 + EIP) and the CloudFront WAF allowlist keyed to its IP (admin site). |
 | `VettidOrgAdminApiStack` | Admin REST API at admin-api.vettid.org (docs/ADMIN-API.md): exit-node-IP resource policy + Cognito authorizer, 3 route-group Lambdas. |
 | `VettidOrgAdminSiteStack` | Admin SPA at admin.vettid.org (`sites/admin`), behind the exit-node web ACL. |
 
@@ -62,8 +62,11 @@ their construct IDs.
 
 ## Admin access (Headscale exit node)
 
-Admin (site, API, and the Cognito admin login) only answers requests from
-the exit node's Elastic IP. To use admin: connect to the tailnet and select
+Admin (site and API) only answers requests from the exit node's Elastic IP.
+The Cognito admin login itself is not IP-locked — the classic hosted UI makes
+some calls (first-login "set new password") from Cognito's own servers, which
+an allowlist blocks — so it relies on TOTP MFA; tokens are useless off the
+exit node because the site and API are locked. To use admin: connect to the tailnet and select
 the `vettid-org-admin-exit` exit node. Off → 403 everywhere.
 
 **First-time setup** (and after replacing the instance):
