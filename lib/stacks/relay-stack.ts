@@ -19,6 +19,8 @@ export interface VettidOrgRelayStackProps extends cdk.StackProps {
 }
 
 const DATA_DIR = '/data';
+/** The relay image's non-root user (distroless nonroot). */
+const RELAY_UID = '65532';
 const DB_FILE = `${DATA_DIR}/relay.db`;
 const RELAY_PORT = 8080;
 
@@ -80,16 +82,23 @@ export class VettidOrgRelayStack extends cdk.Stack {
     const logGroup = new logs.LogGroup(this, 'Logs', {
       logGroupName: `/vettid-org/${config.stage}/relay`,
       retention: logs.RetentionDays.ONE_MONTH,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      // Retained so a failed deploy (which rolls the stack back) leaves evidence.
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
     const logging = (prefix: string) => ecs.LogDrivers.awsLogs({ logGroup, streamPrefix: prefix });
     const mountData = (c: ecs.ContainerDefinition) => c.addMountPoints({ containerPath: DATA_DIR, sourceVolume: 'data', readOnly: false });
 
-    // 1. Restore the latest replica (no-op on the very first start).
+    // 1. Restore the latest replica (no-op on the very first start), then hand
+    //    the data directory to the relay's non-root user: Fargate creates task
+    //    volumes as root:root 0755, which the relay could not write to.
     const restore = taskDef.addContainer('Restore', {
       image: ecs.ContainerImage.fromRegistry(props.litestreamImage),
       essential: false,
-      command: ['restore', '-if-db-not-exists', '-if-replica-exists', '-o', DB_FILE, replicaUrl],
+      entryPoint: ['/bin/sh', '-c'],
+      command: [
+        `litestream restore -if-db-not-exists -if-replica-exists -integrity-check quick -o ${DB_FILE} ${replicaUrl} ` +
+          `&& chown -R ${RELAY_UID}:${RELAY_UID} ${DATA_DIR} && chmod 0700 ${DATA_DIR}`,
+      ],
       environment: { AWS_REGION: this.region },
       logging: logging('restore'),
     });
@@ -125,6 +134,8 @@ export class VettidOrgRelayStack extends cdk.Stack {
       image: ecs.ContainerImage.fromRegistry(props.litestreamImage),
       essential: true,
       command: ['replicate', DB_FILE, replicaUrl],
+      // Same user as the relay, so WAL/SHM/checkpoint files stay writable by both.
+      user: `${RELAY_UID}:${RELAY_UID}`,
       environment: { AWS_REGION: this.region },
       logging: logging('replicate'),
       stopTimeout: cdk.Duration.seconds(30),
