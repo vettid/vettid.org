@@ -11,6 +11,12 @@ import type { MemberItem } from './model';
  */
 export const emailMarkerKey = (email: string) => `email:${email}`;
 
+/**
+ * The member's pointer row in the vaults table (`current_vault_id`). It
+ * carries no user_guid, so it stays out of the table's user-index.
+ */
+export const vaultPointerKey = (guid: string) => `user#${guid}`;
+
 export async function memberByEmail(email: string): Promise<MemberItem | null> {
   const r = await ddb.send(
     new QueryCommand({

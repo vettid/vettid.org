@@ -27,8 +27,8 @@
  *    (epoch s), expires_at (TTL), load? }.
  *  - vault-requests table, PK request_id: the API puts { request_id,
  *    vault_id, user_guid, op, status: queued, instance_id, created_at,
- *    expires_at }; the parent sets status `done` and `envelope` (b64, sealed)
- *    and/or `code` (e.g. etk_unknown).
+ *    expires_at }; the parent sets status `done` and `envelope` (b64 of a
+ *    5,252-byte sealed result) and/or `code` (e.g. etk_unknown).
  *  - vault-releases table, PK release (PCR0 hex): { release, release_number,
  *    status: active|deprecated|retired, available? }, rendered from the
  *    signed manifest by operations. The API records on-demand start requests
@@ -42,7 +42,7 @@ import { ddb, env, table } from '../shared/aws';
 import { HttpError, Router, badRequest, forbidden, notFound } from '../shared/http';
 import { nowIso } from '../shared/ids';
 import { ApiError, MemberRequest, RateLimited, WithStatus, memberHandler, requireSession } from '../shared/member-http';
-import { canSignIn, currentTerms, memberByGuid } from '../shared/members';
+import { canSignIn, currentTerms, memberByGuid, vaultPointerKey } from '../shared/members';
 import type { MemberItem } from '../shared/model';
 import { hit } from '../shared/ratelimit';
 
@@ -57,8 +57,8 @@ const SEALED_OVERHEAD = 1_156;
 export const ENVELOPE_BYTES_LARGE = 12_288 + SEALED_OVERHEAD; // 13,444
 /** Every other alternate-channel envelope: 4,096 bytes padded. */
 export const ENVELOPE_BYTES_SMALL = 4_096 + SEALED_OVERHEAD; // 5,252
-/** Response slots hold at most 8 KiB of envelope (§11.5). */
-const RESPONSE_MAX_BYTES = 8 * 1024;
+/** Every sealed result in a response slot is a 4,096-padded envelope (§11.3, §11.4, §11.5). */
+export const RESULT_ENVELOPE_BYTES = ENVELOPE_BYTES_SMALL; // 5,252
 
 /** An instance is live if it heartbeat within this many seconds. */
 export const LIVE_HEARTBEAT_S = 90;
@@ -176,14 +176,29 @@ const nowS = () => Math.floor(Date.now() / 1000);
 // ---- member gate -------------------------------------------------------------------
 
 /**
- * Every vault route: an active account in state `member` that has accepted
- * the current terms. `registered` users, and members whose accepted terms
- * are no longer current, get 403 terms_required.
+ * Access (§11.1):
+ *  - lock: any signed-in account holder with a vault, whatever the account
+ *    state, including a canceled account in its grace period (locking only
+ *    reduces exposure);
+ *  - status and request polling: an active account (cancellation blocks them);
+ *  - enclave, enroll, unlock: an active account in state `member` that has
+ *    accepted the current terms, else 403 terms_required.
  */
-async function loadVaultMember(req: MemberRequest): Promise<MemberItem> {
+async function loadAccountHolder(req: MemberRequest): Promise<MemberItem> {
   const s = await requireSession(req);
   const m = await memberByGuid(s.user_guid);
-  if (!canSignIn(m) || m.email !== s.email) throw forbidden('This account is not active');
+  if (!m || m.email !== s.email) throw forbidden('This account is not active');
+  return m;
+}
+
+async function loadActiveAccount(req: MemberRequest): Promise<MemberItem> {
+  const m = await loadAccountHolder(req);
+  if (!canSignIn(m)) throw forbidden('This account is not active');
+  return m;
+}
+
+async function loadVaultMember(req: MemberRequest): Promise<MemberItem> {
+  const m = await loadActiveAccount(req);
   if (m.state !== 'member') throw vaultError(403, 'terms_required', 'Accept the membership terms to use the vault');
   const terms = await currentTerms();
   if (terms && terms.version_id !== m.terms_version) {
@@ -199,7 +214,7 @@ async function limit(key: string, max: number, windowS: number): Promise<void> {
 
 // ---- vault rows --------------------------------------------------------------------
 
-const memberPointerKey = (guid: string) => `user#${guid}`;
+const memberPointerKey = vaultPointerKey;
 
 /** The member's current vault, read consistently through the per-member pointer row. */
 async function currentVault(guid: string): Promise<{ pointer: string | null; vault: VaultRow | null }> {
@@ -433,7 +448,7 @@ async function routeCheck(vault: VaultRow | null, instanceId: string, now: numbe
 // ---- routes --------------------------------------------------------------------------
 
 router.on('GET', '/api/vault/status', async (req) => {
-  const m = await loadVaultMember(req);
+  const m = await loadActiveAccount(req);
   await limit(`vault-status#${m.user_guid}`, 60, 60);
   const now = nowS();
   const v = activeVault((await currentVault(m.user_guid)).vault);
@@ -505,17 +520,20 @@ router.on('POST', '/api/vault/unlock', async (req) => {
   const etkKid = field(req.body, 'etk_kid', KID_RE, '16 lowercase hex');
   const envelope = checkEnvelope(req.body.envelope, ENVELOPE_BYTES_LARGE, etkKid);
   await limit(`vault-unlock#${m.user_guid}`, 10, 15 * 60);
-  await limit(`vault-unlock-net#${req.ip}`, 10, 15 * 60);
+  // Per source network: an IPv6 /64, or an IPv4 address (carrier NAT puts
+  // many members behind one address, hence the higher limit; §11.8).
+  await limit(`vault-unlock-net#${req.ip}`, req.ip.endsWith('/64') ? 10 : 60, 15 * 60);
 
   const vault = activeVault((await currentVault(m.user_guid)).vault);
   if (!vault || vault.vault_id !== vaultId) throw notFound('No such vault');
   const inst = await routeCheck(vault, instanceId, nowS());
   await enqueue('unlock', m, vault, requestId, inst, { etk_kid: etkKid, envelope });
+  await audit(m.email, 'vault.unlock_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: instanceId, release: inst.release });
   return new WithStatus(202, { vault_id: vault.vault_id, request_id: requestId });
 });
 
 router.on('POST', '/api/vault/lock', async (req) => {
-  const m = await loadVaultMember(req);
+  const m = await loadAccountHolder(req);
   const vaultId = field(req.body, 'vault_id', VAULT_ID_RE, '32 lowercase hex');
   const requestId = field(req.body, 'request_id', ULID_RE, 'a ULID');
   await limit(`vault-lock#${m.user_guid}`, 30, 15 * 60);
@@ -540,11 +558,12 @@ router.on('POST', '/api/vault/lock', async (req) => {
       throw e;
     }
   }
+  await audit(m.email, 'vault.lock_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: holder?.instance_id ?? null });
   return new WithStatus(202, { vault_id: vault.vault_id, request_id: requestId });
 });
 
 router.on('GET', '/api/vault/requests/{id}', async (req) => {
-  const m = await loadVaultMember(req);
+  const m = await loadActiveAccount(req);
   const requestId = req.params.id;
   if (!ULID_RE.test(requestId)) throw badRequest('Malformed request id');
   await limit(`vault-poll#${m.user_guid}`, 2, 1);
@@ -556,10 +575,13 @@ router.on('GET', '/api/vault/requests/{id}', async (req) => {
   let status = String(item.status);
   if (status === 'queued' && Date.parse(String(item.created_at)) / 1000 + QUEUE_RETENTION_S + EXPIRY_SLACK_S < now) status = 'expired';
   if (status !== 'queued' && status !== 'done' && status !== 'expired') status = 'expired';
-  const out: Record<string, unknown> = { request_id: requestId, op: item.op, status };
+  // §11.5: {status, envelope?, code?}. The envelope (vault.enroll.result,
+  // vault.unlock.result, or random bytes of the same size) is opaque here;
+  // anything but exactly 5,252 bytes is not passed on.
+  const out: Record<string, unknown> = { status };
   if (status === 'done') {
     const env = typeof item.envelope === 'string' ? decodeCanonicalB64(item.envelope) : null;
-    if (env && env.length <= RESPONSE_MAX_BYTES) out.envelope = item.envelope;
+    if (env && env.length === RESULT_ENVELOPE_BYTES) out.envelope = item.envelope;
     if (typeof item.code === 'string' && CODE_RE.test(item.code)) out.code = item.code;
   }
   return out;

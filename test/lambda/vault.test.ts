@@ -167,16 +167,14 @@ afterEach(() => {
 // ---- access ---------------------------------------------------------------------
 
 describe('access', () => {
-  const routes: [string, string, unknown?][] = [
-    ['GET', '/api/vault/status'],
+  // Enclave, enroll and unlock need a member with the current terms (§11.1).
+  const gated: [string, string, unknown?][] = [
     ['GET', '/api/vault/enclave'],
     ['POST', '/api/vault/enroll', { request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV }],
     ['POST', '/api/vault/unlock', { vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV }],
-    ['POST', '/api/vault/lock', { vault_id: VID, request_id: RID }],
-    ['GET', `/api/vault/requests/${RID}`],
   ];
 
-  test.each(routes)('registered users get 403 terms_required: %s %s', async (...[method, path, body]: [string, string, unknown?]) => {
+  test.each(gated)('registered users get 403 terms_required: %s %s', async (...[method, path, body]: [string, string, unknown?]) => {
     put('members', { user_guid: 'g1', email: 'g1@x.org', state: 'registered', account_status: 'active' });
     const r = await call(method, path, body);
     expect(r.status).toBe(403);
@@ -184,7 +182,7 @@ describe('access', () => {
     expect(sqs.calls()).toHaveLength(0);
   });
 
-  test.each(routes)('members whose accepted terms are no longer current get 403 terms_required: %s %s', async (...[method, path, body]: [string, string, unknown?]) => {
+  test.each(gated)('members whose accepted terms are no longer current get 403 terms_required: %s %s', async (...[method, path, body]: [string, string, unknown?]) => {
     put('terms', { version_id: 't1', status: 'superseded' });
     put('terms', { version_id: 't2', status: 'current' });
     const r = await call(method, path, body);
@@ -192,9 +190,33 @@ describe('access', () => {
     expect(r.body.error).toBe('terms_required');
   });
 
-  test('inactive accounts are refused', async () => {
+  test('lock and status stay available for an existing vault without current terms', async () => {
+    put('terms', { version_id: 't2', status: 'current' }); // g1 accepted t1 only
+    release(R0, 4);
+    instance('i-1', R0);
+    vaultOf('g1', { vault_id: VID, state: 'unlocked', lease: { instance_id: 'i-1', lease_expires_at: NOW + 60 } });
+    expect((await call('GET', '/api/vault/status')).body.vault.vault_id).toBe(VID);
+    expect((await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID })).status).toBe(202);
+    expect(sent()[0].msg.op).toBe('lock');
+    put('members', { user_guid: 'g1', email: 'g1@x.org', state: 'registered', account_status: 'active' });
+    expect((await call('GET', '/api/vault/status')).status).toBe(200);
+  });
+
+  test('a canceled account: every route but lock is blocked at once', async () => {
+    release(R0, 4);
+    instance('i-1', R0);
+    vaultOf('g1', { vault_id: VID, state: 'unlocked', lease: { instance_id: 'i-1', lease_expires_at: NOW + 60 } });
     put('members', { user_guid: 'g1', email: 'g1@x.org', state: 'member', account_status: 'canceled', terms_version: 't1' });
-    expect((await call('GET', '/api/vault/status')).status).toBe(403);
+    for (const [method, path, body] of [...gated, ['GET', '/api/vault/status'], ['GET', `/api/vault/requests/${RID}`]] as [string, string, unknown?][]) {
+      expect({ path, status: (await call(method, path, body)).status }).toEqual({ path, status: 403 });
+    }
+    expect((await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID })).status).toBe(202);
+    expect(sent().map((m) => m.msg.op)).toEqual(['lock']);
+  });
+
+  test("lock needs the caller's own vault", async () => {
+    vaultOf('g2', { vault_id: VID });
+    expect((await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID })).status).toBe(404);
   });
 
   test('state-changing routes need the CSRF header', async () => {
@@ -463,6 +485,25 @@ describe('POST /api/vault/unlock', () => {
     expect((await call('POST', '/api/vault/unlock', body({ request_id: '01JB2Z6V9K3M4N5P6Q7R8S9TZZ' }))).status).toBe(429);
   });
 
+  test('audited without PIN or envelope', async () => {
+    vaultOf('g1', { vault_id: VID });
+    await call('POST', '/api/vault/unlock', body());
+    const item = ddb.commandCalls(PutCommand).find((c) => c.args[0].input.TableName === 'audit')!.args[0].input.Item!;
+    expect(item).toMatchObject({ action: 'vault.unlock_request', subject: 'g1', detail: { vault_id: VID, request_id: RID, instance_id: 'i-1' } });
+    expect(JSON.stringify(item)).not.toContain(ENV.slice(0, 64));
+  });
+
+  test('60 per IPv4 address (carrier NAT) across members', async () => {
+    const headers = { 'cloudfront-viewer-address': '198.51.100.7:443' };
+    const key = `vault-unlock-net#198.51.100.7#${NOW - (NOW % 900)}`;
+    put('rl', { key, count: 59 });
+    vaultOf('g1', { vault_id: VID });
+    expect((await call('POST', '/api/vault/unlock', body(), { headers })).status).toBe(202); // 60th
+    const r = await call('POST', '/api/vault/unlock', body({ request_id: RID2 }), { headers });
+    expect(r.status).toBe(429);
+    expect(getItem('rl', key).count).toBe(61);
+  });
+
   test('10 per source /64 across members', async () => {
     vaultOf('g1', { vault_id: VID });
     vaultOf('g2', { vault_id: 'e'.repeat(32) });
@@ -503,13 +544,15 @@ describe('POST /api/vault/lock', () => {
     expect(m.url).toBe(QUEUE_PREFIX + 'i-1');
     expect(Object.keys(m.msg)).toEqual(['v', 'op', 'vault_id', 'user_guid', 'request_id', 'enqueued_at']);
     expect(m.msg.op).toBe('lock');
+    const item = ddb.commandCalls(PutCommand).find((c) => c.args[0].input.TableName === 'audit')!.args[0].input.Item!;
+    expect(item).toMatchObject({ action: 'vault.lock_request', detail: { vault_id: VID, request_id: RID, instance_id: 'i-1' } });
   });
 
   test('no live lease: nothing to lock, the slot is done at once', async () => {
     vaultOf('g1', { vault_id: VID });
     expect((await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID })).status).toBe(202);
     expect(sqs.calls()).toHaveLength(0);
-    expect((await call('GET', `/api/vault/requests/${RID}`)).body).toEqual({ request_id: RID, op: 'lock', status: 'done' });
+    expect((await call('GET', `/api/vault/requests/${RID}`)).body).toEqual({ status: 'done' });
   });
 });
 
@@ -522,15 +565,18 @@ describe('GET /api/vault/requests/{id}', () => {
 
   test('queued, then done with the opaque envelope and code', async () => {
     slot({});
-    expect((await call('GET', `/api/vault/requests/${RID}`)).body).toEqual({ request_id: RID, op: 'unlock', status: 'queued' });
+    expect((await call('GET', `/api/vault/requests/${RID}`)).body).toEqual({ status: 'queued' });
     slot({ status: 'done', envelope: RESULT, code: 'etk_unknown' });
     jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + 1000); // next polling window
-    expect((await call('GET', `/api/vault/requests/${RID}`)).body).toEqual({ request_id: RID, op: 'unlock', status: 'done', envelope: RESULT, code: 'etk_unknown' });
+    expect((await call('GET', `/api/vault/requests/${RID}`)).body).toEqual({ status: 'done', envelope: RESULT, code: 'etk_unknown' });
   });
 
-  test('oversized or malformed response envelopes are not passed on', async () => {
-    slot({ status: 'done', envelope: Buffer.alloc(8_193).toString('base64'), code: 'Bad Code' });
-    expect((await call('GET', `/api/vault/requests/${RID}`)).body).toEqual({ request_id: RID, op: 'unlock', status: 'done' });
+  test('only a 5,252-byte result envelope and a well-formed code are passed on', async () => {
+    for (const [i, bytes] of [5_251, 5_253, 13_444, 8_192].entries()) {
+      jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + i * 1000);
+      slot({ status: 'done', envelope: Buffer.alloc(bytes).toString('base64'), code: 'Bad Code' });
+      expect((await call('GET', `/api/vault/requests/${RID}`)).body).toEqual({ status: 'done' });
+    }
   });
 
   test('still queued after queue retention → expired', async () => {
@@ -580,6 +626,7 @@ describe('GET /api/vault/status', () => {
 test('envelope sizes match VAULT-MESSAGING §5.4', () => {
   expect(vault.ENVELOPE_BYTES_LARGE).toBe(13_444);
   expect(vault.ENVELOPE_BYTES_SMALL).toBe(5_252);
+  expect(vault.RESULT_ENVELOPE_BYTES).toBe(5_252);
   expect(vault.decodeCanonicalB64('AA==')).toEqual(Buffer.from([0]));
   expect(vault.decodeCanonicalB64('AB==')).toBeNull(); // non-zero padding bits
   expect(vault.decodeCanonicalB64('AA')).toBeNull();

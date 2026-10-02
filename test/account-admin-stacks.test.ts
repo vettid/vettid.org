@@ -417,6 +417,12 @@ describe('VettidOrgMemberApiStack', () => {
       expect(instanceWrites).toHaveLength(0);
     });
 
+    test('only the cleanup job may delete vault rows (canceled accounts after the grace period)', () => {
+      const deletes = stmts().filter((s: any) => str(s.Action).includes('dynamodb:DeleteItem') && str(s.Resource).includes('table/vettid-org-vaults'));
+      expect(deletes).toHaveLength(1);
+      expect([].concat(deletes[0].Action).sort()).toEqual(['dynamodb:DeleteItem', 'dynamodb:Query']);
+    });
+
     test('the queue URL prefix is pinned to this account and region', () => {
       const fns = Object.values<any>(t.findResources('AWS::Lambda::Function'));
       const v = fns.find((f) => f.Properties.Environment?.Variables?.VAULT_QUEUE_URL_PREFIX);

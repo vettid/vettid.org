@@ -210,6 +210,8 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     g(cleanup, 'members', ['Query', 'DeleteItem'], true);
     g(cleanup, 'subscriptions', ['Query', 'UpdateItem', 'DeleteItem'], true);
     g(cleanup, 'audit', ['PutItem']);
+    // canceled accounts: their vault rows go with them (vault objects: V5)
+    g(cleanup, 'vaults', ['Query', 'DeleteItem'], true);
     // stale-request reclaim: keep identities the mailing list still uses
     tableGrant(this, config, cleanup, 'mailing-list', ['GetItem']);
     cleanup.addEnvironment('TABLE_MAILING_LIST', resourceName(config, 'mailing-list'));
