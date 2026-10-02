@@ -1,7 +1,7 @@
 ---
 title: PQC-MIGRATION
 status: draft
-version: 0.2.0
+version: 0.3.0
 date: 2026-08-21
 owner: Al Liebl (Mesmer)
 component: cross-cutting (vettid-agent, relay, vault manager, credential format)
@@ -11,6 +11,9 @@ related:
   - PUSH-GATEWAY.md
   - CALLING-SERVICE.md
 changelog:
+  - 0.3.0: §5.1 names a standardized instantiation (HPKE with MLKEM768X25519,
+    in the Go 1.26 standard library) as the preferred way to meet the hybrid
+    KEM requirements
   - 0.2.0: calling media encryption added to Phase 2 (SFrame over hybrid KEM,
     closes the DTLS-SRTP gap); open question 3 resolved via QR claim-check
     (new section 6.5)
@@ -105,6 +108,17 @@ Requirements:
 - An attacker must break **both** X25519 and ML-KEM-768 to recover `ss`.
 - Recipient key bundles advertise `{pk_x25519, pk_mlkem, suite_version}`.
   Suite version `1` = classical only (transition); `2` = hybrid.
+
+**Standardized instantiation (preferred).** The construction above states the
+security requirements; implementations SHOULD meet them with a standardized
+hybrid rather than a hand-rolled combiner. HPKE (RFC 9180) with the
+`MLKEM768X25519` KEM — the X-Wing-style hybrid, available in Go's standard
+library (`crypto/hpke`, Go ≥ 1.26), Apple CryptoKit and BouncyCastle —
+satisfies them: its combiner hashes both shared secrets together with the
+ciphertext and public key, so an attacker must break both X25519 and
+ML-KEM-768, and HPKE's `info` carries the protocol label and transcript
+binding. VettID's vault messaging suite 2 uses HPKE(MLKEM768X25519,
+HKDF-SHA256, ChaCha20-Poly1305) (VAULT-MESSAGING §4).
 
 ### 5.2 Hybrid signatures (component #3)
 
