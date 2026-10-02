@@ -1,8 +1,8 @@
 ---
 title: PQC-MIGRATION
 status: draft
-version: 0.3.0
-date: 2026-08-21
+version: 0.3.1
+date: 2026-10-02
 owner: Al Liebl (Mesmer)
 component: cross-cutting (vettid-agent, relay, vault manager, credential format)
 related:
@@ -11,6 +11,7 @@ related:
   - PUSH-GATEWAY.md
   - CALLING-SERVICE.md
 changelog:
+  - 0.3.1: §6.5 defers the QR and bundle format to VAULT-MESSAGING §6.4
   - 0.3.0: §5.1 names a standardized instantiation (HPKE with MLKEM768X25519,
     in the Go 1.26 standard library) as the preferred way to meet the hybrid
     KEM requirements
@@ -168,13 +169,17 @@ Hybrid key bundles are too large for QR-carried exchange (an ML-KEM-768
 public key alone is 1,184 bytes). Resolution: QR codes carry a **claim-check
 with a commitment**, never the bundle itself.
 
-```
-QR = { v, claim_id, bundle_hash (SHA-256, 32 B), exp }   # ~80 bytes
-```
+The normative QR / link payload, bundle format and bundle encryption are
+defined in **VAULT-MESSAGING §6.4**, which supersedes the sketch in earlier
+versions of this section. In outline:
 
-- The full bundle `{pk_x25519, pk_mlkem, suite_version, ...}` is deposited
-  on the relay as a bootstrap deposit type; the scanner fetches by
-  `claim_id`, recomputes SHA-256, and rejects on mismatch.
+- The QR carries the relay, a claim id, `h` = SHA-256 of the encrypted
+  bundle blob, the bundle key and the expiry (~200 bytes, unchanged by
+  bundle size).
+- The bundle (the inviter's `ik`, hybrid KEM `ek`, relay address, open
+  token) is encrypted under the QR's key and left on the relay as a
+  single-fetch claim; the scanner fetches it by claim id, recomputes
+  SHA-256, and rejects on mismatch before decrypting.
 - The commitment keeps the relay untrusted for integrity (a compromised
   relay cannot substitute a bundle) — consistent with the no-inbound-path
   posture where relays move bytes but vouch for nothing.
