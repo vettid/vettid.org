@@ -14,6 +14,7 @@ import { VettidOrgMemberApiStack } from './stacks/member-api-stack';
 import { VettidOrgAccountSiteStack } from './stacks/account-site-stack';
 import { VettidOrgAuditStack } from './stacks/audit-stack';
 import { VettidOrgRelayStack } from './stacks/relay-stack';
+import { VettidOrgVaultSmokeStack } from './stacks/vault-smoke-stack';
 
 /**
  * Builds every stack in the vettid.org app. Kept out of bin/ so tests can
@@ -95,6 +96,16 @@ export function buildApp(app: cdk.App): void {
     new VettidOrgRelayStack(app, 'VettidOrgRelayStack', { config, relayImage: config.relay.image, litestreamImage: config.relay.litestreamImage, env });
   } else {
     cdk.Annotations.of(app).addInfoV2('vettid:relay-unconfigured', 'VettidOrgRelayStack skipped: set context relayImage and litestreamImage (digest-pinned)');
+  }
+
+  // ---- TEMPORARY vault hardware smoke test (VAULT-PLAN V5). Only with
+  // `-c vaultSmoke=true`; destroy it when the test is done. ----
+  if (app.node.tryGetContext('vaultSmoke') === 'true' || app.node.tryGetContext('vaultSmoke') === true) {
+    new VettidOrgVaultSmokeStack(app, 'VettidOrgVaultSmokeStack', {
+      config,
+      pcr0: String(app.node.tryGetContext('vaultSmokePcr0') ?? ''),
+      env,
+    });
   }
 
   // ---- Account-level audit & detection (CloudTrail, GuardDuty, alerts) ----
