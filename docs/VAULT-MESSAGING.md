@@ -2029,15 +2029,31 @@ shape or truncated listing refuses the seal.
    Other condition entries in the same statement can only narrow it, but
    the enclave still accepts only these: `StringEquals` /
    `StringEqualsIgnoreCase` on `kms:RecipientAttestation:PCR1` to `PCR8`
-   (PCR1 and PCR2, if present, equal the manifest's), on
-   `kms:EncryptionContext:<key>` and on `kms:CallerAccount`, and
-   `ArnEquals` on `aws:PrincipalArn`. Anything else fails.
-8. `Principal` is not used to grant or deny the check: the attestation
-   condition, which only an enclave running that image can satisfy, is the
-   gate. Any well-formed `Principal` is accepted.
+   (PCR1 and PCR2, if present, equal the manifest's) and on
+   `kms:EncryptionContext:<key>`; `StringEquals` on `kms:CallerAccount`
+   (required, and equal to the pinned account, check 8); and `ArnEquals` on
+   `aws:PrincipalArn` with ARNs in the pinned account. Anything else fails.
+8. **Principals.** Releases are public and reproducible, so anyone can run
+   a genuine release image in their own AWS account and present a valid
+   attestation with its PCR0. The attestation condition alone therefore
+   does not keep other accounts out; the principal must. In **every**
+   `Allow` statement:
+   - `Principal` is `{"AWS": <ARN or array of ARNs>}` and every ARN is in
+     the pinned account: the account root `arn:aws:iam::<account>:root` or
+     an IAM role `arn:aws:iam::<account>:role/<path/name>`;
+   - rejected: `"*"`, `{"AWS": "*"}`, any other account, account ids
+     without the ARN form, `Service`, `Federated` or `CanonicalUser`
+     principals, and anything else.
+
+   The `Decrypt` and `GenerateDataKey` statements MUST also carry
+   `StringEquals` `kms:CallerAccount` = the pinned account, as defence in
+   depth against a principal-shape mistake. Read-only statements are held
+   to the same pinned-account rule: foreign reads of a key's metadata would
+   be harmless, but there is no reason to allow them.
 
 **Example policy that passes**, for release 4 whose sealing policy admits
-release 3. `<pcr0-4>` and `<pcr0-3>` stand for the releases' PCR0s:
+release 3, in the pinned account `111122223333`. `<pcr0-4>` and `<pcr0-3>`
+stand for the releases' PCR0s:
 
 ```json
 {
@@ -2047,11 +2063,13 @@ release 3. `<pcr0-4>` and `<pcr0-3>` stand for the releases' PCR0s:
     { "Sid": "UnsealOnlyInRelease4", "Effect": "Allow",
       "Principal": {"AWS": "arn:aws:iam::111122223333:role/vettid-enclave-host"},
       "Action": "kms:Decrypt", "Resource": "*",
-      "Condition": {"StringEqualsIgnoreCase": {"kms:RecipientAttestation:ImageSha384": "<pcr0-4>"}} },
+      "Condition": {"StringEqualsIgnoreCase": {"kms:RecipientAttestation:ImageSha384": "<pcr0-4>"},
+                    "StringEquals": {"kms:CallerAccount": "111122223333"}} },
     { "Sid": "SealFromAdmittedReleases", "Effect": "Allow",
       "Principal": {"AWS": "arn:aws:iam::111122223333:role/vettid-enclave-host"},
       "Action": "kms:GenerateDataKey", "Resource": "*",
-      "Condition": {"StringEqualsIgnoreCase": {"kms:RecipientAttestation:ImageSha384": ["<pcr0-3>", "<pcr0-4>"]}} },
+      "Condition": {"StringEqualsIgnoreCase": {"kms:RecipientAttestation:ImageSha384": ["<pcr0-3>", "<pcr0-4>"]},
+                    "StringEquals": {"kms:CallerAccount": "111122223333"}} },
     { "Sid": "EnclaveVerifiesThisPolicy", "Effect": "Allow",
       "Principal": {"AWS": "arn:aws:iam::111122223333:role/vettid-enclave-host"},
       "Action": ["kms:DescribeKey", "kms:GetKeyPolicy", "kms:ListGrants"], "Resource": "*" }
@@ -2079,6 +2097,11 @@ root, can change the policy, add grants, disable or delete the key.
 | `StringLike` with value `"*"` on `ImageSha384` | 7 |
 | A `GenerateDataKey` value that is not a manifest release numbered ≤ 4 | 6 |
 | A statement member `"Condition2"`, or a duplicated `"Action"` member | 4 |
+| `"Principal": "*"` or `{"AWS": "*"}` on the `Decrypt` statement | 8 |
+| `Principal` `arn:aws:iam::444455556666:role/x` (another account) on `GenerateDataKey` | 8 |
+| `Principal` `{"Service": "ec2.amazonaws.com"}` on any statement | 8 |
+| `"Principal": "*"` on the read-only statement | 8 |
+| `Decrypt` without the `kms:CallerAccount` condition, or with another account | 8 |
 | `ListGrants` returns one grant | 3 |
 | `DescribeKey` shows `Origin` = `EXTERNAL` or `MultiRegion` = `true` | 2 |
 
@@ -2406,8 +2429,9 @@ pending (§15, follow-up 1).
     start, and what the app shows and stores.
   - §11.10.7: before sealing to a release key, the enclave reads its
     metadata, policy and grants from KMS over TLS it terminates and checks
-    them against a strict allow-list (only that release can decrypt; no
-    grants, no policy changes, no re-encryption or other escape hatches),
+    them against a strict allow-list (only that release, in the pinned
+    account, can decrypt; no grants, no policy changes, no re-encryption or
+    other escape hatches),
     with a passing example policy and variants that must fail.
   - §11.3, §11.4: enroll and unlock requests carry the manifest and are
     padded to 12,288 bytes (§5.4); the unlock also carries an optional

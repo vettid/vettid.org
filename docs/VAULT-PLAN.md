@@ -233,13 +233,17 @@ any later release VettID ships.
     single-region, in the pinned account and region, no grants;
   - key policy with exactly three `Allow` statements and nothing else:
     1. `kms:Decrypt`, condition `StringEqualsIgnoreCase`
-       `kms:RecipientAttestation:ImageSha384` = the release's PCR0;
-    2. `kms:GenerateDataKey`, same condition with the PCR0s of the release
+       `kms:RecipientAttestation:ImageSha384` = the release's PCR0 and
+       `StringEquals` `kms:CallerAccount` = the account;
+    2. `kms:GenerateDataKey`, same conditions with the PCR0s of the release
        and the releases admitted to move vaults into it;
     3. `kms:DescribeKey`, `kms:GetKeyPolicy`, `kms:ListGrants`, no
        condition;
 
-    all with `Principal` = the enclave host role and `Resource` = `"*"`.
+    all with `Principal` = `{"AWS": "<enclave host role ARN in the
+    account>"}` (never `"*"` or another account: anyone can run a public
+    release image and present its attestation elsewhere) and
+    `Resource` = `"*"`.
     The example in VAULT-MESSAGING §11.10.7 is normative.
   - **No administrator statement**: no `kms:*`, no account-root
     delegation, no `PutKeyPolicy`, `CreateGrant`, `Encrypt`, `ReEncrypt*`,
