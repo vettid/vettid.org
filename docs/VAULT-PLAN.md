@@ -5,8 +5,8 @@ version: 0.1.0
 date: 2026-10-02
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.2.2) — the wire and behaviour spec this plan implements
-  - RELAY-PROTOCOL.md (0.3.0), RELAY-PLAN.md
+  - VAULT-MESSAGING.md (0.2.3) — the wire and behaviour spec this plan implements
+  - RELAY-PROTOCOL.md (0.4.0), RELAY-PLAN.md
   - PQC-MIGRATION.md (0.3.0)
   - MEMBER-API.md, RUNBOOK.md
 classification: public (no secrets; safe for github.com/vettid)
