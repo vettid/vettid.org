@@ -278,7 +278,10 @@ limits above.
 - `vettid-org-vault-requests` (PK `request_id`, TTL `expires_at`, 15 min),
   the response slots. API: `vault_id`, `user_guid`, `op`, `status: queued`,
   `instance_id`, `created_at`; *host*: `status: done`, `envelope` (b64 of
-  5,252 bytes, if any) and `code: etk_unknown` when the enclave reported it.
+  5,252 bytes, if any) and `code: etk_unknown` when the enclave reported it,
+  or `status: expired` for a request the host did not forward (the lease is
+  held elsewhere) or the enclave could not read (VAULT-MESSAGING 0.3.2
+  §11.5). The host only updates slots that are still `queued`.
 - `vettid-org-vault-releases` (PK `release` = PCR0, GSI `status-index` on
   `status` + `release_number`), rendered from the signed manifest by
   operations: `release_number`, `status` (`active|deprecated|retired`),
