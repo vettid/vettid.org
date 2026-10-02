@@ -5,7 +5,7 @@ version: 0.1.0
 date: 2026-10-02
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.3.0) — the wire and behaviour spec this plan implements
+  - VAULT-MESSAGING.md (0.3.1) — the wire and behaviour spec this plan implements
   - RELAY-PROTOCOL.md (0.4.0), RELAY-PLAN.md
   - PQC-MIGRATION.md (0.3.0)
   - MEMBER-API.md, RUNBOOK.md
@@ -259,6 +259,22 @@ any later release VettID ships.
 - **Manifest signing key:** a KMS ECC_NIST_P256 key, sign-only, in a
   separate account with multi-party approval; apps and release images pin
   its public key.
+- **Release registry (member API):** operations render each release's
+  manifest status and availability into the `vettid-org-vault-releases`
+  table, which the API uses for routing, `410 release_unavailable` and
+  enrollment into an `active` release (VAULT-MESSAGING §11.10.5). The API
+  only records on-demand start requests (`start_requested_at`) there; a
+  scaler (for example a stream- or schedule-triggered function that scales
+  the host ASG) acts on them in V5.
+- **Control queues:** `vettid-org-vault-control-<instance_id>`, created and
+  deleted by the parent; the API's `sqs:SendMessage` is limited to that
+  prefix in its own account and region. Instances heartbeat the registry at
+  least every 30 s; the API treats an instance as live within 90 s.
+- **Account cancellation:** the account lifecycle blocks vault routes
+  (except lock) at cancellation, and after the 7-day grace deletes the
+  member's vault rows and the stored state and headers (all
+  `vaults/<vault_id>/` objects) — an operator power the host already has
+  (VAULT-MESSAGING §13.5).
 - **Allowlist:** the parent's TCP allowlist gains
   `kms.<region>.amazonaws.com:443`; the enclave terminates TLS to it and
   signs its own SigV4 requests with role credentials the parent supplies
