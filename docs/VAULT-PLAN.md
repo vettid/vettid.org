@@ -114,7 +114,7 @@ and no Nitro hardware.
   client-anchored rollback, device attestation (§11.7: Android key
   attestation and App Attest, verified with test CAs in CI and pinned vendor
   roots in release builds), Google attestation revocation list fetch.
-- Supervisor port: process-per-vault, NSM behind an interface (fake NSM with a
+- Supervisor port: one process per vault (D4, §5.3), NSM behind an interface (fake NSM with a
   test CA in CI), KMS sealing via the parent.
 - Parent: vsock mux, per-instance SQS queue, instance registry heartbeat,
   leases, TCP forwarder with relay/KMS/Google allowlist, S3, and role
@@ -150,8 +150,10 @@ and `vaultctl` scripts exercise them through the real relay.
 - **Account deletion:** extend the member API cleanup job
   (`lambda/jobs/cleanup.ts`, TODO there) to delete every object under
   `vaults/<vault_id>/` in the vault data bucket for canceled accounts past
-  their 7-day grace (it already deletes their vault rows), with
-  `s3:ListBucket`/`s3:DeleteObject` scoped to `vaults/*`.
+  their 7-day grace (it already deletes their vault rows), and the
+  enclave's member index object `users/<hex SHA-256("vettid/vms/2/user" ||
+  0x00 || user_guid)>/vault` (VAULT-MESSAGING 0.3.2 §11.1), with
+  `s3:ListBucket`/`s3:DeleteObject` scoped to `vaults/*` and `users/*`.
 - **VettidOrgNitroStack**: VPC with public subnets and no NAT, Graviton host
   ASG (min 0), IMDSv2 hop 1, no inbound, SSM-only access, alarms.
 - EIF and AMI build (vettid-vault CI + script), PCR manifest published at
@@ -182,7 +184,7 @@ SFrame), backup and recovery, PQC Phase 2 (ML-DSA, Go 1.27).
 | D1 | **Sealing across releases: re-seal per release, approved by the member** (§5.1). The member keeps total control: no release can open a vault the member hasn't moved to it. | Decided 2026-10-02 |
 | D2 | **Instance:** on-demand (no Spot). Graviton m7g.large proposed; ASG parked at 0 until the preview opens. | Decided 2026-10-02 |
 | D3 | **Reproducible builds: required.** Pinned toolchain image, `-trimpath`, no secrets in the image, documented `make eif`; anyone can recompute PCR0 and compare it with the manifest. | Decided 2026-10-02 |
-| D4 | **Process model:** one vault manager process per unlocked vault inside the enclave; it dispatches to feature event handlers. | Decided 2026-10-02 |
+| D4 | **Process model:** one OS process per unlocked vault inside the enclave, holding all of that vault's secrets and running its feature handlers; the supervisor keeps only shared duties and no per-vault secrets (§5.3). | Decided 2026-10-02; isolation requirements of §5.3 added after the V3b review |
 | D5 | **TLS terminates in the enclave**, over a few shared HTTP/2 connections per instance, with pinned roots for the allowlisted hosts (§5.2). | Decided 2026-10-02 |
 
 ### 5.1 D1: re-sealing per release
@@ -310,10 +312,22 @@ enclave and payloads are end-to-end encrypted.
 - **Root updates force releases.** Under D1 every release needs each member's
   approval, so the root store must change rarely. Pinning only the roots we
   need does that: Amazon Root CA 1 for relay.vettid.org (ACM; valid to 2038)
-  and for the regional KMS endpoint (Amazon Trust Services; the exact chain,
-  including any Starfield cross-sign, is confirmed in V3), and Google Trust
-  Services roots for the attestation revocation list (valid
-  to 2036), with backups, rather than a full CA bundle.
+  and for the regional KMS endpoint (Amazon Trust Services), and Google
+  Trust Services roots for the attestation revocation list (valid to 2036),
+  with backups, rather than a full CA bundle. Confirmed 2026-10-02 (V3b):
+
+  | Host | Chain verified against the pinned pool | ALPN |
+  |---|---|---|
+  | relay.vettid.org | leaf → Amazon RSA 2048 M01 → Amazon Root CA 1 | h2 |
+  | kms.us-east-1 / eu-west-1.amazonaws.com | leaf → Amazon RSA 2048 M04 → Amazon Root CA 1 | HTTP/1.1 only |
+  | android.googleapis.com | leaf → WR2 → GTS Root R1 | h2 |
+
+  Both Amazon hosts also send Amazon Root CA 1 cross-signed by Starfield
+  Services Root CA – G2, and Google sends GTS Root R1 cross-signed by
+  GlobalSign Root CA; neither cross-certificate is needed and neither
+  Starfield nor GlobalSign is pinned. Pinned: Amazon Root CA 1–4 (2–4
+  cover the other key types ACM issues under) and GTS Root R1, R3, R4.
+  KMS offers no HTTP/2, so KMS calls use a small HTTP/1.1 keep-alive pool.
 - **Clock.** Certificate validation needs time. The enclave clock comes from
   the Nitro hypervisor, not the parent; validate with a margin, as the
   relay's timestamp checks already require a correct clock.
@@ -337,6 +351,59 @@ the parent's allowlist. It keeps the host from learning the social graph and
 from seeing bearer secrets, at the cost of a few hundred lines and a root
 store that changes about once a decade. If the pinned roots must change, that
 is a normal release under D1.
+
+### 5.3 D4: one process per vault
+
+The owner's requirement is that no flaw in one vault's code can leak
+another vault's secrets, and that locking a vault leaves none of its
+secrets behind in memory. Inside the enclave:
+
+- **Supervisor** (PID 1): the NSM broker, the ETKs and the outer
+  decryption and routing of alternate-channel requests, the egress (TLS
+  and the shared HTTP/2 pool, D5), the parent link, and the vault
+  processes' lifecycle. It holds **no per-vault long-term secret**: no DEK,
+  pepper, relay key, identity or KEM key, session key, or plaintext vault
+  state.
+- **One OS process per unlocked vault**, started on enroll or unlock (a
+  re-executed mode of the enclave binary, so no second measured image) and
+  exiting on lock, which frees all of its memory. All feature handlers run
+  in it.
+- **Secrets reach the vault process directly.** After the supervisor
+  decrypts an alternate-channel request with the ETK, it hands the
+  decrypted request to the vault process over the channel and zeroizes its
+  copy at once; as the ETK holder it sees the PIN transiently (it is the
+  shared trusted base, as in vettid.dev). The sealed header and its pepper
+  are unwrapped inside the vault process: the process generates its own
+  ephemeral RSA key; the supervisor only obtains an NSM attestation
+  document binding that public key and forwards the KMS call, so KMS's
+  `CiphertextForRecipient` is readable only by that process. The
+  §11.10.7 key-policy check runs in the vault process, which is the one
+  that decides to seal.
+- **Relay and storage:** requests are built and Ed25519-signed in the vault
+  process (the relay key never leaves it); the supervisor carries them over
+  the shared TLS/HTTP/2 pool and sees only signed requests with end-to-end
+  encrypted payloads. State objects are DEK-encrypted in the vault process.
+- **Channel:** one socketpair per vault process, a narrow, versioned,
+  length-prefixed protocol, parsed strictly and fuzzed. The supervisor
+  scopes everything it brokers to the process's vault: objects under
+  `vaults/<vault_id>/` (plus the member index object, and read-only access
+  to the member's previous vault at re-enrollment), relay requests to the
+  allowlisted relay signed by the vault's own key, KMS calls, and
+  attestation documents that bind only the process's Recipient key or the
+  vault bundle hash, never arbitrary `user_data`.
+- **Hardening per vault process:** its own UID/GID (allocated by the
+  supervisor), `PR_SET_DUMPABLE=0` (the supervisor too), no ptrace, no
+  inherited file descriptors but the channel, no shared writable files or
+  directories, a minimal environment, rlimits (address space, open files,
+  no core dumps), killed with its parent (`PDEATHSIG`). Seccomp is a
+  follow-up.
+- **Locks:** eviction (memory pressure, a vault cap), a lost lease or a lost
+  parent → the supervisor tells the process to lock (flush, exit) and kills
+  it if it does not exit in time; a process that detects a split brain
+  zeroizes and exits without flushing.
+- **Build rules (`make check-tcb`):** the vault and feature packages cannot
+  import the supervisor's internals and vice versa, and use neither
+  `unsafe` nor cgo.
 
 ## 6. Testing without hardware
 
