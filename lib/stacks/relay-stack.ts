@@ -114,6 +114,12 @@ export class VettidOrgRelayStack extends cdk.Stack {
         RELAY_BASE_URL: `https://${host}`,
         RELAY_DB_PATH: DB_FILE,
         RELAY_TRUST_PROXY: 'true',
+        // Protocol 0.3 policy (docs/RELAY-PROTOCOL.md §5.2, §5.6, §6.9): 400-day
+        // low-quota reconnect tokens; open tokens and claims up to 7 days for
+        // remote invitations (docs/VAULT-MESSAGING.md).
+        RELAY_MAX_TOKEN_LIFETIME: '9600h',
+        RELAY_OPEN_TOKEN_MAX_LIFETIME: '168h',
+        RELAY_CLAIM_TTL: '168h',
       },
       logging: logging('relay'),
       stopTimeout: cdk.Duration.seconds(40), // drain long-polls / WebSockets on SIGTERM

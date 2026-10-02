@@ -37,7 +37,7 @@ test('restore runs to completion before the relay; replication starts once the r
   expect(byName.Relay.HealthCheck.Command).toEqual(['CMD', '/relay', '-healthcheck']);
   expect(byName.Replicate.DependsOn).toEqual([{ ContainerName: 'Relay', Condition: 'HEALTHY' }]);
   expect(byName.Relay.Image).toMatch(/@sha256:[0-9a-f]{64}$/);
-  expect(byName.Relay.Environment).toEqual(expect.arrayContaining([{ Name: 'RELAY_BASE_URL', Value: 'https://relay.vettid.org' }, { Name: 'RELAY_TRUST_PROXY', Value: 'true' }]));
+  expect(byName.Relay.Environment).toEqual(expect.arrayContaining([{ Name: 'RELAY_BASE_URL', Value: 'https://relay.vettid.org' }, { Name: 'RELAY_TRUST_PROXY', Value: 'true' }, { Name: 'RELAY_MAX_TOKEN_LIFETIME', Value: '9600h' }, { Name: 'RELAY_OPEN_TOKEN_MAX_LIFETIME', Value: '168h' }, { Name: 'RELAY_CLAIM_TTL', Value: '168h' }]));
 });
 
 test('task accepts traffic only from the ALB; no NAT gateways', () => {
