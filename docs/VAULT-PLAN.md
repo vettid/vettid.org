@@ -53,7 +53,7 @@ feature handlers into it one area at a time behind a small handler interface.
 | Relay client | **move** `vettid-relay/internal/client` → public `vettid-relay/relayclient` | One implementation for vault, agent and test driver. Needs a pluggable dialer (vsock to the parent). |
 | Vault runtime: state store, sealed header, dedupe, outbox, token registry, collect loop, leases | **new** | `state_seq`/`header_seq`, conditional writes, split-brain lock. |
 | Supervisor: NSM attestation, KMS sealing via parent, process-per-vault, IPC, memory manager | **port + trim** | Drop the baked vsock secret, the seed/vote/invite/leash proxies and the RSA PKCS#1 v1.5 fallback. Dev mode becomes a build tag. |
-| Parent | **rewrite small** (~1.5k) | vsock mux, SQS consumer, TCP forwarder to an allowlist, S3 conditional get/put, KMS proxy, lease writes, health. No parsing. |
+| Parent | **rewrite small** (~1.5k) | vsock mux, SQS consumer, TCP forwarder to an allowlist (relay, KMS, Google), S3 conditional get/put, instance-role credentials for the enclave's own KMS calls, lease writes, health. No parsing. |
 | Feature handlers | **port** from vault-manager | Re-homed behind `Handler(ctx, Session, Inner) (Inner, error)`; their storage and logic move mostly unchanged, the publish calls change. |
 | Removed | — | NATS creds/proxy, service/B2C, combined datastore, votes, org vault, WASM handler registry, `unseal`/`sign` stubs, legacy aliases. |
 
@@ -117,7 +117,8 @@ and no Nitro hardware.
 - Supervisor port: process-per-vault, NSM behind an interface (fake NSM with a
   test CA in CI), KMS sealing via the parent.
 - Parent: vsock mux, per-instance SQS queue, instance registry heartbeat,
-  leases, TCP forwarder with relay/Google allowlist, S3 and KMS.
+  leases, TCP forwarder with relay/KMS/Google allowlist, S3, and role
+  credentials for the enclave's KMS calls (TLS ends in the enclave).
 - Member API (this repo): `vault` route group (`/api/vault/enclave`, `enroll`,
   `unlock`, `lock`, `requests/{id}`, `status`), vault, instance-registry and
   request tables, rate limits per §11.8.
@@ -225,15 +226,39 @@ any later release VettID ships.
   (a fix for a bad release ships as a newer release), and a pending move
   recorded in vault state is completed at the next unlock if the header
   write is interrupted.
-- **CDK:** one KMS key per release, rendered from the manifest, with RETAIN.
-  `Decrypt` only with a Nitro attestation of that release's PCR0;
-  `GenerateDataKey` only with a Recipient attestation of a release admitted
-  to seal for it (itself and the releases that may move vaults into it). Key
-  policies are created without any principal allowed `PutKeyPolicy`, so they
-  cannot be loosened later (VAULT-MESSAGING §13.5).
+- **CDK: one KMS key per release**, rendered from the manifest, with RETAIN.
+  The enclave refuses to seal to a key that does not match this shape
+  exactly (VAULT-MESSAGING §11.10.7), so this is the only shape to deploy:
+  - symmetric (`SYMMETRIC_DEFAULT`, `ENCRYPT_DECRYPT`), origin `AWS_KMS`,
+    single-region, in the pinned account and region, no grants;
+  - key policy with exactly three `Allow` statements and nothing else:
+    1. `kms:Decrypt`, condition `StringEqualsIgnoreCase`
+       `kms:RecipientAttestation:ImageSha384` = the release's PCR0;
+    2. `kms:GenerateDataKey`, same condition with the PCR0s of the release
+       and the releases admitted to move vaults into it;
+    3. `kms:DescribeKey`, `kms:GetKeyPolicy`, `kms:ListGrants`, no
+       condition;
+
+    all with `Principal` = the enclave host role and `Resource` = `"*"`.
+    The example in VAULT-MESSAGING §11.10.7 is normative.
+  - **No administrator statement**: no `kms:*`, no account-root
+    delegation, no `PutKeyPolicy`, `CreateGrant`, `Encrypt`, `ReEncrypt*`,
+    `ScheduleKeyDeletion`, `DisableKey` or tagging. KMS's lockout safety
+    check refuses such a policy, so the key is created with
+    `CreateKey(..., BypassPolicyLockoutSafetyCheck: true)` (in CDK, a custom
+    resource; `aws-kms.Key` cannot express it). The policy can never be
+    changed, the key never disabled or deleted, even by the account root:
+    budget for keeping every release key indefinitely.
+  - vettid.dev differed here: its host role and a migration function held
+    `kms:PutKeyPolicy` and widened policies during migrations, and nothing
+    in the enclave checked. That is what the enclave-side check rules out.
 - **Manifest signing key:** a KMS ECC_NIST_P256 key, sign-only, in a
   separate account with multi-party approval; apps and release images pin
   its public key.
+- **Allowlist:** the parent's TCP allowlist gains
+  `kms.<region>.amazonaws.com:443`; the enclave terminates TLS to it and
+  signs its own SigV4 requests with role credentials the parent supplies
+  (§5.2).
 
 ### 5.2 D5: where TLS to the relay terminates
 
@@ -260,7 +285,9 @@ enclave and payloads are end-to-end encrypted.
 - **Root updates force releases.** Under D1 every release needs each member's
   approval, so the root store must change rarely. Pinning only the roots we
   need does that: Amazon Root CA 1 for relay.vettid.org (ACM; valid to 2038)
-  and Google Trust Services roots for the attestation revocation list (valid
+  and for the regional KMS endpoint (Amazon Trust Services; the exact chain,
+  including any Starfield cross-sign, is confirmed in V3), and Google Trust
+  Services roots for the attestation revocation list (valid
   to 2036), with backups, rather than a full CA bundle.
 - **Clock.** Certificate validation needs time. The enclave clock comes from
   the Nitro hypervisor, not the parent; validate with a margin, as the

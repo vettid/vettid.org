@@ -16,8 +16,9 @@ related:
 changelog:
   - 0.3.0: release updates (VAULT-PLAN D1): per-release sealing, the signed
     release manifest, member-approved moves at unlock, routing by
-    sealed_release, threat-model updates; unlock requests carry the manifest
-    and are padded to 12,288 bytes
+    sealed_release, enclave-side verification of sealing-key policies,
+    threat-model updates; enroll and unlock requests carry the manifest and
+    are padded to 12,288 bytes
   - 0.2.3: V2 runtime additions: DEK derivation; §6.6 decides the token
     class by the collect jti (RELAY-PROTOCOL 0.4.0); approval roles; 7-day
     pending connection requests; first-app handshake; refusal of revoked
@@ -151,7 +152,8 @@ hidden. Traffic-analysis resistance is a non-goal (as in RELAY-PROTOCOL
 
 **Out of scope:**
 
-- compromise of the enclave platform, or side channels inside it;
+- compromise of the enclave platform, or side channels inside it, and AWS
+  KMS or Nitro attestation not behaving as documented (§11.10.7);
 - a malicious release that the member approved and moved their vault into
   (§11.10), or enrolled into, after being shown its release number, notes
   and PCR0. No other release can open the vault, and VettID cannot move it
@@ -232,6 +234,8 @@ contains:
 - the DEK's KDF parameters, salt and pepper (§3.3.1);
 - `sealed_release`, the release it is sealed to, and `manifest_serial`, the
   highest release-manifest serial the vault has seen (§11.10);
+- `seal_key_verified`: the sealing key's ARN and the SHA-256 of the policy
+  the enclave verified before sealing under it (§11.10.7);
 - the **unlock keys**: for each app allowed to unlock, its `ik`, its `kem`
   and its device-attestation binding (§11.7);
 - the backoff state (§11.8);
@@ -485,10 +489,11 @@ padded length MUST be exactly that bucket: over-padding to a larger bucket
 is malformed.
 
 Alternate-channel plaintexts are padded to exactly 4,096 bytes; a 4,096-byte
-inner plaintext produces a 5,252-byte sealed envelope. The one exception is
-the `vault.unlock` request, which carries the signed release manifest
-(§11.4) and is padded to exactly **12,288 bytes** (a 13,444-byte envelope)
-whether or not it carries a release update.
+inner plaintext produces a 5,252-byte sealed envelope. The exceptions are
+the `vault.enroll` and `vault.unlock` requests, which carry the signed
+release manifest (§11.3, §11.4) and are padded to exactly **12,288 bytes**
+(a 13,444-byte envelope), whether or not an unlock carries a release
+update.
 
 Receivers MUST reject malformed padding: a padded length that is not
 exactly the bucket for the JSON it contains (or not exactly the fixed size
@@ -1277,8 +1282,8 @@ app <--poll--- GET /api/vault/requests/{id} <-- response slot <-------------- pa
 - `GET /api/vault/status`
 
 The routes follow MEMBER-API conventions. Each request envelope is sealed to
-an instance's ETK and padded to a fixed size (4,096 bytes; 12,288 for
-`vault.unlock`, §5.4), and the API, queue and parent see only opaque bytes.
+an instance's ETK and padded to a fixed size (12,288 bytes for
+`vault.enroll` and `vault.unlock`, 4,096 otherwise, §5.4), and the API, queue and parent see only opaque bytes.
 
 **Instances and leases:**
 
@@ -1354,10 +1359,15 @@ leave enclave memory.
   "app": { "ik": "<b64>", "kem": "<b64 ek>",
            "relay": {"url": "<base>", "mailbox": "<id>", "pk": "<b64>"},
            "open_token": "<open token for MB(app), ≤ 10 min>", "name": "<device name>",
-           "device_attest": { } } }
+           "device_attest": { } },
+  "manifest": { "manifest": "<b64>", "sig": "<b64>", "key_id": "<hex>" } }
 ```
 
-`device_attest` is REQUIRED (§11.7).
+`device_attest` is REQUIRED (§11.7). `manifest` is the served manifest
+document (§11.10.1), REQUIRED: the enclave verifies it, finds its own
+release's entry (which must be `active`) and verifies its own sealing key
+(§11.10.7) before sealing the first header. The request is padded to
+exactly 12,288 bytes (§5.4).
 
 ```
 App               Relay        Member API               SQS/Parent       Enclave
@@ -1406,7 +1416,9 @@ App               Relay        Member API               SQS/Parent       Enclave
 - **App state.** The app stores `vault_id`, the pinned bundle, the release
   and `state_seq` (§13.2).
 - **Release.** The enrolling instance's release becomes the vault's
-  `sealed_release`; the header is sealed to it (§11.10.2).
+  `sealed_release`; the header is sealed to it (§11.10.2) after the key
+  check of §11.10.7. If the check fails, enrollment fails with
+  `release_key`.
 - **The first app's handshake.** After `vault.enrolled`, the app sends
   `hs.init` with purpose `app` and `ctx` = `vault_id`, deposited with the
   token from `vault.enrolled`. The vault answers it without approval if,
@@ -1680,8 +1692,10 @@ of §5.3, at most **4,096 bytes**:
   | `deprecated` | no | no | yes; apps urge an update |
   | `retired` | no | no | yes; apps warn that the release is no longer maintained |
 
-- The manifest MUST list every release that still runs for any vault. A
-  release absent from the manifest is unknown: apps refuse to send it a PIN.
+- The manifest MUST list every release that still runs for any vault, and
+  every release that the sealing policy of an `active` release admits
+  (§11.10.7). A release absent from the manifest is unknown: apps refuse to
+  send it a PIN.
 - `notes` is an `https` URL of human-readable release notes.
 
 **The served document** wraps the exact manifest bytes:
@@ -1729,7 +1743,10 @@ allowed only with a Nitro attestation whose PCR0 is R's;
 is in R's admitted set, so the data key reaches only that enclave. Release
 images pin the account and region of the sealing keys and refuse a
 `seal_key` outside them, so a manifest alone cannot redirect a vault to a
-foreign key. The key policies MUST forbid later policy changes (§13.5).
+foreign key. `seal_key` is the key's full ARN. The enclave itself verifies
+each key's policy before sealing to it (§11.10.7), so a key whose policy
+lets anything other than the release open it, or could ever be changed, is
+refused.
 
 Storage: the sealed header is one object **per release**
 (`vaults/<vault_id>/header/<pcr0>`); an enclave reads only its own release's
@@ -1805,7 +1822,8 @@ enclave of release N processes an unlock in this order:
       app's unlock key (`approval`). The enclave builds the approval string
       itself, with its own PCR0 read from the NSM as `from_pcr0_hex`, so an
       approval for a different source release cannot verify;
-   4. `seal_key` is within the pinned sealing-key namespace (`target`);
+   4. `seal_key` is within the pinned sealing-key namespace (`target`), and
+      the target key passes the checks of §11.10.7 (`seal_key`);
    5. no move to a different release is pending (`pending`).
 5. If an update is refused, the result reports it and the vault runs
    normally under N.
@@ -1921,6 +1939,155 @@ release number), the highest manifest `serial` it has seen, and
   `vault.release` that a vault sends after it first runs under a new
   release.
 
+#### 11.10.7 Verifying a release's sealing key
+
+"Only the approved release can open the vault" holds only if the sealing
+key's policy says so and can never change. The enclave does not take that on
+trust: **before it seals a header to a release key for the first time**, it
+reads the key's metadata, policy and grants from AWS KMS itself and checks
+them. (vettid.dev had no such check: its host role and a migration function
+held `kms:PutKeyPolicy` and widened key policies during migrations, and
+nothing in the enclave noticed.)
+
+**When.** Before the first header seal under a key: at enrollment (the
+enclave's own release key) and before a move (the target's key,
+§11.10.4 step 4). A key whose policy passes these checks can never be
+changed again (no principal may call `PutKeyPolicy` or `CreateGrant`), so
+one successful check per key is enough. The enclave records it in the
+sealed header it writes, as `seal_key_verified = {key_arn,
+policy_sha256}`; later header writes under the same key, by the same
+release, rely on that record instead of re-checking. A failed check refuses
+the enrollment (result code `release_key`) or the update (`seal_key`).
+
+**How.** The enclave calls KMS `DescribeKey`, `GetKeyPolicy` (policy name
+`default`) and `ListGrants` on the key ARN from the signed manifest:
+
+- over TLS that **the enclave terminates** (decision D5): the parent's TCP
+  allowlist includes the regional endpoint `kms.<region>.amazonaws.com:443`,
+  whose certificates chain to the Amazon roots already pinned in the image;
+- signed with **SigV4 by the enclave**, using temporary credentials of the
+  host's instance role that the parent passes in. The credentials only
+  authorize the read; the host cannot forge or alter a TLS-authenticated
+  KMS response about a key in the pinned account and region, so at worst it
+  can withhold credentials (denial of service). The same path carries the
+  enclave's `Decrypt` and `GenerateDataKey` calls.
+
+**Checks.** The enclave fails closed: any failure, error, unknown field
+shape or truncated listing refuses the seal.
+
+1. **Key identity.** The ARN is `arn:aws:kms:<region>:<account>:key/<uuid>`
+   with the pinned account and region (§11.10.2), and equals the manifest's
+   `seal_key`.
+2. **Key metadata** (`DescribeKey`): `KeyState` = `Enabled`; `Origin` =
+   `AWS_KMS` (not imported key material, not an external or CloudHSM key
+   store, and no `CustomKeyStoreId`); `KeySpec` = `SYMMETRIC_DEFAULT`;
+   `KeyUsage` = `ENCRYPT_DECRYPT`; `KeyManager` = `CUSTOMER`;
+   `MultiRegion` = `false` (a replica could carry a different policy).
+3. **No grants** (`ListGrants`): the list is empty and not truncated. A
+   grant is an authorization outside the policy, so none may exist; with
+   no `CreateGrant` permission, none can be added later.
+4. **Policy shape.** The policy parses with the strict JSON rules of §5.3
+   (no duplicate names). Top level: only `Version` (= `"2012-10-17"`),
+   `Id` and `Statement` (an object or an array). Statement members: only
+   `Sid`, `Effect`, `Principal`, `Action`, `Resource` and `Condition`.
+   `NotPrincipal`, `NotAction` and `NotResource` are rejected in `Allow`
+   statements. `Resource` is `"*"` or the key's ARN.
+5. **`Deny` statements** are ignored after the shape check: they can only
+   remove access, so ignoring them over-approximates what is allowed.
+6. **Actions in `Allow` statements** are explicit names, never wildcards
+   (no `*` or `?` anywhere, so `kms:*` and `kms:Generate*` fail), from this
+   list and nothing else:
+
+   | Action | Allowed only with |
+   |---|---|
+   | `kms:Decrypt` | an attestation condition whose every value is the **target release's PCR0** |
+   | `kms:GenerateDataKey` | an attestation condition whose every value is the PCR0 of a release in the manifest numbered **at or below** the target (the target and the releases admitted to seal for it, §11.10.2) |
+   | `kms:DescribeKey`, `kms:GetKeyPolicy`, `kms:ListGrants`, `kms:ListKeyPolicies`, `kms:GetKeyRotationStatus`, `kms:ListResourceTags` | no condition required (read-only metadata) |
+
+   Every other action disqualifies the key, among them `kms:PutKeyPolicy`,
+   `kms:CreateGrant`, `kms:Encrypt` (anyone could then forge sealed
+   objects), `kms:ReEncryptFrom` / `kms:ReEncryptTo` (re-encryption to a
+   key the caller controls bypasses the attestation gate),
+   `kms:GenerateDataKeyWithoutPlaintext`, `kms:ScheduleKeyDeletion`,
+   `kms:CancelKeyDeletion`, `kms:DisableKey`, `kms:EnableKey`,
+   `kms:ImportKeyMaterial`, `kms:DeleteImportedKeyMaterial`,
+   `kms:UpdatePrimaryRegion`, `kms:ReplicateKey`, `kms:TagResource`,
+   `kms:UntagResource`, `kms:UpdateKeyDescription`, and
+   `kms:EnableKeyRotation` / `kms:DisableKeyRotation`.
+7. **The attestation condition.** In the `Condition` of a `Decrypt` or
+   `GenerateDataKey` statement:
+   - operator `StringEquals` or `StringEqualsIgnoreCase`, never an
+     `…IfExists` form (which matches when the request carries no
+     attestation at all), never `ForAnyValue:` / `ForAllValues:`, `Null` or
+     a negated operator;
+   - key `kms:RecipientAttestation:ImageSha384` or
+     `kms:RecipientAttestation:PCR0` (the same measurement on Nitro); if
+     both appear, both must satisfy the rule;
+   - values: one string or an array of strings, each 96 hex characters,
+     compared case-insensitively to the manifest's PCR0s.
+
+   Other condition entries in the same statement can only narrow it, but
+   the enclave still accepts only these: `StringEquals` /
+   `StringEqualsIgnoreCase` on `kms:RecipientAttestation:PCR1` to `PCR8`
+   (PCR1 and PCR2, if present, equal the manifest's), on
+   `kms:EncryptionContext:<key>` and on `kms:CallerAccount`, and
+   `ArnEquals` on `aws:PrincipalArn`. Anything else fails.
+8. `Principal` is not used to grant or deny the check: the attestation
+   condition, which only an enclave running that image can satisfy, is the
+   gate. Any well-formed `Principal` is accepted.
+
+**Example policy that passes**, for release 4 whose sealing policy admits
+release 3. `<pcr0-4>` and `<pcr0-3>` stand for the releases' PCR0s:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Id": "vettid-release-4",
+  "Statement": [
+    { "Sid": "UnsealOnlyInRelease4", "Effect": "Allow",
+      "Principal": {"AWS": "arn:aws:iam::111122223333:role/vettid-enclave-host"},
+      "Action": "kms:Decrypt", "Resource": "*",
+      "Condition": {"StringEqualsIgnoreCase": {"kms:RecipientAttestation:ImageSha384": "<pcr0-4>"}} },
+    { "Sid": "SealFromAdmittedReleases", "Effect": "Allow",
+      "Principal": {"AWS": "arn:aws:iam::111122223333:role/vettid-enclave-host"},
+      "Action": "kms:GenerateDataKey", "Resource": "*",
+      "Condition": {"StringEqualsIgnoreCase": {"kms:RecipientAttestation:ImageSha384": ["<pcr0-3>", "<pcr0-4>"]}} },
+    { "Sid": "EnclaveVerifiesThisPolicy", "Effect": "Allow",
+      "Principal": {"AWS": "arn:aws:iam::111122223333:role/vettid-enclave-host"},
+      "Action": ["kms:DescribeKey", "kms:GetKeyPolicy", "kms:ListGrants"], "Resource": "*" }
+  ]
+}
+```
+
+There is no administrator statement, so KMS's lockout safety check rejects
+the policy unless the key is created with `BypassPolicyLockoutSafetyCheck`
+(VAULT-PLAN §5.1). That is intended: nobody, including the AWS account
+root, can change the policy, add grants, disable or delete the key.
+
+**Variants that MUST fail** (each changes one thing in the example):
+
+| Change | Failing check |
+|---|---|
+| Add the default `{"Principal": {"AWS": "arn:aws:iam::111122223333:root"}, "Action": "kms:*"}` statement | 6 (wildcard) |
+| Add `"Action": "kms:PutKeyPolicy"` or `"kms:CreateGrant"` in any `Allow` | 6 |
+| `StringEqualsIgnoreCaseIfExists` on the `Decrypt` condition | 7 |
+| `Decrypt` condition lists `<pcr0-3>` as well | 6 (`Decrypt` values must all be the target) |
+| `Decrypt` without a `Condition` | 6 |
+| `"Action": ["kms:Decrypt", "kms:ReEncryptFrom"]` | 6 |
+| `"Action": "kms:Encrypt"` | 6 |
+| `"NotAction": "kms:PutKeyPolicy"` with `"Effect": "Allow"` | 4 |
+| `StringLike` with value `"*"` on `ImageSha384` | 7 |
+| A `GenerateDataKey` value that is not a manifest release numbered ≤ 4 | 6 |
+| A statement member `"Condition2"`, or a duplicated `"Action"` member | 4 |
+| `ListGrants` returns one grant | 3 |
+| `DescribeKey` shows `Origin` = `EXTERNAL` or `MultiRegion` = `true` | 2 |
+
+**What remains trusted.** The check moves the guarantee from VettID's word
+to AWS's documented behaviour: that KMS enforces key policies, grants and
+attestation conditions as specified, that Nitro attestation documents
+cannot be forged, and that AWS itself does not bypass them. It cannot
+detect a key-policy evaluation flaw in KMS or an AWS insider.
+
 ## 12. Locked vaults and the collect manager
 
 ### 12.1 Locked
@@ -1944,8 +2111,9 @@ Connections whose standing tokens lapsed recover through reconnect tokens
   as a signed long-poll (`wait=25`, `max=32`) or a WebSocket. During a
   rotation grace period it also collects from the old mailbox.
 - **Batches.** Each vault handles one batch at a time (§8.3).
-- **TLS.** The enclave terminates TLS to the relay. The parent forwards only
-  TCP bytes to its relay allowlist on port 443. The enclave pins only the
+- **TLS.** The enclave terminates TLS to the relay, and to AWS KMS
+  (`kms.<region>.amazonaws.com`, §11.10.7). The parent forwards only TCP
+  bytes to its allowlist on port 443. The enclave pins only the
   roots for the allowlisted hosts (VAULT-PLAN §5.2), so root changes are rare
   releases. Each instance carries every vault's relay requests over a few
   shared HTTP/2 connections rather than one connection per vault, so the host
@@ -2053,7 +2221,7 @@ availability.
 | PIN alone | Nothing without a registered, attested app | `pin.change` |
 | An old release, after members moved away | Vaults still sealed to it. A moved vault only if the host serves it a stale header and state **and** an app sends it the PIN; apps never send a PIN to an older release than they last unlocked into (§11.10.6). Residual: an owner device that never learned of the move. | Members move forward; the app warns about `deprecated` and `retired` releases |
 | Manifest key | Listing a release as `active`. A vault still moves only with the member's approval, and only to a sealing key in the pinned namespace. | Rotate the key in a release; apps pin two keys |
-| Sealing-key policy (VettID's AWS account) | If a policy were changed to allow decrypting without the release's attestation, the pepper would be exposed, enabling offline PIN guessing against stored state | Policies are created immutable (no `PutKeyPolicy` for any principal); this is an operator commitment that attestation cannot prove |
+| Sealing-key policy (VettID's AWS account) | A key whose policy let anything other than its release decrypt, or could be changed later, would expose the pepper and allow offline PIN guessing against stored state. The enclave refuses to seal to such a key: before sealing it reads the policy, metadata and grants from KMS over TLS it terminates and checks them (§11.10.7). | Nothing to recover: the check runs before any seal, and a passing policy can never change |
 
 As operator of the host, queues and API, VettID **can**:
 
@@ -2073,8 +2241,10 @@ It **cannot**:
   stays on its release, including any unfixed vulnerability, until the
   member approves an update; the app makes that visible.
 
-These "cannot" statements assume the sealing keys' policies are immutable
-(§11.10.2, table above).
+These "cannot" statements do not rest on VettID's word about its key
+policies: the enclave verifies each sealing key's policy before sealing to
+it (§11.10.7). They rest on AWS KMS and Nitro attestation behaving as
+documented.
 
 ### 13.6 Implementation requirements
 
@@ -2232,13 +2402,20 @@ pending (§15, follow-up 1).
     sealing keys (seal for another release without being able to unseal),
     the approval statement, the move at unlock with its failure handling,
     confirmation by the new release and abandonment of unconfirmed moves,
-    the forward-only rule, routing by `sealed_release` with on-demand start, and
-    what the app shows and stores.
-  - §11.4: unlock requests carry the manifest and an optional
-    `release_update`, are padded to 12,288 bytes (§5.4), and the signing
-    string covers both; results report the release, its status and moves.
-  - §2, §13.5: VettID cannot force updates; residual risks of old releases,
-    the manifest key and sealing-key policies.
+    the forward-only rule, routing by `sealed_release` with on-demand
+    start, and what the app shows and stores.
+  - §11.10.7: before sealing to a release key, the enclave reads its
+    metadata, policy and grants from KMS over TLS it terminates and checks
+    them against a strict allow-list (only that release can decrypt; no
+    grants, no policy changes, no re-encryption or other escape hatches),
+    with a passing example policy and variants that must fail.
+  - §11.3, §11.4: enroll and unlock requests carry the manifest and are
+    padded to 12,288 bytes (§5.4); the unlock also carries an optional
+    `release_update`, and its signing string covers both; results report
+    the release, its status and moves.
+  - §2, §13.5: VettID cannot force updates; the sealing-key guarantee is
+    verified by the enclave and rests on AWS behaving as documented;
+    residual risks of old releases and the manifest key.
   - §3.3, §10, §11.1–§11.5, §11.9: `sealed_release`, `manifest_serial`,
     `release_move`, the `vault.release` sync kind, routing and failures.
   - §16: release-update vectors.
