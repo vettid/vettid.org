@@ -23,7 +23,13 @@ function synthAll(): cdk.Stack[] {
   const prev = process.env.CDK_DEFAULT_ACCOUNT;
   process.env.CDK_DEFAULT_ACCOUNT = '123456789012';
   try {
-    const app = new cdk.App({ context: { headscaleLoginServer: 'https://headscale.example.net' } });
+    const app = new cdk.App({
+      context: {
+        headscaleLoginServer: 'https://headscale.example.net',
+        relayImage: 'ghcr.io/vettid/vettid-relay@sha256:' + 'a'.repeat(64),
+        litestreamImage: 'litestream/litestream@sha256:' + 'b'.repeat(64),
+      },
+    });
     buildApp(app);
     return app.node.children.filter((c): c is cdk.Stack => c instanceof cdk.Stack);
   } finally {
@@ -48,6 +54,7 @@ describe('app guardrails', () => {
         'VettidOrgDataStack',
         'VettidOrgAdminAccessStack',
         'VettidOrgAuditStack',
+        'VettidOrgRelayStack',
       ]),
     );
   });

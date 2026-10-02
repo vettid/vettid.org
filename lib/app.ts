@@ -13,6 +13,7 @@ import { VettidOrgAdminSiteStack } from './stacks/admin-site-stack';
 import { VettidOrgMemberApiStack } from './stacks/member-api-stack';
 import { VettidOrgAccountSiteStack } from './stacks/account-site-stack';
 import { VettidOrgAuditStack } from './stacks/audit-stack';
+import { VettidOrgRelayStack } from './stacks/relay-stack';
 
 /**
  * Builds every stack in the vettid.org app. Kept out of bin/ so tests can
@@ -88,6 +89,13 @@ export function buildApp(app: cdk.App): void {
   new VettidOrgAdminSiteStack(app, 'VettidOrgAdminSiteStack', { config, env });
   new VettidOrgMemberApiStack(app, 'VettidOrgMemberApiStack', { config, env });
   new VettidOrgAccountSiteStack(app, 'VettidOrgAccountSiteStack', { config, env });
+
+  // ---- Relay (docs/RELAY-PROTOCOL.md; code: github.com/vettid/vettid-relay) ----
+  if (config.relay.image && config.relay.litestreamImage) {
+    new VettidOrgRelayStack(app, 'VettidOrgRelayStack', { config, relayImage: config.relay.image, litestreamImage: config.relay.litestreamImage, env });
+  } else {
+    cdk.Annotations.of(app).addInfoV2('vettid:relay-unconfigured', 'VettidOrgRelayStack skipped: set context relayImage and litestreamImage (digest-pinned)');
+  }
 
   // ---- Account-level audit & detection (CloudTrail, GuardDuty, alerts) ----
   new VettidOrgAuditStack(app, 'VettidOrgAuditStack', { config, ...stateful });

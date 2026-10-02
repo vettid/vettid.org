@@ -96,6 +96,8 @@
     "@aws-cdk/s3-notifications:addS3TrustKeyPolicyForSnsSubscriptions": true,
     "@aws-cdk/aws-ec2:requirePrivateSubnetsForEgressOnlyInternetGateway": true,
     "@aws-cdk/aws-s3:publicAccessBlockedByDefault": true,
-    "@aws-cdk/aws-lambda:useCdkManagedLogGroup": true
+    "@aws-cdk/aws-lambda:useCdkManagedLogGroup": true,
+    "relayImage": "ghcr.io/vettid/vettid-relay@sha256:f3f4a906ae66580b7c550ad9ab4b1cdba00570f602f60382795ee46167b9f40e",
+    "litestreamImage": "litestream/litestream@sha256:4b02b9859a6b6b4087d8b8944e15f7e984bd7957cba322bbeee38b0e27b9656a"
   }
 }
