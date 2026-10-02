@@ -28,4 +28,8 @@ export const table = {
   audit: () => env('TABLE_AUDIT'),
   ratelimits: () => env('TABLE_RATELIMITS'),
   magicLinks: () => env('TABLE_MAGIC_LINKS'),
+  vaults: () => env('TABLE_VAULTS'),
+  vaultInstances: () => env('TABLE_VAULT_INSTANCES'),
+  vaultRequests: () => env('TABLE_VAULT_REQUESTS'),
+  vaultReleases: () => env('TABLE_VAULT_RELEASES'),
 };

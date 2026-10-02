@@ -5,7 +5,7 @@ import { DeleteEmailIdentityCommand, SendEmailCommand, SESv2Client } from '@aws-
 import { marshall } from '@aws-sdk/util-dynamodb';
 
 Object.assign(process.env, {
-  TABLE_MEMBERS: 'members', TABLE_SUBSCRIPTIONS: 'subs', TABLE_AUDIT: 'audit', TABLE_MAILING_LIST: 'list',
+  TABLE_MEMBERS: 'members', TABLE_SUBSCRIPTIONS: 'subs', TABLE_AUDIT: 'audit', TABLE_MAILING_LIST: 'list', TABLE_VAULTS: 'vaults',
   MEMBER_POOL_ID: 'pool', SENDER_EMAIL: 'no-reply@vettid.org', ACCOUNT_HOST: 'account.vettid.org',
 });
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -35,6 +35,25 @@ describe('cleanup job', () => {
     expect(r.deleted).toBe(0);
     expect(idp.commandCalls(AdminDeleteUserCommand)).toHaveLength(0);
     expect(ddb.commandCalls(DeleteCommand)).toHaveLength(1); // only the guarded attempt
+  });
+
+  test('a canceled account past its grace period loses its vault rows (all vault_ids + pointer)', async () => {
+    ddb.on(QueryCommand).callsFake((input) => {
+      if (input.TableName === 'vaults') return { Items: [{ vault_id: 'a'.repeat(32), user_guid: 'g1' }, { vault_id: 'b'.repeat(32), user_guid: 'g1' }] };
+      return input.ExpressionAttributeValues?.[':c'] === 'canceled' && input.ExpressionAttributeValues?.[':s'] === 'member' ? { Items: [canceled] } : { Items: [] };
+    });
+    ddb.on(DeleteCommand).resolves({});
+    idp.on(AdminDeleteUserCommand).resolves({});
+    const r = await cleanup.handler();
+    expect(r.deleted).toBe(1);
+    const vaultQuery = ddb.commandCalls(QueryCommand).find((c) => c.args[0].input.TableName === 'vaults')!.args[0].input;
+    expect(vaultQuery).toMatchObject({ IndexName: 'user-index', ExpressionAttributeValues: { ':g': 'g1' } });
+    const vaultDeletes = ddb.commandCalls(DeleteCommand).filter((c) => c.args[0].input.TableName === 'vaults').map((c) => c.args[0].input.Key);
+    expect(vaultDeletes).toEqual([{ vault_id: 'a'.repeat(32) }, { vault_id: 'b'.repeat(32) }, { vault_id: 'user#g1' }]);
+    // The member row goes first (the reinstatement guard), vault rows after.
+    expect(ddb.commandCalls(DeleteCommand)[0].args[0].input).toMatchObject({ TableName: 'members', Key: { user_guid: 'g1' } });
+    const auditItem = ddb.commandCalls(PutCommand).find((c) => c.args[0].input.TableName === 'audit')!.args[0].input.Item!;
+    expect(auditItem).toMatchObject({ action: 'member.delete_after_cancel', detail: { vault_ids: ['a'.repeat(32), 'b'.repeat(32)] } });
   });
 
   test('stale unverified request: row + marker removed; SES identity kept if the mailing list uses it', async () => {

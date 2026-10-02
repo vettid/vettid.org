@@ -24,7 +24,7 @@ export const originVerifySecretName = (config: AppConfig) => `${resourceName(con
 
 /**
  * Stateless: the member API (docs/MEMBER-API.md), served same-origin behind
- * account.vettid.org. Three route groups (public, auth, account) plus the
+ * account.vettid.org. Four route groups (public, auth, account, vault) plus the
  * background jobs: SES-verification sweep, daily cleanup/expiry, and the
  * members-stream welcome mailer.
  *
@@ -91,6 +91,7 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     const pub = group('Public', '/api/public', 'lambda/member/public.ts');
     const auth = group('Auth', '/api/auth', 'lambda/member/auth.ts');
     const account = group('Account', '/api/account', 'lambda/member/account.ts');
+    const vault = group('Vault', '/api/vault', 'lambda/member/vault.ts');
 
     const cognitoActions = (fn: lambda.IFunction, actions: string[]) =>
       fn.addToRolePolicy(new iam.PolicyStatement({ actions: actions.map((a) => `cognito-idp:${a}`), resources: [memberPoolArn] }));
@@ -153,6 +154,46 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     );
     account.addToRolePolicy(new iam.PolicyStatement({ actions: ['secretsmanager:GetSecretValue'], resources: [env.PIN_PEPPER_SECRET_ARN] }));
 
+    // vault: alternate channel (docs/VAULT-MESSAGING.md §11). Routes sealed,
+    // opaque envelopes to enclave instances; the data it may write is
+    // limited to its own attributes, so it can never set a lease, a sealed
+    // release or lifecycle state, or alter a release's status.
+    const vaultControlQueuePrefix = `${resourceName(config, 'vault-control')}-`;
+    vault.addEnvironment('VAULT_QUEUE_URL_PREFIX', `https://sqs.${this.region}.amazonaws.com/${this.account}/${vaultControlQueuePrefix}`);
+    g(vault, 'members', ['GetItem']);
+    g(vault, 'terms', ['Query'], true);
+    g(vault, 'ratelimits', ['UpdateItem']);
+    g(vault, 'audit', ['PutItem']);
+    g(vault, 'vaults', ['GetItem']);
+    g(vault, 'vault-instances', ['GetItem', 'Query'], true);
+    g(vault, 'vault-requests', ['GetItem', 'PutItem', 'UpdateItem']);
+    g(vault, 'vault-releases', ['GetItem', 'Query'], true);
+    const tableArn = (t: string) => `arn:${this.partition}:dynamodb:${this.region}:${this.account}:table/${resourceName(config, t)}`;
+    // Attribute-level write limits (DynamoDB fine-grained access control).
+    // ForAllValues is vacuously true if a request carried no attribute list,
+    // so this narrows, and never widens, the plain table grant.
+    const onlyAttributes = (attrs: string[]) =>({ 'ForAllValues:StringEquals': { 'dynamodb:Attributes': attrs } });
+    vault.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['dynamodb:PutItem', 'dynamodb:UpdateItem'],
+        resources: [tableArn('vaults')],
+        conditions: onlyAttributes(['vault_id', 'user_guid', 'state', 'created_at', 'updated_at', 'current_vault_id']),
+      }),
+    );
+    vault.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['dynamodb:UpdateItem'],
+        resources: [tableArn('vault-releases')],
+        conditions: onlyAttributes(['release', 'start_requested_at', 'start_requests']),
+      }),
+    );
+    vault.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['sqs:SendMessage'],
+        resources: [`arn:${this.partition}:sqs:${this.region}:${this.account}:${vaultControlQueuePrefix}*`],
+      }),
+    );
+
     // ---- background jobs --------------------------------------------------------
     const job = (id: string, entry: string, timeout = cdk.Duration.minutes(5)) =>
       new ApiFunction(this, id, { entry, environment: env, timeout }).fn;
@@ -169,6 +210,8 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     g(cleanup, 'members', ['Query', 'DeleteItem'], true);
     g(cleanup, 'subscriptions', ['Query', 'UpdateItem', 'DeleteItem'], true);
     g(cleanup, 'audit', ['PutItem']);
+    // canceled accounts: their vault rows go with them (vault objects: V5)
+    g(cleanup, 'vaults', ['Query', 'DeleteItem'], true);
     // stale-request reclaim: keep identities the mailing list still uses
     tableGrant(this, config, cleanup, 'mailing-list', ['GetItem']);
     cleanup.addEnvironment('TABLE_MAILING_LIST', resourceName(config, 'mailing-list'));

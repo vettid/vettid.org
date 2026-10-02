@@ -99,7 +99,48 @@ describe('VettidOrgDataStack', () => {
       'vettid-org-subscription-types',
       'vettid-org-subscriptions',
       'vettid-org-terms',
+      'vettid-org-vault-instances',
+      'vettid-org-vault-releases',
+      'vettid-org-vault-requests',
+      'vettid-org-vaults',
     ]);
+  });
+
+  test('vault tables: routing indexes; ephemeral ones expire via TTL; the vault table is point-in-time recoverable', () => {
+    t.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
+      TableName: 'vettid-org-vaults',
+      KeySchema: [{ AttributeName: 'vault_id', KeyType: 'HASH' }],
+      GlobalSecondaryIndexes: [Match.objectLike({ IndexName: 'user-index' })],
+      Replicas: [Match.objectLike({ PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true } })],
+    });
+    t.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
+      TableName: 'vettid-org-vault-instances',
+      KeySchema: [{ AttributeName: 'instance_id', KeyType: 'HASH' }],
+      TimeToLiveSpecification: { AttributeName: 'expires_at', Enabled: true },
+      GlobalSecondaryIndexes: [
+        Match.objectLike({
+          IndexName: 'release-index',
+          KeySchema: [{ AttributeName: 'release', KeyType: 'HASH' }, { AttributeName: 'heartbeat_at', KeyType: 'RANGE' }],
+          Projection: { ProjectionType: 'INCLUDE', NonKeyAttributes: ['load'] },
+        }),
+      ],
+    });
+    t.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
+      TableName: 'vettid-org-vault-requests',
+      KeySchema: [{ AttributeName: 'request_id', KeyType: 'HASH' }],
+      TimeToLiveSpecification: { AttributeName: 'expires_at', Enabled: true },
+    });
+    t.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
+      TableName: 'vettid-org-vault-releases',
+      GlobalSecondaryIndexes: [Match.objectLike({ IndexName: 'status-index' })],
+    });
+  });
+
+  test('vault table names and the control-queue prefix are published for the enclave host', () => {
+    t.hasResourceProperties('AWS::SSM::Parameter', { Name: '/vettid-org/prod/data/vault-control-queue-prefix', Value: 'vettid-org-vault-control-' });
+    for (const k of ['vaults', 'vault-instances', 'vault-requests', 'vault-releases']) {
+      t.hasResourceProperties('AWS::SSM::Parameter', { Name: `/vettid-org/prod/data/${k}-table-name` });
+    }
   });
 
   test('every table is retained and deletion-protected', () => {
@@ -323,9 +364,9 @@ describe('VettidOrgMemberApiStack', () => {
   const { VettidOrgMemberApiStack } = require('../lib/stacks/member-api-stack');
   const t = Template.fromStack(new VettidOrgMemberApiStack(newApp(), 'MemberApi', { config, env }));
 
-  test('three route groups + link mailer + three jobs', () => {
-    t.resourceCountIs('AWS::Lambda::Function', 7);
-    for (const p of ['/api/public', '/api/auth', '/api/account']) {
+  test('four route groups + link mailer + three jobs', () => {
+    t.resourceCountIs('AWS::Lambda::Function', 8);
+    for (const p of ['/api/public', '/api/auth', '/api/account', '/api/vault']) {
       t.hasResourceProperties('AWS::ApiGatewayV2::Route', { RouteKey: `ANY ${p}/{proxy+}` });
     }
   });
@@ -349,6 +390,44 @@ describe('VettidOrgMemberApiStack', () => {
     const deletes = stmts.filter((s: any) => ([] as string[]).concat(s.Action).includes('ses:DeleteEmailIdentity'));
     expect(deletes.some((s: any) => s.Effect === 'Allow')).toBe(true);
     expect(deletes.some((s: any) => s.Effect === 'Deny' && JSON.stringify(s.Resource).includes('identity/vettid.org'))).toBe(true);
+  });
+
+  describe('vault route group', () => {
+    const stmts = () => Object.values<any>(t.findResources('AWS::IAM::Policy')).flatMap((p) => p.Properties.PolicyDocument.Statement);
+    const str = (x: unknown) => JSON.stringify(x);
+
+    test('sqs:SendMessage only to vettid-org-vault-control-* queues, and nothing else on SQS', () => {
+      const sqsStmts = stmts().filter((s: any) => str(s.Action).includes('sqs:'));
+      expect(sqsStmts).toHaveLength(1);
+      expect(sqsStmts[0].Action).toBe('sqs:SendMessage');
+      expect(str(sqsStmts[0].Resource)).toContain(':vettid-org-vault-control-*');
+    });
+
+    test("vault and release writes are limited to the API's own attributes (never lease, sealed_release or status)", () => {
+      const writes = stmts().filter(
+        (s: any) => /dynamodb:(PutItem|UpdateItem)/.test(str(s.Action)) && /table\/vettid-org-(vaults|vault-releases)"/.test(str(s.Resource)),
+      );
+      expect(writes).toHaveLength(2);
+      for (const w of writes) {
+        const attrs: string[] = w.Condition['ForAllValues:StringEquals']['dynamodb:Attributes'];
+        for (const f of ['lease', 'sealed_release', 'vault_version', 'state_version', 'status', 'available']) expect(attrs).not.toContain(f);
+      }
+      // The instance registry is read-only to the API.
+      const instanceWrites = stmts().filter((s: any) => str(s.Resource).includes('vettid-org-vault-instances') && /Put|Update|Delete/.test(str(s.Action)));
+      expect(instanceWrites).toHaveLength(0);
+    });
+
+    test('only the cleanup job may delete vault rows (canceled accounts after the grace period)', () => {
+      const deletes = stmts().filter((s: any) => str(s.Action).includes('dynamodb:DeleteItem') && str(s.Resource).includes('table/vettid-org-vaults'));
+      expect(deletes).toHaveLength(1);
+      expect([].concat(deletes[0].Action).sort()).toEqual(['dynamodb:DeleteItem', 'dynamodb:Query']);
+    });
+
+    test('the queue URL prefix is pinned to this account and region', () => {
+      const fns = Object.values<any>(t.findResources('AWS::Lambda::Function'));
+      const v = fns.find((f) => f.Properties.Environment?.Variables?.VAULT_QUEUE_URL_PREFIX);
+      expect(str(v.Properties.Environment.Variables.VAULT_QUEUE_URL_PREFIX)).toContain('https://sqs.us-east-1.amazonaws.com/123456789012/vettid-org-vault-control-');
+    });
   });
 
   test('access log records request metadata only', () => {

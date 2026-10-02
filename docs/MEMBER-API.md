@@ -130,3 +130,165 @@ Notes for the UI:
   existing members (they stay `member`; the UI should prompt).
 - Paid types are listed but can't be started yet (`409` "Payments are not
   available yet").
+
+## Vault (alternate channel, requires `vid_id`)
+
+The routes of VAULT-MESSAGING 0.3.1 §11 (enroll, unlock, lock): the app seals each
+request to an enclave instance's transport key (ETK), the API forwards the
+opaque bytes to that instance's SQS queue, and the app polls for the sealed
+answer. The API checks sizes and the envelope's clear header only; it never
+sees or stores PINs, keys, mailbox ids or device identifiers, and never logs
+envelopes.
+
+**Access** (§11.1). The vault does not depend on subscription or voting
+rights.
+- `GET /api/vault/enclave`, `enroll` and `unlock` require an active account
+  in state `member` that has accepted the **current** terms. Anyone else gets
+  `403 terms_required`: `registered` users (they have not accepted the terms
+  yet), and members whose accepted version is no longer current
+  (`terms.needs_acceptance` in `Me`).
+- `lock`, `status` and `requests/{id}` stay available for an existing vault
+  whatever the account state (`registered`, terms out of date), because
+  locking only reduces exposure.
+- **Cancelling the account** blocks every vault route except `lock` at once
+  (`403 forbidden`); `lock` keeps working for as long as the session does.
+  After the 7-day grace period the daily cleanup job deletes the member's
+  vault rows (every `vault_id` they had, and the pointer row). Deleting the
+  stored objects under `vaults/<vault_id>/` (encrypted state and sealed
+  headers) is a TODO in the cleanup job until the vault data bucket exists
+  (VAULT-PLAN V5); nothing is stored there before then.
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| GET | `/api/vault/status` | — | `{vault: VaultStatus \| null}` |
+| GET | `/api/vault/enclave` | — (`?release=<pcr0>` only to abandon an unconfirmed move, §11.10.4) | `Enclave`: the instance to seal to (below) |
+| POST | `/api/vault/enroll` | `{request_id, instance_id, etk_kid, envelope}` | `202 {vault_id, request_id}` |
+| POST | `/api/vault/unlock` | `{vault_id, request_id, instance_id, etk_kid, envelope}` | `202 {vault_id, request_id}` |
+| POST | `/api/vault/lock` | `{vault_id, request_id}` | `202 {vault_id, request_id}` |
+| GET | `/api/vault/requests/{request_id}` | — | `{status: "queued"\|"done"\|"expired", envelope?, code?}` (§11.5) |
+
+```ts
+interface Enclave {
+  instance_id: string;
+  release: string;      // PCR0 (96 lowercase hex) from the instance's attested descriptor
+  descriptor: string;   // base64 of the exact descriptor bytes (§11.2)
+  attestation: string;  // base64 Nitro attestation document; user_data binds the descriptor
+}
+
+interface VaultStatus {     // advisory: written by the enclave host, never a security signal (§11.5)
+  vault_id: string;
+  state: 'enrolling' | 'locked' | 'unlocked';
+  sealed_release: string | null;
+  vault_version: string | null;
+  state_version: number | string | null;
+  leased: boolean;          // an instance currently holds the vault
+  created_at: string; updated_at: string;
+}
+```
+
+**Fields.**
+- `request_id`: a canonical ULID chosen by the app, the same as inside the
+  envelope. Each one is accepted once (`409 duplicate_request` after).
+- `vault_id`: 32 lowercase hex (128 bits), assigned by the API at the first
+  enrollment and returned by it. A member has one current vault; a second
+  enrollment reuses it (the enclave decides whether a provisional vault may be
+  replaced and answers `vault_exists` otherwise, §11.3). A new `vault_id` is
+  assigned only after the vault is deleted.
+- `instance_id`: from `GET /api/vault/enclave`. `etk_kid`: the descriptor's
+  `kid` (16 lowercase hex).
+- `envelope`: canonical base64 (with padding, no line breaks) of the sealed v2
+  envelope. Enroll and unlock are exactly **13,444 bytes** (12,288 padded +
+  1,156 sealed overhead, §5.4). The clear header must be v2 / suite 2 /
+  sealed / flags 0, with an all-zero `sender_kid` and `recipient_kid` =
+  `etk_kid`. Anything else is `400 bad_request` and is not forwarded.
+- `envelope` in a result: base64 of exactly **5,252 bytes**, only when
+  `status` is `done`: `vault.enroll.result` (§11.3) or `vault.unlock.result`
+  (§11.4), sealed to the app, or random bytes of the same size when the
+  enclave could not read the request. All are opaque to the API; a slot
+  envelope of any other size is not passed on. Lock has no envelope.
+- `code`: a host code matching `[a-z_][a-z0-9_]*`, never a sealed outcome.
+  Today only `etk_unknown` (no envelope): refetch the descriptor and re-seal.
+- `expired`: the request left the queue unprocessed (5-minute retention) or
+  could not be queued. Slots disappear 15 minutes after creation (`404`).
+
+**Routing** (§11.1, §11.10.5). `GET /api/vault/enclave` returns:
+1. the instance holding the vault's lease, if the lease is unexpired **and**
+   that instance is live (a crashed holder doesn't strand the vault);
+2. otherwise a live instance of the vault's `sealed_release`, least loaded
+   first;
+3. for enrollment (no vault, or not sealed yet), a live instance of the
+   newest `active` release that has one.
+
+An instance is live while its registry heartbeat is under 90 s old and its
+registered queue is `vettid-org-vault-control-<instance_id>` in this account.
+POSTs are forwarded only if the named instance is live and holds the lease,
+or nobody holds a live lease; enroll additionally needs an instance of an
+`active` release. Lock goes to the leaseholder; with no live lease there is
+nothing running to lock and the slot is `done` at once.
+
+**Vault errors** carry the MEMBER-API `error` plus the spec's `code` (same
+value), and `retry_after` seconds where given:
+
+| Status | `error` | Meaning |
+|---|---|---|
+| 403 | `terms_required` | Not a member, or the current terms are not accepted |
+| 404 | `not_found` | No such vault (or not yours), no such request |
+| 409 | `instance_moved` | The named instance is gone or no longer holds the vault: refetch `/api/vault/enclave` and re-seal |
+| 409 | `vault_busy` | `?release=` asked for a release while another release's instance holds the vault (`retry_after`: until the lease ends) |
+| 409 | `duplicate_request` | `request_id` already used |
+| 410 | `release_unavailable` | The vault's release (or the one `?release=` asked for) is unknown, or its image can no longer be started |
+| 503 | `release_starting` | No instance of the release is running; one has been requested. Body also has `release` and `retry_after` (30) |
+| 503 | `vault_unavailable` | No `active` release is deployed yet (`retry_after` 300) |
+
+A `retired` release still serves the vaults sealed to it (§11.10.1); only an
+unknown or unstartable one is `410`.
+
+**Rate limits** (§11.8; `429 rate_limited` with `retry_after`): enroll 3 per
+member per day; unlock 10 per member per 15 minutes, and per source network
+10 per IPv6 /64 or 60 per IPv4 address per 15 minutes (carrier NAT puts many
+members behind one IPv4 address); polling `requests/{id}` 2 per second per
+member. Not in the spec, chosen here: `enclave` 30 per member per minute,
+`status` 60 per minute, `lock` 30 per 15 minutes.
+
+**Audit.** Enroll, unlock and lock requests are written to the audit table
+(`vault.enroll_request`, `vault.unlock_request`, `vault.lock_request`): the
+member, `vault_id`, `request_id`, instance and release. Never PINs or
+envelopes. Account deletion after cancellation records the deleted
+`vault_ids`.
+
+**Left to the API by the spec, decided here:** the shape of `Enclave`; the
+`vault_id` encoding; reuse of `vault_id` on re-enrollment; liveness (90 s
+heartbeat) and "dead holder means no live lease"; least-load selection
+(`load` in the registry, lower first, then freshest heartbeat); newest
+`active` release for enrollment; the `vault_busy` and `vault_unavailable`
+answers; `lock` without a live lease; `retry_after` values; the extra rate
+limits above.
+
+**Tables** (VettidOrgDataStack; the enclave host writes the fields marked
+*host*):
+- `vettid-org-vaults` (PK `vault_id`, GSI `user-index`): `user_guid`,
+  `state`, `created_at`, `updated_at`; *host*: `lease {instance_id,
+  lease_expires_at (epoch s)}`, `sealed_release`, `vault_version`,
+  `state_version`, later `state`. Pointer rows `user#<guid>` →
+  `current_vault_id` (API only; no `user_guid`, so they stay out of the index).
+- `vettid-org-vault-instances` (PK `instance_id`, GSI `release-index` on
+  `release` + `heartbeat_at`), all *host*: `release`, `queue_url`,
+  `descriptor` (b64), `attestation` (b64), `heartbeat_at` (epoch s),
+  `expires_at` (TTL), optional `load`.
+- `vettid-org-vault-requests` (PK `request_id`, TTL `expires_at`, 15 min),
+  the response slots. API: `vault_id`, `user_guid`, `op`, `status: queued`,
+  `instance_id`, `created_at`; *host*: `status: done`, `envelope` (b64 of
+  5,252 bytes, if any) and `code: etk_unknown` when the enclave reported it.
+- `vettid-org-vault-releases` (PK `release` = PCR0, GSI `status-index` on
+  `status` + `release_number`), rendered from the signed manifest by
+  operations: `release_number`, `status` (`active|deprecated|retired`),
+  `available` (false once the image can't be started). The API records
+  on-demand start requests here (`start_requested_at`, `start_requests`); the
+  infrastructure that starts instances is VAULT-PLAN V5.
+
+The API's IAM can write only its own attributes on `vaults` and
+`vault-releases` (never a lease, `sealed_release` or a status), cannot write
+the instance registry, and can `sqs:SendMessage` only to
+`vettid-org-vault-control-*` queues. Only the cleanup job can delete vault
+rows. Table names and the queue prefix are published under
+`/vettid-org/<stage>/data/` for the enclave host.

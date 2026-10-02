@@ -37,5 +37,9 @@ export function tableEnv(config: AppConfig): Record<string, string> {
     TABLE_AUDIT: t('audit'),
     TABLE_RATELIMITS: t('ratelimits'),
     TABLE_MAGIC_LINKS: t('magic-links'),
+    TABLE_VAULTS: t('vaults'),
+    TABLE_VAULT_INSTANCES: t('vault-instances'),
+    TABLE_VAULT_REQUESTS: t('vault-requests'),
+    TABLE_VAULT_RELEASES: t('vault-releases'),
   };
 }

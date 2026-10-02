@@ -1,7 +1,8 @@
 /**
  * Daily:
  *  - delete accounts canceled more than 7 days ago (Cognito user,
- *    subscription, member row + email marker; the audit trail stays)
+ *    subscription, member row + email marker, vault rows; the audit trail
+ *    stays)
  *  - reclaim membership requests never email-verified within 14 days
  *  - mark subscriptions past their expiry as `expired`
  */
@@ -12,7 +13,7 @@ import { audit } from '../shared/audit';
 import { cognito, ddb, env, ses, table } from '../shared/aws';
 
 const STALE_DAYS = 14;
-import { emailMarkerKey } from '../shared/members';
+import { emailMarkerKey, vaultPointerKey } from '../shared/members';
 import type { MemberItem, SubscriptionItem } from '../shared/model';
 
 async function* query(input: ConstructorParameters<typeof QueryCommand>[0]) {
@@ -22,6 +23,31 @@ async function* query(input: ConstructorParameters<typeof QueryCommand>[0]) {
     yield* r.Items ?? [];
     start = r.LastEvaluatedKey;
   } while (start);
+}
+
+/**
+ * Delete a member's vault rows (every vault_id they ever had, and their
+ * pointer row). Response slots expire on their own (15 min TTL).
+ *
+ * TODO(VAULT-PLAN V5): also delete every stored object under
+ * `vaults/<vault_id>/` (encrypted state and the per-release sealed headers,
+ * VAULT-MESSAGING §11.1, §11.10.2) once the vault data bucket exists in
+ * VettidOrgVaultStack; it does not exist yet, so nothing is stored there.
+ */
+async function deleteVaultRows(guid: string): Promise<string[]> {
+  const ids: string[] = [];
+  for await (const item of query({
+    TableName: table.vaults(),
+    IndexName: 'user-index',
+    KeyConditionExpression: 'user_guid = :g',
+    ExpressionAttributeValues: { ':g': guid },
+  })) {
+    const id = String(item.vault_id);
+    await ddb.send(new DeleteCommand({ TableName: table.vaults(), Key: { vault_id: id } }));
+    ids.push(id);
+  }
+  await ddb.send(new DeleteCommand({ TableName: table.vaults(), Key: { vault_id: vaultPointerKey(guid) } }));
+  return ids;
 }
 
 export const handler = async () => {
@@ -60,7 +86,8 @@ export const handler = async () => {
       }
       await ddb.send(new DeleteCommand({ TableName: table.subscriptions(), Key: { user_guid: m.user_guid } }));
       await ddb.send(new DeleteCommand({ TableName: table.members(), Key: { user_guid: emailMarkerKey(m.email) } }));
-      await audit('system', 'member.delete_after_cancel', m.user_guid, {});
+      const vaultIds = await deleteVaultRows(m.user_guid);
+      await audit('system', 'member.delete_after_cancel', m.user_guid, vaultIds.length ? { vault_ids: vaultIds } : {});
       deleted++;
     }
   }

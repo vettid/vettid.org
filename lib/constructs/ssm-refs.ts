@@ -24,6 +24,11 @@ export type SsmRefKey =
   | 'auth/pin-pepper-secret-arn'
   | 'data/terms-bucket-name'
   | 'data/members-stream-arn'
+  | 'data/vaults-table-name'
+  | 'data/vault-instances-table-name'
+  | 'data/vault-requests-table-name'
+  | 'data/vault-releases-table-name'
+  | 'data/vault-control-queue-prefix'
   | 'member-api/domain'
   | 'admin-access/egress-ip'
   | 'admin-access/site-web-acl-arn';
