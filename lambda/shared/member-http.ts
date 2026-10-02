@@ -98,6 +98,22 @@ export class RateLimited extends HttpError {
   }
 }
 
+/**
+ * An error with a code outside the generic set (e.g. the vault's
+ * `instance_moved`, `release_starting`) and extra body fields such as
+ * `retry_after`. The body is `{error, message, ...extra}`.
+ */
+export class ApiError extends HttpError {
+  constructor(status: number, code: string, message: string, readonly extra: Record<string, unknown> = {}) {
+    super(status, code as HttpError['code'], message);
+  }
+}
+
+/** Return from a route handler to answer with a status other than 200 (e.g. 202). */
+export class WithStatus {
+  constructor(readonly status: number, readonly body: unknown) {}
+}
+
 // ---- origin verification -------------------------------------------------------
 
 async function verifyOrigin(event: APIGatewayProxyEventV2): Promise<void> {
@@ -237,11 +253,13 @@ export function memberHandler(router: Router<MemberRequest>) {
         event,
         setCookies,
       });
+      if (result instanceof WithStatus) return memberJson(result.status, result.body, setCookies);
       return memberJson(200, result, setCookies);
     } catch (err) {
       if (err instanceof RateLimited) {
         return memberJson(429, { error: 'rate_limited', message: err.message, retry_after: err.retryAfter }, setCookies);
       }
+      if (err instanceof ApiError) return memberJson(err.status, { error: err.code, message: err.message, ...err.extra }, setCookies);
       if (err instanceof HttpError) return memberJson(err.status, { error: err.code, message: err.message }, setCookies);
       console.error('unhandled', err);
       return memberJson(500, { error: 'internal', message: 'Internal error' }, setCookies);

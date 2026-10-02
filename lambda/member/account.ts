@@ -10,40 +10,19 @@ import {
 } from '@aws-sdk/client-cognito-identity-provider';
 import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { GetCommand, PutCommand, QueryCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { GetCommand, PutCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { audit } from '../shared/audit';
 import { cognito, ddb, env, s3, table } from '../shared/aws';
 import { HttpError, Router, badRequest, conflict, forbidden, notFound, str } from '../shared/http';
 import { nowIso } from '../shared/ids';
 import { MemberRequest, clearSessionCookies, memberHandler, requireSession } from '../shared/member-http';
-import { canSignIn, memberByGuid } from '../shared/members';
+import { canSignIn, currentTerms, memberByGuid } from '../shared/members';
 import { hasVotingRights, MemberItem, SubscriptionItem } from '../shared/model';
 import { checkPin, hashPin, pinProblem } from '../shared/pin';
 import { sendMail } from '../shared/mail';
 
 const router = new Router<MemberRequest>();
 const poolId = () => env('MEMBER_POOL_ID');
-
-interface CurrentTerms {
-  version_id: string;
-  title: string;
-  sha256: string;
-}
-
-async function currentTerms(): Promise<CurrentTerms | null> {
-  const r = await ddb.send(
-    new QueryCommand({
-      TableName: table.terms(),
-      IndexName: 'status-index',
-      KeyConditionExpression: '#s = :c',
-      ExpressionAttributeNames: { '#s': 'status' },
-      ExpressionAttributeValues: { ':c': 'current' },
-      ScanIndexForward: false,
-      Limit: 1,
-    }),
-  );
-  return (r.Items?.[0] as CurrentTerms | undefined) ?? null;
-}
 
 async function subscriptionOf(guid: string): Promise<SubscriptionItem | null> {
   const r = await ddb.send(new GetCommand({ TableName: table.subscriptions(), Key: { user_guid: guid } }));

@@ -146,7 +146,7 @@ and `vaultctl` scripts exercise them through the real relay.
   data bucket, one KMS sealing key per active release (decrypt only under
   Nitro attestation with that release's PCR0, §5.1), KMS PCR-manifest signing
   key, SSM refs.
-- **DataStack** additions: vaults, instance registry, requests tables.
+- **DataStack** additions: vaults, instance registry, requests tables (landed with V3, plus a releases table; V5 adds the enclave host role's grants on them).
 - **VettidOrgNitroStack**: VPC with public subnets and no NAT, Graviton host
   ASG (min 0), IMDSv2 hop 1, no inbound, SSM-only access, alarms.
 - EIF and AMI build (vettid-vault CI + script), PCR manifest published at

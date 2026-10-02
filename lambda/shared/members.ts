@@ -32,3 +32,25 @@ export async function memberByGuid(guid: string): Promise<MemberItem | null> {
 /** Account holders who may sign in and use the account site. */
 export const canSignIn = (m: MemberItem | null): m is MemberItem =>
   !!m && (m.state === 'registered' || m.state === 'member') && m.account_status === 'active';
+
+export interface CurrentTerms {
+  version_id: string;
+  title: string;
+  sha256: string;
+}
+
+/** The membership terms version members must have accepted (null if none is published). */
+export async function currentTerms(): Promise<CurrentTerms | null> {
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: table.terms(),
+      IndexName: 'status-index',
+      KeyConditionExpression: '#s = :c',
+      ExpressionAttributeNames: { '#s': 'status' },
+      ExpressionAttributeValues: { ':c': 'current' },
+      ScanIndexForward: false,
+      Limit: 1,
+    }),
+  );
+  return (r.Items?.[0] as CurrentTerms | undefined) ?? null;
+}
