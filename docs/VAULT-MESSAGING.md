@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.2.3
+version: 0.3.0
 date: 2026-10-02
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,6 +14,10 @@ related:
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md
 changelog:
+  - 0.3.0: release updates (VAULT-PLAN D1): per-release sealing, the signed
+    release manifest, member-approved moves at unlock, routing by
+    sealed_release, threat-model updates; unlock requests carry the manifest
+    and are padded to 12,288 bytes
   - 0.2.3: V2 runtime additions: DEK derivation; §6.6 decides the token
     class by the collect jti (RELAY-PROTOCOL 0.4.0); approval roles; 7-day
     pending connection requests; first-app handshake; refusal of revoked
@@ -122,7 +126,7 @@ the relay at vettid.org allows:
 
 | Party | Trusted for | Not trusted for |
 |---|---|---|
-| Enclave (attested release) | Confidentiality and integrity of an unlocked vault | Anything its PCRs don't attest. Apps check the release at every enroll and unlock (§11.2). |
+| Enclave (attested release) | Confidentiality and integrity of the vaults sealed to it, which are only those whose members approved it (§11.10) | Anything its PCRs don't attest. Apps check the release at every enroll and unlock (§11.2, §11.10.6). |
 | Parent / host | Availability | Keys, plaintext, parsing, freshness, dedupe, routing decisions |
 | Relay | Availability | Content confidentiality, integrity and authorship |
 | Member API, queues, tables | Member session auth, rate limits, routing, availability | PINs, keys, vault contents, relay addresses |
@@ -148,8 +152,10 @@ hidden. Traffic-analysis resistance is a non-goal (as in RELAY-PROTOCOL
 **Out of scope:**
 
 - compromise of the enclave platform, or side channels inside it;
-- a malicious release that the user unlocks into after being shown its
-  attestation;
+- a malicious release that the member approved and moved their vault into
+  (§11.10), or enrolled into, after being shown its release number, notes
+  and PCR0. No other release can open the vault, and VettID cannot move it
+  there (§13.5);
 - recovery when every owner device is lost. Backup and recovery are a
   separate design.
 
@@ -201,6 +207,7 @@ Rules for all keys:
 **Vault state** is encrypted under the DEK. It holds:
 
 - `vault_id` and `state_seq` (§13.2);
+- `sealed_release` and any pending `release_move` (§11.10.4);
 - the relay key, the mailbox address and the rotation state;
 - the vault's current `ik` and `kem`, and its retired `kem`s;
 - the vault's rotation chain;
@@ -222,7 +229,9 @@ contains:
 
 - `vault_id` and `user_guid`;
 - a `provisional` flag (§11.3);
-- the DEK's KDF parameters and salt;
+- the DEK's KDF parameters, salt and pepper (§3.3.1);
+- `sealed_release`, the release it is sealed to, and `manifest_serial`, the
+  highest release-manifest serial the vault has seen (§11.10);
 - the **unlock keys**: for each app allowed to unlock, its `ik`, its `kem`
   and its device-attestation binding (§11.7);
 - the backoff state (§11.8);
@@ -255,11 +264,13 @@ The reference implementation stores vault state and the sealed header as:
 state  = 0x01 || state_seq (8, big-endian) || nonce (24)
          || XChaCha20-Poly1305(DEK, nonce, aad, state_json)
 aad    = "vettid/vms/2/state" || 0x00 || vault_id || 0x00 || state[0:9]
-header = Seal(header_json, aad = "vettid/vms/2/header" || 0x00 || vault_id)   # sealed to the enclave
+header = Seal_R(header_json, aad = "vettid/vms/2/header" || 0x00 || vault_id)   # sealed to release R (§11.10.2)
 ```
 
 Both objects are written create-only at enrollment and with version-matched
-conditional writes afterwards (§12.3).
+conditional writes afterwards (§12.3). There is one header object per
+release the vault has been sealed to (§11.10.2); a move writes the new one
+create-only.
 
 ### 3.4 Rotation
 
@@ -474,11 +485,14 @@ padded length MUST be exactly that bucket: over-padding to a larger bucket
 is malformed.
 
 Alternate-channel plaintexts are padded to exactly 4,096 bytes; a 4,096-byte
-inner plaintext produces a 5,252-byte sealed envelope.
+inner plaintext produces a 5,252-byte sealed envelope. The one exception is
+the `vault.unlock` request, which carries the signed release manifest
+(§11.4) and is padded to exactly **12,288 bytes** (a 13,444-byte envelope)
+whether or not it carries a release update.
 
 Receivers MUST reject malformed padding: a padded length that is not
-exactly the bucket for the JSON it contains (or not exactly 4,096 bytes on
-the alternate channel), a last non-zero byte other than `0x80`, or no
+exactly the bucket for the JSON it contains (or not exactly the fixed size
+on the alternate channel), a last non-zero byte other than `0x80`, or no
 marker at all. Senders and receivers check the ciphertext length (padded
 length + 16) against the bucket sizes before decrypting.
 
@@ -1182,6 +1196,7 @@ per feature** (§15).
   | `message.read` | `connection_id`, `message_id` |
   | `device.paired` | `device_id`, `role` |
   | `device.unlinked` | `device_id` |
+  | `vault.release` | `release` (PCR0 hex), `release_number`; sent once after a vault first runs under a new release (§11.10.6) |
 
 ### 10.2 Lifecycle and sessions
 
@@ -1204,7 +1219,7 @@ per feature** (§15).
 | `device.pair.create` (app) | `{role: "app" \| "desktop" \| "agent"}` | `{pairing_id, link, exp}` |
 | `device.pair.pending` (to apps) | — | `{pairing_id, pending_id, role, name, sas}`; `name` is the new device's self-asserted `profile.name` |
 | `device.pair.approve`, `.reject` (app) | `{pairing_id}` | `{}` |
-| `device.paired` (to the new device) | — | `{device_id, role, vault_id}` |
+| `device.paired` (to the new device) | — | `{device_id, role, vault_id, release, release_number}` (the release the vault runs under) |
 | `device.list` (app, desktop) | `{}` | `{devices: [{id, kind, state, name, ik, profile?}]}` |
 | `device.unlink` (app) | `{device_id}` | `{}` |
 | `device.unlinked` (to the unlinked device, best effort) | — | `{}` |
@@ -1262,8 +1277,8 @@ app <--poll--- GET /api/vault/requests/{id} <-- response slot <-------------- pa
 - `GET /api/vault/status`
 
 The routes follow MEMBER-API conventions. Each request envelope is sealed to
-an instance's ETK and padded to 4,096 bytes, and the API, queue and parent
-see only opaque bytes.
+an instance's ETK and padded to a fixed size (4,096 bytes; 12,288 for
+`vault.unlock`, §5.4), and the API, queue and parent see only opaque bytes.
 
 **Instances and leases:**
 
@@ -1287,8 +1302,10 @@ see only opaque bytes.
 - **Routing for `GET /api/vault/enclave`:**
   - If the vault has a live lease, the API returns the descriptor of the
     leased instance.
-  - Otherwise, it returns a live instance chosen by load. That instance
-    takes the lease when it processes the request.
+  - Otherwise, it returns a live instance **of the vault's
+    `sealed_release`** chosen by load, or starts one (§11.10.5). That
+    instance takes the lease when it processes the request.
+  - Enrollment goes to an instance of an `active` release.
 - **Routing for posted requests.** A request names the instance whose ETK it
   was sealed to. The API forwards it only if that instance still holds the
   lease, or if there is no live lease. Otherwise it answers `409
@@ -1314,13 +1331,14 @@ exact descriptor bytes together with the attestation document.
 The app MUST:
 
 1. verify the attestation chain up to the AWS Nitro root;
-2. match PCR0, PCR1 and PCR2 against an active entry of VettID's signed PCR
-   manifest, rejecting debug (all-zero) PCRs. The manifest's location and
-   signing key are defined in the vault deployment plan;
+2. match PCR0, PCR1 and PCR2 against an entry of VettID's signed release
+   manifest (§11.10.1), rejecting debug (all-zero) PCRs: an `active` entry
+   to enroll, any listed entry to unlock;
 3. check `user_data`, check `not_after`, and check that the attestation is
    less than 26 h old;
 4. tell the user before sending a PIN if `release` differs from the release
-   the app last unlocked into ("vault software was updated").
+   the app last unlocked into ("vault software was updated"), and never send
+   a PIN to an older release than that one (§11.10.6).
 
 The previous ETK stays valid for 1 h after rotation. ETK private keys never
 leave enclave memory.
@@ -1387,6 +1405,8 @@ App               Relay        Member API               SQS/Parent       Enclave
   NOT be replaced: the enclave answers `vault_exists`.
 - **App state.** The app stores `vault_id`, the pinned bundle, the release
   and `state_seq` (§13.2).
+- **Release.** The enrolling instance's release becomes the vault's
+  `sealed_release`; the header is sealed to it (§11.10.2).
 - **The first app's handshake.** After `vault.enrolled`, the app sends
   `hs.init` with purpose `app` and `ctx` = `vault_id`, deposited with the
   token from `vault.enrolled`. The vault answers it without approval if,
@@ -1403,15 +1423,22 @@ App               Relay        Member API               SQS/Parent       Enclave
   "min_state_seq": 1234, "min_header_seq": 1301,
   "token": "<fresh standing token for MB(device), sub = vault relay key>",
   "device_assertion": { },
+  "manifest": { "manifest": "<b64>", "sig": "<b64>", "key_id": "<hex>" },
+  "release_update": { "to": "<pcr0 hex>", "to_release": 5, "approval": { } },
   "sig": "<b64 Ed25519 by device_ik>" }
 ```
+
+`manifest` is the served manifest document (§11.10.1), REQUIRED.
+`release_update` is present only when the member approved a release update
+(§11.10.3). The request is padded to exactly 12,288 bytes (§5.4).
 
 `device_assertion` is REQUIRED (§11.7). `sig` covers the following string,
 where each `\n` is a literal newline:
 
 ```
 "vettid/vms/2/unlock" \n user_guid \n vault_id \n request_id \n ts \n etk_kid_hex \n
-min_state_seq \n min_header_seq \n hex(SHA-256(pin)) \n hex(SHA-256(token))
+min_state_seq \n min_header_seq \n hex(SHA-256(pin)) \n hex(SHA-256(token)) \n
+hex(SHA-256(manifest_bytes)) \n to_pcr0_hex_or_empty
 ```
 
 `ts` is the request's inner `ts` (§5.3). Integers are decimal, hex is
@@ -1434,8 +1461,13 @@ App        Member API                   SQS/Parent                 Enclave
 header and padded to 4,096 bytes. Its body is one of:
 
 - `{"ok": true, "state_seq": n, "header_seq": m, "token": "<standing token for
-  MB(vault)>", "release": "<PCR0 hex>"}`
-- `{"ok": false, "code": "bad_pin|backoff|unknown_device|attestation|state_rollback|vault_missing",
+  MB(vault)>", "release": "<PCR0 hex>", "release_number": r,
+  "release_status": "active|deprecated|retired", "manifest_serial": s,
+  "update": {"to": "<pcr0>", "result": "moved|refused|abandoned", "code": "<reason>"}}`
+  — `update` is present only if the request carried `release_update`, or a
+  pending move was completed (§11.10.4). After `moved` the vault is locked
+  and sealed to the new release; `header_seq` is the new header's.
+- `{"ok": false, "code": "bad_pin|backoff|unknown_device|attestation|state_rollback|vault_missing|manifest|wrong_release",
   "header_seq": m, "retry_after": <s>}`
 
 On `state_rollback`, the app MUST warn the user that the vault's stored state
@@ -1452,15 +1484,15 @@ Nothing secret is stored:
 
 | Store | Contents | Retention |
 |---|---|---|
-| Vault table | `user_guid`, **`vault_id`** (opaque, 128-bit random, assigned by the API at enrollment; the routing key for alternate-channel requests), `state` (`enrolling`, `locked`, `unlocked`, `deleted`), **lease** (`instance_id`, `lease_expires_at`), **`vault_version`** (release that last opened the vault), **`state_version`** (vault-state format version), `created_at`, `updated_at` | account lifetime |
-| Instance registry | `instance_id`, queue URL, descriptor, attestation, `heartbeat_at` | while the instance is live |
+| Vault table | `user_guid`, **`vault_id`** (opaque, 128-bit random, assigned by the API at enrollment; the routing key for alternate-channel requests), `state` (`enrolling`, `locked`, `unlocked`, `deleted`), **lease** (`instance_id`, `lease_expires_at`), **`sealed_release`** (the PCR0 the vault is sealed to; routing aid, §11.10.5), **`vault_version`** (release that last opened the vault), **`state_version`** (vault-state format version), `created_at`, `updated_at` | account lifetime |
+| Instance registry | `instance_id`, **`release`** (PCR0 from its descriptor), queue URL, descriptor, attestation, `heartbeat_at` | while the instance is live |
 | Request table | `request_id`, `vault_id`, `op`, `status` (`queued`, `done`, `expired`), opaque response envelope (≤ 8 KiB) | TTL 15 min |
 
 - **Not stored:** mailbox ids, relay keys, device identifiers, and request
   envelopes beyond the queue's own retention.
 - **Lifecycle reporting.** The enclave emits lifecycle events (`enrolled`,
-  `unlocked`, `locked`, `deleted`, carrying `vault_version` and
-  `state_version`). The parent writes them to the vault table.
+  `unlocked`, `locked`, `deleted`, `moved` with the target release, carrying
+  `vault_version` and `state_version`). The parent writes them to the vault table.
 - **Lifecycle values are advisory.** `vault_version` should match the
   `release` in the attested descriptor of the reporting instance, but a
   dishonest parent could misreport any of these values. They therefore serve
@@ -1596,6 +1628,298 @@ Desktops and agents have no platform attestation and do not unlock.
 | Decryption, binding, signature or attestation failure | The request is dropped, or gets the uniform sealed result. The API cannot tell which. |
 | Bad PIN, backoff, rollback | The uniform sealed result (§11.4) |
 | State write conflict | The vault locks (§12.3) and the result says `retry`. |
+| The vault's release is not running | `503 release_starting` with `retry_after`; the app retries (§11.10.5). |
+| Stale, invalid or unsigned manifest | Result code `manifest`; the app refetches the manifest. Not counted as a PIN failure. |
+| Header or state belongs to another release | Result code `wrong_release` (§11.10.4). |
+
+### 11.10 Release updates
+
+A **release** is one enclave image, identified by its PCR0. The member keeps
+total control over which release can open their vault (VAULT-PLAN §5.1,
+decision D1):
+
+- A vault's sealed header, which holds the pepper the DEK depends on
+  (§3.3.1), is sealed to **one release**: the release the member last
+  approved. No other release can open it, including any later release
+  VettID ships.
+- A vault moves to a newer release only during an unlock in which the member
+  approves that release in the app (or back, before the newer release has
+  ever run it, §11.10.4). Declining, or not answering, changes nothing.
+- VettID cannot move a vault, and cannot force a member to update.
+
+#### 11.10.1 The release manifest
+
+VettID publishes the releases it runs in a signed **release manifest** at
+`https://vettid.org/.well-known/vettid/pcr-manifest.json`.
+
+**Manifest bytes** are a compact JSON object, parsed with the strict rules
+of §5.3, at most **4,096 bytes**:
+
+```json
+{"v":1,"serial":7,"issued_at":"<RFC 3339, whole seconds>","releases":[
+  {"release":4,"pcr0":"<96 hex>","pcr1":"<96 hex>","pcr2":"<96 hex>",
+   "seal_key":"<sealing-key identifier, ≤ 256 bytes>","status":"active",
+   "published_at":"<RFC 3339, whole seconds>","notes":"<https URL>"}]}
+```
+
+- `serial` is an integer that increases with every publication. A manifest
+  with a lower `serial` than one already seen MUST be refused (by apps and
+  by the enclave, §11.10.4).
+- `release` is the release number: a positive integer, unique, assigned in
+  publication order. **Every release image embeds its own release number**,
+  so it is covered by PCR0. Entries are sorted by `release`; `release` and
+  `pcr0` are unique.
+- PCR values are lowercase hex SHA-384 (96 characters). Debug (all-zero)
+  PCRs MUST NOT appear.
+- `seal_key` names the release's sealing key (§11.10.2).
+- `status`:
+
+  | Status | Enroll into | Move into | Unlock a vault sealed to it |
+  |---|---|---|---|
+  | `active` | yes | yes | yes |
+  | `deprecated` | no | no | yes; apps urge an update |
+  | `retired` | no | no | yes; apps warn that the release is no longer maintained |
+
+- The manifest MUST list every release that still runs for any vault. A
+  release absent from the manifest is unknown: apps refuse to send it a PIN.
+- `notes` is an `https` URL of human-readable release notes.
+
+**The served document** wraps the exact manifest bytes:
+
+```json
+{ "manifest": "<b64 exact manifest bytes>", "sig": "<b64 64 bytes>", "key_id": "<16 hex>" }
+```
+
+```
+sig    = ECDSA-P256-SHA256(manifest_key, "vettid/pcr-manifest/1" || 0x00 || manifest_bytes)
+         encoded as r || s, 32 bytes each, big-endian (IEEE P1363)
+key_id = hex(SHA-256(SubjectPublicKeyInfo DER of the public key)[0:8])
+```
+
+- Signatures are verified over the exact bytes, so no JSON
+  canonicalization is needed.
+- The **manifest key** is an ECDSA P-256 key held by VettID in a hardware
+  key store and used for nothing else. Its public key is **pinned in every
+  app and in every release image**. Apps and images MAY pin two keys to
+  allow rotation; `key_id` selects one. Rotating to a key that an image does
+  not pin requires a release.
+
+#### 11.10.2 Sealing per release
+
+Each release R has a **sealing key** `SK_R` with two operations:
+
+- **unseal**: decrypt an object sealed to R. It is available **only to an
+  enclave attested as release R** (its PCR0).
+- **seal**: create an object sealed to R. It is available only to enclaves
+  attested as a release that R's sealing policy admits: R itself, and the
+  releases allowed to move vaults into R (at least every `active` and
+  `deprecated` release published before R).
+
+Neither operation gives the host any key material. A sealed object is
+authenticated encryption under a fresh data key that only an attested
+enclave ever holds in plaintext, so the host can neither read nor forge
+sealed objects; it can only store, withhold, or replay them.
+
+This is how release N seals for release N+1 without being able to read
+what it sealed: it can seal to `SK_{N+1}`, but only N+1 can unseal.
+
+*Deployment (VAULT-PLAN §5.1):* one AWS KMS key per release. `Decrypt` is
+allowed only with a Nitro attestation whose PCR0 is R's;
+`GenerateDataKey` is allowed only with a Recipient attestation whose PCR0
+is in R's admitted set, so the data key reaches only that enclave. Release
+images pin the account and region of the sealing keys and refuse a
+`seal_key` outside them, so a manifest alone cannot redirect a vault to a
+foreign key. The key policies MUST forbid later policy changes (§13.5).
+
+Storage: the sealed header is one object **per release**
+(`vaults/<vault_id>/header/<pcr0>`); an enclave reads only its own release's
+object. Vault state (§3.3) is encrypted under the DEK, which does not
+change when a vault moves, so state is never re-encrypted.
+
+#### 11.10.3 Approval
+
+When the manifest lists an `active` release newer than the one the vault is
+sealed to, the app MAY offer the update. It shows the release number, the
+notes, and a fingerprint of PCR0 (VAULT-PLAN D3: anyone can rebuild the
+image and compare). If the member approves, the next unlock carries the
+approval.
+
+The **approval signing string**, each `\n` a literal newline, no trailing
+newline:
+
+```
+"vettid/vms/2/release-approval" \n vault_id \n request_id \n from_pcr0_hex \n
+to_pcr0_hex \n to_release \n manifest_serial
+```
+
+- `request_id` is the unlock request's, so an approval is good for that one
+  unlock only and cannot be replayed.
+- `from_pcr0_hex` is the release the vault is sealed to, which is the
+  release of the instance the unlock request is sealed to (§11.2); `to_pcr0_hex` and `to_release` are the
+  target's manifest entry; `manifest_serial` is the serial of the manifest
+  in the same request. Integers are decimal; hex is lowercase.
+- It is signed with the app's **device attestation key** (§11.7), the same
+  key and encoding as `device_assertion`:
+  - Android: ECDSA P-256 with SHA-256 over the string's bytes, DER-encoded;
+  - iOS: an App Attest assertion with `clientDataHash` =
+    SHA-256(string); the counter MUST increase.
+
+**In the unlock request** (§11.4):
+
+```json
+"release_update": { "to": "<to_pcr0_hex>", "to_release": 5,
+                    "approval": { <device_assertion object over the approval string> } }
+```
+
+The unlock signing string (§11.4) also covers `to_pcr0_hex`, so the
+approval is bound to the app's unlock key as well.
+
+#### 11.10.4 The move
+
+Every unlock request carries the current signed manifest (§11.4). An
+enclave of release N processes an unlock in this order:
+
+1. The normal checks of §11.4, in their order, up to and including the
+   rollback checks (§13.2). Before deriving the DEK, it verifies the
+   manifest: the signature under a pinned key, the strict format, and
+   `serial` ≥ the `manifest_serial` recorded in the sealed header. A
+   failure gives the result code `manifest`. A manifest failure is not a PIN
+   failure and does not count toward backoff.
+2. It derives the DEK and loads the state. If the state records a
+   **pending move** (step 6), it never resumes the vault, with one
+   exception: an **abandonment** (see "Abandoning an unconfirmed move"
+   below), a `release_update` whose `to` is the enclave's own PCR0 and
+   `to_release` its own number, with an approval that verifies (step 4,
+   check 3). An abandonment clears the pending move and continues as an
+   ordinary unlock. Otherwise the enclave skips to step 7.
+3. Without `release_update`, the unlock proceeds as before. The enclave
+   records the manifest `serial` at its next header write.
+4. With `release_update`, it checks, and **refuses the update** (the unlock
+   itself still succeeds) with the first failing reason:
+   1. `to` is in the manifest with `status` `active`, and `to_release` is
+      that entry's number (`target`);
+   2. `to_release` is **greater than** the enclave's own release number
+      (`downgrade`). Equal or lower is always refused here (abandoning a
+      move is step 2's exception, not an update);
+   3. the approval verifies under the attested device key bound to this
+      app's unlock key (`approval`). The enclave builds the approval string
+      itself, with its own PCR0 read from the NSM as `from_pcr0_hex`, so an
+      approval for a different source release cannot verify;
+   4. `seal_key` is within the pinned sealing-key namespace (`target`);
+   5. no move to a different release is pending (`pending`).
+5. If an update is refused, the result reports it and the vault runs
+   normally under N.
+6. **Record the move.** It flushes the state (§8.3) with
+   `release_move = {to, to_release, manifest_serial, approved_by: <device
+   id>}`. From here on the vault does not resume under N.
+7. **Seal to N+1.** It builds the new header from the current one with
+   `header_seq` + 1, `sealed_release` = `to` and the manifest serial, seals
+   it to `SK_to`, and writes `header/<to>` **create-only**. If that object
+   already exists, it can only be a leftover of an interrupted attempt at
+   this same recorded move (only admitted enclaves can seal to `SK_to`, and
+   moves only go forward): the enclave replaces it with a conditional write
+   on the version it read.
+8. It returns the result with `update: moved` and **locks** (§12.3) without
+   collecting. The parent reports the lifecycle event `moved` with the
+   target release. `header/<N>` is kept until N+1 confirms the move (below).
+
+**Failures.**
+
+- Before step 6: nothing has changed; the result says `refused` or the
+  unlock failed as usual.
+- Step 6 write fails: the state is unchanged; the result says `refused`
+  with code `write`, and the vault runs under N.
+- Step 7 fails, or the enclave crashes after step 6: the state records the
+  pending move, so the next unlock that reaches release N completes it at
+  step 2 without a new approval (the member already approved), and reports
+  `moved`. Until then the vault stays sealed to N, which is safe.
+- A crash after step 7: `header/<to>` exists and the state records the
+  move; the next unlock that reaches N reports `moved` again, and one that
+  reaches N+1 confirms it.
+
+**Re-approval and idempotency.** An approval for the target already
+recorded as pending is accepted and completes the move. An approval for a
+different target while a move is pending is refused (`pending`).
+
+**Confirmation at release N+1.** When an N+1 enclave opens a vault whose
+state records a pending move to N+1, it clears it, sets
+`state.sealed_release` to N+1, flushes, and only then deletes `header/<N>`
+(conditional delete; failure is ignored). From this flush on, the move is
+**confirmed** and final. An enclave MUST refuse a vault (result code
+`wrong_release`) whose state names a different `sealed_release` and no
+pending move to its own release: that is a stale header served to a
+release the vault has left.
+
+**Abandoning an unconfirmed move.** If N+1 cannot unlock the vault (for
+example, a defective release), the member is not stranded: while the move is
+unconfirmed, `header/<N>` still exists and the state still records the
+pending move. The app MAY then offer to return to release N. It sends an
+unlock to an N instance (§11.10.5) with `release_update.to` = N's own PCR0
+and `to_release` = N's number, approved like any update. The pending move
+is necessarily unconfirmed: had N+1 confirmed it, the state would name N+1
+as `sealed_release`, and N would have refused the vault as
+`wrong_release`. Release N clears the pending move, deletes `header/<to>`
+(conditional delete), resumes the vault, and reports `update: abandoned`;
+the parent reports `moved` back to N. This is the only way back to an
+earlier release, and only before the newer release has ever run the vault.
+
+**Downgrades.** Apart from abandoning an unconfirmed move, moving to an
+older or equal release is never allowed, even with an approval. A defect in
+a release is fixed by publishing a newer release, if necessary a rebuild of
+older code with a new number, and moving forward. *Rationale:* the member's
+approval protects against releases they do not trust, not against being
+talked into an old release with known vulnerabilities; forward-only moves
+remove that attack, and the host cannot exploit a downgrade path that does
+not exist.
+
+#### 11.10.5 Routing and on-demand start
+
+Several releases run at once.
+
+- The vault table records **`sealed_release`** (the PCR0 the vault is sealed
+  to), and the instance registry records each instance's **`release`**
+  (from its attested descriptor, §11.2). Both are routing aids written by the
+  parent from lifecycle events; a wrong value can only misroute, and a
+  release that is not sealed to cannot open the vault.
+- `GET /api/vault/enclave` returns a live instance of the vault's
+  `sealed_release` (the leased one if there is a lease, §11.1). If none is
+  running, the API requests one and answers
+  `503 {"code": "release_starting", "release": "<pcr0>", "retry_after": <s>}`;
+  the app retries after `retry_after`. A release whose image can no longer
+  be started answers `410 {"code": "release_unavailable"}`. VettID keeps
+  each release's image and sealing key while any vault is sealed to it
+  (VAULT-PLAN §5.1).
+- The `moved` lifecycle event updates `sealed_release`; the next unlock is
+  routed to the new release.
+- An app MAY ask for a specific release with
+  `GET /api/vault/enclave?release=<pcr0>`, which is answered the same way
+  for any release listed in the manifest. Apps use it only to abandon an
+  unconfirmed move (§11.10.4).
+
+#### 11.10.6 What the app shows and stores
+
+The app stores, per vault: the **release it last unlocked into** (PCR0 and
+release number), the highest manifest `serial` it has seen, and
+`state_seq` / `header_seq` (§13.2).
+
+- It fetches the manifest before each unlock, refuses one with a lower
+  `serial` than stored, and sends it in the unlock request.
+- It MUST NOT send a PIN to a release with a **lower** release number than
+  the one it last unlocked into (a rollback; it shows an error).
+- If the routed release is **newer** than the stored one and listed in the
+  manifest, the vault was moved from another device. The app tells the user
+  ("vault software was updated") before sending the PIN, as §11.2 step 4
+  requires.
+- For a `deprecated` or `retired` release, it shows the status and offers
+  the newest `active` release.
+- After `update: moved`, it records the new release and sequence numbers
+  and unlocks again, which reaches the new release. If that release
+  repeatedly fails to unlock the vault, the app MAY offer to return to the
+  previous release while the move is unconfirmed (§11.10.4), and records
+  the previous release again after `update: abandoned`. Owner devices also
+  learn the release from `device.paired` and from the `sync.event` kind
+  `vault.release` that a vault sends after it first runs under a new
+  release.
 
 ## 12. Locked vaults and the collect manager
 
@@ -1727,19 +2051,30 @@ availability.
 | ETK | PINs in requests sealed to it (≤ 25 h). Requires breaking the enclave. | Enclave restart |
 | Owner app | Whatever its role allows, including unlock attempts if the PIN is known | Unlink from another device |
 | PIN alone | Nothing without a registered, attested app | `pin.change` |
+| An old release, after members moved away | Vaults still sealed to it. A moved vault only if the host serves it a stale header and state **and** an app sends it the PIN; apps never send a PIN to an older release than they last unlocked into (§11.10.6). Residual: an owner device that never learned of the move. | Members move forward; the app warns about `deprecated` and `retired` releases |
+| Manifest key | Listing a release as `active`. A vault still moves only with the member's approval, and only to a sealing key in the pinned namespace. | Rotate the key in a release; apps pin two keys |
+| Sealing-key policy (VettID's AWS account) | If a policy were changed to allow decrypting without the release's attestation, the pepper would be exposed, enabling offline PIN guessing against stored state | Policies are created immutable (no `PutKeyPolicy` for any principal); this is an operator commitment that attestation cannot prove |
 
 As operator of the host, queues and API, VettID **can**:
 
 - deny service;
 - lock vaults;
 - delete stored state;
-- observe the metadata in §2.2.
+- observe the metadata in §2.2;
+- publish new releases and mark old ones `deprecated` or `retired`.
 
 It **cannot**:
 
 - unlock a vault;
 - read or forge a vault's messages;
-- act on a vault's mailbox without the PIN.
+- act on a vault's mailbox without the PIN;
+- move a vault to another release, or **force an update**: only the
+  member's approval at unlock moves a vault (§11.10). A vault therefore
+  stays on its release, including any unfixed vulnerability, until the
+  member approves an update; the app makes that visible.
+
+These "cannot" statements assume the sealing keys' policies are immutable
+(§11.10.2, table above).
 
 ### 13.6 Implementation requirements
 
@@ -1783,6 +2118,9 @@ Follow-ups:
    scheduled.
 4. **Desktop unlock.** Revisit if a desktop attestation mechanism becomes
    available.
+5. **Release updates.** Implementation in V3: generate the §16 release
+   vectors in vettid-vault, the KMS policy shapes in VAULT-PLAN, and an
+   app UX review of the approval screen.
 
 ## 16. Test vectors
 
@@ -1850,11 +2188,60 @@ Kotlin, Swift and Rust clients MUST reproduce them byte for byte.
   envelope (5252 B, randomness 64 x 0x13) : altchan.json
 ```
 
+**§11.10 release updates (0.3.0).** These values were computed with Go 1.26
+(ECDSA P-256 with RFC 6979 deterministic nonces); vettid-vault adds them to
+`testdata/vectors` in phase V3. The §11 vectors in `altchan.json` predate
+0.3.0 and are regenerated then (the unlock signing string gained two
+fields).
+
+```
+§11.10.1 manifest signature
+  manifest key (test only): P-256 private scalar 32 x 0x21
+  public key SPKI (b64) : MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAERi26GuT8GpaLTazyDN1tvh+uNKqXFRSmPTQFw9HP04O1i7sIwTODQoxYU8ccTIUeE0sFaCHkaP4Kl3q/QxPd4Q==
+  key_id                : 1edbb48b6669decd
+  manifest bytes (1,060 B, one line):
+    {"v":1,"serial":7,"issued_at":"2026-10-02T12:00:00Z","releases":[{"release":3,"pcr0":"ab"x48,
+    "pcr1":"11"x48,"pcr2":"22"x48,"seal_key":"arn:aws:kms:us-east-1:000000000000:key/test-release-3",
+    "status":"deprecated","published_at":"2026-09-01T00:00:00Z","notes":"https://vettid.org/releases/3"},
+    {"release":4,"pcr0":"cd"x48,"pcr1":"33"x48,"pcr2":"44"x48,
+    "seal_key":"arn:aws:kms:us-east-1:000000000000:key/test-release-4","status":"active",
+    "published_at":"2026-10-01T00:00:00Z","notes":"https://vettid.org/releases/4"}]}
+    ("ab"x48 = 96 hex characters; no spaces or line breaks in the real bytes)
+  SHA-256(manifest bytes)                       : d3fc1be2ce9358815863eeae15bebf5c755f168a7ab161c8e5c66500be1288f1
+  SHA-256("vettid/pcr-manifest/1" 00 manifest)  : 9b086ab99783d85706fdacf3dd36f496c16e30f05468450f1efd946fae1ddfad
+  sig (r||s, b64) : 3AyvBQGEjYFOYLlmp+EwyEbvd/34cnEB9jcAA5o691JRXj6eKTHcZHUZw36FgLtpEpYRLAsLlpGYYZWwQZE46w==
+
+§11.10.3 approval (vault_id test-vault-0001, request_id 01JB2Z6V9K3M4N5P6Q7R8S9T22,
+          from "ab"x48 to "cd"x48, to_release 4, manifest_serial 7)
+  signing string  : "vettid/vms/2/release-approval\ntest-vault-0001\n01JB2Z6V9K3M4N5P6Q7R8S9T22\n"
+                    "ab"x48 "\n" "cd"x48 "\n4\n7"
+  SHA-256(string) : 1217fb681eb6a11899ff5ab2ab1a620f179bb942088dc2b79e9b0466380d10b5
+  Android device attestation key (test only): P-256 private scalar 32 x 0x22
+  public key SPKI (b64) : MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE1lqTl3yqPRsIGFL/V6eeRl8WYFdzBLrq1QXdOkhYnPNQGF6JU3LfYiHqOhN1V+Rz/dtnVfBb1QfDxTP86ckShQ==
+  approval sig (DER, b64) : MEQCIH8lw3H0EdOnkuiH6yMEMR/zIh16+kPuacXjK77FnYf+AiBGvXMyQ6vhmpA1JRJYd804f5qw9Dtyo7kXZZ/TTSMCSA==
+```
+
 Cross-implementation checks against Apple CryptoKit and BouncyCastle are
 pending (§15, follow-up 1).
 
 ## 17. Changelog
 
+- **0.3.0** (2026-10-02): release updates (VAULT-PLAN §5.1, decision D1).
+  - §11.10: the signed release manifest (format, ECDSA P-256 signature over
+    exact bytes, monotonic serial, statuses, pinned key), per-release
+    sealing keys (seal for another release without being able to unseal),
+    the approval statement, the move at unlock with its failure handling,
+    confirmation by the new release and abandonment of unconfirmed moves,
+    the forward-only rule, routing by `sealed_release` with on-demand start, and
+    what the app shows and stores.
+  - §11.4: unlock requests carry the manifest and an optional
+    `release_update`, are padded to 12,288 bytes (§5.4), and the signing
+    string covers both; results report the release, its status and moves.
+  - §2, §13.5: VettID cannot force updates; residual risks of old releases,
+    the manifest key and sealing-key policies.
+  - §3.3, §10, §11.1–§11.5, §11.9: `sealed_release`, `manifest_serial`,
+    `release_move`, the `vault.release` sync kind, routing and failures.
+  - §16: release-update vectors.
 - **0.2.3** (2026-10-02): additions from the V2 runtime (vettid-vault).
   - §1.2, §6.6: RELAY-PROTOCOL 0.4.0 `jti` in collect results; the token
     class is decided by the collect `jti`, and a connection's message

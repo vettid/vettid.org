@@ -5,7 +5,7 @@ version: 0.1.0
 date: 2026-10-02
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.2.3) — the wire and behaviour spec this plan implements
+  - VAULT-MESSAGING.md (0.3.0) — the wire and behaviour spec this plan implements
   - RELAY-PROTOCOL.md (0.4.0), RELAY-PLAN.md
   - PQC-MIGRATION.md (0.3.0)
   - MEMBER-API.md, RUNBOOK.md
@@ -109,7 +109,7 @@ and no Nitro hardware.
 
 ### V3 — Alternate channel and enclave shell
 
-- Spec: release-update section in VAULT-MESSAGING (D1, §5.1).
+- Spec: release updates are specified in VAULT-MESSAGING 0.3.0 §11.10 (D1, §5.1).
 - Enclave side: ETK and descriptors, enroll/unlock/lock (§11), backoff,
   client-anchored rollback, device attestation (§11.7: Android key
   attestation and App Attest, verified with test CAs in CI and pinned vendor
@@ -181,6 +181,10 @@ SFrame), backup and recovery, PQC Phase 2 (ML-DSA, Go 1.27).
 
 ### 5.1 D1: re-sealing per release
 
+*Normative protocol: VAULT-MESSAGING §11.10 (manifest, sealing, approval,
+the move, routing, app behaviour). This section keeps the decision and the
+deployment consequences.*
+
 Each release has its own KMS key whose policy allows `Decrypt` only under a
 Nitro attestation with that release's PCR0. A vault's sealed header (and the
 sealed secret its DEK derivation depends on) is encrypted under the key of
@@ -196,7 +200,9 @@ any later release VettID ships.
    if they decline.
 3. On approval, the unlock request (to the N instance holding the vault)
    carries the app's signature, by its attested device key, over
-   `{vault_id, from: PCR0_N, to: PCR0_N+1}`.
+   `{vault_id, from: PCR0_N, to: PCR0_N+1}` (VAULT-MESSAGING §11.10.3, which
+   also binds the request id, the target's release number and the manifest
+   serial).
 4. After a successful PIN unlock, the N enclave checks the approval and that
    `PCR0_N+1` is in the signed manifest, then writes a header sealed under
    N+1's key (create-only, new `header_seq`) and records `sealed_release`.
@@ -215,10 +221,19 @@ any later release VettID ships.
 - **No migration machinery** like vettid.dev's (signed migration configs,
   per-user S3 locks, 72-hour deadlines): the move is one sealed write inside
   a normal unlock.
-- **Spec work:** VAULT-MESSAGING gains a release-update section (approval
-  format, `sealed_release`, routing) before V3.
-- **CDK:** one KMS key per active release, rendered from the manifest, with
-  RETAIN.
+- **Spec:** done in VAULT-MESSAGING 0.3.0 §11.10. Moves are forward-only
+  (a fix for a bad release ships as a newer release), and a pending move
+  recorded in vault state is completed at the next unlock if the header
+  write is interrupted.
+- **CDK:** one KMS key per release, rendered from the manifest, with RETAIN.
+  `Decrypt` only with a Nitro attestation of that release's PCR0;
+  `GenerateDataKey` only with a Recipient attestation of a release admitted
+  to seal for it (itself and the releases that may move vaults into it). Key
+  policies are created without any principal allowed `PutKeyPolicy`, so they
+  cannot be loosened later (VAULT-MESSAGING §13.5).
+- **Manifest signing key:** a KMS ECC_NIST_P256 key, sign-only, in a
+  separate account with multi-party approval; apps and release images pin
+  its public key.
 
 ### 5.2 D5: where TLS to the relay terminates
 
