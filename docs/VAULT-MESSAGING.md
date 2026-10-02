@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.2.0
-date: 2026-10-01
+version: 0.2.1
+date: 2026-10-02
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -14,6 +14,7 @@ related:
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md
 changelog:
+  - 0.2.1: enclave TLS uses pinned roots and shared connections
   - 0.2.0: suite 2 becomes HPKE with the MLKEM768X25519 hybrid KEM; remote
     invitations with selectable TTL; reconnect tokens; client-anchored rollback
     protection (state_seq); vault_id and instance leases for multiple enclave
@@ -125,7 +126,7 @@ the relay at vettid.org allows:
 | Party | Learns | Does not learn |
 |---|---|---|
 | Relay | Mailbox ids, depositor relay keys, timing, padded sizes, blob and claim sizes | Message types, content, or which identity, device or connection a relay key belongs to |
-| Parent / host | Relay host names; TLS byte counts and timing per vault; enroll, unlock and lock events; encrypted-state size; `vault_id` ↔ instance | Relay requests (TLS terminates in the enclave, §12.2), mailbox ids, PINs, keys |
+| Parent / host | Relay host names; TLS byte counts and timing per instance (connections are shared by all vaults, §12.2); enroll, unlock and lock events; encrypted-state size; `vault_id` ↔ instance | Relay requests (TLS terminates in the enclave, §12.2), mailbox ids, PINs, keys |
 | Member API | Which member enrolled, unlocked or locked, and when; `vault_id`, instance lease, `vault_version`, `state_version` (§11.5) | PINs; why an unlock failed (§11.4); mailbox ids; keys; any stable device identifier (§11.7) |
 | Network | Endpoints and timing | Everything else |
 
@@ -1329,8 +1330,11 @@ Connections whose standing tokens lapsed recover through reconnect tokens
   rotation grace period it also collects from the old mailbox.
 - **Batches.** Each vault handles one batch at a time (§8.3).
 - **TLS.** The enclave terminates TLS to the relay. The parent forwards only
-  TCP bytes to its relay allowlist on port 443. The enclave carries its own
-  CA roots.
+  TCP bytes to its relay allowlist on port 443. The enclave pins only the
+  roots for the allowlisted hosts (VAULT-PLAN §5.2), so root changes are rare
+  releases. Each instance carries every vault's relay requests over a few
+  shared HTTP/2 connections rather than one connection per vault, so the host
+  cannot attribute traffic to a vault by connection.
 - **On unlock**, in order:
   1. re-mint tokens and start reconnects (§7.2);
   2. rekey due device sessions;
@@ -1523,6 +1527,9 @@ through a deterministic test hook.
 
 ## 17. Changelog
 
+- **0.2.1** (2026-10-02): enclave TLS pins only the allowlisted hosts'
+  roots and shares a few HTTP/2 connections per instance across vaults
+  (§2.2, §12.2; VAULT-PLAN D5).
 - **0.2.0** (2026-10-01): owner review of 0.1.
   - Suite 2 is now HPKE (RFC 9180) with the MLKEM768X25519 KEM, KDF
     HKDF-SHA256 and AEAD ChaCha20-Poly1305. It replaces the bespoke combiner
