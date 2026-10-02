@@ -23,6 +23,11 @@ export interface AppConfig {
    * (see signup-stack.ts — scoping them silently breaks every send).
    */
   readonly senderEmail: string;
+  /**
+   * Container images for the relay, pinned by digest. Unset → the relay
+   * stack is skipped. Context: relayImage, litestreamImage.
+   */
+  readonly relay: { readonly image: string; readonly litestreamImage: string };
   readonly adminAccess: {
     /**
      * Headscale control server the AWS exit node joins (tailscale
@@ -46,6 +51,10 @@ export function loadConfig(node: Node): AppConfig {
     region: 'us-east-1',
     adminEmail: 'admin@vettid.org',
     senderEmail: 'no-reply@vettid.org',
+    relay: {
+      image: String(node.tryGetContext('relayImage') ?? ''),
+      litestreamImage: String(node.tryGetContext('litestreamImage') ?? ''),
+    },
     adminAccess: {
       headscaleLoginServer: String(node.tryGetContext('headscaleLoginServer') ?? ''),
     },
