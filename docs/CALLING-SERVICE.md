@@ -1,8 +1,8 @@
 ---
 title: CALLING-SERVICE
 status: draft
-version: 0.1.0
-date: 2026-08-21
+version: 0.1.1
+date: 2026-10-03
 owner: Al Liebl (Mesmer)
 component: calling-service (optional, media plane only)
 related:
@@ -131,9 +131,10 @@ service itself.
 DTLS-SRTP is retained as transport encryption but is **not relied upon**
 (and is not yet post-quantum). The E2E and PQC guarantees ride above it:
 
-1. During call setup, the two vaults run the hybrid X25519 + ML-KEM-768
-   exchange (PQC-MIGRATION §5.1) over the relay; transcript binding covers
-   the call_id.
+1. During call setup, the two devices of the call run the hybrid
+   X25519 + ML-KEM-768 exchange (PQC-MIGRATION §5.1) through their vaults
+   over the relay; the info binds the call_id. The vaults relay the KEM
+   values and never hold the media key (VAULT-MESSAGING §10.10, 0.5.0).
 2. Per-call media base key: `k_call = HKDF(ss, salt="vettid-call-v1",
    info=call_id)`.
 3. Frame encryption: SFrame-style per-frame AEAD (ChaCha20-Poly1305) via
@@ -166,10 +167,14 @@ Notes:
 New deposit types on the existing relay (E2E encrypted, standard PASETO
 deposit-token flow, one queue per enclave parent unchanged):
 
-- `call.offer` — SDP offer + vault-signed ICE config + KEM public values
+- `call.offer` — SDP offer + KEM public values; each vault adds its own
+  signed ICE config when it passes the offer to its own devices
 - `call.answer` — SDP answer + KEM ciphertext
 - `call.ice` — trickle ICE candidates
+- `call.ringing` — the callee rings
 - `call.end` — teardown/busy/decline
+
+Body schemas and rules: VAULT-MESSAGING §10.10.
 
 Callee wake via push gateway (wake keypairs unchanged, per PQC-MIGRATION
 component #8). Signaling content is inside the E2E envelope: call metadata
