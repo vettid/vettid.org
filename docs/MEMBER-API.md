@@ -256,6 +256,77 @@ member, `vault_id`, `request_id`, instance and release. Never PINs or
 envelopes. Account deletion after cancellation records the deleted
 `vault_ids`.
 
+### Vault recovery (VAULT-MESSAGING 0.4.1 §11.11)
+
+For a member who has lost every owner app. The portal asks; the vault is
+locked at once; after 24 hours the portal shows a one-time code (as a QR,
+rendered in the page) that a new app presents. The new app then needs the
+PIN and the credential password. The code is minted inside the enclave and
+reaches the API only sealed to a P-256 key held by the member's browser, so
+the API never holds it in a usable form; the enclave enforces the 24 h and
+the expiry itself.
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| POST | `/api/vault/recovery` | `{browser_key}` | `202 {recovery_id, available_at, expires_at}` |
+| GET | `/api/vault/recovery` | — | `{recovery: Recovery \| null}` |
+| POST | `/api/vault/recovery/cancel` | `{recovery_id}` | `200 {}` |
+| POST | `/api/vault/recovery/cancel-link` | `{token}` (no session) | `200 {}` |
+| POST | `/api/vault/recovery/register` | `{vault_id, request_id, instance_id, etk_kid, envelope}` | `202 {vault_id, request_id}`; poll `GET /api/vault/requests/{id}` |
+
+```ts
+interface Recovery {
+  recovery_id: string;                 // ULID; the queue request id
+  state: 'pending' | 'available' | 'cancelled' | 'expired';
+  requested_at: string;                // RFC 3339
+  available_at: string;                // requested_at + 24 h
+  expires_at: string;                  // available_at + 24 h
+  sealed_code?: string;                // b64 of 5,252 bytes, only while `available`
+}
+```
+
+- **Access.** Request, status, cancel and register need the same account
+  state as unlock (`member`, current terms). The cancel link needs no
+  session, only its token.
+- **`browser_key`**: canonical base64 of an uncompressed P-256 point (65
+  bytes, first byte `0x04`), made by the portal with WebCrypto
+  (non-extractable private key kept in IndexedDB).
+- **Request.** `404 not_found` without an enrolled vault (state
+  `enrolling` included); `409 recovery_active` while a recovery is
+  `pending` or `available`. The API writes the recovery on the vault row,
+  creates the response slot (TTL = `expires_at`) and enqueues `recovery`
+  (with `browser_key`) to the leaseholder, or to a live instance of the
+  vault's `sealed_release` (`503 release_starting` as for the enclave
+  route). It emails the member: what happened, when the code becomes
+  available, and a single-use cancel link
+  (`https://account.vettid.org/vault/recovery/cancel#t=<token>`; the API
+  stores only the token's SHA-256, in a request-table row that expires
+  with the recovery).
+- **Status.** `available` from `available_at` to `expires_at` while not
+  cancelled; `sealed_code` is the slot's envelope, returned only then (and
+  absent if the host has not answered yet). The portal decrypts it and
+  renders the QR locally.
+- **Cancel** (session or link): marks the recovery `cancelled`, enqueues
+  `recovery_cancel` to the same routing, and emails the member. Cancelling
+  a recovery that is not `pending` or `available` is a no-op `200`.
+- **Register.** Like unlock (envelope exactly 13,444 bytes, routing,
+  `request_id` once), and only while the recovery is `available`
+  (`409 recovery_not_available`). The enclave re-checks the delay, the
+  expiry, the code and the device attestation.
+- **`GET /api/vault/status`** adds `recovery: {state, available_at} |
+  null` to `VaultStatus`, so owner apps can show a recovery in progress
+  and offer to cancel it.
+- **Rate limits:** request 3 per member per day; register 10 per member
+  per day; cancel 30 per member per 15 minutes; the cancel link 20 per
+  source network per 15 minutes; status 60 per minute.
+- **Audit:** `vault.recovery_request`, `vault.recovery_cancel` (with
+  `via: session | link`), `vault.recovery_code_released` (first release),
+  `vault.recovery_register`. Never the code, the browser key, the token or
+  envelopes.
+- **Email** uses the system mailer (SES sandbox: the member's address must
+  be a verified identity, as for sign-in links; a failed send is logged
+  and does not fail the request).
+
 **Left to the API by the spec, decided here:** the shape of `Enclave`; the
 `vault_id` encoding; reuse of `vault_id` on re-enrollment; liveness (90 s
 heartbeat) and "dead holder means no live lease"; least-load selection
@@ -271,6 +342,8 @@ limits above.
   lease_expires_at (epoch s)}`, `sealed_release`, `vault_version`,
   `state_version`, later `state`. Pointer rows `user#<guid>` →
   `current_vault_id` (API only; no `user_guid`, so they stay out of the index).
+  API: `recovery {recovery_id, state, requested_at, available_at, expires_at}`
+  (epoch s for the times).
 - `vettid-org-vault-instances` (PK `instance_id`, GSI `release-index` on
   `release` + `heartbeat_at`), all *host*: `release`, `queue_url`,
   `descriptor` (b64), `attestation` (b64), `heartbeat_at` (epoch s),
