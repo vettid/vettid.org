@@ -306,6 +306,10 @@ interface Recovery {
   cancelled; `sealed_code` is the slot's envelope, returned only then (and
   absent if the host has not answered yet). The portal decrypts it and
   renders the QR locally.
+  The sealed answer may instead be a refusal (`error: "no_credential"`,
+  VAULT-MESSAGING §11.11.2): a vault without a Protean Credential cannot
+  be recovered. The API cannot tell the two apart; the portal shows the
+  refusal once it decrypts the answer.
 - **Cancel** (session or link): marks the recovery `cancelled`, enqueues
   `recovery_cancel` to the same routing, and emails the member. Cancelling
   a recovery that is not `pending` or `available` is a no-op `200`.
