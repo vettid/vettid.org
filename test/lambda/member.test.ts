@@ -99,7 +99,7 @@ describe('POST /api/public/request', () => {
     expect(idp.calls()).toHaveLength(0);
   });
 
-  test('valid code → registered, invite use consumed in the same transaction, Cognito user created', async () => {
+  test('valid registration code → registered, code use consumed in the same transaction, Cognito user created', async () => {
     idp.on(AdminCreateUserCommand).resolves({});
     idp.on(AdminAddUserToGroupCommand).resolves({});
     const res = await pub.handler(ev('POST', '/api/public/request', { ...body, invite_code: '7k3qx-m9tza' }));
@@ -108,6 +108,10 @@ describe('POST /api/public/request', () => {
     expect(tx[2].Update).toMatchObject({ TableName: 'invites', Key: { code: '7K3QX-M9TZA' } });
     expect(tx[2].Update!.ConditionExpression).toContain('uses < max_uses');
     expect(idp.commandCalls(AdminCreateUserCommand)[0].args[0].input.MessageAction).toBe('SUPPRESS');
+    // Admin notice uses the member-facing name ("registration code"); the API field stays invite_code.
+    const notice = ses.commandCalls(SendEmailCommand)[0].args[0].input.Content!.Simple!;
+    expect(notice.Subject!.Data).toContain('registered with a registration code');
+    expect(notice.Body!.Text!.Data).toContain('Registered with registration code 7K3QX-M9TZA.');
   });
 
   test('bad code silently falls back to review (no oracle)', async () => {

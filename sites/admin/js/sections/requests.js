@@ -4,7 +4,7 @@ import { el, chip, mono, muted, time } from '../dom.js';
 
 export function render(root, { api, ui }) {
   const list = ui.pagedList({
-    columns: ['Name', 'Email', 'Email verified', 'Invite code', 'Requested', 'Actions'],
+    columns: ['Name', 'Email', 'Email verified', 'Registration code', 'Requested', 'Actions'],
     emptyText: 'No pending requests.',
     makePager: () => api.pager('/admin/requests'),
     row: (m, row) => {
@@ -56,7 +56,7 @@ export function render(root, { api, ui }) {
   });
 
   root.append(
-    ui.sectionHead('Requests', 'Membership requests made without a valid invite code, oldest first. Approving creates the account (registered); the member becomes a member once they accept the current terms.'),
+    ui.sectionHead('Requests', 'Membership requests made without a valid registration code, oldest first. Approving creates the account (registered); the member becomes a member once they accept the current terms.'),
     list.node,
   );
   list.reload();

@@ -1,4 +1,5 @@
-// 3. Invites — create codes, list, expire, delete.
+// 3. Registration codes — create codes, list, expire, delete.
+// (Formerly "invites"; the API keeps /admin/invites and invite_code.)
 
 import { el, chip, mono, muted, time } from '../dom.js';
 
@@ -14,12 +15,12 @@ async function copy(ui, code) {
 }
 
 export function render(root, { api, ui }) {
-  const maxUses = el('input', { type: 'number', name: 'max_uses', inputmode: 'numeric', min: 1, max: 1000, value: '1', required: true });
+  const maxUses = el('input', { type: 'number', name: 'max_uses', inputmode: 'numeric', min: 1, max: 1000, value: '2', required: true });
   const days = el('input', { type: 'number', name: 'expires_in_days', inputmode: 'numeric', min: 1, max: 365, value: '30', required: true });
   const note = el('input', { type: 'text', name: 'note', maxlength: 200, autocomplete: 'off', placeholder: 'Who or what this is for' });
-  const submit = el('button', { type: 'submit', class: 'btn btn-primary' }, 'Create invite');
+  const submit = el('button', { type: 'submit', class: 'btn btn-primary' }, 'Create registration code');
   const form = el('form', { class: 'card form-grid' },
-    el('h3', {}, 'New invite'),
+    el('h3', {}, 'New registration code'),
     ui.field('Max uses (1–1000)', maxUses),
     ui.field('Expires in days (1–365)', days),
     ui.field('Note', note),
@@ -29,7 +30,7 @@ export function render(root, { api, ui }) {
 
   const list = ui.pagedList({
     columns: ['Code', 'Note', 'Uses', 'Status', 'Expires', 'Created', 'Actions'],
-    emptyText: 'No invites yet.',
+    emptyText: 'No registration codes yet.',
     makePager: () => api.pager('/admin/invites'),
     row: (inv, row) => {
       const code = api.seg(inv.code);
@@ -44,14 +45,14 @@ export function render(root, { api, ui }) {
           ui.action('Copy', () => copy(ui, inv.code)),
           inv.status === 'active'
             ? ui.action('Expire', async () => {
-                const ok = await ui.confirm({ title: 'Expire invite', body: [`Expire ${inv.code} now? It can no longer be used.`], confirmLabel: 'Expire' });
+                const ok = await ui.confirm({ title: 'Expire registration code', body: [`Expire ${inv.code} now? It can no longer be used.`], confirmLabel: 'Expire' });
                 if (!ok) return;
                 row.update(await api.post(`/admin/invites/${code}/expire`));
                 ui.toast(`Expired ${inv.code}.`);
               })
             : null,
           ui.action('Delete', async () => {
-            const ok = await ui.confirm({ title: 'Delete invite', body: [`Delete ${inv.code}? This removes it from the list.`], confirmLabel: 'Delete', tone: 'danger' });
+            const ok = await ui.confirm({ title: 'Delete registration code', body: [`Delete ${inv.code}? This removes it from the list.`], confirmLabel: 'Delete', tone: 'danger' });
             if (!ok) return;
             await api.del(`/admin/invites/${code}`);
             row.remove();
@@ -71,7 +72,7 @@ export function render(root, { api, ui }) {
         ...(note.value.trim() ? { note: note.value.trim() } : {}),
       });
       created.replaceChildren(
-        el('p', {}, 'New invite code:'),
+        el('p', {}, 'New registration code:'),
         el('div', { class: 'code-line' },
           mono(inv.code, 'code-big'),
           el('button', { type: 'button', class: 'btn btn-sm', on: { click: () => copy(ui, inv.code) } }, 'Copy'),
@@ -81,10 +82,10 @@ export function render(root, { api, ui }) {
       created.hidden = false;
       list.prepend(inv);
       note.value = '';
-      ui.toast('Invite created.');
+      ui.toast('Registration code created.');
     });
   });
 
-  root.append(ui.sectionHead('Invites', 'A valid code on a membership request skips the approval queue.'), form, created, list.node);
+  root.append(ui.sectionHead('Registration codes', 'A valid code on a membership request skips the approval queue. Each code is good for 2 uses by default.'), form, created, list.node);
   list.reload();
 }

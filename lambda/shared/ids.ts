@@ -4,7 +4,7 @@ export const newGuid = (): string => randomUUID();
 
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
-/** Human-friendly invite code, e.g. 7K3QX-M9TZA (50 bits, no I/L/O/U). */
+/** Human-friendly registration code (formerly "invite code"), e.g. 7K3QX-M9TZA (50 bits, no I/L/O/U). */
 export function inviteCode(): string {
   const bytes = randomBytes(10);
   let s = '';
