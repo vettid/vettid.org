@@ -8,7 +8,6 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as route53targets from 'aws-cdk-lib/aws-route53-targets';
-import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 import { AppConfig, hostName, resourceName } from '../config';
 import { readRef } from '../constructs/ssm-refs';
@@ -47,9 +46,14 @@ export const RELAY_MAX_TASKS = 8;
  *    image pulls and logs; their security group admits only the ALB.
  *    DynamoDB and S3 go through free gateway endpoints; Valkey is in-VPC.
  *
- * The SQLite/Litestream single-writer design this replaces left two
- * resources that are kept, unchanged and RETAINed: the Litestream replica
- * bucket (unused) and the log group (still the relay's log group).
+ * The SQLite/Litestream design this replaces had a replica bucket and a
+ * log group, both RETAIN. They are no longer in this stack, so CloudFormation
+ * leaves them in place (it never deletes RETAIN resources); they are deleted
+ * by hand after cutover (docs/RUNBOOK.md "Relay"), because the old task keeps
+ * replicating into the bucket until the new tasks have replaced it. For the
+ * same reason the task definition has a new construct id: the old task's
+ * role and policy stay untouched until CloudFormation's cleanup phase, after
+ * the service has moved to the new tasks.
  */
 export class VettidOrgRelayStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: VettidOrgRelayStackProps) {
@@ -69,20 +73,6 @@ export class VettidOrgRelayStack extends cdk.Stack {
       },
     });
 
-    // Legacy (SQLite + Litestream era): kept so the retained replica and its
-    // history stay managed. Nothing reads or writes it any more; delete it
-    // by hand once the old data is no longer wanted.
-    new s3.Bucket(this, 'Replica', {
-      bucketName: `${resourceName(config, 'relay-replica')}-${this.account}`,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      encryption: s3.BucketEncryption.S3_MANAGED,
-      enforceSSL: true,
-      versioned: true,
-      objectOwnership: s3.ObjectOwnership.BUCKET_OWNER_ENFORCED,
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-      lifecycleRules: [{ noncurrentVersionExpiration: cdk.Duration.days(14) }],
-    });
-
     const tableName = readRef(this, config, 'relay/table-name');
     const tableArn = readRef(this, config, 'relay/table-arn');
     const blobBucket = readRef(this, config, 'relay/blob-bucket-name');
@@ -98,7 +88,7 @@ export class VettidOrgRelayStack extends cdk.Stack {
     // ---- Valkey (ElastiCache Serverless): replay cache, rate limits, wake.
     // Serverless rather than a node: ~$6/month at idle (100 MB minimum),
     // multi-AZ, TLS-only, no patching or failover to manage. The ECPU cap
-    // bounds a runaway bill (50k ECPU/s, ~10x the 100k-user estimate).
+    // bounds a runaway bill (100k ECPU/s, ~3x the 100k-user estimate).
     const cacheName = resourceName(config, 'relay');
     const valkeyUser = new elasticache.CfnUser(this, 'ValkeyUser', {
       engine: 'valkey',
@@ -124,7 +114,7 @@ export class VettidOrgRelayStack extends cdk.Stack {
       userGroupId: valkeyUsers.userGroupId,
       cacheUsageLimits: {
         dataStorage: { maximum: 1, unit: 'GB' },
-        ecpuPerSecond: { maximum: 50000 },
+        ecpuPerSecond: { maximum: 100000 },
       },
       snapshotRetentionLimit: 0, // nothing worth restoring
     });
@@ -132,7 +122,7 @@ export class VettidOrgRelayStack extends cdk.Stack {
 
     const cluster = new ecs.Cluster(this, 'Cluster', { clusterName: resourceName(config, 'relay'), vpc, containerInsightsV2: ecs.ContainerInsights.DISABLED });
 
-    const taskDef = new ecs.FargateTaskDefinition(this, 'Task', {
+    const taskDef = new ecs.FargateTaskDefinition(this, 'TaskMulti', {
       cpu: 256,
       memoryLimitMiB: 512,
       runtimePlatform: { cpuArchitecture: ecs.CpuArchitecture.ARM64, operatingSystemFamily: ecs.OperatingSystemFamily.LINUX },
@@ -163,9 +153,11 @@ export class VettidOrgRelayStack extends cdk.Stack {
       }),
     );
 
-    // Same name and settings as before (retained), so history stays in one place.
-    const logGroup = new logs.LogGroup(this, 'Logs', {
-      logGroupName: `/vettid-org/${config.stage}/relay`,
+    // A new name: the SQLite-era group (/vettid-org/<stage>/relay) is
+    // retained outside the stack until it is deleted by hand after cutover.
+    // RETAIN so a failed deploy (which rolls the stack back) leaves evidence.
+    const logGroup = new logs.LogGroup(this, 'ServiceLogs', {
+      logGroupName: `/vettid-org/${config.stage}/relay-service`,
       retention: logs.RetentionDays.ONE_MONTH,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });

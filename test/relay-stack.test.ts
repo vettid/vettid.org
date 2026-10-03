@@ -87,7 +87,7 @@ describe('service (stateless)', () => {
     t.hasResourceProperties('AWS::ElastiCache::ServerlessCache', {
       Engine: 'valkey',
       ServerlessCacheName: 'vettid-org-relay',
-      CacheUsageLimits: Match.objectLike({ ECPUPerSecond: { Maximum: 50000 } }),
+      CacheUsageLimits: Match.objectLike({ ECPUPerSecond: { Maximum: 100000 } }),
     });
     t.hasResourceProperties('AWS::ElastiCache::User', {
       Engine: 'valkey',
@@ -127,12 +127,14 @@ describe('service (stateless)', () => {
     });
   });
 
-  test('the Litestream-era replica bucket and the log group are kept and retained', () => {
-    t.hasResource('AWS::S3::Bucket', {
-      DeletionPolicy: 'Retain',
-      Properties: Match.objectLike({ VersioningConfiguration: { Status: 'Enabled' } }),
-    });
-    t.hasResource('AWS::Logs::LogGroup', { DeletionPolicy: 'Retain', Properties: Match.objectLike({ LogGroupName: '/vettid-org/prod/relay' }) });
+  test('SQLite-era resources are gone from the stack (deleted by hand after cutover); new service log group', () => {
+    t.resourceCountIs('AWS::S3::Bucket', 0);
+    const groups = Object.values<any>(t.findResources('AWS::Logs::LogGroup'));
+    expect(groups.map((g) => g.Properties.LogGroupName)).toEqual(['/vettid-org/prod/relay-service']);
+    expect(groups[0].DeletionPolicy).toBe('Retain');
+    // New task-definition construct id: the running SQLite task's role and
+    // policy are only removed in CloudFormation's cleanup phase.
+    expect(Object.keys(t.findResources('AWS::ECS::TaskDefinition'))[0]).toMatch(/^TaskMulti/);
   });
 });
 
