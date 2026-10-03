@@ -177,7 +177,7 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
       new iam.PolicyStatement({
         actions: ['dynamodb:PutItem', 'dynamodb:UpdateItem'],
         resources: [tableArn('vaults')],
-        conditions: onlyAttributes(['vault_id', 'user_guid', 'state', 'created_at', 'updated_at', 'current_vault_id']),
+        conditions: onlyAttributes(['vault_id', 'user_guid', 'state', 'created_at', 'updated_at', 'current_vault_id', 'recovery']),
       }),
     );
     vault.addToRolePolicy(
@@ -187,6 +187,7 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
         conditions: onlyAttributes(['release', 'start_requested_at', 'start_requests']),
       }),
     );
+    vault.addToRolePolicy(sesSend); // recovery notices (VAULT-MESSAGING §11.11)
     vault.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['sqs:SendMessage'],

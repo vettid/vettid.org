@@ -2,6 +2,7 @@ import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { GetSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
+import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 
 // "tok-<guid>" ID tokens verify as that user; anything else is expired.
 jest.mock('aws-jwt-verify', () => ({
@@ -20,7 +21,7 @@ Object.assign(process.env, {
   TABLE_MEMBERS: 'members', TABLE_TERMS: 'terms', TABLE_AUDIT: 'audit', TABLE_RATELIMITS: 'rl',
   TABLE_VAULTS: 'vaults', TABLE_VAULT_INSTANCES: 'instances', TABLE_VAULT_REQUESTS: 'requests', TABLE_VAULT_RELEASES: 'releases',
   MEMBER_POOL_ID: 'us-east-1_pool', MEMBER_CLIENT_ID: 'client', ORIGIN_VERIFY_SECRET_ARN: 'origin',
-  VAULT_QUEUE_URL_PREFIX: QUEUE_PREFIX,
+  VAULT_QUEUE_URL_PREFIX: QUEUE_PREFIX, SENDER_EMAIL: 'no-reply@vettid.org', ACCOUNT_HOST: 'account.vettid.org',
 });
 
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -30,6 +31,7 @@ const vault = require('../../lambda/member/vault');
 const ddb = mockClient(DynamoDBDocumentClient);
 const sm = mockClient(SecretsManagerClient);
 const sqs = mockClient(SQSClient);
+const sesMock = mockClient(SESv2Client);
 
 // ---- a tiny in-memory DynamoDB ---------------------------------------------------
 
@@ -61,7 +63,12 @@ function installFakeDdb() {
       return { Attributes: { count } };
     }
     const v = i.ExpressionAttributeValues ?? {};
-    if (t === 'vaults') {
+    if (t === 'vaults' && i.UpdateExpression.startsWith('SET recovery')) {
+      if (!cur) throw ccf();
+      if (i.ConditionExpression === 'attribute_not_exists(recovery)' && cur.recovery) throw ccf();
+      if (i.ConditionExpression === 'recovery.recovery_id = :id' && cur.recovery?.recovery_id !== v[':id']) throw ccf();
+      tbl(t).set(k, { ...cur, recovery: structuredClone(v[':r']), updated_at: v[':now'] });
+    } else if (t === 'vaults') {
       if (i.ConditionExpression === 'attribute_not_exists(vault_id)' && cur) throw ccf();
       if (i.ConditionExpression === 'current_vault_id = :old' && cur?.current_vault_id !== v[':old']) throw ccf();
       tbl(t).set(k, { ...cur, vault_id: k, current_vault_id: v[':new'], updated_at: v[':now'] });
@@ -70,7 +77,8 @@ function installFakeDdb() {
       cur.start_requested_at = v[':now'];
       cur.start_requests = (cur.start_requests ?? 0) + 1;
     } else if (t === 'requests') {
-      if (cur) cur.status = v[':e'];
+      if (cur && i.UpdateExpression.startsWith('SET released')) cur.released = true;
+      else if (cur) cur.status = v[':e'];
     }
     return {};
   });
@@ -145,7 +153,8 @@ const sent = () => sqs.commandCalls(SendMessageCommand).map((c) => ({ url: c.arg
 let logs: string[];
 beforeEach(() => {
   db = {};
-  ddb.reset(); sm.reset(); sqs.reset();
+  ddb.reset(); sm.reset(); sqs.reset(); sesMock.reset();
+  sesMock.on(SendEmailCommand).resolves({});
   installFakeDdb();
   sm.on(GetSecretValueCommand, { SecretId: 'origin' }).resolves({ SecretString: ORIGIN });
   sqs.on(SendMessageCommand).resolves({ MessageId: 'm' });
@@ -616,7 +625,7 @@ describe('GET /api/vault/status', () => {
     vaultOf('g1', { vault_id: VID, state: 'unlocked', sealed_release: R0, vault_version: R0, state_version: 1, lease: { instance_id: 'i-1', lease_expires_at: NOW + 60 } });
     const r = await call('GET', '/api/vault/status');
     expect(r.body).toEqual({
-      vault: { vault_id: VID, state: 'unlocked', sealed_release: R0, vault_version: R0, state_version: 1, leased: true, created_at: expect.any(String), updated_at: expect.any(String) },
+      vault: { vault_id: VID, state: 'unlocked', sealed_release: R0, vault_version: R0, state_version: 1, leased: true, recovery: null, created_at: expect.any(String), updated_at: expect.any(String) },
     });
   });
 });
@@ -630,4 +639,147 @@ test('envelope sizes match VAULT-MESSAGING §5.4', () => {
   expect(vault.decodeCanonicalB64('AA==')).toEqual(Buffer.from([0]));
   expect(vault.decodeCanonicalB64('AB==')).toBeNull(); // non-zero padding bits
   expect(vault.decodeCanonicalB64('AA')).toBeNull();
+});
+
+// ---- recovery (VAULT-MESSAGING §11.11) ----------------------------------------------
+
+describe('vault recovery', () => {
+  const BK = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64');
+  const mails = () => sesMock.commandCalls(SendEmailCommand).map((c) => ({
+    to: c.args[0].input.Destination!.ToAddresses![0],
+    subject: c.args[0].input.Content!.Simple!.Subject!.Data!,
+    text: c.args[0].input.Content!.Simple!.Body!.Text!.Data!,
+  }));
+  // Move the clock; the instances keep heartbeating.
+  const at = (s: number) => {
+    jest.spyOn(Date, 'now').mockReturnValue(s * 1000);
+    for (const i of tbl('instances').values()) i.heartbeat_at = s - 10;
+  };
+  const request = async () => {
+    const r = await call('POST', '/api/vault/recovery', { browser_key: BK });
+    expect(r.status).toBe(202);
+    return r.body.recovery_id as string;
+  };
+  const sealedCode = Buffer.alloc(5_252, 0x33).toString('base64');
+  const answer = (rid: string) => Object.assign(getItem('requests', rid), { status: 'done', envelope: sealedCode });
+
+  beforeEach(() => {
+    release(R0, 4);
+    instance('i-1', R0);
+    vaultOf('g1', { vault_id: VID, state: 'locked', sealed_release: R0 });
+  });
+
+  test('request: recorded, queued with the browser key and no envelope, mailed with a cancel link, audited', async () => {
+    const rid = await request();
+    const row = getItem('vaults', VID);
+    expect(row.recovery).toEqual({ recovery_id: rid, state: 'pending', requested_at: NOW, available_at: NOW + 86_400, expires_at: NOW + 172_800 });
+    const [m] = sent();
+    expect(m.url).toBe(QUEUE_PREFIX + 'i-1');
+    expect(m.msg).toMatchObject({ v: 1, op: 'recovery', vault_id: VID, user_guid: 'g1', request_id: rid, browser_key: BK });
+    expect(m.msg.envelope).toBeUndefined();
+    expect(m.msg.etk_kid).toBeUndefined();
+    // The slot keeps the sealed code until the recovery expires.
+    expect(getItem('requests', rid).expires_at).toBeGreaterThan(NOW + 172_800);
+    const [mail] = mails();
+    expect(mail.to).toBe('g1@x.org');
+    const token = /cancel#t=([A-Za-z0-9_-]{43})/.exec(mail.text)![1];
+    // Only the token's hash is stored.
+    const linkRows = [...tbl('requests').values()].filter((x) => x.op === 'recovery_cancel_link');
+    expect(linkRows).toHaveLength(1);
+    expect(JSON.stringify(linkRows)).not.toContain(token);
+    expect([...tbl('audit').values()].map((a) => a.action)).toContain('vault.recovery_request');
+    expect(JSON.stringify([...tbl('audit').values()])).not.toContain(BK);
+  });
+
+  test('bad browser key → 400; no enrolled vault → 404; a second request while one is active → 409', async () => {
+    expect((await call('POST', '/api/vault/recovery', { browser_key: Buffer.alloc(65, 3).toString('base64') })).status).toBe(400);
+    expect((await call('POST', '/api/vault/recovery', { browser_key: 'AAAA' })).status).toBe(400);
+    put('vaults', { ...getItem('vaults', VID), state: 'enrolling' });
+    expect((await call('POST', '/api/vault/recovery', { browser_key: BK })).status).toBe(404);
+    put('vaults', { ...getItem('vaults', VID), state: 'locked' });
+    await request();
+    const r = await call('POST', '/api/vault/recovery', { browser_key: BK });
+    expect(r).toMatchObject({ status: 409, body: { error: 'recovery_active' } });
+  });
+
+  test('goes to the leaseholder when the vault is running (the enclave locks it first)', async () => {
+    instance('i-2', R0, { load: 9 });
+    put('vaults', { ...getItem('vaults', VID), state: 'unlocked', lease: { instance_id: 'i-2', lease_expires_at: NOW + 60 } });
+    await request();
+    expect(sent()[0].url).toBe(QUEUE_PREFIX + 'i-2');
+  });
+
+  test('the sealed code is released only between available_at and expires_at', async () => {
+    const rid = await request();
+    answer(rid);
+    let r = await call('GET', '/api/vault/recovery');
+    expect(r.body.recovery).toMatchObject({ recovery_id: rid, state: 'pending' });
+    expect(r.body.recovery.sealed_code).toBeUndefined();
+    at(NOW + 86_400);
+    r = await call('GET', '/api/vault/recovery');
+    expect(r.body.recovery).toMatchObject({ state: 'available', sealed_code: sealedCode });
+    await call('GET', '/api/vault/recovery');
+    expect([...tbl('audit').values()].filter((a) => a.action === 'vault.recovery_code_released')).toHaveLength(1);
+    at(NOW + 172_800);
+    r = await call('GET', '/api/vault/recovery');
+    expect(r.body.recovery.state).toBe('expired');
+    expect(r.body.recovery.sealed_code).toBeUndefined();
+    // Owner apps see it in the status while it is active.
+    at(NOW + 100);
+    expect((await call('GET', '/api/vault/status')).body.vault.recovery).toEqual({ state: 'pending', available_at: new Date((NOW + 86_400) * 1000).toISOString() });
+  });
+
+  test('register: only while available, like an unlock', async () => {
+    const rid = await request();
+    answer(rid);
+    const body = { vault_id: VID, request_id: RID2, instance_id: 'i-1', etk_kid: KID, envelope: ENV };
+    expect((await call('POST', '/api/vault/recovery/register', body)).body.error).toBe('recovery_not_available');
+    at(NOW + 86_400 + 5);
+    const r = await call('POST', '/api/vault/recovery/register', body);
+    expect(r).toEqual({ status: 202, body: { vault_id: VID, request_id: RID2 } });
+    const m = sent().pop()!;
+    expect(m.msg).toMatchObject({ op: 'recovery_register', request_id: RID2, etk_kid: KID, envelope: ENV });
+    expect((await call('POST', '/api/vault/recovery/register', { ...body, envelope: envelope(5_252) })).status).toBe(400);
+  });
+
+  test('cancel from the session: marked, queued to the enclave, mailed; then a new request is possible', async () => {
+    const rid = await request();
+    expect((await call('POST', '/api/vault/recovery/cancel', { recovery_id: RID })).status).toBe(404);
+    expect((await call('POST', '/api/vault/recovery/cancel', { recovery_id: rid })).status).toBe(200);
+    expect(getItem('vaults', VID).recovery.state).toBe('cancelled');
+    expect(sent().map((m) => m.msg.op)).toEqual(['recovery', 'recovery_cancel']);
+    expect(mails().map((m) => m.subject)).toContain('VettID vault recovery cancelled');
+    expect((await call('GET', '/api/vault/recovery')).body.recovery.state).toBe('cancelled');
+    // A cancelled recovery is never released.
+    at(NOW + 86_400);
+    expect((await call('GET', '/api/vault/recovery')).body.recovery.sealed_code).toBeUndefined();
+    expect((await call('POST', '/api/vault/recovery', { browser_key: BK })).status).toBe(202);
+  });
+
+  test('cancel by the email link, without a session; a wrong token → 404', async () => {
+    await request();
+    const token = /cancel#t=([A-Za-z0-9_-]{43})/.exec(mails()[0].text)![1];
+    const noSession = { headers: {}, guid: 'nobody' };
+    expect((await call('POST', '/api/vault/recovery/cancel-link', { token: 'x'.repeat(43) }, noSession)).status).toBe(404);
+    expect((await call('POST', '/api/vault/recovery/cancel-link', { token: 'short' }, noSession)).status).toBe(400);
+    expect((await call('POST', '/api/vault/recovery/cancel-link', { token }, noSession)).status).toBe(200);
+    expect(getItem('vaults', VID).recovery.state).toBe('cancelled');
+    const a = [...tbl('audit').values()].find((x) => x.action === 'vault.recovery_cancel');
+    expect(a.detail.via).toBe('link');
+    expect(JSON.stringify([...tbl('audit').values()])).not.toContain(token);
+  });
+
+  test('rate limits: 3 requests a day', async () => {
+    for (let i = 0; i < 3; i++) {
+      await request();
+      expect((await call('POST', '/api/vault/recovery/cancel', { recovery_id: getItem('vaults', VID).recovery.recovery_id })).status).toBe(200);
+    }
+    expect((await call('POST', '/api/vault/recovery', { browser_key: BK })).status).toBe(429);
+  });
+
+  test('a mail failure (SES sandbox) does not fail the request', async () => {
+    sesMock.on(SendEmailCommand).rejects(Object.assign(new Error('x'), { name: 'MessageRejected' }));
+    await request();
+    expect(logs.join('\n')).toContain('recovery mail failed');
+  });
 });
