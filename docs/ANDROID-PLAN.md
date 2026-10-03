@@ -1,0 +1,158 @@
+---
+title: ANDROID-PLAN
+status: draft
+version: 0.1.0
+date: 2026-10-03
+owner: Al Liebl (Mesmer)
+related:
+  - VAULT-MESSAGING.md (0.6.x) — the app's contract with the vault
+  - VAULT-PLAN.md (V6 clients)
+  - RELAY-PROTOCOL.md (0.4.0), MEMBER-API.md
+classification: public (no secrets; safe for github.com/vettid)
+---
+
+# Android app plan (v1)
+
+The first mobile client for the new vault. A fresh rewrite in the
+existing `vettid/vettid-android` repository, with a deliberately smaller
+surface than the vettid.dev app and a layout modelled on Proton Mail.
+
+## 1. Starting point
+
+- **Existing app** (`vettid-android`): about 158k lines of Kotlin in one
+  Gradle module (Compose + Material3, Hilt, EncryptedSharedPreferences,
+  Retrofit, jnats). NATS is used directly by about 90 files; a 4.4k-line
+  client object owns transport, crypto and ~30 event handlers; navigation is
+  one 2.9k-line file; several flows exist twice (enrollment, secrets, calls,
+  credential stores); ~19k lines are dead B2C service code; all strings are
+  hard-coded. Refactoring it in place would carry that complexity forward.
+- **Worth carrying over** (with their tests): hardware key attestation
+  (`HardwareAttestationManager`), Nitro attestation verification and PCR
+  handling (`NitroAttestationVerifier`, `PcrConfigManager`), crypto and
+  security helpers (`CryptoManager` minus the old UTK code, `SecureMemory`,
+  `RuntimeProtection`, `UnlockRateLimiter`), the WebRTC layer and frame
+  encryption (`WebRTCClient`, `CallFrameCryptor`) for when calls arrive,
+  and a few components (QR scanner).
+- **The vault side is defined**: VAULT-MESSAGING lists every message type
+  the app sends and receives, with body schemas, roles and error codes, and
+  vettid-vault ships test vectors and a Go reference client (`client/`,
+  `vaultctl`).
+
+## 2. Decisions (owner, 2026-10-03)
+
+| # | Decision |
+|---|---|
+| D1 | **Fresh rewrite in `vettid-android`**, same package name `com.vettid.app` (keeps the Play listing and signing key). The old code is preserved on a branch/tag and removed from `main`. |
+| D2 | **Proton Mail layout, VettID brand**: dark navy surfaces and Proton's structure; VettID gold (`#F4B942`) as the single accent; the rook logo stays gold with a black keyhole; a light theme as on the website. |
+| D3 | **v1 scope**: enrollment, unlock, Protean Credential, settings (always), plus **connections + messaging** and **secrets + critical secrets**. Calls, desktop/agent pairing and LEASH, wallet, location and presence come later. |
+| D4 | **Minimum Android 12 (API 31)**; target the current API level. |
+| D5 | **Message search later** (not in v1). |
+| D6 | **Biometric app lock in v1**: opening the app (and returning to it after a timeout) can require a biometric or device credential via BiometricPrompt (class 3), gating a Keystore key that unlocks the app's local data. It is a convenience layer only: it never replaces the vault PIN (unlocking the vault) or the credential password (critical actions). |
+
+## 3. Design language (from Proton Mail)
+
+Reference screenshots are kept privately (they show a real mailbox); the
+patterns:
+
+- **Top bar**: menu button, screen title, search, avatar (initial tile).
+- **Navigation drawer** as the main navigation (no bottom tabs): primary
+  destinations, then a "create" group, then Settings / Help, version at the
+  bottom.
+- **List rows**: rounded-square initial tile, two lines (name, preview),
+  date and a trailing action icon; generous spacing.
+- **Empty states**: one illustration, a title and one line.
+- **Floating controls**: a filter chip bottom-left (e.g. Unread), a primary
+  action button bottom-right (compose / add).
+- **Detail screens**: back arrow, centred title, content in a card, a
+  floating pill of actions at the bottom.
+- **Settings**: grouped rounded cards, rows with icon + label + chevron,
+  section headers.
+- **Avatar sheet**: a bottom sheet with the account and its options.
+
+## 4. Screens (v1)
+
+**Drawer**: Messages · Connections · Approvals (badge) · Secrets ·
+Credential · Settings · Help — later: Calls, Devices & agents, Shared
+actions & introductions, Wallet, Location.
+
+| Screen | Proton analogue | Notes |
+|---|---|---|
+| Messages | Inbox | Conversations by connection; Unread chip; compose button |
+| Conversation | Message detail | Bubbles in a card list; pill actions (reply, more) |
+| Connections | Contacts | Initial tiles, status (pending / active / stale / blocked); add = invite (QR or link) / scan |
+| Connection detail | — | Profile shared with you, safety code (SAS), authenticate, alias/notes, block/remove |
+| Approvals | — (VettID-specific) | Pending connection requests, grant requests, critical-secret uses; approve/deny; critical items need the credential password |
+| Secrets | Folder list | Versioned secrets; add/edit; catalog (discoverability) |
+| Credential | — | Critical secrets inside the Protean Credential; unlock window; password change; backup on/off |
+| Settings | Settings | Vault (status, release, lock, PIN); Security (credential, recovery, attestation info, biometric app lock and timeout); Privacy; Backup; App (theme, notifications) |
+| Avatar sheet | Account sheet | Vault status, lock vault, open account portal, sign out of this device |
+| Onboarding | Sign-in flow | Membership check → enroll vault (PIN, credential password) → first connection guide |
+
+Every list has an empty state; every destructive action has a confirmation;
+every critical action asks for the credential password.
+
+## 5. Architecture
+
+Multi-module Gradle, Kotlin, Jetpack Compose + Material3, Hilt, coroutines
+and Flow, Room (encrypted with a Keystore-held key) for local caches,
+DataStore for preferences, OkHttp for HTTP, strings in resources from day
+one (translation-ready), accessibility labels required in review.
+
+| Module | Contents |
+|---|---|
+| `:core:crypto` | Suite 2 (HPKE MLKEM768X25519 / HKDF-SHA256 / ChaCha20-Poly1305), XChaCha20 sessions, Ed25519, Argon2id; envelope v2; handshake and epochs; credential UTK/reply-key sealing. **Must pass the vettid-vault test vectors byte for byte.** |
+| `:core:keystore` | Android Keystore keys (device identity, relay key wrapping, device attestation key with StrongBox/TEE, the biometric-gated app-data key) |
+| `:core:attestation` | Ported Nitro attestation + PCR manifest verification; Android key attestation for enrollment/unlock (§11.7) |
+| `:core:relay` | Relay client (RELAY-PROTOCOL 0.4): register, signed requests, tokens, deposit, collect (long-poll / WebSocket), ack, claims, blobs |
+| `:core:altchan` | Member-API alternate channel: descriptors, sealed enroll/unlock/lock, result polling, release-update approval |
+| `:core:vault` | Typed vault client: one function per §10 type, sessions with the vault, dedupe, outbox, sync events → repositories |
+| `:core:data` | Repositories and Room caches per feature |
+| `:core:ui` | Theme (navy + gold, light/dark), components (top bar, drawer, list row, empty state, pill bar, settings cards, sheets) |
+| `:feature:*` | onboarding, messages, connections, approvals, secrets, credential, settings |
+| `:app` | Navigation (type-safe routes), DI wiring, notifications |
+
+Rules: features depend only on `:core:*`; no feature touches transport or
+crypto directly; one ViewModel per screen with immutable UI state.
+
+## 6. Phases
+
+| Phase | Contents | Exit |
+|---|---|---|
+| A0 | Spec + this plan approved; old code tagged and moved off `main`; empty multi-module skeleton, CI (build, unit tests, lint, detekt), theme and component gallery screen | CI green; component gallery matches the design language on a phone |
+| A1 | `:core:crypto` + vectors; `:core:keystore`; `:core:attestation` port | All vettid-vault vectors pass (incl. MLKEM768X25519 HPKE interop) |
+| A2 | `:core:relay` + `:core:altchan` + `:core:vault` against a local dev stack (vettid-vault integration stack: relay + parent + dev enclave + member-API stand-in) | Instrumented test enrolls, unlocks, exchanges a message with a `vaultctl` peer |
+| A3 | Onboarding, unlock, credential, settings screens, biometric app lock | Fresh install → enrolled vault with credential on a real phone (dev stack) |
+| A4 | Connections, messages, approvals | Invite/QR connect, SAS, messages both ways, approvals |
+| A5 | Secrets + critical secrets, grants and critical-secret approvals | Flows against the dev stack and a second vault |
+| A6 | Hardening and polish: accessibility pass, notifications, offline behaviour, error states, Play pre-launch report | Internal testing track build |
+
+Calls, devices/agents/LEASH, wallet, location and presence follow v1 in
+that order, each as its own phase.
+
+## 7. Dependencies on other work
+
+- **Running vault**: v1 development uses the local dev stack; real devices
+  need the V5 deployment (release pipeline, member API vault routes
+  deployed, enrollment/recovery portal pages).
+- **Push**: deferred until APNs/FCM credentials exist; v1 collects while the
+  app is open (and via a foreground service only if needed).
+- **Membership**: enrollment requires an account.vettid.org member who has
+  accepted the current terms (MEMBER-API).
+
+## 8. Risks
+
+1. **Post-quantum crypto on Android**: Android has no platform ML-KEM; the
+   suite needs BouncyCastle (or another library) supporting HPKE with
+   MLKEM768X25519 (codepoint 0x647a) — the cross-implementation vectors are
+   an open follow-up in VAULT-MESSAGING §15. Verify early (A1); fall back to
+   a small audited implementation only if no library fits.
+2. **Scope creep from the old app**: v1 is deliberately small; resist
+   porting screens without a v1 need.
+3. **Device attestation in the field**: key attestation varies by vendor;
+   test on several devices before release.
+4. **Background delivery without push**: messages arrive when the app is
+   open; set expectations in the UI until push exists.
+
+## 9. Open questions
+
+None at this time (min SDK, search and biometrics decided 2026-10-03).
