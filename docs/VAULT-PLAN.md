@@ -133,8 +133,10 @@ and no Nitro hardware.
 In dependency order, each as its own PR with the handler tests carried over:
 credential and secrets → profile, settings, personal data → audit and feed →
 connections polish (block, authenticate) → calls signalling → device and agent
-sessions → LEASH → grants and critical secrets → shared actions → location →
-wallet → presence ping. Spec follow-up 2 (per-feature body schemas) is
+sessions → LEASH → grants and critical secrets → shared actions → items (one
+item model with tags and share rules, replacing profile fields, secrets and
+critical secrets; VAULT-ITEMS, VAULT-MESSAGING 0.7.0) → location → wallet →
+presence ping. Spec follow-up 2 (per-feature body schemas) is
 written alongside each port, in VAULT-MESSAGING §10.
 
 **Exit per area:** its ops are in the §10 registry, their bodies specified,
