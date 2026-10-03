@@ -130,6 +130,12 @@ inside, so it is useless anywhere but in the vault and to anyone but the
 member. It exists so that a member who loses their phone can be handed the
 credential again through recovery (§3.7).
 
+The backup stays **optional**. With it off, the credential lives only on
+the member's phone: there is no off-device copy and no export, so losing
+the phone loses the credential and every critical item permanently. The
+app warns clearly before the backup is turned off (VAULT-MESSAGING
+0.9.0 §3.5.6).
+
 There is **no member backup or export of vault data outside the service**
 (owner decision, 2026-10-03). Moving a vault from an old vault to a new one
 within the service is a planned future capability (ARCHITECTURE.md,
@@ -137,7 +143,7 @@ roadmap), not an export.
 
 ### 3.7 Recovery
 
-A member who has lost every owner app recovers through the account portal
+A member who has lost their app recovers through the account portal
 (VAULT-MESSAGING §11.11):
 
 1. They request a recovery while signed in. The vault is locked, the owner's
@@ -147,11 +153,14 @@ A member who has lost every owner app recovers through the account portal
    mints the recovery code and enforces the delay with its own clock.
 3. A new, attested app scans the code, then unlocks with the **PIN** and
    receives the credential only after the **credential password** opens the
-   vault's copy. The CEK rotates at that moment, so every copy on the lost
-   devices dies. Under the one-app model (§4) the new app replaces the
-   old one, whose keys are revoked; desktops and agents are kept.
+   vault's copy. The CEK rotates at that moment, so the copy on the lost
+   phone dies. The new app replaces the old one, whose keys are revoked;
+   desktops and agents are kept (§4).
 
-There is no recovery without the credential and the password, and no
+With the backup off there is no copy to hand over: the credential and the
+critical items are lost, and the recovery can only create a new
+credential or delete the vault (VAULT-MESSAGING §11.11.5; an owner
+decision to confirm). There is no other recovery of a credential and no
 bypass that VettID can operate.
 
 ### 3.8 Lifecycle
@@ -162,7 +171,7 @@ connections with a statement signed by the old and new keys; the vehicle
 for post-quantum signatures in PQC Phase 2), and `credential.delete`
 (VAULT-MESSAGING §3.5.5).
 
-## 4. One app per vault: "there can be only one" (intended model)
+## 4. One app per vault: "there can be only one"
 
 **Owner decision, 2026-10-03:** a vault has **exactly one app**, and that
 app **is** the Protean Credential holder. Only one credential is usable at
@@ -222,14 +231,31 @@ is lost.
 
 ### 4.5 Status
 
-VAULT-MESSAGING 0.7.0 still allows several owner apps, lets them fetch
-the latest blob with `credential.get`, and keeps old owner devices after a
-recovery (§11.11.8). **VAULT-MESSAGING will be updated to this model in
-its own change, after V4 batch 4**, together with the vault. That change
-also settles the message names and formats for the transfer, the alert,
-freeze and confirmation, and whether `credential.backup` off (the member
-keeping their own off-device copy of the blob, VAULT-MESSAGING §3.5.6)
-survives decision 3.
+**VAULT-MESSAGING 0.9.0 specifies this model** (implemented in
+vettid-vault together with it):
+
+- **One app.** `device.pair.create{role: "app"}` answers `one_app`; apps
+  are bound only at enrollment, by a transfer or by a recovery (§6.7).
+  Only the holder fetches the latest blob, and only to recover from its
+  own lost response.
+- **Clone alarm** (§3.5.9). Every presentation that is not the current
+  blob, except the holder's retry with its previous, unconfirmed version,
+  is refused (`credential_frozen`) and raises `credential.alarm` to the
+  app (urgent), an audit entry, and a content-free host alarm that the
+  member API turns into an email. Credential operations stay frozen until
+  the app answers `credential.alarm.confirm` ("that was me" or "not me"),
+  then until a forced `credential.rotate`; messaging continues.
+- **Transfer** (§6.7.1): `device.transfer.create`, `.pending`,
+  `.approve` (with the PIN and the password), `.reject`; no wait.
+- **Recovery** (§11.11.5): the new app replaces the old one; desktops and
+  agents are kept.
+- **Backup off survives decision 3** as an option: no off-device copy, no
+  export, and losing the phone loses the credential and the critical
+  items. A recovery then can only reset the credential or delete the
+  vault (an owner decision to confirm). 0.9.0 removed the member-supplied
+  blob of earlier drafts.
+- **GrapheneOS** is accepted through its pinned verified boot keys
+  (§11.7).
 
 ## 5. Decision log (carried over)
 
