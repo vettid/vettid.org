@@ -97,7 +97,6 @@
     "@aws-cdk/aws-ec2:requirePrivateSubnetsForEgressOnlyInternetGateway": true,
     "@aws-cdk/aws-s3:publicAccessBlockedByDefault": true,
     "@aws-cdk/aws-lambda:useCdkManagedLogGroup": true,
-    "relayImage": "ghcr.io/vettid/vettid-relay@sha256:7b130ef2c51ac4cbbd3419a77c9933727e6467cf9543d7a3b63b58dc5568c9c5",
-    "litestreamImage": "litestream/litestream@sha256:4b02b9859a6b6b4087d8b8944e15f7e984bd7957cba322bbeee38b0e27b9656a"
+    "relayImage": "ghcr.io/vettid/vettid-relay@sha256:7b130ef2c51ac4cbbd3419a77c9933727e6467cf9543d7a3b63b58dc5568c9c5"
   }
 }

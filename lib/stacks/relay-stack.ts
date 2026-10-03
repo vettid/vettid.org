@@ -2,42 +2,54 @@ import * as cdk from 'aws-cdk-lib';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
+import * as elasticache from 'aws-cdk-lib/aws-elasticache';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as route53targets from 'aws-cdk-lib/aws-route53-targets';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 import { AppConfig, hostName, resourceName } from '../config';
+import { readRef } from '../constructs/ssm-refs';
 
 export interface VettidOrgRelayStackProps extends cdk.StackProps {
   readonly config: AppConfig;
   /** Relay container image, pinned by digest (e.g. ghcr.io/vettid/vettid-relay@sha256:...). */
   readonly relayImage: string;
-  /** Litestream image, pinned by digest. */
-  readonly litestreamImage: string;
 }
 
-const DATA_DIR = '/data';
-/** The relay image's non-root user (distroless nonroot). */
-const RELAY_UID = '65532';
-const DB_FILE = `${DATA_DIR}/relay.db`;
 const RELAY_PORT = 8080;
+const VALKEY_PORTS = ec2.Port.tcpRange(6379, 6380); // serverless: 6379 primary, 6380 reader
+
+/** Service scaling bounds (two tasks = one per AZ at minimum). */
+export const RELAY_MIN_TASKS = 2;
+export const RELAY_MAX_TASKS = 8;
 
 /**
  * relay.vettid.org — the VettID mailbox relay (github.com/vettid/vettid-relay,
- * docs/RELAY-PROTOCOL.md) on ECS Fargate.
+ * docs/RELAY-PROTOCOL.md) on ECS Fargate, hosting option B: several
+ * identical tasks behind the ALB on one shared store.
  *
- * The relay is one Go binary with SQLite and MUST have a single writer, so:
- *  - the service runs exactly one task, and deployments stop the old task
- *    before starting the new one (min 0% / max 100%);
- *  - Litestream continuously replicates the database to S3; a replacement
- *    task (failure, deploy, AZ loss) restores it before the relay starts, so
- *    recovery takes a minute or two and loses at most seconds of writes.
- *    Clients already retry with backoff and dedupe by message id.
- *  - an ALB gives a stable address, TLS, health checks, and carries long-poll
- *    and WebSocket collects.
- * Scale-out is more relays (mailboxes are assigned to relays), not more tasks.
+ *  - State: DynamoDB table + S3 blob bucket in VettidOrgRelayDataStack
+ *    (stateful, read here through SSM refs). Any task can serve any request;
+ *    every operation the protocol needs to be atomic (deposit + quota +
+ *    open-token use, leases, claim single fetch, rotation) is a DynamoDB
+ *    transaction or conditional write.
+ *  - Coordination: ElastiCache Serverless for Valkey holds the replay cache
+ *    (§4.1), rate-limit buckets (§7.2) and wake-on-deposit pub/sub (§6.2),
+ *    so a long-poll or WebSocket parked on one task wakes for a deposit
+ *    taken by another. TLS in transit, IAM authentication (no password).
+ *  - Deploys are rolling (100% min / 200% max): new tasks join, old tasks
+ *    are deregistered, drained for 30 s (longer than a 25 s long-poll), then
+ *    stopped — no downtime. Target tracking scales on CPU and memory.
+ *  - Network: public subnets in two AZs, no NAT. Tasks get public IPs for
+ *    image pulls and logs; their security group admits only the ALB.
+ *    DynamoDB and S3 go through free gateway endpoints; Valkey is in-VPC.
+ *
+ * The SQLite/Litestream single-writer design this replaces left two
+ * resources that are kept, unchanged and RETAINed: the Litestream replica
+ * bucket (unused) and the log group (still the relay's log group).
  */
 export class VettidOrgRelayStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: VettidOrgRelayStackProps) {
@@ -46,18 +58,21 @@ export class VettidOrgRelayStack extends cdk.Stack {
     const host = hostName(config, 'relay');
     const hostedZone = route53.HostedZone.fromLookup(this, 'Zone', { domainName: config.domainName });
 
-    // Two AZs of public subnets, no NAT (cost): the task gets a public IP for
-    // image pulls but its security group admits only the ALB. S3 (Litestream)
-    // goes through a free gateway endpoint.
     const vpc = new ec2.Vpc(this, 'Vpc', {
       ipAddresses: ec2.IpAddresses.cidr('10.43.0.0/24'),
       maxAzs: 2,
       natGateways: 0,
       subnetConfiguration: [{ name: 'public', subnetType: ec2.SubnetType.PUBLIC, cidrMask: 26 }],
-      gatewayEndpoints: { S3: { service: ec2.GatewayVpcEndpointAwsService.S3 } },
+      gatewayEndpoints: {
+        S3: { service: ec2.GatewayVpcEndpointAwsService.S3 },
+        DynamoDB: { service: ec2.GatewayVpcEndpointAwsService.DYNAMODB },
+      },
     });
 
-    const replica = new s3.Bucket(this, 'Replica', {
+    // Legacy (SQLite + Litestream era): kept so the retained replica and its
+    // history stay managed. Nothing reads or writes it any more; delete it
+    // by hand once the old data is no longer wanted.
+    new s3.Bucket(this, 'Replica', {
       bucketName: `${resourceName(config, 'relay-replica')}-${this.account}`,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
@@ -67,7 +82,53 @@ export class VettidOrgRelayStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       lifecycleRules: [{ noncurrentVersionExpiration: cdk.Duration.days(14) }],
     });
-    const replicaUrl = `s3://${replica.bucketName}/relay.db`;
+
+    const tableName = readRef(this, config, 'relay/table-name');
+    const tableArn = readRef(this, config, 'relay/table-arn');
+    const blobBucket = readRef(this, config, 'relay/blob-bucket-name');
+
+    const albSg = new ec2.SecurityGroup(this, 'AlbSg', { vpc, description: 'relay ALB: HTTPS from anywhere' });
+    albSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443), 'HTTPS');
+    albSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), 'HTTP (redirects to HTTPS)');
+    const taskSg = new ec2.SecurityGroup(this, 'TaskSg', { vpc, description: 'relay task: only the ALB may connect', allowAllOutbound: true });
+    taskSg.addIngressRule(albSg, ec2.Port.tcp(RELAY_PORT), 'from the relay ALB');
+    const cacheSg = new ec2.SecurityGroup(this, 'CacheSg', { vpc, description: 'relay Valkey: only relay tasks may connect', allowAllOutbound: false });
+    cacheSg.addIngressRule(taskSg, VALKEY_PORTS, 'from relay tasks');
+
+    // ---- Valkey (ElastiCache Serverless): replay cache, rate limits, wake.
+    // Serverless rather than a node: ~$6/month at idle (100 MB minimum),
+    // multi-AZ, TLS-only, no patching or failover to manage. The ECPU cap
+    // bounds a runaway bill (50k ECPU/s, ~10x the 100k-user estimate).
+    const cacheName = resourceName(config, 'relay');
+    const valkeyUser = new elasticache.CfnUser(this, 'ValkeyUser', {
+      engine: 'valkey',
+      userId: cacheName, // IAM auth: user id must equal user name
+      userName: cacheName,
+      authenticationMode: { Type: 'iam' },
+      // Only the relay's namespace (keys and pub/sub channels "relay:*").
+      accessString: 'on ~relay:* &relay:* +@all',
+    });
+    const valkeyUsers = new elasticache.CfnUserGroup(this, 'ValkeyUsers', {
+      engine: 'valkey',
+      userGroupId: cacheName,
+      userIds: [valkeyUser.userId],
+    });
+    valkeyUsers.addResourceDependency(valkeyUser);
+    const cache = new elasticache.CfnServerlessCache(this, 'Valkey', {
+      serverlessCacheName: cacheName,
+      engine: 'valkey',
+      majorEngineVersion: '8',
+      description: 'VettID relay: replay cache, rate limits, wake-on-deposit (ephemeral)',
+      securityGroupIds: [cacheSg.securityGroupId],
+      subnetIds: vpc.publicSubnets.map((s) => s.subnetId),
+      userGroupId: valkeyUsers.userGroupId,
+      cacheUsageLimits: {
+        dataStorage: { maximum: 1, unit: 'GB' },
+        ecpuPerSecond: { maximum: 50000 },
+      },
+      snapshotRetentionLimit: 0, // nothing worth restoring
+    });
+    cache.addResourceDependency(valkeyUsers);
 
     const cluster = new ecs.Cluster(this, 'Cluster', { clusterName: resourceName(config, 'relay'), vpc, containerInsightsV2: ecs.ContainerInsights.DISABLED });
 
@@ -75,45 +136,57 @@ export class VettidOrgRelayStack extends cdk.Stack {
       cpu: 256,
       memoryLimitMiB: 512,
       runtimePlatform: { cpuArchitecture: ecs.CpuArchitecture.ARM64, operatingSystemFamily: ecs.OperatingSystemFamily.LINUX },
-      volumes: [{ name: 'data' }],
     });
-    replica.grantReadWrite(taskDef.taskRole);
+    taskDef.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        sid: 'RelayTable',
+        // TransactWriteItems is authorised per contained action.
+        actions: [
+          'dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem',
+          'dynamodb:Query', 'dynamodb:BatchGetItem', 'dynamodb:BatchWriteItem', 'dynamodb:ConditionCheckItem',
+        ],
+        resources: [tableArn, `${tableArn}/index/*`],
+      }),
+    );
+    taskDef.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        sid: 'RelayBlobs',
+        actions: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
+        resources: [`arn:${this.partition}:s3:::${blobBucket}/blobs/*`],
+      }),
+    );
+    taskDef.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        sid: 'RelayValkeyIam',
+        actions: ['elasticache:Connect'],
+        resources: [cache.attrArn, valkeyUser.attrArn],
+      }),
+    );
 
+    // Same name and settings as before (retained), so history stays in one place.
     const logGroup = new logs.LogGroup(this, 'Logs', {
       logGroupName: `/vettid-org/${config.stage}/relay`,
       retention: logs.RetentionDays.ONE_MONTH,
-      // Retained so a failed deploy (which rolls the stack back) leaves evidence.
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
-    const logging = (prefix: string) => ecs.LogDrivers.awsLogs({ logGroup, streamPrefix: prefix });
-    const mountData = (c: ecs.ContainerDefinition) => c.addMountPoints({ containerPath: DATA_DIR, sourceVolume: 'data', readOnly: false });
 
-    // 1. Restore the latest replica (no-op on the very first start), then hand
-    //    the data directory to the relay's non-root user: Fargate creates task
-    //    volumes as root:root 0755, which the relay could not write to.
-    const restore = taskDef.addContainer('Restore', {
-      image: ecs.ContainerImage.fromRegistry(props.litestreamImage),
-      essential: false,
-      entryPoint: ['/bin/sh', '-c'],
-      command: [
-        `litestream restore -if-db-not-exists -if-replica-exists -integrity-check quick -o ${DB_FILE} ${replicaUrl} ` +
-          `&& chown -R ${RELAY_UID}:${RELAY_UID} ${DATA_DIR} && chmod 0700 ${DATA_DIR}`,
-      ],
-      environment: { AWS_REGION: this.region },
-      logging: logging('restore'),
-    });
-    mountData(restore);
-
-    // 2. The relay, once the restore has completed successfully.
-    const relay = taskDef.addContainer('Relay', {
+    taskDef.addContainer('Relay', {
       image: ecs.ContainerImage.fromRegistry(props.relayImage),
       essential: true,
       portMappings: [{ containerPort: RELAY_PORT }],
+      readonlyRootFilesystem: true, // no local state at all now
       environment: {
         RELAY_LISTEN_ADDR: `:${RELAY_PORT}`,
         RELAY_BASE_URL: `https://${host}`,
-        RELAY_DB_PATH: DB_FILE,
         RELAY_TRUST_PROXY: 'true',
+        RELAY_STORE: 'dynamodb',
+        RELAY_DYNAMODB_TABLE: tableName,
+        RELAY_BLOB_BUCKET: blobBucket,
+        RELAY_VALKEY_ADDR: `${cache.attrEndpointAddress}:${cache.attrEndpointPort}`,
+        RELAY_VALKEY_TLS: 'true',
+        RELAY_VALKEY_IAM_USER: valkeyUser.userId,
+        RELAY_VALKEY_CACHE_NAME: cacheName,
+        AWS_REGION: this.region,
         // Protocol 0.3 policy (docs/RELAY-PROTOCOL.md §5.2, §5.6, §6.9): 400-day
         // low-quota reconnect tokens; open tokens and claims up to 7 days for
         // remote invitations (docs/VAULT-MESSAGING.md).
@@ -121,7 +194,7 @@ export class VettidOrgRelayStack extends cdk.Stack {
         RELAY_OPEN_TOKEN_MAX_LIFETIME: '168h',
         RELAY_CLAIM_TTL: '168h',
       },
-      logging: logging('relay'),
+      logging: ecs.LogDrivers.awsLogs({ logGroup, streamPrefix: 'relay' }),
       stopTimeout: cdk.Duration.seconds(40), // drain long-polls / WebSockets on SIGTERM
       // Distroless image: the binary checks its own /healthz.
       healthCheck: {
@@ -132,44 +205,28 @@ export class VettidOrgRelayStack extends cdk.Stack {
         startPeriod: cdk.Duration.seconds(10),
       },
     });
-    relay.addContainerDependencies({ container: restore, condition: ecs.ContainerDependencyCondition.SUCCESS });
-    mountData(relay);
-
-    // 3. Continuous replication to S3 alongside the relay.
-    const replicate = taskDef.addContainer('Replicate', {
-      image: ecs.ContainerImage.fromRegistry(props.litestreamImage),
-      essential: true,
-      command: ['replicate', DB_FILE, replicaUrl],
-      // Same user as the relay, so WAL/SHM/checkpoint files stay writable by both.
-      user: `${RELAY_UID}:${RELAY_UID}`,
-      environment: { AWS_REGION: this.region },
-      logging: logging('replicate'),
-      stopTimeout: cdk.Duration.seconds(30),
-    });
-    // Start once the relay is healthy (it creates the WAL-mode DB on startup).
-    replicate.addContainerDependencies({ container: relay, condition: ecs.ContainerDependencyCondition.HEALTHY });
-    mountData(replicate);
-
-    const albSg = new ec2.SecurityGroup(this, 'AlbSg', { vpc, description: 'relay ALB: HTTPS from anywhere' });
-    albSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443), 'HTTPS');
-    albSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), 'HTTP (redirects to HTTPS)');
-    const taskSg = new ec2.SecurityGroup(this, 'TaskSg', { vpc, description: 'relay task: only the ALB may connect', allowAllOutbound: true });
-    taskSg.addIngressRule(albSg, ec2.Port.tcp(RELAY_PORT), 'from the relay ALB');
 
     const service = new ecs.FargateService(this, 'Service', {
       serviceName: resourceName(config, 'relay'),
       cluster,
       taskDefinition: taskDef,
-      desiredCount: 1,
-      // Never two writers: stop the old task before starting the new one.
-      minHealthyPercent: 0,
-      maxHealthyPercent: 100,
+      desiredCount: RELAY_MIN_TASKS,
+      // Rolling deploys: start the new tasks first, keep full capacity.
+      minHealthyPercent: 100,
+      maxHealthyPercent: 200,
       circuitBreaker: { enable: true, rollback: true },
+      availabilityZoneRebalancing: ecs.AvailabilityZoneRebalancing.ENABLED,
+      healthCheckGracePeriod: cdk.Duration.seconds(30),
       assignPublicIp: true,
       securityGroups: [taskSg],
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       enableExecuteCommand: false,
     });
+    service.node.addDependency(cache);
+
+    const scaling = service.autoScaleTaskCount({ minCapacity: RELAY_MIN_TASKS, maxCapacity: RELAY_MAX_TASKS });
+    scaling.scaleOnCpuUtilization('Cpu', { targetUtilizationPercent: 50, scaleOutCooldown: cdk.Duration.seconds(60), scaleInCooldown: cdk.Duration.minutes(5) });
+    scaling.scaleOnMemoryUtilization('Memory', { targetUtilizationPercent: 70, scaleOutCooldown: cdk.Duration.seconds(60), scaleInCooldown: cdk.Duration.minutes(5) });
 
     const certificate = new acm.Certificate(this, 'Certificate', {
       domainName: host,
@@ -193,6 +250,8 @@ export class VettidOrgRelayStack extends cdk.Stack {
       port: RELAY_PORT,
       protocol: elbv2.ApplicationProtocol.HTTP,
       targets: [service],
+      // Longer than a 25 s long-poll: a deregistered task finishes its
+      // long-polls before ECS stops it, and new requests go elsewhere.
       deregistrationDelay: cdk.Duration.seconds(30),
       healthCheck: { path: '/healthz', healthyHttpCodes: '200', interval: cdk.Duration.seconds(15), healthyThresholdCount: 2 },
     });
@@ -201,6 +260,5 @@ export class VettidOrgRelayStack extends cdk.Stack {
     new route53.ARecord(this, 'Alias', { zone: hostedZone, recordName: host, target });
 
     new cdk.CfnOutput(this, 'RelayUrl', { value: `https://${host}` });
-    new cdk.CfnOutput(this, 'ReplicaBucket', { value: replica.bucketName });
   }
 }
