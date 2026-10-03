@@ -174,7 +174,11 @@ deposit-token flow, one queue per enclave parent unchanged):
 - `call.ringing` — the callee rings
 - `call.end` — teardown/busy/decline
 
-Body schemas and rules: VAULT-MESSAGING §10.10.
+The KEM shares are signed by the device that made them and vouched for by
+its vault, and checked by the peer vault and the peer device. Calls are
+placed and answered on apps and on desktops within an access session;
+there is no handoff between devices. Body schemas and rules:
+VAULT-MESSAGING §10.10.
 
 Callee wake via push gateway (wake keypairs unchanged, per PQC-MIGRATION
 component #8). Signaling content is inside the E2E envelope: call metadata
