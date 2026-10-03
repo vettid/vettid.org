@@ -23,7 +23,7 @@ npm run deploy:all                                # everything
 
 ## Stacks
 
-Stateful stacks (Dns, Signup, Playbooks, Auth, Data, AdminAccess) have
+Stateful stacks (Dns, Signup, Playbooks, Auth, Data, AdminAccess, RelayData) have
 CloudFormation termination protection on (`lib/app.ts`); deleting one means
 turning that off in code (or the console) first.
 
@@ -39,6 +39,8 @@ turning that off in code (or the console) first.
 | `VettidOrgAdminAccessStack` | Admin tailnet exit node (EC2 + EIP) and the CloudFront WAF allowlist keyed to its IP (admin site). |
 | `VettidOrgAdminApiStack` | Admin REST API at admin-api.vettid.org (docs/ADMIN-API.md): exit-node-IP resource policy + Cognito authorizer, 3 route-group Lambdas. |
 | `VettidOrgAdminSiteStack` | Admin SPA at admin.vettid.org (`sites/admin`), behind the exit-node web ACL. |
+| `VettidOrgRelayDataStack` | Relay state: DynamoDB table `vettid-org-relay` and the blob bucket `vettid-org-relay-blobs-<account>` (published via SSM `relay/*`). Stateful. |
+| `VettidOrgRelayStack` | relay.vettid.org: VPC (no NAT; S3 + DynamoDB gateway endpoints), ElastiCache Serverless Valkey (IAM auth, TLS), ECS Fargate service (2–8 tasks, rolling deploys), ALB with PQ TLS. Also keeps the retained, unused Litestream replica bucket and the relay log group. Only deployed when `relayImage` is set. |
 
 ## CDK conventions (new stacks)
 
@@ -131,6 +133,48 @@ stack is deleted.
 second creates the Cognito user, which emails a temporary password). First
 sign-in sets a password and enrolls TOTP. **Removing an admin:** delete
 their Headscale node *and* disable/delete the Cognito user.
+
+## Relay (relay.vettid.org)
+
+Hosting option B (decided 2026-10-03): several identical Fargate tasks
+behind the ALB on one shared store — DynamoDB (state), S3 (blob bodies),
+Valkey (replay cache, rate limits, wake-on-deposit). Any task serves any
+request; deploys are rolling with no downtime. Code and design:
+github.com/vettid/vettid-relay (`internal/store/dynamo`, `internal/coord`,
+README "Multi-process hosting").
+
+```bash
+npx cdk deploy VettidOrgRelayDataStack   # first, and rarely: table + bucket + SSM refs
+npx cdk deploy VettidOrgRelayStack       # service; reads the refs at deploy time
+```
+
+- **Image.** `relayImage` in `cdk.json` is a digest from the relay repo's
+  `publish` job (GHCR). The image must support `RELAY_STORE=dynamodb`
+  (vettid-relay ≥ the "hosting option B" merge); an older digest fails its
+  health check and the circuit breaker rolls back.
+- **Deploys.** 100% min / 200% max: two new tasks start and pass health
+  checks, the old ones are deregistered, drained 30 s (longer than a 25 s
+  long-poll), then sent SIGTERM (40 s stop timeout). WebSockets on a
+  stopping task are closed with 1001 and clients reconnect to another task.
+- **Scaling.** Target tracking on CPU 50% and memory 70%, 2–8 tasks of
+  0.25 vCPU / 512 MB. Raise task size before raising the maximum when
+  CPU-bound.
+- **Valkey.** `vettid-org-relay`, ElastiCache Serverless, Valkey 8. The
+  relay authenticates as user `vettid-org-relay` with IAM (`elasticache:Connect`;
+  no password exists) over TLS; that user can touch only `relay:*` keys and
+  channels. Limits: 1 GB data, 50k ECPU/s (cost guard). Nothing in it needs
+  backing up: losing it costs at most 90 s of replay protection (requests
+  are refused, not admitted, while it is unreachable) and some wake-up
+  latency.
+- **Health.** `/healthz` reads DynamoDB. Metrics worth alarming on (task
+  `/metrics`, loopback): `relay_coord_errors_total`, `relay_wake_bus_up`,
+  `relay_errors_total{code="internal"}`.
+- **Data.** Everything stored is ciphertext the relay cannot read. Table
+  has deletion protection, no PITR (messages live ≤ 14 days); the blob
+  bucket expires objects after 8 days.
+- **Legacy.** The Litestream replica bucket `vettid-org-relay-replica-<account>`
+  is kept (RETAIN) but unused since option B; empty and delete it by hand
+  when its data is no longer wanted.
 
 ## DNS
 
@@ -233,3 +277,9 @@ durable backup.
 
 ~$7–8: WAF telemetry (~$5, intentional), two Route53 zones ($1), CloudFront/
 Lambda/DynamoDB/S3 in pennies at current traffic.
+
+Relay (when deployed), at idle: ~$55/month — ALB ~$16, two 0.25 vCPU tasks
+~$15, four public IPv4 addresses ~$15, Valkey Serverless minimum ~$6, logs
+and DynamoDB a few dollars. It grows with use at roughly $9 per million
+messages plus ~$0.02 per always-on long-poll collector per month (DynamoDB
+on-demand); see the relay PR for the 1k/10k/100k estimates.
