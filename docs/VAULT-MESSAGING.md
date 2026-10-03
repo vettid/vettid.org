@@ -2973,8 +2973,8 @@ when none). The receiving vault keeps the latest list per connection
 
 | Type | Request body | Response / event body |
 |---|---|---|
-| `action.list` (app, desktop) | `{connection_id?}` | without it: `{catalog_version, actions: [{action_id, version, sensitivity, available, param_schema, result_schema, mode, connections?, fields?, secrets?}]}`; with it, what that connection offers: `{actions: [{action_id, version, prompt}]}` |
-| `action.configure` (app; desktop: step-up) | `{action_id, mode, connections?, fields?, secrets?}` | `{version}` (the configuration's version, §10.1) |
+| `action.list` (app, desktop) | `{connection_id?}` | without it: `{catalog_version, actions: [{action_id, version, sensitivity, available, param_schema, result_schema, mode, config_version, connections?, fields?, secrets?}]}`; with it, what that connection offers: `{actions: [{action_id, version, prompt}]}` |
+| `action.configure` (app; desktop: step-up) | `{action_id, version?, mode, connections?, fields?, secrets?}`; `version` is the configuration version it is based on (`conflict` if stale, §10.1) | `{version}` (the new configuration version) |
 | `action.offered` (V↔V) | — | `{actions: [{action_id, version, prompt}]}` (at most 64) |
 | `action.invoke` (app, desktop) | `{connection_id, action_id, params}` | `{invocation_id}` |
 | `action.invocation` (V↔V) | — | `{invocation_id, action_id, version, params}` |
@@ -2987,7 +2987,10 @@ when none). The receiving vault keeps the latest list per connection
   its catalog, not offered to that connection, of another `version`,
   whose parameters do not parse, or that cannot run (not told apart);
   and when it already holds 8 pending invocations from that connection,
-  or has had 60 invocations from it in the last hour. A pending
+  or has had 60 invocations from it in the last hour (refused ones
+  count, so a connection that keeps invoking stays refused). Malformed
+  `action.*` messages from a connection are dropped and audited
+  (`drop.action_malformed`). A pending
   invocation is answered `expired` after 24 h, and `unavailable` when a
   configuration change stops offering it to that connection. A repeated
   `invocation_id` is ignored.
@@ -3047,10 +3050,18 @@ A vault             B vault (introducer)              C vault
    would. A's member then approves the request as any remote one, with
    the SAS (§6.4); `connection.request.pending` carries
    `introduced_by` (A's connection id of B).
-4. If either declines, B cancels, or the introduction expires (7 days),
-   B's vault sends `intro.closed` to each party it had offered it to,
-   without a reason, and each deletes the offer (A also cancels an
-   invitation it made). Neither A nor C learns anything about the other
+4. If either declines, B cancels, or the introduction has not been
+   linked within 7 days, B's vault sends `intro.closed` to each party it
+   had offered it to (except one that declined, which has closed its own
+   copy), without a reason, and each closes its offer (A also cancels an
+   invitation it made and that has not been used). If A cannot make the
+   invitation it closes its copy and tells its devices; B's introduction
+   then closes at its expiry.
+5. **States.** At B: `offered` → `connecting` (both accepted) →
+   `linked` (the link relayed) or `closed`. At A and C: `pending` →
+   `accepted` → `connecting` or `closed`; a `connecting` offer is no
+   longer subject to the 7-day expiry (the invitation's own lifetime
+   governs). Ended records are kept 30 days for `intro.list`. Neither A nor C learns anything about the other
    beyond what B chose to show them before they answered: no key, relay
    address, link or answer of the other.
 
@@ -3067,7 +3078,7 @@ A vault             B vault (introducer)              C vault
 | `intro.link` (V↔V, B → C) | — | `{intro_id, link}` |
 | `intro.closed` (V↔V, B → A, C) | — | `{intro_id}` |
 | `intro.pending` (V→D, apps and desktops of A and C) | — | `{intro_id, connection_id, peer, exp}` |
-| `intro.event` (V→D, apps and desktops) | — | `{intro_id, event: "accepted" \| "declined" \| "connecting" \| "closed", connection_id?}`; B's devices get each answer; A's and C's only `connecting` and `closed` |
+| `intro.event` (V→D, apps and desktops) | — | `{intro_id, event: "accepted" \| "declined" \| "connecting" \| "closed", connection_id?}`; B's devices get each answer (and `sync.event{intro.changed, state: "linked"}` once the link is relayed); A's and C's only `connecting` and `closed` |
 
 - **Limits.** `a` ≠ `c`, both active connections of B; at most one open
   introduction per pair and 16 open per vault (`limit`); `name` 1–128
