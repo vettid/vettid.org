@@ -1,6 +1,6 @@
 ---
 title: VAULT-ITEMS
-status: approved design note (owner, 2026-10-03)
+status: approved design note (owner, 2026-10-03); specified in VAULT-MESSAGING 0.7.0
 version: 0.1.0
 date: 2026-10-03
 owner: Al Liebl (Mesmer)
