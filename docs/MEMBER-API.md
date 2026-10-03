@@ -36,7 +36,7 @@ Responses are `Cache-Control: no-store`.
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| POST | `/api/public/request` | `{email, first_name, last_name, invite_code?: string, consent: true}` | `{outcome}` (below). Names: letters, spaces, `'’.-`, ≤ 40 chars. Global hourly cap (past it: same answer, nothing created). Requests never email-verified are deleted after 14 days. |
+| POST | `/api/public/request` | `{email, first_name, last_name, invite_code?: string, consent: true}` | `{outcome}` (below). `invite_code` is the optional **registration code** (field name kept for compatibility). Names: letters, spaces, `'’.-`, ≤ 40 chars. Global hourly cap (past it: same answer, nothing created). Requests never email-verified are deleted after 14 days. |
 
 `consent` must be `true`: while SES is in sandbox, we can only email
 addresses that have verified with SES, and that verification **is** the
@@ -110,7 +110,7 @@ interface Me {
     status: 'trial' | 'active' | 'expired' | 'canceled';
     paid: boolean; started_at: string; expires_at: string;
   } | null;
-  voting_rights: boolean;
+  voting_rights: boolean;           // paid members are the voting members; governance voting is upcoming
   email_verified: boolean;          // always true once signed in (links need it)
   pin_enabled: boolean;
   preferences: { email_updates: boolean; pin_prompt_dismissed: boolean };

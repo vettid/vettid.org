@@ -1,8 +1,13 @@
 ---
 title: VAULT-PLAN
 status: draft
-version: 0.1.0
-date: 2026-10-02
+version: 0.1.1
+date: 2026-10-03
+changelog:
+  - 0.1.1: notes ported from the vettid.dev archive review and the owner
+    decisions of 2026-10-03: wallet spend caps (V4), DR objectives and a
+    RUNBOOK vault section (V5), no backup or export of vault data and
+    vault-to-vault transfer as a future item (Later), follow-ups (§8)
 owner: Al Liebl (Mesmer)
 related:
   - VAULT-MESSAGING.md (0.3.1) — the wire and behaviour spec this plan implements
@@ -142,6 +147,15 @@ written alongside each port, in VAULT-MESSAGING §10.
 **Exit per area:** its ops are in the §10 registry, their bodies specified,
 and `vaultctl` scripts exercise them through the real relay.
 
+**Wallet note (for the wallet batch).** The original design let members set
+per-operation policies on critical keys; the spend part is a requirement
+here: member-set **spend caps** per transaction and per period (per day,
+per week), enforced by the vault before it signs, with raising a cap a
+credential operation (password, CEK rotation) and every refusal audited.
+Caps apply to every caller, including connections' critical-item uses and
+any future agent path. (vettid-dev `protean_credential_system_design.md`,
+"Policy-Based Authorization"; PROTEAN-CREDENTIAL §5.)
+
 ### V5 — Infrastructure and first hardware run
 
 - **VettidOrgVaultStack** (stateful, RETAIN, termination protection): vault
@@ -161,6 +175,25 @@ and `vaultctl` scripts exercise them through the real relay.
 - EIF and AMI build (vettid-vault CI + script), PCR manifest published at
   `https://vettid.org/.well-known/vettid/pcr-manifest.json`, signed by the KMS
   key whose public key the apps pin.
+- **Disaster recovery objectives** (to be set before members store data):
+  - RPO and RTO for vault state, and whether the vault data bucket is
+    versioned or replicated. Conditional writes and rollback protection
+    (VAULT-MESSAGING §13.2) must hold for any restored version; old
+    versions hold blobs under destroyed CEKs, which are harmless.
+  - Region loss: release sealing keys are single-region and can never be
+    deleted, disabled or re-policied (§5.1), so there is no KMS
+    deletion-recovery scenario, but vaults are unopenable while the key's
+    region is down. Decide whether that is accepted or whether releases
+    get a second-region key.
+  - Loss of the stored state itself stays out of scope for members
+    (VAULT-MESSAGING §2.2); there is no member backup or export (owner
+    decision, 2026-10-03).
+- **RUNBOOK "Vault" section** (placeholders until V5 lands): publishing a
+  release (build, PCRs, manifest signing, per-release key), scaling the host
+  ASG from 0 and on-demand starts of old releases, instance and lease
+  health, incident classes and first responses, capacity per host, and the
+  DR procedures above. The vettid.dev runbooks (incident response, capacity
+  planning) are a checklist only.
 - **Exit:** one real enrollment and unlock on hardware through
   relay.vettid.org, with `vaultctl` verifying attestation against the
   published manifest; a release update approved and the vault re-sealed to
@@ -176,8 +209,17 @@ transport, enrollment, unlock, key attestation already exists in
 
 ### Later
 
-Push gateway wakes (when APNs/FCM credentials exist), calling service (TURN,
-SFrame), backup and recovery, PQC Phase 2 (ML-DSA, Go 1.27).
+Push gateway wakes on both paths (FCM/APNs when credentials exist, and
+UnifiedPush for phones without Google services; PUSH-GATEWAY 0.2.0),
+calling service (TURN, SFrame), PQC Phase 2 (ML-DSA, Go 1.27).
+
+- **No backup or export of vault data outside the service** (owner
+  decision, 2026-10-03). Recovery after losing every app is specified
+  (VAULT-MESSAGING §11.11).
+- **Vault-to-vault transfer** (future): a member moves their data from an
+  old vault to a new one within the service.
+- **Self-hosted vaults / home appliance**: a future direction only
+  (ARCHITECTURE §8).
 
 ## 5. Decisions
 
@@ -432,3 +474,19 @@ secrets behind in memory. Inside the enclave:
    spec with vectors, and `vaultctl` as the reference client.
 6. **iOS App Attest inside the enclave** needs Apple's root pinned and CBOR/
    COSE parsing in the TCB; budgeted in V3.
+
+## 8. Follow-ups
+
+From the vettid.dev archive review (2026-10-03):
+
+1. **Retention of data received from connections.** Grant values are
+   sealed to the fetching device (VAULT-MESSAGING §10.12), so the vault
+   never holds them and cannot sweep them, as vettid.dev's in-enclave
+   retention sweep did. Decide whether grants carry a retention hint that
+   apps honour (delete cached values on expiry, revocation or removal),
+   and specify it in §10.12.
+2. **One app per vault, holding the credential** (owner decision,
+   2026-10-03): a second or stale copy is refused, alerted and freezes
+   credential operations until a forced rotation; direct transfer between
+   phones; recovery replaces the old app. Vault and spec change after V4
+   batch 4, per PROTEAN-CREDENTIAL §4.

@@ -26,7 +26,7 @@ async function sesStatus(addr: string): Promise<'verified' | 'pending' | 'missin
   }
 }
 
-/** Atomically create the member + email marker, optionally consuming an invite use. */
+/** Atomically create the member + email marker, optionally consuming a registration-code use. */
 async function create(item: MemberItem, inviteCode: string | null): Promise<'ok' | 'exists' | 'bad_code'> {
   const now = nowIso();
   try {
@@ -173,9 +173,9 @@ router.on('POST', '/api/public/request', async ({ body, ip }) => {
   try {
     await sendMail(
       env('ADMIN_EMAIL'),
-      item.state === 'registered' ? `VettID: ${first_name} ${last_name} registered with an invite` : `VettID: membership request from ${first_name} ${last_name}`,
+      item.state === 'registered' ? `VettID: ${first_name} ${last_name} registered with a registration code` : `VettID: membership request from ${first_name} ${last_name}`,
       `${first_name} ${last_name} <${addr}>\n` +
-        (item.state === 'registered' ? `Registered with invite ${item.invite_code}.\n` : 'Needs review in admin (Requests).\n') +
+        (item.state === 'registered' ? `Registered with registration code ${item.invite_code}.\n` : 'Needs review in admin (Requests).\n') +
         'admin: https://admin.vettid.org/#requests\n',
     );
   } catch (e) {

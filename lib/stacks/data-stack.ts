@@ -20,7 +20,7 @@ export interface VettidOrgDataStackProps extends cdk.StackProps {
  * Model (docs/ACCOUNT-ADMIN-PLAN.md §3.4, §5.1) — fresh, not vettid-dev's 37:
  *   members            one row per person: lifecycle state, account status,
  *                      terms acceptance, PIN hash, preferences, has_used_trial
- *   invites            invite codes (valid code = auto-registration)
+ *   invites            registration codes (valid code = auto-registration; table name kept)
  *   terms              membership terms versions (PDF in the terms bucket)
  *   subscriptions      one row per member
  *   subscription-types plans (free trial now; `paid` flag for later)

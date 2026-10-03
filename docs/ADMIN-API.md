@@ -39,13 +39,13 @@ interface Member {
   state: State;
   account_status: AccountStatus;
   email_verified: boolean;        // SES verification (sandbox opt-in) complete
-  invite_code: string | null;     // code used on the request, if any
+  invite_code: string | null;     // registration code used on the request, if any
   created_at: string;
   updated_at: string;
   terms_version: string | null;   // accepted terms version, if any
   pin_enabled: boolean;
   subscription: Subscription | null;
-  voting_rights: boolean;         // member + active paid subscription
+  voting_rights: boolean;         // member + active paid subscription (governance voting is upcoming)
 }
 
 interface Subscription {
@@ -73,10 +73,16 @@ interface Subscription {
 | DELETE | `/admin/members/{user_guid}` | — | `{ok: true}` (permanent; Cognito user + data removed, audit kept) |
 | POST | `/admin/members/{user_guid}/clear-pin` | — | `Member` — removes the PIN and its lockout; the member is emailed a notice. Audited. |
 | POST | `/admin/members/{user_guid}/subscription/extend` | `{days: number}` (1–366) | `Member` |
-| GET | `/admin/invites` | — | `{items: Invite[], cursor}` |
-| POST | `/admin/invites` | `{max_uses: number (1–1000), expires_in_days: number (1–365), note?: string}` | `Invite` |
+| GET | `/admin/invites` | — | `{items: Invite[], cursor}` (registration codes) |
+| POST | `/admin/invites` | `{max_uses: number (1–1000), expires_in_days: number (1–365), note?: string}` | `Invite`. The admin site's form defaults `max_uses` to 2. |
 | POST | `/admin/invites/{code}/expire` | — | `Invite` |
 | DELETE | `/admin/invites/{code}` | — | `{ok: true}` |
+
+**Registration codes.** Members and the admin site call these
+*registration codes* (formerly "invite codes"); each is good for 2 uses by
+default. The routes (`/admin/invites`), the `Invite` type, the
+`invite_code` field and the audit actions (`invite.create`,
+`invite.expire`, `invite.delete`) keep their names for compatibility.
 
 ```ts
 interface Invite {

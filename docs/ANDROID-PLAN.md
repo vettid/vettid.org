@@ -1,8 +1,13 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.0
+version: 0.1.1
 date: 2026-10-03
+changelog:
+  - 0.1.1: owner decisions of 2026-10-03: push on both paths (FCM and
+    UnifiedPush, plus a foreground-service path without push, §7); no
+    backup or export of vault data (§4); location viewer notes for the
+    location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
   - VAULT-MESSAGING.md (0.6.x) — the app's contract with the vault
@@ -83,13 +88,16 @@ actions & introductions, Wallet, Location.
 | Connection detail | — | Profile shared with you, safety code (SAS), authenticate, alias/notes, block/remove |
 | Approvals | — (VettID-specific) | Pending connection requests, grant requests, critical-secret uses; approve/deny; critical items need the credential password |
 | Secrets | Folder list | Versioned secrets; add/edit; catalog (discoverability) |
-| Credential | — | Critical secrets inside the Protean Credential; unlock window; password change; backup on/off |
-| Settings | Settings | Vault (status, release, lock, PIN); Security (credential, recovery, attestation info, biometric app lock and timeout); Privacy; Backup; App (theme, notifications) |
+| Credential | — | Critical secrets inside the Protean Credential; unlock window; password change; the vault-held credential copy on/off |
+| Settings | Settings | Vault (status, release, lock, PIN); Security (credential, recovery, attestation info, biometric app lock and timeout); Privacy; App (theme, notifications and push path) |
 | Avatar sheet | Account sheet | Vault status, lock vault, open account portal, sign out of this device |
 | Onboarding | Sign-in flow | Membership check → enroll vault (PIN, credential password) → first connection guide |
 
 Every list has an empty state; every destructive action has a confirmation;
 every critical action asks for the credential password.
+
+There is no backup or export of vault data out of the service (owner
+decision, 2026-10-03); no screen offers one.
 
 ## 5. Architecture
 
@@ -129,13 +137,28 @@ crypto directly; one ViewModel per screen with immutable UI state.
 Calls, devices/agents/LEASH, wallet, location and presence follow v1 in
 that order, each as its own phase.
 
+**Location phase notes** (from vettid-dev `docs/plans/location-sharing-ux.md`,
+input for when the location batch is specified in VAULT-MESSAGING): show a
+shared location in three layers: an event when a connection **starts
+sharing** with you (a feed item, once), a **glance** on the connection's row
+(last-seen place and age), and **detail** on the connection screen (map with
+accuracy and time). The viewer shows the latest location the vault cached
+for that connection rather than tracking live, and offers a **request
+location** action that asks the connection to share once. The vault
+schema for the cache and the request verb belong to the location batch.
+
 ## 7. Dependencies on other work
 
 - **Running vault**: v1 development uses the local dev stack; real devices
   need the V5 deployment (release pipeline, member API vault routes
   deployed, enrollment/recovery portal pages).
-- **Push**: deferred until APNs/FCM credentials exist; v1 collects while the
-  app is open (and via a foreground service only if needed).
+- **Push** (owner decision, 2026-10-03: both paths): FCM when Google Play
+  services are present, **UnifiedPush** for phones without them (for
+  example GrapheneOS), and, with neither, a foreground service that keeps
+  the relay connection, or periodic polling (PUSH-GATEWAY 0.2.0 §11). The
+  member can pick the path in notification settings. Until the gateway is
+  deployed (FCM needs credentials), v1 collects while the app is open and
+  through the foreground-service path.
 - **Membership**: enrollment requires an account.vettid.org member who has
   accepted the current terms (MEMBER-API).
 
@@ -150,8 +173,13 @@ that order, each as its own phase.
    porting screens without a v1 need.
 3. **Device attestation in the field**: key attestation varies by vendor;
    test on several devices before release.
-4. **Background delivery without push**: messages arrive when the app is
-   open; set expectations in the UI until push exists.
+4. **Background delivery without push**: until the gateway exists,
+   messages arrive while the app is open or through the foreground
+   service; set expectations in the UI.
+5. **GrapheneOS and device attestation**: GrapheneOS reports its own
+   verified-boot key (`SelfSigned`), which VAULT-MESSAGING §11.7 does not
+   accept yet; it needs a pinned-key allowance before GrapheneOS users can
+   enroll.
 
 ## 9. Open questions
 
