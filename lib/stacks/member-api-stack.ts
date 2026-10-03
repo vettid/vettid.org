@@ -26,7 +26,7 @@ export const originVerifySecretName = (config: AppConfig) => `${resourceName(con
  * Stateless: the member API (docs/MEMBER-API.md), served same-origin behind
  * account.vettid.org. Four route groups (public, auth, account, vault) plus the
  * background jobs: SES-verification sweep, daily cleanup/expiry, and the
- * members-stream welcome mailer.
+ * members-stream welcome mailer and the vault credential-clone alarm mailer.
  *
  * The HTTP API's execute-api URL is public; every handler rejects requests
  * without CloudFront's origin-verify header, so the API is only usable via
@@ -237,6 +237,36 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
         batchSize: 10,
         retryAttempts: 3,
         bisectBatchOnError: true,
+      }),
+    );
+
+    // Credential-clone alarms (VAULT-MESSAGING 0.9.0 §3.5.9, §11.5): the
+    // enclave host records a content-free alarm on the vault row; this
+    // mailer, fed only the stream records that carry `alarm_pending`, emails
+    // the member. It may only clear `alarm_pending` and stamp the alarm.
+    const alarms = job('VaultAlarmMailer', 'lambda/jobs/vault-alarms.ts', cdk.Duration.seconds(30));
+    g(alarms, 'members', ['GetItem']);
+    g(alarms, 'ratelimits', ['UpdateItem']);
+    g(alarms, 'audit', ['PutItem']);
+    alarms.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['dynamodb:UpdateItem'],
+        resources: [tableArn('vaults')],
+        conditions: onlyAttributes(['vault_id', 'alarm', 'alarm_pending']),
+      }),
+    );
+    alarms.addToRolePolicy(sesSend);
+    const vaultsTable = dynamodb.Table.fromTableAttributes(this, 'VaultsTable', {
+      tableName: resourceName(config, 'vaults'),
+      tableStreamArn: readRef(this, config, 'data/vaults-stream-arn'),
+    });
+    alarms.addEventSource(
+      new sources.DynamoEventSource(vaultsTable, {
+        startingPosition: lambda.StartingPosition.LATEST,
+        batchSize: 10,
+        retryAttempts: 3,
+        bisectBatchOnError: true,
+        filters: [lambda.FilterCriteria.filter({ eventName: lambda.FilterRule.isEqual('MODIFY'), dynamodb: { NewImage: { alarm_pending: { BOOL: lambda.FilterRule.isEqual(true) } } } })],
       }),
     );
 

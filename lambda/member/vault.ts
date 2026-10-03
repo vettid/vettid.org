@@ -26,8 +26,11 @@
  * Shared contract with the enclave host (vettid/vettid-vault, the parent):
  *  - vaults table, PK vault_id: { vault_id, user_guid, state,
  *    lease: { instance_id, lease_expires_at (epoch s) }, sealed_release,
- *    vault_version, state_version, created_at, updated_at }. The API creates
- *    the row (state `enrolling`); the parent owns lease and lifecycle fields.
+ *    vault_version, state_version, created_at, updated_at, alarm: { kind,
+ *    alarm_id (ULID), at (epoch s) }, alarm_pending: true }. The API creates
+ *    the row (state `enrolling`); the parent owns lease, lifecycle and alarm
+ *    fields (the alarm mailer only clears alarm_pending, VAULT-MESSAGING
+ *    0.9.0 §11.5).
  *    Rows keyed `user#<user_guid>` are the API's per-member pointer
  *    (`current_vault_id`) and never carry user_guid.
  *  - vault-instances table, PK instance_id: { instance_id, release (PCR0 hex),
@@ -144,6 +147,13 @@ export interface VaultRow {
   state_version?: string | number;
   /** API-owned: the recovery in progress or last ended (VAULT-MESSAGING §11.11). */
   recovery?: RecoveryRow;
+  /**
+   * Host-owned: the last alarm the vault reported (VAULT-MESSAGING 0.9.0
+   * §11.5), content-free. `alarm_pending` is cleared by the alarm mailer
+   * (lambda/jobs/vault-alarms.ts). Advisory; never a security signal.
+   */
+  alarm?: { kind: string; alarm_id: string; at: number; emailed_at?: number };
+  alarm_pending?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -485,6 +495,8 @@ router.on('GET', '/api/vault/status', async (req) => {
       leased: !!v.lease && typeof v.lease.lease_expires_at === 'number' && v.lease.lease_expires_at > now,
       // So owner apps can show a recovery in progress and offer to cancel it (§11.11.7).
       recovery: recoveryActive(v.recovery, now) ? { state: recoveryState(v.recovery, now), available_at: iso(v.recovery!.available_at) } : null,
+      // The last alarm the vault reported to its host (a credential clone, 0.9.0 §3.5.9).
+      alarm: v.alarm && typeof v.alarm.kind === 'string' && typeof v.alarm.at === 'number' ? { kind: v.alarm.kind, at: iso(v.alarm.at) } : null,
       created_at: v.created_at,
       updated_at: v.updated_at,
     },
@@ -690,6 +702,8 @@ async function notify(to: string, subject: string, text: string): Promise<void> 
 const requestedMail = (cancelUrl: string, availableAt: number) => `A recovery of your VettID vault was requested from your account.
 
 Your vault has been locked. If nobody cancels, a one-time recovery code becomes available on your account page at ${iso(availableAt)}, for 24 hours. A new app then needs the code, your vault PIN and your credential password.
+
+The new app replaces your current app, which is removed; your desktops and agents stay paired. If your credential backup is off, your credential and its critical items cannot be restored: the new app can only start a new credential or delete the vault.
 
 If you did not ask for this, cancel it now:
 ${cancelUrl}

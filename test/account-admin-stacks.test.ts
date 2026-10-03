@@ -112,7 +112,10 @@ describe('VettidOrgDataStack', () => {
       KeySchema: [{ AttributeName: 'vault_id', KeyType: 'HASH' }],
       GlobalSecondaryIndexes: [Match.objectLike({ IndexName: 'user-index' })],
       Replicas: [Match.objectLike({ PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true } })],
+      // credential-clone alarms reach the alarm mailer (VAULT-MESSAGING 0.9.0 §11.5)
+      StreamSpecification: { StreamViewType: 'NEW_IMAGE' },
     });
+    t.hasResourceProperties('AWS::SSM::Parameter', { Name: '/vettid-org/prod/data/vaults-stream-arn' });
     t.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
       TableName: 'vettid-org-vault-instances',
       KeySchema: [{ AttributeName: 'instance_id', KeyType: 'HASH' }],
@@ -364,8 +367,8 @@ describe('VettidOrgMemberApiStack', () => {
   const { VettidOrgMemberApiStack } = require('../lib/stacks/member-api-stack');
   const t = Template.fromStack(new VettidOrgMemberApiStack(newApp(), 'MemberApi', { config, env }));
 
-  test('four route groups + link mailer + three jobs', () => {
-    t.resourceCountIs('AWS::Lambda::Function', 8);
+  test('four route groups + link mailer + four jobs', () => {
+    t.resourceCountIs('AWS::Lambda::Function', 9);
     for (const p of ['/api/public', '/api/auth', '/api/account', '/api/vault']) {
       t.hasResourceProperties('AWS::ApiGatewayV2::Route', { RouteKey: `ANY ${p}/{proxy+}` });
     }
@@ -407,7 +410,7 @@ describe('VettidOrgMemberApiStack', () => {
       const writes = stmts().filter(
         (s: any) => /dynamodb:(PutItem|UpdateItem)/.test(str(s.Action)) && /table\/vettid-org-(vaults|vault-releases)"/.test(str(s.Resource)),
       );
-      expect(writes).toHaveLength(2);
+      expect(writes).toHaveLength(3); // the API's two, and the alarm mailer's
       for (const w of writes) {
         const attrs: string[] = w.Condition['ForAllValues:StringEquals']['dynamodb:Attributes'];
         for (const f of ['lease', 'sealed_release', 'vault_version', 'state_version', 'status', 'available']) expect(attrs).not.toContain(f);
@@ -415,6 +418,21 @@ describe('VettidOrgMemberApiStack', () => {
       // The instance registry is read-only to the API.
       const instanceWrites = stmts().filter((s: any) => str(s.Resource).includes('vettid-org-vault-instances') && /Put|Update|Delete/.test(str(s.Action)));
       expect(instanceWrites).toHaveLength(0);
+    });
+
+    test('the alarm mailer: only the vaults stream records with alarm_pending, and may only clear the alarm flag', () => {
+      t.hasResourceProperties('AWS::Lambda::EventSourceMapping', {
+        StartingPosition: 'LATEST',
+        FilterCriteria: { Filters: [{ Pattern: JSON.stringify({ eventName: ['MODIFY'], dynamodb: { NewImage: { alarm_pending: { BOOL: [true] } } } }) }] },
+      });
+      const alarmWrites = stmts().filter(
+        (s: any) => str(s.Action) === '"dynamodb:UpdateItem"' && str(s.Resource).includes('table/vettid-org-vaults"') && str(s.Condition).includes('alarm_pending'),
+      );
+      expect(alarmWrites).toHaveLength(1);
+      expect(alarmWrites[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(['vault_id', 'alarm', 'alarm_pending']);
+      // The API itself never writes alarm fields.
+      const apiWrites = stmts().filter((s: any) => /PutItem/.test(str(s.Action)) && str(s.Resource).includes('table/vettid-org-vaults"'));
+      for (const w of apiWrites) expect(str(w.Condition)).not.toContain('alarm');
     });
 
     test('only the cleanup job may delete vault rows (canceled accounts after the grace period)', () => {
