@@ -24,10 +24,10 @@ export interface AppConfig {
    */
   readonly senderEmail: string;
   /**
-   * Container images for the relay, pinned by digest. Unset → the relay
-   * stack is skipped. Context: relayImage, litestreamImage.
+   * Relay container image, pinned by digest. Unset → the relay service stack
+   * is skipped (its data stack is not). Context: relayImage.
    */
-  readonly relay: { readonly image: string; readonly litestreamImage: string };
+  readonly relay: { readonly image: string };
   readonly adminAccess: {
     /**
      * Headscale control server the AWS exit node joins (tailscale
@@ -53,7 +53,6 @@ export function loadConfig(node: Node): AppConfig {
     senderEmail: 'no-reply@vettid.org',
     relay: {
       image: String(node.tryGetContext('relayImage') ?? ''),
-      litestreamImage: String(node.tryGetContext('litestreamImage') ?? ''),
     },
     adminAccess: {
       headscaleLoginServer: String(node.tryGetContext('headscaleLoginServer') ?? ''),

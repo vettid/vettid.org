@@ -23,7 +23,7 @@ npm run deploy:all                                # everything
 
 ## Stacks
 
-Stateful stacks (Dns, Signup, Playbooks, Auth, Data, AdminAccess) have
+Stateful stacks (Dns, Signup, Playbooks, Auth, Data, AdminAccess, RelayData) have
 CloudFormation termination protection on (`lib/app.ts`); deleting one means
 turning that off in code (or the console) first.
 
@@ -39,6 +39,8 @@ turning that off in code (or the console) first.
 | `VettidOrgAdminAccessStack` | Admin tailnet exit node (EC2 + EIP) and the CloudFront WAF allowlist keyed to its IP (admin site). |
 | `VettidOrgAdminApiStack` | Admin REST API at admin-api.vettid.org (docs/ADMIN-API.md): exit-node-IP resource policy + Cognito authorizer, 3 route-group Lambdas. |
 | `VettidOrgAdminSiteStack` | Admin SPA at admin.vettid.org (`sites/admin`), behind the exit-node web ACL. |
+| `VettidOrgRelayDataStack` | Relay state: DynamoDB table `vettid-org-relay` and the blob bucket `vettid-org-relay-blobs-<account>` (published via SSM `relay/*`). Stateful. |
+| `VettidOrgRelayStack` | relay.vettid.org: VPC (no NAT; S3 + DynamoDB gateway endpoints), ElastiCache Serverless Valkey (IAM auth, TLS), ECS Fargate service (2–8 tasks, rolling deploys), ALB with PQ TLS. Logs to `/vettid-org/<stage>/relay-service`. Only deployed when `relayImage` is set. |
 
 ## CDK conventions (new stacks)
 
@@ -131,6 +133,78 @@ stack is deleted.
 second creates the Cognito user, which emails a temporary password). First
 sign-in sets a password and enrolls TOTP. **Removing an admin:** delete
 their Headscale node *and* disable/delete the Cognito user.
+
+## Relay (relay.vettid.org)
+
+Hosting option B (decided 2026-10-03): several identical Fargate tasks
+behind the ALB on one shared store — DynamoDB (state), S3 (blob bodies),
+Valkey (replay cache, rate limits, wake-on-deposit). Any task serves any
+request; deploys are rolling with no downtime. Code and design:
+github.com/vettid/vettid-relay (`internal/store/dynamo`, `internal/coord`,
+README "Multi-process hosting").
+
+```bash
+npx cdk deploy VettidOrgRelayDataStack   # first, and rarely: table + bucket + SSM refs
+npx cdk deploy VettidOrgRelayStack       # service; reads the refs at deploy time
+```
+
+- **Image.** `relayImage` in `cdk.json` is a digest from the relay repo's
+  `publish` job (GHCR). The image must support `RELAY_STORE=dynamodb`
+  (vettid-relay ≥ the "hosting option B" merge); an older digest fails its
+  health check and the circuit breaker rolls back.
+- **Deploys.** 100% min / 200% max: two new tasks start and pass health
+  checks, the old ones are deregistered, drained 30 s (longer than a 25 s
+  long-poll), then sent SIGTERM (40 s stop timeout). WebSockets on a
+  stopping task are closed with 1001 and clients reconnect to another task.
+- **Scaling.** Target tracking on CPU 50% and memory 70%, 2–8 tasks of
+  0.25 vCPU / 512 MB. Raise task size before raising the maximum when
+  CPU-bound.
+- **Valkey.** `vettid-org-relay`, ElastiCache Serverless, Valkey 8. The
+  relay authenticates as user `vettid-org-relay` with IAM (`elasticache:Connect`;
+  no password exists) over TLS; that user can touch only `relay:*` keys and
+  channels. Limits: 1 GB data, 100k ECPU/s (cost guard). Nothing in it needs
+  backing up: losing it costs at most 90 s of replay protection (requests
+  are refused, not admitted, while it is unreachable) and some wake-up
+  latency.
+- **Health.** `/healthz` reads DynamoDB. Metrics worth alarming on (task
+  `/metrics`, loopback): `relay_coord_errors_total`, `relay_wake_bus_up`,
+  `relay_errors_total{code="internal"}`.
+- **Data.** Everything stored is ciphertext the relay cannot read. Table
+  has deletion protection, no PITR (messages live ≤ 14 days); the blob
+  bucket expires objects after 8 days.
+- **Empty hints.** Idle long-polls mostly skip DynamoDB (Valkey knows the
+  mailbox is empty); `relay_collect_store_skips_total` vs
+  `relay_collect_store_queries_total` shows the ratio, and
+  `relay_empty_hint_bump_failures_total` > 0 means some deposits may have
+  waited up to 5 min (`RELAY_EMPTY_SKIP_MAX`).
+
+### After the option-B cutover: delete the SQLite-era leftovers (by hand, once)
+
+The SQLite/Litestream relay left a versioned replica bucket and a log group,
+both RETAIN, which the new stack no longer manages. Delete them only after
+`VettidOrgRelayStack` has finished deploying and the old single task is gone
+(its Litestream sidecar writes to the bucket until then):
+
+```bash
+# 1. The rollout is over: one deployment left, running the new task definition.
+aws ecs describe-services --cluster vettid-org-relay --services vettid-org-relay \
+  --query 'services[0].deployments[].[status,rolloutState,taskDefinition]'   # a single PRIMARY / COMPLETED row
+# 2. Empty the versioned replica bucket (versions, then delete markers;
+#    skip a pass whose file says "Objects": null; repeat if > 1000 keys).
+B=vettid-org-relay-replica-$(aws sts get-caller-identity --query Account --output text)
+aws s3api list-object-versions --bucket "$B" --max-items 1000 \
+  --query '{Objects: Versions[].{Key: Key, VersionId: VersionId}}' --output json > /tmp/rv.json
+aws s3api delete-objects --bucket "$B" --delete file:///tmp/rv.json
+aws s3api list-object-versions --bucket "$B" --max-items 1000 \
+  --query '{Objects: DeleteMarkers[].{Key: Key, VersionId: VersionId}}' --output json > /tmp/rm.json
+aws s3api delete-objects --bucket "$B" --delete file:///tmp/rm.json
+aws s3api delete-bucket --bucket "$B"
+# 3. The SQLite-era log group (the service now logs to …/relay-service).
+aws logs delete-log-group --log-group-name /vettid-org/prod/relay
+```
+
+(Before this step a rollback to the SQLite relay can still restore from the
+replica; after it, it cannot.)
 
 ## DNS
 
@@ -233,3 +307,10 @@ durable backup.
 
 ~$7–8: WAF telemetry (~$5, intentional), two Route53 zones ($1), CloudFront/
 Lambda/DynamoDB/S3 in pennies at current traffic.
+
+Relay (when deployed), at idle: ~$55/month — ALB ~$16, two 0.25 vCPU tasks
+~$15, four public IPv4 addresses ~$15, Valkey Serverless minimum ~$6, logs
+and DynamoDB a few dollars. It grows with use at roughly $9 per million
+messages plus ~$0.003 per always-on long-poll collector per month (DynamoDB
+on-demand), with idle collectors mostly served from Valkey (empty hints);
+see the relay PRs for the 1k/10k/100k estimates.

@@ -14,6 +14,7 @@ import { VettidOrgMemberApiStack } from './stacks/member-api-stack';
 import { VettidOrgAccountSiteStack } from './stacks/account-site-stack';
 import { VettidOrgAuditStack } from './stacks/audit-stack';
 import { VettidOrgRelayStack } from './stacks/relay-stack';
+import { VettidOrgRelayDataStack } from './stacks/relay-data-stack';
 import { VettidOrgVaultSmokeStack } from './stacks/vault-smoke-stack';
 
 /**
@@ -23,7 +24,7 @@ import { VettidOrgVaultSmokeStack } from './stacks/vault-smoke-stack';
  * Stack groups (see docs/ACCOUNT-ADMIN-PLAN.md §3):
  *  - public site: Dns, Signup, Playbooks, VettidOrgStack, VettidDevRedirect
  *    (pre-existing; their construct IDs must not change)
- *  - stateful:  Auth, Data, AdminAccess       (rarely deployed, RETAIN)
+ *  - stateful:  Auth, Data, AdminAccess, RelayData (rarely deployed, RETAIN)
  *  - stateless: MemberApi, AccountSite, AdminApi, AdminSite
  *  Stateful → stateless references go through SSM (lib/constructs/ssm-refs.ts),
  *  never CloudFormation exports.
@@ -92,10 +93,13 @@ export function buildApp(app: cdk.App): void {
   new VettidOrgAccountSiteStack(app, 'VettidOrgAccountSiteStack', { config, env });
 
   // ---- Relay (docs/RELAY-PROTOCOL.md; code: github.com/vettid/vettid-relay) ----
-  if (config.relay.image && config.relay.litestreamImage) {
-    new VettidOrgRelayStack(app, 'VettidOrgRelayStack', { config, relayImage: config.relay.image, litestreamImage: config.relay.litestreamImage, env });
+  // Deploy order: RelayData (table + blob bucket, stateful) → Relay (VPC,
+  // Valkey, ECS service, ALB; reads the data refs via SSM).
+  new VettidOrgRelayDataStack(app, 'VettidOrgRelayDataStack', { config, ...stateful });
+  if (config.relay.image) {
+    new VettidOrgRelayStack(app, 'VettidOrgRelayStack', { config, relayImage: config.relay.image, env });
   } else {
-    cdk.Annotations.of(app).addInfoV2('vettid:relay-unconfigured', 'VettidOrgRelayStack skipped: set context relayImage and litestreamImage (digest-pinned)');
+    cdk.Annotations.of(app).addInfoV2('vettid:relay-unconfigured', 'VettidOrgRelayStack skipped: set context relayImage (digest-pinned)');
   }
 
   // ---- TEMPORARY vault hardware smoke test (VAULT-PLAN V5). Only with

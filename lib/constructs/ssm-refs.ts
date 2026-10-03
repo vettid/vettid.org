@@ -29,6 +29,9 @@ export type SsmRefKey =
   | 'data/vault-requests-table-name'
   | 'data/vault-releases-table-name'
   | 'data/vault-control-queue-prefix'
+  | 'relay/table-name'
+  | 'relay/table-arn'
+  | 'relay/blob-bucket-name'
   | 'member-api/domain'
   | 'admin-access/egress-ip'
   | 'admin-access/site-web-acl-arn';

@@ -27,7 +27,6 @@ function synthAll(): cdk.Stack[] {
       context: {
         headscaleLoginServer: 'https://headscale.example.net',
         relayImage: 'ghcr.io/vettid/vettid-relay@sha256:' + 'a'.repeat(64),
-        litestreamImage: 'litestream/litestream@sha256:' + 'b'.repeat(64),
       },
     });
     buildApp(app);
@@ -55,6 +54,7 @@ describe('app guardrails', () => {
         'VettidOrgAdminAccessStack',
         'VettidOrgAuditStack',
         'VettidOrgRelayStack',
+        'VettidOrgRelayDataStack',
       ]),
     );
   });
@@ -78,6 +78,7 @@ describe('app guardrails', () => {
         'VettidOrgDataStack',
         'VettidOrgDnsStack',
         'VettidOrgPlaybooksStack',
+        'VettidOrgRelayDataStack',
         'VettidOrgSignupStack',
       ],
     );
