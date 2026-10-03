@@ -457,6 +457,8 @@ Every operation that reads or changes the credential carries `credential`
    seals a new blob with `version + 1`, a fresh salt, nonce and HPKE
    context, records its hash and version, and returns it;
 5. zeroizes the plaintext, `x` and `K_pw` before the response is sent.
+   A response that carries a secret's value is never written to vault
+   state (§8.2).
 
 The vault MUST NOT keep any plaintext of the credential, `K_pw` or the
 password after the operation, except the credential key during an unlock
@@ -1210,6 +1212,14 @@ Both of the following layers are REQUIRED:
    different `msg_id`s. Responses are cached for 24 h, so a duplicate request
    gets the cached response again and is not re-executed.
 
+**Exception: responses that carry secret values** (`credential.secret.get`,
+§3.5.3). They are never cached and never written to vault state, so they
+are not in the outbox either. They are deposited from memory after the
+batch's flush, behind any queued deposits to the same mailbox, and are
+lost if that deposit fails or the vault stops first. A retransmission of
+such a request is therefore executed again. This is allowed only for types
+whose only side effects are audit and feed entries.
+
 Both stores are flushed with the state changes before the ack (§8.3).
 
 ### 8.3 Ack after durable persist
@@ -1418,7 +1428,8 @@ feature** (§15).
   - `limit`: a count or size limit of the feature would be exceeded;
   - `bad_password`, `backoff`, `stale_credential`: §3.5.3;
   - `bad_pin`: the current PIN given to `pin.change` is wrong.
-- A request answered with an error changes no state. Objects that several
+- A request answered with an error changes no state, except the password
+  backoff and the audit log and feed entries of §3.5.3. Objects that several
   owner devices can edit carry a `version` (an integer from 1, `0` before
   the first write); a change MUST name the version it was based on, and
   the vault answers `conflict` if it differs.
@@ -3082,6 +3093,8 @@ pending (§15, follow-up 1).
   - §6.2, §6.4, §9.3: a vault's `hs.init` profile is `{name}` only; the
     bundle hint is the display name; `profile.update` on activation; the
     broadcast spread is optional because of per-mailbox ordering.
+  - §8.2: responses carrying secret values are neither cached nor written
+    to state; their requests are re-executed on retransmission.
   - §10: registry entries; §10.1 error codes (`conflict`, `exists`,
     `limit`, `bad_password`, `backoff`, `stale_credential`, `bad_pin`),
     versioned objects, `sync.event` kinds; `connection.event` `profile`;
