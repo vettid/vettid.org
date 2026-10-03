@@ -60,6 +60,12 @@ npx cdk deploy   # deploy (publishes straight to production)
 
 Local preview: `python3 -m http.server 8080` from `website/`.
 
+## Design docs
+
+Start with `docs/ARCHITECTURE.md`: a system overview, the roadmap, and an
+index of every design doc in `docs/` (vault, relay, credential, releases,
+push, calling, PQC, account/admin, APIs).
+
 ## Operations
 
 See `docs/RUNBOOK.md` for deploys, DNS, mailing-list ops, logging, and

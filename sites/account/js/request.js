@@ -1,5 +1,5 @@
 // Request membership: POST /api/public/request, then explain the next steps.
-// The API never says whether an invite code was accepted beyond the outcome,
+// The API never says whether a registration code was accepted beyond the outcome,
 // and neither do we.
 
 import { publicPost } from './api.js';
@@ -14,7 +14,7 @@ const result = $('result');
 const submit = form.querySelector('button[type="submit"]');
 let stopCooldown = null;
 
-// Convenience: /request/?code=ABC123 prefills the invite code field.
+// Convenience: /request/?code=ABC123 prefills the registration code field (form field and API name stay invite_code).
 const preset = param('code');
 if (preset && /^[A-Za-z0-9-]{1,64}$/.test(preset)) form.elements.invite_code.value = preset.toUpperCase();
 
