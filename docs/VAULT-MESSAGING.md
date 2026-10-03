@@ -572,23 +572,26 @@ Every operation that opens the credential comes from the **holder**
 
 The vault:
 
-1. **opens `sealed`** with the LTK for `utk_id` and destroys the LTK
+1. refuses with `credential_frozen` or `rotation_required` while a clone
+   alarm is open (§3.5.9), before anything else (the UTK is not spent),
+   and with `transfer_pending` from an old app whose transfer it approved
+   (§6.7.1);
+2. **opens `sealed`** with the LTK for `utk_id` and destroys the LTK
    (§3.5.4). A missing, used, expired or foreign UTK is refused with
    `utk_invalid`;
-2. refuses with `backoff` while the password backoff (below) is in effect,
-   and with `credential_frozen` or `rotation_required` while a clone
-   alarm is open (§3.5.9);
 3. **checks the blob.** SHA-256(`credential`) must equal the hash of the
-   current blob. If it does not, the vault applies the clone rule of
-   §3.5.9: the holder's own retry with the previous, unconfirmed version
-   is answered `stale_credential`; anything else is a clone, answered
-   `credential_frozen`;
-4. **opens it.** The outer layer opens with the current CEK and the inner
+   current blob, and the presenter must be the holder. If not, the vault
+   applies the clone rule of §3.5.9: the holder's own retry with the
+   previous, unconfirmed version is answered `stale_credential`; anything
+   else is a clone, answered `credential_frozen`. The check comes before
+   the backoff, so a clone is detected even while the backoff runs;
+4. refuses with `backoff` while the password backoff (below) is in effect;
+5. **opens it.** The outer layer opens with the current CEK and the inner
    layer with `K_pw`. If the inner AEAD fails, the answer is
    `bad_password`; the failure is counted and recorded as
    `credential.password_failed` (§10.9);
-5. **performs the operation** on the plaintext in memory;
-6. **rotates the CEK**, after every successful opening, whether or not
+6. **performs the operation** on the plaintext in memory;
+7. **rotates the CEK**, after every successful opening, whether or not
    the content changed:
    - it generates a new CEK;
    - it seals the (possibly changed) content under it as `version + 1`,
@@ -598,9 +601,9 @@ The vault:
    - it **destroys the old CEK**;
    - every earlier blob is then undecryptable by anyone, the vault
      included;
-7. returns the new blob and version, with new UTKs when the app's pool is
+8. returns the new blob and version, with new UTKs when the app's pool is
    low (§3.5.4);
-8. zeroizes the plaintext, `x` and `K_pw` before the response is sent.
+9. zeroizes the plaintext, `x` and `K_pw` before the response is sent.
 
 The vault MUST NOT keep any plaintext of the credential, `K_pw` or the
 password after the operation, except the credential key during an unlock
@@ -891,7 +894,8 @@ from the current hash:
    kind: "clone", state: "frozen", at, presenter: "holder" | "other",
    version}` (durable), a feed item `credential.alarm` with priority
    `urgent` (`ref` = `alarm_id`), and `sync.event{kind:
-   "credential.alarm", alarm_id, state}` to the desktops;
+   "credential.alarm", alarm_id, state}` to the owner's apps and
+   desktops (§9.1);
 4. it records `credential.clone_detected` in the audit log (`ref` =
    `alarm_id`, `device_id` = the presenter);
 5. it reports the **host alarm** `alarm.credential_clone` (§11.5): a
@@ -913,11 +917,12 @@ member:
   use (§10.13), wallet signing (§10.18), `credential.unlock` (so signed
   LEASH grants and member authentication answer `credential_locked`) and
   `device.transfer.create` and `.approve`.
+- These refusals come before the UTK is spent (§3.5.3, step 1).
 - Still allowed: `credential.utk.get`, `credential.version` (which shows
   the alarm), `credential.lock`, `credential.alarm.confirm`; in state
-  `rotation_required` the holder's `credential.get` and
-  `credential.rotate`; and a recovering app's `credential.recover`
-  (§11.11.5).
+  `rotation_required` the holder's `credential.get`, `credential.ack` and
+  `credential.rotate`; and a recovering app's `credential.recover` and
+  `credential.reset` (§11.11.5).
 - **Everything else keeps working**: messaging, connections, calls,
   `data` and `secret` items, desktops and agents.
 
@@ -927,7 +932,8 @@ mine}`: `true` for "that was me" (for example a restored phone backup),
 (OWNER DECISION, recommended: a "that was me" that skipped the rotation
 would keep a known second copy alive). On "not me" the app SHOULD also
 suggest changing the password and the PIN. The vault audits
-`credential.alarm.confirmed` and sends `sync.event{kind:
+`credential.alarm.confirmed` (`ref` = `<alarm_id>:mine` or
+`<alarm_id>:not_mine`) and sends `sync.event{kind:
 "credential.alarm", alarm_id, state: "rotation_required"}`.
 
 **Forced rotation.** In state `rotation_required` the only credential
@@ -1510,7 +1516,8 @@ An app is bound only:
 - by a recovery, which replaces it (§11.11.5).
 
 No second app pairs: `device.pair.create{role: "app"}` is answered
-`one_app`, and an `hs.init` of purpose `app` that is not one of these
+`one_app`; the app cannot be unlinked (`device.unlink` of the app is
+answered `forbidden`: it leaves only by a transfer or a recovery); and an `hs.init` of purpose `app` that is not one of these
 three handshakes is dropped and audited (`drop.one_app`). Desktops and
 agents pair from the app as below; they never hold the credential. The QR
 (TTL 10 min) is shown on the app; the new device scans it, or the code is
@@ -1602,8 +1609,8 @@ Old app (holder)           Vault                  Relay             New app
    `pin`. The vault:
    - spends the UTK;
    - checks the PIN against the vault's DEK derivation (§3.3.1): `bad_pin`
-     on a mismatch, counted in the unlock backoff of §11.8, and `backoff`
-     while that backoff runs;
+     on a mismatch, counted in the unlock backoff of §11.8 (and audited
+     `vault.pin_failed`), and `backoff` while that backoff runs;
    - opens the credential with the password (§3.5.3: `bad_password`,
      `backoff`, and the clone rule of §3.5.9);
    - **rotates the CEK** (version + 1). Nobody receives the new blob yet:
@@ -1629,12 +1636,14 @@ Old app (holder)           Vault                  Relay             New app
 
 **Failures and aborts.** An aborted transfer is audited
 `device.transfer.aborted` (`ref` = `transfer_id`) and announced as
-`sync.event{kind: "device.transfer", transfer_id, state: "aborted"}`;
-the pairing's `jti` is denylisted.
+`sync.event{kind: "device.transfer", transfer_id, state: "aborted",
+reason}` (`reason`: `rejected`, `expired`, `alarm`, `replaced` or
+`failed`); the pairing's `jti` is denylisted, and a pending `hs.init` or
+an answered handshake of the new app is dropped.
 
 | Case | What happens |
 |---|---|
-| The holder rejects (`device.transfer.reject`), before or after the scan | Aborted. Nothing else changes. |
+| The holder rejects (`device.transfer.reject`), before or after the scan, or after its own approval while the new app has not finished | Aborted. Nothing else changes (after an approval the old app fetches the rotated blob, as in the offline row below). |
 | No scan, or no approval, within 10 minutes | Aborted. Nothing else changes. |
 | The new app's attestation fails | Its `hs.init` is dropped; the transfer stays open until its 10 minutes run out. |
 | Wrong PIN or password at approval | `bad_pin` / `bad_password`, counted in their backoffs. The transfer stays pending until its 10 minutes run out; the member may retry. |
@@ -1642,7 +1651,8 @@ the pairing's `jti` is denylisted.
 | The old app goes offline before approving | The transfer times out; nothing changes. |
 | The old app goes offline after approving | Nothing is needed from it: the transfer completes at `hs.fin`. The old app learns of its removal from `device.unlinked` (best effort) or from its relay key being refused. |
 | A clone alarm opens (§3.5.9) | An open transfer is aborted. |
-| The vault locks | An unapproved transfer is aborted (pending handshakes are not kept). An approved one whose `exp` passed while the vault was locked is aborted at the next unlock. |
+| The vault locks | The transfer and its pending handshake are kept in vault state; its 10 minutes still run and are checked at the next unlock, which aborts an expired one. |
+| A recovery completes (§11.11.5) | An open transfer is aborted (`replaced`). |
 
 OWNER DECISION (recommended: as specified): the transfer does not
 re-check the old app's device attestation; its session, the PIN and the
@@ -2174,7 +2184,7 @@ an answer to an unknown or expired id is dropped.
   | `device.paired` | `device_id`, `role` |
   | `device.unlinked` | `device_id` |
   | `device.transferred` | `device_id` (the new app), `old_device_id` (§6.7.1) |
-  | `device.transfer` | `transfer_id`, `state` (`aborted`) (§6.7.1) |
+  | `device.transfer` | `transfer_id`, `state` (`aborted`), `reason` (§6.7.1) |
   | `credential.alarm` | `alarm_id`, `state` (`frozen`, `rotation_required`, `resolved`) (§3.5.9) |
   | `vault.release` | `release` (PCR0 hex), `release_number`; sent once after a vault first runs under a new release (§11.10.6) |
   | `credential.changed` | `version` (§3.5.5) |
@@ -2238,12 +2248,12 @@ an answer to an unknown or expired id is dropped.
 | `device.pair.reject` (app) | `{pairing_id}` | `{}` |
 | `device.paired` (to the new device) | — | `{device_id, role, vault_id, release, release_number, session_expires_at?, transfer?, credential_version?}` (the release the vault runs under); `transfer: true` and the credential's `credential_version` for a transferred app (§6.7.1) |
 | `device.list` (app, desktop) | `{}` | `{devices: [{id, kind, state, name, ik, profile?, created_at?, last_active_at?, session_expires_at?}]}` |
-| `device.unlink` (app) | `{device_id}` | `{}` |
+| `device.unlink` (app) | `{device_id}` | `{}`; `forbidden` for the app itself (0.9.0: it leaves by a transfer or a recovery) |
 | `device.unlinked` (to the unlinked device, best effort) | — | `{reason?}`: `"transferred"` for the old app of a transfer (§6.7.1), `"replaced"` for the old app of a recovery (§11.11.5) |
 | `device.transfer.create` (the holder) | `{}` | `{transfer_id, link, exp}`; `exists` while a transfer is open; `credential_frozen` or `rotation_required` during an alarm (§6.7.1) |
 | `device.transfer.pending` (to the holder) | — | `{transfer_id, name, sas}`; `name` is the new app's self-asserted `profile.name` |
 | `device.transfer.approve` (the holder) | `{transfer_id, credential, utk_id, sealed{password, pin}}` | `{exp}`: the new app must finish its handshake by then; `bad_pin`, `backoff`, `bad_password`, `stale_credential`, `credential_frozen`, `utk_invalid` |
-| `device.transfer.reject` (the holder) | `{transfer_id}` | `{}`; cancels the transfer before or after the scan |
+| `device.transfer.reject` (the holder) | `{transfer_id}` | `{}`; cancels the transfer before or after the scan, or after the approval until the new app finishes |
 | `device.session.request` (desktop, agent) | `{seconds?}` (60–86,400, default 3,600) | `{request_id, exp}` |
 | `device.session.pending` (to apps) | — | `{request_id, device_id, role, name, seconds, exp}` |
 | `device.session.approve` (app) | `{request_id, seconds?}` | `{device_id, session_id, expires_at}` |
@@ -2808,9 +2818,11 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `credential.created`, `credential.rotated`, `credential.password_changed`,
   `credential.password_failed`, `credential.unlocked`, `credential.deleted`;
   `credential.recovered`; `credential.clone_detected` (`ref` =
-  `alarm_id`, `device_id` = the presenter), `credential.alarm.confirmed`,
+  `alarm_id`, `device_id` = the presenter), `credential.alarm.confirmed`
+  (`ref` = `<alarm_id>:mine` or `<alarm_id>:not_mine`),
   `credential.alarm.resolved` (`ref` = `alarm_id`), `credential.reset`
-  (§3.5.9, §11.11.5); `device.transfer.started`,
+  (§3.5.9, §11.11.5); `vault.pin_failed` (a wrong PIN at a transfer's
+  approval, §6.7.1); `device.transfer.started`,
   `device.transfer.approved`, `device.transferred`,
   `device.transfer.aborted`, `device.transfer.attestation_failed`
   (`ref` = `transfer_id`), `device.replaced` (`device_id` = the old app a
