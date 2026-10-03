@@ -15,6 +15,14 @@
  * It never sees or stores PINs, keys, mailbox ids or device identifiers
  * (§11.5). Envelopes are never logged.
  *
+ * Recovery (§11.11, docs/MEMBER-API.md "Vault recovery"): the API records
+ * the request on the vault row (`recovery`), routes the recovery operations
+ * like a lock, keeps the enclave's browser-sealed code in the request's
+ * slot until the recovery expires, and releases it only after 24 h. It
+ * never holds the code itself, only that ciphertext; cancel-link tokens are
+ * stored as their SHA-256 in request-table rows that expire with the
+ * recovery.
+ *
  * Shared contract with the enclave host (vettid/vettid-vault, the parent):
  *  - vaults table, PK vault_id: { vault_id, user_guid, state,
  *    lease: { instance_id, lease_expires_at (epoch s) }, sealed_release,
@@ -34,7 +42,7 @@
  *    signed manifest by operations. The API records on-demand start requests
  *    on it (start_requested_at); acting on them is infrastructure (V5).
  */
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { GetCommand, PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { audit } from '../shared/audit';
@@ -45,6 +53,7 @@ import { ApiError, MemberRequest, RateLimited, WithStatus, memberHandler, requir
 import { canSignIn, currentTerms, memberByGuid, vaultPointerKey } from '../shared/members';
 import type { MemberItem } from '../shared/model';
 import { hit } from '../shared/ratelimit';
+import { sendMail } from '../shared/mail';
 
 const sqs = new SQSClient({});
 const router = new Router<MemberRequest>();
@@ -133,8 +142,18 @@ export interface VaultRow {
   sealed_release?: string;
   vault_version?: string;
   state_version?: string | number;
+  /** API-owned: the recovery in progress or last ended (VAULT-MESSAGING §11.11). */
+  recovery?: RecoveryRow;
   created_at: string;
   updated_at: string;
+}
+
+export interface RecoveryRow {
+  recovery_id: string;
+  state: 'pending' | 'cancelled';
+  requested_at: number; // epoch s
+  available_at: number;
+  expires_at: number;
 }
 
 export interface InstanceRow {
@@ -155,7 +174,7 @@ interface ReleaseRow {
   available?: boolean;
 }
 
-type Op = 'enroll' | 'unlock' | 'lock';
+type Op = 'enroll' | 'unlock' | 'lock' | 'recovery' | 'recovery_cancel' | 'recovery_register';
 
 // ---- errors (§11.1, §11.9, §11.10.5) ------------------------------------------------
 // Bodies carry the MEMBER-API `error` and also the spec's `code`.
@@ -383,6 +402,7 @@ async function enqueue(
   requestId: string,
   inst: InstanceRow,
   sealed?: { etk_kid: string; envelope: string },
+  opts: { extra?: Record<string, string>; ttlS?: number } = {},
 ): Promise<void> {
   const created = nowIso();
   try {
@@ -397,7 +417,7 @@ async function enqueue(
           status: 'queued',
           instance_id: inst.instance_id,
           created_at: created,
-          expires_at: nowS() + REQUEST_TTL_S,
+          expires_at: nowS() + (opts.ttlS ?? REQUEST_TTL_S),
         },
         ConditionExpression: 'attribute_not_exists(request_id)',
       }),
@@ -414,6 +434,7 @@ async function enqueue(
     user_guid: m.user_guid,
     request_id: requestId,
     ...(sealed ? { etk_kid: sealed.etk_kid, envelope: sealed.envelope } : {}),
+    ...(opts.extra ?? {}),
     enqueued_at: created,
   };
   try {
@@ -462,6 +483,8 @@ router.on('GET', '/api/vault/status', async (req) => {
       state_version: v.state_version ?? null,
       // Advisory (lifecycle values come from the host and are never used for security, §11.5).
       leased: !!v.lease && typeof v.lease.lease_expires_at === 'number' && v.lease.lease_expires_at > now,
+      // So owner apps can show a recovery in progress and offer to cancel it (§11.11.7).
+      recovery: recoveryActive(v.recovery, now) ? { state: recoveryState(v.recovery, now), available_at: iso(v.recovery!.available_at) } : null,
       created_at: v.created_at,
       updated_at: v.updated_at,
     },
@@ -585,6 +608,228 @@ router.on('GET', '/api/vault/requests/{id}', async (req) => {
     if (typeof item.code === 'string' && CODE_RE.test(item.code)) out.code = item.code;
   }
   return out;
+});
+
+// ---- recovery (VAULT-MESSAGING §11.11) ------------------------------------------------
+//
+// The code is minted inside the enclave and reaches the API only sealed to a
+// P-256 key held by the member's browser: the slot of the `recovery` request
+// holds that ciphertext until the recovery expires. The API gates when it is
+// released; the enclave enforces the same times on its own.
+
+/** The code becomes usable 24 h after the request, for 24 h (§11.11.2). */
+export const RECOVERY_DELAY_S = 24 * 3600;
+export const RECOVERY_VALIDITY_S = 24 * 3600;
+const CANCEL_LINK_PREFIX = 'rcancel#';
+const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
+
+const sha256Hex = (s: string) => createHash('sha256').update(s).digest('hex');
+const iso = (s: number) => new Date(s * 1000).toISOString();
+
+type RecoveryState = 'pending' | 'available' | 'cancelled' | 'expired';
+
+export function recoveryState(r: RecoveryRow | undefined, now: number): RecoveryState | null {
+  if (!r) return null;
+  if (r.state === 'cancelled') return 'cancelled';
+  if (now >= r.expires_at) return 'expired';
+  return now >= r.available_at ? 'available' : 'pending';
+}
+
+const recoveryActive = (r: RecoveryRow | undefined, now: number) => {
+  const st = recoveryState(r, now);
+  return st === 'pending' || st === 'available';
+};
+
+/** A vault that recovery can act on: enrolled (not `enrolling`) and not deleted. */
+async function recoverableVault(guid: string): Promise<VaultRow> {
+  const v = activeVault((await currentVault(guid)).vault);
+  if (!v || v.state === 'enrolling') throw notFound('No enrolled vault');
+  return v;
+}
+
+/** The instance a recovery operation goes to: the leaseholder, else one of the sealed release. */
+async function recoveryInstance(v: VaultRow, now: number): Promise<InstanceRow> {
+  const holder = await liveLease(v, now);
+  if (holder) return holder;
+  if (!v.sealed_release) throw vaultError(409, 'conflict', 'The vault is not sealed to a release yet');
+  const rel = await releaseRow(v.sealed_release);
+  if (!rel || rel.available === false) throw releaseUnavailable();
+  const inst = await pickInstance(v.sealed_release, now);
+  if (inst) return inst;
+  await requestStart(v.sealed_release);
+  throw releaseStarting(v.sealed_release);
+}
+
+/** Write the recovery, conditional on the one read (or none): concurrent requests cannot both win. */
+async function setRecovery(v: VaultRow, r: RecoveryRow, expectId: string | null): Promise<void> {
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: table.vaults(),
+        Key: { vault_id: v.vault_id },
+        UpdateExpression: 'SET recovery = :r, updated_at = :now',
+        ConditionExpression: expectId ? 'recovery.recovery_id = :id' : 'attribute_not_exists(recovery)',
+        ExpressionAttributeValues: { ':r': r, ':now': nowIso(), ...(expectId ? { ':id': expectId } : {}) },
+      }),
+    );
+  } catch (e) {
+    if ((e as Error).name === 'ConditionalCheckFailedException') throw vaultError(409, 'conflict', 'The recovery changed; try again');
+    throw e;
+  }
+}
+
+/** System email; a failed send (e.g. SES sandbox) is logged, never fatal. */
+async function notify(to: string, subject: string, text: string): Promise<void> {
+  try {
+    await sendMail(to, subject, text);
+  } catch (e) {
+    console.error('recovery mail failed', JSON.stringify({ error: (e as Error).name }));
+  }
+}
+
+const requestedMail = (cancelUrl: string, availableAt: number) => `A recovery of your VettID vault was requested from your account.
+
+Your vault has been locked. If nobody cancels, a one-time recovery code becomes available on your account page at ${iso(availableAt)}, for 24 hours. A new app then needs the code, your vault PIN and your credential password.
+
+If you did not ask for this, cancel it now:
+${cancelUrl}
+
+You can also cancel it from any of your VettID apps or from your account page.`;
+
+/** Cancel: mark it, tell the enclave, tell the member. */
+async function cancelRecovery(m: MemberItem, v: VaultRow, via: 'session' | 'link'): Promise<void> {
+  const now = nowS();
+  const r = v.recovery;
+  if (!r || !recoveryActive(r, now)) return; // nothing to cancel: a no-op
+  await setRecovery(v, { ...r, state: 'cancelled' }, r.recovery_id);
+  try {
+    const inst = await recoveryInstance(v, now);
+    await enqueue('recovery_cancel', m, v, newUlid(), inst);
+  } catch (e) {
+    // The enclave also refuses the code if the API never releases it, but
+    // a cancel that could not be queued is worth knowing about.
+    console.error('recovery cancel not queued', JSON.stringify({ vault_id: v.vault_id, error: (e as Error).name }));
+  }
+  await audit(m.email, 'vault.recovery_cancel', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id, via });
+  await notify(m.email, 'VettID vault recovery cancelled', `The recovery of your VettID vault requested at ${iso(r.requested_at)} has been cancelled. Your apps can unlock the vault again.`);
+}
+
+/** A ULID for requests the API makes on its own (cancel). */
+function newUlid(): string {
+  const A = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+  let t = Date.now();
+  let time = '';
+  for (let i = 0; i < 10; i++) {
+    time = A[t % 32] + time;
+    t = Math.floor(t / 32);
+  }
+  const rnd = randomBytes(16);
+  let r = '';
+  for (let i = 0; i < 16; i++) r += A[rnd[i] % 32];
+  return time + r;
+}
+
+router.on('POST', '/api/vault/recovery', async (req) => {
+  const m = await loadVaultMember(req);
+  const bk = req.body.browser_key;
+  const key = typeof bk === 'string' ? decodeCanonicalB64(bk) : null;
+  if (!key || key.length !== 65 || key[0] !== 0x04) throw badRequest('browser_key must be base64 of an uncompressed P-256 point');
+  await limit(`vault-recovery#${m.user_guid}`, 3, 86_400);
+  const now = nowS();
+  const v = await recoverableVault(m.user_guid);
+  if (recoveryActive(v.recovery, now)) throw vaultError(409, 'recovery_active', 'A recovery is already in progress');
+  const inst = await recoveryInstance(v, now);
+  const recoveryId = newUlid();
+  const r: RecoveryRow = { recovery_id: recoveryId, state: 'pending', requested_at: now, available_at: now + RECOVERY_DELAY_S, expires_at: now + RECOVERY_DELAY_S + RECOVERY_VALIDITY_S };
+  await setRecovery(v, r, v.recovery?.recovery_id ?? null);
+  // The slot keeps the sealed code until the recovery expires.
+  await enqueue('recovery', m, v, recoveryId, inst, undefined, { extra: { browser_key: bk as string }, ttlS: r.expires_at - now + 3600 });
+  const token = randomBytes(32).toString('base64url');
+  await ddb.send(
+    new PutCommand({
+      TableName: table.vaultRequests(),
+      Item: { request_id: CANCEL_LINK_PREFIX + sha256Hex(token), vault_id: v.vault_id, user_guid: m.user_guid, op: 'recovery_cancel_link', status: 'link', recovery_id: recoveryId, created_at: nowIso(), expires_at: r.expires_at },
+      ConditionExpression: 'attribute_not_exists(request_id)',
+    }),
+  );
+  await audit(m.email, 'vault.recovery_request', m.user_guid, { vault_id: v.vault_id, recovery_id: recoveryId, instance_id: inst.instance_id });
+  await notify(m.email, 'VettID vault recovery requested', requestedMail(`https://${env('ACCOUNT_HOST')}/vault/recovery/cancel#t=${token}`, r.available_at));
+  return new WithStatus(202, { recovery_id: recoveryId, available_at: iso(r.available_at), expires_at: iso(r.expires_at) });
+});
+
+router.on('GET', '/api/vault/recovery', async (req) => {
+  const m = await loadVaultMember(req);
+  await limit(`vault-recovery-status#${m.user_guid}`, 60, 60);
+  const now = nowS();
+  const v = activeVault((await currentVault(m.user_guid)).vault);
+  const r = v?.recovery;
+  const state = recoveryState(r, now);
+  if (!v || !r || !state) return { recovery: null };
+  const out: Record<string, unknown> = {
+    recovery_id: r.recovery_id, state, requested_at: iso(r.requested_at), available_at: iso(r.available_at), expires_at: iso(r.expires_at),
+  };
+  if (state === 'available') {
+    const slot = (await ddb.send(new GetCommand({ TableName: table.vaultRequests(), Key: { request_id: r.recovery_id }, ConsistentRead: true }))).Item;
+    const env = slot && slot.user_guid === m.user_guid && slot.status === 'done' && typeof slot.envelope === 'string' ? decodeCanonicalB64(slot.envelope) : null;
+    if (env && env.length === RESULT_ENVELOPE_BYTES) {
+      out.sealed_code = slot!.envelope;
+      if (!slot!.released) {
+        await ddb.send(
+          new UpdateCommand({
+            TableName: table.vaultRequests(),
+            Key: { request_id: r.recovery_id },
+            UpdateExpression: 'SET released = :t',
+            ExpressionAttributeValues: { ':t': true },
+          }),
+        );
+        await audit(m.email, 'vault.recovery_code_released', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id });
+      }
+    }
+  }
+  return { recovery: out };
+});
+
+router.on('POST', '/api/vault/recovery/cancel', async (req) => {
+  const m = await loadActiveAccount(req);
+  const recoveryId = field(req.body, 'recovery_id', ULID_RE, 'a ULID');
+  await limit(`vault-recovery-cancel#${m.user_guid}`, 30, 15 * 60);
+  const v = activeVault((await currentVault(m.user_guid)).vault);
+  if (!v || v.recovery?.recovery_id !== recoveryId) throw notFound('No such recovery');
+  await cancelRecovery(m, v, 'session');
+  return {};
+});
+
+// The email link: no session, the token stands in for it (§11.11.7).
+router.on('POST', '/api/vault/recovery/cancel-link', async (req) => {
+  await limit(`vault-recovery-link#${req.ip}`, 20, 15 * 60);
+  const token = req.body.token;
+  if (typeof token !== 'string' || !TOKEN_RE.test(token)) throw badRequest('token is malformed');
+  const key = CANCEL_LINK_PREFIX + sha256Hex(token);
+  const link = (await ddb.send(new GetCommand({ TableName: table.vaultRequests(), Key: { request_id: key }, ConsistentRead: true }))).Item;
+  if (!link || link.op !== 'recovery_cancel_link' || Number(link.expires_at) <= nowS()) throw notFound('This link is no longer valid');
+  const m = await memberByGuid(String(link.user_guid));
+  const v = (await ddb.send(new GetCommand({ TableName: table.vaults(), Key: { vault_id: String(link.vault_id) }, ConsistentRead: true }))).Item as VaultRow | undefined;
+  if (!m || !v || v.user_guid !== m.user_guid || v.recovery?.recovery_id !== link.recovery_id) throw notFound('This link is no longer valid');
+  await cancelRecovery(m, v, 'link');
+  return {};
+});
+
+router.on('POST', '/api/vault/recovery/register', async (req) => {
+  const m = await loadVaultMember(req);
+  const vaultId = field(req.body, 'vault_id', VAULT_ID_RE, '32 lowercase hex');
+  const requestId = field(req.body, 'request_id', ULID_RE, 'a ULID');
+  const instanceId = field(req.body, 'instance_id', INSTANCE_ID_RE, 'an instance id');
+  const etkKid = field(req.body, 'etk_kid', KID_RE, '16 lowercase hex');
+  const envelope = checkEnvelope(req.body.envelope, ENVELOPE_BYTES_LARGE, etkKid);
+  await limit(`vault-recovery-register#${m.user_guid}`, 10, 86_400);
+  const now = nowS();
+  const vault = activeVault((await currentVault(m.user_guid)).vault);
+  if (!vault || vault.vault_id !== vaultId) throw notFound('No such vault');
+  if (recoveryState(vault.recovery, now) !== 'available') throw vaultError(409, 'recovery_not_available', 'No recovery code is valid now');
+  const inst = await routeCheck(vault, instanceId, now);
+  await enqueue('recovery_register', m, vault, requestId, inst, { etk_kid: etkKid, envelope });
+  await audit(m.email, 'vault.recovery_register', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, recovery_id: vault.recovery!.recovery_id, instance_id: instanceId });
+  return new WithStatus(202, { vault_id: vault.vault_id, request_id: requestId });
 });
 
 export const handler = memberHandler(router);
