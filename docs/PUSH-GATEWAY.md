@@ -1,16 +1,23 @@
 # VettID Push Gateway Protocol
 
-**Version:** 0.1.0 (draft)
+**Version:** 0.2.0 (draft)
 **Status:** Pre-implementation draft for review
 **Companion to:** VettID Relay Protocol (v0.2.0, Appendix A)
 
 ## 1. Purpose & design principles
 
 The push gateway is a small VettID-operated service that delivers **contentless
-wake-up pushes** to mobile devices via platform push services (APNs, FCM), so
-that apps without persistent connectivity learn to collect from their relay
-mailbox. It exists so that relays remain push-unaware and vendor-neutral: no
-relay operator ever holds Apple or Google credentials.
+wake-up pushes** to mobile devices, so that apps without persistent
+connectivity learn to collect from their relay mailbox. It delivers through
+the platform push services (APNs, FCM) **and** through **UnifiedPush**, so
+that phones without Google services (for example GrapheneOS without
+sandboxed Play services) get wakes too. It exists so that relays remain
+push-unaware and vendor-neutral: no relay operator ever holds Apple or Google
+credentials.
+
+**Both paths are required** (owner decision, 2026-10-03). A device that can
+use neither a platform service nor UnifiedPush still works without the
+gateway, by keeping its own connection to the relay (§11).
 
 Design principles:
 
@@ -21,7 +28,7 @@ Design principles:
    registration with a relay mailbox. This is achieved with a dedicated wake
    keypair (§3) and opaque wake references.
 3. **Minimal state.** The gateway stores only:
-   `wake_ref → (wake_pubkey, platform, push_token, environment)`.
+   `wake_ref → (wake_pubkey, platform, push_token, environment, webpush_keys?)`.
 4. **Same auth grammar as the relay.** Signed requests per Relay Protocol
    §4.1 — identical canonical digest, headers, freshness window, and replay
    rules. No new cryptographic mechanisms.
@@ -33,8 +40,9 @@ Conformance keywords MUST, SHOULD, MAY are per RFC 2119.
 | Role | Description |
 |---|---|
 | **Owner** | The principal (in VettID: the user's vault) that registers wake references and triggers wakes. Apps never talk to the gateway directly. |
-| **Device** | The mobile app installation holding a platform push token. It sends its push token to its vault over OwnerSpace (E2E); it has no gateway credentials. |
+| **Device** | The mobile app installation holding a platform push token or a UnifiedPush endpoint. It sends it to its vault over its end-to-end encrypted session; it has no gateway credentials. |
 | **Gateway** | This service. Holds APNs/FCM credentials and the wake-ref mapping. |
+| **Distributor** | UnifiedPush only: the push server the member's distributor app uses (a public one, or the member's own). It receives the gateway's contentless POST and delivers it to the device. The gateway holds no credentials for it. |
 
 ## 3. Wake keypair — REQUIRED unlinkability property
 
@@ -61,11 +69,28 @@ Protocol §7.1.
 
 ```
 POST /v1/wake/register
-{ "platform": "apns" | "fcm",
-  "push_token": "<platform push token, opaque string>",
-  "environment": "production" | "sandbox" }     # apns only; default production
+{ "platform": "apns" | "fcm" | "unifiedpush",
+  "push_token": "<platform push token, opaque string; for unifiedpush the endpoint URL>",
+  "environment": "production" | "sandbox",      # apns only; default production
+  "webpush": { "p256dh": "<b64url>", "auth": "<b64url>" } }   # unifiedpush only; optional
 → 201 { "wake_ref": "<ULID>" }
 ```
+
+**UnifiedPush registrations.**
+
+- `push_token` is the endpoint URL the device's distributor gave the app:
+  `https`, at most 2,048 bytes, no credentials in the URL. Registration
+  fails with `platform_invalid` otherwise.
+- The endpoint URL is a bearer secret (anyone holding it can wake the
+  device): it is treated like any push token below.
+- `webpush` carries the app's Web Push keys (RFC 8291) when the app's
+  distributor expects encrypted messages. The gateway then encrypts the
+  wake's constant payload with them; without them it sends the constant
+  payload in the clear, which carries no information either way.
+- Because the gateway makes outbound requests to member-supplied URLs, it
+  MUST resolve the host itself and refuse loopback, private, link-local and
+  other non-public addresses at every request (not only at registration),
+  MUST NOT follow redirects, and MUST use short timeouts.
 
 - The wake_ref is bound to the registering wake pubkey: only that key may
   trigger, update, or delete it.
@@ -82,8 +107,9 @@ PUT /v1/wake/{wake_ref}
 → 204
 ```
 
-Platform push tokens rotate (OS updates, reinstall, restore). The device sends
-its new token to its vault over OwnerSpace; the vault updates the gateway.
+Platform push tokens and UnifiedPush endpoints rotate (OS updates,
+reinstall, restore, a new distributor). The device sends its new token to its
+vault over its session; the vault updates the gateway.
 Platform and environment are immutable per wake_ref — register a new one
 instead.
 
@@ -105,8 +131,14 @@ POST /v1/wake/{wake_ref}
 - `class: "sync"` — silent background wake. APNs: `content-available: 1`,
   `apns-push-type: background`, priority 5. Platforms throttle these
   aggressively; owners MUST NOT rely on `sync` for user-visible delivery.
+- UnifiedPush, both classes: an HTTP `POST` to the endpoint with a
+  constant payload (`{"w":1}`, encrypted per RFC 8291 when `webpush` keys
+  were registered), `TTL: 86400`, and `Urgency: high` for `notify` or
+  `normal` for `sync`. The app's UnifiedPush receiver collects from the
+  relay and builds the notification locally, as with FCM.
 - `collapse_key`: if present, the gateway maps it to APNs `apns-collapse-id` /
-  FCM `collapse_key`, so a burst of wakes coalesces into one delivered push.
+  FCM `collapse_key` / the Web Push `Topic` header (as base64url of the
+  first 24 bytes of SHA-256(collapse_key), 32 characters), so a burst of wakes coalesces into one delivered push.
   Owners SHOULD use a constant collapse_key per device for ordinary message
   wakes — the wake means "collect everything," so coalescing is always safe.
 - The push payload contains **no owner-supplied data**. `class` and
@@ -127,12 +159,12 @@ Owners SHOULD delete wake_refs when a device is unlinked from the vault.
 ## 5. Dead token handling
 
 When a platform reports a token permanently invalid (APNs `410 Unregistered`,
-FCM `UNREGISTERED`):
+FCM `UNREGISTERED`, a UnifiedPush endpoint answering `404` or `410`):
 
 - The gateway marks the wake_ref **dead** (it does not silently delete it).
 - Subsequent triggers return `410` with code `wake_ref_gone`.
 - The owner reacts by requesting a fresh push token from the device over
-  OwnerSpace and registering a new wake_ref (or `PUT` once re-enabled by a
+  its session and registering a new wake_ref (or `PUT` once re-enabled by a
   registration is implementation choice; v1 requires re-registration for
   simplicity).
 
@@ -168,6 +200,9 @@ wake_refs owned by a different key — no existence oracle.
 2. **What platforms learn:** that the app received a contentless wake.
    Notification content is constructed on-device after relay collection and
    local decryption; plaintext never transits APNs/FCM.
+   **UnifiedPush distributors** learn the same: the endpoint, the device it
+   delivers to, and wake timing. Google and Apple learn nothing on this path.
+   The member chooses the distributor and may run their own.
 3. **Gateway compromise** yields push tokens and the ability to send spurious
    contentless wakes (battery/annoyance, bounded by platform throttling). It
    yields no message content, no mailbox linkage, and no ability to forge
@@ -179,6 +214,9 @@ wake_refs owned by a different key — no existence oracle.
    to reduce long-term linkability MAY rotate wake keys by registering new
    wake_refs under a new key and deleting the old ones; the protocol imposes
    no continuity between them.
+6. **UnifiedPush endpoints are outbound requests to member-chosen hosts.**
+   The SSRF rules of §4.1 apply to every request, and the gateway's
+   egress for them SHOULD be isolated from anything internal.
 
 ## 9. Test vector
 
@@ -211,20 +249,49 @@ APNs token shape; it corresponds to no real device.)
 ## 10. End-to-end flow (informative)
 
 ```
-1. app obtains APNs/FCM token from OS
-2. app ──OwnerSpace (E2E)──▶ vault: { platform, push_token }
+1. app obtains an APNs/FCM token from the OS, or a UnifiedPush endpoint
+   from the distributor app
+2. app ──vault session (E2E)──▶ vault: { platform, push_token, webpush? }
 3. vault ──POST /v1/wake/register──▶ gateway → wake_ref
 4. ... later: peer deposits message for app's mailbox via relay ...
    (in VettID flows this transits the vault: peer → relay → vault →
     relay deposit into app's mailbox)
 5. vault ──POST /v1/wake/{wake_ref} {class:"notify"}──▶ gateway
-6. gateway ──contentless push──▶ device
-7. iOS NSE / FCM handler ──collect (Relay §6.3)──▶ relay
+6. gateway ──contentless push──▶ device (APNs / FCM / UnifiedPush distributor)
+7. iOS NSE / FCM handler / UnifiedPush receiver ──collect (Relay §6.3)──▶ relay
 8. device decrypts locally, renders notification, acks (Relay §6.5)
 ```
 
-## 11. Changelog
+## 11. Devices without push (informative)
 
+The gateway is an optimization (§4.3). An app that has neither a platform
+push service nor a UnifiedPush distributor, or whose member turns push off,
+still receives everything:
+
+- **While open,** it collects from the relay by long-poll or WebSocket
+  (Relay §6), as every app does.
+- **In the background on Android,** it MAY keep that connection in a
+  foreground service (with its persistent notification), at a battery
+  cost, or poll periodically (for example every 15 minutes with
+  WorkManager), at a latency cost. No wake_ref is registered and the
+  gateway is not involved; the relay sees only its usual collect requests.
+- **iOS** has no comparable path: background delivery needs APNs.
+
+**Choosing a path (Android).** The app offers the member a choice in its
+notification settings and defaults to the first available of: FCM (when
+Google Play services are present), UnifiedPush (when a distributor app is
+installed), the foreground service. The member can choose UnifiedPush or
+no push even when FCM is available.
+
+## 12. Changelog
+
+- **0.2.0** — owner decision of 2026-10-03: both push paths are supported.
+  Adds the `unifiedpush` platform (endpoint URL as the token, optional Web
+  Push encryption keys, SSRF rules, `Topic` collapse, dead endpoints) and
+  the distributor's view in §8; adds §11, devices without push (relay
+  connection in a foreground service, or polling) and how the Android app
+  chooses. VAULT-MESSAGING §14 (`push.register`) gains the new platform
+  when push is specified there (VAULT-MESSAGING §15, item 3).
 - **0.1.0** — initial draft: wake-ref registration/update/delete, notify and
   sync wake classes, collapse behavior, dead-token handling, unlinkability via
   dedicated wake keys, test vector.

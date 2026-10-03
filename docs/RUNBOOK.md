@@ -206,6 +206,16 @@ aws logs delete-log-group --log-group-name /vettid-org/prod/relay
 (Before this step a rollback to the SQLite relay can still restore from the
 replica; after it, it cannot.)
 
+## Vault (from V5; placeholder)
+
+Nothing runs yet. When VAULT-PLAN V5 lands, this section covers: publishing
+a release (reproducible build, PCRs, manifest signing, the release's
+immutable KMS key), scaling the enclave host ASG from 0 and on-demand starts
+of older releases, instance and lease health, incident classes and first
+responses, capacity per host, and the disaster-recovery objectives listed in
+VAULT-PLAN V5. Release keys can never be deleted or disabled; budget for
+keeping them.
+
 ## DNS
 
 - Route53 is authoritative for **vettid.org** and **vettid.dev**; the registrar

@@ -1,8 +1,12 @@
 ---
 title: ACCOUNT-ADMIN-PLAN
 status: accepted — decisions recorded in §9
-version: 0.2.0
+version: 0.2.1
 changelog:
+  - 0.2.1: owner decisions of 2026-10-03: invite codes are now called
+    registration codes, good for 2 uses by default (API names unchanged);
+    paid members are the voting members and governance voting is upcoming
+    (§5.1, §9 3a)
   - 0.2.0: decisions recorded; simplified membership lifecycle; magic link + PIN
     kept and fixed; subscriptions kept (free trial); SES sandbox opt-in
   - 0.1.0: initial draft
@@ -30,13 +34,14 @@ and vault stacks arrive later.
 
 **In scope:** member auth (magic link + PIN, fixed), the membership lifecycle
 (§5.1), membership terms, free-trial subscriptions, profile/preferences,
-suspend/cancel/delete; admin request queue, members, invites, terms,
+suspend/cancel/delete; admin request queue, members, registration codes, terms,
 subscription types, admins, audit; the private-access network path.
 
 **Out of scope here (later phases, own plans):** everything under `/vault/*`
 (waits on the relay per RELAY-PLAN Phase 5), NATS (deleted, never ported),
-voting/proposals (the *voting-rights* rule is modeled now, §5.1; the voting
-feature itself comes later), payments, services registry, vault
+governance voting/proposals (the *voting-rights* rule is modeled now, §5.1:
+paid members are the voting members; governance voting for them is coming
+soon, outside the vault), payments, services registry, vault
 broadcasts/metrics, help offers, bulk email. Fresh users — no data migration from the archive.
 
 ## 2. What the review found
@@ -56,7 +61,7 @@ structure in both repos. Headlines:
   NATS or the enclave. About half of `account.js` (4,871 lines) is vault UI that
   is deferred.
 - **Admin shrinks to ~4 sections.** Of ~17 UI areas, the ones a fresh
-  deployment actually needs are: registrations queue, members, invites, admins +
+  deployment actually needs are: registrations queue, members, registration codes, admins +
   audit. The rest is vault/NATS-coupled, governance, or nice-to-have.
 - **The existing code carries real bugs we must not port.** Highlights (full
   list in §8): sign-out never clears the refresh cookie (silent re-login); PIN
@@ -146,7 +151,7 @@ Fewer, purpose-clear tables instead of vettid-dev's 37:
 | Table | Holds | Notes |
 |---|---|---|
 | `vettid-org-members` | lifecycle state (§5.1), account status, terms acceptance, PIN hash, preferences | PK `user_guid`; GSIs `email`, `state`; stream → mailer |
-| `vettid-org-invites` | invite codes, uses, expiry | a valid code = auto-registration |
+| `vettid-org-invites` | registration codes (formerly invite codes), uses, expiry | a valid code = auto-registration; table and API names keep "invite" |
 | `vettid-org-subscriptions` | subscription per member + subscription types | `has_used_trial` kept on the member row so a trial can't be re-taken |
 | `vettid-org-terms` | membership terms versions | PDF in `vettid-org-terms` bucket |
 | `vettid-org-audit` | append-only admin + security events | writers get PutItem only; actor passed explicitly |
@@ -199,7 +204,8 @@ admin laptop/phone ──WireGuard (tailnet)──▶ AWS exit node (EIP) ──
 ### 5.1 Membership lifecycle (simplified)
 
 One form — **Request membership** — replaces vettid-dev's separate Register and
-Waitlist tabs. The invite code is an optional field on it.
+Waitlist tabs. The registration code (formerly "invite code"; good for 2
+uses by default) is an optional field on it.
 
 ```
 request membership ──(no code)──▶ REQUESTED ──admin approves──▶ REGISTERED
@@ -224,8 +230,9 @@ Orthogonal to the lifecycle:
 - **Subscription:** `none` / `trial` / `active` / `expired`. Free-trial
   subscription types to start; payment is a later phase.
   `voting_rights = state == member && subscription == active && type.paid`
-  — computed in one shared function so the future voting feature and admin UI
-  agree. (Assumption pending §9 Q3a: a free trial does **not** grant voting.)
+  — computed in one shared function so governance voting and the admin UI
+  agree. Paid members are the voting members; a free trial does **not**
+  grant voting (§9 3a). Governance voting itself is upcoming.
 - **Account status:** `active` / `suspended` / `canceled` → deleted.
   *Suspend* (admin) disables the Cognito user and blocks sign-in, reversible.
   *Cancel* (member) disables immediately and schedules deletion in 7 days
@@ -289,7 +296,8 @@ One page, six small sections:
 2. **Members** — search/list (server-side query, paginated) showing state,
    subscription, voting rights; suspend, reinstate, delete; extend/reactivate
    a subscription.
-3. **Invites** — create codes (uses, expiry), list, expire, delete.
+3. **Registration codes** — create codes (uses, default 2; expiry), list,
+   expire, delete. (API routes keep `/admin/invites`; ADMIN-API.)
 4. **Terms** — publish a new terms version (PDF generated server-side), list,
    download. Members must accept the current version to become `member`.
 5. **Subscription types** — create, enable/disable (free trial now; a `paid`
@@ -341,10 +349,12 @@ Data & logic
 
 1. **Admin egress:** AWS exit node (there will be other admins).
 2. **Member login:** keep magic link + PIN; fix them (§5.3). No passkeys.
-3. **Registration:** invite code or admin approval, simplified into the single
-   lifecycle in §5.1.
-   - 3a. *Open:* does a free trial grant voting rights? Plan assumes **no**
-     ("paid subscription"). Only matters once voting ships.
+3. **Registration:** registration code or admin approval, simplified into
+   the single lifecycle in §5.1. Registration codes (renamed from "invite
+   codes", owner decision 2026-10-03) are good for 2 uses by default.
+   - 3a. *Decided 2026-10-03:* paid members are the voting members; a free
+     trial does not grant voting rights. Votes are not a vault feature;
+     governance voting for paid members is upcoming.
 4. **Subscriptions:** kept, starting with free-trial types; payments later.
 5. **SES:** stay in the sandbox; verification-as-opt-in (§5.2).
 6. **Docs:** design docs and this plan are committed to the public repo.
@@ -358,7 +368,7 @@ Data & logic
 
 **Phase 1 — Auth, data, admin** (2–3 PRs)
 AuthStack + DataStack → AdminAccessStack (exit node + WAF allowlists; verify from tailnet) →
-AdminApiStack + AdminSiteStack (requests, members, invites, terms,
+AdminApiStack + AdminSiteStack (requests, members, registration codes, terms,
 subscription types, admins, audit). Bootstrap the first admin via a script
 (`AdminCreateUser` + add to group). Acceptance: admin reachable only with the
 exit node on; MFA enforced; audit entries for every mutating action; off-tailnet
@@ -368,14 +378,15 @@ requests 403 at site, API, and login.
 MemberApiStack + AccountSiteStack, apex placeholder redirects, SES templates.
 Acceptance, end to end: request (no code) → verify email → admin approves →
 sign in (magic link, then PIN) → accept terms → member → start trial;
-request with code → registered without admin; suspend/reinstate; cancel →
+request with a registration code → registered without admin; suspend/reinstate; cancel →
 cleanup job deletes; sign-out actually ends the session; tests
 for each fix in §8.
 
 **Phase 3+ — Relay era (separate plans)**
 RelayStack (RELAY-PLAN Phase 5), PushStack, CallingStack, VaultStack; then the
 account Vault Services tab and the vault bits of admin, rebuilt against the
-relay. Separately: payments for paid subscriptions, and the voting feature.
+relay. Separately: payments for paid subscriptions, and governance voting
+for paid members (upcoming).
 
 ## 11. Cost delta (approx., monthly)
 
