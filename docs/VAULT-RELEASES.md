@@ -617,8 +617,11 @@ The member API already records start requests (`start_requested_at` on
 the release's `vettid-org-vault-releases` row) and answers `503
 release_starting`. The `vault-scaler` Lambda (host stack):
 
-- **Start:** triggered by that table's stream (filtered to rows whose
-  `start_requested_at` changed) and by a 1-minute schedule. For a release
+- **Start:** triggered by that table's stream (DataStack, new and old
+  images, ARN in SSM `data/vault-releases-stream-arn`; filtered to rows
+  whose `start_requested_at` changed) and by a 1-minute schedule. The
+  member API records a start request at most every 30 s per release and
+  only for a routable release. For a release
   with `available` and no live instance, it sets the release group's
   desired capacity to 1 (group name from SSM by release) and records
   `start_issued_at`. Cold start (boot, allocator, enclave, first
@@ -631,7 +634,15 @@ release_starting`. The `vault-scaler` Lambda (host stack):
   (configurable), so a flood of start requests costs at most that.
 - **Alarms:** a start request unfulfilled after 10 minutes; a group at its
   cap.
-- Never: starting a `removed` release, or one whose group does not exist.
+- Never: starting a `removed` release, unless its row has `rescue: true`
+  (a rescue, §10.3, which the member API routes as usual), or one whose
+  group does not exist.
+- **W6 follow-up (rescue scope):** `rescue` is release-wide: while it is
+  set, every vault sealed to that release is routed to it, not only the
+  vault of the member who asked. That affects availability only (the apps
+  offer nothing but the move off a `removed` release, VAULT-MESSAGING
+  §11.10.6). A per-vault rescue would need a field on the vault row that
+  the member API checks; decide in W6 whether it is worth it.
 
 ### 8.7 Observability
 
@@ -692,7 +703,8 @@ group, the `vault-alarms` mailer on the vaults stream, and the cleanup
 job's vault deletion. Order (W4):
 
 1. `npx cdk diff VettidOrgDataStack`: only the four vault tables, the
-   stream and their SSM refs may appear. Deploy. (If O1 moves the tables
+   two streams (vaults; vault-releases for the scaler, §8.6) and their SSM
+   refs may appear. Deploy. (If O1 moves the tables
    to the vault account, this step becomes part of W5 instead.)
 2. `npx cdk diff VettidOrgMemberApiStack`, deploy. With no `active`
    release, `GET /api/vault/enclave` answers `503 vault_unavailable` and

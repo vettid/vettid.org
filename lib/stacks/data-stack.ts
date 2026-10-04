@@ -161,8 +161,12 @@ export class VettidOrgDataStack extends cdk.Stack {
     table('vault-requests', { name: 'request_id', type: S }, ephemeral);
 
     // vault-releases: PK release (PCR0). status-index lists active releases
-    // (newest release_number first) for enrollment routing.
+    // (newest release_number first) for enrollment routing. The stream (old
+    // and new images, so a consumer can tell which attribute changed) feeds
+    // the scaler's on-demand starts (VAULT-RELEASES §8.6, W6); it is created
+    // now so that W6 needs no DataStack update.
     table('vault-releases', { name: 'release', type: S }, {
+      dynamoStream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
       globalSecondaryIndexes: [
         { indexName: 'status-index', partitionKey: { name: 'status', type: S }, sortKey: { name: 'release_number', type: N } },
       ],
@@ -188,6 +192,7 @@ export class VettidOrgDataStack extends cdk.Stack {
     publishRef(this, config, 'data/vault-instances-table-name', this.tables['vault-instances'].tableName);
     publishRef(this, config, 'data/vault-requests-table-name', this.tables['vault-requests'].tableName);
     publishRef(this, config, 'data/vault-releases-table-name', this.tables['vault-releases'].tableName);
+    publishRef(this, config, 'data/vault-releases-stream-arn', this.tables['vault-releases'].tableStreamArn!);
     publishRef(this, config, 'data/vault-control-queue-prefix', `${resourceName(config, 'vault-control')}-`);
   }
 }

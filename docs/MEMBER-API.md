@@ -480,7 +480,9 @@ the 30 s start-request interval.
   `ends_at` (RFC 3339, from the manifest; not used for routing). The API
   records on-demand start requests here (`start_requested_at`,
   `start_requests`; at most every 30 s per release, never creating a row);
-  the scaler that starts instances is VAULT-RELEASES §8.6.
+  the scaler that starts instances is VAULT-RELEASES §8.6, fed by this
+  table's stream (new and old images; ARN in SSM
+  `data/vault-releases-stream-arn`).
 
 The API's IAM can write only its own attributes on `vaults` and
 `vault-releases` (never a lease, `sealed_release` or a status), cannot write

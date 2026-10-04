@@ -136,7 +136,10 @@ describe('VettidOrgDataStack', () => {
     t.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
       TableName: 'vettid-org-vault-releases',
       GlobalSecondaryIndexes: [Match.objectLike({ IndexName: 'status-index' })],
+      // start requests reach the scaler (VAULT-RELEASES §8.6)
+      StreamSpecification: { StreamViewType: 'NEW_AND_OLD_IMAGES' },
     });
+    t.hasResourceProperties('AWS::SSM::Parameter', { Name: '/vettid-org/prod/data/vault-releases-stream-arn' });
   });
 
   test('vault table names and the control-queue prefix are published for the enclave host', () => {
