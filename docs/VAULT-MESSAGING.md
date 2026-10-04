@@ -4786,9 +4786,11 @@ requests name the manifest by `manifest_sha256` and `manifest_serial`
   `manifests/<manifest_sha256>.json`, refusing an object larger than
   90,112 bytes, and forwards the document to the enclave together with
   the message (the vsock queue frame is `[queue message, served document
-  or empty]`). It MAY cache a few documents by hash. If the object is
-  missing or too large it forwards the message with no document; it never
-  alters the message, and there is no host code for this case.
+  or empty]`). It MAY cache a few documents by hash, and MAY skip an
+  object whose manifest bytes do not hash to its name (so that a corrupt
+  object is not cached). If the object is missing, too large or skipped
+  it forwards the message with no document; it never alters the message,
+  and there is no host code for this case.
 - **Enclave.** Before it uses the manifest (§11.3; §11.10.4 step 1), the
   enclave checks, in this order, and answers the sealed result code
   `manifest` on the first failure: a document is present; it parses as a
@@ -5631,7 +5633,9 @@ recorded in the build's measurements:
 - the manifest public keys (production: key A and key B; staging: the
   staging key), `key_id` selecting one;
 - the sealing-key account and region (§11.10.2);
-- `retirement_principal` and `retirement_window_days` (§11.10.7);
+- `retirement_principal` and `retirement_window_days` (§11.10.7; a
+  channel file with another window than its channel's, 30 or 7 days, is
+  malformed);
 - the Android signing-certificate digests (§11.7);
 - the relay URL (§11.3).
 
@@ -6613,10 +6617,17 @@ carries the approval; `altchan.json` is regenerated for 0.3.0.
 **0.10.0.** `altchan.json` is regenerated: the `vault.unlock` request
 carries `manifest_sha256` and `manifest_serial` instead of the served
 manifest (§11.4); the unlock signing string is unchanged.
-`release.json` gains a 0.10.0 manifest vector with a `removed` entry and
-an `ends_at` date, its SHA-256 and its signature under the test manifest
-key (vettid-vault phase V5 W1). The values in the files are
-authoritative.
+`release.json` gains a 0.10.0 manifest vector (`manifest_0_10_0`) with a
+`removed` and a `retired` entry carrying `ends_at`, its SHA-256 and its
+signature under the test manifest key (vettid-vault phase V5 W1). The
+values in the files are authoritative.
+
+```
+§11.10.1 manifest 0.10.0 (serial 8, releases 2 removed, 3 retired, 4 active)
+  manifest bytes : 1,619 B (release.json manifest_0_10_0)
+  SHA-256        : 1076917dbc01969c1dedaaaa0ec81d711a7d4babc184a834aa8d3fe275c97c9d
+  bucket object  : manifests/1076917dbc01969c1dedaaaa0ec81d711a7d4babc184a834aa8d3fe275c97c9d.json
+```
 
 Cross-implementation checks against Apple CryptoKit and BouncyCastle are
 pending (§15, follow-up 1).
