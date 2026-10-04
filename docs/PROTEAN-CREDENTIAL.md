@@ -157,10 +157,12 @@ A member who has lost their app recovers through the account portal
    phone dies. The new app replaces the old one, whose keys are revoked;
    desktops and agents are kept (§4).
 
-With the backup off there is no copy to hand over: the credential and the
-critical items are lost, and the recovery can only create a new
-credential or delete the vault (VAULT-MESSAGING §11.11.5; an owner
-decision to confirm). There is no other recovery of a credential and no
+With the backup off there is no copy to hand over and **no recovery of
+the credential**: if a recovery could return secrets, a bad actor could
+retrieve them (owner decision, 2026-10-03). The credential and the
+critical items are lost; the recovery restores access to the vault only,
+so that the member can create a new credential or delete the vault
+(VAULT-MESSAGING §11.11.5, §12.5). There is no other recovery of a credential and no
 bypass that VettID can operate.
 
 ### 3.8 Lifecycle
@@ -251,9 +253,11 @@ vettid-vault together with it):
   agents are kept.
 - **Backup off survives decision 3** as an option: no off-device copy, no
   export, and losing the phone loses the credential and the critical
-  items. A recovery then can only reset the credential or delete the
-  vault (an owner decision to confirm). 0.9.0 removed the member-supplied
-  blob of earlier drafts.
+  items. A recovery then restores vault access only, to reset the
+  credential or delete the vault (owner decision, 2026-10-03). 0.9.0
+  removed the member-supplied blob of earlier drafts.
+- **Vault deletion** (§12.5): `vault.delete` from the app (PIN and
+  password) or through a recovery; the member is emailed.
 - **GrapheneOS** is accepted through its pinned verified boot keys
   (§11.7).
 

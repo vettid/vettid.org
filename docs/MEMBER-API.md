@@ -361,8 +361,8 @@ whatever the lease: `alarm = {kind: "credential_clone", alarm_id, at}`
   use recovery if the phone is gone. No secret, device or version is in
   the email (the alarm carries none). If the send fails, the Lambda
   restores `alarm_pending` so the stream retries.
-- **Rate limit:** at most 4 alarm emails per vault per day (OWNER
-  DECISION, recommended); further alarms are recorded on the row but not
+- **Rate limit:** at most 4 alarm emails per vault per day (owner
+  decision, 2026-10-03); further alarms are recorded on the row but not
   mailed.
 - **Audit:** `vault.alarm_email` (`vault_id`, `kind`, `alarm_id`;
   `suppressed: true` when rate-limited).
@@ -375,6 +375,43 @@ whatever the lease: `alarm = {kind: "credential_clone", alarm_id, at}`
   the alarm Lambda may only clear `alarm_pending` and set
   `alarm.emailed_at` (conditional update), and read `members`. The member
   API never writes either.
+
+### Vault deletion (VAULT-MESSAGING 0.9.0 §12.5)
+
+A vault is deleted by its app (`vault.delete` over the relay: the
+holder with the PIN and the password, or a recovering app, including
+through the account site's recovery with the backup off), or by the
+member API when an account is cancelled. The vault deletes itself:
+notices and revocations, keys destroyed, every stored object erased.
+Its own audit log goes with it, so the member is told by email.
+
+- **Notice.** On the lifecycle event `deleted` the parent records, on
+  the vault row and whatever the lease, `state = deleted`,
+  `alarm = {kind: "vault_deleted", alarm_id, at}` and
+  `alarm_pending = true`. The `vault-alarms` Lambda claims it as for a
+  clone alarm and emails the member: their vault was deleted at that
+  time, it cannot be restored, and whom to contact if it was not them.
+  No rate limit applies (one notice per deletion). Audit:
+  `vault.alarm_email` with `kind: vault_deleted`.
+- **Rows.** After the email (or when no member is found) the Lambda
+  deletes the vault row (condition: `state = deleted`) and the pointer
+  row `user#<guid>` if it still names this vault, so the member's next
+  enrollment is a fresh one with a new `vault_id`.
+- **Account cancellation.** After the 7-day grace period the cleanup job
+  enqueues the operation `delete` (§11.5 SQS message, no envelope) for
+  each of the member's vaults not yet `deleted`, to the leaseholder or
+  else a live instance of the vault's `sealed_release` (requesting a
+  start as the enclave route does when none runs). It sets
+  `deletion_requested_at` on the row; a later run retries until the vault
+  reports `deleted`, whose notice removes the rows. A vault that is
+  running deletes itself with the full semantics; otherwise the
+  instance erases its stored objects. Rows of vaults that never reach
+  `deleted` within 30 days are logged for operations, not dropped
+  silently.
+- **Status.** A `deleted` vault row reads as no vault (`{vault: null}`).
+- **IAM.** The alarm Lambda may delete vault rows and pointer rows
+  (conditional) in addition to its alarm updates; the cleanup job may
+  send to the vault-control queues as the API does.
 
 **Left to the API by the spec, decided here:** the shape of `Enclave`; the
 `vault_id` encoding; reuse of `vault_id` on re-enrollment; liveness (90 s
