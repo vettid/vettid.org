@@ -214,7 +214,7 @@ UnifiedPush for phones without Google services; PUSH-GATEWAY 0.2.0),
 calling service (TURN, SFrame), PQC Phase 2 (ML-DSA, Go 1.27).
 
 - **No backup or export of vault data outside the service** (owner
-  decision, 2026-10-03). Recovery after losing every app is specified
+  decision, 2026-10-03). Recovery after losing the app is specified
   (VAULT-MESSAGING §11.11).
 - **Vault-to-vault transfer** (future): a member moves their data from an
   old vault to a new one within the service.
@@ -488,5 +488,6 @@ From the vettid.dev archive review (2026-10-03):
 2. **One app per vault, holding the credential** (owner decision,
    2026-10-03): a second or stale copy is refused, alerted and freezes
    credential operations until a forced rotation; direct transfer between
-   phones; recovery replaces the old app. Vault and spec change after V4
-   batch 4, per PROTEAN-CREDENTIAL §4.
+   phones; recovery replaces the old app. Specified in VAULT-MESSAGING
+   0.9.0 (§3.5.9, §6.7.1, §11.11.5) and implemented in vettid-vault
+   (branch `one-app`), with GrapheneOS attestation (§11.7).

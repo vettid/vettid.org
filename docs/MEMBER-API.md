@@ -182,6 +182,7 @@ interface VaultStatus {     // advisory: written by the enclave host, never a se
   vault_version: string | null;
   state_version: number | string | null;
   leased: boolean;          // an instance currently holds the vault
+  alarm: { kind: 'credential_clone'; at: string } | null;  // the last host alarm (below), advisory
   created_at: string; updated_at: string;
 }
 ```
@@ -258,10 +259,16 @@ envelopes. Account deletion after cancellation records the deleted
 
 ### Vault recovery (VAULT-MESSAGING 0.4.1 §11.11)
 
-For a member who has lost every owner app. The portal asks; the vault is
-locked at once; after 24 hours the portal shows a one-time code (as a QR,
-rendered in the page) that a new app presents. The new app then needs the
-PIN and the credential password. The code is minted inside the enclave and
+For a member who has lost their app (VAULT-MESSAGING 0.9.0: a vault has
+one app). The portal asks; the vault is locked at once; after 24 hours the
+portal shows a one-time code (as a QR, rendered in the page) that a new
+app presents. The new app then needs the PIN and the credential password,
+and **replaces** the old app (removed, its keys revoked); desktops and
+agents stay. With the credential backup off there is no copy of the
+credential to hand over: the password is not needed, but the credential
+and every critical item are lost, and the new app can only create a new
+credential or delete the vault (§11.11.5). A member who still has the old
+phone moves the app by direct transfer instead (§6.7.1), without the API. The code is minted inside the enclave and
 reaches the API only sealed to a P-256 key held by the member's browser, so
 the API never holds it in a usable form; the enclave enforces the 24 h and
 the expiry itself.
@@ -318,7 +325,7 @@ interface Recovery {
   (`409 recovery_not_available`). The enclave re-checks the delay, the
   expiry, the code and the device attestation.
 - **`GET /api/vault/status`** adds `recovery: {state, available_at} |
-  null` to `VaultStatus`, so owner apps can show a recovery in progress
+  null` to `VaultStatus`, so the app can show a recovery in progress
   and offer to cancel it.
 - **Rate limits:** request 3 per member per day; register 10 per member
   per day; cancel 30 per member per 15 minutes; the cancel link 20 per
@@ -330,6 +337,81 @@ interface Recovery {
 - **Email** uses the system mailer (SES sandbox: the member's address must
   be a verified identity, as for sign-in links; a failed send is logged
   and does not fail the request).
+
+### Vault alarms (VAULT-MESSAGING 0.9.0 §3.5.9, §11.5)
+
+When the vault sees a clone of the member's Protean Credential (a copy
+presented by another device, or a stale copy that the app's own retry
+does not explain), it refuses it, alerts the app and freezes credential
+operations. It has no email egress, so it reports the content-free host
+alarm `alarm.credential_clone`. The parent records it on the vault row,
+whatever the lease: `alarm = {kind: "credential_clone", alarm_id, at}`
+(`alarm_id` a ULID made by the parent, `at` epoch seconds) and
+`alarm_pending = true`.
+
+- **Email.** The `vaults` table has a DynamoDB stream (new images). The
+  `vault-alarms` job Lambda receives only records whose new image has
+  `alarm_pending = true` (event-source filter). For each it claims the
+  send with a conditional `REMOVE alarm_pending SET alarm.emailed_at`
+  (condition: `alarm_pending` still true and the same `alarm_id`), finds
+  the member by the row's `user_guid` and emails them with the system
+  mailer: their credential was presented by another device; credential
+  use is frozen until their app confirms, then the app rotates the
+  credential; if it was not them, change the PIN and the password, and
+  use recovery if the phone is gone. No secret, device or version is in
+  the email (the alarm carries none). If the send fails, the Lambda
+  restores `alarm_pending` so the stream retries.
+- **Rate limit:** at most 4 alarm emails per vault per day (owner
+  decision, 2026-10-03); further alarms are recorded on the row but not
+  mailed.
+- **Audit:** `vault.alarm_email` (`vault_id`, `kind`, `alarm_id`;
+  `suppressed: true` when rate-limited).
+- **Status.** `GET /api/vault/status` returns `alarm: {kind, at}` (the
+  last alarm) or `null`, for the account site. Advisory: the vault's own
+  alert to the app is the authoritative signal.
+- **SES** as for recovery notices (`ses:SendEmail`, sandbox rules; a
+  failed send is logged).
+- **IAM.** Only the enclave host writes `alarm` and sets `alarm_pending`;
+  the alarm Lambda may only clear `alarm_pending` and set
+  `alarm.emailed_at` (conditional update), and read `members`. The member
+  API never writes either.
+
+### Vault deletion (VAULT-MESSAGING 0.9.0 §12.5)
+
+A vault is deleted by its app (`vault.delete` over the relay: the
+holder with the PIN and the password, or a recovering app, including
+through the account site's recovery with the backup off), or by the
+member API when an account is cancelled. The vault deletes itself:
+notices and revocations, keys destroyed, every stored object erased.
+Its own audit log goes with it, so the member is told by email.
+
+- **Notice.** On the lifecycle event `deleted` the parent records, on
+  the vault row and whatever the lease, `state = deleted`,
+  `alarm = {kind: "vault_deleted", alarm_id, at}` and
+  `alarm_pending = true`. The `vault-alarms` Lambda claims it as for a
+  clone alarm and emails the member: their vault was deleted at that
+  time, it cannot be restored, and whom to contact if it was not them.
+  No rate limit applies (one notice per deletion). Audit:
+  `vault.alarm_email` with `kind: vault_deleted`.
+- **Rows.** After the email (or when no member is found) the Lambda
+  deletes the vault row (condition: `state = deleted`) and the pointer
+  row `user#<guid>` if it still names this vault, so the member's next
+  enrollment is a fresh one with a new `vault_id`.
+- **Account cancellation.** After the 7-day grace period the cleanup job
+  enqueues the operation `delete` (§11.5 SQS message, no envelope) for
+  each of the member's vaults not yet `deleted`, to the leaseholder or
+  else a live instance of the vault's `sealed_release` (requesting a
+  start as the enclave route does when none runs). It sets
+  `deletion_requested_at` on the row; a later run retries until the vault
+  reports `deleted`, whose notice removes the rows. A vault that is
+  running deletes itself with the full semantics; otherwise the
+  instance erases its stored objects. Rows of vaults that never reach
+  `deleted` within 30 days are logged for operations, not dropped
+  silently.
+- **Status.** A `deleted` vault row reads as no vault (`{vault: null}`).
+- **IAM.** The alarm Lambda may delete vault rows and pointer rows
+  (conditional) in addition to its alarm updates; the cleanup job may
+  send to the vault-control queues as the API does.
 
 **Left to the API by the spec, decided here:** the shape of `Enclave`; the
 `vault_id` encoding; reuse of `vault_id` on re-enrollment; liveness (90 s
@@ -344,7 +426,10 @@ limits above.
 - `vettid-org-vaults` (PK `vault_id`, GSI `user-index`): `user_guid`,
   `state`, `created_at`, `updated_at`; *host*: `lease {instance_id,
   lease_expires_at (epoch s)}`, `sealed_release`, `vault_version`,
-  `state_version`, later `state`. Pointer rows `user#<guid>` →
+  `state_version`, later `state`; `alarm {kind, alarm_id, at}` and
+  `alarm_pending: true` when the vault reports a host alarm (below; the
+  alarm Lambda adds `alarm.emailed_at` and removes `alarm_pending`).
+  Pointer rows `user#<guid>` →
   `current_vault_id` (API only; no `user_guid`, so they stay out of the index).
   API: `recovery {recovery_id, state, requested_at, available_at, expires_at}`
   (epoch s for the times).
