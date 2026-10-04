@@ -6,7 +6,6 @@
 import { randomBytes } from 'node:crypto';
 import { GetCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { ddb, env, table } from './aws';
-import { nowIso } from './ids';
 
 /** An instance is live if it heartbeat within this many seconds. */
 export const LIVE_HEARTBEAT_S = 90;
@@ -26,10 +25,29 @@ export interface InstanceRow {
 export interface ReleaseRow {
   release: string;
   release_number: number;
-  status: 'active' | 'deprecated' | 'retired';
+  /** VAULT-MESSAGING 0.10.0 §11.10.1: fixed from release 1 on. */
+  status: 'active' | 'deprecated' | 'retired' | 'removed';
   /** false once the release's image can no longer be started (§11.10.5). */
   available?: boolean;
+  /**
+   * true while operations have reopened a `removed` release for a rescue
+   * (§11.10.5, VAULT-RELEASES §10.3 step 3); it is routed as usual meanwhile.
+   */
+  rescue?: boolean;
+  /** RFC 3339 end date from the manifest (0.10.0); for apps and notices, not routing. */
+  ends_at?: string;
 }
+
+/**
+ * Whether the API may route to (and ask to start) a release (§11.10.5): it
+ * is known, its image can still start, and it is not `removed` unless
+ * reopened for a rescue. Anything else answers 410 release_unavailable.
+ */
+export const routable = (rel: ReleaseRow | null): rel is ReleaseRow =>
+  !!rel && rel.available !== false && (rel.status !== 'removed' || rel.rescue === true);
+
+/** A release's start request is recorded at most this often. */
+export const START_REQUEST_INTERVAL_S = 30;
 
 /** The queue URL an instance must use: the API never sends anywhere else. */
 export const expectedQueueUrl = (instanceId: string) => `${env('VAULT_QUEUE_URL_PREFIX')}${instanceId}`;
@@ -93,21 +111,39 @@ export async function pickInstance(release: string, now: number): Promise<Instan
 }
 
 /**
- * Ask for an instance of `release` to be started. For now this only records
- * the request on the release row; the infrastructure that acts on it is V5
- * (VAULT-PLAN §4). Only start-request attributes are writable by the API.
+ * Ask for an instance of `release` to be started: records the request on
+ * the release row, which the scaler acts on (VAULT-RELEASES §8.6). Only
+ * start-request attributes are writable by the API. Callers check
+ * `routable` first. The write never creates a row (no start requests for
+ * releases that don't exist), and is recorded at most once per
+ * START_REQUEST_INTERVAL_S per release, so a burst of members, app retries
+ * or cleanup runs costs one write and one stream record, not one each.
+ * Returns whether this call recorded it (false: a request was recorded
+ * recently, or the row is gone; callers answer release_starting either way).
  */
-export async function requestStart(release: string): Promise<void> {
-  await ddb.send(
-    new UpdateCommand({
-      TableName: table.vaultReleases(),
-      Key: { release },
-      UpdateExpression: 'SET start_requested_at = :now ADD start_requests :one',
-      ConditionExpression: 'attribute_exists(#r)',
-      ExpressionAttributeNames: { '#r': 'release' },
-      ExpressionAttributeValues: { ':now': nowIso(), ':one': 1 },
-    }),
-  );
+export async function requestStart(release: string): Promise<boolean> {
+  const now = Date.now();
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: table.vaultReleases(),
+        Key: { release },
+        UpdateExpression: 'SET start_requested_at = :now ADD start_requests :one',
+        // ISO-8601 UTC strings of one format compare in time order.
+        ConditionExpression: 'attribute_exists(#r) AND (attribute_not_exists(start_requested_at) OR start_requested_at < :cut)',
+        ExpressionAttributeNames: { '#r': 'release' },
+        ExpressionAttributeValues: {
+          ':now': new Date(now).toISOString(),
+          ':cut': new Date(now - START_REQUEST_INTERVAL_S * 1000).toISOString(),
+          ':one': 1,
+        },
+      }),
+    );
+    return true;
+  } catch (e) {
+    if ((e as Error).name === 'ConditionalCheckFailedException') return false;
+    throw e;
+  }
 }
 
 /** A ULID for requests the API makes on its own (cancel, delete). */

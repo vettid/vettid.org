@@ -18,7 +18,7 @@ import { cognito, ddb, env, ses, table } from '../shared/aws';
 const STALE_DAYS = 14;
 import { emailMarkerKey, vaultPointerKey } from '../shared/members';
 import type { MemberItem, SubscriptionItem } from '../shared/model';
-import { liveLease, newUlid, pickInstance, releaseRow, requestStart } from '../shared/vault-routing';
+import { liveLease, newUlid, pickInstance, releaseRow, requestStart, routable } from '../shared/vault-routing';
 
 async function* query(input: ConstructorParameters<typeof QueryCommand>[0]) {
   let start: Record<string, unknown> | undefined;
@@ -62,15 +62,13 @@ export async function requestVaultDeletion(v: VaultRowLite, nowS: number): Promi
   let inst = await liveLease(v, nowS);
   if (!inst && v.sealed_release) {
     const rel = await releaseRow(v.sealed_release);
-    if (rel && rel.available !== false) {
+    // A `removed` release (not reopened for a rescue) is never started
+    // (VAULT-MESSAGING 0.10.0 §11.10.5); the stored objects of vaults still
+    // sealed to it go after the key's deletion (VAULT-RELEASES §3.5, D + 37;
+    // not built yet). Until then the row stays, retried and flagged below.
+    if (routable(rel)) {
       inst = await pickInstance(v.sealed_release, nowS);
-      if (!inst) {
-        try {
-          await requestStart(v.sealed_release);
-        } catch (e) {
-          if ((e as Error).name !== 'ConditionalCheckFailedException') throw e;
-        }
-      }
+      if (!inst) await requestStart(v.sealed_release);
     }
   }
   if (inst) {
