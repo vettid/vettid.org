@@ -96,8 +96,9 @@ export const releaseFilePath = (root: string, channel: Channel) => join(root, 'v
 /**
  * Where each channel's served manifest is committed (VAULT-RELEASES §7).
  * Production's is the site's `/.well-known/vettid/pcr-manifest.json`;
- * staging's is kept here until the staging site exists (W9), which serves
- * it at https://staging.vettid.org/.well-known/vettid/pcr-manifest.json.
+ * staging's is kept under vault/ and served byte for byte by
+ * VettidOrgStageSiteStack at
+ * https://staging.vettid.org/.well-known/vettid/pcr-manifest.json.
  * Absent until the channel's first release is published.
  */
 export const SERVED_PATHS: Record<Channel, string> = {

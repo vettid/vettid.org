@@ -130,6 +130,16 @@ export class VettidOrgDataStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
+    // Outside prod there is no mailing list (VettidOrgSignupStack is prod
+    // only), but the cleanup job asks it whether an address is subscribed
+    // before reclaiming a stale request's SES identity. An empty table with
+    // the same key keeps that read (always "not on the list") working.
+    if (config.stage !== 'prod') {
+      table('mailing-list', { name: 'email', type: S }, {
+        pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: false },
+      });
+    }
+
     publishRef(this, config, 'data/terms-bucket-name', this.termsBucket.bucketName);
     publishRef(this, config, 'data/members-stream-arn', this.tables.members.tableStreamArn!);
   }

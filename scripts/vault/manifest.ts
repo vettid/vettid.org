@@ -240,7 +240,7 @@ function publish(c: Ctx, flags: Record<string, string | true>): void {
     '  push and merge the commit (CI runs check:manifest),',
     c.channel === 'prod'
       ? '  npm run deploy:site   (serves https://vettid.org/.well-known/vettid/pcr-manifest.json and the release log),'
-      : '  deploy the staging site (W9; until then the staging manifest is only in the repository),',
+      : '  npx cdk deploy VettidOrgStageSiteStack -c stage=staging --profile vault-staging   (serves https://staging.vettid.org/.well-known/vettid/pcr-manifest.json),',
     `  aws lambda invoke --function-name ${c.syncFunction} --profile ${c.adminProfile} --region ${REGION} /dev/stdout   (routing rows now, not in 5 minutes).`,
   ].join('\n'));
 }

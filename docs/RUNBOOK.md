@@ -23,7 +23,7 @@ npm run deploy:all                                # everything
 
 ## Stacks
 
-Stateful stacks (Dns, Signup, Playbooks, Auth, Data, AdminAccess, RelayData, Audit, Vault) have
+Stateful stacks (Dns, Signup, Playbooks, Auth, Data, AdminAccess, RelayData, Audit, Vault; in staging StageDns) have
 CloudFormation termination protection on (`lib/app.ts`); deleting one means
 turning that off in code (or the console) first.
 
@@ -41,6 +41,9 @@ turning that off in code (or the console) first.
 | `VettidOrgAdminSiteStack` | Admin SPA at admin.vettid.org (`sites/admin`), behind the exit-node web ACL. |
 | `VettidOrgRelayDataStack` | Relay state: DynamoDB table `vettid-org-relay` and the blob bucket `vettid-org-relay-blobs-<account>` (published via SSM `relay/*`). Stateful. |
 | `VettidOrgVaultStack` | **In the vault account** (prod: vettid-vault-prod 369484479783; staging: vettid-vault-staging 347272280361). Vault tables (`vettid-org-vault*`), data bucket `vettid-org-vault-data-<account>`, the fixed-name host and retirement roles, manifest key A and its signer role, the release-key custom resource and one key per release. Stateful; see "Vault". |
+| `VettidOrgStagingDelegationStack` | Prod (management account), only once context `stagingZoneNs` is set: the one NS record delegating staging.vettid.org to the staging account's zone. See "Staging". |
+| `VettidOrgStageDnsStack` | **Staging only** (vettid-vault-staging): zone `staging.vettid.org`, its CAA, the SES domain identity `staging.vettid.org` (DKIM records), SSM `dns/zone-id`. Stateful. |
+| `VettidOrgStageSiteStack` | **Staging only**: https://staging.vettid.org (`sites/staging`), serving the staging channel's manifest from `vault/staging/pcr-manifest.json`. |
 | `VettidOrgRelayStack` | relay.vettid.org: VPC (no NAT; S3 + DynamoDB gateway endpoints), ElastiCache Serverless Valkey (IAM auth, TLS), ECS Fargate service (2–8 tasks, rolling deploys), ALB with PQ TLS. Logs to `/vettid-org/<stage>/relay-service`. Only deployed when `relayImage` is set. |
 
 ## CDK conventions (new stacks)
@@ -50,10 +53,12 @@ Applies to everything added from the account/admin work onward
 their construct IDs.
 
 - **App wiring** lives in `lib/app.ts` (`bin/` only calls `buildApp`).
-  Config — stage, domain, region, sender/admin email — comes from
-  `lib/config.ts`; `-c stage=<name>` exists for a future staging account and
-  defaults to `prod`. Physical names come from `resourceName()`
-  (`vettid-org-<thing>`); hosts from `hostName()`.
+  Config — stage, domain, zone, region, sender/admin email — comes from
+  `lib/config.ts`; `-c stage=staging` builds the staging copy (see
+  "Staging"), the default is `prod`. Physical names come from
+  `resourceName()` (`vettid-org-<thing>`); hosts from `hostName()`; a site's
+  zone from `stageZone()` (prod: the cached vettid.org lookup; staging: the
+  stage zone's SSM ref, no lookup).
 - **Stateful vs stateless.** Pools and tables go in stateful stacks
   (Auth, Data) with `RemovalPolicy.RETAIN`; APIs and sites go in stateless
   stacks that deploy freely.
@@ -230,8 +235,8 @@ that account's profile:
 
 `lib/config.ts` pins these. A vault stack must be deployed with its
 account's profile; CDK refuses a cross-account deploy (bootstrap trust is
-per account). A `-c stage=staging` synth contains only the vault stack
-until the staging copy of the main stacks exists (W9).
+per account). A `-c stage=staging` synth also contains the staging copy of
+the main stacks, all in 347272280361 (W9, "Staging").
 
 For the owner-only roles, add chained profiles (MFA is Identity Center's,
 at sign-in):
@@ -414,7 +419,7 @@ aws logs tail /aws/lambda/vettid-org-vault-scaler $P --since 30m
 Every 5 minutes: fetches the channel's served manifest, verifies it under
 the keys pinned in `lib/config.ts` (`manifestKeys`: key A in production,
 the staging key in staging; key B is added when its token exists; while
-nothing is served (404, or no staging host yet) it logs "no manifest
+nothing is served (404, or staging.vettid.org not up yet) it logs "no manifest
 published yet" and does nothing), and upserts the `vault-releases`
 rows (number, status, seal key, `ends_at`, `available` = the release's
 `vault/releases/<N>/group-name` ref exists). It never writes start
@@ -582,10 +587,102 @@ Publishing a release (manifest signing, W7), instance and lease health in
 practice, incident classes and first responses, capacity per host, and
 the disaster-recovery objectives (VAULT-RELEASES §11.4).
 
+## Staging (W9; VAULT-RELEASES §11.1)
+
+`-c stage=staging --profile vault-staging` builds a copy of what the
+vault's end-to-end tests need, entirely in vettid-vault-staging
+(347272280361), under its own zone **staging.vettid.org**:
+
+| Stack | What |
+|---|---|
+| `VettidOrgStageDnsStack` | zone staging.vettid.org (delegated from vettid.org), CAA, SES domain identity (DKIM) for `no-reply@staging.vettid.org` |
+| `VettidOrgAuthStack`, `VettidOrgDataStack` | the member pool (and an unused admin pool), PIN pepper, the `vettid-org-staging-*` tables (plus an empty `mailing-list` table that the cleanup job reads), terms bucket |
+| `VettidOrgVaultStack`, `VettidOrgVaultHostStack` | as in "Vault" (deployed since W5/W6) |
+| `VettidOrgMemberApiStack` | member API with the vault routes, notice job, alarm mailer (stream: context `stagingVaultsStreamArn` in cdk.json), cleanup |
+| `VettidOrgAccountSiteStack` | https://account.staging.vettid.org (same site, WAF and API path as prod) |
+| `VettidOrgStageSiteStack` | https://staging.vettid.org: a notice page and the staging manifest at `/.well-known/vettid/pcr-manifest.json` |
+
+Not in staging, on purpose: the public site, signup, playbooks and the
+vettid.dev redirect (prod content); the admin exit node, admin API and
+admin site (test data comes from `npm run staging:seed`, the canary flag
+from the CLI fallback in "Canary routing" with `--profile vault-staging`
+and table `vettid-org-staging-members`); the relay (staging images pin
+relay.vettid.org; a staging relay is deployed only when relay changes need
+testing); push; the audit stack (the organization trail and GuardDuty,
+administered from the management account, already cover the account).
+Staging has no release log (the log is production's); its notice emails
+link to the production log.
+
+All system mail comes from `no-reply@staging.vettid.org`. **SES in the
+staging account stays in the sandbox**: every recipient must be a
+verified identity there. Members' addresses verify themselves through the
+membership request (the SES verification email is the opt-in, as in
+prod); for the drill that is the owner's address. Request notifications
+go to admin@vettid.org, which only arrive if that address is verified in
+the staging account too (optional). Never request production access for
+staging.
+
+### First stand-up, in order
+
+```bash
+aws sso login                       # covers default and vault-staging
+C="-c stage=staging --profile vault-staging"
+# 1. The zone and the SES identity (nothing resolves yet).
+npx cdk diff   VettidOrgStageDnsStack $C --exclusively
+npx cdk deploy VettidOrgStageDnsStack $C --exclusively
+#    Output NameServers: four ns-*.awsdns-* names.
+# 2. Delegation (management account). Put them into cdk.json "context":
+#      "stagingZoneNs": "ns-a.awsdns-xx.org,ns-b.awsdns-xx.co.uk,ns-c.awsdns-xx.com,ns-d.awsdns-xx.net"
+#    commit it (PR), then:
+npx cdk diff   VettidOrgStagingDelegationStack --exclusively   # one NS record, staging.vettid.org
+npx cdk deploy VettidOrgStagingDelegationStack --exclusively
+dig +short NS staging.vettid.org
+# 3. Wait until SES has verified the domain (DKIM through the delegation):
+aws sesv2 get-email-identity --email-identity staging.vettid.org --profile vault-staging \
+  --query '{verified:VerifiedForSendingStatus,dkim:DkimAttributes.Status}'
+# 4. Pool and tables (Cognito's SES sender needs the verified identity).
+npx cdk deploy VettidOrgAuthStack VettidOrgDataStack $C --exclusively
+# 5. The vault stacks are already there; the diff must be empty.
+npx cdk diff   VettidOrgVaultStack VettidOrgVaultHostStack $C --exclusively
+# 6. Member API, then the sites (their certificates validate in the zone).
+npx cdk deploy VettidOrgMemberApiStack $C --exclusively
+npx cdk deploy VettidOrgAccountSiteStack VettidOrgStageSiteStack $C --exclusively
+# 7. Test data (no admin site in staging): terms, then a registration code.
+npm run staging:seed -- terms --file local/staging-terms.txt
+npm run staging:seed -- invite
+```
+
+Then request membership at https://account.staging.vettid.org/request/
+with the code, confirm the SES verification email, sign in, accept the
+terms. After that, `npx cdk deploy --all $C` deploys the whole staging
+set in dependency order.
+
+### Publishing a staging manifest
+
+As in "Publishing a manifest" with `--channel staging` and the
+`vault-staging-manifest-signer` profile; the served file is
+`vault/staging/pcr-manifest.json`. After the merge:
+`npx cdk deploy VettidOrgStageSiteStack -c stage=staging --profile vault-staging`
+(byte for byte at https://staging.vettid.org/.well-known/vettid/pcr-manifest.json),
+then run `vettid-org-staging-vault-manifest-sync` with `--profile vault-staging`.
+
+### Parking
+
+Between releases the release groups scale to zero (scaler) and nothing
+else needs to go: at idle the main stacks cost about $10/month (account
+site WAF ~$8, zone $0.50, two secrets ~$0.80, pennies of Lambda,
+DynamoDB, CloudFront). Everything stateful is retained and
+deletion-protected as in prod; tearing staging down means turning
+termination protection off in code first, and the zone (RETAIN) keeps its
+name servers unless it is deleted by hand, after which
+`stagingZoneNs` and the delegation must be updated.
+
 ## DNS
 
 - Route53 is authoritative for **vettid.org** and **vettid.dev**; the registrar
-  (Hover) only points nameservers.
+  (Hover) only points nameservers. **staging.vettid.org** is a separate zone
+  in the staging account, delegated by one NS record
+  (VettidOrgStagingDelegationStack, TTL 1 hour); see "Staging".
 - ProtonMail records (MX/SPF/DKIM/DMARC) live in the DnsStack — change mail
   config in code, not the console.
 - ACM certs auto-validate through the zones; renewals are hands-off.

@@ -28,6 +28,9 @@ export type SsmRefKey =
   | 'relay/table-arn'
   | 'relay/blob-bucket-name'
   | 'member-api/domain'
+  // A non-prod stage's own zone (VettidOrgStageDnsStack); prod's site
+  // stacks look vettid.org up instead (cached in cdk.context.json).
+  | 'dns/zone-id'
   | 'admin-access/egress-ip'
   | 'admin-access/site-web-acl-arn'
   // Vault account (VettidOrgVaultStack); read by the host stack and the

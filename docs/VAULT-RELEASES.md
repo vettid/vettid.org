@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.3
+version: 0.1.4
 date: 2026-10-04
 owner: Al Liebl (Mesmer)
 changelog:
@@ -30,6 +30,12 @@ changelog:
     members (the scaler manages them); the daily notice job (90/30/7/1
     days, ended, urgent security releases); release status in
     GET /api/vault/status
+  - 0.1.4: W9 part A as built (CDK only). `-c stage=staging` builds the
+    staging copy in vettid-vault-staging under its own zone
+    staging.vettid.org (delegated from vettid.org by one NS record):
+    member pool, tables, member API, account site, the staging.vettid.org
+    manifest host, the vault stacks; no admin, signup, relay or audit
+    stacks (§8.1, §11.1)
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.9.1) §11.10 release updates, §12.5 deletion, §13.5
@@ -597,8 +603,8 @@ role (trust, `PassRole`) to CloudFormation's deploy role.
   -releases` input (it ignores the extra members). The window is not a
   field: `ends_at` is set explicitly per §10.3.
 - **Served files:** production `website/.well-known/vettid/pcr-manifest.json`;
-  staging `vault/staging/pcr-manifest.json` until the staging site exists
-  (W9 serves it at staging.vettid.org). **Nothing is served in either
+  staging `vault/staging/pcr-manifest.json`, served byte for byte at
+  staging.vettid.org by `VettidOrgStageSiteStack` (W9). **Nothing is served in either
   channel today**: an empty manifest is not valid (it lists at least one
   release), and nothing may be served before the first release is
   published. The URL answers 404 until then; the manifest sync treats 404
@@ -691,6 +697,16 @@ handling in the Lambda code:
   parent sets that `Policy` attribute in `CreateQueue`.
 - No `Fn::ImportValue`, no cross-account SSM: everything is derived from
   fixed names and account ids, except the stream ARN.
+
+*As built (W9, part A).* `staging` now has a main account too, the same
+vettid-vault-staging (`lib/config.ts`), so in staging the "cross-account"
+policies above admit roles of the same account. The stream ARN is context
+`stagingVaultsStreamArn` (prod keeps `vaultsStreamArn`), so a staging synth
+never picks up production's. The staging copy's DNS is its own zone
+`staging.vettid.org` in that account; vettid.org delegates to it with one
+NS record (`VettidOrgStagingDelegationStack`, management account, context
+`stagingZoneNs`). Its system mail comes from `no-reply@staging.vettid.org`
+(an SES domain identity in the staging zone; SES stays in the sandbox).
 
 ### 8.2 Stacks
 
@@ -1073,6 +1089,22 @@ staging keys with the production shape and a 7-day window. Relay: the
 production relay at first (test mailboxes are harmless and the staging
 image pins it), a staging relay deployed on demand when relay changes need
 testing. Everything parked between releases.
+
+*As built (W9, part A: CDK).* `-c stage=staging --profile vault-staging`
+builds, all in vettid-vault-staging: `VettidOrgStageDnsStack` (zone
+staging.vettid.org, CAA, SES domain identity), `VettidOrgAuthStack`,
+`VettidOrgDataStack`, `VettidOrgVaultStack`, `VettidOrgVaultHostStack`,
+`VettidOrgMemberApiStack` (vault routes, notices, alarm mailer, cleanup),
+`VettidOrgAccountSiteStack` (account.staging.vettid.org) and
+`VettidOrgStageSiteStack` (https://staging.vettid.org, the staging
+manifest at the pinned `manifestUrl`). Left out: the public site, signup,
+playbooks, the admin exit node, API and site (test data from
+`npm run staging:seed`; the canary flag through the CLI), the relay
+(production's), push, and the audit stack (the organization trail and
+GuardDuty cover the account). Staging has no release log; its notices link
+to production's. Order and manual steps: RUNBOOK "Staging". Idle cost of
+the main stacks about $10/month, so parking needs nothing beyond the
+scaler's zero groups.
 
 ### 11.2 Hardware smoke on every release candidate
 

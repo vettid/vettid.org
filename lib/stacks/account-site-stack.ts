@@ -1,9 +1,9 @@
 import * as cdk from 'aws-cdk-lib';
-import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import { Construct } from 'constructs';
 import { AppConfig, androidAssetLinks, hostName, resourceName } from '../config';
 import { readRef } from '../constructs/ssm-refs';
+import { stageZone } from '../constructs/stage-zone';
 import { StaticSite } from '../constructs/static-site';
 import { WafLogging } from '../constructs/waf-logging';
 import { originVerifySecretName } from './member-api-stack';
@@ -21,7 +21,8 @@ export const ACCOUNT_RATE_LIMITS = {
 };
 
 /**
- * Stateless: the member account site at account.vettid.org (sites/account),
+ * Stateless: the member account site at account.vettid.org (sites/account;
+ * account.staging.vettid.org in staging),
  * with the member API same-origin at /api/* — no CORS, and session cookies
  * are host-only + SameSite=Strict. CloudFront adds the origin-verify secret
  * to every API request (resolved from Secrets Manager at deploy time).
@@ -33,7 +34,7 @@ export class VettidOrgAccountSiteStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: VettidOrgAccountSiteStackProps) {
     super(scope, id, props);
     const { config } = props;
-    const hostedZone = route53.HostedZone.fromLookup(this, 'Zone', { domainName: config.domainName });
+    const hostedZone = stageZone(this, config);
 
     const prefix = (searchString: string): wafv2.CfnWebACL.StatementProperty => ({
       byteMatchStatement: {

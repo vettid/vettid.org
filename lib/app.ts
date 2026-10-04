@@ -1,6 +1,6 @@
 import * as cdk from 'aws-cdk-lib/core';
 import { join } from 'node:path';
-import { loadConfig } from './config';
+import { loadConfig, stageZoneNs } from './config';
 import { VettidOrgStack } from './stacks/web-stack';
 import { VettidOrgDnsStack } from './stacks/dns-stack';
 import { VettidOrgSignupStack } from './stacks/signup-stack';
@@ -20,6 +20,9 @@ import { VettidOrgVaultSmokeStack } from './stacks/vault-smoke-stack';
 import { VettidOrgVaultStack, vaultEnv } from './stacks/vault-stack';
 import { VettidOrgVaultHostStack } from './stacks/vault-host-stack';
 import { VettidOrgVaultReleaseStack, releaseStackId } from './stacks/vault-release-stack';
+import { VettidOrgStageDnsStack } from './stacks/stage-dns-stack';
+import { VettidOrgStageSiteStack } from './stacks/stage-site-stack';
+import { VettidOrgStageDelegationStack } from './stacks/stage-delegation-stack';
 import { hostSpecs, keySpecs, readReleaseFile } from './vault/release-list';
 
 /**
@@ -54,8 +57,8 @@ export function buildApp(app: cdk.App): void {
   // release with a `host` in vault/releases/<channel>.json (none yet). Later
   // stacks read the earlier ones' refs from SSM at deploy time; nothing is
   // exported.
-  const vaultStacks = () => {
-    if (!config.vault) return;
+  const vaultStacks = (): cdk.Stack | undefined => {
+    if (!config.vault) return undefined;
     const venv = vaultEnv(config, config.vault);
     // Validated here (synth fails on a malformed list) and in CI (check:manifest).
     const list = readReleaseFile(join(__dirname, '..'), config.vault.channel, config.vault.account);
@@ -73,10 +76,11 @@ export function buildApp(app: cdk.App): void {
       const rel = new VettidOrgVaultReleaseStack(app, releaseStackId(spec.release), { config, env: venv, spec });
       rel.addDependency(host);
     }
+    return vault;
   };
 
-  // A stage whose main stacks are not stood up yet (staging, until W9):
-  // only its vault account's stack.
+  // A stage whose main stacks are not stood up yet: only its vault
+  // account's stack.
   if (config.vault && !config.accounts.main) {
     vaultStacks();
     cdk.Annotations.of(app).addInfoV2('vettid:vault-only', `stage ${config.stage}: only the vault account's stacks (no main account yet)`);
@@ -87,6 +91,36 @@ export function buildApp(app: cdk.App): void {
   // can't be deleted without first turning this off in code — a stray
   // `cdk destroy` fails instead of orphaning or deleting them.
   const stateful = { env, terminationProtection: true };
+
+  // ---- A non-prod stage (staging, VAULT-RELEASES §11.1, W9) ----
+  // A copy of what a vault end-to-end test needs, in the stage's own
+  // account and zone (<stage>.vettid.org), nothing more:
+  //   StageDns (zone + SES domain identity) → Auth, Data → (Vault stacks)
+  //   → MemberApi → AccountSite; StageSite (the channel's manifest host).
+  // Left out on purpose (RUNBOOK "Staging"): the public site, signup and
+  // playbooks (prod content), the admin exit node, admin API and site (the
+  // drill seeds data from the CLI: scripts/staging/seed.ts), the relay
+  // (staging images pin the production relay), push, the vettid.dev
+  // redirect, and the audit stack (the organization trail and GuardDuty,
+  // administered from the management account, already cover this account).
+  // Dependencies only order `cdk deploy --all`; nothing is exported.
+  if (config.stage !== 'prod') {
+    const dnsStack = new VettidOrgStageDnsStack(app, 'VettidOrgStageDnsStack', { config, ...stateful });
+    const auth = new VettidOrgAuthStack(app, 'VettidOrgAuthStack', { config, ...stateful });
+    auth.addStackDependency(dnsStack); // Cognito's SES sender needs the domain identity
+    const data = new VettidOrgDataStack(app, 'VettidOrgDataStack', { config, ...stateful });
+    const vault = vaultStacks();
+    const memberApi = new VettidOrgMemberApiStack(app, 'VettidOrgMemberApiStack', { config, env });
+    memberApi.addStackDependency(auth);
+    memberApi.addStackDependency(data);
+    if (vault) memberApi.addStackDependency(vault); // tables and stream policies name its roles
+    const accountSite = new VettidOrgAccountSiteStack(app, 'VettidOrgAccountSiteStack', { config, env });
+    accountSite.addStackDependency(memberApi);
+    accountSite.addStackDependency(dnsStack);
+    const site = new VettidOrgStageSiteStack(app, 'VettidOrgStageSiteStack', { config, env });
+    site.addStackDependency(dnsStack);
+    return;
+  }
 
   // Deploy order: SignupStack and DnsStack first, then VettidOrgStack
   // (the web stack consumes both via props, and resolves the signup
@@ -159,6 +193,14 @@ export function buildApp(app: cdk.App): void {
   // that reads its tables (RUNBOOK "Vault"):
   //   npx cdk deploy VettidOrgVaultStack VettidOrgVaultHostStack --profile vault-prod
   vaultStacks();
+
+  // ---- Delegation of staging.vettid.org to the staging account's zone ----
+  // Only once context stagingZoneNs (VettidOrgStageDnsStack's output
+  // NameServers, committed in cdk.json) is set; RUNBOOK "Staging".
+  const stagingNs = stageZoneNs(app.node, 'staging');
+  if (stagingNs.length) {
+    new VettidOrgStageDelegationStack(app, 'VettidOrgStagingDelegationStack', { config, stage: 'staging', nameServers: stagingNs, env });
+  }
 
   // ---- Account-level audit & detection (CloudTrail, GuardDuty, alerts) ----
   new VettidOrgAuditStack(app, 'VettidOrgAuditStack', { config, ...stateful });

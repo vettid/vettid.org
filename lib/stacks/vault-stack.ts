@@ -334,7 +334,7 @@ export class VettidOrgVaultStack extends cdk.Stack {
     publishRef(this, config, 'vault/dlq-name', vaultDlqName(config));
 
     // The member API's alarm mailer reads this stream from its own account;
-    // set it as context `vaultsStreamArn` (cdk.json) after the first deploy.
+    // set it as context `vaultsStreamArn` (prod) or `<stage>VaultsStreamArn` (cdk.json) after the first deploy.
     new cdk.CfnOutput(this, 'VaultsStreamArn', { value: t.vaults.tableStreamArn! });
     new cdk.CfnOutput(this, 'ManifestKeyArn', { value: manifestKey.keyArn });
     new cdk.CfnOutput(this, 'DataBucketName', { value: this.dataBucket.bucketName });
