@@ -162,8 +162,8 @@ rights.
 |---|---|---|---|
 | GET | `/api/vault/status` | — | `{vault: VaultStatus \| null}` |
 | GET | `/api/vault/enclave` | — (`?release=<pcr0>` only to abandon an unconfirmed move, §11.10.4) | `Enclave`: the instance to seal to (below) |
-| POST | `/api/vault/enroll` | `{request_id, instance_id, etk_kid, envelope}` | `202 {vault_id, request_id}` |
-| POST | `/api/vault/unlock` | `{vault_id, request_id, instance_id, etk_kid, envelope}` | `202 {vault_id, request_id}` |
+| POST | `/api/vault/enroll` | `{request_id, instance_id, etk_kid, envelope, manifest_sha256}` | `202 {vault_id, request_id}` |
+| POST | `/api/vault/unlock` | `{vault_id, request_id, instance_id, etk_kid, envelope, manifest_sha256}` | `202 {vault_id, request_id}` |
 | POST | `/api/vault/lock` | `{vault_id, request_id}` | `202 {vault_id, request_id}` |
 | GET | `/api/vault/requests/{request_id}` | — | `{status: "queued"\|"done"\|"expired", envelope?, code?}` (§11.5) |
 
@@ -202,6 +202,13 @@ interface VaultStatus {     // advisory: written by the enclave host, never a se
   1,156 sealed overhead, §5.4). The clear header must be v2 / suite 2 /
   sealed / flags 0, with an all-zero `sender_kid` and `recipient_kid` =
   `etk_kid`. Anything else is `400 bad_request` and is not forwarded.
+- `manifest_sha256` (VAULT-MESSAGING 0.10.0 §11.5, "Manifest by hash";
+  enroll and unlock only, REQUIRED): 64 lowercase hex, the SHA-256 of the
+  release manifest bytes the sealed request names. The API checks the
+  format only (else `400 bad_request`) and copies it into the queue
+  message as `manifest_sha256`; the enclave host fetches
+  `manifests/<manifest_sha256>.json` from the vault data bucket and hands
+  it to the enclave. *Pending in the code (VAULT-RELEASES W8).*
 - `envelope` in a result: base64 of exactly **5,252 bytes**, only when
   `status` is `done`: `vault.enroll.result` (§11.3) or `vault.unlock.result`
   (§11.4), sealed to the app, or random bytes of the same size when the
@@ -237,12 +244,15 @@ value), and `retry_after` seconds where given:
 | 409 | `instance_moved` | The named instance is gone or no longer holds the vault: refetch `/api/vault/enclave` and re-seal |
 | 409 | `vault_busy` | `?release=` asked for a release while another release's instance holds the vault (`retry_after`: until the lease ends) |
 | 409 | `duplicate_request` | `request_id` already used |
-| 410 | `release_unavailable` | The vault's release (or the one `?release=` asked for) is unknown, or its image can no longer be started |
+| 410 | `release_unavailable` | The vault's release (or the one `?release=` asked for) is unknown, `removed` (its end date has passed, VAULT-MESSAGING 0.10.0 §11.10.5), or its image can no longer be started |
 | 503 | `release_starting` | No instance of the release is running; one has been requested. Body also has `release` and `retry_after` (30) |
 | 503 | `vault_unavailable` | No `active` release is deployed yet (`retry_after` 300) |
 
-A `retired` release still serves the vaults sealed to it (§11.10.1); only an
-unknown or unstartable one is `410`.
+A `deprecated` or `retired` release still serves the vaults sealed to it
+(§11.10.1); an unknown, `removed` or unstartable one is `410`, except a
+`removed` release that operations have reopened for a rescue (§11.10.5),
+which is routed as usual. *The `removed` rule is pending in the code
+(VAULT-RELEASES W8).*
 
 **Rate limits** (§11.8; `429 rate_limited` with `retry_after`): enroll 3 per
 member per day; unlock 10 per member per 15 minutes, and per source network

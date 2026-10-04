@@ -1,9 +1,13 @@
 ---
 title: VAULT-PLAN
 status: draft
-version: 0.1.2
+version: 0.1.3
 date: 2026-10-04
 changelog:
+  - 0.1.3: W0 of VAULT-RELEASES: §5.1 and §7 risk 3 follow D1a
+    (retirement after notice, deletable release keys by scheduled
+    deletion only, the retirement statements, manifest by hash), as
+    specified in VAULT-MESSAGING 0.10.0
   - 0.1.2: V5 moves to VAULT-RELEASES.md (owner decisions of 2026-10-04
     amending D1: production-only locked keys, cadence, move-only
     deprecated releases, retirement with key deletion)
@@ -13,7 +17,7 @@ changelog:
     vault-to-vault transfer as a future item (Later), follow-ups (§8)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.3.1) — the wire and behaviour spec this plan implements
+  - VAULT-MESSAGING.md (0.10.0) — the wire and behaviour spec this plan implements
   - RELAY-PROTOCOL.md (0.4.0), RELAY-PLAN.md
   - PQC-MIGRATION.md (0.3.0)
   - MEMBER-API.md, RUNBOOK.md
@@ -225,11 +229,12 @@ calling service (TURN, SFrame), PQC Phase 2 (ML-DSA, Go 1.27).
 the move, routing, app behaviour). This section keeps the decision and the
 deployment consequences.*
 
-*Amended 2026-10-04 (D1a): release keys become deletable by scheduled
-deletion only, after a release's notice window; statements below that
-keys "can never be deleted" and releases run "for as long as any vault
-needs them" are superseded by VAULT-RELEASES §3–§4 and change in the
-spec with work item W0.*
+*Amended 2026-10-04 (D1a, VAULT-RELEASES R1–R4): locked keys for
+production releases only; release keys become deletable by scheduled
+deletion only, by a pinned retirement role, after a release's notice
+window (12 months from supersession, 90 days' final notice, a 30-day KMS
+window). Specified in VAULT-MESSAGING 0.10.0 (§11.10.5, §11.10.7); the
+text below follows it.*
 
 Each release has its own KMS key whose policy allows `Decrypt` only under a
 Nitro attestation with that release's PCR0. A vault's sealed header (and the
@@ -259,11 +264,14 @@ any later release VettID ships.
 - **Several releases run at once.** The instance registry records each
   instance's release; `GET /api/vault/enclave` routes a vault to an instance
   of its `sealed_release`. A release with no running instance is started on
-  demand (slow first unlock) rather than deleted: its EIF and KMS key are
-  kept for as long as any vault is sealed to it.
+  demand (slow first unlock). Its EIF and KMS key are kept until the
+  release's end date (`ends_at`), at least 12 months after it was
+  superseded (VAULT-RELEASES §3.5); then it is `removed` and its key is
+  scheduled for deletion.
 - **VettID cannot force security fixes.** The app can urge an update, but a
-  vault stays on its release until the member approves. The spec will say so
-  in its threat model.
+  vault stays on its release until the member approves (VAULT-MESSAGING
+  §13.5). A vault never moved is lost when its release ends: availability,
+  never confidentiality.
 - **No migration machinery** like vettid.dev's (signed migration configs,
   per-user S3 locks, 72-hour deadlines): the move is one sealed write inside
   a normal unlock.
@@ -276,34 +284,45 @@ any later release VettID ships.
   exactly (VAULT-MESSAGING §11.10.7), so this is the only shape to deploy:
   - symmetric (`SYMMETRIC_DEFAULT`, `ENCRYPT_DECRYPT`), origin `AWS_KMS`,
     single-region, in the pinned account and region, no grants;
-  - key policy with exactly three `Allow` statements and nothing else:
+  - key policy with exactly these `Allow` statements and nothing else:
     1. `kms:Decrypt`, condition `StringEqualsIgnoreCase`
        `kms:RecipientAttestation:ImageSha384` = the release's PCR0 and
        `StringEquals` `kms:CallerAccount` = the account;
     2. `kms:GenerateDataKey`, same conditions with the PCR0s of the release
        and the releases admitted to move vaults into it;
     3. `kms:DescribeKey`, `kms:GetKeyPolicy`, `kms:ListGrants`, no
-       condition;
+       condition (the host role and the retirement role);
+    4. `kms:ScheduleKeyDeletion` for the retirement role only, with
+       `NumericEquals` `kms:ScheduleKeyDeletionPendingWindowInDays` = the
+       pinned window (30 in production, 7 in staging) and `StringEquals`
+       `kms:CallerAccount`;
+    5. `kms:CancelKeyDeletion` and `kms:EnableKey` for the retirement role
+       only, with `StringEquals` `kms:CallerAccount`;
 
-    all with `Principal` = `{"AWS": "<enclave host role ARN in the
-    account>"}` (never `"*"` or another account: anyone can run a public
-    release image and present its attestation elsewhere) and
-    `Resource` = `"*"`.
+    statements 1–3 with `Principal` = `{"AWS": "<enclave host role ARN in
+    the account>"}` (never `"*"` or another account: anyone can run a
+    public release image and present its attestation elsewhere), 4 and 5
+    with exactly the retirement role, and `Resource` = `"*"`.
     The example in VAULT-MESSAGING §11.10.7 is normative.
   - **No administrator statement**: no `kms:*`, no account-root
     delegation, no `PutKeyPolicy`, `CreateGrant`, `Encrypt`, `ReEncrypt*`,
-    `ScheduleKeyDeletion`, `DisableKey` or tagging. KMS's lockout safety
-    check refuses such a policy, so the key is created with
+    `DisableKey` or tagging, and no deletion except statement 4. KMS's
+    lockout safety check refuses such a policy, so the key is created with
     `CreateKey(..., BypassPolicyLockoutSafetyCheck: true)` (in CDK, a custom
     resource; `aws-kms.Key` cannot express it). The policy can never be
-    changed, the key never disabled or deleted, even by the account root:
-    budget for keeping every release key indefinitely.
+    changed and the key never disabled, even by the account root; the key
+    is deleted only by the retirement role, with the pinned window, at the
+    release's end (VAULT-RELEASES §6.2). Both roles named in the policy
+    must never be deleted (VAULT-RELEASES §6.3). Key cost levels off at
+    about the window's worth of releases.
   - vettid.dev differed here: its host role and a migration function held
     `kms:PutKeyPolicy` and widened policies during migrations, and nothing
     in the enclave checked. That is what the enclave-side check rules out.
-- **Manifest signing key:** a KMS ECC_NIST_P256 key, sign-only, in a
-  separate account with multi-party approval; apps and release images pin
-  its public key.
+- **Manifest signing keys:** key A in KMS (ECC_NIST_P256, sign-only,
+  owner-only signer role) and key B offline; apps and release images pin
+  both (VAULT-RELEASES §6.1). Enroll and unlock requests carry the
+  manifest's hash; the host supplies the document from the vault data
+  bucket (`manifests/<sha256>.json`, VAULT-MESSAGING §11.5).
 - **Release registry (member API):** operations render each release's
   manifest status and availability into the `vettid-org-vault-releases`
   table, which the API uses for routing, `410 release_unavailable` and
@@ -459,9 +478,11 @@ secrets behind in memory. Inside the enclave:
 2. **Locked-vault UX.** Locked vaults don't collect, and there are no push
    wakes yet, so mobile delivery depends on the app being open. Acceptable for
    the preview.
-3. **Members who never approve updates** keep old releases alive (on-demand
-   instances, retained KMS keys) and stay on old code, including unfixed
-   vulnerabilities. That is the cost of D1; the app makes it visible.
+3. **Members who never approve updates** stay on old code, including
+   unfixed vulnerabilities, until their release ends (at least 12 months
+   after it was superseded, with 90 days' notice and emails); then they
+   lose access to their vault (D1a, VAULT-RELEASES §3.5, §14 risk 4). The
+   app makes this visible; confidentiality is unaffected.
 4. **Single instance** is an availability single point of failure (ASG heals
    in ~5–10 min; vaults relock). Leases already allow a second instance.
 5. **Client effort** across Kotlin, Swift, Rust and Go. Mitigation: a small
