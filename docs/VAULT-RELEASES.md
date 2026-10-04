@@ -1,6 +1,6 @@
 ---
 title: VAULT-RELEASES
-status: draft
+status: approved (owner, 2026-10-04)
 version: 0.1.0
 date: 2026-10-04
 owner: Al Liebl (Mesmer)
@@ -901,6 +901,8 @@ W4 can go any time; W2 and W3 can run beside W1; W5–W8 follow W3.
 9. **Region-bound keys**: a us-east-1 outage takes every vault down.
 
 ## 15. Owner decisions
+
+All ten recommendations below were **accepted by the owner on 2026-10-04**.
 
 | # | Question | Recommendation |
 |---|---|---|
