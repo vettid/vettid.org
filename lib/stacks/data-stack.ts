@@ -28,16 +28,11 @@ export interface VettidOrgDataStackProps extends cdk.StackProps {
  *   ratelimits         rate-limit and PIN-lockout counters (TTL)
  *   magic-links        single-use sign-in tokens, stored hashed (TTL)
  *
- * Vault alternate channel (docs/VAULT-MESSAGING.md §11.5, §11.10.5). Nothing
- * secret: no PINs, keys, mailbox ids or device identifiers.
- *   vaults             one row per vault (routing key vault_id; lease and
- *                      lifecycle written by the enclave host) + one
- *                      `user#<guid>` pointer row per member
- *   vault-instances    instance registry: release, queue, descriptor,
- *                      attestation, heartbeat (TTL)
- *   vault-requests     response slots for alternate-channel requests (TTL 15 min)
- *   vault-releases     releases from the signed manifest (status, whether the
- *                      image can still start) + on-demand start requests
+ * The vault tables (vaults, vault-instances, vault-requests, vault-releases)
+ * moved to the vault account's VettidOrgVaultStack (VAULT-RELEASES §8.1,
+ * W5). The empty copies first deployed here are left in place by
+ * CloudFormation (RETAIN, deletion protection) when this stack drops them;
+ * RUNBOOK "Vault" says how to delete them by hand.
  */
 export class VettidOrgDataStack extends cdk.Stack {
   readonly tables: Record<string, dynamodb.TableV2> = {};
@@ -123,55 +118,6 @@ export class VettidOrgDataStack extends cdk.Stack {
       ],
     });
 
-    // ---- vault alternate channel ------------------------------------------------
-    const N = dynamodb.AttributeType.NUMBER;
-    const ephemeral = { timeToLiveAttribute: 'expires_at', pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: false } };
-
-    // vaults: PK vault_id. The API reads a member's vault through the
-    // consistent `user#<guid>` pointer row; user-index (pointer rows carry no
-    // user_guid, so they stay out of it) is for operations and history.
-    // The stream (new images only) carries the host's credential-clone
-    // alarms (`alarm_pending`, VAULT-MESSAGING 0.9.0 §11.5) to the alarm
-    // mailer; an event-source filter keeps every other write away from it.
-    table('vaults', { name: 'vault_id', type: S }, {
-      dynamoStream: dynamodb.StreamViewType.NEW_IMAGE,
-      globalSecondaryIndexes: [
-        { indexName: 'user-index', partitionKey: { name: 'user_guid', type: S }, sortKey: { name: 'created_at', type: S } },
-      ],
-    });
-
-    // vault-instances: PK instance_id, rows kept alive by the parent's
-    // heartbeat (expires_at TTL). release-index finds live instances of a
-    // release; the API then reads the chosen row for descriptor + attestation.
-    table('vault-instances', { name: 'instance_id', type: S }, {
-      ...ephemeral,
-      globalSecondaryIndexes: [
-        {
-          indexName: 'release-index',
-          partitionKey: { name: 'release', type: S },
-          sortKey: { name: 'heartbeat_at', type: N },
-          projectionType: dynamodb.ProjectionType.INCLUDE,
-          nonKeyAttributes: ['load'],
-        },
-      ],
-    });
-
-    // vault-requests: PK request_id (client ULID). Opaque sealed response
-    // envelopes ≤ 8 KiB; gone after 15 minutes.
-    table('vault-requests', { name: 'request_id', type: S }, ephemeral);
-
-    // vault-releases: PK release (PCR0). status-index lists active releases
-    // (newest release_number first) for enrollment routing. The stream (old
-    // and new images, so a consumer can tell which attribute changed) feeds
-    // the scaler's on-demand starts (VAULT-RELEASES §8.6, W6); it is created
-    // now so that W6 needs no DataStack update.
-    table('vault-releases', { name: 'release', type: S }, {
-      dynamoStream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
-      globalSecondaryIndexes: [
-        { indexName: 'status-index', partitionKey: { name: 'status', type: S }, sortKey: { name: 'release_number', type: N } },
-      ],
-    });
-
     // Membership terms: the source text and the PDF generated from it
     // (terms/<version>.txt|.pdf), written only by the admin API. Members get
     // short-lived presigned GET URLs.
@@ -186,13 +132,5 @@ export class VettidOrgDataStack extends cdk.Stack {
 
     publishRef(this, config, 'data/terms-bucket-name', this.termsBucket.bucketName);
     publishRef(this, config, 'data/members-stream-arn', this.tables.members.tableStreamArn!);
-    // For the enclave host (parent, VAULT-PLAN V5), which isn't a CDK consumer.
-    publishRef(this, config, 'data/vaults-table-name', this.tables.vaults.tableName);
-    publishRef(this, config, 'data/vaults-stream-arn', this.tables.vaults.tableStreamArn!);
-    publishRef(this, config, 'data/vault-instances-table-name', this.tables['vault-instances'].tableName);
-    publishRef(this, config, 'data/vault-requests-table-name', this.tables['vault-requests'].tableName);
-    publishRef(this, config, 'data/vault-releases-table-name', this.tables['vault-releases'].tableName);
-    publishRef(this, config, 'data/vault-releases-stream-arn', this.tables['vault-releases'].tableStreamArn!);
-    publishRef(this, config, 'data/vault-control-queue-prefix', `${resourceName(config, 'vault-control')}-`);
   }
 }

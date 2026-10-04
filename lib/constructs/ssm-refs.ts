@@ -24,19 +24,29 @@ export type SsmRefKey =
   | 'auth/pin-pepper-secret-arn'
   | 'data/terms-bucket-name'
   | 'data/members-stream-arn'
-  | 'data/vaults-table-name'
-  | 'data/vaults-stream-arn'
-  | 'data/vault-instances-table-name'
-  | 'data/vault-requests-table-name'
-  | 'data/vault-releases-table-name'
-  | 'data/vault-releases-stream-arn'
-  | 'data/vault-control-queue-prefix'
   | 'relay/table-name'
   | 'relay/table-arn'
   | 'relay/blob-bucket-name'
   | 'member-api/domain'
   | 'admin-access/egress-ip'
-  | 'admin-access/site-web-acl-arn';
+  | 'admin-access/site-web-acl-arn'
+  // Vault account (VettidOrgVaultStack); read by the host stack and the
+  // enclave host's boot script (VAULT-RELEASES §8.3), all in that account.
+  | 'vault/data-bucket-name'
+  | 'vault/host-role-arn'
+  | 'vault/host-instance-profile-name'
+  | 'vault/retirement-role-arn'
+  | 'vault/manifest-signer-role-arn'
+  | 'vault/manifest-key-arn'
+  | 'vault/vaults-table-name'
+  | 'vault/vault-instances-table-name'
+  | 'vault/vault-requests-table-name'
+  | 'vault/vault-releases-table-name'
+  | 'vault/vault-releases-stream-arn'
+  | 'vault/control-queue-prefix'
+  | 'vault/control-queue-policy'
+  | 'vault/dlq-name'
+  | `vault/releases/${number}/seal-key-arn`;
 
 export function ssmParamName(config: AppConfig, key: SsmRefKey): string {
   return `/vettid-org/${config.stage}/${key}`;

@@ -54,7 +54,9 @@ which is why the vault's production keys need an account of their own
   deny leaving the organization, deny disabling CloudTrail/GuardDuty, and,
   for the vault accounts, deny deleting or modifying the named key-policy
   roles and deny `kms:PutKeyPolicy` with the lockout bypass except by the
-  release-key custom resource's role (VAULT-RELEASES §6).
+  release-key custom resource's role (VAULT-RELEASES §6). The vault part
+  is `lib/org/scp-vault.json` (policy `vettid-vault-key-protection`,
+  attached to the Vault OU by `scripts/vault/apply-scp.sh`; W5).
 
 ## 3. Moving the Proteus website
 

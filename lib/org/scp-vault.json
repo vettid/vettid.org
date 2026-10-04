@@ -1,0 +1,60 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ProtectKeyPolicyRoles",
+      "Effect": "Deny",
+      "Action": [
+        "iam:DeleteRole",
+        "iam:UpdateAssumeRolePolicy",
+        "iam:DeleteInstanceProfile",
+        "iam:RemoveRoleFromInstanceProfile"
+      ],
+      "Resource": [
+        "arn:aws:iam::*:role/vettid-org-vault-host",
+        "arn:aws:iam::*:role/vettid-org-vault-key-retirement",
+        "arn:aws:iam::*:instance-profile/vettid-org-vault-host"
+      ]
+    },
+    {
+      "Sid": "LockoutBypassOnlyByReleaseKeyCreator",
+      "Effect": "Deny",
+      "Action": ["kms:CreateKey", "kms:PutKeyPolicy"],
+      "Resource": "*",
+      "Condition": {
+        "Bool": { "kms:BypassPolicyLockoutSafetyCheck": "true" },
+        "ArnNotLike": { "aws:PrincipalArn": "arn:aws:iam::*:role/vettid-org-vault-release-key-creator" }
+      }
+    },
+    {
+      "Sid": "ReleaseKeyCreatorNeverPutsPolicies",
+      "Effect": "Deny",
+      "Action": "kms:PutKeyPolicy",
+      "Resource": "*",
+      "Condition": {
+        "ArnLike": { "aws:PrincipalArn": "arn:aws:iam::*:role/vettid-org-vault-release-key-creator" }
+      }
+    },
+    {
+      "Sid": "ProtectReleaseKeyCreator",
+      "Effect": "Deny",
+      "Action": [
+        "iam:UpdateAssumeRolePolicy",
+        "iam:PassRole",
+        "lambda:UpdateFunctionCode",
+        "lambda:UpdateFunctionConfiguration",
+        "lambda:PublishVersion",
+        "lambda:CreateAlias",
+        "lambda:UpdateAlias"
+      ],
+      "Resource": [
+        "arn:aws:iam::*:role/vettid-org-vault-release-key-creator",
+        "arn:aws:lambda:*:*:function:vettid-org-vault-release-key-creator",
+        "arn:aws:lambda:*:*:function:vettid-org-vault-release-key-creator:*"
+      ],
+      "Condition": {
+        "ArnNotLike": { "aws:PrincipalArn": "arn:aws:iam::*:role/cdk-*-cfn-exec-role-*" }
+      }
+    }
+  ]
+}

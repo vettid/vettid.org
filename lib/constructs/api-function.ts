@@ -1,4 +1,5 @@
 import * as cdk from 'aws-cdk-lib';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as lambdaNode from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as logs from 'aws-cdk-lib/aws-logs';
@@ -15,6 +16,12 @@ export interface ApiFunctionProps {
   readonly description?: string;
   /** Fixed physical name; only when something must reference the function by name. */
   readonly functionName?: string;
+  /**
+   * Fixed-name role; only when another account's policy names it (vault
+   * cross-account access, the release-key creator). Default: a generated
+   * role with basic execution rights.
+   */
+  readonly roleName?: string;
 }
 
 /**
@@ -47,6 +54,13 @@ export class ApiFunction extends Construct {
       timeout: props.timeout ?? cdk.Duration.seconds(10),
       description: props.description,
       functionName: props.functionName,
+      role: props.roleName
+        ? new iam.Role(this, 'Role', {
+            roleName: props.roleName,
+            assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+            managedPolicies: [iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole')],
+          })
+        : undefined,
       logGroup,
       environment: {
         NODE_OPTIONS: '--enable-source-maps',

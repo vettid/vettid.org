@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.0
+version: 0.1.1
 date: 2026-10-04
 owner: Al Liebl (Mesmer)
 changelog:
@@ -10,6 +10,11 @@ changelog:
     the owner decisions of 2026-10-04 that amend D1 (locked keys for
     production only, a release cadence, move-only deprecated releases,
     retirement with key deletion after notice)
+  - 0.1.1: W5 as built. Cross-account access by resource policies (no
+    assumed role); vault tables in the vault account; accounts per stage;
+    role, function and SCP names; owner-only roles trust the Identity
+    Center permission set (MFA at sign-in); release-key custom resource
+    details; the SCP's break-glass is the management account
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.9.1) §11.10 release updates, §12.5 deletion, §13.5
@@ -395,8 +400,15 @@ fails closed.
 - **Key A**: KMS `ECC_NIST_P256`, `SIGN_VERIFY`, in the vault production
   account (or a separate signing account, O3). `kms:Sign` only for the
   `vettid-org-vault-manifest-signer` role, which only the owner can assume
-  with MFA. Ordinary key policy (deletable, admin statement): this key is
-  not checked by the enclave, and losing it is covered by key B.
+  with MFA. Ordinary key policy (deletable, an admin statement without
+  `kms:Sign`): this key is not checked by the enclave, and losing it is
+  covered by key B. *As built (W5):* the role trusts only the owner's IAM
+  Identity Center permission-set role in the vault account
+  (`AWSReservedSSO_VettIDAdmin_*`); MFA is enforced by Identity Center at
+  sign-in. A `aws:MultiFactorAuthPresent` condition cannot be used: that
+  key is absent from Identity Center (SAML-federated) sessions, so the
+  role would become unassumable. The signer role also writes
+  `manifests/*` in the data bucket (the only principal that may).
 - **Key B**: P-256 on an offline hardware token (for example a YubiHSM 2
   or a smartcard), kept in a safe, used only if A is lost or compromised.
 - Both public keys are pinned in every production image and app
@@ -432,6 +444,18 @@ resource (`aws-kms.Key` always adds an administrator statement):
   deletes it). Only the custom resource's role may call `CreateKey` with
   the bypass flag (IAM condition `kms:BypassPolicyLockoutSafetyCheck`, and
   an SCP in a separate account).
+- *As built (W5):* the function `vettid-org-vault-release-key-creator`
+  (role of the same name, asynchronous retries off) checks the rendered
+  policy against a TypeScript port of the enclave's `keypolicy` rules and
+  the stack's pinned account, region, roles and channel window before
+  `CreateKey`; a policy the enclave would refuse never reaches KMS. Its
+  physical id is `<key ARN>|<SHA-256 of the properties>`, so an update
+  with changed properties fails while a rollback to the original
+  properties (or a new service token) succeeds. The port is tested against
+  vettid-vault's recorded `keycheck` fixtures and every "must fail"
+  variant of §11.10.7 (`test/vault-keypolicy.test.ts`). Its role may
+  create only symmetric, single-region `AWS_KMS` keys, and tag them only
+  with `vettid:release` and `vettid:channel`.
 - **Verification, three layers:**
   1. CDK assertion tests compare the rendered policy with the spec
      example's shape for every release in `releases.json`.
@@ -457,6 +481,17 @@ protection, are covered by a guardrail test (name and retention), and,
 in a separate account, by an SCP denying `iam:DeleteRole` and
 `iam:UpdateAssumeRolePolicy` on them except for a break-glass role.
 Their permissions (IAM policies) may change; their ARNs may not.
+
+*As built (W5):* the names are `vettid-org-vault-host` (with an instance
+profile of the same name) and `vettid-org-vault-key-retirement`, the same
+in both vault accounts. The SCP is `lib/org/scp-vault.json`, applied to
+the Vault OU by `scripts/vault/apply-scp.sh` from the management account.
+It has no in-account exception: the break-glass is detaching or editing
+the SCP from the management account, which nothing inside a vault account
+can do. It also denies the lockout bypass (`CreateKey`, `PutKeyPolicy`)
+to every principal but the creator role, denies the creator role
+`PutKeyPolicy`, and keeps the creator function's code, configuration and
+role (trust, `PassRole`) to CloudFormation's deploy role.
 
 ## 7. Manifest and release log
 
@@ -513,6 +548,34 @@ alarm functions assume a narrow cross-account role there. The spec's
 About 3–5 extra days (W5). If O1 is "one account", everything below
 applies unchanged in the current account.
 
+*As built (W5).* Accounts per stage (`lib/config.ts`): `prod` runs the
+vault stacks in vettid-vault-prod (369484479783) and everything else in
+the management account (449757308783); `staging` runs both in
+vettid-vault-staging (347272280361). The vault tables moved to the vault
+account as recommended, but instead of an assumed role the access is by
+**resource policies**, which is equally narrow and needs no credential
+handling in the Lambda code:
+
+- The three member API functions get fixed role names
+  (`vettid-org-member-vault`, `vettid-org-member-cleanup`,
+  `vettid-org-member-vault-alarms`). One matrix (`lib/vault/access.ts`)
+  renders both their identity policies and the vault account's table
+  resource policies (account root of the API account narrowed by
+  `aws:PrincipalArn`, so neither side must exist first), with the same
+  `dynamodb:Attributes` limits. The handlers address the tables by ARN
+  (DynamoDB accepts a table ARN as `TableName`).
+- The alarm mailer reads the vaults stream across accounts (Lambda
+  supports cross-account DynamoDB Streams event sources through the
+  stream's resource policy, which admits only that role). The stream ARN
+  carries a creation label, so it is context `vaultsStreamArn` set from
+  VettidOrgVaultStack's output after its first deploy.
+- The control queues: the parent applies the queue policy published as
+  SSM `vault/control-queue-policy` (send only, only the vault and cleanup
+  roles) when it creates each queue. **vettid-vault follow-up:** the
+  parent sets that `Policy` attribute in `CreateQueue`.
+- No `Fn::ImportValue`, no cross-account SSM: everything is derived from
+  fixed names and account ids, except the stream ARN.
+
 ### 8.2 Stacks
 
 | Stack | Kind | Owns | Approx. resources |
@@ -535,6 +598,12 @@ versioned, noncurrent versions and delete markers expire after **7 days**
 (`If-None-Match`, `If-Match`) work on versioned buckets. Host access is
 limited to `vaults/*`, `users/*` and reading `manifests/*`; the cleanup job
 deletes `vaults/*` and `users/*` (VAULT-PLAN V5 account deletion).
+*As built (W5):* the bucket policy denies every object action on
+`vaults/*`, `users/*` and `smoke/*` to every principal but the host role,
+and writes to `manifests/*` to every principal but the signer role. The
+cleanup job's object deletion (D + 37, W8) is not granted yet: W8 adds its
+role to that exception. Restoring an older object version (§11.4) means
+editing the bucket policy first.
 
 ### 8.3 Hosts and the AMI
 
@@ -608,6 +677,12 @@ only the host role's grants:
   update.
 - S3 as in §8.2; `ssm:GetParameter` on `vault/*`; CloudWatch Logs and
   metrics; `autoscaling:CompleteLifecycleAction` on its own group.
+- *As built (W5):* also `s3:ListBucket` (so a missing object is
+  `NoSuchKey`, not `AccessDenied`), `smoke/*` for the self-test, the DLQ
+  `vettid-org-vault-dlq` (outside the control prefix), log group
+  `/vettid-org/<stage>/vault-host`, metric namespace `VettID/Vault`, and
+  lifecycle actions on groups named `vettid-org-vault-r*`. All in
+  VettidOrgVaultStack; W6 creates the resources these names point to.
 - **Not** granted: any KMS action in IAM (the key policies name the role),
   any key management.
 
@@ -617,8 +692,8 @@ The member API already records start requests (`start_requested_at` on
 the release's `vettid-org-vault-releases` row) and answers `503
 release_starting`. The `vault-scaler` Lambda (host stack):
 
-- **Start:** triggered by that table's stream (DataStack, new and old
-  images, ARN in SSM `data/vault-releases-stream-arn`; filtered to rows
+- **Start:** triggered by that table's stream (VaultStack, new and old
+  images, ARN in SSM `vault/vault-releases-stream-arn`; filtered to rows
   whose `start_requested_at` changed) and by a 1-minute schedule. The
   member API records a start request at most every 30 s per release and
   only for a routable release. For a release
@@ -705,7 +780,10 @@ job's vault deletion. Order (W4):
 1. `npx cdk diff VettidOrgDataStack`: only the four vault tables, the
    two streams (vaults; vault-releases for the scaler, §8.6) and their SSM
    refs may appear. Deploy. (If O1 moves the tables
-   to the vault account, this step becomes part of W5 instead.)
+   to the vault account, this step becomes part of W5 instead.) *W5:* the
+   tables moved to the vault account; the empty copies deployed here in W4
+   are dropped from DataStack (retained by CloudFormation, deleted by hand,
+   RUNBOOK "Vault").
 2. `npx cdk diff VettidOrgMemberApiStack`, deploy. With no `active`
    release, `GET /api/vault/enclave` answers `503 vault_unavailable` and
    nothing can be enrolled, so this is a safe dark launch. Check the

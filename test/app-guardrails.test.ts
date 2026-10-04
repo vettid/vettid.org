@@ -17,7 +17,7 @@ const MAX_RESOURCES_PER_STACK = 200;
 const STACKS_ALLOWED_TO_IMPORT = new Set(['VettidOrgStack', 'VettidOrgSignupStack']);
 
 // Resource types holding state that must survive a stack delete or replacement.
-const STATEFUL_TYPES = ['AWS::DynamoDB::Table', 'AWS::DynamoDB::GlobalTable', 'AWS::Cognito::UserPool'];
+const STATEFUL_TYPES = ['AWS::DynamoDB::Table', 'AWS::DynamoDB::GlobalTable', 'AWS::Cognito::UserPool', 'Custom::VettidReleaseKey'];
 
 function synthAll(): cdk.Stack[] {
   const prev = process.env.CDK_DEFAULT_ACCOUNT;
@@ -55,8 +55,18 @@ describe('app guardrails', () => {
         'VettidOrgAuditStack',
         'VettidOrgRelayStack',
         'VettidOrgRelayDataStack',
+        'VettidOrgVaultStack',
       ]),
     );
+  });
+
+  test('the vault stack goes to the vault account; everything else to the main (management) account', () => {
+    for (const s of stacks) {
+      expect({ stack: s.stackName, account: s.account }).toEqual({
+        stack: s.stackName,
+        account: s.stackName === 'VettidOrgVaultStack' ? '369484479783' : '449757308783',
+      });
+    }
   });
 
   test.each(templates.map((t) => [t.name, t.json]))('%s stays under the resource budget', (_name, json) => {
@@ -80,6 +90,7 @@ describe('app guardrails', () => {
         'VettidOrgPlaybooksStack',
         'VettidOrgRelayDataStack',
         'VettidOrgSignupStack',
+        'VettidOrgVaultStack',
       ],
     );
   });

@@ -16,6 +16,7 @@ import { VettidOrgAuditStack } from './stacks/audit-stack';
 import { VettidOrgRelayStack } from './stacks/relay-stack';
 import { VettidOrgRelayDataStack } from './stacks/relay-data-stack';
 import { VettidOrgVaultSmokeStack } from './stacks/vault-smoke-stack';
+import { VettidOrgVaultStack, vaultEnv } from './stacks/vault-stack';
 
 /**
  * Builds every stack in the vettid.org app. Kept out of bin/ so tests can
@@ -34,12 +35,33 @@ export function buildApp(app: cdk.App): void {
 
   // Everything lives in us-east-1: CloudFront certs and CLOUDFRONT-scope WAF
   // require it, and one region keeps the growing environment simple.
+  // The main account is pinned per stage (lib/config.ts), so deploying a
+  // vault stack with the vault account's profile still synthesizes these
+  // stacks against their own account and cached lookups.
   const env = {
-    account: process.env.CDK_DEFAULT_ACCOUNT,
+    account: config.accounts.main ?? process.env.CDK_DEFAULT_ACCOUNT,
     region: config.region,
   };
 
   const domainName = config.domainName;
+
+  const vaultStack = () =>
+    config.vault &&
+    new VettidOrgVaultStack(app, 'VettidOrgVaultStack', {
+      config,
+      env: vaultEnv(config, config.vault),
+      terminationProtection: true,
+      // Release keys come from vault/releases.json (W7). None exist yet.
+      releaseKeys: [],
+    });
+
+  // A stage whose main stacks are not stood up yet (staging, until W9):
+  // only its vault account's stack.
+  if (config.vault && !config.accounts.main) {
+    vaultStack();
+    cdk.Annotations.of(app).addInfoV2('vettid:vault-only', `stage ${config.stage}: only VettidOrgVaultStack (no main account yet)`);
+    return;
+  }
 
   // Stacks holding state (zone, pools, tables, buckets, the exit node + EIP)
   // can't be deleted without first turning this off in code — a stray
@@ -111,6 +133,11 @@ export function buildApp(app: cdk.App): void {
       env,
     });
   }
+
+  // ---- Vault (docs/VAULT-RELEASES.md §8; deployed into the vault account) ----
+  // Deploy with that account's profile, before the member API that reads
+  // its tables:  npx cdk deploy VettidOrgVaultStack --profile vault-prod
+  vaultStack();
 
   // ---- Account-level audit & detection (CloudTrail, GuardDuty, alerts) ----
   new VettidOrgAuditStack(app, 'VettidOrgAuditStack', { config, ...stateful });

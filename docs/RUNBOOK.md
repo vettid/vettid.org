@@ -23,7 +23,7 @@ npm run deploy:all                                # everything
 
 ## Stacks
 
-Stateful stacks (Dns, Signup, Playbooks, Auth, Data, AdminAccess, RelayData) have
+Stateful stacks (Dns, Signup, Playbooks, Auth, Data, AdminAccess, RelayData, Audit, Vault) have
 CloudFormation termination protection on (`lib/app.ts`); deleting one means
 turning that off in code (or the console) first.
 
@@ -35,11 +35,12 @@ turning that off in code (or the console) first.
 | `VettidOrgPlaybooksStack` | Playbooks origin bucket (served at `/playbooks/*` by VettidOrgStack; content deployed from the vettid-playbooks repo) |
 | `VettidDevRedirectStack` | The entire vettid.dev footprint: blanket 301 → vettid.org. Permanent. |
 | `VettidOrgAuthStack` | Member + admin Cognito pools, clients, groups, admin hosted-UI domain, PIN pepper secret. Stateful. |
-| `VettidOrgDataStack` | Account/admin DynamoDB tables (`vettid-org-*`), the vault alternate-channel tables (`vettid-org-vault*`, docs/MEMBER-API.md "Vault") + terms PDF bucket. Stateful. |
+| `VettidOrgDataStack` | Account/admin DynamoDB tables (`vettid-org-*`) + terms PDF bucket. Stateful. (The vault tables moved to VettidOrgVaultStack.) |
 | `VettidOrgAdminAccessStack` | Admin tailnet exit node (EC2 + EIP) and the CloudFront WAF allowlist keyed to its IP (admin site). |
 | `VettidOrgAdminApiStack` | Admin REST API at admin-api.vettid.org (docs/ADMIN-API.md): exit-node-IP resource policy + Cognito authorizer, 3 route-group Lambdas. |
 | `VettidOrgAdminSiteStack` | Admin SPA at admin.vettid.org (`sites/admin`), behind the exit-node web ACL. |
 | `VettidOrgRelayDataStack` | Relay state: DynamoDB table `vettid-org-relay` and the blob bucket `vettid-org-relay-blobs-<account>` (published via SSM `relay/*`). Stateful. |
+| `VettidOrgVaultStack` | **In the vault account** (prod: vettid-vault-prod 369484479783; staging: vettid-vault-staging 347272280361). Vault tables (`vettid-org-vault*`), data bucket `vettid-org-vault-data-<account>`, the fixed-name host and retirement roles, manifest key A and its signer role, the release-key custom resource and one key per release. Stateful; see "Vault". |
 | `VettidOrgRelayStack` | relay.vettid.org: VPC (no NAT; S3 + DynamoDB gateway endpoints), ElastiCache Serverless Valkey (IAM auth, TLS), ECS Fargate service (2–8 tasks, rolling deploys), ALB with PQ TLS. Logs to `/vettid-org/<stage>/relay-service`. Only deployed when `relayImage` is set. |
 
 ## CDK conventions (new stacks)
@@ -206,21 +207,145 @@ aws logs delete-log-group --log-group-name /vettid-org/prod/relay
 (Before this step a rollback to the SQLite relay can still restore from the
 replica; after it, it cannot.)
 
-## Vault (from V5; placeholder)
+## Vault (V5; docs/VAULT-RELEASES.md)
 
-Nothing runs yet. When VAULT-PLAN V5 lands, this section covers: publishing
-a release (reproducible build, PCRs, manifest signing, the release's
-immutable KMS key), scaling the enclave host ASG from 0 and on-demand starts
-of older releases, instance and lease health, incident classes and first
-responses, capacity per host, and the disaster-recovery objectives listed in
-VAULT-PLAN V5 (VAULT-RELEASES), and retirement after notice: at a
-release's end date it is `removed`, its stack deleted and its key
+Nothing runs yet: no host, no release, no release key. What exists after
+W5 is the stateful `VettidOrgVaultStack` in each vault account.
+
+### Accounts and profiles
+
+| Stage | Vault account | CLI profile | Member API account |
+|---|---|---|---|
+| `prod` | vettid-vault-prod 369484479783 | `vault-prod` | management 449757308783 (default profile) |
+| `staging` | vettid-vault-staging 347272280361 | `vault-staging` | the staging account itself (full copy, W9) |
+
+`lib/config.ts` pins these. A vault stack must be deployed with its
+account's profile; CDK refuses a cross-account deploy (bootstrap trust is
+per account). A `-c stage=staging` synth contains only the vault stack
+until the staging copy of the main stacks exists (W9).
+
+For the owner-only roles, add chained profiles (MFA is Identity Center's,
+at sign-in):
+
+```ini
+[profile vault-key-retirement]
+source_profile = vault-prod
+role_arn = arn:aws:iam::369484479783:role/vettid-org-vault-key-retirement
+[profile vault-manifest-signer]
+source_profile = vault-prod
+role_arn = arn:aws:iam::369484479783:role/vettid-org-vault-manifest-signer
+```
+
+(and `vault-staging-key-retirement` / `vault-staging-manifest-signer` with
+`source_profile = vault-staging` and account 347272280361 for staging).
+
+### First deployment (W5), in order
+
+```bash
+aws sso login
+# 1. Staging vault account (nothing depends on it yet).
+npx cdk diff   VettidOrgVaultStack -c stage=staging --profile vault-staging
+npx cdk deploy VettidOrgVaultStack -c stage=staging --profile vault-staging
+# 2. Production vault account. The diff shows only new resources.
+npx cdk diff   VettidOrgVaultStack --profile vault-prod
+npx cdk deploy VettidOrgVaultStack --profile vault-prod
+# 3. Put the output VaultsStreamArn into cdk.json "context": "vaultsStreamArn"
+#    (commit it), then move the member API to the vault account's tables
+#    (renamed fixed-name roles, ARNs in env, the cross-account stream):
+npx cdk diff   VettidOrgMemberApiStack
+npx cdk deploy VettidOrgMemberApiStack
+# 4. DataStack drops the four W4 vault tables (CloudFormation retains them)
+#    and their data/vault* SSM refs:
+npx cdk diff   VettidOrgDataStack      # only removals of vault tables + refs
+npx cdk deploy VettidOrgDataStack
+# 5. Delete the orphaned, empty W4 tables by hand (check they are empty):
+for t in vettid-org-vaults vettid-org-vault-instances vettid-org-vault-requests vettid-org-vault-releases; do
+  aws dynamodb scan --table-name $t --select COUNT --query Count
+  aws dynamodb update-table --table-name $t --no-deletion-protection-enabled >/dev/null
+  aws dynamodb delete-table --table-name $t >/dev/null
+done
+# 6. The Vault OU SCP, from the management account (dry run first):
+scripts/vault/apply-scp.sh
+scripts/vault/apply-scp.sh --apply
+```
+
+Step 3 before step 4: the old member API resolves `data/vaults-stream-arn`
+at deploy time, the new one does not. Between steps 2 and 3 the deployed
+API still points at the (empty) W4 tables, which is harmless while no
+release exists.
+
+### Cross-account access
+
+The member API's vault routes, cleanup job and alarm mailer run as fixed
+roles (`vettid-org-member-vault`, `-cleanup`, `-vault-alarms`) and address
+the vault tables by ARN. The vault account's table and stream resource
+policies admit exactly those roles with exactly their grants, rendered
+from the same matrix as their IAM policies (`lib/vault/access.ts`).
+Control queues are created by the enclave host with the queue policy in
+SSM `/vettid-org/<stage>/vault/control-queue-policy` (send only, vault and
+cleanup roles only). Renaming one of the three roles breaks the vault
+routes until VettidOrgVaultStack is redeployed.
+
+### Never delete or rename
+
+- `vettid-org-vault-host` (role and instance profile) and
+  `vettid-org-vault-key-retirement`: every release key's policy names
+  them forever. Deleting the host role makes every vault of every release
+  unopenable; deleting the retirement role makes every key undeletable
+  and fails the enclave's check 8. Retained, guarded by
+  `test/vault-stack.test.ts`, and (once applied) by the Vault OU SCP,
+  which no principal inside a vault account can override. Their IAM
+  policies may change.
+- Release keys can never be disabled or have their policy changed. Removing
+  a release from the stack leaves its key alone (RETAIN; the custom
+  resource's delete does nothing). A changed release entry fails the
+  deploy (the key is immutable): add a new release instead.
+- Break-glass for any of this: detach or edit `vettid-vault-key-protection`
+  from the management account.
+
+### Creating a release key
+
+Releases come from `vault/releases.json` (W7); until then a key is a
+`releaseKeys` entry in `lib/app.ts` (`release`, `pcr0`, and
+`admittedPcr0s` = the PCR0s of every release not `removed`).
+
+1. `npx cdk diff VettidOrgVaultStack --profile vault-prod`: exactly one new
+   `Custom::VettidReleaseKey` and its SSM parameter. Read its `Policy`
+   (the §11.10.7 shape: no administrator statement; Decrypt for this PCR0;
+   GenerateDataKey for this and the admitted PCR0s; reads for the host and
+   retirement roles; the two retirement statements with this channel's
+   window). `npm test` has already run it through the enclave's rules.
+2. `npx cdk deploy VettidOrgVaultStack --profile vault-prod`. The custom
+   resource re-checks the policy and calls `CreateKey` with
+   `BypassPolicyLockoutSafetyCheck`; a refused policy fails the deploy
+   before KMS is called.
+3. The ARN: `aws ssm get-parameter --profile vault-prod --name
+   /vettid-org/prod/vault/releases/<n>/seal-key-arn --query Parameter.Value --output text`.
+4. Check the live key with the enclave's own code (vettid-vault
+   docs/RELEASING.md steps 5–6):
+   `AWS_PROFILE=vault-key-retirement vaultctl keycheck -channel prod -key-arn <arn> -manifest draft.json -record keycheck/<n>`.
+   The release stops unless it exits 0.
+
+Staging keys have the same shape with a 7-day window and are deleted after
+use: `AWS_PROFILE=vault-staging-key-retirement aws kms schedule-key-deletion
+--key-id <arn> --pending-window-in-days 7` (any other window is refused).
+
+### Retirement
+
+At a release's end date it is `removed`, its stack deleted and its key
 scheduled for deletion **as the retirement role, with exactly the pinned
 window** (30 days in production; any other window is refused by the key
 policy), with a rescue (cancel, enable, restart, move) on request within
-that window (VAULT-RELEASES §3.5, §10.3). Release keys can never be
-disabled or have their policy changed; the host and retirement roles named
-in their policies must never be deleted (VAULT-RELEASES §6.3).
+that window (VAULT-RELEASES §3.5, §10.3):
+`AWS_PROFILE=vault-key-retirement aws kms schedule-key-deletion --key-id <arn> --pending-window-in-days 30`.
+
+### Still to come
+
+Publishing a release (reproducible build, PCRs, manifest signing), the
+host and release stacks (W6), scaling the enclave host ASG from 0 and
+on-demand starts of older releases, instance and lease health, incident
+classes and first responses, capacity per host, and the disaster-recovery
+objectives (VAULT-RELEASES §11.4).
 
 ## DNS
 
