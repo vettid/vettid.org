@@ -41,9 +41,19 @@
  *    expires_at }; the parent sets status `done` and `envelope` (b64 of a
  *    5,252-byte sealed result) and/or `code` (e.g. etk_unknown).
  *  - vault-releases table, PK release (PCR0 hex): { release, release_number,
- *    status: active|deprecated|retired, available? }, rendered from the
- *    signed manifest by operations. The API records on-demand start requests
- *    on it (start_requested_at); acting on them is infrastructure (V5).
+ *    status: active|deprecated|retired|removed, available?, rescue?,
+ *    ends_at? }, rendered from the signed manifest by operations. The API
+ *    records on-demand start requests on it (start_requested_at, at most
+ *    every 30 s per release); the scaler acts on them (VAULT-RELEASES §8.6).
+ *
+ * Dark launch (VAULT-RELEASES §9): with no `active` release in the registry,
+ * enroll and GET /api/vault/enclave answer 503 vault_unavailable; nothing is
+ * created, queued or start-requested, and every route keeps its rate limit.
+ *
+ * Manifest by hash (VAULT-MESSAGING 0.10.0 §11.5): enroll and unlock carry
+ * `manifest_sha256` in the clear; the API checks its format only and copies
+ * it into the queue message, so the host can hand that manifest to the
+ * enclave. `manifest_serial` travels only inside the sealed request.
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
@@ -69,6 +79,7 @@ import {
   pickInstance,
   releaseRow,
   requestStart,
+  routable,
 } from '../shared/vault-routing';
 
 export { INSTANCE_ID_RE, LIVE_HEARTBEAT_S, expectedQueueUrl };
@@ -102,6 +113,7 @@ const ULID_RE = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 const VAULT_ID_RE = /^[0-9a-f]{32}$/;
 const KID_RE = /^[0-9a-f]{16}$/;
 const PCR0_RE = /^[0-9a-f]{96}$/;
+const SHA256_RE = /^[0-9a-f]{64}$/;
 const CODE_RE = /^[a-z_][a-z0-9_]{0,63}$/;
 const B64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 
@@ -189,7 +201,9 @@ const vaultError = (status: number, code: string, message: string, extra: Record
 
 const instanceMoved = () =>
   vaultError(409, 'instance_moved', 'The vault is now served by another enclave instance; fetch /api/vault/enclave again and re-seal.');
-const releaseUnavailable = () => vaultError(410, 'release_unavailable', 'The enclave release this vault is sealed to can no longer be started.');
+const releaseUnavailable = () =>
+  vaultError(410, 'release_unavailable', 'The enclave release this vault is sealed to has ended or can no longer be started.');
+const vaultUnavailable = () => vaultError(503, 'vault_unavailable', 'The vault service is not available yet', { retry_after: 300 });
 const releaseStarting = (release: string) =>
   vaultError(503, 'release_starting', 'An enclave for this vault is starting; retry shortly.', { release, retry_after: START_RETRY_AFTER_S });
 
@@ -286,18 +300,21 @@ async function vaultForEnrollment(guid: string, cur: { pointer: string | null; v
 
 const describe = (i: InstanceRow) => ({ instance_id: i.instance_id, release: i.release, descriptor: i.descriptor, attestation: i.attestation });
 
-/** Route to `release`: a live instance, else start one (503), unless it can't run (410). */
+/** Route to `release`: a live instance, else start one (503), unless it can't run or was removed (410). */
 async function routeToRelease(release: string, now: number) {
   const rel = await releaseRow(release);
-  if (!rel || rel.available === false) throw releaseUnavailable();
+  if (!routable(rel)) throw releaseUnavailable();
   const inst = await pickInstance(release, now);
   if (inst) return describe(inst);
   await requestStart(release);
   throw releaseStarting(release);
 }
 
-/** Enrollment: the newest `active` release with a live instance, else start the newest. */
-async function routeForEnrollment(now: number) {
+/**
+ * The `active` releases that can run, newest first. None (the dark launch,
+ * VAULT-RELEASES §9) is 503 vault_unavailable: nothing to enroll into.
+ */
+async function activeReleases(): Promise<ReleaseRow[]> {
   const r = await ddb.send(
     new QueryCommand({
       TableName: table.vaultReleases(),
@@ -308,8 +325,14 @@ async function routeForEnrollment(now: number) {
       ScanIndexForward: false, // newest release_number first
     }),
   );
-  const active = ((r.Items ?? []) as ReleaseRow[]).filter((x) => x.available !== false && PCR0_RE.test(x.release));
-  if (!active.length) throw vaultError(503, 'vault_unavailable', 'The vault service is not available yet', { retry_after: 300 });
+  const active = ((r.Items ?? []) as ReleaseRow[]).filter((x) => x.status === 'active' && x.available !== false && PCR0_RE.test(x.release));
+  if (!active.length) throw vaultUnavailable();
+  return active;
+}
+
+/** Enrollment: the newest `active` release with a live instance, else start the newest. */
+async function routeForEnrollment(now: number) {
+  const active = await activeReleases();
   for (const rel of active) {
     const inst = await pickInstance(rel.release, now);
     if (inst) return describe(inst);
@@ -330,7 +353,7 @@ async function enqueue(
   vault: VaultRow,
   requestId: string,
   inst: InstanceRow,
-  sealed?: { etk_kid: string; envelope: string },
+  sealed?: { etk_kid: string; envelope: string; manifest_sha256?: string },
   opts: { extra?: Record<string, string>; ttlS?: number } = {},
 ): Promise<void> {
   const created = nowIso();
@@ -355,7 +378,8 @@ async function enqueue(
     if ((e as Error).name === 'ConditionalCheckFailedException') throw vaultError(409, 'duplicate_request', 'request_id has already been used');
     throw e;
   }
-  // §11.5 queue message, in the spec's member order. Lock carries no envelope.
+  // §11.5 queue message, in the spec's member order. Lock carries no
+  // envelope; manifest_sha256 is for enroll and unlock only.
   const message = {
     v: 1,
     op,
@@ -363,6 +387,7 @@ async function enqueue(
     user_guid: m.user_guid,
     request_id: requestId,
     ...(sealed ? { etk_kid: sealed.etk_kid, envelope: sealed.envelope } : {}),
+    ...(sealed?.manifest_sha256 ? { manifest_sha256: sealed.manifest_sha256 } : {}),
     ...(opts.extra ?? {}),
     enqueued_at: created,
   };
@@ -393,6 +418,15 @@ async function routeCheck(vault: VaultRow | null, instanceId: string, now: numbe
   const holder = await liveLease(vault, now);
   if (holder && holder.instance_id !== instanceId) throw instanceMoved();
   return inst;
+}
+
+/**
+ * Unlock-like requests to an existing vault: the named instance's release
+ * must still be routable; a `removed` release (not reopened for a rescue)
+ * is 410 release_unavailable (VAULT-MESSAGING 0.10.0 §11.9, §11.10.5).
+ */
+async function requireRoutable(inst: InstanceRow): Promise<void> {
+  if (!routable(await releaseRow(inst.release))) throw releaseUnavailable();
 }
 
 // ---- routes --------------------------------------------------------------------------
@@ -453,15 +487,18 @@ router.on('POST', '/api/vault/enroll', async (req) => {
   const instanceId = field(req.body, 'instance_id', INSTANCE_ID_RE, 'an instance id');
   const etkKid = field(req.body, 'etk_kid', KID_RE, '16 lowercase hex');
   const envelope = checkEnvelope(req.body.envelope, ENVELOPE_BYTES_LARGE, etkKid);
+  const manifestSha256 = field(req.body, 'manifest_sha256', SHA256_RE, '64 lowercase hex');
   await limit(`vault-enroll#${m.user_guid}`, 3, 86_400);
 
+  // Dark launch: no `active` release, nothing to enroll into (503 vault_unavailable).
+  const active = await activeReleases();
   const now = nowS();
   const cur = await currentVault(m.user_guid);
   const inst = await routeCheck(activeVault(cur.vault), instanceId, now);
   // Enrollment goes to an instance of an `active` release (§11.1).
-  if ((await releaseRow(inst.release))?.status !== 'active') throw instanceMoved();
+  if (!active.some((r) => r.release === inst.release)) throw instanceMoved();
   const vault = await vaultForEnrollment(m.user_guid, cur);
-  await enqueue('enroll', m, vault, requestId, inst, { etk_kid: etkKid, envelope });
+  await enqueue('enroll', m, vault, requestId, inst, { etk_kid: etkKid, envelope, manifest_sha256: manifestSha256 });
   await audit(m.email, 'vault.enroll_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: instanceId, release: inst.release });
   return new WithStatus(202, { vault_id: vault.vault_id, request_id: requestId });
 });
@@ -473,6 +510,7 @@ router.on('POST', '/api/vault/unlock', async (req) => {
   const instanceId = field(req.body, 'instance_id', INSTANCE_ID_RE, 'an instance id');
   const etkKid = field(req.body, 'etk_kid', KID_RE, '16 lowercase hex');
   const envelope = checkEnvelope(req.body.envelope, ENVELOPE_BYTES_LARGE, etkKid);
+  const manifestSha256 = field(req.body, 'manifest_sha256', SHA256_RE, '64 lowercase hex');
   await limit(`vault-unlock#${m.user_guid}`, 10, 15 * 60);
   // Per source network: an IPv6 /64, or an IPv4 address (carrier NAT puts
   // many members behind one address, hence the higher limit; §11.8).
@@ -481,7 +519,8 @@ router.on('POST', '/api/vault/unlock', async (req) => {
   const vault = activeVault((await currentVault(m.user_guid)).vault);
   if (!vault || vault.vault_id !== vaultId) throw notFound('No such vault');
   const inst = await routeCheck(vault, instanceId, nowS());
-  await enqueue('unlock', m, vault, requestId, inst, { etk_kid: etkKid, envelope });
+  await requireRoutable(inst);
+  await enqueue('unlock', m, vault, requestId, inst, { etk_kid: etkKid, envelope, manifest_sha256: manifestSha256 });
   await audit(m.email, 'vault.unlock_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: instanceId, release: inst.release });
   return new WithStatus(202, { vault_id: vault.vault_id, request_id: requestId });
 });
@@ -583,8 +622,7 @@ async function recoveryInstance(v: VaultRow, now: number): Promise<InstanceRow> 
   const holder = await liveLease(v, now);
   if (holder) return holder;
   if (!v.sealed_release) throw vaultError(409, 'conflict', 'The vault is not sealed to a release yet');
-  const rel = await releaseRow(v.sealed_release);
-  if (!rel || rel.available === false) throw releaseUnavailable();
+  if (!routable(await releaseRow(v.sealed_release))) throw releaseUnavailable();
   const inst = await pickInstance(v.sealed_release, now);
   if (inst) return inst;
   await requestStart(v.sealed_release);
@@ -746,6 +784,7 @@ router.on('POST', '/api/vault/recovery/register', async (req) => {
   if (!vault || vault.vault_id !== vaultId) throw notFound('No such vault');
   if (recoveryState(vault.recovery, now) !== 'available') throw vaultError(409, 'recovery_not_available', 'No recovery code is valid now');
   const inst = await routeCheck(vault, instanceId, now);
+  await requireRoutable(inst);
   await enqueue('recovery_register', m, vault, requestId, inst, { etk_kid: etkKid, envelope });
   await audit(m.email, 'vault.recovery_register', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, recovery_id: vault.recovery!.recovery_id, instance_id: instanceId });
   return new WithStatus(202, { vault_id: vault.vault_id, request_id: requestId });

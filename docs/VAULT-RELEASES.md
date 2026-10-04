@@ -617,8 +617,11 @@ The member API already records start requests (`start_requested_at` on
 the release's `vettid-org-vault-releases` row) and answers `503
 release_starting`. The `vault-scaler` Lambda (host stack):
 
-- **Start:** triggered by that table's stream (filtered to rows whose
-  `start_requested_at` changed) and by a 1-minute schedule. For a release
+- **Start:** triggered by that table's stream (DataStack, new and old
+  images, ARN in SSM `data/vault-releases-stream-arn`; filtered to rows
+  whose `start_requested_at` changed) and by a 1-minute schedule. The
+  member API records a start request at most every 30 s per release and
+  only for a routable release. For a release
   with `available` and no live instance, it sets the release group's
   desired capacity to 1 (group name from SSM by release) and records
   `start_issued_at`. Cold start (boot, allocator, enclave, first
@@ -631,7 +634,15 @@ release_starting`. The `vault-scaler` Lambda (host stack):
   (configurable), so a flood of start requests costs at most that.
 - **Alarms:** a start request unfulfilled after 10 minutes; a group at its
   cap.
-- Never: starting a `removed` release, or one whose group does not exist.
+- Never: starting a `removed` release, unless its row has `rescue: true`
+  (a rescue, §10.3, which the member API routes as usual), or one whose
+  group does not exist.
+- **W6 follow-up (rescue scope):** `rescue` is release-wide: while it is
+  set, every vault sealed to that release is routed to it, not only the
+  vault of the member who asked. That affects availability only (the apps
+  offer nothing but the move off a `removed` release, VAULT-MESSAGING
+  §11.10.6). A per-vault rescue would need a field on the vault row that
+  the member API checks; decide in W6 whether it is worth it.
 
 ### 8.7 Observability
 
@@ -692,7 +703,8 @@ group, the `vault-alarms` mailer on the vaults stream, and the cleanup
 job's vault deletion. Order (W4):
 
 1. `npx cdk diff VettidOrgDataStack`: only the four vault tables, the
-   stream and their SSM refs may appear. Deploy. (If O1 moves the tables
+   two streams (vaults; vault-releases for the scaler, §8.6) and their SSM
+   refs may appear. Deploy. (If O1 moves the tables
    to the vault account, this step becomes part of W5 instead.)
 2. `npx cdk diff VettidOrgMemberApiStack`, deploy. With no `active`
    release, `GET /api/vault/enclave` answers `503 vault_unavailable` and
@@ -750,8 +762,10 @@ with the notice job sending the emails of §3.5 automatically:
    `aws kms schedule-key-deletion --key-id <arn> --pending-window-in-days 30`;
    the deadline email goes out.
 3. Rescue (D … D+30), on a member's request: as the retirement role,
-   `cancel-key-deletion`, `enable-key`; redeploy the release stack; the
-   member moves; then step 2 again.
+   `cancel-key-deletion`, `enable-key`; redeploy the release stack and set
+   `rescue: true` on its `vault-releases` row (the member API routes a
+   `removed` release only then); the member moves; remove `rescue`; then
+   step 2 again.
 4. D+30: the key is deleted; the final email; D+37 the cleanup job deletes
    the stored objects and rows of vaults still sealed to N.
 5. Drop N from the manifest once no live key admits it.

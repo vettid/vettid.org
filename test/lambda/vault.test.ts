@@ -74,6 +74,7 @@ function installFakeDdb() {
       tbl(t).set(k, { ...cur, vault_id: k, current_vault_id: v[':new'], updated_at: v[':now'] });
     } else if (t === 'releases') {
       if (!cur) throw ccf();
+      if (cur.start_requested_at !== undefined && !(cur.start_requested_at < v[':cut'])) throw ccf();
       cur.start_requested_at = v[':now'];
       cur.start_requests = (cur.start_requests ?? 0) + 1;
     } else if (t === 'requests') {
@@ -109,6 +110,7 @@ const KID = '0123456789abcdef';
 const RID = '01JB2Z6V9K3M4N5P6Q7R8S9T0V';
 const RID2 = '01JB2Z6V9K3M4N5P6Q7R8S9T0W';
 const VID = 'f'.repeat(32);
+const MSHA = '9'.repeat(64); // manifest_sha256 (0.10.0 §11.5)
 
 function envelope(bytes = 13_444, kid = KID, patch: (b: Buffer) => void = () => {}): string {
   const b = Buffer.alloc(bytes, 0x5a);
@@ -179,8 +181,8 @@ describe('access', () => {
   // Enclave, enroll and unlock need a member with the current terms (§11.1).
   const gated: [string, string, unknown?][] = [
     ['GET', '/api/vault/enclave'],
-    ['POST', '/api/vault/enroll', { request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV }],
-    ['POST', '/api/vault/unlock', { vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV }],
+    ['POST', '/api/vault/enroll', { request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA }],
+    ['POST', '/api/vault/unlock', { vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA }],
   ];
 
   test.each(gated)('registered users get 403 terms_required: %s %s', async (...[method, path, body]: [string, string, unknown?]) => {
@@ -303,6 +305,17 @@ describe('GET /api/vault/enclave', () => {
     expect(r.body.error).toBe('release_starting');
   });
 
+  test('start requests are recorded at most every 30 s per release, however many members ask', async () => {
+    release(R0, 4);
+    vaultOf('g1', { vault_id: VID, sealed_release: R0 });
+    vaultOf('g2', { vault_id: 'e'.repeat(32), sealed_release: R0 });
+    for (const guid of ['g1', 'g2', 'g1']) expect((await call('GET', '/api/vault/enclave', undefined, { guid })).body.error).toBe('release_starting');
+    expect(getItem('releases', R0).start_requests).toBe(1);
+    jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + 31_000);
+    await call('GET', '/api/vault/enclave');
+    expect(getItem('releases', R0).start_requests).toBe(2);
+  });
+
   test('sealed release not running: records a start request, 503 release_starting', async () => {
     release(R0, 4, 'retired'); // retired releases still unlock the vaults sealed to them
     vaultOf('g1', { vault_id: VID, sealed_release: R0 });
@@ -358,8 +371,111 @@ describe('GET /api/vault/enclave', () => {
 
 // ---- POST /api/vault/enroll -------------------------------------------------------
 
+// ---- dark launch (VAULT-RELEASES §9): an empty release registry ------------------
+
+describe('dark launch: no active release', () => {
+  const enrollBody = { request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA };
+  const writes = () => ddb.commandCalls(PutCommand).concat(ddb.commandCalls(UpdateCommand) as any).map((c) => c.args[0].input.TableName).filter((t) => t !== 'rl');
+
+  test('enclave and enroll answer 503 vault_unavailable; nothing is created, queued or start-requested', async () => {
+    const e = await call('GET', '/api/vault/enclave');
+    expect(e).toEqual({ status: 503, body: expect.objectContaining({ error: 'vault_unavailable', code: 'vault_unavailable', retry_after: 300 }) });
+    const r = await call('POST', '/api/vault/enroll', enrollBody);
+    expect(r).toEqual({ status: 503, body: expect.objectContaining({ error: 'vault_unavailable', code: 'vault_unavailable', retry_after: 300 }) });
+    expect(sqs.calls()).toHaveLength(0);
+    expect(writes()).toEqual([]);
+    expect(tbl('releases').size).toBe(0);
+    expect(tbl('vaults').size).toBe(0);
+    expect(tbl('requests').size).toBe(0);
+  });
+
+  test('even with a stray instance registered, enroll is 503 (an instance alone is not a release)', async () => {
+    instance('i-1', R0);
+    expect((await call('POST', '/api/vault/enroll', enrollBody)).body.error).toBe('vault_unavailable');
+    expect(sqs.calls()).toHaveLength(0);
+  });
+
+  test('only deprecated, retired, removed or unstartable releases: still 503 vault_unavailable', async () => {
+    release(R0, 4, 'deprecated');
+    release(R1, 5, 'active', { available: false });
+    release('c'.repeat(96), 6, 'removed');
+    instance('i-1', R0);
+    expect((await call('GET', '/api/vault/enclave')).body.error).toBe('vault_unavailable');
+    expect((await call('POST', '/api/vault/enroll', enrollBody)).body.error).toBe('vault_unavailable');
+    for (const r of tbl('releases').values()) expect(r.start_requests).toBeUndefined();
+  });
+
+  test('status, unlock and lock without a vault: {vault: null}, 404, 404', async () => {
+    expect((await call('GET', '/api/vault/status')).body).toEqual({ vault: null });
+    expect((await call('POST', '/api/vault/unlock', { vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA })).status).toBe(404);
+    expect((await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID2 })).status).toBe(404);
+    expect((await call('GET', '/api/vault/enclave', undefined, { query: { release: R0 } })).status).toBe(404);
+    expect((await call('POST', '/api/vault/recovery', { browser_key: Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64') })).status).toBe(404);
+    expect(sqs.calls()).toHaveLength(0);
+    expect(writes()).toEqual([]);
+  });
+
+  test('rate limits still apply: enclave 30 per minute, enroll 3 per day', async () => {
+    for (let i = 0; i < 30; i++) expect((await call('GET', '/api/vault/enclave')).status).toBe(503);
+    expect((await call('GET', '/api/vault/enclave')).status).toBe(429);
+    for (let i = 0; i < 3; i++) expect((await call('POST', '/api/vault/enroll', enrollBody)).status).toBe(503);
+    expect((await call('POST', '/api/vault/enroll', enrollBody)).status).toBe(429);
+  });
+});
+
+// ---- removed releases (VAULT-MESSAGING 0.10.0 §11.10.5) ----------------------------
+
+describe('a removed release', () => {
+  beforeEach(() => {
+    release(R0, 4, 'removed', { ends_at: '2027-11-01T00:00:00Z' });
+    release(R1, 5);
+    instance('i-new', R1);
+  });
+
+  test('the enclave route answers 410 release_unavailable and requests no start', async () => {
+    vaultOf('g1', { vault_id: VID, sealed_release: R0 });
+    const r = await call('GET', '/api/vault/enclave');
+    expect(r).toEqual({ status: 410, body: expect.objectContaining({ error: 'release_unavailable', code: 'release_unavailable' }) });
+    expect(getItem('releases', R0).start_requests).toBeUndefined();
+    expect((await call('GET', '/api/vault/enclave', undefined, { query: { release: R0 } })).status).toBe(410);
+  });
+
+  test('even a stray live instance of it is not routed', async () => {
+    instance('i-old', R0);
+    vaultOf('g1', { vault_id: VID, sealed_release: R0 });
+    expect((await call('GET', '/api/vault/enclave')).status).toBe(410);
+  });
+
+  test('reopened for a rescue: routed as usual, and started on demand', async () => {
+    release(R0, 4, 'removed', { rescue: true });
+    vaultOf('g1', { vault_id: VID, sealed_release: R0 });
+    expect((await call('GET', '/api/vault/enclave')).body).toMatchObject({ error: 'release_starting', release: R0 });
+    expect(getItem('releases', R0).start_requests).toBe(1);
+    instance('i-old', R0);
+    expect((await call('GET', '/api/vault/enclave')).body).toMatchObject({ instance_id: 'i-old', release: R0 });
+  });
+
+  test('recovery is 410 too (no instance to send it to)', async () => {
+    vaultOf('g1', { vault_id: VID, state: 'locked', sealed_release: R0 });
+    const r = await call('POST', '/api/vault/recovery', { browser_key: Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64') });
+    expect(r.status).toBe(410);
+    expect(getItem('vaults', VID).recovery).toBeUndefined();
+    expect(sqs.calls()).toHaveLength(0);
+  });
+});
+
+// manifest_sha256: REQUIRED, 64 lowercase hex (VAULT-MESSAGING 0.10.0 §11.1).
+const badManifestHashes: [string, Record<string, unknown>][] = [
+  ['no manifest_sha256', { manifest_sha256: undefined }],
+  ['manifest_sha256 in upper case', { manifest_sha256: 'A'.repeat(64) }],
+  ['manifest_sha256 of 63 hex', { manifest_sha256: '9'.repeat(63) }],
+  ['manifest_sha256 of 65 hex', { manifest_sha256: '9'.repeat(65) }],
+  ['manifest_sha256 as a number', { manifest_sha256: 9 }],
+  ['manifest_sha256 in base64', { manifest_sha256: Buffer.alloc(32, 9).toString('base64') }],
+];
+
 describe('POST /api/vault/enroll', () => {
-  const body = (extra: Record<string, unknown> = {}) => ({ request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, ...extra });
+  const body = (extra: Record<string, unknown> = {}) => ({ request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA, ...extra });
   beforeEach(() => {
     release(R1, 5);
     instance('i-1', R1);
@@ -378,8 +494,8 @@ describe('POST /api/vault/enroll', () => {
     expect(getItem('requests', RID)).not.toHaveProperty('envelope'); // envelopes are not stored
     const [m] = sent();
     expect(m.url).toBe(QUEUE_PREFIX + 'i-1');
-    expect(Object.keys(m.msg)).toEqual(['v', 'op', 'vault_id', 'user_guid', 'request_id', 'etk_kid', 'envelope', 'enqueued_at']);
-    expect(m.msg).toMatchObject({ v: 1, op: 'enroll', vault_id: vid, user_guid: 'g1', request_id: RID, etk_kid: KID, envelope: ENV });
+    expect(Object.keys(m.msg)).toEqual(['v', 'op', 'vault_id', 'user_guid', 'request_id', 'etk_kid', 'envelope', 'manifest_sha256', 'enqueued_at']);
+    expect(m.msg).toMatchObject({ v: 1, op: 'enroll', vault_id: vid, user_guid: 'g1', request_id: RID, etk_kid: KID, envelope: ENV, manifest_sha256: MSHA });
     const auditPut = ddb.commandCalls(PutCommand).find((c) => c.args[0].input.TableName === 'audit')!;
     expect(auditPut.args[0].input.Item).toMatchObject({ action: 'vault.enroll_request', subject: 'g1' });
     expect(JSON.stringify(auditPut.args[0].input.Item)).not.toContain(ENV.slice(0, 64));
@@ -418,6 +534,7 @@ describe('POST /api/vault/enroll', () => {
     ['bad request_id', { request_id: 'not-a-ulid' }],
     ['bad etk_kid', { etk_kid: 'XYZ' }],
     ['bad instance_id', { instance_id: '../../x' }],
+    ...badManifestHashes,
   ])('rejects %s with 400 and enqueues nothing', async (_name, extra) => {
     const r = await call('POST', '/api/vault/enroll', body(extra));
     expect(r.status).toBe(400);
@@ -453,18 +570,40 @@ describe('POST /api/vault/enroll', () => {
 // ---- POST /api/vault/unlock ------------------------------------------------------
 
 describe('POST /api/vault/unlock', () => {
-  const body = (extra: Record<string, unknown> = {}) => ({ vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, ...extra });
+  const body = (extra: Record<string, unknown> = {}) => ({ vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA, ...extra });
   beforeEach(() => {
     release(R0, 4);
     instance('i-1', R0);
     instance('i-2', R0);
   });
 
-  test('no lease: forwarded to the named live instance', async () => {
+  test('no lease: forwarded to the named live instance; the §11.5 message carries manifest_sha256', async () => {
     vaultOf('g1', { vault_id: VID, sealed_release: R0 });
     const r = await call('POST', '/api/vault/unlock', body());
     expect(r).toEqual({ status: 202, body: { vault_id: VID, request_id: RID } });
-    expect(sent()[0]).toMatchObject({ url: QUEUE_PREFIX + 'i-1', msg: { op: 'unlock', vault_id: VID, user_guid: 'g1', etk_kid: KID, envelope: ENV } });
+    const [m] = sent();
+    expect(m).toMatchObject({ url: QUEUE_PREFIX + 'i-1', msg: { v: 1, op: 'unlock', vault_id: VID, user_guid: 'g1', request_id: RID, etk_kid: KID, envelope: ENV, manifest_sha256: MSHA } });
+    expect(Object.keys(m.msg)).toEqual(['v', 'op', 'vault_id', 'user_guid', 'request_id', 'etk_kid', 'envelope', 'manifest_sha256', 'enqueued_at']);
+  });
+
+  test.each(badManifestHashes)('rejects %s with 400 and enqueues nothing', async (_name, extra) => {
+    vaultOf('g1', { vault_id: VID, sealed_release: R0 });
+    const r = await call('POST', '/api/vault/unlock', body(extra));
+    expect(r).toEqual({ status: 400, body: expect.objectContaining({ error: 'bad_request' }) });
+    expect(sqs.calls()).toHaveLength(0);
+    expect(tbl('requests').size).toBe(0);
+  });
+
+  test('the named instance runs a removed release → 410 release_unavailable, nothing queued; a rescue reopens it', async () => {
+    release(R0, 4, 'removed', { ends_at: '2027-11-01T00:00:00Z' });
+    vaultOf('g1', { vault_id: VID, sealed_release: R0 });
+    const r = await call('POST', '/api/vault/unlock', body());
+    expect(r).toEqual({ status: 410, body: expect.objectContaining({ error: 'release_unavailable', code: 'release_unavailable' }) });
+    expect(sqs.calls()).toHaveLength(0);
+    expect(tbl('requests').size).toBe(0);
+    release(R0, 4, 'removed', { rescue: true });
+    expect((await call('POST', '/api/vault/unlock', body({ request_id: RID2 }))).status).toBe(202);
+    expect(sent()).toHaveLength(1);
   });
 
   test('forwarded when the named instance holds the lease', async () => {
@@ -555,7 +694,14 @@ describe('POST /api/vault/lock', () => {
     instance('i-1', R0);
   });
 
-  test('goes to the leaseholder, without envelope or etk_kid', async () => {
+  test('works whatever the release status, including removed (locking only reduces exposure)', async () => {
+    release(R0, 4, 'removed');
+    vaultOf('g1', { vault_id: VID, state: 'unlocked', sealed_release: R0, lease: { instance_id: 'i-1', lease_expires_at: NOW + 60 } });
+    expect((await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID })).status).toBe(202);
+    expect(sent().map((m) => m.msg.op)).toEqual(['lock']);
+  });
+
+  test('goes to the leaseholder, without envelope, etk_kid or manifest_sha256', async () => {
     vaultOf('g1', { vault_id: VID, state: 'unlocked', lease: { instance_id: 'i-1', lease_expires_at: NOW + 60 } });
     const r = await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID });
     expect(r.status).toBe(202);

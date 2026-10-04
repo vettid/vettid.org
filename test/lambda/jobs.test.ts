@@ -94,6 +94,25 @@ describe('cleanup job', () => {
     expect(ups.find((i) => i.TableName === 'vaults')).toMatchObject({ UpdateExpression: 'SET deletion_requested_at = :t' });
   });
 
+  test('a removed release (0.10.0) is never asked to start, unless reopened for a rescue', async () => {
+    withVaults([{ vault_id: 'a'.repeat(32), user_guid: 'g1', state: 'locked', sealed_release: R }]);
+    ddb.on(GetCommand, { TableName: 'releases' } as any).resolves({ Item: { release: R, release_number: 3, status: 'removed', available: false } });
+    ddb.on(DeleteCommand).resolves({});
+    ddb.on(UpdateCommand).resolves({});
+    idp.on(AdminDeleteUserCommand).resolves({});
+    await cleanup.handler();
+    let ups = ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input);
+    expect(ups.find((i) => i.TableName === 'releases')).toBeUndefined();
+    expect(ups.find((i) => i.TableName === 'vaults')).toMatchObject({ UpdateExpression: 'SET deletion_requested_at = :t' });
+    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
+
+    ddb.resetHistory();
+    ddb.on(GetCommand, { TableName: 'releases' } as any).resolves({ Item: { release: R, release_number: 3, status: 'removed', rescue: true } });
+    await cleanup.handler();
+    ups = ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input);
+    expect(ups.find((i) => i.TableName === 'releases')).toMatchObject({ Key: { release: R } });
+  });
+
   test('unreported deletions are retried; after 30 days they are flagged with the vault_id only', async () => {
     ddb.on(ScanCommand).resolves({ Items: [{ vault_id: 'a'.repeat(32), user_guid: 'g9', state: 'locked', sealed_release: R, deletion_requested_at: nowS() - 31 * 86_400 }] });
     ddb.on(GetCommand, { TableName: 'releases' } as any).resolves({ Item: { release: R, release_number: 3, status: 'active' } });

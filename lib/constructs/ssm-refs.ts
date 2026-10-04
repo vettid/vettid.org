@@ -29,6 +29,7 @@ export type SsmRefKey =
   | 'data/vault-instances-table-name'
   | 'data/vault-requests-table-name'
   | 'data/vault-releases-table-name'
+  | 'data/vault-releases-stream-arn'
   | 'data/vault-control-queue-prefix'
   | 'relay/table-name'
   | 'relay/table-arn'
