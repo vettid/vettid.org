@@ -17,7 +17,13 @@
  *   step's copy, which hosts hand to enclaves, M1); metric
  *   ManifestMissingInBucket if not.
  *
- * No pinned key configured (before W7/W10): logs and does nothing.
+ * No pinned key configured: logs and does nothing. Nothing served yet (HTTP
+ * 404 or no such host: before the channel's first release, W7): logs and
+ * does nothing, unless an earlier manifest was synced (then an error).
+ *
+ * Rows the manifest never wrote (no `manifest_serial`) are the operator's:
+ * a `canary` row (VAULT-RELEASES §10.1 step 9, W8) is never deleted here,
+ * and becomes an ordinary row when the published manifest lists its PCR0.
  */
 import { HeadObjectCommand } from '@aws-sdk/client-s3';
 import { GetParametersByPathCommand, SSMClient } from '@aws-sdk/client-ssm';
@@ -75,8 +81,17 @@ function metrics(values: Record<string, number>): void {
   );
 }
 
-async function fetchServed(url: string): Promise<Buffer> {
-  const r = await fetch(url, { headers: { accept: 'application/json', 'cache-control': 'no-cache' }, signal: AbortSignal.timeout(10_000), redirect: 'error' });
+/** The served document, or null if none is published (HTTP 404, or the host does not exist yet). */
+async function fetchServed(url: string): Promise<Buffer | null> {
+  let r: Response;
+  try {
+    r = await fetch(url, { headers: { accept: 'application/json', 'cache-control': 'no-cache' }, signal: AbortSignal.timeout(10_000), redirect: 'error' });
+  } catch (e) {
+    const code = ((e as { cause?: { code?: string } }).cause ?? {}).code;
+    if (code === 'ENOTFOUND') return null;
+    throw e;
+  }
+  if (r.status === 404) return null;
   if (!r.ok) throw new Error(`manifest fetch: HTTP ${r.status}`);
   const b = Buffer.from(await r.arrayBuffer());
   if (b.length > MAX_SERVED) throw new ManifestError('served', 'served document too large');
@@ -133,9 +148,18 @@ export async function handler(): Promise<{ status: string; serial?: number }> {
     console.log(JSON.stringify({ msg: 'manifest sync skipped: no pinned manifest key configured' }));
     return { status: 'skipped' };
   }
+  const served = await fetchServed(env('MANIFEST_URL'));
+  if (!served) {
+    // Before the channel's first publication nothing is served (VAULT-RELEASES
+    // §7): not an error. Once a manifest was synced, a missing one is.
+    const synced = (await scanRows()).filter((r) => typeof r.manifest_serial === 'number');
+    if (synced.length) throw new Error(`manifest fetch: nothing served, but serial ${Math.max(...synced.map((r) => r.manifest_serial!))} was synced`);
+    console.log(JSON.stringify({ msg: 'no manifest published yet' }));
+    return { status: 'absent' };
+  }
   let m: Manifest;
   try {
-    m = verifyServed(await fetchServed(env('MANIFEST_URL')), keys);
+    m = verifyServed(served, keys);
   } catch (e) {
     if (e instanceof ManifestError) {
       console.log(JSON.stringify({ msg: 'manifest rejected', code: e.code, reason: e.message }));

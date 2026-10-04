@@ -45,6 +45,11 @@
  *    ends_at? }, rendered from the signed manifest by operations. The API
  *    records on-demand start requests on it (start_requested_at, at most
  *    every 30 s per release); the scaler acts on them (VAULT-RELEASES §8.6).
+ *    An operator may add a row with status `canary` for a release under
+ *    test (VAULT-RELEASES §10.1 step 9): it is routed only for members whose
+ *    row has `vault_canary: true` (enrollment prefers it; for everyone else
+ *    it is unknown, 410), and becomes an ordinary row when the published
+ *    manifest lists it.
  *
  * Dark launch (VAULT-RELEASES §9): with no `active` release in the registry,
  * enroll and GET /api/vault/enclave answer 503 vault_unavailable; nothing is
@@ -79,6 +84,7 @@ import {
   pickInstance,
   releaseRow,
   requestStart,
+  isCanaryMember,
   routable,
 } from '../shared/vault-routing';
 
@@ -300,45 +306,62 @@ async function vaultForEnrollment(guid: string, cur: { pointer: string | null; v
 
 const describe = (i: InstanceRow) => ({ instance_id: i.instance_id, release: i.release, descriptor: i.descriptor, attestation: i.attestation });
 
-/** Route to `release`: a live instance, else start one (503), unless it can't run or was removed (410). */
-async function routeToRelease(release: string, now: number) {
+/**
+ * Route to `release`: a live instance, else start one (503), unless it
+ * can't run or was removed (410). `canary`: the member may use canary
+ * releases (VAULT-RELEASES §10.1 step 9); for anyone else a canary release
+ * is unknown (410).
+ */
+async function routeToRelease(release: string, now: number, canary: boolean) {
   const rel = await releaseRow(release);
-  if (!routable(rel)) throw releaseUnavailable();
+  if (!routable(rel, { canary })) throw releaseUnavailable();
   const inst = await pickInstance(release, now);
   if (inst) return describe(inst);
   await requestStart(release);
   throw releaseStarting(release);
 }
 
-/**
- * The `active` releases that can run, newest first. None (the dark launch,
- * VAULT-RELEASES §9) is 503 vault_unavailable: nothing to enroll into.
- */
-async function activeReleases(): Promise<ReleaseRow[]> {
+/** The releases with `status` that can run, newest first. */
+async function releasesWithStatus(status: 'active' | 'canary'): Promise<ReleaseRow[]> {
   const r = await ddb.send(
     new QueryCommand({
       TableName: table.vaultReleases(),
       IndexName: 'status-index',
       KeyConditionExpression: '#s = :a',
       ExpressionAttributeNames: { '#s': 'status' },
-      ExpressionAttributeValues: { ':a': 'active' },
+      ExpressionAttributeValues: { ':a': status },
       ScanIndexForward: false, // newest release_number first
     }),
   );
-  const active = ((r.Items ?? []) as ReleaseRow[]).filter((x) => x.status === 'active' && x.available !== false && PCR0_RE.test(x.release));
+  return ((r.Items ?? []) as ReleaseRow[]).filter((x) => x.status === status && x.available !== false && PCR0_RE.test(x.release));
+}
+
+/**
+ * What a new vault may be enrolled into, newest first: the `active`
+ * releases; for a canary member, the `canary` releases instead while any
+ * exists (the canary enrolls into the release under test, §10.1 step 9,
+ * even before production release 1, when nothing is active). None (the
+ * dark launch, VAULT-RELEASES §9) is 503 vault_unavailable.
+ */
+async function enrollmentTargets(canary: boolean): Promise<ReleaseRow[]> {
+  if (canary) {
+    const c = await releasesWithStatus('canary');
+    if (c.length) return c;
+  }
+  const active = await releasesWithStatus('active');
   if (!active.length) throw vaultUnavailable();
   return active;
 }
 
-/** Enrollment: the newest `active` release with a live instance, else start the newest. */
-async function routeForEnrollment(now: number) {
-  const active = await activeReleases();
-  for (const rel of active) {
+/** Enrollment: the newest target release with a live instance, else start the newest. */
+async function routeForEnrollment(now: number, canary: boolean) {
+  const targets = await enrollmentTargets(canary);
+  for (const rel of targets) {
     const inst = await pickInstance(rel.release, now);
     if (inst) return describe(inst);
   }
-  await requestStart(active[0].release);
-  throw releaseStarting(active[0].release);
+  await requestStart(targets[0].release);
+  throw releaseStarting(targets[0].release);
 }
 
 // ---- requests ------------------------------------------------------------------------
@@ -425,8 +448,36 @@ async function routeCheck(vault: VaultRow | null, instanceId: string, now: numbe
  * must still be routable; a `removed` release (not reopened for a rescue)
  * is 410 release_unavailable (VAULT-MESSAGING 0.10.0 §11.9, §11.10.5).
  */
-async function requireRoutable(inst: InstanceRow): Promise<void> {
-  if (!routable(await releaseRow(inst.release))) throw releaseUnavailable();
+async function requireRoutable(inst: InstanceRow, canary: boolean): Promise<void> {
+  if (!routable(await releaseRow(inst.release), { canary })) throw releaseUnavailable();
+}
+
+/**
+ * What the account site and apps show about the vault's release (W8,
+ * RELEASE-UPDATES §3; the apps' own source is the signed manifest,
+ * VAULT-MESSAGING §11.10.6): its number, status and end date, and the
+ * notice that follows from them. Advisory, from the routing table.
+ */
+export type ReleaseNotice = 'update_available' | 'final_warning' | 'ended' | 'rescue' | 'unavailable' | null;
+
+export function releaseNotice(rel: ReleaseRow | null, newestActive: number | null, canary: boolean): {
+  number: number | null; status: string; ends_at: string | null; newest_active: number | null; notice: ReleaseNotice;
+} {
+  if (!rel || (rel.status === 'canary' && !canary)) return { number: null, status: 'unknown', ends_at: null, newest_active: newestActive, notice: 'unavailable' };
+  const base = { number: rel.release_number, status: rel.status, ends_at: rel.ends_at ?? null, newest_active: newestActive };
+  if (rel.available === false) return { ...base, notice: 'unavailable' };
+  switch (rel.status) {
+    case 'active':
+      return { ...base, notice: newestActive !== null && newestActive > rel.release_number ? 'update_available' : null };
+    case 'deprecated':
+      return { ...base, notice: 'update_available' };
+    case 'retired':
+      return { ...base, notice: 'final_warning' };
+    case 'removed':
+      return { ...base, notice: rel.rescue === true ? 'rescue' : 'ended' };
+    default:
+      return { ...base, notice: null };
+  }
 }
 
 // ---- routes --------------------------------------------------------------------------
@@ -437,11 +488,18 @@ router.on('GET', '/api/vault/status', async (req) => {
   const now = nowS();
   const v = activeVault((await currentVault(m.user_guid)).vault);
   if (!v) return { vault: null };
+  let release = null;
+  if (v.sealed_release) {
+    const [rel, active] = await Promise.all([releaseRow(v.sealed_release), releasesWithStatus('active')]);
+    release = releaseNotice(rel, active.length ? active[0].release_number : null, isCanaryMember(m));
+  }
   return {
     vault: {
       vault_id: v.vault_id,
       state: v.state,
       sealed_release: v.sealed_release ?? null,
+      // The sealed release's number, status, end date and notice (W8).
+      release,
       vault_version: v.vault_version ?? null,
       state_version: v.state_version ?? null,
       // Advisory (lifecycle values come from the host and are never used for security, §11.5).
@@ -464,6 +522,7 @@ router.on('GET', '/api/vault/enclave', async (req) => {
   if (requested !== undefined && !PCR0_RE.test(requested)) throw badRequest('release must be a PCR0 (96 lowercase hex)');
   const vault = activeVault((await currentVault(m.user_guid)).vault);
   const holder = await liveLease(vault, now);
+  const canary = isCanaryMember(m);
 
   if (requested !== undefined) {
     // §11.10.5: only for abandoning an unconfirmed move, so only for an existing vault.
@@ -474,11 +533,11 @@ router.on('GET', '/api/vault/enclave', async (req) => {
         retry_after: Math.max(1, vault.lease!.lease_expires_at - now),
       });
     }
-    return routeToRelease(requested, now);
+    return routeToRelease(requested, now, canary);
   }
   if (holder) return describe(holder);
-  if (vault?.sealed_release) return routeToRelease(vault.sealed_release, now);
-  return routeForEnrollment(now);
+  if (vault?.sealed_release) return routeToRelease(vault.sealed_release, now, canary);
+  return routeForEnrollment(now, canary);
 });
 
 router.on('POST', '/api/vault/enroll', async (req) => {
@@ -491,12 +550,13 @@ router.on('POST', '/api/vault/enroll', async (req) => {
   await limit(`vault-enroll#${m.user_guid}`, 3, 86_400);
 
   // Dark launch: no `active` release, nothing to enroll into (503 vault_unavailable).
-  const active = await activeReleases();
+  const targets = await enrollmentTargets(isCanaryMember(m));
   const now = nowS();
   const cur = await currentVault(m.user_guid);
   const inst = await routeCheck(activeVault(cur.vault), instanceId, now);
-  // Enrollment goes to an instance of an `active` release (§11.1).
-  if (!active.some((r) => r.release === inst.release)) throw instanceMoved();
+  // Enrollment goes to an instance of an `active` release (§11.1), or of a
+  // canary release for a canary member.
+  if (!targets.some((r) => r.release === inst.release)) throw instanceMoved();
   const vault = await vaultForEnrollment(m.user_guid, cur);
   await enqueue('enroll', m, vault, requestId, inst, { etk_kid: etkKid, envelope, manifest_sha256: manifestSha256 });
   await audit(m.email, 'vault.enroll_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: instanceId, release: inst.release });
@@ -519,7 +579,7 @@ router.on('POST', '/api/vault/unlock', async (req) => {
   const vault = activeVault((await currentVault(m.user_guid)).vault);
   if (!vault || vault.vault_id !== vaultId) throw notFound('No such vault');
   const inst = await routeCheck(vault, instanceId, nowS());
-  await requireRoutable(inst);
+  await requireRoutable(inst, isCanaryMember(m));
   await enqueue('unlock', m, vault, requestId, inst, { etk_kid: etkKid, envelope, manifest_sha256: manifestSha256 });
   await audit(m.email, 'vault.unlock_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: instanceId, release: inst.release });
   return new WithStatus(202, { vault_id: vault.vault_id, request_id: requestId });
@@ -618,11 +678,11 @@ async function recoverableVault(guid: string): Promise<VaultRow> {
 }
 
 /** The instance a recovery operation goes to: the leaseholder, else one of the sealed release. */
-async function recoveryInstance(v: VaultRow, now: number): Promise<InstanceRow> {
+async function recoveryInstance(v: VaultRow, now: number, canary: boolean): Promise<InstanceRow> {
   const holder = await liveLease(v, now);
   if (holder) return holder;
   if (!v.sealed_release) throw vaultError(409, 'conflict', 'The vault is not sealed to a release yet');
-  if (!routable(await releaseRow(v.sealed_release))) throw releaseUnavailable();
+  if (!routable(await releaseRow(v.sealed_release), { canary })) throw releaseUnavailable();
   const inst = await pickInstance(v.sealed_release, now);
   if (inst) return inst;
   await requestStart(v.sealed_release);
@@ -674,7 +734,7 @@ async function cancelRecovery(m: MemberItem, v: VaultRow, via: 'session' | 'link
   if (!r || !recoveryActive(r, now)) return; // nothing to cancel: a no-op
   await setRecovery(v, { ...r, state: 'cancelled' }, r.recovery_id);
   try {
-    const inst = await recoveryInstance(v, now);
+    const inst = await recoveryInstance(v, now, isCanaryMember(m));
     await enqueue('recovery_cancel', m, v, newUlid(), inst);
   } catch (e) {
     // The enclave also refuses the code if the API never releases it, but
@@ -695,7 +755,7 @@ router.on('POST', '/api/vault/recovery', async (req) => {
   const now = nowS();
   const v = await recoverableVault(m.user_guid);
   if (recoveryActive(v.recovery, now)) throw vaultError(409, 'recovery_active', 'A recovery is already in progress');
-  const inst = await recoveryInstance(v, now);
+  const inst = await recoveryInstance(v, now, isCanaryMember(m));
   const recoveryId = newUlid();
   const r: RecoveryRow = { recovery_id: recoveryId, state: 'pending', requested_at: now, available_at: now + RECOVERY_DELAY_S, expires_at: now + RECOVERY_DELAY_S + RECOVERY_VALIDITY_S };
   await setRecovery(v, r, v.recovery?.recovery_id ?? null);
@@ -784,7 +844,7 @@ router.on('POST', '/api/vault/recovery/register', async (req) => {
   if (!vault || vault.vault_id !== vaultId) throw notFound('No such vault');
   if (recoveryState(vault.recovery, now) !== 'available') throw vaultError(409, 'recovery_not_available', 'No recovery code is valid now');
   const inst = await routeCheck(vault, instanceId, now);
-  await requireRoutable(inst);
+  await requireRoutable(inst, isCanaryMember(m));
   await enqueue('recovery_register', m, vault, requestId, inst, { etk_kid: etkKid, envelope });
   await audit(m.email, 'vault.recovery_register', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, recovery_id: vault.recovery!.recovery_id, instance_id: instanceId });
   return new WithStatus(202, { vault_id: vault.vault_id, request_id: requestId });

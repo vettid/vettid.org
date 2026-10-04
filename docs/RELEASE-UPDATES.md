@@ -164,7 +164,7 @@ Each entry gives:
 | Security | Whether the release fixes a vulnerability, and how urgent updating is |
 | Status | `active`, `deprecated`, `retired` or `removed`, with dates, including the end date |
 
-The release notes URL in the manifest points to the entry. The log will be
-published on vettid.org (a page under `/security/`) and fed from the
-signed manifest, so the two cannot disagree; until the first release it
-does not exist yet. An entry stays after its release has ended.
+The release notes URL in the manifest points to the entry. The log is
+published at `https://vettid.org/security/releases/` and generated from
+the signed manifest, so the two cannot disagree; until the first release
+it lists nothing. An entry stays after its release has ended.

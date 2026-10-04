@@ -157,6 +157,24 @@ describe('sync handler', () => {
     expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
   });
 
+  test('nothing served yet (404, or no such host): absent, nothing written', async () => {
+    ddb.on(ScanCommand).resolves({ Items: [{ release: 'c'.repeat(96), status: 'canary' }] }); // an operator's canary row
+    fetchSpy.mockResolvedValue(new Response('<html>404</html>', { status: 404 }));
+    expect((await sync.handler()).status).toBe('absent');
+    fetchSpy.mockRejectedValue(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } }));
+    expect((await sync.handler()).status).toBe('absent');
+    expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
+    expect(ddb.commandCalls(DeleteCommand)).toHaveLength(0);
+  });
+
+  test('nothing served after a manifest was synced: an error (alarm)', async () => {
+    ddb.on(ScanCommand).resolves({ Items: [{ release: 'e'.repeat(96), manifest_serial: 3 }] });
+    fetchSpy.mockResolvedValue(new Response('', { status: 404 }));
+    await expect(sync.handler()).rejects.toThrow(/serial 3 was synced/);
+    fetchSpy.mockResolvedValue(new Response('', { status: 503 }));
+    await expect(sync.handler()).rejects.toThrow(/HTTP 503/);
+  });
+
   test('no pinned key: skipped', async () => {
     const prev = process.env.PINNED_KEYS;
     process.env.PINNED_KEYS = '[]';

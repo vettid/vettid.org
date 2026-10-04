@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.2
+version: 0.1.3
 date: 2026-10-04
 owner: Al Liebl (Mesmer)
 changelog:
@@ -20,6 +20,16 @@ changelog:
     rules); per-release stacks from lib/vault/releases.ts; scaler rules
     (freshness, markers, hands-off for unlisted groups); host files in
     vettid-vault deploy/host; rescue stays release-wide
+  - 0.1.3: W7 and W8 as built. Release lists per channel
+    (vault/releases/<channel>.json, replacing lib/vault/releases.ts);
+    key A and the staging key pinned (key B a placeholder until its token
+    exists); scripts/vault/manifest.ts wraps `vaultctl manifest` (sign,
+    upload, publish); check:manifest in CI; the release log under
+    /security/releases/; nothing served in either channel until its first
+    release. Member API: `canary` release rows routed only for flagged
+    members (the scaler manages them); the daily notice job (90/30/7/1
+    days, ended, urgent security releases); release status in
+    GET /api/vault/status
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.9.1) §11.10 release updates, §12.5 deletion, §13.5
@@ -209,6 +219,23 @@ recovery are emailed the same way.
 
 Shortened windows: a release with a known exploited vulnerability may get
 a shorter window, never under 60 days (owner decision O5).
+
+*As built (W8).* The member API's daily `VaultNoticeJob` (MEMBER-API
+"Vault release notices") sends emails 1–4 (90, 30, 7, 1 days before
+`ends_at`, for `deprecated` and `retired` releases; only the latest
+milestone due) and the deadline email (`removed`, up to 14 days after
+`ends_at`, not during a rescue), plus the hotfix email of §10.2 (a release
+whose log says `security: urgent`, to members on its `affects` releases,
+for 30 days). It finds members through a new vaults-table index,
+`sealed-release-index` (projects `vault_id`, `user_guid`, `state` only;
+the `user-index` cannot answer "who is on release N"), with its own role
+(`vettid-org-member-vault-notices`: `Query` on `vault-releases` and that
+index, nothing else in the vault account). Each notice is sent once per
+member, release, end date and milestone (a claim in the ratelimits table).
+In-app: `GET /api/vault/status` carries the release's number, status,
+`ends_at` and a `notice`. **Not built:** the D + 30 "erased" email and the
+D + 37 deletion of stored objects (they need the cleanup role in the
+bucket policy, §8.2); both wait until a release first nears its end.
 
 ## 4. Spec changes needed before release 1
 
@@ -426,6 +453,21 @@ fails closed.
   served document). A gated workflow with required reviewers can replace
   it once there is a second person to review.
 - Staging uses its own deletable KMS key.
+- *As built (W7).* `lib/config.ts` `manifestKeys` pins key A in production
+  (`alias/vettid-org-vault-manifest`, key_id `4353463f85c4012f`) and the
+  staging key (`alias/vettid-org-staging-vault-manifest`, key_id
+  `e9b3a403423120ac`), from `aws kms get-public-key`. **Key B is a TODO**
+  until the owner's hardware token exists. A served document carries one
+  signature and `key_id` selects the pinned key that verifies it
+  (VAULT-MESSAGING §11.10.1), so manifests signed with key A alone are
+  complete, not weakened; but key B must be pinned in release 1's
+  `releasecfg/prod.json` and in the app before production release 1,
+  because a key an image does not pin can only be introduced by a new
+  release (the prod channel file's B placeholder also keeps the release
+  gate closed until then). Signing is `scripts/vault/manifest.ts sign`,
+  which drives vettid-vault's `vaultctl manifest render/check/sign` (not a
+  second signer implementation) as the signer role and re-checks the
+  result with this repository's renderer and verifier.
 
 ### 6.2 Release sealing keys
 
@@ -540,6 +582,63 @@ role (trust, `PassRole`) to CloudFormation's deploy role.
   `manifests/<sha256>.json` is missing. The copy itself stays the
   signer's publish step (only the signer role may write `manifests/*`;
   W7's `sign-manifest.ts`).
+
+*As built (W7).*
+
+- **Release lists:** `vault/releases/prod.json` and `staging.json`
+  (`lib/vault/release-list.ts`): per release the manifest fields, `status`
+  (`candidate` or a manifest status), `admitted_pcr0s` (fixed at key
+  creation), an optional `host` (the release stack's pins; absent: no
+  stack) and, in production, `log` (summary, changes, `security`: `none`,
+  `recommended` or `urgent`, `security_text`, `affects`). Plus
+  `signed_serial`, the highest serial ever signed. CDK builds one release
+  key per entry and one release stack per entry with `host`; synth fails on
+  an invalid file. The files are also valid `vaultctl manifest render
+  -releases` input (it ignores the extra members). The window is not a
+  field: `ends_at` is set explicitly per §10.3.
+- **Served files:** production `website/.well-known/vettid/pcr-manifest.json`;
+  staging `vault/staging/pcr-manifest.json` until the staging site exists
+  (W9 serves it at staging.vettid.org). **Nothing is served in either
+  channel today**: an empty manifest is not valid (it lists at least one
+  release), and nothing may be served before the first release is
+  published. The URL answers 404 until then; the manifest sync treats 404
+  (or a missing host) as "nothing published yet" while it has never synced
+  a manifest, and as an error after. The site serves the JSON with the
+  existing `no-cache, must-revalidate` pass for `*.json`
+  (`application/json`), the site CSP and HSTS; `/.well-known/*` is exempt
+  from the hostile-path rules. No CORS: apps are native, and the account
+  site reads release status from the member API.
+- **Signing and publishing:** `scripts/vault/manifest.ts` (`npm run
+  vault:manifest`): `sign` (render through vaultctl with serial =
+  max(served, `signed_serial`) + 1, cross-checked against this
+  repository's render; `signed_serial` raised in the file first; KMS key A
+  as the signer role; written under `local/`), `upload` (the bucket copy
+  `manifests/<sha256>.json`, If-None-Match, as the signer role: what a
+  canary needs), `publish` (verify again, require an exact render of the
+  release file, upload, confirm the bucket copy as the vault account's
+  admin, then write the served file and the release log and commit only
+  those paths; the site deploy serves it). RUNBOOK "Publishing a manifest".
+- **`npm run check:manifest`** (CI, full history): for each channel the
+  release file; the served document's signature under the pinned keys and
+  its size; manifest bytes exactly a render of the release file; serial ≤
+  `signed_serial`; every committed version of the served file a valid
+  successor of the one before (serial strictly increasing, gaps allowed for
+  unpublished canary serials; no release dropped before `removed`; statuses
+  only forward; PCRs, `seal_key` and `published_at` unchanged; the file
+  never deleted once published); status and date consistency (an active
+  release, deprecated or retired ones older than it, `ends_at` on retired,
+  `retired` within 90 days of `ends_at`, nothing past its `ends_at` still
+  running); every admitted PCR0 listed; for production, the release log
+  pages current.
+- **Release log:** `/security/releases/` (`lib/vault/release-log.ts`,
+  `scripts/vault/release-log.ts`): an index (number, publication date,
+  channel, PCR0, status, end date) and one page per release (the
+  RELEASE-UPDATES §5 fields, rebuild instructions), in the site's design
+  and CSP (no scripts beyond the shared nav, no inline style attributes),
+  plus `index.json`, which also remembers releases the manifest has
+  dropped so their entries stay. Until release 1 the index says that no
+  release has been published; it is linked from `/security` and the
+  sitemap.
 
 ## 8. Infrastructure
 
@@ -801,6 +900,9 @@ release_starting`. The `vault-scaler` Lambda (host stack):
   Metrics (EMF): `StartsIssued`, `StopsIssued`, `StartsBlocked`,
   `StartsUnfulfilled`, `ActiveMinimumUnmet`, `LiveInstances`,
   `DesiredInstances`.
+  *W8:* a row with status `canary` (§10.1 step 9) is routable for the
+  scaler (started on request, stopped when idle); a group whose PCR0 has
+  no row at all (a candidate) stays the operator's.
 
 ### 8.7 Observability
 
@@ -913,6 +1015,20 @@ job's vault deletion. Order (W4):
 | 10 | Publish: commit the signed manifest (N `active`, N−1 `deprecated`, any `retired`/`ends_at` changes), the release log entry, `deploy:site`; manifest sync updates routing | owner | live |
 | 11 | Previous release group to minimum 0; the always-on minimum moves to N (O7) | owner | |
 | 12 | In-app prompts follow from the manifest; no email for a routine release | — | |
+
+*As built (W7, W8).* Step 9: `scripts/vault/manifest.ts sign` then
+`upload` (the bucket copy only; nothing is served), and the operator's
+`canary` row on `vettid-org-vault-releases` for N's PCR0 (RUNBOOK "Canary
+routing"). The member API routes a `canary` release only for members
+whose row has `vault_canary: true`: their enrollment goes to the newest
+canary release (also before production release 1, when nothing is
+`active`), their vaults sealed to it are routed there; for everyone else
+it is unknown (410). The scaler manages a `canary` row like any release.
+The test device loads the canary manifest out of band (it is not served).
+Step 10: `manifest.ts publish` with the same signed document, so the
+canary vault's recorded serial is the published one; the manifest sync
+turns the row into an `active` one. A test member's flag is an operator
+write on the members table; there is no member-facing or admin-UI switch.
 
 If the canary fails before step 10: the manifest s+1 is never published
 (the next one is s+2); N's group is deleted; N becomes `removed` in

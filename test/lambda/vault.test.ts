@@ -781,7 +781,12 @@ describe('GET /api/vault/status', () => {
     vaultOf('g1', { vault_id: VID, state: 'unlocked', sealed_release: R0, vault_version: R0, state_version: 1, lease: { instance_id: 'i-1', lease_expires_at: NOW + 60 } });
     const r = await call('GET', '/api/vault/status');
     expect(r.body).toEqual({
-      vault: { vault_id: VID, state: 'unlocked', sealed_release: R0, vault_version: R0, state_version: 1, leased: true, recovery: null, alarm: null, created_at: expect.any(String), updated_at: expect.any(String) },
+      vault: {
+        vault_id: VID, state: 'unlocked', sealed_release: R0, vault_version: R0, state_version: 1, leased: true, recovery: null, alarm: null,
+        // R0 has no release row here: unknown (the API would answer 410).
+        release: { number: null, status: 'unknown', ends_at: null, newest_active: null, notice: 'unavailable' },
+        created_at: expect.any(String), updated_at: expect.any(String),
+      },
     });
   });
 
@@ -796,6 +801,141 @@ describe('GET /api/vault/status', () => {
     expect(r.body.vault.alarm).toEqual({ kind: 'credential_clone', at: new Date((NOW - 60) * 1000).toISOString() });
     expect(JSON.stringify(r.body)).not.toContain('01JABCDEFGHJKMNPQRSTVWXYZ0');
   });
+});
+
+describe('GET /api/vault/status: the sealed release and its notice (W8)', () => {
+  const RN = 'c'.repeat(96);
+  const status = async () => (await call('GET', '/api/vault/status')).body.vault.release;
+  beforeEach(() => release(RN, 6)); // the newest active release
+
+  test.each([
+    ['the newest active release: no notice', 'active', { release_number: 8 }, { number: 8, status: 'active', newest_active: 8, notice: null }],
+    ['deprecated: update available, with its end date', 'deprecated', { ends_at: '2027-11-01T00:00:00Z' }, { status: 'deprecated', ends_at: '2027-11-01T00:00:00Z', notice: 'update_available' }],
+    ['retired: the final warning', 'retired', { ends_at: '2027-11-01T00:00:00Z' }, { status: 'retired', notice: 'final_warning' }],
+    ['removed: ended', 'removed', { ends_at: '2027-11-01T00:00:00Z' }, { status: 'removed', notice: 'ended' }],
+    ['removed, reopened: rescue', 'removed', { rescue: true }, { notice: 'rescue' }],
+    ['no longer startable: unavailable', 'deprecated', { available: false }, { notice: 'unavailable' }],
+  ])('%s', async (_what, st, extra, want) => {
+    release(R0, 4, st, extra);
+    vaultOf('g1', { vault_id: VID, sealed_release: R0 });
+    expect(await status()).toMatchObject({ newest_active: 6, ...want });
+  });
+
+  test('an older release that is still active: update available', async () => {
+    release(R0, 4);
+    vaultOf('g1', { vault_id: VID, sealed_release: R0 });
+    expect(await status()).toEqual({ number: 4, status: 'active', ends_at: null, newest_active: 6, notice: 'update_available' });
+  });
+
+  test('a canary release reads as unknown to anyone but a canary member', async () => {
+    release(R0, 7, 'canary');
+    vaultOf('g1', { vault_id: VID, sealed_release: R0 });
+    expect(await status()).toMatchObject({ number: null, status: 'unknown', notice: 'unavailable' });
+    put('members', { ...getItem('members', 'g1'), vault_canary: true });
+    expect(await status()).toMatchObject({ number: 7, status: 'canary', notice: null });
+  });
+
+  test('a vault not sealed yet has no release', async () => {
+    vaultOf('g1', { vault_id: VID, state: 'enrolling' });
+    expect(await status()).toBeNull();
+  });
+});
+
+// ---- canary releases (VAULT-RELEASES §10.1 step 9, §11.3; W8) ----------------------
+
+describe('canary routing', () => {
+  const RC = 'c'.repeat(96); // the release under test
+  const enrollBody = { request_id: RID, instance_id: 'i-canary', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA };
+  const canaryMember = (g = 'g1') => put('members', { ...getItem('members', g), vault_canary: true });
+  beforeEach(() => {
+    release(R0, 4); // the current release
+    release(RC, 5, 'canary');
+    instance('i-cur', R0);
+  });
+
+  test('normal members never see a canary release: enrollment goes to the active one', async () => {
+    instance('i-canary', RC);
+    expect((await call('GET', '/api/vault/enclave')).body).toMatchObject({ instance_id: 'i-cur', release: R0 });
+    expect((await call('POST', '/api/vault/enroll', enrollBody)).body).toMatchObject({ error: 'instance_moved' });
+    expect(sqs.calls()).toHaveLength(0);
+  });
+
+  test('normal members: a canary release is unknown (410), even asked for by PCR0 or named by instance', async () => {
+    instance('i-canary', RC);
+    vaultOf('g1', { vault_id: VID, sealed_release: RC });
+    expect((await call('GET', '/api/vault/enclave')).status).toBe(410);
+    expect((await call('GET', '/api/vault/enclave', undefined, { query: { release: RC } })).status).toBe(410);
+    const r = await call('POST', '/api/vault/unlock', { vault_id: VID, request_id: RID, instance_id: 'i-canary', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA });
+    expect(r.status).toBe(410);
+    expect(getItem('releases', RC).start_requests).toBeUndefined();
+    expect(sqs.calls()).toHaveLength(0);
+  });
+
+  test('a canary member enrolls into the canary release, which is started on demand', async () => {
+    canaryMember();
+    expect((await call('GET', '/api/vault/enclave')).body).toMatchObject({ error: 'release_starting', release: RC });
+    expect(getItem('releases', RC).start_requests).toBe(1);
+    instance('i-canary', RC);
+    expect((await call('GET', '/api/vault/enclave')).body).toMatchObject({ instance_id: 'i-canary', release: RC });
+    expect((await call('POST', '/api/vault/enroll', enrollBody)).status).toBe(202);
+    expect(sent()[0]).toMatchObject({ url: QUEUE_PREFIX + 'i-canary', msg: { op: 'enroll' } });
+  });
+
+  test('a canary member can enroll into the canary before any release is active (production release 1)', async () => {
+    release(R0, 4, 'deprecated');
+    canaryMember();
+    instance('i-canary', RC);
+    expect((await call('GET', '/api/vault/enclave')).body).toMatchObject({ instance_id: 'i-canary' });
+    tbl('releases').delete(RC);
+    expect((await call('GET', '/api/vault/enclave')).body.error).toBe('vault_unavailable');
+  });
+
+  test('a canary member with no canary release enrolls as usual', async () => {
+    tbl('releases').delete(RC);
+    canaryMember();
+    expect((await call('GET', '/api/vault/enclave')).body).toMatchObject({ instance_id: 'i-cur' });
+  });
+
+  test('a canary member’s vault sealed to the canary is routed there: unlock and recovery', async () => {
+    canaryMember();
+    instance('i-canary', RC);
+    vaultOf('g1', { vault_id: VID, sealed_release: RC });
+    expect((await call('GET', '/api/vault/enclave')).body).toMatchObject({ instance_id: 'i-canary' });
+    const r = await call('POST', '/api/vault/unlock', { vault_id: VID, request_id: RID, instance_id: 'i-canary', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA });
+    expect(r.status).toBe(202);
+    const rec = await call('POST', '/api/vault/recovery', { browser_key: Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64') });
+    expect(rec.status).toBe(202);
+    expect(sent().map((s) => [s.url, s.msg.op])).toEqual([[QUEUE_PREFIX + 'i-canary', 'unlock'], [QUEUE_PREFIX + 'i-canary', 'recovery']]);
+  });
+
+  test('the oldest release’s canary vault keeps its release until it moves (the ladder, §11.3)', async () => {
+    canaryMember();
+    instance('i-canary', RC);
+    vaultOf('g1', { vault_id: VID, sealed_release: R0 });
+    expect((await call('GET', '/api/vault/enclave')).body).toMatchObject({ instance_id: 'i-cur', release: R0 });
+  });
+
+  test('a canary release that cannot start is 410 for canary members too', async () => {
+    canaryMember();
+    release(RC, 5, 'canary', { available: false });
+    vaultOf('g1', { vault_id: VID, sealed_release: RC });
+    expect((await call('GET', '/api/vault/enclave')).status).toBe(410);
+  });
+});
+
+test('routable: statuses, canary and rescue (shared with the cleanup job)', () => {
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const { routable } = require('../../lambda/shared/vault-routing');
+  /* eslint-enable */
+  const row = (status: string, extra = {}) => ({ release: R0, release_number: 1, status, ...extra });
+  expect(['active', 'deprecated', 'retired'].map((s) => routable(row(s)))).toEqual([true, true, true]);
+  expect(routable(row('removed'))).toBe(false);
+  expect(routable(row('removed', { rescue: true }))).toBe(true);
+  expect(routable(row('canary'))).toBe(false);
+  expect(routable(row('canary'), { canary: true })).toBe(true);
+  expect(routable(row('active', { available: false }))).toBe(false);
+  expect(routable(row('candidate'))).toBe(false); // never a row; refused if one appears
+  expect(routable(null)).toBe(false);
 });
 
 // ---- helpers ------------------------------------------------------------------------

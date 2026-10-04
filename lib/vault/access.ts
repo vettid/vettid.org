@@ -22,15 +22,21 @@ import { AppConfig, VaultConfig, resourceName } from '../config';
 export const VAULT_TABLES = ['vaults', 'vault-instances', 'vault-requests', 'vault-releases'] as const;
 export type VaultTable = (typeof VAULT_TABLES)[number];
 
-export type VaultApiConsumer = 'vault' | 'cleanup' | 'vault-alarms';
-export const VAULT_API_CONSUMERS: VaultApiConsumer[] = ['vault', 'cleanup', 'vault-alarms'];
+export type VaultApiConsumer = 'vault' | 'cleanup' | 'vault-alarms' | 'vault-notices';
+export const VAULT_API_CONSUMERS: VaultApiConsumer[] = ['vault', 'cleanup', 'vault-alarms', 'vault-notices'];
+
+/** The vaults table's index of vaults by sealed release (keys plus user_guid and state), for the notice job (W8). */
+export const SEALED_RELEASE_INDEX = 'sealed-release-index';
 
 export interface VaultTableGrant {
   readonly table: VaultTable;
   /** DynamoDB actions without the `dynamodb:` prefix. */
   readonly actions: string[];
-  /** Also the table's indexes (Query on a GSI). */
-  readonly indexes?: boolean;
+  /**
+   * Also the table's indexes (Query on a GSI): `true` for the table and all
+   * its indexes; a list for those indexes only (not the table itself).
+   */
+  readonly indexes?: boolean | readonly string[];
   /**
    * Fine-grained access control: the request may only name these
    * attributes (`ForAllValues:StringEquals dynamodb:Attributes`). Vacuously
@@ -91,6 +97,17 @@ export const VAULT_API_ACCESS: Record<VaultApiConsumer, VaultApiAccess> = {
     sendsToControlQueues: false,
     readsVaultsStream: true,
   },
+  // Daily release notices (VAULT-RELEASES §3.5, §10.2; W8): reads the
+  // release rows, and finds the vaults sealed to a release through an index
+  // that projects only vault_id, user_guid and state. Writes nothing here.
+  'vault-notices': {
+    tables: [
+      { table: 'vault-releases', actions: ['Query'], indexes: true },
+      { table: 'vaults', actions: ['Query'], indexes: [SEALED_RELEASE_INDEX] },
+    ],
+    sendsToControlQueues: false,
+    readsVaultsStream: false,
+  },
 };
 
 /** Fixed name of a member API function's role (in the API account). */
@@ -109,6 +126,13 @@ export function vaultTableName(config: AppConfig, table: VaultTable): string {
 
 export function vaultTableArn(config: AppConfig, vault: VaultConfig, table: VaultTable): string {
   return `arn:aws:dynamodb:${config.region}:${vault.account}:table/${vaultTableName(config, table)}`;
+}
+
+/** The resources a grant covers: the table and all its indexes, the table alone, or only the named indexes. */
+export function vaultGrantResources(config: AppConfig, vault: VaultConfig, grant: VaultTableGrant): string[] {
+  const arn = vaultTableArn(config, vault, grant.table);
+  if (Array.isArray(grant.indexes)) return grant.indexes.map((i: string) => `${arn}/index/${i}`);
+  return grant.indexes ? [arn, `${arn}/index/*`] : [arn];
 }
 
 /** Per-instance control queues: `<prefix><instance_id>`, created by the parent. */
@@ -149,7 +173,7 @@ export function vaultTableResourceStatements(config: AppConfig, vault: VaultConf
         Effect: 'Allow',
         Principal: { AWS: `arn:aws:iam::${vault.apiAccount}:root` },
         Action: g.actions.map((a) => `dynamodb:${a}`),
-        Resource: g.indexes ? [arn, `${arn}/index/*`] : arn,
+        Resource: g.indexes ? vaultGrantResources(config, vault, g) : arn,
         Condition: {
           ArnEquals: { 'aws:PrincipalArn': vaultApiRoleArn(config, vault, consumer) },
           ...attributeCondition(g.attributes),

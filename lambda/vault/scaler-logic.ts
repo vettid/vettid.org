@@ -21,8 +21,11 @@
  *    hook drains an instance that took a vault in the race.
  *  - A `removed` release without `rescue` (or one no longer `available`)
  *    goes to its minimum at once.
- *  - Groups whose release has no row (a candidate or canary before the
- *    manifest lists it) are operator-managed: never started or stopped.
+ *  - Groups whose release has no row (a candidate before its canary row
+ *    exists) are operator-managed: never started or stopped. A `canary`
+ *    row (an operator's, VAULT-RELEASES §10.1 step 9; the member API routes
+ *    it only for canary members) is managed like any routable release, so
+ *    the canary starts on demand and stops when idle.
  */
 
 export const LIVE_HEARTBEAT_S = 90;
@@ -108,7 +111,8 @@ const ms = (iso: string | undefined): number | undefined => {
 };
 
 export const routable = (r: ReleaseRow): boolean =>
-  r.available !== false && (r.status === 'active' || r.status === 'deprecated' || r.status === 'retired' || (r.status === 'removed' && r.rescue === true));
+  r.available !== false &&
+  (r.status === 'active' || r.status === 'deprecated' || r.status === 'retired' || r.status === 'canary' || (r.status === 'removed' && r.rescue === true));
 
 export function plan(s: Snapshot): Plan {
   const { now, limits } = s;

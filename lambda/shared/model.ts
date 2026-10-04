@@ -29,6 +29,7 @@ export interface MemberItem {
   email_updates?: boolean; // default true
   pin_prompt_dismissed?: boolean; // "skip for now" on the Getting started PIN step
   welcome_sent?: boolean; // "you can sign in" email delivered
+  vault_canary?: boolean; // operator-set: may use canary vault releases (VAULT-RELEASES §10.1 step 9); never shown to the member
 }
 
 /** Row in vettid-org-subscriptions (one per member). */

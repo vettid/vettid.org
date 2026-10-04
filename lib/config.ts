@@ -76,8 +76,11 @@ export interface VaultConfig {
   /**
    * Pinned manifest public keys (SubjectPublicKeyInfo, base64 DER; key A and
    * key B in production, the staging key in staging), the same as in the
-   * channel's `enclave/releasecfg/<channel>.json`. Empty until they are
-   * fixed (W7/W10): the manifest sync then does nothing.
+   * channel's `enclave/releasecfg/<channel>.json` (VAULT-RELEASES §6.1).
+   * Public data, from `aws kms get-public-key` on the channel's
+   * `alias/<resourceName(vault-manifest)>`. A served document carries one
+   * signature, by the key its `key_id` names (§11.10.1): any pinned key
+   * verifies it. Empty: the manifest sync does nothing.
    */
   readonly manifestKeys: readonly string[];
   /** The relay host on the enclave host's egress allowlist (pinned in the release as relay_url). */
@@ -95,7 +98,18 @@ const STAGE_ACCOUNTS: Record<string, { main?: string; vault?: Omit<VaultConfig, 
     vault: {
       channel: 'prod', account: '369484479783', apiAccount: '449757308783', retirementWindowDays: 30, // vettid-vault-prod
       manifestUrl: 'https://vettid.org/.well-known/vettid/pcr-manifest.json',
-      manifestKeys: [],
+      manifestKeys: [
+        // Key A: KMS ECC_NIST_P256 in vettid-vault-prod, alias/vettid-org-vault-manifest
+        // (key 5197fbf9-0863-4e79-986e-2dcd9cb90e7d); key_id 4353463f85c4012f.
+        'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE7xDU6CSVsFDJvP7UXigsN9SDB+KIppU85Y3DRvo0oMQZYKHZ1S/3OaNdFk2/HJX+hohYdyU6QIFPXiDBirflCQ==',
+        // TODO(O3, before production release 1): key B, the offline hardware
+        // token's P-256 SubjectPublicKeyInfo. Until then manifests are signed
+        // with key A only. That is the format (one signature per document,
+        // `key_id` selects the pinned key, §11.10.1), not a weakening: key B
+        // is the standby for losing key A. It must be pinned in release 1's
+        // image and the app, because a key an image does not pin can only be
+        // introduced by a new release.
+      ],
       relayHost: 'relay.vettid.org',
     },
   },
@@ -106,12 +120,27 @@ const STAGE_ACCOUNTS: Record<string, { main?: string; vault?: Omit<VaultConfig, 
     vault: {
       channel: 'staging', account: '347272280361', apiAccount: '347272280361', retirementWindowDays: 7, // vettid-vault-staging
       manifestUrl: 'https://staging.vettid.org/.well-known/vettid/pcr-manifest.json',
-      manifestKeys: [],
+      manifestKeys: [
+        // The staging key: KMS ECC_NIST_P256 in vettid-vault-staging,
+        // alias/vettid-org-staging-vault-manifest (key a9d50ed4-b390-456e-9803-bbbf4371e208); key_id e9b3a403423120ac.
+        'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEok8gqeC5VcGx4KL+B5fL7UgENBXf+59RigkR0TZ0NqjiWM2VK6V1+paNoqRTBx7nXXN3L/2ehjsTb31GGVkEAw==',
+      ],
       // Staging images pin the production relay at first (VAULT-RELEASES §11.1).
       relayHost: 'relay.vettid.org',
     },
   },
 };
+
+/**
+ * A channel's vault configuration and stage, for tools outside the CDK app
+ * (scripts/vault/*): the channel `prod` is stage `prod`, `staging` is stage
+ * `staging`.
+ */
+export function channelVault(channel: 'prod' | 'staging'): { stage: string; vault: VaultConfig } {
+  const v = STAGE_ACCOUNTS[channel]?.vault;
+  if (!v || v.channel !== channel) throw new Error(`no vault configuration for channel ${channel}`);
+  return { stage: channel, vault: { ...v, vaultsStreamArn: '' } };
+}
 
 /**
  * Fixed IAM role names in the vault accounts. The host and retirement roles

@@ -314,9 +314,11 @@ routes until VettidOrgVaultStack is redeployed.
 
 ### Creating a release key
 
-Releases come from `vault/releases.json` (W7); until then a key is a
-`releaseKeys` entry in `lib/app.ts` (`release`, `pcr0`, and
-`admittedPcr0s` = the PCR0s of every release not `removed`).
+A key per entry of `vault/releases/<channel>.json` (W7): add release N
+with `status: "candidate"`, its PCR0–2, `seal_key: ""`, `notes` (production:
+`https://vettid.org/security/releases/<N>/`) and `admitted_pcr0s` = the
+PCR0s of every release not `removed` (never changed afterwards). `npm test`
+and `npm run check:manifest` validate the file.
 
 1. `npx cdk diff VettidOrgVaultStack --profile vault-prod`: exactly one new
    `Custom::VettidReleaseKey` and its SSM parameter. Read its `Policy`
@@ -329,7 +331,8 @@ Releases come from `vault/releases.json` (W7); until then a key is a
    `BypassPolicyLockoutSafetyCheck`; a refused policy fails the deploy
    before KMS is called.
 3. The ARN: `aws ssm get-parameter --profile vault-prod --name
-   /vettid-org/prod/vault/releases/<n>/seal-key-arn --query Parameter.Value --output text`.
+   /vettid-org/prod/vault/releases/<n>/seal-key-arn --query Parameter.Value --output text`;
+   write it into the entry's `seal_key` and commit.
 4. Check the live key with the enclave's own code (vettid-vault
    docs/RELEASING.md steps 5–6):
    `AWS_PROFILE=vault-key-retirement vaultctl keycheck -channel prod -key-arn <arn> -manifest draft.json -record keycheck/<n>`.
@@ -409,8 +412,10 @@ aws logs tail /aws/lambda/vettid-org-vault-scaler $P --since 30m
 ### Manifest sync (`vettid-org-vault-manifest-sync`, VAULT-RELEASES §7)
 
 Every 5 minutes: fetches the channel's served manifest, verifies it under
-the keys pinned in `lib/config.ts` (`manifestKeys`, empty until key A/B
-SPKIs are final: then it does nothing), and upserts the `vault-releases`
+the keys pinned in `lib/config.ts` (`manifestKeys`: key A in production,
+the staging key in staging; key B is added when its token exists; while
+nothing is served (404, or no staging host yet) it logs "no manifest
+published yet" and does nothing), and upserts the `vault-releases`
 rows (number, status, seal key, `ends_at`, `available` = the release's
 `vault/releases/<N>/group-name` ref exists). It never writes start
 requests, scaler markers or `rescue`, refuses a lower serial or the same
@@ -426,8 +431,10 @@ After publishing a manifest, run it at once:
    commit (`source_commit`), PCR0, and at that commit
    `sha256sum deploy/host/SHA256SUMS`. The current AL2023 arm64 AMI:
    `aws ssm get-parameter --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 --profile vault-prod --query Parameter.Value --output text`.
-2. Append the entry to `VAULT_RELEASES.<channel>` in `lib/vault/releases.ts`
-   (`minInstances: 0` for the canary; `maxInstances: 2`), `npm test`.
+2. Add `host` to the release's entry in `vault/releases/<channel>.json`
+   (`tag`, `source_commit`, `measurements_sha256`, `host_files_sha256`,
+   `nitro_cli_version`, `base_ami`, `ami_revision: 0`, `min_instances: 0`
+   for the canary, `max_instances: 2`), `npm test`.
 3. The release key first (VaultStack, "Creating a release key" above).
 4. `npx cdk diff VettidOrgVaultHostStack VettidOrgVaultRelease<N>Stack --profile vault-prod`:
    the host stack only gains N's PCR0 on the smoke key; the release stack
@@ -439,7 +446,77 @@ After publishing a manifest, run it at once:
    run `/opt/vettid/bin/vault-parent -selftest -smoke-key-arn <vault/smoke-key-arn> -smoke-account <account> -bucket <data bucket> -region us-east-1`
    per vettid-vault docs/SMOKE.md, then `systemctl start vault-parent`).
 6. After publication, the always-on minimum moves (O7): set
-   `minInstances: 1` on N and `0` on N−1, deploy both release stacks.
+   `min_instances: 1` on N and `0` on N−1, deploy both release stacks.
+
+### Publishing a manifest (VAULT-RELEASES §6.1, §7, §10.1 steps 9–10)
+
+One-time setup on the owner's machine: `vaultctl` built at a vettid-vault
+release tag (`go build -o ~/bin/vaultctl ./cmd/vaultctl`), and a profile
+for the signer role (owner only, Identity Center session with MFA):
+
+```ini
+[profile vault-prod-manifest-signer]
+role_arn = arn:aws:iam::369484479783:role/vettid-org-vault-manifest-signer
+source_profile = vault-prod
+region = us-east-1
+# staging: [profile vault-staging-manifest-signer], account 347272280361
+```
+
+The script `scripts/vault/manifest.ts` (`npm run vault:manifest -- <cmd> --channel prod`)
+renders with `vaultctl manifest render`, checks with `vaultctl manifest check`,
+signs with key A (`alias/vettid-org-vault-manifest`) through `vaultctl manifest sign`,
+and re-checks everything with this repository's own render and verifier:
+
+1. Edit `vault/releases/prod.json` for the publication: N `active` with
+   `published_at` and its `log` (summary, changes, security), N−1
+   `deprecated`, any `retired`/`ends_at`/`removed` changes (§10.3).
+2. `npm run vault:manifest -- sign --channel prod`: serial = max(served,
+   `signed_serial`) + 1; `signed_serial` is raised in the file *before*
+   signing; output `local/vault/prod/served-<serial>.json`. Commit the
+   raised `signed_serial` even if this manifest is never published.
+3. Canary (§10.1 step 9): `npm run vault:manifest -- upload --channel prod --in local/vault/prod/served-<s>.json`
+   puts `manifests/<sha256>.json` in the data bucket (only the signer role
+   may), so hosts can hand it to the enclave; nothing is served. Then add
+   the canary row and flag the test member (below), enroll and test.
+4. Publish: `npm run vault:manifest -- publish --channel prod --in local/vault/prod/served-<s>.json`
+   checks again, uploads (idempotent) and confirms the bucket copy, then
+   writes `website/.well-known/vettid/pcr-manifest.json`, regenerates the
+   release log (`website/security/releases/`) and commits those paths.
+   Push, merge (CI runs `check:manifest`), `npm run deploy:site`, and run
+   the manifest sync (above) so routing follows at once.
+
+If the canary fails, never publish that document: edit the file (N
+`removed`, no `host`), sign the next serial when there is something to
+publish, and delete the canary row. `check:manifest` refuses a served
+manifest that is not exactly a render of the file, a lower or repeated
+serial, a dropped or backwards-moving release, and a serial above
+`signed_serial`.
+
+Key B (offline token, only if key A is lost): `vaultctl manifest digest`,
+sign the digest on the offline machine, `vaultctl manifest import-sig`
+(vettid-vault docs/RELEASING.md), then `publish --in` the result as above.
+Key B is not pinned yet (`lib/config.ts`, TODO O3).
+
+### Canary routing (W8)
+
+The canary row and the test member's flag (the member API routes a
+`canary` release only for flagged members; MEMBER-API "Canary releases"):
+
+```bash
+# the release under test, in the vault account (no manifest_serial: the sync leaves it alone)
+aws dynamodb put-item --profile vault-prod --table-name vettid-org-vault-releases \
+  --item '{"release":{"S":"<pcr0>"},"release_number":{"N":"<N>"},"status":{"S":"canary"},"available":{"BOOL":true}}' \
+  --condition-expression 'attribute_not_exists(#r)' --expression-attribute-names '{"#r":"release"}'
+# the test member, in the main account
+aws dynamodb update-item --profile admin --table-name vettid-org-members \
+  --key '{"user_guid":{"S":"<guid>"}}' --update-expression 'SET vault_canary = :t' --expression-attribute-values '{":t":{"BOOL":true}}'
+```
+
+The scaler manages a `canary` row like any release (start on request, stop
+when idle). On publication the manifest sync turns the row into an
+`active` one; after a failed canary delete it (`aws dynamodb delete-item
+... --key '{"release":{"S":"<pcr0>"}}'`). Remove `vault_canary` from
+members who are done testing.
 
 Never edit a deployed entry's pins expecting the running hosts to change:
 the template change makes a new AMI and launch template version, but
@@ -455,7 +532,9 @@ deregistered by Image Builder; delete them and their snapshots by hand.
 
 At D (§10.3 step 2): `npx cdk destroy VettidOrgVaultRelease<N>Stack --profile vault-prod`
 (instances drain; the `group-name` ref goes, so the next manifest sync sets
-`available` false), then drop the entry from `lib/vault/releases.ts`.
+`available` false), then remove the entry's `host` in
+`vault/releases/<channel>.json` (the entry itself stays while the manifest
+lists the release).
 Rescue (step 3): cancel and enable the key as the retirement role,
 re-add the entry and deploy the release stack, then
 
