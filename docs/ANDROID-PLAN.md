@@ -1,9 +1,12 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.1
-date: 2026-10-03
+version: 0.1.2
+date: 2026-10-04
 changelog:
+  - 0.1.2: Secrets → Items per VAULT-ITEMS (drawer, screens, modules, A5);
+    favourite connections; the drawer "create" group (§4); brand gold
+    #FFC125 and the website fonts (§3), owner decisions of 2026-10-04
   - 0.1.1: owner decisions of 2026-10-03: push on both paths (FCM and
     UnifiedPush, plus a foreground-service path without push, §7); no
     backup or export of vault data (§4); location viewer notes for the
@@ -11,6 +14,7 @@ changelog:
 owner: Al Liebl (Mesmer)
 related:
   - VAULT-MESSAGING.md (0.6.x) — the app's contract with the vault
+  - VAULT-ITEMS.md — items, tags and share rules (the Items screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.4.0), MEMBER-API.md
 classification: public (no secrets; safe for github.com/vettid)
@@ -49,7 +53,7 @@ surface than the vettid.dev app and a layout modelled on Proton Mail.
 |---|---|
 | D1 | **Fresh rewrite in `vettid-android`**, same package name `com.vettid.app` (keeps the Play listing and signing key). The old code is preserved on a branch/tag and removed from `main`. |
 | D2 | **Proton Mail layout, VettID brand**: dark navy surfaces and Proton's structure; VettID gold (`#F4B942`) as the single accent; the rook logo stays gold with a black keyhole; a light theme as on the website. |
-| D3 | **v1 scope**: enrollment, unlock, Protean Credential, settings (always), plus **connections + messaging** and **secrets + critical secrets**. Calls, desktop/agent pairing and LEASH, wallet, location and presence come later. |
+| D3 | **v1 scope**: enrollment, unlock, Protean Credential, settings (always), plus **connections + messaging** and **items** (data, secret and critical items per VAULT-ITEMS; originally "secrets + critical secrets"). Calls, desktop/agent pairing and LEASH, wallet, location and presence come later. |
 | D4 | **Minimum Android 12 (API 31)**; target the current API level. |
 | D5 | **Message search later** (not in v1). |
 | D6 | **Biometric app lock in v1**: opening the app (and returning to it after a timeout) can require a biometric or device credential via BiometricPrompt (class 3), gating a Keystore key that unlocks the app's local data. It is a convenience layer only: it never replaces the vault PIN (unlocking the vault) or the credential password (critical actions). |
@@ -73,22 +77,31 @@ patterns:
 - **Settings**: grouped rounded cards, rows with icon + label + chevron,
   section headers.
 - **Avatar sheet**: a bottom sheet with the account and its options.
+- **VettID brand** (owner, 2026-10-04): gold `#FFC125` (the website's
+  `--gold`) as the single accent, `--gold-ink-light` `#7F640A` for gold
+  text and icons on light surfaces; navy surfaces from the website tokens;
+  Plus Jakarta Sans for headings and Inter for body, as on the website;
+  Material Icons Outlined. Connection tiles are one indigo, favourite
+  connections teal, the member's own avatar gold.
 
 ## 4. Screens (v1)
 
-**Drawer**: Messages · Connections · Approvals (badge) · Secrets ·
+**Drawer**: Messages · Connections · Approvals (badge) · Items ·
 Credential · Settings · Help — later: Calls, Devices & agents, Shared
-actions & introductions, Wallet, Location.
+actions & introductions, Wallet, Location. A "create" group (Proton's
+Create folder / label) is added once its screens exist: **Invite a
+connection** and **New item** (A4/A5); until then the A0 shell shows only
+the destinations.
 
 | Screen | Proton analogue | Notes |
 |---|---|---|
 | Messages | Inbox | Conversations by connection; Unread chip; compose button |
 | Conversation | Message detail | Bubbles in a card list; pill actions (reply, more) |
-| Connections | Contacts | Initial tiles, status (pending / active / stale / blocked); add = invite (QR or link) / scan |
+| Connections | Contacts | Initial tiles, status (pending / active / stale / blocked); a star marks favourites (the owner's `favorite` flag, `connection.update`), whose tiles are teal; add = invite (QR or link) / scan |
 | Connection detail | — | Profile shared with you, safety code (SAS), authenticate, alias/notes, block/remove |
-| Approvals | — (VettID-specific) | Pending connection requests, grant requests, critical-secret uses; approve/deny; critical items need the credential password |
-| Secrets | Folder list | Versioned secrets; add/edit; catalog (discoverability) |
-| Credential | — | Critical secrets inside the Protean Credential; unlock window; password change; the vault-held credential copy on/off |
+| Approvals | — (VettID-specific) | Pending connection requests, grant requests, critical-item uses, share-rule decisions; approve/deny; critical items need the credential password |
+| Items | Folder list | Items per VAULT-ITEMS: name, category, typed fields, tags, sensitivity (data / secret / critical); filter by tag; add/edit from templates; share rules by tag (default: ask for each new item). Critical items live in the Protean Credential and are never shared by a rule |
+| Credential | — | Critical items inside the Protean Credential; unlock window; password change; the vault-held credential copy on/off |
 | Settings | Settings | Vault (status, release, lock, PIN); Security (credential, recovery, attestation info, biometric app lock and timeout); Privacy; App (theme, notifications and push path) |
 | Avatar sheet | Account sheet | Vault status, lock vault, open account portal, sign out of this device |
 | Onboarding | Sign-in flow | Membership check → enroll vault (PIN, credential password) → first connection guide |
@@ -116,7 +129,7 @@ one (translation-ready), accessibility labels required in review.
 | `:core:vault` | Typed vault client: one function per §10 type, sessions with the vault, dedupe, outbox, sync events → repositories |
 | `:core:data` | Repositories and Room caches per feature |
 | `:core:ui` | Theme (navy + gold, light/dark), components (top bar, drawer, list row, empty state, pill bar, settings cards, sheets) |
-| `:feature:*` | onboarding, messages, connections, approvals, secrets, credential, settings |
+| `:feature:*` | onboarding, messages, connections, approvals, items, credential, settings |
 | `:app` | Navigation (type-safe routes), DI wiring, notifications |
 
 Rules: features depend only on `:core:*`; no feature touches transport or
@@ -131,7 +144,7 @@ crypto directly; one ViewModel per screen with immutable UI state.
 | A2 | `:core:relay` + `:core:altchan` + `:core:vault` against a local dev stack (vettid-vault integration stack: relay + parent + dev enclave + member-API stand-in) | Instrumented test enrolls, unlocks, exchanges a message with a `vaultctl` peer |
 | A3 | Onboarding, unlock, credential, settings screens, biometric app lock | Fresh install → enrolled vault with credential on a real phone (dev stack) |
 | A4 | Connections, messages, approvals | Invite/QR connect, SAS, messages both ways, approvals |
-| A5 | Secrets + critical secrets, grants and critical-secret approvals | Flows against the dev stack and a second vault |
+| A5 | Items (data, secret, critical), tags, share rules, grants and critical-item approvals | Flows against the dev stack and a second vault |
 | A6 | Hardening and polish: accessibility pass, notifications, offline behaviour, error states, Play pre-launch report | Internal testing track build |
 
 Calls, devices/agents/LEASH, wallet, location and presence follow v1 in
