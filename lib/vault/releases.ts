@@ -1,16 +1,17 @@
 /**
  * Vault releases that have a host group (VAULT-RELEASES §7, §8.2, §8.3).
  *
- * One `VettidOrgVaultRelease<N>Stack` per entry: the AMI (EC2 Image Builder,
+ * One `VettidOrgVaultRelease<N>Stack` per spec: the AMI (EC2 Image Builder,
  * with the release's EIF and parent from its GitHub release, verified), the
- * launch template and the instance group. Until W7's `vault/releases.json`
- * exists this list is the source of truth for the release stacks; it is
- * empty while no release exists.
+ * launch template and the instance group. The specs come from the `host`
+ * member of each entry in `vault/releases/<channel>.json`
+ * (lib/vault/release-list.ts, W7); this module keeps their shape, checks
+ * and the scaler's constants.
  *
- * Adding a release (RUNBOOK "Vault", "Adding a release"): append an entry,
- * `npx cdk diff VettidOrgVaultRelease<N>Stack`, deploy it. Removing an entry
- * is how a removed release's stack is deleted (§10.3 step 2): `cdk destroy`
- * that stack first, then drop the entry.
+ * Adding a release (RUNBOOK "Vault", "Adding a release"): give its entry a
+ * `host`, `npx cdk diff VettidOrgVaultRelease<N>Stack`, deploy it. Removing
+ * `host` is how a removed release's stack is deleted (§10.3 step 2):
+ * `cdk destroy` that stack first, then drop `host`.
  */
 export interface VaultReleaseSpec {
   /** The release number N (the channel's own sequence). */
@@ -40,12 +41,6 @@ export interface VaultReleaseSpec {
   /** Group maximum (≤ the scaler's per-release cap of 2). */
   readonly maxInstances: 1 | 2;
 }
-
-/** Per channel. Empty: no release exists yet (W9 adds staging S1, W10 production 1). */
-export const VAULT_RELEASES: Record<'prod' | 'staging', readonly VaultReleaseSpec[]> = {
-  prod: [],
-  staging: [],
-};
 
 /** The scaler's caps (§8.6): at most this many instances per release and in total. */
 export const VAULT_SCALER_LIMITS = { perRelease: 2, total: 6, idleMinutes: 30 } as const;

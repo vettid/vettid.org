@@ -329,8 +329,8 @@ describe('VettidOrgMemberApiStack', () => {
   const apiApp = new cdk.App({ context: { vaultsStreamArn: 'arn:aws:dynamodb:us-east-1:369484479783:table/vettid-org-vaults/stream/2026-10-05T00:00:00.000' } });
   const t = Template.fromStack(new VettidOrgMemberApiStack(apiApp, 'MemberApi', { config: loadConfig(apiApp.node), env }));
 
-  test('four route groups + link mailer + four jobs', () => {
-    t.resourceCountIs('AWS::Lambda::Function', 9);
+  test('four route groups + link mailer + five jobs (incl. the vault notice job, W8)', () => {
+    t.resourceCountIs('AWS::Lambda::Function', 10);
     for (const p of ['/api/public', '/api/auth', '/api/account', '/api/vault']) {
       t.hasResourceProperties('AWS::ApiGatewayV2::Route', { RouteKey: `ANY ${p}/{proxy+}` });
     }
@@ -339,6 +339,7 @@ describe('VettidOrgMemberApiStack', () => {
   test('jobs are scheduled and the mailer reads the members stream', () => {
     t.hasResourceProperties('AWS::Events::Rule', { ScheduleExpression: 'rate(15 minutes)' });
     t.hasResourceProperties('AWS::Events::Rule', { ScheduleExpression: 'cron(0 7 * * ? *)' });
+    t.hasResourceProperties('AWS::Events::Rule', { ScheduleExpression: 'cron(0 15 * * ? *)' }); // vault release notices
     t.hasResourceProperties('AWS::Lambda::EventSourceMapping', { StartingPosition: 'LATEST', BisectBatchOnFunctionError: true });
   });
 

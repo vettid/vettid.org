@@ -9,6 +9,7 @@ import { ApiFunction } from '../constructs/api-function';
 import { ReleaseKey, ReleaseKeySpec } from '../constructs/release-key';
 import { publishRef } from '../constructs/ssm-refs';
 import {
+  SEALED_RELEASE_INDEX,
   VaultTable,
   vaultControlQueueArnPattern,
   vaultControlQueuePolicy,
@@ -124,6 +125,15 @@ export class VettidOrgVaultStack extends cdk.Stack {
         streamResourcePolicy: iam.PolicyDocument.fromJson({ Version: '2012-10-17', Statement: vaultsStreamResourceStatements(config, vault) }),
         globalSecondaryIndexes: [
           { indexName: 'user-index', partitionKey: { name: 'user_guid', type: S }, sortKey: { name: 'created_at', type: S } },
+          // The release notice job (W8) finds the vaults sealed to a release
+          // here; it sees only these attributes, never leases or alarms.
+          {
+            indexName: SEALED_RELEASE_INDEX,
+            partitionKey: { name: 'sealed_release', type: S },
+            sortKey: { name: 'vault_id', type: S },
+            projectionType: dynamodb.ProjectionType.INCLUDE,
+            nonKeyAttributes: ['user_guid', 'state'],
+          },
         ],
       }),
       // vault-instances: the registry, kept alive by the parent's heartbeat.

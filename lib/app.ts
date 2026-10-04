@@ -1,4 +1,5 @@
 import * as cdk from 'aws-cdk-lib/core';
+import { join } from 'node:path';
 import { loadConfig } from './config';
 import { VettidOrgStack } from './stacks/web-stack';
 import { VettidOrgDnsStack } from './stacks/dns-stack';
@@ -19,7 +20,7 @@ import { VettidOrgVaultSmokeStack } from './stacks/vault-smoke-stack';
 import { VettidOrgVaultStack, vaultEnv } from './stacks/vault-stack';
 import { VettidOrgVaultHostStack } from './stacks/vault-host-stack';
 import { VettidOrgVaultReleaseStack, releaseStackId } from './stacks/vault-release-stack';
-import { VAULT_RELEASES, validateReleaseList } from './vault/releases';
+import { hostSpecs, keySpecs, readReleaseFile } from './vault/release-list';
 
 /**
  * Builds every stack in the vettid.org app. Kept out of bin/ so tests can
@@ -50,19 +51,21 @@ export function buildApp(app: cdk.App): void {
 
   // The vault account's stacks (VAULT-RELEASES §8.2), in deploy order:
   // VaultStack (stateful) → VaultHostStack → one VaultRelease<N>Stack per
-  // release in lib/vault/releases.ts (none yet). Later stacks read the
-  // earlier ones' refs from SSM at deploy time; nothing is exported.
+  // release with a `host` in vault/releases/<channel>.json (none yet). Later
+  // stacks read the earlier ones' refs from SSM at deploy time; nothing is
+  // exported.
   const vaultStacks = () => {
     if (!config.vault) return;
     const venv = vaultEnv(config, config.vault);
-    const releases = VAULT_RELEASES[config.vault.channel];
-    validateReleaseList(releases, config.vault.channel);
+    // Validated here (synth fails on a malformed list) and in CI (check:manifest).
+    const list = readReleaseFile(join(__dirname, '..'), config.vault.channel, config.vault.account);
+    const releases = hostSpecs(list);
     const vault = new VettidOrgVaultStack(app, 'VettidOrgVaultStack', {
       config,
       env: venv,
       terminationProtection: true,
-      // Release keys come from vault/releases.json (W7). None exist yet.
-      releaseKeys: [],
+      // One sealing key per listed release (§6.2); none yet.
+      releaseKeys: keySpecs(list),
     });
     const host = new VettidOrgVaultHostStack(app, 'VettidOrgVaultHostStack', { config, env: venv, releases });
     host.addDependency(vault);

@@ -308,7 +308,7 @@ describe('cross-account access (VAULT-RELEASES §8.1)', () => {
       expect(replica.DeletionProtectionEnabled).toBe(true);
       for (const s of replica.ResourcePolicy?.PolicyDocument.Statement ?? []) {
         expect(s.Principal).toEqual({ AWS: 'arn:aws:iam::449757308783:root' });
-        expect(s.Condition.ArnEquals['aws:PrincipalArn']).toMatch(/^arn:aws:iam::449757308783:role\/vettid-org-member-(vault|cleanup|vault-alarms)$/);
+        expect(s.Condition.ArnEquals['aws:PrincipalArn']).toMatch(/^arn:aws:iam::449757308783:role\/vettid-org-member-(vault|cleanup|vault-alarms|vault-notices)$/);
         expect(str(s.Action)).not.toMatch(/dynamodb:\*|BatchWrite|DeleteTable|UpdateTable/);
       }
     }
@@ -338,6 +338,25 @@ describe('cross-account access (VAULT-RELEASES §8.1)', () => {
     for (const v of withQueues) expect(v.VAULT_QUEUE_URL_PREFIX).toBe('https://sqs.us-east-1.amazonaws.com/369484479783/vettid-org-vault-control-');
     const vaultStmts = statements(api).filter((s: any) => str(s.Resource).includes('vettid-org-vault'));
     for (const s of vaultStmts) expect(str(s.Resource)).toContain(':369484479783:');
+  });
+
+  test('the release notice job (W8) reads the release rows and the sealed-release index only, on both sides', () => {
+    const vaultsArn = 'arn:aws:dynamodb:us-east-1:369484479783:table/vettid-org-vaults';
+    const role = resources(api, 'AWS::IAM::Role').find(([, r]) => r.Properties.RoleName === 'vettid-org-member-vault-notices')![0];
+    const pol = resources(api, 'AWS::IAM::Policy').filter(([, p]) => str(p.Properties.Roles).includes(role)).flatMap(([, p]) => p.Properties.PolicyDocument.Statement);
+    const vaultStmts = pol.filter((s: any) => str(s.Resource).includes(':369484479783:'));
+    expect(vaultStmts.map((s: any) => [s.Action, s.Resource])).toEqual([
+      ['dynamodb:Query', ['arn:aws:dynamodb:us-east-1:369484479783:table/vettid-org-vault-releases', 'arn:aws:dynamodb:us-east-1:369484479783:table/vettid-org-vault-releases/index/*']],
+      ['dynamodb:Query', `${vaultsArn}/index/sealed-release-index`],
+    ]);
+    expect(str(pol)).toContain('ses:SendEmail');
+    const vaults = resources(prod.json, 'AWS::DynamoDB::GlobalTable').find(([, t]) => t.Properties.TableName === 'vettid-org-vaults')![1];
+    const st = vaults.Properties.Replicas[0].ResourcePolicy.PolicyDocument.Statement.filter((s: any) => str(s.Condition).includes('vault-notices'));
+    expect(st).toEqual([expect.objectContaining({ Action: 'dynamodb:Query', Resource: `${vaultsArn}/index/sealed-release-index` })]);
+    const rule = resources(api, 'AWS::Events::Rule').find(([, r]) => r.Properties.ScheduleExpression === 'cron(0 15 * * ? *)');
+    expect(rule).toBeDefined();
+    const fn = resources(api, 'AWS::Lambda::Function').find(([, f]) => f.Properties.Environment.Variables.RELEASE_LOG_URL)![1];
+    expect(fn.Properties.Environment.Variables.RELEASE_LOG_URL).toBe('https://vettid.org/security/releases/');
   });
 
   test('the control-queue policy the parent applies admits the two senders only', () => {
@@ -371,7 +390,15 @@ describe('VettidOrgVaultStack: tables (moved from VettidOrgDataStack)', () => {
     t.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
       TableName: 'vettid-org-vaults',
       KeySchema: [{ AttributeName: 'vault_id', KeyType: 'HASH' }],
-      GlobalSecondaryIndexes: [Match.objectLike({ IndexName: 'user-index' })],
+      GlobalSecondaryIndexes: [
+        Match.objectLike({ IndexName: 'user-index' }),
+        // the notice job (W8): vaults by sealed release, three attributes only
+        Match.objectLike({
+          IndexName: 'sealed-release-index',
+          KeySchema: [{ AttributeName: 'sealed_release', KeyType: 'HASH' }, { AttributeName: 'vault_id', KeyType: 'RANGE' }],
+          Projection: { ProjectionType: 'INCLUDE', NonKeyAttributes: ['user_guid', 'state'] },
+        }),
+      ],
       Replicas: [Match.objectLike({ PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true } })],
       // credential-clone alarms reach the alarm mailer (VAULT-MESSAGING 0.9.0 §11.5)
       StreamSpecification: { StreamViewType: 'NEW_IMAGE' },

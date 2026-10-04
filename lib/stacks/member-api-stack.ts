@@ -20,6 +20,7 @@ import {
   vaultApiRoleName,
   vaultControlQueueArnPattern,
   vaultControlQueueUrlPrefix,
+  vaultGrantResources,
   vaultTableArn,
 } from '../vault/access';
 
@@ -187,11 +188,10 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     const vaultGrants = (fn: lambda.Function, consumer: VaultApiConsumer) => {
       const access = VAULT_API_ACCESS[consumer];
       for (const grant of access.tables) {
-        const arn = vaultTableArn(config, vaultCfg, grant.table);
         fn.addToRolePolicy(
           new iam.PolicyStatement({
             actions: grant.actions.map((a) => `dynamodb:${a}`),
-            resources: grant.indexes ? [arn, `${arn}/index/*`] : [arn],
+            resources: vaultGrantResources(config, vaultCfg, grant),
             // Attribute-level write limits (fine-grained access control).
             // ForAllValues is vacuously true if a request carried no attribute
             // list, so this narrows, and never widens, the plain grant.
@@ -270,6 +270,24 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     // May only clear the alarm flag and delete a deleted vault's rows (§12.5).
     vaultGrants(alarms, 'vault-alarms');
     alarms.addToRolePolicy(sesSend);
+    // Release notices (VAULT-RELEASES §3.5, §10.2; W8): daily, emails the
+    // members whose vault is sealed to an ending release (90/30/7/1 days
+    // before ends_at, then "ended") or to one an urgent security release
+    // fixes. Reads the release rows and the sealed-release index only; each
+    // notice is claimed once in the ratelimits table.
+    const notices = job('VaultNoticeJob', 'lambda/jobs/vault-notices.ts', cdk.Duration.minutes(5), vaultApiRoleName(config, 'vault-notices'));
+    g(notices, 'members', ['GetItem']);
+    g(notices, 'ratelimits', ['PutItem', 'DeleteItem']);
+    g(notices, 'audit', ['PutItem']);
+    vaultGrants(notices, 'vault-notices');
+    notices.addToRolePolicy(sesSend);
+    // The public release log (generated from the signed manifest): urgent security releases.
+    notices.addEnvironment('RELEASE_LOG_URL', `https://${config.domainName}/security/releases/`);
+    new events.Rule(this, 'VaultNoticeSchedule', {
+      schedule: events.Schedule.cron({ minute: '0', hour: '15' }), // 15:00 UTC daily: daytime in the Americas and Europe
+      targets: [new targets.LambdaFunction(notices)],
+    });
+
     // The vaults stream is in the vault account (cross-account event source:
     // its stream policy admits this role). Its ARN carries a creation label,
     // so it comes from context after VettidOrgVaultStack's first deploy.

@@ -25,8 +25,13 @@ export interface InstanceRow {
 export interface ReleaseRow {
   release: string;
   release_number: number;
-  /** VAULT-MESSAGING 0.10.0 §11.10.1: fixed from release 1 on. */
-  status: 'active' | 'deprecated' | 'retired' | 'removed';
+  /**
+   * VAULT-MESSAGING 0.10.0 §11.10.1: fixed from release 1 on, written by the
+   * manifest sync. Plus `canary`, which is never in a manifest: a row an
+   * operator writes for a release under test before its manifest is
+   * published (VAULT-RELEASES §10.1 step 9), routed only for canary members.
+   */
+  status: 'active' | 'deprecated' | 'retired' | 'removed' | 'canary';
   /** false once the release's image can no longer be started (§11.10.5). */
   available?: boolean;
   /**
@@ -41,10 +46,29 @@ export interface ReleaseRow {
 /**
  * Whether the API may route to (and ask to start) a release (§11.10.5): it
  * is known, its image can still start, and it is not `removed` unless
- * reopened for a rescue. Anything else answers 410 release_unavailable.
+ * reopened for a rescue. A `canary` release is routable only for canary
+ * members (VAULT-RELEASES §10.1 step 9, §11.3) and for the host operations
+ * of the cleanup job (a vault sealed to it can only be a canary member's).
+ * Anything else answers 410 release_unavailable.
  */
-export const routable = (rel: ReleaseRow | null): rel is ReleaseRow =>
-  !!rel && rel.available !== false && (rel.status !== 'removed' || rel.rescue === true);
+export const routable = (rel: ReleaseRow | null, opts: { canary?: boolean } = {}): rel is ReleaseRow => {
+  if (!rel || rel.available === false) return false;
+  switch (rel.status) {
+    case 'active':
+    case 'deprecated':
+    case 'retired':
+      return true;
+    case 'removed':
+      return rel.rescue === true;
+    case 'canary':
+      return opts.canary === true;
+    default:
+      return false;
+  }
+};
+
+/** A member whose vault may use canary releases: `vault_canary: true` on the member row, set by an operator (RUNBOOK "Vault"). */
+export const isCanaryMember = (m: { vault_canary?: unknown } | null | undefined): boolean => m?.vault_canary === true;
 
 /** A release's start request is recorded at most this often. */
 export const START_REQUEST_INTERVAL_S = 30;

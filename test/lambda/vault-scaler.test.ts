@@ -62,7 +62,7 @@ describe('scaler: start', () => {
 
   test('unavailable or unknown statuses are not routable', () => {
     expect(routable(row(P1, 1, { available: false }))).toBe(false);
-    expect(routable(row(P1, 1, { status: 'canary' }))).toBe(false);
+    expect(routable(row(P1, 1, { status: 'candidate' }))).toBe(false);
     expect(routable(row(P1, 1, { status: 'removed', rescue: false }))).toBe(false);
     expect(plan(snap([row(P1, 1, { available: false, start_requested_at: iso(1) })], [group(P1, 1)])).setDesired).toEqual([]);
   });
@@ -144,9 +144,17 @@ describe('scaler: stop', () => {
     expect(p.setDesired).toEqual([{ group: 'vettid-org-vault-r1', release: P1, from: 1, to: 0, reason: 'not_routable' }]);
   });
 
-  test('groups without a release row (candidate, canary) are left to the operator', () => {
+  test('groups without a release row (a candidate) are left to the operator', () => {
     const p = plan(snap([], [group(P1, 1, { desired: 1 })]));
     expect(p.setDesired).toEqual([]);
+  });
+
+  test('a canary row (W8) is managed like a release: started on request, stopped when idle', () => {
+    expect(routable(row(P1, 5, { status: 'canary' }))).toBe(true);
+    const start = plan(snap([row(P1, 5, { status: 'canary', start_requested_at: iso(10) })], [group(P1, 5)]));
+    expect(start.setDesired).toEqual([expect.objectContaining({ to: 1, reason: 'start' })]);
+    const idle = plan(snap([row(P1, 5, { status: 'canary', start_issued_at: iso(3600) })], [group(P1, 5, { desired: 1 })], { [P1]: [inst(0)] }));
+    expect(idle.setDesired.map((d) => d.to)).toEqual([0]);
   });
 });
 

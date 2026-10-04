@@ -13,7 +13,10 @@
     "deploy:all": "cdk deploy --all --require-approval never",
     "sync:nav": "node scripts/sync-nav.mjs",
     "check:site": "node scripts/sync-nav.mjs --check && node scripts/check-site.mjs && node scripts/sync-site-assets.mjs --check",
-    "sync:assets": "node scripts/sync-site-assets.mjs"
+    "sync:assets": "node scripts/sync-site-assets.mjs",
+    "check:manifest": "ts-node --transpile-only --prefer-ts-exts scripts/vault/check-manifest.ts",
+    "release-log": "ts-node --transpile-only --prefer-ts-exts scripts/vault/release-log.ts",
+    "vault:manifest": "ts-node --transpile-only --prefer-ts-exts scripts/vault/manifest.ts"
   },
   "devDependencies": {
     "@aws-sdk/client-auto-scaling": "^3.1146.0",

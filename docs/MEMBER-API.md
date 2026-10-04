@@ -183,9 +183,27 @@ interface VaultStatus {     // advisory: written by the enclave host, never a se
   state_version: number | string | null;
   leased: boolean;          // an instance currently holds the vault
   alarm: { kind: 'credential_clone'; at: string } | null;  // the last host alarm (below), advisory
+  release: ReleaseInfo | null;  // the sealed release (W8); null while not sealed yet
   created_at: string; updated_at: string;
 }
+
+interface ReleaseInfo {     // from the routing table (the signed manifest); advisory
+  number: number | null;    // null: unknown (not in the manifest; the API answers 410)
+  status: 'active' | 'deprecated' | 'retired' | 'removed' | 'canary' | 'unknown';
+  ends_at: string | null;   // RFC 3339; set on deprecated and retired releases once known
+  newest_active: number | null;
+  notice: 'update_available'   // deprecated, or an older active release: offer the newest
+        | 'final_warning'      // retired: the release ends at ends_at
+        | 'ended'              // removed: the vault can no longer be opened
+        | 'rescue'             // removed, reopened for a rescue: only the move is offered
+        | 'unavailable'        // unknown, or its image can no longer start
+        | null;
+}
 ```
+
+The apps take release status from the signed manifest itself
+(VAULT-MESSAGING §11.10.6); `release` is for the account site and agrees
+with it because both come from the same manifest.
 
 **Fields.**
 - `request_id`: a canonical ULID chosen by the app, the same as inside the
@@ -227,7 +245,8 @@ interface VaultStatus {     // advisory: written by the enclave host, never a se
 2. otherwise a live instance of the vault's `sealed_release`, least loaded
    first;
 3. for enrollment (no vault, or not sealed yet), a live instance of the
-   newest `active` release that has one.
+   newest `active` release that has one (for a canary member, of the
+   newest `canary` release while one exists; below).
 
 An instance is live while its registry heartbeat is under 90 s old and its
 registered queue is `vettid-org-vault-control-<instance_id>` in this account.
@@ -261,6 +280,27 @@ keeps working whatever the release (locking only reduces exposure). The
 cleanup job never asks a `removed` release to start for an account
 deletion either.
 
+**Canary releases** (VAULT-RELEASES §10.1 step 9, §11.3; W8). Before a
+release is published, operations may add a release row with status
+`canary` (never a manifest status) for its PCR0. It is routed only for
+members whose member row has `vault_canary: true` (set by an operator;
+never shown or settable by the member):
+
+- enrollment (`GET /api/vault/enclave` without a vault, and `enroll`) goes
+  to the newest `canary` release while one exists, even when no release is
+  `active` (production release 1's canary); otherwise to the `active` ones
+  as for everyone;
+- a canary member's vault sealed to a canary release is routed there like
+  any release (unlock, recovery, `?release=`), and started on demand;
+- for every other member a canary release is unknown: `410
+  release_unavailable` for it by PCR0 or instance, never an enrollment
+  target, `status` shows it as `unknown`.
+
+When the published manifest lists the release, the manifest sync turns
+the row into an ordinary `active` row. A failed canary's row is deleted by
+the operator. The cleanup job reaches a canary release like any other for
+an account deletion.
+
 **Dark launch** (VAULT-RELEASES §9). While the release registry has no
 `active` release that can start (as before the first release), `GET
 /api/vault/enclave` and `enroll` answer `503 vault_unavailable` after their
@@ -283,6 +323,36 @@ member. Not in the spec, chosen here: `enclave` 30 per member per minute,
 member, `vault_id`, `request_id`, instance and release. Never PINs or
 envelopes. Account deletion after cancellation records the deleted
 `vault_ids`.
+
+### Vault release notices (VAULT-RELEASES §3.5, §10.2; W8)
+
+A daily job (`VaultNoticeJob`, 15:00 UTC, role
+`vettid-org-member-vault-notices`) emails the members whose vault row's
+`sealed_release` is an ending release, found through the vaults table's
+`sealed-release-index` (it projects only `vault_id`, `user_guid` and
+`state`; deleted vaults are skipped):
+
+| Notice | When | Release |
+|---|---|---|
+| `ends_90`, `ends_30`, `ends_7`, `ends_1` | 90, 30, 7 and 1 days before `ends_at` (a run sends only the latest one due, so a missed day sends the current one, never a stale one) | `deprecated` or `retired` with `ends_at` |
+| `ended` | up to 14 days after `ends_at` | `removed`, not reopened for a rescue: how to ask for a rescue in the 30-day window |
+| `urgent_<U>` | in the first 30 days of release U | U is marked `security: urgent` in the release log (`https://vettid.org/security/releases/index.json`, generated from the signed manifest); sent to members on each release in U's `affects` that still runs |
+
+Each notice goes to a member at most once per release, end date and
+milestone: a conditional put of `vault-notice#…` in the ratelimits table
+claims it (expiring 60 days after the end date); a failed send releases
+the claim and the next run retries. Mails are plain text from the system
+sender (members are SES-verified identities) and are audited as
+`vault.release_notice` (release number and milestone only). The job reads
+the vault account's tables only through the access matrix
+(`lib/vault/access.ts`): `Query` on `vault-releases` and on that one
+index, nothing else. In-app notices come from the manifest and
+`GET /api/vault/status` (`release.notice`).
+
+Not built yet: the email when a release's key has been deleted (D + 30)
+and the deletion of the stored objects of vaults still sealed to a
+deleted key (D + 37), which needs the cleanup role in the data bucket's
+policy (VAULT-RELEASES §3.5, §8.2).
 
 ### Vault recovery (VAULT-MESSAGING 0.4.1 §11.11)
 

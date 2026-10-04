@@ -66,7 +66,8 @@ export async function requestVaultDeletion(v: VaultRowLite, nowS: number): Promi
     // (VAULT-MESSAGING 0.10.0 §11.10.5); the stored objects of vaults still
     // sealed to it go after the key's deletion (VAULT-RELEASES §3.5, D + 37;
     // not built yet). Until then the row stays, retried and flagged below.
-    if (routable(rel)) {
+    // A canary release is the host's to reach for a canary member's vault.
+    if (routable(rel, { canary: true })) {
       inst = await pickInstance(v.sealed_release, nowS);
       if (!inst) await requestStart(v.sealed_release);
     }

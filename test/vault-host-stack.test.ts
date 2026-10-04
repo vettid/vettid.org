@@ -4,12 +4,12 @@ import * as os from 'os';
 import * as path from 'path';
 import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
-import { loadConfig, VAULT_ROLE_NAMES } from '../lib/config';
+import { channelVault, loadConfig, VAULT_ROLE_NAMES } from '../lib/config';
 import { VettidOrgVaultHostStack } from '../lib/stacks/vault-host-stack';
 import { VettidOrgVaultReleaseStack, releaseStackId } from '../lib/stacks/vault-release-stack';
 import { vaultEnv } from '../lib/stacks/vault-stack';
 import { renderBuildComponent } from '../lib/vault/image-component';
-import { VAULT_RELEASES, VaultReleaseSpec, validateReleaseList, validateReleaseSpec } from '../lib/vault/releases';
+import { VaultReleaseSpec, validateReleaseList, validateReleaseSpec } from '../lib/vault/releases';
 
 /** A synthetic release (never deployed): the release stack's shape is tested on it. */
 const SPEC: VaultReleaseSpec = {
@@ -204,10 +204,10 @@ describe('VettidOrgVaultHostStack: scaler (§8.6)', () => {
 describe('VettidOrgVaultHostStack: manifest sync (§7)', () => {
   const fn = () => resources(H.json, 'AWS::Lambda::Function').find((f) => f.Properties.FunctionName === 'vettid-org-vault-manifest-sync')!;
 
-  test('fetches the channel’s manifest; pinned keys from config (none yet: it does nothing)', () => {
+  test('fetches the channel’s manifest; pinned keys from config', () => {
     expect(fn().Properties.Environment.Variables).toMatchObject({
       MANIFEST_URL: 'https://vettid.org/.well-known/vettid/pcr-manifest.json',
-      PINNED_KEYS: '[]',
+      PINNED_KEYS: JSON.stringify(channelVault('prod').vault.manifestKeys), // key A (W7)
       DATA_BUCKET: 'vettid-org-vault-data-369484479783',
       SSM_RELEASES_PATH: '/vettid-org/prod/vault/releases/',
     });
@@ -279,7 +279,6 @@ describe('VettidOrgVaultRelease<N>Stack (synthetic release 7)', () => {
     expect(() => validateReleaseSpec(SPEC, 'staging')).toThrow(/channel/);
     expect(() => validateReleaseList([SPEC, { ...SPEC }], 'prod')).toThrow(/twice/);
     expect(() => validateReleaseList([SPEC, { ...SPEC, release: 8, tag: 'release/prod/8' }], 'prod')).toThrow(/PCR0/);
-    expect(VAULT_RELEASES).toEqual({ prod: [], staging: [] }); // none yet (W9/W10)
   });
 
   test('launch template: m7g.large, enclaves, IMDSv2 hop 1, the host instance profile, no key pair, encrypted gp3', () => {
