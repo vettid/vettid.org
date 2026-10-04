@@ -6,7 +6,10 @@ import { join } from 'node:path';
 import { buildApp } from '../lib/app';
 import { hostName, loadConfig, stageZoneNs } from '../lib/config';
 import { MANIFEST_SITE_PATH, VettidOrgStageSiteStack } from '../lib/stacks/stage-site-stack';
-import { SERVED_PATHS } from '../lib/vault/release-list';
+import { SERVED_PATHS, readReleaseFile } from '../lib/vault/release-list';
+import { releaseStackId } from '../lib/stacks/vault-release-stack';
+
+const ROOT = join(__dirname, '..');
 
 /**
  * The staging copy (VAULT-RELEASES §11.1, W9): what `-c stage=staging`
@@ -51,6 +54,9 @@ describe('staging (-c stage=staging)', () => {
       ['VettidOrgDataStack', STAGING, true],
       ['VettidOrgVaultStack', STAGING, true],
       ['VettidOrgVaultHostStack', STAGING, false],
+      // one release stack per entry of vault/releases/staging.json with a `host`
+      ...readReleaseFile(ROOT, 'staging', STAGING).releases.filter((e) => e.host)
+        .map((e) => [releaseStackId(e.release), STAGING, false]),
       ['VettidOrgMemberApiStack', STAGING, false],
       ['VettidOrgAccountSiteStack', STAGING, false],
       ['VettidOrgStageSiteStack', STAGING, false],
