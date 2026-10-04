@@ -391,6 +391,16 @@ describe('POST /api/vault/enroll', () => {
     expect(second.body.vault_id).toBe(first.body.vault_id);
   });
 
+  test('after the deletion notice removed the rows (§12.5), the next enrollment is a fresh one', async () => {
+    vaultOf('g1', { vault_id: VID, state: 'deleted' });
+    tbl('vaults').delete(VID);
+    tbl('vaults').delete('user#g1');
+    const r = await call('POST', '/api/vault/enroll', body());
+    expect(r.status).toBe(202);
+    expect(r.body.vault_id).not.toBe(VID);
+    expect(getItem('vaults', 'user#g1').current_vault_id).toBe(r.body.vault_id);
+  });
+
   test('a deleted vault gets a fresh vault_id', async () => {
     vaultOf('g1', { vault_id: VID, state: 'deleted' });
     const r = await call('POST', '/api/vault/enroll', body());
@@ -625,8 +635,20 @@ describe('GET /api/vault/status', () => {
     vaultOf('g1', { vault_id: VID, state: 'unlocked', sealed_release: R0, vault_version: R0, state_version: 1, lease: { instance_id: 'i-1', lease_expires_at: NOW + 60 } });
     const r = await call('GET', '/api/vault/status');
     expect(r.body).toEqual({
-      vault: { vault_id: VID, state: 'unlocked', sealed_release: R0, vault_version: R0, state_version: 1, leased: true, recovery: null, created_at: expect.any(String), updated_at: expect.any(String) },
+      vault: { vault_id: VID, state: 'unlocked', sealed_release: R0, vault_version: R0, state_version: 1, leased: true, recovery: null, alarm: null, created_at: expect.any(String), updated_at: expect.any(String) },
     });
+  });
+
+  test('a deleted vault (§12.5) reads as no vault', async () => {
+    vaultOf('g1', { vault_id: VID, state: 'deleted', alarm: { kind: 'vault_deleted', alarm_id: '01JABCDEFGHJKMNPQRSTVWXYZ0', at: NOW } });
+    expect((await call('GET', '/api/vault/status')).body).toEqual({ vault: null });
+  });
+
+  test('the last host-reported alarm (kind and time only, VAULT-MESSAGING 0.9.0 §11.5)', async () => {
+    vaultOf('g1', { vault_id: VID, state: 'unlocked', alarm: { kind: 'credential_clone', alarm_id: '01JABCDEFGHJKMNPQRSTVWXYZ0', at: NOW - 60, emailed_at: NOW }, alarm_pending: true });
+    const r = await call('GET', '/api/vault/status');
+    expect(r.body.vault.alarm).toEqual({ kind: 'credential_clone', at: new Date((NOW - 60) * 1000).toISOString() });
+    expect(JSON.stringify(r.body)).not.toContain('01JABCDEFGHJKMNPQRSTVWXYZ0');
   });
 });
 

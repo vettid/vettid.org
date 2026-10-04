@@ -130,7 +130,11 @@ export class VettidOrgDataStack extends cdk.Stack {
     // vaults: PK vault_id. The API reads a member's vault through the
     // consistent `user#<guid>` pointer row; user-index (pointer rows carry no
     // user_guid, so they stay out of it) is for operations and history.
+    // The stream (new images only) carries the host's credential-clone
+    // alarms (`alarm_pending`, VAULT-MESSAGING 0.9.0 §11.5) to the alarm
+    // mailer; an event-source filter keeps every other write away from it.
     table('vaults', { name: 'vault_id', type: S }, {
+      dynamoStream: dynamodb.StreamViewType.NEW_IMAGE,
       globalSecondaryIndexes: [
         { indexName: 'user-index', partitionKey: { name: 'user_guid', type: S }, sortKey: { name: 'created_at', type: S } },
       ],
@@ -180,6 +184,7 @@ export class VettidOrgDataStack extends cdk.Stack {
     publishRef(this, config, 'data/members-stream-arn', this.tables.members.tableStreamArn!);
     // For the enclave host (parent, VAULT-PLAN V5), which isn't a CDK consumer.
     publishRef(this, config, 'data/vaults-table-name', this.tables.vaults.tableName);
+    publishRef(this, config, 'data/vaults-stream-arn', this.tables.vaults.tableStreamArn!);
     publishRef(this, config, 'data/vault-instances-table-name', this.tables['vault-instances'].tableName);
     publishRef(this, config, 'data/vault-requests-table-name', this.tables['vault-requests'].tableName);
     publishRef(this, config, 'data/vault-releases-table-name', this.tables['vault-releases'].tableName);

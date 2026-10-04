@@ -112,7 +112,10 @@ describe('VettidOrgDataStack', () => {
       KeySchema: [{ AttributeName: 'vault_id', KeyType: 'HASH' }],
       GlobalSecondaryIndexes: [Match.objectLike({ IndexName: 'user-index' })],
       Replicas: [Match.objectLike({ PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true } })],
+      // credential-clone alarms reach the alarm mailer (VAULT-MESSAGING 0.9.0 §11.5)
+      StreamSpecification: { StreamViewType: 'NEW_IMAGE' },
     });
+    t.hasResourceProperties('AWS::SSM::Parameter', { Name: '/vettid-org/prod/data/vaults-stream-arn' });
     t.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
       TableName: 'vettid-org-vault-instances',
       KeySchema: [{ AttributeName: 'instance_id', KeyType: 'HASH' }],
@@ -364,8 +367,8 @@ describe('VettidOrgMemberApiStack', () => {
   const { VettidOrgMemberApiStack } = require('../lib/stacks/member-api-stack');
   const t = Template.fromStack(new VettidOrgMemberApiStack(newApp(), 'MemberApi', { config, env }));
 
-  test('four route groups + link mailer + three jobs', () => {
-    t.resourceCountIs('AWS::Lambda::Function', 8);
+  test('four route groups + link mailer + four jobs', () => {
+    t.resourceCountIs('AWS::Lambda::Function', 9);
     for (const p of ['/api/public', '/api/auth', '/api/account', '/api/vault']) {
       t.hasResourceProperties('AWS::ApiGatewayV2::Route', { RouteKey: `ANY ${p}/{proxy+}` });
     }
@@ -398,16 +401,18 @@ describe('VettidOrgMemberApiStack', () => {
 
     test('sqs:SendMessage only to vettid-org-vault-control-* queues, and nothing else on SQS', () => {
       const sqsStmts = stmts().filter((s: any) => str(s.Action).includes('sqs:'));
-      expect(sqsStmts).toHaveLength(1);
-      expect(sqsStmts[0].Action).toBe('sqs:SendMessage');
-      expect(str(sqsStmts[0].Resource)).toContain(':vettid-org-vault-control-*');
+      expect(sqsStmts).toHaveLength(2); // the vault routes, and the cleanup job's vault deletions (§12.5)
+      for (const q of sqsStmts) {
+        expect(q.Action).toBe('sqs:SendMessage');
+        expect(str(q.Resource)).toContain(':vettid-org-vault-control-*');
+      }
     });
 
     test("vault and release writes are limited to the API's own attributes (never lease, sealed_release or status)", () => {
       const writes = stmts().filter(
         (s: any) => /dynamodb:(PutItem|UpdateItem)/.test(str(s.Action)) && /table\/vettid-org-(vaults|vault-releases)"/.test(str(s.Resource)),
       );
-      expect(writes).toHaveLength(2);
+      expect(writes).toHaveLength(5); // the API's two, the alarm mailer's, the cleanup job's deletion mark and start request
       for (const w of writes) {
         const attrs: string[] = w.Condition['ForAllValues:StringEquals']['dynamodb:Attributes'];
         for (const f of ['lease', 'sealed_release', 'vault_version', 'state_version', 'status', 'available']) expect(attrs).not.toContain(f);
@@ -417,16 +422,39 @@ describe('VettidOrgMemberApiStack', () => {
       expect(instanceWrites).toHaveLength(0);
     });
 
-    test('only the cleanup job may delete vault rows (canceled accounts after the grace period)', () => {
+    test('the alarm mailer: only the vaults stream records with alarm_pending, and may only clear the alarm flag', () => {
+      t.hasResourceProperties('AWS::Lambda::EventSourceMapping', {
+        StartingPosition: 'LATEST',
+        FilterCriteria: { Filters: [{ Pattern: JSON.stringify({ eventName: ['MODIFY'], dynamodb: { NewImage: { alarm_pending: { BOOL: [true] } } } }) }] },
+      });
+      const alarmWrites = stmts().filter(
+        (s: any) => str(s.Action) === '"dynamodb:UpdateItem"' && str(s.Resource).includes('table/vettid-org-vaults"') && str(s.Condition).includes('alarm_pending'),
+      );
+      expect(alarmWrites).toHaveLength(1);
+      expect(alarmWrites[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(['vault_id', 'alarm', 'alarm_pending']);
+      // The API itself never writes alarm fields.
+      const apiWrites = stmts().filter((s: any) => /PutItem/.test(str(s.Action)) && str(s.Resource).includes('table/vettid-org-vaults"'));
+      for (const w of apiWrites) expect(str(w.Condition)).not.toContain('alarm');
+    });
+
+    test('vault rows are deleted only by the cleanup job and the deletion notice (§12.5)', () => {
       const deletes = stmts().filter((s: any) => str(s.Action).includes('dynamodb:DeleteItem') && str(s.Resource).includes('table/vettid-org-vaults'));
-      expect(deletes).toHaveLength(1);
-      expect([].concat(deletes[0].Action).sort()).toEqual(['dynamodb:DeleteItem', 'dynamodb:Query']);
+      expect(deletes).toHaveLength(2);
+      const actions = deletes.map((d: any) => ([] as string[]).concat(d.Action).sort().join(',')).sort();
+      expect(actions).toEqual(['dynamodb:DeleteItem', 'dynamodb:DeleteItem,dynamodb:Query,dynamodb:Scan']);
+      // The cleanup job may only mark a deletion requested.
+      const mark = stmts().filter((s: any) => String(str(s.Condition)).includes('deletion_requested_at'));
+      expect(mark).toHaveLength(1);
+      expect(mark[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(['vault_id', 'deletion_requested_at']);
     });
 
     test('the queue URL prefix is pinned to this account and region', () => {
       const fns = Object.values<any>(t.findResources('AWS::Lambda::Function'));
-      const v = fns.find((f) => f.Properties.Environment?.Variables?.VAULT_QUEUE_URL_PREFIX);
-      expect(str(v.Properties.Environment.Variables.VAULT_QUEUE_URL_PREFIX)).toContain('https://sqs.us-east-1.amazonaws.com/123456789012/vettid-org-vault-control-');
+      const vs = fns.filter((f) => f.Properties.Environment?.Variables?.VAULT_QUEUE_URL_PREFIX);
+      expect(vs).toHaveLength(2); // the vault routes and the cleanup job
+      for (const v of vs) {
+        expect(str(v.Properties.Environment.Variables.VAULT_QUEUE_URL_PREFIX)).toContain('https://sqs.us-east-1.amazonaws.com/123456789012/vettid-org-vault-control-');
+      }
     });
   });
 
