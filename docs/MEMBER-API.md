@@ -283,8 +283,9 @@ deletion either.
 **Canary releases** (VAULT-RELEASES §10.1 step 9, §11.3; W8). Before a
 release is published, operations may add a release row with status
 `canary` (never a manifest status) for its PCR0. It is routed only for
-members whose member row has `vault_canary: true` (set by an operator;
-never shown or settable by the member):
+members whose member row has `vault_canary: true` (set by an operator
+from the admin site, ADMIN-API "Vault canary"; never shown or settable by
+the member):
 
 - enrollment (`GET /api/vault/enclave` without a vault, and `enroll`) goes
   to the newest `canary` release while one exists, even when no release is

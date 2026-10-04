@@ -58,6 +58,7 @@ export interface MemberView {
   pin_enabled: boolean;
   subscription: SubscriptionItem | null;
   voting_rights: boolean;
+  vault_canary: boolean; // admin API only (the member API never returns this view)
 }
 
 /**
@@ -91,5 +92,6 @@ export function toMemberView(m: MemberItem, sub: SubscriptionItem | null): Membe
     pin_enabled: !!m.pin_hash,
     subscription: sub,
     voting_rights: hasVotingRights(m, sub),
+    vault_canary: m.vault_canary === true,
   };
 }

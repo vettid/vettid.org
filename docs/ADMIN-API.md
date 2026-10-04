@@ -46,6 +46,7 @@ interface Member {
   pin_enabled: boolean;
   subscription: Subscription | null;
   voting_rights: boolean;         // member + active paid subscription (governance voting is upcoming)
+  vault_canary: boolean;          // vault canary tester (see "Vault canary"); never shown to the member
 }
 
 interface Subscription {
@@ -91,6 +92,36 @@ interface Invite {
   expires_at: string; created_at: string; created_by: string;
 }
 ```
+
+## Vault canary
+
+Canary testers are members routed to `canary` vault releases: builds under
+test that are not published yet (VAULT-RELEASES §10.1 step 9, §11.3;
+MEMBER-API "Canary releases"). The flag is `vault_canary: true` on the
+member row. Served by its own Lambda, whose role may update a member row
+only in `vault_canary` and `updated_at` (IAM `dynamodb:Attributes`, no
+`ALL_NEW`/`ALL_OLD` return values) and holds no Cognito member-pool rights.
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| GET | `/admin/vault-canary` | — | `{items: CanaryMember[], cursor}` — flagged members (a filtered scan; a page may hold fewer than 50 with a non-null cursor) |
+| GET | `/admin/vault-canary/{user_guid}` | — | `CanaryMember` |
+| POST | `/admin/vault-canary/{user_guid}` | — | `CanaryMember` — sets the flag. `409` unless state `member`, or if already set; `404` for an unknown member. Audited `member.vault_canary.set`. |
+| DELETE | `/admin/vault-canary/{user_guid}` | — | `CanaryMember` — clears the flag, in any state. `409` if not set; `404` for an unknown member. Audited `member.vault_canary.clear`. |
+
+```ts
+interface CanaryMember {
+  user_guid: string; email: string; first_name: string; last_name: string;
+  state: State; account_status: AccountStatus;
+  vault_canary: boolean;
+  eligible: boolean;               // state === 'member' (the flag may be set)
+}
+```
+
+Clearing the flag of a member whose vault is sealed to a canary release
+makes that vault unreachable (`410 release_unavailable`) until the
+release is published. The admin site shows the switch on each member's
+row (Members) with a confirmation, and lists testers below the members.
 
 ## Content
 

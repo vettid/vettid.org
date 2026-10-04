@@ -1,7 +1,8 @@
 // 2. Members — search/list registered + member accounts; suspend, reinstate,
-// delete, extend subscription.
+// delete, extend subscription, vault canary flag (plus the testers list).
 
 import { el, chip, mono, muted, option, time } from '../dom.js';
+import * as vaultCanary from './vault-canary.js';
 
 const STATE_TONE = { requested: 'mute', registered: 'info', member: 'ok', rejected: 'err' };
 const STATUS_TONE = { active: 'ok', suspended: 'warn', canceled: 'err' };
@@ -15,7 +16,10 @@ function subscriptionCell(s) {
   );
 }
 
-export function render(root, { api, ui }) {
+export function render(root, ctx) {
+  const { api, ui } = ctx;
+  const rows = new Map(); // user_guid -> { m, row } for rows on screen, so the testers list can update them
+  let canaryList = null;
   const state = el('select', { name: 'state' },
     option('', 'Registered + member'), option('registered', 'Registered'), option('member', 'Member'));
   const status = el('select', { name: 'status' },
@@ -33,6 +37,7 @@ export function render(root, { api, ui }) {
     emptyText: 'No members match these filters.',
     makePager: () => api.pager('/admin/members', { state: state.value, status: status.value, q: q.value.trim() }),
     row: (m, row) => {
+      rows.set(m.user_guid, { m, row });
       const id = api.seg(m.user_guid);
       const name = `${m.first_name ?? ''} ${m.last_name ?? ''}`.trim() || '—';
       const suspendOrReinstate = m.account_status === 'active'
@@ -109,14 +114,19 @@ export function render(root, { api, ui }) {
         ui.toast(`Deleted ${m.email}.`);
       }, 'danger');
 
+      const canary = vaultCanary.toggle(m, ctx, (v) => {
+        row.update({ ...m, vault_canary: v.vault_canary });
+        canaryList?.reload();
+      });
+
       return [
         el('div', {}, name, el('div', { class: 'sub' }, mono(m.user_guid))),
         m.email,
-        chip(m.state, STATE_TONE[m.state] ?? 'mute'),
+        el('div', {}, chip(m.state, STATE_TONE[m.state] ?? 'mute'), m.vault_canary ? el('div', { class: 'sub' }, chip('vault canary', 'warn')) : null),
         chip(m.account_status, STATUS_TONE[m.account_status] ?? 'mute'),
         subscriptionCell(m.subscription),
         m.voting_rights ? chip('yes', 'ok') : muted('no'),
-        ui.rowActions(suspendOrReinstate, extend, clearPin, remove),
+        ui.rowActions(suspendOrReinstate, extend, clearPin, canary, remove),
       ];
     },
   });
@@ -132,4 +142,12 @@ export function render(root, { api, ui }) {
     list.node,
   );
   list.reload();
+
+  // Second section on this page: who is flagged, wherever they are in the list above.
+  const canarySection = el('section', { class: 'section' });
+  root.after(canarySection);
+  canaryList = vaultCanary.renderList(canarySection, ctx, (v) => {
+    const r = rows.get(v.user_guid);
+    if (r) r.row.update({ ...r.m, vault_canary: false });
+  });
 }
