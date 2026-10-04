@@ -209,8 +209,17 @@ replica; after it, it cannot.)
 
 ## Vault (V5; docs/VAULT-RELEASES.md)
 
-Nothing runs yet: no host, no release, no release key. What exists after
-W5 is the stateful `VettidOrgVaultStack` in each vault account.
+No release and no release key exist yet. Per vault account there are
+three kinds of stack (VAULT-RELEASES §8.2), deployed in this order with
+that account's profile:
+
+1. `VettidOrgVaultStack`: stateful (tables, data bucket, fixed roles, keys).
+2. `VettidOrgVaultHostStack`: stateless (VPC, DNS Firewall, build VPC and
+   Image Builder infrastructure, DLQ, host log group, smoke-test key,
+   scaler, manifest sync, alarms). Reads the stream ARN from (1) via SSM.
+3. `VettidOrgVaultRelease<N>Stack`, one per entry in `lib/vault/releases.ts`
+   (none yet): AMI, launch template, group `vettid-org-vault-r<N>`. Reads
+   (2)'s refs via SSM.
 
 ### Accounts and profiles
 
@@ -339,13 +348,142 @@ policy), with a rescue (cancel, enable, restart, move) on request within
 that window (VAULT-RELEASES §3.5, §10.3):
 `AWS_PROFILE=vault-key-retirement aws kms schedule-key-deletion --key-id <arn> --pending-window-in-days 30`.
 
+### Host stack (W6), first deployment
+
+```bash
+aws sso login
+# Once per account: Image Builder's service-linked role (CloudFormation's
+# first CreateImage normally creates it; this is harmless if it exists).
+aws iam create-service-linked-role --aws-service-name imagebuilder.amazonaws.com --profile vault-staging || true
+aws iam create-service-linked-role --aws-service-name imagebuilder.amazonaws.com --profile vault-prod || true
+# 1. Staging first.
+npx cdk diff   VettidOrgVaultHostStack -c stage=staging --profile vault-staging
+npx cdk deploy VettidOrgVaultHostStack -c stage=staging --profile vault-staging
+# 2. Production. The diff shows only new resources; VettidOrgVaultStack is unchanged.
+npx cdk diff   VettidOrgVaultStack VettidOrgVaultHostStack --profile vault-prod
+npx cdk deploy VettidOrgVaultHostStack --profile vault-prod
+```
+
+Then confirm the SNS subscription (`vettid-org[-staging]-vault-alerts`)
+from the admin inbox. With no release and no pinned manifest key the
+scaler finds nothing to do and the manifest sync logs "skipped"; neither
+starts anything. Nothing in the member API changes.
+
+### How the scaler works (`vettid-org-vault-scaler`, VAULT-RELEASES §8.6)
+
+- Runs every minute and on each start request (the `vault-releases`
+  stream, filtered to rows carrying `start_requested_at`); reserved
+  concurrency 1, every run is a full idempotent reconcile.
+- **Start:** a release row with a start request newer than 5 minutes and
+  newer than its `start_issued_at`, no live instance (heartbeat ≤ 90 s) and
+  desired 0 → `start_issued_at` is written, then desired 1. Only for a
+  routable release (`active`, `deprecated`, `retired`, or `removed` **with
+  `rescue: true`**; `available` not false) whose group exists and is
+  tagged with the row's PCR0 and number.
+- **Caps:** 2 per release (and the group's max), 6 in total (desired sums
+  over all vault groups). A refused start counts `StartsBlocked`.
+- **Stop:** a group above its minimum whose live instances all report
+  `load` 0 and with no request, issued start or busy report (`busy_at`,
+  refreshed every 5 min while an instance holds vaults) for 30 minutes →
+  desired = minimum. The `vault-drain` lifecycle hook gives the parent
+  5 minutes to lock its vaults. A `removed` release without rescue goes to
+  its minimum at once.
+- **Hands off:** groups whose PCR0 has no `vault-releases` row (a
+  candidate or canary before the manifest lists it) are never started or
+  stopped by the scaler: scale them by hand. A hand scale-up of a listed
+  release gets 30 idle minutes from the first time the scaler sees it.
+- Metrics (`VettID/Vault`, `Component=scaler`) and alarms: start
+  unfulfilled after 10 minutes, start blocked, the newest active release
+  with minimum 1 and no live instance for 10 minutes, scaler errors.
+
+By hand:
+
+```bash
+P=--profile vault-prod
+aws autoscaling describe-auto-scaling-groups $P --filters Name=tag:vettid:vault-scaler,Values=managed \
+  --query 'AutoScalingGroups[].[AutoScalingGroupName,MinSize,DesiredCapacity,MaxSize,length(Instances)]' --output table
+aws autoscaling set-desired-capacity $P --auto-scaling-group-name vettid-org-vault-r<N> --desired-capacity 1
+aws logs tail /aws/lambda/vettid-org-vault-scaler $P --since 30m
+```
+
+### Manifest sync (`vettid-org-vault-manifest-sync`, VAULT-RELEASES §7)
+
+Every 5 minutes: fetches the channel's served manifest, verifies it under
+the keys pinned in `lib/config.ts` (`manifestKeys`, empty until key A/B
+SPKIs are final: then it does nothing), and upserts the `vault-releases`
+rows (number, status, seal key, `ends_at`, `available` = the release's
+`vault/releases/<N>/group-name` ref exists). It never writes start
+requests, scaler markers or `rescue`, refuses a lower serial or the same
+serial with other bytes, deletes rows of releases the manifest dropped,
+and alarms if `manifests/<sha256>.json` is missing from the data bucket.
+After publishing a manifest, run it at once:
+`aws lambda invoke --function-name vettid-org-vault-manifest-sync --profile vault-prod /dev/stdout`.
+
+### Adding a release (VAULT-RELEASES §10.1 steps 5–8)
+
+1. From the vettid-vault GitHub release `release/<channel>/<N>` (published
+   after the independent rebuild): `sha256sum measurements.json`, the
+   commit (`source_commit`), PCR0, and at that commit
+   `sha256sum deploy/host/SHA256SUMS`. The current AL2023 arm64 AMI:
+   `aws ssm get-parameter --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 --profile vault-prod --query Parameter.Value --output text`.
+2. Append the entry to `VAULT_RELEASES.<channel>` in `lib/vault/releases.ts`
+   (`minInstances: 0` for the canary; `maxInstances: 2`), `npm test`.
+3. The release key first (VaultStack, "Creating a release key" above).
+4. `npx cdk diff VettidOrgVaultHostStack VettidOrgVaultRelease<N>Stack --profile vault-prod`:
+   the host stack only gains N's PCR0 on the smoke key; the release stack
+   is new. Deploy both (`npx cdk deploy VettidOrgVaultHostStack VettidOrgVaultRelease<N>Stack --profile vault-prod`).
+   The image build takes about 20–40 minutes; a hash or PCR0 mismatch
+   fails the build and the deploy (logs: `/aws/imagebuilder/vettid-org-vault-r<N>-<hash>`).
+5. Canary: `aws autoscaling set-desired-capacity --auto-scaling-group-name vettid-org-vault-r<N> --desired-capacity 1`,
+   then the self-test through SSM on that instance (`systemctl stop vault-parent`,
+   run `/opt/vettid/bin/vault-parent -selftest -smoke-key-arn <vault/smoke-key-arn> -smoke-account <account> -bucket <data bucket> -region us-east-1`
+   per vettid-vault docs/SMOKE.md, then `systemctl start vault-parent`).
+6. After publication, the always-on minimum moves (O7): set
+   `minInstances: 1` on N and `0` on N−1, deploy both release stacks.
+
+Never edit a deployed entry's pins expecting the running hosts to change:
+the template change makes a new AMI and launch template version, but
+running instances are only replaced by an explicit refresh:
+
+**Host OS patch** (C4: same EIF and parent): set a new `baseAmi` (or bump
+`amiRevision`) on that one entry, deploy its stack, then
+`aws autoscaling start-instance-refresh --auto-scaling-group-name vettid-org-vault-r<N> --preferences MinHealthyPercentage=100,InstanceWarmup=300 --profile vault-prod`
+(instances drain through the lifecycle hook). Old AMIs are not
+deregistered by Image Builder; delete them and their snapshots by hand.
+
+### Removing a release and rescue
+
+At D (§10.3 step 2): `npx cdk destroy VettidOrgVaultRelease<N>Stack --profile vault-prod`
+(instances drain; the `group-name` ref goes, so the next manifest sync sets
+`available` false), then drop the entry from `lib/vault/releases.ts`.
+Rescue (step 3): cancel and enable the key as the retirement role,
+re-add the entry and deploy the release stack, then
+
+```bash
+aws dynamodb update-item --profile vault-prod --table-name vettid-org-vault-releases \
+  --key '{"release":{"S":"<pcr0>"}}' --update-expression 'SET rescue = :t' --expression-attribute-values '{":t":{"BOOL":true}}'
+```
+
+The member API routes the vaults of that release again and the scaler
+starts it on demand. `rescue` is release-wide (every vault sealed to it is
+routed while it is set). Remove it (`REMOVE rescue`) when the member has
+moved; the scaler then stops the group at once.
+
+### Network and egress
+
+Hosts: public subnets in two AZs of the host VPC, no NAT, no inbound,
+outbound TCP 443 only, SSM Session Manager only. Route 53 Resolver DNS
+Firewall answers only the names in `lib/vault/egress.ts` (NXDOMAIN for the
+rest; query logs in `/vettid-org/<stage>/vault-dns`, metric
+`DnsQueriesBlocked`); S3 and DynamoDB gateway endpoints admit only this
+account's resources. AMIs are built in a separate build VPC without the
+firewall (the builder needs GitHub and the package repositories).
+
 ### Still to come
 
-Publishing a release (reproducible build, PCRs, manifest signing), the
-host and release stacks (W6), scaling the enclave host ASG from 0 and
-on-demand starts of older releases, instance and lease health, incident
-classes and first responses, capacity per host, and the disaster-recovery
-objectives (VAULT-RELEASES §11.4).
+Publishing a release (manifest signing, W7), instance and lease health in
+practice, incident classes and first responses, capacity per host, and
+the disaster-recovery objectives (VAULT-RELEASES §11.4).
 
 ## DNS
 
@@ -455,3 +593,10 @@ and DynamoDB a few dollars. It grows with use at roughly $9 per million
 messages plus ~$0.003 per always-on long-poll collector per month (DynamoDB
 on-demand), with idle collectors mostly served from Valkey (empty hints);
 see the relay PRs for the 1k/10k/100k estimates.
+
+Vault host stack, per vault account, with every group parked: about
+$6–8/month (scaler and sync custom metrics ~$4, ~10 alarms ~$1–2, smoke
+key $1, DNS Firewall, query and flow logs, Lambda within the free tier).
+Each running m7g.large host adds ~$60 plus ~$5 for its public IPv4 and
+disk; an AMI build costs a few cents of builder time; each release's AMI
+snapshot is well under $1/month.

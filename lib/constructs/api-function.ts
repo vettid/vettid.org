@@ -22,6 +22,8 @@ export interface ApiFunctionProps {
    * role with basic execution rights.
    */
   readonly roleName?: string;
+  /** Reserved concurrency; only where invocations must not overlap (the vault scaler). */
+  readonly reservedConcurrentExecutions?: number;
 }
 
 /**
@@ -54,6 +56,7 @@ export class ApiFunction extends Construct {
       timeout: props.timeout ?? cdk.Duration.seconds(10),
       description: props.description,
       functionName: props.functionName,
+      reservedConcurrentExecutions: props.reservedConcurrentExecutions,
       role: props.roleName
         ? new iam.Role(this, 'Role', {
             roleName: props.roleName,

@@ -46,7 +46,19 @@ export type SsmRefKey =
   | 'vault/control-queue-prefix'
   | 'vault/control-queue-policy'
   | 'vault/dlq-name'
-  | `vault/releases/${number}/seal-key-arn`;
+  | `vault/releases/${number}/seal-key-arn`
+  // Vault host stack (VettidOrgVaultHostStack); read by the release stacks
+  // and the enclave hosts' boot (vettid-vault deploy/host).
+  | 'vault/dlq-arn'
+  | 'vault/relay-host'
+  | 'vault/host-log-group'
+  | 'vault/host-security-group-id'
+  | 'vault/host-subnet-ids'
+  | 'vault/image-builder-infra-arn'
+  | 'vault/alerts-topic-arn'
+  | 'vault/smoke-key-arn'
+  // Per release stack: its group exists (the manifest sync's `available`).
+  | `vault/releases/${number}/group-name`;
 
 export function ssmParamName(config: AppConfig, key: SsmRefKey): string {
   return `/vettid-org/${config.stage}/${key}`;

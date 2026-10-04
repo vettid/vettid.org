@@ -68,6 +68,20 @@ export interface VaultConfig {
    * `vaultsStreamArn`. Empty: the alarm mailer has no event source yet.
    */
   readonly vaultsStreamArn: string;
+  /**
+   * The served release manifest (VAULT-RELEASES §3.1, §7), which the
+   * manifest sync turns into routing rows.
+   */
+  readonly manifestUrl: string;
+  /**
+   * Pinned manifest public keys (SubjectPublicKeyInfo, base64 DER; key A and
+   * key B in production, the staging key in staging), the same as in the
+   * channel's `enclave/releasecfg/<channel>.json`. Empty until they are
+   * fixed (W7/W10): the manifest sync then does nothing.
+   */
+  readonly manifestKeys: readonly string[];
+  /** The relay host on the enclave host's egress allowlist (pinned in the release as relay_url). */
+  readonly relayHost: string;
 }
 
 /**
@@ -78,13 +92,24 @@ export interface VaultConfig {
 const STAGE_ACCOUNTS: Record<string, { main?: string; vault?: Omit<VaultConfig, 'vaultsStreamArn'> }> = {
   prod: {
     main: '449757308783', // VettID (management)
-    vault: { channel: 'prod', account: '369484479783', apiAccount: '449757308783', retirementWindowDays: 30 }, // vettid-vault-prod
+    vault: {
+      channel: 'prod', account: '369484479783', apiAccount: '449757308783', retirementWindowDays: 30, // vettid-vault-prod
+      manifestUrl: 'https://vettid.org/.well-known/vettid/pcr-manifest.json',
+      manifestKeys: [],
+      relayHost: 'relay.vettid.org',
+    },
   },
   staging: {
     // main: '347272280361' once the staging copy of the main stacks exists
     // (W9: its own zone and hosts). Until then a staging synth builds only
     // the vault stack, so nothing tries to look up vettid.org there.
-    vault: { channel: 'staging', account: '347272280361', apiAccount: '347272280361', retirementWindowDays: 7 }, // vettid-vault-staging
+    vault: {
+      channel: 'staging', account: '347272280361', apiAccount: '347272280361', retirementWindowDays: 7, // vettid-vault-staging
+      manifestUrl: 'https://staging.vettid.org/.well-known/vettid/pcr-manifest.json',
+      manifestKeys: [],
+      // Staging images pin the production relay at first (VAULT-RELEASES §11.1).
+      relayHost: 'relay.vettid.org',
+    },
   },
 };
 

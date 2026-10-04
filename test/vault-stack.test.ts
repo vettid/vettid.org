@@ -36,12 +36,15 @@ describe('VettidOrgVaultStack: accounts and channels', () => {
     expect(staging.vault).toMatchObject({ channel: 'staging', account: '347272280361', apiAccount: '347272280361', retirementWindowDays: 7 });
   });
 
-  test('a staging synth builds only the vault stack, in the staging account (main stacks wait for W9)', () => {
+  test('a staging synth builds only the vault account stacks, in the staging account (main stacks wait for W9)', () => {
     const app = new cdk.App({ context: { stage: 'staging' } });
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     require('../lib/app').buildApp(app);
     const stacks = app.node.children.filter((c): c is cdk.Stack => c instanceof cdk.Stack);
-    expect(stacks.map((s) => [s.stackName, s.account, s.terminationProtection])).toEqual([['VettidOrgVaultStack', '347272280361', true]]);
+    expect(stacks.map((s) => [s.stackName, s.account, s.terminationProtection])).toEqual([
+      ['VettidOrgVaultStack', '347272280361', true],
+      ['VettidOrgVaultHostStack', '347272280361', false],
+    ]);
   });
 
   test('refuses any other account', () => {

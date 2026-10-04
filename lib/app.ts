@@ -17,6 +17,9 @@ import { VettidOrgRelayStack } from './stacks/relay-stack';
 import { VettidOrgRelayDataStack } from './stacks/relay-data-stack';
 import { VettidOrgVaultSmokeStack } from './stacks/vault-smoke-stack';
 import { VettidOrgVaultStack, vaultEnv } from './stacks/vault-stack';
+import { VettidOrgVaultHostStack } from './stacks/vault-host-stack';
+import { VettidOrgVaultReleaseStack, releaseStackId } from './stacks/vault-release-stack';
+import { VAULT_RELEASES, validateReleaseList } from './vault/releases';
 
 /**
  * Builds every stack in the vettid.org app. Kept out of bin/ so tests can
@@ -45,21 +48,35 @@ export function buildApp(app: cdk.App): void {
 
   const domainName = config.domainName;
 
-  const vaultStack = () =>
-    config.vault &&
-    new VettidOrgVaultStack(app, 'VettidOrgVaultStack', {
+  // The vault account's stacks (VAULT-RELEASES §8.2), in deploy order:
+  // VaultStack (stateful) → VaultHostStack → one VaultRelease<N>Stack per
+  // release in lib/vault/releases.ts (none yet). Later stacks read the
+  // earlier ones' refs from SSM at deploy time; nothing is exported.
+  const vaultStacks = () => {
+    if (!config.vault) return;
+    const venv = vaultEnv(config, config.vault);
+    const releases = VAULT_RELEASES[config.vault.channel];
+    validateReleaseList(releases, config.vault.channel);
+    const vault = new VettidOrgVaultStack(app, 'VettidOrgVaultStack', {
       config,
-      env: vaultEnv(config, config.vault),
+      env: venv,
       terminationProtection: true,
       // Release keys come from vault/releases.json (W7). None exist yet.
       releaseKeys: [],
     });
+    const host = new VettidOrgVaultHostStack(app, 'VettidOrgVaultHostStack', { config, env: venv, releases });
+    host.addDependency(vault);
+    for (const spec of releases) {
+      const rel = new VettidOrgVaultReleaseStack(app, releaseStackId(spec.release), { config, env: venv, spec });
+      rel.addDependency(host);
+    }
+  };
 
   // A stage whose main stacks are not stood up yet (staging, until W9):
   // only its vault account's stack.
   if (config.vault && !config.accounts.main) {
-    vaultStack();
-    cdk.Annotations.of(app).addInfoV2('vettid:vault-only', `stage ${config.stage}: only VettidOrgVaultStack (no main account yet)`);
+    vaultStacks();
+    cdk.Annotations.of(app).addInfoV2('vettid:vault-only', `stage ${config.stage}: only the vault account's stacks (no main account yet)`);
     return;
   }
 
@@ -135,9 +152,10 @@ export function buildApp(app: cdk.App): void {
   }
 
   // ---- Vault (docs/VAULT-RELEASES.md §8; deployed into the vault account) ----
-  // Deploy with that account's profile, before the member API that reads
-  // its tables:  npx cdk deploy VettidOrgVaultStack --profile vault-prod
-  vaultStack();
+  // Deploy with that account's profile, VaultStack before the member API
+  // that reads its tables (RUNBOOK "Vault"):
+  //   npx cdk deploy VettidOrgVaultStack VettidOrgVaultHostStack --profile vault-prod
+  vaultStacks();
 
   // ---- Account-level audit & detection (CloudTrail, GuardDuty, alerts) ----
   new VettidOrgAuditStack(app, 'VettidOrgAuditStack', { config, ...stateful });
