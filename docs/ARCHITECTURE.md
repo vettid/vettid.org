@@ -1,10 +1,13 @@
 ---
 title: ARCHITECTURE
 status: overview (as built and planned, 2026-10-03)
-version: 0.1.0
-date: 2026-10-03
+version: 0.1.1
+date: 2026-10-04
 owner: Al Liebl (Mesmer)
 changelog:
+  - 0.1.1: the V5 release model (VAULT-RELEASES, VAULT-MESSAGING
+    0.10.0): channels, monthly cadence, retirement after notice with key
+    deletion, manifest by hash; VAULT-RELEASES in the docs index
   - 0.1.0: first system overview for vettid.org, replacing vettid-dev
     `docs/vettid-architecture-diagram.md`; includes the docs index and
     the roadmap after the owner decisions of 2026-10-03
@@ -176,12 +179,24 @@ rotation (§3.5.9).
 
 - **Attestation.** Apps verify the enclave's Nitro attestation and the
   release's PCR0 against a manifest signed by a key pinned in every app
-  and release image (§11.2, §11.10.1).
+  and release image (§11.2, §11.10.1). Enroll and unlock requests carry
+  the manifest's hash; the host supplies the document, which the enclave
+  verifies (§11.5).
+- **Channels (VAULT-RELEASES §3.1).** `dev` (fake NSM and KMS), `staging`
+  (its own AWS account, manifest key and deletable keys) and `production`
+  (locked keys); each image embeds one channel's constants, so a staging
+  image can never open, seal to or be listed for production (§11.10.8).
 - **Sealing per release (VAULT-PLAN D1).** Each release has its own KMS key
   whose immutable policy lets only that release's PCR0 decrypt. A vault is
   sealed to the release the member last approved; no later release, and
-  nobody at VettID, can open it until the member approves a move. There
-  are no deadlines and nothing is auto-retired.
+  nobody at VettID, can open it until the member approves a move.
+- **Releases and retirement (D1a, VAULT-RELEASES).** At most one
+  production release a month plus security hotfixes. A superseded release
+  is `deprecated` (move-only) for 12 months, `retired` for its last 90
+  days (in-app warnings and emails), then `removed`: its instances stop
+  and its key is scheduled for deletion with a 30-day window, the only
+  deletion its policy allows, by one pinned retirement role (§11.10.7).
+  Members who never move lose access; confidentiality never changes.
 - **Reproducible builds (D3).** Anyone can rebuild the image and compare
   PCR0.
 - **Process per vault (D4).** Each unlocked vault is its own OS process
@@ -268,7 +283,8 @@ All in `docs/` of this repository unless noted.
 | VAULT-PLAN.md | How the vault is built: repos, phases V1–V6, decisions D1–D5 |
 | VAULT-ITEMS.md | Design note: one item model with tags, sensitivity and share rules |
 | PROTEAN-CREDENTIAL.md | The Protean Credential's design and rationale (normative in VAULT-MESSAGING §3.5) |
-| RELEASE-UPDATES.md | How members approve vault releases, with no deadlines; the public release log |
+| VAULT-RELEASES.md | V5 plan: channels, release lifecycle and retirement, build, keys, infrastructure, first deployment |
+| RELEASE-UPDATES.md | How members approve vault releases; end dates and notices; the public release log |
 | RELAY-PROTOCOL.md | Relay wire protocol: mailboxes, tokens, deposit, collect, claims |
 | RELAY-PLAN.md | Relay implementation plan and history |
 | PUSH-GATEWAY.md | Contentless wake-up pushes: FCM/APNs and UnifiedPush, plus a no-push polling path |

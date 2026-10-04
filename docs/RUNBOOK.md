@@ -213,8 +213,14 @@ a release (reproducible build, PCRs, manifest signing, the release's
 immutable KMS key), scaling the enclave host ASG from 0 and on-demand starts
 of older releases, instance and lease health, incident classes and first
 responses, capacity per host, and the disaster-recovery objectives listed in
-VAULT-PLAN V5. Release keys can never be deleted or disabled; budget for
-keeping them.
+VAULT-PLAN V5 (VAULT-RELEASES), and retirement after notice: at a
+release's end date it is `removed`, its stack deleted and its key
+scheduled for deletion **as the retirement role, with exactly the pinned
+window** (30 days in production; any other window is refused by the key
+policy), with a rescue (cancel, enable, restart, move) on request within
+that window (VAULT-RELEASES §3.5, §10.3). Release keys can never be
+disabled or have their policy changed; the host and retirement roles named
+in their policies must never be deleted (VAULT-RELEASES §6.3).
 
 ## DNS
 
