@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.1
+version: 0.1.2
 date: 2026-10-04
 owner: Al Liebl (Mesmer)
 changelog:
@@ -15,6 +15,11 @@ changelog:
     role, function and SCP names; owner-only roles trust the Identity
     Center permission set (MFA at sign-in); release-key custom resource
     details; the SCP's break-glass is the management account
+  - 0.1.2: W6 as built. Host stack (VPC, DNS Firewall allowlist, separate
+    build VPC for Image Builder, scaler, manifest sync, alarms, CloudTrail
+    rules); per-release stacks from lib/vault/releases.ts; scaler rules
+    (freshness, markers, hands-off for unlisted groups); host files in
+    vettid-vault deploy/host; rescue stays release-wide
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.9.1) §11.10 release updates, §12.5 deletion, §13.5
@@ -523,6 +528,18 @@ role (trust, `PassRole`) to CloudFormation's deploy role.
   pinned keys, and upserts `vettid-org-vault-releases` (status, number,
   seal key, `ends_at`). `available` comes from the release stacks (SSM).
   The API never trusts the table for security; it only routes.
+  *As built (W6):* in the host stack (`lambda/vault/manifest-sync.ts`,
+  verification in `lambda/shared/manifest.ts`, tested against
+  vettid-vault's recorded manifest vectors). The keys are pinned in
+  `lib/config.ts` (`manifestKeys`, empty until the SPKIs are final: the
+  sync then does nothing). "After each site deploy" is a manual
+  `aws lambda invoke` (the site deploys from another account). It also
+  writes `manifest_serial`, `manifest_sha256` and `synced_at`, refuses a
+  lower serial (or the same serial with other bytes), deletes rows of
+  releases the manifest dropped, and alarms when the bucket copy
+  `manifests/<sha256>.json` is missing. The copy itself stays the
+  signer's publish step (only the signer role may write `manifests/*`;
+  W7's `sign-manifest.ts`).
 
 ## 8. Infrastructure
 
@@ -591,6 +608,18 @@ release is deleting its stack; and each stack stays far below the 200-
 resource guardrail. No `Fn::ImportValue`: release stacks read the host
 stack's refs through SSM (RUNBOOK conventions).
 
+*As built (W6).* `lib/stacks/vault-host-stack.ts` and
+`lib/stacks/vault-release-stack.ts`; the app builds the host stack in each
+vault account and one release stack per entry of `lib/vault/releases.ts`
+(empty; W7's `releases.json` replaces it). Release stacks read
+`vault/host-security-group-id`, `host-subnet-ids`, `image-builder-infra-arn`
+and `alerts-topic-arn`, and publish `vault/releases/<N>/group-name`. The
+host stack also publishes `dlq-arn`, `relay-host`, `host-log-group` and
+`smoke-key-arn` for the hosts' boot. The lifecycle hook is inline in the
+group (`vault-drain`, 300 s, default CONTINUE); per-release alarm: desired
+> in service for 15 minutes. Both stacks stay far below 200 resources
+(guardrail test).
+
 **Data bucket** `vettid-org-vault-data-<account>`: block public access,
 SSE-S3 (objects are already DEK-encrypted or KMS-sealed), TLS only,
 versioned, noncurrent versions and delete markers expire after **7 days**
@@ -631,6 +660,26 @@ editing the bucket policy first.
 - **Shutdown:** the ASG termination lifecycle hook gives the parent up to
   5 minutes to lock its vaults, release leases, delete its queue and
   deregister, then completes the hook.
+- *As built (W6).* The component (`lib/vault/image-component.ts`) pins per
+  release: tag, source commit, PCR0, the SHA-256 of `measurements.json`
+  (which pins the EIF and parent hashes), the SHA-256 of vettid-vault's
+  `deploy/host/SHA256SUMS` at that commit, the nitro-cli package version
+  and the base AMI. It checks `nitro-cli describe-eif`'s PCR0 too, then
+  runs the commit's `deploy/host/install.sh` (units, allocator 1 vCPU /
+  5 GiB, `vault-host-config`, `vault-lifecycle`, CloudWatch agent
+  template): the host files travel with the release tag (C4). Image
+  Builder names carry a content hash (its versions are immutable), so new
+  inputs are new resources. **The build runs in a separate build VPC**,
+  not the host VPC: the builder needs GitHub and the AL2023 repositories,
+  which the host DNS Firewall must not admit. The builder has its own role
+  (`vettid-org-vault-image-builder`), never the host role. User data is a
+  cloud-config writing only `/etc/vettid/host.env` (SSM prefix, region,
+  release, group, hook); `vault-host-config` reads the rest from SSM, and
+  the parent reads `vault/control-queue-policy` itself
+  (`-queue-policy-param`) and refuses to start without a valid policy.
+  The parent's instance id is the EC2 instance id. No update policy on the
+  group: a deploy never replaces running hosts; a host patch is an explicit
+  instance refresh of that release's group.
 
 ### 8.4 Network and egress
 
@@ -659,6 +708,19 @@ the enclave's pinned roots would accept it, but it adds about $15/month
 `aws:SourceVpce` (check 7 refuses other conditions), and the public path
 is TLS terminated in the enclave anyway. S3 and DynamoDB use the free
 gateway endpoints. No NAT.
+
+*As built (W6).* The allowlist is `lib/vault/egress.ts` (snapshot-tested):
+the relay, `kms`, `android.googleapis.com`; `sqs`, `dynamodb` and the
+SDK's account endpoint `<account>.ddb`, `s3` and the data bucket's
+virtual host, `ssm`; `ssmmessages`, `ec2messages`, `logs`, `monitoring`,
+`autoscaling` (all `us-east-1`); `*.ec2.internal`. Allowed names may
+redirect (CNAME chains to ELB or S3 names: `TRUST_REDIRECTION_DOMAIN`);
+everything else is NXDOMAIN; the association is mutation-protected and the
+resolver fails closed (the default). Query logs go to
+`/vettid-org/<stage>/vault-dns` (metric `DnsQueriesBlocked`, no alarm until
+W9 shows the baseline noise). The gateway endpoints' policies admit only
+resources of the vault account (`aws:ResourceAccount`). Flow logs (all
+traffic) to `/vettid-org/<stage>/vault-flow-logs`, one month.
 
 ### 8.5 Registry, leases, queues
 
@@ -718,6 +780,27 @@ release_starting`. The `vault-scaler` Lambda (host stack):
   offer nothing but the move off a `removed` release, VAULT-MESSAGING
   §11.10.6). A per-vault rescue would need a field on the vault row that
   the member API checks; decide in W6 whether it is worth it.
+  *Decided in W6 (recommendation, owner to confirm):* release-wide stays.
+  A rescue is rare and short (the member moves, `rescue` is removed and the
+  scaler stops the group at once) and affects availability only; a
+  per-vault flag would add a member-API code path for no confidentiality
+  gain. Revisit if rescues become routine.
+- *As built (W6)* (`lambda/vault/scaler.ts`, `scaler-logic.ts`): one full
+  reconcile per invocation (stream or the 1-minute schedule), reserved
+  concurrency 1. A start needs a request **fresher than 5 minutes** and
+  newer than `start_issued_at` (so an idle stop is never undone by an old
+  request); the marker is written before the capacity change. Idle =
+  30 minutes since the latest of the request, the issued start and
+  `busy_at` (written at most every 5 minutes while a live instance has
+  `load` > 0). Groups are found by tag (`vettid:vault-scaler=managed`) and
+  must carry the row's PCR0 and release number; groups whose PCR0 has no
+  row (candidate, canary) are left to the operator. A `removed` release
+  without rescue, or `available: false`, goes to its minimum at once. The
+  scaler may write only `start_issued_at` and `busy_at` on release rows,
+  and `SetDesiredCapacity` only on tagged `vettid-org-vault-r*` groups.
+  Metrics (EMF): `StartsIssued`, `StopsIssued`, `StartsBlocked`,
+  `StartsUnfulfilled`, `ActiveMinimumUnmet`, `LiveInstances`,
+  `DesiredInstances`.
 
 ### 8.7 Observability
 
@@ -737,6 +820,22 @@ release_starting`. The `vault-scaler` Lambda (host stack):
     `ScheduleKeyDeletion`, `CancelKeyDeletion`, `EnableKey`, `CreateKey`
     with the bypass flag, `PutKeyPolicy` attempt, and `iam:DeleteRole` /
     `UpdateAssumeRolePolicy` on the host or retirement role.
+- *As built (W6).* SNS topic `vettid-org[-<stage>]-vault-alerts` in each
+  vault account (email to the admin address; confirm once). Alarms: DLQ
+  not empty; control-queue age > 60 s (a Metrics Insights query over every
+  queue but the DLQ, since queues are per instance); start unfulfilled;
+  start blocked (no group or a cap); the newest active release with
+  minimum 1 and no live instance for 10 minutes (the registry-heartbeat
+  check: live means a heartbeat within 90 s); scaler and manifest-sync
+  errors; manifest rejected; manifest missing from the bucket; per release,
+  desired > in service for 15 minutes. CloudTrail rules (vault account
+  bus, fed by the organization trail): `ScheduleKeyDeletion`,
+  `CancelKeyDeletion`, `EnableKey`, `DisableKey`, `PutKeyPolicy` (also on
+  the manifest and smoke keys, by deploys), `CreateKey` with the bypass
+  flag (expected once per release key), and `DeleteRole`,
+  `UpdateAssumeRolePolicy`, `DeleteInstanceProfile`,
+  `RemoveRoleFromInstanceProfile` on the pinned roles. Parent EMF metrics
+  come with the parent's own instrumentation (not part of W6).
 
 ### 8.8 Capacity
 
@@ -958,7 +1057,7 @@ Android closed beta; until then, staging carries the testing.
 | W3 | Accounts (vault production, vault staging, and **proteus** for the prote.us website, see AWS-ACCOUNTS.md), SCPs, permission sets; manifest keys A, B and staging; move the Proteus website (AWS-ACCOUNTS §3) | AWS | 2–3 d + owner |
 | W4 | Member API dark launch (§9) | vettid.org | 0.5 d |
 | W5 | `VettidOrgVaultStack`: bucket, roles (fixed names, guardrails), key A, release-key custom resource, cross-account wiring if O1 | vettid.org | 3–5 d |
-| W6 | `VettidOrgVaultHostStack` and the release stack construct: VPC, DNS Firewall, Image Builder, launch template, ASG, lifecycle hook, scaler, manifest sync, alarms | vettid.org | 4–5 d |
+| W6 | `VettidOrgVaultHostStack` and the release stack construct: VPC, DNS Firewall, Image Builder, launch template, ASG, lifecycle hook, scaler, manifest sync, alarms; vettid-vault: the parent sets the control-queue policy, `deploy/host` | vettid.org, vettid-vault | 4–5 d |
 | W7 | `releases.json`, `sign-manifest.ts`, `check:manifest`, `.well-known` path, release log pages | vettid.org | 2 d |
 | W8 | Member API: canary routing for flagged members; notice job (retirement and hotfix emails); `removed` → 410 | vettid.org | 2 d |
 | W9 | Staging stand-up, release S1/S2, hardware tests, capacity measurement, retirement drill (7 days wall time) | both | 3 d |

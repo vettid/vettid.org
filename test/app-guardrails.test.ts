@@ -56,15 +56,17 @@ describe('app guardrails', () => {
         'VettidOrgRelayStack',
         'VettidOrgRelayDataStack',
         'VettidOrgVaultStack',
+        'VettidOrgVaultHostStack',
       ]),
     );
   });
 
-  test('the vault stack goes to the vault account; everything else to the main (management) account', () => {
+  test('the vault stacks go to the vault account; everything else to the main (management) account', () => {
+    const inVaultAccount = (name: string) => /^VettidOrgVault(Host|Release\d+)?Stack$/.test(name);
     for (const s of stacks) {
       expect({ stack: s.stackName, account: s.account }).toEqual({
         stack: s.stackName,
-        account: s.stackName === 'VettidOrgVaultStack' ? '369484479783' : '449757308783',
+        account: inVaultAccount(s.stackName) ? '369484479783' : '449757308783',
       });
     }
   });
