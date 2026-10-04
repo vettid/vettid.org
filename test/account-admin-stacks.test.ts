@@ -479,6 +479,22 @@ describe('VettidOrgAccountSiteStack', () => {
     });
   });
 
+  test('publishes the Android App Links statement for the release signing keys', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { androidAssetLinks } = require('../lib/config');
+    const links = androidAssetLinks();
+    expect(links).toEqual([{
+      relation: ['delegate_permission/common.handle_all_urls'],
+      target: {
+        namespace: 'android_app',
+        package_name: 'com.vettid.app',
+        sha256_cert_fingerprints: ['31:A1:96:13:AA:10:F2:09:E0:89:45:F9:47:F9:4F:7C:E3:E6:E5:AC:34:24:57:FF:99:69:A6:79:86:92:8E:65'],
+      },
+    }]);
+    const code = JSON.stringify(t.findResources('AWS::CloudFront::Function'));
+    expect(code).toContain('/.well-known/assetlinks.json');
+  });
+
   test('CSP: same-origin only', () => {
     const csp = JSON.stringify(t.findResources('AWS::CloudFront::ResponseHeadersPolicy'));
     expect(csp).toContain("connect-src 'self';");

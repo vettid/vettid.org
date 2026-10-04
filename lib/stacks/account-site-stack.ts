@@ -2,7 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import { Construct } from 'constructs';
-import { AppConfig, hostName, resourceName } from '../config';
+import { AppConfig, androidAssetLinks, hostName, resourceName } from '../config';
 import { readRef } from '../constructs/ssm-refs';
 import { StaticSite } from '../constructs/static-site';
 import { WafLogging } from '../constructs/waf-logging';
@@ -87,6 +87,8 @@ export class VettidOrgAccountSiteStack extends cdk.Stack {
       hostedZone,
       sourceDir: 'sites/account',
       notFoundPage: '404.html',
+      // Sign-in links open in the Android app (App Links).
+      wellKnown: { 'assetlinks.json': androidAssetLinks() },
       // Signed-out visitors never get the account page shell (see COOKIES.present).
       requireCookie: { pathPrefix: '/account/', cookie: 'vid_s', redirectTo: '/signin/' },
       webAclArn: webAcl.attrArn,

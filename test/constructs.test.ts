@@ -198,6 +198,7 @@ describe('StaticSite branded 404', () => {
     sourceDir: 'test/fixtures/site',
     runtimeConfig: { a: 1 },
     notFoundPage: '404.html',
+    wellKnown: { 'assetlinks.json': [{ a: 1 }] },
   });
   const t = Template.fromStack(stack);
   const code = Object.values<any>(t.findResources('AWS::CloudFront::Function'))[0].Properties.FunctionCode as string;
@@ -212,6 +213,7 @@ describe('StaticSite branded 404', () => {
     ['/about/', '/about/index.html'],
     ['/404.html', '/404.html'],
     ['/config.json', '/config.json'],
+    ['/.well-known/assetlinks.json', '/.well-known/assetlinks.json'],
   ])('known path %s is rewritten to %s and passed to S3', (uri, expected) => {
     const r = req(uri);
     expect(r.statusCode).toBeUndefined();
@@ -224,6 +226,18 @@ describe('StaticSite branded 404', () => {
     expect(r.body.data).toContain('Nothing here.');
     expect(r.headers['content-security-policy'].value).toContain("script-src 'self'");
     expect(r.headers['x-frame-options'].value).toBe('DENY');
+  });
+
+  test('wellKnown documents are deployed under /.well-known/ in the revalidating pass', () => {
+    const deps = Object.values<any>(t.findResources('Custom::CDKBucketDeployment')).map((r) => r.Properties);
+    const html = deps.find((d) => JSON.stringify(d.Include ?? []).includes('*.json'));
+    expect(html.SourceObjectKeys.length).toBe(3); // site, config.json, assetlinks.json
+  });
+
+  test('wellKnown names must be plain JSON file names', () => {
+    const s2 = new cdk.Stack(new cdk.App(), 'Bad', { env });
+    const z2 = route53.HostedZone.fromHostedZoneAttributes(s2, 'Zone', { hostedZoneId: 'Z1', zoneName: 'vettid.org' });
+    expect(() => new StaticSite(s2, 'S', { hostName: 'x.vettid.org', hostedZone: z2, sourceDir: 'test/fixtures/site', wellKnown: { '../x.json': {} } })).toThrow(/plain/);
   });
 
   test('stays within the CloudFront Functions size limit', () => {
