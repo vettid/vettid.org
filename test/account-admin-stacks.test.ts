@@ -401,16 +401,18 @@ describe('VettidOrgMemberApiStack', () => {
 
     test('sqs:SendMessage only to vettid-org-vault-control-* queues, and nothing else on SQS', () => {
       const sqsStmts = stmts().filter((s: any) => str(s.Action).includes('sqs:'));
-      expect(sqsStmts).toHaveLength(1);
-      expect(sqsStmts[0].Action).toBe('sqs:SendMessage');
-      expect(str(sqsStmts[0].Resource)).toContain(':vettid-org-vault-control-*');
+      expect(sqsStmts).toHaveLength(2); // the vault routes, and the cleanup job's vault deletions (§12.5)
+      for (const q of sqsStmts) {
+        expect(q.Action).toBe('sqs:SendMessage');
+        expect(str(q.Resource)).toContain(':vettid-org-vault-control-*');
+      }
     });
 
     test("vault and release writes are limited to the API's own attributes (never lease, sealed_release or status)", () => {
       const writes = stmts().filter(
         (s: any) => /dynamodb:(PutItem|UpdateItem)/.test(str(s.Action)) && /table\/vettid-org-(vaults|vault-releases)"/.test(str(s.Resource)),
       );
-      expect(writes).toHaveLength(3); // the API's two, and the alarm mailer's
+      expect(writes).toHaveLength(5); // the API's two, the alarm mailer's, the cleanup job's deletion mark and start request
       for (const w of writes) {
         const attrs: string[] = w.Condition['ForAllValues:StringEquals']['dynamodb:Attributes'];
         for (const f of ['lease', 'sealed_release', 'vault_version', 'state_version', 'status', 'available']) expect(attrs).not.toContain(f);
@@ -435,16 +437,24 @@ describe('VettidOrgMemberApiStack', () => {
       for (const w of apiWrites) expect(str(w.Condition)).not.toContain('alarm');
     });
 
-    test('only the cleanup job may delete vault rows (canceled accounts after the grace period)', () => {
+    test('vault rows are deleted only by the cleanup job and the deletion notice (§12.5)', () => {
       const deletes = stmts().filter((s: any) => str(s.Action).includes('dynamodb:DeleteItem') && str(s.Resource).includes('table/vettid-org-vaults'));
-      expect(deletes).toHaveLength(1);
-      expect([].concat(deletes[0].Action).sort()).toEqual(['dynamodb:DeleteItem', 'dynamodb:Query']);
+      expect(deletes).toHaveLength(2);
+      const actions = deletes.map((d: any) => ([] as string[]).concat(d.Action).sort().join(',')).sort();
+      expect(actions).toEqual(['dynamodb:DeleteItem', 'dynamodb:DeleteItem,dynamodb:Query,dynamodb:Scan']);
+      // The cleanup job may only mark a deletion requested.
+      const mark = stmts().filter((s: any) => String(str(s.Condition)).includes('deletion_requested_at'));
+      expect(mark).toHaveLength(1);
+      expect(mark[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(['vault_id', 'deletion_requested_at']);
     });
 
     test('the queue URL prefix is pinned to this account and region', () => {
       const fns = Object.values<any>(t.findResources('AWS::Lambda::Function'));
-      const v = fns.find((f) => f.Properties.Environment?.Variables?.VAULT_QUEUE_URL_PREFIX);
-      expect(str(v.Properties.Environment.Variables.VAULT_QUEUE_URL_PREFIX)).toContain('https://sqs.us-east-1.amazonaws.com/123456789012/vettid-org-vault-control-');
+      const vs = fns.filter((f) => f.Properties.Environment?.Variables?.VAULT_QUEUE_URL_PREFIX);
+      expect(vs).toHaveLength(2); // the vault routes and the cleanup job
+      for (const v of vs) {
+        expect(str(v.Properties.Environment.Variables.VAULT_QUEUE_URL_PREFIX)).toContain('https://sqs.us-east-1.amazonaws.com/123456789012/vettid-org-vault-control-');
+      }
     });
   });
 

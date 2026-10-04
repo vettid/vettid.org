@@ -211,8 +211,34 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     g(cleanup, 'members', ['Query', 'DeleteItem'], true);
     g(cleanup, 'subscriptions', ['Query', 'UpdateItem', 'DeleteItem'], true);
     g(cleanup, 'audit', ['PutItem']);
-    // canceled accounts: their vault rows go with them (vault objects: V5)
-    g(cleanup, 'vaults', ['Query', 'DeleteItem'], true);
+    // canceled accounts (VAULT-MESSAGING 0.9.0 §12.5): each vault is asked
+    // to delete itself through its instance's queue (the vault_deleted
+    // notice then removes its row); never-sealed rows and the pointer row go
+    // here; unreported deletions are retried (Scan) and flagged after 30 days.
+    g(cleanup, 'vaults', ['Query', 'Scan', 'DeleteItem'], true);
+    cleanup.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['dynamodb:UpdateItem'],
+        resources: [tableArn('vaults')],
+        conditions: onlyAttributes(['vault_id', 'deletion_requested_at']),
+      }),
+    );
+    g(cleanup, 'vault-instances', ['GetItem', 'Query'], true);
+    g(cleanup, 'vault-releases', ['GetItem']);
+    cleanup.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['dynamodb:UpdateItem'],
+        resources: [tableArn('vault-releases')],
+        conditions: onlyAttributes(['release', 'start_requested_at', 'start_requests']),
+      }),
+    );
+    cleanup.addEnvironment('VAULT_QUEUE_URL_PREFIX', `https://sqs.${this.region}.amazonaws.com/${this.account}/${vaultControlQueuePrefix}`);
+    cleanup.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['sqs:SendMessage'],
+        resources: [`arn:${this.partition}:sqs:${this.region}:${this.account}:${vaultControlQueuePrefix}*`],
+      }),
+    );
     // stale-request reclaim: keep identities the mailing list still uses
     tableGrant(this, config, cleanup, 'mailing-list', ['GetItem']);
     cleanup.addEnvironment('TABLE_MAILING_LIST', resourceName(config, 'mailing-list'));
@@ -240,7 +266,7 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
       }),
     );
 
-    // Credential-clone alarms (VAULT-MESSAGING 0.9.0 §3.5.9, §11.5): the
+    // Credential-clone alarms and deletion notices (VAULT-MESSAGING 0.9.0 §3.5.9, §11.5, §12.5): the
     // enclave host records a content-free alarm on the vault row; this
     // mailer, fed only the stream records that carry `alarm_pending`, emails
     // the member. It may only clear `alarm_pending` and stamp the alarm.
@@ -255,6 +281,9 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
         conditions: onlyAttributes(['vault_id', 'alarm', 'alarm_pending']),
       }),
     );
+    // The vault_deleted notice (§12.5): the deleted vault's row and the
+    // member's pointer to it (conditional deletes).
+    alarms.addToRolePolicy(new iam.PolicyStatement({ actions: ['dynamodb:DeleteItem'], resources: [tableArn('vaults')] }));
     alarms.addToRolePolicy(sesSend);
     const vaultsTable = dynamodb.Table.fromTableAttributes(this, 'VaultsTable', {
       tableName: resourceName(config, 'vaults'),

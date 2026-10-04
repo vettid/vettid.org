@@ -1,20 +1,24 @@
 /**
  * Daily:
  *  - delete accounts canceled more than 7 days ago (Cognito user,
- *    subscription, member row + email marker, vault rows; the audit trail
- *    stays)
+ *    subscription, member row + email marker; each vault is asked to delete
+ *    itself, VAULT-MESSAGING 0.9.0 §12.5, and its row goes with the
+ *    vault_deleted notice; the audit trail stays)
+ *  - retry vault deletions not yet reported
  *  - reclaim membership requests never email-verified within 14 days
  *  - mark subscriptions past their expiry as `expired`
  */
 import { AdminDeleteUserCommand } from '@aws-sdk/client-cognito-identity-provider';
 import { DeleteEmailIdentityCommand } from '@aws-sdk/client-sesv2';
-import { DeleteCommand, GetCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
+import { DeleteCommand, GetCommand, QueryCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { audit } from '../shared/audit';
 import { cognito, ddb, env, ses, table } from '../shared/aws';
 
 const STALE_DAYS = 14;
 import { emailMarkerKey, vaultPointerKey } from '../shared/members';
 import type { MemberItem, SubscriptionItem } from '../shared/model';
+import { liveLease, newUlid, pickInstance, releaseRow, requestStart } from '../shared/vault-routing';
 
 async function* query(input: ConstructorParameters<typeof QueryCommand>[0]) {
   let start: Record<string, unknown> | undefined;
@@ -25,16 +29,89 @@ async function* query(input: ConstructorParameters<typeof QueryCommand>[0]) {
   } while (start);
 }
 
+const sqs = new SQSClient({});
+
+/** After this long without a `deleted` report, a vault deletion is flagged to operations. */
+export const DELETION_STALE_S = 30 * 86_400;
+
+interface VaultRowLite {
+  vault_id: string;
+  user_guid: string;
+  state?: string;
+  sealed_release?: string;
+  lease?: { instance_id?: unknown; lease_expires_at?: unknown };
+  deletion_requested_at?: number;
+}
+
 /**
- * Delete a member's vault rows (every vault_id they ever had, and their
- * pointer row). Response slots expire on their own (15 min TTL).
- *
- * TODO(VAULT-PLAN V5): also delete every stored object under
- * `vaults/<vault_id>/` (encrypted state and the per-release sealed headers,
- * VAULT-MESSAGING §11.1, §11.10.2) once the vault data bucket exists in
- * VettidOrgVaultStack; it does not exist yet, so nothing is stored there.
+ * Ask one vault to delete itself (VAULT-MESSAGING 0.9.0 §12.5): the queue
+ * operation `delete` (§11.5, no envelope) to the leaseholder, else a live
+ * instance of its sealed release (a start is requested when none runs).
+ * A running vault deletes itself with the full semantics; otherwise the
+ * instance erases the stored objects. The vault's `deleted` report brings
+ * the vault_deleted notice, whose mailer removes the row. Returns whether
+ * the operation was queued.
  */
-async function deleteVaultRows(guid: string): Promise<string[]> {
+export async function requestVaultDeletion(v: VaultRowLite, nowS: number): Promise<boolean> {
+  if (v.state === 'deleted') return false;
+  if (!v.sealed_release && !v.lease) {
+    // Never sealed: nothing is stored for it; the row is all there is.
+    await ddb.send(new DeleteCommand({ TableName: table.vaults(), Key: { vault_id: v.vault_id } }));
+    return false;
+  }
+  let inst = await liveLease(v, nowS);
+  if (!inst && v.sealed_release) {
+    const rel = await releaseRow(v.sealed_release);
+    if (rel && rel.available !== false) {
+      inst = await pickInstance(v.sealed_release, nowS);
+      if (!inst) {
+        try {
+          await requestStart(v.sealed_release);
+        } catch (e) {
+          if ((e as Error).name !== 'ConditionalCheckFailedException') throw e;
+        }
+      }
+    }
+  }
+  if (inst) {
+    const message = {
+      v: 1,
+      op: 'delete',
+      vault_id: v.vault_id,
+      user_guid: v.user_guid,
+      request_id: newUlid(),
+      enqueued_at: new Date(nowS * 1000).toISOString(),
+    };
+    try {
+      await sqs.send(new SendMessageCommand({ QueueUrl: inst.queue_url, MessageBody: JSON.stringify(message) }));
+    } catch (e) {
+      console.error('vault delete enqueue failed', JSON.stringify({ vault_id: v.vault_id, error: (e as Error).name }));
+      inst = null;
+    }
+  }
+  if (typeof v.deletion_requested_at !== 'number') {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: table.vaults(),
+        Key: { vault_id: v.vault_id },
+        UpdateExpression: 'SET deletion_requested_at = :t',
+        ConditionExpression: 'attribute_exists(vault_id) AND attribute_not_exists(deletion_requested_at)',
+        ExpressionAttributeValues: { ':t': nowS },
+      }),
+    ).catch((e: Error) => {
+      if (e.name !== 'ConditionalCheckFailedException') throw e;
+    });
+  } else if (v.deletion_requested_at < nowS - DELETION_STALE_S) {
+    console.warn('vault deletion pending', JSON.stringify({ vault_id: v.vault_id }));
+  }
+  return !!inst;
+}
+
+/**
+ * A canceled member's vaults: each is asked to delete itself; the pointer
+ * row goes now (the member is gone). Response slots are not used.
+ */
+async function deleteVaults(guid: string, nowS: number): Promise<string[]> {
   const ids: string[] = [];
   for await (const item of query({
     TableName: table.vaults(),
@@ -42,12 +119,35 @@ async function deleteVaultRows(guid: string): Promise<string[]> {
     KeyConditionExpression: 'user_guid = :g',
     ExpressionAttributeValues: { ':g': guid },
   })) {
-    const id = String(item.vault_id);
-    await ddb.send(new DeleteCommand({ TableName: table.vaults(), Key: { vault_id: id } }));
-    ids.push(id);
+    const v = item as VaultRowLite;
+    await requestVaultDeletion(v, nowS);
+    ids.push(String(v.vault_id));
   }
   await ddb.send(new DeleteCommand({ TableName: table.vaults(), Key: { vault_id: vaultPointerKey(guid) } }));
   return ids;
+}
+
+/** Retry deletions not yet reported (the member row is already gone). */
+async function retryVaultDeletions(nowS: number): Promise<number> {
+  let n = 0;
+  let start: Record<string, unknown> | undefined;
+  do {
+    const r = await ddb.send(
+      new ScanCommand({
+        TableName: table.vaults(),
+        FilterExpression: 'attribute_exists(deletion_requested_at) AND #s <> :d AND deletion_requested_at < :recent',
+        ExpressionAttributeNames: { '#s': 'state' },
+        ExpressionAttributeValues: { ':d': 'deleted', ':recent': nowS - 3600 },
+        ExclusiveStartKey: start,
+      }),
+    );
+    for (const item of r.Items ?? []) {
+      await requestVaultDeletion(item as VaultRowLite, nowS);
+      n++;
+    }
+    start = r.LastEvaluatedKey;
+  } while (start);
+  return n;
 }
 
 export const handler = async () => {
@@ -86,7 +186,7 @@ export const handler = async () => {
       }
       await ddb.send(new DeleteCommand({ TableName: table.subscriptions(), Key: { user_guid: m.user_guid } }));
       await ddb.send(new DeleteCommand({ TableName: table.members(), Key: { user_guid: emailMarkerKey(m.email) } }));
-      const vaultIds = await deleteVaultRows(m.user_guid);
+      const vaultIds = await deleteVaults(m.user_guid, Math.floor(Date.now() / 1000));
       await audit('system', 'member.delete_after_cancel', m.user_guid, vaultIds.length ? { vault_ids: vaultIds } : {});
       deleted++;
     }
@@ -134,6 +234,8 @@ export const handler = async () => {
     reclaimed++;
   }
 
+  const vaultRetries = await retryVaultDeletions(Math.floor(Date.now() / 1000));
+
   let expired = 0;
   for (const status of ['trial', 'active']) {
     for await (const item of query({
@@ -157,6 +259,6 @@ export const handler = async () => {
       expired++;
     }
   }
-  console.log(JSON.stringify({ deleted, reclaimed, expired }));
-  return { deleted, reclaimed, expired };
+  console.log(JSON.stringify({ deleted, reclaimed, expired, vaultRetries }));
+  return { deleted, reclaimed, expired, vaultRetries };
 };

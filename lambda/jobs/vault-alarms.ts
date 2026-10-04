@@ -20,13 +20,21 @@
  *
  * The alarm carries no secrets and neither does the email. Nothing here is
  * a security decision: the vault has already frozen and alerted the app.
+ *
+ * The same path carries the deletion notice (VAULT-MESSAGING 0.9.0 §12.5):
+ * on the lifecycle event `deleted` the parent records
+ * `alarm = {kind: 'vault_deleted', ...}`. The vault's own audit log is gone,
+ * so the member is emailed (no rate limit: one notice per deletion), then
+ * the vault row (still `deleted`) and the member's pointer row (if it still
+ * names this vault) are removed, so the next enrollment is a fresh one.
  */
 import type { DynamoDBRecord, DynamoDBStreamHandler } from 'aws-lambda';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
-import { GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DeleteCommand, GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { audit } from '../shared/audit';
 import { ddb, env, table } from '../shared/aws';
 import { sendMail } from '../shared/mail';
+import { vaultPointerKey } from '../shared/members';
 import { hit } from '../shared/ratelimit';
 import type { MemberItem } from '../shared/model';
 
@@ -35,8 +43,25 @@ export const MAX_MAILS_PER_DAY = 4;
 const VAULT_ID_RE = /^[0-9a-f]{32}$/;
 const ALARM_ID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 
+/** Kinds that are never rate-limited (one notice per event). */
+const UNLIMITED = new Set(['vault_deleted']);
+
 /** Alarm kinds the host may record, with their email. */
 const MAILS: Record<string, { subject: string; text: (at: string) => string }> = {
+  vault_deleted: {
+    subject: 'Your VettID vault was deleted',
+    text: (at) => `At ${at} your VettID vault was deleted, together with everything stored in it: your items, your Protean Credential and its critical items, your connections and your devices' access.
+
+A deleted vault cannot be restored.
+
+If you did not delete it, secure your VettID account now (sign in and review it) and contact VettID support:
+https://${env('ACCOUNT_HOST')}/
+
+VettID never asks for your PIN or password by email.
+
+— VettID
+`,
+  },
   credential_clone: {
     subject: 'Security alert: your VettID credential was presented by another device',
     text: (at) => `At ${at} your VettID vault saw your Protean Credential presented by a device other than your app, or an old copy of it.
@@ -58,6 +83,7 @@ VettID never asks for your PIN or password by email.
 interface AlarmRow {
   vault_id: string;
   user_guid?: string;
+  state?: unknown;
   alarm?: { kind?: unknown; alarm_id?: unknown; at?: unknown };
   alarm_pending?: unknown;
 }
@@ -116,6 +142,36 @@ async function markEmailed(vaultId: string, alarmId: string, now: number): Promi
   }
 }
 
+/** Remove a deleted vault's row and the member's pointer to it (§12.5). */
+async function removeRows(vaultId: string, guid: string | undefined): Promise<void> {
+  try {
+    await ddb.send(
+      new DeleteCommand({
+        TableName: table.vaults(),
+        Key: { vault_id: vaultId },
+        ConditionExpression: '#s = :deleted',
+        ExpressionAttributeNames: { '#s': 'state' },
+        ExpressionAttributeValues: { ':deleted': 'deleted' },
+      }),
+    );
+  } catch (e) {
+    if (!isCcf(e)) throw e;
+  }
+  if (!guid) return;
+  try {
+    await ddb.send(
+      new DeleteCommand({
+        TableName: table.vaults(),
+        Key: { vault_id: vaultPointerKey(guid) },
+        ConditionExpression: 'current_vault_id = :id',
+        ExpressionAttributeValues: { ':id': vaultId },
+      }),
+    );
+  } catch (e) {
+    if (!isCcf(e)) throw e; // the pointer names another vault, or is gone
+  }
+}
+
 /** Handle one stream record. Exported for tests. */
 export async function processRecord(rec: DynamoDBRecord): Promise<'ignored' | 'claimed_elsewhere' | 'mailed' | 'not_mailed'> {
   if (rec.eventName === 'REMOVE' || !rec.dynamodb?.NewImage) return 'ignored';
@@ -130,15 +186,17 @@ export async function processRecord(rec: DynamoDBRecord): Promise<'ignored' | 'c
 
   const subject = row.user_guid ?? '';
   const detail = { vault_id: vaultId, kind, alarm_id: alarmId };
+  const deletion = kind === 'vault_deleted';
   const notMailed = async (reason: string) => {
     await audit('system', 'vault.alarm_email', subject, { ...detail, mailed: false, reason });
+    if (deletion) await removeRows(vaultId, row.user_guid);
     return 'not_mailed' as const;
   };
 
   const mail = MAILS[kind];
   if (!mail) return notMailed('unknown_kind');
   if (!row.user_guid) return notMailed('no_member');
-  if (!(await hit(`vault-alarm-mail#${vaultId}`, MAX_MAILS_PER_DAY, 86_400)).allowed) return notMailed('rate_limited');
+  if (!UNLIMITED.has(kind) && !(await hit(`vault-alarm-mail#${vaultId}`, MAX_MAILS_PER_DAY, 86_400)).allowed) return notMailed('rate_limited');
   const m = (await ddb.send(new GetCommand({ TableName: table.members(), Key: { user_guid: row.user_guid } }))).Item as MemberItem | undefined;
   if (!m?.email) return notMailed('no_member');
 
@@ -153,8 +211,9 @@ export async function processRecord(rec: DynamoDBRecord): Promise<'ignored' | 'c
     await unclaim(vaultId, alarmId);
     throw e;
   }
-  await markEmailed(vaultId, alarmId, Math.floor(Date.now() / 1000));
   await audit('system', 'vault.alarm_email', subject, { ...detail, mailed: true });
+  if (deletion) await removeRows(vaultId, row.user_guid);
+  else await markEmailed(vaultId, alarmId, Math.floor(Date.now() / 1000));
   return 'mailed';
 }
 
