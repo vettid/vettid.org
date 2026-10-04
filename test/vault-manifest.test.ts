@@ -277,7 +277,7 @@ describe('release log (RELEASE-UPDATES §5)', () => {
 
 describe('pinned manifest keys (lib/config.ts, VAULT-RELEASES §6.1)', () => {
   test.each([
-    ['prod', ['4353463f85c4012f']],
+    ['prod', ['4353463f85c4012f', '1abd49da96970b6e']],
     ['staging', ['e9b3a403423120ac']],
   ] as const)('%s: P-256 SubjectPublicKeyInfo, key_ids %j', (ch, ids) => {
     const keys = channelVault(ch).vault.manifestKeys;
