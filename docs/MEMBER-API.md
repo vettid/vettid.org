@@ -449,8 +449,9 @@ answers; `lock` without a live lease; `retry_after` values; the extra rate
 limits above; the `rescue` flag that marks a reopened `removed` release;
 the 30 s start-request interval.
 
-**Tables** (VettidOrgDataStack; the enclave host writes the fields marked
-*host*):
+**Tables** (in the vault account's VettidOrgVaultStack, VAULT-RELEASES
+§8.1; the API addresses them by table ARN across accounts; the enclave
+host writes the fields marked *host*):
 - `vettid-org-vaults` (PK `vault_id`, GSI `user-index`): `user_guid`,
   `state`, `created_at`, `updated_at`; *host*: `lease {instance_id,
   lease_expires_at (epoch s)}`, `sealed_release`, `vault_version`,
@@ -482,11 +483,16 @@ the 30 s start-request interval.
   `start_requests`; at most every 30 s per release, never creating a row);
   the scaler that starts instances is VAULT-RELEASES §8.6, fed by this
   table's stream (new and old images; ARN in SSM
-  `data/vault-releases-stream-arn`).
+  `vault/vault-releases-stream-arn`, vault account).
 
-The API's IAM can write only its own attributes on `vaults` and
+The API can write only its own attributes on `vaults` and
 `vault-releases` (never a lease, `sealed_release` or a status), cannot write
 the instance registry, and can `sqs:SendMessage` only to
-`vettid-org-vault-control-*` queues. Only the cleanup job can delete vault
-rows. Table names and the queue prefix are published under
-`/vettid-org/<stage>/data/` for the enclave host.
+`vettid-org-vault-control-*` queues. Only the cleanup job and the deletion
+notice can delete vault rows. These limits are enforced twice: by the
+three functions' IAM policies here (fixed role names
+`vettid-org-member-vault`, `-cleanup`, `-vault-alarms`) and by the vault
+account's table, stream and queue resource policies, rendered from the same
+matrix (`lib/vault/access.ts`). Table names, the queue prefix and the queue
+policy the parent applies are published under `/vettid-org/<stage>/vault/`
+in the vault account for the enclave host.
