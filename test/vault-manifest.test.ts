@@ -116,10 +116,10 @@ describe('the release file (vault/releases/<channel>.json)', () => {
     expect(() => validateReleaseFile(f, 'prod', ACCOUNT)).toThrow(re);
   });
 
-  test('the committed files are valid and list nothing yet (production release 1 is W10)', () => {
+  test('the committed files are valid (production lists nothing until release 1, W10)', () => {
     for (const ch of ['prod', 'staging'] as const) {
       const f = readReleaseFile(ROOT, ch, channelVault(ch).vault.account);
-      expect(f.releases).toEqual([]);
+      if (ch === 'prod') expect(f.releases).toEqual([]);
     }
   });
 });
