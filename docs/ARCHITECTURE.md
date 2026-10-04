@@ -163,10 +163,14 @@ with the member's signed approval, the vault is re-sealed for that release
 
 **Recovery** (§11.11). From the account portal, with a 24-hour delay that
 the member's app can cancel, then the PIN and the credential password on
-a new attested app, which replaces the old one. A member who still has
-the old phone transfers directly instead: the old app shows a QR, the new
-app scans it, the old app approves with the PIN and password, no wait
-(PROTEAN-CREDENTIAL §4.3).
+a new attested app, which replaces the old one; with the credential
+backup off the credential and critical items are lost and only a new
+credential or deletion remains. A member who still has the old phone
+transfers directly instead: the old app shows a QR, the new app scans it,
+the old app approves with the PIN and password, no wait (VAULT-MESSAGING
+§6.7.1). A second copy of the credential raises a clone alarm: refused,
+the app alerted, the member emailed, credential use frozen until a forced
+rotation (§3.5.9).
 
 ## 5. Keys, attestation and releases
 
