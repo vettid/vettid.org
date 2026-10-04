@@ -16,7 +16,8 @@
     "sync:assets": "node scripts/sync-site-assets.mjs",
     "check:manifest": "ts-node --transpile-only --prefer-ts-exts scripts/vault/check-manifest.ts",
     "release-log": "ts-node --transpile-only --prefer-ts-exts scripts/vault/release-log.ts",
-    "vault:manifest": "ts-node --transpile-only --prefer-ts-exts scripts/vault/manifest.ts"
+    "vault:manifest": "ts-node --transpile-only --prefer-ts-exts scripts/vault/manifest.ts",
+    "staging:seed": "ts-node --transpile-only --prefer-ts-exts scripts/staging/seed.ts"
   },
   "devDependencies": {
     "@aws-sdk/client-auto-scaling": "^3.1146.0",

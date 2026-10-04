@@ -54,6 +54,13 @@ export interface StaticSiteProps {
    * Served as application/json, revalidated on every request.
    */
   readonly wellKnown?: Record<string, unknown>;
+  /**
+   * Files published byte for byte at the given site paths (e.g.
+   * `{ '.well-known/vettid/pcr-manifest.json': <signed document> }`), for
+   * content that lives outside sourceDir and must not be re-serialized.
+   * Only `*.json` / `*.txt`: they ride in the revalidating pass.
+   */
+  readonly files?: Record<string, string>;
 }
 
 /** Every file the deployment will put in the bucket, as request paths. */
@@ -179,15 +186,22 @@ export class StaticSite extends Construct {
       if (!/^[a-z0-9][a-z0-9.-]*\.json$/.test(name)) throw new Error(`${props.hostName}: wellKnown name ${name} must be a plain *.json file name`);
     }
     const wellKnownPaths = wellKnown.map(([name]) => `/.well-known/${name}`);
+    const files = Object.entries(props.files ?? {});
+    for (const [path] of files) {
+      if (!/^[a-z0-9.][a-z0-9._/-]*\.(json|txt)$/.test(path) || path.includes('..') || path.includes('//')) {
+        throw new Error(`${props.hostName}: file path ${path} must be a relative *.json or *.txt path`);
+      }
+    }
+    const filePaths = files.map(([path]) => `/${path}`);
 
     // S3 (OAC) doesn't resolve /path or /path/ to /path/index.html by itself.
     // With notFoundPage, unknown paths are answered here with the branded
     // page and a real 404 (S3 would say 403 for a missing key).
     let notFound = '';
     if (props.notFoundPage) {
-      const files = sitePaths(props.sourceDir);
-      if (props.runtimeConfig) files.push('/config.json');
-      files.push(...wellKnownPaths);
+      const known = sitePaths(props.sourceDir);
+      if (props.runtimeConfig) known.push('/config.json');
+      known.push(...wellKnownPaths, ...filePaths);
       const page = readFileSync(join(props.sourceDir, props.notFoundPage), 'utf8');
       const fnHeaders = {
         'content-type': { value: 'text/html; charset=utf-8' },
@@ -205,7 +219,7 @@ export class StaticSite extends Construct {
       body: { encoding: 'text', data: NOT_FOUND } };
   }
 `;
-      notFound = `var FILES = ${JSON.stringify(Object.fromEntries(files.map((f) => [f, 1])))};
+      notFound = `var FILES = ${JSON.stringify(Object.fromEntries(known.map((f) => [f, 1])))};
 var NOT_FOUND = ${JSON.stringify(page)};
 @@CHECK@@${notFound}`;
     }
@@ -307,6 +321,7 @@ function handler(event) {
         content,
         ...(props.runtimeConfig ? [s3deploy.Source.jsonData('config.json', props.runtimeConfig)] : []),
         ...wellKnown.map(([name, doc]) => s3deploy.Source.jsonData(`.well-known/${name}`, doc)),
+        ...files.map(([path, body]) => s3deploy.Source.data(path, body)),
       ],
       destinationBucket: this.bucket,
       exclude: ['*'],

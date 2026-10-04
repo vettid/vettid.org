@@ -35,13 +35,14 @@ export class VettidOrgAuthStack extends cdk.Stack {
     const { config } = props;
 
     // Cognito-sent mail (admin invitations / temporary passwords) goes through
-    // the verified vettid.org SES domain identity. SES is in the sandbox by
-    // decision, so recipients must be verified identities first.
+    // the stage's verified SES domain identity (vettid.org in prod, its own
+    // zone elsewhere). SES is in the sandbox by decision, so recipients must
+    // be verified identities first.
     const email = cognito.UserPoolEmail.withSES({
       fromEmail: config.senderEmail,
       fromName: 'VettID',
       sesRegion: config.region,
-      sesVerifiedDomain: config.domainName,
+      sesVerifiedDomain: config.zoneName,
     });
 
     // ---- Members --------------------------------------------------------

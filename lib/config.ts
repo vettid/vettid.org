@@ -3,12 +3,12 @@ import { Node } from 'constructs';
 /**
  * Deployment-wide configuration for the vettid.org app.
  *
- * There is one environment today (prod). `stage` exists so a staging copy can
- * be stood up later (in its own AWS account, under staging.vettid.org) without
- * renaming anything in prod: physical names only gain a stage suffix when
- * stage !== 'prod'.
+ * Two stages: `prod` (default) and `staging`, a copy in its own AWS account
+ * under staging.vettid.org (VAULT-RELEASES §11.1, W9). Physical names only
+ * gain a stage suffix when stage !== 'prod', so prod never renames anything.
  *
- *   npx cdk deploy -c stage=prod   (default)
+ *   npx cdk deploy -c stage=prod                               (default)
+ *   npx cdk deploy -c stage=staging --profile vault-staging    (RUNBOOK "Staging")
  */
 export interface AppConfig {
   readonly stage: string;
@@ -18,9 +18,16 @@ export interface AppConfig {
   /** Where operational notifications go (new membership requests, etc.). */
   readonly adminEmail: string;
   /**
-   * Sender for all system email. The account has a verified SES *domain*
-   * identity for vettid.org; ses:SendEmail grants must stay resources:['*']
-   * (see signup-stack.ts — scoping them silently breaks every send).
+   * The stage's own DNS zone and SES sending domain: vettid.org in prod,
+   * `<stage>.vettid.org` elsewhere (a zone in the stage's account, delegated
+   * from vettid.org). Site hosts are hostName() names inside it.
+   */
+  readonly zoneName: string;
+  /**
+   * Sender for all system email: no-reply@<zoneName>. Each account has a
+   * verified SES *domain* identity for its zoneName; ses:SendEmail grants
+   * must stay resources:['*'] (see signup-stack.ts — scoping them silently
+   * breaks every send).
    */
   readonly senderEmail: string;
   /**
@@ -65,7 +72,9 @@ export interface VaultConfig {
    * The vault table's stream ARN, from VettidOrgVaultStack's output
    * `VaultsStreamArn` (a stream ARN carries a creation label, so it cannot
    * be derived; and SSM refs do not cross accounts). Context
-   * `vaultsStreamArn`. Empty: the alarm mailer has no event source yet.
+   * `vaultsStreamArn` in prod, `<stage>VaultsStreamArn` elsewhere (so a
+   * staging synth never picks up prod's value from cdk.json). Empty: the
+   * alarm mailer has no event source yet.
    */
   readonly vaultsStreamArn: string;
   /**
@@ -114,9 +123,10 @@ const STAGE_ACCOUNTS: Record<string, { main?: string; vault?: Omit<VaultConfig, 
     },
   },
   staging: {
-    // main: '347272280361' once the staging copy of the main stacks exists
-    // (W9: its own zone and hosts). Until then a staging synth builds only
-    // the vault stack, so nothing tries to look up vettid.org there.
+    // The staging copy (W9): its zone staging.vettid.org, member pool,
+    // tables, member API, account site and the staging.vettid.org site, all
+    // in the vault staging account (lib/app.ts, stageStacks).
+    main: '347272280361', // vettid-vault-staging
     vault: {
       channel: 'staging', account: '347272280361', apiAccount: '347272280361', retirementWindowDays: 7, // vettid-vault-staging
       manifestUrl: 'https://staging.vettid.org/.well-known/vettid/pcr-manifest.json',
@@ -201,12 +211,16 @@ export function loadConfig(node: Node): AppConfig {
   if (!/^[a-z][a-z0-9]{0,11}$/.test(stage)) {
     throw new Error(`Invalid stage "${stage}": lowercase alphanumeric, max 12 chars`);
   }
+  const domainName = 'vettid.org';
+  const zoneName = stage === PROD_STAGE ? domainName : `${stage}.${domainName}`;
+  const streamKey = stage === PROD_STAGE ? 'vaultsStreamArn' : `${stage}VaultsStreamArn`;
   return {
     stage,
-    domainName: 'vettid.org',
+    domainName,
+    zoneName,
     region: 'us-east-1',
     adminEmail: 'admin@vettid.org',
-    senderEmail: 'no-reply@vettid.org',
+    senderEmail: `no-reply@${zoneName}`,
     relay: {
       image: String(node.tryGetContext('relayImage') ?? ''),
     },
@@ -215,7 +229,7 @@ export function loadConfig(node: Node): AppConfig {
     },
     accounts: { main: STAGE_ACCOUNTS[stage]?.main },
     vault: STAGE_ACCOUNTS[stage]?.vault
-      ? { ...STAGE_ACCOUNTS[stage].vault!, vaultsStreamArn: String(node.tryGetContext('vaultsStreamArn') ?? '') }
+      ? { ...STAGE_ACCOUNTS[stage].vault!, vaultsStreamArn: String(node.tryGetContext(streamKey) ?? '') }
       : undefined,
   };
 }
@@ -234,4 +248,24 @@ export function hostName(config: AppConfig, sub: string): string {
   return config.stage === PROD_STAGE
     ? `${sub}.${config.domainName}`
     : `${sub}.${config.stage}.${config.domainName}`;
+}
+
+/**
+ * The delegation of a stage's zone from vettid.org (VettidOrgStageDelegationStack,
+ * deployed in prod): the four name servers of the stage zone, known only once
+ * VettidOrgStageDnsStack exists there (its output NameServers). Context
+ * `<stage>ZoneNs`, committed in cdk.json so a later prod deploy keeps it:
+ * a comma-separated string or an array. Empty: no delegation stack.
+ */
+export function stageZoneNs(node: Node, stage: string): string[] {
+  const raw = node.tryGetContext(`${stage}ZoneNs`);
+  if (raw === undefined || raw === null || raw === '') return [];
+  const ns = (Array.isArray(raw) ? raw : String(raw).split(','))
+    .map((v) => String(v).trim().replace(/\.$/, '').toLowerCase())
+    .filter(Boolean);
+  const awsNs = /^ns-\d{1,4}\.awsdns-\d{1,2}\.(com|net|org|co\.uk)$/;
+  if (ns.length !== 4 || !ns.every((n) => awsNs.test(n)) || new Set(ns).size !== 4) {
+    throw new Error(`context ${stage}ZoneNs: expected the four Route 53 name servers of ${stage}.vettid.org, got ${JSON.stringify(raw)}`);
+  }
+  return ns;
 }

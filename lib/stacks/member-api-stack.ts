@@ -313,7 +313,7 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     } else {
       cdk.Annotations.of(this).addWarningV2(
         'vettid:vaults-stream-unset',
-        'The vault alarm mailer has no event source: set context vaultsStreamArn (VettidOrgVaultStack output VaultsStreamArn)',
+        `The vault alarm mailer has no event source: set context ${config.stage === 'prod' ? 'vaultsStreamArn' : `${config.stage}VaultsStreamArn`} (VettidOrgVaultStack output VaultsStreamArn)`,
       );
     }
 
