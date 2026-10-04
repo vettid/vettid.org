@@ -417,8 +417,8 @@ aws logs tail /aws/lambda/vettid-org-vault-scaler $P --since 30m
 ### Manifest sync (`vettid-org-vault-manifest-sync`, VAULT-RELEASES §7)
 
 Every 5 minutes: fetches the channel's served manifest, verifies it under
-the keys pinned in `lib/config.ts` (`manifestKeys`: key A in production,
-the staging key in staging; key B is added when its token exists; while
+the keys pinned in `lib/config.ts` (`manifestKeys`: keys A and B in production,
+the staging key in staging; while
 nothing is served (404, or staging.vettid.org not up yet) it logs "no manifest
 published yet" and does nothing), and upserts the `vault-releases`
 rows (number, status, seal key, `ends_at`, `available` = the release's

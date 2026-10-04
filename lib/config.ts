@@ -111,13 +111,10 @@ const STAGE_ACCOUNTS: Record<string, { main?: string; vault?: Omit<VaultConfig, 
         // Key A: KMS ECC_NIST_P256 in vettid-vault-prod, alias/vettid-org-vault-manifest
         // (key 5197fbf9-0863-4e79-986e-2dcd9cb90e7d); key_id 4353463f85c4012f.
         'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE7xDU6CSVsFDJvP7UXigsN9SDB+KIppU85Y3DRvo0oMQZYKHZ1S/3OaNdFk2/HJX+hohYdyU6QIFPXiDBirflCQ==',
-        // TODO(O3, before production release 1): key B, the offline hardware
-        // token's P-256 SubjectPublicKeyInfo. Until then manifests are signed
-        // with key A only. That is the format (one signature per document,
-        // `key_id` selects the pinned key, §11.10.1), not a weakening: key B
-        // is the standby for losing key A. It must be pinned in release 1's
-        // image and the app, because a key an image does not pin can only be
-        // introduced by a new release.
+        // Key B: the offline standby (YubiKey PIV slot 9c, P-256, PIN and
+        // touch on every use; generated on the token 2026-10-04);
+        // key_id 1abd49da96970b6e. Used only if key A is lost (O3).
+        'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEIcIodW3liYaxACuOdB0If8igq/oWfVOcLGbWTy1vUNzTlvsVNe3ljfqpqfTCZwtR611EYk7UPTCfjaEEMPLxfQ==',
       ],
       relayHost: 'relay.vettid.org',
     },
