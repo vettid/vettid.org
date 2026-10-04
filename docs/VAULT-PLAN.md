@@ -1,9 +1,12 @@
 ---
 title: VAULT-PLAN
 status: draft
-version: 0.1.1
-date: 2026-10-03
+version: 0.1.2
+date: 2026-10-04
 changelog:
+  - 0.1.2: V5 moves to VAULT-RELEASES.md (owner decisions of 2026-10-04
+    amending D1: production-only locked keys, cadence, move-only
+    deprecated releases, retirement with key deletion)
   - 0.1.1: notes ported from the vettid.dev archive review and the owner
     decisions of 2026-10-03: wallet spend caps (V4), DR objectives and a
     RUNBOOK vault section (V5), no backup or export of vault data and
@@ -14,6 +17,7 @@ related:
   - RELAY-PROTOCOL.md (0.4.0), RELAY-PLAN.md
   - PQC-MIGRATION.md (0.3.0)
   - MEMBER-API.md, RUNBOOK.md
+  - VAULT-RELEASES.md (0.1.0) — the V5 plan
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -156,49 +160,32 @@ Caps apply to every caller, including connections' critical-item uses and
 any future agent path. (vettid-dev `protean_credential_system_design.md`,
 "Policy-Based Authorization"; PROTEAN-CREDENTIAL §5.)
 
-### V5 — Infrastructure and first hardware run
+### V5 — Releases, infrastructure and first deployment
 
-- **VettidOrgVaultStack** (stateful, RETAIN, termination protection): vault
-  data bucket, one KMS sealing key per active release (decrypt only under
-  Nitro attestation with that release's PCR0, §5.1), KMS PCR-manifest signing
-  key, SSM refs.
-- **DataStack** additions: vaults, instance registry, requests tables (landed with V3, plus a releases table; V5 adds the enclave host role's grants on them).
-- **Account deletion:** extend the member API cleanup job
-  (`lambda/jobs/cleanup.ts`, TODO there) to delete every object under
-  `vaults/<vault_id>/` in the vault data bucket for canceled accounts past
-  their 7-day grace (it already deletes their vault rows), and the
-  enclave's member index object `users/<hex SHA-256("vettid/vms/2/user" ||
-  0x00 || user_guid)>/vault` (VAULT-MESSAGING 0.3.2 §11.1), with
-  `s3:ListBucket`/`s3:DeleteObject` scoped to `vaults/*` and `users/*`.
-- **VettidOrgNitroStack**: VPC with public subnets and no NAT, Graviton host
-  ASG (min 0), IMDSv2 hop 1, no inbound, SSM-only access, alarms.
-- EIF and AMI build (vettid-vault CI + script), PCR manifest published at
-  `https://vettid.org/.well-known/vettid/pcr-manifest.json`, signed by the KMS
-  key whose public key the apps pin.
-- **Disaster recovery objectives** (to be set before members store data):
-  - RPO and RTO for vault state, and whether the vault data bucket is
-    versioned or replicated. Conditional writes and rollback protection
-    (VAULT-MESSAGING §13.2) must hold for any restored version; old
-    versions hold blobs under destroyed CEKs, which are harmless.
-  - Region loss: release sealing keys are single-region and can never be
-    deleted, disabled or re-policied (§5.1), so there is no KMS
-    deletion-recovery scenario, but vaults are unopenable while the key's
-    region is down. Decide whether that is accepted or whether releases
-    get a second-region key.
-  - Loss of the stored state itself stays out of scope for members
-    (VAULT-MESSAGING §2.2); there is no member backup or export (owner
-    decision, 2026-10-03).
-- **RUNBOOK "Vault" section** (placeholders until V5 lands): publishing a
-  release (build, PCRs, manifest signing, per-release key), scaling the host
-  ASG from 0 and on-demand starts of old releases, instance and lease
-  health, incident classes and first responses, capacity per host, and the
-  DR procedures above. The vettid.dev runbooks (incident response, capacity
-  planning) are a checklist only.
-- **Exit:** one real enrollment and unlock on hardware through
-  relay.vettid.org, with `vaultctl` verifying attestation against the
-  published manifest; a release update approved and the vault re-sealed to
-  the new release; KMS decrypt refused for a debug-mode enclave and for the
-  new release before approval (negative tests).
+Planned in **VAULT-RELEASES.md** (0.1.0), which replaces the bullets that
+stood here and builds on the owner decisions of 2026-10-04 that amend D1
+(R1–R4 there): locked keys for production releases only, a release
+cadence, move-only deprecated releases, and retirement with key deletion
+after a notice window. In short:
+
+- spec changes before release 1: §11.10.7 allows scheduled deletion (and
+  its cancellation) of a release key by one pinned principal; the
+  manifest no longer travels inside the unlock request; a `removed`
+  status and an `ends_at` date;
+- reproducible EIF builds in CI with provenance, release constants in
+  committed per-channel files, staging and production channels;
+- `VettidOrgVaultStack` (data bucket, host and retirement roles, release
+  keys), `VettidOrgVaultHostStack` (network, egress controls, scaler,
+  manifest sync, alarms) and one stack per live release (AMI, ASG);
+- the member API vault routes deployed dark first; the release, hotfix
+  and retirement processes; staging, hardware smoke, compatibility and DR
+  testing; the first production deployment and its owner decisions.
+
+**Exit:** as before, one real enrollment and unlock on hardware with
+`vaultctl` verifying attestation against the published (staging)
+manifest; a release update approved and the vault re-sealed; KMS decrypt
+refused for a debug-mode enclave and for the new release before approval;
+plus a retirement drill (schedule, cancel, delete) in staging.
 
 ### V6 — Clients
 
@@ -230,12 +217,19 @@ calling service (TURN, SFrame), PQC Phase 2 (ML-DSA, Go 1.27).
 | D3 | **Reproducible builds: required.** Pinned toolchain image, `-trimpath`, no secrets in the image, documented `make eif`; anyone can recompute PCR0 and compare it with the manifest. | Decided 2026-10-02 |
 | D4 | **Process model:** one OS process per unlocked vault inside the enclave, holding all of that vault's secrets and running its feature handlers; the supervisor keeps only shared duties and no per-vault secrets (§5.3). | Decided 2026-10-02; isolation requirements of §5.3 added after the V3b review |
 | D5 | **TLS terminates in the enclave**, over a few shared HTTP/2 connections per instance, with pinned roots for the allowlisted hosts (§5.2). | Decided 2026-10-02 |
+| D1a | **D1 amended:** locked keys only for production releases; a release cadence; deprecated releases are move-only; releases retire after a notice window (12 months to start) and their keys are then deleted. Confidentiality is unchanged; members who never move lose access. Details and the §11.10.7 change: VAULT-RELEASES §2–§4. | Decided 2026-10-04 |
 
 ### 5.1 D1: re-sealing per release
 
 *Normative protocol: VAULT-MESSAGING §11.10 (manifest, sealing, approval,
 the move, routing, app behaviour). This section keeps the decision and the
 deployment consequences.*
+
+*Amended 2026-10-04 (D1a): release keys become deletable by scheduled
+deletion only, after a release's notice window; statements below that
+keys "can never be deleted" and releases run "for as long as any vault
+needs them" are superseded by VAULT-RELEASES §3–§4 and change in the
+spec with work item W0.*
 
 Each release has its own KMS key whose policy allows `Decrypt` only under a
 Nitro attestation with that release's PCR0. A vault's sealed header (and the
