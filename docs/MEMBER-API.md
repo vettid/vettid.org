@@ -133,7 +133,7 @@ Notes for the UI:
 
 ## Vault (alternate channel, requires `vid_id`)
 
-The routes of VAULT-MESSAGING 0.3.1 §11 (enroll, unlock, lock): the app seals each
+The routes of VAULT-MESSAGING 0.10.0 §11 (enroll, unlock, lock): the app seals each
 request to an enclave instance's transport key (ETK), the API forwards the
 opaque bytes to that instance's SQS queue, and the app polls for the sealed
 answer. The API checks sizes and the envelope's clear header only; it never
@@ -208,7 +208,9 @@ interface VaultStatus {     // advisory: written by the enclave host, never a se
   format only (else `400 bad_request`) and copies it into the queue
   message as `manifest_sha256`; the enclave host fetches
   `manifests/<manifest_sha256>.json` from the vault data bucket and hands
-  it to the enclave. *Pending in the code (VAULT-RELEASES W8).*
+  it to the enclave. `manifest_serial` travels only inside the sealed
+  request; the API neither needs nor reads it. Recovery `register` and
+  every other op carry no `manifest_sha256`.
 - `envelope` in a result: base64 of exactly **5,252 bytes**, only when
   `status` is `done`: `vault.enroll.result` (§11.3) or `vault.unlock.result`
   (§11.4), sealed to the app, or random bytes of the same size when the
@@ -251,8 +253,23 @@ value), and `retry_after` seconds where given:
 A `deprecated` or `retired` release still serves the vaults sealed to it
 (§11.10.1); an unknown, `removed` or unstartable one is `410`, except a
 `removed` release that operations have reopened for a rescue (§11.10.5),
-which is routed as usual. *The `removed` rule is pending in the code
-(VAULT-RELEASES W8).*
+which is routed as usual. The rule covers `GET /api/vault/enclave` (with
+or without `?release=`, no start is requested), `unlock` and recovery
+`register` to an instance of such a release, and a recovery request (a
+recovery cancel is still recorded and mailed, only not queued); `lock`
+keeps working whatever the release (locking only reduces exposure). The
+cleanup job never asks a `removed` release to start for an account
+deletion either.
+
+**Dark launch** (VAULT-RELEASES §9). While the release registry has no
+`active` release that can start (as before the first release), `GET
+/api/vault/enclave` and `enroll` answer `503 vault_unavailable` after their
+rate limits and body checks: no vault row, response slot or start request
+is written and nothing is queued, even if a stray instance is registered.
+`status` answers `{vault: null}`, and `unlock`, `lock` and recovery answer
+`404` (there are no vaults). Start requests are recorded only for a known,
+routable release, and at most once per 30 s per release however many
+members or retries ask.
 
 **Rate limits** (§11.8; `429 rate_limited` with `retry_after`): enroll 3 per
 member per day; unlock 10 per member per 15 minutes, and per source network
@@ -429,7 +446,8 @@ heartbeat) and "dead holder means no live lease"; least-load selection
 (`load` in the registry, lower first, then freshest heartbeat); newest
 `active` release for enrollment; the `vault_busy` and `vault_unavailable`
 answers; `lock` without a live lease; `retry_after` values; the extra rate
-limits above.
+limits above; the `rescue` flag that marks a reopened `removed` release;
+the 30 s start-request interval.
 
 **Tables** (VettidOrgDataStack; the enclave host writes the fields marked
 *host*):
@@ -456,10 +474,13 @@ limits above.
   §11.5). The host only updates slots that are still `queued`.
 - `vettid-org-vault-releases` (PK `release` = PCR0, GSI `status-index` on
   `status` + `release_number`), rendered from the signed manifest by
-  operations: `release_number`, `status` (`active|deprecated|retired`),
-  `available` (false once the image can't be started). The API records
-  on-demand start requests here (`start_requested_at`, `start_requests`); the
-  infrastructure that starts instances is VAULT-PLAN V5.
+  operations: `release_number`, `status` (`active|deprecated|retired|removed`),
+  `available` (false once the image can't be started), `rescue` (true while
+  a `removed` release is reopened for a rescue, VAULT-RELEASES §10.3) and
+  `ends_at` (RFC 3339, from the manifest; not used for routing). The API
+  records on-demand start requests here (`start_requested_at`,
+  `start_requests`; at most every 30 s per release, never creating a row);
+  the scaler that starts instances is VAULT-RELEASES §8.6.
 
 The API's IAM can write only its own attributes on `vaults` and
 `vault-releases` (never a lease, `sealed_release` or a status), cannot write

@@ -750,8 +750,10 @@ with the notice job sending the emails of §3.5 automatically:
    `aws kms schedule-key-deletion --key-id <arn> --pending-window-in-days 30`;
    the deadline email goes out.
 3. Rescue (D … D+30), on a member's request: as the retirement role,
-   `cancel-key-deletion`, `enable-key`; redeploy the release stack; the
-   member moves; then step 2 again.
+   `cancel-key-deletion`, `enable-key`; redeploy the release stack and set
+   `rescue: true` on its `vault-releases` row (the member API routes a
+   `removed` release only then); the member moves; remove `rescue`; then
+   step 2 again.
 4. D+30: the key is deleted; the final email; D+37 the cleanup job deletes
    the stored objects and rows of vaults still sealed to N.
 5. Drop N from the manifest once no live key admits it.
