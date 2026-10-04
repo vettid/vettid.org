@@ -143,6 +143,34 @@ export function channelVault(channel: 'prod' | 'staging'): { stage: string; vaul
 }
 
 /**
+ * The Android app's sign-in App Link (MEMBER-API "Auth"): account.vettid.org
+ * publishes /.well-known/assetlinks.json so that
+ * https://account.vettid.org/auth/... opens in the app. Each entry is the
+ * SHA-256 of a certificate the app is signed with: the upload key (builds
+ * signed by the owner) now; the Play app-signing key is added once the Play
+ * Console shows it (VAULT-RELEASES O8). The same digests are pinned in
+ * vettid-vault enclave/releasecfg/prod.json `android_signers`.
+ */
+export const ANDROID_APP_LINKS = {
+  packageName: 'com.vettid.app',
+  sha256CertFingerprints: [
+    '31:A1:96:13:AA:10:F2:09:E0:89:45:F9:47:F9:4F:7C:E3:E6:E5:AC:34:24:57:FF:99:69:A6:79:86:92:8E:65', // upload key (2026-10-04)
+  ],
+} as const;
+
+/** The Digital Asset Links statement for {@link ANDROID_APP_LINKS}. */
+export function androidAssetLinks(): unknown[] {
+  return [{
+    relation: ['delegate_permission/common.handle_all_urls'],
+    target: {
+      namespace: 'android_app',
+      package_name: ANDROID_APP_LINKS.packageName,
+      sha256_cert_fingerprints: [...ANDROID_APP_LINKS.sha256CertFingerprints],
+    },
+  }];
+}
+
+/**
  * Fixed IAM role names in the vault accounts. The host and retirement roles
  * are named in every release key's policy, which can never change: renaming
  * or deleting either role makes every key fail the enclave's check 8, and

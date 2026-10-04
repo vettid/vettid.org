@@ -47,6 +47,13 @@ export interface StaticSiteProps {
    * (302) to `redirectTo`. UX only — the API enforces the real session.
    */
   readonly requireCookie?: { pathPrefix: string; cookie: string; redirectTo: string };
+  /**
+   * JSON documents published under /.well-known/ (RFC 8615), by file name,
+   * e.g. `{ 'assetlinks.json': [...] }`. Generated here rather than kept in
+   * sourceDir, whose dot-directories are never published (SITE_EXCLUDE).
+   * Served as application/json, revalidated on every request.
+   */
+  readonly wellKnown?: Record<string, unknown>;
 }
 
 /** Every file the deployment will put in the bucket, as request paths. */
@@ -167,6 +174,12 @@ export class StaticSite extends Construct {
       },
     });
 
+    const wellKnown = Object.entries(props.wellKnown ?? {});
+    for (const [name] of wellKnown) {
+      if (!/^[a-z0-9][a-z0-9.-]*\.json$/.test(name)) throw new Error(`${props.hostName}: wellKnown name ${name} must be a plain *.json file name`);
+    }
+    const wellKnownPaths = wellKnown.map(([name]) => `/.well-known/${name}`);
+
     // S3 (OAC) doesn't resolve /path or /path/ to /path/index.html by itself.
     // With notFoundPage, unknown paths are answered here with the branded
     // page and a real 404 (S3 would say 403 for a missing key).
@@ -174,6 +187,7 @@ export class StaticSite extends Construct {
     if (props.notFoundPage) {
       const files = sitePaths(props.sourceDir);
       if (props.runtimeConfig) files.push('/config.json');
+      files.push(...wellKnownPaths);
       const page = readFileSync(join(props.sourceDir, props.notFoundPage), 'utf8');
       const fnHeaders = {
         'content-type': { value: 'text/html; charset=utf-8' },
@@ -289,9 +303,11 @@ function handler(event) {
       distributionPaths: ['/*'],
     });
     new s3deploy.BucketDeployment(this, 'DeployHtml', {
-      sources: props.runtimeConfig
-        ? [content, s3deploy.Source.jsonData('config.json', props.runtimeConfig)]
-        : [content],
+      sources: [
+        content,
+        ...(props.runtimeConfig ? [s3deploy.Source.jsonData('config.json', props.runtimeConfig)] : []),
+        ...wellKnown.map(([name, doc]) => s3deploy.Source.jsonData(`.well-known/${name}`, doc)),
+      ],
       destinationBucket: this.bucket,
       exclude: ['*'],
       include: revalidate,
