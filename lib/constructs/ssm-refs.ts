@@ -25,6 +25,7 @@ export type SsmRefKey =
   | 'data/terms-bucket-name'
   | 'data/members-stream-arn'
   | 'data/vaults-table-name'
+  | 'data/vaults-stream-arn'
   | 'data/vault-instances-table-name'
   | 'data/vault-requests-table-name'
   | 'data/vault-releases-table-name'

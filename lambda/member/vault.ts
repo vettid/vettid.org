@@ -26,8 +26,11 @@
  * Shared contract with the enclave host (vettid/vettid-vault, the parent):
  *  - vaults table, PK vault_id: { vault_id, user_guid, state,
  *    lease: { instance_id, lease_expires_at (epoch s) }, sealed_release,
- *    vault_version, state_version, created_at, updated_at }. The API creates
- *    the row (state `enrolling`); the parent owns lease and lifecycle fields.
+ *    vault_version, state_version, created_at, updated_at, alarm: { kind,
+ *    alarm_id (ULID), at (epoch s) }, alarm_pending: true }. The API creates
+ *    the row (state `enrolling`); the parent owns lease, lifecycle and alarm
+ *    fields (the alarm mailer only clears alarm_pending, VAULT-MESSAGING
+ *    0.9.0 §11.5).
  *    Rows keyed `user#<user_guid>` are the API's per-member pointer
  *    (`current_vault_id`) and never carry user_guid.
  *  - vault-instances table, PK instance_id: { instance_id, release (PCR0 hex),
@@ -54,6 +57,22 @@ import { canSignIn, currentTerms, memberByGuid, vaultPointerKey } from '../share
 import type { MemberItem } from '../shared/model';
 import { hit } from '../shared/ratelimit';
 import { sendMail } from '../shared/mail';
+import {
+  INSTANCE_ID_RE,
+  type InstanceRow,
+  LIVE_HEARTBEAT_S,
+  type ReleaseRow,
+  expectedQueueUrl,
+  liveInstance,
+  liveLease,
+  newUlid,
+  pickInstance,
+  releaseRow,
+  requestStart,
+} from '../shared/vault-routing';
+
+export { INSTANCE_ID_RE, LIVE_HEARTBEAT_S, expectedQueueUrl };
+export type { InstanceRow };
 
 const sqs = new SQSClient({});
 const router = new Router<MemberRequest>();
@@ -69,8 +88,6 @@ export const ENVELOPE_BYTES_SMALL = 4_096 + SEALED_OVERHEAD; // 5,252
 /** Every sealed result in a response slot is a 4,096-padded envelope (§11.3, §11.4, §11.5). */
 export const RESULT_ENVELOPE_BYTES = ENVELOPE_BYTES_SMALL; // 5,252
 
-/** An instance is live if it heartbeat within this many seconds. */
-export const LIVE_HEARTBEAT_S = 90;
 /** What 503 release_starting tells the app to wait. */
 export const START_RETRY_AFTER_S = 30;
 /** Request slots live 15 minutes (§11.5). */
@@ -85,8 +102,6 @@ const ULID_RE = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 const VAULT_ID_RE = /^[0-9a-f]{32}$/;
 const KID_RE = /^[0-9a-f]{16}$/;
 const PCR0_RE = /^[0-9a-f]{96}$/;
-/** Becomes part of an SQS queue name (≤ 80 chars incl. the prefix). */
-export const INSTANCE_ID_RE = /^[A-Za-z0-9_-]{1,48}$/;
 const CODE_RE = /^[a-z_][a-z0-9_]{0,63}$/;
 const B64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 
@@ -144,6 +159,13 @@ export interface VaultRow {
   state_version?: string | number;
   /** API-owned: the recovery in progress or last ended (VAULT-MESSAGING §11.11). */
   recovery?: RecoveryRow;
+  /**
+   * Host-owned: the last alarm the vault reported (VAULT-MESSAGING 0.9.0
+   * §11.5), content-free. `alarm_pending` is cleared by the alarm mailer
+   * (lambda/jobs/vault-alarms.ts). Advisory; never a security signal.
+   */
+  alarm?: { kind: string; alarm_id: string; at: number; emailed_at?: number };
+  alarm_pending?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -156,25 +178,8 @@ export interface RecoveryRow {
   expires_at: number;
 }
 
-export interface InstanceRow {
-  instance_id: string;
-  release: string;
-  queue_url: string;
-  descriptor: string;
-  attestation: string;
-  heartbeat_at: number;
-  load?: number;
-}
-
-interface ReleaseRow {
-  release: string;
-  release_number: number;
-  status: 'active' | 'deprecated' | 'retired';
-  /** false once the release's image can no longer be started (§11.10.5). */
-  available?: boolean;
-}
-
 type Op = 'enroll' | 'unlock' | 'lock' | 'recovery' | 'recovery_cancel' | 'recovery_register';
+
 
 // ---- errors (§11.1, §11.9, §11.10.5) ------------------------------------------------
 // Bodies carry the MEMBER-API `error` and also the spec's `code`.
@@ -278,82 +283,6 @@ async function vaultForEnrollment(guid: string, cur: { pointer: string | null; v
 }
 
 // ---- instances, leases, releases -----------------------------------------------------
-
-/** The queue URL an instance must use: the API never sends anywhere else. */
-export const expectedQueueUrl = (instanceId: string) => `${env('VAULT_QUEUE_URL_PREFIX')}${instanceId}`;
-
-const isLive = (i: InstanceRow | undefined, now: number): i is InstanceRow =>
-  !!i &&
-  INSTANCE_ID_RE.test(i.instance_id) &&
-  typeof i.heartbeat_at === 'number' &&
-  i.heartbeat_at >= now - LIVE_HEARTBEAT_S &&
-  i.queue_url === expectedQueueUrl(i.instance_id) &&
-  typeof i.descriptor === 'string' &&
-  typeof i.attestation === 'string';
-
-async function liveInstance(instanceId: string, now: number): Promise<InstanceRow | null> {
-  if (!INSTANCE_ID_RE.test(instanceId)) return null;
-  const r = await ddb.send(new GetCommand({ TableName: table.vaultInstances(), Key: { instance_id: instanceId } }));
-  const i = r.Item as InstanceRow | undefined;
-  return isLive(i, now) ? i : null;
-}
-
-/**
- * The instance holding a live lease on the vault, or null. A lease counts
- * as live only while it is unexpired AND its holder is a live instance: a
- * crashed holder does not strand the vault until its lease runs out. Leases
- * are a routing aid only; the parent's conditional lease write and the
- * split-brain guard (§12.3) keep two instances from running one vault.
- */
-async function liveLease(v: VaultRow | null, now: number): Promise<InstanceRow | null> {
-  const l = v?.lease;
-  if (!l || typeof l.instance_id !== 'string' || typeof l.lease_expires_at !== 'number' || l.lease_expires_at <= now) return null;
-  return liveInstance(l.instance_id, now);
-}
-
-async function releaseRow(release: string): Promise<ReleaseRow | null> {
-  const r = await ddb.send(new GetCommand({ TableName: table.vaultReleases(), Key: { release } }));
-  return (r.Item as ReleaseRow | undefined) ?? null;
-}
-
-/** A live instance of `release`, least loaded first, then freshest heartbeat. */
-async function pickInstance(release: string, now: number): Promise<InstanceRow | null> {
-  const r = await ddb.send(
-    new QueryCommand({
-      TableName: table.vaultInstances(),
-      IndexName: 'release-index',
-      KeyConditionExpression: '#r = :r AND heartbeat_at >= :cut',
-      ExpressionAttributeNames: { '#r': 'release' },
-      ExpressionAttributeValues: { ':r': release, ':cut': now - LIVE_HEARTBEAT_S },
-    }),
-  );
-  const candidates = ((r.Items ?? []) as Pick<InstanceRow, 'instance_id' | 'heartbeat_at' | 'load'>[]).sort(
-    (a, b) => (a.load ?? 0) - (b.load ?? 0) || b.heartbeat_at - a.heartbeat_at,
-  );
-  for (const c of candidates.slice(0, 5)) {
-    const i = await liveInstance(c.instance_id, now);
-    if (i && i.release === release) return i;
-  }
-  return null;
-}
-
-/**
- * Ask for an instance of `release` to be started. For now this only records
- * the request on the release row; the infrastructure that acts on it is V5
- * (VAULT-PLAN §4). Only start-request attributes are writable by the API.
- */
-async function requestStart(release: string): Promise<void> {
-  await ddb.send(
-    new UpdateCommand({
-      TableName: table.vaultReleases(),
-      Key: { release },
-      UpdateExpression: 'SET start_requested_at = :now ADD start_requests :one',
-      ConditionExpression: 'attribute_exists(#r)',
-      ExpressionAttributeNames: { '#r': 'release' },
-      ExpressionAttributeValues: { ':now': nowIso(), ':one': 1 },
-    }),
-  );
-}
 
 const describe = (i: InstanceRow) => ({ instance_id: i.instance_id, release: i.release, descriptor: i.descriptor, attestation: i.attestation });
 
@@ -485,6 +414,8 @@ router.on('GET', '/api/vault/status', async (req) => {
       leased: !!v.lease && typeof v.lease.lease_expires_at === 'number' && v.lease.lease_expires_at > now,
       // So owner apps can show a recovery in progress and offer to cancel it (§11.11.7).
       recovery: recoveryActive(v.recovery, now) ? { state: recoveryState(v.recovery, now), available_at: iso(v.recovery!.available_at) } : null,
+      // The last alarm the vault reported to its host (a credential clone, 0.9.0 §3.5.9).
+      alarm: v.alarm && typeof v.alarm.kind === 'string' && typeof v.alarm.at === 'number' ? { kind: v.alarm.kind, at: iso(v.alarm.at) } : null,
       created_at: v.created_at,
       updated_at: v.updated_at,
     },
@@ -691,6 +622,8 @@ const requestedMail = (cancelUrl: string, availableAt: number) => `A recovery of
 
 Your vault has been locked. If nobody cancels, a one-time recovery code becomes available on your account page at ${iso(availableAt)}, for 24 hours. A new app then needs the code, your vault PIN and your credential password.
 
+The new app replaces your current app, which is removed; your desktops and agents stay paired. If your credential backup is off, your credential and its critical items cannot be restored: the new app can only start a new credential or delete the vault.
+
 If you did not ask for this, cancel it now:
 ${cancelUrl}
 
@@ -714,20 +647,6 @@ async function cancelRecovery(m: MemberItem, v: VaultRow, via: 'session' | 'link
   await notify(m.email, 'VettID vault recovery cancelled', `The recovery of your VettID vault requested at ${iso(r.requested_at)} has been cancelled. Your apps can unlock the vault again.`);
 }
 
-/** A ULID for requests the API makes on its own (cancel). */
-function newUlid(): string {
-  const A = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-  let t = Date.now();
-  let time = '';
-  for (let i = 0; i < 10; i++) {
-    time = A[t % 32] + time;
-    t = Math.floor(t / 32);
-  }
-  const rnd = randomBytes(16);
-  let r = '';
-  for (let i = 0; i < 16; i++) r += A[rnd[i] % 32];
-  return time + r;
-}
 
 router.on('POST', '/api/vault/recovery', async (req) => {
   const m = await loadVaultMember(req);
