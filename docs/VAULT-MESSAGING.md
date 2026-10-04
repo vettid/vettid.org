@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.10.1
+version: 0.10.2
 date: 2026-10-04
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -17,6 +17,18 @@ related:
   - VAULT-RELEASES.md (0.1.0, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.10.2: connection requests, from the Android A4 build: both members
+    see and confirm the safety code; the accepting vault's member approves
+    too, and its vault completes the handshake only then (§6.4, §10.4);
+    `connection.invite.accept` returns `sas` and answers `exists` for a
+    vault already connected or requested; the inviter's drop of such an
+    `hs.init` and the accepter's 8-day expiry (`failed`) are specified
+    (§6.4); `connection.request.list`, `connection.request.outgoing` and
+    the `connection.request` sync kind; `pending_id` in
+    `connection.event{added}` (§10.1, §10.4); the link URL
+    `https://vettid.org/connect#<payload>` (`url`), the QR unchanged (§6.4);
+    `critical-secret-use.get` returns an incoming request with its payload
+    (§10.13); §15 items 16–17
   - 0.10.1: the vault PIN is 6–32 ASCII digits (was 4–32), owner decision
     of 2026-10-04; the enclave refuses shorter PINs everywhere it takes one
     (§11.3, §6.7.1, §10.6)
@@ -1330,7 +1342,9 @@ Verification and activation:
   record for the principal whose session decrypts it. A mismatch is acked,
   dropped and audited.
 - `sas` depends only on `hs.init`, so either side can display it before
-  `hs.resp` is sent.
+  `hs.resp` is sent: the initiator from the moment it builds `hs.init`,
+  the responder once it has opened it. For a connection both members see
+  it (§6.4).
 
 ### 6.4 Connections and invitations
 
@@ -1394,6 +1408,38 @@ The bundle is protected and published as follows:
   bundle whose `kind` does not match `t`, whose `exp` differs from `e`, or
   that has expired.
 
+**Invitation URL** (0.10.2). A connection invitation (`t` = `c`) is shared
+as a URL:
+
+```
+https://vettid.org/connect#<link>
+```
+
+- `<link>` is the base64url payload above and is the whole fragment: no
+  query, no other path, nothing else in the fragment. Apps build the URL
+  from `link` (§10.4) with their channel's site (§11.10.8):
+  `https://vettid.org` in production, `https://staging.vettid.org` in
+  staging.
+- The fragment never reaches a server, so the payload stays out of
+  requests, access logs and referrers.
+- On a phone with the app, the URL opens it as a verified App Link
+  (Android; universal links on iOS later); the site serves the
+  association file for the app's signing key (§15 item 16). Elsewhere
+  `/connect` is a static page that says to open the link in the VettID
+  app. That page MUST NOT read the fragment, load third-party scripts or
+  send a referrer (`Referrer-Policy: no-referrer`).
+- Apps MUST accept the URL form of their own channel's site and the bare
+  payload, pasted or opened, and MAY find either inside surrounding text.
+  They pass the bare payload to `connection.invite.accept`, which accepts
+  only that.
+- **QR codes keep the compact JSON.** It needs a smaller QR version than
+  the URL (no base64url growth, no prefix) and is read only by the VettID
+  scanner. Scanners MUST also accept a QR holding the bare payload or
+  the URL form, so that a later switch to URL QRs, which a phone's camera
+  would open, needs no app release.
+- Pairing and transfer links (`t` = `p`, `d`, `a`) are used in person
+  and stay bare payloads.
+
 ```
 A app            A vault           Relay            B vault           B app
   |--invite.create{ttl}-->|           |                 |                |
@@ -1401,10 +1447,12 @@ A app            A vault           Relay            B vault           B app
   |<--QR / link------|                |                 |<--invite.accept{QR}
   |                  |                |<--GET claim-----|  check h, decrypt, exp
   |                  |                |<--hs.init (open token)-----------|
+  |                  |                |                 |--{connection_id, sas}-->|
   |                  |<--collect------|                 |                |
   |<--request.pending{profile,sas,remote}               |                |
-  |--approve-------->|--hs.resp------>|---------------->|                |
-  |                  |<---------------|<--hs.fin--------|                |
+  |   (each member compares the SAS with the other's screen)             |
+  |--approve-------->|--hs.resp------>|---------------->|<--approve------|
+  |                  |<---------------|<--hs.fin--------|  (after both approvals)
   |<--connection.event{added}         |                 |--connection.event{added}-->|
 ```
 
@@ -1413,9 +1461,29 @@ Rules:
 - **Single use.** Every invite is single-use. The inviting vault accepts at
   most one `hs.init` per `invite_id` and rejects invites that are expired,
   used or revoked. The claim is single-fetch.
+- **Safety code (SAS, §6.3), both sides** (0.10.2). The accepting vault
+  knows the SAS when it sends `hs.init` and returns it in the
+  `connection.invite.accept` response; the inviting vault sends it in
+  `connection.request.pending`. Both apps MUST show it, as six digits,
+  with the other side's name, and ask their member to compare it with
+  the code on the other member's screen (in person, or over a channel
+  they trust, such as a call). Each member decides only for their own
+  side:
+  - The **inviter** approves (`connection.approve{pending_id}`) or
+    declines the incoming request, as below. Approval sends `hs.resp`.
+  - The **accepter** approves (`connection.approve{connection_id}`) or
+    declines (`connection.decline{connection_id}`) its outgoing request.
+    The accepting vault MUST NOT send `hs.fin` before that approval: an
+    `hs.resp` that arrives first is stored with the request (and acked)
+    and processed at the approval. Declining drops the request and any
+    stored `hs.resp`.
+  - The connection becomes active on both sides only after both
+    approvals, in either order. A member who sees a different code
+    declines; the other side's request then ends by expiry (below), since
+    a decline is not sent to the peer.
 - **In-person invites (10 min).** Approval is explicit by default; the owner
-  MAY enable auto-approval for in-person invites. Apps SHOULD offer to
-  compare the SAS as a safety number.
+  MAY enable auto-approval for in-person invites, which skips the
+  inviter's approval only. The accepter always approves.
 - **Remote invites.** The resulting connection stays **`pending`** until the
   inviter explicitly approves it in the app.
   - Auto-approval MUST NOT apply.
@@ -1425,9 +1493,37 @@ Rules:
   - The vault does not send `hs.resp` while the connection is pending.
     Anyone who saw the link could have accepted it, so approval is the
     control.
-- **Pending expiry.** A connection request that the owner has neither
-  approved nor declined is dropped after **7 days** (the longest invite
-  TTL).
+- **Already connected** (0.10.2). After opening the bundle and before
+  making an `hs.init`, the accepting vault MUST answer
+  `connection.invite.accept` with `exists` (body `{connection_id}`, its
+  own id for that peer) if `vault.ik` or `vault.relay.pk` is that of one
+  of its connections that is not `stale`, or of one of its outgoing
+  requests. The claim has then been fetched, so the link is spent; the
+  inviter's invitation stays outstanding until its `exp` or
+  `connection.invite.cancel`. A member whose connection is broken
+  removes it and asks for a new invitation.
+- **The inviter's drop.** An `hs.init` of purpose `connection` whose
+  collect `sender` or `from.ik` is that of an active connection or a
+  device of the inviting vault is dropped and audited
+  (`drop.hs_init_from_known_peer`); the invitation is not used. A peer
+  whose record is `stale` is accepted (§7.4). No answer is sent: the
+  accepting vault's own check above, and its expiry below, keep its
+  member from waiting.
+- **Request expiry and retention.**
+  - An **incoming** request (the inviter's) that the owner has neither
+    approved nor declined is dropped after **7 days** (the longest invite
+    TTL). Once approved, it waits for `hs.fin` for at most 16 days (the
+    accepter's 8 days, with room for a vault that was locked) and is then
+    dropped. A declined request is dropped at once.
+  - An **outgoing** request (the accepter's) that is not active **8 days**
+    after the accept (the inviter's 7 days and a day for delivery) is
+    dropped, with any stored `hs.resp`, and the vault sends
+    `connection.event{connection_id, event: "failed"}`, as for an aborted
+    `hs.resp` (§6.3). A later `hs.resp` finds no handshake and is dropped.
+  - `connection.request.list` (§10.4) returns both kinds until they end,
+    with their SAS, so an app can show a request again at any time; the
+    ends are announced as `sync.event{kind: "connection.request"}` and
+    `connection.event`.
 - **Who approves.** Connection requests are approved or declined by an
   owner device of role `app` or `desktop`. Agents MUST NOT create, accept,
   approve or decline invitations.
@@ -2074,8 +2170,9 @@ an answer to an unknown or expired id is dropped.
 | | `profile.update` | V↔V | | Shared profile (name, photo, `@profile` items) to a connection (§9.3, §10.8) |
 | | `sync.event` / `sync.since` | V→D, V↔V / D→V, V↔V | — / req | Mirror changes (kinds in §10.1); catch up |
 | Connections | `connection.invite.create`, `.list`, `.cancel`, `.accept` | D→V | req | Invitations (§6.4) |
-| | `connection.request.pending` | V→D | | Awaiting approval (profile, `sas`, `remote`) |
-| | `connection.approve`, `.decline`, `.list`, `.get`, `.remove`, `.update` | D→V | req | Manage connections; the owner's own metadata |
+| | `connection.request.pending`, `connection.request.outgoing` | V→D | | An incoming request awaiting approval (profile, `sas`, `remote`); an outgoing one (`sas`) (§6.4) |
+| | `connection.request.list` | D→V | req | Pending incoming and outgoing requests with their SAS (§6.4) |
+| | `connection.approve`, `.decline`, `.list`, `.get`, `.remove`, `.update` | D→V | req | Approve or decline a request; manage connections; the owner's own metadata |
 | | `connection.removed` | V↔V | | Notify the peer |
 | | `connection.event` | V→D | | Added, pending, stale, removed, rekeyed, reconnected |
 | | `block.add`, `.remove`, `.list` | D→V | req | Block list (§7.4) |
@@ -2119,7 +2216,7 @@ an answer to an unknown or expired id is dropped.
 | Grants | `grant.request`, `.decide`, `.revoke`, `.list`, `.fetch`, `.catalog` | D→V | req | 1:1 grants of items; a connection's catalog (§10.12) |
 | | `data.request`, `data.decided`, `data.shared`, `data.revoked`, `data.fetch`, `data.value`, `data.catalog.get`, `data.catalog` | V↔V | | Between the two vaults |
 | | `grant.pending`, `grant.event`, `grant.value`, `grant.catalog.result` | V→D | | Asked; granted, denied or revoked; a value sealed to the fetching device; a connection's catalog |
-| Critical items | `critical-secret-use.request`, `.approve`, `.deny`, `.list` | D→V | req | Ask a connection's member to use a critical item; consent with the password (§10.13) |
+| Critical items | `critical-secret-use.request`, `.approve`, `.deny`, `.list`, `.get` | D→V | req | Ask a connection's member to use a critical item; consent with the password (§10.13) |
 | | `critical-secret.use`, `critical-secret.result` | V↔V | | The request; the result or refusal |
 | | `critical-secret-use.pending`, `critical-secret-use.result` | V→D | | Asked (apps and desktops); the result |
 | Presence | `presence.query`, `presence.get`, `presence.set` | D→V | req | Ask; read and set own state and policy (§10.17) |
@@ -2156,7 +2253,9 @@ an answer to an unknown or expired id is dropped.
   `ttl_not_allowed`, `claim_unavailable`, `accept_failed`, `approve_failed`,
   `connection_unavailable`, and (0.4.0):
   - `conflict`: the request's `version` is not the current one (§8.4);
-  - `exists`: the object already exists (`credential.create`);
+  - `exists`: the object already exists (`credential.create`; since
+    0.10.2 also `connection.invite.accept` of a vault already connected
+    or requested, with body `{connection_id}`, §6.4);
   - `limit`: a count or size limit of the feature would be exceeded;
   - `bad_password`, `backoff`, `stale_credential`, `utk_invalid`: §3.5.3,
     §3.5.4;
@@ -2230,6 +2329,7 @@ an answer to an unknown or expired id is dropped.
   | `feed.updated` | `item_id`, `seq` |
   | `feed.deleted` | `item_id`, `seq` |
   | `connection.changed` | `connection_id`, `version` (`connection.update`, §10.4) |
+  | `connection.request` | `pending_id` (incoming) or `connection_id` (outgoing), `state` (`approved`, `declined`, `expired`) (§6.4) |
   | `block.added`, `block.removed` | `block_id` (§10.4) |
   | `connection.authenticate.decided` | `request_id`, `approved` (§10.4) |
   | `device.session` | `device_id`, `expires_at` (absent when the session ended) (§6.8) |
@@ -2313,15 +2413,17 @@ an answer to an unknown or expired id is dropped.
 | `connection.invite.create` | `{ttl_seconds: 600 \| 3600 \| 86400 \| 604800}` | `{invite_id, link, exp, remote}` |
 | `connection.invite.list` | `{}` | `{invites: [{invite_id, exp, remote}]}` |
 | `connection.invite.cancel` | `{invite_id}` | `{}` |
-| `connection.invite.accept` | `{link}` | `{connection_id, state: "pending"}` |
-| `connection.request.pending` | — | `{pending_id, invite_id, sas, remote, profile?}` |
-| `connection.approve`, `.decline` | `{pending_id}` | `{}` |
+| `connection.invite.accept` | `{link}` (the bare payload, §6.4) | `{connection_id, state: "pending", sas, remote, exp, name?}`: an outgoing request (§6.4); `name` is the bundle's `hint.name`. `exists` with body `{connection_id}` for a vault already connected or requested; `blocked`, `limit`, `claim_unavailable`, `bad_request`, `accept_failed` |
+| `connection.request.pending` (incoming, to apps and desktops) | — | `{pending_id, invite_id, sas, remote, exp, profile?, introduced_by?}` |
+| `connection.request.outgoing` (to apps and desktops other than the accepting device) | — | `{connection_id, sas, remote, exp, name?, introduced_by?}`: an outgoing request made by another device's accept or by an introduction (§10.15) |
+| `connection.request.list` | `{}` | `{incoming: [{pending_id, invite_id, sas, remote, state, created_at, exp, profile?, introduced_by?}], outgoing: [{connection_id, sas, remote, state, approved, created_at, exp, name?, introduced_by?}]}` |
+| `connection.approve`, `.decline` | `{pending_id}` (an incoming request) or `{connection_id}` (an outgoing one), exactly one | `{}`; `not_found` for an unknown or ended request |
 | `connection.list` | `{}` | `{connections: [<connection>]}` |
 | `connection.get` | `{connection_id}` | `<connection>` |
 | `connection.update` | `{connection_id, version, alias?, note?, tags?, favorite?, archived?}` (at least one) | `{version}` |
 | `connection.remove` | `{connection_id}` | `{}` |
 | `connection.removed` (V↔V) | — | `{}` |
-| `connection.event` | — | `{connection_id, event: "added" \| "removed" \| "stale" \| "rekeyed" \| "reconnected" \| "failed" \| "profile"}`; `profile`: the connection's shared profile changed (§10.8) |
+| `connection.event` | — | `{connection_id, event: "added" \| "removed" \| "stale" \| "rekeyed" \| "reconnected" \| "failed" \| "profile", pending_id?}`; `profile`: the connection's shared profile changed (§10.8); `failed`: an outgoing request ended without a connection (§6.4); `pending_id` with `added` on the inviter's side names the request it came from (on the accepter's side `connection_id` is the accept's) |
 | `block.add` | `{connection_id \| pending_id, note?}` (exactly one of the ids) | `{block_id}` |
 | `block.remove` | `{block_id}` | `{}` |
 | `block.list` | `{}` | `{blocks: [{block_id, ik, name?, note?, created_at}]}` |
@@ -2332,6 +2434,20 @@ connection: { "id": "<id>", "kind": "connection", "state": "active", "name": "..
               "version": 2, "alias": "...", "note": "...", "tags": ["family"],
               "favorite": true, "archived": false }
 ```
+
+- **Requests** (0.10.2, §6.4). In `connection.request.list`, an incoming
+  request's `state` is `pending` (awaiting the owner) or `approved`
+  (`hs.resp` sent, awaiting `hs.fin`); an outgoing request's `state` is
+  `waiting` (no `hs.resp` yet) or `answered` (an `hs.resp` is stored until
+  the member approves), and `approved` is whether its member has
+  approved. `exp` is when the request is dropped (§6.4 "Request expiry
+  and retention"); `created_at` is when the vault received the `hs.init`
+  or sent it. Both lists are newest first; a vault holds at most 256
+  requests of each kind (more are refused: an `hs.init` is dropped and
+  audited, an accept is answered `limit`). `introduced_by` is the vault's
+  connection id of the introducer (§10.15). Approvals and declines reach
+  the other devices as `sync.event{kind: "connection.request"}`, and so
+  does an incoming request's expiry.
 
 The D→V types above are sent by `app` or `desktop` devices (§6.4 "Who
 approves"); for desktops, `connection.invite.create`,
@@ -3724,6 +3840,7 @@ B app            B vault                   A vault                      A app
 | `critical-secret.result` (V↔V) | — | `{request_id, status: "ok", signature, public_key}` or `{request_id, status: "denied" \| "expired" \| "unavailable" \| "unsuitable"}` |
 | `critical-secret-use.result` (V→D, apps and desktops) | — | `{connection_id, request_id, status, signature?, public_key?}` |
 | `critical-secret-use.list` (app, desktop) | `{}` | `{incoming: [{request_id, connection_id, item_id, field_id, name, label, operation, payload_sha256, context?, exp}], outgoing: [{request_id, connection_id, item_id, field_id, operation, state, status?}]}` |
+| `critical-secret-use.get` (app, desktop) | `{request_id}` (an incoming request) | the `critical-secret-use.pending` body: `{request_id, connection_id, item_id, field_id, name, label, operation, payload, payload_sha256, context?, exp}`; `not_found` for an unknown, answered or expired request |
 
 - **What can be asked.** Only a critical item that a share rule of that
   connection includes (it is then `usable` in the connection's catalog,
@@ -3731,9 +3848,17 @@ B app            B vault                   A vault                      A app
   answered `unavailable` at once, without asking the member, and audited
   (`critical-secret.use.requested` and `critical-secret.use.denied`);
   an item the rule does not include is not told apart from a missing
-  one. `payload` is 1–4,096 bytes (base64) and `context` at most 256
-  bytes; the app MUST show both, the item's name and field label, and
-  the connection's name, to the member. A vault keeps at most 8 pending
+  one. `payload` is 1–4,096 bytes (before its base64) and `context` at
+  most 256 bytes; the app MUST show both, the item's name and field
+  label, and the connection's name, to the member.
+- **Showing a request again** (0.10.2). `critical-secret-use.list` gives
+  only `payload_sha256`, which keeps the list small; an app that shows an
+  incoming request from the list (or from the feed) fetches it with
+  `critical-secret-use.get`. Before showing a payload, from `.pending` or
+  `.get`, the app MUST check that SHA-256(`payload`) equals
+  `payload_sha256`, and MUST NOT offer the approval otherwise; the
+  `payload_sha256` it seals in the approval is the one it computed from
+  the payload it showed. A vault keeps at most 8 pending
   requests per connection (more are answered `unavailable`) and answers
   `expired` after 24 h; a repeated `request_id` is ignored.
 - **Consent per use.** `critical-secret-use.approve` is one use of the
@@ -3952,7 +4077,10 @@ A vault             B vault (introducer)              C vault
    (`intro.link`), and C's vault accepts it as `connection.invite.accept`
    would. A's member then approves the request as any remote one, with
    the SAS (§6.4); `connection.request.pending` carries
-   `introduced_by` (A's connection id of B).
+   `introduced_by` (A's connection id of B). C's member approves C's
+   outgoing request with the same SAS (§6.4, 0.10.2);
+   `connection.request.outgoing` carries `introduced_by` (C's connection
+   id of B).
 4. If either declines, B cancels, or the introduction has not been
    linked within 7 days, B's vault sends `intro.closed` to each party it
    had offered it to (except one that declined, which has closed its own
@@ -6524,6 +6652,45 @@ Follow-ups:
     into the queue message and `410 release_unavailable` for a `removed`
     release are specified here and in MEMBER-API; the member-API code
     follows in VAULT-RELEASES W8.
+16. **Connection requests (0.10.2).** Follow-ups: vettid-vault (the SAS
+    in the accept response, the accepter's approval gating `hs.fin`,
+    `exists`, the `from.ik` check in the inviter's drop, the 8-day
+    outgoing expiry, `connection.request.list` and `.outgoing`, the
+    `connection.request` sync kind, `pending_id` in `added`,
+    `critical-secret-use.get`) and the apps; the site serves
+    `/connect` and `/.well-known/assetlinks.json` (and later
+    `apple-app-site-association`) on `vettid.org` and
+    `staging.vettid.org` (§6.4). These land in a staging release after
+    S1; nothing in production depends on the 0.10.1 shapes.
+    **OWNER DECISIONS of 0.10.2** (each written as recommended, to
+    confirm at review):
+    1. The accepter's member approves too, always, also when the inviter
+       auto-approves in person; the vault sends `hs.fin` only then.
+       Recommended: yes; the SAS protects only when both compare.
+    2. A decline is not sent to the peer; the peer's request ends by
+       expiry (8 days for the accepter). Recommended: yes, as other
+       refusals (§9.2); anyone could have accepted a remote link.
+    3. `exists` spends the link and offers no override; a member whose
+       connection is broken removes it and asks for a new invitation.
+       Recommended: yes; an override (`replace`, keeping the opened
+       bundle until `exp`) can come later if this proves common.
+    4. The invitation URL is `https://vettid.org/connect#<link>` with the
+       payload in the fragment, built by the apps; QR codes keep the
+       compact JSON. Recommended: yes.
+    5. `critical-secret-use.get` rather than payloads inline in
+       `critical-secret-use.list`. Recommended: yes; 8 pending requests
+       per connection of up to 4,096 bytes each would let the list
+       outgrow one message (§5.5).
+17. **SAS strength.** `sas` (§6.3) depends only on `hs.init`, which the
+    initiator alone chooses. A party that substitutes a remote invitation
+    link (a man in the middle between two members) receives the victim's
+    `hs.init`, learns its SAS, and can then try fresh `hs.init`s to the
+    real inviter until one yields the same six digits (about 10^6
+    handshake constructions, minutes of CPU), so the two codes the
+    members compare match. Comparing the SAS therefore does not reliably
+    detect a substituted remote link today. A fix needs a commitment
+    (the initiator commits to its contribution before the responder
+    reveals one, as in ZRTP), or a longer code; open, for the owner.
 
 ## 16. Test vectors
 
@@ -6640,10 +6807,42 @@ values in the files are authoritative.
   bucket object  : manifests/1076917dbc01969c1dedaaaa0ec81d711a7d4babc184a834aa8d3fe275c97c9d.json
 ```
 
+**0.10.2.** No vector changes: the invitation URL (§6.4) is the site's
+`/connect#` followed by `invite.json`'s `link`.
+
 Cross-implementation checks against Apple CryptoKit and BouncyCastle are
 pending (§15, follow-up 1).
 
 ## 17. Changelog
+
+- **0.10.2** (2026-10-04): connection requests, from the Android A4
+  build (vettid-android).
+  - §6.3, §6.4: both members see the SAS: the accepting vault returns it
+    in the `connection.invite.accept` response. Each side approves its
+    own request after comparing; the accepting vault holds `hs.fin` (and
+    stores an early `hs.resp`) until its member approves; in-person
+    auto-approval skips only the inviter's approval.
+  - §6.4: an accepting vault already connected to the inviter (or with
+    an outgoing request to it) answers `exists{connection_id}` before any
+    `hs.init`; the inviter's drop of an `hs.init` from a known peer
+    (sender or `from.ik`) is specified; outgoing requests expire after
+    8 days with `connection.event{failed}`; retention of incoming
+    requests after approval (16 days).
+  - §6.4: the invitation URL `https://vettid.org/connect#<link>`, the
+    `/connect` page's rules, App Links; QR codes unchanged; apps accept
+    both forms and pass the bare payload.
+  - §10, §10.1, §10.4: `connection.request.list`,
+    `connection.request.outgoing`, `connection.approve` / `.decline` with
+    `{connection_id}` for an outgoing request, `exp` and `introduced_by`
+    in `connection.request.pending`, `pending_id` in
+    `connection.event{added}`, the `connection.request` sync kind,
+    `exists` for `connection.invite.accept`.
+  - §10.13: `critical-secret-use.get` (an incoming request with its
+    payload); the app checks the payload against `payload_sha256`;
+    `payload`'s 4,096 bytes are before base64.
+  - §10.15: the introduced party approves its outgoing request with the
+    SAS.
+  - §15 items 16 (follow-ups and owner decisions) and 17 (SAS strength).
 
 - **0.10.0** (2026-10-04): the V5 release model (VAULT-RELEASES 0.1.0,
   owner decisions of 2026-10-04, R1–R4, O1–O10).
