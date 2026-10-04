@@ -11,6 +11,9 @@ import { Construct } from 'constructs';
 import { AppConfig, resourceName } from '../config';
 import { readRef } from '../constructs/ssm-refs';
 
+/** AWS Organizations organization (docs/AWS-ACCOUNTS.md). */
+const ORG_ID = 'o-kualrldevn';
+
 export interface VettidOrgAuditStackProps extends cdk.StackProps {
   readonly config: AppConfig;
 }
@@ -58,6 +61,11 @@ export class VettidOrgAuditStack extends cdk.Stack {
       includeGlobalServiceEvents: true,
       enableFileValidation: true,
       managementEvents: cloudtrail.ReadWriteType.ALL,
+      // Organization trail: also records every member account (vault prod,
+      // vault staging, proteus — docs/AWS-ACCOUNTS.md). Members can't stop or
+      // change it; the SCP baseline protects their side as well.
+      isOrganizationTrail: true,
+      orgId: ORG_ID,
     });
     // Who read or wrote membership terms (data events; cents per month).
     const termsBucket = s3.Bucket.fromBucketName(this, 'TermsBucket', readRef(this, config, 'data/terms-bucket-name'));
