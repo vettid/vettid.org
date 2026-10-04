@@ -37,7 +37,7 @@ turning that off in code (or the console) first.
 | `VettidOrgAuthStack` | Member + admin Cognito pools, clients, groups, admin hosted-UI domain, PIN pepper secret. Stateful. |
 | `VettidOrgDataStack` | Account/admin DynamoDB tables (`vettid-org-*`) + terms PDF bucket. Stateful. (The vault tables moved to VettidOrgVaultStack.) |
 | `VettidOrgAdminAccessStack` | Admin tailnet exit node (EC2 + EIP) and the CloudFront WAF allowlist keyed to its IP (admin site). |
-| `VettidOrgAdminApiStack` | Admin REST API at admin-api.vettid.org (docs/ADMIN-API.md): exit-node-IP resource policy + Cognito authorizer, 3 route-group Lambdas. |
+| `VettidOrgAdminApiStack` | Admin REST API at admin-api.vettid.org (docs/ADMIN-API.md): exit-node-IP resource policy + Cognito authorizer, 4 route-group Lambdas (people, content, system, vault-canary). |
 | `VettidOrgAdminSiteStack` | Admin SPA at admin.vettid.org (`sites/admin`), behind the exit-node web ACL. |
 | `VettidOrgRelayDataStack` | Relay state: DynamoDB table `vettid-org-relay` and the blob bucket `vettid-org-relay-blobs-<account>` (published via SSM `relay/*`). Stateful. |
 | `VettidOrgVaultStack` | **In the vault account** (prod: vettid-vault-prod 369484479783; staging: vettid-vault-staging 347272280361). Vault tables (`vettid-org-vault*`), data bucket `vettid-org-vault-data-<account>`, the fixed-name host and retirement roles, manifest key A and its signer role, the release-key custom resource and one key per release. Stateful; see "Vault". |
@@ -500,23 +500,41 @@ Key B is not pinned yet (`lib/config.ts`, TODO O3).
 ### Canary routing (W8)
 
 The canary row and the test member's flag (the member API routes a
-`canary` release only for flagged members; MEMBER-API "Canary releases"):
+`canary` release only for flagged members; MEMBER-API "Canary releases").
+
+**Flag the test member from the admin site** (admin exit node on):
+Members → find the member → **Vault canary** switch → confirm. Only
+members in state `member` can be flagged. Flagged members are listed under
+**Vault canary testers** on the same page, where the flag is also cleared.
+Both are audited (`member.vault_canary.set` / `.clear`; ADMIN-API "Vault
+canary").
+
+**The release row** has no admin-site control; add it in the vault account:
 
 ```bash
-# the release under test, in the vault account (no manifest_serial: the sync leaves it alone)
+# the release under test (no manifest_serial: the sync leaves it alone)
 aws dynamodb put-item --profile vault-prod --table-name vettid-org-vault-releases \
   --item '{"release":{"S":"<pcr0>"},"release_number":{"N":"<N>"},"status":{"S":"canary"},"available":{"BOOL":true}}' \
   --condition-expression 'attribute_not_exists(#r)' --expression-attribute-names '{"#r":"release"}'
-# the test member, in the main account
+```
+
+Fallback if the admin site or API is unavailable (main account; this
+bypasses the audit log, so note who and why in the canary report):
+
+```bash
 aws dynamodb update-item --profile admin --table-name vettid-org-members \
-  --key '{"user_guid":{"S":"<guid>"}}' --update-expression 'SET vault_canary = :t' --expression-attribute-values '{":t":{"BOOL":true}}'
+  --key '{"user_guid":{"S":"<guid>"}}' --condition-expression 'attribute_exists(user_guid)' \
+  --update-expression 'SET vault_canary = :t' --expression-attribute-values '{":t":{"BOOL":true}}'
+# clear: --update-expression 'REMOVE vault_canary' (no values)
 ```
 
 The scaler manages a `canary` row like any release (start on request, stop
 when idle). On publication the manifest sync turns the row into an
 `active` one; after a failed canary delete it (`aws dynamodb delete-item
-... --key '{"release":{"S":"<pcr0>"}}'`). Remove `vault_canary` from
-members who are done testing.
+... --key '{"release":{"S":"<pcr0>"}}'`). Clear `vault_canary` from
+members who are done testing, but only once their vault is off the canary
+release (published, or moved to an active one): a cleared member's vault
+sealed to an unpublished canary release is unreachable (410).
 
 Never edit a deployed entry's pins expecting the running hosts to change:
 the template change makes a new AMI and launch template version, but

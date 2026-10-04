@@ -27,7 +27,8 @@ export interface VettidOrgAdminApiStackProps extends cdk.StackProps {
  *  2. Cognito authorizer on the admin pool; handlers also require the
  *     `admin` group.
  *
- * Routes are served by three route-group Lambdas (people, content, system).
+ * Routes are served by four route-group Lambdas (people, content, system,
+ * vault-canary).
  */
 export class VettidOrgAdminApiStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: VettidOrgAdminApiStackProps) {
@@ -165,6 +166,14 @@ export class VettidOrgAdminApiStack extends cdk.Stack {
       entry: 'lambda/admin/system.ts',
       environment: env,
     }).fn;
+    // Its own Lambda so its member-row writes can be limited to the flag.
+    const vaultCanary = new RestRouteGroup(this, 'VaultCanary', {
+      api,
+      authorizer,
+      pathPrefixes: ['/admin/vault-canary'],
+      entry: 'lambda/admin/vault-canary.ts',
+      environment: env,
+    }).fn;
 
     // ---- least-privilege grants ---------------------------------------------
     const tableArn = (t: string) => `arn:${this.partition}:dynamodb:${this.region}:${this.account}:table/${tableName(t)}`;
@@ -177,12 +186,12 @@ export class VettidOrgAdminApiStack extends cdk.Stack {
       );
 
     // Every route re-checks that the calling admin is still enabled.
-    for (const fn of [people, content, system]) {
+    for (const fn of [people, content, system, vaultCanary]) {
       fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['cognito-idp:AdminGetUser'], resources: [readRef(this, config, 'auth/admin-pool-arn')] }));
     }
 
     // Audit is append-only for every writer; only `system` may read it.
-    for (const fn of [people, content, system]) grantTable(fn, 'audit', ['PutItem']);
+    for (const fn of [people, content, system, vaultCanary]) grantTable(fn, 'audit', ['PutItem']);
     grantTable(system, 'audit', ['Query'], true);
 
     grantTable(people, 'members', ['GetItem', 'Query', 'Scan', 'UpdateItem', 'DeleteItem'], true);
@@ -199,6 +208,22 @@ export class VettidOrgAdminApiStack extends cdk.Stack {
           'cognito-idp:AdminUserGlobalSignOut',
         ],
         resources: [readRef(this, config, 'auth/member-pool-arn')],
+      }),
+    );
+
+    // vault-canary (lambda/admin/vault-canary.ts): read members, list the
+    // flagged ones, and write the `vault_canary` flag and nothing else
+    // (fine-grained access control: the request may name only these
+    // attributes, and may not ask for whole items back).
+    grantTable(vaultCanary, 'members', ['GetItem', 'Scan']);
+    vaultCanary.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['dynamodb:UpdateItem'],
+        resources: [tableArn('members')],
+        conditions: {
+          'ForAllValues:StringEquals': { 'dynamodb:Attributes': ['user_guid', 'vault_canary', 'updated_at'] },
+          StringEqualsIfExists: { 'dynamodb:ReturnValues': ['NONE', 'UPDATED_OLD', 'UPDATED_NEW'] },
+        },
       }),
     );
 

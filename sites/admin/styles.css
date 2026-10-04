@@ -281,6 +281,7 @@ main:focus { outline: none; }
 .btn-danger-solid:hover:not(:disabled) { background: var(--error-hover); border-color: var(--error-hover); }
 
 .row-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.switch-state { font-weight: 650; text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; }
 
 /* ── Chips ────────────────────────────────────────── */
 .chip {

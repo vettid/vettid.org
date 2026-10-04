@@ -251,12 +251,12 @@ describe('VettidOrgAdminApiStack', () => {
   test('every non-OPTIONS method uses the Cognito authorizer', () => {
     const methods = Object.values<any>(t.findResources('AWS::ApiGateway::Method'));
     const real = methods.filter((m) => m.Properties.HttpMethod !== 'OPTIONS');
-    expect(real.length).toBeGreaterThanOrEqual(16); // 8 prefixes × (prefix + proxy)
+    expect(real.length).toBeGreaterThanOrEqual(18); // 9 prefixes × (prefix + proxy)
     for (const m of real) expect(m.Properties.AuthorizationType).toBe('COGNITO_USER_POOLS');
   });
 
-  test('three route-group Lambdas, Node 24 on ARM', () => {
-    t.resourceCountIs('AWS::Lambda::Function', 3);
+  test('four route-group Lambdas, Node 24 on ARM', () => {
+    t.resourceCountIs('AWS::Lambda::Function', 4);
     t.allResourcesProperties('AWS::Lambda::Function', { Runtime: 'nodejs24.x', Architectures: ['arm64'] });
   });
 
@@ -273,6 +273,27 @@ describe('VettidOrgAdminApiStack', () => {
       .filter((s: any) => JSON.stringify(s.Resource).includes('table/vettid-org-terms'));
     const actions = stmts.flatMap((s: any) => [].concat(s.Action));
     for (const a of ['Scan', 'GetItem', 'PutItem', 'Query', 'UpdateItem', 'DeleteItem']) expect(actions).toContain(`dynamodb:${a}`);
+  });
+
+  test('vault-canary Lambda may write only the vault_canary flag on a member row', () => {
+    const fns = t.findResources('AWS::Lambda::Function');
+    const roleId = Object.entries<any>(fns).find(([id]) => id.startsWith('VaultCanary'))![1].Properties.Role['Fn::GetAtt'][0];
+    const stmts = Object.values<any>(t.findResources('AWS::IAM::Policy'))
+      .filter((p) => p.Properties.Roles.some((r: any) => r.Ref === roleId))
+      .flatMap((p) => p.Properties.PolicyDocument.Statement);
+    const members = stmts.filter((s: any) => JSON.stringify(s.Resource).includes('table/vettid-org-members'));
+    const actions = members.flatMap((s: any) => [].concat(s.Action)).sort();
+    expect(actions).toEqual(['dynamodb:GetItem', 'dynamodb:Scan', 'dynamodb:UpdateItem']);
+    const update = members.find((s: any) => [].concat(s.Action).includes('dynamodb:UpdateItem' as never));
+    expect([].concat(update.Action)).toEqual(['dynamodb:UpdateItem']);
+    expect(update.Condition).toEqual({
+      'ForAllValues:StringEquals': { 'dynamodb:Attributes': ['user_guid', 'vault_canary', 'updated_at'] },
+      StringEqualsIfExists: { 'dynamodb:ReturnValues': ['NONE', 'UPDATED_OLD', 'UPDATED_NEW'] },
+    });
+    // nothing else on the members table, its indexes, or any other data table but audit (PutItem)
+    expect(JSON.stringify(members.map((s: any) => s.Resource))).not.toContain('/index/');
+    const writes = stmts.flatMap((s: any) => [].concat(s.Action)).filter((a: string) => a.startsWith('dynamodb:'));
+    expect(writes.sort()).toEqual(['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:Scan', 'dynamodb:UpdateItem']);
   });
 
   test('audit is append-only for writers (no Update/Delete on the audit table)', () => {
