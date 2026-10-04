@@ -863,7 +863,7 @@ Android closed beta; until then, staging carries the testing.
 | W0 | Spec: VAULT-MESSAGING 0.10.0 (§11.10.7 delta, M1 manifest by hash, `removed`, `ends_at`, §11.10.5, §13.5); RELEASE-UPDATES 0.2.0; VAULT-PLAN §5.1, §7; RUNBOOK placeholder | vettid.org | 1.5–2 d |
 | W1 | `keypolicy` delta and variants; retirement constants; `releasecfg` channels (`go:embed`, `CHANNEL`); M1 (parent supplies the manifest by hash; `MaxBytes` 64 KiB); statuses; vectors regenerated | vettid-vault | 3–4 d |
 | W2 | `release` workflow (AL2023 container, pinned nitro-cli and blobs, two builds, attestations, GitHub release); `vaultctl keycheck`, `vaultctl manifest`; compat-matrix job | vettid-vault | 3 d |
-| W3 | Accounts (vault production, staging), SCPs, permission sets; manifest keys A, B and staging | AWS | 1–2 d + owner |
+| W3 | Accounts (vault production, vault staging, and **proteus** for the prote.us website, see AWS-ACCOUNTS.md), SCPs, permission sets; manifest keys A, B and staging; move the Proteus website (AWS-ACCOUNTS §3) | AWS | 2–3 d + owner |
 | W4 | Member API dark launch (§9) | vettid.org | 0.5 d |
 | W5 | `VettidOrgVaultStack`: bucket, roles (fixed names, guardrails), key A, release-key custom resource, cross-account wiring if O1 | vettid.org | 3–5 d |
 | W6 | `VettidOrgVaultHostStack` and the release stack construct: VPC, DNS Firewall, Image Builder, launch template, ASG, lifecycle hook, scaler, manifest sync, alarms | vettid.org | 4–5 d |
