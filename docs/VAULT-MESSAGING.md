@@ -26,7 +26,8 @@ changelog:
     (§6.4); `connection.request.list`, `connection.request.outgoing` and
     the `connection.request` sync kind; `pending_id` in
     `connection.event{added}` (§10.1, §10.4); the link URL
-    `https://vettid.org/connect#<payload>` (`url`), the QR unchanged (§6.4);
+    `<relay>/connect#<payload>` on the invitation's own relay, the QR
+    unchanged (§6.4);
     `critical-secret-use.get` returns an incoming request with its payload
     (§10.13); §15 items 16–17
   - 0.10.1: the vault PIN is 6–32 ASCII digits (was 4–32), owner decision
@@ -1409,29 +1410,41 @@ The bundle is protected and published as follows:
   that has expired.
 
 **Invitation URL** (0.10.2). A connection invitation (`t` = `c`) is shared
-as a URL:
+as a URL on **the invitation's own relay** (`r` in the payload):
 
 ```
-https://vettid.org/connect#<link>
+<r>/connect#<link>          e.g. https://relay.vettid.org/connect#<link>
 ```
 
 - `<link>` is the base64url payload above and is the whole fragment: no
   query, no other path, nothing else in the fragment. Apps build the URL
-  from `link` (§10.4) with their channel's site (§11.10.8):
-  `https://vettid.org` in production, `https://staging.vettid.org` in
-  staging.
+  from `link` (§10.4) and the payload's `r`. The relay that carries the
+  connection also hosts its link, so a home appliance or a self-hosted
+  relay (owner decision, 2026-10-04) needs nothing from vettid.org.
 - The fragment never reaches a server, so the payload stays out of
   requests, access logs and referrers.
-- On a phone with the app, the URL opens it as a verified App Link
-  (Android; universal links on iOS later); the site serves the
-  association file for the app's signing key (§15 item 16). Elsewhere
-  `/connect` is a static page that says to open the link in the VettID
-  app. That page MUST NOT read the fragment, load third-party scripts or
-  send a referrer (`Referrer-Policy: no-referrer`).
-- Apps MUST accept the URL form of their own channel's site and the bare
-  payload, pasted or opened, and MAY find either inside surrounding text.
-  They pass the bare payload to `connection.invite.accept`, which accepts
-  only that.
+- **The relay serves `/connect`** (RELAY-PROTOCOL): a static page, the
+  same for every relay, that says to open the link in the VettID app.
+  It MUST NOT send the fragment anywhere: no network requests at all
+  (`Content-Security-Policy: default-src 'none'`, inline style and one
+  inline script allowed by hash), no third-party content,
+  `Referrer-Policy: no-referrer`. Its inline script MAY read the fragment
+  locally only to build an "Open in VettID" link `vettid://connect#<link>`
+  and a copy button.
+- **Opening the app.** Every relay serves
+  `/.well-known/assetlinks.json` for the VettID app's signing keys (and
+  later `apple-app-site-association`), built into the relay software. For
+  the relays VettID runs, the app declares the host, so the URL opens the
+  app directly as a verified App Link. A self-hosted relay's host cannot
+  be declared in advance, so there the page's "Open in VettID" link uses
+  the `vettid:` scheme. Another app could register that scheme too and
+  receive the payload; it learns nothing it could not get by holding the
+  link, and accepting with it is caught by the SAS comparison (§6.3).
+- Apps MUST accept the URL form on any relay, the `vettid://connect#`
+  form and the bare payload, pasted or opened, and MAY find any of them
+  inside surrounding text. The payload inside is authoritative: the host
+  of the URL is not trusted, and its `r` decides the relay. Apps pass the
+  bare payload to `connection.invite.accept`, which accepts only that.
 - **QR codes keep the compact JSON.** It needs a smaller QR version than
   the URL (no base64url growth, no prefix) and is read only by the VettID
   scanner. Scanners MUST also accept a QR holding the bare payload or
@@ -6657,10 +6670,10 @@ Follow-ups:
     `exists`, the `from.ik` check in the inviter's drop, the 8-day
     outgoing expiry, `connection.request.list` and `.outgoing`, the
     `connection.request` sync kind, `pending_id` in `added`,
-    `critical-secret-use.get`) and the apps; the site serves
-    `/connect` and `/.well-known/assetlinks.json` (and later
-    `apple-app-site-association`) on `vettid.org` and
-    `staging.vettid.org` (§6.4). These land in a staging release after
+    `critical-secret-use.get`) and the apps (the `vettid:` scheme, the
+    App Link host relay.vettid.org); vettid-relay serves `/connect` and
+    `/.well-known/assetlinks.json` (and later
+    `apple-app-site-association`), RELAY-PROTOCOL to describe them (§6.4). These land in a staging release after
     S1; nothing in production depends on the 0.10.1 shapes.
     **OWNER DECISIONS of 0.10.2** (each written as recommended, to
     confirm at review):
@@ -6674,9 +6687,11 @@ Follow-ups:
        connection is broken removes it and asks for a new invitation.
        Recommended: yes; an override (`replace`, keeping the opened
        bundle until `exp`) can come later if this proves common.
-    4. The invitation URL is `https://vettid.org/connect#<link>` with the
-       payload in the fragment, built by the apps; QR codes keep the
-       compact JSON. Recommended: yes.
+    4. The invitation URL is `<relay>/connect#<link>` on the
+       invitation's own relay, with the payload in the fragment, built by
+       the apps; QR codes keep the compact JSON. Owner decision
+       2026-10-04: the relay hosts it, so home appliances and
+       self-hosted relays work without vettid.org.
     5. `critical-secret-use.get` rather than payloads inline in
        `critical-secret-use.list`. Recommended: yes; 8 pending requests
        per connection of up to 4,096 bytes each would let the list
@@ -6807,8 +6822,8 @@ values in the files are authoritative.
   bucket object  : manifests/1076917dbc01969c1dedaaaa0ec81d711a7d4babc184a834aa8d3fe275c97c9d.json
 ```
 
-**0.10.2.** No vector changes: the invitation URL (§6.4) is the site's
-`/connect#` followed by `invite.json`'s `link`.
+**0.10.2.** No vector changes: the invitation URL (§6.4) is the
+payload's `r`, `/connect#`, then `invite.json`'s `link`.
 
 Cross-implementation checks against Apple CryptoKit and BouncyCastle are
 pending (§15, follow-up 1).
@@ -6828,9 +6843,10 @@ pending (§15, follow-up 1).
     (sender or `from.ik`) is specified; outgoing requests expire after
     8 days with `connection.event{failed}`; retention of incoming
     requests after approval (16 days).
-  - §6.4: the invitation URL `https://vettid.org/connect#<link>`, the
-    `/connect` page's rules, App Links; QR codes unchanged; apps accept
-    both forms and pass the bare payload.
+  - §6.4: the invitation URL `<relay>/connect#<link>` on the
+    invitation's own relay, the relay's `/connect` page rules, App Links
+    and the `vettid:` fallback; QR codes unchanged; apps accept every
+    form and pass the bare payload.
   - §10, §10.1, §10.4: `connection.request.list`,
     `connection.request.outgoing`, `connection.approve` / `.decline` with
     `{connection_id}` for an outgoing request, `exp` and `introduced_by`
