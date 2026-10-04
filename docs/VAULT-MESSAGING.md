@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.10.0
+version: 0.10.1
 date: 2026-10-04
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -17,6 +17,9 @@ related:
   - VAULT-RELEASES.md (0.1.0, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.10.1: the vault PIN is 6–32 ASCII digits (was 4–32), owner decision
+    of 2026-10-04; the enclave refuses shorter PINs everywhere it takes one
+    (§11.3, §6.7.1, §10.6)
   - 0.10.0: V5 release model (VAULT-RELEASES, owner decisions of
     2026-10-04): enroll and unlock requests carry the manifest's hash and
     serial instead of the document, which the host supplies from the vault
@@ -707,8 +710,8 @@ critical-item use (§10.13), `request_id` and `payload_sha256`, which bind
 the member's consent to one request and one payload. A wallet spend
 (§10.18) binds it with `item_id` (the wallet) and `payload_sha256` (the
 PSBT's hash), and `wallet.create` may carry an imported phrase as `item`.
-A transfer's approval (§6.7.1) carries the `pin` (4–32 ASCII digits, as
-at unlock) with the password.
+A transfer's approval (§6.7.1) carries the `pin` (6–32 ASCII digits,
+§11.3) with the password.
 
 **Using a UTK.** The vault looks the UTK up among those issued to the
 sending app and removes it from the pool before anything else is checked.
@@ -2497,7 +2500,7 @@ for `credential`, `utk_id` and `sealed`.
 | `credential.reset` | `{utk_id, sealed{password}}` | `{credential, version, key, utks}`: a new credential after a recovery with the backup off; the old credential and every critical item are destroyed (§11.11.5); `exists` if the vault keeps the latest blob (use `credential.recover`) |
 | `credential.alarm` (V→D, to the holder; durable) | — | `{alarm_id, kind: "clone", state: "frozen", at, presenter: "holder" \| "other", version}`: an urgent alert (§3.5.9) |
 | `credential.alarm.confirm` | `{alarm_id, mine: bool}` | `{state: "rotation_required"}`; `not_found` if no such alarm is open (§3.5.9) |
-| `pin.change` | `{pin, new_pin}` | `{}`; `bad_pin` if `pin` is wrong |
+| `pin.change` | `{pin, new_pin}` | `{}`; `bad_pin` if `pin` is wrong; `bad_request` if `new_pin` is not 6–32 digits (§11.3) |
 
 - `key` is the credential key's public key (base64). `version` is the
   credential's version (§3.5.2). In the `item.*` types, whose own
@@ -4522,6 +4525,14 @@ manifest's `serial`) are REQUIRED and name the manifest the app verified
 with these two fields, finds its own release's entry (which must be
 `active`) and verifies its own sealing key (§11.10.7) before sealing the
 first header. The request is padded to exactly 12,288 bytes (§5.4).
+
+**The vault PIN** is 6–32 ASCII digits (owner decision, 2026-10-04) in
+every message that sets or checks one: `vault.enroll`, `vault.unlock`, a
+transfer's approval (§6.7.1) and `pin.change` (`pin` and `new_pin`). The
+enclave refuses any other value as malformed before deriving anything from
+it. Apps also refuse weak PINs (repeats, runs such as 123456, short repeated
+patterns, common PINs); the vault does not judge strength. No vault exists
+with a shorter PIN, so none is migrated.
 
 ```
 App               Relay        Member API               SQS/Parent       Enclave
