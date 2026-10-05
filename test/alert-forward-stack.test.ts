@@ -1,16 +1,18 @@
 import * as cdk from 'aws-cdk-lib/core';
 import { Template } from 'aws-cdk-lib/assertions';
 import { buildApp } from '../lib/app';
-import { ALERT_FORWARDER_ROLE_NAME, ALERT_FORWARDER_RULE_NAME, ORG } from '../lib/config';
+import { ALERT_FORWARDER_ROLE_NAME, ALERT_FORWARDER_RULE_NAME, ALERT_HEARTBEAT_RULE_NAME, ORG } from '../lib/config';
 import { MANAGEMENT_BUS_ARN, VettidOrgAlertForwardStack } from '../lib/stacks/alert-forward-stack';
 import { matchesPattern } from './event-pattern';
 
 const app = new cdk.App();
 const t = Template.fromStack(new VettidOrgAlertForwardStack(app, 'Fwd', { env: { account: ORG.members.proteus, region: 'us-east-1' } }));
 const json = t.toJSON();
-const rules = Object.values<any>(t.findResources('AWS::Events::Rule'));
+const allRules = Object.values<any>(t.findResources('AWS::Events::Rule'));
+const rules = allRules.filter((r) => r.Properties.Name === ALERT_FORWARDER_RULE_NAME);
 
 test('one forwarding rule, to the management account\'s default bus, through the forwarder role', () => {
+  expect(allRules).toHaveLength(2);
   expect(rules).toHaveLength(1);
   const r = rules[0].Properties;
   expect(r.Name).toBe(ALERT_FORWARDER_RULE_NAME);
@@ -19,6 +21,14 @@ test('one forwarding rule, to the management account\'s default bus, through the
   expect(r.Targets[0].Arn).toBe(MANAGEMENT_BUS_ARN);
   const roleId = Object.keys(t.findResources('AWS::IAM::Role'))[0];
   expect(r.Targets[0].RoleArn).toEqual({ 'Fn::GetAtt': [roleId, 'Arn'] });
+});
+
+test('hourly heartbeat to the same bus through the same role', () => {
+  const hb = allRules.find((r) => r.Properties.Name === ALERT_HEARTBEAT_RULE_NAME).Properties;
+  expect(hb.ScheduleExpression).toBe('rate(1 hour)');
+  expect(hb.Targets).toHaveLength(1);
+  expect(hb.Targets[0].Arn).toBe(MANAGEMENT_BUS_ARN);
+  expect(hb.Targets[0].RoleArn).toEqual(rules[0].Properties.Targets[0].RoleArn);
 });
 
 test('forwarder role: fixed name, assumable only by EventBridge for this account, may only put events on that bus', () => {

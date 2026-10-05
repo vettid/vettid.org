@@ -825,6 +825,27 @@ How events get there:
   `vettid-org-member-security-events`, in VettidOrgAuditStack) admits
   `events:PutEvents` only from those three forwarder roles, only from
   inside organization o-kualrldevn.
+- **Heartbeat.** Each member account also sends an hourly scheduled event
+  (rule `vettid-org-security-alert-heartbeat`) through the same role and
+  bus policy. VettidOrgAuditStack counts them per account (rules
+  `Heartbeat<Account>`, into a throwaway queue) and the alarm
+  `vettid-org-security-alert-heartbeat-<account>` (vaultProd,
+  vaultStaging, proteus) emails the same topic when none arrived for 3
+  hours (and again when they resume). A heartbeat rather than the member
+  rule's `FailedInvocations`: that metric lives in the member account (a
+  notification from there needs its own topic per account) and it says
+  nothing when the rule is disabled or deleted; and not "no events for
+  24 h", since proteus has days without a single write call.
+- **Protected by an SCP.** `lib/org/scp-alert-forwarder.json` (policy
+  `vettid-alert-forwarder-protection`, on the Workloads OU
+  ou-kuf0-q8c9trwg, so every member account) denies changing, disabling or
+  deleting the forward and heartbeat rules, and changing, deleting or
+  passing the forwarder role, to everyone but CloudFormation's CDK
+  execution role (`cdk-*-cfn-exec-role-*`). Attempts are still logged and
+  alerted (`AuditTampering`, `IamRoleOrPolicyChanges`, with an error).
+  Applied by `scripts/org/apply-alert-forwarder-scp.sh` (dry run by
+  default; `--apply`), from the management account. Break-glass: detach
+  or edit it there.
 - **GuardDuty findings** of all accounts arrive in the management account
   directly: it is the GuardDuty administrator (members auto-enabled).
 - us-east-1 only: global events (IAM, STS, sign-in, Organizations,
@@ -852,6 +873,7 @@ pattern the SCPs exempt):
 | `S3PublicAccess` | bucket policy, ACL, ownership controls, bucket- or account-level public access block (outside a deploy) |
 | `SecurityGroupOpenToWorld` | ingress from `0.0.0.0/0` or `::/0` (outside a deploy) |
 | `GuardDutyFindings` | GuardDuty findings of severity ≥ 4 (medium) in any account |
+| alarm `vettid-org-security-alert-heartbeat-<account>` | no forwarding heartbeat from that member for 3 hours (OK email when it resumes) |
 
 KMS in the two vault accounts is covered by the vault's own rules
 (VettidOrgVaultHostStack: key lifecycle and policy, lockout-bypass key
@@ -863,7 +885,9 @@ reported there.
 
 ### Deploying
 
-Management first (the bus policy must exist before the forwarders send):
+Management first (the bus policy must exist before the forwarders send),
+then the forwarders within three hours (until a member's heartbeats
+arrive, its heartbeat alarm is in ALARM and emails once), then the SCP:
 
 ```bash
 npx cdk diff   VettidOrgAuditStack --exclusively
@@ -871,7 +895,13 @@ npx cdk deploy VettidOrgAuditStack --exclusively
 npx cdk deploy VettidOrgVaultAlertForwardStack --exclusively -c stage=staging --profile vault-staging
 npx cdk deploy VettidOrgVaultAlertForwardStack --exclusively --profile vault-prod
 npx cdk deploy VettidOrgProteusAlertForwardStack --exclusively --profile proteus
+# The SCP, from the management account (owner's admin session):
+scripts/org/apply-alert-forwarder-scp.sh            # dry run
+scripts/org/apply-alert-forwarder-scp.sh --apply
 ```
+
+Later changes to the forwarder stacks deploy as usual: CloudFormation
+runs as the CDK execution role, which the SCP exempts.
 
 A new member account: add it to `ORG.members` (lib/config.ts), add its
 forwarder stack in `lib/app.ts`, deploy VettidOrgAuditStack (bus policy),
@@ -908,6 +938,18 @@ permission policy or identity provider changed" emails (`CreateRole`,
 In the management account itself, the same test without `$P` (and the
 management account id in the trust document) exercises the rules
 directly.
+
+The SCP, once applied (expect `AccessDenied`, and an `AuditTampering`
+email showing `error: AccessDenied`; nothing changes):
+
+```bash
+aws events disable-rule --name vettid-org-security-alert-forward --profile vault-staging
+```
+
+Heartbeats: `aws cloudwatch describe-alarms --alarm-name-prefix
+vettid-org-security-alert-heartbeat --query
+'MetricAlarms[].[AlarmName,StateValue]' --output text` shows `OK` for
+each member once its forwarder is deployed.
 
 ## DNS
 

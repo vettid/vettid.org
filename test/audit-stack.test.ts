@@ -106,8 +106,8 @@ function signIn(account: string, who: Who, detail: Record<string, any> = {}) {
 const { vaultProd, vaultStaging, proteus } = ORG.members;
 const MGMT = ORG.management;
 
-test('fourteen alert rules, each to the emailed SNS topic, each naming the account', () => {
-  t.resourceCountIs('AWS::Events::Rule', RULES.length);
+test('fourteen alert rules (plus one heartbeat rule per member), each to the emailed SNS topic, each naming the account', () => {
+  t.resourceCountIs('AWS::Events::Rule', RULES.length + Object.keys(ORG.members).length);
   t.hasResourceProperties('AWS::SNS::Subscription', { Protocol: 'email', Endpoint: 'admin@vettid.org' });
   const topicId = Object.keys(t.findResources('AWS::SNS::Topic'))[0];
   for (const id of RULES) {
@@ -251,4 +251,50 @@ test('no Allow to a wildcard principal anywhere in the stack (the TLS-only Deny 
   expect(statements.length).toBeGreaterThan(0);
   const wild = (p: any) => p === '*' || [p?.AWS].flat().includes('*');
   expect(statements.filter((st) => st.Effect === 'Allow' && wild(st.Principal))).toEqual([]);
+});
+
+// ---- Forwarding heartbeat -----------------------------------------------------------------
+
+describe('heartbeat from each member account', () => {
+  const beats = rules.filter(([id]) => id.startsWith('Heartbeat') && !id.startsWith('HeartbeatSink'));
+  const alarms = Object.values<any>(t.findResources('AWS::CloudWatch::Alarm')).map((a) => a.Properties);
+  const topicId = Object.keys(t.findResources('AWS::SNS::Topic'))[0];
+  const scheduled = (account: string, rule = 'vettid-org-security-alert-heartbeat') => ({
+    'detail-type': 'Scheduled Event',
+    source: 'aws.events',
+    account,
+    resources: [`arn:aws:events:us-east-1:${account}:rule/${rule}`],
+    detail: {},
+  });
+
+  test('one rule per member, matching only that member\'s heartbeat', () => {
+    expect(beats).toHaveLength(3);
+    for (const acct of [vaultProd, vaultStaging, proteus]) {
+      expect(beats.filter(([, r]) => matchesPattern(r.Properties.EventPattern, scheduled(acct)))).toHaveLength(1);
+      expect(beats.filter(([, r]) => matchesPattern(r.Properties.EventPattern, scheduled(acct, 'some-other-rule')))).toHaveLength(0);
+    }
+    // Heartbeats never trigger an alert email themselves.
+    for (const acct of [vaultProd, proteus]) expect(matching(scheduled(acct))).toEqual([]);
+  });
+
+  test('an alarm per member: no heartbeat for 3 hours (missing data counts) → the security topic, alarm and recovery', () => {
+    expect(alarms).toHaveLength(3);
+    for (const a of alarms) {
+      expect(a).toMatchObject({
+        Namespace: 'AWS/Events',
+        MetricName: 'Invocations',
+        Statistic: 'Sum',
+        Period: 3600,
+        EvaluationPeriods: 3,
+        DatapointsToAlarm: 3,
+        Threshold: 1,
+        ComparisonOperator: 'LessThanThreshold',
+        TreatMissingData: 'breaching',
+        AlarmActions: [{ Ref: topicId }],
+        OKActions: [{ Ref: topicId }],
+      });
+      const ruleRef = a.Dimensions[0].Value.Ref;
+      expect(beats.map(([id]) => id)).toContain(ruleRef);
+    }
+  });
 });

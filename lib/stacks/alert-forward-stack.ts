@@ -3,7 +3,7 @@ import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
-import { ALERT_FORWARDER_ROLE_NAME, ALERT_FORWARDER_RULE_NAME, ORG } from '../config';
+import { ALERT_FORWARDER_ROLE_NAME, ALERT_FORWARDER_RULE_NAME, ALERT_HEARTBEAT_RULE_NAME, ORG } from '../config';
 
 /** The management account's default event bus, where VettidOrgAuditStack's alert rules run. */
 export const MANAGEMENT_BUS_ARN = `arn:aws:events:us-east-1:${ORG.management}:event-bus/default`;
@@ -25,6 +25,14 @@ export const MANAGEMENT_BUS_ARN = `arn:aws:events:us-east-1:${ORG.management}:ev
  * GuardDuty findings are not forwarded: the management account is the
  * GuardDuty administrator and already receives every member's findings.
  *
+ * A heartbeat rule sends a scheduled event every hour along the same path
+ * (role, bus policy, SCP); VettidOrgAuditStack alarms when an account's
+ * heartbeats stop, so a broken forwarding path does not go unnoticed.
+ *
+ * The rules and the role are protected by the Workloads OU SCP
+ * lib/org/scp-alert-forwarder.json: only CloudFormation's CDK execution
+ * role may change them.
+ *
  * Deploy after VettidOrgAuditStack (its bus policy admits this stack's role).
  */
 export class VettidOrgAlertForwardStack extends cdk.Stack {
@@ -40,6 +48,7 @@ export class VettidOrgAlertForwardStack extends cdk.Stack {
     });
     role.addToPolicy(new iam.PolicyStatement({ actions: ['events:PutEvents'], resources: [MANAGEMENT_BUS_ARN] }));
 
+    const managementBus = events.EventBus.fromEventBusArn(this, 'ManagementBus', MANAGEMENT_BUS_ARN);
     new events.Rule(this, 'Forward', {
       ruleName: ALERT_FORWARDER_RULE_NAME,
       description: 'Forward CloudTrail write events and console sign-ins to the management account (VettID security alerts)',
@@ -49,7 +58,14 @@ export class VettidOrgAlertForwardStack extends cdk.Stack {
         // is forwarded too: anything-but never matches a missing field.
         detail: { $or: [{ readOnly: [false] }, { readOnly: events.Match.doesNotExist() }] },
       },
-      targets: [new targets.EventBus(events.EventBus.fromEventBusArn(this, 'ManagementBus', MANAGEMENT_BUS_ARN), { role })],
+      targets: [new targets.EventBus(managementBus, { role })],
+    });
+
+    new events.Rule(this, 'Heartbeat', {
+      ruleName: ALERT_HEARTBEAT_RULE_NAME,
+      description: 'Hourly heartbeat to the management account (VettidOrgAuditStack alarms when it stops)',
+      schedule: events.Schedule.rate(cdk.Duration.hours(1)),
+      targets: [new targets.EventBus(managementBus, { role })],
     });
   }
 }

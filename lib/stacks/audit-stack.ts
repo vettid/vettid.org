@@ -1,14 +1,17 @@
 import * as cdk from 'aws-cdk-lib';
 import * as accessanalyzer from 'aws-cdk-lib/aws-accessanalyzer';
 import * as cloudtrail from 'aws-cdk-lib/aws-cloudtrail';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
+import * as cwActions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as guardduty from 'aws-cdk-lib/aws-guardduty';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as sns from 'aws-cdk-lib/aws-sns';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as subs from 'aws-cdk-lib/aws-sns-subscriptions';
 import { Construct } from 'constructs';
-import { ALERT_FORWARDER_ROLE_NAME, AppConfig, ORG, ORG_MEMBER_ACCOUNTS, resourceName } from '../config';
+import { ALERT_FORWARDER_ROLE_NAME, ALERT_HEARTBEAT_RULE_NAME, AppConfig, ORG, ORG_MEMBER_ACCOUNTS, resourceName } from '../config';
 import { readRef } from '../constructs/ssm-refs';
 
 /** AWS Organizations organization (docs/AWS-ACCOUNTS.md). */
@@ -368,6 +371,58 @@ export class VettidOrgAuditStack extends cdk.Stack {
         }),
       ],
     });
+
+    // ---- Forwarding heartbeat ------------------------------------------------
+    // Each member account's heartbeat rule puts a scheduled event on this bus
+    // every hour, through the forwarder role, bus policy and SCP. A rule here
+    // per member counts them (its Invocations metric; the target is a
+    // throwaway queue, since a rule needs a target to be invoked), and an
+    // alarm fires when none arrived for three hours: the member's alerts are
+    // not reaching us. Why not the member rule's FailedInvocations: that
+    // metric lives in the member account, so notifying from there would
+    // need a topic and subscription per account, and it misses a rule that
+    // was disabled or deleted. Not "no CloudTrail events for 24 h" either:
+    // quiet accounts (proteus) have days without a single write call.
+    const heartbeatSink = new sqs.Queue(this, 'HeartbeatSink', {
+      queueName: resourceName(config, 'security-alert-heartbeats'),
+      retentionPeriod: cdk.Duration.seconds(60),
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      enforceSSL: true,
+    });
+    const alarmAction = new cwActions.SnsAction(topic);
+    for (const [name, account] of Object.entries(ORG.members)) {
+      const id = name.charAt(0).toUpperCase() + name.slice(1);
+      const beat = new events.Rule(this, `Heartbeat${id}`, {
+        description: `Hourly forwarding heartbeat from ${name} (${account})`,
+        eventPattern: {
+          source: ['aws.events'],
+          detailType: ['Scheduled Event'],
+          account: [account],
+          resources: [`arn:aws:events:${this.region}:${account}:rule/${ALERT_HEARTBEAT_RULE_NAME}`],
+        },
+        targets: [new targets.SqsQueue(heartbeatSink)],
+      });
+      const alarm = new cloudwatch.Alarm(this, `HeartbeatMissing${id}`, {
+        alarmName: resourceName(config, `security-alert-heartbeat-${name}`),
+        alarmDescription:
+          `No security-alert heartbeat from ${name} (${account}) for 3 hours: its CloudTrail events are not reaching the ` +
+          'alert rules. Check its forwarder (RUNBOOK "Security alerts").',
+        metric: new cloudwatch.Metric({
+          namespace: 'AWS/Events',
+          metricName: 'Invocations',
+          dimensionsMap: { RuleName: beat.ruleName },
+          statistic: 'Sum',
+          period: cdk.Duration.hours(1),
+        }),
+        threshold: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+        evaluationPeriods: 3,
+        datapointsToAlarm: 3,
+        treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+      });
+      alarm.addAlarmAction(alarmAction);
+      alarm.addOkAction(alarmAction);
+    }
 
     new cdk.CfnOutput(this, 'AlertTopicArn', { value: topic.topicArn });
   }

@@ -233,6 +233,11 @@ export const ORG_MEMBER_ACCOUNTS: readonly string[] = Object.values(ORG.members)
 export const ALERT_FORWARDER_ROLE_NAME = 'vettid-org-security-alert-forwarder';
 /** The forwarding rule in each member account (fixed; the alert rules watch it). */
 export const ALERT_FORWARDER_RULE_NAME = 'vettid-org-security-alert-forward';
+/**
+ * The hourly heartbeat each member account sends to the management bus
+ * through the same role; VettidOrgAuditStack alarms when one stops arriving.
+ */
+export const ALERT_HEARTBEAT_RULE_NAME = 'vettid-org-security-alert-heartbeat';
 
 export function vaultRoleArn(vault: VaultConfig, role: keyof typeof VAULT_ROLE_NAMES): string {
   return `arn:aws:iam::${vault.account}:role/${VAULT_ROLE_NAMES[role]}`;
