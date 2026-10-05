@@ -495,6 +495,61 @@ describe('VettidOrgAccountSiteStack', () => {
     expect(code).toContain('/.well-known/assetlinks.json');
   });
 
+  describe('edge function with the real site tree', () => {
+    const code = Object.values<any>(t.findResources('AWS::CloudFront::Function'))[0].Properties.FunctionCode as string;
+    // eslint-disable-next-line no-new-func
+    const handler = new Function(`${code}; return handler;`)() as (e: unknown) => any;
+    const req = (uri: string, cookies: Record<string, unknown> = {}) => handler({ request: { uri, headers: {}, querystring: {}, cookies } });
+    const signedIn = { vid_s: { value: '1' } };
+
+    test('stays within the CloudFront Functions size limit', () => {
+      expect(code.length).toBeLessThan(10 * 1024);
+    });
+
+    test('the vault recovery page is behind the /account/ gate', () => {
+      expect(req('/account/vault/recovery/').statusCode).toBe(302);
+      expect(req('/account/vault/recovery/', signedIn).uri).toBe('/account/vault/recovery/index.html');
+    });
+
+    test.each(['/vault/recovery/cancel', '/vault/recovery/cancel/'])('the emailed cancel link %s needs no session', (uri) => {
+      const r = req(uri);
+      expect(r.statusCode).toBeUndefined();
+      expect(r.uri).toBe('/vault/recovery/cancel/index.html');
+    });
+
+    test.each(['/js/vault.js', '/js/recovery.js', '/js/recovery-code.js', '/js/qr.js', '/js/vendor/qrcode-generator.js', '/js/vendor/qrcode-generator.LICENSE.txt', '/config.json'])('%s is a known file', (uri) => {
+      expect(req(uri).statusCode).toBeUndefined();
+    });
+
+    test('unknown vault paths get the branded 404', () => {
+      expect(req('/vault/').statusCode).toBe(404);
+      expect(req('/account/vault/nope/', signedIn).statusCode).toBe(404);
+    });
+  });
+
+  test('config.json: stage, public site, no Android link until one is configured', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { accountSiteConfig } = require('../lib/stacks/account-site-stack');
+    expect(accountSiteConfig(config)).toEqual({ stage: 'prod', release_log_url: 'https://vettid.org/security/releases/', android_app_url: null });
+    expect(accountSiteConfig(loadConfig(new cdk.App({ context: { stage: 'staging', stagingAndroidAppUrl: 'https://example.org/a' } }).node)))
+      .toEqual({ stage: 'staging', release_log_url: 'https://vettid.org/security/releases/', android_app_url: 'https://example.org/a' });
+    // Deployed in the revalidating pass: the site, config.json and assetlinks.json.
+    const deps = Object.values<any>(t.findResources('Custom::CDKBucketDeployment')).map((r) => r.Properties);
+    const html = deps.find((d) => JSON.stringify(d.Include ?? []).includes('*.json'));
+    expect(html.SourceObjectKeys).toHaveLength(3);
+  });
+
+  test('the Android app link comes from context (https only)', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { loadConfig: load } = require('../lib/config');
+    expect(load(new cdk.App({ context: { androidAppUrl: 'https://play.google.com/store/apps/details?id=com.vettid.app' } }).node).androidAppUrl)
+      .toBe('https://play.google.com/store/apps/details?id=com.vettid.app');
+    expect(load(new cdk.App({ context: { stage: 'staging', stagingAndroidAppUrl: 'https://example.org/staging.apk' } }).node).androidAppUrl)
+      .toBe('https://example.org/staging.apk');
+    expect(load(new cdk.App().node).androidAppUrl).toBeUndefined();
+    expect(() => load(new cdk.App({ context: { androidAppUrl: 'http://example.org' } }).node)).toThrow(/https URL/);
+  });
+
   test('CSP: same-origin only', () => {
     const csp = JSON.stringify(t.findResources('AWS::CloudFront::ResponseHeadersPolicy'));
     expect(csp).toContain("connect-src 'self';");
