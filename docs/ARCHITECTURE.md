@@ -290,6 +290,7 @@ All in `docs/` of this repository unless noted.
 | PUSH-GATEWAY.md | Contentless wake-up pushes: FCM/APNs and UnifiedPush, plus a no-push polling path |
 | CALLING-SERVICE.md | Optional TURN media plane and end-to-end encrypted 1:1 calls |
 | PQC-MIGRATION.md | Post-quantum migration plan, phases 1 and 2 |
+| LEASH-IMPLEMENTATION.md | How the vault implements the LEASH paper: status, mapping, wire-format differences |
 | ACCOUNT-ADMIN-PLAN.md | Account and admin sites: lifecycle, registration codes, voting rights, private admin access |
 | MEMBER-API.md | Member API routes, including the vault alternate channel and recovery |
 | ADMIN-API.md | Admin API routes |
