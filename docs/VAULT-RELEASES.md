@@ -1,8 +1,8 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.4
-date: 2026-10-04
+version: 0.1.5
+date: 2026-10-05
 owner: Al Liebl (Mesmer)
 changelog:
   - 0.1.0: V5 plan. Release pipeline, keys, infrastructure, release
@@ -36,9 +36,14 @@ changelog:
     member pool, tables, member API, account site, the staging.vettid.org
     manifest host, the vault stacks; no admin, signup, relay or audit
     stacks (§8.1, §11.1)
+  - 0.1.5 (editorial, W10 readiness review I1–I11, I18): key B pinned;
+    script, tag and release-list names as built; `admitted_pcr0s` lists
+    earlier releases only; the admin-site canary switch; enclave memory
+    5 GiB throughout; staging served since S1; the "Today" paragraph
+    marked as the state when the plan was written
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
-  - VAULT-MESSAGING.md (0.9.1) §11.10 release updates, §12.5 deletion, §13.5
+  - VAULT-MESSAGING.md (0.10.7) §11.10 release updates, §12.5 deletion, §13.5
   - RELEASE-UPDATES.md (0.1.0) — member-facing; §3 changes with this plan
   - MEMBER-API.md "Vault", RUNBOOK.md, ARCHITECTURE.md
   - vettid-vault docs/SMOKE.md (hardware smoke test, 2026-10-02)
@@ -54,15 +59,18 @@ the first production deployment. It replaces the V5 bullets in VAULT-PLAN
 (§13) and land in VAULT-MESSAGING, RELEASE-UPDATES and the vettid-vault
 code first.
 
-Today: the vettid-vault code is feature complete through V4 and passed
-the hardware smoke test (m7g.large, 1 enclave vCPU / 3 GiB, nitro-cli
-1.5.0; seccomp, per-vault UIDs and attested KMS round trips work; Argon2id
-at 64 MiB peaks at about 76 MB per vault process, the supervisor uses
-about 13 MB). In vettid.org the member API vault routes, the vault tables
-and the alarm and deletion mailers are merged but **not deployed**. No
-vault infrastructure, release key or manifest exists. Release constants
-in `enclave/config.go` are empty, so a release image built today refuses
-every enrollment and unlock.
+When this plan was written (2026-10-04): the vettid-vault code was
+feature complete through V4 and had passed the hardware smoke test
+(m7g.large, 1 enclave vCPU / 3 GiB, nitro-cli 1.5.0; seccomp, per-vault
+UIDs and attested KMS round trips work; Argon2id at 64 MiB peaks at
+about 76 MB per vault process, the supervisor uses about 13 MB). In
+vettid.org the member API vault routes, the vault tables and the alarm
+and deletion mailers were merged but not deployed; no vault
+infrastructure, release key or manifest existed, and the release
+constants were empty, so a release image refused every enrollment and
+unlock. That state is superseded: W4–W9 are built and deployed (the
+*As built* notes in each section), staging has published releases, and
+production release 1 is tracked in W10-READINESS.
 
 ## 1. Summary
 
@@ -198,7 +206,7 @@ announced next roots, and keep the window to a year.
 ### 3.5 Retirement, notices and key deletion
 
 For release N superseded by N+1 at T0, with window W (default 12
-months, set per release in `releases.json`, §7):
+months, set per release in the release list, §7):
 
 | When | Manifest | Instances and key | Member notices |
 |---|---|---|---|
@@ -413,7 +421,7 @@ whose value is recorded in `measurements.json`):
 
 GrapheneOS verified-boot keys and vendor roots stay in `vms/pins` (code).
 Everything that defines a release is in the tagged tree, so
-`git checkout vault-rN && make eif CHANNEL=prod` reproduces it; no
+`git checkout release/prod/N && make eif CHANNEL=prod` reproduces it; no
 `-ldflags -X` and no build-time secrets. A missing or zero value still
 fails closed.
 
@@ -454,23 +462,23 @@ fails closed.
   release pinning B and a new A′, and retire releases pinning only A over
   the normal window.
 - Signing is a step in the owner's release checklist
-  (`scripts/vault/sign-manifest.ts`, which renders the manifest from
-  `releases.json`, increments `serial`, signs with KMS and writes the
-  served document). A gated workflow with required reviewers can replace
-  it once there is a second person to review.
+  (`scripts/vault/manifest.ts`, `npm run vault:manifest`, which renders
+  the manifest from the release list, increments `serial`, signs with KMS
+  and writes the served document). A gated workflow with required
+  reviewers can replace it once there is a second person to review.
 - Staging uses its own deletable KMS key.
 - *As built (W7).* `lib/config.ts` `manifestKeys` pins key A in production
   (`alias/vettid-org-vault-manifest`, key_id `4353463f85c4012f`) and the
   staging key (`alias/vettid-org-staging-vault-manifest`, key_id
-  `e9b3a403423120ac`), from `aws kms get-public-key`. **Key B is a TODO**
-  until the owner's hardware token exists. A served document carries one
+  `e9b3a403423120ac`), from `aws kms get-public-key`. Key B (key_id
+  `1abd49da96970b6e`, P-256 generated on the owner's YubiKey, PIV slot
+  9c, 2026-10-04) is pinned too (#100), as it is in vettid-vault's
+  `releasecfg/prod.json` and in the app. A served document carries one
   signature and `key_id` selects the pinned key that verifies it
   (VAULT-MESSAGING §11.10.1), so manifests signed with key A alone are
-  complete, not weakened; but key B must be pinned in release 1's
-  `releasecfg/prod.json` and in the app before production release 1,
-  because a key an image does not pin can only be introduced by a new
-  release (the prod channel file's B placeholder also keeps the release
-  gate closed until then). Signing is `scripts/vault/manifest.ts sign`,
+  complete, not weakened; key B had to be pinned before production
+  release 1 because a key an image does not pin can only be introduced by
+  a new release. Signing is `scripts/vault/manifest.ts sign`,
   which drives vettid-vault's `vaultctl manifest render/check/sign` (not a
   second signer implementation) as the signer role and re-checks the
   result with this repository's renderer and verifier.
@@ -482,7 +490,7 @@ resource (`aws-kms.Key` always adds an administrator statement):
 
 - `CreateKey` with `KeySpec SYMMETRIC_DEFAULT`, `KeyUsage
   ENCRYPT_DECRYPT`, `Origin AWS_KMS`, `MultiRegion false`, the policy
-  rendered from `releases.json`, `BypassPolicyLockoutSafetyCheck: true`,
+  rendered from the release list, `BypassPolicyLockoutSafetyCheck: true`,
   and tags `vettid:release`, `vettid:channel` given at creation. No alias
   (`CreateAlias` would need a key-policy permission). The ARN goes to SSM
   `/vettid-org/<stage>/vault/releases/<n>/seal-key-arn`.
@@ -511,7 +519,7 @@ resource (`aws-kms.Key` always adds an administrator statement):
   with `vettid:release` and `vettid:channel`.
 - **Verification, three layers:**
   1. CDK assertion tests compare the rendered policy with the spec
-     example's shape for every release in `releases.json`.
+     example's shape for every release in the release list.
   2. `vaultctl keycheck` (new, W2) runs the enclave's own `keypolicy`
      package against the live key's `DescribeKey`, `GetKeyPolicy` and
      `ListGrants`, fetched as the retirement role (a reader in the
@@ -548,7 +556,8 @@ role (trust, `PassRole`) to CloudFormation's deploy role.
 
 ## 7. Manifest and release log
 
-- **Source of truth:** `vault/releases.json` in this repo: per release its
+- **Source of truth:** the release list in this repo (as built:
+  `vault/releases/<channel>.json`, below): per release its
   number, tag, commit, PCR0–2, binary hash, nitro-cli version, admitted
   PCR0s, seal-key ARN (after creation), status, `published_at`, `ends_at`,
   window, instance settings and notes URL. CDK (keys and release stacks)
@@ -562,14 +571,14 @@ role (trust, `PassRole`) to CloudFormation's deploy role.
   (M1).
 - **CI check** (`npm run check:manifest`): the signature verifies under a
   pinned key; `serial` is greater than the previous commit's; the bytes
-  equal a fresh render of `releases.json`; the size limit; every PCR0
+  equal a fresh render of the release list; the size limit; every PCR0
   admitted by a live key is listed; every listed release has a release-log
   entry.
 - **`serial`:** increases by one per publication; it is never reused, even
   for a canary manifest that is never published (§10.1).
 - **Release log:** `/security/releases/` on vettid.org, one page per
   release with the RELEASE-UPDATES §5 fields, generated from
-  `releases.json` so it cannot disagree with the manifest. It stays
+  the release list so it cannot disagree with the manifest. It stays
   after a release is removed.
 - **Registry sync:** a `vault-manifest-sync` Lambda (every 5 minutes and
   after each site deploy) fetches the manifest, verifies it against the
@@ -587,7 +596,7 @@ role (trust, `PassRole`) to CloudFormation's deploy role.
   releases the manifest dropped, and alarms when the bucket copy
   `manifests/<sha256>.json` is missing. The copy itself stays the
   signer's publish step (only the signer role may write `manifests/*`;
-  W7's `sign-manifest.ts`).
+  W7's `scripts/vault/manifest.ts`).
 
 *As built (W7).*
 
@@ -604,9 +613,10 @@ role (trust, `PassRole`) to CloudFormation's deploy role.
   field: `ends_at` is set explicitly per §10.3.
 - **Served files:** production `website/.well-known/vettid/pcr-manifest.json`;
   staging `vault/staging/pcr-manifest.json`, served byte for byte at
-  staging.vettid.org by `VettidOrgStageSiteStack` (W9). **Nothing is served in either
-  channel today**: an empty manifest is not valid (it lists at least one
-  release), and nothing may be served before the first release is
+  staging.vettid.org by `VettidOrgStageSiteStack` (W9). Staging has
+  served a manifest since S1 was published (W9); production serves
+  nothing until release 1: an empty manifest is not valid (it lists at
+  least one release), and nothing may be served before the first release is
   published. The URL answers 404 until then; the manifest sync treats 404
   (or a missing host) as "nothing published yet" while it has never synced
   a manifest, and as an error after. The site serves the JSON with the
@@ -714,7 +724,7 @@ NS record (`VettidOrgStagingDelegationStack`, management account, context
 |---|---|---|---|
 | `VettidOrgVaultStack` | stateful, RETAIN, termination protection | data bucket; host role; retirement role; manifest-signer role and key A; release-key custom resource and one key per release; vault tables (if O1); SSM refs `vault/*` | 40 + 2 per release |
 | `VettidOrgVaultHostStack` | stateless | VPC (2 AZs, public subnets, no NAT, S3 + DynamoDB gateway endpoints); host security group; DNS Firewall; DLQ; log groups; scaler and manifest-sync Lambdas; Image Builder infrastructure configuration; smoke test key; alarms | ~70 |
-| `VettidOrgVaultRelease<N>Stack` | stateless, one per live release | Image Builder component, recipe and image (the AMI); launch template; ASG (min/max from `releases.json`); termination lifecycle hook; per-release alarms | ~12 |
+| `VettidOrgVaultRelease<N>Stack` | stateless, one per live release | Image Builder component, recipe and image (the AMI); launch template; ASG (min/max from the release list); termination lifecycle hook; per-release alarms | ~12 |
 
 Recommended over one stack with all release groups: a deploy for release
 N+1 cannot touch release N's instances (D1: no fleet instance refresh,
@@ -726,7 +736,9 @@ stack's refs through SSM (RUNBOOK conventions).
 *As built (W6).* `lib/stacks/vault-host-stack.ts` and
 `lib/stacks/vault-release-stack.ts`; the app builds the host stack in each
 vault account and one release stack per entry of `lib/vault/releases.ts`
-(empty; W7's `releases.json` replaces it). Release stacks read
+(empty; since W7 the entries with a `host` in
+`vault/releases/<channel>.json`, and `lib/vault/releases.ts` keeps only
+the spec's shape and checks). Release stacks read
 `vault/host-security-group-id`, `host-subnet-ids`, `image-builder-infra-arn`
 and `alerts-topic-arn`, and publish `vault/releases/<N>/group-name`. The
 host stack also publishes `dlq-arn`, `relay-host`, `host-log-group` and
@@ -759,7 +771,7 @@ editing the bucket policy first.
   by the release stack (`CfnImage`; the AMI id feeds the launch template
   directly). The component installs, from pinned sources with checksums:
   AL2023 arm64 (AMI pinned in `cdk.context.json`), nitro-cli and the
-  allocator (enclave: 1 vCPU, memory O6), the release's `vault-parent`
+  allocator (enclave: 1 vCPU, 5 GiB, O6), the release's `vault-parent`
   and EIF from the GitHub release, **verified against
   `measurements.json`** (the build fails on a mismatch), systemd units, the
   CloudWatch agent. Recommended over a script: no hard-coded VPC or
@@ -781,7 +793,7 @@ editing the bucket policy first.
   `deploy/host/SHA256SUMS` at that commit, the nitro-cli package version
   and the base AMI. It checks `nitro-cli describe-eif`'s PCR0 too, then
   runs the commit's `deploy/host/install.sh` (units, allocator 1 vCPU /
-  5 GiB, `vault-host-config`, `vault-lifecycle`, CloudWatch agent
+  5 GiB = 5120 MiB, `vault-host-config`, `vault-lifecycle`, CloudWatch agent
   template): the host files travel with the release tag (C4). Image
   Builder names carry a content hash (its versions are immutable), so new
   inputs are new resources. **The build runs in a separate build VPC**,
@@ -959,7 +971,7 @@ release_starting`. The `vault-scaler` Lambda (host stack):
 
 From the smoke test: Argon2id peaks at about 76 MB per vault process, the
 supervisor about 13 MB. On an m7g.large (2 vCPUs, 8 GiB) the enclave gets
-1 vCPU (the parent keeps one) and up to about 6 GiB, so about 60–70
+1 vCPU and 5 GiB (5120 MiB, O6; the parent keeps the rest), so about 60–70
 concurrently unlocked vaults if processes stay near their peak; steady
 state RSS after the KDF is to be measured (W9). One vCPU serializes
 Argon2id (a few hundred milliseconds each), which bounds unlock bursts.
@@ -1019,12 +1031,12 @@ job's vault deletion. Order (W4):
 
 | # | Step | Who / where | Output |
 |---|---|---|---|
-| 1 | Freeze; open `release/rN` from `main`; the release commit sets `releasecfg/prod.json` `release: N` (and any pin changes); review; signed tag `vault-rN` | vettid-vault | tag |
+| 1 | Freeze; the release commit sets `releasecfg/prod.json` `release: N` (and any pin changes); review; merge to `main`; signed tag `release/prod/N` on that commit (vettid-vault docs/RELEASING.md) | vettid-vault | tag |
 | 2 | `release` workflow: EIF ×2 per channel, measurements, parent binaries, attestations; draft GitHub release | CI, arm64 | artifacts, PCRs |
 | 3 | Independent rebuild; PCR0 must match | owner | sign-off |
-| 4 | Staging: add staging release to staging `releases.json`, deploy its key and release stack, hardware self-test, vaultctl end-to-end, compat run incl. a move from the previous staging release (§11) | staging | report |
-| 5 | Production PR: add N to `vault/releases.json` (status `candidate`: in CDK, not in the manifest), admitted PCR0s = N plus every release not `removed` | vettid.org | PR |
-| 6 | Deploy `VettidOrgVaultStack` (creates the key); `vaultctl keycheck` against the draft manifest | owner | key ARN in `releases.json` |
+| 4 | Staging: add the staging release to `vault/releases/staging.json`, deploy its key and release stack, hardware self-test, vaultctl end-to-end, compat run incl. a move from the previous staging release (§11) | staging | report |
+| 5 | Production PR: add N to `vault/releases/prod.json` (status `candidate`: in CDK, not in the manifest), `admitted_pcr0s` = every earlier release not `removed` (N's own PCR0 is admitted implicitly; `lib/vault/release-list.ts`) | vettid.org | PR |
+| 6 | Deploy `VettidOrgVaultStack` (creates the key); `vaultctl keycheck` against the draft manifest | owner | key ARN in `vault/releases/prod.json` |
 | 7 | Deploy `VettidOrgVaultRelease<N>Stack` (AMI with EIF verified against measurements; group min 0, canary 1) | owner | instance |
 | 8 | Hardware self-test on the canary host (`vault-parent -selftest` against the host stack's deletable smoke key), then normal start | SSM | PASS report |
 | 9 | Canary: sign manifest `serial` s+1 with N `active` but **do not publish**; the registry row is `canary`, routed only for flagged test members (W8 adds this to the member API); canary member enrolls into N, unlocks, locks; the oldest live release's canary vault moves into N (§11.3); soak 24 h | owner, test device | canary report |
@@ -1040,21 +1052,24 @@ whose row has `vault_canary: true`: their enrollment goes to the newest
 canary release (also before production release 1, when nothing is
 `active`), their vaults sealed to it are routed there; for everyone else
 it is unknown (410). The scaler manages a `canary` row like any release.
-The test device loads the canary manifest out of band (it is not served).
+The test device needs the canary manifest out of band (it is not
+served); the app has no such path yet (W10-READINESS P31, B5).
 Step 10: `manifest.ts publish` with the same signed document, so the
 canary vault's recorded serial is the published one; the manifest sync
 turns the row into an `active` one. A test member's flag is an operator
-write on the members table; there is no member-facing or admin-UI switch.
+write on the members table, set from the admin site (#95; RUNBOOK
+"Canary routing", ADMIN-API "Vault canary"); there is no member-facing
+switch.
 
 If the canary fails before step 10: the manifest s+1 is never published
 (the next one is s+2); N's group is deleted; N becomes `removed` in
-`releases.json` (it admits nothing, and no later key admits it) and its
+the release list (it admits nothing, and no later key admits it) and its
 key is scheduled for deletion at once (no member was ever on it). The
 fix ships as N+1.
 
 ### 10.2 Hotfix
 
-Same steps, cut from `vault-r<current>` plus the fix, with the canary
+Same steps, cut from `release/prod/<current>` plus the fix, with the canary
 soak shortened to 2 hours and step 4 limited to the self-test, end-to-end
 and one move. Release notes carry `security: urgent` and the affected
 releases; members sealed to them are emailed (W8 job). The window for an
@@ -1062,7 +1077,7 @@ exploited vulnerability may be shortened (O5).
 
 ### 10.3 Retirement, per release
 
-A monthly checklist driven by `releases.json` (`ends_at` per release),
+A monthly checklist driven by the release list (`ends_at` per release),
 with the notice job sending the emails of §3.5 automatically:
 
 1. At T0 + W − 90 days: set `retired` and `ends_at` = D; publish.
@@ -1206,7 +1221,7 @@ Android closed beta; until then, staging carries the testing.
 | W4 | Member API dark launch (§9) | vettid.org | 0.5 d |
 | W5 | `VettidOrgVaultStack`: bucket, roles (fixed names, guardrails), key A, release-key custom resource, cross-account wiring if O1 | vettid.org | 3–5 d |
 | W6 | `VettidOrgVaultHostStack` and the release stack construct: VPC, DNS Firewall, Image Builder, launch template, ASG, lifecycle hook, scaler, manifest sync, alarms; vettid-vault: the parent sets the control-queue policy, `deploy/host` | vettid.org, vettid-vault | 4–5 d |
-| W7 | `releases.json`, `sign-manifest.ts`, `check:manifest`, `.well-known` path, release log pages | vettid.org | 2 d |
+| W7 | `vault/releases/<channel>.json`, `scripts/vault/manifest.ts`, `check:manifest`, `.well-known` path, release log pages | vettid.org | 2 d |
 | W8 | Member API: canary routing for flagged members; notice job (retirement and hotfix emails); `removed` → 410 | vettid.org | 2 d |
 | W9 | Staging stand-up, release S1/S2, hardware tests, capacity measurement, retirement drill (7 days wall time) | both | 3 d |
 | W10 | Production release 1 with the canary (blocked on the signed Android build), RUNBOOK "Vault" section | both | 2 d |
