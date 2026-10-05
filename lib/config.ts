@@ -205,6 +205,40 @@ export const VAULT_ROLE_NAMES = {
 /** The release-key custom resource's function (fixed: the SCP names it). */
 export const VAULT_RELEASE_KEY_FUNCTION_NAME = 'vettid-org-vault-release-key-creator';
 
+/**
+ * The AWS organization (docs/AWS-ACCOUNTS.md). Security alerts are matched
+ * and emailed in one place, the management account's VettidOrgAuditStack;
+ * every member account forwards its CloudTrail events to the management
+ * account's default event bus (VettidOrg*AlertForwardStack; RUNBOOK
+ * "Security alerts").
+ */
+export const ORG = {
+  id: 'o-kualrldevn',
+  management: '449757308783', // VettID
+  members: {
+    vaultProd: '369484479783', // vettid-vault-prod
+    vaultStaging: '347272280361', // vettid-vault-staging
+    proteus: '605628228301', // proteus
+  },
+} as const;
+
+/** Member account ids, in a fixed order. */
+export const ORG_MEMBER_ACCOUNTS: readonly string[] = Object.values(ORG.members);
+
+/**
+ * The role each member account's forwarding rule uses to put events on the
+ * management account's bus. Fixed (no stage suffix; one per account): the
+ * management bus policy admits exactly this role in each member account.
+ */
+export const ALERT_FORWARDER_ROLE_NAME = 'vettid-org-security-alert-forwarder';
+/** The forwarding rule in each member account (fixed; the alert rules watch it). */
+export const ALERT_FORWARDER_RULE_NAME = 'vettid-org-security-alert-forward';
+/**
+ * The hourly heartbeat each member account sends to the management bus
+ * through the same role; VettidOrgAuditStack alarms when one stops arriving.
+ */
+export const ALERT_HEARTBEAT_RULE_NAME = 'vettid-org-security-alert-heartbeat';
+
 export function vaultRoleArn(vault: VaultConfig, role: keyof typeof VAULT_ROLE_NAMES): string {
   return `arn:aws:iam::${vault.account}:role/${VAULT_ROLE_NAMES[role]}`;
 }

@@ -57,17 +57,18 @@ describe('app guardrails', () => {
         'VettidOrgRelayDataStack',
         'VettidOrgVaultStack',
         'VettidOrgVaultHostStack',
+        'VettidOrgVaultAlertForwardStack',
+        'VettidOrgProteusAlertForwardStack',
       ]),
     );
   });
 
-  test('the vault stacks go to the vault account; everything else to the main (management) account', () => {
-    const inVaultAccount = (name: string) => /^VettidOrgVault(Host|Release\d+)?Stack$/.test(name);
+  test('the vault stacks go to the vault account, the proteus forwarder to proteus; everything else to the main (management) account', () => {
+    const inVaultAccount = (name: string) => /^VettidOrgVault(Host|Release\d+|AlertForward|CiReadOnly)?Stack$/.test(name);
+    const account = (name: string) =>
+      inVaultAccount(name) ? '369484479783' : name === 'VettidOrgProteusAlertForwardStack' ? '605628228301' : '449757308783';
     for (const s of stacks) {
-      expect({ stack: s.stackName, account: s.account }).toEqual({
-        stack: s.stackName,
-        account: inVaultAccount(s.stackName) ? '369484479783' : '449757308783',
-      });
+      expect({ stack: s.stackName, account: s.account }).toEqual({ stack: s.stackName, account: account(s.stackName) });
     }
   });
 

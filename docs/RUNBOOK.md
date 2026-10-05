@@ -20,6 +20,9 @@ npm run deploy:all                                # everything
   because it creates the `vettid-org-signup/origin-verify` secret that
   VettidOrgStack resolves (by name) into the `/api/*` origin header; until
   VettidOrgStack is redeployed after it, the signup API answers 403.
+- Deploy what you merge, from an up-to-date master with `npm ci`'d
+  dependencies and the default `cdk.out`. A daily check alerts when
+  production differs from master ("Production drift" below).
 
 ## Stacks
 
@@ -45,7 +48,101 @@ turning that off in code (or the console) first.
 | `VettidOrgStageDnsStack` | **Staging only** (vettid-vault-staging): zone `staging.vettid.org`, its CAA, the SES domain identity `staging.vettid.org` (DKIM records), SSM `dns/zone-id`. Stateful. |
 | `VettidOrgStageSiteStack` | **Staging only**: https://staging.vettid.org (`sites/staging`), serving the staging channel's manifest from `vault/staging/pcr-manifest.json`. |
 | `VettidOrgStageTestMailStack` | **Staging only, test infrastructure**: MX for `test.staging.vettid.org`, the SES receipt rule set storing its mail in `vettid-org-staging-test-mail-<account>` (7 days), the owner-only reader role. See "Staging" → "Test mail". Never in prod. |
+| `VettidOrgAuditStack` | Management account: the organization CloudTrail trail and its bucket, the GuardDuty detector (administrator for the organization), Access Analyzer, the security-alert rules and topic `vettid-org-security-alerts`, and the default-bus policy admitting the member accounts' forwarders. Stateful. See "Security alerts". |
+| `VettidOrgVaultAlertForwardStack` | **In the vault account** (prod: vettid-vault-prod; staging: vettid-vault-staging): the one rule forwarding its CloudTrail events to the management account's bus. See "Security alerts". |
+| `VettidOrgProteusAlertForwardStack` | **In the proteus account** (605628228301): the same forwarder. Deployed from this repository with `--profile proteus`. See "Security alerts". |
+| `VettidOrgCiReadOnlyStack`, `VettidOrgVaultCiReadOnlyStack` | Prod only, one per production account (management; vettid-vault-prod with `--profile vault-prod`): the GitHub Actions OIDC provider and the read-only role `vettid-org-ci-drift-readonly` for the drift check. See "Production drift". |
 | `VettidOrgRelayStack` | relay.vettid.org: VPC (no NAT; S3 + DynamoDB gateway endpoints), ElastiCache Serverless Valkey (IAM auth, TLS), ECS Fargate service (2–8 tasks, rolling deploys), ALB with PQ TLS. Logs to `/vettid-org/<stage>/relay-service`. Only deployed when `relayImage` is set. |
+
+## Production drift
+
+On 2026-10-05 a security fix (PIN lockout) had been merged for four days
+but never deployed. `.github/workflows/drift.yml` makes that visible: every
+day at 13:23 UTC, and on demand, it synthesizes master and compares every
+production stack's template with the one CloudFormation holds, in the
+management account and vettid-vault-prod. Staging is not checked.
+
+- **What counts.** The whole template, minus CDK's version metadata. Lambda
+  code and site content are in it as asset hashes (S3 keys), so a merged
+  code change that was not deployed shows as a changed `Code/S3Key`.
+  Also reported: stacks in master that are not deployed, `Vettid*` stacks
+  deployed that master no longer has (a forgotten smoke stack, or one master
+  skips: `VettidOrgAdminAccessStack` when `headscaleLoginServer` is unset),
+  and stacks it could not check (mid-update, API error). It does **not**
+  see console changes to resources (that is CloudFormation drift detection,
+  a different thing), nor deploy-time inputs outside the template (SSM
+  values, the secret behind a dynamic reference). Context given only on
+  the deploy command line (`-c vettidDevMailPolicy=true`) is not in CI's
+  synth: once used for good, make it the default in code or `cdk.json`.
+- **Asset hashes are path-independent.** A Lambda's asset hash covers its
+  source map, whose `sources` esbuild writes relative to the bundling
+  directory. `ApiFunction` rewrites them after bundling to what the default
+  `cdk.out` produces (`lib/constructs/sourcemap-paths.cjs`), so the same code
+  has the same hash whatever the checkout path or `-o` directory. Other
+  inputs still matter: deploy from master with `npm ci`'d dependencies (a
+  stale `node_modules` bundles different code, and the check rightly says
+  so) and with no untracked files under `website/` or `sites/` (they would
+  be deployed, and then differ).
+- **Non-ASCII.** CloudFormation's GetTemplate returns every non-ASCII
+  character of a deployed template as `?`; the comparison folds both sides
+  the same way, so a change from `§` to `¶` alone is not seen.
+- **Access.** GitHub OIDC → `vettid-org-ci-drift-readonly` in each account
+  (`VettidOrgCiReadOnlyStack`, `VettidOrgVaultCiReadOnlyStack`): only
+  workflows of vettid/vettid.org running on master can assume it (OIDC
+  `sub` `repo:vettid/vettid.org:ref:refs/heads/master`, `aud`
+  `sts.amazonaws.com`), and it can only `cloudformation:ListStacks` and
+  `cloudformation:GetTemplate` on `Vettid*` stacks. No credentials are
+  stored in GitHub. Synth needs no AWS access (lookups are committed in
+  `cdk.context.json` and `cdk.json`); the one uncommitted context value,
+  `headscaleLoginServer`, comes from the repository **secret**
+  `HEADSCALE_LOGIN_SERVER` (masked in logs; the repo is public, and
+  variables are not). The workflow never echoes it, discards synth's
+  output, and the report and issue name template paths and logical IDs
+  only, never values.
+
+**Reading the result.** In sync: the run is green and an open "Production
+drift" issue is closed. Drift: the run fails (GitHub emails the failure)
+and the issue "Production drift" is opened, or its body replaced (a comment
+only when the set of stacks changes). Per stack it shows when it was last
+deployed, the template paths that differ (`… (Lambda code)` for code), and
+master's commits since that deploy (squash merges, so one per PR). Then:
+
+- *in master, not deployed / differs from master*: deploy it (`npx cdk diff
+  <stack>` first, with the right profile); the next run closes the issue.
+  Re-run the workflow (Actions → Production drift → Run workflow) to close
+  it at once.
+- *deployed, not in master*: a stack deployed from a branch that never got
+  merged, a temporary stack to destroy, or `VettidOrgAdminAccessStack` with
+  the repository secret missing.
+- If a difference is deliberate (rare: a deploy held back on purpose), say
+  so in the issue; it stays open and the run stays red until it is
+  deployed.
+
+**Running it by hand** (read-only; with your SSO session):
+
+```bash
+npx cdk synth --quiet       # into the default cdk.out
+npm run drift -- check --account 449757308783 --profile default    --out local/drift-main.json
+npm run drift -- check --account 369484479783 --profile vault-prod --out local/drift-vault.json
+npm run drift -- report local/drift-main.json local/drift-vault.json   # exit 1 = drift
+```
+
+**First deployment** (once):
+
+```bash
+aws sso login
+# 1. The read-only roles (and each account's GitHub OIDC provider; none existed).
+npx cdk deploy VettidOrgCiReadOnlyStack
+npx cdk deploy VettidOrgVaultCiReadOnlyStack --profile vault-prod
+# 2. The one context value not in the repo, as a secret: paste the value of
+#    ~/.cdk.json headscaleLoginServer at the prompt (not on the command line).
+gh secret set HEADSCALE_LOGIN_SERVER --repo vettid/vettid.org
+# 3. Run it once: Actions → Production drift → Run workflow (or:)
+gh workflow run drift.yml --repo vettid/vettid.org --ref master
+```
+
+A second user of GitHub OIDC in either account must import this stack's
+provider (IAM allows one per URL per account), not create another.
 
 ## CDK conventions (new stacks)
 
@@ -67,7 +164,7 @@ their construct IDs.
   consumers `readRef()` (`lib/constructs/ssm-refs.ts`, params under
   `/vettid-org/<stage>/…`). Deploy the producer first.
 - **Lambdas** are defined only through `ApiFunction` (Node 24, ARM64, esbuild,
-  1-month log group) and served through `HttpRouteGroup`: one function per
+  path-independent source maps, 1-month log group) and served through `HttpRouteGroup`: one function per
   route *group* (`ANY /api/<group>/{proxy+}`), routing in the handler.
 - **Static sites** use `StaticSite`: own host, strict CSP (`script-src 'self'`,
   no inline styles, no `data:` images, Trusted Types required — build DOM with
@@ -633,7 +730,9 @@ from the CLI fallback in "Canary routing" with `--profile vault-staging`
 and table `vettid-org-staging-members`); the relay (staging images pin
 relay.vettid.org; a staging relay is deployed only when relay changes need
 testing); push; the audit stack (the organization trail and GuardDuty,
-administered from the management account, already cover the account).
+administered from the management account, already cover the account;
+`VettidOrgVaultAlertForwardStack` sends the account's events to the
+management account's alert rules — "Security alerts").
 Staging has no release log (the log is production's); its notice emails
 link to the production log.
 
@@ -787,6 +886,164 @@ deletion-protected as in prod; tearing staging down means turning
 termination protection off in code first, and the zone (RETAIN) keeps its
 name servers unless it is deleted by hand, after which
 `stagingZoneNs` and the delegation must be updated.
+
+## Security alerts (every account in the organization)
+
+One place for the rules and the email: **VettidOrgAuditStack** in the
+management account (449757308783). Alerts go to SNS topic
+`vettid-org-security-alerts` → email to admin@vettid.org (the
+subscription is confirmed once, from the inbox). Each email names the
+`account`:
+
+| Account | Id |
+|---|---|
+| VettID (management) | 449757308783 |
+| vettid-vault-prod | 369484479783 |
+| vettid-vault-staging | 347272280361 |
+| proteus | 605628228301 |
+
+How events get there:
+
+- **Member accounts → management bus.** CloudTrail puts an account's events
+  on that account's own default event bus only (the organization trail
+  stores them centrally but does not put them on the management bus). Each
+  member account therefore runs one forwarding rule,
+  `vettid-org-security-alert-forward` (role
+  `vettid-org-security-alert-forwarder`), that sends every CloudTrail
+  write call (read-only calls excluded; refused calls included) and every
+  console sign-in to the management account's default bus. Stacks:
+  `VettidOrgVaultAlertForwardStack` (vault-prod; in staging, vault-staging)
+  and `VettidOrgProteusAlertForwardStack` (proteus; an organization-level
+  control, so it lives here, not in the proteus-web-site repository).
+- **The management bus policy** (statement
+  `vettid-org-member-security-events`, in VettidOrgAuditStack) admits
+  `events:PutEvents` only from those three forwarder roles, only from
+  inside organization o-kualrldevn.
+- **Heartbeat.** Each member account also sends an hourly scheduled event
+  (rule `vettid-org-security-alert-heartbeat`) through the same role and
+  bus policy. VettidOrgAuditStack counts them per account (rules
+  `Heartbeat<Account>`, into a throwaway queue) and the alarm
+  `vettid-org-security-alert-heartbeat-<account>` (vaultProd,
+  vaultStaging, proteus) emails the same topic when none arrived for 3
+  hours (and again when they resume). A heartbeat rather than the member
+  rule's `FailedInvocations`: that metric lives in the member account (a
+  notification from there needs its own topic per account) and it says
+  nothing when the rule is disabled or deleted; and not "no events for
+  24 h", since proteus has days without a single write call.
+- **Protected by an SCP.** `lib/org/scp-alert-forwarder.json` (policy
+  `vettid-alert-forwarder-protection`, on the Workloads OU
+  ou-kuf0-q8c9trwg, so every member account) denies changing, disabling or
+  deleting the forward and heartbeat rules, and changing, deleting or
+  passing the forwarder role, to everyone but CloudFormation's CDK
+  execution role (`cdk-*-cfn-exec-role-*`). Attempts are still logged and
+  alerted (`AuditTampering`, `IamRoleOrPolicyChanges`, with an error).
+  Applied by `scripts/org/apply-alert-forwarder-scp.sh` (dry run by
+  default; `--apply`), from the management account. Break-glass: detach
+  or edit it there.
+- **GuardDuty findings** of all accounts arrive in the management account
+  directly: it is the GuardDuty administrator (members auto-enabled).
+- us-east-1 only: global events (IAM, STS, sign-in, Organizations,
+  Identity Center) land there, and the Workloads SCP denies every other
+  region in the member accounts. (Calls attempted in other regions are
+  still in the organization trail, just not alerted.)
+
+The rules (all in VettidOrgAuditStack; "outside a deploy" = not by
+CloudFormation's CDK execution role `cdk-*-cfn-exec-role-*`, the same
+pattern the SCPs exempt):
+
+| Rule | Fires on |
+|---|---|
+| `RootActivity` | any use of the root user, any account (also refused attempts; members deny root by SCP) |
+| `ConsoleSignInRisk` | a failed console sign-in; a root or IAM-user sign-in without MFA (Identity Center sign-ins always record `MFAUsed: No` — MFA happens at the portal — so they are not checked) |
+| `NonStandardConsoleSignIn` | a console sign-in or switch-role by anything other than the `VettIDAdmin` permission set (another permission set, `OrganizationAccountAccessRole`, an IAM user) |
+| `VaultProdConsoleSignIn` | every successful console sign-in to vettid-vault-prod |
+| `IamCredentialChanges` | IAM users, access keys, login profiles, user policies, MFA devices, password policy (outside a deploy) |
+| `IamRoleOrPolicyChanges` | role create/delete, trust policy, role/group policies, permission boundaries, policy versions, SAML/OIDC providers (outside a deploy) |
+| `AuditTampering` | CloudTrail stop/delete/update; GuardDuty detector, membership, filters and IP sets; Access Analyzer delete/archive rules; EventBridge `DeleteRule`/`DisableRule`/`RemoveTargets`/`PutPermission`/`RemovePermission` (the forwarders and these rules) — outside a deploy, refused attempts included |
+| `OrgOrSsoChanges` | Organizations (leave, remove/move/create account, SCP create/update/delete/attach/detach, service access, delegated admins) and Identity Center (permission sets, account assignments, users, group memberships) |
+| `CentralRootSession` | `sts:AssumeRoot` (a root session into a member account) |
+| `KmsKeyDeletion` | `ScheduleKeyDeletion`, `CancelKeyDeletion`, `DisableKey`, `DeleteImportedKeyMaterial` — always, deploys included (management and proteus) |
+| `KmsKeyPolicy` | `PutKeyPolicy` outside a deploy (management and proteus) |
+| `S3PublicAccess` | bucket policy, ACL, ownership controls, bucket- or account-level public access block (outside a deploy) |
+| `SecurityGroupOpenToWorld` | ingress from `0.0.0.0/0` or `::/0` (outside a deploy) |
+| `GuardDutyFindings` | GuardDuty findings of severity ≥ 4 (medium) in any account |
+| alarm `vettid-org-security-alert-heartbeat-<account>` | no forwarding heartbeat from that member for 3 hours (OK email when it resumes) |
+
+KMS in the two vault accounts is covered by the vault's own rules
+(VettidOrgVaultHostStack: key lifecycle and policy, lockout-bypass key
+creation, the pinned roles; topic `vettid-org[-staging]-vault-alerts`,
+also emailed to admin@vettid.org), so the central KMS rules skip those
+accounts rather than send every key event twice. A release key's
+scheduled deletion by the retirement role is expected and is still
+reported there.
+
+### Deploying
+
+Management first (the bus policy must exist before the forwarders send),
+then the forwarders within three hours (until a member's heartbeats
+arrive, its heartbeat alarm is in ALARM and emails once), then the SCP:
+
+```bash
+npx cdk diff   VettidOrgAuditStack --exclusively
+npx cdk deploy VettidOrgAuditStack --exclusively
+npx cdk deploy VettidOrgVaultAlertForwardStack --exclusively -c stage=staging --profile vault-staging
+npx cdk deploy VettidOrgVaultAlertForwardStack --exclusively --profile vault-prod
+npx cdk deploy VettidOrgProteusAlertForwardStack --exclusively --profile proteus
+# The SCP, from the management account (owner's admin session):
+scripts/org/apply-alert-forwarder-scp.sh            # dry run
+scripts/org/apply-alert-forwarder-scp.sh --apply
+```
+
+Later changes to the forwarder stacks deploy as usual: CloudFormation
+runs as the CDK execution role, which the SCP exempts.
+
+A new member account: add it to `ORG.members` (lib/config.ts), add its
+forwarder stack in `lib/app.ts`, deploy VettidOrgAuditStack (bus policy),
+then the forwarder with that account's profile.
+
+### Testing an alert
+
+A harmless IAM change in staging, undone at once (a tagged role with no
+permissions, trusted only by the account itself):
+
+```bash
+P="--profile vault-staging"
+aws iam create-role $P --role-name vettid-org-alert-test \
+  --tags Key=purpose,Value=alert-test \
+  --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::347272280361:root"},"Action":"sts:AssumeRole"}]}'
+aws iam delete-role $P --role-name vettid-org-alert-test
+```
+
+Within a few minutes admin@vettid.org gets two "IAM role, trust policy,
+permission policy or identity provider changed" emails (`CreateRole`,
+`DeleteRole`) with `account: 347272280361`. If nothing arrives:
+
+1. The forwarder: `aws cloudwatch get-metric-statistics $P --namespace
+   AWS/Events --metric-name FailedInvocations --dimensions
+   Name=RuleName,Value=vettid-org-security-alert-forward --start-time
+   <15 min ago> --end-time <now> --period 300 --statistics Sum` (failures
+   mean the bus policy or the role is wrong); `Invocations` should be > 0.
+2. The management rule: same metrics without `$P`, namespace `AWS/Events`,
+   `RuleName` = the `IamRoleOrPolicyChanges…` rule's physical name
+   (`aws events list-rules --name-prefix VettidOrgAuditStack-IamRole`).
+3. The SNS subscription: `aws sns list-subscriptions-by-topic --topic-arn
+   <AlertTopicArn output>` must not say `PendingConfirmation`.
+
+In the management account itself, the same test without `$P` (and the
+management account id in the trust document) exercises the rules
+directly.
+
+The SCP, once applied (expect `AccessDenied`, and an `AuditTampering`
+email showing `error: AccessDenied`; nothing changes):
+
+```bash
+aws events disable-rule --name vettid-org-security-alert-forward --profile vault-staging
+```
+
+Heartbeats: `aws cloudwatch describe-alarms --alarm-name-prefix
+vettid-org-security-alert-heartbeat --query
+'MetricAlarms[].[AlarmName,StateValue]' --output text` shows `OK` for
+each member once its forwarder is deployed.
 
 ## DNS
 

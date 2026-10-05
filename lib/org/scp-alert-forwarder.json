@@ -1,0 +1,43 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ProtectAlertForwarderRules",
+      "Effect": "Deny",
+      "Action": [
+        "events:DeleteRule",
+        "events:DisableRule",
+        "events:PutRule",
+        "events:RemoveTargets",
+        "events:PutTargets"
+      ],
+      "Resource": [
+        "arn:aws:events:*:*:rule/vettid-org-security-alert-forward",
+        "arn:aws:events:*:*:rule/vettid-org-security-alert-heartbeat"
+      ],
+      "Condition": {
+        "ArnNotLike": { "aws:PrincipalArn": "arn:aws:iam::*:role/cdk-*-cfn-exec-role-*" }
+      }
+    },
+    {
+      "Sid": "ProtectAlertForwarderRole",
+      "Effect": "Deny",
+      "Action": [
+        "iam:DeleteRole",
+        "iam:UpdateRole",
+        "iam:UpdateAssumeRolePolicy",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:PutRolePermissionsBoundary",
+        "iam:DeleteRolePermissionsBoundary",
+        "iam:PassRole"
+      ],
+      "Resource": "arn:aws:iam::*:role/vettid-org-security-alert-forwarder",
+      "Condition": {
+        "ArnNotLike": { "aws:PrincipalArn": "arn:aws:iam::*:role/cdk-*-cfn-exec-role-*" }
+      }
+    }
+  ]
+}
