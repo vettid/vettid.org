@@ -117,7 +117,8 @@ function renderStatus() {
 
   const recovery = v.recovery
     ? el('span', {},
-      v.recovery.state === 'available' ? chip('Code ready', 'warn') : chip('In progress', 'warn'), ' ',
+      v.recovery.state === 'available' ? chip('Code ready', 'warn')
+        : v.recovery.state === 'registered' ? chip('Code used', 'warn') : chip('In progress', 'warn'), ' ',
       el('a', { href: RECOVERY_PAGE }, 'View the recovery'))
     : null;
 
@@ -128,7 +129,9 @@ function renderStatus() {
     notices.push(callout('warn', 'A recovery is in progress',
       v.recovery.state === 'available'
         ? 'The recovery code is ready in the browser where the recovery was requested.'
-        : `Your vault stays locked. The recovery code is ready on ${dateTime(v.recovery.available_at)}.`,
+        : v.recovery.state === 'registered'
+          ? 'The recovery code was used on your new phone. The new app finishes the recovery with your vault PIN and credential password.'
+          : `Your vault stays locked. The recovery code is ready on ${dateTime(v.recovery.available_at)}.`,
       el('p', {}, "If you didn't ask for this, ", el('a', { href: RECOVERY_PAGE }, 'cancel the recovery'), ' now.')));
   }
   if (v.alarm?.kind === 'credential_clone') {
