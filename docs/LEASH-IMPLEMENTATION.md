@@ -17,7 +17,7 @@ numbers in the right-hand column refer to VAULT-MESSAGING unless stated.
 | Implementation tier (§6) | Tier 1: each member's vault runs as its own process inside an AWS Nitro Enclave. |
 | Encrypted channel (§3.4) | The vault and the agent exchange end-to-end-encrypted messages through mailboxes on a relay ([RELAY-PROTOCOL](RELAY-PROTOCOL.md) 0.6.0, `relay.vettid.org`) that stores only ciphertext. Sessions use epochs and rekeys (§6). |
 | Enrollment (§3.1) | Agent pairing (§6.7): the owner's app shows a QR code that is valid for 10 minutes. The owner compares a committed short authentication string (§6.3) and approves in the app. |
-| Connection Contract (§3.2) | The agent's grants. Each grant is a delegation signed with the owner's credential key, which is held in the owner's Protean Credential, so the owner must be present to issue one (§10.11, §3.5). The approval mode is per grant: `ask` (the default) or `auto`, within per-hour and per-day limits. "Automatic for all" is not offered. |
+| Connection Contract (§3.2) | The agent's grants. Each grant is a delegation signed with the owner's credential key, which is held in the owner's Protean Credential, so the owner must be present to issue one (§10.11, §3.5). The approval mode is per grant: `ask` (the default) or `auto`, within per-hour and per-day limits, matching the paper's two modes. |
 | Access window | Besides its grants, an agent acts only within a time-limited access session that the owner's app grants: 60 seconds to 24 hours, 1 hour by default (§6.8). |
 | Delegations and status statements (§3.5); revocation (§3.4) | Revoking a grant takes effect in the vault at once. For relying parties outside the vault, the vault signs short-lived status statements that the agent staples to its delegation. A statement lives 60 seconds to 1 hour, 15 minutes by default, so a revoked delegation is accepted for at most that long plus 60 seconds of clock skew (§10.11). The reference verifier is `leashwire.VerifyPresented` in vettid-vault. |
 | Pattern 1: retrieval (§2.3) | `agent.request{op: "item.get"}` on the items the owner has shared with the agent (§10.11, §10.12). |
@@ -27,11 +27,13 @@ numbers in the right-hand column refer to VAULT-MESSAGING unless stated.
 | Audit logging (§3.4) | A hash-chained audit log with `leash.*` entry kinds (§10.9, §10.11). |
 | Platform binding and binary attestation (§3.4) | Left to the agent's connector; outside the vault's scope (§10.11). |
 
-## Wire format compared with the paper's §3.5
+## Alignment with the paper's §3.5
 
-The paper's §3.5 defines a generic version 1 format. VettID's format
-(VAULT-MESSAGING §10.11) has the same structure and the same bounds but is not
-byte-compatible with it:
+The paper's §3.5 defines a generic version 1 format. VettID's current format
+(VAULT-MESSAGING §10.11) has the same structure and the same bounds. VettID is
+aligning §10.11 to the paper's §3.5 in a separate VAULT-MESSAGING change, and
+the reference implementation will follow. Until then, the current format
+differs in these ways:
 
 - **Same:** a delegation signed by the owner's key and a status statement
   signed by the status issuer; the status statement's fields (`v`,
