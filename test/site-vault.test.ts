@@ -254,6 +254,17 @@ describe('vault wording', () => {
     expect(vt.releaseNotice({ number: 2, notice: 'update_available', newest_active: 3 }).title).toBe('Update available: release 3');
   });
 
+  test('the vault service pause (MEMBER-API 1.2.0): a generic notice when status says paused, none otherwise', () => {
+    const n = vt.servicePaused({ vault: null, service: 'paused' });
+    expect(n).toEqual({ tone: 'warn', title: 'Vault service is paused for maintenance', text: expect.stringContaining('locking still works') });
+    for (const st of [{ vault: null, service: 'available' }, { vault: null }, null, undefined]) expect(vt.servicePaused(st)).toBeNull();
+  });
+
+  test('the account page shows the pause notice in every vault view', () => {
+    const src = readFileSync(join(__dirname, '..', 'sites', 'account', 'js', 'vault.js'), 'utf8');
+    expect(src.match(/pausedNotice\(\),/g)).toHaveLength(3); // enrolling, a vault, no vault
+  });
+
   test('the states the API returns all have labels', () => {
     for (const s of ['enrolling', 'locked', 'unlocked']) expect(vt.vaultState(s)[0]).not.toBe(s);
     for (const s of ['active', 'deprecated', 'retired', 'removed', 'canary', 'unknown']) expect(vt.releaseStatus(s)[0]).not.toBe(s);

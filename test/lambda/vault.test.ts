@@ -3,6 +3,7 @@ import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, UpdateCom
 import { GetSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
+import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 
 // "tok-<guid>" ID tokens verify as that user; anything else is expired.
 jest.mock('aws-jwt-verify', () => ({
@@ -22,16 +23,23 @@ Object.assign(process.env, {
   TABLE_VAULTS: 'vaults', TABLE_VAULT_INSTANCES: 'instances', TABLE_VAULT_REQUESTS: 'requests', TABLE_VAULT_RELEASES: 'releases',
   MEMBER_POOL_ID: 'us-east-1_pool', MEMBER_CLIENT_ID: 'client', ORIGIN_VERIFY_SECRET_ARN: 'origin',
   VAULT_QUEUE_URL_PREFIX: QUEUE_PREFIX, SENDER_EMAIL: 'no-reply@vettid.org', ACCOUNT_HOST: 'account.vettid.org',
+  VAULT_SERVICE_PARAM: '/vettid-org/prod/switch/vault-service',
 });
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const vault = require('../../lambda/member/vault');
+const vaultService = require('../../lambda/shared/vault-service');
 /* eslint-enable */
 
 const ddb = mockClient(DynamoDBDocumentClient);
 const sm = mockClient(SecretsManagerClient);
 const sqs = mockClient(SQSClient);
 const sesMock = mockClient(SESv2Client);
+const ssm = mockClient(SSMClient);
+
+/** The vault service switch as SSM holds it (undefined: no parameter, on). */
+let switchValue: string | undefined;
+const paused = (reason = 'incident') => (switchValue = JSON.stringify({ enabled: false, reason, set_by: 'ops@vettid.org', set_at: '2026-10-02T11:00:00.000Z' }));
 
 // ---- a tiny in-memory DynamoDB ---------------------------------------------------
 
@@ -164,7 +172,13 @@ const sent = () => sqs.commandCalls(SendMessageCommand).map((c) => ({ url: c.arg
 let logs: string[];
 beforeEach(() => {
   db = {};
-  ddb.reset(); sm.reset(); sqs.reset(); sesMock.reset();
+  ddb.reset(); sm.reset(); sqs.reset(); sesMock.reset(); ssm.reset();
+  switchValue = undefined;
+  vaultService.resetVaultServiceCache();
+  ssm.on(GetParameterCommand).callsFake(() => {
+    if (switchValue === undefined) throw Object.assign(new Error('nf'), { name: 'ParameterNotFound' });
+    return { Parameter: { Value: switchValue } };
+  });
   sesMock.on(SendEmailCommand).resolves({});
   installFakeDdb();
   sm.on(GetSecretValueCommand, { SecretId: 'origin' }).resolves({ SecretString: ORIGIN });
@@ -415,7 +429,7 @@ describe('dark launch: no active release', () => {
   });
 
   test('status, unlock and lock without a vault: {vault: null}, 404, 404', async () => {
-    expect((await call('GET', '/api/vault/status')).body).toEqual({ vault: null });
+    expect((await call('GET', '/api/vault/status')).body).toEqual({ vault: null, service: 'available' });
     expect((await call('POST', '/api/vault/unlock', { vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA })).status).toBe(404);
     expect((await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID2 })).status).toBe(404);
     expect((await call('GET', '/api/vault/enclave', undefined, { query: { release: R0 } })).status).toBe(404);
@@ -783,7 +797,7 @@ describe('GET /api/vault/requests/{id}', () => {
 
 describe('GET /api/vault/status', () => {
   test('no vault', async () => {
-    expect((await call('GET', '/api/vault/status')).body).toEqual({ vault: null });
+    expect((await call('GET', '/api/vault/status')).body).toEqual({ vault: null, service: 'available' });
   });
 
   test('advisory lifecycle fields; lease as a boolean only', async () => {
@@ -796,6 +810,7 @@ describe('GET /api/vault/status', () => {
         release: { number: null, status: 'unknown', ends_at: null, newest_active: null, notice: 'unavailable' },
         created_at: expect.any(String), updated_at: expect.any(String),
       },
+      service: 'available',
     });
   });
 
@@ -819,7 +834,7 @@ describe('GET /api/vault/status', () => {
 
   test('a deleted vault (§12.5) reads as no vault', async () => {
     vaultOf('g1', { vault_id: VID, state: 'deleted', alarm: { kind: 'vault_deleted', alarm_id: '01JABCDEFGHJKMNPQRSTVWXYZ0', at: NOW } });
-    expect((await call('GET', '/api/vault/status')).body).toEqual({ vault: null });
+    expect((await call('GET', '/api/vault/status')).body).toEqual({ vault: null, service: 'available' });
   });
 
   test('the last host-reported alarm (kind and time only, VAULT-MESSAGING 0.9.0 §11.5)', async () => {
@@ -1229,5 +1244,170 @@ describe('vault recovery', () => {
     sesMock.on(SendEmailCommand).rejects(Object.assign(new Error('x'), { name: 'MessageRejected' }));
     await request();
     expect(logs.join('\n')).toContain('recovery mail failed');
+  });
+});
+
+// ---- the vault service pause (MEMBER-API 1.2.0 "Vault service pause") ------------------
+
+describe('vault service pause', () => {
+  const BK = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64');
+  const UNLOCK = { vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA };
+  const REGISTER = { vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV };
+  const refused: [string, string, unknown?, Record<string, string>?][] = [
+    ['GET', '/api/vault/enclave'],
+    ['GET', '/api/vault/enclave', undefined, { release: R0 }],
+    ['POST', '/api/vault/enroll', { ...UNLOCK, vault_id: undefined }],
+    ['POST', '/api/vault/unlock', UNLOCK],
+    ['POST', '/api/vault/recovery', { browser_key: BK }],
+    ['POST', '/api/vault/recovery/register', REGISTER],
+  ];
+  const raw = async (method: string, path: string, body?: unknown, query?: Record<string, string>) => vault.handler(ev(method, path, body, { query }));
+  const writes = () => ddb.commandCalls(PutCommand).length + ddb.commandCalls(UpdateCommand).length;
+
+  beforeEach(() => {
+    release(R0, 4);
+    instance('i-1', R0);
+    vaultOf('g1', { vault_id: VID, state: 'locked', sealed_release: R0 });
+  });
+
+  test.each(refused)('paused: %s %s → 503 vault_unavailable, service paused, Retry-After; nothing written, queued, started or counted', async (...[method, path, body, query]: [string, string, unknown?, Record<string, string>?]) => {
+    paused();
+    const res = await raw(method, path, body, query);
+    expect(res.statusCode).toBe(503);
+    expect(res.headers['Retry-After']).toBe('300');
+    expect(JSON.parse(res.body)).toEqual({
+      error: 'vault_unavailable', code: 'vault_unavailable', service: 'paused', retry_after: 300,
+      message: 'The vault service is paused for maintenance. Try again later.',
+    });
+    // Not the operator's reason; no rate-limit hit (a paused attempt does not use up the daily allowance).
+    expect(res.body).not.toContain('incident');
+    expect(writes()).toBe(0);
+    expect(sqs.calls()).toHaveLength(0);
+    expect(getItem('releases', R0).start_requested_at).toBeUndefined();
+  });
+
+  test.each(refused)('on: %s %s is not refused by the switch', async (...[method, path, body, query]: [string, string, unknown?, Record<string, string>?]) => {
+    const res = await raw(method, path, body, query);
+    expect(JSON.parse(res.body).service).toBeUndefined();
+  });
+
+  test('paused before body checks: a malformed unlock is 503, not 400', async () => {
+    paused();
+    expect((await call('POST', '/api/vault/unlock', { vault_id: 'nope' })).status).toBe(503);
+  });
+
+  test('the account checks still come first: a registered user gets 403 terms_required', async () => {
+    paused();
+    put('members', { user_guid: 'g1', email: 'g1@x.org', state: 'registered', account_status: 'active' });
+    expect((await call('GET', '/api/vault/enclave')).body.error).toBe('terms_required');
+  });
+
+  test('status: served, with service paused (and available when on), with or without a vault', async () => {
+    expect((await call('GET', '/api/vault/status')).body).toMatchObject({ vault: { vault_id: VID }, service: 'available' });
+    paused();
+    vaultService.resetVaultServiceCache();
+    expect((await call('GET', '/api/vault/status')).body).toMatchObject({ vault: { vault_id: VID }, service: 'paused' });
+    expect((await call('GET', '/api/vault/status', undefined, { guid: 'g2' })).body).toEqual({ vault: null, service: 'paused' });
+  });
+
+  test('lock: still goes to the leaseholder; without a lease the slot is done; never a start', async () => {
+    paused();
+    put('vaults', { ...getItem('vaults', VID), state: 'unlocked', lease: { instance_id: 'i-1', lease_expires_at: NOW + 60 } });
+    expect((await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID })).status).toBe(202);
+    expect(sent().map((m) => m.msg.op)).toEqual(['lock']);
+    put('vaults', { ...getItem('vaults', VID), state: 'locked', lease: undefined });
+    expect((await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID2 })).status).toBe(202);
+    expect(getItem('requests', RID2).status).toBe('done');
+    expect(getItem('releases', R0).start_requested_at).toBeUndefined();
+  });
+
+  test('polling a request queued before the pause still answers', async () => {
+    const r = await call('POST', '/api/vault/unlock', UNLOCK);
+    expect(r.status).toBe(202);
+    paused();
+    vaultService.resetVaultServiceCache();
+    Object.assign(getItem('requests', RID), { status: 'done', envelope: Buffer.alloc(5_252, 1).toString('base64') });
+    expect((await call('GET', `/api/vault/requests/${RID}`)).body.status).toBe('done');
+  });
+
+  test('recovery status and cancel: served; the cancel goes to a live instance, or is recorded and mailed without a start', async () => {
+    const rid = (await call('POST', '/api/vault/recovery', { browser_key: BK })).body.recovery_id;
+    paused();
+    vaultService.resetVaultServiceCache();
+    expect((await call('GET', '/api/vault/recovery')).body.recovery).toMatchObject({ recovery_id: rid, state: 'pending' });
+    // With a live instance the cancel is queued as usual.
+    expect(await call('POST', '/api/vault/recovery/cancel', { recovery_id: rid })).toEqual({ status: 200, body: { cancelled: true } });
+    expect(sent().map((m) => m.msg.op)).toEqual(['recovery', 'recovery_cancel']);
+
+    // No live instance: recorded and mailed, not queued, no start requested.
+    put('vaults', { ...getItem('vaults', VID), recovery: undefined });
+    switchValue = undefined;
+    vaultService.resetVaultServiceCache();
+    const rid2 = (await call('POST', '/api/vault/recovery', { browser_key: BK }, { guid: 'g1' })).body.recovery_id;
+    tbl('instances').clear();
+    paused();
+    vaultService.resetVaultServiceCache();
+    sqs.resetHistory();
+    expect(await call('POST', '/api/vault/recovery/cancel', { recovery_id: rid2 })).toEqual({ status: 200, body: { cancelled: true } });
+    expect(getItem('vaults', VID).recovery.state).toBe('cancelled');
+    expect(sqs.calls()).toHaveLength(0);
+    expect(getItem('releases', R0).start_requested_at).toBeUndefined();
+    expect(logs.join('\n')).toContain('recovery cancel not queued');
+  });
+
+  test('cache: a change takes effect after at most 30 s; one SSM read per 30 s', async () => {
+    const enclave = async () => (await call('GET', '/api/vault/enclave')).status;
+    expect(await enclave()).toBe(200);
+    paused();
+    expect(await enclave()).toBe(200); // cached "on"
+    jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + 29_000);
+    expect(await enclave()).toBe(200);
+    jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + 30_000);
+    expect(await enclave()).toBe(503);
+    for (const i of tbl('instances').values()) i.heartbeat_at = NOW + 20;
+    switchValue = JSON.stringify({ enabled: true });
+    jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + 59_000);
+    expect(await enclave()).toBe(503); // cached "paused"
+    jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + 60_000);
+    expect(await enclave()).toBe(200);
+    expect(ssm.commandCalls(GetParameterCommand)).toHaveLength(3);
+    expect(ssm.commandCalls(GetParameterCommand)[0].args[0].input.Name).toBe('/vettid-org/prod/switch/vault-service');
+  });
+
+  test('values: absent or enabled true is on; enabled false, or anything unreadable, is paused', async () => {
+    const st = async (v: string | undefined) => {
+      switchValue = v;
+      vaultService.resetVaultServiceCache();
+      return (await call('GET', '/api/vault/status')).body.service;
+    };
+    expect(await st(undefined)).toBe('available');
+    expect(await st('{"enabled":true}')).toBe('available');
+    expect(await st('{"enabled":false}')).toBe('paused');
+    expect(await st('off')).toBe('paused');
+    expect(await st('{"enabled":"false"}')).toBe('paused');
+    expect(await st('[]')).toBe('paused');
+  });
+
+  test('an unreadable switch: the last value read is kept; with none, on (logged)', async () => {
+    ssm.on(GetParameterCommand).rejects(Object.assign(new Error('x'), { name: 'ThrottlingException' }));
+    expect((await call('GET', '/api/vault/enclave')).status).toBe(200);
+    expect(logs.join('\n')).toContain('vault service switch unreadable');
+    // Last read paused, then SSM fails: still paused.
+    ssm.reset();
+    paused();
+    ssm.on(GetParameterCommand).callsFake(() => ({ Parameter: { Value: switchValue } }));
+    jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + 31_000);
+    expect((await call('GET', '/api/vault/enclave')).status).toBe(503);
+    ssm.on(GetParameterCommand).rejects(Object.assign(new Error('x'), { name: 'InternalServerError' }));
+    jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + 62_000);
+    expect((await call('GET', '/api/vault/enclave')).status).toBe(503);
+  });
+
+  test('other 503s carry Retry-After too (release_starting: 30)', async () => {
+    tbl('instances').clear();
+    const res = await raw('GET', '/api/vault/enclave');
+    expect(res.statusCode).toBe(503);
+    expect(JSON.parse(res.body).error).toBe('release_starting');
+    expect(res.headers['Retry-After']).toBe('30');
   });
 });

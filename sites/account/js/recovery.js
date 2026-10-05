@@ -297,6 +297,7 @@ function recoveryErrorText(err) {
     case 'not_found': return "Your account has no set-up vault to recover.";
     case 'release_starting': return "Your vault's software is starting. Try again in about 30 seconds.";
     case 'release_unavailable': return "Your vault's release is no longer available, so it can't be recovered. Email support@vettid.org.";
+    case 'vault_unavailable': return "The vault service is paused for maintenance, so a recovery can't start right now. Your vault is not affected. Try again later.";
     case 'conflict': return 'Something changed in the meantime. Reload the page and try again.';
     default: return ui.errorText(err);
   }
