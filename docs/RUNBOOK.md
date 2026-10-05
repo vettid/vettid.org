@@ -566,6 +566,32 @@ After publishing a manifest, run it at once:
 6. After publication, the always-on minimum moves (O7): set
    `min_instances: 1` on N and `0` on N−1, deploy both release stacks.
 
+### Capacity measurement (W9; VAULT-RELEASES §8.8, O6)
+
+From S3 on, the release image's self-test can measure how many vaults one
+host holds (vettid-vault docs/SMOKE.md, "Capacity measurement"). Run it on
+a host of the release under test, the same way as the canary self-test,
+through SSM with `executionTimeout` of at least 7200 s:
+
+```bash
+systemctl stop vault-parent      # also stops the enclave (PartOf)
+systemctl start vault-enclave    # a fresh enclave for the self-test parent
+/opt/vettid/bin/vault-parent -selftest -smoke-key-arn <vault/smoke-key-arn> -smoke-account <account> \
+  -bucket <data bucket> -region us-east-1 -capacity 400 \
+  >/root/capacity-report.json 2>/root/capacity.log
+grep -E '^(PASS|FAIL|INFO|CAPACITY) ' /root/capacity.log
+systemctl stop vault-enclave
+sleep 60                         # SQS queue-name rule
+systemctl start vault-enclave vault-parent
+```
+
+It spawns synthetic vault processes (test keys and data only, hardened like
+real ones) until 400, the time budget (default 90 min) or a memory floor of
+15% of enclave memory, then measures per-vault memory, unlock latency at
+concurrency 1/2/4 and idle CPU, and tears everything down. For O6, read
+`held` if it stopped at `memory_floor`, otherwise `projected_max_vaults`.
+Record the result in VAULT-RELEASES §8.8.
+
 ### Publishing a manifest (VAULT-RELEASES §6.1, §7, §10.1 steps 9–10)
 
 One-time setup on the owner's machine: `vaultctl` built at a vettid-vault
@@ -781,6 +807,7 @@ npx cdk deploy VettidOrgAccountSiteStack VettidOrgStageSiteStack $C --exclusivel
 # 7. Test data (no admin site in staging): terms, then a registration code.
 npm run staging:seed -- terms --file local/staging-terms.txt
 npm run staging:seed -- invite
+npm run staging:seed -- subscription-types    # production's plans (reads prod read-only)
 ```
 
 Then request membership at https://account.staging.vettid.org/request/
