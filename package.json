@@ -18,10 +18,12 @@
     "release-log": "ts-node --transpile-only --prefer-ts-exts scripts/vault/release-log.ts",
     "vault:manifest": "ts-node --transpile-only --prefer-ts-exts scripts/vault/manifest.ts",
     "staging:seed": "ts-node --transpile-only --prefer-ts-exts scripts/staging/seed.ts",
-    "staging:mail": "ts-node --transpile-only --prefer-ts-exts scripts/staging/mail.ts"
+    "staging:mail": "ts-node --transpile-only --prefer-ts-exts scripts/staging/mail.ts",
+    "drift": "ts-node --transpile-only --prefer-ts-exts scripts/ops/drift-check.ts"
   },
   "devDependencies": {
     "@aws-sdk/client-auto-scaling": "^3.1146.0",
+    "@aws-sdk/client-cloudformation": "^3.1146.0",
     "@aws-sdk/client-cognito-identity-provider": "^3.1144.0",
     "@aws-sdk/client-dynamodb": "^3.1144.0",
     "@aws-sdk/client-kms": "^3.1146.0",

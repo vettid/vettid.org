@@ -25,6 +25,7 @@ import { VettidOrgStageDnsStack } from './stacks/stage-dns-stack';
 import { VettidOrgStageSiteStack } from './stacks/stage-site-stack';
 import { VettidOrgStageDelegationStack } from './stacks/stage-delegation-stack';
 import { VettidOrgStageTestMailStack } from './stacks/stage-test-mail-stack';
+import { VettidOrgCiReadOnlyStack } from './stacks/ci-readonly-stack';
 import { hostSpecs, keySpecs, readReleaseFile } from './vault/release-list';
 
 /**
@@ -233,4 +234,12 @@ export function buildApp(app: cdk.App): void {
   const audit = new VettidOrgAuditStack(app, 'VettidOrgAuditStack', { config, ...stateful });
   alertForward('VettidOrgProteusAlertForwardStack', ORG.members.proteus);
   for (const f of forwarders) f.addStackDependency(audit);
+
+  // ---- Production drift check (RUNBOOK "Production drift") ----
+  // The read-only role .github/workflows/drift.yml assumes, in each
+  // production account; the vault account's with the vault-prod profile.
+  new VettidOrgCiReadOnlyStack(app, 'VettidOrgCiReadOnlyStack', { config, env });
+  if (config.vault) {
+    new VettidOrgCiReadOnlyStack(app, 'VettidOrgVaultCiReadOnlyStack', { config, env: vaultEnv(config, config.vault) });
+  }
 }

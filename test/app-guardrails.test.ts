@@ -64,7 +64,7 @@ describe('app guardrails', () => {
   });
 
   test('the vault stacks go to the vault account, the proteus forwarder to proteus; everything else to the main (management) account', () => {
-    const inVaultAccount = (name: string) => /^VettidOrgVault(Host|Release\d+|AlertForward)?Stack$/.test(name);
+    const inVaultAccount = (name: string) => /^VettidOrgVault(Host|Release\d+|AlertForward|CiReadOnly)?Stack$/.test(name);
     const account = (name: string) =>
       inVaultAccount(name) ? '369484479783' : name === 'VettidOrgProteusAlertForwardStack' ? '605628228301' : '449757308783';
     for (const s of stacks) {
