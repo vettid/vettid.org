@@ -22,10 +22,12 @@ function head(title) {
   return el('h2', { id: 'h-cancel', tabindex: '-1' }, title);
 }
 
-function done() {
+function done(cancelled) {
   fill(card,
-    head('Recovery cancelled'),
-    el('p', {}, "If a recovery of your vault was in progress, it's cancelled now, and we've emailed you a confirmation. Your VettID app can unlock your vault again with your vault PIN."),
+    head(cancelled ? 'Recovery cancelled' : 'Nothing left to cancel'),
+    cancelled
+      ? el('p', {}, "The recovery of your vault is cancelled, and we've emailed you a confirmation. Your VettID app can unlock your vault again with your vault PIN.")
+      : el('p', {}, 'This recovery had already ended: it was cancelled before, or its 48 hours are over. Nothing changed.'),
     el('p', {}, "If you didn't start this recovery, someone may be able to read your email or use your VettID account:"),
     el('ul', { class: 'rec-points' },
       el('li', {}, 'Secure your email account: change its password and turn on two-step sign-in.'),
@@ -60,7 +62,8 @@ if (!token) {
         else ui.showError(err);
       },
     });
-    if (res) done();
+    // MEMBER-API 1.1.0: {cancelled: boolean}; an older answer ({}) means it was handled.
+    if (res) done(res.cancelled !== false);
   });
   fill(card,
     head('Cancel the recovery of your vault?'),

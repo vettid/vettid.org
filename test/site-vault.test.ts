@@ -22,7 +22,13 @@ const SIZE = 5252;
 const b64url = (b: Uint8Array) => Buffer.from(b).toString('base64url');
 const hex = (s: string) => new Uint8Array(Buffer.from(s, 'hex'));
 
-/** The Go reference's vector (vettid-vault vms/altchan.SealRecoveryCode). */
+/**
+ * The Go reference's vector (vettid-vault vms/altchan.SealRecoveryCode).
+ * TODO(VAULT-MESSAGING 0.10.6 §15 item 19): switch to vettid-vault's shared
+ * vector `testdata/vectors/recovery.json` once it lands on vettid-vault main
+ * (not there on 2026-10-05); until then this is a copy made with the same
+ * generator, so the portal and the apps may still test against different bytes.
+ */
 const vector = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'recovery', 'seal-vector.json'), 'utf8'));
 
 async function importBrowserKey(dHex: string, pubHex: string) {

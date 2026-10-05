@@ -10,7 +10,10 @@
 //     locally (js/qr.js). The code is decrypted only while it is shown, is
 //     never sent, logged or stored, and is wiped when it is hidden or the
 //     page is left.
-//  4. Cancelled / expired: the key is deleted; a new request is possible.
+//  4. Registered: the code was used on the new phone (the API saw the
+//     enclave's marker, VAULT-MESSAGING 0.10.6 §11.11.7); no code is shown
+//     and the key is deleted. Cancel stays possible until the recovery expires.
+//  5. Cancelled / expired: the key is deleted; a new request is possible.
 
 import { get, post } from './api.js';
 import { $, chip, el, fill } from './dom.js';
@@ -37,7 +40,11 @@ let pollTimer = null;
 let tickTimer = null;
 let pollWhenVisible = false;
 
-const isActive = (r) => !!r && (r.state === 'pending' || r.state === 'available');
+const isActive = (r) => !!r && (r.state === 'pending' || r.state === 'available' || (r.state === 'registered' && Date.parse(r.expires_at) > Date.now()));
+/** The code is still to be shown: its key must be kept. */
+const needsKey = (r) => !!r && (r.state === 'pending' || r.state === 'available');
+/** The vault the recovery belongs to (MEMBER-API 1.1.0 `Recovery.vault_id`; older answers: the status's). */
+const recoveryVaultId = () => recovery?.vault_id ?? vault?.vault_id;
 
 // ── Loading ─────────────────────────────────────────────────────────────
 
@@ -57,7 +64,7 @@ async function load({ focus } = {}) {
     return;
   }
   canStore ??= await keys.supported();
-  if (canStore) await keys.prune(isActive(recovery) ? recovery : null);
+  if (canStore) await keys.prune(needsKey(recovery) ? recovery : null);
   await classify();
   render();
   schedule();
@@ -71,10 +78,10 @@ async function classify() {
   openState = null;
   refusal = null;
   hasKey = false;
-  if (!isActive(recovery) || !canStore) return;
+  if (!needsKey(recovery) || !canStore) return;
   let cands = [];
   try {
-    cands = await keys.candidates(recovery.recovery_id, vault.vault_id);
+    cands = await keys.candidates(recovery.recovery_id, recoveryVaultId());
   } catch {
     cands = [];
   }
@@ -88,7 +95,7 @@ async function classify() {
   for (const rec of cands) {
     let r;
     try {
-      r = await openSealedCode({ privateKey: rec.privateKey, browserKey: rec.browser_key, sealed, vaultId: vault.vault_id, recoveryId: recovery.recovery_id });
+      r = await openSealedCode({ privateKey: rec.privateKey, browserKey: rec.browser_key, sealed, vaultId: recoveryVaultId(), recoveryId: recovery.recovery_id });
     } catch (e) {
       if (e instanceof SealError) continue;
       throw e;
@@ -123,6 +130,8 @@ function schedule() {
   if (recovery.state === 'pending') {
     wait = Math.min(wait, Math.max(3_000, Date.parse(recovery.available_at) - Date.now() + 3_000));
     tickTimer = setInterval(updateCountdown, 30_000);
+  } else if (recovery.state === 'registered') {
+    wait = Math.min(wait, Math.max(3_000, Date.parse(recovery.expires_at) - Date.now() + 3_000));
   } else if (!recovery.sealed_code) {
     wait = 15_000;
   } else {
@@ -153,6 +162,7 @@ async function poll() {
   const before = recovery?.state;
   await load();
   if (before === 'pending' && recovery?.state === 'available') ui.showNotice('Your recovery code is ready.', 'info');
+  else if (before === 'available' && recovery?.state === 'registered') ui.showNotice('Your recovery code was used on your new phone.', 'info');
   else if (before && isActive({ state: before }) && !isActive(recovery)) ui.showNotice('The recovery is no longer in progress.', 'info');
 }
 
@@ -207,6 +217,7 @@ function render() {
     return;
   }
   if (recovery.state === 'pending') renderPending();
+  else if (recovery.state === 'registered') renderRegistered();
   else renderAvailable();
 }
 
@@ -228,7 +239,7 @@ function renderTermsRequired() {
 
 function renderRequest() {
   const ended = recovery && !isActive(recovery)
-    ? el('p', { class: 'muted' }, `Your last recovery, requested ${dateTime(recovery.requested_at)}, ${recovery.state === 'cancelled' ? 'was cancelled' : 'expired'}.`)
+    ? el('p', { class: 'muted' }, `Your last recovery, requested ${dateTime(recovery.requested_at)}, ${endedText(recovery.state)}.`)
     : null;
 
   const explain = el('section', { class: 'card', 'aria-labelledby': 'h-rec' },
@@ -271,6 +282,12 @@ function renderRequest() {
     action = el('section', { class: 'card', 'aria-labelledby': 'h-rec-start' }, sectionHead('h-rec-start', 'Start a recovery'), form);
   }
   fill(root, explain, action);
+}
+
+function endedText(state) {
+  if (state === 'cancelled') return 'was cancelled';
+  if (state === 'registered') return 'was used on a new phone';
+  return 'expired';
 }
 
 function recoveryErrorText(err) {
@@ -350,7 +367,9 @@ async function cancelRecovery(b) {
   wipeCode();
   await keys.deleteKey(id).catch(() => {});
   await load({ focus: 'h-rec' });
-  ui.showNotice("The recovery is cancelled. We've emailed you a confirmation.");
+  // MEMBER-API 1.1.0: {cancelled: false} when the recovery had already ended.
+  if (res.cancelled === false) ui.showNotice('There was nothing left to cancel: this recovery had already ended.', 'info');
+  else ui.showNotice("The recovery is cancelled. We've emailed you a confirmation.");
 }
 
 function noKeyCallout() {
@@ -451,7 +470,7 @@ async function showCode(btn) {
   }
   let r;
   try {
-    r = await openSealedCode({ privateKey: keyRec.privateKey, browserKey: keyRec.browser_key, sealed, vaultId: vault.vault_id, recoveryId: recovery.recovery_id });
+    r = await openSealedCode({ privateKey: keyRec.privateKey, browserKey: keyRec.browser_key, sealed, vaultId: recoveryVaultId(), recoveryId: recovery.recovery_id });
   } catch {
     ui.showError("The code couldn't be opened. Reload the page and try again.");
     return;
@@ -460,7 +479,7 @@ async function showCode(btn) {
   const box = $('code-box');
   const groups = codeGroups(r.code);
   fill(box,
-    qrSvg(qrModules(qrPayload(vault.vault_id, recovery.recovery_id, r.code)), 'Recovery QR code for the VettID app'),
+    qrSvg(qrModules(qrPayload(recoveryVaultId(), recovery.recovery_id, r.code)), 'Recovery QR code for the VettID app'),
     el('p', { class: 'code-label', id: 'code-label' }, 'Or type this code:'),
     el('p', { class: 'code-text', 'aria-labelledby': 'code-label' }, groups.flatMap((g, i) => [i ? ' ' : null, el('span', {}, g)])),
   );
@@ -483,6 +502,27 @@ function wipeCode() {
     btn.setAttribute('aria-expanded', 'false');
   }
   codeShown = false;
+}
+
+// ── 4. Registered ───────────────────────────────────────────────────────
+
+function renderRegistered() {
+  fill(root,
+    el('section', { class: 'card', 'aria-labelledby': 'h-rec' },
+      sectionHead('h-rec', 'Recovery code used'),
+      el('p', {}, chip('Used', 'ok'), ' ', 'Your recovery code was used on your new phone. It no longer works, and this page no longer shows it.'),
+      el('p', {}, 'On the new phone, the VettID app finishes the recovery with your vault PIN and then your credential password. When it is done, your old app is removed.'),
+      facts([
+        ['Requested', when(recovery.requested_at)],
+        ['Recovery ends', when(recovery.expires_at)],
+      ]),
+      neverAsk(),
+    ),
+    el('section', { class: 'card', 'aria-labelledby': 'h-rec-cancel' },
+      sectionHead('h-rec-cancel', "Wasn't that your phone?"),
+      el('p', {}, 'Cancel the recovery now. The phone that used the code loses its access, and your old app can unlock your vault again.'),
+      el('div', { class: 'actions' }, cancelButton())),
+  );
 }
 
 // Leaving the page (or the browser freezing it in its back/forward cache):

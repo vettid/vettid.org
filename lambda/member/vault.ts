@@ -21,7 +21,13 @@
  * slot until the recovery expires, and releases it only after 24 h. It
  * never holds the code itself, only that ciphertext; cancel-link tokens are
  * stored as their SHA-256 in request-table rows that expire with the
- * recovery.
+ * recovery. A register slot answered with the host's `recovery_registered`
+ * marker turns the recovery `registered` (VAULT-MESSAGING 0.10.6 §11.11.7):
+ * the code is spent and no longer released.
+ *
+ * Status reports `unlocked` only under a live lease (0.10.6 §11.5): the
+ * host's `locked` update can lag, or be lost for a vault locked over the
+ * relay.
  *
  * Shared contract with the enclave host (vettid/vettid-vault, the parent):
  *  - vaults table, PK vault_id: { vault_id, user_guid, state,
@@ -190,10 +196,13 @@ export interface VaultRow {
 
 export interface RecoveryRow {
   recovery_id: string;
-  state: 'pending' | 'cancelled';
+  /** `registered`: a register request was answered with the enclave's marker (0.10.6 §11.11.7). */
+  state: 'pending' | 'registered' | 'cancelled';
   requested_at: number; // epoch s
   available_at: number;
   expires_at: number;
+  /** The register requests sent for this recovery, so their slots can be checked. */
+  register_ids?: string[];
 }
 
 type Op = 'enroll' | 'unlock' | 'lock' | 'recovery' | 'recovery_cancel' | 'recovery_register';
@@ -377,7 +386,7 @@ async function enqueue(
   requestId: string,
   inst: InstanceRow,
   sealed?: { etk_kid: string; envelope: string; manifest_sha256?: string },
-  opts: { extra?: Record<string, string>; ttlS?: number } = {},
+  opts: { extra?: Record<string, string>; ttlS?: number; slot?: Record<string, string> } = {},
 ): Promise<void> {
   const created = nowIso();
   try {
@@ -393,6 +402,7 @@ async function enqueue(
           instance_id: inst.instance_id,
           created_at: created,
           expires_at: nowS() + (opts.ttlS ?? REQUEST_TTL_S),
+          ...(opts.slot ?? {}),
         },
         ConditionExpression: 'attribute_not_exists(request_id)',
       }),
@@ -486,24 +496,28 @@ router.on('GET', '/api/vault/status', async (req) => {
   const m = await loadActiveAccount(req);
   await limit(`vault-status#${m.user_guid}`, 60, 60);
   const now = nowS();
-  const v = activeVault((await currentVault(m.user_guid)).vault);
-  if (!v) return { vault: null };
+  const found = activeVault((await currentVault(m.user_guid)).vault);
+  if (!found) return { vault: null };
+  const v = await refreshRegistered(m, found);
   let release = null;
   if (v.sealed_release) {
     const [rel, active] = await Promise.all([releaseRow(v.sealed_release), releasesWithStatus('active')]);
     release = releaseNotice(rel, active.length ? active[0].release_number : null, isCanaryMember(m));
   }
+  // A vault runs only under a live lease: `unlocked` without one is a vault
+  // that stopped before its host recorded the lock (0.10.6 §11.5).
+  const leased = !!v.lease && typeof v.lease.lease_expires_at === 'number' && v.lease.lease_expires_at > now;
   return {
     vault: {
       vault_id: v.vault_id,
-      state: v.state,
+      state: v.state === 'unlocked' && !leased ? 'locked' : v.state,
       sealed_release: v.sealed_release ?? null,
       // The sealed release's number, status, end date and notice (W8).
       release,
       vault_version: v.vault_version ?? null,
       state_version: v.state_version ?? null,
       // Advisory (lifecycle values come from the host and are never used for security, §11.5).
-      leased: !!v.lease && typeof v.lease.lease_expires_at === 'number' && v.lease.lease_expires_at > now,
+      leased,
       // So owner apps can show a recovery in progress and offer to cancel it (§11.11.7).
       recovery: recoveryActive(v.recovery, now) ? { state: recoveryState(v.recovery, now), available_at: iso(v.recovery!.available_at) } : null,
       // The last alarm the vault reported to its host (a credential clone, 0.9.0 §3.5.9).
@@ -636,6 +650,11 @@ router.on('GET', '/api/vault/requests/{id}', async (req) => {
     const env = typeof item.envelope === 'string' ? decodeCanonicalB64(item.envelope) : null;
     if (env && env.length === RESULT_ENVELOPE_BYTES) out.envelope = item.envelope;
     if (typeof item.code === 'string' && CODE_RE.test(item.code)) out.code = item.code;
+    // The app polls its register result: the moment to retire the code.
+    if (isRegisteredSlot(item) && VAULT_ID_RE.test(String(item.vault_id))) {
+      const v = (await ddb.send(new GetCommand({ TableName: table.vaults(), Key: { vault_id: String(item.vault_id) }, ConsistentRead: true }))).Item as VaultRow | undefined;
+      if (v?.recovery && v.user_guid === m.user_guid && v.recovery.recovery_id === item.recovery_id) await markRegistered(m, v, v.recovery);
+    }
   }
   return out;
 });
@@ -656,19 +675,76 @@ const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 const sha256Hex = (s: string) => createHash('sha256').update(s).digest('hex');
 const iso = (s: number) => new Date(s * 1000).toISOString();
 
-type RecoveryState = 'pending' | 'available' | 'cancelled' | 'expired';
+type RecoveryState = 'pending' | 'available' | 'registered' | 'cancelled' | 'expired';
 
+/** The state the API answers; `available` and `expired` follow from the clock. */
 export function recoveryState(r: RecoveryRow | undefined, now: number): RecoveryState | null {
   if (!r) return null;
   if (r.state === 'cancelled') return 'cancelled';
+  // The code is spent; it stays `registered` after expires_at (0.10.6 §11.11.7).
+  if (r.state === 'registered') return 'registered';
   if (now >= r.expires_at) return 'expired';
   return now >= r.available_at ? 'available' : 'pending';
 }
 
-const recoveryActive = (r: RecoveryRow | undefined, now: number) => {
+/** Pending, available or registered, before expires_at: blocks a new request, can be cancelled. */
+export const recoveryActive = (r: RecoveryRow | undefined, now: number): boolean => {
+  if (!r || now >= r.expires_at) return false;
   const st = recoveryState(r, now);
-  return st === 'pending' || st === 'available';
+  return st === 'pending' || st === 'available' || st === 'registered';
 };
+
+/** The host's copy of the enclave's clear marker of a successful register (0.10.6 §11.5). */
+export const REGISTERED_CODE = 'recovery_registered';
+/** At most this many register ids are kept on a recovery (the route's daily rate limit). */
+const MAX_REGISTER_IDS = 10;
+
+const isRegisteredSlot = (item: Record<string, unknown> | undefined): boolean =>
+  !!item && item.op === 'recovery_register' && item.status === 'done' && item.code === REGISTERED_CODE && typeof item.recovery_id === 'string';
+
+/**
+ * Record that the code of `r` is spent: `pending` -> `registered`, only for
+ * the same recovery and never over a cancel (conditional). Returns the
+ * recovery as it now is.
+ */
+async function markRegistered(m: MemberItem, v: VaultRow, r: RecoveryRow): Promise<RecoveryRow> {
+  if (r.state !== 'pending') return r;
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: table.vaults(),
+        Key: { vault_id: v.vault_id },
+        UpdateExpression: 'SET recovery.#st = :reg, updated_at = :now',
+        ConditionExpression: 'recovery.recovery_id = :id AND recovery.#st = :pending',
+        ExpressionAttributeNames: { '#st': 'state' },
+        ExpressionAttributeValues: { ':reg': 'registered', ':pending': 'pending', ':id': r.recovery_id, ':now': nowIso() },
+      }),
+    );
+  } catch (e) {
+    if ((e as Error).name === 'ConditionalCheckFailedException') return r; // cancelled or replaced meanwhile
+    throw e;
+  }
+  await audit(m.email, 'vault.recovery_registered', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id });
+  return { ...r, state: 'registered' };
+}
+
+/**
+ * While the code is available, look at the slots of this recovery's
+ * register requests (they live 15 minutes): one answered with the marker
+ * means the code is spent. Returns the vault row with its recovery updated.
+ */
+async function refreshRegistered(m: MemberItem, v: VaultRow): Promise<VaultRow> {
+  const r = v.recovery;
+  if (!r || recoveryState(r, nowS()) !== 'available' || !r.register_ids?.length) return v;
+  for (const id of r.register_ids.slice(-MAX_REGISTER_IDS)) {
+    if (!ULID_RE.test(id)) continue;
+    const slot = (await ddb.send(new GetCommand({ TableName: table.vaultRequests(), Key: { request_id: id }, ConsistentRead: true }))).Item;
+    if (isRegisteredSlot(slot) && slot!.user_guid === m.user_guid && slot!.recovery_id === r.recovery_id) {
+      return { ...v, recovery: await markRegistered(m, v, r) };
+    }
+  }
+  return v;
+}
 
 /** A vault that recovery can act on: enrolled (not `enrolling`) and not deleted. */
 async function recoverableVault(guid: string): Promise<VaultRow> {
@@ -727,11 +803,11 @@ ${cancelUrl}
 
 You can also cancel it from any of your VettID apps or from your account page.`;
 
-/** Cancel: mark it, tell the enclave, tell the member. */
-async function cancelRecovery(m: MemberItem, v: VaultRow, via: 'session' | 'link'): Promise<void> {
+/** Cancel: mark it, tell the enclave, tell the member. False: nothing to cancel (a no-op). */
+async function cancelRecovery(m: MemberItem, v: VaultRow, via: 'session' | 'link'): Promise<boolean> {
   const now = nowS();
   const r = v.recovery;
-  if (!r || !recoveryActive(r, now)) return; // nothing to cancel: a no-op
+  if (!r || !recoveryActive(r, now)) return false;
   await setRecovery(v, { ...r, state: 'cancelled' }, r.recovery_id);
   try {
     const inst = await recoveryInstance(v, now, isCanaryMember(m));
@@ -743,6 +819,7 @@ async function cancelRecovery(m: MemberItem, v: VaultRow, via: 'session' | 'link
   }
   await audit(m.email, 'vault.recovery_cancel', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id, via });
   await notify(m.email, 'VettID vault recovery cancelled', `The recovery of your VettID vault requested at ${iso(r.requested_at)} has been cancelled. Your apps can unlock the vault again.`);
+  return true;
 }
 
 
@@ -778,12 +855,13 @@ router.on('GET', '/api/vault/recovery', async (req) => {
   const m = await loadVaultMember(req);
   await limit(`vault-recovery-status#${m.user_guid}`, 60, 60);
   const now = nowS();
-  const v = activeVault((await currentVault(m.user_guid)).vault);
+  const found = activeVault((await currentVault(m.user_guid)).vault);
+  const v = found ? await refreshRegistered(m, found) : null;
   const r = v?.recovery;
   const state = recoveryState(r, now);
   if (!v || !r || !state) return { recovery: null };
   const out: Record<string, unknown> = {
-    recovery_id: r.recovery_id, state, requested_at: iso(r.requested_at), available_at: iso(r.available_at), expires_at: iso(r.expires_at),
+    recovery_id: r.recovery_id, vault_id: v.vault_id, state, requested_at: iso(r.requested_at), available_at: iso(r.available_at), expires_at: iso(r.expires_at),
   };
   if (state === 'available') {
     const slot = (await ddb.send(new GetCommand({ TableName: table.vaultRequests(), Key: { request_id: r.recovery_id }, ConsistentRead: true }))).Item;
@@ -812,8 +890,7 @@ router.on('POST', '/api/vault/recovery/cancel', async (req) => {
   await limit(`vault-recovery-cancel#${m.user_guid}`, 30, 15 * 60);
   const v = activeVault((await currentVault(m.user_guid)).vault);
   if (!v || v.recovery?.recovery_id !== recoveryId) throw notFound('No such recovery');
-  await cancelRecovery(m, v, 'session');
-  return {};
+  return { cancelled: await cancelRecovery(m, v, 'session') };
 });
 
 // The email link: no session, the token stands in for it (§11.11.7).
@@ -827,9 +904,26 @@ router.on('POST', '/api/vault/recovery/cancel-link', async (req) => {
   const m = await memberByGuid(String(link.user_guid));
   const v = (await ddb.send(new GetCommand({ TableName: table.vaults(), Key: { vault_id: String(link.vault_id) }, ConsistentRead: true }))).Item as VaultRow | undefined;
   if (!m || !v || v.user_guid !== m.user_guid || v.recovery?.recovery_id !== link.recovery_id) throw notFound('This link is no longer valid');
-  await cancelRecovery(m, v, 'link');
-  return {};
+  return { cancelled: await cancelRecovery(m, v, 'link') };
 });
+
+/** Remember a register request on its recovery (best effort: the app's poll finds the slot anyway). */
+async function recordRegisterId(v: VaultRow, recoveryId: string, requestId: string): Promise<void> {
+  const ids = [...(v.recovery?.register_ids ?? []), requestId].slice(-MAX_REGISTER_IDS);
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: table.vaults(),
+        Key: { vault_id: v.vault_id },
+        UpdateExpression: 'SET recovery.register_ids = :ids, updated_at = :now',
+        ConditionExpression: 'recovery.recovery_id = :id',
+        ExpressionAttributeValues: { ':ids': ids, ':id': recoveryId, ':now': nowIso() },
+      }),
+    );
+  } catch (e) {
+    console.error('register id not recorded', JSON.stringify({ vault_id: v.vault_id, error: (e as Error).name }));
+  }
+}
 
 router.on('POST', '/api/vault/recovery/register', async (req) => {
   const m = await loadVaultMember(req);
@@ -845,8 +939,11 @@ router.on('POST', '/api/vault/recovery/register', async (req) => {
   if (recoveryState(vault.recovery, now) !== 'available') throw vaultError(409, 'recovery_not_available', 'No recovery code is valid now');
   const inst = await routeCheck(vault, instanceId, now);
   await requireRoutable(inst, isCanaryMember(m));
-  await enqueue('recovery_register', m, vault, requestId, inst, { etk_kid: etkKid, envelope });
-  await audit(m.email, 'vault.recovery_register', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, recovery_id: vault.recovery!.recovery_id, instance_id: instanceId });
+  const recoveryId = vault.recovery!.recovery_id;
+  // The slot names its recovery, so its answer can retire the code (0.10.6 §11.11.7).
+  await enqueue('recovery_register', m, vault, requestId, inst, { etk_kid: etkKid, envelope }, { slot: { recovery_id: recoveryId } });
+  await recordRegisterId(vault, recoveryId, requestId);
+  await audit(m.email, 'vault.recovery_register', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, recovery_id: recoveryId, instance_id: instanceId });
   return new WithStatus(202, { vault_id: vault.vault_id, request_id: requestId });
 });
 
