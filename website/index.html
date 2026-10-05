@@ -1545,8 +1545,8 @@
         <path d="M29 28v-3a3 3 0 016 0v3" stroke="#ffc125" stroke-width="2" fill="none"/>
       </svg>
       <h3>End-to-End Encryption</h3>
-      <p>All communication between your device and your vault is encrypted using keys that only exist at the endpoints. Infrastructure sees only encrypted blobs.</p>
-      <span class="tech-tag">X25519 + ChaCha20</span>
+      <p>Everything between your devices, your vault and your connections' vaults is encrypted with keys that exist only at the endpoints. The key exchange is post-quantum hybrid, so what's recorded today stays sealed against a future quantum computer.</p>
+      <span class="tech-tag">ML-KEM-768 + X25519</span>
     </div>
 
     <div class="security-card">
@@ -1616,7 +1616,7 @@
     <div class="nitro-features">
       <div class="nitro-feature">
         <h4>Hardware Attestation</h4>
-        <p>AWS Nitro provides cryptographic proof of the exact code running in your vault. Published attestation measurements (PCR values) let you verify independently.</p>
+        <p>AWS Nitro provides cryptographic proof of the exact code running in your vault. Each release's measurements (PCR values) are published in a signed manifest and our release log, and builds are reproducible, so you can rebuild from source and compare.</p>
       </div>
       <div class="nitro-feature">
         <h4>Memory Isolation</h4>
@@ -1624,7 +1624,7 @@
       </div>
       <div class="nitro-feature">
         <h4>Sealed Storage</h4>
-        <p>Encryption keys are sealed to the enclave's code. If anyone modifies the code, sealed data becomes permanently inaccessible.</p>
+        <p>Your vault is sealed to the exact release you approved: only that release's measured code can decrypt it. Modified code can't open it, and nobody at VettID can move it to a new release without your approval.</p>
       </div>
     </div>
   </div>
@@ -1645,28 +1645,28 @@
             <circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2"/>
             <circle cx="10" cy="10" r="3"/>
           </svg>
-          Encrypted blobs (opaque ciphertext)
+          Encrypted messages in relay mailboxes &mdash; their size and timing, not their content
         </li>
         <li>
           <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
             <circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2"/>
             <circle cx="10" cy="10" r="3"/>
           </svg>
-          Your messagespace address &mdash; not what flows through it
+          When your vault is enrolled, unlocked or locked
         </li>
         <li>
           <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
             <circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2"/>
             <circle cx="10" cy="10" r="3"/>
           </svg>
-          User account identifiers
+          Your account details: name, email, membership, sign-ins
         </li>
         <li>
           <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
             <circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2"/>
             <circle cx="10" cy="10" r="3"/>
           </svg>
-          Vault activity patterns (not content)
+          Traffic patterns and encrypted data sizes (not content)
         </li>
       </ul>
     </div>
@@ -1693,6 +1693,13 @@
             <path d="M9 12l2 2 4-4" transform="scale(0.8) translate(2,2)"/>
           </svg>
           Vault encryption keys
+        </li>
+        <li>
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" transform="scale(0.8) translate(2,2)"/>
+            <path d="M9 12l2 2 4-4" transform="scale(0.8) translate(2,2)"/>
+          </svg>
+          Your PIN and credential password
         </li>
         <li>
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">

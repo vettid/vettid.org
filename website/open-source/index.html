@@ -228,20 +228,25 @@
 
   <div class="why">
     <div class="battlement-rule"></div>
-    <p>Open source isn't a marketing choice here &mdash; it's load-bearing. VettID's trust model depends on cryptographic attestation: your app verifies the exact code running in the enclave before sharing anything. Attestation only means something when the code being attested is public. The published PCR values on our repositories are how you check that the enclave you're talking to was built from the source you can read.</p>
+    <p>Open source isn't a marketing choice here &mdash; it's load-bearing. VettID's trust model depends on cryptographic attestation: your app verifies the exact code running in the enclave before sharing anything. Attestation only means something when the code being attested is public. Each vault release's measurements (PCR values) are published in a signed manifest and our <a href="/security/releases/">release log</a>, and the build is reproducible: that is how you check that the enclave you're talking to was built from the source you can read.</p>
   </div>
 
   <h2 class="section-title">The Stack</h2>
   <div class="repo-grid">
     <a class="repo-card" href="https://github.com/vettid/vettid.org" target="_blank" rel="noopener noreferrer">
       <h3>vettid.org</h3>
-      <p>This website and the AWS infrastructure serving it &mdash; the CDK stacks, edge logging, and the mailing list you can join right now.</p>
+      <p>This website, the account and admin sites, the member and admin APIs, every AWS CDK stack, and the design docs, including the vault messaging spec.</p>
       <div class="chips"><span class="chip">TypeScript</span><span class="chip">AWS CDK</span></div>
     </a>
-    <a class="repo-card" href="https://github.com/vettid/vettid-dev" target="_blank" rel="noopener noreferrer">
-      <h3>vettid-dev</h3>
-      <p>The backend: AWS CDK infrastructure, Lambda handlers, and the Nitro Enclave vault-manager where member secrets live.</p>
-      <div class="chips"><span class="chip">TypeScript</span><span class="chip">Go</span><span class="chip">Nitro Enclave</span></div>
+    <a class="repo-card" href="https://github.com/vettid/vettid-vault" target="_blank" rel="noopener noreferrer">
+      <h3>vettid-vault</h3>
+      <p>The vault: the Nitro Enclave supervisor and per-member vault where member secrets live, the host-side forwarder, the hybrid post-quantum crypto, and the reproducible image build.</p>
+      <div class="chips"><span class="chip">Go</span><span class="chip">Nitro Enclave</span></div>
+    </a>
+    <a class="repo-card" href="https://github.com/vettid/vettid-relay" target="_blank" rel="noopener noreferrer">
+      <h3>vettid-relay</h3>
+      <p>The relay: mailboxes that hold end-to-end encrypted messages they cannot read, and the Go client.</p>
+      <div class="chips"><span class="chip">Go</span></div>
     </a>
     <a class="repo-card" href="https://github.com/vettid/vettid-android" target="_blank" rel="noopener noreferrer">
       <h3>vettid-android</h3>

@@ -32,9 +32,11 @@
 - [How We Use AI](https://vettid.org/ai/how-we-use-ai): AI helps build VettID; AI
   never sees member data — by architecture, not policy
 - [Security](https://vettid.org/security): vulnerability disclosure policy,
-  scope, severity targets, and PGP key for encrypted reports
+  scope, severity targets, cryptography at a glance (hybrid post-quantum
+  ML-KEM-768 + X25519 key exchange; Ed25519 signatures), what the operator
+  can see, and PGP key for encrypted reports
 - [Donate](https://vettid.org/donate): support the project (Bitcoin)
-- [Open Source](https://vettid.org/open-source): the full stack is public on GitHub (AGPL-3.0) — enclave, apps, agent connector, infrastructure, and the LEASH proposal
+- [Open Source](https://vettid.org/open-source): the full stack is public on GitHub (AGPL-3.0) — enclave vault, relay, apps, agent connector, infrastructure, and the LEASH proposal
 
 ## Contact
 

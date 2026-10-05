@@ -37,6 +37,29 @@
         "min_instances": 0,
         "max_instances": 2
       }
+    },
+    {
+      "release": 3,
+      "status": "candidate",
+      "pcr0": "80a580024d4cf3d1f7955dc010ae12a0626ad4f6d542c385bf9cf5202fa37eab81f37c75a009dbc4212b22960f19d289",
+      "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
+      "pcr2": "268ee4b7b2a51e904504ee2cfbb3ade2640a9af7c465bb412640839881bf002abdbb77950dc546d2a4157696eb8f5219",
+      "seal_key": "arn:aws:kms:us-east-1:347272280361:key/a11c4d60-87c8-4a9f-8b21-8ab4fa3221a2",
+      "admitted_pcr0s": [
+        "49cb5aa0a9ff7933ddd63ecfe502fb8a8a3e12a57a44e2e11a791d2963b92b78313a05b631cc7114235c9b99dea8b0e6"
+      ],
+      "notes": "https://github.com/vettid/vettid-vault/releases/tag/release/staging/3",
+      "host": {
+        "tag": "release/staging/3",
+        "source_commit": "5cd11db5e29b07d0ebc24a50d5c7615d0b0a8856",
+        "measurements_sha256": "a6af7ccc551c9724cc20da714c120f3b4e05259a250494ee054d007c99f7dd13",
+        "host_files_sha256": "c0b36acafa89e4110a0d497fb8b6c552c3bfd8c86eabda5757ff5c8d4210410a",
+        "nitro_cli_version": "1.5.0",
+        "base_ami": "ami-065b1b834d2a83a7a",
+        "ami_revision": 0,
+        "min_instances": 0,
+        "max_instances": 2
+      }
     }
   ]
 }
