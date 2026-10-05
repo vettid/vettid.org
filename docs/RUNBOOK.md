@@ -660,6 +660,82 @@ running instances are only replaced by an explicit refresh:
 (instances drain through the lifecycle hook). Old AMIs are not
 deregistered by Image Builder; delete them and their snapshots by hand.
 
+### Pausing the vault service (kill switch)
+
+The off switch for the member API's vault routes (MEMBER-API "Vault
+service pause"). Use it when vault activity must stop now and nothing
+else should change: a suspected bad release before the next manifest, an
+incident in the vault account, a host or queue problem. It touches no
+vault, key, manifest, release row or stored state, and is undone by
+resuming. While paused, enroll, unlock (and release-update approvals),
+the enclave route, recovery requests and recovery register answer `503
+vault_unavailable`; status, lock, request polling, the recovery status
+and recovery cancels keep working. Vaults already unlocked keep running
+until they lock; nothing new is started. The account site's Vault tab
+says the service is paused for maintenance.
+
+Taking a release out of service for good is still the manifest's job
+(VAULT-RELEASES §12.3: a serial with the release `removed`); the pause is
+for "stop, look, resume".
+
+**From the admin site** (production; admin exit node on): **Vault
+service** → **Pause the vault service** → enter the reason (operators
+only; members never see it) → confirm. **Resume the vault service** turns
+it back on. Both are audited (`vault.service.pause` / `.resume`; ADMIN-API
+"Vault service"). The member API follows within about 30 s.
+
+**Fallback, and staging** (staging has no admin site). In the member
+API's account: prod the default (management) profile, staging
+`--profile vault-staging`. This bypasses the audit log, so note who and
+why in the incident notes; the change email still goes out.
+
+```bash
+P="--profile vault-staging"; STAGE=staging   # prod: P=""; STAGE=prod
+NAME=/vettid-org/$STAGE/switch/vault-service
+# pause
+aws ssm put-parameter $P --name $NAME --type String --overwrite \
+  --value "{\"enabled\":false,\"reason\":\"<why>\",\"set_by\":\"$(whoami) (cli)\",\"set_at\":\"$(date -u +%FT%TZ)\"}"
+# state
+aws ssm get-parameter $P --name $NAME --query Parameter.Value --output text
+# resume (or delete-parameter: no parameter means on)
+aws ssm put-parameter $P --name $NAME --type String --overwrite \
+  --value "{\"enabled\":true,\"reason\":null,\"set_by\":\"$(whoami) (cli)\",\"set_at\":\"$(date -u +%FT%TZ)\"}"
+# history (every version, with the IAM identity that wrote it)
+aws ssm get-parameter-history $P --name $NAME --query 'Parameters[].[Version,LastModifiedDate,LastModifiedUser,Value]' --output text
+```
+
+Only a value that is JSON with `"enabled": true` (or no parameter) means
+on; anything else written there pauses the service. No deploy creates or
+changes the parameter.
+
+**Checks after pausing:** an enroll or unlock from a test phone gets the
+"not available" message; `GET /api/vault/status` on the account site
+shows the paused notice; the member API's vault function log
+(`VettidOrgMemberApiStack`, function `Vault`) shows no `vault service
+switch unreadable`.
+
+**Alerts.** Every write to the parameter (admin site or CLI, either
+stage) emails the security alerts ("vault service switch changed").
+Production also has two alarms on the metric `VettID/MemberApi
+VaultServicePaused` (written every 5 minutes by
+`vettid-org-vault-service-watch`): `vettid-org-vault-service-paused`
+(alarm within about 10 minutes of pausing, OK when resumed) and
+`vettid-org-vault-service-paused-24h` (still paused after a day), so a
+pause is not forgotten. Staging has the alarms without a recipient.
+
+**Running vaults.** The pause does not lock them. There is no "lock every
+vault" action (a follow-up if wanted). If one is needed during an
+incident, scale the release's group in (`aws autoscaling
+update-auto-scaling-group --auto-scaling-group-name vettid-org-vault-r<N>
+--min-size 0 --desired-capacity 0 --profile vault-prod`): the drain hook
+gives the parent 5 minutes to lock each vault before its host stops. The
+next deploy of that release stack restores its minimum. Start requests
+made in the 5 minutes before the pause can still start one host; it
+stops after 30 idle minutes.
+
+**After resuming,** the cleanup job's next daily run (07:00 UTC) queues
+the account deletions it held back, and members' apps retry on their own.
+
 ### Removing a release and rescue
 
 At D (§10.3 step 2): `npx cdk destroy VettidOrgVaultRelease<N>Stack --profile vault-prod`

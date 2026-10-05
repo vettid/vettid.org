@@ -163,8 +163,10 @@ files.
   member API lights up from the manifest; the only way back is a new
   manifest serial with release 1 `removed`, which also strands anyone
   already on it. Until first members, the real gate is app distribution
-  (step 14). Consider whether an operator switch in the member API is
-  worth adding before release 1 (owner question).
+  (step 14). *Owner decision 2026-10-05: add one.* The vault service
+  pause (MEMBER-API "Vault service pause", RUNBOOK "Pausing the vault
+  service") is the off switch; deploy it before step 12 and try it on
+  staging (pause, an unlock refused, resume).
 - **R3. Enclave size is per release.** The allocator size is in the release
   commit's host files (P11), so a wrong O6 guess costs a release, not a
   redeploy; and `VAULT_HOST_INSTANCE_TYPE` is one constant for every

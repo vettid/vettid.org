@@ -1194,6 +1194,12 @@ Android closed beta; until then, staging carries the testing.
   move (§11.10.4).
 - **Manifest:** never lower `serial`; publish s+1 with the change
   (for example N back out of `active` before anyone enrolled).
+- **Pause first** (as built, owner decision 2026-10-05): the operator's
+  vault service pause (MEMBER-API "Vault service pause", RUNBOOK
+  "Pausing the vault service") stops enrollment, unlock and recovery at
+  once without touching vaults, keys or the manifest, and is undone by
+  resuming; the manifest change above is for taking a release out for
+  good.
 
 ## 13. Work items, in order
 

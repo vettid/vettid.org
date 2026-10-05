@@ -1,8 +1,15 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 1.1.0
+version: 1.2.0
 changelog:
+  - 1.2.0 (2026-10-05): the operator's vault service pause ("Vault
+    service pause"): while paused, `GET /api/vault/enclave`, `enroll`,
+    `unlock`, recovery request and recovery `register` answer `503
+    vault_unavailable` with `service: "paused"` and a `Retry-After`
+    header; `GET /api/vault/status` gains the top-level `service`.
+    Additive: v1 clients that ignore unknown fields and already handle
+    `503 vault_unavailable` keep working
   - 1.1.0 (2026-10-05, VAULT-MESSAGING 0.10.6): `VaultStatus` documents
     `recovery`; `state` reads `unlocked` only under a live lease;
     `Recovery` gains `vault_id` and the state `registered` (no
@@ -171,7 +178,7 @@ rights.
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| GET | `/api/vault/status` | — | `{vault: VaultStatus \| null}` |
+| GET | `/api/vault/status` | — | `{vault: VaultStatus \| null, service: 'available' \| 'paused'}` (`service`: 1.2.0, "Vault service pause") |
 | GET | `/api/vault/enclave` | — (`?release=<pcr0>` only to abandon an unconfirmed move, §11.10.4) | `Enclave`: the instance to seal to (below) |
 | POST | `/api/vault/enroll` | `{request_id, instance_id, etk_kid, envelope, manifest_sha256}` | `202 {vault_id, request_id}` |
 | POST | `/api/vault/unlock` | `{vault_id, request_id, instance_id, etk_kid, envelope, manifest_sha256}` | `202 {vault_id, request_id}` |
@@ -290,7 +297,7 @@ value), and `retry_after` seconds where given:
 | 409 | `duplicate_request` | `request_id` already used |
 | 410 | `release_unavailable` | The vault's release (or the one `?release=` asked for) is unknown, `removed` (its end date has passed, VAULT-MESSAGING 0.10.0 §11.10.5), or its image can no longer be started |
 | 503 | `release_starting` | No instance of the release is running; one has been requested. Body also has `release` and `retry_after` (30) |
-| 503 | `vault_unavailable` | No `active` release is deployed yet (`retry_after` 300) |
+| 503 | `vault_unavailable` | No `active` release is deployed yet, or the operator has paused the vault service (body `service: "paused"`, below); `retry_after` 300 |
 
 A `deprecated` or `retired` release still serves the vaults sealed to it
 (§11.10.1); an unknown, `removed` or unstartable one is `410`, except a
@@ -334,6 +341,66 @@ is written and nothing is queued, even if a stray instance is registered.
 `404` (there are no vaults). Start requests are recorded only for a known,
 routable release, and at most once per 30 s per release however many
 members or retries ask.
+
+**Vault service pause** (1.2.0; owner decision 2026-10-05). An
+operator switch that makes the vault service temporarily unavailable
+without touching any vault, key, manifest, release row or stored state,
+and turns it back on (ADMIN-API "Vault service", RUNBOOK "Pausing the
+vault service"). It is the off switch the published manifest does not
+have: the only other way back is a manifest serial with the release
+`removed` (VAULT-RELEASES §12.3), which also strands the vaults on it.
+
+- **State.** One SSM parameter per stage in the member API's account,
+  `/vettid-org/<stage>/switch/vault-service`, value JSON `{enabled,
+  reason, set_by, set_at}`. No parameter (the normal case) means on; a
+  value that is not JSON with a boolean `enabled` means paused (someone
+  wrote it on purpose). It is never created or changed by a deploy.
+- **Effect.** The vault Lambda reads it at most every 30 s per instance
+  (a change takes effect within about 30 s). If a read fails it keeps
+  the last value it read, and with none it treats the service as on
+  (logged `vault service switch unreadable`): an SSM outage must not take
+  the vaults down.
+- **Paused: refused** with `503 vault_unavailable`, `service: "paused"`,
+  `retry_after` 300 and the header `Retry-After: 300`, right after the
+  account checks and before body checks and rate limits (paused attempts
+  do not use up a member's daily enroll or recovery allowance). Nothing
+  is written, queued or start-requested:
+  `GET /api/vault/enclave` (with or without `?release=`), `enroll`,
+  `unlock` (and with it release-update approvals, which travel in an
+  unlock), `POST /api/vault/recovery`, `POST /api/vault/recovery/register`.
+- **Paused: still served.** `status` (it adds `service: "paused"`),
+  `requests/{id}` (answers to requests queued before the pause), `lock`
+  (locking only reduces exposure; it goes to the leaseholder and never
+  starts anything), `GET /api/vault/recovery`, and both recovery
+  cancels: the cancel is recorded and mailed as usual and queued only
+  to a leaseholder or a live instance, never by asking for a start (as
+  for a `removed` release); the next unlock can still cancel it in the
+  enclave (§11.11.4).
+- **Running vaults** keep running until they lock (lease expiry, the
+  app, or the drain at scale-in); the pause does not lock them, and the
+  relay is not affected. A "lock every vault" operator action does not
+  exist; it is a follow-up if one is wanted.
+- **Starts.** While paused nothing asks the scaler for a start: the
+  routes above write no start request, and the daily cleanup job neither
+  queues account-deletion `delete` operations nor requests starts (it
+  records `deletion_requested_at` and retries after the pause, as for a
+  release that cannot start). The scaler starts hosts only for start
+  requests, so at most a request made in the last 5 minutes before the
+  pause starts one host, which stops again after 30 idle minutes. Release
+  stacks' always-on minimums are deployment configuration and stay as
+  they are.
+- **`reason`** is for operators (admin site, audit, alerts) and is never
+  shown to members; they see only the generic text: "The vault service is
+  paused for maintenance. Try again later."
+- **Audit and alerts.** Each change from the admin API is audited
+  (`vault.service.pause`, `vault.service.resume`). Every write to the
+  parameter, from the admin API or the CLI, emails the security-alerts
+  topic, and while paused a CloudWatch alarm reports it (production: on
+  pausing, again after 24 h, and when it ends).
+- **Clients.** The account site's Vault tab shows "Vault service is
+  paused for maintenance" when `status` says so. Apps treat the 503 as
+  they treat `vault_unavailable` today (try again later) and may show
+  `service: "paused"` from `status`.
 
 **Rate limits** (§11.8; `429 rate_limited` with `retry_after`): enroll 3 per
 member per day; unlock 10 per member per 15 minutes, and per source network
@@ -609,7 +676,7 @@ heartbeat) and "dead holder means no live lease"; least-load selection
 (`load` in the registry, lower first, then freshest heartbeat); newest
 `active` release for enrollment; the `vault_busy` and `vault_unavailable`
 answers; `lock` without a live lease; `retry_after` values; the extra rate
-limits above; the `rescue` flag that marks a reopened `removed` release;
+limits above; the vault service pause; the `rescue` flag that marks a reopened `removed` release;
 the 30 s start-request interval.
 
 **Tables** (in the vault account's VettidOrgVaultStack, VAULT-RELEASES
