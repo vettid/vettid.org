@@ -31,6 +31,9 @@ export type SsmRefKey =
   // A non-prod stage's own zone (VettidOrgStageDnsStack); prod's site
   // stacks look vettid.org up instead (cached in cdk.context.json).
   | 'dns/zone-id'
+  // Staging's test mailbox (VettidOrgStageTestMailStack; never in prod).
+  | 'test-mail/bucket-name'
+  | 'test-mail/reader-role-arn'
   | 'admin-access/egress-ip'
   | 'admin-access/site-web-acl-arn'
   // Vault account (VettidOrgVaultStack); read by the host stack and the

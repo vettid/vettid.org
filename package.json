@@ -17,7 +17,8 @@
     "check:manifest": "ts-node --transpile-only --prefer-ts-exts scripts/vault/check-manifest.ts",
     "release-log": "ts-node --transpile-only --prefer-ts-exts scripts/vault/release-log.ts",
     "vault:manifest": "ts-node --transpile-only --prefer-ts-exts scripts/vault/manifest.ts",
-    "staging:seed": "ts-node --transpile-only --prefer-ts-exts scripts/staging/seed.ts"
+    "staging:seed": "ts-node --transpile-only --prefer-ts-exts scripts/staging/seed.ts",
+    "staging:mail": "ts-node --transpile-only --prefer-ts-exts scripts/staging/mail.ts"
   },
   "devDependencies": {
     "@aws-sdk/client-auto-scaling": "^3.1146.0",
@@ -27,6 +28,7 @@
     "@aws-sdk/client-lambda": "^3.1145.0",
     "@aws-sdk/client-s3": "^3.1144.0",
     "@aws-sdk/client-secrets-manager": "^3.1144.0",
+    "@aws-sdk/client-ses": "^3.1146.0",
     "@aws-sdk/client-sesv2": "^3.1144.0",
     "@aws-sdk/client-sqs": "^3.1145.0",
     "@aws-sdk/client-ssm": "^3.1146.0",

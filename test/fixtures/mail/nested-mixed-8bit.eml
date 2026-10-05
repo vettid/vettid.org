@@ -1,0 +1,30 @@
+From: VettID <no-reply@staging.vettid.org>
+To: undisclosed-recipients:;
+Cc: tester-cc@test.staging.vettid.org
+Subject: Nested
+Date: Mon, 5 Oct 2026 12:03:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=outer
+
+--outer
+Content-Type: multipart/alternative; boundary="inner"
+
+--inner
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+Your PIN reset link: https://account.staging.vettid.org/pin/#r=xyz789 (valid 15 minutes).
+Grüße
+
+--inner
+Content-Type: text/html; charset=utf-8
+
+<p>Your PIN reset link: <a href='https://account.staging.vettid.org/pin/#r=xyz789'>reset</a></p>
+--inner--
+
+--outer
+Content-Type: text/plain; name="terms.txt"
+Content-Disposition: attachment; filename="terms.txt"
+
+https://attachment.example.com/should-not-appear
+--outer--

@@ -60,6 +60,7 @@ describe('staging (-c stage=staging)', () => {
       ['VettidOrgMemberApiStack', STAGING, false],
       ['VettidOrgAccountSiteStack', STAGING, false],
       ['VettidOrgStageSiteStack', STAGING, false],
+      ['VettidOrgStageTestMailStack', STAGING, false],
     ]);
   });
 
@@ -69,6 +70,7 @@ describe('staging (-c stage=staging)', () => {
     expect(deps('VettidOrgMemberApiStack')).toEqual(['VettidOrgAuthStack', 'VettidOrgDataStack', 'VettidOrgVaultStack']);
     expect(deps('VettidOrgAccountSiteStack')).toEqual(['VettidOrgMemberApiStack', 'VettidOrgStageDnsStack']);
     expect(deps('VettidOrgStageSiteStack')).toEqual(['VettidOrgStageDnsStack']);
+    expect(deps('VettidOrgStageTestMailStack')).toEqual(['VettidOrgStageDnsStack']);
   });
 
   test('host names live under staging.vettid.org', () => {
@@ -142,7 +144,7 @@ describe('staging (-c stage=staging)', () => {
     for (const n of names) expect(n).toMatch(/^vettid-org-staging-/);
   });
 
-  test.each(['VettidOrgStageDnsStack', 'VettidOrgAuthStack', 'VettidOrgDataStack', 'VettidOrgMemberApiStack', 'VettidOrgAccountSiteStack', 'VettidOrgStageSiteStack'])(
+  test.each(['VettidOrgStageDnsStack', 'VettidOrgAuthStack', 'VettidOrgDataStack', 'VettidOrgMemberApiStack', 'VettidOrgAccountSiteStack', 'VettidOrgStageSiteStack', 'VettidOrgStageTestMailStack'])(
     '%s: no imports, under the resource budget, stateful resources retained',
     (name) => {
       const json = t(name);
@@ -200,7 +202,7 @@ describe('prod is unaffected by staging', () => {
   test('the prod stack set is unchanged; no stage stacks in prod', () => {
     const names = [...base.keys()];
     expect(names).not.toEqual(expect.arrayContaining(['VettidOrgStageDnsStack']));
-    for (const n of names) expect(n).not.toMatch(/Stage(Dns|Site)Stack|StagingDelegation/);
+    for (const n of names) expect(n).not.toMatch(/Stage(Dns|Site|TestMail)Stack|StagingDelegation/);
     for (const { stack } of base.values()) expect(['369484479783', PROD]).toContain(stack.account);
   });
 

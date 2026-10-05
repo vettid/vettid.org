@@ -8,6 +8,7 @@ import { AppConfig, VAULT_RELEASE_KEY_FUNCTION_NAME, VAULT_ROLE_NAMES, VaultConf
 import { ApiFunction } from '../constructs/api-function';
 import { ReleaseKey, ReleaseKeySpec } from '../constructs/release-key';
 import { publishRef } from '../constructs/ssm-refs';
+import { ownerTrust as ownerTrustIn } from '../constructs/owner-trust';
 import {
   SEALED_RELEASE_INDEX,
   VaultTable,
@@ -20,12 +21,9 @@ import {
   vaultsStreamResourceStatements,
 } from '../vault/access';
 
-/**
- * The owner's IAM Identity Center permission set. Its role in the vault
- * account (`AWSReservedSSO_<name>_<hash>`) is the only principal that may
- * assume the manifest-signer and retirement roles.
- */
-export const OWNER_PERMISSION_SET = 'VettIDAdmin';
+// The owner's permission set (Identity Center): the only principal that may
+// assume the manifest-signer and retirement roles (lib/constructs/owner-trust.ts).
+export { OWNER_PERMISSION_SET } from '../constructs/owner-trust';
 
 export interface VettidOrgVaultStackProps extends cdk.StackProps {
   readonly config: AppConfig;
@@ -65,15 +63,8 @@ export class VettidOrgVaultStack extends cdk.Stack {
     }
     const retain = cdk.RemovalPolicy.RETAIN;
 
-    // ---- the owner (Identity Center) -------------------------------------------
-    // Identity Center enforces MFA at sign-in. aws:MultiFactorAuthPresent is
-    // never present in an Identity Center (SAML-federated) session, so a
-    // Bool condition on it would make these roles unassumable; the trust is
-    // pinned to the owner's permission-set role instead.
-    const ownerTrust = (): iam.PrincipalBase =>
-      new iam.AccountRootPrincipal().withConditions({
-        ArnLike: { 'aws:PrincipalArn': `arn:aws:iam::${vault.account}:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_${OWNER_PERMISSION_SET}_*` },
-      });
+    // ---- the owner (Identity Center; MFA at sign-in, see owner-trust.ts) -------
+    const ownerTrust = (): iam.PrincipalBase => ownerTrustIn(vault.account);
 
     // ---- the roles named in key policies (FIXED NAMES, never delete) ------------
     this.hostRole = new iam.Role(this, 'HostRole', {

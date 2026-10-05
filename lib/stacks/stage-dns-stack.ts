@@ -22,7 +22,9 @@ export interface VettidOrgStageDnsStackProps extends cdk.StackProps {
  * under the stage name resolves, so certificates for the stage's sites
  * cannot validate: deploy this stack, then the delegation, then the rest.
  *
- * No MX and no SPF: nothing receives mail here, SES's MAIL FROM is its own
+ * No MX and no SPF: nothing receives mail at <stage>.vettid.org itself
+ * (only the test subdomain test.<stage>.vettid.org does, with its own MX:
+ * VettidOrgStageTestMailStack), SES's MAIL FROM is its own
  * domain, and DKIM (aligned with the organizational domain vettid.org)
  * carries DMARC, whose policy the stage inherits from vettid.org.
  */

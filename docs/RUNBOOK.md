@@ -44,6 +44,7 @@ turning that off in code (or the console) first.
 | `VettidOrgStagingDelegationStack` | Prod (management account), only once context `stagingZoneNs` is set: the one NS record delegating staging.vettid.org to the staging account's zone. See "Staging". |
 | `VettidOrgStageDnsStack` | **Staging only** (vettid-vault-staging): zone `staging.vettid.org`, its CAA, the SES domain identity `staging.vettid.org` (DKIM records), SSM `dns/zone-id`. Stateful. |
 | `VettidOrgStageSiteStack` | **Staging only**: https://staging.vettid.org (`sites/staging`), serving the staging channel's manifest from `vault/staging/pcr-manifest.json`. |
+| `VettidOrgStageTestMailStack` | **Staging only, test infrastructure**: MX for `test.staging.vettid.org`, the SES receipt rule set storing its mail in `vettid-org-staging-test-mail-<account>` (7 days), the owner-only reader role. See "Staging" → "Test mail". Never in prod. |
 | `VettidOrgRelayStack` | relay.vettid.org: VPC (no NAT; S3 + DynamoDB gateway endpoints), ElastiCache Serverless Valkey (IAM auth, TLS), ECS Fargate service (2–8 tasks, rolling deploys), ALB with PQ TLS. Logs to `/vettid-org/<stage>/relay-service`. Only deployed when `relayImage` is set. |
 
 ## CDK conventions (new stacks)
@@ -612,6 +613,7 @@ vault's end-to-end tests need, entirely in vettid-vault-staging
 | `VettidOrgMemberApiStack` | member API with the vault routes, notice job, alarm mailer (stream: context `stagingVaultsStreamArn` in cdk.json), cleanup |
 | `VettidOrgAccountSiteStack` | https://account.staging.vettid.org (same site, WAF and API path as prod) |
 | `VettidOrgStageSiteStack` | https://staging.vettid.org: a notice page and the staging manifest at `/.well-known/vettid/pcr-manifest.json` |
+| `VettidOrgStageTestMailStack` | test infrastructure: a mailbox for automated tests at `*@test.staging.vettid.org` ("Test mail" below) |
 
 Not in staging, on purpose: the public site, signup, playbooks and the
 vettid.dev redirect (prod content); the admin exit node, admin API and
@@ -676,6 +678,93 @@ As in "Publishing a manifest" with `--channel staging` and the
 `npx cdk deploy VettidOrgStageSiteStack -c stage=staging --profile vault-staging`
 (byte for byte at https://staging.vettid.org/.well-known/vettid/pcr-manifest.json),
 then run `vettid-org-staging-vault-manifest-sync` with `--profile vault-staging`.
+
+### Test mail
+
+**Test infrastructure, staging only** (never built for prod): automated
+tests receive VettID's mail without a human: sign-in links, SES
+verification links, notices.
+
+- **Addresses**: anything `@test.staging.vettid.org`. Use a fresh random
+  address per test run (`new-address`). MX → SES inbound (us-east-1).
+- **Sending to them in the SES sandbox** needs no per-address verification:
+  the staging account's verified domain identity `staging.vettid.org`
+  covers its subdomains (SES identity inheritance), so SES may send to
+  `test.staging.vettid.org` addresses as to any verified domain. The app's
+  own opt-in still happens: a membership request with a test address
+  makes SES send its verification email to it, which the test follows
+  with `link --match 'email-verification\.'`.
+- **Storage**: receipt rule set `vettid-org-staging-test-mail` (the
+  account's ACTIVE rule set: SES allows one per account and region; a
+  custom resource activates it and refuses if another set is active), one
+  rule: every recipient at the domain, TLS required, spam/virus scan, raw
+  message to `s3://vettid-org-staging-test-mail-347272280361/inbound/`,
+  stop. Objects expire after **7 days**; the bucket is destroyed with the
+  stack (test data only).
+- **Reading**: role `vettid-org-staging-test-mail-reader` (owner's
+  Identity Center permission set only; `s3:ListBucket` on `inbound/`,
+  `s3:GetObject` on `inbound/*`, nothing else; SSM
+  `test-mail/reader-role-arn`, `test-mail/bucket-name`). Add a profile to
+  `~/.aws/config`:
+
+  ```ini
+  [profile vault-staging-test-mail]
+  role_arn = arn:aws:iam::347272280361:role/vettid-org-staging-test-mail-reader
+  source_profile = vault-staging
+  region = us-east-1
+  ```
+
+- **CLI** (`scripts/staging/mail.ts`; refuses any account but
+  347272280361; prints only the mail's fields; exit 0 found, 2 timed out,
+  1 error):
+
+  ```bash
+  npm run -s staging:mail -- new-address [--prefix tester]
+  #   tester-<random>@test.staging.vettid.org (no AWS call)
+  npm run -s staging:mail -- wait --to ADDRESS [--since ISO] [--timeout 120] [--subject REGEX]
+  #   JSON {from, to, subject, date, links, text}; --since defaults to 60 s ago
+  npm run -s staging:mail -- link --to ADDRESS [--match REGEX] [--since ISO] [--timeout 120]
+  #   the first matching link of the newest matching message, e.g.
+  #   --match '/auth/#t='                     (account site sign-in link)
+  #   --match 'email-verification\.'          (SES verification link)
+  ```
+
+  `--profile` overrides the default `vault-staging-test-mail`. Take
+  `--since` from just before the action that sends the mail, so an older
+  message to the same address is not picked up.
+
+Deploy (staging account only; after VettidOrgStageDnsStack):
+
+```bash
+aws sso login
+# At most one active receipt rule set per account+region: expect none (or ours).
+aws ses describe-active-receipt-rule-set --profile vault-staging --region us-east-1
+npx cdk diff   VettidOrgStageTestMailStack -c stage=staging --profile vault-staging --exclusively
+npx cdk deploy VettidOrgStageTestMailStack -c stage=staging --profile vault-staging --exclusively
+dig +short MX test.staging.vettid.org          # 10 inbound-smtp.us-east-1.amazonaws.com.
+```
+
+Confirm end to end (add the profile above first):
+
+```bash
+TO=$(npm run -s staging:mail -- new-address)
+SINCE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+aws sesv2 send-email --profile vault-staging --region us-east-1 \
+  --from-email-address no-reply@staging.vettid.org \
+  --destination "ToAddresses=$TO" \
+  --content '{"Simple":{"Subject":{"Data":"test mail check"},"Body":{"Text":{"Data":"https://staging.vettid.org/?check=1"}}}}'
+npm run -s staging:mail -- wait --to "$TO" --since "$SINCE" --timeout 120
+npm run -s staging:mail -- link --to "$TO" --since "$SINCE" --match 'check=1'
+```
+
+If the send is rejected with "Email address is not verified", the
+sandbox does not treat the subdomain as verified for recipients: add an
+SES domain identity for `test.staging.vettid.org` (Easy DKIM, records in
+the staging zone) to this stack.
+
+To remove it: `npx cdk destroy VettidOrgStageTestMailStack -c stage=staging
+--profile vault-staging --exclusively` (deactivates the rule set, deletes
+it, empties and deletes the bucket; the MX goes with it).
 
 ### Parking
 
