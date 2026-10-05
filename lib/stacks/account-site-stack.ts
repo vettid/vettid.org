@@ -21,6 +21,20 @@ export const ACCOUNT_RATE_LIMITS = {
 };
 
 /**
+ * The account site's /config.json, read by sites/account/js/site-config.js:
+ * the stage (staging pages say so), the public release log (production's
+ * in every stage, as for the notice emails: RUNBOOK "Staging") and the
+ * Android app link (null until there is one).
+ */
+export function accountSiteConfig(config: AppConfig): Record<string, unknown> {
+  return {
+    stage: config.stage,
+    release_log_url: `https://${config.domainName}/security/releases/`,
+    android_app_url: config.androidAppUrl ?? null,
+  };
+}
+
+/**
  * Stateless: the member account site at account.vettid.org (sites/account;
  * account.staging.vettid.org in staging),
  * with the member API same-origin at /api/* — no CORS, and session cookies
@@ -88,9 +102,12 @@ export class VettidOrgAccountSiteStack extends cdk.Stack {
       hostedZone,
       sourceDir: 'sites/account',
       notFoundPage: '404.html',
+      runtimeConfig: accountSiteConfig(config),
       // Sign-in links open in the Android app (App Links).
       wellKnown: { 'assetlinks.json': androidAssetLinks() },
       // Signed-out visitors never get the account page shell (see COOKIES.present).
+      // The recovery cancel link (/vault/recovery/cancel) is outside it: it
+      // needs no session.
       requireCookie: { pathPrefix: '/account/', cookie: 'vid_s', redirectTo: '/signin/' },
       webAclArn: webAcl.attrArn,
       apiOriginDomain: readRef(this, config, 'member-api/domain'),

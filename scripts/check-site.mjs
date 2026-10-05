@@ -6,6 +6,7 @@
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'website');
@@ -101,9 +102,64 @@ for (const file of walk(ROOT).filter((p) => p.endsWith('.css') || p.endsWith('.h
   }
 }
 
+// 8. The app sites (sites/*: account, admin, staging) are served with a
+// strict CSP (script-src/style-src 'self', require-trusted-types-for):
+// no inline scripts, styles or event handlers, balanced structure, and
+// internal links — in the HTML and the page paths the JS builds — that
+// resolve to files the deployment publishes (the edge function's 404 file
+// list is built from the same tree, lib/constructs/static-site.ts).
+const SITES = join(ROOT, '..', 'sites');
+let appPages = 0;
+for (const site of readdirSync(SITES)) {
+  const dir = join(SITES, site);
+  if (!statSync(dir).isDirectory()) continue;
+  const files = walk(dir).filter((p) => !p.slice(dir.length + 1).split('/').some((seg) => seg.startsWith('.')));
+  const resolves = (path) => {
+    if (path === '/' || path.startsWith('/api/') || path.startsWith('/.well-known/') || path === '/config.json') return true;
+    return existsSync(join(dir, path)) || existsSync(join(dir, path, 'index.html'));
+  };
+  for (const file of files.filter((p) => p.endsWith('.html'))) {
+    appPages += 1;
+    const rel = `sites/${site}/${file.slice(dir.length + 1)}`;
+    const src = readFileSync(file, 'utf8');
+    for (const tag of ['section', 'div', 'header', 'footer', 'main', 'ul', 'ol', 'svg', 'form', 'script']) {
+      const open = (src.match(new RegExp(`<${tag}[ >]`, 'g')) ?? []).length;
+      const close = (src.match(new RegExp(`</${tag}>`, 'g')) ?? []).length;
+      if (open !== close) errors.push(`${rel}: <${tag}> open/close mismatch (${open}/${close})`);
+    }
+    if (/ style="/.test(src)) errors.push(`${rel}: inline style attribute (CSP style-src 'self')`);
+    if (/<style[\s>]/.test(src)) errors.push(`${rel}: <style> block (CSP style-src 'self')`);
+    for (const m of src.matchAll(/<script\b([^>]*)>/g)) {
+      if (!/\ssrc="/.test(m[1])) errors.push(`${rel}: inline <script> (CSP script-src 'self')`);
+    }
+    if (/\son[a-z]+="/i.test(src)) errors.push(`${rel}: inline event handler attribute`);
+    if (/vettid\.dev/i.test(src)) errors.push(`${rel}: references vettid.dev`);
+    for (const m of src.matchAll(/(?:href|src)="(\/[^"#?]*)/g)) {
+      if (!resolves(m[1])) errors.push(`${rel}: broken internal link ${m[1]}`);
+    }
+  }
+  for (const file of files.filter((p) => p.endsWith('.js'))) {
+    const rel = `sites/${site}/${file.slice(dir.length + 1)}`;
+    const src = readFileSync(file, 'utf8');
+    // Parses as the browser loads it (classic theme-init.js, ES modules otherwise).
+    const asModule = !file.endsWith('theme-init.js');
+    const syntax = spawnSync(process.execPath, [`--input-type=${asModule ? 'module' : 'commonjs'}`, '--check'], { input: src, encoding: 'utf8' });
+    if (syntax.status !== 0) errors.push(`${rel}: syntax error: ${(syntax.stderr.match(/SyntaxError: .*/) ?? [syntax.stderr.trim()])[0]}`);
+    if (file.includes('/vendor/')) continue;
+    if (/\.innerHTML\s*=|\.outerHTML\s*=|insertAdjacentHTML|document\.write\(|\beval\(|new Function\(/.test(src)) {
+      errors.push(`${rel}: HTML/script string sink (Trusted Types: build DOM with createElement/textContent)`);
+    }
+    if (/\.style\.|setAttribute\(\s*'style'/.test(src)) errors.push(`${rel}: inline style write (CSP style-src 'self')`);
+    // Page paths built in JS: '/x/y/' or '/x/#tab' string literals.
+    for (const m of src.matchAll(/['`](\/[a-z0-9][a-z0-9/-]*\/)(?:#[a-z]+)?['`]/g)) {
+      if (!resolves(m[1])) errors.push(`${rel}: link to missing page ${m[1]}`);
+    }
+  }
+}
+
 if (errors.length) {
   console.error(`check:site FAILED (${errors.length}):`);
   for (const e of errors) console.error(`  ✗ ${e}`);
   process.exit(1);
 }
-console.log(`check:site OK — ${htmlFiles.length} pages verified`);
+console.log(`check:site OK — ${htmlFiles.length} website pages and ${appPages} app-site pages verified`);
