@@ -1,9 +1,12 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.2
-date: 2026-10-04
+version: 0.1.3
+date: 2026-10-05
 changelog:
+  - 0.1.3 (editorial): D2 gold #FFC125 as in §3; GrapheneOS risk closed
+    (staging accepted GrapheneOS attestation on 2026-10-05); current
+    VAULT-MESSAGING and RELAY-PROTOCOL versions
   - 0.1.2: Secrets → Items per VAULT-ITEMS (drawer, screens, modules, A5);
     favourite connections; the drawer "create" group (§4); brand gold
     #FFC125 and the website fonts (§3), owner decisions of 2026-10-04
@@ -13,10 +16,10 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.6.x) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.10.7) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Items screens)
   - VAULT-PLAN.md (V6 clients)
-  - RELAY-PROTOCOL.md (0.4.0), MEMBER-API.md
+  - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -52,7 +55,7 @@ surface than the vettid.dev app and a layout modelled on Proton Mail.
 | # | Decision |
 |---|---|
 | D1 | **Fresh rewrite in `vettid-android`**, same package name `com.vettid.app` (keeps the Play listing and signing key). The old code is preserved on a branch/tag and removed from `main`. |
-| D2 | **Proton Mail layout, VettID brand**: dark navy surfaces and Proton's structure; VettID gold (`#F4B942`) as the single accent; the rook logo stays gold with a black keyhole; a light theme as on the website. |
+| D2 | **Proton Mail layout, VettID brand**: dark navy surfaces and Proton's structure; VettID gold (`#FFC125`, owner 2026-10-04, §3) as the single accent; the rook logo stays gold with a black keyhole; a light theme as on the website. |
 | D3 | **v1 scope**: enrollment, unlock, Protean Credential, settings (always), plus **connections + messaging** and **items** (data, secret and critical items per VAULT-ITEMS; originally "secrets + critical secrets"). Calls, desktop/agent pairing and LEASH, wallet, location and presence come later. |
 | D4 | **Minimum Android 12 (API 31)**; target the current API level. |
 | D5 | **Message search later** (not in v1). |
@@ -124,7 +127,7 @@ one (translation-ready), accessibility labels required in review.
 | `:core:crypto` | Suite 2 (HPKE MLKEM768X25519 / HKDF-SHA256 / ChaCha20-Poly1305), XChaCha20 sessions, Ed25519, Argon2id; envelope v2; handshake and epochs; credential UTK/reply-key sealing. **Must pass the vettid-vault test vectors byte for byte.** |
 | `:core:keystore` | Android Keystore keys (device identity, relay key wrapping, device attestation key with StrongBox/TEE, the biometric-gated app-data key) |
 | `:core:attestation` | Ported Nitro attestation + PCR manifest verification; Android key attestation for enrollment/unlock (§11.7) |
-| `:core:relay` | Relay client (RELAY-PROTOCOL 0.4): register, signed requests, tokens, deposit, collect (long-poll / WebSocket), ack, claims, blobs |
+| `:core:relay` | Relay client (RELAY-PROTOCOL 0.6): register, signed requests, tokens, deposit, collect (long-poll / WebSocket), ack, claims, blobs |
 | `:core:altchan` | Member-API alternate channel: descriptors, sealed enroll/unlock/lock, result polling, release-update approval |
 | `:core:vault` | Typed vault client: one function per §10 type, sessions with the vault, dedupe, outbox, sync events → repositories |
 | `:core:data` | Repositories and Room caches per feature |
@@ -189,10 +192,11 @@ schema for the cache and the request verb belong to the location batch.
 4. **Background delivery without push**: until the gateway exists,
    messages arrive while the app is open or through the foreground
    service; set expectations in the UI.
-5. **GrapheneOS and device attestation**: GrapheneOS reports its own
-   verified-boot key (`SelfSigned`), which VAULT-MESSAGING §11.7 does not
-   accept yet; it needs a pinned-key allowance before GrapheneOS users can
-   enroll.
+5. **GrapheneOS and device attestation** (resolved): GrapheneOS reports
+   its own verified-boot key (`SelfSigned`); VAULT-MESSAGING 0.9.0 §11.7
+   accepts it when the key is one of the pinned GrapheneOS fingerprints.
+   Staging accepted GrapheneOS attestation on real phones on 2026-10-05
+   (Pixel 10 Pro and Pixel 9 Pro, verified boot yellow / `SelfSigned`).
 
 ## 9. Open questions
 

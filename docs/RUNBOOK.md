@@ -312,17 +312,19 @@ replica; after it, it cannot.)
 
 ## Vault (V5; docs/VAULT-RELEASES.md)
 
-No release and no release key exist yet. Per vault account there are
-three kinds of stack (VAULT-RELEASES §8.2), deployed in this order with
-that account's profile:
+Staging has published releases (S1, now `removed`, and S2); production
+has no release and no release key yet (release 1: docs/W10-READINESS.md).
+Per vault account there are three kinds of stack (VAULT-RELEASES §8.2),
+deployed in this order with that account's profile:
 
 1. `VettidOrgVaultStack`: stateful (tables, data bucket, fixed roles, keys).
 2. `VettidOrgVaultHostStack`: stateless (VPC, DNS Firewall, build VPC and
    Image Builder infrastructure, DLQ, host log group, smoke-test key,
    scaler, manifest sync, alarms). Reads the stream ARN from (1) via SSM.
-3. `VettidOrgVaultRelease<N>Stack`, one per entry in `lib/vault/releases.ts`
-   (none yet): AMI, launch template, group `vettid-org-vault-r<N>`. Reads
-   (2)'s refs via SSM.
+3. `VettidOrgVaultRelease<N>Stack`, one per entry with a `host` in
+   `vault/releases/<channel>.json` (`lib/vault/release-list.ts`): AMI,
+   launch template, group `vettid-org-vault-r<N>`. Reads (2)'s refs via
+   SSM.
 
 ### Accounts and profiles
 
@@ -340,16 +342,18 @@ For the owner-only roles, add chained profiles (MFA is Identity Center's,
 at sign-in):
 
 ```ini
-[profile vault-key-retirement]
+[profile vault-prod-key-retirement]
 source_profile = vault-prod
 role_arn = arn:aws:iam::369484479783:role/vettid-org-vault-key-retirement
-[profile vault-manifest-signer]
+[profile vault-prod-manifest-signer]
 source_profile = vault-prod
 role_arn = arn:aws:iam::369484479783:role/vettid-org-vault-manifest-signer
 ```
 
 (and `vault-staging-key-retirement` / `vault-staging-manifest-signer` with
 `source_profile = vault-staging` and account 347272280361 for staging).
+`npm run vault:manifest` uses `vault-<channel>-manifest-signer` unless
+`VAULT_SIGNER_PROFILE` says otherwise.
 
 ### First deployment (W5), in order
 
@@ -438,7 +442,7 @@ and `npm run check:manifest` validate the file.
    write it into the entry's `seal_key` and commit.
 4. Check the live key with the enclave's own code (vettid-vault
    docs/RELEASING.md steps 5–6):
-   `AWS_PROFILE=vault-key-retirement vaultctl keycheck -channel prod -key-arn <arn> -manifest draft.json -record keycheck/<n>`.
+   `AWS_PROFILE=vault-prod-key-retirement vaultctl keycheck -channel prod -key-arn <arn> -manifest draft.json -record keycheck/<n>`.
    The release stops unless it exits 0.
 
 Staging keys have the same shape with a 7-day window and are deleted after
@@ -452,7 +456,7 @@ scheduled for deletion **as the retirement role, with exactly the pinned
 window** (30 days in production; any other window is refused by the key
 policy), with a rescue (cancel, enable, restart, move) on request within
 that window (VAULT-RELEASES §3.5, §10.3):
-`AWS_PROFILE=vault-key-retirement aws kms schedule-key-deletion --key-id <arn> --pending-window-in-days 30`.
+`AWS_PROFILE=vault-prod-key-retirement aws kms schedule-key-deletion --key-id <arn> --pending-window-in-days 30`.
 
 ### Host stack (W6), first deployment
 
@@ -732,9 +736,10 @@ for that stage.
 Production release 1: status, blockers and the release-day steps are in
 docs/W10-READINESS.md until it is published.
 
-Publishing a release (manifest signing, W7), instance and lease health in
-practice, incident classes and first responses, capacity per host, and
-the disaster-recovery objectives (VAULT-RELEASES §11.4).
+Instance and lease health in practice, incident classes and first
+responses, capacity per host, and the disaster-recovery objectives
+(VAULT-RELEASES §11.4). Publishing a release is "Publishing a manifest"
+above (W7).
 
 ## Staging (W9; VAULT-RELEASES §11.1)
 
