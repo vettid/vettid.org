@@ -10,6 +10,10 @@
  *       publish membership terms (text + PDF + the `current` row, the same
  *       shape the admin API writes); members must accept them before they
  *       can use the vault
+ *   npm run staging:seed -- subscription-types [--from-profile default]
+ *       copy production's subscription types (plan definitions, no member
+ *       data) into staging, so the portal offers the same choices; reads
+ *       production with --from-profile (read-only), never overwrites a type
  *
  * Profile: --profile (default vault-staging). Writes go through the AWS SDK
  * as that profile; nothing is printed but codes, versions and hashes.
@@ -50,8 +54,8 @@ function int(flags: Record<string, string>, name: string, def: number, min: numb
 
 async function main(): Promise<void> {
   const { cmd, flags } = args(process.argv.slice(2));
-  if (cmd !== 'invite' && cmd !== 'terms') {
-    throw new Error('usage: seed.ts invite [--uses N] [--days D] [--note TEXT] | terms --file PATH [--title TEXT] [--profile P]');
+  if (cmd !== 'invite' && cmd !== 'terms' && cmd !== 'subscription-types') {
+    throw new Error('usage: seed.ts invite [--uses N] [--days D] [--note TEXT] | terms --file PATH [--title TEXT] | subscription-types [--from-profile P] [--profile P]');
   }
   const profile = flags.profile ?? 'vault-staging';
   const account = execFileSync('aws', ['sts', 'get-caller-identity', '--query', 'Account', '--output', 'text', '--profile', profile], { encoding: 'utf8' }).trim();
@@ -68,6 +72,26 @@ async function main(): Promise<void> {
       new PutCommand({ TableName: table('audit'), Item: { month: ts.slice(0, 7), ts_id: tsId(ts), ts, actor, action, subject, detail }, ConditionExpression: 'attribute_not_exists(ts_id)' }),
     );
   };
+
+  if (cmd === 'subscription-types') {
+    // Production's plan definitions, read with the CLI as --from-profile.
+    const raw = execFileSync('aws', ['dynamodb', 'scan', '--table-name', 'vettid-org-subscription-types', '--output', 'json',
+      '--profile', flags['from-profile'] ?? 'default', '--region', REGION], { encoding: 'utf8' });
+    const items = (JSON.parse(raw).Items ?? []) as Record<string, Record<string, unknown>>[];
+    const plain = (it: Record<string, Record<string, unknown>>) =>
+      Object.fromEntries(Object.entries(it).map(([k, v]) => [k, 'S' in v ? v.S : 'N' in v ? Number(v.N) : 'BOOL' in v ? v.BOOL : null]));
+    for (const it of items.map(plain)) {
+      try {
+        await ddb.send(new PutCommand({ TableName: table('subscription-types'), Item: it, ConditionExpression: 'attribute_not_exists(type_id)' }));
+        await audit('subscription_type.create', String(it.type_id), { copied_from: 'production' });
+        console.log(`copied ${it.type_id}`);
+      } catch (e) {
+        if ((e as Error).name !== 'ConditionalCheckFailedException') throw e;
+        console.log(`exists ${it.type_id}`);
+      }
+    }
+    return;
+  }
 
   if (cmd === 'invite') {
     const max_uses = int(flags, 'uses', 1, 1, 1000);
