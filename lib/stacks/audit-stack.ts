@@ -8,11 +8,17 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as subs from 'aws-cdk-lib/aws-sns-subscriptions';
 import { Construct } from 'constructs';
-import { AppConfig, resourceName } from '../config';
+import { ALERT_FORWARDER_ROLE_NAME, AppConfig, ORG, ORG_MEMBER_ACCOUNTS, resourceName } from '../config';
 import { readRef } from '../constructs/ssm-refs';
 
 /** AWS Organizations organization (docs/AWS-ACCOUNTS.md). */
-const ORG_ID = 'o-kualrldevn';
+const ORG_ID = ORG.id;
+
+/**
+ * The standard way into every account: Identity Center's VettIDAdmin
+ * permission set (its roles are AWSReservedSSO_VettIDAdmin_<suffix>).
+ */
+const STANDARD_SSO_ROLE_PREFIX = 'AWSReservedSSO_VettIDAdmin_';
 
 export interface VettidOrgAuditStackProps extends cdk.StackProps {
   readonly config: AppConfig;
@@ -24,12 +30,18 @@ export interface VettidOrgAuditStackProps extends cdk.StackProps {
  *    dedicated, retained bucket; S3 data events on the membership-terms bucket
  *  - GuardDuty detector (us-east-1)
  *  - IAM Access Analyzer (account scope) for anything shared externally
- *  - EventBridge → SNS → email alerts for high-signal events. CDK deploys
- *    create roles and security groups all the time, so rules exclude
- *    CloudFormation's deploy role rather than alerting on every deploy.
+ *  - EventBridge → SNS → email alerts for high-signal events, for every
+ *    account in the organization: the member accounts forward their
+ *    CloudTrail events to this account's default bus
+ *    (VettidOrgAlertForwardStack; this stack's bus policy admits them), and
+ *    member GuardDuty findings arrive here because this account is the
+ *    GuardDuty administrator. CDK deploys create roles and security groups
+ *    all the time, so most rules exclude CloudFormation's deploy role
+ *    rather than alerting on every deploy.
  *
  * The SNS email subscription must be confirmed once from the inbox.
  * Alert rules run in us-east-1, where global (IAM, sign-in) events land.
+ * RUNBOOK "Security alerts" lists the rules and how to test one.
  */
 export class VettidOrgAuditStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: VettidOrgAuditStackProps) {
@@ -83,35 +95,91 @@ export class VettidOrgAuditStack extends cdk.Stack {
     });
 
     // ---- Alerts -------------------------------------------------------------
+    // One place for every account in the organization: each member account
+    // forwards its CloudTrail events to this account's default bus
+    // (VettidOrgAlertForwardStack), and the rules below match events from
+    // any account; `account` in each email says which. GuardDuty findings of
+    // the members arrive here directly (this account is the GuardDuty
+    // administrator). RUNBOOK "Security alerts".
     const topic = new sns.Topic(this, 'Alerts', {
       topicName: resourceName(config, 'security-alerts'),
       displayName: 'VettID security alerts',
     });
     topic.addSubscription(new subs.EmailSubscription(config.adminEmail));
 
-    // "Not CloudFormation's CDK deploy role." anything-but never matches a
-    // MISSING field, and IAM-user/root calls have no session issuer, so those
-    // must be matched explicitly or they'd slip through unalerted.
+    // Admit the members' forwarding rules to the default bus: each member
+    // account's one forwarder role, and only from inside the organization.
+    // Principals are the member accounts (never "*"), narrowed to the role.
+    new events.CfnEventBusPolicy(this, 'MemberForwardPolicy', {
+      eventBusName: 'default',
+      statementId: 'vettid-org-member-security-events',
+      statement: {
+        Sid: 'vettid-org-member-security-events',
+        Effect: 'Allow',
+        Principal: { AWS: ORG_MEMBER_ACCOUNTS.map((a) => `arn:aws:iam::${a}:root`) },
+        Action: 'events:PutEvents',
+        Resource: `arn:aws:events:${this.region}:${this.account}:event-bus/default`,
+        Condition: {
+          StringEquals: { 'aws:PrincipalOrgID': ORG.id },
+          ArnEquals: { 'aws:PrincipalArn': ORG_MEMBER_ACCOUNTS.map((a) => `arn:aws:iam::${a}:role/${ALERT_FORWARDER_ROLE_NAME}`) },
+        },
+      },
+    });
+
+    // "Not CloudFormation's CDK deploy role" (cdk-<qualifier>-cfn-exec-role-*
+    // in any account; the same pattern the SCPs exempt). anything-but never
+    // matches a MISSING field, and IAM-user/root calls have no session
+    // issuer, so those must be matched explicitly or they'd slip through
+    // unalerted. Creating a role with a cfn-exec-like name outside a deploy
+    // is itself alerted (IamRoleOrPolicyChanges).
     const notDeploy = {
       $or: [
-        { userIdentity: { sessionContext: { sessionIssuer: { userName: events.Match.anythingButPrefix('cdk-') } } } },
+        { userIdentity: { sessionContext: { sessionIssuer: { userName: events.Match.anythingButWildcard('cdk-*-cfn-exec-role-*') } } } },
         { userIdentity: { sessionContext: { sessionIssuer: { userName: events.Match.doesNotExist() } } } },
       ],
     };
-    const apiCall = (id: string, description: string, source: string[], detail: Record<string, unknown>) =>
+    // KMS in the vault accounts is alerted by the vault's own rules
+    // (VettidOrgVaultHostStack, topic vettid-org[-staging]-vault-alerts, a
+    // superset of these), so not twice.
+    const notVaultAccount = { account: events.Match.anythingBut(ORG.members.vaultProd, ORG.members.vaultStaging) };
+
+    const ev = (path: string) => events.EventField.fromPath(path);
+    const apiCall = (id: string, description: string, source: string[], detail: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
       new events.Rule(this, id, {
         description,
-        eventPattern: { source, detailType: ['AWS API Call via CloudTrail'], detail },
+        eventPattern: { source, detailType: ['AWS API Call via CloudTrail'], detail, ...extra },
         targets: [
           new targets.SnsTopic(topic, {
             message: events.RuleTargetInput.fromText(
               `VettID security alert: ${description}\n\n` +
-                `event:   ${events.EventField.fromPath('$.detail.eventName')}\n` +
-                `who:     ${events.EventField.fromPath('$.detail.userIdentity.arn')}\n` +
-                `from:    ${events.EventField.fromPath('$.detail.sourceIPAddress')}\n` +
-                `region:  ${events.EventField.fromPath('$.region')}\n` +
-                `time:    ${events.EventField.fromPath('$.time')}\n\n` +
-                'Look up the full event in CloudTrail (Event history) by time and event name.',
+                `account: ${ev('$.account')}\n` +
+                `event:   ${ev('$.detail.eventName')}\n` +
+                `error:   ${ev('$.detail.errorCode')}\n` +
+                `who:     ${ev('$.detail.userIdentity.arn')}\n` +
+                `from:    ${ev('$.detail.sourceIPAddress')}\n` +
+                `region:  ${ev('$.region')}\n` +
+                `time:    ${ev('$.time')}\n\n` +
+                'Look up the full event in CloudTrail (Event history, in that account) by time and event name. ' +
+                'An error (e.g. AccessDenied) means the call was attempted and refused. RUNBOOK "Security alerts".',
+            ),
+          }),
+        ],
+      });
+    const signIn = (id: string, description: string, pattern: Record<string, unknown>) =>
+      new events.Rule(this, id, {
+        description,
+        eventPattern: { detailType: ['AWS Console Sign In via CloudTrail'], ...pattern },
+        targets: [
+          new targets.SnsTopic(topic, {
+            message: events.RuleTargetInput.fromText(
+              `VettID security alert: ${description}\n\n` +
+                `account: ${ev('$.account')}\n` +
+                `event:   ${ev('$.detail.eventName')}\n` +
+                `who:     ${ev('$.detail.userIdentity.arn')}\n` +
+                `result:  ${ev('$.detail.responseElements.ConsoleLogin')}\n` +
+                `MFA:     ${ev('$.detail.additionalEventData.MFAUsed')}\n` +
+                `from:    ${ev('$.detail.sourceIPAddress')}\n` +
+                `time:    ${ev('$.time')}`,
             ),
           }),
         ],
@@ -127,35 +195,46 @@ export class VettidOrgAuditStack extends cdk.Stack {
         new targets.SnsTopic(topic, {
           message: events.RuleTargetInput.fromText(
             'VettID security alert: the ROOT user was used.\n\n' +
-              `event:   ${events.EventField.fromPath('$.detail.eventName')}\n` +
-              `from:    ${events.EventField.fromPath('$.detail.sourceIPAddress')}\n` +
-              `time:    ${events.EventField.fromPath('$.time')}\n\n` +
+              `account: ${ev('$.account')}\n` +
+              `event:   ${ev('$.detail.eventName')}\n` +
+              `error:   ${ev('$.detail.errorCode')}\n` +
+              `from:    ${ev('$.detail.sourceIPAddress')}\n` +
+              `time:    ${ev('$.time')}\n\n` +
               'If this was not you, treat the account as compromised.',
           ),
         }),
       ],
     });
 
-    new events.Rule(this, 'ConsoleSignInRisk', {
-      description: 'Console sign-in that failed or did not use MFA',
-      eventPattern: {
-        detailType: ['AWS Console Sign In via CloudTrail'],
-        detail: {
-          $or: [{ responseElements: { ConsoleLogin: ['Failure'] } }, { additionalEventData: { MFAUsed: ['No'] } }],
+    // Federated (Identity Center) sign-ins always record MFAUsed "No": MFA
+    // happens at the Identity Center portal. So the MFA check is for root and
+    // IAM users only; failures are alerted for everyone.
+    signIn('ConsoleSignInRisk', 'console sign-in that failed, or root/IAM-user sign-in without MFA', {
+      detail: {
+        $or: [
+          { responseElements: { ConsoleLogin: ['Failure'] } },
+          { additionalEventData: { MFAUsed: ['No'] }, userIdentity: { type: ['Root', 'IAMUser'] } },
+        ],
+      },
+    });
+
+    // The one standard way in is Identity Center's VettIDAdmin permission
+    // set. Any other role (another permission set, switch-role into
+    // OrganizationAccountAccessRole) or an IAM user signing in is unusual.
+    signIn('NonStandardConsoleSignIn', 'console sign-in with something other than the VettIDAdmin permission set', {
+      detail: {
+        eventName: ['ConsoleLogin', 'SwitchRole'],
+        userIdentity: {
+          type: ['AssumedRole', 'IAMUser'],
+          arn: events.Match.anythingButWildcard(`arn:aws:sts::*:assumed-role/${STANDARD_SSO_ROLE_PREFIX}*`),
         },
       },
-      targets: [
-        new targets.SnsTopic(topic, {
-          message: events.RuleTargetInput.fromText(
-            'VettID security alert: console sign-in failed or did not use MFA.\n\n' +
-              `who:     ${events.EventField.fromPath('$.detail.userIdentity.arn')}\n` +
-              `result:  ${events.EventField.fromPath('$.detail.responseElements.ConsoleLogin')}\n` +
-              `MFA:     ${events.EventField.fromPath('$.detail.additionalEventData.MFAUsed')}\n` +
-              `from:    ${events.EventField.fromPath('$.detail.sourceIPAddress')}\n` +
-              `time:    ${events.EventField.fromPath('$.time')}`,
-          ),
-        }),
-      ],
+    });
+
+    // Production vault: console use there is rare enough to report every time.
+    signIn('VaultProdConsoleSignIn', 'console sign-in to the PRODUCTION VAULT account', {
+      account: [ORG.members.vaultProd],
+      detail: { eventName: ['ConsoleLogin'], responseElements: { ConsoleLogin: ['Success'] } },
     });
 
     apiCall('IamCredentialChanges', 'IAM users, credentials or MFA changed', ['aws.iam'], {
@@ -175,27 +254,116 @@ export class VettidOrgAuditStack extends cdk.Stack {
       ...notDeploy,
     });
 
-    apiCall('AuditTampering', 'audit/detection settings changed (CloudTrail, GuardDuty, Access Analyzer)', ['aws.cloudtrail', 'aws.guardduty', 'aws.access-analyzer'], {
-      eventName: ['StopLogging', 'DeleteTrail', 'UpdateTrail', 'PutEventSelectors', 'DeleteDetector', 'UpdateDetector', 'DeleteAnalyzer'],
+    apiCall('IamRoleOrPolicyChanges', 'IAM role, trust policy, permission policy or identity provider changed (outside a deploy)', ['aws.iam'], {
+      eventName: [
+        'CreateRole',
+        'DeleteRole',
+        'UpdateAssumeRolePolicy',
+        'AttachRolePolicy',
+        'PutRolePolicy',
+        'PutRolePermissionsBoundary',
+        'DeleteRolePermissionsBoundary',
+        'CreatePolicyVersion',
+        'SetDefaultPolicyVersion',
+        'AttachGroupPolicy',
+        'PutGroupPolicy',
+        'CreateSAMLProvider',
+        'UpdateSAMLProvider',
+        'CreateOpenIDConnectProvider',
+        'UpdateOpenIDConnectProviderThumbprint',
+        'AddClientIDToOpenIDConnectProvider',
+      ],
+      ...notDeploy,
+    });
+
+    apiCall(
+      'AuditTampering',
+      'audit/detection/alerting settings changed (CloudTrail, GuardDuty, Access Analyzer, EventBridge rules or bus policy)',
+      ['aws.cloudtrail', 'aws.guardduty', 'aws.access-analyzer', 'aws.events'],
+      {
+        eventName: [
+          // CloudTrail
+          'StopLogging', 'DeleteTrail', 'UpdateTrail', 'PutEventSelectors',
+          // GuardDuty: detector, membership, and anything that hides findings
+          'DeleteDetector', 'UpdateDetector', 'DisassociateFromMasterAccount', 'DisassociateFromAdministratorAccount',
+          'DisassociateMembers', 'DeleteMembers', 'StopMonitoringMembers', 'UpdateOrganizationConfiguration',
+          'CreateFilter', 'UpdateFilter', 'CreateIPSet', 'UpdateIPSet',
+          // Access Analyzer (archive rules hide findings)
+          'DeleteAnalyzer', 'CreateArchiveRule', 'UpdateArchiveRule',
+          // EventBridge: these alert rules, the member forwarders, the bus policy
+          'DeleteRule', 'DisableRule', 'RemoveTargets', 'PutPermission', 'RemovePermission',
+        ],
+        ...notDeploy,
+      },
+    );
+
+    // Organizations and Identity Center live in this (management) account.
+    // MoveAccount matters: an account moved out of its OU loses that OU's SCPs.
+    apiCall('OrgOrSsoChanges', 'organization, SCP or Identity Center (permission set, assignment, user) changed', ['aws.organizations', 'aws.sso', 'aws.identitystore'], {
+      eventName: [
+        // Organizations
+        'LeaveOrganization', 'RemoveAccountFromOrganization', 'MoveAccount', 'CreateAccount', 'InviteAccountToOrganization',
+        'CreatePolicy', 'UpdatePolicy', 'DeletePolicy', 'AttachPolicy', 'DetachPolicy', 'DisablePolicyType',
+        'EnableAWSServiceAccess', 'DisableAWSServiceAccess', 'RegisterDelegatedAdministrator', 'DeregisterDelegatedAdministrator',
+        // Identity Center
+        'CreatePermissionSet', 'UpdatePermissionSet', 'PutInlinePolicyToPermissionSet', 'AttachManagedPolicyToPermissionSet',
+        'AttachCustomerManagedPolicyReferenceToPermissionSet', 'PutPermissionsBoundaryToPermissionSet', 'CreateAccountAssignment',
+        // Identity store
+        'CreateUser', 'CreateGroupMembership',
+      ],
+    });
+
+    // Root sessions into member accounts (centralized root access).
+    apiCall('CentralRootSession', 'a root session was opened into a member account (sts:AssumeRoot)', ['aws.sts'], {
+      eventName: ['AssumeRoot'],
+    });
+
+    // Key deletion is rare and important: always reported, deploys included.
+    apiCall(
+      'KmsKeyDeletion',
+      'KMS key deletion scheduled or cancelled, key disabled, or key material deleted',
+      ['aws.kms'],
+      { eventName: ['ScheduleKeyDeletion', 'CancelKeyDeletion', 'DisableKey', 'DeleteImportedKeyMaterial'] },
+      notVaultAccount,
+    );
+    apiCall('KmsKeyPolicy', 'KMS key policy changed (outside a deploy)', ['aws.kms'], { eventName: ['PutKeyPolicy'], ...notDeploy }, notVaultAccount);
+
+    apiCall('S3PublicAccess', 'S3 bucket policy, ACL, ownership or public-access block changed (outside a deploy)', ['aws.s3'], {
+      eventName: [
+        'PutBucketPolicy',
+        'DeleteBucketPolicy',
+        'PutBucketAcl',
+        'PutBucketOwnershipControls',
+        'PutBucketPublicAccessBlock',
+        'DeleteBucketPublicAccessBlock',
+        'PutAccountPublicAccessBlock',
+        'DeleteAccountPublicAccessBlock',
+      ],
       ...notDeploy,
     });
 
     apiCall('SecurityGroupOpenToWorld', 'security group opened to the whole internet (outside a deploy)', ['aws.ec2'], {
       eventName: ['AuthorizeSecurityGroupIngress'],
-      requestParameters: { ipPermissions: { items: { ipRanges: { items: { cidrIp: ['0.0.0.0/0'] } } } } },
-      ...notDeploy,
+      // (IPv4 or IPv6 world) and not a deploy: EventBridge has no $and, so
+      // the cross product of the two $or lists.
+      $or: [
+        { requestParameters: { ipPermissions: { items: { ipRanges: { items: { cidrIp: ['0.0.0.0/0'] } } } } } },
+        { requestParameters: { ipPermissions: { items: { ipv6Ranges: { items: { cidrIpv6: ['::/0'] } } } } } },
+      ].flatMap((world) => notDeploy.$or.map((who) => ({ ...world, ...who }))),
     });
 
+    // Members' findings included: this account is the GuardDuty administrator.
     new events.Rule(this, 'GuardDutyFindings', {
-      description: 'GuardDuty findings, medium severity and above',
+      description: 'GuardDuty findings, medium severity and above (every account in the organization)',
       eventPattern: { source: ['aws.guardduty'], detailType: ['GuardDuty Finding'], detail: { severity: events.Match.greaterThanOrEqual(4) } },
       targets: [
         new targets.SnsTopic(topic, {
           message: events.RuleTargetInput.fromText(
-            `VettID GuardDuty finding (severity ${events.EventField.fromPath('$.detail.severity')}): ${events.EventField.fromPath('$.detail.title')}\n\n` +
-              `type:    ${events.EventField.fromPath('$.detail.type')}\n` +
-              `time:    ${events.EventField.fromPath('$.time')}\n\n` +
-              'Details: GuardDuty console → Findings.',
+            `VettID GuardDuty finding (severity ${ev('$.detail.severity')}): ${ev('$.detail.title')}\n\n` +
+              `account: ${ev('$.detail.accountId')}\n` +
+              `type:    ${ev('$.detail.type')}\n` +
+              `time:    ${ev('$.time')}\n\n` +
+              'Details: GuardDuty console → Findings (management account; it shows every member).',
           ),
         }),
       ],

@@ -57,6 +57,7 @@ describe('staging (-c stage=staging)', () => {
       // one release stack per entry of vault/releases/staging.json with a `host`
       ...readReleaseFile(ROOT, 'staging', STAGING).releases.filter((e) => e.host)
         .map((e) => [releaseStackId(e.release), STAGING, false]),
+      ['VettidOrgVaultAlertForwardStack', STAGING, false],
       ['VettidOrgMemberApiStack', STAGING, false],
       ['VettidOrgAccountSiteStack', STAGING, false],
       ['VettidOrgStageSiteStack', STAGING, false],
@@ -203,7 +204,8 @@ describe('prod is unaffected by staging', () => {
     const names = [...base.keys()];
     expect(names).not.toEqual(expect.arrayContaining(['VettidOrgStageDnsStack']));
     for (const n of names) expect(n).not.toMatch(/Stage(Dns|Site|TestMail)Stack|StagingDelegation/);
-    for (const { stack } of base.values()) expect(['369484479783', PROD]).toContain(stack.account);
+    // vault prod, the management account, and proteus (its alert forwarder only)
+    for (const { stack } of base.values()) expect(['369484479783', PROD, '605628228301']).toContain(stack.account);
   });
 
   test('stagingZoneNs adds only VettidOrgStagingDelegationStack, and changes no other prod template', () => {

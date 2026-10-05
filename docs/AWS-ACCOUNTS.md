@@ -48,8 +48,7 @@ which is why the vault's production keys need an account of their own
 - CDK is bootstrapped in each new account (`cdk bootstrap
   aws://<account>/us-east-1`), with trust limited to the account itself.
 - CloudTrail, GuardDuty and the security-alert rules extend to the new
-  accounts (an organization trail, or the audit stack deployed per
-  account).
+  accounts (§2.1).
 - SCPs (organization-level, applied to the new accounts only):
   deny leaving the organization, deny disabling CloudTrail/GuardDuty, and,
   for the vault accounts, deny deleting or modifying the named key-policy
@@ -57,6 +56,22 @@ which is why the vault's production keys need an account of their own
   release-key custom resource's role (VAULT-RELEASES §6). The vault part
   is `lib/org/scp-vault.json` (policy `vettid-vault-key-protection`,
   attached to the Vault OU by `scripts/vault/apply-scp.sh`; W5).
+
+### 2.1 Audit and security alerts across the organization
+
+| | Management (449757308783) | Members (vault prod 369484479783, vault staging 347272280361, proteus 605628228301) |
+|---|---|---|
+| CloudTrail | organization trail `vettid-org-trail` (VettidOrgAuditStack) | recorded by the organization trail; members cannot stop or change it (SCP) |
+| GuardDuty | detector and organization administrator | members, auto-enabled; findings reach the administrator |
+| Alert rules and email | VettidOrgAuditStack: all rules, topic `vettid-org-security-alerts` → admin@vettid.org | one forwarding rule each (`VettidOrg*AlertForwardStack`) sending CloudTrail write calls and console sign-ins to the management account's default bus |
+
+Centralized rather than an alert stack per account: one set of rules and
+allow-lists, one email subscription, and nothing to keep in step across
+accounts; a member account only holds a forwarder (rule plus role) that the
+management bus policy admits by name and organization id. The vault
+accounts keep their own KMS and pinned-role rules (VettidOrgVaultHostStack),
+which predate this and stay local to the keys they guard. RUNBOOK
+"Security alerts" lists the rules and how to test them.
 
 ## 3. Moving the Proteus website
 

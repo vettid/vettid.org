@@ -1,6 +1,6 @@
 import * as cdk from 'aws-cdk-lib/core';
 import { join } from 'node:path';
-import { loadConfig, stageZoneNs } from './config';
+import { ORG, ORG_MEMBER_ACCOUNTS, loadConfig, stageZoneNs } from './config';
 import { VettidOrgStack } from './stacks/web-stack';
 import { VettidOrgDnsStack } from './stacks/dns-stack';
 import { VettidOrgSignupStack } from './stacks/signup-stack';
@@ -14,6 +14,7 @@ import { VettidOrgAdminSiteStack } from './stacks/admin-site-stack';
 import { VettidOrgMemberApiStack } from './stacks/member-api-stack';
 import { VettidOrgAccountSiteStack } from './stacks/account-site-stack';
 import { VettidOrgAuditStack } from './stacks/audit-stack';
+import { VettidOrgAlertForwardStack } from './stacks/alert-forward-stack';
 import { VettidOrgRelayStack } from './stacks/relay-stack';
 import { VettidOrgRelayDataStack } from './stacks/relay-data-stack';
 import { VettidOrgVaultSmokeStack } from './stacks/vault-smoke-stack';
@@ -58,6 +59,16 @@ export function buildApp(app: cdk.App): void {
   // release with a `host` in vault/releases/<channel>.json (none yet). Later
   // stacks read the earlier ones' refs from SSM at deploy time; nothing is
   // exported.
+  // Security-alert forwarding from a member account of the organization to
+  // the management account's bus, where VettidOrgAuditStack's rules match
+  // and email (RUNBOOK "Security alerts"). Deployed with that account's
+  // profile, after VettidOrgAuditStack (its bus policy admits the forwarder).
+  const forwarders: cdk.Stack[] = [];
+  const alertForward = (id: string, account: string) => {
+    if (!ORG_MEMBER_ACCOUNTS.includes(account)) throw new Error(`${id}: ${account} is not a member account of ${ORG.id}`);
+    forwarders.push(new VettidOrgAlertForwardStack(app, id, { env: { account, region: config.region } }));
+  };
+
   const vaultStacks = (): cdk.Stack | undefined => {
     if (!config.vault) return undefined;
     const venv = vaultEnv(config, config.vault);
@@ -77,6 +88,7 @@ export function buildApp(app: cdk.App): void {
       const rel = new VettidOrgVaultReleaseStack(app, releaseStackId(spec.release), { config, env: venv, spec });
       rel.addDependency(host);
     }
+    alertForward('VettidOrgVaultAlertForwardStack', config.vault.account);
     return vault;
   };
 
@@ -104,7 +116,9 @@ export function buildApp(app: cdk.App): void {
   // drill seeds data from the CLI: scripts/staging/seed.ts), the relay
   // (staging images pin the production relay), push, the vettid.dev
   // redirect, and the audit stack (the organization trail and GuardDuty,
-  // administered from the management account, already cover this account).
+  // administered from the management account, already cover this account;
+  // VettidOrgVaultAlertForwardStack sends its events to the management
+  // account's alert rules).
   // Dependencies only order `cdk deploy --all`; nothing is exported.
   if (config.stage !== 'prod') {
     const dnsStack = new VettidOrgStageDnsStack(app, 'VettidOrgStageDnsStack', { config, ...stateful });
@@ -209,5 +223,14 @@ export function buildApp(app: cdk.App): void {
   }
 
   // ---- Account-level audit & detection (CloudTrail, GuardDuty, alerts) ----
-  new VettidOrgAuditStack(app, 'VettidOrgAuditStack', { config, ...stateful });
+  // Alerts for the whole organization: the vault account's forwarder (above)
+  // and the proteus account's forward their events here. The Proteus
+  // website's own code is the proteus-web-site repository; this forwarder
+  // is an organization-level control, so it lives with the audit stack.
+  //   npx cdk deploy VettidOrgAuditStack                                   (management)
+  //   npx cdk deploy VettidOrgVaultAlertForwardStack --profile vault-prod
+  //   npx cdk deploy VettidOrgProteusAlertForwardStack --profile proteus
+  const audit = new VettidOrgAuditStack(app, 'VettidOrgAuditStack', { config, ...stateful });
+  alertForward('VettidOrgProteusAlertForwardStack', ORG.members.proteus);
+  for (const f of forwarders) f.addStackDependency(audit);
 }
