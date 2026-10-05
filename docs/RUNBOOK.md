@@ -717,8 +717,8 @@ switch unreadable`.
 **Alerts.** Every write to the parameter (admin site or CLI, either
 stage) emails the security alerts ("vault service switch changed").
 Production also has two alarms on the metric `VettID/MemberApi
-VaultServicePaused` (written every 5 minutes by
-`vettid-org-vault-service-watch`): `vettid-org-vault-service-paused`
+VaultServicePaused` (written every 5 minutes by the member API's
+`VaultServiceWatch` job): `vettid-org-vault-service-paused`
 (alarm within about 10 minutes of pausing, OK when resumed) and
 `vettid-org-vault-service-paused-24h` (still paused after a day), so a
 pause is not forgotten. Staging has the alarms without a recipient.

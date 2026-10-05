@@ -139,7 +139,7 @@ and put that one parameter (and write the audit table).
 |---|---|---|---|
 | GET | `/admin/vault-service` | — | `VaultService` |
 | POST | `/admin/vault-service/pause` | `{reason: string}` (1–500 chars, required) | `VaultService` (paused). `409` if already paused. Audited `vault.service.pause` (`reason`). |
-| POST | `/admin/vault-service/resume` | — | `VaultService` (on). `409` if not paused. Audited `vault.service.resume` (the pause's `reason`, `set_by` and `set_at`). |
+| POST | `/admin/vault-service/resume` | — | `VaultService` (on). `409` if not paused. Audited `vault.service.resume` (`paused_reason`, `paused_by`, `paused_at`: what the pause was). |
 
 ```ts
 interface VaultService {
