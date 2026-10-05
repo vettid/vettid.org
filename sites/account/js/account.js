@@ -5,8 +5,10 @@
 import { del, get, post, publicPost } from './api.js';
 import { $, chip, date, el, fill } from './dom.js';
 import * as ui from './ui.js';
+import { mountVault, renderVault, showVault } from './vault.js';
 
 ui.init();
+mountVault({ getMe: () => me, reveal: (id) => reveal(id) });
 
 const TERMS_URL_MAX_AGE_MS = 4 * 60 * 1000; // pdf_url is presigned for 5 minutes
 
@@ -79,6 +81,7 @@ function renderAll() {
   renderPin();
   renderPrefs();
   renderCancel();
+  renderVault();
 }
 
 // ── Shared bits ─────────────────────────────────────────────────────────
@@ -119,12 +122,12 @@ function days(n) {
 
 const shortHash = (h) => (h ? `${String(h).slice(0, 12)}…` : '');
 
-// ── Tabs (#start | #membership | #security | #settings) ─────────────────
+// ── Tabs (#start | #membership | #vault | #security | #settings) ────────
 // The first tab is labelled "Getting started" while actionable steps remain
 // and "Overview" once they're done; its hash stays #start (#overview is an
 // alias kept for old links).
 
-const TABS = ['start', 'membership', 'security', 'settings'];
+const TABS = ['start', 'membership', 'vault', 'security', 'settings'];
 const HASH_ALIASES = { overview: 'start' };
 
 function tabFromHash() {
@@ -154,6 +157,7 @@ function selectTab(name, { focus = true } = {}) {
   }
   const want = `#${name}`;
   if (location.hash !== want) history.replaceState(null, '', location.pathname + location.search + want);
+  if (name === 'vault') showVault();
   if (focus) $(`tab-${name}`).focus();
 }
 

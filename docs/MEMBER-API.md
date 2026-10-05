@@ -436,6 +436,47 @@ interface Recovery {
   be a verified identity, as for sign-in links; a failed send is logged
   and does not fail the request).
 
+### The account site's vault pages
+
+What `sites/account` does with the routes above (enrollment, unlock,
+release approval, `register` and vault deletion are app-only; the site
+never asks for the vault PIN or the credential password):
+
+- **`/account/#vault`** (a tab of the account page, behind the `/account/`
+  cookie gate): `GET /api/vault/status`, loaded when the tab is opened.
+  No vault: what is needed (membership, current terms, Android 12+), the
+  app link from `/config.json` (`android_app_url`, CDK context
+  `androidAppUrl` / `<stage>AndroidAppUrl`; until it is set the page says
+  the app is not available yet; staging says to use the VettID Staging
+  build), and the setup steps as the app shows them. A vault: state,
+  release number and status, `release.notice` as a notice (approval
+  happens in the app at an unlock), an open recovery, the last
+  `credential_clone` alarm, and **Lock vault** (`POST /api/vault/lock`
+  with a browser-made ULID, then up to 30 s of `requests/{id}` polling)
+  while the vault is `unlocked` or leased. The release log link is
+  production's in every stage.
+- **`/account/vault/recovery/`** (gated): the request
+  (`browser_key` from a WebCrypto P-256 pair made **non-extractable**,
+  kept in IndexedDB `vettid-vault-recovery`, store `keys`, keyed by
+  `recovery_id` once the API answers; an unbound key survives a lost
+  answer and is tried when the code is opened), the 24 h countdown and
+  cancel, and, while `available`, the code: opened in the page (ECDH
+  `deriveBits`, HKDF-SHA-256, AES-256-GCM, all WebCrypto), drawn as the
+  §11.11.2 QR payload by the vendored qrcode-generator 2.0.4 (MIT,
+  `js/vendor/`, checksum pinned in `test/site-vault.test.ts`) and as
+  text in groups of four. The code is decrypted only when the member
+  presses **Show the code** and is removed from the page on **Hide**, on
+  any re-render and on `pagehide`; it is never sent, logged or stored.
+  Polling `GET /api/vault/recovery` is at most once a minute (once every
+  15 s while `available` without `sealed_code`). A browser without the
+  key (another browser, a private window, cleared site data) is told so
+  and offered cancel and a new request. Keys of ended recoveries are
+  deleted.
+- **`/vault/recovery/cancel#t=<token>`** (outside the gate, no session):
+  the fragment is removed from the address bar first; the token is sent
+  to `cancel-link` only when the member presses the button. 404 explains
+  that the link is used or the recovery has ended.
+
 ### Vault alarms (VAULT-MESSAGING 0.9.0 §3.5.9, §11.5)
 
 When the vault sees a clone of the member's Protean Credential (a copy

@@ -57,6 +57,14 @@ export interface AppConfig {
    * stacks are then not part of the app.
    */
   readonly vault: VaultConfig | undefined;
+  /**
+   * Where members get the Android app (the account site's Vault tab links
+   * to it): the Google Play listing in production, the test build's page
+   * in staging. Context `androidAppUrl` in prod, `<stage>AndroidAppUrl`
+   * elsewhere; an https URL. Unset until one exists: the site then says the
+   * app is not available yet (never a placeholder link).
+   */
+  readonly androidAppUrl?: string;
 }
 
 export interface VaultConfig {
@@ -211,6 +219,11 @@ export function loadConfig(node: Node): AppConfig {
   const domainName = 'vettid.org';
   const zoneName = stage === PROD_STAGE ? domainName : `${stage}.${domainName}`;
   const streamKey = stage === PROD_STAGE ? 'vaultsStreamArn' : `${stage}VaultsStreamArn`;
+  const appUrlKey = stage === PROD_STAGE ? 'androidAppUrl' : `${stage}AndroidAppUrl`;
+  const androidAppUrl = String(node.tryGetContext(appUrlKey) ?? '');
+  if (androidAppUrl && !/^https:\/\/[^\s"<>]+$/.test(androidAppUrl)) {
+    throw new Error(`context ${appUrlKey}: expected an https URL, got ${JSON.stringify(androidAppUrl)}`);
+  }
   return {
     stage,
     domainName,
@@ -228,6 +241,7 @@ export function loadConfig(node: Node): AppConfig {
     vault: STAGE_ACCOUNTS[stage]?.vault
       ? { ...STAGE_ACCOUNTS[stage].vault!, vaultsStreamArn: String(node.tryGetContext(streamKey) ?? '') }
       : undefined,
+    ...(androidAppUrl ? { androidAppUrl } : {}),
   };
 }
 

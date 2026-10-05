@@ -593,6 +593,17 @@ rest; query logs in `/vettid-org/<stage>/vault-dns`, metric
 account's resources. AMIs are built in a separate build VPC without the
 firewall (the builder needs GitHub and the package repositories).
 
+### The Android app link (account site)
+
+The account site's Vault tab links to the Android app from
+`/config.json`, which the account site stack writes at deploy from CDK
+context: `androidAppUrl` (production, the Google Play listing) and
+`stagingAndroidAppUrl` (staging, the test build's page). Both are unset
+until the link exists, and the page then says the app is not available
+yet. To set one, add it to cdk.json `"context"` (https only; the synth
+fails otherwise), commit it (PR) and deploy `VettidOrgAccountSiteStack`
+for that stage.
+
 ### Still to come
 
 Publishing a release (manifest signing, W7), instance and lease health in
