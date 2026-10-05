@@ -1,6 +1,17 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
+version: 1.1.0
+changelog:
+  - 1.1.0 (2026-10-05, VAULT-MESSAGING 0.10.6): `VaultStatus` documents
+    `recovery`; `state` reads `unlocked` only under a live lease;
+    `Recovery` gains `vault_id` and the state `registered` (no
+    `sealed_code` after it); both recovery cancel routes answer
+    `{cancelled}`; `GET /api/vault/recovery` without an enrolled vault is
+    `{recovery: null}` (as it always was). Additive: v1 clients that ignore unknown fields and
+    treat an unknown recovery state as ended keep working
+  - 1.0.0: v1 as first published (Phase 2), with the vault routes added
+    since (no version was recorded before 1.1.0)
 related: ACCOUNT-ADMIN-PLAN.md (§5 member account site), ADMIN-API.md
 ---
 
@@ -177,13 +188,17 @@ interface Enclave {
 
 interface VaultStatus {     // advisory: written by the enclave host, never a security signal (§11.5)
   vault_id: string;
-  state: 'enrolling' | 'locked' | 'unlocked';
+  state: 'enrolling' | 'locked' | 'unlocked';  // `unlocked` only while `leased` (below)
   sealed_release: string | null;
   vault_version: string | null;
   state_version: number | string | null;
   leased: boolean;          // an instance currently holds the vault
   alarm: { kind: 'credential_clone'; at: string } | null;  // the last host alarm (below), advisory
   release: ReleaseInfo | null;  // the sealed release (W8); null while not sealed yet
+  recovery: {               // the active recovery ("Vault recovery"), for apps and the account site
+    state: 'pending' | 'available' | 'registered';
+    available_at: string;   // RFC 3339
+  } | null;                 // null: none, or it was cancelled or has expired
   created_at: string; updated_at: string;
 }
 
@@ -204,6 +219,14 @@ interface ReleaseInfo {     // from the routing table (the signed manifest); adv
 The apps take release status from the signed manifest itself
 (VAULT-MESSAGING §11.10.6); `release` is for the account site and agrees
 with it because both come from the same manifest.
+
+**`state` and the lease** (1.1.0, VAULT-MESSAGING 0.10.6 §11.5). A vault
+runs only while its instance holds an unexpired lease, so a row that says
+`unlocked` without one is answered `locked`: the host's own update to
+`locked` can arrive late or, before vettid-vault fixes it, not at all
+(for a vault locked from the app over the relay). `leased` is the same
+check. A lease that is unexpired but held by a crashed instance still
+reads `unlocked` until it expires.
 
 **Fields.**
 - `request_id`: a canonical ULID chosen by the app, the same as inside the
@@ -375,14 +398,15 @@ the expiry itself.
 |---|---|---|---|
 | POST | `/api/vault/recovery` | `{browser_key}` | `202 {recovery_id, available_at, expires_at}` |
 | GET | `/api/vault/recovery` | — | `{recovery: Recovery \| null}` |
-| POST | `/api/vault/recovery/cancel` | `{recovery_id}` | `200 {}` |
-| POST | `/api/vault/recovery/cancel-link` | `{token}` (no session) | `200 {}` |
+| POST | `/api/vault/recovery/cancel` | `{recovery_id}` | `200 {cancelled: boolean}` |
+| POST | `/api/vault/recovery/cancel-link` | `{token}` (no session) | `200 {cancelled: boolean}` |
 | POST | `/api/vault/recovery/register` | `{vault_id, request_id, instance_id, etk_kid, envelope}` | `202 {vault_id, request_id}`; poll `GET /api/vault/requests/{id}` |
 
 ```ts
 interface Recovery {
   recovery_id: string;                 // ULID; the queue request id
-  state: 'pending' | 'available' | 'cancelled' | 'expired';
+  vault_id: string;                    // the vault being recovered (HKDF info and QR payload, §11.11.2)
+  state: 'pending' | 'available' | 'registered' | 'cancelled' | 'expired';
   requested_at: string;                // RFC 3339
   available_at: string;                // requested_at + 24 h
   expires_at: string;                  // available_at + 24 h
@@ -407,7 +431,9 @@ interface Recovery {
   (`https://account.vettid.org/vault/recovery/cancel#t=<token>`; the API
   stores only the token's SHA-256, in a request-table row that expires
   with the recovery).
-- **Status.** `available` from `available_at` to `expires_at` while not
+- **Status.** Without an enrolled vault (none, `enrolling` or deleted)
+  the answer is `{recovery: null}`, not `404`; likewise for a vault that
+  never had a recovery. `available` from `available_at` to `expires_at` while not
   cancelled; `sealed_code` is the slot's envelope, returned only then (and
   absent if the host has not answered yet). The portal decrypts it and
   renders the QR locally.
@@ -415,22 +441,43 @@ interface Recovery {
   VAULT-MESSAGING §11.11.2): a vault without a Protean Credential cannot
   be recovered. The API cannot tell the two apart; the portal shows the
   refusal once it decrypts the answer.
+- **Registered** (1.1.0, VAULT-MESSAGING 0.10.6 §11.11.7). The register
+  route records the `request_id` on the recovery (`register_ids`, at
+  most the 10 a day the rate limit allows) and on its slot
+  (`recovery_id`). When a register slot is `done` with `code:
+  "recovery_registered"` (the enclave's clear marker of `{ok: true}`,
+  copied by the host), the API sets the recovery's state to
+  `registered` (conditional on the same `recovery_id` and on not being
+  cancelled) and audits `vault.recovery_registered`. It notices it when
+  the app polls `GET /api/vault/requests/{id}` for that request, and
+  also when `GET /api/vault/recovery` or `/status` finds an `available`
+  recovery with register requests (it reads their slots, which live 15
+  minutes). From then on `sealed_code` is not returned. `registered`
+  stays active until `expires_at` (a new request is `409
+  recovery_active`, `status` shows it, it can be cancelled), and reads
+  `registered` afterwards. Until vettid-vault sends the marker, a
+  recovery stays `available` after a register, as before.
 - **Cancel** (session or link): marks the recovery `cancelled`, enqueues
-  `recovery_cancel` to the same routing, and emails the member. Cancelling
-  a recovery that is not `pending` or `available` is a no-op `200`.
+  `recovery_cancel` to the same routing, emails the member and answers
+  `{cancelled: true}`. Cancelling a recovery that is not `pending`,
+  `available` or `registered` (or one that has passed `expires_at`) is a
+  no-op answered `{cancelled: false}`. The link stays valid until the
+  recovery's `expires_at`, so its second use answers `false`; a link of a
+  recovery that a newer one has replaced is `404`.
 - **Register.** Like unlock (envelope exactly 13,444 bytes, routing,
   `request_id` once), and only while the recovery is `available`
   (`409 recovery_not_available`). The enclave re-checks the delay, the
   expiry, the code and the device attestation.
-- **`GET /api/vault/status`** adds `recovery: {state, available_at} |
-  null` to `VaultStatus`, so the app can show a recovery in progress
-  and offer to cancel it.
+- **`GET /api/vault/status`** includes `recovery: {state,
+  available_at} | null` in `VaultStatus` (above): the active recovery
+  (`pending`, `available` or `registered` before `expires_at`), so the
+  app can show a recovery in progress and offer to cancel it.
 - **Rate limits:** request 3 per member per day; register 10 per member
   per day; cancel 30 per member per 15 minutes; the cancel link 20 per
   source network per 15 minutes; status 60 per minute.
 - **Audit:** `vault.recovery_request`, `vault.recovery_cancel` (with
   `via: session | link`), `vault.recovery_code_released` (first release),
-  `vault.recovery_register`. Never the code, the browser key, the token or
+  `vault.recovery_register`, `vault.recovery_registered` (1.1.0). Never the code, the browser key, the token or
   envelopes.
 - **Email** uses the system mailer (SES sandbox: the member's address must
   be a verified identity, as for sign-in links; a failed send is logged
@@ -471,11 +518,15 @@ never asks for the vault PIN or the credential password):
   15 s while `available` without `sealed_code`). A browser without the
   key (another browser, a private window, cleared site data) is told so
   and offered cancel and a new request. Keys of ended recoveries are
-  deleted.
+  deleted. The seal is opened with the recovery's own `vault_id`. A
+  `registered` recovery is shown as "used on your new phone", without a
+  code (its key is deleted), with cancel while it is active.
 - **`/vault/recovery/cancel#t=<token>`** (outside the gate, no session):
   the fragment is removed from the address bar first; the token is sent
-  to `cancel-link` only when the member presses the button. 404 explains
-  that the link is used or the recovery has ended.
+  to `cancel-link` only when the member presses the button.
+  `{cancelled: true}` confirms the cancel; `{cancelled: false}` says
+  there was nothing left to cancel (cancelled already, or ended); 404
+  explains that the link no longer belongs to a recovery.
 
 ### Vault alarms (VAULT-MESSAGING 0.9.0 §3.5.9, §11.5)
 
@@ -572,8 +623,9 @@ host writes the fields marked *host*):
   alarm Lambda adds `alarm.emailed_at` and removes `alarm_pending`).
   Pointer rows `user#<guid>` →
   `current_vault_id` (API only; no `user_guid`, so they stay out of the index).
-  API: `recovery {recovery_id, state, requested_at, available_at, expires_at}`
-  (epoch s for the times).
+  API: `recovery {recovery_id, state (pending|registered|cancelled),
+  requested_at, available_at, expires_at, register_ids?}` (epoch s for
+  the times; `available` and `expired` are derived from them).
 - `vettid-org-vault-instances` (PK `instance_id`, GSI `release-index` on
   `release` + `heartbeat_at`), all *host*: `release`, `queue_url`,
   `descriptor` (b64), `attestation` (b64), `heartbeat_at` (epoch s),
