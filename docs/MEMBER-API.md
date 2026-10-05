@@ -7,7 +7,8 @@ changelog:
     `recovery`; `state` reads `unlocked` only under a live lease;
     `Recovery` gains `vault_id` and the state `registered` (no
     `sealed_code` after it); both recovery cancel routes answer
-    `{cancelled}`. Additive: v1 clients that ignore unknown fields and
+    `{cancelled}`; `GET /api/vault/recovery` without an enrolled vault is
+    `{recovery: null}` (as it always was). Additive: v1 clients that ignore unknown fields and
     treat an unknown recovery state as ended keep working
   - 1.0.0: v1 as first published (Phase 2), with the vault routes added
     since (no version was recorded before 1.1.0)
@@ -430,7 +431,9 @@ interface Recovery {
   (`https://account.vettid.org/vault/recovery/cancel#t=<token>`; the API
   stores only the token's SHA-256, in a request-table row that expires
   with the recovery).
-- **Status.** `available` from `available_at` to `expires_at` while not
+- **Status.** Without an enrolled vault (none, `enrolling` or deleted)
+  the answer is `{recovery: null}`, not `404`; likewise for a vault that
+  never had a recovery. `available` from `available_at` to `expires_at` while not
   cancelled; `sealed_code` is the slot's envelope, returned only then (and
   absent if the host has not answered yet). The portal decrypts it and
   renders the QR locally.

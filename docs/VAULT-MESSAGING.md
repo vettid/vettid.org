@@ -32,7 +32,11 @@ changelog:
     peer's `connection.approved` gave a standing token; the audit `ref`
     of a decline after activation is the `connection_id`; on S2
     receivers the decline stays unacked and is redelivered until expiry
-    (§6.4, §10.9, §15 items 18 and 19)
+    (§6.4, §10.9, §15 items 18 and 19). From the Android recovery and
+    transfer work: a recovered app's unlock result carries
+    `credential_backup` (§11.11.5); a transferring app stops waiting for
+    `hs.resp` after 60 s (§6.7.1); without an enrolled vault `GET
+    /api/vault/recovery` answers `{recovery: null}` (§11.11.7)
   - 0.10.5: a declined connection request is sent to the other party
     (owner decision of 2026-10-05, reversing 0.10.2 decision 2): the
     declining vault sends `connection.declined{}` under the handshake's
@@ -2094,6 +2098,11 @@ Old app (holder)           Vault                  Relay             New app
    `hs.fin` and shows the SAS, and once `hs.fin` checks out (§6.3) the
    vault sends the holder `device.transfer.pending{transfer_id, name,
    sas}`.
+   A dropped `hs.init` (a spent or expired link, a failed attestation)
+   is never answered, so the new app cannot tell it from a slow vault.
+   It SHOULD stop waiting for `hs.resp` after **60 seconds** and tell its
+   user that the code may already have been used or that this phone
+   could not be verified, and offer to scan a new code (0.10.6).
 3. The holder compares the SAS and sends `device.transfer.approve` with
    its current blob and, sealed to a UTK (§3.5.4), the `password` and the
    `pin`. The vault:
@@ -2138,7 +2147,7 @@ and the new app's handshake state is dropped. A commitment mismatch at
 |---|---|
 | The holder rejects (`device.transfer.reject`), before or after the scan | Aborted. Nothing else changes. After the new app's `hs.fin` the vault tells it with `device.pair.rejected` (0.10.5, §6.7); before that the new app times out. (Since 0.10.3 an approval completes the transfer, so there is nothing to reject after it.) |
 | No scan before the link's `exp` (10 minutes after `device.transfer.create`), or no approval within 10 minutes after the new app's `hs.init` (0.10.4) | Aborted. Nothing else changes. |
-| The new app's attestation fails | Its `hs.init` is dropped; the transfer stays open until its 10 minutes run out. |
+| The new app's attestation fails | Its `hs.init` is dropped; the transfer stays open until its 10 minutes run out. The new app stops waiting for `hs.resp` after 60 seconds (step 2, 0.10.6). |
 | Wrong PIN or password at approval | `bad_pin` / `bad_password`, counted in their backoffs. The transfer stays pending until its 10 minutes run out; the member may retry. |
 | The new app goes offline before its `hs.fin` | No SAS is shown; the transfer times out after 10 minutes; nothing changes. |
 | The new app goes offline after its `hs.fin` | The approval still completes the transfer. `device.paired` waits in the new app's mailbox (relay TTL); if the new app never returns, the member recovers (§11.11), as when a new app is lost after a transfer. |
@@ -6447,6 +6456,10 @@ because it only reduces exposure. Owner apps learn of the recovery from
      `vault.enrolled`). The bundle is authenticated by being sealed to
      `app.kem`, which only the attested enclave received, inside the
      register request.
+   - The result also carries `credential_backup` (bool, 0.10.6): the
+     vault's `credential.backup` setting (§3.5.6), so that the app asks
+     for the credential password only when the vault keeps a copy, and
+     otherwise goes straight to the choice of step 4.
 2. **Handshake.** The app sends `hs.init` with purpose `app` and `ctx` =
    `recovery_id`. It is accepted without approval, exactly as the first
    app's handshake (§11.3), because its keys were bound at registration.
@@ -6549,6 +6562,9 @@ The email link uses its own route, `POST /api/vault/recovery/cancel-link`
 with body `{token}`, answered `200 {cancelled}` like the session's
 cancel. It needs no session: the token stands in for it.
 
+- **No vault.** Without an enrolled vault (none, `enrolling` or
+  deleted), `GET /api/vault/recovery` answers `{recovery: null}`, not
+  `404` (0.10.6, as the API always did).
 - **`vault_id`** (0.10.6): the vault being recovered, which the portal
   needs for the seal's HKDF `info` (§11.11.2) and the QR payload.
 - **State.** `state` is `pending`, `available` (from `available_at`, when
@@ -7300,6 +7316,14 @@ Follow-ups:
     - The cancel routes answered `200 {}` whether or not they cancelled
       anything; they answer `{cancelled}` (§11.11.7).
     - The QR's parameters were not fixed (§11.11.2).
+    - From the Android recovery and transfer work (vettid-android PR
+      #56): the recovered app could not know whether to ask for the
+      credential password, so the unlock result of a registered app
+      carries `credential_backup` (§11.11.5 step 1); a new app of a
+      transfer whose `hs.init` was dropped waited for nothing, so it
+      stops after 60 s (§6.7.1); and the answer of `GET
+      /api/vault/recovery` without a vault was unspecified
+      (§11.11.7).
     - **Lock state.** On staging, after the member locked the vault from
       the app (`vault.lock` over the relay), the vault row kept
       `state: unlocked` with no lease. The vault process reports
@@ -7313,10 +7337,12 @@ Follow-ups:
     parent copies it into the slot; the parent's lease release on a
     stopped vault turns `unlocked` into `locked`; the vault process
     delivers its queued notifications before it exits; a recovery vector
-    `testdata/vectors/recovery.json` for the seal and the QR payload);
+    `testdata/vectors/recovery.json` for the seal and the QR payload;
+    `credential_backup` in a registered app's unlock result);
     vettid-android (the recovery scanner accepts any QR version and any
     level from M up; it ignores the slot's `recovery_registered`
-    marker); vettid.org (the member API and the account site, done with
+    marker; it asks for the password only with `credential_backup`
+    true; the transfer's 60 s wait for `hs.resp`); vettid.org (the member API and the account site, done with
     this version).
     **OWNER DECISIONS of 0.10.6** (pending):
     1. The enclave states a successful register in the clear
@@ -7331,6 +7357,20 @@ Follow-ups:
        host turns `unlocked` into `locked` when it releases a stopped
        vault's lease. Recommended: yes; a vault cannot run without its
        lease, and the status is advisory anyway.
+    4. `credential_backup` in the registered app's unlock result.
+       Recommended: yes; the setting is the member's own, revealed only
+       to an app that already passed the code, the attestation and the
+       PIN, and it spares the member a password prompt that cannot
+       succeed.
+    5. The 60-second wait for `hs.resp` is a SHOULD for apps, not a
+       protocol timer. Recommended: yes; the vault's `hs.resp` is
+       immediate (0.10.3), so 60 s covers relay delay with margin.
+    6. `attempts_left` in `vault.recovery.result` (`ok: false, code:
+       bad_code`), so that apps need not count wrong codes themselves.
+       Recommended: not in 0.10.6, revisit in a later revision; the count
+       is enforced in the enclave (5 per recovery, §11.11.2) and an
+       app's local count only drives its wording, while a new field in
+       a sealed result needs the vault and apps to change together.
 
 ## 16. Test vectors
 
@@ -7514,7 +7554,14 @@ pending (§15, follow-up 1).
   - §15 item 18 Compatibility: on S2 receivers, after their member's
     approval, the decline stays unacked and is redelivered at each relay
     lease until the request expires.
-  - §15 item 19: follow-ups and owner decisions (pending).
+  - §11.11.5 step 1: a registered app's unlock result carries
+    `credential_backup`.
+  - §6.7.1 step 2 and failures: the new app stops waiting for `hs.resp`
+    after 60 s and says the code may have been used or the phone could
+    not be verified.
+  - §11.11.7: `{recovery: null}` without an enrolled vault.
+  - §15 item 19: follow-ups and owner decisions (pending; decision 6,
+    `attempts_left`, recommended for a later revision).
 
 - **0.10.5** (2026-10-05): declines are sent (owner decision of
   2026-10-05, reversing 0.10.2 decision 2; §15 item 18).
