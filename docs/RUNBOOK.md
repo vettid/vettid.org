@@ -703,6 +703,9 @@ for that stage.
 
 ### Still to come
 
+Production release 1: status, blockers and the release-day steps are in
+docs/W10-READINESS.md until it is published.
+
 Publishing a release (manifest signing, W7), instance and lease health in
 practice, incident classes and first responses, capacity per host, and
 the disaster-recovery objectives (VAULT-RELEASES §11.4).
