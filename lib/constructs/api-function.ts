@@ -77,6 +77,16 @@ export class ApiFunction extends Construct {
         externalModules: [],
         // ESM bundles of CJS deps need `require` available.
         banner: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
+        // Source-map paths independent of the assembly's location, so the
+        // asset hash depends only on the code (sourcemap-paths.cjs; the
+        // production drift check compares these hashes).
+        commandHooks: {
+          beforeBundling: () => [],
+          beforeInstall: () => [],
+          afterBundling: (inputDir: string, outputDir: string) => [
+            `node "${inputDir}/lib/constructs/sourcemap-paths.cjs" "${outputDir}" "${inputDir}"`,
+          ],
+        },
       },
     });
   }

@@ -4,7 +4,7 @@ module.exports = {
   testMatch: ['**/*.test.ts'],
   // Prefer TypeScript sources over stale tsc output (`npm run build` emits
   // .js next to each .ts, and jest would otherwise resolve those first).
-  moduleFileExtensions: ['ts', 'js', 'json'],
+  moduleFileExtensions: ['ts', 'js', 'cjs', 'json'],
   transform: {
     '^.+\\.tsx?$': 'ts-jest',
     // The site's browser ES modules, for test/site-vault.test.ts.

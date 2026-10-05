@@ -1,0 +1,89 @@
+# Production drift check (docs/RUNBOOK.md "Production drift").
+#
+# Daily, and on demand: synthesizes master and compares every production
+# stack's template with the one CloudFormation holds, in the management
+# account (449757308783) and vettid-vault-prod (369484479783). Lambda code
+# and site content are compared through their asset hashes. Read-only: the
+# roles (VettidOrgCiReadOnlyStack, VettidOrgVaultCiReadOnlyStack) can only
+# list stacks and read templates.
+#
+# Drift → the job fails and the "Production drift" issue is opened or
+# updated. In sync → an open "Production drift" issue is closed.
+#
+# Actions are pinned by commit SHA (tag in the comment).
+name: Production drift
+
+on:
+  schedule:
+    - cron: '23 13 * * *' # daily, 13:23 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: production-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    # The roles trust master only (OIDC sub repo:vettid/vettid.org:ref:refs/heads/master).
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write # GitHub OIDC → the read-only roles
+      issues: write # the "Production drift" issue
+    env:
+      MAIN_ROLE: arn:aws:iam::449757308783:role/vettid-org-ci-drift-readonly
+      VAULT_ROLE: arn:aws:iam::369484479783:role/vettid-org-ci-drift-readonly
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The report lists the commits merged since each stack's last deploy.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+
+      # No AWS credentials yet: synth needs none (lookups are cached in
+      # cdk.context.json and cdk.json). Into the default cdk.out: asset
+      # hashes then match the owner's deploys byte for byte.
+      - name: Synthesize master
+        env:
+          HEADSCALE_LOGIN_SERVER: ${{ vars.HEADSCALE_LOGIN_SERVER }}
+          AWS_EC2_METADATA_DISABLED: 'true'
+        run: |
+          if [ -z "$HEADSCALE_LOGIN_SERVER" ]; then
+            echo "::error::Repository variable HEADSCALE_LOGIN_SERVER is not set (the owner's ~/.cdk.json headscaleLoginServer); without it VettidOrgAdminAccessStack is not synthesized."
+            exit 1
+          fi
+          npx cdk synth --quiet -c headscaleLoginServer="$HEADSCALE_LOGIN_SERVER" > /dev/null
+
+      - name: Credentials (management account, read-only)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ env.MAIN_ROLE }}
+          role-session-name: drift-${{ github.run_id }}
+          aws-region: us-east-1
+      - name: Compare (management account)
+        run: npm run -s drift -- check --account 449757308783 --out drift-main.json
+
+      - name: Credentials (vettid-vault-prod, read-only)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ env.VAULT_ROLE }}
+          role-session-name: drift-${{ github.run_id }}
+          aws-region: us-east-1
+      - name: Compare (vettid-vault-prod)
+        run: npm run -s drift -- check --account 369484479783 --out drift-vault.json
+
+      # Exits 1 on drift, after updating the issue: the failed run is the
+      # notification, the issue is the record.
+      - name: Report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: npm run -s drift -- report --issue --summary "$GITHUB_STEP_SUMMARY" drift-main.json drift-vault.json
