@@ -20,6 +20,9 @@ npm run deploy:all                                # everything
   because it creates the `vettid-org-signup/origin-verify` secret that
   VettidOrgStack resolves (by name) into the `/api/*` origin header; until
   VettidOrgStack is redeployed after it, the signup API answers 403.
+- Deploy what you merge, from an up-to-date master with `npm ci`'d
+  dependencies and the default `cdk.out`. A daily check alerts when
+  production differs from master ("Production drift" below).
 
 ## Stacks
 
@@ -45,7 +48,98 @@ turning that off in code (or the console) first.
 | `VettidOrgStageDnsStack` | **Staging only** (vettid-vault-staging): zone `staging.vettid.org`, its CAA, the SES domain identity `staging.vettid.org` (DKIM records), SSM `dns/zone-id`. Stateful. |
 | `VettidOrgStageSiteStack` | **Staging only**: https://staging.vettid.org (`sites/staging`), serving the staging channel's manifest from `vault/staging/pcr-manifest.json`. |
 | `VettidOrgStageTestMailStack` | **Staging only, test infrastructure**: MX for `test.staging.vettid.org`, the SES receipt rule set storing its mail in `vettid-org-staging-test-mail-<account>` (7 days), the owner-only reader role. See "Staging" → "Test mail". Never in prod. |
+| `VettidOrgCiReadOnlyStack`, `VettidOrgVaultCiReadOnlyStack` | Prod only, one per production account (management; vettid-vault-prod with `--profile vault-prod`): the GitHub Actions OIDC provider and the read-only role `vettid-org-ci-drift-readonly` for the drift check. See "Production drift". |
 | `VettidOrgRelayStack` | relay.vettid.org: VPC (no NAT; S3 + DynamoDB gateway endpoints), ElastiCache Serverless Valkey (IAM auth, TLS), ECS Fargate service (2–8 tasks, rolling deploys), ALB with PQ TLS. Logs to `/vettid-org/<stage>/relay-service`. Only deployed when `relayImage` is set. |
+
+## Production drift
+
+On 2026-10-05 a security fix (PIN lockout) had been merged for four days
+but never deployed. `.github/workflows/drift.yml` makes that visible: every
+day at 13:23 UTC, and on demand, it synthesizes master and compares every
+production stack's template with the one CloudFormation holds, in the
+management account and vettid-vault-prod. Staging is not checked.
+
+- **What counts.** The whole template, minus CDK's version metadata. Lambda
+  code and site content are in it as asset hashes (S3 keys), so a merged
+  code change that was not deployed shows as a changed `Code/S3Key`.
+  Also reported: stacks in master that are not deployed, `Vettid*` stacks
+  deployed that master no longer has (a forgotten smoke stack, or one master
+  skips: `VettidOrgAdminAccessStack` when `headscaleLoginServer` is unset),
+  and stacks it could not check (mid-update, API error). It does **not**
+  see console changes to resources (that is CloudFormation drift detection,
+  a different thing), nor deploy-time inputs outside the template (SSM
+  values, the secret behind a dynamic reference). Context given only on
+  the deploy command line (`-c vettidDevMailPolicy=true`) is not in CI's
+  synth: once used for good, make it the default in code or `cdk.json`.
+- **Asset hashes are path-independent.** A Lambda's asset hash covers its
+  source map, whose `sources` esbuild writes relative to the bundling
+  directory. `ApiFunction` rewrites them after bundling to what the default
+  `cdk.out` produces (`lib/constructs/sourcemap-paths.cjs`), so the same code
+  has the same hash whatever the checkout path or `-o` directory. Other
+  inputs still matter: deploy from master with `npm ci`'d dependencies (a
+  stale `node_modules` bundles different code, and the check rightly says
+  so) and with no untracked files under `website/` or `sites/` (they would
+  be deployed, and then differ).
+- **Non-ASCII.** CloudFormation's GetTemplate returns every non-ASCII
+  character of a deployed template as `?`; the comparison folds both sides
+  the same way, so a change from `§` to `¶` alone is not seen.
+- **Access.** GitHub OIDC → `vettid-org-ci-drift-readonly` in each account
+  (`VettidOrgCiReadOnlyStack`, `VettidOrgVaultCiReadOnlyStack`): only
+  workflows of vettid/vettid.org running on master can assume it (OIDC
+  `sub` `repo:vettid/vettid.org:ref:refs/heads/master`, `aud`
+  `sts.amazonaws.com`), and it can only `cloudformation:ListStacks` and
+  `cloudformation:GetTemplate` on `Vettid*` stacks. No credentials are
+  stored in GitHub. Synth needs no AWS access (lookups are committed in
+  `cdk.context.json` and `cdk.json`); the one uncommitted context value,
+  `headscaleLoginServer`, comes from the repository **secret**
+  `HEADSCALE_LOGIN_SERVER` (masked in logs; the repo is public, and
+  variables are not). The workflow never echoes it, discards synth's
+  output, and the report and issue name template paths and logical IDs
+  only, never values.
+
+**Reading the result.** In sync: the run is green and an open "Production
+drift" issue is closed. Drift: the run fails (GitHub emails the failure)
+and the issue "Production drift" is opened, or its body replaced (a comment
+only when the set of stacks changes). Per stack it shows when it was last
+deployed, the template paths that differ (`… (Lambda code)` for code), and
+master's commits since that deploy (squash merges, so one per PR). Then:
+
+- *in master, not deployed / differs from master*: deploy it (`npx cdk diff
+  <stack>` first, with the right profile); the next run closes the issue.
+  Re-run the workflow (Actions → Production drift → Run workflow) to close
+  it at once.
+- *deployed, not in master*: a stack deployed from a branch that never got
+  merged, a temporary stack to destroy, or `VettidOrgAdminAccessStack` with
+  the repository secret missing.
+- If a difference is deliberate (rare: a deploy held back on purpose), say
+  so in the issue; it stays open and the run stays red until it is
+  deployed.
+
+**Running it by hand** (read-only; with your SSO session):
+
+```bash
+npx cdk synth --quiet       # into the default cdk.out
+npm run drift -- check --account 449757308783 --profile default    --out local/drift-main.json
+npm run drift -- check --account 369484479783 --profile vault-prod --out local/drift-vault.json
+npm run drift -- report local/drift-main.json local/drift-vault.json   # exit 1 = drift
+```
+
+**First deployment** (once):
+
+```bash
+aws sso login
+# 1. The read-only roles (and each account's GitHub OIDC provider; none existed).
+npx cdk deploy VettidOrgCiReadOnlyStack
+npx cdk deploy VettidOrgVaultCiReadOnlyStack --profile vault-prod
+# 2. The one context value not in the repo, as a secret: paste the value of
+#    ~/.cdk.json headscaleLoginServer at the prompt (not on the command line).
+gh secret set HEADSCALE_LOGIN_SERVER --repo vettid/vettid.org
+# 3. Run it once: Actions → Production drift → Run workflow (or:)
+gh workflow run drift.yml --repo vettid/vettid.org --ref master
+```
+
+A second user of GitHub OIDC in either account must import this stack's
+provider (IAM allows one per URL per account), not create another.
 
 ## CDK conventions (new stacks)
 
@@ -67,7 +161,7 @@ their construct IDs.
   consumers `readRef()` (`lib/constructs/ssm-refs.ts`, params under
   `/vettid-org/<stage>/…`). Deploy the producer first.
 - **Lambdas** are defined only through `ApiFunction` (Node 24, ARM64, esbuild,
-  1-month log group) and served through `HttpRouteGroup`: one function per
+  path-independent source maps, 1-month log group) and served through `HttpRouteGroup`: one function per
   route *group* (`ANY /api/<group>/{proxy+}`), routing in the handler.
 - **Static sites** use `StaticSite`: own host, strict CSP (`script-src 'self'`,
   no inline styles, no `data:` images, Trusted Types required — build DOM with

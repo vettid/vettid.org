@@ -62,7 +62,7 @@ describe('app guardrails', () => {
   });
 
   test('the vault stacks go to the vault account; everything else to the main (management) account', () => {
-    const inVaultAccount = (name: string) => /^VettidOrgVault(Host|Release\d+)?Stack$/.test(name);
+    const inVaultAccount = (name: string) => /^VettidOrgVault(Host|Release\d+|CiReadOnly)?Stack$/.test(name);
     for (const s of stacks) {
       expect({ stack: s.stackName, account: s.account }).toEqual({
         stack: s.stackName,
