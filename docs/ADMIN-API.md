@@ -123,6 +123,40 @@ makes that vault unreachable (`410 release_unavailable`) until the
 release is published. The admin site shows the switch on each member's
 row (Members) with a confirmation, and lists testers below the members.
 
+## Vault service
+
+The operator's pause of the member API's vault routes (MEMBER-API "Vault
+service pause"; owner decision 2026-10-05): while paused, the routes that
+start or change vault activity (enclave, enroll, unlock, recovery request
+and register) answer `503 vault_unavailable`; status, polling, lock, the
+recovery status and cancels keep working. No vault, key, manifest or
+release row is touched. The state is the SSM parameter
+`/vettid-org/<stage>/switch/vault-service` in the member API's account
+(no parameter: on). Served by its own Lambda, whose role may only get
+and put that one parameter (and write the audit table).
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| GET | `/admin/vault-service` | — | `VaultService` |
+| POST | `/admin/vault-service/pause` | `{reason: string}` (1–500 chars, required) | `VaultService` (paused). `409` if already paused. Audited `vault.service.pause` (`reason`). |
+| POST | `/admin/vault-service/resume` | — | `VaultService` (on). `409` if not paused. Audited `vault.service.resume` (`paused_reason`, `paused_by`, `paused_at`: what the pause was). |
+
+```ts
+interface VaultService {
+  enabled: boolean;               // false: paused
+  reason: string | null;          // the operator's note; never shown to members
+  set_by: string | null;          // admin email, or whoever wrote it from the CLI
+  set_at: string | null;          // ISO-8601; null when never set
+}
+```
+
+A change takes effect in the member API within about 30 s (its cache).
+Every write to the parameter, from here or the CLI, emails the security
+alerts; production also alarms while paused (RUNBOOK "Pausing the vault
+service"). The admin site shows the state and the switch on its **Vault
+service** page, each change behind a confirmation (pausing asks for the
+reason).
+
 ## Content
 
 | Method | Path | Body | Returns |
