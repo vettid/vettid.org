@@ -60,6 +60,18 @@ describe('template comparison', () => {
     ]);
   });
 
+  test('values never reach the report (only paths): e.g. the secret headscale URL in user data', () => {
+    const withUrl = (url: string) => {
+      const t: any = base();
+      t.Resources.ExitNode = { Type: 'AWS::EC2::Instance', Properties: { UserData: { 'Fn::Base64': { 'Fn::Join': ['', ['tailscale up --login-server ', url]] } } } };
+      return t;
+    };
+    const r = compareStack({ stackName: 'VettidOrgAdminAccessStack', account: '1', synthesized: withUrl('https://hs-new.example.net'), deployed: deployedOf(withUrl('https://hs-old.example.net')) });
+    expect(r.differences).toEqual(['Resources/ExitNode/Properties/UserData/Fn::Base64/Fn::Join']);
+    const md = renderReport({ results: [r], commitsSince: {}, now: new Date('2026-10-05T12:00:00Z'), head: 'abc1234' });
+    expect(md).not.toMatch(/hs-(new|old)|example\.net/);
+  });
+
   test('not deployed, mid-update', () => {
     expect(compareStack({ stackName: 'S', account: '1', synthesized: base() }).state).toBe('not-deployed');
     const r = compareStack({ stackName: 'S', account: '1', synthesized: base(), deployed: { ...deployedOf(base()), stackStatus: 'UPDATE_IN_PROGRESS' } });

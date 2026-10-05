@@ -91,8 +91,11 @@ management account and vettid-vault-prod. Staging is not checked.
   `cloudformation:GetTemplate` on `Vettid*` stacks. No credentials are
   stored in GitHub. Synth needs no AWS access (lookups are committed in
   `cdk.context.json` and `cdk.json`); the one uncommitted context value,
-  `headscaleLoginServer`, comes from the repository variable
-  `HEADSCALE_LOGIN_SERVER`.
+  `headscaleLoginServer`, comes from the repository **secret**
+  `HEADSCALE_LOGIN_SERVER` (masked in logs; the repo is public, and
+  variables are not). The workflow never echoes it, discards synth's
+  output, and the report and issue name template paths and logical IDs
+  only, never values.
 
 **Reading the result.** In sync: the run is green and an open "Production
 drift" issue is closed. Drift: the run fails (GitHub emails the failure)
@@ -107,7 +110,7 @@ master's commits since that deploy (squash merges, so one per PR). Then:
   it at once.
 - *deployed, not in master*: a stack deployed from a branch that never got
   merged, a temporary stack to destroy, or `VettidOrgAdminAccessStack` with
-  the repository variable missing.
+  the repository secret missing.
 - If a difference is deliberate (rare: a deploy held back on purpose), say
   so in the issue; it stays open and the run stays red until it is
   deployed.
@@ -128,8 +131,9 @@ aws sso login
 # 1. The read-only roles (and each account's GitHub OIDC provider; none existed).
 npx cdk deploy VettidOrgCiReadOnlyStack
 npx cdk deploy VettidOrgVaultCiReadOnlyStack --profile vault-prod
-# 2. The one context value not in the repo (value of ~/.cdk.json headscaleLoginServer):
-gh variable set HEADSCALE_LOGIN_SERVER --repo vettid/vettid.org --body 'https://…'
+# 2. The one context value not in the repo, as a secret: paste the value of
+#    ~/.cdk.json headscaleLoginServer at the prompt (not on the command line).
+gh secret set HEADSCALE_LOGIN_SERVER --repo vettid/vettid.org
 # 3. Run it once: Actions → Production drift → Run workflow (or:)
 gh workflow run drift.yml --repo vettid/vettid.org --ref master
 ```

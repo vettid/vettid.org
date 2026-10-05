@@ -52,13 +52,17 @@ jobs:
       # No AWS credentials yet: synth needs none (lookups are cached in
       # cdk.context.json and cdk.json). Into the default cdk.out: asset
       # hashes then match the owner's deploys byte for byte.
+      # headscaleLoginServer is a repository SECRET (the repo is public and
+      # variables are not masked): passed only through this env var, never
+      # echoed; synth's stdout (the templates) goes to /dev/null, and the
+      # report prints template paths only, never values.
       - name: Synthesize master
         env:
-          HEADSCALE_LOGIN_SERVER: ${{ vars.HEADSCALE_LOGIN_SERVER }}
+          HEADSCALE_LOGIN_SERVER: ${{ secrets.HEADSCALE_LOGIN_SERVER }}
           AWS_EC2_METADATA_DISABLED: 'true'
         run: |
           if [ -z "$HEADSCALE_LOGIN_SERVER" ]; then
-            echo "::error::Repository variable HEADSCALE_LOGIN_SERVER is not set (the owner's ~/.cdk.json headscaleLoginServer); without it VettidOrgAdminAccessStack is not synthesized."
+            echo "::error::Repository secret HEADSCALE_LOGIN_SERVER is not set (the owner's ~/.cdk.json headscaleLoginServer); without it VettidOrgAdminAccessStack is not synthesized."
             exit 1
           fi
           npx cdk synth --quiet -c headscaleLoginServer="$HEADSCALE_LOGIN_SERVER" > /dev/null
