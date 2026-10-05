@@ -1026,6 +1026,14 @@ describe('vault recovery', () => {
     expect(JSON.stringify([...tbl('audit').values()])).not.toContain(BK);
   });
 
+  test('GET /api/vault/recovery without an enrolled vault is {recovery: null}, not 404 (0.10.6 §11.11.7)', async () => {
+    expect(await call('GET', '/api/vault/recovery', undefined, { guid: 'g2' })).toEqual({ status: 200, body: { recovery: null } });
+    put('vaults', { ...getItem('vaults', VID), state: 'enrolling' });
+    expect(await call('GET', '/api/vault/recovery')).toEqual({ status: 200, body: { recovery: null } });
+    put('vaults', { ...getItem('vaults', VID), state: 'deleted' });
+    expect(await call('GET', '/api/vault/recovery')).toEqual({ status: 200, body: { recovery: null } });
+  });
+
   test('bad browser key → 400; no enrolled vault → 404; a second request while one is active → 409', async () => {
     expect((await call('POST', '/api/vault/recovery', { browser_key: Buffer.alloc(65, 3).toString('base64') })).status).toBe(400);
     expect((await call('POST', '/api/vault/recovery', { browser_key: 'AAAA' })).status).toBe(400);
