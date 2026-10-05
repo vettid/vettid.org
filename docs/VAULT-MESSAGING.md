@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.10.5
+version: 0.10.6
 date: 2026-10-05
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -17,6 +17,22 @@ related:
   - VAULT-RELEASES.md (0.1.0, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.10.6: gaps found building the account site's recovery pages and
+    the vault's 0.10.5 code. Recovery: the member API's recovery gains
+    `vault_id` and the state `registered` (the code is spent), which the
+    API learns from the clear marker `recovery_registered` that the
+    enclave adds to a successful register's answer and the host copies
+    into the slot's `code`; cancels answer `{cancelled}`; the QR's
+    parameters are fixed (byte mode, level M or higher, 4-module quiet
+    zone, any version) (§11.5, §11.11.2, §11.11.3, §11.11.7). Lock
+    reporting: a vault that stops without a `locked` event is written
+    `locked` by the host when it releases the lease, and the member API
+    reports `unlocked` only under a live lease (§11.5). Wording of
+    0.10.5: the decline goes on the peer's request token even after the
+    peer's `connection.approved` gave a standing token; the audit `ref`
+    of a decline after activation is the `connection_id`; on S2
+    receivers the decline stays unacked and is redelivered until expiry
+    (§6.4, §10.9, §15 items 18 and 19)
   - 0.10.5: a declined connection request is sent to the other party
     (owner decision of 2026-10-05, reversing 0.10.2 decision 2): the
     declining vault sends `connection.declined{}` under the handshake's
@@ -1641,6 +1657,15 @@ Rules:
       vault denylists are those **it** issued to the peer, which the peer
       would deposit with, not the one it deposits with. Delivery is best
       effort, retried as any deposit (§8.6) until that token expires.
+    - **Always the request token** (0.10.6). If the peer's
+      `connection.approved` has already arrived, the vault holds the
+      peer's standing (and reconnect) token too, but it still deposits
+      the decline on the peer's **request** token, which it keeps for
+      that purpose until the request ends; it never uses the standing
+      token. The receiver accepts `connection.declined` on its request
+      token whether or not it sent its own `connection.approved` (above),
+      and a deposit on its standing token would reach a connection that
+      is not active on the decliner's side.
     - **When it can be sent.** Only once the vault holds both the
       handshake's epoch and a token from the peer:
       - The **inviter** declining an incoming request: always, for any
@@ -1708,7 +1733,9 @@ Rules:
       handshake's epoch began, once the connection is active is handled
       as `connection.removed` from that peer (§7.4 "Connection removed",
       without a notice back; devices get `connection.event{removed}`)
-      and audited `connection.request.peer_declined`: the decliner has
+      and audited `connection.request.peer_declined` with `ref` = the
+      `connection_id` (0.10.6; the request's `pending_id` no longer
+      names anything once the connection is active): the decliner has
       already denylisted every token it issued, so the connection could
       only turn `stale`.
     - **Not forgeable.** Like `connection.approved`, it is sealed under
@@ -3362,7 +3389,8 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `message.received` (no content; `ref` = `message_id`);
   `connection.blocked`, `connection.unblocked` (`ref` = `block_id`);
   `connection.request.peer_declined` (`ref` = `pending_id` or the
-  outgoing request's `connection_id`; §6.4, 0.10.5);
+  outgoing request's `connection_id`; for a decline that reaches an
+  active connection, the `connection_id`, 0.10.6; §6.4, 0.10.5);
   `connection.authenticate.requested`, `connection.authenticate.signed`,
   `connection.authenticate.denied`, `connection.authenticated`,
   `connection.authenticate_failed` (`ref` = `request_id`);
@@ -3432,7 +3460,7 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
   `priority`; changes send `sync.event` `feed.updated` or `feed.deleted`.
 - Kinds the vault creates: `connection.request` (`ref` = `pending_id`),
   `connection.request.peer_declined` (`ref` = `pending_id` or
-  `connection_id`; 0.10.5), `connection.added`, `connection.removed`, `connection.stale`,
+  `connection_id`, the latter always after activation; 0.10.5, 0.10.6), `connection.added`, `connection.removed`, `connection.stale`,
   `device.pair.pending`, `device.paired`, `device.unlinked`,
   `message.received` (`ref` = `message_id`), `credential.password_failed`,
   `item.revealed` (`ref` = `item_id`; critical items), `credential.rotated`,
@@ -5228,6 +5256,17 @@ Nothing secret is stored:
   the vault table only while it holds the vault's lease or no lease exists
   (a conditional write), so an instance that lost a split brain cannot
   overwrite the holder's values.
+- **A stopped vault is locked** (0.10.6). A vault runs only under its
+  instance's live lease. When the parent releases a lease because the
+  vault stopped (the enclave's "stopped" notice: an owner's
+  `vault.lock` over the relay, a lock on lease loss or memory pressure,
+  a split brain or an error) it also turns a row's `state = unlocked`
+  into `locked` (other states, `enrolling` among them, are left as they
+  are), conditional on the lease being its own like the removal itself,
+  whether or not a `locked` event arrived first; a `locked` event that
+  is lost or late then changes nothing. The member API reports `unlocked` only while the
+  row's lease is unexpired; a row that says `unlocked` without one is
+  reported `locked` (MEMBER-API "Vault").
 - **Host alarms** (0.9.0). The vault reports a clone alarm (§3.5.9) as
   the lifecycle event `alarm.credential_clone`, once per alarm. It
   carries nothing but its kind, the `vault_id` and the usual release
@@ -5272,17 +5311,28 @@ and `unlock` together with the manifest document it names (below). The
 enclave answers the parent with
 
 ```json
-{ "v": 1, "request_id": "<ULID>", "status": "done|etk_unknown", "envelope": "<b64, 5,252 bytes>" }
+{ "v": 1, "request_id": "<ULID>", "status": "done|etk_unknown", "envelope": "<b64, 5,252 bytes>",
+  "code": "recovery_registered" }
 ```
 
-(`envelope` absent for lock, delete and `etk_unknown`). The parent writes
-the response slot: `status: "done"`, the `envelope` if any, and `code:
-"etk_unknown"` when the enclave reported it; or `status: "expired"` for a
-request it did not forward (lease held elsewhere, §11.1) or that the
-enclave could not read (no answer). It writes only slots that are still
-`queued`. `GET /api/vault/requests/{id}`
+(`envelope` absent for lock, delete and `etk_unknown`; `code` present
+only for a `recovery_register` whose sealed result is `{"ok": true}`,
+§11.11.3, 0.10.6). The parent writes the response slot: `status:
+"done"`, the `envelope` if any, and `code: "etk_unknown"` when the
+enclave reported it, or `code: "recovery_registered"` (with the
+envelope) when the enclave's answer carries it; or `status: "expired"`
+for a request it did not forward (lease held elsewhere, §11.1) or that
+the enclave could not read (no answer). It writes only slots that are
+still `queued`, and no other `code`. `GET /api/vault/requests/{id}`
 returns `{status, envelope?, code?}`; `code` matches `[a-z_][a-z0-9_]*`
-and is a host code, never a sealed outcome. The parent writes the
+and is a host code. It never carries a sealed outcome, with one
+exception: `recovery_registered` tells the member API, in the clear,
+that a recovery's code is spent, so that the API stops releasing it
+(§11.11.7). That much is no secret from the host, which sees the
+registered app unlock next; a host that forges the marker only hides a
+code it could withhold anyway, and one that suppresses it leaves a spent
+code on the portal, which the enclave refuses (`used`). Apps read the
+envelope as usual and ignore the marker. The parent writes the
 lifecycle events to the vault table and deletes the queue message when
 the enclave reports completion.
 
@@ -6296,6 +6346,12 @@ the older code. The API allows only one active recovery per vault.
   {"v":1,"t":"r","vault_id":"<id>","recovery_id":"<ULID>","code":"<32 chars>"}
   ```
 
+  The QR (0.10.6) encodes those exact bytes in **byte mode**, with error
+  correction **M or higher** and a **quiet zone of 4 modules**, dark
+  modules on a light background. The version is whatever fits (the
+  account site uses the smallest one at level M: version 8, 49 × 49
+  modules, for the 146-byte payload of a 32-hex `vault_id`); the app
+  MUST accept any version and any level from M up.
   The portal also shows the code as text, in groups of four, for typing.
 - **Why the vault mints the code.** VettID's servers never hold the code
   in a usable form: the API stores only the ciphertext sealed to the
@@ -6342,7 +6398,11 @@ then checks, in this order:
    only after the code matched, so a failure leaves the code usable.
 
 On success it adds the app to the header's unlock keys and sets the state
-to `registered`; the code is spent.
+to `registered`; the code is spent. Its answer to the host then also
+carries the clear marker `code: "recovery_registered"` (§11.5, 0.10.6),
+which the host copies into the response slot, so that the member API
+stops releasing the spent code (§11.11.7). Any other answer, `ok: false`
+or random bytes, carries no marker.
 
 The answer is `vault.recovery.result`, sealed to `app.kem` and padded like
 unlock results:
@@ -6481,17 +6541,38 @@ a member session and the current terms:
 | Route | Body | Answer |
 |---|---|---|
 | `POST /api/vault/recovery` | `{browser_key}` (b64 of 65 bytes) | `202 {recovery_id, available_at, expires_at}` |
-| `GET /api/vault/recovery` | — | `{recovery: {recovery_id, state, requested_at, available_at, expires_at, sealed_code?} \| null}` |
-| `POST /api/vault/recovery/cancel` | `{recovery_id}` | `200 {}` |
+| `GET /api/vault/recovery` | — | `{recovery: {recovery_id, vault_id, state, requested_at, available_at, expires_at, sealed_code?} \| null}` |
+| `POST /api/vault/recovery/cancel` | `{recovery_id}` | `200 {cancelled}` |
 | `POST /api/vault/recovery/register` | `{vault_id, request_id, instance_id, etk_kid, envelope}` | `202 {vault_id, request_id}`; the result is polled like unlock (`GET /api/vault/requests/{id}`) |
 
 The email link uses its own route, `POST /api/vault/recovery/cancel-link`
-with body `{token}`. It needs no session: the token stands in for it.
+with body `{token}`, answered `200 {cancelled}` like the session's
+cancel. It needs no session: the token stands in for it.
 
+- **`vault_id`** (0.10.6): the vault being recovered, which the portal
+  needs for the seal's HKDF `info` (§11.11.2) and the QR payload.
 - **State.** `state` is `pending`, `available` (from `available_at`, when
-  `sealed_code` is returned), `cancelled` or `expired`. `sealed_code` is
-  the slot's 5,252 bytes; the API returns it only between `available_at`
-  and `expires_at`.
+  `sealed_code` is returned), `registered` (0.10.6), `cancelled` or
+  `expired`. `sealed_code` is the slot's 5,252 bytes; the API returns it
+  only between `available_at` and `expires_at`, and only while the state
+  is `available`.
+- **Registered** (0.10.6). Once a `recovery_register` request for this
+  recovery has been answered with the marker `recovery_registered`
+  (§11.11.3; the API sees it in that request's slot, whether through the
+  app's poll of `GET /api/vault/requests/{id}` or its own check), the
+  API records the recovery as `registered`: the code is spent and
+  `sealed_code` is no longer returned, so the portal says the code was
+  used. A registered recovery stays active (it blocks a new request
+  with `409 recovery_active`, it is shown in `GET /api/vault/status` and
+  it can still be cancelled, §11.11.4) until `expires_at`, and keeps
+  reading `registered` afterwards. The API cannot see the rest of the
+  recovery (unlock, `credential.recover`); the vault removes its record
+  when it completes.
+- **Cancelled.** `{cancelled: true}` when this call ended an active
+  recovery (`pending`, `available` or `registered`), `{cancelled: false}`
+  when there was nothing to cancel (it had ended already, by a cancel or
+  its expiry). The cancel link stays usable until
+  the recovery's `expires_at`, so a second use answers `false`.
 - **Request.** The API accepts a request only for a vault in a state other
   than `enrolling`, and only when no recovery is `pending` or `available`
   (`409 recovery_active`). It records the recovery on the vault row and
@@ -7156,10 +7237,13 @@ Follow-ups:
     staging release. Mixed versions behave as 0.10.4: a vault that does
     not send it leaves the peer's request to its expiry, and a 0.10.4
     vault that receives it before activation handles it as any other
-    message on a request token or under an unapproved request's epoch
-    (acked, dropped and audited, or, after its member's approval, left
-    for an activation that never comes and dropped with the request at
-    its expiry). It never reaches the unknown-type rule of §5.3, so no
+    message on a request token or under an unapproved request's epoch:
+    before its member's approval it is acked, dropped and audited
+    (`drop.unapproved_peer`); after it, it is left **unacked** for an
+    activation that never comes, so the relay redelivers it each time
+    its relay lease lapses (RELAY-PROTOCOL: at-least-once delivery)
+    until the request expires, and it is then dropped with the request
+    (0.10.6 wording). It never reaches the unknown-type rule of §5.3, so no
     `unsupported_type` is sent back (the decliner could not open one
     anyway: its epoch is gone). In the after-activation race a 0.10.4
     receiver drops it as a misused request token (§7.1), and its
@@ -7202,6 +7286,51 @@ Follow-ups:
        commitment mismatch, a clone alarm or a recovery, so an unapproved
        device learns nothing of the vault's state. §13.5 is unchanged:
        the device learns only what its user saw on the phone.
+19. **Recovery and lock-state gaps (0.10.6).** Found while building the
+    account site's recovery pages (vettid.org PR #114) and checking the
+    vault table on staging:
+    - The member API's `Recovery` had no `vault_id`, needed for the
+      seal's HKDF `info`; it is added (§11.11.7).
+    - After a successful register the API kept answering `available`
+      with the spent code until `expires_at`. The API cannot open the
+      sealed result, so the enclave adds the clear marker
+      `recovery_registered` to that answer and the host copies it into
+      the slot (§11.5, §11.11.3); the API then records `registered`
+      (§11.11.7).
+    - The cancel routes answered `200 {}` whether or not they cancelled
+      anything; they answer `{cancelled}` (§11.11.7).
+    - The QR's parameters were not fixed (§11.11.2).
+    - **Lock state.** On staging, after the member locked the vault from
+      the app (`vault.lock` over the relay), the vault row kept
+      `state: unlocked` with no lease. The vault process reports
+      `locked` as an asynchronous notification and exits right after;
+      the notification can be lost with the process, and the parent,
+      seeing only the process stop, removed the lease without touching
+      `state`. The rule "a stopped vault is locked" (§11.5) and the
+      member API's lease check fix what members see.
+    Follow-ups: vettid-vault (the enclave's answer to a successful
+    `recovery_register` carries `code: "recovery_registered"` and the
+    parent copies it into the slot; the parent's lease release on a
+    stopped vault turns `unlocked` into `locked`; the vault process
+    delivers its queued notifications before it exits; a recovery vector
+    `testdata/vectors/recovery.json` for the seal and the QR payload);
+    vettid-android (the recovery scanner accepts any QR version and any
+    level from M up; it ignores the slot's `recovery_registered`
+    marker); vettid.org (the member API and the account site, done with
+    this version).
+    **OWNER DECISIONS of 0.10.6** (pending):
+    1. The enclave states a successful register in the clear
+       (`recovery_registered`). Recommended: yes; the host learns
+       nothing it would not see at the registered app's unlock, and a
+       forged or suppressed marker changes only what the portal shows.
+    2. A `registered` recovery stays active until `expires_at` (blocks a
+       new request, shown to owner apps, cancellable). Recommended: yes;
+       a cancel still removes the registered app's unlock key
+       (§11.11.4), and the API cannot see the recovery complete.
+    3. The member API reports `unlocked` only under a live lease, and the
+       host turns `unlocked` into `locked` when it releases a stopped
+       vault's lease. Recommended: yes; a vault cannot run without its
+       lease, and the status is advisory anyway.
 
 ## 16. Test vectors
 
@@ -7362,6 +7491,30 @@ Cross-implementation checks against Apple CryptoKit and BouncyCastle are
 pending (§15, follow-up 1).
 
 ## 17. Changelog
+
+- **0.10.6** (2026-10-05): recovery and lock-state gaps, and the wording
+  of 0.10.5 (§15 item 19).
+  - §6.4: a decline always goes on the request token the peer issued,
+    which the vault keeps until the request ends, even after the peer's
+    `connection.approved` gave it a standing token; never on the
+    standing token.
+  - §6.4 "After activation", §10.9: the audit and feed `ref` of a
+    decline that reaches an active connection is the `connection_id`.
+  - §11.5: a vault that stops is written `locked` when its lease is
+    released, whether or not its `locked` event arrived; the member API
+    reports `unlocked` only under a live lease. The enclave's answer to
+    a successful `recovery_register` carries the clear marker
+    `recovery_registered`, which the host copies into the slot's `code`
+    (the one host code that reflects a sealed outcome).
+  - §11.11.2: the QR is byte mode, error correction M or higher, with a
+    4-module quiet zone; the app accepts any version.
+  - §11.11.3: the marker on a successful register.
+  - §11.11.7: `Recovery` gains `vault_id` and the state `registered` (no
+    `sealed_code` after it); both cancel routes answer `{cancelled}`.
+  - §15 item 18 Compatibility: on S2 receivers, after their member's
+    approval, the decline stays unacked and is redelivered at each relay
+    lease until the request expires.
+  - §15 item 19: follow-ups and owner decisions (pending).
 
 - **0.10.5** (2026-10-05): declines are sent (owner decision of
   2026-10-05, reversing 0.10.2 decision 2; §15 item 18).
