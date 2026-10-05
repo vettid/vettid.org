@@ -27,7 +27,10 @@ changelog:
     accepter's side `connection.event{failed, reason: "declined"}`) and
     denylists its tokens; a block of a pending request sends it too; one
     arriving at an active connection removes it (§6.4, §7.1, §7.4, §9.2,
-    §10.1, §10.4, §10.9, §13.5, §15 items 16–18)
+    §10.1, §10.4, §10.9, §13.5, §15 items 16–18). Likewise the owner's
+    rejection of a pairing or transfer after its `hs.fin` is sent to the
+    new device as `device.pair.rejected{}`, which stops it waiting (owner
+    decision of 2026-10-05; §6.7, §6.7.1, §7.1, §7.4, §10, §10.3)
   - 0.10.4: what the vault implementation of 0.10.3 settled
     (vettid-vault PR #26): every `device.paired` carries a fresh standing
     token; a request that ends unactivated denylists every token issued
@@ -1945,7 +1948,58 @@ Rules:
   vault drops the pairing and its handshake state and denylists the open
   token's and the request token's `jti`. The new device shows only the
   code; its user compares it on the app, and it waits for `device.paired`
-  until 10 minutes after its `hs.init`.
+  or (0.10.5) `device.pair.rejected` until 10 minutes after its
+  `hs.init`.
+- **The rejection is sent** (0.10.5; owner decision of 2026-10-05,
+  "include `device.pair.rejected`"). The new device is the member's own,
+  in their hand, so there is nothing to hide, and without it the device
+  waits out its 10 minutes.
+  - On the owner's `device.pair.reject` (or `device.transfer.reject`,
+    §6.7.1), the vault sends the new device `device.pair.rejected{}`
+    (V→D, session mode under the handshake's epoch, deposited on the
+    standing token the **new device** issued in its `hs.init`: the
+    channel `device.paired` uses, §7.1), then drops the pairing as
+    above. One flush (§7.4): the message is sealed and its deposit queued
+    first, while the epoch still exists (the epoch is never activated, so
+    it is sealed with the handshake's epoch directly, not the device's
+    session); the queued deposit keeps its own copy of the device's
+    token; and the tokens the vault denylists (the open token and the
+    request token) are those **it** issued, which the device would
+    deposit with, not the one it deposits with. Best effort, retried as
+    any deposit (§8.6) until the pairing's 10 minutes end.
+  - **One type for pairing and transfer.** A transfer is a pairing of
+    role `app` (QR `t: "p"`, §6.4) and ends in the same `device.paired`
+    (with `transfer: true`); the new device knows which it started, so
+    `device.pair.rejected` serves both and needs no
+    `device.transfer.rejected`.
+  - **When it can be sent.** Only once `hs.fin` has checked out: then
+    the vault holds the epoch (§6.3) and the owner has seen the SAS
+    (`device.pair.pending`, `device.transfer.pending`). A rejection
+    before that (no scan yet, or a handshake still awaiting its
+    `hs.fin`) sends nothing: before the scan there is no device, and
+    without `hs.fin` the vault has no epoch; that device waits out its
+    10 minutes, as before. Only the owner's rejection is sent: an expiry
+    (the device's own 10 minutes end too), a commitment mismatch
+    (`failed`, §6.3), and a transfer aborted by a clone alarm (`alarm`)
+    or a recovery (`replaced`) send nothing, so an unapproved device
+    learns nothing of the vault's state.
+  - **The new device** accepts, under the handshake's epoch from its
+    vault's relay key, `device.paired` and `device.pair.rejected`. On
+    `device.pair.rejected` it stops waiting, drops its handshake state
+    and the request token it holds, and tells its user: an app or
+    desktop shows "Rejected on your phone"; an agent ends its pairing
+    with that error. It sends nothing back (its request token is
+    denylisted).
+  - **Late and duplicate.** The vault sends it once per pairing; an
+    approval completes the pairing at once (§6.7.1), so a vault never
+    sends both `device.paired` and `device.pair.rejected`. A redelivery,
+    or one arriving after the device's 10 minutes, finds no handshake
+    state and is dropped.
+  - **Not forgeable.** It is sealed under the handshake's epoch, whose
+    keys only the vault and the new device hold (the device authenticated
+    the vault by the bundle's `ik`, §6.3), and deposited on the device's
+    sender-bound token (RELAY-PROTOCOL §5); the relay, VettID and any
+    third party can neither forge it nor end a pairing with it.
 - **Who pairs.** Only an owner device of role `app` creates
   (`device.pair.create`), approves or rejects pairings. Desktops and agents
   cannot.
@@ -2055,7 +2109,7 @@ and the new app's handshake state is dropped. A commitment mismatch at
 
 | Case | What happens |
 |---|---|
-| The holder rejects (`device.transfer.reject`), before or after the scan | Aborted. Nothing else changes. (Since 0.10.3 an approval completes the transfer, so there is nothing to reject after it.) |
+| The holder rejects (`device.transfer.reject`), before or after the scan | Aborted. Nothing else changes. After the new app's `hs.fin` the vault tells it with `device.pair.rejected` (0.10.5, §6.7); before that the new app times out. (Since 0.10.3 an approval completes the transfer, so there is nothing to reject after it.) |
 | No scan before the link's `exp` (10 minutes after `device.transfer.create`), or no approval within 10 minutes after the new app's `hs.init` (0.10.4) | Aborted. Nothing else changes. |
 | The new app's attestation fails | Its `hs.init` is dropped; the transfer stays open until its 10 minutes run out. |
 | Wrong PIN or password at approval | `bad_pin` / `bad_password`, counted in their backoffs. The transfer stays pending until its 10 minutes run out; the member may retry. |
@@ -2193,7 +2247,9 @@ receiving vault, which records each token's kind by `jti` (§6.6), acks,
 drops and audits anything else that arrives on one. A
 `connection.declined` on a request token is processed also once the
 connection is active, under its session (§6.4 "After activation"); the
-token is denylisted then. A request token is not refreshed: its
+token is denylisted then. A pairing's `device.pair.rejected` (0.10.5)
+goes the other way, on the token the new device issued in its
+`hs.init`, as `device.paired` does (§6.7). A request token is not refreshed: its
 `relay.token.refresh` is answered `forbidden` once the connection or
 device is active; before that it is handled as any other message before
 activation (§6.4, §6.7; 0.10.4). It is replaced by the
@@ -2241,7 +2297,7 @@ The actions for each event are applied in one flush, in the order listed:
 | Device unlinked | End its access session and drop its held and pending requests (§6.8). Send `device.unlinked` (best effort). Denylist `sub`. Remove the device from the unlock keys. Delete its wake reference. |
 | Agent revoked | As for device unlinked, plus revoke all of the agent's LEASH grants |
 | Invite or pairing cancelled or expired | Denylist the open token's `jti`. DELETE the claim. |
-| Connection request or pairing ended without activation (declined, rejected, expired, aborted; 0.10.3) | If the vault's member declined (or blocked) a connection request whose handshake has given it the epoch and the peer's request token, send `connection.declined` first (0.10.5, §6.4), sealed under the epoch and queued on that token; the queued deposit keeps its own copy of the token, so deleting the held tokens below does not cancel it, and the tokens denylisted below are the vault's own, not the one it deposits with. Denylist the `jti` of every token the vault issued to the peer in the request: the request token and, if its member approved, the standing and reconnect tokens of its `connection.approved` (0.10.4). Delete the tokens held for the peer and the handshake state. |
+| Connection request or pairing ended without activation (declined, rejected, expired, aborted; 0.10.3) | If the vault's member declined (or blocked) a connection request whose handshake has given it the epoch and the peer's request token, send `connection.declined` first (0.10.5, §6.4), sealed under the epoch and queued on that token; the queued deposit keeps its own copy of the token, so deleting the held tokens below does not cancel it, and the tokens denylisted below are the vault's own, not the one it deposits with. Likewise, if the owner rejected a pairing or transfer after its `hs.fin`, send `device.pair.rejected` first, on the new device's token (0.10.5, §6.7). Denylist the `jti` of every token the vault issued to the peer in the request: the request token and, if its member approved, the standing and reconnect tokens of its `connection.approved` (0.10.4). Delete the tokens held for the peer and the handshake state. |
 
 The relay retains denylist entries for its maximum token lifetime
 (RELAY-PROTOCOL §5.5). This is why reconnect tokens raise denylist retention
@@ -2504,6 +2560,7 @@ an answer to an unknown or expired id is dropped.
 | | `device.transfer.create`, `.approve`, `.reject` | D→V | req | Direct transfer of the app to a new phone (§6.7.1) |
 | | `device.transfer.pending` | V→D | | The new phone scanned: name and `sas` |
 | | `device.paired`, `device.unlinked` | V→D | | Welcome and removal notices |
+| | `device.pair.rejected` | V→D (the new device) | | The owner rejected the pairing or transfer after its `hs.fin` (§6.7, 0.10.5) |
 | | `device.session.request`, `.approve`, `.deny`, `.end` | D→V | req | Access sessions of desktops and agents (§6.8) |
 | | `device.session.pending`, `.granted`, `.ended` | V→D | | Asked; granted; ended or denied |
 | | `approval.pending`, `approval.waiting` / `approval.decide` | V→D / D→V | — / req | A desktop's step-up request or an agent's referred request, held for an app (§6.8) |
@@ -2691,6 +2748,7 @@ an answer to an unknown or expired id is dropped.
 | `device.pair.pending` (to apps) | — | `{pairing_id, pending_id, role, name, sas}`; `name` is the new device's self-asserted `profile.name` |
 | `device.pair.approve` (app) | `{pairing_id, session_seconds?, grants?}`; `session_seconds` (60–86,400) only for a desktop or agent: its first access session (§6.8); `grants` only for an agent: 1–32 LEASH grant specifications (§10.11), signed at the approval (`credential_locked` outside the unlock window) | `{}` |
 | `device.pair.reject` (app) | `{pairing_id}` | `{}` |
+| `device.pair.rejected` (to the new device) | — | `{}`: the owner rejected the pairing or transfer after its `hs.fin` (0.10.5); sealed under the handshake's epoch, on the device's token from `hs.init`, as `device.paired`; the device stops waiting (§6.7) |
 | `device.paired` (to the new device) | — | `{device_id, role, vault_id, release, release_number, token, session_expires_at?, transfer?, credential_version?}` (the release the vault runs under); `token`: the device's standing token (§7.1); it replaces the request token of a pairing's or transfer's `hs.resp` (0.10.3), and after enrollment or recovery, whose `hs.resp` already carries one, it is a fresh one (0.10.4); `transfer: true` and the credential's `credential_version` for a transferred app (§6.7.1) |
 | `device.list` (app, desktop) | `{}` | `{devices: [{id, kind, state, name, ik, profile?, created_at?, last_active_at?, session_expires_at?}]}` |
 | `device.unlink` (app) | `{device_id}` | `{}`; `forbidden` for the app itself (0.9.0: it leaves by a transfer or a recovery) |
@@ -2698,7 +2756,7 @@ an answer to an unknown or expired id is dropped.
 | `device.transfer.create` (the holder) | `{}` | `{transfer_id, link, exp}`; `exists` while a transfer is open; `credential_frozen` or `rotation_required` during an alarm (§6.7.1) |
 | `device.transfer.pending` (to the holder) | — | `{transfer_id, name, sas}`; `name` is the new app's self-asserted `profile.name` |
 | `device.transfer.approve` (the holder) | `{transfer_id, credential, utk_id, sealed{password, pin}}` | `{}`: the transfer is complete (0.10.3; was `{exp}`); `bad_pin`, `backoff`, `bad_password`, `stale_credential`, `credential_frozen`, `utk_invalid` |
-| `device.transfer.reject` (the holder) | `{transfer_id}` | `{}`; cancels the transfer before or after the scan, until the approval |
+| `device.transfer.reject` (the holder) | `{transfer_id}` | `{}`; cancels the transfer before or after the scan, until the approval; after the new app's `hs.fin` it gets `device.pair.rejected` (0.10.5) |
 | `device.session.request` (desktop, agent) | `{seconds?}` (60–86,400, default 3,600) | `{request_id, exp}` |
 | `device.session.pending` (to apps) | — | `{request_id, device_id, role, name, seconds, exp}` |
 | `device.session.approve` (app) | `{request_id, seconds?}` | `{device_id, session_id, expires_at}` |
@@ -7069,9 +7127,12 @@ Follow-ups:
     6. The SAS stays six digits. Recommended: yes; 10^-6 per attempt,
        with one attempt per invitation or accept, each visible as a
        mismatch to the members.
-18. **Declines sent (0.10.5).** Owner decision of 2026-10-05, reversing
-    item 16 decision 2: a declined connection request is sent to the
-    other party as `connection.declined` (§6.4, §7.1, §7.4, §10.4).
+18. **Declines and rejections sent (0.10.5).** Owner decision of
+    2026-10-05, reversing item 16 decision 2: a declined connection
+    request is sent to the other party as `connection.declined` (§6.4,
+    §7.1, §7.4, §10.4). Owner decision of the same day, "include
+    `device.pair.rejected`": the owner's rejection of a pairing or
+    transfer is sent to the new device (§6.7, §6.7.1, §10.3).
     Follow-ups: vettid-vault (send it from `connection.decline` and
     `block.add{pending_id}` before the drop, when the epoch and the
     peer's request token exist; accept it on the request token and under
@@ -7082,6 +7143,14 @@ Follow-ups:
     declined your connection request" or "<name> declined the
     connection" on `sync.event{connection.request, peer_declined}`,
     keeping the request's name until then; not again on the `failed`).
+    `device.pair.rejected` follow-ups: vettid-vault (in
+    `device.pair.reject` and `device.transfer.reject`, once the request
+    exists, seal it under the request's epoch and queue it on the new
+    device's token before `dropRequest`; nothing for a handshake still
+    awaiting `hs.fin`, nor for expiry, `failed`, `alarm` or `replaced`);
+    vettid-android (the new app of a transfer, and later the desktop and
+    agents: end the wait for `device.paired` on `device.pair.rejected`,
+    drop the handshake state, show "Rejected on your phone").
     **Compatibility.** S2, built from vettid-vault main before this
     change, neither sends nor understands it; the code lands in a later
     staging release. Mixed versions behave as 0.10.4: a vault that does
@@ -7094,9 +7163,15 @@ Follow-ups:
     `unsupported_type` is sent back (the decliner could not open one
     anyway: its epoch is gone). In the after-activation race a 0.10.4
     receiver drops it as a misused request token (§7.1), and its
-    connection turns `stale`, as in 0.10.4.
-    **OWNER DECISIONS of 0.10.5** (each written as recommended, to
-    confirm at review):
+    connection turns `stale`, as in 0.10.4. `device.pair.rejected` is
+    likewise sent only by a release after S2; a new device on older code
+    opens it under the handshake's epoch, does not recognise it and keeps
+    waiting for `device.paired` until its 10 minutes end, as in 0.10.4.
+    It sends no `unsupported_type` back (an event it does not know is
+    not answered by the current app; any answer would go on its request
+    token, which the vault has denylisted).
+    **OWNER DECISIONS of 0.10.5** (approved by the owner as recommended,
+    2026-10-05):
     1. The name `connection.declined{}`, empty, on the
        `connection.approved` channel. Recommended: yes; it mirrors
        `connection.approved` and needs no new token or session.
@@ -7119,6 +7194,14 @@ Follow-ups:
     6. App copy: the accepter sees "<name> declined your connection
        request", the inviter "<name> declined the connection".
        Recommended: yes; the inviter made no request of its own.
+    7. Include `device.pair.rejected` (owner, 2026-10-05). One type for
+       pairing and transfer, not a separate `device.transfer.rejected`:
+       a transfer is a pairing of role `app` that ends in the same
+       `device.paired`, and the device knows what it started. Sent only
+       for the owner's rejection after `hs.fin`; not for expiry, a
+       commitment mismatch, a clone alarm or a recovery, so an unapproved
+       device learns nothing of the vault's state. §13.5 is unchanged:
+       the device learns only what its user saw on the phone.
 
 ## 16. Test vectors
 
@@ -7302,8 +7385,17 @@ pending (§15, follow-up 1).
     kind.
   - §10.9: the `connection.request.peer_declined` audit and feed kinds.
   - §13.5: what a link holder learns from a decline.
+  - §6.7, §6.7.1, §7.1, §7.4, §10, §10.3: the owner's rejection of a
+    pairing or transfer after its `hs.fin` is sent to the new device as
+    `device.pair.rejected{}` (one type for both), under the handshake's
+    epoch on the token the device issued in `hs.init`, as `device.paired`
+    travels; when it is and is not sent; the device stops waiting and
+    shows "Rejected on your phone"; late and duplicate copies; why it
+    cannot be forged (owner decision of 2026-10-05, "include
+    `device.pair.rejected`").
   - §15: item 16 decision 2 and item 17 decision 4 superseded; item 18
-    (follow-ups, compatibility, owner decisions).
+    (follow-ups, compatibility, owner decisions, all approved
+    2026-10-05).
 
 - **0.10.4** (2026-10-04): what the vault implementation of 0.10.3
   settled (vettid-vault PR #26).
