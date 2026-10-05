@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.10.6
+version: 0.10.7
 date: 2026-10-05
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -17,6 +17,8 @@ related:
   - VAULT-RELEASES.md (0.1.0, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.10.7: editorial: §11.4 lists `credential_backup` in the unlock result
+    (0.10.6, §11.11.5); §16 adds the `recovery.json` vector (vettid-vault #31, #33)
   - 0.10.6: gaps found building the account site's recovery pages and
     the vault's 0.10.5 code. Recovery: the member API's recovery gains
     `vault_id` and the state `registered` (the code is spent), which the
@@ -5217,13 +5219,13 @@ one of:
   MB(vault)>", "release": "<PCR0 hex>", "release_number": r,
   "release_status": "active|deprecated|retired|removed", "manifest_serial": s,
   "update": {"to": "<pcr0>", "result": "moved|refused|abandoned", "code": "<reason>"},
-  "recovery_cancelled": true, "vault_bundle": "<b64>"}`
+  "recovery_cancelled": true, "vault_bundle": "<b64>", "credential_backup": true|false}`
   — `update` is present only if the request carried `release_update`, or a
   pending move was completed (§11.10.4). After `moved` the vault is locked
   and sealed to the new release; `header_seq` is the new header's, and
   `token` is absent (the vault did not resume).
   — `recovery_cancelled` is present when the unlock cancelled a recovery
-  (§11.11.4); `vault_bundle` only for the app a recovery registered
+  (§11.11.4); `vault_bundle` and, after it, `credential_backup` (0.10.6) only for the app a recovery registered
   (§11.11.5).
 - `{"ok": false, "code": "bad_pin|backoff|unknown_device|attestation|state_rollback|vault_missing|manifest|wrong_release|release_key|retry|recovery_pending",
   "header_seq": m, "retry_after": <s>}` — `recovery_pending`: a recovery
@@ -7527,11 +7529,52 @@ reference implementation (0.10.4).
   sig_R, sig_I, all three envelopes : handshake.json
 ```
 
+**0.10.6.** New file `recovery.json` (§11.11.2): the recovery code sealed
+to the portal's browser key, and the `no_credential` refusal, with every
+intermediate value, the header's code hash and the QR payload. Generated
+by vettid-vault (#31) through the enclave's own sealing code; the values
+in the file are authoritative. The browser key is test only (the portal's
+real key is a non-extractable WebCrypto key). The ephemeral scalar is
+drawn before the nonce.
+
+```
+§11.11.2 recovery code                                          (recovery.json)
+  browser key (test only): P-256 private scalar 32 x 0x23
+  browser_key (65 B, hex) : 042464a2f8813e007299b9c0beef9c8d6d8d17470b32bba0329c145f0cfc60b683
+                            f831a35205868db984da728a6a0e1129e8940e8b735798e65360dada93457645
+  vault_id    : test-vault-0001        recovery_id : 01JB2Z6V9K3M4N5P6Q7R8S9T30
+  code bytes  : 20 x 0x28              code        : 50M2GA1850M2GA1850M2GA1850M2GA18
+  not_before  : 2026-10-02T12:00:00.000Z   expires_at : 2026-10-03T12:00:00.000Z
+  code_hash   : 0aa336f542592f05a7c72081fa955cd7a8a22a7b3595fdb5d1f9c5cad7c80a72
+                = SHA-256("vettid/vms/2/recovery-code" 00 vault_id 00 recovery_id 00 code)
+
+  sealed code: eph scalar 32 x 0x24, nonce 12 x 0x25
+    ECDH (x)  : b49383585922137d268863642bc701246272d84c8a93072905e25b65e9f457da
+    k         : 14878c75a9e9cdac52a7d9d7f477d42a1e5a8270709ee503e37334f40c9aa261
+    pt        : {"v":1,"vault_id":"test-vault-0001","recovery_id":"01JB2Z6V9K3M4N5P6Q7R8S9T30",
+                 "code":"50M2GA1850M2GA1850M2GA1850M2GA18","not_before":"2026-10-02T12:00:00.000Z",
+                 "expires_at":"2026-10-03T12:00:00.000Z"} (one line), 00 padding to 5,158 B
+    out       : 5,252 B, SHA-256 f8dc9c8dc69b4cbf64c5e6bcc61df6c76e488f03e1f3223b07dff755aba57c91
+
+  no_credential: eph scalar 32 x 0x26, nonce 12 x 0x27
+    ECDH (x)  : f57b8af7a79e75c5c841cce2d24bb02c5ca61a9ceceadb23d4f3324bac9af655
+    k         : a3a4c5eadb9bdc06f48189dd81795a2eb34d1ae5783de14c25d057b421902126
+    pt        : {"v":1,"vault_id":"test-vault-0001","recovery_id":"01JB2Z6V9K3M4N5P6Q7R8S9T30","error":"no_credential"},
+                00 padding to 5,158 B
+    out       : 5,252 B, SHA-256 c7120dd27a8bbfe190789fe1cf316fbb8a04da0133993761f294cc0a9b809631
+
+  QR payload (129 B): {"v":1,"t":"r","vault_id":"test-vault-0001","recovery_id":"01JB2Z6V9K3M4N5P6Q7R8S9T30",
+                       "code":"50M2GA1850M2GA1850M2GA1850M2GA18"} (one line)
+  salt, aad, eph public keys, full out (b64) : recovery.json
+```
+
 Cross-implementation checks against Apple CryptoKit and BouncyCastle are
 pending (§15, follow-up 1).
 
 ## 17. Changelog
 
+- **0.10.7** (2026-10-05): editorial. §11.4 shows `credential_backup` in
+  the unlock result's ok body, after `vault_bundle`; §16 adds `recovery.json`.
 - **0.10.6** (2026-10-05): recovery and lock-state gaps, and the wording
   of 0.10.5 (§15 item 19).
   - §6.4: a decline always goes on the request token the peer issued,
