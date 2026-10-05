@@ -10,6 +10,7 @@ import * as terms from './sections/terms.js';
 import * as subscriptionTypes from './sections/subscription-types.js';
 import * as admins from './sections/admins.js';
 import * as audit from './sections/audit.js';
+import * as vaultService from './sections/vault-service.js';
 
 const ROUTES = {
   requests: [requests],
@@ -17,6 +18,7 @@ const ROUTES = {
   invites: [invites],
   terms: [terms],
   'subscription-types': [subscriptionTypes],
+  'vault-service': [vaultService],
   admins: [admins, audit],
 };
 const DEFAULT_ROUTE = 'requests';

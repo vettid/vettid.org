@@ -222,6 +222,13 @@ export const ORG = {
   },
 } as const;
 
+/**
+ * The vault service pause (MEMBER-API "Vault service pause"): an SSM
+ * parameter in the stage's main account, written by operators only (admin
+ * API or CLI), never by a deploy. Absent means on.
+ */
+export const vaultServiceParamName = (config: Pick<AppConfig, 'stage'>): string => `/vettid-org/${config.stage}/switch/vault-service`;
+
 /** Member account ids, in a fixed order. */
 export const ORG_MEMBER_ACCOUNTS: readonly string[] = Object.values(ORG.members);
 

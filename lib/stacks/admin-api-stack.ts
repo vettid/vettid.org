@@ -7,7 +7,7 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as route53targets from 'aws-cdk-lib/aws-route53-targets';
 import { Construct } from 'constructs';
-import { AppConfig, hostName, resourceName } from '../config';
+import { AppConfig, hostName, resourceName, vaultServiceParamName } from '../config';
 import { RestRouteGroup } from '../constructs/rest-route-group';
 import { readRef } from '../constructs/ssm-refs';
 import { tableEnv } from '../constructs/table-grants';
@@ -27,8 +27,8 @@ export interface VettidOrgAdminApiStackProps extends cdk.StackProps {
  *  2. Cognito authorizer on the admin pool; handlers also require the
  *     `admin` group.
  *
- * Routes are served by four route-group Lambdas (people, content, system,
- * vault-canary).
+ * Routes are served by five route-group Lambdas (people, content, system,
+ * vault-canary, vault-service).
  */
 export class VettidOrgAdminApiStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: VettidOrgAdminApiStackProps) {
@@ -174,6 +174,14 @@ export class VettidOrgAdminApiStack extends cdk.Stack {
       entry: 'lambda/admin/vault-canary.ts',
       environment: env,
     }).fn;
+    // Its own Lambda: the only role that may write the vault service switch.
+    const vaultService = new RestRouteGroup(this, 'VaultService', {
+      api,
+      authorizer,
+      pathPrefixes: ['/admin/vault-service'],
+      entry: 'lambda/admin/vault-service.ts',
+      environment: { ...env, VAULT_SERVICE_PARAM: vaultServiceParamName(config) },
+    }).fn;
 
     // ---- least-privilege grants ---------------------------------------------
     const tableArn = (t: string) => `arn:${this.partition}:dynamodb:${this.region}:${this.account}:table/${tableName(t)}`;
@@ -186,12 +194,12 @@ export class VettidOrgAdminApiStack extends cdk.Stack {
       );
 
     // Every route re-checks that the calling admin is still enabled.
-    for (const fn of [people, content, system, vaultCanary]) {
+    for (const fn of [people, content, system, vaultCanary, vaultService]) {
       fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['cognito-idp:AdminGetUser'], resources: [readRef(this, config, 'auth/admin-pool-arn')] }));
     }
 
     // Audit is append-only for every writer; only `system` may read it.
-    for (const fn of [people, content, system, vaultCanary]) grantTable(fn, 'audit', ['PutItem']);
+    for (const fn of [people, content, system, vaultCanary, vaultService]) grantTable(fn, 'audit', ['PutItem']);
     grantTable(system, 'audit', ['Query'], true);
 
     grantTable(people, 'members', ['GetItem', 'Query', 'Scan', 'UpdateItem', 'DeleteItem'], true);
@@ -224,6 +232,15 @@ export class VettidOrgAdminApiStack extends cdk.Stack {
           'ForAllValues:StringEquals': { 'dynamodb:Attributes': ['user_guid', 'vault_canary', 'updated_at'] },
           StringEqualsIfExists: { 'dynamodb:ReturnValues': ['NONE', 'UPDATED_OLD', 'UPDATED_NEW'] },
         },
+      }),
+    );
+
+    // vault-service (lambda/admin/vault-service.ts): get and put the one
+    // switch parameter (String, no KMS), nothing else in SSM.
+    vaultService.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+        resources: [`arn:${this.partition}:ssm:${this.region}:${this.account}:parameter${vaultServiceParamName(config)}`],
       }),
     );
 

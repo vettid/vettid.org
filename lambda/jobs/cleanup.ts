@@ -19,6 +19,7 @@ const STALE_DAYS = 14;
 import { emailMarkerKey, vaultPointerKey } from '../shared/members';
 import type { MemberItem, SubscriptionItem } from '../shared/model';
 import { liveLease, newUlid, pickInstance, releaseRow, requestStart, routable } from '../shared/vault-routing';
+import { vaultService } from '../shared/vault-service';
 
 async function* query(input: ConstructorParameters<typeof QueryCommand>[0]) {
   let start: Record<string, unknown> | undefined;
@@ -51,6 +52,10 @@ interface VaultRowLite {
  * instance erases the stored objects. The vault's `deleted` report brings
  * the vault_deleted notice, whose mailer removes the row. Returns whether
  * the operation was queued.
+ *
+ * While the operator has paused the vault service (MEMBER-API "Vault
+ * service pause") nothing is queued or start-requested: the row gets its
+ * `deletion_requested_at` and a run after the pause retries it.
  */
 export async function requestVaultDeletion(v: VaultRowLite, nowS: number): Promise<boolean> {
   if (v.state === 'deleted') return false;
@@ -59,8 +64,9 @@ export async function requestVaultDeletion(v: VaultRowLite, nowS: number): Promi
     await ddb.send(new DeleteCommand({ TableName: table.vaults(), Key: { vault_id: v.vault_id } }));
     return false;
   }
-  let inst = await liveLease(v, nowS);
-  if (!inst && v.sealed_release) {
+  const paused = !(await vaultService()).enabled;
+  let inst = paused ? null : await liveLease(v, nowS);
+  if (!inst && v.sealed_release && !paused) {
     const rel = await releaseRow(v.sealed_release);
     // A `removed` release (not reopened for a rescue) is never started
     // (VAULT-MESSAGING 0.10.0 §11.10.5); the stored objects of vaults still

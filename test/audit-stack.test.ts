@@ -46,6 +46,7 @@ const RULES = [
   'CentralRootSession',
   'KmsKeyDeletion',
   'KmsKeyPolicy',
+  'VaultServiceSwitch',
   'S3PublicAccess',
   'SecurityGroupOpenToWorld',
   'GuardDutyFindings',
@@ -106,7 +107,7 @@ function signIn(account: string, who: Who, detail: Record<string, any> = {}) {
 const { vaultProd, vaultStaging, proteus } = ORG.members;
 const MGMT = ORG.management;
 
-test('fourteen alert rules (plus one heartbeat rule per member), each to the emailed SNS topic, each naming the account', () => {
+test('fifteen alert rules (plus one heartbeat rule per member), each to the emailed SNS topic, each naming the account', () => {
   t.resourceCountIs('AWS::Events::Rule', RULES.length + Object.keys(ORG.members).length);
   t.hasResourceProperties('AWS::SNS::Subscription', { Protocol: 'email', Endpoint: 'admin@vettid.org' });
   const topicId = Object.keys(t.findResources('AWS::SNS::Topic'))[0];
@@ -151,6 +152,22 @@ describe('KMS', () => {
   test.each([vaultProd, vaultStaging])('vault account %s: left to the vault stack\'s own KMS rules (no duplicate email)', (acct) => {
     expect(matching(apiCall(acct, 'aws.kms', 'ScheduleKeyDeletion', SSO_ADMIN))).toEqual([]);
     expect(matching(apiCall(acct, 'aws.kms', 'PutKeyPolicy', SSO_ADMIN))).toEqual([]);
+  });
+});
+
+describe('vault service switch (MEMBER-API "Vault service pause")', () => {
+  const name = (stage: string) => ({ requestParameters: { name: `/vettid-org/${stage}/switch/vault-service`, type: 'String', overwrite: true } });
+  test.each([[MGMT, 'prod'], [vaultStaging, 'staging']])('every write in %s (%s) alerts: admin API, CLI, even a deploy', (acct, stage) => {
+    const adminApi = { userName: 'VettidOrgAdminApiStack-VaultServiceFunctionRole', arn: 'arn:aws:sts::{acct}:assumed-role/VettidOrgAdminApiStack-VaultServiceFunctionRole/fn' };
+    for (const who of [adminApi, SSO_ADMIN, CFN_EXEC] as Who[]) {
+      expect(matching(apiCall(acct, 'aws.ssm', 'PutParameter', who, name(stage)))).toEqual(['VaultServiceSwitch']);
+    }
+    expect(matching(apiCall(acct, 'aws.ssm', 'DeleteParameter', SSO_ADMIN, name(stage)))).toEqual(['VaultServiceSwitch']);
+    expect(matching(apiCall(acct, 'aws.ssm', 'DeleteParameters', SSO_ADMIN, { requestParameters: { names: ['/x', `/vettid-org/${stage}/switch/vault-service`] } }))).toEqual(['VaultServiceSwitch']);
+  });
+  test('other parameters, and reads, are quiet', () => {
+    expect(matching(apiCall(MGMT, 'aws.ssm', 'PutParameter', CFN_EXEC, { requestParameters: { name: '/vettid-org/prod/auth/member-pool-id' } }))).toEqual([]);
+    expect(matching(apiCall(MGMT, 'aws.ssm', 'GetParameter', SSO_ADMIN, { readOnly: true, ...name('prod') }))).toEqual([]);
   });
 });
 

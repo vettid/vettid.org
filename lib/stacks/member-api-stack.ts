@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
@@ -9,7 +10,7 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as sources from 'aws-cdk-lib/aws-lambda-event-sources';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
-import { AppConfig, hostName, resourceName } from '../config';
+import { AppConfig, ORG, hostName, resourceName, vaultServiceParamName } from '../config';
 import { ApiFunction } from '../constructs/api-function';
 import { HttpRouteGroup } from '../constructs/route-group';
 import { publishRef, readRef } from '../constructs/ssm-refs';
@@ -204,6 +205,15 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
         fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['sqs:SendMessage'], resources: [vaultControlQueues] }));
       }
     };
+    // The vault service pause (MEMBER-API "Vault service pause"): read-only
+    // access to the one switch parameter, for the routes and the cleanup
+    // job; only the admin API's vault-service Lambda may write it.
+    const switchParamArn = `arn:${this.partition}:ssm:${this.region}:${this.account}:parameter${vaultServiceParamName(config)}`;
+    const readSwitch = (fn: lambda.Function) => {
+      fn.addEnvironment('VAULT_SERVICE_PARAM', vaultServiceParamName(config));
+      fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['ssm:GetParameter'], resources: [switchParamArn] }));
+    };
+    readSwitch(vault);
     g(vault, 'members', ['GetItem']);
     g(vault, 'terms', ['Query'], true);
     g(vault, 'ratelimits', ['UpdateItem']);
@@ -232,6 +242,7 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     // notice then removes its row); never-sealed rows and the pointer row go
     // here; unreported deletions are retried (Scan) and flagged after 30 days.
     vaultGrants(cleanup, 'cleanup');
+    readSwitch(cleanup); // no deletion is queued while the vault service is paused
     // stale-request reclaim: keep identities the mailing list still uses
     tableGrant(this, config, cleanup, 'mailing-list', ['GetItem']);
     cleanup.addEnvironment('TABLE_MAILING_LIST', resourceName(config, 'mailing-list'));
@@ -287,6 +298,50 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
       schedule: events.Schedule.cron({ minute: '0', hour: '15' }), // 15:00 UTC daily: daytime in the Americas and Europe
       targets: [new targets.LambdaFunction(notices)],
     });
+
+    // A pause must not be forgotten (RUNBOOK "Pausing the vault service"):
+    // every 5 minutes the watcher writes VaultServicePaused (EMF, no
+    // PutMetricData right); one alarm reports a pause and its end, another
+    // a pause still on after a day. Every write to the parameter is also
+    // emailed by VettidOrgAuditStack's rule (both stages).
+    const watch = job('VaultServiceWatch', 'lambda/jobs/vault-service-watch.ts', cdk.Duration.seconds(30));
+    readSwitch(watch);
+    new events.Rule(this, 'VaultServiceWatchSchedule', {
+      schedule: events.Schedule.rate(cdk.Duration.minutes(5)),
+      targets: [new targets.LambdaFunction(watch)],
+    });
+    const pausedMetric = (period: cdk.Duration) =>
+      new cloudwatch.Metric({ namespace: 'VettID/MemberApi', metricName: 'VaultServicePaused', statistic: 'Maximum', period });
+    const pausedAlarms = [
+      new cloudwatch.Alarm(this, 'VaultServicePaused', {
+        alarmName: resourceName(config, 'vault-service-paused'),
+        alarmDescription: 'The vault service is paused: enroll, unlock and recovery answer 503 (RUNBOOK "Pausing the vault service"). OK when resumed.',
+        metric: pausedMetric(cdk.Duration.minutes(5)),
+        threshold: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        evaluationPeriods: 1,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      }),
+      new cloudwatch.Alarm(this, 'VaultServicePaused24h', {
+        alarmName: resourceName(config, 'vault-service-paused-24h'),
+        alarmDescription: 'The vault service has been paused for 24 hours (RUNBOOK "Pausing the vault service"): resume it or say why not.',
+        metric: pausedMetric(cdk.Duration.hours(1)),
+        threshold: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        evaluationPeriods: 24,
+        datapointsToAlarm: 24,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      }),
+    ];
+    // Production's main account is the management account, home of the
+    // security-alerts topic (VettidOrgAuditStack). Staging's account has no
+    // topic: there the parameter-change emails are the notice.
+    if (this.account === ORG.management && config.stage === 'prod') {
+      const alertsTopicArn = `arn:${this.partition}:sns:${this.region}:${this.account}:${resourceName(config, 'security-alerts')}`;
+      const action = { bind: () => ({ alarmActionArn: alertsTopicArn }) };
+      for (const a of pausedAlarms) a.addAlarmAction(action);
+      pausedAlarms[0].addOkAction(action); // "resumed"; the 24 h alarm's OK would say it twice
+    }
 
     // The vaults stream is in the vault account (cross-account event source:
     // its stream policy admits this role). Its ARN carries a creation label,
