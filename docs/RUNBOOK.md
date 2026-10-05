@@ -447,9 +447,20 @@ After publishing a manifest, run it at once:
    The image build takes about 20–40 minutes; a hash or PCR0 mismatch
    fails the build and the deploy (logs: `/aws/imagebuilder/vettid-org-vault-r<N>-<hash>`).
 5. Canary: `aws autoscaling set-desired-capacity --auto-scaling-group-name vettid-org-vault-r<N> --desired-capacity 1`,
-   then the self-test through SSM on that instance (`systemctl stop vault-parent`,
-   run `/opt/vettid/bin/vault-parent -selftest -smoke-key-arn <vault/smoke-key-arn> -smoke-account <account> -bucket <data bucket> -region us-east-1`
-   per vettid-vault docs/SMOKE.md, then `systemctl start vault-parent`).
+   then the self-test through SSM on that instance, per vettid-vault
+   docs/SMOKE.md:
+   ```bash
+   systemctl stop vault-parent      # also stops the enclave (vault-enclave is PartOf the parent)
+   systemctl start vault-enclave    # a fresh enclave, which dials the self-test parent
+   /opt/vettid/bin/vault-parent -selftest -smoke-key-arn <vault/smoke-key-arn> -smoke-account <account> -bucket <data bucket> -region us-east-1
+   systemctl stop vault-enclave
+   sleep 60                         # SQS refuses to recreate the instance queue within 60 s of its deletion
+   systemctl start vault-enclave vault-parent
+   ```
+   Expect `"result": "PASS"` with `key_policy_check: 6` (the deletable
+   test key is refused, as designed). Without the 60-second wait the
+   parent restarts in a loop (`QueueDeletedRecently`) until a minute has
+   passed; it recovers by itself. (S1, 2026-10-05: PASS.)
 6. After publication, the always-on minimum moves (O7): set
    `min_instances: 1` on N and `0` on N−1, deploy both release stacks.
 
@@ -500,7 +511,7 @@ serial, a dropped or backwards-moving release, and a serial above
 Key B (offline token, only if key A is lost): `vaultctl manifest digest`,
 sign the digest on the offline machine, `vaultctl manifest import-sig`
 (vettid-vault docs/RELEASING.md), then `publish --in` the result as above.
-Key B is not pinned yet (`lib/config.ts`, TODO O3).
+Key B is pinned (`lib/config.ts`, key_id 1abd49da96970b6e).
 
 ### Canary routing (W8)
 
