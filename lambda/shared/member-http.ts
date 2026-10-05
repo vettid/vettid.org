@@ -259,7 +259,13 @@ export function memberHandler(router: Router<MemberRequest>) {
       if (err instanceof RateLimited) {
         return memberJson(429, { error: 'rate_limited', message: err.message, retry_after: err.retryAfter }, setCookies);
       }
-      if (err instanceof ApiError) return memberJson(err.status, { error: err.code, message: err.message, ...err.extra }, setCookies);
+      if (err instanceof ApiError) {
+        const res = memberJson(err.status, { error: err.code, message: err.message, ...err.extra }, setCookies);
+        // A 503 that says when to come back also says it in the standard header.
+        const ra = err.extra.retry_after;
+        if (err.status === 503 && typeof ra === 'number' && Number.isInteger(ra) && ra > 0) res.headers = { ...res.headers, 'Retry-After': String(ra) };
+        return res;
+      }
       if (err instanceof HttpError) return memberJson(err.status, { error: err.code, message: err.message }, setCookies);
       console.error('unhandled', err);
       return memberJson(500, { error: 'internal', message: 'Internal error' }, setCookies);

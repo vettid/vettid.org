@@ -61,6 +61,14 @@
  * enroll and GET /api/vault/enclave answer 503 vault_unavailable; nothing is
  * created, queued or start-requested, and every route keeps its rate limit.
  *
+ * Vault service pause (MEMBER-API 1.2.0 "Vault service pause"): while the
+ * operator's switch is off, enclave, enroll, unlock, recovery request and
+ * register answer 503 vault_unavailable (service: "paused") right after the
+ * account checks, before body checks and rate limits; nothing is written,
+ * queued or start-requested. Status (with `service`), polling, lock, the
+ * recovery status and cancels stay; a cancel is queued only to a running
+ * instance, never by a start request.
+ *
  * Manifest by hash (VAULT-MESSAGING 0.10.0 §11.5): enroll and unlock carry
  * `manifest_sha256` in the clear; the API checks its format only and copies
  * it into the queue message, so the host can hand that manifest to the
@@ -78,6 +86,7 @@ import { canSignIn, currentTerms, memberByGuid, vaultPointerKey } from '../share
 import type { MemberItem } from '../shared/model';
 import { hit } from '../shared/ratelimit';
 import { sendMail } from '../shared/mail';
+import { vaultService } from '../shared/vault-service';
 import {
   INSTANCE_ID_RE,
   type InstanceRow,
@@ -219,6 +228,16 @@ const instanceMoved = () =>
 const releaseUnavailable = () =>
   vaultError(410, 'release_unavailable', 'The enclave release this vault is sealed to has ended or can no longer be started.');
 const vaultUnavailable = () => vaultError(503, 'vault_unavailable', 'The vault service is not available yet', { retry_after: 300 });
+/** What a paused vault service answers (also `Retry-After`, member-http). */
+export const PAUSED_RETRY_AFTER_S = 300;
+const vaultPaused = () =>
+  vaultError(503, 'vault_unavailable', 'The vault service is paused for maintenance. Try again later.', { service: 'paused', retry_after: PAUSED_RETRY_AFTER_S });
+
+/** Routes that start or change vault activity: refused while the operator has paused the service. */
+async function requireService(): Promise<void> {
+  if (!(await vaultService()).enabled) throw vaultPaused();
+}
+
 const releaseStarting = (release: string) =>
   vaultError(503, 'release_starting', 'An enclave for this vault is starting; retry shortly.', { release, retry_after: START_RETRY_AFTER_S });
 
@@ -496,8 +515,9 @@ router.on('GET', '/api/vault/status', async (req) => {
   const m = await loadActiveAccount(req);
   await limit(`vault-status#${m.user_guid}`, 60, 60);
   const now = nowS();
+  const service = (await vaultService()).enabled ? 'available' : 'paused';
   const found = activeVault((await currentVault(m.user_guid)).vault);
-  if (!found) return { vault: null };
+  if (!found) return { vault: null, service };
   const v = await refreshRegistered(m, found);
   let release = null;
   if (v.sealed_release) {
@@ -525,11 +545,14 @@ router.on('GET', '/api/vault/status', async (req) => {
       created_at: v.created_at,
       updated_at: v.updated_at,
     },
+    // The operator's pause (MEMBER-API 1.2.0), so sites and apps can say so.
+    service,
   };
 });
 
 router.on('GET', '/api/vault/enclave', async (req) => {
   const m = await loadVaultMember(req);
+  await requireService();
   await limit(`vault-enclave#${m.user_guid}`, 30, 60);
   const now = nowS();
   const requested = req.query.release;
@@ -556,6 +579,7 @@ router.on('GET', '/api/vault/enclave', async (req) => {
 
 router.on('POST', '/api/vault/enroll', async (req) => {
   const m = await loadVaultMember(req);
+  await requireService();
   const requestId = field(req.body, 'request_id', ULID_RE, 'a ULID');
   const instanceId = field(req.body, 'instance_id', INSTANCE_ID_RE, 'an instance id');
   const etkKid = field(req.body, 'etk_kid', KID_RE, '16 lowercase hex');
@@ -579,6 +603,7 @@ router.on('POST', '/api/vault/enroll', async (req) => {
 
 router.on('POST', '/api/vault/unlock', async (req) => {
   const m = await loadVaultMember(req);
+  await requireService();
   const vaultId = field(req.body, 'vault_id', VAULT_ID_RE, '32 lowercase hex');
   const requestId = field(req.body, 'request_id', ULID_RE, 'a ULID');
   const instanceId = field(req.body, 'instance_id', INSTANCE_ID_RE, 'an instance id');
@@ -753,7 +778,11 @@ async function recoverableVault(guid: string): Promise<VaultRow> {
   return v;
 }
 
-/** The instance a recovery operation goes to: the leaseholder, else one of the sealed release. */
+/**
+ * The instance a recovery operation goes to: the leaseholder, else one of
+ * the sealed release. While the service is paused (only a cancel gets
+ * here then) no start is requested.
+ */
 async function recoveryInstance(v: VaultRow, now: number, canary: boolean): Promise<InstanceRow> {
   const holder = await liveLease(v, now);
   if (holder) return holder;
@@ -761,6 +790,7 @@ async function recoveryInstance(v: VaultRow, now: number, canary: boolean): Prom
   if (!routable(await releaseRow(v.sealed_release), { canary })) throw releaseUnavailable();
   const inst = await pickInstance(v.sealed_release, now);
   if (inst) return inst;
+  if (!(await vaultService()).enabled) throw vaultPaused();
   await requestStart(v.sealed_release);
   throw releaseStarting(v.sealed_release);
 }
@@ -825,6 +855,7 @@ async function cancelRecovery(m: MemberItem, v: VaultRow, via: 'session' | 'link
 
 router.on('POST', '/api/vault/recovery', async (req) => {
   const m = await loadVaultMember(req);
+  await requireService();
   const bk = req.body.browser_key;
   const key = typeof bk === 'string' ? decodeCanonicalB64(bk) : null;
   if (!key || key.length !== 65 || key[0] !== 0x04) throw badRequest('browser_key must be base64 of an uncompressed P-256 point');
@@ -927,6 +958,7 @@ async function recordRegisterId(v: VaultRow, recoveryId: string, requestId: stri
 
 router.on('POST', '/api/vault/recovery/register', async (req) => {
   const m = await loadVaultMember(req);
+  await requireService();
   const vaultId = field(req.body, 'vault_id', VAULT_ID_RE, '32 lowercase hex');
   const requestId = field(req.body, 'request_id', ULID_RE, 'a ULID');
   const instanceId = field(req.body, 'instance_id', INSTANCE_ID_RE, 'an instance id');

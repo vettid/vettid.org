@@ -100,3 +100,17 @@ export function timeUntil(iso, now = Date.now()) {
   if (h >= 10 || m === 0) return `about ${Math.round(min / 60)} hour${Math.round(min / 60) === 1 ? '' : 's'}`;
   return `${h} hour${h === 1 ? '' : 's'} ${m} minute${m === 1 ? '' : 's'}`;
 }
+
+/**
+ * The operator's pause (MEMBER-API 1.2.0 "Vault service pause"): `status`
+ * says `service: "paused"`. -> { tone, title, text } or null. Generic on
+ * purpose: the operator's reason is never shown to members.
+ */
+export function servicePaused(status) {
+  if (status?.service !== 'paused') return null;
+  return {
+    tone: 'warn',
+    title: 'Vault service is paused for maintenance',
+    text: "Setting up, unlocking and recovering a vault aren't available right now. Your vault and its data are not affected, and locking still works. Try again later.",
+  };
+}

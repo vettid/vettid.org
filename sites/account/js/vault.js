@@ -10,13 +10,13 @@ import { newUlid } from './recovery-code.js';
 import { siteConfig } from './site-config.js';
 import { $, chip, date, el, fill, mono } from './dom.js';
 import * as ui from './ui.js';
-import { dateTime, releaseNotice, releaseStatus, vaultState } from './vault-text.js';
+import { dateTime, releaseNotice, releaseStatus, servicePaused, vaultState } from './vault-text.js';
 
 const RECOVERY_PAGE = '/account/vault/recovery/';
 
 let getMe = () => null;
 let reveal = () => {};
-let status = null; // { vault } from the API
+let status = null; // { vault, service } from the API
 let loadState = 'idle'; // idle | loading | error | done
 let config = null;
 
@@ -67,6 +67,13 @@ function callout(tone, title, ...body) {
   return el('div', { class: `callout callout-${tone}` }, title ? el('p', { class: 'callout-title' }, title) : null, body.map((b) => (typeof b === 'string' ? el('p', {}, b) : b)));
 }
 
+// The operator's pause (MEMBER-API "Vault service pause"): status says
+// `service: "paused"`; setup, unlock and recovery wait, locking still works.
+const pausedNotice = () => {
+  const p = servicePaused(status);
+  return p ? callout(p.tone, p.title, p.text) : null;
+};
+
 const neverAsk = () => el('p', { class: 'muted small never-ask' },
   'VettID never asks for your vault PIN or credential password on this website. Enter them only in the VettID app.');
 
@@ -97,6 +104,7 @@ function renderStatus() {
   if (v.state === 'enrolling') {
     fill(sec,
       sectionHead('h-vault', 'Your vault'),
+      pausedNotice(),
       el('p', {}, chip('Setting up', 'warn'), ' ', "Your vault's setup isn't finished."),
       el('p', {}, 'Finish it in the VettID app on your phone. If setup stopped, open the app and choose Try again.'),
       neverAsk(),
@@ -143,6 +151,7 @@ function renderStatus() {
   const canLock = v.state === 'unlocked' || v.leased;
   fill(sec,
     sectionHead('h-vault', 'Your vault'),
+    pausedNotice(),
     facts([
       ['Status', el('span', {}, chip(label, tone), line ? el('span', { class: 'muted' }, line) : null)],
       ['Software', releaseCell],
@@ -234,6 +243,7 @@ function renderEnrollment(sec) {
 
   fill(sec,
     sectionHead('h-vault', 'Your vault', "You don't have a vault yet. Your vault keeps your messages, connections and most important secrets, and only you can open it. You set it up in the VettID app."),
+    pausedNotice(),
     el('h3', {}, 'What you need'),
     el('ul', { class: 'reqs' },
       req(member, 'A VettID membership'),

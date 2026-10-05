@@ -255,8 +255,8 @@ describe('VettidOrgAdminApiStack', () => {
     for (const m of real) expect(m.Properties.AuthorizationType).toBe('COGNITO_USER_POOLS');
   });
 
-  test('four route-group Lambdas, Node 24 on ARM', () => {
-    t.resourceCountIs('AWS::Lambda::Function', 4);
+  test('five route-group Lambdas, Node 24 on ARM', () => {
+    t.resourceCountIs('AWS::Lambda::Function', 5);
     t.allResourcesProperties('AWS::Lambda::Function', { Runtime: 'nodejs24.x', Architectures: ['arm64'] });
   });
 
@@ -294,6 +294,24 @@ describe('VettidOrgAdminApiStack', () => {
     expect(JSON.stringify(members.map((s: any) => s.Resource))).not.toContain('/index/');
     const writes = stmts.flatMap((s: any) => [].concat(s.Action)).filter((a: string) => a.startsWith('dynamodb:'));
     expect(writes.sort()).toEqual(['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:Scan', 'dynamodb:UpdateItem']);
+  });
+
+  test('vault-service Lambda: get and put the one switch parameter; no other function touches SSM', () => {
+    const fns = t.findResources('AWS::Lambda::Function');
+    const [fnId, fn] = Object.entries<any>(fns).find(([id]) => id.startsWith('VaultService'))!;
+    expect(fn.Properties.Environment.Variables.VAULT_SERVICE_PARAM).toBe('/vettid-org/prod/switch/vault-service');
+    const roleId = fns[fnId].Properties.Role['Fn::GetAtt'][0];
+    const policies = Object.values<any>(t.findResources('AWS::IAM::Policy'));
+    const own = policies.filter((p) => p.Properties.Roles.some((r: any) => r.Ref === roleId)).flatMap((p) => p.Properties.PolicyDocument.Statement);
+    const ssm = own.filter((s: any) => JSON.stringify(s.Action).includes('ssm:'));
+    expect(ssm).toHaveLength(1);
+    expect(ssm[0].Action).toEqual(['ssm:GetParameter', 'ssm:PutParameter']);
+    expect(JSON.stringify(ssm[0].Resource)).toContain(':parameter/vettid-org/prod/switch/vault-service"');
+    // Its data rights: the audit table (append) only.
+    const ddb = own.flatMap((s: any) => [].concat(s.Action)).filter((a: string) => a.startsWith('dynamodb:'));
+    expect(ddb).toEqual(['dynamodb:PutItem']);
+    const others = policies.filter((p) => !p.Properties.Roles.some((r: any) => r.Ref === roleId)).flatMap((p) => p.Properties.PolicyDocument.Statement);
+    expect(JSON.stringify(others.map((s: any) => s.Action))).not.toContain('ssm:');
   });
 
   test('audit is append-only for writers (no Update/Delete on the audit table)', () => {
@@ -350,8 +368,8 @@ describe('VettidOrgMemberApiStack', () => {
   const apiApp = new cdk.App({ context: { vaultsStreamArn: 'arn:aws:dynamodb:us-east-1:369484479783:table/vettid-org-vaults/stream/2026-10-05T00:00:00.000' } });
   const t = Template.fromStack(new VettidOrgMemberApiStack(apiApp, 'MemberApi', { config: loadConfig(apiApp.node), env }));
 
-  test('four route groups + link mailer + five jobs (incl. the vault notice job, W8)', () => {
-    t.resourceCountIs('AWS::Lambda::Function', 10);
+  test('four route groups + link mailer + six jobs (incl. the vault notice job, W8, and the vault service watch)', () => {
+    t.resourceCountIs('AWS::Lambda::Function', 11);
     for (const p of ['/api/public', '/api/auth', '/api/account', '/api/vault']) {
       t.hasResourceProperties('AWS::ApiGatewayV2::Route', { RouteKey: `ANY ${p}/{proxy+}` });
     }
@@ -439,6 +457,66 @@ describe('VettidOrgMemberApiStack', () => {
       for (const v of vs) {
         expect(str(v.Properties.Environment.Variables.VAULT_QUEUE_URL_PREFIX)).toContain('https://sqs.us-east-1.amazonaws.com/369484479783/vettid-org-vault-control-');
       }
+    });
+  });
+
+  describe('vault service switch (MEMBER-API "Vault service pause")', () => {
+    const PARAM_ARN = ':parameter/vettid-org/prod/switch/vault-service"';
+    const fns = () => Object.entries<any>(t.findResources('AWS::Lambda::Function'));
+    const roleOf = (prefix: string) => fns().find(([id]) => id.startsWith(prefix))![1].Properties.Role['Fn::GetAtt'][0];
+    const stmtsOf = (roleId: string) =>
+      Object.values<any>(t.findResources('AWS::IAM::Policy'))
+        .filter((p) => p.Properties.Roles.some((r: any) => r.Ref === roleId))
+        .flatMap((p) => p.Properties.PolicyDocument.Statement);
+
+    test('read-only: ssm:GetParameter on the one parameter, for the vault routes, the cleanup job and the watch; nobody here may write it', () => {
+      const all = Object.values<any>(t.findResources('AWS::IAM::Policy')).flatMap((p) => p.Properties.PolicyDocument.Statement);
+      const ssm = all.filter((s: any) => JSON.stringify(s.Action).includes('ssm:'));
+      expect(ssm).toHaveLength(3);
+      for (const s of ssm) {
+        expect(s.Action).toBe('ssm:GetParameter');
+        expect(JSON.stringify(s.Resource)).toContain(PARAM_ARN);
+      }
+      for (const prefix of ['VaultFunction', 'CleanupJob', 'VaultServiceWatch']) {
+        const own = stmtsOf(roleOf(prefix)).filter((s: any) => JSON.stringify(s.Action).includes('ssm:'));
+        expect({ prefix, n: own.length }).toEqual({ prefix, n: 1 });
+      }
+      const withEnv = fns().filter(([, f]) => f.Properties.Environment?.Variables?.VAULT_SERVICE_PARAM).map(([id]) => id.replace(/[0-9A-F]{8}$/, ''));
+      expect(withEnv.sort()).toEqual(['CleanupJobFn', 'VaultFunctionFn', 'VaultServiceWatchFn']);
+    });
+
+    test('the watch: every 5 minutes, no rights but the read (the metric is EMF, no PutMetricData)', () => {
+      t.hasResourceProperties('AWS::Events::Rule', { ScheduleExpression: 'rate(5 minutes)' });
+      const own = stmtsOf(roleOf('VaultServiceWatch'));
+      expect(own.map((s: any) => s.Action)).toEqual(['ssm:GetParameter']);
+    });
+
+    test('alarms: paused (5 min) and paused for 24 h, on VettID/MemberApi VaultServicePaused; no recipient outside the management account', () => {
+      t.hasResourceProperties('AWS::CloudWatch::Alarm', {
+        AlarmName: 'vettid-org-vault-service-paused', Namespace: 'VettID/MemberApi', MetricName: 'VaultServicePaused',
+        Statistic: 'Maximum', Period: 300, EvaluationPeriods: 1, Threshold: 1, ComparisonOperator: 'GreaterThanOrEqualToThreshold', TreatMissingData: 'notBreaching',
+      });
+      t.hasResourceProperties('AWS::CloudWatch::Alarm', { AlarmName: 'vettid-org-vault-service-paused-24h', Period: 3600, EvaluationPeriods: 24, DatapointsToAlarm: 24 });
+      for (const a of Object.values<any>(t.findResources('AWS::CloudWatch::Alarm'))) expect(a.Properties.AlarmActions).toBeUndefined();
+    });
+
+    test('in production (the management account) both alarm to the security-alerts topic; the first also says when it ends', () => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { ORG } = require('../lib/config');
+      const prodApp = new cdk.App({ context: { vaultsStreamArn: 'arn:aws:dynamodb:us-east-1:369484479783:table/vettid-org-vaults/stream/2026-10-05T00:00:00.000' } });
+      const p = Template.fromStack(new VettidOrgMemberApiStack(prodApp, 'MemberApiProd', { config: loadConfig(prodApp.node), env: { account: ORG.management, region: 'us-east-1' } }));
+      const topic = `:sns:us-east-1:${ORG.management}:vettid-org-security-alerts`;
+      const alarms = Object.values<any>(p.findResources('AWS::CloudWatch::Alarm')).filter((a) => String(a.Properties.AlarmName).startsWith('vettid-org-vault-service-paused'));
+      expect(alarms).toHaveLength(2);
+      for (const a of alarms) expect(JSON.stringify(a.Properties.AlarmActions)).toContain(topic);
+      const first = alarms.find((a) => a.Properties.AlarmName === 'vettid-org-vault-service-paused');
+      expect(JSON.stringify(first.Properties.OKActions)).toContain(topic);
+      expect(alarms.find((a) => a.Properties.AlarmName.endsWith('-24h')).Properties.OKActions).toBeUndefined();
+    });
+
+    test('no deploy creates or changes the parameter', () => {
+      const params = Object.values<any>(t.findResources('AWS::SSM::Parameter'));
+      expect(JSON.stringify(params)).not.toContain('switch/vault-service');
     });
   });
 

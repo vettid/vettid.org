@@ -4,27 +4,35 @@ import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { AdminDeleteUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
 import { DeleteEmailIdentityCommand, SendEmailCommand, SESv2Client } from '@aws-sdk/client-sesv2';
 import { marshall } from '@aws-sdk/util-dynamodb';
+import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 
 Object.assign(process.env, {
   TABLE_MEMBERS: 'members', TABLE_SUBSCRIPTIONS: 'subs', TABLE_AUDIT: 'audit', TABLE_MAILING_LIST: 'list', TABLE_VAULTS: 'vaults', TABLE_RATELIMITS: 'rl',
   TABLE_VAULT_INSTANCES: 'instances', TABLE_VAULT_RELEASES: 'releases',
   VAULT_QUEUE_URL_PREFIX: 'https://sqs.us-east-1.amazonaws.com/123456789012/vettid-org-vault-control-',
   MEMBER_POOL_ID: 'pool', SENDER_EMAIL: 'no-reply@vettid.org', ACCOUNT_HOST: 'account.vettid.org',
+  VAULT_SERVICE_PARAM: '/vettid-org/prod/switch/vault-service',
 });
 /* eslint-disable @typescript-eslint/no-require-imports */
 const cleanup = require('../../lambda/jobs/cleanup');
 const stream = require('../../lambda/jobs/members-stream');
 const alarms = require('../../lambda/jobs/vault-alarms');
+const serviceWatch = require('../../lambda/jobs/vault-service-watch');
+const vaultService = require('../../lambda/shared/vault-service');
 /* eslint-enable */
 
 const ddb = mockClient(DynamoDBDocumentClient);
 const idp = mockClient(CognitoIdentityProviderClient);
 const ses = mockClient(SESv2Client);
 const sqs = mockClient(SQSClient);
+const ssm = mockClient(SSMClient);
+const PAUSED = JSON.stringify({ enabled: false, reason: 'incident', set_by: 'ops@vettid.org', set_at: '2026-10-05T20:00:00.000Z' });
 const ccf = () => Object.assign(new Error('c'), { name: 'ConditionalCheckFailedException' });
 
 beforeEach(() => {
-  ddb.reset(); idp.reset(); ses.reset(); sqs.reset();
+  ddb.reset(); idp.reset(); ses.reset(); sqs.reset(); ssm.reset();
+  vaultService.resetVaultServiceCache();
+  ssm.on(GetParameterCommand).rejects(Object.assign(new Error('nf'), { name: 'ParameterNotFound' }));
   ddb.on(PutCommand).resolves({});
   ddb.on(QueryCommand).resolves({ Items: [] });
   ddb.on(ScanCommand).resolves({ Items: [] });
@@ -111,6 +119,22 @@ describe('cleanup job', () => {
     await cleanup.handler();
     ups = ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input);
     expect(ups.find((i) => i.TableName === 'releases')).toMatchObject({ Key: { release: R } });
+  });
+
+  test('vault service paused: nothing queued, no start, the deletion is marked for a run after the pause', async () => {
+    ssm.on(GetParameterCommand).resolves({ Parameter: { Value: PAUSED } });
+    withVaults([{ vault_id: 'a'.repeat(32), user_guid: 'g1', state: 'locked', sealed_release: R, lease: { instance_id: 'i1', lease_expires_at: nowS() + 60 } }]);
+    ddb.on(GetCommand, { TableName: 'instances' } as any).resolves({ Item: liveInst('i1') });
+    ddb.on(GetCommand, { TableName: 'releases' } as any).resolves({ Item: { release: R, release_number: 3, status: 'active' } });
+    ddb.on(DeleteCommand).resolves({});
+    ddb.on(UpdateCommand).resolves({});
+    idp.on(AdminDeleteUserCommand).resolves({});
+    const r = await cleanup.handler();
+    expect(r.deleted).toBe(1); // the account itself still goes
+    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
+    const ups = ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input);
+    expect(ups.find((i) => i.TableName === 'releases')).toBeUndefined();
+    expect(ups.find((i) => i.TableName === 'vaults')).toMatchObject({ Key: { vault_id: 'a'.repeat(32) }, UpdateExpression: 'SET deletion_requested_at = :t' });
   });
 
   test('unreported deletions are retried; after 30 days they are flagged with the vault_id only', async () => {
@@ -309,5 +333,38 @@ describe('vault alarm mailer (VAULT-MESSAGING 0.9.0 §11.5)', () => {
       expect(deletes()).toHaveLength(0);
       err.mockRestore();
     });
+  });
+});
+
+describe('vault service watch (MEMBER-API "Vault service pause")', () => {
+  const metricLine = (log: jest.SpyInstance) => JSON.parse(log.mock.calls.map((c) => String(c[0])).find((l) => l.includes('_aws'))!);
+
+  test('on: VaultServicePaused 0 (EMF, namespace VettID/MemberApi, no dimensions)', async () => {
+    const log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    expect(await serviceWatch.handler()).toEqual({ paused: false });
+    const m = metricLine(log);
+    expect(m._aws.CloudWatchMetrics).toEqual([{ Namespace: 'VettID/MemberApi', Dimensions: [[]], Metrics: [{ Name: 'VaultServicePaused', Unit: 'Count' }] }]);
+    expect(m.VaultServicePaused).toBe(0);
+    log.mockRestore();
+  });
+
+  test('paused: 1, and a log line without the reason', async () => {
+    ssm.on(GetParameterCommand).resolves({ Parameter: { Value: PAUSED } });
+    const log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(await serviceWatch.handler()).toEqual({ paused: true });
+    expect(metricLine(log).VaultServicePaused).toBe(1);
+    expect(JSON.stringify(warn.mock.calls)).toContain('vault service paused');
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('incident');
+    log.mockRestore();
+    warn.mockRestore();
+  });
+
+  test('an unreadable switch fails the run (no metric is guessed)', async () => {
+    ssm.on(GetParameterCommand).rejects(Object.assign(new Error('x'), { name: 'AccessDeniedException' }));
+    const log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    await expect(serviceWatch.handler()).rejects.toThrow();
+    expect(log).not.toHaveBeenCalled();
+    log.mockRestore();
   });
 });

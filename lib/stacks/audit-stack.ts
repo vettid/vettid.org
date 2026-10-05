@@ -329,6 +329,14 @@ export class VettidOrgAuditStack extends cdk.Stack {
       { eventName: ['ScheduleKeyDeletion', 'CancelKeyDeletion', 'DisableKey', 'DeleteImportedKeyMaterial'] },
       notVaultAccount,
     );
+    // The vault service pause (MEMBER-API "Vault service pause"): every
+    // write to the switch parameter, from the admin API or the CLI, in any
+    // stage's account (staging's arrives through its forwarder). Including
+    // deploys: none should ever touch it.
+    apiCall('VaultServiceSwitch', 'vault service switch changed (pause or resume of the member API vault routes; RUNBOOK "Pausing the vault service")', ['aws.ssm'], {
+      eventName: ['PutParameter', 'DeleteParameter', 'DeleteParameters', 'LabelParameterVersion'],
+      requestParameters: { $or: [{ name: events.Match.wildcard('*switch/vault-service') }, { names: events.Match.wildcard('*switch/vault-service') }] },
+    });
     apiCall('KmsKeyPolicy', 'KMS key policy changed (outside a deploy)', ['aws.kms'], { eventName: ['PutKeyPolicy'], ...notDeploy }, notVaultAccount);
 
     apiCall('S3PublicAccess', 'S3 bucket policy, ACL, ownership or public-access block changed (outside a deploy)', ['aws.s3'], {
