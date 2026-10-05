@@ -312,17 +312,19 @@ replica; after it, it cannot.)
 
 ## Vault (V5; docs/VAULT-RELEASES.md)
 
-No release and no release key exist yet. Per vault account there are
-three kinds of stack (VAULT-RELEASES §8.2), deployed in this order with
-that account's profile:
+Staging has published releases (S1, now `removed`, and S2); production
+has no release and no release key yet (release 1: docs/W10-READINESS.md).
+Per vault account there are three kinds of stack (VAULT-RELEASES §8.2),
+deployed in this order with that account's profile:
 
 1. `VettidOrgVaultStack`: stateful (tables, data bucket, fixed roles, keys).
 2. `VettidOrgVaultHostStack`: stateless (VPC, DNS Firewall, build VPC and
    Image Builder infrastructure, DLQ, host log group, smoke-test key,
    scaler, manifest sync, alarms). Reads the stream ARN from (1) via SSM.
-3. `VettidOrgVaultRelease<N>Stack`, one per entry in `lib/vault/releases.ts`
-   (none yet): AMI, launch template, group `vettid-org-vault-r<N>`. Reads
-   (2)'s refs via SSM.
+3. `VettidOrgVaultRelease<N>Stack`, one per entry with a `host` in
+   `vault/releases/<channel>.json` (`lib/vault/release-list.ts`): AMI,
+   launch template, group `vettid-org-vault-r<N>`. Reads (2)'s refs via
+   SSM.
 
 ### Accounts and profiles
 
@@ -340,16 +342,18 @@ For the owner-only roles, add chained profiles (MFA is Identity Center's,
 at sign-in):
 
 ```ini
-[profile vault-key-retirement]
+[profile vault-prod-key-retirement]
 source_profile = vault-prod
 role_arn = arn:aws:iam::369484479783:role/vettid-org-vault-key-retirement
-[profile vault-manifest-signer]
+[profile vault-prod-manifest-signer]
 source_profile = vault-prod
 role_arn = arn:aws:iam::369484479783:role/vettid-org-vault-manifest-signer
 ```
 
 (and `vault-staging-key-retirement` / `vault-staging-manifest-signer` with
 `source_profile = vault-staging` and account 347272280361 for staging).
+`npm run vault:manifest` uses `vault-<channel>-manifest-signer` unless
+`VAULT_SIGNER_PROFILE` says otherwise.
 
 ### First deployment (W5), in order
 
@@ -438,7 +442,7 @@ and `npm run check:manifest` validate the file.
    write it into the entry's `seal_key` and commit.
 4. Check the live key with the enclave's own code (vettid-vault
    docs/RELEASING.md steps 5–6):
-   `AWS_PROFILE=vault-key-retirement vaultctl keycheck -channel prod -key-arn <arn> -manifest draft.json -record keycheck/<n>`.
+   `AWS_PROFILE=vault-prod-key-retirement vaultctl keycheck -channel prod -key-arn <arn> -manifest draft.json -record keycheck/<n>`.
    The release stops unless it exits 0.
 
 Staging keys have the same shape with a 7-day window and are deleted after
@@ -452,7 +456,7 @@ scheduled for deletion **as the retirement role, with exactly the pinned
 window** (30 days in production; any other window is refused by the key
 policy), with a rescue (cancel, enable, restart, move) on request within
 that window (VAULT-RELEASES §3.5, §10.3):
-`AWS_PROFILE=vault-key-retirement aws kms schedule-key-deletion --key-id <arn> --pending-window-in-days 30`.
+`AWS_PROFILE=vault-prod-key-retirement aws kms schedule-key-deletion --key-id <arn> --pending-window-in-days 30`.
 
 ### Host stack (W6), first deployment
 
@@ -561,6 +565,32 @@ After publishing a manifest, run it at once:
    passed; it recovers by itself. (S1, 2026-10-05: PASS.)
 6. After publication, the always-on minimum moves (O7): set
    `min_instances: 1` on N and `0` on N−1, deploy both release stacks.
+
+### Capacity measurement (W9; VAULT-RELEASES §8.8, O6)
+
+From S3 on, the release image's self-test can measure how many vaults one
+host holds (vettid-vault docs/SMOKE.md, "Capacity measurement"). Run it on
+a host of the release under test, the same way as the canary self-test,
+through SSM with `executionTimeout` of at least 7200 s:
+
+```bash
+systemctl stop vault-parent      # also stops the enclave (PartOf)
+systemctl start vault-enclave    # a fresh enclave for the self-test parent
+/opt/vettid/bin/vault-parent -selftest -smoke-key-arn <vault/smoke-key-arn> -smoke-account <account> \
+  -bucket <data bucket> -region us-east-1 -capacity 400 \
+  >/root/capacity-report.json 2>/root/capacity.log
+grep -E '^(PASS|FAIL|INFO|CAPACITY) ' /root/capacity.log
+systemctl stop vault-enclave
+sleep 60                         # SQS queue-name rule
+systemctl start vault-enclave vault-parent
+```
+
+It spawns synthetic vault processes (test keys and data only, hardened like
+real ones) until 400, the time budget (default 90 min) or a memory floor of
+15% of enclave memory, then measures per-vault memory, unlock latency at
+concurrency 1/2/4 and idle CPU, and tears everything down. For O6, read
+`held` if it stopped at `memory_floor`, otherwise `projected_max_vaults`.
+Record the result in VAULT-RELEASES §8.8.
 
 ### Publishing a manifest (VAULT-RELEASES §6.1, §7, §10.1 steps 9–10)
 
@@ -782,9 +812,10 @@ for that stage.
 Production release 1: status, blockers and the release-day steps are in
 docs/W10-READINESS.md until it is published.
 
-Publishing a release (manifest signing, W7), instance and lease health in
-practice, incident classes and first responses, capacity per host, and
-the disaster-recovery objectives (VAULT-RELEASES §11.4).
+Instance and lease health in practice, incident classes and first
+responses, capacity per host, and the disaster-recovery objectives
+(VAULT-RELEASES §11.4). Publishing a release is "Publishing a manifest"
+above (W7).
 
 ## Staging (W9; VAULT-RELEASES §11.1)
 
@@ -852,6 +883,7 @@ npx cdk deploy VettidOrgAccountSiteStack VettidOrgStageSiteStack $C --exclusivel
 # 7. Test data (no admin site in staging): terms, then a registration code.
 npm run staging:seed -- terms --file local/staging-terms.txt
 npm run staging:seed -- invite
+npm run staging:seed -- subscription-types    # production's plans (reads prod read-only)
 ```
 
 Then request membership at https://account.staging.vettid.org/request/

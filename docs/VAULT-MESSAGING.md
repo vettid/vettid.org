@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.10.7
+version: 0.10.8
 date: 2026-10-05
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -17,6 +17,9 @@ related:
   - VAULT-RELEASES.md (0.1.0, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.10.8: editorial: §6.7.1 failures table — the old app erases its local
+    state on `device.unlinked`; a refused relay key alone only offers an erase
+    (owner decisions of 2026-10-05; vettid-android #57, #58)
   - 0.10.7: editorial: §11.4 lists `credential_backup` in the unlock result
     (0.10.6, §11.11.5); §16 adds the `recovery.json` vector (vettid-vault #31, #33)
   - 0.10.6: gaps found building the account site's recovery pages and
@@ -2154,7 +2157,7 @@ and the new app's handshake state is dropped. A commitment mismatch at
 | The new app goes offline before its `hs.fin` | No SAS is shown; the transfer times out after 10 minutes; nothing changes. |
 | The new app goes offline after its `hs.fin` | The approval still completes the transfer. `device.paired` waits in the new app's mailbox (relay TTL); if the new app never returns, the member recovers (§11.11), as when a new app is lost after a transfer. |
 | The old app goes offline before approving | The transfer times out; nothing changes. |
-| The old app goes offline after approving | Nothing is needed from it: the approval completed the transfer. The old app learns of its removal from `device.unlinked` (best effort) or from its relay key being refused. |
+| The old app goes offline after approving | Nothing is needed from it: the approval completed the transfer. The old app learns of its removal from `device.unlinked` (best effort), and then erases its local state (owner decision, 2026-10-05). A refused relay key alone is not proof of removal: the app offers the member an erase instead of erasing by itself. |
 | A clone alarm opens (§3.5.9) | An open transfer is aborted. |
 | The vault locks | The transfer and its pending handshake are kept in vault state; its 10 minutes still run and are checked at the next unlock, which aborts an expired one. |
 | A recovery completes (§11.11.5) | An open transfer is aborted (`replaced`). |
@@ -7573,6 +7576,8 @@ pending (§15, follow-up 1).
 
 ## 17. Changelog
 
+- **0.10.8** (2026-10-05): editorial. §6.7.1: a replaced app erases its local
+  state on `device.unlinked`; a refused relay key alone only offers an erase.
 - **0.10.7** (2026-10-05): editorial. §11.4 shows `credential_backup` in
   the unlock result's ok body, after `vault_bundle`; §16 adds `recovery.json`.
 - **0.10.6** (2026-10-05): recovery and lock-state gaps, and the wording

@@ -11,8 +11,9 @@ Expires: 2027-05-25T00:00:00Z
 # PGP fingerprint (cross-reference; full armored key on /security):
 # E23A 83D6 7828 2CD7 9E95 E5F7 1523 8C03 B404 DAEB
 #
-# In scope: vault-manager + enclave, mobile apps (Android/iOS),
-# desktop app, agent connector, api.vettid.org, nats.vettid.org,
+# In scope: vault enclave (vettid-vault), mobile apps (Android/iOS),
+# desktop app, agent connector, account.vettid.org (member API),
+# relay.vettid.org, admin site + admin API,
 # vettid.org web surfaces.
 #
 # Out of scope: DoS against public endpoints, social engineering,
