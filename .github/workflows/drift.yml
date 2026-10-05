@@ -28,7 +28,7 @@ jobs:
   drift:
     # The roles trust master only (OIDC sub repo:vettid/vettid.org:ref:refs/heads/master).
     if: github.ref == 'refs/heads/master'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       contents: read
