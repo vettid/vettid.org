@@ -377,7 +377,8 @@ blobs, not the Nitro Enclaves device (that is needed only to run an
 EIF), so a GitHub arm64 runner can build it. The blobs are part of PCR0,
 so they are pinned like the toolchain:
 
-- A new `release` workflow in vettid-vault, on `ubuntu-24.04-arm`, runs
+- A new `release` workflow in vettid-vault, on `ubuntu-26.04-arm` (moved
+  from 24.04 on 2026-10-05; measurements identical), runs
   the build inside `amazonlinux:2023` pinned by digest, with the
   `aws-nitro-enclaves-cli` package at a pinned version (1.5.0 today)
   verified by RPM checksum, and the runner's Docker socket mounted.
