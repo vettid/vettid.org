@@ -40,7 +40,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { AppConfig, channelVault, resourceName } from '../../lib/config';
 import { checkChannel, servedManifest } from '../../lib/vault/manifest-check';
 import {
@@ -199,13 +199,18 @@ function readSigned(c: Ctx, flags: Record<string, string | true>) {
 function upload(c: Ctx, doc: { path: string; m: { sha256: string } }): void {
   const key = `manifests/${doc.m.sha256}.json`;
   try {
-    run('aws', ['s3api', 'put-object', '--bucket', c.bucket, '--key', key, '--body', doc.path, '--content-type', 'application/json',
-      '--if-none-match', '*', '--profile', c.signerProfile]);
+    // stderr captured (not inherited, as `run` does) so a 412 can be told apart.
+    execFileSync('aws', ['s3api', 'put-object', '--bucket', c.bucket, '--key', key, '--body', doc.path, '--content-type', 'application/json',
+      '--if-none-match', '*', '--profile', c.signerProfile], { cwd: ROOT, env: { ...process.env, AWS_REGION: REGION }, stdio: ['ignore', 'pipe', 'pipe'] });
     console.log(`uploaded s3://${c.bucket}/${key}`);
   } catch (e) {
     // 412: the object exists. Objects are named by the manifest bytes' hash,
     // so any copy carries this manifest (a signature by a pinned key).
-    if (!/PreconditionFailed|412/.test(String((e as { stderr?: Buffer }).stderr ?? (e as Error).message))) throw e;
+    const stderr = String((e as { stderr?: Buffer }).stderr ?? '');
+    if (!/PreconditionFailed|412/.test(stderr + (e as Error).message)) {
+      process.stderr.write(stderr);
+      throw e;
+    }
     console.log(`s3://${c.bucket}/${key} already exists`);
   }
   run('aws', ['s3api', 'head-object', '--bucket', c.bucket, '--key', key, '--profile', c.adminProfile]);
@@ -223,6 +228,7 @@ function publish(c: Ctx, flags: Record<string, string | true>): void {
   if (problems.length) throw new Error(`refusing to publish:\n  ${problems.join('\n  ')}`);
 
   upload(c, doc); // the bucket copy first (M1)
+  mkdirSync(dirname(servedPath(c)), { recursive: true }); // the first publication of a channel
   writeFileSync(servedPath(c), doc.bytes);
   const paths = [SERVED_PATHS[c.channel], relative(ROOT, releaseFilePath(ROOT, c.channel))];
   if (c.channel === 'prod') {
