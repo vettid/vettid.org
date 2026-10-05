@@ -1,0 +1,26 @@
+Return-Path: <0100019a@amazonses.com>
+Received: from a8-30.smtp-out.amazonses.com (a8-30.smtp-out.amazonses.com [54.240.8.30])
+ by inbound-smtp.us-east-1.amazonaws.com with SMTP id abc123
+ for tester-1a2b3c4d5e6f@test.staging.vettid.org;
+ Mon, 05 Oct 2026 12:00:01 +0000 (UTC)
+X-SES-Spam-Verdict: PASS
+X-SES-Virus-Verdict: PASS
+From: VettID <no-reply@staging.vettid.org>
+To: tester-1a2b3c4d5e6f@test.staging.vettid.org
+Subject: Your VettID sign-in link
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+Date: Mon, 5 Oct 2026 12:00:00 +0000
+Message-ID: <0100019a-1@email.amazonses.com>
+
+Use this link to sign in to your VettID account. It works once and expires =
+in 15 minutes:
+
+https://account.staging.vettid.org/auth/#t=3DZm9vYmFyYmF6cXV4MTIzNDU2Nzg5MG=
+FiY2RlZmdoaWprbG1ub3BxcnN0&e=3Dtester-1a2b3c4d5e6f%40test.staging.vettid.org
+
+If you didn't ask to sign in, ignore this email =E2=80=94 nobody can use th=
+e link without access to your inbox.
+
+=E2=80=94 VettID

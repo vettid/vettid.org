@@ -23,6 +23,7 @@ import { VettidOrgVaultReleaseStack, releaseStackId } from './stacks/vault-relea
 import { VettidOrgStageDnsStack } from './stacks/stage-dns-stack';
 import { VettidOrgStageSiteStack } from './stacks/stage-site-stack';
 import { VettidOrgStageDelegationStack } from './stacks/stage-delegation-stack';
+import { VettidOrgStageTestMailStack } from './stacks/stage-test-mail-stack';
 import { hostSpecs, keySpecs, readReleaseFile } from './vault/release-list';
 
 /**
@@ -96,7 +97,8 @@ export function buildApp(app: cdk.App): void {
   // A copy of what a vault end-to-end test needs, in the stage's own
   // account and zone (<stage>.vettid.org), nothing more:
   //   StageDns (zone + SES domain identity) → Auth, Data → (Vault stacks)
-  //   → MemberApi → AccountSite; StageSite (the channel's manifest host).
+  //   → MemberApi → AccountSite; StageSite (the channel's manifest host);
+  //   StageTestMail (a mailbox for automated tests, RUNBOOK "Test mail").
   // Left out on purpose (RUNBOOK "Staging"): the public site, signup and
   // playbooks (prod content), the admin exit node, admin API and site (the
   // drill seeds data from the CLI: scripts/staging/seed.ts), the relay
@@ -119,6 +121,10 @@ export function buildApp(app: cdk.App): void {
     accountSite.addStackDependency(dnsStack);
     const site = new VettidOrgStageSiteStack(app, 'VettidOrgStageSiteStack', { config, env });
     site.addStackDependency(dnsStack);
+    // Test infrastructure: a mailbox at test.<zone> that automated tests
+    // read (sign-in and SES verification links). Never in prod.
+    const testMail = new VettidOrgStageTestMailStack(app, 'VettidOrgStageTestMailStack', { config, env });
+    testMail.addStackDependency(dnsStack);
     return;
   }
 
