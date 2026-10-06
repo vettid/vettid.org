@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.6
+version: 0.1.7
 date: 2026-10-06
 owner: Al Liebl (Mesmer)
 changelog:
@@ -48,6 +48,10 @@ changelog:
     the selection rule (VAULT-MESSAGING 0.14.0 §11.10.1); removal after
     publication (automatic) or a failed canary (Settings); risk 10, a
     leaked canary document (§14)
+  - 0.1.7 (editorial; W10-READINESS 0.1.3): §8.8 records the capacity
+    measured on staging S3 (2026-10-05) and the owner's O6 decision of
+    2026-10-06 (keep 1 vCPU / 5120 MiB for release 1; revisit when unlock
+    queueing shows in metrics); §15 O6 updated to match
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.14.0) §11.10 release updates, §12.5 deletion, §13.5, §13.9
@@ -979,12 +983,34 @@ release_starting`. The `vault-scaler` Lambda (host stack):
 
 From the smoke test: Argon2id peaks at about 76 MB per vault process, the
 supervisor about 13 MB. On an m7g.large (2 vCPUs, 8 GiB) the enclave gets
-1 vCPU and 5 GiB (5120 MiB, O6; the parent keeps the rest), so about 60–70
-concurrently unlocked vaults if processes stay near their peak; steady
-state RSS after the KDF is to be measured (W9). One vCPU serializes
-Argon2id (a few hundred milliseconds each), which bounds unlock bursts.
-`m7g.xlarge` (3 enclave vCPUs, ~12 GiB) is the next step. Plenty for the
-preview.
+1 vCPU and 5 GiB (5120 MiB, O6; the parent keeps the rest). One vCPU
+serializes Argon2id, which bounds unlock bursts. `m7g.xlarge` (3 enclave
+vCPUs, ~12 GiB) is the next step.
+
+*Measured (W9, staging S3, 2026-10-05):* `vault-parent -selftest
+-capacity` on an S3 host (m7g.large, enclave 1 vCPU / 5120 MiB; RUNBOOK
+"Capacity measurement", vettid-vault SMOKE.md), PASS:
+
+| Measure | Result |
+|---|---|
+| Unlock p50 at concurrency 1 / 2 / 4 | 195 ms / ~400 ms / ~830 ms (the KDF dominates; one vCPU serializes it) |
+| Vaults held when the fill stopped (`memory_floor`) | 58 |
+| Transient memory per unlock | ~76 MiB |
+| Steady marginal memory per unlocked vault | 4.1 MiB |
+| Projected idle unlocked vaults per host | ~980 |
+| Idle CPU | 0.9 ms per vault per minute |
+
+So the limit is concurrent unlocks (one vCPU for the KDF and ~76 MiB each
+for a moment), not steady memory: 58 is the conservative figure for a
+burst of unlocks, ~980 the figure for idle unlocked vaults. Record:
+W9-REPORT §4.
+
+*O6 decision (owner, 2026-10-06):* keep the 1 vCPU / 5120 MiB enclave on
+m7g.large for release 1; revisit when unlock queueing shows in metrics
+(unlock latency above the single-unlock figure under load; the parent's
+EMF metrics, §8.7). A change means new host files at a release commit
+(the size is pinned by `host_files_sha256`), so it takes effect with a
+release, not a redeploy (W10-READINESS R3). Plenty for the preview.
 
 ### 8.9 Cost (us-east-1, on demand, approximate)
 
@@ -1323,7 +1349,7 @@ All ten recommendations below were **accepted by the owner on 2026-10-04**.
 | O3 | Manifest key custody | **Key A in KMS** (vault account, owner-only signer role with MFA), **key B offline** on a hardware token in a safe; both pinned. A separate signing account only if a second operator joins. |
 | O4 | Cadence | **Monthly at most**, skipping months without member-visible change; hotfixes any time |
 | O5 | Retirement window | **12 months** from supersession, final notice 90 days, KMS window 30 days; for an exploited vulnerability, a shorter window of **no less than 60 days** |
-| O6 | Instance size | **m7g.large**, enclave 1 vCPU and 5 GiB; revisit after the capacity measurement (W9) |
+| O6 | Instance size | **m7g.large**, enclave 1 vCPU and 5 GiB. Measured on S3 (W9, §8.8); owner 2026-10-06: kept for release 1, revisit when unlock queueing shows in metrics |
 | O7 | Always-on minimum for the current release | **0 until production members exist** (on-demand start, ~2–3 min first unlock), **1 from the Android beta** on |
 | O8 | Android signing digest(s) to pin (blocks release 1) | Pin the **Play app signing certificate and the upload certificate** used for direct builds, decided when the Android signing key is created |
 | O9 | Data bucket retention and DR | Versioned, **7-day** noncurrent retention; region loss accepted for the preview; no second-region keys |

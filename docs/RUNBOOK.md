@@ -312,8 +312,9 @@ replica; after it, it cannot.)
 
 ## Vault (V5; docs/VAULT-RELEASES.md)
 
-Staging has published releases (S1, now `removed`, and S2); production
-has no release and no release key yet (release 1: docs/W10-READINESS.md).
+Staging has published releases (S1 and S2, now `removed`, and S3,
+`active` since manifest serial 4); production has no release and no
+release key yet (release 1: docs/W10-READINESS.md).
 Per vault account there are three kinds of stack (VAULT-RELEASES §8.2),
 deployed in this order with that account's profile:
 
