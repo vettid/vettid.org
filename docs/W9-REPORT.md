@@ -232,7 +232,7 @@ and the part with a vault and notice emails on S3 when S4 deprecates it
 - Manifest serial 5 (#141; `191f76da…03d8`): S2 `removed`, `ends_at`
   2026-10-06T18:17:46Z, no host; served and synced.
 - `VettidOrgVaultRelease2Stack` deleted; the key is retained (RETAIN).
-- Final 7-day deletion schedule: _pending (owner)_.
+- Final 7-day deletion schedule: done by the owner (retirement role, 7 days; deletes ~2026-10-13). Confirm then.
 
 ## 9. Issues found and fixed during W9
 
