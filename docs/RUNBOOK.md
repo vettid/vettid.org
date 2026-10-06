@@ -909,7 +909,8 @@ undoing.
 
 **A vault enrolled with a stolen code** (the member says "that wasn't me"
 after the redemption email): support deletes it with the host `delete` op
-(ENROLLMENT-CODES §10 decision 11); there is no self-service deletion.
+(ENROLLMENT-CODES §10 decision 11). Since MEMBER-API 2.1.0 the member can
+also do it themselves: "Delete my vault and start over" (below).
 
 **The staging switch-over.** `stagingVaultLegacySessionAuth: true` in
 cdk.json context makes the staging member API still accept portal-style
@@ -924,6 +925,58 @@ or cancellation changes (the account routes and the admin site's
 reinstate and subscription extend invoke it). It sends only to a live
 leaseholder and never starts anything; a failure is logged and the next
 unlock carries a fresh snapshot.
+
+### No recovery with the backup off; start over (MEMBER-API 2.1.0)
+
+VAULT-MESSAGING 0.16.0, owner decisions of 2026-10-06: a vault whose
+credential backup is off cannot be recovered; the member's only path is to
+delete it and set up a new one.
+
+**The backup bit.** The enclave host writes `credential_backup` (bool) on
+the vault row from the vault's lifecycle reports (`enrolled`, `unlocked`,
+`locked`, the event `credential_backup`). Only the host role may write it
+(`VettidOrgVaultStack` grant); it is absent until a 0.16.0 release has
+reported it, and then the API forwards a recovery request and the enclave
+decides. With `false`, `POST /api/vault/recovery` answers `409
+recovery_unavailable` (`reason: no_backup`) before anything is written,
+queued, locked or mailed. A request the enclave refuses comes back on its
+slot with the host code `recovery_unavailable`; the API then marks the
+recovery `unavailable` (audit `vault.recovery_unavailable`). Support has
+nothing to undo in either case: the vault was not locked.
+
+**Start over** (`/account/vault/deletion/`; routes `/api/vault/deletion`,
+`/cancel`, `/cancel-link`). The member types "delete my vault"; the API
+records `deletion {deletion_id, state: pending, requested_at, deletes_at}`
+on the vault row and emails a cancel link
+(`/vault/deletion/cancel#t=…`, stored as its SHA-256 in the request table
+until `deletes_at`). Nothing is queued and the vault is not locked during
+the 24 hours. The cleanup job runs every 5 minutes with `{task:
+"start_over"}` (rule `StartOverSchedule`): a pending deletion past
+`deletes_at` becomes `executing` and gets the host `delete`, exactly as an
+account cancellation (`deletion_requested_at`, the daily retries, the
+30-day log); `deletion.queued_at` records when it could be queued, and a
+deletion not yet queued (no instance running, the service paused) is tried
+again at each 5-minute run. The vault's `deleted` report brings the usual
+vault_deleted email and removes the rows; the member then gets a new setup
+code. Audit: `vault.deletion_request`, `vault.deletion_cancel` (`via:
+session | link | app`), `vault.deletion_executed`.
+
+- *Member says "I didn't ask for this"* within the 24 hours: they cancel
+  from the email link, the account page or the app. After `executing` it
+  cannot be cancelled; the vault is gone once the host deletes it (stored
+  versions stay 7 days, sealed, and are not restorable by support).
+- *Stuck in `executing`*: as for an account deletion: look at
+  `deletion_requested_at`, the release's routability and the host logs;
+  the daily retry keeps trying and logs `vault deletion pending` after 30
+  days.
+
+**Deploy order for 2.1.0.** `VettidOrgVaultStack` (vault account: the
+host's `credential_backup` grant and the API roles' `deletion` attribute in
+the table's resource policy) before `VettidOrgMemberApiStack` (routes, the
+5-minute rule, the API roles' identity policies), then the account site
+(`VettidOrgAccountSiteStack`). No new SSM parameter. The host's 0.16.0
+release then reports the bit; until it does, `credential_backup` reads
+`null` and nothing is refused upfront.
 
 ### Still to come
 

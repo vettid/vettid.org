@@ -15,6 +15,7 @@ import { dateTime, releaseNotice, releaseStatus, servicePaused, vaultState } fro
 
 const RECOVERY_PAGE = '/account/vault/recovery/';
 const SETUP_PAGE = '/account/vault/setup/';
+const DELETION_PAGE = '/account/vault/deletion/';
 
 /** "Set up your vault" (2.0.0): not offered while the vault service is paused. */
 const setupLink = (label) => (servicePaused(status) ? null : el('a', { class: 'btn btn-primary', href: SETUP_PAGE }, label));
@@ -136,8 +137,22 @@ function renderStatus() {
     : null;
 
   const notices = [];
+  // 2.1.0 (VAULT-MESSAGING 0.16.0 §11.11.9): a start-over in progress comes first.
+  if (v.deletion) {
+    notices.push(callout('error', v.deletion.state === 'executing' ? 'Your vault is being deleted' : `Your vault will be deleted on ${dateTime(v.deletion.deletes_at)}`,
+      v.deletion.state === 'executing'
+        ? 'You asked to delete it and start over. Once it is gone, you can set up a new vault here.'
+        : 'You asked to delete it and start over. Everything in it will be lost.',
+      el('p', {}, "If you didn't ask for this, or changed your mind, ", el('a', { href: DELETION_PAGE }, 'cancel the deletion'), ' now.')));
+  }
   const rn = releaseNotice(rel);
   if (rn) notices.push(callout(rn.tone, rn.title, rn.text));
+  // 2.1.0: no recovery with the credential backup off.
+  if (v.credential_backup === false && !v.deletion) {
+    notices.push(callout('warn', "Your vault can't be recovered",
+      "Its credential backup is off. If your phone is lost, broken, reset or replaced without a transfer, your vault cannot be recovered: it can only be deleted and replaced by a new one, and everything in it is lost. To make recovery possible, turn the backup on in the VettID app, under Credential.",
+      el('p', {}, 'If your phone is already gone: ', el('a', { href: DELETION_PAGE }, 'delete your vault and start over'), '.')));
+  }
   if (v.recovery) {
     notices.push(callout('warn', 'A recovery is in progress',
       v.recovery.state === 'available'
@@ -161,6 +176,10 @@ function renderStatus() {
       ['Status', el('span', {}, chip(label, tone), line ? el('span', { class: 'muted' }, line) : null)],
       ['Software', releaseCell],
       recovery ? ['Recovery', recovery] : null,
+      ['Credential backup', v.credential_backup === true ? chip('On', 'ok')
+        : v.credential_backup === false ? el('span', {}, chip('Off', 'warn'), el('span', { class: 'muted' }, 'Your vault cannot be recovered.'))
+          : el('span', { class: 'muted' }, 'Not reported yet')],
+      v.deletion ? ['Deletion', el('span', {}, chip(v.deletion.state === 'executing' ? 'Deleting' : 'Scheduled', 'warn'), ' ', el('a', { href: DELETION_PAGE }, 'View the deletion'))] : null,
       ['Created', date(v.created_at)],
       ['Last update', v.updated_at ? el('span', {}, dateTime(v.updated_at)) : date(null)],
     ]),
@@ -264,7 +283,7 @@ function renderEnrollment(sec) {
       el('li', {}, el('strong', {}, 'Get a setup code here. '), "Choose Set up your vault below. Scan the code's QR with the app, or type its 8 characters with this account's email address. A code works once, for 5 minutes."),
       el('li', {}, el('strong', {}, 'Choose your vault PIN. '), "It unlocks your vault and isn't your sign-in PIN. Use at least 6 digits; avoid dates and simple patterns. Only your vault's sealed enclave ever checks it."),
       el('li', {}, el('strong', {}, 'Create your credential password. '), 'It protects your Protean Credential and your critical items, and the app asks for it at every critical action. Nobody, VettID included, can reset it.'),
-      el('li', {}, el('strong', {}, 'Choose your backup. '), 'With the sealed backup on (recommended), your vault keeps a copy sealed to it and to your password, so a recovery can restore your credential if you lose your phone. With it off, your credential lives only on your phone: losing the phone loses your credential and every critical item.'),
+      el('li', {}, el('strong', {}, 'Choose your backup. '), 'With the credential backup on (recommended), your vault keeps a copy sealed to it and to your password, so you can recover your vault if you lose your phone. With it off, a lost or replaced phone means your vault cannot be recovered: it can only be deleted and replaced by a new one, and everything in it is lost.'),
     ),
     ready ? null : el('p', { class: 'next-step' }, member
       ? 'Accept the current membership terms first: a setup code needs them.'
@@ -290,10 +309,21 @@ function renderHelp() {
       el('div', { class: 'path' },
         el('h3', {}, 'Still have your phone?'),
         el('p', {}, 'Move VettID to your new phone with a direct transfer, started from the app on your current phone. It needs your vault PIN and credential password, and no waiting.')),
-      el('div', { class: 'path' },
-        el('h3', {}, 'Lost it?'),
-        el('p', {}, 'Start a recovery here. Your vault locks at once; after 24 hours your new phone can take over with a one-time code, your vault PIN and your credential password.'),
-        el('a', { class: 'btn', href: RECOVERY_PAGE }, v.recovery ? 'View the recovery' : 'Recover your vault')),
+      v.credential_backup === false && !v.recovery
+        ? el('div', { class: 'path' },
+          el('h3', {}, 'Lost it?'),
+          el('p', {}, "Your credential backup is off, so your vault can't be recovered. You can only delete it and start over with a new, empty vault."),
+          el('a', { class: 'btn', href: DELETION_PAGE }, v.deletion ? 'View the deletion' : 'Delete my vault and start over'))
+        : el('div', { class: 'path' },
+          el('h3', {}, 'Lost it?'),
+          el('p', {}, 'Start a recovery here. Your vault locks at once; after 24 hours your new phone can take over with a one-time code, your vault PIN and your credential password. A recovery works only with the credential backup on.'),
+          el('a', { class: 'btn', href: RECOVERY_PAGE }, v.recovery ? 'View the recovery' : 'Recover your vault')),
+      v.credential_backup === false && !v.recovery
+        ? null
+        : el('div', { class: 'path' },
+          el('h3', {}, 'Start over?'),
+          el('p', {}, 'Delete your vault and set up a new, empty one. It takes 24 hours and can be cancelled until then; everything in the vault is lost. If you can recover your vault, a recovery keeps it instead.'),
+          el('a', { class: 'btn', href: DELETION_PAGE }, v.deletion ? 'View the deletion' : 'Delete my vault and start over')),
     ),
   );
 }

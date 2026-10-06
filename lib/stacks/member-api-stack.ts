@@ -301,6 +301,13 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
       schedule: events.Schedule.cron({ minute: '0', hour: '7' }), // 07:00 UTC daily
       targets: [new targets.LambdaFunction(cleanup)],
     });
+    // "Delete my vault and start over" (MEMBER-API 2.1.0, VAULT-MESSAGING
+    // 0.16.0 §11.11.9): the same job, every 5 minutes, sends the host's
+    // `delete` for each start-over past its 24 h.
+    new events.Rule(this, 'StartOverSchedule', {
+      schedule: events.Schedule.rate(cdk.Duration.minutes(5)),
+      targets: [new targets.LambdaFunction(cleanup, { event: events.RuleTargetInput.fromObject({ task: 'start_over' }) })],
+    });
 
     const mailer = job('MembersStreamMailer', 'lambda/jobs/members-stream.ts', cdk.Duration.seconds(30));
     g(mailer, 'members', ['UpdateItem']);

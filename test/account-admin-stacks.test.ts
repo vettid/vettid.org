@@ -388,6 +388,11 @@ describe('VettidOrgMemberApiStack', () => {
     t.hasResourceProperties('AWS::Events::Rule', { ScheduleExpression: 'rate(15 minutes)' });
     t.hasResourceProperties('AWS::Events::Rule', { ScheduleExpression: 'cron(0 7 * * ? *)' });
     t.hasResourceProperties('AWS::Events::Rule', { ScheduleExpression: 'cron(0 15 * * ? *)' }); // vault release notices
+    // 2.1.0: the cleanup job's start-over run, every 5 minutes
+    t.hasResourceProperties('AWS::Events::Rule', {
+      ScheduleExpression: 'rate(5 minutes)',
+      Targets: [Match.objectLike({ Input: JSON.stringify({ task: 'start_over' }) })],
+    });
     t.hasResourceProperties('AWS::Lambda::EventSourceMapping', { StartingPosition: 'LATEST', BisectBatchOnFunctionError: true });
   });
 
@@ -456,7 +461,7 @@ describe('VettidOrgMemberApiStack', () => {
       // The cleanup job may only mark a deletion requested.
       const mark = stmts().filter((s: any) => String(str(s.Condition)).includes('deletion_requested_at'));
       expect(mark).toHaveLength(1);
-      expect(mark[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(['vault_id', 'deletion_requested_at']);
+      expect(mark[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(['vault_id', 'deletion_requested_at', 'deletion']);
     });
 
     test('the queue URL prefix is pinned to the vault account and region', () => {
@@ -682,6 +687,17 @@ describe('VettidOrgAccountSiteStack', () => {
       const r = req(uri);
       expect(r.statusCode).toBeUndefined();
       expect(r.uri).toBe('/vault/recovery/cancel/index.html');
+    });
+
+    test('2.1.0: the start-over page is behind the gate; its emailed cancel link needs no session', () => {
+      expect(req('/account/vault/deletion/').statusCode).toBe(302);
+      expect(req('/account/vault/deletion/', signedIn).uri).toBe('/account/vault/deletion/index.html');
+      for (const uri of ['/vault/deletion/cancel', '/vault/deletion/cancel/']) {
+        const r = req(uri);
+        expect(r.statusCode).toBeUndefined();
+        expect(r.uri).toBe('/vault/deletion/cancel/index.html');
+      }
+      for (const uri of ['/js/deletion.js', '/js/deletion-cancel.js']) expect(req(uri).statusCode).toBeUndefined();
     });
 
     test.each(['/js/vault.js', '/js/recovery.js', '/js/recovery-code.js', '/js/qr.js', '/js/vendor/qrcode-generator.js', '/js/vendor/qrcode-generator.LICENSE.txt', '/config.json'])('%s is a known file', (uri) => {
