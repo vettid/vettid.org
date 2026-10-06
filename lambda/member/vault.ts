@@ -48,6 +48,20 @@
  * `recovery_registered` marker turns the recovery `registered` (VAULT-MESSAGING
  * 0.10.6 §11.11.7) and makes that key the recovering key.
  *
+ * No recovery with the credential backup off (2.1.0, VAULT-MESSAGING 0.16.0):
+ * the host writes the vault's one-bit `credential_backup` on the row; a
+ * request for a vault whose bit is `false` is refused upfront (409
+ * recovery_unavailable, reason no_backup) before anything is written,
+ * queued, locked or mailed. A recovery whose own slot comes back with the
+ * enclave's clear `recovery_unavailable` ends at once (state `unavailable`)
+ * and its sealed refusal is returned without waiting for `available_at`.
+ *
+ * Start over (2.1.0, §11.11.9): "Delete my vault and start over" from the
+ * portal records `deletion` on the vault row and emails a cancel link; after
+ * 24 h without a cancel (portal, link or the app's key) the cleanup job's
+ * five-minute run sends the host's `delete` (lambda/jobs/cleanup.ts). The
+ * API enforces the delay; nothing is queued or locked before then.
+ *
  * Status reports `unlocked` only under a live lease (0.10.6 §11.5): the
  * host's `locked` update can lag, or be lost for a vault locked over the
  * relay.
@@ -254,6 +268,14 @@ export interface VaultRow {
   /** API-owned: the recovery in progress or last ended (VAULT-MESSAGING §11.11). */
   recovery?: RecoveryRow;
   /**
+   * Host-owned (2.1.0, VAULT-MESSAGING 0.16.0 §11.5): whether the vault keeps a
+   * backup copy of its credential, as last reported. Absent until a 0.16.0
+   * release reports it. Used only to refuse a recovery request upfront.
+   */
+  credential_backup?: boolean;
+  /** API-owned (2.1.0): a pending or executing start-over (§11.11.9). */
+  deletion?: DeletionRow;
+  /**
    * Host-owned: the last alarm the vault reported (VAULT-MESSAGING 0.9.0
    * §11.5), content-free. `alarm_pending` is cleared by the alarm mailer
    * (lambda/jobs/vault-alarms.ts). Advisory; never a security signal.
@@ -266,8 +288,12 @@ export interface VaultRow {
 
 export interface RecoveryRow {
   recovery_id: string;
-  /** `registered`: a register request was answered with the enclave's marker (0.10.6 §11.11.7). */
-  state: 'pending' | 'registered' | 'cancelled';
+  /**
+   * `registered`: a register request was answered with the enclave's marker
+   * (0.10.6 §11.11.7). `unavailable` (2.1.0): the enclave refused the request
+   * (its slot's `recovery_unavailable`, 0.16.0 §11.11.2); an ended state.
+   */
+  state: 'pending' | 'registered' | 'cancelled' | 'unavailable';
   requested_at: number; // epoch s
   available_at: number;
   expires_at: number;
@@ -277,6 +303,16 @@ export interface RecoveryRow {
   claim_keys?: StoredKey[];
   /** 2.0.0: the claim key whose register came back `recovery_registered`. */
   recovering_key?: StoredKey;
+}
+
+/** API-owned (2.1.0, VAULT-MESSAGING 0.16.0 §11.11.9): "Delete my vault and start over". */
+export interface DeletionRow {
+  deletion_id: string;
+  state: 'pending' | 'executing';
+  requested_at: number; // epoch s
+  deletes_at: number; // requested_at + 24 h
+  /** The cleanup job: when the host's `delete` was queued (absent until it could be). */
+  queued_at?: number;
 }
 
 type Op = 'enroll' | 'unlock' | 'lock' | 'recovery' | 'recovery_cancel' | 'recovery_register';
@@ -817,7 +853,7 @@ router.on('GET', '/api/vault/status', async (req) => {
   const service = (await vaultService()).enabled ? 'available' : 'paused';
   if (req.appHeader === undefined) found = activeVault((await currentVault(m.user_guid)).vault);
   if (!found) return { vault: null, service };
-  const v = await refreshRegistered(m, found);
+  const v = await refreshRecovery(m, found);
   let release = null;
   if (v.sealed_release) {
     const [rel, active] = await Promise.all([releaseRow(v.sealed_release), releasesWithStatus('active')]);
@@ -841,6 +877,10 @@ router.on('GET', '/api/vault/status', async (req) => {
       recovery: recoveryActive(v.recovery, now) ? { state: recoveryState(v.recovery, now), available_at: iso(v.recovery!.available_at) } : null,
       // The last alarm the vault reported to its host (a credential clone, 0.9.0 §3.5.9).
       alarm: v.alarm && typeof v.alarm.kind === 'string' && typeof v.alarm.at === 'number' ? { kind: v.alarm.kind, at: iso(v.alarm.at) } : null,
+      // 2.1.0: the host-written backup bit (false: the vault cannot be recovered; null: not reported yet).
+      credential_backup: typeof v.credential_backup === 'boolean' ? v.credential_backup : null,
+      // 2.1.0: a pending start-over, so the app can show it and offer to cancel (§11.11.9).
+      deletion: deletionOf(v) ? { state: v.deletion!.state, deletes_at: iso(v.deletion!.deletes_at) } : null,
       created_at: v.created_at,
       updated_at: v.updated_at,
     },
@@ -1351,12 +1391,14 @@ export const MAX_CLAIM_KEYS = 10;
 
 const sha256Hex = (s: string) => createHash('sha256').update(s).digest('hex');
 
-type RecoveryState = 'pending' | 'available' | 'registered' | 'cancelled' | 'expired';
+type RecoveryState = 'pending' | 'available' | 'registered' | 'cancelled' | 'expired' | 'unavailable';
 
 /** The state the API answers; `available` and `expired` follow from the clock. */
 export function recoveryState(r: RecoveryRow | undefined, now: number): RecoveryState | null {
   if (!r) return null;
   if (r.state === 'cancelled') return 'cancelled';
+  // 2.1.0: refused by the enclave (no backup copy, or no credential); ended.
+  if (r.state === 'unavailable') return 'unavailable';
   // The code is spent; it stays `registered` after expires_at (0.10.6 §11.11.7).
   if (r.state === 'registered') return 'registered';
   if (now >= r.expires_at) return 'expired';
@@ -1372,6 +1414,8 @@ export const recoveryActive = (r: RecoveryRow | undefined, now: number): boolean
 
 /** The host's copy of the enclave's clear marker of a successful register (0.10.6 §11.5). */
 export const REGISTERED_CODE = 'recovery_registered';
+/** The host's copy of the enclave's clear marker of a refused recovery request (0.16.0 §11.11.2). */
+export const UNAVAILABLE_CODE = 'recovery_unavailable';
 /** At most this many register ids are kept on a recovery (the route's daily rate limit). */
 const MAX_REGISTER_IDS = 10;
 
@@ -1406,12 +1450,52 @@ async function markRegistered(m: MemberItem, v: VaultRow, r: RecoveryRow, slot: 
   return { ...r, state: 'registered', ...(recovering ? { recovering_key: recovering } : {}) };
 }
 
+/** The recovery request's own slot (its request_id is the recovery_id), if it is the member's. */
+async function recoverySlot(m: MemberItem, r: RecoveryRow): Promise<Record<string, unknown> | null> {
+  const slot = (await ddb.send(new GetCommand({ TableName: table.vaultRequests(), Key: { request_id: r.recovery_id }, ConsistentRead: true }))).Item;
+  return slot && slot.user_guid === m.user_guid ? slot : null;
+}
+
 /**
- * While the code is available, look at the slots of this recovery's
+ * 2.1.0 (VAULT-MESSAGING 0.16.0 §11.11.2, §11.11.7): while a recovery is
+ * `pending` (before or after available_at), its own slot answered with the
+ * enclave's clear `recovery_unavailable` means the enclave refused it: the
+ * recovery ends at once as `unavailable` (conditional on the same recovery,
+ * never over a cancel or a register). Returns the recovery as it now is.
+ */
+async function refreshUnavailable(m: MemberItem, v: VaultRow, r: RecoveryRow, now: number): Promise<RecoveryRow> {
+  if (r.state !== 'pending' || now >= r.expires_at) return r;
+  const slot = await recoverySlot(m, r);
+  if (!slot || slot.status !== 'done' || slot.code !== UNAVAILABLE_CODE) return r;
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: table.vaults(),
+        Key: { vault_id: v.vault_id },
+        UpdateExpression: 'SET recovery.#st = :un, updated_at = :now',
+        ConditionExpression: 'recovery.recovery_id = :id AND recovery.#st = :pending',
+        ExpressionAttributeNames: { '#st': 'state' },
+        ExpressionAttributeValues: { ':un': 'unavailable', ':pending': 'pending', ':id': r.recovery_id, ':now': nowIso() },
+      }),
+    );
+  } catch (e) {
+    if ((e as Error).name === 'ConditionalCheckFailedException') return r; // cancelled, registered or replaced meanwhile
+    throw e;
+  }
+  await audit(m.email, 'vault.recovery_unavailable', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id });
+  return { ...r, state: 'unavailable' };
+}
+
+/**
+ * Bring the recovery up to date from its slots: the enclave's refusal
+ * (2.1.0, above), then, while the code is available, the slots of its
  * register requests (they live 15 minutes): one answered with the marker
  * means the code is spent. Returns the vault row with its recovery updated.
  */
-async function refreshRegistered(m: MemberItem, v: VaultRow): Promise<VaultRow> {
+async function refreshRecovery(m: MemberItem, v: VaultRow): Promise<VaultRow> {
+  if (!v.recovery) return v;
+  const refused = await refreshUnavailable(m, v, v.recovery, nowS());
+  if (refused !== v.recovery) return { ...v, recovery: refused };
   const r = v.recovery;
   if (!r || recoveryState(r, nowS()) !== 'available' || !r.register_ids?.length) return v;
   for (const id of r.register_ids.slice(-MAX_REGISTER_IDS)) {
@@ -1448,15 +1532,21 @@ async function recoveryInstance(v: VaultRow, now: number, canary: boolean): Prom
   throw releaseStarting(v.sealed_release);
 }
 
-/** Write the recovery, conditional on the one read (or none): concurrent requests cannot both win. */
-async function setRecovery(v: VaultRow, r: RecoveryRow, expectId: string | null): Promise<void> {
+/**
+ * Write the recovery, conditional on the one read (or none): concurrent
+ * requests cannot both win. A new request (`request`) also needs no
+ * start-over to be pending (2.1.0), so a concurrent deletion request and
+ * recovery request cannot both win either.
+ */
+async function setRecovery(v: VaultRow, r: RecoveryRow, expectId: string | null, request = false): Promise<void> {
+  const cond = expectId ? 'recovery.recovery_id = :id' : 'attribute_not_exists(recovery)';
   try {
     await ddb.send(
       new UpdateCommand({
         TableName: table.vaults(),
         Key: { vault_id: v.vault_id },
         UpdateExpression: 'SET recovery = :r, updated_at = :now',
-        ConditionExpression: expectId ? 'recovery.recovery_id = :id' : 'attribute_not_exists(recovery)',
+        ConditionExpression: request ? `${cond} AND attribute_not_exists(deletion)` : cond,
         ExpressionAttributeValues: { ':r': r, ':now': nowIso(), ...(expectId ? { ':id': expectId } : {}) },
       }),
     );
@@ -1470,7 +1560,7 @@ const requestedMail = (cancelUrl: string, availableAt: number) => `A recovery of
 
 Your vault has been locked. If nobody cancels, a one-time recovery code becomes available on your account page at ${iso(availableAt)}, for 24 hours. A new app then needs the code, your vault PIN and your credential password.
 
-The new app replaces your current app, which is removed; your desktops and agents stay paired. If your credential backup is off, your credential and its critical items cannot be restored: the new app can only start a new credential or delete the vault.
+The new app replaces your current app, which is removed; your desktops and agents stay paired. A vault whose credential backup is off cannot be recovered: it refuses the recovery, and your account page then says so.
 
 If you did not ask for this, cancel it now:
 ${cancelUrl}
@@ -1507,10 +1597,17 @@ router.on('POST', '/api/vault/recovery', async (req) => {
   const now = nowS();
   const v = await recoverableVault(m.user_guid);
   if (recoveryActive(v.recovery, now)) throw vaultError(409, 'recovery_active', 'A recovery is already in progress');
+  if (deletionOf(v)) throw deletionPending();
+  // 2.1.0 (VAULT-MESSAGING 0.16.0 §11.11.7): no recovery with the credential
+  // backup off. Refused before anything is written, queued, locked or mailed;
+  // with the bit absent the request goes on and the enclave decides.
+  if (v.credential_backup === false) {
+    throw vaultError(409, 'recovery_unavailable', 'This vault cannot be recovered: its credential backup is off. You can delete it and start over.', { reason: 'no_backup' });
+  }
   const inst = await recoveryInstance(v, now, isCanaryMember(m));
   const recoveryId = newUlid();
   const r: RecoveryRow = { recovery_id: recoveryId, state: 'pending', requested_at: now, available_at: now + RECOVERY_DELAY_S, expires_at: now + RECOVERY_DELAY_S + RECOVERY_VALIDITY_S };
-  await setRecovery(v, r, v.recovery?.recovery_id ?? null);
+  await setRecovery(v, r, v.recovery?.recovery_id ?? null, true);
   // The slot keeps the sealed code until the recovery expires.
   await enqueue('recovery', m, v, recoveryId, inst, undefined, { extra: { browser_key: bk as string }, ttlS: r.expires_at - now + 3600 });
   const token = randomBytes(32).toString('base64url');
@@ -1531,19 +1628,20 @@ router.on('GET', '/api/vault/recovery', async (req) => {
   await limit(`vault-recovery-status#${m.user_guid}`, 60, 60);
   const now = nowS();
   const found = activeVault((await currentVault(m.user_guid)).vault);
-  const v = found ? await refreshRegistered(m, found) : null;
+  const v = found ? await refreshRecovery(m, found) : null;
   const r = v?.recovery;
   const state = recoveryState(r, now);
   if (!v || !r || !state) return { recovery: null };
   const out: Record<string, unknown> = {
     recovery_id: r.recovery_id, vault_id: v.vault_id, state, requested_at: iso(r.requested_at), available_at: iso(r.available_at), expires_at: iso(r.expires_at),
   };
-  if (state === 'available') {
-    const slot = (await ddb.send(new GetCommand({ TableName: table.vaultRequests(), Key: { request_id: r.recovery_id }, ConsistentRead: true }))).Item;
-    const env = slot && slot.user_guid === m.user_guid && slot.status === 'done' && typeof slot.envelope === 'string' ? decodeCanonicalB64(slot.envelope) : null;
+  // The code from available_at; a refusal (2.1.0, `unavailable`) at once.
+  if (state === 'available' || state === 'unavailable') {
+    const slot = await recoverySlot(m, r);
+    const env = slot && slot.status === 'done' && typeof slot.envelope === 'string' ? decodeCanonicalB64(slot.envelope) : null;
     if (env && env.length === RESULT_ENVELOPE_BYTES) {
       out.sealed_code = slot!.envelope;
-      if (!slot!.released) {
+      if (state === 'available' && !slot!.released) {
         await ddb.send(
           new UpdateCommand({
             TableName: table.vaultRequests(),
@@ -1602,7 +1700,8 @@ router.on('POST', '/api/vault/recovery/claim', async (req) => {
   const pointer = m ? await readPointer(m.user_guid) : null;
   if (!m || pointer?.current_vault_id !== v.vault_id) throw notFound('No such recovery');
   requireActive(m);
-  if (recoveryState(r, now) !== 'available') throw vaultError(409, 'recovery_not_available', 'No recovery code is valid now');
+  // 2.1.0: a recovery the enclave refused is `unavailable`, never claimable.
+  if (recoveryState(await refreshUnavailable(m, v, r, now), now) !== 'available') throw vaultError(409, 'recovery_not_available', 'No recovery code is valid now');
   const keys = [...(r.claim_keys ?? []).filter((k) => isStoredKey(k) && k.kid !== key.kid), { key: key.b64, kid: key.kid }].slice(-MAX_CLAIM_KEYS);
   try {
     await ddb.send(
@@ -1655,7 +1754,8 @@ router.on('POST', '/api/vault/recovery/register', async (req) => {
   const now = nowS();
   const vault = c.vault;
   if (!vault || vault.vault_id !== vaultId) throw notFound('No such vault');
-  if (recoveryState(vault.recovery, now) !== 'available') throw vaultError(409, 'recovery_not_available', 'No recovery code is valid now');
+  const rec = vault.recovery ? await refreshUnavailable(m, vault, vault.recovery, now) : undefined;
+  if (recoveryState(rec, now) !== 'available') throw vaultError(409, 'recovery_not_available', 'No recovery code is valid now');
   const inst = await routeCheck(vault, instanceId, now);
   await requireRoutable(inst, isCanaryMember(m));
   const recoveryId = vault.recovery!.recovery_id;
@@ -1669,6 +1769,150 @@ router.on('POST', '/api/vault/recovery/register', async (req) => {
   await recordRegisterId(vault, recoveryId, requestId);
   await audit(m.email, 'vault.recovery_register', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, recovery_id: recoveryId, instance_id: instanceId, ...viaOf(c) });
   return new WithStatus(202, { vault_id: vault.vault_id, request_id: requestId });
+});
+
+// ---- start over: "Delete my vault and start over" (2.1.0, VAULT-MESSAGING 0.16.0 §11.11.9) ----
+//
+// For a member who lost the phone with the credential backup off (no
+// recovery exists then), or who does not want to recover. The deletion
+// opens and returns nothing; the API enforces its 24 h, the emails and the
+// cancel (portal, the email link, the app's key). The cleanup job's
+// five-minute run then sends the host's `delete` (lambda/jobs/cleanup.ts).
+// Nothing is queued and the vault is not locked or told during the wait.
+
+/** The start-over runs 24 h after the request (§11.11.9). */
+export const DELETION_DELAY_S = 24 * 3600;
+export const DELETION_PHRASE = 'delete my vault';
+const DELETION_LINK_PREFIX = 'dcancel#';
+
+/** The vault's start-over, if one is pending or executing. */
+export function deletionOf(v: VaultRow | null | undefined): DeletionRow | null {
+  const d = v?.deletion;
+  if (!d || typeof d.deletion_id !== 'string' || typeof d.deletes_at !== 'number') return null;
+  return d.state === 'pending' || d.state === 'executing' ? d : null;
+}
+
+const deletionPending = () => vaultError(409, 'deletion_pending', 'Your vault is being deleted to start over. Cancel the deletion first.');
+
+const deletionBody = (d: DeletionRow) => ({ deletion_id: d.deletion_id, state: d.state, requested_at: iso(d.requested_at), deletes_at: iso(d.deletes_at) });
+
+const deletionRequestedMail = (cancelUrl: string, requestedAt: number, deletesAt: number) => `You asked to delete your VettID vault and start over, from your account, at ${iso(requestedAt)}.
+
+Your vault and everything in it (your messages, connections, profile, items, Protean Credential, audit log and feed) will be deleted at ${iso(deletesAt)}. This cannot be undone: nothing can be restored afterwards. You can then set up a new, empty vault from your account page.
+
+To keep your vault, cancel before then:
+${cancelUrl}
+
+You can also cancel on your account page or in your VettID app.
+
+If you did not ask for this, cancel now, then secure your email account and your VettID account.`;
+
+/**
+ * Cancel a pending start-over: conditional on the same deletion and
+ * `pending`; removes the record, mails the member. False: nothing to cancel
+ * (none, another one, or already executing).
+ */
+async function cancelDeletion(m: MemberItem, v: VaultRow, deletionId: string, via: 'session' | 'link' | 'app', kid?: string): Promise<boolean> {
+  const d = deletionOf(v);
+  if (!d || d.deletion_id !== deletionId || d.state !== 'pending') return false;
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: table.vaults(),
+        Key: { vault_id: v.vault_id },
+        UpdateExpression: 'REMOVE deletion SET updated_at = :now',
+        ConditionExpression: 'deletion.deletion_id = :id AND deletion.#st = :pending',
+        ExpressionAttributeNames: { '#st': 'state' },
+        ExpressionAttributeValues: { ':id': deletionId, ':pending': 'pending', ':now': nowIso() },
+      }),
+    );
+  } catch (e) {
+    if ((e as Error).name === 'ConditionalCheckFailedException') return false; // executing, cancelled or replaced meanwhile
+    throw e;
+  }
+  await audit(m.email, 'vault.deletion_cancel', m.user_guid, { vault_id: v.vault_id, deletion_id: deletionId, via, ...(kid ? { kid } : {}) });
+  await notify(m.email, 'VettID vault deletion cancelled',
+    `The deletion of your VettID vault requested at ${iso(d.requested_at)} has been cancelled. Your vault and everything in it stay as they are.`);
+  return true;
+}
+
+router.on('POST', '/api/vault/deletion', async (req) => {
+  // A session of an active member with the current terms, as for a recovery request.
+  const m = await loadVaultMember(req);
+  if (req.body.confirm !== DELETION_PHRASE) throw badRequest(`confirm must be exactly "${DELETION_PHRASE}"`);
+  await limit(`vault-deletion#${m.user_guid}`, 3, 86_400);
+  const now = nowS();
+  // A confirmed vault: not none, `enrolling` or deleted (404).
+  const v = await recoverableVault(m.user_guid);
+  if (recoveryActive(v.recovery, now)) throw vaultError(409, 'recovery_active', 'A recovery is in progress; cancel it first');
+  if (deletionOf(v)) throw deletionPending();
+  const d: DeletionRow = { deletion_id: newUlid(), state: 'pending', requested_at: now, deletes_at: now + DELETION_DELAY_S };
+  // Conditional on what was read: no start-over yet, and the same (inactive) recovery or none.
+  const rid = v.recovery?.recovery_id;
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: table.vaults(),
+        Key: { vault_id: v.vault_id },
+        UpdateExpression: 'SET deletion = :d, updated_at = :now',
+        ConditionExpression: `user_guid = :g AND attribute_not_exists(deletion) AND ${rid ? 'recovery.recovery_id = :rid' : 'attribute_not_exists(recovery)'}`,
+        ExpressionAttributeValues: { ':d': d, ':g': m.user_guid, ':now': nowIso(), ...(rid ? { ':rid': rid } : {}) },
+      }),
+    );
+  } catch (e) {
+    if ((e as Error).name === 'ConditionalCheckFailedException') throw vaultError(409, 'conflict', 'The vault changed; try again');
+    throw e;
+  }
+  // The single-use cancel link: only its SHA-256 is stored, until deletes_at.
+  const token = randomBytes(32).toString('base64url');
+  await ddb.send(
+    new PutCommand({
+      TableName: table.vaultRequests(),
+      Item: { request_id: DELETION_LINK_PREFIX + sha256Hex(token), vault_id: v.vault_id, user_guid: m.user_guid, op: 'deletion_cancel_link', status: 'link', deletion_id: d.deletion_id, created_at: nowIso(), expires_at: d.deletes_at },
+      ConditionExpression: 'attribute_not_exists(request_id)',
+    }),
+  );
+  await audit(m.email, 'vault.deletion_request', m.user_guid, { vault_id: v.vault_id, deletion_id: d.deletion_id, deletes_at: iso(d.deletes_at) });
+  await notify(m.email, 'VettID: your vault will be deleted',
+    deletionRequestedMail(`https://${env('ACCOUNT_HOST')}/vault/deletion/cancel#t=${token}`, d.requested_at, d.deletes_at));
+  return new WithStatus(202, { deletion_id: d.deletion_id, requested_at: iso(d.requested_at), deletes_at: iso(d.deletes_at) });
+});
+
+router.on('GET', '/api/vault/deletion', async (req) => {
+  const m = await loadActiveAccount(req);
+  await limit(`vault-deletion-status#${m.user_guid}`, 60, 60);
+  const d = deletionOf(activeVault((await currentVault(m.user_guid)).vault));
+  return { deletion: d ? deletionBody(d) : null };
+});
+
+// The portal's session, or the vault's app signed by its app key (§11.11.9).
+router.on('POST', '/api/vault/deletion/cancel', async (req) => {
+  let c: Caller;
+  if (req.appHeader !== undefined) {
+    c = await appCaller(req, ['app']);
+    requireActive(c.m);
+  } else {
+    c = { via: 'session', m: await loadActiveAccount(req), vault: null, key: null, role: null };
+  }
+  const m = c.m;
+  const deletionId = field(req.body, 'deletion_id', ULID_RE, 'a ULID');
+  await limit(`vault-deletion-cancel#${m.user_guid}`, 30, 15 * 60);
+  const v = c.via === 'app' ? c.vault : activeVault((await currentVault(m.user_guid)).vault);
+  if (!v) return { cancelled: false };
+  return { cancelled: await cancelDeletion(m, v, deletionId, c.via, c.key?.kid) };
+});
+
+// The email link: no session, the token stands in for it.
+router.on('POST', '/api/vault/deletion/cancel-link', async (req) => {
+  await limit(`vault-deletion-link#${req.ip}`, 20, 15 * 60);
+  const token = req.body.token;
+  if (typeof token !== 'string' || !TOKEN_RE.test(token)) throw badRequest('token is malformed');
+  const link = (await ddb.send(new GetCommand({ TableName: table.vaultRequests(), Key: { request_id: DELETION_LINK_PREFIX + sha256Hex(token) }, ConsistentRead: true }))).Item;
+  if (!link || link.op !== 'deletion_cancel_link' || Number(link.expires_at) <= nowS()) throw notFound('This link is no longer valid');
+  const m = await memberByGuid(String(link.user_guid));
+  const v = await vaultRow(String(link.vault_id));
+  if (!m || !v || v.user_guid !== m.user_guid) throw notFound('This link is no longer valid');
+  return { cancelled: await cancelDeletion(m, v, String(link.deletion_id), 'link') };
 });
 
 export const handler = memberHandler(router);

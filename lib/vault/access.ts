@@ -65,9 +65,10 @@ export const VAULT_API_ACCESS: Record<VaultApiConsumer, VaultApiAccess> = {
     tables: [
       { table: 'vaults', actions: ['GetItem'] },
       // Its own attributes only (MEMBER-API 2.0.0 adds the pending app key
-      // and the pointer's setup-code issuance); never `app_key`, which only
-      // the enclave host writes.
-      { table: 'vaults', actions: ['PutItem', 'UpdateItem'], attributes: ['vault_id', 'user_guid', 'state', 'created_at', 'updated_at', 'current_vault_id', 'recovery', 'app_key_pending', 'enroll_live'] },
+      // and the pointer's setup-code issuance; 2.1.0 the start-over's
+      // `deletion`); never `app_key` or `credential_backup`, which only the
+      // enclave host writes.
+      { table: 'vaults', actions: ['PutItem', 'UpdateItem'], attributes: ['vault_id', 'user_guid', 'state', 'created_at', 'updated_at', 'current_vault_id', 'recovery', 'app_key_pending', 'enroll_live', 'deletion'] },
       { table: 'vault-instances', actions: ['GetItem', 'Query'], indexes: true },
       { table: 'vault-requests', actions: ['GetItem', 'PutItem', 'UpdateItem'] },
       { table: 'vault-releases', actions: ['GetItem', 'Query'], indexes: true },
@@ -77,11 +78,13 @@ export const VAULT_API_ACCESS: Record<VaultApiConsumer, VaultApiAccess> = {
     readsVaultsStream: false,
   },
   // Daily cleanup: canceled accounts' vaults are asked to delete themselves
-  // (§12.5); never-sealed rows and pointer rows are deleted here.
+  // (§12.5); never-sealed rows and pointer rows are deleted here. Every 5
+  // minutes (MEMBER-API 2.1.0): start-overs past their 24 h, marked in the
+  // API's `deletion` (state, queued_at).
   cleanup: {
     tables: [
       { table: 'vaults', actions: ['Query', 'Scan', 'DeleteItem'], indexes: true },
-      { table: 'vaults', actions: ['UpdateItem'], attributes: ['vault_id', 'deletion_requested_at'] },
+      { table: 'vaults', actions: ['UpdateItem'], attributes: ['vault_id', 'deletion_requested_at', 'deletion'] },
       { table: 'vault-instances', actions: ['GetItem', 'Query'], indexes: true },
       { table: 'vault-releases', actions: ['GetItem'] },
       { table: 'vault-releases', actions: ['UpdateItem'], attributes: ['release', 'start_requested_at', 'start_requests'] },

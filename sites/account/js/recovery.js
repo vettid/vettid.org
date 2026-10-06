@@ -14,6 +14,14 @@
 //     enclave's marker, VAULT-MESSAGING 0.10.6 §11.11.7); no code is shown
 //     and the key is deleted. Cancel stays possible until the recovery expires.
 //  5. Cancelled / expired: the key is deleted; a new request is possible.
+//
+// No recovery with the credential backup off (MEMBER-API 2.1.0,
+// VAULT-MESSAGING 0.16.0): when the status says `credential_backup: false`
+// the page offers no request, only the start-over (delete the vault and set
+// up a new one, /account/vault/deletion/); the API's 409
+// recovery_unavailable says the same. A recovery the enclave refused ends
+// as `unavailable`: its sealed refusal (no_backup / no_credential) is
+// opened here and shown at once.
 
 import { get, post } from './api.js';
 import { $, chip, el, fill } from './dom.js';
@@ -25,6 +33,7 @@ import { dateTime, timeUntil } from './vault-text.js';
 
 ui.init();
 
+const DELETION_PAGE = '/account/vault/deletion/';
 const root = $('rec');
 
 let vault = null; // VaultStatus | null
@@ -32,7 +41,7 @@ let recovery = null; // Recovery | null
 let sealed = null; // Uint8Array: the sealed code (ciphertext only)
 let keyRec = null; // the stored key that opens it
 let openState = null; // null | 'ok' | 'refused' | 'unopenable' | 'nokey'
-let refusal = null; // the vault's refusal code ('no_credential')
+let refusal = null; // the vault's refusal code ('no_backup', 'no_credential')
 let hasKey = false; // pending: this browser holds a key that may open the code
 let canStore = null; // WebCrypto + IndexedDB usable here
 let codeShown = false;
@@ -41,8 +50,8 @@ let tickTimer = null;
 let pollWhenVisible = false;
 
 const isActive = (r) => !!r && (r.state === 'pending' || r.state === 'available' || (r.state === 'registered' && Date.parse(r.expires_at) > Date.now()));
-/** The code is still to be shown: its key must be kept. */
-const needsKey = (r) => !!r && (r.state === 'pending' || r.state === 'available');
+/** The code (or, 2.1.0, the vault's refusal) is still to be opened: its key must be kept. */
+const needsKey = (r) => !!r && (r.state === 'pending' || r.state === 'available' || r.state === 'unavailable');
 /** The vault the recovery belongs to (MEMBER-API 1.1.0 `Recovery.vault_id`; older answers: the status's). */
 const recoveryVaultId = () => recovery?.vault_id ?? vault?.vault_id;
 
@@ -86,7 +95,7 @@ async function classify() {
     cands = [];
   }
   hasKey = cands.length > 0;
-  if (recovery.state !== 'available' || !recovery.sealed_code) return;
+  if ((recovery.state !== 'available' && recovery.state !== 'unavailable') || !recovery.sealed_code) return;
   sealed = fromBase64(recovery.sealed_code);
   if (!sealed) {
     openState = 'unopenable';
@@ -213,7 +222,11 @@ function render() {
     return;
   }
   if (!isActive(recovery)) {
-    renderRequest();
+    // 2.1.0: a start-over in progress, the vault's refusal, or the backup off: no request.
+    if (vault.deletion) renderDeletionPending();
+    else if (recovery?.state === 'unavailable') renderUnavailable();
+    else if (vault.credential_backup === false) renderNoBackup();
+    else renderRequest();
     return;
   }
   if (recovery.state === 'pending') renderPending();
@@ -255,8 +268,9 @@ function renderRequest() {
       el('li', {}, el('strong', {}, 'Your new phone needs '), 'the VettID app, the code, your vault PIN and your credential password.'),
       el('li', {}, el('strong', {}, 'The new app replaces the old one, '), 'which is removed and can no longer use your vault. Desktops and agents you paired stay paired.'),
     ),
-    callout('warn', 'If your sealed backup is off',
-      "There is no copy of your credential to hand over. You won't need your credential password, but your Protean Credential and every critical item are lost: the new app can only start a new credential or delete the vault."),
+    callout('warn', 'Only with the credential backup on',
+      "A vault can be recovered only if its credential backup is on (in the VettID app, under Credential). If it's off, your vault can't be recovered: you can only delete it and start over with a new, empty vault.",
+      el('p', {}, el('a', { href: DELETION_PAGE }, 'Delete my vault and start over'))),
     neverAsk(),
   );
 
@@ -286,6 +300,7 @@ function renderRequest() {
 
 function endedText(state) {
   if (state === 'cancelled') return 'was cancelled';
+  if (state === 'unavailable') return 'was refused by your vault';
   if (state === 'registered') return 'was used on a new phone';
   return 'expired';
 }
@@ -293,6 +308,8 @@ function endedText(state) {
 function recoveryErrorText(err) {
   switch (err?.code) {
     case 'recovery_active': return 'A recovery is already in progress.';
+    case 'recovery_unavailable': return NO_BACKUP_TEXT;
+    case 'deletion_pending': return 'Your vault is being deleted to start over. Cancel the deletion first if you want to recover it instead.';
     case 'terms_required': return 'Accept the current membership terms in your account first.';
     case 'not_found': return "Your account has no set-up vault to recover.";
     case 'release_starting': return "Your vault's software is starting. Try again in about 30 seconds.";
@@ -329,7 +346,7 @@ async function startRecovery(form) {
       // request may still have gone through; keep the key for that case.
       if (created && err?.status && err.status !== 0) await keys.deleteKey(created.id).catch(() => {});
       ui.showError(err?.status === undefined ? err.message : recoveryErrorText(err));
-      if (err?.code === 'recovery_active') load();
+      if (err?.code === 'recovery_active' || err?.code === 'recovery_unavailable' || err?.code === 'deletion_pending') load();
     },
   });
   if (!res) return;
@@ -418,12 +435,9 @@ function renderAvailable() {
 
   if (openState === 'refused') {
     fill(root, el('section', { class: 'card', 'aria-labelledby': 'h-rec' }, head,
-      callout('error', "Your vault can't be recovered",
-        refusal === 'no_credential'
-          ? 'It has no Protean Credential, and a vault without a credential cannot be recovered.'
-          : `Your vault refused the recovery (${refusal}).`,
-        'Cancel this recovery so that your vault can be unlocked again. If you no longer have your app, email support@vettid.org.'),
-      el('div', { class: 'actions' }, cancelButton())));
+      refusalCallout(refusal,
+        'Cancel this recovery so that your vault can be unlocked again. If you no longer have your app, you can only delete your vault and start over.'),
+      el('div', { class: 'actions' }, cancelButton(), el('a', { class: 'btn', href: DELETION_PAGE }, 'Delete my vault and start over'))));
     return;
   }
 
@@ -448,7 +462,7 @@ function renderAvailable() {
       el('ol', { class: 'howto' },
         el('li', {}, 'On your new phone, install VettID and choose to recover a vault. The app never signs in: the code below is all it needs from this site.'),
         el('li', {}, 'Scan the code below (or type it). The app shows the account it belongs to (the first letter of your email and its domain): check that it is yours.'),
-        el('li', {}, 'Enter your vault PIN, then your credential password. Your old app is removed. (With the sealed backup off, the app asks for no password: it offers a new credential or deleting the vault.)'),
+        el('li', {}, 'Enter your vault PIN, then your credential password. Your old app is removed.'),
       ),
       callout('warn', 'Keep this code to yourself',
         "With this code, your vault PIN and your credential password, someone could take over your vault. Don't share it, photograph it or take a screenshot. Show it only while you scan it."),
@@ -503,6 +517,62 @@ function wipeCode() {
     btn.setAttribute('aria-expanded', 'false');
   }
   codeShown = false;
+}
+
+// ── Not recoverable (2.1.0, VAULT-MESSAGING 0.16.0) ─────────────────────
+
+const NO_BACKUP_TEXT = 'This vault cannot be recovered: its credential backup is off. You can delete it and start over with a new vault.';
+
+function refusalCallout(code, ...more) {
+  const text = code === 'no_credential'
+    ? 'This vault cannot be recovered: it has no Protean Credential.'
+    : code === 'no_backup' || !code
+      ? NO_BACKUP_TEXT
+      : `This vault cannot be recovered (${code}).`;
+  return callout('error', "Your vault can't be recovered", text, ...more);
+}
+
+function startOverActions() {
+  return el('div', { class: 'actions' },
+    el('a', { class: 'btn btn-primary', href: DELETION_PAGE }, 'Delete my vault and start over'),
+    el('a', { class: 'btn', href: '/account/#vault' }, 'Back to your vault'));
+}
+
+const stillHavePhone = () => callout('info', 'Still have your phone?',
+  "Then nothing is lost: keep using your vault there. To move to a new phone, use a direct transfer from the app on your current phone. You can also turn the credential backup on in the app (under Credential), so that a recovery is possible from then on.");
+
+/** The status says the vault keeps no backup copy of its credential: no recovery is offered. */
+function renderNoBackup() {
+  fill(root, el('section', { class: 'card', 'aria-labelledby': 'h-rec' },
+    sectionHead('h-rec', "Your vault can't be recovered"),
+    refusalCallout('no_backup'),
+    el('p', {}, "Nothing in your vault is ever released to anyone without your credential, not even to you on a new phone. If the phone with your VettID app is gone, the only way forward is to delete the vault and set up a new, empty one. Everything in the old vault is lost."),
+    stillHavePhone(),
+    startOverActions(),
+  ));
+}
+
+/** The enclave refused the recovery (`unavailable`): its sealed reason, opened here when this browser has the key. */
+function renderUnavailable() {
+  const code = openState === 'refused' ? refusal : null;
+  fill(root, el('section', { class: 'card', 'aria-labelledby': 'h-rec' },
+    sectionHead('h-rec', "Your vault can't be recovered"),
+    refusalCallout(code),
+    el('p', {}, "Your vault refused the recovery you requested on ", when(recovery.requested_at), ". It was not locked, and nothing changed in it."),
+    stillHavePhone(),
+    startOverActions(),
+  ));
+}
+
+/** A start-over is pending or executing (2.1.0): no recovery request. */
+function renderDeletionPending() {
+  fill(root, el('section', { class: 'card', 'aria-labelledby': 'h-rec' },
+    sectionHead('h-rec', 'Your vault is being deleted'),
+    el('p', {}, vault.deletion.state === 'executing'
+      ? 'Your vault is being deleted to start over. It can no longer be recovered.'
+      : ['Your vault will be deleted on ', when(vault.deletion.deletes_at), ' to start over. To recover it instead, cancel the deletion first.']),
+    el('div', { class: 'actions' }, el('a', { class: 'btn btn-primary', href: DELETION_PAGE }, 'View the deletion')),
+  ));
 }
 
 // ── 4. Registered ───────────────────────────────────────────────────────

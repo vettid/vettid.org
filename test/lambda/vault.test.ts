@@ -83,7 +83,7 @@ function installFakeDdb() {
     if (t === 'vaults' && i.UpdateExpression.startsWith('SET recovery.#st')) {
       // markRegistered: pending -> registered, same recovery only.
       if (!cur?.recovery || cur.recovery.recovery_id !== v[':id'] || cur.recovery.state !== v[':pending']) throw ccf();
-      cur.recovery.state = v[':reg'];
+      cur.recovery.state = v[':reg'] ?? v[':un'];
       if (v[':rk']) cur.recovery.recovering_key = structuredClone(v[':rk']);
       cur.updated_at = v[':now'];
     } else if (t === 'vaults' && i.UpdateExpression.startsWith('SET recovery.claim_keys')) {
@@ -109,9 +109,20 @@ function installFakeDdb() {
       cur.updated_at = v[':now'];
     } else if (t === 'vaults' && i.UpdateExpression.startsWith('SET recovery')) {
       if (!cur) throw ccf();
-      if (i.ConditionExpression === 'attribute_not_exists(recovery)' && cur.recovery) throw ccf();
-      if (i.ConditionExpression === 'recovery.recovery_id = :id' && cur.recovery?.recovery_id !== v[':id']) throw ccf();
+      if (i.ConditionExpression.startsWith('attribute_not_exists(recovery)') && cur.recovery) throw ccf();
+      if (i.ConditionExpression.startsWith('recovery.recovery_id = :id') && cur.recovery?.recovery_id !== v[':id']) throw ccf();
+      if (i.ConditionExpression.includes('attribute_not_exists(deletion)') && cur.deletion) throw ccf();
       tbl(t).set(k, { ...cur, recovery: structuredClone(v[':r']), updated_at: v[':now'] });
+    } else if (t === 'vaults' && i.UpdateExpression === 'SET deletion = :d, updated_at = :now') {
+      // The start-over request (2.1.0): no deletion yet, the recovery read (or none).
+      if (!cur || cur.user_guid !== v[':g'] || cur.deletion) throw ccf();
+      if (v[':rid'] ? cur.recovery?.recovery_id !== v[':rid'] : cur.recovery) throw ccf();
+      cur.deletion = structuredClone(v[':d']);
+      cur.updated_at = v[':now'];
+    } else if (t === 'vaults' && i.UpdateExpression === 'REMOVE deletion SET updated_at = :now') {
+      if (cur?.deletion?.deletion_id !== v[':id'] || cur.deletion.state !== v[':pending']) throw ccf();
+      delete cur.deletion;
+      cur.updated_at = v[':now'];
     } else if (t === 'vaults') {
       if (i.ConditionExpression === 'attribute_not_exists(current_vault_id)' && cur?.current_vault_id) throw ccf();
       if (i.ConditionExpression === 'current_vault_id = :old' && cur?.current_vault_id !== v[':old']) throw ccf();
@@ -976,6 +987,7 @@ describe('GET /api/vault/status', () => {
     expect(r.body).toEqual({
       vault: {
         vault_id: VID, state: 'unlocked', sealed_release: R0, vault_version: R0, state_version: 1, leased: true, recovery: null, alarm: null,
+        credential_backup: null, deletion: null, // 2.1.0
         // R0 has no release row here: unknown (the API would answer 410).
         release: { number: null, status: 'unknown', ends_at: null, newest_active: null, notice: 'unavailable' },
         created_at: expect.any(String), updated_at: expect.any(String),
@@ -2157,5 +2169,204 @@ describe('account push', () => {
     paused();
     vaultOf('g1', { vault_id: VID, state: 'unlocked', lease: { instance_id: 'i-1', lease_expires_at: NOW + 60 } });
     expect(await push.handler({ user_guid: 'g1' })).toEqual({ sent: true });
+  });
+});
+
+// ---- MEMBER-API 2.1.0 (VAULT-MESSAGING 0.16.0): no recovery with the backup off; start over ----
+
+describe('2.1.0: the credential backup bit and the refused recovery', () => {
+  const BK = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64');
+  const REFUSAL = Buffer.alloc(5_252, 0x55).toString('base64');
+  const at = (s: number) => {
+    jest.spyOn(Date, 'now').mockReturnValue(s * 1000);
+    for (const i of tbl('instances').values()) i.heartbeat_at = s - 10;
+  };
+  const audits = (action: string) => [...tbl('audit').values()].filter((a) => a.action === action);
+
+  beforeEach(() => {
+    release(R0, 4);
+    instance('i-1', R0);
+    vaultOf('g1', { vault_id: VID, state: 'locked', sealed_release: R0, app_key: { key: keyOf('g1').b64, kid: keyOf('g1').kid, seq: 1 } });
+  });
+
+  test('status carries credential_backup (null until reported) and deletion (null)', async () => {
+    let v = (await call('GET', '/api/vault/status')).body.vault;
+    expect(v).toMatchObject({ credential_backup: null, deletion: null });
+    getItem('vaults', VID).credential_backup = false;
+    v = (await call('GET', '/api/vault/status', undefined, { app: { key: keyOf('g1'), vault: VID } })).body.vault;
+    expect(v.credential_backup).toBe(false);
+  });
+
+  test('backup off: 409 recovery_unavailable {reason: no_backup}; nothing written, queued or mailed; the request still counts', async () => {
+    getItem('vaults', VID).credential_backup = false;
+    const before = structuredClone(getItem('vaults', VID));
+    for (let n = 0; n < 3; n++) {
+      const r = await call('POST', '/api/vault/recovery', { browser_key: BK });
+      expect(r).toMatchObject({ status: 409, body: { error: 'recovery_unavailable', code: 'recovery_unavailable', reason: 'no_backup' } });
+    }
+    expect(getItem('vaults', VID)).toEqual(before);
+    expect(sent()).toHaveLength(0);
+    expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(0);
+    expect([...tbl('requests').values()]).toHaveLength(0);
+    expect(tbl('audit').size).toBe(0);
+    expect((await call('POST', '/api/vault/recovery', { browser_key: BK })).status).toBe(429);
+  });
+
+  test('backup on, or not reported: the request goes on (the enclave decides)', async () => {
+    getItem('vaults', VID).credential_backup = true;
+    expect((await call('POST', '/api/vault/recovery', { browser_key: BK })).status).toBe(202);
+  });
+
+  test("the enclave's refusal (slot code recovery_unavailable) ends the recovery at once; its sealed refusal is returned; claim refused", async () => {
+    const rid = (await call('POST', '/api/vault/recovery', { browser_key: BK })).body.recovery_id;
+    Object.assign(getItem('requests', rid), { status: 'done', envelope: REFUSAL, code: 'recovery_unavailable' });
+    at(NOW + 60);
+    const r = await call('GET', '/api/vault/recovery');
+    expect(r.body.recovery).toMatchObject({ recovery_id: rid, state: 'unavailable', sealed_code: REFUSAL });
+    expect(getItem('vaults', VID).recovery.state).toBe('unavailable');
+    expect(audits('vault.recovery_unavailable')).toHaveLength(1);
+    expect(audits('vault.recovery_code_released')).toHaveLength(0);
+    // Ended: not in the status, not claimable even after available_at, and a new request is possible.
+    expect((await call('GET', '/api/vault/status')).body.vault.recovery).toBeNull();
+    at(NOW + 86_400 + 5);
+    const newApp = keyOf('new-phone');
+    const claim = await call('POST', '/api/vault/recovery/claim', { vault_id: VID, recovery_id: rid, app_key: newApp.b64 }, { app: { key: newApp, vault: VID }, guid: 'nobody' });
+    expect(claim.body.error).toBe('recovery_not_available');
+    expect((await call('POST', '/api/vault/recovery/cancel', { recovery_id: rid })).body).toEqual({ cancelled: false });
+    expect((await call('POST', '/api/vault/recovery', { browser_key: BK })).status).toBe(202);
+  });
+
+  test('a refusal is noticed at claim time too, without a status read first', async () => {
+    const rid = (await call('POST', '/api/vault/recovery', { browser_key: BK })).body.recovery_id;
+    Object.assign(getItem('requests', rid), { status: 'done', envelope: REFUSAL, code: 'recovery_unavailable' });
+    at(NOW + 86_400 + 5);
+    const newApp = keyOf('new-phone');
+    const claim = await call('POST', '/api/vault/recovery/claim', { vault_id: VID, recovery_id: rid, app_key: newApp.b64 }, { app: { key: newApp, vault: VID }, guid: 'nobody' });
+    expect(claim).toMatchObject({ status: 409, body: { error: 'recovery_not_available' } });
+    expect(getItem('vaults', VID).recovery.state).toBe('unavailable');
+  });
+
+  test('a refusal without the code (a release before 0.16.0) is shown at available_at, as before', async () => {
+    const rid = (await call('POST', '/api/vault/recovery', { browser_key: BK })).body.recovery_id;
+    Object.assign(getItem('requests', rid), { status: 'done', envelope: REFUSAL });
+    expect((await call('GET', '/api/vault/recovery')).body.recovery).toMatchObject({ state: 'pending' });
+    expect((await call('GET', '/api/vault/recovery')).body.recovery.sealed_code).toBeUndefined();
+    at(NOW + 86_400);
+    expect((await call('GET', '/api/vault/recovery')).body.recovery).toMatchObject({ state: 'available', sealed_code: REFUSAL });
+  });
+});
+
+describe('2.1.0: delete my vault and start over (§11.11.9)', () => {
+  const BK = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64');
+  const CONFIRM = { confirm: 'delete my vault' };
+  const mails = () => sesMock.commandCalls(SendEmailCommand).map((c) => ({
+    to: c.args[0].input.Destination!.ToAddresses![0],
+    subject: c.args[0].input.Content!.Simple!.Subject!.Data!,
+    text: c.args[0].input.Content!.Simple!.Body!.Text!.Data!,
+  }));
+  const audits = (action: string) => [...tbl('audit').values()].filter((a) => a.action === action);
+  const iso = (s: number) => new Date(s * 1000).toISOString();
+  const noSession = { headers: {}, guid: 'nobody' };
+
+  beforeEach(() => {
+    release(R0, 4);
+    instance('i-1', R0);
+    vaultOf('g1', { vault_id: VID, state: 'locked', sealed_release: R0, credential_backup: false, app_key: { key: keyOf('g1').b64, kid: keyOf('g1').kid, seq: 1 } });
+  });
+
+  test('request: recorded with deletes_at = +24 h, mailed with a single-use cancel link (hash only), audited; nothing queued or locked', async () => {
+    const r = await call('POST', '/api/vault/deletion', CONFIRM);
+    expect(r.status).toBe(202);
+    expect(r.body).toEqual({ deletion_id: expect.stringMatching(/^[0-9A-HJKMNP-TV-Z]{26}$/), requested_at: iso(NOW), deletes_at: iso(NOW + 86_400) });
+    const row = getItem('vaults', VID);
+    expect(row.deletion).toEqual({ deletion_id: r.body.deletion_id, state: 'pending', requested_at: NOW, deletes_at: NOW + 86_400 });
+    expect(row.state).toBe('locked');
+    expect(sent()).toHaveLength(0);
+    const [mail] = mails();
+    expect(mail).toMatchObject({ to: 'g1@x.org', subject: 'VettID: your vault will be deleted' });
+    const token = /deletion\/cancel#t=([A-Za-z0-9_-]{43})/.exec(mail.text)![1];
+    const links = [...tbl('requests').values()].filter((x) => x.op === 'deletion_cancel_link');
+    expect(links).toEqual([expect.objectContaining({ request_id: `dcancel#${createHash('sha256').update(token).digest('hex')}`, deletion_id: r.body.deletion_id, expires_at: NOW + 86_400 })]);
+    expect(JSON.stringify([...tbl('requests').values()])).not.toContain(token);
+    expect(audits('vault.deletion_request')).toHaveLength(1);
+    expect(JSON.stringify([...tbl('audit').values()])).not.toContain(token);
+    // GET and the status show it; a second request and a recovery request are refused.
+    expect((await call('GET', '/api/vault/deletion')).body).toEqual({ deletion: { deletion_id: r.body.deletion_id, state: 'pending', requested_at: iso(NOW), deletes_at: iso(NOW + 86_400) } });
+    expect((await call('GET', '/api/vault/status', undefined, { app: { key: keyOf('g1'), vault: VID } })).body.vault.deletion).toEqual({ state: 'pending', deletes_at: iso(NOW + 86_400) });
+    expect((await call('POST', '/api/vault/deletion', CONFIRM)).body.error).toBe('deletion_pending');
+    getItem('vaults', VID).credential_backup = true;
+    expect((await call('POST', '/api/vault/recovery', { browser_key: BK })).body.error).toBe('deletion_pending');
+    getItem('vaults', VID).deletion.state = 'executing';
+    expect((await call('POST', '/api/vault/recovery', { browser_key: BK })).body.error).toBe('deletion_pending');
+  });
+
+  test('refusals: the phrase (400), no confirmed vault (404), an active recovery (409), the terms (403); limit 3 a day', async () => {
+    expect((await call('POST', '/api/vault/deletion', { confirm: 'Delete my vault' })).status).toBe(400);
+    expect((await call('POST', '/api/vault/deletion', {})).status).toBe(400);
+    expect((await call('POST', '/api/vault/deletion', CONFIRM, { guid: 'g2' })).status).toBe(404);
+    put('vaults', { ...getItem('vaults', VID), state: 'enrolling' });
+    expect((await call('POST', '/api/vault/deletion', CONFIRM)).status).toBe(404);
+    put('vaults', { ...getItem('vaults', VID), state: 'locked', credential_backup: true });
+    expect((await call('POST', '/api/vault/recovery', { browser_key: BK })).status).toBe(202);
+    expect((await call('POST', '/api/vault/deletion', CONFIRM)).body.error).toBe('recovery_active');
+    getItem('members', 'g1').terms_version = 't0';
+    expect((await call('POST', '/api/vault/deletion', CONFIRM)).body.error).toBe('terms_required');
+    getItem('members', 'g1').terms_version = 't1';
+    // Counted for g1: the 404 (enrolling) and the 409 so far; the phrase and the terms come first.
+    expect((await call('POST', '/api/vault/deletion', CONFIRM)).body.error).toBe('recovery_active');
+    expect((await call('POST', '/api/vault/deletion', CONFIRM)).status).toBe(429);
+  });
+
+  test('cancel from the session: removed, mailed, audited; again → {cancelled: false}; then a new request is possible', async () => {
+    const id = (await call('POST', '/api/vault/deletion', CONFIRM)).body.deletion_id;
+    expect(await call('POST', '/api/vault/deletion/cancel', { deletion_id: RID })).toEqual({ status: 200, body: { cancelled: false } });
+    expect(await call('POST', '/api/vault/deletion/cancel', { deletion_id: id })).toEqual({ status: 200, body: { cancelled: true } });
+    expect(getItem('vaults', VID).deletion).toBeUndefined();
+    expect(await call('POST', '/api/vault/deletion/cancel', { deletion_id: id })).toEqual({ status: 200, body: { cancelled: false } });
+    expect(mails().filter((m) => m.subject === 'VettID vault deletion cancelled')).toHaveLength(1);
+    expect(audits('vault.deletion_cancel').map((a) => a.detail.via)).toEqual(['session']);
+    expect((await call('GET', '/api/vault/deletion')).body).toEqual({ deletion: null });
+    expect((await call('POST', '/api/vault/deletion', CONFIRM)).status).toBe(202);
+  });
+
+  test('cancel once executing → {cancelled: false}', async () => {
+    const id = (await call('POST', '/api/vault/deletion', CONFIRM)).body.deletion_id;
+    getItem('vaults', VID).deletion.state = 'executing';
+    expect((await call('POST', '/api/vault/deletion/cancel', { deletion_id: id })).body).toEqual({ cancelled: false });
+    expect(getItem('vaults', VID).deletion.state).toBe('executing');
+  });
+
+  test('cancel by the email link, without a session; a wrong or malformed token → 404/400; second use cancels nothing', async () => {
+    await call('POST', '/api/vault/deletion', CONFIRM);
+    const token = /deletion\/cancel#t=([A-Za-z0-9_-]{43})/.exec(mails()[0].text)![1];
+    expect((await call('POST', '/api/vault/deletion/cancel-link', { token: 'x'.repeat(43) }, noSession)).status).toBe(404);
+    expect((await call('POST', '/api/vault/deletion/cancel-link', { token: 'short' }, noSession)).status).toBe(400);
+    // The recovery's link route does not take it, nor this route a recovery link.
+    expect((await call('POST', '/api/vault/recovery/cancel-link', { token }, noSession)).status).toBe(404);
+    expect(await call('POST', '/api/vault/deletion/cancel-link', { token }, noSession)).toEqual({ status: 200, body: { cancelled: true } });
+    expect(getItem('vaults', VID).deletion).toBeUndefined();
+    expect(await call('POST', '/api/vault/deletion/cancel-link', { token }, noSession)).toEqual({ status: 200, body: { cancelled: false } });
+    expect(audits('vault.deletion_cancel').map((a) => a.detail.via)).toEqual(['link']);
+    // A new deletion is not cancelled by the old link.
+    await call('POST', '/api/vault/deletion', CONFIRM);
+    expect((await call('POST', '/api/vault/deletion/cancel-link', { token }, noSession)).body).toEqual({ cancelled: false });
+    expect(getItem('vaults', VID).deletion.state).toBe('pending');
+    // After deletes_at the link is gone.
+    jest.spyOn(Date, 'now').mockReturnValue((NOW + 86_401) * 1000);
+    const token2 = /deletion\/cancel#t=([A-Za-z0-9_-]{43})/.exec(mails().filter((m) => m.subject === 'VettID: your vault will be deleted')[1].text)![1];
+    expect((await call('POST', '/api/vault/deletion/cancel-link', { token: token2 }, noSession)).status).toBe(404);
+  });
+
+  test("cancel by the vault's app, signed by its app key; another key is 401", async () => {
+    const id = (await call('POST', '/api/vault/deletion', CONFIRM)).body.deletion_id;
+    const other = keyOf('stranger');
+    expect((await call('POST', '/api/vault/deletion/cancel', { deletion_id: id }, { app: { key: other, vault: VID } })).status).toBe(401);
+    expect(await call('POST', '/api/vault/deletion/cancel', { deletion_id: id }, { app: { key: keyOf('g1'), vault: VID } })).toEqual({ status: 200, body: { cancelled: true } });
+    expect(audits('vault.deletion_cancel')[0].detail).toMatchObject({ via: 'app', kid: keyOf('g1').kid });
+  });
+
+  test('the app cannot request one (session routes only)', async () => {
+    expect((await call('POST', '/api/vault/deletion', CONFIRM, { app: { key: keyOf('g1'), vault: VID } })).status).toBe(401);
+    expect(getItem('vaults', VID).deletion).toBeUndefined();
   });
 });

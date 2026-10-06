@@ -1,4 +1,11 @@
 /**
+ * Every 5 minutes (event `{task: "start_over"}`, MEMBER-API 2.1.0,
+ * VAULT-MESSAGING 0.16.0 §11.11.9): each "delete my vault and start over"
+ * past its `deletes_at` and not cancelled is marked `executing` and its
+ * vault is asked to delete itself (the host's `delete`, as below); one
+ * that could not be queued yet (no instance running, the service paused)
+ * is tried again at the next run, and the daily retry below covers the rest.
+ *
  * Daily:
  *  - delete accounts canceled more than 7 days ago (Cognito user,
  *    subscription, member row + email marker; each vault is asked to delete
@@ -42,6 +49,8 @@ interface VaultRowLite {
   sealed_release?: string;
   lease?: { instance_id?: unknown; lease_expires_at?: unknown };
   deletion_requested_at?: number;
+  /** MEMBER-API 2.1.0: the member's start-over (§11.11.9), written by the member API. */
+  deletion?: { deletion_id?: unknown; state?: unknown; deletes_at?: unknown; queued_at?: unknown };
 }
 
 /**
@@ -155,7 +164,85 @@ async function retryVaultDeletions(nowS: number): Promise<number> {
   return n;
 }
 
-export const handler = async () => {
+/**
+ * Start-overs (MEMBER-API 2.1.0, VAULT-MESSAGING 0.16.0 §11.11.9): a
+ * `pending` deletion past `deletes_at` becomes `executing` (conditional on
+ * the same deletion still pending, so a cancel that won stays cancelled)
+ * and its vault is asked to delete itself exactly as for an account
+ * cancellation; `queued_at` records when the `delete` could be queued. An
+ * `executing` one never queued is tried again at each run. The vault's
+ * `deleted` report then brings the vault_deleted notice, which emails the
+ * member and removes the rows.
+ */
+export async function executeStartOvers(nowS: number): Promise<{ executed: number; retried: number }> {
+  let executed = 0;
+  let retried = 0;
+  let start: Record<string, unknown> | undefined;
+  do {
+    const r = await ddb.send(
+      new ScanCommand({
+        TableName: table.vaults(),
+        FilterExpression: 'attribute_exists(deletion) AND #s <> :d',
+        ExpressionAttributeNames: { '#s': 'state' },
+        ExpressionAttributeValues: { ':d': 'deleted' },
+        ExclusiveStartKey: start,
+      }),
+    );
+    for (const item of r.Items ?? []) {
+      const v = item as VaultRowLite;
+      const d = v.deletion;
+      if (!d || typeof d.deletion_id !== 'string' || typeof d.deletes_at !== 'number' || v.state === 'deleted') continue;
+      if (d.state === 'pending' && d.deletes_at <= nowS) {
+        try {
+          await ddb.send(
+            new UpdateCommand({
+              TableName: table.vaults(),
+              Key: { vault_id: v.vault_id },
+              UpdateExpression: 'SET deletion.#st = :ex',
+              ConditionExpression: 'deletion.deletion_id = :id AND deletion.#st = :p',
+              ExpressionAttributeNames: { '#st': 'state' },
+              ExpressionAttributeValues: { ':ex': 'executing', ':p': 'pending', ':id': d.deletion_id },
+            }),
+          );
+        } catch (e) {
+          if ((e as Error).name === 'ConditionalCheckFailedException') continue; // cancelled meanwhile
+          throw e;
+        }
+        const queued = await requestVaultDeletion(v, nowS);
+        if (queued) await markQueued(v.vault_id, d.deletion_id, nowS);
+        await audit('system', 'vault.deletion_executed', v.user_guid, { vault_id: v.vault_id, deletion_id: d.deletion_id, queued });
+        executed++;
+      } else if (d.state === 'executing' && typeof d.queued_at !== 'number') {
+        if (await requestVaultDeletion(v, nowS)) await markQueued(v.vault_id, d.deletion_id, nowS);
+        retried++;
+      }
+    }
+    start = r.LastEvaluatedKey;
+  } while (start);
+  return { executed, retried };
+}
+
+async function markQueued(vaultId: string, deletionId: string, nowS: number): Promise<void> {
+  await ddb.send(
+    new UpdateCommand({
+      TableName: table.vaults(),
+      Key: { vault_id: vaultId },
+      UpdateExpression: 'SET deletion.queued_at = :t',
+      ConditionExpression: 'deletion.deletion_id = :id',
+      ExpressionAttributeValues: { ':t': nowS, ':id': deletionId },
+    }),
+  ).catch((e: Error) => {
+    if (e.name !== 'ConditionalCheckFailedException') throw e;
+  });
+}
+
+export const handler = async (event?: { task?: string }) => {
+  // The five-minute schedule (MEMBER-API 2.1.0): start-overs only.
+  if (event?.task === 'start_over') {
+    const r = await executeStartOvers(Math.floor(Date.now() / 1000));
+    console.log(JSON.stringify({ startOvers: r }));
+    return r;
+  }
   const now = new Date().toISOString();
   let deleted = 0;
   for (const state of ['registered', 'member']) {

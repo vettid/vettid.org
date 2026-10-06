@@ -173,6 +173,83 @@ describe('cleanup job', () => {
   });
 });
 
+describe('cleanup job: start-overs (MEMBER-API 2.1.0, VAULT-MESSAGING 0.16.0 §11.11.9)', () => {
+  const R = 'c'.repeat(96);
+  const QP = 'https://sqs.us-east-1.amazonaws.com/123456789012/vettid-org-vault-control-';
+  const nowS = () => Math.floor(Date.now() / 1000);
+  const DID = '01JB2Z6V9K3M4N5P6Q7R8S9T0V';
+  const row = (deletion: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    vault_id: 'a'.repeat(32), user_guid: 'g1', state: 'locked', sealed_release: R, lease: { instance_id: 'i1', lease_expires_at: nowS() + 60 },
+    deletion: { deletion_id: DID, requested_at: nowS() - 86_500, ...deletion }, ...extra,
+  });
+  const run = () => cleanup.handler({ task: 'start_over' });
+  const vaultUpdates = () => ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'vaults');
+  const audits = () => ddb.commandCalls(PutCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'audit').map((i) => i.Item);
+
+  beforeEach(() => {
+    ddb.on(GetCommand, { TableName: 'instances' } as any).resolves({ Item: { instance_id: 'i1', release: R, queue_url: QP + 'i1', descriptor: 'd', attestation: 'a', heartbeat_at: nowS() } });
+    ddb.on(GetCommand, { TableName: 'releases' } as any).resolves({ Item: { release: R, release_number: 3, status: 'active' } });
+    ddb.on(UpdateCommand).resolves({});
+  });
+
+  test('a pending one past deletes_at: marked executing (conditional), the host delete queued, queued_at set, audited', async () => {
+    ddb.on(ScanCommand).resolves({ Items: [row({ state: 'pending', deletes_at: nowS() - 5 })] });
+    expect(await run()).toEqual({ executed: 1, retried: 0 });
+    const scan = ddb.commandCalls(ScanCommand)[0].args[0].input;
+    expect(scan.FilterExpression).toBe('attribute_exists(deletion) AND #s <> :d');
+    const [mark, requested, queued] = vaultUpdates();
+    expect(mark).toMatchObject({ UpdateExpression: 'SET deletion.#st = :ex', ConditionExpression: 'deletion.deletion_id = :id AND deletion.#st = :p', ExpressionAttributeValues: { ':ex': 'executing', ':p': 'pending', ':id': DID } });
+    expect(requested).toMatchObject({ UpdateExpression: 'SET deletion_requested_at = :t' });
+    expect(queued).toMatchObject({ UpdateExpression: 'SET deletion.queued_at = :t', ConditionExpression: 'deletion.deletion_id = :id' });
+    const [send] = sqs.commandCalls(SendMessageCommand);
+    expect(send.args[0].input.QueueUrl).toBe(QP + 'i1');
+    expect(JSON.parse(send.args[0].input.MessageBody!)).toMatchObject({ v: 1, op: 'delete', vault_id: 'a'.repeat(32), user_guid: 'g1' });
+    expect(audits()).toEqual([expect.objectContaining({ action: 'vault.deletion_executed' })]);
+  });
+
+  test('not yet due, cancelled meanwhile, or already queued: nothing is sent', async () => {
+    ddb.on(ScanCommand).resolves({ Items: [
+      row({ state: 'pending', deletes_at: nowS() + 60 }),
+      row({ state: 'executing', deletes_at: nowS() - 600, queued_at: nowS() - 300 }, { vault_id: 'b'.repeat(32) }),
+      row({ state: 'pending', deletes_at: nowS() - 5 }, { vault_id: 'c'.repeat(32) }),
+      { vault_id: 'd'.repeat(32), user_guid: 'g4', state: 'locked' }, // no deletion
+    ] });
+    ddb.on(UpdateCommand, { Key: { vault_id: 'c'.repeat(32) } } as any).rejects(ccf()); // the cancel won
+    expect(await run()).toEqual({ executed: 0, retried: 0 });
+    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
+    expect(audits()).toHaveLength(0);
+  });
+
+  test('no instance running: a start is requested and the next run sends it', async () => {
+    ddb.on(ScanCommand).resolves({ Items: [row({ state: 'pending', deletes_at: nowS() - 5 }, { lease: undefined })] });
+    ddb.on(QueryCommand).resolves({ Items: [] });
+    expect(await run()).toEqual({ executed: 1, retried: 0 });
+    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
+    expect(vaultUpdates().map((u) => u.UpdateExpression)).not.toContain('SET deletion.queued_at = :t');
+    expect(ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input).find((i) => i.TableName === 'releases')).toBeDefined();
+
+    ddb.resetHistory();
+    ddb.on(ScanCommand).resolves({ Items: [row({ state: 'executing', deletes_at: nowS() - 300 }, { deletion_requested_at: nowS() - 300 })] });
+    expect(await run()).toEqual({ executed: 0, retried: 1 });
+    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(1);
+    expect(vaultUpdates().map((u) => u.UpdateExpression)).toEqual(['SET deletion.queued_at = :t']);
+  });
+
+  test('vault service paused: marked executing, nothing queued, no start', async () => {
+    ssm.on(GetParameterCommand).resolves({ Parameter: { Value: PAUSED } });
+    ddb.on(ScanCommand).resolves({ Items: [row({ state: 'pending', deletes_at: nowS() - 5 })] });
+    expect(await run()).toEqual({ executed: 1, retried: 0 });
+    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
+    expect(ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input).find((i) => i.TableName === 'releases')).toBeUndefined();
+  });
+
+  test('the daily run does not execute start-overs', async () => {
+    ddb.on(ScanCommand).resolves({ Items: [] });
+    await cleanup.handler();
+    expect(ddb.commandCalls(ScanCommand).map((c) => c.args[0].input.FilterExpression)).not.toContain('attribute_exists(deletion) AND #s <> :d');
+  });
+});
+
 describe('members stream mailer', () => {
   const rec = (img: Record<string, unknown>) => ({ eventName: 'MODIFY', dynamodb: { NewImage: marshall(img) } });
   const ready = { user_guid: 'g1', email: 'm@x.org', first_name: 'Evil\nhttps://phish', state: 'registered', account_status: 'active', email_verified: true };
