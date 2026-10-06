@@ -133,7 +133,12 @@ sensitivity (VAULT-ITEMS §4):
 code (2 uses by default) or admin approval; verify the email (SES sandbox
 opt-in); sign in; accept the terms (ACCOUNT-ADMIN-PLAN §5.1).
 
-**Enroll** (VAULT-MESSAGING §11.3). The app fetches an enclave instance's
+**Enroll** (VAULT-MESSAGING §11.3, §11.12). The member gets a one-time,
+5-minute setup code from the account portal (a QR, or a short code typed
+with the account's email); the app redeems
+it with its own app key, which then signs all its member API requests:
+the app never signs in to the account site, and it learns the member's
+account state only through the vault (§11.13). The app fetches an enclave instance's
 transport key (ETK) and attestation through the Member API, checks the
 attestation against the signed release manifest, and sends a request
 sealed to the ETK, with Android key attestation (or App Attest) and the
@@ -293,6 +298,7 @@ All in `docs/` of this repository unless noted.
 | LEASH-IMPLEMENTATION.md | How the vault implements the LEASH paper: status, mapping, wire-format differences |
 | ACCOUNT-ADMIN-PLAN.md | Account and admin sites: lifecycle, registration codes, voting rights, private admin access |
 | MEMBER-API.md | Member API routes, including the vault alternate channel and recovery |
+| ENROLLMENT-CODES.md | Design note: portal-issued enrollment codes, app keys instead of an app sign-in, account status through the vault |
 | ADMIN-API.md | Admin API routes |
 | ANDROID-PLAN.md | Android app rewrite plan |
 | TECH-PREVIEW.md | Guide for preview testers: status, sign-up, what the operator can see |

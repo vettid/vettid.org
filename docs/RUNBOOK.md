@@ -758,9 +758,10 @@ else should change: a suspected bad release before the next manifest, an
 incident in the vault account, a host or queue problem. It touches no
 vault, key, manifest, release row or stored state, and is undone by
 resuming. While paused, enroll, unlock (and release-update approvals),
-the enclave route, recovery requests and recovery register answer `503
+the enclave route, recovery requests and recovery register, and (since
+MEMBER-API 2.0.0) setup-code issue, redeem and recovery claim answer `503
 vault_unavailable`; status, lock, request polling, the recovery status
-and recovery cancels keep working. Vaults already unlocked keep running
+and recovery cancels, and reading or revoking a setup code keep working. Vaults already unlocked keep running
 until they lock; nothing new is started. The account site's Vault tab
 says the service is paused for maintenance.
 

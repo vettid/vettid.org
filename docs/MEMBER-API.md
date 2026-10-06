@@ -1,8 +1,25 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 1.2.0
+version: 2.0.0
 changelog:
+  - 2.0.0 (2026-10-06, VAULT-MESSAGING 0.15.0; ENROLLMENT-CODES.md):
+    **breaking for apps.** Apps no longer sign in: the portal issues a
+    setup code (`/api/vault/enroll-code`: a 128-bit QR secret and an
+    8-symbol code typed with the member's email; 5 minutes; no global
+    limit), the app redeems it
+    (`/api/vault/enroll/redeem`) with its app key, and every app request
+    is signed by that key (`X-VettID-App`) instead of carrying cookies.
+    `enclave`, `enroll`, `unlock` and recovery `register` accept only
+    signed requests; `status`, `lock` and `requests/{id}` accept either.
+    New: recovery `claim`; the vault row's `app_key` (host-written),
+    pending and claim keys; the `account` snapshot pushed to the vault;
+    the redemption email. Unlock no longer needs the current terms. The
+    portal's `/auth/` App Link is no longer claimed by the app; `/vault/enroll/`
+    is. Portal sign-in, cookies and CSRF are unchanged. While the vault
+    service is paused (1.2.0), code issue, redeem and recovery `claim`
+    are refused like `enroll`; reading and revoking a code are served.
+    Numbered after 1.2.0 (the kill switch), which it keeps
   - 1.2.0 (2026-10-05): the operator's vault service pause ("Vault
     service pause"): while paused, `GET /api/vault/enclave`, `enroll`,
     `unlock`, recovery request and recovery `register` answer `503
@@ -149,27 +166,178 @@ Notes for the UI:
 - Paid types are listed but can't be started yet (`409` "Payments are not
   available yet").
 
-## Vault (alternate channel, requires `vid_id`)
+## Vault (alternate channel)
 
-The routes of VAULT-MESSAGING 0.10.0 §11 (enroll, unlock, lock): the app seals each
+The routes of VAULT-MESSAGING 0.15.0 §11 (enroll, unlock, lock): the app seals each
 request to an enclave instance's transport key (ETK), the API forwards the
 opaque bytes to that instance's SQS queue, and the app polls for the sealed
 answer. The API checks sizes and the envelope's clear header only; it never
-sees or stores PINs, keys, mailbox ids or device identifiers, and never logs
-envelopes.
+sees or stores PINs, keys (other than app public keys), mailbox ids or
+device identifiers, and never logs envelopes.
 
-**Access** (§11.1). The vault does not depend on subscription or voting
-rights.
-- `GET /api/vault/enclave`, `enroll` and `unlock` require an active account
-  in state `member` that has accepted the **current** terms. Anyone else gets
-  `403 terms_required`: `registered` users (they have not accepted the terms
-  yet), and members whose accepted version is no longer current
-  (`terms.needs_acceptance` in `Me`).
+### Two kinds of caller (2.0.0)
+
+- **The account portal** uses its session (`vid_id` cookie, CSRF header)
+  for `status`, `lock`, `requests/{id}`, the enrollment-code routes and the
+  recovery routes it always had.
+- **Apps never sign in** (owner decision of 2026-10-05). Each request is
+  signed by the app's **app key** (VAULT-MESSAGING §11.12.2): a per-app,
+  per-vault P-256 key in Android Keystore or the iOS Secure Enclave. The
+  API finds the vault from the header and the member from the vault row,
+  then applies the same account checks, rate limits and canary routing as
+  for a session. A request carrying `X-VettID-App` is authenticated by it
+  alone (cookies ignored, no CSRF header needed).
+
+| Route | Portal (session) | App (signed) |
+|---|---|---|
+| `POST /api/vault/enroll-code`, `GET`, `DELETE` | yes | — |
+| `POST /api/vault/enroll/redeem` | — | the key being registered (`vault=` empty) |
+| `GET /api/vault/enclave` | — | `app_key`, pending key, claim or recovering key |
+| `POST /api/vault/enroll` | — | pending key |
+| `POST /api/vault/unlock` | — | `app_key`, recovering key |
+| `POST /api/vault/lock` | yes | `app_key`, recovering key |
+| `GET /api/vault/status` | yes | `app_key`, recovering key |
+| `GET /api/vault/requests/{id}` | yes (the member's slots) | the key that made the request |
+| `POST /api/vault/recovery`, `GET`, `/cancel` | yes | — |
+| `POST /api/vault/recovery/cancel-link` | its token | — |
+| `POST /api/vault/recovery/claim` | — | the key being registered (`vault=` the QR's) |
+| `POST /api/vault/recovery/register` | — | a claim key |
+
+### App request signing (2.0.0)
+
+```
+X-VettID-App: v=1; vault=<vault_id or empty>; kid=<akid>; ts=<Unix s>; nonce=<b64url 16 B>; sig=<b64url DER>
+```
+
+`sig` is ECDSA P-256 / SHA-256 over `"vettid/member-api/app/1" \n METHOD
+\n path \n query \n vault_id \n akid \n ts \n nonce \n
+hex(SHA-256(body))` (VAULT-MESSAGING §11.12.2). `akid` is the first 16
+bytes of SHA-256 of the key's SPKI DER, 32 lowercase hex. The API checks,
+in order: the header's syntax, `ts` within 300 s, the nonce unused for
+this `akid` within 600 s (a conditional put of `appnonce#<akid>#<nonce>`
+in the rate-limit table, TTL 600 s), that the key is allowed for the
+route on that vault (table above), and the signature. Any failure is
+`401 unauthorized` with no detail. The header, not `Authorization`,
+because CloudFront forwards `Authorization` only through a cache policy
+and `/api/*` disables caching: the account site's `/api/*` origin request
+policy adds `X-VettID-App` to its allowlist.
+
+**App keys on the vault row** (`vaults` table):
+- `app_key {key, kid, seq}`: written **only by the enclave host**, from
+  the vault's lifecycle reports (`enrolled`, `unlocked`, `locked`,
+  `app_key`; VAULT-MESSAGING §11.5), whatever the lease, when `seq` is
+  higher than the stored one (`enrolled` always). The API never writes it.
+- `app_key_pending {key, kid, until}`: written by the redeem; valid 1
+  hour; cleared once `app_key` names the same `kid`.
+- On the recovery: `claim_keys [{key, kid}]` (at most 10) and
+  `recovering_key {key, kid}` (from the register whose slot came back
+  `recovery_registered`).
+- On each response slot: the signing `kid` (`app_kid`), so that only that
+  key can poll it.
+
+### Setup codes (2.0.0, VAULT-MESSAGING §11.12.1)
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| POST | `/api/vault/enroll-code` | — (session, CSRF) | `201 {secret, code, expires_at, api}`: `secret` the 22-character QR secret, `code` the 8-symbol typed code, each returned only here; `api` the origin for the QR |
+| GET | `/api/vault/enroll-code` | — (session) | `{enroll_code: {state: 'live'\|'used'\|'expired'\|'revoked', typed_blocked: boolean, issued_at, expires_at, used_at?} \| null}`: the member's latest issuance, never its secrets |
+| DELETE | `/api/vault/enroll-code` | — (session, CSRF) | `{revoked: boolean}` |
+| POST | `/api/vault/enroll/redeem` | `{secret, app_key}` or `{email, code, app_key}` (signed by `app_key`) | `200 {vault_id, user_guid, email_hint}` |
+
+- **Issue** needs an active account in state `member` with the current
+  terms (`403 terms_required`). It revokes the member's live issuance, if
+  any, and makes one issuance with two secrets that live and die
+  together: the QR secret (16 CSPRNG bytes, base64url, 22 characters)
+  and the typed code (8 symbols of `23456789ABCDEFGHJKMNPQRSTUVWXYZ` by
+  rejection sampling). It lives **5 minutes** and is redeemed once, by
+  either secret.
+- **Storage.** `k_code` is an HMAC key in SSM SecureString
+  (`/vettid-org/<stage>/member/enroll-code-key`). The issuance is a
+  request-table row keyed `enroll#<hex HMAC(k_code, "qr" || 0x00 ||
+  secret)>` with `user_guid`, `code_mac` = HMAC(k_code, "code" || 0x00 ||
+  user_guid || 0x00 || code), `issued_at`, `expires_at` (also the TTL),
+  `state` (`live`, `used`, `revoked`), `typed_attempts` and
+  `typed_blocked`. The member's pointer row `user#<guid>` names the live
+  issuance (`enroll_live`), which is how a new issuance or `DELETE`
+  revokes the old one and how a typed redeem finds it. Neither secret is
+  stored, logged or audited.
+- **Redeem.** Exactly one form, else `400 bad_request`. `app_key` is the
+  b64 SPKI DER of a P-256 key, and the request must be signed by it with
+  an empty `vault`.
+  - **By QR secret** `{secret, app_key}`: one lookup by the secret's
+    HMAC.
+  - **Typed** `{email, code, app_key}`: the email is trimmed and
+    lower-cased, the code stripped of spaces and hyphens and upper-cased
+    (a code of another form is `404 invalid_code` like any other
+    failure). The API finds the member by email, the live issuance
+    through the pointer, and compares `code_mac` in constant time. The
+    code is never compared with another member's issuance. Each typed
+    attempt increments `typed_attempts` (conditional on not blocked);
+    the 800th makes the issuance `typed_blocked` (below).
+  - Both forms require the issuance to be live, unexpired, the pointer's
+    current one, and its member an active `member` (typed: and not
+    `typed_blocked`). Then the API marks it `used` with a conditional
+    write (one winner, both secrets spent), finds or assigns the member's
+    vault (as enroll did), writes `app_key_pending`, emails the member ("A
+    phone used your setup code at <time> to set up your VettID vault. If
+    this wasn't you, contact support."), audits
+    `vault.enroll_code_redeemed` (with `via: qr | typed`), and answers
+    `vault_id`, `user_guid` and `email_hint` (first character of the
+    local part, `***`, `@`, the domain).
+- **One failure answer.** Every failure of either form, including a
+  wrong or unknown email, a member without a live issuance, a wrong code,
+  and an expired, used, revoked or `typed_blocked` issuance, is `404
+  invalid_code`. The typed path does the same work in every case (the
+  member lookup, a MAC compared against the stored `code_mac` or a dummy
+  one) and answers no sooner than 250 ms after receipt, so neither the
+  content nor the timing reveals whether an account exists.
+- **Limits** (`429 rate_limited` with `retry_after`). **None is global.**
+  - Issue: 5 per member per hour and 20 per day; 20 per source network
+    per hour.
+  - Redeem, both forms, per source network: 30 per 5 minutes per IPv4
+    address (carrier NAT), 10 per IPv6 /64.
+  - Typed, per (email, source network): 5 per 5 minutes, counted for
+    every email whether or not it belongs to an account
+    (`enroll-typed#<HMAC(k_code, email)>#<network>`).
+  - Typed, **per issuance: 800 attempts** from all sources together:
+    at most 800 / 31^8 ≈ 9.4 × 10^-10 chance per issuance that guessing
+    finds the code (at most 1.9 × 10^-8 per member and day, at 20
+    issuances). At the 800th the issuance becomes `typed_blocked`: its
+    typed redeems answer `404 invalid_code`, its QR secret still
+    redeems, the API emails the member once ("Someone tried many wrong
+    codes for your account. Scan the QR code instead, or get a new
+    code.") and raises the alarm `MemberEnrollTypedCeiling`; the portal
+    page shows it. Attempts against an email with no live issuance are
+    counted on a per-email, per-5-minute counter with the same
+    threshold, so the behaviour is the same for every email; it blocks
+    nothing real.
+  - The QR secret (128 bits) needs no limit beyond the per-network one.
+  - The effect of flooding is therefore bounded to one member's typed
+    entry for one issuance (at most 5 minutes); every other member, and
+    that member's QR and App Link, are unaffected.
+- **Audit:** `vault.enroll_code_issued`, `vault.enroll_code_revoked`,
+  `vault.enroll_code_redeemed` (member, `vault_id`, the key's `kid`,
+  `via`), `vault.enroll_code_typed_blocked` (member, issuance time),
+  `vault.enroll_code_failed` (aggregated per network and hour). Never a
+  secret, a code or an email that is not a member's.
+
+### Access (§11.1)
+
+The vault does not depend on subscription or voting rights.
+- **Enrollment** needs a member in state `member` with the **current**
+  terms when the portal issues the code (`403 terms_required` on
+  `POST /api/vault/enroll-code`), and an active `member` account at redeem
+  and at `enclave` and `enroll` with the pending key.
+- **Since 2.0.0** `enclave` (for an enrolled vault), `unlock` and recovery
+  `register` need an active account but no longer the current terms: the
+  vault keeps working when the terms change; the portal prompts as
+  before, and the app shows `needs_acceptance` from the account snapshot.
 - `lock`, `status` and `requests/{id}` stay available for an existing vault
   whatever the account state (`registered`, terms out of date), because
   locking only reduces exposure.
 - **Cancelling the account** blocks every vault route except `lock` at once
-  (`403 forbidden`); `lock` keeps working for as long as the session does.
+  (`403 forbidden`); `lock` keeps working, with the portal's session or
+  the app key, until the vault rows are deleted.
   After the 7-day grace period the daily cleanup job deletes the member's
   vault rows (every `vault_id` they had, and the pointer row). Deleting the
   stored objects under `vaults/<vault_id>/` (encrypted state and sealed
@@ -178,9 +346,9 @@ rights.
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| GET | `/api/vault/status` | — | `{vault: VaultStatus \| null, service: 'available' \| 'paused'}` (`service`: 1.2.0, "Vault service pause") |
+| GET | `/api/vault/status` | — | `{vault: VaultStatus \| null, service: 'available' \| 'paused'}` (`service`: 1.2.0, "Vault service pause"; app: the signing key's vault) |
 | GET | `/api/vault/enclave` | — (`?release=<pcr0>` only to abandon an unconfirmed move, §11.10.4) | `Enclave`: the instance to seal to (below) |
-| POST | `/api/vault/enroll` | `{request_id, instance_id, etk_kid, envelope, manifest_sha256}` | `202 {vault_id, request_id}` |
+| POST | `/api/vault/enroll` | `{vault_id, request_id, instance_id, etk_kid, envelope, manifest_sha256}` (signed by the pending key; 2.0.0 adds `vault_id`, the redeem's) | `202 {vault_id, request_id}`; the queue message carries the pending key as `app_key` |
 | POST | `/api/vault/unlock` | `{vault_id, request_id, instance_id, etk_kid, envelope, manifest_sha256}` | `202 {vault_id, request_id}` |
 | POST | `/api/vault/lock` | `{vault_id, request_id}` | `202 {vault_id, request_id}` |
 | GET | `/api/vault/requests/{request_id}` | — | `{status: "queued"\|"done"\|"expired", envelope?, code?}` (§11.5) |
@@ -239,7 +407,7 @@ reads `unlocked` until it expires.
 - `request_id`: a canonical ULID chosen by the app, the same as inside the
   envelope. Each one is accepted once (`409 duplicate_request` after).
 - `vault_id`: 32 lowercase hex (128 bits), assigned by the API at the first
-  enrollment and returned by it. A member has one current vault; a second
+  enrollment and returned by it (since 2.0.0 by the redeem). A member has one current vault; a second
   enrollment reuses it (the enclave decides whether a provisional vault may be
   replaced and answers `vault_exists` otherwise, §11.3). A new `vault_id` is
   assigned only after the vault is deleted.
@@ -368,6 +536,21 @@ have: the only other way back is a manifest serial with the release
   `GET /api/vault/enclave` (with or without `?release=`), `enroll`,
   `unlock` (and with it release-update approvals, which travel in an
   unlock), `POST /api/vault/recovery`, `POST /api/vault/recovery/register`.
+- **Paused: the 2.0.0 routes.** Refused in the same way:
+  `POST /api/vault/enroll-code` (issue, like `enroll`: a code that could
+  not be used before it expires is not issued), `POST
+  /api/vault/enroll/redeem` and `POST /api/vault/recovery/claim`. For the
+  redeem and the claim the refusal comes right after the app signature
+  check, before the body is read and before any lookup: no issuance is
+  spent, no typed attempt is counted, no `app_key_pending` or claim key
+  is written and no email is sent, and it reveals nothing about an
+  account. Served: `GET` and `DELETE /api/vault/enroll-code` (revoking
+  only reduces exposure), and the app-signed `status`, `lock` and
+  `requests/{id}` like the portal's. A redeem that succeeded just before
+  the pause leaves `app_key_pending` (1 hour); `enclave` and `enroll`
+  with it are refused while paused, and after the hour the member gets a
+  new code. The `account` snapshot op to a live leaseholder (below) is
+  still sent: it goes only to a leaseholder and never starts anything.
 - **Paused: still served.** `status` (it adds `service: "paused"`),
   `requests/{id}` (answers to requests queued before the pause), `lock`
   (locking only reduces exposure; it goes to the leaseholder and never
@@ -398,11 +581,13 @@ have: the only other way back is a manifest serial with the release
   topic, and while paused a CloudWatch alarm reports it (production: on
   pausing, again after 24 h, and when it ends).
 - **Clients.** The account site's Vault tab shows "Vault service is
-  paused for maintenance" when `status` says so. Apps treat the 503 as
+  paused for maintenance" when `status` says so (and, since 2.0.0, does
+  not offer **Get a setup code** while paused). Apps treat the 503 as
   they treat `vault_unavailable` today (try again later) and may show
   `service: "paused"` from `status`.
 
-**Rate limits** (§11.8; `429 rate_limited` with `retry_after`): enroll 3 per
+**Rate limits** (§11.8; `429 rate_limited` with `retry_after`): the code
+limits above; enroll 3 per
 member per day; unlock 10 per member per 15 minutes, and per source network
 10 per IPv6 /64 or 60 per IPv4 address per 15 minutes (carrier NAT puts many
 members behind one IPv4 address); polling `requests/{id}` 2 per second per
@@ -411,9 +596,30 @@ member. Not in the spec, chosen here: `enclave` 30 per member per minute,
 
 **Audit.** Enroll, unlock and lock requests are written to the audit table
 (`vault.enroll_request`, `vault.unlock_request`, `vault.lock_request`): the
-member, `vault_id`, `request_id`, instance and release. Never PINs or
+member, `vault_id`, `request_id`, instance and release, and (2.0.0)
+`via: session | app` with the app key's `kid`. Never PINs or
 envelopes. Account deletion after cancellation records the deleted
 `vault_ids`.
+
+### Account snapshot to the vault (2.0.0, VAULT-MESSAGING §11.13)
+
+The app shows membership, terms and subscription state, read-only, and
+gets it only from its vault. The API builds the snapshot from the member
+row (`v`, `as_of`, `email_hint`, `state`, `account_status`, `deletes_at`,
+`terms.needs_acceptance`, `subscription {type_name, status, paid,
+expires_at} | null`, `voting_rights`; at most 2 KiB) and sends it:
+
+- in every `unlock` queue message (`account`);
+- as the queue op `account` to the vault's live leaseholder after a
+  change: `POST /api/account/terms/accept`, `/subscription`,
+  `/subscription/cancel`, `/cancel` (and the admin site's equivalents).
+  With no live lease nothing is sent. A slot is written as for `lock`;
+  the host answers it `done`. A newly published terms version is not
+  fanned out (each vault learns it at its next unlock).
+
+It is display only and never a security signal; the API's own checks
+(Access, above) are what enforce membership and terms. Audit: none (it is
+the member's own data going to the member's own vault).
 
 ### Vault release notices (VAULT-RELEASES §3.5, §10.2; W8)
 
@@ -467,7 +673,8 @@ the expiry itself.
 | GET | `/api/vault/recovery` | — | `{recovery: Recovery \| null}` |
 | POST | `/api/vault/recovery/cancel` | `{recovery_id}` | `200 {cancelled: boolean}` |
 | POST | `/api/vault/recovery/cancel-link` | `{token}` (no session) | `200 {cancelled: boolean}` |
-| POST | `/api/vault/recovery/register` | `{vault_id, request_id, instance_id, etk_kid, envelope}` | `202 {vault_id, request_id}`; poll `GET /api/vault/requests/{id}` |
+| POST | `/api/vault/recovery/claim` | `{vault_id, recovery_id, app_key}` (app, signed by `app_key`; 2.0.0) | `200 {user_guid, email_hint}` |
+| POST | `/api/vault/recovery/register` | `{vault_id, request_id, instance_id, etk_kid, envelope}` (app, signed by a claim key; 2.0.0) | `202 {vault_id, request_id}`; poll `GET /api/vault/requests/{id}` |
 
 ```ts
 interface Recovery {
@@ -481,9 +688,22 @@ interface Recovery {
 }
 ```
 
-- **Access.** Request, status, cancel and register need the same account
-  state as unlock (`member`, current terms). The cancel link needs no
-  session, only its token.
+- **Access.** Request, status and cancel are the portal's and need a
+  session of an active `member` with the current terms. Claim and register
+  (2.0.0) are the new app's: signed, no session, an active account. The
+  cancel link needs no session, only its token.
+- **Claim** (2.0.0). Only while the recovery is `available` (`409
+  recovery_not_available`; `404 not_found` when `vault_id` and
+  `recovery_id` do not name the vault's current recovery). Adds the key
+  to `claim_keys` (at most 10; the oldest goes), audits
+  `vault.recovery_claim`, answers `user_guid` and `email_hint`. Limits: 10
+  per vault per day, 10 per source network per 15 minutes.
+- **Recovering key** (2.0.0). When a register slot comes back
+  `recovery_registered`, the API records that register's key (the slot's
+  `app_kid`) as `recovering_key`, with the `registered` state. It may
+  `unlock`, `lock` and read `status` while the recovery is active. When
+  the host writes the vault's `app_key` with the same `kid` (the recovery
+  completed), the recovery's keys are cleared.
 - **`browser_key`**: canonical base64 of an uncompressed P-256 point (65
   bytes, first byte `0x04`), made by the portal with WebCrypto
   (non-extractable private key kept in IndexedDB).
@@ -533,7 +753,8 @@ interface Recovery {
   recovery that a newer one has replaced is `404`.
 - **Register.** Like unlock (envelope exactly 13,444 bytes, routing,
   `request_id` once), and only while the recovery is `available`
-  (`409 recovery_not_available`). The enclave re-checks the delay, the
+  (`409 recovery_not_available`), signed by one of its claim keys, which
+  goes into the queue message as `app_key` (2.0.0). The enclave re-checks the delay, the
   expiry, the code and the device attestation.
 - **`GET /api/vault/status`** includes `recovery: {state,
   available_at} | null` in `VaultStatus` (above): the active recovery
@@ -562,7 +783,26 @@ never asks for the vault PIN or the credential password):
   app link from `/config.json` (`android_app_url`, CDK context
   `androidAppUrl` / `<stage>AndroidAppUrl`; until it is set the page says
   the app is not available yet; staging says to use the VettID Staging
-  build), and the setup steps as the app shows them. A vault: state,
+  build), the setup steps as the app shows them, and (2.0.0) **Set up
+  your vault**, which leads to the setup page.
+- **`/account/vault/setup/`** (gated; 2.0.0): issues a code
+  (`POST /api/vault/enroll-code`) when the member presses **Get a setup
+  code** (never on page load), and shows it as the §11.12.1 QR (the same
+  vendored generator as recovery) and as `XXXX-XXXX` text, with a
+  5-minute countdown, **Cancel code** (`DELETE`) and, on a phone, **Open
+  in the VettID app** (`https://<account host>/vault/enroll/#s=<QR
+  secret>`, an App Link the app claims; never the typed code). The text
+  says the typed code must be entered with the account's email. The code is removed from the page on
+  `pagehide` and when it is used or expires (the page polls `GET
+  /api/vault/enroll-code` every 5 s while live). A reload does not show
+  it again: the member gets a new one. Wording: "Only enter this in your
+  own VettID app. VettID will never ask you for it." With a vault
+  already enrolled the page says so first (a confirmed vault is not
+  replaced; use transfer or recovery to move phones).
+- **`/vault/enroll/`** (outside the gate; 2.0.0): the App Link target.
+  Without the app it removes the fragment from the address bar, offers
+  the app's download link, and draws the QR from the secret in the
+  fragment (for scanning with another phone). A vault: state,
   release number and status, `release.notice` as a notice (approval
   happens in the app at an unlock), an open recovery, the last
   `credential_clone` alarm, and **Lock vault** (`POST /api/vault/lock`
@@ -576,7 +816,7 @@ never asks for the vault PIN or the credential password):
   answer and is tried when the code is opened), the 24 h countdown and
   cancel, and, while `available`, the code: opened in the page (ECDH
   `deriveBits`, HKDF-SHA-256, AES-256-GCM, all WebCrypto), drawn as the
-  §11.11.2 QR payload by the vendored qrcode-generator 2.0.4 (MIT,
+  §11.11.2 QR payload (with `api`, 2.0.0) by the vendored qrcode-generator 2.0.4 (MIT,
   `js/vendor/`, checksum pinned in `test/site-vault.test.ts`) and as
   text in groups of four. The code is decrypted only when the member
   presses **Show the code** and is removed from the page on **Hide**, on
