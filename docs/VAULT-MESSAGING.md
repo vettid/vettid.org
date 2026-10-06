@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.10.8
+version: 0.12.0
 date: 2026-10-05
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -17,6 +17,11 @@ related:
   - VAULT-RELEASES.md (0.1.0, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.12.0: LEASH delegation and status statement in the LEASH paper's §3.5
+    format (`iss`, `sub`, `status_issuer`, `scope` object, `limits`,
+    `nonce`; RFC 8785; `leash/v1/delegation`, `leash/v1/status`); the
+    paper's verifier steps and revocation bound; `leash.json` vectors
+    (owner decision of 2026-10-05; §10.11, §15 item 21, §16)
   - 0.10.8: editorial: §6.7.1 failures table — the old app erases its local
     state on `device.unlinked`; a refused relay key alone only offers an erase
     (owner decisions of 2026-10-05; vettid-android #57, #58)
@@ -1091,7 +1096,9 @@ pinned by the §16 vectors.
 Notation and labels:
 
 - All labels are ASCII strings with no terminator, and embed the suite
-  number (`vettid/vms/2/...`).
+  number (`vettid/vms/2/...`), except LEASH's `leash/v1/delegation` and
+  `leash/v1/status` (§10.11, 0.12.0), which are the LEASH paper's and
+  versioned by its format.
 - `||` is concatenation.
 - `HKDF-SHA-256(ikm, salt, info, L)` is RFC 5869 extract-then-expand.
 - HPKE `SetupBaseS`, `SetupBaseR`, `Seal`, `Open` and `Export` are as defined
@@ -3660,16 +3667,17 @@ LEASH's terms map as follows:
 | Enrollment: a one-time token; the owner reviews and approves | Agent pairing (§6.7): a 10-minute QR; the agent's self-asserted name and the SAS are shown; an app approves |
 | Connector key pair; an encrypted channel with forward secrecy | The agent's `ik` and `kem`, and the §6 session (epochs, rekeys) |
 | Connection Contract | The agent's **grants** (below), each a delegation signed by the member's credential key; issued with the pairing or later by an app, with the member present (the unlock window) |
-| Approval mode | Per grant: `ask` (the default) or `auto`. LEASH's "automatic for all" is not offered |
+| Approval mode | Per grant: `ask` (the default) or `auto`, LEASH's two modes; LEASH has no unrestricted mode |
 | Rate limits; suspension and owner notification | Per grant: `per_hour` and `per_day`; past a limit the grant refers requests to an app until its window ends, and the owner is notified. Per agent: refusal cooldowns, a referral cap and suspension after repeated refusals (below) |
 | Action permissions | The scope `items.read` (share rules with the agent as subject, §10.12) and the delegable owner types |
 | Expiry | Per grant (`expires_at`), and the agent's access session (§6.8) |
-| `leash/request_secret` (pattern 1) | `agent.request{op: "item.get"}` |
-| `leash/execute_action` (pattern 2) | `agent.request{op: "item.use"}` |
-| `leash/check_status` | `approval.waiting`, then the held request's response (§6.8) |
-| `leash/list_available` | `agent.request{op: "catalog"}` |
-| `leash/connection_info` | `leash.grant.list` from the agent (its own grants) and `vault.status` |
-| Instant revocation | `leash.grant.revoke`, `device.session.end`, `device.unlink` (§7.4) |
+| `leash.request_secret` (pattern 1) | `agent.request{op: "item.get"}` |
+| `leash.execute_action` (pattern 2) | `agent.request{op: "item.use"}` |
+| `leash.check_status` | `approval.waiting`, then the held request's response (§6.8) |
+| `leash.list_available` | `agent.request{op: "catalog"}` |
+| `leash.connection_info` | `leash.grant.list` from the agent (its own grants) and `vault.status` |
+| Delegation and status statement (§3.5) | The grant's `delegation` and `sig`, and the vault's `status` and `status_sig`, in LEASH §3.5's format (below, 0.12.0) |
+| Bounded revocation (§3.4) | `leash.grant.revoke`, `device.session.end`, `device.unlink` (§7.4): at once in the vault; elsewhere within `status_ttl` + 60 s (below) |
 | Audit with integrity protection | The hash-chained audit log (§10.9), `leash.*` kinds |
 | Implementation tier | Tier 1: a hardware-isolated vault (AWS Nitro Enclaves) |
 
@@ -3682,8 +3690,8 @@ its `ik` and relay key.
 ```json
 grant: { "grant_id": "<ULID>", "agent_id": "<device id>", "version": 1, "scope": "message.send",
          "approval": "ask", "connections": ["<id>"],
-         "per_hour": 60, "per_day": 1000, "expires_at": "<ts>", "issued_at": "<ts>",
-         "delegation": "<b64>", "delegation_sig": "<b64>", "key": "<b64>" }
+         "per_hour": 60, "per_day": 1000, "expires_at": "<ts>", "issued_at": "<ts>", "status_ttl": 900,
+         "delegation": "<b64>", "sig": "<b64>" }
 ```
 
 - `scope` is one of:
@@ -3836,53 +3844,75 @@ agents (§3.5).
   HTTP requests made by the vault with an injected secret need egress
   beyond the relay and are not offered (§15).
 
-**Every grant is a signed delegation.** The member's **credential key**
-(§3.5.1) signs each grant when it is issued, replaced or given with a
-pairing: a statement, verifiable without the vault, that the member
-delegated the scope to the agent's key. The agent receives it with its
-grants and can present it.
+**Every grant is a signed delegation** (LEASH §3.5). The member's
+**credential key** (§3.5.1) signs each grant when it is issued, replaced
+or given with a pairing: a statement, verifiable without the vault, that
+the member delegated the scope to the agent's key. The agent receives it
+with its grants and can present it. Since 0.12.0 the delegation, its
+signature, the status statement and the verifier's checks are the LEASH
+paper's §3.5 format, version 1, byte for byte (owner decision of
+2026-10-05: the paper is the neutral reference); what is VettID's own is
+named as a binding below.
 
 ```
-delegation     = standard base64 of the exact bytes
-                 {"v":1,"vault_ik":"<b64>","agent_ik":"<b64>","grant_id":"<ULID>","version":1,
-                  "scope":"<scope>","approval":"ask","connections":["<id>"],
-                  "tags":["<tag>"],"match":"any","access":"read","uses":10,"per_hour":60,"per_day":1000,
-                  "status_ttl":<s>,"iat":<unix s>,"exp":<unix s>}
-delegation_sig = standard base64 of Ed25519(credential key, "vettid/vms/2/leash" || those bytes)
-key            = the credential key's public key
+delegation = standard base64 of the exact bytes (RFC 8785, JCS; shown here in that member order)
+             {"approval":"auto","exp":<unix s>,"grant_id":"<ULID>","iat":<unix s>,
+              "iss":"<b64 credential key>","limits":{"per_day":1000,"per_hour":60},
+              "nonce":"<b64, 16 random bytes>",
+              "scope":{"access":"read","connections":["<id>"],"match":"any","op":"<scope>",
+                       "tags":["<tag>"],"uses":10},
+              "status_issuer":"<b64 vault ik>","status_ttl":<s>,"sub":"<b64 agent ik>",
+              "v":1,"version":1}
+sig        = standard base64 of Ed25519(credential key, "leash/v1/delegation" || those bytes)
 ```
 
-- **Format.** The LEASH paper defines the Connection Contract (§3.2:
-  scope, approval mode, rate limits, action permissions, expiry) but no
-  wire format for it. This statement carries the contract's terms and
-  the claims of vettid.dev's LEASH token (issuer, the agent's key, grant
-  id and version, scope) as canonical JSON: members in the order shown,
-  no whitespace, `connections` only when the grant has them; `tags`,
-  `match`, `access`, `per_hour` and `per_day` exactly for scope
-  `items.read` (`uses` when its rule has it); ids and keys as in the
-  grant, `status_ttl` the lifetime of its status statements in seconds
-  (below), `iat` the issue time.
+- **Members** (LEASH §3.5, "Delegation"):
+
+  | Member | Here |
+  |---|---|
+  | `v` | `1` |
+  | `iss` | The member's credential key (§3.5.1), its 32-byte Ed25519 public key in standard base64. (Before 0.12.0 it travelled beside the delegation as `key`.) |
+  | `sub` | The agent's `ik` (its connector key, §6.7), likewise (was `agent_ik`) |
+  | `grant_id`, `version` | The grant's (§10.1) |
+  | `scope` | An object: `op`, the grant's scope (an owner type or `items.read`, below); `connections` when the grant has them; for `items.read`, the rule's `tags`, `match` and `access`, and `uses` when the rule has it. These were top-level members before 0.12.0 (`scope` was the bare string). |
+  | `approval` | `ask` or `auto` (an `items.read` grant: its rule's `mode`) |
+  | `limits` | `{per_day, per_hour}`, exactly when the grant has rate limits: every `auto` and `items.read` grant (before 0.12.0 only `items.read` carried them) |
+  | `status_issuer` | The member's vault: its `ik` when the grant was signed (was `vault_ik`) |
+  | `status_ttl` | 60–3,600 s, default 900 (below) |
+  | `nonce` | 16 bytes from the vault's random generator, in standard base64 (24 characters), new for each signature, a replacement's included (new in 0.12.0) |
+  | `iat` | The signing time, in Unix seconds |
+  | `exp` | The grant's `expires_at` in whole seconds; absent when the grant has none (LEASH §3.2: expiry is optional) |
+
+  No other member appears, at the top level or in `scope` or `limits`.
+- **Encoding.** The vault produces the bytes in the JSON Canonicalization
+  Scheme (RFC 8785): members sorted by name, no whitespace, integers in
+  plain decimal. Every value here is an ASCII string without characters
+  that need escaping, an array of such strings, or an integer below
+  2^53, so JCS is plain sorted compact JSON. The bytes are carried
+  base64-encoded and signed as they are; a verifier checks the signature
+  over the bytes as received and never re-serializes them (LEASH §3.5).
+  The vault re-reads only delegations it produced and requires them to
+  be in JCS. Base64 is standard with padding (RFC 4648 §4) throughout,
+  as everywhere in this document.
+- **Signature.** `sig` is Ed25519 (RFC 8032) by `iss` over the ASCII
+  context string `leash/v1/delegation` immediately followed by the
+  delegation bytes, with no separator or length (`||` as in §4.1). It replaces `vettid/vms/2/leash`.
 - **Tags in the delegation** (owner decision of 2026-10-03). An
-  `items.read` delegation carries its rule's tag names, so a relying
-  party the agent shows it to sees them: the one place tag names leave
-  the vault (§10.8), as VAULT-ITEMS §6 asks ("the signed delegation
-  carries the rule"). The agent is the member's own and shows its
-  delegation only to parties it deals with.
-- **Lifetime.** `exp` is the grant's `expires_at` in whole seconds, and
-  is absent when the grant has none: LEASH's contract expiry is optional
-  (§3.2). (The 24 h cap of the first 0.6.0 draft came from vettid.dev's
-  token format, not from LEASH, and is gone.)
-- **Revocation** follows LEASH §3.4: the vault invalidates a revoked
-  grant at once, and the connector stops serving within one heartbeat.
-  Here the vault is the enforcement point and never relies on a
-  delegation; the agent is told at once in `leash.grant.updated`, and its
-  connector MUST stop presenting a delegation that is no longer among
-  its current grants. A relying party outside the vault MUST check the
-  canonical form, the signature under the member's key (pinned, for a
-  connection, through §10.4), `exp` if present, and that the presenter
-  proves possession of `agent_ik`, and SHOULD require a current status
-  statement (below), which bounds how long a revoked delegation can be
-  shown.
+  `items.read` delegation carries its rule's tag names in `scope.tags`,
+  so a relying party the agent shows it to sees them: the one place tag
+  names leave the vault (§10.8), as VAULT-ITEMS §6 asks ("the signed
+  delegation carries the rule"). The agent is the member's own and shows
+  its delegation only to parties it deals with.
+- **Lifetime.** `exp` is absent when the grant has no expiry. (The 24 h
+  cap of the first 0.6.0 draft came from vettid.dev's token format, not
+  from LEASH, and is gone.)
+- **Revocation** follows LEASH §3.4 ("Bounded revocation"): the vault
+  stops honoring a revoked grant at once and issues no further status
+  statements for it. Here the vault is the enforcement point and never
+  relies on a delegation; the agent is told at once in
+  `leash.grant.updated`, and its connector MUST stop presenting a
+  delegation that is no longer among its current grants. Other
+  verifiers stop accepting it within the bound below.
 - **The member present.** Signing uses the credential key, so issuing
   needs the member: only an app issues or replaces a grant, and only
   within the credential's unlock window (`credential.unlock`, §3.5.3;
@@ -3890,41 +3920,44 @@ key            = the credential key's public key
   pairing approval with `grants` likewise needs the window: the grants
   are signed at the approval for the agent's `ik` from its `hs.init`,
   and take effect when the pairing completes. Revoking and resuming
-  sign nothing and need no window.
-- A replacement is signed again under its new `version`. A
-  `credential.rotate` does not re-sign grants: their delegations name
-  the old key, which verifiers follow through the rotation statements
-  (§3.5.5).
+  sign nothing and need no window. This is LEASH §3.5's "issuing a
+  delegation needs the owner, and a vault operator cannot issue one":
+  the credential key is usable only inside the member's unlock window
+  (§3.5).
+- A replacement is signed again under its new `version` (and a new
+  `nonce`). A `credential.rotate` does not re-sign grants: their `iss`
+  is the old key, which verifiers that trust the new one follow through
+  the rotation statements (§3.5.5).
 
 **Status statements ("stapling").** A delegation names its **status
-issuer**: the member's vault, by `vault_ik`. The vault signs short-lived
-statements that the delegation is still in force, and the agent staples
-the current one to the delegation it presents. They need neither the
-credential nor the member (they grant nothing new), so the vault issues
-them on its own:
+issuer**: the member's vault, by its `ik` in `status_issuer`. The vault
+signs short-lived statements that the delegation is still in force, and
+the agent staples the current one to the delegation it presents. They
+need neither the credential nor the member (they grant nothing new), so
+the vault issues them on its own:
 
 ```
-status     = standard base64 of the exact bytes
-             {"v":1,"delegation":"<b64 SHA-256(delegation bytes)>","grant_id":"<ULID>",
-              "status":"valid","issued_at":<unix s>,"not_after":<unix s>}
-status_sig = standard base64 of Ed25519(vault ik, "vettid/vms/2/leash-status" || those bytes)
-rotations  = the vault's identity.rotate statements (§3.4) from the delegation's vault_ik
-             to the ik that signed, in order; absent when it has not rotated
+status     = standard base64 of the exact bytes (RFC 8785, JCS)
+             {"delegation":"<b64 SHA-256(delegation bytes)>","grant_id":"<ULID>",
+              "issued_at":<unix s>,"not_after":<unix s>,"status":"valid","v":1}
+status_sig = standard base64 of Ed25519(vault ik, "leash/v1/status" || those bytes)
+rotations  = the vault's identity.rotate statements (§3.4) from the delegation's status_issuer
+             to the ik that signed, in order; absent when it has not rotated (VettID binding)
 ```
 
+- **Members and signature** are LEASH §3.5's ("Status statement"); only
+  the encoding (JCS, as above) and the context string `leash/v1/status`
+  (was `vettid/vms/2/leash-status`) changed in 0.12.0.
 - **Lifetime.** `not_after` = `issued_at` + the delegation's
   `status_ttl`, and never past the delegation's `exp`. `status_ttl` is
-  set per grant (`leash.grant.issue{status_ttl}`): 60–3,600 s, default
-  900. It is the revocation latency for relying parties outside the
-  vault: 15 minutes by default keeps a revoked delegation usable for at
-  most a quarter of an hour while an agent refreshes about four times an
-  hour per grant; the member may shorten it to a minute for sensitive
-  scopes; an hour is the cap, beyond which a revocation would wait
-  longer than LEASH's "within one heartbeat" (§3.4) can reasonably mean.
+  set per grant (`leash.grant.issue{status_ttl}`,
+  `share.rule.set{status_ttl}`): 60–3,600 s, default 900. The member may
+  shorten it to a minute for sensitive scopes, at the cost of more
+  frequent refreshes.
 - **Only for delegations in force.** The vault issues a statement only
   for an unexpired, unrevoked grant of an agent that is not suspended; a
-  revoked grant gets no new statement, so its last one lapses within
-  `status_ttl`. A locked vault (§12.1) issues none: the mechanism fails
+  revoked grant gets no new statement, so its last one lapses at its
+  `not_after`. A locked vault (§12.1) issues none: the mechanism fails
   closed, and an agent whose member's vault stays locked loses its
   statements within `status_ttl`. Refreshing uses the agent's E2E session
   and needs its access session (§6.8).
@@ -3934,40 +3967,74 @@ rotations  = the vault's identity.rotate statements (§3.4) from the delegation'
   (`not_found` for a grant that is not the agent's or not in force,
   `forbidden` while the agent is suspended). The reference client
   refreshes a statement when less than a quarter of its lifetime (at
-  least a minute) remains.
-- **Rotation of the vault's `ik`.** The delegation is not re-signed when
-  the vault's `ik` rotates (that would need the member's credential key
-  for every grant): statements are signed by the current `ik` and carry
-  the rotation chain from the delegation's `vault_ik`, which each link
-  signs with both keys (§3.4), at most 32 links. A verifier therefore
-  needs nothing but what the agent presents.
-- **Verification by a relying party that is not connected to the vault**
-  (normative). Given the delegation, `delegation_sig`, the member's
-  credential key it trusts, the statement, `status_sig`, `rotations` and
-  its clock, it MUST check, in order:
-  1. the delegation's canonical form and `delegation_sig` under the
-     member's key, and that `now` < `exp` if `exp` is present;
-  2. the statement's canonical form;
-  3. that `rotations` is a valid chain from the delegation's `vault_ik`
-     (each link as in §3.4); the statement's signer is the chain's last
-     key (the delegation's `vault_ik` if empty);
-  4. `status_sig` under that key;
-  5. that `delegation` equals SHA-256 of the delegation's bytes and
-     `grant_id` the delegation's;
-  6. `issued_at` − 60 s ≤ `now` ≤ `not_after` + 60 s (clock skew);
-  7. that the presenter proves possession of `agent_ik` (for example by
-     signing the relying party's challenge, as LEASH's connector does).
+  least a minute) remains, as LEASH §3.5 suggests.
+- **Rotation of the vault's `ik`** (VettID binding; LEASH §3.5 does not
+  define key rotation). The delegation is not re-signed when the vault's
+  `ik` rotates (that would need the member's credential key for every
+  grant): statements are signed by the current `ik` and carry the
+  rotation chain from the delegation's `status_issuer`, which each link
+  signs with both keys (§3.4), at most 32 links. A VettID verifier
+  therefore needs nothing but what the agent presents. A verifier that
+  implements only LEASH §3.5 checks `status_sig` under `status_issuer`
+  itself, so it rejects statements after a rotation until the grant is
+  re-signed: it fails closed, never open (§15 item 21).
 
-  The reference verifier is `leashwire.VerifyPresented` in vettid-vault
-  (steps 1–6). **Residual:** a revocation takes effect for relying
-  parties within `status_ttl` (plus skew). How a relying party comes to
-  trust the member's credential key in the first place (member
-  authentication, §10.4, for a VettID connection; otherwise LEASH's
-  enrollment and trust model) is outside this document.
+**Revocation latency bound** (LEASH §3.5; normative). The vault stops
+honoring a revoked grant immediately. For any other verifier, the
+longest a revoked grant can still be accepted is `status_ttl` plus the
+clock skew of 60 seconds: **15 minutes plus 60 seconds by default, at
+most 1 hour plus 60 seconds, at least 1 minute plus 60 seconds.** A
+verifier that does not require a status statement (LEASH: SHOULD reject
+a delegation without one) can be shown a revoked delegation until its
+`exp`, or indefinitely if it has none; VettID's reference verifier
+always requires one.
+
+**Verification by a relying party that is not connected to the vault**
+(normative; LEASH §3.5, "Verification"). A verifier is given the
+delegation, `sig`, the status statement, `status_sig`, `rotations` (a
+VettID binding, possibly absent) and a proof of possession. Both
+objects MUST parse as JSON objects with `v` = 1, no duplicate member
+names, and the members above with their types. It MUST then check, in
+order:
+
+1. `sig` over the delegation bytes under `iss` (context
+   `leash/v1/delegation`), and that `iss` is a key it trusts for this
+   member. Here that is the member's credential key as the verifier
+   pinned it (member authentication, §10.4, for a VettID connection), or
+   an earlier credential key linked to it by rotation statements
+   (§3.5.5);
+2. that `now` is before `exp`, if `exp` is present;
+3. `status_sig` (context `leash/v1/status`) under the delegation's
+   `status_issuer`, or, when `rotations` is present, under the last key
+   of the chain that starts at `status_issuer` (each link as in §3.4, at
+   most 32);
+4. that the statement's `delegation` equals SHA-256 of the delegation
+   bytes and that its `grant_id` matches;
+5. that `issued_at` − 60 s ≤ `now` ≤ `not_after` + 60 s;
+6. that the presenter proves possession of the private key for `sub`
+   (the agent's `ik`), for example by signing a challenge from the
+   verifier or, over HTTP, with a DPoP proof (RFC 9449);
+7. that the requested operation is within `scope`: `scope.op`, and only
+   for the connections in `scope.connections` when present. For
+   `items.read`, `scope.tags` say which of the member's tags the rule
+   names; which items carry them is known only to the vault, which
+   enforces inclusion.
+
+It MUST reject the request if any check fails. VettID's reference
+verifier, `leashwire.VerifyPresented` in vettid-vault (steps 1–5;
+steps 6 and 7 are the caller's), is stricter, never looser: it rejects
+members other than those above, a `status_ttl` outside 60–3,600, and a
+statement whose `not_after` − `issued_at` exceeds the delegation's
+`status_ttl`, and it rejects a delegation presented without a status
+statement. How a relying party comes to trust the member's credential
+key in the first place (member authentication, §10.4, for a VettID
+connection; otherwise LEASH's trust model, an open question there) is
+outside this document. The §16 vectors (`leash.json`) are two
+delegations and their statements.
 
 | Type | Request body | Response / event body |
 |---|---|---|
-| `leash.grant.issue` (app, within the unlock window) | `{agent_id, grant_id?, version?, scope, approval?, connections?, per_hour?, per_day?, expires_at?, status_ttl?}` (not `items.read`); without `grant_id` a new grant (`version` absent); with it, a replacement of that grant (`version` required; `conflict`); `credential_locked` outside the window | `<grant>`, with its `delegation`, `delegation_sig` and `key` |
+| `leash.grant.issue` (app, within the unlock window) | `{agent_id, grant_id?, version?, scope, approval?, connections?, per_hour?, per_day?, expires_at?, status_ttl?}` (not `items.read`); without `grant_id` a new grant (`version` absent); with it, a replacement of that grant (`version` required; `conflict`); `credential_locked` outside the window | `<grant>`, with its `delegation` and `sig` |
 | `leash.grant.revoke` (app, desktop) | `{grant_id}` | `{}` |
 | `leash.grant.list` (app, desktop: `{agent_id?}`; agent: `{}`, its own) | as left | apps and desktops: `{grants: [<grant>], suspended: [<agent_id>]}`; an agent: `{grants: [<grant>], suspended}` |
 | `leash.grant.updated` (V→D, to the agent) | — | `{grants: [<grant>], suspended}`: all of its grants, after every change and at suspension and resumption |
@@ -3983,7 +4050,8 @@ rotations  = the vault's identity.rotate statements (§3.4) from the delegation'
   its share rule). Unlinking the agent revokes all of its grants and
   deletes its share rules (§7.4). Removing or blocking a connection
   revokes every grant that names it in `connections`: its delegation
-  names the connection and cannot be re-signed without the member.
+  names the connection (`scope.connections`) and cannot be re-signed
+  without the member.
 - Changes are announced as `sync.event` `leash.grant.changed`,
   `leash.grant.revoked` or `leash.agent.suspended` (to apps and
   desktops) and audited (`leash.grant.issued`, `.updated`, `.revoked`,
@@ -6906,7 +6974,7 @@ it can read and write only its own objects and use only its own relay key
 | Owner app (the vault's one app) | Whatever its role allows, including unlock attempts if the PIN is known; with the PIN and the password, a transfer to another phone (§6.7.1) | Recovery (§11.11), which replaces it |
 | Desktop | Within an access session, what desktops may send; step-up types (secret items' values, item and tag changes, profile, settings, share rules and decisions, invitations, removals, grant decisions, action configurations, introductions, location shares, the location log, the presence policy) only with an app's approval; never critical items or wallet spends; nothing after the session ends (§6.8) | `device.session.end`; unlink |
 | Agent | Within its access session, only what its LEASH grants cover: through `ask` grants nothing without an app's approval of each request (at most 20 referrals an hour), through `auto` grants up to their rate limits; LEASH operations only on the `data` and `secret` items its share rules include, never critical ones; never app-only types, invitations, credential, device or grant management. Refused requests are throttled and repeated ones suspend it; its activity is summarised in the audit log, so it cannot push older entries out (§10.11) | `leash.grant.revoke`, `device.session.end`, `device.unlink`; suspension is automatic |
-| A LEASH delegation (every grant) | A claim, to relying parties that trust the member's credential key, that the agent holds that scope, until the grant's `expires_at` if any; the vault never relies on it. A relying party that requires a status statement accepts a revoked delegation for at most its `status_ttl` (≤ 1 h, default 15 min) plus skew; one that does not can be shown it until `exp` (§10.11) | `leash.grant.revoke` (no new statements); a shorter `status_ttl` |
+| A LEASH delegation (every grant) | A claim, to relying parties that trust the member's credential key, that the agent holds that scope, until the grant's `expires_at` if any; the vault never relies on it. A relying party that requires a status statement accepts a revoked delegation for at most its `status_ttl` (≤ 1 h, default 15 min) plus 60 s of skew (LEASH §3.5's bound); one that does not can be shown it until `exp` (§10.11) | `leash.grant.revoke` (no new statements); a shorter `status_ttl` |
 | The vault's `ik` as status issuer | Signing statements that keep a revoked or suspended agent's delegations "valid" for relying parties; it grants nothing in the vault itself. An approved release does only what §10.11 says (§2.1) | Rotate the `ik` (§3.4): the chain moves the issuer; revoke the grants |
 | A status statement | Nothing beyond its `not_after`: it names one delegation by hash and is useless without it and the agent's key | — |
 | Issuing grants | Only with the member present: an app within the credential's unlock window, since the credential key signs each grant (§10.11) | — |
@@ -7057,11 +7125,12 @@ Follow-ups:
    app UX review of the approval screen.
 6. **ICE issuer secret.** How the coturn shared secret (or a managed
    provider's credentials) reaches the enclave (CALLING-SERVICE §5, §10).
-7. **LEASH action execution and revocation status.** LEASH's HTTP action
-   (the vault makes a request with an injected secret) needs egress from
-   the enclave beyond the relay and KMS allowlist; signed delegations
-   (§10.11) have no online revocation status. Both wait for a decision on
-   enclave egress and a public status route.
+7. **LEASH action execution.** LEASH's HTTP action (the vault makes a
+   request with an injected secret) needs egress from the enclave beyond
+   the relay and KMS allowlist, and waits for a decision on enclave
+   egress. Revocation status, once listed here too, is the stapled status
+   statement of §10.11 (since 0.6.0; LEASH §3.5's format since 0.12.0),
+   which needs no public status route.
 8. **Files in items.** The `file` field kind (§10.7) is reserved until
    blob storage and its size policy are decided (VAULT-ITEMS owner
    decision 4).
@@ -7376,6 +7445,63 @@ Follow-ups:
        is enforced in the enclave (5 per recovery, §11.11.2) and an
        app's local count only drives its wording, while a new field in
        a sealed result needs the vault and apps to change together.
+21. **LEASH §3.5 alignment (0.12.0).** Owner decision of 2026-10-05:
+    VettID adopts the LEASH paper's §3.5 delegation and status statement
+    format; the paper is the neutral reference, and with no production
+    users the change is cheap now. The delegation, `sig`, the status
+    statement, `status_sig`, the context strings, the encoding, the
+    verifier's steps and the revocation latency bound are the paper's;
+    the relay transport, the credential key as `iss`, the Protean
+    Credential's unlock window, the vault's `ik` as status issuer with its
+    rotation chain, and the audit kinds stay VettID's (§10.11).
+    Follow-ups: vettid-vault (`vms/leashwire`: the new members, JCS,
+    `nonce`, `leash/v1/*` context strings, the §10.11 verifier steps,
+    `testdata/vectors/leash.json` reproducing §16 byte for byte;
+    `features/leash` and `features/items/share.go`: build `scope` and
+    `limits`, the grant object's `sig` without `key`; `client/leash.go`
+    and `cmd/vaultctl`: read `sig`, verify with `iss`; the e2e LEASH
+    tests); vettid-android (nothing until the agents phase, ANDROID-PLAN;
+    it has no LEASH code); LEASH-IMPLEMENTATION (its list of differences
+    shrinks to the VettID bindings).
+    **OWNER DECISIONS of 0.12.0** (each written as recommended, to
+    confirm at review):
+    1. `scope` is an object: `op` (VettID's one scope per grant) and the
+       grant's restrictions (`connections`; for `items.read`, `tags`,
+       `match`, `access`, `uses`). Recommended: yes; the paper's `scope`
+       is "the operations, the secret categories or items, and the
+       permitted targets", without a fixed shape.
+    2. `uses` goes in `scope`, not `limits`. Recommended: `scope`; it
+       counts reads of each included item, a property of the rule, and
+       `limits` stays exactly the paper's `per_hour` and `per_day`.
+    3. `limits` appears in every delegation whose grant has limits, so
+       `auto` grants of owner types now carry them (before, only
+       `items.read`). Recommended: yes; the paper's `auto` is "allowed
+       within `limits`", which a verifier can only see if they are there.
+    4. VettID's verifier rejects members it does not know, at the top
+       level and in `scope` and `limits`. Recommended: yes (fail closed:
+       a restriction a verifier cannot read must not be ignored), and ask
+       the paper to state the rule for version 1.
+    5. Base64 is standard with padding (RFC 4648 §4), for `iss`, `sub`,
+       `status_issuer`, `nonce`, the statement's `delegation` and the
+       carried bytes. Recommended: yes, as everywhere in VettID, and ask
+       the paper to name the alphabet (it says only "base64-encoded").
+    6. The vault's `ik` rotation stays a VettID binding: statements after
+       a rotation carry `rotations`, and a verifier that implements only
+       the paper rejects them until the grant is re-signed (fail closed).
+       Recommended: keep the chain, re-sign nothing automatically, and
+       propose key rotation to the paper for a later version.
+    7. The grant object's `delegation_sig` becomes `sig`, and `key` is
+       dropped (it is the delegation's `iss`). Recommended: yes; no
+       client reads them yet.
+    8. No migration: a stored grant whose delegation is in the 0.6.0
+       format is not served; the member re-issues it. Recommended: yes;
+       there are no production users and no agent connector.
+    9. The verifier no longer checks the delegation's `iat` (it rejected
+       one more than 60 s in the future). Recommended: follow the paper;
+       the status statement's `issued_at` bounds freshness.
+    10. The proof of possession of `sub` is not specified here; it waits
+        for the paper's MCP profile. Recommended: wait; no relying party
+        outside VettID exists yet.
 
 ## 16. Test vectors
 
@@ -7455,7 +7581,7 @@ carries the approval; `altchan.json` is regenerated for 0.3.0.
   manifest key (test only): P-256 private scalar 32 x 0x21
   public key SPKI (b64) : MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAERi26GuT8GpaLTazyDN1tvh+uNKqXFRSmPTQFw9HP04O1i7sIwTODQoxYU8ccTIUeE0sFaCHkaP4Kl3q/QxPd4Q==
   key_id                : 1edbb48b6669decd
-  manifest bytes (1,060 B, one line):
+  manifest bytes (1,060 B; one line, broken here after commas):
     {"v":1,"serial":7,"issued_at":"2026-10-02T12:00:00Z","releases":[{"release":3,"pcr0":"ab"x48,
     "pcr1":"11"x48,"pcr2":"22"x48,"seal_key":"arn:aws:kms:us-east-1:000000000000:key/test-release-3",
     "status":"deprecated","published_at":"2026-09-01T00:00:00Z","notes":"https://vettid.org/releases/3"},
@@ -7571,11 +7697,86 @@ drawn before the nonce.
   salt, aad, eph public keys, full out (b64) : recovery.json
 ```
 
+**0.12.0.** New file `leash.json` (§10.11): two LEASH delegations in
+the LEASH paper's §3.5 format and their status statements. These values
+were computed for this revision with two independent implementations
+(Python `cryptography` 50 with `json.dumps(sort_keys)`, and Go 1.26
+`crypto/ed25519` with `encoding/json` maps), which agree byte for byte;
+vettid-vault's `leash.json` is to reproduce them (§15 item 21). Times are
+Unix seconds; `iat` is 2026-10-01T12:00:00Z.
+
+```
+§10.11 LEASH delegation and status statement                     (leash.json)
+  credential key seed (iss) : 32 x 0x30   pk : G6QHW3fJ4/s+zeFc2vUiHzwQNz5iP3sOHvdjZrCvcTc=
+  agent ik seed (sub)       : 32 x 0x31   pk : SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0=
+  vault ik seed (status)    : 32 x 0x04   pk : ypOsFwUYcHHWe4PH/w7+gQjo7EUwV113JoeTM9vavnw=  (§3.2 above)
+
+  A: items.read, auto, with exp; nonce 16 x 0x32
+    delegation (467 B; one line, broken here after commas):
+      {"approval":"auto","exp":1798632000,"grant_id":"01JB2Z6V9K3M4N5P6Q7R8S9T41",
+      "iat":1790856000,"iss":"G6QHW3fJ4/s+zeFc2vUiHzwQNz5iP3sOHvdjZrCvcTc=",
+      "limits":{"per_day":1000,"per_hour":60},"nonce":"MjIyMjIyMjIyMjIyMjIyMg==",
+      "scope":{"access":"read","match":"any","op":"items.read","tags":["api-keys","work"],
+      "uses":10},"status_issuer":"ypOsFwUYcHHWe4PH/w7+gQjo7EUwV113JoeTM9vavnw=",
+      "status_ttl":900,"sub":"SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0=","v":1,"version":1}
+    SHA-256   : 82403562f0a1b62c520c468d46f58a473eefc0cae0ac6a0d8d8bdaef225ea436
+    sig       : xGYxdD9lhE27/4NjTmDl1L+9/UJRv3cdRdWp3yOVxCOPgicdwrL+lv9A7lP4RNkE47XVEpAjAvh7Dc0z9dBKCw==
+    status    : {"delegation":"gkA1YvChtixSDEaNRvWKRz7vwMrgrGoNjYva7yJepDY=",
+                "grant_id":"01JB2Z6V9K3M4N5P6Q7R8S9T41","issued_at":1790856060,"not_after":1790856960,
+                "status":"valid","v":1}
+    status_sig: aSkNJrcIZmkYLzpX5Z7jb/1tHXkwrcNHBZURMycInB9vWdwEpGJB3RDzPmzUscKL6H3tRaOSyZID653kpcgACg==
+    accepted for now in [1790856000, 1790857020] (issued_at − 60, not_after + 60)
+
+  B: message.send, ask, one connection, version 2, no exp, status_ttl 300; nonce 16 x 0x33
+    delegation (389 B; one line, broken here after commas):
+      {"approval":"ask","grant_id":"01JB2Z6V9K3M4N5P6Q7R8S9T42","iat":1790856000,
+      "iss":"G6QHW3fJ4/s+zeFc2vUiHzwQNz5iP3sOHvdjZrCvcTc=","nonce":"MzMzMzMzMzMzMzMzMzMzMw==",
+      "scope":{"connections":["01JB2Z6V9K3M4N5P6Q7R8S9T43"],"op":"message.send"},
+      "status_issuer":"ypOsFwUYcHHWe4PH/w7+gQjo7EUwV113JoeTM9vavnw=","status_ttl":300,
+      "sub":"SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0=","v":1,"version":2}
+    SHA-256   : 36ce9294e797cf1eecff1c61b8a21647e45a20eedd6acdb2abe2a591e322bacc
+    sig       : PS1c/aT/OAMyYaPhSudMMJX7TjCaXVrkjk6zOmjoFfZR9ZxjkzjTgfMg6smbq6KCDRoqh4AmXwUAtnJivESDBw==
+    status    : {"delegation":"Ns6SlOeXzx7s/xxhuKIWR+RaIO7das2yq+KlkeMiusw=",
+                "grant_id":"01JB2Z6V9K3M4N5P6Q7R8S9T42","issued_at":1790856060,"not_after":1790856360,
+                "status":"valid","v":1}
+    status_sig: AcQTmAdY8UpkeDssy4iHgHo8hKPZxwq1FJI8YHOwSUOgHRlCEc+SV4VVZr7fTn/jzKrFo9EilExC3XwKJKW1Bw==
+    accepted for now in [1790856000, 1790856420]
+
+  statements are one line too, broken here after commas
+  signing inputs: "leash/v1/delegation" || delegation bytes; "leash/v1/status" || status bytes
+  base64 of the delegation and status bytes : leash.json
+```
+
 Cross-implementation checks against Apple CryptoKit and BouncyCastle are
 pending (§15, follow-up 1).
 
 ## 17. Changelog
 
+- **0.12.0** (2026-10-05): LEASH delegations and status statements in
+  the LEASH paper's §3.5 format (owner decision of 2026-10-05; §15
+  item 21). Independent of the open 0.11.0 (enrollment codes, vettid.org
+  PR #122), which touches no LEASH text.
+  - §10.11: the delegation's members are the paper's: `iss` (the
+    credential key, formerly `key` beside it), `sub` (formerly
+    `agent_ik`), `status_issuer` (formerly `vault_ik`), `scope` as an
+    object (`op`, `connections`, `tags`, `match`, `access`, `uses`,
+    formerly top-level), `limits` (`per_hour`, `per_day`, now for every
+    grant that has limits), a new 128-bit `nonce`; `grant_id`,
+    `version`, `approval`, `status_ttl`, `iat`, `exp` unchanged. The
+    delegation and the status statement are RFC 8785 (JCS) rather than a
+    fixed member order. Context strings `leash/v1/delegation` and
+    `leash/v1/status` replace `vettid/vms/2/leash` and
+    `vettid/vms/2/leash-status`. The verifier's checks are the paper's
+    seven, in its order, with the rotation chain as a VettID binding,
+    and without the old `iat` check. The revocation latency bound is
+    stated as the paper states it. The grant object carries `sig`
+    (formerly `delegation_sig`) and no `key`. The mapping table uses the
+    paper's dotted MCP tool names.
+  - §4.1: the `leash/v1/*` labels are the one exception to suite-numbered
+    labels.
+  - §13.5: the bound names its 60 s skew.
+  - §15: item 7 no longer lists revocation status as open; item 21.
+  - §16: `leash.json`.
 - **0.10.8** (2026-10-05): editorial. §6.7.1: a replaced app erases its local
   state on `device.unlinked`; a refused relay key alone only offers an erase.
 - **0.10.7** (2026-10-05): editorial. §11.4 shows `credential_backup` in
