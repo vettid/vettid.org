@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.16.1
+version: 0.17.0
 date: 2026-10-06
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -12,13 +12,19 @@ related:
   - CALLING-SERVICE.md
   - PUSH-GATEWAY.md
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.1.1)
+  - MEMBER-API.md (2.1.2)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.0, approved 2026-10-03)
   - VAULT-RELEASES.md (0.1.6, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.17.0: normative (owner decisions of 2026-10-06, §15 item 25): a
+    transferred app's `device.paired` carries the member's `user_guid`
+    from the vault's sealed header, which its later unlocks need (§6.7.1,
+    §10.3); a `backoff` error carries `retry_after` in its body, as the
+    unlock result's does (§3.6.1, §10.1). Editorial: the app header's
+    `nonce` and `sig` are base64url without padding (§11.12.2)
   - 0.16.1: editorial-normative (owner decision of 2026-10-06, MEMBER-API
     2.1.1): the app learns a pending start-over from `deletion:
     {deletion_id, state, deletes_at}` in `GET /api/vault/status`, so that
@@ -1282,14 +1288,16 @@ vault:
 2. spends the UTK and opens `sealed` (§3.5.4; `utk_invalid`);
 3. checks the blob (§3.5.3 step 3): `stale_credential` for the holder's
    own retry, `credential_frozen` and an alarm for a clone;
-4. refuses with `backoff` while the PIN backoff of §11.8 runs;
+4. refuses with `backoff` while the PIN backoff of §11.8 runs, with
+   `retry_after` in the error body (§10.1, 0.17.0);
 5. **checks the PIN** against the vault's DEK derivation (§3.3.1), as a
    transfer's approval does (§6.7.1): it derives the DEK from `pin` with
    the header's KDF parameters and compares it with the DEK in memory in
    constant time. A mismatch is `bad_pin`, counted in the §11.8 backoff
    (`header_seq` + 1) and audited `vault.pin_failed`; the password is not
    tried;
-6. refuses with `backoff` while the password backoff of §3.5.3 runs;
+6. refuses with `backoff` while the password backoff of §3.5.3 runs, with
+   `retry_after` as in step 4;
 7. **opens the credential** with the password (§3.5.3 step 5):
    `bad_password`, counted in the password backoff and audited
    `credential.password_failed`;
@@ -2692,7 +2700,7 @@ Old app (holder)           Vault                  Relay             New app
   |                           |  holder := new app, old app removed     |
   |<--{}----------------------|                     |                   |
   |<--device.unlinked{transferred} (best effort)    |                   |
-  |                           |--device.paired{transfer, credential_version, token}->|
+  |                           |--device.paired{transfer, credential_version, user_guid, token}->|
   |                           |<--credential.get, credential.ack, credential.utk.get--|
 ```
 
@@ -2737,7 +2745,8 @@ Old app (holder)           Vault                  Relay             New app
    **removed** as by `device.unlink` (§7.4: `device.unlinked{reason:
    "transferred"}` best effort after the response, relay key denylisted,
    unlock key and UTK pool removed). The new app receives
-   `device.paired{…, transfer: true, credential_version, token}`; the
+   `device.paired{…, transfer: true, credential_version, user_guid,
+   token}` (`user_guid` since 0.17.0, below); the
    new app's `api_key` becomes the vault's app key and the vault reports
    it to the host (`app_key`, §11.5; 0.15.0), so the old phone's key is
    refused by the member API from then on; the
@@ -2752,6 +2761,32 @@ Old app (holder)           Vault                  Relay             New app
 5. The new app fetches the blob with `credential.get`, confirms it with
    `credential.ack` and fills its UTK pool with `credential.utk.get`.
    It unlocks later with the PIN, like any app (§11.4).
+
+**The member's `user_guid`** (0.17.0, owner decision of 2026-10-06,
+§15 item 25). An unlock names the member's `user_guid` and signs it
+(§11.4). An enrolled app learns it from the setup code's redeem
+(§11.12.1), a recovering app from the claim (§11.11.7). A transferred app
+has neither, so the vault gives it: a transfer's `device.paired` carries
+`user_guid`, copied from the vault's sealed header (§3.3), and only a
+transfer's (`transfer: true`). It is sealed under the handshake's epoch
+to the new app alone, like the rest of `device.paired` (§6.7); the relay,
+the member API and other devices learn nothing new. The old app sends
+nothing for it, so a transfer from an old app of any version gives the
+new app its `user_guid`.
+
+- The new app MUST check that it is a string of 1 to 128 printable
+  ASCII characters (0x21–0x7E), so that it fits §11.4's signing string,
+  and stores it with `vault_id` exactly as an enrolled app stores the
+  redeem's: it is the `user_guid` of every later `vault.unlock` (§11.4),
+  kept until the app is erased. A value that fails the check is treated
+  as absent (below).
+- A transfer's `device.paired` without a valid `user_guid` comes only
+  from a vault release before 0.17.0 (none is in production). The
+  transfer is complete when it arrives (the old app is already removed,
+  step 4), so the new app does not refuse it: it keeps the vault and
+  tells the member that this phone cannot unlock the vault after it
+  locks until the vault runs a release of 0.17.0 or later, which always
+  sends it.
 
 **Failures and aborts.** An aborted transfer is audited
 `device.transfer.aborted` (`ref` = `transfer_id`) and announced as
@@ -3315,7 +3350,12 @@ an answer to an unknown or expired id is dropped.
     or requested, with body `{connection_id}`, §6.4);
   - `limit`: a count or size limit of the feature would be exceeded;
   - `bad_password`, `backoff`, `stale_credential`, `utk_invalid`: §3.5.3,
-    §3.5.4;
+    §3.5.4. Since 0.17.0 a `backoff` error response's body is
+    `{retry_after}`: the whole seconds, rounded up and at least 1, until
+    the backoff that refused the request ends (the PIN backoff of §11.8
+    or the password backoff of §3.5.3), as in the unlock result
+    (§11.4). The app shows it as a countdown and does not resend
+    before it ends;
   - `credential_required`: the vault has no credential (§3.5.7), or a
     recovery needs one (§11.11.5);
   - `bad_pin`: the current PIN given to `pin.change` is wrong;
@@ -3432,7 +3472,7 @@ an answer to an unknown or expired id is dropped.
 | `vault.enrolled` | — | §11.3 |
 | `vault.enroll.confirm` (app) | `{}` | `{}` |
 | `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; `owner_check` (0.13.0) is `{state: "ok" \| "due" \| "held", deadline, interval_seconds, failures, hold, hold_off_until?}` to apps and desktops and `{state}` to agents (§3.6, §3.6.7). A recovering app (§11.11.5) gets only `{vault_id, state_seq, header_seq}` (0.16.0): nothing about the vault's devices, connections or owner check before it has proved the credential password |
-| `vault.owner-check` (app: the holder) | `{credential, utk_id, sealed{pin, password, hold?, hold_off_until?}}` | `{credential, version, utks, deadline, interval_seconds, hold, hold_off_until?}` (§3.6.1, §3.6.7); `bad_pin`, `bad_password`, `backoff`, `utk_invalid`, `stale_credential`, `credential_frozen`, `rotation_required`, `forbidden` (not the holder), `bad_request` (a PIN that is not 6–32 digits) |
+| `vault.owner-check` (app: the holder) | `{credential, utk_id, sealed{pin, password, hold?, hold_off_until?}}` | `{credential, version, utks, deadline, interval_seconds, hold, hold_off_until?}` (§3.6.1, §3.6.7); `bad_pin`, `bad_password`, `backoff` (body `{retry_after}`, §10.1), `utk_invalid`, `stale_credential`, `credential_frozen`, `rotation_required`, `forbidden` (not the holder), `bad_request` (a PIN that is not 6–32 digits) |
 | `vault.held` (V→D, to the app and desktops in an access session) | — | `{deadline, waiting: {messages, requests, calls, other}}` (§3.6.3) |
 | `vault.lock` (app, desktop) | `{}` | `{}`; then `vault.locking` |
 | `account.get` (app, desktop) | `{}` | `{account: <snapshot, §11.13> \| null, version, received_at}`; `null` (and `version` 0) before any snapshot arrived (0.15.0) |
@@ -3452,7 +3492,7 @@ an answer to an unknown or expired id is dropped.
 | `device.pair.approve` (app) | `{pairing_id, session_seconds?, grants?}`; `session_seconds` (60–86,400) only for a desktop or agent: its first access session (§6.8); `grants` only for an agent: 1–32 LEASH grant specifications (§10.11), signed at the approval (`credential_locked` outside the unlock window) | `{}` |
 | `device.pair.reject` (app) | `{pairing_id}` | `{}` |
 | `device.pair.rejected` (to the new device) | — | `{}`: the owner rejected the pairing or transfer after its `hs.fin` (0.10.5); sealed under the handshake's epoch, on the device's token from `hs.init`, as `device.paired`; the device stops waiting (§6.7) |
-| `device.paired` (to the new device) | — | `{device_id, role, vault_id, release, release_number, token, session_expires_at?, transfer?, credential_version?}` (the release the vault runs under); `token`: the device's standing token (§7.1); it replaces the request token of a pairing's or transfer's `hs.resp` (0.10.3), and after enrollment or recovery, whose `hs.resp` already carries one, it is a fresh one (0.10.4); `transfer: true` and the credential's `credential_version` for a transferred app (§6.7.1) |
+| `device.paired` (to the new device) | — | `{device_id, role, vault_id, release, release_number, token, session_expires_at?, transfer?, credential_version?, user_guid?}` (the release the vault runs under); `token`: the device's standing token (§7.1); it replaces the request token of a pairing's or transfer's `hs.resp` (0.10.3), and after enrollment or recovery, whose `hs.resp` already carries one, it is a fresh one (0.10.4); `transfer: true`, the credential's `credential_version` and (0.17.0) the member's `user_guid`, which its unlocks need, for a transferred app only (§6.7.1) |
 | `device.list` (app, desktop) | `{}` | `{devices: [{id, kind, state, name, ik, profile?, created_at?, last_active_at?, session_expires_at?}]}` |
 | `device.unlink` (app) | `{device_id}` | `{}`; `forbidden` for the app itself (0.9.0: it leaves by a transfer or a recovery) |
 | `device.unlinked` (to the unlinked device, best effort) | — | `{reason?}`: `"transferred"` for the old app of a transfer (§6.7.1), `"replaced"` for the old app of a recovery (§11.11.5) |
@@ -7803,7 +7843,10 @@ email; no global limit that one attacker could exhaust for everyone.)
   X-VettID-App: v=1; vault=<vault_id or empty>; kid=<akid>; ts=<Unix s>; nonce=<b64url, 16 bytes>; sig=<b64url DER ECDSA>
   ```
 
-  where `sig` is ECDSA P-256 with SHA-256 over (each `\n` a literal
+  where `nonce` and `sig` are base64url (RFC 4648 §5) **without
+  padding**, canonical (0.17.0, editorial: as the apps send and the
+  member API accepts; a padded value fails the header's syntax), and
+  `sig` is ECDSA P-256 with SHA-256 over (each `\n` a literal
   newline, no trailing newline):
 
   ```
@@ -9135,6 +9178,49 @@ Follow-ups:
     during the start-over's 24 h (nothing in it is at risk from the
     deletion request, and the member's app can still cancel); the delay
     is enforced by the member API, not the enclave (§11.11.9).
+25. **A transferred app learns `user_guid` from `device.paired`; `backoff`
+    carries `retry_after` (0.17.0).** Owner decisions of 2026-10-06.
+    1. **The gap.** A phone set up by a direct transfer (§6.7.1) never
+       received the member's `user_guid`, which every unlock names and
+       signs (§11.4): it paired, but could not unlock after the vault
+       next locked. An enrolled app has it from the redeem (§11.12.1), a
+       recovering app from the claim (§11.11.7).
+    2. **The decision: option 1.** The vault puts `user_guid`, from its
+       own sealed header (§3.3), in a transfer's `device.paired`, sealed
+       under the handshake's epoch to the new app (§6.7.1, §10.3). The
+       old app sends nothing new, so it works whatever the old app's
+       version; the new app stores it as an enrolled app stores the
+       redeem's. This **supersedes** the first instruction of the same
+       day, that the old phone hand `user_guid` to the new phone inside
+       "the transfer's existing sealed handoff": no such old-to-new
+       payload exists (the approval's sealed part is sealed to a UTK,
+       for the vault; the new app's `api_key` travels in its own
+       `hs.init`; the new app receives only `device.paired` and the
+       blob, from the vault). Rejected alternatives: the old app's
+       approval carrying it for the vault to forward (still
+       `device.paired`, and the vault already knows it); the transfer QR
+       or link (not sealed: anyone who saw the code would learn the
+       member's `user_guid`); a new member API route.
+    3. **Old releases.** A transfer's `device.paired` without
+       `user_guid` comes only from a vault release before 0.17.0; the
+       transfer is already complete, so the new app keeps the vault and
+       warns that it cannot unlock after the vault locks until the vault
+       runs 0.17.0 or later (§6.7.1).
+    4. **`backoff` carries `retry_after`** (whole seconds, rounded up, at
+       least 1) in its error body, for the owner check (§3.6.1) as the
+       unlock result already does (§11.4). Decided with it, recommended
+       as written (to confirm at review): every `backoff` error response
+       carries it, since the PIN and password backoffs are shared with
+       the transfer's approval and the other credential operations
+       (§10.1); additive, as unknown members are ignored.
+    5. **Editorial:** the app header's `nonce` and `sig` are base64url
+       without padding (§11.12.2, MEMBER-API 2.1.2), as vettid-android
+       sends and the member API already requires.
+    Follow-ups: vettid-vault (`user_guid` in a transfer's
+    `device.paired`; `{retry_after}` on `backoff`; `client/`);
+    vettid-android (store `user_guid` from a transfer's `device.paired`
+    and unlock with it, warn when it is absent; the owner check's
+    backoff countdown from `retry_after`).
 
 ## 16. Test vectors
 
@@ -9401,6 +9487,20 @@ adds it to `recovery.json` (eph scalar 32 × 0x28, nonce 12 × 0x29) with
 the 0.16.0 implementation.
 
 ## 17. Changelog
+
+- **0.17.0** (2026-10-06): normative, owner decisions of 2026-10-06
+  (§15 item 25).
+  - §6.7.1, §10.3: a transfer's `device.paired` carries the member's
+    `user_guid`, from the vault's sealed header; the new app checks it
+    and stores it as an enrolled app stores the redeem's, and its
+    unlocks use it (§11.4). Without it a transferred phone could pair
+    but not unlock. A `device.paired` without it (a release before
+    0.17.0) still completes the transfer; the app warns.
+  - §10.1, §3.6.1, §10.2: a `backoff` error response's body is
+    `{retry_after}` (seconds until the backoff ends), as the unlock
+    result's `retry_after`.
+  - §11.12.2 (editorial): `nonce` and `sig` in `X-VettID-App` are
+    base64url without padding.
 
 - **0.16.1** (2026-10-06): editorial-normative, owner decision of
   2026-10-06. §11.11.9: `GET /api/vault/status` shows a pending

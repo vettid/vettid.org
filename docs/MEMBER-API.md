@@ -1,8 +1,12 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.1.1
+version: 2.1.2
 changelog:
+  - 2.1.2 (2026-10-06, VAULT-MESSAGING 0.17.0): editorial. The
+    `X-VettID-App` header's `nonce` and `sig` are base64url without
+    padding, canonical, as the apps send and the API already requires
+    (a padded value is `401 unauthorized`)
   - 2.1.1 (2026-10-06, owner decision of 2026-10-06, from the
     implementation, vettid.org #148): `VaultStatus.deletion` carries
     `deletion_id`, so that the app, which cannot read the session-only
@@ -248,6 +252,8 @@ device identifiers, and never logs envelopes.
 X-VettID-App: v=1; vault=<vault_id or empty>; kid=<akid>; ts=<Unix s>; nonce=<b64url 16 B>; sig=<b64url DER>
 ```
 
+`nonce` and `sig` are base64url (RFC 4648 §5) without padding, canonical
+(2.1.2): a padded or non-canonical value fails the header's syntax.
 `sig` is ECDSA P-256 / SHA-256 over `"vettid/member-api/app/1" \n METHOD
 \n path \n query \n vault_id \n akid \n ts \n nonce \n
 hex(SHA-256(body))` (VAULT-MESSAGING §11.12.2). `akid` is the first 16

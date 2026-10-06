@@ -1,9 +1,14 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.8
+version: 0.1.9
 date: 2026-10-06
 changelog:
+  - 0.1.9: a phone set up by a direct transfer stores the member's
+    `user_guid` from the vault's `device.paired` and unlocks with it,
+    and warns when an older vault release sent none; the owner check's
+    backoff countdown comes from `retry_after` (VAULT-MESSAGING 0.17.0)
+    (§4, §6)
   - 0.1.8: the pending-deletion banner cancels with the `deletion_id`
     from `GET /api/vault/status` (MEMBER-API 2.1.1, VAULT-MESSAGING
     0.16.1) (§4)
@@ -34,7 +39,7 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.16.0) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.17.0) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Items screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
@@ -128,6 +133,7 @@ the destinations.
 | Avatar sheet | Account sheet | Vault status, lock vault, the member's membership and subscription (read-only, from the vault, VAULT-MESSAGING §11.13), open account portal (browser) |
 | Recovery (new phone) | — (VettID-specific) | Only with the backup on: scan the portal's recovery QR → claim (`email_hint`) → register → PIN → credential password → the app replaces the old one. No other path: 0.1.6's backup-off choice (new credential or delete) is removed. `no_backup` at register or unlock (a vault whose backup is off): "This vault cannot be recovered: its credential backup was off. Delete it on the account site and start over with a new setup code", with a link to the portal's start-over page (MEMBER-API 2.1.0) and then to onboarding |
 | Pending deletion | — | When `GET /api/vault/status` shows `deletion` (a start-over requested on the portal, VAULT-MESSAGING §11.11.9): an urgent banner with the time left and **Cancel deletion** (`POST /api/vault/deletion/cancel {deletion_id}`, signed by the app key, with the `deletion_id` from the status's `deletion: {deletion_id, state, deletes_at}`, MEMBER-API 2.1.1) |
+| Transfer (new phone) | — (VettID-specific) | Scan the old phone's transfer QR → compare the SAS → wait for the approval → `device.paired{transfer}`: the app stores its `vault_id` and the member's `user_guid` (VAULT-MESSAGING 0.17.0 §6.7.1) like an enrolled phone, so that it unlocks later with the PIN. Without `user_guid` (a vault release before 0.17.0) the transfer still completes and the app warns: "This phone cannot unlock your vault after it locks until your vault is updated" |
 | Onboarding | Sign-in flow | Scan the setup QR from the account portal, or type its short code with the account's email (no sign-in in the app, VAULT-MESSAGING 0.15.0 §11.12) → confirm the account (`email_hint`) → enroll vault (PIN, credential password) → first connection guide |
 
 Every list has an empty state; every destructive action has a confirmation;
@@ -186,7 +192,9 @@ interval). Follow-ups, in A3 unless noted:
    `sync.event{owner_check}`, the `owner_check.*` feed kinds.
 2. **One check screen**: PIN and password on one screen, sent together;
    both zeroized after the answer. Shows which entry was wrong, the
-   checks left before the lock (10 − `failures`) and a running backoff.
+   checks left before the lock (10 − `failures`) and a running backoff,
+   counted down from the `backoff` error's `retry_after` (VAULT-MESSAGING
+   0.17.0 §10.1); the send button stays off until it ends.
 3. **When to ask**: at the first app open or return to the foreground
    after the deadline, before any vault screen; never over an action in
    progress. A refused request keeps its input (drafts stay drafts) and
