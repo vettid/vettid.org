@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.14.0
+version: 0.15.0
 date: 2026-10-06
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -12,11 +12,37 @@ related:
   - CALLING-SERVICE.md
   - PUSH-GATEWAY.md
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md
+  - MEMBER-API.md (2.0.0)
+  - ENROLLMENT-CODES.md (0.2.1, design note for 0.15.0)
   - VAULT-ITEMS.md (0.1.0, approved 2026-10-03)
   - VAULT-RELEASES.md (0.1.6, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.15.0: the app and the account portal are separate (owner decision
+    of 2026-10-05, approved 2026-10-06; ENROLLMENT-CODES.md; drafted as
+    0.11.0 in vettid.org PR #122 and renumbered after 0.14.0). The portal issues a single-use
+    5-minute setup code (a 128-bit QR secret, `t: "e"`, and an
+    8-character code typed with the member's email; no global limit);
+    the app redeems it
+    with its new app key and never signs in. Every app request to the
+    member API is signed by that per-app P-256 key instead of carrying a
+    member session; the enclave records the key (`app.api_key` in
+    enroll and register, `api_key` in a transfer's `hs.init`) and reports
+    it to the host (`enrolled`, `unlocked`, `locked`, new `app_key`
+    event), which keeps the API's view current across transfer and
+    recovery. Membership, terms and subscription reach the app only
+    through the vault: an account snapshot in every unlock message and
+    the new queue op `account`, kept in vault state, `account.get` and
+    `sync.event{account.changed}`. Unlock no longer needs the current
+    terms. The recovery QR gains `api`; a recovering app claims the
+    recovery with its key (§2.2, §6.2, §6.7.1, §10, §10.1, §10.2, §11.1,
+    §11.3, §11.5, §11.6, §11.8, §11.11, §11.12, §11.13, §13.5, §13.7,
+    §15 item 20). With the daily owner check (0.13.0): enrollment by
+    setup code starts the clock, and `account.get` and
+    `sync.event{account.changed}` are held like other owner requests
+    and fan-out (§3.6, §11.12, §11.13); while the member API's vault
+    service is paused, code issue, redeem and claim are refused like
+    enroll. Breaking for apps and the member API
   - 0.14.0: the canary manifest (owner decisions of 2026-10-06): an app
     MAY accept an unpublished served manifest shared to it as a file,
     verified under its pinned keys and the serial rule, installed only
@@ -384,7 +410,7 @@ the relay at vettid.org allows:
 |---|---|---|
 | Relay | Mailbox ids, depositor relay keys, timing, padded sizes, blob and claim sizes | Message types, content, or which identity, device or connection a relay key belongs to |
 | Parent / host | Relay host names; TLS byte counts and timing per instance (connections are shared by all vaults, §12.2); enroll, unlock and lock events; encrypted-state size; `vault_id` ↔ instance | Relay requests (TLS terminates in the enclave, §12.2), mailbox ids, PINs, keys |
-| Member API | Which member enrolled, unlocked or locked, and when; `vault_id`, instance lease, `vault_version`, `state_version` (§11.5) | PINs; why an unlock failed (§11.4); mailbox ids; keys; any stable device identifier (§11.7) |
+| Member API | Which member enrolled, unlocked or locked, and when; `vault_id`, instance lease, `vault_version`, `state_version` (§11.5); the public key of the vault's app key and when it changes, so when a transfer or recovery completed (0.15.0, §11.12) | PINs; why an unlock failed (§11.4); mailbox ids; keys other than app public keys; any stable device identifier (§11.7) |
 | Network | Endpoints and timing | Everything else |
 
 The owner check (§3.6) adds nothing to this table. The hold is not
@@ -1184,7 +1210,8 @@ recovery code's validity (§11.11.2).
 **What else starts the clock.** Each of these verifies the PIN and the
 password, or sets them, and writes the record as a check does:
 
-- **enrollment**: the vault's first `credential.create` (§3.5.5), which
+- **enrollment** (since 0.15.0 always after a setup code's redeem,
+  §11.12.1): the vault's first `credential.create` (§3.5.5), which
   follows the PIN of `vault.enroll` within the provisional window
   (§11.3). A later `credential.create`, after a `credential.delete`,
   does not move the clock;
@@ -1762,6 +1789,7 @@ hs.init: { "purpose": "app|desktop|agent|connection|rekey|reconnect",
            "profile": { },
            "rotations": [ ],
            "device_attest": { },
+           "api_key": "<b64 SPKI DER, P-256; a transfer's hs.init only>",
            "sas_commit": "<b64 32 bytes>" }
 hs.resp: { "token": "...", "reconnect_token": "...", "suite": 2,
            "rotations": [ ], "sas_nonce": "<b64 n_R, 32 bytes>", "sig": "<b64>" }
@@ -1779,6 +1807,11 @@ Field rules:
 - `rotations` is used only for reconnects (§6.6), in both `hs.init` and
   `hs.resp`; it MUST be absent for every other purpose.
 - `device_attest` is used only for purpose `app` (§6.7, §11.7).
+- `api_key` (0.15.0) is the new app's app key (§11.12). It is REQUIRED in
+  the `hs.init` of a transfer (§6.7.1) and MUST be absent otherwise (an
+  enrolling or recovering app gave its key in the sealed request). A
+  transfer `hs.init` without a well-formed key is dropped like one with
+  an invalid attestation.
 - **SAS commitment** (0.10.3, §6.3). For purposes `app`, `desktop`,
   `agent` and `connection`, `hs.init` MUST carry `sas_commit`, and
   `hs.resp` and `hs.fin` MUST carry `sas_nonce`; for `rekey` and
@@ -2551,7 +2584,8 @@ Old app (holder)           Vault                  Relay             New app
    The vault creates the invitation and answers `{transfer_id, link,
    exp}`; audit `device.transfer.started`.
 2. The new app scans the QR and sends `hs.init` (purpose `app`) with
-   `device_attest`, which is REQUIRED (§11.7). An invalid attestation drops
+   `device_attest`, which is REQUIRED (§11.7), and its app key `api_key`
+   (0.15.0, §6.2, §11.12). An invalid attestation drops
    the `hs.init` (audit `device.transfer.attestation_failed`); the holder
    sees no pending transfer. Otherwise the vault answers with `hs.resp`
    at once (0.10.3, as for any pairing, §6.7), the new app answers with
@@ -2585,6 +2619,9 @@ Old app (holder)           Vault                  Relay             New app
    "transferred"}` best effort after the response, relay key denylisted,
    unlock key and UTK pool removed). The new app receives
    `device.paired{…, transfer: true, credential_version, token}`; the
+   new app's `api_key` becomes the vault's app key and the vault reports
+   it to the host (`app_key`, §11.5; 0.15.0), so the old phone's key is
+   refused by the member API from then on; the
    vault audits `device.transferred` (`device_id` = the new app, `ref` =
    `transfer_id`), creates the feed item `device.transferred` and sends
    desktops `sync.event{kind: "device.transferred", device_id,
@@ -3048,6 +3085,7 @@ an answer to an unknown or expired id is dropped.
 | | `profile.get`, `profile.set`, `settings.get`, `settings.set` | D→V | req | Display name and photo; owner policy (§10.8) |
 | | `profile.update` | V↔V | | Shared profile (name, photo, `@profile` items) to a connection (§9.3, §10.8) |
 | | `sync.event` / `sync.since` | V→D, V↔V / D→V, V↔V | — / req | Mirror changes (kinds in §10.1); catch up |
+| | `account.get` | D→V | req | The member's account snapshot from the member API, display only (§11.13, 0.15.0) |
 | Connections | `connection.invite.create`, `.list`, `.cancel`, `.accept` | D→V | req | Invitations (§6.4) |
 | | `connection.request.pending`, `connection.request.outgoing` | V→D | | An incoming request awaiting approval (profile, `sas`, `remote`); an outgoing one (`sas`) (§6.4) |
 | | `connection.request.list` | D→V | req | Pending incoming and outgoing requests with their SAS (§6.4) |
@@ -3209,6 +3247,7 @@ an answer to an unknown or expired id is dropped.
   | `credential.alarm` | `alarm_id`, `state` (`frozen`, `rotation_required`, `resolved`) (§3.5.9) |
   | `owner_check` | `deadline`: a check succeeded, and a hold, if any, ended (§3.6, 0.13.0) |
   | `vault.release` | `release` (PCR0 hex), `release_number`; sent once after a vault first runs under a new release (§11.10.6) |
+  | `account.changed` | `version`: a newer account snapshot arrived from the host (§11.13, 0.15.0) |
   | `credential.changed` | `version` (§3.5.5) |
   | `credential.deleted` | — |
   | `item.changed` | `item_id`, `version` (§10.7) |
@@ -3257,6 +3296,7 @@ an answer to an unknown or expired id is dropped.
 | `vault.owner_check` (app: the holder) | `{credential, utk_id, sealed{pin, password, hold?, hold_off_until?}}` | `{credential, version, utks, deadline, interval_seconds, hold, hold_off_until?}` (§3.6.1, §3.6.7); `bad_pin`, `bad_password`, `backoff`, `utk_invalid`, `stale_credential`, `credential_frozen`, `rotation_required`, `forbidden` (not the holder), `bad_request` (a PIN that is not 6–32 digits) |
 | `vault.held` (V→D, to the app and desktops in an access session) | — | `{deadline, waiting: {messages, requests, calls, other}}` (§3.6.3) |
 | `vault.lock` (app, desktop) | `{}` | `{}`; then `vault.locking` |
+| `account.get` (app, desktop) | `{}` | `{account: <snapshot, §11.13> \| null, version, received_at}`; `null` (and `version` 0) before any snapshot arrived (0.15.0) |
 | `vault.delete` (app: the holder, a recovering app, or the enrolling app before a credential exists) | `{confirm: "delete my vault", credential?, utk_id, sealed{pin, password?}}` | `{}`; then the deletion of §12.5. `bad_request` without the exact phrase or a needed member; `bad_pin`, `backoff`, `bad_password`, `credential_frozen` / `rotation_required` (holder during an alarm), `forbidden` |
 | `vault.locking` (ephemeral) | — | `{reason?}`, with `exp` = now + 60 s; `reason` is `"recovery"` when a recovery request locked the vault (§11.11.1), `"owner_check"` when ten consecutive failed owner checks did (§3.6.4, 0.13.0) |
 | `relay.token.issued` | — | `{kind: "standing" \| "reconnect", token}` |
@@ -5510,12 +5550,19 @@ app <--poll--- GET /api/vault/requests/{id} <-- response slot <-------------- pa
 
 **Routes:**
 
+- `POST /api/vault/enroll/redeem` (0.15.0, §11.12)
 - `GET /api/vault/enclave`
 - `POST /api/vault/enroll`
 - `POST /api/vault/unlock`
 - `POST /api/vault/lock`
 - `GET /api/vault/requests/{id}`
 - `GET /api/vault/status`
+
+**Who calls them** (0.15.0). Apps never hold a member session: every app
+request is signed by the app's **app key** (§11.12), and the API finds the
+vault and the member from it. The account portal keeps its session and
+uses only `status`, `lock` and `requests/{id}` of these, plus the recovery
+routes (§11.11.7) and the enrollment-code routes (§11.12.1).
 
 The routes follow MEMBER-API conventions; errors use the MEMBER-API error
 body `{error, message}` and add `code` (equal to `error`) and any fields
@@ -5527,9 +5574,14 @@ The enroll and unlock bodies also carry `manifest_sha256` in the clear
 public manifest the sealed request names, so that the host can supply
 that manifest to the enclave (§11.5, "Manifest by hash").
 
-**Access.** `GET /api/vault/enclave`, enroll and unlock require a member in
-state `member` who has accepted the current terms (otherwise `403
-terms_required`). Lock and status stay available for an existing vault
+**Access.** Enrollment requires a member in state `member` who has
+accepted the current terms: the portal checks it when it issues the
+enrollment code, and the redeem checks again that the account is an
+active member (§11.12.1). Since 0.15.0 later requests (`enclave` for an
+enrolled vault, unlock, register) need an active account but not the
+current terms: the vault keeps working when the terms change, and the
+portal and the app (through the account snapshot, §11.13) ask the member
+to accept. Lock and status stay available for an existing vault
 whatever the account state, because locking only reduces exposure.
 Cancelling the account blocks vault access (every route but lock) at once;
 after the 7-day grace period the API deletes the member's vault rows, the
@@ -5628,16 +5680,19 @@ leave enclave memory.
 `GET /api/vault/enclave`:
 
 ```json
-{ "user_guid": "<from /api/account/me>", "request_id": "<ULID>", "nonce": "<b64 32 B>",
+{ "user_guid": "<from the redeem, §11.12.1>", "request_id": "<ULID>", "nonce": "<b64 32 B>",
   "pin": "<digits>",
   "app": { "ik": "<b64>", "kem": "<b64 ek>",
            "relay": {"url": "<base>", "mailbox": "<id>", "pk": "<b64>"},
            "open_token": "<open token for MB(app), ≤ 10 min>", "name": "<device name>",
-           "device_attest": { } },
+           "device_attest": { }, "api_key": "<b64 SPKI DER, P-256>" },
   "manifest_sha256": "<64 hex>", "manifest_serial": 7 }
 ```
 
-`device_attest` is REQUIRED (§11.7). `manifest_sha256` (64 lowercase hex,
+`device_attest` is REQUIRED (§11.7). `app.api_key` (0.15.0) is REQUIRED:
+the app key that signs the app's member API requests (§11.12); the vault
+keeps it with the app's unlock key in the sealed header (`app_key_seq`
+1) and reports it to the host. `manifest_sha256` (64 lowercase hex,
 SHA-256 of the exact manifest bytes) and `manifest_serial` (that
 manifest's `serial`) are REQUIRED and name the manifest the app verified
 (§11.10.1). The request does not carry the document: the host supplies it
@@ -5658,7 +5713,9 @@ with a shorter PIN, so none is migrated.
 App               Relay        Member API               SQS/Parent       Enclave
  | gen keys          |               |                    |                 |
  |--register MB(app)->|              |                    |                 |
- |--GET /api/vault/enclave---------->|  (instance chosen) |                 |
+ |--POST /api/vault/enroll/redeem{secret | email+code, app_key}, §11.12.1
+ |<--{vault_id, user_guid, email_hint}-|                    |                 |
+ |--GET /api/vault/enclave (signed)-->|  (instance chosen) |                 |
  |<--descriptor + attestation--------|                    |                 |
  | verify (§11.2); attest device key (§11.7, in envelope) |                 |
  |--POST /api/vault/enroll{request_id, instance_id, etk_kid, envelope}|
@@ -5700,8 +5757,9 @@ size (§11.4).
 
 **Rules:**
 
-- **Binding.** The enclave MUST reject the request if `user_guid` or
-  `request_id` in the ciphertext differ from the queue message, or if the
+- **Binding.** The enclave MUST reject the request if `user_guid`,
+  `request_id` or (0.15.0) `app.api_key` in the ciphertext differ from
+  the queue message (`app_key`, §11.5), or if the
   inner `ts` (§5.3) is more than 5 minutes off. The inner `id` of an
   alternate-channel request equals its `request_id`, and its `sender_kid`
   is all-zero. It records the queue's `vault_id` in the sealed
@@ -5826,7 +5884,7 @@ Nothing secret is stored:
 
 | Store | Contents | Retention |
 |---|---|---|
-| Vault table | `user_guid`, **`vault_id`** (opaque, 128-bit random, 32 lowercase hex characters, assigned by the API at a member's first enrollment; the routing key for alternate-channel requests), `state` (`enrolling`, `locked`, `unlocked`, `deleted`), **lease** (`instance_id`, `lease_expires_at`), **`sealed_release`** (the PCR0 the vault is sealed to; routing aid, §11.10.5), **`vault_version`** (release that last opened the vault), **`state_version`** (vault-state format version), **`alarm`** (`kind`, `alarm_id`, `at`, `emailed_at`; the last host alarm, below) and `alarm_pending`, `created_at`, `updated_at` | account lifetime |
+| Vault table | **`app_key`** (0.15.0: `{key, kid, seq}`, the public key of the vault's app key as the enclave last reported it, written by the host; and the API's own `app_key_pending` and recovery claim keys, §11.12), `user_guid`, **`vault_id`** (opaque, 128-bit random, 32 lowercase hex characters, assigned by the API at a member's first enrollment; the routing key for alternate-channel requests), `state` (`enrolling`, `locked`, `unlocked`, `deleted`), **lease** (`instance_id`, `lease_expires_at`), **`sealed_release`** (the PCR0 the vault is sealed to; routing aid, §11.10.5), **`vault_version`** (release that last opened the vault), **`state_version`** (vault-state format version), **`alarm`** (`kind`, `alarm_id`, `at`, `emailed_at`; the last host alarm, below) and `alarm_pending`, `created_at`, `updated_at` | account lifetime |
 | Instance registry | `instance_id`, **`release`** (PCR0 from its descriptor), queue URL, descriptor, attestation, `heartbeat_at` | while the instance is live |
 | Request table (response slots) | `request_id`, `vault_id`, `op`, `status` (`queued`, `done`, `expired`), opaque response `envelope` (≤ 8 KiB) and/or a host `code` | TTL 15 min |
 | Audit log | enroll, unlock and lock requests: member, time, `vault_id`, request id, never PINs or envelopes | MEMBER-API audit retention |
@@ -5835,7 +5893,19 @@ Nothing secret is stored:
   envelopes beyond the queue's own retention.
 - **Lifecycle reporting.** The enclave emits lifecycle events (`enrolled`,
   `unlocked`, `locked`, `deleted`, `moved` with the target release, carrying
-  `vault_version` and `state_version`, a number). The parent writes them to
+  `vault_version` and `state_version`, a number). Since 0.15.0
+  `enrolled`, `unlocked` and `locked` also carry the vault's current app
+  key (`app_key`: b64 SPKI DER; `app_key_seq`: the header's count of
+  app-key changes, 1 at enrollment), and the event **`app_key`** carries
+  the same two values when a transfer (§6.7.1) or a recovery (§11.11.5)
+  replaces the app. The enclave hands the `app_key` event to the parent
+  together with the header write that made the change, and the parent
+  writes it after that store succeeds. The parent writes `app_key = {key,
+  kid, seq}` on the vault row **whatever the lease**, conditional only on
+  `seq` being higher than the row's (a stale instance can only report an
+  older one), except that `enrolled` always replaces it (a replaced
+  provisional vault starts again at 1, §11.3); it never takes the key
+  from anywhere else. The parent writes them to
   the vault table only while it holds the vault's lease or no lease exists
   (a conditional write), so an instance that lost a split brain cannot
   overwrite the holder's values.
@@ -5875,14 +5945,26 @@ Nothing secret is stored:
 with a DLQ after 3 receives:
 
 ```json
-{ "v": 1, "op": "enroll|unlock|lock|delete|recovery|recovery_cancel|recovery_register",
+{ "v": 1, "op": "enroll|unlock|lock|delete|recovery|recovery_cancel|recovery_register|account",
   "vault_id": "...", "user_guid": "...", "request_id": "<ULID>",
   "etk_kid": "<16 hex; enroll, unlock and recovery_register only>",
   "envelope": "<b64; enroll, unlock and recovery_register only>",
   "manifest_sha256": "<64 hex; enroll and unlock only>",
   "browser_key": "<b64 65-byte P-256 point; recovery only>",
+  "app_key": "<b64 SPKI DER; enroll and recovery_register only>",
+  "account": { "...": "the account snapshot, §11.13; unlock and account only" },
   "enqueued_at": "<RFC 3339>" }
 ```
+
+`app_key` (0.15.0) is REQUIRED for `enroll` and `recovery_register` and
+absent otherwise: the key the request was signed with at the API, which
+the enclave binds to the sealed `app.api_key` (§11.3, §11.11.3).
+`account` (0.15.0) is REQUIRED for `account` and OPTIONAL for `unlock`
+(the API includes it whenever it can read the member): the enclave
+passes it to the vault process after a successful unlock, or, for the op
+`account`, to the running vault process; with no running vault it drops
+it. `account` takes no lease and has no envelope; the parent answers its
+slot `done` (§11.13).
 
 `manifest_sha256` is REQUIRED for `enroll` and `unlock` and absent for
 every other op. The member API copies it from the request body (§11.1,
@@ -5961,7 +6043,7 @@ requests name the manifest by `manifest_sha256` and `manifest_serial`
   cause anyway); it cannot make the enclave accept a manifest the app did
   not verify, because the hash is inside the sealed, signed request.
 
-`lock` and `delete` carry no envelope. Locking is harmless, and deletion
+`lock`, `delete` and `account` carry no envelope. Locking is harmless, and deletion
 through the API is an operator power the host has anyway (§13.5). The
 recovery operations are in §11.11; `recovery_register` carries a
 12,288-byte padded request like enroll and unlock, and the response to
@@ -5980,7 +6062,12 @@ the lease: the vault is not left open.
   rejected. A request therefore cannot be redirected to another vault.
 - **Session-only attackers.** Unlock requires both a registered unlock key
   and passing device attestation (§11.7). A member session alone, which
-  VettID could obtain, cannot attempt a PIN.
+  VettID could obtain, cannot attempt a PIN. Since 0.15.0 a member session
+  cannot even submit an unlock: the route takes only app-key-signed
+  requests (§11.12).
+- **Replayed API requests** (0.15.0). App requests carry a timestamp and a
+  single-use nonce under the app key's signature (§11.12.2); the sealed
+  request inside keeps its own replay protection above.
 
 ### 11.7 Device attestation (REQUIRED for enroll and unlock)
 
@@ -6126,7 +6213,11 @@ Desktops and agents have no platform attestation and do not unlock.
 - unlock: 10 per member per 15 min; per source network, 10 per 15 min per
   IPv6 /64 and 60 per 15 min per IPv4 address (carrier NAT puts many
   members behind one address);
-- polling: 2 per second.
+- polling: 2 per second;
+- setup codes (0.15.0, §11.12.1): issue 5 per member per hour and 20 per
+  day, one live issuance per member; redeem 10 per 5 min per IPv6 /64
+  and 30 per IPv4 address; typed redeems 5 per 5 min per (email, source
+  network) and 800 per issuance. No limit is global.
 
 Enroll, unlock and lock requests are audited (§11.5), without PINs or
 envelopes.
@@ -6884,7 +6975,8 @@ Portal      Member API                   Enclave (vault process)        Owner de
  |          (24 h; cancel from portal, email link or an owner app's unlock)  |
  |--GET /api/vault/recovery (after available_at)--> sealed code              |
  | decrypt in the browser; show the QR (rendered locally)                    |
-New app --scan QR--> POST /api/vault/recovery/register --queue--> code + device attestation:
+New app --scan QR--> POST /api/vault/recovery/claim{app_key} (0.15.0) --> user_guid
+New app --POST /api/vault/recovery/register (signed) --queue--> code + device attestation:
          |                                       unlock key added (header)   |
 New app --POST /api/vault/unlock (PIN; enclave backoff)--> vault opens; vault_bundle
 New app --hs.init (purpose app, ctx = recovery_id) --> device record, restricted
@@ -6974,14 +7066,21 @@ the older code. The API allows only one active recovery per vault.
   JSON
 
   ```json
-  {"v":1,"t":"r","vault_id":"<id>","recovery_id":"<ULID>","code":"<32 chars>"}
+  {"v":1,"t":"r","api":"https://account.vettid.org","vault_id":"<id>","recovery_id":"<ULID>","code":"<32 chars>"}
   ```
+
+  `api` (0.15.0) is the member API origin of the portal that made the QR,
+  as in the enrollment QR (§11.12.1): an identifier the app compares
+  exactly with its own built-in origin, refusing a mismatch, and never an
+  address it connects to. Apps of 0.15.0 require it; the portal of
+  0.15.0 always writes it.
 
   The QR (0.10.6) encodes those exact bytes in **byte mode**, with error
   correction **M or higher** and a **quiet zone of 4 modules**, dark
   modules on a light background. The version is whatever fits (the
-  account site uses the smallest one at level M: version 8, 49 × 49
-  modules, for the 146-byte payload of a 32-hex `vault_id`); the app
+  account site uses the smallest one at level M; before 0.15.0's `api`
+  that was version 8, 49 × 49 modules, for the 146-byte payload of a
+  32-hex `vault_id`); the app
   MUST accept any version and any level from M up.
   The portal also shows the code as text, in groups of four, for typing.
 - **Why the vault mints the code.** VettID's servers never hold the code
@@ -7013,8 +7112,13 @@ bytes:
   "recovery_id": "<ULID>", "code": "<32 chars>",
   "app": { "ik": "<b64>", "kem": "<b64 ek>",
            "relay": {"url": "<base>", "mailbox": "<id>", "pk": "<b64>"},
-           "name": "<device name>", "device_attest": { } } }
+           "name": "<device name>", "device_attest": { },
+           "api_key": "<b64 SPKI DER, P-256>" } }
 ```
+
+`app.api_key` (0.15.0) is REQUIRED: the new app's app key (§11.12),
+which the enclave binds to the queue message's `app_key` like
+`user_guid`. The app takes `user_guid` from the claim (§11.11.7).
 
 The enclave applies the binding and replay rules of §11.3 and §11.6. It
 then checks, in this order:
@@ -7028,8 +7132,8 @@ then checks, in this order:
    request's `request_id`, the `vault_id` and the inner `ts`. It is checked
    only after the code matched, so a failure leaves the code usable.
 
-On success it adds the app to the header's unlock keys and sets the state
-to `registered`; the code is spent. Its answer to the host then also
+On success it adds the app to the header's unlock keys, with its app key,
+and sets the state to `registered`; the code is spent. Its answer to the host then also
 carries the clear marker `code: "recovery_registered"` (§11.5, 0.10.6),
 which the host copies into the response slot, so that the member API
 stops releasing the spent code (§11.11.7). Any other answer, `ok: false`
@@ -7107,6 +7211,9 @@ because it only reduces exposure. Owner apps learn of the recovery from
    - **The new app replaces the old one,** in the same flush:
      - the device becomes the vault's app and the credential's holder
        (§3.5.9), and the recovery record is removed;
+     - its app key becomes the vault's app key (`app_key_seq` + 1), and
+       the vault reports it to the host (`app_key`, §11.5; 0.15.0): the
+       old app's key is refused by the member API from then on;
      - every other device of role `app` is removed as by `device.unlink`
        (§7.4): `device.unlinked{reason: "replaced"}` best effort, its
        relay key denylisted, its unlock key and UTK pool removed, audit
@@ -7176,15 +7283,36 @@ because it only reduces exposure. Owner apps learn of the recovery from
 
 #### 11.11.7 Member API routes
 
-All routes follow MEMBER-API conventions. Each of the following requires
-a member session and the current terms:
+All routes follow MEMBER-API conventions. The first three require a
+member session and the current terms (the portal); the last two are the
+new app's (0.15.0), signed by its app key (§11.12.2) and needing no
+session:
 
 | Route | Body | Answer |
 |---|---|---|
 | `POST /api/vault/recovery` | `{browser_key}` (b64 of 65 bytes) | `202 {recovery_id, available_at, expires_at}` |
 | `GET /api/vault/recovery` | — | `{recovery: {recovery_id, vault_id, state, requested_at, available_at, expires_at, sealed_code?} \| null}` |
 | `POST /api/vault/recovery/cancel` | `{recovery_id}` | `200 {cancelled}` |
+| `POST /api/vault/recovery/claim` | `{vault_id, recovery_id, app_key}` | `200 {user_guid, email_hint}` (0.15.0) |
 | `POST /api/vault/recovery/register` | `{vault_id, request_id, instance_id, etk_kid, envelope}` | `202 {vault_id, request_id}`; the result is polled like unlock (`GET /api/vault/requests/{id}`) |
+
+- **Claim** (0.15.0). The new app, which has no session and no vault
+  key at the API yet, presents the QR's `vault_id` and `recovery_id` with
+  its app key. The API accepts it only while that recovery is
+  `available` (`409 recovery_not_available`; `404` for an unknown pair),
+  records the key as one of the recovery's **claim keys** (at most 10, the
+  register limit; the oldest is dropped), and answers the member's
+  `user_guid` (for the sealed register and unlock bodies) and
+  `email_hint` (§11.13), which the app shows. A claim key may call
+  `enclave`, `register` and poll its own requests. The API forwards a
+  register only if it is signed by a claim key, and puts that key in the
+  queue message's `app_key`. When a register's slot carries
+  `recovery_registered`, that register's key becomes the recovery's
+  **recovering key**, which may also `unlock`, `lock` and read `status`
+  until the recovery ends or the vault reports the key as its app key
+  (§11.11.5 step 3). Knowing `vault_id` and `recovery_id` (both in the
+  QR) lets a stranger claim, which gains nothing: the enclave still
+  needs the code and an attestation.
 
 The email link uses its own route, `POST /api/vault/recovery/cancel-link`
 with body `{token}`, answered `200 {cancelled}` like the session's
@@ -7253,6 +7381,226 @@ cancel. It needs no session: the token stands in for it.
     (§3.5.7).
   - A vault without a credential is not recoverable. It cannot exist past
     enrollment anyway (§3.5.7).
+
+### 11.12 Enrollment codes and app keys
+
+(0.15.0; owner decision of 2026-10-05: the app and the account portal are
+separate. Design and rationale: ENROLLMENT-CODES.md.)
+
+The app never signs in to the member API. The portal, where the member is
+signed in, issues a **setup code** (a QR secret, and a short code typed
+with the member's email); the app redeems it with its **app key**, which
+then signs every app request to the API.
+
+#### 11.12.1 The setup code
+
+(Revised before approval, owner review of 2026-10-05: 5 minutes; a long
+QR secret as the primary path; the typed code only with the member's
+email; no global limit that one attacker could exhaust for everyone.)
+
+- **Issue.** The portal's "Set up your vault" calls `POST
+  /api/vault/enroll-code` with the member session (MEMBER-API). The API
+  requires an active account in state `member` with the current terms
+  (`403 terms_required` otherwise), revokes the member's live issuance
+  if any, and makes one **issuance** with two secrets, both returned
+  once:
+  - the **QR secret**: 16 bytes from a CSPRNG, written as 22 characters
+    base64url without padding (128 bits);
+  - the **typed code**: 8 symbols from `23456789ABCDEFGHJKMNPQRSTUVWXYZ`
+    (31 symbols: no 0, 1, I, L or O), each chosen uniformly by rejection
+    sampling: 31^8 ≈ 8.5 × 10^11, about 39.6 bits; shown as `XXXX-XXXX`.
+- **Validity.** 5 minutes from issue, single use, at most one live
+  issuance per member. Redeeming either secret spends the issuance, so
+  both end together; a new issuance, the portal's cancel or expiry ends
+  both too.
+- **At rest.** With `k_code`, a secret key held by the API (never in the
+  tables):
+  - the issuance is stored under `HMAC-SHA-256(k_code, "qr" || 0x00 ||
+    secret)`, its lookup key;
+  - it holds `user_guid`, `code_mac = HMAC-SHA-256(k_code, "code" || 0x00
+    || user_guid || 0x00 || code)`, `expires_at`, `state` and a count of
+    typed attempts;
+  - the member's pointer names the live issuance.
+  Neither secret is stored, logged or audited.
+- **QR.** The portal shows the QR secret as the QR payload
+
+  ```json
+  {"v":1,"t":"e","api":"<member API origin>","s":"<22 chars base64url>"}
+  ```
+
+  encoded as the recovery QR is (§11.11.2: byte mode, level M or higher,
+  4-module quiet zone, any version), and the typed code beneath it as
+  text. The QR does not carry the typed code. `api` is the portal's
+  origin (production `https://account.vettid.org`): an identifier that
+  the app compares exactly with its own built-in member API origin,
+  refusing a mismatch with a message naming the other environment. An app
+  MUST NOT send anything to an origin taken from a QR. On a phone the
+  portal also offers the App Link `https://<account host>/vault/enroll/#s=<QR
+  secret>`; it never puts the typed code in a link.
+- **Redeem.** `POST /api/vault/enroll/redeem`, signed (§11.12.2) by the
+  key in `app_key` with an empty `vault`, with exactly one of:
+  - `{secret, app_key}` (scanned QR or App Link): the API looks the
+    issuance up by `HMAC(k_code, "qr" || 0x00 || secret)`;
+  - `{email, code, app_key}` (typed): the API normalises both (email
+    trimmed and lower-cased; code without spaces or hyphens, upper case),
+    finds the member by email and the member's live issuance through the
+    pointer, and compares `code_mac` in constant time. The code is
+    compared with that one member's issuance only: there is no space of
+    codes shared between members.
+
+  Either way the issuance must be live, unexpired, the member's current
+  one, and its member an active `member`; for the typed form also not
+  `typed_blocked` (below). Any failure, of either form, is `404
+  invalid_code`. Then the API:
+  1. marks the issuance used with a conditional write (single use, both
+     secrets);
+  2. finds the member's vault, or assigns a new `vault_id` (§11.3,
+     "Re-enrollment"), and records `app_key` as the vault's **pending app
+     key** for 1 hour;
+  3. emails the member that a phone used their setup code, with the time;
+  4. answers `{vault_id, user_guid, email_hint}`.
+
+  The app shows `email_hint` ("Setting up a vault for m***@example.com")
+  before it asks for a PIN, then enrolls (§11.3) with `user_guid` in the
+  sealed request and every call signed by the app key. The pending key
+  may call `GET /api/vault/enclave`, `POST /api/vault/enroll` and poll its
+  own requests, nothing else. The enclave binds the vault to `user_guid`
+  as before: the API, which issued the code, remains the authority on
+  which member a vault belongs to.
+  As for every enrollment, the vault's first `credential.create` starts
+  the daily owner check's clock (§3.6.1); redeeming a code does not.
+- **Vault service pause.** While the operator has paused the vault
+  service (MEMBER-API 1.2.0, "Vault service pause"), issue, redeem and
+  recovery `claim` (§11.11) are refused with `503 vault_unavailable` like
+  `enroll`, before anything is spent, counted or written; reading and
+  revoking the member's code are still served.
+- **Limits** (§11.8), none of them global:
+  - per source network, both forms: 30 redeems per 5 minutes per IPv4
+    address, 10 per IPv6 /64;
+  - typed, per (email, source network): 5 per 5 minutes;
+  - typed, **per issuance: 800 attempts** across all sources. The chance
+    that they find the code is at most 800 / 31^8 ≈ 9.4 × 10^-10 per
+    issuance, and with at most 20 issuances a day at most 1.9 × 10^-8 per
+    member and day. On reaching it the issuance becomes `typed_blocked`:
+    typed redeems of it fail, a QR redeem of it still works, the member
+    is emailed and operations are alerted. Flooding therefore costs at
+    most one member the typed entry of one issuance;
+  - the QR secret (2^128) needs no other limit.
+- **No account oracle.** The typed form answers a wrong email, an email
+  without a live issuance, a wrong code, and an expired, used, revoked or
+  blocked issuance identically (`404 invalid_code`), after the same work
+  (a member lookup and a MAC compared against the stored or a dummy
+  `code_mac`) and no sooner than 250 ms after receipt. Its limits count
+  attempts for every email, existing or not.
+- **An existing vault.** A code can be issued and redeemed whatever the
+  member's vault; the enclave decides (§11.3: a confirmed vault is never
+  replaced, `vault_exists`). A pending key never replaces the vault's
+  `app_key` at the API; only the enclave's report does (§11.5).
+
+#### 11.12.2 The app key and signed requests
+
+- **The key.** Each app makes, per vault, a P-256 signing key that never
+  leaves its hardware: Android Keystore (StrongBox if present, else the
+  TEE; non-exportable; purpose SIGN; no user authentication, so that lock
+  and polling work in the background) or an iOS Secure Enclave key. It is
+  distinct from the device attestation key (§11.7), whose certificate
+  chain stays inside the enclave. Its public form is the b64 of its SPKI
+  DER, and its id `akid` the first 16 bytes of SHA-256(SPKI DER), 32
+  lowercase hex.
+- **The header.** Every app request to `/api/vault/*` carries
+
+  ```
+  X-VettID-App: v=1; vault=<vault_id or empty>; kid=<akid>; ts=<Unix s>; nonce=<b64url, 16 bytes>; sig=<b64url DER ECDSA>
+  ```
+
+  where `sig` is ECDSA P-256 with SHA-256 over (each `\n` a literal
+  newline, no trailing newline):
+
+  ```
+  "vettid/member-api/app/1" \n METHOD \n path \n query \n vault_id \n akid \n ts \n nonce \n hex(SHA-256(body))
+  ```
+
+  `path` is the request path as sent, `query` the raw query string
+  without `?` (or empty), `body` the exact body bytes (empty for a GET).
+  (Not `Authorization`, which the account site's CloudFront cannot forward
+  through an origin request policy.)
+- **Verification** (the member API). `ts` within 300 s of the API's
+  clock; `nonce` not seen for this `akid` in the last 600 s (recorded
+  with a conditional write); the key is one the vault row allows for the
+  route (below); the signature verifies. Otherwise `401 unauthorized`,
+  one answer for all. A request with this header is authenticated by it
+  alone: cookies are ignored and the CSRF header is not required.
+- **Which key may call what:**
+
+  | Key | Recorded by | Routes |
+  |---|---|---|
+  | The vault's `app_key` | the host, from the enclave's reports (§11.5) | `enclave`, `unlock`, `lock`, `status`, its own `requests/{id}` |
+  | The pending key | the API, at redeem; 1 hour | `enclave`, `enroll`, its own `requests/{id}` |
+  | A recovery's claim keys | the API, at claim (§11.11.7) | `enclave`, `recovery/register`, their own `requests/{id}` |
+  | A recovery's recovering key | the API, from `recovery_registered` | as a claim key, and `unlock`, `lock`, `status` |
+
+  "Its own" requests: the API records the signing `akid` on each response
+  slot, and answers a poll signed by another key `404`.
+- **What the key cannot do.** The member API holds only public keys, and
+  the enclave does not check app-key signatures: they authorize routing,
+  rate limits and account checks, not anything in the vault. Every
+  operation that matters still needs what only the app has (PIN, unlock
+  key signature, device assertion, release approval, recovery code,
+  attestation). A dishonest API can therefore do with app keys only what
+  it could do already: refuse, misroute, lock.
+- **Rotation and revocation.** The vault's app key changes only when the
+  app does: a transfer (the new app's `api_key` in its `hs.init`, §6.2,
+  §6.7.1) or a recovery (the key of the registered app, §11.11.5). Each
+  change increments the header's `app_key_seq` and is reported to the
+  host (`app_key`, §11.5); the old app's key is refused from then on.
+  There is no other rotation in 0.15.0. A phone that lost its Keystore
+  lost its attestation key too, and recovers.
+
+### 11.13 Account status through the vault
+
+(0.15.0.) Apps show the member's membership, terms and subscription
+state, read-only, and get it only from their vault; changes are made on
+the portal.
+
+- **The snapshot** the member API builds from the member's account:
+
+  ```json
+  { "v": 1, "as_of": "<RFC 3339>", "email_hint": "m***@example.com",
+    "state": "member", "account_status": "active|canceled", "deletes_at": "<RFC 3339>|null",
+    "terms": { "needs_acceptance": false },
+    "subscription": { "type_name": "...", "status": "trial|active|expired|canceled",
+                      "paid": false, "expires_at": "<RFC 3339>" } | null,
+    "voting_rights": false }
+  ```
+
+  `email_hint` is the first character of the address's local part, `***`,
+  `@` and the domain. Nothing else about the member is sent (no name, no
+  full address, no `user_guid`). At most 2 KiB.
+- **Delivery.** The API puts the snapshot in every `unlock` queue message
+  (`account`, §11.5) and, when the member's account changes (terms
+  accepted, subscription started, cancelled or changed, account
+  cancelled), sends the op `account` to the vault's live leaseholder; with
+  no live lease it sends nothing (the next unlock carries it). A new terms
+  version is not fanned out: each vault learns it at its next unlock. A
+  trial's expiry needs no message: apps show `expired` once `expires_at`
+  has passed.
+- **In the vault.** After a successful unlock, or on the op `account` for
+  a running vault, the vault parses the snapshot strictly (unknown members
+  ignored, wrong types refused, over 2 KiB refused), ignores it unless its
+  `as_of` is later than the stored one, stores it in DEK state with a
+  `version` (+1 per change) and its own `received_at`, and sends
+  `sync.event{kind: "account.changed", version}` to the app and desktops.
+  They read it with `account.get` (§10.2). Agents and connections never
+  receive it (§13.7).
+- **While held** (§3.6.3). The op `account` is still stored (it comes
+  from the host, not an owner device), but `account.get` is not on the
+  hold's allow list (`owner_check_required`), and
+  `sync.event{account.changed}` waits for the check like any other
+  fan-out; devices catch up with `sync.since` after it.
+- **Display only.** Nothing in the vault depends on the snapshot, and it
+  is not authenticated beyond the host path: it is VettID's own data
+  about the member, which VettID could equally withhold. Membership and
+  terms are enforced by the member API (§11.1).
 
 ## 12. Locked vaults and the collect manager
 
@@ -7577,7 +7925,12 @@ it can read and write only its own objects and use only its own relay key
 | An app's session keys | No password or secret value (UTK and reply-key sealing), no replay (single-use UTKs), no redirected payloads (§3.5.4) | Unlink the device |
 | Credential password alone | Nothing without the blob and a paired app | `credential.password.change` |
 | Member's email and account session (24 h, unnoticed) | A recovery: one new attested app that replaces the member's app. Still needs the PIN and, with the backup on, the password, online, under both backoffs (§11.11.2); with the backup off, a reset that destroys the critical items (§11.11.5) | Cancel; the app sees `recovery_pending` and `vault.locking{recovery}` |
-| VettID's API tables | Nothing: the recovery code is stored only sealed to the member's browser, and the enclave enforces the 24 h (§11.11.2) | — |
+| VettID's API tables | Nothing: the recovery code is stored only sealed to the member's browser, and the enclave enforces the 24 h (§11.11.2); setup codes only as MACs under a key outside the tables, app keys only as public keys (§11.12) | — |
+| A setup code (stolen, shoulder-surfed or phished; 0.15.0) | Before the member uses it, within its 5 minutes (the typed code also needs the member's email): an **empty** vault enrolled into the member's account, with the thief's phone and PIN, whose account snapshot shows the thief the masked email and membership (§11.13). Never an existing vault: a confirmed vault is never replaced (§11.3) | Single use; one live code; the member's own redeem then fails and the portal shows the code used; the member is emailed at every redemption; support deletes the vault (the host `delete`) |
+| Guessing setup codes | The QR secret: nothing (128 bits). A typed code: only one named member's, at most 800 guesses per issuance from all sources, 9.4 × 10^-10 per issuance (§11.12.1; ENROLLMENT-CODES §3.3). Flooding one member's typed entry blocks only that issuance's typed form for at most 5 minutes; the QR and every other member are unaffected (no global limit) | The limits of §11.8; the member is emailed and operations alerted at the ceiling |
+| A code of someone else's account (reverse phishing) | The member's new vault belongs to that account, whose holder could later request a recovery; it still needs the member's PIN and password after 24 h in which the member's app sees the recovery | The app shows `email_hint` before enrolling and in its account view (§11.12.1, §11.13) |
+| An app key (0.15.0) | Member API calls as the vault's app: unlock attempts still need the unlock key, the device assertion and the PIN; lock and status. Hardware-held: in practice, the phone | Transfer or recovery replaces it (§11.12.2) |
+| A member session (0.15.0) | No longer any vault request but `status`, `lock` and the recovery routes; issuing a setup code (useful only to an account without a confirmed vault) | Sign out; the redemption email |
 | Decrypted vault state (DEK) | Everything in it (`data` and `secret` items included), plus offline guessing of the credential password against the current CEK and the latest blob (§3.5.8); critical items' values stay encrypted under item keys that only the credential, sealed under the password, holds (§10.7) | Rotate the relay key and the credential; change the password |
 | A critical item key (from an old blob with its CEK and the password, or from a compromised release during an operation) | That item's ciphertext of that generation only; nothing after the item's next use, which re-keys it (§10.7) | Use the item, or `credential.rotate` (re-keys every item) |
 | An old release, after members moved away | Vaults still sealed to it. A moved vault only if the host serves it a stale header and state **and** an app sends it the PIN; apps never send a PIN to an older release than they last unlocked into (§11.10.6). Residual: an owner device that never learned of the move. | Members move forward; the app warns about `deprecated` and `retired` releases; the release ends at its `ends_at` (§11.10.5) |
@@ -7639,9 +7992,17 @@ their owner. Period.")
   only to its owner's devices (§9.1), each within its role (§6.8).
 - To its host it reports only the content-free lifecycle events and
   alarms of §11.5 (`enrolled`, `unlocked`, `locked`, `moved`, `deleted`,
-  `alarm.credential_clone`). The owner check (§3.6) adds none: the hold
-  is not reported, and the lock after ten failed checks is an ordinary
+  `alarm.credential_clone`) and, since 0.15.0, its app's public app key
+  with its sequence number (on `enrolled`, `unlocked` and `locked`, and
+  the event `app_key`, §11.12.2). That key exists for this vault's
+  member API requests only and identifies no device; its changes tell
+  the host that a transfer or recovery completed, which the next unlock
+  would show anyway. The owner check (§3.6) adds none: the hold is not
+  reported, and the lock after ten failed checks is an ordinary
   `locked`.
+- From its host it accepts, besides queue operations, only the account
+  snapshot (§11.13, 0.15.0), which it shows to its owner's app and
+  desktops and to no one else.
 - To a connection it sends only what the member's features share with
   that connection by the member's own decisions: messages, calls, the
   shared profile, granted and shared items, action results,
@@ -8112,6 +8473,96 @@ Follow-ups:
        is enforced in the enclave (5 per recovery, §11.11.2) and an
        app's local count only drives its wording, while a new field in
        a sealed result needs the vault and apps to change together.
+
+20. **App and portal separate (0.15.0).** Owner decision of 2026-10-05:
+    the app no longer signs in to the member API; the portal issues a
+    setup code (revised after the owner's review of the same day: 5
+    minutes, a 128-bit QR secret as the primary path, the short code
+    typed only with the member's email, no global limit), the app redeems it with a per-app app key that signs
+    its requests, and account information reaches the app through the
+    vault (§11.12, §11.13; ENROLLMENT-CODES.md).
+    Follow-ups: vettid-vault (`app.api_key` in `vault.enroll` and
+    `vault.recovery.register` with the binding to the queue's `app_key`;
+    `api_key` in a transfer's `hs.init`; the key and `app_key_seq` in the
+    header's app record; the key on `enrolled`, `unlocked` and `locked`
+    and the event `app_key`, handed over with the header write; the
+    parent's sequence-conditional write of `app_key` whatever the lease;
+    the queue op `account` and `account` in unlock, routed to the vault
+    process; `account.get` and `sync.event{account.changed}`;
+    memberapitest with signed requests, redeem, claim and pending keys;
+    vectors for the request signing string, the code alphabet and both QR
+    payloads); vettid.org (the code routes, redeem, claim, request
+    signing and key matrix, the `account` pushes, the redemption email,
+    CloudFront forwarding `X-VettID-App`, the portal's setup page and the
+    recovery QR's `api`); vettid-android (no sign-in; the app key; the
+    scanner's `t: "e"`; redeem and claim; the account view from
+    `account.get`).
+    Open risk: if the parent dies between storing a transfer's header and
+    writing the reported key, the new phone cannot reach the API and the
+    member recovers (availability only).
+    Migration: production has no vaults; staging vaults of S1 to S3 are
+    deleted and re-enrolled after a staging release S4 of 0.15.0; no
+    compatibility path exists in production.
+    With the daily owner check (0.13.0, item 22): enrollment by setup
+    code starts the clock like any enrollment (§3.6); `account.get` is
+    not on the hold's allow list and `sync.event{account.changed}` waits
+    for the check (§11.13). With the member API's vault service pause
+    (MEMBER-API 1.2.0): code issue, redeem and recovery `claim` are
+    refused like `enroll` (MEMBER-API 2.0.0).
+    **OWNER DECISIONS of 0.15.0** (drafted as 0.11.0; approved as
+    recommended, with the owner's changes noted, on 2026-10-06):
+    1. The typed code's alphabet `23456789ABCDEFGHJKMNPQRSTUVWXYZ`, 8
+       symbols (about 39.6 bits), uniform by rejection sampling.
+       Recommended: yes (Crockford base32 keeps 0 and 1).
+    2. **Changed by the owner, 2026-10-05:** 5 minutes (was 15). Single
+       use, one live issuance per member, shown once, stored only as
+       MACs: unchanged.
+    3. The QR carries the API origin as an identifier the app must match
+       exactly, never as an address; the recovery QR gains it too.
+       Recommended: yes.
+    4. A same-device App Link `https://account.vettid.org/vault/enroll/#s=`
+       on the portal for a member using it on the phone, carrying the QR
+       secret, never the short code (owner, 2026-10-05). Recommended:
+       yes.
+    5. A separate per-app P-256 app key signs app requests, rather than
+       the device attestation key (a device identifier the API must not
+       see) or a bearer token. Recommended: yes.
+    6. The enclave is the source of the app key and reports it to the
+       host (§13.7 amended). Recommended: yes.
+    7. Unlock no longer requires the current terms; only issuing a code
+       does. Recommended: yes.
+    8. Account information reaches the app only through the vault, as a
+       display-only snapshot pushed by the API with the fields of §11.13,
+       `email_hint` included. Recommended: yes.
+    9. A new terms version reaches running vaults at their next unlock,
+       without a fan-out. Recommended: yes.
+    10. The member is emailed at every redemption. Recommended: yes.
+    11. A vault enrolled with a stolen code is removed by support (host
+        `delete`); no self-service deletion on the portal in v1.
+        Recommended: yes.
+    12. **Changed by the owner, 2026-10-05: removed.** There is no global
+        cap or brake on redemptions (it let one attacker stop every
+        member's enrollment); decisions 16–19 replace it.
+    13. No portal control to revoke the app's key. Recommended: none;
+        recovery covers a lost phone.
+    14. Staging vaults are re-enrolled, not migrated. Recommended: yes.
+    15. The app drops sign-in entirely, including the `/auth/` App Link.
+        Recommended: yes.
+    16. Each issuance carries a 128-bit QR secret (22 characters
+        base64url), the primary path, redeemable alone under the
+        per-network limits only. Recommended: yes.
+    17. The typed fallback needs the member's email with the 8-character
+        code, compared only with that member's live issuance. Recommended:
+        yes.
+    18. A ceiling of 800 typed attempts per issuance (about 9.4 × 10^-10
+        per issuance), with 5 per (email, network) and the per-network
+        limits; at the ceiling only that issuance's typed entry is
+        blocked, the member is emailed and operations alerted, and the QR
+        still works. Recommended: yes.
+    19. No account-existence oracle: every typed failure answers `404
+        invalid_code` after the same work and no sooner than 250 ms.
+        Recommended: yes.
+
 21. **LEASH §3.5 alignment (0.12.0).** Owner decision of 2026-10-05:
     VettID adopts the LEASH paper's §3.5 delegation and status statement
     format; the paper is the neutral reference, and with no production
@@ -8170,9 +8621,9 @@ Follow-ups:
     10. The proof of possession of `sub` is not specified here; it waits
         for the paper's MCP profile. Recommended: wait; no relying party
         outside VettID exists yet.
-22. **The daily owner check (0.13.0).** (Item 20 is held by the open
-    0.11.0, vettid.org PR #122; 21 is 0.12.0; this is the next free
-    number whichever merges first.) Owner decisions of 2026-10-05, as
+22. **The daily owner check (0.13.0).** (Item 20 is 0.15.0, drafted as
+    0.11.0 in vettid.org PR #122 and merged after this item; 21 is
+    0.12.0.) Owner decisions of 2026-10-05, as
     specified in §3.6:
     1. **Vault-enforced.** The vault records the time of the member's
        last successful check, the PIN and the credential password
@@ -8232,10 +8683,10 @@ Follow-ups:
     counts and hidden cache, the hold switch with its end date and the
     persistent "hold is off" indicator, the early warning, the interval setting,
     the locked-and-past-deadline path, error and lock handling);
-    MEMBER-API unchanged (the hold is not reported to the host). If 0.11.0
-    (PR #122) merges, its `account.get` is not on the hold's allow list
-    and `sync.event{account.changed}` waits for the check, like any
-    other fan-out.
+    MEMBER-API unchanged (the hold is not reported to the host). Since
+    0.15.0 (item 20), `account.get` is not on the hold's allow list and
+    `sync.event{account.changed}` waits for the check, like any other
+    fan-out (§11.13).
 
     **OWNER DECISIONS of 0.13.0** (sub-decisions; all twelve approved as
     recommended by the owner on 2026-10-06):
@@ -8535,6 +8986,48 @@ pending (§15, follow-up 1).
 
 ## 17. Changelog
 
+- **0.15.0** (2026-10-06): the app and the account portal are separate
+  (owner decision of 2026-10-05; approved 2026-10-06; ENROLLMENT-CODES.md;
+  §15 item 20). Breaking for apps and the member API. Drafted as 0.11.0
+  (vettid.org PR #122) and renumbered after 0.14.0 at merge; the "open
+  0.11.0" that the 0.12.0 and 0.13.0 entries mention is this release,
+  and §15 keeps the item number 20 that 0.13.0 left for it.
+  - §11.12 (new): the portal-issued setup code (one issuance per member,
+    5 minutes, single use, MACs at rest: a 128-bit QR secret, QR `t: "e"`
+    with `api`, and an 8-symbol code typed with the member's email and
+    compared with that member's issuance only; 800 typed attempts per
+    issuance; no global limit; no account oracle), its redeem, and the app key: a per-app
+    P-256 key whose signature (`X-VettID-App`) authorizes every app
+    request to the member API, with the matrix of keys and routes.
+  - §11.13 (new): the account snapshot, in every unlock message and the
+    new queue op `account`; kept in vault state; `account.get` and
+    `sync.event{account.changed}`; display only.
+  - §11.1: apps hold no member session; enrollment needs the current
+    terms at code issue; later requests need an active account only.
+  - §11.3: `app.api_key` in `vault.enroll`, bound to the queue's
+    `app_key`; `user_guid` from the redeem.
+  - §11.5: `app_key` and `account` in the queue message; the key on
+    `enrolled`, `unlocked` and `locked` and the event `app_key`; the
+    parent writes it whatever the lease, by sequence.
+  - §11.6, §11.8: a session cannot submit an unlock; replay of signed
+    requests; code limits.
+  - §11.11: the recovery QR's `api`; `app.api_key` in the register;
+    `POST /api/vault/recovery/claim`; claim and recovering keys; the
+    recovered app's key reported at completion.
+  - §6.2, §6.7.1: `api_key` in a transfer's `hs.init`; reported at the
+    approval.
+  - §2.2, §10, §10.1, §10.2, §13.5, §13.7: what the API learns;
+    `account.get`; `account.changed`; threats; what the vault reports to
+    and accepts from its host.
+  - With the daily owner check (0.13.0, §3.6): enrollment by setup code
+    starts the clock at the enrollment's first `credential.create`, as
+    any enrollment does (§3.6, §11.12); `account.get` is not on the
+    hold's allow list and `sync.event{account.changed}` waits for the
+    check like other fan-out, while the queue op `account` is still
+    stored (§11.13); §15 item 22's note on 0.11.0 updated.
+  - With the member API's vault service pause (MEMBER-API 1.2.0): code
+    issue, redeem and recovery `claim` are refused like `enroll` (§11.12.1,
+    MEMBER-API 2.0.0).
 - **0.14.0** (2026-10-06): the canary manifest (owner decisions of
   2026-10-06; VAULT-RELEASES 0.1.6 §10.1; vettid-android #63). Normative
   for apps that accept one; no wire, enclave or member API change.

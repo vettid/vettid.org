@@ -1,9 +1,13 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.4
-date: 2026-10-05
+version: 0.1.5
+date: 2026-10-06
 changelog:
+  - 0.1.5: the app never signs in (VAULT-MESSAGING 0.15.0 §11.12–§11.13,
+    MEMBER-API 2.0.0; ENROLLMENT-CODES.md): onboarding by setup code, the
+    avatar sheet's account view from the vault (§4), `:core:altchan`
+    (§5), membership (§7)
   - 0.1.4: the daily owner check (VAULT-MESSAGING 0.13.0 §3.6, owner
     decisions of 2026-10-05 and 2026-10-06): follow-ups for A3 and A6
     (§6), the Settings and owner-check rows (§4), the hold switch
@@ -110,8 +114,8 @@ the destinations.
 | Credential | — | Critical items inside the Protean Credential; unlock window; password change; the vault-held credential copy on/off |
 | Settings | Settings | Vault (status, release, lock, PIN); Security (credential, recovery, attestation info, biometric app lock and timeout, the owner-check interval 1–24 h and the hold switch); Privacy; App (theme, notifications and push path) |
 | Owner check | — (VettID-specific) | One screen: PIN and credential password together (VAULT-MESSAGING §3.6.5); also the "vault held" screen with the waiting counts and the lock action |
-| Avatar sheet | Account sheet | Vault status, lock vault, open account portal, sign out of this device |
-| Onboarding | Sign-in flow | Membership check → enroll vault (PIN, credential password) → first connection guide |
+| Avatar sheet | Account sheet | Vault status, lock vault, the member's membership and subscription (read-only, from the vault, VAULT-MESSAGING §11.13), open account portal (browser) |
+| Onboarding | Sign-in flow | Scan the setup QR from the account portal, or type its short code with the account's email (no sign-in in the app, VAULT-MESSAGING 0.15.0 §11.12) → confirm the account (`email_hint`) → enroll vault (PIN, credential password) → first connection guide |
 
 Every list has an empty state; every destructive action has a confirmation;
 every critical action asks for the credential password.
@@ -132,7 +136,7 @@ one (translation-ready), accessibility labels required in review.
 | `:core:keystore` | Android Keystore keys (device identity, relay key wrapping, device attestation key with StrongBox/TEE, the biometric-gated app-data key) |
 | `:core:attestation` | Ported Nitro attestation + PCR manifest verification; Android key attestation for enrollment/unlock (§11.7) |
 | `:core:relay` | Relay client (RELAY-PROTOCOL 0.6): register, signed requests, tokens, deposit, collect (long-poll / WebSocket), ack, claims, blobs |
-| `:core:altchan` | Member-API alternate channel: descriptors, sealed enroll/unlock/lock, result polling, release-update approval |
+| `:core:altchan` | Member-API alternate channel: code redeem and recovery claim, requests signed by the app key (no member session), descriptors, sealed enroll/unlock/lock, result polling, release-update approval |
 | `:core:vault` | Typed vault client: one function per §10 type, sessions with the vault, dedupe, outbox, sync events → repositories |
 | `:core:data` | Repositories and Room caches per feature |
 | `:core:ui` | Theme (navy + gold, light/dark), components (top bar, drawer, list row, empty state, pill bar, settings cards, sheets) |
@@ -224,7 +228,8 @@ schema for the cache and the request verb belong to the location batch.
   deployed (FCM needs credentials), v1 collects while the app is open and
   through the foreground-service path.
 - **Membership**: enrollment requires an account.vettid.org member who has
-  accepted the current terms (MEMBER-API).
+  accepted the current terms; the portal checks it when it issues the
+  setup code (MEMBER-API 2.0.0). The app itself never signs in.
 
 ## 8. Risks
 
