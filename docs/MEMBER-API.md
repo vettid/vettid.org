@@ -1,8 +1,18 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.0.0
+version: 2.0.1
 changelog:
+  - 2.0.1 (2026-10-06, from the implementation, vettid.org #144):
+    editorial. The pause refusal of `redeem` and recovery `claim` comes
+    after the signature check, which reads `app_key` from the body, and
+    before anything is spent, counted, written or emailed (it used to
+    say "before the body is read"); a suspended account gets no account
+    snapshot (`account_status` is `active` or `canceled` only); limits
+    chosen where the spec was silent: reading a setup code 60 per member
+    per minute, revoking it 30 per 15 minutes; failed redeems are
+    audited at the 1st, 10th, 100th, … failure per source network and
+    hour
   - 2.0.0 (2026-10-06, VAULT-MESSAGING 0.15.0; ENROLLMENT-CODES.md):
     **breaking for apps.** Apps no longer sign in: the portal issues a
     setup code (`/api/vault/enroll-code`: a 128-bit QR secret and an
@@ -315,11 +325,16 @@ policy adds `X-VettID-App` to its allowlist.
   - The effect of flooding is therefore bounded to one member's typed
     entry for one issuance (at most 5 minutes); every other member, and
     that member's QR and App Link, are unaffected.
+  - Not in the spec, chosen here (2.0.1): reading the code (`GET`) 60
+    per member per minute; revoking it (`DELETE`) 30 per member per 15
+    minutes.
 - **Audit:** `vault.enroll_code_issued`, `vault.enroll_code_revoked`,
   `vault.enroll_code_redeemed` (member, `vault_id`, the key's `kid`,
   `via`), `vault.enroll_code_typed_blocked` (member, issuance time),
-  `vault.enroll_code_failed` (aggregated per network and hour). Never a
-  secret, a code or an email that is not a member's.
+  `vault.enroll_code_failed` (aggregated per source network and hour:
+  written at the 1st, 10th, 100th, … failure of the network's hour, with
+  the count so far and `via`). Never a secret, a code or an email that
+  is not a member's.
 
 ### Access (§11.1)
 
@@ -541,10 +556,12 @@ have: the only other way back is a manifest serial with the release
   not be used before it expires is not issued), `POST
   /api/vault/enroll/redeem` and `POST /api/vault/recovery/claim`. For the
   redeem and the claim the refusal comes right after the app signature
-  check, before the body is read and before any lookup: no issuance is
-  spent, no typed attempt is counted, no `app_key_pending` or claim key
-  is written and no email is sent, and it reveals nothing about an
-  account. Served: `GET` and `DELETE /api/vault/enroll-code` (revoking
+  check (which reads `app_key` from the body: the request is signed by
+  that key) and before any lookup, so before anything is spent, counted,
+  written or emailed: no issuance is spent, no typed attempt is counted,
+  no `app_key_pending` or claim key is written and no email is sent, and
+  it reveals nothing about an account. Only `app_key` is read for the
+  signature; the rest of the body is not looked at. Served: `GET` and `DELETE /api/vault/enroll-code` (revoking
   only reduces exposure), and the app-signed `status`, `lock` and
   `requests/{id}` like the portal's. A redeem that succeeded just before
   the pause leaves `app_key_pending` (1 hour); `enclave` and `enroll`
@@ -616,6 +633,13 @@ expires_at} | null`, `voting_rights`; at most 2 KiB) and sends it:
   With no live lease nothing is sent. A slot is written as for `lock`;
   the host answers it `done`. A newly published terms version is not
   fanned out (each vault learns it at its next unlock).
+
+The snapshot's `account_status` is `active` or `canceled` only
+(VAULT-MESSAGING §11.13). A **suspended** account (or one in any other
+status, or in neither state `registered` nor `member`) gets **no
+snapshot**: none is put in an `unlock` (which a suspended account cannot
+make anyway, Access above) and no `account` op is sent; the vault keeps
+the last snapshot it had.
 
 It is display only and never a security signal; the API's own checks
 (Access, above) are what enforce membership and terms. Audit: none (it is
