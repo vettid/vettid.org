@@ -1,6 +1,6 @@
 {
   "channel": "staging",
-  "signed_serial": 4,
+  "signed_serial": 5,
   "releases": [
     {
       "release": 1,
@@ -16,7 +16,7 @@
     },
     {
       "release": 2,
-      "status": "deprecated",
+      "status": "removed",
       "pcr0": "49cb5aa0a9ff7933ddd63ecfe502fb8a8a3e12a57a44e2e11a791d2963b92b78313a05b631cc7114235c9b99dea8b0e6",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
       "pcr2": "654e09beb592cf8d65b75476a7b561dfa7b7bd221690c5314dc3279b9f9fbb5c4f558311c627e45a53545e96cf8b1504",
@@ -25,18 +25,8 @@
         "cbaf7412603d1b54dad85c2a7769396c153d20c6f4a1c0f5a13341653352edee48ecbdc31615a058f50e2685b61bf8e5"
       ],
       "published_at": "2026-10-05T14:55:20Z",
-      "notes": "https://github.com/vettid/vettid-vault/releases/tag/release/staging/2",
-      "host": {
-        "tag": "release/staging/2",
-        "source_commit": "bf0cc3120f780278a9afad974609f6a2bf2703ef",
-        "measurements_sha256": "8c46c1405dd6b0288c84cf331823af442387c348b64b022358ef5d6a655919e3",
-        "host_files_sha256": "c0b36acafa89e4110a0d497fb8b6c552c3bfd8c86eabda5757ff5c8d4210410a",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-065b1b834d2a83a7a",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      }
+      "ends_at": "2026-10-06T18:17:46Z",
+      "notes": "https://github.com/vettid/vettid-vault/releases/tag/release/staging/2"
     },
     {
       "release": 3,
