@@ -1,9 +1,13 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.5
+version: 0.1.6
 date: 2026-10-06
 changelog:
+  - 0.1.6: the owner check's message type is `vault.owner-check`
+    (VAULT-MESSAGING 0.15.2: §5.3's type grammar has no underscore); the
+    settings keys, `owner_check_required` and the `owner_check` sync,
+    lock-reason and feed kinds keep their spelling
   - 0.1.5: the app never signs in (VAULT-MESSAGING 0.15.0 §11.12–§11.13,
     MEMBER-API 2.0.0; ENROLLMENT-CODES.md): onboarding by setup code, the
     avatar sheet's account view from the vault (§4), `:core:altchan`
@@ -166,7 +170,7 @@ that order, each as its own phase.
 the credential password together for 24 h (or the member's shorter
 interval). Follow-ups, in A3 unless noted:
 
-1. `:core:vault`: `vault.owner_check` (UTK-sealed `{pin, password}` with
+1. `:core:vault`: `vault.owner-check` (UTK-sealed `{pin, password}` with
    the blob; the new blob is stored and acked like any credential
    response), `vault.held`, `owner_check` in `vault.status`,
    `owner_check_required`, `vault.locking{reason: "owner_check"}`,

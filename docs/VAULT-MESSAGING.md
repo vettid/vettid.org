@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.15.1
+version: 0.15.2
 date: 2026-10-06
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -12,12 +12,29 @@ related:
   - CALLING-SERVICE.md
   - PUSH-GATEWAY.md
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.0.0)
-  - ENROLLMENT-CODES.md (0.2.1, design note for 0.15.0)
+  - MEMBER-API.md (2.0.1)
+  - ENROLLMENT-CODES.md (0.2.2, design note for 0.15.0)
   - VAULT-ITEMS.md (0.1.0, approved 2026-10-03)
   - VAULT-RELEASES.md (0.1.6, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.15.2: editorial-normative (owner decisions of 2026-10-06). The
+    owner check's message type is `vault.owner-check`: 0.13.0 spelled it
+    `vault.owner_check`, which §5.3's type grammar forbids and parsers
+    reject (vettid-vault already uses the hyphen); settings keys, the
+    error code and the audit, feed, sync and lock-reason kinds keep
+    `owner_check` (§3.6.1, §10). **Normative: `credential.delete` is
+    removed**; a credential is deleted only as the first step of
+    `vault.delete`, and a member who wants a new credential uses
+    `credential.reset`, which the holder may now send (PIN, current
+    and new password; delete and create in one step; restarts the
+    clock) (§3.5.5, §10.6, §15 item 23). A vault without a credential
+    exists only during enrollment and is not gated by the owner check;
+    the first `credential.create` starts the clock and `credential.reset`
+    starts it fresh (§3.5.7, §3.6.1). Errata: the recovery QR with `api` is
+    181 bytes for a 32-hex `vault_id`, version 10 (was 8) (§11.11.2); §16
+    points to `appkey.json` for the 0.15.0 recovery QR; a suspended
+    account gets no account snapshot (§11.13)
   - 0.15.1: editorial, from the 2026-10-06 staging recovery test
     (vettid-android #66): §6.7.1 names `403 token_revoked` on a deposit
     to the device's own vault mailbox as the refused relay key; §8.6 says
@@ -61,7 +78,7 @@ changelog:
     only; item 21 records vettid-vault #38
   - 0.13.0: the daily owner check (owner decisions of 2026-10-05): the
     vault records its member's last check, the PIN and the credential
-    password verified together by `vault.owner_check` (a credential
+    password verified together by `vault.owner-check` (a credential
     operation, so it rotates the CEK); enrollment, a completed recovery
     and a completed transfer start the clock. Past the interval (the
     setting `owner_check.interval_seconds`, at most and by default 24 h)
@@ -476,7 +493,7 @@ key `ek` is 1,216 bytes. The decapsulation (private) key is stored as its
 | DEK | vault | Encrypting vault state | While unlocked | Enclave memory only |
 | Device attestation key | app (Android Keystore key, iOS App Attest key) | Device attestation (§11.7) | Life of the installation | StrongBox / TEE / Secure Enclave (platform) |
 | Wake key (Ed25519) | vault | Push gateway (§14) | PUSH-GATEWAY §3 | DEK state |
-| CEK (KEM key) | vault | Sealing the Protean Credential (§3.5) | Until `credential.rotate` or `credential.delete` | DEK state |
+| CEK (KEM key) | vault | Sealing the Protean Credential (§3.5) | Until `credential.rotate`, `credential.reset` or the vault's deletion | DEK state |
 | Credential key (Ed25519; hybrid in PQC Phase 2) | the member | Signing what the member approves: member authentication (§10.4), LEASH delegations (§10.11) | Until `credential.rotate` | **Only inside the Protean Credential** held by the member's app; in vault memory only during an unlock window (§3.5) |
 
 Rules for all keys:
@@ -825,7 +842,7 @@ that key, in the vault process's memory for the
 - Operations that sign with the credential key may use it within the
   window; each use extends the window to the full TTL.
 - The window ends at expiry, `credential.lock`, `credential.rotate`,
-  `credential.delete`, vault lock and the start of a hold (§3.6.3).
+  `credential.reset`, vault lock and the start of a hold (§3.6.3).
 - The key is never written to state.
 
 #### 3.5.4 One-time transaction keys (UTK/LTK)
@@ -933,18 +950,35 @@ item's values seals them to a **one-time reply key** instead:
     ```
 
     Both signatures MUST verify and `old_key` MUST differ from `new_key`.
-    A vault keeps its latest 32 statements. A new credential after
-    `credential.delete` has no statement.
+    A vault keeps its latest 32 statements. A new credential from
+    `credential.reset` has no statement.
   - It is the PQC Phase 2 vehicle; the CEK rotates as with every use.
   - Apps SHOULD offer it at least yearly.
   - The vault MUST NOT rotate the credential key without the member.
-- **Delete.** `credential.delete` destroys the CEK, the recorded hash, the
-  latest blob and the UTKs.
-  - Blobs held by apps can no longer be opened by anyone.
-  - The vault becomes restricted again (§3.5.7) until a new
-    `credential.create`.
-  - `vault.delete` does the same, as the first step of the vault's
-    deletion (§12.5).
+- **Reset: a new credential** (0.15.2, owner decision of 2026-10-06).
+  `credential.reset` deletes the credential and creates a new one in a
+  single operation and a single flush, so a vault that has had a
+  credential is never without one:
+  - it destroys the CEK, the recorded hash, the latest blob, the UTKs
+    and every critical item (§10.7); blobs held by apps can no longer be
+    opened by anyone;
+  - it creates version 1 of a new credential under a new password, with
+    a new credential key and no rotation statement, and starts the owner
+    check's clock (§3.6.1);
+  - the holder sends it as `credential.reset{credential, utk_id,
+    sealed{pin, password, new_password}}` (§10.6): the current blob, the
+    PIN and the current password are verified as in an owner check
+    (§3.6.1 steps 1–7, and the same backoffs; a `bad_pin` or
+    `bad_password` is a failed check, §3.6.4), and `new_password` is the
+    new credential's. A recovering app sends it as
+    `credential.reset{utk_id, sealed{password}}` after a recovery with the
+    backup off (§11.11.5), where `password` is the new one.
+- **No deletion on its own** (0.15.2, owner decision of 2026-10-06).
+  There is no `credential.delete`: a credential is deleted only as the
+  first step of the vault's deletion (`vault.delete`, §12.5). A member
+  who wants a new credential uses `credential.reset`. A vault therefore
+  has no credential only during enrollment, before its first
+  `credential.create` (§3.5.7).
 
 #### 3.5.6 Backup: the vault's copy of the blob
 
@@ -988,11 +1022,12 @@ the holder confirms it (§3.5.3), then only its hash and version.
 
 #### 3.5.7 A vault without a credential is restricted
 
-A vault MUST have a credential before it is used.
+A vault MUST have a credential before it is used. Since 0.15.2 a vault
+is without one only during enrollment (§3.5.5: no standalone deletion).
 
-- From enrollment until `credential.create` completes, and again after
-  `credential.delete`, the vault answers every request with
-  `credential_required` and drops every other message (audited).
+- From enrollment until `credential.create` completes, the vault answers
+  every request with `credential_required` and drops every other message
+  (audited).
 - The exceptions are the types needed to create the credential and keep
   the session alive: `vault.status`, `vault.lock`, `credential.utk.get`,
   `credential.create`, `credential.version`, `relay.token.issued`,
@@ -1002,6 +1037,8 @@ A vault MUST have a credential before it is used.
   stays **provisional** (§11.3) until it has a credential.
 - The sealed header records whether a credential exists (`has_credential`)
   so that a recovery of a vault without one is refused (§11.11.1).
+- The owner check does not gate a vault without a credential (§3.6.1,
+  0.15.2).
 
 #### 3.5.8 What VettID and the vault can do
 
@@ -1048,7 +1085,7 @@ routine refresh.
 `credential.create` sets it to the sender; a completed transfer
 (§6.7.1) or recovery (§11.11.5) moves it. Only the holder may send the
 types that carry or return a blob: `credential.get`, `.ack`, `.unlock`,
-`.rotate`, `.password.change`, `.delete`, the critical-item, critical-use
+`.rotate`, `.password.change`, the holder's `.reset` (§3.5.5), the critical-item, critical-use
 and wallet operations (§10.7, §10.13, §10.18) and `device.transfer.*`
 (§6.7.1). **A vault with a credential but no holder** (a state of an
 earlier draft) never adopts an app that presents a blob: it refuses
@@ -1172,10 +1209,13 @@ successful check can turn it off (§3.6.7; owner decisions of
 
 #### 3.6.1 The check
 
-**One operation resets the clock:** `vault.owner_check{credential,
+**One operation resets the clock:** `vault.owner-check{credential,
 utk_id, sealed{pin, password, hold?, hold_off_until?}}` (§10.2), sent by
 the holder (§3.5.9); `hold` and `hold_off_until` change the hold
-(§3.6.7). It
+(§3.6.7). (0.13.0–0.15.1 spelled the type `vault.owner_check`, which
+§5.3's type grammar does not allow; 0.15.2 corrected it. The settings
+keys, the error code and the audit, feed, sync and lock-reason kinds
+keep `owner_check`.) It
 is a credential operation (§3.5.3), so every check rotates the CEK. The
 vault:
 
@@ -1219,16 +1259,32 @@ password, or sets them, and writes the record as a check does:
 - **enrollment** (since 0.15.0 always after a setup code's redeem,
   §11.12.1): the vault's first `credential.create` (§3.5.5), which
   follows the PIN of `vault.enroll` within the provisional window
-  (§11.3). A later `credential.create`, after a `credential.delete`,
-  does not move the clock;
-- **a completed recovery**: `credential.recover` or `credential.reset`
-  (§11.11.5), after the registered app's unlock with the PIN;
+  (§11.3). There is no later `credential.create`: a vault that has a
+  credential answers it `exists`, and it cannot lose it (§3.5.5);
+- **a new credential**: the holder's `credential.reset` (§3.5.5), which
+  carries the PIN, the current password and the new one, and starts the
+  clock fresh. Its `bad_pin` and `bad_password` are failed checks too;
+- **a completed recovery**: `credential.recover` or, with the backup
+  off, `credential.reset` (§11.11.5), after the registered app's unlock
+  with the PIN;
 - **a completed transfer**: `device.transfer.approve` (§6.7.1), which
   carries the PIN and the password. Its `bad_pin` and `bad_password` are
   failed checks too;
 - **a vault from before 0.13.0**: a vault whose state has no record
   starts the clock at its first unlock under a release that implements
   0.13.0.
+
+**A vault without a credential** (0.15.2; owner decisions of
+2026-10-06: "we shouldn't have a vault without a credential except
+during enrollment", and no standalone credential deletion, §3.5.5)
+exists only during enrollment, before its first `credential.create`.
+The check needs the credential, so such a vault is **not gated** by the
+owner check: it is never held or due, and nothing it is sent is answered
+`owner_check_required` or dropped as `drop.owner_check`; it is
+restricted instead (§3.5.7), which allows nothing but creating the
+credential. `vault.status` reports `owner_check.state: "ok"`. Its first
+`credential.create` starts the clock, and every operation that gives
+the vault a new credential (`credential.reset`) starts it fresh.
 
 **Nothing else resets it.** An unlock (the PIN only), `credential.unlock`
 or any other credential operation (the password only), `pin.change` and
@@ -1363,7 +1419,7 @@ every `drop.*` entry, §10.9). Allowed while held:
 
 | Sender | Types |
 |---|---|
-| The holder | `vault.owner_check`; `vault.status` (reports the hold) and `vault.lock`; `credential.utk.get` (UTKs for the check); `credential.get` and `credential.ack` (the latest blob after a lost check response, §3.5.3, and its confirmation); `credential.version`; `credential.lock`; during a clone alarm, `credential.alarm.confirm` and, in `rotation_required`, `credential.rotate` (the check is refused until the alarm closes, so the alarm's own path stays open); for a transfer opened before the hold, `device.transfer.approve` (itself a check, §3.6.1) and `device.transfer.reject`; `call.end`, and `call.ice` of a call answered before the deadline |
+| The holder | `vault.owner-check`; `vault.status` (reports the hold) and `vault.lock`; `credential.utk.get` (UTKs for the check); `credential.get` and `credential.ack` (the latest blob after a lost check response, §3.5.3, and its confirmation); `credential.version`; `credential.lock`; during a clone alarm, `credential.alarm.confirm` and, in `rotation_required`, `credential.rotate` (the check is refused until the alarm closes, so the alarm's own path stays open); for a transfer opened before the hold, `device.transfer.approve` (itself a check, §3.6.1) and `device.transfer.reject`; `call.end`, and `call.ice` of a call answered before the deadline |
 | A recovering app (§11.11.5) | Its own set, unchanged: `credential.utk.get`, `credential.recover`, `credential.reset`, `vault.delete`, `vault.status` and the token and address types. A recovery completes while held and starts the clock (§3.6.1) |
 | A desktop | `vault.status`, `vault.lock`, `device.session.end{}` (its own session), `call.end` and `call.ice` of a call it answered before the deadline |
 | An agent | `vault.status`, `device.session.end{}` (its own session) |
@@ -1441,7 +1497,7 @@ There is no host alarm and no email (§13.7; §15 item 22).
 #### 3.6.5 What the apps do
 
 - The app **MUST** ask for the PIN and the password **on one screen**,
-  together, and send them in one `vault.owner_check`. It MUST NOT keep
+  together, and send them in one `vault.owner-check`. It MUST NOT keep
   either beyond the check's answer (for a locked vault, beyond the unlock
   and the check that follows it), and zeroizes both.
 - It **SHOULD** show the check at the **first app open** (or return to
@@ -1500,7 +1556,7 @@ back to a held vault. The settings `owner_check.hold` (boolean, default
 `true`) and `owner_check.hold_off_until` (§10.8) hold the choice.
 
 - **Off only with a check.** The hold is turned off only by a successful
-  `vault.owner_check` whose sealed payload carries `hold: false`, and
+  `vault.owner-check` whose sealed payload carries `hold: false`, and
   optionally `hold_off_until` (RFC 3339, in the future and at most 30
   days ahead; otherwise the whole request is `bad_request`, answered
   once the UTK is opened and before the PIN is tried, so it is not a
@@ -3096,12 +3152,12 @@ an answer to an unknown or expired id is dropped.
 | | `vault.unlock` / `vault.unlock.result` | ACh | | PIN unlock (§11.4) |
 | | `vault.lock`, `vault.status`, `vault.delete` | D→V | req | Lock, status, delete (§7.4 first) |
 | | `vault.locking` | V→D | | Graceful lock notice (ephemeral) |
-| | `vault.owner_check` | D→V | req | The daily owner check: PIN and credential password together (§3.6, 0.13.0) |
+| | `vault.owner-check` | D→V | req | The daily owner check: PIN and credential password together (§3.6, 0.13.0; spelled `vault.owner_check` before 0.15.2) |
 | | `vault.held` | V→D | | The vault is held: content-free counts of what is waiting (§3.6.3, 0.13.0) |
 | Sessions | `hs.init`, `hs.resp`, `hs.fin` | D↔V, V↔V | | Handshake, rekey, reconnect (§6) |
 | | `relay.token.issued` / `relay.token.refresh` | any | — / req | Deliver or request a token |
 | | `relay.address.update`, `identity.rotate` | any | | Rotation (§3.4) |
-| Credential | `credential.create`, `.get`, `.version`, `.unlock`, `.lock`, `.rotate`, `.password.change`, `.delete`, `.recover`, `.reset` | D→V | req | Protean Credential lifecycle (§3.5, §10.6) |
+| Credential | `credential.create`, `.get`, `.version`, `.unlock`, `.lock`, `.rotate`, `.password.change`, `.recover`, `.reset` | D→V | req | Protean Credential lifecycle (§3.5, §10.6) |
 | | `credential.alarm` / `credential.alarm.confirm` | V→D / D→V | — / req | Clone alarm to the holder; its confirmation (§3.5.9) |
 | | `pin.change` | D→V | req | Re-derive the DEK and re-seal the header (§10.6) |
 | Items & profile | `item.put`, `.get`, `.reveal`, `.list`, `.tag`, `.sensitivity`, `.delete` | D→V | req | The member's items: `data`, `secret` and `critical` (§10.7) |
@@ -3242,7 +3298,7 @@ an answer to an unknown or expired id is dropped.
     - `transfer_pending`: reserved; unused since 0.10.3, when the
       approval of a transfer completes it at once (§6.7.1);
   - and (0.13.0) `owner_check_required`: the vault is held (§3.6.3); the
-    request waits for a successful `vault.owner_check`. Answered to every
+    request waits for a successful `vault.owner-check`. Answered to every
     owner-device request outside the hold's allow list, to requests held
     for approval when the hold begins, and to a `settings.set` that
     would turn the hold off, which only a check may do (§3.6.7).
@@ -3273,7 +3329,6 @@ an answer to an unknown or expired id is dropped.
   | `vault.release` | `release` (PCR0 hex), `release_number`; sent once after a vault first runs under a new release (§11.10.6) |
   | `account.changed` | `version`: a newer account snapshot arrived from the host (§11.13, 0.15.0) |
   | `credential.changed` | `version` (§3.5.5) |
-  | `credential.deleted` | — |
   | `item.changed` | `item_id`, `version` (§10.7) |
   | `item.deleted` | `item_id` (§10.7) |
   | `tag.changed` | `version`: the registry, or tags on items, changed (§10.8) |
@@ -3317,7 +3372,7 @@ an answer to an unknown or expired id is dropped.
 | `vault.enrolled` | — | §11.3 |
 | `vault.enroll.confirm` (app) | `{}` | `{}` |
 | `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; `owner_check` (0.13.0) is `{state: "ok" \| "due" \| "held", deadline, interval_seconds, failures, hold, hold_off_until?}` to apps and desktops and `{state}` to agents (§3.6, §3.6.7) |
-| `vault.owner_check` (app: the holder) | `{credential, utk_id, sealed{pin, password, hold?, hold_off_until?}}` | `{credential, version, utks, deadline, interval_seconds, hold, hold_off_until?}` (§3.6.1, §3.6.7); `bad_pin`, `bad_password`, `backoff`, `utk_invalid`, `stale_credential`, `credential_frozen`, `rotation_required`, `forbidden` (not the holder), `bad_request` (a PIN that is not 6–32 digits) |
+| `vault.owner-check` (app: the holder) | `{credential, utk_id, sealed{pin, password, hold?, hold_off_until?}}` | `{credential, version, utks, deadline, interval_seconds, hold, hold_off_until?}` (§3.6.1, §3.6.7); `bad_pin`, `bad_password`, `backoff`, `utk_invalid`, `stale_credential`, `credential_frozen`, `rotation_required`, `forbidden` (not the holder), `bad_request` (a PIN that is not 6–32 digits) |
 | `vault.held` (V→D, to the app and desktops in an access session) | — | `{deadline, waiting: {messages, requests, calls, other}}` (§3.6.3) |
 | `vault.lock` (app, desktop) | `{}` | `{}`; then `vault.locking` |
 | `account.get` (app, desktop) | `{}` | `{account: <snapshot, §11.13> \| null, version, received_at}`; `null` (and `version` 0) before any snapshot arrived (0.15.0) |
@@ -3543,9 +3598,10 @@ The D→V messaging types are sent by `app` or `desktop` devices.
 Every type below is sent by the vault's app, except
 `credential.version`, which an `app` or `desktop` may send. The types that
 carry or return a blob (`credential.get`, `.ack`, `.unlock`, `.rotate`,
-`.password.change`, `.delete`, and `vault.owner_check`, §3.6) and
-`credential.alarm.confirm` are the **holder's** only (§3.5.9); `credential.recover` and `credential.reset`
-are the recovering app's only (§11.11.5). Critical
+`.password.change`, `vault.owner-check`, §3.6, and the holder's form of
+`credential.reset`) and `credential.alarm.confirm` are the **holder's**
+only (§3.5.9); `credential.recover` and the other form of
+`credential.reset` are the recovering app's only (§11.11.5). Critical
 items, the member's data inside the credential, are `item.*` types with
 `sensitivity: "critical"` (§10.7); they follow the rules of this section
 for `credential`, `utk_id` and `sealed`.
@@ -3576,9 +3632,8 @@ for `credential`, `utk_id` and `sealed`.
 | `credential.lock` | `{}` | `{}` |
 | `credential.rotate` | `{credential, utk_id, sealed{password}}` | `{credential, version, key, utks}`; the vault also rotates `ik` and `kem` (§3.4) |
 | `credential.password.change` | `{credential, utk_id, sealed{password, new_password}}` | `{credential, version, utks}` |
-| `credential.delete` | `{credential, utk_id, sealed{password}}` | `{}`; the critical items go with it (§10.7) |
 | `credential.recover` | `{utk_id, sealed{password}}` | `{credential, version, utks}` (§11.11.5); `credential_lost` if the vault keeps no copy of the latest blob (backup off). 0.9.0 removed the member-supplied `credential` |
-| `credential.reset` | `{utk_id, sealed{password}}` | `{credential, version, key, utks}`: a new credential after a recovery with the backup off; the old credential and every critical item are destroyed (§11.11.5); `exists` if the vault keeps the latest blob (use `credential.recover`) |
+| `credential.reset` | the holder (0.15.2): `{credential, utk_id, sealed{pin, password, new_password}}`; a recovering app: `{utk_id, sealed{password}}` | `{credential, version, key, utks}`: a new credential; the old credential and every critical item are destroyed (§3.5.5). The holder's form answers as an owner check does (§3.6.1: `bad_pin`, `bad_password`, `backoff`, `credential_frozen`, `rotation_required`, …) and is refused while the vault is held (§3.6.3); the recovering app's comes after a recovery with the backup off (§11.11.5) and is refused with `exists` if the vault keeps the latest blob (use `credential.recover`) |
 | `credential.alarm` (V→D, to the holder; durable) | — | `{alarm_id, kind: "clone", state: "frozen", at, presenter: "holder" \| "other", version}`: an urgent alert (§3.5.9) |
 | `credential.alarm.confirm` | `{alarm_id, mine: bool}` | `{state: "rotation_required"}`; `not_found` if no such alarm is open (§3.5.9) |
 | `pin.change` | `{pin, new_pin}` | `{}`; `bad_pin` if `pin` is wrong; `bad_request` if `new_pin` is not 6–32 digits (§11.3) |
@@ -3589,7 +3644,7 @@ for `credential`, `utk_id` and `sealed`.
 - `reply_key` is a 1,216-byte KEM `ek`.
 - **Change notices.** Every new version sends
   `sync.event{kind: "credential.changed", version}` to the owner's other
-  devices (`credential.deleted` for a delete).
+  devices (also after a `credential.reset`).
 - **`pin.change`** re-derives the DEK from `new_pin` (§3.3.1, fresh salt)
   and re-encrypts the state and the header. Its crash-safe write order is
   specified together with its implementation (§15).
@@ -3750,7 +3805,8 @@ decision 1):
 - **Deleting** an item withdraws it from every share rule and revokes its
   grants (§10.12). A critical item's values are removed from the
   credential.
-- `credential.delete` (§10.6) deletes every critical item.
+- `credential.reset` (§3.5.5) and the vault's deletion (§12.5) delete every
+  critical item.
 - **Change notices.** `sync.event` `item.changed` (`item_id`, `version`)
   or `item.deleted` (`item_id`), never with values.
 - **Audit and feed.** `item.added`, `item.updated` (content or tags),
@@ -3866,8 +3922,8 @@ tagged **`@profile`** (owner decision 3). Sent by `app` or `desktop`.
 | `location.history.retention_days` | integer 1–365 | 30 |
 | `location.history.interval_seconds` | integer 60–3,600: the log's cadence | 300 |
 | `owner_check.interval_seconds` | integer 3,600–86,400: the longest time between owner checks (§3.6.2); app only (a desktop's `settings.set` naming it is `forbidden`); a shorter value applies at once, a longer one from the next check | 86,400 |
-| `owner_check.hold` | boolean: whether the vault holds past the deadline (§3.6.7); holder only; `settings.set` may set it `true` (at once); `false` only in a successful `vault.owner_check` (`settings.set` answers `owner_check_required`) | `true` |
-| `owner_check.hold_off_until` | RFC 3339 time at most 30 days ahead, or absent: when a hold turned off comes back on (§3.6.7); set only in a `vault.owner_check` with `hold: false`; cleared when the hold comes back on | — |
+| `owner_check.hold` | boolean: whether the vault holds past the deadline (§3.6.7); holder only; `settings.set` may set it `true` (at once); `false` only in a successful `vault.owner-check` (`settings.set` answers `owner_check_required`) | `true` |
+| `owner_check.hold_off_until` | RFC 3339 time at most 30 days ahead, or absent: when a hold turned off comes back on (§3.6.7); set only in a `vault.owner-check` with `hold: false`; cleared when the hold comes back on | — |
 | `app.<name>` | string of at most 4,096 bytes, or `null` to remove; `<name>` matches `[a-z0-9_.-]{1,48}`; at most 64 | — |
 
 `app.*` keys are opaque to the vault; apps use them for preferences that
@@ -3934,7 +3990,7 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `device.unlinked`; `connection.added`, `connection.removed`,
   `connection.stale`, `connection.reconnected`; `identity.rotated`;
   `credential.created`, `credential.rotated`, `credential.password_changed`,
-  `credential.password_failed`, `credential.unlocked`, `credential.deleted`;
+  `credential.password_failed`, `credential.unlocked`;
   `credential.recovered`; `credential.clone_detected` (`ref` =
   `alarm_id`, `device_id` = the presenter), `credential.alarm.confirmed`
   (`ref` = `<alarm_id>:mine` or `<alarm_id>:not_mine`),
@@ -5482,7 +5538,7 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
   §10.7). The wallet owns its item: `item.put` and `item.sensitivity` of
   it are refused with `in_use` (a changed phrase would no longer match
   the accounts); `item.tag` works as for any item; `item.delete` of it
-  (a credential operation) or `credential.delete` deletes the wallet
+  (a credential operation) or `credential.reset` deletes the wallet
   (`sync.event{wallet.deleted}`). A share rule that matches the item can
   make it at most usable (§10.13), for which a phrase is `unsuitable`.
 - **Addresses.** `wallet.address.new` issues the next index of an
@@ -7102,9 +7158,10 @@ the older code. The API allows only one active recovery per vault.
   The QR (0.10.6) encodes those exact bytes in **byte mode**, with error
   correction **M or higher** and a **quiet zone of 4 modules**, dark
   modules on a light background. The version is whatever fits (the
-  account site uses the smallest one at level M; before 0.15.0's `api`
-  that was version 8, 49 × 49 modules, for the 146-byte payload of a
-  32-hex `vault_id`); the app
+  account site uses the smallest one at level M). For a 32-hex
+  `vault_id` the payload is 181 bytes with 0.15.0's `api`, which needs
+  **version 10** (57 × 57 modules) at level M; before `api` it was 146
+  bytes, version 8 (49 × 49). The app
   MUST accept any version and any level from M up.
   The portal also shows the code as text, in groups of four, for typing.
 - **Why the vault mints the code.** VettID's servers never hold the code
@@ -7267,7 +7324,7 @@ because it only reduces exposure. Owner apps learn of the recovery from
    app explains this and offers (owner decision, 2026-10-03):
    - **a new credential**: `credential.reset{utk_id, sealed{password}}`
      with a new password. The vault destroys the old credential and every
-     critical item (as `credential.delete`, §3.5.5), creates a new
+     critical item (as every reset does, §3.5.5), creates a new
      credential (version 1, a new credential key, no rotation statement),
      and completes the recovery exactly as in step 3: the app becomes the
      holder and replaces the old app, and the owner check's clock starts. It answers `{credential, version,
@@ -7608,6 +7665,9 @@ the portal.
   version is not fanned out: each vault learns it at its next unlock. A
   trial's expiry needs no message: apps show `expired` once `expires_at`
   has passed.
+  A **suspended** account gets no snapshot (0.15.2; `account_status` is
+  `active` or `canceled` only): the API sends none, in an unlock or as
+  an op, and the vault keeps the last one it stored (MEMBER-API 2.0.1).
 - **In the vault.** After a successful unlock, or on the op `account` for
   a running vault, the vault parses the snapshot strictly (unknown members
   ignored, wrong types refused, over 2 KiB refused), ignores it unless its
@@ -8677,7 +8737,7 @@ Follow-ups:
        within the interval.
     8. **The member decides whether the vault holds** (owner decision of
        2026-10-06, §3.6.7): `owner_check.hold` (default on). Turning it
-       off rides on a successful `vault.owner_check` (`hold: false`, an
+       off rides on a successful `vault.owner-check` (`hold: false`, an
        optional `hold_off_until` at most 30 days ahead, after which it
        comes back on by itself); turning it on needs no check and holds
        at once if the deadline has passed. Corrected the same day: the
@@ -8691,7 +8751,7 @@ Follow-ups:
        off" indicator.
 
     Follow-ups: vettid-vault (the owner-check record and its migration
-    for existing vaults; `vault.owner_check` reusing the transfer's PIN
+    for existing vaults; `vault.owner-check` reusing the transfer's PIN
     check and §3.5.3; the hold's allow list in the dispatcher, with
     `owner_check_required` and `drop.owner_check`; `vault.held` and its
     counters; the call, presence, approval, access-session, location and
@@ -8714,7 +8774,7 @@ Follow-ups:
 
     **OWNER DECISIONS of 0.13.0** (sub-decisions; all twelve approved as
     recommended by the owner on 2026-10-06):
-    1. **What resets the clock:** only `vault.owner_check` (a dedicated,
+    1. **What resets the clock:** only `vault.owner-check` (a dedicated,
        UTK-sealed `{pin, password}` with the blob), plus enrollment's
        first `credential.create`, a completed recovery and a transfer's
        approval. An unlock never counts, even with a password (§3.6.1:
@@ -8760,6 +8820,26 @@ Follow-ups:
     12. **The unlock result does not report the hold**: the app reads
         `vault.status` after unlocking. Recommended: as specified (no
         change to the sealed result's format, §11.4).
+
+23. **No standalone credential deletion (0.15.2).** Owner decisions of
+    2026-10-06: "we shouldn't have a vault without a credential except
+    during enrollment", and `credential.delete` is removed as a
+    standalone operation. A credential is deleted only as the first step
+    of `vault.delete` (§12.5); a member who wants a new credential uses
+    `credential.reset` (delete and create in one step, with the PIN and
+    a new password; it restarts the owner check's clock), which the
+    holder may now send (§3.5.5, §10.6). The holder's form also carries
+    the current password, as the removed `credential.delete` did, so
+    that the PIN alone cannot replace the credential and defeat the
+    owner check (§3.6). A vault without a credential exists only during
+    enrollment, where the owner check does not gate it (§3.6.1).
+    Follow-ups: vettid-vault (remove the `credential.delete` handler and
+    the `credential.deleted` kinds; accept the holder's
+    `credential.reset` with the owner-check verification, failure
+    counting and clock restart; `client/` and `cmd/vaultctl`);
+    vettid-android (remove the delete-credential UI; offer "new
+    credential" as the holder's reset, with the warning that every
+    critical item is destroyed).
 
 ## 16. Test vectors
 
@@ -8955,6 +9035,18 @@ drawn before the nonce.
   salt, aad, eph public keys, full out (b64) : recovery.json
 ```
 
+**0.15.2.** The QR payload of `recovery.json` above predates the `api`
+member (0.15.0) and is no longer what a portal writes or an app of
+0.15.0 accepts. The 0.15.0 form, with `api`, is `recovery_qr` in
+`appkey.json` (164 B for the same `vault_id`, `recovery_id` and code),
+next to the enrollment QR `enroll_qr` (79 B):
+
+```
+§11.11.2 recovery QR, 0.15.0                                    (appkey.json)
+  recovery_qr (164 B): {"v":1,"t":"r","api":"https://account.vettid.org","vault_id":"test-vault-0001",
+                        "recovery_id":"01JB2Z6V9K3M4N5P6Q7R8S9T30","code":"50M2GA1850M2GA1850M2GA1850M2GA18"} (one line)
+```
+
 **0.12.0.** New file `leash.json` (§10.11): two LEASH delegations in
 the LEASH paper's §3.5 format and their status statements. These values
 were computed for this revision with two independent implementations
@@ -9010,6 +9102,46 @@ pending (§15, follow-up 1).
 
 ## 17. Changelog
 
+- **0.15.2** (2026-10-06): editorial-normative, owner decisions of
+  2026-10-06. Makes 0.13.0 consistent with §5.3, and removes
+  `credential.delete` (normative; breaking for apps that offered it).
+  - §3.6.1, §10, §10.2 and every mention: the owner check's type is
+    **`vault.owner-check`**. 0.13.0–0.15.1 wrote `vault.owner_check`,
+    which §5.3's type grammar `[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*`
+    forbids and receivers reject; vettid-vault implements the hyphen.
+    Not renamed, not being message types (§5.3's grammar covers only the
+    `type` field; error codes allow `_` by §5.3): the settings keys `owner_check.interval_seconds`,
+    `owner_check.hold` and `owner_check.hold_off_until`; the error code
+    `owner_check_required`; the audit and feed kinds `owner_check.*` and
+    `drop.owner_check`; `sync.event{kind: "owner_check"}`;
+    `vault.locking{reason: "owner_check"}`; the `owner_check` member of
+    `vault.status`.
+  - **Normative: `credential.delete` removed** (owner decision of
+    2026-10-06; §15 item 23). A credential is deleted only as the first
+    step of `vault.delete` (§12.5, unchanged). A member who wants a new
+    credential uses `credential.reset`, which deletes and creates in one
+    operation and one flush. The holder may now send it:
+    `credential.reset{credential, utk_id, sealed{pin, password,
+    new_password}}`, verified like an owner check (failed entries count
+    as failed checks) and refused while held; the recovering app's form
+    is unchanged. Removed with it: the `credential.deleted` sync and
+    audit kinds. Updated: §3.2 (CEK lifetime), §3.5.3 (unlock window),
+    §3.5.5, §3.5.7, §3.5.9 (holder types), §10 registry, §10.1, §10.6,
+    §10.7, §10.9, §10.18 (wallet), §11.11.5.
+  - §3.6.1, §3.5.7: a vault without a credential exists only during
+    enrollment (owner decision: "we shouldn't have a vault without a
+    credential except during enrollment") and is not gated by the owner
+    check; the first `credential.create` starts the clock and
+    `credential.reset` (the holder's, or after a backup-off recovery)
+    starts it fresh, as do recovery and transfer as before.
+  - §11.11.2: with 0.15.0's `api` the recovery QR for a 32-hex
+    `vault_id` is 181 bytes, QR version 10 (57 × 57) at level M, up
+    from version 8.
+  - §16: the QR payload of `recovery.json` predates `api`; the 0.15.0
+    form is `recovery_qr` in vettid-vault `testdata/vectors/appkey.json`
+    (164 B), excerpted.
+  - §11.13: a suspended account gets no snapshot (`account_status` is
+    `active` or `canceled` only); MEMBER-API 2.0.1.
 - **0.15.1** (2026-10-06): editorial, from the staging recovery test of
   2026-10-06 (W9; vettid-android #66). No wire, enclave or member API
   change.
@@ -9096,7 +9228,7 @@ pending (§15, follow-up 1).
     on at any time; with it off only the app is gated; `owner_check.hold_changed`; `hold` and
     `hold_off_until` in `vault.status`, the check's payload and answer
     (§3.5.4, §10.2, §10.6, §10.8, §10.9, §10.11, §13.5, §13.8).
-  - §3.6 (new): `vault.owner_check{credential, utk_id, sealed{pin,
+  - §3.6 (new): `vault.owner-check{credential, utk_id, sealed{pin,
     password}}`, a credential operation; the record `{last_at, deadline,
     failures}` in DEK state; what starts the clock; the interval; the
     hold (what keeps running, what stops, the owner devices' allow
@@ -9109,7 +9241,7 @@ pending (§15, follow-up 1).
   - §6.7.1: a transfer's approval is a check; `device.transfer.create`
     waits for one while held; §6.8: access sessions suspended; §9.1:
     fan-out while held.
-  - §10: `vault.owner_check`, `vault.held`; §10.1: `owner_check_required`
+  - §10: `vault.owner-check`, `vault.held`; §10.1: `owner_check_required`
     and the `owner_check` sync kind; §10.2: the bodies, `owner_check` in
     `vault.status`, `vault.locking{reason: "owner_check"}`; §10.6: the
     check is the holder's; §10.8: `owner_check.interval_seconds`; §10.9:

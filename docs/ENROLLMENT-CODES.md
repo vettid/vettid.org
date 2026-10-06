@@ -1,9 +1,12 @@
 ---
 title: ENROLLMENT-CODES
 status: draft (design note; normative text in VAULT-MESSAGING 0.15.0 §11.12–§11.13 and MEMBER-API 2.0.0)
-version: 0.2.1
+version: 0.2.2
 date: 2026-10-06
 changelog:
+  - 0.2.2: errata: the setup QR's example payload is 79 bytes, not 78
+    (§3.2; still version 5 at level M); related versions
+    (VAULT-MESSAGING 0.15.2, MEMBER-API 2.0.1)
   - 0.2.1: approved by the owner 2026-10-06 and renumbered at merge:
     VAULT-MESSAGING 0.15.0 (was 0.11.0; 0.12.0–0.14.0 merged first) and
     MEMBER-API 2.0.0 on top of 1.2.0; staging vaults of S1–S3; how
@@ -16,8 +19,8 @@ changelog:
   - 0.1.0: first draft
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.15.0)
-  - MEMBER-API.md (2.0.0)
+  - VAULT-MESSAGING.md (0.15.2)
+  - MEMBER-API.md (2.0.1)
   - ANDROID-PLAN.md
 classification: public (no secrets; safe for github.com/vettid)
 ---
@@ -174,7 +177,7 @@ two secrets:
 
 - Byte mode, error correction M or higher, quiet zone of 4 modules, any
   version: the same rules as the recovery QR (VAULT-MESSAGING §11.11.2).
-  The payload is 78 bytes (version 5 at level M).
+  The payload is 79 bytes (version 5 at level M, which holds 84).
 - `s` is the QR secret. The typed code is not in the QR: the QR does not
   need it, and leaving it out keeps a photographed QR from also giving
   away the typed form.
