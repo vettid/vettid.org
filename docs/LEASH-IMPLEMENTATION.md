@@ -8,7 +8,7 @@ document maps the paper onto the vault and records what is and is not built.
 It was Appendix B of the paper until the paper was made vendor-neutral.
 
 The vault's normative specification is [VAULT-MESSAGING](VAULT-MESSAGING.md)
-(version 0.10.8, draft). Its §10.11 maps the paper's terms onto the vault. The
+(version 0.12.0, draft). Its §10.11 maps the paper's terms onto the vault. The
 code is in [vettid/vettid-vault](https://github.com/vettid/vettid-vault). Section
 numbers in the right-hand column refer to VAULT-MESSAGING unless stated.
 
@@ -29,35 +29,31 @@ numbers in the right-hand column refer to VAULT-MESSAGING unless stated.
 
 ## Alignment with the paper's §3.5
 
-The paper's §3.5 defines a generic version 1 format. VettID's current format
-(VAULT-MESSAGING §10.11) has the same structure and the same bounds. VettID is
-aligning §10.11 to the paper's §3.5 in a separate VAULT-MESSAGING change, and
-the reference implementation will follow. Until then, the current format
-differs in these ways:
+Since VAULT-MESSAGING 0.12.0, VettID's delegation and status statement use the
+paper's §3.5 format. That covers the members, `sig` and `status_sig`, the
+`leash/v1/delegation` and `leash/v1/status` context strings, the encoding
+(RFC 8785, standard base64 with padding), the verifier's steps and the
+revocation latency bound (§10.11, §15 item 21). The vault code has not caught up
+yet: `vms/leashwire` and the LEASH features in vettid-vault still produce the
+pre-0.12.0 format, and that change is a pending vettid-vault follow-up.
 
-- **Same:** a delegation signed by the owner's key and a status statement
-  signed by the status issuer; the status statement's fields (`v`,
-  `delegation` = SHA-256 of the delegation bytes, `grant_id`, `status`,
-  `issued_at`, `not_after`); `status_ttl` of 60 to 3,600 seconds, default 900;
-  60 seconds of clock skew; Ed25519 signatures over the exact bytes; proof of
-  possession of the agent's key.
-- **Different names:** the agent's key is `agent_ik` (the paper's `sub`), and
-  the status issuer is the vault's identity key `vault_ik` (the paper's
-  `status_issuer`). The owner's key is sent beside the delegation as `key`
-  rather than inside it as `iss`.
-- **Different scope fields:** VettID carries `scope`, `approval`,
-  `connections`, `tags`, `match`, `access`, `uses`, `per_hour` and `per_day`
-  as top-level members. The paper groups the limits under `limits`.
-- **No `nonce`:** `grant_id` (a ULID) and `version` make each VettID
-  delegation unique.
-- **Encoding:** VettID requires a fixed member order with no whitespace. The
-  paper recommends RFC 8785 and has verifiers check the signature over the
-  bytes as received.
-- **Context strings:** `vettid/vms/2/leash` and `vettid/vms/2/leash-status`,
-  where the paper uses `leash/v1/delegation` and `leash/v1/status`.
-- **Rotation:** VettID statements carry a chain of `identity.rotate`
-  statements when the vault's key has rotated since the delegation was
-  issued. The paper does not define key rotation.
+What stays VettID-specific are bindings the paper leaves open:
+
+- **Transport:** delegations, status statements and agent requests travel over
+  end-to-end-encrypted relay mailboxes ([RELAY-PROTOCOL](RELAY-PROTOCOL.md)).
+- **Signer:** `iss` is the member's credential key, held in the Protean
+  Credential. It signs only within the credential's unlock window, so the
+  member must be present (§3.5).
+- **Status issuer key rotation:** `status_issuer` is the vault's `ik`. When
+  that key rotates, VettID statements carry a chain of `identity.rotate`
+  statements (`rotations`, at most 32 links). The paper's version 1 does not
+  define rotation, so a verifier that implements only the paper rejects
+  statements after a rotation until the grant is re-signed. It fails closed.
+- **Audit:** the hash-chained audit log uses `leash.*` entry kinds, with
+  hourly summaries per agent (§10.9, §10.11).
+- **Rate limits and suspension:** these go beyond the paper's `limits`. They
+  are refusal cooldowns per scope, at most 20 referrals per agent per hour,
+  and suspension after 30 refusals in an hour (§10.11).
 
 ## Cryptography
 
