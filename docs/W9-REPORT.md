@@ -37,7 +37,7 @@ owner's test session of 2026-10-05. Times are UTC. Sections marked
 | S1 → S2 move (deprecated release, member approval) | pass |
 | Two members: connect (commit-then-reveal SAS), messaging, declines, `device.pair.rejected` | pass |
 | Capacity on S3 (1 vCPU / 5 GiB enclave) | PASS; see §4 |
-| Kill switch (vault service pause) | deployed; staging pause/resume smoke pass; phone check TBD |
+| Kill switch (vault service pause) | deployed (staging and production); staging pause/resume and phone unlock refusal pass |
 | Recovery (24 h wait, QR, new phone) | **TBD (2026-10-06)** |
 | S2 → S3 move, manifest serial 4 | **TBD (2026-10-06)** |
 | Retirement drill with a vault and notice emails (on S2) | **TBD (2026-10-06)** |
@@ -122,10 +122,21 @@ Owner decision 2026-10-05 (W10-READINESS R2). Spec #126 (MEMBER-API
 vault service", CLI): pause and resume worked, and the
 `VaultServicePaused` metric went 1 → 0 on resume.
 
-**TBD (2026-10-06): unlock refused on a phone.** With staging paused, an
-unlock from a test phone shows the "not available" message and the
-account site's Vault tab shows the paused notice; after resume the unlock
-succeeds. Result: _TBD_.
+**Unlock refused on a phone (2026-10-06): pass.** Member 2's vault on the
+Pixel 10 Pro was locked from the app (09:55:18 UTC), staging was paused
+(09:55:28), and an unlock 66 s later was refused within 6 s with "The
+vault service is not available yet. Try again later." Staging was
+resumed at 09:56:48 (paused about 80 s) and the next unlock succeeded
+(09:57:46). The member API's Vault function log showed no errors and no
+"switch unreadable" line. The account site's paused notice was not
+checked (it needs a member sign-in). Follow-ups: the app's wording says
+"not available yet" for a pause (Android PR replaces it with "paused for
+maintenance"); the app showed "cannot connect" once after the phone had
+dozed, cleared by one retry.
+
+Production: deployed 2026-10-05; switch parameter absent (service on),
+both alarms OK with the security-alerts topic, watch job reports 0. Not
+paused in production.
 
 ## 6. Recovery test — TBD (2026-10-06)
 
