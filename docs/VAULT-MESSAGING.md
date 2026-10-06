@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.15.0
+version: 0.15.1
 date: 2026-10-06
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -18,6 +18,12 @@ related:
   - VAULT-RELEASES.md (0.1.6, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.15.1: editorial, from the 2026-10-06 staging recovery test
+    (vettid-android #66): §6.7.1 names `403 token_revoked` on a deposit
+    to the device's own vault mailbox as the refused relay key; §8.6 says
+    what an owner device does on it (counts toward the erase offer, never
+    erases on it alone) and that a device SHOULD ack a vault message even
+    when its answer is refused
   - 0.15.0: the app and the account portal are separate (owner decision
     of 2026-10-05, approved 2026-10-06; ENROLLMENT-CODES.md; drafted as
     0.11.0 in vettid.org PR #122 and renumbered after 0.14.0). The portal issues a single-use
@@ -2652,7 +2658,7 @@ and the new app's handshake state is dropped. A commitment mismatch at
 | The new app goes offline before its `hs.fin` | No SAS is shown; the transfer times out after 10 minutes; nothing changes. |
 | The new app goes offline after its `hs.fin` | The approval still completes the transfer. `device.paired` waits in the new app's mailbox (relay TTL); if the new app never returns, the member recovers (§11.11), as when a new app is lost after a transfer. |
 | The old app goes offline before approving | The transfer times out; nothing changes. |
-| The old app goes offline after approving | Nothing is needed from it: the approval completed the transfer. The old app learns of its removal from `device.unlinked` (best effort), and then erases its local state (owner decision, 2026-10-05). A refused relay key alone is not proof of removal: the app offers the member an erase instead of erasing by itself. |
+| The old app goes offline after approving | Nothing is needed from it: the approval completed the transfer. The old app learns of its removal from `device.unlinked` (best effort), and then erases its local state (owner decision, 2026-10-05). A refused relay key alone is not proof of removal: the app offers the member an erase instead of erasing by itself. The refused relay key is a `403 token_revoked` (RELAY-PROTOCOL §5.3 step 6, §7.1) on a deposit to the device's own vault mailbox: the vault has put the device's relay key on its denylist as a `sub` (§7.4). The same holds for the old app of a recovery (§11.11.5). What the device does on that answer: §8.6. |
 | A clone alarm opens (§3.5.9) | An open transfer is aborted. |
 | The vault locks | The transfer and its pending handshake are kept in vault state; its 10 minutes still run and are checked at the next unlock, which aborts an expired one. |
 | A recovery completes (§11.11.5) | An open transfer is aborted (`replaced`). |
@@ -2977,6 +2983,24 @@ How each error is handled:
 | `token_revoked` | Terminal. Stop sending to that mailbox. |
 | `token_used` | The open token is already spent. Restart first contact. |
 | `mailbox_unknown` | Re-resolve the address, or mark the connection `stale`. |
+
+**An owner device refused by its own vault.** When a deposit by an owner
+device to its own vault's mailbox answers `token_revoked`, the device
+stops sending to that mailbox, as above, and treats the answer as the
+refused relay key of §6.7.1: it counts toward offering the member an
+erase. It MUST NOT erase its local state on that answer alone: only
+`device.unlinked` (or the member's choice in the erase offer) erases it.
+It keeps collecting its own mailbox, where a `device.unlinked` may still
+be waiting.
+
+**A refused answer does not block the mailbox.** A device SHOULD ack a
+vault message (§8.3) once it has processed it, even when the deposit of
+its answer is refused (`token_revoked` or another terminal error): it
+records the refusal instead of leaving the message unacked. Otherwise the
+message is redelivered and its refused answer retried on every collect,
+and the messages queued behind it, such as a `device.unlinked`, are never
+read. (Seen on staging 2026-10-06: a replaced phone never reached its
+queued `device.unlinked{replaced}`; fixed by vettid-android #66.)
 
 ## 9. Fan-out, presence and broadcasts
 
@@ -8986,6 +9010,18 @@ pending (§15, follow-up 1).
 
 ## 17. Changelog
 
+- **0.15.1** (2026-10-06): editorial, from the staging recovery test of
+  2026-10-06 (W9; vettid-android #66). No wire, enclave or member API
+  change.
+  - §6.7.1: the "refused relay key" is named: `403 token_revoked`
+    (RELAY-PROTOCOL §5.3 step 6, §7.1) on a deposit to the device's own
+    vault mailbox, the device's relay key being a `sub` on the vault's
+    denylist; the same for the old app of a recovery.
+  - §8.6: an owner device that gets `token_revoked` from its own vault's
+    mailbox stops sending, counts it toward the erase offer of §6.7.1,
+    never erases on it alone and keeps collecting; a device SHOULD ack a
+    vault message even when its answer is refused, so a refused answer
+    cannot block reading a queued `device.unlinked`.
 - **0.15.0** (2026-10-06): the app and the account portal are separate
   (owner decision of 2026-10-05; approved 2026-10-06; ENROLLMENT-CODES.md;
   §15 item 20). Breaking for apps and the member API. Drafted as 0.11.0
