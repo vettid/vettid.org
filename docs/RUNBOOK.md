@@ -746,12 +746,18 @@ switch unreadable`.
 
 **Alerts.** Every write to the parameter (admin site or CLI, either
 stage) emails the security alerts ("vault service switch changed").
-Production also has two alarms on the metric `VettID/MemberApi
+Production also has alarms on the metric `VettID/MemberApi
 VaultServicePaused` (written every 5 minutes by the member API's
 `VaultServiceWatch` job): `vettid-org-vault-service-paused`
 (alarm within about 10 minutes of pausing, OK when resumed) and
 `vettid-org-vault-service-paused-24h` (still paused after a day), so a
-pause is not forgotten. Staging has the alarms without a recipient.
+pause is not forgotten. Both read a missing sample as "not paused", so a
+third, `vettid-org-vault-service-watch-silent`, alarms when no sample has
+been written for 20 minutes (the watch is failing or not running: an
+unreadable switch, a timeout, throttling, a disabled schedule), and says
+when it writes again. While it is in alarm the other two are blind: check
+the switch by hand (`get-parameter` above) and read the `VaultServiceWatch`
+function's log. Staging has the alarms without a recipient.
 
 **Running vaults.** The pause does not lock them. There is no "lock every
 vault" action (a follow-up if wanted). If one is needed during an
