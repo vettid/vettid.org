@@ -1,7 +1,7 @@
 ---
 title: PROTEAN-CREDENTIAL
 status: design rationale (normative spec is VAULT-MESSAGING §3.5)
-version: 0.1.0
+version: 0.1.1
 date: 2026-10-03
 owner: Al Liebl (Mesmer)
 related:
@@ -10,6 +10,9 @@ related:
   - VAULT-PLAN.md (D1 release approval)
   - ARCHITECTURE.md
 changelog:
+  - 0.1.1: §3.8: no standalone `credential.delete`; `credential.reset`
+    gives a new credential (owner decision of 2026-10-06; VAULT-MESSAGING
+    0.15.2)
   - 0.1.0: ported from vettid-dev `docs/protean_credential_system_design.md`
     and the decision log of `docs/NITRO-ENCLAVE-VAULT-ARCHITECTURE.md`
     §15.1, updated to the current design and to the owner decisions of
@@ -170,8 +173,11 @@ bypass that VettID can operate.
 `credential.create` (a vault has no other use until it exists),
 password change, `credential.rotate` (a new credential key, announced to
 connections with a statement signed by the old and new keys; the vehicle
-for post-quantum signatures in PQC Phase 2), and `credential.delete`
-(VAULT-MESSAGING §3.5.5).
+for post-quantum signatures in PQC Phase 2), and `credential.reset` (a
+new credential in place of the old, which destroys every critical item;
+VAULT-MESSAGING §3.5.5). There is no standalone deletion (owner decision
+of 2026-10-06, VAULT-MESSAGING 0.15.2): a credential is deleted only as
+the first step of the vault's deletion.
 
 ## 4. One app per vault: "there can be only one"
 
