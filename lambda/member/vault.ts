@@ -880,7 +880,8 @@ router.on('GET', '/api/vault/status', async (req) => {
       // 2.1.0: the host-written backup bit (false: the vault cannot be recovered; null: not reported yet).
       credential_backup: typeof v.credential_backup === 'boolean' ? v.credential_backup : null,
       // 2.1.0: a pending start-over, so the app can show it and offer to cancel (§11.11.9).
-      deletion: deletionOf(v) ? { state: v.deletion!.state, deletes_at: iso(v.deletion!.deletes_at) } : null,
+      // 2.1.1: with its id, which the app's cancel names (it cannot read GET /api/vault/deletion).
+      deletion: deletionOf(v) ? { deletion_id: v.deletion!.deletion_id, state: v.deletion!.state, deletes_at: iso(v.deletion!.deletes_at) } : null,
       created_at: v.created_at,
       updated_at: v.updated_at,
     },

@@ -1,9 +1,12 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.7
+version: 0.1.8
 date: 2026-10-06
 changelog:
+  - 0.1.8: the pending-deletion banner cancels with the `deletion_id`
+    from `GET /api/vault/status` (MEMBER-API 2.1.1, VAULT-MESSAGING
+    0.16.1) (§4)
   - 0.1.7: no recovery with the credential backup off (VAULT-MESSAGING
     0.16.0, owner decisions of 2026-10-06): the backup-off warning, the
     recovery screens without the backup-off path, `no_backup`, and
@@ -124,7 +127,7 @@ the destinations.
 | Owner check | — (VettID-specific) | One screen: PIN and credential password together (VAULT-MESSAGING §3.6.5); also the "vault held" screen with the waiting counts and the lock action |
 | Avatar sheet | Account sheet | Vault status, lock vault, the member's membership and subscription (read-only, from the vault, VAULT-MESSAGING §11.13), open account portal (browser) |
 | Recovery (new phone) | — (VettID-specific) | Only with the backup on: scan the portal's recovery QR → claim (`email_hint`) → register → PIN → credential password → the app replaces the old one. No other path: 0.1.6's backup-off choice (new credential or delete) is removed. `no_backup` at register or unlock (a vault whose backup is off): "This vault cannot be recovered: its credential backup was off. Delete it on the account site and start over with a new setup code", with a link to the portal's start-over page (MEMBER-API 2.1.0) and then to onboarding |
-| Pending deletion | — | When `GET /api/vault/status` shows `deletion` (a start-over requested on the portal, VAULT-MESSAGING §11.11.9): an urgent banner with the time left and **Cancel deletion** (`POST /api/vault/deletion/cancel`, signed by the app key) |
+| Pending deletion | — | When `GET /api/vault/status` shows `deletion` (a start-over requested on the portal, VAULT-MESSAGING §11.11.9): an urgent banner with the time left and **Cancel deletion** (`POST /api/vault/deletion/cancel {deletion_id}`, signed by the app key, with the `deletion_id` from the status's `deletion: {deletion_id, state, deletes_at}`, MEMBER-API 2.1.1) |
 | Onboarding | Sign-in flow | Scan the setup QR from the account portal, or type its short code with the account's email (no sign-in in the app, VAULT-MESSAGING 0.15.0 §11.12) → confirm the account (`email_hint`) → enroll vault (PIN, credential password) → first connection guide |
 
 Every list has an empty state; every destructive action has a confirmation;

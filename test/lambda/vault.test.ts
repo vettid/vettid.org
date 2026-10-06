@@ -2292,7 +2292,7 @@ describe('2.1.0: delete my vault and start over (§11.11.9)', () => {
     expect(JSON.stringify([...tbl('audit').values()])).not.toContain(token);
     // GET and the status show it; a second request and a recovery request are refused.
     expect((await call('GET', '/api/vault/deletion')).body).toEqual({ deletion: { deletion_id: r.body.deletion_id, state: 'pending', requested_at: iso(NOW), deletes_at: iso(NOW + 86_400) } });
-    expect((await call('GET', '/api/vault/status', undefined, { app: { key: keyOf('g1'), vault: VID } })).body.vault.deletion).toEqual({ state: 'pending', deletes_at: iso(NOW + 86_400) });
+    expect((await call('GET', '/api/vault/status', undefined, { app: { key: keyOf('g1'), vault: VID } })).body.vault.deletion).toEqual({ deletion_id: r.body.deletion_id, state: 'pending', deletes_at: iso(NOW + 86_400) });
     expect((await call('POST', '/api/vault/deletion', CONFIRM)).body.error).toBe('deletion_pending');
     getItem('vaults', VID).credential_backup = true;
     expect((await call('POST', '/api/vault/recovery', { browser_key: BK })).body.error).toBe('deletion_pending');
@@ -2357,8 +2357,9 @@ describe('2.1.0: delete my vault and start over (§11.11.9)', () => {
     expect((await call('POST', '/api/vault/deletion/cancel-link', { token: token2 }, noSession)).status).toBe(404);
   });
 
-  test("cancel by the vault's app, signed by its app key; another key is 401", async () => {
-    const id = (await call('POST', '/api/vault/deletion', CONFIRM)).body.deletion_id;
+  test("cancel by the vault's app, signed by its app key, with the id from its status (2.1.1); another key is 401", async () => {
+    await call('POST', '/api/vault/deletion', CONFIRM);
+    const id = (await call('GET', '/api/vault/status', undefined, { app: { key: keyOf('g1'), vault: VID } })).body.vault.deletion.deletion_id;
     const other = keyOf('stranger');
     expect((await call('POST', '/api/vault/deletion/cancel', { deletion_id: id }, { app: { key: other, vault: VID } })).status).toBe(401);
     expect(await call('POST', '/api/vault/deletion/cancel', { deletion_id: id }, { app: { key: keyOf('g1'), vault: VID } })).toEqual({ status: 200, body: { cancelled: true } });

@@ -1,8 +1,13 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.1.0
+version: 2.1.1
 changelog:
+  - 2.1.1 (2026-10-06, owner decision of 2026-10-06, from the
+    implementation, vettid.org #148): `VaultStatus.deletion` carries
+    `deletion_id`, so that the app, which cannot read the session-only
+    `GET /api/vault/deletion`, can send `POST /api/vault/deletion/cancel
+    {deletion_id}` with its app key. Additive
   - 2.1.0 (2026-10-06, VAULT-MESSAGING 0.16.0; owner decisions of
     2026-10-06: no recovery with the credential backup off; start over
     instead): the vault row gains the host-written `credential_backup`
@@ -411,6 +416,7 @@ interface VaultStatus {     // advisory: written by the enclave host, never a se
   } | null;                 // null: none, or it was cancelled, refused or has expired
   credential_backup: boolean | null;  // 2.1.0: host-written; false = the vault cannot be recovered; null = not reported yet
   deletion: {               // 2.1.0: a pending start-over ("Vault deletion: start over")
+    deletion_id: string;    // 2.1.1: what the app's cancel names
     state: 'pending' | 'executing';
     deletes_at: string;     // RFC 3339
   } | null;
@@ -1035,8 +1041,9 @@ interface Deletion {
   Nothing is enqueued and the vault is not locked.
 - **Cancel** (session, link or app): conditional on `state = pending`;
   removes the record, emails the member, answers `{cancelled: true}`;
-  otherwise `{cancelled: false}`. The app sees `deletion` in
-  `GET /api/vault/status` and offers the cancel.
+  otherwise `{cancelled: false}`. The app sees `deletion` (with its
+  `deletion_id`, 2.1.1) in `GET /api/vault/status` and offers the
+  cancel.
 - **Execution.** The cleanup job (every 5 minutes) takes each `pending`
   deletion past `deletes_at`, sets `executing` (conditional) and
   enqueues the operation `delete` exactly as for an account
