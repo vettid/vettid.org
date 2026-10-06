@@ -12,6 +12,7 @@ const rc = require('../sites/account/js/recovery-code.js');
 const qr = require('../sites/account/js/qr.js');
 const vt = require('../sites/account/js/vault-text.js');
 const sc = require('../sites/account/js/site-config.js');
+const ec = require('../sites/account/js/enroll-code.js');
 const jsQR = require('jsqr');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
@@ -87,8 +88,11 @@ describe('sealed recovery code: the Go reference vector', () => {
     expect(r).toEqual({ error: 'no_credential' });
   });
 
-  test('the QR payload is byte for byte the reference RecoveryQR', () => {
-    expect(rc.qrPayload(vector.vault_id, vector.recovery_id, vector.code)).toBe(vector.qr_payload);
+  test('the QR payload is the reference RecoveryQR with `api` after `t` (VAULT-MESSAGING 0.15.0 §11.11.2)', () => {
+    // The vector predates 0.15.0's `api` member; the rest is byte for byte the same.
+    const api = 'https://account.vettid.org';
+    expect(rc.qrPayload(api, vector.vault_id, vector.recovery_id, vector.code)).toBe(vector.qr_payload.replace('"t":"r",', `"t":"r","api":"${api}",`));
+    expect(JSON.parse(rc.qrPayload(api, vector.vault_id, vector.recovery_id, vector.code))).toEqual({ ...JSON.parse(vector.qr_payload), api });
   });
 
   test('another recovery id or vault id derives another key: unopenable', async () => {
@@ -164,8 +168,11 @@ describe('recovery-code helpers', () => {
   });
 
   test('qrPayload refuses malformed input', () => {
-    expect(() => rc.qrPayload(VAULT, REC, 'short')).toThrow();
-    expect(() => rc.qrPayload('XYZ', REC, CODE)).toThrow();
+    const api = 'https://account.vettid.org';
+    expect(() => rc.qrPayload(api, VAULT, REC, 'short')).toThrow();
+    expect(() => rc.qrPayload(api, 'XYZ', REC, CODE)).toThrow();
+    expect(() => rc.qrPayload('http://account.vettid.org', VAULT, REC, CODE)).toThrow();
+    expect(() => rc.qrPayload(VAULT, REC, CODE)).toThrow();
   });
 
   test('newUlid: canonical, time-ordered, 80 random bits', () => {
@@ -218,9 +225,10 @@ describe('QR code (vendored qrcode-generator 2.0.4)', () => {
   }
 
   test('round trip: the recovery payload decodes back exactly', () => {
-    const payload = rc.qrPayload(vector.vault_id, vector.recovery_id, vector.code);
+    const payload = rc.qrPayload('https://account.vettid.org', vector.vault_id, vector.recovery_id, vector.code);
     const modules = qr.qrModules(payload);
-    expect(modules.length).toBe(49); // version 8 at level M for 146 bytes
+    expect(payload).toHaveLength(181);
+    expect(modules.length).toBe(57); // version 10 at level M for 181 bytes (version 8 for the 146 bytes before `api`)
     const got = decode(modules);
     expect(got).not.toBeNull();
     expect(got.data).toBe(payload);
@@ -277,6 +285,65 @@ describe('vault wording', () => {
     expect(vt.timeUntil(at(25 * 60_000), now)).toBe('about 25 minutes');
     expect(vt.timeUntil(at(3 * 3600_000 + 20 * 60_000), now)).toBe('3 hours 20 minutes');
     expect(vt.timeUntil(at(23 * 3600_000 + 50 * 60_000), now)).toBe('about 24 hours');
+  });
+});
+
+describe('setup codes (MEMBER-API 2.0.0, VAULT-MESSAGING 0.15.0 §11.12.1)', () => {
+  const SECRET = 'q2Vw5Zt7-_AbCdEfGhIjKg';
+  const api = 'https://account.vettid.org';
+
+  // ENROLLMENT-CODES §3.2 says "78 bytes"; it is 79 (still version 5 at level M, which holds 84).
+  test('the QR payload: compact JSON, keys in order, 79 bytes for production, no typed code', () => {
+    const payload = ec.setupQrPayload(api, SECRET);
+    expect(payload).toBe(`{"v":1,"t":"e","api":"https://account.vettid.org","s":"${SECRET}"}`);
+    expect(payload).toHaveLength(79);
+    const modules = qr.qrModules(payload);
+    expect(modules.length).toBe(37); // version 5 at level M
+    expect(JSON.parse(ec.setupQrPayload('https://account.staging.vettid.org', SECRET)).api).toBe('https://account.staging.vettid.org');
+    for (const [a, s] of [['http://account.vettid.org', SECRET], [api, SECRET.slice(1)], [api, `${SECRET.slice(1)}=`], ['https://x/', SECRET]]) {
+      expect(() => ec.setupQrPayload(a, s)).toThrow();
+    }
+  });
+
+  test('the typed code as XXXX-XXXX; only the 31-symbol alphabet', () => {
+    expect(ec.formatCode('ABCD2345')).toBe('ABCD-2345');
+    for (const bad of ['ABCD234', 'ABCD-2345', 'ABCD234O', 'abcd2345', 'ABCD2341']) expect(() => ec.formatCode(bad)).toThrow();
+  });
+
+  test('the same-device App Link carries the QR secret in the fragment, never the typed code', () => {
+    expect(ec.appLink(api, SECRET)).toBe(`https://account.vettid.org/vault/enroll/#s=${SECRET}`);
+    expect(() => ec.appLink(api, 'ABCD2345')).toThrow();
+    expect(ec.secretFromHash(`#s=${SECRET}`)).toBe(SECRET);
+    for (const bad of ['', '#s=abc', `#t=${SECRET}`, `#s=${SECRET}x`]) expect(ec.secretFromHash(bad)).toBeNull();
+  });
+
+  test('countdown', () => {
+    expect(ec.mmss(300_000)).toBe('5:00');
+    expect(ec.mmss(299_001)).toBe('5:00');
+    expect(ec.mmss(61_000)).toBe('1:01');
+    expect(ec.mmss(0)).toBe('0:00');
+    expect(ec.mmss(-5)).toBe('0:00');
+  });
+
+  test('the pages: issue only on a press, never stored, wiped on pagehide; the Vault tab offers setup except while paused', () => {
+    const page = (f: string) => readFileSync(join(__dirname, '..', 'sites', 'account', 'js', f), 'utf8');
+    const setup = page('vault-setup.js');
+    expect(setup).toContain("post('/api/vault/enroll-code')");
+    expect(setup).toContain("del('/api/vault/enroll-code')");
+    expect(setup).toContain('Only enter this in your own VettID app. VettID will never ask you for it.');
+    expect(setup).toMatch(/addEventListener\('pagehide'/);
+    // The issue call sits in the button's handler only.
+    expect(setup.match(/post\('\/api\/vault\/enroll-code'\)/g)).toHaveLength(1);
+    expect(setup).toMatch(/button\.addEventListener\('click', \(\) => issue\(button\)\)/);
+    for (const f of ['vault-setup.js', 'vault-enroll-link.js', 'enroll-code.js']) {
+      expect(page(f)).not.toMatch(/localStorage|sessionStorage|indexedDB|console\./);
+    }
+    const link = page('vault-enroll-link.js');
+    expect(link.indexOf('history.replaceState')).toBeLessThan(link.indexOf('function render'));
+    expect(link).not.toMatch(/fetch\(|post\(|get\(/);
+    const tab = page('vault.js');
+    expect(tab).toContain("servicePaused(status) ? null : el('a', { class: 'btn btn-primary', href: SETUP_PAGE }, label)");
+    expect(tab).not.toMatch(/Sign in\. /);
   });
 });
 

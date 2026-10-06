@@ -446,8 +446,8 @@ function renderAvailable() {
     el('section', { class: 'card', 'aria-labelledby': 'h-rec' }, head,
       el('p', {}, chip('Ready', 'ok'), ' ', 'Scan this code with the VettID app on your new phone. It works once, until ', when(recovery.expires_at), '.'),
       el('ol', { class: 'howto' },
-        el('li', {}, 'On your new phone, install VettID and sign in to this account with the link we email you.'),
-        el('li', {}, 'When the app says your account already has a vault, choose to recover it, and scan the code below (or type it).'),
+        el('li', {}, 'On your new phone, install VettID and choose to recover a vault. The app never signs in: the code below is all it needs from this site.'),
+        el('li', {}, 'Scan the code below (or type it). The app shows the account it belongs to (the first letter of your email and its domain): check that it is yours.'),
         el('li', {}, 'Enter your vault PIN, then your credential password. Your old app is removed. (With the sealed backup off, the app asks for no password: it offers a new credential or deleting the vault.)'),
       ),
       callout('warn', 'Keep this code to yourself',
@@ -480,7 +480,7 @@ async function showCode(btn) {
   const box = $('code-box');
   const groups = codeGroups(r.code);
   fill(box,
-    qrSvg(qrModules(qrPayload(recoveryVaultId(), recovery.recovery_id, r.code)), 'Recovery QR code for the VettID app'),
+    qrSvg(qrModules(qrPayload(location.origin, recoveryVaultId(), recovery.recovery_id, r.code)), 'Recovery QR code for the VettID app'),
     el('p', { class: 'code-label', id: 'code-label' }, 'Or type this code:'),
     el('p', { class: 'code-text', 'aria-labelledby': 'code-label' }, groups.flatMap((g, i) => [i ? ' ' : null, el('span', {}, g)])),
   );

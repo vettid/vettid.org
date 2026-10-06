@@ -157,11 +157,13 @@ export function parsePlaintext(pt, vaultId, recoveryId) {
 
 /**
  * The QR payload the new app scans (§11.11.2): compact JSON, keys in this
- * order, exactly as vettid-vault's altchan.RecoveryQR writes it.
+ * order. `api` (VAULT-MESSAGING 0.15.0) is the member API origin of this
+ * portal: an identifier the app compares with its own built-in origin,
+ * never an address it connects to.
  */
-export function qrPayload(vaultId, recoveryId, code) {
-  if (!VAULT_ID_RE.test(vaultId) || !ULID_RE.test(recoveryId) || !CODE_RE.test(code)) throw new Error('qrPayload: bad input');
-  return JSON.stringify({ v: 1, t: 'r', vault_id: vaultId, recovery_id: recoveryId, code });
+export function qrPayload(api, vaultId, recoveryId, code) {
+  if (!/^https:\/\/[a-z0-9.-]+(:\d+)?$/.test(api) || !VAULT_ID_RE.test(vaultId) || !ULID_RE.test(recoveryId) || !CODE_RE.test(code)) throw new Error('qrPayload: bad input');
+  return JSON.stringify({ v: 1, t: 'r', api, vault_id: vaultId, recovery_id: recoveryId, code });
 }
 
 /** The code as text, in groups of four for typing (§11.11.2). */

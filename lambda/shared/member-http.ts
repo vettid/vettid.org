@@ -3,6 +3,7 @@ import { InitiateAuthCommand } from '@aws-sdk/client-cognito-identity-provider';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import { timingSafeEqual } from 'node:crypto';
 import { cognito, env } from './aws';
+import { APP_HEADER } from './app-auth';
 import { HttpError, Router, badRequest } from './http';
 import { secret } from './secrets';
 
@@ -13,6 +14,12 @@ import { secret } from './secrets';
  *    (the execute-api URL is public; this makes it useless to call directly)
  *  - POST/DELETE require `X-VettID-CSRF: 1`
  *  - the session is httpOnly cookies; tokens never reach JavaScript
+ *  - an app request (MEMBER-API 2.0.0) carries `X-VettID-App` instead and
+ *    is authenticated by it alone: its cookies are ignored and the CSRF
+ *    header is not required (no browser can send the header cross-site
+ *    without CORS, which the API never grants). Routes that accept it check
+ *    the signature (lambda/member/vault.ts); every other route sees no
+ *    session and answers 401.
  */
 
 export type MemberRequest = {
@@ -22,6 +29,10 @@ export type MemberRequest = {
   query: Record<string, string>;
   body: Record<string, unknown>;
   cookies: Record<string, string>;
+  /** The exact body bytes (app signatures cover them). */
+  rawBody: Buffer;
+  /** The raw `X-VettID-App` header of an app request; undefined for a browser. */
+  appHeader?: string;
   /** Rate-limit key for the viewer: IPv4 address, or the IPv6 /64. */
   ip: string;
   event: APIGatewayProxyEventV2;
@@ -223,16 +234,19 @@ export function memberHandler(router: Router<MemberRequest>) {
     try {
       await verifyOrigin(event);
       const method = event.requestContext.http.method.toUpperCase();
-      if ((method === 'POST' || method === 'DELETE') && event.headers['x-vettid-csrf'] !== '1') {
+      const appHeader = event.headers[APP_HEADER];
+      const isApp = appHeader !== undefined;
+      if ((method === 'POST' || method === 'DELETE') && !isApp && event.headers['x-vettid-csrf'] !== '1') {
         return memberJson(403, { error: 'csrf', message: 'Missing CSRF header' });
       }
       const m = router.match(method, event.rawPath);
       if (m === null || m === 'method') throw new HttpError(404, 'not_found', 'No such route');
 
       let body: Record<string, unknown> = {};
+      const rawBody = event.body ? (event.isBase64Encoded ? Buffer.from(event.body, 'base64') : Buffer.from(event.body, 'utf8')) : Buffer.alloc(0);
+      if (rawBody.length > 64 * 1024) throw badRequest('Body too large');
       if (event.body && (method === 'POST' || method === 'DELETE')) {
-        const raw = event.isBase64Encoded ? Buffer.from(event.body, 'base64').toString('utf8') : event.body;
-        if (raw.length > 64 * 1024) throw badRequest('Body too large');
+        const raw = rawBody.toString('utf8');
         try {
           const v = JSON.parse(raw);
           if (v === null || typeof v !== 'object' || Array.isArray(v)) throw new Error();
@@ -248,7 +262,10 @@ export function memberHandler(router: Router<MemberRequest>) {
         params: m.params,
         query: (event.queryStringParameters ?? {}) as Record<string, string>,
         body,
-        cookies: parseCookies(event),
+        // An app request is authenticated by its signature alone.
+        cookies: isApp ? {} : parseCookies(event),
+        rawBody,
+        appHeader,
         ip: rateKeyFromViewer(event.headers['cloudfront-viewer-address'], event.requestContext.http.sourceIp),
         event,
         setCookies,

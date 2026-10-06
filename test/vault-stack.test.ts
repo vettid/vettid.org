@@ -299,7 +299,7 @@ describe('cross-account access (VAULT-RELEASES §8.1)', () => {
       expect(replica.DeletionProtectionEnabled).toBe(true);
       for (const s of replica.ResourcePolicy?.PolicyDocument.Statement ?? []) {
         expect(s.Principal).toEqual({ AWS: 'arn:aws:iam::449757308783:root' });
-        expect(s.Condition.ArnEquals['aws:PrincipalArn']).toMatch(/^arn:aws:iam::449757308783:role\/vettid-org-member-(vault|cleanup|vault-alarms|vault-notices)$/);
+        expect(s.Condition.ArnEquals['aws:PrincipalArn']).toMatch(/^arn:aws:iam::449757308783:role\/vettid-org-member-(vault|cleanup|vault-alarms|vault-notices|account-push)$/);
         expect(str(s.Action)).not.toMatch(/dynamodb:\*|BatchWrite|DeleteTable|UpdateTable/);
       }
     }
@@ -325,7 +325,7 @@ describe('cross-account access (VAULT-RELEASES §8.1)', () => {
     const fns = resources(api, 'AWS::Lambda::Function').map(([, f]) => f.Properties.Environment.Variables);
     for (const v of fns) expect(v.TABLE_VAULTS).toBe('arn:aws:dynamodb:us-east-1:369484479783:table/vettid-org-vaults');
     const withQueues = fns.filter((v) => v.VAULT_QUEUE_URL_PREFIX);
-    expect(withQueues).toHaveLength(2);
+    expect(withQueues).toHaveLength(3); // the vault routes, the cleanup job and the account push (MEMBER-API 2.0.0)
     for (const v of withQueues) expect(v.VAULT_QUEUE_URL_PREFIX).toBe('https://sqs.us-east-1.amazonaws.com/369484479783/vettid-org-vault-control-');
     const vaultStmts = statements(api).filter((s: any) => str(s.Resource).includes('vettid-org-vault'));
     for (const s of vaultStmts) expect(str(s.Resource)).toContain(':369484479783:');
@@ -350,7 +350,20 @@ describe('cross-account access (VAULT-RELEASES §8.1)', () => {
     expect(fn.Properties.Environment.Variables.RELEASE_LOG_URL).toBe('https://vettid.org/security/releases/');
   });
 
-  test('the control-queue policy the parent applies admits the two senders only', () => {
+  test('app keys (MEMBER-API 2.0.0): only the enclave host writes app_key; the API only its pending key and the setup-code pointer', () => {
+    const vaults = resources(prod.json, 'AWS::DynamoDB::GlobalTable').find(([, t]) => t.Properties.TableName === 'vettid-org-vaults')![1];
+    const writes = vaults.Properties.Replicas[0].ResourcePolicy.PolicyDocument.Statement.filter((s: any) => str(s.Action).match(/PutItem|UpdateItem/));
+    const attrs = writes.flatMap((s: any) => s.Condition['ForAllValues:StringEquals']?.['dynamodb:Attributes'] ?? []);
+    expect(attrs).toEqual(expect.arrayContaining(['app_key_pending', 'enroll_live']));
+    expect(attrs).not.toContain('app_key');
+    const hostVaultWrites = statements(prod.json).filter((s: any) => s.Action === 'dynamodb:UpdateItem' && (s.Condition?.['ForAllValues:StringEquals']?.['dynamodb:Attributes'] ?? []).includes('lease'));
+    expect(hostVaultWrites).toHaveLength(1);
+    expect(hostVaultWrites[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(
+      ['vault_id', 'lease', 'updated_at', 'sealed_release', 'vault_version', 'state_version', 'state', 'alarm', 'alarm_pending', 'app_key'],
+    );
+  });
+
+  test('the control-queue policy the parent applies admits the three senders only', () => {
     const param = resources(prod.json, 'AWS::SSM::Parameter').find(([, p]) => p.Properties.Name === '/vettid-org/prod/vault/control-queue-policy')![1];
     const policy = JSON.parse(param.Properties.Value);
     expect(policy.Statement).toEqual([
@@ -360,7 +373,7 @@ describe('cross-account access (VAULT-RELEASES §8.1)', () => {
         Principal: { AWS: 'arn:aws:iam::449757308783:root' },
         Action: 'sqs:SendMessage',
         Resource: 'arn:aws:sqs:us-east-1:369484479783:vettid-org-vault-control-*',
-        Condition: { ArnEquals: { 'aws:PrincipalArn': ['arn:aws:iam::449757308783:role/vettid-org-member-vault', 'arn:aws:iam::449757308783:role/vettid-org-member-cleanup'] } },
+        Condition: { ArnEquals: { 'aws:PrincipalArn': ['arn:aws:iam::449757308783:role/vettid-org-member-vault', 'arn:aws:iam::449757308783:role/vettid-org-member-cleanup', 'arn:aws:iam::449757308783:role/vettid-org-member-account-push'] } },
       },
     ]);
   });

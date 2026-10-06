@@ -30,6 +30,7 @@ import { inviteCode, nowIso } from '../shared/ids';
 import { emailMarkerKey } from '../shared/members';
 import { sendMail } from '../shared/mail';
 import { MemberItem, MemberView, SubscriptionItem, toMemberView } from '../shared/model';
+import { pushAccountSnapshot } from '../shared/account-snapshot';
 
 const PAGE = 50;
 const memberPoolId = () => env('MEMBER_POOL_ID');
@@ -276,6 +277,7 @@ router.on('POST', '/admin/members/{user_guid}/reinstate', async ({ params, actor
   await cognito.send(new AdminEnableUserCommand({ UserPoolId: memberPoolId(), Username: m.email }));
   const updated = await update(m.user_guid, { account_status: m.account_status }, { account_status: 'active' }, ['suspend_reason', 'delete_after']);
   await audit(actor, 'member.reinstate', m.user_guid, { email: m.email, from: m.account_status });
+  await pushAccountSnapshot(m.user_guid); // the vault's account snapshot (MEMBER-API 2.0.0)
   return view(updated);
 });
 
@@ -325,6 +327,7 @@ router.on('POST', '/admin/members/{user_guid}/subscription/extend', async ({ par
   const status = sub.status === 'expired' || sub.status === 'canceled' ? (sub.paid ? 'active' : 'trial') : sub.status;
   await ddb.send(new PutCommand({ TableName: table.subscriptions(), Item: { ...sub, expires_at, status } }));
   await audit(actor, 'subscription.extend', m.user_guid, { days, from: sub.expires_at, to: expires_at });
+  await pushAccountSnapshot(m.user_guid); // the vault's account snapshot (MEMBER-API 2.0.0)
   return view(m);
 });
 

@@ -239,6 +239,15 @@ describe('VettidOrgAdminApiStack', () => {
     t.hasResourceProperties('AWS::ApiGateway::DomainName', { DomainName: 'admin-api.vettid.org', SecurityPolicy: 'SecurityPolicy_TLS13_1_2_PFS_PQ_2025_09', EndpointAccessMode: 'STRICT' });
   });
 
+  test('people may invoke the member API account push, by its fixed name (MEMBER-API 2.0.0)', () => {
+    const all = Object.values<any>(t.findResources('AWS::IAM::Policy')).flatMap((p) => p.Properties.PolicyDocument.Statement);
+    const inv = all.filter((x: any) => JSON.stringify(x.Action).includes('lambda:InvokeFunction'));
+    expect(inv).toHaveLength(1);
+    expect(JSON.stringify(inv[0].Resource)).toContain(':function:vettid-org-member-account-push');
+    const fns = Object.values<any>(t.findResources('AWS::Lambda::Function')).filter((f) => f.Properties.Environment?.Variables?.ACCOUNT_PUSH_FN);
+    expect(fns.map((f) => f.Properties.Environment.Variables.ACCOUNT_PUSH_FN)).toEqual(['vettid-org-member-account-push']);
+  });
+
   test('resource policy allows only the exit-node egress IP (from SSM)', () => {
     const api = Object.values<any>(t.findResources('AWS::ApiGateway::RestApi'))[0];
     const stmt = api.Properties.Policy.Statement;
@@ -368,8 +377,8 @@ describe('VettidOrgMemberApiStack', () => {
   const apiApp = new cdk.App({ context: { vaultsStreamArn: 'arn:aws:dynamodb:us-east-1:369484479783:table/vettid-org-vaults/stream/2026-10-05T00:00:00.000' } });
   const t = Template.fromStack(new VettidOrgMemberApiStack(apiApp, 'MemberApi', { config: loadConfig(apiApp.node), env }));
 
-  test('four route groups + link mailer + six jobs (incl. the vault notice job, W8, and the vault service watch)', () => {
-    t.resourceCountIs('AWS::Lambda::Function', 11);
+  test('four route groups + link mailer + seven jobs (incl. the vault notice job, W8, the vault service watch and the account push, 2.0.0)', () => {
+    t.resourceCountIs('AWS::Lambda::Function', 12);
     for (const p of ['/api/public', '/api/auth', '/api/account', '/api/vault']) {
       t.hasResourceProperties('AWS::ApiGatewayV2::Route', { RouteKey: `ANY ${p}/{proxy+}` });
     }
@@ -403,7 +412,7 @@ describe('VettidOrgMemberApiStack', () => {
 
     test('sqs:SendMessage only to vettid-org-vault-control-* queues, and nothing else on SQS', () => {
       const sqsStmts = stmts().filter((s: any) => str(s.Action).includes('sqs:'));
-      expect(sqsStmts).toHaveLength(2); // the vault routes, and the cleanup job's vault deletions (§12.5)
+      expect(sqsStmts).toHaveLength(3); // the vault routes, the cleanup job's vault deletions (§12.5), the account push (2.0.0)
       for (const q of sqsStmts) {
         expect(q.Action).toBe('sqs:SendMessage');
         expect(str(q.Resource)).toContain(':369484479783:vettid-org-vault-control-*'); // the vault account
@@ -453,10 +462,77 @@ describe('VettidOrgMemberApiStack', () => {
     test('the queue URL prefix is pinned to the vault account and region', () => {
       const fns = Object.values<any>(t.findResources('AWS::Lambda::Function'));
       const vs = fns.filter((f) => f.Properties.Environment?.Variables?.VAULT_QUEUE_URL_PREFIX);
-      expect(vs).toHaveLength(2); // the vault routes and the cleanup job
+      expect(vs).toHaveLength(3); // the vault routes, the cleanup job and the account push
       for (const v of vs) {
         expect(str(v.Properties.Environment.Variables.VAULT_QUEUE_URL_PREFIX)).toContain('https://sqs.us-east-1.amazonaws.com/369484479783/vettid-org-vault-control-');
       }
+    });
+  });
+
+  describe('MEMBER-API 2.0.0: setup codes, app keys, the account push', () => {
+    const fns = () => Object.entries<any>(t.findResources('AWS::Lambda::Function'));
+    const fnOf = (prefix: string) => fns().find(([id]) => id.startsWith(prefix))![1];
+    const stmtsOf = (prefix: string) => {
+      const roleId = fnOf(prefix).Properties.Role['Fn::GetAtt'][0];
+      return Object.values<any>(t.findResources('AWS::IAM::Policy'))
+        .filter((p) => p.Properties.Roles.some((r: any) => r.Ref === roleId))
+        .flatMap((p) => p.Properties.PolicyDocument.Statement);
+    };
+    const str = (v: unknown) => JSON.stringify(v);
+
+    test('only the vault routes read k_code, by name (an SSM SecureString nobody here can write)', () => {
+      const all = Object.values<any>(t.findResources('AWS::IAM::Policy')).flatMap((p) => p.Properties.PolicyDocument.Statement);
+      const keyStmts = all.filter((x: any) => str(x.Resource).includes('enroll-code-key'));
+      expect(keyStmts).toHaveLength(1);
+      expect(keyStmts[0].Action).toBe('ssm:GetParameter');
+      expect(str(keyStmts[0].Resource)).toContain(':parameter/vettid-org/prod/member/enroll-code-key"');
+      expect(stmtsOf('VaultFunction')).toContainEqual(keyStmts[0]);
+      expect(fnOf('VaultFunction').Properties.Environment.Variables.ENROLL_CODE_KEY_PARAM).toBe('/vettid-org/prod/member/enroll-code-key');
+      expect(all.some((x: any) => str(x.Action).includes('ssm:Put'))).toBe(false);
+    });
+
+    test('the vault routes: members by email (typed codes), subscriptions (the snapshot), no legacy sessions in production', () => {
+      const own = stmtsOf('VaultFunction');
+      expect(own.some((x: any) => str(x.Action).includes('dynamodb:Query') && str(x.Resource).includes('vettid-org-members/index/*'))).toBe(true);
+      expect(own.some((x: any) => str(x.Action).includes('dynamodb:GetItem') && str(x.Resource).includes('vettid-org-subscriptions'))).toBe(true);
+      expect(fnOf('VaultFunction').Properties.Environment.Variables.VAULT_LEGACY_SESSION_AUTH).toBeUndefined();
+    });
+
+    test('the account push: fixed names, the vault grants of its own matrix entry, invoked by the account routes', () => {
+      const push = fnOf('VaultAccountPush');
+      expect(push.Properties.FunctionName).toBe('vettid-org-member-account-push');
+      t.hasResourceProperties('AWS::IAM::Role', { RoleName: 'vettid-org-member-account-push' });
+      const own = stmtsOf('VaultAccountPush');
+      const vault = own.filter((x: any) => str(x.Resource).includes('369484479783'));
+      expect(vault.map((x: any) => [x.Action, x.Resource])).toEqual([
+        ['dynamodb:GetItem', 'arn:aws:dynamodb:us-east-1:369484479783:table/vettid-org-vaults'],
+        ['dynamodb:GetItem', 'arn:aws:dynamodb:us-east-1:369484479783:table/vettid-org-vault-instances'],
+        ['dynamodb:PutItem', 'arn:aws:dynamodb:us-east-1:369484479783:table/vettid-org-vault-requests'],
+        ['sqs:SendMessage', 'arn:aws:sqs:us-east-1:369484479783:vettid-org-vault-control-*'],
+      ]);
+      expect(own.some((x: any) => str(x.Action).includes('UpdateItem'))).toBe(false);
+      expect(str(fnOf('AccountFunction').Properties.Environment.Variables.ACCOUNT_PUSH_FN)).toContain('VaultAccountPush');
+      expect(stmtsOf('AccountFunction').some((x: any) => str(x.Action).includes('lambda:InvokeFunction'))).toBe(true);
+    });
+
+    test('alarm MemberEnrollTypedCeiling on the EMF metric the vault routes write', () => {
+      t.hasResourceProperties('AWS::CloudWatch::Alarm', {
+        AlarmName: 'vettid-org-member-enroll-typed-ceiling',
+        Namespace: 'VettID/MemberApi',
+        MetricName: 'EnrollTypedCeiling',
+        Statistic: 'Sum',
+        Threshold: 1,
+        ComparisonOperator: 'GreaterThanOrEqualToThreshold',
+        TreatMissingData: 'notBreaching',
+      });
+    });
+
+    test('the legacy session switch is staging-only: refused in production, set in staging when asked', () => {
+      expect(() => loadConfig(new cdk.App({ context: { prodVaultLegacySessionAuth: true } }).node)).toThrow(/staging-only/);
+      expect(() => loadConfig(new cdk.App({ context: { vaultLegacySessionAuth: true } }).node)).toThrow(/staging-only/);
+      const staging = loadConfig(new cdk.App({ context: { stage: 'staging', stagingVaultLegacySessionAuth: true } }).node);
+      expect(staging.vaultLegacySessionAuth).toBe(true);
+      expect(loadConfig(new cdk.App({ context: { stage: 'staging' } }).node).vaultLegacySessionAuth).toBeUndefined();
     });
   });
 
@@ -471,14 +547,15 @@ describe('VettidOrgMemberApiStack', () => {
 
     test('read-only: ssm:GetParameter on the one parameter, for the vault routes, the cleanup job and the watch; nobody here may write it', () => {
       const all = Object.values<any>(t.findResources('AWS::IAM::Policy')).flatMap((p) => p.Properties.PolicyDocument.Statement);
-      const ssm = all.filter((s: any) => JSON.stringify(s.Action).includes('ssm:'));
+      // (The vault routes also read the setup codes' key, MEMBER-API 2.0.0: below.)
+      const ssm = all.filter((s: any) => JSON.stringify(s.Action).includes('ssm:') && !JSON.stringify(s.Resource).includes('enroll-code-key'));
       expect(ssm).toHaveLength(3);
       for (const s of ssm) {
         expect(s.Action).toBe('ssm:GetParameter');
         expect(JSON.stringify(s.Resource)).toContain(PARAM_ARN);
       }
       for (const prefix of ['VaultFunction', 'CleanupJob', 'VaultServiceWatch']) {
-        const own = stmtsOf(roleOf(prefix)).filter((s: any) => JSON.stringify(s.Action).includes('ssm:'));
+        const own = stmtsOf(roleOf(prefix)).filter((s: any) => JSON.stringify(s.Resource).includes(PARAM_ARN));
         expect({ prefix, n: own.length }).toEqual({ prefix, n: 1 });
       }
       const withEnv = fns().filter(([, f]) => f.Properties.Environment?.Variables?.VAULT_SERVICE_PARAM).map(([id]) => id.replace(/[0-9A-F]{8}$/, ''));
@@ -564,7 +641,7 @@ describe('VettidOrgAccountSiteStack', () => {
     t.hasResourceProperties('AWS::CloudFront::OriginRequestPolicy', {
       OriginRequestPolicyConfig: Match.objectLike({
         CookiesConfig: { CookieBehavior: 'all' },
-        HeadersConfig: { HeaderBehavior: 'whitelist', Headers: ['Content-Type', 'X-VettID-CSRF', 'CloudFront-Viewer-Address'] },
+        HeadersConfig: { HeaderBehavior: 'whitelist', Headers: ['Content-Type', 'X-VettID-CSRF', 'X-VettID-App', 'CloudFront-Viewer-Address'] },
       }),
     });
   });

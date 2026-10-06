@@ -257,12 +257,14 @@ function handler(event) {
     const additionalBehaviors: Record<string, cloudfront.BehaviorOptions> = {};
     if (props.apiOriginDomain) {
       // Forward only what the API uses: cookies (session), query strings, the
-      // CSRF and content-type headers, and the viewer's address (rate limits).
+      // CSRF and content-type headers, the apps' request signature
+      // (X-VettID-App, MEMBER-API 2.0.0: not Authorization, which an origin
+      // request policy cannot forward) and the viewer's address (rate limits).
       const apiRequests = new cloudfront.OriginRequestPolicy(this, 'ApiOriginRequests', {
         comment: `${props.hostName} /api/*`,
         cookieBehavior: cloudfront.OriginRequestCookieBehavior.all(),
         queryStringBehavior: cloudfront.OriginRequestQueryStringBehavior.all(),
-        headerBehavior: cloudfront.OriginRequestHeaderBehavior.allowList('Content-Type', 'X-VettID-CSRF', 'CloudFront-Viewer-Address'),
+        headerBehavior: cloudfront.OriginRequestHeaderBehavior.allowList('Content-Type', 'X-VettID-CSRF', 'X-VettID-App', 'CloudFront-Viewer-Address'),
       });
       additionalBehaviors['/api/*'] = {
         origin: new origins.HttpOrigin(props.apiOriginDomain, { customHeaders: props.apiOriginHeaders }),

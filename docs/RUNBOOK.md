@@ -875,6 +875,56 @@ yet. To set one, add it to cdk.json `"context"` (https only; the synth
 fails otherwise), commit it (PR) and deploy `VettidOrgAccountSiteStack`
 for that stage.
 
+### Setup codes and app keys (MEMBER-API 2.0.0)
+
+Apps never sign in: the portal issues a 5-minute setup code
+(`POST /api/vault/enroll-code`) and the app redeems it with its app key,
+which then signs every app request (`X-VettID-App`; ENROLLMENT-CODES.md).
+
+**`k_code`, once per stage, before the first deploy of 2.0.0.** The HMAC
+key of the setup codes is an SSM SecureString in the stage's main account
+(production: the management account; staging: the staging account). No
+deploy creates or changes it; without it, issuing and redeeming answer
+500 (nothing is issued or checked without it).
+
+```bash
+aws ssm put-parameter --profile <main profile> --type SecureString \
+  --name /vettid-org/<stage>/member/enroll-code-key \
+  --value "$(openssl rand -base64 32)"
+```
+
+Only the member API's vault routes may read it (`ssm:GetParameter`, the
+AWS-managed `aws/ssm` key). Rotating it (`--overwrite`) invalidates the
+codes issued in the last 5 minutes and nothing else; the containers pick
+it up within 5 minutes. Never print it, paste it or put it in a ticket.
+
+**`MemberEnrollTypedCeiling`** (alarm `vettid-org-member-enroll-typed-ceiling`;
+production: security-alerts email): a member's setup code got 800 wrong
+typed attempts, so its typed entry is blocked. The member was emailed to
+scan the QR instead or get a new code; the QR and every other member are
+unaffected, and the code expires within 5 minutes anyway. Look at the
+audit log (`vault.enroll_code_typed_blocked`, `vault.enroll_code_failed`
+per network and hour) and the WAF logs for the source; nothing needs
+undoing.
+
+**A vault enrolled with a stolen code** (the member says "that wasn't me"
+after the redemption email): support deletes it with the host `delete` op
+(ENROLLMENT-CODES §10 decision 11); there is no self-service deletion.
+
+**The staging switch-over.** `stagingVaultLegacySessionAuth: true` in
+cdk.json context makes the staging member API still accept portal-style
+sessions on `enclave`, `enroll`, `unlock` and recovery `register`, for apps
+built before 2.0.0, until the staging cut-over (ENROLLMENT-CODES §8 step
+5); then remove it and redeploy `VettidOrgMemberApiStack`. The synth
+refuses it for production.
+
+**The account snapshot.** `vettid-org-member-account-push` sends a
+member's running vault their new account snapshot after terms, subscription
+or cancellation changes (the account routes and the admin site's
+reinstate and subscription extend invoke it). It sends only to a live
+leaseholder and never starts anything; a failure is logged and the next
+unlock carries a fresh snapshot.
+
 ### Still to come
 
 Production release 1: status, blockers and the release-day steps are in

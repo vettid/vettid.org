@@ -65,6 +65,15 @@ export interface AppConfig {
    * app is not available yet (never a placeholder link).
    */
   readonly androidAppUrl?: string;
+  /**
+   * The staging-only switch-over of MEMBER-API 2.0.0 (ENROLLMENT-CODES §8
+   * step 3): the member API still admits portal-style sessions on the app
+   * routes (`enclave`, `enroll`, `unlock`, recovery `register`) next to app
+   * keys, so the apps of before 2.0.0 keep working until the staging
+   * cut-over. Context `<stage>VaultLegacySessionAuth` (`true`); refused in
+   * production, where the API never accepts cookies on the app routes.
+   */
+  readonly vaultLegacySessionAuth?: boolean;
 }
 
 export interface VaultConfig {
@@ -229,6 +238,21 @@ export const ORG = {
  */
 export const vaultServiceParamName = (config: Pick<AppConfig, 'stage'>): string => `/vettid-org/${config.stage}/switch/vault-service`;
 
+/**
+ * The setup codes' HMAC key `k_code` (MEMBER-API 2.0.0 "Setup codes"): an
+ * SSM SecureString in the stage's main account, created once by an
+ * operator (RUNBOOK "Setup codes"), never by a deploy, and read only by the
+ * member API's vault routes.
+ */
+export const enrollCodeKeyParamName = (config: Pick<AppConfig, 'stage'>): string => `/vettid-org/${config.stage}/member/enroll-code-key`;
+
+/**
+ * The member API's account-push function (MEMBER-API 2.0.0 "Account
+ * snapshot to the vault"): a fixed name, so the admin API can invoke it
+ * without a cross-stack reference.
+ */
+export const accountPushFunctionName = (config: AppConfig): string => resourceName(config, 'member-account-push');
+
 /** Member account ids, in a fixed order. */
 export const ORG_MEMBER_ACCOUNTS: readonly string[] = Object.values(ORG.members);
 
@@ -265,6 +289,12 @@ export function loadConfig(node: Node): AppConfig {
   if (androidAppUrl && !/^https:\/\/[^\s"<>]+$/.test(androidAppUrl)) {
     throw new Error(`context ${appUrlKey}: expected an https URL, got ${JSON.stringify(androidAppUrl)}`);
   }
+  const legacyKey = `${stage}VaultLegacySessionAuth`;
+  const legacyRaw = node.tryGetContext(legacyKey);
+  const vaultLegacySessionAuth = legacyRaw === true || legacyRaw === 'true';
+  if (stage === PROD_STAGE && (node.tryGetContext('vaultLegacySessionAuth') !== undefined || legacyRaw !== undefined)) {
+    throw new Error('vault legacy session auth is staging-only: production never accepts cookies on the app routes (MEMBER-API 2.0.0)');
+  }
   return {
     stage,
     domainName,
@@ -283,6 +313,7 @@ export function loadConfig(node: Node): AppConfig {
       ? { ...STAGE_ACCOUNTS[stage].vault!, vaultsStreamArn: String(node.tryGetContext(streamKey) ?? '') }
       : undefined,
     ...(androidAppUrl ? { androidAppUrl } : {}),
+    ...(vaultLegacySessionAuth ? { vaultLegacySessionAuth } : {}),
   };
 }
 
