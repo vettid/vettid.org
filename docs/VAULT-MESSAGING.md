@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.16.0
+version: 0.16.1
 date: 2026-10-06
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -12,13 +12,17 @@ related:
   - CALLING-SERVICE.md
   - PUSH-GATEWAY.md
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.1.0)
+  - MEMBER-API.md (2.1.1)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.0, approved 2026-10-03)
   - VAULT-RELEASES.md (0.1.6, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.16.1: editorial-normative (owner decision of 2026-10-06, MEMBER-API
+    2.1.1): the app learns a pending start-over from `deletion:
+    {deletion_id, state, deletes_at}` in `GET /api/vault/status`, so that
+    its cancel can name the `deletion_id` (§11.11.9)
   - 0.16.0: normative (owner decisions of 2026-10-06, §15 item 24:
     "if you lose a credential and have backups disabled you should not
     have a path back besides re-enrolling. we don't want to leak
@@ -7637,8 +7641,8 @@ destroy a vault at once.
   `https://account.vettid.org/vault/deletion/cancel#t=<token>`, stored
   as its SHA-256 only), and again on a cancel. A deletion is cancelled
   from the portal, the email link or the vault's app (its app key); the
-  app learns of it from `deletion: {state, deletes_at}` in `GET
-  /api/vault/status`, which it reads after every unlock and whenever
+  app learns of it from `deletion: {deletion_id, state, deletes_at}`
+  in `GET /api/vault/status` (0.16.1: the id its cancel names), which it reads after every unlock and whenever
   it shows vault status, and offers to cancel. The vault is not locked
   and not told during the wait: it has nothing to decide.
 - **Execution.** At `deletes_at` the API's scheduled job marks the
@@ -9393,6 +9397,12 @@ adds it to `recovery.json` (eph scalar 32 × 0x28, nonce 12 × 0x29) with
 the 0.16.0 implementation.
 
 ## 17. Changelog
+
+- **0.16.1** (2026-10-06): editorial-normative, owner decision of
+  2026-10-06. §11.11.9: `GET /api/vault/status` shows a pending
+  start-over as `deletion: {deletion_id, state, deletes_at}`; the app's
+  `POST /api/vault/deletion/cancel` names that `deletion_id`
+  (MEMBER-API 2.1.1). Before, the app had no way to learn the id.
 
 - **0.16.0** (2026-10-06): normative, owner decisions of 2026-10-06
   (§15 item 24). **No recovery with the credential backup off; start
