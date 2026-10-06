@@ -1,10 +1,12 @@
 ---
 title: ARCHITECTURE
 status: overview (as built and planned, 2026-10-03)
-version: 0.1.1
-date: 2026-10-04
+version: 0.1.2
+date: 2026-10-06
 owner: Al Liebl (Mesmer)
 changelog:
+  - 0.1.2: no recovery with the credential backup off; start over
+    instead (VAULT-MESSAGING 0.16.0)
   - 0.1.1: the V5 release model (VAULT-RELEASES, VAULT-MESSAGING
     0.10.0): channels, monthly cadence, retirement after notice with key
     deletion, manifest by hash; VAULT-RELEASES in the docs index
@@ -171,9 +173,10 @@ with the member's signed approval, the vault is re-sealed for that release
 
 **Recovery** (§11.11). From the account portal, with a 24-hour delay that
 the member's app can cancel, then the PIN and the credential password on
-a new attested app, which replaces the old one; with the credential
-backup off the credential and critical items are lost and only a new
-credential or deletion remains. A member who still has the old phone
+a new attested app, which replaces the old one. Recovery exists only
+with the credential backup on; with it off there is no recovery, and the
+member deletes the vault from the portal (24 h, cancellable) and enrolls
+a new one (§11.11.9). A member who still has the old phone
 transfers directly instead: the old app shows a QR, the new app scans it,
 the old app approves with the PIN and password, no wait (VAULT-MESSAGING
 §6.7.1). A second copy of the credential raises a clone alarm: refused,

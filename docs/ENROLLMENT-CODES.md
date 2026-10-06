@@ -1,9 +1,15 @@
 ---
 title: ENROLLMENT-CODES
 status: draft (design note; normative text in VAULT-MESSAGING 0.15.0 §11.12–§11.13 and MEMBER-API 2.0.0)
-version: 0.2.2
+version: 0.2.3
 date: 2026-10-06
 changelog:
+  - 0.2.3: VAULT-MESSAGING 0.16.0 (owner decisions of 2026-10-06): a
+    recovery exists only with the credential backup on, and only
+    `credential.recover` completes one (§4.4); with the backup off a
+    replaced phone means a start-over: the portal deletes the vault
+    after 24 h and the member redeems a new setup code (§4.4, §7);
+    related versions (VAULT-MESSAGING 0.16.0, MEMBER-API 2.1.0)
   - 0.2.2: errata: the setup QR's example payload is 79 bytes, not 78
     (§3.2; still version 5 at level M); related versions
     (VAULT-MESSAGING 0.15.2, MEMBER-API 2.0.1)
@@ -19,8 +25,8 @@ changelog:
   - 0.1.0: first draft
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.15.2)
-  - MEMBER-API.md (2.0.1)
+  - VAULT-MESSAGING.md (0.16.0)
+  - MEMBER-API.md (2.1.0)
   - ANDROID-PLAN.md
 classification: public (no secrets; safe for github.com/vettid)
 ---
@@ -334,9 +340,16 @@ then decides.
   already learns of its removal from `device.unlinked`.
 - **Recovery (§11.11).** The new phone claims the recovery with its key,
   registers with it, and unlocks with it while the recovery is
-  `registered`. When `credential.recover` or `credential.reset` makes it
-  the app, the vault emits `app_key`.
-- **Replaced phone without the old one:** recovery, as above. There is no
+  `registered`. When `credential.recover` makes it the app, the vault
+  emits `app_key`. A recovery exists only with the credential backup on
+  (VAULT-MESSAGING 0.16.0): with it off the API refuses the claim's
+  recovery before it exists (`409 recovery_unavailable`), and the
+  enclave refuses a register (`no_backup`).
+- **Replaced phone without the old one:** recovery, as above, with the
+  backup on. With the backup off there is no way back into the vault:
+  the member deletes it from the portal ("Delete my vault and start
+  over", 24 h, cancellable; VAULT-MESSAGING §11.11.9) and, once it is
+  gone, gets a new setup code and enrolls a new, empty vault. There is no
   portal "revoke the app" button (OWNER DECISION 13): the recovery's
   `recovery_pending` already keeps a thief with the old phone and the PIN
   out for the 24 hours, and the portal session would otherwise gain a way
@@ -477,8 +490,8 @@ already infer from the next unlock.
 | **Flooding one member's typed entry** (to stop them enrolling) | That member cannot use the typed code of that issuance (at most 5 minutes). Blast radius: one member's typed path. The QR, the App Link and every other member keep working; there is no global brake to pull. | The alert `MemberEnrollTypedCeiling`; the member is emailed and told to scan the QR. |
 | **Probing for accounts** through typed redeem | Nothing: wrong email, wrong code, expired or blocked issuance all answer `404 invalid_code` with flat timing; limits count non-existent emails like real ones (§3.3). | — |
 | **A malicious member API** | What it had: refuse, misroute, lie about status and account, bind a new enrollment to any member (it is the membership authority), issue codes for anyone, see request timing. New: it sees app public keys and when they change (a transfer or recovery completed). | Unchanged enclave checks (§4.5): it cannot unlock, register, approve, or forge an app's request to the vault. |
-| **A compromised portal session** | Issue a code (useful only for an account without a confirmed vault), request a recovery (24 h, cancellable, as before), lock, read status, cancel codes. It can no longer submit an unlock attempt: before 0.15.0 it could (it still needed the unlock key and the attestation, so it learned nothing). | The redemption email; recovery emails as before. |
-| **A stolen phone** | As before: the thief has the app key, the unlock key and the attestation key, and needs the PIN. | Recovery (`recovery_pending` from the request on; the old key is revoked when the recovery completes). |
+| **A compromised portal session** | Issue a code (useful only for an account without a confirmed vault), request a recovery (24 h, cancellable, as before; refused when the vault has no credential backup, VAULT-MESSAGING 0.16.0), request a start-over deletion of the vault (24 h, cancellable, availability only: it reveals nothing; 0.2.3), lock, read status, cancel codes. It can no longer submit an unlock attempt: before 0.15.0 it could (it still needed the unlock key and the attestation, so it learned nothing). | The redemption email; recovery and start-over emails, each with a cancel link. |
+| **A stolen phone** | As before: the thief has the app key, the unlock key and the attestation key, and needs the PIN. | Recovery with the credential backup on (`recovery_pending` from the request on; the old key is revoked when the recovery completes); with it off, a start-over (VAULT-MESSAGING §11.11.9). |
 | **A replayed app request** | Nothing: `ts` window and single-use nonce; POST bodies also carry single-use `request_id`s. | — |
 | **A forged QR `api`** | Nothing: the app never connects to it (§3.2). | — |
 

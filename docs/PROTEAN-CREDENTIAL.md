@@ -1,8 +1,8 @@
 ---
 title: PROTEAN-CREDENTIAL
 status: design rationale (normative spec is VAULT-MESSAGING §3.5)
-version: 0.1.1
-date: 2026-10-03
+version: 0.1.2
+date: 2026-10-06
 owner: Al Liebl (Mesmer)
 related:
   - VAULT-MESSAGING.md (0.7.0): §3.5 Protean Credential, §3.3.1 DEK, §10.6 credential, §10.7 items, §10.13 critical-item use, §11.11 recovery
@@ -10,6 +10,10 @@ related:
   - VAULT-PLAN.md (D1 release approval)
   - ARCHITECTURE.md
 changelog:
+  - 0.1.2: no recovery with the backup off; a member who loses the
+    phone then deletes the vault and starts over (owner decisions of
+    2026-10-06; VAULT-MESSAGING 0.16.0 §11.11.9) (§3.6, §3.7, §4.3,
+    §4.5)
   - 0.1.1: §3.8: no standalone `credential.delete`; `credential.reset`
     gives a new credential (owner decision of 2026-10-06; VAULT-MESSAGING
     0.15.2)
@@ -131,13 +135,15 @@ The vault keeps the latest blob in its own encrypted state (the
 copy is sealed to the vault's current CEK outside and to the password
 inside, so it is useless anywhere but in the vault and to anyone but the
 member. It exists so that a member who loses their phone can be handed the
-credential again through recovery (§3.7).
+credential again through recovery (§3.7), and **only a vault that keeps
+it can be recovered** (VAULT-MESSAGING 0.16.0).
 
 The backup stays **optional**. With it off, the credential lives only on
-the member's phone: there is no off-device copy and no export, so losing
-the phone loses the credential and every critical item permanently. The
-app warns clearly before the backup is turned off (VAULT-MESSAGING
-0.9.0 §3.5.6).
+the member's phone: there is no off-device copy and no export, and
+losing the phone loses **the whole vault**, not only the credential:
+there is no recovery, and the member can only delete the vault and
+start over with a new one (§3.7). The app warns clearly before the
+backup is turned off, saying exactly that (VAULT-MESSAGING §3.5.6).
 
 There is **no member backup or export of vault data outside the service**
 (owner decision, 2026-10-03). Moving a vault from an old vault to a new one
@@ -160,12 +166,19 @@ A member who has lost their app recovers through the account portal
    phone dies. The new app replaces the old one, whose keys are revoked;
    desktops and agents are kept (§4).
 
-With the backup off there is no copy to hand over and **no recovery of
-the credential**: if a recovery could return secrets, a bad actor could
-retrieve them (owner decision, 2026-10-03). The credential and the
-critical items are lost; the recovery restores access to the vault only,
-so that the member can create a new credential or delete the vault
-(VAULT-MESSAGING §11.11.5, §12.5). There is no other recovery of a credential and no
+With the backup off there is **no recovery at all** (owner decisions of
+2026-10-06: "if you lose a credential and have backups disabled you
+should not have a path back besides re-enrolling. we don't want to leak
+anything to someone without the credential", and "THERE IS NO RECOVERY
+IF BACKUP IS DISABLED"). The member API refuses the request from a
+content-free bit the vault reports, and the enclave refuses it too, so
+nothing of the vault reaches anyone without the credential. 0.9.0–0.15.2
+let such a recovery keep the vault under a new credential; that path is
+gone. The member's only path is **"Delete my vault and start over"** on
+the account portal: 24 hours, emails and cancel as for a recovery, then
+the vault is deleted (it opens nothing and returns nothing) and the
+member enrolls a new, empty vault with a setup code (VAULT-MESSAGING
+§11.11.9, §12.5). There is no other recovery of a credential and no
 bypass that VettID can operate.
 
 ### 3.8 Lifecycle
@@ -223,9 +236,12 @@ credential operations only, not the vault.
   the credential password**. The credential moves to the new app, the old
   app is removed, and there is no waiting period.
 - **Lost phone: recovery** through the account site with the **24-hour
-  wait** (§3.7). The new app receives the current credential and
-  **replaces** the old app: the old app is removed and its keys revoked.
-  Desktops and agents are kept.
+  wait** (§3.7), with the backup on. The new app receives the current
+  credential and **replaces** the old app: the old app is removed and its
+  keys revoked. Desktops and agents are kept.
+- **Lost phone, backup off: start over** (§3.7). The vault cannot be
+  recovered; the member deletes it from the account site after 24 hours
+  and enrolls a new one.
 
 ### 4.4 Why
 
@@ -258,12 +274,14 @@ vettid-vault together with it):
 - **Recovery** (§11.11.5): the new app replaces the old one; desktops and
   agents are kept.
 - **Backup off survives decision 3** as an option: no off-device copy, no
-  export, and losing the phone loses the credential and the critical
-  items. A recovery then restores vault access only, to reset the
-  credential or delete the vault (owner decision, 2026-10-03). 0.9.0
-  removed the member-supplied blob of earlier drafts.
-- **Vault deletion** (§12.5): `vault.delete` from the app (PIN and
-  password) or through a recovery; the member is emailed.
+  export, and losing the phone loses the vault. Since 0.16.0 there is no
+  recovery then (owner decisions of 2026-10-06), only a start-over
+  (§11.11.9); 0.9.0's "access only" recovery (reset the credential or
+  delete the vault) is removed. 0.9.0 removed the member-supplied blob
+  of earlier drafts.
+- **Vault deletion** (§12.5): `vault.delete` from the holder (PIN and
+  password), or the portal's start-over after 24 hours; the member is
+  emailed.
 - **GrapheneOS** is accepted through its pinned verified boot keys
   (§11.7).
 
