@@ -5,8 +5,8 @@ version: 0.1.4
 date: 2026-10-05
 changelog:
   - 0.1.4: the daily owner check (VAULT-MESSAGING 0.13.0 §3.6, owner
-    decisions of 2026-10-05): follow-ups for A3 and A6 (§6), the Settings
-    and onboarding rows (§4)
+    decisions of 2026-10-05 and 2026-10-06): follow-ups for A3 and A6
+    (§6), the Settings and owner-check rows (§4), the hold switch
   - 0.1.3 (editorial): D2 gold #FFC125 as in §3; GrapheneOS risk closed
     (staging accepted GrapheneOS attestation on 2026-10-05); current
     VAULT-MESSAGING and RELAY-PROTOCOL versions
@@ -108,7 +108,7 @@ the destinations.
 | Approvals | — (VettID-specific) | Pending connection requests, grant requests, critical-item uses, share-rule decisions; approve/deny; critical items need the credential password |
 | Items | Folder list | Items per VAULT-ITEMS: name, category, typed fields, tags, sensitivity (data / secret / critical); filter by tag; add/edit from templates; share rules by tag (default: ask for each new item). Critical items live in the Protean Credential and are never shared by a rule |
 | Credential | — | Critical items inside the Protean Credential; unlock window; password change; the vault-held credential copy on/off |
-| Settings | Settings | Vault (status, release, lock, PIN); Security (credential, recovery, attestation info, biometric app lock and timeout, the owner-check interval 1–24 h); Privacy; App (theme, notifications and push path) |
+| Settings | Settings | Vault (status, release, lock, PIN); Security (credential, recovery, attestation info, biometric app lock and timeout, the owner-check interval 1–24 h and the hold switch); Privacy; App (theme, notifications and push path) |
 | Owner check | — (VettID-specific) | One screen: PIN and credential password together (VAULT-MESSAGING §3.6.5); also the "vault held" screen with the waiting counts and the lock action |
 | Avatar sheet | Account sheet | Vault status, lock vault, open account portal, sign out of this device |
 | Onboarding | Sign-in flow | Membership check → enroll vault (PIN, credential password) → first connection guide |
@@ -184,6 +184,14 @@ interval). Follow-ups, in A3 unless noted:
    unlock, read `vault.status`, then send the check without asking again.
 7. **Settings**: the interval (1–24 h); shortening may hold the vault at
    once, so the app offers a check with the change.
+   **Hold switch** (owner decision of 2026-10-06, §3.6.7): turning the
+   hold off is part of a check (the same PIN-and-password screen, with
+   `hold: false` and an optional end date up to 30 days ahead in the
+   sealed payload) and comes with a plain warning of what it gives up;
+   turning it on is a plain `settings.set`. While off: a persistent
+   "hold is off" indicator (with the end date) on the main screens, and
+   the post-deadline check prompt is dismissible. Show
+   `owner_check.hold_changed` feed items.
 8. **Lock after ten failures**: show the locked state and the urgent
    feed item after the next unlock.
 9. Tests: an injectable clock in the dev stack (vettid-vault) to drive a
