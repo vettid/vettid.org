@@ -1,9 +1,13 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.6
+version: 0.1.7
 date: 2026-10-06
 changelog:
+  - 0.1.7: no recovery with the credential backup off (VAULT-MESSAGING
+    0.16.0, owner decisions of 2026-10-06): the backup-off warning, the
+    recovery screens without the backup-off path, `no_backup`, and
+    "delete and start over" with a new setup code (§4)
   - 0.1.6: the owner check's message type is `vault.owner-check`
     (VAULT-MESSAGING 0.15.2: §5.3's type grammar has no underscore); the
     settings keys, `owner_check_required` and the `owner_check` sync,
@@ -27,7 +31,7 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.13.0) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.16.0) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Items screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
@@ -115,10 +119,12 @@ the destinations.
 | Connection detail | — | Profile shared with you, safety code (SAS), authenticate, alias/notes, block/remove |
 | Approvals | — (VettID-specific) | Pending connection requests, grant requests, critical-item uses, share-rule decisions; approve/deny; critical items need the credential password |
 | Items | Folder list | Items per VAULT-ITEMS: name, category, typed fields, tags, sensitivity (data / secret / critical); filter by tag; add/edit from templates; share rules by tag (default: ask for each new item). Critical items live in the Protean Credential and are never shared by a rule |
-| Credential | — | Critical items inside the Protean Credential; unlock window; password change; the vault-held credential copy on/off |
+| Credential | — | Critical items inside the Protean Credential; unlock window; password change; the vault-held credential copy (the backup) on/off. Turning it off shows VAULT-MESSAGING §3.5.6's warning and needs a confirmation: "If this phone is lost, broken, reset or replaced without a transfer, your vault **cannot be recovered**. It can only be deleted and replaced by a new one, and **everything in it is lost**." While off, the screen and Settings keep a short "no recovery" notice. Turning it on asks for the password at once (an owner check) so that the copy exists, and says recovery is possible from then on |
 | Settings | Settings | Vault (status, release, lock, PIN); Security (credential, recovery, attestation info, biometric app lock and timeout, the owner-check interval 1–24 h and the hold switch); Privacy; App (theme, notifications and push path) |
 | Owner check | — (VettID-specific) | One screen: PIN and credential password together (VAULT-MESSAGING §3.6.5); also the "vault held" screen with the waiting counts and the lock action |
 | Avatar sheet | Account sheet | Vault status, lock vault, the member's membership and subscription (read-only, from the vault, VAULT-MESSAGING §11.13), open account portal (browser) |
+| Recovery (new phone) | — (VettID-specific) | Only with the backup on: scan the portal's recovery QR → claim (`email_hint`) → register → PIN → credential password → the app replaces the old one. No other path: 0.1.6's backup-off choice (new credential or delete) is removed. `no_backup` at register or unlock (a vault whose backup is off): "This vault cannot be recovered: its credential backup was off. Delete it on the account site and start over with a new setup code", with a link to the portal's start-over page (MEMBER-API 2.1.0) and then to onboarding |
+| Pending deletion | — | When `GET /api/vault/status` shows `deletion` (a start-over requested on the portal, VAULT-MESSAGING §11.11.9): an urgent banner with the time left and **Cancel deletion** (`POST /api/vault/deletion/cancel`, signed by the app key) |
 | Onboarding | Sign-in flow | Scan the setup QR from the account portal, or type its short code with the account's email (no sign-in in the app, VAULT-MESSAGING 0.15.0 §11.12) → confirm the account (`email_hint`) → enroll vault (PIN, credential password) → first connection guide |
 
 Every list has an empty state; every destructive action has a confirmation;

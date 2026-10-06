@@ -1,8 +1,8 @@
 ---
 title: TECH-PREVIEW
 status: draft (the preview opens when VAULT-PLAN V5 and the Android app's first release are ready)
-version: 0.1.0
-date: 2026-10-03
+version: 0.1.1
+date: 2026-10-06
 owner: Al Liebl (Mesmer)
 related:
   - ARCHITECTURE.md
@@ -10,6 +10,9 @@ related:
   - VAULT-PLAN.md (V5 infrastructure, V6 clients), ANDROID-PLAN.md
   - RELEASE-UPDATES.md, PROTEAN-CREDENTIAL.md
 changelog:
+  - 0.1.1: recovery needs the credential backup; with it off a lost
+    phone means deleting the vault and starting over (VAULT-MESSAGING
+    0.16.0, owner decisions of 2026-10-06)
   - 0.1.0: rewritten for the vettid.org system; replaces vettid-dev
     `docs/TECH-PREVIEW.md`
 classification: public (no secrets; safe for github.com/vettid)
@@ -63,6 +66,10 @@ work.
   either. If you lose your phone, recovery takes 24 hours and needs both
   (PROTEAN-CREDENTIAL §3.7). Without them, the vault cannot be opened, by
   you or by us.
+- **Keep the credential backup on** unless you mean it. Recovery works
+  only while it is on (the default). With it off, a lost or replaced
+  phone cannot be recovered at all: the vault can only be deleted from
+  the account site and replaced by a new, empty one.
 - **This is a small project.** Expect rough edges in the apps and slow
   answers at times. There is no SLA and no support contract; bug reports
   get a best-effort response.
@@ -110,7 +117,8 @@ the current terms (MEMBER-API).
 - **One phone per vault.** Your app holds your Protean Credential, and
   there can be only one. To move to a new phone, transfer directly from
   the old one (scan its QR, approve with your PIN and password). If the
-  old phone is lost, use recovery (24 hours).
+  old phone is lost, use recovery (24 hours; only with the credential
+  backup on, otherwise delete the vault and start over).
 
 ### iOS, desktop and agents
 

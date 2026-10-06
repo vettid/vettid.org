@@ -1,8 +1,25 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.0.1
+version: 2.1.0
 changelog:
+  - 2.1.0 (2026-10-06, VAULT-MESSAGING 0.16.0; owner decisions of
+    2026-10-06: no recovery with the credential backup off; start over
+    instead): the vault row gains the host-written `credential_backup`
+    (one bit the vault reports: whether it keeps a backup copy of its
+    credential) and `VaultStatus.credential_backup`; `POST
+    /api/vault/recovery` answers `409 recovery_unavailable` (`reason:
+    "no_backup"`) when it is `false`, and `409 deletion_pending` during
+    a start-over; a recovery the enclave refuses (slot code
+    `recovery_unavailable`) ends at once in the new state `unavailable`,
+    with its sealed refusal returned immediately. New: "Delete my vault
+    and start over" (`/api/vault/deletion`, `GET`, `/cancel`,
+    `/cancel-link`; 24 h, emails, cancel from the portal, the link or
+    the app; then the queue op `delete`) and `VaultStatus.deletion`.
+    Removed from the text: the backup-off recovery that ended in a new
+    credential or a deletion by the recovering app. Additive for v2
+    clients that ignore unknown fields and treat an unknown recovery
+    state as ended
   - 2.0.1 (2026-10-06, from the implementation, vettid.org #144):
     editorial. The pause refusal of `redeem` and recovery `claim` comes
     after the signature check, which reads `app_key` from the body, and
@@ -212,6 +229,9 @@ device identifiers, and never logs envelopes.
 | `POST /api/vault/recovery/cancel-link` | its token | — |
 | `POST /api/vault/recovery/claim` | — | the key being registered (`vault=` the QR's) |
 | `POST /api/vault/recovery/register` | — | a claim key |
+| `POST /api/vault/deletion`, `GET` (2.1.0) | yes | — |
+| `POST /api/vault/deletion/cancel` (2.1.0) | yes | `app_key` |
+| `POST /api/vault/deletion/cancel-link` (2.1.0) | its token | — |
 
 ### App request signing (2.0.0)
 
@@ -388,7 +408,12 @@ interface VaultStatus {     // advisory: written by the enclave host, never a se
   recovery: {               // the active recovery ("Vault recovery"), for apps and the account site
     state: 'pending' | 'available' | 'registered';
     available_at: string;   // RFC 3339
-  } | null;                 // null: none, or it was cancelled or has expired
+  } | null;                 // null: none, or it was cancelled, refused or has expired
+  credential_backup: boolean | null;  // 2.1.0: host-written; false = the vault cannot be recovered; null = not reported yet
+  deletion: {               // 2.1.0: a pending start-over ("Vault deletion: start over")
+    state: 'pending' | 'executing';
+    deletes_at: string;     // RFC 3339
+  } | null;
   created_at: string; updated_at: string;
 }
 
@@ -682,10 +707,11 @@ one app). The portal asks; the vault is locked at once; after 24 hours the
 portal shows a one-time code (as a QR, rendered in the page) that a new
 app presents. The new app then needs the PIN and the credential password,
 and **replaces** the old app (removed, its keys revoked); desktops and
-agents stay. With the credential backup off there is no copy of the
-credential to hand over: the password is not needed, but the credential
-and every critical item are lost, and the new app can only create a new
-credential or delete the vault (§11.11.5). A member who still has the old
+agents stay. **A recovery exists only with the credential backup on**
+(VAULT-MESSAGING 0.16.0, owner decisions of 2026-10-06: "THERE IS NO
+RECOVERY IF BACKUP IS DISABLED"). With the backup off the request is
+refused upfront (below), and the member's only path is to delete the
+vault and start over ("Vault deletion: start over"). A member who still has the old
 phone moves the app by direct transfer instead (§6.7.1), without the API. The code is minted inside the enclave and
 reaches the API only sealed to a P-256 key held by the member's browser, so
 the API never holds it in a usable form; the enclave enforces the 24 h and
@@ -704,7 +730,8 @@ the expiry itself.
 interface Recovery {
   recovery_id: string;                 // ULID; the queue request id
   vault_id: string;                    // the vault being recovered (HKDF info and QR payload, §11.11.2)
-  state: 'pending' | 'available' | 'registered' | 'cancelled' | 'expired';
+  state: 'pending' | 'available' | 'registered' | 'cancelled' | 'expired'
+       | 'unavailable';                // 2.1.0: the enclave refused it (no backup copy)
   requested_at: string;                // RFC 3339
   available_at: string;                // requested_at + 24 h
   expires_at: string;                  // available_at + 24 h
@@ -733,7 +760,14 @@ interface Recovery {
   (non-extractable private key kept in IndexedDB).
 - **Request.** `404 not_found` without an enrolled vault (state
   `enrolling` included); `409 recovery_active` while a recovery is
-  `pending` or `available`. The API writes the recovery on the vault row,
+  `pending` or `available`; `409 deletion_pending` while a start-over
+  is pending (2.1.0). **Backup off** (2.1.0): when the vault row's
+  `credential_backup` is `false`, `409 recovery_unavailable` with
+  `{error, reason: "no_backup"}`, before anything is written, enqueued,
+  locked or mailed (the request still counts toward the rate limit);
+  the portal says the vault cannot be recovered because its credential
+  backup is off, and offers the start-over. With `credential_backup`
+  absent the request proceeds and the enclave decides. The API writes the recovery on the vault row,
   creates the response slot (TTL = `expires_at`) and enqueues `recovery`
   (with `browser_key`) to the leaseholder, or to a live instance of the
   vault's `sealed_release` (`503 release_starting` as for the enclave
@@ -748,10 +782,18 @@ interface Recovery {
   cancelled; `sealed_code` is the slot's envelope, returned only then (and
   absent if the host has not answered yet). The portal decrypts it and
   renders the QR locally.
-  The sealed answer may instead be a refusal (`error: "no_credential"`,
-  VAULT-MESSAGING §11.11.2): a vault without a Protean Credential cannot
-  be recovered. The API cannot tell the two apart; the portal shows the
-  refusal once it decrypts the answer.
+  The sealed answer may instead be a refusal (`error: "no_credential"`
+  or, 2.1.0, `"no_backup"`, VAULT-MESSAGING §11.11.2): the vault cannot
+  be recovered. Since 2.1.0 the enclave marks a refusal with the slot's
+  clear `code: "recovery_unavailable"`: the API then sets the
+  recovery's state to `unavailable` (an ended state, conditional on the
+  same `recovery_id`), returns the slot's envelope as `sealed_code`
+  at once (not waiting for `available_at`), refuses claim and register
+  for it, and audits `vault.recovery_unavailable`. The API notices the
+  code as it notices `recovery_registered` (below), on the request's
+  own slot. The portal decrypts the refusal and shows it. A refusal
+  without the code (a release before 0.16.0) is shown at
+  `available_at`, as before.
 - **Registered** (1.1.0, VAULT-MESSAGING 0.10.6 §11.11.7). The register
   route records the `request_id` on the recovery (`register_ids`, at
   most the 10 a day the rate limit allows) and on its slot
@@ -798,8 +840,9 @@ interface Recovery {
 ### The account site's vault pages
 
 What `sites/account` does with the routes above (enrollment, unlock,
-release approval, `register` and vault deletion are app-only; the site
-never asks for the vault PIN or the credential password):
+release approval and `register` are app-only; the site deletes a vault
+only by the 24-hour start-over; it never asks for the vault PIN or the
+credential password):
 
 - **`/account/#vault`** (a tab of the account page, behind the `/account/`
   cookie gate): `GET /api/vault/status`, loaded when the tab is opened.
@@ -852,6 +895,19 @@ never asks for the vault PIN or the credential password):
   deleted. The seal is opened with the recovery's own `vault_id`. A
   `registered` recovery is shown as "used on your new phone", without a
   code (its key is deleted), with cancel while it is active.
+- **Backup off** (2.1.0): the vault tab says, when `credential_backup`
+  is `false`, that the vault cannot be recovered if the phone is lost,
+  and links to the start-over. The recovery page shows the API's `409
+  recovery_unavailable` (or a decrypted `no_backup` refusal) as "This
+  vault cannot be recovered: its credential backup is off. You can
+  delete it and start over with a new vault", with the link. The
+  0.15.x copy that promised a new credential or a deletion after a
+  backup-off recovery is removed.
+- **`/account/vault/deletion/`** (gated; 2.1.0): **Delete my vault and
+  start over**: what is lost (everything in the vault, for good), the
+  typed phrase, the 24 h countdown and **Cancel**, then, once the vault
+  is gone, **Set up your vault**. **`/vault/deletion/cancel#t=<token>`**
+  (outside the gate) works like the recovery's cancel link.
 - **`/vault/recovery/cancel#t=<token>`** (outside the gate, no session):
   the fragment is removed from the address bar first; the token is sent
   to `cancel-link` only when the member presses the button.
@@ -900,9 +956,10 @@ whatever the lease: `alarm = {kind: "credential_clone", alarm_id, at}`
 ### Vault deletion (VAULT-MESSAGING 0.9.0 §12.5)
 
 A vault is deleted by its app (`vault.delete` over the relay: the
-holder with the PIN and the password, or a recovering app, including
-through the account site's recovery with the backup off), or by the
-member API when an account is cancelled. The vault deletes itself:
+holder with the PIN and the password), by the member's start-over from
+the account site (2.1.0, below), or by the member API when an account is
+cancelled. 2.1.0 removed the recovering app's deletion (VAULT-MESSAGING
+0.16.0). The vault deletes itself:
 notices and revocations, keys destroyed, every stored object erased.
 Its own audit log goes with it, so the member is told by email.
 
@@ -930,9 +987,66 @@ Its own audit log goes with it, so the member is told by email.
   `deleted` within 30 days are logged for operations, not dropped
   silently.
 - **Status.** A `deleted` vault row reads as no vault (`{vault: null}`).
+- **Stored versions.** The data bucket keeps noncurrent versions for 7
+  days (VAULT-RELEASES §8.2, §11.4): the erased objects, still sealed,
+  are gone 7 days after the deletion (VAULT-MESSAGING §12.5).
 - **IAM.** The alarm Lambda may delete vault rows and pointer rows
   (conditional) in addition to its alarm updates; the cleanup job may
   send to the vault-control queues as the API does.
+
+### Vault deletion: start over (2.1.0, VAULT-MESSAGING 0.16.0 §11.11.9)
+
+For a member who has lost the phone with the credential backup off (no
+recovery exists then), or who does not want to recover: the portal
+deletes the vault after 24 hours, and the member then enrolls a new,
+empty vault with a setup code. The deletion needs no app, PIN or
+credential because it opens and returns nothing; the delay, emails and
+cancel stop someone holding the member's session from destroying the
+vault at once (owner decision, 2026-10-06).
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| POST | `/api/vault/deletion` | `{confirm: "delete my vault"}` | `202 {deletion_id, requested_at, deletes_at}` |
+| GET | `/api/vault/deletion` | — | `{deletion: Deletion \| null}` |
+| POST | `/api/vault/deletion/cancel` | `{deletion_id}` (portal session, or the vault's app signed by its `app_key`) | `200 {cancelled: boolean}` |
+| POST | `/api/vault/deletion/cancel-link` | `{token}` (no session) | `200 {cancelled: boolean}` |
+
+```ts
+interface Deletion {
+  deletion_id: string;                 // ULID
+  state: 'pending' | 'executing' | 'cancelled';
+  requested_at: string;                // RFC 3339
+  deletes_at: string;                  // requested_at + 24 h
+}
+```
+
+- **Request.** A session of an active `member` with the current terms.
+  `400 bad_request` without the exact phrase; `404 not_found` without a
+  confirmed vault (none, `enrolling` or deleted); `409 recovery_active`
+  while a recovery is `pending`, `available` or `registered`; `409
+  deletion_pending` while one is `pending` or `executing`. Offered
+  whatever `credential_backup` says. The API writes `deletion
+  {deletion_id, state: pending, requested_at, deletes_at}` on the vault
+  row and emails the member: the vault and everything in it will be
+  deleted at `deletes_at` and cannot be restored; how to cancel; a
+  single-use cancel link
+  (`https://account.vettid.org/vault/deletion/cancel#t=<token>`, stored
+  as its SHA-256 in a request-table row that expires at `deletes_at`).
+  Nothing is enqueued and the vault is not locked.
+- **Cancel** (session, link or app): conditional on `state = pending`;
+  removes the record, emails the member, answers `{cancelled: true}`;
+  otherwise `{cancelled: false}`. The app sees `deletion` in
+  `GET /api/vault/status` and offers the cancel.
+- **Execution.** The cleanup job (every 5 minutes) takes each `pending`
+  deletion past `deletes_at`, sets `executing` (conditional) and
+  enqueues the operation `delete` exactly as for an account
+  cancellation (below; `deletion_requested_at`, retries, the 30-day
+  log). The `vault_deleted` notice emails the member and deletes the
+  rows; the portal then offers **Set up your vault** (a new setup code).
+- **Rate limits:** request 3 per member per day; cancel 30 per member
+  per 15 minutes; the link 20 per source network per 15 minutes.
+- **Audit:** `vault.deletion_request`, `vault.deletion_cancel` (`via:
+  session | link | app`), `vault.deletion_executed`. Never the token.
 
 **Left to the API by the spec, decided here:** the shape of `Enclave`; the
 `vault_id` encoding; reuse of `vault_id` on re-enrollment; liveness (90 s
@@ -954,9 +1068,12 @@ host writes the fields marked *host*):
   alarm Lambda adds `alarm.emailed_at` and removes `alarm_pending`).
   Pointer rows `user#<guid>` →
   `current_vault_id` (API only; no `user_guid`, so they stay out of the index).
-  API: `recovery {recovery_id, state (pending|registered|cancelled),
+  API: `recovery {recovery_id, state (pending|registered|cancelled|unavailable),
   requested_at, available_at, expires_at, register_ids?}` (epoch s for
-  the times; `available` and `expired` are derived from them).
+  the times; `available` and `expired` are derived from them);
+  `deletion {deletion_id, state (pending|executing), requested_at,
+  deletes_at}` (2.1.0). *Host* (2.1.0): `credential_backup` (bool, from
+  the vault's lifecycle reports, VAULT-MESSAGING §11.5).
 - `vettid-org-vault-instances` (PK `instance_id`, GSI `release-index` on
   `release` + `heartbeat_at`), all *host*: `release`, `queue_url`,
   `descriptor` (b64), `attestation` (b64), `heartbeat_at` (epoch s),
