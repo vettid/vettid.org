@@ -8,7 +8,7 @@ document maps the paper onto the vault and records what is and is not built.
 It was Appendix B of the paper until the paper was made vendor-neutral.
 
 The vault's normative specification is [VAULT-MESSAGING](VAULT-MESSAGING.md)
-(version 0.13.1, draft). Its §10.11 maps the paper's terms onto the vault. The
+(version 0.14.0, draft). Its §10.11 maps the paper's terms onto the vault. The
 code is in [vettid/vettid-vault](https://github.com/vettid/vettid-vault). Section
 numbers in the right-hand column refer to VAULT-MESSAGING unless stated.
 

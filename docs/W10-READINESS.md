@@ -1,13 +1,13 @@
 ---
 title: W10-READINESS
 status: living checklist (update as items close; not a plan)
-version: 0.1.1
-date: 2026-10-05
+version: 0.1.2
+date: 2026-10-06
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-RELEASES.md (0.1.5) §10.1 release steps, §12 first deployment, §13 W9/W10, §15 O1–O10
-  - RUNBOOK.md "Vault", "Adding a release", "Publishing a manifest", "Canary routing", "Staging", "Security alerts", "Production drift"
-  - VAULT-MESSAGING.md (0.10.7) §11.10 release updates
+  - VAULT-RELEASES.md (0.1.6) §10.1 release steps, §12 first deployment, §13 W9/W10, §15 O1–O10
+  - RUNBOOK.md "Vault", "Adding a release", "Publishing a manifest", "Canary routing", "Canary manifest on the test phone", "Staging", "Security alerts", "Production drift"
+  - VAULT-MESSAGING.md (0.14.0) §11.10 release updates, §13.9 canary manifest
   - MEMBER-API.md (1.1.0; 2.0.0 pending in PR #122), ANDROID-PLAN.md
   - vettid-vault docs/RELEASING.md, docs/SMOKE.md
 changelog:
@@ -16,6 +16,9 @@ changelog:
     account, vettid-vault-prod and vettid-vault-staging)
   - 0.1.1: the §4.2 inconsistencies fixed in the documents they name;
     staging release names: S3 = the W9 release, S4 = the 0.11.0 release
+  - 0.1.2: P31/B5 done (vettid-android #63; VAULT-RELEASES 0.1.6 §10.1,
+    VAULT-MESSAGING 0.14.0 §11.10.1 and §13.9, RUNBOOK "Canary manifest on
+    the test phone"); I18 resolved; B6 still open
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -93,7 +96,7 @@ dependency), **on hold** (deliberately paused by the owner).
 |---|---|---|---|
 | P29 | Android release build signed with the upload key (direct install) | **pending** | `:app:assembleRelease` is built unsigned in CI; release builds are signed outside the repository (vettid-android README). The upload digest is pinned (P8), so a direct build signed with the upload key can enroll into release 1 once it exists. |
 | P30 | Play app signing and a Play track (closed testing) | **on hold (owner)** | Gives the P9 digest and the `androidAppUrl` link (RUNBOOK "The Android app link"). |
-| P31 | App support for an unpublished canary manifest | **missing (engineering)** | VAULT-RELEASES §10.1 (as built W7/W8) says "the test device loads the canary manifest out of band"; vettid-android `master` has no such path (fixed `Endpoints.PRODUCTION` manifest URL, no override). Before release 1 the production URL answers 404, so the canary phone cannot enroll at all without it (§2, B5). |
+| P31 | App support for an unpublished canary manifest | **done** (2026-10-06; not yet run on a phone) | vettid-android #63 (`da72029`): the tester shares the signed `served-<s>.json` to the app, which verifies it under the build's pinned keys, shows serial, key and releases and installs it on confirmation; it is used while newer than the published manifest, also on a 404 (release 1), and dropped on publication. Spec: VAULT-RELEASES 0.1.6 §10.1, VAULT-MESSAGING 0.14.0 §11.10.1, §13.9 (accepted risk). Procedure: RUNBOOK "Canary manifest on the test phone". First end-to-end run is B6. |
 | P32 | Push gateway (FCM, UnifiedPush) | **deferred, not blocking** | No FCM credentials (on hold with Play). ANDROID-PLAN §7: v1 collects while the app is open and through the foreground-service path. |
 
 ## 2. Blockers
@@ -108,8 +111,8 @@ unblocked.
 | B2 | Enrollment-code redesign (#122) approved, implemented in all three repos, proven on a staging release | owner approves the spec and lifts the hold after B1; then engineering (estimate in #122: about 11–16 days) | owner, then engineering |
 | B3 | O6 instance and enclave size confirmed from the capacity result | owner decision after P20; engineering changes `deploy/host/allocator.yaml` and `VAULT_HOST_INSTANCE_TYPE` if needed **before** the release-1 tag | owner + engineering |
 | B4 | Play app-signing digest (O8) in `releasecfg/prod.json` | owner sets up Play App Signing (on hold); engineering pins the digest in vettid-vault (and the app's own pins if any) | owner |
-| B5 | Canary manifest on the test phone (P31) | engineering: a canary/test-only path in vettid-android to fetch or import a signed, unpublished manifest (verified under the same pinned keys A/B, so it adds no trust), plus a RUNBOOK step for where the canary document is placed | engineering |
-| B6 | The canary path itself never ran (P28a) | engineering: run S3 (or S4, the 0.11.0 staging release) through the canary procedure (row + flag, nothing `active`) before publishing it | engineering |
+| B5 | ~~Canary manifest on the test phone (P31)~~ **done** 2026-10-06 | app: vettid-android #63; spec: VAULT-RELEASES 0.1.6 §10.1, VAULT-MESSAGING 0.14.0 §11.10.1, §13.9; RUNBOOK "Canary manifest on the test phone". Exercised on a phone only by B6. | — |
+| B6 | The canary path itself never ran (P28a) | engineering: run S3 (or S4, the 0.11.0 staging release) through the canary procedure (row + flag, nothing `active`) before publishing it, with the canary manifest loaded on a staging build (RUNBOOK "Canary manifest on the test phone"; the staging channel has a published manifest, so this exercises "canary newer than published", not the release-1 404 case) | engineering |
 | B7 | Prod CLI profiles for the signer and retirement roles (P5) | owner edits `~/.aws/config` | owner |
 | B8 | A signed Android build for the canary phone (P29): direct build signed with the upload key | owner (the upload key never leaves the owner's machine) | owner |
 | B9 | W9 results written up (enrollment, moves, messaging, recovery, drill, capacity) as the V5 exit-test record (VAULT-RELEASES §12.1 step 5) | engineering, after B1 | engineering |
@@ -147,7 +150,7 @@ files.
 | 8 [8] | **Canary self-test**: desired capacity 1; through SSM the self-test sequence with the 60 s wait (RUNBOOK "Adding a release" 5). Optionally the capacity run on production hardware while no member exists (SMOKE "Capacity measurement"). | `"result": "PASS"` with `key_policy_check: 6` (the deletable smoke key is refused by design); parent restarts cleanly; no alarm, DLQ empty. | Desired 0. A FAIL is a canary failure: as step 6 rollback. |
 | 9 [9] | **Sign manifest serial 1** (key A, signer role): edit `prod.json` (release 1 `active`, `published_at`, `log`), `npm run vault:manifest -- sign --channel prod`, commit the raised `signed_serial`; `upload` the bucket copy (RUNBOOK "Publishing a manifest" 1–3). | Output `local/vault/prod/served-1.json` verifies under key_id `4353463f85c4012f`; `manifests/<sha256>.json` in the data bucket; nothing served (URL still 404). | Never publish this document; the next signature uses serial 2. |
 | 10 [9] | **Canary row + flag**: put the `canary` row for release 1's PCR0 (RUNBOOK "Canary routing"); flag the owner's test member on the admin site. | Row present without `manifest_serial`; the member appears under "Vault canary testers"; an unflagged member still gets `503 vault_unavailable`. | Delete the row; clear the flag (no vault yet). |
-| 11 [9] | **Canary vault on a real phone**: the upload-key-signed app with the canary manifest (B5) enrolls into release 1, unlocks, locks, unlocks again; a second canary phone connects (SAS) and messages; recovery request and cancel; soak 24 h. (No older release exists, so the move step of §11.3 starts with release 2.) | Status shows release 1 `canary`; the enclave's own key check passed at first enrollment (no `release_key` error); scaler started and later stopped the group; no alarm; DLQ and queue age 0; the host log holds no secrets. | Canary failure: delete the canary vaults from the app (PIN + password) **before** clearing the flag (a cleared member's canary vault is unreachable, 410); delete the row; destroy the release stack; release 1 → `removed`; schedule the key's deletion (30 days); ship release 2 (VAULT-RELEASES §10.1, "If the canary fails"). |
+| 11 [9] | **Canary vault on a real phone**: the upload-key-signed app with the canary manifest `served-1.json` loaded (B5; RUNBOOK "Canary manifest on the test phone") enrolls into release 1, unlocks, locks, unlocks again; a second canary phone connects (SAS) and messages; recovery request and cancel; soak 24 h. (No older release exists, so the move step of §11.3 starts with release 2.) | Status shows release 1 `canary`; the enclave's own key check passed at first enrollment (no `release_key` error); scaler started and later stopped the group; no alarm; DLQ and queue age 0; the host log holds no secrets. | Canary failure: delete the canary vaults from the app (PIN + password) **before** clearing the flag, then remove the canary manifest (Settings → Attestation) (a cleared member's canary vault is unreachable, 410); delete the row; destroy the release stack; release 1 → `removed`; schedule the key's deletion (30 days); ship release 2 (VAULT-RELEASES §10.1, "If the canary fails"). |
 | 12 [10] | **Publish serial 1**: `npm run vault:manifest -- publish --channel prod --in local/vault/prod/served-1.json` (commits the served file and the release log), PR (CI `check:manifest`), merge, `npm run deploy:site`, invoke the manifest sync (RUNBOOK "Publishing a manifest" 4, "Manifest sync"). This is the step that turns the member API's vault routes on for production. | `https://vettid.org/.well-known/vettid/pcr-manifest.json` 200, serial 1, key_id `4353463f85c4012f`; `/security/releases/1/` live and linked; the `vault-releases` row is `active` with `manifest_serial` 1; an unflagged test member gets `GET /api/vault/enclave` 200; the canary vault still unlocks. | A published manifest cannot be withdrawn or lowered. Before anyone else enrolls: publish serial 2 with release 1 `removed` (§12.3); the routes go dark again (503). |
 | 13 [11] | **Always-on minimum** (O7): stays 0 until the Android beta opens; then `min_instances: 1` on release 1 (PR, deploy `VettidOrgVaultRelease1Stack`). | One instance in service; the "newest active release, minimum 1, no live instance" alarm stays OK. | Set it back to 0. |
 | 14 | **First members**: set `androidAppUrl` (cdk.json, PR, deploy `VettidOrgAccountSiteStack`); distribute the app (Play closed track when P30 is unblocked, or a direct build to named testers); registration codes as usual. Clear the owner's canary flag once their vault is on the published release. | Account site Vault tab shows the app link; first enrollments in the audit log; no alarms. | Stop distribution; unset `androidAppUrl`. Members' vaults stay; they can only be removed by the member (or support's `delete` op under #122). |
@@ -218,4 +221,4 @@ RELEASING.md, vettid-android README), except I12, which is a naming rule
 | I15 | docs/ANDROID-PLAN.md:16, :127 | VAULT-MESSAGING "(0.6.x)", RELAY-PROTOCOL "(0.4.0)" / "RELAY-PROTOCOL 0.4" | 0.10.7 and 0.6.0. Also :107 "Onboarding — Sign-in flow" changes with #122 (which edits ANDROID-PLAN). |
 | I16 | vettid-vault docs/RELEASING.md:20–34, :82 | "Today: dry runs only … placeholders"; "two `ubuntu-24.04-arm` runners" | Staging releases 1 and 2 were built for real; runners are `ubuntu-26.04-arm` since #35 (its body lists the follow-up). |
 | I17 | vettid-android README.md:8 | "Status: phase A2" | A4 and the recovery/transfer work are merged. |
-| I18 | VAULT-RELEASES §10.1 (as built) vs vettid-android | "The test device loads the canary manifest out of band" | No such path exists in the app (P31, B5). |
+| I18 | VAULT-RELEASES §10.1 (as built) vs vettid-android | "The test device loads the canary manifest out of band" | No such path exists in the app (P31, B5). *Resolved 2026-10-06: vettid-android #63; VAULT-RELEASES 0.1.6.* |

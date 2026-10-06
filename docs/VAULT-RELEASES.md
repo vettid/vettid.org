@@ -1,8 +1,8 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.5
-date: 2026-10-05
+version: 0.1.6
+date: 2026-10-06
 owner: Al Liebl (Mesmer)
 changelog:
   - 0.1.0: V5 plan. Release pipeline, keys, infrastructure, release
@@ -41,9 +41,16 @@ changelog:
     earlier releases only; the admin-site canary switch; enclave memory
     5 GiB throughout; staging served since S1; the "Today" paragraph
     marked as the state when the plan was written
+  - 0.1.6 (owner decisions of 2026-10-06; vettid-android #63): how the
+    canary phone gets the canary manifest (§10.1): the tester shares the
+    signed served-<s>.json to the app, which verifies it under its pinned
+    keys, shows serial, key and releases and installs it on confirmation;
+    the selection rule (VAULT-MESSAGING 0.14.0 §11.10.1); removal after
+    publication (automatic) or a failed canary (Settings); risk 10, a
+    leaked canary document (§14)
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
-  - VAULT-MESSAGING.md (0.10.7) §11.10 release updates, §12.5 deletion, §13.5
+  - VAULT-MESSAGING.md (0.14.0) §11.10 release updates, §12.5 deletion, §13.5, §13.9
   - RELEASE-UPDATES.md (0.1.0) — member-facing; §3 changes with this plan
   - MEMBER-API.md "Vault", RUNBOOK.md, ARCHITECTURE.md
   - vettid-vault docs/SMOKE.md (hardware smoke test, 2026-10-02)
@@ -1054,7 +1061,7 @@ canary release (also before production release 1, when nothing is
 `active`), their vaults sealed to it are routed there; for everyone else
 it is unknown (410). The scaler manages a `canary` row like any release.
 The test device needs the canary manifest out of band (it is not
-served); the app has no such path yet (W10-READINESS P31, B5).
+served); see "The canary manifest on the test phone" below.
 Step 10: `manifest.ts publish` with the same signed document, so the
 canary vault's recorded serial is the published one; the manifest sync
 turns the row into an `active` one. A test member's flag is an operator
@@ -1062,11 +1069,46 @@ write on the members table, set from the admin site (#95; RUNBOOK
 "Canary routing", ADMIN-API "Vault canary"); there is no member-facing
 switch.
 
+**The canary manifest on the test phone** (owner decisions of
+2026-10-06; vettid-android #63; the app's rules are normative in
+VAULT-MESSAGING §11.10.1, 0.14.0):
+
+- *Delivery.* The canary tester shares the signed
+  `local/vault/<channel>/served-<s>.json` from step 9 to the VettID app
+  as a file (Android share intent). It travels only over a private
+  channel (a USB transfer from the owner's machine, for example), never
+  from a public URL (RUNBOOK "Canary manifest on the test phone"). The
+  path works in release builds: the canary phone runs the release build
+  signed with the upload key (W10-READINESS B8).
+- *Verification.* The app accepts the document only if it is signed by
+  a manifest key that build pins (key A or B in release builds, the
+  staging key in staging builds) and is in the strict manifest format.
+  It refuses the document if its serial is lower than the highest serial
+  the phone has used, or if the published manifest already has that
+  serial or a newer one. It shows the serial, the `key_id` and the listed
+  releases, and installs the document only after the tester confirms.
+  The document is stored encrypted on the phone, is erased by the
+  replaced-phone wipe, and can be removed in Settings → Attestation
+  ("Stop using the test manifest").
+- *Selection.* Before each enroll, unlock and recovery register, the app
+  uses whichever manifest has the higher serial; on a tie the published
+  one. A 404 on the published manifest (production release 1, when
+  nothing is served) falls back to the canary manifest. The app drops the
+  canary manifest automatically once the published serial reaches it. A
+  canary manifest that no longer verifies is ignored.
+- *After step 10* nothing is needed on the phone: the published
+  document is the same serial, so the app switches to it and drops the
+  canary copy.
+
 If the canary fails before step 10: the manifest s+1 is never published
 (the next one is s+2); N's group is deleted; N becomes `removed` in
 the release list (it admits nothing, and no later key admits it) and its
 key is scheduled for deletion at once (no member was ever on it). The
-fix ships as N+1.
+fix ships as N+1. On the test phone the tester removes the canary
+manifest (Settings → Attestation). The phone has used serial s+1, so it
+refuses the published s: a vault on an older release that it unlocked
+during the canary opens again once s+2 is published (N `removed`).
+Publish s+2 promptly when such a vault exists.
 
 ### 10.2 Hotfix
 
@@ -1260,6 +1302,15 @@ W4 can go any time; W2 and W3 can run beside W1; W5–W8 follow W3.
 8. **nitro-cli in a container** is expected to work but unconfirmed (W2);
    the fallback is building on Image Builder.
 9. **Region-bound keys**: a us-east-1 outage takes every vault down.
+10. **A leaked canary manifest** (accepted, owner decision 2026-10-06;
+    VAULT-MESSAGING §13.9). Anyone holding an unpublished canary
+    document could load it into the app and move their own vault into
+    the canary release. That vault is then unreachable for them (410)
+    until the release is published, and for good if the canary fails.
+    The document stays with the owner and the canary tester. A
+    canary-only app build with separate signing would close this; it is
+    a possible later hardening tied to the canary build's signing
+    (W10-READINESS B8), not done now.
 
 ## 15. Owner decisions
 
