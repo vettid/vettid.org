@@ -39,8 +39,8 @@ owner's test session of 2026-10-05. Times are UTC. Sections marked
 | Capacity on S3 (1 vCPU / 5 GiB enclave) | PASS; see §4 |
 | Kill switch (vault service pause) | deployed (staging and production); staging pause/resume and phone unlock refusal pass |
 | Recovery (24 h wait, code, new phone) | pass; old phone wipe passed after vettid-android #66 |
-| S2 → S3 move, manifest serial 4 | **TBD (2026-10-06)** |
-| Retirement drill with a vault and notice emails (on S2) | **TBD (2026-10-06)** |
+| S2 → S3 move, manifest serial 4 | pass |
+| Retirement drill | S2 key drill pass; with a vault and notice emails: moved to S3 at S4 |
 | S1 key deletion confirmed | **TBD (2026-10-12)** |
 
 ## 2. Staging releases
@@ -184,14 +184,20 @@ Findings, fixed the same day:
   vault's mailbox answers `token_revoked` (§8.6); consider requiring a
   device to ack a vault message even when its answer is refused.
 
-## 7. S2 → S3 move — TBD (2026-10-06)
+## 7. S2 → S3 move (2026-10-06): pass
 
-After the recovery test: publish manifest serial 4 (S3 active, S2
-deprecated), deploy `VettidOrgStageSiteStack`, run the staging manifest
-sync, then move both test vaults S2 → S3 with member approval and check
-unlock, messaging and the 0.10.5/0.10.6 behaviour on S3. (W10-READINESS
-B6 also asks for one run of the canary path, a `canary` row and flagged
-member with nothing `active`; S3 or S4.) Result: _TBD_.
+Manifest serial 4 (#140; `manifest_sha256 8a07295b…0d2f`): S3 active, S2
+deprecated; served byte for byte, routing synced to serial 4. Both apps
+updated in place to vettid-android `0aa8fd1` first.
+
+- Member 2 (Pixel 10 Pro), 18:04 UTC; member 1 (Fold), 18:09 UTC. Each
+  app showed "Release 2 is deprecated" and "Update available: release 3
+  (fingerprint 80a5 8002 4d4c f3d1)" (S3's PCR0), and the member approved
+  it with the unlock ("Approve the update with this unlock" + PIN).
+- Vault status on both: "Release 3 (active)".
+- Messaging on S3: a message from member 1 was delivered to member 2.
+- Observed again: the app shows "VettID cannot connect" on its first
+  launch after the phone has been idle; one retry connects. Follow-up.
 
 ## 8. Retirement drill — TBD
 
@@ -210,12 +216,23 @@ Confirm key `9e24fe29…` is deleted after 2026-10-12 ~15:34 (read-only
 `kms describe-key` as the retirement role; the CloudTrail `DeleteKey`
 event). Result: _TBD_.
 
-### 8.3 S2 with a vault and notice emails — TBD (2026-10-06 onward)
+### 8.3 S2 (no vaults), 2026-10-06; the drill with a vault moves to S3
 
-Once serial 4 makes S2 deprecated: keep one vault on S2, run the notice
-job's emails (staging SES sandbox: verified recipients only), retire S2,
-cancel → enable → unlock → reschedule, then delete and confirm `410`.
-Result: _TBD_.
+Both test vaults were moved to S3 before the drill (a sequencing
+mistake: the plan said to keep one on S2, and a deprecated release takes
+no new vaults). Owner decision 2026-10-06: run the key part on S2 now,
+and the part with a vault and notice emails on S3 when S4 deprecates it
+(keep one vault on S3 then).
+
+- Key drill on S2's seal key `aa8a3e11…` (owner ran the commands): the
+  retirement role was refused a 30-day window; the admin role was
+  refused outright; the retirement role scheduled deletion with 7 days
+  (`PendingDeletion`, 2026-10-13), cancelled, re-enabled; keycheck pass
+  (records `local/vault/staging/keycheck/4`).
+- Manifest serial 5 (#141; `191f76da…03d8`): S2 `removed`, `ends_at`
+  2026-10-06T18:17:46Z, no host; served and synced.
+- `VettidOrgVaultRelease2Stack` deleted; the key is retained (RETAIN).
+- Final 7-day deletion schedule: _pending (owner)_.
 
 ## 9. Issues found and fixed during W9
 
