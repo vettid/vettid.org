@@ -333,6 +333,22 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       }),
     ];
+    // Both alarms above read missing data as "not paused", so a watcher
+    // that stops writing would silence them. The watcher writes the metric
+    // every run in both states (1 or 0), so its absence is the one signal
+    // that covers every way it can stop: a failed run (unreadable switch),
+    // a timeout, throttling, a disabled schedule, a broken EMF line. An
+    // alarm on the function's Errors would see only the first.
+    const watchSilent = new cloudwatch.Alarm(this, 'VaultServiceWatchSilent', {
+      alarmName: resourceName(config, 'vault-service-watch-silent'),
+      alarmDescription: 'VaultServicePaused has not been written for 20 minutes: the VaultServiceWatch job is failing or not running, so a pause would go unreported (RUNBOOK "Pausing the vault service"). OK when it writes again.',
+      metric: new cloudwatch.Metric({ namespace: 'VettID/MemberApi', metricName: 'VaultServicePaused', statistic: 'SampleCount', period: cdk.Duration.minutes(5) }),
+      threshold: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+      evaluationPeriods: 4,
+      datapointsToAlarm: 4,
+      treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+    });
     // Production's main account is the management account, home of the
     // security-alerts topic (VettidOrgAuditStack). Staging's account has no
     // topic: there the parameter-change emails are the notice.
@@ -341,6 +357,8 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
       const action = { bind: () => ({ alarmActionArn: alertsTopicArn }) };
       for (const a of pausedAlarms) a.addAlarmAction(action);
       pausedAlarms[0].addOkAction(action); // "resumed"; the 24 h alarm's OK would say it twice
+      watchSilent.addAlarmAction(action);
+      watchSilent.addOkAction(action); // the watch is back
     }
 
     // The vaults stream is in the vault account (cross-account event source:
