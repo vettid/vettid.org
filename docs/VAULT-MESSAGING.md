@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.13.1
+version: 0.14.0
 date: 2026-10-06
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,9 +14,16 @@ related:
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md
   - VAULT-ITEMS.md (0.1.0, approved 2026-10-03)
-  - VAULT-RELEASES.md (0.1.0, approved 2026-10-04)
+  - VAULT-RELEASES.md (0.1.6, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.14.0: the canary manifest (owner decisions of 2026-10-06): an app
+    MAY accept an unpublished served manifest shared to it as a file,
+    verified under its pinned keys and the serial rule, installed only
+    after the member confirms, used while its serial is higher than the
+    published one (or nothing is published, 404) and removed once the
+    published serial reaches it; the accepted risk of a leaked canary
+    document (§11.10.1, §11.10.6, §13.9)
   - 0.13.1: editorial: the related RELAY-PROTOCOL is 0.6.0 and §1.2 lists
     its web endpoints (§6.11, used by §6.4); §15 item 7 is the HTTP action
     only; item 21 records vettid-vault #38
@@ -6245,7 +6252,54 @@ key_id = hex(SHA-256(SubjectPublicKeyInfo DER of the public key)[0:8])
   verify it (signature, strict format, the serial rule), store the
   highest `serial` seen and send `manifest_sha256` = hex(SHA-256(manifest
   bytes)) and `manifest_serial` in the request. On a `manifest` result
-  they refetch and retry once.
+  they refetch and retry once. The one exception is a canary manifest
+  (next item).
+- **A canary manifest** (0.14.0; owner decisions of 2026-10-06;
+  VAULT-RELEASES §10.1 step 9). To test a release before it is published,
+  VettID signs the next serial with that release `active` and does not
+  serve it. The phone used for the canary gets that served document out
+  of band. It adds no trust: it is verified exactly as the served one
+  is. An app MAY accept one, and if it does:
+  - **Delivery.** The member shares the served document to the app as a
+    file (on Android a share intent, `application/json`). The app reads
+    at most the 90,112-byte limit plus one byte and refuses anything
+    larger. It never fetches a canary manifest from a URL. The path
+    exists in release builds, because the canary phone runs a normally
+    signed release build.
+  - **Installation.** The app verifies it as above: a signature under a
+    manifest key **this build pins**, selected by `key_id` (keys A and B
+    in release builds, the staging key in staging builds), and the
+    strict format. It refuses it if its `serial` is lower than the
+    highest serial this phone has used, or if the published manifest
+    already has that `serial` or a higher one (checked when the app can
+    read and verify the published manifest). It then shows the `serial`,
+    the `key_id` and the listed releases (number and status), and
+    installs it only after the member confirms. One canary manifest is
+    installed at a time, and a new one replaces it. It is stored
+    encrypted under the app's device key store. It is erased with
+    everything else when the phone's local state is wiped (§6.7.1, the
+    replaced phone), and the member can remove it at any time (on
+    Android: Settings → Attestation, "Stop using the test manifest").
+  - **Selection**, before every enroll, unlock and recovery register.
+    The app verifies the installed canary manifest again. One that no
+    longer verifies is removed and ignored, never used as a fallback.
+    The app then fetches the published one and uses the one with the
+    higher `serial`. On equal serials it uses the published one (the
+    canary document published as it was). When the published URL
+    answers 404 (nothing published yet, as before a channel's first
+    release), it uses the canary manifest. A published manifest that
+    fails verification is an error, as it is without a canary, and the
+    canary manifest never masks it. Once the published `serial` reaches
+    the canary's, the app removes the canary manifest. The serial rule
+    applies to whichever manifest is used, and that manifest's `serial`
+    is the one stored and sent.
+
+  A phone that used a canary manifest of serial s+1 has seen s+1, so it
+  refuses the published s from then on, also after the canary manifest
+  is removed (the enclave refuses s too, since its sealed header records
+  s+1, §13.2). If the canary fails, the vault unlocks again once VettID
+  publishes s+2 (VAULT-RELEASES §10.1, "If the canary fails"). §13.9
+  describes the risk this path leaves.
 - The **manifest key** is an ECDSA P-256 key held by VettID in a hardware
   key store and used for nothing else. Its public key is **pinned in every
   app and in every release image**. Apps and images MAY pin two keys to
@@ -6483,8 +6537,9 @@ the request is sealed to; when it abandons a move it therefore sends N's
 value, and keeps N's release and `header_seq` until the move is confirmed
 or abandoned.
 
-- It fetches the manifest before each unlock, refuses one with a lower
-  `serial` than stored, and sends its `manifest_sha256` and
+- It fetches the manifest before each unlock (or uses an installed
+  canary manifest under the selection rule of §11.10.1), refuses one
+  with a lower `serial` than stored, and sends its `manifest_sha256` and
   `manifest_serial` in the unlock request (§11.10.1).
 - It MUST NOT send a PIN to a release with a **lower** release number than
   the one it last unlocked into (a rollback; it shows an error).
@@ -7673,6 +7728,31 @@ rollback residual of §13.2 (the apps' `min_state_seq` bounds it, and the
 PIN backoff is in the header, under `min_header_seq`). A dishonest host
 can still lock the vault (§13.5), which it could do anyway.
 
+### 13.9 The canary manifest
+
+A canary manifest (§11.10.1, 0.14.0) is verified under the same pinned
+keys as the published manifest, so it gives VettID no power it does not
+already have: anything VettID could list there, it could also publish.
+The serial rule stops it from taking a phone backwards. A phone uses it
+only after its member confirmed it, and only until the published
+manifest reaches its serial.
+
+**Accepted risk** (owner decision, 2026-10-06). Anyone who obtains an
+unpublished canary manifest can load it into a VettID app and approve a
+move of their own vault into the canary release (§11.10.3). The member
+API routes a canary release only for flagged test members. For anyone
+else, the moved vault is unreachable (`410 release_unavailable`) until
+VettID publishes the release, and permanently if the canary fails and
+the release is never published. Nobody else's vault is affected: a move
+still needs the vault's own member, with their PIN and their approval.
+The only mitigation is that the document never leaves the owner and the
+canary tester. It reaches the test phone over a private channel and is
+never served from a public URL (RUNBOOK "Canary manifest on the test
+phone"). A canary-only app build would close this risk: a build signed
+with its own key, and the only build that accepts canary manifests. That
+is a possible later hardening, tied to the signing of the canary
+phone's build (W10-READINESS B8), and is not done now.
+
 ## 14. Push compatibility (deferred)
 
 An app will send `push.register{platform, push_token, environment}` over its
@@ -8455,6 +8535,23 @@ pending (§15, follow-up 1).
 
 ## 17. Changelog
 
+- **0.14.0** (2026-10-06): the canary manifest (owner decisions of
+  2026-10-06; VAULT-RELEASES 0.1.6 §10.1; vettid-android #63). Normative
+  for apps that accept one; no wire, enclave or member API change.
+  - §11.10.1: "How apps learn the manifest" names its one exception; the
+    new item "A canary manifest": delivery as a shared file (release
+    builds too), installation (pinned keys of this build, strict format,
+    not below the phone's highest serial, not already published, the
+    member's confirmation, encrypted storage, erased by the wipe,
+    removable by the member), and the selection rule (higher serial wins,
+    the published one on a tie, the canary on a 404, removed once
+    published, a canary that no longer verifies ignored, a failing
+    published manifest never masked); a used canary serial raises the
+    phone's floor.
+  - §11.10.6: the unlock uses the manifest the selection rule chooses.
+  - §13.9 (new): what a canary manifest can and cannot do; the accepted
+    risk of a leaked document (a self-inflicted move into an unpublished
+    release, 410 until published); a canary-only build as later hardening.
 - **0.13.1** (2026-10-06): editorial. Front matter: RELAY-PROTOCOL 0.6.0
   (was 0.5.0). §1.2: the relay features are 0.6.0's and include the web
   endpoints (§6.11) that §6.4's invitation URL uses. §15: item 7 is the
