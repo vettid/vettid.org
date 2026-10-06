@@ -12,8 +12,30 @@
  *  - the parent writes the enclave's sealed answer into the request table,
  *    which the app polls.
  *
- * It never sees or stores PINs, keys, mailbox ids or device identifiers
- * (§11.5). Envelopes are never logged.
+ * It never sees or stores PINs, keys (other than app public keys), mailbox
+ * ids or device identifiers (§11.5). Envelopes are never logged.
+ *
+ * Two kinds of caller (MEMBER-API 2.0.0, VAULT-MESSAGING 0.15.0 §11.12):
+ *  - the account portal, with its session (cookies, CSRF): status, lock,
+ *    request polling, the setup-code routes and the recovery routes;
+ *  - apps, which never sign in: each request is signed by the app's P-256
+ *    app key (`X-VettID-App`, lambda/shared/app-auth.ts). The vault comes
+ *    from the header, the member from the vault row; the key must be one the
+ *    row allows for the route: the host-written `app_key`, the redeem's
+ *    `app_key_pending` (1 hour), a recovery's claim keys or its recovering
+ *    key. `enclave`, `enroll`, `unlock` and recovery `register` accept only
+ *    signed requests (a staging-only switch, VAULT_LEGACY_SESSION_AUTH, still
+ *    admits sessions there for the switch-over: ENROLLMENT-CODES §8 step 3).
+ *
+ * Setup codes (2.0.0, §11.12.1, lambda/shared/enroll-code.ts): the portal
+ * issues a 5-minute issuance with a 128-bit QR secret and an 8-symbol typed
+ * code (typed only with the member's email); the app redeems it with its
+ * app key, which becomes the vault's pending key. Only MACs are stored.
+ * There is no global limit anywhere; the typed path has one failure answer
+ * (404 invalid_code) and flat timing.
+ *
+ * The account snapshot (2.0.0, §11.13) rides in every unlock queue message;
+ * changes reach a running vault through lambda/jobs/vault-account-push.ts.
  *
  * Recovery (§11.11, docs/MEMBER-API.md "Vault recovery"): the API records
  * the request on the vault row (`recovery`), routes the recovery operations
@@ -21,9 +43,10 @@
  * slot until the recovery expires, and releases it only after 24 h. It
  * never holds the code itself, only that ciphertext; cancel-link tokens are
  * stored as their SHA-256 in request-table rows that expire with the
- * recovery. A register slot answered with the host's `recovery_registered`
- * marker turns the recovery `registered` (VAULT-MESSAGING 0.10.6 §11.11.7):
- * the code is spent and no longer released.
+ * recovery. The new app claims the recovery with its key (2.0.0) and
+ * registers with it; a register slot answered with the host's
+ * `recovery_registered` marker turns the recovery `registered` (VAULT-MESSAGING
+ * 0.10.6 §11.11.7) and makes that key the recovering key.
  *
  * Status reports `unlocked` only under a live lease (0.10.6 §11.5): the
  * host's `locked` update can lag, or be lost for a vault locked over the
@@ -33,19 +56,22 @@
  *  - vaults table, PK vault_id: { vault_id, user_guid, state,
  *    lease: { instance_id, lease_expires_at (epoch s) }, sealed_release,
  *    vault_version, state_version, created_at, updated_at, alarm: { kind,
- *    alarm_id (ULID), at (epoch s) }, alarm_pending: true }. The API creates
- *    the row (state `enrolling`); the parent owns lease, lifecycle and alarm
- *    fields (the alarm mailer only clears alarm_pending, VAULT-MESSAGING
- *    0.9.0 §11.5).
+ *    alarm_id (ULID), at (epoch s) }, alarm_pending: true, app_key: { key,
+ *    kid, seq } }. The API creates the row (state `enrolling`); the parent
+ *    owns lease, lifecycle, alarm and app_key fields (the alarm mailer only
+ *    clears alarm_pending, VAULT-MESSAGING 0.9.0 §11.5). The API writes
+ *    only its own: `app_key_pending` and `recovery` (with its claim keys).
  *    Rows keyed `user#<user_guid>` are the API's per-member pointer
- *    (`current_vault_id`) and never carry user_guid.
+ *    (`current_vault_id`, and `enroll_live`: the member's latest setup-code
+ *    issuance) and never carry user_guid.
  *  - vault-instances table, PK instance_id: { instance_id, release (PCR0 hex),
  *    queue_url, descriptor (b64 exact bytes), attestation (b64), heartbeat_at
  *    (epoch s), expires_at (TTL), load? }.
  *  - vault-requests table, PK request_id: the API puts { request_id,
  *    vault_id, user_guid, op, status: queued, instance_id, created_at,
- *    expires_at }; the parent sets status `done` and `envelope` (b64 of a
- *    5,252-byte sealed result) and/or `code` (e.g. etk_unknown).
+ *    expires_at, app_kid? }; the parent sets status `done` and `envelope` (b64
+ *    of a 5,252-byte sealed result) and/or `code` (e.g. etk_unknown). Setup
+ *    code issuances live here too, keyed `enroll#<hex HMAC>`.
  *  - vault-releases table, PK release (PCR0 hex): { release, release_number,
  *    status: active|deprecated|retired|removed, available?, rescue?,
  *    ends_at? }, rendered from the signed manifest by operations. The API
@@ -65,24 +91,46 @@
  * operator's switch is off, enclave, enroll, unlock, recovery request and
  * register answer 503 vault_unavailable (service: "paused") right after the
  * account checks, before body checks and rate limits; nothing is written,
- * queued or start-requested. Status (with `service`), polling, lock, the
- * recovery status and cancels stay; a cancel is queued only to a running
- * instance, never by a start request.
+ * queued or start-requested. So do (2.0.0) setup-code issue, and redeem and
+ * recovery claim right after their signature check, before the body is read
+ * and before any lookup. Status (with `service`), polling, lock, the recovery
+ * status and cancels, and reading or revoking a setup code stay; a cancel is
+ * queued only to a running instance, never by a start request.
  *
  * Manifest by hash (VAULT-MESSAGING 0.10.0 §11.5): enroll and unlock carry
  * `manifest_sha256` in the clear; the API checks its format only and copies
  * it into the queue message, so the host can hand that manifest to the
  * enclave. `manifest_serial` travels only inside the sealed request.
  */
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { GetCommand, PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { snapshotFor } from '../shared/account-snapshot';
+import { AppHeader, AppKey, NONCE_TTL_S, TS_WINDOW_S, parseAppHeader, parseAppKey, signingInput, verifyAppSignature } from '../shared/app-auth';
 import { audit } from '../shared/audit';
 import { ddb, env, table } from '../shared/aws';
+import {
+  CODE_RE,
+  ENROLL_CODE_TTL_S,
+  PENDING_KEY_TTL_S,
+  TYPED_CEILING,
+  TYPED_MIN_MS,
+  codeMac,
+  emailHint,
+  emailMac,
+  enrollCodeKey,
+  isQrSecret,
+  issuanceKey,
+  newQrSecret,
+  newTypedCode,
+  normalizeCode,
+  normalizeEmail,
+  qrMac,
+} from '../shared/enroll-code';
 import { HttpError, Router, badRequest, forbidden, notFound } from '../shared/http';
 import { nowIso } from '../shared/ids';
 import { ApiError, MemberRequest, RateLimited, WithStatus, memberHandler, requireSession } from '../shared/member-http';
-import { canSignIn, currentTerms, memberByGuid, vaultPointerKey } from '../shared/members';
+import { canSignIn, currentTerms, memberByEmail, memberByGuid, vaultPointerKey } from '../shared/members';
 import type { MemberItem } from '../shared/model';
 import { hit } from '../shared/ratelimit';
 import { sendMail } from '../shared/mail';
@@ -135,7 +183,7 @@ const VAULT_ID_RE = /^[0-9a-f]{32}$/;
 const KID_RE = /^[0-9a-f]{16}$/;
 const PCR0_RE = /^[0-9a-f]{96}$/;
 const SHA256_RE = /^[0-9a-f]{64}$/;
-const CODE_RE = /^[a-z_][a-z0-9_]{0,63}$/;
+const CODE_RE_HOST = /^[a-z_][a-z0-9_]{0,63}$/;
 const B64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 
 function field(body: Record<string, unknown>, key: string, re: RegExp, what: string): string {
@@ -182,6 +230,12 @@ export interface Lease {
   lease_expires_at: number;
 }
 
+/** An app public key: canonical b64 of its SPKI DER and its akid. */
+export interface StoredKey {
+  key: string;
+  kid: string;
+}
+
 export interface VaultRow {
   vault_id: string;
   user_guid: string;
@@ -190,6 +244,13 @@ export interface VaultRow {
   sealed_release?: string;
   vault_version?: string;
   state_version?: string | number;
+  /**
+   * Host-owned (2.0.0, VAULT-MESSAGING 0.15.0 §11.5): the vault's app key as
+   * the enclave last reported it. The API only reads it.
+   */
+  app_key?: StoredKey & { seq?: number };
+  /** API-owned (2.0.0): the key a setup-code redeem registered; valid until `until` (epoch s). */
+  app_key_pending?: StoredKey & { until: number };
   /** API-owned: the recovery in progress or last ended (VAULT-MESSAGING §11.11). */
   recovery?: RecoveryRow;
   /**
@@ -212,10 +273,13 @@ export interface RecoveryRow {
   expires_at: number;
   /** The register requests sent for this recovery, so their slots can be checked. */
   register_ids?: string[];
+  /** 2.0.0: the keys of new apps that claimed this recovery (at most 10, oldest dropped). */
+  claim_keys?: StoredKey[];
+  /** 2.0.0: the claim key whose register came back `recovery_registered`. */
+  recovering_key?: StoredKey;
 }
 
 type Op = 'enroll' | 'unlock' | 'lock' | 'recovery' | 'recovery_cancel' | 'recovery_register';
-
 
 // ---- errors (§11.1, §11.9, §11.10.5) ------------------------------------------------
 // Bodies carry the MEMBER-API `error` and also the spec's `code`.
@@ -223,6 +287,8 @@ type Op = 'enroll' | 'unlock' | 'lock' | 'recovery' | 'recovery_cancel' | 'recov
 const vaultError = (status: number, code: string, message: string, extra: Record<string, unknown> = {}) =>
   new ApiError(status, code, message, { code, ...extra });
 
+const unauthorized = () => new HttpError(401, 'unauthorized', 'Unauthorized');
+const termsRequired = (message = 'Accept the membership terms to use the vault') => vaultError(403, 'terms_required', message);
 const instanceMoved = () =>
   vaultError(409, 'instance_moved', 'The vault is now served by another enclave instance; fetch /api/vault/enclave again and re-seal.');
 const releaseUnavailable = () =>
@@ -232,6 +298,8 @@ const vaultUnavailable = () => vaultError(503, 'vault_unavailable', 'The vault s
 export const PAUSED_RETRY_AFTER_S = 300;
 const vaultPaused = () =>
   vaultError(503, 'vault_unavailable', 'The vault service is paused for maintenance. Try again later.', { service: 'paused', retry_after: PAUSED_RETRY_AFTER_S });
+/** Every failure of a setup-code redeem, of either form (§11.12.1). */
+const invalidCode = () => vaultError(404, 'invalid_code', 'This setup code is not valid. Get a new code on the account site.');
 
 /** Routes that start or change vault activity: refused while the operator has paused the service. */
 async function requireService(): Promise<void> {
@@ -245,16 +313,23 @@ const releaseStarting = (release: string) =>
 
 const nowS = () => Math.floor(Date.now() / 1000);
 
-// ---- member gate -------------------------------------------------------------------
+/** The typed redeem's minimum answer time (§11.12.1); replaceable in tests. */
+export const timing = {
+  hold: (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms)),
+};
+
+// ---- member gate (portal sessions) ----------------------------------------------------
 
 /**
- * Access (§11.1):
- *  - lock: any signed-in account holder with a vault, whatever the account
- *    state, including a canceled account in its grace period (locking only
+ * Access (§11.1, MEMBER-API "Access"):
+ *  - lock: any account holder with a vault, whatever the account state,
+ *    including a canceled account in its grace period (locking only
  *    reduces exposure);
- *  - status and request polling: an active account (cancellation blocks them);
- *  - enclave, enroll, unlock: an active account in state `member` that has
- *    accepted the current terms, else 403 terms_required.
+ *  - status, request polling, reading and revoking a setup code: an active
+ *    account (cancellation blocks them);
+ *  - issuing a setup code, the recovery request and its status: an active
+ *    account in state `member` that has accepted the current terms, else
+ *    403 terms_required.
  */
 async function loadAccountHolder(req: MemberRequest): Promise<MemberItem> {
   const s = await requireSession(req);
@@ -271,12 +346,27 @@ async function loadActiveAccount(req: MemberRequest): Promise<MemberItem> {
 
 async function loadVaultMember(req: MemberRequest): Promise<MemberItem> {
   const m = await loadActiveAccount(req);
-  if (m.state !== 'member') throw vaultError(403, 'terms_required', 'Accept the membership terms to use the vault');
+  await requireCurrentTerms(m);
+  return m;
+}
+
+async function requireCurrentTerms(m: MemberItem): Promise<void> {
+  if (m.state !== 'member') throw termsRequired();
   const terms = await currentTerms();
   if (terms && terms.version_id !== m.terms_version) {
-    throw vaultError(403, 'terms_required', 'The membership terms have changed; accept the current terms to use the vault');
+    throw termsRequired('The membership terms have changed; accept the current terms to use the vault');
   }
-  return m;
+}
+
+/** App callers: an active account (cancellation blocks every route but lock). */
+function requireActive(m: MemberItem): void {
+  if (!canSignIn(m)) throw forbidden('This account is not active');
+}
+
+/** Enrollment with a pending key: an active account in state `member` (the terms were checked when the code was issued). */
+function requireActiveMember(m: MemberItem): void {
+  requireActive(m);
+  if (m.state !== 'member') throw termsRequired();
 }
 
 async function limit(key: string, max: number, windowS: number): Promise<void> {
@@ -284,18 +374,36 @@ async function limit(key: string, max: number, windowS: number): Promise<void> {
   if (!r.allowed) throw new RateLimited(r.retryAfter);
 }
 
+/** Per source network: an IPv6 /64 gets `v6`, an IPv4 address (carrier NAT) `v4`. */
+const perNetwork = (ip: string, v4: number, v6: number) => (ip.endsWith('/64') ? v6 : v4);
+
 // ---- vault rows --------------------------------------------------------------------
 
 const memberPointerKey = vaultPointerKey;
 
+interface Pointer {
+  current_vault_id?: string;
+  /** The request-table key of the member's latest setup-code issuance. */
+  enroll_live?: string;
+}
+
+async function readPointer(guid: string): Promise<Pointer | null> {
+  const p = await ddb.send(new GetCommand({ TableName: table.vaults(), Key: { vault_id: memberPointerKey(guid) }, ConsistentRead: true }));
+  return (p.Item as Pointer | undefined) ?? null;
+}
+
 /** The member's current vault, read consistently through the per-member pointer row. */
 async function currentVault(guid: string): Promise<{ pointer: string | null; vault: VaultRow | null }> {
-  const p = await ddb.send(new GetCommand({ TableName: table.vaults(), Key: { vault_id: memberPointerKey(guid) }, ConsistentRead: true }));
-  const pointer = typeof p.Item?.current_vault_id === 'string' ? (p.Item.current_vault_id as string) : null;
+  const p = await readPointer(guid);
+  const pointer = typeof p?.current_vault_id === 'string' ? p.current_vault_id : null;
   if (!pointer) return { pointer: null, vault: null };
-  const v = await ddb.send(new GetCommand({ TableName: table.vaults(), Key: { vault_id: pointer }, ConsistentRead: true }));
-  const row = v.Item as VaultRow | undefined;
+  const row = await vaultRow(pointer);
   return { pointer, vault: row && row.user_guid === guid ? row : null };
+}
+
+async function vaultRow(vaultId: string): Promise<VaultRow | null> {
+  const v = await ddb.send(new GetCommand({ TableName: table.vaults(), Key: { vault_id: vaultId }, ConsistentRead: true }));
+  return (v.Item as VaultRow | undefined) ?? null;
 }
 
 /** Current vault unless it has been deleted. */
@@ -304,7 +412,9 @@ const activeVault = (v: VaultRow | null) => (v && v.state !== 'deleted' ? v : nu
 /**
  * The vault an enrollment targets: the member's existing vault if it isn't
  * deleted (the enclave decides whether a provisional vault may be replaced
- * and answers vault_exists for a confirmed one, §11.3), else a new one.
+ * and answers vault_exists for a confirmed one, §11.3), else a new one. The
+ * pointer row may exist without a vault (it also names the member's setup
+ * code), so a new pointer is conditional on `current_vault_id`.
  */
 async function vaultForEnrollment(guid: string, cur: { pointer: string | null; vault: VaultRow | null }): Promise<VaultRow> {
   const existing = activeVault(cur.vault);
@@ -317,7 +427,7 @@ async function vaultForEnrollment(guid: string, cur: { pointer: string | null; v
         TableName: table.vaults(),
         Key: { vault_id: memberPointerKey(guid) },
         UpdateExpression: 'SET current_vault_id = :new, updated_at = :now',
-        ConditionExpression: cur.pointer ? 'current_vault_id = :old' : 'attribute_not_exists(vault_id)',
+        ConditionExpression: cur.pointer ? 'current_vault_id = :old' : 'attribute_not_exists(current_vault_id)',
         ExpressionAttributeValues: { ':new': vaultId, ':now': now, ...(cur.pointer ? { ':old': cur.pointer } : {}) },
       }),
     );
@@ -328,6 +438,179 @@ async function vaultForEnrollment(guid: string, cur: { pointer: string | null; v
   const row: VaultRow = { vault_id: vaultId, user_guid: guid, state: 'enrolling', created_at: now, updated_at: now };
   await ddb.send(new PutCommand({ TableName: table.vaults(), Item: row, ConditionExpression: 'attribute_not_exists(vault_id)' }));
   return row;
+}
+
+// ---- app callers (2.0.0, §11.12.2) ---------------------------------------------------
+
+type KeyRole = 'app' | 'pending' | 'claim' | 'recovering';
+
+interface Caller {
+  via: 'session' | 'app';
+  m: MemberItem;
+  /** App callers: the vault the header names. Sessions: the member's current vault. */
+  vault: VaultRow | null;
+  /** App callers: the signing key and the role it matched. */
+  key: StoredKey | null;
+  role: KeyRole | null;
+}
+
+const isStoredKey = (k: unknown): k is StoredKey =>
+  !!k && typeof (k as StoredKey).key === 'string' && typeof (k as StoredKey).kid === 'string';
+
+/**
+ * The keys a vault row allows in `role` now. The pending key ends after an
+ * hour, or once the host's `app_key` names it; a recovery's keys only while
+ * the recovery is active and the vault's app key is not yet the recovering
+ * key (then the recovery has completed, §11.11.5).
+ */
+function keysFor(v: VaultRow, role: KeyRole, now: number): StoredKey[] {
+  const appKid = isStoredKey(v.app_key) ? v.app_key.kid : null;
+  switch (role) {
+    case 'app':
+      return isStoredKey(v.app_key) ? [v.app_key] : [];
+    case 'pending': {
+      const p = v.app_key_pending;
+      return isStoredKey(p) && typeof p.until === 'number' && p.until > now && p.kid !== appKid ? [p] : [];
+    }
+    case 'claim':
+    case 'recovering': {
+      const r = v.recovery;
+      if (!r || !recoveryActive(r, now)) return [];
+      if (isStoredKey(r.recovering_key) && r.recovering_key.kid === appKid) return [];
+      if (role === 'recovering') return isStoredKey(r.recovering_key) ? [r.recovering_key] : [];
+      return (r.claim_keys ?? []).filter(isStoredKey);
+    }
+  }
+}
+
+/** Header syntax and `ts`; any failure is 401 with no detail. */
+function appHeader(req: MemberRequest): AppHeader {
+  const h = parseAppHeader(req.appHeader);
+  if (!h || Math.abs(nowS() - h.ts) > TS_WINDOW_S) throw unauthorized();
+  return h;
+}
+
+/** Single use within 600 s per key: a conditional write of `appnonce#<akid>#<nonce>` (ratelimits table). */
+async function spendNonce(h: AppHeader): Promise<void> {
+  const now = nowS();
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: table.ratelimits(),
+        Key: { key: `appnonce#${h.kid}#${h.nonce}` },
+        UpdateExpression: 'SET expires_at = :exp',
+        ConditionExpression: 'attribute_not_exists(#k) OR expires_at < :now',
+        ExpressionAttributeNames: { '#k': 'key' },
+        ExpressionAttributeValues: { ':exp': now + NONCE_TTL_S, ':now': now },
+      }),
+    );
+  } catch (e) {
+    if ((e as Error).name === 'ConditionalCheckFailedException') throw unauthorized();
+    throw e;
+  }
+}
+
+function signatureOk(req: MemberRequest, h: AppHeader, key: AppKey): boolean {
+  const query = req.event.rawQueryString ?? '';
+  return verifyAppSignature(key.key, signingInput(req.method, req.path, query, h, req.rawBody), h.sig);
+}
+
+/**
+ * A request signed by a key the vault row allows for the route (`roles`,
+ * tried in order). Checks, in order: the header's syntax, `ts`, the nonce,
+ * that the key is allowed, and the signature. The vault must be the
+ * member's current one and not deleted.
+ */
+async function appCaller(req: MemberRequest, roles: KeyRole[]): Promise<Caller & { vault: VaultRow; key: StoredKey; role: KeyRole }> {
+  const h = appHeader(req);
+  if (!h.vault) throw unauthorized();
+  await spendNonce(h);
+  const now = nowS();
+  const v = await vaultRow(h.vault);
+  if (!v || typeof v.user_guid !== 'string' || v.state === 'deleted') throw unauthorized();
+  let match: { key: StoredKey; role: KeyRole } | null = null;
+  for (const role of roles) {
+    const k = keysFor(v, role, now).find((x) => x.kid === h.kid);
+    if (k) {
+      match = { key: k, role };
+      break;
+    }
+  }
+  const key = match ? parseAppKey(match.key.key) : null;
+  if (!match || !key || key.kid !== h.kid || !signatureOk(req, h, key)) throw unauthorized();
+  const [pointer, m] = await Promise.all([readPointer(v.user_guid), memberByGuid(v.user_guid)]);
+  if (!m || pointer?.current_vault_id !== v.vault_id) throw unauthorized();
+  if (match.role === 'app') await tidyKeys(v);
+  return { via: 'app', m, vault: v, key: match.key, role: match.role };
+}
+
+/**
+ * Once the host's `app_key` names the pending key, or a recovery's
+ * recovering key, the API's own records of it are cleared (best effort;
+ * keysFor() already ignores them). The conditions name only the API's own
+ * attributes.
+ */
+async function tidyKeys(v: VaultRow): Promise<void> {
+  const appKid = isStoredKey(v.app_key) ? v.app_key.kid : null;
+  if (!appKid) return;
+  const updates: UpdateCommand[] = [];
+  if (v.app_key_pending?.kid === appKid) {
+    updates.push(new UpdateCommand({
+      TableName: table.vaults(),
+      Key: { vault_id: v.vault_id },
+      UpdateExpression: 'REMOVE app_key_pending',
+      ConditionExpression: 'app_key_pending.kid = :k',
+      ExpressionAttributeValues: { ':k': appKid },
+    }));
+  }
+  const r = v.recovery;
+  if (r && isStoredKey(r.recovering_key) && r.recovering_key.kid === appKid) {
+    updates.push(new UpdateCommand({
+      TableName: table.vaults(),
+      Key: { vault_id: v.vault_id },
+      UpdateExpression: 'REMOVE recovery.claim_keys, recovery.recovering_key',
+      ConditionExpression: 'recovery.recovery_id = :id',
+      ExpressionAttributeValues: { ':id': r.recovery_id },
+    }));
+  }
+  for (const u of updates) {
+    try {
+      await ddb.send(u);
+    } catch (e) {
+      if ((e as Error).name !== 'ConditionalCheckFailedException') console.error('app key tidy failed', JSON.stringify({ vault_id: v.vault_id, error: (e as Error).name }));
+    }
+  }
+}
+
+/**
+ * Redeem and claim: the request must be signed by the key it registers
+ * (`app_key` in the body), with `vault=` as given. Same checks and order as
+ * appCaller(); no row is read.
+ */
+async function newKeyCaller(req: MemberRequest, vault: (h: AppHeader) => boolean): Promise<{ h: AppHeader; key: AppKey }> {
+  const h = appHeader(req);
+  if (!vault(h)) throw unauthorized();
+  await spendNonce(h);
+  const key = parseAppKey(req.body.app_key);
+  if (!key || key.kid !== h.kid || !signatureOk(req, h, key)) throw unauthorized();
+  return { h, key };
+}
+
+/** The staging-only switch-over (ENROLLMENT-CODES §8 step 3): sessions still admitted on the app routes. Never on in production. */
+const legacySessions = () => process.env.VAULT_LEGACY_SESSION_AUTH === '1';
+
+/**
+ * `enclave`, `enroll`, `unlock`, recovery `register`: the app only (2.0.0),
+ * or, with the staging switch on and no app header, a session as before
+ * 2.0.0 (with its terms check).
+ */
+async function appOnlyCaller(req: MemberRequest, roles: KeyRole[]): Promise<Caller> {
+  if (req.appHeader === undefined && legacySessions()) {
+    const m = await loadVaultMember(req);
+    return { via: 'session', m, vault: activeVault((await currentVault(m.user_guid)).vault), key: null, role: null };
+  }
+  if (req.appHeader === undefined) throw unauthorized();
+  return appCaller(req, roles);
 }
 
 // ---- instances, leases, releases -----------------------------------------------------
@@ -396,7 +679,8 @@ async function routeForEnrollment(now: number, canary: boolean) {
 
 /**
  * Create the response slot, then enqueue. The slot exists before the
- * message, so the parent can always answer into it.
+ * message, so the parent can always answer into it. The slot records the
+ * signing key's kid (`app_kid`), so that only that key can poll it.
  */
 async function enqueue(
   op: Op,
@@ -405,7 +689,7 @@ async function enqueue(
   requestId: string,
   inst: InstanceRow,
   sealed?: { etk_kid: string; envelope: string; manifest_sha256?: string },
-  opts: { extra?: Record<string, string>; ttlS?: number; slot?: Record<string, string> } = {},
+  opts: { extra?: Record<string, unknown>; ttlS?: number; slot?: Record<string, string> } = {},
 ): Promise<void> {
   const created = nowIso();
   try {
@@ -463,6 +747,11 @@ async function enqueue(
   }
 }
 
+/** The slot attribute naming the key that made an app request. */
+const slotOf = (c: Caller): Record<string, string> => (c.key ? { app_kid: c.key.kid } : {});
+/** Audit detail: who asked (2.0.0). */
+const viaOf = (c: Caller) => ({ via: c.via, ...(c.key ? { kid: c.key.kid } : {}) });
+
 /** Forward only to the leaseholder, or to any live instance while nobody holds the lease (§11.1). */
 async function routeCheck(vault: VaultRow | null, instanceId: string, now: number): Promise<InstanceRow> {
   const inst = await liveInstance(instanceId, now);
@@ -512,11 +801,21 @@ export function releaseNotice(rel: ReleaseRow | null, newestActive: number | nul
 // ---- routes --------------------------------------------------------------------------
 
 router.on('GET', '/api/vault/status', async (req) => {
-  const m = await loadActiveAccount(req);
+  let m: MemberItem;
+  let found: VaultRow | null;
+  if (req.appHeader !== undefined) {
+    const c = await appCaller(req, ['app', 'recovering']);
+    requireActive(c.m);
+    m = c.m;
+    found = c.vault;
+  } else {
+    m = await loadActiveAccount(req);
+    found = null;
+  }
   await limit(`vault-status#${m.user_guid}`, 60, 60);
   const now = nowS();
   const service = (await vaultService()).enabled ? 'available' : 'paused';
-  const found = activeVault((await currentVault(m.user_guid)).vault);
+  if (req.appHeader === undefined) found = activeVault((await currentVault(m.user_guid)).vault);
   if (!found) return { vault: null, service };
   const v = await refreshRegistered(m, found);
   let release = null;
@@ -551,13 +850,19 @@ router.on('GET', '/api/vault/status', async (req) => {
 });
 
 router.on('GET', '/api/vault/enclave', async (req) => {
-  const m = await loadVaultMember(req);
+  const c = await appOnlyCaller(req, ['app', 'pending', 'claim', 'recovering']);
+  const m = c.m;
+  // Enrollment (the pending key) needs an active member; an enrolled vault an active account (2.0.0).
+  if (c.via === 'app') {
+    if (c.role === 'pending') requireActiveMember(m);
+    else requireActive(m);
+  }
   await requireService();
   await limit(`vault-enclave#${m.user_guid}`, 30, 60);
   const now = nowS();
   const requested = req.query.release;
   if (requested !== undefined && !PCR0_RE.test(requested)) throw badRequest('release must be a PCR0 (96 lowercase hex)');
-  const vault = activeVault((await currentVault(m.user_guid)).vault);
+  const vault = c.vault;
   const holder = await liveLease(vault, now);
   const canary = isCanaryMember(m);
 
@@ -578,31 +883,50 @@ router.on('GET', '/api/vault/enclave', async (req) => {
 });
 
 router.on('POST', '/api/vault/enroll', async (req) => {
-  const m = await loadVaultMember(req);
+  const c = await appOnlyCaller(req, ['pending']);
+  const m = c.m;
+  if (c.via === 'app') requireActiveMember(m);
   await requireService();
+  // 2.0.0: the redeem's vault_id; the app's request names it twice (body and header).
+  const vaultId = c.via === 'app' ? field(req.body, 'vault_id', VAULT_ID_RE, '32 lowercase hex') : null;
   const requestId = field(req.body, 'request_id', ULID_RE, 'a ULID');
   const instanceId = field(req.body, 'instance_id', INSTANCE_ID_RE, 'an instance id');
   const etkKid = field(req.body, 'etk_kid', KID_RE, '16 lowercase hex');
   const envelope = checkEnvelope(req.body.envelope, ENVELOPE_BYTES_LARGE, etkKid);
   const manifestSha256 = field(req.body, 'manifest_sha256', SHA256_RE, '64 lowercase hex');
+  if (vaultId !== null && vaultId !== c.vault!.vault_id) throw notFound('No such vault');
   await limit(`vault-enroll#${m.user_guid}`, 3, 86_400);
 
   // Dark launch: no `active` release, nothing to enroll into (503 vault_unavailable).
   const targets = await enrollmentTargets(isCanaryMember(m));
   const now = nowS();
-  const cur = await currentVault(m.user_guid);
-  const inst = await routeCheck(activeVault(cur.vault), instanceId, now);
+  let vault: VaultRow;
+  let inst: InstanceRow;
+  if (c.via === 'app') {
+    inst = await routeCheck(c.vault, instanceId, now);
+    vault = c.vault!;
+  } else {
+    const cur = await currentVault(m.user_guid);
+    inst = await routeCheck(activeVault(cur.vault), instanceId, now);
+    vault = await vaultForEnrollment(m.user_guid, cur);
+  }
   // Enrollment goes to an instance of an `active` release (§11.1), or of a
   // canary release for a canary member.
   if (!targets.some((r) => r.release === inst.release)) throw instanceMoved();
-  const vault = await vaultForEnrollment(m.user_guid, cur);
-  await enqueue('enroll', m, vault, requestId, inst, { etk_kid: etkKid, envelope, manifest_sha256: manifestSha256 });
-  await audit(m.email, 'vault.enroll_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: instanceId, release: inst.release });
+  // The enclave binds the vault to the key the request was signed with (§11.5: `app_key`).
+  await enqueue('enroll', m, vault, requestId, inst, { etk_kid: etkKid, envelope, manifest_sha256: manifestSha256 }, {
+    extra: c.key ? { app_key: c.key.key } : {},
+    slot: slotOf(c),
+  });
+  await audit(m.email, 'vault.enroll_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: instanceId, release: inst.release, ...viaOf(c) });
   return new WithStatus(202, { vault_id: vault.vault_id, request_id: requestId });
 });
 
 router.on('POST', '/api/vault/unlock', async (req) => {
-  const m = await loadVaultMember(req);
+  const c = await appOnlyCaller(req, ['app', 'recovering']);
+  const m = c.m;
+  // 2.0.0: an active account; the current terms are no longer required (§11.1).
+  if (c.via === 'app') requireActive(m);
   await requireService();
   const vaultId = field(req.body, 'vault_id', VAULT_ID_RE, '32 lowercase hex');
   const requestId = field(req.body, 'request_id', ULID_RE, 'a ULID');
@@ -613,35 +937,44 @@ router.on('POST', '/api/vault/unlock', async (req) => {
   await limit(`vault-unlock#${m.user_guid}`, 10, 15 * 60);
   // Per source network: an IPv6 /64, or an IPv4 address (carrier NAT puts
   // many members behind one address, hence the higher limit; §11.8).
-  await limit(`vault-unlock-net#${req.ip}`, req.ip.endsWith('/64') ? 10 : 60, 15 * 60);
+  await limit(`vault-unlock-net#${req.ip}`, perNetwork(req.ip, 60, 10), 15 * 60);
 
-  const vault = activeVault((await currentVault(m.user_guid)).vault);
+  const vault = c.vault;
   if (!vault || vault.vault_id !== vaultId) throw notFound('No such vault');
   const inst = await routeCheck(vault, instanceId, nowS());
   await requireRoutable(inst, isCanaryMember(m));
-  await enqueue('unlock', m, vault, requestId, inst, { etk_kid: etkKid, envelope, manifest_sha256: manifestSha256 });
-  await audit(m.email, 'vault.unlock_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: instanceId, release: inst.release });
+  // The account snapshot rides in every unlock (§11.13), whenever the member can be read.
+  const account = await snapshotFor(m);
+  await enqueue('unlock', m, vault, requestId, inst, { etk_kid: etkKid, envelope, manifest_sha256: manifestSha256 }, {
+    extra: account ? { account } : {},
+    slot: slotOf(c),
+  });
+  await audit(m.email, 'vault.unlock_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: instanceId, release: inst.release, ...viaOf(c) });
   return new WithStatus(202, { vault_id: vault.vault_id, request_id: requestId });
 });
 
 router.on('POST', '/api/vault/lock', async (req) => {
-  const m = await loadAccountHolder(req);
+  // The portal's session or the app key, whatever the account state (locking only reduces exposure).
+  const c: Caller = req.appHeader !== undefined
+    ? await appCaller(req, ['app', 'recovering'])
+    : { via: 'session', m: await loadAccountHolder(req), vault: null, key: null, role: null };
+  const m = c.m;
   const vaultId = field(req.body, 'vault_id', VAULT_ID_RE, '32 lowercase hex');
   const requestId = field(req.body, 'request_id', ULID_RE, 'a ULID');
   await limit(`vault-lock#${m.user_guid}`, 30, 15 * 60);
 
-  const vault = activeVault((await currentVault(m.user_guid)).vault);
+  const vault = c.via === 'app' ? c.vault : activeVault((await currentVault(m.user_guid)).vault);
   if (!vault || vault.vault_id !== vaultId) throw notFound('No such vault');
   const holder = await liveLease(vault, nowS());
   if (holder) {
-    await enqueue('lock', m, vault, requestId, holder);
+    await enqueue('lock', m, vault, requestId, holder, undefined, { slot: slotOf(c) });
   } else {
     // Nobody holds the vault, so it is not running: nothing to lock.
     try {
       await ddb.send(
         new PutCommand({
           TableName: table.vaultRequests(),
-          Item: { request_id: requestId, vault_id: vault.vault_id, user_guid: m.user_guid, op: 'lock', status: 'done', created_at: nowIso(), expires_at: nowS() + REQUEST_TTL_S },
+          Item: { request_id: requestId, vault_id: vault.vault_id, user_guid: m.user_guid, op: 'lock', status: 'done', created_at: nowIso(), expires_at: nowS() + REQUEST_TTL_S, ...slotOf(c) },
           ConditionExpression: 'attribute_not_exists(request_id)',
         }),
       );
@@ -650,12 +983,19 @@ router.on('POST', '/api/vault/lock', async (req) => {
       throw e;
     }
   }
-  await audit(m.email, 'vault.lock_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: holder?.instance_id ?? null });
+  await audit(m.email, 'vault.lock_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: holder?.instance_id ?? null, ...viaOf(c) });
   return new WithStatus(202, { vault_id: vault.vault_id, request_id: requestId });
 });
 
 router.on('GET', '/api/vault/requests/{id}', async (req) => {
-  const m = await loadActiveAccount(req);
+  let c: Caller;
+  if (req.appHeader !== undefined) {
+    c = await appCaller(req, ['app', 'pending', 'claim', 'recovering']);
+    requireActive(c.m);
+  } else {
+    c = { via: 'session', m: await loadActiveAccount(req), vault: null, key: null, role: null };
+  }
+  const m = c.m;
   const requestId = req.params.id;
   if (!ULID_RE.test(requestId)) throw badRequest('Malformed request id');
   await limit(`vault-poll#${m.user_guid}`, 2, 1);
@@ -663,6 +1003,8 @@ router.on('GET', '/api/vault/requests/{id}', async (req) => {
   const item = r.Item;
   const now = nowS();
   if (!item || item.user_guid !== m.user_guid || Number(item.expires_at) <= now) throw notFound('No such request');
+  // An app polls only the requests its own key made (§11.12.2).
+  if (c.via === 'app' && (item.vault_id !== c.vault!.vault_id || item.app_kid !== c.key!.kid)) throw notFound('No such request');
 
   let status = String(item.status);
   if (status === 'queued' && Date.parse(String(item.created_at)) / 1000 + QUEUE_RETENTION_S + EXPIRY_SLACK_S < now) status = 'expired';
@@ -674,14 +1016,322 @@ router.on('GET', '/api/vault/requests/{id}', async (req) => {
   if (status === 'done') {
     const env = typeof item.envelope === 'string' ? decodeCanonicalB64(item.envelope) : null;
     if (env && env.length === RESULT_ENVELOPE_BYTES) out.envelope = item.envelope;
-    if (typeof item.code === 'string' && CODE_RE.test(item.code)) out.code = item.code;
+    if (typeof item.code === 'string' && CODE_RE_HOST.test(item.code)) out.code = item.code;
     // The app polls its register result: the moment to retire the code.
     if (isRegisteredSlot(item) && VAULT_ID_RE.test(String(item.vault_id))) {
-      const v = (await ddb.send(new GetCommand({ TableName: table.vaults(), Key: { vault_id: String(item.vault_id) }, ConsistentRead: true }))).Item as VaultRow | undefined;
-      if (v?.recovery && v.user_guid === m.user_guid && v.recovery.recovery_id === item.recovery_id) await markRegistered(m, v, v.recovery);
+      const v = await vaultRow(String(item.vault_id));
+      if (v?.recovery && v.user_guid === m.user_guid && v.recovery.recovery_id === item.recovery_id) await markRegistered(m, v, v.recovery, item);
     }
   }
   return out;
+});
+
+// ---- setup codes (2.0.0, VAULT-MESSAGING §11.12.1) --------------------------------------
+
+/** The member API origin, for the QR's `api` (an identifier the app compares, never an address). */
+const apiOrigin = () => `https://${env('ACCOUNT_HOST')}`;
+const iso = (s: number) => new Date(s * 1000).toISOString();
+
+interface IssuanceRow {
+  request_id: string;
+  op: 'enroll_code';
+  user_guid: string;
+  code_mac: string; // hex
+  issued_at: number;
+  expires_at: number; // also the TTL
+  state: 'live' | 'used' | 'revoked';
+  typed_attempts: number;
+  typed_blocked: boolean;
+  used_at?: number;
+}
+
+async function issuance(key: string): Promise<IssuanceRow | null> {
+  const r = await ddb.send(new GetCommand({ TableName: table.vaultRequests(), Key: { request_id: key }, ConsistentRead: true }));
+  const it = r.Item as IssuanceRow | undefined;
+  return it && it.op === 'enroll_code' && typeof it.user_guid === 'string' ? it : null;
+}
+
+/** Revoke a live issuance (conditional); true if this call revoked it. */
+async function revokeIssuance(key: string): Promise<boolean> {
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: table.vaultRequests(),
+        Key: { request_id: key },
+        UpdateExpression: 'SET #st = :revoked',
+        ConditionExpression: '#st = :live',
+        ExpressionAttributeNames: { '#st': 'state' },
+        ExpressionAttributeValues: { ':revoked': 'revoked', ':live': 'live' },
+      }),
+    );
+    return true;
+  } catch (e) {
+    if ((e as Error).name === 'ConditionalCheckFailedException') return false;
+    throw e;
+  }
+}
+
+const issuanceState = (it: IssuanceRow, now: number): 'live' | 'used' | 'expired' | 'revoked' =>
+  it.state === 'used' ? 'used' : it.state === 'revoked' ? 'revoked' : now >= it.expires_at ? 'expired' : 'live';
+
+router.on('POST', '/api/vault/enroll-code', async (req) => {
+  // An active member with the current terms (403 terms_required).
+  const m = await loadVaultMember(req);
+  // Paused: a code that could not be used before it expires is not issued.
+  await requireService();
+  await limit(`enroll-code-issue#${m.user_guid}`, 5, 3600);
+  await limit(`enroll-code-issue-day#${m.user_guid}`, 20, 86_400);
+  await limit(`enroll-code-issue-net#${req.ip}`, 20, 3600);
+  const k = await enrollCodeKey();
+  const secret = newQrSecret();
+  const code = newTypedCode();
+  const now = nowS();
+  const key = issuanceKey(qrMac(k, secret));
+  const row: IssuanceRow = {
+    request_id: key,
+    op: 'enroll_code',
+    user_guid: m.user_guid,
+    code_mac: codeMac(k, m.user_guid, code).toString('hex'),
+    issued_at: now,
+    expires_at: now + ENROLL_CODE_TTL_S,
+    state: 'live',
+    typed_attempts: 0,
+    typed_blocked: false,
+  };
+  await ddb.send(new PutCommand({ TableName: table.vaultRequests(), Item: row, ConditionExpression: 'attribute_not_exists(request_id)' }));
+  // One live issuance per member: the pointer names the new one, and the old one is revoked.
+  const pointer = await readPointer(m.user_guid);
+  await ddb.send(
+    new UpdateCommand({
+      TableName: table.vaults(),
+      Key: { vault_id: memberPointerKey(m.user_guid) },
+      UpdateExpression: 'SET enroll_live = :k, updated_at = :now',
+      ExpressionAttributeValues: { ':k': key, ':now': nowIso() },
+    }),
+  );
+  if (pointer?.enroll_live && pointer.enroll_live !== key) await revokeIssuance(pointer.enroll_live);
+  await audit(m.email, 'vault.enroll_code_issued', m.user_guid, { expires_at: iso(row.expires_at) });
+  return new WithStatus(201, { secret, code, expires_at: iso(row.expires_at), api: apiOrigin() });
+});
+
+router.on('GET', '/api/vault/enroll-code', async (req) => {
+  const m = await loadActiveAccount(req);
+  await limit(`enroll-code-read#${m.user_guid}`, 60, 60);
+  const pointer = await readPointer(m.user_guid);
+  const it = pointer?.enroll_live ? await issuance(pointer.enroll_live) : null;
+  if (!it || it.user_guid !== m.user_guid) return { enroll_code: null };
+  return {
+    enroll_code: {
+      state: issuanceState(it, nowS()),
+      typed_blocked: it.typed_blocked === true,
+      issued_at: iso(it.issued_at),
+      expires_at: iso(it.expires_at),
+      ...(typeof it.used_at === 'number' ? { used_at: iso(it.used_at) } : {}),
+    },
+  };
+});
+
+router.on('DELETE', '/api/vault/enroll-code', async (req) => {
+  const m = await loadActiveAccount(req);
+  await limit(`enroll-code-revoke#${m.user_guid}`, 30, 15 * 60);
+  const pointer = await readPointer(m.user_guid);
+  const it = pointer?.enroll_live ? await issuance(pointer.enroll_live) : null;
+  const revoked = !!it && it.user_guid === m.user_guid && issuanceState(it, nowS()) === 'live' && (await revokeIssuance(it.request_id));
+  if (revoked) await audit(m.email, 'vault.enroll_code_revoked', m.user_guid, {});
+  return { revoked };
+});
+
+/** System email; a failed send (e.g. SES sandbox) is logged, never fatal. */
+async function notify(to: string, subject: string, text: string): Promise<void> {
+  try {
+    await sendMail(to, subject, text);
+  } catch (e) {
+    console.error('vault mail failed', JSON.stringify({ error: (e as Error).name }));
+  }
+}
+
+/** An active account in state `member`: who a code can be redeemed for. */
+const redeemable = (m: MemberItem | null): m is MemberItem => !!m && canSignIn(m) && m.state === 'member';
+
+/**
+ * Failed redeems, aggregated per source network and hour for the audit log
+ * (MEMBER-API "Setup codes"): the 1st, 10th, 100th, ... failure of each
+ * window is recorded with the count so far. Never a secret, a code or an
+ * email.
+ */
+async function auditFailure(req: MemberRequest, via: 'qr' | 'typed'): Promise<void> {
+  try {
+    const r = await hit(`enroll-fail#${req.ip}`, Number.MAX_SAFE_INTEGER, 3600);
+    if (/^10*$/.test(String(r.count))) {
+      await audit('app', 'vault.enroll_code_failed', req.ip, { network: req.ip, failures_this_hour: r.count, via });
+    }
+  } catch (e) {
+    console.error('enroll failure not recorded', JSON.stringify({ error: (e as Error).name }));
+  }
+}
+
+/** The 800th typed attempt: block the issuance's typed entry, tell the member and operations (once). */
+async function blockTyped(m: MemberItem, it: IssuanceRow): Promise<void> {
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: table.vaultRequests(),
+        Key: { request_id: it.request_id },
+        UpdateExpression: 'SET typed_blocked = :t',
+        ConditionExpression: 'typed_blocked = :f',
+        ExpressionAttributeValues: { ':t': true, ':f': false },
+      }),
+    );
+  } catch (e) {
+    if ((e as Error).name === 'ConditionalCheckFailedException') return; // someone else did
+    throw e;
+  }
+  // The alarm MemberEnrollTypedCeiling watches this metric (EMF; member-api-stack).
+  console.log(JSON.stringify({
+    _aws: { Timestamp: Date.now(), CloudWatchMetrics: [{ Namespace: 'VettID/MemberApi', Dimensions: [[]], Metrics: [{ Name: 'EnrollTypedCeiling', Unit: 'Count' }] }] },
+    EnrollTypedCeiling: 1,
+  }));
+  await audit(m.email, 'vault.enroll_code_typed_blocked', m.user_guid, { issued_at: iso(it.issued_at) });
+  await notify(m.email, 'VettID: many wrong setup codes were tried',
+    `Someone tried many wrong codes for your account. Scan the QR code instead, or get a new code.
+
+The setup code you got at ${iso(it.issued_at)} can no longer be typed in; its QR code still works until it expires. If you weren't setting up your vault, you can cancel the code on your account page.`);
+}
+
+/**
+ * One typed attempt against a live issuance, counted before the code is
+ * compared: at most TYPED_CEILING per issuance from every source together.
+ * Returns the attempt number, or null if the issuance is blocked or full.
+ */
+async function countTyped(it: IssuanceRow): Promise<number | null> {
+  try {
+    const r = await ddb.send(
+      new UpdateCommand({
+        TableName: table.vaultRequests(),
+        Key: { request_id: it.request_id },
+        UpdateExpression: 'ADD typed_attempts :one',
+        ConditionExpression: 'typed_blocked = :f AND typed_attempts < :max',
+        ExpressionAttributeValues: { ':one': 1, ':f': false, ':max': TYPED_CEILING },
+        ReturnValues: 'UPDATED_NEW',
+      }),
+    );
+    return Number(r.Attributes?.typed_attempts);
+  } catch (e) {
+    if ((e as Error).name === 'ConditionalCheckFailedException') return null;
+    throw e;
+  }
+}
+
+/** Spend the issuance: one winner, both secrets. */
+async function spend(it: IssuanceRow, via: 'qr' | 'typed', now: number): Promise<boolean> {
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: table.vaultRequests(),
+        Key: { request_id: it.request_id },
+        UpdateExpression: 'SET #st = :used, used_at = :now, used_via = :via',
+        ConditionExpression: via === 'typed' ? '#st = :live AND expires_at > :now AND typed_blocked = :f' : '#st = :live AND expires_at > :now',
+        ExpressionAttributeNames: { '#st': 'state' },
+        ExpressionAttributeValues: { ':used': 'used', ':live': 'live', ':now': now, ':via': via, ...(via === 'typed' ? { ':f': false } : {}) },
+      }),
+    );
+    return true;
+  } catch (e) {
+    if ((e as Error).name === 'ConditionalCheckFailedException') return false;
+    throw e;
+  }
+}
+
+/** The issuance can be redeemed now: live, unexpired, the member's current one. */
+const usable = (it: IssuanceRow | null, pointer: Pointer | null, now: number): it is IssuanceRow =>
+  !!it && it.state === 'live' && it.expires_at > now && pointer?.enroll_live === it.request_id;
+
+/** After a successful spend: the vault, the pending key, the email, the audit, the answer. */
+async function completeRedeem(m: MemberItem, key: AppKey, via: 'qr' | 'typed') {
+  const vault = await vaultForEnrollment(m.user_guid, await currentVault(m.user_guid));
+  const now = nowS();
+  await ddb.send(
+    new UpdateCommand({
+      TableName: table.vaults(),
+      Key: { vault_id: vault.vault_id },
+      UpdateExpression: 'SET app_key_pending = :p, updated_at = :now',
+      ConditionExpression: 'user_guid = :g',
+      ExpressionAttributeValues: { ':p': { key: key.b64, kid: key.kid, until: now + PENDING_KEY_TTL_S }, ':g': m.user_guid, ':now': nowIso() },
+    }),
+  );
+  await notify(m.email, 'VettID: your setup code was used',
+    `A phone used your setup code at ${iso(now)} to set up your VettID vault. If this wasn't you, contact support@vettid.org.`);
+  await audit(m.email, 'vault.enroll_code_redeemed', m.user_guid, { vault_id: vault.vault_id, kid: key.kid, via });
+  return { vault_id: vault.vault_id, user_guid: m.user_guid, email_hint: emailHint(m.email) };
+}
+
+/** The dummy code_mac a typed attempt is compared with when there is no issuance (the same work). */
+const DUMMY_MAC = Buffer.alloc(32);
+
+async function redeemTyped(req: MemberRequest, key: AppKey, emailIn: string, codeIn: string) {
+  const k = await enrollCodeKey();
+  const email = normalizeEmail(emailIn).slice(0, 320);
+  const code = normalizeCode(codeIn);
+  // Counted for every email, whether or not it belongs to an account: its 429 tells nothing.
+  await limit(`enroll-typed#${emailMac(k, email)}#${req.ip}`, 5, 5 * 60);
+  const now = nowS();
+  const found = email ? await memberByEmail(email) : null;
+  const m = redeemable(found) ? found : null;
+  const pointer = m ? await readPointer(m.user_guid) : null;
+  const it = m && pointer?.enroll_live ? await issuance(pointer.enroll_live) : null;
+  const live = usable(it, pointer, now) && it.user_guid === m!.user_guid && it.typed_blocked !== true ? it : null;
+  let attempt: number | null = null;
+  if (live) {
+    attempt = await countTyped(live);
+  } else {
+    // Same threshold, protecting nothing: the behaviour is the same for every email.
+    await hit(`enroll-typed-none#${emailMac(k, email)}`, TYPED_CEILING, 5 * 60);
+  }
+  // The MAC is computed and compared in every case (against a dummy without an issuance).
+  const mac = codeMac(k, m?.user_guid ?? '', code);
+  const stored = live && attempt !== null ? Buffer.from(live.code_mac, 'hex') : DUMMY_MAC;
+  const same = stored.length === mac.length && timingSafeEqual(stored, mac);
+  if (live && attempt !== null && same && CODE_RE.test(code) && (await spend(live, 'typed', now))) {
+    return completeRedeem(m!, key, 'typed');
+  }
+  if (live && attempt !== null && attempt >= TYPED_CEILING) await blockTyped(m!, live);
+  await auditFailure(req, 'typed');
+  throw invalidCode();
+}
+
+async function redeemQr(req: MemberRequest, key: AppKey, secret: unknown) {
+  const now = nowS();
+  if (isQrSecret(secret)) {
+    const it = await issuance(issuanceKey(qrMac(await enrollCodeKey(), secret)));
+    const m = it ? await memberByGuid(it.user_guid) : null;
+    const pointer = it ? await readPointer(it.user_guid) : null;
+    if (redeemable(m) && usable(it, pointer, now) && (await spend(it, 'qr', now))) return completeRedeem(m, key, 'qr');
+  }
+  await auditFailure(req, 'qr');
+  throw invalidCode();
+}
+
+router.on('POST', '/api/vault/enroll/redeem', async (req) => {
+  const received = typeof req.event.requestContext?.timeEpoch === 'number' ? req.event.requestContext.timeEpoch : Date.now();
+  // Signed by the key it registers, with an empty `vault`.
+  const { key } = await newKeyCaller(req, (h) => h.vault === '');
+  // Paused: refused before the body is read and before any lookup; nothing is spent, counted or written.
+  await requireService();
+  const b = req.body;
+  const hasSecret = 'secret' in b;
+  const hasTyped = 'email' in b || 'code' in b;
+  if (hasSecret === hasTyped) throw badRequest('Send exactly one of {secret, app_key} or {email, code, app_key}');
+  if (hasTyped && (typeof b.email !== 'string' || typeof b.code !== 'string' || b.email.length > 1024 || b.code.length > 64)) throw badRequest('email and code must be strings');
+  // Both forms, per source network: 30 per 5 minutes per IPv4 address, 10 per IPv6 /64.
+  await limit(`enroll-redeem-net#${req.ip}`, perNetwork(req.ip, 30, 10), 5 * 60);
+  if (hasSecret) return redeemQr(req, key, b.secret);
+  // The typed form answers no sooner than 250 ms after receipt, whatever the outcome.
+  try {
+    return await redeemTyped(req, key, b.email as string, b.code as string);
+  } finally {
+    const wait = received + TYPED_MIN_MS - Date.now();
+    await timing.hold(Math.max(0, Math.min(TYPED_MIN_MS, wait)));
+  }
 });
 
 // ---- recovery (VAULT-MESSAGING §11.11) ------------------------------------------------
@@ -696,9 +1346,10 @@ export const RECOVERY_DELAY_S = 24 * 3600;
 export const RECOVERY_VALIDITY_S = 24 * 3600;
 const CANCEL_LINK_PREFIX = 'rcancel#';
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
+/** A recovery keeps at most this many claim keys (the register limit); the oldest goes. */
+export const MAX_CLAIM_KEYS = 10;
 
 const sha256Hex = (s: string) => createHash('sha256').update(s).digest('hex');
-const iso = (s: number) => new Date(s * 1000).toISOString();
 
 type RecoveryState = 'pending' | 'available' | 'registered' | 'cancelled' | 'expired';
 
@@ -729,20 +1380,22 @@ const isRegisteredSlot = (item: Record<string, unknown> | undefined): boolean =>
 
 /**
  * Record that the code of `r` is spent: `pending` -> `registered`, only for
- * the same recovery and never over a cancel (conditional). Returns the
- * recovery as it now is.
+ * the same recovery and never over a cancel (conditional). The register's
+ * key (the slot's `app_kid`, one of the claim keys) becomes the recovering
+ * key (2.0.0). Returns the recovery as it now is.
  */
-async function markRegistered(m: MemberItem, v: VaultRow, r: RecoveryRow): Promise<RecoveryRow> {
+async function markRegistered(m: MemberItem, v: VaultRow, r: RecoveryRow, slot: Record<string, unknown>): Promise<RecoveryRow> {
   if (r.state !== 'pending') return r;
+  const recovering = (r.claim_keys ?? []).find((k) => isStoredKey(k) && k.kid === slot.app_kid);
   try {
     await ddb.send(
       new UpdateCommand({
         TableName: table.vaults(),
         Key: { vault_id: v.vault_id },
-        UpdateExpression: 'SET recovery.#st = :reg, updated_at = :now',
+        UpdateExpression: `SET recovery.#st = :reg, updated_at = :now${recovering ? ', recovery.recovering_key = :rk' : ''}`,
         ConditionExpression: 'recovery.recovery_id = :id AND recovery.#st = :pending',
         ExpressionAttributeNames: { '#st': 'state' },
-        ExpressionAttributeValues: { ':reg': 'registered', ':pending': 'pending', ':id': r.recovery_id, ':now': nowIso() },
+        ExpressionAttributeValues: { ':reg': 'registered', ':pending': 'pending', ':id': r.recovery_id, ':now': nowIso(), ...(recovering ? { ':rk': recovering } : {}) },
       }),
     );
   } catch (e) {
@@ -750,7 +1403,7 @@ async function markRegistered(m: MemberItem, v: VaultRow, r: RecoveryRow): Promi
     throw e;
   }
   await audit(m.email, 'vault.recovery_registered', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id });
-  return { ...r, state: 'registered' };
+  return { ...r, state: 'registered', ...(recovering ? { recovering_key: recovering } : {}) };
 }
 
 /**
@@ -765,7 +1418,7 @@ async function refreshRegistered(m: MemberItem, v: VaultRow): Promise<VaultRow> 
     if (!ULID_RE.test(id)) continue;
     const slot = (await ddb.send(new GetCommand({ TableName: table.vaultRequests(), Key: { request_id: id }, ConsistentRead: true }))).Item;
     if (isRegisteredSlot(slot) && slot!.user_guid === m.user_guid && slot!.recovery_id === r.recovery_id) {
-      return { ...v, recovery: await markRegistered(m, v, r) };
+      return { ...v, recovery: await markRegistered(m, v, r, slot!) };
     }
   }
   return v;
@@ -810,15 +1463,6 @@ async function setRecovery(v: VaultRow, r: RecoveryRow, expectId: string | null)
   } catch (e) {
     if ((e as Error).name === 'ConditionalCheckFailedException') throw vaultError(409, 'conflict', 'The recovery changed; try again');
     throw e;
-  }
-}
-
-/** System email; a failed send (e.g. SES sandbox) is logged, never fatal. */
-async function notify(to: string, subject: string, text: string): Promise<void> {
-  try {
-    await sendMail(to, subject, text);
-  } catch (e) {
-    console.error('recovery mail failed', JSON.stringify({ error: (e as Error).name }));
   }
 }
 
@@ -933,9 +1577,49 @@ router.on('POST', '/api/vault/recovery/cancel-link', async (req) => {
   const link = (await ddb.send(new GetCommand({ TableName: table.vaultRequests(), Key: { request_id: key }, ConsistentRead: true }))).Item;
   if (!link || link.op !== 'recovery_cancel_link' || Number(link.expires_at) <= nowS()) throw notFound('This link is no longer valid');
   const m = await memberByGuid(String(link.user_guid));
-  const v = (await ddb.send(new GetCommand({ TableName: table.vaults(), Key: { vault_id: String(link.vault_id) }, ConsistentRead: true }))).Item as VaultRow | undefined;
+  const v = await vaultRow(String(link.vault_id));
   if (!m || !v || v.user_guid !== m.user_guid || v.recovery?.recovery_id !== link.recovery_id) throw notFound('This link is no longer valid');
   return { cancelled: await cancelRecovery(m, v, 'link') };
+});
+
+// The new app (2.0.0): no session and no key at the API yet; it presents the
+// QR's vault_id and recovery_id with its own app key (§11.11.7).
+router.on('POST', '/api/vault/recovery/claim', async (req) => {
+  // Signed by the key it registers, with `vault=` the QR's vault.
+  const { h, key } = await newKeyCaller(req, (x) => x.vault !== '');
+  // Paused: refused before the body is read and before any lookup.
+  await requireService();
+  const vaultId = field(req.body, 'vault_id', VAULT_ID_RE, '32 lowercase hex');
+  const recoveryId = field(req.body, 'recovery_id', ULID_RE, 'a ULID');
+  if (vaultId !== h.vault) throw badRequest('vault_id must be the vault the request is signed for');
+  await limit(`vault-recovery-claim#${vaultId}`, 10, 86_400);
+  await limit(`vault-recovery-claim-net#${req.ip}`, 10, 15 * 60);
+  const now = nowS();
+  const v = await vaultRow(vaultId);
+  const r = v?.recovery;
+  if (!v || v.state === 'deleted' || !r || r.recovery_id !== recoveryId) throw notFound('No such recovery');
+  const m = await memberByGuid(v.user_guid);
+  const pointer = m ? await readPointer(m.user_guid) : null;
+  if (!m || pointer?.current_vault_id !== v.vault_id) throw notFound('No such recovery');
+  requireActive(m);
+  if (recoveryState(r, now) !== 'available') throw vaultError(409, 'recovery_not_available', 'No recovery code is valid now');
+  const keys = [...(r.claim_keys ?? []).filter((k) => isStoredKey(k) && k.kid !== key.kid), { key: key.b64, kid: key.kid }].slice(-MAX_CLAIM_KEYS);
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: table.vaults(),
+        Key: { vault_id: v.vault_id },
+        UpdateExpression: 'SET recovery.claim_keys = :keys, updated_at = :now',
+        ConditionExpression: 'recovery.recovery_id = :id',
+        ExpressionAttributeValues: { ':keys': keys, ':id': r.recovery_id, ':now': nowIso() },
+      }),
+    );
+  } catch (e) {
+    if ((e as Error).name === 'ConditionalCheckFailedException') throw vaultError(409, 'conflict', 'The recovery changed; try again');
+    throw e;
+  }
+  await audit(m.email, 'vault.recovery_claim', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id, kid: key.kid });
+  return { user_guid: m.user_guid, email_hint: emailHint(m.email) };
 });
 
 /** Remember a register request on its recovery (best effort: the app's poll finds the slot anyway). */
@@ -957,7 +1641,10 @@ async function recordRegisterId(v: VaultRow, recoveryId: string, requestId: stri
 }
 
 router.on('POST', '/api/vault/recovery/register', async (req) => {
-  const m = await loadVaultMember(req);
+  // 2.0.0: signed by one of the recovery's claim keys; an active account.
+  const c = await appOnlyCaller(req, ['claim']);
+  const m = c.m;
+  if (c.via === 'app') requireActive(m);
   await requireService();
   const vaultId = field(req.body, 'vault_id', VAULT_ID_RE, '32 lowercase hex');
   const requestId = field(req.body, 'request_id', ULID_RE, 'a ULID');
@@ -966,16 +1653,21 @@ router.on('POST', '/api/vault/recovery/register', async (req) => {
   const envelope = checkEnvelope(req.body.envelope, ENVELOPE_BYTES_LARGE, etkKid);
   await limit(`vault-recovery-register#${m.user_guid}`, 10, 86_400);
   const now = nowS();
-  const vault = activeVault((await currentVault(m.user_guid)).vault);
+  const vault = c.vault;
   if (!vault || vault.vault_id !== vaultId) throw notFound('No such vault');
   if (recoveryState(vault.recovery, now) !== 'available') throw vaultError(409, 'recovery_not_available', 'No recovery code is valid now');
   const inst = await routeCheck(vault, instanceId, now);
   await requireRoutable(inst, isCanaryMember(m));
   const recoveryId = vault.recovery!.recovery_id;
-  // The slot names its recovery, so its answer can retire the code (0.10.6 §11.11.7).
-  await enqueue('recovery_register', m, vault, requestId, inst, { etk_kid: etkKid, envelope }, { slot: { recovery_id: recoveryId } });
+  // The slot names its recovery, so its answer can retire the code (0.10.6
+  // §11.11.7), and its key, which then becomes the recovering key; the
+  // queue message carries the key for the enclave to bind (§11.5).
+  await enqueue('recovery_register', m, vault, requestId, inst, { etk_kid: etkKid, envelope }, {
+    extra: c.key ? { app_key: c.key.key } : {},
+    slot: { recovery_id: recoveryId, ...slotOf(c) },
+  });
   await recordRegisterId(vault, recoveryId, requestId);
-  await audit(m.email, 'vault.recovery_register', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, recovery_id: recoveryId, instance_id: instanceId });
+  await audit(m.email, 'vault.recovery_register', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, recovery_id: recoveryId, instance_id: instanceId, ...viaOf(c) });
   return new WithStatus(202, { vault_id: vault.vault_id, request_id: requestId });
 });
 

@@ -249,10 +249,12 @@ export class VettidOrgVaultStack extends cdk.Stack {
     const onlyAttributes = (attrs: string[]) => ({ 'ForAllValues:StringEquals': { 'dynamodb:Attributes': attrs } });
     const t = this.tables;
     h(['dynamodb:GetItem'], [t.vaults.tableArn]);
-    // Lease, lifecycle and alarm attributes only (parent/aws.go): never the
-    // member's own fields (user_guid, recovery, current_vault_id).
+    // Lease, lifecycle, alarm and app-key attributes only (parent/aws.go):
+    // never the member's own fields (user_guid, recovery, current_vault_id,
+    // app_key_pending, enroll_live). `app_key` (VAULT-MESSAGING 0.15.0
+    // §11.5) is written only here, from the enclave's reports.
     h(['dynamodb:UpdateItem'], [t.vaults.tableArn], onlyAttributes([
-      'vault_id', 'lease', 'updated_at', 'sealed_release', 'vault_version', 'state_version', 'state', 'alarm', 'alarm_pending',
+      'vault_id', 'lease', 'updated_at', 'sealed_release', 'vault_version', 'state_version', 'state', 'alarm', 'alarm_pending', 'app_key',
     ]));
     h(['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:DeleteItem'], [t['vault-instances'].tableArn]);
     h(['dynamodb:UpdateItem'], [t['vault-requests'].tableArn], onlyAttributes(['request_id', 'status', 'envelope', 'code']));

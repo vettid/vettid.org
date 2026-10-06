@@ -4,6 +4,7 @@ import { GetSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-sec
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
+import { KeyObject, createHash, generateKeyPairSync, randomBytes, sign as cryptoSign } from 'node:crypto';
 
 // "tok-<guid>" ID tokens verify as that user; anything else is expired.
 jest.mock('aws-jwt-verify', () => ({
@@ -19,16 +20,18 @@ jest.mock('aws-jwt-verify', () => ({
 
 const QUEUE_PREFIX = 'https://sqs.us-east-1.amazonaws.com/123456789012/vettid-org-vault-control-';
 Object.assign(process.env, {
-  TABLE_MEMBERS: 'members', TABLE_TERMS: 'terms', TABLE_AUDIT: 'audit', TABLE_RATELIMITS: 'rl',
+  TABLE_MEMBERS: 'members', TABLE_TERMS: 'terms', TABLE_AUDIT: 'audit', TABLE_RATELIMITS: 'rl', TABLE_SUBSCRIPTIONS: 'subscriptions',
   TABLE_VAULTS: 'vaults', TABLE_VAULT_INSTANCES: 'instances', TABLE_VAULT_REQUESTS: 'requests', TABLE_VAULT_RELEASES: 'releases',
   MEMBER_POOL_ID: 'us-east-1_pool', MEMBER_CLIENT_ID: 'client', ORIGIN_VERIFY_SECRET_ARN: 'origin',
   VAULT_QUEUE_URL_PREFIX: QUEUE_PREFIX, SENDER_EMAIL: 'no-reply@vettid.org', ACCOUNT_HOST: 'account.vettid.org',
   VAULT_SERVICE_PARAM: '/vettid-org/prod/switch/vault-service',
+  ENROLL_CODE_KEY_PARAM: '/vettid-org/prod/member/enroll-code-key',
 });
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const vault = require('../../lambda/member/vault');
 const vaultService = require('../../lambda/shared/vault-service');
+const enrollCode = require('../../lambda/shared/enroll-code');
 /* eslint-enable */
 
 const ddb = mockClient(DynamoDBDocumentClient);
@@ -44,7 +47,7 @@ const paused = (reason = 'incident') => (switchValue = JSON.stringify({ enabled:
 // ---- a tiny in-memory DynamoDB ---------------------------------------------------
 
 const KEYS: Record<string, string> = {
-  members: 'user_guid', terms: 'version_id', audit: 'ts_id', rl: 'key',
+  members: 'user_guid', terms: 'version_id', audit: 'ts_id', rl: 'key', subscriptions: 'user_guid',
   vaults: 'vault_id', instances: 'instance_id', requests: 'request_id', releases: 'release',
 };
 let db: Record<string, Map<string, any>>;
@@ -65,17 +68,41 @@ function installFakeDdb() {
     const t = i.TableName;
     const k = i.Key[KEYS[t]];
     const cur = tbl(t).get(k);
+    const v = i.ExpressionAttributeValues ?? {};
+    if (t === 'rl' && i.UpdateExpression === 'SET expires_at = :exp') {
+      // An app request's nonce: single use while unexpired.
+      if (cur && !(cur.expires_at < v[':now'])) throw ccf();
+      tbl(t).set(k, { key: k, expires_at: v[':exp'] });
+      return {};
+    }
     if (t === 'rl') {
       const count = (cur?.count ?? 0) + 1;
       tbl(t).set(k, { key: k, count });
       return { Attributes: { count } };
     }
-    const v = i.ExpressionAttributeValues ?? {};
     if (t === 'vaults' && i.UpdateExpression.startsWith('SET recovery.#st')) {
       // markRegistered: pending -> registered, same recovery only.
       if (!cur?.recovery || cur.recovery.recovery_id !== v[':id'] || cur.recovery.state !== v[':pending']) throw ccf();
       cur.recovery.state = v[':reg'];
+      if (v[':rk']) cur.recovery.recovering_key = structuredClone(v[':rk']);
       cur.updated_at = v[':now'];
+    } else if (t === 'vaults' && i.UpdateExpression.startsWith('SET recovery.claim_keys')) {
+      if (!cur?.recovery || cur.recovery.recovery_id !== v[':id']) throw ccf();
+      cur.recovery.claim_keys = structuredClone(v[':keys']);
+      cur.updated_at = v[':now'];
+    } else if (t === 'vaults' && i.UpdateExpression === 'REMOVE recovery.claim_keys, recovery.recovering_key') {
+      if (!cur?.recovery || cur.recovery.recovery_id !== v[':id']) throw ccf();
+      delete cur.recovery.claim_keys;
+      delete cur.recovery.recovering_key;
+    } else if (t === 'vaults' && i.UpdateExpression === 'REMOVE app_key_pending') {
+      if (cur?.app_key_pending?.kid !== v[':k']) throw ccf();
+      delete cur.app_key_pending;
+    } else if (t === 'vaults' && i.UpdateExpression.startsWith('SET app_key_pending')) {
+      if (!cur || cur.user_guid !== v[':g']) throw ccf();
+      cur.app_key_pending = structuredClone(v[':p']);
+      cur.updated_at = v[':now'];
+    } else if (t === 'vaults' && i.UpdateExpression.startsWith('SET enroll_live')) {
+      tbl(t).set(k, { ...cur, vault_id: k, enroll_live: v[':k'], updated_at: v[':now'] });
     } else if (t === 'vaults' && i.UpdateExpression.startsWith('SET recovery.register_ids')) {
       if (!cur?.recovery || cur.recovery.recovery_id !== v[':id']) throw ccf();
       cur.recovery.register_ids = structuredClone(v[':ids']);
@@ -86,7 +113,7 @@ function installFakeDdb() {
       if (i.ConditionExpression === 'recovery.recovery_id = :id' && cur.recovery?.recovery_id !== v[':id']) throw ccf();
       tbl(t).set(k, { ...cur, recovery: structuredClone(v[':r']), updated_at: v[':now'] });
     } else if (t === 'vaults') {
-      if (i.ConditionExpression === 'attribute_not_exists(vault_id)' && cur) throw ccf();
+      if (i.ConditionExpression === 'attribute_not_exists(current_vault_id)' && cur?.current_vault_id) throw ccf();
       if (i.ConditionExpression === 'current_vault_id = :old' && cur?.current_vault_id !== v[':old']) throw ccf();
       tbl(t).set(k, { ...cur, vault_id: k, current_vault_id: v[':new'], updated_at: v[':now'] });
     } else if (t === 'releases') {
@@ -94,6 +121,19 @@ function installFakeDdb() {
       if (cur.start_requested_at !== undefined && !(cur.start_requested_at < v[':cut'])) throw ccf();
       cur.start_requested_at = v[':now'];
       cur.start_requests = (cur.start_requests ?? 0) + 1;
+    } else if (t === 'requests' && i.UpdateExpression === 'SET #st = :revoked') {
+      if (cur?.state !== v[':live']) throw ccf();
+      cur.state = v[':revoked'];
+    } else if (t === 'requests' && i.UpdateExpression === 'ADD typed_attempts :one') {
+      if (!cur || cur.typed_blocked !== v[':f'] || !(cur.typed_attempts < v[':max'])) throw ccf();
+      cur.typed_attempts += 1;
+      return { Attributes: { typed_attempts: cur.typed_attempts } };
+    } else if (t === 'requests' && i.UpdateExpression === 'SET typed_blocked = :t') {
+      if (!cur || cur.typed_blocked !== v[':f']) throw ccf();
+      cur.typed_blocked = true;
+    } else if (t === 'requests' && i.UpdateExpression.startsWith('SET #st = :used')) {
+      if (!cur || cur.state !== v[':live'] || !(cur.expires_at > v[':now']) || (v[':f'] !== undefined && cur.typed_blocked !== v[':f'])) throw ccf();
+      Object.assign(cur, { state: v[':used'], used_at: v[':now'], used_via: v[':via'] });
     } else if (t === 'requests') {
       if (cur && i.UpdateExpression.startsWith('SET released')) cur.released = true;
       else if (cur) cur.status = v[':e'];
@@ -103,6 +143,7 @@ function installFakeDdb() {
   ddb.on(QueryCommand).callsFake((i) => {
     const v = i.ExpressionAttributeValues;
     if (i.TableName === 'terms') return { Items: [...tbl('terms').values()].filter((x) => x.status === 'current') };
+    if (i.TableName === 'members' && i.IndexName === 'email-index') return { Items: [...tbl('members').values()].filter((x) => x.email === v[':e']).slice(0, 1) };
     if (i.TableName === 'releases') {
       return { Items: [...tbl('releases').values()].filter((x) => x.status === v[':a']).sort((a, b) => b.release_number - a.release_number) };
     }
@@ -153,18 +194,99 @@ const vaultOf = (guid: string, row: Record<string, unknown>) => {
 };
 
 const ORIGIN = 'origin-secret';
-const ev = (method: string, path: string, body?: unknown, opts: { guid?: string; headers?: Record<string, string>; query?: Record<string, string> } = {}) =>
-  ({
+type EvOpts = { guid?: string; headers?: Record<string, string>; query?: Record<string, string>; session?: boolean; app?: AppSig };
+const ev = (method: string, path: string, body?: unknown, opts: EvOpts = {}) => {
+  const raw = body === undefined ? undefined : JSON.stringify(body);
+  const rawQuery = opts.query ? new URLSearchParams(opts.query).toString() : '';
+  const headers: Record<string, string> = { 'x-origin-verify': ORIGIN, 'x-vettid-csrf': '1', 'cloudfront-viewer-address': '2001:db8:1:2:3:4:5:6:443', ...opts.headers };
+  if (opts.app) headers['x-vettid-app'] = signHeader(method, path, rawQuery, raw ?? '', opts.app);
+  return {
     rawPath: path,
-    body: body === undefined ? undefined : JSON.stringify(body),
+    rawQueryString: rawQuery,
+    body: raw,
     isBase64Encoded: false,
     cookies: [`vid_id=tok-${opts.guid ?? 'g1'}`, 'vid_s=1'],
     queryStringParameters: opts.query,
-    headers: { 'x-origin-verify': ORIGIN, 'x-vettid-csrf': '1', 'cloudfront-viewer-address': '2001:db8:1:2:3:4:5:6:443', ...opts.headers },
+    headers,
     requestContext: { http: { method, sourceIp: '10.0.0.1' } },
-  }) as any;
+  } as any;
+};
+
+// ---- apps: app keys and signed requests (MEMBER-API 2.0.0, VAULT-MESSAGING §11.12.2) ----
+
+interface TestKey { priv: KeyObject; b64: string; kid: string }
+const makeKey = (): TestKey => {
+  const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const der = publicKey.export({ format: 'der', type: 'spki' }) as Buffer;
+  return { priv: privateKey, b64: der.toString('base64'), kid: createHash('sha256').update(der).digest().subarray(0, 16).toString('hex') };
+};
+const APP_KEYS: Record<string, TestKey> = {};
+/** One P-256 app key per name (by default the member's guid). */
+const keyOf = (name: string) => (APP_KEYS[name] ??= makeKey());
+
+interface AppSig { key: TestKey; vault: string; ts?: number; nonce?: string; tamper?: (input: string) => string }
+function signHeader(method: string, path: string, query: string, body: string, a: AppSig): string {
+  const ts = String(a.ts ?? Math.floor(Date.now() / 1000));
+  const nonce = a.nonce ?? randomBytes(16).toString('base64url');
+  let input = ['vettid/member-api/app/1', method, path, query, a.vault, a.key.kid, ts, nonce, createHash('sha256').update(body).digest('hex')].join('\n');
+  if (a.tamper) input = a.tamper(input);
+  const sig = cryptoSign('sha256', Buffer.from(input), { key: a.key.priv, dsaEncoding: 'der' }).toString('base64url');
+  return `v=1; vault=${a.vault}; kid=${a.key.kid}; ts=${ts}; nonce=${nonce}; sig=${sig}`;
+}
+
+/** The routes only an app may call (2.0.0), and the key each test call signs with by default. */
+const APP_ONLY: Record<string, 'app' | 'pending' | 'claim'> = {
+  'GET /api/vault/enclave': 'app',
+  'POST /api/vault/enroll': 'pending',
+  'POST /api/vault/unlock': 'app',
+  'POST /api/vault/recovery/register': 'claim',
+};
+/** The vault a redeem made for a member who had none (as the test calls provision it). */
+const evid = (guid: string) => createHash('sha256').update(`vault:${guid}`).digest('hex').slice(0, 32);
+const currentVaultId = (guid: string): string | undefined => getItem('vaults', `user#${guid}`)?.current_vault_id;
+
+/**
+ * Put the member's app key where the route expects it, as the redeem, the
+ * host or a claim would have: the pending key (enroll; and enclave for a
+ * member without a vault, which gets one as a redeem would), the vault's
+ * `app_key`, or the recovery's claim keys. Returns the vault to sign for.
+ */
+function provision(guid: string, role: 'app' | 'pending' | 'claim', key: TestKey): string {
+  let vid = currentVaultId(guid);
+  let row = vid ? getItem('vaults', vid) : undefined;
+  if (!row && role !== 'claim') {
+    vid = evid(guid);
+    vaultOf(guid, { vault_id: vid, state: 'enrolling' });
+    row = getItem('vaults', vid);
+    role = 'pending';
+  }
+  if (!row) return vid ?? '';
+  const nowS = Math.floor(Date.now() / 1000);
+  if (role === 'pending' || (role === 'app' && row.state === 'enrolling' && !row.app_key)) row.app_key_pending = { key: key.b64, kid: key.kid, until: nowS + 3600 };
+  if (role === 'app' && row.state !== 'enrolling') row.app_key = { key: key.b64, kid: key.kid, seq: 1 };
+  if (role === 'claim' && row.recovery && !(row.recovery.claim_keys ?? []).some((k: any) => k.kid === key.kid)) {
+    row.recovery.claim_keys = [...(row.recovery.claim_keys ?? []), { key: key.b64, kid: key.kid }];
+  }
+  return row.vault_id;
+}
+
+/**
+ * The event a test call sends: app-only routes are signed by the member's
+ * app key (provisioned as above) unless `session` asks for the portal's
+ * cookies; any route is signed when `app` is given.
+ */
+function build(method: string, path: string, body?: unknown, opts: EvOpts = {}) {
+  const role = APP_ONLY[`${method} ${path}`];
+  if (role && !opts.session && !opts.app) {
+    const guid = opts.guid ?? 'g1';
+    const key = keyOf(guid);
+    const vid = provision(guid, role, key) || (body as any)?.vault_id || '';
+    return ev(method, path, body, { ...opts, app: { key, vault: vid } });
+  }
+  return ev(method, path, body, opts);
+}
 const call = async (...a: Parameters<typeof ev>) => {
-  const res = await vault.handler(ev(...a));
+  const res = await vault.handler(build(...a));
   return { status: res.statusCode as number, body: JSON.parse(res.body) };
 };
 const sent = () => sqs.commandCalls(SendMessageCommand).map((c) => ({ url: c.args[0].input.QueueUrl, msg: JSON.parse(c.args[0].input.MessageBody!) }));
@@ -201,27 +323,33 @@ afterEach(() => {
 // ---- access ---------------------------------------------------------------------
 
 describe('access', () => {
-  // Enclave, enroll and unlock need a member with the current terms (§11.1).
-  const gated: [string, string, unknown?][] = [
-    ['GET', '/api/vault/enclave'],
-    ['POST', '/api/vault/enroll', { request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA }],
-    ['POST', '/api/vault/unlock', { vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA }],
-  ];
+  const ENROLL = { request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA };
+  const UNLOCK = { vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA };
+  const enrollBody = () => ({ ...ENROLL, vault_id: currentVaultId('g1') ?? evid('g1') });
 
-  test.each(gated)('registered users get 403 terms_required: %s %s', async (...[method, path, body]: [string, string, unknown?]) => {
+  // Enrollment with the pending key needs an active member (2.0.0: the
+  // terms were checked when the portal issued the code).
+  test('enrollment: a registered user gets 403 terms_required on enclave and enroll', async () => {
     put('members', { user_guid: 'g1', email: 'g1@x.org', state: 'registered', account_status: 'active' });
-    const r = await call(method, path, body);
-    expect(r.status).toBe(403);
-    expect(r.body).toMatchObject({ error: 'terms_required', code: 'terms_required' });
+    for (const [method, path, body] of [['GET', '/api/vault/enclave'], ['POST', '/api/vault/enroll', enrollBody()]] as [string, string, unknown?][]) {
+      const r = await call(method, path, body);
+      expect({ path, status: r.status, error: r.body.error, code: r.body.code }).toEqual({ path, status: 403, error: 'terms_required', code: 'terms_required' });
+    }
     expect(sqs.calls()).toHaveLength(0);
   });
 
-  test.each(gated)('members whose accepted terms are no longer current get 403 terms_required: %s %s', async (...[method, path, body]: [string, string, unknown?]) => {
+  test('2.0.0: enrolling, unlocking and the enclave no longer need the current terms', async () => {
     put('terms', { version_id: 't1', status: 'superseded' });
     put('terms', { version_id: 't2', status: 'current' });
-    const r = await call(method, path, body);
-    expect(r.status).toBe(403);
-    expect(r.body.error).toBe('terms_required');
+    release(R0, 4);
+    instance('i-1', R0);
+    expect((await call('GET', '/api/vault/enclave')).status).toBe(200);
+    expect((await call('POST', '/api/vault/enroll', enrollBody())).status).toBe(202);
+    put('vaults', { ...getItem('vaults', evid('g1')), state: 'locked', sealed_release: R0 });
+    expect((await call('POST', '/api/vault/unlock', { ...UNLOCK, vault_id: evid('g1'), request_id: RID2 })).status).toBe(202);
+    // A registered (not yet member) account with an existing vault may unlock it too.
+    put('members', { user_guid: 'g1', email: 'g1@x.org', state: 'registered', account_status: 'active' });
+    expect((await call('POST', '/api/vault/unlock', { ...UNLOCK, vault_id: evid('g1'), request_id: '01JB2Z6V9K3M4N5P6Q7R8S9T0X' })).status).toBe(202);
   });
 
   test('lock and status stay available for an existing vault without current terms', async () => {
@@ -236,16 +364,29 @@ describe('access', () => {
     expect((await call('GET', '/api/vault/status')).status).toBe(200);
   });
 
-  test('a canceled account: every route but lock is blocked at once', async () => {
+  test('a canceled account: every route but lock is blocked at once (portal and app)', async () => {
     release(R0, 4);
     instance('i-1', R0);
     vaultOf('g1', { vault_id: VID, state: 'unlocked', lease: { instance_id: 'i-1', lease_expires_at: NOW + 60 } });
     put('members', { user_guid: 'g1', email: 'g1@x.org', state: 'member', account_status: 'canceled', terms_version: 't1' });
-    for (const [method, path, body] of [...gated, ['GET', '/api/vault/status'], ['GET', `/api/vault/requests/${RID}`]] as [string, string, unknown?][]) {
-      expect({ path, status: (await call(method, path, body)).status }).toEqual({ path, status: 403 });
+    const app = { key: keyOf('g1'), vault: VID };
+    provision('g1', 'app', keyOf('g1'));
+    for (const [method, path, body, opts] of [
+      ['GET', '/api/vault/enclave'],
+      ['POST', '/api/vault/enroll', { ...ENROLL, vault_id: VID }],
+      ['POST', '/api/vault/unlock', UNLOCK],
+      ['GET', '/api/vault/status'],
+      ['GET', `/api/vault/requests/${RID}`],
+      ['GET', '/api/vault/status', undefined, { app }],
+      ['GET', `/api/vault/requests/${RID}`, undefined, { app }],
+    ] as [string, string, unknown?, EvOpts?][]) {
+      const r = await call(method, path, body, opts);
+      // enroll: the pending key was never issued for a canceled account; the vault's app key cannot enroll.
+      expect({ path, status: r.status }).toEqual({ path, status: path === '/api/vault/enroll' ? 401 : 403 });
     }
     expect((await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID })).status).toBe(202);
-    expect(sent().map((m) => m.msg.op)).toEqual(['lock']);
+    expect((await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID2 }, { app })).status).toBe(202);
+    expect(sent().map((m) => m.msg.op)).toEqual(['lock', 'lock']);
   });
 
   test("lock needs the caller's own vault", async () => {
@@ -256,6 +397,21 @@ describe('access', () => {
   test('state-changing routes need the CSRF header', async () => {
     const r = await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID }, { headers: { 'x-vettid-csrf': '' } });
     expect(r).toEqual({ status: 403, body: expect.objectContaining({ error: 'csrf' }) });
+  });
+
+  test('2.0.0: enclave, enroll, unlock and register refuse a portal session (401), cookies or not', async () => {
+    release(R0, 4);
+    instance('i-1', R0);
+    vaultOf('g1', { vault_id: VID, state: 'locked', sealed_release: R0 });
+    for (const [method, path, body] of [
+      ['GET', '/api/vault/enclave'],
+      ['POST', '/api/vault/enroll', { ...ENROLL, vault_id: VID }],
+      ['POST', '/api/vault/unlock', UNLOCK],
+      ['POST', '/api/vault/recovery/register', { vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV }],
+    ] as [string, string, unknown?][]) {
+      expect({ path, status: (await call(method, path, body, { session: true })).status }).toEqual({ path, status: 401 });
+    }
+    expect(sqs.calls()).toHaveLength(0);
   });
 });
 
@@ -366,9 +522,8 @@ describe('GET /api/vault/enclave', () => {
       expect(r.body).toMatchObject({ instance_id: 'i-r0', release: R0 });
     });
 
-    test('malformed → 400; no vault → 404; unknown release → 410', async () => {
+    test('malformed → 400; unknown release → 410', async () => {
       expect((await call('GET', '/api/vault/enclave', undefined, { query: { release: 'A'.repeat(96) } })).status).toBe(400);
-      expect((await call('GET', '/api/vault/enclave', undefined, { query: { release: R0 } })).status).toBe(404);
       vaultOf('g1', { vault_id: VID, sealed_release: R1 });
       expect((await call('GET', '/api/vault/enclave', undefined, { query: { release: R0 } })).status).toBe(410);
     });
@@ -397,7 +552,7 @@ describe('GET /api/vault/enclave', () => {
 // ---- dark launch (VAULT-RELEASES §9): an empty release registry ------------------
 
 describe('dark launch: no active release', () => {
-  const enrollBody = { request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA };
+  const enrollBody = { vault_id: evid('g1'), request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA };
   const writes = () => ddb.commandCalls(PutCommand).concat(ddb.commandCalls(UpdateCommand) as any).map((c) => c.args[0].input.TableName).filter((t) => t !== 'rl');
 
   test('enclave and enroll answer 503 vault_unavailable; nothing is created, queued or start-requested', async () => {
@@ -408,7 +563,7 @@ describe('dark launch: no active release', () => {
     expect(sqs.calls()).toHaveLength(0);
     expect(writes()).toEqual([]);
     expect(tbl('releases').size).toBe(0);
-    expect(tbl('vaults').size).toBe(0);
+    expect(tbl('vaults').size).toBe(2); // the redeem's vault and pointer (made by the test), nothing more
     expect(tbl('requests').size).toBe(0);
   });
 
@@ -428,11 +583,10 @@ describe('dark launch: no active release', () => {
     for (const r of tbl('releases').values()) expect(r.start_requests).toBeUndefined();
   });
 
-  test('status, unlock and lock without a vault: {vault: null}, 404, 404', async () => {
+  test('status, unlock and lock without a vault: {vault: null}, 401 (no key for it), 404', async () => {
     expect((await call('GET', '/api/vault/status')).body).toEqual({ vault: null, service: 'available' });
-    expect((await call('POST', '/api/vault/unlock', { vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA })).status).toBe(404);
+    expect((await call('POST', '/api/vault/unlock', { vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA }, { app: { key: keyOf('g1'), vault: VID } })).status).toBe(401);
     expect((await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID2 })).status).toBe(404);
-    expect((await call('GET', '/api/vault/enclave', undefined, { query: { release: R0 } })).status).toBe(404);
     expect((await call('POST', '/api/vault/recovery', { browser_key: Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64') })).status).toBe(404);
     expect(sqs.calls()).toHaveLength(0);
     expect(writes()).toEqual([]);
@@ -498,53 +652,47 @@ const badManifestHashes: [string, Record<string, unknown>][] = [
 ];
 
 describe('POST /api/vault/enroll', () => {
-  const body = (extra: Record<string, unknown> = {}) => ({ request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA, ...extra });
+  // 2.0.0: the redeem made the vault and recorded the pending key; enroll names that vault.
+  const body = (extra: Record<string, unknown> = {}) => ({ vault_id: evid('g1'), request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA, ...extra });
   beforeEach(() => {
     release(R1, 5);
     instance('i-1', R1);
   });
 
-  test('assigns a vault_id, creates the row and the slot, enqueues the §11.5 message, audits', async () => {
+  test("goes to the redeem's vault, writes the slot with the key's kid, enqueues the §11.5 message with app_key, audits", async () => {
     const r = await call('POST', '/api/vault/enroll', body());
     expect(r.status).toBe(202);
-    const vid = r.body.vault_id;
-    expect(vid).toMatch(/^[0-9a-f]{32}$/);
+    const vid = evid('g1');
     expect(r.body).toEqual({ vault_id: vid, request_id: RID });
-    expect(getItem('vaults', 'user#g1')).toMatchObject({ current_vault_id: vid });
-    expect(getItem('vaults', 'user#g1')).not.toHaveProperty('user_guid'); // pointer rows stay out of user-index
-    expect(getItem('vaults', vid)).toEqual({ vault_id: vid, user_guid: 'g1', state: 'enrolling', created_at: expect.any(String), updated_at: expect.any(String) });
-    expect(getItem('requests', RID)).toMatchObject({ request_id: RID, vault_id: vid, user_guid: 'g1', op: 'enroll', status: 'queued', instance_id: 'i-1', expires_at: NOW + 900 });
+    expect(getItem('requests', RID)).toMatchObject({ request_id: RID, vault_id: vid, user_guid: 'g1', op: 'enroll', status: 'queued', instance_id: 'i-1', expires_at: NOW + 900, app_kid: keyOf('g1').kid });
     expect(getItem('requests', RID)).not.toHaveProperty('envelope'); // envelopes are not stored
     const [m] = sent();
     expect(m.url).toBe(QUEUE_PREFIX + 'i-1');
-    expect(Object.keys(m.msg)).toEqual(['v', 'op', 'vault_id', 'user_guid', 'request_id', 'etk_kid', 'envelope', 'manifest_sha256', 'enqueued_at']);
-    expect(m.msg).toMatchObject({ v: 1, op: 'enroll', vault_id: vid, user_guid: 'g1', request_id: RID, etk_kid: KID, envelope: ENV, manifest_sha256: MSHA });
+    expect(Object.keys(m.msg)).toEqual(['v', 'op', 'vault_id', 'user_guid', 'request_id', 'etk_kid', 'envelope', 'manifest_sha256', 'app_key', 'enqueued_at']);
+    expect(m.msg).toMatchObject({ v: 1, op: 'enroll', vault_id: vid, user_guid: 'g1', request_id: RID, etk_kid: KID, envelope: ENV, manifest_sha256: MSHA, app_key: keyOf('g1').b64 });
     const auditPut = ddb.commandCalls(PutCommand).find((c) => c.args[0].input.TableName === 'audit')!;
-    expect(auditPut.args[0].input.Item).toMatchObject({ action: 'vault.enroll_request', subject: 'g1' });
+    expect(auditPut.args[0].input.Item).toMatchObject({ action: 'vault.enroll_request', subject: 'g1', detail: { vault_id: vid, via: 'app', kid: keyOf('g1').kid } });
     expect(JSON.stringify(auditPut.args[0].input.Item)).not.toContain(ENV.slice(0, 64));
   });
 
-  test('a second enrollment reuses the member\'s vault_id (the enclave decides on replacement)', async () => {
+  test("a second enrollment reuses the member's vault_id (the enclave decides on replacement)", async () => {
     const first = await call('POST', '/api/vault/enroll', body());
     const second = await call('POST', '/api/vault/enroll', body({ request_id: RID2 }));
     expect(second.body.vault_id).toBe(first.body.vault_id);
   });
 
-  test('after the deletion notice removed the rows (§12.5), the next enrollment is a fresh one', async () => {
-    vaultOf('g1', { vault_id: VID, state: 'deleted' });
-    tbl('vaults').delete(VID);
-    tbl('vaults').delete('user#g1');
-    const r = await call('POST', '/api/vault/enroll', body());
-    expect(r.status).toBe(202);
-    expect(r.body.vault_id).not.toBe(VID);
-    expect(getItem('vaults', 'user#g1').current_vault_id).toBe(r.body.vault_id);
-  });
-
-  test('a deleted vault gets a fresh vault_id', async () => {
-    vaultOf('g1', { vault_id: VID, state: 'deleted' });
-    const r = await call('POST', '/api/vault/enroll', body());
-    expect(r.body.vault_id).not.toBe(VID);
-    expect(getItem('vaults', 'user#g1').current_vault_id).toBe(r.body.vault_id);
+  test('only the pending key enrolls: the vault app key, an expired pending key, another vault → 401 or 404', async () => {
+    provision('g1', 'pending', keyOf('g1'));
+    const row = getItem('vaults', evid('g1'));
+    // The host reported this key as the vault's app key: no longer pending (cleared once app_key names it).
+    row.app_key = { key: keyOf('g1').b64, kid: keyOf('g1').kid, seq: 1 };
+    expect((await call('POST', '/api/vault/enroll', body(), { app: { key: keyOf('g1'), vault: evid('g1') } })).status).toBe(401);
+    delete row.app_key;
+    row.app_key_pending.until = NOW;
+    expect((await call('POST', '/api/vault/enroll', body(), { app: { key: keyOf('g1'), vault: evid('g1') } })).status).toBe(401);
+    row.app_key_pending.until = NOW + 10;
+    expect((await call('POST', '/api/vault/enroll', body({ vault_id: VID }), { app: { key: keyOf('g1'), vault: evid('g1') } })).status).toBe(404);
+    expect(sqs.calls()).toHaveLength(0);
   });
 
   test.each([
@@ -606,7 +754,27 @@ describe('POST /api/vault/unlock', () => {
     expect(r).toEqual({ status: 202, body: { vault_id: VID, request_id: RID } });
     const [m] = sent();
     expect(m).toMatchObject({ url: QUEUE_PREFIX + 'i-1', msg: { v: 1, op: 'unlock', vault_id: VID, user_guid: 'g1', request_id: RID, etk_kid: KID, envelope: ENV, manifest_sha256: MSHA } });
-    expect(Object.keys(m.msg)).toEqual(['v', 'op', 'vault_id', 'user_guid', 'request_id', 'etk_kid', 'envelope', 'manifest_sha256', 'enqueued_at']);
+    // 2.0.0: the account snapshot rides in every unlock (VAULT-MESSAGING §11.13); no app_key.
+    expect(Object.keys(m.msg)).toEqual(['v', 'op', 'vault_id', 'user_guid', 'request_id', 'etk_kid', 'envelope', 'manifest_sha256', 'account', 'enqueued_at']);
+    expect(m.msg.account).toEqual({
+      v: 1, as_of: new Date(NOW_MS).toISOString(), email_hint: 'g***@x.org', state: 'member', account_status: 'active', deletes_at: null,
+      terms: { needs_acceptance: false }, subscription: null, voting_rights: false,
+    });
+    expect(getItem('requests', RID).app_kid).toBe(keyOf('g1').kid);
+  });
+
+  test('the snapshot carries the subscription and the terms state; never the name, the email or the user_guid', async () => {
+    vaultOf('g1', { vault_id: VID, sealed_release: R0 });
+    put('members', { ...getItem('members', 'g1'), first_name: 'Gina', last_name: 'One' });
+    put('subscriptions', { user_guid: 'g1', type_id: 'trial', type_name: 'Trial', status: 'trial', paid: false, started_at: '2026-10-01T00:00:00.000Z', expires_at: '2026-10-31T00:00:00.000Z' });
+    put('terms', { version_id: 't1', status: 'superseded' });
+    put('terms', { version_id: 't2', status: 'current' });
+    await call('POST', '/api/vault/unlock', body());
+    const a = sent()[0].msg.account;
+    expect(a).toMatchObject({ terms: { needs_acceptance: true }, subscription: { type_name: 'Trial', status: 'trial', paid: false, expires_at: '2026-10-31T00:00:00.000Z' } });
+    expect(Object.keys(a.subscription)).toEqual(['type_name', 'status', 'paid', 'expires_at']);
+    const text = JSON.stringify(a);
+    for (const secret of ['Gina', 'One', 'g1@x.org', '"g1"']) expect(text).not.toContain(secret);
   });
 
   test.each(badManifestHashes)('rejects %s with 400 and enqueues nothing', async (_name, extra) => {
@@ -643,13 +811,15 @@ describe('POST /api/vault/unlock', () => {
     expect(tbl('requests').size).toBe(0);
   });
 
-  test('another vault_id, or a deleted vault → 404', async () => {
+  test("another member's vault or a deleted vault → 401 (no key of this app); another vault_id in the body → 404", async () => {
     vaultOf('g2', { vault_id: VID });
-    expect((await call('POST', '/api/vault/unlock', body())).status).toBe(404); // g1 has no vault
+    provision('g2', 'app', keyOf('g2'));
+    expect((await call('POST', '/api/vault/unlock', body(), { app: { key: keyOf('g1'), vault: VID } })).status).toBe(401); // g1 has no vault
     vaultOf('g1', { vault_id: 'e'.repeat(32) });
     expect((await call('POST', '/api/vault/unlock', body())).status).toBe(404);
-    vaultOf('g1', { vault_id: VID, state: 'deleted' });
-    expect((await call('POST', '/api/vault/unlock', body())).status).toBe(404);
+    vaultOf('g1', { vault_id: VID, state: 'deleted', app_key: { key: keyOf('g1').b64, kid: keyOf('g1').kid, seq: 1 } });
+    expect((await call('POST', '/api/vault/unlock', body(), { app: { key: keyOf('g1'), vault: VID } })).status).toBe(401);
+    expect(sqs.calls()).toHaveLength(0);
   });
 
   test('padding is fixed: a 4,096-padded envelope is refused', async () => {
@@ -670,7 +840,7 @@ describe('POST /api/vault/unlock', () => {
     vaultOf('g1', { vault_id: VID });
     await call('POST', '/api/vault/unlock', body());
     const item = ddb.commandCalls(PutCommand).find((c) => c.args[0].input.TableName === 'audit')!.args[0].input.Item!;
-    expect(item).toMatchObject({ action: 'vault.unlock_request', subject: 'g1', detail: { vault_id: VID, request_id: RID, instance_id: 'i-1' } });
+    expect(item).toMatchObject({ action: 'vault.unlock_request', subject: 'g1', detail: { vault_id: VID, request_id: RID, instance_id: 'i-1', via: 'app', kid: keyOf('g1').kid } });
     expect(JSON.stringify(item)).not.toContain(ENV.slice(0, 64));
   });
 
@@ -887,7 +1057,7 @@ describe('GET /api/vault/status: the sealed release and its notice (W8)', () => 
 
 describe('canary routing', () => {
   const RC = 'c'.repeat(96); // the release under test
-  const enrollBody = { request_id: RID, instance_id: 'i-canary', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA };
+  const enrollBody = { vault_id: evid('g1'), request_id: RID, instance_id: 'i-canary', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA };
   const canaryMember = (g = 'g1') => put('members', { ...getItem('members', g), vault_canary: true });
   beforeEach(() => {
     release(R0, 4); // the current release
@@ -1243,7 +1413,7 @@ describe('vault recovery', () => {
   test('a mail failure (SES sandbox) does not fail the request', async () => {
     sesMock.on(SendEmailCommand).rejects(Object.assign(new Error('x'), { name: 'MessageRejected' }));
     await request();
-    expect(logs.join('\n')).toContain('recovery mail failed');
+    expect(logs.join('\n')).toContain('vault mail failed');
   });
 });
 
@@ -1261,8 +1431,9 @@ describe('vault service pause', () => {
     ['POST', '/api/vault/recovery', { browser_key: BK }],
     ['POST', '/api/vault/recovery/register', REGISTER],
   ];
-  const raw = async (method: string, path: string, body?: unknown, query?: Record<string, string>) => vault.handler(ev(method, path, body, { query }));
-  const writes = () => ddb.commandCalls(PutCommand).length + ddb.commandCalls(UpdateCommand).length;
+  const raw = async (method: string, path: string, body?: unknown, query?: Record<string, string>) => vault.handler(build(method, path, body, { query }));
+  // An app request's nonce is recorded by its signature check, which comes first (2.0.0); nothing else is written.
+  const writes = () => ddb.commandCalls(PutCommand).length + ddb.commandCalls(UpdateCommand).filter((c) => !String(c.args[0].input.Key?.key ?? '').startsWith('appnonce#')).length;
 
   beforeEach(() => {
     release(R0, 4);
@@ -1270,7 +1441,13 @@ describe('vault service pause', () => {
     vaultOf('g1', { vault_id: VID, state: 'locked', sealed_release: R0 });
   });
 
+  // register is signed by a claim key, so the vault has a recovery for it.
+  const withRecovery = (path: string) => {
+    if (path.endsWith('/register')) put('vaults', { ...getItem('vaults', VID), recovery: { recovery_id: RID2, state: 'pending', requested_at: NOW - 90_000, available_at: NOW - 3600, expires_at: NOW + 80_000 } });
+  };
+
   test.each(refused)('paused: %s %s → 503 vault_unavailable, service paused, Retry-After; nothing written, queued, started or counted', async (...[method, path, body, query]: [string, string, unknown?, Record<string, string>?]) => {
+    withRecovery(path);
     paused();
     const res = await raw(method, path, body, query);
     expect(res.statusCode).toBe(503);
@@ -1287,6 +1464,7 @@ describe('vault service pause', () => {
   });
 
   test.each(refused)('on: %s %s is not refused by the switch', async (...[method, path, body, query]: [string, string, unknown?, Record<string, string>?]) => {
+    withRecovery(path);
     const res = await raw(method, path, body, query);
     expect(JSON.parse(res.body).service).toBeUndefined();
   });
@@ -1296,10 +1474,16 @@ describe('vault service pause', () => {
     expect((await call('POST', '/api/vault/unlock', { vault_id: 'nope' })).status).toBe(503);
   });
 
-  test('the account checks still come first: a registered user gets 403 terms_required', async () => {
+  test('the account checks still come first: a registered user enrolling gets 403 terms_required', async () => {
     paused();
     put('members', { user_guid: 'g1', email: 'g1@x.org', state: 'registered', account_status: 'active' });
-    expect((await call('GET', '/api/vault/enclave')).body.error).toBe('terms_required');
+    expect((await call('POST', '/api/vault/enroll', { vault_id: VID })).body.error).toBe('terms_required');
+  });
+
+  test('the signature check comes before everything: an unsigned or badly signed app request is 401 even while paused', async () => {
+    paused();
+    const r = await call('POST', '/api/vault/unlock', UNLOCK, { app: { key: keyOf('g1'), vault: VID, tamper: (x) => x.replace('POST', 'PUT') } });
+    expect(r.status).toBe(401);
   });
 
   test('status: served, with service paused (and available when on), with or without a vault', async () => {
@@ -1409,5 +1593,569 @@ describe('vault service pause', () => {
     expect(res.statusCode).toBe(503);
     expect(JSON.parse(res.body).error).toBe('release_starting');
     expect(res.headers['Retry-After']).toBe('30');
+  });
+});
+
+// ---- app request signing (MEMBER-API 2.0.0, VAULT-MESSAGING 0.15.0 §11.12.2) ----------
+
+describe('app request signing', () => {
+  const UNLOCK = { vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA };
+  const app = (extra: Partial<AppSig> = {}): AppSig => ({ key: keyOf('g1'), vault: VID, ...extra });
+  const status = (opts: EvOpts) => call('GET', '/api/vault/status', undefined, opts);
+  beforeEach(() => {
+    release(R0, 4);
+    instance('i-1', R0);
+    vaultOf('g1', { vault_id: VID, state: 'locked', sealed_release: R0 });
+    provision('g1', 'app', keyOf('g1'));
+  });
+
+  test("status with the vault's app key: that vault, no session needed", async () => {
+    const r = await call('GET', '/api/vault/status', undefined, { app: app(), guid: 'nobody' });
+    expect(r.status).toBe(200);
+    expect(r.body.vault.vault_id).toBe(VID);
+  });
+
+  test('a malformed header, or a member missing, repeated or unknown: 401 with no detail', async () => {
+    const good = signHeader('GET', '/api/vault/status', '', '', app());
+    for (const h of [
+      'garbage',
+      good.replace('v=1', 'v=2'),
+      good.replace(/; nonce=[^;]+/, ''),
+      `${good}; extra=1`,
+      good.replace('kid=', 'kid=0'),
+      good.replace(/ts=\d+/, 'ts=0123'),
+      `${good}; sig=AAAA`,
+    ]) {
+      const r = await call('GET', '/api/vault/status', undefined, { headers: { 'x-vettid-app': h } });
+      expect({ h, status: r.status, body: r.body }).toEqual({ h, status: 401, body: { error: 'unauthorized', message: 'Unauthorized' } });
+    }
+  });
+
+  test('ts must be within 300 s of the clock', async () => {
+    expect((await status({ app: app({ ts: NOW - 300 }) })).status).toBe(200);
+    expect((await status({ app: app({ ts: NOW + 300 }) })).status).toBe(200);
+    expect((await status({ app: app({ ts: NOW - 301 }) })).status).toBe(401);
+    expect((await status({ app: app({ ts: NOW + 301 }) })).status).toBe(401);
+  });
+
+  test('a nonce is single use (a captured request cannot be replayed)', async () => {
+    const nonce = randomBytes(16).toString('base64url');
+    expect((await status({ app: app({ nonce }) })).status).toBe(200);
+    expect((await status({ app: app({ nonce }) })).status).toBe(401);
+    // After 600 s the record has expired (and ts would be stale anyway).
+    expect(getItem('rl', `appnonce#${keyOf('g1').kid}#${nonce}`).expires_at).toBe(NOW + 600);
+  });
+
+  test('the signature covers the method, path, query, vault, kid, ts, nonce and body', async () => {
+    for (const tamper of [
+      (x: string) => x.replace('\nGET\n', '\nPOST\n'),
+      (x: string) => x.replace('/api/vault/status', '/api/vault/statuS'),
+      (x: string) => x.replace(`\n${VID}\n`, `\n${'e'.repeat(32)}\n`),
+    ]) expect((await status({ app: app({ tamper }) })).status).toBe(401);
+    // The body: an unlock whose envelope differs from the signed one.
+    const res = await vault.handler({ ...build('POST', '/api/vault/unlock', UNLOCK, { app: app() }), body: JSON.stringify({ ...UNLOCK, request_id: RID2 }) });
+    expect(res.statusCode).toBe(401);
+    // The query.
+    const q = build('GET', '/api/vault/enclave', undefined, { app: app(), query: { release: R0 } });
+    expect((await vault.handler({ ...q, rawQueryString: `release=${R1}`, queryStringParameters: { release: R1 } })).statusCode).toBe(401);
+    expect(sqs.calls()).toHaveLength(0);
+  });
+
+  test("another key, or the key of another member's vault: 401", async () => {
+    vaultOf('g2', { vault_id: 'e'.repeat(32), state: 'locked' });
+    provision('g2', 'app', keyOf('g2'));
+    expect((await status({ app: app({ key: keyOf('stranger') }) })).status).toBe(401);
+    expect((await status({ app: app({ key: keyOf('g2') }) })).status).toBe(401);
+    expect((await status({ app: { key: keyOf('g2'), vault: 'e'.repeat(32) } })).body.vault.vault_id).toBe('e'.repeat(32));
+  });
+
+  test('cookies are ignored and CSRF is not required on an app request', async () => {
+    // A valid session cookie does not rescue a bad signature.
+    expect((await status({ app: app({ key: keyOf('stranger') }), guid: 'g1' })).status).toBe(401);
+    // A signed POST without the CSRF header is served.
+    put('vaults', { ...getItem('vaults', VID), state: 'unlocked', lease: { instance_id: 'i-1', lease_expires_at: NOW + 60 } });
+    const r = await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID }, { app: app(), headers: { 'x-vettid-csrf': '' } });
+    expect(r.status).toBe(202);
+    expect(getItem('requests', RID).app_kid).toBe(keyOf('g1').kid);
+    const a = [...tbl('audit').values()].find((x) => x.action === 'vault.lock_request');
+    expect(a.detail).toMatchObject({ via: 'app', kid: keyOf('g1').kid });
+    // Portal-only routes see no session from an app.
+    expect((await call('POST', '/api/vault/enroll-code', undefined, { app: app() })).status).toBe(401);
+    expect((await call('GET', '/api/vault/recovery', undefined, { app: app() })).status).toBe(401);
+  });
+
+  test('an app polls only the requests its own key made', async () => {
+    expect((await call('POST', '/api/vault/unlock', UNLOCK, { app: app() })).status).toBe(202);
+    jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + 1000);
+    expect((await call('GET', `/api/vault/requests/${RID}`, undefined, { app: app() })).body).toEqual({ status: 'queued' });
+    // The portal (the member's session) may poll it too.
+    expect((await call('GET', `/api/vault/requests/${RID}`)).status).toBe(200);
+    // A slot made by the portal or by another key is not this app's.
+    put('requests', { request_id: RID2, vault_id: VID, user_guid: 'g1', op: 'lock', status: 'done', created_at: new Date(NOW_MS).toISOString(), expires_at: NOW + 800 });
+    jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + 2000);
+    expect((await call('GET', `/api/vault/requests/${RID2}`, undefined, { app: app() })).status).toBe(404);
+  });
+
+  test('the pending key may call enclave, enroll and poll; not unlock, lock or status', async () => {
+    const row = getItem('vaults', VID);
+    delete row.app_key;
+    row.app_key_pending = { key: keyOf('g1').b64, kid: keyOf('g1').kid, until: NOW + 3600 };
+    expect((await call('GET', '/api/vault/enclave', undefined, { app: app() })).status).toBe(200);
+    expect((await status({ app: app() })).status).toBe(401);
+    expect((await call('POST', '/api/vault/unlock', UNLOCK, { app: app() })).status).toBe(401);
+    expect((await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID }, { app: app() })).status).toBe(401);
+  });
+
+  test('once the host reports the pending key as the app key, the pending record is cleared', async () => {
+    const row = getItem('vaults', VID);
+    row.app_key_pending = { key: keyOf('g1').b64, kid: keyOf('g1').kid, until: NOW + 3600 };
+    expect((await status({ app: app() })).status).toBe(200);
+    expect(getItem('vaults', VID).app_key_pending).toBeUndefined();
+    expect(getItem('vaults', VID).app_key.kid).toBe(keyOf('g1').kid); // the host's, untouched
+  });
+
+  test('a vault that is not the member\'s current one: 401', async () => {
+    put('vaults', { vault_id: 'user#g1', current_vault_id: 'e'.repeat(32) });
+    expect((await status({ app: app() })).status).toBe(401);
+  });
+});
+
+// ---- setup codes (MEMBER-API 2.0.0 "Setup codes", VAULT-MESSAGING §11.12.1) -----------
+
+describe('setup codes', () => {
+  const K_CODE = Buffer.alloc(32, 0x4b);
+  const ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+  const newKey = () => keyOf(`app-${randomBytes(4).toString('hex')}`);
+  const issue = async (guid = 'g1') => {
+    const r = await call('POST', '/api/vault/enroll-code', undefined, { guid });
+    expect(r.status).toBe(201);
+    return r.body as { secret: string; code: string; expires_at: string; api: string };
+  };
+  /** A redeem, signed by the key it registers, with an empty vault. */
+  const redeem = (body: Record<string, unknown>, key = newKey(), opts: EvOpts = {}) =>
+    call('POST', '/api/vault/enroll/redeem', { ...body, app_key: key.b64 }, { app: { key, vault: '' }, guid: 'nobody', ...opts });
+  const mails = () => sesMock.commandCalls(SendEmailCommand).map((c) => ({ to: c.args[0].input.Destination!.ToAddresses![0], subject: c.args[0].input.Content!.Simple!.Subject!.Data!, text: c.args[0].input.Content!.Simple!.Body!.Text!.Data! }));
+  const issuances = () => [...tbl('requests').values()].filter((x) => x.op === 'enroll_code');
+  let holds: number[];
+
+  beforeEach(() => {
+    enrollCode.resetEnrollCodeKeyCache();
+    ssm.on(GetParameterCommand, { Name: '/vettid-org/prod/member/enroll-code-key' }).resolves({ Parameter: { Value: K_CODE.toString('base64') } });
+    holds = [];
+    jest.spyOn(vault.timing, 'hold').mockImplementation(async (...a: unknown[]) => void holds.push(a[0] as number));
+    release(R0, 4);
+    instance('i-1', R0);
+  });
+
+  test('issue: a 22-character QR secret, an 8-symbol code, 5 minutes, the API origin; only MACs are stored', async () => {
+    const c = await issue();
+    expect(c.secret).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(Buffer.from(c.secret, 'base64url')).toHaveLength(16);
+    expect(c.code).toMatch(/^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$/);
+    expect(c.expires_at).toBe(new Date((NOW + 300) * 1000).toISOString());
+    expect(c.api).toBe('https://account.vettid.org');
+    const [row] = issuances();
+    expect(row.request_id).toBe(`enroll#${enrollCode.qrMac(K_CODE, c.secret)}`);
+    expect(row).toMatchObject({ user_guid: 'g1', state: 'live', issued_at: NOW, expires_at: NOW + 300, typed_attempts: 0, typed_blocked: false });
+    expect(row.code_mac).toBe(enrollCode.codeMac(K_CODE, 'g1', c.code).toString('hex'));
+    expect(getItem('vaults', 'user#g1')).toMatchObject({ enroll_live: row.request_id });
+    expect(getItem('vaults', 'user#g1')).not.toHaveProperty('user_guid');
+    // Neither secret is stored, audited or logged.
+    const everything = JSON.stringify([...Object.values(db)].map((m) => [...m.values()])) + logs.join('\n');
+    expect(everything).not.toContain(c.secret);
+    expect(everything).not.toContain(c.code);
+    expect([...tbl('audit').values()].map((a) => a.action)).toEqual(['vault.enroll_code_issued']);
+    expect(ssm.commandCalls(GetParameterCommand).find((x) => x.args[0].input.Name === '/vettid-org/prod/member/enroll-code-key')!.args[0].input.WithDecryption).toBe(true);
+  });
+
+  test('issue needs a member with the current terms; a new issuance revokes the old one', async () => {
+    put('members', { user_guid: 'g1', email: 'g1@x.org', state: 'registered', account_status: 'active' });
+    expect((await call('POST', '/api/vault/enroll-code')).body.error).toBe('terms_required');
+    put('members', { user_guid: 'g1', email: 'g1@x.org', state: 'member', account_status: 'active', terms_version: 't0' });
+    expect((await call('POST', '/api/vault/enroll-code')).body.error).toBe('terms_required');
+    put('members', { user_guid: 'g1', email: 'g1@x.org', state: 'member', account_status: 'active', terms_version: 't1' });
+    const first = await issue();
+    const second = await issue();
+    expect(issuances().map((x) => x.state).sort()).toEqual(['live', 'revoked']);
+    expect((await redeem({ secret: first.secret })).body.error).toBe('invalid_code');
+    expect((await redeem({ secret: second.secret })).status).toBe(200);
+  });
+
+  test('issue: 5 per member per hour', async () => {
+    for (let i = 0; i < 5; i++) await issue();
+    expect((await call('POST', '/api/vault/enroll-code')).status).toBe(429);
+  });
+
+  test('GET: the latest issuance, never its secrets; DELETE revokes it', async () => {
+    expect((await call('GET', '/api/vault/enroll-code')).body).toEqual({ enroll_code: null });
+    const c = await issue();
+    const live = (await call('GET', '/api/vault/enroll-code')).body;
+    expect(live).toEqual({ enroll_code: { state: 'live', typed_blocked: false, issued_at: new Date(NOW_MS).toISOString(), expires_at: c.expires_at } });
+    expect(JSON.stringify(live)).not.toContain(c.secret);
+    expect(await call('DELETE', '/api/vault/enroll-code')).toEqual({ status: 200, body: { revoked: true } });
+    expect(await call('DELETE', '/api/vault/enroll-code')).toEqual({ status: 200, body: { revoked: false } });
+    expect((await call('GET', '/api/vault/enroll-code')).body.enroll_code.state).toBe('revoked');
+    expect((await redeem({ secret: c.secret })).body.error).toBe('invalid_code');
+    expect([...tbl('audit').values()].map((a) => a.action)).toContain('vault.enroll_code_revoked');
+    await issue();
+    jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + 300_000);
+    expect((await call('GET', '/api/vault/enroll-code')).body.enroll_code.state).toBe('expired');
+  });
+
+  test('redeem by QR secret: the vault, the pending key, the email, the audit and the answer', async () => {
+    const c = await issue();
+    const key = newKey();
+    const r = await redeem({ secret: c.secret }, key);
+    expect(r.status).toBe(200);
+    const vid = r.body.vault_id;
+    expect(r.body).toEqual({ vault_id: vid, user_guid: 'g1', email_hint: 'g***@x.org' });
+    expect(vid).toMatch(/^[0-9a-f]{32}$/);
+    expect(getItem('vaults', vid)).toMatchObject({ vault_id: vid, user_guid: 'g1', state: 'enrolling', app_key_pending: { key: key.b64, kid: key.kid, until: NOW + 3600 } });
+    expect(getItem('vaults', vid)).not.toHaveProperty('app_key'); // only the host writes it
+    expect(getItem('vaults', 'user#g1')).toMatchObject({ current_vault_id: vid, enroll_live: issuances()[0].request_id });
+    expect(issuances()[0]).toMatchObject({ state: 'used', used_at: NOW, used_via: 'qr' });
+    expect(mails()).toEqual([expect.objectContaining({ to: 'g1@x.org', subject: 'VettID: your setup code was used', text: expect.stringContaining(`A phone used your setup code at ${new Date(NOW_MS).toISOString()} to set up your VettID vault.`) })]);
+    const a = [...tbl('audit').values()].find((x) => x.action === 'vault.enroll_code_redeemed');
+    expect(a.detail).toEqual({ vault_id: vid, kid: key.kid, via: 'qr' });
+    // Single use, both forms.
+    expect((await redeem({ secret: c.secret })).body).toMatchObject({ error: 'invalid_code', code: 'invalid_code' });
+    expect((await redeem({ email: 'g1@x.org', code: c.code })).status).toBe(404);
+    expect((await call('GET', '/api/vault/enroll-code')).body.enroll_code).toMatchObject({ state: 'used', used_at: new Date(NOW_MS).toISOString() });
+    // The pending key now enrolls into that vault.
+    const enroll = await call('POST', '/api/vault/enroll', { vault_id: vid, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA }, { app: { key, vault: vid } });
+    expect(enroll.status).toBe(202);
+    expect(sent()[0].msg.app_key).toBe(key.b64);
+  });
+
+  test('redeem typed: email and code normalised; compared with that member only; held to 250 ms', async () => {
+    const c = await issue();
+    const typed = `${c.code.slice(0, 4).toLowerCase()} - ${c.code.slice(4).toLowerCase()}`;
+    const r = await redeem({ email: '  G1@X.org ', code: typed });
+    expect(r.status).toBe(200);
+    expect(r.body.user_guid).toBe('g1');
+    expect(issuances()[0]).toMatchObject({ state: 'used', used_via: 'typed', typed_attempts: 1 });
+    expect(holds).toEqual([250]);
+  });
+
+  test("no account oracle: every typed failure is the same 404 invalid_code, after the same work and hold", async () => {
+    const c = await issue();
+    const other = await issue('g2');
+    const cases: [string, Record<string, unknown>][] = [
+      ['wrong code', { email: 'g1@x.org', code: c.code === '22222222' ? '33333333' : '22222222' }],
+      ["another member's code", { email: 'g1@x.org', code: other.code }],
+      ['unknown email', { email: 'nobody@x.org', code: c.code }],
+      ['malformed code', { email: 'g1@x.org', code: 'I0O1L' }],
+      ['empty email', { email: '', code: c.code }],
+    ];
+    const answers = [];
+    for (const [, body] of cases) {
+      const r = await redeem(body, newKey(), { headers: { 'cloudfront-viewer-address': `203.0.113.${answers.length + 1}:443` } });
+      answers.push(r);
+    }
+    for (const r of answers) expect(r).toEqual({ status: 404, body: { error: 'invalid_code', code: 'invalid_code', message: 'This setup code is not valid. Get a new code on the account site.' } });
+    expect(holds).toEqual([250, 250, 250, 250, 250]);
+    // The members were looked up for every email (the same work).
+    expect(ddb.commandCalls(QueryCommand).filter((q) => q.args[0].input.IndexName === 'email-index').length).toBe(4);
+    // Counted on the issuance, or on the per-email counter for an email without one.
+    expect(issuances().find((x) => x.user_guid === 'g1').typed_attempts).toBe(3);
+    expect(issuances().find((x) => x.user_guid === 'g2').typed_attempts).toBe(0);
+    // Nothing of what was typed is logged or audited.
+    expect(logs.join('\n')).not.toContain('nobody@x.org');
+    expect(JSON.stringify([...tbl('audit').values()])).not.toContain('nobody@x.org');
+    const failed = [...tbl('audit').values()].filter((a) => a.action === 'vault.enroll_code_failed');
+    expect(failed.length).toBeGreaterThan(0);
+    // The code still works for the right member.
+    expect((await redeem({ email: 'g1@x.org', code: c.code })).status).toBe(200);
+  });
+
+  test('expired, revoked and blocked issuances: 404 invalid_code', async () => {
+    const c = await issue();
+    jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + 300_000);
+    expect((await redeem({ secret: c.secret })).status).toBe(404);
+    expect((await redeem({ email: 'g1@x.org', code: c.code })).status).toBe(404);
+    jest.spyOn(Date, 'now').mockReturnValue(NOW_MS);
+    const d = await issue();
+    await call('DELETE', '/api/vault/enroll-code');
+    expect((await redeem({ email: 'g1@x.org', code: d.code })).status).toBe(404);
+    // A canceled or suspended account: the code is not redeemable.
+    const e = await issue();
+    put('members', { ...getItem('members', 'g1'), account_status: 'suspended' });
+    expect((await redeem({ secret: e.secret })).status).toBe(404);
+  });
+
+  test('typed: 5 per (email, network) per 5 minutes, for unknown emails too', async () => {
+    for (const email of ['g1@x.org', 'nobody@x.org']) {
+      for (let i = 0; i < 5; i++) expect((await redeem({ email, code: '22222222' }, newKey(), { headers: { 'cloudfront-viewer-address': '198.51.100.9:443' } })).status).toBe(404);
+      const r = await redeem({ email, code: '22222222' }, newKey(), { headers: { 'cloudfront-viewer-address': '198.51.100.9:443' } });
+      expect(r).toMatchObject({ status: 429, body: { error: 'rate_limited' } });
+      // Another network may still try.
+      expect((await redeem({ email, code: '22222222' }, newKey(), { headers: { 'cloudfront-viewer-address': '198.51.100.10:443' } })).status).toBe(404);
+    }
+  });
+
+  test('both forms, per source network: 30 per 5 minutes per IPv4 address, 10 per IPv6 /64', async () => {
+    const v4 = { headers: { 'cloudfront-viewer-address': '198.51.100.7:443' } };
+    put('rl', { key: `enroll-redeem-net#198.51.100.7#${NOW - (NOW % 300)}`, count: 29 });
+    expect((await redeem({ secret: 'A'.repeat(22) }, newKey(), v4)).status).toBe(404);
+    expect((await redeem({ secret: 'A'.repeat(22) }, newKey(), v4)).status).toBe(429);
+    put('rl', { key: `enroll-redeem-net#2001:0db8:0001:0002::/64#${NOW - (NOW % 300)}`, count: 9 });
+    expect((await redeem({ secret: 'A'.repeat(22) })).status).toBe(404);
+    expect((await redeem({ secret: 'A'.repeat(22) })).status).toBe(429);
+  });
+
+  test('the 800th typed attempt blocks typed entry for that issuance only: alarm, email, audit; the QR still works', async () => {
+    const c = await issue();
+    issuances()[0].typed_attempts = 799;
+    const wrong = c.code === '22222222' ? '33333333' : '22222222';
+    expect((await redeem({ email: 'g1@x.org', code: wrong })).status).toBe(404);
+    expect(issuances()[0]).toMatchObject({ typed_attempts: 800, typed_blocked: true, state: 'live' });
+    const emf = logs.map((l) => { try { return JSON.parse(l); } catch { return null; } }).find((x) => x?.EnrollTypedCeiling === 1);
+    expect(emf._aws.CloudWatchMetrics[0]).toMatchObject({ Namespace: 'VettID/MemberApi', Metrics: [{ Name: 'EnrollTypedCeiling', Unit: 'Count' }] });
+    expect(mails().map((m) => m.text)).toEqual([expect.stringContaining('Someone tried many wrong codes for your account. Scan the QR code instead, or get a new code.')]);
+    expect([...tbl('audit').values()].find((a) => a.action === 'vault.enroll_code_typed_blocked').detail).toEqual({ issued_at: new Date(NOW_MS).toISOString() });
+    expect((await call('GET', '/api/vault/enroll-code')).body.enroll_code.typed_blocked).toBe(true);
+    // Even the right code, typed, now fails like any other; nothing more is counted or mailed.
+    expect((await redeem({ email: 'g1@x.org', code: c.code }, newKey(), { headers: { 'cloudfront-viewer-address': '203.0.113.1:443' } })).status).toBe(404);
+    expect(issuances()[0].typed_attempts).toBe(800);
+    expect(mails()).toHaveLength(1);
+    // Another member is unaffected, and so is this member's QR.
+    const other = await issue('g2');
+    expect((await redeem({ email: 'g2@x.org', code: other.code }, newKey(), { headers: { 'cloudfront-viewer-address': '203.0.113.2:443' } })).status).toBe(200);
+    expect((await redeem({ secret: c.secret }, newKey(), { headers: { 'cloudfront-viewer-address': '203.0.113.3:443' } })).status).toBe(200);
+  });
+
+  test('exactly one form, else 400; the request must be signed by app_key with an empty vault', async () => {
+    const c = await issue();
+    for (const body of [{}, { secret: c.secret, email: 'g1@x.org', code: c.code }, { secret: c.secret, code: c.code }, { email: 'g1@x.org' }, { email: 'g1@x.org', code: 7 }]) {
+      expect({ body, status: (await redeem(body)).status }).toEqual({ body, status: 400 });
+    }
+    const key = newKey();
+    // Signed by another key than app_key, with a vault, without a header, or with a malformed app_key: 401.
+    expect((await call('POST', '/api/vault/enroll/redeem', { secret: c.secret, app_key: key.b64 }, { app: { key: newKey(), vault: '' } })).status).toBe(401);
+    expect((await call('POST', '/api/vault/enroll/redeem', { secret: c.secret, app_key: key.b64 }, { app: { key, vault: VID } })).status).toBe(401);
+    expect((await call('POST', '/api/vault/enroll/redeem', { secret: c.secret, app_key: key.b64 })).status).toBe(401);
+    expect((await call('POST', '/api/vault/enroll/redeem', { secret: c.secret, app_key: 'AAAA' }, { app: { key, vault: '' } })).status).toBe(401);
+    expect(issuances()[0].state).toBe('live');
+  });
+
+  test('an existing vault: the pending key goes on it (the enclave decides); a deleted one gets a fresh vault_id', async () => {
+    vaultOf('g1', { vault_id: VID, state: 'locked', sealed_release: R0, app_key: { key: keyOf('g1').b64, kid: keyOf('g1').kid, seq: 1 } });
+    const key = newKey();
+    const r = await redeem({ secret: (await issue()).secret }, key);
+    expect(r.body.vault_id).toBe(VID);
+    expect(getItem('vaults', VID).app_key_pending.kid).toBe(key.kid);
+    expect(getItem('vaults', VID).app_key.kid).toBe(keyOf('g1').kid); // never replaced by the API
+    put('vaults', { ...getItem('vaults', VID), state: 'deleted' });
+    const fresh = await redeem({ secret: (await issue()).secret });
+    expect(fresh.body.vault_id).not.toBe(VID);
+    expect(getItem('vaults', 'user#g1').current_vault_id).toBe(fresh.body.vault_id);
+    // After the deletion notice removed the rows (§12.5) too.
+    tbl('vaults').delete(fresh.body.vault_id);
+    tbl('vaults').delete('user#g1');
+    const again = await redeem({ secret: (await issue()).secret });
+    expect(again.status).toBe(200);
+    expect(again.body.vault_id).not.toBe(fresh.body.vault_id);
+  });
+
+  test('paused: issue and redeem refused before anything is spent, counted or written; read and revoke served', async () => {
+    const c = await issue();
+    paused();
+    vaultService.resetVaultServiceCache();
+    const before = JSON.stringify(issuances());
+    for (const body of [{ secret: c.secret }, { email: 'g1@x.org', code: c.code }]) {
+      const res = await vault.handler(build('POST', '/api/vault/enroll/redeem', { ...body, app_key: keyOf('p').b64 }, { app: { key: keyOf('p'), vault: '' } }));
+      expect(res.statusCode).toBe(503);
+      expect(res.headers['Retry-After']).toBe('300');
+      expect(JSON.parse(res.body)).toMatchObject({ error: 'vault_unavailable', service: 'paused' });
+    }
+    expect(JSON.stringify(issuances())).toBe(before);
+    expect(mails()).toHaveLength(0);
+    expect([...tbl('rl').keys()].filter((k) => /^enroll-(redeem|typed|fail)/.test(k))).toEqual([]);
+    expect((await call('POST', '/api/vault/enroll-code')).body).toMatchObject({ error: 'vault_unavailable', service: 'paused' });
+    expect(issuances()).toHaveLength(1);
+    expect((await call('GET', '/api/vault/enroll-code')).body.enroll_code.state).toBe('live');
+    expect((await call('DELETE', '/api/vault/enroll-code')).body).toEqual({ revoked: true });
+  });
+
+  test('a missing k_code fails closed (500), and nothing is issued', async () => {
+    enrollCode.resetEnrollCodeKeyCache();
+    ssm.on(GetParameterCommand, { Name: '/vettid-org/prod/member/enroll-code-key' }).rejects(Object.assign(new Error('nf'), { name: 'ParameterNotFound' }));
+    expect((await call('POST', '/api/vault/enroll-code')).status).toBe(500);
+    expect(issuances()).toHaveLength(0);
+  });
+
+  test('the typed code is uniform over the 31-symbol alphabet (rejection sampling)', () => {
+    // Bytes 248-255 are skipped; 0..247 map onto the alphabet 8 times each.
+    const bytes = Buffer.from([255, 248, 0, 30, 31, 247, 249, 61, 62, 100, 200]);
+    expect(enrollCode.newTypedCode(() => bytes)).toBe([0, 30, 31, 247, 61, 62, 100, 200].map((b) => ALPHABET[b % 31]).join(''));
+    const counts = new Map<string, number>();
+    for (let i = 0; i < 4000; i++) for (const ch of enrollCode.newTypedCode()) counts.set(ch, (counts.get(ch) ?? 0) + 1);
+    expect([...counts.keys()].sort().join('')).toBe(ALPHABET);
+    for (const n of counts.values()) expect(n).toBeGreaterThan(32_000 / 31 * 0.8);
+  });
+});
+
+// ---- recovery claim (MEMBER-API 2.0.0, VAULT-MESSAGING 0.15.0 §11.11.7) ----------------
+
+describe('recovery claim and the recovering key', () => {
+  const BK = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64');
+  const newApp = keyOf('new-phone');
+  const claim = (body: Record<string, unknown>, key = newApp, vault = VID) =>
+    call('POST', '/api/vault/recovery/claim', { ...body, app_key: key.b64 }, { app: { key, vault }, guid: 'nobody' });
+  const at = (s: number) => {
+    jest.spyOn(Date, 'now').mockReturnValue(s * 1000);
+    for (const i of tbl('instances').values()) i.heartbeat_at = s - 10;
+  };
+  const REG = { vault_id: VID, request_id: RID2, instance_id: 'i-1', etk_kid: KID, envelope: ENV };
+  const UNLOCK = { vault_id: VID, request_id: '01JB2Z6V9K3M4N5P6Q7R8S9T0X', instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA };
+  let rid: string;
+
+  beforeEach(async () => {
+    release(R0, 4);
+    instance('i-1', R0);
+    vaultOf('g1', { vault_id: VID, state: 'locked', sealed_release: R0, app_key: { key: keyOf('old-phone').b64, kid: keyOf('old-phone').kid, seq: 1 } });
+    rid = (await call('POST', '/api/vault/recovery', { browser_key: BK })).body.recovery_id;
+    Object.assign(getItem('requests', rid), { status: 'done', envelope: Buffer.alloc(5_252, 3).toString('base64') });
+  });
+
+  test('only while available: pending → 409 recovery_not_available; an unknown pair → 404', async () => {
+    expect((await claim({ vault_id: VID, recovery_id: rid })).body).toMatchObject({ error: 'recovery_not_available' });
+    at(NOW + 86_400 + 5);
+    expect((await claim({ vault_id: VID, recovery_id: RID })).status).toBe(404);
+    expect((await claim({ vault_id: 'e'.repeat(32), recovery_id: rid }, newApp, 'e'.repeat(32))).status).toBe(404);
+    // The body must name the vault the request is signed for.
+    expect((await claim({ vault_id: 'e'.repeat(32), recovery_id: rid })).status).toBe(400);
+  });
+
+  test('claim → register → recovery_registered → the recovering key unlocks; the host reports it → keys cleared', async () => {
+    at(NOW + 86_400 + 5);
+    const r = await claim({ vault_id: VID, recovery_id: rid });
+    expect(r).toEqual({ status: 200, body: { user_guid: 'g1', email_hint: 'g***@x.org' } });
+    expect(getItem('vaults', VID).recovery.claim_keys).toEqual([{ key: newApp.b64, kid: newApp.kid }]);
+    expect([...tbl('audit').values()].find((a) => a.action === 'vault.recovery_claim').detail).toEqual({ vault_id: VID, recovery_id: rid, kid: newApp.kid });
+    // A claim key: enclave and register, not unlock or status.
+    const signed = { app: { key: newApp, vault: VID } };
+    expect((await call('GET', '/api/vault/enclave', undefined, signed)).status).toBe(200);
+    expect((await call('GET', '/api/vault/status', undefined, signed)).status).toBe(401);
+    expect((await call('POST', '/api/vault/unlock', UNLOCK, signed)).status).toBe(401);
+    expect((await call('POST', '/api/vault/recovery/register', REG, signed)).status).toBe(202);
+    const m = sent().pop()!;
+    expect(m.msg).toMatchObject({ op: 'recovery_register', app_key: newApp.b64 });
+    expect(Object.keys(m.msg)).toEqual(['v', 'op', 'vault_id', 'user_guid', 'request_id', 'etk_kid', 'envelope', 'app_key', 'enqueued_at']);
+    expect(getItem('requests', RID2)).toMatchObject({ recovery_id: rid, app_kid: newApp.kid });
+    // The old phone's key is not a claim key.
+    expect((await call('POST', '/api/vault/recovery/register', { ...REG, request_id: RID }, { app: { key: keyOf('old-phone'), vault: VID } })).status).toBe(401);
+    // The enclave accepts it.
+    Object.assign(getItem('requests', RID2), { status: 'done', envelope: Buffer.alloc(5_252, 4).toString('base64'), code: 'recovery_registered' });
+    at(NOW + 86_400 + 7);
+    expect((await call('GET', `/api/vault/requests/${RID2}`, undefined, signed)).body.code).toBe('recovery_registered');
+    expect(getItem('vaults', VID).recovery).toMatchObject({ state: 'registered', recovering_key: { key: newApp.b64, kid: newApp.kid } });
+    // The recovering key may unlock, read status and lock while the recovery is active.
+    expect((await call('GET', '/api/vault/status', undefined, signed)).body.vault.recovery.state).toBe('registered');
+    expect((await call('POST', '/api/vault/unlock', UNLOCK, signed)).status).toBe(202);
+    // The old phone still unlocks too until the enclave reports the new app key.
+    expect((await call('GET', '/api/vault/status', undefined, { app: { key: keyOf('old-phone'), vault: VID } })).status).toBe(200);
+    // The host writes the new key: the old key is refused, the recovery's keys are cleared.
+    getItem('vaults', VID).app_key = { key: newApp.b64, kid: newApp.kid, seq: 2 };
+    expect((await call('GET', '/api/vault/status', undefined, { app: { key: keyOf('old-phone'), vault: VID } })).status).toBe(401);
+    expect((await call('GET', '/api/vault/status', undefined, signed)).status).toBe(200);
+    expect(getItem('vaults', VID).recovery.claim_keys).toBeUndefined();
+    expect(getItem('vaults', VID).recovery.recovering_key).toBeUndefined();
+  });
+
+  test('at most 10 claim keys; the oldest goes; 10 claims per vault per day', async () => {
+    at(NOW + 86_400 + 5);
+    const keys = Array.from({ length: 10 }, (_, i) => keyOf(`claimer-${i}`));
+    for (const [i, k] of keys.entries()) {
+      expect((await claim({ vault_id: VID, recovery_id: rid }, k)).status).toBe(200);
+      if (i === 0) expect(getItem('vaults', VID).recovery.claim_keys).toHaveLength(1);
+    }
+    expect(getItem('vaults', VID).recovery.claim_keys.map((k: any) => k.kid)).toEqual(keys.map((k) => k.kid));
+    expect((await claim({ vault_id: VID, recovery_id: rid }, keyOf('claimer-10'))).status).toBe(429);
+    getItem('vaults', VID).recovery.claim_keys = keys.slice(0, 10).map((k) => ({ key: k.b64, kid: k.kid }));
+    jest.spyOn(Date, 'now').mockReturnValue((NOW + 2 * 86_400 - 60) * 1000); // next day's window, recovery still available
+    for (const i of tbl('instances').values()) i.heartbeat_at = NOW + 2 * 86_400 - 70;
+    expect((await claim({ vault_id: VID, recovery_id: rid }, keyOf('claimer-10'))).status).toBe(200);
+    expect(getItem('vaults', VID).recovery.claim_keys.map((k: any) => k.kid)).toEqual([...keys.slice(1), keyOf('claimer-10')].map((k) => k.kid));
+  });
+
+  test('paused: claim refused before the body is read; no claim key written', async () => {
+    at(NOW + 86_400 + 5);
+    paused();
+    vaultService.resetVaultServiceCache();
+    const r = await call('POST', '/api/vault/recovery/claim', { app_key: newApp.b64 }, { app: { key: newApp, vault: VID }, guid: 'nobody' });
+    expect(r.body).toMatchObject({ error: 'vault_unavailable', service: 'paused' });
+    expect(getItem('vaults', VID).recovery.claim_keys).toBeUndefined();
+  });
+});
+
+// ---- the staging-only switch-over (ENROLLMENT-CODES §8 step 3) ---------------------------
+
+describe('legacy sessions on the app routes (staging switch-over)', () => {
+  beforeEach(() => {
+    process.env.VAULT_LEGACY_SESSION_AUTH = '1';
+    release(R0, 4);
+    instance('i-1', R0);
+  });
+  afterEach(() => {
+    delete process.env.VAULT_LEGACY_SESSION_AUTH;
+  });
+
+  test('a session enrolls and unlocks as before 2.0.0 (terms required; no app_key in the message)', async () => {
+    expect((await call('GET', '/api/vault/enclave', undefined, { session: true })).status).toBe(200);
+    const r = await call('POST', '/api/vault/enroll', { request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA }, { session: true });
+    expect(r.status).toBe(202);
+    expect(sent()[0].msg.app_key).toBeUndefined();
+    expect(getItem('vaults', 'user#g1').current_vault_id).toBe(r.body.vault_id);
+    put('members', { user_guid: 'g1', email: 'g1@x.org', state: 'registered', account_status: 'active' });
+    expect((await call('GET', '/api/vault/enclave', undefined, { session: true })).body.error).toBe('terms_required');
+  });
+
+  test('signed requests work alongside', async () => {
+    expect((await call('GET', '/api/vault/enclave')).status).toBe(200);
+  });
+});
+
+// ---- the account snapshot to a running vault (lambda/jobs/vault-account-push.ts) -------
+
+describe('account push', () => {
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const push = require('../../lambda/jobs/vault-account-push');
+  /* eslint-enable */
+  beforeEach(() => {
+    release(R0, 4);
+    instance('i-1', R0);
+  });
+
+  test('to the live leaseholder only: a slot and the op account with the snapshot', async () => {
+    vaultOf('g1', { vault_id: VID, state: 'unlocked', lease: { instance_id: 'i-1', lease_expires_at: NOW + 60 } });
+    put('members', { ...getItem('members', 'g1'), account_status: 'canceled', delete_after: '2026-10-09T12:00:00.000Z' });
+    expect(await push.handler({ user_guid: 'g1' })).toEqual({ sent: true });
+    const [m] = sent();
+    expect(m.url).toBe(QUEUE_PREFIX + 'i-1');
+    expect(Object.keys(m.msg)).toEqual(['v', 'op', 'vault_id', 'user_guid', 'request_id', 'account', 'enqueued_at']);
+    expect(m.msg).toMatchObject({ v: 1, op: 'account', vault_id: VID, user_guid: 'g1', account: { account_status: 'canceled', deletes_at: '2026-10-09T12:00:00.000Z', email_hint: 'g***@x.org' } });
+    expect(getItem('requests', m.msg.request_id)).toMatchObject({ op: 'account', status: 'queued', vault_id: VID, instance_id: 'i-1' });
+    expect(tbl('audit').size).toBe(0);
+  });
+
+  test('no live lease, no vault, a deleted vault or a suspended account: nothing is sent or started', async () => {
+    expect(await push.handler({ user_guid: 'g1' })).toEqual({ sent: false });
+    vaultOf('g1', { vault_id: VID, state: 'locked', sealed_release: R0 });
+    expect(await push.handler({ user_guid: 'g1' })).toEqual({ sent: false });
+    put('vaults', { ...getItem('vaults', VID), state: 'unlocked', lease: { instance_id: 'i-1', lease_expires_at: NOW - 1 } });
+    expect(await push.handler({ user_guid: 'g1' })).toEqual({ sent: false });
+    put('vaults', { ...getItem('vaults', VID), lease: { instance_id: 'i-1', lease_expires_at: NOW + 60 } });
+    put('members', { ...getItem('members', 'g1'), account_status: 'suspended' });
+    expect(await push.handler({ user_guid: 'g1' })).toEqual({ sent: false });
+    expect(await push.handler({ user_guid: '../x' })).toEqual({ sent: false });
+    expect(sqs.calls()).toHaveLength(0);
+    expect(getItem('releases', R0).start_requests).toBeUndefined();
+  });
+
+  test('sent while the vault service is paused (it reaches only a running vault)', async () => {
+    paused();
+    vaultOf('g1', { vault_id: VID, state: 'unlocked', lease: { instance_id: 'i-1', lease_expires_at: NOW + 60 } });
+    expect(await push.handler({ user_guid: 'g1' })).toEqual({ sent: true });
   });
 });

@@ -10,7 +10,7 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as sources from 'aws-cdk-lib/aws-lambda-event-sources';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
-import { AppConfig, ORG, hostName, resourceName, vaultServiceParamName } from '../config';
+import { AppConfig, ORG, accountPushFunctionName, enrollCodeKeyParamName, hostName, resourceName, vaultServiceParamName } from '../config';
 import { ApiFunction } from '../constructs/api-function';
 import { HttpRouteGroup } from '../constructs/route-group';
 import { publishRef, readRef } from '../constructs/ssm-refs';
@@ -214,12 +214,60 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
       fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['ssm:GetParameter'], resources: [switchParamArn] }));
     };
     readSwitch(vault);
-    g(vault, 'members', ['GetItem']);
+    // GetItem by user_guid; Query on email-index for a typed setup code
+    // (the member is found by the email typed with it, MEMBER-API 2.0.0).
+    g(vault, 'members', ['GetItem', 'Query'], true);
     g(vault, 'terms', ['Query'], true);
-    g(vault, 'ratelimits', ['UpdateItem']);
+    g(vault, 'subscriptions', ['GetItem']); // the account snapshot in each unlock (§11.13)
+    g(vault, 'ratelimits', ['UpdateItem']); // counters and the app requests' single-use nonces
     g(vault, 'audit', ['PutItem']);
     vaultGrants(vault, 'vault');
-    vault.addToRolePolicy(sesSend); // recovery notices (VAULT-MESSAGING §11.11)
+    vault.addToRolePolicy(sesSend); // recovery notices (VAULT-MESSAGING §11.11), setup-code emails
+    // k_code (MEMBER-API 2.0.0 "Setup codes"): the HMAC key of the setup
+    // codes, an SSM SecureString an operator creates once (RUNBOOK "Setup
+    // codes"). Read here only; the AWS-managed aws/ssm key decrypts it for
+    // any principal of the account allowed to read the parameter.
+    const enrollKeyParam = enrollCodeKeyParamName(config);
+    vault.addEnvironment('ENROLL_CODE_KEY_PARAM', enrollKeyParam);
+    vault.addToRolePolicy(new iam.PolicyStatement({ actions: ['ssm:GetParameter'], resources: [`arn:${this.partition}:ssm:${this.region}:${this.account}:parameter${enrollKeyParam}`] }));
+    // The staging-only switch-over (ENROLLMENT-CODES §8 step 3; never in production, lib/config.ts).
+    if (config.vaultLegacySessionAuth) {
+      if (config.stage === 'prod') throw new Error('vaultLegacySessionAuth is staging-only');
+      vault.addEnvironment('VAULT_LEGACY_SESSION_AUTH', '1');
+    }
+
+    // A member's typed setup-code entry reached its ceiling of 800 attempts
+    // (MEMBER-API 2.0.0 "Setup codes"): the vault Lambda writes
+    // EnrollTypedCeiling (EMF) when it blocks an issuance's typed entry.
+    const typedCeiling = new cloudwatch.Alarm(this, 'MemberEnrollTypedCeiling', {
+      alarmName: resourceName(config, 'member-enroll-typed-ceiling'),
+      alarmDescription: "MemberEnrollTypedCeiling: a member's setup code got 800 wrong typed attempts and its typed entry is blocked (the QR still works; the member was emailed). Someone is guessing one member's code (RUNBOOK \"Setup codes\").",
+      metric: new cloudwatch.Metric({ namespace: 'VettID/MemberApi', metricName: 'EnrollTypedCeiling', statistic: 'Sum', period: cdk.Duration.minutes(5) }),
+      threshold: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      evaluationPeriods: 1,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+
+    // The account snapshot to a running vault (MEMBER-API 2.0.0, VAULT-MESSAGING
+    // 0.15.0 §11.13): invoked asynchronously by the account routes and the
+    // admin API after a change; sends the op `account` to the vault's live
+    // leaseholder only. Fixed role name (the vault account's policies name
+    // it) and function name (the admin API invokes it by name).
+    const accountPush = new ApiFunction(this, 'VaultAccountPush', {
+      entry: 'lambda/jobs/vault-account-push.ts',
+      environment: env,
+      timeout: cdk.Duration.seconds(30),
+      functionName: accountPushFunctionName(config),
+      roleName: vaultApiRoleName(config, 'account-push'),
+      description: "Sends a member's account snapshot to their running vault (queue op account)",
+    }).fn;
+    g(accountPush, 'members', ['GetItem']);
+    g(accountPush, 'subscriptions', ['GetItem']);
+    g(accountPush, 'terms', ['Query'], true);
+    vaultGrants(accountPush, 'account-push');
+    accountPush.grantInvoke(account);
+    account.addEnvironment('ACCOUNT_PUSH_FN', accountPush.functionName);
 
     // ---- background jobs --------------------------------------------------------
     const job = (id: string, entry: string, timeout = cdk.Duration.minutes(5), roleName?: string) =>
@@ -356,6 +404,7 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
       const alertsTopicArn = `arn:${this.partition}:sns:${this.region}:${this.account}:${resourceName(config, 'security-alerts')}`;
       const action = { bind: () => ({ alarmActionArn: alertsTopicArn }) };
       for (const a of pausedAlarms) a.addAlarmAction(action);
+      typedCeiling.addAlarmAction(action);
       pausedAlarms[0].addOkAction(action); // "resumed"; the 24 h alarm's OK would say it twice
       watchSilent.addAlarmAction(action);
       watchSilent.addOkAction(action); // the watch is back

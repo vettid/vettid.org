@@ -1,9 +1,10 @@
 // The account page's Vault tab (MEMBER-API "Vault"): the vault's status as
 // the vault service last recorded it (GET /api/vault/status), its release
 // and any release notice, a lock button, and — with no vault yet — how to
-// set one up in the Android app. Enrollment, unlock and release approval
-// happen only in the app; this site never asks for the vault PIN or the
-// credential password.
+// set one up: "Set up your vault" leads to the setup page, which issues the
+// setup code the Android app redeems (MEMBER-API 2.0.0; the app never signs
+// in). Enrollment, unlock and release approval happen only in the app; this
+// site never asks for the vault PIN or the credential password.
 
 import { get, post } from './api.js';
 import { newUlid } from './recovery-code.js';
@@ -13,6 +14,10 @@ import * as ui from './ui.js';
 import { dateTime, releaseNotice, releaseStatus, servicePaused, vaultState } from './vault-text.js';
 
 const RECOVERY_PAGE = '/account/vault/recovery/';
+const SETUP_PAGE = '/account/vault/setup/';
+
+/** "Set up your vault" (2.0.0): not offered while the vault service is paused. */
+const setupLink = (label) => (servicePaused(status) ? null : el('a', { class: 'btn btn-primary', href: SETUP_PAGE }, label));
 
 let getMe = () => null;
 let reveal = () => {};
@@ -106,9 +111,9 @@ function renderStatus() {
       sectionHead('h-vault', 'Your vault'),
       pausedNotice(),
       el('p', {}, chip('Setting up', 'warn'), ' ', "Your vault's setup isn't finished."),
-      el('p', {}, 'Finish it in the VettID app on your phone. If setup stopped, open the app and choose Try again.'),
+      el('p', {}, 'Finish it in the VettID app on your phone. If setup stopped, open the app and choose Try again; if the app asks for a new setup code, get one here.'),
       neverAsk(),
-      el('div', { class: 'actions' }, refreshButton()),
+      el('div', { class: 'actions' }, setupLink('Get a new setup code'), refreshButton()),
     );
     return;
   }
@@ -230,7 +235,7 @@ function renderEnrollment(sec) {
   if (c.staging) {
     getApp = [
       callout('warn', 'This is the staging site',
-        `Use the VettID Staging app, the test build: its name says Staging and its welcome screen says STAGING build. It signs in to ${location.host}. The production app doesn't work with this site.`),
+        `Use the VettID Staging app, the test build: its name says Staging and its welcome screen says STAGING build. It takes setup codes from ${location.host}. The production app doesn't work with this site.`),
       c.androidAppUrl
         ? el('div', { class: 'actions' }, el('a', { class: 'btn btn-primary', href: c.androidAppUrl, rel: 'noopener noreferrer' }, 'Get the VettID Staging app'))
         : el('p', {}, 'Ask the VettID team for the staging build.'),
@@ -255,17 +260,17 @@ function renderEnrollment(sec) {
     getApp,
     el('h3', { class: 'h3-gap' }, 'Set up your vault in the app'),
     el('ol', { class: 'howto' },
-      el('li', {}, el('strong', {}, 'Install and open the app.')),
-      el('li', {}, el('strong', {}, 'Sign in. '), 'Enter the email address of this account and open the sign-in link we email you on your phone. If your account has a sign-in PIN, the app asks for it too.'),
+      el('li', {}, el('strong', {}, 'Install and open the app. '), "You don't sign in to the app: it connects to this account with a setup code."),
+      el('li', {}, el('strong', {}, 'Get a setup code here. '), "Choose Set up your vault below. Scan the code's QR with the app, or type its 8 characters with this account's email address. A code works once, for 5 minutes."),
       el('li', {}, el('strong', {}, 'Choose your vault PIN. '), "It unlocks your vault and isn't your sign-in PIN. Use at least 6 digits; avoid dates and simple patterns. Only your vault's sealed enclave ever checks it."),
       el('li', {}, el('strong', {}, 'Create your credential password. '), 'It protects your Protean Credential and your critical items, and the app asks for it at every critical action. Nobody, VettID included, can reset it.'),
       el('li', {}, el('strong', {}, 'Choose your backup. '), 'With the sealed backup on (recommended), your vault keeps a copy sealed to it and to your password, so a recovery can restore your credential if you lose your phone. With it off, your credential lives only on your phone: losing the phone loses your credential and every critical item.'),
     ),
     ready ? null : el('p', { class: 'next-step' }, member
-      ? 'Accept the current membership terms first: the app checks them before it sets up a vault.'
+      ? 'Accept the current membership terms first: a setup code needs them.'
       : 'Become a member first: accept the membership terms in the Membership tab.'),
     neverAsk(),
-    el('div', { class: 'actions' }, refreshButton()),
+    el('div', { class: 'actions' }, ready ? setupLink('Set up your vault') : null, refreshButton()),
   );
 }
 

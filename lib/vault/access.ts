@@ -22,8 +22,8 @@ import { AppConfig, VaultConfig, resourceName } from '../config';
 export const VAULT_TABLES = ['vaults', 'vault-instances', 'vault-requests', 'vault-releases'] as const;
 export type VaultTable = (typeof VAULT_TABLES)[number];
 
-export type VaultApiConsumer = 'vault' | 'cleanup' | 'vault-alarms' | 'vault-notices';
-export const VAULT_API_CONSUMERS: VaultApiConsumer[] = ['vault', 'cleanup', 'vault-alarms', 'vault-notices'];
+export type VaultApiConsumer = 'vault' | 'cleanup' | 'vault-alarms' | 'vault-notices' | 'account-push';
+export const VAULT_API_CONSUMERS: VaultApiConsumer[] = ['vault', 'cleanup', 'vault-alarms', 'vault-notices', 'account-push'];
 
 /** The vaults table's index of vaults by sealed release (keys plus user_guid and state), for the notice job (W8). */
 export const SEALED_RELEASE_INDEX = 'sealed-release-index';
@@ -64,7 +64,10 @@ export const VAULT_API_ACCESS: Record<VaultApiConsumer, VaultApiAccess> = {
   vault: {
     tables: [
       { table: 'vaults', actions: ['GetItem'] },
-      { table: 'vaults', actions: ['PutItem', 'UpdateItem'], attributes: ['vault_id', 'user_guid', 'state', 'created_at', 'updated_at', 'current_vault_id', 'recovery'] },
+      // Its own attributes only (MEMBER-API 2.0.0 adds the pending app key
+      // and the pointer's setup-code issuance); never `app_key`, which only
+      // the enclave host writes.
+      { table: 'vaults', actions: ['PutItem', 'UpdateItem'], attributes: ['vault_id', 'user_guid', 'state', 'created_at', 'updated_at', 'current_vault_id', 'recovery', 'app_key_pending', 'enroll_live'] },
       { table: 'vault-instances', actions: ['GetItem', 'Query'], indexes: true },
       { table: 'vault-requests', actions: ['GetItem', 'PutItem', 'UpdateItem'] },
       { table: 'vault-releases', actions: ['GetItem', 'Query'], indexes: true },
@@ -106,6 +109,19 @@ export const VAULT_API_ACCESS: Record<VaultApiConsumer, VaultApiAccess> = {
       { table: 'vaults', actions: ['Query'], indexes: [SEALED_RELEASE_INDEX] },
     ],
     sendsToControlQueues: false,
+    readsVaultsStream: false,
+  },
+  // The account snapshot to a running vault (MEMBER-API 2.0.0, VAULT-MESSAGING
+  // 0.15.0 §11.13): reads the member's vault and its lease, writes the
+  // response slot and sends the op `account` to the leaseholder's queue.
+  // Never starts anything; writes nothing on the vault row.
+  'account-push': {
+    tables: [
+      { table: 'vaults', actions: ['GetItem'] },
+      { table: 'vault-instances', actions: ['GetItem'] },
+      { table: 'vault-requests', actions: ['PutItem'] },
+    ],
+    sendsToControlQueues: true,
     readsVaultsStream: false,
   },
 };

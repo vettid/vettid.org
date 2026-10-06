@@ -363,3 +363,43 @@ describe('POST /api/account/preferences', () => {
     expect((await account.handler(ev('POST', '/api/account/preferences', { email_updates: 'yes' }))).statusCode).toBe(400);
   });
 });
+
+describe('account changes reach the running vault (MEMBER-API 2.0.0 "Account snapshot to the vault")', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const account = require('../../lambda/member/account');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const memberHttp = require('../../lambda/shared/member-http');
+  const pushes = () => lam.commandCalls(InvokeCommand).filter((c) => c.args[0].input.FunctionName === 'account-push-fn').map((c) => c.args[0].input);
+  const member = { user_guid: 'g1', email: 'm@x.org', state: 'member', account_status: 'active', email_verified: true, terms_version: 't1' };
+
+  beforeEach(() => {
+    process.env.ACCOUNT_PUSH_FN = 'account-push-fn';
+    jest.spyOn(memberHttp, 'requireSession').mockResolvedValue({ email: 'm@x.org', user_guid: 'g1' });
+    ddb.on(GetCommand, { TableName: 'members' }).resolves({ Item: member });
+    ddb.on(UpdateCommand, { TableName: 'members' }).resolves({ Attributes: member });
+    ddb.on(QueryCommand).resolves({ Items: [] });
+  });
+  afterEach(() => {
+    delete process.env.ACCOUNT_PUSH_FN;
+    jest.restoreAllMocks();
+  });
+
+  test('cancelling the subscription asks for a push (asynchronous, the member only)', async () => {
+    ddb.on(GetCommand).callsFake((i) => (i.TableName === 'members' ? { Item: member } : { Item: { user_guid: 'g1', type_id: 'trial', type_name: 'Trial', status: 'trial', paid: false, started_at: 'x', expires_at: '2099-01-01T00:00:00.000Z' } }));
+    const res = await account.handler(ev('POST', '/api/account/subscription/cancel'));
+    expect(res.statusCode).toBe(200);
+    expect(pushes()).toEqual([{ FunctionName: 'account-push-fn', InvocationType: 'Event', Payload: Buffer.from('{"user_guid":"g1"}') }]);
+  });
+
+  test('a failed push request never fails the change', async () => {
+    lam.on(InvokeCommand).rejects(Object.assign(new Error('x'), { name: 'ServiceException' }));
+    ddb.on(GetCommand).callsFake((i) => (i.TableName === 'members' ? { Item: member } : { Item: { user_guid: 'g1', type_id: 'trial', type_name: 'Trial', status: 'trial', paid: false, started_at: 'x', expires_at: '2099-01-01T00:00:00.000Z' } }));
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    expect((await account.handler(ev('POST', '/api/account/subscription/cancel'))).statusCode).toBe(200);
+  });
+
+  test('preferences and PIN changes do not push (the snapshot does not show them)', async () => {
+    await account.handler(ev('POST', '/api/account/preferences', { email_updates: false }));
+    expect(pushes()).toHaveLength(0);
+  });
+});

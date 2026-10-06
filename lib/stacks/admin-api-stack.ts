@@ -7,7 +7,7 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as route53targets from 'aws-cdk-lib/aws-route53-targets';
 import { Construct } from 'constructs';
-import { AppConfig, hostName, resourceName, vaultServiceParamName } from '../config';
+import { AppConfig, accountPushFunctionName, hostName, resourceName, vaultServiceParamName } from '../config';
 import { RestRouteGroup } from '../constructs/rest-route-group';
 import { readRef } from '../constructs/ssm-refs';
 import { tableEnv } from '../constructs/table-grants';
@@ -148,8 +148,15 @@ export class VettidOrgAdminApiStack extends cdk.Stack {
       authorizer,
       pathPrefixes: ['/admin/requests', '/admin/members', '/admin/invites'],
       entry: 'lambda/admin/people.ts',
-      environment: { ...env, MEMBER_POOL_ID: readRef(this, config, 'auth/member-pool-id') },
+      environment: { ...env, MEMBER_POOL_ID: readRef(this, config, 'auth/member-pool-id'), ACCOUNT_PUSH_FN: accountPushFunctionName(config) },
     }).fn;
+    // Reinstating a member or extending a subscription sends the member's
+    // running vault a fresh account snapshot (MEMBER-API 2.0.0), through the
+    // member API's account-push function, by its fixed name.
+    people.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['lambda:InvokeFunction'],
+      resources: [`arn:${this.partition}:lambda:${this.region}:${this.account}:function:${accountPushFunctionName(config)}`],
+    }));
     const content = new RestRouteGroup(this, 'Content', {
       api,
       authorizer,

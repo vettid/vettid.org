@@ -2,6 +2,11 @@
  * Member API, account routes: /api/account/*  (docs/MEMBER-API.md)
  * Every route requires a valid session cookie and an active account; the
  * members table (not token claims) is the source of truth for state.
+ *
+ * After a change the vault's account snapshot shows (terms accepted,
+ * subscription started or cancelled, account cancelled), the member's
+ * running vault is sent the new snapshot (MEMBER-API 2.0.0 "Account
+ * snapshot to the vault"; asynchronous, best effort).
  */
 import {
   AdminAddUserToGroupCommand,
@@ -20,6 +25,7 @@ import { canSignIn, currentTerms, memberByGuid } from '../shared/members';
 import { hasVotingRights, MemberItem, SubscriptionItem } from '../shared/model';
 import { checkPin, hashPin, pinProblem } from '../shared/pin';
 import { sendMail } from '../shared/mail';
+import { pushAccountSnapshot } from '../shared/account-snapshot';
 
 const router = new Router<MemberRequest>();
 const poolId = () => env('MEMBER_POOL_ID');
@@ -144,6 +150,7 @@ router.on('POST', '/api/account/terms/accept', async (req) => {
     await cognito.send(new AdminAddUserToGroupCommand({ UserPoolId: poolId(), Username: m.email, GroupName: 'member' }));
   }
   await audit(m.email, 'member.accept_terms', m.user_guid, { version_id: t.version_id, sha256: t.sha256, from_state: m.state });
+  await pushAccountSnapshot(m.user_guid);
   return me(updated);
 });
 
@@ -212,6 +219,7 @@ router.on('POST', '/api/account/subscription', async (req) => {
   }
   await ddb.send(new PutCommand({ TableName: table.subscriptions(), Item: sub }));
   await audit(m.email, 'subscription.start', m.user_guid, { type_id: t.type_id, expires_at: sub.expires_at });
+  await pushAccountSnapshot(m.user_guid);
   return me({ ...m, has_used_trial: true });
 });
 
@@ -221,6 +229,7 @@ router.on('POST', '/api/account/subscription/cancel', async (req) => {
   if (!sub || sub.status === 'canceled' || sub.status === 'expired') throw conflict('No active subscription');
   await ddb.send(new PutCommand({ TableName: table.subscriptions(), Item: { ...sub, status: 'canceled' } }));
   await audit(m.email, 'subscription.cancel', m.user_guid, { type_id: sub.type_id });
+  await pushAccountSnapshot(m.user_guid);
   return me(m);
 });
 
@@ -272,6 +281,7 @@ router.on('POST', '/api/account/cancel', async (req) => {
   await cognito.send(new AdminDisableUserCommand({ UserPoolId: poolId(), Username: m.email }));
   await cognito.send(new AdminUserGlobalSignOutCommand({ UserPoolId: poolId(), Username: m.email }));
   await audit(m.email, 'member.cancel', m.user_guid, { delete_after: deleteAfter });
+  await pushAccountSnapshot(m.user_guid);
   req.setCookies.push(...clearSessionCookies());
   return { ok: true };
 });
