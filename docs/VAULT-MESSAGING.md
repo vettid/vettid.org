@@ -22,7 +22,9 @@ changelog:
   - 0.16.1: editorial-normative (owner decision of 2026-10-06, MEMBER-API
     2.1.1): the app learns a pending start-over from `deletion:
     {deletion_id, state, deletes_at}` in `GET /api/vault/status`, so that
-    its cancel can name the `deletion_id` (§11.11.9)
+    its cancel can name the `deletion_id` (§11.11.9). Editorial
+    (vettid-vault #42): §11.11.2's slot code `recovery_unavailable`
+    marks either refusal, `no_backup` or `no_credential`
   - 0.16.0: normative (owner decisions of 2026-10-06, §15 item 24:
     "if you lose a credential and have backups disabled you should not
     have a path back besides re-enrolling. we don't want to leak
@@ -7249,7 +7251,9 @@ the older code. The API allows only one active recovery per vault.
   of it (`no_backup`, 0.16.0); nothing is recorded. The API normally
   refuses a backup-off request before it reaches the enclave
   (§11.11.7), so `no_backup` arrives only when the API's bit was absent
-  or stale. The enclave's answer to a refused request then carries the
+  or stale. The enclave's answer to a refused request, with either
+  error (`no_backup` or `no_credential`; a vault without a credential
+  exists only during enrollment, §3.5.7), carries the
   clear marker `code: "recovery_unavailable"` (0.16.0), which the host
   copies into the slot as it does `recovery_registered` (§11.5): the
   member API ends the recovery at once and returns the sealed refusal
@@ -9403,6 +9407,9 @@ the 0.16.0 implementation.
   start-over as `deletion: {deletion_id, state, deletes_at}`; the app's
   `POST /api/vault/deletion/cancel` names that `deletion_id`
   (MEMBER-API 2.1.1). Before, the app had no way to learn the id.
+  Editorial: §11.11.2 states that the clear `recovery_unavailable`
+  marks either sealed refusal (`no_backup` or `no_credential`), as
+  vettid-vault #42 implements.
 
 - **0.16.0** (2026-10-06): normative, owner decisions of 2026-10-06
   (§15 item 24). **No recovery with the credential backup off; start

@@ -7,7 +7,11 @@ changelog:
     implementation, vettid.org #148): `VaultStatus.deletion` carries
     `deletion_id`, so that the app, which cannot read the session-only
     `GET /api/vault/deletion`, can send `POST /api/vault/deletion/cancel
-    {deletion_id}` with its app key. Additive
+    {deletion_id}` with its app key. Additive. Editorial (vettid-vault
+    #42): the recovery state `unavailable` covers either sealed refusal,
+    `no_backup` or `no_credential` (a vault without a credential exists
+    only during enrollment); the API acts on the slot code
+    `recovery_unavailable` alone, never on the sealed body
   - 2.1.0 (2026-10-06, VAULT-MESSAGING 0.16.0; owner decisions of
     2026-10-06: no recovery with the credential backup off; start over
     instead): the vault row gains the host-written `credential_backup`
@@ -737,7 +741,7 @@ interface Recovery {
   recovery_id: string;                 // ULID; the queue request id
   vault_id: string;                    // the vault being recovered (HKDF info and QR payload, §11.11.2)
   state: 'pending' | 'available' | 'registered' | 'cancelled' | 'expired'
-       | 'unavailable';                // 2.1.0: the enclave refused it (no backup copy)
+       | 'unavailable';                // 2.1.0: the enclave refused it (no_backup or no_credential; slot code recovery_unavailable)
   requested_at: string;                // RFC 3339
   available_at: string;                // requested_at + 24 h
   expires_at: string;                  // available_at + 24 h
