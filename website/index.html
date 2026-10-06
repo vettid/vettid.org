@@ -1436,14 +1436,12 @@
   <div class="service-highlight service-highlight-stacked">
     <div class="service-highlight-content">
       <h3>For Developers: Agent Connector</h3>
-      <p>The VettID Agent Connector is an open-source sidecar binary that gives AI agents secure, owner-controlled access to vault secrets and encrypted messaging. A single command connects your agent to a vault &mdash; the owner defines exactly what it can access, and revocation is instant. The agent never touches encryption keys or credentials.</p>
+      <p>The VettID Agent Connector is the open-source sidecar an AI agent will run to use its owner&rsquo;s vault under <a href="/ai/leash">LEASH</a>. It will pair with the vault as an agent device, with the owner deciding from their phone what it may do. The connector in the repository today was written for VettID&rsquo;s earlier messaging system; it is being rebuilt for the current vault and relay and does not work with them yet.</p>
       <ul class="service-features">
-        <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Zero-trust for the agent &mdash; never holds encryption keys or messaging credentials</li>
-        <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Owner approves scope, rate limits, and auto-approval rules from their phone</li>
-        <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Secrets pass through, never cached</li>
-        <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> E2E encrypted messaging &mdash; agents send messages and approval requests directly to user's feed</li>
-        <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Single Go binary with local-only REST and WebSocket API</li>
-        <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Platform-bound credentials &mdash; cannot be decrypted on any other machine</li>
+        <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Acts only under grants the owner signs and can revoke &mdash; each a LEASH delegation</li>
+        <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Per grant: ask-every-time or automatic approval, rate limits and expiry</li>
+        <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Can use a stored key without seeing it (HMAC) instead of reading the secret</li>
+        <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Never holds the vault&rsquo;s keys; every access is recorded in the vault&rsquo;s audit log</li>
         <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Open source (AGPL-3.0) &mdash; <a href="https://github.com/vettid/vettid-agent" target="_blank" rel="noopener noreferrer">view on GitHub</a></li>
       </ul>
     </div>
@@ -1590,7 +1588,7 @@
           </div>
           <div class="diagram-box trusted">
             <h4>Agent Connector</h4>
-            <p>E2E encrypted sidecar</p>
+            <p>LEASH sidecar (being rebuilt)</p>
           </div>
         </div>
 

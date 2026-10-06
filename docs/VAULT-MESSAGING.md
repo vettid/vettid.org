@@ -1,12 +1,12 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.13.0
+version: 0.13.1
 date: 2026-10-06
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
-  - RELAY-PROTOCOL.md (0.5.0)
+  - RELAY-PROTOCOL.md (0.6.0)
   - RELAY-PLAN.md
   - PQC-MIGRATION.md
   - CALLING-SERVICE.md
@@ -17,6 +17,9 @@ related:
   - VAULT-RELEASES.md (0.1.0, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.13.1: editorial: the related RELAY-PROTOCOL is 0.6.0 and §1.2 lists
+    its web endpoints (§6.11, used by §6.4); §15 item 7 is the HTTP action
+    only; item 21 records vettid-vault #38
   - 0.13.0: the daily owner check (owner decisions of 2026-10-05): the
     vault records its member's last check, the PIN and the credential
     password verified together by `vault.owner_check` (a credential
@@ -329,7 +332,7 @@ described in RFC 2119.
 
 ### 1.2 Relay features used
 
-This document uses the following RELAY-PROTOCOL 0.5.0 features:
+This document uses the following RELAY-PROTOCOL 0.6.0 features:
 
 - one-shot **open deposit tokens** (§5.6);
 - **`sender`** in collect responses (§6.3, §6.4);
@@ -338,6 +341,8 @@ This document uses the following RELAY-PROTOCOL 0.5.0 features:
 - **claims** (§6.9);
 - **mailbox deletion**, `DELETE /v1/mailbox` (§6.10; new in 0.5.0, used
   by §12.5);
+- **web endpoints**, `/connect` and `/.well-known/assetlinks.json`
+  (§6.11; new in 0.6.0, used by §6.4's invitation URL);
 - fractional-second timestamps (§4.1);
 - relay **policy values** advertised at registration:
   - `max_token_lifetime_seconds`;
@@ -7706,12 +7711,13 @@ Follow-ups:
    app UX review of the approval screen.
 6. **ICE issuer secret.** How the coturn shared secret (or a managed
    provider's credentials) reaches the enclave (CALLING-SERVICE §5, §10).
-7. **LEASH action execution.** LEASH's HTTP action (the vault makes a
+7. **LEASH HTTP action.** LEASH's HTTP action (the vault makes a
    request with an injected secret) needs egress from the enclave beyond
    the relay and KMS allowlist, and waits for a decision on enclave
-   egress. Revocation status, once listed here too, is the stapled status
-   statement of §10.11 (since 0.6.0; LEASH §3.5's format since 0.12.0),
-   which needs no public status route.
+   egress; until then pattern 2 is `item.use` (HMAC-SHA-256) only
+   (§10.11). Revocation status, formerly listed here, is resolved: the
+   stapled status statement of §10.11 (since 0.6.0; LEASH §3.5's format
+   since 0.12.0, item 21) needs no public status route.
 8. **Files in items.** The `file` field kind (§10.7) is reserved until
    blob storage and its size policy are decided (VAULT-ITEMS owner
    decision 4).
@@ -8044,6 +8050,7 @@ Follow-ups:
     tests); vettid-android (nothing until the agents phase, ANDROID-PLAN;
     it has no LEASH code); LEASH-IMPLEMENTATION (its list of differences
     shrinks to the VettID bindings).
+    vettid-vault: done (vettid-vault #38).
     **OWNER DECISIONS of 0.12.0** (each written as recommended, to
     confirm at review):
     1. `scope` is an object: `op` (VettID's one scope per grant) and the
@@ -8448,6 +8455,11 @@ pending (§15, follow-up 1).
 
 ## 17. Changelog
 
+- **0.13.1** (2026-10-06): editorial. Front matter: RELAY-PROTOCOL 0.6.0
+  (was 0.5.0). §1.2: the relay features are 0.6.0's and include the web
+  endpoints (§6.11) that §6.4's invitation URL uses. §15: item 7 is the
+  HTTP action only, with revocation status recorded as resolved (item
+  21); item 21 records the vettid-vault follow-up as done (#38).
 - **0.13.0** (2026-10-06): the daily owner check (owner decisions of
   2026-10-05 and 2026-10-06; §15 item 22). Independent of the open
   0.11.0 (PR #122).
