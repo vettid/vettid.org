@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.12.0
+version: 0.13.0
 date: 2026-10-05
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -17,6 +17,21 @@ related:
   - VAULT-RELEASES.md (0.1.0, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.13.0: the daily owner check (owner decisions of 2026-10-05): the
+    vault records its member's last check, the PIN and the credential
+    password verified together by `vault.owner_check` (a credential
+    operation, so it rotates the CEK); enrollment, a completed recovery
+    and a completed transfer start the clock. Past the interval (the
+    setting `owner_check.interval_seconds`, at most and by default 24 h)
+    the vault is **held**: it keeps serving its peers and queues what
+    needs the member, rings no calls, sends its devices only the
+    content-free `vault.held` counts, refuses every other owner-device
+    request with `owner_check_required`, suspends desktops' access
+    sessions and issues no LEASH status statements. Ten consecutive
+    failed checks lock the vault (§3.6, §1.1, §2.2, §3.3, §3.5.3,
+    §3.5.9, §6.7.1, §6.8, §9.1, §10, §10.1, §10.2, §10.6, §10.8, §10.9,
+    §10.10, §10.11, §10.17, §11.11.5, §12.1, §12.3, §13.5, §13.7, §13.8,
+    §15 item 22)
   - 0.12.0: LEASH delegation and status statement in the LEASH paper's §3.5
     format (`iss`, `sub`, `status_issuer`, `scope` object, `limits`,
     `nonce`; RFC 8785; `leash/v1/delegation`, `leash/v1/status`); the
@@ -238,7 +253,8 @@ This document defines how a VettID vault exchanges messages over the VettID
 relay (RELAY-PROTOCOL.md) with its owner's devices, its paired agents and the
 vaults of its connections. It covers:
 
-- keys (§3);
+- keys (§3), and the daily owner check that holds a vault whose member
+  has not proved their presence for 24 h (§3.6);
 - one hybrid post-quantum construction and one envelope for every payload
   (§4, §5);
 - sessions, invitations, reconnects, pairing, and the access sessions of
@@ -299,6 +315,10 @@ described in RFC 2119.
    as before and never hold the credential. A second copy of the
    credential is treated as theft (§3.5.9); the app moves to a new phone
    by direct transfer (§6.7.1) or by recovery (§11.11).
+9. **A daily owner check** (owner decisions, 2026-10-05; 0.13.0). At
+   least every 24 h the member gives the vault their PIN and credential
+   password together. Without that, the vault holds: it keeps serving its
+   peers but serves its owner's devices nothing but the check (§3.6).
 
 ### 1.2 Relay features used
 
@@ -347,6 +367,14 @@ the relay at vettid.org allows:
 | Parent / host | Relay host names; TLS byte counts and timing per instance (connections are shared by all vaults, §12.2); enroll, unlock and lock events; encrypted-state size; `vault_id` ↔ instance | Relay requests (TLS terminates in the enclave, §12.2), mailbox ids, PINs, keys |
 | Member API | Which member enrolled, unlocked or locked, and when; `vault_id`, instance lease, `vault_version`, `state_version` (§11.5) | PINs; why an unlock failed (§11.4); mailbox ids; keys; any stable device identifier (§11.7) |
 | Network | Endpoints and timing | Everything else |
+
+The owner check (§3.6) adds nothing to this table. The hold is not
+reported to the host or to connections: the host sees the lock after ten
+failed checks as an ordinary `locked` event, without a reason; a peer
+sees a held vault keep acking, answer with delivered receipts and serve
+standing grants, but no presence, ringing or read receipts, as with an
+absent member; the relay sees only that an owner's devices exchange
+less traffic with the vault, as during any quiet period.
 
 VettID operates both the host and the relay, so in its own deployment it can
 correlate their timing. This residual metadata is disclosed here rather than
@@ -424,6 +452,7 @@ Rules for all keys:
   SHA-256 of its current blob, the password backoff state, the latest
   blob while kept (§3.5.3, §3.5.6), and the LTKs of each app's UTK pool
   (§3.5.4);
+- the owner-check record (§3.6): `last_at`, `deadline` and `failures`;
 - the items (§10.7): `data` and `secret` items whole; `critical` items'
   metadata and their values encrypted under item keys that only the
   credential holds (§3.5.2); the tag registry, the profile object and the
@@ -735,7 +764,8 @@ credential operations:
 - for 30 s, then 1 min, 5 min, 15 min and 60 min after each further
   failure (capped at 60 min);
 - a success resets the count;
-- the count is in DEK state and survives locks.
+- the count is in DEK state and survives locks;
+- a wrong password in an owner check (§3.6) counts like any other.
 
 **Unlock window.** `credential.unlock` keeps the credential key, and only
 that key, in the vault process's memory for the
@@ -744,7 +774,7 @@ that key, in the vault process's memory for the
 - Operations that sign with the credential key may use it within the
   window; each use extends the window to the full TTL.
 - The window ends at expiry, `credential.lock`, `credential.rotate`,
-  `credential.delete` and vault lock.
+  `credential.delete`, vault lock and the start of a hold (§3.6.3).
 - The key is never written to state.
 
 #### 3.5.4 One-time transaction keys (UTK/LTK)
@@ -952,7 +982,8 @@ A vault MUST have a credential before it is used.
   byte-identical to the current blob and used before the member uses it
   again: every other presentation is a clone (§3.5.9). The vault refuses
   it, alerts the app and the member, and forces a rotation that kills
-  every copy.
+  every copy. The daily owner check (§3.6.6) rotates the CEK at least
+  once per interval, so a copy goes stale within it.
 
 #### 3.5.9 One holder; clone alarm, freeze and forced rotation
 
@@ -1034,6 +1065,10 @@ member:
   `credential.reset` (§11.11.5).
 - **Everything else keeps working**: messaging, connections, calls,
   `data` and `secret` items, desktops and agents.
+- **The owner check** (§3.6) is a credential operation, so it is refused
+  during an alarm. A vault that is held as well keeps the alarm's path
+  open (`credential.alarm.confirm`, `credential.get`, `credential.ack`,
+  `credential.rotate`, §3.6.3); the check follows the rotation.
 
 **Confirm.** The holder answers `credential.alarm.confirm{alarm_id,
 mine}`: `true` for "that was me" (for example a restored phone backup),
@@ -1064,6 +1099,308 @@ opens a new alarm.
 - A recovery completed during an alarm (`credential.recover`) moves the
   alarm to `rotation_required`: the recovered app is the new holder and
   must rotate.
+
+### 3.6 The daily owner check and the hold
+
+(Owner decisions of 2026-10-05; 0.13.0; §15 item 22.) At least once
+every 24 hours the member proves to the vault that they still hold the
+app: the **owner check**, the member's PIN and credential password
+verified together. When the interval passes without one, the vault
+**holds**: it keeps running for its peers but serves its owner's
+devices nothing but the check.
+
+The check is vault-enforced. It does not depend on the app behaving: an
+app that never asks still meets the hold at the deadline.
+
+#### 3.6.1 The check
+
+**One operation resets the clock:** `vault.owner_check{credential,
+utk_id, sealed{pin, password}}` (§10.2), sent by the holder (§3.5.9). It
+is a credential operation (§3.5.3), so every check rotates the CEK. The
+vault:
+
+1. refuses with `credential_frozen` or `rotation_required` while a clone
+   alarm is open (§3.5.9), before anything else (the UTK is not spent);
+2. spends the UTK and opens `sealed` (§3.5.4; `utk_invalid`);
+3. checks the blob (§3.5.3 step 3): `stale_credential` for the holder's
+   own retry, `credential_frozen` and an alarm for a clone;
+4. refuses with `backoff` while the PIN backoff of §11.8 runs;
+5. **checks the PIN** against the vault's DEK derivation (§3.3.1), as a
+   transfer's approval does (§6.7.1): it derives the DEK from `pin` with
+   the header's KDF parameters and compares it with the DEK in memory in
+   constant time. A mismatch is `bad_pin`, counted in the §11.8 backoff
+   (`header_seq` + 1) and audited `vault.pin_failed`; the password is not
+   tried;
+6. refuses with `backoff` while the password backoff of §3.5.3 runs;
+7. **opens the credential** with the password (§3.5.3 step 5):
+   `bad_password`, counted in the password backoff and audited
+   `credential.password_failed`;
+8. on success, in one flush: rotates the CEK (§3.5.3 step 7); resets the
+   password backoff and, if it counted failures, the §11.8 backoff (a
+   header write, as at a successful unlock); records the check (below);
+   ends the hold if the vault was held; audits `owner_check.passed`; and
+   answers `{credential, version, utks, deadline, interval_seconds}`.
+
+A `bad_pin` (step 5) or `bad_password` (step 7) is a **failed check**
+(§3.6.4). Other refusals (`backoff`, `utk_invalid`, `stale_credential`,
+a clone) are not: they test no guess.
+
+**The record**, in DEK state (§3.3), so it survives locks:
+`owner_check = {last_at, deadline, failures}`. A check sets `last_at`
+to now, `deadline` to now + the interval (§3.6.2) and `failures` to 0.
+The vault measures time with the enclave's own clock, as it does a
+recovery code's validity (§11.11.2).
+
+**What else starts the clock.** Each of these verifies the PIN and the
+password, or sets them, and writes the record as a check does:
+
+- **enrollment**: the vault's first `credential.create` (§3.5.5), which
+  follows the PIN of `vault.enroll` within the provisional window
+  (§11.3). A later `credential.create`, after a `credential.delete`,
+  does not move the clock;
+- **a completed recovery**: `credential.recover` or `credential.reset`
+  (§11.11.5), after the registered app's unlock with the PIN;
+- **a completed transfer**: `device.transfer.approve` (§6.7.1), which
+  carries the PIN and the password. Its `bad_pin` and `bad_password` are
+  failed checks too;
+- **a vault from before 0.13.0**: a vault whose state has no record
+  starts the clock at its first unlock under a release that implements
+  0.13.0.
+
+**Nothing else resets it.** An unlock (the PIN only), `credential.unlock`
+or any other credential operation (the password only), `pin.change` and
+`credential.password.change` do not. *Rationale for one dedicated
+operation:*
+
+- The check must work on a running vault, which may stay unlocked for
+  weeks; an unlock happens only after a lock.
+- The unlock travels the alternate channel through the host (§11). Its
+  request is padded to 12,288 bytes, which a blob of up to 131 KiB
+  (§3.5.2) does not fit, and it has no UTK, no E2E session and so no
+  holder identity for the clone rule (§3.5.9). Carrying the password
+  there would widen what the host-routed path carries, for no gain.
+- Counting "an unlock plus some credential operation within N minutes"
+  would make the clock depend on two requests and a window between them.
+  A single request that carries both secrets under one UTK is one place
+  to implement, audit and test.
+
+A member whose vault is locked past the deadline still types the PIN and
+the password once, on one screen: the app unlocks with the PIN (§11.4)
+and sends the check right after (§3.6.5).
+
+#### 3.6.2 The interval
+
+The setting `owner_check.interval_seconds` (§10.8) is 3,600–86,400
+seconds, default and maximum **86,400 (24 h)**. A longer value is
+`bad_request`; there is no way to turn the check off.
+
+- **Owner only.** Only the app sets it. A desktop's `settings.set`
+  naming it is answered `forbidden` at once, never held for approval
+  (§6.8); agents never send `settings.*`.
+- **Shortening** takes effect at once: `deadline` becomes the earlier of
+  the current deadline and `last_at` + the new interval. That may put the
+  vault into the hold at once; the app SHOULD offer a check together with
+  the change.
+- **Lengthening** takes effect at the next check: the current deadline
+  does not move. Only a check moves a deadline later, so someone holding
+  an unlocked app cannot buy time with a setting.
+
+#### 3.6.3 The hold
+
+From the deadline until a successful check the vault is **held**. Held
+is not locked (§12.1): the DEK, the relay key and every session stay in
+memory. The vault compares the time with the deadline whenever it
+handles a request and at every collect cycle (§12.2, at most 30 s
+apart), so no owner request is served after the deadline. A locked vault
+does nothing; one that unlocks past its deadline is held from the unlock
+on.
+
+**Entering the hold**, in one flush, the vault:
+
+- ends the credential's unlock window (§3.5.3), so nothing is signed
+  with the credential key;
+- answers every request held for an app's approval (§6.8, §10.11) with
+  `owner_check_required`, and drops pending access-session requests;
+- stops a ringing incoming call on its devices (`call.end{unavailable}`
+  to them; the caller is not told and times out, as with a locked
+  callee). A call answered before the deadline continues (below);
+- audits `owner_check.held` and sends `vault.held` (below) to the
+  owner's app and desktops.
+
+**What keeps running** (the peer side; none of it waits for the member):
+
+- collecting, acking and storing every inbound message, as when unlocked
+  (§8.3): messages, receipts, profile updates, rotations, reconnects,
+  rekeys and token refreshes. Delivered receipts are sent as usual; read
+  receipts need the member and are not;
+- the relay mailbox, tokens, sessions and their rekeys, toward devices
+  and peers alike;
+- **standing authorizations the member already gave a connection**:
+  fetches under an issued grant (§10.12), items an `auto` share rule
+  includes, actions in an `auto` mode (§10.14). They were the member's
+  decisions, and a connection cannot tell a hold from an absent member;
+- **everything that would ask the member is queued, not decided**:
+  incoming connection requests (the handshake completes, §6.4, but the
+  request stays pending; in-person auto-approval does not apply while
+  held), grant and share requests, critical-item use requests, actions
+  invoked in an `ask` mode, introductions and location requests. They
+  keep their own expiries, which run during the hold;
+- clone detection and its alarm: a `credential.alarm`, its feed item and
+  its `sync.event` are delivered while held (§3.5.9).
+
+**What stops:**
+
+- **Incoming calls do not ring.** An offer that arrives while held rings
+  no device. The vault does not answer it (no `busy`, no `call.end`), so
+  the caller times out exactly as with a locked callee; the vault records
+  a missed call (feed `call.missed`), counted in `vault.held`. Ringing a
+  device that may not act before a check would either force the check in
+  the middle of answering or ring for nothing, and an answer from a phone
+  in someone else's hands would let them speak as the member. A call
+  answered before the deadline continues: its device's `call.ice` and
+  `call.end` are forwarded until it ends (the check is never forced
+  mid-action, §3.6.5).
+- **Presence.** A held vault does not answer `presence.ping` (§10.17):
+  it looks locked or offline, as any refusal does (§9.2).
+- **Owner fan-out.** No `sync.event`, `feed.event`, `message.new` or
+  other feature event reaches a device, except those listed below. What
+  happened is in vault state; devices catch up after the check
+  (`sync.since`, `feed.list{after_seq}`, `message.list`).
+- **Desktops' access sessions are suspended** (§6.8). A session's expiry
+  keeps running, and an unexpired session resumes after the check.
+- **Agents are paused** (§10.11). Their requests are refused, and the
+  vault issues and renews no LEASH status statement while held, so each
+  agent's statements lapse at their `not_after`: relying parties stop
+  accepting its delegations within `status_ttl` + 60 s of the deadline.
+  Statements already issued are not revoked early (a status statement
+  cannot be). The agents' grants are untouched and resume with the check.
+- **Owner-side location.** A device's `location.update` (an outgoing
+  share's position or the location log's) is dropped: shares pause
+  without ending.
+
+**What the owner's devices may still send.** Every other request from
+an owner device is answered `owner_check_required` (§10.1), and every
+other message is dropped and audited `drop.owner_check` (bounded like
+every `drop.*` entry, §10.9). Allowed while held:
+
+| Sender | Types |
+|---|---|
+| The holder | `vault.owner_check`; `vault.status` (reports the hold) and `vault.lock`; `credential.utk.get` (UTKs for the check); `credential.get` and `credential.ack` (the latest blob after a lost check response, §3.5.3, and its confirmation); `credential.version`; `credential.lock`; during a clone alarm, `credential.alarm.confirm` and, in `rotation_required`, `credential.rotate` (the check is refused until the alarm closes, so the alarm's own path stays open); for a transfer opened before the hold, `device.transfer.approve` (itself a check, §3.6.1) and `device.transfer.reject`; `call.end`, and `call.ice` of a call answered before the deadline |
+| A recovering app (§11.11.5) | Its own set, unchanged: `credential.utk.get`, `credential.recover`, `credential.reset`, `vault.delete`, `vault.status` and the token and address types. A recovery completes while held and starts the clock (§3.6.1) |
+| A desktop | `vault.status`, `vault.lock`, `device.session.end{}` (its own session), `call.end` and `call.ice` of a call it answered before the deadline |
+| An agent | `vault.status`, `device.session.end{}` (its own session) |
+| Any device | The handshake (`hs.init`, `hs.resp`, `hs.fin`: rekeys and reconnects), `relay.token.issued`, `relay.token.refresh`, `relay.address.update` |
+
+In particular, while held there is no pairing approval (a pending
+pairing times out), no new transfer (`device.transfer.create`), no
+unlinking, no access-session grant, no `approval.decide`, no
+`settings.*` (the interval included: a check ends the hold, a setting
+does not), no `vault.delete` by the holder and no `pin.change`. A
+deletion or a PIN change waits for the check, which takes seconds.
+
+**What the vault still sends its owner's devices:** responses to the
+allowed requests; `vault.held`; `vault.locking`; `credential.alarm`
+with its feed item and `sync.event`; `device.transfer.pending` for an
+open transfer; `device.unlinked`; and the token, address, rotation and
+handshake messages.
+
+**`vault.held`** (V→D, durable) is the content-free notice that lets
+the app show that something arrived:
+
+```json
+{ "deadline": "<ts>", "waiting": { "messages": 3, "requests": 1, "calls": 0, "other": 2 } }
+```
+
+- Since the deadline: `messages` counts messages received, `requests`
+  incoming connection requests, `calls` missed calls, and `other` every
+  other event that would have created a feed item. Counts only: no
+  connection, name, type or time beyond `deadline`.
+- It goes to the app, and to desktops with an unexpired access session,
+  when the vault enters the hold and then whenever the counts change, at
+  most once per device every 10 minutes (with the latest counts). A
+  device keeps the newest by `ts`.
+- A successful check ends the hold. The holder learns it from the
+  response, the other devices from `sync.event{kind: "owner_check",
+  deadline}`. Agents with a session receive `leash.grant.updated` with
+  fresh status statements (§10.11). Fan-out resumes; nothing missed is
+  replayed as events.
+
+#### 3.6.4 Failed checks lock the vault
+
+Wrong entries are bounded twice:
+
+- each counts in its own backoff: a wrong PIN in the §11.8 backoff (in
+  the sealed header), a wrong password in the §3.5.3 password backoff
+  (in DEK state);
+- `failures` in the record counts consecutive failed checks (§3.6.1),
+  whichever entry was wrong. Only a successful check resets it; a lock
+  does not.
+
+**At 10 consecutive failed checks the vault locks.** In the flush of the
+tenth failure the vault audits `owner_check.locked` (`ref` = the count),
+creates the feed item `owner_check.locked` (priority `urgent`), answers
+the request (`bad_pin` or `bad_password`), sends `vault.locking{reason:
+"owner_check"}` to the owner's app and desktops, and then locks as on an
+owner request (§12.3). Each further failed check while `failures` is 10
+or more locks it again.
+
+After that lock, the vault opens again only with the PIN (§11.4, under
+the unlock backoff), and is still held: someone without the PIN is out
+for good, and someone with the PIN but not the password keeps meeting
+the password backoff, which survives locks (§3.5.3), and a lock at every
+further failure.
+
+Each failed check is also audited `owner_check.failed` (`ref` = `pin` or
+`password`) and creates a feed item `owner_check.failed` (priority
+`high`, same `ref`), besides `vault.pin_failed` or
+`credential.password_failed`. While held, feed items reach devices only
+after a check; the lock's `vault.locking` reaches them at once.
+
+The host sees the lock as an ordinary `locked` lifecycle event (§11.5),
+without a reason: it learns nothing it would not learn from any lock.
+There is no host alarm and no email (§13.7; §15 item 22).
+
+#### 3.6.5 What the apps do
+
+- The app **MUST** ask for the PIN and the password **on one screen**,
+  together, and send them in one `vault.owner_check`. It MUST NOT keep
+  either beyond the check's answer (for a locked vault, beyond the unlock
+  and the check that follows it), and zeroizes both.
+- It **SHOULD** show the check at the **first app open** (or return to
+  the foreground) after the deadline, before any screen that needs the
+  vault. It **MUST NOT** interrupt an action in progress (composing a
+  message, a call, an approval, a credential operation) with the prompt:
+  a request refused with `owner_check_required` keeps the member's input
+  (an unsent message stays a draft), and the prompt appears when the
+  member leaves that screen or next opens the app.
+- It **MAY** warn ahead, from 1 hour before the deadline in the
+  reference app: a banner, or a local notification, with a "check now"
+  action. A check is allowed at any time and resets the clock from then.
+- While held it **MUST NOT** show cached vault content (messages, items,
+  connections, the feed): only the check, the `vault.held` counts
+  ("3 new messages waiting") and the lock action. The hold then means
+  something on the phone too, not only at the vault.
+- It shows which entry was wrong (`bad_pin` or `bad_password`), how many
+  failed checks remain before the vault locks (10 − `failures`, from
+  `vault.status`), and a running backoff's wait.
+- For a **locked** vault past its deadline, one screen asks for the PIN
+  and the password; the app unlocks (§11.4), reads `vault.status`, and
+  sends the check if the vault is held.
+- Settings offer the interval (1–24 h, §3.6.2).
+- **Desktops** cannot do the check: they hold no credential. A desktop
+  SHOULD show the hold, the counts and "open your app to continue", and
+  SHOULD hide its cached content likewise.
+
+#### 3.6.6 What the check adds against a copied credential
+
+Every check is a use of the credential, so it rotates the CEK (§3.5.3).
+A copied blob therefore goes stale within one interval at most, even if
+the member does nothing else with the credential: after the next check
+the holder's copy is the only current one, and a later presentation of
+the copy is a clone (§3.5.9). Before 0.13.0 a copy stayed current until
+the member's next credential operation, which could be weeks away. The
+check also bounds the "byte-identical copy used before the member's next
+use" residual (§13.5) to one interval.
 
 ## 4. Cryptographic construction
 
@@ -2099,7 +2436,8 @@ Old app (holder)           Vault                  Relay             New app
 
 1. The holder sends `device.transfer.create`. It is refused with
    `credential_frozen` or `rotation_required` during a clone alarm
-   (§3.5.9), and `exists` while another transfer is open: one at a time.
+   (§3.5.9), `exists` while another transfer is open (one at a time),
+   and `owner_check_required` while the vault is held (§3.6.3).
    The vault creates the invitation and answers `{transfer_id, link,
    exp}`; audit `device.transfer.started`.
 2. The new app scans the QR and sends `hs.init` (purpose `app`) with
@@ -2142,7 +2480,9 @@ Old app (holder)           Vault                  Relay             New app
    desktops `sync.event{kind: "device.transferred", device_id,
    old_device_id}`. As before 0.10.3, the old app is removed only once
    the new app has completed the handshake; there is no longer an
-   approved-but-unfinished state.
+   approved-but-unfinished state. The approval verified the PIN and the
+   password together, so it is an owner check (§3.6.1): it starts the
+   new app's clock, and ends a hold.
 5. The new app fetches the blob with `credential.get`, confirms it with
    `credential.ack` and fills its UTK pool with `credential.utk.get`.
    It unlocks later with the PIN, like any app (§11.4).
@@ -2160,7 +2500,8 @@ and the new app's handshake state is dropped. A commitment mismatch at
 | The holder rejects (`device.transfer.reject`), before or after the scan | Aborted. Nothing else changes. After the new app's `hs.fin` the vault tells it with `device.pair.rejected` (0.10.5, §6.7); before that the new app times out. (Since 0.10.3 an approval completes the transfer, so there is nothing to reject after it.) |
 | No scan before the link's `exp` (10 minutes after `device.transfer.create`), or no approval within 10 minutes after the new app's `hs.init` (0.10.4) | Aborted. Nothing else changes. |
 | The new app's attestation fails | Its `hs.init` is dropped; the transfer stays open until its 10 minutes run out. The new app stops waiting for `hs.resp` after 60 seconds (step 2, 0.10.6). |
-| Wrong PIN or password at approval | `bad_pin` / `bad_password`, counted in their backoffs. The transfer stays pending until its 10 minutes run out; the member may retry. |
+| Wrong PIN or password at approval | `bad_pin` / `bad_password`, counted in their backoffs and as a failed owner check (§3.6.4). The transfer stays pending until its 10 minutes run out; the member may retry. |
+| The vault becomes held (§3.6.3) while a transfer is open | The transfer stays open: the holder may still approve it (a check in itself) or reject it. A new `device.transfer.create` waits for a check. |
 | The new app goes offline before its `hs.fin` | No SAS is shown; the transfer times out after 10 minutes; nothing changes. |
 | The new app goes offline after its `hs.fin` | The approval still completes the transfer. `device.paired` waits in the new app's mailbox (relay TTL); if the new app never returns, the member recovers (§11.11), as when a new app is lost after a transfer. |
 | The old app goes offline before approving | The transfer times out; nothing changes. |
@@ -2263,6 +2604,15 @@ the device knows `expires_at`.
 
 Every grant, end and decision is audited (§10.9), and the owner's other
 devices learn of it as `sync.event` (§10.1).
+
+**While the vault is held** (§3.6.3), access sessions are suspended: a
+desktop or agent may send only `vault.status`, `device.session.end{}`
+and the transport types (a desktop also `vault.lock`, and `call.end` and
+`call.ice` of a call it answered before the deadline); everything else is answered
+`owner_check_required`. Held requests were answered
+`owner_check_required` when the hold began, and no app may grant a
+session or decide an approval until a check ends the hold. A session's
+expiry keeps running, and an unexpired session resumes after the check.
 
 ## 7. Deposit tokens
 
@@ -2494,6 +2844,10 @@ How each error is handled:
   reach the owner's other devices as `sync.event`, or as feature events.
 - A device that has not collected for longer than the relay TTL resyncs
   with `sync.since`.
+- While the vault is held (§3.6.3), fan-out stops except for
+  `vault.held`, `vault.locking`, the clone alarm and the transfer,
+  unlink and transport messages listed there; devices catch up after
+  the check.
 
 ### 9.2 Presence ping
 
@@ -2571,6 +2925,8 @@ an answer to an unknown or expired id is dropped.
 | | `vault.unlock` / `vault.unlock.result` | ACh | | PIN unlock (§11.4) |
 | | `vault.lock`, `vault.status`, `vault.delete` | D→V | req | Lock, status, delete (§7.4 first) |
 | | `vault.locking` | V→D | | Graceful lock notice (ephemeral) |
+| | `vault.owner_check` | D→V | req | The daily owner check: PIN and credential password together (§3.6, 0.13.0) |
+| | `vault.held` | V→D | | The vault is held: content-free counts of what is waiting (§3.6.3, 0.13.0) |
 | Sessions | `hs.init`, `hs.resp`, `hs.fin` | D↔V, V↔V | | Handshake, rekey, reconnect (§6) |
 | | `relay.token.issued` / `relay.token.refresh` | any | — / req | Deliver or request a token |
 | | `relay.address.update`, `identity.rotate` | any | | Rotation (§3.4) |
@@ -2712,9 +3068,15 @@ an answer to an unknown or expired id is dropped.
     - `credential_lost`: `credential.recover` when the vault keeps no copy
       of the latest blob (backup off, §11.11.5);
     - `transfer_pending`: reserved; unused since 0.10.3, when the
-      approval of a transfer completes it at once (§6.7.1).
+      approval of a transfer completes it at once (§6.7.1);
+  - and (0.13.0) `owner_check_required`: the vault is held (§3.6.3); the
+    request waits for a successful `vault.owner_check`. Answered to every
+    owner-device request outside the hold's allow list, and to requests
+    held for approval when the hold begins.
 - A request answered with an error changes no state, except the password
-  backoff, the spent UTK and the audit log and feed entries of §3.5.3.
+  backoff, the spent UTK and the audit log and feed entries of §3.5.3,
+  and, for a failed owner check, the PIN backoff and the check's
+  `failures` (§3.6.4).
   Objects that several
   owner devices can edit carry a `version` (an integer from 1, `0` before
   the first write); a change MUST name the version it was based on, and
@@ -2734,6 +3096,7 @@ an answer to an unknown or expired id is dropped.
   | `device.transferred` | `device_id` (the new app), `old_device_id` (§6.7.1) |
   | `device.transfer` | `transfer_id`, `state` (`aborted`), `reason` (§6.7.1) |
   | `credential.alarm` | `alarm_id`, `state` (`frozen`, `rotation_required`, `resolved`) (§3.5.9) |
+  | `owner_check` | `deadline`: a check succeeded, and a hold, if any, ended (§3.6, 0.13.0) |
   | `vault.release` | `release` (PCR0 hex), `release_number`; sent once after a vault first runs under a new release (§11.10.6) |
   | `credential.changed` | `version` (§3.5.5) |
   | `credential.deleted` | — |
@@ -2779,10 +3142,12 @@ an answer to an unknown or expired id is dropped.
 |---|---|---|
 | `vault.enrolled` | — | §11.3 |
 | `vault.enroll.confirm` (app) | `{}` | `{}` |
-| `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections}` |
+| `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; `owner_check` (0.13.0) is `{state: "ok" \| "held", deadline, interval_seconds, failures}` to apps and desktops and `{state}` to agents (§3.6) |
+| `vault.owner_check` (app: the holder) | `{credential, utk_id, sealed{pin, password}}` | `{credential, version, utks, deadline, interval_seconds}` (§3.6.1); `bad_pin`, `bad_password`, `backoff`, `utk_invalid`, `stale_credential`, `credential_frozen`, `rotation_required`, `forbidden` (not the holder), `bad_request` (a PIN that is not 6–32 digits) |
+| `vault.held` (V→D, to the app and desktops in an access session) | — | `{deadline, waiting: {messages, requests, calls, other}}` (§3.6.3) |
 | `vault.lock` (app, desktop) | `{}` | `{}`; then `vault.locking` |
 | `vault.delete` (app: the holder, a recovering app, or the enrolling app before a credential exists) | `{confirm: "delete my vault", credential?, utk_id, sealed{pin, password?}}` | `{}`; then the deletion of §12.5. `bad_request` without the exact phrase or a needed member; `bad_pin`, `backoff`, `bad_password`, `credential_frozen` / `rotation_required` (holder during an alarm), `forbidden` |
-| `vault.locking` (ephemeral) | — | `{reason?}`, with `exp` = now + 60 s; `reason` is `"recovery"` when a recovery request locked the vault (§11.11.1) |
+| `vault.locking` (ephemeral) | — | `{reason?}`, with `exp` = now + 60 s; `reason` is `"recovery"` when a recovery request locked the vault (§11.11.1), `"owner_check"` when ten consecutive failed owner checks did (§3.6.4, 0.13.0) |
 | `relay.token.issued` | — | `{kind: "standing" \| "reconnect", token}` |
 | `relay.token.refresh` (req) | `{}` | `{kind: "standing", token}` |
 | `identity.rotate` | — | `{rotation: <identity.rotate statement, §3.4>}` |
@@ -3003,8 +3368,8 @@ The D→V messaging types are sent by `app` or `desktop` devices.
 Every type below is sent by the vault's app, except
 `credential.version`, which an `app` or `desktop` may send. The types that
 carry or return a blob (`credential.get`, `.ack`, `.unlock`, `.rotate`,
-`.password.change`, `.delete`) and `credential.alarm.confirm` are the
-**holder's** only (§3.5.9); `credential.recover` and `credential.reset`
+`.password.change`, `.delete`, and `vault.owner_check`, §3.6) and
+`credential.alarm.confirm` are the **holder's** only (§3.5.9); `credential.recover` and `credential.reset`
 are the recovering app's only (§11.11.5). Critical
 items, the member's data inside the credential, are `item.*` types with
 `sensitivity: "critical"` (§10.7); they follow the rules of this section
@@ -3014,7 +3379,7 @@ for `credential`, `utk_id` and `sealed`.
 - `utk_id` and `sealed` carry the UTK-sealed payload (§3.5.4). The
   payload members are shown in `{…}` after `sealed`: `password` and
   `new_password` (UTF-8, 8–1,024 bytes), `item_id`, `item`, `reply_key`,
-  `request_id`, `payload_sha256` and `pin` (§6.7.1).
+  `request_id`, `payload_sha256` and `pin` (§6.7.1, §3.6.1).
 - Types that carry `sealed` can answer `utk_invalid` (§3.5.4). Types that
   carry `credential` follow §3.5.3: they can answer `backoff`,
   `stale_credential` and `bad_password`, and on success they rotate the
@@ -3324,6 +3689,7 @@ tagged **`@profile`** (owner decision 3). Sent by `app` or `desktop`.
 | `location.history.enabled` | boolean: keep the member's own location log (§10.16); turning it off deletes the log | `false` |
 | `location.history.retention_days` | integer 1–365 | 30 |
 | `location.history.interval_seconds` | integer 60–3,600: the log's cadence | 300 |
+| `owner_check.interval_seconds` | integer 3,600–86,400: the longest time between owner checks (§3.6.2); app only (a desktop's `settings.set` naming it is `forbidden`); a shorter value applies at once, a longer one from the next check | 86,400 |
 | `app.<name>` | string of at most 4,096 bytes, or `null` to remove; `<name>` matches `[a-z0-9_.-]{1,48}`; at most 64 | — |
 
 `app.*` keys are opaque to the vault; apps use them for preferences that
@@ -3396,7 +3762,10 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   (`ref` = `<alarm_id>:mine` or `<alarm_id>:not_mine`),
   `credential.alarm.resolved` (`ref` = `alarm_id`), `credential.reset`
   (§3.5.9, §11.11.5); `vault.pin_failed` (a wrong PIN at a transfer's
-  approval, §6.7.1); `device.transfer.started`,
+  approval, §6.7.1, or in an owner check, §3.6.1);
+  `owner_check.passed`, `owner_check.held`, `owner_check.failed`
+  (`ref` = `pin` or `password`), `owner_check.locked` (`ref` = the count
+  of consecutive failed checks) (§3.6, 0.13.0); `device.transfer.started`,
   `device.transfer.approved`, `device.transferred`,
   `device.transfer.aborted`, `device.transfer.attestation_failed`
   (`ref` = `transfer_id`), `device.replaced` (`device_id` = the old app a
@@ -3450,7 +3819,8 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   (`ref` = `txid`) (§10.18); `drop.suppressed`;
   and `drop.<reason>` for every message the vault dropped
   or refused (§6.3, §6.6, §7.3, §8.4), with the runtime's reason, such as
-  `drop.rate_limited` or `drop.one_app` (§6.7).
+  `drop.rate_limited`, `drop.one_app` (§6.7) or `drop.owner_check`
+  (§3.6.3).
 
 **Feed.**
 
@@ -3500,7 +3870,9 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
   `wallet.signed` (`ref` = `txid`), `credential.alarm` (priority
   `urgent`, `ref` = `alarm_id`), `device.transferred` (`ref` =
   `transfer_id`), `device.replaced` (`device_id` = the old app),
-  `credential.reset`,
+  `credential.reset`, `owner_check.failed` (priority `high`, `ref` =
+  `pin` or `password`), `owner_check.locked` (priority `urgent`)
+  (§3.6.4, 0.13.0),
   and `guide`. Apps render
   items from `kind` and the references; only `guide` items carry `title`
   and `body`.
@@ -3566,8 +3938,14 @@ new one on the other device.
   signed ICE configuration.
 - **Ringing.** The callee's vault drops an offer without `exp` or with an
   `exp` more than 90 s ahead, and treats a repeated `call_id` as a
-  duplicate. If a call is ringing or active it answers `call.end{busy}`.
-  Otherwise it sends every owner app and desktop (within its access
+  duplicate. A **held** vault (§3.6.3, 0.13.0) rings no device and does
+  not answer, not even `busy`: the caller times out as with a locked
+  callee, and the callee's vault records a missed call. A call ringing
+  when the hold begins stops ringing on the devices
+  (`call.end{unavailable}` to them only); a call answered before it
+  continues until it ends. A held caller's `call.start` is answered
+  `owner_check_required`. Otherwise, if a call is ringing or active the
+  vault answers `call.end{busy}`. Otherwise it sends every owner app and desktop (within its access
   session, §9.1) `call.offer` with the same `exp` and its own signed ICE
   configuration. A ringing device MAY send `call.ringing`, which the vault
   forwards once to the caller's vault, which forwards it to the call's
@@ -3677,7 +4055,7 @@ LEASH's terms map as follows:
 | `leash.list_available` | `agent.request{op: "catalog"}` |
 | `leash.connection_info` | `leash.grant.list` from the agent (its own grants) and `vault.status` |
 | Delegation and status statement (§3.5) | The grant's `delegation` and `sig`, and the vault's `status` and `status_sig`, in LEASH §3.5's format (below, 0.12.0) |
-| Bounded revocation (§3.4) | `leash.grant.revoke`, `device.session.end`, `device.unlink` (§7.4): at once in the vault; elsewhere within `status_ttl` + 60 s (below) |
+| Bounded revocation (§3.4) | `leash.grant.revoke`, `device.session.end`, `device.unlink` (§7.4): at once in the vault; elsewhere within `status_ttl` + 60 s (below). The owner-check hold pauses every agent with the same bound (§3.6.3, 0.13.0) |
 | Audit with integrity protection | The hash-chained audit log (§10.9), `leash.*` kinds |
 | Implementation tier | Tier 1: a hardware-isolated vault (AWS Nitro Enclaves) |
 
@@ -3959,7 +4337,13 @@ rotations  = the vault's identity.rotate statements (§3.4) from the delegation'
   revoked grant gets no new statement, so its last one lapses at its
   `not_after`. A locked vault (§12.1) issues none: the mechanism fails
   closed, and an agent whose member's vault stays locked loses its
-  statements within `status_ttl`. Refreshing uses the agent's E2E session
+  statements within `status_ttl`. A **held** vault (§3.6.3, 0.13.0)
+  issues none either, and refuses the agent's requests
+  (`leash.status.get` included) with `owner_check_required`: an agent
+  is paused from the deadline, in the vault at once and for relying
+  parties within `status_ttl` + 60 s. Statements issued before the
+  deadline are not revoked early; the grants stay, and statements resume
+  with the next check (`leash.grant.updated` to agents in a session). Refreshing uses the agent's E2E session
   and needs its access session (§6.8).
 - **Delivery.** Every grant in `leash.grant.updated` and in an agent's
   `leash.grant.list` carries a fresh `status`, `status_sig` and
@@ -4039,7 +4423,7 @@ delegations and their statements.
 | `leash.grant.list` (app, desktop: `{agent_id?}`; agent: `{}`, its own) | as left | apps and desktops: `{grants: [<grant>], suspended: [<agent_id>]}`; an agent: `{grants: [<grant>], suspended}` |
 | `leash.grant.updated` (V→D, to the agent) | — | `{grants: [<grant>], suspended}`: all of its grants, after every change and at suspension and resumption |
 | `leash.agent.resume` (app) | `{agent_id}` | `{}`; `not_found` unless the agent is suspended |
-| `leash.status.get` (agent) | `{grant_id}` | `{grant_id, status, status_sig, rotations?}`; `not_found`, `forbidden` (suspended) |
+| `leash.status.get` (agent) | `{grant_id}` | `{grant_id, status, status_sig, rotations?}`; `not_found`, `forbidden` (suspended), `owner_check_required` (the vault is held, §3.6.3) |
 | `agent.request` (agent) | `{op: "catalog"}`, `{op: "item.get", item_id, fields?}` or `{op: "item.use", item_id, field_id, action: "hmac-sha256", data}` | `{items}`, `{item_id, name, category, fields, notes?}` or `{item_id, field_id, action, result}` |
 
 - `agent_id` names an active device of role `agent` (`not_found`
@@ -4812,8 +5196,8 @@ Presence is on demand (§9.2): no heartbeats.
   unknown.
 - **Answering.** A vault answers a ping with `presence.pong` (from
   memory, `exp` = now + 30 s) only if its `state` is not `invisible`, its
-  policy shares with that connection, and it has not answered that
-  connection in the last minute. Otherwise it **does not answer**: a
+  policy shares with that connection, it has not answered that
+  connection in the last minute, and it is not held (§3.6.3). Otherwise it **does not answer**: a
   refusal is indistinguishable from a locked or offline vault.
   `last_active` is the newest activity of the member's apps and desktops
   (§10.3), rounded down to 5 minutes; it is absent when none is known.
@@ -6541,7 +6925,10 @@ because it only reduces exposure. Owner apps learn of the recovery from
      `credential.reset`, `vault.delete`, `vault.status` and the token and
      address types (anything else is `forbidden`);
    - it receives no fan-out;
-   - it is not announced to the other devices.
+   - it is not announced to the other devices;
+   - the owner-check hold (§3.6.3) does not apply to it: a vault held
+     when the recovery began (the usual case after 24 h) still lets the
+     recovering app send these types.
 3. **Password.** The app first gets UTKs with `credential.utk.get`, which a
    recovering app may send. It then sends `credential.recover{utk_id,
    sealed{password}}`.
@@ -6562,7 +6949,10 @@ because it only reduces exposure. Owner apps learn of the recovery from
        "device.unlinked"}`;
      - **desktops and agents are kept**, with their access sessions and
        LEASH grants;
-     - the other devices receive `sync.event{kind: "device.paired"}`.
+     - the other devices receive `sync.event{kind: "device.paired"}`;
+     - the owner check's clock starts (§3.6.1): the registered app's
+       unlock verified the PIN and this step the password, and a hold
+       ends.
    - A clone alarm that is open (§3.5.9) moves to `rotation_required`:
      the recovered app must rotate before using the credential.
 4. **Backup off: no recovery of the credential, only of access.** When
@@ -6584,7 +6974,7 @@ because it only reduces exposure. Owner apps learn of the recovery from
      critical item (as `credential.delete`, §3.5.5), creates a new
      credential (version 1, a new credential key, no rotation statement),
      and completes the recovery exactly as in step 3: the app becomes the
-     holder and replaces the old app. It answers `{credential, version,
+     holder and replaces the old app, and the owner check's clock starts. It answers `{credential, version,
      key, utks}`, audits `credential.reset` and creates a feed item.
      `credential.reset` is refused with `exists` when the vault does keep
      the latest blob: the member must then use `credential.recover` with
@@ -6716,6 +7106,10 @@ unlocks, messages that expired in the meantime show up as `seq` gaps.
 Connections whose standing tokens lapsed recover through reconnect tokens
 (§6.6).
 
+A **held** vault (§3.6.3) is not locked: it keeps its keys, collects,
+acks and serves its peers, and refuses only its owner's devices until a
+check. A held vault may still be locked by any trigger of §12.3.
+
 ### 12.2 Collect manager
 
 - **One collect loop per unlocked vault.** The loop runs inside the enclave
@@ -6746,6 +7140,7 @@ Connections whose standing tokens lapsed recover through reconnect tokens
 | Trigger | Behaviour |
 |---|---|
 | Owner request (`vault.lock`, API lock route) | Finish the batch, flush, send `vault.locking`, stop the loop, release the lease, zeroize. |
+| Ten consecutive failed owner checks (§3.6.4, 0.13.0) | Same as an owner request, with `vault.locking{reason: "owner_check"}`, after the audit entry and the urgent feed item. The host sees an ordinary lock. |
 | Memory pressure (the least recently active vault is evicted) | Same as an owner request. |
 | Enclave release or restart | Same if signalled. Otherwise all vaults lock through loss of memory, and their leases expire; a parent that sees the enclave restart releases the leases it held. |
 | Parent restart (the enclave keeps running) | The enclave locks every vault before it serves the new parent, which holds no leases for them. |
@@ -6755,11 +7150,12 @@ Connections whose standing tokens lapsed recover through reconnect tokens
 | Vault deletion | Run the §7.4 revocations, then destroy the state and the header. |
 | Account cancelled | Vault routes other than lock are refused at once (§11.1); the vault is locked. After the 7-day grace period the API deletes the vault rows and the stored state and headers. |
 
-There is no idle lock by default; the owner MAY set one. Leases left by a
-lock expire within 60 s (relay) and 180 s (vault lease). Zeroizing covers the
-DEK and the relay, identity, KEM and session keys; with one process per
-vault (§12.4), locking ends the vault's process, which releases all of its
-memory.
+There is no idle lock by default; the owner MAY set one. The owner
+check's hold (§3.6.3) is not a lock trigger: a held vault keeps running.
+Leases left by a lock expire within 60 s (relay) and 180 s (vault
+lease). Zeroizing covers the DEK and the relay, identity, KEM and
+session keys; with one process per vault (§12.4), locking ends the
+vault's process, which releases all of its memory.
 
 ### 12.4 Process isolation inside the enclave
 
@@ -6971,9 +7367,11 @@ it can read and write only its own objects and use only its own relay key
 | Session epoch key | Read and forge messages in that epoch and direction. Vault-to-vault epochs last at most 24 h. | Next rekey |
 | Vault `ik` or `kem` | Impersonate the vault in new handshakes and read new `hs.init`s | Credential rotation, `identity.rotate`, rekey |
 | ETK | PINs in requests sealed to it (≤ 25 h). Requires breaking the enclave. | Enclave restart |
-| Owner app (the vault's one app) | Whatever its role allows, including unlock attempts if the PIN is known; with the PIN and the password, a transfer to another phone (§6.7.1) | Recovery (§11.11), which replaces it |
+| Owner app (the vault's one app) | Whatever its role allows, including unlock attempts if the PIN is known; with the PIN and the password, a transfer to another phone (§6.7.1). Since 0.13.0 only until the owner check's deadline (at most 24 h after the member's last check): then nothing but the check, which needs the PIN and the password, under both backoffs, with a lock after 10 consecutive failures (§3.6) | Recovery (§11.11), which replaces it |
+| An unlocked app, or a desktop in an access session, in someone else's hands, without the PIN and the password (0.13.0) | What its role allows until the deadline; then nothing: the vault holds, the app hides its cached content, desktops' sessions are suspended; ten wrong guesses lock the vault, which then needs the PIN to open (§3.6) | Recovery; a shorter `owner_check.interval_seconds` |
+| A thief who holds the app and knows both the PIN and the password | Everything the app can do: the check passes, and the hold changes nothing (§13.8) | Recovery (§11.11), which replaces the app; change the PIN and the password |
 | Desktop | Within an access session, what desktops may send; step-up types (secret items' values, item and tag changes, profile, settings, share rules and decisions, invitations, removals, grant decisions, action configurations, introductions, location shares, the location log, the presence policy) only with an app's approval; never critical items or wallet spends; nothing after the session ends (§6.8) | `device.session.end`; unlink |
-| Agent | Within its access session, only what its LEASH grants cover: through `ask` grants nothing without an app's approval of each request (at most 20 referrals an hour), through `auto` grants up to their rate limits; LEASH operations only on the `data` and `secret` items its share rules include, never critical ones; never app-only types, invitations, credential, device or grant management. Refused requests are throttled and repeated ones suspend it; its activity is summarised in the audit log, so it cannot push older entries out (§10.11) | `leash.grant.revoke`, `device.session.end`, `device.unlink`; suspension is automatic |
+| Agent | Paused while the vault is held (§3.6.3): refused in the vault, and its delegations rejected by relying parties within `status_ttl` + 60 s. Otherwise, within its access session, only what its LEASH grants cover: through `ask` grants nothing without an app's approval of each request (at most 20 referrals an hour), through `auto` grants up to their rate limits; LEASH operations only on the `data` and `secret` items its share rules include, never critical ones; never app-only types, invitations, credential, device or grant management. Refused requests are throttled and repeated ones suspend it; its activity is summarised in the audit log, so it cannot push older entries out (§10.11) | `leash.grant.revoke`, `device.session.end`, `device.unlink`; suspension is automatic |
 | A LEASH delegation (every grant) | A claim, to relying parties that trust the member's credential key, that the agent holds that scope, until the grant's `expires_at` if any; the vault never relies on it. A relying party that requires a status statement accepts a revoked delegation for at most its `status_ttl` (≤ 1 h, default 15 min) plus 60 s of skew (LEASH §3.5's bound); one that does not can be shown it until `exp` (§10.11) | `leash.grant.revoke` (no new statements); a shorter `status_ttl` |
 | The vault's `ik` as status issuer | Signing statements that keep a revoked or suspended agent's delegations "valid" for relying parties; it grants nothing in the vault itself. An approved release does only what §10.11 says (§2.1) | Rotate the `ik` (§3.4): the chain moves the issuer; revoke the grants |
 | A status statement | Nothing beyond its `not_after`: it names one delegation by hash and is useless without it and the agent's key | — |
@@ -7005,7 +7403,7 @@ it can read and write only its own objects and use only its own relay key
 | A thief with the app's session and the PIN, without the password | No deletion: the holder's `vault.delete` needs the password too (§12.5) | — |
 | The member's account, email and PIN, for 24 h unnoticed, with the backup off | A recovery that restores access only: a reset or a deletion, never the credential or a critical item (§11.11.5, §12.5) | Cancel the recovery; turn the backup on |
 | VettID (operator) | Deleting a vault (the host's `delete`, an operator power it had anyway, §13.5 list), never reading it; the member is emailed | — |
-| A byte-identical copy of the current blob, used before the member's next use | Undetectable at that moment; a use still needs the password and the holder's session. The member's next use then presents a stale copy and raises the alarm (§3.5.9) | The alarm and the forced rotation |
+| A byte-identical copy of the current blob, used before the member's next use | Undetectable at that moment; a use still needs the password and the holder's session. The member's next use then presents a stale copy and raises the alarm (§3.5.9). The daily owner check is such a use, so the window is at most one interval (§3.6.6) | The alarm and the forced rotation |
 | A dishonest host, about clone alarms | Suppressing or delaying the member's email; not the vault's alert to the app, its freeze or its audit entry (§11.5) | — |
 | A transfer (§6.7.1) | Moving the app needs the holder's session, the PIN and the password; the new phone must pass device attestation; the old app is removed and its copy dead | Recovery, if the member lost the phone to it |
 | A recovery with `credential.backup` off | The account (email and session) for 24 h unnoticed and the PIN: a new credential, with every critical item destroyed, or deletion of the vault; never the old critical items (§11.11.5) | Cancel within the 24 h; keep the backup on |
@@ -7075,7 +7473,9 @@ their owner. Period.")
   only to its owner's devices (§9.1), each within its role (§6.8).
 - To its host it reports only the content-free lifecycle events and
   alarms of §11.5 (`enrolled`, `unlocked`, `locked`, `moved`, `deleted`,
-  `alarm.credential_clone`).
+  `alarm.credential_clone`). The owner check (§3.6) adds none: the hold
+  is not reported, and the lock after ten failed checks is an ordinary
+  `locked`.
 - To a connection it sends only what the member's features share with
   that connection by the member's own decisions: messages, calls, the
   shared profile, granted and shared items, action results,
@@ -7083,9 +7483,69 @@ their owner. Period.")
   credential key's public rotation statements and the signatures the
   member approved (§10.4, §10.13). A refused or failed credential
   operation (wrong password, backoff, an alarm or freeze) leaves a
-  connection's request pending; it never tells the connection why.
+  connection's request pending; it never tells the connection why. The
+  same holds for the hold (§3.6.3): what waits for the member stays
+  pending, calls time out and pings go unanswered, as with an absent
+  member.
 - It never answers a principal that is not its owner's device, its
   connection or its host; a holderless vault (§3.5.9) adopts no one.
+
+### 13.8 What the owner check protects, and what it does not
+
+The daily owner check (§3.6) bounds how long an owner device can act
+without the member.
+
+**It protects against:**
+
+- **an unlocked phone, or a desktop in an access session, in someone
+  else's hands.** Their use of the vault ends at the deadline, at most
+  24 h (or the member's shorter interval) after the member's last check.
+  Past it they need the PIN and the password together; each wrong entry
+  counts in its backoff, and ten consecutive failures lock the vault,
+  which then opens only with the PIN. The app's own biometric lock
+  (ANDROID-PLAN D6) is local and the vault cannot see it; the check is
+  what the vault can see;
+- **an absent member's agents.** Agents stop at the deadline: in the
+  vault at once, for relying parties within `status_ttl` + 60 s (§10.11).
+  A member who stops checking, for any reason, stops their delegations
+  within a day;
+- **a copied credential blob.** Every check rotates the CEK, so a copy
+  goes stale within one interval, and presenting it raises the clone
+  alarm (§3.5.9, §3.6.6);
+- **a stolen app session.** Someone with the session keys but not the
+  PIN and the password can no longer act past the deadline: the check's
+  secrets are UTK-sealed (§3.5.4), so the session alone cannot pass it.
+
+**It does not protect against:**
+
+- **a thief who holds the app and knows both the PIN and the password.**
+  The check is knowledge-based; they pass it every day. Recovery
+  (§11.11) is the remedy, as before;
+- **anything within the interval.** Until the deadline nothing changes;
+  a shorter interval narrows the window at the cost of more checks;
+- **an attacker inside the vault.** The hold keeps the DEK and the keys
+  in memory (it is not a lock, §12.1). Whoever could read an unlocked
+  vault's memory can read a held one's; only a lock zeroizes. The
+  ten-failure lock adds that zeroization against guessing;
+- **the app's local cache, if the app ignores §3.6.5.** The vault
+  enforces the hold for what it serves; what the phone already holds is
+  protected by the app hiding it and by the app's own encryption;
+- **standing authorizations toward connections.** Issued grants, `auto`
+  share rules and `auto` actions keep working while held (§3.6.3): they
+  are the member's own earlier decisions, which the member revokes in the
+  usual ways;
+- **availability.** A held vault can still be locked by the host or by
+  memory pressure (§12.3), like any vault that nobody is using; its
+  peers' messages then wait in the mailbox up to the relay TTL.
+
+**What VettID can and cannot do with it.** The host cannot start, end
+or move a hold: the record and the clock are inside DEK state and the
+enclave. Serving an older state (§13.2) can only bring an earlier
+deadline, never a later one, so a rollback fails toward the hold. It
+could bring a lower `failures` count and password backoff, which is the
+rollback residual of §13.2 (the apps' `min_state_seq` bounds it, and the
+PIN backoff is in the header, under `min_header_seq`). A dishonest host
+can still lock the vault (§13.5), which it could do anyway.
 
 ## 14. Push compatibility (deferred)
 
@@ -7502,6 +7962,103 @@ Follow-ups:
     10. The proof of possession of `sub` is not specified here; it waits
         for the paper's MCP profile. Recommended: wait; no relying party
         outside VettID exists yet.
+22. **The daily owner check (0.13.0).** (Item 20 is held by the open
+    0.11.0, vettid.org PR #122; 21 is 0.12.0; this is the next free
+    number whichever merges first.) Owner decisions of 2026-10-05, as
+    specified in §3.6:
+    1. **Vault-enforced.** The vault records the time of the member's
+       last successful check, the PIN and the credential password
+       verified together, in DEK state. Enrollment, a completed recovery
+       and a completed transfer start the clock.
+    2. **Hold, not lock.** Past the interval the vault is held: it keeps
+       receiving, acking and storing inbound traffic, keeps its mailbox
+       and sessions alive and sends content-free counts, but refuses
+       every owner-device request except the check, `vault.lock`,
+       `vault.status` and what the check strictly needs, with the new
+       error `owner_check_required`. Peers' requests that need the
+       member are queued; credential alarms are still delivered;
+       desktops' access sessions are suspended; recovery and its cancel
+       keep working.
+    3. **One combined prompt**, at the first app open after the
+       deadline, never mid-action; the app may warn ahead.
+    4. **Interval:** default and maximum 24 h, shorter by the member's
+       setting (at least 1 h); changing it is owner-only.
+    5. **Agents paused while held**: no LEASH status statements are
+       issued or renewed, so agents stop within `status_ttl` + 60 s;
+       existing statements are not revoked early; agents' requests are
+       refused.
+    6. **Wrong entries** count in the PIN and password backoffs; ten
+       consecutive failed checks lock the vault and alert the owner's
+       devices.
+    7. The check rotates the credential, so a copied blob goes stale
+       within the interval.
+
+    Follow-ups: vettid-vault (the owner-check record and its migration
+    for existing vaults; `vault.owner_check` reusing the transfer's PIN
+    check and §3.5.3; the hold's allow list in the dispatcher, with
+    `owner_check_required` and `drop.owner_check`; `vault.held` and its
+    counters; the call, presence, approval, access-session, location and
+    LEASH status gates; the ten-failure lock; the setting with its
+    shorten-now, lengthen-later rule; audit and feed kinds; e2e tests of
+    a held vault receiving a message, refusing an app request, passing a
+    check and resuming an agent, using an injectable clock;
+    `client/` and `cmd/vaultctl`: `owner-check`); vettid-android
+    (ANDROID-PLAN §6: the combined check screen, the hold screen with
+    counts and hidden cache, the early warning, the interval setting,
+    the locked-and-past-deadline path, error and lock handling);
+    MEMBER-API unchanged (the hold is not reported to the host). If 0.11.0
+    (PR #122) merges, its `account.get` is not on the hold's allow list
+    and `sync.event{account.changed}` waits for the check, like any
+    other fan-out.
+
+    **OWNER DECISIONS of 0.13.0** (sub-decisions, each written as
+    recommended, to confirm at review):
+    1. **What resets the clock:** only `vault.owner_check` (a dedicated,
+       UTK-sealed `{pin, password}` with the blob), plus enrollment's
+       first `credential.create`, a completed recovery and a transfer's
+       approval. An unlock never counts, even with a password (§3.6.1:
+       the alternate channel cannot carry the blob, has no holder
+       session, and the check must work on a vault that stays unlocked).
+       Recommended: as specified.
+    2. **Calls while held:** no ringing; the caller times out as with a
+       locked callee; a missed call is recorded and counted. A call
+       answered before the deadline continues. Recommended: as
+       specified (an answer would let a phone in other hands speak as
+       the member, and a check in the middle of answering is
+       mid-action).
+    3. **Standing authorizations toward connections continue** while
+       held (issued grants, `auto` share rules, `auto` actions), and
+       everything that asks the member is queued. Recommended: continue;
+       the alternative, pausing all outbound disclosure, would tell
+       connections that something changed and break the member's own
+       standing decisions.
+    4. **Presence:** a held vault does not answer pings (it looks locked
+       or offline). Recommended: as specified.
+    5. **The failure count** survives a lock and is reset only by a
+       successful check; each failure past ten locks again.
+       Recommended: as specified.
+    6. **No host alarm or email** for the ten-failure lock: the host sees
+       an ordinary lock (§13.7). Recommended: none now; revisit with
+       push (§14), which could wake desktops.
+    7. **Interval changes:** app only; a shorter value applies at once, a
+       longer one from the next check. Recommended: as specified.
+    8. **Existing vaults** start their clock at the first unlock under a
+       0.13.0 release, not held at once. Recommended: as specified
+       (there are no production vaults, and a full interval avoids a
+       surprise lock-out in staging).
+    9. **The app MUST hide cached vault content while held.**
+       Recommended: MUST; otherwise the hold protects only what the vault
+       serves, not what the phone already shows.
+    10. **`vault.held` cadence:** at the start of the hold and on count
+        changes, at most once per device per 10 minutes, to the app and
+        to desktops with an unexpired access session. Recommended: as
+        specified.
+    11. **A transfer's approval is a check** (success starts the clock;
+        wrong entries count as failed checks); an open transfer survives
+        the hold, a new one waits for a check. Recommended: as specified.
+    12. **The unlock result does not report the hold**: the app reads
+        `vault.status` after unlocking. Recommended: as specified (no
+        change to the sealed result's format, §11.4).
 
 ## 16. Test vectors
 
@@ -7752,6 +8309,33 @@ pending (§15, follow-up 1).
 
 ## 17. Changelog
 
+- **0.13.0** (2026-10-05): the daily owner check (owner decisions of
+  2026-10-05; §15 item 22). Independent of the open 0.11.0 (PR #122).
+  - §3.6 (new): `vault.owner_check{credential, utk_id, sealed{pin,
+    password}}`, a credential operation; the record `{last_at, deadline,
+    failures}` in DEK state; what starts the clock; the interval; the
+    hold (what keeps running, what stops, the owner devices' allow
+    list, `vault.held`); the ten-failure lock; what the apps do; the
+    copied-blob benefit.
+  - §1, §1.1 item 9; §2.2: what the hold shows, and to whom; §3.3: the
+    record in vault state; §3.5.3: the unlock window ends at a hold, a
+    wrong password in a check counts; §3.5.8, §3.5.9: the check and the
+    clone alarm.
+  - §6.7.1: a transfer's approval is a check; `device.transfer.create`
+    waits for one while held; §6.8: access sessions suspended; §9.1:
+    fan-out while held.
+  - §10: `vault.owner_check`, `vault.held`; §10.1: `owner_check_required`
+    and the `owner_check` sync kind; §10.2: the bodies, `owner_check` in
+    `vault.status`, `vault.locking{reason: "owner_check"}`; §10.6: the
+    check is the holder's; §10.8: `owner_check.interval_seconds`; §10.9:
+    `owner_check.*` audit and feed kinds, `drop.owner_check`; §10.10:
+    no ringing while held; §10.11: no status statements while held;
+    §10.17: no pongs while held.
+  - §11.11.5: recovery is not held, and its completion starts the clock.
+  - §12.1, §12.3: held is not locked; the ten-failure lock trigger.
+  - §13.5: rows for a device in other hands and a thief with both
+    secrets; §13.7: nothing new to the host; §13.8 (new).
+  - §15: item 22. §16: no new vectors (no new cryptography).
 - **0.12.0** (2026-10-05): LEASH delegations and status statements in
   the LEASH paper's §3.5 format (owner decision of 2026-10-05; §15
   item 21). Independent of the open 0.11.0 (enrollment codes, vettid.org

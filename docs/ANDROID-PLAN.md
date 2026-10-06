@@ -1,9 +1,12 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.3
+version: 0.1.4
 date: 2026-10-05
 changelog:
+  - 0.1.4: the daily owner check (VAULT-MESSAGING 0.13.0 §3.6, owner
+    decisions of 2026-10-05): follow-ups for A3 and A6 (§6), the Settings
+    and onboarding rows (§4)
   - 0.1.3 (editorial): D2 gold #FFC125 as in §3; GrapheneOS risk closed
     (staging accepted GrapheneOS attestation on 2026-10-05); current
     VAULT-MESSAGING and RELAY-PROTOCOL versions
@@ -16,7 +19,7 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.10.7) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.13.0) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Items screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
@@ -105,7 +108,8 @@ the destinations.
 | Approvals | — (VettID-specific) | Pending connection requests, grant requests, critical-item uses, share-rule decisions; approve/deny; critical items need the credential password |
 | Items | Folder list | Items per VAULT-ITEMS: name, category, typed fields, tags, sensitivity (data / secret / critical); filter by tag; add/edit from templates; share rules by tag (default: ask for each new item). Critical items live in the Protean Credential and are never shared by a rule |
 | Credential | — | Critical items inside the Protean Credential; unlock window; password change; the vault-held credential copy on/off |
-| Settings | Settings | Vault (status, release, lock, PIN); Security (credential, recovery, attestation info, biometric app lock and timeout); Privacy; App (theme, notifications and push path) |
+| Settings | Settings | Vault (status, release, lock, PIN); Security (credential, recovery, attestation info, biometric app lock and timeout, the owner-check interval 1–24 h); Privacy; App (theme, notifications and push path) |
+| Owner check | — (VettID-specific) | One screen: PIN and credential password together (VAULT-MESSAGING §3.6.5); also the "vault held" screen with the waiting counts and the lock action |
 | Avatar sheet | Account sheet | Vault status, lock vault, open account portal, sign out of this device |
 | Onboarding | Sign-in flow | Membership check → enroll vault (PIN, credential password) → first connection guide |
 
@@ -152,6 +156,39 @@ crypto directly; one ViewModel per screen with immutable UI state.
 
 Calls, devices/agents/LEASH, wallet, location and presence follow v1 in
 that order, each as its own phase.
+
+**Owner check** (VAULT-MESSAGING 0.13.0 §3.6, owner decisions of
+2026-10-05). The vault holds when the member has not given the PIN and
+the credential password together for 24 h (or the member's shorter
+interval). Follow-ups, in A3 unless noted:
+
+1. `:core:vault`: `vault.owner_check` (UTK-sealed `{pin, password}` with
+   the blob; the new blob is stored and acked like any credential
+   response), `vault.held`, `owner_check` in `vault.status`,
+   `owner_check_required`, `vault.locking{reason: "owner_check"}`,
+   `sync.event{owner_check}`, the `owner_check.*` feed kinds.
+2. **One check screen**: PIN and password on one screen, sent together;
+   both zeroized after the answer. Shows which entry was wrong, the
+   checks left before the lock (10 − `failures`) and a running backoff.
+3. **When to ask**: at the first app open or return to the foreground
+   after the deadline, before any vault screen; never over an action in
+   progress. A refused request keeps its input (drafts stay drafts) and
+   the prompt follows when the member leaves the screen.
+4. **Held screen**: no cached vault content (messages, items,
+   connections, feed) while held; only the check, the `vault.held`
+   counts ("3 new messages waiting") and the lock action. After the
+   check, catch up (`sync.since`, `feed.list`, `message.list`).
+5. **Early warning** (A6, with notifications): from 1 h before the
+   deadline, a banner and a local notification with "check now".
+6. **Locked and past the deadline**: one screen for PIN and password;
+   unlock, read `vault.status`, then send the check without asking again.
+7. **Settings**: the interval (1–24 h); shortening may hold the vault at
+   once, so the app offers a check with the change.
+8. **Lock after ten failures**: show the locked state and the urgent
+   feed item after the next unlock.
+9. Tests: an injectable clock in the dev stack (vettid-vault) to drive a
+   vault past its deadline; instrumented tests for the held screen, the
+   check, a wrong PIN, a wrong password and the ten-failure lock.
 
 **Location phase notes** (from vettid-dev `docs/plans/location-sharing-ux.md`,
 input for when the location batch is specified in VAULT-MESSAGING): show a
