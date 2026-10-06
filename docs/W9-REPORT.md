@@ -1,6 +1,6 @@
 ---
 title: W9-REPORT
-status: draft (results through 2026-10-05; TBD sections close on 2026-10-06 and 2026-10-12)
+status: results through 2026-10-06; open: S1/S2 key deletion confirmations (2026-10-12/13) and the drill with a vault at S4
 version: 0.1.0
 date: 2026-10-06
 owner: Al Liebl (Mesmer)
@@ -275,11 +275,10 @@ and the part with a vault and notice emails on S3 when S4 deprecates it
 The production checklist is [W10-READINESS.md](W10-READINESS.md). From
 W9 specifically:
 
-- Close the TBD sections above (recovery, Pixel 7 wipe, S2 → S3,
-  retirement drill with notices, S1 key deletion, kill-switch phone
-  check) and update this page.
-- O6 decision from §4 (B3), before the release-1 tag; update
-  VAULT-RELEASES §8.8.
+- Confirm the S1 and S2 key deletions (2026-10-12, 2026-10-13) and
+  run the retirement drill with a vault and notice emails on S3 at S4.
+- O6 decided 2026-10-06: keep 1 vCPU / 5120 MiB for release 1
+  (VAULT-RELEASES §8.8, #142).
 - Canary path never exercised (P28a, B6); app support for an unpublished
   canary manifest (P31, B5).
 - Negative tests of VAULT-RELEASES §12.1 step 5 not recorded (P28b):
@@ -287,5 +286,5 @@ W9 specifically:
 - S4: #122 enrollment codes and #135 daily owner check implemented
   together (vettid-vault, member API and portal, Android), proven on a
   staging release (B2).
-- W10-READINESS P26 says the cancel → enable cycle is not done; #112
-  records it as done for S1 (without the unlock); align it.
+- App: "VettID cannot connect" on first launch after idle (one retry
+  connects); fix in progress.
