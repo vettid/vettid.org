@@ -38,7 +38,7 @@ owner's test session of 2026-10-05. Times are UTC. Sections marked
 | Two members: connect (commit-then-reveal SAS), messaging, declines, `device.pair.rejected` | pass |
 | Capacity on S3 (1 vCPU / 5 GiB enclave) | PASS; see §4 |
 | Kill switch (vault service pause) | deployed (staging and production); staging pause/resume and phone unlock refusal pass |
-| Recovery (24 h wait, QR, new phone) | **TBD (2026-10-06)** |
+| Recovery (24 h wait, code, new phone) | pass; old phone wipe passed after vettid-android #66 |
 | S2 → S3 move, manifest serial 4 | **TBD (2026-10-06)** |
 | Retirement drill with a vault and notice emails (on S2) | **TBD (2026-10-06)** |
 | S1 key deletion confirmed | **TBD (2026-10-12)** |
@@ -138,26 +138,51 @@ Production: deployed 2026-10-05; switch parameter absent (service on),
 both alarms OK with the security-alerts topic, watch job reports 0. Not
 paused in production.
 
-## 6. Recovery test — TBD (2026-10-06)
+## 6. Recovery test (2026-10-06): pass
 
-Requested for test member 1 on 2026-10-05 15:23 (vault on S2). Code
-available 2026-10-06 15:23, expires 2026-10-07 15:23. Target: Pixel 10
-Pro Fold (third test phone, Android 17, verified boot yellow).
+Requested for test member 1 on 2026-10-05 15:23 UTC (vault `93f722a8…`
+on S2). Code available 2026-10-06 15:23, expires 2026-10-07 15:23.
+Target: Pixel 10 Pro Fold, staging build `8f5e962` signed with the
+automation key.
 
-To record: code opened in the browser (§11.11.2), QR scanned on the
-Fold, register (`recovery_registered` is not sent by S2, so the portal
-will not show `registered`; vettid-vault #33), unlock,
-`credential_backup` path, credential recovered, connection to member 2
-still working, Pixel 7 replaced.
+- 15:25: the portal's recovery status read `available` with a sealed
+  code; opened with the browser key (§11.11.2 ECDH/HKDF/AES-GCM) into a
+  32-character code. Secrets went from `local/` to the phone only.
+- On the Fold: "I lost my phone" → account sign-in (magic link from
+  test mail, pasted; the link did not open the app directly) → "Your
+  code is ready" → the code typed (not scanned) → "The code was
+  accepted" → PIN → vault unlocked → credential password → "Your vault
+  is on this phone now" (15:35).
+- The recovered vault showed the existing conversation with member 2.
+  Credential version 2 (rotated by the recovery).
 
-Result: _TBD_.
+Findings, fixed the same day:
+- A password manager (Proton Pass) offered to save the credential
+  password. vettid-android #65 excludes every secret field (PIN,
+  credential password, recovery and transfer codes, sign-in link,
+  invitation, delete phrase) from autofill; re-checked on the Fold:
+  opening the credential unlock window with the password raised no
+  prompt.
 
-### 6.1 Pixel 7 replaced-app wipe — TBD (2026-10-06)
+### 6.1 Pixel 7 replaced-app wipe: pass after a fix
 
-After the recovery, the Pixel 7 (old holder) should erase its local
-state on the authenticated `device.unlinked{replaced}` and show the
-welcome screen (vettid-android #57); if it was offline past the relay's
-retention, the manual erase offer applies (#58, #61). Result: _TBD_.
+- First check (build from 2026-10-05, then current master `68bbfc7`):
+  **fail**. The old app crashed on every launch with an uncaught
+  `relay: 403 token_revoked` (its answer to a vault message queued
+  before the recovery was refused by the relay, the exception escaped
+  the mailbox collector, and the message was never acked, so the queued
+  `device.unlinked{replaced}` behind it was never read).
+- Fix: vettid-android #66 (relay errors never kill the app; a refused
+  answer is acked and counted; `token_revoked` from the own vault's
+  mailbox counts toward the erase offer per §6.7.1; a process-wide
+  safety net for network errors).
+- Retest with `0aa8fd1` (updated in place, owner's staging key, data
+  kept): the app read `device.unlinked{replaced}` and erased VettID's
+  own data by itself, then showed the welcome screen. No crash.
+- Spec follow-ups (editorial): name `403 token_revoked` as the "refused
+  relay key" of §6.7.1; say what an owner device does when its own
+  vault's mailbox answers `token_revoked` (§8.6); consider requiring a
+  device to ack a vault message even when its answer is refused.
 
 ## 7. S2 → S3 move — TBD (2026-10-06)
 
