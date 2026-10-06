@@ -30,8 +30,9 @@ changelog:
     sessions and issues no LEASH status statements. Ten consecutive
     failed checks lock the vault. The member may turn the hold off
     (`owner_check.hold`, optionally until `hold_off_until`, at most 30
-    days), but only within a successful check (owner decision of
-    2026-10-06) (§3.6, §3.6.7, §3.5.4, §1.1, §2.2, §3.3, §3.5.3,
+    days), but only within a successful check; past the deadline the
+    app is gated either way, and the switch frees only desktops, agents,
+    calls and presence (owner decisions of 2026-10-06) (§3.6, §3.6.7, §3.5.4, §1.1, §2.2, §3.3, §3.5.3,
     §3.5.9, §6.7.1, §6.8, §9.1, §10, §10.1, §10.2, §10.6, §10.8, §10.9,
     §10.10, §10.11, §10.17, §11.11.5, §12.1, §12.3, §13.5, §13.7, §13.8,
     §15 item 22)
@@ -322,8 +323,9 @@ described in RFC 2119.
    least every 24 h the member gives the vault their PIN and credential
    password together. Without that, the vault holds: it keeps serving its
    peers but serves its owner's devices nothing but the check (§3.6).
-   The member may turn the hold off, only within a check (§3.6.7; owner
-   decision, 2026-10-06).
+   The member may turn the hold of the rest of the vault off, only
+   within a check; the app is gated past the deadline regardless
+   (§3.6.3, §3.6.7; owner decisions, 2026-10-06).
 
 ### 1.2 Relay features used
 
@@ -1116,9 +1118,12 @@ verified together. When the interval passes without one, the vault
 devices nothing but the check.
 
 The check is vault-enforced. It does not depend on the app behaving: an
-app that never asks still meets the hold at the deadline. The member
-decides whether their vault holds: the hold is on by default, and only a
-successful check can turn it off (§3.6.7; owner decision of
+app that never asks still meets the hold at the deadline. Past the
+deadline **the app is always gated**: it may send only the check and
+what the check needs, whatever the settings (§3.6.3). The member
+decides whether **the rest of the vault** holds as well (desktops,
+agents, calls, presence): the hold is on by default, and only a
+successful check can turn it off (§3.6.7; owner decisions of
 2026-10-06).
 
 #### 3.6.1 The check
@@ -1230,7 +1235,20 @@ apart), so no owner request is served after the deadline. A locked vault
 does nothing; one that unlocks past its deadline is held from the unlock
 on.
 
-**Entering the hold**, in one flush, the vault:
+**The app gate** (owner decision of 2026-10-06). From the deadline
+until a successful check, the holder's requests are limited to the
+holder's row of the allow list below, and everything else it sends is
+answered `owner_check_required` (or dropped and audited
+`drop.owner_check`), **whether or not the hold is on**. The app cannot
+be used past the deadline without the check; the hold switch (§3.6.7)
+never changes that. With the hold off, only the app is gated: it gets no
+fan-out but `vault.held` (with its counts) and the messages listed for
+it below, and while the app is gated an incoming call rings on it but
+its `call.answer` is dropped until a check (desktops may answer).
+`vault.status` reports `state: "due"` for a vault past its deadline with
+the hold off, `"held"` with it on.
+
+**Entering the hold** (the hold on), in one flush, the vault:
 
 - ends the credential's unlock window (§3.5.3), so nothing is signed
   with the credential key;
@@ -1407,9 +1425,11 @@ There is no host alarm and no email (§13.7; §15 item 22).
   date (at most 30 days ahead), and warns plainly what it gives up
   (§13.8). Turning it on needs no check.
 - With the hold **off**, the app **MUST** show a persistent "hold is
-  off" indicator (with the end date, if any) on its main screens, and
-  still asks for the check after the deadline, but the prompt is
-  dismissible.
+  off" indicator (with the end date, if any) on its main screens. The
+  check is **never dismissible**: past the deadline the app is gated by
+  the vault whether or not the hold is on (§3.6.3), and the app MUST ask
+  for the check before any other use, exactly as when held (the rules
+  above, never mid-action, apply unchanged).
 - **Desktops** cannot do the check: they hold no credential. A desktop
   SHOULD show the hold, the counts and "open your app to continue", and
   SHOULD hide its cached content likewise.
@@ -1423,9 +1443,9 @@ the holder's copy is the only current one, and a later presentation of
 the copy is a clone (§3.5.9). Before 0.13.0 a copy stayed current until
 the member's next credential operation, which could be weeks away. The
 check also bounds the "byte-identical copy used before the member's next
-use" residual (§13.5) to one interval. With the hold off (§3.6.7) the
-copy goes stale only when the member does a check or another credential
-operation.
+use" residual (§13.5) to one interval for a member who uses the app
+(which is gated without a check, §3.6.3); a member away from the app
+does no check, so the copy then goes stale at their next check.
 
 #### 3.6.7 Turning the hold off
 
@@ -1459,20 +1479,26 @@ back to a held vault. The settings `owner_check.hold` (boolean, default
   that time (the vault compares it as it does the deadline, §3.6.3); if
   the deadline has passed by then, the vault is held at once. Without
   it, the hold stays off until the member turns it on.
-- **With the hold off:** the clock and the deadline run as usual; the
-  app still asks for the check after the deadline, dismissibly
-  (§3.6.5); the vault does not hold, so its owner's devices and agents
-  are served as usual and agents' status statements are renewed as
-  usual (§10.11). Checks that are attempted are still checks: their
-  failures count in the backoffs and toward the ten-failure lock
-  (§3.6.4), and a success resets the clock.
+- **With the hold off** (owner correction of 2026-10-06): the clock and
+  the deadline run as usual, and **the app is still gated** past the
+  deadline (§3.6.3): the member must pass the check before using the
+  app; the prompt is never dismissible. What the switch turns off is the
+  hold of **the rest of the vault**: desktops' access sessions continue,
+  agents keep running and their status statements renew as usual
+  (§10.11), incoming calls ring (on desktops, and on the app, which must
+  pass the check before it can answer), presence is answered, and
+  devices other than the app get their usual fan-out. Checks are still
+  checks: their failures count in the backoffs and toward the
+  ten-failure lock (§3.6.4), and a success resets the clock.
 - **Every change is audited and announced:** audit and feed item
   `owner_check.hold_changed` (`ref` = `on`, `off`, `off_until:<ts>` or
   `on:expired` when `hold_off_until` passed; feed priority `high`), and
   `sync.event{kind: "settings.changed"}` to the other devices.
   `vault.status` reports `hold` and `hold_off_until`.
 - **What it gives up** is stated in §13.8: with the hold off, a thief
-  with an unlocked phone and app keeps access until the vault locks.
+  with the unlocked phone still cannot use the app past the deadline,
+  but desktops and agents keep their access until the hold is turned
+  back on, the vault locks or a check succeeds.
 
 ## 4. Cryptographic construction
 
@@ -3215,7 +3241,7 @@ an answer to an unknown or expired id is dropped.
 |---|---|---|
 | `vault.enrolled` | — | §11.3 |
 | `vault.enroll.confirm` (app) | `{}` | `{}` |
-| `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; `owner_check` (0.13.0) is `{state: "ok" \| "held", deadline, interval_seconds, failures, hold, hold_off_until?}` to apps and desktops and `{state}` to agents (§3.6, §3.6.7) |
+| `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; `owner_check` (0.13.0) is `{state: "ok" \| "due" \| "held", deadline, interval_seconds, failures, hold, hold_off_until?}` to apps and desktops and `{state}` to agents (§3.6, §3.6.7) |
 | `vault.owner_check` (app: the holder) | `{credential, utk_id, sealed{pin, password, hold?, hold_off_until?}}` | `{credential, version, utks, deadline, interval_seconds, hold, hold_off_until?}` (§3.6.1, §3.6.7); `bad_pin`, `bad_password`, `backoff`, `utk_invalid`, `stale_credential`, `credential_frozen`, `rotation_required`, `forbidden` (not the holder), `bad_request` (a PIN that is not 6–32 digits) |
 | `vault.held` (V→D, to the app and desktops in an access session) | — | `{deadline, waiting: {messages, requests, calls, other}}` (§3.6.3) |
 | `vault.lock` (app, desktop) | `{}` | `{}`; then `vault.locking` |
@@ -7449,7 +7475,7 @@ it can read and write only its own objects and use only its own relay key
 | Owner app (the vault's one app) | Whatever its role allows, including unlock attempts if the PIN is known; with the PIN and the password, a transfer to another phone (§6.7.1). Since 0.13.0 only until the owner check's deadline (at most 24 h after the member's last check): then nothing but the check, which needs the PIN and the password, under both backoffs, with a lock after 10 consecutive failures (§3.6) | Recovery (§11.11), which replaces it |
 | An unlocked app, or a desktop in an access session, in someone else's hands, without the PIN and the password (0.13.0) | What its role allows until the deadline; then nothing: the vault holds, the app hides its cached content, desktops' sessions are suspended; ten wrong guesses lock the vault, which then needs the PIN to open (§3.6) | Recovery; a shorter `owner_check.interval_seconds` |
 | A thief who holds the app and knows both the PIN and the password | Everything the app can do: the check passes, and the hold changes nothing (§13.8) | Recovery (§11.11), which replaces the app; change the PIN and the password |
-| An unlocked app in someone else's hands while the member has turned the hold off (§3.6.7) | What its role allows until the vault locks or the hold comes back on (`hold_off_until`); it cannot turn the hold off itself, or keep it off, without the PIN and the password; ten failed checks still lock the vault | Recovery; `vault.lock` through the account site; keep the hold on, or off only with an end date |
+| The vault's desktops and agents, or an unlocked app, in someone else's hands while the member has turned the hold off (§3.6.7) | The app: nothing past the deadline but the check, as with the hold on. Desktops and agents: what their sessions and grants allow, until the hold comes back on (`hold_off_until` or the member), the vault locks or a check succeeds. Nobody can turn the hold off, or keep it off, without the PIN and the password; ten failed checks still lock the vault | Turn the hold on (no check needed); `device.session.end`, `device.unlink`, `leash.grant.revoke`; `vault.lock` through the account site; recovery |
 | Desktop | Within an access session, what desktops may send; step-up types (secret items' values, item and tag changes, profile, settings, share rules and decisions, invitations, removals, grant decisions, action configurations, introductions, location shares, the location log, the presence policy) only with an app's approval; never critical items or wallet spends; nothing after the session ends (§6.8) | `device.session.end`; unlink |
 | Agent | Paused while the vault is held (§3.6.3): refused in the vault, and its delegations rejected by relying parties within `status_ttl` + 60 s. Otherwise, within its access session, only what its LEASH grants cover: through `ask` grants nothing without an app's approval of each request (at most 20 referrals an hour), through `auto` grants up to their rate limits; LEASH operations only on the `data` and `secret` items its share rules include, never critical ones; never app-only types, invitations, credential, device or grant management. Refused requests are throttled and repeated ones suspend it; its activity is summarised in the audit log, so it cannot push older entries out (§10.11) | `leash.grant.revoke`, `device.session.end`, `device.unlink`; suspension is automatic |
 | A LEASH delegation (every grant) | A claim, to relying parties that trust the member's credential key, that the agent holds that scope, until the grant's `expires_at` if any; the vault never relies on it. A relying party that requires a status statement accepts a revoked delegation for at most its `status_ttl` (≤ 1 h, default 15 min) plus 60 s of skew (LEASH §3.5's bound); one that does not can be shown it until `exp` (§10.11) | `leash.grant.revoke` (no new statements); a shorter `status_ttl` |
@@ -7573,7 +7599,9 @@ their owner. Period.")
 ### 13.8 What the owner check protects, and what it does not
 
 The daily owner check (§3.6) bounds how long an owner device can act
-without the member, while the hold is on (the default; §3.6.7).
+without the member: the app always (it is gated past the deadline,
+§3.6.3), desktops and agents while the hold is on (the default;
+§3.6.7).
 
 **It protects against:**
 
@@ -7598,17 +7626,18 @@ without the member, while the hold is on (the default; §3.6.7).
 
 **It does not protect against:**
 
-- **anything, past the deadline, while the member has turned the hold
-  off** (§3.6.7). Turning it off gives up the hold's protection: a thief
-  with an unlocked phone and app keeps access, as before 0.13.0, until
-  the vault locks (by any §12.3 trigger, `vault.lock` from the account
-  site, or ten failed checks) or the hold comes back on at
-  `hold_off_until`. Agents keep running. The thief cannot turn the hold
-  off, or extend `hold_off_until`, without the PIN and the password,
-  since only a successful check can; turning it on needs no check, so it
-  only ever moves toward protection. Members who turn it off should set
-  an end date; the app warns and shows a persistent indicator
-  (§3.6.5);
+- **desktops and agents past the deadline, while the member has turned
+  the hold off** (§3.6.7). A thief with the unlocked phone still cannot
+  use the app past the deadline: the vault gates the app whatever the
+  switch says. But desktops and agents keep their access (sessions,
+  grants, status statements) until the hold is turned back on (by the
+  member or at `hold_off_until`), the vault locks (any §12.3 trigger,
+  `vault.lock` from the account site, or ten failed checks) or a check
+  succeeds. Nobody can turn the hold off, or extend `hold_off_until`,
+  without the PIN and the password, since only a successful check can;
+  turning it on needs no check, so it only ever moves toward protection.
+  Members who turn it off should set an end date; the app warns and
+  shows a persistent indicator (§3.6.5);
 
 - **a thief who holds the app and knows both the PIN and the password.**
   The check is knowledge-based; they pass it every day. Recovery
@@ -8089,10 +8118,13 @@ Follow-ups:
        off rides on a successful `vault.owner_check` (`hold: false`, an
        optional `hold_off_until` at most 30 days ahead, after which it
        comes back on by itself); turning it on needs no check and holds
-       at once if the deadline has passed. With it off the clock still
-       runs, the app still prompts (dismissibly), agents keep running,
-       and attempted checks still count toward the backoffs and the
-       ten-failure lock. Every change is audited and a feed item
+       at once if the deadline has passed. Corrected the same day: the
+       check is never dismissible; past the deadline the vault gates
+       the app whether or not the hold is on. With the hold off only
+       the rest of the vault keeps running (desktops' sessions, agents
+       and their status statements, ringing, presence, fan-out to
+       devices other than the app), and attempted checks still count
+       toward the backoffs and the ten-failure lock. Every change is audited and a feed item
        (`owner_check.hold_changed`); the app shows a persistent "hold is
        off" indicator.
 
@@ -8419,9 +8451,11 @@ pending (§15, follow-up 1).
 - **0.13.0** (2026-10-06): the daily owner check (owner decisions of
   2026-10-05 and 2026-10-06; §15 item 22). Independent of the open
   0.11.0 (PR #122).
+  - §3.6.3: the app gate, past the deadline whatever the hold switch
+    says; `vault.status` `state: "due"`.
   - §3.6.7 (new): the member's hold switch, `owner_check.hold` and
     `owner_check.hold_off_until`; off only within a successful check,
-    on at any time; `owner_check.hold_changed`; `hold` and
+    on at any time; with it off only the app is gated; `owner_check.hold_changed`; `hold` and
     `hold_off_until` in `vault.status`, the check's payload and answer
     (§3.5.4, §10.2, §10.6, §10.8, §10.9, §10.11, §13.5, §13.8).
   - §3.6 (new): `vault.owner_check{credential, utk_id, sealed{pin,

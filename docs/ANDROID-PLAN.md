@@ -189,9 +189,12 @@ interval). Follow-ups, in A3 unless noted:
    `hold: false` and an optional end date up to 30 days ahead in the
    sealed payload) and comes with a plain warning of what it gives up;
    turning it on is a plain `settings.set`. While off: a persistent
-   "hold is off" indicator (with the end date) on the main screens, and
-   the post-deadline check prompt is dismissible. Show
-   `owner_check.hold_changed` feed items.
+   "hold is off" indicator (with the end date) on the main screens. The
+   check is never dismissible: past the deadline the vault gates the app
+   (`vault.status` `state: "due"`) exactly as when held, so the same
+   check screen comes first; only desktops, agents, calls (which may
+   ring, but the app answers only after the check) and presence keep
+   running. Show `owner_check.hold_changed` feed items.
 8. **Lock after ten failures**: show the locked state and the urgent
    feed item after the next unlock.
 9. Tests: an injectable clock in the dev stack (vettid-vault) to drive a
