@@ -1,8 +1,8 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.5
-date: 2026-10-05
+version: 0.1.7
+date: 2026-10-06
 owner: Al Liebl (Mesmer)
 changelog:
   - 0.1.0: V5 plan. Release pipeline, keys, infrastructure, release
@@ -41,9 +41,20 @@ changelog:
     earlier releases only; the admin-site canary switch; enclave memory
     5 GiB throughout; staging served since S1; the "Today" paragraph
     marked as the state when the plan was written
+  - 0.1.6 (owner decisions of 2026-10-06; vettid-android #63): how the
+    canary phone gets the canary manifest (§10.1): the tester shares the
+    signed served-<s>.json to the app, which verifies it under its pinned
+    keys, shows serial, key and releases and installs it on confirmation;
+    the selection rule (VAULT-MESSAGING 0.14.0 §11.10.1); removal after
+    publication (automatic) or a failed canary (Settings); risk 10, a
+    leaked canary document (§14)
+  - 0.1.7 (editorial; W10-READINESS 0.1.3): §8.8 records the capacity
+    measured on staging S3 (2026-10-05) and the owner's O6 decision of
+    2026-10-06 (keep 1 vCPU / 5120 MiB for release 1; revisit when unlock
+    queueing shows in metrics); §15 O6 updated to match
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
-  - VAULT-MESSAGING.md (0.10.7) §11.10 release updates, §12.5 deletion, §13.5
+  - VAULT-MESSAGING.md (0.14.0) §11.10 release updates, §12.5 deletion, §13.5, §13.9
   - RELEASE-UPDATES.md (0.1.0) — member-facing; §3 changes with this plan
   - MEMBER-API.md "Vault", RUNBOOK.md, ARCHITECTURE.md
   - vettid-vault docs/SMOKE.md (hardware smoke test, 2026-10-02)
@@ -972,12 +983,34 @@ release_starting`. The `vault-scaler` Lambda (host stack):
 
 From the smoke test: Argon2id peaks at about 76 MB per vault process, the
 supervisor about 13 MB. On an m7g.large (2 vCPUs, 8 GiB) the enclave gets
-1 vCPU and 5 GiB (5120 MiB, O6; the parent keeps the rest), so about 60–70
-concurrently unlocked vaults if processes stay near their peak; steady
-state RSS after the KDF is to be measured (W9). One vCPU serializes
-Argon2id (a few hundred milliseconds each), which bounds unlock bursts.
-`m7g.xlarge` (3 enclave vCPUs, ~12 GiB) is the next step. Plenty for the
-preview.
+1 vCPU and 5 GiB (5120 MiB, O6; the parent keeps the rest). One vCPU
+serializes Argon2id, which bounds unlock bursts. `m7g.xlarge` (3 enclave
+vCPUs, ~12 GiB) is the next step.
+
+*Measured (W9, staging S3, 2026-10-05):* `vault-parent -selftest
+-capacity` on an S3 host (m7g.large, enclave 1 vCPU / 5120 MiB; RUNBOOK
+"Capacity measurement", vettid-vault SMOKE.md), PASS:
+
+| Measure | Result |
+|---|---|
+| Unlock p50 at concurrency 1 / 2 / 4 | 195 ms / ~400 ms / ~830 ms (the KDF dominates; one vCPU serializes it) |
+| Vaults held when the fill stopped (`memory_floor`) | 58 |
+| Transient memory per unlock | ~76 MiB |
+| Steady marginal memory per unlocked vault | 4.1 MiB |
+| Projected idle unlocked vaults per host | ~980 |
+| Idle CPU | 0.9 ms per vault per minute |
+
+So the limit is concurrent unlocks (one vCPU for the KDF and ~76 MiB each
+for a moment), not steady memory: 58 is the conservative figure for a
+burst of unlocks, ~980 the figure for idle unlocked vaults. Record:
+W9-REPORT §4.
+
+*O6 decision (owner, 2026-10-06):* keep the 1 vCPU / 5120 MiB enclave on
+m7g.large for release 1; revisit when unlock queueing shows in metrics
+(unlock latency above the single-unlock figure under load; the parent's
+EMF metrics, §8.7). A change means new host files at a release commit
+(the size is pinned by `host_files_sha256`), so it takes effect with a
+release, not a redeploy (W10-READINESS R3). Plenty for the preview.
 
 ### 8.9 Cost (us-east-1, on demand, approximate)
 
@@ -1054,7 +1087,7 @@ canary release (also before production release 1, when nothing is
 `active`), their vaults sealed to it are routed there; for everyone else
 it is unknown (410). The scaler manages a `canary` row like any release.
 The test device needs the canary manifest out of band (it is not
-served); the app has no such path yet (W10-READINESS P31, B5).
+served); see "The canary manifest on the test phone" below.
 Step 10: `manifest.ts publish` with the same signed document, so the
 canary vault's recorded serial is the published one; the manifest sync
 turns the row into an `active` one. A test member's flag is an operator
@@ -1062,11 +1095,46 @@ write on the members table, set from the admin site (#95; RUNBOOK
 "Canary routing", ADMIN-API "Vault canary"); there is no member-facing
 switch.
 
+**The canary manifest on the test phone** (owner decisions of
+2026-10-06; vettid-android #63; the app's rules are normative in
+VAULT-MESSAGING §11.10.1, 0.14.0):
+
+- *Delivery.* The canary tester shares the signed
+  `local/vault/<channel>/served-<s>.json` from step 9 to the VettID app
+  as a file (Android share intent). It travels only over a private
+  channel (a USB transfer from the owner's machine, for example), never
+  from a public URL (RUNBOOK "Canary manifest on the test phone"). The
+  path works in release builds: the canary phone runs the release build
+  signed with the upload key (W10-READINESS B8).
+- *Verification.* The app accepts the document only if it is signed by
+  a manifest key that build pins (key A or B in release builds, the
+  staging key in staging builds) and is in the strict manifest format.
+  It refuses the document if its serial is lower than the highest serial
+  the phone has used, or if the published manifest already has that
+  serial or a newer one. It shows the serial, the `key_id` and the listed
+  releases, and installs the document only after the tester confirms.
+  The document is stored encrypted on the phone, is erased by the
+  replaced-phone wipe, and can be removed in Settings → Attestation
+  ("Stop using the test manifest").
+- *Selection.* Before each enroll, unlock and recovery register, the app
+  uses whichever manifest has the higher serial; on a tie the published
+  one. A 404 on the published manifest (production release 1, when
+  nothing is served) falls back to the canary manifest. The app drops the
+  canary manifest automatically once the published serial reaches it. A
+  canary manifest that no longer verifies is ignored.
+- *After step 10* nothing is needed on the phone: the published
+  document is the same serial, so the app switches to it and drops the
+  canary copy.
+
 If the canary fails before step 10: the manifest s+1 is never published
 (the next one is s+2); N's group is deleted; N becomes `removed` in
 the release list (it admits nothing, and no later key admits it) and its
 key is scheduled for deletion at once (no member was ever on it). The
-fix ships as N+1.
+fix ships as N+1. On the test phone the tester removes the canary
+manifest (Settings → Attestation). The phone has used serial s+1, so it
+refuses the published s: a vault on an older release that it unlocked
+during the canary opens again once s+2 is published (N `removed`).
+Publish s+2 promptly when such a vault exists.
 
 ### 10.2 Hotfix
 
@@ -1260,6 +1328,15 @@ W4 can go any time; W2 and W3 can run beside W1; W5–W8 follow W3.
 8. **nitro-cli in a container** is expected to work but unconfirmed (W2);
    the fallback is building on Image Builder.
 9. **Region-bound keys**: a us-east-1 outage takes every vault down.
+10. **A leaked canary manifest** (accepted, owner decision 2026-10-06;
+    VAULT-MESSAGING §13.9). Anyone holding an unpublished canary
+    document could load it into the app and move their own vault into
+    the canary release. That vault is then unreachable for them (410)
+    until the release is published, and for good if the canary fails.
+    The document stays with the owner and the canary tester. A
+    canary-only app build with separate signing would close this; it is
+    a possible later hardening tied to the canary build's signing
+    (W10-READINESS B8), not done now.
 
 ## 15. Owner decisions
 
@@ -1272,7 +1349,7 @@ All ten recommendations below were **accepted by the owner on 2026-10-04**.
 | O3 | Manifest key custody | **Key A in KMS** (vault account, owner-only signer role with MFA), **key B offline** on a hardware token in a safe; both pinned. A separate signing account only if a second operator joins. |
 | O4 | Cadence | **Monthly at most**, skipping months without member-visible change; hotfixes any time |
 | O5 | Retirement window | **12 months** from supersession, final notice 90 days, KMS window 30 days; for an exploited vulnerability, a shorter window of **no less than 60 days** |
-| O6 | Instance size | **m7g.large**, enclave 1 vCPU and 5 GiB; revisit after the capacity measurement (W9) |
+| O6 | Instance size | **m7g.large**, enclave 1 vCPU and 5 GiB. Measured on S3 (W9, §8.8); owner 2026-10-06: kept for release 1, revisit when unlock queueing shows in metrics |
 | O7 | Always-on minimum for the current release | **0 until production members exist** (on-demand start, ~2–3 min first unlock), **1 from the Android beta** on |
 | O8 | Android signing digest(s) to pin (blocks release 1) | Pin the **Play app signing certificate and the upload certificate** used for direct builds, decided when the Android signing key is created |
 | O9 | Data bucket retention and DR | Versioned, **7-day** noncurrent retention; region loss accepted for the preview; no second-region keys |

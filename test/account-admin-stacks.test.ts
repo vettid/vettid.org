@@ -500,18 +500,30 @@ describe('VettidOrgMemberApiStack', () => {
       for (const a of Object.values<any>(t.findResources('AWS::CloudWatch::Alarm'))) expect(a.Properties.AlarmActions).toBeUndefined();
     });
 
-    test('in production (the management account) both alarm to the security-alerts topic; the first also says when it ends', () => {
+    test('a silent watch alarms: no VaultServicePaused sample for 20 minutes (missing data breaches)', () => {
+      t.hasResourceProperties('AWS::CloudWatch::Alarm', {
+        AlarmName: 'vettid-org-vault-service-watch-silent', Namespace: 'VettID/MemberApi', MetricName: 'VaultServicePaused',
+        Statistic: 'SampleCount', Period: 300, EvaluationPeriods: 4, DatapointsToAlarm: 4, Threshold: 1,
+        ComparisonOperator: 'LessThanThreshold', TreatMissingData: 'breaching',
+      });
+    });
+
+    test('in production (the management account) all three alarm to the security-alerts topic; the paused and silent-watch alarms also say when they end', () => {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { ORG } = require('../lib/config');
       const prodApp = new cdk.App({ context: { vaultsStreamArn: 'arn:aws:dynamodb:us-east-1:369484479783:table/vettid-org-vaults/stream/2026-10-05T00:00:00.000' } });
       const p = Template.fromStack(new VettidOrgMemberApiStack(prodApp, 'MemberApiProd', { config: loadConfig(prodApp.node), env: { account: ORG.management, region: 'us-east-1' } }));
       const topic = `:sns:us-east-1:${ORG.management}:vettid-org-security-alerts`;
-      const alarms = Object.values<any>(p.findResources('AWS::CloudWatch::Alarm')).filter((a) => String(a.Properties.AlarmName).startsWith('vettid-org-vault-service-paused'));
-      expect(alarms).toHaveLength(2);
+      const alarms = Object.values<any>(p.findResources('AWS::CloudWatch::Alarm')).filter((a) => String(a.Properties.AlarmName).startsWith('vettid-org-vault-service-'));
+      expect(alarms.map((a) => a.Properties.AlarmName).sort()).toEqual([
+        'vettid-org-vault-service-paused', 'vettid-org-vault-service-paused-24h', 'vettid-org-vault-service-watch-silent',
+      ]);
       for (const a of alarms) expect(JSON.stringify(a.Properties.AlarmActions)).toContain(topic);
       const first = alarms.find((a) => a.Properties.AlarmName === 'vettid-org-vault-service-paused');
       expect(JSON.stringify(first.Properties.OKActions)).toContain(topic);
       expect(alarms.find((a) => a.Properties.AlarmName.endsWith('-24h')).Properties.OKActions).toBeUndefined();
+      const silent = alarms.find((a) => a.Properties.AlarmName.endsWith('-watch-silent'));
+      expect(JSON.stringify(silent.Properties.OKActions)).toContain(topic);
     });
 
     test('no deploy creates or changes the parameter', () => {

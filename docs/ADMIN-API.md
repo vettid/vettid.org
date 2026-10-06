@@ -128,8 +128,10 @@ row (Members) with a confirmation, and lists testers below the members.
 The operator's pause of the member API's vault routes (MEMBER-API "Vault
 service pause"; owner decision 2026-10-05): while paused, the routes that
 start or change vault activity (enclave, enroll, unlock, recovery request
-and register) answer `503 vault_unavailable`; status, polling, lock, the
-recovery status and cancels keep working. No vault, key, manifest or
+and register; since MEMBER-API 2.0.0 also setup-code issue, redeem and
+recovery claim) answer `503 vault_unavailable`; status, polling, lock, the
+recovery status and cancels, and reading or revoking a setup code keep
+working. No vault, key, manifest or
 release row is touched. The state is the SSM parameter
 `/vettid-org/<stage>/switch/vault-service` in the member API's account
 (no parameter: on). Served by its own Lambda, whose role may only get

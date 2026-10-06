@@ -8,7 +8,7 @@ document maps the paper onto the vault and records what is and is not built.
 It was Appendix B of the paper until the paper was made vendor-neutral.
 
 The vault's normative specification is [VAULT-MESSAGING](VAULT-MESSAGING.md)
-(version 0.12.0, draft). Its §10.11 maps the paper's terms onto the vault. The
+(version 0.14.0, draft). Its §10.11 maps the paper's terms onto the vault. The
 code is in [vettid/vettid-vault](https://github.com/vettid/vettid-vault). Section
 numbers in the right-hand column refer to VAULT-MESSAGING unless stated.
 
@@ -33,9 +33,11 @@ Since VAULT-MESSAGING 0.12.0, VettID's delegation and status statement use the
 paper's §3.5 format. That covers the members, `sig` and `status_sig`, the
 `leash/v1/delegation` and `leash/v1/status` context strings, the encoding
 (RFC 8785, standard base64 with padding), the verifier's steps and the
-revocation latency bound (§10.11, §15 item 21). The vault code has not caught up
-yet: `vms/leashwire` and the LEASH features in vettid-vault still produce the
-pre-0.12.0 format, and that change is a pending vettid-vault follow-up.
+revocation latency bound (§10.11, §15 item 21). The vault code implements it
+since vettid-vault #38 (merged): `vms/leashwire` and the LEASH features produce
+and verify the 0.12.0 format. It ships in the next vault release; no published
+release has it yet, so vaults running a current release still use the
+pre-0.12.0 format.
 
 What stays VettID-specific are bindings the paper leaves open:
 

@@ -312,8 +312,9 @@ replica; after it, it cannot.)
 
 ## Vault (V5; docs/VAULT-RELEASES.md)
 
-Staging has published releases (S1, now `removed`, and S2); production
-has no release and no release key yet (release 1: docs/W10-READINESS.md).
+Staging has published releases (S1 and S2, now `removed`, and S3,
+`active` since manifest serial 4); production has no release and no
+release key yet (release 1: docs/W10-READINESS.md).
 Per vault account there are three kinds of stack (VAULT-RELEASES §8.2),
 deployed in this order with that account's profile:
 
@@ -621,7 +622,9 @@ and re-checks everything with this repository's own render and verifier:
 3. Canary (§10.1 step 9): `npm run vault:manifest -- upload --channel prod --in local/vault/prod/served-<s>.json`
    puts `manifests/<sha256>.json` in the data bucket (only the signer role
    may), so hosts can hand it to the enclave; nothing is served. Then add
-   the canary row and flag the test member (below), enroll and test.
+   the canary row and flag the test member (below), load the document on
+   the canary phone ("Canary manifest on the test phone", below), enroll
+   and test.
 4. Publish: `npm run vault:manifest -- publish --channel prod --in local/vault/prod/served-<s>.json`
    checks again, uploads (idempotent) and confirms the bucket copy, then
    writes `website/.well-known/vettid/pcr-manifest.json`, regenerates the
@@ -690,6 +693,64 @@ running instances are only replaced by an explicit refresh:
 (instances drain through the lifecycle hook). Old AMIs are not
 deregistered by Image Builder; delete them and their snapshots by hand.
 
+### Canary manifest on the test phone (B5; VAULT-RELEASES §10.1)
+
+The canary phone cannot read an unpublished manifest from the site, so
+the tester loads the signed document into the app by hand. The app
+(vettid-android #63, release builds included) verifies it under the keys
+it pins and uses it only while it is newer than the published one
+(VAULT-MESSAGING §11.10.1). The canary phone runs the release build
+signed with the upload key (W10-READINESS B8). For staging, use the
+staging build and `local/vault/staging/served-<s>.json`.
+
+The document must stay private until it is published (VAULT-MESSAGING
+§13.9): anyone holding it could move their own vault into the
+unpublished release. Do not put it on a public URL, in a bucket other
+than the signer's `manifests/` copy, or in an email, chat or cloud drive.
+
+1. Copy it to the phone over USB:
+
+   ```bash
+   adb devices -l                                   # pick the canary phone's serial
+   adb -s <serial> push local/vault/prod/served-<s>.json /sdcard/Download/
+   ```
+
+   (Another private channel is fine, such as a direct cable transfer.)
+2. On the phone, open **Files** → Downloads, select `served-<s>.json`,
+   **Share** → **VettID**. The app takes a shared file. "Open with" from
+   a file manager is not supported. If VettID is not offered, the file
+   manager is not labelling the file `application/json`: keep the `.json`
+   name, or use the Files app.
+3. The app shows **Use a test release manifest?** with the serial, the
+   signing key and the releases it lists. Check them against the `sign`
+   output: serial `<s>`, key `4353463f85c4012f` (key A; key B is
+   `1abd49da96970b6e`; staging `e9b3a403423120ac`), and release N
+   `active` along with the earlier releases. Tap **Use it** only if they
+   match. If the file is refused instead, the app says why: not signed by
+   a pinned key (wrong build, e.g. a staging build with a production
+   document), older than what the phone has used, already published, or
+   not a manifest.
+4. Delete the copy from the phone: `adb -s <serial> shell rm /sdcard/Download/served-<s>.json`
+   (the app keeps its own encrypted copy). Settings → Attestation now
+   shows **Test release manifest** with the serial.
+5. Run the canary (VAULT-RELEASES §10.1 step 9; W10-READINESS §3 step 11
+   for release 1).
+6. Then either:
+   - **Publish** (step 10, "Publishing a manifest" 4). Nothing is needed
+     on the phone: the published serial equals the canary's, so the app
+     uses the published document and drops its canary copy at the next
+     unlock or enrollment. Settings → Attestation no longer shows it.
+   - **Canary failed**: on the phone, Settings → Attestation → **Stop
+     using the test manifest** → confirm. Then follow "If the canary
+     fails" ("Publishing a manifest" above, VAULT-RELEASES §10.1, and for
+     release 1 the rollback of W10-READINESS §3 step 11: delete the
+     canary vaults from the app before clearing the flag). The phone has
+     used serial `<s>`, so it refuses the published `<s>−1`: any vault on
+     an older release that it unlocked during the canary opens again
+     only once `<s>+1` is published (N `removed`).
+
+The wipe after the phone is replaced also removes the document.
+
 ### Pausing the vault service (kill switch)
 
 The off switch for the member API's vault routes (MEMBER-API "Vault
@@ -698,9 +759,10 @@ else should change: a suspected bad release before the next manifest, an
 incident in the vault account, a host or queue problem. It touches no
 vault, key, manifest, release row or stored state, and is undone by
 resuming. While paused, enroll, unlock (and release-update approvals),
-the enclave route, recovery requests and recovery register answer `503
+the enclave route, recovery requests and recovery register, and (since
+MEMBER-API 2.0.0) setup-code issue, redeem and recovery claim answer `503
 vault_unavailable`; status, lock, request polling, the recovery status
-and recovery cancels keep working. Vaults already unlocked keep running
+and recovery cancels, and reading or revoking a setup code keep working. Vaults already unlocked keep running
 until they lock; nothing new is started. The account site's Vault tab
 says the service is paused for maintenance.
 
@@ -746,12 +808,18 @@ switch unreadable`.
 
 **Alerts.** Every write to the parameter (admin site or CLI, either
 stage) emails the security alerts ("vault service switch changed").
-Production also has two alarms on the metric `VettID/MemberApi
+Production also has alarms on the metric `VettID/MemberApi
 VaultServicePaused` (written every 5 minutes by the member API's
 `VaultServiceWatch` job): `vettid-org-vault-service-paused`
 (alarm within about 10 minutes of pausing, OK when resumed) and
 `vettid-org-vault-service-paused-24h` (still paused after a day), so a
-pause is not forgotten. Staging has the alarms without a recipient.
+pause is not forgotten. Both read a missing sample as "not paused", so a
+third, `vettid-org-vault-service-watch-silent`, alarms when no sample has
+been written for 20 minutes (the watch is failing or not running: an
+unreadable switch, a timeout, throttling, a disabled schedule), and says
+when it writes again. While it is in alarm the other two are blind: check
+the switch by hand (`get-parameter` above) and read the `VaultServiceWatch`
+function's log. Staging has the alarms without a recipient.
 
 **Running vaults.** The pause does not lock them. There is no "lock every
 vault" action (a follow-up if wanted). If one is needed during an
