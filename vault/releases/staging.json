@@ -1,6 +1,6 @@
 {
   "channel": "staging",
-  "signed_serial": 5,
+  "signed_serial": 6,
   "releases": [
     {
       "release": 1,
@@ -30,7 +30,7 @@
     },
     {
       "release": 3,
-      "status": "active",
+      "status": "deprecated",
       "pcr0": "80a580024d4cf3d1f7955dc010ae12a0626ad4f6d542c385bf9cf5202fa37eab81f37c75a009dbc4212b22960f19d289",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
       "pcr2": "268ee4b7b2a51e904504ee2cfbb3ade2640a9af7c465bb412640839881bf002abdbb77950dc546d2a4157696eb8f5219",
@@ -54,7 +54,7 @@
     },
     {
       "release": 4,
-      "status": "candidate",
+      "status": "active",
       "pcr0": "8c26adfd1fe53025c5aea91563129bc4670bffc993531040a4a0e6f530e753bcf5a1be2cafa78bb0373a469adc88f7c8",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
       "pcr2": "cad60816833136190c86c25ce70503240feb510d154328465dae9ab0f52606508370e8a8d6a4c3fc0eb4eae7cb58e8c5",
@@ -62,6 +62,7 @@
       "admitted_pcr0s": [
         "80a580024d4cf3d1f7955dc010ae12a0626ad4f6d542c385bf9cf5202fa37eab81f37c75a009dbc4212b22960f19d289"
       ],
+      "published_at": "2026-10-07T10:08:46Z",
       "notes": "https://github.com/vettid/vettid-vault/releases/tag/release/staging/4",
       "host": {
         "tag": "release/staging/4",
