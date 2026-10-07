@@ -1,8 +1,20 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.1.2
+version: 2.2.0
 changelog:
+  - 2.2.0 (2026-10-07, VAULT-MESSAGING 0.18.0; owner decisions of
+    2026-10-07): the account snapshot carries `first_name`,
+    `last_name` and `name_change` (required; still `v: 1`), which the
+    vault sends every connection in its profile's core, and the
+    `enroll` queue message carries the snapshot too. Members change
+    their names **only in the app**: the vault checks the PIN and the
+    credential password and reports the request (host event
+    `account_name`, the vault row's `name_change`); a stream job
+    applies it at most once per 30 days, audits `member.name_change` or
+    `member.name_change_refused`, emails the member and pushes the
+    snapshot. The portal shows the names read-only; there is no name
+    route for a session or an app key. Additive
   - 2.1.2 (2026-10-06, VAULT-MESSAGING 0.17.0): editorial. The
     `X-VettID-App` header's `nonce` and `sig` are base64url without
     padding, canonical, as the apps send and the API already requires
@@ -198,9 +210,19 @@ interface SubscriptionType {
 }
 ```
 
+**Names** (2.2.0, VAULT-MESSAGING 0.18.0 §10.8, §11.13). `first_name`
+and `last_name` are the names every connection of the member's vault
+sees, as the name on the member's VettID account (never as a verified
+identity). Members change them **only in the app** (owner decision of
+2026-10-07), through their vault ("Name changes from the vault",
+below); no account route changes them, for a session or an app key.
+
 Notes for the UI:
 - `registered` members see terms acceptance as the next step; subscription
   only after becoming `member`.
+- The account page shows the names read-only, says that every
+  connection sees them, and that they are changed in the VettID app
+  (at most once every 30 days).
 - If the published terms change, `needs_acceptance` turns true again for
   existing members (they stay `member`; the UI should prompt).
 - Paid types are listed but can't be started yet (`409` "Payments are not
@@ -663,17 +685,31 @@ envelopes. Account deletion after cancellation records the deleted
 
 The app shows membership, terms and subscription state, read-only, and
 gets it only from its vault. The API builds the snapshot from the member
-row (`v`, `as_of`, `email_hint`, `state`, `account_status`, `deletes_at`,
-`terms.needs_acceptance`, `subscription {type_name, status, paid,
-expires_at} | null`, `voting_rights`; at most 2 KiB) and sends it:
+row (`v`, `as_of`, `email_hint`, `first_name`, `last_name` and
+`name_change` (2.2.0), `state`, `account_status`, `deletes_at`, `terms.needs_acceptance`,
+`subscription {type_name, status, paid, expires_at} | null`,
+`voting_rights`; at most 2 KiB) and sends it:
 
-- in every `unlock` queue message (`account`);
+- in every `enroll` (2.2.0) and `unlock` queue message (`account`; an
+  `enroll` without one is refused by the enclave, so the API builds it
+  before it enqueues and answers `503 vault_unavailable` if it cannot);
 - as the queue op `account` to the vault's live leaseholder after a
   change: `POST /api/account/terms/accept`, `/subscription`,
-  `/subscription/cancel`, `/cancel` (and the admin site's equivalents).
+  `/subscription/cancel`, `/cancel` (and the admin site's equivalents),
+  and (2.2.0) after the name-change job has processed a request.
   With no live lease nothing is sent. A slot is written as for `lock`;
   the host answers it `done`. A newly published terms version is not
   fanned out (each vault learns it at its next unlock).
+
+**Names (2.2.0).** `first_name` and `last_name` are the member row's, as
+stored (validated at registration or by the name-change job). The email
+address is never in the snapshot. `name_change` is `{allowed_after,
+last}`: `allowed_after` is the member row's `name_changed_at` + 30 days
+while that lies in the future, else `null` (always `null` before the
+first change: the registration names do not count); `last` is the vault
+row's `name_change_result` (`{seq, status, reason?}`) or `null`. The
+snapshot keeps `"v": 1` with these members required: VettID has no
+vaults to stay compatible with (owner decision of 2026-10-07).
 
 The snapshot's `account_status` is `active` or `canceled` only
 (VAULT-MESSAGING §11.13). A **suspended** account (or one in any other
@@ -683,8 +719,71 @@ make anyway, Access above) and no `account` op is sent; the vault keeps
 the last snapshot it had.
 
 It is display only and never a security signal; the API's own checks
-(Access, above) are what enforce membership and terms. Audit: none (it is
+(Access, above) are what enforce membership and terms. Its names are the
+one part a vault passes on, to its connections, as the account's
+(unverified) names. Audit: none (it is
 the member's own data going to the member's own vault).
+
+### Name changes from the vault (2.2.0, VAULT-MESSAGING 0.18.0 §10.8, §11.5)
+
+The member asks in the app (`account.name.set`); the vault checks the
+PIN and the credential password, as in the daily owner check, and the
+validation below, then reports the event `account_name {seq,
+first_name, last_name}`. The parent writes `name_change = {seq,
+first_name, last_name, at}` and `name_change_pending = true` on the
+vault row, whatever the lease, if `seq` is higher than the row's.
+
+- **The job.** The `vaults` table's stream (new images) feeds a
+  `vault-names` job Lambda, filtered on `name_change_pending = true`. It
+  claims the request with a conditional `REMOVE name_change_pending`
+  (condition: still true, same `seq`), finds the member by the row's
+  `user_guid`, and refuses the change (`status: "refused"`) when:
+  - `account`: the account is not `active`, or not in state
+    `registered` or `member`, or the vault row is not the member's
+    current vault;
+  - `invalid`: a name fails the registration rule (as in
+    `/api/public/request`: trimmed;
+    `^[\p{L}\p{M}][\p{L}\p{M} '’.-]*$`; at most 40 characters,
+    counted as UTF-16 code units), or
+    both equal the current names;
+  - `too_soon`: the member row's `name_changed_at` is less than 30 days
+    ago (the **rate limit**: one applied change per 30 days per member;
+    the registration names do not count, refused requests do not
+    count).
+  Otherwise it updates the member row's `first_name`, `last_name` and
+  `name_changed_at` (conditional on `name_changed_at` unchanged, so two
+  requests cannot both pass the 30 days) with `status: "applied"`.
+- **Then**, either way, it writes `name_change_result = {seq, status,
+  reason?}` on the vault row (conditional on `seq` not lower than the
+  stored result's), and pushes the snapshot to the vault's live
+  leaseholder (Account snapshot to the vault, above); with no live lease
+  the next unlock carries it. The vault settles the app's request from
+  the snapshot's `name_change.last` and, after an applied change, sends
+  the new names to every connection. If the job fails before the
+  result is written, it restores `name_change_pending` so the stream
+  retries.
+- **Email.** After an applied change the member is emailed with the
+  system mailer: "The name on your VettID account was changed from …
+  to … in your VettID app; your connections now see it. If this
+  wasn't you, contact support." Refusals are not emailed (the app
+  shows them).
+- **Audit:** `member.name_change` (`vault_id`, `seq`, the previous and
+  the new names) or `member.name_change_refused` (`vault_id`, `seq`,
+  `reason`).
+- **What the app shows** comes from the vault (VAULT-MESSAGING §10.8):
+  "Name change requested" while pending, the new names once applied,
+  and for `too_soon` "You can change your name once every 30 days. You
+  can change it again on <allowed_after>."
+- **IAM.** Only the enclave host writes `name_change` and sets
+  `name_change_pending`; the job may only clear `name_change_pending`
+  and write `name_change_result` on the vault row, update the names and
+  `name_changed_at` on the member row, and read both. No route of the
+  member API or the admin API changes the names. The admin API shows
+  them (ADMIN-API "People"); if an admin edit is ever added, it MUST
+  push the snapshot as the job does.
+- **Why the vault path** (owner decision of 2026-10-07, VAULT-MESSAGING
+  §15 item 26): a change needs the member's PIN and credential password,
+  not a portal session or a phone's app-key signature alone.
 
 ### Vault release notices (VAULT-RELEASES §3.5, §10.2; W8)
 
