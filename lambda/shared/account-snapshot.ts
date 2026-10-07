@@ -7,7 +7,7 @@
  * §10.8) the names, which the vault sends every connection as the
  * account's (unverified) names.
  *
- *   { "v": 1, "as_of", "email_hint", "first_name", "last_name",
+ *   { "v": 1, "as_of", "email", "first_name", "last_name",
  *     "name_change": { "allowed_after": RFC 3339 | null,
  *                      "last": { "seq", "status", "reason"? } | null },
  *     "state", "account_status", "deletes_at",
@@ -17,12 +17,18 @@
  *
  * 2.2.0: first_name, last_name and name_change are required (still v: 1;
  * a 0.18.0 vault refuses a snapshot without them, older ones ignore unknown
- * members). No full address, no user_guid. At most 2 KiB.
+ * members). No user_guid. At most 2 KiB.
+ *
+ * 2.3.0 (VAULT-MESSAGING 0.20.0): the member's full verified `email`
+ * replaces `email_hint` (still v: 1; `email` required by a 0.20.0 vault,
+ * older ones check `email_hint` only when present). The vault returns it
+ * only to the member's own app and desktops. The masked hint stays in the
+ * redeem and recovery-claim answers (lambda/member/vault.ts). Never log a
+ * snapshot: it carries the full address.
  */
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { GetCommand } from '@aws-sdk/lib-dynamodb';
 import { ddb, table } from './aws';
-import { emailHint } from './enroll-code';
 import { CurrentTerms, currentTerms } from './members';
 import { MemberItem, SubscriptionItem, hasVotingRights } from './model';
 
@@ -43,7 +49,7 @@ export type NameChangeResult = { seq: number; status: 'applied' } | { seq: numbe
 export interface AccountSnapshot {
   v: 1;
   as_of: string;
-  email_hint: string;
+  email: string;
   first_name: string;
   last_name: string;
   name_change: { allowed_after: string | null; last: NameChangeResult | null };
@@ -79,10 +85,18 @@ export function nameChangeAllowedAfter(m: Pick<MemberItem, 'name_changed_at'>, n
 const snapshotName = (v: unknown): v is string =>
   typeof v === 'string' && v.length > 0 && Buffer.byteLength(v, 'utf8') <= 160 && !/\p{Cc}/u.test(v);
 
+/** What a 0.20.0 vault accepts as the email (§11.13): 3–1,016 bytes of UTF-8 with an `@` and no control characters. */
+const snapshotEmail = (v: unknown): v is string => {
+  if (typeof v !== 'string') return false;
+  const n = Buffer.byteLength(v, 'utf8');
+  return n >= 3 && n <= 1016 && v.includes('@') && !/\p{Cc}/u.test(v);
+};
+
 /**
  * The snapshot for `m`, or null when it cannot be expressed in the spec's
  * form (an account that is neither active nor canceled, e.g. suspended, or
- * not registered/member; names a vault would refuse) or would exceed 2 KiB.
+ * not registered/member; names or an email a vault would refuse) or would
+ * exceed 2 KiB.
  * Callers then send none. `vault` is the member's vault row, for the
  * outcome of its latest name request (`name_change_result`).
  */
@@ -96,10 +110,11 @@ export function accountSnapshot(
   if (m.state !== 'registered' && m.state !== 'member') return null;
   if (m.account_status !== 'active' && m.account_status !== 'canceled') return null;
   if (!snapshotName(m.first_name) || !snapshotName(m.last_name)) return null;
+  if (!snapshotEmail(m.email)) return null;
   const snap: AccountSnapshot = {
     v: 1,
     as_of: now.toISOString(),
-    email_hint: emailHint(m.email),
+    email: m.email,
     first_name: m.first_name,
     last_name: m.last_name,
     name_change: { allowed_after: nameChangeAllowedAfter(m, now), last: nameChangeResult(vault?.name_change_result) },
