@@ -1,8 +1,18 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.2.1
+version: 2.3.0
 changelog:
+  - 2.3.0 (2026-10-07, VAULT-MESSAGING 0.20.0; owner decision of
+    2026-10-07): the account snapshot carries the member's full
+    verified `email` (the member row's, trimmed and lower-cased, at
+    most 254 characters) instead of `email_hint`, so that the app can
+    show the member their own address; still `v: 1`, `email` required.
+    The vault returns it only to the member's app and desktops and
+    never passes it on. Running vaults (0.15.0–0.19.0) accept the new
+    form unchanged. `POST /api/vault/enroll/redeem` and
+    `POST /api/vault/recovery/claim` keep answering the masked
+    `email_hint`
   - 2.2.1 (2026-10-07, VAULT-MESSAGING 0.19.0): errata from the
     vault's implementation (vettid-vault #45). Names are trimmed of
     leading and trailing U+0020 spaces only, at registration
@@ -694,8 +704,8 @@ envelopes. Account deletion after cancellation records the deleted
 
 The app shows membership, terms and subscription state, read-only, and
 gets it only from its vault. The API builds the snapshot from the member
-row (`v`, `as_of`, `email_hint`, `first_name`, `last_name` and
-`name_change` (2.2.0), `state`, `account_status`, `deletes_at`, `terms.needs_acceptance`,
+row (`v`, `as_of`, `email` (2.3.0; `email_hint` before), `first_name`,
+`last_name` and `name_change` (2.2.0), `state`, `account_status`, `deletes_at`, `terms.needs_acceptance`,
 `subscription {type_name, status, paid, expires_at} | null`,
 `voting_rights`; at most 2 KiB) and sends it:
 
@@ -711,8 +721,8 @@ row (`v`, `as_of`, `email_hint`, `first_name`, `last_name` and
   fanned out (each vault learns it at its next unlock).
 
 **Names (2.2.0).** `first_name` and `last_name` are the member row's, as
-stored (validated at registration or by the name-change job). The email
-address is never in the snapshot. `name_change` is `{allowed_after,
+stored (validated at registration or by the name-change job).
+`name_change` is `{allowed_after,
 last}`: `allowed_after` is the member row's `name_changed_at` + 30 days
 while that lies in the future, else `null` (always `null` before the
 first change: the registration names do not count); `last` is the vault
@@ -730,6 +740,24 @@ status, or in neither state `registered` nor `member`) gets **no
 snapshot**: none is put in an `unlock` (which a suspended account cannot
 make anyway, Access above) and no `account` op is sent; the vault keeps
 the last snapshot it had.
+
+**Email (2.3.0, owner decision of 2026-10-07).** `email` is the member
+row's `email`, the address the member verified at registration, as
+stored (trimmed and lower-cased by `/api/public/request`; at most 254
+characters). It replaces `email_hint`, which the snapshot no longer
+carries; the redeem and recovery-claim answers keep `email_hint` (the
+first character of the local part, `***`, `@` and the domain), since
+they reach an app before it has proved anything. The vault shows the
+address to the member's app and desktops only and never passes it to a
+connection, an agent or back to the host (VAULT-MESSAGING 0.20.0
+§11.13). With the names and the email at their maxima the snapshot is
+about 1.9 KiB, under the 2 KiB limit, which `accountSnapshot` still
+enforces (a snapshot over it is not sent). A 0.20.0 vault refuses a
+snapshot without `email`; older vaults (0.15.0–0.19.0) check
+`email_hint` only when present and ignore unknown members, so they
+accept the new form, and the API sends `email` only, without a
+transition. A member whose address changes (no route changes it today)
+would get the new one with the next snapshot.
 
 It is display only and never a security signal; the API's own checks
 (Access, above) are what enforce membership and terms. Its names are the

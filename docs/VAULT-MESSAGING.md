@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.19.0
+version: 0.20.0
 date: 2026-10-07
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -12,13 +12,27 @@ related:
   - CALLING-SERVICE.md
   - PUSH-GATEWAY.md
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.2.1)
+  - MEMBER-API.md (2.3.0)
+  - ANDROID-PLAN.md (0.1.11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.0, approved 2026-10-03)
   - VAULT-RELEASES.md (0.1.6, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.20.0: normative (owner decisions of 2026-10-07, §15 item 28): the
+    account snapshot carries the member's full verified `email` instead
+    of `email_hint` (still `v: 1`; `email` required), which the vault
+    shows only to the member's app and desktops and never puts in a
+    profile, an `hs.init`, an invitation, a feed item or anything a
+    connection or an agent receives; the redeem and recovery-claim
+    answers keep the masked `email_hint` (§11.13, §10.2, §13.7).
+    `audit.list` and `connection.audit.list` gain `q`, a
+    case-insensitive substring search the vault runs over each entry's
+    kind and the current names of the connection, device and item it
+    refers to, and the time range `since`/`until`; a search examines
+    at most 2,000 entries per request and returns `partial` with a
+    cursor when that budget runs out (§10.9)
   - 0.19.0: normative (owner decisions of 2026-10-07, §15 item 27):
     `vault.status`'s `owner_check` carries the `vault.held` counts as
     `waiting` while `due` or `held`; the first count change after the
@@ -3532,7 +3546,7 @@ an answer to an unknown or expired id is dropped.
 | `vault.owner-check` (app: the holder) | `{credential, utk_id, sealed{pin, password, hold?, hold_off_until?}}` | `{credential, version, utks, deadline, interval_seconds, hold, hold_off_until?}` (§3.6.1, §3.6.7); `bad_pin`, `bad_password`, `backoff` (body `{retry_after}`, §10.1), `utk_invalid`, `stale_credential`, `credential_frozen`, `rotation_required`, `forbidden` (not the holder), `bad_request` (a PIN that is not 6–32 digits) |
 | `vault.held` (V→D, to the app and desktops in an access session) | — | `{deadline, waiting: {messages, requests, calls, other}}` (§3.6.3) |
 | `vault.lock` (app, desktop) | `{}` | `{}`; then `vault.locking` |
-| `account.get` (app, desktop) | `{}` | `{account: <snapshot, §11.13> \| null, version, received_at, name_request?}`; `null` (and `version` 0) before any snapshot arrived (0.15.0); `name_request` (0.18.0) is the latest `account.name.set` request (§10.8). A change of `name_request` alone sends `sync.event{kind: "account.changed"}` with the stored snapshot's `version` repeated, not incremented (0.19.0): `version` counts snapshots only, so a device MUST NOT skip an `account.changed` whose `version` it already holds |
+| `account.get` (app, desktop) | `{}` | `{account: <snapshot, §11.13> \| null, version, received_at, name_request?}`; `null` (and `version` 0) before any snapshot arrived (0.15.0); the snapshot carries the member's full `email` (0.20.0), which only this type returns and only to the app and desktops (§11.13); `name_request` (0.18.0) is the latest `account.name.set` request (§10.8). A change of `name_request` alone sends `sync.event{kind: "account.changed"}` with the stored snapshot's `version` repeated, not incremented (0.19.0): `version` counts snapshots only, so a device MUST NOT skip an `account.changed` whose `version` it already holds |
 | `vault.delete` (app: the holder, or the enrolling app before a credential exists) | `{confirm: "delete my vault", credential?, utk_id, sealed{pin, password?}}` | `{}`; then the deletion of §12.5. `bad_request` without the exact phrase or a needed member; `bad_pin`, `backoff`, `bad_password`, `credential_frozen` / `rotation_required` (holder during an alarm), `forbidden` (a recovering app since 0.16.0: it completes the recovery first, then deletes as the holder; a member without the credential uses §11.11.9) |
 | `vault.locking` (ephemeral) | — | `{reason?}`, with `exp` = now + 60 s; `reason` is `"recovery"` when a recovery request locked the vault (§11.11.1), `"owner_check"` when ten consecutive failed owner checks did (§3.6.4, 0.13.0) |
 | `relay.token.issued` | — | `{kind: "standing" \| "reconnect", token}` |
@@ -4314,8 +4328,8 @@ All types are sent by `app` or `desktop`.
 
 | Type | Request body | Response body |
 |---|---|---|
-| `audit.list` | `{connection_id?, kinds?: [<prefix>], before_seq? \| after_seq?, limit?}` | `{entries: [<entry>], head, seq, next_before_seq? \| next_after_seq?}`; newest first, or oldest first with `after_seq` |
-| `connection.audit.list` | `{connection_id, kinds?, before_seq?, limit?}` | as `audit.list`, for one connection |
+| `audit.list` | `{connection_id?, kinds?: [<prefix>], q?, since?, until?, before_seq? \| after_seq?, limit?}` | `{entries: [<entry>], head, seq, next_before_seq? \| next_after_seq?, partial?}`; newest first, or oldest first with `after_seq`; `q`, `since`, `until` and `partial` since 0.20.0 (Search, below) |
+| `connection.audit.list` | `{connection_id, kinds?, q?, since?, until?, before_seq?, limit?}` | as `audit.list`, for one connection |
 
 ```json
 entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.added",
@@ -4326,6 +4340,71 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
 - `limit` is 1–500 (default 100). `kinds` holds 1–16 prefixes of at most
   64 bytes; an entry matches if its `kind` equals a prefix or starts with
   the prefix followed by `.`.
+- **Search (0.20.0, owner decision of 2026-10-07, §15 item 28).** The
+  vault filters the log itself, so that an app need not download it to
+  find an entry. An entry is returned when it passes every filter the
+  request names:
+  - `connection_id` and `kinds`, as above;
+  - `since` and `until`: RFC 3339 times (any offset, compared in Unix
+    milliseconds, as `at_ms` below); an entry matches if `since` ≤ `at`
+    (inclusive) and `at` < `until` (exclusive). Either may be given
+    alone. The vault does not assume that `at` grows with `seq` (the
+    enclave clock may step back); the range is a filter, not a cursor;
+  - `q`: a case-insensitive substring of the entry's **search text**.
+    `q` is a string of 1–128 bytes of UTF-8 without control characters
+    (C0, DEL, C1) and not only white space. The search text is the
+    following fields, each matched separately (a match never spans two
+    fields):
+    1. the `kind`, and the `kind` with each `.`, `_` and `-` replaced by
+       a space (so `password changed` finds
+       `credential.password_changed`);
+    2. for an entry with `connection_id`, that connection's current
+       `name`, `alias`, and its shared profile's `first_name`,
+       `last_name` and display name (§10.8; the same values
+       `connection.list` returns), and the two names joined by one
+       space ("First Last");
+    3. for an entry with `device_id`, that device's current `name`
+       (`device.list`, §10.3), app, desktop or agent;
+    4. for an entry whose `ref` is an `item_id` (`item.added`,
+       `item.updated`, `item.deleted`, `item.sensitivity_changed`,
+       `item.revealed`, `share.included`, `share.declined`,
+       `share.withdrawn`, and `wallet.created`, `wallet.deleted` and
+       `wallet.address_issued`, whose `wallet_id` is the item's), that
+       item's current `name` (§10.7), also for a critical item, whose
+       name is DEK-state metadata.
+    Names are those the vault holds **when it answers**: a connection,
+    device or item that has been removed, unlinked or deleted (or a
+    `connection_id` of a pending request) adds no text, and the entry
+    is then found by its kind only. The search never reads field
+    labels or values, message text, tags, notes, keys, the account
+    snapshot or anything else; the entry itself is unchanged, and so
+    is its `hash`. **Comparison:** the vault maps `q` and each field
+    through Go's `strings.ToLower` (Unicode simple lower-case mapping,
+    per rune; no locale rules) and tests `strings.Contains`. It does
+    not normalise Unicode (the enclave carries no normalisation
+    tables): apps send `q` in NFC, as they send names, so composed
+    characters match. An empty field never matches.
+- **Scan budget (0.20.0).** Without `q`, a request examines the log as
+  before (at most 10,000 entries). With `q`, the vault evaluates `q` for
+  at most **2,000** entries per request: the entries in the request's
+  order that pass the other filters (`connection_id`, `kinds`,
+  `since`, `until`, the cursor). If that budget runs out before
+  `limit` entries matched, the vault answers with the matches it found
+  (possibly none), `partial: true`, and `next_before_seq` (or
+  `next_after_seq`) = the `seq` of the last entry it evaluated; the app
+  continues with that cursor (it is exclusive, as every cursor). A
+  response without a `next_*` cursor is the end of the results.
+  `partial` is absent otherwise. The cursors and `limit` are unchanged
+  otherwise: with `limit` matches found and more entries left, the
+  cursor is the `seq` of the last entry returned.
+- **Errors:** `bad_request` for a `q` that is empty, longer than 128
+  bytes, not UTF-8, only white space or with a control character; a
+  `since` or `until` that is not an RFC 3339 time; `since` ≥ `until`;
+  and, as before, a bad `kinds`, `limit` or cursor, or both cursors.
+  `connection.audit.list` takes the same `q`, `since` and `until`, with
+  the same rules, for its one connection. Both types stay `app` and
+  `desktop` only (above); agents and connections never read the audit
+  log (§13.7).
 - `seq` starts at 1 and increases by one per entry. `hash` chains the log:
 
   ```
@@ -8194,12 +8273,14 @@ state, read-only, and get it only from their vault; changes are made on
 the portal. Since 0.18.0 the snapshot also carries the account's first
 and last name, which the vault puts in the core of its shared profile
 (§10.8) and which the member changes only from the app
-(`account.name.set`, §10.8), never on the portal.
+(`account.name.set`, §10.8), never on the portal. Since 0.20.0 it carries the member's full
+email address, which the vault shows to the member's own app and
+desktops only (owner decision of 2026-10-07, §15 item 28).
 
 - **The snapshot** the member API builds from the member's account:
 
   ```json
-  { "v": 1, "as_of": "<RFC 3339>", "email_hint": "m***@example.com",
+  { "v": 1, "as_of": "<RFC 3339>", "email": "member@example.com",
     "first_name": "Ada", "last_name": "Lovelace",
     "name_change": { "allowed_after": "<RFC 3339>|null",
                      "last": { "seq": 3, "status": "applied|refused",
@@ -8211,8 +8292,15 @@ and last name, which the vault puts in the core of its shared profile
     "voting_rights": false }
   ```
 
-  `email_hint` is the first character of the address's local part, `***`,
-  `@` and the domain. `first_name` and `last_name` (0.18.0, owner
+  `email` (0.20.0, owner decision of 2026-10-07) is the member row's
+  address, the one the member verified at registration, as the member
+  API stores it (trimmed and lower-cased; at most 254 characters, the
+  registration rule, so at most 1,016 bytes of UTF-8 and in practice
+  ASCII). It replaces 0.15.0's `email_hint` (the first character of the
+  local part, `***`, `@` and the domain), which the snapshot no longer
+  carries; the masked `email_hint` remains only in the code-redeem and
+  recovery-claim answers (§11.11.7, §11.12.1), which reach an app before
+  it has proved anything. `first_name` and `last_name` (0.18.0, owner
   decision of 2026-10-07) are the member row's names, as registered
   (MEMBER-API `/api/public/request`) or last changed from the app
   (§10.8): letters, spaces and `'’.-`, at most 40 characters each, so at
@@ -8226,10 +8314,25 @@ and last name, which the vault puts in the core of its shared profile
   sent it), or `null`. `last.status` is `"applied"` or `"refused"`
   (0.19.0); `reason` is present only with `"refused"`, as `"too_soon"`,
   `"invalid"` or `"account"` (§10.8), and is absent with `"applied"` (a
-  vault ignores one there). Nothing else about the member is sent (no full address, no `user_guid`; the
-  email address goes neither in the snapshot nor in the profile). At
-  most 2 KiB, names included (the new members add at most about 500
-  bytes; the rest of the snapshot is well under 1 KiB).
+  vault ignores one there). Nothing else about the member is sent (no
+  `user_guid`). At most 2 KiB, names and email included: the names
+  take at most 320 bytes and the email at most 1,016, the rest about
+  530 bytes (with a 64-byte subscription `type_name`), so the largest
+  snapshot is about 1.9 KiB and a realistic one well under 1 KiB; the
+  member API still sends none over 2 KiB (MEMBER-API).
+- **The email stays with the member (0.20.0).** The vault returns the
+  `email` only in `account.get`, to the member's app and to desktops
+  (the member's own devices, a desktop within its access session as
+  for every desktop request; §6.8). It MUST NOT put it, or anything
+  derived from it (a hash, a hint, its domain), in a `profile.update`,
+  an `hs.init` profile, an invitation bundle or its `hint`, a feed
+  item, an audit entry, a LEASH statement or any other message to a
+  connection or an agent, or in an event to its host, unless a future
+  version of this specification says so. Agents never receive it:
+  `account.get` is not an agent type and no LEASH grant reaches the
+  snapshot (§10.11). Apps and desktops show it only to the member
+  (the avatar sheet, Settings) and never include it in anything they
+  send.
 - **Version (0.18.0).** The snapshot keeps `"v": 1`, with `first_name`,
   `last_name` and `name_change` **required**: VettID has no members'
   vaults to stay compatible with (owner decision of 2026-10-07), so no
@@ -8237,7 +8340,17 @@ and last name, which the vault puts in the core of its shared profile
   with a name that is not a string of 1–160 bytes without control
   characters, or with a `name_change.last.status` other than
   `"applied"` or `"refused"` (0.19.0), as it refuses a wrong type, and
-  keeps the one it had.
+  keeps the one it had. Since 0.20.0 `email` is **required** too, still
+  with `"v": 1`: a string of 3–1,016 bytes, with an `@`, without
+  control characters; a 0.20.0 vault refuses a snapshot without it, and
+  ignores an `email_hint` if one is present (an unknown member). Older
+  releases need no change to accept the new form: 0.15.0–0.19.0 vaults
+  (staging release S4, and vettid-vault #45) check `email_hint` only
+  when it is present and ignore unknown members, so they accept a
+  snapshot with `email` and without `email_hint`, store it as received
+  and return it in `account.get` unchanged; S3 predates the snapshot
+  (0.15.0) and never parses one. The member API therefore sends
+  `email` only, from MEMBER-API 2.3.0.
 - **Delivery.** The API puts the snapshot in every `enroll` (0.18.0) and
   `unlock` queue message (`account`, §11.5) and, when the member's
   account changes (terms accepted, subscription started, cancelled or
@@ -8257,7 +8370,8 @@ and last name, which the vault puts in the core of its shared profile
   `version` (+1 per change) and its own `received_at`, and sends
   `sync.event{kind: "account.changed", version}` to the app and desktops.
   They read it with `account.get` (§10.2). Agents and connections never
-  receive it (§13.7), except its `first_name` and `last_name`, which every
+  receive it (§13.7), and never its `email` (above), except its
+  `first_name` and `last_name`, which every
   connection receives in the shared profile's core (§10.8, 0.18.0) and an
   agent delegated `profile.get` reads there. A stored snapshot whose names
   differ from the last ones sent triggers the `profile.update` of §10.8,
@@ -8708,7 +8822,9 @@ their owner. Period.")
   snapshot (§11.13, 0.15.0), which it shows to its owner's app and
   desktops and to no one else, except the account's first and last name,
   which it sends every connection in its shared profile's core (§10.8;
-  0.18.0, owner decision of 2026-10-07).
+  0.18.0, owner decision of 2026-10-07). The snapshot's full `email`
+  (0.20.0) goes to the app and desktops only, never to a connection, an
+  agent or back to the host (§11.13).
 - To a connection it sends only what the member's features share with
   that connection by the member's own decisions: messages, calls, the
   shared profile (whose core, the account names and `ik`, goes to every
@@ -9666,6 +9782,59 @@ Follow-ups:
     first-change exception, the worst-case size check; on vettid-vault
     #45); vettid-android (the unknown-counts state and the foreground
     re-read).
+28. **The full email in the app; audit search in the vault; the app's
+    navigation and History (0.20.0).** Owner decisions of 2026-10-07,
+    from hands-on testing of the staging app.
+    1. **The full email address in the app.** The member's own avatar
+       sheet and Settings show the account's first and last name and
+       the full email address, not the masked hint. The account
+       snapshot carries `email` (the member's verified address) instead
+       of `email_hint`, which is removed from the snapshot without a
+       transition: VettID has no users, the vaults that run today (S4,
+       0.15.0–0.17.0, and #45's 0.18.0) check `email_hint` only when
+       present and ignore unknown members, so none refuses the new form,
+       and S3 never parses a snapshot (§11.13). The redeem and
+       recovery-claim answers keep `email_hint`: they reach an app that
+       has proved nothing yet (§11.11.7, §11.12.1). **The email stays
+       inside the member's own vault and devices**: only `account.get`
+       returns it, to the app and desktops; it never goes into a
+       profile, an `hs.init`, an invitation hint, a feed item, an audit
+       entry or anything a connection, an agent or the host receives,
+       unless a future version of this specification says so (§11.13,
+       §13.7). Agents never get it (`account.get` is not delegable,
+       §10.11).
+    2. **Audit search in the vault.** `audit.list` and
+       `connection.audit.list` gain `q` (a case-insensitive substring
+       search the vault runs over the entry's kind and the current
+       names of its connection, device and item, never secret values),
+       `since` and `until` (RFC 3339), beside `kinds` and
+       `connection_id`; a search evaluates at most 2,000 entries per
+       request and answers `partial` with a cursor when that budget runs
+       out before `limit` matches (§10.9). Chosen here (not decided by
+       the owner, to confirm at review): the searched fields; Go's
+       `strings.ToLower` per rune without Unicode normalisation (the
+       enclave has no normalisation tables; apps send NFC); kinds also
+       matched with `.`, `_` and `-` read as spaces; names as they are
+       when the vault answers (a removed connection's entries are found
+       by kind only); the 2,000-entry budget; `since` inclusive, `until`
+       exclusive; who may call the types is unchanged (app, desktop).
+    3. **App navigation and naming** (ANDROID-PLAN 0.1.11): the drawer
+       drops "Credential" (reached from Settings → Security) and
+       "Invite a connection" (the floating action button invites on
+       Connections and starts a new message on Messages); the "Items"
+       section is called **"Vault"** in the app's interface, while the
+       specifications keep "items" as the technical term; a new drawer
+       entry **"History"** shows the audit log with the vault-side
+       search, filters by category, connection and date, infinite scroll
+       with the cursors and an entry detail, read-only.
+    Follow-ups: vettid-vault (`email` required in the snapshot parser;
+    `q`, `since`, `until`, `partial` and the scan budget in
+    `features/audit`, with a name resolver over connections, devices
+    and items; `client/` and `vaultctl audit`; tests); vettid.org
+    (MEMBER-API 2.3.0: `email` instead of `email_hint` in
+    `accountSnapshot`, tests; the redeem and claim answers unchanged);
+    vettid-android (the account card in the avatar sheet and Settings,
+    the drawer and FAB changes, "Vault" strings, the History screen).
 
 ## 16. Test vectors
 
@@ -9937,6 +10106,26 @@ adds it to `recovery.json` (eph scalar 32 × 0x28, nonce 12 × 0x29) with
 the 0.16.0 implementation.
 
 ## 17. Changelog
+
+- **0.20.0** (2026-10-07): normative, owner decisions of 2026-10-07
+  (§15 item 28); MEMBER-API 2.3.0, ANDROID-PLAN 0.1.11.
+  - §11.13: the account snapshot carries the member's full `email`
+    (required, still `"v": 1`) instead of `email_hint`; the snapshot's
+    size budget with the email; 0.15.0–0.19.0 vaults accept the new
+    form unchanged, so the member API sends `email` only. The masked
+    `email_hint` stays in the redeem and recovery-claim answers.
+  - §11.13, §13.7, §10.2: the email is returned only by `account.get`,
+    to the app and desktops; it never goes into a profile, an
+    `hs.init`, an invitation, a feed item, an audit entry, a LEASH
+    statement or a host event, and agents never receive it.
+  - §10.9: `audit.list` and `connection.audit.list` take `q` (1–128
+    bytes; a case-insensitive substring of the kind and the current
+    names of the entry's connection, device and item; `strings.ToLower`,
+    no normalisation), `since` and `until` (RFC 3339; inclusive,
+    exclusive); with `q` at most 2,000 entries are evaluated per
+    request, and a page the budget cut short carries `partial: true`
+    and the cursor of the last evaluated entry; `bad_request` for a bad
+    `q`, time or range.
 
 - **0.19.0** (2026-10-07): normative, owner decisions of 2026-10-07
   (§15 item 27), and errata to 0.18.0, found while implementing it
