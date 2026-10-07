@@ -32,13 +32,11 @@ import { audit } from '../shared/audit';
 import { ddb, table } from '../shared/aws';
 import { sendMail } from '../shared/mail';
 import { vaultPointerKey } from '../shared/members';
+import { normalizeName } from '../shared/names';
 import type { MemberItem } from '../shared/model';
 
 const VAULT_ID_RE = /^[0-9a-f]{32}$/;
 const GUID_RE = /^[A-Za-z0-9-]{1,64}$/;
-/** The registration rule (MEMBER-API /api/public/request). */
-const NAME_RE = /^[\p{L}\p{M}][\p{L}\p{M} '’.-]*$/u;
-const NAME_MAX = 40; // UTF-16 code units, as String.length counts
 /** Member-row update attempts when a concurrent change moves name_changed_at. */
 const APPLY_ATTEMPTS = 3;
 
@@ -54,17 +52,8 @@ interface NameRow {
 
 const isCcf = (e: unknown) => (e as Error).name === 'ConditionalCheckFailedException';
 
-/**
- * A requested name under the registration rule: trimmed of leading and
- * trailing U+0020 only (as the vault does, §10.8), then letters, marks,
- * spaces and '’.- starting with a letter, at most 40 UTF-16 code units.
- * Null when it fails.
- */
-export function normalizeName(v: unknown): string | null {
-  if (typeof v !== 'string') return null;
-  const s = v.replace(/^ +| +$/g, '');
-  return s.length <= NAME_MAX && NAME_RE.test(s) ? s : null;
-}
+/** The registration rule (lambda/shared/names.ts); re-exported for tests. */
+export { normalizeName };
 
 async function claim(vaultId: string, seq: number): Promise<boolean> {
   try {

@@ -223,6 +223,21 @@ describe('public request input', () => {
     expect(res.statusCode).toBe(200);
   });
 
+  // 2.2.1: trimmed of leading and trailing U+0020 only, as the name-change job and the vault do.
+  test.each(['\u00a0Ada', 'Ada\u00a0', '\tAda', 'Ada\n', '\u2003Ada', '   ', 'x'.repeat(41)])('rejects name %j (2.2.1: no other white space is trimmed)', async (first) => {
+    const res = await pub.handler(ev('POST', '/api/public/request', { email: 'a@b.org', first_name: first, last_name: 'L', consent: true }));
+    expect(res.statusCode).toBe(400);
+    expect(ddb.commandCalls(TransactWriteCommand)).toHaveLength(0);
+  });
+
+  test('leading and trailing spaces are trimmed before the rule and stored trimmed (40 characters after the trim)', async () => {
+    const res = await pub.handler(ev('POST', '/api/public/request', { email: 'a@b.org', first_name: '  Ada ', last_name: ` ${'x'.repeat(40)}  `, consent: true }));
+    expect(res.statusCode).toBe(200);
+    const put = JSON.stringify(ddb.commandCalls(TransactWriteCommand)[0].args[0].input);
+    expect(put).toContain('"first_name":"Ada"');
+    expect(put).toContain(`"last_name":"${'x'.repeat(40)}"`);
+  });
+
   test('past the global hourly cap: same answer, nothing created', async () => {
     ddb.on(UpdateCommand, { TableName: 'rl' }).resolvesOnce({ Attributes: { count: 1 } }).resolves({ Attributes: { count: 999 } });
     const res = await pub.handler(ev('POST', '/api/public/request', { email: 'a@b.org', first_name: 'A', last_name: 'B', consent: true }));
