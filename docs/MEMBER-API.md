@@ -1,8 +1,16 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.1.2
+version: 2.2.0
 changelog:
+  - 2.2.0 (2026-10-07, VAULT-MESSAGING 0.18.0; owner decisions of
+    2026-10-07): the account snapshot carries `first_name` and
+    `last_name` (still `v: 1`; vaults before 0.18.0 ignore them), which
+    the vault sends every connection in its profile's core. New: `POST
+    /api/account/name {first_name, last_name}` (the registration
+    validation; CSRF; 10 changes per member per 24 h; audited
+    `member.name_change`; the member is emailed; `Me`), after which the
+    snapshot is pushed to a running vault. Additive
   - 2.1.2 (2026-10-06, VAULT-MESSAGING 0.17.0): editorial. The
     `X-VettID-App` header's `nonce` and `sig` are base64url without
     padding, canonical, as the apps send and the API already requires
@@ -165,6 +173,7 @@ set, changed, removed or locked.
 | POST | `/api/account/pin` | `{pin, current_pin?}` | `Me` — set (no current) or change (`current_pin` required). 4–8 digits, not trivially weak |
 | DELETE | `/api/account/pin` | `{current_pin}` | `Me` — disable |
 | POST | `/api/account/preferences` | `{email_updates?: boolean, pin_prompt_dismissed?: boolean}` (at least one) | `Me` |
+| POST | `/api/account/name` | `{first_name, last_name}` | `Me` (2.2.0) — change the account's names (below) |
 | POST | `/api/account/cancel` | `{confirm: "CANCEL", pin?}` | `{ok: true}` — `pin` required if a PIN is set. Account disabled now, deleted after 7 days; cookies cleared |
 
 ```ts
@@ -198,9 +207,38 @@ interface SubscriptionType {
 }
 ```
 
+**Names** (2.2.0, VAULT-MESSAGING 0.18.0 §10.8, §11.13). `first_name`
+and `last_name` are the names every connection of the member's vault
+sees, as the name on the member's VettID account (never as a verified
+identity).
+
+- `POST /api/account/name` takes both names; each is validated as in
+  `/api/public/request` (trimmed; letters, spaces, `'’.-`, starting with
+  a letter, at most 40 characters; `400 bad_request` otherwise). It
+  needs a session of an active account in state `registered` or
+  `member`, and `X-VettID-CSRF`. No account PIN is asked, even when one
+  is set (the PIN guards sign-in, which the session already passed; of
+  the account changes only the irreversible `/api/account/cancel` asks
+  for it again).
+- Names equal to the stored ones are answered with `Me` and change,
+  audit, email and push nothing. Otherwise the member row is updated,
+  the change audited as `member.name_change` (detail: the previous and
+  the new names), the member emailed a notice ("The name on your VettID
+  account was changed to …; your connections will see it. If this
+  wasn't you, contact support.") and the account snapshot pushed to the
+  running vault (Account snapshot to the vault, below), which sends the
+  new names to every connection.
+- Rate limit: 10 changes per member per 24 hours (`429 rate_limited`
+  with `retry_after`); no-op requests do not count.
+- The admin API shows member names but has no route to change them
+  (ADMIN-API "People"); one added later MUST push the snapshot as this
+  route does.
+
 Notes for the UI:
 - `registered` members see terms acceptance as the next step; subscription
   only after becoming `member`.
+- The account page shows the names with an edit form, and says that
+  every connection sees them.
 - If the published terms change, `needs_acceptance` turns true again for
   existing members (they stay `member`; the UI should prompt).
 - Paid types are listed but can't be started yet (`409` "Payments are not
@@ -663,17 +701,29 @@ envelopes. Account deletion after cancellation records the deleted
 
 The app shows membership, terms and subscription state, read-only, and
 gets it only from its vault. The API builds the snapshot from the member
-row (`v`, `as_of`, `email_hint`, `state`, `account_status`, `deletes_at`,
-`terms.needs_acceptance`, `subscription {type_name, status, paid,
-expires_at} | null`, `voting_rights`; at most 2 KiB) and sends it:
+row (`v`, `as_of`, `email_hint`, `first_name` and `last_name` (2.2.0),
+`state`, `account_status`, `deletes_at`, `terms.needs_acceptance`,
+`subscription {type_name, status, paid, expires_at} | null`,
+`voting_rights`; at most 2 KiB) and sends it:
 
 - in every `unlock` queue message (`account`);
 - as the queue op `account` to the vault's live leaseholder after a
   change: `POST /api/account/terms/accept`, `/subscription`,
-  `/subscription/cancel`, `/cancel` (and the admin site's equivalents).
+  `/subscription/cancel`, `/cancel` (and the admin site's equivalents),
+  and `/name` (2.2.0; the admin site has none).
   With no live lease nothing is sent. A slot is written as for `lock`;
   the host answers it `done`. A newly published terms version is not
   fanned out (each vault learns it at its next unlock).
+
+**Names (2.2.0).** `first_name` and `last_name` are the member row's, as
+stored (already validated at registration or by `POST
+/api/account/name`). The email address is never in the snapshot. The
+snapshot keeps `"v": 1`: vault releases before VAULT-MESSAGING 0.18.0
+parse it strictly but ignore unknown members, so the API sends the names
+to every vault without asking for its release; a release implementing
+0.18.0 puts them in the core of the profile its connections receive
+(VAULT-MESSAGING §10.8), and re-sends that profile when a pushed or
+unlock snapshot changes them.
 
 The snapshot's `account_status` is `active` or `canceled` only
 (VAULT-MESSAGING §11.13). A **suspended** account (or one in any other
@@ -683,7 +733,9 @@ make anyway, Access above) and no `account` op is sent; the vault keeps
 the last snapshot it had.
 
 It is display only and never a security signal; the API's own checks
-(Access, above) are what enforce membership and terms. Audit: none (it is
+(Access, above) are what enforce membership and terms. Its names are the
+one part a vault passes on, to its connections, as the account's
+(unverified) names. Audit: none (it is
 the member's own data going to the member's own vault).
 
 ### Vault release notices (VAULT-RELEASES §3.5, §10.2; W8)

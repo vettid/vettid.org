@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.17.0
-date: 2026-10-06
+version: 0.18.0
+date: 2026-10-07
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -12,13 +12,25 @@ related:
   - CALLING-SERVICE.md
   - PUSH-GATEWAY.md
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.1.2)
+  - MEMBER-API.md (2.2.0)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.0, approved 2026-10-03)
   - VAULT-RELEASES.md (0.1.6, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.18.0: normative (owner decisions of 2026-10-07, §15 item 26):
+    every `profile.update` carries a fixed core, the account's
+    `first_name` and `last_name` (new in the account snapshot, still
+    `v: 1`) and the vault's current `ik`; the display name becomes an
+    optional extra beside the photo and `@profile` items; no
+    `profile.update` without the core; re-sent when the names change,
+    once to every connection when a vault first stores names, and after
+    an `ik` rotation only in the epoch under the new `ik`; receivers
+    check `ik` against the pinned one (`drop.profile_ik_mismatch`), title
+    connections "First Last", show a placeholder before the core, an
+    `ik` fingerprint, and never call the names verified (§6.2, §9.3,
+    §10.4, §10.8, §10.9, §11.13, §13.7, §16)
   - 0.17.0: normative (owner decisions of 2026-10-06, §15 item 25): a
     transferred app's `device.paired` carries the member's `user_guid`
     from the vault's sealed header, which its later unlocks need (§6.7.1,
@@ -1927,10 +1939,15 @@ Field rules:
 
 - `profile` is self-asserted and optional (§6.4). It is allowed only for
   purposes `app`, `desktop`, `agent` and `connection`. A vault's `profile`
-  (purpose `connection`) carries only `{name}`, its display name (§10.8);
-  the shared profile follows in `profile.update` once the connection is
-  active (§9.3), so nothing more is disclosed to a party that has not been
-  approved.
+  (purpose `connection`) carries only `{first_name?, last_name?, name}`
+  (0.18.0): the core names of its shared profile, both or neither
+  (neither while it holds no snapshot with names, §10.8), and its display
+  name (`""` without one); `ik` is `from.ik`, which the handshake's
+  signature binds. The rest of the shared profile follows in
+  `profile.update` once the connection is active (§9.3), so nothing more
+  is disclosed to a party that has not been approved. The receiving app
+  shows the names on the request as §10.8 says for a profile (account
+  names, not verified). A device's `profile` is unchanged.
 - `rotations` is used only for reconnects (§6.6), in both `hs.init` and
   `hs.resp`; it MUST be absent for every other purpose.
 - `device_attest` is used only for purpose `app` (§6.7, §11.7).
@@ -3208,7 +3225,9 @@ messages to that peer; implementations MAY send without the spread
 (the reference implementation does, for now).
 
 When a connection becomes active (`connection.event{added}`), each vault
-sends its current shared profile to the other as `profile.update`.
+sends its current shared profile to the other as `profile.update`, if
+it has one with the core (0.18.0, §10.8); otherwise it sends it as soon
+as it stores a snapshot with names.
 
 There are no multi-recipient primitives.
 
@@ -3254,8 +3273,8 @@ an answer to an unknown or expired id is dropped.
 | | `pin.change` | D→V | req | Re-derive the DEK and re-seal the header (§10.6) |
 | Items & profile | `item.put`, `.get`, `.reveal`, `.list`, `.tag`, `.sensitivity`, `.delete` | D→V | req | The member's items: `data`, `secret` and `critical` (§10.7) |
 | | `tag.list`, `.set`, `.delete`, `.merge` | D→V | req | The tag registry; rename and merge (§10.8) |
-| | `profile.get`, `profile.set`, `settings.get`, `settings.set` | D→V | req | Display name and photo; owner policy (§10.8) |
-| | `profile.update` | V↔V | | Shared profile (name, photo, `@profile` items) to a connection (§9.3, §10.8) |
+| | `profile.get`, `profile.set`, `settings.get`, `settings.set` | D→V | req | Display name and photo, the read-only core; owner policy (§10.8) |
+| | `profile.update` | V↔V | | Shared profile (the core `first_name`, `last_name`, `ik`; display name, photo, `@profile` items) to a connection (§9.3, §10.8) |
 | | `sync.event` / `sync.since` | V→D, V↔V / D→V, V↔V | — / req | Mirror changes (kinds in §10.1); catch up |
 | | `account.get` | D→V | req | The member's account snapshot from the member API, display only (§11.13, 0.15.0) |
 | Connections | `connection.invite.create`, `.list`, `.cancel`, `.accept` | D→V | req | Invitations (§6.4) |
@@ -3580,7 +3599,18 @@ step-up types (§6.8).
   `version` is `0` before the first update) and are announced to the
   other devices as `sync.event{kind: "connection.changed"}`. `""` clears
   `alias` or `note`; `tags` replaces the list. `name` and `profile` remain
-  the peer's self-asserted values (§10.8).
+  the peer's values (§10.8).
+- **`name` and `profile`** (0.18.0). `profile` is the peer's latest kept
+  `profile.update` body (§10.8): `{version, first_name, last_name, ik,
+  name, photo?, items}`, or only the extras from a peer before 0.18.0,
+  or absent before the first. `name` is the peer's display name, from
+  that profile or, before it, from the peer's `hs.init` or the bundle's
+  `hint.name`; absent without one. Apps title a connection from
+  `profile.first_name` and `profile.last_name` as §10.8 says, never from
+  `name` alone, and show the fingerprint of `ik`. In
+  `connection.request.pending` and `connection.request.list`, `profile`
+  is the requester's `hs.init` profile (`{first_name?, last_name?,
+  name}`, §6.2).
 - **`last_active_at`** is when the vault last processed a durable message
   from the connection, to the minute; `created_at` is when the connection
   was made.
@@ -3970,35 +4000,140 @@ names it (§10.12; owner decision 2).
   new versions without `item.changed` notices. They are audited as
   `tag.changed` (`ref` = the new version).
 
-**Profile.** What connections see of the member is a small profile
-object, the display name and photo, plus the member's `data` items
-tagged **`@profile`** (owner decision 3). Sent by `app` or `desktop`.
+**Profile.** What connections see of the member is the **shared
+profile**: a fixed **core**, which the member cannot remove or edit from
+the app, and optional extras the member chooses (owner decision 3; owner
+decisions of 2026-10-07, §15 item 26, 0.18.0):
+
+- the core: `first_name` and `last_name`, the names of the member's
+  VettID account from the vault's latest account snapshot (§11.13), and
+  `ik`, the sending vault's current identity public key (§3.2);
+- the extras: a display name, a photo, and the member's `data` items
+  tagged **`@profile`**.
+
+The **profile object** holds the extras' display name and photo. Sent by
+`app` or `desktop` (`profile.get` also by an agent it is delegated to,
+§10.11).
 
 | Type | Request body | Response body |
 |---|---|---|
-| `profile.get` | `{}` | `{version, name, photo?}` |
+| `profile.get` | `{}` | `{version, name, photo?, first_name?, last_name?, ik}` |
 | `profile.set` | `{version, name?, photo?}` | `{version}` |
-| `profile.update` (V↔V) | — | `{version, name, photo?, items: [{item_id, name, category, fields: [{field_id, label, kind, value}]}]}` |
+| `profile.update` (V↔V) | — | `{version, first_name, last_name, ik, name, photo?, items: [{item_id, name, category, fields: [{field_id, label, kind, value}]}]}` |
 
-- `name`, the display name, is at most 128 bytes. `photo` is base64 of a
-  JPEG or PNG image of at most 65,536 bytes; in `profile.set`, `""`
-  removes it. The version rules of §10.1 apply to the profile object.
-- **The shared profile** is `name`, `photo` and every `data` item tagged
-  `@profile`, sorted by `item_id`, with all of its fields (not its notes,
-  tags or other members). At most 32 items carry `@profile`, and a
+- `name`, the display name, is optional: at most 128 bytes, `""` when the
+  member has none (the default). `photo` is base64 of a JPEG or PNG image
+  of at most 65,536 bytes; in `profile.set`, `""` removes it. The version
+  rules of §10.1 apply to the profile object.
+- **The core is read-only.** `first_name` and `last_name` are the
+  snapshot's, byte for byte; `ik` is the standard base64 of the vault's
+  current 32-byte identity public key. `profile.get` returns them;
+  `first_name` and `last_name` are absent while the vault holds no
+  snapshot with names. A `profile.set` naming `first_name`, `last_name`
+  or `ik` is refused with `bad_request` (an exception to §10.1's ignored
+  unknown members, so that an app cannot believe it changed them): the
+  names change only on the account portal (MEMBER-API 2.2.0 `POST
+  /api/account/name`), `ik` only by rotation (§3.4).
+- **The shared profile** is the core, `name`, `photo` and every `data`
+  item tagged `@profile`, sorted by `item_id`, with all of its fields
+  (not its notes, tags or other members). `name` is always present, `""`
+  without a display name, so that receivers before 0.18.0, which require
+  it, still parse the update. At most 32 items carry `@profile`, and a
   `profile.update` body is at most 196,608 bytes: a change that would
   exceed either is refused with `limit`.
-- After a change of the profile object, `sync.event{kind:
-  "profile.changed"}`. Whenever the shared profile changes (the name, the
-  photo, or an `@profile` item's tag, name, category or fields), the
-  vault sends `profile.update` to every active connection (§9.3). Its
-  `version` is a counter of the shared profile, distinct from the
-  profile object's.
-- A receiver parses `profile.update` strictly (the field rules of §10.7),
-  keeps the one with the highest `version` per connection and ignores
-  older ones (§8.4), shows it as the connection's `profile` (§10.4) and
-  notifies its owner devices with `connection.event{event: "profile"}`.
-  It is the peer's self-asserted data, and apps MUST present it as such.
+- **No profile without the core.** A vault MUST NOT send `profile.update`
+  without `first_name`, `last_name` and `ik`. While it holds no snapshot
+  with names (a vault enrolled before 0.18.0 that has not received one
+  since, or the moments between an enrollment and the first snapshot) it
+  sends no `profile.update` at all, not even at a connection's
+  activation (§9.3); its peers show the placeholder below. A release
+  implementing 0.18.0 treats a snapshot stored by an earlier release as
+  carrying no names.
+- **When it is sent.** After a change of the profile object,
+  `sync.event{kind: "profile.changed"}`. Whenever the shared profile
+  changes, the vault sends `profile.update` to every active connection
+  (§9.3); its `version` is a counter of the shared profile, distinct
+  from the profile object's, +1 per change. The shared profile changes
+  when:
+  1. the display name, the photo, or an `@profile` item's tag, name,
+     category or fields change;
+  2. the vault stores a snapshot (§11.13) whose `first_name` or
+     `last_name` differ, byte for byte, from the ones it last sent; a
+     newer snapshot with the same names changes nothing. The **first**
+     snapshot with names that a vault stores (after its enrollment, or
+     after it first runs a release implementing 0.18.0: its existing
+     connections then get the core at the first unlock or `account` op
+     whose snapshot carries names) is such a change, so every active
+     connection receives the core once;
+  3. `ik` rotates (§3.4), in the order below.
+- **After an `ik` rotation** the vault sends each peer the new
+  `profile.update`, carrying the new `ik`, only after it has sent that
+  peer the `identity.rotate` statement and the epoch it established with
+  that peer under the new `ik` (the rekey of §3.4 step 3, or a reconnect,
+  §6.6) is active, and it sends it in that epoch, never in an earlier
+  one. A peer accepts that handshake only under the key that its pinned
+  `ik` leads to through the rotation chain (§6.3, §6.6), so a peer that
+  can open the update has already followed the rotation, and the
+  update's `ik` equals the one it pinned. An update sent before the
+  rotation carries an earlier `ik`; one that arrives after the peer
+  followed the rotation is ignored (below, step 3), and the update sent
+  after the rotation replaces it.
+- **Receiving.** A receiver parses `profile.update` strictly (the field
+  rules of §10.7; `first_name` and `last_name` strings of 1–160 bytes
+  without control characters (C0, C1, U+2028, U+2029); `ik` the base64 of
+  32 bytes) and then, in this order:
+  1. ignores an update whose `version` is not higher than the one it
+     keeps for that connection (§8.4);
+  2. checks the core: an update carrying none of `first_name`,
+     `last_name` and `ik` is one from a vault release before 0.18.0 and
+     is kept (extras only, step 4, without step 3) as long as that
+     connection has never sent one with the core. An update with only
+     part of the core, or without it from a connection that has already
+     sent one, is dropped and audited `drop.profile_malformed`, and so is
+     one whose core members break the rules above;
+  3. checks that `ik` equals, byte for byte, the connection's pinned `ik`
+     (the `ik` of `connection.get`, as followed through `identity.rotate`,
+     §3.4, §6.6). An update whose `ik` is an earlier key of that peer
+     (an `old_ik` in the peer's rotation chain it stores, §3.4) was sent
+     before a rotation it has since followed and is ignored without an
+     audit entry. Any other mismatch: it drops the update and audits
+     `drop.profile_ik_mismatch` (`ref` = the `connection_id`), keeps the
+     profile it had and tells no device;
+  4. keeps the update, shows it as the connection's `profile` (§10.4) and
+     notifies its owner devices with `connection.event{event:
+     "profile"}`.
+- **What apps show.** An app MUST title a connection whose `profile`
+  carries the core as `first_name`, one space, `last_name`, and show a
+  non-empty display name, if it differs, as secondary text (the owner's
+  own `alias`, §10.4, may replace the title on the owner's screens, the
+  names still shown with it). Before a profile with the core has arrived
+  (a peer before 0.18.0, or one whose vault holds no snapshot with names
+  yet), it shows a neutral placeholder, **"Name not shared yet"**, with a
+  display name, if any, as secondary text; never a blank or "Unnamed
+  connection". Connection details MUST show the **fingerprint** of the
+  connection's pinned `ik`:
+
+  ```
+  fp = SHA-256("vettid/vms/2/ik-fp" || ik)    # ik: the 32 raw bytes
+  ```
+
+  shown as its first 16 bytes in lowercase hex, in 8 groups of 4 digits
+  separated by spaces (vector in §16). It changes when the peer's `ik`
+  rotates; apps show the new one without a warning when the rotation
+  chain verified (§3.4), as they do for a credential-key rotation
+  (§10.4). Names use Unicode bidirectional isolation wherever an app
+  shows them next to other text.
+- **What the names are.** `first_name` and `last_name` are the names the
+  peer's member gave VettID at registration or later on the account
+  portal, passed on by the peer's vault from VettID's snapshot. VettID
+  does not verify them against any identity document. Apps MAY label
+  them as the name on the peer's VettID account; they MUST NOT present
+  them as verified, legal or checked (no "verified" badge or check mark,
+  no "real name" or "ID-checked" wording), and MUST NOT suggest that
+  VettID vouches for the person. The `ik` fingerprint identifies the
+  peer's vault, the one the SAS was compared with (§6.3), not a person.
+  The display name, the photo and the `@profile` items remain the
+  peer's self-asserted data, and apps MUST present them as such.
 - 0.7.0 removed the profile's own fields, `shared` and `order`: they are
   `@profile` items, and anything else reaches a connection only through
   share rules and grants (§10.12).
@@ -4153,7 +4288,8 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   (`ref` = `txid`) (§10.18); `drop.suppressed`;
   and `drop.<reason>` for every message the vault dropped
   or refused (§6.3, §6.6, §7.3, §8.4), with the runtime's reason, such as
-  `drop.rate_limited`, `drop.one_app` (§6.7) or `drop.owner_check`
+  `drop.rate_limited`, `drop.one_app` (§6.7), `drop.profile_ik_mismatch`
+  and `drop.profile_malformed` (§10.8, 0.18.0) or `drop.owner_check`
   (§3.6.3).
 
 **Feed.**
@@ -7893,12 +8029,15 @@ email; no global limit that one attacker could exhaust for everyone.)
 
 (0.15.0.) Apps show the member's membership, terms and subscription
 state, read-only, and get it only from their vault; changes are made on
-the portal.
+the portal. Since 0.18.0 the snapshot also carries the account's first
+and last name, which the vault puts in the core of its shared profile
+(§10.8).
 
 - **The snapshot** the member API builds from the member's account:
 
   ```json
   { "v": 1, "as_of": "<RFC 3339>", "email_hint": "m***@example.com",
+    "first_name": "Ada", "last_name": "Lovelace",
     "state": "member", "account_status": "active|canceled", "deletes_at": "<RFC 3339>|null",
     "terms": { "needs_acceptance": false },
     "subscription": { "type_name": "...", "status": "trial|active|expired|canceled",
@@ -7907,8 +8046,24 @@ the portal.
   ```
 
   `email_hint` is the first character of the address's local part, `***`,
-  `@` and the domain. Nothing else about the member is sent (no name, no
-  full address, no `user_guid`). At most 2 KiB.
+  `@` and the domain. `first_name` and `last_name` (0.18.0, owner
+  decision of 2026-10-07) are the member row's names, as registered
+  (MEMBER-API `/api/public/request`) or last changed on the portal
+  (MEMBER-API 2.2.0 `POST /api/account/name`): letters, spaces and
+  `'’.-`, at most 40 characters each, so at most 160 bytes each. Nothing
+  else about the member is sent (no full address, no `user_guid`; the
+  email address goes neither in the snapshot nor in the profile). At
+  most 2 KiB, names included (they add at most about 360 bytes; the
+  rest of the snapshot is well under 1 KiB).
+- **Compatibility (0.18.0).** The snapshot keeps `"v": 1`: the names are
+  new members, which the strict parse below ignores in a release before
+  0.18.0 (unknown members are ignored), so the member API sends them to
+  every vault at once and an older release keeps working without them.
+  A release implementing 0.18.0 reads them; both or neither, each a
+  string of 1–160 bytes without control characters (a snapshot with one
+  of them only, or a malformed one, is refused as a wrong type is). A
+  snapshot without them (an API before MEMBER-API 2.2.0) is accepted
+  and leaves the vault without names (§10.8).
 - **Delivery.** The API puts the snapshot in every `unlock` queue message
   (`account`, §11.5) and, when the member's account changes (terms
   accepted, subscription started, cancelled or changed, account
@@ -7927,16 +8082,21 @@ the portal.
   `version` (+1 per change) and its own `received_at`, and sends
   `sync.event{kind: "account.changed", version}` to the app and desktops.
   They read it with `account.get` (§10.2). Agents and connections never
-  receive it (§13.7).
+  receive it (§13.7), except its `first_name` and `last_name`, which every
+  connection receives in the shared profile's core (§10.8, 0.18.0) and an
+  agent delegated `profile.get` reads there. A stored snapshot whose names
+  differ from the last ones sent triggers the `profile.update` of §10.8.
 - **While held** (§3.6.3). The op `account` is still stored (it comes
   from the host, not an owner device), but `account.get` is not on the
   hold's allow list (`owner_check_required`), and
   `sync.event{account.changed}` waits for the check like any other
   fan-out; devices catch up with `sync.since` after it.
-- **Display only.** Nothing in the vault depends on the snapshot, and it
-  is not authenticated beyond the host path: it is VettID's own data
-  about the member, which VettID could equally withhold. Membership and
-  terms are enforced by the member API (§11.1).
+- **Display only.** Nothing in the vault depends on the snapshot except
+  the profile's core names (0.18.0), and it is not authenticated beyond
+  the host path: it is VettID's own data about the member, which VettID
+  could equally withhold or change. That is why apps present the names
+  as the account's, never as verified (§10.8). Membership and terms are
+  enforced by the member API (§11.1).
 
 ## 12. Locked vaults and the collect manager
 
@@ -8365,10 +8525,14 @@ their owner. Period.")
   `locked`.
 - From its host it accepts, besides queue operations, only the account
   snapshot (§11.13, 0.15.0), which it shows to its owner's app and
-  desktops and to no one else.
+  desktops and to no one else, except the account's first and last name,
+  which it sends every connection in its shared profile's core (§10.8;
+  0.18.0, owner decision of 2026-10-07).
 - To a connection it sends only what the member's features share with
   that connection by the member's own decisions: messages, calls, the
-  shared profile, granted and shared items, action results,
+  shared profile (whose core, the account names and `ik`, goes to every
+  connection by the owner decision of 2026-10-07, §10.8), granted and
+  shared items, action results,
   introductions, location and presence under their policies, the
   credential key's public rotation statements and the signatures the
   member approved (§10.4, §10.13). A refused or failed credential
@@ -9221,6 +9385,60 @@ Follow-ups:
     vettid-android (store `user_guid` from a transfer's `device.paired`
     and unlock with it, warn when it is absent; the owner check's
     backoff countdown from `retry_after`).
+26. **Connections always get the account's names and the vault's
+    identity key (0.18.0).** Owner decisions of 2026-10-07.
+    1. **The gap.** Connections in the new app showed "Unnamed
+       connection": the shared profile's only name was the optional,
+       empty-by-default display name (§10.8), and the account snapshot
+       carried no name (§11.13). The old vettid.dev published profile
+       carried the first and last name, the email address and the vault
+       identity key.
+    2. **Account names.** The member API adds the member row's
+       `first_name` and `last_name` to the account snapshot (MEMBER-API
+       2.2.0); the email address stays out of the snapshot and the
+       profile. The snapshot keeps `"v": 1` (§11.13): its parse ignores
+       unknown members, so the names are additive and older releases
+       keep working; a `v: 2` would have made every release before
+       0.18.0 refuse every snapshot.
+    3. **A fixed core.** Every `profile.update` carries `first_name`,
+       `last_name` and `ik`, which the member cannot remove or edit in
+       the app; the display name ("allow a display name too"), photo and
+       `@profile` items are optional extras. A vault without names sends
+       no profile; receivers show a placeholder meanwhile.
+    4. **Re-sent on change**: a name change from a newer snapshot, the
+       first snapshot with names (so existing connections get the core
+       after the upgrade), and an `ik` rotation, ordered after
+       `identity.rotate` and in the epoch under the new `ik` (§10.8).
+    5. **Portal edit.** Members change their names on the account
+       portal (`POST /api/account/name`, MEMBER-API 2.2.0); the account
+       snapshot push then updates the running vault, which re-sends the
+       profile. The admin API shows member names but has no route to
+       edit them; an admin edit added later MUST push the snapshot too.
+    **Not decided, recommended as written** (to confirm at review): the
+    name change needs no account PIN, even with one set (the PIN guards
+    sign-in, which the session already passed, and among account
+    changes only the irreversible `/api/account/cancel`; a name change
+    is reversible, rate-limited and emailed to the member); the
+    placeholder's wording, "Name not shared yet"; a vault's `hs.init`
+    profile carries the core names so that the approval screen shows
+    who asks (alternative: keep it `{name}` and show names only after
+    activation), while the bundle's `hint.name`, which anyone holding
+    the link can read, stays the display name only; the `ik`
+    fingerprint's form (16 bytes of a domain-separated SHA-256, 8
+    groups of 4 hex digits); the name order is always first, then last
+    (no per-culture ordering); the core names are not shown on a
+    device-pairing request (a device's profile is unchanged).
+    Follow-ups: vettid-vault (parse and store the names; the core in
+    `profile.get` and `profile.update`; refuse the core in
+    `profile.set`; send on name change, on first names and after a
+    rotation's rekey; the receiver's checks and the two `drop.*` kinds;
+    the `hs.init` profile; the fingerprint in `keys.json`; `client/`);
+    vettid-android ("First Last" titles, display name secondary, the
+    placeholder, the fingerprint in connection details, no "verified"
+    wording; the member's own names in the avatar sheet, read-only,
+    with a link to the portal); vettid.org (MEMBER-API 2.2.0: the names
+    in the snapshot, `POST /api/account/name`, its email, audit and
+    push; the account site's name form; RUNBOOK "The account snapshot").
 
 ## 16. Test vectors
 
@@ -9281,6 +9499,11 @@ Kotlin, Swift and Rust clients MUST reproduce them byte for byte.
 
 §6.4 claim bundle                                               (invite.json)
   k_b : 32 x 0x14   nonce : 24 x 0x15   blob, h, QR JSON, link : invite.json
+
+§10.8 ik fingerprint (0.18.0; computed for this document, to be added to keys.json)
+  ik     : the vault ik pk above
+  SHA-256("vettid/vms/2/ik-fp" || ik) : 9a1fbb7d873eeafb494bef94f0727b2539c2faf27783d46d4e6862673f6216c3
+  shown  : 9a1f bb7d 873e eafb 494b ef94 f072 7b25
 
 §11 alternate channel                                           (altchan.json)
   ETK seed 32 x 0x06; descriptor bytes and user_data, devatt challenges
@@ -9487,6 +9710,37 @@ adds it to `recovery.json` (eph scalar 32 × 0x28, nonce 12 × 0x29) with
 the 0.16.0 implementation.
 
 ## 17. Changelog
+
+- **0.18.0** (2026-10-07): normative, owner decisions of 2026-10-07
+  (§15 item 26). Connections always get the account's names and the
+  vault's identity key.
+  - §11.13: the account snapshot carries `first_name` and `last_name`
+    (the member row's names; MEMBER-API 2.2.0); still `"v": 1`, as the
+    strict parse ignores unknown members, so older releases keep
+    working. The email address stays out of the snapshot and the
+    profile.
+  - §10.8: the shared profile is a read-only core (`first_name`,
+    `last_name`, `ik`) plus the optional display name, photo and
+    `@profile` items; `profile.get` returns the core, `profile.set`
+    refuses it (`bad_request`); `name` stays present (`""` for none)
+    for receivers before 0.18.0. A vault sends no `profile.update`
+    without the core; it sends one when the names change, once to
+    every active connection when it first stores a snapshot with names
+    (so existing connections get the core after the upgrade), and,
+    after an `ik` rotation, only after `identity.rotate` and in the
+    epoch under the new `ik`. Receivers parse strictly, ignore an
+    earlier `ik` of the peer's chain, drop any other mismatch
+    (`drop.profile_ik_mismatch`) and a partial or withdrawn core
+    (`drop.profile_malformed`), accept an extras-only update from a
+    release before 0.18.0, title the connection "First Last" with the
+    display name secondary, show "Name not shared yet" before the core
+    and the `ik` fingerprint (new, vector in §16), and never present the
+    names as verified.
+  - §6.2: a vault's `hs.init` profile is `{first_name?, last_name?,
+    name}`; §9.3: the activation update waits for the core; §10.4:
+    `name` and `profile` of connections and requests; §10.9:
+    `drop.profile_*`; §13.7: the names are the one part of the
+    snapshot that connections receive.
 
 - **0.17.0** (2026-10-06): normative, owner decisions of 2026-10-06
   (§15 item 25).
