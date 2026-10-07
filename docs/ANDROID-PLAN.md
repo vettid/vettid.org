@@ -6,10 +6,12 @@ date: 2026-10-07
 changelog:
   - 0.1.10: connections are titled with the account's first and last
     name from the profile's core, the display name secondary, a
-    placeholder before the core and the identity-key fingerprint in
-    the details, never called verified; the avatar sheet shows the
-    member's own names read-only, changed on the portal
-    (VAULT-MESSAGING 0.18.0 §10.8, MEMBER-API 2.2.0) (§4)
+    placeholder only until the first profile arrives, and the
+    identity-key fingerprint in the details, never called verified; the
+    member changes their own names only here, in the avatar sheet, with
+    the PIN and the credential password (`account.name.set`, at most
+    once every 30 days) (VAULT-MESSAGING 0.18.0 §10.8, MEMBER-API
+    2.2.0) (§4)
   - 0.1.9: a phone set up by a direct transfer stores the member's
     `user_guid` from the vault's `device.paired` and unlocks with it,
     and warns when an older vault release sent none; the owner check's
@@ -129,14 +131,14 @@ the destinations.
 |---|---|---|
 | Messages | Inbox | Conversations by connection; Unread chip; compose button |
 | Conversation | Message detail | Bubbles in a card list; pill actions (reply, more) |
-| Connections | Contacts | Initial tiles, status (pending / active / stale / blocked); a star marks favourites (the owner's `favorite` flag, `connection.update`), whose tiles are teal; add = invite (QR or link) / scan. Each is titled "First Last" from the profile's core (VAULT-MESSAGING 0.18.0 §10.8), the display name, if any, as secondary text; before the core has arrived: "Name not shared yet", never "Unnamed connection". Incoming requests show the requester's names the same way |
+| Connections | Contacts | Initial tiles, status (pending / active / stale / blocked); a star marks favourites (the owner's `favorite` flag, `connection.update`), whose tiles are teal; add = invite (QR or link) / scan. Each is titled "First Last" from the profile's core (VAULT-MESSAGING 0.18.0 §10.8), the display name, if any, as secondary text. Incoming requests show the requester's names the same way. Only between activation and the first `profile.update`, when the request's names are not at hand: "Name not shared yet"; never "Unnamed connection" |
 | Connection detail | — | Profile shared with you (the names labelled as the name on their VettID account, never "verified"; display name, photo and items labelled as shared by them), the vault key fingerprint (`ik`, 8 groups of 4 hex digits, §10.8), safety code (SAS), authenticate, alias/notes, block/remove |
 | Approvals | — (VettID-specific) | Pending connection requests, grant requests, critical-item uses, share-rule decisions; approve/deny; critical items need the credential password |
 | Items | Folder list | Items per VAULT-ITEMS: name, category, typed fields, tags, sensitivity (data / secret / critical); filter by tag; add/edit from templates; share rules by tag (default: ask for each new item). Critical items live in the Protean Credential and are never shared by a rule |
 | Credential | — | Critical items inside the Protean Credential; unlock window; password change; the vault-held credential copy (the backup) on/off. Turning it off shows VAULT-MESSAGING §3.5.6's warning and needs a confirmation: "If this phone is lost, broken, reset or replaced without a transfer, your vault **cannot be recovered**. It can only be deleted and replaced by a new one, and **everything in it is lost**." While off, the screen and Settings keep a short "no recovery" notice. Turning it on asks for the password at once (an owner check) so that the copy exists, and says recovery is possible from then on |
 | Settings | Settings | Vault (status, release, lock, PIN); Security (credential, recovery, attestation info, biometric app lock and timeout, the owner-check interval 1–24 h and the hold switch); Privacy; App (theme, notifications and push path) |
 | Owner check | — (VettID-specific) | One screen: PIN and credential password together (VAULT-MESSAGING §3.6.5); also the "vault held" screen with the waiting counts and the lock action |
-| Avatar sheet | Account sheet | Vault status, lock vault, the member's names (read-only, from `profile.get`: "Your connections see this name; change it on the account site", 0.1.10), membership and subscription (read-only, from the vault, VAULT-MESSAGING §11.13), open account portal (browser) |
+| Avatar sheet | Account sheet | Vault status, lock vault, the member's names (from `profile.get`: "Your connections see this name") with **Change name** (0.1.10): the two names (the registration rule: letters, spaces, `'’.-`, ≤ 40), then the owner-check screen's PIN and password, sent as `account.name.set`; then "Name change requested" until `account.get`'s `name_request` is `applied` or `refused`; `too_soon` (from the vault or the member API): "You can change your name once every 30 days. You can change it again on <date>" (VAULT-MESSAGING §10.8), membership and subscription (read-only, from the vault, VAULT-MESSAGING §11.13), open account portal (browser) |
 | Recovery (new phone) | — (VettID-specific) | Only with the backup on: scan the portal's recovery QR → claim (`email_hint`) → register → PIN → credential password → the app replaces the old one. No other path: 0.1.6's backup-off choice (new credential or delete) is removed. `no_backup` at register or unlock (a vault whose backup is off): "This vault cannot be recovered: its credential backup was off. Delete it on the account site and start over with a new setup code", with a link to the portal's start-over page (MEMBER-API 2.1.0) and then to onboarding |
 | Pending deletion | — | When `GET /api/vault/status` shows `deletion` (a start-over requested on the portal, VAULT-MESSAGING §11.11.9): an urgent banner with the time left and **Cancel deletion** (`POST /api/vault/deletion/cancel {deletion_id}`, signed by the app key, with the `deletion_id` from the status's `deletion: {deletion_id, state, deletes_at}`, MEMBER-API 2.1.1) |
 | Transfer (new phone) | — (VettID-specific) | Scan the old phone's transfer QR → compare the SAS → wait for the approval → `device.paired{transfer}`: the app stores its `vault_id` and the member's `user_guid` (VAULT-MESSAGING 0.17.0 §6.7.1) like an enrolled phone, so that it unlocks later with the PIN. Without `user_guid` (a vault release before 0.17.0) the transfer still completes and the app warns: "This phone cannot unlock your vault after it locks until your vault is updated" |

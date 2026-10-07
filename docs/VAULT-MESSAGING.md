@@ -20,17 +20,21 @@ related:
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
   - 0.18.0: normative (owner decisions of 2026-10-07, §15 item 26):
-    every `profile.update` carries a fixed core, the account's
-    `first_name` and `last_name` (new in the account snapshot, still
-    `v: 1`) and the vault's current `ik`; the display name becomes an
-    optional extra beside the photo and `@profile` items; no
-    `profile.update` without the core; re-sent when the names change,
-    once to every connection when a vault first stores names, and after
-    an `ik` rotation only in the epoch under the new `ik`; receivers
-    check `ik` against the pinned one (`drop.profile_ik_mismatch`), title
-    connections "First Last", show a placeholder before the core, an
-    `ik` fingerprint, and never call the names verified (§6.2, §9.3,
-    §10.4, §10.8, §10.9, §11.13, §13.7, §16)
+    every `profile.update` and connection `hs.init` profile carries the
+    account's `first_name` and `last_name` (now required in the account
+    snapshot, still `v: 1`, and carried at enrollment) and, in the
+    update, the vault's current `ik`; the display name becomes an
+    optional extra beside the photo and `@profile` items; re-sent when
+    the names change and after an `ik` rotation only in the epoch under
+    the new `ik`; receivers drop an update without the core
+    (`drop.profile_malformed`) or with another `ik`
+    (`drop.profile_ik_mismatch`), title connections "First Last", show
+    an `ik` fingerprint and never call the names verified. The member
+    changes the names only in the app: `account.name.set` (PIN and
+    credential password), the host event `account_name`, applied by the
+    member API at most once per 30 days, the result in the snapshot's
+    `name_change` (§6.2, §9.3, §10.1, §10.2, §10.4, §10.8, §10.9, §11.5,
+    §11.13, §13.7, §16)
   - 0.17.0: normative (owner decisions of 2026-10-06, §15 item 25): a
     transferred app's `device.paired` carries the member's `user_guid`
     from the vault's sealed header, which its later unlocks need (§6.7.1,
@@ -481,7 +485,7 @@ the relay at vettid.org allows:
 |---|---|---|
 | Relay | Mailbox ids, depositor relay keys, timing, padded sizes, blob and claim sizes | Message types, content, or which identity, device or connection a relay key belongs to |
 | Parent / host | Relay host names; TLS byte counts and timing per instance (connections are shared by all vaults, §12.2); enroll, unlock and lock events; encrypted-state size; `vault_id` ↔ instance | Relay requests (TLS terminates in the enclave, §12.2), mailbox ids, PINs, keys |
-| Member API | Which member enrolled, unlocked or locked, and when; `vault_id`, instance lease, `vault_version`, `state_version` (§11.5); the public key of the vault's app key and when it changes, so when a transfer or recovery completed (0.15.0, §11.12); whether the vault keeps a backup copy of its credential (`credential_backup`, one bit, 0.16.0, §11.5), so whether it can be recovered | PINs; why an unlock failed (§11.4); mailbox ids; keys other than app public keys; any stable device identifier (§11.7) |
+| Member API | Which member enrolled, unlocked or locked, and when; `vault_id`, instance lease, `vault_version`, `state_version` (§11.5); the public key of the vault's app key and when it changes, so when a transfer or recovery completed (0.15.0, §11.12); whether the vault keeps a backup copy of its credential (`credential_backup`, one bit, 0.16.0, §11.5), so whether it can be recovered; the member's name change requests (`account_name`, 0.18.0, §11.5), whose names it holds anyway | PINs; why an unlock failed (§11.4); mailbox ids; keys other than app public keys; any stable device identifier (§11.7) |
 | Network | Endpoints and timing | Everything else |
 
 The owner check (§3.6) adds nothing to this table. The hold is not
@@ -1939,11 +1943,11 @@ Field rules:
 
 - `profile` is self-asserted and optional (§6.4). It is allowed only for
   purposes `app`, `desktop`, `agent` and `connection`. A vault's `profile`
-  (purpose `connection`) carries only `{first_name?, last_name?, name}`
-  (0.18.0): the core names of its shared profile, both or neither
-  (neither while it holds no snapshot with names, §10.8), and its display
-  name (`""` without one); `ik` is `from.ik`, which the handshake's
-  signature binds. The rest of the shared profile follows in
+  (purpose `connection`) carries only `{first_name, last_name, name?}`
+  (0.18.0): the core names of its shared profile, always, and its display
+  name, if any (§10.8); `ik` is `from.ik`, which the handshake's
+  signature binds. A connection `hs.init` from a vault whose `profile`
+  lacks either name is dropped and audited `drop.profile_malformed`. The rest of the shared profile follows in
   `profile.update` once the connection is active (§9.3), so nothing more
   is disclosed to a party that has not been approved. The receiving app
   shows the names on the request as §10.8 says for a profile (account
@@ -3225,9 +3229,8 @@ messages to that peer; implementations MAY send without the spread
 (the reference implementation does, for now).
 
 When a connection becomes active (`connection.event{added}`), each vault
-sends its current shared profile to the other as `profile.update`, if
-it has one with the core (0.18.0, §10.8); otherwise it sends it as soon
-as it stores a snapshot with names.
+sends its current shared profile, with its core (0.18.0, §10.8), to the
+other as `profile.update`.
 
 There are no multi-recipient primitives.
 
@@ -3277,6 +3280,7 @@ an answer to an unknown or expired id is dropped.
 | | `profile.update` | V↔V | | Shared profile (the core `first_name`, `last_name`, `ik`; display name, photo, `@profile` items) to a connection (§9.3, §10.8) |
 | | `sync.event` / `sync.since` | V→D, V↔V / D→V, V↔V | — / req | Mirror changes (kinds in §10.1); catch up |
 | | `account.get` | D→V | req | The member's account snapshot from the member API, display only (§11.13, 0.15.0) |
+| | `account.name.set` | D→V | req | Change the account's first and last name, with the PIN and the credential password; applied by the member API (§10.8, 0.18.0) |
 | Connections | `connection.invite.create`, `.list`, `.cancel`, `.accept` | D→V | req | Invitations (§6.4) |
 | | `connection.request.pending`, `connection.request.outgoing` | V→D | | An incoming request awaiting approval (profile, `sas`, `remote`); an outgoing one (`sas`) (§6.4) |
 | | `connection.request.list` | D→V | req | Pending incoming and outgoing requests with their SAS (§6.4) |
@@ -3368,6 +3372,8 @@ an answer to an unknown or expired id is dropped.
     0.10.2 also `connection.invite.accept` of a vault already connected
     or requested, with body `{connection_id}`, §6.4);
   - `limit`: a count or size limit of the feature would be exceeded;
+  - (0.18.0) `too_soon`: `account.name.set` within 30 days of the last
+    applied name change, with body `{allowed_after}` (RFC 3339, §10.8);
   - `bad_password`, `backoff`, `stale_credential`, `utk_invalid`: §3.5.3,
     §3.5.4. Since 0.17.0 a `backoff` error response's body is
     `{retry_after}`: the whole seconds, rounded up and at least 1, until
@@ -3446,7 +3452,7 @@ an answer to an unknown or expired id is dropped.
   | `credential.alarm` | `alarm_id`, `state` (`frozen`, `rotation_required`, `resolved`) (§3.5.9) |
   | `owner_check` | `deadline`: a check succeeded, and a hold, if any, ended (§3.6, 0.13.0) |
   | `vault.release` | `release` (PCR0 hex), `release_number`; sent once after a vault first runs under a new release (§11.10.6) |
-  | `account.changed` | `version`: a newer account snapshot arrived from the host (§11.13, 0.15.0) |
+  | `account.changed` | `version`: a newer account snapshot arrived from the host (§11.13, 0.15.0), or (0.18.0) the `name_request` changed (§10.8) |
   | `credential.changed` | `version` (§3.5.5) |
   | `item.changed` | `item_id`, `version` (§10.7) |
   | `item.deleted` | `item_id` (§10.7) |
@@ -3494,7 +3500,7 @@ an answer to an unknown or expired id is dropped.
 | `vault.owner-check` (app: the holder) | `{credential, utk_id, sealed{pin, password, hold?, hold_off_until?}}` | `{credential, version, utks, deadline, interval_seconds, hold, hold_off_until?}` (§3.6.1, §3.6.7); `bad_pin`, `bad_password`, `backoff` (body `{retry_after}`, §10.1), `utk_invalid`, `stale_credential`, `credential_frozen`, `rotation_required`, `forbidden` (not the holder), `bad_request` (a PIN that is not 6–32 digits) |
 | `vault.held` (V→D, to the app and desktops in an access session) | — | `{deadline, waiting: {messages, requests, calls, other}}` (§3.6.3) |
 | `vault.lock` (app, desktop) | `{}` | `{}`; then `vault.locking` |
-| `account.get` (app, desktop) | `{}` | `{account: <snapshot, §11.13> \| null, version, received_at}`; `null` (and `version` 0) before any snapshot arrived (0.15.0) |
+| `account.get` (app, desktop) | `{}` | `{account: <snapshot, §11.13> \| null, version, received_at, name_request?}`; `null` (and `version` 0) before any snapshot arrived (0.15.0); `name_request` (0.18.0) is the latest `account.name.set` request (§10.8) |
 | `vault.delete` (app: the holder, or the enrolling app before a credential exists) | `{confirm: "delete my vault", credential?, utk_id, sealed{pin, password?}}` | `{}`; then the deletion of §12.5. `bad_request` without the exact phrase or a needed member; `bad_pin`, `backoff`, `bad_password`, `credential_frozen` / `rotation_required` (holder during an alarm), `forbidden` (a recovering app since 0.16.0: it completes the recovery first, then deletes as the holder; a member without the credential uses §11.11.9) |
 | `vault.locking` (ephemeral) | — | `{reason?}`, with `exp` = now + 60 s; `reason` is `"recovery"` when a recovery request locked the vault (§11.11.1), `"owner_check"` when ten consecutive failed owner checks did (§3.6.4, 0.13.0) |
 | `relay.token.issued` | — | `{kind: "standing" \| "reconnect", token}` |
@@ -3602,15 +3608,15 @@ step-up types (§6.8).
   the peer's values (§10.8).
 - **`name` and `profile`** (0.18.0). `profile` is the peer's latest kept
   `profile.update` body (§10.8): `{version, first_name, last_name, ik,
-  name, photo?, items}`, or only the extras from a peer before 0.18.0,
-  or absent before the first. `name` is the peer's display name, from
-  that profile or, before it, from the peer's `hs.init` or the bundle's
-  `hint.name`; absent without one. Apps title a connection from
-  `profile.first_name` and `profile.last_name` as §10.8 says, never from
-  `name` alone, and show the fingerprint of `ik`. In
-  `connection.request.pending` and `connection.request.list`, `profile`
-  is the requester's `hs.init` profile (`{first_name?, last_name?,
-  name}`, §6.2).
+  name?, photo?, items}`, absent only before the first, in the moment
+  after activation; the inviter's side then has the request's
+  `{first_name, last_name, name?}`. `name` is the peer's display name,
+  from that profile or, before it, from the peer's `hs.init` or the
+  bundle's `hint.name`; absent without one. Apps title a connection from
+  the names as §10.8 says, never from `name` alone, and show the
+  fingerprint of `ik`. In `connection.request.pending` and
+  `connection.request.list`, `profile` is the requester's `hs.init`
+  profile (`{first_name, last_name, name?}`, §6.2).
 - **`last_active_at`** is when the vault last processed a durable message
   from the connection, to the minute; `created_at` is when the connection
   was made.
@@ -4001,9 +4007,9 @@ names it (§10.12; owner decision 2).
   `tag.changed` (`ref` = the new version).
 
 **Profile.** What connections see of the member is the **shared
-profile**: a fixed **core**, which the member cannot remove or edit from
-the app, and optional extras the member chooses (owner decision 3; owner
-decisions of 2026-10-07, §15 item 26, 0.18.0):
+profile**: a fixed **core**, which the member cannot remove or edit as
+part of the profile, and optional extras the member chooses (owner
+decision 3; owner decisions of 2026-10-07, §15 item 26, 0.18.0):
 
 - the core: `first_name` and `last_name`, the names of the member's
   VettID account from the vault's latest account snapshot (§11.13), and
@@ -4013,58 +4019,50 @@ decisions of 2026-10-07, §15 item 26, 0.18.0):
 
 The **profile object** holds the extras' display name and photo. Sent by
 `app` or `desktop` (`profile.get` also by an agent it is delegated to,
-§10.11).
+§10.11). The names themselves change only through `account.name.set`
+(below), never through the profile.
 
 | Type | Request body | Response body |
 |---|---|---|
-| `profile.get` | `{}` | `{version, name, photo?, first_name?, last_name?, ik}` |
+| `profile.get` | `{}` | `{version, name?, photo?, first_name, last_name, ik}` |
 | `profile.set` | `{version, name?, photo?}` | `{version}` |
-| `profile.update` (V↔V) | — | `{version, first_name, last_name, ik, name, photo?, items: [{item_id, name, category, fields: [{field_id, label, kind, value}]}]}` |
+| `profile.update` (V↔V) | — | `{version, first_name, last_name, ik, name?, photo?, items: [{item_id, name, category, fields: [{field_id, label, kind, value}]}]}` |
 
-- `name`, the display name, is optional: at most 128 bytes, `""` when the
-  member has none (the default). `photo` is base64 of a JPEG or PNG image
-  of at most 65,536 bytes; in `profile.set`, `""` removes it. The version
-  rules of §10.1 apply to the profile object.
+- `name`, the display name, is optional: at most 128 bytes, absent when
+  the member has none (the default). `photo` is base64 of a JPEG or PNG
+  image of at most 65,536 bytes. In `profile.set`, `""` removes either.
+  The version rules of §10.1 apply to the profile object.
 - **The core is read-only.** `first_name` and `last_name` are the
   snapshot's, byte for byte; `ik` is the standard base64 of the vault's
-  current 32-byte identity public key. `profile.get` returns them;
-  `first_name` and `last_name` are absent while the vault holds no
-  snapshot with names. A `profile.set` naming `first_name`, `last_name`
-  or `ik` is refused with `bad_request` (an exception to §10.1's ignored
-  unknown members, so that an app cannot believe it changed them): the
-  names change only on the account portal (MEMBER-API 2.2.0 `POST
-  /api/account/name`), `ik` only by rotation (§3.4).
+  current 32-byte identity public key. `profile.get` returns them. A
+  `profile.set` naming `first_name`, `last_name` or `ik` is refused with
+  `bad_request` (an exception to §10.1's ignored unknown members, so that
+  an app cannot believe it changed them).
 - **The shared profile** is the core, `name`, `photo` and every `data`
   item tagged `@profile`, sorted by `item_id`, with all of its fields
-  (not its notes, tags or other members). `name` is always present, `""`
-  without a display name, so that receivers before 0.18.0, which require
-  it, still parse the update. At most 32 items carry `@profile`, and a
-  `profile.update` body is at most 196,608 bytes: a change that would
-  exceed either is refused with `limit`.
-- **No profile without the core.** A vault MUST NOT send `profile.update`
-  without `first_name`, `last_name` and `ik`. While it holds no snapshot
-  with names (a vault enrolled before 0.18.0 that has not received one
-  since, or the moments between an enrollment and the first snapshot) it
-  sends no `profile.update` at all, not even at a connection's
-  activation (§9.3); its peers show the placeholder below. A release
-  implementing 0.18.0 treats a snapshot stored by an earlier release as
-  carrying no names.
+  (not its notes, tags or other members). At most 32 items carry
+  `@profile`, and a `profile.update` body is at most 196,608 bytes: a
+  change that would exceed either is refused with `limit`.
+- **The core is always there.** Every vault holds a snapshot with names
+  from its enrollment on (the `enroll` queue message carries one, §11.5),
+  and every `profile.update` and connection `hs.init` profile carries
+  them. A vault MUST NOT send a `profile.update` without the complete
+  core; should it ever lack names (which the enrollment rule excludes),
+  it sends none and audits `profile.core_missing`, rather than an
+  incomplete one.
 - **When it is sent.** After a change of the profile object,
-  `sync.event{kind: "profile.changed"}`. Whenever the shared profile
-  changes, the vault sends `profile.update` to every active connection
-  (§9.3); its `version` is a counter of the shared profile, distinct
-  from the profile object's, +1 per change. The shared profile changes
-  when:
+  `sync.event{kind: "profile.changed"}`. The vault sends `profile.update`
+  to the peer when a connection becomes active (§9.3) and, whenever the
+  shared profile changes, to every active connection (§9.3); its
+  `version` is a counter of the shared profile, distinct from the
+  profile object's, +1 per change. The shared profile changes when:
   1. the display name, the photo, or an `@profile` item's tag, name,
      category or fields change;
   2. the vault stores a snapshot (§11.13) whose `first_name` or
-     `last_name` differ, byte for byte, from the ones it last sent; a
-     newer snapshot with the same names changes nothing. The **first**
-     snapshot with names that a vault stores (after its enrollment, or
-     after it first runs a release implementing 0.18.0: its existing
-     connections then get the core at the first unlock or `account` op
-     whose snapshot carries names) is such a change, so every active
-     connection receives the core once;
+     `last_name` differ, byte for byte, from the ones it last sent (after
+     an `account.name.set` the member API applied, or any other change of
+     the account's names); a newer snapshot with the same names changes
+     nothing;
   3. `ik` rotates (§3.4), in the order below.
 - **After an `ik` rotation** the vault sends each peer the new
   `profile.update`, carrying the new `ik`, only after it has sent that
@@ -4084,13 +4082,9 @@ The **profile object** holds the extras' display name and photo. Sent by
   32 bytes) and then, in this order:
   1. ignores an update whose `version` is not higher than the one it
      keeps for that connection (§8.4);
-  2. checks the core: an update carrying none of `first_name`,
-     `last_name` and `ik` is one from a vault release before 0.18.0 and
-     is kept (extras only, step 4, without step 3) as long as that
-     connection has never sent one with the core. An update with only
-     part of the core, or without it from a connection that has already
-     sent one, is dropped and audited `drop.profile_malformed`, and so is
-     one whose core members break the rules above;
+  2. drops an update that lacks any of `first_name`, `last_name` and
+     `ik`, or whose core members break the rules above, and audits
+     `drop.profile_malformed` (`ref` = the `connection_id`);
   3. checks that `ik` equals, byte for byte, the connection's pinned `ik`
      (the `ik` of `connection.get`, as followed through `identity.rotate`,
      §3.4, §6.6). An update whose `ik` is an earlier key of that peer
@@ -4102,16 +4096,19 @@ The **profile object** holds the extras' display name and photo. Sent by
   4. keeps the update, shows it as the connection's `profile` (§10.4) and
      notifies its owner devices with `connection.event{event:
      "profile"}`.
-- **What apps show.** An app MUST title a connection whose `profile`
-  carries the core as `first_name`, one space, `last_name`, and show a
-  non-empty display name, if it differs, as secondary text (the owner's
-  own `alias`, §10.4, may replace the title on the owner's screens, the
-  names still shown with it). Before a profile with the core has arrived
-  (a peer before 0.18.0, or one whose vault holds no snapshot with names
-  yet), it shows a neutral placeholder, **"Name not shared yet"**, with a
-  display name, if any, as secondary text; never a blank or "Unnamed
-  connection". Connection details MUST show the **fingerprint** of the
-  connection's pinned `ik`:
+  A dropped update changes nothing; the next valid one (a higher
+  `version`) replaces the kept profile.
+- **What apps show.** An app MUST title a connection as `first_name`, one
+  space, `last_name`, from its `profile`, and show a non-empty display
+  name, if it differs, as secondary text (the owner's own `alias`, §10.4,
+  may replace the title on the owner's screens, the names still shown
+  with it). Pending requests show the requester's names from its
+  `hs.init` profile the same way (§6.2). In the short moment between a
+  connection's activation and its first `profile.update`, the app titles
+  it with the request's names if it has them (the inviter does) and
+  otherwise shows a neutral placeholder, **"Name not shared yet"**; never
+  a blank or "Unnamed connection". Connection details MUST show the
+  **fingerprint** of the connection's pinned `ik`:
 
   ```
   fp = SHA-256("vettid/vms/2/ik-fp" || ik)    # ik: the 32 raw bytes
@@ -4124,19 +4121,93 @@ The **profile object** holds the extras' display name and photo. Sent by
   (§10.4). Names use Unicode bidirectional isolation wherever an app
   shows them next to other text.
 - **What the names are.** `first_name` and `last_name` are the names the
-  peer's member gave VettID at registration or later on the account
-  portal, passed on by the peer's vault from VettID's snapshot. VettID
-  does not verify them against any identity document. Apps MAY label
-  them as the name on the peer's VettID account; they MUST NOT present
-  them as verified, legal or checked (no "verified" badge or check mark,
-  no "real name" or "ID-checked" wording), and MUST NOT suggest that
-  VettID vouches for the person. The `ik` fingerprint identifies the
-  peer's vault, the one the SAS was compared with (§6.3), not a person.
-  The display name, the photo and the `@profile` items remain the
-  peer's self-asserted data, and apps MUST present them as such.
+  peer's member gave VettID at registration or later changed from the
+  app (`account.name.set`), passed on by the peer's vault from VettID's
+  snapshot. VettID does not verify them against any identity document.
+  Apps MAY label them as the name on the peer's VettID account; they
+  MUST NOT present them as verified, legal or checked (no "verified"
+  badge or check mark, no "real name" or "ID-checked" wording), and MUST
+  NOT suggest that VettID vouches for the person. The `ik` fingerprint
+  identifies the peer's vault, the one the SAS was compared with (§6.3),
+  not a person. The display name, the photo and the `@profile` items
+  remain the peer's self-asserted data, and apps MUST present them as
+  such.
 - 0.7.0 removed the profile's own fields, `shared` and `order`: they are
   `@profile` items, and anything else reaches a connection only through
   share rules and grants (§10.12).
+
+**Changing the account's names** (0.18.0; owner decisions of
+2026-10-07: "only in the app"). The member changes `first_name` and
+`last_name` only from the app, never on the account portal (which shows
+them read-only). The vault verifies the member as an owner check does
+and hands the request to its host, which records it for the member API;
+the member API applies it and pushes the new snapshot, and only then do
+connections see the new names.
+
+| Type | Request body | Response body |
+|---|---|---|
+| `account.name.set` (app: the holder) | `{credential, utk_id, sealed{pin, password, first_name, last_name}}` | `{credential, version, utks, request: <name request>}`; `too_soon` (body `{allowed_after}`), `bad_request`, and the owner check's answers (§3.6.1: `bad_pin`, `bad_password`, `backoff`, `utk_invalid`, `stale_credential`, `credential_frozen`, `rotation_required`) |
+
+```json
+name request: { "seq": 3, "first_name": "Ada", "last_name": "King",
+                "requested_at": "<ts>", "state": "pending|applied|refused",
+                "reason": "too_soon|invalid|account" }
+```
+
+- **Names.** Each is trimmed of leading and trailing spaces and MUST
+  match `^[\p{L}\p{M}][\p{L}\p{M} '’.-]*$` with at most 40 characters
+  counted as UTF-16 code units: the member API's registration rule
+  (MEMBER-API `/api/public/request`), which the vault applies first so
+  that the API rarely refuses (`bad_request` otherwise; also when both
+  equal the current names).
+- **The vault**, for the holder only (`forbidden` otherwise) and not
+  while held (§3.6.3):
+  1. spends the UTK and opens `sealed` (§3.5.4);
+  2. answers `too_soon` with `{allowed_after}` while the stored
+     snapshot's `name_change.allowed_after` (§11.13) lies in the future;
+     nothing is counted;
+  3. checks the blob, the PIN and the password exactly as
+     `vault.owner-check` does (§3.6.1 steps 3–7: the same backoffs,
+     counts and audit entries), and on success rotates the CEK and
+     returns the new `credential` (§3.5.3);
+  4. checks the names (above);
+  5. increments its name-request counter `seq` (DEK state, from 1),
+     stores the request as `pending` (replacing one still pending), and
+     emits the host event **`account_name`** `{seq, first_name,
+     last_name}` (§11.5), handed to the parent with the flush that
+     stored the request, as `app_key` is;
+  6. audits `account.name_requested` (`ref` = `seq`; no names) and
+     answers with the request.
+  A successful `account.name.set` is not an owner check: it does not
+  move the deadline (§3.6.1).
+- **The result** arrives in the account snapshot (§11.13), which the
+  member API pushes after it has processed the request (MEMBER-API
+  2.2.0): `name_change.last` names the `seq` and whether it was
+  `applied` or `refused` (`reason`: `too_soon` within 30 days of the last
+  applied change, `invalid` names, `account` an account that may not
+  change them). When a stored snapshot's `name_change.last.seq` equals
+  the pending request's, the vault sets the request's `state` and
+  `reason` from it and audits `account.name_applied` or
+  `account.name_refused` (`ref` = `seq`); an applied change also brings
+  the new names, which update every connection (above). A request still
+  `pending` after a snapshot with a higher `last.seq` (which cannot
+  happen with an honest host) is `refused` with `reason: "account"`.
+  `account.get` (§10.2) returns the latest request as `name_request`;
+  every state change sends `sync.event{kind: "account.changed"}`.
+- **What the app shows.** The account sheet shows the names read-only,
+  with "Change name" (the PIN and password screen of the owner check,
+  §3.6.5, with the two names), and says that every connection sees them.
+  While `pending`: "Name change requested". `refused` with `too_soon`,
+  or the vault's `too_soon`: "You can change your name once every 30
+  days. You can change it again on <allowed_after>." `invalid`: the
+  registration rule; `account`: "Your account cannot change its name
+  right now".
+- **Trust.** The host and the member API are VettID's, which holds the
+  account's names anyway (§11.13): the vault path means that an honest
+  VettID changes them only on a request the member approved with the PIN
+  and the credential password, not on a phone's signature or a portal
+  session alone. A dishonest host could still write the account's names
+  directly, as before.
 
 **Settings.** Owner policy, versioned as one object. Sent by `app` or
 `desktop`.
@@ -4241,7 +4312,10 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   recovery removed) (§6.7.1, §11.11.5); `item.added`, `item.updated`, `item.deleted`,
   `item.sensitivity_changed`, `item.revealed` (`ref` = `item_id`),
   `tag.changed` (`ref` = the registry's new version) (§10.7, §10.8);
-  `settings.changed` (`ref` = the new version); `recovery.requested`, `recovery.replaced`, `recovery.bad_code`,
+  `settings.changed` (`ref` = the new version); `account.name_requested`,
+  `account.name_applied`, `account.name_refused` (`ref` = the request's
+  `seq`; no names), `profile.core_missing` (§10.8, 0.18.0);
+  `recovery.requested`, `recovery.replaced`, `recovery.bad_code`,
   `recovery.attestation_failed`, `recovery.registered`,
   `recovery.device_paired`, `recovery.completed`, `recovery.cancelled`,
   `recovery.expired`, `recovery.voided` (§11.11.6); `message.sent`,
@@ -6206,7 +6280,7 @@ Nothing secret is stored:
 
 | Store | Contents | Retention |
 |---|---|---|
-| Vault table | **`app_key`** (0.15.0: `{key, kid, seq}`, the public key of the vault's app key as the enclave last reported it, written by the host; and the API's own `app_key_pending` and recovery claim keys, §11.12), `user_guid`, **`vault_id`** (opaque, 128-bit random, 32 lowercase hex characters, assigned by the API at a member's first enrollment; the routing key for alternate-channel requests), `state` (`enrolling`, `locked`, `unlocked`, `deleted`), **lease** (`instance_id`, `lease_expires_at`), **`sealed_release`** (the PCR0 the vault is sealed to; routing aid, §11.10.5), **`vault_version`** (release that last opened the vault), **`state_version`** (vault-state format version), **`alarm`** (`kind`, `alarm_id`, `at`, `emailed_at`; the last host alarm, below) and `alarm_pending`, **`credential_backup`** (0.16.0: whether the vault keeps a backup copy of its credential, as last reported, below; absent until a release of 0.16.0 reports it), the API's own `deletion` record (§11.11.9), `created_at`, `updated_at` | account lifetime |
+| Vault table | **`app_key`** (0.15.0: `{key, kid, seq}`, the public key of the vault's app key as the enclave last reported it, written by the host; and the API's own `app_key_pending` and recovery claim keys, §11.12), `user_guid`, **`vault_id`** (opaque, 128-bit random, 32 lowercase hex characters, assigned by the API at a member's first enrollment; the routing key for alternate-channel requests), `state` (`enrolling`, `locked`, `unlocked`, `deleted`), **lease** (`instance_id`, `lease_expires_at`), **`sealed_release`** (the PCR0 the vault is sealed to; routing aid, §11.10.5), **`vault_version`** (release that last opened the vault), **`state_version`** (vault-state format version), **`alarm`** (`kind`, `alarm_id`, `at`, `emailed_at`; the last host alarm, below) and `alarm_pending`, **`credential_backup`** (0.16.0: whether the vault keeps a backup copy of its credential, as last reported, below; absent until a release of 0.16.0 reports it), the API's own `deletion` record (§11.11.9), **`name_change`** (0.18.0: `{seq, first_name, last_name, at}`, the vault's latest name request, written by the host) and `name_change_pending`, the API's `name_change_result` (§10.8, below), `created_at`, `updated_at` | account lifetime |
 | Instance registry | `instance_id`, **`release`** (PCR0 from its descriptor), queue URL, descriptor, attestation, `heartbeat_at` | while the instance is live |
 | Request table (response slots) | `request_id`, `vault_id`, `op`, `status` (`queued`, `done`, `expired`), opaque response `envelope` (≤ 8 KiB) and/or a host `code` | TTL 15 min |
 | Audit log | enroll, unlock and lock requests: member, time, `vault_id`, request id, never PINs or envelopes | MEMBER-API audit retention |
@@ -6243,8 +6317,22 @@ Nothing secret is stored:
   (§11.11.7); the enclave decides from its own header (§11.11.1), so a
   host that misreports the bit can only refuse recoveries it could
   refuse anyway, or forward one the enclave refuses.
+- **Name requests** (0.18.0, owner decisions of 2026-10-07, §10.8). After
+  a successful `account.name.set` the vault emits the event
+  **`account_name`** `{seq, first_name, last_name}`, handed to the parent
+  with the flush that stored the request, as for `app_key`. The parent
+  writes `name_change = {seq, first_name, last_name, at}` (`at`: its own
+  Unix seconds) and `name_change_pending = true` on the vault row
+  **whatever the lease**, conditional only on `seq` being higher than the
+  row's (absent: 0), so a stale instance can only report an older
+  request. It is the only lifecycle event with member content: the
+  member's own instruction about account data VettID already holds. The
+  member API processes it (MEMBER-API 2.2.0 "Name changes"), records
+  `name_change_result = {seq, status, reason?}` and pushes the snapshot,
+  whose `name_change.last` carries that result (§11.13). Only the host
+  role writes `name_change` and sets `name_change_pending`.
 - **The lease rule.** The parent writes the lifecycle values (other than
-  `app_key`, above) to
+  `app_key` and `name_change`, above) to
   the vault table only while it holds the vault's lease or no lease exists
   (a conditional write), so an instance that lost a split brain cannot
   overwrite the holder's values.
@@ -6291,18 +6379,21 @@ with a DLQ after 3 receives:
   "manifest_sha256": "<64 hex; enroll and unlock only>",
   "browser_key": "<b64 65-byte P-256 point; recovery only>",
   "app_key": "<b64 SPKI DER; enroll and recovery_register only>",
-  "account": { "...": "the account snapshot, §11.13; unlock and account only" },
+  "account": { "...": "the account snapshot, §11.13; enroll, unlock and account only" },
   "enqueued_at": "<RFC 3339>" }
 ```
 
 `app_key` (0.15.0) is REQUIRED for `enroll` and `recovery_register` and
 absent otherwise: the key the request was signed with at the API, which
 the enclave binds to the sealed `app.api_key` (§11.3, §11.11.3).
-`account` (0.15.0) is REQUIRED for `account` and OPTIONAL for `unlock`
-(the API includes it whenever it can read the member): the enclave
-passes it to the vault process after a successful unlock, or, for the op
-`account`, to the running vault process; with no running vault it drops
-it. `account` takes no lease and has no envelope; the parent answers its
+`account` (0.15.0) is REQUIRED for `account` and, since 0.18.0, for
+`enroll`, and OPTIONAL for `unlock` (the API includes it whenever it can
+read the member): the enclave passes it to the vault process after a
+successful enrollment or unlock, or, for the op `account`, to the
+running vault process; with no running vault it drops it. An `enroll`
+without a well-formed `account` (§11.13) is answered `bad_request`
+(§11.3), so that every vault holds the account's names from its first
+moment (§10.8). `account` takes no lease and has no envelope; the parent answers its
 slot `done` (§11.13).
 
 `manifest_sha256` is REQUIRED for `enroll` and `unlock` and absent for
@@ -6348,8 +6439,8 @@ the enclave reports completion.
 
 - **Lifecycle events:** `enrolled` and `unlocked` at enrollment; `moved`
   with the target release after a move, and back to the earlier release
-  after an abandonment (§11.10.4); `alarm.credential_clone` and, since
-  0.16.0, `credential_backup` (above).
+  after an abandonment (§11.10.4); `alarm.credential_clone`, since
+  0.16.0 `credential_backup`, and since 0.18.0 `account_name` (above).
 
 **Manifest by hash** (0.10.0, owner decision O10). Enroll and unlock
 requests name the manifest by `manifest_sha256` and `manifest_serial`
@@ -8031,13 +8122,17 @@ email; no global limit that one attacker could exhaust for everyone.)
 state, read-only, and get it only from their vault; changes are made on
 the portal. Since 0.18.0 the snapshot also carries the account's first
 and last name, which the vault puts in the core of its shared profile
-(§10.8).
+(§10.8) and which the member changes only from the app
+(`account.name.set`, §10.8), never on the portal.
 
 - **The snapshot** the member API builds from the member's account:
 
   ```json
   { "v": 1, "as_of": "<RFC 3339>", "email_hint": "m***@example.com",
     "first_name": "Ada", "last_name": "Lovelace",
+    "name_change": { "allowed_after": "<RFC 3339>|null",
+                     "last": { "seq": 3, "status": "applied|refused",
+                               "reason": "too_soon|invalid|account" } | null },
     "state": "member", "account_status": "active|canceled", "deletes_at": "<RFC 3339>|null",
     "terms": { "needs_acceptance": false },
     "subscription": { "type_name": "...", "status": "trial|active|expired|canceled",
@@ -8048,35 +8143,40 @@ and last name, which the vault puts in the core of its shared profile
   `email_hint` is the first character of the address's local part, `***`,
   `@` and the domain. `first_name` and `last_name` (0.18.0, owner
   decision of 2026-10-07) are the member row's names, as registered
-  (MEMBER-API `/api/public/request`) or last changed on the portal
-  (MEMBER-API 2.2.0 `POST /api/account/name`): letters, spaces and
-  `'’.-`, at most 40 characters each, so at most 160 bytes each. Nothing
+  (MEMBER-API `/api/public/request`) or last changed from the app
+  (§10.8): letters, spaces and `'’.-`, at most 40 characters each, so at
+  most 160 bytes each. Every member has them from registration, and
+  every snapshot carries them. `name_change` (0.18.0) is the member API's
+  state of the name changes: `allowed_after`, when the next change may
+  be applied (30 days after the last applied one; `null` when a change
+  may be applied now, as before any change: the registration names do
+  not count), and `last`, the outcome of this vault's latest
+  `account.name.set` request that the API processed (`seq` as the vault
+  sent it; `reason` only with `refused`), or `null`. Nothing
   else about the member is sent (no full address, no `user_guid`; the
   email address goes neither in the snapshot nor in the profile). At
-  most 2 KiB, names included (they add at most about 360 bytes; the
-  rest of the snapshot is well under 1 KiB).
-- **Compatibility (0.18.0).** The snapshot keeps `"v": 1`: the names are
-  new members, which the strict parse below ignores in a release before
-  0.18.0 (unknown members are ignored), so the member API sends them to
-  every vault at once and an older release keeps working without them.
-  A release implementing 0.18.0 reads them; both or neither, each a
-  string of 1–160 bytes without control characters (a snapshot with one
-  of them only, or a malformed one, is refused as a wrong type is). A
-  snapshot without them (an API before MEMBER-API 2.2.0) is accepted
-  and leaves the vault without names (§10.8).
-- **Delivery.** The API puts the snapshot in every `unlock` queue message
-  (`account`, §11.5) and, when the member's account changes (terms
-  accepted, subscription started, cancelled or changed, account
-  cancelled), sends the op `account` to the vault's live leaseholder; with
-  no live lease it sends nothing (the next unlock carries it). A new terms
+  most 2 KiB, names included (the new members add at most about 500
+  bytes; the rest of the snapshot is well under 1 KiB).
+- **Version (0.18.0).** The snapshot keeps `"v": 1`, with `first_name`,
+  `last_name` and `name_change` **required**: VettID has no members'
+  vaults to stay compatible with (owner decision of 2026-10-07), so no
+  older form is accepted. The vault refuses a snapshot without them, or
+  with a name that is not a string of 1–160 bytes without control
+  characters, as it refuses a wrong type, and keeps the one it had.
+- **Delivery.** The API puts the snapshot in every `enroll` (0.18.0) and
+  `unlock` queue message (`account`, §11.5) and, when the member's
+  account changes (terms accepted, subscription started, cancelled or
+  changed, account cancelled, and since 0.18.0 a name change processed,
+  applied or refused), sends the op `account` to the vault's live
+  leaseholder; with no live lease it sends nothing (the next unlock carries it). A new terms
   version is not fanned out: each vault learns it at its next unlock. A
   trial's expiry needs no message: apps show `expired` once `expires_at`
   has passed.
   A **suspended** account gets no snapshot (0.15.2; `account_status` is
   `active` or `canceled` only): the API sends none, in an unlock or as
   an op, and the vault keeps the last one it stored (MEMBER-API 2.0.1).
-- **In the vault.** After a successful unlock, or on the op `account` for
-  a running vault, the vault parses the snapshot strictly (unknown members
+- **In the vault.** After a successful enrollment (0.18.0) or unlock, or
+  on the op `account` for a running vault, the vault parses the snapshot strictly (unknown members
   ignored, wrong types refused, over 2 KiB refused), ignores it unless its
   `as_of` is later than the stored one, stores it in DEK state with a
   `version` (+1 per change) and its own `received_at`, and sends
@@ -8085,7 +8185,8 @@ and last name, which the vault puts in the core of its shared profile
   receive it (§13.7), except its `first_name` and `last_name`, which every
   connection receives in the shared profile's core (§10.8, 0.18.0) and an
   agent delegated `profile.get` reads there. A stored snapshot whose names
-  differ from the last ones sent triggers the `profile.update` of §10.8.
+  differ from the last ones sent triggers the `profile.update` of §10.8,
+  and its `name_change.last` settles a pending name request (§10.8).
 - **While held** (§3.6.3). The op `account` is still stored (it comes
   from the host, not an owner device), but `account.get` is not on the
   hold's allow list (`owner_check_required`), and
@@ -8520,7 +8621,12 @@ their owner. Period.")
   that the member API can refuse a recovery request upfront with a
   clear answer instead of locking the vault and refusing a day later.
   The enclave's refusal of a recovery request adds the clear slot code
-  `recovery_unavailable` (§11.11.2), which says the same. The owner check (§3.6) adds none: the hold is not
+  `recovery_unavailable` (§11.11.2), which says the same. Since 0.18.0
+  (owner decisions of 2026-10-07, §15 item 26) it also reports the
+  member's approved request to change the account's first and last name
+  (`account_name`, §10.8, §11.5): content, but the member's own
+  instruction to VettID about data VettID holds, sent only after the PIN
+  and the credential password. The owner check (§3.6) adds none: the hold is not
   reported, and the lock after ten failed checks is an ordinary
   `locked`.
 - From its host it accepts, besides queue operations, only the account
@@ -9386,7 +9492,9 @@ Follow-ups:
     and unlock with it, warn when it is absent; the owner check's
     backoff countdown from `retry_after`).
 26. **Connections always get the account's names and the vault's
-    identity key (0.18.0).** Owner decisions of 2026-10-07.
+    identity key; names change only in the app (0.18.0).** Owner
+    decisions of 2026-10-07, in two rounds (the second answering the
+    review of vettid.org #155).
     1. **The gap.** Connections in the new app showed "Unnamed
        connection": the shared profile's only name was the optional,
        empty-by-default display name (§10.8), and the account snapshot
@@ -9396,49 +9504,71 @@ Follow-ups:
     2. **Account names.** The member API adds the member row's
        `first_name` and `last_name` to the account snapshot (MEMBER-API
        2.2.0); the email address stays out of the snapshot and the
-       profile. The snapshot keeps `"v": 1` (§11.13): its parse ignores
-       unknown members, so the names are additive and older releases
-       keep working; a `v: 2` would have made every release before
-       0.18.0 refuse every snapshot.
+       profile.
     3. **A fixed core.** Every `profile.update` carries `first_name`,
-       `last_name` and `ik`, which the member cannot remove or edit in
-       the app; the display name ("allow a display name too"), photo and
-       `@profile` items are optional extras. A vault without names sends
-       no profile; receivers show a placeholder meanwhile.
-    4. **Re-sent on change**: a name change from a newer snapshot, the
-       first snapshot with names (so existing connections get the core
-       after the upgrade), and an `ik` rotation, ordered after
-       `identity.rotate` and in the epoch under the new `ik` (§10.8).
-    5. **Portal edit.** Members change their names on the account
-       portal (`POST /api/account/name`, MEMBER-API 2.2.0); the account
-       snapshot push then updates the running vault, which re-sends the
-       profile. The admin API shows member names but has no route to
-       edit them; an admin edit added later MUST push the snapshot too.
-    **Not decided, recommended as written** (to confirm at review): the
-    name change needs no account PIN, even with one set (the PIN guards
-    sign-in, which the session already passed, and among account
-    changes only the irreversible `/api/account/cancel`; a name change
-    is reversible, rate-limited and emailed to the member); the
-    placeholder's wording, "Name not shared yet"; a vault's `hs.init`
-    profile carries the core names so that the approval screen shows
-    who asks (alternative: keep it `{name}` and show names only after
-    activation), while the bundle's `hint.name`, which anyone holding
-    the link can read, stays the display name only; the `ik`
-    fingerprint's form (16 bytes of a domain-separated SHA-256, 8
-    groups of 4 hex digits); the name order is always first, then last
-    (no per-culture ordering); the core names are not shown on a
-    device-pairing request (a device's profile is unchanged).
-    Follow-ups: vettid-vault (parse and store the names; the core in
-    `profile.get` and `profile.update`; refuse the core in
-    `profile.set`; send on name change, on first names and after a
-    rotation's rekey; the receiver's checks and the two `drop.*` kinds;
-    the `hs.init` profile; the fingerprint in `keys.json`; `client/`);
-    vettid-android ("First Last" titles, display name secondary, the
-    placeholder, the fingerprint in connection details, no "verified"
-    wording; the member's own names in the avatar sheet, read-only,
-    with a link to the portal); vettid.org (MEMBER-API 2.2.0: the names
-    in the snapshot, `POST /api/account/name`, its email, audit and
-    push; the account site's name form; RUNBOOK "The account snapshot").
+       `last_name` and `ik`, which the member cannot remove or edit as
+       part of the profile; the display name ("allow a display name
+       too"), photo and `@profile` items are optional extras.
+    4. **Re-sent on change**: a name change from a newer snapshot and
+       an `ik` rotation, ordered after `identity.rotate` and in the
+       epoch under the new `ik` (§10.8).
+    5. **Answers of 2026-10-07 (owner):**
+       - **Name changes only in the app**, not on the portal, which
+         shows the names read-only. Chosen design: the vault verifies
+         the member with the PIN and the credential password, as an
+         owner check, and hands the request to its host
+         (`account.name.set`, the event `account_name`, §10.8, §11.5);
+         the member API accepts a change only from that path. Rejected:
+         a member API route signed by the app key (MEMBER-API 2.0.0),
+         which is simpler (no new host event, an immediate HTTP answer)
+         but proves only possession of the phone, not the member's PIN
+         and password, and would be the one account change an app makes
+         without its vault.
+       - **Placeholder** "Name not shared yet": approved, for the short
+         moment between a connection's activation and its first
+         `profile.update` only, since peers always carry names.
+       - **The names in the connection request** (`hs.init` profile):
+         approved. The bundle's `hint.name`, which anyone holding the
+         link can read, stays the display name only.
+       - **"First Last"** ordering: approved. **Rate limit: once a
+         month**, made precise as one applied change per 30 days per
+         member (the registration names do not count; refused requests
+         do not count).
+       - **No backward compatibility: VettID has no users today.**
+         Every `profile.update` and `hs.init` profile MUST carry the
+         names (and the update `ik`); an update without them is dropped
+         as malformed. The snapshot always carries the names; it keeps
+         `"v": 1` with them required, and the `enroll` message carries
+         it, so that no vault is ever without names. 0.18.0's first
+         draft's allowances (profiles from releases before 0.18.0,
+         a vault without names that sends no profile, a display name
+         always present for older receivers) are removed; the display
+         name is optional (absent when none).
+    6. **Admin.** The admin API shows member names but has no route to
+       change them; none is added.
+    **Not decided, recommended as written** (to confirm at review): a
+    successful `account.name.set` does not count as the daily owner
+    check (it does not move the deadline); a new request replaces one
+    still pending; the vault checks the 30 days itself from the
+    snapshot's `allowed_after` before asking for the PIN and password,
+    and the member API checks them again; the fingerprint's form (16
+    bytes of a domain-separated SHA-256, 8 groups of 4 hex digits); the
+    defensive `profile.core_missing` audit for a vault that somehow
+    lacks names.
+    Follow-ups: vettid-vault (names required in the snapshot and the
+    `enroll` message; the core in `profile.get`, `profile.update` and
+    `hs.init`; refuse the core in `profile.set`; send on name change
+    and after a rotation's rekey; the receiver's checks and the
+    `drop.*` kinds; `account.name.set`, the `account_name` event, the
+    parent's row write, `name_request`; the fingerprint in
+    `keys.json`; `client/`); vettid-android ("First Last" titles,
+    display name secondary, the placeholder, the fingerprint, no
+    "verified" wording; the change-name screen with PIN and password
+    and its states); vettid.org (MEMBER-API 2.2.0: the names and
+    `name_change` in the snapshot, `account` in `enroll`, the
+    vault-row fields and their IAM, the name-change job with its audit,
+    email and push; the account site shows the names read-only;
+    RUNBOOK "The account snapshot").
 
 ## 16. Test vectors
 
@@ -9713,34 +9843,39 @@ the 0.16.0 implementation.
 
 - **0.18.0** (2026-10-07): normative, owner decisions of 2026-10-07
   (§15 item 26). Connections always get the account's names and the
-  vault's identity key.
-  - §11.13: the account snapshot carries `first_name` and `last_name`
-    (the member row's names; MEMBER-API 2.2.0); still `"v": 1`, as the
-    strict parse ignores unknown members, so older releases keep
-    working. The email address stays out of the snapshot and the
-    profile.
+  vault's identity key; the member changes the names only in the app.
+  - §11.13, §11.5: the account snapshot carries `first_name`,
+    `last_name` and `name_change`, all required (still `"v": 1`; VettID
+    has no vaults to stay compatible with); the `enroll` queue message
+    carries the snapshot too (`bad_request` without it), so a vault
+    always holds the names. The email address stays out of the snapshot
+    and the profile.
   - §10.8: the shared profile is a read-only core (`first_name`,
     `last_name`, `ik`) plus the optional display name, photo and
     `@profile` items; `profile.get` returns the core, `profile.set`
-    refuses it (`bad_request`); `name` stays present (`""` for none)
-    for receivers before 0.18.0. A vault sends no `profile.update`
-    without the core; it sends one when the names change, once to
-    every active connection when it first stores a snapshot with names
-    (so existing connections get the core after the upgrade), and,
-    after an `ik` rotation, only after `identity.rotate` and in the
-    epoch under the new `ik`. Receivers parse strictly, ignore an
-    earlier `ik` of the peer's chain, drop any other mismatch
-    (`drop.profile_ik_mismatch`) and a partial or withdrawn core
-    (`drop.profile_malformed`), accept an extras-only update from a
-    release before 0.18.0, title the connection "First Last" with the
-    display name secondary, show "Name not shared yet" before the core
-    and the `ik` fingerprint (new, vector in §16), and never present the
-    names as verified.
-  - §6.2: a vault's `hs.init` profile is `{first_name?, last_name?,
-    name}`; §9.3: the activation update waits for the core; §10.4:
-    `name` and `profile` of connections and requests; §10.9:
-    `drop.profile_*`; §13.7: the names are the one part of the
-    snapshot that connections receive.
+    refuses it (`bad_request`). The vault never sends an update without
+    the core (`profile.core_missing` as a defensive error); it re-sends
+    the profile when the names change and, after an `ik` rotation, only
+    after `identity.rotate` and in the epoch under the new `ik`.
+    Receivers parse strictly, drop an update without the full core
+    (`drop.profile_malformed`), ignore an earlier `ik` of the peer's
+    chain and drop any other mismatch (`drop.profile_ik_mismatch`),
+    title the connection "First Last" with the display name secondary,
+    show "Name not shared yet" only between activation and the first
+    update (when the request's names are not at hand), show the `ik`
+    fingerprint (new, vector in §16), and never present the names as
+    verified.
+  - §10.8 (new): `account.name.set` (the holder; PIN and credential
+    password as an owner check; `too_soon` within 30 days of the last
+    applied change); the host event `account_name` (§11.5); the member
+    API applies or refuses it and pushes the snapshot, whose
+    `name_change.last` settles the request; `account.get` returns
+    `name_request`. The portal shows the names read-only.
+  - §6.2: a vault's `hs.init` profile is `{first_name, last_name,
+    name?}`; §9.3, §10.4: the activation update and the `name` and
+    `profile` of connections and requests; §10.1: `too_soon`; §10.9:
+    the new audit and `drop.*` kinds; §2.2, §13.7: the names reach
+    connections, and the host learns name requests.
 
 - **0.17.0** (2026-10-06): normative, owner decisions of 2026-10-06
   (§15 item 25).
