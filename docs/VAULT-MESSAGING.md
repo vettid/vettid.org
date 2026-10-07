@@ -9810,8 +9810,8 @@ Follow-ups:
        `since` and `until` (RFC 3339), beside `kinds` and
        `connection_id`; a search evaluates at most 2,000 entries per
        request and answers `partial` with a cursor when that budget runs
-       out before `limit` matches (§10.9). Chosen here (not decided by
-       the owner, to confirm at review): the searched fields; Go's
+       out before `limit` matches (§10.9). Chosen in the draft, then
+       confirmed by the owner (point 4): the searched fields; Go's
        `strings.ToLower` per rune without Unicode normalisation (the
        enclave has no normalisation tables; apps send NFC); kinds also
        matched with `.`, `_` and `-` read as spaces; names as they are
@@ -9827,6 +9827,17 @@ Follow-ups:
        entry **"History"** shows the audit log with the vault-side
        search, filters by category, connection and date, infinite scroll
        with the cursors and an entry detail, read-only.
+    4. **Review of vettid.org #158 (owner, 2026-10-07).** The owner
+       agreed to the choices above that were open: the searched fields,
+       `strings.ToLower` without normalisation and the kind separators
+       read as spaces, current names only, the 2,000-entry budget with
+       `q` only, `since` inclusive and `until` exclusive; desktops keep
+       the full email (`account.get` stays app and desktop); History's
+       category filter is single-choice (so a request never exceeds 16
+       `kinds` prefixes), with ANDROID-PLAN's category table; translated
+       kind labels are not searchable in the vault. One change: the
+       app's drawer has no "create" group at all, since the floating
+       action button creates everywhere (ANDROID-PLAN 0.1.11 §3, §4).
     Follow-ups: vettid-vault (`email` required in the snapshot parser;
     `q`, `since`, `until`, `partial` and the scan budget in
     `features/audit`, with a name resolver over connections, devices

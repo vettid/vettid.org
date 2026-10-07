@@ -11,7 +11,8 @@ changelog:
     only to the member); the drawer drops "Credential" (Settings →
     Security → Credential) and "Invite a connection" (the floating
     action button invites on Connections and starts a new message on
-    Messages); the Items section is called **"Vault"** in the interface
+    Messages; the drawer's planned "create" group is dropped, as the
+    button creates everywhere); the Items section is called **"Vault"** in the interface
     ("items" stays the technical term); a new drawer entry **"History"**:
     the audit log, searched by the vault (`q`), filtered by category,
     connection and date, with infinite scroll and an entry detail,
@@ -111,8 +112,9 @@ patterns:
 
 - **Top bar**: menu button, screen title, search, avatar (initial tile).
 - **Navigation drawer** as the main navigation (no bottom tabs): primary
-  destinations, then a "create" group, then Settings / Help, version at the
-  bottom.
+  destinations, then Settings / Help, version at the bottom. No "create"
+  group (0.1.11, owner decision of 2026-10-07; Proton's Create folder /
+  label is not adopted): the floating action button creates.
 - **List rows**: rounded-square initial tile, two lines (name, preview),
   date and a trailing action icon; generous spacing.
 - **Empty states**: one illustration, a title and one line.
@@ -140,9 +142,10 @@ later: Calls, Devices & agents, Shared actions & introductions, Wallet,
 Location. "Credential" is not in the drawer: it is reached from Settings →
 Security → Credential. "Invite a connection" is not in the drawer either:
 the floating action button invites on Connections and starts a new
-message on Messages (§3). A "create" group (Proton's Create folder /
-label) holds only **New item** (A5), as a shortcut to the Vault screen's
-add button; until it exists the drawer shows only the destinations.
+message on Messages (§3). The drawer has **no "create" group** (owner
+decision of 2026-10-07; 0.1.2 planned one with Invite a connection and
+New item): the floating action button creates on every screen that
+creates something (§3), so the drawer holds only destinations.
 
 **"Vault", not "Items", in the interface** (0.1.11, owner decision of
 2026-10-07). The member's stored data (VAULT-ITEMS) is called **Vault**
