@@ -682,7 +682,8 @@ describe('POST /api/vault/enroll', () => {
     // 2.2.0: every enroll carries the account snapshot (VAULT-MESSAGING 0.18.0 §11.5).
     expect(Object.keys(m.msg)).toEqual(['v', 'op', 'vault_id', 'user_guid', 'request_id', 'etk_kid', 'envelope', 'manifest_sha256', 'app_key', 'account', 'enqueued_at']);
     expect(m.msg).toMatchObject({ v: 1, op: 'enroll', vault_id: vid, user_guid: 'g1', request_id: RID, etk_kid: KID, envelope: ENV, manifest_sha256: MSHA, app_key: keyOf('g1').b64 });
-    expect(m.msg.account).toMatchObject({ v: 1, first_name: 'Ada', last_name: 'One', name_change: { allowed_after: null, last: null }, state: 'member', account_status: 'active' });
+    expect(m.msg.account).toMatchObject({ v: 1, email: 'g1@x.org', first_name: 'Ada', last_name: 'One', name_change: { allowed_after: null, last: null }, state: 'member', account_status: 'active' });
+    expect(m.msg.account).not.toHaveProperty('email_hint'); // 2.3.0
     const auditPut = ddb.commandCalls(PutCommand).find((c) => c.args[0].input.TableName === 'audit')!;
     expect(auditPut.args[0].input.Item).toMatchObject({ action: 'vault.enroll_request', subject: 'g1', detail: { vault_id: vid, via: 'app', kid: keyOf('g1').kid } });
     expect(JSON.stringify(auditPut.args[0].input.Item)).not.toContain(ENV.slice(0, 64));
@@ -690,6 +691,20 @@ describe('POST /api/vault/enroll', () => {
 
   test('2.2.0: no snapshot, no enroll: 503 vault_unavailable and nothing queued', async () => {
     put('members', { ...getItem('members', 'g1'), last_name: 'x'.repeat(161) });
+    const r = await call('POST', '/api/vault/enroll', body());
+    expect(r).toEqual({ status: 503, body: expect.objectContaining({ error: 'vault_unavailable' }) });
+    expect(sqs.calls()).toHaveLength(0);
+    expect(tbl('requests').size).toBe(0);
+  });
+
+  test.each([
+    ['too short', 'a@'],
+    ['without @', 'member.example.com'],
+    ['over 1,016 bytes', 'm@' + 'x'.repeat(1015)],
+    ['with a control character', 'm\n@x.org'],
+    ['missing', undefined],
+  ])('2.3.0: an email a vault would refuse (%s): no snapshot, no enroll, nothing queued', async (_n, email) => {
+    put('members', { ...getItem('members', 'g1'), email });
     const r = await call('POST', '/api/vault/enroll', body());
     expect(r).toEqual({ status: 503, body: expect.objectContaining({ error: 'vault_unavailable' }) });
     expect(sqs.calls()).toHaveLength(0);
@@ -777,9 +792,9 @@ describe('POST /api/vault/unlock', () => {
     expect(m).toMatchObject({ url: QUEUE_PREFIX + 'i-1', msg: { v: 1, op: 'unlock', vault_id: VID, user_guid: 'g1', request_id: RID, etk_kid: KID, envelope: ENV, manifest_sha256: MSHA } });
     // 2.0.0: the account snapshot rides in every unlock (VAULT-MESSAGING §11.13); no app_key.
     expect(Object.keys(m.msg)).toEqual(['v', 'op', 'vault_id', 'user_guid', 'request_id', 'etk_kid', 'envelope', 'manifest_sha256', 'account', 'enqueued_at']);
-    expect(Object.keys(m.msg.account)).toEqual(['v', 'as_of', 'email_hint', 'first_name', 'last_name', 'name_change', 'state', 'account_status', 'deletes_at', 'terms', 'subscription', 'voting_rights']);
+    expect(Object.keys(m.msg.account)).toEqual(['v', 'as_of', 'email', 'first_name', 'last_name', 'name_change', 'state', 'account_status', 'deletes_at', 'terms', 'subscription', 'voting_rights']);
     expect(m.msg.account).toEqual({
-      v: 1, as_of: new Date(NOW_MS).toISOString(), email_hint: 'g***@x.org',
+      v: 1, as_of: new Date(NOW_MS).toISOString(), email: 'g1@x.org', // 2.3.0: the full address, not the hint
       first_name: 'Ada', last_name: 'One', name_change: { allowed_after: null, last: null }, // 2.2.0
       state: 'member', account_status: 'active', deletes_at: null,
       terms: { needs_acceptance: false }, subscription: null, voting_rights: false,
@@ -787,7 +802,7 @@ describe('POST /api/vault/unlock', () => {
     expect(getItem('requests', RID).app_kid).toBe(keyOf('g1').kid);
   });
 
-  test('the snapshot carries the subscription, the terms state and (2.2.0) the names; never the email or the user_guid', async () => {
+  test('the snapshot carries the subscription, the terms state, (2.2.0) the names and (2.3.0) the email; never the user_guid', async () => {
     vaultOf('g1', { vault_id: VID, sealed_release: R0 });
     put('members', { ...getItem('members', 'g1'), first_name: 'Gina', last_name: 'One' });
     put('subscriptions', { user_guid: 'g1', type_id: 'trial', type_name: 'Trial', status: 'trial', paid: false, started_at: '2026-10-01T00:00:00.000Z', expires_at: '2026-10-31T00:00:00.000Z' });
@@ -799,7 +814,9 @@ describe('POST /api/vault/unlock', () => {
     expect(Object.keys(a.subscription)).toEqual(['type_name', 'status', 'paid', 'expires_at']);
     expect(a).toMatchObject({ first_name: 'Gina', last_name: 'One' });
     const text = JSON.stringify(a);
-    for (const secret of ['g1@x.org', '"g1"']) expect(text).not.toContain(secret);
+    expect(text).not.toContain('"g1"');
+    expect(a.email).toBe('g1@x.org');
+    expect(text).not.toContain('***'); // no email_hint
   });
 
   test("2.2.0: name_change carries allowed_after (the last applied change + 30 days) and the vault row's result", async () => {
@@ -827,6 +844,24 @@ describe('POST /api/vault/unlock', () => {
     put('members', { ...getItem('members', 'g1'), first_name: '' });
     expect((await call('POST', '/api/vault/unlock', body())).status).toBe(202);
     expect(sent()[0].msg).not.toHaveProperty('account');
+  });
+
+  test('2.3.0: a member whose email a vault would refuse gets no snapshot in an unlock', async () => {
+    vaultOf('g1', { vault_id: VID, sealed_release: R0 });
+    put('members', { ...getItem('members', 'g1'), email: 'no-at-sign' });
+    expect((await call('POST', '/api/vault/unlock', body())).status).toBe(202);
+    expect(sent()[0].msg).not.toHaveProperty('account');
+  });
+
+  test('2.3.0: with the names and the email at their maxima the snapshot fits in 2 KiB', async () => {
+    vaultOf('g1', { vault_id: VID, sealed_release: R0, name_change_result: { seq: 2 ** 40, status: 'refused', reason: 'too_soon' } });
+    const email = 'm@' + 'x'.repeat(1014); // 1,016 bytes
+    put('members', { ...getItem('members', 'g1'), email, first_name: 'Ä'.repeat(80), last_name: 'Ö'.repeat(80), name_changed_at: new Date(NOW_MS - 86_400_000).toISOString() });
+    put('subscriptions', { user_guid: 'g1', type_id: 't', type_name: 'T'.repeat(64), status: 'trial', paid: false, started_at: '2026-10-01T00:00:00.000Z', expires_at: '2026-10-31T00:00:00.000Z' });
+    expect((await call('POST', '/api/vault/unlock', body())).status).toBe(202);
+    const a = sent()[0].msg.account;
+    expect(a.email).toBe(email);
+    expect(Buffer.byteLength(JSON.stringify(a), 'utf8')).toBeLessThanOrEqual(2048);
   });
 
   test.each(badManifestHashes)('rejects %s with 400 and enqueues nothing', async (_name, extra) => {
@@ -2188,7 +2223,8 @@ describe('account push', () => {
     const [m] = sent();
     expect(m.url).toBe(QUEUE_PREFIX + 'i-1');
     expect(Object.keys(m.msg)).toEqual(['v', 'op', 'vault_id', 'user_guid', 'request_id', 'account', 'enqueued_at']);
-    expect(m.msg).toMatchObject({ v: 1, op: 'account', vault_id: VID, user_guid: 'g1', account: { account_status: 'canceled', deletes_at: '2026-10-09T12:00:00.000Z', email_hint: 'g***@x.org' } });
+    expect(m.msg).toMatchObject({ v: 1, op: 'account', vault_id: VID, user_guid: 'g1', account: { account_status: 'canceled', deletes_at: '2026-10-09T12:00:00.000Z', email: 'g1@x.org' } });
+    expect(m.msg.account).not.toHaveProperty('email_hint'); // 2.3.0
     expect(getItem('requests', m.msg.request_id)).toMatchObject({ op: 'account', status: 'queued', vault_id: VID, instance_id: 'i-1' });
     expect(tbl('audit').size).toBe(0);
   });

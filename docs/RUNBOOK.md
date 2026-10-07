@@ -929,7 +929,14 @@ unlock carries a fresh snapshot. Since 2.2.0 every snapshot carries the
 member's `first_name`, `last_name` and `name_change`, and every `enroll`
 carries one: a member whose names a vault would refuse (empty, over 160
 bytes, control characters) cannot enroll (`503 vault_unavailable`) and gets
-no snapshot in an unlock; fix the member row.
+no snapshot in an unlock; fix the member row. Since MEMBER-API 2.3.0 the
+snapshot carries the member's full verified `email` instead of
+`email_hint` (the redeem and recovery-claim answers keep the masked
+hint); a member row whose `email` a vault would refuse (under 3 or over
+1,016 bytes, no `@`, control characters) is treated the same way: no
+enroll, no snapshot in an unlock or a push. The snapshot is never logged
+(it carries the address); the push and enqueue failures log only ids and
+the error name.
 
 **Name changes (MEMBER-API 2.2.0).** Members change their names only in
 the app. The enclave host writes `name_change` and `name_change_pending` on
