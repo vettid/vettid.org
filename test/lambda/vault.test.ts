@@ -318,7 +318,7 @@ beforeEach(() => {
   sqs.on(SendMessageCommand).resolves({ MessageId: 'm' });
   jest.spyOn(Date, 'now').mockReturnValue(NOW_MS);
   put('terms', { version_id: 't1', status: 'current' });
-  for (const g of ['g1', 'g2']) put('members', { user_guid: g, email: `${g}@x.org`, state: 'member', account_status: 'active', terms_version: 't1' });
+  for (const g of ['g1', 'g2']) put('members', { user_guid: g, email: `${g}@x.org`, first_name: 'Ada', last_name: g === 'g1' ? 'One' : 'Two', state: 'member', account_status: 'active', terms_version: 't1' });
   logs = [];
   for (const level of ['log', 'info', 'warn', 'error', 'debug'] as const) {
     jest.spyOn(console, level).mockImplementation((...args: unknown[]) => void logs.push(args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a, Object.getOwnPropertyNames(a ?? {})))).join(' ')));
@@ -341,7 +341,7 @@ describe('access', () => {
   // Enrollment with the pending key needs an active member (2.0.0: the
   // terms were checked when the portal issued the code).
   test('enrollment: a registered user gets 403 terms_required on enclave and enroll', async () => {
-    put('members', { user_guid: 'g1', email: 'g1@x.org', state: 'registered', account_status: 'active' });
+    put('members', { user_guid: 'g1', email: 'g1@x.org', first_name: 'Ada', last_name: 'One', state: 'registered', account_status: 'active' });
     for (const [method, path, body] of [['GET', '/api/vault/enclave'], ['POST', '/api/vault/enroll', enrollBody()]] as [string, string, unknown?][]) {
       const r = await call(method, path, body);
       expect({ path, status: r.status, error: r.body.error, code: r.body.code }).toEqual({ path, status: 403, error: 'terms_required', code: 'terms_required' });
@@ -359,7 +359,7 @@ describe('access', () => {
     put('vaults', { ...getItem('vaults', evid('g1')), state: 'locked', sealed_release: R0 });
     expect((await call('POST', '/api/vault/unlock', { ...UNLOCK, vault_id: evid('g1'), request_id: RID2 })).status).toBe(202);
     // A registered (not yet member) account with an existing vault may unlock it too.
-    put('members', { user_guid: 'g1', email: 'g1@x.org', state: 'registered', account_status: 'active' });
+    put('members', { user_guid: 'g1', email: 'g1@x.org', first_name: 'Ada', last_name: 'One', state: 'registered', account_status: 'active' });
     expect((await call('POST', '/api/vault/unlock', { ...UNLOCK, vault_id: evid('g1'), request_id: '01JB2Z6V9K3M4N5P6Q7R8S9T0X' })).status).toBe(202);
   });
 
@@ -371,7 +371,7 @@ describe('access', () => {
     expect((await call('GET', '/api/vault/status')).body.vault.vault_id).toBe(VID);
     expect((await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID })).status).toBe(202);
     expect(sent()[0].msg.op).toBe('lock');
-    put('members', { user_guid: 'g1', email: 'g1@x.org', state: 'registered', account_status: 'active' });
+    put('members', { user_guid: 'g1', email: 'g1@x.org', first_name: 'Ada', last_name: 'One', state: 'registered', account_status: 'active' });
     expect((await call('GET', '/api/vault/status')).status).toBe(200);
   });
 
@@ -379,7 +379,7 @@ describe('access', () => {
     release(R0, 4);
     instance('i-1', R0);
     vaultOf('g1', { vault_id: VID, state: 'unlocked', lease: { instance_id: 'i-1', lease_expires_at: NOW + 60 } });
-    put('members', { user_guid: 'g1', email: 'g1@x.org', state: 'member', account_status: 'canceled', terms_version: 't1' });
+    put('members', { user_guid: 'g1', email: 'g1@x.org', first_name: 'Ada', last_name: 'One', state: 'member', account_status: 'canceled', terms_version: 't1' });
     const app = { key: keyOf('g1'), vault: VID };
     provision('g1', 'app', keyOf('g1'));
     for (const [method, path, body, opts] of [
@@ -679,11 +679,21 @@ describe('POST /api/vault/enroll', () => {
     expect(getItem('requests', RID)).not.toHaveProperty('envelope'); // envelopes are not stored
     const [m] = sent();
     expect(m.url).toBe(QUEUE_PREFIX + 'i-1');
-    expect(Object.keys(m.msg)).toEqual(['v', 'op', 'vault_id', 'user_guid', 'request_id', 'etk_kid', 'envelope', 'manifest_sha256', 'app_key', 'enqueued_at']);
+    // 2.2.0: every enroll carries the account snapshot (VAULT-MESSAGING 0.18.0 §11.5).
+    expect(Object.keys(m.msg)).toEqual(['v', 'op', 'vault_id', 'user_guid', 'request_id', 'etk_kid', 'envelope', 'manifest_sha256', 'app_key', 'account', 'enqueued_at']);
     expect(m.msg).toMatchObject({ v: 1, op: 'enroll', vault_id: vid, user_guid: 'g1', request_id: RID, etk_kid: KID, envelope: ENV, manifest_sha256: MSHA, app_key: keyOf('g1').b64 });
+    expect(m.msg.account).toMatchObject({ v: 1, first_name: 'Ada', last_name: 'One', name_change: { allowed_after: null, last: null }, state: 'member', account_status: 'active' });
     const auditPut = ddb.commandCalls(PutCommand).find((c) => c.args[0].input.TableName === 'audit')!;
     expect(auditPut.args[0].input.Item).toMatchObject({ action: 'vault.enroll_request', subject: 'g1', detail: { vault_id: vid, via: 'app', kid: keyOf('g1').kid } });
     expect(JSON.stringify(auditPut.args[0].input.Item)).not.toContain(ENV.slice(0, 64));
+  });
+
+  test('2.2.0: no snapshot, no enroll: 503 vault_unavailable and nothing queued', async () => {
+    put('members', { ...getItem('members', 'g1'), last_name: 'x'.repeat(161) });
+    const r = await call('POST', '/api/vault/enroll', body());
+    expect(r).toEqual({ status: 503, body: expect.objectContaining({ error: 'vault_unavailable' }) });
+    expect(sqs.calls()).toHaveLength(0);
+    expect(tbl('requests').size).toBe(0);
   });
 
   test("a second enrollment reuses the member's vault_id (the enclave decides on replacement)", async () => {
@@ -767,14 +777,17 @@ describe('POST /api/vault/unlock', () => {
     expect(m).toMatchObject({ url: QUEUE_PREFIX + 'i-1', msg: { v: 1, op: 'unlock', vault_id: VID, user_guid: 'g1', request_id: RID, etk_kid: KID, envelope: ENV, manifest_sha256: MSHA } });
     // 2.0.0: the account snapshot rides in every unlock (VAULT-MESSAGING §11.13); no app_key.
     expect(Object.keys(m.msg)).toEqual(['v', 'op', 'vault_id', 'user_guid', 'request_id', 'etk_kid', 'envelope', 'manifest_sha256', 'account', 'enqueued_at']);
+    expect(Object.keys(m.msg.account)).toEqual(['v', 'as_of', 'email_hint', 'first_name', 'last_name', 'name_change', 'state', 'account_status', 'deletes_at', 'terms', 'subscription', 'voting_rights']);
     expect(m.msg.account).toEqual({
-      v: 1, as_of: new Date(NOW_MS).toISOString(), email_hint: 'g***@x.org', state: 'member', account_status: 'active', deletes_at: null,
+      v: 1, as_of: new Date(NOW_MS).toISOString(), email_hint: 'g***@x.org',
+      first_name: 'Ada', last_name: 'One', name_change: { allowed_after: null, last: null }, // 2.2.0
+      state: 'member', account_status: 'active', deletes_at: null,
       terms: { needs_acceptance: false }, subscription: null, voting_rights: false,
     });
     expect(getItem('requests', RID).app_kid).toBe(keyOf('g1').kid);
   });
 
-  test('the snapshot carries the subscription and the terms state; never the name, the email or the user_guid', async () => {
+  test('the snapshot carries the subscription, the terms state and (2.2.0) the names; never the email or the user_guid', async () => {
     vaultOf('g1', { vault_id: VID, sealed_release: R0 });
     put('members', { ...getItem('members', 'g1'), first_name: 'Gina', last_name: 'One' });
     put('subscriptions', { user_guid: 'g1', type_id: 'trial', type_name: 'Trial', status: 'trial', paid: false, started_at: '2026-10-01T00:00:00.000Z', expires_at: '2026-10-31T00:00:00.000Z' });
@@ -784,8 +797,36 @@ describe('POST /api/vault/unlock', () => {
     const a = sent()[0].msg.account;
     expect(a).toMatchObject({ terms: { needs_acceptance: true }, subscription: { type_name: 'Trial', status: 'trial', paid: false, expires_at: '2026-10-31T00:00:00.000Z' } });
     expect(Object.keys(a.subscription)).toEqual(['type_name', 'status', 'paid', 'expires_at']);
+    expect(a).toMatchObject({ first_name: 'Gina', last_name: 'One' });
     const text = JSON.stringify(a);
-    for (const secret of ['Gina', 'One', 'g1@x.org', '"g1"']) expect(text).not.toContain(secret);
+    for (const secret of ['g1@x.org', '"g1"']) expect(text).not.toContain(secret);
+  });
+
+  test("2.2.0: name_change carries allowed_after (the last applied change + 30 days) and the vault row's result", async () => {
+    vaultOf('g1', { vault_id: VID, sealed_release: R0, name_change_result: { seq: 3, status: 'refused', reason: 'too_soon' } });
+    const changed = new Date(NOW_MS - 10 * 86_400_000).toISOString();
+    put('members', { ...getItem('members', 'g1'), name_changed_at: changed, name_change_applied: { vault_id: VID, seq: 2, first_name: 'Old', last_name: 'Name' } });
+    await call('POST', '/api/vault/unlock', body());
+    const a = sent()[0].msg.account;
+    expect(a.name_change).toEqual({ allowed_after: new Date(NOW_MS + 20 * 86_400_000).toISOString(), last: { seq: 3, status: 'refused', reason: 'too_soon' } });
+    expect(JSON.stringify(a)).not.toContain('Old'); // the change record stays on the member row
+  });
+
+  test('2.2.0: allowed_after is null once the 30 days have passed; an applied result has no reason; a malformed one is null', async () => {
+    vaultOf('g1', { vault_id: VID, sealed_release: R0, name_change_result: { seq: 4, status: 'applied', reason: 'x' } });
+    put('members', { ...getItem('members', 'g1'), name_changed_at: new Date(NOW_MS - 30 * 86_400_000).toISOString() });
+    await call('POST', '/api/vault/unlock', body());
+    expect(sent()[0].msg.account.name_change).toEqual({ allowed_after: null, last: { seq: 4, status: 'applied' } });
+    put('vaults', { ...getItem('vaults', VID), name_change_result: { seq: 5, status: 'refused', reason: 'other' } });
+    await call('POST', '/api/vault/unlock', body({ request_id: RID2 }));
+    expect(sent()[1].msg.account.name_change.last).toBeNull();
+  });
+
+  test('2.2.0: a member without names a vault accepts gets no snapshot in an unlock (it is optional there)', async () => {
+    vaultOf('g1', { vault_id: VID, sealed_release: R0 });
+    put('members', { ...getItem('members', 'g1'), first_name: '' });
+    expect((await call('POST', '/api/vault/unlock', body())).status).toBe(202);
+    expect(sent()[0].msg).not.toHaveProperty('account');
   });
 
   test.each(badManifestHashes)('rejects %s with 400 and enqueues nothing', async (_name, extra) => {
@@ -1488,7 +1529,7 @@ describe('vault service pause', () => {
 
   test('the account checks still come first: a registered user enrolling gets 403 terms_required', async () => {
     paused();
-    put('members', { user_guid: 'g1', email: 'g1@x.org', state: 'registered', account_status: 'active' });
+    put('members', { user_guid: 'g1', email: 'g1@x.org', first_name: 'Ada', last_name: 'One', state: 'registered', account_status: 'active' });
     expect((await call('POST', '/api/vault/enroll', { vault_id: VID })).body.error).toBe('terms_required');
   });
 
@@ -1781,7 +1822,7 @@ describe('setup codes', () => {
   });
 
   test('issue needs a member with the current terms; a new issuance revokes the old one', async () => {
-    put('members', { user_guid: 'g1', email: 'g1@x.org', state: 'registered', account_status: 'active' });
+    put('members', { user_guid: 'g1', email: 'g1@x.org', first_name: 'Ada', last_name: 'One', state: 'registered', account_status: 'active' });
     expect((await call('POST', '/api/vault/enroll-code')).body.error).toBe('terms_required');
     put('members', { user_guid: 'g1', email: 'g1@x.org', state: 'member', account_status: 'active', terms_version: 't0' });
     expect((await call('POST', '/api/vault/enroll-code')).body.error).toBe('terms_required');
@@ -2118,8 +2159,9 @@ describe('legacy sessions on the app routes (staging switch-over)', () => {
     const r = await call('POST', '/api/vault/enroll', { request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA }, { session: true });
     expect(r.status).toBe(202);
     expect(sent()[0].msg.app_key).toBeUndefined();
+    expect(sent()[0].msg.account).toMatchObject({ first_name: 'Ada', last_name: 'One', name_change: { allowed_after: null, last: null } }); // 2.2.0
     expect(getItem('vaults', 'user#g1').current_vault_id).toBe(r.body.vault_id);
-    put('members', { user_guid: 'g1', email: 'g1@x.org', state: 'registered', account_status: 'active' });
+    put('members', { user_guid: 'g1', email: 'g1@x.org', first_name: 'Ada', last_name: 'One', state: 'registered', account_status: 'active' });
     expect((await call('GET', '/api/vault/enclave', undefined, { session: true })).body.error).toBe('terms_required');
   });
 
@@ -2163,6 +2205,16 @@ describe('account push', () => {
     expect(await push.handler({ user_guid: '../x' })).toEqual({ sent: false });
     expect(sqs.calls()).toHaveLength(0);
     expect(getItem('releases', R0).start_requests).toBeUndefined();
+  });
+
+  test("2.2.0: the snapshot carries the names and the vault row's name_change_result", async () => {
+    vaultOf('g1', { vault_id: VID, state: 'unlocked', lease: { instance_id: 'i-1', lease_expires_at: NOW + 60 }, name_change_result: { seq: 7, status: 'applied' } });
+    put('members', { ...getItem('members', 'g1'), first_name: 'Grace', last_name: 'Hopper', name_changed_at: new Date(NOW_MS).toISOString() });
+    expect(await push.handler({ user_guid: 'g1' })).toEqual({ sent: true });
+    expect(sent()[0].msg.account).toMatchObject({
+      first_name: 'Grace', last_name: 'Hopper',
+      name_change: { allowed_after: new Date(NOW_MS + 30 * 86_400_000).toISOString(), last: { seq: 7, status: 'applied' } },
+    });
   });
 
   test('sent while the vault service is paused (it reaches only a running vault)', async () => {

@@ -377,8 +377,8 @@ describe('VettidOrgMemberApiStack', () => {
   const apiApp = new cdk.App({ context: { vaultsStreamArn: 'arn:aws:dynamodb:us-east-1:369484479783:table/vettid-org-vaults/stream/2026-10-05T00:00:00.000' } });
   const t = Template.fromStack(new VettidOrgMemberApiStack(apiApp, 'MemberApi', { config: loadConfig(apiApp.node), env }));
 
-  test('four route groups + link mailer + seven jobs (incl. the vault notice job, W8, the vault service watch and the account push, 2.0.0)', () => {
-    t.resourceCountIs('AWS::Lambda::Function', 12);
+  test('four route groups + link mailer + eight jobs (incl. the vault notice job, W8, the vault service watch, the account push, 2.0.0, and the vault-names job, 2.2.0)', () => {
+    t.resourceCountIs('AWS::Lambda::Function', 13);
     for (const p of ['/api/public', '/api/auth', '/api/account', '/api/vault']) {
       t.hasResourceProperties('AWS::ApiGatewayV2::Route', { RouteKey: `ANY ${p}/{proxy+}` });
     }
@@ -428,7 +428,7 @@ describe('VettidOrgMemberApiStack', () => {
       const writes = stmts().filter(
         (s: any) => /dynamodb:(PutItem|UpdateItem)/.test(str(s.Action)) && /table\/vettid-org-(vaults|vault-releases)"/.test(str(s.Resource)),
       );
-      expect(writes).toHaveLength(5); // the API's two, the alarm mailer's, the cleanup job's deletion mark and start request
+      expect(writes).toHaveLength(6); // the API's two, the alarm mailer's, the cleanup job's deletion mark and start request, the vault-names job's (2.2.0)
       for (const w of writes) {
         const attrs: string[] = w.Condition['ForAllValues:StringEquals']['dynamodb:Attributes'];
         for (const f of ['lease', 'sealed_release', 'vault_version', 'state_version', 'status', 'available']) expect(attrs).not.toContain(f);
@@ -451,6 +451,31 @@ describe('VettidOrgMemberApiStack', () => {
       // The API itself never writes alarm fields.
       const apiWrites = stmts().filter((s: any) => /PutItem/.test(str(s.Action)) && str(s.Resource).includes('table/vettid-org-vaults"'));
       for (const w of apiWrites) expect(str(w.Condition)).not.toContain('alarm');
+    });
+
+    test('2.2.0: the vault-names job reads only name_change_pending records; may only clear the flag and write the result, and on the member row only the names', () => {
+      t.hasResourceProperties('AWS::Lambda::EventSourceMapping', {
+        StartingPosition: 'LATEST',
+        BisectBatchOnFunctionError: true,
+        FilterCriteria: { Filters: [{ Pattern: JSON.stringify({ eventName: ['MODIFY'], dynamodb: { NewImage: { name_change_pending: { BOOL: [true] } } } }) }] },
+      });
+      const fn = Object.entries<any>(t.findResources('AWS::Lambda::Function')).find(([id]) => id.startsWith('VaultNamesJob'))!;
+      expect(fn[1].Properties.Environment.Variables.ACCOUNT_PUSH_FN).toBeDefined();
+      const roles = Object.values<any>(t.findResources('AWS::IAM::Role'));
+      expect(roles.map((r) => r.Properties.RoleName)).toContain('vettid-org-member-vault-names');
+      const policy = Object.values<any>(t.findResources('AWS::IAM::Policy')).find((p) => str(p.Properties.Roles).includes('VaultNamesJob'))!;
+      const own = policy.Properties.PolicyDocument.Statement;
+      const vaultWrites = own.filter((s: any) => str(s.Action).includes('UpdateItem') && str(s.Resource).includes('table/vettid-org-vaults"'));
+      expect(vaultWrites).toHaveLength(1);
+      expect(vaultWrites[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(['vault_id', 'name_change', 'name_change_pending', 'name_change_result']);
+      const memberWrites = own.filter((s: any) => str(s.Action).includes('UpdateItem') && str(s.Resource).includes('table/vettid-org-members'));
+      expect(memberWrites).toHaveLength(1);
+      expect(memberWrites[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(['user_guid', 'first_name', 'last_name', 'name_changed_at', 'name_change_applied', 'updated_at']);
+      // Nothing else: no queue sends (account-push sends), no deletes, no other table writes.
+      expect(str(own)).not.toContain('sqs:');
+      expect(own.filter((s: any) => /PutItem|DeleteItem/.test(str(s.Action)) && /vettid-org-(members|vaults)/.test(str(s.Resource)))).toEqual([]);
+      expect(own.some((s: any) => str(s.Action).includes('lambda:InvokeFunction'))).toBe(true);
+      expect(own.some((s: any) => str(s.Action).includes('ses:SendEmail'))).toBe(true);
     });
 
     test('vault rows are deleted only by the cleanup job and the deletion notice (§12.5)', () => {

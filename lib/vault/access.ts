@@ -22,8 +22,8 @@ import { AppConfig, VaultConfig, resourceName } from '../config';
 export const VAULT_TABLES = ['vaults', 'vault-instances', 'vault-requests', 'vault-releases'] as const;
 export type VaultTable = (typeof VAULT_TABLES)[number];
 
-export type VaultApiConsumer = 'vault' | 'cleanup' | 'vault-alarms' | 'vault-notices' | 'account-push';
-export const VAULT_API_CONSUMERS: VaultApiConsumer[] = ['vault', 'cleanup', 'vault-alarms', 'vault-notices', 'account-push'];
+export type VaultApiConsumer = 'vault' | 'cleanup' | 'vault-alarms' | 'vault-notices' | 'account-push' | 'vault-names';
+export const VAULT_API_CONSUMERS: VaultApiConsumer[] = ['vault', 'cleanup', 'vault-alarms', 'vault-notices', 'account-push', 'vault-names'];
 
 /** The vaults table's index of vaults by sealed release (keys plus user_guid and state), for the notice job (W8). */
 export const SEALED_RELEASE_INDEX = 'sealed-release-index';
@@ -126,6 +126,21 @@ export const VAULT_API_ACCESS: Record<VaultApiConsumer, VaultApiAccess> = {
     ],
     sendsToControlQueues: true,
     readsVaultsStream: false,
+  },
+  // Name changes from the vault (MEMBER-API 2.2.0, VAULT-MESSAGING 0.18.0
+  // §10.8, §11.5), fed by the vaults stream: reads the member's pointer row,
+  // clears `name_change_pending` (and puts it back after a failure) and
+  // writes `name_change_result`. `name_change` is listed only because the
+  // claim's condition names `name_change.seq` (dynamodb:Attributes covers
+  // every attribute a request names); the job never sets it. The snapshot
+  // goes out through account-push, which this job invokes.
+  'vault-names': {
+    tables: [
+      { table: 'vaults', actions: ['GetItem'] },
+      { table: 'vaults', actions: ['UpdateItem'], attributes: ['vault_id', 'name_change', 'name_change_pending', 'name_change_result'] },
+    ],
+    sendsToControlQueues: false,
+    readsVaultsStream: true,
   },
 };
 

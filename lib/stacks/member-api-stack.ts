@@ -36,7 +36,8 @@ export const originVerifySecretName = (config: AppConfig) => `${resourceName(con
  * Stateless: the member API (docs/MEMBER-API.md), served same-origin behind
  * account.vettid.org. Four route groups (public, auth, account, vault) plus the
  * background jobs: SES-verification sweep, daily cleanup/expiry, and the
- * members-stream welcome mailer and the vault credential-clone alarm mailer.
+ * members-stream welcome mailer, the vault credential-clone alarm mailer and
+ * the vault-names job (2.2.0).
  *
  * The HTTP API's execute-api URL is public; every handler rejects requests
  * without CloudFront's origin-verify header, so the API is only usable via
@@ -336,6 +337,23 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     // May only clear the alarm flag and delete a deleted vault's rows (§12.5).
     vaultGrants(alarms, 'vault-alarms');
     alarms.addToRolePolicy(sesSend);
+    // Name changes from the vault (MEMBER-API 2.2.0, VAULT-MESSAGING 0.18.0
+    // §10.8, §11.5): the enclave host records the vault's name request on the
+    // vault row; this job, fed only the stream records that carry
+    // `name_change_pending`, applies or refuses it (one applied change per 30
+    // days), audits, emails the member and has account-push send the
+    // snapshot. On the vault row it may only clear the flag and write the
+    // result; on the member row only the names and their change record.
+    const names = job('VaultNamesJob', 'lambda/jobs/vault-names.ts', cdk.Duration.seconds(30), vaultApiRoleName(config, 'vault-names'));
+    g(names, 'members', ['GetItem']);
+    tableGrant(this, config, names, 'members', ['UpdateItem'], {
+      attributes: ['user_guid', 'first_name', 'last_name', 'name_changed_at', 'name_change_applied', 'updated_at'],
+    });
+    g(names, 'audit', ['PutItem']);
+    vaultGrants(names, 'vault-names');
+    names.addToRolePolicy(sesSend);
+    accountPush.grantInvoke(names);
+    names.addEnvironment('ACCOUNT_PUSH_FN', accountPush.functionName);
     // Release notices (VAULT-RELEASES §3.5, §10.2; W8): daily, emails the
     // members whose vault is sealed to an ending release (90/30/7/1 days
     // before ends_at, then "ended") or to one an urgent security release
@@ -439,10 +457,19 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
           filters: [lambda.FilterCriteria.filter({ eventName: lambda.FilterRule.isEqual('MODIFY'), dynamodb: { NewImage: { alarm_pending: { BOOL: lambda.FilterRule.isEqual(true) } } } })],
         }),
       );
+      names.addEventSource(
+        new sources.DynamoEventSource(vaultsTable, {
+          startingPosition: lambda.StartingPosition.LATEST,
+          batchSize: 10,
+          retryAttempts: 3,
+          bisectBatchOnError: true,
+          filters: [lambda.FilterCriteria.filter({ eventName: lambda.FilterRule.isEqual('MODIFY'), dynamodb: { NewImage: { name_change_pending: { BOOL: lambda.FilterRule.isEqual(true) } } } })],
+        }),
+      );
     } else {
       cdk.Annotations.of(this).addWarningV2(
         'vettid:vaults-stream-unset',
-        `The vault alarm mailer has no event source: set context ${config.stage === 'prod' ? 'vaultsStreamArn' : `${config.stage}VaultsStreamArn`} (VettidOrgVaultStack output VaultsStreamArn)`,
+        `The vault alarm mailer and the vault-names job have no event source: set context ${config.stage === 'prod' ? 'vaultsStreamArn' : `${config.stage}VaultsStreamArn`} (VettidOrgVaultStack output VaultsStreamArn)`,
       );
     }
 

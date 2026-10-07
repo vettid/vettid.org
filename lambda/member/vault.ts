@@ -34,7 +34,8 @@
  * There is no global limit anywhere; the typed path has one failure answer
  * (404 invalid_code) and flat timing.
  *
- * The account snapshot (2.0.0, §11.13) rides in every unlock queue message;
+ * The account snapshot (2.0.0, §11.13) rides in every unlock queue message
+ * and (2.2.0) every enroll;
  * changes reach a running vault through lambda/jobs/vault-account-push.ts.
  *
  * Recovery (§11.11, docs/MEMBER-API.md "Vault recovery"): the API records
@@ -282,6 +283,14 @@ export interface VaultRow {
    */
   alarm?: { kind: string; alarm_id: string; at: number; emailed_at?: number };
   alarm_pending?: boolean;
+  /**
+   * Host-owned (2.2.0, VAULT-MESSAGING 0.18.0 §11.5): the vault's latest name
+   * request, and the flag the vault-names job clears when it claims it.
+   */
+  name_change?: { seq: number; first_name: string; last_name: string; at: number };
+  name_change_pending?: boolean;
+  /** Written by the vault-names job (2.2.0): the outcome the next snapshot carries. */
+  name_change_result?: { seq: number; status: string; reason?: string };
   created_at: string;
   updated_at: string;
 }
@@ -954,9 +963,14 @@ router.on('POST', '/api/vault/enroll', async (req) => {
   // Enrollment goes to an instance of an `active` release (§11.1), or of a
   // canary release for a canary member.
   if (!targets.some((r) => r.release === inst.release)) throw instanceMoved();
+  // 2.2.0 (VAULT-MESSAGING 0.18.0 §11.5): every enroll carries the account
+  // snapshot, whose names the vault shares with its connections; the
+  // enclave refuses an enroll without one, so none is sent without it.
+  const account = await snapshotFor(m, vault);
+  if (!account) throw vaultUnavailable();
   // The enclave binds the vault to the key the request was signed with (§11.5: `app_key`).
   await enqueue('enroll', m, vault, requestId, inst, { etk_kid: etkKid, envelope, manifest_sha256: manifestSha256 }, {
-    extra: c.key ? { app_key: c.key.key } : {},
+    extra: { ...(c.key ? { app_key: c.key.key } : {}), account },
     slot: slotOf(c),
   });
   await audit(m.email, 'vault.enroll_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: instanceId, release: inst.release, ...viaOf(c) });
@@ -985,7 +999,7 @@ router.on('POST', '/api/vault/unlock', async (req) => {
   const inst = await routeCheck(vault, instanceId, nowS());
   await requireRoutable(inst, isCanaryMember(m));
   // The account snapshot rides in every unlock (§11.13), whenever the member can be read.
-  const account = await snapshotFor(m);
+  const account = await snapshotFor(m, vault);
   await enqueue('unlock', m, vault, requestId, inst, { etk_kid: etkKid, envelope, manifest_sha256: manifestSha256 }, {
     extra: account ? { account } : {},
     slot: slotOf(c),
