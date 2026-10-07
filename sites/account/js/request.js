@@ -21,9 +21,12 @@ if (preset && /^[A-Za-z0-9-]{1,64}$/.test(preset)) form.elements.invite_code.val
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = form.elements;
+  // MEMBER-API 2.2.1: names are trimmed of leading and trailing U+0020 only,
+  // as the API does; any other white space is sent as typed (and refused).
+  const spaces = (s) => s.replace(/^ +| +$/g, '');
   const body = {
-    first_name: f.first_name.value.trim(),
-    last_name: f.last_name.value.trim(),
+    first_name: spaces(f.first_name.value),
+    last_name: spaces(f.last_name.value),
     email: f.email.value.trim(),
     consent: f.consent.checked,
   };

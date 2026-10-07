@@ -922,9 +922,30 @@ refuses it for production.
 **The account snapshot.** `vettid-org-member-account-push` sends a
 member's running vault their new account snapshot after terms, subscription
 or cancellation changes (the account routes and the admin site's
-reinstate and subscription extend invoke it). It sends only to a live
+reinstate and subscription extend invoke it), and (MEMBER-API 2.2.0) after
+a name change from the vault was processed. It sends only to a live
 leaseholder and never starts anything; a failure is logged and the next
-unlock carries a fresh snapshot.
+unlock carries a fresh snapshot. Since 2.2.0 every snapshot carries the
+member's `first_name`, `last_name` and `name_change`, and every `enroll`
+carries one: a member whose names a vault would refuse (empty, over 160
+bytes, control characters) cannot enroll (`503 vault_unavailable`) and gets
+no snapshot in an unlock; fix the member row.
+
+**Name changes (MEMBER-API 2.2.0).** Members change their names only in
+the app. The enclave host writes `name_change` and `name_change_pending` on
+the vault row; the `VaultNamesJob` Lambda (role
+`vettid-org-member-vault-names`, fed by the vaults stream, filtered on
+`name_change_pending = true`) applies or refuses it (`account`,
+`invalid`, `too_soon`: one applied change per 30 days, from the member
+row's `name_changed_at`), audits `member.name_change` or
+`member.name_change_refused`, emails the member after an applied change,
+writes `name_change_result` and invokes the account push. A failed run
+puts `name_change_pending` back, so the stream retries; a request stuck
+with `name_change_pending = true` (the stream's retries exhausted) is
+retried by removing the flag and setting it again, in two updates (an
+update that changes nothing makes no stream record). Like the alarm mailer, it has no event source until
+the vaults stream ARN is in context. No admin route edits names; if one
+is ever added, it must push the snapshot as the job does.
 
 ### No recovery with the backup off; start over (MEMBER-API 2.1.0)
 

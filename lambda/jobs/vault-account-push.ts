@@ -4,7 +4,8 @@
  *
  * Invoked asynchronously ({ user_guid }) by the account routes after terms
  * are accepted, a subscription is started or cancelled and the account is
- * cancelled, and by the admin site's equivalents. It sends the queue op
+ * cancelled, by the admin site's equivalents, and (2.2.0) by the vault-names
+ * job after it processed a name change (lambda/jobs/vault-names.ts). It sends the queue op
  * `account` only to the vault's live leaseholder: with no live lease nothing
  * is sent (the next unlock carries a snapshot), and nothing is ever started.
  * A response slot is written as for a lock; the host answers it `done`.
@@ -43,7 +44,8 @@ export const handler = async (event: { user_guid?: unknown }): Promise<{ sent: b
   const now = Math.floor(Date.now() / 1000);
   const holder = await liveLease(v as { lease?: { instance_id?: unknown; lease_expires_at?: unknown } }, now);
   if (!holder) return { sent: false };
-  const account = await snapshotFor(m);
+  // The vault row's name_change_result rides along (2.2.0).
+  const account = await snapshotFor(m, v);
   if (!account) return { sent: false };
 
   const requestId = newUlid();

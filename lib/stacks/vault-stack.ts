@@ -254,9 +254,12 @@ export class VettidOrgVaultStack extends cdk.Stack {
     // app_key_pending, enroll_live, deletion). `app_key` (VAULT-MESSAGING
     // 0.15.0 §11.5) and `credential_backup` (0.16.0 §11.5: the one bit of
     // whether the vault keeps a backup copy of its credential) are written
-    // only here, from the enclave's reports.
+    // only here, from the enclave's reports. `name_change` and
+    // `name_change_pending` (0.18.0 §11.5, MEMBER-API 2.2.0): the vault's
+    // name request from the event `account_name`, which only the host writes.
     h(['dynamodb:UpdateItem'], [t.vaults.tableArn], onlyAttributes([
       'vault_id', 'lease', 'updated_at', 'sealed_release', 'vault_version', 'state_version', 'state', 'alarm', 'alarm_pending', 'app_key', 'credential_backup',
+      'name_change', 'name_change_pending',
     ]));
     h(['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:DeleteItem'], [t['vault-instances'].tableArn]);
     h(['dynamodb:UpdateItem'], [t['vault-requests'].tableArn], onlyAttributes(['request_id', 'status', 'envelope', 'code']));

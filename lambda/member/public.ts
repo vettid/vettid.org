@@ -11,6 +11,7 @@ import { newGuid, nowIso } from '../shared/ids';
 import { sendMail } from '../shared/mail';
 import { MemberRequest, RateLimited, memberHandler } from '../shared/member-http';
 import { emailMarkerKey, memberByEmail } from '../shared/members';
+import { NAME_MAX, NAME_RE, trimSpaces } from '../shared/names';
 import type { MemberItem } from '../shared/model';
 import { hit } from '../shared/ratelimit';
 
@@ -71,11 +72,19 @@ async function create(item: MemberItem, inviteCode: string | null): Promise<'ok'
  * Names are shown to admins and (never) interpolated into member email, but
  * keep them to plain name characters anyway: letters (any script), spaces,
  * apostrophes, hyphens and periods; no URLs, digits or control characters.
+ * MEMBER-API 2.2.1: trimmed of leading and trailing U+0020 only, the rule
+ * the name-change job and the vault apply (lambda/shared/names.ts).
  */
 function personName(body: Record<string, unknown>, key: string): string {
-  const v = str(body, key, { max: 40 });
-  if (!/^[\p{L}\p{M}][\p{L}\p{M} '’.-]*$/u.test(v)) throw badRequest(`${key.replace('_', ' ')} may only contain letters, spaces, apostrophes, hyphens and periods`);
-  return v;
+  const v = body[key];
+  const label = key.replace('_', ' ');
+  if (v === undefined || v === null || v === '') throw badRequest(`${key} is required`);
+  if (typeof v !== 'string') throw badRequest(`${key} must be a string`);
+  const t = trimSpaces(v);
+  if (t === '') throw badRequest(`${key} is required`);
+  if (t.length > NAME_MAX) throw badRequest(`${key} is too long`);
+  if (!NAME_RE.test(t)) throw badRequest(`${label} may only contain letters, spaces, apostrophes, hyphens and periods`);
+  return t;
 }
 
 /** Account-wide cap on new requests per hour (each one creates an SES identity). */

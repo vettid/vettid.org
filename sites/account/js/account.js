@@ -361,9 +361,16 @@ function renderStatus() {
     ? el('span', {}, chip('Yes', 'ok'))
     : el('span', {}, chip('Not yet', 'mute'), el('span', { class: 'muted' }, 'Voting requires an active paid subscription.'));
 
+  // MEMBER-API 2.2.0: read-only here; names change only in the app, through the vault.
+  const name = el('span', {},
+    fullName() || '—',
+    el('span', { class: 'muted' }, 'Every connection of your vault sees this name. You can change it in the VettID app, at most once every 30 days.'),
+  );
+
   fill($('sec-status'),
     sectionHead('h-status', 'Status'),
     facts([
+      ['Name', name],
       ['Membership', member ? chip('Member', 'ok') : chip('Registered', 'warn')],
       ['Subscription', subSummary],
       ['Voting rights', voting],

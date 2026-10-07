@@ -14,13 +14,16 @@ export function tableGrant(
   fn: lambda.IFunction,
   table: string,
   actions: string[],
-  opts: { indexes?: boolean } = {},
+  opts: { indexes?: boolean; attributes?: string[] } = {},
 ): void {
   const arn = `arn:${scope.partition}:dynamodb:${scope.region}:${scope.account}:table/${resourceName(config, table)}`;
   fn.addToRolePolicy(
     new iam.PolicyStatement({
       actions: actions.map((a) => `dynamodb:${a}`),
       resources: opts.indexes ? [arn, `${arn}/index/*`] : [arn],
+      // Fine-grained access control: the request may only name these
+      // attributes (vacuously true without an attribute list, so it narrows).
+      conditions: opts.attributes ? { 'ForAllValues:StringEquals': { 'dynamodb:Attributes': opts.attributes } } : undefined,
     }),
   );
 }

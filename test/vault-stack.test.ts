@@ -299,7 +299,7 @@ describe('cross-account access (VAULT-RELEASES §8.1)', () => {
       expect(replica.DeletionProtectionEnabled).toBe(true);
       for (const s of replica.ResourcePolicy?.PolicyDocument.Statement ?? []) {
         expect(s.Principal).toEqual({ AWS: 'arn:aws:iam::449757308783:root' });
-        expect(s.Condition.ArnEquals['aws:PrincipalArn']).toMatch(/^arn:aws:iam::449757308783:role\/vettid-org-member-(vault|cleanup|vault-alarms|vault-notices|account-push)$/);
+        expect(s.Condition.ArnEquals['aws:PrincipalArn']).toMatch(/^arn:aws:iam::449757308783:role\/vettid-org-member-(vault|cleanup|vault-alarms|vault-notices|account-push|vault-names)$/);
         expect(str(s.Action)).not.toMatch(/dynamodb:\*|BatchWrite|DeleteTable|UpdateTable/);
       }
     }
@@ -309,11 +309,23 @@ describe('cross-account access (VAULT-RELEASES §8.1)', () => {
     for (const [, t] of tables) expect(str(t.Properties.Replicas[0].ResourcePolicy ?? {})).not.toMatch(/"lease"|"sealed_release"/);
   });
 
-  test('the vaults stream admits the alarm mailer only', () => {
+  test('the vaults stream admits the alarm mailer and (2.2.0) the vault-names job only', () => {
     const vaults = resources(prod.json, 'AWS::DynamoDB::GlobalTable').find(([, t]) => t.Properties.TableName === 'vettid-org-vaults')![1];
     const st = vaults.Properties.Replicas[0].ReplicaStreamSpecification.ResourcePolicy.PolicyDocument.Statement;
-    expect(st).toHaveLength(1);
-    expect(st[0].Condition).toEqual({ ArnEquals: { 'aws:PrincipalArn': 'arn:aws:iam::449757308783:role/vettid-org-member-vault-alarms' } });
+    expect(st.map((s: any) => s.Condition)).toEqual([
+      { ArnEquals: { 'aws:PrincipalArn': 'arn:aws:iam::449757308783:role/vettid-org-member-vault-alarms' } },
+      { ArnEquals: { 'aws:PrincipalArn': 'arn:aws:iam::449757308783:role/vettid-org-member-vault-names' } },
+    ]);
+  });
+
+  test('2.2.0: only the host writes name_change; the vault-names job only clears the flag and writes the result', () => {
+    const vaults = resources(prod.json, 'AWS::DynamoDB::GlobalTable').find(([, t]) => t.Properties.TableName === 'vettid-org-vaults')![1];
+    const writes = vaults.Properties.Replicas[0].ResourcePolicy.PolicyDocument.Statement.filter((s: any) => str(s.Action).match(/PutItem|UpdateItem/));
+    const attrsOf = (role: string) => writes.filter((s: any) => str(s.Condition).includes(role)).flatMap((s: any) => s.Condition['ForAllValues:StringEquals']?.['dynamodb:Attributes'] ?? []);
+    expect(attrsOf('member-vault-names"')).toEqual(['vault_id', 'name_change', 'name_change_pending', 'name_change_result']);
+    for (const role of ['member-vault"', 'member-cleanup"', 'member-vault-alarms"', 'member-account-push"']) expect(attrsOf(role)).not.toEqual(expect.arrayContaining(['name_change']));
+    const reads = vaults.Properties.Replicas[0].ResourcePolicy.PolicyDocument.Statement.filter((s: any) => str(s.Condition).includes('member-vault-names"') && !str(s.Action).match(/PutItem|UpdateItem/));
+    expect(reads.map((s: any) => s.Action)).toEqual(['dynamodb:GetItem']);
   });
 
   test('the member API roles the resource policies name exist with exactly those names', () => {
@@ -359,7 +371,7 @@ describe('cross-account access (VAULT-RELEASES §8.1)', () => {
     const hostVaultWrites = statements(prod.json).filter((s: any) => s.Action === 'dynamodb:UpdateItem' && (s.Condition?.['ForAllValues:StringEquals']?.['dynamodb:Attributes'] ?? []).includes('lease'));
     expect(hostVaultWrites).toHaveLength(1);
     expect(hostVaultWrites[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(
-      ['vault_id', 'lease', 'updated_at', 'sealed_release', 'vault_version', 'state_version', 'state', 'alarm', 'alarm_pending', 'app_key', 'credential_backup'],
+      ['vault_id', 'lease', 'updated_at', 'sealed_release', 'vault_version', 'state_version', 'state', 'alarm', 'alarm_pending', 'app_key', 'credential_backup', 'name_change', 'name_change_pending'],
     );
   });
 

@@ -30,6 +30,14 @@ export interface MemberItem {
   pin_prompt_dismissed?: boolean; // "skip for now" on the Getting started PIN step
   welcome_sent?: boolean; // "you can sign in" email delivered
   vault_canary?: boolean; // operator-set: may use canary vault releases (VAULT-RELEASES §10.1 step 9); never shown to the member
+  /** MEMBER-API 2.2.0: when a name change from the vault was last applied (absent: the registration names). */
+  name_changed_at?: string;
+  /**
+   * MEMBER-API 2.2.0: the request that last changed the names, and the names
+   * it replaced, so a retried job run recognizes its own change
+   * (lambda/jobs/vault-names.ts).
+   */
+  name_change_applied?: { vault_id: string; seq: number; first_name: string; last_name: string };
 }
 
 /** Row in vettid-org-subscriptions (one per member). */
