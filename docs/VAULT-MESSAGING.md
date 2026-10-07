@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.18.0
+version: 0.19.0
 date: 2026-10-07
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -12,13 +12,29 @@ related:
   - CALLING-SERVICE.md
   - PUSH-GATEWAY.md
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.2.0)
+  - MEMBER-API.md (2.2.1)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.0, approved 2026-10-03)
   - VAULT-RELEASES.md (0.1.6, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.19.0: normative (owner decision of 2026-10-07, §15 item 27):
+    `vault.status`'s `owner_check` carries the `vault.held` counts as
+    `waiting` while `due` or `held`; the first count change after the
+    hold starts is sent at once; apps never show unknown counts as zero
+    and re-read `vault.status` on returning to the foreground while
+    gated (§3.6.3, §3.6.5, §10.2). Errata to 0.18.0 from its
+    implementation (vettid-vault #45), MEMBER-API 2.2.1:
+    `account.name.set` checks the names before the PIN and the password, so that a refused name never costs the
+    blob the CEK rotation sealed; `name_change.last.status` is `applied`
+    or `refused`, `reason` only with `refused`; a vault without names
+    refuses `connection.invite.accept` with `internal`; names are
+    trimmed of U+0020 only; `sync.event{account.changed}` for a name
+    request alone repeats the snapshot's `version`; the 196,608-byte
+    limit is checked with the current names. Normative addition: a
+    still-pending name request is reported again with every `unlocked`
+    report (§10.1, §10.2, §10.4, §10.8, §11.5, §11.13)
   - 0.18.0: normative (owner decisions of 2026-10-07, §15 item 26):
     every `profile.update` and connection `hs.init` profile carries the
     account's `first_name` and `last_name` (now required in the account
@@ -1532,8 +1548,17 @@ the app show that something arrived:
   connection, name, type or time beyond `deadline`.
 - It goes to the app, and to desktops with an unexpired access session,
   when the vault enters the hold and then whenever the counts change, at
-  most once per device every 10 minutes (with the latest counts). A
-  device keeps the newest by `ts`.
+  most once per device every 10 minutes (with the latest counts). The
+  first count change after the start notice is the exception (0.19.0):
+  it is sent at once, without waiting out the 10 minutes, so that the
+  first thing to arrive shows without delay; the 10 minutes then run
+  from that notice. A device keeps the newest by `ts`.
+- **In `vault.status`** (0.19.0). The same counts are in
+  `vault.status`'s `owner_check.waiting` (§10.2) for each device that
+  receives `vault.held`, while the state is `due` or `held`, so that a
+  device that missed a notice (or opens after it) reads the current
+  counts. A device that has neither a notice nor a `vault.status`
+  answer does not know the counts (§3.6.5).
 - A successful check ends the hold. The holder learns it from the
   response, the other devices from `sync.event{kind: "owner_check",
   deadline}`. Agents with a session receive `leash.grant.updated` with
@@ -1595,6 +1620,12 @@ There is no host alarm and no email (§13.7; §15 item 22).
   connections, the feed): only the check, the `vault.held` counts
   ("3 new messages waiting") and the lock action. The hold then means
   something on the phone too, not only at the vault.
+- (0.19.0) It **MUST NOT** present counts it does not know as zero
+  ("nothing new"): without a `vault.held` notice or a `vault.status`
+  `owner_check.waiting` it shows that something may be waiting, not that
+  nothing is. While gated it **re-reads `vault.status`** whenever it
+  returns to the foreground, and shows the counts from it or from a
+  newer `vault.held`.
 - It shows which entry was wrong (`bad_pin` or `bad_password`), how many
   failed checks remain before the vault locks (10 − `failures`, from
   `vault.status`), and a running backoff's wait.
@@ -3452,7 +3483,7 @@ an answer to an unknown or expired id is dropped.
   | `credential.alarm` | `alarm_id`, `state` (`frozen`, `rotation_required`, `resolved`) (§3.5.9) |
   | `owner_check` | `deadline`: a check succeeded, and a hold, if any, ended (§3.6, 0.13.0) |
   | `vault.release` | `release` (PCR0 hex), `release_number`; sent once after a vault first runs under a new release (§11.10.6) |
-  | `account.changed` | `version`: a newer account snapshot arrived from the host (§11.13, 0.15.0), or (0.18.0) the `name_request` changed (§10.8) |
+  | `account.changed` | `version`: a newer account snapshot arrived from the host (§11.13, 0.15.0), or (0.18.0) the `name_request` changed (§10.8); for a `name_request` change alone, `version` is the stored snapshot's, unchanged (0.19.0) |
   | `credential.changed` | `version` (§3.5.5) |
   | `item.changed` | `item_id`, `version` (§10.7) |
   | `item.deleted` | `item_id` (§10.7) |
@@ -3496,11 +3527,11 @@ an answer to an unknown or expired id is dropped.
 |---|---|---|
 | `vault.enrolled` | — | §11.3 |
 | `vault.enroll.confirm` (app) | `{}` | `{}` |
-| `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; `owner_check` (0.13.0) is `{state: "ok" \| "due" \| "held", deadline, interval_seconds, failures, hold, hold_off_until?}` to apps and desktops and `{state}` to agents (§3.6, §3.6.7). A recovering app (§11.11.5) gets only `{vault_id, state_seq, header_seq}` (0.16.0): nothing about the vault's devices, connections or owner check before it has proved the credential password |
+| `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; `owner_check` (0.13.0) is `{state: "ok" \| "due" \| "held", deadline, interval_seconds, failures, hold, hold_off_until?, waiting?}` to apps and desktops and `{state}` to agents (§3.6, §3.6.7). `waiting` (0.19.0) is `{messages, requests, calls, other}`, the counts of `vault.held` since the deadline (§3.6.3), present while the state is `due` or `held` for a device that receives `vault.held` (the app; desktops with an access session while `held`) and absent otherwise. A recovering app (§11.11.5) gets only `{vault_id, state_seq, header_seq}` (0.16.0): nothing about the vault's devices, connections or owner check before it has proved the credential password |
 | `vault.owner-check` (app: the holder) | `{credential, utk_id, sealed{pin, password, hold?, hold_off_until?}}` | `{credential, version, utks, deadline, interval_seconds, hold, hold_off_until?}` (§3.6.1, §3.6.7); `bad_pin`, `bad_password`, `backoff` (body `{retry_after}`, §10.1), `utk_invalid`, `stale_credential`, `credential_frozen`, `rotation_required`, `forbidden` (not the holder), `bad_request` (a PIN that is not 6–32 digits) |
 | `vault.held` (V→D, to the app and desktops in an access session) | — | `{deadline, waiting: {messages, requests, calls, other}}` (§3.6.3) |
 | `vault.lock` (app, desktop) | `{}` | `{}`; then `vault.locking` |
-| `account.get` (app, desktop) | `{}` | `{account: <snapshot, §11.13> \| null, version, received_at, name_request?}`; `null` (and `version` 0) before any snapshot arrived (0.15.0); `name_request` (0.18.0) is the latest `account.name.set` request (§10.8) |
+| `account.get` (app, desktop) | `{}` | `{account: <snapshot, §11.13> \| null, version, received_at, name_request?}`; `null` (and `version` 0) before any snapshot arrived (0.15.0); `name_request` (0.18.0) is the latest `account.name.set` request (§10.8). A change of `name_request` alone sends `sync.event{kind: "account.changed"}` with the stored snapshot's `version` repeated, not incremented (0.19.0): `version` counts snapshots only, so a device MUST NOT skip an `account.changed` whose `version` it already holds |
 | `vault.delete` (app: the holder, or the enrolling app before a credential exists) | `{confirm: "delete my vault", credential?, utk_id, sealed{pin, password?}}` | `{}`; then the deletion of §12.5. `bad_request` without the exact phrase or a needed member; `bad_pin`, `backoff`, `bad_password`, `credential_frozen` / `rotation_required` (holder during an alarm), `forbidden` (a recovering app since 0.16.0: it completes the recovery first, then deletes as the holder; a member without the credential uses §11.11.9) |
 | `vault.locking` (ephemeral) | — | `{reason?}`, with `exp` = now + 60 s; `reason` is `"recovery"` when a recovery request locked the vault (§11.11.1), `"owner_check"` when ten consecutive failed owner checks did (§3.6.4, 0.13.0) |
 | `relay.token.issued` | — | `{kind: "standing" \| "reconnect", token}` |
@@ -3550,7 +3581,7 @@ an answer to an unknown or expired id is dropped.
 | `connection.invite.create` | `{ttl_seconds: 600 \| 3600 \| 86400 \| 604800}` | `{invite_id, link, exp, remote}` |
 | `connection.invite.list` | `{}` | `{invites: [{invite_id, exp, remote}]}` |
 | `connection.invite.cancel` | `{invite_id}` | `{}` |
-| `connection.invite.accept` | `{link}` (the bare payload, §6.4) | `{connection_id, state: "waiting", remote, exp, name?}`: an outgoing request (§6.4); the SAS follows in `connection.request.outgoing` once the handshake has run (0.10.3); `name` is the bundle's `hint.name`. `exists` with body `{connection_id}` for a vault already connected or requested; `blocked`, `limit`, `claim_unavailable`, `bad_request`, `accept_failed` |
+| `connection.invite.accept` | `{link}` (the bare payload, §6.4) | `{connection_id, state: "waiting", remote, exp, name?}`: an outgoing request (§6.4); the SAS follows in `connection.request.outgoing` once the handshake has run (0.10.3); `name` is the bundle's `hint.name`. `exists` with body `{connection_id}` for a vault already connected or requested; `blocked`, `limit`, `claim_unavailable`, `bad_request`, `accept_failed`; `internal` from a vault without the account's names (§10.8, 0.19.0) |
 | `connection.request.pending` (incoming, to apps and desktops) | — | `{pending_id, invite_id, sas, remote, state, exp, profile?, introduced_by?}`, once `hs.fin` has checked out; `state` is `pending`, or `approved` under in-person auto-approval (§6.4) |
 | `connection.request.outgoing` (to apps and desktops, the accepting device included) | — | `{connection_id, sas, remote, exp, name?, introduced_by?}`, once the vault has sent `hs.fin` and knows the SAS (0.10.3), whichever device accepted or for an introduction (§10.15) |
 | `connection.request.list` | `{}` | `{incoming: [{pending_id, invite_id, sas, remote, state, peer_approved, created_at, exp, profile?, introduced_by?}], outgoing: [{connection_id, sas?, remote, state, peer_approved, created_at, exp, name?, introduced_by?}]}` |
@@ -4042,14 +4073,21 @@ The **profile object** holds the extras' display name and photo. Sent by
   item tagged `@profile`, sorted by `item_id`, with all of its fields
   (not its notes, tags or other members). At most 32 items carry
   `@profile`, and a `profile.update` body is at most 196,608 bytes: a
-  change that would exceed either is refused with `limit`.
+  change that would exceed either is refused with `limit`. The size is
+  checked with the core as it is at the change, the current names
+  (0.19.0); a later name change is never refused or held back for size
+  (the member API has applied it already). Each name is at most 40
+  UTF-16 code units, so a name change moves the body's size by at most
+  a few hundred bytes.
 - **The core is always there.** Every vault holds a snapshot with names
   from its enrollment on (the `enroll` queue message carries one, §11.5),
   and every `profile.update` and connection `hs.init` profile carries
-  them. A vault MUST NOT send a `profile.update` without the complete
-  core; should it ever lack names (which the enrollment rule excludes),
-  it sends none and audits `profile.core_missing`, rather than an
-  incomplete one.
+  them. A vault MUST NOT send a `profile.update` or a connection
+  `hs.init` without the complete core; should it ever lack names (which
+  the enrollment rule excludes), it sends none and audits
+  `profile.core_missing`, rather than an incomplete one. For
+  `connection.invite.accept` (0.19.0) it then answers `internal` and
+  sends no `hs.init` (§10.4), as it sends no `profile.update`.
 - **When it is sent.** After a change of the profile object,
   `sync.event{kind: "profile.changed"}`. The vault sends `profile.update`
   to the peer when a connection becomes active (§9.3) and, whenever the
@@ -4154,7 +4192,9 @@ name request: { "seq": 3, "first_name": "Ada", "last_name": "King",
                 "reason": "too_soon|invalid|account" }
 ```
 
-- **Names.** Each is trimmed of leading and trailing spaces and MUST
+- **Names.** Each is trimmed of leading and trailing spaces (U+0020
+  only, 0.19.0; no other white space is removed, so a name with any
+  other at either end fails the pattern) and MUST
   match `^[\p{L}\p{M}][\p{L}\p{M} '’.-]*$` with at most 40 characters
   counted as UTF-16 code units: the member API's registration rule
   (MEMBER-API `/api/public/request`), which the vault applies first so
@@ -4166,16 +4206,25 @@ name request: { "seq": 3, "first_name": "Ada", "last_name": "King",
   2. answers `too_soon` with `{allowed_after}` while the stored
      snapshot's `name_change.allowed_after` (§11.13) lies in the future;
      nothing is counted;
-  3. checks the blob, the PIN and the password exactly as
+  3. checks the names (above), answering `bad_request` before any PIN
+     or password check (0.19.0), as `vault.owner-check` checks a hold
+     change before the PIN is tried (§3.6.7): it is not a failed check,
+     nothing is counted, the CEK does not rotate, and the app's blob
+     stays current;
+  4. checks the blob, the PIN and the password exactly as
      `vault.owner-check` does (§3.6.1 steps 3–7: the same backoffs,
      counts and audit entries), and on success rotates the CEK and
-     returns the new `credential` (§3.5.3);
-  4. checks the names (above);
+     returns the new `credential` (§3.5.3). Every refusal of the request
+     comes before this step, so a rotated CEK is always answered with
+     its `credential`;
   5. increments its name-request counter `seq` (DEK state, from 1),
      stores the request as `pending` (replacing one still pending), and
      emits the host event **`account_name`** `{seq, first_name,
      last_name}` (§11.5), handed to the parent with the flush that
-     stored the request, as `app_key` is;
+     stored the request, as `app_key` is, and again with every
+     `unlocked` report while the request is still `pending` (0.19.0,
+     §11.5), so that an event lost after the flush is not lost for
+     good;
   6. audits `account.name_requested` (`ref` = `seq`; no names) and
      answers with the request.
   A successful `account.name.set` is not an owner check: it does not
@@ -4185,15 +4234,17 @@ name request: { "seq": 3, "first_name": "Ada", "last_name": "King",
   2.2.0): `name_change.last` names the `seq` and whether it was
   `applied` or `refused` (`reason`: `too_soon` within 30 days of the last
   applied change, `invalid` names, `account` an account that may not
-  change them). When a stored snapshot's `name_change.last.seq` equals
-  the pending request's, the vault sets the request's `state` and
+  change them; present only with `refused`, §11.13). When a stored
+  snapshot's `name_change.last.seq` equals the pending request's, the vault sets the request's `state` and
   `reason` from it and audits `account.name_applied` or
   `account.name_refused` (`ref` = `seq`); an applied change also brings
   the new names, which update every connection (above). A request still
   `pending` after a snapshot with a higher `last.seq` (which cannot
   happen with an honest host) is `refused` with `reason: "account"`.
   `account.get` (§10.2) returns the latest request as `name_request`;
-  every state change sends `sync.event{kind: "account.changed"}`.
+  every state change sends `sync.event{kind: "account.changed"}`, whose
+  `version` for a request change alone is the stored snapshot's,
+  unchanged (0.19.0, §10.2).
 - **What the app shows.** The account sheet shows the names read-only,
   with "Change name" (the PIN and password screen of the owner check,
   §3.6.5, with the two names), and says that every connection sees them.
@@ -6325,7 +6376,14 @@ Nothing secret is stored:
   Unix seconds) and `name_change_pending = true` on the vault row
   **whatever the lease**, conditional only on `seq` being higher than the
   row's (absent: 0), so a stale instance can only report an older
-  request. It is the only lifecycle event with member content: the
+  request. **Re-reported on unlock** (0.19.0): an event the parent
+  never wrote (lost after the flush, with the instance) is not emitted
+  again by that flush, so with every `unlocked` report the vault emits
+  `account_name` again for its latest request while that is still
+  `pending` (§10.8). The `seq` condition makes this idempotent: a
+  request the row already holds fails the condition, which the parent
+  treats as done, and a request the member API already processed is
+  not reopened. It is the only lifecycle event with member content: the
   member's own instruction about account data VettID already holds. The
   member API processes it (MEMBER-API 2.2.0 "Name changes"), records
   `name_change_result = {seq, status, reason?}` and pushes the snapshot,
@@ -6440,7 +6498,8 @@ the enclave reports completion.
 - **Lifecycle events:** `enrolled` and `unlocked` at enrollment; `moved`
   with the target release after a move, and back to the earlier release
   after an abandonment (§11.10.4); `alarm.credential_clone`, since
-  0.16.0 `credential_backup`, and since 0.18.0 `account_name` (above).
+  0.16.0 `credential_backup`, and since 0.18.0 `account_name` (above;
+  since 0.19.0 also with `unlocked` while a request is pending).
 
 **Manifest by hash** (0.10.0, owner decision O10). Enroll and unlock
 requests name the manifest by `manifest_sha256` and `manifest_serial`
@@ -8152,8 +8211,10 @@ and last name, which the vault puts in the core of its shared profile
   may be applied now, as before any change: the registration names do
   not count), and `last`, the outcome of this vault's latest
   `account.name.set` request that the API processed (`seq` as the vault
-  sent it; `reason` only with `refused`), or `null`. Nothing
-  else about the member is sent (no full address, no `user_guid`; the
+  sent it), or `null`. `last.status` is `"applied"` or `"refused"`
+  (0.19.0); `reason` is present only with `"refused"`, as `"too_soon"`,
+  `"invalid"` or `"account"` (§10.8), and is absent with `"applied"` (a
+  vault ignores one there). Nothing else about the member is sent (no full address, no `user_guid`; the
   email address goes neither in the snapshot nor in the profile). At
   most 2 KiB, names included (the new members add at most about 500
   bytes; the rest of the snapshot is well under 1 KiB).
@@ -8162,7 +8223,9 @@ and last name, which the vault puts in the core of its shared profile
   vaults to stay compatible with (owner decision of 2026-10-07), so no
   older form is accepted. The vault refuses a snapshot without them, or
   with a name that is not a string of 1–160 bytes without control
-  characters, as it refuses a wrong type, and keeps the one it had.
+  characters, or with a `name_change.last.status` other than
+  `"applied"` or `"refused"` (0.19.0), as it refuses a wrong type, and
+  keeps the one it had.
 - **Delivery.** The API puts the snapshot in every `enroll` (0.18.0) and
   `unlock` queue message (`account`, §11.5) and, when the member's
   account changes (terms accepted, subscription started, cancelled or
@@ -9569,6 +9632,18 @@ Follow-ups:
     vault-row fields and their IAM, the name-change job with its audit,
     email and push; the account site shows the names read-only;
     RUNBOOK "The account snapshot").
+27. **The held counts in `vault.status` (0.19.0).** Owner decision of
+    2026-10-07. A `vault.held` notice can be missed (an app that was not
+    running, a notice dropped as older), and before 0.19.0 nothing else
+    carried the counts, so an app could show a gated vault as having
+    nothing new. Decided: `vault.status`'s `owner_check.waiting` carries
+    the same counts while `due` or `held` (§10.2); the first count
+    change after the start notice is not delayed by the 10-minute
+    spacing (§3.6.3); apps never show unknown counts as zero and re-read
+    `vault.status` when they return to the foreground while gated
+    (§3.6.5). Follow-ups: vettid-vault (`waiting` in `vault.status`, the
+    first-change exception; on vettid-vault #45); vettid-android (the
+    unknown-counts state and the foreground re-read).
 
 ## 16. Test vectors
 
@@ -9840,6 +9915,41 @@ adds it to `recovery.json` (eph scalar 32 × 0x28, nonce 12 × 0x29) with
 the 0.16.0 implementation.
 
 ## 17. Changelog
+
+- **0.19.0** (2026-10-07): normative, owner decision of 2026-10-07
+  (§15 item 27), and errata to 0.18.0, found while implementing it
+  (vettid-vault #45); MEMBER-API 2.2.1.
+  - §10.2, §3.6.3: `vault.status`'s `owner_check` carries `waiting`
+    (`{messages, requests, calls, other}`, the `vault.held` counts)
+    while the state is `due` or `held`, for the devices that receive
+    `vault.held`; absent otherwise.
+  - §3.6.3: the first count change after the hold starts is sent at
+    once; later changes keep the at-most-once-per-10-minutes rule.
+  - §3.6.5: apps never present unknown counts as zero and re-read
+    `vault.status` when they return to the foreground while gated.
+  - §10.8: `account.name.set` checks the names (step 3) before the
+    blob, the PIN and the password (step 4), as `vault.owner-check`
+    checks a hold change first (§3.6.7). Before, a `bad_request` for the
+    names came after the CEK rotation and returned no `credential`, so
+    the app lost the blob just sealed.
+  - §11.13: `name_change.last.status` is `applied` or `refused`;
+    `reason` (`too_soon`, `invalid`, `account`) only with `refused`; a
+    vault refuses a snapshot with any other `status`.
+  - §10.8, §10.4: a vault without names (which enrollment rules out)
+    answers `connection.invite.accept` with `internal`, sends no
+    `hs.init` and audits `profile.core_missing`, as for
+    `profile.update`.
+  - §10.8, §11.5 (normative addition): the vault emits `account_name`
+    again with every `unlocked` report while its latest request is
+    still `pending`, so that an event lost after the flush is
+    recovered; the parent's `seq` condition makes it idempotent.
+  - §10.8, MEMBER-API: names are trimmed of U+0020 only, at
+    registration as in a name change.
+  - §10.1, §10.2: `sync.event{account.changed}` for a name request
+    alone repeats the stored snapshot's `version`; devices do not skip
+    it.
+  - §10.8: the 196,608-byte limit is checked with the current names; a
+    later name change is never refused for size.
 
 - **0.18.0** (2026-10-07): normative, owner decisions of 2026-10-07
   (§15 item 26). Connections always get the account's names and the

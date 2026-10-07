@@ -1,8 +1,17 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.2.0
+version: 2.2.1
 changelog:
+  - 2.2.1 (2026-10-07, VAULT-MESSAGING 0.19.0): errata from the
+    vault's implementation (vettid-vault #45). Names are trimmed of
+    leading and trailing U+0020 spaces only, at registration
+    (`/api/public/request`) as in the name-change job (before, the
+    registration trimmed all JavaScript white space); the snapshot's
+    `name_change.last.status` is `applied` or `refused`, `reason` only
+    with `refused`; the vault re-reports a still-pending name request
+    with each `unlocked` report, which the row's `seq` condition makes
+    a no-op when the request is already recorded
   - 2.2.0 (2026-10-07, VAULT-MESSAGING 0.18.0; owner decisions of
     2026-10-07): the account snapshot carries `first_name`,
     `last_name` and `name_change` (required; still `v: 1`), which the
@@ -123,7 +132,7 @@ Responses are `Cache-Control: no-store`.
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| POST | `/api/public/request` | `{email, first_name, last_name, invite_code?: string, consent: true}` | `{outcome}` (below). `invite_code` is the optional **registration code** (field name kept for compatibility). Names: letters, spaces, `'’.-`, ≤ 40 chars. Global hourly cap (past it: same answer, nothing created). Requests never email-verified are deleted after 14 days. |
+| POST | `/api/public/request` | `{email, first_name, last_name, invite_code?: string, consent: true}` | `{outcome}` (below). `invite_code` is the optional **registration code** (field name kept for compatibility). Names: trimmed of leading and trailing U+0020 spaces only (2.2.1), then letters, spaces, `'’.-`, ≤ 40 chars. Global hourly cap (past it: same answer, nothing created). Requests never email-verified are deleted after 14 days. |
 
 `consent` must be `true`: while SES is in sandbox, we can only email
 addresses that have verified with SES, and that verification **is** the
@@ -707,7 +716,11 @@ address is never in the snapshot. `name_change` is `{allowed_after,
 last}`: `allowed_after` is the member row's `name_changed_at` + 30 days
 while that lies in the future, else `null` (always `null` before the
 first change: the registration names do not count); `last` is the vault
-row's `name_change_result` (`{seq, status, reason?}`) or `null`. The
+row's `name_change_result` (`{seq, status, reason?}`) or `null`;
+`status` is `applied` or `refused`, and `reason` (`too_soon`,
+`invalid` or `account`) is present only with `refused` (2.2.1). A vault
+refuses a snapshot whose `status` is anything else and keeps the one it
+had (VAULT-MESSAGING §11.13). The
 snapshot keeps `"v": 1` with these members required: VettID has no
 vaults to stay compatible with (owner decision of 2026-10-07).
 
@@ -732,6 +745,11 @@ validation below, then reports the event `account_name {seq,
 first_name, last_name}`. The parent writes `name_change = {seq,
 first_name, last_name, at}` and `name_change_pending = true` on the
 vault row, whatever the lease, if `seq` is higher than the row's.
+While the request is still pending in the vault, the vault reports it
+again with every `unlocked` report (2.2.1, VAULT-MESSAGING 0.19.0
+§11.5), so that an event lost after the flush reaches the row; a
+request the row already holds fails the `seq` condition, which the
+parent treats as done, and is not processed twice.
 
 - **The job.** The `vaults` table's stream (new images) feeds a
   `vault-names` job Lambda, filtered on `name_change_pending = true`. It
@@ -742,7 +760,8 @@ vault row, whatever the lease, if `seq` is higher than the row's.
     `registered` or `member`, or the vault row is not the member's
     current vault;
   - `invalid`: a name fails the registration rule (as in
-    `/api/public/request`: trimmed;
+    `/api/public/request`: trimmed of leading and trailing U+0020
+    spaces only (2.2.1);
     `^[\p{L}\p{M}][\p{L}\p{M} '’.-]*$`; at most 40 characters,
     counted as UTF-16 code units), or
     both equal the current names;
