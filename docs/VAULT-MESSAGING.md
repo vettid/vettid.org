@@ -19,22 +19,23 @@ related:
   - VAULT-RELEASES.md (0.1.6, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
-  - 0.19.0: normative (owner decision of 2026-10-07, §15 item 27):
+  - 0.19.0: normative (owner decisions of 2026-10-07, §15 item 27):
     `vault.status`'s `owner_check` carries the `vault.held` counts as
     `waiting` while `due` or `held`; the first count change after the
     hold starts is sent at once; apps never show unknown counts as zero
     and re-read `vault.status` on returning to the foreground while
-    gated (§3.6.3, §3.6.5, §10.2). Errata to 0.18.0 from its
-    implementation (vettid-vault #45), MEMBER-API 2.2.1:
-    `account.name.set` checks the names before the PIN and the password, so that a refused name never costs the
-    blob the CEK rotation sealed; `name_change.last.status` is `applied`
-    or `refused`, `reason` only with `refused`; a vault without names
+    gated (§3.6.3, §3.6.5, §10.2); the 196,608-byte `profile.update`
+    limit is checked with maximum-length names (§10.8). Errata to 0.18.0
+    from its implementation (vettid-vault #45), MEMBER-API 2.2.1:
+    `account.name.set` checks the names before the PIN and the
+    password, so that a refused name never costs the blob the CEK
+    rotation sealed; `name_change.last.status` is `applied` or
+    `refused`, `reason` only with `refused`; a vault without names
     refuses `connection.invite.accept` with `internal`; names are
     trimmed of U+0020 only; `sync.event{account.changed}` for a name
-    request alone repeats the snapshot's `version`; the 196,608-byte
-    limit is checked with the current names. Normative addition: a
-    still-pending name request is reported again with every `unlocked`
-    report (§10.1, §10.2, §10.4, §10.8, §11.5, §11.13)
+    request alone repeats the snapshot's `version`. Normative addition:
+    a still-pending name request is reported again with every
+    `unlocked` report (§10.1, §10.2, §10.4, §10.8, §11.5, §11.13)
   - 0.18.0: normative (owner decisions of 2026-10-07, §15 item 26):
     every `profile.update` and connection `hs.init` profile carries the
     account's `first_name` and `last_name` (now required in the account
@@ -4074,11 +4075,22 @@ The **profile object** holds the extras' display name and photo. Sent by
   (not its notes, tags or other members). At most 32 items carry
   `@profile`, and a `profile.update` body is at most 196,608 bytes: a
   change that would exceed either is refused with `limit`. The size is
-  checked with the core as it is at the change, the current names
-  (0.19.0); a later name change is never refused or held back for size
-  (the member API has applied it already). Each name is at most 40
-  UTF-16 code units, so a name change moves the body's size by at most
-  a few hundred bytes.
+  checked with **maximum-length names** (0.19.0; owner decision of
+  2026-10-07, §15 item 27), not the current ones, whenever the display
+  name, the photo or the `@profile` items change: the vault computes the
+  body with `first_name` and `last_name` each counted as a JSON string
+  of 322 bytes, quotes included, and refuses the change with `limit` if
+  that body would exceed 196,608 bytes. The 322 bytes are the most a
+  name can take: a vault accepts names of at most 160 bytes (§11.13; the
+  name rule itself allows at most 120, 40 UTF-16 code units of at most 3
+  UTF-8 bytes each), and it encodes a name as raw UTF-8 escaping only
+  `"` and `\` (as `\"` and `\\`), since names contain no control
+  characters, U+2028 or U+2029 (§11.13; the receiver's rule, below), so
+  at most 2 × 160 bytes plus the 2 quotes. `ik` has a fixed size (44
+  base64 characters). A later name change therefore never brings a
+  `profile.update` over 196,608 bytes, and is never refused or held
+  back for size (the member API has applied it already); receivers
+  drop any body over 196,608 bytes as before.
 - **The core is always there.** Every vault holds a snapshot with names
   from its enrollment on (the `enroll` queue message carries one, §11.5),
   and every `profile.update` and connection `hs.init` profile carries
@@ -9632,7 +9644,7 @@ Follow-ups:
     vault-row fields and their IAM, the name-change job with its audit,
     email and push; the account site shows the names read-only;
     RUNBOOK "The account snapshot").
-27. **The held counts in `vault.status` (0.19.0).** Owner decision of
+27. **The held counts in `vault.status`; the profile size check (0.19.0).** Owner decisions of
     2026-10-07. A `vault.held` notice can be missed (an app that was not
     running, a notice dropped as older), and before 0.19.0 nothing else
     carried the counts, so an app could show a gated vault as having
@@ -9641,9 +9653,19 @@ Follow-ups:
     change after the start notice is not delayed by the 10-minute
     spacing (§3.6.3); apps never show unknown counts as zero and re-read
     `vault.status` when they return to the foreground while gated
-    (§3.6.5). Follow-ups: vettid-vault (`waiting` in `vault.status`, the
-    first-change exception; on vettid-vault #45); vettid-android (the
-    unknown-counts state and the foreground re-read).
+    (§3.6.5). Also decided by the owner on 2026-10-07 (from the review
+    of vettid.org #156): the shared profile's 196,608-byte limit is
+    checked against maximum-length names (each counted as a 322-byte
+    JSON string) whenever the display name, photo or `@profile` items
+    change, so that a later name change, which the vault cannot refuse
+    once the member API applied it, never brings a `profile.update` over
+    the limit receivers enforce (§10.8). Rejected: checking with the
+    current names (an update near the limit would be dropped by every
+    receiver after a longer name) and a receiver margin over 196,608
+    bytes. Follow-ups: vettid-vault (`waiting` in `vault.status`, the
+    first-change exception, the worst-case size check; on vettid-vault
+    #45); vettid-android (the unknown-counts state and the foreground
+    re-read).
 
 ## 16. Test vectors
 
@@ -9916,7 +9938,7 @@ the 0.16.0 implementation.
 
 ## 17. Changelog
 
-- **0.19.0** (2026-10-07): normative, owner decision of 2026-10-07
+- **0.19.0** (2026-10-07): normative, owner decisions of 2026-10-07
   (§15 item 27), and errata to 0.18.0, found while implementing it
   (vettid-vault #45); MEMBER-API 2.2.1.
   - §10.2, §3.6.3: `vault.status`'s `owner_check` carries `waiting`
@@ -9948,8 +9970,12 @@ the 0.16.0 implementation.
   - §10.1, §10.2: `sync.event{account.changed}` for a name request
     alone repeats the stored snapshot's `version`; devices do not skip
     it.
-  - §10.8: the 196,608-byte limit is checked with the current names; a
-    later name change is never refused for size.
+  - §10.8 (owner decision, §15 item 27): the 196,608-byte limit is
+    checked, when the display name, photo or `@profile` items change,
+    with each name counted as its largest encoding (a 322-byte JSON
+    string: 160 bytes, `"` and `\` escaped, quotes), so that a later
+    name change can never bring an update over the limit, which
+    receivers keep enforcing.
 
 - **0.18.0** (2026-10-07): normative, owner decisions of 2026-10-07
   (§15 item 26). Connections always get the account's names and the
