@@ -1,9 +1,16 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.14
+version: 0.1.15
 date: 2026-10-08
 changelog:
+  - 0.1.15: owner feedback of 2026-10-08: value-first item fields (one input
+    captioned by the field's label, its type as a hint; a ⋯ menu to rename,
+    change an unsaved field's type, move or remove; the label asked for when
+    adding), a short explanation of tags under Tags, and member-defined
+    categories ("New category…" derives the §10.7 identifier from a typed
+    name, custom ones shown humanized and offered in the picker and the
+    Vault filter) (§4)
   - 0.1.14: owner, 2026-10-08: the profile photo's review step shows
     the shot in a circular frame to crop/zoom (pinch, drag, zoom buttons
     or slider, Reset); "Use photo" keeps the square under the circle
