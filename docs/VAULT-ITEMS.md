@@ -1,8 +1,8 @@
 ---
 title: VAULT-ITEMS
 status: approved design note (owner, 2026-10-03); specified in VAULT-MESSAGING 0.7.0
-version: 0.1.0
-date: 2026-10-03
+version: 0.1.1
+date: 2026-10-08
 owner: Al Liebl (Mesmer)
 related:
   - VAULT-MESSAGING.md (0.6.x): §3.5 Protean Credential, §10.6 credential secrets, §10.7 secrets, §10.8 profile, §10.11 LEASH, §10.12 grants, §10.13 critical-secret use
@@ -78,6 +78,16 @@ item: {
   the vault. Choosing "Passport" pre-fills labelled fields and suggests
   tags; the member can add, remove or rename anything. Free-form items need
   no template at all.
+- **Templates never add reserved tags** (`@profile` or any other `@`
+  tag). Only the member puts an item into the shared profile, by tagging
+  it `@profile` (owner decision 2026-10-08).
+- **Contact information is one item per contact point.** Sharing is per
+  item: a share rule selects whole items by tag, and the whole item goes
+  to the connection. So the recommended templates are *Email address*,
+  *Phone number*, *Postal address* and *Website*, each a single-field
+  `contact` item, rather than one "contact details" item; a member can
+  then share a phone number and an email address without the postal
+  address (owner decision 2026-10-08).
 - **Limits** (proposed): 64 fields per item, a field value ≤ 16 KiB, an
   item ≤ 64 KiB, 2,000 items. Critical items are bounded by the Protean
   Credential (§3.5.2); the proposal raises its limit from 64 secrets to 64
@@ -115,7 +125,9 @@ a login defaults to `secret`, a recovery phrase to `critical`).
 - **Reserved tag `@profile`.** Items carrying it form what connections see
   as the member's profile (`profile.update`); this replaces the separate
   profile fields and `shared` list. The display name and photo stay a tiny
-  profile object.
+  profile object. The shared profile contains **only items the member
+  tagged `@profile`**: no template, default or import adds the tag
+  (owner decision 2026-10-08).
 
 ## 6. Share rules (the connection contract)
 
@@ -195,3 +207,14 @@ credential rules (§3.5) and the audit model stay as they are.
 4. ANDROID-PLAN updated: one "Add" screen (template or blank → name,
    category, sensitivity, tags, fields), a tag filter on lists, and a
    share-rule editor on each connection and agent.
+
+## 10. Changelog
+
+- **0.1.1** (2026-10-08), owner decision of 2026-10-08: templates never
+  add reserved tags, so the shared profile holds only items the member
+  tagged `@profile` (§3, §5); contact information is one item per contact
+  point so each can be shared on its own (§3). The registry's
+  `contact_card` template (tagged `@profile`) is replaced by
+  `email_address`, `phone_number`, `postal_address` and `website`, none
+  tagged (vettid-vault `docs/item-templates.json` version 2).
+- **0.1.0** (2026-10-03): approved design note.
