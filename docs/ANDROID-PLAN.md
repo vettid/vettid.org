@@ -1,9 +1,14 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.15
+version: 0.1.16
 date: 2026-10-08
 changelog:
+  - 0.1.16: owner decision of 2026-10-08 (VAULT-ITEMS 0.1.1): contact
+    information is one item per contact point (templates Email address,
+    Phone number, Postal address and Website replace Contact details), no
+    template adds @profile, "Shared profile" is a built-in tag choice for
+    standard items only, and a blank item starts with no field (§4)
   - 0.1.15: owner feedback of 2026-10-08: value-first item fields (one input
     captioned by the field's label, its type as a hint; a ⋯ menu to rename,
     change an unsaved field's type, move or remove; the label asked for when
