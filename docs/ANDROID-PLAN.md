@@ -1,9 +1,20 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.16
+version: 0.1.17
 date: 2026-10-08
 changelog:
+  - 0.1.17: owner decisions of 2026-10-08 (VAULT-MESSAGING 0.22.0 §15
+    item 30): History export, a deliberate exception to "no export" for
+    activity metadata only. History's ⋯ menu "Export…" opens a confirm
+    sheet with the count and date range of what the filters show (at
+    most 10,000 entries, newest first; more is said and narrower dates
+    suggested), the format (CSV or JSON) and the unencrypted-file
+    notice; the vault PIN (`audit.export`), then the platform's "Save
+    to…" (Storage Access Framework) only; the category table gains
+    identifiers and `audit` under Security; after the owner's review of
+    vettid.org #174, a wrong PIN counts only in the PIN backoff and the
+    export is refused while a credential alarm is open (§4, §6)
   - 0.1.16: owner decision of 2026-10-08 (VAULT-ITEMS 0.1.1): contact
     information is one item per contact point (templates Email address,
     Phone number, Postal address and Website replace Contact details), no
@@ -96,7 +107,7 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.20.0) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.22.0) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
@@ -201,7 +212,7 @@ rows below say "Vault" for the screens and "item" for the data.
 | Connection detail | — | Titled "First Last" (never an alias), the display name secondary. Profile shared with you (the names labelled as the name on their VettID account, never "verified"; display name, photo and items labelled as shared by them), sharing, authenticate, the vault key fingerprint (`ik`, 8 groups of 4 hex digits, §10.8: the lasting identity check). The action bar: message, favourite, History, remove (confirmed). No safety code (it belongs to connecting: the invite and request screens), no alias or notes, no edit or block (0.1.13; blocking stays on an incoming request) |
 | Approvals | — (VettID-specific) | Pending connection requests, grant requests, critical-item uses, share-rule decisions; approve/deny; critical items need the credential password |
 | Vault | Folder list | Titled "Vault" (0.1.11; was "Items"). Items per VAULT-ITEMS: name, category, typed fields, tags, sensitivity (data / secret / critical); filter by tag; add/edit from templates; share rules by tag (default: ask for each new item). Critical items live in the Protean Credential and are never shared by a rule |
-| History | — (VettID-specific) | The member's audit log (0.1.11, `audit.list`, VAULT-MESSAGING 0.20.0 §10.9), read-only: a search field (the vault searches, `q`), filter chips (category, connection, date range), a list of entries newest first with infinite scroll, and an entry detail. Details below |
+| History | — (VettID-specific) | The member's audit log (0.1.11, `audit.list`, VAULT-MESSAGING 0.20.0 §10.9), read-only: a search field (the vault searches, `q`), filter chips (category, connection, date range), a list of entries newest first with infinite scroll, and an entry detail; a ⋯ menu with **Export…** (0.1.17: CSV or JSON of what the filters show, with the vault PIN, saved through "Save to…"). Details below |
 | Credential | — | Reached from Settings → Security → Credential (0.1.11; not in the drawer). Critical items inside the Protean Credential; unlock window; password change; the vault-held credential copy (the backup) on/off. Turning it off shows VAULT-MESSAGING §3.5.6's warning and needs a confirmation: "If this phone is lost, broken, reset or replaced without a transfer, your vault **cannot be recovered**. It can only be deleted and replaced by a new one, and **everything in it is lost**." While off, the screen and Settings keep a short "no recovery" notice. Turning it on asks for the password at once (an owner check) so that the copy exists, and says recovery is possible from then on |
 | Settings | Settings | At the top, an **account card** (0.1.11): the member's first and last name and full email address (`account.get`, VAULT-MESSAGING 0.20.0 §11.13) and the membership state; tapping it opens the avatar sheet. Vault (status, release, lock, PIN); Security (credential, recovery, attestation info, biometric app lock and timeout, the owner-check interval 1–24 h and the hold switch); Privacy (the **Shared profile**, glyph `Badge`, 0.1.12: display name, `@profile` items and the profile photo, **camera only** — "Take a photo" / "Retake photo" opens the app's own camera screen, front camera first with a switch to the rear one, then "Retake" or "Use photo"; no selection of an existing picture and no other camera app; the shot stays in memory, is never saved to the gallery, and is cropped, scaled and re-encoded to a JPEG ≤ 65,536 bytes without EXIF before `profile.set{photo}`; "Remove photo" confirmed; a refused camera permission is explained, with the system settings once Android no longer asks; a phone without a camera is told); App (theme, notifications and push path) |
 | Owner check | — (VettID-specific) | One screen: PIN and credential password together (VAULT-MESSAGING §3.6.5); also the "vault held" screen with the waiting counts and the lock action |
@@ -239,18 +250,22 @@ the screen changes or deletes an entry.
   - **Category**, one at a time ("All" by default), sent as `kinds`
     prefixes:
 
-    | Category | `kinds` prefixes |
-    |---|---|
-    | Unlocks and owner checks | `vault`, `owner_check` |
-    | Security | `credential`, `identity`, `recovery` |
-    | Devices | `device`, `approval` |
-    | Connections | `connection`, `intro`, `profile` |
-    | Messages and calls | `message`, `call` |
-    | Vault (items, sharing, wallet) | `item`, `tag`, `share`, `grant`, `critical-secret`, `wallet` |
-    | Agents | `leash`, `action` |
-    | Location | `location` |
-    | Account and settings | `account`, `settings` |
-    | Blocked and dropped | `drop` |
+    | Category | Identifier (0.1.17) | `kinds` prefixes |
+    |---|---|---|
+    | Unlocks and owner checks | `unlocks` | `vault`, `owner_check` |
+    | Security | `security` | `credential`, `identity`, `recovery`, `audit` (0.1.17: `audit.exported`, a History export) |
+    | Devices | `devices` | `device`, `approval` |
+    | Connections | `connections` | `connection`, `intro`, `profile` |
+    | Messages and calls | `messages` | `message`, `call` |
+    | Vault (items, sharing, wallet) | `vault` | `item`, `tag`, `share`, `grant`, `critical-secret`, `wallet` |
+    | Agents | `agents` | `leash`, `action` |
+    | Location | `location` | `location` |
+    | Account and settings | `account` | `account`, `settings` |
+    | Blocked and dropped | `dropped` | `drop` |
+
+    The identifier is the category's stable name in an export file
+    (below); it is never translated. An entry whose kind falls in no
+    category has the identifier `other`.
 
     Every audit kind of §10.9 falls in exactly one category (blocks are
     `connection.blocked` / `.unblocked`, so under Connections). A kind
@@ -280,12 +295,72 @@ the screen changes or deletes an entry.
 - **States.** Empty log: "No history yet". No results: "Nothing
   matches" with "Clear filters". While held or due (§3.6), History is
   gated like every vault screen.
+- **Export** (0.1.17, owner decisions of 2026-10-08; VAULT-MESSAGING
+  0.22.0 §10.9 History export). History's top bar has a ⋯ menu with
+  **Export…**, also on a connection's History. It exports what the list
+  shows: the current category, connection, date range and search, never
+  more. Only the app offers it (VettID desktops do not, in this version).
+  1. **Confirm sheet.** On opening, the app sends the preview
+     (`audit.export{dry_run: true}` with the list's filters) and shows
+     "40 entries, 1 Oct 2026 – 8 Oct 2026" (the count, and the dates of
+     `oldest_at` and `newest_at` in local time), the filters in words,
+     the format choice **CSV** ("for a spreadsheet") or **JSON** ("for
+     checking against your vault"; neither is preselected), and the
+     notice: "The file is not encrypted. Anyone who
+     gets it can see who you connected with, your devices and item
+     names, and when. It holds no item values, passwords or messages."
+     With `count` 0: "Nothing to export" and no Continue. While a
+     credential alarm is open the preview is refused
+     (`credential_frozen` / `rotation_required`) and the sheet says so
+     (below), with no Continue. With `more`:
+     "Only the newest 10,000 of the matching entries can be exported.
+     Narrow the dates to export older ones", with Continue still
+     offered for the newest 10,000.
+  2. **PIN.** Continue asks for the **vault PIN** (not the credential
+     password, not the biometric app lock), on its own step, and sends
+     `audit.export` with the same filters, the format, the preview's
+     `upto_seq` and the PIN sealed to a UTK (topping the pool up first
+     if it is empty). `bad_pin`: "Wrong PIN" (it counts only in the
+     vault's PIN backoff, not as a failed owner check);
+     `credential_frozen` / `rotation_required`: "Export is not
+     available while a credential alarm is open", with a link to the
+     alarm; `backoff`: the countdown; `not_found`: "Nothing to export"
+     (the entries are gone); `owner_check_required`: the owner-check
+     screen.
+  3. **Reading.** A progress sheet ("Preparing 40 entries…") pages
+     `audit.list` with `limit` 100 from `before_seq` = `upto_seq` + 1
+     with the same filters, keeps the first `count` entries, and
+     resolves the names as the list does. The entries are held in
+     memory only. Cancel drops them; the `audit.exported` entry stays
+     (the vault recorded the authorised export).
+  4. **Saving.** The system's "Save to…" dialog (Storage Access
+     Framework, `ACTION_CREATE_DOCUMENT`, MIME `text/csv` or
+     `application/json`), suggested name
+     `vettid-history-<YYYYMMDD>-<HHMMSS>.<csv|json>` (UTC). The app
+     writes straight to the chosen document through its stream: no
+     copy in shared storage, the gallery, the cache or the clipboard,
+     no upload, no share sheet. A dismissed dialog discards the data.
+     After saving: "History exported" with the count; fewer entries
+     than authorised (the log's retention dropped old ones meanwhile):
+     "38 of 40 entries exported; 2 older entries were removed by your
+     vault's history limit meanwhile".
+  - **Writers**: CSV and JSON exactly as VAULT-MESSAGING §10.9 defines
+    them (columns, quoting, the byte order mark for CSV, the apostrophe
+    before `=`, `+`, `-`, `@`, tab and CR, `hash` in hex in CSV;
+    the JSON header and entries with `prev` and `hash`); unit tests
+    recompute the hash chain of a JSON export.
+  - The new entry `audit.exported` shows in History under Security as
+    "History exported" with its format and count from `ref`.
 
 Every list has an empty state; every destructive action has a confirmation;
 every critical action asks for the credential password.
 
 There is no backup or export of vault data out of the service (owner
-decision, 2026-10-03); no screen offers one.
+decision, 2026-10-03); no screen offers one. The one exception is
+History's export of activity metadata (0.1.17, owner decisions of
+2026-10-08, above): it never holds item values, secrets, message text,
+credential material or the email, and is no backup (nothing imports
+it).
 
 ## 5. Architecture
 
@@ -317,7 +392,7 @@ crypto directly; one ViewModel per screen with immutable UI state.
 | A0 | Spec + this plan approved; old code tagged and moved off `main`; empty multi-module skeleton, CI (build, unit tests, lint, detekt), theme and component gallery screen | CI green; component gallery matches the design language on a phone |
 | A1 | `:core:crypto` + vectors; `:core:keystore`; `:core:attestation` port | All vettid-vault vectors pass (incl. MLKEM768X25519 HPKE interop) |
 | A2 | `:core:relay` + `:core:altchan` + `:core:vault` against a local dev stack (vettid-vault integration stack: relay + parent + dev enclave + member-API stand-in) | Instrumented test enrolls, unlocks, exchanges a message with a `vaultctl` peer |
-| A3 | Onboarding, unlock, credential, settings screens (with the account card, 0.1.11), biometric app lock; History (0.1.11), once the vault release with VAULT-MESSAGING 0.20.0's search is in staging | Fresh install → enrolled vault with credential on a real phone (dev stack) |
+| A3 | Onboarding, unlock, credential, settings screens (with the account card, 0.1.11), biometric app lock; History (0.1.11), once the vault release with VAULT-MESSAGING 0.20.0's search is in staging; History export (0.1.17), once a release with 0.22.0's `audit.export` is | Fresh install → enrolled vault with credential on a real phone (dev stack) |
 | A4 | Connections, messages, approvals | Invite/QR connect, SAS, messages both ways, approvals |
 | A5 | Items (data, secret, critical), tags, share rules, grants and critical-item approvals | Flows against the dev stack and a second vault |
 | A6 | Hardening and polish: accessibility pass, notifications, offline behaviour, error states, Play pre-launch report | Internal testing track build |

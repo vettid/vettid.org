@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.21.2
+version: 0.22.0
 date: 2026-10-08
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -13,13 +13,27 @@ related:
   - PUSH-GATEWAY.md
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.3.1)
-  - ANDROID-PLAN.md (0.1.11)
+  - ANDROID-PLAN.md (0.1.17)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.0, approved 2026-10-03)
   - VAULT-RELEASES.md (0.1.6, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.22.0: normative (owner decisions of 2026-10-08, §15 item 30):
+    History export, a deliberate exception to the 2026-10-03 decision
+    of no export of vault data, for activity metadata only. The holder's
+    app sends `audit.export` with `audit.list`'s filters: a dry run
+    counts the entries (at most 10,000, newest first, `more` beyond),
+    then the export carries the UTK-sealed PIN, which the vault checks
+    under the §11.8 backoff only (not a failed owner check),
+    audits `audit.exported` with a summary in `ref` and answers the
+    bound `upto_seq`; the app reads the entries with `audit.list` and
+    writes CSV or JSON (formats defined here), saved only through the
+    platform's "Save to…" and unencrypted. App only: desktops are
+    refused, agents never get `audit.*`; refused while a clone alarm
+    is open (`credential_frozen`, `rotation_required`) (§3.5.4, §3.5.6, §10, §10.9,
+    §10.11, §10.16, §13.5)
   - 0.21.1: editorial-normative, errata to 0.21.0 from its
     implementation (vettid-vault #47; owner decision of 2026-10-08,
     §15 item 29.7): a dry run follows the access rule of the call it
@@ -1017,7 +1031,9 @@ the member's consent to one request and one payload. A wallet spend
 PSBT's hash), and `wallet.create` may carry an imported phrase as `item`.
 A transfer's approval (§6.7.1) and an owner check (§3.6.1) carry the
 `pin` (6–32 ASCII digits, §11.3) with the password; an owner check may
-also carry `hold` and `hold_off_until` (§3.6.7).
+also carry `hold` and `hold_off_until` (§3.6.7). A History export
+(`audit.export`, §10.9, 0.22.0) carries the `pin` alone and is not a
+credential operation.
 
 **Using a UTK.** The vault looks the UTK up among those issued to the
 sending app and removes it from the pool before anything else is checked.
@@ -1144,6 +1160,8 @@ the holder confirms it (§3.5.3), then only its hash and version.
   off-device copy and no export (owner decision, 2026-10-03): the app
   MUST NOT write the blob anywhere but its own protected storage (no
   cloud or device backup, no file, no QR, no copy to another device).
+  History's export of activity metadata (§10.9, 0.22.0), the one
+  exception to that decision, never includes the credential.
   A member-supplied blob is never accepted (0.9.0 removed it from
   `credential.recover`).
 - **There is no recovery with the backup off** (0.16.0, owner decisions
@@ -1292,8 +1310,10 @@ member:
   `credential_frozen`; in state `rotation_required`, with
   `rotation_required`. This covers critical items (§10.7), critical-item
   use (§10.13), wallet signing (§10.18), `credential.unlock` (so signed
-  LEASH grants and member authentication answer `credential_locked`) and
-  `device.transfer.create` and `.approve`.
+  LEASH grants and member authentication answer `credential_locked`),
+  `device.transfer.create` and `.approve`, and (0.22.0, owner decision
+  of 2026-10-08) `audit.export`, its dry run included, although it is
+  not a credential operation (§10.9 History export).
 - These refusals come before the UTK is spent (§3.5.3, step 1).
 - Still allowed: `credential.utk.get`, `credential.version` (which shows
   the alarm), `credential.lock`, `credential.alarm.confirm`; in state
@@ -3423,6 +3443,7 @@ an answer to an unknown or expired id is dropped.
 | | `presence.ping`, `presence.pong` | V↔V | | On demand (§9.2; ephemeral events) |
 | | `presence.result` | V→D | | The answer, to the asking device (ephemeral) |
 | Audit & feed | `audit.list`, `connection.audit.list` | D→V | req | Audit log, whole or per connection (§10.9) |
+| | `audit.export` | D→V | req | The member's History export: count, PIN, audit entry; the app then reads the entries with `audit.list` (§10.9, 0.22.0) |
 | | `feed.list`, `.get`, `.update`, `.delete`, `guide.sync` | D→V | req | Activity feed; app guides as feed items (§10.9) |
 | | `feed.event` | V→D | | New feed item |
 | Push | `push.register`, `push.unregister` | D→V | req | Reserved (§14) |
@@ -4556,7 +4577,8 @@ The vault keeps two records of what happened:
 
 Neither holds message text, item values, tags or keys. Both are DEK
 state.
-All types are sent by `app` or `desktop`.
+All types are sent by `app` or `desktop`, except `audit.export`, which
+only the app (the holder) sends (History export, below).
 
 **Audit.**
 
@@ -4564,6 +4586,7 @@ All types are sent by `app` or `desktop`.
 |---|---|---|
 | `audit.list` | `{connection_id?, kinds?: [<prefix>], q?, since?, until?, before_seq? \| after_seq?, limit?}` | `{entries: [<entry>], head, seq, next_before_seq? \| next_after_seq?, partial?}`; newest first, or oldest first with `after_seq`; `q`, `since`, `until` and `partial` since 0.20.0 (Search, below) |
 | `connection.audit.list` | `{connection_id, kinds?, q?, since?, until?, before_seq? \| after_seq?, limit?}` | as `audit.list`, for one connection; `after_seq` as in `audit.list` (accepted by every release; stated in 0.21.0) |
+| `audit.export` (app: the holder; 0.22.0) | `{format?, connection_id?, kinds?, q?, since?, until?, dry_run?, upto_seq?, utk_id?, sealed?}`; `format` (`csv` or `json`) is required except in a dry run; `sealed` is UTK-sealed `{pin}` (§3.5.4) | `{count, more, upto_seq, upto_hash, oldest_seq?, newest_seq?, oldest_at?, newest_at?}`; the export (not a dry run) also `entry_seq`; `bad_pin`, `backoff` (body `{retry_after}`), `utk_invalid`, `credential_frozen` and `rotation_required` (a clone alarm is open), `not_found` (nothing matches), `bad_request`, `forbidden`, `owner_check_required` (History export, below) |
 
 ```json
 entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.added",
@@ -4742,12 +4765,209 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   deleted), `location.history.shared`, `location.history.received`
   (`ref` = `share_id`) (§10.16); `wallet.created`, `wallet.deleted`,
   `wallet.address_issued` (`ref` = `wallet_id`), `wallet.signed`
-  (`ref` = `txid`) (§10.18); `drop.suppressed`;
+  (`ref` = `txid`) (§10.18); `audit.exported` (`device_id` = the app,
+  `ref` = the export summary; History export, below, 0.22.0);
+  `drop.suppressed`;
   and `drop.<reason>` for every message the vault dropped
   or refused (§6.3, §6.6, §7.3, §8.4), with the runtime's reason, such as
   `drop.rate_limited`, `drop.one_app` (§6.7), `drop.profile_ik_mismatch`
   and `drop.profile_malformed` (§10.8, 0.18.0) or `drop.owner_check`
   (§3.6.3).
+
+**History export** (0.22.0; owner decisions of 2026-10-08, §15 item
+30). The member may save the entries History shows to a file, as CSV or
+JSON, from the app. It is a **deliberate exception** to the decision of
+2026-10-03 that there is no backup or export of vault data out of the
+service (§3.5.6, §10.16; VAULT-PLAN §4, VAULT-RELEASES §11,
+ANDROID-PLAN §4), and it is limited to **activity metadata**: the audit
+entries as the app shows them (time, kind, direction, the names of the
+connection, device and item an entry refers to, the identifiers and the
+chain fields). An export never holds an item's value, field label,
+notes or tags, a secret, message text, credential material, a key, the
+account snapshot or its email, or anything else the audit log does not
+hold. It is not a backup: nothing can be imported or restored from it,
+and the credential, the location log and every other part of the vault
+stay without an export.
+
+- **`audit.export` is the holder's only** (§3.5.9): a desktop's request
+  is answered `forbidden` at once, never held for approval (§6.8), and
+  any other device, including a recovering app, is answered
+  `forbidden`. It is not delegable (§10.11). While the app is gated
+  (§3.6.3) it is answered `owner_check_required`, as History is gated.
+  While a clone alarm is open (§3.5.9) it is refused, the preview
+  included, with the alarm's freeze code, `credential_frozen` or
+  `rotation_required`, before anything else and without spending the
+  UTK, as credential operations are (owner decision of 2026-10-08).
+  Desktops keep reading the log with `audit.list` but MUST NOT offer an
+  export in this version; an export from a desktop, with step-up, is
+  left for a later version (§15 item 30).
+- **The filters** are those of `audit.list`, with the same forms and
+  `bad_request` rules: `connection_id`, `kinds`, `q`, `since`, `until`
+  (no cursor and no `limit`). An export covers the entries that pass
+  every filter, **newest first**, at most **10,000** (the export cap);
+  `more: true` says that more entries match than the cap. (The log
+  keeps at most 10,000 entries, so the cap is reached only by an
+  unfiltered export of a full log and `more` stays false today; it
+  holds if the retention changes.) `audit.export` evaluates `q` over
+  the whole log in one request, without the 2,000-entry scan budget of
+  `audit.list`: the log has at most 10,000 entries, and a count must be
+  exact.
+- **Two steps.**
+  1. **The preview**, `dry_run: true`, without `utk_id`, `sealed` or
+     `upto_seq` (`bad_request` with any of them; `format` is optional
+     and, if present, checked): the vault counts the
+     entries that match and answers `count` (0–10,000), `more`,
+     `upto_seq` (the newest entry's `seq`, which bounds the export) and
+     its `upto_hash`, and, when `count` > 0, `oldest_seq`, `newest_seq`
+     and their `oldest_at`, `newest_at` (the `at` of those entries;
+     `at` need not grow with `seq`, §10.9 Search). It needs no PIN,
+     spends nothing and writes no audit entry: it reveals no more than
+     `audit.list`. The app shows the count and the range before the
+     member confirms.
+  2. **The export**, with the same filters and `format`, `upto_seq` from
+     the preview, `utk_id` and `sealed` = `{pin}` sealed to that UTK
+     (§3.5.4; the PIN is 6–32 ASCII digits, §11.3). The vault:
+     1. refuses with `credential_frozen` or `rotation_required` while
+        a clone alarm is open (above; the UTK is not spent), then
+        spends the UTK and opens `sealed` (`utk_invalid`); the
+        payload holds `pin` only;
+     2. checks the request: `bad_request` for a bad filter, a
+        `format` other than `csv` or `json`, a PIN that is not 6–32
+        digits, or an `upto_seq` that is not an integer ≥ 1 and at most
+        the newest entry's `seq`;
+     3. counts the entries that match with `seq` ≤ `upto_seq` and
+        answers `not_found` if there are none (the preview said so;
+        nothing is counted against the member);
+     4. refuses with `backoff` while the PIN backoff of §11.8 runs,
+        with `retry_after` (§10.1);
+     5. **checks the PIN** as an owner check does (§3.6.1 step 5): it
+        derives the DEK from `pin` and compares it with the DEK in
+        memory in constant time. A mismatch is `bad_pin`, counted in
+        the §11.8 backoff (`header_seq` + 1) and audited
+        `vault.pin_failed`, as a wrong PIN at an unlock is bounded. It
+        is **not** a failed owner check (owner decision of 2026-10-08):
+        it does not count in `failures` toward the lock of §3.6.4 and
+        writes no `owner_check.failed` entry or feed item;
+     6. on success, in one flush: resets the §11.8 backoff if it counted
+        failures (a header write, as a successful check does); appends
+        `audit.exported` (below); and answers as the preview, for the
+        entries with `seq` ≤ `upto_seq`, with `entry_seq` = the `seq`
+        of the `audit.exported` entry.
+  A successful export is not an owner check: it moves no deadline and
+  resets no `failures` (§3.6.1). It is not a credential operation: no
+  password, no CEK rotation, no new blob. Its response adds no UTKs;
+  the app tops its pool up with `credential.utk.get` (§3.5.4).
+- **The entries.** The app then reads them with `audit.list`, with the
+  same filters, `before_seq` = `upto_seq` + 1 for the first page and
+  `next_before_seq` after it, and keeps the first `count` entries it
+  receives (following `partial` pages, §10.9 Scan budget). The response
+  does not carry the entries: 10,000 entries of up to a few hundred
+  bytes each are megabytes, far beyond the 245,760-byte inner
+  plaintext of §5.5, and a vault-uploaded claim-check blob would be a
+  new mechanism for data the app may read anyway. Paging reuses
+  `audit.list` unchanged; the app SHOULD use `limit` 100 (the default),
+  so that each page stays well under the 64 KiB claim-check threshold
+  (§5.5); 10,000 entries are then 100 requests. `upto_seq` keeps the
+  export to what the member confirmed: entries written meanwhile,
+  `audit.exported` among them, are newer and not included. The
+  retention (above) may drop the oldest entries while the app reads; it
+  then receives fewer than `count` and says so in the file and on the
+  screen (ANDROID-PLAN §4).
+- **What the PIN is for.** `audit.list` is open to the app and desktops
+  without a PIN, so the vault cannot stop a device that can read the
+  log from writing it down. The PIN step makes the export a deliberate
+  act of the member, bounded by the PIN backoffs, and the
+  `audit.exported` entry records it in the tamper-evident log. The app
+  MUST NOT write an export file without a successful `audit.export`
+  answer for that export, and MUST include only the entries with
+  `seq` ≤ its `upto_seq` that match its filters.
+- **`audit.exported`** (`device_id` = the app, no `connection_id`,
+  `ref` = the export summary): `ref` is `;`-separated `key=value`
+  pairs in this order, the optional ones only when present:
+  `format=<csv|json>;count=<n>;seqs=<oldest_seq>-<newest_seq>;filters=<f>`
+  then `;since=<t>` and `;until=<t>`, where `<f>` is `none` or the
+  filters the request named, comma-separated in the order
+  `connection,kinds,q,dates`, and `<t>` is `since` or `until` as UTC in
+  the `ts` format (§5.3). Example:
+  `format=json;count=812;seqs=1-812;filters=none`, or
+  `format=csv;count=40;seqs=700-790;filters=kinds,dates;since=2026-10-01T04:00:00.000Z;until=2026-10-08T04:00:00.000Z`.
+  The summary names no connection, kind prefix or search text: the
+  entry fields are fixed by the hash (above), and the log holds no
+  names. Its `count`, `seqs` and times are those the vault answered.
+- **The file** is written by the app, never by the vault, and is **not
+  encrypted**. The app saves it only where the member chooses, through
+  the platform's own "Save to…" dialog (on Android the Storage Access
+  Framework, `ACTION_CREATE_DOCUMENT`); it never writes it to shared
+  storage or the gallery on its own, never uploads it, and never hands
+  it to another app (no share sheet). Before saving it tells the member
+  that the file is unencrypted and that anyone who gets it can read
+  it. The file name is `vettid-history-<YYYYMMDD>-<HHMMSS>.<csv|json>`
+  (UTC, the time of the export), without a name or an email. Both
+  formats carry the same entries, newest first; for each entry:
+  - `seq`, `entry_id`, `at` (verbatim from the vault: ISO 8601 / RFC
+    3339 UTC with milliseconds, the `ts` format), `kind`, `direction`;
+  - the app's `label` for the kind and its History `category` (the
+    category's identifier, ANDROID-PLAN §4), as History shows them;
+  - for an entry with `connection_id`, the connection's name as History
+    shows it ("First Last", or "Removed connection"); with `device_id`,
+    the device's name ("Removed device"); with an item's `item_id` as
+    `ref` (§10.9 Search point 4), the item's name ("Deleted item"),
+    also for a critical item, whose name is metadata;
+  - `ref`, and, in JSON, the `connection_id`, `device_id`, `prev` and
+    `hash` that the hash covers.
+- **JSON** (`application/json`, UTF-8 without a byte order mark, one
+  object, RFC 8259):
+
+  ```json
+  { "format": "vettid-history", "format_version": 1,
+    "exported_at": "2026-10-08T14:03:12.511Z",
+    "filters": { "category": "security", "kinds": ["credential", "identity", "recovery", "audit"],
+                 "connection_id": "<id>?", "connection_name": "First Last?",
+                 "q": "...?", "since": "<RFC 3339>?", "until": "<RFC 3339>?" },
+    "count": 40, "more": false, "authorised_count": 40,
+    "oldest_seq": 700, "newest_seq": 790,
+    "log_head": { "seq": 812, "hash": "<b64 32>" },
+    "entries": [
+      { "seq": 790, "entry_id": "<ULID>", "at": "<ts>", "kind": "credential.rotated",
+        "label": "Credential rotated", "category": "security",
+        "direction": "in|out?", "connection_id": "<id>?", "connection_name": "...?",
+        "device_id": "<id>?", "device_name": "...?", "ref": "<ref>?", "item_name": "...?",
+        "prev": "<b64 32>", "hash": "<b64 32>" } ] }
+  ```
+
+  `exported_at` is the time of the vault's answer (`ts` of the
+  `audit.export` response); `filters` holds only the filters used
+  (`{}` for none), `since` and `until` as sent; `count` is the number
+  of `entries`, `authorised_count` the vault's `count` (they differ
+  only when the retention dropped entries, above); `log_head` is
+  `upto_seq` and `upto_hash`. Optional members are absent, not `null`.
+  The header carries nothing that identifies the vault, the account or
+  the device: no `vault_id`, `user_guid`, email or app key.
+  **Checking an export against the log:** each entry's `hash` can be
+  recomputed from its own `prev`, `seq`, `at`, `kind`, `connection_id`,
+  `device_id`, `ref` and `direction` (§10.9; `at_ms` from `at`); where
+  two entries have consecutive `seq`, the newer one's `prev` is the
+  older one's `hash`, so an unfiltered export is one chain ending at
+  `log_head`; and the vault's later `audit.list` from `after_seq` =
+  `log_head.seq` must chain from `log_head.hash` (§10.9 anchors). Names,
+  labels and categories are the app's rendering at export time and are
+  not covered by the hash.
+- **CSV** (`text/csv; charset=utf-8; header=present`, RFC 4180: CRLF
+  line ends, every field that contains a comma, a double quote, CR or
+  LF enclosed in double quotes with inner quotes doubled; UTF-8 with a
+  byte order mark, so that spreadsheets read non-ASCII names). A header
+  row, then one row per entry, with the columns, in this order:
+  `seq,time,category,event,kind,direction,connection,device,item,ref,hash`,
+  where `time` is `at`, `event` the label, `connection`, `device` and
+  `item` the names, and `hash` the entry's hash in lowercase hex (64
+  digits). Absent values are empty fields. The CSV carries no
+  `prev`, `entry_id` or identifiers other than `ref`: it is for reading;
+  the JSON is for checking. **Formula injection:** a field whose first
+  character is `=`, `+`, `-`, `@`, a tab (U+0009) or CR (U+000D) is
+  written with an apostrophe (`'`) before it, inside the quoting
+  (OWASP CSV injection). This changes only such text fields (names,
+  labels and a `ref` starting so); `seq`, `time`, `kind` and the hex
+  `hash` never start with them.
 
 **Feed.**
 
@@ -5014,7 +5234,9 @@ grant: { "grant_id": "<ULID>", "agent_id": "<device id>", "version": 1, "scope":
   `settings.*`, `profile.set`, invitations, `connection.approve`,
   `.decline`, `.remove` or `.update`, `block.*`, `call.*`, `grant.*`,
   `critical-secret-use.*` or `connection.authenticate.*`, nor (0.8.0)
-  any `location.*`, `presence.*` or `wallet.*` type.
+  any `location.*`, `presence.*` or `wallet.*` type, nor any `audit.*`
+  type (agents never read the audit log, §10.9; 0.22.0: in particular
+  `audit.export`).
 - `approval` is `ask` (the default: every request is referred to an app,
   §6.8) or `auto` (allowed without approval, within the rate limits).
 - `connections` (1–64 connection ids) restricts the types whose body
@@ -6139,7 +6361,9 @@ member may have their vault keep their **own** location history. It is
 separate from sharing: the log is never shared by share rules, grants or
 actions, and leaves the vault only as a snapshot the member sends through
 one of their existing location shares. There is no export or backup of
-it outside the service (owner decision).
+it outside the service (owner decision). History's export (§10.9,
+0.22.0) holds the `location.*` audit entries, as History shows them,
+never a position.
 
 | Type | Request body | Response / event body |
 |---|---|---|
@@ -9065,6 +9289,7 @@ it can read and write only its own objects and use only its own relay key
 | A recovery with `credential.backup` off | Does not exist (0.16.0, owner decisions of 2026-10-06): the API and the enclave refuse it, no recovering device is created, and nothing of the vault (items, messages, connections, profile, audit log, feed) is released. Before 0.16.0 it gave a new credential over the rest of the vault, or its deletion, on the account and the PIN alone (§11.11.5 step 4) | — |
 | A start-over deletion (§11.11.9) requested by someone with the member's account session | The vault's deletion after 24 h unnoticed: availability only; it opens nothing and returns nothing. The member is emailed at the request | Cancel from the portal, the email link or the app within the 24 h |
 | A GrapheneOS device | Treated as any attested app: accepted only with a locked bootloader and a verified boot key pinned in the release (§11.7) | A release update removes a key |
+| A History export file the member saved (0.22.0) | Activity metadata only: the exported audit entries with the names of connections, devices and items as the app showed them, their times, kinds, references and chain fields; never values, secrets, message text, credential material or the email. Unencrypted, wherever the member saved it; VettID and the vault cannot reach or delete it. Making one needs the holder's app and the PIN, and is audited `audit.exported` (§10.9) | Delete the file |
 | An app's session keys | No password or secret value (UTK and reply-key sealing), no replay (single-use UTKs), no redirected payloads (§3.5.4) | Unlink the device |
 | Credential password alone | Nothing without the blob and a paired app | `credential.password.change` |
 | Member's email and account session (24 h, unnoticed) | A recovery (backup on only): one new attested app that replaces the member's app. Still needs the PIN and the password, online, under both backoffs (§11.11.2); with the backup off, nothing: no recovery (§11.11.1), only a start-over deletion after another 24 h (§11.11.9) | Cancel; the app sees `recovery_pending` and `vault.locking{recovery}`, or `deletion` in `GET /api/vault/status` |
@@ -10301,6 +10526,107 @@ Follow-ups:
     For 0.21.1: vettid-vault #47 (the six points as implemented, with
     tests for an absent `kind`); vettid-android (an absent `kind` is
     unknown: no suitability notice).
+30. **History export (0.22.0).** Owner decisions of 2026-10-08.
+    1. **A deliberate exception to "no export".** The member may export
+       History (the audit log as the app shows it) to a file. This is
+       an exception to the decision of 2026-10-03 that there is no
+       backup or export of vault data out of the service, recorded
+       wherever that rule is stated (§3.5.6, §10.16; VAULT-PLAN 0.1.4
+       §4, VAULT-RELEASES 0.1.8 §11, ANDROID-PLAN 0.1.17 §4). It covers
+       **activity metadata only**: time, kind, direction, the
+       connection's, device's and item's names, `ref`, `seq` and the
+       chain fields; never item values, secrets, message text,
+       credential material or the account email. The rule stands for
+       everything else (§10.9 History export).
+    2. **CSV and JSON**, chosen by the member. JSON carries each
+       entry's chain fields so that an export can be checked against
+       the log, with a header (format version, `exported_at`, the
+       filters, the count, the first and last `seq`) and nothing that
+       identifies the vault; CSV has a header row, RFC 4180 quoting,
+       UTF-8, ISO 8601 UTC times and the apostrophe against formula
+       injection (§10.9).
+    3. **Scope**: what History's filters show (category, connection,
+       dates, search), newest first, at most 10,000 entries; if more
+       match the app says so and suggests narrowing the dates; the
+       count and the range are shown before the member confirms.
+    4. **The vault PIN** confirms it, checked by the vault under the
+       existing backoffs, in a new request that carries the sealed
+       PIN; the vault audits the export and then authorises it.
+    5. **Saving** only through the platform's "Save to…" (Android's
+       Storage Access Framework): never to shared storage or the
+       gallery on its own, never uploaded; the file is unencrypted and
+       the app says so before saving.
+    6. **Agents never** get it (§10.11).
+    Chosen in the draft (owner's review below, point 8):
+    1. **App only.** Desktops are answered `forbidden` and MUST NOT
+       offer an export; an export from a desktop with step-up (§6.8) is
+       left for later.
+    2. **The PIN alone, UTK-sealed** (§3.5.4), as the enrolling app's
+       `vault.delete` carries it: no password and no credential
+       operation, so no CEK rotation. A wrong PIN is `bad_pin` in the
+       §11.8 backoff, audited `vault.pin_failed`; the draft also made
+       it a failed owner check (§3.6.4), which the owner's review
+       dropped (point 8.2).
+    3. **A preview and an export, then paging.** `audit.export` with
+       `dry_run` counts without the PIN; the export answers the count
+       and the bound `upto_seq` but not the entries, which the app reads
+       with `audit.list` below `upto_seq` + 1. Carrying up to 10,000
+       entries in one response would need megabytes, beyond §5.5's
+       inner plaintext, and a claim-check blob from the vault would be
+       new machinery; paging needs nothing new, since the app may read
+       the log anyway. The PIN is therefore an intent check and an
+       audit record, not access control: the app MUST NOT write a file
+       without a successful export.
+    4. **The kind `audit.exported`**, named after the request (as
+       `account.name_requested` after `account.name.set`), with
+       `device_id` = the app and a `key=value` summary in `ref`
+       (`format`, `count`, `seqs`, `filters`, `since`, `until`): the
+       entry's members are fixed by the hash formula, so the summary
+       does not get members of its own; it names no connection, kind
+       prefix or search text. History lists it under **Security**
+       (ANDROID-PLAN §4).
+    5. **No feed item** for an export; the draft did not refuse it
+       during a clone alarm (it is not a credential operation), which
+       the owner's review changed (point 8.4).
+    6. `q` is evaluated over the whole log by `audit.export`, without
+       the 2,000-entry budget, so that the count is exact; the log has
+       at most 10,000 entries.
+    7. CSV with a byte order mark (spreadsheets read UTF-8 names then)
+       and `hash` in hex (so that no cell needs the apostrophe); JSON
+       without one; the file name `vettid-history-<UTC time>`.
+    8. **Review of vettid.org #174 (owner, 2026-10-08).**
+       1. App only in this version (confirmed); an export from a
+          desktop with step-up may come later.
+       2. A wrong export PIN counts **only** in the §11.8 PIN backoff
+          and is audited `vault.pin_failed`; it is **not** a failed
+          owner check and never counts toward the lock after ten
+          failed checks (§3.6.4).
+       3. The 10,000-entry cap and `more` stay as written (the app
+          handles `more` though the retention makes it unreachable
+          today).
+       4. The export is **refused while a clone alarm is open**, as
+          the other sensitive actions are: `credential_frozen` or
+          `rotation_required`, the alarm's freeze code, before the UTK
+          is spent, the dry run included (§3.5.9, §10.9). No feed item
+          for an export (confirmed).
+       5. The `ref` summary as written (confirmed).
+       6. CSV with a byte order mark and `hash` in hex; JSON with
+          base64 (confirmed).
+       7. The website's use-cases page ("There is no export file to
+          steal or misuse", about the credential) stays as it is.
+    Follow-ups: vettid-vault (`audit.export` in `features/audit`: dry
+    run, the PIN check with the §11.8 backoff only (no failed-check
+    count), the refusal during a clone alarm, `upto_seq`, the whole-log `q`, `audit.exported` and its
+    `ref`; holder only, `forbidden` for desktops, not delegable, gated
+    while held; `client/` and `vaultctl audit export`; tests, among
+    them the backoff, no `failures` change on a wrong PIN, the alarm
+    refusal without a spent UTK, `not_found`, `upto_seq` bounds
+    and the summary format); vettid-android (History ⋯ → "Export…",
+    the confirm sheet with count, range and format, the PIN step,
+    paging, the CSV and JSON writers with the injection rule, the
+    Storage Access Framework save, the unencrypted-file notice; tests
+    with a chain check of the JSON); vettid.org (none beyond these
+    documents).
 
 ## 16. Test vectors
 
@@ -10572,6 +10898,27 @@ adds it to `recovery.json` (eph scalar 32 × 0x28, nonce 12 × 0x29) with
 the 0.16.0 implementation.
 
 ## 17. Changelog
+
+- **0.22.0** (2026-10-08): normative, owner decisions of 2026-10-08
+  (§15 item 30): History export, a deliberate exception to the
+  2026-10-03 decision of no export of vault data, for activity metadata
+  only.
+  - §10.9: `audit.export` (the holder's app only): a dry run counts the
+    entries matching `audit.list`'s filters (at most 10,000, newest
+    first, `more` beyond, `q` over the whole log); the export carries
+    the UTK-sealed `{pin}`, checked under the §11.8 backoff only (a
+    wrong PIN is `bad_pin` and `vault.pin_failed`, not a failed owner
+    check); refused with the freeze code while a clone alarm is open,
+    appends `audit.exported` (`ref` = the export summary) and answers
+    `upto_seq`; the app reads the entries with `audit.list` below it.
+    The CSV and JSON formats, the file's name, the "Save to…" rule and
+    the unencrypted-file notice.
+  - §10 registry: `audit.export`. §10.11: no `audit.*` type is
+    delegable. §3.5.4: the payload may be the PIN alone. §3.5.6,
+    §10.16: the export is the one exception and holds neither the
+    credential nor positions. §3.5.9: `audit.export` is refused during
+    a clone alarm. §13.5: a saved export file.
+  - §15 item 30.8: the owner's review of vettid.org #174.
 
 - **0.21.2** (2026-10-08): editorial, owner decision of 2026-10-08
   (VAULT-ITEMS 0.1.1).

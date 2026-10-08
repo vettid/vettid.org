@@ -1,8 +1,8 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.7
-date: 2026-10-06
+version: 0.1.8
+date: 2026-10-08
 owner: Al Liebl (Mesmer)
 changelog:
   - 0.1.0: V5 plan. Release pipeline, keys, infrastructure, release
@@ -52,6 +52,10 @@ changelog:
     measured on staging S3 (2026-10-05) and the owner's O6 decision of
     2026-10-06 (keep 1 vCPU / 5120 MiB for release 1; revisit when unlock
     queueing shows in metrics); §15 O6 updated to match
+  - 0.1.8 (editorial; owner decisions of 2026-10-08, VAULT-MESSAGING
+    0.22.0 §15 item 30): §11 notes the member's History export as the
+    one exception to "no backup or export"; it changes no recovery
+    objective
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.14.0) §11.10 release updates, §12.5 deletion, §13.5, §13.9
@@ -1231,7 +1235,10 @@ the ad-hoc tool for testing hardware questions outside a release.
 | Host role deleted | catastrophic, prevented | §6.3 |
 
 No backup or export outside the service (owner decision, 2026-10-03).
-The 7-day retention also bounds how long deleted vault data lingers.
+The one exception, the member's History export of activity metadata
+from the app (owner decisions of 2026-10-08, VAULT-MESSAGING 0.22.0
+§10.9), is no backup: nothing restores from it, and it changes none of
+the objectives above. The 7-day retention also bounds how long deleted vault data lingers.
 
 ## 12. First deployment
 

@@ -1,8 +1,8 @@
 ---
 title: TECH-PREVIEW
 status: draft (the preview opens when VAULT-PLAN V5 and the Android app's first release are ready)
-version: 0.1.1
-date: 2026-10-06
+version: 0.1.2
+date: 2026-10-08
 owner: Al Liebl (Mesmer)
 related:
   - ARCHITECTURE.md
@@ -10,6 +10,9 @@ related:
   - VAULT-PLAN.md (V5 infrastructure, V6 clients), ANDROID-PLAN.md
   - RELEASE-UPDATES.md, PROTEAN-CREDENTIAL.md
 changelog:
+  - 0.1.2: the History export (activity metadata only) is the one
+    exception to "no backup or export" and is no backup
+    (VAULT-MESSAGING 0.22.0, owner decisions of 2026-10-08)
   - 0.1.1: recovery needs the credential backup; with it off a lost
     phone means deleting the vault and starting over (VAULT-MESSAGING
     0.16.0, owner decisions of 2026-10-06)
@@ -59,7 +62,10 @@ work.
   expose into a preview vault. The cryptography is designed conservatively,
   but the code is new, and a preview exists to find what is wrong with it.
 - **Data loss is possible.** VettID offers no backup or export of vault
-  data outside the service (owner decision, 2026-10-03). Treat everything
+  data outside the service (owner decision, 2026-10-03). The app can
+  export your History (when and with whom things happened, never item
+  values, secrets or messages), but that is no backup and nothing can be
+  restored from it (owner decisions of 2026-10-08). Treat everything
   in a preview vault as disposable, and keep your own copy of anything that
   matters somewhere else.
 - **Remember your PIN and your credential password.** VettID cannot reset
@@ -140,7 +146,7 @@ you approve (ARCHITECTURE.md).
 | Recovery after losing your phone (24 h, PIN and password) | Beta |
 | Push notifications | Not yet: open the app to receive |
 | Calls, desktop, agents, wallet, location | Later phases |
-| Vault data backup or export | Not offered (by decision) |
+| Vault data backup or export | Not offered (by decision); History export (activity metadata only, CSV or JSON) once the vault release with VAULT-MESSAGING 0.22.0 ships |
 
 A broken Beta feature is a useful report. A broken Core feature is a
 high-priority one.
