@@ -1,10 +1,12 @@
 ---
 title: ARCHITECTURE
 status: overview (as built and planned, 2026-10-03)
-version: 0.1.2
-date: 2026-10-06
+version: 0.1.3
+date: 2026-10-08
 owner: Al Liebl (Mesmer)
 changelog:
+  - 0.1.3: History export (activity metadata only) as the one exception
+    to "no backup or export" (VAULT-MESSAGING 0.22.0)
   - 0.1.2: no recovery with the credential backup off; start over
     instead (VAULT-MESSAGING 0.16.0)
   - 0.1.1: the V5 release model (VAULT-RELEASES, VAULT-MESSAGING
@@ -234,7 +236,9 @@ PQC-MIGRATION is the plan. In short:
 ## 7. What VettID does not do
 
 - No backup or export of vault data outside the service (owner decision,
-  2026-10-03). Losing the stored state itself is out of scope
+  2026-10-03); the one exception is the member's History export of
+  activity metadata (owner decisions of 2026-10-08, VAULT-MESSAGING
+  0.22.0 §10.9), which is no backup. Losing the stored state itself is out of scope
   (VAULT-MESSAGING §2.2).
 - No votes, B2C service vaults, org vaults or group primitives in the
   vault (VAULT-MESSAGING §1.1).

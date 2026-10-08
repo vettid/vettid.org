@@ -1,9 +1,12 @@
 ---
 title: VAULT-PLAN
 status: draft
-version: 0.1.3
-date: 2026-10-04
+version: 0.1.4
+date: 2026-10-08
 changelog:
+  - 0.1.4: owner decisions of 2026-10-08 (VAULT-MESSAGING 0.22.0 §15
+    item 30): History export of activity metadata is the one exception
+    to "no backup or export of vault data" (§4 Later)
   - 0.1.3: W0 of VAULT-RELEASES: §5.1 and §7 risk 3 follow D1a
     (retirement after notice, deletable release keys by scheduled
     deletion only, the retirement statements, manifest by hash), as
@@ -206,7 +209,11 @@ calling service (TURN, SFrame), PQC Phase 2 (ML-DSA, Go 1.27).
 
 - **No backup or export of vault data outside the service** (owner
   decision, 2026-10-03). Recovery after losing the app is specified
-  (VAULT-MESSAGING §11.11).
+  (VAULT-MESSAGING §11.11). The one exception (owner decisions of
+  2026-10-08): the member's History export, activity metadata only
+  (the audit entries, never values, secrets, messages, credential
+  material or the email), from the app with the vault PIN, as CSV or
+  JSON (VAULT-MESSAGING 0.22.0 §10.9). It is no backup.
 - **Vault-to-vault transfer** (future): a member moves their data from an
   old vault to a new one within the service.
 - **Self-hosted vaults / home appliance**: a future direction only

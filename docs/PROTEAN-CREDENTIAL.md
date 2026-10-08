@@ -1,8 +1,8 @@
 ---
 title: PROTEAN-CREDENTIAL
 status: design rationale (normative spec is VAULT-MESSAGING §3.5)
-version: 0.1.2
-date: 2026-10-06
+version: 0.1.3
+date: 2026-10-08
 owner: Al Liebl (Mesmer)
 related:
   - VAULT-MESSAGING.md (0.7.0): §3.5 Protean Credential, §3.3.1 DEK, §10.6 credential, §10.7 items, §10.13 critical-item use, §11.11 recovery
@@ -10,6 +10,9 @@ related:
   - VAULT-PLAN.md (D1 release approval)
   - ARCHITECTURE.md
 changelog:
+  - 0.1.3: History export (activity metadata only, VAULT-MESSAGING
+    0.22.0) is the one exception to "no export"; it never holds the
+    credential (owner decisions of 2026-10-08)
   - 0.1.2: no recovery with the backup off; a member who loses the
     phone then deletes the vault and starts over (owner decisions of
     2026-10-06; VAULT-MESSAGING 0.16.0 §11.11.9) (§3.6, §3.7, §4.3,
@@ -148,7 +151,10 @@ backup is turned off, saying exactly that (VAULT-MESSAGING §3.5.6).
 There is **no member backup or export of vault data outside the service**
 (owner decision, 2026-10-03). Moving a vault from an old vault to a new one
 within the service is a planned future capability (ARCHITECTURE.md,
-roadmap), not an export.
+roadmap), not an export. The one exception (owner decisions of
+2026-10-08) is the member's History export of activity metadata from the
+app (VAULT-MESSAGING 0.22.0 §10.9): never item values, secrets, messages,
+credential material or the email, and no backup.
 
 ### 3.7 Recovery
 
