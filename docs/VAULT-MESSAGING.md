@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.20.0
-date: 2026-10-07
+version: 0.21.0
+date: 2026-10-08
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -12,7 +12,7 @@ related:
   - CALLING-SERVICE.md
   - PUSH-GATEWAY.md
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.3.0)
+  - MEMBER-API.md (2.3.1)
   - ANDROID-PLAN.md (0.1.11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -20,6 +20,31 @@ related:
   - VAULT-RELEASES.md (0.1.6, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.21.0: normative (owner decisions of 2026-10-08, §15 item 29),
+    gaps found while implementing 0.20.0 (vettid-vault #46) and the
+    app's items, sharing and grants (vettid-android A5, #78–#80);
+    MEMBER-API 2.3.1: an `item.put` replacing an item of any
+    sensitivity keeps the stored value of a field sent without `value`
+    and the notes with `keep_notes`, so that editing a critical item is
+    one credential operation and a secret item needs no reveal;
+    `item.get` returns the item's `size` (§10.7); a field that cannot hold an Ed25519
+    seed (by kind, or a wallet's item) is `unsuitable` at once, and
+    `critical-secret-use.pending`, `.list` and `.get` carry its `kind`
+    (§10.13); every `limit` error names its limit, `{limit, max,
+    size?}` (§10.1). Additions: `dry_run` on `item.put` and `item.tag`
+    (§10.7); an item's size counted without the members the vault
+    assigns, with the exact encoding (§10.7); `share.pending.list`, and
+    `share.decide` with `include` and `decline` in one change
+    (§10.12); `labels` on received grants in `grant.list`, the item's
+    `name`, `category` and `labels` in `grant.pending` entries, the
+    shape of `grant.list`'s `requested` (§10.12); the 64 outgoing
+    critical-item use requests (§10.13). Editorial: `file` stays
+    reserved (§10.7); the 2,000-entry search budget runs out at a
+    2,001st entry; `since` and `until` compared in Unix milliseconds;
+    `connection.audit.list` takes `after_seq` (§10.9); the snapshot
+    `email`'s excluded characters, U+2028 and U+2029 among them, and
+    DEL in the names, which the member API refuses at registration too
+    (§10.8, §11.13)
   - 0.20.0: normative (owner decisions of 2026-10-07, §15 item 28): the
     account snapshot carries the member's full verified `email` instead
     of `email_hint` (still `v: 1`; `email` required), which the vault
@@ -3372,7 +3397,7 @@ an answer to an unknown or expired id is dropped.
 | Introductions | `intro.create`, `.cancel`, `.list`, `.accept`, `.decline` | D→V | req | Introduce two connections; answer an introduction (§10.15) |
 | | `intro.offer`, `.answer`, `.connect`, `.invite`, `.link`, `.closed` | V↔V | | Between the introducer and each party |
 | | `intro.pending`, `intro.event` | V→D | | Offered; answered, connecting or closed |
-| Sharing | `share.rule.set`, `.list`, `.delete`, `share.decide` | D→V | req | Share rules for connections and agents; decide the items they ask about (§10.12) |
+| Sharing | `share.rule.set`, `.list`, `.delete`, `share.decide`, `share.pending.list` | D→V | req | Share rules for connections and agents; decide the items they ask about; list the items waiting (§10.12) |
 | | `share.pending` | V→D | | Items waiting for the member's decision (§10.12) |
 | Grants | `grant.request`, `.decide`, `.revoke`, `.list`, `.fetch`, `.catalog` | D→V | req | 1:1 grants of items; a connection's catalog (§10.12) |
 | | `data.request`, `data.decided`, `data.shared`, `data.revoked`, `data.fetch`, `data.value`, `data.catalog.get`, `data.catalog` | V↔V | | Between the two vaults |
@@ -3417,7 +3442,48 @@ an answer to an unknown or expired id is dropped.
   - `exists`: the object already exists (`credential.create`; since
     0.10.2 also `connection.invite.accept` of a vault already connected
     or requested, with body `{connection_id}`, §6.4);
-  - `limit`: a count or size limit of the feature would be exceeded;
+  - `limit`: a count or size limit of the feature would be exceeded.
+    Since 0.21.0 (owner decision of 2026-10-08, §15 item 29) its body
+    names the limit: `{limit: <name>, max, size?}`, where `max` is the
+    bound (a count, or bytes for a `*_size` limit) and `size`, only for
+    a size limit, the size the refused request would have reached as
+    the vault counted it. A vault never sends `limit` without this
+    body; an app shows a name it does not know as a generic "limit
+    reached". The names:
+
+    | `limit` | `max` | Reached by |
+    |---|---|---|
+    | `items` | 2,000 items, critical ones included | `item.put`, `wallet.create` (§10.7, §10.18) |
+    | `critical_items` | 1,000 critical items (also the credential's 1,000 entries, §3.5.2) | critical `item.put`, `item.sensitivity`, `wallet.create` |
+    | `item_size` | 65,536 bytes, or 12,288 for a critical item (§10.7 Size) | `item.put`, `item.sensitivity` |
+    | `credential_size` | 131,072 bytes of the credential's `inner` (§3.5.2) | a credential operation that adds to it |
+    | `profile_items` | 32 items tagged `@profile` | `item.put`, `item.tag` (§10.8) |
+    | `profile_size` | 196,608 bytes of `profile.update`, counted with maximum-length names | `profile.set`, `item.put`, `item.tag` (§10.8) |
+    | `tag_registry` | 512 registry entries | `tag.set` (§10.8) |
+    | `app_settings` | 64 `app.*` keys | `settings.set` (§10.8) |
+    | `share_rules_subject` | 64 rules per subject | `share.rule.set` (§10.12) |
+    | `share_rules` | 512 rules in all | `share.rule.set` |
+    | `share_pending` | 4,096 pending items | `share.rule.set`, `item.put`, `item.tag`, `tag.merge` |
+    | `grants_given` | 1,000 active given grants | `grant.decide`, and every change that includes items by an `auto` rule or a decision (`share.rule.set`, `share.decide`, `item.put`, `item.tag`, `tag.merge`), shared actions (§10.12, §10.14) |
+    | `grant_requests` | 1,000 requests the asking vault keeps | `grant.request` |
+    | `catalog_requests` | 64 outstanding catalog requests | `grant.catalog` |
+    | `grant_fetches` | 64 outstanding fetches | `grant.fetch` |
+    | `held_approvals` | 8 held requests per device | a request held for approval (§6.8) |
+    | `connection_requests` | 256 outgoing connection requests | `connection.invite.accept` (§10.4) |
+    | `blocks` | 1,000 block entries | `block.add` (§10.4) |
+    | `auth_challenges` | 8 outstanding challenges per connection | `connection.authenticate.request` (§10.4) |
+    | `agent_grants` | 32 grants per agent | LEASH grants, agent share rules (§10.11) |
+    | `critical_use_requests` | 64 outstanding outgoing requests | `critical-secret-use.request` (§10.13) |
+    | `action_invocations` | 256 outstanding outgoing invocations | `action.invoke` (§10.14; the reference's bound, first stated here) |
+    | `introductions` | 16 open introductions | `intro.create` (§10.15) |
+    | `location_shares` | 64 outgoing shares | `location.share.start` (§10.16) |
+    | `location_requests` | 1 per connection per 10 minutes | `location.request` (§10.16) |
+    | `wallets` | 16 wallets | `wallet.create` (§10.18) |
+    | `wallet_addresses` | 2,000 addresses per wallet | `wallet.address.new` (§10.18) |
+
+    Limits on what another vault sends (received grants, pending
+    requests per connection, offers) are not error responses: those
+    messages are dropped and audited as their sections say;
   - (0.18.0) `too_soon`: `account.name.set` within 30 days of the last
     applied name change, with body `{allowed_after}` (RFC 3339, §10.8);
   - `bad_password`, `backoff`, `stale_credential`, `utk_invalid`: §3.5.3,
@@ -3884,11 +3950,35 @@ item: { "item_id": "<ULID>", "version": 3, "name": "Passport", "category": "iden
   | `password` | a string of at most 16,384 bytes; apps mask it and reveal it on purpose |
   | `otp` | a TOTP seed: an `otpauth://` URI of at most 2,048 bytes, or a base32 secret (RFC 4648 alphabet, case-insensitive, 16–256 characters, optional `=` padding) |
   | `address` | an object `{street?, street2?, city?, region?, postal_code?, country?}` of strings of at most 256 bytes without line breaks; `country` is an ISO 3166-1 alpha-2 code in upper case; other members are refused |
-  | `file` | reserved for blob references (owner decision 4: files later); refused with `bad_request` |
+  | `file` | reserved for blob references (owner decision 4: files later); refused with `bad_request`. It stays reserved in 0.21.0: VAULT-ITEMS §3's `file` field shows the later design, not this version, and apps MUST NOT offer it |
 
-- **Size.** An item's encoding as in `item.get` with every value (the
-  canonical JSON the vault returns) is at most 65,536 bytes; a vault
-  holds at most 2,000 items, critical ones included (`limit`).
+- **Size.** An item's **size** is the length in bytes of its content
+  encoding: the canonical JSON of `item.get` with every value
+  (compact, members in the order of the example above) **without the
+  members the vault assigns**, `item_id`, `version`, `created_at`,
+  `updated_at` and the fields' `field_id`s (0.21.0, owner decision of
+  2026-10-08, §15 item 29; 0.7.0–0.20.0 counted them, so every item
+  accepted before is accepted now):
+
+  ```
+  {"name":…,"category":…,"sensitivity":…[,"template":…],"tags":[…],
+   "fields":[{"label":…,"kind":…,"value":…},…][,"notes":…]}
+  ```
+
+  `template` is present only when set and `notes` only when not empty;
+  `tags` (normalised and sorted, §10.8) and `fields` always, `[]` when
+  empty. Every value is a JSON string except an `address`, the object
+  of its non-empty members in the order `street`, `street2`, `city`,
+  `region`, `postal_code`, `country` (`{}` when all are empty). Strings
+  are raw UTF-8 with exactly these escapes: `"` as `\"`, `\` as `\\`,
+  line feed as `\n`, tab as `\t`, U+2028 as `\u2028` and U+2029 as
+  `\u2029` (Go's `encoding/json` without HTML escaping; the text rule
+  above admits no other control character). An app that holds every
+  value therefore computes the size exactly, without knowing the
+  vault's ids or timestamps. The size is at most 65,536 bytes (12,288
+  for a critical item, below), and a vault holds at most 2,000 items,
+  critical ones included: `limit` with `item_size` (and `max`, `size`)
+  or `items` (§10.1).
 
 **Sensitivity**, chosen per item at creation (default `data`; owner
 decision 1):
@@ -3899,9 +3989,10 @@ decision 1):
 | `secret` | DEK state | apps; desktops with step-up (§6.8); values only through `item.reveal`, audited | by share rules and grants (§10.12) |
 | `critical` | DEK state, its values and notes encrypted under an item key that only the Protean Credential holds (§3.5.2); its metadata (name, category, template, tags, field ids, labels and kinds) in the clear in DEK state | apps only, each read or change a credential operation with the password (§3.5.3) | never readable by anyone else: a share rule can at most make it *usable* (§10.13) |
 
-- A critical item is at most 64 fields and its encoding at most 12,288
-  bytes (its content travels in one UTK payload, §3.5.4); a vault holds
-  at most 1,000 critical items (`limit`).
+- A critical item is at most 64 fields and its size (above) at most
+  12,288 bytes (its content travels in one UTK payload, §3.5.4); a
+  vault holds at most 1,000 critical items (`limit`: `item_size`,
+  `critical_items`).
 - **Envelope encryption** (owner decision of 2026-10-03). A critical
   item's values and notes are encrypted under a random 32-byte item key:
 
@@ -3941,13 +4032,14 @@ decision 1):
 
 | Type | Request body | Response body |
 |---|---|---|
-| `item.put` (app; desktop: step-up) | `data`, `secret`: `{item_id?, version?, sensitivity?, name, category?, template?, tags?, fields?, notes?}` | `{item_id, version, updated_at}` |
-| | `critical` (app): `{version?, sensitivity: "critical", tags?, credential, utk_id, sealed{password, item_id?, item}}`, where `item` is `{name, category?, template?, fields?, notes?}` | `{item_id, version, updated_at, credential, credential_version, utks}` |
-| `item.get` (app, desktop) | `{item_id}` | `<item>`: a `data` item with its values; a `secret` or `critical` item without `value`s and `notes`, with `has_notes` |
+| `item.put` (app; desktop: step-up) | `data`, `secret`: `{item_id?, version?, sensitivity?, name, category?, template?, tags?, fields?, notes?, keep_notes?}`; a replacement's fields may omit `value` (Kept values, below; 0.21.0) | `{item_id, version, updated_at}` |
+| | `critical` (app): `{version?, sensitivity: "critical", tags?, credential, utk_id, sealed{password, item_id?, item}}`, where `item` is `{name, category?, template?, fields?, notes?, keep_notes?}`; a replacement's fields may omit `value` (Kept values, below; 0.21.0) | `{item_id, version, updated_at, credential, credential_version, utks}` |
+| | dry run (0.21.0): `{dry_run: true, item_id?, version?, sensitivity?, tags?}` (Dry run, below) | `{version?, shares, withdrawals}` |
+| `item.get` (app, desktop) | `{item_id}` | `<item>`: a `data` item with its values; a `secret` or `critical` item without `value`s and `notes`, with `has_notes`; with `size` (0.21.0, below) |
 | `item.reveal` (app; desktop: step-up) | `secret`: `{item_id, fields?: [<field_id>]}` (a `data` item: `{item_id}`, as `item.get`) | `<item>` with its values (only those `fields`, without `notes`, if given) |
 | | `critical` (app): `{item_id, credential, utk_id, sealed{password, item_id, reply_key}}` | `{item_id, version, values_sealed, credential, credential_version, utks}` |
 | `item.list` (app, desktop) | `{tags?, match?, category?, sensitivity?, after?, limit?}` | `{items: [<item without values and notes>], next?}` |
-| `item.tag` (app; desktop: step-up) | `{item_id, version, tags}` | `{version}` |
+| `item.tag` (app; desktop: step-up) | `{item_id, version, tags, dry_run?}` | `{version}`; with `dry_run` (0.21.0): `{version, shares, withdrawals}` |
 | `item.sensitivity` (app; desktop: step-up, `data` ↔ `secret` only) | `{item_id, version, sensitivity}`; to or from `critical` (app) also `credential, utk_id, sealed{password, item_id}` | `{version}`; with the credential also `{credential, credential_version, utks}` |
 | `item.delete` (app; desktop: step-up) | `{item_id}`; `critical` (app): `{item_id, credential, utk_id, sealed{password, item_id}}` | `{}`; `critical`: `{credential, credential_version, utks}` |
 
@@ -3964,6 +4056,65 @@ decision 1):
   content travels in the UTK-sealed `item`, and `item_id` (to replace)
   inside the payload, so that a session attacker can neither read it nor
   redirect it to another item; only `version` and `tags` are outside.
+- **Kept values (0.21.0; owner decisions of 2026-10-08, §15 item 29).**
+  So that editing an item never needs its values first (for a
+  critical item one password entry, not a reveal followed by a
+  replacement; for a secret item no `item.reveal` at all), an
+  `item.put` that **replaces** an item, of any sensitivity, need not
+  carry the values the member did not change. The content is the
+  request's (`data`, `secret`) or the sealed `item` (`critical`, with
+  `item_id` in the sealed payload):
+  - A field that names a `field_id` of the item's current version and
+    has no `value` **keeps its stored value**. Its `kind` MUST be the
+    stored one (`bad_request` otherwise: the stored value was checked
+    for that kind; to change a field's kind the app sends a value for
+    it); its `label` and its position may change.
+  - `keep_notes: true` keeps the stored notes. `notes` and
+    `keep_notes` together are `bad_request`; with neither, the notes
+    are removed, as before.
+  - A field without `field_id` (a new field) needs a `value`, and so
+    does every field of a new item (no `item_id`), where `keep_notes`
+    is `bad_request`.
+  - A field is removed by leaving it out of `fields`, as before
+    (`fields` absent removes every field).
+  - The rule is the same for every sensitivity. A `data` item's app
+    holds its values from `item.get` and may send them all, as before;
+    the rule only makes the three forms consistent.
+
+  The vault takes the kept values from what it stores, checks the
+  resulting item as any replacement (every value's shape, 64 fields,
+  the size limit with the kept values counted) and stores it. For a
+  `secret` item it reads them from DEK state: the edit is not a reveal,
+  needs no `item.reveal` and no user-presence step in the app, and is
+  recorded as `item.updated` only (a desktop's `item.put` still needs
+  step-up, §6.8). For a `critical` item, within the same credential
+  operation, it opens the stored values with the item's current key,
+  takes the kept ones (a kept field without a stored value keeps `""`,
+  or `{}` for an `address`, as `item.sensitivity` does), seals the
+  result under a fresh key of the next generation with the AAD of the
+  new field ids in their new order, as every critical `item.put` does,
+  and wipes the plaintext. In every case no value leaves the vault:
+  the response is unchanged and the change is recorded as
+  `item.updated`, never `item.revealed`. Apps SHOULD edit `secret` and
+  `critical` items this way (the edit form shows each stored value as
+  kept, masked and not revealed, and sends a `value` only for a field
+  the member typed into), and SHOULD NOT reveal an item only to open
+  its edit form (a member who wants to see a value reveals it on
+  purpose). The app learns the stored size from `item.get`'s `size`
+  (below); the vault's `limit` (`item_size`, with `size`) remains the
+  authority.
+- **Size in `item.get` (0.21.0; owner decision of 2026-10-08, §15
+  item 29).** `item.get` returns `size`, the item's size as defined
+  above (Size), for every sensitivity, so that an app that does not
+  hold the values (a `secret` or `critical` item) shows the room left
+  before the limit. The vault records it whenever it writes the item's
+  content (`item.put`, `item.sensitivity`, a tag change, a re-key) and
+  whenever it opens a critical item's values (`item.reveal`, a use,
+  §10.13); a critical item last written by an earlier release has no
+  `size` until then. `size` is metadata of the member's own devices
+  only: it is not part of the counted encoding, `item.list` does not
+  return it, and it is never in a grant, a catalog, the profile or
+  anything a connection or an agent receives.
 - **Reading.** `item.get` never returns the values of `secret` or
   `critical` items: the member reveals them on purpose. `item.reveal` of
   a `secret` item returns them in the clear inside the session (the
@@ -3982,7 +4133,47 @@ decision 1):
 - **Tags** change with `item.put` or `item.tag` (no password, for every
   sensitivity: tags are metadata). A tag change can include or withdraw
   the item in share rules (§10.12); the apps show the effect before
-  saving.
+  saving, from a dry run.
+- **Dry run (0.21.0; owner decision of 2026-10-08, §15 item 29).**
+  `item.put` and `item.tag` take `dry_run: true`: the vault changes
+  nothing and answers what the request would do to sharing.
+
+  ```json
+  { "version": 3,
+    "shares":      [ { "rule_id": "<ULID>", "subject": { "connection_id": "<id>" }, "mode": "ask", "usable": true } ],
+    "withdrawals": [ { "rule_id": "<ULID>", "subject": { "connection_id": "<id>" }, "state": "pending|included" } ] }
+  ```
+
+  `shares` lists the rules the item would **gain** (§10.12: with
+  `mode` `ask` the member is asked, with `auto` it is included at
+  once); `usable: true` marks a critical item, which a connection rule
+  makes only usable (§10.13), and is absent otherwise. `withdrawals`
+  lists the rules in which the item is pending or included and would
+  stop matching. Both are sorted by `rule_id`, connection and agent
+  rules alike (subject `{connection_id}` or `{agent_id}`), and empty
+  when nothing changes; `version` is the item's current version,
+  absent for a new item. The vault plans it as the real request would
+  (the rules in force, `match`, earlier declines, items already
+  pending), so apps MUST show this answer rather than compute the
+  effect from `share.rule.list`.
+  - `item.tag{item_id, version, tags, dry_run: true}` previews a re-tag
+    of any item, of every sensitivity.
+  - `item.put{dry_run: true, item_id?, version?, sensitivity?, tags?}`
+    previews a save: without `item_id`, a new item of `sensitivity`
+    (default `data`) with `tags`; with it, the item with the new `tags`
+    (`tags` absent: no change, empty lists). Only tags and sensitivity
+    decide sharing: the content members (`name`, `fields` and the
+    others) MAY be present and are ignored; the critical form's
+    `credential`, `utk_id` and `sealed` MUST be absent (`bad_request`),
+    since a dry run never opens the credential; an existing critical
+    item is named by `item_id` in the clear.
+  - A dry run answers `bad_request` (tags, `@profile` on a non-`data`
+    item), `not_found`, `conflict` (a stale `version`) and the sharing
+    and profile limits the change would reach (`limit`:
+    `share_pending`, `grants_given`, `profile_items`); it does not
+    check the content. It is a read: nothing is recorded or sent, no
+    `sync.event` follows, and a desktop needs no step-up for it (a
+    critical item stays app-only: `forbidden`, above).
 - **Deleting** an item withdraws it from every share rule and revokes its
   grants (§10.12). A critical item's values are removed from the
   credential.
@@ -4142,7 +4333,8 @@ The **profile object** holds the extras' display name and photo. Sent by
   after the rotation replaces it.
 - **Receiving.** A receiver parses `profile.update` strictly (the field
   rules of §10.7; `first_name` and `last_name` strings of 1–160 bytes
-  without control characters (C0, C1, U+2028, U+2029); `ik` the base64 of
+  without control characters (C0, DEL, C1, U+2028, U+2029; DEL since
+  0.21.0); `ik` the base64 of
   32 bytes) and then, in this order:
   1. ignores an update whose `version` is not higher than the one it
      keeps for that connection (§8.4);
@@ -4329,7 +4521,7 @@ All types are sent by `app` or `desktop`.
 | Type | Request body | Response body |
 |---|---|---|
 | `audit.list` | `{connection_id?, kinds?: [<prefix>], q?, since?, until?, before_seq? \| after_seq?, limit?}` | `{entries: [<entry>], head, seq, next_before_seq? \| next_after_seq?, partial?}`; newest first, or oldest first with `after_seq`; `q`, `since`, `until` and `partial` since 0.20.0 (Search, below) |
-| `connection.audit.list` | `{connection_id, kinds?, q?, since?, until?, before_seq?, limit?}` | as `audit.list`, for one connection |
+| `connection.audit.list` | `{connection_id, kinds?, q?, since?, until?, before_seq? \| after_seq?, limit?}` | as `audit.list`, for one connection; `after_seq` as in `audit.list` (accepted by every release; stated in 0.21.0) |
 
 ```json
 entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.added",
@@ -4388,7 +4580,11 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   before (at most 10,000 entries). With `q`, the vault evaluates `q` for
   at most **2,000** entries per request: the entries in the request's
   order that pass the other filters (`connection_id`, `kinds`,
-  `since`, `until`, the cursor). If that budget runs out before
+  `since`, `until`, the cursor). The budget **runs out** when a
+  2,001st such entry would have to be evaluated (0.21.0, stating what
+  every 0.20.0 vault does): a request whose entries passing the other
+  filters end by the 2,000th evaluated one, or that found `limit`
+  matches by then, is not `partial`. If that budget runs out before
   `limit` entries matched, the vault answers with the matches it found
   (possibly none), `partial: true`, and `next_before_seq` (or
   `next_after_seq`) = the `seq` of the last entry it evaluated; the app
@@ -4399,7 +4595,10 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   cursor is the `seq` of the last entry returned.
 - **Errors:** `bad_request` for a `q` that is empty, longer than 128
   bytes, not UTF-8, only white space or with a control character; a
-  `since` or `until` that is not an RFC 3339 time; `since` ≥ `until`;
+  `since` or `until` that is not an RFC 3339 time; `since` ≥ `until`,
+  compared in Unix milliseconds (each time truncated to the
+  millisecond, as `at` is compared; two times within one millisecond,
+  in any offsets, are equal and refused; stated in 0.21.0);
   and, as before, a bad `kinds`, `limit` or cursor, or both cursors.
   `connection.audit.list` takes the same `q`, `since` and `until`, with
   the same rules, for its one connection. Both types stay `app` and
@@ -5182,7 +5381,9 @@ never matches a `critical` item. Each matching item is, for that rule,
   asked again until it gains the rule again.
 - **Mode `auto`.** An item that gains the rule is included at once,
   without asking. The apps show the impact before a rule or a tag change
-  is saved (`dry_run`, below).
+  is saved (`dry_run`: `share.rule.set` below, `tag.merge` and
+  `tag.delete` §10.8, and since 0.21.0 `item.put` and `item.tag`
+  §10.7).
 - **`include_existing`.** When a rule is created (or replaced), the items
   that already match it gain it if `include_existing` is `true`; with
   `false` only later gains count. `share.rule.set{dry_run: true}` lists
@@ -5202,7 +5403,8 @@ never matches a `critical` item. Each matching item is, for that rule,
 | `share.rule.list` (app, desktop) | `{connection_id? \| agent_id?, after?, limit?}` | `{rules: [<share_rule>], next?}` |
 | `share.rule.delete` (app, desktop) | `{rule_id}` | `{}` |
 | `share.pending` (V→D, apps and desktops) | — | `{rule_id, subject, items: [{item_id, name, category, sensitivity}], reason: "rule" \| "tagged"}` |
-| `share.decide` (app; desktop: step-up) | `{rule_id, items: [<item_id>], approve}` | `{included: [<item_id>], declined: [<item_id>]}` |
+| `share.pending.list` (app, desktop; 0.21.0) | `{rule_id? \| connection_id? \| agent_id?, after?, limit?}` | `{pending: [{rule_id, subject, item_id, name, category, sensitivity, at}], next?}` |
+| `share.decide` (app; desktop: step-up) | `{rule_id, items: [<item_id>], approve}`, or (0.21.0) `{rule_id, include?: [<item_id>], decline?: [<item_id>]}` | `{included: [<item_id>], declined: [<item_id>]}` |
 
 - `share.rule.set` without `rule_id` creates a rule (`version` absent);
   with it, it replaces the rule (`version` required, `not_found`,
@@ -5220,6 +5422,30 @@ never matches a `critical` item. Each matching item is, for that rule,
   items changed. It is also a feed item (`share.pending`, `ref` =
   `rule_id`). `share.decide` decides the listed pending items of the rule
   (1–500; items not pending are ignored; none pending is `bad_request`).
+- **Deciding several items at once (0.21.0; owner decision of
+  2026-10-08, §15 item 29).** `share.decide{rule_id, include, decline}`
+  includes some of the rule's pending items and declines others in
+  **one change**: one flush, one response, one
+  `sync.event{share.decided}`, and on an error (a `limit`, say) no
+  change at all. `include` and `decline` are each optional, together
+  1–500 item ids, and no id may be in both; mixing them with `items` or
+  `approve` is `bad_request`. Items not pending are ignored and none
+  pending is `bad_request`, as above. The `{items, approve}` form stays
+  valid. Apps SHOULD send a mixed decision (some items unticked) in the
+  new form.
+- **Listing pending decisions (0.21.0).** `share.pending.list` returns
+  the items that wait for the member's decision, one entry per rule and
+  item: the rule's `rule_id` and `subject`, the item's current
+  `item_id`, `name`, `category` and `sensitivity` (as `share.pending`
+  carries them), and `at`, when it became pending. It is sorted by
+  `rule_id`, then `item_id`, optionally for one rule or one subject
+  (at most one of `rule_id`, `connection_id`, `agent_id`), and paged
+  like `item.list`: `limit` 1–500 (default 100), at most 131,072 bytes,
+  `next` present when more entries match, passed back as `after`
+  (opaque to apps). An app builds its pending share decisions from this
+  list, so that a decision another device left open, or whose
+  `share.pending` it missed, is still asked; it does not need to
+  resolve the `pending` ids of `share.rule.list` itself.
 - Removing or blocking a connection, or unlinking an agent, deletes its
   rules (§7.4).
 - **Change notices.** `sync.event` `share.rule.changed` (`rule_id`,
@@ -5248,7 +5474,9 @@ B app            B vault                   A vault                    A app
 ```json
 grant: { "grant_id": "<ULID>", "connection_id": "<id>", "direction": "given|received",
          "kind": "item", "ref": "<item_id>", "fields": ["f1"], "label": "...", "rule_id": "<ULID>",
-         "name": "...", "category": "...", "uses": 3, "used": 1, "expires_at": "<ts>",
+         "name": "...", "category": "...",
+         "labels": [ { "field_id": "f1", "label": "Number", "kind": "text" } ],
+         "uses": 3, "used": 1, "expires_at": "<ts>",
          "state": "active|used|expired|revoked", "created_at": "<ts>" }
 ```
 
@@ -5273,7 +5501,7 @@ grant: { "grant_id": "<ULID>", "connection_id": "<id>", "direction": "given|rece
 |---|---|---|
 | `grant.request` (app, desktop) | `{connection_id, items: [<item>], uses?, expires_in?, reason?}` | `{request_id}` |
 | `data.request` (V↔V) | — | `{request_id, items, uses, expires_in, reason?}` |
-| `grant.pending` (V→D, apps and desktops) | — | `{request_id, connection_id, items: [{kind, ref, fields?, label?, available}], uses, expires_in, reason?, exp}` |
+| `grant.pending` (V→D, apps and desktops) | — | `{request_id, connection_id, items: [{kind, ref, fields?, label?, available, name?, category?, labels?}], uses, expires_in, reason?, exp}` |
 | `grant.decide` (app; desktop: step-up) | `{request_id, approve, items?: [<index>], answers?: [{index, item_id, fields?}], uses?, expires_in?}` | `{grants: [{grant_id, kind, ref}]}` |
 | `data.decided` (V↔V) | — | `{request_id, approved, grants?: [<descriptor>]}` |
 | `data.shared` (V↔V) | — | `{grants: [<descriptor>]}` (1–64) |
@@ -5284,7 +5512,7 @@ grant: { "grant_id": "<ULID>", "connection_id": "<id>", "direction": "given|rece
 | `grant.value` (V→D, to the device that fetched) | — | `{connection_id, fetch_id, grant_id, value_sealed?, uses_left?, error?}` |
 | `grant.revoke` (app, desktop) | `{grant_id}` (given or received) | `{}` |
 | `data.revoked` (V↔V) | — | `{grant_id}` |
-| `grant.list` (app, desktop) | `{}` | `{given: [<grant>], received: [<grant>], pending: [{request_id, connection_id, items, uses, expires_in, reason?, exp}], requested: [{request_id, connection_id, items, state}]}` |
+| `grant.list` (app, desktop) | `{}` | `{given: [<grant>], received: [<grant>], pending: [{request_id, connection_id, items: [<grant.pending entry>], uses, expires_in, reason?, exp}], requested: [{request_id, connection_id, items: [{kind, ref, fields?, label?}], state: "pending" \| "granted" \| "denied"}]}` (0.21.0: below) |
 | `grant.catalog` (app, desktop) | `{connection_id}` | `{request_id}` |
 | `data.catalog.get` (V↔V) | — | `{request_id}` |
 | `data.catalog` (V↔V) | — | `{request_id, items: [{item_id, name, category, labels: [{field_id, label, kind}], grant_id?, uses_left?, usable?}], truncated?}` |
@@ -5303,6 +5531,15 @@ grant: { "grant_id": "<ULID>", "connection_id": "<id>", "direction": "given|rece
   a `category` entry is available when the member answers it. A `data.*`
   message that does not parse is dropped and audited
   (`drop.grant_malformed`), never answered.
+- **What an entry would grant (0.21.0; owner decision of 2026-10-08,
+  §15 item 29).** An available `item` entry in `grant.pending` (and in
+  `grant.list`'s `pending`) also carries the member's item's current
+  `name`, `category` and `labels`, `[{field_id, label, kind}]` of the
+  requested `fields` in the item's order (every field without
+  `fields`), so that the member sees what each entry would grant
+  before deciding; the asker's `label` stays its own words. They come
+  from the member's own vault and go only to the member's devices.
+  Unavailable entries and `category` entries carry none of them.
 - **Deciding.** An approval grants each listed entry (`items` holds
   indices into the request's items; default all): an `item` entry if it
   is available; a `category` entry only through an `answer`, which names
@@ -5354,6 +5591,17 @@ grant: { "grant_id": "<ULID>", "connection_id": "<id>", "direction": "given|rece
   `data.catalog` with at most 1,000 entries and 131,072 bytes
   (`truncated: true` when it left entries out). Each connection sees only
   its own catalog; tags and rules are never in it.
+- **`grant.list` (0.21.0).** A received `<grant>` carries `labels`,
+  the `[{field_id, label, kind}]` of its descriptor as the connection's
+  vault sent it (not refreshed), so that an app shows what a grant
+  holds before fetching it; a given grant carries none (the app has
+  the item). `pending` entries are `grant.pending`'s, with
+  `available`, `name`, `category` and `labels` as of the answer.
+  `requested` lists this vault's own requests (kept as above): `items`
+  are exactly the entries as sent in `grant.request`, `label` being
+  the asker's own description, and `state` is `pending`, `granted`
+  (the connection granted some entries; the grants arrive as received
+  grants) or `denied` (denied, or not decided in 7 days).
 - **Revoking.** Either side may revoke: the member's vault stops
   answering for the grant, the other side is told `data.revoked`, and
   both tell their owner devices (`grant.event{revoked}` on the asking
@@ -5395,13 +5643,13 @@ B app            B vault                   A vault                      A app
 |---|---|---|
 | `critical-secret-use.request` (app, desktop) | `{connection_id, item_id, field_id, operation: "sign" \| "auth", payload, context?}` | `{request_id}` |
 | `critical-secret.use` (V↔V) | — | `{request_id, item_id, field_id, operation, payload, context?}` |
-| `critical-secret-use.pending` (V→D, apps and desktops) | — | `{request_id, connection_id, item_id, field_id, name, label, operation, payload, payload_sha256, context?, exp}` |
+| `critical-secret-use.pending` (V→D, apps and desktops) | — | `{request_id, connection_id, item_id, field_id, name, label, kind, operation, payload, payload_sha256, context?, exp}` |
 | `critical-secret-use.approve` (app) | `{request_id, credential, utk_id, sealed{password, request_id, payload_sha256}}` | `{request_id, status, credential, version, utks}` |
 | `critical-secret-use.deny` (app, desktop) | `{request_id}` | `{}` |
 | `critical-secret.result` (V↔V) | — | `{request_id, status: "ok", signature, public_key}` or `{request_id, status: "denied" \| "expired" \| "unavailable" \| "unsuitable"}` |
 | `critical-secret-use.result` (V→D, apps and desktops) | — | `{connection_id, request_id, status, signature?, public_key?}` |
-| `critical-secret-use.list` (app, desktop) | `{}` | `{incoming: [{request_id, connection_id, item_id, field_id, name, label, operation, payload_sha256, context?, exp}], outgoing: [{request_id, connection_id, item_id, field_id, operation, state, status?}]}` |
-| `critical-secret-use.get` (app, desktop) | `{request_id}` (an incoming request) | the `critical-secret-use.pending` body: `{request_id, connection_id, item_id, field_id, name, label, operation, payload, payload_sha256, context?, exp}`; `not_found` for an unknown, answered or expired request |
+| `critical-secret-use.list` (app, desktop) | `{}` | `{incoming: [{request_id, connection_id, item_id, field_id, name, label, kind, operation, payload_sha256, context?, exp}], outgoing: [{request_id, connection_id, item_id, field_id, operation, state, status?}]}` |
+| `critical-secret-use.get` (app, desktop) | `{request_id}` (an incoming request) | the `critical-secret-use.pending` body: `{request_id, connection_id, item_id, field_id, name, label, kind, operation, payload, payload_sha256, context?, exp}`; `not_found` for an unknown, answered or expired request |
 
 - **What can be asked.** Only a critical item that a share rule of that
   connection includes (it is then `usable` in the connection's catalog,
@@ -5412,6 +5660,24 @@ B app            B vault                   A vault                      A app
   one. `payload` is 1–4,096 bytes (before its base64) and `context` at
   most 256 bytes; the app MUST show both, the item's name and field
   label, and the connection's name, to the member.
+- **Suitability (0.21.0; owner decision of 2026-10-08, §15 item 29).**
+  Both operations need an Ed25519 seed. A field is **suitable** only if
+  its `kind` is `password`, `text` or `multiline` and its item is not a
+  wallet's (§10.18: a recovery phrase and a passphrase). A request for
+  an unsuitable field is answered `unsuitable` at once, without asking
+  the member and without opening the credential, and audited
+  (`critical-secret.use.requested` and `critical-secret.use.denied`).
+  It is **not shown to the member** (owner decision of 2026-10-08):
+  no `.pending`, no feed item, not in `.list`; the member finds it
+  only in the audit log (the app's History);
+  the connection already sees the field's kind in its catalog
+  (§10.12), so the answer tells it nothing new. A suitable field whose
+  value is not a seed is found only at the use, once the credential is
+  open (below). `.pending`, `.list` and `.get` carry the field's
+  `kind` (0.21.0) beside `name` and `label`, as the vault recorded them
+  when the request arrived, so that the app can say what is asked
+  before the password; `unsuitable` means exactly these two cases.
+  Apps SHOULD keep an Ed25519 seed in a `password` field.
 - **Showing a request again** (0.10.2). `critical-secret-use.list` gives
   only `payload_sha256`, which keeps the list small; an app that shows an
   incoming request from the list (or from the feed) fetches it with
@@ -5421,7 +5687,10 @@ B app            B vault                   A vault                      A app
   `payload_sha256` it seals in the approval is the one it computed from
   the payload it showed. A vault keeps at most 8 pending
   requests per connection (more are answered `unavailable`) and answers
-  `expired` after 24 h; a repeated `request_id` is ignored.
+  `expired` after 24 h; a repeated `request_id` is ignored. The asking
+  vault keeps at most 64 outstanding outgoing requests (`limit`,
+  `critical_use_requests`; the reference's bound, first stated in
+  0.21.0).
 - **Consent per use.** `critical-secret-use.approve` is one use of the
   credential (§3.5.3), from an app: the UTK-sealed payload carries the
   password, the `request_id` and `payload_sha256` = SHA-256(`payload`).
@@ -5437,8 +5706,8 @@ B app            B vault                   A vault                      A app
   plaintext and the keys. Nothing is retained:
   there are no standing allowances, and the next use needs the password
   again. The value MUST be the standard base64 of a 32-byte Ed25519 seed
-  (a `password` or `text` field, for example); otherwise the status is
-  `unsuitable` (the credential has still been opened and rotated).
+  in a suitable field (above); otherwise the status is `unsuitable`
+  (the credential has still been opened and rotated).
   - `sign`: `signature = Ed25519(seed, payload)`, the payload as is, for
     protocols that need the member's key to sign their own messages.
   - `auth`: `signature = Ed25519(seed, "vettid/vms/2/critical-auth" ||
@@ -8338,11 +8607,20 @@ desktops only (owner decision of 2026-10-07, §15 item 28).
   vaults to stay compatible with (owner decision of 2026-10-07), so no
   older form is accepted. The vault refuses a snapshot without them, or
   with a name that is not a string of 1–160 bytes without control
-  characters, or with a `name_change.last.status` other than
+  characters (C0, DEL, C1, U+2028, U+2029; DEL since 0.21.0, owner
+  decision of 2026-10-08: the member API's names never contain it,
+  MEMBER-API 2.3.1), or with a `name_change.last.status` other than
   `"applied"` or `"refused"` (0.19.0), as it refuses a wrong type, and
   keeps the one it had. Since 0.20.0 `email` is **required** too, still
-  with `"v": 1`: a string of 3–1,016 bytes, with an `@`, without
-  control characters; a 0.20.0 vault refuses a snapshot without it, and
+  with `"v": 1`: a string of 3–1,016 bytes of UTF-8, with an `@`,
+  without control characters, which for the email are (0.21.0) C0
+  (U+0000–U+001F), DEL (U+007F), C1 (U+0080–U+009F), U+2028 and
+  U+2029, the names' set (0.20.0 named no set; its reference refuses
+  the first three and admits the line and paragraph separators, which
+  a 0.21.0 vault refuses too). The member API refuses the same
+  characters at registration (MEMBER-API 2.3.1, owner decision of
+  2026-10-08), so that a vault never refuses a snapshot built from a
+  registered member. A 0.20.0 vault refuses a snapshot without it, and
   ignores an `email_hint` if one is present (an unknown member). Older
   releases need no change to accept the new form: 0.15.0–0.19.0 vaults
   (staging release S4, and vettid-vault #45) check `email_hint` only
@@ -9846,6 +10124,92 @@ Follow-ups:
     `accountSnapshot`, tests; the redeem and claim answers unchanged);
     vettid-android (the account card in the avatar sheet and Settings,
     the drawer and FAB changes, "Vault" strings, the History screen).
+29. **Gaps from implementing 0.20.0 and the app's vault items, sharing
+    and grants (0.21.0).** Owner decision of 2026-10-08: the owner asked
+    for these fixes before staging release S5, from the gaps vettid-vault
+    #46 (0.20.0) and vettid-android A5 (#78–#80: items, tags and
+    sharing, grants and critical-item approvals) reported. The details
+    marked "chosen in the draft" are open for the owner's review of this
+    revision.
+    1. **Editing a critical item with one password entry.** Until 0.20.0
+       an edit was two credential operations: `item.reveal`, then an
+       `item.put` that sent every value back. A critical `item.put`
+       that replaces an item now keeps the stored value of a field sent
+       with its `field_id` and without `value`, and the stored notes
+       with `keep_notes: true`; the vault opens the old values inside
+       the same operation and re-seals the result under the next item
+       key (§10.7 Kept values). Chosen in the draft: a kept field keeps
+       its kind (a kind change needs a value); its label and position
+       may change; a field is removed by leaving it out, as before.
+       The draft kept the rule to critical items; the owner extended
+       it to secret items (point 6), and so to every replacement.
+    2. **Suitability before the password.** `critical-secret-use.pending`,
+       `.list` and `.get` carry the field's `kind`; a field is suitable
+       only if it is a `password`, `text` or `multiline` field of an
+       item that is not a wallet's, and a request for any other is
+       answered `unsuitable` at once, without the member and without a
+       credential operation (§10.13). A suitable field whose value is
+       not a seed is still found only at the use.
+    3. **Which limit.** Every `limit` error carries `{limit, max,
+       size?}`, with one name per limit of this specification (§10.1),
+       so that apps say which limit was reached.
+    4. **Additions for the apps** (chosen in the draft): `dry_run` on
+       `item.put` and `item.tag`, answering the rules the item would
+       gain or leave, so that apps never compute the sharing effect from
+       the rules themselves (§10.7); an item's size counted without the
+       members the vault assigns (ids, version, timestamps), with the
+       exact encoding, so that an app computes it (§10.7 Size);
+       `share.pending.list` (§10.12); `share.decide` with `include` and
+       `decline` in one atomic change (§10.12); field `labels` on
+       received grants in `grant.list` and the member's item `name`,
+       `category` and `labels` on available `grant.pending` entries;
+       the shape of `grant.list`'s `requested` (§10.12); the bound of
+       64 outgoing critical-item use requests (§10.13).
+    5. **Editorial.** `file` fields stay reserved (§10.7); the search
+       budget runs out when a 2,001st entry would be evaluated;
+       `since` ≥ `until` is compared in Unix milliseconds;
+       `connection.audit.list` takes `after_seq`, as every release did
+       (§10.9); the snapshot `email` excludes C0, DEL, C1, U+2028 and
+       U+2029 (§11.13).
+    6. **Review of vettid.org #161 (owner, 2026-10-08).** The owner
+       agreed to the choices above and decided the open points:
+       1. Kept values apply to `secret` items too, so that editing one
+          needs no `item.reveal`; the draft extends the rule to every
+          replacement, `data` included, since it only makes the forms
+          consistent (§10.7 Kept values).
+       2. A kept field may not change its kind (confirmed).
+       3. Requests refused at once as `unsuitable` are not shown to
+          the member, only recorded in the audit log, which the app's
+          History shows (§10.13).
+       4. The `limit` table keeps every limit of this specification
+          (confirmed).
+       5. `item.get` reports the item's `size` now, for every
+          sensitivity; `item.list` does not (§10.7).
+       6. The member API's registration refuses an email with C0, DEL,
+          C1, U+2028 or U+2029, the snapshot `email`'s set, and its
+          names rule is stated to refuse DEL; the vault's names rule
+          adds DEL, so that a vault never refuses a snapshot built from
+          a registered member (MEMBER-API 2.3.1, §10.8, §11.13).
+       7. Agent share rules stay deferred: v1 pairs no agents (D3).
+    Follow-ups: vettid-vault (kept values and `keep_notes` in
+    `features/items` for every replacement, critical and secret
+    included; `size` in `item.get`, recorded for critical items; the
+    size without assigned members in `itemspec`; `dry_run` on `item.put`/`item.tag` from the existing
+    share plan; the `limit` body in every feature; `share.pending.list`
+    and `share.decide{include, decline}`; `labels` on received grants,
+    `name`/`category`/`labels` on available `grant.pending` and
+    `grant.list` pending entries; `kind` and the early `unsuitable` in
+    `features/critical`, the early refusals kept off the feed and
+    `.list`; U+2028/U+2029 in `ValidAccountEmail` and DEL in
+    `ValidAccountName` and the profile receiver; `client/` and
+    `vaultctl`; tests); vettid.org (MEMBER-API 2.3.1: the registration
+    email check refuses C0, DEL, C1, U+2028 and U+2029; tests);
+    vettid-android (critical edit in one password operation and secret
+    edit without a reveal, with kept values; the room left from
+    `item.get`'s `size`; the size computed without ids; the dry run instead of the local computation; the `limit`
+    names in the member's words; pending shares from
+    `share.pending.list`; one `share.decide` with both lists; grant
+    labels and entry names from the vault; the suitability notice).
 
 ## 16. Test vectors
 
@@ -10117,6 +10481,40 @@ adds it to `recovery.json` (eph scalar 32 × 0x28, nonce 12 × 0x29) with
 the 0.16.0 implementation.
 
 ## 17. Changelog
+
+- **0.21.0** (2026-10-08): normative, owner decisions of 2026-10-08
+  (§15 item 29), from gaps found while implementing 0.20.0
+  (vettid-vault #46) and the app's items, sharing and grants
+  (vettid-android #78–#80); MEMBER-API 2.3.1.
+  - §10.7: an `item.put` replacing an item of any sensitivity keeps
+    the stored value of a field sent with its `field_id` and without
+    `value` (same `kind`), and the stored notes with `keep_notes: true`,
+    so a critical edit is one credential operation and a secret edit
+    needs no reveal; `item.get` returns `size`; `item.put` and `item.tag` take
+    `dry_run`, answering `{version?, shares, withdrawals}`; an item's
+    size is its content encoding without `item_id`, `version`,
+    `created_at`, `updated_at` and `field_id`s, with the exact string
+    escapes; `file` stays reserved.
+  - §10.1: every `limit` error has the body `{limit, max, size?}`,
+    with a table of the limit names.
+  - §10.12: `share.pending.list`; `share.decide{rule_id, include,
+    decline}` in one change; `labels` on received grants in
+    `grant.list`; `name`, `category` and `labels` on available `item`
+    entries of `grant.pending` and of `grant.list`'s `pending`; the
+    shape and states of `grant.list`'s `requested`.
+  - §10.13: a field is suitable for a use only if it is a `password`,
+    `text` or `multiline` field of an item that is not a wallet's;
+    other requests are answered `unsuitable` at once;
+    `critical-secret-use.pending`, `.list` and `.get` carry `kind`;
+    the refusals at once are shown only in the audit log; at most 64
+    outgoing requests (`limit`).
+  - §10.9 (editorial): the 2,000-entry budget runs out at a 2,001st
+    evaluated entry; `since` ≥ `until` in Unix milliseconds;
+    `connection.audit.list` takes `after_seq`.
+  - §11.13, §10.8: the snapshot `email` excludes C0, DEL, C1, U+2028
+    and U+2029, and names exclude DEL too; MEMBER-API 2.3.1 refuses the
+    same characters at registration.
+  - §15 item 29.6: the owner's review of vettid.org #161.
 
 - **0.20.0** (2026-10-07): normative, owner decisions of 2026-10-07
   (§15 item 28); MEMBER-API 2.3.0, ANDROID-PLAN 0.1.11.

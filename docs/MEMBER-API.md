@@ -1,8 +1,17 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.3.0
+version: 2.3.1
 changelog:
+  - 2.3.1 (2026-10-08, VAULT-MESSAGING 0.21.0; owner decision of
+    2026-10-08, §15 item 29): an email address with a control
+    character, C0 (U+0000–U+001F), DEL (U+007F), C1 (U+0080–U+009F),
+    U+2028 or U+2029, is refused (`400`, "Invalid email address") at
+    registration and by every route that takes an email, the same set
+    a vault refuses in the snapshot's `email`; the names rule is stated
+    to refuse the same characters (its letters-only pattern already
+    did). So a vault never refuses a snapshot built from a registered
+    member
   - 2.3.0 (2026-10-07, VAULT-MESSAGING 0.20.0; owner decision of
     2026-10-07): the account snapshot carries the member's full
     verified `email` (the member row's, trimmed and lower-cased, at
@@ -142,7 +151,7 @@ Responses are `Cache-Control: no-store`.
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| POST | `/api/public/request` | `{email, first_name, last_name, invite_code?: string, consent: true}` | `{outcome}` (below). `invite_code` is the optional **registration code** (field name kept for compatibility). Names: trimmed of leading and trailing U+0020 spaces only (2.2.1), then letters, spaces, `'’.-`, ≤ 40 chars. Global hourly cap (past it: same answer, nothing created). Requests never email-verified are deleted after 14 days. |
+| POST | `/api/public/request` | `{email, first_name, last_name, invite_code?: string, consent: true}` | `{outcome}` (below). `invite_code` is the optional **registration code** (field name kept for compatibility). Names: trimmed of leading and trailing U+0020 spaces only (2.2.1), then letters, spaces, `'’.-`, ≤ 40 chars (so never a control character: C0, DEL, C1, U+2028 or U+2029, 2.3.1). Email: trimmed and lower-cased, at most 254 characters, one `@` with a dot in the domain, no white space and (2.3.1) no C0, DEL, C1, U+2028 or U+2029 (the snapshot `email`'s rule, VAULT-MESSAGING 0.21.0 §11.13). Global hourly cap (past it: same answer, nothing created). Requests never email-verified are deleted after 14 days. |
 
 `consent` must be `true`: while SES is in sandbox, we can only email
 addresses that have verified with SES, and that verification **is** the
@@ -758,6 +767,21 @@ snapshot without `email`; older vaults (0.15.0–0.19.0) check
 accept the new form, and the API sends `email` only, without a
 transition. A member whose address changes (no route changes it today)
 would get the new one with the next snapshot.
+
+**Characters (2.3.1, owner decision of 2026-10-08, VAULT-MESSAGING
+0.21.0 §11.13).** A 0.21.0 vault refuses a snapshot whose `email`
+contains C0 (U+0000–U+001F), DEL (U+007F), C1 (U+0080–U+009F), U+2028
+or U+2029, or whose names contain any of them, and keeps the snapshot
+it had. The API therefore refuses such an address wherever it takes
+one (the shared email check: registration, sign-in, typed redeem; `400`
+"Invalid email address", as for any other bad address), and the names
+rule (letters, spaces, `'’.-`) admits none of them, at registration and
+in the name-change job. No registered member can have one, so every
+snapshot the API builds from a member registered under 2.3.1 is
+accepted. Rows registered before are not rewritten: the earlier
+pattern already refused white space, U+2028 and U+2029, and a member
+whose stored address held another of these characters would keep their
+vault's last snapshot until the address is corrected.
 
 It is display only and never a security signal; the API's own checks
 (Access, above) are what enforce membership and terms. Its names are the
