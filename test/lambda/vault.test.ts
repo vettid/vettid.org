@@ -1956,6 +1956,18 @@ describe('setup codes', () => {
     expect((await redeem({ email: 'g1@x.org', code: c.code })).status).toBe(200);
   });
 
+  // 2.3.1: an email with a control character is refused as the shared email check refuses it,
+  // before any lookup or count; the answer depends on the input only, and the hold still applies.
+  test.each(['g1\u0000@x.org', 'g1@x\u007f.org', 'g1@x.org\u0085x', 'g\u20281@x.org', 'g1@x.o\u2029rg'])('typed redeem refuses %j with 400 Invalid email address', async (addr) => {
+    const c = await issue();
+    const r = await redeem({ email: addr, code: c.code });
+    expect(r).toMatchObject({ status: 400, body: { message: 'Invalid email address' } });
+    expect(holds).toEqual([250]);
+    expect(ddb.commandCalls(QueryCommand).filter((q) => q.args[0].input.IndexName === 'email-index')).toHaveLength(0);
+    expect(issuances()[0]).toMatchObject({ state: 'live', typed_attempts: 0 });
+    expect([...tbl('rl').keys()].filter((k) => k.startsWith('enroll-typed'))).toEqual([]);
+  });
+
   test('expired, revoked and blocked issuances: 404 invalid_code', async () => {
     const c = await issue();
     jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + 300_000);

@@ -5,6 +5,8 @@
  * trimmed of leading and trailing U+0020 spaces only (no other white space
  * is trimmed, and the pattern admits none), then a letter or mark first,
  * letters, marks, spaces and '’.- after it, at most 40 UTF-16 code units.
+ * The pattern admits no control character (MEMBER-API 2.3.1): C0, DEL, C1,
+ * U+2028 and U+2029 are none of letters, marks, U+0020 or '’.-.
  */
 export const NAME_MAX = 40;
 export const NAME_RE = /^[\p{L}\p{M}][\p{L}\p{M} '’.-]*$/u;
