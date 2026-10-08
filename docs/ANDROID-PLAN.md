@@ -1,9 +1,23 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.17
+version: 0.1.18
 date: 2026-10-08
 changelog:
+  - 0.1.18: owner requests of 2026-10-08: the connection detail shows
+    sharing as two cards, "You share with <First>" (gold, its rules and
+    the items shared, "Share items…") and "<First> shares with you"
+    (neutral, read-only, "Ask for something"), each with a count and an
+    empty state; nothing is pre-typed in the item editor (a template's
+    name is the placeholder and is used when the name is left empty);
+    formats are enforced while typing (dates masked to YYYY-MM-DD with a
+    calendar, a card's expiry as month and year YYYY-MM, numbers, phones,
+    emails, web addresses and one-time code keys filtered and normalised
+    on paste); an existing item's protection changes in the editor (the
+    content saved first, then item.sensitivity; leaving critical warns
+    first); and Vault, Messages and Connections hide their search behind a
+    search icon in the top bar (open while a query is set; History keeps
+    its search field; Approvals has none) (§4)
   - 0.1.17: owner decisions of 2026-10-08 (VAULT-MESSAGING 0.22.0 §15
     item 30): History export, a deliberate exception to "no export" for
     activity metadata only. History's ⋯ menu "Export…" opens a confirm
