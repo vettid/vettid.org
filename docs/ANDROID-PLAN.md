@@ -1,9 +1,18 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.12
+version: 0.1.13
 date: 2026-10-08
 changelog:
+  - 0.1.13: owner decisions of 2026-10-08: the connection detail is
+    simpler. No safety code (SAS) there: it protects the moment of
+    connecting only and stays on the invite and request screens; the
+    vault key fingerprint is the lasting identity check. No alias or
+    note: the app neither shows nor sets them (no `connection.update`
+    alias or note), and a connection is always titled "First Last",
+    never by an alias; aliases and notes a vault already holds stay
+    there, unshown. The detail's action bar loses edit and block;
+    remove stays, and an incoming request can still be blocked (§4)
   - 0.1.12: owner feedback of 2026-10-08, from testing the S5 staging
     app: **Lock vault** is the first entry of the avatar sheet, right
     under the name and email (it was at the bottom, cut off on a phone),
@@ -174,7 +183,7 @@ rows below say "Vault" for the screens and "item" for the data.
 | Messages | Inbox | Conversations by connection; Unread chip; the floating action button starts a new message (pick a connection, then the conversation) |
 | Conversation | Message detail | Bubbles in a card list; pill actions (reply, more) |
 | Connections | Contacts | Initial tiles, status (pending / active / stale / blocked); a star marks favourites (the owner's `favorite` flag, `connection.update`), whose tiles are teal; the floating action button invites a connection (0.1.11: QR or link, or scan the other's QR), the only invite entry point besides empty states. Each is titled "First Last" from the profile's core (VAULT-MESSAGING 0.18.0 §10.8), the display name, if any, as secondary text. Incoming requests show the requester's names the same way. Only between activation and the first `profile.update`, when the request's names are not at hand: "Name not shared yet"; never "Unnamed connection" |
-| Connection detail | — | Profile shared with you (the names labelled as the name on their VettID account, never "verified"; display name, photo and items labelled as shared by them), the vault key fingerprint (`ik`, 8 groups of 4 hex digits, §10.8), safety code (SAS), authenticate, alias/notes, block/remove |
+| Connection detail | — | Titled "First Last" (never an alias), the display name secondary. Profile shared with you (the names labelled as the name on their VettID account, never "verified"; display name, photo and items labelled as shared by them), sharing, authenticate, the vault key fingerprint (`ik`, 8 groups of 4 hex digits, §10.8: the lasting identity check). The action bar: message, favourite, History, remove (confirmed). No safety code (it belongs to connecting: the invite and request screens), no alias or notes, no edit or block (0.1.13; blocking stays on an incoming request) |
 | Approvals | — (VettID-specific) | Pending connection requests, grant requests, critical-item uses, share-rule decisions; approve/deny; critical items need the credential password |
 | Vault | Folder list | Titled "Vault" (0.1.11; was "Items"). Items per VAULT-ITEMS: name, category, typed fields, tags, sensitivity (data / secret / critical); filter by tag; add/edit from templates; share rules by tag (default: ask for each new item). Critical items live in the Protean Credential and are never shared by a rule |
 | History | — (VettID-specific) | The member's audit log (0.1.11, `audit.list`, VAULT-MESSAGING 0.20.0 §10.9), read-only: a search field (the vault searches, `q`), filter chips (category, connection, date range), a list of entries newest first with infinite scroll, and an entry detail. Details below |
