@@ -12,7 +12,9 @@ changelog:
     suggested), the format (CSV or JSON) and the unencrypted-file
     notice; the vault PIN (`audit.export`), then the platform's "Save
     to…" (Storage Access Framework) only; the category table gains
-    identifiers and `audit` under Security (§4, §6)
+    identifiers and `audit` under Security; after the owner's review of
+    vettid.org #174, a wrong PIN counts only in the PIN backoff and the
+    export is refused while a credential alarm is open (§4, §6)
   - 0.1.16: owner decision of 2026-10-08 (VAULT-ITEMS 0.1.1): contact
     information is one item per contact point (templates Email address,
     Phone number, Postal address and Website replace Contact details), no
@@ -307,7 +309,10 @@ the screen changes or deletes an entry.
      notice: "The file is not encrypted. Anyone who
      gets it can see who you connected with, your devices and item
      names, and when. It holds no item values, passwords or messages."
-     With `count` 0: "Nothing to export" and no Continue. With `more`:
+     With `count` 0: "Nothing to export" and no Continue. While a
+     credential alarm is open the preview is refused
+     (`credential_frozen` / `rotation_required`) and the sheet says so
+     (below), with no Continue. With `more`:
      "Only the newest 10,000 of the matching entries can be exported.
      Narrow the dates to export older ones", with Continue still
      offered for the newest 10,000.
@@ -315,8 +320,11 @@ the screen changes or deletes an entry.
      password, not the biometric app lock), on its own step, and sends
      `audit.export` with the same filters, the format, the preview's
      `upto_seq` and the PIN sealed to a UTK (topping the pool up first
-     if it is empty). `bad_pin`: "Wrong PIN", as on the owner-check
-     screen (a wrong PIN here counts as a failed owner check); `backoff`: the countdown; `not_found`: "Nothing to export"
+     if it is empty). `bad_pin`: "Wrong PIN" (it counts only in the
+     vault's PIN backoff, not as a failed owner check);
+     `credential_frozen` / `rotation_required`: "Export is not
+     available while a credential alarm is open", with a link to the
+     alarm; `backoff`: the countdown; `not_found`: "Nothing to export"
      (the entries are gone); `owner_check_required`: the owner-check
      screen.
   3. **Reading.** A progress sheet ("Preparing 40 entries…") pages

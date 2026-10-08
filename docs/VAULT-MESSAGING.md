@@ -26,12 +26,13 @@ changelog:
     app sends `audit.export` with `audit.list`'s filters: a dry run
     counts the entries (at most 10,000, newest first, `more` beyond),
     then the export carries the UTK-sealed PIN, which the vault checks
-    under the §11.8 backoff (a wrong one is a failed owner check),
+    under the §11.8 backoff only (not a failed owner check),
     audits `audit.exported` with a summary in `ref` and answers the
     bound `upto_seq`; the app reads the entries with `audit.list` and
     writes CSV or JSON (formats defined here), saved only through the
     platform's "Save to…" and unencrypted. App only: desktops are
-    refused, agents never get `audit.*` (§3.5.4, §3.5.6, §10, §10.9,
+    refused, agents never get `audit.*`; refused while a clone alarm
+    is open (`credential_frozen`, `rotation_required`) (§3.5.4, §3.5.6, §10, §10.9,
     §10.11, §10.16, §13.5)
   - 0.21.1: editorial-normative, errata to 0.21.0 from its
     implementation (vettid-vault #47; owner decision of 2026-10-08,
@@ -1309,8 +1310,10 @@ member:
   `credential_frozen`; in state `rotation_required`, with
   `rotation_required`. This covers critical items (§10.7), critical-item
   use (§10.13), wallet signing (§10.18), `credential.unlock` (so signed
-  LEASH grants and member authentication answer `credential_locked`) and
-  `device.transfer.create` and `.approve`.
+  LEASH grants and member authentication answer `credential_locked`),
+  `device.transfer.create` and `.approve`, and (0.22.0, owner decision
+  of 2026-10-08) `audit.export`, its dry run included, although it is
+  not a credential operation (§10.9 History export).
 - These refusals come before the UTK is spent (§3.5.3, step 1).
 - Still allowed: `credential.utk.get`, `credential.version` (which shows
   the alarm), `credential.lock`, `credential.alarm.confirm`; in state
@@ -4583,7 +4586,7 @@ only the app (the holder) sends (History export, below).
 |---|---|---|
 | `audit.list` | `{connection_id?, kinds?: [<prefix>], q?, since?, until?, before_seq? \| after_seq?, limit?}` | `{entries: [<entry>], head, seq, next_before_seq? \| next_after_seq?, partial?}`; newest first, or oldest first with `after_seq`; `q`, `since`, `until` and `partial` since 0.20.0 (Search, below) |
 | `connection.audit.list` | `{connection_id, kinds?, q?, since?, until?, before_seq? \| after_seq?, limit?}` | as `audit.list`, for one connection; `after_seq` as in `audit.list` (accepted by every release; stated in 0.21.0) |
-| `audit.export` (app: the holder; 0.22.0) | `{format?, connection_id?, kinds?, q?, since?, until?, dry_run?, upto_seq?, utk_id?, sealed?}`; `format` (`csv` or `json`) is required except in a dry run; `sealed` is UTK-sealed `{pin}` (§3.5.4) | `{count, more, upto_seq, upto_hash, oldest_seq?, newest_seq?, oldest_at?, newest_at?}`; the export (not a dry run) also `entry_seq`; `bad_pin`, `backoff` (body `{retry_after}`), `utk_invalid`, `not_found` (nothing matches), `bad_request`, `forbidden`, `owner_check_required` (History export, below) |
+| `audit.export` (app: the holder; 0.22.0) | `{format?, connection_id?, kinds?, q?, since?, until?, dry_run?, upto_seq?, utk_id?, sealed?}`; `format` (`csv` or `json`) is required except in a dry run; `sealed` is UTK-sealed `{pin}` (§3.5.4) | `{count, more, upto_seq, upto_hash, oldest_seq?, newest_seq?, oldest_at?, newest_at?}`; the export (not a dry run) also `entry_seq`; `bad_pin`, `backoff` (body `{retry_after}`), `utk_invalid`, `credential_frozen` and `rotation_required` (a clone alarm is open), `not_found` (nothing matches), `bad_request`, `forbidden`, `owner_check_required` (History export, below) |
 
 ```json
 entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.added",
@@ -4791,6 +4794,10 @@ stay without an export.
   any other device, including a recovering app, is answered
   `forbidden`. It is not delegable (§10.11). While the app is gated
   (§3.6.3) it is answered `owner_check_required`, as History is gated.
+  While a clone alarm is open (§3.5.9) it is refused, the preview
+  included, with the alarm's freeze code, `credential_frozen` or
+  `rotation_required`, before anything else and without spending the
+  UTK, as credential operations are (owner decision of 2026-10-08).
   Desktops keep reading the log with `audit.list` but MUST NOT offer an
   export in this version; an export from a desktop, with step-up, is
   left for a later version (§15 item 30).
@@ -4820,7 +4827,9 @@ stay without an export.
   2. **The export**, with the same filters and `format`, `upto_seq` from
      the preview, `utk_id` and `sealed` = `{pin}` sealed to that UTK
      (§3.5.4; the PIN is 6–32 ASCII digits, §11.3). The vault:
-     1. spends the UTK and opens `sealed` (`utk_invalid`); the
+     1. refuses with `credential_frozen` or `rotation_required` while
+        a clone alarm is open (above; the UTK is not spent), then
+        spends the UTK and opens `sealed` (`utk_invalid`); the
         payload holds `pin` only;
      2. checks the request: `bad_request` for a bad filter, a
         `format` other than `csv` or `json`, a PIN that is not 6–32
@@ -4834,11 +4843,11 @@ stay without an export.
      5. **checks the PIN** as an owner check does (§3.6.1 step 5): it
         derives the DEK from `pin` and compares it with the DEK in
         memory in constant time. A mismatch is `bad_pin`, counted in
-        the §11.8 backoff (`header_seq` + 1), audited
-        `vault.pin_failed`, and a failed check (§3.6.4: it counts in
-        `failures`, is audited `owner_check.failed` with `ref` = `pin`
-        and creates that feed item), so that the export cannot be used
-        to guess the PIN more often than the owner check allows;
+        the §11.8 backoff (`header_seq` + 1) and audited
+        `vault.pin_failed`, as a wrong PIN at an unlock is bounded. It
+        is **not** a failed owner check (owner decision of 2026-10-08):
+        it does not count in `failures` toward the lock of §3.6.4 and
+        writes no `owner_check.failed` entry or feed item;
      6. on success, in one flush: resets the §11.8 backoff if it counted
         failures (a header write, as a successful check does); appends
         `audit.exported` (below); and answers as the preview, for the
@@ -10548,17 +10557,16 @@ Follow-ups:
        gallery on its own, never uploaded; the file is unencrypted and
        the app says so before saving.
     6. **Agents never** get it (§10.11).
-    Chosen in the draft, open for the owner's review of this revision:
+    Chosen in the draft (owner's review below, point 8):
     1. **App only.** Desktops are answered `forbidden` and MUST NOT
        offer an export; an export from a desktop with step-up (§6.8) is
        left for later.
     2. **The PIN alone, UTK-sealed** (§3.5.4), as the enrolling app's
        `vault.delete` carries it: no password and no credential
        operation, so no CEK rotation. A wrong PIN is `bad_pin` in the
-       §11.8 backoff, audited `vault.pin_failed`, **and a failed owner
-       check** (§3.6.4), so that ten wrong PINs through exports lock
-       the vault as through checks. The alternative, the backoff
-       alone, is what an unlock allows.
+       §11.8 backoff, audited `vault.pin_failed`; the draft also made
+       it a failed owner check (§3.6.4), which the owner's review
+       dropped (point 8.2).
     3. **A preview and an export, then paging.** `audit.export` with
        `dry_run` counts without the PIN; the export answers the count
        and the bound `upto_seq` but not the entries, which the app reads
@@ -10577,20 +10585,42 @@ Follow-ups:
        does not get members of its own; it names no connection, kind
        prefix or search text. History lists it under **Security**
        (ANDROID-PLAN §4).
-    5. **No feed item** for an export, and no refusal while a clone
-       alarm is open (it is not a credential operation).
+    5. **No feed item** for an export; the draft did not refuse it
+       during a clone alarm (it is not a credential operation), which
+       the owner's review changed (point 8.4).
     6. `q` is evaluated over the whole log by `audit.export`, without
        the 2,000-entry budget, so that the count is exact; the log has
        at most 10,000 entries.
     7. CSV with a byte order mark (spreadsheets read UTF-8 names then)
        and `hash` in hex (so that no cell needs the apostrophe); JSON
        without one; the file name `vettid-history-<UTC time>`.
+    8. **Review of vettid.org #174 (owner, 2026-10-08).**
+       1. App only in this version (confirmed); an export from a
+          desktop with step-up may come later.
+       2. A wrong export PIN counts **only** in the §11.8 PIN backoff
+          and is audited `vault.pin_failed`; it is **not** a failed
+          owner check and never counts toward the lock after ten
+          failed checks (§3.6.4).
+       3. The 10,000-entry cap and `more` stay as written (the app
+          handles `more` though the retention makes it unreachable
+          today).
+       4. The export is **refused while a clone alarm is open**, as
+          the other sensitive actions are: `credential_frozen` or
+          `rotation_required`, the alarm's freeze code, before the UTK
+          is spent, the dry run included (§3.5.9, §10.9). No feed item
+          for an export (confirmed).
+       5. The `ref` summary as written (confirmed).
+       6. CSV with a byte order mark and `hash` in hex; JSON with
+          base64 (confirmed).
+       7. The website's use-cases page ("There is no export file to
+          steal or misuse", about the credential) stays as it is.
     Follow-ups: vettid-vault (`audit.export` in `features/audit`: dry
-    run, the PIN check with the §11.8 backoff and the failed-check
-    count, `upto_seq`, the whole-log `q`, `audit.exported` and its
+    run, the PIN check with the §11.8 backoff only (no failed-check
+    count), the refusal during a clone alarm, `upto_seq`, the whole-log `q`, `audit.exported` and its
     `ref`; holder only, `forbidden` for desktops, not delegable, gated
     while held; `client/` and `vaultctl audit export`; tests, among
-    them the backoff, a failed check, `not_found`, `upto_seq` bounds
+    them the backoff, no `failures` change on a wrong PIN, the alarm
+    refusal without a spent UTK, `not_found`, `upto_seq` bounds
     and the summary format); vettid-android (History ⋯ → "Export…",
     the confirm sheet with count, range and format, the PIN step,
     paging, the CSV and JSON writers with the injection rule, the
@@ -10876,8 +10906,9 @@ the 0.16.0 implementation.
   - §10.9: `audit.export` (the holder's app only): a dry run counts the
     entries matching `audit.list`'s filters (at most 10,000, newest
     first, `more` beyond, `q` over the whole log); the export carries
-    the UTK-sealed `{pin}`, checked under the §11.8 backoff (a wrong
-    PIN is `bad_pin`, `vault.pin_failed` and a failed owner check),
+    the UTK-sealed `{pin}`, checked under the §11.8 backoff only (a
+    wrong PIN is `bad_pin` and `vault.pin_failed`, not a failed owner
+    check); refused with the freeze code while a clone alarm is open,
     appends `audit.exported` (`ref` = the export summary) and answers
     `upto_seq`; the app reads the entries with `audit.list` below it.
     The CSV and JSON formats, the file's name, the "Save to…" rule and
@@ -10885,7 +10916,9 @@ the 0.16.0 implementation.
   - §10 registry: `audit.export`. §10.11: no `audit.*` type is
     delegable. §3.5.4: the payload may be the PIN alone. §3.5.6,
     §10.16: the export is the one exception and holds neither the
-    credential nor positions. §13.5: a saved export file.
+    credential nor positions. §3.5.9: `audit.export` is refused during
+    a clone alarm. §13.5: a saved export file.
+  - §15 item 30.8: the owner's review of vettid.org #174.
 
 - **0.21.2** (2026-10-08): editorial, owner decision of 2026-10-08
   (VAULT-ITEMS 0.1.1).
