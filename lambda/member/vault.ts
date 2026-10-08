@@ -142,7 +142,7 @@ import {
   normalizeEmail,
   qrMac,
 } from '../shared/enroll-code';
-import { HttpError, Router, badRequest, forbidden, notFound } from '../shared/http';
+import { CONTROL_RE, HttpError, Router, badRequest, forbidden, notFound } from '../shared/http';
 import { nowIso } from '../shared/ids';
 import { ApiError, MemberRequest, RateLimited, WithStatus, memberHandler, requireSession } from '../shared/member-http';
 import { canSignIn, currentTerms, memberByEmail, memberByGuid, vaultPointerKey } from '../shared/members';
@@ -1326,6 +1326,10 @@ const DUMMY_MAC = Buffer.alloc(32);
 async function redeemTyped(req: MemberRequest, key: AppKey, emailIn: string, codeIn: string) {
   const k = await enrollCodeKey();
   const email = normalizeEmail(emailIn).slice(0, 320);
+  // 2.3.1: an address with a control character is refused as the shared email
+  // check refuses it, before any lookup or count. The answer depends only on
+  // what was typed, never on an account, so it is no account oracle.
+  if (CONTROL_RE.test(email)) throw badRequest('Invalid email address');
   const code = normalizeCode(codeIn);
   // Counted for every email, whether or not it belongs to an account: its 429 tells nothing.
   await limit(`enroll-typed#${emailMac(k, email)}#${req.ip}`, 5, 5 * 60);

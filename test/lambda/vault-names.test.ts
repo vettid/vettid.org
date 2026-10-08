@@ -108,6 +108,14 @@ describe('normalizeName (the registration rule, U+0020 trim only)', () => {
   ])('%j → %j', (input, out) => expect(names.normalizeName(input)).toBe(out));
   test.each([['x'.repeat(41)], [''], ['   '], ['\tGrace'], ['Grace '], ['-Grace'], ['Gr4ce'], ['a@b'], [7], [null]])('%j is invalid', (input) =>
     expect(names.normalizeName(input)).toBeNull());
+  // 2.3.1: the pattern admits no control character (C0, DEL, C1, U+2028, U+2029), anywhere.
+  test('refuses every C0, DEL, C1, U+2028 and U+2029 character, inside or at either end', () => {
+    const controls = [...Array.from({ length: 0x20 }, (_, i) => i), ...Array.from({ length: 0x21 }, (_, i) => 0x7f + i), 0x2028, 0x2029].map((cp) => String.fromCharCode(cp));
+    expect(controls).toHaveLength(32 + 1 + 32 + 2);
+    for (const c of controls) {
+      for (const bad of [`Gr${c}ace`, `Grace${c}`, `${c}Grace`, `Grace ${c}`]) expect(names.normalizeName(bad)).toBeNull();
+    }
+  });
   test('40 UTF-16 code units, not code points', () => {
     expect(names.normalizeName('𝒜'.repeat(20))).toBe('𝒜'.repeat(20)); // a letter outside the BMP: 2 units each
     expect(names.normalizeName('𝒜'.repeat(21))).toBeNull();
