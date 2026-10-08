@@ -1,9 +1,21 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.11
-date: 2026-10-07
+version: 0.1.12
+date: 2026-10-08
 changelog:
+  - 0.1.12: owner feedback of 2026-10-08, from testing the S5 staging
+    app: **Lock vault** is the first entry of the avatar sheet, right
+    under the name and email (it was at the bottom, cut off on a phone),
+    and the sheet scrolls so every entry is reachable; the profile photo
+    is **camera only**: taken with the app's own camera screen (CameraX,
+    the front camera first with a switch to the rear one, "Retake" and
+    "Use photo"), never selected from the gallery (no Photo Picker) and
+    never taken by another camera app (no system camera intent), kept
+    in memory only, never saved to the gallery or shared storage, then
+    cropped, scaled and re-encoded as before (≤ 65,536 bytes, no EXIF);
+    the shared profile's glyph is Material Icons Outlined `Badge` (an ID
+    card), on its screen and on the rows that open it (§3, §4)
   - 0.1.11: owner decisions of 2026-10-07, from testing the staging
     app (VAULT-MESSAGING 0.20.0 §15 item 28, MEMBER-API 2.3.0): the
     avatar sheet and a Settings account card show the member's first
@@ -126,7 +138,8 @@ patterns:
   floating pill of actions at the bottom.
 - **Settings**: grouped rounded cards, rows with icon + label + chevron,
   section headers.
-- **Avatar sheet**: a bottom sheet with the account and its options.
+- **Avatar sheet**: a bottom sheet with the account and its options,
+  opened fully expanded and scrolling (0.1.12), **Lock vault** first.
 - **VettID brand** (owner, 2026-10-04): gold `#FFC125` (the website's
   `--gold`) as the single accent, `--gold-ink-light` `#7F640A` for gold
   text and icons on light surfaces; navy surfaces from the website tokens;
@@ -166,9 +179,9 @@ rows below say "Vault" for the screens and "item" for the data.
 | Vault | Folder list | Titled "Vault" (0.1.11; was "Items"). Items per VAULT-ITEMS: name, category, typed fields, tags, sensitivity (data / secret / critical); filter by tag; add/edit from templates; share rules by tag (default: ask for each new item). Critical items live in the Protean Credential and are never shared by a rule |
 | History | — (VettID-specific) | The member's audit log (0.1.11, `audit.list`, VAULT-MESSAGING 0.20.0 §10.9), read-only: a search field (the vault searches, `q`), filter chips (category, connection, date range), a list of entries newest first with infinite scroll, and an entry detail. Details below |
 | Credential | — | Reached from Settings → Security → Credential (0.1.11; not in the drawer). Critical items inside the Protean Credential; unlock window; password change; the vault-held credential copy (the backup) on/off. Turning it off shows VAULT-MESSAGING §3.5.6's warning and needs a confirmation: "If this phone is lost, broken, reset or replaced without a transfer, your vault **cannot be recovered**. It can only be deleted and replaced by a new one, and **everything in it is lost**." While off, the screen and Settings keep a short "no recovery" notice. Turning it on asks for the password at once (an owner check) so that the copy exists, and says recovery is possible from then on |
-| Settings | Settings | At the top, an **account card** (0.1.11): the member's first and last name and full email address (`account.get`, VAULT-MESSAGING 0.20.0 §11.13) and the membership state; tapping it opens the avatar sheet. Vault (status, release, lock, PIN); Security (credential, recovery, attestation info, biometric app lock and timeout, the owner-check interval 1–24 h and the hold switch); Privacy; App (theme, notifications and push path) |
+| Settings | Settings | At the top, an **account card** (0.1.11): the member's first and last name and full email address (`account.get`, VAULT-MESSAGING 0.20.0 §11.13) and the membership state; tapping it opens the avatar sheet. Vault (status, release, lock, PIN); Security (credential, recovery, attestation info, biometric app lock and timeout, the owner-check interval 1–24 h and the hold switch); Privacy (the **Shared profile**, glyph `Badge`, 0.1.12: display name, `@profile` items and the profile photo, **camera only** — "Take a photo" / "Retake photo" opens the app's own camera screen, front camera first with a switch to the rear one, then "Retake" or "Use photo"; no selection of an existing picture and no other camera app; the shot stays in memory, is never saved to the gallery, and is cropped, scaled and re-encoded to a JPEG ≤ 65,536 bytes without EXIF before `profile.set{photo}`; "Remove photo" confirmed; a refused camera permission is explained, with the system settings once Android no longer asks; a phone without a camera is told); App (theme, notifications and push path) |
 | Owner check | — (VettID-specific) | One screen: PIN and credential password together (VAULT-MESSAGING §3.6.5); also the "vault held" screen with the waiting counts and the lock action |
-| Avatar sheet | Account sheet | The member's first and last name and **full email address** (0.1.11, from `account.get`'s snapshot `first_name`, `last_name` and `email`, VAULT-MESSAGING 0.20.0 §11.13; never the masked hint), the email labelled "Only you see this address" and the names "Your connections see this name"; vault status, lock vault; **Change name** (0.1.10): the two names (the registration rule: letters, spaces, `'’.-`, ≤ 40), then the owner-check screen's PIN and password, sent as `account.name.set`; then "Name change requested" until `account.get`'s `name_request` is `applied` or `refused`; `too_soon` (from the vault or the member API): "You can change your name once every 30 days. You can change it again on <date>" (VAULT-MESSAGING §10.8), membership and subscription (read-only, from the vault, VAULT-MESSAGING §11.13), open account portal (browser) |
+| Avatar sheet | Account sheet | The member's first and last name and **full email address** (0.1.11, from `account.get`'s snapshot `first_name`, `last_name` and `email`, VAULT-MESSAGING 0.20.0 §11.13; never the masked hint), the email labelled "Only you see this address" and the names "Your connections see this name"; **Lock vault first** (0.1.12), right under the name and email, before Change name, Shared profile and the email; the sheet scrolls; vault status; **Change name** (0.1.10): the two names (the registration rule: letters, spaces, `'’.-`, ≤ 40), then the owner-check screen's PIN and password, sent as `account.name.set`; then "Name change requested" until `account.get`'s `name_request` is `applied` or `refused`; `too_soon` (from the vault or the member API): "You can change your name once every 30 days. You can change it again on <date>" (VAULT-MESSAGING §10.8), membership and subscription (read-only, from the vault, VAULT-MESSAGING §11.13), open account portal (browser) |
 | Recovery (new phone) | — (VettID-specific) | Only with the backup on: scan the portal's recovery QR → claim (`email_hint`) → register → PIN → credential password → the app replaces the old one. No other path: 0.1.6's backup-off choice (new credential or delete) is removed. `no_backup` at register or unlock (a vault whose backup is off): "This vault cannot be recovered: its credential backup was off. Delete it on the account site and start over with a new setup code", with a link to the portal's start-over page (MEMBER-API 2.1.0) and then to onboarding |
 | Pending deletion | — | When `GET /api/vault/status` shows `deletion` (a start-over requested on the portal, VAULT-MESSAGING §11.11.9): an urgent banner with the time left and **Cancel deletion** (`POST /api/vault/deletion/cancel {deletion_id}`, signed by the app key, with the `deletion_id` from the status's `deletion: {deletion_id, state, deletes_at}`, MEMBER-API 2.1.1) |
 | Transfer (new phone) | — (VettID-specific) | Scan the old phone's transfer QR → compare the SAS → wait for the approval → `device.paired{transfer}`: the app stores its `vault_id` and the member's `user_guid` (VAULT-MESSAGING 0.17.0 §6.7.1) like an enrolled phone, so that it unlocks later with the PIN. Without `user_guid` (a vault release before 0.17.0) the transfer still completes and the app warns: "This phone cannot unlock your vault after it locks until your vault is updated" |
