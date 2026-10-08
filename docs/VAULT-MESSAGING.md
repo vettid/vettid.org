@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.21.0
+version: 0.21.1
 date: 2026-10-08
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -20,6 +20,20 @@ related:
   - VAULT-RELEASES.md (0.1.6, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.21.1: editorial-normative, errata to 0.21.0 from its
+    implementation (vettid-vault #47; owner decision of 2026-10-08,
+    §15 item 29.7): a dry run follows the access rule of the call it
+    previews but never needs step-up, so a desktop may dry-run
+    `item.tag` of a critical item but not `item.put` (`forbidden`);
+    `item.put`'s dry run requires `version` with `item_id`; more than
+    64 fields is `bad_request` for every sensitivity (the separate
+    critical 64-field limit, which the general check always reached
+    first, is gone), and the critical forms are listed exactly (§10.7,
+    §10.1); a move to `critical` checks the size of the item as it
+    will be stored (§10.7); `kind` may be absent from requests that
+    arrived before 0.21.0, and receivers treat it as unknown; an
+    incoming use is checked usable, then suitable, then against the
+    pending cap (§10.13)
   - 0.21.0: normative (owner decisions of 2026-10-08, §15 item 29),
     gaps found while implementing 0.20.0 (vettid-vault #46) and the
     app's items, sharing and grants (vettid-android A5, #78–#80);
@@ -3481,7 +3495,10 @@ an answer to an unknown or expired id is dropped.
     | `wallets` | 16 wallets | `wallet.create` (§10.18) |
     | `wallet_addresses` | 2,000 addresses per wallet | `wallet.address.new` (§10.18) |
 
-    Limits on what another vault sends (received grants, pending
+    A count that is part of a request's shape is `bad_request`, not a
+    `limit`, and has no name: more than 64 fields in an item, for every
+    sensitivity (§10.7; 0.21.1), as more than 16 tags or 500 ids in a
+    list. Limits on what another vault sends (received grants, pending
     requests per connection, offers) are not error responses: those
     messages are dropped and audited as their sections say;
   - (0.18.0) `too_soon`: `account.name.set` within 30 days of the last
@@ -3930,7 +3947,9 @@ item: { "item_id": "<ULID>", "version": 3, "name": "Passport", "category": "iden
 - **Text.** No string member of an item may contain a control character
   (U+0000–U+001F, U+007F), except line feed and tab in `notes` and in
   `multiline` and `password` values.
-- **Fields** are ordered, at most 64. `label` is 1–64 bytes. `field_id`
+- **Fields** are ordered, at most 64 for every sensitivity; more is
+  `bad_request`, not `limit`: the count is part of the request's shape
+  (0.21.1). `label` is 1–64 bytes. `field_id`
   is assigned by the vault (`f1`, `f2`, ... from a counter of the item,
   never reused): in `item.put` a field either names a `field_id` of the
   item's current version (the same field, possibly relabelled) or has
@@ -3989,10 +4008,14 @@ decision 1):
 | `secret` | DEK state | apps; desktops with step-up (§6.8); values only through `item.reveal`, audited | by share rules and grants (§10.12) |
 | `critical` | DEK state, its values and notes encrypted under an item key that only the Protean Credential holds (§3.5.2); its metadata (name, category, template, tags, field ids, labels and kinds) in the clear in DEK state | apps only, each read or change a credential operation with the password (§3.5.3) | never readable by anyone else: a share rule can at most make it *usable* (§10.13) |
 
-- A critical item is at most 64 fields and its size (above) at most
-  12,288 bytes (its content travels in one UTK payload, §3.5.4); a
-  vault holds at most 1,000 critical items (`limit`: `item_size`,
-  `critical_items`).
+- A critical item's size (above) is at most 12,288 bytes (its content
+  travels in one UTK payload, §3.5.4); a vault holds at most 1,000
+  critical items (`limit`: `item_size`, `critical_items`). Its fields
+  are limited as every item's (at most 64, `bad_request`, above; 0.21.1:
+  0.7.0–0.21.0 also stated a separate 64-field limit for critical items,
+  which the general check always reached first). The size is checked on
+  the item as it will be stored: an `item.sensitivity` to `critical`
+  counts it with `"sensitivity":"critical"` (0.21.1).
 - **Envelope encryption** (owner decision of 2026-10-03). A critical
   item's values and notes are encrypted under a random 32-byte item key:
 
@@ -4044,9 +4067,13 @@ decision 1):
 | `item.delete` (app; desktop: step-up) | `{item_id}`; `critical` (app): `{item_id, credential, utk_id, sealed{password, item_id}}` | `{}`; `critical`: `{credential, credential_version, utks}` |
 
 - **Critical forms are app-only.** A desktop's request in a critical form
-  (one that carries `credential`, names `sensitivity: "critical"`, or
-  acts on a critical item) is answered `forbidden` at once, never held
-  for an app's approval it could not pass (§6.8).
+  (one that carries `credential`, `utk_id` or `sealed`, names
+  `sensitivity: "critical"`, or is an `item.put` (dry run included),
+  `item.reveal`, `item.sensitivity` or `item.delete` of a critical
+  item) is answered `forbidden` at once, never held for an app's
+  approval it could not pass (§6.8). `item.tag` of a critical item is
+  not a critical form: tags are metadata, and a desktop may re-tag it
+  with step-up, as any item (0.21.1).
 - **Create and replace.** Without `item_id`, `item.put` creates an item
   (`version` absent); with it, it replaces the item's name, category,
   template, tags, fields and notes (`version` required, `not_found`,
@@ -4160,8 +4187,10 @@ decision 1):
     of any item, of every sensitivity.
   - `item.put{dry_run: true, item_id?, version?, sensitivity?, tags?}`
     previews a save: without `item_id`, a new item of `sensitivity`
-    (default `data`) with `tags`; with it, the item with the new `tags`
-    (`tags` absent: no change, empty lists). Only tags and sensitivity
+    (default `data`) with `tags` (`version` absent); with it, the item
+    with the new `tags` (`tags` absent: no change, empty lists), and
+    `version` is required with `item_id`, as in the real `item.put`
+    (`bad_request` if only one of them is present; 0.21.1). Only tags and sensitivity
     decide sharing: the content members (`name`, `fields` and the
     others) MAY be present and are ignored; the critical form's
     `credential`, `utk_id` and `sealed` MUST be absent (`bad_request`),
@@ -4172,8 +4201,15 @@ decision 1):
     and profile limits the change would reach (`limit`:
     `share_pending`, `grants_given`, `profile_items`); it does not
     check the content. It is a read: nothing is recorded or sent, no
-    `sync.event` follows, and a desktop needs no step-up for it (a
-    critical item stays app-only: `forbidden`, above).
+    `sync.event` follows.
+  - **Desktops (0.21.1).** A dry run follows the access rule of the
+    call it previews but never needs step-up, since it changes nothing:
+    a desktop's dry run is answered at once, never held. So a desktop
+    MAY dry-run `item.tag` of any item, a critical one included (its
+    real `item.tag` is allowed with step-up), but a dry run of
+    `item.put` for a critical item (named by `item_id`, or with
+    `sensitivity: "critical"`) is `forbidden` from a desktop, since a
+    critical `item.put` is app-only (above).
 - **Deleting** an item withdraws it from every share rule and revokes its
   grants (§10.12). A critical item's values are removed from the
   credential.
@@ -5643,13 +5679,13 @@ B app            B vault                   A vault                      A app
 |---|---|---|
 | `critical-secret-use.request` (app, desktop) | `{connection_id, item_id, field_id, operation: "sign" \| "auth", payload, context?}` | `{request_id}` |
 | `critical-secret.use` (V↔V) | — | `{request_id, item_id, field_id, operation, payload, context?}` |
-| `critical-secret-use.pending` (V→D, apps and desktops) | — | `{request_id, connection_id, item_id, field_id, name, label, kind, operation, payload, payload_sha256, context?, exp}` |
+| `critical-secret-use.pending` (V→D, apps and desktops) | — | `{request_id, connection_id, item_id, field_id, name, label, kind?, operation, payload, payload_sha256, context?, exp}` |
 | `critical-secret-use.approve` (app) | `{request_id, credential, utk_id, sealed{password, request_id, payload_sha256}}` | `{request_id, status, credential, version, utks}` |
 | `critical-secret-use.deny` (app, desktop) | `{request_id}` | `{}` |
 | `critical-secret.result` (V↔V) | — | `{request_id, status: "ok", signature, public_key}` or `{request_id, status: "denied" \| "expired" \| "unavailable" \| "unsuitable"}` |
 | `critical-secret-use.result` (V→D, apps and desktops) | — | `{connection_id, request_id, status, signature?, public_key?}` |
-| `critical-secret-use.list` (app, desktop) | `{}` | `{incoming: [{request_id, connection_id, item_id, field_id, name, label, kind, operation, payload_sha256, context?, exp}], outgoing: [{request_id, connection_id, item_id, field_id, operation, state, status?}]}` |
-| `critical-secret-use.get` (app, desktop) | `{request_id}` (an incoming request) | the `critical-secret-use.pending` body: `{request_id, connection_id, item_id, field_id, name, label, kind, operation, payload, payload_sha256, context?, exp}`; `not_found` for an unknown, answered or expired request |
+| `critical-secret-use.list` (app, desktop) | `{}` | `{incoming: [{request_id, connection_id, item_id, field_id, name, label, kind?, operation, payload_sha256, context?, exp}], outgoing: [{request_id, connection_id, item_id, field_id, operation, state, status?}]}` |
+| `critical-secret-use.get` (app, desktop) | `{request_id}` (an incoming request) | the `critical-secret-use.pending` body: `{request_id, connection_id, item_id, field_id, name, label, kind?, operation, payload, payload_sha256, context?, exp}`; `not_found` for an unknown, answered or expired request |
 
 - **What can be asked.** Only a critical item that a share rule of that
   connection includes (it is then `usable` in the connection's catalog,
@@ -5678,6 +5714,23 @@ B app            B vault                   A vault                      A app
   when the request arrived, so that the app can say what is asked
   before the password; `unsuitable` means exactly these two cases.
   Apps SHOULD keep an Ed25519 seed in a `password` field.
+  - **Requests from before 0.21.0 (0.21.1).** A request that arrived
+    before the vault ran 0.21.0 was recorded without a kind. Its
+    `kind` MAY be absent from `.pending`, `.list` and `.get`; the vault
+    MAY fill it in with the field's current kind (the reference does
+    while the field is still usable). Such requests expire 24 h after
+    they arrived, so `kind` is absent at most 24 h after the upgrade.
+    Receivers (apps, desktops) treat an absent `kind` as unknown: they
+    show the request without it and show no suitability notice for it;
+    the vault still decides suitability at the approval.
+  - **Order of checks (0.21.1).** For an incoming `critical-secret.use`
+    the vault checks, in this order: that the field is usable by the
+    connection (What can be asked, above: `unavailable`), that it is
+    suitable (`unsuitable`), and then the 8 pending requests per
+    connection (below: `unavailable`). An unsuitable request is
+    therefore answered `unsuitable` even when that connection's pending
+    requests are at the cap, and an unusable one `unavailable` whatever
+    its kind.
 - **Showing a request again** (0.10.2). `critical-secret-use.list` gives
   only `payload_sha256`, which keeps the list small; an app that shows an
   incoming request from the list (or from the feed) fetches it with
@@ -10191,6 +10244,35 @@ Follow-ups:
           adds DEL, so that a vault never refuses a snapshot built from
           a registered member (MEMBER-API 2.3.1, §10.8, §11.13).
        7. Agent share rules stay deferred: v1 pairs no agents (D3).
+    7. **Errata from implementing 0.21.0 (0.21.1).** vettid-vault #47
+       found six points where 0.21.0 was contradictory, ambiguous or
+       unreachable; the owner (2026-10-08): "agreed, fix all 6".
+       1. A dry run follows the access rule of the call it previews but
+          never needs step-up: a desktop may dry-run `item.tag` of a
+          critical item (its real `item.tag` is allowed with step-up),
+          while a dry run of `item.put` for a critical item is
+          `forbidden` (critical puts are app-only). 0.21.0 said both
+          that a desktop's dry run needs no step-up and that "a
+          critical item stays app-only", which read as forbidding every
+          dry run of a critical item, and its list of critical forms
+          ("acts on a critical item") covered `item.tag`, which is
+          metadata (§10.7).
+       2. `item.put`'s dry run requires `version` with `item_id`, as the
+          real `item.put` does (§10.7).
+       3. More than 64 fields is `bad_request` for every sensitivity, a
+          shape error without a `limit` name; the separate 64-field
+          bound for critical items could never be reached and is
+          removed (§10.7, §10.1).
+       4. A move to `critical` checks the 12,288-byte size on the item
+          as it will be stored, with `"sensitivity":"critical"` (§10.7).
+       5. `kind` may be absent from `critical-secret-use.pending`,
+          `.list` and `.get` for a request that arrived before 0.21.0
+          (at most 24 h after the upgrade); receivers treat an absent
+          `kind` as unknown (§10.13).
+       6. An incoming `critical-secret.use` is checked usable, then
+          suitable, then against the 8 pending requests per connection,
+          so an unsuitable request is answered `unsuitable` even at the
+          cap (§10.13).
     Follow-ups: vettid-vault (kept values and `keep_notes` in
     `features/items` for every replacement, critical and secret
     included; `size` in `item.get`, recorded for critical items; the
@@ -10210,6 +10292,9 @@ Follow-ups:
     names in the member's words; pending shares from
     `share.pending.list`; one `share.decide` with both lists; grant
     labels and entry names from the vault; the suitability notice).
+    For 0.21.1: vettid-vault #47 (the six points as implemented, with
+    tests for an absent `kind`); vettid-android (an absent `kind` is
+    unknown: no suitability notice).
 
 ## 16. Test vectors
 
@@ -10481,6 +10566,27 @@ adds it to `recovery.json` (eph scalar 32 × 0x28, nonce 12 × 0x29) with
 the 0.16.0 implementation.
 
 ## 17. Changelog
+
+- **0.21.1** (2026-10-08): editorial-normative, errata to 0.21.0 from
+  its implementation (vettid-vault #47); owner decision of 2026-10-08
+  (§15 item 29.7: "agreed, fix all 6").
+  - §10.7: a dry run follows the access rule of the call it previews
+    but never needs step-up; a desktop may dry-run `item.tag` of a
+    critical item, and a dry run of `item.put` for a critical item is
+    `forbidden` from a desktop; the critical forms are listed exactly
+    (`item.tag` is not one).
+  - §10.7: `item.put`'s dry run requires `version` together with
+    `item_id`.
+  - §10.7, §10.1: more than 64 fields is `bad_request` for every
+    sensitivity, without a `limit` name; the unreachable separate
+    critical 64-field limit is removed.
+  - §10.7: a move to `critical` checks the size of the item as it will
+    be stored, with `"sensitivity":"critical"`.
+  - §10.13: `kind` may be absent for requests that arrived before
+    0.21.0 (at most 24 h after the upgrade); receivers treat it as
+    unknown.
+  - §10.13: an incoming use is checked usable, then suitable, then
+    against the per-connection pending cap.
 
 - **0.21.0** (2026-10-08): normative, owner decisions of 2026-10-08
   (§15 item 29), from gaps found while implementing 0.20.0
