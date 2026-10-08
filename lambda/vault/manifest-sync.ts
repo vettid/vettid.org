@@ -81,11 +81,14 @@ function metrics(values: Record<string, number>): void {
   );
 }
 
+/** Identifies the poll in the site's access logs (it runs every 5 minutes in each vault account). */
+export const USER_AGENT = 'vettid-manifest-sync/1 (+https://vettid.org/security/releases/)';
+
 /** The served document, or null if none is published (HTTP 404, or the host does not exist yet). */
 async function fetchServed(url: string): Promise<Buffer | null> {
   let r: Response;
   try {
-    r = await fetch(url, { headers: { accept: 'application/json', 'cache-control': 'no-cache' }, signal: AbortSignal.timeout(10_000), redirect: 'error' });
+    r = await fetch(url, { headers: { accept: 'application/json', 'cache-control': 'no-cache', 'user-agent': USER_AGENT }, signal: AbortSignal.timeout(10_000), redirect: 'error' });
   } catch (e) {
     const code = ((e as { cause?: { code?: string } }).cause ?? {}).code;
     if (code === 'ENOTFOUND') return null;
