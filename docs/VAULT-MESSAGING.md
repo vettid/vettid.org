@@ -12,7 +12,7 @@ related:
   - CALLING-SERVICE.md
   - PUSH-GATEWAY.md
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.3.0)
+  - MEMBER-API.md (2.3.1)
   - ANDROID-PLAN.md (0.1.11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -22,10 +22,12 @@ related:
 changelog:
   - 0.21.0: normative (owner decisions of 2026-10-08, §15 item 29),
     gaps found while implementing 0.20.0 (vettid-vault #46) and the
-    app's items, sharing and grants (vettid-android A5, #78–#80): a
-    critical `item.put` keeps the stored value of a field sent without
-    `value` and the notes with `keep_notes`, so that an edit is one
-    credential operation (§10.7); a field that cannot hold an Ed25519
+    app's items, sharing and grants (vettid-android A5, #78–#80);
+    MEMBER-API 2.3.1: an `item.put` replacing an item of any
+    sensitivity keeps the stored value of a field sent without `value`
+    and the notes with `keep_notes`, so that editing a critical item is
+    one credential operation and a secret item needs no reveal;
+    `item.get` returns the item's `size` (§10.7); a field that cannot hold an Ed25519
     seed (by kind, or a wallet's item) is `unsuitable` at once, and
     `critical-secret-use.pending`, `.list` and `.get` carry its `kind`
     (§10.13); every `limit` error names its limit, `{limit, max,
@@ -40,8 +42,9 @@ changelog:
     reserved (§10.7); the 2,000-entry search budget runs out at a
     2,001st entry; `since` and `until` compared in Unix milliseconds;
     `connection.audit.list` takes `after_seq` (§10.9); the snapshot
-    `email`'s excluded characters, U+2028 and U+2029 among them
-    (§11.13)
+    `email`'s excluded characters, U+2028 and U+2029 among them, and
+    DEL in the names, which the member API refuses at registration too
+    (§10.8, §11.13)
   - 0.20.0: normative (owner decisions of 2026-10-07, §15 item 28): the
     account snapshot carries the member's full verified `email` instead
     of `email_hint` (still `v: 1`; `email` required), which the vault
@@ -4029,10 +4032,10 @@ decision 1):
 
 | Type | Request body | Response body |
 |---|---|---|
-| `item.put` (app; desktop: step-up) | `data`, `secret`: `{item_id?, version?, sensitivity?, name, category?, template?, tags?, fields?, notes?}` | `{item_id, version, updated_at}` |
+| `item.put` (app; desktop: step-up) | `data`, `secret`: `{item_id?, version?, sensitivity?, name, category?, template?, tags?, fields?, notes?, keep_notes?}`; a replacement's fields may omit `value` (Kept values, below; 0.21.0) | `{item_id, version, updated_at}` |
 | | `critical` (app): `{version?, sensitivity: "critical", tags?, credential, utk_id, sealed{password, item_id?, item}}`, where `item` is `{name, category?, template?, fields?, notes?, keep_notes?}`; a replacement's fields may omit `value` (Kept values, below; 0.21.0) | `{item_id, version, updated_at, credential, credential_version, utks}` |
 | | dry run (0.21.0): `{dry_run: true, item_id?, version?, sensitivity?, tags?}` (Dry run, below) | `{version?, shares, withdrawals}` |
-| `item.get` (app, desktop) | `{item_id}` | `<item>`: a `data` item with its values; a `secret` or `critical` item without `value`s and `notes`, with `has_notes` |
+| `item.get` (app, desktop) | `{item_id}` | `<item>`: a `data` item with its values; a `secret` or `critical` item without `value`s and `notes`, with `has_notes`; with `size` (0.21.0, below) |
 | `item.reveal` (app; desktop: step-up) | `secret`: `{item_id, fields?: [<field_id>]}` (a `data` item: `{item_id}`, as `item.get`) | `<item>` with its values (only those `fields`, without `notes`, if given) |
 | | `critical` (app): `{item_id, credential, utk_id, sealed{password, item_id, reply_key}}` | `{item_id, version, values_sealed, credential, credential_version, utks}` |
 | `item.list` (app, desktop) | `{tags?, match?, category?, sensitivity?, after?, limit?}` | `{items: [<item without values and notes>], next?}` |
@@ -4053,44 +4056,65 @@ decision 1):
   content travels in the UTK-sealed `item`, and `item_id` (to replace)
   inside the payload, so that a session attacker can neither read it nor
   redirect it to another item; only `version` and `tags` are outside.
-- **Kept values (critical, 0.21.0; owner decision of 2026-10-08, §15
-  item 29).** So that editing a critical item takes one password
-  entry, not a reveal followed by a replacement, a critical `item.put`
-  that replaces an item (`item_id` in the sealed payload) need not
-  carry the values the member did not change:
+- **Kept values (0.21.0; owner decisions of 2026-10-08, §15 item 29).**
+  So that editing an item never needs its values first (for a
+  critical item one password entry, not a reveal followed by a
+  replacement; for a secret item no `item.reveal` at all), an
+  `item.put` that **replaces** an item, of any sensitivity, need not
+  carry the values the member did not change. The content is the
+  request's (`data`, `secret`) or the sealed `item` (`critical`, with
+  `item_id` in the sealed payload):
   - A field that names a `field_id` of the item's current version and
     has no `value` **keeps its stored value**. Its `kind` MUST be the
     stored one (`bad_request` otherwise: the stored value was checked
     for that kind; to change a field's kind the app sends a value for
     it); its `label` and its position may change.
-  - `keep_notes: true` in `item` keeps the stored notes. `notes` and
+  - `keep_notes: true` keeps the stored notes. `notes` and
     `keep_notes` together are `bad_request`; with neither, the notes
     are removed, as before.
   - A field without `field_id` (a new field) needs a `value`, and so
-    does every field of a new critical item (no `item_id`), where
-    `keep_notes` is `bad_request`.
+    does every field of a new item (no `item_id`), where `keep_notes`
+    is `bad_request`.
   - A field is removed by leaving it out of `fields`, as before
     (`fields` absent removes every field).
-  - The `data` and `secret` forms are unchanged: every field carries
-    its `value` (`bad_request` without one).
+  - The rule is the same for every sensitivity. A `data` item's app
+    holds its values from `item.get` and may send them all, as before;
+    the rule only makes the three forms consistent.
 
-  Within the same credential operation the vault opens the stored
-  values with the item's current key, takes the kept ones (a kept field
-  without a stored value keeps `""`, or `{}` for an `address`, as
-  `item.sensitivity` does), checks the resulting item as any
-  replacement (every value's shape, 64 fields, a size of at most 12,288
-  bytes with the kept values counted), seals it under a fresh key of
-  the next generation with the AAD of the new field ids in their new
-  order, as every critical `item.put` does, and wipes the plaintext.
-  No value leaves the vault: the response is unchanged and the change
-  is recorded as `item.updated`, not `item.revealed`. Apps SHOULD edit
-  a critical item this way (the edit form shows each stored value as
+  The vault takes the kept values from what it stores, checks the
+  resulting item as any replacement (every value's shape, 64 fields,
+  the size limit with the kept values counted) and stores it. For a
+  `secret` item it reads them from DEK state: the edit is not a reveal,
+  needs no `item.reveal` and no user-presence step in the app, and is
+  recorded as `item.updated` only (a desktop's `item.put` still needs
+  step-up, §6.8). For a `critical` item, within the same credential
+  operation, it opens the stored values with the item's current key,
+  takes the kept ones (a kept field without a stored value keeps `""`,
+  or `{}` for an `address`, as `item.sensitivity` does), seals the
+  result under a fresh key of the next generation with the AAD of the
+  new field ids in their new order, as every critical `item.put` does,
+  and wipes the plaintext. In every case no value leaves the vault:
+  the response is unchanged and the change is recorded as
+  `item.updated`, never `item.revealed`. Apps SHOULD edit `secret` and
+  `critical` items this way (the edit form shows each stored value as
   kept, masked and not revealed, and sends a `value` only for a field
   the member typed into), and SHOULD NOT reveal an item only to open
   its edit form (a member who wants to see a value reveals it on
-  purpose).
-  The app does not know the kept values' sizes, so there the vault's
-  `limit` (`item_size`, with `size`) is the authority.
+  purpose). The app learns the stored size from `item.get`'s `size`
+  (below); the vault's `limit` (`item_size`, with `size`) remains the
+  authority.
+- **Size in `item.get` (0.21.0; owner decision of 2026-10-08, §15
+  item 29).** `item.get` returns `size`, the item's size as defined
+  above (Size), for every sensitivity, so that an app that does not
+  hold the values (a `secret` or `critical` item) shows the room left
+  before the limit. The vault records it whenever it writes the item's
+  content (`item.put`, `item.sensitivity`, a tag change, a re-key) and
+  whenever it opens a critical item's values (`item.reveal`, a use,
+  §10.13); a critical item last written by an earlier release has no
+  `size` until then. `size` is metadata of the member's own devices
+  only: it is not part of the counted encoding, `item.list` does not
+  return it, and it is never in a grant, a catalog, the profile or
+  anything a connection or an agent receives.
 - **Reading.** `item.get` never returns the values of `secret` or
   `critical` items: the member reveals them on purpose. `item.reveal` of
   a `secret` item returns them in the clear inside the session (the
@@ -4309,7 +4333,8 @@ The **profile object** holds the extras' display name and photo. Sent by
   after the rotation replaces it.
 - **Receiving.** A receiver parses `profile.update` strictly (the field
   rules of §10.7; `first_name` and `last_name` strings of 1–160 bytes
-  without control characters (C0, C1, U+2028, U+2029); `ik` the base64 of
+  without control characters (C0, DEL, C1, U+2028, U+2029; DEL since
+  0.21.0); `ik` the base64 of
   32 bytes) and then, in this order:
   1. ignores an update whose `version` is not higher than the one it
      keeps for that connection (§8.4);
@@ -5641,7 +5666,10 @@ B app            B vault                   A vault                      A app
   wallet's (§10.18: a recovery phrase and a passphrase). A request for
   an unsuitable field is answered `unsuitable` at once, without asking
   the member and without opening the credential, and audited
-  (`critical-secret.use.requested` and `critical-secret.use.denied`);
+  (`critical-secret.use.requested` and `critical-secret.use.denied`).
+  It is **not shown to the member** (owner decision of 2026-10-08):
+  no `.pending`, no feed item, not in `.list`; the member finds it
+  only in the audit log (the app's History);
   the connection already sees the field's kind in its catalog
   (§10.12), so the answer tells it nothing new. A suitable field whose
   value is not a seed is found only at the use, once the credential is
@@ -8579,16 +8607,20 @@ desktops only (owner decision of 2026-10-07, §15 item 28).
   vaults to stay compatible with (owner decision of 2026-10-07), so no
   older form is accepted. The vault refuses a snapshot without them, or
   with a name that is not a string of 1–160 bytes without control
-  characters, or with a `name_change.last.status` other than
+  characters (C0, DEL, C1, U+2028, U+2029; DEL since 0.21.0, owner
+  decision of 2026-10-08: the member API's names never contain it,
+  MEMBER-API 2.3.1), or with a `name_change.last.status` other than
   `"applied"` or `"refused"` (0.19.0), as it refuses a wrong type, and
   keeps the one it had. Since 0.20.0 `email` is **required** too, still
   with `"v": 1`: a string of 3–1,016 bytes of UTF-8, with an `@`,
   without control characters, which for the email are (0.21.0) C0
   (U+0000–U+001F), DEL (U+007F), C1 (U+0080–U+009F), U+2028 and
-  U+2029, the names' set plus DEL (0.20.0 named no set; its reference
-  refuses the first three and admits the line and paragraph
-  separators, which a 0.21.0 vault refuses too); a 0.20.0 vault
-  refuses a snapshot without it, and
+  U+2029, the names' set (0.20.0 named no set; its reference refuses
+  the first three and admits the line and paragraph separators, which
+  a 0.21.0 vault refuses too). The member API refuses the same
+  characters at registration (MEMBER-API 2.3.1, owner decision of
+  2026-10-08), so that a vault never refuses a snapshot built from a
+  registered member. A 0.20.0 vault refuses a snapshot without it, and
   ignores an `email_hint` if one is present (an unknown member). Older
   releases need no change to accept the new form: 0.15.0–0.19.0 vaults
   (staging release S4, and vettid-vault #45) check `email_hint` only
@@ -10108,9 +10140,9 @@ Follow-ups:
        the same operation and re-seals the result under the next item
        key (§10.7 Kept values). Chosen in the draft: a kept field keeps
        its kind (a kind change needs a value); its label and position
-       may change; a field is removed by leaving it out, as before;
-       `data` and `secret` items still send every value (a secret
-       item's edit costs a biometric reveal, not a password).
+       may change; a field is removed by leaving it out, as before.
+       The draft kept the rule to critical items; the owner extended
+       it to secret items (point 6), and so to every replacement.
     2. **Suitability before the password.** `critical-secret-use.pending`,
        `.list` and `.get` carry the field's `kind`; a field is suitable
        only if it is a `password`, `text` or `multiline` field of an
@@ -10139,17 +10171,42 @@ Follow-ups:
        `connection.audit.list` takes `after_seq`, as every release did
        (§10.9); the snapshot `email` excludes C0, DEL, C1, U+2028 and
        U+2029 (§11.13).
+    6. **Review of vettid.org #161 (owner, 2026-10-08).** The owner
+       agreed to the choices above and decided the open points:
+       1. Kept values apply to `secret` items too, so that editing one
+          needs no `item.reveal`; the draft extends the rule to every
+          replacement, `data` included, since it only makes the forms
+          consistent (§10.7 Kept values).
+       2. A kept field may not change its kind (confirmed).
+       3. Requests refused at once as `unsuitable` are not shown to
+          the member, only recorded in the audit log, which the app's
+          History shows (§10.13).
+       4. The `limit` table keeps every limit of this specification
+          (confirmed).
+       5. `item.get` reports the item's `size` now, for every
+          sensitivity; `item.list` does not (§10.7).
+       6. The member API's registration refuses an email with C0, DEL,
+          C1, U+2028 or U+2029, the snapshot `email`'s set, and its
+          names rule is stated to refuse DEL; the vault's names rule
+          adds DEL, so that a vault never refuses a snapshot built from
+          a registered member (MEMBER-API 2.3.1, §10.8, §11.13).
+       7. Agent share rules stay deferred: v1 pairs no agents (D3).
     Follow-ups: vettid-vault (kept values and `keep_notes` in
-    `features/items` critical put; the size without assigned members in
-    `itemspec`; `dry_run` on `item.put`/`item.tag` from the existing
+    `features/items` for every replacement, critical and secret
+    included; `size` in `item.get`, recorded for critical items; the
+    size without assigned members in `itemspec`; `dry_run` on `item.put`/`item.tag` from the existing
     share plan; the `limit` body in every feature; `share.pending.list`
     and `share.decide{include, decline}`; `labels` on received grants,
     `name`/`category`/`labels` on available `grant.pending` and
     `grant.list` pending entries; `kind` and the early `unsuitable` in
-    `features/critical`; U+2028/U+2029 in `ValidAccountEmail`; `client/`
-    and `vaultctl`; tests); vettid-android (critical edit in one
-    password operation with kept values; the size computed without
-    ids; the dry run instead of the local computation; the `limit`
+    `features/critical`, the early refusals kept off the feed and
+    `.list`; U+2028/U+2029 in `ValidAccountEmail` and DEL in
+    `ValidAccountName` and the profile receiver; `client/` and
+    `vaultctl`; tests); vettid.org (MEMBER-API 2.3.1: the registration
+    email check refuses C0, DEL, C1, U+2028 and U+2029; tests);
+    vettid-android (critical edit in one password operation and secret
+    edit without a reveal, with kept values; the room left from
+    `item.get`'s `size`; the size computed without ids; the dry run instead of the local computation; the `limit`
     names in the member's words; pending shares from
     `share.pending.list`; one `share.decide` with both lists; grant
     labels and entry names from the vault; the suitability notice).
@@ -10425,14 +10482,15 @@ the 0.16.0 implementation.
 
 ## 17. Changelog
 
-- **0.21.0** (2026-10-08): normative, owner decision of 2026-10-08
+- **0.21.0** (2026-10-08): normative, owner decisions of 2026-10-08
   (§15 item 29), from gaps found while implementing 0.20.0
   (vettid-vault #46) and the app's items, sharing and grants
-  (vettid-android #78–#80).
-  - §10.7: a critical `item.put` replacing an item keeps the stored
-    value of a field sent with its `field_id` and without `value`
-    (same `kind`), and the stored notes with `keep_notes: true`, so an
-    edit is one credential operation; `item.put` and `item.tag` take
+  (vettid-android #78–#80); MEMBER-API 2.3.1.
+  - §10.7: an `item.put` replacing an item of any sensitivity keeps
+    the stored value of a field sent with its `field_id` and without
+    `value` (same `kind`), and the stored notes with `keep_notes: true`,
+    so a critical edit is one credential operation and a secret edit
+    needs no reveal; `item.get` returns `size`; `item.put` and `item.tag` take
     `dry_run`, answering `{version?, shares, withdrawals}`; an item's
     size is its content encoding without `item_id`, `version`,
     `created_at`, `updated_at` and `field_id`s, with the exact string
@@ -10447,13 +10505,16 @@ the 0.16.0 implementation.
   - §10.13: a field is suitable for a use only if it is a `password`,
     `text` or `multiline` field of an item that is not a wallet's;
     other requests are answered `unsuitable` at once;
-    `critical-secret-use.pending`, `.list` and `.get` carry `kind`; at
-    most 64 outgoing requests (`limit`).
+    `critical-secret-use.pending`, `.list` and `.get` carry `kind`;
+    the refusals at once are shown only in the audit log; at most 64
+    outgoing requests (`limit`).
   - §10.9 (editorial): the 2,000-entry budget runs out at a 2,001st
     evaluated entry; `since` ≥ `until` in Unix milliseconds;
     `connection.audit.list` takes `after_seq`.
-  - §11.13: the snapshot `email` excludes C0, DEL, C1, U+2028 and
-    U+2029.
+  - §11.13, §10.8: the snapshot `email` excludes C0, DEL, C1, U+2028
+    and U+2029, and names exclude DEL too; MEMBER-API 2.3.1 refuses the
+    same characters at registration.
+  - §15 item 29.6: the owner's review of vettid.org #161.
 
 - **0.20.0** (2026-10-07): normative, owner decisions of 2026-10-07
   (§15 item 28); MEMBER-API 2.3.0, ANDROID-PLAN 0.1.11.
