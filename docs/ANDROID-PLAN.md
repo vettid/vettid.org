@@ -1,9 +1,12 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.13
+version: 0.1.14
 date: 2026-10-08
 changelog:
+  - 0.1.14: owner, 2026-10-08: the profile photo's review step shows
+    the shot in a circular frame to crop/zoom (pinch, drag, zoom buttons
+    or slider, Reset); "Use photo" keeps the square under the circle
   - 0.1.13: owner decisions of 2026-10-08: the connection detail is
     simpler. No safety code (SAS) there: it protects the moment of
     connecting only and stays on the invite and request screens; the
