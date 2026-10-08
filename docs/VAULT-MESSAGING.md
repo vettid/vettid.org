@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.21.1
+version: 0.21.2
 date: 2026-10-08
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -3926,7 +3926,12 @@ secrets and critical secrets of 0.6.0 (VAULT-ITEMS, owner decisions of
 the apps, which pre-fill fields and suggest tags and a sensitivity from
 them; a shared registry of recommended templates is kept with the
 reference implementation (vettid-vault `docs/item-templates.json`). The
-vault validates shape and size only.
+vault validates shape and size only. A template MUST NOT suggest a
+reserved tag (§10.8): only the member puts an item into the shared
+profile. Because sharing is per item, the registry keeps contact
+information as one item per contact point (`email_address`,
+`phone_number`, `postal_address`, `website`) so that each can be shared
+on its own (VAULT-ITEMS 0.1.1, owner decision of 2026-10-08).
 
 ```json
 item: { "item_id": "<ULID>", "version": 3, "name": "Passport", "category": "identity_document",
@@ -4288,7 +4293,8 @@ decision 3; owner decisions of 2026-10-07, §15 item 26, 0.18.0):
   VettID account from the vault's latest account snapshot (§11.13), and
   `ik`, the sending vault's current identity public key (§3.2);
 - the extras: a display name, a photo, and the member's `data` items
-  tagged **`@profile`**.
+  tagged **`@profile`**. Only the member adds that tag: no template
+  suggests it (§10.7), and the vault never adds it.
 
 The **profile object** holds the extras' display name and photo. Sent by
 `app` or `desktop` (`profile.get` also by an agent it is delegated to,
@@ -10566,6 +10572,17 @@ adds it to `recovery.json` (eph scalar 32 × 0x28, nonce 12 × 0x29) with
 the 0.16.0 implementation.
 
 ## 17. Changelog
+
+- **0.21.2** (2026-10-08): editorial, owner decision of 2026-10-08
+  (VAULT-ITEMS 0.1.1).
+  - §10.7: templates never suggest a reserved tag; the registry keeps
+    contact information as one item per contact point (`contact_card`
+    replaced by `email_address`, `phone_number`, `postal_address`,
+    `website`). No message, limit or vault behaviour changes; `template`
+    stays opaque to the vault, so items created with `contact_card` keep
+    loading and editing.
+  - §10.8: the shared profile holds only items the member tagged
+    `@profile`.
 
 - **0.21.1** (2026-10-08): editorial-normative, errata to 0.21.0 from
   its implementation (vettid-vault #47); owner decision of 2026-10-08
