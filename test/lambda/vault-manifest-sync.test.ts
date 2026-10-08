@@ -149,6 +149,7 @@ describe('sync handler', () => {
     expect(ddb.commandCalls(DeleteCommand)[0].args[0].input).toMatchObject({ Key: { release: 'e'.repeat(96) }, ConditionExpression: 'manifest_serial < :serial' });
     expect(s3.commandCalls(HeadObjectCommand)[0].args[0].input).toEqual({ Bucket: 'bucket', Key: V.manifest_0_10_0.object_key });
     expect(fetchSpy.mock.calls[0][1]).toMatchObject({ redirect: 'error' });
+    expect(fetchSpy.mock.calls[0][1]).toMatchObject({ headers: { 'user-agent': 'vettid-manifest-sync/1 (+https://vettid.org/security/releases/)' } });
   });
 
   test('a manifest that does not verify writes nothing', async () => {
