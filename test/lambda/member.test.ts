@@ -143,6 +143,28 @@ describe('POST /api/auth/start', () => {
     expect(ses.commandCalls(SendEmailCommand)).toHaveLength(0);
   });
 
+  // 2.3.1: the same shared check; nothing is counted or handed off.
+  test.each(['m\u0000@x.org', 'm\u001f@x.org', 'm\u007f@x.org', 'm\u0080@x.org', 'm\u009f@x.org', 'm@x\u2028.org', 'm@x.\u2029org'])('refuses %j with 400', async (addr) => {
+    const res = await auth.handler(ev('POST', '/api/auth/start', { email: addr }));
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).message).toBe('Invalid email address');
+    expect(lam.commandCalls(InvokeCommand)).toHaveLength(0);
+    expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
+  });
+
+  test('/api/auth/verify refuses such an address too, before any Cognito call', async () => {
+    const res = await auth.handler(ev('POST', '/api/auth/verify', { email: 'm\u0085@x.org', token: 'A'.repeat(43) }));
+    expect(res.statusCode).toBe(400);
+    expect(idp.calls()).toHaveLength(0);
+  });
+
+  test('a normal address still starts sign-in (unicode local part, internationalised domain)', async () => {
+    const res = await auth.handler(ev('POST', '/api/auth/start', { email: 'Jos\u00e9@B\u00fccher.de' }));
+    expect(JSON.parse(res.body)).toEqual({ ok: true });
+    const inv = lam.commandCalls(InvokeCommand)[0].args[0].input;
+    expect(JSON.parse(Buffer.from(inv.Payload as Uint8Array).toString())).toEqual({ email: 'jos\u00e9@b\u00fccher.de' });
+  });
+
   test('per (address, network) limit is silent: same answer, no hand-off', async () => {
     ddb.on(UpdateCommand, { TableName: 'rl' }).resolvesOnce({ Attributes: { count: 1 } }).resolves({ Attributes: { count: 4 } });
     const res = await auth.handler(ev('POST', '/api/auth/start', { email: 'm@x.org' }));
@@ -229,6 +251,27 @@ describe('public request input', () => {
     expect(res.statusCode).toBe(400);
     expect(ddb.commandCalls(TransactWriteCommand)).toHaveLength(0);
   });
+
+  // 2.3.1: an email with C0, DEL, C1, U+2028 or U+2029 is refused (400), and nothing is created.
+  test.each([['C0', 'a\u0001b@b.org'], ['C0 TAB', 'a\tb@b.org'], ['DEL', 'a\u007fb@b.org'], ['C1', 'a@b\u0085c.org'], ['U+2028', 'a\u2028b@b.org'], ['U+2029', 'a@b.or\u2029g']])(
+    'rejects an email with %s',
+    async (_, addr) => {
+      const res = await pub.handler(ev('POST', '/api/public/request', { email: addr, first_name: 'Ada', last_name: 'L', consent: true }));
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).message).toBe('Invalid email address');
+      expect(ddb.commandCalls(TransactWriteCommand)).toHaveLength(0);
+      expect(ses.commandCalls(CreateEmailIdentityCommand)).toHaveLength(0);
+    },
+  );
+
+  test.each([['jos\u00e9@b.org', 'jos\u00e9@b.org'], ['A@B\u00dcCHER.de', 'a@b\u00fccher.de'], ['a@xn--bcher-kva.example', 'a@xn--bcher-kva.example']])(
+    'accepts email %j',
+    async (addr, stored) => {
+      const res = await pub.handler(ev('POST', '/api/public/request', { email: addr, first_name: 'Ada', last_name: 'L', consent: true }));
+      expect(res.statusCode).toBe(200);
+      expect(JSON.stringify(ddb.commandCalls(TransactWriteCommand)[0].args[0].input)).toContain(`"email":${JSON.stringify(stored)}`);
+    },
+  );
 
   test('leading and trailing spaces are trimmed before the rule and stored trimmed (40 characters after the trim)', async () => {
     const res = await pub.handler(ev('POST', '/api/public/request', { email: 'a@b.org', first_name: '  Ada ', last_name: ` ${'x'.repeat(40)}  `, consent: true }));

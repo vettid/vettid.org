@@ -147,9 +147,20 @@ export function bool(body: Record<string, unknown>, key: string): boolean {
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/**
+ * C0 (U+0000–U+001F), DEL (U+007F), C1 (U+0080–U+009F), U+2028 and U+2029:
+ * the characters a vault refuses in the account snapshot's `email` and names
+ * (MEMBER-API 2.3.1, VAULT-MESSAGING 0.21.0 §11.13).
+ */
+export const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+/**
+ * The shared email check (MEMBER-API 2.3.1): trimmed and lower-cased, at most
+ * 254 characters, one `@` with a dot in the domain, no white space and no
+ * control character (CONTROL_RE). Anything else is `400 Invalid email address`.
+ */
 export function email(value: string): string {
   const e = value.trim().toLowerCase();
-  if (e.length > 254 || !EMAIL_RE.test(e)) throw badRequest('Invalid email address');
+  if (e.length > 254 || !EMAIL_RE.test(e) || CONTROL_RE.test(e)) throw badRequest('Invalid email address');
   return e;
 }
 

@@ -1,4 +1,4 @@
-import { Router, decodeCursor, encodeCursor, email } from '../../lambda/shared/http';
+import { CONTROL_RE, Router, decodeCursor, encodeCursor, email } from '../../lambda/shared/http';
 import { requireAdminClaims as requireAdmin } from '../../lambda/shared/admin-auth';
 import { hasVotingRights, SubscriptionItem } from '../../lambda/shared/model';
 import { inviteCode } from '../../lambda/shared/ids';
@@ -78,6 +78,50 @@ describe('helpers', () => {
   test('email normalizes and validates', () => {
     expect(email('  Foo@Example.ORG ')).toBe('foo@example.org');
     expect(() => email('nope')).toThrow();
+  });
+
+  // MEMBER-API 2.3.1: no C0, DEL, C1, U+2028 or U+2029 anywhere in the address.
+  const controls: [string, string][] = [
+    ['C0 NUL', '\u0000'], ['C0 SOH', '\u0001'], ['C0 TAB', '\t'], ['C0 LF', '\n'], ['C0 CR', '\r'], ['C0 ESC', '\u001b'], ['C0 US', '\u001f'],
+    ['DEL', '\u007f'],
+    ['C1 PAD', '\u0080'], ['C1 NEL', '\u0085'], ['C1 CSI', '\u009b'], ['C1 APC', '\u009f'],
+    ['LINE SEPARATOR', '\u2028'], ['PARAGRAPH SEPARATOR', '\u2029'],
+  ];
+  test.each(controls)('email refuses %s inside the local part and the domain', (_, c) => {
+    for (const bad of [`a${c}b@example.org`, `ab@ex${c}ample.org`, `ab@example.o${c}rg`]) {
+      expect(() => email(bad)).toThrow(expect.objectContaining({ status: 400, message: 'Invalid email address' }));
+    }
+  });
+  test('the refused set is exactly C0, DEL, C1, U+2028 and U+2029', () => {
+    for (let cp = 0; cp <= 0x9f; cp++) {
+      const bad = cp <= 0x1f || cp >= 0x7f;
+      if (bad) expect(CONTROL_RE.test(String.fromCharCode(cp))).toBe(true);
+      else expect(CONTROL_RE.test(String.fromCharCode(cp))).toBe(false);
+    }
+    expect(CONTROL_RE.test('\u2028')).toBe(true);
+    expect(CONTROL_RE.test('\u2029')).toBe(true);
+    for (const ok of ['\u00a0', '\u00a1', '\u00e9', '\u2027', '\u202a', '\u200b', '\ufeff']) expect(CONTROL_RE.test(ok)).toBe(false);
+  });
+  test('surrounding white space, a line terminator included, is trimmed before the check (as before)', () => {
+    expect(email('\ta@example.org\n')).toBe('a@example.org');
+    expect(email('\u2028a@example.org\u2029')).toBe('a@example.org');
+  });
+  test.each([
+    ['a@example.org', 'a@example.org'],
+    ['First.Last+tag@Sub.Example.CO.uk', 'first.last+tag@sub.example.co.uk'],
+    ["o'brien_x-y@example.org", "o'brien_x-y@example.org"],
+    ['jos\u00e9@exampl\u00e9.org', 'jos\u00e9@exampl\u00e9.org'],
+    ['\u7528\u6237@\u4f8b\u5b50.\u4e2d\u56fd', '\u7528\u6237@\u4f8b\u5b50.\u4e2d\u56fd'],
+    ['user@xn--bcher-kva.example', 'user@xn--bcher-kva.example'],
+    ['\u00c9MILE@B\u00dcCHER.DE', '\u00e9mile@b\u00fccher.de'],
+  ])('email accepts %j (unicode local parts and internationalised domains, unchanged by 2.3.1)', (input, out) => {
+    expect(email(input)).toBe(out);
+  });
+  test('the rest of the rule is unchanged', () => {
+    for (const bad of ['a b@example.org', 'a@b@example.org', 'a@example', '@example.org', 'a@', `${'a'.repeat(243)}@example.org`, 'a\u00a0b@example.org']) {
+      expect(() => email(bad)).toThrow();
+    }
+    expect(email(`${'a'.repeat(242)}@example.org`)).toHaveLength(254);
   });
 
   test('invite codes are XXXXX-XXXXX Crockford base32', () => {
