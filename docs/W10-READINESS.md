@@ -1,8 +1,8 @@
 ---
 title: W10-READINESS
 status: living checklist (update as items close; not a plan)
-version: 0.1.4
-date: 2026-10-06
+version: 0.1.5
+date: 2026-10-09
 owner: Al Liebl (Mesmer)
 related:
   - VAULT-RELEASES.md (0.1.7) §8.8 capacity, §10.1 release steps, §12 first deployment, §13 W9/W10, §15 O1–O10
@@ -33,6 +33,8 @@ changelog:
     profiles verified); B8 token set up; B9 drafted (#136); I1–I11
     re-checked and marked resolved (VAULT-RELEASES 0.1.7 records capacity
     and O6 in §8.8)
+  - 0.1.5: P32 without UnifiedPush (owner decision, 2026-10-09;
+    PUSH-GATEWAY 0.3.0)
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -111,7 +113,7 @@ dependency), **on hold** (deliberately paused by the owner).
 | P29 | Android release build signed with the upload key (direct install) | **pending (owner)** | The owner's hardware token is set up (2026-10-06). `:app:assembleRelease` is built unsigned in CI; release builds are signed outside the repository (vettid-android README). Still needed: the upload-key-signed direct build, when the canary step comes (§3 step 11). The upload digest is pinned (P8). |
 | P30 | Play app signing and a Play track (closed testing) | **blocked (owner)** | Waits for the owner's Play account (B4). Gives the P9 digest and the `androidAppUrl` link (RUNBOOK "The Android app link"). |
 | P31 | App support for an unpublished canary manifest | **done** (2026-10-06; not yet run on a phone) | vettid-android #63 (`da72029`): the tester shares the signed `served-<s>.json` to the app, which verifies it under the build's pinned keys, shows serial, key and releases and installs it on confirmation; it is used while newer than the published manifest, also on a 404 (release 1), and dropped on publication. Spec: VAULT-RELEASES 0.1.6 §10.1, VAULT-MESSAGING 0.14.0 §11.10.1, §13.9 (accepted risk). Procedure: RUNBOOK "Canary manifest on the test phone". First end-to-end run is B6. |
-| P32 | Push gateway (FCM, UnifiedPush) | **deferred, not blocking** | No FCM credentials (on hold with Play). ANDROID-PLAN §7: v1 collects while the app is open and through the foreground-service path. |
+| P32 | Push gateway (FCM) | **deferred, not blocking** | No FCM credentials (on hold with Play). No UnifiedPush (owner, 2026-10-09; PUSH-GATEWAY 0.3.0). ANDROID-PLAN §7: v1 collects while the app is open and through the on-phone service. |
 
 ## 2. Blockers
 

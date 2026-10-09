@@ -1,9 +1,11 @@
 ---
 title: VAULT-PLAN
 status: draft
-version: 0.1.4
-date: 2026-10-08
+version: 0.1.5
+date: 2026-10-09
 changelog:
+  - 0.1.5: no UnifiedPush (owner decision, 2026-10-09; PUSH-GATEWAY
+    0.3.0): push gateway wakes through FCM/APNs only (§4 Later)
   - 0.1.4: owner decisions of 2026-10-08 (VAULT-MESSAGING 0.22.0 §15
     item 30): History export of activity metadata is the one exception
     to "no backup or export of vault data" (§4 Later)
@@ -203,8 +205,9 @@ transport, enrollment, unlock, key attestation already exists in
 
 ### Later
 
-Push gateway wakes on both paths (FCM/APNs when credentials exist, and
-UnifiedPush for phones without Google services; PUSH-GATEWAY 0.2.0),
+Push gateway wakes through FCM/APNs when credentials exist (no
+UnifiedPush, owner 2026-10-09: phones without Google services use the
+app's on-phone service; PUSH-GATEWAY 0.3.0),
 calling service (TURN, SFrame), PQC Phase 2 (ML-DSA, Go 1.27).
 
 - **No backup or export of vault data outside the service** (owner

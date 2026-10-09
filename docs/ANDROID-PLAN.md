@@ -1,9 +1,17 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.23
+version: 0.1.24
 date: 2026-10-09
 changelog:
+  - 0.1.24: owner decision of 2026-10-09: **no UnifiedPush** ("we're not
+    doing unified push. the vettid service is our solution. and apps
+    connected to vettid get to use our notification channel"). §9
+    question 10 answered otherwise; the on-phone service (D7) is the
+    path for phones without Google services, Google push (FCM through
+    the push gateway, which stays) the platform path; `unifiedpush` and
+    `webpush` keys dropped from the `push.register` gaps (§4 item 9);
+    §7 Push rewritten; PUSH-GATEWAY 0.3.0
   - 0.1.23: the Notifications screen, the vault's feed (VAULT-MESSAGING
     0.23.1 §10.9) in the app: a bell in the top bar of the drawer
     screens with the unread count, a list grouped by day with urgent
@@ -25,7 +33,8 @@ changelog:
     lock screen, previews of names only by default; which feed kinds
     and events notify; FCM optional at build time; the VAULT-MESSAGING
     gaps for `push.register` (§14 is reserved); an implementation order
-    (N1–N4, §6); UnifiedPush and four more open questions (§9);
+    (N1–N4, §6); UnifiedPush (answered otherwise in 0.1.24) and
+    four more open questions (§9);
     VAULT-MESSAGING 0.23.1 under related
   - 0.1.22: VAULT-MESSAGING 0.23.0 and owner requests of 2026-10-09:
     one tag per share rule ("Select the tag to share", the chosen chip
@@ -228,7 +237,8 @@ changelog:
     favourite connections; the drawer "create" group (§4); brand gold
     #FFC125 and the website fonts (§3), owner decisions of 2026-10-04
   - 0.1.1: owner decisions of 2026-10-03: push on both paths (FCM and
-    UnifiedPush, plus a foreground-service path without push, §7); no
+    UnifiedPush, plus a foreground-service path without push, §7;
+    UnifiedPush dropped in 0.1.24); no
     backup or export of vault data (§4); location viewer notes for the
     location phase (§6)
 owner: Al Liebl (Mesmer)
@@ -277,7 +287,7 @@ surface than the vettid.dev app and a layout modelled on Proton Mail.
 | D4 | **Minimum Android 12 (API 31)**; target the current API level. |
 | D5 | **Message search later** (not in v1). |
 | D6 | **Biometric app lock in v1**: opening the app (and returning to it after a timeout) can require a biometric or device credential via BiometricPrompt (class 3), gating a Keystore key that unlocks the app's local data. 0.1.19: called **App lock**, with the method Biometrics (as described) or Phone screen lock (the device credential only). It is a convenience layer only: it never replaces the vault PIN (unlocking the vault) or the credential password (critical actions). |
-| D7 | **Notification modes** (owner, 2026-10-09; 0.1.23): the member picks how notifications reach the phone: **On-phone service** (recommended, most private; the default), **Google push** (FCM through the VettID push gateway; offered once the gateway and FCM credentials exist) or **Off** (not recommended). Feed items raise notifications through the chosen mode (§4 Notification modes). Supersedes PUSH-GATEWAY 0.2.0 §11's default order (FCM first) for this app; UnifiedPush is open (§9). |
+| D7 | **Notification modes** (owner, 2026-10-09; 0.1.23): the member picks how notifications reach the phone: **On-phone service** (recommended, most private; the default), **Google push** (FCM through the VettID push gateway; offered once the gateway and FCM credentials exist) or **Off** (not recommended). Feed items raise notifications through the chosen mode (§4 Notification modes). Supersedes PUSH-GATEWAY 0.2.0 §11's default order (FCM first) for this app (PUSH-GATEWAY 0.3.0 follows it). No UnifiedPush (owner, 2026-10-09; 0.1.24; §9, question 10): the on-phone service is the path for phones without Google services. |
 
 ## 3. Design language (from Proton Mail)
 
@@ -804,7 +814,7 @@ its process runs; nothing keeps it running in the background).
      (inexact; no exact-alarm permission). After the check the app
      catches up (§6 Owner check, 4) and normal notifications resume;
      nothing missed is replayed as notifications, the bell counts it.
-4. **(b) Google push (FCM)** (PUSH-GATEWAY 0.2.0). Contentless wakes:
+4. **(b) Google push (FCM)** (PUSH-GATEWAY 0.3.0). Contentless wakes:
    the app's FCM token goes to its vault over the end-to-end session
    (`push.register`), the vault registers a `wake_ref` with the gateway
    under its own wake key (§3) and later triggers `notify` wakes; the
@@ -917,8 +927,8 @@ its process runs; nothing keeps it running in the background).
    1. The bodies, responses and errors of `push.register` and
       `push.unregister` (the holder only, or desktops too; the answer,
       e.g. `{registered: true}` or `unavailable` when the vault has no
-      gateway configured); `platform` values `fcm` (and `unifiedpush`
-      with `webpush` keys, PUSH-GATEWAY 0.2.0) and the size limits.
+      gateway configured); `platform` value `fcm` (PUSH-GATEWAY 0.3.0;
+      no `unifiedpush`, 0.1.24) and the size limits.
    2. Token rotation: whether a second `push.register` replaces the
       first (the vault then `PUT`s or re-registers, PUSH-GATEWAY §4.2).
    3. A dead token (PUSH-GATEWAY §5: "the owner requests a fresh push
@@ -1092,16 +1102,15 @@ schema for the cache and the request verb belong to the location batch.
 - **Running vault**: v1 development uses the local dev stack; real devices
   need the V5 deployment (release pipeline, member API vault routes
   deployed, enrollment/recovery portal pages).
-- **Push** (owner decision, 2026-10-03: both paths): FCM when Google Play
-  services are present, **UnifiedPush** for phones without them (for
-  example GrapheneOS), and, with neither, a foreground service that keeps
-  the relay connection, or periodic polling (PUSH-GATEWAY 0.2.0 §11). The
-  member can pick the path in notification settings. Until the gateway is
-  deployed (FCM needs credentials), v1 collects while the app is open and
-  through the foreground-service path. 0.1.23 (D7, owner 2026-10-09):
-  three modes, the on-phone service the default and recommended, Google
-  push once the gateway, FCM credentials and VAULT-MESSAGING's
-  `push.register` exist, and Off; UnifiedPush is open (§9, question 10).
+- **Push** (D7, owner 2026-10-09): three modes, the on-phone service
+  (a foreground service that keeps the relay connection, PUSH-GATEWAY
+  0.3.0 §11) the default and recommended, and the path for phones
+  without Google services (for example GrapheneOS); Google push (FCM
+  through the VettID push gateway) once the gateway, FCM credentials and
+  VAULT-MESSAGING's `push.register` exist; and Off. No UnifiedPush
+  (owner, 2026-10-09; replaces the "both paths" decision of 2026-10-03).
+  Until the gateway is deployed (FCM needs credentials), v1 collects
+  while the app is open and through the on-phone service.
 - **Membership**: enrollment requires an account.vettid.org member who has
   accepted the current terms; the portal checks it when it issues the
   setup code (MEMBER-API 2.0.0). The app itself never signs in.
@@ -1134,7 +1143,8 @@ schema for the cache and the request verb belong to the location batch.
 
 Min SDK, search and biometrics decided 2026-10-03. The Notifications
 screen's questions (0.1.23) were answered by the owner on 2026-10-09;
-the notification modes' questions are open.
+of the notification modes' questions, 10 was answered otherwise on
+2026-10-09 (0.1.24) and 11–14 are open.
 
 ### Notifications screen (answered)
 
@@ -1169,15 +1179,12 @@ notification modes (D7, §4 Notification modes).
 
 Each with the recommended answer.
 
-10. **UnifiedPush.** PUSH-GATEWAY's owner decision of 2026-10-03
-    requires UnifiedPush besides FCM; the three modes do not name it.
-    *Recommended: keep it for later as a fourth mode*, "UnifiedPush
-    (your own push server)", using the gateway's existing `unifiedpush`
-    path, added with N3–N4 (it needs the same `push.register`, with
-    `webpush` keys). The on-phone service already serves phones without
-    Google; UnifiedPush mainly saves battery for members who run a
-    distributor (ntfy, for example). PUSH-GATEWAY's "both paths" stays
-    the gateway's requirement.
+10. **UnifiedPush.** **Answered otherwise: no UnifiedPush** (owner,
+    2026-10-09: "we're not doing unified push. the vettid service is
+    our solution. and apps connected to vettid get to use our
+    notification channel"). No fourth mode; the on-phone service is the
+    path for phones without Google. The push gateway stays, for FCM and
+    APNs; PUSH-GATEWAY 0.3.0 drops `unifiedpush` and "both paths".
 11. **Foreground-service type.** *Recommended: `specialUse`* with the
     Play Console declaration (above); fall back to `remoteMessaging`
     only if Play refuses it, and never `dataSync` (6 hours a day on

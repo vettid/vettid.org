@@ -1,10 +1,15 @@
 ---
 title: ARCHITECTURE
 status: overview (as built and planned, 2026-10-03)
-version: 0.1.3
-date: 2026-10-08
+version: 0.1.4
+date: 2026-10-09
 owner: Al Liebl (Mesmer)
 changelog:
+  - 0.1.4: no UnifiedPush (owner decision, 2026-10-09): platform push
+    (FCM/APNs) through the push gateway, which stays, and the app's
+    on-phone service for phones without Google services; future
+    direction: VettID's notification channel for connected apps and
+    services (PUSH-GATEWAY 0.3.0)
   - 0.1.3: History export (activity metadata only) as the one exception
     to "no backup or export" (VAULT-MESSAGING 0.22.0)
   - 0.1.2: no recovery with the credential backup off; start over
@@ -95,7 +100,7 @@ contents.
 | **Desktop** | Pairs with the phone; access sessions with step-up approvals; never unlocks | Later | VAULT-MESSAGING §6.7, §6.8 |
 | **Agents** | Act under LEASH grants signed with the member's credential key | Vault side specified; client later | VAULT-MESSAGING §10.11, LEASH |
 | **`vaultctl`** | Go reference client and test driver (app, desktop, agent or peer vault) | Built | vettid-vault |
-| **Push gateway** | Contentless wakes through FCM/APNs or UnifiedPush | Planned | PUSH-GATEWAY 0.2.0 |
+| **Push gateway** | Contentless wakes through FCM/APNs | Planned | PUSH-GATEWAY 0.3.0 |
 | **Calling service** | Optional, self-hostable TURN media plane for end-to-end encrypted 1:1 calls | Planned | CALLING-SERVICE |
 
 **LEASH** (Lightweight Encrypted Agent Secret Handling) is the open
@@ -250,7 +255,7 @@ PQC-MIGRATION is the plan. In short:
 | Item | Status | Where |
 |---|---|---|
 | Vault on Nitro hardware (V5), then clients (V6: `vaultctl`, Go agent, Android, iOS, desktop) | Next | VAULT-PLAN |
-| **Push, both paths** (owner decision, 2026-10-03): FCM/APNs **and** a path without Google services (UnifiedPush, or relay polling by a foreground service), so phones such as GrapheneOS get messages | Designed | PUSH-GATEWAY 0.2.0, ANDROID-PLAN §7 |
+| **Push** (owner decision, 2026-10-09; no UnifiedPush): platform push (FCM/APNs) through the VettID push gateway, and the app's on-phone service (a foreground service holding its relay connection) for phones without Google services such as GrapheneOS. Future direction: apps and services connected to VettID use VettID's notification channel; no protocol yet | Designed | PUSH-GATEWAY 0.3.0, ANDROID-PLAN D7, §7 |
 | GrapheneOS enrollment: accept its verified-boot key in device attestation (it reports `SelfSigned`, which VAULT-MESSAGING §11.7 refuses today) | Follow-up | VAULT-MESSAGING §11.7 |
 | One app per vault, holding the credential; a second or stale copy is refused, alerted, emailed and freezes credential operations until a forced rotation; direct transfer to a new phone (owner decision, 2026-10-03) | Spec change after V4 batch 4 | PROTEAN-CREDENTIAL §4 |
 | Calling service (TURN, SFrame end-to-end media) | Planned | CALLING-SERVICE |
@@ -299,7 +304,7 @@ All in `docs/` of this repository unless noted.
 | RELEASE-UPDATES.md | How members approve vault releases; end dates and notices; the public release log |
 | RELAY-PROTOCOL.md | Relay wire protocol: mailboxes, tokens, deposit, collect, claims |
 | RELAY-PLAN.md | Relay implementation plan and history |
-| PUSH-GATEWAY.md | Contentless wake-up pushes: FCM/APNs and UnifiedPush, plus a no-push polling path |
+| PUSH-GATEWAY.md | Contentless wake-up pushes through FCM/APNs; devices without push keep their own relay connection |
 | CALLING-SERVICE.md | Optional TURN media plane and end-to-end encrypted 1:1 calls |
 | PQC-MIGRATION.md | Post-quantum migration plan, phases 1 and 2 |
 | LEASH-IMPLEMENTATION.md | How the vault implements the LEASH paper: status, mapping, wire-format differences |
