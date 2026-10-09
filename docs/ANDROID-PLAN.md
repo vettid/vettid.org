@@ -21,11 +21,11 @@ changelog:
     holding the app's own relay connection, PUSH-GATEWAY §11; the
     default), Google push (FCM through the push gateway; plumbing now,
     "not available yet" until the gateway and FCM credentials exist) or
-    off (not recommended); seven notification channels, private on the
+    off (not recommended); eight notification channels, private on the
     lock screen, previews of names only by default; which feed kinds
     and events notify; FCM optional at build time; the VAULT-MESSAGING
     gaps for `push.register` (§14 is reserved); an implementation order
-    (N1–N4, §6); UnifiedPush and three more open questions (§9);
+    (N1–N4, §6); UnifiedPush and four more open questions (§9);
     VAULT-MESSAGING 0.23.1 under related
   - 0.1.22: VAULT-MESSAGING 0.23.0 and owner requests of 2026-10-09:
     one tag per share rule ("Select the tag to share", the chosen chip
