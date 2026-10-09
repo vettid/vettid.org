@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.23.1
+version: 0.23.2
 date: 2026-10-09
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -20,6 +20,15 @@ related:
   - VAULT-RELEASES.md (0.1.6, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.23.2: additive (owner decision of 2026-10-09, §15 item 31.14):
+    History records which device opened and locked the vault.
+    `vault.unlocked` carries `device_id`, the app whose unlock (§11.4)
+    opened the vault, also the confirming unlock at a move's new
+    release and an abandonment (§11.10.4); `vault.locked` carries
+    `device_id` when an owner device's `vault.lock` locked the vault,
+    and none for any other lock; `owner_check.held` stays without one.
+    Older entries are unchanged; the chain already covers `device_id`
+    (§10.9)
   - 0.23.1: editorial-normative, errata to 0.23.0 from its
     implementation (vettid-vault #52; owner decision of 2026-10-09,
     §15 item 31.13): `tag.merge`'s `shares` carry `ask_rule_id` (§10.8);
@@ -4950,7 +4959,15 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
 - **Drop entries are bounded.** At most 60 `drop.*` entries per kind and
   principal per hour; the 61st is written once as `drop.suppressed` with
   `ref` = the suppressed kind. A peer cannot flood the log out.
-- Kinds: `vault.unlocked`, `vault.locked`; `device.paired`,
+- Kinds: `vault.unlocked` (`device_id` = the app whose unlock, §11.4,
+  opened the vault, also the confirming unlock at a move's new release
+  and an abandonment, §11.10.4; absent for an app that has no device
+  record yet, the first app before its enrollment handshake, §11.3, or
+  a recovered app before its handshake, §11.11.5; 0.23.2),
+  `vault.locked` (`device_id` = the app or desktop whose `vault.lock`,
+  §10.2, locked the vault; absent for every other lock, §12.3: the
+  account site's lock route, ten failed owner checks, a recovery,
+  memory pressure, a lease loss, a restart, 0.23.2); `device.paired`,
   `device.unlinked`; `connection.added`, `connection.removed`,
   `connection.stale`, `connection.reconnected`; `identity.rotated`;
   `credential.created`, `credential.rotated`, `credential.password_changed`,
@@ -4961,7 +4978,8 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `credential.alarm.resolved` (`ref` = `alarm_id`), `credential.reset`
   (§3.5.9, §11.11.5); `vault.pin_failed` (a wrong PIN at a transfer's
   approval, §6.7.1, or in an owner check, §3.6.1);
-  `owner_check.passed`, `owner_check.held`, `owner_check.failed`
+  `owner_check.passed` (`device_id` = the app), `owner_check.held`
+  (no `device_id`: the vault holds itself), `owner_check.failed`
   (`ref` = `pin` or `password`), `owner_check.locked` (`ref` = the count
   of consecutive failed checks), `owner_check.hold_changed` (`ref` =
   `on`, `off`, `off_until:<ts>` or `on:expired`) (§3.6, 0.13.0); `device.transfer.started`,
@@ -11343,6 +11361,42 @@ Follow-ups:
             change carries `{connection_id, version}`, as for
             `connection.update`, and goes to every owner device
             (§10.4.1, §10.1).
+    14. **Owner decision (2026-10-09): History records which device
+        opened the vault (0.23.2).** Until 0.23.1, `vault.unlocked`,
+        `vault.locked` and `owner_check.held` carried no `device_id`,
+        so History could not say which phone opened the vault and a
+        search by a device's name did not find these entries, while
+        `owner_check.passed`, `settings.changed` and `audit.exported`
+        named their device. From 0.23.2:
+        1. `vault.unlocked` carries `device_id`, the device record of
+           the app whose unlock (§11.4) opened the vault: the vault
+           knows it at the unlock, from the unlock key the request's
+           `device_ik` selects, after the signature and the device
+           assertion verified. The confirming unlock at a move's new
+           release and an abandonment (§11.10.4) are unlocks of the app
+           as well and name it. An app without a device record (the
+           first app before its enrollment handshake, §11.3, or a
+           recovered app before its handshake, §11.11.5) has no
+           `device_id` to name, and the entry has none.
+        2. `vault.locked` carries `device_id` when an owner device's
+           `vault.lock` (§10.2) locked the vault. Every other lock
+           (§12.3) has none: the account site's lock route (the
+           account's, not a device's), ten failed owner checks (whose
+           own entries precede it), a recovery, memory pressure, a lease
+           loss, a restart. If a `vault.lock` and the owner check's lock
+           fall in one batch, the lock is the owner check's. Neither
+           entry gains a reason.
+        3. `owner_check.held` stays without `device_id`: the vault holds
+           itself (§3.6.3).
+        4. Additive only: entries written before are unchanged, and the
+           chain is unchanged, since `lp(device_id)` was always hashed
+           (empty when absent). New entries hash their `device_id`. The
+           search's device name (§10.9 Search, field 3), `audit.list`,
+           `audit.export` and the export's device name apply to these
+           entries as to any other. No type or member changes; an app
+           names the device as for any entry with `device_id`, through
+           `device.list` (ANDROID-PLAN History: the row and the entry
+           page; follow-up there).
     Open points:
     1. **ANDROID-PLAN** gains the rule editor's per-hour and per-day
        fields, the overlap explanation, and the connection page's
@@ -11658,6 +11712,20 @@ adds it to `recovery.json` (eph scalar 32 × 0x28, nonce 12 × 0x29) with
 the 0.16.0 implementation.
 
 ## 17. Changelog
+
+- **0.23.2** (2026-10-09): additive, owner decision of 2026-10-09
+  (§15 item 31.14).
+  - §10.9: `vault.unlocked` carries `device_id`, the app whose unlock
+    (§11.4) opened the vault, also at a move's confirmation or
+    abandonment (§11.10.4); none for an app without a device record
+    yet.
+  - §10.9: `vault.locked` carries `device_id` when an owner device's
+    `vault.lock` locked the vault, and none for any other lock (§12.3).
+  - §10.9: `owner_check.held` stays without `device_id`;
+    `owner_check.passed` names the app, as before.
+  - Older entries and the chain are unchanged (`device_id` was always
+    hashed, empty when absent).
+  - §15 item 31.14.
 
 - **0.23.1** (2026-10-09): editorial-normative, errata to 0.23.0 from
   its implementation (vettid-vault #52); owner decision of 2026-10-09
