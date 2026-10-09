@@ -1,6 +1,6 @@
 # VettID Relay Protocol
 
-**Version:** 0.6.0 (draft)
+**Version:** 0.6.1 (draft)
 **Status:** Pre-implementation draft for review
 
 ## 1. Purpose & design principles
@@ -835,12 +835,17 @@ Properties:
 - **Connected clients never need it**: a foregrounded app or an always-on
   desktop/agent uses long-poll/WebSocket and achieves sub-second delivery via
   wake-on-deposit (§6.2). Android implementations MAY use a persistent
-  background service in lieu of the gateway, though FCM via the gateway is
-  recommended for battery and Doze-mode resilience.
+  background service in lieu of the gateway. VettID's app makes that
+  on-phone service the default and offers FCM via the gateway as an
+  option (ANDROID-PLAN D7, owner decision 2026-10-09).
 
 The push gateway API is specified separately.
 
 ## 10. Changelog
+
+- **0.6.1** — Appendix A: the on-phone background service is VettID's
+  default; FCM via the gateway is an option (ANDROID-PLAN D7, owner
+  decision 2026-10-09). Informative only.
 
 - **0.6.0** — web endpoints (§6.11): `/connect` (the invitation landing page
   of VAULT-MESSAGING §6.4), `/.well-known/assetlinks.json` (the VettID

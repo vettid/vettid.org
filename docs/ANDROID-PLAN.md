@@ -1144,7 +1144,8 @@ schema for the cache and the request verb belong to the location batch.
 Min SDK, search and biometrics decided 2026-10-03. The Notifications
 screen's questions (0.1.23) were answered by the owner on 2026-10-09;
 of the notification modes' questions, 10 was answered otherwise on
-2026-10-09 (0.1.24) and 11–14 are open.
+2026-10-09 (0.1.24) and 11–14 were answered as recommended when the
+owner approved 0.1.23 (#188) on 2026-10-09.
 
 ### Notifications screen (answered)
 
@@ -1185,26 +1186,26 @@ Each with the recommended answer.
     notification channel"). No fourth mode; the on-phone service is the
     path for phones without Google. The push gateway stays, for FCM and
     APNs; PUSH-GATEWAY 0.3.0 drops `unifiedpush` and "both paths".
-11. **Foreground-service type.** *Recommended: `specialUse`* with the
+11. **Foreground-service type.** **Answered (2026-10-09): `specialUse`** with the
     Play Console declaration (above); fall back to `remoteMessaging`
     only if Play refuses it, and never `dataSync` (6 hours a day on
     Android 15, no start from boot). Approve submitting the
     declaration and its video with the first build that has the
     service.
-12. **FCM at build time.** *Recommended: one build*, Firebase
+12. **FCM at build time.** **Answered (2026-10-09): one build**, Firebase
     initialised at runtime from Gradle properties (no
     `google-services.json`, no plugin), "not available yet" without
     them; a `foss` flavour without the Firebase library only if VettID
     is published on F-Droid.
-13. **Default for existing installs.** *Recommended: the on-phone
-    service for every install*, new and updated (the app has no other
+13. **Default for existing installs.** **Answered (2026-10-09): the on-phone
+    service for every install**, new and updated (the app has no other
     background path today), with POST_NOTIFICATIONS asked at the next
     open and a one-time note "VettID now notifies you in the
     background. Change this in Settings → Notifications".
 14. **Notifications while the vault is locked.** A locked vault sends
     nothing (VAULT-MESSAGING §12.1, §14: "a 'vault locked, messages
     waiting' prompt would need a wake path that does not depend on the
-    DEK"). *Recommended: accept it for now*: the app says "Vault
+    DEK"). **Answered (2026-10-09): accept it for now**: the app says "Vault
     locked: notifications resume after you unlock it" (status read
     from the member API at most hourly); a DEK-free "messages waiting"
     signal stays the separate future decision §14 names.
