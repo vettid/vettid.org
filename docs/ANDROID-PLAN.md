@@ -1,9 +1,23 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.22
+version: 0.1.23
 date: 2026-10-09
 changelog:
+  - 0.1.23: the Notifications screen, the vault's feed (VAULT-MESSAGING
+    0.23.1 §10.9) in the app: a bell in the top bar of the drawer
+    screens with the unread count, a list grouped by day with urgent
+    items first, unread and read, swipe to archive (Undo) and to mark
+    read or unread, an Archived view; every feed kind of §10.9 mapped to
+    a label and a tap target, batches of a connection's asks (`count`)
+    as one row; `feed.list` at open and after a check,
+    `feed.event` and `sync.event{feed.updated, feed.deleted}` live,
+    `feed.list{after_seq}` to catch up; nothing while held or due but
+    the `vault.held` counts; the feed only in memory while the vault is
+    open; no system notifications for feed items until a push or
+    foreground-service path exists; the release banner stays separate
+    (releases are not feed items); open questions for the owner (§4
+    Notifications, §9); VAULT-MESSAGING 0.23.1 under related
   - 0.1.22: VAULT-MESSAGING 0.23.0 and owner requests of 2026-10-09:
     one tag per share rule ("Select the tag to share", the chosen chip
     in its colour with a gold outline and a check mark, a tag that
@@ -210,7 +224,7 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.22.0) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.23.1) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
@@ -260,7 +274,8 @@ surface than the vettid.dev app and a layout modelled on Proton Mail.
 Reference screenshots are kept privately (they show a real mailbox); the
 patterns:
 
-- **Top bar**: menu button, screen title, search, avatar (initial tile).
+- **Top bar**: menu button, screen title, search, avatar (initial tile);
+  0.1.23: a bell before the avatar (Notifications, §4).
 - **Navigation drawer** as the main navigation (no bottom tabs): primary
   destinations, then Settings / Help, version at the bottom. No "create"
   group (0.1.11, owner decision of 2026-10-07; Proton's Create folder /
@@ -297,6 +312,8 @@ message on Messages (§3). The drawer has **no "create" group** (owner
 decision of 2026-10-07; 0.1.2 planned one with Invite a connection and
 New item): the floating action button creates on every screen that
 creates something (§3), so the drawer holds only destinations.
+Notifications (0.1.23, proposed) is not a drawer entry either: it opens
+from the bell in the top bar (below; open question 1).
 
 **"Vault", not "Items", in the interface** (0.1.11, owner decision of
 2026-10-07). The member's stored data (VAULT-ITEMS) is called **Vault**
@@ -316,6 +333,7 @@ rows below say "Vault" for the screens and "item" for the data.
 | Approvals | — (VettID-specific) | Pending connection requests, grant requests, critical-item uses, share-rule decisions; approve/deny; critical items need the credential password. 0.1.22: a connection's asks within 10 minutes are one entry ("Sam asks for 3 things"), a connection whose asks are paused is a notice (resume, or remove the connection), a share question names the rule that asks first and warns when declining stops an item already shared, one question per item and connection |
 | Vault | Folder list | Titled "Vault" (0.1.11; was "Items"). Items per VAULT-ITEMS: name, category, typed fields, tags, sensitivity (data / secret / critical); filter by tag (0.1.21: "✕ Clear" ends the filter chips while a filter is on); each tag in its own colour (0.1.21); add/edit from templates ("Save item" in the top bar, 0.1.21); share rules by tag, as many per connection as needed (up to 64), each with its own tags, mode (default: ask each time), fetch limit and end (presets or a custom date and time), overlaps shown (0.1.20); one tag per rule, per-hour and per-day limits, `ask` wins, rules named by their tags, "Save rule" in the top bar (0.1.22). Critical items live in the Protean Credential and are never shared by a rule |
 | History | — (VettID-specific) | The member's audit log (0.1.11, `audit.list`, VAULT-MESSAGING 0.20.0 §10.9), read-only: a search field (the vault searches, `q`), filter chips (category, connection, date range), a list of entries newest first with infinite scroll, and an entry detail, each entry's icon in its category's colour (0.1.22); a ⋯ menu with **Export…** (0.1.17: CSV or JSON of what the filters show, with the vault PIN, saved through "Save to…"). Details below |
+| Notifications | — (Proton has none; a bell as in most apps) | 0.1.23, proposed: the vault's feed (VAULT-MESSAGING §10.9), opened from the bell in the top bar with the unread count; grouped by day, urgent items first, unread and read, swipe to archive or to mark read, an Archived view; each item opens the screen it is about. Details below |
 | Credential | — | Reached from Settings → Security → Credential (0.1.11; not in the drawer). Critical items inside the Protean Credential; unlock window; password change; the vault-held credential copy (the backup) on/off. Turning it off shows VAULT-MESSAGING §3.5.6's warning and needs a confirmation: "If this phone is lost, broken, reset or replaced without a transfer, your vault **cannot be recovered**. It can only be deleted and replaced by a new one, and **everything in it is lost**." While off, the screen and Settings keep a short "no recovery" notice. Turning it on asks for the password at once (an owner check) so that the copy exists, and says recovery is possible from then on |
 | Settings | Settings | At the top, an **account card** (0.1.11): the member's first and last name and full email address (`account.get`, VAULT-MESSAGING 0.20.0 §11.13) and the membership state; tapping it opens the avatar sheet. Vault (status, release, lock, PIN; "Update available" while a newer release can be approved, 0.1.19); Security (credential, recovery, attestation info, the app lock (0.1.19: Biometrics or Phone screen lock) and timeout, the owner-check interval 1–24 h and the hold switch); Privacy (the **Shared profile**, glyph `Badge`, 0.1.12: display name, `@profile` items and the profile photo, **camera only** — "Take a photo" / "Retake photo" opens the app's own camera screen, front camera first with a switch to the rear one, then "Retake" or "Use photo"; no selection of an existing picture and no other camera app; the shot stays in memory, is never saved to the gallery, and is cropped, scaled and re-encoded to a JPEG ≤ 65,536 bytes without EXIF before `profile.set{photo}`; "Remove photo" confirmed; a refused camera permission is explained, with the system settings once Android no longer asks; a phone without a camera is told); App (theme, notifications and push path; the local "Vault updates" channel, 0.1.19) |
 | Owner check | — (VettID-specific) | One screen: PIN and credential password together (VAULT-MESSAGING §3.6.5); also the "vault held" screen with the waiting counts and the lock action |
@@ -456,6 +474,204 @@ the screen changes or deletes an entry.
   - The new entry `audit.exported` shows in History under Security as
     "History exported" with its format and count from `ref`.
 
+**Notifications** (0.1.23, proposed; needs the owner's approval before
+any app work). The vault's **feed** (VAULT-MESSAGING §10.9): the owner's
+activity list, with read and archive state shared by the owner's
+devices. "Notifications" in everything the member sees; "feed" in the
+specifications, the code and this plan's technical text (as Vault and
+item, above).
+
+*Today.* The app already has the transport: `VaultApi.feedList`,
+`feedGet`, `feedUpdate`, `feedDelete`, the `feedEvents` flow and the
+`FeedItem` and `FeedPage` models (`:core:vault`). Only
+`OwnerCheckManager` uses them, for the `owner_check.*` notices of the
+shell's gate (§6 Owner check); 0.1.22's notices (paused asks, rate
+limits) show only on the connection page and in Approvals. There is no
+feed repository and no screen.
+
+1. **Where it lives.**
+   - A **bell** (`Notifications` outlined) in the top bar of every drawer
+     screen (Messages, Connections, Approvals, Vault, History, Settings,
+     Help), between search and the avatar, with the existing
+     `CountBadge`: the number of `active` (unread) items, "99+" above 99;
+     no badge at 0. Detail screens have no bell.
+   - An urgent unread item (`credential.alarm`, `owner_check.locked`)
+     turns the badge red (the error colour); otherwise it is gold.
+   - No drawer entry (open question 1). Approvals keeps its own badge:
+     Approvals is the to-do list (what waits for a decision), Notifications
+     the record of what happened, so an ask is in both.
+2. **Repository** (`:core:data`, `FeedManager`, the pattern of
+   `ItemsManager`): a `StateFlow` of the items by `item_id`, the cursor
+   (the highest `seq` applied) and a load state; one per open vault.
+   - **Open** (unlock, app start with the vault open, a passed owner
+     check): `feed.list{after_seq: 0, limit: 500}`, repeated with
+     `after_seq` = the last item's `seq` until a page is shorter than the
+     limit; items with `status: "deleted"` are dropped; the cursor is the
+     response `seq`. This reads the whole feed (at most 1,000 live items,
+     §10.9) and its state in one pass; `feed.list` without `after_seq`
+     has no cursor for older pages (open question 7).
+   - **Live**: `feed.event` (a new item) is upserted. `sync.event`
+     `feed.updated` / `feed.deleted` (another device read, archived or
+     deleted an item; a batch's `count` changed, §10.4.1) and any
+     `feed.event` whose `seq` is not cursor + 1 trigger a **catch-up**:
+     `feed.list{after_seq: cursor}`, paged as above, coalesced (one in
+     flight, one queued); each returned item replaces the cached one,
+     `deleted` removes it. The app's own `feed.update` / `feed.delete`
+     apply the response at once (the vault sends no `sync.event` to the
+     sender, §10.1).
+   - **Return to the foreground** and a relay **reconnect**: a catch-up.
+   - **Retention**: items older than `feed.retention_days` (§10.8,
+     default 30) are dropped locally as well (open question 7).
+   - **Clear**: on lock, on entering `held` or `due`, on a wipe, and with
+     the process; the next open reads again (below, 7).
+3. **The list.** Newest first by `at` (not by `seq`, which changes at
+   every read; a batch keeps its first ask's `at`).
+   - **Needs attention** at the top: unread items of priority `urgent`,
+     newest first, each on the error container colour with a red leading
+     bar; reading one moves it to its day.
+   - **Day groups** below, by `at` in local time: Today, Yesterday, then
+     the date ("Mon 5 Oct"; with the year when not the current one).
+   - **Row**: the kind's icon in its History category colour (0.1.22),
+     the connection's tile instead where the item names a connection
+     ("First Last", or "Removed connection"); a title from the kind (2,
+     below) and a second line (the device's or item's name, or the
+     batch's "3 things"); the time; a gold dot while unread. Unread
+     rows bold, read rows regular. Priority: `urgent` as above; `high`
+     an amber icon tile and "Important" for screen readers; `normal`
+     plain; `low` the secondary text colour.
+   - **Filter chip** bottom-left (the design language's floating chip,
+     §3): **Unread** (`status: "active"`). The ⋯ menu: **Mark all as
+     read**, **Archived**.
+   - **Swipe** (each also a screen-reader custom action and in the row's
+     long-press menu): end-to-start **Archive** (`feed.update{status:
+     "archived"}`) with an **Undo** snackbar that restores the previous
+     status (`active` or `read`); start-to-end **Mark as read** /
+     **Mark as unread** (`read` ↔ `active`).
+   - **Archived** view (from ⋯): the archived items, the same rows;
+     swipe **Move to Notifications** (`status: "read"`) and **Delete**
+     (`feed.delete`, confirmed: "Delete this notification on all your
+     devices?"; for a batch's item: "Later requests from <First> will
+     start a new notification", §10.4.1, 0.23.1). Nothing is deleted
+     from the main list (open question 5).
+   - **Mark all as read**: `feed.update{status: "read"}` for each
+     `active` item, at most 4 in flight, the count falling as they
+     land; there is no bulk type (open question 4).
+   - **Empty states**: "No notifications" / "Nothing unread" (with
+     "✕ Clear" for the chip, 0.1.21) / "Nothing archived".
+4. **Tapping an item** marks it read (`feed.update{status: "read"}`, not
+   waiting for the answer) and opens its target. When the target is gone
+   (a removed connection, a deleted item, an ask already decided or
+   expired), a **detail sheet** opens instead: the label, the exact
+   time, the connection, device or item as History resolves them, and
+   "This is no longer waiting" for an ask. Unknown kinds (a newer vault)
+   show the kind itself with a generic icon and open the sheet; they are
+   never hidden. Deciding an ask in Approvals also marks its feed item
+   read (matched by kind and `ref`; open question 2).
+
+   | Kind (§10.9) | Label (en) | Opens |
+   |---|---|---|
+   | `connection.request` | "<First Last> wants to connect" | Approvals: the request (`ref` = `pending_id`) |
+   | `connection.request.peer_declined` | "<First Last> did not accept your request" | The connection (`connection_id`), else Connections |
+   | `connection.added` | "You are now connected with <First Last>" | The connection |
+   | `connection.removed` | "<First Last> was removed" | Detail sheet |
+   | `connection.stale` | "<First Last> has not been reachable" | The connection |
+   | `connection.asks_paused` | "<First>'s requests are paused" (§10.4.1) | The connection, its requests (Resume, remove) |
+   | `connection.authenticate.requested` | "<First Last> asks you to confirm it is you" | Approvals: the challenge |
+   | `message.received` | "New message from <First Last>" | The conversation |
+   | `call.missed` | "Missed call from <First Last>" | The conversation (calls come later, §6) |
+   | `grant.request` | "<First> asks for <item>"; with `count`: "<First> asks for N things" | Approvals: the request, or the batch's entry (0.1.22) |
+   | `grant.shared` | "<First> shared <item> with you" | The connection's "Shared with you" |
+   | `grant.revoked` | "<First> stopped sharing <item>" | The connection's "Shared with you" |
+   | `share.pending` | "Your <tag> rule for <First> needs a decision" | Approvals: the share decision (`ref` = `rule_id`) |
+   | `share.rate_limited` | "<First> reached the limit of your <tag> rule" (§10.12) | The rule's editor (`ref` = `rule_id`) |
+   | `critical-secret.use.request` | "<First> asks to use <item>" | Approvals: the use (credential password there) |
+   | `item.revealed` | "<item> was revealed" | The item (a critical item asks for the credential password, as elsewhere) |
+   | `device.pair.pending`, `device.paired`, `device.unlinked`, `device.transferred`, `device.replaced` | "A device asks to pair" / "<device> was paired" / "<device> was removed" / "Your vault moved to this phone" / "Your vault moved to a new phone" | Settings → Vault (devices) |
+   | `device.session.pending`, `approval.pending` | "<device> asks for access" / "<device> asks to approve a request" | Approvals |
+   | `credential.alarm` (urgent) | "Your credential was used somewhere else" | The alarm screen (as the shell's banner) |
+   | `credential.password_failed` | "Wrong credential password entered" | History, Security |
+   | `credential.rotated`, `credential.reset` | "Your credential was renewed" / "Your credential was reset" | Settings → Security → Credential |
+   | `owner_check.failed` (high) | "A daily check failed: wrong PIN" / "…wrong password" (`ref`) | Settings → Security (the check) |
+   | `owner_check.locked` (urgent) | "Your vault locked after 10 failed checks" | Settings → Security |
+   | `owner_check.hold_changed` (high) | "Hold turned off until <date>" / "Hold turned on" / "Hold back on" (`ref`) | Settings → Security (the hold) |
+   | `guide` | the item's `title`; `body` in the sheet | Detail sheet |
+   | `leash.*`, `action.request`, `intro.request`, `location.shared`, `location.request`, `wallet.signed` | from the app's strings, as History | Detail sheet: "Not available in this version of the app" (agents, shared actions, introductions, location and wallet come later, §6; their asks expire as their sections say) |
+
+   Names come from the app's caches as in History (§4 History);
+   `<item>` is the item's name, never a value; `<tag>` names the rule by
+   its tag (0.1.22). The labels live in string resources.
+5. **Batches** (§10.4.1). An item with `count` is one row and one
+   Approvals entry; a later ask of the batch updates the row's count in
+   place (catch-up), without moving it, and leaves its read state as the
+   member set it (0.23.1).
+6. **Owner-check notices.** The shell's gate keeps its `owner_check.*`
+   banner (§6 Owner check, 8); the items are also in the list. Closing
+   the banner marks them read, as today, and reading them in the list
+   closes the banner (one source: `FeedManager`; `OwnerCheckManager`
+   reads the notices from it instead of its own `feed.event` handler).
+7. **While held or due** (VAULT-MESSAGING §3.6.3, §3.6.5). The vault
+   sends no `feed.event` and no `sync.event` (except the clone alarm),
+   and the app MUST NOT show cached feed content: the feed is cleared
+   on entering the hold, the bell is not shown, and the held screen
+   shows only the `vault.held` counts (`other` covers what would have
+   been feed items). The credential alarm's `feed.event`, which does
+   arrive while held, opens the alarm path (allowed while held) but is
+   not listed. After the check: a full read (2, Open), never replayed
+   events; the bell then counts what arrived.
+8. **The release banner** (0.1.19) **stays separate.** Releases are not
+   feed items (§10.9's kinds; the app learns of a release from the
+   manifest and `sync.event{vault.release}`, §11.10.6), so the
+   Notifications screen does not list them, and the "Vault updates"
+   channel keeps its one notification per release (open question 6).
+   The credential-alarm and pending-deletion banners stay as they are.
+9. **System notifications.** None for feed items in this version. There
+   is no push (FCM credentials and the gateway are deferred, §7) and no
+   foreground service yet, so feed events reach the app only while it is
+   open, where the bell and the banners already show them. When a
+   background path exists (§7), feed items raise notifications on a
+   "Vault activity" channel: `urgent` and `high` items, messages and
+   asks; one per batch, never one per ask of a batch in progress
+   (§10.4.1, a MUST); nothing for a muted connection's asks (the vault
+   creates no item); `VISIBILITY_PRIVATE` with a public version
+   "New activity in your vault"; the tap opens the item's target (4).
+   Open question 3.
+10. **Privacy.** Nothing from the feed is kept outside an open vault,
+    the same as item metadata: the items, the cursor and the counts are
+    in memory only (no Room table, no file, no DataStore, no
+    `SavedStateHandle` beyond an `item_id`), cleared as in 2; nothing
+    from the feed goes to logs or crash reports (kinds and `seq` in
+    debug logs only, never names, titles or bodies); a system
+    notification, when there is one (9), shows names only on an
+    unlocked screen.
+11. **Tests.**
+    - Unit (`FeedManager`, fake `VaultApi`): the paged open read and its
+      cursor; `deleted` dropped; `feed.event` upsert; a `seq` gap and
+      `feed.updated` / `feed.deleted` each cause one coalesced catch-up;
+      a batch's `count` update keeps the status; the own `feed.update`
+      applied from the response; retention; clear on lock, held, due and
+      wipe; the unread count; Mark all as read with an error midway.
+    - Unit (labels and targets): every kind of §10.9 has a label, an
+      icon, a category colour and a target; an unknown kind falls back;
+      a missing connection, device or item resolves to "Removed …" or
+      "Deleted item" and the sheet.
+    - Compose UI: the bell and badge (0, 1, 99+, red for urgent);
+      Needs attention, day groups, unread and read styles, the four
+      priorities; swipe archive and Undo, mark read and unread; the
+      Archived view and confirmed delete; the Unread chip and "✕ Clear";
+      the empty states; TalkBack custom actions; both themes, AA.
+    - Screen catalog (debug tools): each state above, plus a batch and an
+      unknown kind.
+    - Instrumented, dev stack: a `vaultctl` peer's connection request and
+      grant request show live with the bell; a desktop (`vaultctl`)
+      reads and archives and the phone follows; a batch of three asks is
+      one row with count 3; the vault driven past its deadline (the
+      injectable clock) clears the list and shows only counts, and after
+      the check the list holds what arrived; lock and unlock re-read it.
+    - Privacy: after a lock, the app's files and databases hold no
+      `item_id`, kind, name or `seq` of a feed item (a test that scans
+      the app's data directory, as for item metadata).
+    - Manual: the test phones (Pixel 10 Pro, Pixel 7) against staging.
+
 Every list has an empty state; every destructive action has a confirmation;
 every critical action asks for the credential password.
 
@@ -483,7 +699,7 @@ one (translation-ready), accessibility labels required in review.
 | `:core:vault` | Typed vault client: one function per §10 type, sessions with the vault, dedupe, outbox, sync events → repositories |
 | `:core:data` | Repositories and Room caches per feature |
 | `:core:ui` | Theme (navy + gold, light/dark), components (top bar, drawer, list row, empty state, pill bar, settings cards, sheets) |
-| `:feature:*` | onboarding, messages, connections, approvals, items (the "Vault" screens), credential, settings, history (0.1.11) |
+| `:feature:*` | onboarding, messages, connections, approvals, items (the "Vault" screens), credential, settings, history (0.1.11), notifications (0.1.23, the feed) |
 | `:app` | Navigation (type-safe routes), DI wiring, notifications |
 
 Rules: features depend only on `:core:*`; no feature touches transport or
@@ -499,7 +715,7 @@ crypto directly; one ViewModel per screen with immutable UI state.
 | A3 | Onboarding, unlock, credential, settings screens (with the account card, 0.1.11), biometric app lock; History (0.1.11), once the vault release with VAULT-MESSAGING 0.20.0's search is in staging; History export (0.1.17), once a release with 0.22.0's `audit.export` is | Fresh install → enrolled vault with credential on a real phone (dev stack) |
 | A4 | Connections, messages, approvals | Invite/QR connect, SAS, messages both ways, approvals |
 | A5 | Items (data, secret, critical), tags, share rules, grants and critical-item approvals | Flows against the dev stack and a second vault |
-| A6 | Hardening and polish: accessibility pass, notifications, offline behaviour, error states, Play pre-launch report | Internal testing track build |
+| A6 | Hardening and polish: accessibility pass, notifications (0.1.23: the Notifications screen, once approved; system notifications with a background path, §7), offline behaviour, error states, Play pre-launch report | Internal testing track build |
 
 Calls, devices/agents/LEASH, wallet, location and presence follow v1 in
 that order, each as its own phase.
@@ -598,4 +814,52 @@ schema for the cache and the request verb belong to the location batch.
 
 ## 9. Open questions
 
-None at this time (min SDK, search and biometrics decided 2026-10-03).
+Min SDK, search and biometrics decided 2026-10-03. Open: the
+Notifications screen's questions for the owner (0.1.23), below.
+
+### Open questions for the owner
+
+Each with the recommended answer. None needs a VAULT-MESSAGING change
+before the app work; 7 asks for an editorial statement.
+
+1. **Bell, drawer entry, or both?** *Recommended: the bell only*, in the
+   top bar of every drawer screen. It is visible on every main screen
+   without opening the drawer, and the drawer keeps one badge
+   (Approvals) instead of two counts that overlap.
+2. **Should deciding an ask mark its feed item read?** The vault does
+   not change a feed item when its ask is decided (§10.9). *Recommended:
+   yes, by the app* (matched by kind and `ref`, through `feed.update`,
+   so other devices follow); a vault-side rule can come later if
+   desktops decide asks often.
+3. **System notifications for feed items before push.** *Recommended:
+   none in this version*; the bell and banners cover the app while it
+   is open. Add the "Vault activity" channel (§4 Notifications, 9) with the
+   foreground-service or push path (§7), not before.
+4. **"Mark all as read" without a bulk type.** *Recommended: one
+   `feed.update` per item* (at most 1,000, 4 in flight), no protocol
+   change; propose `feed.update{item_ids}` only if staging shows it slow.
+5. **Delete in the main list?** *Recommended: no*: archive there (with
+   Undo), delete only from Archived, confirmed. Deleting is for all
+   devices and ends a batch (§10.4.1), so it should be a deliberate
+   second step.
+6. **Releases in the Notifications list?** Releases are not feed items.
+   *Recommended: keep them out*: the release banner, the update screen
+   and the "Vault updates" channel (0.1.19) already carry them, and a
+   feed kind would need a vault change for no new information.
+7. **Reading the whole feed, and retention drops.** `feed.list` has no
+   `before_seq`, so the app reads the feed with `after_seq` from 0
+   (above, 2). VAULT-MESSAGING does not say how long `deleted` entries
+   stay in the `after_seq` history, nor whether an item dropped for
+   `feed.retention_days` or the 1,000 cap shows up there as `deleted`.
+   *Recommended: no protocol change*; the app also drops items past
+   retention itself, and VAULT-MESSAGING states both points in a
+   0.23.x erratum (dropped items appear as `deleted`; deleted entries
+   are kept no longer than `feed.retention_days`).
+8. **A setting for `feed.retention_days`?** *Recommended: not now*:
+   the default 30 days stays; add "Keep notifications for" to Settings →
+   Privacy later if members ask.
+9. **Kinds with no screen in v1** (agents, shared actions,
+   introductions, location, wallet). *Recommended: list them* with the
+   detail sheet "Not available in this version of the app" rather than
+   hide them: the member sees that something happened, and the asks
+   expire on their own.
