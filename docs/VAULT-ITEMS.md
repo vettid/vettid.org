@@ -1,8 +1,8 @@
 ---
 title: VAULT-ITEMS
 status: approved design note (owner, 2026-10-03); specified in VAULT-MESSAGING 0.7.0
-version: 0.1.1
-date: 2026-10-08
+version: 0.1.2
+date: 2026-10-09
 owner: Al Liebl (Mesmer)
 related:
   - VAULT-MESSAGING.md (0.6.x): §3.5 Protean Credential, §10.6 credential secrets, §10.7 secrets, §10.8 profile, §10.11 LEASH, §10.12 grants, §10.13 critical-secret use
@@ -78,6 +78,12 @@ item: {
   the vault. Choosing "Passport" pre-fills labelled fields and suggests
   tags; the member can add, remove or rename anything. Free-form items need
   no template at all.
+- **Month dates** (0.1.2, editorial). A template's `date` field may
+  carry the hint `"format": "month"`: the app asks for a month and a year
+  only and stores `YYYY-MM` (a `date` value may already be a month), as
+  for a payment card's expiry. The hint belongs to the registry and the
+  apps; it is not stored in the item and the vault never sees it
+  (VAULT-MESSAGING 0.23.0 §10.7).
 - **Templates never add reserved tags** (`@profile` or any other `@`
   tag). Only the member puts an item into the shared profile, by tagging
   it `@profile` (owner decision 2026-10-08).
@@ -210,6 +216,11 @@ credential rules (§3.5) and the audit model stay as they are.
 
 ## 10. Changelog
 
+- **0.1.2** (2026-10-09), editorial, owner decision of 2026-10-09: a
+  template's `date` field may carry `"format": "month"`, so that the app
+  collects `YYYY-MM` (a card's expiry); the registry's `payment_card`
+  template uses it for *Expires* (vettid-vault `docs/item-templates.json`
+  version 3). No item, message or vault change (§3).
 - **0.1.1** (2026-10-08), owner decision of 2026-10-08: templates never
   add reserved tags, so the shared profile holds only items the member
   tagged `@profile` (§3, §5); contact information is one item per contact
