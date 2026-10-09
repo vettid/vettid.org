@@ -126,6 +126,32 @@
         "min_instances": 0,
         "max_instances": 2
       }
+    },
+    {
+      "release": 7,
+      "status": "candidate",
+      "pcr0": "2303feb157143c5393fe55e8dd880f0ebc82f982c5f0e2a64e0d1c3b53e306d5c36641544185c1dfed7d7834188864e8",
+      "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
+      "pcr2": "7a2b75f1b6be6dd65892fbdae01cfac2e2c00b0b0385bbd5f8122a4d5826ce9c63b3e615c9c463a8d5e0468054b66153",
+      "seal_key": "",
+      "admitted_pcr0s": [
+        "80a580024d4cf3d1f7955dc010ae12a0626ad4f6d542c385bf9cf5202fa37eab81f37c75a009dbc4212b22960f19d289",
+        "8c26adfd1fe53025c5aea91563129bc4670bffc993531040a4a0e6f530e753bcf5a1be2cafa78bb0373a469adc88f7c8",
+        "e9f9005d31ba54e64aec4db3c7044aa8c290bae8c65246e6a1692fae7ea40d2dae8bf41c3a4b0575c7066d23ac5e3f1a",
+        "c6dd654f6b261f616f9115b215600eb992365943c52177adc86bafdba0fd7138c0dfe6558d8b2052ff1aed4dee50232f"
+      ],
+      "notes": "https://github.com/vettid/vettid-vault/releases/tag/release/staging/7",
+      "host": {
+        "tag": "release/staging/7",
+        "source_commit": "c22a750d90d037a8a7a3e4bbb525386b07ef38ce",
+        "measurements_sha256": "bc533dcef155e8744ced5e70d9eb15d1c0ddf09ad6f55c93ec0589f90702532b",
+        "host_files_sha256": "c0b36acafa89e4110a0d497fb8b6c552c3bfd8c86eabda5757ff5c8d4210410a",
+        "nitro_cli_version": "1.5.0",
+        "base_ami": "ami-065b1b834d2a83a7a",
+        "ami_revision": 0,
+        "min_instances": 0,
+        "max_instances": 2
+      }
     }
   ]
 }
