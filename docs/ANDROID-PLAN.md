@@ -14,10 +14,19 @@ changelog:
     `feed.event` and `sync.event{feed.updated, feed.deleted}` live,
     `feed.list{after_seq}` to catch up; nothing while held or due but
     the `vault.held` counts; the feed only in memory while the vault is
-    open; no system notifications for feed items until a push or
-    foreground-service path exists; the release banner stays separate
-    (releases are not feed items); open questions for the owner (§4
-    Notifications, §9); VAULT-MESSAGING 0.23.1 under related
+    open; the release banner stays separate (releases are not feed
+    items). Owner answers of 2026-10-09 (§9: questions 1, 2 and 4–9 as
+    recommended; 3 replaced): **notification modes** (D7, §4
+    Notification modes): an on-phone service (a foreground service
+    holding the app's own relay connection, PUSH-GATEWAY §11; the
+    default), Google push (FCM through the push gateway; plumbing now,
+    "not available yet" until the gateway and FCM credentials exist) or
+    off (not recommended); seven notification channels, private on the
+    lock screen, previews of names only by default; which feed kinds
+    and events notify; FCM optional at build time; the VAULT-MESSAGING
+    gaps for `push.register` (§14 is reserved); an implementation order
+    (N1–N4, §6); UnifiedPush and three more open questions (§9);
+    VAULT-MESSAGING 0.23.1 under related
   - 0.1.22: VAULT-MESSAGING 0.23.0 and owner requests of 2026-10-09:
     one tag per share rule ("Select the tag to share", the chosen chip
     in its colour with a gold outline and a check mark, a tag that
@@ -268,6 +277,7 @@ surface than the vettid.dev app and a layout modelled on Proton Mail.
 | D4 | **Minimum Android 12 (API 31)**; target the current API level. |
 | D5 | **Message search later** (not in v1). |
 | D6 | **Biometric app lock in v1**: opening the app (and returning to it after a timeout) can require a biometric or device credential via BiometricPrompt (class 3), gating a Keystore key that unlocks the app's local data. 0.1.19: called **App lock**, with the method Biometrics (as described) or Phone screen lock (the device credential only). It is a convenience layer only: it never replaces the vault PIN (unlocking the vault) or the credential password (critical actions). |
+| D7 | **Notification modes** (owner, 2026-10-09; 0.1.23): the member picks how notifications reach the phone: **On-phone service** (recommended, most private; the default), **Google push** (FCM through the VettID push gateway; offered once the gateway and FCM credentials exist) or **Off** (not recommended). Feed items raise notifications through the chosen mode (§4 Notification modes). Supersedes PUSH-GATEWAY 0.2.0 §11's default order (FCM first) for this app; UnifiedPush is open (§9). |
 
 ## 3. Design language (from Proton Mail)
 
@@ -312,8 +322,8 @@ message on Messages (§3). The drawer has **no "create" group** (owner
 decision of 2026-10-07; 0.1.2 planned one with Invite a connection and
 New item): the floating action button creates on every screen that
 creates something (§3), so the drawer holds only destinations.
-Notifications (0.1.23, proposed) is not a drawer entry either: it opens
-from the bell in the top bar (below; open question 1).
+Notifications (0.1.23) is not a drawer entry either: it opens from the
+bell in the top bar (below; owner answer of 2026-10-09, §9 question 1).
 
 **"Vault", not "Items", in the interface** (0.1.11, owner decision of
 2026-10-07). The member's stored data (VAULT-ITEMS) is called **Vault**
@@ -333,9 +343,9 @@ rows below say "Vault" for the screens and "item" for the data.
 | Approvals | — (VettID-specific) | Pending connection requests, grant requests, critical-item uses, share-rule decisions; approve/deny; critical items need the credential password. 0.1.22: a connection's asks within 10 minutes are one entry ("Sam asks for 3 things"), a connection whose asks are paused is a notice (resume, or remove the connection), a share question names the rule that asks first and warns when declining stops an item already shared, one question per item and connection |
 | Vault | Folder list | Titled "Vault" (0.1.11; was "Items"). Items per VAULT-ITEMS: name, category, typed fields, tags, sensitivity (data / secret / critical); filter by tag (0.1.21: "✕ Clear" ends the filter chips while a filter is on); each tag in its own colour (0.1.21); add/edit from templates ("Save item" in the top bar, 0.1.21); share rules by tag, as many per connection as needed (up to 64), each with its own tags, mode (default: ask each time), fetch limit and end (presets or a custom date and time), overlaps shown (0.1.20); one tag per rule, per-hour and per-day limits, `ask` wins, rules named by their tags, "Save rule" in the top bar (0.1.22). Critical items live in the Protean Credential and are never shared by a rule |
 | History | — (VettID-specific) | The member's audit log (0.1.11, `audit.list`, VAULT-MESSAGING 0.20.0 §10.9), read-only: a search field (the vault searches, `q`), filter chips (category, connection, date range), a list of entries newest first with infinite scroll, and an entry detail, each entry's icon in its category's colour (0.1.22); a ⋯ menu with **Export…** (0.1.17: CSV or JSON of what the filters show, with the vault PIN, saved through "Save to…"). Details below |
-| Notifications | — (Proton has none; a bell as in most apps) | 0.1.23, proposed: the vault's feed (VAULT-MESSAGING §10.9), opened from the bell in the top bar with the unread count; grouped by day, urgent items first, unread and read, swipe to archive or to mark read, an Archived view; each item opens the screen it is about. Details below |
+| Notifications | — (Proton has none; a bell as in most apps) | 0.1.23 (owner answers of 2026-10-09): the vault's feed (VAULT-MESSAGING §10.9), opened from the bell in the top bar with the unread count; grouped by day, urgent items first, unread and read, swipe to archive or to mark read, an Archived view; each item opens the screen it is about; system notifications through the member's notification mode (D7). Details below |
 | Credential | — | Reached from Settings → Security → Credential (0.1.11; not in the drawer). Critical items inside the Protean Credential; unlock window; password change; the vault-held credential copy (the backup) on/off. Turning it off shows VAULT-MESSAGING §3.5.6's warning and needs a confirmation: "If this phone is lost, broken, reset or replaced without a transfer, your vault **cannot be recovered**. It can only be deleted and replaced by a new one, and **everything in it is lost**." While off, the screen and Settings keep a short "no recovery" notice. Turning it on asks for the password at once (an owner check) so that the copy exists, and says recovery is possible from then on |
-| Settings | Settings | At the top, an **account card** (0.1.11): the member's first and last name and full email address (`account.get`, VAULT-MESSAGING 0.20.0 §11.13) and the membership state; tapping it opens the avatar sheet. Vault (status, release, lock, PIN; "Update available" while a newer release can be approved, 0.1.19); Security (credential, recovery, attestation info, the app lock (0.1.19: Biometrics or Phone screen lock) and timeout, the owner-check interval 1–24 h and the hold switch); Privacy (the **Shared profile**, glyph `Badge`, 0.1.12: display name, `@profile` items and the profile photo, **camera only** — "Take a photo" / "Retake photo" opens the app's own camera screen, front camera first with a switch to the rear one, then "Retake" or "Use photo"; no selection of an existing picture and no other camera app; the shot stays in memory, is never saved to the gallery, and is cropped, scaled and re-encoded to a JPEG ≤ 65,536 bytes without EXIF before `profile.set{photo}`; "Remove photo" confirmed; a refused camera permission is explained, with the system settings once Android no longer asks; a phone without a camera is told); App (theme, notifications and push path; the local "Vault updates" channel, 0.1.19) |
+| Settings | Settings | At the top, an **account card** (0.1.11): the member's first and last name and full email address (`account.get`, VAULT-MESSAGING 0.20.0 §11.13) and the membership state; tapping it opens the avatar sheet. Vault (status, release, lock, PIN; "Update available" while a newer release can be approved, 0.1.19); Security (credential, recovery, attestation info, the app lock (0.1.19: Biometrics or Phone screen lock) and timeout, the owner-check interval 1–24 h and the hold switch); Privacy (the **Shared profile**, glyph `Badge`, 0.1.12: display name, `@profile` items and the profile photo, **camera only** — "Take a photo" / "Retake photo" opens the app's own camera screen, front camera first with a switch to the rear one, then "Retake" or "Use photo"; no selection of an existing picture and no other camera app; the shot stays in memory, is never saved to the gallery, and is cropped, scaled and re-encoded to a JPEG ≤ 65,536 bytes without EXIF before `profile.set{photo}`; "Remove photo" confirmed; a refused camera permission is explained, with the system settings once Android no longer asks; a phone without a camera is told); App (theme; **Notifications** (0.1.23): the mode, its status, previews and the channels, §4 Notification modes; the local "Vault updates" channel, 0.1.19) |
 | Owner check | — (VettID-specific) | One screen: PIN and credential password together (VAULT-MESSAGING §3.6.5); also the "vault held" screen with the waiting counts and the lock action |
 | Avatar sheet | Account sheet | The member's first and last name and **full email address** (0.1.11, from `account.get`'s snapshot `first_name`, `last_name` and `email`, VAULT-MESSAGING 0.20.0 §11.13; never the masked hint), the email labelled "Only you see this address" and the names "Your connections see this name"; **Lock vault first** (0.1.12), right under the name and email, before Change name, Shared profile and the email; the sheet scrolls; vault status; **Change name** (0.1.10): the two names (the registration rule: letters, spaces, `'’.-`, ≤ 40), then the owner-check screen's PIN and password, sent as `account.name.set`; then "Name change requested" until `account.get`'s `name_request` is `applied` or `refused`; `too_soon` (from the vault or the member API): "You can change your name once every 30 days. You can change it again on <date>" (VAULT-MESSAGING §10.8), membership and subscription (read-only, from the vault, VAULT-MESSAGING §11.13), open account portal (browser) |
 | Recovery (new phone) | — (VettID-specific) | Only with the backup on: scan the portal's recovery QR → claim (`email_hint`) → register → PIN → credential password → the app replaces the old one. No other path: 0.1.6's backup-off choice (new credential or delete) is removed. `no_backup` at register or unlock (a vault whose backup is off): "This vault cannot be recovered: its credential backup was off. Delete it on the account site and start over with a new setup code", with a link to the portal's start-over page (MEMBER-API 2.1.0) and then to onboarding |
@@ -474,8 +484,8 @@ the screen changes or deletes an entry.
   - The new entry `audit.exported` shows in History under Security as
     "History exported" with its format and count from `ref`.
 
-**Notifications** (0.1.23, proposed; needs the owner's approval before
-any app work). The vault's **feed** (VAULT-MESSAGING §10.9): the owner's
+**Notifications** (0.1.23; the owner's answers of 2026-10-09 in §9).
+The vault's **feed** (VAULT-MESSAGING §10.9): the owner's
 activity list, with read and archive state shared by the owner's
 devices. "Notifications" in everything the member sees; "feed" in the
 specifications, the code and this plan's technical text (as Vault and
@@ -497,7 +507,7 @@ feed repository and no screen.
      no badge at 0. Detail screens have no bell.
    - An urgent unread item (`credential.alarm`, `owner_check.locked`)
      turns the badge red (the error colour); otherwise it is gold.
-   - No drawer entry (open question 1). Approvals keeps its own badge:
+   - No drawer entry (§9 question 1). Approvals keeps its own badge:
      Approvals is the to-do list (what waits for a decision), Notifications
      the record of what happened, so an ask is in both.
 2. **Repository** (`:core:data`, `FeedManager`, the pattern of
@@ -509,7 +519,7 @@ feed repository and no screen.
      limit; items with `status: "deleted"` are dropped; the cursor is the
      response `seq`. This reads the whole feed (at most 1,000 live items,
      §10.9) and its state in one pass; `feed.list` without `after_seq`
-     has no cursor for older pages (open question 7).
+     has no cursor for older pages (§9 question 7).
    - **Live**: `feed.event` (a new item) is upserted. `sync.event`
      `feed.updated` / `feed.deleted` (another device read, archived or
      deleted an item; a batch's `count` changed, §10.4.1) and any
@@ -521,7 +531,7 @@ feed repository and no screen.
      sender, §10.1).
    - **Return to the foreground** and a relay **reconnect**: a catch-up.
    - **Retention**: items older than `feed.retention_days` (§10.8,
-     default 30) are dropped locally as well (open question 7).
+     default 30) are dropped locally as well (§9 question 7).
    - **Clear**: on lock, on entering `held` or `due`, on a wipe, and with
      the process; the next open reads again (below, 7).
 3. **The list.** Newest first by `at` (not by `seq`, which changes at
@@ -552,10 +562,10 @@ feed repository and no screen.
      (`feed.delete`, confirmed: "Delete this notification on all your
      devices?"; for a batch's item: "Later requests from <First> will
      start a new notification", §10.4.1, 0.23.1). Nothing is deleted
-     from the main list (open question 5).
+     from the main list (§9 question 5).
    - **Mark all as read**: `feed.update{status: "read"}` for each
      `active` item, at most 4 in flight, the count falling as they
-     land; there is no bulk type (open question 4).
+     land; there is no bulk type (§9 question 4).
    - **Empty states**: "No notifications" / "Nothing unread" (with
      "✕ Clear" for the chip, 0.1.21) / "Nothing archived".
 4. **Tapping an item** marks it read (`feed.update{status: "read"}`, not
@@ -566,7 +576,7 @@ feed repository and no screen.
    "This is no longer waiting" for an ask. Unknown kinds (a newer vault)
    show the kind itself with a generic icon and open the sheet; they are
    never hidden. Deciding an ask in Approvals also marks its feed item
-   read (matched by kind and `ref`; open question 2).
+   read (matched by kind and `ref`; §9 question 2).
 
    | Kind (§10.9) | Label (en) | Opens |
    |---|---|---|
@@ -622,27 +632,22 @@ feed repository and no screen.
    feed items (§10.9's kinds; the app learns of a release from the
    manifest and `sync.event{vault.release}`, §11.10.6), so the
    Notifications screen does not list them, and the "Vault updates"
-   channel keeps its one notification per release (open question 6).
+   channel keeps its one notification per release (§9 question 6).
    The credential-alarm and pending-deletion banners stay as they are.
-9. **System notifications.** None for feed items in this version. There
-   is no push (FCM credentials and the gateway are deferred, §7) and no
-   foreground service yet, so feed events reach the app only while it is
-   open, where the bell and the banners already show them. When a
-   background path exists (§7), feed items raise notifications on a
-   "Vault activity" channel: `urgent` and `high` items, messages and
-   asks; one per batch, never one per ask of a batch in progress
-   (§10.4.1, a MUST); nothing for a muted connection's asks (the vault
-   creates no item); `VISIBILITY_PRIVATE` with a public version
-   "New activity in your vault"; the tap opens the item's target (4).
-   Open question 3.
+9. **System notifications** (0.1.23, owner answer to question 3):
+   feed items raise Android notifications through the member's
+   notification mode (§4 Notification modes, Mapping): one per item,
+   one per batch, never one per ask of a batch in progress (§10.4.1, a
+   MUST), cancelled when the item is read, archived or deleted on any
+   device. Opening a notification marks its item read and opens the
+   item's target (4).
 10. **Privacy.** Nothing from the feed is kept outside an open vault,
     the same as item metadata: the items, the cursor and the counts are
     in memory only (no Room table, no file, no DataStore, no
     `SavedStateHandle` beyond an `item_id`), cleared as in 2; nothing
     from the feed goes to logs or crash reports (kinds and `seq` in
-    debug logs only, never names, titles or bodies); a system
-    notification, when there is one (9), shows names only on an
-    unlocked screen.
+    debug logs only, never names, titles or bodies); system
+    notifications follow §4 Notification modes, Content.
 11. **Tests.**
     - Unit (`FeedManager`, fake `VaultApi`): the paged open read and its
       cursor; `deleted` dropped; `feed.event` upsert; a `seq` gap and
@@ -672,6 +677,310 @@ feed repository and no screen.
       the app's data directory, as for item metadata).
     - Manual: the test phones (Pixel 10 Pro, Pixel 7) against staging.
 
+**Notification modes** (0.1.23; owner answer of 2026-10-09 to
+Notifications question 3, D7). "I'd like to get the current app working
+with notifications via a service on the phone … the ability to enable
+service based notifications (more private) or Google push based
+notifications or disable notifications (not recommended)." Settings →
+App → **Notifications** replaces today's line "Messages arrive while
+VettID is open. Push comes later." (the app today collects only while
+its process runs; nothing keeps it running in the background).
+
+1. **The setting.** One choice, "How notifications reach this phone":
+   - **On-phone service** — "Recommended. Most private: your phone keeps
+     its own connection, and no Google or VettID push service is
+     involved. Uses a little more battery." **The default for new
+     installs**, and for the update to this version.
+   - **Google push** — "Uses Google's push service to wake VettID. Google
+     learns only that VettID was woken, never who or what." Shown
+     disabled with **"Not available yet"** until the build has FCM
+     configuration and the vault answers `push.register` (below); with
+     **"Needs Google Play services, which this phone does not have"**
+     when they are missing (GrapheneOS without sandboxed Play, for
+     example); "Google Play services need an update" when outdated.
+   - **Off** — "Not recommended. You see messages, requests, calls and
+     security alarms only when you open VettID." Choosing it asks to
+     confirm with the same text.
+
+   Under the choice: a **status line** (Connected; Waiting for network;
+   Your vault is locked: notifications resume after you unlock it; Daily
+   check due; Notifications are blocked in Android settings, with a
+   button to them; Battery optimisation may delay notifications, with
+   "Allow in background"), **Show in notifications** (Content, below)
+   and **Notification categories** (the system's channel settings).
+   The mode is a device preference (DataStore), not a vault setting:
+   it describes this phone. Changing it stops the old path first (the
+   service, or `push.unregister`) and then starts the new one.
+2. **Permission.** POST_NOTIFICATIONS (Android 13+) is asked when a mode
+   other than Off is chosen, and on first start in the default mode
+   after the onboarding's last step ("Allow VettID to notify you about
+   messages, requests and security alarms"); 0.1.19's first-banner ask
+   then finds it decided. Refused: the mode stays, the status line says
+   "blocked", and the system settings are one tap away once Android no
+   longer asks. With the permission refused the service still runs (Android 13+ then shows its notification only in the
+   task manager), so the app is current when opened.
+3. **(a) On-phone service.** A foreground service (`VaultConnectionService`
+   in `:core:notify`) keeps the app's own relay connection as
+   PUSH-GATEWAY §11 "Devices without push" describes: the
+   `MailboxCollector` the app already uses (RELAY-PROTOCOL §6: WebSocket,
+   long-poll fallback) runs in the service instead of only while the
+   app is open; messages are decrypted on the phone with the device's
+   session keys, acked after persist as today (§8.3), and turned into
+   local notifications (Mapping, below). No wake_ref, no gateway, no
+   Google: the relay sees only this device's usual collects.
+   - **Foreground-service type.** `specialUse` with the
+     `PROPERTY_SPECIAL_USE_FGS_SUBTYPE` "Keeps the user's own end-to-end
+     encrypted message connection open to show notifications on
+     devices without a push service", and the Play Console declaration
+     (description and video). Not `dataSync`: Android 15 limits it to 6
+     hours a day and forbids starting it from `BOOT_COMPLETED`. Not
+     `remoteMessaging`: it is for continuing a messaging task on another
+     device, which this is not, and Play reviews it against that use.
+     `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_SPECIAL_USE` in the
+     manifest. To be confirmed against the Play policy at the time of
+     submission (§9 question 11).
+   - **Its notification** (required by Android): on the "Connection"
+     channel, importance MIN (no icon in the status bar, collapsed at
+     the bottom of the shade), not dismissible on Android < 14 (14+ lets
+     the member swipe it away; the service keeps running): "VettID is
+     connected" / "Waiting for network" / "Vault locked". The tap opens
+     Settings → App → Notifications. It never names a connection.
+   - **Start.** When the mode is chosen; at process start
+     (`Application.onCreate`) when the app has a vault and the mode is
+     the service; on `BOOT_COMPLETED` (`RECEIVE_BOOT_COMPLETED`; sent after
+     the member first unlocks the phone, when the credential-encrypted
+     storage holding the device state is readable; no direct-boot
+     receiver); on
+     `MY_PACKAGE_REPLACED` (after an app update). These broadcasts are
+     exemptions from Android 12's background-start limit. Not started
+     on a phone without an enrolled vault, or after a wipe.
+   - **Connection and backoff.** One connection for the process (the
+     app's screens use the service's collector while it runs). On a
+     drop: reconnect with exponential backoff and full jitter, 1 s
+     doubling to 5 minutes; reset after 5 minutes connected; an
+     immediate retry when `ConnectivityManager` reports a validated
+     network, and none while there is none. Relay `429` follows its
+     `retry_after`. Token or address changes (`relay.token.issued`,
+     `relay.address.update`) are handled as when open.
+   - **Battery and Doze.** The WebSocket idles between frames; the
+     service holds no wake lock beyond handling a batch (at most 10 s
+     per batch). In Doze, Android suspends network access for apps not
+     exempt from battery optimisation, so delivery can wait for a
+     maintenance window: the status line offers "Allow in background"
+     (`ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS`, no special
+     permission; Play restricts `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`)
+     and explains the delay without it. On return to the foreground the
+     app collects at once as today, so nothing is lost, only late.
+   - **Vault locked** (VAULT-MESSAGING §12.1). A locked vault collects,
+     deposits and wakes nothing: nothing new reaches the device's
+     mailbox, so the service has nothing to show. On `vault.locking` (unless the
+     member locked it on this phone) it posts "Your vault is locked. You won't be notified until you unlock
+     it" (Security channel, one at a time) and its own notification says
+     "Vault locked". Locks that send no `vault.locking` (an unsignalled
+     enclave restart, a lost lease, §12.3) are found by
+     `GET /api/vault/status` (MEMBER-API, signed by the app key) at
+     every reconnect and at most every 60 minutes while the relay
+     brings nothing. While locked the service keeps no relay
+     connection open (a status read each 60 minutes only); after an
+     unlock in the app it reconnects. What a locked vault's phone can
+     still decrypt: only messages the vault deposited before it locked
+     and the device has not yet collected; they are collected and
+     notified as usual.
+   - **Vault held or due** (§3.6.3). The vault keeps running but sends
+     this device only `vault.held` (the counts), `vault.locking`,
+     `credential.alarm` (with its `feed.event` and `sync.event`),
+     `device.transfer.pending`, `device.unlinked`, and the token,
+     address, rotation and handshake messages; no `feed.event`,
+     `message.new` or other `sync.event`. The service shows one "Daily
+     check due" notification on the Daily check channel with the counts
+     only ("3 messages and 1 request are waiting"; never names), updated
+     in place as `vault.held` arrives (at most every 10 minutes after
+     the first change, §3.6.3), and the credential alarm on the Security
+     channel. When the counts are unknown (§3.6.5, 0.19.0): "Something
+     may be waiting", never "nothing new". On entering the hold it
+     cancels the notifications that carry names (Content). The 1-hour
+     early warning (§6 Owner check, 5) is a local notification on the
+     same channel, scheduled by `AlarmManager` from the known deadline
+     (inexact; no exact-alarm permission). After the check the app
+     catches up (§6 Owner check, 4) and normal notifications resume;
+     nothing missed is replayed as notifications, the bell counts it.
+4. **(b) Google push (FCM)** (PUSH-GATEWAY 0.2.0). Contentless wakes:
+   the app's FCM token goes to its vault over the end-to-end session
+   (`push.register`), the vault registers a `wake_ref` with the gateway
+   under its own wake key (§3) and later triggers `notify` wakes; the
+   gateway sends a high-priority FCM data message with no content; the
+   app's `FirebaseMessagingService` then collects from the relay and
+   decrypts as in (a), and posts the same notifications, with no
+   persistent service. A wake gives up to about 20 s of execution; a longer
+   collect runs as expedited `WorkManager` work. Token rotation
+   (`onNewToken`) sends `push.register` again; switching away from the
+   mode, a wipe or an unlink sends `push.unregister` (an unlink also
+   deletes the wake_ref vault-side, §14). Correctness never depends on
+   a wake: the app collects at every foreground as now.
+   - **Plumbing now**: the setting, a `PushProvider` interface
+     (`available()`, `token()`, `onWake`), the FCM provider behind it,
+     and the registration path through the vault, written against
+     VAULT-MESSAGING's `push.register` once it is specified (Protocol
+     gaps, below); until then the provider reports "not available yet".
+   - **FCM optional at build time** (recommended): no
+     `google-services.json` and no Google Services Gradle plugin. The
+     `firebase-messaging` library is a dependency of `:core:push-fcm`
+     only; `FirebaseInitProvider` is removed from the merged manifest
+     and auto-init is off; the provider initialises `FirebaseApp` at
+     runtime from `FirebaseOptions` (application id, project id, API key,
+     sender id) read from Gradle properties into `BuildConfig`, absent
+     by default. No properties: the provider is "not available yet" and
+     the app builds and runs as today (CI included). Google Play
+     services presence: `GoogleApiAvailability`. A later `foss` build
+     flavour without the library (for F-Droid) remains possible and is
+     §9 question 12; a flavour now would double every build and test
+     for no user yet.
+   - Unavailable when Google Play services are missing (said in the UI,
+     1), and until the gateway is deployed with FCM credentials (the
+     owner has no FCM service account yet, §7).
+5. **(c) Off.** No service, no registration. The app collects while
+   open, as today. The Notifications screen and the bell work as
+   always; the release notification (0.1.19) is still posted when the
+   app learns of a release, since it is local. Settings shows the
+   warning of 1 under the choice.
+6. **Channels** (created at first start; ids are stable, names
+   translated; the member can change each in Android settings):
+
+   | Channel (id) | Importance | Carries |
+   |---|---|---|
+   | Messages (`messages`) | High | New messages |
+   | Requests (`requests`) | High | Asks waiting for a decision (Approvals) |
+   | Calls (`calls`) | High | Missed calls now; ringing later (full-screen intent with the calls phase) |
+   | Security alarms (`security`) | High, alarms marked urgent | The clone alarm, the ten-failure lock, failed checks, the vault locked, the vault moved |
+   | Daily check (`owner_check`) | High | The early warning and "check due" with the held counts |
+   | Vault activity (`activity`) | Low (silent, in the shade) | Other feed items |
+   | Vault updates (`vault_updates`, 0.1.19) | Default | One per release |
+   | Connection (`connection`) | Min | The service's own notification |
+
+7. **Mapping** (feed kinds of VAULT-MESSAGING §10.9 and events; this
+   replaces the earlier answer to question 3). Feed items are the one
+   source of notifications, so read state stays shared: the
+   notification's id is the item's `item_id`, a later `seq` updates it
+   in place without sound (`setOnlyAlertOnce`), and `feed.updated` to
+   `read` or `archived`, or `feed.deleted`, cancels it. Opening a
+   conversation marks its `message.received` items read; deciding an
+   ask marks its item read (question 2). Items of priority `low` and
+   `guide` items never notify.
+
+   | Notifies on | Feed kinds (and events) |
+   |---|---|
+   | Messages | `message.received` (text from `message.new` only with previews on) |
+   | Requests | `connection.request`, `connection.authenticate.requested`, `grant.request` (a batch: one, "Sam asks for 3 things", updated), `share.pending`, `critical-secret.use.request`, `device.pair.pending`, `device.session.pending`, `approval.pending`; `action.request`, `intro.request`, `location.request` with "Open VettID on a newer version" until their phases |
+   | Calls | `call.missed` |
+   | Security alarms | `credential.alarm` (urgent; also while held), `owner_check.locked`, `owner_check.failed`, `owner_check.hold_changed`, `credential.password_failed`, `credential.reset`, `device.replaced`, `device.transferred`; the event `vault.locking` (Vault locked, 3) |
+   | Daily check | the events `vault.held` and the early warning (3) |
+   | Vault activity | `connection.added`, `connection.request.peer_declined`, `connection.asks_paused`, `connection.stale`, `connection.removed`, `grant.shared`, `grant.revoked`, `share.rate_limited`, `item.revealed`, `device.paired`, `device.unlinked`, `credential.rotated`, `leash.*`, `location.shared`, `wallet.signed`; unknown kinds of priority `normal` or above |
+   | none | priority `low`, `guide`; anything while the app is in the foreground on the Notifications screen or the item's own target (the bell and the screen show it) |
+
+   A muted connection's asks create no item (§10.4.1), so they never
+   notify.
+8. **Content** (privacy). Every notification is
+   `VISIBILITY_PRIVATE`, with a public version "New activity in VettID"
+   (the Security and Daily check channels: "VettID needs your
+   attention"), so nothing of it shows on the lock screen until the
+   phone is unlocked. **Show in notifications**:
+   - **Names** (default): the connection's "First Last" or the device's
+     name and the kind ("Message from Sam Lee", "Sam Lee asks for
+     3 things"); never message text, item names or values, tags or
+     amounts.
+   - **Names and message text**: adds the message text (from
+     `message.new`, decrypted on the phone) and item names; never
+     item values or secrets, which the vault never sends a device
+     unasked.
+   - **Nothing**: "New activity in VettID" for everything; the channel
+     still says what kind it is.
+
+   The member's email never appears (VAULT-MESSAGING §11.13). Nothing
+   from a notification is stored by the app: the text is built in
+   memory from the event and the in-memory caches (the service reads
+   `connection.list` once per vault open when the process starts in
+   the background), and is not written to disk by the app. Android's
+   notification shade and history keep what was posted; therefore
+   notifications that carry names are cancelled when the vault locks
+   or is held, at a wipe and at an unlink, and posted notifications
+   never outlive the vault being open (the rule "nothing kept outside
+   an open vault"). Android's "Notification history" setting, when the
+   member turns it on, keeps them outside the app's control; the
+   Notifications setting says so.
+9. **Protocol gaps for (b)** (VAULT-MESSAGING 0.23.1; this PR does not
+   change it). §10's registry lists `push.register` and
+   `push.unregister` as **reserved**, and §14 is a sketch
+   (`push.register{platform, push_token, environment}`, the wake_ref in
+   the device record, `device.unlink` deletes it, a wake after "a
+   user-visible message", none while locked). Missing before the app
+   can register:
+   1. The bodies, responses and errors of `push.register` and
+      `push.unregister` (the holder only, or desktops too; the answer,
+      e.g. `{registered: true}` or `unavailable` when the vault has no
+      gateway configured); `platform` values `fcm` (and `unifiedpush`
+      with `webpush` keys, PUSH-GATEWAY 0.2.0) and the size limits.
+   2. Token rotation: whether a second `push.register` replaces the
+      first (the vault then `PUT`s or re-registers, PUSH-GATEWAY §4.2).
+   3. A dead token (PUSH-GATEWAY §5: "the owner requests a fresh push
+      token from the device"): a V→D message for it (e.g.
+      `push.token_needed`) and how the app learns its registration's
+      state (e.g. `push` in `device.list` or `vault.status`).
+   4. Which events trigger a wake and of which class: §14 says a
+      user-visible message; the app needs a wake for every item the
+      Mapping notifies (feed items of priority `normal` and above,
+      batches once), `vault.held`, `vault.locking` and the
+      credential alarm, with the constant `collapse_key`.
+   5. Wakes while held: §3.6.3 stops owner fan-out; whether the vault
+      wakes the app for the messages it still sends (`vault.held`, the
+      alarm). Recommended: yes, for those only.
+   6. Enclave egress to the gateway: §12.2 allows only the relay and
+      AWS KMS through the parent; the gateway's host needs adding (and
+      VAULT-PLAN's allowlist), with the gateway URL in the release
+      constants.
+   7. When the wake key is created (at the first `push.register`) and
+      the audit kinds (`push.registered`, `push.unregistered`).
+10. **Implementation order** (§6, N1–N4; each its own PR, the owner
+    approves this plan first):
+    - **N1 app, now:** the Notifications setting (three modes, status
+      line, previews, categories), the channels, the Mapping and
+      Content rules, the on-phone service fully working (start on
+      boot and after updates, backoff, Doze advice, locked and held
+      behaviour), Off; the Notifications screen (above); the
+      `PushProvider` interface with the FCM provider stubbed ("not
+      available yet"), FCM optional at build time.
+    - **N2 spec:** VAULT-MESSAGING `push.register` / `push.unregister`
+      (the gaps in 9), PUSH-GATEWAY's default order updated by D7.
+    - **N3 vault:** the push ops, the wake key, wakes after deposits,
+      the egress allowlist (vettid-vault), against a gateway stand-in in
+      the dev stack.
+    - **N4 gateway, later:** deployment with an FCM service account
+      (and APNs for iOS), then the app's FCM provider enabled with the
+      Firebase configuration; end-to-end tests on the Pixel 7 (Play
+      services) and "not available" on the Pixel 10 Pro (GrapheneOS).
+11. **Tests** (in addition to the Notifications screen's).
+    - Unit: the mode state machine (switching stops the old path
+      first; Off stops everything); the Mapping table for every §10.9
+      kind and unknown kinds; batch updates in place and cancel on
+      read, archive, delete and from other devices; Content per
+      preview choice (no text with Names, nothing with Nothing; never
+      an email or value); cancel on lock, hold, wipe and unlink; the
+      backoff schedule with a fake clock and network; the FCM provider
+      "not available yet" without configuration and without Play
+      services.
+    - Instrumented (dev stack): with the app in the background and the
+      screen off, a `vaultctl` peer's message and grant request post
+      notifications on their channels; reading on a `vaultctl` desktop
+      cancels them; the vault locked (`vault.locking`) and an
+      unsignalled lock (the dev enclave restarted) show "Vault locked";
+      the vault past its deadline shows "Daily check due" with counts
+      and no names; reboot and `adb install -r` restart the service;
+      Doze forced (`adb shell dumpsys deviceidle force-idle`) with and
+      without the battery exemption; POST_NOTIFICATIONS refused.
+    - Build: CI builds and tests without any Firebase configuration.
+    - Manual on the test phones: a day of normal use for battery
+      (Settings → Battery usage), the service notification, lock-screen
+      privacy.
+
 Every list has an empty state; every destructive action has a confirmation;
 every critical action asks for the credential password.
 
@@ -698,6 +1007,7 @@ one (translation-ready), accessibility labels required in review.
 | `:core:altchan` | Member-API alternate channel: code redeem and recovery claim, requests signed by the app key (no member session), descriptors, sealed enroll/unlock/lock, result polling, release-update approval |
 | `:core:vault` | Typed vault client: one function per §10 type, sessions with the vault, dedupe, outbox, sync events → repositories |
 | `:core:data` | Repositories and Room caches per feature |
+| `:core:notify` | 0.1.23: the notification modes: the on-phone service (`VaultConnectionService`), channels, the Mapping and Content rules, the `PushProvider` interface; `:core:push-fcm` the FCM provider (the only module with Firebase) |
 | `:core:ui` | Theme (navy + gold, light/dark), components (top bar, drawer, list row, empty state, pill bar, settings cards, sheets) |
 | `:feature:*` | onboarding, messages, connections, approvals, items (the "Vault" screens), credential, settings, history (0.1.11), notifications (0.1.23, the feed) |
 | `:app` | Navigation (type-safe routes), DI wiring, notifications |
@@ -715,7 +1025,8 @@ crypto directly; one ViewModel per screen with immutable UI state.
 | A3 | Onboarding, unlock, credential, settings screens (with the account card, 0.1.11), biometric app lock; History (0.1.11), once the vault release with VAULT-MESSAGING 0.20.0's search is in staging; History export (0.1.17), once a release with 0.22.0's `audit.export` is | Fresh install → enrolled vault with credential on a real phone (dev stack) |
 | A4 | Connections, messages, approvals | Invite/QR connect, SAS, messages both ways, approvals |
 | A5 | Items (data, secret, critical), tags, share rules, grants and critical-item approvals | Flows against the dev stack and a second vault |
-| A6 | Hardening and polish: accessibility pass, notifications (0.1.23: the Notifications screen, once approved; system notifications with a background path, §7), offline behaviour, error states, Play pre-launch report | Internal testing track build |
+| A6 | Hardening and polish: accessibility pass, notifications (0.1.23: the Notifications screen and N1 below), offline behaviour, error states, Play pre-launch report | Internal testing track build |
+| N1–N4 | 0.1.23, notification modes (§4 Notification modes, 10): N1 app (setting, channels, on-phone service, FCM stubbed); N2 spec (`push.register`); N3 vault (push ops, wakes); N4 gateway with FCM credentials, then FCM on | N1: notifications in the background on both test phones without Google; N4: FCM wakes on the Pixel 7 |
 
 Calls, devices/agents/LEASH, wallet, location and presence follow v1 in
 that order, each as its own phase.
@@ -787,7 +1098,10 @@ schema for the cache and the request verb belong to the location batch.
   the relay connection, or periodic polling (PUSH-GATEWAY 0.2.0 §11). The
   member can pick the path in notification settings. Until the gateway is
   deployed (FCM needs credentials), v1 collects while the app is open and
-  through the foreground-service path.
+  through the foreground-service path. 0.1.23 (D7, owner 2026-10-09):
+  three modes, the on-phone service the default and recommended, Google
+  push once the gateway, FCM credentials and VAULT-MESSAGING's
+  `push.register` exist, and Off; UnifiedPush is open (§9, question 10).
 - **Membership**: enrollment requires an account.vettid.org member who has
   accepted the current terms; the portal checks it when it issues the
   setup code (MEMBER-API 2.0.0). The app itself never signs in.
@@ -805,7 +1119,11 @@ schema for the cache and the request verb belong to the location batch.
    test on several devices before release.
 4. **Background delivery without push**: until the gateway exists,
    messages arrive while the app is open or through the foreground
-   service; set expectations in the UI.
+   service; set expectations in the UI. 0.1.23: the service's
+   `specialUse` type needs Play's approval of the declaration, and
+   some vendors' battery managers stop foreground services regardless;
+   the status line and "Allow in background" are the mitigation, and
+   collection at every foreground keeps nothing from being lost.
 5. **GrapheneOS and device attestation** (resolved): GrapheneOS reports
    its own verified-boot key (`SelfSigned`); VAULT-MESSAGING 0.9.0 §11.7
    accepts it when the key is one of the pinned GrapheneOS fingerprints.
@@ -814,52 +1132,72 @@ schema for the cache and the request verb belong to the location batch.
 
 ## 9. Open questions
 
-Min SDK, search and biometrics decided 2026-10-03. Open: the
-Notifications screen's questions for the owner (0.1.23), below.
+Min SDK, search and biometrics decided 2026-10-03. The Notifications
+screen's questions (0.1.23) were answered by the owner on 2026-10-09;
+the notification modes' questions are open.
 
-### Open questions for the owner
+### Notifications screen (answered)
 
-Each with the recommended answer. None needs a VAULT-MESSAGING change
-before the app work; 7 asks for an editorial statement.
+Owner, 2026-10-09: 1, 2 and 4–9 as recommended; 3 replaced by the
+notification modes (D7, §4 Notification modes).
 
-1. **Bell, drawer entry, or both?** *Recommended: the bell only*, in the
-   top bar of every drawer screen. It is visible on every main screen
-   without opening the drawer, and the drawer keeps one badge
-   (Approvals) instead of two counts that overlap.
-2. **Should deciding an ask mark its feed item read?** The vault does
-   not change a feed item when its ask is decided (§10.9). *Recommended:
-   yes, by the app* (matched by kind and `ref`, through `feed.update`,
-   so other devices follow); a vault-side rule can come later if
-   desktops decide asks often.
-3. **System notifications for feed items before push.** *Recommended:
-   none in this version*; the bell and banners cover the app while it
-   is open. Add the "Vault activity" channel (§4 Notifications, 9) with the
-   foreground-service or push path (§7), not before.
-4. **"Mark all as read" without a bulk type.** *Recommended: one
-   `feed.update` per item* (at most 1,000, 4 in flight), no protocol
-   change; propose `feed.update{item_ids}` only if staging shows it slow.
-5. **Delete in the main list?** *Recommended: no*: archive there (with
-   Undo), delete only from Archived, confirmed. Deleting is for all
-   devices and ends a batch (§10.4.1), so it should be a deliberate
-   second step.
-6. **Releases in the Notifications list?** Releases are not feed items.
-   *Recommended: keep them out*: the release banner, the update screen
-   and the "Vault updates" channel (0.1.19) already carry them, and a
-   feed kind would need a vault change for no new information.
-7. **Reading the whole feed, and retention drops.** `feed.list` has no
-   `before_seq`, so the app reads the feed with `after_seq` from 0
-   (above, 2). VAULT-MESSAGING does not say how long `deleted` entries
-   stay in the `after_seq` history, nor whether an item dropped for
-   `feed.retention_days` or the 1,000 cap shows up there as `deleted`.
-   *Recommended: no protocol change*; the app also drops items past
-   retention itself, and VAULT-MESSAGING states both points in a
-   0.23.x erratum (dropped items appear as `deleted`; deleted entries
-   are kept no longer than `feed.retention_days`).
-8. **A setting for `feed.retention_days`?** *Recommended: not now*:
-   the default 30 days stays; add "Keep notifications for" to Settings →
-   Privacy later if members ask.
-9. **Kinds with no screen in v1** (agents, shared actions,
-   introductions, location, wallet). *Recommended: list them* with the
-   detail sheet "Not available in this version of the app" rather than
-   hide them: the member sees that something happened, and the asks
-   expire on their own.
+1. **Bell, drawer entry, or both?** **Answered: the bell only**, in the
+   top bar of every drawer screen.
+2. **Should deciding an ask mark its feed item read?** **Answered: yes,
+   by the app** (kind and `ref`, through `feed.update`); 0.1.23 also
+   marks `message.received` items read when their conversation opens.
+3. **System notifications for feed items before push.** **Answered
+   otherwise:** the owner wants notifications now, through a service on
+   the phone, Google push, or off (not recommended). Feed items notify
+   through the chosen mode (§4 Notification modes, Mapping).
+4. **"Mark all as read" without a bulk type.** **Answered: one
+   `feed.update` per item**, no protocol change.
+5. **Delete in the main list?** **Answered: no**; archive there,
+   delete only from Archived, confirmed.
+6. **Releases in the Notifications list?** **Answered: no**; the
+   banner and the "Vault updates" channel carry them.
+7. **Reading the whole feed, and retention drops.** **Answered: no
+   protocol change**; the app drops items past retention itself, and a
+   VAULT-MESSAGING 0.23.x erratum states that dropped items appear as
+   `deleted` and that deleted entries are kept no longer than
+   `feed.retention_days`.
+8. **A setting for `feed.retention_days`?** **Answered: not now.**
+9. **Kinds with no screen in v1.** **Answered: list them** with the
+   "Not available in this version of the app" sheet.
+
+### Open questions for the owner (notification modes)
+
+Each with the recommended answer.
+
+10. **UnifiedPush.** PUSH-GATEWAY's owner decision of 2026-10-03
+    requires UnifiedPush besides FCM; the three modes do not name it.
+    *Recommended: keep it for later as a fourth mode*, "UnifiedPush
+    (your own push server)", using the gateway's existing `unifiedpush`
+    path, added with N3–N4 (it needs the same `push.register`, with
+    `webpush` keys). The on-phone service already serves phones without
+    Google; UnifiedPush mainly saves battery for members who run a
+    distributor (ntfy, for example). PUSH-GATEWAY's "both paths" stays
+    the gateway's requirement.
+11. **Foreground-service type.** *Recommended: `specialUse`* with the
+    Play Console declaration (above); fall back to `remoteMessaging`
+    only if Play refuses it, and never `dataSync` (6 hours a day on
+    Android 15, no start from boot). Approve submitting the
+    declaration and its video with the first build that has the
+    service.
+12. **FCM at build time.** *Recommended: one build*, Firebase
+    initialised at runtime from Gradle properties (no
+    `google-services.json`, no plugin), "not available yet" without
+    them; a `foss` flavour without the Firebase library only if VettID
+    is published on F-Droid.
+13. **Default for existing installs.** *Recommended: the on-phone
+    service for every install*, new and updated (the app has no other
+    background path today), with POST_NOTIFICATIONS asked at the next
+    open and a one-time note "VettID now notifies you in the
+    background. Change this in Settings → Notifications".
+14. **Notifications while the vault is locked.** A locked vault sends
+    nothing (VAULT-MESSAGING §12.1, §14: "a 'vault locked, messages
+    waiting' prompt would need a wake path that does not depend on the
+    DEK"). *Recommended: accept it for now*: the app says "Vault
+    locked: notifications resume after you unlock it" (status read
+    from the member API at most hourly); a DEK-free "messages waiting"
+    signal stays the separate future decision §14 names.
