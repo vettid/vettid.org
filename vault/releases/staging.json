@@ -1,6 +1,6 @@
 {
   "channel": "staging",
-  "signed_serial": 7,
+  "signed_serial": 8,
   "releases": [
     {
       "release": 1,
@@ -78,7 +78,7 @@
     },
     {
       "release": 5,
-      "status": "active",
+      "status": "deprecated",
       "pcr0": "e9f9005d31ba54e64aec4db3c7044aa8c290bae8c65246e6a1692fae7ea40d2dae8bf41c3a4b0575c7066d23ac5e3f1a",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
       "pcr2": "4b159971caca1dc08731712d748e4cf1d2d8bca225e37b1d8cf99221413ebdeb6affdd1f749dbedac50e213404c41fd9",
@@ -103,7 +103,7 @@
     },
     {
       "release": 6,
-      "status": "candidate",
+      "status": "active",
       "pcr0": "c6dd654f6b261f616f9115b215600eb992365943c52177adc86bafdba0fd7138c0dfe6558d8b2052ff1aed4dee50232f",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
       "pcr2": "14d4ca2f4f830aecddd9ab18ec3f4e1a98fdadf90a473a97f549aaaebd4494bfd28693d1493cb8e2fed58b7448811924",
@@ -113,6 +113,7 @@
         "8c26adfd1fe53025c5aea91563129bc4670bffc993531040a4a0e6f530e753bcf5a1be2cafa78bb0373a469adc88f7c8",
         "e9f9005d31ba54e64aec4db3c7044aa8c290bae8c65246e6a1692fae7ea40d2dae8bf41c3a4b0575c7066d23ac5e3f1a"
       ],
+      "published_at": "2026-10-09T01:32:42Z",
       "notes": "https://github.com/vettid/vettid-vault/releases/tag/release/staging/6",
       "host": {
         "tag": "release/staging/6",
