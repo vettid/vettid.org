@@ -30,7 +30,9 @@ changelog:
     Overlapping rules of one subject: `ask` wins; an item is shared
     only after the member's approval if any covering rule is `ask`; one
     answer per item and subject; no silent withdrawal; removing an
-    `ask` rule never shares anything; rate limits combine strictly;
+    `ask` rule never shares anything; rate limits and `uses` combine
+    strictly (a fetch counts a use on every rule grant of the item, all
+    spent together); rules named by their tags;
     `ask_rule_id`, `shared` and `outcome` in previews and pending
     entries, and the app explains it (§10.7, §10.11, §10.12). Errata to
     0.22.0 (vettid-vault #50): `audit.export`'s full order of checks,
@@ -38,8 +40,16 @@ changelog:
     `bad_request` at once without a spendable UTK, the empty-log
     preview (§10.9); a responder leaves a new epoch's message that
     arrives before `hs.fin` unacked, a MUST for devices too (§6.3,
-    §6.5). Editorial: `"format": "month"` on a template's `date` field
-    (§10.7, VAULT-ITEMS 0.1.2)
+    §6.5). Owner's review of #181 (§15 item 31.12): a connection's asks
+    (grant requests, critical-item uses, `prompt-each-time`
+    invocations, authentication challenges, introduction offers,
+    location requests) are suppressed while muted or paused, for 7 days
+    after a decline of the same ask, beyond 8 pending or 5 per 24 h; 3
+    declines in 30 days pause them (one feed item); `connection.asks.mute`
+    and `.resume`; 10-minute batches; a suppressed ask gets the decline
+    answer after a random delay, so the connection cannot tell them
+    apart; `drop.ask_*` audit kinds (§10.4.1). Editorial: `"format":
+    "month"` on a template's `date` field (§10.7, VAULT-ITEMS 0.1.2)
   - 0.22.0: normative (owner decisions of 2026-10-08, §15 item 30):
     History export, a deliberate exception to the 2026-10-03 decision
     of no export of vault data, for activity metadata only. The holder's
@@ -3433,6 +3443,7 @@ an answer to an unknown or expired id is dropped.
 | | `connection.event` | V→D | | Added, pending, stale, removed, rekeyed, reconnected |
 | | `block.add`, `.remove`, `.list` | D→V | req | Block list (§7.4) |
 | | `connection.authenticate.request`, `.approve`, `.deny`, `.list` | D→V | req | Member authentication (§10.4) |
+| | `connection.asks.mute`, `connection.asks.resume` | D→V | req | Mute or resume a connection's asks (§10.4.1, 0.23.0) |
 | | `connection.authenticate.challenge`, `.response`, `.rotated` | V↔V | | Challenge; the member's signature or refusal; credential-key rotation statements |
 | | `connection.authenticate.pending` / `.result` / `.key` | V→D | | Asked to authenticate; the verdict; the pinned key followed a rotation |
 | Messaging | `message.send` | D→V | req | Send to a connection |
@@ -3558,7 +3569,8 @@ an answer to an unknown or expired id is dropped.
     sensitivity (§10.7; 0.21.1), as more than 16 tags or 500 ids in a
     list. Limits on what another vault sends (received grants, pending
     requests per connection, offers) are not error responses: those
-    messages are dropped and audited as their sections say;
+    messages are dropped and audited as their sections say, and (0.23.0)
+    a connection's asks are bounded by §10.4.1's constants;
   - (0.18.0) `too_soon`: `account.name.set` within 30 days of the last
     applied name change, with body `{allowed_after}` (RFC 3339, §10.8);
   - `bad_password`, `backoff`, `stale_credential`, `utk_invalid`: §3.5.3,
@@ -3758,7 +3770,8 @@ an answer to an unknown or expired id is dropped.
 connection: { "id": "<id>", "kind": "connection", "state": "active", "name": "...", "ik": "<b64>",
               "profile": { }, "created_at": "<ts>", "last_active_at": "<ts>",
               "version": 2, "alias": "...", "note": "...", "tags": ["family"],
-              "favorite": true, "archived": false }
+              "favorite": true, "archived": false,
+              "asks": { "muted": false, "paused": false, "cooldowns": 0 } }
 ```
 
 - **Requests** (0.10.2, §6.4; states 0.10.3). In
@@ -3854,7 +3867,8 @@ vault signs a fresh challenge with the member's **credential key**
 - `nonce` is 32 random bytes; `context` is at most 256 bytes and shown to
   the member. A challenge lives 10 minutes (`exp`). A vault keeps at most
   8 outstanding challenges it sent per connection (`limit`) and 4 it
-  received (more are dropped and audited).
+  received (more are dropped and audited). Since 0.23.0 a received
+  challenge is an ask (§10.4.1).
 - To approve, the app opens the credential's unlock window
   (`credential.unlock`, §3.5.3) and sends `connection.authenticate.approve`;
   the use extends the window. The vault signs
@@ -3900,6 +3914,158 @@ vault signs a fresh challenge with the member's **credential key**
   `connection.authenticate.key_rotated`,
   `connection.authenticate.rotation_rejected`); an incoming challenge is a
   feed item.
+
+#### 10.4.1 Asks from a connection: no approval fatigue
+
+(0.23.0; owner's review of vettid.org #181, 2026-10-09, §15 item 31.)
+A connection must not be able to wear the member down with repeated
+requests until one is approved by mistake. An agent is bounded by
+cooldowns, a referral cap and suspension (§10.11); a connection is
+bounded here, in the member's vault, by the same ideas.
+
+**Asks.** An **ask** is a message from a connection that, if accepted,
+waits for the member's decision:
+
+| Ask | Arrives as | Reaches the member as | The member's decline answers |
+|---|---|---|---|
+| A grant request, `item` or `category` entries (§10.12) | `data.request` | `grant.pending`, feed `grant.request` | `data.decided{approved: false}` |
+| A critical-item use (§10.13) | `critical-secret.use` | `critical-secret-use.pending`, feed `critical-secret.use.request` | `critical-secret.result{status: "denied"}` |
+| An invocation of a `prompt-each-time` action (§10.14) | `action.invocation` | `action.pending`, feed `action.request` | `action.result{status: "denied"}` |
+| A member-authentication challenge (§10.4) | `connection.authenticate.challenge` | `connection.authenticate.pending`, feed `connection.authenticate.requested` | `connection.authenticate.response{status: "denied"}` |
+| An introduction offer, from the introducer (§10.15) | `intro.offer` | `intro.pending`, feed `intro.request` | `intro.answer{accept: false}` |
+| A location request (§10.16) | `location.requested` | `location.request.pending`, feed `location.request` | (none: §10.16 has no decline message) |
+
+Nothing else a connection sends waits for the member. Share-rule
+questions (`share.pending`, §10.12) come from the member's own rules,
+never from a connection, and are not asks. Actions in `allowlist` or
+`default-allow` run without the member and are bounded by §10.14's
+limits only. Connection requests (§6.4) come from not-yet-connections
+and keep their own limits.
+
+**Constants.** Fixed for v1 by this specification (defaults; a later
+version may make them settings):
+
+| Constant | Value |
+|---|---|
+| Decline cooldown | 7 days |
+| Ask rate | 5 asks per connection per 24 hours |
+| Pending asks | 8 per connection, all kinds together |
+| Pause | after 3 declines from one connection within 30 days |
+| Batch | 10 minutes |
+| Neutral answer delay | 1–20 minutes, uniformly random (below) |
+| Held neutral answers | 16 per connection |
+
+These are not `limit` errors (§10.1): the requester is another vault,
+which never gets an error response for them.
+
+**Checks.** For each ask that passes the checks its type already makes
+at once (malformed, a duplicate id, an item that is not usable or a
+field that is not suitable, an action not offered, the per-type caps;
+§10.12–§10.16), the member's vault checks, in this order, and
+**suppresses** the ask at the first that applies:
+
+1. **Muted.** The member muted this connection's asks (below).
+2. **Paused.** This connection's asks are paused (below).
+3. **Cooldown.** The member declined the **same** ask from this
+   connection within the last 7 days. The same means: for a grant
+   request, an entry with the same `kind` and `ref` (the same `item_id`,
+   whatever its `fields`, or the same category); for a critical-item
+   use, the same `item_id` and `field_id`, whatever the operation and
+   payload; for an action, the same `action_id`; for authentication, any
+   challenge; for an introduction, any offer from that introducer. A
+   grant request in which only some entries are in cooldown reaches the
+   member without those entries (the member's decision, and so the
+   answer, covers only the others); one in which all are is suppressed.
+   Location requests have no decline and no cooldown.
+4. **Pending.** This connection already has 8 asks waiting for the
+   member, all kinds together. The per-type caps of §10.12–§10.16 stay
+   as a backstop.
+5. **Rate.** 5 asks of this connection have reached the member in the
+   current window. The window is a fixed 24-hour window that starts at
+   the first ask that reaches the member, as §10.12's rate limits are
+   (Rate limits for connections); suppressed asks do not count.
+
+An ask that passes reaches the member as before and counts in the
+window.
+
+**Declines.** A **decline** is the member's explicit refusal of a whole
+ask: `grant.decide{approve: false}`, `critical-secret-use.deny`,
+`action.respond{approve: false}`, `connection.authenticate.deny`,
+`intro.decline`. An expiry, an approval of only some entries, a
+suppressed ask and a desktop's request that an app denied are not
+declines. Each decline starts the cooldown of that ask (point 3).
+
+**Pause.** When a connection's third decline falls within 30 days of
+the first of those three (the vault keeps the times of its last three
+declines; this is a count of events, not of throughput, so it is a
+sliding 30 days), its asks are **paused**: later asks are suppressed
+until the member resumes them. The member gets **one** high-priority
+feed item, `connection.asks_paused` (`connection_id`), and
+`sync.event{connection.changed}`; the app says "<First>'s requests are
+paused after you declined several" and offers to resume them or to
+remove the connection. Asks already waiting stay and can be decided.
+Pausing is per connection and has no end of its own.
+
+**Mute.** The member may mute a connection's asks at any time, and
+unmute them. While muted every ask is suppressed with no feed item and
+no notification; asks already waiting stay. Muting does not pause or
+remove the connection: messages, profile updates, grants and shares go
+on.
+
+| Type | Request body | Response |
+|---|---|---|
+| `connection.asks.mute` (app, desktop) | `{connection_id, muted}` (`muted` boolean) | `{}`; `not_found` |
+| `connection.asks.resume` (app, desktop) | `{connection_id}` | `{}`; `not_found` |
+
+- `connection.asks.resume` ends a pause and clears the connection's
+  decline times and cooldowns (so that a member who declined by mistake
+  can be asked again at once); it is accepted, and changes nothing, on a
+  connection that is not paused and has no cooldown. Unmuting does not
+  resume a pause. Neither type is delegable (§10.11).
+- **State.** Per connection, in DEK state: `muted`, `paused_at`, the
+  times of the last three declines, the cooldowns (one per ask
+  identity, at most 64 per connection, the oldest dropped first, each
+  with its end), the current window's start and count, the open batch
+  and the held neutral answers. It goes with the connection (§7.4).
+- **Shown on the connection.** `<connection>` carries
+  `asks: {muted, paused, paused_at?, cooldowns}` (`cooldowns` the number
+  in force), and changes send `sync.event{connection.changed}`. The app
+  shows a paused or muted state on the connection's page with the
+  action that ends it.
+
+**Batching.** Asks from one connection that reach the member within 10
+minutes of the first of them form one **batch**: the first creates its
+feed item as before; each later ask of the batch creates no feed item
+and instead updates the batch's item (a new `seq`, the same `item_id`),
+whose `count` (0.23.0, present from 2) is the number of asks in the
+batch. The per-type `.pending` events are still sent. Apps MUST present
+a batch as one approval entry and one notification ("Dr Lee asks for 3
+things"), listing its asks from the per-type lists, and MUST NOT raise a
+notification for each ask of a batch in progress.
+
+**What the connection learns: nothing it could tell apart.** A
+suppressed ask is answered exactly as the member's decline of that kind
+is (the table above: `approved: false`, `denied`, `accept: false`), with
+the same members, never with a code or a `retry_after` of its own, and
+not at once: after a delay drawn uniformly at random from 1 to 20
+minutes (at most until 1 minute before the ask's `exp`), so that its
+timing does not tell an automatic refusal from a person's. A location
+request gets no answer, as when the member does not share. The vault
+holds at most 16 such answers per connection; asks beyond that are
+dropped without an answer, as an unanswered ask. So a connection cannot
+tell a decline from a cooldown, a pause, a mute, the pending cap or the
+rate. Apps on the asking side MUST show every refusal neutrally ("Not
+accepted"), never as "declined by <First>".
+
+**Audit.** Every suppressed ask is audited `drop.ask_muted`,
+`drop.ask_paused`, `drop.ask_cooldown`, `drop.ask_pending` or
+`drop.ask_rate` (`connection_id`, `ref` = the ask's `request_id`,
+`invocation_id` or `intro_id`), and an entry removed from a grant
+request `drop.ask_cooldown` with the same `ref`; History shows them on
+the connection. The changes are audited `connection.asks_paused`,
+`connection.asks_resumed`, `connection.asks_muted` and
+`connection.asks_unmuted` (`connection_id`). Only a pause is a feed
+item.
 
 ### 10.5 Messaging
 
@@ -4783,7 +4949,10 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `device.session.granted`, `device.session.ended`, `approval.granted`,
   `approval.denied` (`ref` = `approval_id`) (§6.8);
   `connection.authenticate.key_rotated`,
-  `connection.authenticate.rotation_rejected` (§10.4); `call.outgoing`,
+  `connection.authenticate.rotation_rejected` (§10.4);
+  `connection.asks_paused`, `connection.asks_resumed`,
+  `connection.asks_muted`, `connection.asks_unmuted` (`connection_id`;
+  §10.4.1, 0.23.0); `call.outgoing`,
   `call.incoming`, `call.answered`, `call.ended` (`ref` = `call_id`, no
   SDP or keys) (§10.10); `leash.grant.issued`, `leash.grant.updated`,
   `leash.grant.revoked`, `leash.rate_limited` (`device_id` = the agent,
@@ -4817,7 +4986,9 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `drop.suppressed`;
   and `drop.<reason>` for every message the vault dropped
   or refused (§6.3, §6.6, §7.3, §8.4), with the runtime's reason, such as
-  `drop.rate_limited`, `drop.one_app` (§6.7), `drop.profile_ik_mismatch`
+  `drop.rate_limited`, `drop.one_app` (§6.7), the suppressed asks
+  `drop.ask_muted`, `drop.ask_paused`, `drop.ask_cooldown`,
+  `drop.ask_pending` and `drop.ask_rate` (§10.4.1, 0.23.0), `drop.profile_ik_mismatch`
   and `drop.profile_malformed` (§10.8, 0.18.0) or `drop.owner_check`
   (§3.6.3).
 
@@ -5063,7 +5234,7 @@ stay without an export.
 ```json
 item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts>",
         "status": "active|read|archived|deleted", "priority": "low|normal|high|urgent",
-        "connection_id": "<id>?", "device_id": "<id>?", "ref": "<id>?",
+        "connection_id": "<id>?", "device_id": "<id>?", "ref": "<id>?", "count": 3,
         "title": "...?", "body": "...?" }
 ```
 
@@ -5074,6 +5245,8 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
   item changed after it, in `seq` order, including deleted ones (without
   `title` and `body`), so that a device can catch up. The response `seq`
   is the current counter. `limit` is 1–500 (default 100).
+- `count` (0.23.0) is present, from 2, only on the feed item of a batch
+  of a connection's asks: the number of asks it stands for (§10.4.1).
 - `feed.update` sets `status` (`active`, `read` or `archived`) and/or
   `priority`; changes send `sync.event` `feed.updated` or `feed.deleted`.
 - Kinds the vault creates: `connection.request` (`ref` = `pending_id`),
@@ -5099,7 +5272,8 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
   `urgent`, `ref` = `alarm_id`), `device.transferred` (`ref` =
   `transfer_id`), `device.replaced` (`device_id` = the old app),
   `credential.reset`, `owner_check.failed` (priority `high`, `ref` =
-  `pin` or `password`), `owner_check.locked` (priority `urgent`)
+  `pin` or `password`), `connection.asks_paused` (priority `high`;
+  §10.4.1, 0.23.0), `owner_check.locked` (priority `urgent`)
   (§3.6.4), `owner_check.hold_changed` (priority `high`, `ref` as in the
   audit log) (§3.6.7, 0.13.0),
   and `guide`. Apps render
@@ -5364,7 +5538,8 @@ agent (§10.12) is that agent's grant of scope `items.read`:
 - It never includes a `critical` item: critical items are never
   reachable by agents. `uses` counts the reads (`item.get` and
   `item.use`) of each included item; an item with no use left is no
-  longer included.
+  longer included (since 0.23.0 in any of the agent's rules, and a read
+  counts in each of them that has `uses`, §10.12 Overlapping rules).
 
 **Decisions** (§6.8). For a request of an agent within its access
 session, the vault takes the agent's unexpired grants whose scope is the
@@ -5812,23 +5987,50 @@ other.
   stay declined. Only an item that gains an `auto` rule afterwards is
   included at once. Deleting or narrowing a rule therefore never makes
   more items readable.
-- **Limits.** Each rule's grants keep their own `uses` and `expires_at`.
-  The rate limits combine strictly: a fetch (or an agent's read) of an
-  item counts in the windows of **every** rule of that subject that
-  includes the item, and is refused while any of those windows is full
-  (Rate limits for connections, below; §10.11). So adding a second rule
-  never raises how often an item can be fetched.
+- **Limits: the strictest applies.** Adding a second rule never raises
+  how often an item can be fetched or read.
+  - **Rate limits.** A fetch (or an agent's read) of an item counts in
+    the windows of **every** rule of that subject that includes the
+    item, and is refused while any of those windows is full (Rate
+    limits for connections, below; §10.11).
+  - **`uses`** (owner's review of #181). For a connection and an item,
+    the **rule grants of the item** are the grants given to that
+    connection for that item by the rules of that connection that
+    include it (one per rule; one-off and shared-action grants are not
+    among them). A fetch through one of them is answered only if every
+    rule grant of the item that has `uses` has a use left (otherwise
+    `exhausted`), and it counts **one use on each** of them; a rule
+    grant without `uses` counts nothing. When the last use of one of
+    them is spent, all of them are spent: the vault sets every rule
+    grant of the item to `used` in the same flush, so the item can no
+    longer be fetched under any of the connection's rules until it is
+    withdrawn and gains one again (or the member grants it one-off).
+    `uses_left` in `data.value` and in the catalog is the least of
+    them. For an agent, a read of an item counts one use in every rule
+    of that agent that includes it and has `uses`; when one has none
+    left the item is no longer included in any of them (§10.11).
+  - **`expires_at`** stays each grant's own: a grant ends at its
+    rule's expiry, and the item then stays readable only through the
+    other rules' grants, which are still bound by the above.
 - **Previews and explanation.** `share.rule.set{dry_run}` and the
   `dry_run`s of `item.put` and `item.tag` (§10.7) report an item that
   would be asked because of another rule with that rule's `ask_rule_id`;
   `share.pending` and `share.pending.list` carry it on the entries it
   holds. Apps MUST explain it in the member's words wherever such an
-  item appears, naming the holding rule by its tags (rules have no
-  names): "Asks you first because your *medical* rule for Dr Lee covers
-  it" in a preview, and "Also covered by your *medical* rule, which asks
-  you first" on the question. A pending question about an item already
-  shared with the subject by another rule says so, and a decline says
-  that it stops that sharing.
+  item appears: "Asks you first because your *medical* rule for Dr Lee
+  covers it" in a preview, and "Also covered by your *medical* rule,
+  which asks you first" on the question. A pending question about an
+  item already shared with the subject by another rule says so, and a
+  decline says that it stops that sharing.
+- **Naming a rule to the member** (owner's review of #181). Rules have
+  no names, and the member gives them none: in every member-facing text
+  a rule is named by its tags, in the rule's order, as the member's
+  tag names (§10.8): one tag, "your *medical* rule"; with `match: all`,
+  joined by " + " ("your *medical + id* rule"); with `match: any`,
+  joined by " or " ("your *medical or id* rule"); followed by "for
+  <subject>" where the subject is not otherwise clear. If two rules of
+  the same subject would read the same, the app adds what differs
+  (the mode, "asks first" or "shares automatically", or the expiry).
 
 | Type | Request body | Response / event body |
 |---|---|---|
@@ -5982,7 +6184,9 @@ grant: { "grant_id": "<ULID>", "connection_id": "<id>", "direction": "given|rece
   resolves now (an existing `data` or `secret` item with those fields);
   a `category` entry is available when the member answers it. A `data.*`
   message that does not parse is dropped and audited
-  (`drop.grant_malformed`), never answered.
+  (`drop.grant_malformed`), never answered. Since 0.23.0 a `data.request`
+  is an ask: mute, pause, cooldown (per entry), the pending cap and the
+  ask rate of §10.4.1 apply before it reaches the member.
 - **What an entry would grant (0.21.0; owner decision of 2026-10-08,
   §15 item 29).** An available `item` entry in `grant.pending` (and in
   `grant.list`'s `pending`) also carries the member's item's current
@@ -6074,9 +6278,11 @@ grant: { "grant_id": "<ULID>", "connection_id": "<id>", "direction": "given|rece
     (`ref` = `rule_id`, with `connection_id`), at most one per rule per
     24 hours, so that the member can raise the limit or ask the
     connection why.
-  - **With `uses`** both apply: `uses` bounds each grant's fetches over
-    its life, the rate limits bound the rule's fetches per window; a
-    fetch needs a use left and room in every window.
+  - **With `uses`** both apply: `uses` bounds the grants' fetches over
+    their life (for an item several rules include, on every one of its
+    rule grants, Overlapping rules, above), the rate limits bound the
+    rules' fetches per window; a fetch needs a use left and room in
+    every window.
   - **Shown to both sides.** The rule (`share.rule.list`) carries its
     limits; a given grant carries them as `limits`, and a received
     grant as its descriptor said (above), so that the connection's app
@@ -6199,7 +6405,9 @@ B app            B vault                   A vault                      A app
     connection (below: `unavailable`). An unsuitable request is
     therefore answered `unsuitable` even when that connection's pending
     requests are at the cap, and an unusable one `unavailable` whatever
-    its kind.
+    its kind. Then (0.23.0) the ask checks of §10.4.1: mute, pause,
+    the cooldown of the same `item_id` and `field_id`, the pending cap
+    and the ask rate.
 - **Showing a request again** (0.10.2). `critical-secret-use.list` gives
   only `payload_sha256`, which keeps the list small; an app that shows an
   incoming request from the list (or from the feed) fetches it with
@@ -6368,7 +6576,9 @@ when none). The receiving vault keeps the latest list per connection
   whose parameters do not parse, or that cannot run (not told apart);
   and when it already holds 8 pending invocations from that connection,
   or has had 60 invocations from it in the last hour (refused ones
-  count, so a connection that keeps invoking stays refused). Malformed
+  count, so a connection that keeps invoking stays refused). Since
+  0.23.0 an invocation that would wait for the member
+  (`prompt-each-time`) is also an ask (§10.4.1). Malformed
   `action.*` messages from a connection are dropped and audited
   (`drop.action_malformed`). A pending
   invocation is answered `expired` after 24 h, and `unavailable` when a
@@ -6469,7 +6679,8 @@ A vault             B vault (introducer)              C vault
   introduction per pair and 16 open per vault (`limit`); `name` 1–128
   bytes, `note` at most 256. A receiving vault keeps at most 4 open
   offers per introducer and 16 in all (more are dropped and audited,
-  `drop.intro_limit`) and ignores a repeated `intro_id`.
+  `drop.intro_limit`) and ignores a repeated `intro_id`. Since 0.23.0 an
+  offer is an ask of the introducer (§10.4.1).
 - **Authority.** A vault acts on `intro.answer` and `intro.invite` only
   from the party it sent the offer or `intro.connect` to, on
   `intro.connect`, `intro.link` and `intro.closed` only from the
@@ -6581,6 +6792,8 @@ A app            A vault                          B vault                 B apps
   16 pending (24 h), tells its apps and desktops
   (`location.request.pending`) and creates a feed item. There is no
   decline message: the member answers by starting a share, or not.
+  Since 0.23.0 a request is an ask (§10.4.1): mute, pause, the pending
+  cap and the ask rate apply; it has no cooldown.
 - Removing or blocking a connection drops every share and request with
   it (§7.4).
 - **Audit and feed.** `location.share.started`, `location.share.stopped`
@@ -10957,8 +11170,9 @@ Follow-ups:
     10. **Limits across overlapping rules: the strictest applies.** A
         fetch, or an agent's read, counts in the windows of every rule
         of the subject that includes the item and is refused while any
-        is full, so a second rule never raises the rate. Each grant
-        keeps its own `uses` and `expires_at` (open point below).
+        is full, so a second rule never raises the rate. The draft
+        kept each grant's own `uses`; the owner's review tightened it
+        (point 12.1).
     11. **Previews and app text**: the dry runs of `share.rule.set`
         (`outcome`, `ask_rule_id`), `item.put` and `item.tag`
         (`ask_rule_id` on an `auto` entry) and the pending entries
@@ -10966,19 +11180,77 @@ Follow-ups:
         explain it ("Asks you first because your *medical* rule for Dr
         Lee covers it"), naming rules by their tags since rules have no
         names.
+    12. **Review of vettid.org #181 (owner, 2026-10-09).** Approved, with
+        these changes:
+        1. **`uses` across overlapping rules: tightened.** A fetch
+           through a rule grant counts one use on every rule grant of
+           that item to that connection that has `uses`, is refused
+           `exhausted` if any has none left, and spending the last use
+           of one spends them all (`used`); `uses_left` is the least.
+           For an agent a read counts in every including rule with
+           `uses`, and an item with none left in one is included in
+           none (§10.12 Overlapping rules, §10.11).
+        2. **Rule names are their tags** in member-facing text, with no
+           member label: one tag "your *medical* rule", `match: all`
+           joined by " + " ("your *medical + id* rule"), `match: any`
+           by " or "; two rules that read the same are told apart by
+           mode or expiry (§10.12).
+        3. The ANDROID-PLAN entry follows later (confirmed).
+        4. **No approval fatigue from connections** (§10.4.1). A
+           connection's **asks** (grant requests, critical-item uses,
+           `prompt-each-time` invocations, authentication challenges,
+           introduction offers, location requests; share-rule
+           questions are the member's own and are not asks) are checked
+           for mute, pause, a 7-day **cooldown** after the member
+           declined the same ask, **8 pending** per connection and **5
+           per 24 hours** (a fixed window from the first ask that
+           reaches the member, as §10.12's), and suppressed at the
+           first that applies. **3 declines within 30 days** pause the
+           connection's asks, with one feed item
+           (`connection.asks_paused`) until the member resumes
+           (`connection.asks.resume`); the member can **mute** and
+           unmute (`connection.asks.mute`). Asks within **10 minutes**
+           form one batch: one feed item with `count`, one approval
+           entry and one notification. The constants are fixed for v1.
+        Chosen in the draft for point 4 (open for review):
+        1. **The asks** are the six listed; connection requests (§6.4)
+           keep their own limits; `allowlist` and `default-allow`
+           actions are not asks.
+        2. **"The same" ask**: a grant entry's `kind` and `ref` (fields
+           ignored); a use's `item_id` and `field_id`; an action's
+           `action_id`; any challenge; any offer from that introducer.
+           A grant request loses only the entries in cooldown. Location
+           requests have no decline, so no cooldown.
+        3. **A decline** is an explicit refusal of a whole ask; expiries,
+           partial approvals and suppressed asks are not. The 30 days
+           are sliding (three timestamps kept); the 24 hours are a
+           fixed window, as §10.12's, counting only asks that reached
+           the member.
+        4. **No oracle**: a suppressed ask gets exactly the member's
+           decline answer of its kind (`approved: false`, `denied`,
+           `accept: false`; a location request none), never a code or
+           `retry_after` of its own, after a random delay of 1–20
+           minutes (before the ask's `exp`), at most 16 held per
+           connection (beyond: no answer). The suggested `rate_limited`
+           or `unavailable` with `retry_after` would tell the connection
+           which mechanism refused it, so they are not used; asking
+           apps show every refusal as "Not accepted".
+        5. **Mute** suppresses silently (audited only); unmuting does
+           not resume a pause; `connection.asks.resume` also clears the
+           decline times and cooldowns. Both types are app and desktop
+           (no step-up: both only reduce or restore what reaches the
+           member), not delegable.
+        6. **Audit**: `drop.ask_muted`, `drop.ask_paused`,
+           `drop.ask_cooldown`, `drop.ask_pending`, `drop.ask_rate`,
+           and `connection.asks_paused`, `_resumed`, `_muted`,
+           `_unmuted`; the state is in `<connection>.asks`.
     Open points:
-    1. **`uses` across overlapping rules.** Two rules that include the
-       same item for one connection give it two grants, each with its
-       own `uses`, so the connection can fetch up to their sum. Counting
-       a fetch against every including grant's `uses`, or issuing one
-       grant per item and subject, would be stricter; neither is in
-       this revision.
-    2. **Rule names.** The app's explanation names rules by their tags;
-       a member-given rule name (a `label`) would read better when two
-       rules share tags.
-    3. **ANDROID-PLAN** gains the rule editor's per-hour and per-day
-       fields and the overlap explanation once #179 and #180 are
-       merged, to avoid conflicting with them.
+    1. **ANDROID-PLAN** gains the rule editor's per-hour and per-day
+       fields, the overlap explanation, and the connection page's
+       paused and muted states once #179 and #180 are merged, to avoid
+       conflicting with them.
+    2. **Settings for the constants.** §10.4.1's numbers are fixed for
+       v1; making them member settings is left for later.
     Follow-ups: vettid-vault (`per_hour`/`per_day` on connection rules
     in `features/items/share.go`, the per-rule windows in state, the
     `rate_limited` refusal with `retry_after` in `features/grants`, the
@@ -10986,17 +11258,29 @@ Follow-ups:
     `share.rate_limited` feed item at most once per rule per 24 h; the
     ask-wins planning, `ask_rule_id`, `shared` and `outcome` in the
     plans and dry runs, one answer per item and subject in
-    `share.decide`, the strictest windows for agents' reads; the
-    `audit.export` errata as implemented in #50, with the order
-    stated; tests for each); vettid-android (the rule editor's
-    "at most N times an hour / a day" fields for connections, the
-    "try again in" message on `rate_limited`, `limits` on received
-    grants, the overlap explanation in previews and questions, the
-    one-question-per-item decision and the decline warning; the early
-    new-epoch MUST is already met since #75; the month picker for
-    `"format": "month"`); vettid.org (none beyond these documents;
-    the registry's `payment_card` template in vettid-vault
-    `docs/item-templates.json` version 3).
+    `share.decide`, the strictest windows and `uses` across rule
+    grants (one use on each, all spent together) and for agents'
+    reads; the asks of §10.4.1 across `features/grants`,
+    `features/critical`, `features/actions`, `features/intro`,
+    `features/location` and the authentication handler: the checks in
+    order, cooldowns, pending cap, window, pause and mute state,
+    `connection.asks.mute`/`.resume`, `<connection>.asks`, batching
+    with the feed `count`, the delayed neutral answers, the `drop.ask_*`
+    and `connection.asks_*` entries; the `audit.export` errata as
+    implemented in #50, with the order stated; `client/`, `vaultctl`;
+    tests for each, among them that a suppressed ask's answer is
+    byte-identical in shape to a decline's); vettid-android (the rule
+    editor's "at most N times an hour / a day" fields for connections,
+    the "try again in" message on `rate_limited`, `limits` on received
+    grants, the overlap explanation in previews and questions with the
+    tag naming rule, the one-question-per-item decision and the
+    decline warning; one approval entry and notification per batch;
+    the connection page's paused and muted states with Resume, Mute and
+    Unmute; refusals shown as "Not accepted"; the early new-epoch MUST
+    is already met since #75; the month picker for `"format":
+    "month"`); vettid.org (none beyond these documents; the registry's
+    `payment_card` template in vettid-vault `docs/item-templates.json`
+    version 3).
 
 ## 16. Test vectors
 
@@ -11290,7 +11574,12 @@ the 0.16.0 implementation.
     already includes it; one answer per item and subject (a decline
     withdraws the item from that subject's rules); no silent
     withdrawal and no question per version; removing an `ask` rule
-    never shares anything; rate limits combine strictly; `outcome` and
+    never shares anything; rate limits combine strictly, and so does
+    `uses` (owner's review): a fetch through a rule grant counts one use
+    on every rule grant of the item to that connection, is `exhausted`
+    if any has none left, and spending one spends all; a rule is named
+    to the member by its tags (" + " for `all`, " or " for `any`);
+    `outcome` and
     `ask_rule_id` in `share.rule.set`'s dry run, `ask_rule_id` and
     `shared` in `share.pending` and `share.pending.list`; apps MUST
     explain which rule asks. A rule replaced from `ask` to `auto`
@@ -11309,7 +11598,17 @@ the 0.16.0 implementation.
   - §6.3, §6.5: a responder MUST leave a message of a new epoch that
     arrives before `hs.fin` unacked for redelivery; devices, desktops
     and agents as the vault.
-  - §15 item 31.
+  - §10.4.1 (new; owner's review of #181): asks from a connection and
+    their checks (mute, pause, a 7-day cooldown of the same ask after
+    a decline, 8 pending, 5 per 24 h fixed window), the pause after 3
+    declines in 30 days with one `connection.asks_paused` feed item,
+    `connection.asks.mute` and `connection.asks.resume`,
+    `<connection>.asks`, 10-minute batches with the feed item's
+    `count`, suppressed asks answered as a decline after a random
+    1–20-minute delay (no oracle), `drop.ask_*` and `connection.asks_*`
+    audit kinds; pointers in §10.4, §10.12–§10.16; §10 registry; §10.1;
+    §10.9 feed `count`.
+  - §15 item 31 (with 31.12, the owner's review of #181).
 
 - **0.22.0** (2026-10-08): normative, owner decisions of 2026-10-08
   (§15 item 30): History export, a deliberate exception to the
