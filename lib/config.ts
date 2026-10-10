@@ -111,6 +111,15 @@ export interface VaultConfig {
   readonly manifestKeys: readonly string[];
   /** The relay host on the enclave host's egress allowlist (pinned in the release as relay_url). */
   readonly relayHost: string;
+  /**
+   * The push gateway host on the enclave host's egress allowlist
+   * (PUSH-GATEWAY §10.1, §10.4; VAULT-MESSAGING §11.10.8, §14.3). The
+   * channel's release constants pin the gateway URL `https://<pushHost>`
+   * (vettid-vault `enclave/releasecfg/<channel>.json`): production
+   * `push.vettid.org`, staging `push.staging.vettid.org`. Channels never
+   * cross: each host allows only its own channel's gateway.
+   */
+  readonly pushHost: string;
 }
 
 /**
@@ -134,6 +143,7 @@ const STAGE_ACCOUNTS: Record<string, { main?: string; vault?: Omit<VaultConfig, 
         'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEIcIodW3liYaxACuOdB0If8igq/oWfVOcLGbWTy1vUNzTlvsVNe3ljfqpqfTCZwtR611EYk7UPTCfjaEEMPLxfQ==',
       ],
       relayHost: 'relay.vettid.org',
+      pushHost: 'push.vettid.org',
     },
   },
   staging: {
@@ -151,6 +161,8 @@ const STAGE_ACCOUNTS: Record<string, { main?: string; vault?: Omit<VaultConfig, 
       ],
       // Staging images pin the production relay at first (VAULT-RELEASES §11.1).
       relayHost: 'relay.vettid.org',
+      // The staging gateway (PUSH-GATEWAY §10.4), unlike the relay.
+      pushHost: 'push.staging.vettid.org',
     },
   },
 };
