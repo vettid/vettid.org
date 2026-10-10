@@ -21,7 +21,8 @@ related:
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
   - 0.24.1: editorial-normative, errata to 0.24.0 from its
-    implementation (vettid-vault #59, N3; pending owner approval): the
+    implementation (vettid-vault #59, N3; approved, owner decision
+    2026-10-10): the
     event is `push.token-needed` (0.24.0's `push.token_needed` broke
     §5.3's type grammar, as `vault.owner_check` did before 0.15.2); the
     vault's conservative readings stated as normative: what counts toward
@@ -33,8 +34,15 @@ changelog:
     the exempt quota counts every exempt wake and no retry, the lock wake
     obeys the debounce and caps and is skipped past its 3 s budget,
     `push.unregister` takes only `{}`, and a vault without a credential
-    answers `credential_required` (§10, §10.1, §14.1, §14.2, §15 item 32;
-    PUSH-GATEWAY 0.4.1, ANDROID-PLAN 0.1.30)
+    answers `credential_required`. Owner decision 2026-10-10: an
+    unparsable or oversized gateway answer counts toward
+    `push_registrations`; a wake attempt waits at most 10 s (the lock
+    wake: the rest of its 3 s); the HTTP `Retry-After` header is used
+    when the body has no `retry_after`, capped at 3,600 s; at a wake a
+    `401` and the `400` codes other than `token_invalid` are retried like
+    a `5xx`; an app answered `limit` pauses registering for 24 hours
+    (§10, §10.1, §14.1, §14.2, §15 item 32; PUSH-GATEWAY 0.4.1,
+    ANDROID-PLAN 0.1.30)
   - 0.24.0: normative, additive (owner request of 2026-10-10, "we can
     start to design the push service for google play and apple ios";
     §15 item 32; a draft for the owner's review): push. The app (the
@@ -10183,8 +10191,13 @@ refused or not (0.24.1):
    registration **reached the gateway** when the gateway answered its
    `POST /v1/register` over HTTP, whatever the answer: a refusal
    (`400`, `401`, `403`, `429`, `5xx`) counts as a `201` does. A timeout
-   or a failed connection does not count. The vault records the request
-   in the window even when `push.register` then fails (0.24.1).
+   or a failed connection does not count. An answer that does not parse
+   or exceeds the vault's size limit for answers is still an answer and
+   counts (owner decision 2026-10-10). The vault records the request in
+   the window even when `push.register` then fails (0.24.1). An app
+   answered `limit` stops sending `push.register` for 24 hours and
+   relies on its fallback meanwhile (ANDROID-PLAN §4 Notification
+   modes, 4: the on-phone service).
 
 **Then** the vault generates a fresh Ed25519 wake key inside the enclave
 (PUSH-GATEWAY §3), obtains an attestation document from the NSM with
@@ -10199,7 +10212,8 @@ request runs. Gateway answers: `400` (`platform_invalid`, `app_invalid`,
 `token_invalid`) → `bad_request` with the gateway's code as `message`;
 `403 attestation_invalid`, `429`, `5xx`, a timeout or no connection →
 `gateway_error` (with `retry_after` from a `429` or `502`, at most
-3,600). Every other answer (`401`, any other `4xx`, a `400` with another
+3,600; taken from the HTTP `Retry-After` header when the body has none,
+owner decision 2026-10-10). Every other answer (`401`, any other `4xx`, a `400` with another
 code, a `201` whose body does not parse) is also `gateway_error`
 (0.24.1).
 
@@ -10269,7 +10283,9 @@ phase, §15 item 32). Desktops and agents are never woken.
   not hold it back (0.24.1).
 
 **The request** is `POST /v1/wake {wake_blob, class: "notify"}`, signed
-with the wake key (PUSH-GATEWAY §5.2). It carries no data of the vault's,
+with the wake key (PUSH-GATEWAY §5.2). An attempt waits at most **10 s**
+for the answer (the lock wake: what is left of its 3 s budget); a
+timeout is handled as no connection (owner decision 2026-10-10). It carries no data of the vault's,
 and the gateway sends a fixed payload (PUSH-GATEWAY §6): no item, kind,
 name, count, cursor or priority reaches the gateway, Google or Apple.
 There are no vault-side quiet hours: the phone's Do Not Disturb or Focus
@@ -10287,13 +10303,15 @@ member's time zone.
   there is no registration). The app answers with a fresh
   `push.register` when it next runs; a wake that would have been sent is
   lost, which is safe: the app collects at every start.
-- `429`: wait `retry_after` (at most 3,600 s; **60 s** when the answer
-  has none, 0.24.1), merging triggers; `last_result` `rate_limited`.
+- `429`: wait `retry_after` (from the body, else the HTTP `Retry-After`
+  header, owner decision 2026-10-10; at most 3,600 s; **60 s** when the
+  answer has neither, 0.24.1), merging triggers; `last_result` `rate_limited`.
 - `5xx`, a timeout or no connection: retry after 5 s, 30 s and 120 s
   (each ±20 % jitter), then drop the wake; `last_result`
   `gateway_error`. Not audited. Every answer other than `202`, `429` and
-  the three above (`401`, any other `4xx`, a `202` whose body does not
-  parse) is handled the same way (0.24.1).
+  the three above (`401`, a `400` other than `token_invalid`, any other
+  `4xx`, a `202` whose body does not parse) is handled the same way
+  (0.24.1; owner decision 2026-10-10, PUSH-GATEWAY §7).
 
 No wake writes an audit entry or a feed item: wakes are frequent, and a
 log of them would be a timeline of the member's activity.
@@ -11791,8 +11809,15 @@ Follow-ups:
     7. `push.unregister` accepts only `{}`; a vault without a credential
        answers both push requests `credential_required` (§3.5.7 runs
        first) (§14.1).
-    Follow-up: vettid-android listens for `push.token-needed`
-    (ANDROID-PLAN 0.1.30).
+    Owner decision 2026-10-10 on the review of these errata: an
+    unparsable or oversized gateway answer counts toward
+    `push_registrations` (vettid-vault fixed to match); a wake attempt
+    waits at most 10 s; the `Retry-After` header is used when the body
+    has no `retry_after`, capped at 3,600 s; PUSH-GATEWAY §7 follows the
+    vault for `401` and for `400` at a wake; an app answered `limit`
+    pauses registering for 24 hours on its on-phone fallback.
+    Follow-up: vettid-android listens for `push.token-needed` and
+    handles `limit` (ANDROID-PLAN 0.1.30).
 
 ## 16. Test vectors
 
@@ -12066,7 +12091,8 @@ the 0.16.0 implementation.
 ## 17. Changelog
 
 - **0.24.1** (2026-10-10): editorial-normative, errata to 0.24.0 from
-  its implementation (vettid-vault #59, N3; pending owner approval;
+  its implementation (vettid-vault #59, N3; approved, owner decision
+  2026-10-10;
   §15 item 32).
   - §10, §14.1, §14.2, §3.6.3 and every mention: the event is
     **`push.token-needed`**. 0.24.0 wrote `push.token_needed`, which
@@ -12091,6 +12117,13 @@ the 0.16.0 implementation.
     outcome is not recorded.
   - §10.1: the `push_registrations` limit, `gateway_error` and the
     state a failed request may change follow §14.1.
+  - Owner decision 2026-10-10: §14.1 check 5 counts an unparsable or
+    oversized gateway answer too, and an app answered `limit` stops
+    registering for 24 hours; §14.1 and §14.2 use the HTTP `Retry-After`
+    header when the body has no `retry_after` (at most 3,600 s); §14.2:
+    a wake attempt waits at most 10 s (the lock wake: the rest of its
+    3 s), and at a wake a `400` other than `token_invalid` is retried
+    like a `5xx` (PUSH-GATEWAY 0.4.1 §7).
   - §15 item 32: the errata listed.
 
 - **0.24.0** (2026-10-10): normative, additive; owner request of

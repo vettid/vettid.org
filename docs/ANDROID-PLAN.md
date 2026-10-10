@@ -5,11 +5,14 @@ version: 0.1.30
 date: 2026-10-10
 changelog:
   - 0.1.30: errata from the vault's N3 implementation (VAULT-MESSAGING
-    0.24.1, PUSH-GATEWAY 0.4.1; vettid-vault #59; pending owner
-    approval): the vault asks for a fresh token with
+    0.24.1, PUSH-GATEWAY 0.4.1; vettid-vault #59; approved, owner
+    decision 2026-10-10): the vault asks for a fresh token with
     `push.token-needed`, not 0.1.29's `push.token_needed`, which broke
-    VAULT-MESSAGING §5.3's type grammar; the app listens for the hyphen
-    (§4 Notification modes, 4)
+    VAULT-MESSAGING §5.3's type grammar; the app listens for the hyphen.
+    Owner decision 2026-10-10: when `push.register` answers `limit`, the
+    app stops retrying for 24 hours, Settings → Notifications shows
+    "Push unavailable, using the on-phone service", and the on-phone
+    service keeps running as the fallback (§4 Notification modes, 4)
   - 0.1.29: the N2 spec step (owner request of 2026-10-10, a draft for
     review): Google push (§4 Notification modes, 4) follows
     VAULT-MESSAGING 0.24.0 §14 and PUSH-GATEWAY 0.4.0: `push.register`
@@ -936,7 +939,12 @@ its process runs; nothing keeps it running in the background).
    (`last_result` `gateway_error`: "Push service not reachable, retrying"),
    and "Registering again" after `push.token-needed`; `unavailable`
    from `push.register` keeps "Not available yet", `gateway_error`
-   retries with backoff (1 minute doubling to 1 hour). Correctness
+   retries with backoff (1 minute doubling to 1 hour). `limit`
+   (`push_registrations`: 20 answered registrations in 24 hours, refusals
+   included) stops the retries for 24 hours; Settings → Notifications
+   shows "Push unavailable, using the on-phone service", and the on-phone
+   service (a) runs as the fallback meanwhile (owner decision
+   2026-10-10, 0.1.30). Correctness
    never depends on a wake: the app collects at every foreground as
    now.
    - **Plumbing now**: the setting, a `PushProvider` interface
