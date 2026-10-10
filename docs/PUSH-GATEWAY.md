@@ -533,9 +533,9 @@ still receives everything:
       Secrets Manager (`vettid-org/<stage>/push/fcm`) yourself, deleting
       the downloaded file.
 2. **Apple**
-   1. An **Apple Developer Program** membership. An organisation
-      membership needs the legal entity and a D-U-N-S number (the entity
-      is in formation); see question 12.
+   1. An **Apple Developer Program** membership: an individual one now,
+      under the organisation's Apple ID, converted to an organisation
+      membership once the entity has a D-U-N-S number (question 12).
    2. Register the App ID `com.vettid.app` (the bundle id the earlier iOS
       app used), with Push Notifications, App Groups, Associated Domains
       and Time Sensitive Notifications; and the extension's App ID
@@ -543,7 +543,7 @@ still receives everything:
       `com.vettid.app.staging` and
       `com.vettid.app.staging.NotificationService`. App Groups
       `group.com.vettid.app` and `group.com.vettid.app.staging` (§10.4).
-      `com.vettid.app` belongs to the organisation team (question 12).
+      They stay with the team when it is converted (question 12).
    3. Create an **APNs authentication key (.p8)** (Keys → +, Apple Push
       Notifications service). Note the Key ID and the Team ID. The .p8
       downloads **once**: put it straight into Secrets Manager
@@ -594,15 +594,16 @@ still receives everything:
     constant key.
 11. **Desktops.** **Recommended: no push for desktops**; they connect
     while running.
-12. **Apple membership.** **Open; the owner is deciding** (2026-10-10):
-    an **individual** membership now, to build and test, and the
-    **organisation** membership (legal entity, D-U-N-S number) for
-    release. Either way, `com.vettid.app`, `com.vettid.app.staging` and
-    the production APNs key belong to the organisation team: an App ID
-    cannot move between teams without an app transfer. An individual
-    team uses development bundle ids of its own and its own APNs key,
-    the latter only in the staging secret, with its bundle ids in the
-    staging gateway's app list (§5.1).
+12. **Apple membership.** **Decided** (owner, 2026-10-10): an
+    **individual** membership now, under the organisation's Apple ID,
+    to build and test; it is **converted** to an organisation
+    membership (Apple's "Switch to organization membership", with the
+    entity's D-U-N-S number) for release. A conversion keeps the team,
+    its App IDs and its keys, so `com.vettid.app`, its staging ids and
+    the APNs key are registered on the individual team from the start;
+    no app transfer is needed. The earlier iOS app was signed by team
+    3X25CJ86MV (Xcode automatic signing); if `com.vettid.app` is still
+    registered there, it is removed from that team first.
 13. **Calls.** Ringing calls need FCM high priority with a full-screen
     intent on Android and PushKit (VoIP pushes, which must report a
     CallKit call at once) on iOS. **Recommended: leave to the calls
@@ -665,7 +666,7 @@ APNs token shape; it corresponds to no device.)
   service vault; at most one registration per vault, §3; iOS staging
   bundle ids, App Groups and keychain groups, the APNs environment of each
   build, Universal Links and a future IOS-PLAN, §10.4, §11.2, §14.1;
-  question 12 open, question 14 answered). **Stateless
+  questions 12 and 14 answered). **Stateless
   gateway**: 0.3.0's `wake_ref` registry is replaced by **wake blobs**
   sealed by the gateway and kept only by the vault (§4); endpoints are
   `POST /v1/register` and `POST /v1/wake` (no update, no delete); one
