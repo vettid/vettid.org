@@ -1,14 +1,20 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.29
+version: 0.1.30
 date: 2026-10-10
 changelog:
+  - 0.1.30: errata from the vault's N3 implementation (VAULT-MESSAGING
+    0.24.1, PUSH-GATEWAY 0.4.1; vettid-vault #59; pending owner
+    approval): the vault asks for a fresh token with
+    `push.token-needed`, not 0.1.29's `push.token_needed`, which broke
+    VAULT-MESSAGING §5.3's type grammar; the app listens for the hyphen
+    (§4 Notification modes, 4)
   - 0.1.29: the N2 spec step (owner request of 2026-10-10, a draft for
     review): Google push (§4 Notification modes, 4) follows
     VAULT-MESSAGING 0.24.0 §14 and PUSH-GATEWAY 0.4.0: `push.register`
     `{platform: "fcm", token, app_id}`, the gateway's sealed wake blob
-    instead of a `wake_ref`, `push.token_needed` re-registers, the
+    instead of a `wake_ref`, `push.token-needed` re-registers, the
     status line reads the `push` state from `device.list`; the protocol
     gaps of item 9 are answered there. Owner review of 2026-10-10: links
     in a conversation (§4 Screens, Conversation): only `https://` URLs are
@@ -909,8 +915,8 @@ its process runs; nothing keeps it running in the background).
      (inexact; no exact-alarm permission). After the check the app
      catches up (§6 Owner check, 4) and normal notifications resume;
      nothing missed is replayed as notifications, the bell counts it.
-4. **(b) Google push (FCM)** (PUSH-GATEWAY 0.4.0; VAULT-MESSAGING
-   0.24.0 §14, 0.1.29). Contentless wakes:
+4. **(b) Google push (FCM)** (PUSH-GATEWAY 0.4.1; VAULT-MESSAGING
+   0.24.1 §14, 0.1.29, 0.1.30). Contentless wakes:
    the app's FCM token goes to its vault over the end-to-end session
    (`push.register{platform: "fcm", token, app_id}`, `app_id` the
    application id of the build), the vault registers it with the
@@ -921,14 +927,14 @@ its process runs; nothing keeps it running in the background).
    decrypts as in (a), and posts the same notifications, with no
    persistent service. A wake gives up to about 20 s of execution; a longer
    collect runs as expedited `WorkManager` work. Token rotation
-   (`onNewToken`) and `push.token_needed` (the gateway reported the
-   token gone) send `push.register` again; switching away from the
+   (`onNewToken`) and `push.token-needed` (the gateway reported the
+   token gone; 0.1.29 spelled it `push.token_needed`) send `push.register` again; switching away from the
    mode or a wipe sends `push.unregister` (a transfer or a recovery
    that removes the app erases the registration vault-side,
    VAULT-MESSAGING §14.1). The status line (1) reads the `push` state
    on the app's `device.list` entry: "Connected" while `active`
    (`last_result` `gateway_error`: "Push service not reachable, retrying"),
-   and "Registering again" after `push.token_needed`; `unavailable`
+   and "Registering again" after `push.token-needed`; `unavailable`
    from `push.register` keeps "Not available yet", `gateway_error`
    retries with backoff (1 minute doubling to 1 hour). Correctness
    never depends on a wake: the app collects at every foreground as
@@ -1027,7 +1033,7 @@ its process runs; nothing keeps it running in the background).
    (0.1.29, a draft for the owner's review): 1 by §14.1 (the holder
    only; `{push}` or `unavailable`; `fcm` and `apns`; sizes); 2 by a new
    `push.register` replacing the old registration; 3 by
-   `push.token_needed` and `push` in `device.list`; 4 by §14.2 (feed
+   `push.token-needed` and `push` in `device.list`; 4 by §14.2 (feed
    items of priority `normal` and above except guides, `vault.held`,
    `vault.locking`, the alarm; FCM's constant `collapse_key` is set by the
    gateway); 5 yes, for those only; 6 by §11.10.8 and §12.2; 7 a fresh
@@ -1048,7 +1054,7 @@ its process runs; nothing keeps it running in the background).
       first (the vault then `PUT`s or re-registers, PUSH-GATEWAY §4.2).
    3. A dead token (PUSH-GATEWAY §5: "the owner requests a fresh push
       token from the device"): a V→D message for it (e.g.
-      `push.token_needed`) and how the app learns its registration's
+      `push.token-needed`) and how the app learns its registration's
       state (e.g. `push` in `device.list` or `vault.status`).
    4. Which events trigger a wake and of which class: §14 says a
       user-visible message; the app needs a wake for every item the

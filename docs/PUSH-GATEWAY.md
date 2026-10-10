@@ -1,11 +1,11 @@
 # VettID Push Gateway Protocol
 
-**Version:** 0.4.0 (draft)
+**Version:** 0.4.1 (draft)
 **Status:** Pre-implementation draft for review (N2; owner request of
 2026-10-10: "we can start to design the push service for google play and
 apple ios")
 **Companion to:** VettID Relay Protocol (Appendix A), VAULT-MESSAGING
-0.24.0 §14 (`push.register`, the vault's wake rules), ANDROID-PLAN D7
+0.24.1 §14 (`push.register`, the vault's wake rules), ANDROID-PLAN D7
 
 ## 1. Purpose & design principles
 
@@ -381,7 +381,7 @@ records wakes instead of sending them (N3).
 3. FCM may downgrade high-priority messages that show no notification.
    The vault wakes only for what the Mapping notifies (VAULT-MESSAGING
    §14.2), so nearly every wake shows one.
-4. `onNewToken` and `push.token_needed` send `push.register` again;
+4. `onNewToken` and `push.token-needed` send `push.register` again;
    leaving the mode or a wipe sends `push.unregister`.
 
 ### 11.2 iOS: Apple push (the iOS default)
@@ -401,7 +401,7 @@ modes: **Apple push** (the default) and **Off**.
   app fetches only while open, as on Android. The same warning ("Not
   recommended…").
 - The app re-registers whenever the OS gives a token different from the
-  one last registered, and on `push.token_needed`.
+  one last registered, and on `push.token-needed`.
 
 **How a wake is handled: a notification service extension (recommended).**
 
@@ -660,6 +660,12 @@ APNs token shape; it corresponds to no device.)
 
 ## 17. Changelog
 
+- **0.4.1** — errata from the vault's N3 implementation (vettid-vault
+  #59; pending owner approval): the event asking the app for a fresh
+  token is `push.token-needed` (§11.1, §11.2), as VAULT-MESSAGING 0.24.1
+  corrects it; 0.4.0's `push.token_needed` broke VAULT-MESSAGING §5.3's
+  type grammar. The vault's handling of each gateway answer is
+  VAULT-MESSAGING 0.24.1 §14.1 and §14.2.
 - **0.4.0** — N2 design (owner request of 2026-10-10; revised after the
   owner's review of 2026-10-10: §12 rewritten, connections already use
   the channel through messaging, `https://`-only links, services with the
