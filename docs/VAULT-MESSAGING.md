@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.23.2
-date: 2026-10-09
+version: 0.23.3
+date: 2026-10-10
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -20,6 +20,14 @@ related:
   - VAULT-RELEASES.md (0.1.6, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.23.3: editorial-normative, from the staging S8 canary of
+    2026-10-10 (pending owner approval): an unlock of a vault that is
+    already unlocked locks it and opens it again in the same request
+    (stated, unchanged; §11.4); the lock that request makes keeps the
+    lease the request took, which is released only if the vault does
+    not open (§11.1); apps ignore a `vault.locking` whose `ts` is not
+    later than that of their latest successful unlock result (§10.2,
+    §11.4)
   - 0.23.2: additive (owner decision of 2026-10-09, §15 item 31.14):
     History records which device opened and locked the vault.
     `vault.unlocked` carries `device_id`, the app whose unlock (§11.4)
@@ -3730,7 +3738,7 @@ an answer to an unknown or expired id is dropped.
 | `vault.lock` (app, desktop) | `{}` | `{}`; then `vault.locking` |
 | `account.get` (app, desktop) | `{}` | `{account: <snapshot, §11.13> \| null, version, received_at, name_request?}`; `null` (and `version` 0) before any snapshot arrived (0.15.0); the snapshot carries the member's full `email` (0.20.0), which only this type returns and only to the app and desktops (§11.13); `name_request` (0.18.0) is the latest `account.name.set` request (§10.8). A change of `name_request` alone sends `sync.event{kind: "account.changed"}` with the stored snapshot's `version` repeated, not incremented (0.19.0): `version` counts snapshots only, so a device MUST NOT skip an `account.changed` whose `version` it already holds |
 | `vault.delete` (app: the holder, or the enrolling app before a credential exists) | `{confirm: "delete my vault", credential?, utk_id, sealed{pin, password?}}` | `{}`; then the deletion of §12.5. `bad_request` without the exact phrase or a needed member; `bad_pin`, `backoff`, `bad_password`, `credential_frozen` / `rotation_required` (holder during an alarm), `forbidden` (a recovering app since 0.16.0: it completes the recovery first, then deletes as the holder; a member without the credential uses §11.11.9) |
-| `vault.locking` (ephemeral) | — | `{reason?}`, with `exp` = now + 60 s; `reason` is `"recovery"` when a recovery request locked the vault (§11.11.1), `"owner_check"` when ten consecutive failed owner checks did (§3.6.4, 0.13.0) |
+| `vault.locking` (ephemeral) | — | `{reason?}`, with `exp` = now + 60 s; an app ignores one whose `ts` is not later than its latest successful unlock result's (§11.4, 0.23.3); `reason` is `"recovery"` when a recovery request locked the vault (§11.11.1), `"owner_check"` when ten consecutive failed owner checks did (§3.6.4, 0.13.0) |
 | `relay.token.issued` | — | `{kind: "standing" \| "reconnect", token}` |
 | `relay.token.refresh` (req) | `{}` | `{kind: "standing", token}` |
 | `identity.rotate` | — | `{rotation: <identity.rotate statement, §3.4>}` |
@@ -7233,7 +7241,10 @@ enclave's member index object (`users/<hex SHA-256("vettid/vms/2/user" ||
     with a lease length of 180 s. A renewal that finds another holder, or
     renewals that keep failing until 15 s before the lease expires, mean
     the lease is **lost**: the enclave locks the vault (§12.3).
-  - The parent releases the lease on lock.
+  - The parent releases the lease on lock, except for the lock that an
+    enroll or unlock makes of the vault it is about to open (§11.4):
+    that request's lease stays, and the parent releases it only if the
+    vault does not open (0.23.3).
 - **Routing for `GET /api/vault/enclave`:**
   - If the vault has a live lease, the API returns the descriptor of the
     leased instance.
@@ -7478,6 +7489,21 @@ one of:
   credential (§11.11.5 step 1). Nothing else is in the body: no token,
   no `vault_bundle`; the vault removes the recovery and the registered
   unlock key and locks again.
+
+**Unlock of a running vault (0.23.3).** An unlock of a vault that is
+already unlocked is processed like any other: there is no "already
+unlocked" answer, because the PIN, the device assertion, the minimum
+sequence numbers and any `release_update` are checked by every unlock,
+and its result carries a fresh token. The enclave first locks the
+running vault as for an owner request (§12.3: the batch, the flush,
+`vault.locking`, the lifecycle `locked`), then opens it with the
+request; an unlock that fails leaves the vault locked. The lease the
+request took stays across that lock (§11.1). The result's inner `ts` is
+set after the lock, so the lock's `vault.locking` is never later than
+the result. That notice is relayed and can reach the app after the
+result (as can the lock before a release update's confirming unlock,
+§11.10.6): an app MUST ignore a `vault.locking` whose `ts` is not later
+than that of the latest successful unlock result it received.
 
 On `state_rollback`, the app MUST warn the user that the vault's stored state
 is older than state this device has already seen (§13.2). `release_key`
