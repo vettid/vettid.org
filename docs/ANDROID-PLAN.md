@@ -10,7 +10,10 @@ changelog:
     `{platform: "fcm", token, app_id}`, the gateway's sealed wake blob
     instead of a `wake_ref`, `push.token_needed` re-registers, the
     status line reads the `push` state from `device.list`; the protocol
-    gaps of item 9 are answered there
+    gaps of item 9 are answered there. Owner review of 2026-10-10: links
+    in a conversation (§4 Screens, Conversation): only `https://` URLs are
+    tappable, opened through Android after "Open link to <host>?";
+    other schemes stay text
   - 0.1.28: staging S8 canary of 2026-10-10 (VAULT-MESSAGING 0.23.3,
     pending owner approval): after a release update ("Your vault is
     updated", Continue) and after an unlock of an open vault, the app
@@ -407,7 +410,7 @@ rows below say "Vault" for the screens and "item" for the data.
 | Screen | Proton analogue | Notes |
 |---|---|---|
 | Messages | Inbox | Conversations by connection; Unread chip; the floating action button starts a new message (pick a connection, then the conversation) |
-| Conversation | Message detail | Bubbles in a card list; pill actions (reply, more) |
+| Conversation | Message detail | Bubbles in a card list; pill actions (reply, more). Links in a message (0.1.29, VAULT-MESSAGING 0.24.0 §10.5): only `https://` URLs are tappable; a tap asks "Open link to <host>?" and then hands the URL to Android, so a verified App Link opens its app and any other link the browser; every other scheme, custom app schemes included, stays plain text |
 | Connections | Contacts | Initial tiles, status (pending / active / stale / blocked); a star marks favourites (the owner's `favorite` flag, `connection.update`), whose tiles are teal; the floating action button invites a connection (0.1.11: QR or link, or scan the other's QR), the only invite entry point besides empty states. Each is titled "First Last" from the profile's core (VAULT-MESSAGING 0.18.0 §10.8), the display name, if any, as secondary text. Incoming requests show the requester's names the same way. Only between activation and the first `profile.update`, when the request's names are not at hand: "Name not shared yet"; never "Unnamed connection" |
 | Connection detail | — | Titled "First Last" (never an alias), the display name secondary. Profile shared with you (the names labelled as the name on their VettID account, never "verified"; display name, photo and items labelled as shared by them), sharing both ways ("You share with <First>": every share rule a row with its own settings, opening its editor or deleted after a confirmation, "Add a rule" up to 64, 0.1.20), a connection's requests (0.1.22, VAULT-MESSAGING 0.23.0 §10.4.1: muted, paused after several declines, declined ones in cooldown, with Mute/Unmute, Resume and "Allow declined requests again"), authenticate, the vault key fingerprint (`ik`, 8 groups of 4 hex digits, §10.8: the lasting identity check). The action bar: message, favourite, History, remove (confirmed). No safety code (it belongs to connecting: the invite and request screens), no alias or notes, no edit or block (0.1.13; blocking stays on an incoming request) |
 | Approvals | — (VettID-specific) | Pending connection requests, grant requests, critical-item uses, share-rule decisions; approve/deny; critical items need the credential password. 0.1.22: a connection's asks within 10 minutes are one entry ("Sam asks for 3 things"), a connection whose asks are paused is a notice (resume, or remove the connection), a share question names the rule that asks first and warns when declining stops an item already shared, one question per item and connection |

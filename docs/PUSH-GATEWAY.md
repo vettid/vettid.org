@@ -77,6 +77,11 @@ connection while they run, and agents are servers.
 - Since the token itself is already a stable device identifier towards the
   gateway, a per-registration key adds no linkability; it only proves that
   the caller is the vault that registered.
+- A vault has **at most one push registration** (owner review of
+  2026-10-10): the holder's, the phone that holds the credential
+  (VAULT-MESSAGING §3.5.9), which is the only device to wake. A new
+  registration replaces the previous one (VAULT-MESSAGING §14.1). There
+  is no list of registrations or wake keys, per member or per vault.
 
 ## 4. Wake blobs
 
@@ -324,7 +329,19 @@ for that service account in the secret above.
 | Trusted manifest | the staging manifest and key | the production manifest, keys A and B |
 | Firebase project | `vettid-staging` | `vettid-prod` |
 | APNs environments | `sandbox` and `production` | `production` only |
-| App ids | as configured for staging builds | `com.vettid.app` (FCM and APNs) |
+| App ids (Android) | the staging build's application id | `com.vettid.app` |
+| App ids (iOS) | `com.vettid.app.staging`, extension `com.vettid.app.staging.NotificationService` | `com.vettid.app`, extension `com.vettid.app.NotificationService` |
+| iOS App Group | `group.com.vettid.app.staging` | `group.com.vettid.app` |
+| iOS keychain access group | `<team id>.com.vettid.app.staging` | `<team id>.com.vettid.app` |
+
+The APNs environment of a registration follows how the iOS build is
+signed (its `aps-environment` entitlement, §11.2): builds installed from
+Xcode with a development profile use **`sandbox`**; TestFlight and App
+Store builds use **`production`**. A staging build from TestFlight
+therefore registers `production` against the staging gateway, which is
+why staging accepts both. The staging and production iOS apps have
+separate bundle ids, App Groups and keychain access groups, so a staging
+install never shares storage with a production one on the same phone.
 
 A staging vault image embeds the staging URL; channels cannot cross
 (VAULT-MESSAGING §11.10.8). The dev stack uses a **gateway stand-in**
@@ -434,33 +451,52 @@ carry names (`removeDeliveredNotifications`), mirroring Android's rule
 (to be verified on device in the iOS phase, with the interruption level
 set from the extension).
 
-## 12. Apps connected to VettID (principles)
+**Beyond push.** iOS client work other than push (onboarding, the vault
+session, keychain storage, Universal Links for enrollment and connection
+links, message links per §12) is planned in a future **IOS-PLAN**, the
+counterpart of ANDROID-PLAN.
+
+## 12. Apps and services connected to VettID
 
 Owner direction: "apps connected to vettid get to use our notification
-channel." The detailed protocol comes later; these principles bind it:
+channel." **No new protocol is needed for this** (owner review of
+2026-10-10): a connection already reaches the member through VettID
+messaging, and that is the notification channel.
 
-1. **Through the vault, never the token.** A connected app or service (a
-   LEASH agent, a connection, or a future registered service) sends a
-   notice to the member's **vault**, end-to-end encrypted, as it sends
-   anything else. The vault turns it into a feed item and its wake rules
-   decide whether the phone is woken. No third party ever sees a push
-   token, a wake blob or the gateway.
-2. **The member decides per source**: on or off for each app, a cap on its
-   priority (a third party can never raise `urgent` or use the Security
-   and Daily check channels, which belong to the vault), and per-source
-   rate limits in the style of a connection's asks (VAULT-MESSAGING
-   §10.4.1): muted, paused after abuse, bounded per hour and day.
-3. **Same privacy as VettID's own.** Text lives only in the vault and the
-   phone; the wake is the same fixed payload. The notification names its
-   source ("From <agent name>").
-4. **Open questions** (for that later design): which principal posts
-   (an agent with a `notify` LEASH grant is the natural first case); a
-   new feed kind (`notice`) with `title`/`body` limits and a deep link; and
-   whether a third-party mobile app on the same phone may receive a
-   notice: recommended **only as a VettID notification whose tap opens
-   that app by its declared link**, never an inter-app wake (that would
-   make VettID a distributor, which the no-UnifiedPush decision rules
-   out).
+1. **Through the vault, never the token.** A connection sends a message
+   (`message.send` → `message.deliver`, VAULT-MESSAGING §10.5),
+   end-to-end encrypted, to the member's vault. The vault stores it,
+   creates a `message.received` feed item (VAULT-MESSAGING §10.9), and
+   its wake rules (§14.2 there) decide whether the phone is woken. The sender
+   never sees a push token, a wake blob or the gateway, and the wake is
+   the same fixed payload (§6).
+2. **Same privacy as VettID's own.** The text lives only in the vaults and
+   on the phone. The notification is built on the phone, under the
+   member's preview setting, and names its source ("New message from
+   <First Last>", ANDROID-PLAN §4 Notifications).
+3. **Bounded by the existing rules.** The vault creates the feed item and
+   sets its priority; a connection cannot raise it, and the Security and
+   Daily check channels carry only the vault's own kinds. A connection's
+   messages are limited per peer (VAULT-MESSAGING §7.3); its asks can be
+   muted and are paused after abuse (VAULT-MESSAGING §10.4.1); the member
+   can remove or block it (§10.4).
+4. **Links in messages** (VAULT-MESSAGING §10.5). Message text is plain
+   text. Clients make only **`https://`** URLs tappable. Before opening
+   one the app shows its domain and asks; it then hands the URL to the
+   operating system, so an Android App Link or an iOS Universal Link
+   opens the installed app verified for that domain, and any other link
+   opens the browser. **Custom schemes** (`someapp://`) and all other
+   schemes are shown as text and never opened: any app can claim a
+   custom scheme, so such a link could open an impostor. A notification
+   holds no links; tapping it opens the conversation.
+5. **Services** without a member vault come with the **service vault**
+   (owner, 2026-10-10: designed soon). A service gets its own vault and
+   becomes a connection like any other, so 1–4 apply unchanged. Whether
+   a service may send more than messages (for example a notice with a
+   title and a link) is decided in that design. VettID never wakes a
+   third-party app (that would make VettID a distributor, which the
+   no-UnifiedPush decision rules out); a third-party app is opened only
+   by the member tapping its link.
 
 ## 13. Devices without push (informative)
 
@@ -501,9 +537,13 @@ still receives everything:
       membership needs the legal entity and a D-U-N-S number (the entity
       is in formation); see question 12.
    2. Register the App ID `com.vettid.app` (the bundle id the earlier iOS
-      app used), with Push Notifications, App Groups and Time Sensitive
-      Notifications; and the extension's App ID
-      `com.vettid.app.NotificationService`.
+      app used), with Push Notifications, App Groups, Associated Domains
+      and Time Sensitive Notifications; and the extension's App ID
+      `com.vettid.app.NotificationService`. The same for staging:
+      `com.vettid.app.staging` and
+      `com.vettid.app.staging.NotificationService`. App Groups
+      `group.com.vettid.app` and `group.com.vettid.app.staging` (§10.4).
+      `com.vettid.app` belongs to the organisation team (question 12).
    3. Create an **APNs authentication key (.p8)** (Keys → +, Apple Push
       Notifications service). Note the Key ID and the Team ID. The .p8
       downloads **once**: put it straight into Secrets Manager
@@ -511,6 +551,12 @@ still receives everything:
       delete the file.
    4. Request the **notification service extension filtering**
       entitlement (Apple's request form) for `com.vettid.app`.
+   5. **Universal Links**: give an agent the Team ID. The stacks then serve
+      `/.well-known/apple-app-site-association` on the account and relay
+      hosts (production and staging), listing the team's bundle ids and
+      the paths the Android App Links already cover (enrollment and
+      connection links); nothing manual beyond the Associated Domains
+      capability of item 2.
 3. **DNS/TLS**: nothing manual; the stack adds `push.vettid.org` and
    `push.staging.vettid.org` to the zone and the ALB certificate.
 
@@ -548,17 +594,22 @@ still receives everything:
     constant key.
 11. **Desktops.** **Recommended: no push for desktops**; they connect
     while running.
-12. **Apple membership.** Enrol as the organisation once the entity has a
-    D-U-N-S number, or as an individual now? **Recommended: the
-    organisation**, since the App Store seller name and the APNs key
-    belong to it and moving apps between memberships is slow; iOS work is
-    not scheduled before then.
+12. **Apple membership.** **Open; the owner is deciding** (2026-10-10):
+    an **individual** membership now, to build and test, and the
+    **organisation** membership (legal entity, D-U-N-S number) for
+    release. Either way, `com.vettid.app`, `com.vettid.app.staging` and
+    the production APNs key belong to the organisation team: an App ID
+    cannot move between teams without an app transfer. An individual
+    team uses development bundle ids of its own and its own APNs key,
+    the latter only in the staging secret, with its bundle ids in the
+    staging gateway's app list (§5.1).
 13. **Calls.** Ringing calls need FCM high priority with a full-screen
     intent on Android and PushKit (VoIP pushes, which must report a
     CallKit call at once) on iOS. **Recommended: leave to the calls
     phase**; missed calls already notify as feed items.
-14. **Connected apps** (§12). **Recommended: the principles as written**;
-    the protocol after N4.
+14. **Connected apps** (§12). **Answered** (owner review of 2026-10-10):
+    connections already use the channel through messaging; links are
+    `https://` only; services come with the service vault.
 
 ## 15. Test vector
 
@@ -608,7 +659,13 @@ APNs token shape; it corresponds to no device.)
 
 ## 17. Changelog
 
-- **0.4.0** — N2 design (owner request of 2026-10-10). **Stateless
+- **0.4.0** — N2 design (owner request of 2026-10-10; revised after the
+  owner's review of 2026-10-10: §12 rewritten, connections already use
+  the channel through messaging, `https://`-only links, services with the
+  service vault; at most one registration per vault, §3; iOS staging
+  bundle ids, App Groups and keychain groups, the APNs environment of each
+  build, Universal Links and a future IOS-PLAN, §10.4, §11.2, §14.1;
+  question 12 open, question 14 answered). **Stateless
   gateway**: 0.3.0's `wake_ref` registry is replaced by **wake blobs**
   sealed by the gateway and kept only by the vault (§4); endpoints are
   `POST /v1/register` and `POST /v1/wake` (no update, no delete); one

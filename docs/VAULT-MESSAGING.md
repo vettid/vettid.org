@@ -37,8 +37,12 @@ changelog:
     debounce, 30 wakes an hour then one per 10 minutes, urgent ones
     exempt up to 10 an hour; retries; no content and no quiet hours.
     Both push types are allowed while held. The release constants gain
-    the gateway URL and the enclave egress the gateway's host (§3.6.3,
-    §10, §10.1, §10.3, §10.9, §11.10.8, §12.2, §14; PUSH-GATEWAY 0.4.0)
+    the gateway URL and the enclave egress the gateway's host. Owner
+    review of 2026-10-10: at most one registration per vault (§14.1);
+    message text links: only `https://` URLs are tappable, opened through
+    the operating system after showing the host, never custom schemes
+    (§10.5) (§3.6.3, §10, §10.1, §10.3, §10.5, §10.9, §11.10.8, §12.2,
+    §14; PUSH-GATEWAY 0.4.0)
   - 0.23.3: editorial-normative, from the staging S8 canary of
     2026-10-10 (pending owner approval): an unlock of a vault that is
     already unlocked locks it and opens it again in the same request
@@ -4160,6 +4164,17 @@ item.
 | `message.delete` | `{connection_id, message_id}` | `{}`; local only |
 
 The D→V messaging types are sent by `app` or `desktop` devices.
+
+**Links** (0.24.0, owner review of 2026-10-10). `text` is plain text;
+the vault neither parses nor rewrites it. Clients make only `https://`
+URLs tappable; before opening one they show its host and ask, then hand
+the URL to the operating system, so an Android App Link or an iOS
+Universal Link opens the app verified for that domain and any other link
+opens the browser. URLs of every other scheme, custom app schemes
+(`someapp://`) included, are shown as text and never opened: any app can
+claim a custom scheme. This is how connections, and later services
+(their service vaults), reach the member through VettID's notification
+channel (PUSH-GATEWAY §12).
 
 ### 10.6 Credential (§3.5)
 
@@ -10154,6 +10169,12 @@ request runs. Gateway answers: `400` (`platform_invalid`, `app_invalid`,
 A **token rotation** is simply a new `push.register`: the new
 registration replaces the old one, and the old blob is never used again
 (the gateway keeps nothing to delete).
+
+**At most one registration per vault** (owner review of 2026-10-10):
+only the holder registers (check 1), and the holder is the one phone
+that holds the credential and needs waking. A vault keeps no list of
+registrations or wake keys; every successful `push.register` replaces
+the previous registration.
 
 **`push.unregister`** erases the registration (wake key and blob) in one
 flush and audits `push.unregistered{ref: "app"}`; without a registration
