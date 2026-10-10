@@ -1,9 +1,19 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.28
+version: 0.1.29
 date: 2026-10-10
 changelog:
+  - 0.1.29: the N2 spec step (owner request of 2026-10-10, a draft for
+    review): Google push (§4 Notification modes, 4) follows
+    VAULT-MESSAGING 0.24.0 §14 and PUSH-GATEWAY 0.4.0: `push.register`
+    `{platform: "fcm", token, app_id}`, the gateway's sealed wake blob
+    instead of a `wake_ref`, `push.token_needed` re-registers, the
+    status line reads the `push` state from `device.list`; the protocol
+    gaps of item 9 are answered there. Owner review of 2026-10-10: links
+    in a conversation (§4 Screens, Conversation): only `https://` URLs are
+    tappable, opened through Android after "Open link to <host>?";
+    other schemes stay text
   - 0.1.28: staging S8 canary of 2026-10-10 (VAULT-MESSAGING 0.23.3,
     pending owner approval): after a release update ("Your vault is
     updated", Continue) and after an unlock of an open vault, the app
@@ -400,7 +410,7 @@ rows below say "Vault" for the screens and "item" for the data.
 | Screen | Proton analogue | Notes |
 |---|---|---|
 | Messages | Inbox | Conversations by connection; Unread chip; the floating action button starts a new message (pick a connection, then the conversation) |
-| Conversation | Message detail | Bubbles in a card list; pill actions (reply, more) |
+| Conversation | Message detail | Bubbles in a card list; pill actions (reply, more). Links in a message (0.1.29, VAULT-MESSAGING 0.24.0 §10.5): only `https://` URLs are tappable; a tap asks "Open link to <host>?" and then hands the URL to Android, so a verified App Link opens its app and any other link the browser; every other scheme, custom app schemes included, stays plain text |
 | Connections | Contacts | Initial tiles, status (pending / active / stale / blocked); a star marks favourites (the owner's `favorite` flag, `connection.update`), whose tiles are teal; the floating action button invites a connection (0.1.11: QR or link, or scan the other's QR), the only invite entry point besides empty states. Each is titled "First Last" from the profile's core (VAULT-MESSAGING 0.18.0 §10.8), the display name, if any, as secondary text. Incoming requests show the requester's names the same way. Only between activation and the first `profile.update`, when the request's names are not at hand: "Name not shared yet"; never "Unnamed connection" |
 | Connection detail | — | Titled "First Last" (never an alias), the display name secondary. Profile shared with you (the names labelled as the name on their VettID account, never "verified"; display name, photo and items labelled as shared by them), sharing both ways ("You share with <First>": every share rule a row with its own settings, opening its editor or deleted after a confirmation, "Add a rule" up to 64, 0.1.20), a connection's requests (0.1.22, VAULT-MESSAGING 0.23.0 §10.4.1: muted, paused after several declines, declined ones in cooldown, with Mute/Unmute, Resume and "Allow declined requests again"), authenticate, the vault key fingerprint (`ik`, 8 groups of 4 hex digits, §10.8: the lasting identity check). The action bar: message, favourite, History, remove (confirmed). No safety code (it belongs to connecting: the invite and request screens), no alias or notes, no edit or block (0.1.13; blocking stays on an incoming request) |
 | Approvals | — (VettID-specific) | Pending connection requests, grant requests, critical-item uses, share-rule decisions; approve/deny; critical items need the credential password. 0.1.22: a connection's asks within 10 minutes are one entry ("Sam asks for 3 things"), a connection whose asks are paused is a notice (resume, or remove the connection), a share question names the rule that asks first and warns when declining stops an item already shared, one question per item and connection |
@@ -899,19 +909,30 @@ its process runs; nothing keeps it running in the background).
      (inexact; no exact-alarm permission). After the check the app
      catches up (§6 Owner check, 4) and normal notifications resume;
      nothing missed is replayed as notifications, the bell counts it.
-4. **(b) Google push (FCM)** (PUSH-GATEWAY 0.3.0). Contentless wakes:
+4. **(b) Google push (FCM)** (PUSH-GATEWAY 0.4.0; VAULT-MESSAGING
+   0.24.0 §14, 0.1.29). Contentless wakes:
    the app's FCM token goes to its vault over the end-to-end session
-   (`push.register`), the vault registers a `wake_ref` with the gateway
-   under its own wake key (§3) and later triggers `notify` wakes; the
+   (`push.register{platform: "fcm", token, app_id}`, `app_id` the
+   application id of the build), the vault registers it with the
+   gateway, keeps only the gateway's sealed wake blob (never the
+   token), and later triggers `notify` wakes (VAULT-MESSAGING §14.2); the
    gateway sends a high-priority FCM data message with no content; the
    app's `FirebaseMessagingService` then collects from the relay and
    decrypts as in (a), and posts the same notifications, with no
    persistent service. A wake gives up to about 20 s of execution; a longer
    collect runs as expedited `WorkManager` work. Token rotation
-   (`onNewToken`) sends `push.register` again; switching away from the
-   mode, a wipe or an unlink sends `push.unregister` (an unlink also
-   deletes the wake_ref vault-side, §14). Correctness never depends on
-   a wake: the app collects at every foreground as now.
+   (`onNewToken`) and `push.token_needed` (the gateway reported the
+   token gone) send `push.register` again; switching away from the
+   mode or a wipe sends `push.unregister` (a transfer or a recovery
+   that removes the app erases the registration vault-side,
+   VAULT-MESSAGING §14.1). The status line (1) reads the `push` state
+   on the app's `device.list` entry: "Connected" while `active`
+   (`last_result` `gateway_error`: "Push service not reachable, retrying"),
+   and "Registering again" after `push.token_needed`; `unavailable`
+   from `push.register` keeps "Not available yet", `gateway_error`
+   retries with backoff (1 minute doubling to 1 hour). Correctness
+   never depends on a wake: the app collects at every foreground as
+   now.
    - **Plumbing now**: the setting, a `PushProvider` interface
      (`available()`, `token()`, `onWake`), the FCM provider behind it,
      and the registration path through the vault, written against
@@ -1002,7 +1023,16 @@ its process runs; nothing keeps it running in the background).
    an open vault"). Android's "Notification history" setting, when the
    member turns it on, keeps them outside the app's control; the
    Notifications setting says so.
-9. **Protocol gaps for (b)** (VAULT-MESSAGING 0.23.1; this PR does not
+9. **Protocol gaps for (b)**: **answered by VAULT-MESSAGING 0.24.0 §14**
+   (0.1.29, a draft for the owner's review): 1 by §14.1 (the holder
+   only; `{push}` or `unavailable`; `fcm` and `apns`; sizes); 2 by a new
+   `push.register` replacing the old registration; 3 by
+   `push.token_needed` and `push` in `device.list`; 4 by §14.2 (feed
+   items of priority `normal` and above except guides, `vault.held`,
+   `vault.locking`, the alarm; FCM's constant `collapse_key` is set by the
+   gateway); 5 yes, for those only; 6 by §11.10.8 and §12.2; 7 a fresh
+   wake key at each registration and the audit kinds of §10.9. As
+   first written (VAULT-MESSAGING 0.23.1; this PR does not
    change it). §10's registry lists `push.register` and
    `push.unregister` as **reserved**, and §14 is a sketch
    (`push.register{platform, push_token, environment}`, the wake_ref in
