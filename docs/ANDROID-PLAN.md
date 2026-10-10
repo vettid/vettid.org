@@ -1,9 +1,24 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.25
-date: 2026-10-09
+version: 0.1.26
+date: 2026-10-10
 changelog:
+  - 0.1.26: owner feedback of 2026-10-10 ("viewing the notifications
+    doesn't clear them unless you look at the details. this is bad
+    UX"): **viewing the Notifications screen marks its items read**.
+    While the screen is in view (resumed), every unread item that is
+    not `urgent` is marked read (`feed.update{status: "read"}`, at most
+    4 in flight, shared with Mark all as read): those unread when it
+    opens and those that arrive while it is open; the bell's count
+    falls with them. Urgent items (Needs attention:
+    `credential.alarm`, `owner_check.locked`) stay unread, and keep the
+    badge red, until tapped or marked read. What was read by viewing
+    keeps its gold dot, and stays under the Unread chip, until the
+    member leaves the screen. Each item is marked read by viewing at
+    most once while the screen lives: one the member marks unread, or
+    that another device marks unread while it is in view, stays unread.
+    The Archived view marks nothing (§4 Notifications, 3 and 4)
   - 0.1.25: owner decision of 2026-10-09: **tag colours are distinct
     and stored in the vault** (supersedes 0.1.21's hash-only colours).
     A tag's colour is the registry's `color` (VAULT-MESSAGING §10.8,
@@ -594,6 +609,25 @@ feed repository and no screen.
    - **Mark all as read**: `feed.update{status: "read"}` for each
      `active` item, at most 4 in flight, the count falling as they
      land; there is no bulk type (§9 question 4).
+   - **Viewing marks read** (0.1.26, owner feedback of 2026-10-10):
+     while the screen is in view (resumed), every unread item that is
+     not `urgent` is marked read, without waiting for the answers and
+     past the screen's end, the 4 in flight shared with Mark all as
+     read: those unread when the screen comes into view and those that
+     arrive while it is in view (an item not seen before; not one
+     another device marked unread meanwhile). The bell's count falls
+     with them. **Urgent** items (Needs attention) stay unread, and the
+     badge red, until tapped or marked read: a security alarm never
+     goes by a glance. The items read by viewing keep the gold dot and
+     the bold text, and stay under the Unread chip, until the member
+     leaves the screen (stopped: back, a target opened, the app in the
+     background); on return they show as read. Each item is marked read
+     by viewing at most once while the screen lives: one the member
+     marks unread (swipe), or that another device marks unread while
+     the screen is in view, stays unread. On a row still dotted after
+     viewing, the swipe reads Mark as read and only takes the dot away.
+     The Archived view marks nothing. `feed.updated` on other devices
+     as for any read; their system notifications are cancelled (9).
    - **Empty states**: "No notifications" / "Nothing unread" (with
      "✕ Clear" for the chip, 0.1.21) / "Nothing archived".
 4. **Tapping an item** marks it read (`feed.update{status: "read"}`, not
@@ -682,7 +716,13 @@ feed repository and no screen.
       `feed.updated` / `feed.deleted` each cause one coalesced catch-up;
       a batch's `count` update keeps the status; the own `feed.update`
       applied from the response; retention; clear on lock, held, due and
-      wipe; the unread count; Mark all as read with an error midway.
+      wipe; the unread count; Mark all as read with an error midway;
+      viewed items marked read except urgent ones (0.1.26).
+    - Unit (ViewModel, 0.1.26): viewing marks the unread non-urgent
+      items read, urgent ones kept; arrivals in view marked, not while
+      paused; the dots and the Unread chip kept until leaving; an item
+      marked unread (here or on another device) not marked again; the
+      Archived view marks nothing.
     - Unit (labels and targets): every kind of §10.9 has a label, an
       icon, a category colour and a target; an unknown kind falls back;
       a missing connection, device or item resolves to "Removed …" or
