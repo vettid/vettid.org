@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.9
+version: 0.1.10
 date: 2026-10-10
 owner: Al Liebl (Mesmer)
 changelog:
@@ -63,10 +63,20 @@ changelog:
     for every channel); each stage's DNS Firewall and the enclave's
     release allowlist admit only their own channel's host; the gateway
     URL is `push_url` in vettid-vault `enclave/releasecfg/<channel>.json`
+  - 0.1.10 (owner request 2026-10-10, RELEASE-UPDATES 0.3.0,
+    ANDROID-PLAN 0.1.31): release notes on every channel (§7 "Release
+    notes on every channel"): a `log` is required for every release in
+    every channel from the moment it leaves `candidate`; a release's
+    `notes` is its entry in its own channel's log; staging gets a log at
+    `https://staging.vettid.org/security/releases/` generated the same
+    way; check:manifest checks both logs; staging S1–S9 backfilled with
+    short entries; notice emails link the ending and the newest release's
+    notes (§3.5). §10.1 steps 4, 5, 10 and 12 and §11.1 follow
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.14.0) §11.10 release updates, §12.5 deletion, §13.5, §13.9
-  - RELEASE-UPDATES.md (0.1.0) — member-facing; §3 changes with this plan
+  - RELEASE-UPDATES.md (0.3.0) — member-facing; §3 changes with this plan; §5 the release log
+  - ANDROID-PLAN.md (0.1.31) — the app's "What's new" from the log
   - MEMBER-API.md "Vault", RUNBOOK.md, ARCHITECTURE.md
   - vettid-vault docs/SMOKE.md (hardware smoke test, 2026-10-02)
 classification: public (no secrets; safe for github.com/vettid)
@@ -246,6 +256,14 @@ deletion *is* the end of service. The 30 days are a buffer to abort a
 mistake or rescue a member who writes in, not extra time members are
 told to count on. Cancelling leaves the key `Disabled`; `EnableKey`
 restores it, which is why the retirement role needs both (§4.1).
+
+Every notice email links release notes (owner request 2026-10-10,
+RELEASE-UPDATES §3): emails 1–4 and the deadline email link N's `notes`
+and the `notes` and log summary of the newest `active` release (the one
+the app offers); the hotfix email of §10.2 links the hotfix's `notes`
+with its summary and `security_text`. The URLs are the channel's own log
+entries (§7 "Release notes on every channel"); a summary the job cannot
+read from the log is left out, never the link.
 
 Who is emailed: members whose vault row's `sealed_release` is N, found
 through the vaults table's `user-index`. That value is advisory (written
@@ -583,7 +601,8 @@ role (trust, `PassRole`) to CloudFormation's deploy role.
   `vault/releases/<channel>.json`, below): per release its
   number, tag, commit, PCR0–2, binary hash, nitro-cli version, admitted
   PCR0s, seal-key ARN (after creation), status, `published_at`, `ends_at`,
-  window, instance settings and notes URL. CDK (keys and release stacks)
+  window, instance settings, notes URL (the release's log entry, below)
+  and log text. CDK (keys and release stacks)
   and the manifest renderer both read it.
 - **Served document:**
   `website/.well-known/vettid/pcr-manifest.json`, committed and deployed
@@ -596,13 +615,14 @@ role (trust, `PassRole`) to CloudFormation's deploy role.
   pinned key; `serial` is greater than the previous commit's; the bytes
   equal a fresh render of the release list; the size limit; every PCR0
   admitted by a live key is listed; every listed release has a release-log
-  entry.
+  entry, in every channel (below, "Release notes on every channel").
 - **`serial`:** increases by one per publication; it is never reused, even
   for a canary manifest that is never published (§10.1).
-- **Release log:** `/security/releases/` on vettid.org, one page per
-  release with the RELEASE-UPDATES §5 fields, generated from
-  the release list so it cannot disagree with the manifest. It stays
-  after a release is removed.
+- **Release log:** `/security/releases/` on each channel's site
+  (vettid.org, staging.vettid.org), one page per release with the
+  RELEASE-UPDATES §5 fields, generated from the release list so it
+  cannot disagree with the manifest. It stays after a release is
+  removed.
 - **Registry sync:** a `vault-manifest-sync` Lambda (every 5 minutes and
   after each site deploy) fetches the manifest, verifies it against the
   pinned keys, and upserts `vettid-org-vault-releases` (status, number,
@@ -678,6 +698,63 @@ role (trust, `PassRole`) to CloudFormation's deploy role.
   dropped so their entries stay. Until release 1 the index says that no
   release has been published; it is linked from `/security` and the
   sitemap.
+
+**Release notes on every channel** (owner request 2026-10-10,
+RELEASE-UPDATES 0.3.0 §5; to build, replacing the W7 rule that only
+production carries `log`):
+
+- **`log` is required for every release in every channel once it leaves
+  `candidate`**, that is, from the moment it is signed into a manifest
+  (a canary or a published one). The release-list validation
+  (`lib/vault/release-list.ts`) enforces it, so `vault:manifest sign`,
+  CDK synth and `check:manifest` all refuse a non-candidate entry without
+  it. Why there and not at publication: the signed bytes fix the `notes`
+  URL, and the text behind it must exist, reviewed, when they are
+  signed. A `candidate` may carry `log` already (it is reviewed in the
+  release PR, §10.1 steps 4 and 5).
+- **Text limits** (validation): `summary` one line, 1–160 characters;
+  `changes` 1–20 items, each 1–280 characters; `security_text` at most
+  1,000 characters; all plain text (no control characters, no markup;
+  the app shows them as written).
+- **`notes` is the channel's own log entry**:
+  `https://<zoneName>/security/releases/<n>/` (production
+  `https://vettid.org/security/releases/<n>/`, staging
+  `https://staging.vettid.org/security/releases/<n>/`), required by the
+  validation in both channels (`releaseLogUrl(channel, n)`). A new
+  successor rule: once a published release's `notes` is its log URL it
+  never changes (until now `notes` was not compared between serials,
+  which the staging backfill below relies on once).
+- **Staging log:** generated by the same code (`lib/vault/release-log.ts`
+  and `scripts/vault/release-log.ts`, given the channel) from the staging
+  manifest and `vault/releases/staging.json` into
+  `sites/staging/security/releases/` (pages and `index.json`), served by
+  `VettidOrgStageSiteStack` with the manifest. Its pages say "Staging
+  (test builds)" in the title and the intro, and link the staging
+  manifest. `vault:manifest publish --channel staging` writes and
+  commits it like production's; `check:manifest` checks both channels'
+  logs current (today: production only).
+- **`index.json`** is what the app reads (ANDROID-PLAN §4 "What's new"):
+  the existing entry fields, unchanged in shape (`release`, `pcr0`,
+  `status`, `summary`, `changes`, `security`, `security_text`, …). It is
+  public and unsigned; the app treats it as information only. Served
+  `no-cache` like every `*.json` on the sites.
+- **Links per stage:** the notice job's `RELEASE_LOG_URL` and the account
+  site's `release_log_url` are `https://<zoneName>/security/releases/`
+  (staging today links production's log). The emails take each release's
+  link from its `notes` (§3.5).
+- **Backfill (staging S1–S9).** S1–S8 are published without `log` and
+  with GitHub release URLs as `notes`; S9 is a `candidate`. The
+  implementation PR adds to each a short `log`: a one-line summary and
+  the changes taken from its existing GitHub release notes, `security:
+  none` (staging builds fix nothing for members). S1 and S2 are included
+  because they are `removed` but still listed, and the generator needs
+  text for every listed release. Their `notes` switch to their staging
+  log URLs in the next staging manifest signed after that PR (one
+  publication for all of them; S9 too if it is still unpublished then).
+  The manifests already signed (serials 1–10, and any signed before the
+  change) keep their GitHub URLs in git history; nothing is re-signed or
+  rewritten. Production has nothing to backfill: release 1 is not
+  published and its entry already needs `log` (W10-READINESS step 5).
 
 ## 8. Infrastructure
 
@@ -1090,15 +1167,15 @@ job's vault deletion. Order (W4):
 | 1 | Freeze; the release commit sets `releasecfg/prod.json` `release: N` (and any pin changes); review; merge to `main`; signed tag `release/prod/N` on that commit (vettid-vault docs/RELEASING.md) | vettid-vault | tag |
 | 2 | `release` workflow: EIF ×2 per channel, measurements, parent binaries, attestations; draft GitHub release | CI, arm64 | artifacts, PCRs |
 | 3 | Independent rebuild; PCR0 must match | owner | sign-off |
-| 4 | Staging: add the staging release to `vault/releases/staging.json`, deploy its key and release stack, hardware self-test, vaultctl end-to-end, compat run incl. a move from the previous staging release (§11) | staging | report |
-| 5 | Production PR: add N to `vault/releases/prod.json` (status `candidate`: in CDK, not in the manifest), `admitted_pcr0s` = every earlier release not `removed` (N's own PCR0 is admitted implicitly; `lib/vault/release-list.ts`) | vettid.org | PR |
+| 4 | Staging: add the staging release to `vault/releases/staging.json` (with `log` and `notes` = its staging log URL, §7), deploy its key and release stack, hardware self-test, vaultctl end-to-end, compat run incl. a move from the previous staging release (§11) | staging | report |
+| 5 | Production PR: add N to `vault/releases/prod.json` (status `candidate`: in CDK, not in the manifest; with `log`, reviewed in this PR, and `notes` = `https://vettid.org/security/releases/N/`), `admitted_pcr0s` = every earlier release not `removed` (N's own PCR0 is admitted implicitly; `lib/vault/release-list.ts`) | vettid.org | PR |
 | 6 | Deploy `VettidOrgVaultStack` (creates the key); `vaultctl keycheck` against the draft manifest | owner | key ARN in `vault/releases/prod.json` |
 | 7 | Deploy `VettidOrgVaultRelease<N>Stack` (AMI with EIF verified against measurements; group min 0, canary 1) | owner | instance |
 | 8 | Hardware self-test on the canary host (`vault-parent -selftest` against the host stack's deletable smoke key), then normal start | SSM | PASS report |
 | 9 | Canary: sign manifest `serial` s+1 with N `active` but **do not publish**; the registry row is `canary`, routed only for flagged test members (W8 adds this to the member API); canary member enrolls into N, unlocks, locks; the oldest live release's canary vault moves into N (§11.3); soak 24 h | owner, test device | canary report |
 | 10 | Publish: commit the signed manifest (N `active`, N−1 `deprecated`, any `retired`/`ends_at` changes), the release log entry, `deploy:site`; manifest sync updates routing | owner | live |
 | 11 | Previous release group to minimum 0; the always-on minimum moves to N (O7) | owner | |
-| 12 | In-app prompts follow from the manifest; no email for a routine release | — | |
+| 12 | In-app prompts follow from the manifest, with What's new from the log (ANDROID-PLAN §4); no email for a routine release | — | |
 
 *As built (W7, W8).* Step 9: `scripts/vault/manifest.ts sign` then
 `upload` (the bucket copy only; nothing is served), and the operator's
@@ -1109,7 +1186,10 @@ canary release (also before production release 1, when nothing is
 `active`), their vaults sealed to it are routed there; for everyone else
 it is unknown (410). The scaler manages a `canary` row like any release.
 The test device needs the canary manifest out of band (it is not
-served); see "The canary manifest on the test phone" below.
+served); see "The canary manifest on the test phone" below. Until step
+10 publishes N's log entry, the canary phone shows "Release notes
+unavailable" with the link for N (ANDROID-PLAN §4 "What's new"), which
+also exercises that path.
 Step 10: `manifest.ts publish` with the same signed document, so the
 canary vault's recorded serial is the published one; the manifest sync
 turns the row into an `active` one. A test member's flag is an operator
@@ -1207,8 +1287,10 @@ manifest at the pinned `manifestUrl`). Left out: the public site, signup,
 playbooks, the admin exit node, API and site (test data from
 `npm run staging:seed`; the canary flag through the CLI), the relay
 (production's), push, and the audit stack (the organization trail and
-GuardDuty cover the account). Staging has no release log; its notices link
-to production's. Order and manual steps: RUNBOOK "Staging". Idle cost of
+GuardDuty cover the account). Staging has had no release log, its
+notices linking production's; from 0.1.10 it has its own at
+`https://staging.vettid.org/security/releases/` (§7 "Release notes on
+every channel"). Order and manual steps: RUNBOOK "Staging". Idle cost of
 the main stacks about $10/month, so parking needs nothing beyond the
 scaler's zero groups.
 
@@ -1325,6 +1407,7 @@ Android closed beta; until then, staging carries the testing.
 | W8 | Member API: canary routing for flagged members; notice job (retirement and hotfix emails); `removed` → 410 | vettid.org | 2 d |
 | W9 | Staging stand-up, release S1/S2, hardware tests, capacity measurement, retirement drill (7 days wall time) | both | 3 d |
 | W10 | Production release 1 with the canary (blocked on the signed Android build), RUNBOOK "Vault" section | both | 2 d |
+| W11 | Release notes on every channel (§7, owner request 2026-10-10): `log` and log `notes` required in every channel; the staging log; check:manifest for both logs; notice email links (§3.5) and per-stage log URLs; the S1–S9 backfill; MEMBER-API "Vault release notices" and RUNBOOK ("Staging", "Adding a release") updated as built. The app's side is ANDROID-PLAN 0.1.31 | vettid.org, vettid-android | 1.5 d |
 
 About 25–30 engineering days, plus the Android dependency for W10.
 W4 can go any time; W2 and W3 can run beside W1; W5–W8 follow W3.
