@@ -8,7 +8,8 @@ import { AppConfig, VaultConfig, resourceName } from '../config';
  *
  *  - The enclave's own egress (the parent's forwarder allowlist,
  *    parent.DefaultAllow): the relay, the pinned KMS endpoint, Google's
- *    attestation status list.
+ *    attestation status list, the push gateway of the vault's channel
+ *    (VAULT-MESSAGING §14.3; PUSH-GATEWAY §10.1).
  *  - What the parent uses (AWS SDK, the vault's own account): SQS, DynamoDB
  *    (including the SDK's account-based endpoint), S3 (path and the data
  *    bucket's virtual host; the gateway endpoint carries the traffic), SSM
@@ -30,6 +31,7 @@ export function vaultHostDnsAllowlist(config: AppConfig, vault: VaultConfig): st
     vault.relayHost,
     aws('kms'),
     'android.googleapis.com',
+    vault.pushHost,
     // parent
     aws('sqs'),
     aws('dynamodb'),
