@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.23.3
+version: 0.24.0
 date: 2026-10-10
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -10,16 +10,35 @@ related:
   - RELAY-PLAN.md
   - PQC-MIGRATION.md
   - CALLING-SERVICE.md
-  - PUSH-GATEWAY.md
+  - PUSH-GATEWAY.md (0.4.0)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.3.1)
-  - ANDROID-PLAN.md (0.1.17)
+  - ANDROID-PLAN.md (0.1.29)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
   - VAULT-RELEASES.md (0.1.6, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.24.0: normative, additive (owner request of 2026-10-10, "we can
+    start to design the push service for google play and apple ios";
+    §15 item 32; a draft for the owner's review): push. The app (the
+    holder) registers its FCM or APNs token with `push.register`
+    `{platform, token, app_id, environment?}` and drops it with
+    `push.unregister`; the vault keeps only the gateway's sealed wake
+    blob, a per-registration wake key and a hash of the token, never the
+    token; `push` state in `device.list`; `push.token_needed` (V→D) when
+    the gateway reports the token gone; new error `gateway_error`, limit
+    `push_registrations`; audit kinds `push.registered`,
+    `push.unregistered`, `push.token_gone`. The wake rules: after the
+    deposit of a new feed item of priority `normal` or above (not
+    `guide`), `vault.held`, `vault.locking` (not for the app's own lock)
+    and `credential.alarm`; only those three while held; a 5-second
+    debounce, 30 wakes an hour then one per 10 minutes, urgent ones
+    exempt up to 10 an hour; retries; no content and no quiet hours.
+    Both push types are allowed while held. The release constants gain
+    the gateway URL and the enclave egress the gateway's host (§3.6.3,
+    §10, §10.1, §10.3, §10.9, §11.10.8, §12.2, §14; PUSH-GATEWAY 0.4.0)
   - 0.23.3: editorial-normative, from the staging S8 canary of
     2026-10-10 (pending owner approval): an unlock of a vault that is
     already unlocked locks it and opens it again in the same request
@@ -1657,7 +1676,7 @@ every `drop.*` entry, §10.9). Allowed while held:
 
 | Sender | Types |
 |---|---|
-| The holder | `vault.owner-check`; `vault.status` (reports the hold) and `vault.lock`; `credential.utk.get` (UTKs for the check); `credential.get` and `credential.ack` (the latest blob after a lost check response, §3.5.3, and its confirmation); `credential.version`; `credential.lock`; during a clone alarm, `credential.alarm.confirm` and, in `rotation_required`, `credential.rotate` (the check is refused until the alarm closes, so the alarm's own path stays open); for a transfer opened before the hold, `device.transfer.approve` (itself a check, §3.6.1) and `device.transfer.reject`; `call.end`, and `call.ice` of a call answered before the deadline |
+| The holder | `vault.owner-check`; `vault.status` (reports the hold) and `vault.lock`; `credential.utk.get` (UTKs for the check); `credential.get` and `credential.ack` (the latest blob after a lost check response, §3.5.3, and its confirmation); `credential.version`; `credential.lock`; during a clone alarm, `credential.alarm.confirm` and, in `rotation_required`, `credential.rotate` (the check is refused until the alarm closes, so the alarm's own path stays open); `push.register` and `push.unregister` (0.24.0: the wakes for `vault.held` and the alarm depend on a current token, §14.2); for a transfer opened before the hold, `device.transfer.approve` (itself a check, §3.6.1) and `device.transfer.reject`; `call.end`, and `call.ice` of a call answered before the deadline |
 | A recovering app (§11.11.5) | Its own set, unchanged by the hold: `credential.utk.get`, `credential.recover`, `vault.status` (reduced) and the token and address types (0.16.0 removed `credential.reset` and `vault.delete` from it). A recovery completes while held and starts the clock (§3.6.1) |
 | A desktop | `vault.status`, `vault.lock`, `device.session.end{}` (its own session), `call.end` and `call.ice` of a call it answered before the deadline |
 | An agent | `vault.status`, `device.session.end{}` (its own session) |
@@ -1673,8 +1692,9 @@ deletion or a PIN change waits for the check, which takes seconds.
 **What the vault still sends its owner's devices:** responses to the
 allowed requests; `vault.held`; `vault.locking`; `credential.alarm`
 with its feed item and `sync.event`; `device.transfer.pending` for an
-open transfer; `device.unlinked`; and the token, address, rotation and
-handshake messages.
+open transfer; `device.unlinked`; `push.token_needed` (0.24.0); and the
+token, address, rotation and handshake messages. Of these, `vault.held`,
+`vault.locking` and the alarm wake the app (§14.2).
 
 **`vault.held`** (V→D, durable) is the content-free notice that lets
 the app show that something arrived:
@@ -3437,7 +3457,7 @@ devices and access sessions, connections (with blocks and member
 authentication), messaging, the credential, items, tags, profile,
 settings, audit, feed, calls, LEASH, share rules and grants,
 critical-item use, shared actions, introductions, location, presence and
-the wallet are in §10.1–§10.18; push is reserved (§14).
+the wallet are in §10.1–§10.18, and push in §14 (0.24.0).
 
 Every flow between vaults is a set of **events** correlated by ids in
 their bodies (`request_id`, `fetch_id`, `invocation_id`), never a V↔V
@@ -3531,7 +3551,8 @@ an answer to an unknown or expired id is dropped.
 | | `audit.export` | D→V | req | The member's History export: count, PIN, audit entry; the app then reads the entries with `audit.list` (§10.9, 0.22.0) |
 | | `feed.list`, `.get`, `.update`, `.delete`, `guide.sync` | D→V | req | Activity feed; app guides as feed items (§10.9) |
 | | `feed.event` | V→D | | New feed item |
-| Push | `push.register`, `push.unregister` | D→V | req | Reserved (§14) |
+| Push | `push.register`, `push.unregister` | D→V | req | Register or drop the app's FCM or APNs token for contentless wakes (§14, 0.24.0) |
+| | `push.token_needed` | V→D | | The registration ended (the token is gone); send a fresh one (§14.2) |
 
 **Calls** (CALLING-SERVICE §7, §9; §10.10):
 
@@ -3600,6 +3621,7 @@ an answer to an unknown or expired id is dropped.
     | `location_requests` | 1 per connection per 10 minutes | `location.request` (§10.16) |
     | `wallets` | 16 wallets | `wallet.create` (§10.18) |
     | `wallet_addresses` | 2,000 addresses per wallet | `wallet.address.new` (§10.18) |
+    | `push_registrations` | 20 registrations that reach the gateway per 24 hours (0.24.0) | `push.register` (§14.1) |
 
     A count that is part of a request's shape is `bad_request`, not a
     `limit`, and has no name: more than 64 fields in an item, for every
@@ -3662,7 +3684,11 @@ an answer to an unknown or expired id is dropped.
     request waits for a successful `vault.owner-check`. Answered to every
     owner-device request outside the hold's allow list, to requests held
     for approval when the hold begins, and to a `settings.set` that
-    would turn the hold off, which only a check may do (§3.6.7).
+    would turn the hold off, which only a check may do (§3.6.7);
+  - and (0.24.0) `gateway_error`: `push.register` could not complete at
+    the push gateway (unreachable, timed out, `5xx`, or the gateway
+    refused the vault's attestation), with body `{retry_after?}`; the
+    app tries again later, after `retry_after` if present (§14.1).
 - A request answered with an error changes no state, except the password
   backoff, the spent UTK and the audit log and feed entries of §3.5.3,
   and, for a failed owner check, the PIN backoff and the check's
@@ -3754,7 +3780,7 @@ an answer to an unknown or expired id is dropped.
 | `device.pair.reject` (app) | `{pairing_id}` | `{}` |
 | `device.pair.rejected` (to the new device) | — | `{}`: the owner rejected the pairing or transfer after its `hs.fin` (0.10.5); sealed under the handshake's epoch, on the device's token from `hs.init`, as `device.paired`; the device stops waiting (§6.7) |
 | `device.paired` (to the new device) | — | `{device_id, role, vault_id, release, release_number, token, session_expires_at?, transfer?, credential_version?, user_guid?}` (the release the vault runs under); `token`: the device's standing token (§7.1); it replaces the request token of a pairing's or transfer's `hs.resp` (0.10.3), and after enrollment or recovery, whose `hs.resp` already carries one, it is a fresh one (0.10.4); `transfer: true`, the credential's `credential_version` and (0.17.0) the member's `user_guid`, which its unlocks need, for a transferred app only (§6.7.1) |
-| `device.list` (app, desktop) | `{}` | `{devices: [{id, kind, state, name, ik, profile?, created_at?, last_active_at?, session_expires_at?}]}` |
+| `device.list` (app, desktop) | `{}` | `{devices: [{id, kind, state, name, ik, profile?, created_at?, last_active_at?, session_expires_at?, push?}]}`; `push` (0.24.0) only on the app's entry while it has a registration: the push state of §14.1 |
 | `device.unlink` (app) | `{device_id}` | `{}`; `forbidden` for the app itself (0.9.0: it leaves by a transfer or a recovery) |
 | `device.unlinked` (to the unlinked device, best effort) | — | `{reason?}`: `"transferred"` for the old app of a transfer (§6.7.1), `"replaced"` for the old app of a recovery (§11.11.5) |
 | `device.transfer.create` (the holder) | `{}` | `{transfer_id, link, exp}`; `exists` while a transfer is open; `credential_frozen` or `rotation_required` during an alarm (§6.7.1) |
@@ -5049,6 +5075,11 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `wallet.address_issued` (`ref` = `wallet_id`), `wallet.signed`
   (`ref` = `txid`) (§10.18); `audit.exported` (`device_id` = the app,
   `ref` = the export summary; History export, below, 0.22.0);
+  `push.registered` (`device_id` = the app, `ref` = `fcm` or `apns`),
+  `push.unregistered` (`device_id` = the app, `ref` = `app`,
+  `transferred` or `replaced`), `push.token_gone` (`device_id` = the app, `ref` =
+  the gateway's code, `token_gone`, `token_invalid` or `blob_invalid`)
+  (§14, 0.24.0; never one entry per wake);
   `drop.suppressed`;
   and `drop.<reason>` for every message the vault dropped
   or refused (§6.3, §6.6, §7.3, §8.4), with the runtime's reason, such as
@@ -8624,7 +8655,11 @@ recorded in the build's measurements:
   channel file with another window than its channel's, 30 or 7 days, is
   malformed);
 - the Android signing-certificate digests (§11.7);
-- the relay URL (§11.3).
+- the relay URL (§11.3);
+- (0.24.0) the push gateway URL (`https://push.vettid.org` in
+  production, `https://push.staging.vettid.org` in staging; optional in
+  dev, where it names the gateway stand-in, PUSH-GATEWAY §10.4). Without
+  it `push.register` is answered `unavailable` (§14.1).
 
 GrapheneOS verified-boot keys and the vendor roots stay in code and are
 the same for every channel. A release build MUST refuse a channel file
@@ -9529,8 +9564,9 @@ check. A held vault may still be locked by any trigger of §12.3.
   as a signed long-poll (`wait=25`, `max=32`) or a WebSocket. During a
   rotation grace period it also collects from the old mailbox.
 - **Batches.** Each vault handles one batch at a time (§8.3).
-- **TLS.** The enclave terminates TLS to the relay, and to AWS KMS
-  (`kms.<region>.amazonaws.com`, §11.10.7). The parent forwards only TCP
+- **TLS.** The enclave terminates TLS to the relay, to AWS KMS
+  (`kms.<region>.amazonaws.com`, §11.10.7), and (0.24.0) to the push
+  gateway of its channel (§11.10.8, §14.3). The parent forwards only TCP
   bytes to its allowlist on port 443. The enclave pins only the
   roots for the allowlisted hosts (VAULT-PLAN §5.2), so root changes are rare
   releases. Each instance carries every vault's relay requests over a few
@@ -10053,19 +10089,162 @@ with its own key, and the only build that accepts canary manifests. That
 is a possible later hardening, tied to the signing of the canary
 phone's build (W10-READINESS B8), and is not done now.
 
-## 14. Push compatibility (deferred)
+## 14. Push (0.24.0)
 
-An app will send `push.register{platform, push_token, environment}` over its
-session. The vault keeps the wake key in DEK state and stores the `wake_ref`
-in the device record; `device.unlink` deletes it.
+(0.24.0, owner request of 2026-10-10; §15 item 32. Until 0.23.x this
+section was a sketch and the types were reserved.) The vault wakes its
+app through the VettID push gateway (PUSH-GATEWAY 0.4.0) so that the app
+collects without a connection of its own. A wake carries nothing from
+the vault: it means only "collect" (§14.2). Push is **opt-in per device**:
+the app registers only in a push mode (Android: "Google push", which the
+member chooses, the on-phone service staying the default, ANDROID-PLAN
+D7; iOS: "Apple push", once the member allows notifications,
+PUSH-GATEWAY §11.2). Desktops and agents never register.
 
-After depositing a user-visible message into an app's mailbox, an unlocked
-vault triggers `POST /v1/wake/{wake_ref}` with a constant per-device
-`collapse_key`.
+### 14.1 Registration
 
-A locked vault triggers no wakes. A "vault locked, messages waiting" prompt
-would need a wake path that does not depend on the DEK. That is a separate
-future decision.
+| Type | Request body | Response / event body |
+|---|---|---|
+| `push.register` (app: the holder) | `{platform: "fcm" \| "apns", token, app_id, environment?}` | `{push: <push state>}`; `bad_request`, `forbidden`, `unavailable`, `gateway_error` (body `{retry_after?}`), `limit` (`push_registrations`) |
+| `push.unregister` (app: the holder) | `{}` | `{}` |
+| `push.token_needed` (V→D, to the app, durable) | — | `{reason: "token_gone" \| "token_invalid" \| "blob_invalid"}` (§14.2) |
+
+```json
+push state: { "platform": "fcm|apns", "environment": "production|sandbox?",
+              "app_id": "<id>", "state": "active", "registered_at": "<ts>",
+              "last_wake_at": "<ts>?", "last_result": "sent|rate_limited|gateway_error?" }
+```
+
+**Checks**, in order, each failure changing nothing (the previous
+registration, if any, stays):
+
+1. the sender: the holder (§3.5.9) only; a desktop, an agent or a
+   recovering app (§11.11.5) is answered `forbidden`. Allowed while the
+   vault is held (§3.6.3) and while a clone alarm is open: push is not a
+   credential operation, and the alarm's own wake needs a current token;
+2. the body (`bad_request`): `platform` is `fcm` or `apns`; `token` is
+   1–4,096 bytes of printable ASCII (0x21–0x7E) for `fcm`, and 64–200
+   lowercase hex digits, an even count, for `apns`; `app_id` is 1–255
+   bytes matching `[A-Za-z0-9][A-Za-z0-9._-]*` (the Android package or
+   iOS bundle id); `environment` is `production` or `sandbox`, required
+   for `apns` and absent for `fcm`;
+3. the release has a push gateway URL (§11.10.8), else `unavailable`;
+4. **idempotence**: the vault computes
+   `token_hash = SHA-256("vettid/vms/2/push-token" || lp(platform) ||
+   lp(app_id) || lp(environment) || lp(token))` (`lp` as in §10.9's
+   chain; an absent `environment` is empty). Equal to the stored
+   registration's: the vault answers its push state and contacts no one;
+5. `limit` (`push_registrations`, max 20) when 20 registrations reached
+   the gateway in the last 24 hours (a rolling window in DEK state).
+
+**Then** the vault generates a fresh Ed25519 wake key inside the enclave
+(PUSH-GATEWAY §3), obtains an attestation document from the NSM with
+`public_key` = the wake public key and `user_data` = the request digest,
+and calls `POST /v1/register` (PUSH-GATEWAY §5.1; 10 s timeout, no
+retry inside the request). On `201` it stores, in one flush, the app's
+registration `{wake_sk, wake_blob, token_hash, platform, environment,
+app_id, registered_at, state: "active"}`, replacing and erasing any
+previous one (its key and blob), audits `push.registered`, and answers.
+**The token itself is never stored**: the vault holds it only while the
+request runs. Gateway answers: `400` (`platform_invalid`, `app_invalid`,
+`token_invalid`) → `bad_request` with the gateway's code as `message`;
+`403 attestation_invalid`, `429`, `5xx`, a timeout or no connection →
+`gateway_error` (with `retry_after` from a `429` or `502`).
+
+A **token rotation** is simply a new `push.register`: the new
+registration replaces the old one, and the old blob is never used again
+(the gateway keeps nothing to delete).
+
+**`push.unregister`** erases the registration (wake key and blob) in one
+flush and audits `push.unregistered{ref: "app"}`; without a registration
+it answers `{}` and writes nothing. No gateway call. The registration is
+also erased, with the same entry and `ref` `transferred` or `replaced`,
+when a direct transfer or a recovery removes the app (§6.7.1,
+§11.11.5), and with everything else at a vault deletion (§12.5).
+
+The push state appears in `device.list` on the app's entry (§10.3).
+`last_wake_at` and `last_result` are updated in memory and written with
+the next state flush; they are not synced to other devices.
+
+### 14.2 When the vault wakes the app
+
+A vault wakes only while **unlocked** (the wake key and blob are DEK
+state, §12.1), only an app with an `active` registration, and only
+**after the relay accepted the deposit** of one of these into that app's
+mailbox:
+
+1. a `feed.event` for a **new** feed item of priority `normal`, `high` or
+   `urgent` whose kind is not `guide` (the first item of a batch of asks
+   included; a later `count` update, `feed.updated` and `feed.deleted`
+   do not wake);
+2. `vault.held` (already at most one per 10 minutes, §3.6.3);
+3. `vault.locking`, except for a lock the app itself requested
+   (`vault.lock` from the app): the wake is sent after the notice's
+   deposit and before the vault zeroizes, one attempt, waiting at most
+   3 s, so it never delays a lock;
+4. `credential.alarm` (§3.5.9).
+
+While the vault is held (§3.6.3) only 2, 3 and 4 occur. Nothing else
+wakes: not `message.new` (its feed item does), `sync.event`, responses,
+receipts, the token, address, rotation and handshake messages, items of
+priority `low`, guides, or call signalling (calls are left to the calls
+phase, §15 item 32). Desktops and agents are never woken.
+
+**Debounce and limits** (per registration, in memory, reset at unlock):
+
+- at most one wake in flight; a trigger less than **5 s** after the last
+  wake is deferred until 5 s after it, and every trigger meanwhile merges
+  into that one wake;
+- at most **30 wakes per rolling hour**; past that, at most one per
+  **10 minutes** until the hour's count falls below 30;
+- triggers 3 and 4, and items of priority `urgent`, skip the hourly cap
+  (they still count toward it and are still debounced), up to **10 per
+  hour**.
+
+**The request** is `POST /v1/wake {wake_blob, class: "notify"}`, signed
+with the wake key (PUSH-GATEWAY §5.2). It carries no data of the vault's,
+and the gateway sends a fixed payload (PUSH-GATEWAY §6): no item, kind,
+name, count, cursor or priority reaches the gateway, Google or Apple.
+There are no vault-side quiet hours: the phone's Do Not Disturb or Focus
+applies to the notification it builds, and the vault does not learn the
+member's time zone.
+
+**Outcomes:**
+
+- `202`: `last_result` `sent`, `last_wake_at` set; a `reseal` in the
+  answer replaces the stored blob at the next flush.
+- `410 token_gone`, `400 token_invalid`, `410 blob_invalid`: in one flush
+  the vault erases the wake key and blob, sets nothing in their place
+  (`device.list` shows no `push`), audits `push.token_gone` (`ref` = the
+  code), and deposits `push.token_needed{reason}` to the app (no wake:
+  there is no registration). The app answers with a fresh
+  `push.register` when it next runs; a wake that would have been sent is
+  lost, which is safe: the app collects at every start.
+- `429`: wait `retry_after` (at most 3,600 s), merging triggers;
+  `last_result` `rate_limited`.
+- `5xx`, a timeout or no connection: retry after 5 s, 30 s and 120 s
+  (each ±20 % jitter), then drop the wake; `last_result`
+  `gateway_error`. Not audited.
+
+No wake writes an audit entry or a feed item: wakes are frequent, and a
+log of them would be a timeline of the member's activity.
+
+### 14.3 Egress, attestation and privacy
+
+- The enclave reaches the gateway of its channel only (§11.10.8), over
+  TLS it terminates, through the parent's forwarder (§12.2); the host's
+  allowlist gains the gateway's name (VAULT-RELEASES §8.4 control 3).
+- The attestation at registration proves to the gateway that the wake key
+  was made by a VettID vault release the channel's manifest lists. It
+  reveals the release and the enclave's host, never the vault or the
+  member.
+- What each party learns: PUSH-GATEWAY §9. The vault keeps no token, and
+  the gateway keeps nothing; Google or Apple see the timing of wakes, as
+  the relay already sees the timing of deposits.
+- A locked vault sends no wake, so a "vault locked, messages waiting"
+  signal stays the separate future decision of ANDROID-PLAN §9
+  question 14; the app says "notifications resume after you unlock"
+  (trigger 3 tells it once).
 
 ## 15. Open questions and follow-ups
 
@@ -10082,8 +10261,7 @@ Follow-ups:
    actions are in §10.1–§10.14, and location, presence and the wallet
    (0.8.0) in §10.16–§10.18. Still open: the `sync.since` cursor, and the crash-safe write order of
    `pin.change` (with its implementation).
-3. **Push.** Specify the push-gateway integration (§14) when that service is
-   scheduled.
+3. **Push.** Specified in 0.24.0 (§14; item 32).
 4. **Desktop unlock.** Revisit if a desktop attestation mechanism becomes
    available.
 5. **Release updates.** Implementation in V3: generate the §16 release
@@ -11468,6 +11646,58 @@ Follow-ups:
     shown as no limits; Resume may be offered whenever the connection
     has declines, not only while paused).
 
+32. **Push (0.24.0).** Owner request of 2026-10-10 ("we can start to
+    design the push service for google play and apple ios"); the N2 step
+    of ANDROID-PLAN §4 Notification modes, item 10. Owner decisions it
+    follows: no UnifiedPush; VettID's service is the notification path;
+    the payload carries no content and no names; push is opt-in per
+    device (the on-phone service stays Android's default); the design
+    must work end to end once the FCM and APNs credentials exist.
+    Chosen in the draft (open for the owner's review; PUSH-GATEWAY 0.4.0
+    §14.2 has the gateway's questions):
+    1. **The vault never stores the token**, only the gateway's sealed
+       wake blob, a fresh wake key per registration and a hash of the
+       token for idempotence (§14.1).
+    2. **The holder only** registers (one app per vault); desktops and
+       agents get no push. Both push types are allowed while held and
+       during a clone alarm, so the wakes that still matter then keep
+       working.
+    3. **What wakes**: new feed items of priority `normal` and above
+       except guides (exactly what ANDROID-PLAN's Mapping notifies),
+       `vault.held`, `vault.locking` (not the app's own lock) and the
+       clone alarm; only the last three while held (answers the gaps of
+       ANDROID-PLAN §4 item 9, points 4 and 5).
+    4. **Limits**: a 5-second debounce, 30 wakes an hour then one per
+       10 minutes, urgent ones exempt up to 10 an hour; 20 registrations
+       per 24 hours.
+    5. **A dead token** erases the registration and sends
+       `push.token_needed`; the app re-registers (gap 3).
+    6. **No audit entry or feed item per wake**; registrations, removals
+       and dead tokens are audited.
+    7. **No vault-side quiet hours** (the phone's Do Not Disturb applies;
+       the vault would need the member's time zone).
+    8. **Calls** (ringing through push: FCM full-screen intents, iOS
+       PushKit and CallKit) are left to the calls phase.
+    Open points:
+    1. **The numbers** of point 4 are first guesses, to be tuned with the
+       test phones (N4).
+    2. **A DEK-free "messages waiting" signal** for locked vaults stays a
+       separate future decision (§14.3).
+    3. **Apps connected to VettID** using VettID's channel: principles in
+       PUSH-GATEWAY §12 (through the vault's feed, the member's
+       per-source control, no token access); a protocol later.
+    Follow-ups: vettid-vault N3 (`push.register`, `push.unregister`,
+    `push.token_needed`, the registration in DEK state, NSM attestation
+    for the wake key, the wake rules, debounce and limits, retries, the
+    audit kinds, `push` in `device.list`, the hold allow list, the
+    gateway URL constant, a gateway stand-in in the dev stack and
+    `vaultctl` support; tests for each); vettid.org (the egress
+    allowlist entry in `lib/vault/egress.ts`, the channel files'
+    gateway URL, the gateway stack, N4); `vettid/vettid-push` (new,
+    N4); vettid-android (the FCM provider against §14, the status line
+    from `push`, `push.token_needed`); iOS (PUSH-GATEWAY §11.2) when
+    scheduled.
+
 ## 16. Test vectors
 
 These vectors use fixed seeds and are for **test use only**. The complete
@@ -11738,6 +11968,29 @@ adds it to `recovery.json` (eph scalar 32 × 0x28, nonce 12 × 0x29) with
 the 0.16.0 implementation.
 
 ## 17. Changelog
+
+- **0.24.0** (2026-10-10): normative, additive; owner request of
+  2026-10-10 (§15 item 32); a draft for the owner's review.
+  - §14 rewritten: **Push**. `push.register{platform, token, app_id,
+    environment?}` and `push.unregister` from the holder;
+    `push.token_needed` to the app; the push state; checks, idempotence by
+    `token_hash`, attested registration with a fresh wake key, the token
+    never stored, rotation by re-registering (§14.1). The wake rules,
+    debounce and limits, outcomes and retries, no content, no quiet hours,
+    no audit per wake (§14.2). Egress, attestation and privacy (§14.3).
+  - §10: the registry's push row is no longer reserved;
+    `push.token_needed` added.
+  - §10.1: error `gateway_error` with `{retry_after?}`; limit
+    `push_registrations` (20 per 24 hours).
+  - §10.3: `push` on the app's `device.list` entry.
+  - §10.9: audit kinds `push.registered`, `push.unregistered`,
+    `push.token_gone`.
+  - §3.6.3: the holder may send `push.register` and `push.unregister`
+    while held; the vault still sends `push.token_needed`; `vault.held`,
+    `vault.locking` and the alarm wake the app.
+  - §11.10.8: the push gateway URL among the release constants.
+  - §12.2: the enclave terminates TLS to the push gateway too.
+  - §15 item 3 answered; item 32.
 
 - **0.23.2** (2026-10-09): additive, owner decision of 2026-10-09
   (§15 item 31.14).
