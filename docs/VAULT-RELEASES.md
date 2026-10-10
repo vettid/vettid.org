@@ -1,8 +1,8 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.8
-date: 2026-10-08
+version: 0.1.9
+date: 2026-10-10
 owner: Al Liebl (Mesmer)
 changelog:
   - 0.1.0: V5 plan. Release pipeline, keys, infrastructure, release
@@ -56,6 +56,13 @@ changelog:
     0.22.0 §15 item 30): §11 notes the member's History export as the
     one exception to "no backup or export"; it changes no recovery
     objective
+  - 0.1.9 (editorial; push N3, VAULT-MESSAGING 0.24.1 §14.3, vettid.org
+    #204, vettid-vault #59): §8.4 adds the push gateway to the egress
+    controls. The parent's `DefaultAllow` carries both
+    `push.vettid.org` and `push.staging.vettid.org` (one parent binary
+    for every channel); each stage's DNS Firewall and the enclave's
+    release allowlist admit only their own channel's host; the gateway
+    URL is `push_url` in vettid-vault `enclave/releasecfg/<channel>.json`
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.14.0) §11.10 release updates, §12.5 deletion, §13.5, §13.9
@@ -832,14 +839,23 @@ out:
 1. The enclave has no network: its only path out is the parent's
    forwarder over vsock, which accepts only exact host names on port 443
    from `DefaultAllow` (the relay, `kms.us-east-1.amazonaws.com`,
-   `android.googleapis.com`) and resolves them itself, so the enclave
-   cannot choose addresses.
+   `android.googleapis.com`, and since push N3 the push gateways
+   `push.vettid.org` and `push.staging.vettid.org`) and resolves them
+   itself, so the enclave cannot choose addresses. The parent binary is
+   built once for every channel, so `DefaultAllow` (`parent.PushHosts`)
+   names both gateways; the stage's DNS Firewall (control 3) and the
+   enclave's own release allowlist each admit only their channel's
+   gateway, whose URL is the release constant `push_url` in vettid-vault
+   `enclave/releasecfg/<channel>.json` (`https://push.vettid.org` for
+   prod, `https://push.staging.vettid.org` for staging; VAULT-MESSAGING
+   §11.10.8, §14.3).
 2. TLS ends in the enclave against pinned roots (D5): a misroute can only
    fail, never be read.
-3. **Route 53 Resolver DNS Firewall** on the VPC: allow-list of the three
-   hosts plus the AWS endpoints the parent and agents use (SQS,
-   DynamoDB, S3, SSM, SSM messages, EC2 messages, CloudWatch Logs and
-   metrics, Auto Scaling); block everything else. It limits a
+3. **Route 53 Resolver DNS Firewall** on the VPC: allow-list of the
+   enclave's hosts (the relay, KMS, `android.googleapis.com` and the
+   stage's own push gateway) plus the AWS endpoints the parent and
+   agents use (SQS, DynamoDB, S3, SSM, SSM messages, EC2 messages,
+   CloudWatch Logs and metrics, Auto Scaling); block everything else. It limits a
    compromised parent too, including DNS tunnelling.
 4. Security group: no inbound; outbound TCP 443 only (plus DNS to the
    resolver). VPC Flow Logs for audit (7–30 days).
@@ -853,8 +869,10 @@ is TLS terminated in the enclave anyway. S3 and DynamoDB use the free
 gateway endpoints. No NAT.
 
 *As built (W6).* The allowlist is `lib/vault/egress.ts` (snapshot-tested):
-the relay, `kms`, `android.googleapis.com`; `sqs`, `dynamodb` and the
-SDK's account endpoint `<account>.ddb`, `s3` and the data bucket's
+the relay, `kms`, `android.googleapis.com`, the stage's push gateway
+(`pushHost` in `lib/config.ts`: `push.vettid.org` in prod,
+`push.staging.vettid.org` in staging; vettid.org #204); `sqs`,
+`dynamodb` and the SDK's account endpoint `<account>.ddb`, `s3` and the data bucket's
 virtual host, `ssm`; `ssmmessages`, `ec2messages`, `logs`, `monitoring`,
 `autoscaling` (all `us-east-1`); `*.ec2.internal`. Allowed names may
 redirect (CNAME chains to ELB or S3 names: `TRUST_REDIRECTION_DOMAIN`);

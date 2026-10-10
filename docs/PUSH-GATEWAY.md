@@ -1,11 +1,11 @@
 # VettID Push Gateway Protocol
 
-**Version:** 0.4.0 (draft)
+**Version:** 0.4.1 (draft)
 **Status:** Pre-implementation draft for review (N2; owner request of
 2026-10-10: "we can start to design the push service for google play and
 apple ios")
 **Companion to:** VettID Relay Protocol (Appendix A), VAULT-MESSAGING
-0.24.0 §14 (`push.register`, the vault's wake rules), ANDROID-PLAN D7
+0.24.1 §14 (`push.register`, the vault's wake rules), ANDROID-PLAN D7
 
 ## 1. Purpose & design principles
 
@@ -221,9 +221,9 @@ Codes (grammar per Relay Protocol §7.1):
 
 | Status | `code` | Meaning | The vault |
 |---|---|---|---|
-| 401 | `signature_invalid`, `timestamp_stale`, `replay_detected` | Auth | Fix clock / retry once |
+| 401 | `signature_invalid`, `timestamp_stale`, `replay_detected` | Auth | At registration `gateway_error`, no retry; at a wake retried like a `5xx` (owner decision 2026-10-10) |
 | 403 | `attestation_invalid` | Registration only | `gateway_error`; the app may retry later |
-| 400 | `bad_request`, `platform_invalid`, `app_invalid`, `token_invalid` | Body (`token_invalid`: also APNs `BadDeviceToken` or FCM `INVALID_ARGUMENT` for the token at a wake) | Registration refused; at a wake, as `token_gone` |
+| 400 | `bad_request`, `platform_invalid`, `app_invalid`, `token_invalid` | Body (`token_invalid`: also APNs `BadDeviceToken` or FCM `INVALID_ARGUMENT` for the token at a wake) | Registration refused; at a wake, `token_invalid` as `token_gone` and the other codes retried like a `5xx` (owner decision 2026-10-10) |
 | 410 | `token_gone` | FCM `UNREGISTERED` / 404, APNs `410 Unregistered` | Drop the registration, ask the app for a new token |
 | 410 | `blob_invalid` | §5.2 step 2 | Same as `token_gone` |
 | 429 | `rate_limited` (+ `retry_after`) | §8, or the platform's own `429`/`TooManyRequests` | Wait, merge triggers |
@@ -232,6 +232,14 @@ Codes (grammar per Relay Protocol §7.1):
 
 The gateway keeps no record of dead tokens: the vault drops its blob, so a
 dead token is never sent again.
+
+The vault's side is normative in VAULT-MESSAGING §14.1 and §14.2
+(0.24.1). A `429` or `5xx` may carry the wait in the body's `retry_after`
+or in the HTTP `Retry-After` header (delta-seconds); the vault uses the
+header only when the body has none, and caps either at 3,600 s (owner
+decision 2026-10-10). The vault gives one wake attempt at most 10 s (the
+lock wake: what is left of its 3 s budget), longer than this gateway's
+5 s platform send (§5.2).
 
 ## 8. Rate limiting & abuse
 
@@ -381,7 +389,7 @@ records wakes instead of sending them (N3).
 3. FCM may downgrade high-priority messages that show no notification.
    The vault wakes only for what the Mapping notifies (VAULT-MESSAGING
    §14.2), so nearly every wake shows one.
-4. `onNewToken` and `push.token_needed` send `push.register` again;
+4. `onNewToken` and `push.token-needed` send `push.register` again;
    leaving the mode or a wipe sends `push.unregister`.
 
 ### 11.2 iOS: Apple push (the iOS default)
@@ -401,7 +409,7 @@ modes: **Apple push** (the default) and **Off**.
   app fetches only while open, as on Android. The same warning ("Not
   recommended…").
 - The app re-registers whenever the OS gives a token different from the
-  one last registered, and on `push.token_needed`.
+  one last registered, and on `push.token-needed`.
 
 **How a wake is handled: a notification service extension (recommended).**
 
@@ -660,6 +668,18 @@ APNs token shape; it corresponds to no device.)
 
 ## 17. Changelog
 
+- **0.4.1** — errata from the vault's N3 implementation (vettid-vault
+  #59; approved, owner decision 2026-10-10): the event asking the app
+  for a fresh token is `push.token-needed` (§11.1, §11.2), as VAULT-MESSAGING 0.24.1
+  corrects it; 0.4.0's `push.token_needed` broke VAULT-MESSAGING §5.3's
+  type grammar. The vault's handling of each gateway answer is
+  VAULT-MESSAGING 0.24.1 §14.1 and §14.2. Owner decision 2026-10-10
+  (§7): a `401` is `gateway_error` at registration with no retry and is
+  retried like a `5xx` at a wake (0.4.0: "retry once"); at a wake only
+  `400 token_invalid` is handled as `token_gone`, and the other `400`
+  codes are retried like a `5xx`; the `Retry-After` header is used when
+  the body has no `retry_after`, capped at 3,600 s; a wake attempt waits
+  at most 10 s.
 - **0.4.0** — N2 design (owner request of 2026-10-10; revised after the
   owner's review of 2026-10-10: §12 rewritten, connections already use
   the channel through messaging, `https://`-only links, services with the
