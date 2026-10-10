@@ -1,9 +1,21 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.26
+version: 0.1.27
 date: 2026-10-10
 changelog:
+  - 0.1.27: History names the device of an entry (VAULT-MESSAGING
+    0.23.2 §15 item 31.14 follow-up: `vault.unlocked` and a device's
+    `vault.locked` carry `device_id`). The names come from `device.list`
+    (§10.3), as in the export: read when History opens and again when
+    it is shown again, kept for the session; a failed read names no
+    device (not "Removed device"). A row's second line adds the
+    device's name after the item and connection names ("Vault unlocked"
+    over "Pixel 10 Pro"; "Removed device" once unlisted); an entry
+    without `device_id` is unchanged. The entry page's **Device** line
+    shows the name, with "(this phone)" when `device_id` is this app's
+    own (from its pairing), and the id below it as **Device ID**; the
+    search is unchanged (the vault already matches device names, §10.9)
   - 0.1.26: owner feedback of 2026-10-10 ("viewing the notifications
     doesn't clear them unless you look at the details. this is bad
     UX"): **viewing the Notifications screen marks its items read**.
@@ -406,7 +418,12 @@ the screen changes or deletes an entry.
   connection's "First Last", the device's or the item's name where the
   entry refers to one (resolved from the app's caches; a removed one
   shows "Removed connection" / "Removed device" / "Deleted item"), and
-  the time. Infinite scroll: `audit.list` with `limit` 50 and
+  the time. The device (0.1.27) is any entry's `device_id`, since
+  VAULT-MESSAGING 0.23.2 also on `vault.unlocked` and a device's
+  `vault.locked`: its name from `device.list` (read when History opens
+  and when it is shown again; without an answer no device is named),
+  after the item and connection names on the row's second line, which
+  is the category's name only when the entry names none of the three. Infinite scroll: `audit.list` with `limit` 50 and
   `before_seq` = the previous page's `next_before_seq`; no
   `next_before_seq` is the end of the log ("Start of your history"). A
   page with `partial: true` (a search that ran out of its scan budget)
@@ -454,7 +471,9 @@ the screen changes or deletes an entry.
     the first day, local time, as RFC 3339 with offset) and `until`
     (the start of the day after the last).
 - **Entry detail** (tap a row): the label and kind, the exact time,
-  the connection (opens it, if it still exists), the device, the item
+  the connection (opens it, if it still exists), the device (0.1.27:
+  its name, "Removed device" once unlisted, "(this phone)" when it is
+  this app's own `device_id`, then the id as **Device ID**), the item
   (opens it, if it still exists and is not critical; a critical item
   opens only with the credential password as elsewhere), `direction`,
   `ref` (copyable), `seq` and the entry's `hash`. Nothing in the detail
