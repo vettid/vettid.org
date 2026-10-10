@@ -1,9 +1,17 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.27
+version: 0.1.28
 date: 2026-10-10
 changelog:
+  - 0.1.28: staging S8 canary of 2026-10-10 (VAULT-MESSAGING 0.23.3,
+    pending owner approval): after a release update ("Your vault is
+    updated", Continue) and after an unlock of an open vault, the app
+    showed the unlock screen although the vault was open: the
+    `vault.locking` of the lock before the unlock arrived over the
+    relay after the result. The app keeps the inner `ts` of each
+    successful unlock result and drops a `vault.locking` that is not
+    later (vettid-android #107); a later lock still locks the app
   - 0.1.27: History names the device of an entry (VAULT-MESSAGING
     0.23.2 §15 item 31.14 follow-up: `vault.unlocked` and a device's
     `vault.locked` carry `device_id`). The names come from `device.list`
