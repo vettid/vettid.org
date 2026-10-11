@@ -1,7 +1,7 @@
 ---
 title: STAGING-DEVELOPMENT-PLAN
 status: approved by the owner 2026-10-11 (D1–D11 as recommended; D3 as in ANDROID-PLAN 0.1.36, which replaced 0.1.34's answer the same day)
-version: 0.1.1
+version: 0.1.2
 date: 2026-10-11
 owner: Al Liebl (Mesmer)
 related:
@@ -19,6 +19,11 @@ changelog:
     Google, so there are two signers, not one. Release 1 pins only
     VettID's key and does not wait for the Play account (§2.2, §5 rows
     0a and 1, §6, §7 row 9, §8.4)
+  - 0.1.2: state after staging release S10 (2026-10-11; approved by
+    the owner 2026-10-11). D4 (feature allowlist), D5 (the staging
+    application id) and the signer binding are in S10, which is
+    published; §4, §5 row 1, §7 and §8 say what is now done. New
+    §8.5, the S10 record. Nothing else in the plan changes
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -179,7 +184,7 @@ other open work fits.
 | Automation signing key among staging `android_signers` (second digest, added at S2) | Pinned in every staging image | **Keep for development.** Never in `prod.json` (reviewed in the release commit, W10-READINESS §3 step 1) |
 | Test mail `*@test.staging.vettid.org` (SES inbound, staging account) | Deployed (`VettidOrgStageTestMailStack`) | **Keep.** Never built for production |
 | Canary flags on staging members | None set today (0 of 10 rows) | **Keep the mechanism**, set only for a canary run and cleared in the same session |
-| Staging app has the production application id `com.vettid.app` (the vault pins one package for both channels, `enclave/config.go`) | Staging and production builds cannot be on one phone; switching means uninstalling, which removes the app's keys, so the vault must be recovered (24 h wait) or re-enrolled | **Time-box**: decision D5 |
+| Staging app has the production application id `com.vettid.app` (the vault pins one package for both channels, `enclave/config.go`) | Staging and production builds cannot be on one phone; switching means uninstalling, which removes the app's keys, so the vault must be recovered (24 h wait) or re-enrolled. **Ended at S10 (0.1.2):** the staging build is `com.vettid.app.staging` and S10 accepts only that package in key attestation | **Time-box**: decision D5 (done) |
 | Staging SES in the sandbox | Every recipient is a verified identity | **Keep** (RUNBOOK: never request production access for staging) |
 | No admin site on staging; test data by `npm run staging:seed` and the CLI | As built | **Keep**; consequence: the admin site's vault pages are only ever exercised in production (risk 2) |
 | Device attestation: test CA accepted beside the vendor roots on staging | As built (VAULT-RELEASES §3.1) | **Keep** |
@@ -195,7 +200,7 @@ ever used from a phone. No app code exists for any row from 2 on.
 | 0 | Finish v1 on staging: A6 hardening, S3 retirement drill, cleanup to three releases | A6 open (ANDROID-PLAN §6); S3 ends 2026-10-13 | android, vettid.org | No (staging manifest changes only) | — | Key deletions (S1 due 10-12, S2 due 10-13, then the batch) |
 | 0a | F-Droid `foss` build | Branch `build/fdroid-foss` (2026-10-11), not merged | android | No: it is signed with VettID's own key, already pinned (D3) | Reproducible build | F-Droid submission |
 | 0b | Push N4 (Google push) | Gateway deployed for staging without platforms; app side merged (vettid-android #109); vault side in S9 | vettid.org, push | No | A Firebase project | Firebase project (owner: hold) |
-| 1 | **Production release 1** | Not blocked on Google Play (0.1.1, D3): it pins only VettID's own key (W10-READINESS 0.1.7 P9) | vault, vettid.org, android | It is one | Phase 0; §2.4; the production backend deploy | D2, D4; the tester list; the signer binding of VAULT-MESSAGING 0.27.0 §11.7.1 (W10-READINESS P9a) |
+| 1 | **Production release 1** | Not blocked on Google Play (0.1.1, D3): it pins only VettID's own key (W10-READINESS 0.1.7 P9). 0.1.2: the feature allowlist, the per-channel package and the signer binding are in vettid-vault `main` and proven on S10; what still blocks it is in W10-READINESS 0.1.8 §2 | vault, vettid.org, android | It is one | Phase 0; §2.4; the production backend deploy | D2, D4; the tester list; the signer binding of VAULT-MESSAGING 0.27.0 §11.7.1 (W10-READINESS P9a) |
 | 2 | Calls (1:1) | Vault code exists (`features/calls`, `vms/callwire`; VAULT-MESSAGING §10.10). Calling service **specified in CALLING-SERVICE 0.1.1, not built** (no repository). No app code | android, vault, a new calling-service repo, vettid.org (stacks), relay if `call.*` needs relay work (not established) | Very likely: the vault issues ICE credentials and its egress list would gain the calling service; not established in detail | A wake for the callee: the on-phone service works today, FCM needs 0b | Own TURN fleet or a managed one (CALLING-SERVICE §8); its §10 open questions |
 | 3 | Devices, agents, LEASH | Vault code exists (`features/leash`, 0.12.0 format, in S4 and later). Connector **not rebuilt** (LEASH-IMPLEMENTATION "Connector"); `vettid-agent` and `vettid-desktop` last changed 2026-05 and do not work with this vault | android, agent, desktop, vault (fixes) | Only for fixes found | — | Whether desktop or agent comes first |
 | 4 | Wallet | Vault code exists (`features/wallet`; §10.18). No app code | android, vault | For fixes | — | Networks to support |
@@ -235,9 +240,10 @@ Phases 2–6 run on staging under §2; each reaches production through
 | 4 | After 2026-10-13: one PR setting S3–S6 `removed` and deleting their stacks, leaving S7–S9; the key list for the owner's batch | assistant, then owner |
 | 5 | Remove the legacy session auth switch (§4) | assistant |
 | 6 | Create `/vettid-org/prod/member/enroll-code-key`; first weekly production deploy | owner, then assistant |
-| 7 | If D4 or D5 is accepted: spec changes in VAULT-MESSAGING / VAULT-RELEASES and vettid-vault, on a staging release | assistant |
+| 7 | If D4 or D5 is accepted: spec changes in VAULT-MESSAGING / VAULT-RELEASES and vettid-vault, on a staging release. **Done (0.1.2):** VAULT-MESSAGING 0.26.0 and 0.27.0, VAULT-RELEASES 0.1.11 and 0.1.12; vettid-vault #62–#64; staging release S10, published 2026-10-11 (§8.5); the app's `.staging` build (vettid-android #116) | assistant |
 | 8 | Amend the stale text below in one docs PR once §6 is answered | assistant |
 | 9 | Play account and the Play certificate's digest (after release 1, D3); Firebase project; Apple account when iOS is scheduled | owner |
+| 10 | (0.1.2) Move the remaining staging vaults to the `com.vettid.app.staging` app while S10 is the newest release: the staging release after S10 refuses a vault with no recorded signer (VAULT-MESSAGING §11.7.1). Done on 2026-10-11 for test member 4's vault and the owner's (§8.5); the others by transfer, recovery or a new enrollment | owner, on the phones |
 
 Text this plan makes stale (not edited here):
 
@@ -285,7 +291,7 @@ Measured 2026-10-11. Profiles: `vault-staging` (347272280361), default
 | Admin site and API | Production only | RUNBOOK "Staging" |
 | Repository, `cdk.json`, CI, tag-signing key, image registry | Shared | `cdk.json` |
 | Organization trail, GuardDuty, alert topic | Shared (staging alerts arrive with production's) | RUNBOOK "Security alerts" |
-| Android package name | Same (`com.vettid.app`); signing keys differ | `app/build.gradle.kts` lines 43, 90–99; `enclave/config.go:57` |
+| Android package name | Same (`com.vettid.app`); signing keys differ. **0.1.2: separate since S10**, `com.vettid.app.staging` in staging (the channel file's `android_package`; the app's `staging` build type) | `app/build.gradle.kts` lines 43, 90–99; `enclave/config.go:57`; 0.1.2: `enclave/releasecfg/staging.json` |
 
 What calls would add: a TURN service (coturn and a sidecar) and five
 `call.*` deposit types on the relay, per CALLING-SERVICE §4 and §9;
@@ -347,7 +353,10 @@ mailboxes; the HTTP action that needs enclave egress is not offered
 - `/vettid-org/prod/member/enroll-code-key` does not exist; the staging
   parameter does (`aws ssm describe-parameters`, names only).
 - `vault/releases/prod.json` has no release; `prod.json` in vettid-vault
-  has `release: 0` and the `TODO-O8` placeholder.
+  has `release: 0` and the `TODO-O8` placeholder. (0.1.2: the
+  placeholder is gone. `prod.json` now lists the one `vettid` signer,
+  `android_package` `com.vettid.app` and `features: []`; `release: 0`
+  is the only value the release gate still reports missing.)
 
 ### 8.4 Not established
 
@@ -361,3 +370,36 @@ mailboxes; the HTTP action that needs enclave egress is not offered
 - Whether an automated test run deletes its test member today (§2.5.4
   states the rule, not the current behaviour).
 - The cost estimate of risk 5 after cleanup; it is arithmetic from §8.2.
+
+### 8.5 After S10 (0.1.2)
+
+State of 2026-10-11, about 23:00 UTC. From the repositories unless
+marked; nothing here was measured again in AWS.
+
+- **S10**: tag `release/staging/10` at vettid-vault `8678752f`; PCR0
+  `a9e3defc8bfa4c3c6f89a87afac67bc245f1ef8ac331de88505d8d4928a4bc0d9e793fb928050ba02c9f3b915ffbfb0e`;
+  the independent rebuild matched (vettid.org #228); key check passed
+  (#229). As reported from the release session: self-test PASS with
+  the capacity run (58 vaults held, about 907 projected, VAULT-RELEASES
+  §8.8), canary on a test phone at 22:29 UTC.
+- **Manifest serial 12** (#230, merged about 23:00 UTC): S10 `active`,
+  S9 `deprecated` with S4–S8, S3 `retired` (ends 2026-10-13 15:30
+  UTC), S1 and S2 `removed`. S10's log entry is `security: urgent`,
+  the first use of that level on either channel (the key attestation
+  chain fix; it affects S3–S9), which is what the notice job's urgent
+  mail is for.
+- **In S10**: the feature allowlist (staging lists all seven, so no
+  behaviour changes there), `android_package`
+  `com.vettid.app.staging`, per-vault signer binding, the key
+  attestation chain rules (VAULT-MESSAGING 0.26.0, 0.27.0, 0.27.1).
+- **Vaults** (as reported by the owner, 2026-10-11): test member 4's
+  vault and the owner's are on S10 and attached to the
+  `com.vettid.app.staging` app; the owner's moved on the same phone by
+  a pasted transfer code. Vaults still attached to the old app unlock
+  on S10 unbound and must move before the next staging release (§7
+  action 10).
+- **Rule §2.1.2** (at most three staging releases not `removed`): eight
+  are now (S3–S10). The cleanup of §7 action 4 follows the S3 drill.
+- **Push**: the staging gateway's Android app id is configured as
+  `com.vettid.app.staging` (vettid.org #223); no platform is enabled
+  (the Firebase project is on hold).
