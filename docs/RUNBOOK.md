@@ -543,6 +543,18 @@ After publishing a manifest, run it at once:
    (`tag`, `source_commit`, `measurements_sha256`, `host_files_sha256`,
    `nitro_cli_version`, `base_ami`, `ami_revision: 0`, `min_instances: 0`
    for the canary, `max_instances: 2`), `npm test`.
+   Every entry, in every channel, has `notes` = its own channel's log
+   entry (`https://vettid.org/security/releases/<N>/`, staging
+   `https://staging.vettid.org/security/releases/<N>/`) and, before it
+   is signed into any manifest (a canary too), its `log` (VAULT-RELEASES
+   §7 "Release notes on every channel"): `summary` one line of at most
+   160 characters; `changes` 1–20 items of at most 280 characters;
+   `security` `none`, `recommended` or `urgent` (the last two with
+   `security_text`, at most 1,000 characters, and `affects`). Plain text
+   only: no line breaks, `<`, `>`, backticks, `**`, `](` or `://` (the
+   app shows it as written). The validation (CDK synth, `npm test`,
+   `vault:manifest sign`, `check:manifest`) refuses a non-candidate
+   without `log`. Write it in the release PR, where it is reviewed.
 3. The release key first (VaultStack, "Creating a release key" above).
 4. `npx cdk diff VettidOrgVaultHostStack VettidOrgVaultRelease<N>Stack --profile vault-prod`:
    the host stack only gains N's PCR0 on the smoke key; the release stack
@@ -615,7 +627,10 @@ and re-checks everything with this repository's own render and verifier:
 1. Edit `vault/releases/prod.json` for the publication: N `active` with
    `published_at` and its `log` (summary, changes, security), N−1
    `deprecated`, any `retired`/`ends_at`/`removed` changes (§10.3).
-2. `npm run vault:manifest -- sign --channel prod`: serial = max(served,
+2. `npm run vault:manifest -- sign --channel prod`: refuses while any
+   release's `notes` is not its release log entry (`npm run vault:manifest --
+   notes --channel <c>` switches them; only staging S1–S9 ever had other
+   notes), then serial = max(served,
    `signed_serial`) + 1; `signed_serial` is raised in the file *before*
    signing; output `local/vault/prod/served-<serial>.json`. Commit the
    raised `signed_serial` even if this manifest is never published.
@@ -628,7 +643,11 @@ and re-checks everything with this repository's own render and verifier:
 4. Publish: `npm run vault:manifest -- publish --channel prod --in local/vault/prod/served-<s>.json`
    checks again, uploads (idempotent) and confirms the bucket copy, then
    writes `website/.well-known/vettid/pcr-manifest.json`, regenerates the
-   release log (`website/security/releases/`) and commits those paths.
+   release log (`website/security/releases/`) and commits those paths
+   (staging: `vault/staging/pcr-manifest.json` and
+   `sites/staging/security/releases/`). `npm run release-log [-- --channel <c>]`
+   regenerates a log by hand; `check:manifest` fails while either
+   channel's log is stale.
    Push, merge (CI runs `check:manifest`), `npm run deploy:site`, and run
    the manifest sync (above) so routing follows at once.
 
@@ -1029,7 +1048,7 @@ vault's end-to-end tests need, entirely in vettid-vault-staging
 | `VettidOrgVaultStack`, `VettidOrgVaultHostStack` | as in "Vault" (deployed since W5/W6) |
 | `VettidOrgMemberApiStack` | member API with the vault routes, notice job, alarm mailer (stream: context `stagingVaultsStreamArn` in cdk.json), cleanup |
 | `VettidOrgAccountSiteStack` | https://account.staging.vettid.org (same site, WAF and API path as prod) |
-| `VettidOrgStageSiteStack` | https://staging.vettid.org: a notice page and the staging manifest at `/.well-known/vettid/pcr-manifest.json` |
+| `VettidOrgStageSiteStack` | https://staging.vettid.org: a notice page, the staging manifest at `/.well-known/vettid/pcr-manifest.json` and the staging release log at `/security/releases/` |
 | `VettidOrgStageTestMailStack` | test infrastructure: a mailbox for automated tests at `*@test.staging.vettid.org` ("Test mail" below) |
 
 Not in staging, on purpose: the public site, signup, playbooks and the
@@ -1042,8 +1061,12 @@ testing); push; the audit stack (the organization trail and GuardDuty,
 administered from the management account, already cover the account;
 `VettidOrgVaultAlertForwardStack` sends the account's events to the
 management account's alert rules — "Security alerts").
-Staging has no release log (the log is production's); its notice emails
-link to the production log.
+Staging has its own release log (W11; VAULT-RELEASES §7 "Release notes
+on every channel"): https://staging.vettid.org/security/releases/,
+generated into `sites/staging/security/releases/` (pages "Staging (test
+builds)", `log.css`, `index.json` for the staging app's What's new) by
+the same code as production's and served by `VettidOrgStageSiteStack`.
+The staging notice emails and the staging account site link it.
 
 All system mail comes from `no-reply@staging.vettid.org`. **SES in the
 staging account stays in the sandbox**: every recipient must be a
@@ -1094,10 +1117,24 @@ set in dependency order.
 
 As in "Publishing a manifest" with `--channel staging` and the
 `vault-staging-manifest-signer` profile; the served file is
-`vault/staging/pcr-manifest.json`. After the merge:
+`vault/staging/pcr-manifest.json`, the log `sites/staging/security/releases/`
+(both written and committed by `publish`). After the merge:
 `npx cdk deploy VettidOrgStageSiteStack -c stage=staging --profile vault-staging`
-(byte for byte at https://staging.vettid.org/.well-known/vettid/pcr-manifest.json),
-then run `vettid-org-staging-vault-manifest-sync` with `--profile vault-staging`.
+(the manifest byte for byte at https://staging.vettid.org/.well-known/vettid/pcr-manifest.json,
+and the release log), then run `vettid-org-staging-vault-manifest-sync`
+with `--profile vault-staging`.
+
+**The one-time notes switch (W11 backfill).** S1–S8 were signed with
+their GitHub release URLs as `notes` (S9 too, if it was published before
+W11 merged). The validation accepts that URL for staging releases 1–9
+only, so the manifests already signed stay renders of the file, but
+`sign` refuses it. The first staging signing after W11 therefore starts
+with `npm run vault:manifest -- notes --channel staging`, which sets
+every entry's `notes` to `https://staging.vettid.org/security/releases/<N>/`
+(review the diff); then edit statuses as usual and `sign`. One
+publication switches them all; the earlier serials keep their GitHub
+URLs in git history. From then on a release's log URL never changes
+(`check:manifest` successor rule).
 
 ### Test mail
 

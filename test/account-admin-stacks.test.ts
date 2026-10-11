@@ -740,7 +740,7 @@ describe('VettidOrgAccountSiteStack', () => {
     const { accountSiteConfig } = require('../lib/stacks/account-site-stack');
     expect(accountSiteConfig(config)).toEqual({ stage: 'prod', release_log_url: 'https://vettid.org/security/releases/', android_app_url: null });
     expect(accountSiteConfig(loadConfig(new cdk.App({ context: { stage: 'staging', stagingAndroidAppUrl: 'https://example.org/a' } }).node)))
-      .toEqual({ stage: 'staging', release_log_url: 'https://vettid.org/security/releases/', android_app_url: 'https://example.org/a' });
+      .toEqual({ stage: 'staging', release_log_url: 'https://staging.vettid.org/security/releases/', android_app_url: 'https://example.org/a' });
     // Deployed in the revalidating pass: the site, config.json and assetlinks.json.
     const deps = Object.values<any>(t.findResources('Custom::CDKBucketDeployment')).map((r) => r.Properties);
     const html = deps.find((d) => JSON.stringify(d.Include ?? []).includes('*.json'));

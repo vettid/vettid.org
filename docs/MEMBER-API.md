@@ -1,8 +1,16 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.3.1
+version: 2.3.2
 changelog:
+  - 2.3.2 (2026-10-10, VAULT-RELEASES 0.1.10 W11, RELEASE-UPDATES
+    0.3.0; editorial, as built): "Vault release notices": every notice
+    email links release notes (the ending release's entry, the newest
+    `active` release's entry and summary; the urgent email the security
+    release's entry, summary and what it fixes), taken from the stage's
+    own release log; `RELEASE_LOG_URL` and the account site's
+    `release_log_url` are per stage (`https://<zoneName>/security/releases/`,
+    staging's own log in staging)
   - 2.3.1 (2026-10-08, VAULT-MESSAGING 0.21.0; owner decision of
     2026-10-08, §15 item 29): an email address with a control
     character, C0 (U+0000–U+001F), DEL (U+007F), C1 (U+0080–U+009F),
@@ -868,7 +876,30 @@ A daily job (`VaultNoticeJob`, 15:00 UTC, role
 |---|---|---|
 | `ends_90`, `ends_30`, `ends_7`, `ends_1` | 90, 30, 7 and 1 days before `ends_at` (a run sends only the latest one due, so a missed day sends the current one, never a stale one) | `deprecated` or `retired` with `ends_at` |
 | `ended` | up to 14 days after `ends_at` | `removed`, not reopened for a rescue: how to ask for a rescue in the 30-day window |
-| `urgent_<U>` | in the first 30 days of release U | U is marked `security: urgent` in the release log (`https://vettid.org/security/releases/index.json`, generated from the signed manifest); sent to members on each release in U's `affects` that still runs |
+| `urgent_<U>` | in the first 30 days of release U | U is marked `security: urgent` in the stage's release log (`index.json`, generated from the signed manifest); sent to members on each release in U's `affects` that still runs |
+
+Every email links release notes (RELEASE-UPDATES §3, VAULT-RELEASES §3.5;
+W11). The job reads the stage's own release log, `RELEASE_LOG_URL` =
+`https://<zoneName>/security/releases/` (production
+`https://vettid.org/security/releases/`, staging
+`https://staging.vettid.org/security/releases/`), once per run
+(`index.json`, 10 s timeout, no redirects):
+
+- `ends_*` and `ended`: the ending release's notes, and the newest
+  `active` release (the highest `release_number` among the `active` rows
+  of `vault-releases`, the one the app offers) with its notes and its
+  one-line log summary, when it is newer than the ending one; plus the
+  log's index.
+- `urgent_<U>`: U's notes, its summary and its `security_text` ("What it
+  fixes").
+
+A release's link is its `notes` as the log lists it (an `https` URL;
+staging releases signed before the log rule still list their GitHub
+release URL until the next staging signing), otherwise
+`RELEASE_LOG_URL<n>/`. Summaries and `security_text` are flattened to one
+line and bounded (160 and 1,000 characters). If the log cannot be read,
+the deadline notices still go out with the links and without summaries;
+urgent emails wait for the next run.
 
 Each notice goes to a member at most once per release, end date and
 milestone: a conditional put of `vault-notice#…` in the ratelimits table
@@ -1060,8 +1091,9 @@ credential password):
   happens in the app at an unlock), an open recovery, the last
   `credential_clone` alarm, and **Lock vault** (`POST /api/vault/lock`
   with a browser-made ULID, then up to 30 s of `requests/{id}` polling)
-  while the vault is `unlocked` or leased. The release log link is
-  production's in every stage.
+  while the vault is `unlocked` or leased. The release log link is the
+  stage's own log (`release_log_url` in `/config.json`,
+  `https://<zoneName>/security/releases/`).
 - **`/account/vault/recovery/`** (gated): the request
   (`browser_key` from a WebCrypto P-256 pair made **non-extractable**,
   kept in IndexedDB `vettid-vault-recovery`, store `keys`, keyed by

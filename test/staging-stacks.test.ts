@@ -159,6 +159,16 @@ describe('staging (-c stage=staging)', () => {
     },
   );
 
+  test('release notes per stage (VAULT-RELEASES §7): the notice job and the account site link staging\'s own log, which the staging site serves', () => {
+    const fns = resources(t('VettidOrgMemberApiStack'), 'AWS::Lambda::Function').filter((f) => f.Properties.Environment?.Variables?.RELEASE_LOG_URL);
+    expect(fns.map((f) => f.Properties.Environment.Variables.RELEASE_LOG_URL)).toEqual(['https://staging.vettid.org/security/releases/']);
+    const fnCode = resources(t('VettidOrgStageSiteStack'), 'AWS::CloudFront::Function')[0].Properties.FunctionCode as string;
+    for (const p of ['/security/releases/index.html', '/security/releases/index.json', '/security/releases/log.css']) expect(fnCode).toContain(`"${p}":1`);
+    for (const e of readReleaseFile(ROOT, 'staging', STAGING).releases.filter((r) => r.status !== 'candidate')) {
+      expect(fnCode).toContain(`"/security/releases/${e.release}/index.html":1`);
+    }
+  });
+
   test('left out of staging: public site, signup, admin, relay, audit, delegation', () => {
     const names = [...staging.keys()];
     for (const n of ['VettidOrgStack', 'VettidOrgDnsStack', 'VettidOrgSignupStack', 'VettidOrgPlaybooksStack', 'VettidDevRedirectStack',

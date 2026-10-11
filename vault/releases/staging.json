@@ -12,7 +12,15 @@
       "admitted_pcr0s": [],
       "published_at": "2026-10-05T00:03:09Z",
       "ends_at": "2026-10-05T15:27:03Z",
-      "notes": "https://github.com/vettid/vettid-vault/releases/tag/release/staging/1"
+      "notes": "https://github.com/vettid/vettid-vault/releases/tag/release/staging/1",
+      "log": {
+        "summary": "The first staging test build of the vault, used to stand up the staging channel.",
+        "changes": [
+          "First test build of the vault on the staging channel: enroll, unlock, lock and recovery inside a Nitro Enclave, with each vault sealed to this release's own key.",
+          "Built from vettid-vault commit 87187e7 (tag release/staging/1) and independently rebuilt on 2026-10-04 with a matching PCR0."
+        ],
+        "security": "none"
+      }
     },
     {
       "release": 2,
@@ -26,7 +34,16 @@
       ],
       "published_at": "2026-10-05T14:55:20Z",
       "ends_at": "2026-10-06T18:17:46Z",
-      "notes": "https://github.com/vettid/vettid-vault/releases/tag/release/staging/2"
+      "notes": "https://github.com/vettid/vettid-vault/releases/tag/release/staging/2",
+      "log": {
+        "summary": "Test build adding connection requests with a short code that both people compare.",
+        "changes": [
+          "Connection requests, with a short code that both people compare before they connect (VAULT-MESSAGING 0.10.2 and 0.10.3).",
+          "The release number and the release automation signing key are built into the image.",
+          "Built from vettid-vault commit bf0cc31 (tag release/staging/2) and independently rebuilt on 2026-10-05 with a matching PCR0."
+        ],
+        "security": "none"
+      }
     },
     {
       "release": 3,
@@ -51,6 +68,16 @@
         "ami_revision": 0,
         "min_instances": 0,
         "max_instances": 2
+      },
+      "log": {
+        "summary": "Test build with notices for declined connections and pairings, recovery fixes and a capacity self-test.",
+        "changes": [
+          "A declined connection request or a rejected device pairing is reported to the other side (VAULT-MESSAGING 0.10.5).",
+          "Recovery records when it was registered, and the vault keeps the credential backup setting (VAULT-MESSAGING 0.10.6).",
+          "Fixes from the first staging tests (queue recreation, lock logging, recovery test vectors) and a capacity measurement in the self-test.",
+          "Built from vettid-vault commit 5cd11db (tag release/staging/3), the first release built on the ubuntu-26.04-arm runners, and independently rebuilt on 2026-10-05 with a matching PCR0."
+        ],
+        "security": "none"
       }
     },
     {
@@ -75,6 +102,18 @@
         "ami_revision": 0,
         "min_instances": 0,
         "max_instances": 2
+      },
+      "log": {
+        "summary": "Test build adding the daily owner check, enrollment codes, delegation statements and stricter credential and recovery rules.",
+        "changes": [
+          "The daily owner check: a vault whose owner has not confirmed with PIN and password for 24 hours is held, and its agents pause, until the owner does (VAULT-MESSAGING 0.13.0).",
+          "Enrollment codes, app keys and account status (VAULT-MESSAGING 0.15.0).",
+          "Delegation and status statements in the LEASH format (VAULT-MESSAGING 0.12.0).",
+          "A credential can no longer be deleted on its own, and recovery needs the credential backup to be on (VAULT-MESSAGING 0.15.2 and 0.16.0).",
+          "A transferred app learns its account from the pairing, and errors say how long to wait before retrying (VAULT-MESSAGING 0.17.0).",
+          "Built from vettid-vault commit f5cf127 (tag release/staging/4) and independently rebuilt on 2026-10-07 with a matching PCR0."
+        ],
+        "security": "none"
       }
     },
     {
@@ -100,6 +139,16 @@
         "ami_revision": 0,
         "min_instances": 0,
         "max_instances": 2
+      },
+      "log": {
+        "summary": "Test build with your name always shared with connections, your full email in the account view, history search and item limits.",
+        "changes": [
+          "Your shared profile always carries your first and last name, and you can change your name from the app (VAULT-MESSAGING 0.18.0).",
+          "The account view shows your full email, and your history can be searched inside the vault (VAULT-MESSAGING 0.20.0).",
+          "Kept values, item size limits, dry runs, named limits and fixes to sharing (VAULT-MESSAGING 0.21.0).",
+          "Built from vettid-vault commit 26b7140 (tag release/staging/5) and independently rebuilt on 2026-10-08 with a matching PCR0."
+        ],
+        "security": "none"
       }
     },
     {
@@ -126,6 +175,15 @@
         "ami_revision": 0,
         "min_instances": 0,
         "max_instances": 2
+      },
+      "log": {
+        "summary": "Test build adding History export and one template item per contact point.",
+        "changes": [
+          "You can export your History from the vault (VAULT-MESSAGING 0.22.0).",
+          "Contact templates keep one item per contact point, without reserved tags (template registry version 2).",
+          "Built from vettid-vault commit 403d7d9 (tag release/staging/6) and independently rebuilt on 2026-10-09 with a matching PCR0."
+        ],
+        "security": "none"
       }
     },
     {
@@ -153,6 +211,15 @@
         "ami_revision": 0,
         "min_instances": 0,
         "max_instances": 2
+      },
+      "log": {
+        "summary": "Test build adding asks from connections, with rate limits per connection rule.",
+        "changes": [
+          "Connections can ask you for information under rules you set, with rate limits per connection rule (VAULT-MESSAGING 0.23.0).",
+          "Fixes to merging tags and resuming asks (VAULT-MESSAGING 0.23.1).",
+          "Built from vettid-vault commit c22a750 (tag release/staging/7) and independently rebuilt on 2026-10-09 with a matching PCR0."
+        ],
+        "security": "none"
       }
     },
     {
@@ -181,6 +248,15 @@
         "ami_revision": 0,
         "min_instances": 0,
         "max_instances": 2
+      },
+      "log": {
+        "summary": "Test build that records which device unlocked or locked your vault in its history.",
+        "changes": [
+          "Your vault's history records which device unlocked or locked it (VAULT-MESSAGING 0.23.2).",
+          "The build's base images come from the AWS ECR Public mirror at the same pinned digests; nothing else in the vault changes.",
+          "Built from vettid-vault commit 6a752d2 (tag release/staging/8) and independently rebuilt on 2026-10-10 with a matching PCR0."
+        ],
+        "security": "none"
       }
     },
     {
@@ -209,6 +285,16 @@
         "ami_revision": 0,
         "min_instances": 0,
         "max_instances": 2
+      },
+      "log": {
+        "summary": "Release 9 fixes a problem where your vault could lock itself again right after an update, and prepares it for push notifications through Google and Apple.",
+        "changes": [
+          "Fixed: after updating, the vault could lock again within a minute and ask you to unlock once more. Unlocking a vault that is already open now keeps it open.",
+          "New: your vault can register this phone for push notifications, so that in a later app update notifications can arrive without the app's on-phone service.",
+          "The push carries no content: Google or Apple only learn that VettID woke your phone, never what for. Nothing changes until you choose Google push in the app.",
+          "Your vault's network access gains one address: VettID's push service for this channel (push.staging.vettid.org). Nothing else is added."
+        ],
+        "security": "none"
       }
     }
   ]

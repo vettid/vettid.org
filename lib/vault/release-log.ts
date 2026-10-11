@@ -1,21 +1,29 @@
 /**
- * The public release log (RELEASE-UPDATES §5, VAULT-RELEASES §7):
- * `/security/releases/` on vettid.org, one page per production release,
- * generated from the signed manifest (the authority for numbers, PCRs,
- * statuses and dates) and `vault/releases/prod.json` (tag, commit and the
- * log text), so the log cannot disagree with the manifest.
+ * The public release logs (RELEASE-UPDATES §5, VAULT-RELEASES §7
+ * "Release notes on every channel"): `/security/releases/` on each
+ * channel's site (production https://vettid.org, staging
+ * https://staging.vettid.org), one page per release, generated from the
+ * channel's signed manifest (the authority for numbers, PCRs, statuses and
+ * dates) and `vault/releases/<channel>.json` (tag, commit and the log
+ * text), so a log cannot disagree with its manifest.
  *
- * `website/security/releases/index.json` is both the machine-readable log
- * and its memory: a release the manifest has dropped (removed, and no live
- * key admits it, §10.3 step 5) keeps its last entry there and its page
- * stays (RELEASE-UPDATES §5: an entry stays after its release has ended).
- * The vault notice job reads it for urgent security releases (W8).
+ * `<log dir>/index.json` (RELEASE_LOG_DIRS) is both the machine-readable
+ * log, which the app reads for What's new and the notice job for links,
+ * summaries and urgent security releases, and its memory: a release the
+ * manifest has dropped (removed, and no live key admits it, §10.3 step 5)
+ * keeps its last entry there and its page stays (an entry stays after its
+ * release has ended).
+ *
+ * Production pages use the vettid.org design (shared navigation filled in
+ * by scripts/sync-nav.mjs, which comparisons ignore). Staging pages use the
+ * staging site's plain design and its strict CSP (stylesheets only:
+ * `log.css` is generated next to them), say "Staging (test builds)" and
+ * link the staging manifest.
  *
  * Pure: inputs in, files out (scripts/vault/release-log.ts writes or checks
- * them). The shared navigation inside the pages is filled in by
- * scripts/sync-nav.mjs; comparisons ignore it.
+ * them).
  */
-import type { ReleaseFile, SecurityLevel } from './release-list';
+import { type Channel, RELEASE_LOG_DIRS, type ReleaseFile, SERVED_PATHS, type SecurityLevel } from './release-list';
 
 export interface LogManifest {
   serial: number;
@@ -61,8 +69,8 @@ export function buildIndex(prev: LogIndex, manifest: LogManifest | null, file: R
   const byNumber = new Map(prev.releases.map((r) => [r.release, r]));
   for (const m of manifest.releases) {
     const e = file.releases.find((x) => x.release === m.release);
-    if (!e || e.pcr0 !== m.pcr0) throw new Error(`release ${m.release} is in the manifest but not (with that PCR0) in vault/releases/prod.json`);
-    if (!e.log) throw new Error(`release ${m.release} has no log text in vault/releases/prod.json`);
+    if (!e || e.pcr0 !== m.pcr0) throw new Error(`release ${m.release} is in the manifest but not (with that PCR0) in vault/releases/${file.channel}.json`);
+    if (!e.log) throw new Error(`release ${m.release} has no log text in vault/releases/${file.channel}.json`);
     const old = byNumber.get(m.release);
     if (old && old.pcr0 !== m.pcr0) throw new Error(`release ${m.release}: the log has another PCR0`);
     byNumber.set(m.release, {
@@ -223,7 +231,8 @@ const ABOUT = `  <section>
     <p>What the statuses mean, and how long each release keeps running, is explained in <a href="https://github.com/vettid/vettid.org/blob/master/docs/RELEASE-UPDATES.md">Vault release updates</a>: a release is kept for at least 12 months after a newer one replaces it, the last 90 days with a final notice and emails, then it ends.</p>
   </section>`;
 
-export function renderIndexPage(index: LogIndex): string {
+export function renderIndexPage(index: LogIndex, channel: Channel = 'prod'): string {
+  if (channel === 'staging') return stagingIndexPage(index);
   const rows = index.releases
     .map(
       (r) => `        <tr>
@@ -269,7 +278,24 @@ ${ABOUT}`,
   });
 }
 
-export function renderReleasePage(r: LogEntry): string {
+export function renderReleasePage(r: LogEntry, channel: Channel = 'prod'): string {
+  if (channel === 'staging') return stagingReleasePage(r);
+  return page({
+    path: `/security/releases/${r.release}/`,
+    title: `Vault release ${r.release}`,
+    description: `VettID vault release ${r.release}: measurements, source, changes, security and status.`,
+    body: `  <div class="hero">
+    <span class="hero-badge"><a href="/security/releases/">Vault release log</a></span>
+    <h1>Vault release ${r.release}</h1>
+    <p class="subtitle">${esc(r.summary)}</p>
+  </div>
+
+${releaseSections(r, channel)}`,
+  });
+}
+
+/** A release page's sections (status, changes, measurements, source), the same on every channel. */
+function releaseSections(r: LogEntry, channel: Channel): string {
   const commit = r.source_commit
     ? `<a href="https://github.com/vettid/vettid-vault/tree/${esc(r.source_commit)}"><code>${esc(r.source_commit)}</code></a>`
     : '&mdash;';
@@ -286,24 +312,15 @@ export function renderReleasePage(r: LogEntry): string {
     ? `<pre>git clone https://github.com/vettid/vettid-vault &amp;&amp; cd vettid-vault
 git checkout ${esc(r.tag)}
 gh release download ${esc(r.tag)} -p measurements.json -p vault-enclave.eif -D published
-CHANNEL=prod release/rebuild.sh out published/measurements.json</pre>`
+CHANNEL=${channel} release/rebuild.sh out published/measurements.json</pre>`
     : '';
-  return page({
-    path: `/security/releases/${r.release}/`,
-    title: `Vault release ${r.release}`,
-    description: `VettID vault release ${r.release}: measurements, source, changes, security and status.`,
-    body: `  <div class="hero">
-    <span class="hero-badge"><a href="/security/releases/">Vault release log</a></span>
-    <h1>Vault release ${r.release}</h1>
-    <p class="subtitle">${esc(r.summary)}</p>
-  </div>
-
-  <section>
+  const noEnd = channel === 'prod' ? 'Not set (at least 12 months after a newer release replaces it)' : 'Not set';
+  return `  <section>
     <h2>Status</h2>
     <dl class="fields">
       <dt>Status</dt><dd>${status(r.status)}</dd>
       <dt>Published</dt><dd>${day(r.published_at)}</dd>
-      <dt>End date</dt><dd>${r.ends_at ? day(r.ends_at) : 'Not set (at least 12 months after a newer release replaces it)'}</dd>
+      <dt>End date</dt><dd>${r.ends_at ? day(r.ends_at) : noEnd}</dd>
     </dl>
     <p>${statusLine}</p>
   </section>
@@ -332,17 +349,129 @@ ${r.security_text ? `    <p>${esc(r.security_text)}</p>\n` : ''}  </section>
       <dt>Commit</dt><dd>${commit}</dd>
     </dl>
     <p>Rebuild it on an arm64 Linux machine and compare the PCR0 with the one above (<a href="https://github.com/vettid/vettid-vault/blob/main/docs/RELEASING.md#rebuild-and-match-anyone">details</a>):</p>
-${rebuild}  </section>`,
+${rebuild}  </section>`;
+}
+
+/** Every generated file of a channel's log, by path relative to the repository root. */
+export function renderLog(index: LogIndex, channel: Channel = 'prod'): Map<string, string> {
+  const dir = RELEASE_LOG_DIRS[channel];
+  const out = new Map<string, string>();
+  out.set(`${dir}/index.html`, renderIndexPage(index, channel));
+  out.set(`${dir}/index.json`, `${JSON.stringify(index, null, 2)}\n`);
+  if (channel === 'staging') out.set(`${dir}/log.css`, STAGING_CSS);
+  for (const r of index.releases) out.set(`${dir}/${r.release}/index.html`, renderReleasePage(r, channel));
+  return out;
+}
+
+// ---- staging (https://staging.vettid.org) ------------------------------------------------
+
+/** The staging site's design (sites/staging/styles.css: system colours) plus the log's layout; no inline styles (CSP). */
+const STAGING_CSS = `/* Generated by scripts/vault/release-log.ts. Do not edit. */
+main.log { max-width: 52rem; }
+.badge { display: inline-block; padding: 0.15rem 0.6rem; border: 1px solid GrayText; border-radius: 1rem; font-size: 0.85rem; }
+.subtitle { font-size: 1.05rem; }
+section { border: 1px solid GrayText; border-radius: 0.5rem; padding: 0.25rem 1.25rem 0.75rem; margin: 1.25rem 0; }
+section h2 { font-size: 1.2rem; }
+section h3 { font-size: 1rem; margin-bottom: 0.25rem; }
+.table-scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+th { text-align: left; font-weight: 600; font-size: 0.8rem; padding: 0.4rem 0.5rem; border-bottom: 1px solid GrayText; }
+td { padding: 0.5rem; border-bottom: 1px solid GrayText; vertical-align: top; }
+tr:last-child td { border-bottom: none; }
+.status { white-space: nowrap; }
+.status-removed { color: GrayText; }
+dl.fields { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 1rem; }
+dl.fields dt { color: GrayText; font-size: 0.85rem; }
+dl.fields dd { margin: 0; }
+code, .mono { font-family: ui-monospace, monospace; font-size: 0.85rem; overflow-wrap: anywhere; }
+pre { overflow-x: auto; font-size: 0.8rem; border: 1px solid GrayText; border-radius: 0.4rem; padding: 0.75rem; }
+@media (max-width: 600px) {
+  dl.fields { grid-template-columns: 1fr; gap: 0.2rem; }
+  dl.fields dd { margin-bottom: 0.5rem; }
+}
+`;
+
+function stagingPage(opts: { title: string; body: string }): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="color-scheme" content="dark light">
+  <title>${esc(opts.title)} · VettID staging</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/security/releases/log.css">
+</head>
+<body>
+<!-- Generated by scripts/vault/release-log.ts from the signed staging manifest and vault/releases/staging.json. Do not edit. -->
+  <main class="log">
+${opts.body}
+  </main>
+</body>
+</html>
+`;
+}
+
+const STAGING_ABOUT = `  <section>
+    <h2>About staging releases</h2>
+    <p>These are test builds of the VettID vault. They run only in VettID's staging environment, which holds no real accounts, and are never offered to members. Production releases have their own log at <a href="https://vettid.org/security/releases/">vettid.org/security/releases</a>.</p>
+    <p>Each staging release is listed in the staging channel's signed manifest at <a href="/.well-known/vettid/pcr-manifest.json"><code>/.well-known/vettid/pcr-manifest.json</code></a>, which staging builds of the app verify with the staging key built into them. This log is generated from that manifest, so the two cannot disagree; the manifest's history is public in the <a href="https://github.com/vettid/vettid.org/commits/master/${SERVED_PATHS.staging}">vettid.org repository</a>.</p>
+    <p>Staging releases are built reproducibly from the public <a href="https://github.com/vettid/vettid-vault">vettid-vault</a> source like production ones, and replaced and ended much faster.</p>
+  </section>`;
+
+function stagingIndexPage(index: LogIndex): string {
+  const rows = index.releases
+    .map(
+      (r) => `        <tr>
+          <td><a href="/security/releases/${r.release}/">Release ${r.release}</a></td>
+          <td>${day(r.published_at)}</td>
+          <td>Staging</td>
+          <td><span class="mono" title="${esc(r.pcr0)}">${short(r.pcr0)}</span></td>
+          <td>${status(r.status)}</td>
+          <td>${r.ends_at ? day(r.ends_at) : '&mdash;'}</td>
+        </tr>`,
+    )
+    .join('\n');
+  const list = index.releases.length
+    ? `  <section>
+    <h2>Releases</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Release</th><th>Published</th><th>Channel</th><th>PCR0</th><th>Status</th><th>End date</th></tr></thead>
+        <tbody>
+${rows}
+        </tbody>
+      </table>
+    </div>
+    <p>Generated from staging manifest serial ${index.serial}. Machine-readable: <a href="/security/releases/index.json"><code>index.json</code></a>.</p>
+  </section>`
+    : `  <section>
+    <h2>Releases</h2>
+    <p>No staging release has been published yet.</p>
+  </section>`;
+  return stagingPage({
+    title: 'Vault release log: Staging (test builds)',
+    body: `    <p><span class="badge">Staging (test builds)</span></p>
+    <h1>Vault release log: Staging (test builds)</h1>
+    <p class="subtitle">Every staging test build of the vault: what it is, what changed, and its status. Not for members.</p>
+
+${list}
+
+${STAGING_ABOUT}`,
   });
 }
 
-/** Every generated file, by path relative to the repository root. */
-export function renderLog(index: LogIndex): Map<string, string> {
-  const out = new Map<string, string>();
-  out.set('website/security/releases/index.html', renderIndexPage(index));
-  out.set('website/security/releases/index.json', `${JSON.stringify(index, null, 2)}\n`);
-  for (const r of index.releases) out.set(`website/security/releases/${r.release}/index.html`, renderReleasePage(r));
-  return out;
+function stagingReleasePage(r: LogEntry): string {
+  return stagingPage({
+    title: `Staging release ${r.release} (test build)`,
+    body: `    <p><a class="badge" href="/security/releases/">Staging (test builds): vault release log</a></p>
+    <h1>Staging release ${r.release} (test build)</h1>
+    <p class="subtitle">${esc(r.summary)}</p>
+
+${releaseSections(r, 'staging')}`,
+  });
 }
 
 /** The page without its generated navigation (scripts/sync-nav.mjs owns those blocks). */
