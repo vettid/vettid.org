@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.11
+version: 0.1.12
 date: 2026-10-11
 owner: Al Liebl (Mesmer)
 changelog:
@@ -83,6 +83,19 @@ changelog:
     parked between releases; its releases are cut by hand, at most two
     a week, and no nightly image exists; the text that said otherwise
     now points to the plan (§1, §3.1, §3.3, §8.9, §11.1, §15 O2)
+  - 0.1.12 (owner decision 2026-10-11, ANDROID-PLAN 0.1.36,
+    VAULT-MESSAGING 0.27.0 §11.7.1; approved by the owner 2026-10-11):
+    O8 amended. Google generates and holds the Play app-signing key;
+    VettID's release key (the certificate already pinned, called the
+    upload certificate until now) signs the F-Droid and direct builds
+    and is never given to Google. **Production release 1 pins that one
+    certificate**: `TODO-O8` is removed, not filled in, and O8 no
+    longer blocks release 1. The Play certificate is added by a later
+    production release, before the Play listing goes live.
+    `android_signers` entries become `{digest, class}` and each vault
+    is bound to its app's signer (§5.2); C6 says what adding and
+    removing a signer does to existing vaults (§3.4); §12.1 and §15 O8
+    follow
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.14.0) §11.10 release updates, §12.5 deletion, §13.5, §13.9
@@ -245,7 +258,7 @@ the oldest live release is removed.
 | C3 | Storage and tables | S3 keys `vaults/<vault_id>/…` and `users/<hash>/vault`, conditional-write semantics; the attributes a release's parent reads and writes (lease, registry row, response slot, lifecycle events, `alarm`); the queue name prefix. Schema changes additive only. |
 | C4 | Host | Each release runs **its own tag's parent** on its own AMI, so the vsock protocol never crosses versions. Host OS patches rebuild the AMI with the same EIF and parent. |
 | C5 | AWS | The pinned KMS region endpoint, SigV4, IMDS credentials, the pinned Amazon roots (Amazon Root CA 1 runs to 2038) |
-| C6 | Device attestation | The Android signing-certificate digests, package name and iOS app ID pinned in the release; the pinned Google, Apple and GrapheneOS roots. Rotating the app signing key needs every live release to pin the new digest first (two digests pinned). |
+| C6 | Device attestation | The Android signing-certificate digests, package name and iOS app ID pinned in the release; the pinned Google, Apple and GrapheneOS roots. Rotating the app signing key needs every live release to pin the new digest first (two digests pinned). 0.1.12: each vault is bound to the signer of its app (VAULT-MESSAGING 0.27.0 §11.7.1). **Adding** a signer to a release changes nothing for existing vaults. **Removing** one strands the vaults bound to it at that release (`signer_refused`, also at the confirming unlock of a move into it) until the member transfers or recovers to an app with a pinned signer: a release drops a signer only with the notice of a retirement (§3.5), and its log entry says so. A release's log entry also says when it adds a signer. |
 | C7 | Relay | Not needed for a move (a move locks without collecting). Ordinary unlocks collect from the relay: best effort only. The relay stays backward compatible in practice, but a deprecated release may lose messaging. |
 | C8 | Member API vault features | Lock, status, recovery and the host `delete` (account cancellation) keep working for every live release |
 
@@ -515,7 +528,7 @@ whose value is recorded in `measurements.json`):
 | `manifest_keys` | SPKI of key A and key B | §6.1 |
 | `seal_account`, `seal_region` | the vault production account, `us-east-1` | owner decision O1 |
 | `retirement_principal`, `retirement_window_days` | the retirement role ARN, 30 | §4.1 |
-| `android_signers` | SHA-256 of the app signing certificate(s) | owner decision O8 |
+| `android_signers` | 1 to 4 entries `{"digest": "<SHA-256 of a signing certificate, 64 lowercase hex>", "class": "vettid" \| "google_play" \| "development"}` (0.1.12; a bare list of digests before) | owner decision O8 as amended 2026-10-11 |
 | `android_package` (0.1.11) | `com.vettid.app` (staging: `com.vettid.app.staging`) | VAULT-MESSAGING 0.26.0 §11.10.8, "Android package"; STAGING-DEVELOPMENT-PLAN D5 |
 | `features` (0.1.11) | the optional features the image registers: none in release 1 (staging: all seven) | VAULT-MESSAGING 0.26.0 §11.10.8, "Feature allowlist"; STAGING-DEVELOPMENT-PLAN D4 |
 | `relay_url` | `https://relay.vettid.org` | |
@@ -525,6 +538,41 @@ Everything that defines a release is in the tagged tree, so
 `git checkout release/prod/N && make eif CHANNEL=prod` reproduces it; no
 `-ldflags -X` and no build-time secrets. A missing or zero value still
 fails closed.
+
+**Android signers (0.1.12; owner decision of 2026-10-11, ANDROID-PLAN
+0.1.36 §7).** Each entry names a certificate and its class
+(VAULT-MESSAGING 0.27.0 §11.7.1, §11.10.8): `vettid` for a key only
+VettID holds (the F-Droid and direct builds), `google_play` for the
+Play app-signing key, which Google generates and holds, `development`
+for a development or automation key. The file is embedded, so the
+classes are measured into the image with the digests; the vault labels
+a member's app from them and never from anything the app says. The
+release build refuses an entry without a class, an unknown class, a
+duplicate digest, the bare-string form and, in `prod.json`,
+`development`.
+
+- **Production release 1:** one entry,
+  `{"digest": "31a19613aa10f209e08945f947f94f7ce3e6e5ac342457ff9969a67986928e65", "class": "vettid"}`,
+  the certificate `prod.json` already lists. The `TODO-O8` placeholder
+  is deleted. Release 1 is for the owner and at most ten named testers
+  (STAGING-DEVELOPMENT-PLAN D7), who install the direct or F-Droid
+  build, so it does not wait for a Google Play account.
+- **The Play certificate** is added, class `google_play`, by the
+  production release cut once the owner has enrolled the app in Play
+  App Signing and read the app-signing certificate's digest there (to
+  confirm in the Play Console). An app installed from Google Play
+  cannot enroll, receive a transfer or register for a recovery on a
+  release that does not pin it, so **the Play listing does not go
+  live, on any track members can install from, before such a release
+  is `active`**. The Play upload certificate is never pinned.
+- **Signer binding** (VAULT-MESSAGING §11.7.1) is in release 1 (owner
+  decision, 2026-10-11), so that no production vault ever exists
+  unbound and none needs the binding-by-chain step.
+- **Staging:** the staging signing certificate is `vettid` and the
+  automation certificate `development` (STAGING-DEVELOPMENT-PLAN §4).
+  S10 carries this with `android_package` and `features` (0.1.11); how
+  the binding and the move to `com.vettid.app.staging` compose is in
+  VAULT-MESSAGING §11.7.1.
 
 ### 5.3 Provenance
 
@@ -1411,7 +1459,9 @@ the objectives above. The 7-day retention also bounds how long deleted vault dat
 
 ### 12.1 Sequence
 
-1. **Owner decisions** O1–O10 (§15). O1 and O8 block release 1.
+1. **Owner decisions** O1–O10 (§15). O1 and O8 block release 1. (0.1.12:
+   O8 as amended on 2026-10-11 no longer does; release 1 pins the
+   certificate it already lists.)
 2. **W0, W1:** spec and code changes (§4), merged.
 3. **Accounts** (W3): staging and vault production accounts, SCPs,
    permission sets; manifest keys A and B, staging manifest key.
@@ -1527,6 +1577,6 @@ All ten recommendations below were **accepted by the owner on 2026-10-04**.
 | O5 | Retirement window | **12 months** from supersession, final notice 90 days, KMS window 30 days; for an exploited vulnerability, a shorter window of **no less than 60 days**. *2026-10-11 (STAGING-DEVELOPMENT-PLAN D2): production release 1 only, 90 days (§3.5)* |
 | O6 | Instance size | **m7g.large**, enclave 1 vCPU and 5 GiB. Measured on S3 (W9, §8.8); owner 2026-10-06: kept for release 1, revisit when unlock queueing shows in metrics |
 | O7 | Always-on minimum for the current release | **0 until production members exist** (on-demand start, ~2–3 min first unlock), **1 from the Android beta** on |
-| O8 | Android signing digest(s) to pin (blocks release 1) | Pin the **Play app signing certificate and the upload certificate** used for direct builds, decided when the Android signing key is created |
+| O8 | Android signing digest(s) to pin (blocked release 1 until 2026-10-11) | Accepted 2026-10-04: pin the **Play app signing certificate and the upload certificate** used for direct builds, decided when the Android signing key is created. **Amended by the owner on 2026-10-11** (ANDROID-PLAN 0.1.36 §7; §5.2): Google generates and holds the Play app-signing key; the certificate called "upload" here is VettID's release key, which signs the F-Droid and direct builds and is never given to Google; a separate key, never pinned, uploads to Play. **Release 1 pins VettID's certificate only**; the Play certificate is pinned by a later release, before the Play listing goes live; each vault is bound to its app's signer |
 | O9 | Data bucket retention and DR | Versioned, **7-day** noncurrent retention; region loss accepted for the preview; no second-region keys |
 | O10 | Manifest size | **M1** (manifest by hash, supplied by the host) before release 1 |

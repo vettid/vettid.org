@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.26.0
+version: 0.27.0
 date: 2026-10-11
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -12,15 +12,45 @@ related:
   - CALLING-SERVICE.md
   - PUSH-GATEWAY.md (0.4.1)
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.4.0)
-  - ANDROID-PLAN.md (0.1.35)
+  - MEMBER-API.md (2.4.1)
+  - ANDROID-PLAN.md (0.1.36)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
-  - VAULT-RELEASES.md (0.1.6, approved 2026-10-04)
+  - VAULT-RELEASES.md (0.1.12; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
-  - STAGING-DEVELOPMENT-PLAN.md (0.1.0; D4, D5)
+  - STAGING-DEVELOPMENT-PLAN.md (0.1.1; D3, D4, D5)
 changelog:
+  - 0.27.0: normative; an enclave change and a vault release (owner
+    decision of 2026-10-11, ANDROID-PLAN 0.1.36: the Play app-signing
+    key is Google's and VettID's release key is never given to Google;
+    §15 item 35; approved by the owner 2026-10-11, all eight
+    recommendations as drafted): **per-vault signer
+    binding** on Android. Until now a vault accepted an app whose
+    attestation showed any signing certificate the release pins, and
+    did not keep which. Now the digest is recorded with the attested
+    device key at enrollment, transfer and recovery; unlock and a
+    release-update approval require the recorded signer to be pinned
+    by the running release (`signer_refused`: sealed, not a PIN
+    failure, audited, no alarm); the binding changes only by a direct
+    transfer, where a change of signer is shown to the holder and must
+    be confirmed in the approval (`signer_unconfirmed`), or by a
+    completed recovery, each audited as `device.signer_changed` with
+    the old and new class; vaults enrolled earlier bind from the
+    certificate chain of the key they enrolled with
+    (`device_assertion.chain`); an attestation must report exactly one
+    signing digest; pinned signers carry a class (`vettid`,
+    `google_play`, `development`) in the release configuration, and
+    the app's `device.list` entry reports `signer{class, digest}`.
+    Android only; how it would extend to iOS (new §11.7.1; §6.7.1,
+    §10.3, §10.9, §11.3, §11.4, §11.7, §11.9, §11.10.8, §11.11.3,
+    §11.11.5, §15 item 35; ANDROID-PLAN 0.1.36, VAULT-RELEASES 0.1.12).
+    It ships with 0.26.0's constants in staging release S10, and the
+    two compose (§11.7.1, "With the staging application id"). Also,
+    editorial: §11.11.7 "Registered" follows MEMBER-API 2.4.1 (a
+    registered recovery is active until the host reports its key as
+    the vault's `app_key`, when the API records it `completed`, or
+    until `expires_at`)
   - 0.26.0: normative; **needs a vault release** (staging S10 first;
     owner decisions D4 and D5 of 2026-10-11, STAGING-DEVELOPMENT-PLAN
     0.1.0 §6; §15 item 34; a draft for the owner's review). Two new
@@ -3013,7 +3043,10 @@ Old app (holder)           Vault                  Relay             New app
    at once (0.10.3, as for any pairing, §6.7), the new app answers with
    `hs.fin` and shows the SAS, and once `hs.fin` checks out (§6.3) the
    vault sends the holder `device.transfer.pending{transfer_id, name,
-   sas}`.
+   sas}`, with (0.27.0) the new app's `signer` class and
+   `signer_changed` (§11.7.1). When the signer differs from the one the
+   vault is bound to, the holder's app says so before it asks for the
+   PIN (ANDROID-PLAN §7).
    A dropped `hs.init` (a spent or expired link, a failed attestation)
    is never answered, so the new app cannot tell it from a slow vault.
    It SHOULD stop waiting for `hs.resp` after **60 seconds** and tell its
@@ -3021,7 +3054,11 @@ Old app (holder)           Vault                  Relay             New app
    could not be verified, and offer to scan a new code (0.10.6).
 3. The holder compares the SAS and sends `device.transfer.approve` with
    its current blob and, sealed to a UTK (§3.5.4), the `password` and the
-   `pin`. The vault:
+   `pin`, and (0.27.0) `signer` when the new app's signer differs. The
+   vault:
+   - (0.27.0) answers `signer_unconfirmed` if the new app's signer
+     differs from the binding and the approval does not name its class
+     (§11.7.1); nothing is spent or counted and the transfer stays open;
    - spends the UTK;
    - checks the PIN against the vault's DEK derivation (§3.3.1): `bad_pin`
      on a mismatch, counted in the unlock backoff of §11.8 (and audited
@@ -3036,7 +3073,9 @@ Old app (holder)           Vault                  Relay             New app
      the same flush (step 4) and answers `{}`.
 4. The approval completes the transfer in **one flush**: the epoch
    becomes active; the new device record (role `app`, attestation
-   binding, unlock key); the holder becomes the new app; the old app is
+   binding, unlock key), and with it (0.27.0) the vault's signer
+   binding, audited `device.signer_changed` when the signer changed
+   (§11.7.1); the holder becomes the new app; the old app is
    **removed** as by `device.unlink` (§7.4: `device.unlinked{reason:
    "transferred"}` best effort after the response, relay key denylisted,
    unlock key and UTK pool removed). The new app receives
@@ -3853,12 +3892,12 @@ an answer to an unknown or expired id is dropped.
 | `device.pair.reject` (app) | `{pairing_id}` | `{}` |
 | `device.pair.rejected` (to the new device) | — | `{}`: the owner rejected the pairing or transfer after its `hs.fin` (0.10.5); sealed under the handshake's epoch, on the device's token from `hs.init`, as `device.paired`; the device stops waiting (§6.7) |
 | `device.paired` (to the new device) | — | `{device_id, role, vault_id, release, release_number, token, session_expires_at?, transfer?, credential_version?, user_guid?}` (the release the vault runs under); `token`: the device's standing token (§7.1); it replaces the request token of a pairing's or transfer's `hs.resp` (0.10.3), and after enrollment or recovery, whose `hs.resp` already carries one, it is a fresh one (0.10.4); `transfer: true`, the credential's `credential_version` and (0.17.0) the member's `user_guid`, which its unlocks need, for a transferred app only (§6.7.1) |
-| `device.list` (app, desktop) | `{}` | `{devices: [{id, kind, state, name, ik, profile?, created_at?, last_active_at?, session_expires_at?, push?}]}`; `push` (0.24.0) only on the app's entry while it has a registration: the push state of §14.1 |
+| `device.list` (app, desktop) | `{}` | `{devices: [{id, kind, state, name, ik, profile?, created_at?, last_active_at?, session_expires_at?, push?, signer?}]}`; `push` (0.24.0) only on the app's entry while it has a registration: the push state of §14.1; `signer` (0.27.0) only on an Android app's entry with a recorded signer: `{class: "vettid" \| "google_play" \| "development", digest: "<64 hex>"}`, the vault's signer binding (§11.7.1) |
 | `device.unlink` (app) | `{device_id}` | `{}`; `forbidden` for the app itself (0.9.0: it leaves by a transfer or a recovery) |
 | `device.unlinked` (to the unlinked device, best effort) | — | `{reason?}`: `"transferred"` for the old app of a transfer (§6.7.1), `"replaced"` for the old app of a recovery (§11.11.5) |
 | `device.transfer.create` (the holder) | `{}` | `{transfer_id, link, exp}`; `exists` while a transfer is open; `credential_frozen` or `rotation_required` during an alarm (§6.7.1) |
-| `device.transfer.pending` (to the holder) | — | `{transfer_id, name, sas}`; `name` is the new app's self-asserted `profile.name` |
-| `device.transfer.approve` (the holder) | `{transfer_id, credential, utk_id, sealed{password, pin}}` | `{}`: the transfer is complete (0.10.3; was `{exp}`); `bad_pin`, `backoff`, `bad_password`, `stale_credential`, `credential_frozen`, `utk_invalid` |
+| `device.transfer.pending` (to the holder) | — | `{transfer_id, name, sas, signer?, signer_changed?}`; `name` is the new app's self-asserted `profile.name`; (0.27.0, Android) `signer` is the attested class of the new app's signer and `signer_changed` whether its digest differs from the vault's binding (§11.7.1) |
+| `device.transfer.approve` (the holder) | `{transfer_id, credential, utk_id, sealed{password, pin}, signer?}` | `{}`: the transfer is complete (0.10.3; was `{exp}`); `bad_pin`, `backoff`, `bad_password`, `stale_credential`, `credential_frozen`, `utk_invalid`; (0.27.0) `signer`, the new app's class, is REQUIRED when the pending said `signer_changed: true`, else `signer_unconfirmed` (§11.7.1) |
 | `device.transfer.reject` (the holder) | `{transfer_id}` | `{}`; cancels the transfer before or after the scan, until the approval; after the new app's `hs.fin` it gets `device.pair.rejected` (0.10.5) |
 | `device.session.request` (desktop, agent) | `{seconds?}` (60–86,400, default 3,600) | `{request_id, exp}` |
 | `device.session.pending` (to apps) | — | `{request_id, device_id, role, name, seconds, exp}` |
@@ -5104,7 +5143,10 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `device.transfer.approved`, `device.transferred`,
   `device.transfer.aborted`, `device.transfer.attestation_failed`
   (`ref` = `transfer_id`), `device.replaced` (`device_id` = the old app a
-  recovery removed) (§6.7.1, §11.11.5); `item.added`, `item.updated`, `item.deleted`,
+  recovery removed) (§6.7.1, §11.11.5); `device.signer_bound` (`ref` =
+  the class), `device.signer_changed` (`device_id` = the new app, `ref`
+  = `<old class>:<new class>`), `device.signer_refused` (`ref` =
+  `unpinned` or `unbound`; no `device_id`) (§11.7.1, 0.27.0); `item.added`, `item.updated`, `item.deleted`,
   `item.sensitivity_changed`, `item.revealed` (`ref` = `item_id`),
   `tag.changed` (`ref` = the registry's new version) (§10.7, §10.8);
   `settings.changed` (`ref` = the new version); `account.name_requested`,
@@ -5452,6 +5494,8 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
   `wallet.signed` (`ref` = `txid`), `credential.alarm` (priority
   `urgent`, `ref` = `alarm_id`), `device.transferred` (`ref` =
   `transfer_id`), `device.replaced` (`device_id` = the old app),
+  `device.signer_changed` (priority `high`, `ref` as in the audit log;
+  §11.7.1, 0.27.0),
   `credential.reset`, `owner_check.failed` (priority `high`, `ref` =
   `pin` or `password`), `connection.asks_paused` (priority `high`;
   §10.4.1, 0.23.0), `owner_check.locked` (priority `urgent`)
@@ -7512,6 +7556,10 @@ size (§11.4).
   otherwise replaces it. The enclave also keeps its own index from a member
   to a vault and applies the same rule to a different `vault_id` of the
   same member.
+- **Signer binding** (0.27.0). The enclave records the signing-
+  certificate digest of the enrolling app's attestation with its device
+  key; it is the vault's signer binding from the first header on
+  (§11.7.1). A replaced provisional vault's binding is gone with it.
 - **App state.** The app stores `vault_id`, the pinned bundle, the release
   and `state_seq` (§13.2).
 - **Release.** The enrolling instance's release becomes the vault's
@@ -7545,7 +7593,10 @@ the app verified, exactly as in `vault.enroll` (§11.3); the host supplies
 the document (§11.5). `release_update` is present only when the member approved a release update
 (§11.10.3). The request is padded to exactly 12,288 bytes (§5.4).
 
-`device_assertion` is REQUIRED (§11.7). `sig` covers the following string,
+`device_assertion` is REQUIRED (§11.7). (0.27.0) On Android it MAY
+carry `chain`, which an app sends while the vault has not recorded its
+signer (§11.7.1); `chain` is not part of the signing string. `sig`
+covers the following string,
 where each `\n` is a literal newline:
 
 ```
@@ -7568,7 +7619,7 @@ App        Member API                   SQS/Parent                 Enclave
  |          check lease             |--enqueue--->|--vsock bytes--->|
  |<--202----|                       |             |  replay check; sealed header;
  |          |                       |             |  vault_id/user_guid; unlock key + sig;
- |          |                       |             |  device attestation sig; backoff; rollback
+ |          |                       |             |  device attestation sig; signer (§11.7.1); backoff; rollback
  |          |                       |             |  (§13.2); derive DEK; load state
  |          |<--response slot{request_id, envelope}----------------|
  |--GET /api/vault/requests/{id} (1 s poll)-->|                    |
@@ -7595,8 +7646,13 @@ one of:
   (§11.11.5). Since 0.16.0 `credential_backup` is always `true` there
   (a vault without a backup copy refuses that unlock with `no_backup`);
   apps MUST NOT rely on it and MAY ignore it.
-- `{"ok": false, "code": "bad_pin|backoff|unknown_device|attestation|state_rollback|vault_missing|manifest|wrong_release|release_key|retry|recovery_pending|no_backup",
-  "header_seq": m, "retry_after": <s>}` — `recovery_pending`: a recovery
+- `{"ok": false, "code": "bad_pin|backoff|unknown_device|attestation|signer_refused|state_rollback|vault_missing|manifest|wrong_release|release_key|retry|recovery_pending|no_backup",
+  "header_seq": m, "retry_after": <s>}` — `signer_refused` (0.27.0):
+  the device key's recorded signer is not pinned by this release, or
+  the key has no recorded signer and the request brought no valid
+  `chain`; decided after `sig` and the assertion verified and before
+  the PIN is tried, and not a PIN failure (§11.7.1).
+  `recovery_pending`: a recovery
   is in progress and the request did not cancel it (§11.11.4); it is
   answered before the PIN is tried and is not a PIN failure.
   `no_backup` (0.16.0): only to the app a recovery registered, when the
@@ -7902,7 +7958,8 @@ Android and iOS use the same challenge.
 ```json
 device_attest:    {"platform": "android", "chain": ["<b64 DER cert, leaf first>", "..."]}
                 | {"platform": "ios", "key_id": "<b64>", "attestation": "<b64 CBOR attestation object>"}
-device_assertion: {"platform": "android", "sig": "<b64 DER ECDSA P-256 signature over challenge>"}
+device_assertion: {"platform": "android", "sig": "<b64 DER ECDSA P-256 signature over challenge>",
+                   "chain": ["<b64 DER cert, leaf first>", "..."]}   # chain: optional (0.27.0, §11.7.1)
                 | {"platform": "ios", "assertion": "<b64 CBOR assertion>"}
 ```
 
@@ -7933,7 +7990,8 @@ challenge at every unlock.
     `StrongBox` (never `Software`); `RootOfTrust` with `deviceLocked` true and
     `verifiedBootState` `Verified`, or `SelfSigned` with an allowlisted
     `verifiedBootKey` (GrapheneOS, below); the `attestationApplicationId` package
-    name and signing-certificate digest of the VettID app; a signing-only,
+    name and signing-certificate digest of the VettID app (0.27.0:
+    exactly one digest, pinned by the release, §11.7.1); a signing-only,
     non-exportable key.
   - Certificate revocation uses Google's attestation status list. The
     enclave fetches it over TLS it terminates itself, like relay traffic
@@ -7947,15 +8005,17 @@ challenge at every unlock.
     `attestationVersion` 3 or later, and requires the key properties to be
     hardware-enforced: purposes within {SIGN, VERIFY} and including SIGN,
     EC P-256, origin GENERATED.
-  - The enclave stores the attested public key with that app's unlock key in
-    the sealed header. Each unlock carries a signature over `challenge` by
-    that key.
+  - The enclave stores the attested public key and (0.27.0) the signing-
+    certificate digest with that app's unlock key in the sealed header.
+    Each unlock carries a signature over `challenge` by that key, and the
+    recorded digest must still be pinned (§11.7.1).
   - (0.26.0) The package name is the channel's `android_package`
     (§11.10.8): `com.vettid.app` in production, `com.vettid.app.staging`
     in staging. It is checked where an attestation is verified
     (enrollment, a transfer, a recovery's register). An unlock and a
     release approval check the stored key's signature and the stored
-    chain's revocation status, not the package again.
+    chain's revocation status, not the package again; (0.27.0) they do
+    check that the key's recorded signer is still pinned (§11.7.1).
 - **GrapheneOS** (owner decision, 2026-10-03; 0.9.0). GrapheneOS runs
   with the device's bootloader locked to its own signing key, so the
   attestation reports `verifiedBootState` `SelfSigned`. The enclave
@@ -8021,6 +8081,261 @@ depends on it.
 
 Desktops and agents have no platform attestation and do not unlock.
 
+#### 11.7.1 Signer binding (Android, 0.27.0)
+
+(Owner decision of 2026-10-11, ANDROID-PLAN 0.1.36 §7 "Signing and the
+two distributions"; §15 item 35. Approved by the owner 2026-10-11.)
+
+A release may pin more than one Android signing certificate: VettID's
+own, which signs the F-Droid and direct builds, and, once the app is
+on Google Play, the Play app-signing certificate, whose key Google
+holds. Until 0.27.0 the vault treated them as one set: an attestation
+was accepted if its signing digest was any pinned one, the digest was
+not kept, and nothing told the member which signer their vault's app
+has. From 0.27.0 **each vault is bound to the signer of its app**.
+
+**What an unlock proves, and what it does not.** An unlock carries no
+fresh attestation. It carries a signature by the device key that was
+attested when the app enrolled, was transferred to or registered for a
+recovery (above). That key cannot leave the installation that
+generated it, and Android replaces an installation only with one
+signed by the same key, so the signer of whatever unlocks is the
+signer recorded at attestation. The binding therefore adds no check
+that a correct phone could fail by itself. It adds what the vault did
+not have:
+
+- the signer is **recorded**, and shown to the member (below);
+- a signer that a release **stops pinning** stops unlocking (before
+  0.27.0, a key attested under a signer kept unlocking on a release
+  that no longer listed it);
+- a **change of signer** happens only where the owner proves the PIN
+  and the credential password, is confirmed explicitly in a transfer,
+  and is audited;
+- any present or future operation that presents an attestation for a
+  bound vault outside those flows is refused.
+
+It does not protect a member who installs from Google Play against a
+build signed by Google: that build has the bound signer (ANDROID-PLAN
+§7).
+
+**The signer of an attestation.** The attestation's
+`attestationApplicationId` MUST contain exactly one signing-certificate
+digest, and it MUST be pinned by the running release. (Before 0.27.0:
+one or more, all pinned. VettID's builds have one signer; an
+attestation that reports several is refused with the code of a failed
+attestation.) That digest is the app's **signer**. Each pinned signer
+has a **class**, set in the release configuration (§11.10.8):
+
+| Class | Meaning | The app's text (ANDROID-PLAN §7) |
+|---|---|---|
+| `vettid` | Signed with a key only VettID holds: the F-Droid and direct builds | "F-Droid or direct (signed by VettID)" |
+| `google_play` | Signed with the Play app-signing key, which Google holds | "Google Play (signed by Google)" |
+| `development` | A development or automation key; refused in a production release's configuration | "Development build" |
+
+The class is an identifier from this table, not free text: the vault
+never supplies member-facing wording.
+
+**Recording.** The enclave stores the signer digest in the device
+binding, beside the attested public key and the chain's serial numbers,
+in the sealed header, for every Android key it attests: at enrollment
+(§11.3), at a transfer's `hs.init` (§6.7.1) and at a recovery's
+register (§11.11.3). The vault has one app (§6.7), and **the vault's
+signer binding is the signer recorded for that app's key**.
+
+- **Enrollment** binds the vault to the enrolling app's signer; audit
+  `device.signer_bound` (`ref` = the class).
+- **Unlock** (§11.4) and a **release-update approval** (§11.10.3), the
+  two operations that verify a device-key signature, additionally
+  require, after the signature has verified, that the key's recorded
+  signer is pinned by the running release. If it is not, the result is
+  `signer_refused` (below).
+- **Nothing else changes the binding** except the two flows that
+  replace the app, both of which prove the owner's PIN and credential
+  password:
+  - **Direct transfer** (§6.7.1). The new app's attestation gives its
+    signer. `device.transfer.pending` carries `signer` (the new app's
+    class) and `signer_changed` (whether its digest differs from the
+    binding; `false` when the vault has no recorded signer, the staging
+    case below, where the transfer simply binds and is audited
+    `device.signer_bound`). When it differs, `device.transfer.approve` MUST carry
+    `signer` equal to the new app's class; without it the vault
+    answers `signer_unconfirmed`, before it spends the UTK or tries
+    the PIN, and the transfer stays open. The binding moves to the new
+    app's signer in the flush that completes the transfer.
+  - **Recovery** (§11.11). The registered key records its own signer
+    at register; the vault's binding does not move then. It moves when
+    `credential.recover` succeeds and the old app is removed
+    (§11.11.5). A recovery that is cancelled, expires or is voided
+    leaves the binding as it was.
+  - In both, when the digest changed, the vault audits
+    `device.signer_changed` (`device_id` = the new app, `ref` =
+    `<old class>:<new class>`, for example `vettid:google_play`) and
+    creates a feed item `device.signer_changed` of priority `high`
+    with the same two classes. The audit entry and the feed item carry
+    classes, not digests.
+- A fresh attestation for a vault's app in any other operation (none
+  exists in 0.27.0; a later one that re-attests the device key would
+  be) MUST show the bound digest and is otherwise refused with
+  `signer_refused`, without changing the binding.
+- An enrollment never rebinds an existing vault: it is answered
+  `vault_exists`, or it replaces an unconfirmed provisional vault with
+  a new one (§11.3), which binds as any enrollment.
+
+**The refusal.** `signer_refused` is a code of `vault.unlock.result`
+(§11.4):
+
+- It is returned only inside the uniform sealed result, to a request
+  whose `sig` and `device_assertion` both verified, that is, to the
+  bound app itself. The member API and the parent see the same size
+  and path as for every other outcome (§11.4). Any other requester
+  gets what it got before: random bytes, or `attestation`.
+- It is decided before the PIN is tried and is not a PIN failure: it
+  neither counts toward nor resets the backoff (§11.8).
+- It is recorded in the sealed header's log, as the steps of a
+  recovery are (§11.11.6), at most once per 24 hours, and written to
+  the audit log at the next unlock that succeeds as
+  `device.signer_refused` (`ref` = `unpinned`, or `unbound` for the
+  case below).
+- **It raises no clone alarm and no host alarm** (§3.5.9). The alarm
+  is for a second copy of the credential; it freezes the credential,
+  emails the member and forces a rotation. A signer refusal can only
+  reach the vault from the owner's own installed app, on a release
+  that does not pin its signer: a release that dropped a signer would
+  alarm every vault bound to it at once, each alarm false. A member
+  who deliberately changes store never meets the refusal at all: that
+  change goes through a transfer or a recovery, which rebind. And an
+  app the owner did not install but which carries the bound signer is
+  not something the vault can tell from the owner's. The owner learns
+  of a refusal from the app's message and the audit entry. OWNER
+  DECISION (2026-10-11): refuse and audit, no alarm.
+- The app's message: "This vault no longer accepts this installation
+  of VettID. Update the app, or recover your vault with a current
+  version."
+
+A transferred-to or recovering app whose signer is not pinned is
+refused as before 0.27.0: its attestation fails (§6.7.1 step 2,
+§11.11.3 check 6).
+
+**A release that stops pinning a signer** strands the vaults bound to
+it: they are refused at the release, including at the confirming
+unlock of a move into it (§11.10.4), until the member transfers or
+recovers to an app with a pinned signer (a release that still pins the
+old signer accepts the unlock as long as it lives). Removing a signer
+is therefore a decision of the same weight as retiring a release, with
+the same notice (VAULT-RELEASES §3.4 C6); adding one changes nothing for
+existing vaults.
+
+**Vaults enrolled before 0.27.0.** Their bindings hold no signer, and
+an unlock presents none. They are bound from the attestation they
+already made:
+
+- The Android `device_assertion` gains an optional member `chain`: the
+  certificate chain of the bound device key, the same certificates the
+  app sent at attestation (Android Keystore keeps them with the key).
+  An app of 0.27.0 or later sends it at every unlock while its
+  `device.list` entry shows no `signer`. Releases before 0.27.0 ignore
+  it (unknown members are ignored, above).
+- For a key with no recorded signer, the enclave verifies the chain as
+  at attestation (pinned root, the attestation extension's package and
+  exactly one pinned digest) with two differences: the leaf's public
+  key MUST equal the bound key and the chain's serial numbers MUST
+  equal the stored ones, and the challenge and the certificates'
+  validity periods are not checked again (both were when the chain was
+  first accepted, and the equal serials tie this chain to that one).
+  It then records the digest; audit `device.signer_bound`. A chain
+  that fails is answered `attestation`.
+- A key with a recorded signer ignores `chain`.
+- **A key with no recorded signer and no valid `chain` is answered
+  `signer_refused`**, except on the staging channel, where it unlocks
+  unbound (staging vaults are disposable, and staging apps older than
+  0.27.0 exist). Staging accepts them from S10, the first staging
+  release with the rule, and refuses them from the staging release
+  after it (owner decision, 2026-10-11). No production vault is in
+  this case: 0.27.0 is in production release 1 (owner decision,
+  2026-10-11; VAULT-RELEASES 0.1.12 §5.2).
+
+**With the staging application id (0.26.0, §11.10.8 "Android
+package").** S10 carries both changes, and they compose: a staging
+vault enrolled under `com.vettid.app` is unbound, so its old build
+keeps unlocking it on S10 without a chain, exactly as "Moving the
+existing staging vaults" needs; it cannot bind by `chain`, because the
+chain's package is checked against S10's `android_package` and is the
+old one; and the transfer, recovery or new enrollment that attaches it
+to the `com.vettid.app.staging` build is a fresh attestation, which
+records the signer and binds it (no confirmation is asked, there being
+no earlier signer). A staging vault still unbound at the release after
+S10 has not been moved to the new build and is refused there.
+
+This is acceptable because the digest is not taken on trust from
+whatever unlocks first. It is read from the certificate that Google's
+attestation root signed for the very key that enrolled, so it is the
+signer of the app that enrolled, whoever presents it and whenever.
+
+**What the member sees.** The app's own entry in `device.list` (§10.3)
+carries `signer: {class, digest}` for an Android app with a recorded
+signer: `class` from the table above, `digest` the 64 lowercase hex
+digits of the certificate's SHA-256 (public: it is in every APK). The
+app shows the class in its vault status as "Installed from: …"
+(ANDROID-PLAN §7); the digest is for a details view and for support,
+not for the status line. Desktops reading `device.list` see the same
+member. The recovering app's reduced answers (§11.11.5) carry nothing
+of it.
+
+**iOS.** The rule is Android-only for now. An iOS release pins one App
+ID (team and bundle), there is one distribution path, and App Attest
+reports no signing certificate; an iOS binding has no `signer` and
+`device.list` carries none. If a second iOS path were ever pinned (a
+second App ID), the release configuration would list the App IDs with
+classes as it lists Android signers, the binding would record the App
+ID attested, and every rule above would apply with "App ID" for
+"signer digest".
+
+**Tests required.**
+
+- Attestation: one pinned digest accepted and recorded; two digests,
+  both pinned, refused; an unpinned digest refused; the class of each
+  configured signer.
+- Enrollment binds and audits `device.signer_bound`; `device.list`
+  shows `signer` on the app's entry only.
+- Unlock and a release-update approval with a bound signer the running
+  release pins: unchanged. With a bound signer the release does not
+  pin (the same vault moved to an image whose configuration omits it):
+  `signer_refused`, sealed and sized as any result; the backoff
+  counters unchanged; no alarm opened, nothing reported to the host;
+  one header-log entry per 24 hours; `device.signer_refused` in the
+  audit log after a later successful unlock.
+- A wrong `device_ik` signature or a wrong assertion never yields
+  `signer_refused`.
+- Transfer to the same signer: no `signer` needed in the approval, no
+  `device.signer_changed`. To another pinned signer:
+  `device.transfer.pending` shows `signer_changed: true`; an approval
+  without `signer`, or with the wrong class, is `signer_unconfirmed`
+  with the UTK unspent and the PIN backoff untouched; with it, the
+  transfer completes, the binding is the new signer, and
+  `device.signer_changed` is audited with both classes and in the
+  feed. To an unpinned signer: dropped as today.
+- Recovery to another pinned signer: the binding is unchanged after
+  register, after a cancel and after an expiry; changed, audited and
+  in the feed after `credential.recover`; the old app's key no longer
+  unlocks.
+- A header written before 0.27.0: with a valid `chain`, bound and
+  audited; with a chain naming another package than the channel's
+  `android_package`, `attestation`; a transfer from an unbound vault
+  shows `signer_changed: false`, needs no `signer` and binds; with a chain for another key, with other serials, with two
+  digests or with an unpinned digest, `attestation`; without a chain,
+  `signer_refused` on a production-channel build and an unbound unlock
+  on a staging-channel build; a bound key ignores `chain`.
+- Release configuration (§11.10.8): entries without a class, an
+  unknown class, a duplicate digest, `development` in the production
+  file, and the bare-string form are each refused by the release
+  build.
+- On real phones (staging): a Pixel on stock Android and one on
+  GrapheneOS enroll and show the expected class; a vault enrolled on
+  the previous staging release binds by `chain` at its first unlock;
+  the attestation of the app as built reports exactly one digest
+  (to confirm, also for an app whose signing key was rotated, which no
+  VettID build is).
+
 ### 11.8 Rate limits and backoff
 
 **Member API limits:**
@@ -8053,6 +8368,7 @@ envelopes.
 | Unknown or expired `etk_kid` | The enclave reports `etk_unknown`; the response slot carries `code: "etk_unknown"` and no envelope (§11.5). The app refetches and retries. |
 | Decryption, binding, signature or attestation failure | Random bytes of the result's size, or the uniform sealed result (`attestation`). The API cannot tell which. |
 | Bad PIN, backoff, rollback | The uniform sealed result (§11.4) |
+| The app's signer is not pinned by the release, or was never recorded (0.27.0) | The uniform sealed result, `signer_refused` (§11.7.1). Not counted as a PIN failure; no alarm. |
 | State write conflict | The vault locks (§12.3) and the result says `retry`. |
 | The vault's release is not running | `503 release_starting` with `retry_after`; the app retries (§11.10.5). |
 | Stale, invalid or unsigned manifest; the host withheld the document or supplied another; hash or serial mismatch (§11.5) | Result code `manifest`; the app refetches the manifest and retries once. Not counted as a PIN failure. |
@@ -8744,14 +9060,24 @@ recorded in the build's measurements:
 - `retirement_principal` and `retirement_window_days` (§11.10.7; a
   channel file with another window than its channel's, 30 or 7 days, is
   malformed);
-- the Android signing-certificate digests (§11.7);
+- (0.26.0) `android_package`, the Android package name accepted in key
+  attestation (§11.7; "Android package" below);
+- `android_signers`, the Android signing certificates accepted in key
+  attestation for that package (§11.7): since 0.27.0 a list of 1 to 4
+  objects `{"digest": "<64 lowercase hex>", "class": "vettid" |
+  "google_play" | "development"}` with distinct digests, the class
+  being what the vault reports for a vault bound to that signer
+  (§11.7.1). The bare list of digest strings used before 0.27.0 is
+  malformed from the first release that carries the rule, and so is
+  `development` in the production file. Production release 1: one
+  entry, VettID's own certificate, class `vettid`; staging: the
+  staging certificate (`vettid`) and the automation certificate
+  (`development`);
 - the relay URL (§11.3);
 - (0.24.0) the push gateway URL (`https://push.vettid.org` in
   production, `https://push.staging.vettid.org` in staging; optional in
   dev, where it names the gateway stand-in, PUSH-GATEWAY §10.4). Without
-  it `push.register` is answered `unavailable` (§14.1).
-- (0.26.0) `android_package`, the Android package name accepted in key
-  attestation (§11.7; "Android package" below);
+  it `push.register` is answered `unavailable` (§14.1);
 - (0.26.0) `features`, the optional features the image registers
   ("Feature allowlist" below).
 
@@ -8947,6 +9273,7 @@ phone can hold the production app and the staging app side by side.
   from before 0.26.0; `android_package` missing, a placeholder, another
   channel's value; the committed files (staging: seven names and
   `com.vettid.app.staging`; production: none and `com.vettid.app`).
+  (0.27.0) `android_signers` entries: §11.7.1's tests.
 - Vault, per optional feature, in a build without it: each of its types
   is answered `unsupported_type` to an app and to a connection, and a
   response of such a type is dropped; no `features.<name>` entry exists
@@ -9211,6 +9538,10 @@ then checks, in this order:
 6. the device attestation is valid (§11.7), over the challenge with this
    request's `request_id`, the `vault_id` and the inner `ts`. It is checked
    only after the code matched, so a failure leaves the code usable.
+   (0.27.0) Its signer may be any the release pins and need not be the
+   one the vault is bound to; it is recorded with the registered key and
+   becomes the vault's binding only when the recovery completes
+   (§11.7.1, §11.11.5).
 
 On success it adds the app to the header's unlock keys, with its app key,
 and sets the state to `registered`; the code is spent. Its answer to the host then also
@@ -9310,6 +9641,9 @@ not its owner check's state.
    - **The new app replaces the old one,** in the same flush:
      - the device becomes the vault's app and the credential's holder
        (§3.5.9), and the recovery record is removed;
+     - (0.27.0) the vault's signer binding becomes the signer recorded
+       for its key at register (§11.7.1); if that differs from the old
+       app's, audit and feed item `device.signer_changed`;
      - its app key becomes the vault's app key (`app_key_seq` + 1), and
        the vault reports it to the host (`app_key`, §11.5; 0.15.0): the
        old app's key is refused by the member API from then on;
@@ -9439,10 +9773,14 @@ cancel. It needs no session: the token stands in for it.
   `sealed_code` is no longer returned, so the portal says the code was
   used. A registered recovery stays active (it blocks a new request
   with `409 recovery_active`, it is shown in `GET /api/vault/status` and
-  it can still be cancelled, §11.11.4) until `expires_at`, and keeps
-  reading `registered` afterwards. The API cannot see the rest of the
-  recovery (unlock, `credential.recover`); the vault removes its record
-  when it completes.
+  it can still be cancelled, §11.11.4) until the host reports the
+  registered app's key as the vault's `app_key` (§11.5), when the API
+  records it as `completed`, an ended state (0.27.0; MEMBER-API 2.4.1,
+  owner decision of 2026-10-11), or until `expires_at`, after which it
+  keeps reading `registered`. The API sees nothing else of the rest of
+  the recovery (unlock, `credential.recover`): the vault makes that key
+  its app key only in the flush of a successful `credential.recover`
+  (§11.11.5 step 3), and removes its own record then.
 - **Cancelled.** `{cancelled: true}` when this call ended an active
   recovery (`pending`, `available` or `registered`), `{cancelled: false}`
   when there was nothing to cancel (it had ended already, by a cancel or
@@ -12324,7 +12662,6 @@ Follow-ups:
     2.4.0 and the recovery page), vettid-android (ANDROID-PLAN 0.1.33);
     vettid-vault: none, except the §16 vector in its reference client's
     tests if wanted.
-
 34. **Feature allowlist and the staging application id (0.26.0).**
     Owner decisions D4 and D5 of 2026-10-11 (STAGING-DEVELOPMENT-PLAN
     0.1.0 §6, "all as recommended"); a draft for the owner's review;
@@ -12387,6 +12724,54 @@ Follow-ups:
     ids); vettid-android (the `staging` application id; ANDROID-PLAN
     0.1.35); then staging release S10 and the moves of §11.10.8;
     vettid-relay with its next release.
+35. **Signer binding (0.27.0).** Owner decision of 2026-10-11: the
+    Play app-signing key is Google's and VettID's release key is never
+    given to Google (ANDROID-PLAN 0.1.36 §7, reversing 0.1.34), so
+    production will in time pin two signers of different standing.
+    Approved by the owner on 2026-10-11; §11.7.1 is the design. As built
+    before it (vettid-vault `main`, 2026-10-11): `vms/devattest`
+    accepts an attestation whose every digest is in the release's
+    `android_signers` and keeps the public key and serials, not the
+    digest; attestation is verified at enrollment, at a transfer's
+    `hs.init` and at a recovery's register; unlock and a release
+    approval verify a signature by the attested key and recheck the
+    serials, and never look at `android_signers` again. Chosen:
+    1. the digest is recorded with the key, and the vault's binding is
+       its app's;
+    2. unlock and approval require the recorded signer to be pinned by
+       the running release;
+    3. the binding changes only by a transfer or a completed recovery;
+       a transfer to another signer needs the holder's explicit
+       confirmation in the approval;
+    4. `signer_refused` refuses and audits; no clone alarm;
+    5. older vaults bind from the chain of the key they enrolled with,
+       sent again by the app; without it they are refused outside
+       staging;
+    6. signers carry a class in the release configuration, and the
+       app's `device.list` entry shows the class and digest;
+    7. exactly one signing digest per attestation.
+    **Answered (owner, 2026-10-11): all as recommended.** A refusal
+    raises no alarm. A transfer to another signer needs the explicit
+    confirmation. No vault setting that refuses transfers and
+    recoveries to another signer class, for now (whoever can complete
+    either already holds the PIN and the credential password, and
+    could change the setting). The rule is in production release 1,
+    so that no production vault is ever unbound. Exactly one signing
+    digest per attestation. Staging accepts unbound vaults at S10 and
+    refuses them from the staging release after it, which composes
+    with item 34's move to `com.vettid.app.staging` (§11.7.1). The
+    Play upload key is a dedicated key, and the member-facing
+    sentences stand as written (ANDROID-PLAN §7).
+    Not verified: what
+    `attestationApplicationId` reports for an app with a rotated
+    signing key or several signers (test on phones before relying on
+    "exactly one"); that the unlock request still fits its 12,288
+    bytes with a `chain` and a `release_update` together (to measure
+    in the implementation; the chain is sent only until the vault is
+    bound). Follow-ups: vettid-vault (the binding, the classes in
+    `releasecfg`, staging release S10), vettid-android (the chain, the
+    status line, the transfer warning), the account site's text,
+    production release 1's configuration (W10-READINESS).
 
 ## 16. Test vectors
 
@@ -12676,6 +13061,41 @@ the 44 characters of `locator || code`. `0xd8d41` is `11011 00011 01010
 00001`, the characters `V`, `3`, `A`, `1`.
 
 ## 17. Changelog
+
+- **0.27.0** (2026-10-11): normative; owner decision of 2026-10-11
+  (ANDROID-PLAN 0.1.36: option (a), Google holds only the Play
+  app-signing key); §15 item 35; approved by the owner 2026-10-11, all
+  eight recommendations as drafted. **An enclave change and a vault
+  release** (staging S10 first, with 0.26.0's constants).
+  - New §11.7.1: per-vault signer binding on Android. What an unlock
+    proves; exactly one signing digest per attestation; signer
+    classes; where the digest is recorded; the check at unlock and at
+    a release-update approval; the binding changes only by a transfer
+    or a completed recovery; `signer_refused` (sealed, before the PIN,
+    audited, no alarm) and why no alarm; a release that stops pinning
+    a signer; vaults enrolled before 0.27.0 (`device_assertion.chain`);
+    what the member sees; iOS; the tests required.
+  - §11.7: `device_assertion` MAY carry `chain` on Android; the digest
+    is stored with the attested key.
+  - §10.3: `device.list` reports `signer{class, digest}` on the app's
+    entry; `device.transfer.pending` carries `signer` and
+    `signer_changed`; `device.transfer.approve` takes `signer` and
+    answers `signer_unconfirmed`. §6.7.1 steps 2 to 4 say the same.
+  - §10.9: audit kinds `device.signer_bound`, `device.signer_changed`,
+    `device.signer_refused`; feed kind `device.signer_changed`.
+  - §11.3: enrollment binds. §11.4: `signer_refused` among the unlock
+    codes. §11.9: its row. §11.11.3 check 6: a recovery may register
+    another pinned signer; the binding moves at completion.
+  - §11.10.8: `android_signers` entries are `{digest, class}`, listed
+    beside 0.26.0's `android_package`; §11.7.1 says how the binding
+    composes with the move to `com.vettid.app.staging`.
+  - Editorial: §11.11.7 "Registered" follows MEMBER-API 2.4.1 (a
+    completed recovery is recorded as `completed` and no longer blocks
+    a new request); front matter cites MEMBER-API 2.4.1.
+  - No new test vector (§16): the rule adds no cryptographic format.
+  - ANDROID-PLAN 0.1.36 carries the decision, the texts and the app's
+    screens; VAULT-RELEASES 0.1.12 the release configuration and what
+    production release 1 pins.
 
 - **0.26.0** (2026-10-11): normative; owner decisions D4 and D5 of
   2026-10-11 (STAGING-DEVELOPMENT-PLAN 0.1.0 §6; §15 item 34); a draft
