@@ -26,7 +26,7 @@ npm run deploy:all                                # everything
 
 ## Stacks
 
-Stateful stacks (Dns, Signup, Playbooks, Auth, Data, AdminAccess, RelayData, Audit, Vault; in staging StageDns) have
+Stateful stacks (Dns, Signup, Playbooks, Auth, Data, AdminAccess, RelayData, PushData, Audit, Vault; in staging StageDns) have
 CloudFormation termination protection on (`lib/app.ts`); deleting one means
 turning that off in code (or the console) first.
 
@@ -53,6 +53,9 @@ turning that off in code (or the console) first.
 | `VettidOrgProteusAlertForwardStack` | **In the proteus account** (605628228301): the same forwarder. Deployed from this repository with `--profile proteus`. See "Security alerts". |
 | `VettidOrgCiReadOnlyStack`, `VettidOrgVaultCiReadOnlyStack` | Prod only, one per production account (management; vettid-vault-prod with `--profile vault-prod`): the GitHub Actions OIDC provider and the read-only role `vettid-org-ci-drift-readonly` for the drift check. See "Production drift". |
 | `VettidOrgRelayStack` | relay.vettid.org: VPC (no NAT; S3 + DynamoDB gateway endpoints), ElastiCache Serverless Valkey (IAM auth, TLS), ECS Fargate service (2–8 tasks, rolling deploys), ALB with PQ TLS. Logs to `/vettid-org/<stage>/relay-service`. Only deployed when `relayImage` is set. |
+| `VettidOrgPushDataStack` | Only with context `pushStages`. Management account, for both channels: the key `alias/vettid-org-push`, the empty secrets `vettid-org/<stage>/push/{apns,fcm,blob-keys}`, the log groups `/vettid-org/<stage>/push-service` (14 days), the zone `push.staging.vettid.org`, the alarm topic `vettid-org-push-alerts`. Stateful. See "Push gateway". |
+| `VettidOrgPushStack` | Only with `pushImage` or `stagingPushImage`. push.vettid.org and push.staging.vettid.org: one Fargate service per channel (2 tasks) in the relay's cluster, behind the relay's ALB (host rule, own certificate, own target group), task role, security group, alarms. No state. |
+| `VettidOrgStagePushDelegationStack` | **Staging only**, once context `stagingPushZoneNs` is set: the one NS record delegating push.staging.vettid.org to the management account's zone. |
 
 ## Production drift
 
@@ -309,6 +312,172 @@ aws logs delete-log-group --log-group-name /vettid-org/prod/relay
 
 (Before this step a rollback to the SQLite relay can still restore from the
 replica; after it, it cannot.)
+
+## Push gateway (push.vettid.org, push.staging.vettid.org)
+
+The wake-up push service (docs/PUSH-GATEWAY.md §10; code and runtime
+contract: github.com/vettid/vettid-push, README). **Both channels run in
+the management account**, as two Fargate services in the relay's cluster
+behind the relay's load balancer (§10.4): staging is not in the staging
+account. It holds no state; what it has are three secrets per channel.
+
+| Context | Meaning |
+|---|---|
+| `pushStages` | `staging`, `prod` or both: the channels whose gateway exists. Unset: no push stack at all, and the relay stack is untouched. |
+| `stagingPushImage`, `pushImage` | The channel's image, **pinned by digest** (`ghcr.io/vettid/vettid-push@sha256:…`, from that repository's publish job; multi-arch, the tasks run arm64). Unset: the channel has its secrets and log group but no service. Staging and production are separate so a new image runs on staging first. |
+| `stagingPushPlatforms`, `pushPlatforms` | `fcm`, `apns`, `fcm,apns`. **Default: none.** A gateway without platforms starts with no credentials and answers `platform_invalid`. A listed platform must have its secret filled first, or the tasks do not start. The task role can read only the listed platforms' secrets. |
+| `stagingPushFcmProject`, `pushFcmProject` | The Firebase project id (`vettid-staging`, `vettid-prod`). Needed with workload identity federation, unless `project_id` is added to the secret; a service-account key already has it. |
+| `stagingPushZoneNs` | **Staging app**: the four name servers of the zone `push.staging.vettid.org` (step 2). |
+
+Until a value is in `cdk.json`, it must be on **every** production deploy
+command, or the stack is built without it: a `VettidOrgRelayStack` deploy
+without `pushStages` would delete the seven SSM parameters the push stack
+reads (the running services are not affected; the next push deploy fails
+until they are back). Commit each value as soon as its deploy has worked
+(the drift check reports the difference until then).
+
+### What is where
+
+- **`VettidOrgPushDataStack`** (stateful): the key, the secrets (created
+  **empty**: no template ever holds a value), the log groups, the staging
+  zone and the alarm topic. Deployed once, before anything else, because
+  the secrets must be filled before a service can start, and so that a
+  failed service deployment (rolled back and deleted) leaves the log that
+  says why.
+- **`VettidOrgRelayStack`** gains seven SSM parameters (`relay/vpc-id`,
+  `relay/public-subnet-ids`, `relay/alb-*`, `relay/https-listener-arn`):
+  parameters only. The listener, its certificate, the load balancer and the
+  relay service are not changed and not replaced; check with `cdk diff`.
+- **`VettidOrgPushStack`** adds to the relay's HTTPS listener a host rule
+  and a certificate per gateway (SNI; the relay's own certificate is not
+  reissued), so the push hosts get the same post-quantum TLS policy.
+  Requests for any other host still go to the relay (the default action).
+- **push.staging.vettid.org** is a small zone of its own in the management
+  account, delegated from `staging.vettid.org` (which lives in the staging
+  account) by `VettidOrgStagePushDelegationStack`. The certificate
+  validates in it and the alias to the load balancer is in it, so nothing
+  in the management account writes to the staging zone.
+- **Key policy** (`alias/vettid-org-push`): `kms:Decrypt` only for the two
+  task roles `vettid-org-push-gateway` and `vettid-org-staging-push-gateway`
+  (each for its own channel's secrets, through Secrets Manager) and for the
+  owner's Identity Center role (`VettIDAdmin`). The administrator statement
+  has no cryptographic action and no `kms:CreateGrant`.
+
+### First deployment (staging first; production's service absent)
+
+```bash
+aws sso login                       # covers default and vault-staging
+P="-c pushStages=staging"
+# 1. Key, empty secrets, log group, zone, alarm topic; and the relay's refs.
+npx cdk diff   VettidOrgPushDataStack VettidOrgRelayStack $P --exclusively
+#    VettidOrgRelayStack must show seven [+] AWS::SSM::Parameter and nothing else.
+npx cdk deploy VettidOrgPushDataStack VettidOrgRelayStack $P --exclusively
+#    Output StagingZoneNameServers: four ns-*.awsdns-* names.
+#    Confirm the "VettID push gateway alarms" subscription email (admin@vettid.org).
+# 2. Delegation (staging account). Put into cdk.json "context", with pushStages:
+#      "pushStages": "staging",
+#      "stagingPushZoneNs": "ns-a.awsdns-xx.org,ns-b.awsdns-xx.co.uk,ns-c.awsdns-xx.com,ns-d.awsdns-xx.net"
+#    commit it (PR), then:
+npx cdk deploy VettidOrgStagePushDelegationStack -c stage=staging --profile vault-staging --exclusively
+dig +short NS push.staging.vettid.org      # the four names; the certificate cannot validate before
+# 3. The blob keys (pushctl: `make build` in vettid-push). Its output is the secret.
+pushctl blob-keys new | aws secretsmanager put-secret-value \
+  --secret-id vettid-org/staging/push/blob-keys --secret-string file:///dev/stdin
+# 4. The service: no platform yet (no credentials exist), so only blob keys are needed.
+npx cdk deploy VettidOrgPushStack $P -c stagingPushImage=ghcr.io/vettid/vettid-push@sha256:<digest> --exclusively
+curl -s -o /dev/null -w '%{http_code}\n' https://push.staging.vettid.org/v1/health     # 200
+# 5. Commit "stagingPushImage" in cdk.json (PR).
+```
+
+If step 4 fails, the tasks did not start: the circuit breaker stops the
+deployment and CloudFormation rolls the stack back (first time: deletes
+it). The reason is the last lines of `/vettid-org/staging/push-service`
+(`aws logs tail /vettid-org/staging/push-service --since 30m`): usually an
+empty or malformed secret. Fix it and deploy again.
+
+**Production** later: `pushStages` `staging,prod` (the data stack adds
+production's three secrets and its log group; the key and the staging
+resources do not change), fill `vettid-org/prod/push/blob-keys` with
+`pushctl blob-keys new` (**a different key from staging's**), then deploy
+with `pushImage`. Its record and certificate validation are in vettid.org
+itself; nothing is delegated.
+
+### Filling the FCM and APNs secrets
+
+Values go straight from their source into Secrets Manager: never through
+the repository, a chat or the shell history. Then list the platform and
+deploy (a new task definition: the tasks restart and read the secret).
+
+```bash
+# FCM, the fallback: the service-account JSON key (PUSH-GATEWAY §14.1 item 1.4).
+aws secretsmanager put-secret-value --secret-id vettid-org/staging/push/fcm --secret-string file://<the downloaded key>.json
+shred -u <the downloaded key>.json
+# FCM, recommended (§10.3): Google's workload identity federation configuration
+# for AWS (`gcloud iam workload-identity-pools create-cred-config … --aws`), which
+# holds no secret. The pool trusts the task role, stack output TaskRoleArn
+# (arn:aws:iam::449757308783:role/vettid-org-staging-push-gateway). It has no
+# project_id: deploy with -c stagingPushFcmProject=vettid-staging.
+aws secretsmanager put-secret-value --secret-id vettid-org/staging/push/fcm --secret-string file://<cred-config>.json
+
+# APNs: {team_id, key_id, p8}. The .p8 downloads once (§14.1 item 2.3); the same key serves both channels.
+jq -n --arg team_id <TEAM ID> --arg key_id <KEY ID> --rawfile p8 AuthKey_<KEY ID>.p8 '{team_id: $team_id, key_id: $key_id, p8: $p8}' \
+  | aws secretsmanager put-secret-value --secret-id vettid-org/staging/push/apns --secret-string file:///dev/stdin
+shred -u AuthKey_<KEY ID>.p8
+
+npx cdk deploy VettidOrgPushStack --exclusively       # with "stagingPushPlatforms": "fcm" (later "fcm,apns") in cdk.json
+```
+
+### Rotation
+
+Tasks read the secrets **at start only**: every change below takes effect
+with the next deployment of the service, which is rolling (no downtime).
+
+```bash
+restart() { aws ecs update-service --cluster vettid-org-relay --service "$1" --force-new-deployment --query 'service.deployments[0].rolloutState'; }
+S=vettid-org/staging/push/blob-keys
+# Yearly: a new current blob key. Retired keys stay and still open blobs (the vault gets a reseal).
+aws secretsmanager get-secret-value --secret-id $S --query SecretString --output text \
+  | pushctl blob-keys rotate \
+  | aws secretsmanager put-secret-value --secret-id $S --secret-string file:///dev/stdin
+restart vettid-org-staging-push          # production: vettid-org-push
+# 400 days after a rotation: delete the retired key (the secret holds no dates; put it on the calendar).
+aws secretsmanager get-secret-value --secret-id $S --query SecretString --output text | pushctl blob-keys list
+aws secretsmanager get-secret-value --secret-id $S --query SecretString --output text \
+  | pushctl blob-keys drop <key id> \
+  | aws secretsmanager put-secret-value --secret-id $S --secret-string file:///dev/stdin
+```
+
+- **APNs key**, yearly: create the second key at Apple (two may be active),
+  put it in both channels' `apns` secrets, `restart` both services, check
+  that wakes are `sent`, then revoke the old key at Apple.
+- **FCM service-account key** (only without federation): new key in the
+  secret, `restart`, delete the old key in Google Cloud.
+- **A new image**: change the digest (staging first), deploy
+  `VettidOrgPushStack`. The KMS key rotates its own material yearly.
+
+### Alarms
+
+All go to the topic `vettid-org-push-alerts` → admin@vettid.org (a topic
+of its own: `vettid-org-security-alerts` accepts EventBridge only, so a
+CloudWatch alarm cannot publish to it). Names are
+`vettid-org[-staging]-push-<name>`. The gateway's metrics are in the
+namespace `vettid-org/<stage>/push`; the sums the alarms need over every
+platform are metric filters on its metric lines
+(`vettid-org/<stage>/push/alarms`).
+
+| Alarm | Fires when | Do |
+|---|---|---|
+| `provider-auth` | any wake was refused for the gateway's credentials (APNs `403`, FCM `401`/`403`) in 5 minutes | The secret is wrong, revoked or expired, or (federation) the Google pool no longer trusts the role. Fix the secret, `restart`. |
+| `provider-unavailable` | more than 5 % of wakes answered `provider_unavailable` for 10 minutes | FCM or APNs is down or throttling (their status pages); vaults retry. Nothing to deploy unless it lasts. |
+| `internal` | any `500 internal` in 5 minutes | A bug or a broken task: read the log group; roll back the image if it began with a deploy. |
+| `manifest-refresh` | for an hour every refresh failed (`manifest_refresh{outcome=error}` and no `ok`) | The channel's manifest site is unreachable or serves a document that does not verify. The last good manifest stays trusted: a new release cannot register, a retired one still can. |
+| `attestation-failures` | more than 25 refused attestations in an hour (`attestation_failures`, by `reason`) | `pcr0`: a retired release still registering (expected briefly after a retirement). `chain`, `signature`: forged documents. `stale`: clocks. The threshold is a starting value (`PUSH_ATTESTATION_FAILURES_PER_HOUR`). |
+| `no-healthy-task` | the load balancer has had no healthy task for 3 minutes | The gateway is down: `aws ecs describe-services --cluster vettid-org-relay --services vettid-org-staging-push`, then the log group. Also sends OK. |
+
+The log holds starts, stops and throttled errors only, never a request
+(PUSH-GATEWAY §10.5), and the load balancer's access and connection logs
+are off. **Keep them off**: they are per load balancer, so turning them on
+for the relay would log every push request too (source address, time).
 
 ## Vault (V5; docs/VAULT-RELEASES.md)
 
@@ -1057,7 +1226,9 @@ admin site (test data comes from `npm run staging:seed`, the canary flag
 from the CLI fallback in "Canary routing" with `--profile vault-staging`
 and table `vettid-org-staging-members`); the relay (staging images pin
 relay.vettid.org; a staging relay is deployed only when relay changes need
-testing); push; the audit stack (the organization trail and GuardDuty,
+testing); the push gateway (the staging gateway runs in the management
+account next to production's, "Push gateway"; here only the delegation of
+its name, `VettidOrgStagePushDelegationStack`); the audit stack (the organization trail and GuardDuty,
 administered from the management account, already cover the account;
 `VettidOrgVaultAlertForwardStack` sends the account's events to the
 management account's alert rules — "Security alerts").
@@ -1502,6 +1673,11 @@ and DynamoDB a few dollars. It grows with use at roughly $9 per million
 messages plus ~$0.003 per always-on long-poll collector per month (DynamoDB
 on-demand), with idle collectors mostly served from Valkey (empty hints);
 see the relay PRs for the 1k/10k/100k estimates.
+
+Push gateway (when deployed): about $25/month per channel — two 0.25 vCPU
+tasks ~$15, their two public IPv4 addresses ~$7, three secrets ~$1, six
+alarms and four filter metrics ~$2 — plus, once, the key ($1) and the
+staging zone ($0.50). The load balancer is the relay's.
 
 Vault host stack, per vault account, with every group parked: about
 $6–8/month (scaler and sync custom metrics ~$4, ~10 alarms ~$1–2, smoke
