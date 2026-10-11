@@ -167,7 +167,7 @@ other open work fits.
 
 | Shortcut | State (2026-10-11) | Decision proposed |
 |---|---|---|
-| `stagingVaultLegacySessionAuth` (portal sessions accepted on app routes) | Not in `cdk.json`; no deployed staging member function has `VAULT_LEGACY_SESSION_AUTH` (checked every function named `*member*`). It appears to be off already | **Remove**: confirm after the S3 drill ends (2026-10-13), then delete the context key, the env switch and its test in one PR |
+| `stagingVaultLegacySessionAuth` (portal sessions accepted on app routes) | **On**: not in `cdk.json`, passed at every staging member API deploy as `-c stagingVaultLegacySessionAuth=true`; the staging Vault function has `VAULT_LEGACY_SESSION_AUTH=1` (checked 2026-10-11). The drill's member 1 (S3, old app) needs it | **Remove** after the S3 drill ends (2026-10-13): redeploy without the flag, then delete the context key, the env switch and its test in one PR. Until then a staging member API deploy without the flag breaks member 1 |
 | Automation signing key among staging `android_signers` (second digest, added at S2) | Pinned in every staging image | **Keep for development.** Never in `prod.json` (reviewed in the release commit, W10-READINESS §3 step 1) |
 | Test mail `*@test.staging.vettid.org` (SES inbound, staging account) | Deployed (`VettidOrgStageTestMailStack`) | **Keep.** Never built for production |
 | Canary flags on staging members | None set today (0 of 10 rows) | **Keep the mechanism**, set only for a canary run and cleared in the same session |
@@ -207,7 +207,7 @@ Answer "all good" to accept every recommendation, or name the exceptions.
 |---|---|---|
 | D1 | Adopt §2: staging is the development channel; at most three live staging releases; at most two releases a week | Yes |
 | D2 | Release 1's retirement window. Default 12 months (VAULT-RELEASES §3.5); the notice sequence needs 90 days | **90 days for release 1 only**, told to the testers when they join; later releases 12 months. Needs a line in VAULT-RELEASES §3.5 (O5 sets 60 days as the floor for shortened windows) |
-| D3 | Which Android signers release 1 pins (one to four are allowed). Today: the Play certificate (not yet known) and the upload certificate | Decide the F-Droid signing key **before** release 1 is cut, and pin it if it is neither of the two; adding a signer later takes a release every live vault must move to |
+| D3 | Which Android signers release 1 pins (one to four are allowed). Today: the Play certificate (not yet known) and the upload certificate | The route is decided (owner, 2026-10-11): F-Droid's reproducible builds, which publish the developer-signed APK. Play holds the Play certificate, so the F-Droid APK is signed with the **upload key**, whose digest release 1 already pins: no third signer is needed. Confirm before release 1 is cut; adding a signer later takes a release every live vault must move to |
 | D4 | Does release 1's image answer calls, agent, wallet, location and presence operations that no production app uses? Today every image does | **Add a per-channel feature allowlist to the release configuration** (measured into the image; production lists only what passed §2.4). A vault spec and code change, before release 1. Not checked: which of these operations a peer can reach on a vault whose owner never used them |
 | D5 | Staging application id | **Change to `com.vettid.app.staging`** with the next staging release that can carry it (the package becomes a per-channel value in the vault), before release 1, so the owner's phone can hold both. Until then: production on the owner's phone, staging on the test phones only |
 | D6 | Production backend rhythm | Weekly, Monday, by the assistant after the owner approves the diff; the first one as soon as the owner lifts "the prod deploy waits" and creates the enroll-code key |
@@ -348,7 +348,7 @@ mailboxes; the HTTP action that needs enclave egress is not offered
 - Whether calls need a relay code change or only new opaque deposit
   types, and exactly what a staging vault would need to reach a TURN
   service.
-- Which certificate will sign the F-Droid build.
+- The F-Droid build's signer follows from D3 (the upload key); the build's reproducibility is being established on `build/fdroid-foss`.
 - Which vault operations of the unused features a peer can reach (D4).
 - Whether an automated test run deletes its test member today (§2.5.4
   states the rule, not the current behaviour).
