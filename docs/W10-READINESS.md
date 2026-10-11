@@ -1,7 +1,7 @@
 ---
 title: W10-READINESS
 status: living checklist (update as items close; not a plan)
-version: 0.1.6
+version: 0.1.7
 date: 2026-10-11
 owner: Al Liebl (Mesmer)
 related:
@@ -35,13 +35,20 @@ changelog:
     and O6 in §8.8)
   - 0.1.5: P32 without UnifiedPush (owner decision, 2026-10-09;
     PUSH-GATEWAY 0.3.0)
-  - 0.1.6: owner decision of 2026-10-11 (ANDROID-PLAN 0.1.35 §7,
-    VAULT-RELEASES 0.1.11 §5.2 and O8): Google holds only the Play
+  - 0.1.6: owner decisions of 2026-10-11 (STAGING-DEVELOPMENT-PLAN 0.1.0
+    §6; VAULT-RELEASES 0.1.11, VAULT-MESSAGING 0.26.0). §3: the staging
+    twin is the staging release that passed the plan's §2.4, not S4 by
+    name; step 1 sets `features` and `android_package`; step 5 sets
+    `ends_after_days: 90` (D2). B1: the S3 drill and the key
+    confirmations are tracked in the plan's §7. R1: release 1 lives
+    until 90 days after release 2
+  - 0.1.7: owner decision of 2026-10-11 (ANDROID-PLAN 0.1.36 §7,
+    VAULT-RELEASES 0.1.12 §5.2 and O8): Google holds only the Play
     app-signing key, and **release 1 pins only VettID's release key**,
     the certificate already in `prod.json`. P9 and B4 no longer block
     release 1 (the `TODO-O8` placeholder is removed in the release
     commit, §3 step 1); P30 moves after release 1; new P9a and B10,
-    per-vault signer binding (VAULT-MESSAGING 0.26.0 §11.7.1) in the
+    per-vault signer binding (VAULT-MESSAGING 0.27.0 §11.7.1) in the
     release-1 candidate; R7 rewritten; the key called "the upload key"
     in P8, P29, B8 and step 11 is VettID's release key
 classification: public (no secrets; safe for github.com/vettid)
@@ -75,9 +82,9 @@ dependency), **on hold** (deliberately paused by the owner).
 | P5 | Owner's CLI profiles for the prod signer and retirement roles | **done** | 2026-10-06: the owner added `vault-prod-key-retirement` and `vault-prod-manifest-signer` to `~/.aws/config`; both assume their roles in vettid-vault-prod 369484479783 (verified with `aws sts get-caller-identity`). Names as in RUNBOOK "Accounts and profiles" / "Publishing a manifest". |
 | P6 | Tag-signing key registered on GitHub | **done** | The release workflow's gate refuses unverified tags; `release/staging/1` and `/2` passed it (2026-10-04/05). |
 | P7 | `releasecfg/prod.json`: account, retirement principal and window, manifest keys, relay URL | **done** | `go run ./cmd/releasecfg check prod` (vettid-vault `721c3ad`, read-only) reports only `release, android_signers` missing. |
-| P8 | `releasecfg/prod.json`: the certificate digest of **VettID's release key** (called the upload certificate until 0.1.6; it signs the F-Droid and direct builds, ANDROID-PLAN 0.1.35 §7) | **done** | `31a19613…8e65`, pinned by vettid-vault #20. From 0.1.6 it is the only signer release 1 pins. |
-| P9 | `releasecfg/prod.json`: **Play app-signing** certificate digest (O8) | **not needed for release 1** (owner decision 2026-10-11; was blocked) | Release 1 pins only P8 (VAULT-RELEASES 0.1.11 §5.2). `prod.json` still holds the `TODO-O8: …` entry, which the release gate refuses; the release commit deletes it (§3 step 1). The Play certificate is pinned by a later production release, when the Play listing exists (P30). |
-| P9a | Per-vault signer binding and signer classes (VAULT-MESSAGING 0.26.0 §11.7.1) in the release-1 candidate | **pending** (the spec is a draft for the owner; then engineering) | Recommended in release 1, so that no production vault is ever unbound; at the latest in the release that first pins the Play certificate. vettid-vault: the binding and `{digest, class}` entries, proven on staging release S10; then `prod.json` `android_signers: [{"digest": "31a19613…8e65", "class": "vettid"}]` (B10). |
+| P8 | `releasecfg/prod.json`: the certificate digest of **VettID's release key** (called the upload certificate until 0.1.7; it signs the F-Droid and direct builds, ANDROID-PLAN 0.1.36 §7) | **done** | `31a19613…8e65`, pinned by vettid-vault #20. From 0.1.7 it is the only signer release 1 pins. |
+| P9 | `releasecfg/prod.json`: **Play app-signing** certificate digest (O8) | **not needed for release 1** (owner decision 2026-10-11; was blocked) | Release 1 pins only P8 (VAULT-RELEASES 0.1.12 §5.2). `prod.json` still holds the `TODO-O8: …` entry, which the release gate refuses; the release commit deletes it (§3 step 1). The Play certificate is pinned by a later production release, when the Play listing exists (P30). |
+| P9a | Per-vault signer binding and signer classes (VAULT-MESSAGING 0.27.0 §11.7.1) in the release-1 candidate | **pending** (engineering; the spec was approved by the owner 2026-10-11) | In release 1 (owner decision, 2026-10-11), so that no production vault is ever unbound. vettid-vault: the binding and `{digest, class}` entries, proven on staging release S10; then `prod.json` `android_signers: [{"digest": "31a19613…8e65", "class": "vettid"}]` (B10). |
 | P10 | `releasecfg/prod.json`: `release: 1` | **pending** | Set in the release commit (§3, step 1); release 0 is a deliberate placeholder. |
 | P11 | Enclave size fixed for release 1 (O6) | **done** | **Owner decision 2026-10-06: keep 1 vCPU / 5120 MiB enclave (m7g.large) for release 1; revisit when unlock queueing shows in metrics.** No change to vettid-vault `deploy/host/` (the size is pinned by `host_files_sha256` at the release commit). Basis: P20; recorded in VAULT-RELEASES 0.1.7 §8.8 and §15 O6. |
 
@@ -121,7 +128,7 @@ dependency), **on hold** (deliberately paused by the owner).
 | # | Prerequisite | Status | Evidence / what remains |
 |---|---|---|---|
 | P29 | Android release build signed with the upload key (direct install) | **pending (owner)** | The owner's hardware token is set up (2026-10-06). `:app:assembleRelease` is built unsigned in CI; release builds are signed outside the repository (vettid-android README). Still needed: the upload-key-signed direct build, when the canary step comes (§3 step 11). The upload digest is pinned (P8). |
-| P30 | Play app signing and a Play track (closed testing) | **after release 1** (owner; was blocking through B4) | Waits for the owner's Play account. Google generates the app-signing key; a dedicated upload key, pinned nowhere, is made for uploads (ANDROID-PLAN 0.1.35 §7; every Play Console step to confirm there). Gives the Play certificate's digest for a later production release and the `androidAppUrl` link (RUNBOOK "The Android app link"). The listing does not go live on any track members can install from before a release that pins the Play certificate is `active`. |
+| P30 | Play app signing and a Play track (closed testing) | **after release 1** (owner; was blocking through B4) | Waits for the owner's Play account. Google generates the app-signing key; a dedicated upload key, pinned nowhere, is made for uploads (ANDROID-PLAN 0.1.36 §7; every Play Console step to confirm there). Gives the Play certificate's digest for a later production release and the `androidAppUrl` link (RUNBOOK "The Android app link"). The listing does not go live on any track members can install from before a release that pins the Play certificate is `active`. |
 | P31 | App support for an unpublished canary manifest | **done** (2026-10-06; not yet run on a phone) | vettid-android #63 (`da72029`): the tester shares the signed `served-<s>.json` to the app, which verifies it under the build's pinned keys, shows serial, key and releases and installs it on confirmation; it is used while newer than the published manifest, also on a 404 (release 1), and dropped on publication. Spec: VAULT-RELEASES 0.1.6 §10.1, VAULT-MESSAGING 0.14.0 §11.10.1, §13.9 (accepted risk). Procedure: RUNBOOK "Canary manifest on the test phone". First end-to-end run is B6. |
 | P32 | Push gateway (FCM) | **deferred, not blocking** | No FCM credentials (on hold with Play). No UnifiedPush (owner, 2026-10-09; PUSH-GATEWAY 0.3.0). ANDROID-PLAN §7: v1 collects while the app is open and through the on-phone service. |
 
@@ -133,7 +140,7 @@ unblocked.
 
 | # | Blocker | Unblocked by | Kind |
 |---|---|---|---|
-| B1 | W9 staging tests finish. **Mostly done** 2026-10-06: S3 (P28), capacity (P20), recovery and old-phone wipe (P27), S1 and S2 key drills (P26). Remaining: confirm the S1 key deleted (after 2026-10-12) and the S2 key (after 2026-10-13); the retirement drill with a vault and the notice emails, on S3 when S4 deprecates it (P26); the §12.1 step 5 negative tests are still unrecorded (P28b) | wall-clock waits; S4 (B2) | engineering |
+| B1 | W9 staging tests finish. **Mostly done** 2026-10-06: S3 (P28), capacity (P20), recovery and old-phone wipe (P27), S1 and S2 key drills (P26). Remaining: confirm the S1 key deleted (after 2026-10-12) and the S2 key (after 2026-10-13); the retirement drill with a vault and the notice emails, on S3 when S4 deprecates it (P26); the §12.1 step 5 negative tests are still unrecorded (P28b). *0.1.6: the S3 drill (ends 2026-10-13) and the two key confirmations are now tracked in STAGING-DEVELOPMENT-PLAN §7, actions 2–4* | wall-clock waits; S4 (B2) | engineering |
 | B2 | Enrollment-code redesign (#122) approved, implemented in all three repos, proven on a staging release | approved 2026-10-06 (merged as VAULT-MESSAGING 0.15.0, MEMBER-API 2.0.0); implementation next: engineering (estimate in #122: about 11–16 days), proven on staging release S4 (S4 also carries the daily owner check, #135 / VAULT-MESSAGING 0.13.0, and vettid-vault #38, LEASH / 0.12.0) | engineering |
 | B3 | ~~O6 instance and enclave size confirmed from the capacity result~~ **done** 2026-10-06 | Owner decision: keep 1 vCPU / 5120 MiB enclave on m7g.large for release 1; revisit when unlock queueing shows in metrics (P11, P20; VAULT-RELEASES 0.1.7 §8.8). No change to `deploy/host/allocator.yaml` or `VAULT_HOST_INSTANCE_TYPE`. | — |
 | B4 | ~~Play app-signing digest (O8) in `releasecfg/prod.json` (also P30)~~ **no longer a blocker** (owner decision 2026-10-11) | Release 1 pins only VettID's release key (P8, P9). The Play digest is pinned by a later release, before the Play listing goes live (P30) | — |
@@ -142,7 +149,7 @@ unblocked.
 | B7 | ~~Prod CLI profiles for the signer and retirement roles (P5)~~ **done** 2026-10-06 | owner added both profiles; `sts get-caller-identity` verified for each (P5) | — |
 | B8 | A signed Android build for the canary phone (P29): direct build signed with the upload key | the owner's hardware token is set up (2026-10-06); still needs the upload-key-signed direct build when the canary step comes (§3 step 11). Owner only (the upload key never leaves the owner's machine) | owner |
 | B9 | W9 results written up (enrollment, moves, messaging, recovery, drill, capacity) as the V5 exit-test record (VAULT-RELEASES §12.1 step 5) | **drafted**: [W9-REPORT](W9-REPORT.md), PR #136 (ready for review); its open sections are the S1/S2 key-deletion confirmations and the drill with a vault at S4 | engineering |
-| B10 | Signer binding (P9a), if the owner accepts it for release 1 | owner approves VAULT-MESSAGING 0.26.0 §11.7.1; engineering implements it in vettid-vault and proves it on staging release S10 | owner, then engineering |
+| B10 | Signer binding (P9a), in release 1 by the owner's decision of 2026-10-11 | VAULT-MESSAGING 0.27.0 §11.7.1 approved (2026-10-11); engineering implements it in vettid-vault and proves it on staging release S10 | engineering |
 
 Not blocking release 1, but blocking **first members** (§3 step 14): a
 way for members to get the app (P30, or a direct-download page for named
@@ -161,17 +168,22 @@ per step follows VAULT-RELEASES §12.3; the rule throughout: before a
 member is on release 1, retire it at once and ship release 2.
 
 Before starting: §2 is empty; `aws sso login` (default, vault-prod);
-`free -g` shows room for builds; S4 (the 0.15.0 staging release)
+`free -g` shows room for builds; the staging twin (0.1.6: the newest
+staging release that passed STAGING-DEVELOPMENT-PLAN §2.4; it was S4,
+the 0.15.0 release, when this was written)
 is built from the same source as the release commit except the channel
-files.
+files. From VAULT-MESSAGING 0.26.0 the channel files differ in behaviour
+too: production's `features` is empty and staging's lists all seven
+(§11.10.8), so production's list is first run on hardware by this
+release's canary (steps 8–11).
 
 | Step | What | Verify | Rollback |
 |---|---|---|---|
-| 1 [1] | **Release commit** (vettid-vault): `enclave/releasecfg/prod.json` `release: 1`; (0.1.6) the `TODO-O8` entry deleted, leaving VettID's release certificate as the only signer, as `{digest, class: "vettid"}` once P9a is in; review; merge. | `go run ./cmd/releasecfg check prod` exits 0; CI green. | Revert the PR. Nothing exists yet. |
+| 1 [1] | **Release commit** (vettid-vault): `enclave/releasecfg/prod.json` `release: 1`; (0.1.6) `features: []` and `android_package: "com.vettid.app"` (VAULT-MESSAGING 0.26.0 §11.10.8); (0.1.7) the `TODO-O8` entry deleted, leaving VettID's release certificate as the only signer, as `{digest, class: "vettid"}` (P9a; VAULT-MESSAGING 0.27.0 §11.10.8); review; merge. | `go run ./cmd/releasecfg check prod` exits 0; CI green. | Revert the PR. Nothing exists yet. |
 | 2 [1] | **Owner signs the tag**: `git tag -s release/prod/1 -m "Vault production release 1"`, push (RELEASING "A release, step by step" 1). | GitHub shows the tag *Verified*. | Until step 6 nothing references release 1: delete the tag and any draft release, fix, re-tag (owner's call). |
 | 3 [2] | **Release workflow** runs on the tag: gate, two arm64 builds, compare, attest, draft release. | All jobs green; `measurements.json` says `channel: prod`, `release: 1`; note PCR0. | Delete the draft release; as step 2. |
 | 4 [3] | **Independent rebuild** by the owner on a separate arm64 machine (RELEASING "Rebuild and match"); then publish the draft GitHub release. | `eifinfo match`/`compare` MATCH: same PCR0–2, binaries, measured sections. | Mismatch: stop, do not publish; investigate (toolchain lock, runner image). |
-| 5 [5] | **Release entry PR** (vettid.org): release 1 in `vault/releases/prod.json`, `status: candidate`, PCR0–2, `seal_key: ""`, `admitted_pcr0s: []` (no earlier release), `notes: https://vettid.org/security/releases/1/`, `log`, and `host` with `min_instances: 0`, `max_instances: 2` (RUNBOOK "Adding a release" 1–2, "Creating a release key"). | `npm test`, `npm run check:manifest`; `npx cdk diff VettidOrgVaultStack --profile vault-prod` shows exactly one `Custom::VettidReleaseKey` and its SSM parameter, policy of the §11.10.7 shape with the 30-day window. | Revert the PR (no key yet). |
+| 5 [5] | **Release entry PR** (vettid.org): release 1 in `vault/releases/prod.json`, `status: candidate`, PCR0–2, `seal_key: ""`, `admitted_pcr0s: []` (no earlier release), `notes: https://vettid.org/security/releases/1/`, `log`, (0.1.6) `ends_after_days: 90` (VAULT-RELEASES 0.1.11 §3.5, D2), and `host` with `min_instances: 0`, `max_instances: 2` (RUNBOOK "Adding a release" 1–2, "Creating a release key"). | `npm test`, `npm run check:manifest`; `npx cdk diff VettidOrgVaultStack --profile vault-prod` shows exactly one `Custom::VettidReleaseKey` and its SSM parameter, policy of the §11.10.7 shape with the 30-day window. | Revert the PR (no key yet). |
 | 6 [6] | **Release key**: deploy `VettidOrgVaultStack` (prod) from master; read the ARN from SSM `…/vault/releases/1/seal-key-arn`; PR with `seal_key`; **keycheck** as the retirement role against the draft manifest, `-record keycheck/1` (RUNBOOK "Creating a release key" 2–4). | Deploy succeeds (the custom resource re-checks the policy); keycheck exits 0; VaultStack diff after the `seal_key` PR is empty. | The key is immutable and permanent. If keycheck fails: release 1 → `removed` (no `host`), schedule the key's deletion as the retirement role with the pinned 30 days (RUNBOOK "Retirement"), ship release 2. |
 | 7 [7] | **Host + release stacks (AMI)**: `npx cdk diff VettidOrgVaultHostStack VettidOrgVaultRelease1Stack --profile vault-prod` (host: only the smoke key gains PCR0; release stack new), deploy both (RUNBOOK "Adding a release" 4). Image build 20–40 min. | Stack CREATE_COMPLETE; group `vettid-org-vault-r1` (min 0, max 2); SSM `vault/releases/1/group-name`; Image Builder log clean (hash and PCR0 checks passed). | Destroy `VettidOrgVaultRelease1Stack` (stateless); redeploy the host stack from master. A hash or PCR0 mismatch fails the build: stop and investigate. |
 | 8 [8] | **Canary self-test**: desired capacity 1; through SSM the self-test sequence with the 60 s wait (RUNBOOK "Adding a release" 5). Optionally the capacity run on production hardware while no member exists (SMOKE "Capacity measurement"). | `"result": "PASS"` with `key_policy_check: 6` (the deletable smoke key is refused by design); parent restarts cleanly; no alarm, DLQ empty. | Desired 0. A FAIL is a canary failure: as step 6 rollback. |
@@ -188,7 +200,8 @@ files.
 ### 4.1 Risks
 
 - **R1. Release 1 freezes the enrollment wire for a year or more**
-  (VAULT-RELEASES §14 risk 2). Shipping before #122 would leave the cookie-
+  (VAULT-RELEASES §14 risk 2; 0.1.6: for release 1 itself, until 90
+  days after release 2 is published, VAULT-RELEASES 0.1.11 §3.5). Shipping before #122 would leave the cookie-
   signed enrollment in a release that must keep working, move-only, until
   it is removed. Hence B2 before the tag.
 - **R2. No kill switch for the vault routes after publication.** The
@@ -216,8 +229,8 @@ files.
 - **R6. W9 evidence is not in the repository.** *Addressed 2026-10-06:*
   [W9-REPORT](W9-REPORT.md) (PR #136) records the phone tests, moves,
   recovery, capacity and drills; it closes when merged (B9).
-- **R7. Play installs come later** (rewritten in 0.1.6; owner decision
-  2026-10-11, ANDROID-PLAN 0.1.35 §7). Release 1 pins only VettID's
+- **R7. Play installs come later** (rewritten in 0.1.7; owner decision
+  2026-10-11, ANDROID-PLAN 0.1.36 §7). Release 1 pins only VettID's
   release key, so it is built without a Play account. No app installed
   from Google Play can enroll, receive a transfer or register for a
   recovery until a production release pins the Play certificate; the

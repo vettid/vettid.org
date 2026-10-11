@@ -1,11 +1,11 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.35
+version: 0.1.36
 date: 2026-10-11
 changelog:
-  - 0.1.35: owner decision 2026-10-11, reversing 0.1.34's signing
-    decision the day it was made (a draft for the owner's review).
+  - 0.1.36: owner decision 2026-10-11, reversing 0.1.34's signing
+    decision the day it was made (approved by the owner 2026-10-11).
     **The key that signs Play installs is Google's, option (a)**, not
     VettID's (option (b), chosen in 0.1.34). The owner's question: "it
     feels like giving my key to google will let them have access into
@@ -22,13 +22,21 @@ changelog:
     and F-Droid or direct is a transfer or the 24-hour recovery, never
     an update; the sentences the app, the account site and the store
     listings carry; the app's "Installed from" line and the transfer
-    warning (VAULT-MESSAGING 0.26.0 §11.7.1, per-vault signer
+    warning (VAULT-MESSAGING 0.27.0 §11.7.1, per-vault signer
     binding). Production release 1 pins only VettID's release key and
     no longer waits for the Play account; the Play certificate comes
     with a later release, before which the Play listing does not go
     live. What can and cannot be compared for a Play install; code
     transparency for app bundles as a follow-up to evaluate (§7
     Signing and the two distributions; §9 question 15)
+  - 0.1.35: owner decision D5 of 2026-10-11 (STAGING-DEVELOPMENT-PLAN
+    0.1.0 §6; VAULT-MESSAGING 0.26.0 §11.10.8, "Android package"; a
+    draft for the owner's review): the `staging` build type's
+    application id becomes `com.vettid.app.staging`
+    (`applicationIdSuffix ".staging"`), from the build that goes with
+    staging release S10, so the production and staging apps install
+    side by side (§5, "Build types and application ids"). 0.1.34 is the
+    two distributions (vettid.org #219)
   - 0.1.34: owner request 2026-10-11 (the app is to be on F-Droid;
     signing route decided by the owner the same day: F-Droid's
     reproducible builds, which publish the VettID-signed APK;
@@ -525,7 +533,7 @@ rows below say "Vault" for the screens and "item" for the data.
 | History | — (VettID-specific) | The member's audit log (0.1.11, `audit.list`, VAULT-MESSAGING 0.20.0 §10.9), read-only: a search field (the vault searches, `q`), filter chips (category, connection, date range), a list of entries newest first with infinite scroll, and an entry detail, each entry's icon in its category's colour (0.1.22); a ⋯ menu with **Export…** (0.1.17: CSV or JSON of what the filters show, with the vault PIN, saved through "Save to…"). Details below |
 | Notifications | — (Proton has none; a bell as in most apps) | 0.1.23 (owner answers of 2026-10-09): the vault's feed (VAULT-MESSAGING §10.9), opened from the bell in the top bar with the unread count; grouped by day, urgent items first, unread and read, swipe to archive or to mark read, an Archived view; each item opens the screen it is about; system notifications through the member's notification mode (D7). Details below |
 | Credential | — | Reached from Settings → Security → Credential (0.1.11; not in the drawer). Critical items inside the Protean Credential; unlock window; password change; the vault-held credential copy (the backup) on/off. Turning it off shows VAULT-MESSAGING §3.5.6's warning and needs a confirmation: "If this phone is lost, broken, reset or replaced without a transfer, your vault **cannot be recovered**. It can only be deleted and replaced by a new one, and **everything in it is lost**." While off, the screen and Settings keep a short "no recovery" notice. Turning it on asks for the password at once (an owner check) so that the copy exists, and says recovery is possible from then on |
-| Settings | Settings | At the top, an **account card** (0.1.11): the member's first and last name and full email address (`account.get`, VAULT-MESSAGING 0.20.0 §11.13) and the membership state; tapping it opens the avatar sheet. Vault (status, with the "Installed from" line of §7 "Signing and the two distributions" (0.1.35), release, lock, PIN; "Update available" while a newer release can be approved, 0.1.19); Security (credential, recovery, attestation info, the app lock (0.1.19: Biometrics or Phone screen lock) and timeout, the owner-check interval 1–24 h and the hold switch); Privacy (the **Shared profile**, glyph `Badge`, 0.1.12: display name, `@profile` items and the profile photo, **camera only** — "Take a photo" / "Retake photo" opens the app's own camera screen, front camera first with a switch to the rear one, then "Retake" or "Use photo"; no selection of an existing picture and no other camera app; the shot stays in memory, is never saved to the gallery, and is cropped, scaled and re-encoded to a JPEG ≤ 65,536 bytes without EXIF before `profile.set{photo}`; "Remove photo" confirmed; a refused camera permission is explained, with the system settings once Android no longer asks; a phone without a camera is told); App (theme; **Notifications** (0.1.23): the mode, its status, previews and the channels, §4 Notification modes; the local "Vault updates" channel, 0.1.19) |
+| Settings | Settings | At the top, an **account card** (0.1.11): the member's first and last name and full email address (`account.get`, VAULT-MESSAGING 0.20.0 §11.13) and the membership state; tapping it opens the avatar sheet. Vault (status, with the "Installed from" line of §7 "Signing and the two distributions" (0.1.36), release, lock, PIN; "Update available" while a newer release can be approved, 0.1.19); Security (credential, recovery, attestation info, the app lock (0.1.19: Biometrics or Phone screen lock) and timeout, the owner-check interval 1–24 h and the hold switch); Privacy (the **Shared profile**, glyph `Badge`, 0.1.12: display name, `@profile` items and the profile photo, **camera only** — "Take a photo" / "Retake photo" opens the app's own camera screen, front camera first with a switch to the rear one, then "Retake" or "Use photo"; no selection of an existing picture and no other camera app; the shot stays in memory, is never saved to the gallery, and is cropped, scaled and re-encoded to a JPEG ≤ 65,536 bytes without EXIF before `profile.set{photo}`; "Remove photo" confirmed; a refused camera permission is explained, with the system settings once Android no longer asks; a phone without a camera is told); App (theme; **Notifications** (0.1.23): the mode, its status, previews and the channels, §4 Notification modes; the local "Vault updates" channel, 0.1.19) |
 | Owner check | — (VettID-specific) | One screen: PIN and credential password together (VAULT-MESSAGING §3.6.5); also the "vault held" screen with the waiting counts and the lock action |
 | Avatar sheet | Account sheet | The member's first and last name and **full email address** (0.1.11, from `account.get`'s snapshot `first_name`, `last_name` and `email`, VAULT-MESSAGING 0.20.0 §11.13; never the masked hint), the email labelled "Only you see this address" and the names "Your connections see this name"; **Lock vault first** (0.1.12), right under the name and email, before Change name, Shared profile and the email; the sheet scrolls; vault status; **Change name** (0.1.10): the two names (the registration rule: letters, spaces, `'’.-`, ≤ 40), then the owner-check screen's PIN and password, sent as `account.name.set`; then "Name change requested" until `account.get`'s `name_request` is `applied` or `refused`; `too_soon` (from the vault or the member API): "You can change your name once every 30 days. You can change it again on <date>" (VAULT-MESSAGING §10.8), membership and subscription (read-only, from the vault, VAULT-MESSAGING §11.13), open account portal (browser) |
 | Recovery (new phone) | — (VettID-specific) | Only with the backup on: scan the portal's recovery QR, or type its code (0.1.33, below) → claim (`email_hint`) → register → PIN → credential password → the app replaces the old one. No other path: 0.1.6's backup-off choice (new credential or delete) is removed. `no_backup` at register or unlock (a vault whose backup is off): "This vault cannot be recovered: its credential backup was off. Delete it on the account site and start over with a new setup code", with a link to the portal's start-over page (MEMBER-API 2.1.0) and then to onboarding |
@@ -1408,6 +1416,29 @@ one (translation-ready), accessibility labels required in review.
 Rules: features depend only on `:core:*`; no feature touches transport or
 crypto directly; one ViewModel per screen with immutable UI state.
 
+**Build types and application ids** (0.1.35; STAGING-DEVELOPMENT-PLAN
+D5).
+
+| Build type | Application id | Launcher label |
+|---|---|---|
+| `release` | `com.vettid.app` | VettID |
+| `staging` | `com.vettid.app.staging` (0.1.35; it was `com.vettid.app`) | VettID Staging |
+| `debug` | `com.vettid.app.dev` | VettID Dev |
+| `devStack` | `com.vettid.app.devstack` | VettID Dev Stack |
+
+The staging build gets `applicationIdSuffix ".staging"` with the build
+that goes with staging release S10, whose images accept exactly that
+package in key attestation (VAULT-MESSAGING 0.26.0 §11.10.8, which also
+lists what follows the package and how an existing staging vault moves
+to the new build: Android treats it as another app, so nothing is
+carried over by an update). The label and the signing key do not
+change. From then on the production and staging apps install side by
+side on one phone. `checkStagingApk` asserts the id; the staging
+manifest's App Link host (`account.staging.vettid.org`) is verified once
+that site's `assetlinks.json` names the new package; the app's
+`push.register` `app_id` is its application id and follows by itself.
+The staging id is never published to a store.
+
 ## 6. Phases
 
 | Phase | Contents | Exit |
@@ -1502,7 +1533,7 @@ schema for the cache and the request verb belong to the location batch.
   accepted the current terms; the portal checks it when it issues the
   setup code (MEMBER-API 2.0.0). The app itself never signs in.
 
-### Signing and the two distributions (0.1.35; decided: option (a))
+### Signing and the two distributions (0.1.36; decided: option (a))
 
 **Versions.** Both distributions of a release have the same
 `versionCode` and `versionName`, and each release is a tag
@@ -1520,7 +1551,7 @@ same day the owner asked: "it feels like giving my key to google will
 let them have access into my app if they chose to try and insert a
 backdoor (it is open source code). if this is possible we need to
 rethink the keys". It is possible, as set out below, and the owner
-decided: "yeah, we need to go back to option a." **0.1.35 replaces (b)
+decided: "yeah, we need to go back to option a." **0.1.36 replaces (b)
 with (a).** 0.1.34's argument for (b), "Google holds the key that signs
 Play installs under either option, so (b) adds no party that can sign",
 was true of Play installs and wrong about the others: under (b) the
@@ -1576,11 +1607,12 @@ The owner accepts that cost.
 
 | Key | Who holds it | What it signs | Pinned by vaults |
 |---|---|---|---|
-| **VettID's release key** (certificate SHA-256 `31a19613aa10f209e08945f947f94f7ce3e6e5ac342457ff9969a67986928e65`; "the upload key" in documents before 0.1.35) | The owner, as a file (confirmed 2026-10-11), kept off line; never given to Google | The F-Droid APK (F-Droid's reproducible builds publish the VettID-signed APK) and direct builds | Yes, class `vettid`: already in `enclave/releasecfg/prod.json` (W10-READINESS P8), and the only signer of production release 1 |
+| **VettID's release key** (certificate SHA-256 `31a19613aa10f209e08945f947f94f7ce3e6e5ac342457ff9969a67986928e65`; "the upload key" in documents before 0.1.36) | The owner, as a file (confirmed 2026-10-11), kept off line; never given to Google | The F-Droid APK (F-Droid's reproducible builds publish the VettID-signed APK) and direct builds | Yes, class `vettid`: already in `enclave/releasecfg/prod.json` (W10-READINESS P8), and the only signer of production release 1 |
 | **Play app-signing key** | Google, which generates it at enrolment; VettID never has it | Everything Google Play installs | Not by release 1. Added, class `google_play`, by the production release cut when the Play listing is prepared (below) |
 | **Play upload key** (new, made for this purpose only) | The owner | Only the app bundle uploaded to the Play Console | Never |
 
-**The Play upload key is a dedicated key, not VettID's release key.**
+**The Play upload key is a dedicated key, not VettID's release key**
+(owner decision, 2026-10-11).
 The upload key authenticates an upload to Play. Play checks it and
 re-signs with the app-signing key, so nothing a member installs is
 signed by the upload key. Reusing the release key as the upload key
@@ -1620,18 +1652,18 @@ the app erases its keys. The member either transfers the vault to the
 other version on a second phone (VAULT-MESSAGING §6.7.1; no wait) or
 uninstalls, installs the other version and recovers the vault (24
 hours, §11.11). Both need the PIN and the credential password, and
-both rebind the vault to the new app's signer (VAULT-MESSAGING 0.26.0
+both rebind the vault to the new app's signer (VAULT-MESSAGING 0.27.0
 §11.7.1). F-Droid and direct builds share a signer, so moving between
 those two is an ordinary update (a `full` direct build updated by
 F-Droid's `foss` build loses Google push, which the fallback rule
 covers, §4 Notification modes, 4).
 
 **What members are told** (one sentence each; the wording is the
-requirement):
+requirement, approved by the owner 2026-10-11):
 
 - **The app**, Settings → Vault, under the vault's status, from the
   app's own entry in `device.list` (`signer.class`, VAULT-MESSAGING
-  0.26.0 §10.3): "Installed from: Google Play (signed by Google)" or
+  0.27.0 §10.3): "Installed from: Google Play (signed by Google)" or
   "Installed from: F-Droid or direct (signed by VettID)" (class
   `development`: "Development build"; no line when the vault reports
   no signer). Tapping the line shows: "The Google Play version is
@@ -1676,9 +1708,9 @@ vault refuses its attestation). So **the Play listing does not go live, on any
 track that members can install from, before such a release is
 active**; the same digest is added to the App Links document
 (RELAY-PROTOCOL, "The Play app-signing key will be added when it
-exists"). Per-vault signer binding (VAULT-MESSAGING 0.26.0 §11.7.1) is
+exists"). Per-vault signer binding (VAULT-MESSAGING 0.27.0 §11.7.1) is
 in the release that first pins the Play certificate at the latest;
-recommended and assumed here: in release 1 already, so that no
+decided (owner, 2026-10-11): in release 1 already, so that no
 production vault ever exists unbound.
 
 **What can be checked about a Play install.** The F-Droid and direct
@@ -1817,7 +1849,7 @@ Each with the recommended answer.
     signal stays the separate future decision §14 names.
 15. **The key that signs Play installs** (0.1.34; **answered
     2026-10-11: VettID's own key, option (b); replaced the same day by
-    option (a)**, 0.1.35). The question was: let Google generate the
+    option (a)**, 0.1.36). The question was: let Google generate the
     Play app-signing key, or supply VettID's own at enrolment so that
     Google Play and F-Droid installs share a signer and members can
     move between them without uninstalling? 0.1.34 recommended, and
