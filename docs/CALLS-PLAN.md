@@ -1,7 +1,7 @@
 ---
 title: CALLS-PLAN
-status: draft for the owner's review
-version: 0.1.0
+status: approved by the owner 2026-10-11 (D1–D11 as recommended; D1 with the owner's position of §3.1)
+version: 0.1.1
 date: 2026-10-11
 owner: Al Liebl (Mesmer)
 related:
@@ -17,6 +17,14 @@ changelog:
     `origin/main` (6b50425), vettid-relay `origin/main`, vettid-android
     `origin/master` (4e793592) and this repository (3a0f740); §11 has the
     references and what was not established
+  - 0.1.1: approved by the owner 2026-10-11 ("i am good with it with
+    the recommendations"). His question, "do we need stun and turn? i
+    am not concerned about connected users seeing each other's IP",
+    is answered in the new §3.1: both are still needed, TURN only as
+    the fallback. Following from his position: direct media is the
+    default with no reservation; the "Always relay calls" switch (V9)
+    is deferred; C5 becomes the fallback and hostile-network phase and
+    measures how often TURN is needed (§3, §6.1, §6.4, §7, §9, §10)
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -61,7 +69,7 @@ A = caller, B = callee. "Exists" means in vettid-vault `origin/main`.
 | 6 | B answers. Only now does B's app open a peer connection and gather addresses (so that calling someone never reveals their IP address unanswered). It encapsulates to A's key, signs, sends `call.answer` | B's app | No |
 | 7 | B's vault vouches, forwards to A's vault, tells B's other devices `answered_elsewhere`; A's vault checks and passes the answer to A's calling device only | both vaults | Yes |
 | 8 | Both apps derive `k_call`, exchange `call.ice` candidates (batched, at most 16 per message, 256 messages a call) | apps; vaults forward from memory | Vault yes, apps no |
-| 9 | Media flows device to device, or through TURN when no direct path exists (or when the member chose "always relay", §3). Every audio and video frame is encrypted under `k_call` on top of DTLS-SRTP | apps; the calling service | No |
+| 9 | Media flows device to device, or through TURN when no direct path exists Every audio and video frame is encrypted under `k_call` on top of DTLS-SRTP | apps; the calling service | No |
 | 10 | Either side hangs up: `call.end{hangup}` through both vaults; both record `call.ended` in the audit log | apps, vaults | Vault yes |
 
 **The other endings.**
@@ -99,19 +107,52 @@ happened, not that it was a call (§6.5 for what iOS will force later).
 | Relay | That a mailbox received deposits, their sizes and times, the depositor's relay key. A call is a burst of 10–30 small deposits; a traffic observer could guess "a call started" | Who, content, keys; message types are inside the envelope |
 | Vault hosts (parent) | The same bursts for a vault | Anything inside the enclave |
 | The vaults | Who called whom, when, how long, audio or video; SDP and candidates pass through in memory, so both members' IP addresses are visible to both vaults during setup. History: 200 calls, no SDP, no keys | `k_call`, media |
-| Calling service (TURN) | Client IP addresses, allocation times and byte counts; with "always relay" on both sides, both members' addresses | Who the members are (credentials name no one, V8), content |
+| Calling service (TURN) | Client IP addresses, allocation times and byte counts | Who the members are (credentials name no one, V8), content |
 | Google (push mode only) | That VettID was woken, and when | That it was a call; from whom |
-| The other member | With a direct path: the member's public IP address (roughly city and provider) and local network addresses. With relay only: nothing but the TURN server's address | — |
+| The other member | With a direct path: the member's public IP address (roughly city and provider) and local network addresses. When a call falls back to TURN: only the TURN server's address | — |
 | Networks on the path | That the phone talks to a TURN server or to another address by UDP | Content |
 
-**Direct or relayed.** A direct path is faster, keeps working if the
-TURN service is down and costs nothing; it shows each member's IP address
-to the other. Relaying hides it and costs bandwidth (§5.4) and some
-delay. Connections are people the member approved one by one, so the
-recommendation (D1) is **direct when possible by default, with one
-switch "Always relay calls"** in Settings → Privacy, stored in the vault
-so that it holds on every device; a per-connection override can follow.
-Either way the callee gathers no addresses before answering (§2 step 6).
+**Direct or relayed (decided, D1).** Media goes directly between the
+two phones whenever a direct path exists, and through TURN only when
+none does. Each member's IP address is then visible to the other; the
+owner accepts that between connections (2026-10-11: "they are connected
+and should be trusted"). The callee still gathers no addresses before
+answering (§2 step 6), which costs nothing.
+
+### 3.1 Are STUN and TURN still needed? Yes, both
+
+- **STUN** is how a phone behind a home router or a mobile network
+  learns its own public address, so that the two phones can find a
+  direct path at all. Without it only two phones on the same network
+  can connect. It reveals the address to the phone itself and, through
+  the signalling, to the other party, which is accepted above. It
+  carries no media and costs nothing to run.
+- **TURN** is the fallback for calls where no direct path exists: both
+  sides behind strict (symmetric or carrier-grade) NAT, restrictive
+  firewalls, some mobile and office networks. Without it those calls do
+  not connect at all; they do not degrade, they fail. How often: it is
+  commonly cited as roughly one call in five to ten on mobile networks.
+  That is general experience, **not measured for VettID**; measuring it
+  is an exit criterion of C5 (§7).
+- Both are the same coturn server (§5): nothing extra is deployed for
+  STUN.
+
+What the owner's position changes:
+
+1. Direct by default is confirmed without a privacy reservation, so TURN
+   carries only fallback traffic. The cost of §5.4 is then mostly the
+   idle $18 a month, and the $30 ceiling is comfortable.
+2. **"Always relay calls" is deferred** (V9 and its setting are not
+   built now). It is not free: a vault setting, a policy in the signed
+   ICE configuration, a vault release, and the relay-to-relay case that
+   failed in the old backend (§10 risk 6) to make work. With no privacy
+   need behind it, that is not worth it yet. It can be added later
+   without changing anything built here; the app keeps a forced-relay
+   option in debug builds only, to test the fallback.
+3. Same-network calls (C1) can go to staging testers before the calling
+   service exists, as §7 already has it. Calls across networks wait for
+   C2: today's vault gives its devices no servers at all, not even
+   STUN (§1), and the app may use only servers its vault signs.
 
 **Annoyance.** Today any active connection may ring, and the only limit
 is 60 durable messages a minute per connection (VAULT-MESSAGING §7.3).
@@ -279,7 +320,7 @@ $30 a month, with a billing alarm.
 | V6 | Glare: when an offer arrives from the connection the vault is itself calling, the call with the lower `call_id` wins and the other ends quietly | Both end `busy` today |
 | V7 | `call.update` (a new offer/answer inside an active call) for network changes and for adding or dropping video | Not in §10.10 |
 | V8 | TURN usernames carry a random part, not the `call_id` | §5.1 |
-| V9 | "Always relay" as a vault setting, carried in the signed ICE configuration as a policy the devices obey | So one switch covers every device |
+| V9 | **Deferred (0.1.1, §3.1).** "Always relay" as a vault setting, carried in the signed ICE configuration as a policy the devices obey | So one switch covers every device; not needed while direct media is accepted |
 
 Not changed: the key agreement, the signatures, one call at a time, no
 handoff, desktops ring within a session (already in the code and tested
@@ -339,7 +380,7 @@ from a push wake.
 | In call | audio; video; reconnecting; relayed or direct indicator; muted; speaker, Bluetooth | the encryption line; "Reconnecting…" |
 | Permission prompts | microphone, camera, Bluetooth, full-screen intent | why each is asked |
 | Call history (in the conversation; a list later) | outgoing, incoming, missed, with duration | — |
-| Settings → Privacy → Calls | Always relay calls; per connection: Calls allowed / off | the explanation of what relaying hides |
+| Connection settings | Calls allowed / off ("Always relay calls" is deferred, §3.1) | — |
 | Settings → Notifications | "Calls ring only while the vault is unlocked"; the battery line for the on-phone service | — |
 
 ### 6.5 Push gateway
@@ -354,9 +395,8 @@ V4's wake class in the vault is named so that it can carry over.
 
 ### 6.6 Proposed edits to other documents (not made in this PR)
 
-- **VAULT-MESSAGING**: §10.10 (V2–V9: timeouts, keep-alive, glare,
-  `call.update`, permission and limits, the relay policy in the ICE
-  configuration, the issuer; "the callee gathers no candidates before
+- **VAULT-MESSAGING**: §10.10 (V2–V8: timeouts, keep-alive, glare,
+  `call.update`, permission and limits, the issuer; "the callee gathers no candidates before
   answering"; "media not decrypted under `k_call` is never played");
   §10.4 `connection.update` (the calls permission); §10.9 (merged missed
   calls); §11.10.8 (`calls_url`); §14.2 (the call wake); §15 item 6
@@ -388,13 +428,13 @@ days of implementation and review, as ranges; owner testing is extra.
 | C2 | The calling service on staging; vault fixes V1–V3, V5, V6, V8 | The same calls with one phone on mobile data and one on Wi-Fi; app killed mid-call frees both vaults within 2 minutes; glare connects one call | New service and stack; **a vault release**; host stack deploy (egress) | 12–20 |
 | C3 | Ringing with the app closed | On-phone service: rings within 2 s on both kinds of phone, screen off, including after a reboot; behaviour in Doze recorded. Google push on the Pixel 7 once Firebase exists (does not block the phase) | **A vault release** for V4 (can ride with C2's) | 6–10 |
 | C4 | Video: camera, switching cameras, adding video to a voice call, network change (V7) | Video both ways for 10 minutes; walk from Wi-Fi to mobile data without the call dropping | A vault release (V7) | 8–14 |
-| C5 | "Always relay" (V9) and hostile networks | A call with relay forced on both sides (both on one TURN server: the old backend ran two servers because this case failed there); a call from a network allowing only TCP 443; neither side's address visible to the other in a packet capture | A vault release (V9) | 5–8 |
+| C5 | The TURN fallback and hostile networks | A call from a network allowing only TCP 443; a call with relay forced on one side and on both (debug option; both on one TURN server: the old backend ran two servers because this case failed there); **the share of calls that needed TURN, counted over at least 50 real calls on mobile data and home networks** (the app records direct or relayed per call, locally) and written into this plan | App only | 4–7 |
 | C6 | Hardening: call limits and spam, battery over 24 h idle and an hour's call, Bluetooth and wired headsets, a mobile call arriving during a VettID call, accessibility, texts | A written test sheet passed on all three phones | App only | 8–12 |
 | Promotion | STAGING-DEVELOPMENT-PLAN §2.4: specs merged, a published staging release, both kinds of phone, a move to the next release with call history intact, seven quiet days, the production calling service deployed, the owner's approval | — | A production vault release with `calls` listed; a production calling service | 3–5 plus the seven days |
 
 Total: roughly 60–95 working days. No phase needs a relay release.
 At most two staging releases a week (§2.1 there) is not a constraint:
-three or four vault releases cover C2–C5.
+two or three vault releases cover C2–C4.
 
 ## 8. Out of scope for now
 
@@ -415,11 +455,13 @@ three or four vault releases cover C2–C5.
 
 ## 9. Owner decisions
 
-Answer "all good" or name the exceptions.
+**Answered (owner, 2026-10-11): all as recommended**, with one position
+on D1: seeing each other's IP address is not a concern between
+connections (§3.1).
 
 | # | Decision | Recommendation |
 |---|---|---|
-| D1 | Direct or always-relayed media by default | **Direct when possible**, with a switch "Always relay calls" that hides the IP address. Connections are people you approved; direct is faster and free. |
+| D1 | Direct or always-relayed media by default | **Decided: direct when possible**, TURN as the fallback only. STUN and TURN are both still needed (§3.1). The "Always relay calls" switch recommended in 0.1.0 is deferred: no privacy need, and it is not cheap. |
 | D2 | The media stack | **`io.github.webrtc-sdk:android`** (libwebrtc with built-in frame encryption), confirmed or replaced after the C0 spike; fallback the Conversations build with our own cipher. |
 | D3 | Where the calling service runs on staging | **The staging account**, one small instance in us-east-1, in its own network. The production home is decided at promotion. |
 | D4 | Who issues TURN credentials | **The calling service, to attested vaults only**; the shared secret never enters a vault. This adds one host name to the vaults' egress list. |
@@ -440,7 +482,7 @@ Answer "all good" or name the exceptions.
 | 3 | A locked vault cannot be called, and members will not expect that | Said in the app (§6.4); an enclave restart locks every vault on the host, so calls stop until each member unlocks |
 | 4 | The fork behind option A slows down or changes its frame format | Version pinned; the format written down (C0 proof 3); B remains possible |
 | 5 | The TURN server is abused as a free relay or as a way into its network | §5.3; its own account-level alarm and ceiling (D8) |
-| 6 | Relay-only calls fail when both sides use the same TURN server (seen in the old backend) | Tested in C5; a second server costs about $16 a month |
+| 6 | A call where both sides need the relay fails when both use the same TURN server (seen in the old backend) | Rare with direct by default (both sides must lack a direct path); tested in C5; a second server costs about $16 a month |
 | 7 | Android or Play policy on `phoneCall` services and full-screen intents changes | Confirmed at submission; the F-Droid and direct builds are unaffected |
 | 8 | Calls add bursts to the shared production relay from staging | Small (tens of deposits a call); no load testing against it (STAGING-DEVELOPMENT-PLAN §3 risk 6) |
 | 9 | Effort: the app side is the bulk and has no code to start from | Phases are cut so that each ends in something the owner can use |
