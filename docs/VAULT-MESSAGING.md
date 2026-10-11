@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.24.1
-date: 2026-10-10
+version: 0.25.0
+date: 2026-10-11
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -12,14 +12,35 @@ related:
   - CALLING-SERVICE.md
   - PUSH-GATEWAY.md (0.4.1)
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.3.1)
-  - ANDROID-PLAN.md (0.1.30)
+  - MEMBER-API.md (2.4.0)
+  - ANDROID-PLAN.md (0.1.33)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
   - VAULT-RELEASES.md (0.1.6, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
 changelog:
+  - 0.25.0: normative, additive; no enclave change and no vault release
+    (owner decision of 2026-10-11, "we should allow a typed recovery
+    code"; §15 item 33; a draft for the owner's review): the recovery
+    code can be **typed** when the new phone cannot scan the portal's
+    QR. The portal shows one string of 48 Crockford characters in 12
+    groups of four: a 12-character **locator** minted by the member API
+    (60 random bits; it stands for the QR's `vault_id` and
+    `recovery_id` and opens nothing), the 32-character code unchanged,
+    and 4 **check characters** computed in the browser over the
+    portal's `api` origin, the locator and the code. The app verifies
+    the check with its own origin before anything is sent (a typing
+    mistake, or a code of another environment's site, is caught on the
+    phone and is not a wrong code), claims by locator
+    (`POST /api/vault/recovery/claim {locator, app_key}`, answered with
+    `vault_id` and `recovery_id`), and from there registers exactly as
+    after a scan: the same sealed register, the same answers, the same
+    5 wrong codes, the same 24 hours, single use, PIN and credential
+    password. The bare 32-character text the portal showed "for typing"
+    is withdrawn (no app could use it since 0.15.0) (§11.11,
+    §11.11.2, §11.11.3, §11.11.6, §11.11.7, §11.11.8, new §11.11.10,
+    §13.5, §15 item 33, §16; MEMBER-API 2.4.0, ANDROID-PLAN 0.1.33)
   - 0.24.1: editorial-normative, errata to 0.24.0 from its
     implementation (vettid-vault #59, N3; approved, owner decision
     2026-10-10): the
@@ -8754,7 +8775,8 @@ Portal      Member API                   Enclave (vault process)        Owner de
  |          (24 h; cancel from portal, email link or an owner app's unlock)  |
  |--GET /api/vault/recovery (after available_at)--> sealed code              |
  | decrypt in the browser; show the QR (rendered locally)                    |
-New app --scan QR--> POST /api/vault/recovery/claim{app_key} (0.15.0) --> user_guid
+New app --scan QR, or type the code (0.25.0, §11.11.10)-->
+         POST /api/vault/recovery/claim{app_key} (0.15.0) --> user_guid
 New app --POST /api/vault/recovery/register (signed) --queue--> code + device attestation:
          |                                       unlock key added (header)   |
 New app --POST /api/vault/unlock (PIN; enclave backoff)--> vault opens; vault_bundle
@@ -8886,7 +8908,13 @@ the older code. The API allows only one active recovery per vault.
   **version 10** (57 × 57 modules) at level M; before `api` it was 146
   bytes, version 8 (49 × 49). The app
   MUST accept any version and any level from M up.
-  The portal also shows the code as text, in groups of four, for typing.
+- **Typed form** (0.25.0). For a phone that cannot scan, the portal
+  also shows the code as text: 48 characters in 12 groups of four,
+  made of a 12-character locator from the member API, the code, and
+  4 check characters (§11.11.10). 0.10.6–0.24.1 showed the bare code
+  "in groups of four, for typing"; since 0.15.0 no app could use it
+  (it names neither the vault nor the recovery), and it is no longer
+  shown.
 - **Why the vault mints the code.** VettID's servers never hold the code
   in a usable form: the API stores only the ciphertext sealed to the
   member's browser. The 24 h delay and the expiry are enforced inside the
@@ -8906,8 +8934,11 @@ the older code. The API allows only one active recovery per vault.
 
 #### 11.11.3 Register
 
-The new app scans the QR and sends `vault.recovery.register` over the
-alternate channel. Like `vault.unlock`, the request is sealed to the ETK
+The new app scans the QR, or takes the typed form (0.25.0, §11.11.10:
+the identifiers then come from the claim, §11.11.7), and sends
+`vault.recovery.register` over the alternate channel. The request is
+the same either way: the enclave cannot tell how the app read the code.
+Like `vault.unlock`, the request is sealed to the ETK
 of the instance named by `GET /api/vault/enclave` and padded to 12,288
 bytes:
 
@@ -9082,8 +9113,10 @@ not its owner check's state.
   - the PIN backoff (§11.8);
   - the credential password backoff (§3.5.3);
   - one recovery per vault (a new request replaces the old).
-- **Member API limits** (§11.11.7): requests, registrations, cancels and
-  status polls are rate-limited.
+- **Member API limits** (§11.11.7): requests, claims, registrations,
+  cancels and status polls are rate-limited. A claim by locator
+  (0.25.0) is limited per source network before the lookup and per
+  vault after it; none of these limits is global (§11.11.10).
 - **Audit in the vault.** Every step is recorded (`recovery.*` kinds,
   §10.9). Steps taken while the vault was locked are written from the
   header's log at the next unlock.
@@ -9101,9 +9134,9 @@ session:
 | Route | Body | Answer |
 |---|---|---|
 | `POST /api/vault/recovery` | `{browser_key}` (b64 of 65 bytes) | `202 {recovery_id, available_at, expires_at}` |
-| `GET /api/vault/recovery` | — | `{recovery: {recovery_id, vault_id, state, requested_at, available_at, expires_at, sealed_code?} \| null}` |
+| `GET /api/vault/recovery` | — | `{recovery: {recovery_id, vault_id, state, requested_at, available_at, expires_at, sealed_code?, locator?} \| null}` |
 | `POST /api/vault/recovery/cancel` | `{recovery_id}` | `200 {cancelled}` |
-| `POST /api/vault/recovery/claim` | `{vault_id, recovery_id, app_key}` | `200 {user_guid, email_hint}` (0.15.0) |
+| `POST /api/vault/recovery/claim` | `{vault_id, recovery_id, app_key}` (scanned), or `{locator, app_key}` (typed, 0.25.0) | `200 {user_guid, email_hint, vault_id, recovery_id}` (0.15.0; the two identifiers since 0.25.0) |
 | `POST /api/vault/recovery/register` | `{vault_id, request_id, instance_id, etk_kid, envelope}` | `202 {vault_id, request_id}`; the result is polled like unlock (`GET /api/vault/requests/{id}`) |
 
 - **Claim** (0.15.0). The new app, which has no session and no vault
@@ -9123,6 +9156,26 @@ session:
   (§11.11.5 step 3). Knowing `vault_id` and `recovery_id` (both in the
   QR) lets a stranger claim, which gains nothing: the enclave still
   needs the code and an attestation.
+- **Claim by locator** (0.25.0, §11.11.10). The app that was given
+  the typed form presents `{locator, app_key}`, signed by that key
+  with an empty `vault` (as a setup code's redeem, §11.12.2), because
+  it does not know the vault yet. The API looks the locator up. A
+  locator it does not hold, or one whose recovery is no longer the
+  vault's current one, is `404`, with the body and timing of an
+  unknown pair. Otherwise the API proceeds **exactly as for the pair
+  the locator names**: the same account checks, `409
+  recovery_not_available` unless the recovery is `available`, the key
+  recorded as a claim key, the same answer. The answer of either form
+  carries `vault_id` and `recovery_id` (0.25.0), which the typed app
+  needs for every later request and the sealed register body. The
+  claim is limited per source network before the lookup (so misses
+  count) and per vault after it; a miss is charged to no recovery.
+- **`locator`** (0.25.0): 12 Crockford base32 characters (60 random
+  bits), minted by the API with the request, unique among the
+  recoveries it holds, kept with the recovery and dropped when the
+  recovery expires. `GET /api/vault/recovery` returns it only
+  together with `sealed_code`. It is not derived from the code, which
+  the API cannot read, and the enclave never sees it.
 
 The email link uses its own route, `POST /api/vault/recovery/cancel-link`
 with body `{token}`, answered `200 {cancelled}` like the session's
@@ -9207,6 +9260,11 @@ cancel. It needs no session: the token stands in for it.
   (§11.11.9).
 - A vault without a credential is not recoverable. It cannot exist past
   enrollment anyway (§3.5.7).
+- **The code can be typed** (owner decision, 2026-10-11: "we should
+  allow a typed recovery code"; §15 item 33). A locator from the
+  member API stands for the QR's identifiers, and check characters
+  catch typing mistakes on the phone; the enclave, the code and every
+  limit are as they were (§11.11.10).
 
 #### 11.11.9 Starting over: deleting a vault without the app
 
@@ -9269,6 +9327,166 @@ destroy a vault at once.
   cancel link as for a recovery (§11.11.7). The API audits
   `vault.deletion_request`, `vault.deletion_cancel` (`via: session |
   link | app`) and `vault.deletion_executed`; never the token.
+
+#### 11.11.10 Typed entry (0.25.0)
+
+(Owner decision of 2026-10-11: "we should allow a typed recovery code";
+§15 item 33. A draft for the owner's review.) Enrollment already has
+"Type the code instead" (§11.12.1); recovery was camera-only, so a
+member whose new phone has a broken camera could not recover. Typed
+entry is a second way to **read** the same code. It changes nothing in
+the enclave and nothing after the claim: no vault release is needed.
+
+**The problem.** The QR carries four things: `api`, `vault_id`,
+`recovery_id` and the code (§11.11.2). The code alone (32 characters)
+does not say which vault and which recovery it belongs to; the claim
+(§11.11.7) and the enclave's hash (§11.11.2) need both, and the app has
+no account session to ask with (§11.12). Typing the two identifiers as
+well would mean 84 characters (26 for the 128-bit `vault_id`, 26 for
+the ULID, 32 for the code).
+
+**The typed form.** 48 characters of the code's alphabet
+(`0-9A-HJKMNP-TV-Z`), shown in 12 groups of four:
+
+```
+typed   = locator (12) || code (32) || check (4)
+locator = 60 random bits from the member API's CSPRNG, as 12 Crockford
+          base32 characters (most significant 5 bits first)
+check   = the first 20 bits of
+          SHA-256("vettid/vms/2/recovery-typed-check" || 0x00 || api || 0x00 || locator || code),
+          as 4 Crockford base32 characters (most significant 5 bits first)
+```
+
+- **`locator`** is minted by the member API with the recovery request
+  and stands for the pair (`vault_id`, `recovery_id`) at the claim
+  (§11.11.7). It is **not derived from the code** and is no secret that
+  opens anything: whoever holds it can do exactly what the holder of
+  the QR's two identifiers can do (claim; §11.11.7), and nothing more.
+  The API returns it to the portal only together with `sealed_code`,
+  so nobody outside the API has it before the code can be read. The
+  enclave never sees it.
+- **`code`** is the enclave's code, unchanged.
+- **`check`** is computed by the portal, in the browser, after it has
+  opened the code. `api` is the same exact string as the QR's `api`
+  (the portal's own origin, no trailing slash; ASCII), `locator` and
+  `code` in canonical form (upper case). The check characters are
+  never sent anywhere: the app verifies them and drops them. They hold
+  no secret an attacker lacks (anyone can compute them for a guess), so
+  they change nothing about guessing.
+
+**What the portal shows** (MEMBER-API 2.4.0). Under the QR, "Can't scan?
+Type this code in the app", and the 48 characters as twelve groups of
+four, in three rows of four groups. The bare 32-character text of
+0.10.6–0.24.1 is no longer shown: since 0.15.0 no app could use it.
+A recovery requested before the API mints locators has none: its page
+shows only the QR and says that typing needs a new recovery. The typed
+form is shown and removed with the QR (on **Show the code**, **Hide**,
+re-render and `pagehide`) and is never sent, logged or stored. There is
+no copy button: the code does not go to a clipboard.
+
+**What the app does.** The recover screen offers **Type the code
+instead** wherever it offers the scan (ANDROID-PLAN 0.1.33). The app:
+
+1. normalizes what is typed or pasted: spaces, hyphens and line breaks
+   are dropped; letters are upper-cased; `I` and `L` are read as `1`
+   and `O` as `0` (Crockford's look-alikes, which the canonical form
+   never contains). **`U` is not in the alphabet and is not mapped**:
+   it is refused in the field with "The code has no letter U. Check
+   whether it is a V." Any other character is refused the same way. A
+   silent guess would turn a visible mistake into a counted wrong code;
+2. at 48 characters, recomputes `check` with **its own built-in member
+   API origin** (the one it compares a QR's `api` with). On a mismatch
+   it sends nothing and says: "That code doesn't match. Compare it
+   with the account site group by group, and check that the site is
+   <the app's account host>." This is input validation, as for a QR
+   that is not a recovery QR: it is not a wrong code, reaches neither
+   the API nor the enclave, and is not counted. A typing mistake
+   passes the check with probability 2⁻²⁰;
+3. claims with the locator (§11.11.7), signed by its app key with an
+   empty `vault`, and takes `user_guid`, `email_hint`, `vault_id` and
+   `recovery_id` from the answer;
+4. continues **exactly as after a scan** with the `vault_id`,
+   `recovery_id` and `code` it now holds: the same sealed
+   `vault.recovery.register` (§11.11.3), the same result codes and the
+   same texts for them, the same count of wrong codes, then the PIN
+   and the credential password (§11.11.5).
+
+**The environment check without a QR.** The scanned `api` exists so that
+an app never acts on another environment's code. Typed entry keeps that
+in three ways: the check characters are bound to the portal's origin,
+so a staging code typed into the production app fails on the phone
+(step 2); the app only ever talks to its own built-in origin, as with a
+scan; and locators, vaults and recoveries of another environment do not
+exist at that origin, so a claim there is `404`. The typed setup code
+of §11.12.1 has always relied on the last two alone.
+
+**Wrong codes are counted as before.** The enclave decides
+(§11.11.3 check 5) and cannot tell a typed code from a scanned one. A
+typed string that names a live recovery and carries a wrong code is
+`bad_code`, counted, and the fifth voids the recovery; a typed string
+whose locator names no recovery is the claim's `404`, exactly as a QR
+whose identifiers name none, and there is no recovery to count it
+against in either case. No answer exists for a typed code that a
+scanned one does not get, and none is missing.
+
+**Why this is no cheaper path for an attacker.**
+
+- *Guessing the code.* Unchanged: 160 bits, 5 tries, inside the
+  enclave. The locator and the check characters carry nothing of the
+  code. The API learns nothing derived from the code.
+- *Enumerating recoveries.* A claim by locator is a guess at 60 bits
+  against the few recoveries that are `available` at that moment; with
+  *n* of them a guess hits with probability *n* / 2⁶⁰, under the
+  claim's per-network limit (§11.11.7). A scan's claim needs the
+  128-bit `vault_id` and the ULID, so the typed claim is weaker in
+  bits; neither is reachable online (10⁹ guesses a day against 100
+  live recoveries: 10⁻⁷ a day). A miss is `404`, identical in body and
+  timing for every miss, and cannot be charged to a recovery: there is
+  none to charge. No limit is global, as for setup codes (§11.12.1), so
+  nobody can stop other members' recoveries by guessing.
+- *What a hit would give.* What the QR's two identifiers give: a claim
+  key, the member's `user_guid` and masked `email_hint`, and the means
+  to send five wrong codes and void that one recovery (the member
+  requests again and waits 24 hours). Never the code, the PIN or the
+  password, and never a registered device.
+- *The 24 hours, the expiry and single use* are the enclave's
+  (§11.11.2) and are not touched.
+
+**Accessibility.**
+
+- Portal: each group is its own element and each row its own line; the
+  text is selectable and scales with the page; a font with a slashed
+  or dotted zero; a screen reader gets the groups one at a time
+  ("group 3 of 12"), spelled character by character, never read as
+  words. The page says the code has no I, L, O or U.
+- App: one text field, shown in groups of four as it fills, with
+  "*n* of 12 groups" beside it; paste is accepted; no autocorrect,
+  suggestions or keyboard learning; lower case is accepted; the
+  refusals of steps 1 and 2 are announced to screen readers and name
+  the group to look at when one character is refused; the entry is
+  kept across a rotation, never written to disk, and excluded from
+  screenshots and the recent-apps preview.
+
+**Tests required** (follow-up implementations).
+
+- Portal: the check characters against §16's vector for the production
+  and staging origins; the grouping; the typed form removed with the
+  QR; no bare 32-character text.
+- Member API: a locator minted per request and unique; `locator` only
+  with `sealed_code`; claim by locator: hit, miss (`404`, same body as
+  an unknown pair), stale locator of a replaced or cancelled recovery
+  (`404`), not available (`409`), paused service, both limits, the
+  answer's `vault_id` and `recovery_id`, the key recorded as a claim
+  key; the QR form unchanged.
+- App: normalization (case, spaces, hyphens, `I`/`L`/`O`, `U` and other
+  characters refused); the check against §16's vector, and a staging
+  string refused by a production build; a failed check sends no
+  request; a typed code registers with the same request bytes as the
+  scanned one for the same recovery; `bad_code` shows the same text
+  and count either way.
+- End to end on staging: a recovery completed by typing; a wrong typed
+  code counted by the vault (`recovery.bad_code` in the audit log after
+  the next unlock) and the fifth voiding the recovery.
 
 ### 11.12 Enrollment codes and app keys
 
@@ -9924,6 +10142,7 @@ it can read and write only its own objects and use only its own relay key
 | Credential password alone | Nothing without the blob and a paired app | `credential.password.change` |
 | Member's email and account session (24 h, unnoticed) | A recovery (backup on only): one new attested app that replaces the member's app. Still needs the PIN and the password, online, under both backoffs (§11.11.2); with the backup off, nothing: no recovery (§11.11.1), only a start-over deletion after another 24 h (§11.11.9) | Cancel; the app sees `recovery_pending` and `vault.locking{recovery}`, or `deletion` in `GET /api/vault/status` |
 | VettID's API tables | Nothing: the recovery code is stored only sealed to the member's browser, and the enclave enforces the 24 h (§11.11.2); setup codes only as MACs under a key outside the tables, app keys only as public keys (§11.12) | — |
+| A typed recovery code's locator, without the code (0.25.0) | What the QR's `vault_id` and `recovery_id` give: a claim (the member's `user_guid` and masked `email_hint`) and the means to send five wrong codes, which voids that one recovery. Never the code, the PIN or the password, and no registered device. It is shown only with the code, for the code's 24 hours (§11.11.10) | The member requests a new recovery; the claim's limits (§11.11.7) |
 | A setup code (stolen, shoulder-surfed or phished; 0.15.0) | Before the member uses it, within its 5 minutes (the typed code also needs the member's email): an **empty** vault enrolled into the member's account, with the thief's phone and PIN, whose account snapshot shows the thief the masked email and membership (§11.13). Never an existing vault: a confirmed vault is never replaced (§11.3) | Single use; one live code; the member's own redeem then fails and the portal shows the code used; the member is emailed at every redemption; support deletes the vault (the host `delete`) |
 | Guessing setup codes | The QR secret: nothing (128 bits). A typed code: only one named member's, at most 800 guesses per issuance from all sources, 9.4 × 10^-10 per issuance (§11.12.1; ENROLLMENT-CODES §3.3). Flooding one member's typed entry blocks only that issuance's typed form for at most 5 minutes; the QR and every other member are unaffected (no global limit) | The limits of §11.8; the member is emailed and operations alerted at the ceiling |
 | A code of someone else's account (reverse phishing) | The member's new vault belongs to that account, whose holder could later request a recovery; it still needs the member's PIN and password after 24 h in which the member's app sees the recovery | The app shows `email_hint` before enrolling and in its account view (§11.12.1, §11.13) |
@@ -11819,6 +12038,53 @@ Follow-ups:
     Follow-up: vettid-android listens for `push.token-needed` and
     handles `limit` (ANDROID-PLAN 0.1.30).
 
+33. **Typed recovery code (0.25.0).** Owner decision of 2026-10-11:
+    "we should allow a typed recovery code" (enrollment has "Type the
+    code instead"; recovery was camera-only, so a member with a broken
+    camera could not recover). A draft for the owner's review; §11.11.10
+    is the design. Constraints it holds to: the app never has an account
+    session; the member's email is never shown beyond the masked hint
+    the claim already answers; the PIN and the credential password still
+    follow the code; the 24 hours, the 5 wrong codes and single use are
+    untouched; typing gives the same answers and the same count as
+    scanning. Chosen:
+    1. **A locator minted by the member API**, typed in front of the
+       code (12 characters, 60 bits), instead of the QR's `vault_id`
+       and `recovery_id`. Portal, member API and app only; **no enclave
+       change and no vault release**.
+    2. **Four check characters**, computed in the browser and verified
+       on the phone, bound to the portal's origin: a typing mistake or
+       a code from another environment is caught before anything is
+       sent, so it cannot use up one of the five tries.
+    3. **One string, 48 characters, 12 groups of four.**
+    Rejected:
+    - *The code alone, found by a lookup on a value derived from it*
+      (a hash, or a prefix). The API would have to hold something
+      derived from the code, which it never has (§11.11.2), delivered
+      either by the enclave (a vault release) or by the browser. A
+      mistyped code would then be a lookup miss that no recovery can be
+      charged with, so typed mistakes and typed guesses would bypass
+      the enclave's count that scanned ones meet; and a prefix handed
+      to the API is that many bits of the code given away.
+    - *Typing `vault_id` and `recovery_id` with the code:* 84
+      characters.
+    - *The member's email with the code* (as the typed setup code,
+      §11.12.1). Anyone who knows a member's email could then claim that
+      member's recovery and void it with five wrong codes, as often as
+      the member asks again, and the claim would say whether an address
+      has a recovery in progress.
+    - *A short locator* (8 characters or fewer): within reach of a
+      distributed search, and a hit lets a stranger void a recovery.
+    - *Mapping `U` to `V`:* not Crockford's rule, and a wrong guess
+      would cost a try.
+    Open for the owner: the locator's length (12, or 16 for 80 bits and
+    52 characters in 13 groups); whether to keep the check characters
+    (without them: 44 characters, and every typing mistake in the code
+    part is one of the five tries). Follow-ups: vettid.org (member API
+    2.4.0 and the recovery page), vettid-android (ANDROID-PLAN 0.1.33);
+    vettid-vault: none, except the §16 vector in its reference client's
+    tests if wanted.
+
 ## 16. Test vectors
 
 These vectors use fixed seeds and are for **test use only**. The complete
@@ -12088,7 +12354,46 @@ pending (§15, follow-up 1).
 adds it to `recovery.json` (eph scalar 32 × 0x28, nonce 12 × 0x29) with
 the 0.16.0 implementation.
 
+**0.25.0.** The typed recovery code's check characters (§11.11.10); no
+key or randomness is involved. With `locator` = `7ZK3M9QX2HTD` and
+`code` = `CDEFGHJKMNPQRSTVWXYZ0123456789AB` (TEST ONLY):
+
+```
+api = https://account.vettid.org
+  SHA-256 = d8d41816e4cf5ac83a89a6472d2ab0b63197207dc80e77e77bd95f50214ae1c4
+  check   = V3A1
+  typed   = 7ZK3 M9QX 2HTD CDEF GHJK MNPQ RSTV WXYZ 0123 4567 89AB V3A1
+api = https://account.staging.vettid.org
+  SHA-256 = 91651f858ae9b0d2a1670b77aec98f3cfd1c19b9d44208dafdece04a5e3558ce
+  check   = J5JH
+```
+
+The hashed bytes are the 33-byte label, `0x00`, the origin, `0x00` and
+the 44 characters of `locator || code`. `0xd8d41` is `11011 00011 01010
+00001`, the characters `V`, `3`, `A`, `1`.
+
 ## 17. Changelog
+
+- **0.25.0** (2026-10-11): normative, additive; owner decision of
+  2026-10-11 ("we should allow a typed recovery code"; §15 item 33); a
+  draft for the owner's review. **No enclave change; no vault release.**
+  - New §11.11.10: the typed form (locator, code, check characters; 48
+    characters in 12 groups of four), what the portal shows, what the
+    app does, the environment check without a QR, how wrong codes are
+    counted, why typing is no cheaper path than scanning,
+    accessibility, and the tests required.
+  - §11.11.2: the portal shows the typed form of §11.11.10 instead of
+    the bare code "in groups of four, for typing".
+  - §11.11.3: the app reads the code from the QR or from the typed
+    form; the register is the same.
+  - §11.11.6, §11.11.7: `GET /api/vault/recovery` returns `locator`
+    with `sealed_code`; the claim takes `{locator, app_key}` as well as
+    `{vault_id, recovery_id, app_key}` and answers `vault_id` and
+    `recovery_id` too; its limits.
+  - §11.11.8: the decision. §13.5: what a locator gives. §15 item 33.
+    §16: the check characters' vector.
+  - MEMBER-API 2.4.0 and ANDROID-PLAN 0.1.33 carry the API and the
+    screens.
 
 - **0.24.1** (2026-10-10): editorial-normative, errata to 0.24.0 from
   its implementation (vettid-vault #59, N3; approved, owner decision
