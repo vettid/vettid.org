@@ -949,6 +949,33 @@ input.pin {
   color: var(--ink-hi);
   user-select: all;
 }
+.code-box .code-label { text-align: center; }
+/* The typed recovery code: three rows of four groups; a dotted or slashed zero. */
+.typed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+}
+.typed-code {
+  font-family: var(--font-mono);
+  font-variant-numeric: slashed-zero;
+  font-weight: 500;
+  font-size: 1.15rem;
+  line-height: 1.7;
+  letter-spacing: 0.08em;
+  color: var(--ink-hi);
+  user-select: text;
+}
+.typed-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0 0.9em;
+}
+.typed-group { white-space: nowrap; }
+.typed-spoken { user-select: none; }
 .facts + .callout,
 .facts + p,
 .facts + .next-step { margin-top: 18px; }
