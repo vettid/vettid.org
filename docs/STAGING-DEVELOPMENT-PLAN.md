@@ -1,6 +1,6 @@
 ---
 title: STAGING-DEVELOPMENT-PLAN
-status: draft for the owner's review
+status: approved by the owner 2026-10-11 (D1–D11 as recommended; D3 as in ANDROID-PLAN 0.1.34)
 version: 0.1.0
 date: 2026-10-11
 owner: Al Liebl (Mesmer)
@@ -201,13 +201,13 @@ Phases 2–6 run on staging under §2; each reaches production through
 
 ## 6. Owner decisions
 
-Answer "all good" to accept every recommendation, or name the exceptions.
+**Answered (owner, 2026-10-11): all as recommended**, with two additions: the shared relay stays (D11: "let's use production for the relay"), and for D3 the owner chose VettID's own key for Play installs as well (ANDROID-PLAN 0.1.34 §7 "Signing and the two distributions", option (b)), so Google Play, F-Droid and direct builds share one signer.
 
 | # | Decision | Recommendation |
 |---|---|---|
 | D1 | Adopt §2: staging is the development channel; at most three live staging releases; at most two releases a week | Yes |
 | D2 | Release 1's retirement window. Default 12 months (VAULT-RELEASES §3.5); the notice sequence needs 90 days | **90 days for release 1 only**, told to the testers when they join; later releases 12 months. Needs a line in VAULT-RELEASES §3.5 (O5 sets 60 days as the floor for shortened windows) |
-| D3 | Which Android signers release 1 pins (one to four are allowed). Today: the Play certificate (not yet known) and the upload certificate | The route is decided (owner, 2026-10-11): F-Droid's reproducible builds, which publish the developer-signed APK. Play holds the Play certificate, so the F-Droid APK is signed with the **upload key**, whose digest release 1 already pins: no third signer is needed. Confirm before release 1 is cut; adding a signer later takes a release every live vault must move to |
+| D3 | Which Android signers release 1 pins (one to four are allowed) | **Decided (owner, 2026-10-11):** VettID supplies its own app-signing key to Play (ANDROID-PLAN 0.1.34, option (b)); the F-Droid APK (reproducible builds) and direct builds carry the same signature. The key the owner holds is a file and its digest is already pinned, so release 1 needs no digest from Play |
 | D4 | Does release 1's image answer calls, agent, wallet, location and presence operations that no production app uses? Today every image does | **Add a per-channel feature allowlist to the release configuration** (measured into the image; production lists only what passed §2.4). A vault spec and code change, before release 1. Not checked: which of these operations a peer can reach on a vault whose owner never used them |
 | D5 | Staging application id | **Change to `com.vettid.app.staging`** with the next staging release that can carry it (the package becomes a per-channel value in the vault), before release 1, so the owner's phone can hold both. Until then: production on the owner's phone, staging on the test phones only |
 | D6 | Production backend rhythm | Weekly, Monday, by the assistant after the owner approves the diff; the first one as soon as the owner lifts "the prod deploy waits" and creates the enroll-code key |
