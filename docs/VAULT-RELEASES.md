@@ -98,12 +98,12 @@ changelog:
     removing a signer does to existing vaults (§3.4); §12.1 and §15 O8
     follow
   - 0.1.13 (editorial, as built; staging release S10, vettid.org #223,
-    #228–#230, vettid-vault #62–#65; VAULT-MESSAGING 0.27.1; a draft
-    for the owner's review). §3.5: what `check:manifest` does and does
+    #228–#230, vettid-vault #62–#65; VAULT-MESSAGING 0.27.1; approved
+    by the owner 2026-10-11). §3.5: what `check:manifest` does and does
     not check about `ends_after_days` (an `ends_at` needs release 2's
     `published_at`; only an early `ends_at` is refused; nothing
-    requires the member on production release 1, **an owner decision,
-    recommended: require it**). §5.2: the feature list's only-grow
+    requires the member on production release 1; **owner decision
+    2026-10-11: it will be required**, not yet implemented). §5.2: the feature list's only-grow
     check runs in the release workflow against the highest lower tag;
     the staging exception for unbound vaults is derived from the
     channel and release number; the key attestation chain rules.
@@ -355,10 +355,11 @@ the default of 12 months.
     `ends_at` would be whatever is typed (after `published_at`), and
     its log page would promise "at least 12 months". The 90 days of D2
     then rest on the release entry PR's review alone (W10-READINESS §3
-    step 5). **Owner decision pending; recommended:** `check:manifest`
-    refuses a production release 1 entry without
-    `ends_after_days: 90`. A small change to the validation, before
-    the release entry PR; not made here.
+    step 5). **Decided (owner, 2026-10-11, as recommended; not yet
+    implemented):** `check:manifest` must refuse a production release
+    1 entry without `ends_after_days: 90`. A small change to the
+    validation, to make before the release entry PR (W10-READINESS
+    B12).
 - *The timeline.* W equals the notice period, so release 1 is never
   `deprecated`: the manifest that makes release 2 `active` (T0) sets
   release 1 `retired` with `ends_at` = T0 + 90 days. `active` to

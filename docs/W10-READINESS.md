@@ -58,8 +58,9 @@ changelog:
     `vettid` signer, `android_package` and `features: []`. New §2
     list, "What still blocks release 1 after S10": the production
     backend rollout with the missing enroll-code key (B11), the
-    release build signed with the owner's key (B8), and the owner's
-    decision on requiring `ends_after_days` (B12). Not the Play
+    release build signed with the owner's key (B8), and the check that
+    requires `ends_after_days` (B12; decided by the owner 2026-10-11,
+    not yet implemented). Not the Play
     account. §3 step 1 follows
 classification: public (no secrets; safe for github.com/vettid)
 ---
@@ -161,12 +162,12 @@ unblocked.
 | B9 | W9 results written up (enrollment, moves, messaging, recovery, drill, capacity) as the V5 exit-test record (VAULT-RELEASES §12.1 step 5) | **drafted**: [W9-REPORT](W9-REPORT.md), PR #136 (ready for review); its open sections are the S1/S2 key-deletion confirmations and the drill with a vault at S4 | engineering |
 | B10 | ~~Signer binding (P9a), in release 1 by the owner's decision of 2026-10-11~~ **done** 2026-10-11 | VAULT-MESSAGING 0.27.0 §11.7.1 approved (2026-10-11); implemented in vettid-vault #63 with the chain rules of #64, and run on staging release S10 with real phones (VAULT-MESSAGING 0.27.1 §11.7.1 "Tests required") | — |
 | B11 | The production backend is behind master and cannot issue setup codes: the SSM parameter `/vettid-org/prod/member/enroll-code-key` does not exist (STAGING-DEVELOPMENT-PLAN §2.3, §8.3; RUNBOOK "Setup codes and app keys") | The owner creates the parameter and lifts "the prod deploy waits"; then the member API, portal and admin stacks are deployed from master and the drift check is green | owner, then engineering |
-| B12 | (0.1.8) Whether `check:manifest` must require `ends_after_days: 90` on production release 1. Today nothing does: an entry without it passes and has no checked window (VAULT-RELEASES 0.1.13 §3.5) | Owner decision; recommended: require it. A small validation change before the release entry PR (§3 step 5) | owner, then engineering |
+| B12 | (0.1.8) `check:manifest` must refuse a production release 1 entry without `ends_after_days: 90` (owner decision 2026-10-11). Today nothing requires the member: an entry without it passes and has no checked window (VAULT-RELEASES 0.1.13 §3.5) | The validation change in `lib/vault/release-list.ts` with its test, before the release entry PR (§3 step 5). Not yet implemented | engineering |
 
 **What still blocks release 1 after S10** (0.1.8): B11 (the production
 backend rollout, with the missing enroll-code key), B8 (a release
 build of the app signed with the owner's key, for the canary phone),
-B12 (the decision above), and whatever of the older rows (B1, B2, B6,
+B12 (the validation change above), and whatever of the older rows (B1, B2, B6,
 B9) is still open, which this revision did not check again. **Not**
 the Google Play account (P9, P30), and nothing of S10's scope: the
 feature allowlist, the per-channel package, the signer binding and the

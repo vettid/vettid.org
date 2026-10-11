@@ -19,8 +19,8 @@ changelog:
     Google, so there are two signers, not one. Release 1 pins only
     VettID's key and does not wait for the Play account (§2.2, §5 rows
     0a and 1, §6, §7 row 9, §8.4)
-  - 0.1.2: state after staging release S10 (2026-10-11; a draft for
-    the owner's review). D4 (feature allowlist), D5 (the staging
+  - 0.1.2: state after staging release S10 (2026-10-11; approved by
+    the owner 2026-10-11). D4 (feature allowlist), D5 (the staging
     application id) and the signer binding are in S10, which is
     published; §4, §5 row 1, §7 and §8 say what is now done. New
     §8.5, the S10 record. Nothing else in the plan changes

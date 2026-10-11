@@ -7,7 +7,7 @@ changelog:
   - 0.1.37: errata from the app's implementations of 2026-10-11
     (vettid-android #113 typed recovery code, #115 brand kit, #116
     staging application id and signer binding; staging release S10;
-    VAULT-MESSAGING 0.27.1; a draft for the owner's review).
+    VAULT-MESSAGING 0.27.1; approved by the owner 2026-10-11).
     Implemented behaviour written down. **Signer binding** (§7 Signing
     and the two distributions, "As built"): when the app sends its
     key's certificate chain; the `signer_refused` screen; the transfer

@@ -11,8 +11,8 @@ related:
   - ANDROID-PLAN.md (0.1.31) §4 "Vault update", "What's new" (the app's side of §2)
   - ARCHITECTURE.md
 changelog:
-  - 0.3.2: as built (vettid.org #224, MEMBER-API 2.4.2; a draft for the
-    owner's review): each notice email before the end date says how
+  - 0.3.2: as built (vettid.org #224, MEMBER-API 2.4.2; approved by
+    the owner 2026-10-11): each notice email before the end date says how
     far away the end is on the day it is sent, and names the time on
     the last two days (§3). 0.3.1 marked approved
   - 0.3.1: owner decision of 2026-10-11 (STAGING-DEVELOPMENT-PLAN D2;

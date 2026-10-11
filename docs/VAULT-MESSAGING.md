@@ -23,7 +23,8 @@ related:
 changelog:
   - 0.27.1: editorial-normative, errata to 0.26.0 and 0.27.0 from
     their implementations (vettid-vault #62, #63, #64, staging release
-    S10; vettid-android #116; a draft for the owner's review). No wire
+    S10; vettid-android #116; approved by the owner 2026-10-11, all five
+    recommendations as drafted). No wire
     change. **Key attestation chain rules** (§11.7), enforced from S10:
     the attestation extension on the leaf only, CAs above the
     attestation certificate, path lengths, the attestation certificate
@@ -55,8 +56,13 @@ changelog:
     "previous release" is the highest lower tag, and rule 2 runs in
     the release workflow. The same-phone transfer by pasted code
     among the ways to move a staging vault. 0.25.0 and 0.26.0 marked
-    approved. **Owner decision pending:** the binding across an iOS
-    app (§11.7.1, §15 item 35) (§10.9, §11.7, §11.7.1, §11.10.8, §15
+    approved. **Owner decisions (2026-10-11, all as recommended):**
+    the vault will keep the last recorded Android signer across an
+    app without one (decided, not yet implemented; a vault change
+    before iOS); a vault attached while its certificates were valid
+    keeps unlocking; the consequences of `signer_refused`'s order are
+    accepted as built; confirmation stays by class (§11.7.1, §15
+    item 35) (§10.9, §11.7, §11.7.1, §11.10.8, §15
     item 35; ANDROID-PLAN 0.1.37)
   - 0.27.0: normative; an enclave change and a vault release (owner
     decision of 2026-10-11, ANDROID-PLAN 0.1.36: the Play app-signing
@@ -8083,7 +8089,8 @@ challenge at every unlock.
     certificate has run out; a remotely provisioned phone gets fresh
     certificates. An unlock verifies no chain, so a vault attached
     while the certificates were valid keeps unlocking after they
-    expire.
+    expire (kept: owner decision, 2026-10-11; refusing at unlock
+    would lock members out of vaults they already have).
   - **Chains seen on real phones** (0.27.1; recorded without device
     identifiers). The chains of the app's own key generation on the two
     test phones on 2026-10-11, a Pixel 10 Pro on GrapheneOS and a
@@ -8280,7 +8287,8 @@ signer binding is the signer recorded for that app's key**.
       already has, be confirmed by that same class and be audited
       `<class>:<class>`: the holder could not tell which certificate.
       A release that does so needs the confirmation to name the digest
-      first (a wire change, then).
+      first (a wire change, then). Owner decision, 2026-10-11: keep
+      the confirmation by class, on that condition.
     - **Across platforms.** When the new app has no signer (Android to
       iOS), `device.transfer.pending` carries neither `signer` nor
       `signer_changed`, no confirmation is asked, and the binding ends
@@ -8288,8 +8296,8 @@ signer binding is the signer recorded for that app's key**.
       afterwards. When the old app has none (iOS, or an unbound
       vault) and the new one is an Android app, `signer_changed` is
       `false` and the transfer binds, audited `device.signer_bound`.
-      What that means for a later transfer back to Android is an open
-      decision (§15 item 35, "Open").
+      What that means for a later transfer back to Android is decided
+      below ("Across an iOS app").
   - **Recovery** (§11.11). The registered key records its own signer
     at register; the vault's binding does not move then. It moves when
     `credential.recover` succeeds and the old app is removed
@@ -8338,6 +8346,12 @@ signer binding is the signer recorded for that app's key**.
     recovery (§11.11.1): once every release that accepts its key is
     removed, that vault is lost. This is what removing a signer costs
     ("A release that stops pinning a signer" below).
+
+  Both are **accepted as built** (owner decision, 2026-10-11):
+  another order would let a refused installation act on the vault.
+  Removing a signer therefore needs the same care and notice as
+  retiring a release, and a member whose vault is bound to it with
+  the backup off is told before it happens.
 - It is recorded in the sealed header's log, as the steps of a
   recovery are (§11.11.6), at most once per 24 hours, and written to
   the audit log at the next unlock that succeeds as
@@ -8487,19 +8501,20 @@ classes as it lists Android signers, the binding would record the App
 ID attested, and every rule above would apply with "App ID" for
 "signer digest".
 
-(0.27.1) **Across an iOS app: open.** As implemented, the vault's
+(0.27.1) **Across an iOS app.** As implemented, the vault's
 binding is the signer recorded for its one app's key, so a transfer
 (or a recovery) to an iOS app leaves the vault with no recorded
 signer. A later transfer back to an Android app of any pinned signer
 then needs no confirmation and is audited `device.signer_bound`, not
 `device.signer_changed`: the change of signer that §11.7.1 exists to
 show passes unseen if an iOS app was in between. No iOS app exists, so
-nothing can reach this today. **Owner decision pending (§15 item 35,
-"Open"); recommended:** before the first release that accepts an iOS
-app, the vault keeps the last recorded Android signer across an app
-without one, and a transfer or recovery to an Android app with another
-signer is then `signer_changed`, confirmed and audited as between two
-Android apps.
+nothing can reach this today. **Decided (owner, 2026-10-11, as
+recommended; not yet implemented):** before the first release that
+accepts an iOS app, the vault keeps the last recorded Android signer
+across an app without one, and a transfer or recovery to an Android
+app with another signer is then `signer_changed`, confirmed and
+audited as between two Android apps. It is a vault change to make
+before iOS; nothing changes for S10 or production release 1.
 
 **Tests required.**
 
@@ -13023,12 +13038,19 @@ Follow-ups:
     `TestUnlockWithChainAndReleaseUpdateFits`; real chains are about
     3,200 bytes). What the implementation chose where 0.27.0 was
     silent is marked (0.27.1) in §11.7 and §11.7.1.
-    **Open (owner decision pending, 0.27.1):** the binding across an
-    iOS app (§11.7.1, "Across an iOS app"). Recommended: keep the last
-    recorded Android signer when the vault's app has none, so that a
-    return to Android under another signer is confirmed and audited as
-    a change. A vault change before the first release that accepts an
-    iOS app; nothing to do for S10 or production release 1.
+    **Answered (owner, 2026-10-11): all as recommended** (0.27.1).
+    The binding across an iOS app (§11.7.1, "Across an iOS app"): the
+    vault will keep the last recorded Android signer when its app has
+    none, so that a return to Android under another signer is
+    confirmed and audited as a change; decided, not yet implemented,
+    a vault change before the first release that accepts an iOS app,
+    nothing for S10 or production release 1. A vault attached while
+    its phone's certificates were valid keeps unlocking after they
+    expire (§11.7). The order of `signer_refused` and what follows
+    from it are accepted as built, so removing a signer needs the
+    care and notice of retiring a release (§11.7.1). Confirmation
+    stays by class, the digest to be named before any release pins
+    two certificates of one class (§11.7.1).
 
 ## 16. Test vectors
 
@@ -13321,8 +13343,8 @@ the 44 characters of `locator || code`. `0xd8d41` is `11011 00011 01010
 
 - **0.27.1** (2026-10-11): editorial-normative; errata to 0.26.0 and
   0.27.0 from their implementations (vettid-vault #62, #63 and #64 in
-  staging release S10; vettid-android #116); a draft for the owner's
-  review. **No wire change, no new vault release**: S10 already
+  staging release S10; vettid-android #116); approved by the owner 2026-10-11, all five
+  recommendations as drafted. **No wire change, no new vault release**: S10 already
   behaves as written here.
   - §11.7: the **chain rules** (new list, rules 1–7), where 0.27.0
     said only "verifies the chain up to a Google hardware attestation
@@ -13355,9 +13377,11 @@ the 44 characters of `locator || code`. `0xd8d41` is `11011 00011 01010
     measured channel and release number; no staging vault can bind by
     chain; "after an expiry" in the recovery test; the real-phone test
     replaced by what was run at S10 on 2026-10-11.
-  - §11.7.1, §15 item 35: **owner decision pending**, the binding
-    across an iOS app (recommended: keep the last recorded Android
-    signer).
+  - §11.7.1, §15 item 35: owner decisions of 2026-10-11, as
+    recommended. The binding across an iOS app: the vault will keep
+    the last recorded Android signer (decided; not yet implemented).
+    Kept as built: unlocking after the certificates expire; the order
+    of `signer_refused` with its consequences; confirmation by class.
   - §11.10.8: the release check's rule 2 as built (the highest lower
     tag; in the release workflow, not the image); a placeholder
     `android_package`; `location.history.` by prefix; the same-phone
@@ -13366,7 +13390,7 @@ the 44 characters of `locator || code`. `0xd8d41` is `11011 00011 01010
   - §10.9: `device.signer_bound`'s `device_id`.
   - 0.25.0 and 0.26.0 (front matter, §11.11.10, §15 items 33 and 34,
     below): approved by the owner 2026-10-11 (vettid.org #212, #220);
-    they still read "a draft for the owner's review".
+    until now they read "a draft for the owner's review".
   - No new test vector.
 
 - **0.27.0** (2026-10-11): normative; owner decision of 2026-10-11

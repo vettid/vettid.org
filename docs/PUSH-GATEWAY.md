@@ -954,7 +954,7 @@ again computes another digest and refuses a good signature.
 ## 17. Changelog
 
 - **0.4.4** — the deployment as built (vettid.org #213, #216, #217,
-  #223; vettid-push #1; a draft for the owner's review). No change to
+  #223; vettid-push #1; approved by the owner 2026-10-11). No change to
   the wire format or to the gateway's behaviour. §10.1: two stacks
   (`VettidOrgPushDataStack`, `VettidOrgPushStack`), a certificate per
   gateway on the relay's listener, staging through a delegated zone

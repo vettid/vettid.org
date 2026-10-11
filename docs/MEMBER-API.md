@@ -5,7 +5,8 @@ version: 2.4.2
 changelog:
   - 2.4.2 (2026-10-11; editorial, as built: errata from the
     implementations of 2.4.0 and 2.4.1 and of the notice mail,
-    vettid.org #215, #222, #224; a draft for the owner's review). No
+    vettid.org #215, #222, #224; approved by the owner 2026-10-11).
+    No
     route, body or status code changes. **Claim by locator** ("Vault
     recovery"): which recoveries a locator misses (a cancelled or
     expired one is `404`, where the scanned pair answers `409`); the
