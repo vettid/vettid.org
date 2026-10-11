@@ -33,9 +33,9 @@ export type ManifestStatus = Exclude<ListStatus, 'candidate'>;
 export const SECURITY_LEVELS = ['none', 'recommended', 'urgent'] as const;
 export type SecurityLevel = (typeof SECURITY_LEVELS)[number];
 
-/** The release log text of one release (RELEASE-UPDATES §5). */
+/** The release log text of one release (RELEASE-UPDATES §5). Plain text: the app shows it as written. */
 export interface ReleaseLog {
-  /** One paragraph, plain language. */
+  /** One line, plain language, at most LOG_LIMITS.summary characters. */
   readonly summary: string;
   /** What changed: features, fixes, and anything that touches how members' data is handled. */
   readonly changes: readonly string[];
@@ -72,10 +72,16 @@ export interface ReleaseEntry {
   /** RFC 3339, whole seconds UTC. Required once the release is in a manifest. */
   readonly published_at?: string;
   readonly ends_at?: string;
-  /** The release log entry: `https://vettid.org/security/releases/<n>/` in production. */
+  /**
+   * The release's entry in its channel's release log, releaseLogUrl(channel, n)
+   * (VAULT-RELEASES §7 "Release notes on every channel"); staging releases
+   * signed before that rule may still carry their GitHub release URL
+   * (legacyStagingNotes) until the next staging signing switches them.
+   */
   readonly notes: string;
   /** Null or absent: no release stack (not built yet, or deleted at `removed`). */
   readonly host?: HostEntry | null;
+  /** Required once the release leaves `candidate` (signed into a manifest), in every channel. */
   readonly log?: ReleaseLog;
 }
 
@@ -106,9 +112,40 @@ export const SERVED_PATHS: Record<Channel, string> = {
   staging: 'vault/staging/pcr-manifest.json',
 };
 
-/** The production release log (RELEASE-UPDATES §5). */
-export const RELEASE_LOG_DIR = 'website/security/releases';
-export const releaseLogUrl = (n: number) => `https://vettid.org/security/releases/${n}/`;
+/**
+ * Each channel's release log (RELEASE-UPDATES §5, VAULT-RELEASES §7): on
+ * the site that serves the channel's manifest (the host of
+ * channelVault(channel).vault.manifestUrl; a test checks they agree),
+ * generated into these directories by scripts/vault/release-log.ts.
+ */
+export const RELEASE_LOG_HOSTS: Record<Channel, string> = {
+  prod: 'vettid.org',
+  staging: 'staging.vettid.org',
+};
+export const RELEASE_LOG_DIRS: Record<Channel, string> = {
+  prod: 'website/security/releases',
+  staging: 'sites/staging/security/releases',
+};
+/** The release log's index on the channel's site. */
+export const releaseLogIndexUrl = (channel: Channel) => `https://${RELEASE_LOG_HOSTS[channel]}/security/releases/`;
+/** A release's `notes`: its entry in its own channel's log. */
+export const releaseLogUrl = (channel: Channel, n: number) => `${releaseLogIndexUrl(channel)}${n}/`;
+/** True if `url` is release n's entry in any channel's log (the successor rule: such a `notes` never changes). */
+export const isReleaseLogUrl = (url: string, n: number) => CHANNELS.some((c) => url === releaseLogUrl(c, n));
+
+/**
+ * The staging releases signed before the log rule (S1–S8 published, S9 a
+ * candidate when it was written) carry their GitHub release URL as `notes`.
+ * The validation accepts that URL for them, and only for them, so that the
+ * manifests already signed stay renders of the file; `vault:manifest sign`
+ * refuses it (notesToSwitch), so the next staging signing switches all of
+ * them to their log URLs at once (VAULT-RELEASES §7 "Backfill").
+ */
+export const LEGACY_STAGING_NOTES_THROUGH = 9;
+export const legacyStagingNotes = (n: number) => `https://github.com/vettid/vettid-vault/releases/tag/release/staging/${n}`;
+
+/** The release log text limits (VAULT-RELEASES §7 "Text limits"). */
+export const LOG_LIMITS = { summary: 160, changes: 20, change: 280, securityText: 1000 } as const;
 
 const HEX = (n: number) => new RegExp(`^[0-9a-f]{${n}}$`);
 const PCR = HEX(96);
@@ -173,12 +210,13 @@ export function validateReleaseFile(raw: unknown, channel: Channel, account: str
     if (e.status === 'retired' && e.ends_at === undefined) at('a retired release needs its ends_at (§3.5)');
     if (e.status === 'removed' && e.host) at('a removed release has no release stack (§10.3 step 2: delete it, then drop host)');
     if (typeof e.notes !== 'string' || !/^https:\/\/[^\s/@]+\/\S*$/.test(e.notes) || e.notes.length > 1024) at('notes must be an https URL');
-    if (channel === 'prod' && e.notes !== releaseLogUrl(n)) at(`notes must be ${releaseLogUrl(n)} (the release log entry)`);
+    const legacy = channel === 'staging' && n <= LEGACY_STAGING_NOTES_THROUGH && e.notes === legacyStagingNotes(n);
+    if (e.notes !== releaseLogUrl(channel, n) && !legacy) at(`notes must be ${releaseLogUrl(channel, n)} (its release log entry)`);
     for (const k of ['pcr0', 'pcr1', 'pcr2', 'seal_key', 'published_at', 'ends_at', 'notes']) {
       if (e[k] !== undefined && !PRINTABLE.test(e[k] as string)) at(`${k} must be printable ASCII`);
     }
     if (e.log !== undefined) validateLog(e.log, at);
-    else if (!candidate && channel === 'prod') at('log is required once the release is published (the release log, RELEASE-UPDATES §5)');
+    else if (!candidate) at('log is required once the release leaves candidate (its release log entry, RELEASE-UPDATES §5)');
     pcr0s.set(e.pcr0 as string, n);
   }
   const file = raw as ReleaseFile;
@@ -186,14 +224,44 @@ export function validateReleaseFile(raw: unknown, channel: Channel, account: str
   return file;
 }
 
+/** Control characters (including line breaks) and markup, which the app would show as written. */
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+const MARKUP = /[<>`]|\*\*|\]\(|:\/\//;
+
+/** Problems with one plain-text log string, or null. */
+export function plainTextProblem(s: unknown, max: number): string | null {
+  if (typeof s !== 'string' || !s.trim()) return 'must be non-empty text';
+  if (s !== s.trim()) return 'must not start or end with spaces';
+  if ([...s].length > max) return `must be at most ${max} characters (it has ${[...s].length})`;
+  if (CONTROL.test(s)) return 'must be one line of plain text (no control characters)';
+  if (MARKUP.test(s)) return 'must be plain text: no markup, code quotes or links (<, >, `, **, ](, ://)';
+  return null;
+}
+
 function validateLog(raw: unknown, at: (what: string) => never): void {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) at('log must be an object');
   const l = raw as Record<string, unknown>;
-  if (typeof l.summary !== 'string' || !l.summary.trim()) at('log.summary is required');
-  if (!Array.isArray(l.changes) || l.changes.some((c) => typeof c !== 'string' || !c.trim())) at('log.changes must be a list of strings');
+  const text = (what: string, v: unknown, max: number) => {
+    const p = plainTextProblem(v, max);
+    if (p) at(`${what} ${p}`);
+  };
+  text('log.summary', l.summary, LOG_LIMITS.summary);
+  if (!Array.isArray(l.changes) || l.changes.length < 1 || l.changes.length > LOG_LIMITS.changes) at(`log.changes must list 1 to ${LOG_LIMITS.changes} changes`);
+  (l.changes as unknown[]).forEach((c, i) => text(`log.changes[${i}]`, c, LOG_LIMITS.change));
   if (!SECURITY_LEVELS.includes(l.security as SecurityLevel)) at(`log.security must be one of ${SECURITY_LEVELS.join(', ')}`);
-  if (l.security !== 'none' && (typeof l.security_text !== 'string' || !l.security_text.trim())) at('log.security_text is required for a security release');
+  if (l.security !== 'none' || l.security_text !== undefined) text('log.security_text', l.security_text, LOG_LIMITS.securityText);
   if (l.affects !== undefined && (!Array.isArray(l.affects) || l.affects.some((n) => !Number.isSafeInteger(n) || n < 1))) at('log.affects must list release numbers');
+}
+
+/**
+ * Entries whose `notes` is not yet their log URL (the legacy staging ones).
+ * `vault:manifest sign` refuses to sign while any is left: the first
+ * staging signing after the log rule switches them all
+ * (`vault:manifest notes --channel staging`).
+ */
+export function notesToSwitch(file: ReleaseFile): number[] {
+  return file.releases.filter((e) => e.notes !== releaseLogUrl(file.channel, e.release)).map((e) => e.release);
 }
 
 export function readReleaseFile(root: string, channel: Channel, account: string): ReleaseFile {
@@ -286,7 +354,7 @@ export function renderManifest(serial: number, issuedAt: string, entries: readon
 
 export const sha256Hex = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 
-/** The successor rules (as vaultctl's CheckSuccessor) plus the strict serial rule of §7. */
+/** The successor rules (as vaultctl's CheckSuccessor) plus the strict serial rule and the notes rule of §7. */
 export function successorProblems(
   prev: { serial: number; releases: readonly ManifestEntry[] },
   next: { serial: number; releases: readonly ManifestEntry[] },
@@ -303,6 +371,8 @@ export function successorProblems(
     if (n.pcr0 !== p.pcr0 || n.pcr1 !== p.pcr1 || n.pcr2 !== p.pcr2 || n.seal_key !== p.seal_key) out.push(`release ${p.release}'s PCRs or seal_key changed`);
     if (rank[n.status] < rank[p.status]) out.push(`release ${p.release} goes back from ${p.status} to ${n.status}`);
     if (n.published_at !== p.published_at) out.push(`release ${p.release}'s published_at changed`);
+    // Once a release's notes is its log entry it never changes (§7); before, they were not compared (the staging backfill).
+    if (isReleaseLogUrl(p.notes, p.release) && n.notes !== p.notes) out.push(`release ${p.release}'s notes changed from its release log entry ${p.notes}`);
   }
   return out;
 }

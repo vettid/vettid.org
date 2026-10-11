@@ -44,6 +44,26 @@ describe('dueMilestone (pure)', () => {
   ])('%j → %s', (row, want) => expect(job.dueMilestone(row, NOW)).toBe(want));
 });
 
+describe('release references (pure)', () => {
+  test('notes from the log when they are an https URL, else the entry in the stage\'s log; summaries bounded to one line', () => {
+    const log = { releases: [{ release: 4, notes: 'https://staging.vettid.org/security/releases/4/', summary: 'x'.repeat(200) }, { release: 5, notes: 'http://x/' }] };
+    expect(job.notesUrl(log, 4)).toBe('https://staging.vettid.org/security/releases/4/');
+    expect(job.notesUrl(log, 5)).toBe('https://vettid.org/security/releases/5/');
+    expect(job.notesUrl(null, 7)).toBe('https://vettid.org/security/releases/7/');
+    const ref = job.releaseRef(log, 4);
+    expect([...ref.summary].length).toBe(160);
+    expect(ref.summary.endsWith('…')).toBe(true);
+    expect(job.releaseRef(log, 5)).toEqual({ n: 5, url: 'https://vettid.org/security/releases/5/' });
+  });
+
+  test('the urgent email carries the release\'s summary and what it fixes', () => {
+    const u = { release: 5, status: 'active', published_at: iso(NOW), listed: true, security: 'urgent', security_text: 'Fixes recovery.', affects: [4] };
+    const mail = job.urgentMail(u, 4, { n: 5, url: 'https://staging.vettid.org/security/releases/5/', summary: 'Release 5 fixes recovery.' });
+    expect(mail.text).toContain('which your VettID vault runs on.\n\nRelease 5 fixes recovery.\n\nWhat it fixes: Fixes recovery.');
+    expect(mail.text).toContain("What's new in release 5: https://staging.vettid.org/security/releases/5/");
+  });
+});
+
 describe('urgentReleases (pure)', () => {
   const e = (extra = {}) => ({ release: 6, status: 'active', published_at: iso(NOW - 3 * DAY), listed: true, security: 'urgent', affects: [5], ...extra });
   test('urgent, listed, with affected releases, in its first 30 days', () => {
@@ -122,10 +142,12 @@ describe('the notice job', () => {
     expect(g1.subject).toBe(`Action needed: your VettID vault's software ends on ${iso(NOW + 30 * DAY).slice(0, 10)}`);
     expect(g1.text).toContain('release 3');
     expect(g1.text).toContain('in 30 days');
-    expect(g1.text).toContain('https://vettid.org/security/releases/3/');
+    expect(g1.text).toContain('Release 3 (the one that is ending): https://vettid.org/security/releases/3/');
+    expect(g1.text).not.toContain('newest release'); // no active release in this table
     const g4 = m.find((x) => x.to === 'g4@x.org')!;
     expect(g4.subject).toBe("Your VettID vault's software release 2 has ended");
     expect(g4.text).toContain('support@vettid.org');
+    expect(g4.text).toContain('Release 2 (the one that ended): https://vettid.org/security/releases/2/');
     for (const x of m) expect(x.text).toContain('never asks for your PIN');
     // Deduplicated: a second run the same day (or a retry) sends nothing.
     ses.resetHistory();
@@ -173,15 +195,44 @@ describe('the notice job', () => {
     expect(m).toHaveLength(1); // release 4's member; release 2 is removed
     expect(m[0]).toMatchObject({ to: 'g5@x.org', subject: 'Security update for your VettID vault' });
     expect(m[0].text).toContain('Release 5 of the vault software fixes a security problem in release 4');
-    expect(m[0].text).toContain('Fixes a bug in recovery.');
+    expect(m[0].text).toContain('What it fixes: Fixes a bug in recovery.');
+    expect(m[0].text).toContain("What's new in release 5: https://vettid.org/security/releases/5/");
     ses.resetHistory();
     await job.handler();
     expect(mails()).toEqual([]);
     expect(fetchSpy.mock.calls[0][0]).toBe('https://vettid.org/security/releases/index.json');
   });
 
-  test('the release log being unreachable does not stop the deadline notices', async () => {
+  test('the release log being unreachable does not stop the deadline notices: links stay, summaries go', async () => {
     fetchSpy.mockRejectedValue(new TypeError('fetch failed'));
+    releases.push({ release: P('d'), release_number: 6, status: 'active' });
     expect((await job.handler()).sent).toBe(3);
+    const g1 = mails().find((x) => x.to === 'g1@x.org')!;
+    expect(g1.text).toContain("The newest release, which the app offers you, is release 6.\nWhat's new in release 6: https://vettid.org/security/releases/6/");
+    expect(g1.text).toContain('Release 3 (the one that is ending): https://vettid.org/security/releases/3/');
+  });
+
+  test('ending and ended emails link the ending release\'s notes and the newest active release\'s notes and summary, from the log', async () => {
+    releases.push({ release: P('d'), release_number: 5, status: 'active' }, { release: P('e'), release_number: 6, status: 'active' });
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify({
+      serial: 11,
+      releases: [
+        { release: 6, status: 'active', published_at: iso(NOW - DAY), listed: true, notes: 'https://staging.vettid.org/security/releases/6/',
+          summary: 'Release 6 fixes a\nthing.', security: 'none' },
+        // Legacy notes (a staging release signed before the log rule): the email uses them as listed.
+        { release: 3, status: 'retired', published_at: iso(NOW - 300 * DAY), listed: true, notes: 'https://github.com/vettid/vettid-vault/releases/tag/release/staging/3', summary: 'Three.', security: 'none' },
+        { release: 2, status: 'removed', published_at: iso(NOW - 400 * DAY), listed: true, notes: 'javascript:alert(1)', security: 'none' },
+      ],
+    }), { status: 200 }));
+    await job.handler();
+    const m = mails();
+    const g1 = m.find((x) => x.to === 'g1@x.org')!;
+    expect(g1.text).toContain("The newest release, which the app offers you, is release 6. Release 6 fixes a thing.\nWhat's new in release 6: https://staging.vettid.org/security/releases/6/\n");
+    expect(g1.text).toContain('Release 3 (the one that is ending): https://github.com/vettid/vettid-vault/releases/tag/release/staging/3\n');
+    expect(g1.text).toContain('All releases: https://vettid.org/security/releases/');
+    const g4 = m.find((x) => x.to === 'g4@x.org')!;
+    expect(g4.text).toContain('The newest release, which a restarted vault moves to, is release 6.');
+    // A notes value that is not an https URL is replaced by the release's entry in the stage's log.
+    expect(g4.text).toContain('Release 2 (the one that ended): https://vettid.org/security/releases/2/');
   });
 });

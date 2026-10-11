@@ -1,7 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import { Construct } from 'constructs';
-import { AppConfig, androidAssetLinks, hostName, resourceName } from '../config';
+import { AppConfig, androidAssetLinks, hostName, releaseLogBaseUrl, resourceName } from '../config';
 import { readRef } from '../constructs/ssm-refs';
 import { stageZone } from '../constructs/stage-zone';
 import { StaticSite } from '../constructs/static-site';
@@ -22,14 +22,14 @@ export const ACCOUNT_RATE_LIMITS = {
 
 /**
  * The account site's /config.json, read by sites/account/js/site-config.js:
- * the stage (staging pages say so), the public release log (production's
- * in every stage, as for the notice emails: RUNBOOK "Staging") and the
- * Android app link (null until there is one).
+ * the stage (staging pages say so), the stage's own public release log
+ * (https://<zoneName>/security/releases/, as for the notice emails;
+ * VAULT-RELEASES §7) and the Android app link (null until there is one).
  */
 export function accountSiteConfig(config: AppConfig): Record<string, unknown> {
   return {
     stage: config.stage,
-    release_log_url: `https://${config.domainName}/security/releases/`,
+    release_log_url: releaseLogBaseUrl(config),
     android_app_url: config.androidAppUrl ?? null,
   };
 }

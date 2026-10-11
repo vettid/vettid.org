@@ -288,6 +288,13 @@ export function vaultRoleArn(vault: VaultConfig, role: keyof typeof VAULT_ROLE_N
 
 const PROD_STAGE = 'prod';
 
+/**
+ * The stage's public vault release log (RELEASE-UPDATES §5, VAULT-RELEASES
+ * §7): on the site that serves the stage's manifest, https://<zoneName>.
+ * The notice job's RELEASE_LOG_URL and the account site's release_log_url.
+ */
+export const releaseLogBaseUrl = (config: Pick<AppConfig, 'zoneName'>) => `https://${config.zoneName}/security/releases/`;
+
 export function loadConfig(node: Node): AppConfig {
   const stage = String(node.tryGetContext('stage') ?? PROD_STAGE);
   if (!/^[a-z][a-z0-9]{0,11}$/.test(stage)) {

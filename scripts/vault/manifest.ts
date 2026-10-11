@@ -7,11 +7,18 @@
  * lib/config.ts).
  *
  *   npx ts-node --transpile-only scripts/vault/manifest.ts status  --channel prod
+ *   npx ts-node --transpile-only scripts/vault/manifest.ts notes   --channel staging
  *   npx ts-node --transpile-only scripts/vault/manifest.ts sign    --channel prod [--issued-at 2027-01-15T12:00:00Z]
  *   npx ts-node --transpile-only scripts/vault/manifest.ts upload  --channel prod --in local/vault/prod/served-<serial>.json
  *   npx ts-node --transpile-only scripts/vault/manifest.ts publish --channel prod --in local/vault/prod/served-<serial>.json [--no-commit]
  *
- * - `sign` renders the manifest from vault/releases/<channel>.json with the
+ * - `notes` sets every release's `notes` in vault/releases/<channel>.json to
+ *   its release log entry (releaseLogUrl), the one-time switch of the
+ *   staging releases signed before the log rule (VAULT-RELEASES §7
+ *   "Backfill"). Edits the file only; review and commit it with the
+ *   signing.
+ * - `sign` refuses while any release's `notes` is not its log entry (run
+ *   `notes` first), then renders the manifest from vault/releases/<channel>.json with the
  *   next serial (above both the served one and `signed_serial`), raises
  *   `signed_serial` in that file first (a serial is never reused, even for
  *   a canary manifest that is never published), signs with key A as the
@@ -25,9 +32,10 @@
  * - `publish` checks the document again (signature, exact render of the
  *   release file as it is now, successor of the served one), uploads it
  *   (idempotent), confirms the bucket copy exists, and only then writes
- *   the served file and, for production, the release log, and commits
- *   those paths. The site deploy (`npm run deploy:site`) then serves it:
- *   the bucket copy always exists before any app can reference it (M1).
+ *   the served file and the channel's release log, and commits those
+ *   paths. The site deploy (`npm run deploy:site`, or VettidOrgStageSiteStack
+ *   for staging) then serves both: the bucket copy always exists before any
+ *   app can reference it (M1).
  *
  * Environment:
  *   VAULTCTL                  vaultctl binary (default: vaultctl on PATH;
@@ -46,11 +54,13 @@ import { checkChannel, servedManifest } from '../../lib/vault/manifest-check';
 import {
   CHANNELS,
   Channel,
-  RELEASE_LOG_DIR,
+  RELEASE_LOG_DIRS,
   SERVED_PATHS,
   consistencyProblems,
   manifestEntries,
+  notesToSwitch,
   readReleaseFile,
+  releaseLogUrl,
   releaseFilePath,
   renderManifest,
   sha256Hex,
@@ -147,8 +157,28 @@ function status(c: Ctx): void {
   }, null, 2));
 }
 
+/** The one-time switch of `notes` to the release log entries (VAULT-RELEASES §7 "Backfill"). */
+function notes(c: Ctx): void {
+  const file = readReleaseFile(ROOT, c.channel, c.account);
+  const todo = notesToSwitch(file);
+  if (!todo.length) {
+    console.log(`every release's notes in vault/releases/${c.channel}.json is already its release log entry`);
+    return;
+  }
+  const listPath = releaseFilePath(ROOT, c.channel);
+  const raw = JSON.parse(readFileSync(listPath, 'utf8')) as { releases: { release: number; notes: string }[] };
+  for (const e of raw.releases) if (todo.includes(e.release)) e.notes = releaseLogUrl(c.channel, e.release);
+  writeFileSync(listPath, `${JSON.stringify(raw, null, 2)}\n`);
+  readReleaseFile(ROOT, c.channel, c.account); // still valid
+  console.log(`notes switched to the ${c.channel} release log for release(s) ${todo.join(', ')} in ${relative(ROOT, listPath)}; review the diff, then sign.`);
+}
+
 function sign(c: Ctx, flags: Record<string, string | true>): void {
   const file = readReleaseFile(ROOT, c.channel, c.account);
+  const legacy = notesToSwitch(file);
+  if (legacy.length) {
+    throw new Error(`refusing to sign: the notes of release(s) ${legacy.join(', ')} are not their release log entries; run \`manifest.ts notes --channel ${c.channel}\` first (VAULT-RELEASES §7)`);
+  }
   const entries = manifestEntries(file);
   if (!entries.length) throw new Error(`vault/releases/${c.channel}.json lists no release for a manifest (candidates are left out)`);
   const served = currentServed(c);
@@ -230,11 +260,8 @@ function publish(c: Ctx, flags: Record<string, string | true>): void {
   upload(c, doc); // the bucket copy first (M1)
   mkdirSync(dirname(servedPath(c)), { recursive: true }); // the first publication of a channel
   writeFileSync(servedPath(c), doc.bytes);
-  const paths = [SERVED_PATHS[c.channel], relative(ROOT, releaseFilePath(ROOT, c.channel))];
-  if (c.channel === 'prod') {
-    writeReleaseLog(ROOT, servedManifest(doc.bytes), file);
-    paths.push(RELEASE_LOG_DIR);
-  }
+  const paths = [SERVED_PATHS[c.channel], relative(ROOT, releaseFilePath(ROOT, c.channel)), RELEASE_LOG_DIRS[c.channel]];
+  writeReleaseLog(ROOT, servedManifest(doc.bytes), file);
   console.log(`${c.channel} manifest serial ${doc.m.serial} written to ${SERVED_PATHS[c.channel]}`);
   if (flags['no-commit'] !== true) {
     run('git', ['add', '--', ...paths]);
@@ -246,7 +273,7 @@ function publish(c: Ctx, flags: Record<string, string | true>): void {
     '  push and merge the commit (CI runs check:manifest),',
     c.channel === 'prod'
       ? '  npm run deploy:site   (serves https://vettid.org/.well-known/vettid/pcr-manifest.json and the release log),'
-      : '  npx cdk deploy VettidOrgStageSiteStack -c stage=staging --profile vault-staging   (serves https://staging.vettid.org/.well-known/vettid/pcr-manifest.json),',
+      : '  npx cdk deploy VettidOrgStageSiteStack -c stage=staging --profile vault-staging   (serves https://staging.vettid.org/.well-known/vettid/pcr-manifest.json and the release log),',
     `  aws lambda invoke --function-name ${c.syncFunction} --profile ${c.adminProfile} --region ${REGION} /dev/stdout   (routing rows now, not in 5 minutes).`,
   ].join('\n'));
 }
@@ -257,6 +284,8 @@ function main(): void {
   switch (cmd) {
     case 'status':
       return status(c);
+    case 'notes':
+      return notes(c);
     case 'sign':
       return sign(c, flags);
     case 'upload':
@@ -264,7 +293,7 @@ function main(): void {
     case 'publish':
       return publish(c, flags);
     default:
-      throw new UsageError('usage: manifest.ts status|sign|upload|publish --channel prod|staging [--in FILE] [--issued-at T] [--no-commit]');
+      throw new UsageError('usage: manifest.ts status|notes|sign|upload|publish --channel prod|staging [--in FILE] [--issued-at T] [--no-commit]');
   }
 }
 
