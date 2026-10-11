@@ -1,9 +1,32 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.31
-date: 2026-10-10
+version: 0.1.32
+date: 2026-10-11
 changelog:
+  - 0.1.32: errata from the Android and gateway N4 implementations
+    (vettid-android #109; vettid-push; PUSH-GATEWAY 0.4.2; a draft for
+    the owner's review). Implemented behaviour written down (§4
+    Notification modes, 1 and 4). Changing the mode no longer "stops the
+    old path first" in every case; it follows PUSH-GATEWAY §11.1: to
+    Google push, the on-phone service runs until the vault holds the
+    registration; back to the service, `push.unregister` is started and
+    the service starts without waiting for it. A wipe sends no
+    `push.unregister` (0.1.29 said it did): the vault has already erased
+    the registration (VAULT-MESSAGING §14.1); the app deletes its token.
+    `unavailable` keeps Google push selected with "Not available yet"
+    under it. A wake's collect takes at most 15 s before expedited
+    `WorkManager` work, and how "collect finished" is decided; a
+    `vault.locking` met during a wake posts "Your vault is locked";
+    `feed.event`s collected before a wake-started process knows the
+    vault is open are held in memory (64 at most). The Firebase options
+    are four Gradle properties per build type, all or none; the build
+    guard `check<Variant>PushManifest`. **Owner decisions pending**
+    (marked in 4): the fallback to the on-phone service beyond `limit`
+    (implemented for `unavailable`, refusals and `gateway_error`
+    retries; recommended: keep), and Google push chosen but the push
+    service later unavailable on the phone (today nothing runs;
+    recommended: fall back to the on-phone service; not implemented)
   - 0.1.31: owner request 2026-10-10 ("when we let users know about new
     vault updates we need to provide them with some way to see the
     change log so they know what is changing"; RELEASE-UPDATES 0.3.0,
@@ -825,7 +848,10 @@ its process runs; nothing keeps it running in the background).
    - **Google push** — "Uses Google's push service to wake VettID. Google
      learns only that VettID was woken, never who or what." Shown
      disabled with **"Not available yet"** until the build has FCM
-     configuration and the vault answers `push.register` (below); with
+     configuration and the vault answers `push.register` (below; 0.1.32:
+     disabled only in a build without the configuration. When it is the
+     vault that answers `unavailable`, the choice can be made and stays
+     selected, with "Not available yet" under it, 4); with
      **"Needs Google Play services, which this phone does not have"**
      when they are missing (GrapheneOS without sandboxed Play, for
      example); "Google Play services need an update" when outdated.
@@ -841,7 +867,18 @@ its process runs; nothing keeps it running in the background).
    and **Notification categories** (the system's channel settings).
    The mode is a device preference (DataStore), not a vault setting:
    it describes this phone. Changing it stops the old path first (the
-   service, or `push.unregister`) and then starts the new one.
+   service, or `push.unregister`) and then starts the new one, with one
+   exception (0.1.32, so that this plan and PUSH-GATEWAY §11.1 say the
+   same): **to Google push**, the app registers first and the on-phone
+   service keeps running until the vault answers that it holds the
+   registration (`push` `active`), then stops, so no notification falls
+   into a gap. **From Google push to the service**, `push.unregister` is
+   started first and the service then starts without waiting for its
+   answer. **To Off**, both stop. When the vault cannot be told now
+   (locked, no network), the app deletes its token all the same and
+   sends `push.unregister` when the vault next opens on this phone; a
+   wake that still arrives for a registration the phone no longer wants
+   collects nothing and drops it.
 2. **Permission.** POST_NOTIFICATIONS (Android 13+) is asked when a mode
    other than Off is chosen, and on first start in the default mode
    after the onboarding's last step ("Allow VettID to notify you about
@@ -935,8 +972,8 @@ its process runs; nothing keeps it running in the background).
      (inexact; no exact-alarm permission). After the check the app
      catches up (§6 Owner check, 4) and normal notifications resume;
      nothing missed is replayed as notifications, the bell counts it.
-4. **(b) Google push (FCM)** (PUSH-GATEWAY 0.4.1; VAULT-MESSAGING
-   0.24.1 §14, 0.1.29, 0.1.30). Contentless wakes:
+4. **(b) Google push (FCM)** (PUSH-GATEWAY 0.4.2; VAULT-MESSAGING
+   0.24.1 §14, 0.1.29, 0.1.30, 0.1.32). Contentless wakes:
    the app's FCM token goes to its vault over the end-to-end session
    (`push.register{platform: "fcm", token, app_id}`, `app_id` the
    application id of the build), the vault registers it with the
@@ -946,17 +983,26 @@ its process runs; nothing keeps it running in the background).
    app's `FirebaseMessagingService` then collects from the relay and
    decrypts as in (a), and posts the same notifications, with no
    persistent service. A wake gives up to about 20 s of execution; a longer
-   collect runs as expedited `WorkManager` work. Token rotation
+   collect runs as expedited `WorkManager` work (0.1.32: the app
+   collects for at most 15 s of them, "A wake" below). Token rotation
    (`onNewToken`) and `push.token-needed` (the gateway reported the
    token gone; 0.1.29 spelled it `push.token_needed`) send `push.register` again; switching away from the
-   mode or a wipe sends `push.unregister` (a transfer or a recovery
-   that removes the app erases the registration vault-side,
-   VAULT-MESSAGING §14.1). The status line (1) reads the `push` state
+   mode sends `push.unregister`. A wipe or erase sends none (0.1.32;
+   0.1.29 said it did): the vault has already erased the registration
+   when it removed the app (a transfer or a recovery) or was deleted
+   with it (VAULT-MESSAGING §14.1, §12.5), and the phone has no session
+   left. The app deletes its FCM token, on the phone and at Google, and
+   forgets what it remembered of the registration. The status line (1) reads the `push` state
    on the app's `device.list` entry: "Connected" while `active`
    (`last_result` `gateway_error`: "Push service not reachable, retrying"),
    and "Registering again" after `push.token-needed`; `unavailable`
-   from `push.register` keeps "Not available yet", `gateway_error`
-   retries with backoff (1 minute doubling to 1 hour). `limit`
+   from `push.register` keeps "Not available yet" (0.1.32: under the
+   choice, which stays selected; the vault is asked again when it next
+   opens on this phone), `gateway_error`
+   retries with backoff (1 minute doubling to 1 hour; 0.1.32: the
+   vault's `retry_after` is used when it gives one, and a token the push
+   service could not supply, or a request without an answer, is retried
+   on the same schedule). `limit`
    (`push_registrations`: 20 answered registrations in 24 hours, refusals
    included) stops the retries for 24 hours; Settings → Notifications
    shows "Push unavailable, using the on-phone service", and the on-phone
@@ -964,6 +1010,75 @@ its process runs; nothing keeps it running in the background).
    2026-10-10, 0.1.30). Correctness
    never depends on a wake: the app collects at every foreground as
    now.
+   - **The fallback beyond `limit`** (0.1.32; implemented in
+     vettid-android #109; **owner decision pending**). The decision of
+     2026-10-10 names the on-phone service as the fallback for `limit`
+     only. As implemented, it also runs while the phone has **no
+     working registration for any other reason**: `unavailable`, another
+     refusal (`bad_request`, `forbidden`, or a `push` state that is not
+     `active`), and while `gateway_error` (or a missing token or
+     answer) is being retried. Without it the member would get no
+     notifications at all in those states, without having chosen Off.
+     The status line says so: "Push unavailable, using the on-phone
+     service" (`limit`, `unavailable`, a refusal) or "Push service not
+     reachable, retrying" (retries). The service stops again as soon as
+     the vault holds the registration. **The mode preference is never
+     changed automatically**: the choice stays Google push.
+     Privacy, plainly: the member chose Google push, and the fallback
+     keeps the phone's own connection to the relay instead. That is the
+     more private of the two paths (Google is not involved), so it
+     reveals nothing new to anyone. Its cost is what the member did not
+     choose: a little more battery and the service's "VettID is
+     connected" notification, for as long as the fallback lasts.
+     **Recommended: approve as implemented.** If refused, the app falls
+     back for `limit` only and shows "Not available yet" or "Push
+     service not reachable, retrying" with no notifications meanwhile.
+   - **Google push chosen, the push service later unavailable on the
+     phone** (0.1.32; **owner decision pending; the proposed rule is
+     not implemented**). The choice can only be made while Google push
+     is available, but it can stop being so afterwards: Google Play
+     services disabled, removed or outdated, or an update to a build
+     without the Firebase options. **Today** nothing runs then: no
+     registration and no on-phone service, the status line says
+     "Connecting", and the member gets notifications only while the app
+     is open. **Proposed (recommended), as a follow-up app change:** the
+     on-phone service runs as the fallback, as for `unavailable`; the
+     status line says "Google push is not available on this phone, using
+     the on-phone service"; the note under the choice gives the reason
+     ("Needs Google Play services…", "…need an update", "Not available
+     yet"); the choice stays Google push and registration resumes by
+     itself when the push service is back; the vault is sent
+     `push.unregister` when it next opens, so it stops waking a phone
+     that cannot be woken.
+   - **A wake** (0.1.32, as implemented). The push message's content is
+     never read. The process's one mailbox collector does the work, as
+     when the app is open (decrypt, persist, ack). The collect runs for
+     at most **15 s** (0.1.29: "about 20 s", which is all Android
+     gives); if it has not finished, it continues as expedited
+     `WorkManager` work (needs a network, at most 3 minutes, one at a
+     time, never retried, since the app collects at every start and
+     foreground anyway). **"Finished" is a heuristic**: the relay
+     answers a collect at once when messages wait, so the collect is
+     taken as done when its long poll has been outstanding for 2.5 s
+     and no read that the collected events started is still in flight
+     (the feed's read, the held events below); checked every 250 ms. A
+     process that cannot learn whether its vault is open (no network)
+     hands over to the work at once.
+   - **A lock met during a wake** (0.1.32). The vault wakes the phone
+     for `vault.locking` (VAULT-MESSAGING §14.2). A process started by
+     that wake never saw the vault open, so it has no open-to-locked
+     change to react to: when `vault.locking` arrives during a wake, and
+     the lock was not made on this phone, the app posts "Your vault is
+     locked. You won't be notified until you unlock it" (Security
+     channel), as the on-phone service does (3).
+   - **Events collected before the vault is known to be open**
+     (0.1.32). A process started by a wake collects its mailbox while it
+     is still reading the vault's status. `feed.event`s that arrive
+     meanwhile cannot notify yet (nothing is shown of a vault not known
+     to be open), so they are **held in memory, at most 64** (the oldest
+     dropped first) and notified once the vault is known to be open; if
+     it turns out locked, or there is no vault any more, they are
+     dropped. Nothing is written to disk.
    - **Plumbing now**: the setting, a `PushProvider` interface
      (`available()`, `token()`, `onWake`), the FCM provider behind it,
      and the registration path through the vault, written against
@@ -977,11 +1092,39 @@ its process runs; nothing keeps it running in the background).
      runtime from `FirebaseOptions` (application id, project id, API key,
      sender id) read from Gradle properties into `BuildConfig`, absent
      by default. No properties: the provider is "not available yet" and
-     the app builds and runs as today (CI included). Google Play
+     the app builds and runs as today (CI included). (0.1.32) The
+     properties are **four per build type**:
+     `vettidFcm<Type>ApplicationId`, `vettidFcm<Type>ProjectId`,
+     `vettidFcm<Type>ApiKey` and `vettidFcm<Type>SenderId`, `<Type>`
+     being `Debug`, `DevStack`, `Staging` or `Release`. **All four or
+     none**: a partial set fails the build. In CI they are secrets
+     exported as `ORG_GRADLE_PROJECT_<property>`. `checkReleaseApk` and
+     `checkStagingApk` also fail if an APK carries the other
+     environment's Firebase application id. Google Play
      services presence: `GoogleApiAvailability`. A later `foss` build
      flavour without the library (for F-Droid) remains possible and is
      §9 question 12; a flavour now would double every build and test
      for no user yet.
+   - **The build guard** (0.1.32). `check<Variant>PushManifest`, run by
+     `checkReleaseApk` and `checkStagingApk`, reads the merged manifest
+     and fails on anything of Firebase or Google beyond Messaging's: a
+     Google component or Firebase registrar Messaging does not need
+     (Analytics, Crashlytics, `FirebaseInitProvider`, …), a
+     `com.google.*` permission other than
+     `com.google.android.c2dm.permission.RECEIVE`, an advertising-id
+     permission, or WorkManager's start-up initialiser. Google push adds
+     two permissions to the app, `WAKE_LOCK` and that
+     `c2dm.permission.RECEIVE`, and no other. `FirebaseInitProvider` and
+     the WorkManager initializer are removed from the manifest
+     (WorkManager starts on first use, which a build without the options
+     never reaches). Automatic token creation
+     (`firebase_messaging_auto_init_enabled`), Analytics collection
+     (`firebase_analytics_collection_enabled`) and BigQuery export of
+     delivery metrics (`delivery_metrics_exported_to_big_query_enabled`)
+     must be `false`, so Google is first contacted when the member
+     chooses Google push. The messaging service and Firebase's receiver
+     are in every build's manifest but **enabled only in a build that
+     carries the options**; the guard fails on a mismatch either way.
    - Unavailable when Google Play services are missing (said in the UI,
      1), and until the gateway is deployed with FCM credentials (the
      owner has no FCM service account yet, §7).
@@ -1115,7 +1258,8 @@ its process runs; nothing keeps it running in the background).
       services) and "not available" on the Pixel 10 Pro (GrapheneOS).
 11. **Tests** (in addition to the Notifications screen's).
     - Unit: the mode state machine (switching stops the old path
-      first; Off stops everything); the Mapping table for every §10.9
+      first, except to Google push, where the service runs until the
+      registration is active, 0.1.32; Off stops everything); the Mapping table for every §10.9
       kind and unknown kinds; batch updates in place and cancel on
       read, archive, delete and from other devices; Content per
       preview choice (no text with Names, nothing with Nothing; never
