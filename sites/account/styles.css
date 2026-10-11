@@ -31,8 +31,6 @@
   --gold-hover: #ffd25a;
   --ink-on-gold: #101018;
 
-  --brand-mark: #ffc125;         /* the rook: brand gold in every theme */
-  --brand-keyhole: #101018;      /* solid keyhole (not a cut-out) so it stays dark on light grounds */
   /* email-preference switch */
   --switch-off-track: var(--surface-2);
   --switch-off-edge: var(--border-strong);
@@ -265,19 +263,25 @@ code, .mono {
   color: var(--ink-hi);
 }
 .brand:hover { color: var(--ink-hi); }
-.brand-mark {
+/* Brand kit artwork, unmodified (assets/ is synced from website/assets): the
+   horizontal lockup, and the icon alone at phone width, where the lockup
+   would fall under its 160px minimum (BRAND.md rule 2). One file serves both
+   themes: the kit's transparent and on-light lockups are the same artwork.
+   The file carries its own padding (the artwork is 83.4% of its width, so
+   192px gives a 160px lockup); the negative margins take it back out so the
+   header keeps its height. Never restyle, recolour or filter these images. */
+.brand-logo {
   display: block;
-  width: 26px;
-  height: auto;
   flex: none;
-  color: var(--brand-mark);
+  width: 192px;
+  height: auto;
+  margin: -21px 0 -21px -15px;
 }
-.brand-mark .brand-keyhole { fill: var(--brand-keyhole); }
-.brand-name {
-  font-family: var(--font-head);
-  font-weight: 800;
-  font-size: 1.1rem;
-  letter-spacing: 1px;
+.brand-icon {
+  display: none;
+  flex: none;
+  width: 34px;
+  height: 34px;
 }
 .brand-tag {
   font-family: var(--font-mono);
@@ -1004,6 +1008,8 @@ input.pin {
 @media (max-width: 640px) {
   .site-header { padding: 10px var(--gutter); gap: 10px; }
   .brand { gap: 8px; }
+  .brand-logo { display: none; }
+  .brand-icon { display: block; }
   .brand-tag { padding-left: 8px; font-size: 10px; letter-spacing: 0.08em; }
   /* The tabs (one with a badge) don't fit one row at phone width: two columns. */
   .tabs {
