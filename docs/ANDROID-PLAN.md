@@ -19,8 +19,9 @@ changelog:
     The rule for Google push chosen but the push service later
     unavailable on the phone is **approved (owner, 2026-10-11) and
     implemented** (vettid-android #112), with the `foss` distribution
-    among its causes (4). **Owner decision open** (§7 Signing and the
-    two distributions; §9 question 15): which key signs Play installs,
+    among its causes (4). **Owner decision (2026-10-11): VettID's own
+    key signs Play installs** (§7 Signing and the two distributions;
+    §9 question 15): which key signs Play installs is
     chosen once at Play App Signing enrolment; it decides whether
     members can move between Google Play and F-Droid without
     uninstalling, and what production release 1 pins in
@@ -1476,7 +1477,7 @@ schema for the cache and the request verb belong to the location batch.
   accepted the current terms; the portal checks it when it issues the
   setup code (MEMBER-API 2.0.0). The app itself never signs in.
 
-### Signing and the two distributions (0.1.34; owner decision open)
+### Signing and the two distributions (0.1.34; decided: option (b))
 
 **Versions.** Both distributions of a release have the same
 `versionCode` and `versionName`, and each release is a tag
@@ -1534,12 +1535,22 @@ The same rows record that the owner's hardware token is set up
 (2026-10-06), but no document says that the upload key itself is on the
 token; the token is documented only for manifest key B (VAULT-RELEASES
 §6.1). No build has been signed with the upload key yet (P29 is
-pending). **To confirm with the owner:** whether the upload key is a
-file or on the token. If it was generated on the token it cannot be the
-key supplied in (b), and (b) needs a new key.
+pending). **Confirmed by the owner (2026-10-11): the key is a file**,
+not on the token, so it can be the key supplied in (b).
 
-**Recommended: (b), with a new app-signing key made for the purpose and
-the existing upload key kept as Play's upload key.** Under (a) the cost
+**Decided (owner, 2026-10-11): (b).** *Which* VettID key becomes the
+app-signing key is the one detail still to confirm, and the draft's
+answer changed once the key was known to be a file: **the existing key
+(digest `31a19613…8e65`, already pinned in production, P8) is supplied
+to Play as the app-signing key**, and it also signs the F-Droid APK and
+direct builds; a **new upload key** is made for Play uploads. Play
+re-signs what is uploaded, so nothing a member installs is signed by
+the upload key and it is never pinned. Production release 1 then pins
+**one** certificate, the one it already lists, and `TODO-O8` is removed
+rather than filled in: release 1 no longer waits for a digest from
+Play (P9). The alternative, a new app-signing key with the existing key
+kept as upload key, pins two certificates and has no advantage now.
+The reasoning for (b) over (a), as recommended in the draft: under (a) the cost
 falls on members, for as long as the app exists: whoever changes store
 loses the app's data and waits out a recovery, and it can never be
 repaired. Under (b) the cost falls on the owner, once: a key file to
@@ -1651,7 +1662,8 @@ Each with the recommended answer.
     locked: notifications resume after you unlock it" (status read
     from the member API at most hourly); a DEK-free "messages waiting"
     signal stays the separate future decision §14 names.
-15. **The key that signs Play installs** (0.1.34; **open**). Let Google
+15. **The key that signs Play installs** (0.1.34; **answered
+    2026-10-11: VettID's own key, option (b)**). Let Google
     generate the Play app-signing key, or supply VettID's own at
     enrolment so that Google Play and F-Droid installs share a signer
     and members can move between them without uninstalling? Chosen
