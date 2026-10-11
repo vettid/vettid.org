@@ -1,6 +1,6 @@
 {
   "channel": "staging",
-  "signed_serial": 10,
+  "signed_serial": 11,
   "releases": [
     {
       "release": 1,
@@ -12,7 +12,7 @@
       "admitted_pcr0s": [],
       "published_at": "2026-10-05T00:03:09Z",
       "ends_at": "2026-10-05T15:27:03Z",
-      "notes": "https://github.com/vettid/vettid-vault/releases/tag/release/staging/1",
+      "notes": "https://staging.vettid.org/security/releases/1/",
       "log": {
         "summary": "The first staging test build of the vault, used to stand up the staging channel.",
         "changes": [
@@ -34,7 +34,7 @@
       ],
       "published_at": "2026-10-05T14:55:20Z",
       "ends_at": "2026-10-06T18:17:46Z",
-      "notes": "https://github.com/vettid/vettid-vault/releases/tag/release/staging/2",
+      "notes": "https://staging.vettid.org/security/releases/2/",
       "log": {
         "summary": "Test build adding connection requests with a short code that both people compare.",
         "changes": [
@@ -57,7 +57,7 @@
       ],
       "published_at": "2026-10-06T17:47:53Z",
       "ends_at": "2026-10-13T15:30:00Z",
-      "notes": "https://github.com/vettid/vettid-vault/releases/tag/release/staging/3",
+      "notes": "https://staging.vettid.org/security/releases/3/",
       "host": {
         "tag": "release/staging/3",
         "source_commit": "5cd11db5e29b07d0ebc24a50d5c7615d0b0a8856",
@@ -91,7 +91,7 @@
         "80a580024d4cf3d1f7955dc010ae12a0626ad4f6d542c385bf9cf5202fa37eab81f37c75a009dbc4212b22960f19d289"
       ],
       "published_at": "2026-10-07T10:08:46Z",
-      "notes": "https://github.com/vettid/vettid-vault/releases/tag/release/staging/4",
+      "notes": "https://staging.vettid.org/security/releases/4/",
       "host": {
         "tag": "release/staging/4",
         "source_commit": "f5cf1277105d1ae12a1db588df6f60cdf1438776",
@@ -128,7 +128,7 @@
         "8c26adfd1fe53025c5aea91563129bc4670bffc993531040a4a0e6f530e753bcf5a1be2cafa78bb0373a469adc88f7c8"
       ],
       "published_at": "2026-10-08T13:34:56Z",
-      "notes": "https://github.com/vettid/vettid-vault/releases/tag/release/staging/5",
+      "notes": "https://staging.vettid.org/security/releases/5/",
       "host": {
         "tag": "release/staging/5",
         "source_commit": "26b71409a83e537656019a63d7caffedab545cfd",
@@ -164,7 +164,7 @@
         "e9f9005d31ba54e64aec4db3c7044aa8c290bae8c65246e6a1692fae7ea40d2dae8bf41c3a4b0575c7066d23ac5e3f1a"
       ],
       "published_at": "2026-10-09T01:32:42Z",
-      "notes": "https://github.com/vettid/vettid-vault/releases/tag/release/staging/6",
+      "notes": "https://staging.vettid.org/security/releases/6/",
       "host": {
         "tag": "release/staging/6",
         "source_commit": "403d7d9c3afa2194bd397a15b3e0b672eb8b2d2a",
@@ -200,7 +200,7 @@
         "c6dd654f6b261f616f9115b215600eb992365943c52177adc86bafdba0fd7138c0dfe6558d8b2052ff1aed4dee50232f"
       ],
       "published_at": "2026-10-09T20:00:44Z",
-      "notes": "https://github.com/vettid/vettid-vault/releases/tag/release/staging/7",
+      "notes": "https://staging.vettid.org/security/releases/7/",
       "host": {
         "tag": "release/staging/7",
         "source_commit": "c22a750d90d037a8a7a3e4bbb525386b07ef38ce",
@@ -224,7 +224,7 @@
     },
     {
       "release": 8,
-      "status": "active",
+      "status": "deprecated",
       "pcr0": "8eebbb1012f55e131ab24a8259d1e714ffc6cc2f9ea090c41e3773702979fd0756134b7035773f8b58ab174f864f5f7d",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
       "pcr2": "1e47cea4f04f8e7d2f5fd00f4b06e645bb61bd922a947f890f7ac12f0c19171aba04db046448523928a58387b5dc6809",
@@ -237,7 +237,7 @@
         "2303feb157143c5393fe55e8dd880f0ebc82f982c5f0e2a64e0d1c3b53e306d5c36641544185c1dfed7d7834188864e8"
       ],
       "published_at": "2026-10-10T14:05:08Z",
-      "notes": "https://github.com/vettid/vettid-vault/releases/tag/release/staging/8",
+      "notes": "https://staging.vettid.org/security/releases/8/",
       "host": {
         "tag": "release/staging/8",
         "source_commit": "6a752d2a6219fc91ecadc94328c999e741fcdcc1",
@@ -261,7 +261,7 @@
     },
     {
       "release": 9,
-      "status": "candidate",
+      "status": "active",
       "pcr0": "8ab041980ae3cd122b9e09f04a165b13aa01cfb5378d31c35830c05f129072b2f0889cbed1f492c0fdfb13f0af8c303e",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
       "pcr2": "ec9157672809295e6650135ff56c2e37a86fff9de2a066b3a22a4dcc8df5c0cb76f365d14c344bdaa139ee914dad0cf0",
@@ -274,7 +274,8 @@
         "2303feb157143c5393fe55e8dd880f0ebc82f982c5f0e2a64e0d1c3b53e306d5c36641544185c1dfed7d7834188864e8",
         "8eebbb1012f55e131ab24a8259d1e714ffc6cc2f9ea090c41e3773702979fd0756134b7035773f8b58ab174f864f5f7d"
       ],
-      "notes": "https://github.com/vettid/vettid-vault/releases/tag/release/staging/9",
+      "published_at": "2026-10-11T00:27:16Z",
+      "notes": "https://staging.vettid.org/security/releases/9/",
       "host": {
         "tag": "release/staging/9",
         "source_commit": "f6614b97e06911d6bb799203805b206f38aa687c",
