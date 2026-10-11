@@ -172,6 +172,7 @@ async function poll() {
   await load();
   if (before === 'pending' && recovery?.state === 'available') ui.showNotice('Your recovery code is ready.', 'info');
   else if (before === 'available' && recovery?.state === 'registered') ui.showNotice('Your recovery code was used on your new phone.', 'info');
+  else if (before === 'registered' && recovery?.state === 'completed') ui.showNotice('Your vault was recovered on your new phone.', 'info');
   else if (before && isActive({ state: before }) && !isActive(recovery)) ui.showNotice('The recovery is no longer in progress.', 'info');
 }
 
@@ -301,6 +302,8 @@ function renderRequest() {
 function endedText(state) {
   if (state === 'cancelled') return 'was cancelled';
   if (state === 'unavailable') return 'was refused by your vault';
+  // 2.4.1: the new phone finished it (PIN and credential password) and is the vault's app.
+  if (state === 'completed') return 'was completed on your new phone';
   if (state === 'registered') return 'was used on a new phone';
   return 'expired';
 }
