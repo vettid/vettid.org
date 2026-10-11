@@ -1,7 +1,7 @@
 ---
 title: STAGING-DEVELOPMENT-PLAN
-status: approved by the owner 2026-10-11 (D1–D11 as recommended; D3 as in ANDROID-PLAN 0.1.34)
-version: 0.1.0
+status: approved by the owner 2026-10-11 (D1–D11 as recommended; D3 as in ANDROID-PLAN 0.1.35, which replaced 0.1.34's answer the same day)
+version: 0.1.1
 date: 2026-10-11
 owner: Al Liebl (Mesmer)
 related:
@@ -13,6 +13,12 @@ changelog:
   - 0.1.0: first draft after the owner's question of 2026-10-11 ("keep
     using staging for adding the calling, agents, etc."); state measured
     2026-10-11 about 15:30 UTC (read-only AWS and repository checks, §8)
+  - 0.1.1: D3 corrected (owner decision 2026-10-11, ANDROID-PLAN 0.1.35
+    §7): Google generates and holds the Play app-signing key, VettID's
+    own key signs the F-Droid and direct builds and is never given to
+    Google, so there are two signers, not one. Release 1 pins only
+    VettID's key and does not wait for the Play account (§2.2, §5 rows
+    0a and 1, §6, §7 row 9, §8.4)
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -54,13 +60,15 @@ Each rule is a proposal. Those that need the owner's choice are in §6.
 
 ### 2.2 Production release 1: early and small
 
-1. It is cut as soon as the Play app-signing digest exists (W10-READINESS
-   P9/B4, owner), from the newest staging release that has passed §2.4.
-   It does not wait for calls, agents or FCM.
+1. It is cut from the newest staging release that has passed §2.4. It
+   does not wait for calls, agents or FCM, nor (0.1.1) for the Google
+   Play account: it pins only VettID's own signing key, and the Play
+   certificate comes with a later release (D3; W10-READINESS 0.1.6
+   P9).
 2. Members: the owner and named testers only (proposal: at most 10),
    through registration codes as today. No public announcement.
 3. It exists to exercise what staging cannot: signing with offline key B,
-   keys that cannot be deleted early, the 30-day window, Play signing,
+   keys that cannot be deleted early, the 30-day window,
    production SES and the admin site, real member data.
 4. Its cost must be accepted knowingly: **release 1 freezes its wire
    formats and its pinned app signers** for as long as it is live
@@ -185,9 +193,9 @@ ever used from a phone. No app code exists for any row from 2 on.
 | # | Phase | State today | Repos | Needs a vault release? | Depends on | Owner input needed |
 |---|---|---|---|---|---|---|
 | 0 | Finish v1 on staging: A6 hardening, S3 retirement drill, cleanup to three releases | A6 open (ANDROID-PLAN §6); S3 ends 2026-10-13 | android, vettid.org | No (staging manifest changes only) | — | Key deletions (S1 due 10-12, S2 due 10-13, then the batch) |
-| 0a | F-Droid `foss` build | Branch `build/fdroid-foss` (2026-10-11), not merged | android | Only if its signing certificate is not already pinned (D3) | Reproducible build | Which key signs it; F-Droid submission |
+| 0a | F-Droid `foss` build | Branch `build/fdroid-foss` (2026-10-11), not merged | android | No: it is signed with VettID's own key, already pinned (D3) | Reproducible build | F-Droid submission |
 | 0b | Push N4 (Google push) | Gateway deployed for staging without platforms; app side merged (vettid-android #109); vault side in S9 | vettid.org, push | No | A Firebase project | Firebase project (owner: hold) |
-| 1 | **Production release 1** | Blocked on the Play digest (P9/B4) | vault, vettid.org, android | It is one | Phase 0; §2.4; the production backend deploy | Play account; D2, D3, D4; the tester list |
+| 1 | **Production release 1** | Not blocked on Google Play (0.1.1, D3): it pins only VettID's own key (W10-READINESS 0.1.6 P9) | vault, vettid.org, android | It is one | Phase 0; §2.4; the production backend deploy | D2, D4; the tester list; the signer binding of VAULT-MESSAGING 0.26.0 §11.7.1 (W10-READINESS P9a) |
 | 2 | Calls (1:1) | Vault code exists (`features/calls`, `vms/callwire`; VAULT-MESSAGING §10.10). Calling service **specified in CALLING-SERVICE 0.1.1, not built** (no repository). No app code | android, vault, a new calling-service repo, vettid.org (stacks), relay if `call.*` needs relay work (not established) | Very likely: the vault issues ICE credentials and its egress list would gain the calling service; not established in detail | A wake for the callee: the on-phone service works today, FCM needs 0b | Own TURN fleet or a managed one (CALLING-SERVICE §8); its §10 open questions |
 | 3 | Devices, agents, LEASH | Vault code exists (`features/leash`, 0.12.0 format, in S4 and later). Connector **not rebuilt** (LEASH-IMPLEMENTATION "Connector"); `vettid-agent` and `vettid-desktop` last changed 2026-05 and do not work with this vault | android, agent, desktop, vault (fixes) | Only for fixes found | — | Whether desktop or agent comes first |
 | 4 | Wallet | Vault code exists (`features/wallet`; §10.18). No app code | android, vault | For fixes | — | Networks to support |
@@ -201,13 +209,13 @@ Phases 2–6 run on staging under §2; each reaches production through
 
 ## 6. Owner decisions
 
-**Answered (owner, 2026-10-11): all as recommended**, with two additions: the shared relay stays (D11: "let's use production for the relay"), and for D3 the owner chose VettID's own key for Play installs as well (ANDROID-PLAN 0.1.34 §7 "Signing and the two distributions", option (b)), so Google Play, F-Droid and direct builds share one signer.
+**Answered (owner, 2026-10-11): all as recommended**, with two additions: the shared relay stays (D11: "let's use production for the relay"), and for D3 the owner first chose VettID's own key for Play installs as well (ANDROID-PLAN 0.1.34, option (b)) and replaced that the same day with option (a) (ANDROID-PLAN 0.1.35 §7 "Signing and the two distributions"): giving Google the key would let a build signed by Google replace F-Droid and direct installs too. Google Play installs are signed by Google; F-Droid and direct builds by VettID; two signers.
 
 | # | Decision | Recommendation |
 |---|---|---|
 | D1 | Adopt §2: staging is the development channel; at most three live staging releases; at most two releases a week | Yes |
 | D2 | Release 1's retirement window. Default 12 months (VAULT-RELEASES §3.5); the notice sequence needs 90 days | **90 days for release 1 only**, told to the testers when they join; later releases 12 months. Needs a line in VAULT-RELEASES §3.5 (O5 sets 60 days as the floor for shortened windows) |
-| D3 | Which Android signers release 1 pins (one to four are allowed) | **Decided (owner, 2026-10-11):** VettID supplies its own app-signing key to Play (ANDROID-PLAN 0.1.34, option (b)); the F-Droid APK (reproducible builds) and direct builds carry the same signature. The key the owner holds is a file and its digest is already pinned, so release 1 needs no digest from Play |
+| D3 | Which Android signers release 1 pins (one to four are allowed) | **Decided (owner, 2026-10-11; 0.1.1):** only VettID's own key, whose digest `prod.json` already lists; it signs the F-Droid APK (reproducible builds) and direct builds and is never given to Google, so release 1 needs nothing from Play. Google generates and holds the Play app-signing key; its certificate is pinned by a later release, before the Play listing goes live, and each vault is bound to its app's signer (ANDROID-PLAN 0.1.35 §7, option (a); VAULT-MESSAGING 0.26.0 §11.7.1). 0.1.0 recorded option (b), one shared signer, withdrawn the same day |
 | D4 | Does release 1's image answer calls, agent, wallet, location and presence operations that no production app uses? Today every image does | **Add a per-channel feature allowlist to the release configuration** (measured into the image; production lists only what passed §2.4). A vault spec and code change, before release 1. Not checked: which of these operations a peer can reach on a vault whose owner never used them |
 | D5 | Staging application id | **Change to `com.vettid.app.staging`** with the next staging release that can carry it (the package becomes a per-channel value in the vault), before release 1, so the owner's phone can hold both. Until then: production on the owner's phone, staging on the test phones only |
 | D6 | Production backend rhythm | Weekly, Monday, by the assistant after the owner approves the diff; the first one as soon as the owner lifts "the prod deploy waits" and creates the enroll-code key |
@@ -229,7 +237,7 @@ Phases 2–6 run on staging under §2; each reaches production through
 | 6 | Create `/vettid-org/prod/member/enroll-code-key`; first weekly production deploy | owner, then assistant |
 | 7 | If D4 or D5 is accepted: spec changes in VAULT-MESSAGING / VAULT-RELEASES and vettid-vault, on a staging release | assistant |
 | 8 | Amend the stale text below in one docs PR once §6 is answered | assistant |
-| 9 | Play account and digest; Firebase project; Apple account when iOS is scheduled | owner |
+| 9 | Play account and the Play certificate's digest (after release 1, D3); Firebase project; Apple account when iOS is scheduled | owner |
 
 Text this plan makes stale (not edited here):
 
@@ -348,7 +356,7 @@ mailboxes; the HTTP action that needs enclave egress is not offered
 - Whether calls need a relay code change or only new opaque deposit
   types, and exactly what a staging vault would need to reach a TURN
   service.
-- The F-Droid build's signer follows from D3 (the upload key); the build's reproducibility is being established on `build/fdroid-foss`.
+- The F-Droid build's signer follows from D3 (VettID's own key, called the upload key before 0.1.1); the build's reproducibility is being established on `build/fdroid-foss`.
 - Which vault operations of the unused features a peer can reach (D4).
 - Whether an automated test run deletes its test member today (§2.5.4
   states the rule, not the current behaviour).
