@@ -617,7 +617,7 @@ root, runs only as channel `dev` (its blobs open nowhere else), and the
    register (`unavailable`, `limit`, another refusal, `gateway_error`
    retries) the on-phone service runs as the fallback and the member's
    choice stays Google push (ANDROID-PLAN §4 Notification modes, 4;
-   beyond `limit` an owner decision is pending there).
+   the fallback beyond `limit` was approved by the owner on 2026-10-11).
 2. A wake arrives as a high-priority data message in
    `FirebaseMessagingService.onMessageReceived`. The app collects from its
    relay mailbox over its normal vault session (Relay §6), decrypts on the
