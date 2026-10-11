@@ -1,16 +1,21 @@
 ---
 title: RELEASE-UPDATES
 status: draft
-version: 0.3.0
-date: 2026-10-10
+version: 0.3.1
+date: 2026-10-11
 owner: Al Liebl (Mesmer)
 related:
   - VAULT-PLAN.md (D1 re-sealing per release, D3 reproducible builds)
   - VAULT-MESSAGING.md (0.10.0) §11.10 (normative: manifest, sealing, approval, the move, app behaviour, the key check incl. retirement)
-  - VAULT-RELEASES.md (0.1.10) §3 (statuses, cadence, retirement and notices), §7 (manifest and release log)
+  - VAULT-RELEASES.md (0.1.11) §3 (statuses, cadence, retirement and notices), §7 (manifest and release log)
   - ANDROID-PLAN.md (0.1.31) §4 "Vault update", "What's new" (the app's side of §2)
   - ARCHITECTURE.md
 changelog:
+  - 0.3.1: owner decision of 2026-10-11 (STAGING-DEVELOPMENT-PLAN D2;
+    VAULT-RELEASES 0.1.11 §3.5; a draft for the owner's review): the
+    first production release, which goes to a small group of testers,
+    is kept for 90 days after release 2 replaces it, not 12 months;
+    every later release keeps the 12 months (§3)
   - 0.3.0: owner request 2026-10-10 ("when we let users know about new
     vault updates we need to provide them with some way to see the
     change log so they know what is changing"). Every release on every
@@ -37,7 +42,7 @@ identified by a measurement called **PCR0**. Your vault is sealed so that
 only the release you approved can open it. **A new release cannot read
 your vault until you approve it.** You decide when to move, within a
 long window: each release is kept for at least a year after a newer one
-replaces it (§3).
+replaces it (§3; the first release, for testers, for 90 days).
 
 This page explains how that works for members, and why. The protocol is
 specified in VAULT-MESSAGING §11.10; the decision and its operational
@@ -123,6 +128,12 @@ notice, and then an end date (owner decisions of 2026-10-04).
   period may be slower. A deprecated release is kept working for what you
   need to leave it: unlock, approve a move, lock, recovery. New features
   and fixes go only into newer releases.
+- **The first release is the exception** (0.3.1). Release 1 goes to a
+  small group of testers and is kept for **90 days** after release 2
+  replaces it. Its testers are told so when they join, and its release
+  log entry says so. The notices are the same; the first one comes when
+  release 2 is published. Every later release has the 12
+  months.
 - **Notice.** 90 days before the end date the release becomes
   **retired**. The app shows the date at every unlock, and VettID emails
   you 90, 30, 7 and 1 days before it.

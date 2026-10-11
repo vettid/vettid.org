@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.25.0
+version: 0.26.0
 date: 2026-10-11
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -13,13 +13,30 @@ related:
   - PUSH-GATEWAY.md (0.4.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.4.0)
-  - ANDROID-PLAN.md (0.1.33)
+  - ANDROID-PLAN.md (0.1.35)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
   - VAULT-RELEASES.md (0.1.6, approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
+  - STAGING-DEVELOPMENT-PLAN.md (0.1.0; D4, D5)
 changelog:
+  - 0.26.0: normative; **needs a vault release** (staging S10 first;
+    owner decisions D4 and D5 of 2026-10-11, STAGING-DEVELOPMENT-PLAN
+    0.1.0 §6; §15 item 34; a draft for the owner's review). Two new
+    release constants (§11.10.8). **`features`**: the optional features
+    a channel's images register (`actions`, `calls`, `intro`, `leash`,
+    `location`, `presence`, `wallet`). A feature not listed is not
+    registered: its types are unknown types (`unsupported_type`, §5.3),
+    it keeps no state and none of its hooks run. Staging lists all
+    seven; production lists none, and gains one only when it has passed
+    the promotion checklist. A channel's list only grows.
+    **`android_package`**: the Android package a channel's images
+    accept in key attestation, `com.vettid.app` in production and
+    `com.vettid.app.staging` in staging (it was one constant for both
+    channels), so that a phone can hold both apps; what follows the
+    package, and how the existing staging vaults move (§10, §11.7,
+    §11.10.8, §15 item 34; VAULT-RELEASES 0.1.11, ANDROID-PLAN 0.1.35)
   - 0.25.0: normative, additive; no enclave change and no vault release
     (owner decision of 2026-10-11, "we should allow a typed recovery
     code"; §15 item 33; a draft for the owner's review): the recovery
@@ -3506,6 +3523,11 @@ authentication), messaging, the credential, items, tags, profile,
 settings, audit, feed, calls, LEASH, share rules and grants,
 critical-item use, shared actions, introductions, location, presence and
 the wallet are in §10.1–§10.18, and push in §14 (0.24.0).
+
+(0.26.0) The types of the optional features (`actions`, `calls`,
+`intro`, `leash`, `location`, `presence`, `wallet`) exist only in a
+release whose channel lists the feature (§11.10.8, "Feature allowlist");
+in any other release they are unknown types (§5.3).
 
 Every flow between vaults is a set of **events** correlated by ids in
 their bodies (`request_id`, `fetch_id`, `invocation_id`), never a V↔V
@@ -7928,6 +7950,12 @@ challenge at every unlock.
   - The enclave stores the attested public key with that app's unlock key in
     the sealed header. Each unlock carries a signature over `challenge` by
     that key.
+  - (0.26.0) The package name is the channel's `android_package`
+    (§11.10.8): `com.vettid.app` in production, `com.vettid.app.staging`
+    in staging. It is checked where an attestation is verified
+    (enrollment, a transfer, a recovery's register). An unlock and a
+    release approval check the stored key's signature and the stored
+    chain's revocation status, not the package again.
 - **GrapheneOS** (owner decision, 2026-10-03; 0.9.0). GrapheneOS runs
   with the device's bootloader locked to its own signing key, so the
   attestation reports `verifiedBootState` `SelfSigned`. The enclave
@@ -8722,6 +8750,10 @@ recorded in the build's measurements:
   production, `https://push.staging.vettid.org` in staging; optional in
   dev, where it names the gateway stand-in, PUSH-GATEWAY §10.4). Without
   it `push.register` is answered `unavailable` (§14.1).
+- (0.26.0) `android_package`, the Android package name accepted in key
+  attestation (§11.7; "Android package" below);
+- (0.26.0) `features`, the optional features the image registers
+  ("Feature allowlist" below).
 
 GrapheneOS verified-boot keys and the vendor roots stay in code and are
 the same for every channel. A release build MUST refuse a channel file
@@ -8736,6 +8768,214 @@ production code; each image refuses sealing keys outside its channel's
 account (§11.10.2); and production keys' policies name production PCR0s
 only (§11.10.7). Apps pin per channel too: a production app pins only the
 production manifest keys and URL.
+
+**Feature allowlist (0.26.0; owner decision D4, §15 item 34).** Until
+0.26.0 every image registered every feature of §10, whether an app used
+it or not. From 0.26.0 a channel file carries `features`, the list of
+the **optional** features its images register. The names are the
+feature packages' own (vettid-vault `features/<name>`):
+
+| Feature | Its types | Section | A connection can send it |
+|---|---|---|---|
+| `actions` | `action.*` | §10.14 | `action.offered`, `.invocation`, `.result` |
+| `calls` | `call.*` | §10.10 | `call.offer`, `.answer`, `.end`, `.ice`, `.ringing` |
+| `intro` | `intro.*` | §10.15 | `intro.offer`, `.answer`, `.connect`, `.invite`, `.link`, `.closed` |
+| `leash` | `leash.*`, `agent.request` | §10.11 | nothing (apps, desktops and agents only) |
+| `location` | `location.*` | §10.16 | `location.update`, `.shared`, `.stopped`, `.requested`, `.snapshot` |
+| `presence` | `presence.*` | §10.17 | `presence.ping`, `.pong` |
+| `wallet` | `wallet.*` | §10.18 | nothing directly (only through `actions`) |
+
+The last column is what a connection may send today to a vault whose
+owner never used the feature (the `From` lists of each package's types).
+
+The other features are **always registered and are not names of the
+list**: `audit`, `feed`, `messaging`, `credential`, `items`, `grants`,
+`critical` and `connauth`, beside everything the vault core registers
+itself (lifecycle, sessions, devices, connections, settings, the
+account, push). The v1 app uses all of them.
+
+- **The file.** `features` is an array of zero or more of the seven
+  names, each at most once, in ascending byte order, so that one set has
+  one file. It is embedded with the rest of the channel file: the list
+  is in the tagged tree, in the reproducible build and in PCR0.
+- **Not listed means not registered.** The image does not construct the
+  feature. Then:
+  - each of its types is an unknown type: a message without `re` is
+    answered with `error` code `unsupported_type` and one with `re` is
+    dropped, as §5.3 says for any type the vault does not know, with the
+    same answer to an app, a desktop, an agent and a connection;
+  - it has no state: no `features.<name>` entry is created in the
+    vault's state, and nothing is migrated for it;
+  - none of its hooks run (activity, a connection or device removed,
+    the owner hold, a settings change, deletion), and it sends nothing;
+  - what others do through it is unavailable. Without `leash`: a share
+    rule for an agent is answered `not_found` (as today when no feature
+    keeps agent rules), and `device.pair.create` with `role: "agent"`
+    is answered `bad_request`, as an unknown role is (new: an agent
+    without LEASH could do nothing). Without `wallet`: the wallet
+    actions of §10.14 answer `unavailable` (as today), so `actions` may
+    be listed without `wallet`. Without `location`: `settings.set` of a
+    `location.history.*` member is answered `bad_request` (new);
+    `settings.get` is unchanged.
+- **No list in the protocol.** No message carries a list of features or
+  types today, and 0.26.0 adds none: an app or a peer learns that a
+  feature is absent from `unsupported_type`. The list is public all the
+  same: it is in the tagged channel file, and a release's log entry
+  names each feature the release turns on.
+- **Turning a feature on.** A later release of the channel may add a
+  name. A vault that moves into it has no entry for the feature, so the
+  feature starts empty, as in a new vault, and its entry is written with
+  a later flush. The member is asked nothing beyond the release approval
+  (§11.10.3). This is what already happens when a release adds a
+  feature. Production adds a name only for a feature that passed
+  STAGING-DEVELOPMENT-PLAN §2.4.
+- **Never off.** A channel's list only grows. A release whose list
+  lacks a name that the channel's previous release listed is refused by
+  the release check (below), because members may hold that feature's
+  state. An image that nevertheless meets a `features.<name>` entry of
+  a feature it does not register MUST carry the entry unchanged through
+  every flush and move, and MUST NOT read, migrate or delete it.
+- **The release check** (`releasecfg check`, the release build's gate):
+  1. `features` missing, not an array of strings, a placeholder, a name
+     that is not one of the seven (an always-registered feature's name
+     included), a repeated name or names out of order: malformed.
+  2. Given the channel file of the channel's previous release (the
+     release workflow reads it from the tag
+     `release/<channel>/<N-1>`), a list that lacks one of that file's
+     names: refused. A previous file from before 0.26.0 counts as
+     listing all seven. Production release 1 has no previous release. A
+     rebuild from the tag alone runs rule 1 only.
+- **The development build** has no channel file and registers
+  everything, unless its test configuration names a list, so that the
+  app is run against production's list before a production release.
+
+The initial lists:
+
+| Feature | Staging (S10) | Production release 1 | Why |
+|---|---|---|---|
+| `audit`, `feed` | always | always | History and the Notifications screen; every feature records through them |
+| `credential` | always | always | The Protean Credential (ANDROID-PLAN D3) |
+| `messaging`, `items`, `grants`, `critical`, `connauth` | always | always | ANDROID-PLAN D3 and phase A5: connections and messaging, items, share rules, grants, critical-item approvals, member authentication. The app sends `message.*`, `item.*`, `share.*`, `grant.*`, `critical-secret-use.*` and `connection.authenticate.*` |
+| `calls` | on | **off** | No app code; the calling service is not built (CALLING-SERVICE). Phase 2 of STAGING-DEVELOPMENT-PLAN §5 |
+| `leash` | on | **off** | No connector, agent or desktop works with this vault (LEASH-IMPLEMENTATION); the app sends no `leash.*`. Phase 3 |
+| `wallet` | on | **off** | No app code. Phase 4 |
+| `location` | on | **off** | No app code. Phase 5 |
+| `presence` | on | **off** | No app code. Phase 6 |
+| `actions`, `intro` | on | **off** | ANDROID-PLAN §4 lists shared actions and introductions among the later screens; the app sends no `action.*` or `intro.*`, and shows what arrives as "Not available in this version of the app" |
+
+So `staging.json` has `"features": ["actions", "calls", "intro",
+"leash", "location", "presence", "wallet"]`, which is what S1–S9
+registered (S10 changes no behaviour), and `prod.json` has
+`"features": []`.
+
+Not switched by this list: pairing a desktop and its access sessions
+(§6.7, §6.8) are core operations with no feature package. They stay
+answered in every release (§15 item 34, open for the owner).
+
+**Android package (0.26.0; owner decision D5, §15 item 34).** Until
+0.26.0 every image accepted the one package `com.vettid.app` (a constant
+in the enclave's code), and the staging app differed from the production
+app only in its signing key, so a phone could hold one of them. From
+0.26.0 the package is the release constant `android_package`:
+
+| Channel | `android_package` |
+|---|---|
+| production | `com.vettid.app` |
+| staging | `com.vettid.app.staging` |
+
+A channel file names exactly its channel's value and any other is
+malformed (as for `push_url`), so a production image can never accept
+the staging app's package, nor the reverse. It is one value, not a list.
+The development enclave's further packages (its device policy file) are
+unchanged, and the iOS app ID stays a constant in code.
+
+What follows the package, each changing with the staging release that
+first pins the new value (S10):
+
+| Where | Until S10 | From S10 |
+|---|---|---|
+| Key attestation in the staging image (§11.7) | `com.vettid.app` | `com.vettid.app.staging` |
+| The app's `staging` build type (ANDROID-PLAN §5) | no id suffix | `applicationIdSuffix ".staging"` |
+| `assetlinks.json` of account.staging.vettid.org (the same-device setup link, §11.12.1) | package `com.vettid.app` with the production upload key's digest only, so the staging build's link is not a verified App Link | package `com.vettid.app.staging` with the digests of staging's `android_signers`. Production's account site is unchanged |
+| `assetlinks.json` of relay.vettid.org (invitation links, §6.4) | `com.vettid.app` with production's and staging's digests (RELAY-PROTOCOL §6.11) | Unchanged for now: the relay is production's and is shared (STAGING-DEVELOPMENT-PLAN §3 risk 6). The staging app's invitation links open the relay's `/connect` page and its `vettid:` link, and Android asks which app when both are installed. A second statement for the staging package needs a relay release (§15 item 34) |
+| The staging push gateway's accepted Android app ids (`PUSH_FCM_APP_IDS`, PUSH-GATEWAY §10.4) | `com.vettid.app` | `com.vettid.app.staging`. The app's `push.register` `app_id` is its application id (§14.1) and follows by itself |
+| The staging Firebase project's Android app (PUSH-GATEWAY §14.1), when it exists | not created | `com.vettid.app.staging` |
+| Google Play and F-Droid | | Production's id only; the staging build is not published to a store |
+
+**Moving the existing staging vaults** (four: the test members' and the
+owner's). To Android a new package is a different app. The new staging
+build installs beside the old one with its own Keystore and has none of
+its keys; no update carries a vault across.
+
+- **S10 pins only `com.vettid.app.staging`; no release accepts both
+  ids.** This locks nobody out, because the package is checked only when
+  an attestation is verified (§11.7). The old staging build keeps
+  unlocking its vault on S9, can approve the move to S10 and keeps
+  unlocking it there. On S10 it can no longer enroll, receive a transfer
+  or register for a recovery.
+- Per vault, in this order:
+  1. Move the vault to S10 with the old build. (S9 pins the old package:
+     the new build can attach to nothing that is still sealed to S9.)
+  2. Install the new build. Do not uninstall the old one first: that
+     erases the only keys the vault knows.
+  3. Attach the vault to the new build, one of: a **direct transfer**
+     (§6.7.1), at once, when the new build is on another phone that can
+     scan the old build's QR; a **recovery** (§11.11) on the same phone,
+     24 hours, its code typed (§11.11.10) or scanned from another
+     screen; or, since staging vaults are disposable
+     (STAGING-DEVELOPMENT-PLAN §2.1), **delete the vault and enroll
+     again**.
+  4. Uninstall the old build.
+- A vault left on S9 with the old build works until S9 is removed.
+- A push registration made under the old id stops waking once the
+  gateway's list changes (PUSH-GATEWAY §5.2, step 2) and is replaced by
+  the new build's `push.register`.
+- Why not both ids for one release: bindings already made are not
+  checked again, so a second id would help no unlock; it would only
+  spare four disposable vaults a transfer or a 24-hour wait, at the
+  price of a list to specify, measure and test, and of new enrollments
+  under the old id for as long as it stayed.
+
+Production has no vault yet and nothing to move: release 1 pins
+`com.vettid.app` through the file instead of the constant. From S10 a
+phone can hold the production app and the staging app side by side.
+
+**Tests required** (0.26.0; follow-up implementations).
+
+- `releasecfg`: every refusal of rule 1 for `features`; rule 2 both ways
+  (a name dropped is refused, a name added passes), with a previous file
+  from before 0.26.0; `android_package` missing, a placeholder, another
+  channel's value; the committed files (staging: seven names and
+  `com.vettid.app.staging`; production: none and `com.vettid.app`).
+- Vault, per optional feature, in a build without it: each of its types
+  is answered `unsupported_type` to an app and to a connection, and a
+  response of such a type is dropped; no `features.<name>` entry exists
+  after enrollment, unlock and a flush; with it, the existing vectors
+  are unchanged. With no optional feature at all, the flows the v1 app
+  uses pass.
+- Vault: a state holding an entry of an unregistered feature is byte for
+  byte the same after load, flush, lock, unlock and a move; a vault
+  enrolled without a feature and moved to a release with it uses the
+  feature and gains the entry.
+- Vault: `device.pair.create{role: "agent"}` and an agent share rule
+  without `leash`; `settings.set` of `location.history.*` without
+  `location`; a wallet action with `actions` and without `wallet`.
+- Vault, device attestation: in a channel build, an attestation naming
+  the other channel's package is refused at enrollment, at a transfer
+  and at a recovery's register; an unlock and a release approval by a
+  binding made under another package pass.
+- Build: the two channels' images of one commit differ in
+  `releasecfg_sha256` and PCR0, and each rebuilds to the same PCR0.
+- App: the `staging` variant's application id is
+  `com.vettid.app.staging` and `checkStagingApk` fails on any other; the
+  dev-stack exit test passes against a development enclave given
+  production's list.
+- vettid.org: `assetlinks.json` per stage; the push gateway's app ids
+  per channel.
+- End to end on staging at S10: a vault moved from S9 with the old
+  build; a direct transfer to the new build on a second phone; a
+  recovery to the new build on the same phone; an enrollment with the
+  new build; both builds installed on one phone.
 
 ### 11.11 Recovery
 
@@ -12085,6 +12325,69 @@ Follow-ups:
     vettid-vault: none, except the §16 vector in its reference client's
     tests if wanted.
 
+34. **Feature allowlist and the staging application id (0.26.0).**
+    Owner decisions D4 and D5 of 2026-10-11 (STAGING-DEVELOPMENT-PLAN
+    0.1.0 §6, "all as recommended"); a draft for the owner's review;
+    §11.10.8 is the design. Chosen:
+    1. **The list names the optional features only** (seven); the eight
+       the v1 app needs cannot be named, so no file can switch them off.
+       A feature added to the code later is off in every channel until a
+       channel file names it.
+    2. **`actions` and `intro` are optional too**, beyond the five
+       features D4 names: the app sends none of their types, and a
+       connection can send both to a vault whose owner never used them.
+    3. **An unlisted feature's types are unknown types**
+       (`unsupported_type`), not a new error code: release 1 freezes the
+       wire (VAULT-RELEASES §3.4 C2) and an old peer already knows this
+       answer.
+    4. **A list only grows**, in both channels, enforced by the release
+       check; an entry of an unregistered feature is carried untouched
+       if one is ever met.
+    5. **`android_package` is one value per channel**, fixed by the
+       channel as `push_url` is.
+    6. **S10 pins only the new staging id.**
+    Rejected:
+    - *A runtime switch* (a setting, or a value the host passes): it
+      would not be measured, and the host could turn a feature on.
+    - *Naming all fifteen features in the list:* a file could then omit
+      one the app needs, and the check would need a second list to
+      forbid it.
+    - *A capability list in `vault.status`:* a wire addition in the
+      release that freezes the wire, for something `unsupported_type`
+      already tells.
+    - *Deleting the state of a feature turned off:* a member's data
+      destroyed by a release they approved for another reason.
+    - *Both package ids for a transition release* (§11.10.8, "Moving the
+      existing staging vaults").
+    Open for the owner, each with the recommendation taken above:
+    - `device.pair.create{role: "agent"}` refused without `leash`
+      (recommended), or left as it is.
+    - Desktop pairing and access sessions are core and stay answered in
+      production release 1 although no desktop works with this vault
+      (recommended for release 1: no core change; the v1 app never sends
+      `device.pair.create`), or get a switch of their own.
+    - `settings.set` of `location.history.*` refused without `location`
+      (recommended), or accepted and inert.
+    - The only-grow rule on staging too (recommended: yes, with no
+      exception until one is needed), or production only.
+    - The relay's `assetlinks.json` gains a statement for the staging
+      package with its next release (recommended; until then the staging
+      app's invitation links are not verified App Links), or the staging
+      build stops declaring `relay.vettid.org`.
+    - Production's list is never run on staging hardware (channels
+      cannot cross): it is tested in the development enclave and by the
+      canary of the production candidate (VAULT-RELEASES §10.1, steps
+      8–9).
+      Accepted (recommended), or a staging release with production's
+      list is cut once before release 1, which the only-grow rule would
+      then have to allow.
+    Follow-ups, in order: vettid-vault (`releasecfg`, `features/all`,
+    `enclave/config.go`, the tests of §11.10.8, docs/MUST-COVERAGE.md);
+    vettid.org (`assetlinks.json` per stage, the staging gateway's app
+    ids); vettid-android (the `staging` application id; ANDROID-PLAN
+    0.1.35); then staging release S10 and the moves of §11.10.8;
+    vettid-relay with its next release.
+
 ## 16. Test vectors
 
 These vectors use fixed seeds and are for **test use only**. The complete
@@ -12373,6 +12676,22 @@ the 44 characters of `locator || code`. `0xd8d41` is `11011 00011 01010
 00001`, the characters `V`, `3`, `A`, `1`.
 
 ## 17. Changelog
+
+- **0.26.0** (2026-10-11): normative; owner decisions D4 and D5 of
+  2026-10-11 (STAGING-DEVELOPMENT-PLAN 0.1.0 §6; §15 item 34); a draft
+  for the owner's review. **Needs a vault release** (staging S10 first).
+  - §11.10.8: two new release constants. `features`, the feature
+    allowlist: the seven optional features, what "not registered" means
+    (`unsupported_type`, no state, no hooks), no list in the protocol,
+    turning a feature on, never off, the release check, the initial
+    lists (staging all seven, production none). `android_package`: per
+    channel, what follows the package, how the existing staging vaults
+    move, and why S10 pins only the new id. The tests required.
+  - §10: the optional features' types exist only where the feature is
+    listed. §11.7: the package is the channel's, and is checked when an
+    attestation is verified.
+  - §15 item 34: the decisions, what was rejected, what is open.
+  - VAULT-RELEASES 0.1.11 (§5.2) and ANDROID-PLAN 0.1.35 (§5) follow.
 
 - **0.25.0** (2026-10-11): normative, additive; owner decision of
   2026-10-11 ("we should allow a typed recovery code"; §15 item 33); a

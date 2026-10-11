@@ -277,6 +277,8 @@ W9 specifically:
 
 - Confirm the S1 and S2 key deletions (2026-10-12, 2026-10-13) and
   run the retirement drill with a vault and notice emails on S3 at S4.
+  (2026-10-11: now tracked in STAGING-DEVELOPMENT-PLAN §7, actions 2–4;
+  the S3 drill ends 2026-10-13.)
 - O6 decided 2026-10-06: keep 1 vCPU / 5120 MiB for release 1
   (VAULT-RELEASES §8.8, #142).
 - Canary path never exercised (P28a, B6); app support for an unpublished
