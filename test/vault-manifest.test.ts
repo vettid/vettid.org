@@ -536,7 +536,9 @@ describe('release log (RELEASE-UPDATES §5)', () => {
     expect(idx.serial).toBe(m!.serial);
     for (const r of m!.releases) {
       const e = idx.releases.find((x: any) => x.release === r.release);
-      expect(e).toMatchObject({ notes: r.notes, status: r.status, security: 'none', summary: f.releases.find((x) => x.release === r.release)!.log!.summary });
+      // The security level is the entry's own: S1–S9 are `none`, S10 is `urgent` (the key attestation chain fix).
+      const log = f.releases.find((x) => x.release === r.release)!.log!;
+      expect(e).toMatchObject({ notes: r.notes, status: r.status, security: log.security, summary: log.summary });
     }
   });
 
