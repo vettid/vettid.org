@@ -1,9 +1,17 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.33
+version: 0.1.35
 date: 2026-10-11
 changelog:
+  - 0.1.35: owner decision D5 of 2026-10-11 (STAGING-DEVELOPMENT-PLAN
+    0.1.0 §6; VAULT-MESSAGING 0.26.0 §11.10.8, "Android package"; a
+    draft for the owner's review): the `staging` build type's
+    application id becomes `com.vettid.app.staging`
+    (`applicationIdSuffix ".staging"`), from the build that goes with
+    staging release S10, so the production and staging apps install
+    side by side (§5, "Build types and application ids"). 0.1.34 is the
+    two distributions (vettid.org #219), open when this was written
   - 0.1.33: owner decision 2026-10-11 ("we should allow a typed
     recovery code"; VAULT-MESSAGING 0.25.0 §11.11.10, MEMBER-API 2.4.0;
     a draft for the owner's review): the recover screens gain **Type
@@ -1327,6 +1335,29 @@ one (translation-ready), accessibility labels required in review.
 
 Rules: features depend only on `:core:*`; no feature touches transport or
 crypto directly; one ViewModel per screen with immutable UI state.
+
+**Build types and application ids** (0.1.35; STAGING-DEVELOPMENT-PLAN
+D5).
+
+| Build type | Application id | Launcher label |
+|---|---|---|
+| `release` | `com.vettid.app` | VettID |
+| `staging` | `com.vettid.app.staging` (0.1.35; it was `com.vettid.app`) | VettID Staging |
+| `debug` | `com.vettid.app.dev` | VettID Dev |
+| `devStack` | `com.vettid.app.devstack` | VettID Dev Stack |
+
+The staging build gets `applicationIdSuffix ".staging"` with the build
+that goes with staging release S10, whose images accept exactly that
+package in key attestation (VAULT-MESSAGING 0.26.0 §11.10.8, which also
+lists what follows the package and how an existing staging vault moves
+to the new build: Android treats it as another app, so nothing is
+carried over by an update). The label and the signing key do not
+change. From then on the production and staging apps install side by
+side on one phone. `checkStagingApk` asserts the id; the staging
+manifest's App Link host (`account.staging.vettid.org`) is verified once
+that site's `assetlinks.json` names the new package; the app's
+`push.register` `app_id` is its application id and follows by itself.
+The staging id is never published to a store.
 
 ## 6. Phases
 

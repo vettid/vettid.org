@@ -37,7 +37,7 @@ which is why the vault's production keys need an account of their own
 |---|---|---|
 | `VettID` (management, existing) | Organization management; vettid.org services as today | Unchanged for now. Moving its workloads out of the management account is a later cleanup, not part of V5. |
 | `vettid-vault-prod` (new) | Production vault: release keys, manifest key A, vault data bucket, hosts | Pinned in every production image (O1). SCPs protect the key-policy roles and the policy-lockout bypass. |
-| `vettid-vault-staging` (new) | The whole staging copy (`-c stage=staging`): vault stacks plus member pool, tables, member API and sites under staging.vettid.org (W9), parked between releases | Own manifest key; keys with a 7-day deletion window (O2). Own zone staging.vettid.org, delegated from vettid.org. |
+| `vettid-vault-staging` (new) | The whole staging copy (`-c stage=staging`): vault stacks plus member pool, tables, member API and sites under staging.vettid.org (W9). Since 2026-10-11 the development channel, not parked between releases (STAGING-DEVELOPMENT-PLAN §2.1) | Own manifest key; keys with a 7-day deletion window (O2). Own zone staging.vettid.org, delegated from vettid.org. |
 | `proteus` (new) | The Proteus website (prote.us) | Moved out of the VettID account so the two projects share nothing but the organization. |
 
 - Accounts are created with AWS Organizations from the management account,

@@ -1,8 +1,8 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.10
-date: 2026-10-10
+version: 0.1.11
+date: 2026-10-11
 owner: Al Liebl (Mesmer)
 changelog:
   - 0.1.0: V5 plan. Release pipeline, keys, infrastructure, release
@@ -72,11 +72,23 @@ changelog:
     way; check:manifest checks both logs; staging S1–S9 backfilled with
     short entries; notice emails link the ending and the newest release's
     notes (§3.5). §10.1 steps 4, 5, 10 and 12 and §11.1 follow
+  - 0.1.11 (owner decisions of 2026-10-11, STAGING-DEVELOPMENT-PLAN
+    0.1.0 §6; a draft for the owner's review). **D2:** production
+    release 1's window is 90 days, for release 1 only, expressed as
+    `ends_after_days: 90` on its entry in `vault/releases/prod.json`;
+    the default stays 12 months and the KMS window 30 days (§3.5; §1,
+    §7, §10.3, §14, §15 O5 follow). **D4, D5:** the release constants
+    `features` and `android_package` (§5.2; VAULT-MESSAGING 0.26.0
+    §11.10.8). **D1, D11:** staging is the development channel, not
+    parked between releases; its releases are cut by hand, at most two
+    a week, and no nightly image exists; the text that said otherwise
+    now points to the plan (§1, §3.1, §3.3, §8.9, §11.1, §15 O2)
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.14.0) §11.10 release updates, §12.5 deletion, §13.5, §13.9
-  - RELEASE-UPDATES.md (0.3.0) — member-facing; §3 changes with this plan; §5 the release log
+  - RELEASE-UPDATES.md (0.3.1) — member-facing; §3 changes with this plan; §5 the release log
   - ANDROID-PLAN.md (0.1.31) — the app's "What's new" from the log
+  - STAGING-DEVELOPMENT-PLAN.md (0.1.0) — staging as the development channel; D1–D11
   - MEMBER-API.md "Vault", RUNBOOK.md, ARCHITECTURE.md
   - vettid-vault docs/SMOKE.md (hardware smoke test, 2026-10-02)
 classification: public (no secrets; safe for github.com/vettid)
@@ -112,7 +124,8 @@ production release 1 is tracked in W10-READINESS.
   or be listed for production, by construction (§3.1).
 - **Lifecycle.** `active` → `deprecated` (move-only) → `retired` (final
   notice) → `removed` (key scheduled for deletion, then deleted). Default
-  12 months from supersession to the deadline, configurable (§3.2).
+  12 months from supersession to the deadline, configurable (§3.2);
+  production release 1: 90 days (§3.5).
 - **Cadence.** One production release a month at most, plus security
   hotfixes; a month with nothing member-visible is skipped (§3.3).
 - **Spec changes before release 1** (§4): the §11.10.7 key check admits
@@ -136,7 +149,9 @@ production release 1 is tracked in W10-READINESS.
   live release (AMI from EC2 Image Builder, launch template, ASG). Old
   releases run on demand (§8).
 - **Cost.** About $90/month in production at steady state with one
-  always-on m7g.large; about $30 parked; staging about $10 parked (§8.9).
+  always-on m7g.large; about $30 parked. Staging is the development
+  channel and is not parked: about $100–120 a month, an estimate (§8.9;
+  STAGING-DEVELOPMENT-PLAN §3 risk 5).
 - **First deployment.** Member API vault routes dark first; staging
   release and hardware tests; production release 1 only when the Android
   app's signing key exists, because its digest is pinned in the image
@@ -166,7 +181,7 @@ promises to run a release for a bounded time, not forever.
 | Manifest key | test key in the repo | staging key (KMS, deletable) | key A (KMS) + key B (offline) |
 | Manifest URL | none (passed by vaultctl) | `https://staging.vettid.org/.well-known/vettid/pcr-manifest.json` | `https://vettid.org/.well-known/vettid/pcr-manifest.json` |
 | Sealing-key account | none | staging account | production account |
-| Release keys | dev sealer | §11.10.7 shape, retirement window 7 days, deleted after use | §11.10.7 shape, window 30 days, deleted only at retirement |
+| Release keys | dev sealer | §11.10.7 shape, retirement window 7 days, deleted when the release is removed (at most three staging releases are live, STAGING-DEVELOPMENT-PLAN §2.1, §2.5) | §11.10.7 shape, window 30 days, deleted only at retirement |
 | Device attestation | test CA | test CA **and** the real vendor roots | real vendor roots only |
 | Release numbers | 0 | its own sequence | 1, 2, 3, … |
 
@@ -199,7 +214,9 @@ that release's PCR0 (§4.2), so that §11.10.7 check 6 keeps passing.
 ### 3.3 Cadence and hotfixes
 
 - **Monthly train.** Code freezes on the first Monday; the release is cut
-  from `main` that week, spends at least a week in staging, and is
+  from `main` that week, from the commit of a staging release that
+  passes the promotion checklist (STAGING-DEVELOPMENT-PLAN §2.4, seven
+  quiet days on staging among its conditions), and is
   published in the third week. A month with no member-visible change is
   skipped: every release costs each member an approval.
 - **Hotfix.** A security fix ships as the next release number, cut from
@@ -207,8 +224,10 @@ that release's PCR0 (§4.2), so that §11.10.7 check 6 keeps passing.
   Its notes carry the urgency; members on affected releases are emailed.
   The fix is prepared in a private fork and the public source is pushed
   when the release is published (AGPL: source with the release).
-- **Never** "every merge": `main` builds a staging image nightly; only
-  the train or a hotfix creates a production release.
+- **Never** "every merge": only the train or a hotfix creates a
+  production release. Staging releases are cut by hand from a tag, at
+  most two a week (STAGING-DEVELOPMENT-PLAN §2.1); no nightly staging
+  image is built.
 
 ### 3.4 The move-only contract
 
@@ -273,6 +292,45 @@ recovery are emailed the same way.
 
 Shortened windows: a release with a known exploited vulnerability may get
 a shorter window, never under 60 days (owner decision O5).
+
+**Production release 1: 90 days** (0.1.11; owner decision D2 of
+2026-10-11, STAGING-DEVELOPMENT-PLAN §6). Release 1 goes early to the
+owner and named testers (at most 10) and freezes its wire formats and
+pinned signers for as long as it is live (§3.4), so its window W is
+**90 days, for release 1 only**. Release 2 and every later release keep
+the default of 12 months.
+
+- *What changes.* W for one release, nothing else. The notice period,
+  the emails, the rescue and O5's floor of 60 days are as above. The
+  30 days of `ScheduleKeyDeletion` after the deadline are a different
+  thing (`retirement_window_days`, pinned in the image and in the key's
+  policy, §4.1) and stay 30.
+- *How it is expressed.* Release 1's entry in
+  `vault/releases/prod.json` carries **`ends_after_days: 90`**, from the
+  release entry PR on (§10.1 step 5). It is a member of the release list
+  only, like `host` and `log`: it is not in the manifest or the image,
+  and no enclave or app reads it. An entry without it has the default.
+  `check:manifest` accepts the member only on production release 1 and
+  only with the value 90, and then refuses an `ends_at` on that entry
+  earlier than 90 days after release 2's `published_at`. (No check knew
+  W before: `ends_at` is set by hand, §7, §10.3.)
+- *The timeline.* W equals the notice period, so release 1 is never
+  `deprecated`: the manifest that makes release 2 `active` (T0) sets
+  release 1 `retired` with `ends_at` = T0 + 90 days. `active` to
+  `retired` is a forward step, which the manifest checks allow. Email 1
+  goes out with the notice job's next run, emails 2–4 at 30, 7 and 1
+  days, and the deadline, the rescue and the deletion follow the table.
+  The two parts marked "Not built" below are therefore needed by
+  T0 + 120 days, not a year later.
+- *What members are told.* Before T0 there is no date to show, so the
+  window itself is stated: by the owner to each tester with the
+  registration code; in release 1's log entry (`changes`: "This first
+  release is kept for 90 days after release 2 replaces it, not the
+  usual 12 months"); and on its release log page, whose "End date" line
+  reads "Not set (90 days after a newer release replaces it)" for an
+  entry with `ends_after_days`. From T0 the app, the release log and the
+  emails show the date as for any retired release (RELEASE-UPDATES
+  0.3.1 §3).
 
 *As built (W8).* The member API's daily `VaultNoticeJob` (MEMBER-API
 "Vault release notices") sends emails 1–4 (90, 30, 7, 1 days before
@@ -458,6 +516,8 @@ whose value is recorded in `measurements.json`):
 | `seal_account`, `seal_region` | the vault production account, `us-east-1` | owner decision O1 |
 | `retirement_principal`, `retirement_window_days` | the retirement role ARN, 30 | §4.1 |
 | `android_signers` | SHA-256 of the app signing certificate(s) | owner decision O8 |
+| `android_package` (0.1.11) | `com.vettid.app` (staging: `com.vettid.app.staging`) | VAULT-MESSAGING 0.26.0 §11.10.8, "Android package"; STAGING-DEVELOPMENT-PLAN D5 |
+| `features` (0.1.11) | the optional features the image registers: none in release 1 (staging: all seven) | VAULT-MESSAGING 0.26.0 §11.10.8, "Feature allowlist"; STAGING-DEVELOPMENT-PLAN D4 |
 | `relay_url` | `https://relay.vettid.org` | |
 
 GrapheneOS verified-boot keys and vendor roots stay in `vms/pins` (code).
@@ -653,7 +713,8 @@ role (trust, `PassRole`) to CloudFormation's deploy role.
   key per entry and one release stack per entry with `host`; synth fails on
   an invalid file. The files are also valid `vaultctl manifest render
   -releases` input (it ignores the extra members). The window is not a
-  field: `ends_at` is set explicitly per §10.3.
+  field: `ends_at` is set explicitly per §10.3. (0.1.11: one exception,
+  `ends_after_days` on production release 1, §3.5.)
 - **Served files:** production `website/.well-known/vettid/pcr-manifest.json`;
   staging `vault/staging/pcr-manifest.json`, served byte for byte at
   staging.vettid.org by `VettidOrgStageSiteStack` (W9). Staging has
@@ -1125,8 +1186,10 @@ release, not a redeploy (W10-READINESS R3). Plenty for the preview.
 | **Total, current release always on** | **~90** |
 | Total, parked (minimum 0, on-demand start only) | ~30 |
 
-Staging, parked: about $10 (its few keys deleted after use, a parked
-group, the shared relay or a parked staging relay). Image Builder is free
+Staging (0.1.11): no longer parked. As the development channel it is
+estimated at about $100–120 a month (one host most of the time, the
+fixed parts, three keys, the push gateway; STAGING-DEVELOPMENT-PLAN §3
+risk 5 and §8.2), on the shared production relay. Image Builder is free
 apart from about 30 minutes of build instance per AMI. GitHub's arm64
 runners are free for public repositories. The relay (~$55) is already
 running and counted in RUNBOOK. VAULT-PLAN's earlier "keys kept forever"
@@ -1252,6 +1315,8 @@ A monthly checklist driven by the release list (`ends_at` per release),
 with the notice job sending the emails of §3.5 automatically:
 
 1. At T0 + W − 90 days: set `retired` and `ends_at` = D; publish.
+   (Production release 1, W = 90 days: at T0, in the manifest that makes
+   release 2 `active`, §3.5.)
 2. At D: set `removed`; publish; delete the release stack (instances
    stop; `available` false; API 410); as the retirement role,
    `aws kms schedule-key-deletion --key-id <arn> --pending-window-in-days 30`;
@@ -1274,7 +1339,8 @@ tables, vault stacks, the staging manifest under staging.vettid.org,
 staging keys with the production shape and a 7-day window. Relay: the
 production relay at first (test mailboxes are harmless and the staging
 image pins it), a staging relay deployed on demand when relay changes need
-testing. Everything parked between releases.
+testing. (0.1.11) Staging is the development channel and is not parked
+between releases; its rules are STAGING-DEVELOPMENT-PLAN §2.
 
 *As built (W9, part A: CDK).* `-c stage=staging --profile vault-staging`
 builds, all in vettid-vault-staging: `VettidOrgStageDnsStack` (zone
@@ -1291,8 +1357,9 @@ GuardDuty cover the account). Staging has had no release log, its
 notices linking production's; from 0.1.10 it has its own at
 `https://staging.vettid.org/security/releases/` (§7 "Release notes on
 every channel"). Order and manual steps: RUNBOOK "Staging". Idle cost of
-the main stacks about $10/month, so parking needs nothing beyond the
-scaler's zero groups.
+the main stacks about $10/month. A release group with no leased vault
+still scales to zero (§8.6), but staging as a whole is no longer parked
+(STAGING-DEVELOPMENT-PLAN §2.1, §2.5).
 
 ### 11.2 Hardware smoke on every release candidate
 
@@ -1419,7 +1486,8 @@ W4 can go any time; W2 and W3 can run beside W1; W5–W8 follow W3.
    and alarms; it remains the sharpest edge.
 2. **Release 1's code is frozen for a year or more.** Every wire and
    manifest decision in it binds the apps and the member API until it is
-   removed. Hence §4 before release 1, and a deliberately small release-1
+   removed. (0.1.11: release 1 itself is removed 90 days after release 2
+   is published, §3.5; the risk then passes to release 2.) Hence §4 before release 1, and a deliberately small release-1
    surface.
 3. **Approval fatigue.** Monthly prompts may train members to approve
    blindly, or to ignore them until the deadline. Skipping empty months and
@@ -1453,10 +1521,10 @@ All ten recommendations below were **accepted by the owner on 2026-10-04**.
 | # | Question | Recommendation |
 |---|---|---|
 | O1 | Account for production vault keys and hosts (pinned in every image; blocks release 1) | **A separate vault production account** in the existing organization, with SCPs protecting the roles and the bypass flag. The current account is the management account, which SCPs cannot restrict. (Relays stay where they are.) |
-| O2 | Staging | **A separate staging account**, full copy, parked between releases (as ACCOUNT-ADMIN-PLAN §3 already foresees) |
+| O2 | Staging | **A separate staging account**, full copy, parked between releases (as ACCOUNT-ADMIN-PLAN §3 already foresees). *2026-10-11: no longer parked; staging is the development channel (STAGING-DEVELOPMENT-PLAN D1)* |
 | O3 | Manifest key custody | **Key A in KMS** (vault account, owner-only signer role with MFA), **key B offline** on a hardware token in a safe; both pinned. A separate signing account only if a second operator joins. |
 | O4 | Cadence | **Monthly at most**, skipping months without member-visible change; hotfixes any time |
-| O5 | Retirement window | **12 months** from supersession, final notice 90 days, KMS window 30 days; for an exploited vulnerability, a shorter window of **no less than 60 days** |
+| O5 | Retirement window | **12 months** from supersession, final notice 90 days, KMS window 30 days; for an exploited vulnerability, a shorter window of **no less than 60 days**. *2026-10-11 (STAGING-DEVELOPMENT-PLAN D2): production release 1 only, 90 days (§3.5)* |
 | O6 | Instance size | **m7g.large**, enclave 1 vCPU and 5 GiB. Measured on S3 (W9, §8.8); owner 2026-10-06: kept for release 1, revisit when unlock queueing shows in metrics |
 | O7 | Always-on minimum for the current release | **0 until production members exist** (on-demand start, ~2–3 min first unlock), **1 from the Android beta** on |
 | O8 | Android signing digest(s) to pin (blocks release 1) | Pin the **Play app signing certificate and the upload certificate** used for direct builds, decided when the Android signing key is created |
