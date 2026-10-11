@@ -28,7 +28,7 @@ function previousIndex(root: string, channel: Channel): LogIndex {
 }
 
 function files(root: string, manifest: LogManifest | null, file: ReleaseFile): Map<string, string> {
-  return renderLog(buildIndex(previousIndex(root, file.channel), manifest, file), file.channel);
+  return renderLog(buildIndex(previousIndex(root, file.channel), manifest, file), file.channel, file);
 }
 
 /** Problems with a channel's committed log (stale or missing pages, a stale index.json); the channel is the file's. */

@@ -337,6 +337,32 @@ reads (the running services are not affected; the next push deploy fails
 until they are back). Commit each value as soon as its deploy has worked
 (the drift check reports the difference until then).
 
+### Android app ids per channel (`PUSH_FCM_APP_IDS`)
+
+Not context: `PUSH_APP_IDS` in `lib/config.ts`. A channel's gateway
+accepts one Android `app_id`, the channel's `android_package`
+(VAULT-MESSAGING 0.26.0 §11.10.8): production `com.vettid.app`, staging
+**`com.vettid.app.staging`** (it was `com.vettid.app` until staging
+release S10; STAGING-DEVELOPMENT-PLAN D5). The iOS ids did not change.
+
+The change reaches the running staging gateway only with a deploy of
+`VettidOrgPushStack` **in the management account, on the owner's
+go-ahead**, together with S10 and the first Android build that has the
+`.staging` application id:
+
+```bash
+npx cdk diff   VettidOrgPushStack --exclusively     # one container environment value: PUSH_FCM_APP_IDS
+npx cdk deploy VettidOrgPushStack --exclusively     # a new task definition revision; the service replaces its tasks (rolling)
+curl -s -o /dev/null -w '%{http_code}\n' https://push.staging.vettid.org/v1/health     # 200
+```
+
+Earlier is harmless, later is not: while `stagingPushPlatforms` is empty
+the gateway answers `platform_invalid` to every registration whatever the
+list says, so nothing that works today depends on it; but once `fcm` is
+on, a gateway still listing `com.vettid.app` refuses the new build's
+`push.register`. A registration made under the old id stops waking when
+the list changes and is replaced by the new build's (PUSH-GATEWAY §5.2).
+
 ### What is where
 
 - **`VettidOrgPushDataStack`** (stateful): the key, the log groups, the
@@ -703,6 +729,27 @@ window** (30 days in production; any other window is refused by the key
 policy), with a rescue (cancel, enable, restart, move) on request within
 that window (VAULT-RELEASES §3.5, §10.3):
 `AWS_PROFILE=vault-prod-key-retirement aws kms schedule-key-deletion --key-id <arn> --pending-window-in-days 30`.
+
+**Production release 1 is kept for 90 days, not 12 months** (VAULT-RELEASES
+0.1.11 §3.5, owner decision D2; release 1 only). Its entry in
+`vault/releases/prod.json` carries `"ends_after_days": 90` from the
+release entry PR on (W10-READINESS §3 step 5). The member belongs to the
+release list alone: it is never in the manifest, the image or the log's
+`index.json`. What follows from it:
+
+- The validation (CDK synth, `npm test`, `check:manifest`,
+  `vault:manifest`) accepts the member only on production release 1 and
+  only as 90, and then refuses an `ends_at` on release 1 earlier than 90
+  days after release 2's `published_at`. A later date passes.
+- Release 1 is never `deprecated`: in the same edit that makes release 2
+  `active` (T0), set release 1 `retired` with `ends_at` = release 2's
+  `published_at` + 90 days, and sign and publish that manifest. The
+  notice job then sends email 1 on its next run and the others at 30, 7
+  and 1 days.
+- Until then release 1's log page says "End date: Not set (90 days after
+  a newer release replaces it)"; every other release says 12 months.
+- The 30 days of `schedule-key-deletion` above are another window
+  (`retirement_window_days`) and stay 30.
 
 ### Host stack (W6), first deployment
 
@@ -1138,6 +1185,46 @@ until the link exists, and the page then says the app is not available
 yet. To set one, add it to cdk.json `"context"` (https only; the synth
 fails otherwise), commit it (PR) and deploy `VettidOrgAccountSiteStack`
 for that stage.
+
+### App Links: `assetlinks.json` per stage (account site)
+
+Each stage's account site serves `/.well-known/assetlinks.json`, written
+at deploy from `ANDROID_APP_LINKS` in `lib/config.ts`, so that the
+same-device setup link `https://account.<zone>/vault/enroll/#s=…` opens
+in that stage's app as a verified App Link (VAULT-MESSAGING §11.12.1;
+0.26.0 §11.10.8 "Android package", STAGING-DEVELOPMENT-PLAN D5):
+
+| Stage | Host | Package | Certificate digests |
+|---|---|---|---|
+| prod | account.vettid.org | `com.vettid.app` | the production upload key; the Play app-signing key when it exists (O8) |
+| staging | account.staging.vettid.org | `com.vettid.app.staging` | the two staging signers (the owner's staging key and the automation key) |
+
+One statement per stage, never both. The package and the digests are the
+channel's `android_package` and `android_signers` in vettid-vault
+`enclave/releasecfg/<channel>.json` (there lowercase hex, here uppercase
+with colons): a signer added or removed there is a PR here and a deploy
+of that stage's `VettidOrgAccountSiteStack`. The relay's own
+`assetlinks.json` (relay.vettid.org, invitation links) is the relay's
+and is not changed from here.
+
+Staging's statement goes live with staging release S10 and the first
+Android build whose application id is `com.vettid.app.staging`:
+
+```bash
+npx cdk diff   VettidOrgAccountSiteStack -c stage=staging --profile vault-staging    # the site deployment's assets only
+npx cdk deploy VettidOrgAccountSiteStack -c stage=staging --profile vault-staging
+curl -s https://account.staging.vettid.org/.well-known/assetlinks.json               # com.vettid.app.staging, two digests
+# On a phone with the new build (Android verifies at install; re-verify after the deploy):
+adb -s <serial> shell pm verify-app-links --re-verify com.vettid.app.staging
+adb -s <serial> shell pm get-app-links com.vettid.app.staging                        # account.staging.vettid.org: verified
+```
+
+Deploying before S10 breaks nothing that works today: until now staging
+served production's package with production's digest only, so no staging
+build's setup link was ever a verified App Link. An old staging build
+(`com.vettid.app`, staging-signed) is unverified before and after.
+Production's document is unchanged; a production deploy of the account
+site shows no difference from this.
 
 ### Setup codes and app keys (MEMBER-API 2.0.0)
 

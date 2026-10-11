@@ -97,14 +97,16 @@ export class VettidOrgAccountSiteStack extends cdk.Stack {
       logGroupName: `aws-waf-logs-${resourceName(config, 'account')}`,
     });
 
+    const assetLinks = androidAssetLinks(config.stage);
     new StaticSite(this, 'Site', {
       hostName: hostName(config, 'account'),
       hostedZone,
       sourceDir: 'sites/account',
       notFoundPage: '404.html',
       runtimeConfig: accountSiteConfig(config),
-      // Sign-in links open in the Android app (App Links).
-      wellKnown: { 'assetlinks.json': androidAssetLinks() },
+      // The same-device setup link opens in this stage's Android app (App
+      // Links): production names com.vettid.app, staging com.vettid.app.staging.
+      ...(assetLinks ? { wellKnown: { 'assetlinks.json': assetLinks } } : {}),
       // Signed-out visitors never get the account page shell (see COOKIES.present).
       // The recovery cancel link (/vault/recovery/cancel) is outside it: it
       // needs no session.

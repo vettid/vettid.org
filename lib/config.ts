@@ -212,16 +212,18 @@ export interface PushGatewayConfig {
 }
 
 /**
- * What each channel's gateway accepts (PUSH-GATEWAY §10.4). The staging
- * Android build has the production application id (vettid-android
- * `app/build.gradle.kts`: staging images pin the package `com.vettid.app`
- * and tell the builds apart by signing key); the staging iOS app has its
- * own bundle id. An iOS registration's `app_id` is the app's bundle id
+ * What each channel's gateway accepts (PUSH-GATEWAY §10.4). An Android
+ * registration's `app_id` is the app's application id, which is the
+ * channel's `android_package` (VAULT-MESSAGING 0.26.0 §11.10.8, "Android
+ * package"; ANDROID-PLAN 0.1.35 §5): `com.vettid.app` in production,
+ * `com.vettid.app.staging` in staging from staging release S10 on (until
+ * then the staging build had production's id). The staging iOS app has its
+ * own bundle id too. An iOS registration's `app_id` is the app's bundle id
  * (the `apns-topic`), never the notification service extension's.
  */
 const PUSH_APP_IDS: Record<PushChannel, { fcm: string[]; apns: string[] }> = {
   prod: { fcm: ['com.vettid.app'], apns: ['com.vettid.app'] },
-  staging: { fcm: ['com.vettid.app'], apns: ['com.vettid.app.staging'] },
+  staging: { fcm: ['com.vettid.app.staging'], apns: ['com.vettid.app.staging'] },
 };
 
 const PUSH_CHANNELS: readonly PushChannel[] = ['prod', 'staging'];
@@ -298,30 +300,66 @@ export function channelVault(channel: 'prod' | 'staging'): { stage: string; vaul
   return { stage: channel, vault: { ...v, vaultsStreamArn: '' } };
 }
 
-/**
- * The Android app's sign-in App Link (MEMBER-API "Auth"): account.vettid.org
- * publishes /.well-known/assetlinks.json so that
- * https://account.vettid.org/auth/... opens in the app. Each entry is the
- * SHA-256 of a certificate the app is signed with: the upload key (builds
- * signed by the owner) now; the Play app-signing key is added once the Play
- * Console shows it (VAULT-RELEASES O8). The same digests are pinned in
- * vettid-vault enclave/releasecfg/prod.json `android_signers`.
- */
-export const ANDROID_APP_LINKS = {
-  packageName: 'com.vettid.app',
-  sha256CertFingerprints: [
-    '31:A1:96:13:AA:10:F2:09:E0:89:45:F9:47:F9:4F:7C:E3:E6:E5:AC:34:24:57:FF:99:69:A6:79:86:92:8E:65', // upload key (2026-10-04)
-  ],
-} as const;
+/** One stage's Android app, as its account site's Digital Asset Links statement names it. */
+export interface AndroidAppLinks {
+  /** The app's application id: the channel's `android_package` (VAULT-MESSAGING §11.10.8). */
+  readonly packageName: string;
+  /** SHA-256 of each certificate the app may be signed with: uppercase hex, colon-separated. */
+  readonly sha256CertFingerprints: readonly string[];
+}
 
-/** The Digital Asset Links statement for {@link ANDROID_APP_LINKS}. */
-export function androidAssetLinks(): unknown[] {
+/**
+ * The Android app's same-device setup link (VAULT-MESSAGING §11.12.1): each
+ * stage's account site publishes /.well-known/assetlinks.json so that
+ * https://account.<zone>/vault/enroll/... opens in that stage's app as a
+ * verified App Link. One statement per stage, never both: the app of one
+ * channel is not named on the other's site (VAULT-MESSAGING 0.26.0
+ * §11.10.8, "Android package"; STAGING-DEVELOPMENT-PLAN D5).
+ *
+ * - `prod` (account.vettid.org): `com.vettid.app`, signed with the upload
+ *   key (builds signed by the owner) now; the Play app-signing key is added
+ *   once the Play Console shows it (VAULT-RELEASES O8).
+ * - `staging` (account.staging.vettid.org, the only host the staging
+ *   build's manifest adds, vettid-android app/src/staging/AndroidManifest.xml):
+ *   `com.vettid.app.staging`, the staging build's id from the build that
+ *   goes with staging release S10 (ANDROID-PLAN 0.1.35 §5), signed with the
+ *   owner's staging signing key or the automation key.
+ *
+ * The package and the digests are the channel's `android_package` and
+ * `android_signers` in vettid-vault enclave/releasecfg/<channel>.json (there
+ * in lowercase hex without colons); a change there is a change here. A
+ * stage with no entry publishes no statement.
+ */
+export const ANDROID_APP_LINKS: Readonly<Record<string, AndroidAppLinks>> = {
+  prod: {
+    packageName: 'com.vettid.app',
+    sha256CertFingerprints: [
+      '31:A1:96:13:AA:10:F2:09:E0:89:45:F9:47:F9:4F:7C:E3:E6:E5:AC:34:24:57:FF:99:69:A6:79:86:92:8E:65', // upload key (2026-10-04)
+    ],
+  },
+  staging: {
+    packageName: 'com.vettid.app.staging',
+    // The two staging `android_signers`, in the vault's order.
+    sha256CertFingerprints: [
+      'BD:83:A0:75:3F:AA:6A:F6:F8:D8:1B:9F:76:A0:4A:C1:A4:99:EA:6C:7F:46:C6:F1:11:3D:4B:57:87:EC:B2:C4',
+      '2F:ED:27:B7:27:46:79:7A:93:1F:D4:14:FF:3D:AC:4C:D9:69:FA:0C:2F:F3:62:09:AE:05:36:5F:58:00:14:F2',
+    ],
+  },
+};
+
+/**
+ * The Digital Asset Links statement list of a stage's account site
+ * ({@link ANDROID_APP_LINKS}); null for a stage that has no app.
+ */
+export function androidAssetLinks(stage: string): unknown[] | null {
+  const links = Object.prototype.hasOwnProperty.call(ANDROID_APP_LINKS, stage) ? ANDROID_APP_LINKS[stage] : undefined;
+  if (!links) return null;
   return [{
     relation: ['delegate_permission/common.handle_all_urls'],
     target: {
       namespace: 'android_app',
-      package_name: ANDROID_APP_LINKS.packageName,
-      sha256_cert_fingerprints: [...ANDROID_APP_LINKS.sha256CertFingerprints],
+      package_name: links.packageName,
+      sha256_cert_fingerprints: [...links.sha256CertFingerprints],
     },
   }];
 }

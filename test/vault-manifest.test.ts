@@ -4,8 +4,9 @@ import { createPublicKey, generateKeyPairSync, sign } from 'node:crypto';
 import * as cdk from 'aws-cdk-lib';
 import { channelVault, loadConfig, releaseLogBaseUrl } from '../lib/config';
 import { checkChannel } from '../lib/vault/manifest-check';
-import { EMPTY_INDEX, buildIndex, renderLog, withoutNav } from '../lib/vault/release-log';
+import { EMPTY_INDEX, buildIndex, noEndDate, renderLog, withoutNav } from '../lib/vault/release-log';
 import {
+  FIRST_RELEASE_WINDOW,
   LEGACY_STAGING_NOTES_THROUGH,
   RELEASE_LOG_HOSTS,
   ReleaseFile,
@@ -152,6 +153,165 @@ describe('the release file (vault/releases/<channel>.json)', () => {
       const f = readReleaseFile(ROOT, ch, channelVault(ch).vault.account);
       if (ch === 'prod') expect(f.releases).toEqual([]);
     }
+  });
+});
+
+describe('ends_after_days: production release 1 is kept for 90 days (VAULT-RELEASES 0.1.11 §3.5, D2)', () => {
+  const STAGING_ACCOUNT = '347272280361';
+  const T0 = '2027-02-15T12:00:00Z'; // release 2's published_at in sample()
+  const T0_PLUS_90 = '2027-05-16T12:00:00Z';
+
+  /** sample() as §3.5 has it at T0: release 1 retired with ends_at = T0 + 90 days, release 2 active. */
+  function windowed(endsAt: string | undefined = T0_PLUS_90, status = 'retired'): any {
+    const f = sample();
+    Object.assign(f.releases[0], { ends_after_days: 90, status });
+    if (endsAt === undefined) delete f.releases[0].ends_at;
+    else f.releases[0].ends_at = endsAt;
+    return f;
+  }
+  const check = (f: any, channel: 'prod' | 'staging' = 'prod') => () => validateReleaseFile(f, channel, channel === 'prod' ? ACCOUNT : STAGING_ACCOUNT);
+
+  test('the window is 90 days, on production release 1, counted from release 2', () => {
+    expect(FIRST_RELEASE_WINDOW).toEqual({ channel: 'prod', release: 1, days: 90, successor: 2 });
+    expect(Date.parse(T0_PLUS_90) - Date.parse(T0)).toBe(90 * 86_400_000);
+  });
+
+  test('accepted on production release 1 with the value 90: as a candidate, while active, and retired at T0 + 90 days', () => {
+    const candidate = { channel: 'prod', signed_serial: 0, releases: [{ ...sample().releases[2], release: 1, admitted_pcr0s: [], notes: releaseLogUrl('prod', 1), ends_after_days: 90 }] };
+    expect(check(candidate)).not.toThrow(); // from the release entry PR on (§10.1 step 5)
+    const active = { channel: 'prod', signed_serial: 1, releases: [{ ...sample().releases[1], release: 1, seal_key: keyArn(1), admitted_pcr0s: [], notes: releaseLogUrl('prod', 1), host: host(1), log: log('First release.'), ends_after_days: 90 }] };
+    expect(check(active)).not.toThrow();
+    expect(check(windowed())).not.toThrow();
+  });
+
+  test('an entry without it has the default: nothing is checked about its ends_at', () => {
+    const f = sample();
+    f.releases[0].ends_at = '2027-02-16T00:00:00Z'; // a day after release 2: no check knows the default W (§7)
+    expect(check(f)).not.toThrow();
+  });
+
+  test.each([
+    ['production release 2', (f: any) => (f.releases[1].ends_after_days = 90)],
+    ['a production candidate other than release 1', (f: any) => (f.releases[2].ends_after_days = 90)],
+  ])('refused on %s', (_what, change) => {
+    const f = sample();
+    change(f);
+    expect(check(f)).toThrow(/ends_after_days is allowed only on production release 1/);
+  });
+
+  test('refused on staging, release 1 included', () => {
+    const f = sample();
+    f.channel = 'staging';
+    for (const e of f.releases) {
+      e.notes = releaseLogUrl('staging', e.release);
+      if (e.seal_key) e.seal_key = e.seal_key.replace(ACCOUNT, STAGING_ACCOUNT);
+      if (e.host) e.host.tag = `release/staging/${e.release}`;
+    }
+    expect(check(f, 'staging')).not.toThrow();
+    f.releases[0].ends_after_days = 90;
+    expect(check(f, 'staging')).toThrow(/ends_after_days is allowed only on production release 1/);
+  });
+
+  test.each([60, 89, 91, 365, 0, -90, 90.5, '90', null, true, [90]])('refuses the value %j: only 90', (v) => {
+    const f = windowed();
+    f.releases[0].ends_after_days = v;
+    expect(check(f)).toThrow(/ends_after_days must be 90/);
+  });
+
+  test('refuses an ends_at earlier than 90 days after release 2\'s published_at; the day itself and later pass', () => {
+    expect(check(windowed('2027-05-16T11:59:59Z'))).toThrow(/release 1: ends_at 2027-05-16T11:59:59Z is earlier than 2027-05-16T12:00:00Z, 90 days \(ends_after_days\) after release 2's published_at/);
+    expect(check(windowed('2027-03-17T12:00:00Z'))).toThrow(/earlier than 2027-05-16T12:00:00Z/); // 30 days: the KMS window is another thing
+    expect(check(windowed(T0_PLUS_90))).not.toThrow();
+    expect(check(windowed('2027-06-01T00:00:00Z'))).not.toThrow();
+  });
+
+  test('the days are counted from release 2\'s published_at, not release 1\'s', () => {
+    const f = windowed('2027-04-15T12:00:00Z'); // 90 days after release 1's own publication
+    expect(check(f)).toThrow(/earlier than 2027-05-16T12:00:00Z/);
+  });
+
+  test('the rule holds in every status that carries an ends_at', () => {
+    for (const status of ['deprecated', 'retired']) expect(check(windowed('2027-05-01T00:00:00Z', status))).toThrow(/earlier than/);
+    const removed = windowed('2027-05-01T00:00:00Z', 'removed');
+    delete removed.releases[0].host;
+    expect(check(removed)).toThrow(/earlier than/);
+    removed.releases[0].ends_at = T0_PLUS_90;
+    expect(check(removed)).not.toThrow();
+  });
+
+  test('refuses an ends_at that cannot be counted: release 2 unlisted, or not published', () => {
+    const f = windowed();
+    f.releases[2].admitted_pcr0s = [pcr('a')];
+    f.releases.splice(1, 1); // releases 1 and 3
+    expect(check(f)).toThrow(/release 1: ends_at is set, but release 2 has no published_at/);
+    const g = windowed();
+    Object.assign(g.releases[1], { status: 'candidate' });
+    delete g.releases[1].published_at;
+    expect(check(g)).toThrow(/release 1: ends_at is set, but release 2 has no published_at/);
+  });
+
+  test('never copied into the signed manifest: the same bytes with and without it', () => {
+    const withIt = validateReleaseFile(windowed(), 'prod', ACCOUNT);
+    const plain = windowed();
+    delete plain.releases[0].ends_after_days;
+    const without = validateReleaseFile(plain, 'prod', ACCOUNT);
+    for (const e of manifestEntries(withIt)) expect(Object.keys(e)).not.toContain('ends_after_days');
+    const bytes = renderManifest(4, '2027-03-01T00:00:00Z', manifestEntries(withIt));
+    expect(bytes.equals(renderManifest(4, '2027-03-01T00:00:00Z', manifestEntries(without)))).toBe(true);
+    expect(bytes.toString('utf8')).not.toContain('ends_after');
+    // The renderer copies named members only, whatever an entry object carries.
+    const smuggled = manifestEntries(withIt).map((e) => ({ ...e, ends_after_days: 90 }));
+    expect(renderManifest(4, '2027-03-01T00:00:00Z', smuggled).equals(bytes)).toBe(true);
+  });
+
+  test('check:manifest: T0 as §3.5 has it passes (active to retired is a forward step); an early ends_at cannot be published', () => {
+    const before = sample();
+    before.releases = [{ ...before.releases[0], status: 'active', ends_after_days: 90 }];
+    delete before.releases[0].ends_at;
+    before.signed_serial = 1;
+    const v1 = publish(validateReleaseFile(before, 'prod', ACCOUNT), 1, '2027-01-15T12:00:00Z');
+    const at = validateReleaseFile({ ...windowed(), signed_serial: 2 }, 'prod', ACCOUNT);
+    expect(checkChannel({ channel: 'prod', file: at, served: publish(at, 2, T0), pinnedKeys: [SPKI], history: [{ commit: 'a'.repeat(40), served: v1 }] })).toEqual([]);
+    // Release 1 is never deprecated: W equals the notice period, so the existing 90-day rule already asks for retired.
+    const dep = manifestEntries(validateReleaseFile(windowed(T0_PLUS_90, 'deprecated'), 'prod', ACCOUNT));
+    expect(consistencyProblems(dep, T0)).toEqual([expect.stringMatching(/release 1: within 90 days of its ends_at but still deprecated/)]);
+    // The file is refused before anything is rendered or signed (readReleaseFile, which check:manifest and vault:manifest both start with).
+    expect(check(windowed('2027-05-15T12:00:00Z'))).toThrow(/earlier than/);
+  });
+
+  test('release log: the "End date" line states the window per release; index.json is unchanged in shape', () => {
+    expect(noEndDate('prod')).toBe('Not set (at least 12 months after a newer release replaces it)');
+    expect(noEndDate('prod', 90)).toBe('Not set (90 days after a newer release replaces it)');
+    expect(noEndDate('staging')).toBe('Not set');
+    expect(noEndDate('staging', 90)).toBe('Not set');
+
+    // Releases 1 and 2 both active-era pages: release 1 (with the member) before T0, and release 2.
+    const one = sample();
+    one.releases = [{ ...one.releases[0], status: 'active', ends_after_days: 90 }];
+    delete one.releases[0].ends_at;
+    const f1 = validateReleaseFile(one, 'prod', ACCOUNT);
+    const out1 = renderLog(buildIndex(EMPTY_INDEX, { serial: 1, releases: manifestEntries(f1) }, f1), 'prod', f1);
+    const page1 = out1.get('website/security/releases/1/index.html')!;
+    expect(page1).toContain('<dt>End date</dt><dd>Not set (90 days after a newer release replaces it)</dd>');
+    expect(page1).not.toContain('12 months');
+    expect(out1.get('website/security/releases/index.json')).not.toContain('ends_after');
+
+    // From T0 the date is shown as for any retired release; release 2 keeps the default wording.
+    const f2 = validateReleaseFile(windowed(), 'prod', ACCOUNT);
+    const out2 = renderLog(buildIndex(EMPTY_INDEX, { serial: 3, releases: manifestEntries(f2) }, f2), 'prod', f2);
+    expect(out2.get('website/security/releases/1/index.html')).toContain('<dt>End date</dt><dd>2027-05-16</dd>');
+    expect(out2.get('website/security/releases/1/index.html')).toContain('Final notice: this release ends on 2027-05-16.');
+    expect(out2.get('website/security/releases/2/index.html')).toContain('<dt>End date</dt><dd>Not set (at least 12 months after a newer release replaces it)</dd>');
+    expect(out2.get('website/security/releases/index.json')).not.toContain('ends_after');
+
+    // An entry without the member: the default, as before.
+    const f3 = validateReleaseFile({ ...one, releases: [{ ...one.releases[0], ends_after_days: undefined }] }, 'prod', ACCOUNT);
+    expect(renderLog(buildIndex(EMPTY_INDEX, { serial: 1, releases: manifestEntries(f3) }, f3), 'prod', f3).get('website/security/releases/1/index.html'))
+      .toContain('Not set (at least 12 months after a newer release replaces it)');
+
+    // The index says which release is the exception.
+    expect(out1.get('website/security/releases/index.html')).toContain('at least 12 months after a newer one replaces it');
+    expect(out1.get('website/security/releases/index.html')).toContain('it is kept for 90 days after release 2 replaces it');
   });
 });
 

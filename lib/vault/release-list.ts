@@ -9,8 +9,9 @@
  *
  * The file is also a valid `vaultctl manifest render -releases` input: that
  * parser reads `releases[].{release, pcr0, pcr1, pcr2, seal_key, status,
- * published_at, ends_at, notes}`, ignores every other member and leaves
- * `candidate` entries out.
+ * published_at, ends_at, notes}`, ignores every other member (`host`,
+ * `log`, `admitted_pcr0s`, `ends_after_days`) and leaves `candidate`
+ * entries out.
  *
  * Plain Node (fs, crypto) only: imported by the CDK app, the scripts and
  * the tests, never by a Lambda.
@@ -83,7 +84,29 @@ export interface ReleaseEntry {
   readonly host?: HostEntry | null;
   /** Required once the release leaves `candidate` (signed into a manifest), in every channel. */
   readonly log?: ReleaseLog;
+  /**
+   * The release's retirement window W in days, where it is not the default
+   * of 12 months (VAULT-RELEASES 0.1.11 §3.5, owner decision D2): allowed
+   * only on production release 1, and only as 90 (FIRST_RELEASE_WINDOW).
+   * A member of the release list only, like `host` and `log`: never in the
+   * manifest or the image, and no enclave or app reads it. Absent: the
+   * default.
+   */
+  readonly ends_after_days?: number;
 }
+
+/**
+ * Production release 1's window (VAULT-RELEASES 0.1.11 §3.5, D2): the one
+ * release that may carry `ends_after_days`, and the one value it may have.
+ * It goes early to the owner and named testers and is kept for 90 days
+ * after release 2 replaces it; every later release keeps the 12 months.
+ * (The 30 days of ScheduleKeyDeletion after the deadline are another
+ * thing, `retirementWindowDays` in lib/config.ts, and stay 30.)
+ */
+export const FIRST_RELEASE_WINDOW = { channel: 'prod', release: 1, days: 90, successor: 2 } as const;
+
+/** `t` plus whole days, RFC 3339 in whole seconds UTC. */
+const addDays = (t: string, days: number) => new Date(Date.parse(t) + days * 86_400_000).toISOString().replace('.000Z', 'Z');
 
 export interface ReleaseFile {
   readonly channel: Channel;
@@ -217,7 +240,27 @@ export function validateReleaseFile(raw: unknown, channel: Channel, account: str
     }
     if (e.log !== undefined) validateLog(e.log, at);
     else if (!candidate) at('log is required once the release leaves candidate (its release log entry, RELEASE-UPDATES §5)');
+    if (e.ends_after_days !== undefined) {
+      const w = FIRST_RELEASE_WINDOW;
+      if (channel !== w.channel || n !== w.release) at(`ends_after_days is allowed only on production release ${w.release} (VAULT-RELEASES §3.5); every other release has the default window`);
+      if (e.ends_after_days !== w.days) at(`ends_after_days must be ${w.days} (VAULT-RELEASES §3.5), got ${JSON.stringify(e.ends_after_days)}`);
+    }
     pcr0s.set(e.pcr0 as string, n);
+  }
+  // Production release 1's window: its ends_at is no earlier than 90 days
+  // after release 2's published_at (§3.5). ISO times of one shape compare as strings.
+  const first = entries.find((e) => e.ends_after_days !== undefined);
+  if (first && first.ends_at !== undefined) {
+    const w = FIRST_RELEASE_WINDOW;
+    const next = entries.find((e) => e.release === w.successor);
+    if (!next || next.published_at === undefined) {
+      bad(`release ${w.release}: ends_at is set, but release ${w.successor} has no published_at to count its ${w.days} days (ends_after_days) from (VAULT-RELEASES §3.5)`);
+    } else {
+      const earliest = addDays(next.published_at as string, w.days);
+      if ((first.ends_at as string) < earliest) {
+        bad(`release ${w.release}: ends_at ${String(first.ends_at)} is earlier than ${earliest}, ${w.days} days (ends_after_days) after release ${w.successor}'s published_at (VAULT-RELEASES §3.5)`);
+      }
+    }
   }
   const file = raw as ReleaseFile;
   validateReleaseList(hostSpecs(file), channel);
@@ -314,7 +357,12 @@ export interface ManifestEntry {
   notes: string;
 }
 
-/** The entries a manifest of this list carries: every non-candidate, in release order. */
+/**
+ * The entries a manifest of this list carries: every non-candidate, in
+ * release order. Only the manifest members (§11.10.1) are copied: the
+ * list's own (`host`, `log`, `admitted_pcr0s`, `ends_after_days`) never
+ * reach the signed bytes.
+ */
 export function manifestEntries(file: ReleaseFile): ManifestEntry[] {
   return file.releases
     .filter((e) => e.status !== 'candidate')
