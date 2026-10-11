@@ -1,9 +1,31 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.33
+version: 0.1.34
 date: 2026-10-11
 changelog:
+  - 0.1.34: owner request 2026-10-11 (the app is to be on F-Droid;
+    signing route decided by the owner the same day: F-Droid's
+    reproducible builds, which publish the VettID-signed APK;
+    vettid-android #111; a draft for the owner's review). **Two
+    distributions replace "one build"** (§9 question 12): `full`
+    (Google Play and VettID's own releases) links Firebase Messaging as
+    before; `foss` (F-Droid) contains no Google code. Same application
+    id and version. In `foss`, Google push is shown disabled with "Not
+    available in this build of VettID, which contains no Google
+    software." (§4 Notification modes, 1); the `distribution` flavour
+    dimension, the reproducible FOSS release and `checkFossReleaseApk`
+    (4); `:core:push-fcm` is `full` only (§5); versions and tags (§7).
+    The rule for Google push chosen but the push service later
+    unavailable on the phone is **approved (owner, 2026-10-11) and
+    implemented** (vettid-android #112), with the `foss` distribution
+    among its causes (4). **Owner decision (2026-10-11): VettID's own
+    key signs Play installs** (§7 Signing and the two distributions;
+    §9 question 15): which key signs Play installs is
+    chosen once at Play App Signing enrolment; it decides whether
+    members can move between Google Play and F-Droid without
+    uninstalling, and what production release 1 pins in
+    `android_signers`
   - 0.1.33: owner decision 2026-10-11 ("we should allow a typed
     recovery code"; VAULT-MESSAGING 0.25.0 §11.11.10, MEMBER-API 2.4.0;
     a draft for the owner's review): the recover screens gain **Type
@@ -868,6 +890,9 @@ its process runs; nothing keeps it running in the background).
      **"Needs Google Play services, which this phone does not have"**
      when they are missing (GrapheneOS without sandboxed Play, for
      example); "Google Play services need an update" when outdated.
+     (0.1.34) In the `foss` distribution (4) it is shown disabled, not
+     hidden, with **"Not available in this build of VettID, which
+     contains no Google software."**
    - **Off** — "Not recommended. You see messages, requests, calls and
      security alarms only when you open VettID." Choosing it asks to
      confirm with the same text.
@@ -1047,22 +1072,28 @@ its process runs; nothing keeps it running in the background).
      back for `limit` only and shows "Not available yet" or "Push
      service not reachable, retrying" with no notifications meanwhile.
    - **Google push chosen, the push service later unavailable on the
-     phone** (0.1.32; **owner decision pending; the proposed rule is
-     not implemented**). The choice can only be made while Google push
-     is available, but it can stop being so afterwards: Google Play
-     services disabled, removed or outdated, or an update to a build
-     without the Firebase options. **Today** nothing runs then: no
-     registration and no on-phone service, the status line says
-     "Connecting", and the member gets notifications only while the app
-     is open. **Proposed (recommended), as a follow-up app change:** the
-     on-phone service runs as the fallback, as for `unavailable`; the
-     status line says "Google push is not available on this phone, using
-     the on-phone service"; the note under the choice gives the reason
-     ("Needs Google Play services…", "…need an update", "Not available
-     yet"); the choice stays Google push and registration resumes by
-     itself when the push service is back; the vault is sent
-     `push.unregister` when it next opens, so it stops waking a phone
-     that cannot be woken.
+     phone** (0.1.32; **approved by the owner, 2026-10-11, and
+     implemented**, vettid-android #112, 0.1.34). The choice can only
+     be made while Google push is available, but it can stop being so
+     afterwards: Google Play services disabled, removed or outdated, an
+     update to a build without the Firebase options, or an update to
+     the `foss` distribution (below; possible only where both
+     distributions carry the same signing certificate, §7). Then the
+     on-phone service runs as the fallback, as for `unavailable`, and
+     **the mode preference is never changed**: the choice stays Google
+     push. A registration the vault may still hold is dropped with
+     `push.unregister`, at once if the vault is open, otherwise at its
+     next open, so that the vault stops waking a phone that cannot be
+     woken (a phone that never registered sends nothing); the local
+     token is deleted. Registration resumes by itself when the provider
+     is available again. The status line says "Google push is not
+     available on this phone, using the on-phone service"; the note
+     under the choice gives the reason ("Needs Google Play services…",
+     "…need an update", "Not available yet", "Not available in this
+     build of VettID…"). The app notices at a cold start and, while
+     running, at the next phase change, registration status change or
+     return to the foreground: there is no package-change broadcast to
+     hear of it sooner.
    - **A wake** (0.1.32, as implemented). The push message's content is
      never read. The process's one mailbox collector does the work, as
      when the app is open (decrypt, persist, ack). The collect runs for
@@ -1114,10 +1145,22 @@ its process runs; nothing keeps it running in the background).
      exported as `ORG_GRADLE_PROJECT_<property>`. `checkReleaseApk` and
      `checkStagingApk` also fail if an APK carries the other
      environment's Firebase application id. Google Play
-     services presence: `GoogleApiAvailability`. A later `foss` build
-     flavour without the library (for F-Droid) remains possible and is
-     §9 question 12; a flavour now would double every build and test
-     for no user yet.
+     services presence: `GoogleApiAvailability`. (0.1.34; §9 question 12;
+     vettid-android #111) The app has **two distributions**, a
+     `distribution` flavour dimension: `full` (Google Play and VettID's
+     own releases) and `foss` (F-Droid), with the same application id,
+     version and source. Of `foss` only `fossRelease` exists; debug,
+     devStack and staging are `full` only, so nothing is built or
+     tested twice. `:core:push-fcm` and WorkManager are `full` only
+     (an F-Droid build deletes the module's directory before building);
+     `foss` binds a provider that reports "not in this build" (1). The
+     FOSS release build **must be reproducible**: the unsigned
+     `fossRelease` APK is byte-identical across clean builds of the
+     same commit with the same JDK (21), because F-Droid publishes the
+     VettID-signed APK only if its own build is the same apart from the
+     signature (§7). For that the release APK carries no VCS info, and
+     no build carries the dependency metadata block. Checked by hand
+     with two clean builds, not by CI.
    - **The build guard** (0.1.32). `check<Variant>PushManifest`, run by
      `checkReleaseApk` and `checkStagingApk`, reads the merged manifest
      and fails on anything of Firebase or Google beyond Messaging's: a
@@ -1136,8 +1179,18 @@ its process runs; nothing keeps it running in the background).
      delivery metrics (`delivery_metrics_exported_to_big_query_enabled`)
      must be `false`, so Google is first contacted when the member
      chooses Google push. The messaging service and Firebase's receiver
-     are in every build's manifest but **enabled only in a build that
-     carries the options**; the guard fails on a mismatch either way.
+     are in every `full` build's manifest but **enabled only in a build
+     that carries the options**; the guard fails on a mismatch either
+     way. (0.1.34) **`checkFossReleaseApk`** fails if the `foss` release
+     carries anything of Google. Four checks: the variant's resolved
+     dependency graph, the APK's dex, the APK's file list and the
+     merged manifest. None may show Firebase, Google Play services,
+     datatransport, Play, ML Kit, install referrer, billing or
+     `androidx.work`, and the manifest no `com.google.*` permission or
+     component (nor a registrar, package query or intent action of
+     Google's). One Google name is allowed in the dex: the string
+     `com.google.android.gms.org.conscrypt`, which OkHttp carries to
+     look for a TLS provider by reflection; it is no Google code.
    - Unavailable when Google Play services are missing (said in the UI,
      1), and until the gateway is deployed with FCM credentials (the
      owner has no FCM service account yet, §7).
@@ -1289,7 +1342,9 @@ its process runs; nothing keeps it running in the background).
       and no names; reboot and `adb install -r` restart the service;
       Doze forced (`adb shell dumpsys deviceidle force-idle`) with and
       without the battery exemption; POST_NOTIFICATIONS refused.
-    - Build: CI builds and tests without any Firebase configuration.
+    - Build: CI builds and tests without any Firebase configuration,
+      and (0.1.34) builds the FOSS release and runs
+      `checkFossReleaseApk` on it.
     - Manual on the test phones: a day of normal use for battery
       (Settings → Battery usage), the service notification, lock-screen
       privacy.
@@ -1320,7 +1375,7 @@ one (translation-ready), accessibility labels required in review.
 | `:core:altchan` | Member-API alternate channel: code redeem and recovery claim, requests signed by the app key (no member session), descriptors, sealed enroll/unlock/lock, result polling, release-update approval |
 | `:core:vault` | Typed vault client: one function per §10 type, sessions with the vault, dedupe, outbox, sync events → repositories |
 | `:core:data` | Repositories and Room caches per feature |
-| `:core:notify` | 0.1.23: the notification modes: the on-phone service (`VaultConnectionService`), channels, the Mapping and Content rules, the `PushProvider` interface; `:core:push-fcm` the FCM provider (the only module with Firebase) |
+| `:core:notify` | 0.1.23: the notification modes: the on-phone service (`VaultConnectionService`), channels, the Mapping and Content rules, the `PushProvider` interface; `:core:push-fcm` the FCM provider (the only module with Firebase; 0.1.34: in the `full` distribution only, `foss` binds a provider that reports "not in this build") |
 | `:core:ui` | Theme (navy + gold, light/dark), components (top bar, drawer, list row, empty state, pill bar, settings cards, sheets) |
 | `:feature:*` | onboarding, messages, connections, approvals, items (the "Vault" screens), credential, settings, history (0.1.11), notifications (0.1.23, the feed) |
 | `:app` | Navigation (type-safe routes), DI wiring, notifications |
@@ -1422,6 +1477,92 @@ schema for the cache and the request verb belong to the location batch.
   accepted the current terms; the portal checks it when it issues the
   setup code (MEMBER-API 2.0.0). The app itself never signs in.
 
+### Signing and the two distributions (0.1.34; decided: option (b))
+
+**Versions.** Both distributions of a release have the same
+`versionCode` and `versionName`, and each release is a tag
+`v<versionName>` on the commit that sets them (F-Droid's update check
+reads them from the tag). The signed `foss` APK of a release is
+published at a stable address (a release asset,
+`vettid-<versionName>-foss.apk`), where F-Droid fetches it to compare
+with its own build. The F-Droid metadata is a draft in vettid-android
+(`docs/fdroid/com.vettid.app.yml`); nothing has been submitted.
+
+**What the vault accepts.** Each vault release pins the Android signing
+certificates it accepts (`android_signers`, VAULT-RELEASES §5.2, owner
+decision O8). In production these are the Play app-signing certificate,
+still to be set (W10-READINESS P9: it waits for the owner's Play
+account), and the upload-key certificate, which is pinned (P8). Under
+reproducible builds the F-Droid APK carries a VettID signature, not
+F-Droid's, so vaults accept it if that certificate is pinned. The
+upload key's already is.
+
+**What Android accepts.** Android installs an update only over an app
+with the same signing certificate. If Play installs carry one
+certificate (a Play app-signing key that Google holds) and F-Droid
+installs another (the upload key), a member cannot move from one store
+to the other without uninstalling. Uninstalling wipes the app, so the
+member then needs a transfer from another phone or the 24-hour
+recovery. If both carry the same certificate, updates cross in both
+directions. A Play install updated by F-Droid then loses Google push,
+which the fallback rule covers (§4 Notification modes, 4).
+
+**The decision.** It is made when the app is first enrolled in Play
+App Signing and cannot be changed afterwards for that app. Every
+statement about Play below is to confirm in the Play Console at
+enrolment; nothing in this repository verifies it.
+
+- **(a) Google generates the app-signing key** (Play's default). The
+  two stores then have different signers, as above. `android_signers`
+  in production release 1: the Play certificate, known only after
+  enrolment (it replaces `TODO-O8`), and the upload certificate, which
+  signs the F-Droid APK and direct builds. This is O8 as recommended
+  today.
+- **(b) VettID supplies its own app-signing key to Play at enrolment**
+  (Play accepts an uploaded key). The same key signs the F-Droid APK
+  and direct builds, so every install has one signer. The cost: the key
+  must exist as an exportable file at enrolment, so it cannot live only
+  on a hardware token. `android_signers` in production release 1: that
+  key's certificate, whose digest is known before the listing exists
+  (W10-READINESS R7), and the upload certificate, which stays pinned
+  while any build signed with it is in use (the canary build, P29) and
+  can leave a later release.
+
+**How the upload key is held today.** Its certificate digest is pinned
+in production (P8). Release builds are signed outside the repository,
+and the upload key never leaves the owner's machine (W10-READINESS B8).
+The same rows record that the owner's hardware token is set up
+(2026-10-06), but no document says that the upload key itself is on the
+token; the token is documented only for manifest key B (VAULT-RELEASES
+§6.1). No build has been signed with the upload key yet (P29 is
+pending). **Confirmed by the owner (2026-10-11): the key is a file**,
+not on the token, so it can be the key supplied in (b).
+
+**Decided (owner, 2026-10-11): (b).** *Which* VettID key becomes the
+app-signing key is the one detail still to confirm, and the draft's
+answer changed once the key was known to be a file: **the existing key
+(digest `31a19613…8e65`, already pinned in production, P8) is supplied
+to Play as the app-signing key**, and it also signs the F-Droid APK and
+direct builds; a **new upload key** is made for Play uploads. Play
+re-signs what is uploaded, so nothing a member installs is signed by
+the upload key and it is never pinned. Production release 1 then pins
+**one** certificate, the one it already lists, and `TODO-O8` is removed
+rather than filled in: release 1 no longer waits for a digest from
+Play (P9). The alternative, a new app-signing key with the existing key
+kept as upload key, pins two certificates and has no advantage now.
+The reasoning for (b) over (a), as recommended in the draft: under (a) the cost
+falls on members, for as long as the app exists: whoever changes store
+loses the app's data and waits out a recovery, and it can never be
+repaired. Under (b) the cost falls on the owner, once: a key file to
+generate offline, hand to Play, and then keep offline. Google holds the
+key that signs Play installs under either option, so (b) adds no party
+that can sign, only VettID's own copy. It also makes the digest known
+before the Play listing, which unblocks the pin that production
+release 1 waits for (P9). If the owner holds that no VettID signing key
+may exist outside a hardware token, the answer is (a), and the account
+site and F-Droid listing should say that changing store means
+recovering the vault.
+
 ## 8. Risks
 
 1. **Post-quantum crypto on Android**: Android has no platform ML-KEM; the
@@ -1503,7 +1644,12 @@ Each with the recommended answer.
     initialised at runtime from Gradle properties (no
     `google-services.json`, no plugin), "not available yet" without
     them; a `foss` flavour without the Firebase library only if VettID
-    is published on F-Droid.
+    is published on F-Droid. **Replaced (2026-10-11): two
+    distributions.** `full` (Google Play and VettID's own releases)
+    links Firebase Messaging as before; `foss` (F-Droid) contains no
+    Google code. Same application id and version for both; F-Droid
+    publishes the VettID-signed APK through reproducible builds (§4
+    Notification modes, 4; §7).
 13. **Default for existing installs.** **Answered (2026-10-09): the on-phone
     service for every install**, new and updated (the app has no other
     background path today), with POST_NOTIFICATIONS asked at the next
@@ -1516,3 +1662,11 @@ Each with the recommended answer.
     locked: notifications resume after you unlock it" (status read
     from the member API at most hourly); a DEK-free "messages waiting"
     signal stays the separate future decision §14 names.
+15. **The key that signs Play installs** (0.1.34; **answered
+    2026-10-11: VettID's own key, option (b)**). Let Google
+    generate the Play app-signing key, or supply VettID's own at
+    enrolment so that Google Play and F-Droid installs share a signer
+    and members can move between them without uninstalling? Chosen
+    once, at Play App Signing enrolment. **Recommended: supply VettID's
+    own key** (§7 Signing and the two distributions, with what each
+    answer pins in `android_signers`).
