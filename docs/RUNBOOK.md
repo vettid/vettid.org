@@ -1282,9 +1282,13 @@ above (W7).
 
 ## Staging (W9; VAULT-RELEASES §11.1)
 
-`-c stage=staging --profile vault-staging` builds a copy of what the
-vault's end-to-end tests need, entirely in vettid-vault-staging
-(347272280361), under its own zone **staging.vettid.org**:
+`-c stage=staging --profile vault-staging` builds the staging channel,
+entirely in vettid-vault-staging
+(347272280361), under its own zone **staging.vettid.org**. It began as
+a copy of what the vault's end-to-end tests need; since 2026-10-11 it
+is the development channel, where every change runs first
+(docs/STAGING-DEVELOPMENT-PLAN.md §2: at most three live releases, at
+most two new ones a week, cleanup with every release):
 
 | Stack | What |
 |---|---|
@@ -1472,8 +1476,12 @@ it, empties and deletes the bucket; the MX goes with it).
 
 ### Parking
 
-Between releases the release groups scale to zero (scaler) and nothing
-else needs to go: at idle the main stacks cost about $10/month (account
+Staging is no longer parked between releases (2026-10-11,
+docs/STAGING-DEVELOPMENT-PLAN.md §2.1, §2.5): it is in use, and what
+keeps its cost down is removing old releases and locking test vaults,
+since an unlocked vault keeps its release's host running. What remains
+true: a release group with no leased vault scales to zero (scaler), and
+at idle the main stacks cost about $10/month (account
 site WAF ~$8, zone $0.50, two secrets ~$0.80, pennies of Lambda,
 DynamoDB, CloudFront). Everything stateful is retained and
 deletion-protected as in prod; tearing staging down means turning
