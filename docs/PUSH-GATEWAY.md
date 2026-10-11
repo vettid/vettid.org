@@ -1,10 +1,12 @@
 # VettID Push Gateway Protocol
 
-**Version:** 0.4.3 (draft)
+**Version:** 0.4.4 (draft)
 **Status:** Draft for review (N2; owner request of 2026-10-10: "we can
 start to design the push service for google play and apple ios").
 Implemented by `vettid/vettid-push` (the gateway) and vettid-android #109
-(the app's Google push mode), N4; 0.4.2 carries their errata
+(the app's Google push mode), N4; 0.4.2 carries their errata. 0.4.2
+and 0.4.3 approved by the owner 2026-10-11. Deployed for staging since
+2026-10-11 (§10.4); 0.4.4 writes down the deployment as built
 **Companion to:** VettID Relay Protocol (Appendix A), VAULT-MESSAGING
 0.24.1 §14 (`push.register`, the vault's wake rules), ANDROID-PLAN D7
 
@@ -178,7 +180,11 @@ looked at):
    passes the serial rule, the same manifest served again included; a
    `404` once a manifest is held is a failed refresh. Wakes of blobs
    already sealed are not affected. While stale the refresh stays at
-   every 10 minutes. The `manifest_refresh` metric raises the alarm
+   every 10 minutes (0.4.4: so once the site is back, registrations
+   can stay refused for up to 10 minutes more; the one-minute retry is
+   only for a gateway that holds no manifest at all). The age is
+   measured on the task's monotonic clock, so a step of the wall
+   clock neither ages nor renews a manifest (0.4.4). The `manifest_refresh` metric raises the alarm
    after an hour (§10.5), so the limit is not reached in normal
    operation. The lower-`serial` rule (a lower serial, or the same
    serial with other bytes, is refused) is held **in memory only** and
@@ -396,6 +402,39 @@ lock wake: what is left of its 3 s budget), longer than this gateway's
   the enclave terminates TLS and pins Amazon's roots, as for the relay).
   Its own target group, task role, log group and security group; no
   access to the relay's DynamoDB, S3 or Valkey. About $20 a month.
+- (0.4.4) **As built** (vettid.org #213, #216, #217, #223; RUNBOOK
+  "Push gateway" is the operator's reference):
+  - **Two stacks, not one.** `VettidOrgPushDataStack` is stateful and
+    deployed first: the KMS key, one log group per channel, the staging
+    zone and the alarm topic. `VettidOrgPushStack` holds the services
+    and everything that can be rebuilt; it exists only once a channel
+    has an image. A failed service deployment then leaves the log that
+    says why.
+  - **A certificate per gateway**, added to the relay load balancer's
+    HTTPS listener beside the relay's (selected by SNI), with a host
+    rule and a target group per gateway. The relay's own certificate
+    is not reissued, and requests for any other host still reach the
+    relay.
+  - **Staging's name** is served from a small zone of its own,
+    `push.staging.vettid.org`, in the main account, delegated from
+    `staging.vettid.org` by one NS record in the staging account
+    (`VettidOrgStagePushDelegationStack`). The certificate validates
+    in that zone, so nothing in the main account writes to the staging
+    account's zone. Production's record is in `vettid.org` itself.
+  - **Network.** The tasks have public addresses in the relay's public
+    subnets; their only egress is tcp/443, and their only ingress is
+    from the load balancer.
+  - **Context** (`cdk.json`): `pushStages` (the channels whose gateway
+    exists), `stagingPushImage` / `pushImage` (the image by digest;
+    separate so a new image runs on staging first),
+    `stagingPushPlatforms` / `pushPlatforms` (default none),
+    `stagingPushFcmProject` / `pushFcmProject`, and `stagingPushZoneNs`
+    (the staging zone's name servers, for the delegation).
+  - **Cost:** about $25 a month per channel (two tasks about $15, their
+    two public IPv4 addresses about $7, three secrets, six alarms and
+    four filter metrics), plus once the key ($1) and the staging zone
+    ($0.50); the load balancer is the relay's. 0.4.0's $20 left out
+    the addresses and the alarms.
 - Vault side: the vault hosts' DNS firewall and the parent's forwarder
   allowlist gain the gateway's host name (`lib/vault/egress.ts`); the
   release constants gain the gateway URL (VAULT-MESSAGING §11.10.8).
@@ -404,13 +443,42 @@ lock wake: what is left of its 3 s budget), longer than this gateway's
 
 In the main account, `us-east-1`, encrypted with a customer-managed KMS
 key `alias/vettid-org-push` whose policy allows `kms:Decrypt` only to the
-gateway task role (and the account's break-glass admin):
+gateway task role (and the account's break-glass admin; 0.4.4: as built
+that is the owner's administrator role, below):
 
 | Secret (Secrets Manager) | Content |
 |---|---|
 | `vettid-org/<stage>/push/apns` | `{team_id, key_id, p8}` (the .p8 PEM) |
 | `vettid-org/<stage>/push/fcm` | Workload identity federation config (no secret, §14 question 4), or the service-account JSON key as the fallback |
 | `vettid-org/<stage>/push/blob-keys` | `{current, keys: {<key_id>: <b64 32 bytes>}}` |
+
+(0.4.4) **No stack creates these secrets; the operator does.** The
+first deployment that had a stack create them failed (2026-10-11):
+under a customer-managed key, Secrets Manager requires `kms:Decrypt`
+and `kms:GenerateDataKey` of whoever creates a secret or puts a value,
+and a deployment role holding those could read every secret. So:
+
+- The owner's administrator role (Identity Center) creates each secret
+  **with its value**, under the key (`aws secretsmanager create-secret
+  --name vettid-org/<stage>/push/<name> --kms-key-id
+  alias/vettid-org-push …`), and is the **only** principal with
+  `kms:GenerateDataKey` under the key, hence the only one that can
+  create a secret or change a value. The key's administrator statement
+  has no cryptographic action and no grant.
+- Each gateway's task role may `kms:Decrypt` only through Secrets
+  Manager and only for its own channel's secrets (the key policy
+  conditions on the secret's ARN, `vettid-org/<stage>/push/*`), and
+  may read only `blob-keys` and the secrets of the platforms its
+  channel lists. Staging's gateway cannot read production's secrets,
+  nor the reverse.
+- The first use of a name is `create-secret`; every later change is
+  `put-secret-value` on the same secret. **A secret is never deleted
+  and created again**: the task role's permission is on the name, and
+  a deleted secret's name stays taken for its recovery window (7 to
+  30 days).
+- A secret that does not exist is no error for a deployment; only a
+  service that needs it does not start. A gateway with no platform
+  listed needs `blob-keys` alone.
 
 `<stage>` is `prod` or `staging`. Tasks read them at start; nothing is
 written back. The APNs key is rotated yearly (Apple allows two active
@@ -464,7 +532,7 @@ with any other token or impersonation host is refused at start.
 | Trusted manifest | the staging manifest and key | the production manifest, keys A and B |
 | Firebase project | `vettid-staging` | `vettid-prod` |
 | APNs environments | `sandbox` and `production` | `production` only |
-| App ids (Android) | the staging build's application id | `com.vettid.app` |
+| App ids (Android) | the staging build's application id (0.4.4: `com.vettid.app.staging` since staging release S10, VAULT-MESSAGING 0.26.0 §11.10.8; `com.vettid.app` before) | `com.vettid.app` |
 | App ids (iOS) | `com.vettid.app.staging`, extension `com.vettid.app.staging.NotificationService` | `com.vettid.app`, extension `com.vettid.app.NotificationService` |
 | iOS App Group | `group.com.vettid.app.staging` | `group.com.vettid.app` |
 | iOS keychain access group | `<team id>.com.vettid.app.staging` | `<team id>.com.vettid.app` |
@@ -477,6 +545,14 @@ therefore registers `production` against the staging gateway, which is
 why staging accepts both. The staging and production iOS apps have
 separate bundle ids, App Groups and keychain access groups, so a staging
 install never shares storage with a production one on the same phone.
+
+(0.4.4) **State, 2026-10-11.** The staging gateway is live at
+`https://push.staging.vettid.org` (two tasks) with **no platform
+enabled**: the Firebase project does not exist yet (owner: hold), so
+every registration is answered `platform_invalid` (§5.1 step 3).
+Production has no gateway
+(`pushStages` is `staging`). vettid.org's open source page lists
+`vettid-push`.
 
 A staging vault image embeds the staging URL; channels cannot cross
 (VAULT-MESSAGING §11.10.8). The dev stack uses a **gateway stand-in**
@@ -516,7 +592,15 @@ root, runs only as channel `dev` (its blobs open nowhere else), and the
 - **Alarms** (SNS to admin@vettid.org): provider auth failures (APNs
   `403 InvalidProviderToken`, FCM `401/403`), `provider_unavailable` above
   5 % for 10 minutes, any `internal`, manifest refresh failing for 1 hour,
-  attestation failures above a baseline.
+  attestation failures above a baseline. (0.4.4, as built) The alarms
+  go to a topic of their own, `vettid-org-push-alerts` (the security
+  alerts topic takes EventBridge events only). "Above a baseline" is a
+  fixed **more than 25 refused attestations in an hour** to start
+  with, to be adjusted once real traffic shows a baseline. A sixth
+  alarm, **`no-healthy-task`**, fires when the load balancer has had
+  no healthy task for 3 minutes, and reports the recovery too. The
+  sums the alarms need across platforms come from metric filters on
+  the gateway's own metric lines.
 
 ## 11. Client behaviour (informative)
 
@@ -533,7 +617,7 @@ root, runs only as channel `dev` (its blobs open nowhere else), and the
    register (`unavailable`, `limit`, another refusal, `gateway_error`
    retries) the on-phone service runs as the fallback and the member's
    choice stays Google push (ANDROID-PLAN §4 Notification modes, 4;
-   beyond `limit` an owner decision is pending there).
+   the fallback beyond `limit` was approved by the owner on 2026-10-11).
 2. A wake arrives as a high-priority data message in
    `FirebaseMessagingService.onMessageReceived`. The app collects from its
    relay mailbox over its normal vault session (Relay §6), decrypts on the
@@ -701,7 +785,10 @@ still receives everything:
       federation for the AWS main account and the gateway role (an agent
       can script it with you), or create one JSON key and paste it into
       Secrets Manager (`vettid-org/<stage>/push/fcm`) yourself, deleting
-      the downloaded file.
+      the downloaded file. (0.4.4) Either way the secret does not exist
+      beforehand: you create it with its value (`create-secret` under
+      `alias/vettid-org-push`, §10.2; the commands are in RUNBOOK
+      "Filling the FCM and APNs secrets").
 2. **Apple**
    1. An **Apple Developer Program** membership: an individual one now,
       under the organisation's Apple ID, converted to an organisation
@@ -718,7 +805,8 @@ still receives everything:
       Notifications service). Note the Key ID and the Team ID. The .p8
       downloads **once**: put it straight into Secrets Manager
       (`vettid-org/prod/push/apns`, and the same key for staging) and
-      delete the file.
+      delete the file. (0.4.4) Here too the secret is created with its
+      value, in your own session (§10.2).
    4. Request the **notification service extension filtering**
       entitlement (Apple's request form) for `com.vettid.app`.
    5. **Universal Links**: give an agent the Team ID. The stacks then serve
@@ -729,6 +817,12 @@ still receives everything:
       capability of item 2.
 3. **DNS/TLS**: nothing manual; the stack adds `push.vettid.org` and
    `push.staging.vettid.org` to the zone and the ALB certificate.
+   (0.4.4, as built: not quite nothing. Production's name is added by
+   the stack. Staging's needed one step by hand, done on 2026-10-11:
+   the four name servers of the new zone `push.staging.vettid.org`
+   copied into `cdk.json` (`stagingPushZoneNs`) and the delegation
+   stack deployed in the staging account, §10.1. Each gateway has its
+   own certificate; the relay's is untouched.)
 
 ### 14.2 Open questions (each with the recommendation)
 
@@ -859,6 +953,24 @@ again computes another digest and refuses a good signature.
 
 ## 17. Changelog
 
+- **0.4.4** — the deployment as built (vettid.org #213, #216, #217,
+  #223; vettid-push #1; approved by the owner 2026-10-11). No change to
+  the wire format or to the gateway's behaviour. §10.1: two stacks
+  (`VettidOrgPushDataStack`, `VettidOrgPushStack`), a certificate per
+  gateway on the relay's listener, staging through a delegated zone
+  `push.staging.vettid.org`, egress tcp/443 only, the context keys,
+  about $25 a month per channel. §10.2: no stack creates a secret; the
+  owner's administrator role creates each with its value and is the
+  only principal that can; each gateway decrypts only its channel's;
+  `create-secret` once, `put-secret-value` after, never delete and
+  recreate (the first deployment, which had a stack create them,
+  failed on 2026-10-11). §10.4: staging's Android app id is
+  `com.vettid.app.staging`; the staging gateway is live with no
+  platform enabled. §10.5: the topic `vettid-org-push-alerts`, the
+  attestation-failures threshold of 25 an hour, the `no-healthy-task`
+  alarm. §14.1 items 1.4, 2.3 and 3 follow. §5.1 step 2: while stale
+  the refresh stays at 10 minutes, so recovery can take that long;
+  the age is on a monotonic clock. 0.4.2 marked approved.
 - **0.4.3** — the trusted manifest's maximum age (§5.1 step 2, §14.2
   question 15; owner, 2026-10-11; vettid-push #1): 7 days since the
   last successful refresh, then registrations are refused with the
@@ -866,7 +978,8 @@ again computes another digest and refuses a good signature.
   not affected; the serial is still not persisted. No change to the
   wire format.
 - **0.4.2** — errata from the gateway and Android N4 implementations
-  (vettid-push; vettid-android #109; a draft for the owner's review).
+  (vettid-push; vettid-android #109; approved by the owner 2026-10-11,
+  merged as vettid.org #211).
   Implemented behaviour written down where 0.4.1 was silent or
   ambiguous. **Requests** (§5, §15): timestamps may carry fractional
   seconds and the digest uses the header string verbatim; a full replay

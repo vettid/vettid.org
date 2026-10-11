@@ -868,6 +868,18 @@ After publishing a manifest, run it at once:
    test key is refused, as designed). Without the 60-second wait the
    parent restarts in a loop (`QueueDeletedRecently`) until a minute has
    passed; it recovers by itself. (S1, 2026-10-05: PASS.)
+   As run for S10 (2026-10-11): the same sequence with the capacity
+   run in one go, that is the self-test line with `-capacity 400` and
+   the output redirected as in "Capacity measurement" below (SSM
+   `executionTimeout` of at least 7200 s); PASS, 58 held, about 907
+   projected. Two things about the group's size while doing this: a
+   **candidate or canary** group, whose PCR0 has no `vault-releases`
+   row yet, is left alone by the scaler and stayed at 1 for the whole
+   self-test, so set it back to 0 by hand afterwards; an idle group of
+   a **listed** release that is scaled up by hand is returned to its
+   minimum by the scaler after its 30 idle minutes (seen on r4), so a
+   long run on a listed release needs a vault unlocked on it or a
+   fresh scale-up.
 6. After publication, the always-on minimum moves (O7): set
    `min_instances: 1` on N and `0` on N−1, deploy both release stacks.
 
@@ -1032,6 +1044,14 @@ than the signer's `manifests/` copy, or in an email, chat or cloud drive.
    a file manager is not supported. If VettID is not offered, the file
    manager is not labelling the file `application/json`: keep the `.json`
    name, or use the Files app.
+   Do it on the phone. Handing the file to the app from the computer
+   (`adb shell am start -a android.intent.action.SEND … --grant-read-uri-permission`)
+   no longer works: the media provider denies the permission (seen on
+   GrapheneOS, 2026-10-11).
+   Each installed app keeps its own canary manifest: with the old
+   staging app (`com.vettid.app`) and the new one
+   (`com.vettid.app.staging`) on one phone, share the file to each app
+   that is to use it.
 3. The app shows **Use a test release manifest?** with the serial, the
    signing key and the releases it lists. Check them against the `sign`
    output: serial `<s>`, key `4353463f85c4012f` (key A; key B is

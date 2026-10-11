@@ -1,18 +1,23 @@
 ---
 title: RELEASE-UPDATES
 status: draft
-version: 0.3.1
+version: 0.3.2
 date: 2026-10-11
 owner: Al Liebl (Mesmer)
 related:
   - VAULT-PLAN.md (D1 re-sealing per release, D3 reproducible builds)
   - VAULT-MESSAGING.md (0.10.0) §11.10 (normative: manifest, sealing, approval, the move, app behaviour, the key check incl. retirement)
-  - VAULT-RELEASES.md (0.1.11) §3 (statuses, cadence, retirement and notices), §7 (manifest and release log)
+  - VAULT-RELEASES.md (0.1.13) §3 (statuses, cadence, retirement and notices), §7 (manifest and release log)
   - ANDROID-PLAN.md (0.1.31) §4 "Vault update", "What's new" (the app's side of §2)
   - ARCHITECTURE.md
 changelog:
+  - 0.3.2: as built (vettid.org #224, MEMBER-API 2.4.2; approved by
+    the owner 2026-10-11): each notice email before the end date says how
+    far away the end is on the day it is sent, and names the time on
+    the last two days (§3). 0.3.1 marked approved
   - 0.3.1: owner decision of 2026-10-11 (STAGING-DEVELOPMENT-PLAN D2;
-    VAULT-RELEASES 0.1.11 §3.5; a draft for the owner's review): the
+    VAULT-RELEASES 0.1.11 §3.5; approved by the owner 2026-10-11,
+    merged as vettid.org #220): the
     first production release, which goes to a small group of testers,
     is kept for 90 days after release 2 replaces it, not 12 months;
     every later release keeps the 12 months (§3)
@@ -136,7 +141,10 @@ notice, and then an end date (owner decisions of 2026-10-04).
   months.
 - **Notice.** 90 days before the end date the release becomes
   **retired**. The app shows the date at every unlock, and VettID emails
-  you 90, 30, 7 and 1 days before it.
+  you 90, 30, 7 and 1 days before it. (0.3.2) Each of those emails
+  gives the end date and how far away it is on the day the email is
+  sent ("in 30 days"), and on the last two days the time as well
+  ("tomorrow at 15:30 UTC", "today at 15:30 UTC").
 - **Every notice email links the release notes** (owner request
   2026-10-10): the entry of the release that is ending, and the entry
   and one-line summary of the newest release, the one the app will

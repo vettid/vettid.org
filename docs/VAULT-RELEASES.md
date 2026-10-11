@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.12
+version: 0.1.13
 date: 2026-10-11
 owner: Al Liebl (Mesmer)
 changelog:
@@ -73,7 +73,8 @@ changelog:
     short entries; notice emails link the ending and the newest release's
     notes (§3.5). §10.1 steps 4, 5, 10 and 12 and §11.1 follow
   - 0.1.11 (owner decisions of 2026-10-11, STAGING-DEVELOPMENT-PLAN
-    0.1.0 §6; a draft for the owner's review). **D2:** production
+    0.1.0 §6; approved by the owner 2026-10-11, merged as vettid.org
+    #220). **D2:** production
     release 1's window is 90 days, for release 1 only, expressed as
     `ends_after_days: 90` on its entry in `vault/releases/prod.json`;
     the default stays 12 months and the KMS window 30 days (§3.5; §1,
@@ -96,6 +97,18 @@ changelog:
     is bound to its app's signer (§5.2); C6 says what adding and
     removing a signer does to existing vaults (§3.4); §12.1 and §15 O8
     follow
+  - 0.1.13 (editorial, as built; staging release S10, vettid.org #223,
+    #228–#230, vettid-vault #62–#65; VAULT-MESSAGING 0.27.1; approved
+    by the owner 2026-10-11). §3.5: what `check:manifest` does and does
+    not check about `ends_after_days` (an `ends_at` needs release 2's
+    `published_at`; only an early `ends_at` is refused; nothing
+    requires the member on production release 1; **owner decision
+    2026-10-11: it will be required**, not yet implemented). §5.2: the feature list's only-grow
+    check runs in the release workflow against the highest lower tag;
+    the staging exception for unbound vaults is derived from the
+    channel and release number; the key attestation chain rules.
+    §3.5 "As built": `security: urgent` first used, by S10. §8.8:
+    S10's capacity figures. 0.1.11 marked approved
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.14.0) §11.10 release updates, §12.5 deletion, §13.5, §13.9
@@ -327,6 +340,26 @@ the default of 12 months.
   only with the value 90, and then refuses an `ends_at` on that entry
   earlier than 90 days after release 2's `published_at`. (No check knew
   W before: `ends_at` is set by hand, §7, §10.3.)
+- *The check, as built* (0.1.13; `lib/vault/release-list.ts`).
+  - An `ends_at` on the entry is refused while release 2 is not in
+    the list or has no `published_at`: there is nothing to count the
+    90 days from.
+  - Only an **early** `ends_at` is refused. There is no upper bound: a
+    later date is a longer window, which is always allowed.
+  - The member is kept out of the manifest and out of the log's
+    `index.json`; only the release log page's "End date" line reads
+    it.
+  - **Nothing requires the member.** A production release 1 entry
+    without it passes every check, and then has no checked window at
+    all: no check knows the default of 12 months either, so its
+    `ends_at` would be whatever is typed (after `published_at`), and
+    its log page would promise "at least 12 months". The 90 days of D2
+    then rest on the release entry PR's review alone (W10-READINESS §3
+    step 5). **Decided (owner, 2026-10-11, as recommended; not yet
+    implemented):** `check:manifest` must refuse a production release
+    1 entry without `ends_after_days: 90`. A small change to the
+    validation, to make before the release entry PR (W10-READINESS
+    B12).
 - *The timeline.* W equals the notice period, so release 1 is never
   `deprecated`: the manifest that makes release 2 `active` (T0) sets
   release 1 `retired` with `ends_at` = T0 + 90 days. `active` to
@@ -351,7 +384,8 @@ the default of 12 months.
 milestone due) and the deadline email (`removed`, up to 14 days after
 `ends_at`, not during a rescue), plus the hotfix email of §10.2 (a release
 whose log says `security: urgent`, to members on its `affects` releases,
-for 30 days). It finds members through a new vaults-table index,
+for 30 days; 0.1.13: first used by staging S10, serial 12, whose log
+entry is `security: urgent` with `affects` S3–S9). It finds members through a new vaults-table index,
 `sealed-release-index` (projects `vault_id`, `user_guid`, `state` only;
 the `user-index` cannot answer "who is on release N"), with its own role
 (`vettid-org-member-vault-notices`: `Query` on `vault-releases` and that
@@ -573,6 +607,17 @@ duplicate digest, the bare-string form and, in `prod.json`,
   S10 carries this with `android_package` and `features` (0.1.11); how
   the binding and the move to `com.vettid.app.staging` compose is in
   VAULT-MESSAGING §11.7.1.
+- **As built** (0.1.13; vettid-vault #62–#64, in S10; VAULT-MESSAGING
+  0.27.1). The feature list's only-grow check compares with the
+  channel file at the **highest existing tag `release/<channel>/<m>`
+  below N**, and runs in the release workflow's gate on a release tag
+  (`releasecfg check -previous`), not in the image or in a rebuild
+  from the tag alone. Staging's acceptance of vaults with no recorded
+  signer is **not a constant of the file**: the image derives it from
+  its channel and release number (staging, release 10 or lower), so
+  `prod.json` cannot express it. Since S10 the images also apply the
+  key attestation chain rules of VAULT-MESSAGING §11.7 (the fix that
+  made S10 an urgent security release).
 
 ### 5.3 Provenance
 
@@ -1212,6 +1257,12 @@ So the limit is concurrent unlocks (one vCPU for the KDF and ~76 MiB each
 for a moment), not steady memory: 58 is the conservative figure for a
 burst of unlocks, ~980 the figure for idle unlocked vaults. Record:
 W9-REPORT §4.
+
+*Measured again (staging S10, 2026-10-11):* the same run as S10's
+canary self-test (`-capacity 400`, same host and enclave size), PASS:
+58 vaults held at the memory floor, about 907 idle unlocked vaults
+projected per host. The burst figure is unchanged; the projection is
+about 7 % lower than S3's.
 
 *O6 decision (owner, 2026-10-06):* keep the 1 vCPU / 5120 MiB enclave on
 m7g.large for release 1; revisit when unlock queueing shows in metrics
