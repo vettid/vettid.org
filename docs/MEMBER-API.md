@@ -1,8 +1,21 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.3.2
+version: 2.4.0
 changelog:
+  - 2.4.0 (2026-10-11, VAULT-MESSAGING 0.25.0 §11.11.10; owner decision
+    of 2026-10-11, "we should allow a typed recovery code"; a draft for
+    the owner's review): the recovery code can be typed. The API mints a
+    12-character `locator` (60 random bits) with each recovery request
+    and returns it in `GET /api/vault/recovery` together with
+    `sealed_code`; `POST /api/vault/recovery/claim` also takes
+    `{locator, app_key}`, signed with an empty `vault`, and both forms
+    of the claim answer `vault_id` and `recovery_id` as well. The
+    recovery page shows the typed form (locator, code and 4 check
+    characters computed in the browser: 48 characters in 12 groups of
+    four) instead of the bare code. Additive: an app that sends the
+    scanned form and ignores unknown fields is unaffected; the queue,
+    the enclave and the register route do not change
   - 2.3.2 (2026-10-10, VAULT-RELEASES 0.1.10 W11, RELEASE-UPDATES
     0.3.0; editorial, as built): "Vault release notices": every notice
     email links release notes (the ending release's entry, the newest
@@ -298,7 +311,7 @@ device identifiers, and never logs envelopes.
 | `GET /api/vault/requests/{id}` | yes (the member's slots) | the key that made the request |
 | `POST /api/vault/recovery`, `GET`, `/cancel` | yes | — |
 | `POST /api/vault/recovery/cancel-link` | its token | — |
-| `POST /api/vault/recovery/claim` | — | the key being registered (`vault=` the QR's) |
+| `POST /api/vault/recovery/claim` | — | the key being registered (`vault=` the QR's; empty with a `locator`, 2.4.0) |
 | `POST /api/vault/recovery/register` | — | a claim key |
 | `POST /api/vault/deletion`, `GET` (2.1.0) | yes | — |
 | `POST /api/vault/deletion/cancel` (2.1.0) | yes | `app_key` |
@@ -940,7 +953,7 @@ the expiry itself.
 | GET | `/api/vault/recovery` | — | `{recovery: Recovery \| null}` |
 | POST | `/api/vault/recovery/cancel` | `{recovery_id}` | `200 {cancelled: boolean}` |
 | POST | `/api/vault/recovery/cancel-link` | `{token}` (no session) | `200 {cancelled: boolean}` |
-| POST | `/api/vault/recovery/claim` | `{vault_id, recovery_id, app_key}` (app, signed by `app_key`; 2.0.0) | `200 {user_guid, email_hint}` |
+| POST | `/api/vault/recovery/claim` | `{vault_id, recovery_id, app_key}` (scanned; 2.0.0) or `{locator, app_key}` (typed; 2.4.0); app, signed by `app_key` | `200 {user_guid, email_hint, vault_id, recovery_id}` (the two identifiers since 2.4.0) |
 | POST | `/api/vault/recovery/register` | `{vault_id, request_id, instance_id, etk_kid, envelope}` (app, signed by a claim key; 2.0.0) | `202 {vault_id, request_id}`; poll `GET /api/vault/requests/{id}` |
 
 ```ts
@@ -953,6 +966,7 @@ interface Recovery {
   available_at: string;                // requested_at + 24 h
   expires_at: string;                  // available_at + 24 h
   sealed_code?: string;                // b64 of 5,252 bytes, only while `available`
+  locator?: string;                    // 2.4.0: 12 Crockford base32 characters, only together with a `sealed_code` that is a code's (never with `unavailable`)
 }
 ```
 
@@ -964,8 +978,47 @@ interface Recovery {
   recovery_not_available`; `404 not_found` when `vault_id` and
   `recovery_id` do not name the vault's current recovery). Adds the key
   to `claim_keys` (at most 10; the oldest goes), audits
-  `vault.recovery_claim`, answers `user_guid` and `email_hint`. Limits: 10
+  `vault.recovery_claim`, answers `user_guid` and `email_hint` and,
+  since 2.4.0, the recovery's `vault_id` and `recovery_id`. Limits: 10
   per vault per day, 10 per source network per 15 minutes.
+- **Claim by locator** (2.4.0, VAULT-MESSAGING 0.25.0 §11.11.10): the
+  typed form. Body `{locator, app_key}`; a body with `locator` and
+  either identifier is `400`. Signed by the key being registered with
+  `vault=` empty, as the redeem. In order: the signature; the pause
+  (`503 vault_unavailable` with `service: "paused"`, before the body
+  is read, as the scanned form); the body's syntax (`locator` exactly 12 characters of
+  `0-9A-HJKMNP-TV-Z`; the app sends the canonical form, and anything
+  else is `400`); the per-network limit; the lookup.
+  - **Miss.** No such locator, or its recovery is not the vault's
+    current one (replaced), or the vault or the pointer is gone:
+    `404 not_found`, the body of an unknown pair, after the same work
+    (one read of the locator row and one of a vault row, a dummy when
+    there is none), so that timing does not tell a miss from a stale
+    hit. A miss writes nothing and is charged to no recovery.
+  - **Hit.** From here the scanned form's code runs with the row's
+    `vault_id` and `recovery_id`: the per-vault limit, the account
+    checks, `409 recovery_not_available` unless `available`, the
+    claim keys, the audit and the answer.
+  - **Limits.** Per source network, 10 per 15 minutes, in the same
+    bucket as the scanned form (`vault-recovery-claim-net#<network>`,
+    hits and misses alike); then, on a hit, the scanned form's 10 per
+    vault per day. **None is global**, as for setup codes: a search
+    for locators cannot stop anyone else's recovery.
+  - **Audit.** `vault.recovery_claim` gains `via: qr | typed`.
+    Misses are audited as `vault.recovery_locator_miss`, aggregated
+    per source network and hour (at the 1st, 10th, 100th, … miss, as
+    `vault.enroll_code_failed`); never the locator tried.
+- **The locator** (2.4.0). 60 bits from the API's CSPRNG as 12
+  Crockford base32 characters, minted in `POST /api/vault/recovery`.
+  Kept on the recovery (`recovery.locator`) and as a request-table
+  row `recovery-locator#<locator>` → `{vault_id, recovery_id}`,
+  written with a conditional put (a collision draws again) and
+  expiring with the recovery, like the cancel link's row. It is kept
+  in the clear: it is no more than the `vault_id` and `recovery_id`
+  it stands for, which the table holds anyway. `GET
+  /api/vault/recovery` returns it only in an answer that carries a
+  code's `sealed_code` (`available`). It is not in `status`, in any
+  email or in a log. A recovery requested before 2.4.0 has none.
 - **Recovering key** (2.0.0). When a register slot comes back
   `recovery_registered`, the API records that register's key (the slot's
   `app_kid`) as `recovering_key`, with the `registered` state. It may
@@ -1043,12 +1096,14 @@ interface Recovery {
   available_at} | null` in `VaultStatus` (above): the active recovery
   (`pending`, `available` or `registered` before `expires_at`), so the
   app can show a recovery in progress and offer to cancel it.
-- **Rate limits:** request 3 per member per day; register 10 per member
-  per day; cancel 30 per member per 15 minutes; the cancel link 20 per
+- **Rate limits:** request 3 per member per day; claim as above;
+  register 10 per member per day; cancel 30 per member per 15 minutes; the cancel link 20 per
   source network per 15 minutes; status 60 per minute.
 - **Audit:** `vault.recovery_request`, `vault.recovery_cancel` (with
   `via: session | link`), `vault.recovery_code_released` (first release),
-  `vault.recovery_register`, `vault.recovery_registered` (1.1.0). Never the code, the browser key, the token or
+  `vault.recovery_register`, `vault.recovery_registered` (1.1.0),
+  `vault.recovery_claim` (2.0.0; `via`, 2.4.0),
+  `vault.recovery_locator_miss` (2.4.0). Never the code, the locator, the browser key, the token or
   envelopes.
 - **Email** uses the system mailer (SES sandbox: the member's address must
   be a verified identity, as for sign-in links; a failed send is logged
@@ -1102,8 +1157,18 @@ credential password):
   cancel, and, while `available`, the code: opened in the page (ECDH
   `deriveBits`, HKDF-SHA-256, AES-256-GCM, all WebCrypto), drawn as the
   §11.11.2 QR payload (with `api`, 2.0.0) by the vendored qrcode-generator 2.0.4 (MIT,
-  `js/vendor/`, checksum pinned in `test/site-vault.test.ts`) and as
-  text in groups of four. The code is decrypted only when the member
+  `js/vendor/`, checksum pinned in `test/site-vault.test.ts`) and, 2.4.0,
+  as the **typed form** of VAULT-MESSAGING 0.25.0 §11.11.10 under
+  "Can't scan? Type this code in the app": the API's `locator`, the
+  code and 4 check characters (the first 20 bits of SHA-256 over
+  `"vettid/vms/2/recovery-typed-check" || 0x00 || location.origin ||
+  0x00 || locator || code`, computed with WebCrypto), 48 characters
+  as twelve groups of four in three rows, each group its own element,
+  with "The code has no I, L, O or U" and no copy button. The bare
+  32-character text shown until 2.3.2 is removed. Without a `locator`
+  (a recovery requested before 2.4.0) only the QR is shown, with
+  "To type the code instead, cancel this recovery and start a new
+  one". The check characters are never sent. The code is decrypted only when the member
   presses **Show the code** and is removed from the page on **Hide**, on
   any re-render and on `pagehide`; it is never sent, logged or stored.
   Polling `GET /api/vault/recovery` is at most once a minute (once every
