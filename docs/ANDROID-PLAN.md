@@ -1121,7 +1121,8 @@ its process runs; nothing keeps it running in the background).
    never depends on a wake: the app collects at every foreground as
    now.
    - **The fallback beyond `limit`** (0.1.32; implemented in
-     vettid-android #109; **owner decision pending**). The decision of
+     vettid-android #109; **approved by the owner 2026-10-11** with
+     vettid.org #211: "good with your recommendations"). The decision of
      2026-10-10 names the on-phone service as the fallback for `limit`
      only. As implemented, it also runs while the phone has **no
      working registration for any other reason**: `unavailable`, another
