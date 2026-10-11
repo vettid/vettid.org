@@ -16,7 +16,7 @@ const SRC = join(ROOT, 'website', 'assets');
 const FONTS = readdirSync(join(SRC, 'fonts')).map((f) => `fonts/${f}`);
 // target dir → files from website/assets it needs
 const TARGETS = {
-  'sites/account/assets': ['fonts.css', 'favicon.svg', 'favicon.png', 'logo-192.png', ...FONTS],
+  'sites/account/assets': ['fonts.css', 'favicon.svg', 'favicon.png', 'logo-192.png', 'vettid-horizontal-transparent.svg', ...FONTS],
   'sites/admin': ['favicon.svg', 'favicon.png'],
 };
 

@@ -35,6 +35,33 @@ header {
   text-decoration: none;
 }
 
+/* Brand kit artwork (stamped by scripts/sync-nav.mjs): the horizontal lockup
+   above 768px, the icon alone below, where the lockup would fall under its
+   160px minimum (BRAND.md rule 2). The lockup file carries its own padding
+   (the artwork is 83.4% of its width, so 192px gives a 160px lockup); the
+   negative margins take that padding back out, so the header keeps the
+   height and left edge it had with the 30x40 mark. Never restyle, recolour
+   or filter these images. */
+.header-logo img {
+  display: block;
+  flex: none;
+}
+
+.header-logo-full {
+  width: 192px;
+  height: auto;
+  margin: -18.4px 0 -18.4px -15px;
+}
+
+.header-logo-icon {
+  width: 40px;
+  height: 40px;
+}
+
+.header-logo img.header-logo-icon { display: none; }
+
+/* Inline mark + text name: only /playbooks (separate repo) still renders
+   these; this site's pages use the images above. */
 .header-logo svg {
   width: 30px;
   height: auto;
@@ -71,6 +98,8 @@ header {
 
 @media (max-width: 768px) {
   .header-logo span { display: none; }
+  .header-logo img.header-logo-full { display: none; }
+  .header-logo img.header-logo-icon { display: block; }
   .coming-soon-chip { font-size: 10px; padding: 6px 10px; }
 }
 
