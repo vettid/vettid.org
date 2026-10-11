@@ -3,7 +3,6 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as route53 from 'aws-cdk-lib/aws-route53';
-import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as subs from 'aws-cdk-lib/aws-sns-subscriptions';
 import { Construct } from 'constructs';
@@ -21,7 +20,11 @@ export interface VettidOrgPushDataStackProps extends cdk.StackProps {
 export const PUSH_KEY_ALIAS = 'alias/vettid-org-push';
 /** Where the gateways' alarms go (§10.5): a topic of their own, emailed to the admin address. */
 export const PUSH_ALERTS_TOPIC_NAME = 'vettid-org-push-alerts';
-/** The secrets a gateway reads at start (§10.2), in `vettid-org/<channel>/push/<name>`. */
+/**
+ * The secrets a gateway reads at start (§10.2), `vettid-org/<channel>/push/<name>`.
+ * No stack creates them: the operator does, under the key (RUNBOOK "Push
+ * gateway"), and the stacks refer to them by name only.
+ */
 export const PUSH_SECRETS = ['apns', 'fcm', 'blob-keys'] as const;
 export type PushSecret = (typeof PUSH_SECRETS)[number];
 
@@ -54,18 +57,20 @@ export const pushSecretsRead = (platforms: readonly PushPlatform[]): PushSecret[
  *    exactly: each channel's gateway task role, for that channel's secrets
  *    only (through Secrets Manager, by the secret's ARN in the encryption
  *    context), and the owner's Identity Center role (the account's
- *    break-glass admin, who also fills and rotates the secrets). Nobody else
- *    can read a secret, whatever their IAM policy says: the administrator
- *    statement carries no cryptographic action and no `kms:CreateGrant`.
- *    Both channels' roles are named from the start, so adding production
- *    later does not touch the key.
- *  - **The secrets**, per listed channel: `vettid-org/<channel>/push/apns`,
- *    `fcm` and `blob-keys`, created **empty** (no value, no generated one)
- *    under the key. No value is ever in a template: the operator puts them
- *    (RUNBOOK "Push gateway"), `blob-keys` from `pushctl blob-keys new`.
- *    Created here rather than by hand so that a secret cannot end up under
- *    the account's default key, which any principal with IAM access could
- *    read.
+ *    break-glass admin, who also creates and rotates the secrets). Nobody
+ *    else can read a secret, whatever their IAM policy says: the
+ *    administrator statement carries no cryptographic action and no
+ *    `kms:CreateGrant`. Both channels' roles are named from the start, so
+ *    adding production later does not touch the key.
+ *  - **Not the secrets.** `vettid-org/<channel>/push/apns`, `fcm` and
+ *    `blob-keys` are created by the operator, with their value, under the
+ *    key (RUNBOOK "Push gateway"), and are named here and in
+ *    VettidOrgPushStack only. CloudFormation cannot create them, not even
+ *    empty: Secrets Manager's CreateSecret under a customer-managed key
+ *    needs `kms:GenerateDataKey` **and** `kms:Decrypt` for its caller, and
+ *    a deployment role that may decrypt under this key could read every
+ *    secret, which is what the key policy exists to prevent (the first
+ *    deployment tried, and failed with "Access to KMS is not allowed").
  *  - **The log group** per listed channel, `/vettid-org/<channel>/push-service`,
  *    14 days. Here, not with the service: a service stack whose first
  *    deployment fails is rolled back and deleted, and its log (why the tasks
@@ -90,6 +95,12 @@ export class VettidOrgPushDataStack extends cdk.Stack {
     if (!channels.length) throw new Error('VettidOrgPushDataStack: context pushStages lists no channel');
 
     const retain = cdk.RemovalPolicy.RETAIN;
+    // The log groups and the zone are kept for life, but not stranded when
+    // the operation that creates them rolls back (RetainExceptOnCreate): a
+    // failed first deploy on 2026-10-11 left a log group whose name then
+    // blocked the retry, and an empty zone. The key stays plain RETAIN:
+    // CloudFormation never schedules a key deletion here.
+    const retainOnceCreated = cdk.RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE;
     const viaSecretsManager = { StringEquals: { 'kms:ViaService': `secretsmanager.${this.region}.amazonaws.com` } };
     const secretArnPattern = (channel: PushChannel) =>
       `arn:${this.partition}:secretsmanager:${this.region}:${this.account}:secret:${pushSecretPrefix(channel)}/*`;
@@ -118,22 +129,18 @@ export class VettidOrgPushDataStack extends cdk.Stack {
             resources: ['*'],
           }),
           new iam.PolicyStatement({
-            // Writing a secret needs a data key, not Decrypt: whoever IAM
-            // lets put a value (the owner, CloudFormation creating the
-            // empty secrets) can, and still cannot read one.
-            sid: 'WriteSecrets',
-            principals: [new iam.AccountRootPrincipal()],
-            actions: ['kms:GenerateDataKey'],
-            resources: ['*'],
-            conditions: viaSecretsManager,
-          }),
-          new iam.PolicyStatement({
             // The break-glass admin of §10.2: the owner's Identity Center
-            // role (MFA at sign-in). Needed in normal operation too: a
-            // blob-key rotation reads the secret (`pushctl blob-keys rotate`).
-            sid: 'OwnerReadsSecrets',
+            // role (MFA at sign-in), and the only one who creates, fills,
+            // rotates and reads the secrets. Secrets Manager needs both
+            // actions of its caller for CreateSecret and PutSecretValue
+            // under a customer-managed key, even for a secret with no
+            // value, and Decrypt alone for GetSecretValue
+            // (`pushctl blob-keys rotate` reads the secret). Nobody else
+            // has either: no deployment role can write a secret, and so
+            // none needs to be able to read one.
+            sid: 'OwnerWritesAndReadsSecrets',
             principals: [ownerTrust(this.account)],
-            actions: ['kms:Decrypt'],
+            actions: ['kms:GenerateDataKey', 'kms:Decrypt'],
             resources: ['*'],
             conditions: viaSecretsManager,
           }),
@@ -164,27 +171,12 @@ export class VettidOrgPushDataStack extends cdk.Stack {
     });
     publishRef(this, config, 'push/key-arn', key.keyArn);
 
-    const what: Record<PushSecret, string> = {
-      apns: 'APNs authentication key {team_id, key_id, p8}',
-      fcm: 'FCM access: workload identity federation configuration, or a service-account key',
-      'blob-keys': 'wake-blob keys {current, keys}, from pushctl blob-keys',
-    };
     for (const channel of channels) {
       const cid = channel === 'prod' ? 'Prod' : 'Staging';
-      for (const name of PUSH_SECRETS) {
-        // The L1: secretsmanager.Secret always generates a value. This one
-        // has none until the operator puts it.
-        const secret = new secretsmanager.CfnSecret(this, `${cid}Secret${name.replace(/(^|-)([a-z])/g, (_m, _d, c: string) => c.toUpperCase())}`, {
-          name: pushSecretName(channel, name),
-          description: `VettID push gateway (${channel}): ${what[name]}. Value put by the operator (RUNBOOK "Push gateway"), never by a deploy.`,
-          kmsKeyId: key.keyArn,
-        });
-        secret.applyRemovalPolicy(retain);
-      }
       new logs.LogGroup(this, `${cid}ServiceLogs`, {
         logGroupName: pushLogGroupName(channel),
         retention: logs.RetentionDays.TWO_WEEKS,
-        removalPolicy: retain,
+        removalPolicy: retainOnceCreated,
       });
     }
 
@@ -195,7 +187,7 @@ export class VettidOrgPushDataStack extends cdk.Stack {
         comment: `${host} (the staging push gateway, behind the relay's load balancer) - managed by VettidOrgPushDataStack; delegated from staging.vettid.org`,
       });
       // New name servers would orphan the delegation in the staging zone.
-      zone.applyRemovalPolicy(retain);
+      zone.applyRemovalPolicy(retainOnceCreated);
       // The zone's apex is the host itself, so a CAA lookup stops here.
       amazonOnlyCaa(this, 'StagingCaa', zone);
       publishRef(this, config, 'push/staging-zone-id', zone.hostedZoneId);

@@ -8,10 +8,11 @@ import { PUSH_KEY_ALIAS, VettidOrgPushDataStack, pushSecretsRead } from '../lib/
 import { vaultHostDnsAllowlist } from '../lib/vault/egress';
 
 /**
- * The push gateways (PUSH-GATEWAY §10): VettidOrgPushDataStack (key, empty
- * secrets, log groups, the staging zone, alarm topic), VettidOrgPushStack
- * (one Fargate service per channel behind the relay's load balancer) and,
- * in the staging app, the delegation of push.staging.vettid.org.
+ * The push gateways (PUSH-GATEWAY §10): VettidOrgPushDataStack (key, log
+ * groups, the staging zone, alarm topic; the secrets are the operator's,
+ * no stack creates them), VettidOrgPushStack (one Fargate service per
+ * channel behind the relay's load balancer) and, in the staging app, the
+ * delegation of push.staging.vettid.org.
  */
 
 const MAIN = '449757308783';
@@ -51,6 +52,9 @@ const container = (json: any, family: string) => {
   expect(td.ContainerDefinitions).toHaveLength(1);
   return { td, c: td.ContainerDefinitions[0], env: Object.fromEntries(td.ContainerDefinitions[0].Environment.map((e: any) => [e.Name, e.Value])) };
 };
+/** ARNs as IAM will see them: `Fn::Join` with the partition resolved. */
+const arns = (x: unknown): string[] =>
+  [x].flat().map((a: any) => (typeof a === 'string' ? a : a['Fn::Join'][1].map((p: any) => (typeof p === 'string' ? p : p.Ref === 'AWS::Partition' ? 'aws' : `<${str(p)}>`)).join('')));
 const policyOf = (json: any, roleName: string) => {
   const [roleId] = entries(json, 'AWS::IAM::Role').find(([, r]) => r.Properties.RoleName === roleName)!;
   return of(json, 'AWS::IAM::Policy').filter((p) => str(p.Properties.Roles).includes(roleId)).flatMap((p) => p.Properties.PolicyDocument.Statement);
@@ -103,35 +107,30 @@ describe('context', () => {
 });
 
 describe('data stack (stateful)', () => {
-  test('no secret value is in any template: the secrets are created empty, under the key', () => {
-    const secrets = of(stagingOnly.data, 'AWS::SecretsManager::Secret');
-    expect(secrets.map((s) => s.Properties.Name).sort()).toEqual([
-      'vettid-org/staging/push/apns', 'vettid-org/staging/push/blob-keys', 'vettid-org/staging/push/fcm',
-    ]);
-    const [keyId] = entries(stagingOnly.data, 'AWS::KMS::Key')[0];
-    for (const s of secrets) {
-      expect(Object.keys(s.Properties).sort()).toEqual(['Description', 'KmsKeyId', 'Name']); // no SecretString, no GenerateSecretString
-      expect(s.Properties.KmsKeyId).toEqual({ 'Fn::GetAtt': [keyId, 'Arn'] });
-      expect(s.DeletionPolicy).toBe('Retain');
-      expect(s.UpdateReplacePolicy).toBe('Retain');
-    }
-    for (const json of [stagingOnly.data, stagingOnly.push, both.data, both.push]) {
+  test('no stack creates a secret, and no secret value is in any template', () => {
+    // CloudFormation cannot create a secret under the key (CreateSecret
+    // needs kms:Decrypt for its caller, which no deployment role has): the
+    // operator creates them, and the stacks name them.
+    for (const json of [stagingOnly.data, stagingOnly.push, both.data, both.push, stacks({ pushStages: 'prod', pushImage: IMAGE2 }).push]) {
+      const types = Object.values<any>(json.Resources).map((r) => r.Type as string);
+      expect(types.filter((x) => x.startsWith('AWS::SecretsManager::'))).toEqual([]);
       const text = str(json);
-      expect(text).not.toMatch(/SecretString|GenerateSecretString|resolve:secretsmanager|BEGIN [A-Z ]*PRIVATE KEY|private_key/);
+      expect(text).not.toMatch(/SecretString|GenerateSecretString|resolve:secretsmanager|resolve:ssm-secure|BEGIN [A-Z ]*PRIVATE KEY|private_key/);
       // The task definition takes no secret from the execution role either.
       for (const td of of(json, 'AWS::ECS::TaskDefinition')) expect(td.Properties.ContainerDefinitions[0].Secrets).toBeUndefined();
     }
   });
 
-  test('a channel that is not listed has no secret, log group or service', () => {
+  test('a channel that is not listed has no log group or service', () => {
     // (The key policy names both channels from the start; nothing else of production exists.)
-    expect(of(stagingOnly.data, 'AWS::SecretsManager::Secret').filter((x) => !x.Properties.Name.startsWith('vettid-org/staging/push/'))).toEqual([]);
     expect(of(stagingOnly.data, 'AWS::Logs::LogGroup').map((g) => g.Properties.LogGroupName)).toEqual(['/vettid-org/staging/push-service']);
-    expect(of(both.data, 'AWS::SecretsManager::Secret').map((s) => s.Properties.Name)).toEqual(expect.arrayContaining(['vettid-org/prod/push/apns', 'vettid-org/staging/push/apns']));
-    expect(of(both.data, 'AWS::SecretsManager::Secret')).toHaveLength(6);
+    expect(Object.values<any>(stagingOnly.data.Resources).map((r) => r.Type).sort()).toEqual([
+      'AWS::KMS::Alias', 'AWS::KMS::Key', 'AWS::Logs::LogGroup', 'AWS::Route53::HostedZone', 'AWS::Route53::RecordSet',
+      'AWS::SNS::Subscription', 'AWS::SNS::Topic', 'AWS::SSM::Parameter', 'AWS::SSM::Parameter',
+    ]);
   });
 
-  test('the key: alias/vettid-org-push, retained, rotating; Decrypt only for the two task roles and the owner', () => {
+  test('the key: alias/vettid-org-push, retained, rotating; Decrypt only for the two task roles and the owner, who alone can write', () => {
     expect(of(stagingOnly.data, 'AWS::KMS::Alias').map((a) => a.Properties.AliasName)).toEqual([PUSH_KEY_ALIAS]);
     expect(PUSH_KEY_ALIAS).toBe('alias/vettid-org-push');
     const key = of(stagingOnly.data, 'AWS::KMS::Key')[0];
@@ -148,40 +147,49 @@ describe('data stack (stateful)', () => {
     }
     expect(admin.Condition).toBeUndefined();
 
-    const decrypt = statements.filter((s) => actions(s).some((a) => /^kms:(\*|Decrypt|ReEncrypt)/.test(a)));
-    expect(decrypt.map((s) => s.Sid).sort()).toEqual(['GatewayProdDecrypts', 'GatewayStagingDecrypts', 'OwnerReadsSecrets']);
-    for (const s of decrypt) {
-      expect(actions(s)).toEqual(['kms:Decrypt']);
+    // Every cryptographic action of the policy, by statement: nothing but these.
+    const crypto = statements.filter((s) => actions(s).some((a) => /^kms:(\*|Decrypt|Encrypt|ReEncrypt|GenerateDataKey|CreateGrant)/.test(a)));
+    expect(crypto.map((s) => [s.Sid, actions(s)]).sort()).toEqual([
+      ['GatewayProdDecrypts', ['kms:Decrypt']],
+      ['GatewayStagingDecrypts', ['kms:Decrypt']],
+      ['OwnerWritesAndReadsSecrets', ['kms:GenerateDataKey', 'kms:Decrypt']],
+    ]);
+    for (const s of crypto) {
+      // Through Secrets Manager only, and never for the account as a whole:
+      // each names one role (a deployment role matches none of them).
       expect(s.Condition.StringEquals).toEqual({ 'kms:ViaService': 'secretsmanager.us-east-1.amazonaws.com' });
+      expect(s.Principal).toEqual({ AWS: { 'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, `:iam::${MAIN}:root`]] } });
+      expect(Object.keys({ ...s.Condition.ArnLike, ...s.Condition.ArnEquals })).toEqual(['aws:PrincipalArn']);
     }
-    const by = Object.fromEntries(decrypt.map((s) => [s.Sid, s]));
-    expect(by.OwnerReadsSecrets.Condition.ArnLike['aws:PrincipalArn']).toBe(
-      `arn:aws:iam::${MAIN}:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_${OWNER_PERMISSION_SET}_*`,
-    );
-    // Each gateway: its own role, and only its own channel's secrets.
+    const by = Object.fromEntries(crypto.map((s) => [s.Sid, s]));
+    // The owner creates and rotates the secrets: CreateSecret and
+    // PutSecretValue need a data key and Decrypt for their caller. The
+    // owner's statement has no encryption-context condition (both channels).
+    expect(by.OwnerWritesAndReadsSecrets.Condition).toEqual({
+      StringEquals: { 'kms:ViaService': 'secretsmanager.us-east-1.amazonaws.com' },
+      ArnLike: { 'aws:PrincipalArn': `arn:aws:iam::${MAIN}:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_${OWNER_PERMISSION_SET}_*` },
+    });
+    // Each gateway: its own role, and only its own channel's secrets, by
+    // the name prefix in the secret's ARN (whoever created the secret).
     for (const [sid, role, channel] of [['GatewayProdDecrypts', 'vettid-org-push-gateway', 'prod'], ['GatewayStagingDecrypts', 'vettid-org-staging-push-gateway', 'staging']]) {
       expect(str(by[sid].Condition.ArnEquals['aws:PrincipalArn'])).toContain(`:iam::${MAIN}:role/${role}"`);
-      expect(str(by[sid].Condition.StringLike['kms:EncryptionContext:SecretARN'])).toContain(`:secret:vettid-org/${channel}/push/*`);
+      expect(str(by[sid].Condition.StringLike['kms:EncryptionContext:SecretARN'])).toContain(`:secretsmanager:us-east-1:${MAIN}:secret:vettid-org/${channel}/push/*`);
     }
-    // Writing needs a data key only; it reads nothing.
-    const write = statements.find((s) => s.Sid === 'WriteSecrets');
-    expect(actions(write)).toEqual(['kms:GenerateDataKey']);
-    expect(write.Condition.StringEquals['kms:ViaService']).toBe('secretsmanager.us-east-1.amazonaws.com');
-    expect(statements).toHaveLength(5);
+    expect(statements.map((s) => s.Sid)).toEqual(['AdministerButNotDecrypt', 'OwnerWritesAndReadsSecrets', 'GatewayProdDecrypts', 'GatewayStagingDecrypts']);
     // The policy is the same whichever channels are listed: adding production never touches the key.
     expect(of(both.data, 'AWS::KMS::Key')[0]).toEqual(key);
   });
 
   test('log group per channel: /vettid-org/<stage>/push-service, 14 days, retained', () => {
     expect(of(both.data, 'AWS::Logs::LogGroup').map((g) => [g.Properties.LogGroupName, g.Properties.RetentionInDays, g.DeletionPolicy]).sort()).toEqual([
-      ['/vettid-org/prod/push-service', 14, 'Retain'],
-      ['/vettid-org/staging/push-service', 14, 'Retain'],
+      ['/vettid-org/prod/push-service', 14, 'RetainExceptOnCreate'],
+      ['/vettid-org/staging/push-service', 14, 'RetainExceptOnCreate'],
     ]);
   });
 
   test('staging: the zone push.staging.vettid.org (retained, Amazon-only CAA), its id through SSM, its name servers as an output', () => {
     const zones = of(stagingOnly.data, 'AWS::Route53::HostedZone');
-    expect(zones.map((z) => [z.Properties.Name, z.DeletionPolicy])).toEqual([['push.staging.vettid.org.', 'Retain']]);
+    expect(zones.map((z) => [z.Properties.Name, z.DeletionPolicy])).toEqual([['push.staging.vettid.org.', 'RetainExceptOnCreate']]);
     const records = of(stagingOnly.data, 'AWS::Route53::RecordSet');
     expect(records.map((r) => [r.Properties.Type, r.Properties.Name])).toEqual([['CAA', 'push.staging.vettid.org.']]);
     expect(records[0].Properties.ResourceRecords).toEqual(expect.arrayContaining(['0 issue "amazon.com"', '0 issuewild ";"']));
@@ -266,8 +274,7 @@ describe('service stack: staging only (the first deployment)', () => {
     // Present with an empty value: unset would mean the gateway's default, both platforms.
     expect(c.Environment).toContainEqual({ Name: 'PUSH_PLATFORMS', Value: '' });
     const secrets = policyOf(none, 'vettid-org-staging-push-gateway').find((s) => s.Sid === 'PushSecrets');
-    expect([secrets.Resource].flat()).toHaveLength(1);
-    expect(str(secrets.Resource)).toContain(':secret:vettid-org/staging/push/blob-keys-??????');
+    expect(arns(secrets.Resource)).toEqual([`arn:aws:secretsmanager:us-east-1:${MAIN}:secret:vettid-org/staging/push/blob-keys-??????`]);
     expect(pushSecretsRead([])).toEqual(['blob-keys']);
     expect(pushSecretsRead(['apns', 'fcm'])).toEqual(['apns', 'fcm', 'blob-keys']);
   });
@@ -277,14 +284,16 @@ describe('service stack: staging only (the first deployment)', () => {
     expect(statements.map((s) => s.Sid).sort()).toEqual(['PushSecrets', 'PushSecretsKey']);
     const by = Object.fromEntries(statements.map((s) => [s.Sid, s]));
     expect(by.PushSecrets.Action).toBe('secretsmanager:GetSecretValue');
-    // FCM only: the APNs key is not readable.
-    expect(str(by.PushSecrets.Resource)).toContain('vettid-org/staging/push/fcm-??????');
-    expect(str(by.PushSecrets.Resource)).toContain('vettid-org/staging/push/blob-keys-??????');
-    expect(str(by.PushSecrets.Resource)).not.toContain('apns');
+    // By name (no stack owns the secrets), with the ARN's random suffix and
+    // nothing wider. FCM only: the APNs key is not readable.
+    expect(arns(by.PushSecrets.Resource)).toEqual(['fcm', 'blob-keys'].map((n) => `arn:aws:secretsmanager:us-east-1:${MAIN}:secret:vettid-org/staging/push/${n}-??????`));
+    expect(by.PushSecrets.Condition).toBeUndefined();
+    expect(str(t)).not.toMatch(/Fn::ImportValue|AWS::SecretsManager/);
     expect(by.PushSecretsKey.Action).toBe('kms:Decrypt');
     expect(str(by.PushSecretsKey.Resource)).toContain('SsmParameterValuevettidorgprodpushkeyarn');
     expect(by.PushSecretsKey.Condition.StringEquals).toEqual({ 'kms:ViaService': 'secretsmanager.us-east-1.amazonaws.com' });
-    expect(str(by.PushSecretsKey.Condition.StringLike)).toContain(':secret:vettid-org/staging/push/*');
+    expect(Object.keys(by.PushSecretsKey.Condition).sort()).toEqual(['StringEquals', 'StringLike']);
+    expect(arns(by.PushSecretsKey.Condition.StringLike['kms:EncryptionContext:SecretARN'])).toEqual([`arn:aws:secretsmanager:us-east-1:${MAIN}:secret:vettid-org/staging/push/*`]);
 
     // Every statement of the stack (task and execution roles): no wildcard
     // action or resource, and no relay data.
@@ -441,7 +450,9 @@ describe('service stack: both channels', () => {
   test('channels cannot cross: each role reads only its own channel\'s secrets', () => {
     const prod = str(policyOf(t, 'vettid-org-push-gateway'));
     const staging = str(policyOf(t, 'vettid-org-staging-push-gateway'));
-    expect(prod).toContain('vettid-org/prod/push/apns-??????');
+    expect(arns(policyOf(t, 'vettid-org-push-gateway').find((s) => s.Sid === 'PushSecrets').Resource)).toEqual(
+      ['apns', 'fcm', 'blob-keys'].map((n) => `arn:aws:secretsmanager:us-east-1:${MAIN}:secret:vettid-org/prod/push/${n}-??????`),
+    );
     expect(prod).not.toContain('vettid-org/staging/');
     expect(staging).not.toContain('vettid-org/prod/');
   });

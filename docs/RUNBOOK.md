@@ -53,7 +53,7 @@ turning that off in code (or the console) first.
 | `VettidOrgProteusAlertForwardStack` | **In the proteus account** (605628228301): the same forwarder. Deployed from this repository with `--profile proteus`. See "Security alerts". |
 | `VettidOrgCiReadOnlyStack`, `VettidOrgVaultCiReadOnlyStack` | Prod only, one per production account (management; vettid-vault-prod with `--profile vault-prod`): the GitHub Actions OIDC provider and the read-only role `vettid-org-ci-drift-readonly` for the drift check. See "Production drift". |
 | `VettidOrgRelayStack` | relay.vettid.org: VPC (no NAT; S3 + DynamoDB gateway endpoints), ElastiCache Serverless Valkey (IAM auth, TLS), ECS Fargate service (2–8 tasks, rolling deploys), ALB with PQ TLS. Logs to `/vettid-org/<stage>/relay-service`. Only deployed when `relayImage` is set. |
-| `VettidOrgPushDataStack` | Only with context `pushStages`. Management account, for both channels: the key `alias/vettid-org-push`, the empty secrets `vettid-org/<stage>/push/{apns,fcm,blob-keys}`, the log groups `/vettid-org/<stage>/push-service` (14 days), the zone `push.staging.vettid.org`, the alarm topic `vettid-org-push-alerts`. Stateful. See "Push gateway". |
+| `VettidOrgPushDataStack` | Only with context `pushStages`. Management account, for both channels: the key `alias/vettid-org-push` (the secrets `vettid-org/<stage>/push/{apns,fcm,blob-keys}` under it are created by the operator, not by a stack), the log groups `/vettid-org/<stage>/push-service` (14 days), the zone `push.staging.vettid.org`, the alarm topic `vettid-org-push-alerts`. Stateful. See "Push gateway". |
 | `VettidOrgPushStack` | Only with `pushImage` or `stagingPushImage`. push.vettid.org and push.staging.vettid.org: one Fargate service per channel (2 tasks) in the relay's cluster, behind the relay's ALB (host rule, own certificate, own target group), task role, security group, alarms. No state. |
 | `VettidOrgStagePushDelegationStack` | **Staging only**, once context `stagingPushZoneNs` is set: the one NS record delegating push.staging.vettid.org to the management account's zone. |
 
@@ -319,13 +319,14 @@ The wake-up push service (docs/PUSH-GATEWAY.md §10; code and runtime
 contract: github.com/vettid/vettid-push, README). **Both channels run in
 the management account**, as two Fargate services in the relay's cluster
 behind the relay's load balancer (§10.4): staging is not in the staging
-account. It holds no state; what it has are three secrets per channel.
+account. It holds no state; what it has are three secrets per channel,
+which **the operator creates by hand**: no stack creates or holds one.
 
 | Context | Meaning |
 |---|---|
 | `pushStages` | `staging`, `prod` or both: the channels whose gateway exists. Unset: no push stack at all, and the relay stack is untouched. |
-| `stagingPushImage`, `pushImage` | The channel's image, **pinned by digest** (`ghcr.io/vettid/vettid-push@sha256:…`, from that repository's publish job; multi-arch, the tasks run arm64). Unset: the channel has its secrets and log group but no service. Staging and production are separate so a new image runs on staging first. |
-| `stagingPushPlatforms`, `pushPlatforms` | `fcm`, `apns`, `fcm,apns`. **Default: none.** A gateway without platforms starts with no credentials and answers `platform_invalid`. A listed platform must have its secret filled first, or the tasks do not start. The task role can read only the listed platforms' secrets. |
+| `stagingPushImage`, `pushImage` | The channel's image, **pinned by digest** (`ghcr.io/vettid/vettid-push@sha256:…`, from that repository's publish job; multi-arch, the tasks run arm64). Unset: the channel has its log group but no service. Staging and production are separate so a new image runs on staging first. |
+| `stagingPushPlatforms`, `pushPlatforms` | `fcm`, `apns`, `fcm,apns`. **Default: none.** A gateway without platforms starts with no credentials and answers `platform_invalid`. A listed platform's secret must exist first, or the tasks do not start. The task role can read only the listed platforms' secrets. |
 | `stagingPushFcmProject`, `pushFcmProject` | The Firebase project id (`vettid-staging`, `vettid-prod`). Needed with workload identity federation, unless `project_id` is added to the secret; a service-account key already has it. |
 | `stagingPushZoneNs` | **Staging app**: the four name servers of the zone `push.staging.vettid.org` (step 2). |
 
@@ -338,12 +339,20 @@ until they are back). Commit each value as soon as its deploy has worked
 
 ### What is where
 
-- **`VettidOrgPushDataStack`** (stateful): the key, the secrets (created
-  **empty**: no template ever holds a value), the log groups, the staging
-  zone and the alarm topic. Deployed once, before anything else, because
-  the secrets must be filled before a service can start, and so that a
-  failed service deployment (rolled back and deleted) leaves the log that
-  says why.
+- **`VettidOrgPushDataStack`** (stateful): the key, the log groups, the
+  staging zone and the alarm topic. Deployed once, before anything else,
+  because the secrets are created under its key before a service can
+  start, and so that a failed service deployment (rolled back and deleted)
+  leaves the log that says why.
+- **The secrets** `vettid-org/<stage>/push/{blob-keys,fcm,apns}` belong to
+  no stack. The operator creates each one with its value, under the key
+  (below); the stacks know them by name only (the task role's
+  `secretsmanager:GetSecretValue` is on
+  `…:secret:vettid-org/<stage>/push/<name>-??????`). CloudFormation cannot
+  create them, not even empty: under a customer-managed key Secrets Manager
+  requires `kms:Decrypt` of whoever creates a secret, and a deployment role
+  with that could read all of them. A secret that does not exist yet is not
+  an error for any deploy; only a service that needs it does not start.
 - **`VettidOrgRelayStack`** gains seven SSM parameters (`relay/vpc-id`,
   `relay/public-subnet-ids`, `relay/alb-*`, `relay/https-listener-arn`):
   parameters only. The listener, its certificate, the load balancer and the
@@ -360,15 +369,20 @@ until they are back). Commit each value as soon as its deploy has worked
 - **Key policy** (`alias/vettid-org-push`): `kms:Decrypt` only for the two
   task roles `vettid-org-push-gateway` and `vettid-org-staging-push-gateway`
   (each for its own channel's secrets, through Secrets Manager) and for the
-  owner's Identity Center role (`VettIDAdmin`). The administrator statement
-  has no cryptographic action and no `kms:CreateGrant`.
+  owner's Identity Center role (`VettIDAdmin`), which also has
+  `kms:GenerateDataKey` and is therefore the **only** principal that can
+  create a secret under the key or put a value (Secrets Manager needs both
+  actions of its caller for either). The administrator statement has no
+  cryptographic action and no `kms:CreateGrant`. So every `aws
+  secretsmanager` command below runs in the owner's session (`aws sso
+  login`, default profile), never from CI or a deployment role.
 
 ### First deployment (staging first; production's service absent)
 
 ```bash
 aws sso login                       # covers default and vault-staging
 P="-c pushStages=staging"
-# 1. Key, empty secrets, log group, zone, alarm topic; and the relay's refs.
+# 1. Key, log group, zone, alarm topic; and the relay's refs. No secret.
 npx cdk diff   VettidOrgPushDataStack VettidOrgRelayStack $P --exclusively
 #    VettidOrgRelayStack must show seven [+] AWS::SSM::Parameter and nothing else.
 npx cdk deploy VettidOrgPushDataStack VettidOrgRelayStack $P --exclusively
@@ -380,9 +394,19 @@ npx cdk deploy VettidOrgPushDataStack VettidOrgRelayStack $P --exclusively
 #    commit it (PR), then:
 npx cdk deploy VettidOrgStagePushDelegationStack -c stage=staging --profile vault-staging --exclusively
 dig +short NS push.staging.vettid.org      # the four names; the certificate cannot validate before
-# 3. The blob keys (pushctl: `make build` in vettid-push). Its output is the secret.
-pushctl blob-keys new | aws secretsmanager put-secret-value \
-  --secret-id vettid-org/staging/push/blob-keys --secret-string file:///dev/stdin
+# 3. The blob keys secret, created by hand under the key (pushctl: `make build`
+#    in vettid-push). pushctl's output is the secret: it goes through the pipe
+#    and is never on the screen, in a file or in the shell history. The command
+#    prints the new secret's ARN only.
+pushctl blob-keys new | aws secretsmanager create-secret \
+  --name vettid-org/staging/push/blob-keys --kms-key-id alias/vettid-org-push \
+  --description 'VettID push gateway (staging): wake-blob keys {current, keys}, from pushctl blob-keys' \
+  --secret-string file:///dev/stdin --query ARN --output text
+#    Check the key (a secret without --kms-key-id is under the account's default
+#    key, which is not this one) and that the value parses; neither prints it.
+aws secretsmanager describe-secret --secret-id vettid-org/staging/push/blob-keys --query KmsKeyId --output text   # alias/vettid-org-push
+aws secretsmanager get-secret-value --secret-id vettid-org/staging/push/blob-keys --query SecretString --output text \
+  | pushctl blob-keys list                                                                                          # key ids only
 # 4. The service: no platform yet (no credentials exist), so only blob keys are needed.
 npx cdk deploy VettidOrgPushStack $P -c stagingPushImage=ghcr.io/vettid/vettid-push@sha256:<digest> --exclusively
 curl -s -o /dev/null -w '%{http_code}\n' https://push.staging.vettid.org/v1/health     # 200
@@ -392,38 +416,85 @@ curl -s -o /dev/null -w '%{http_code}\n' https://push.staging.vettid.org/v1/heal
 If step 4 fails, the tasks did not start: the circuit breaker stops the
 deployment and CloudFormation rolls the stack back (first time: deletes
 it). The reason is the last lines of `/vettid-org/staging/push-service`
-(`aws logs tail /vettid-org/staging/push-service --since 30m`): usually an
-empty or malformed secret. Fix it and deploy again.
+(`aws logs tail /vettid-org/staging/push-service --since 30m`): usually a
+missing or malformed secret. Fix it and deploy again.
 
 **Production** later: `pushStages` `staging,prod` (the data stack adds
-production's three secrets and its log group; the key and the staging
-resources do not change), fill `vettid-org/prod/push/blob-keys` with
-`pushctl blob-keys new` (**a different key from staging's**), then deploy
-with `pushImage`. Its record and certificate validation are in vettid.org
+production's log group; the key and the staging resources do not change),
+create `vettid-org/prod/push/blob-keys` as in step 3 (`pushctl blob-keys
+new` again: **a different key from staging's**), then deploy with
+`pushImage`. Its record and certificate validation are in vettid.org
 itself; nothing is delegated.
+
+### Recovering from a failed first deployment of the data stack
+
+A stack whose **first** create fails ends in `ROLLBACK_COMPLETE`: it holds
+nothing and can only be deleted. `cdk deploy` would delete it by itself,
+but this stack has termination protection, so:
+
+```bash
+S=VettidOrgPushDataStack
+aws cloudformation describe-stacks --stack-name $S --query 'Stacks[0].StackStatus' --output text      # ROLLBACK_COMPLETE, or stop here
+# What the rollback kept (DeletionPolicy Retain is honoured on a rollback too). Note the ids.
+aws cloudformation describe-stack-events --stack-name $S --output text \
+  --query 'StackEvents[?ResourceStatus==`DELETE_SKIPPED`].[ResourceType,PhysicalResourceId]'
+aws cloudformation update-termination-protection --stack-name $S --no-enable-termination-protection
+aws cloudformation delete-stack --stack-name $S
+aws cloudformation wait stack-delete-complete --stack-name $S
+```
+
+Then remove what was kept, **before** deploying again. Otherwise the retry
+fails on the log group's name ("already exists"), and it would create a
+second key and a second zone next to the orphans:
+
+```bash
+aws logs delete-log-group --log-group-name /vettid-org/staging/push-service      # empty: no service has run
+# The zone (only its NS and SOA are left). Safe only while step 2 has not delegated to it.
+aws route53 list-hosted-zones-by-name --dns-name push.staging.vettid.org \
+  --query 'HostedZones[?Name==`push.staging.vettid.org.`].Id' --output text
+aws route53 delete-hosted-zone --id <zone id>
+# The key: it has no alias (the alias was rolled back), so take its id from the
+# events above. Check the description, then schedule the deletion.
+aws kms describe-key --key-id <key id> --query 'KeyMetadata.[Description,KeyState]' --output text
+aws kms schedule-key-deletion --key-id <key id> --pending-window-in-days 7
+# Nothing of the name may be left: both print nothing.
+aws kms list-aliases --query 'Aliases[?AliasName==`alias/vettid-org-push`].AliasName' --output text
+aws logs describe-log-groups --log-group-name-prefix /vettid-org/staging/push-service --query 'logGroups[].logGroupName' --output text
+```
+
+Then start again at step 1. This applies to the first create only: once the stack exists, a failed
+update rolls back to the previous state and nothing is left over. A failed
+`VettidOrgPushStack` create needs none of this: it has no termination
+protection and retains nothing, so `cdk deploy` replaces it.
 
 ### Filling the FCM and APNs secrets
 
 Values go straight from their source into Secrets Manager: never through
-the repository, a chat or the shell history. Then list the platform and
-deploy (a new task definition: the tasks restart and read the secret).
+the repository, a chat or the shell history. The **first** time a secret is
+created (`create-secret … --kms-key-id alias/vettid-org-push`, as below);
+replacing its value later is `put-secret-value --secret-id <name>` with the
+same `--secret-string` (the secret keeps its key). Then list the platform
+and deploy (a new task definition: the tasks restart and read the secret).
 
 ```bash
+new_secret() { aws secretsmanager create-secret --name "vettid-org/staging/push/$1" --kms-key-id alias/vettid-org-push \
+  --description "VettID push gateway (staging): $2" --secret-string "$3" --query ARN --output text; }
 # FCM, the fallback: the service-account JSON key (PUSH-GATEWAY §14.1 item 1.4).
-aws secretsmanager put-secret-value --secret-id vettid-org/staging/push/fcm --secret-string file://<the downloaded key>.json
+new_secret fcm 'FCM service-account key' file://<the downloaded key>.json
 shred -u <the downloaded key>.json
 # FCM, recommended (§10.3): Google's workload identity federation configuration
 # for AWS (`gcloud iam workload-identity-pools create-cred-config … --aws`), which
 # holds no secret. The pool trusts the task role, stack output TaskRoleArn
 # (arn:aws:iam::449757308783:role/vettid-org-staging-push-gateway). It has no
 # project_id: deploy with -c stagingPushFcmProject=vettid-staging.
-aws secretsmanager put-secret-value --secret-id vettid-org/staging/push/fcm --secret-string file://<cred-config>.json
+new_secret fcm 'FCM workload identity federation configuration' file://<cred-config>.json
 
 # APNs: {team_id, key_id, p8}. The .p8 downloads once (§14.1 item 2.3); the same key serves both channels.
 jq -n --arg team_id <TEAM ID> --arg key_id <KEY ID> --rawfile p8 AuthKey_<KEY ID>.p8 '{team_id: $team_id, key_id: $key_id, p8: $p8}' \
-  | aws secretsmanager put-secret-value --secret-id vettid-org/staging/push/apns --secret-string file:///dev/stdin
+  | new_secret apns 'APNs authentication key {team_id, key_id, p8}' file:///dev/stdin
 shred -u AuthKey_<KEY ID>.p8
 
+aws secretsmanager describe-secret --secret-id vettid-org/staging/push/fcm --query KmsKeyId --output text    # alias/vettid-org-push
 npx cdk deploy VettidOrgPushStack --exclusively       # with "stagingPushPlatforms": "fcm" (later "fcm,apns") in cdk.json
 ```
 
@@ -431,6 +502,11 @@ npx cdk deploy VettidOrgPushStack --exclusively       # with "stagingPushPlatfor
 
 Tasks read the secrets **at start only**: every change below takes effect
 with the next deployment of the service, which is rolling (no downtime).
+A rotation is a new **value** of the same secret (`put-secret-value`), in
+the owner's session; the secret's ARN, and so the task role's permission,
+does not change. Do not delete and recreate a secret to change it: a
+deleted secret's name stays taken for its recovery window (7 to 30 days;
+`restore-secret` undoes a deletion within it).
 
 ```bash
 restart() { aws ecs update-service --cluster vettid-org-relay --service "$1" --force-new-deployment --query 'service.deployments[0].rolloutState'; }
