@@ -1,9 +1,40 @@
 {
-  "serial": 11,
+  "serial": 12,
   "releases": [
     {
-      "release": 9,
+      "release": 10,
       "status": "active",
+      "published_at": "2026-10-11T22:24:04Z",
+      "pcr0": "a9e3defc8bfa4c3c6f89a87afac67bc245f1ef8ac331de88505d8d4928a4bc0d9e793fb928050ba02c9f3b915ffbfb0e",
+      "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
+      "pcr2": "591df284aa375ebbb619221fb348b17e4929b07b0fe386ca1a7bd13665278eba6f52fcf87e5fe0cfda55dd0e120cf1c1",
+      "seal_key": "arn:aws:kms:us-east-1:347272280361:key/7b045614-4fff-4ca9-a103-2ee673fcda7b",
+      "notes": "https://staging.vettid.org/security/releases/10/",
+      "tag": "release/staging/10",
+      "source_commit": "8678752f19dd5da1c9bdaa698e2eda26cb62fa7b",
+      "summary": "Release 10 tightens how your vault checks your phone's app and records which version of VettID it was set up with.",
+      "changes": [
+        "Security fix: the check that an app runs on a genuine, locked phone was tightened. Before, a specially built certificate chain could pass it. Your PIN and credential password were never bypassed by this.",
+        "New: your vault records which version of VettID it was set up with, signed by VettID or by Google, and shows it under Settings, Vault status. Changing version needs a transfer or a recovery with your PIN and password.",
+        "This test channel now has its own app, VettID Staging, which installs beside the production app. Each staging vault is attached to the new app once: by transfer, by recovery or by enrolling again.",
+        "Features your app does not use yet can now be left out of a release. On this channel all of them stay on, so nothing changes."
+      ],
+      "security": "urgent",
+      "security_text": "The vault accepted a phone's hardware attestation without checking that only the phone's own certificate carried the app's details. Someone with a real Android phone could have attached a modified app to a vault they could already enroll, receive by an approved transfer or recover. It did not bypass the PIN, the credential password, a transfer's approval or the recovery code. Release 10 refuses such certificate chains.",
+      "affects": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "listed": true
+    },
+    {
+      "release": 9,
+      "status": "deprecated",
       "published_at": "2026-10-11T00:27:16Z",
       "pcr0": "8ab041980ae3cd122b9e09f04a165b13aa01cfb5378d31c35830c05f129072b2f0889cbed1f492c0fdfb13f0af8c303e",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",

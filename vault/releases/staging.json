@@ -1,6 +1,6 @@
 {
   "channel": "staging",
-  "signed_serial": 11,
+  "signed_serial": 12,
   "releases": [
     {
       "release": 1,
@@ -261,7 +261,7 @@
     },
     {
       "release": 9,
-      "status": "active",
+      "status": "deprecated",
       "pcr0": "8ab041980ae3cd122b9e09f04a165b13aa01cfb5378d31c35830c05f129072b2f0889cbed1f492c0fdfb13f0af8c303e",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
       "pcr2": "ec9157672809295e6650135ff56c2e37a86fff9de2a066b3a22a4dcc8df5c0cb76f365d14c344bdaa139ee914dad0cf0",
@@ -300,7 +300,7 @@
     },
     {
       "release": 10,
-      "status": "candidate",
+      "status": "active",
       "pcr0": "a9e3defc8bfa4c3c6f89a87afac67bc245f1ef8ac331de88505d8d4928a4bc0d9e793fb928050ba02c9f3b915ffbfb0e",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
       "pcr2": "591df284aa375ebbb619221fb348b17e4929b07b0fe386ca1a7bd13665278eba6f52fcf87e5fe0cfda55dd0e120cf1c1",
@@ -314,6 +314,7 @@
         "8eebbb1012f55e131ab24a8259d1e714ffc6cc2f9ea090c41e3773702979fd0756134b7035773f8b58ab174f864f5f7d",
         "8ab041980ae3cd122b9e09f04a165b13aa01cfb5378d31c35830c05f129072b2f0889cbed1f492c0fdfb13f0af8c303e"
       ],
+      "published_at": "2026-10-11T22:24:04Z",
       "notes": "https://staging.vettid.org/security/releases/10/",
       "host": {
         "tag": "release/staging/10",
