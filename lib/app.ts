@@ -1,6 +1,6 @@
 import * as cdk from 'aws-cdk-lib/core';
 import { join } from 'node:path';
-import { ORG, ORG_MEMBER_ACCOUNTS, loadConfig, stageZoneNs } from './config';
+import { ORG, ORG_MEMBER_ACCOUNTS, loadConfig, stagePushZoneNs, stageZoneNs } from './config';
 import { VettidOrgStack } from './stacks/web-stack';
 import { VettidOrgDnsStack } from './stacks/dns-stack';
 import { VettidOrgSignupStack } from './stacks/signup-stack';
@@ -17,6 +17,9 @@ import { VettidOrgAuditStack } from './stacks/audit-stack';
 import { VettidOrgAlertForwardStack } from './stacks/alert-forward-stack';
 import { VettidOrgRelayStack } from './stacks/relay-stack';
 import { VettidOrgRelayDataStack } from './stacks/relay-data-stack';
+import { VettidOrgPushStack } from './stacks/push-stack';
+import { VettidOrgPushDataStack } from './stacks/push-data-stack';
+import { VettidOrgStagePushDelegationStack } from './stacks/stage-push-delegation-stack';
 import { VettidOrgVaultSmokeStack } from './stacks/vault-smoke-stack';
 import { VettidOrgVaultStack, vaultEnv } from './stacks/vault-stack';
 import { VettidOrgVaultHostStack } from './stacks/vault-host-stack';
@@ -115,8 +118,10 @@ export function buildApp(app: cdk.App): void {
   // Left out on purpose (RUNBOOK "Staging"): the public site, signup and
   // playbooks (prod content), the admin exit node, admin API and site (the
   // drill seeds data from the CLI: scripts/staging/seed.ts), the relay
-  // (staging images pin the production relay), push, the vettid.dev
-  // redirect, and the audit stack (the organization trail and GuardDuty,
+  // (staging images pin the production relay), the push gateway (the
+  // staging gateway is a service in the prod app's main account; only its
+  // name is delegated from here, below), the vettid.dev redirect, and the
+  // audit stack (the organization trail and GuardDuty,
   // administered from the management account, already cover this account;
   // VettidOrgVaultAlertForwardStack sends its events to the management
   // account's alert rules).
@@ -140,6 +145,14 @@ export function buildApp(app: cdk.App): void {
     // read (sign-in and SES verification links). Never in prod.
     const testMail = new VettidOrgStageTestMailStack(app, 'VettidOrgStageTestMailStack', { config, env });
     testMail.addStackDependency(dnsStack);
+    // The stage's push gateway runs in the main account (prod app,
+    // VettidOrgPushStack); only its name is delegated from this zone, once
+    // context <stage>PushZoneNs is set (RUNBOOK "Push gateway").
+    const pushNs = stagePushZoneNs(app.node, config.stage);
+    if (pushNs.length) {
+      const pushDelegation = new VettidOrgStagePushDelegationStack(app, 'VettidOrgStagePushDelegationStack', { config, nameServers: pushNs, env });
+      pushDelegation.addStackDependency(dnsStack);
+    }
     return;
   }
 
@@ -193,10 +206,37 @@ export function buildApp(app: cdk.App): void {
   // Deploy order: RelayData (table + blob bucket, stateful) → Relay (VPC,
   // Valkey, ECS service, ALB; reads the data refs via SSM).
   new VettidOrgRelayDataStack(app, 'VettidOrgRelayDataStack', { config, ...stateful });
+  // With a push gateway configured, the relay stack also publishes its VPC
+  // and load balancer through SSM (parameters only; nothing of the relay
+  // changes).
+  const push = config.push.gateways;
+  let relay: VettidOrgRelayStack | undefined;
   if (config.relay.image) {
-    new VettidOrgRelayStack(app, 'VettidOrgRelayStack', { config, relayImage: config.relay.image, env });
+    relay = new VettidOrgRelayStack(app, 'VettidOrgRelayStack', { config, relayImage: config.relay.image, publishPushRefs: push.length > 0, env });
   } else {
     cdk.Annotations.of(app).addInfoV2('vettid:relay-unconfigured', 'VettidOrgRelayStack skipped: set context relayImage (digest-pinned)');
+  }
+
+  // ---- Push gateway (docs/PUSH-GATEWAY.md §10; code: github.com/vettid/vettid-push) ----
+  // Both channels' gateways are here, in the main account, behind the
+  // relay's load balancer (§10.4). Nothing exists until context pushStages
+  // lists a channel. Deploy order (RUNBOOK "Push gateway"):
+  //   PushData (key, empty secrets, log groups, the staging zone, alarm
+  //   topic; stateful) and Relay (the SSM refs) → the operator fills the
+  //   secrets → Push (one service per channel with an image: context
+  //   pushImage / stagingPushImage, digest-pinned).
+  if (push.length) {
+    const pushData = new VettidOrgPushDataStack(app, 'VettidOrgPushDataStack', { config, ...stateful });
+    if (!relay) {
+      throw new Error('context pushStages: the push gateways sit behind the relay\'s load balancer; set relayImage too');
+    }
+    if (push.some((g) => g.image)) {
+      const pushStack = new VettidOrgPushStack(app, 'VettidOrgPushStack', { config, env });
+      pushStack.addStackDependency(pushData);
+      pushStack.addStackDependency(relay);
+    } else {
+      cdk.Annotations.of(app).addInfoV2('vettid:push-no-image', 'VettidOrgPushStack skipped: set context pushImage or stagingPushImage (digest-pinned)');
+    }
   }
 
   // ---- TEMPORARY vault hardware smoke test (VAULT-PLAN V5). Only with

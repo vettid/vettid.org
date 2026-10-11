@@ -27,6 +27,19 @@ export type SsmRefKey =
   | 'relay/table-name'
   | 'relay/table-arn'
   | 'relay/blob-bucket-name'
+  // The relay's network and load balancer, which the push gateway shares
+  // (VettidOrgRelayStack publishes them only when a push gateway is
+  // configured; PUSH-GATEWAY §10.1).
+  | 'relay/vpc-id'
+  | 'relay/public-subnet-ids'
+  | 'relay/alb-security-group-id'
+  | 'relay/https-listener-arn'
+  | 'relay/alb-dns-name'
+  | 'relay/alb-hosted-zone-id'
+  | 'relay/alb-full-name'
+  // Push gateway (VettidOrgPushDataStack), read by VettidOrgPushStack.
+  | 'push/key-arn'
+  | 'push/staging-zone-id'
   | 'member-api/domain'
   // A non-prod stage's own zone (VettidOrgStageDnsStack); prod's site
   // stacks look vettid.org up instead (cached in cdk.context.json).
