@@ -49,9 +49,11 @@ const RULE_PRIORITY = { prod: 10, staging: 20 } as const;
  *  - **Not shared**: each gateway has its own target group, task role, log
  *    group and security group, and no permission on the relay's table,
  *    bucket or Valkey (whose security group admits only relay tasks).
- *  - **No state.** Nothing is written anywhere; the three secrets are read
- *    once at start, by the task itself (`PUSH_SECRETS=aws`), so no secret
- *    value passes through the task definition or the execution role.
+ *  - **No state.** Nothing is written anywhere; the secrets (created by the
+ *    operator, referred to by name) are read once at start, by the task
+ *    itself (`PUSH_SECRETS=aws`), so no secret value passes through the
+ *    task definition or the execution role. A task whose blob keys, or a
+ *    listed platform's secret, do not exist does not start.
  *  - **No per-request log** (§10.5): the service logs starts, stops and
  *    throttled errors, and the load balancer's access logs are off (they
  *    are for the relay too; turning them on for the relay would log the
@@ -154,8 +156,11 @@ class PushGateway extends Construct {
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
     });
     // Its blob keys, and the credentials of the platforms it serves: a
-    // gateway without APNs cannot read the APNs key. `-??????` is the
-    // random suffix Secrets Manager adds to a secret's ARN.
+    // gateway without APNs cannot read the APNs key. By name: the secrets
+    // are the operator's, not a stack's (VettidOrgPushDataStack), so there
+    // is no ARN to reference; `-??????` is the random suffix Secrets
+    // Manager adds to a secret's ARN (six characters exactly, so no
+    // other secret's ARN matches).
     const secretArns = pushSecretsRead(gateway.platforms).map(
       (s) => `arn:${stack.partition}:secretsmanager:${stack.region}:${stack.account}:secret:${pushSecretName(channel, s)}-??????`,
     );
@@ -165,7 +170,9 @@ class PushGateway extends Construct {
         sid: 'PushSecretsKey',
         actions: ['kms:Decrypt'],
         resources: [shared.keyArn],
-        // The key policy says the same (VettidOrgPushDataStack).
+        // The key policy says the same (VettidOrgPushDataStack). The
+        // encryption context is the secret's full ARN, suffix included,
+        // whoever created it: the channel's name prefix decides.
         conditions: {
           StringEquals: { 'kms:ViaService': `secretsmanager.${stack.region}.amazonaws.com` },
           StringLike: {

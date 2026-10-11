@@ -221,10 +221,10 @@ export function buildApp(app: cdk.App): void {
   // Both channels' gateways are here, in the main account, behind the
   // relay's load balancer (§10.4). Nothing exists until context pushStages
   // lists a channel. Deploy order (RUNBOOK "Push gateway"):
-  //   PushData (key, empty secrets, log groups, the staging zone, alarm
-  //   topic; stateful) and Relay (the SSM refs) → the operator fills the
-  //   secrets → Push (one service per channel with an image: context
-  //   pushImage / stagingPushImage, digest-pinned).
+  //   PushData (key, log groups, the staging zone, alarm topic; stateful)
+  //   and Relay (the SSM refs) → the operator creates the secrets under
+  //   the key (no stack does) → Push (one service per channel with an
+  //   image: context pushImage / stagingPushImage, digest-pinned).
   if (push.length) {
     const pushData = new VettidOrgPushDataStack(app, 'VettidOrgPushDataStack', { config, ...stateful });
     if (!relay) {
