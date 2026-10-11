@@ -35,6 +35,14 @@ export interface AppConfig {
    * is skipped (its data stack is not). Context: relayImage.
    */
   readonly relay: { readonly image: string };
+  /**
+   * The push gateways of the main account (PUSH-GATEWAY §10): one per
+   * channel listed in context `pushStages`, in the prod app only (the
+   * staging gateway is a second service next to production's, §10.4).
+   * Empty: no push stack exists and the relay stack publishes nothing for
+   * one.
+   */
+  readonly push: { readonly gateways: readonly PushGatewayConfig[] };
   readonly adminAccess: {
     /**
      * Headscale control server the AWS exit node joins (tailscale
@@ -166,6 +174,118 @@ const STAGE_ACCOUNTS: Record<string, { main?: string; vault?: Omit<VaultConfig, 
     },
   },
 };
+
+export type PushChannel = 'prod' | 'staging';
+export type PushPlatform = 'fcm' | 'apns';
+
+/** One push gateway (github.com/vettid/vettid-push; PUSH-GATEWAY §10.1, §10.4). */
+export interface PushGatewayConfig {
+  /** `PUSH_CHANNEL`: selects the pinned manifest, the APNs environments and the secret names. */
+  readonly channel: PushChannel;
+  /** The channel's `pushHost`, the same name its vault hosts may reach (lib/vault/egress.ts). */
+  readonly host: string;
+  /**
+   * Gateway image, pinned by digest. Context `pushImage` (prod),
+   * `stagingPushImage` (staging). Empty: the channel has its secrets, log
+   * group and (staging) zone, but no service yet.
+   */
+  readonly image: string;
+  /**
+   * `PUSH_PLATFORMS`: the platforms with credentials. Context
+   * `pushPlatforms` / `stagingPushPlatforms`, a comma-separated list of
+   * `fcm` and `apns`. Default **none**: a gateway starts before any
+   * credential exists and answers `platform_invalid` (§5.1 step 3). A
+   * listed platform must have its secret filled, or the tasks do not start.
+   */
+  readonly platforms: readonly PushPlatform[];
+  /** `PUSH_FCM_APP_IDS`: Android application ids accepted for `fcm` (§10.4). */
+  readonly fcmAppIds: readonly string[];
+  /** `PUSH_APNS_APP_IDS`: iOS bundle ids (the `apns-topic`) accepted for `apns` (§10.4). */
+  readonly apnsAppIds: readonly string[];
+  /**
+   * `PUSH_FCM_PROJECT` (§10.2): context `pushFcmProject` /
+   * `stagingPushFcmProject`. Empty: the gateway takes `project_id` from
+   * the `fcm` secret (a service-account key has it; a federation
+   * configuration needs it added, or this set).
+   */
+  readonly fcmProject: string;
+}
+
+/**
+ * What each channel's gateway accepts (PUSH-GATEWAY §10.4). The staging
+ * Android build has the production application id (vettid-android
+ * `app/build.gradle.kts`: staging images pin the package `com.vettid.app`
+ * and tell the builds apart by signing key); the staging iOS app has its
+ * own bundle id. An iOS registration's `app_id` is the app's bundle id
+ * (the `apns-topic`), never the notification service extension's.
+ */
+const PUSH_APP_IDS: Record<PushChannel, { fcm: string[]; apns: string[] }> = {
+  prod: { fcm: ['com.vettid.app'], apns: ['com.vettid.app'] },
+  staging: { fcm: ['com.vettid.app'], apns: ['com.vettid.app.staging'] },
+};
+
+const PUSH_CHANNELS: readonly PushChannel[] = ['prod', 'staging'];
+
+/** Context key of a channel's gateway setting: `pushImage` (prod), `stagingPushImage` (staging). */
+export function pushContextKey(channel: PushChannel, setting: 'Image' | 'Platforms' | 'FcmProject'): string {
+  return channel === 'prod' ? `push${setting}` : `${channel}Push${setting}`;
+}
+
+const csv = (raw: unknown): string[] =>
+  (Array.isArray(raw) ? raw : String(raw ?? '').split(',')).map((v) => String(v).trim()).filter(Boolean);
+
+/**
+ * The push gateways from context (prod app only; see {@link AppConfig.push}):
+ *
+ *   -c pushStages=staging -c stagingPushImage=ghcr.io/vettid/vettid-push@sha256:…
+ *
+ * `pushStages` lists the channels whose gateway exists (`staging`, `prod`);
+ * a channel's image, platforms and Firebase project are refused unless the
+ * channel is listed, so a typo never silently deploys nothing.
+ */
+function loadPush(node: Node, stage: string): PushGatewayConfig[] {
+  if (stage !== PROD_STAGE) return [];
+  const listed = csv(node.tryGetContext('pushStages'));
+  for (const c of listed) {
+    if (!PUSH_CHANNELS.includes(c as PushChannel)) throw new Error(`context pushStages: expected "staging", "prod" or both, got ${JSON.stringify(c)}`);
+  }
+  const gateways: PushGatewayConfig[] = [];
+  for (const channel of PUSH_CHANNELS) {
+    const key = (s: 'Image' | 'Platforms' | 'FcmProject') => pushContextKey(channel, s);
+    const image = String(node.tryGetContext(key('Image')) ?? '');
+    const platforms = [...new Set(csv(node.tryGetContext(key('Platforms'))))];
+    const fcmProject = String(node.tryGetContext(key('FcmProject')) ?? '');
+    if (!listed.includes(channel)) {
+      for (const [k, v] of [[key('Image'), image], [key('Platforms'), platforms.join(',')], [key('FcmProject'), fcmProject]]) {
+        if (v) throw new Error(`context ${k} is set but pushStages does not list "${channel}"`);
+      }
+      continue;
+    }
+    // A tag can be moved; only a digest names one image (as relayImage).
+    if (image && !/^[a-z0-9][a-z0-9._\/-]*@sha256:[0-9a-f]{64}$/.test(image)) {
+      throw new Error(`context ${key('Image')}: expected an image pinned by digest (…@sha256:<64 hex>), got ${JSON.stringify(image)}`);
+    }
+    for (const p of platforms) {
+      if (p !== 'fcm' && p !== 'apns') throw new Error(`context ${key('Platforms')}: expected a list of "fcm" and "apns", got ${JSON.stringify(p)}`);
+    }
+    // Firebase project ids: 6–30 lowercase letters, digits and hyphens.
+    if (fcmProject && !/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(fcmProject)) {
+      throw new Error(`context ${key('FcmProject')}: expected a Firebase project id, got ${JSON.stringify(fcmProject)}`);
+    }
+    const host = STAGE_ACCOUNTS[channel]?.vault?.pushHost;
+    if (!host) throw new Error(`no push host for channel ${channel}`);
+    gateways.push({
+      channel,
+      host,
+      image,
+      platforms: platforms as PushPlatform[],
+      fcmAppIds: PUSH_APP_IDS[channel].fcm,
+      apnsAppIds: PUSH_APP_IDS[channel].apns,
+      fcmProject,
+    });
+  }
+  return gateways;
+}
 
 /**
  * A channel's vault configuration and stage, for tools outside the CDK app
@@ -324,6 +444,7 @@ export function loadConfig(node: Node): AppConfig {
     relay: {
       image: String(node.tryGetContext('relayImage') ?? ''),
     },
+    push: { gateways: loadPush(node, stage) },
     adminAccess: {
       headscaleLoginServer: String(node.tryGetContext('headscaleLoginServer') ?? ''),
     },
@@ -360,14 +481,30 @@ export function hostName(config: AppConfig, sub: string): string {
  * a comma-separated string or an array. Empty: no delegation stack.
  */
 export function stageZoneNs(node: Node, stage: string): string[] {
-  const raw = node.tryGetContext(`${stage}ZoneNs`);
+  return nameServersFromContext(node, `${stage}ZoneNs`, `${stage}.vettid.org`);
+}
+
+/**
+ * The delegation of `push.<stage>.vettid.org` from the stage's zone to the
+ * push gateway's zone in the main account (VettidOrgStagePushDelegationStack,
+ * deployed in the stage's account; PUSH-GATEWAY §10.4): the four name
+ * servers of that zone (VettidOrgPushDataStack's output
+ * StagingZoneNameServers). Context `<stage>PushZoneNs`, as `<stage>ZoneNs`.
+ * Empty: no delegation stack.
+ */
+export function stagePushZoneNs(node: Node, stage: string): string[] {
+  return nameServersFromContext(node, `${stage}PushZoneNs`, `push.${stage}.vettid.org`);
+}
+
+function nameServersFromContext(node: Node, key: string, zone: string): string[] {
+  const raw = node.tryGetContext(key);
   if (raw === undefined || raw === null || raw === '') return [];
   const ns = (Array.isArray(raw) ? raw : String(raw).split(','))
     .map((v) => String(v).trim().replace(/\.$/, '').toLowerCase())
     .filter(Boolean);
   const awsNs = /^ns-\d{1,4}\.awsdns-\d{1,2}\.(com|net|org|co\.uk)$/;
   if (ns.length !== 4 || !ns.every((n) => awsNs.test(n)) || new Set(ns).size !== 4) {
-    throw new Error(`context ${stage}ZoneNs: expected the four Route 53 name servers of ${stage}.vettid.org, got ${JSON.stringify(raw)}`);
+    throw new Error(`context ${key}: expected the four Route 53 name servers of ${zone}, got ${JSON.stringify(raw)}`);
   }
   return ns;
 }

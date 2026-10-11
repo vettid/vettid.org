@@ -315,3 +315,27 @@ describe('heartbeat from each member account', () => {
     }
   });
 });
+
+test('the alerts topic admits this account\'s CloudWatch alarms, and only them', () => {
+  // Without this statement the topic policy names events.amazonaws.com
+  // alone and every alarm action fails with "not authorized: SNS:Publish".
+  t.hasResourceProperties('AWS::SNS::TopicPolicy', {
+    PolicyDocument: Match.objectLike({
+      Statement: Match.arrayWith([
+        Match.objectLike({
+          Sid: 'AlarmsOfThisAccount',
+          Effect: 'Allow',
+          Principal: { Service: 'cloudwatch.amazonaws.com' },
+          Action: 'sns:Publish',
+          Condition: {
+            StringEquals: { 'aws:SourceAccount': ORG.management },
+            ArnLike: { 'aws:SourceArn': Match.objectLike({ 'Fn::Join': Match.anyValue() }) },
+          },
+        }),
+      ]),
+    }),
+  });
+  const policies = Object.values(json.Resources).filter((r: any) => r.Type === 'AWS::SNS::TopicPolicy') as any[];
+  const services = policies.flatMap((p) => p.Properties.PolicyDocument.Statement.map((s: any) => s.Principal?.Service));
+  expect(new Set(services)).toEqual(new Set(['events.amazonaws.com', 'cloudwatch.amazonaws.com']));
+});
