@@ -182,14 +182,14 @@ describe('data stack (stateful)', () => {
 
   test('log group per channel: /vettid-org/<stage>/push-service, 14 days, retained', () => {
     expect(of(both.data, 'AWS::Logs::LogGroup').map((g) => [g.Properties.LogGroupName, g.Properties.RetentionInDays, g.DeletionPolicy]).sort()).toEqual([
-      ['/vettid-org/prod/push-service', 14, 'Retain'],
-      ['/vettid-org/staging/push-service', 14, 'Retain'],
+      ['/vettid-org/prod/push-service', 14, 'RetainExceptOnCreate'],
+      ['/vettid-org/staging/push-service', 14, 'RetainExceptOnCreate'],
     ]);
   });
 
   test('staging: the zone push.staging.vettid.org (retained, Amazon-only CAA), its id through SSM, its name servers as an output', () => {
     const zones = of(stagingOnly.data, 'AWS::Route53::HostedZone');
-    expect(zones.map((z) => [z.Properties.Name, z.DeletionPolicy])).toEqual([['push.staging.vettid.org.', 'Retain']]);
+    expect(zones.map((z) => [z.Properties.Name, z.DeletionPolicy])).toEqual([['push.staging.vettid.org.', 'RetainExceptOnCreate']]);
     const records = of(stagingOnly.data, 'AWS::Route53::RecordSet');
     expect(records.map((r) => [r.Properties.Type, r.Properties.Name])).toEqual([['CAA', 'push.staging.vettid.org.']]);
     expect(records[0].Properties.ResourceRecords).toEqual(expect.arrayContaining(['0 issue "amazon.com"', '0 issuewild ";"']));

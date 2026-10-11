@@ -95,6 +95,12 @@ export class VettidOrgPushDataStack extends cdk.Stack {
     if (!channels.length) throw new Error('VettidOrgPushDataStack: context pushStages lists no channel');
 
     const retain = cdk.RemovalPolicy.RETAIN;
+    // The log groups and the zone are kept for life, but not stranded when
+    // the operation that creates them rolls back (RetainExceptOnCreate): a
+    // failed first deploy on 2026-10-11 left a log group whose name then
+    // blocked the retry, and an empty zone. The key stays plain RETAIN:
+    // CloudFormation never schedules a key deletion here.
+    const retainOnceCreated = cdk.RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE;
     const viaSecretsManager = { StringEquals: { 'kms:ViaService': `secretsmanager.${this.region}.amazonaws.com` } };
     const secretArnPattern = (channel: PushChannel) =>
       `arn:${this.partition}:secretsmanager:${this.region}:${this.account}:secret:${pushSecretPrefix(channel)}/*`;
@@ -170,7 +176,7 @@ export class VettidOrgPushDataStack extends cdk.Stack {
       new logs.LogGroup(this, `${cid}ServiceLogs`, {
         logGroupName: pushLogGroupName(channel),
         retention: logs.RetentionDays.TWO_WEEKS,
-        removalPolicy: retain,
+        removalPolicy: retainOnceCreated,
       });
     }
 
@@ -181,7 +187,7 @@ export class VettidOrgPushDataStack extends cdk.Stack {
         comment: `${host} (the staging push gateway, behind the relay's load balancer) - managed by VettidOrgPushDataStack; delegated from staging.vettid.org`,
       });
       // New name servers would orphan the delegation in the staging zone.
-      zone.applyRemovalPolicy(retain);
+      zone.applyRemovalPolicy(retainOnceCreated);
       // The zone's apex is the host itself, so a CAA lookup stops here.
       amazonOnlyCaa(this, 'StagingCaa', zone);
       publishRef(this, config, 'push/staging-zone-id', zone.hostedZoneId);
