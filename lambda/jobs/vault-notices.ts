@@ -160,12 +160,28 @@ What's new in release ${newest.n}: ${newest.url}
 `
     : '';
 
-export function endingMail(ending: ReleaseRef, endsAt: string, milestone: Exclude<Milestone, 'ended'>, newest?: ReleaseRef): { subject: string; text: string } {
+/**
+ * How far away `endsAt` is, in the mail's words. Counted from when the mail
+ * is sent, not from the milestone's name: a milestone can go out late (only
+ * the latest due one is sent, and a release can be retired with less notice
+ * than a milestone's days, as in the staging drill), and "in 7 days" two days
+ * before the end is wrong. Whole UTC calendar days, as the date beside it is
+ * a UTC date; for today and tomorrow it names the time too.
+ */
+export function timeLeft(endsAt: string, now: number): string {
+  const end = Date.parse(endsAt);
+  const utcDay = (t: number) => Math.floor(t / DAY_MS);
+  const days = utcDay(end) - utcDay(now);
+  if (days > 1) return `in ${days} days`;
+  return `${days === 1 ? 'tomorrow' : 'today'} at ${new Date(end).toISOString().slice(11, 16)} UTC`;
+}
+
+export function endingMail(ending: ReleaseRef, endsAt: string, milestone: Exclude<Milestone, 'ended'>, newest?: ReleaseRef, now: number = Date.now()): { subject: string; text: string } {
   const n = ending.n;
   const days = Number(milestone.slice(5));
   return {
     subject: days === 1 ? `Last day: your VettID vault's software ends on ${day(endsAt)}` : `Action needed: your VettID vault's software ends on ${day(endsAt)}`,
-    text: `Your VettID vault still runs on release ${n} of the vault software. That release ends on ${day(endsAt)} (${days === 1 ? 'tomorrow' : `in ${days} days`}).
+    text: `Your VettID vault still runs on release ${n} of the vault software. That release ends on ${day(endsAt)} (${timeLeft(endsAt, now)}).
 
 After that date your vault can no longer be opened in release ${n}. A vault that has not moved to a newer release by then is lost, and you would have to enroll a new vault.
 
@@ -340,7 +356,7 @@ export async function handler(): Promise<Counts> {
     const guids = await sealedMembers(r.release);
     if (!guids.length) continue;
     const ref = releaseRef(log, r.release_number);
-    const mail = milestone === 'ended' ? endedMail(ref, r.ends_at!, newest) : endingMail(ref, r.ends_at!, milestone, newest);
+    const mail = milestone === 'ended' ? endedMail(ref, r.ends_at!, newest) : endingMail(ref, r.ends_at!, milestone, newest, now);
     const expiresAt = Math.floor(Date.parse(r.ends_at!) / 1000) + 60 * 86_400;
     await notify(guids, (g) => `vault-notice#${r.release_number}#${r.release.slice(0, 16)}#${r.ends_at}#${milestone}#${g}`, expiresAt, mail,
       { release_number: r.release_number, milestone, ends_at: r.ends_at }, counts);

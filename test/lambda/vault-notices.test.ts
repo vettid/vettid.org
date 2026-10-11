@@ -236,3 +236,33 @@ describe('the notice job', () => {
     expect(g4.text).toContain('Release 2 (the one that ended): https://vettid.org/security/releases/2/');
   });
 });
+
+describe('how far away the end is, in the mail', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { timeLeft, endingMail } = require('../../lambda/jobs/vault-notices');
+  const at = (s: string) => Date.parse(s);
+
+  test('counted from when the mail is sent, not from the milestone: a late 7-day notice two days before the end', () => {
+    // The staging drill of 2026-10-11: retired with three days' notice, so the
+    // "7 days" milestone was the latest due one and went out two days before.
+    expect(timeLeft('2026-10-13T15:30:00Z', at('2026-10-11T15:00:29Z'))).toBe('in 2 days');
+    const m = endingMail({ n: 3, url: 'https://x/3/' }, '2026-10-13T15:30:00Z', 'ends_7', undefined, at('2026-10-11T15:00:29Z'));
+    expect(m.text).toContain('ends on 2026-10-13 (in 2 days)');
+    expect(m.text).not.toContain('in 7 days');
+  });
+
+  test('whole UTC days on a milestone day', () => {
+    expect(timeLeft('2026-11-10T15:30:00Z', at('2026-10-11T15:00:00Z'))).toBe('in 30 days');
+    expect(timeLeft('2026-10-18T15:30:00Z', at('2026-10-11T15:00:00Z'))).toBe('in 7 days');
+  });
+
+  test('tomorrow and today name the time', () => {
+    expect(timeLeft('2026-10-13T15:30:00Z', at('2026-10-12T15:00:00Z'))).toBe('tomorrow at 15:30 UTC');
+    // The drill's last notice: sent 30 minutes before the end, on the same day.
+    expect(timeLeft('2026-10-13T15:30:00Z', at('2026-10-13T15:00:00Z'))).toBe('today at 15:30 UTC');
+    const m = endingMail({ n: 3, url: 'https://x/3/' }, '2026-10-13T15:30:00Z', 'ends_1', undefined, at('2026-10-13T15:00:00Z'));
+    expect(m.subject).toMatch(/^Last day/);
+    expect(m.text).toContain('(today at 15:30 UTC)');
+    expect(m.text).not.toContain('tomorrow');
+  });
+});
