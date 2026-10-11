@@ -228,7 +228,7 @@ const ABOUT = `  <section>
     <h2>How to check a release</h2>
     <p>VettID lists every vault release it runs in a signed manifest at <a href="https://vettid.org/.well-known/vettid/pcr-manifest.json"><code>/.well-known/vettid/pcr-manifest.json</code></a>. Your app verifies its signature with a key built into the app, and your vault only opens in the release you approved. This log is generated from that manifest, so the two cannot disagree; the manifest's history is public in the <a href="https://github.com/vettid/vettid.org/commits/master/website/.well-known/vettid/pcr-manifest.json">vettid.org repository</a>.</p>
     <p>Releases are built reproducibly from the public <a href="https://github.com/vettid/vettid-vault">vettid-vault</a> source. Anyone can rebuild a release from its tag and compare the measurement (PCR0) with the one listed here: <a href="https://github.com/vettid/vettid-vault/blob/main/docs/RELEASING.md#rebuild-and-match-anyone">how to rebuild and match</a>.</p>
-    <p>What the statuses mean, and how long each release keeps running, is explained in <a href="https://github.com/vettid/vettid.org/blob/master/docs/RELEASE-UPDATES.md">Vault release updates</a>: a release is kept for at least 12 months after a newer one replaces it, the last 90 days with a final notice and emails, then it ends.</p>
+    <p>What the statuses mean, and how long each release keeps running, is explained in <a href="https://github.com/vettid/vettid.org/blob/master/docs/RELEASE-UPDATES.md">Vault release updates</a>: a release is kept for at least 12 months after a newer one replaces it, the last 90 days with a final notice and emails, then it ends. The first release, which goes to a small group of testers, is the exception: it is kept for 90 days after release 2 replaces it.</p>
   </section>`;
 
 export function renderIndexPage(index: LogIndex, channel: Channel = 'prod'): string {
@@ -278,7 +278,11 @@ ${ABOUT}`,
   });
 }
 
-export function renderReleasePage(r: LogEntry, channel: Channel = 'prod'): string {
+/**
+ * `endsAfterDays`: the entry's `ends_after_days` in the release list
+ * (production release 1, VAULT-RELEASES §3.5); undefined for the default.
+ */
+export function renderReleasePage(r: LogEntry, channel: Channel = 'prod', endsAfterDays?: number): string {
   if (channel === 'staging') return stagingReleasePage(r);
   return page({
     path: `/security/releases/${r.release}/`,
@@ -290,12 +294,26 @@ export function renderReleasePage(r: LogEntry, channel: Channel = 'prod'): strin
     <p class="subtitle">${esc(r.summary)}</p>
   </div>
 
-${releaseSections(r, channel)}`,
+${releaseSections(r, channel, endsAfterDays)}`,
   });
 }
 
+/**
+ * The "End date" line of a release with no `ends_at` yet. Before a newer
+ * release replaces it there is no date to show, so the window itself is
+ * stated (VAULT-RELEASES §3.5, "What members are told"): the default of 12
+ * months, or the entry's `ends_after_days` (production release 1: 90
+ * days). Staging promises no window.
+ */
+export function noEndDate(channel: Channel, endsAfterDays?: number): string {
+  if (channel !== 'prod') return 'Not set';
+  return endsAfterDays === undefined
+    ? 'Not set (at least 12 months after a newer release replaces it)'
+    : `Not set (${endsAfterDays} days after a newer release replaces it)`;
+}
+
 /** A release page's sections (status, changes, measurements, source), the same on every channel. */
-function releaseSections(r: LogEntry, channel: Channel): string {
+function releaseSections(r: LogEntry, channel: Channel, endsAfterDays?: number): string {
   const commit = r.source_commit
     ? `<a href="https://github.com/vettid/vettid-vault/tree/${esc(r.source_commit)}"><code>${esc(r.source_commit)}</code></a>`
     : '&mdash;';
@@ -314,7 +332,7 @@ git checkout ${esc(r.tag)}
 gh release download ${esc(r.tag)} -p measurements.json -p vault-enclave.eif -D published
 CHANNEL=${channel} release/rebuild.sh out published/measurements.json</pre>`
     : '';
-  const noEnd = channel === 'prod' ? 'Not set (at least 12 months after a newer release replaces it)' : 'Not set';
+  const noEnd = noEndDate(channel, endsAfterDays);
   return `  <section>
     <h2>Status</h2>
     <dl class="fields">
@@ -352,14 +370,22 @@ ${r.security_text ? `    <p>${esc(r.security_text)}</p>\n` : ''}  </section>
 ${rebuild}  </section>`;
 }
 
-/** Every generated file of a channel's log, by path relative to the repository root. */
-export function renderLog(index: LogIndex, channel: Channel = 'prod'): Map<string, string> {
+/**
+ * Every generated file of a channel's log, by path relative to the
+ * repository root. `file` is the channel's release list, read here only
+ * for `ends_after_days` (the "End date" line of a release with no date
+ * yet): that member is the list's alone, so it is not copied into
+ * `index.json`, which the app reads and whose entry shape does not change
+ * (VAULT-RELEASES §3.5, §7).
+ */
+export function renderLog(index: LogIndex, channel: Channel = 'prod', file?: ReleaseFile): Map<string, string> {
   const dir = RELEASE_LOG_DIRS[channel];
   const out = new Map<string, string>();
   out.set(`${dir}/index.html`, renderIndexPage(index, channel));
   out.set(`${dir}/index.json`, `${JSON.stringify(index, null, 2)}\n`);
   if (channel === 'staging') out.set(`${dir}/log.css`, STAGING_CSS);
-  for (const r of index.releases) out.set(`${dir}/${r.release}/index.html`, renderReleasePage(r, channel));
+  const window = (n: number) => file?.releases.find((e) => e.release === n)?.ends_after_days;
+  for (const r of index.releases) out.set(`${dir}/${r.release}/index.html`, renderReleasePage(r, channel, window(r.release)));
   return out;
 }
 

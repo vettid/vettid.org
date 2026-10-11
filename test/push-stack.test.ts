@@ -70,13 +70,22 @@ describe('context', () => {
     expect(cfg({ pushStages: 'staging' }).push.gateways).toEqual([
       {
         channel: 'staging', host: 'push.staging.vettid.org', image: '', platforms: [],
-        fcmAppIds: ['com.vettid.app'], apnsAppIds: ['com.vettid.app.staging'], fcmProject: '',
+        fcmAppIds: ['com.vettid.app.staging'], apnsAppIds: ['com.vettid.app.staging'], fcmProject: '',
       },
     ]);
     const g = cfg({ pushStages: ['prod', 'staging'], pushImage: IMAGE, pushPlatforms: 'apns, fcm' }).push.gateways;
     expect(g.map((x) => [x.channel, x.host, x.image, x.platforms, x.apnsAppIds])).toEqual([
       ['prod', 'push.vettid.org', IMAGE, ['apns', 'fcm'], ['com.vettid.app']],
       ['staging', 'push.staging.vettid.org', '', [], ['com.vettid.app.staging']],
+    ]);
+  });
+
+  test('Android app ids per channel are the channel\'s android_package (VAULT-MESSAGING 0.26.0 §11.10.8, D5)', () => {
+    const g = cfg({ pushStages: ['prod', 'staging'] }).push.gateways;
+    // One id each: a channel's gateway never accepts the other channel's app.
+    expect(g.map((x) => [x.channel, x.fcmAppIds])).toEqual([
+      ['prod', ['com.vettid.app']],
+      ['staging', ['com.vettid.app.staging']],
     ]);
   });
 
@@ -259,7 +268,7 @@ describe('service stack: staging only (the first deployment)', () => {
       PUSH_LISTEN_ADDR: ':8080',
       PUSH_TRUST_PROXY: 'true',
       PUSH_PLATFORMS: 'fcm',
-      PUSH_FCM_APP_IDS: 'com.vettid.app',
+      PUSH_FCM_APP_IDS: 'com.vettid.app.staging', // staging's android_package from S10 (D5)
       PUSH_APNS_APP_IDS: 'com.vettid.app.staging',
       PUSH_SECRETS: 'aws',
       PUSH_SECRET_PREFIX: 'vettid-org/staging/push',
