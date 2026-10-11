@@ -1,9 +1,30 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.36
+version: 0.1.37
 date: 2026-10-11
 changelog:
+  - 0.1.37: errata from the app's implementations of 2026-10-11
+    (vettid-android #113 typed recovery code, #115 brand kit, #116
+    staging application id and signer binding; staging release S10;
+    VAULT-MESSAGING 0.27.1; a draft for the owner's review).
+    Implemented behaviour written down. **Signer binding** (§7 Signing
+    and the two distributions, "As built"): when the app sends its
+    key's certificate chain; the `signer_refused` screen; the transfer
+    confirmation's texts for every class and the answer to
+    `signer_unconfirmed`; the History and feed texts; the "Installed
+    from" row is in Settings → Vault status and opens an inline card.
+    The texts the specification did not give are the app's own and
+    open to the owner's rewording. **Typed recovery code** (§4
+    Screens, "Recovery: type the code"): a password-class keyboard; a
+    refused character names its group; fewer than 48 characters; the
+    "No camera" notice; the wait after a `429`; when the typed
+    characters are cleared. **Build types** (§5): the App Link hosts
+    each build claims (the staging build no longer claims
+    `account.vettid.org`); moving a vault to the staging application
+    id on the same phone by a pasted transfer code. **Brand** (§3):
+    the brand kit's logo artwork (owner, 2026-10-11). 0.1.32–0.1.35
+    marked approved
   - 0.1.36: owner decision 2026-10-11, reversing 0.1.34's signing
     decision the day it was made (approved by the owner 2026-10-11).
     **The key that signs Play installs is Google's, option (a)**, not
@@ -30,8 +51,9 @@ changelog:
     transparency for app bundles as a follow-up to evaluate (§7
     Signing and the two distributions; §9 question 15)
   - 0.1.35: owner decision D5 of 2026-10-11 (STAGING-DEVELOPMENT-PLAN
-    0.1.0 §6; VAULT-MESSAGING 0.26.0 §11.10.8, "Android package"; a
-    draft for the owner's review): the `staging` build type's
+    0.1.0 §6; VAULT-MESSAGING 0.26.0 §11.10.8, "Android package";
+    approved by the owner 2026-10-11, merged as vettid.org #220): the
+    `staging` build type's
     application id becomes `com.vettid.app.staging`
     (`applicationIdSuffix ".staging"`), from the build that goes with
     staging release S10, so the production and staging apps install
@@ -40,7 +62,8 @@ changelog:
   - 0.1.34: owner request 2026-10-11 (the app is to be on F-Droid;
     signing route decided by the owner the same day: F-Droid's
     reproducible builds, which publish the VettID-signed APK;
-    vettid-android #111; a draft for the owner's review). **Two
+    vettid-android #111; approved by the owner 2026-10-11, merged as
+    vettid.org #219). **Two
     distributions replace "one build"** (§9 question 12): `full`
     (Google Play and VettID's own releases) links Firebase Messaging as
     before; `foss` (F-Droid) contains no Google code. Same application
@@ -61,7 +84,8 @@ changelog:
     `android_signers`
   - 0.1.33: owner decision 2026-10-11 ("we should allow a typed
     recovery code"; VAULT-MESSAGING 0.25.0 §11.11.10, MEMBER-API 2.4.0;
-    a draft for the owner's review): the recover screens gain **Type
+    approved by the owner 2026-10-11, merged as vettid.org #212): the
+    recover screens gain **Type
     the code instead**, as onboarding has for the setup code (§4
     Screens, Recovery). The member types the 48 characters the account
     site shows (12 groups of four: locator, code, check characters);
@@ -72,8 +96,9 @@ changelog:
     as after a scan, with the same messages and the same count of wrong
     codes. No account session, no email typed, nothing persisted
   - 0.1.32: errata from the Android and gateway N4 implementations
-    (vettid-android #109; vettid-push; PUSH-GATEWAY 0.4.2; a draft for
-    the owner's review). Implemented behaviour written down (§4
+    (vettid-android #109; vettid-push; PUSH-GATEWAY 0.4.2; approved by
+    the owner 2026-10-11, merged as vettid.org #211). Implemented
+    behaviour written down (§4
     Notification modes, 1 and 4). Changing the mode no longer "stops the
     old path first" in every case; it follows PUSH-GATEWAY §11.1: to
     Google push, the on-phone service runs until the vault holds the
@@ -497,6 +522,20 @@ patterns:
   Plus Jakarta Sans for headings and Inter for body, as on the website;
   Material Icons Outlined. Connection tiles are one indigo, favourite
   connections teal, the member's own avatar gold.
+- **Brand kit** (0.1.37; owner, 2026-10-11; vettid-android #115,
+  vettid.org #225 and #226). The app and the sites use the kit's logo
+  artwork: the launcher icon is the gold rook on a VettID Blue
+  (`#2E2D88`) tile with the keyhole cut out, and the drawer's header
+  is the horizontal lockup, in the light theme its on-light version
+  (VettID Blue wordmark, gold rook). Non-production launcher icons
+  (`debug`, `devStack`, `staging`) carry a white band along the bottom
+  so they can be told apart beside the production app; the band is
+  VettID's addition, not part of the kit. The kit changes nothing
+  else here: the fonts stay Inter and Plus Jakarta Sans, the sites'
+  backgrounds are unchanged, the tagline is "Secure. Private.
+  Trusted." (the sites'; no app screen shows a tagline), and the name
+  "VettID Cloud" is not used. The kit itself is not reproduced in
+  this repository's documents.
 
 ## 4. Screens (v1)
 
@@ -537,7 +576,7 @@ rows below say "Vault" for the screens and "item" for the data.
 | Owner check | — (VettID-specific) | One screen: PIN and credential password together (VAULT-MESSAGING §3.6.5); also the "vault held" screen with the waiting counts and the lock action |
 | Avatar sheet | Account sheet | The member's first and last name and **full email address** (0.1.11, from `account.get`'s snapshot `first_name`, `last_name` and `email`, VAULT-MESSAGING 0.20.0 §11.13; never the masked hint), the email labelled "Only you see this address" and the names "Your connections see this name"; **Lock vault first** (0.1.12), right under the name and email, before Change name, Shared profile and the email; the sheet scrolls; vault status; **Change name** (0.1.10): the two names (the registration rule: letters, spaces, `'’.-`, ≤ 40), then the owner-check screen's PIN and password, sent as `account.name.set`; then "Name change requested" until `account.get`'s `name_request` is `applied` or `refused`; `too_soon` (from the vault or the member API): "You can change your name once every 30 days. You can change it again on <date>" (VAULT-MESSAGING §10.8), membership and subscription (read-only, from the vault, VAULT-MESSAGING §11.13), open account portal (browser) |
 | Recovery (new phone) | — (VettID-specific) | Only with the backup on: scan the portal's recovery QR, or type its code (0.1.33, below) → claim (`email_hint`) → register → PIN → credential password → the app replaces the old one. No other path: 0.1.6's backup-off choice (new credential or delete) is removed. `no_backup` at register or unlock (a vault whose backup is off): "This vault cannot be recovered: its credential backup was off. Delete it on the account site and start over with a new setup code", with a link to the portal's start-over page (MEMBER-API 2.1.0) and then to onboarding |
-| Recovery: type the code (new phone) | — (VettID-specific) | 0.1.33 (owner decision of 2026-10-11; VAULT-MESSAGING 0.25.0 §11.11.10). **Where:** **Type the code instead**, a text button on the recover intro (under **Scan the code**) and on the scan screen, and the primary action when the camera permission is refused or the phone has no working camera; **Scan instead** leads back. **The screen:** title "Type your recovery code"; body "On the account site, under the QR code, there are 12 groups of four characters. Type them all, in order."; one text field, monospace, drawn in groups of four in three rows as it fills, with "*n* of 12 groups" under it; **Continue**, enabled at 48 characters. **Input:** paste accepted; spaces, hyphens and line breaks dropped; lower case accepted and shown upper case; `I` and `L` become `1` and `O` becomes `0` as typed (the code never contains them); `U` is refused with "The code has no letter U. Check whether it is a V." and any other character with "The code uses only digits and letters."; a forty-ninth character is ignored. The keyboard is text, capital letters, with no autocorrect, no suggestions and no personalized learning. **Before anything is sent:** the app recomputes the 4 check characters with its own built-in member API origin. On a mismatch: "That code doesn't match. Compare it with the account site group by group, and check that the site is <account host>." Nothing is sent and nothing is counted; the entry stays for correction. A paste of exactly 32 valid characters (the bare code an account page showed before MEMBER-API 2.4.0) says "That is the short code of an older page. Reload the recovery page on the account site: it shows 12 groups." **Then:** `POST /api/vault/recovery/claim {locator, app_key}` signed with an empty `vault` → `vault_id`, `recovery_id`, `user_guid`, `email_hint` → the same `RecoveryCode` a scan produces → register → PIN → credential password, the row above. **Answers:** every answer shows the text the scan shows for it, and returns to the typed entry: the claim's `404` ("This recovery is no longer active…"; with the check passed, a mistyped locator is not a likely cause), `409 recovery_not_available`, `429` and the register's `bad_code` ("That code is not right. After 5 wrong codes the recovery is cancelled. Wrong codes from this phone: *n* of 5."), voided, `expired`, `too_early`, `used`, `attestation`, `retry` and `no_backup`. The characters are kept for correction, and cleared when the recovery has ended (the fifth wrong code, `expired`, `used`, `no_backup`). **Never:** an account session, the member's email typed or shown beyond `email_hint`, the code or the locator written to disk, logs, the clipboard or saved state that outlives the process; the screen is excluded from screenshots and the recent-apps preview (`FLAG_SECURE`; the first screen of the app to set it, an open point for the owner). **Accessibility:** TalkBack reads the field group by group, character by character; the count and every refusal are announced (a live region), a refused character naming its group ("group 4"); the layout holds at the largest font scale (the groups wrap to more rows); the entry survives rotation; nothing times out but the code's own 24 hours. **Tests:** `RecoveryCodes.normalize` extended to 48 characters and its `U` refusal; the check against VAULT-MESSAGING §16's vector for production and staging, and a staging string refused by a production build; a failed check makes no request; typed and scanned entry of the same recovery produce equal register requests; `bad_code` text and count equal either way; screen-catalog entries for empty, partial, refused character, failed check, `404` and `bad_code`; an end-to-end typed recovery on staging |
+| Recovery: type the code (new phone) | — (VettID-specific) | 0.1.33 (owner decision of 2026-10-11; VAULT-MESSAGING 0.25.0 §11.11.10). **Where:** **Type the code instead**, a text button on the recover intro (under **Scan the code**) and on the scan screen, and the primary action when the camera permission is refused or the phone has no working camera; **Scan instead** leads back. **The screen:** title "Type your recovery code"; body "On the account site, under the QR code, there are 12 groups of four characters. Type them all, in order."; one text field, monospace, drawn in groups of four in three rows as it fills, with "*n* of 12 groups" under it; **Continue**, enabled at 48 characters. **Input:** paste accepted; spaces, hyphens and line breaks dropped; lower case accepted and shown upper case; `I` and `L` become `1` and `O` becomes `0` as typed (the code never contains them); `U` is refused with "The code has no letter U. Check whether it is a V." and any other character with "The code uses only digits and letters."; a forty-ninth character is ignored. The keyboard is text, capital letters, with no autocorrect, no suggestions and no personalized learning. **Before anything is sent:** the app recomputes the 4 check characters with its own built-in member API origin. On a mismatch: "That code doesn't match. Compare it with the account site group by group, and check that the site is <account host>." Nothing is sent and nothing is counted; the entry stays for correction. A paste of exactly 32 valid characters (the bare code an account page showed before MEMBER-API 2.4.0) says "That is the short code of an older page. Reload the recovery page on the account site: it shows 12 groups." **Then:** `POST /api/vault/recovery/claim {locator, app_key}` signed with an empty `vault` → `vault_id`, `recovery_id`, `user_guid`, `email_hint` → the same `RecoveryCode` a scan produces → register → PIN → credential password, the row above. **Answers:** every answer shows the text the scan shows for it, and returns to the typed entry: the claim's `404` ("This recovery is no longer active…"; with the check passed, a mistyped locator is not a likely cause), `409 recovery_not_available`, `429` and the register's `bad_code` ("That code is not right. After 5 wrong codes the recovery is cancelled. Wrong codes from this phone: *n* of 5."), voided, `expired`, `too_early`, `used`, `attestation`, `retry` and `no_backup`. The characters are kept for correction, and cleared when the recovery has ended (the fifth wrong code, `expired`, `used`, `no_backup`). **Never:** an account session, the member's email typed or shown beyond `email_hint`, the code or the locator written to disk, logs, the clipboard or saved state that outlives the process; the screen is excluded from screenshots and the recent-apps preview (`FLAG_SECURE`; the first screen of the app to set it, an open point for the owner). **Accessibility:** TalkBack reads the field group by group, character by character; the count and every refusal are announced (a live region), a refused character naming its group ("group 4"); the layout holds at the largest font scale (the groups wrap to more rows); the entry survives rotation; nothing times out but the code's own 24 hours. **Tests:** `RecoveryCodes.normalize` extended to 48 characters and its `U` refusal; the check against VAULT-MESSAGING §16's vector for production and staging, and a staging string refused by a production build; a failed check makes no request; typed and scanned entry of the same recovery produce equal register requests; `bad_code` text and count equal either way; screen-catalog entries for empty, partial, refused character, failed check, `404` and `bad_code`; an end-to-end typed recovery on staging. **As built (0.1.37; vettid-android #113):** the keyboard is the **password-class** text keyboard with capital letters (Android has no flag that turns off suggestions and personalized learning on a plain text keyboard; the password class does, and the characters stay visible). A refused character's message **names its group on screen**, not only to TalkBack: "The code has no letter U. Check whether it is a V. Look at group 4." (likewise for any other character). **Continue** stays disabled below 48 characters; the keyboard's Done key with fewer says "The code has 12 groups of four characters. Type them all." The "short code of an older page" text appears when a paste leaves exactly 32 characters, and on Done with a bare code. On a phone with no camera at all (no camera feature) the scan screen shows **"No camera"**, "This phone has no camera that VettID can use. Type the code instead.", and typing is the primary action. A `429` that carries `Retry-After` (in seconds) shows "Too many attempts. Try again in *wait*." and counts down, on the intro, scan and type screens alike; it does not disable the retry, and without the header the general "Too many attempts" text is shown. The typed characters live in the screen's view model only: kept when switching to the scan and back and through refusals that can be corrected, and cleared **when the register succeeds** (before the PIN step), on `no_backup` and when the recovery has ended (voided, `expired`, `used`). A scanned claim reads the answer's `vault_id` and `recovery_id` as optional (a member API before 2.4.0 did not send them; the QR has both); the claim by locator requires them |
 | Pending deletion | — | When `GET /api/vault/status` shows `deletion` (a start-over requested on the portal, VAULT-MESSAGING §11.11.9): an urgent banner with the time left and **Cancel deletion** (`POST /api/vault/deletion/cancel {deletion_id}`, signed by the app key, with the `deletion_id` from the status's `deletion: {deletion_id, state, deletes_at}`, MEMBER-API 2.1.1) |
 | Vault update | — (VettID-specific) | 0.1.19 (owner decision of 2026-10-09). **Banner** at the top of the shell while the trusted manifest lists an `active` release newer than the vault's: "A new vault release is available (release N)" with Update now and a close button (back after 24 h; a newer release or a change to the end-date warning shows at once), or, for a `retired` release or a `deprecated` one with an `ends_at`, the urgent "Your vault's release ends on <date>. Update now to keep your vault" (also back after 24 h). The offer is read from the manifest at app start, on return to the foreground and after every unlock (no other polling). **Notification**: one local notification per release on the "Vault updates" channel, its tap opens the update screen; the POST_NOTIFICATIONS permission is asked once, when the first banner shows. **Update screen** (banner, notification, Settings → Vault → "Update available"): the release number, the PCR0 fingerprint, "Anyone can rebuild it and compare the fingerprint", the release notes, the vault PIN and **Approve and update** (no credential password: the owner check, when due, comes first through the shell's gate). Then, over every screen: lock → the unlock with the approved `release_update` (built as at the unlock screen) → `update: moved` → the unlock that reaches N+1 with the same PIN ("Updating your vault…", three steps; "Release N is starting. This can take a few minutes." while the API answers `503 release_starting`). Outcomes: done; refused (`target`, `downgrade`, `approval`, `seal_key`, `pending`, `write`, each explained; the vault stays on its release and is open); a wrong PIN or the backoff (the vault is locked, nothing moved; "Approve and update" again or "Unlock without updating"); N+1 does not open (try again, or **Return to release N**, confirmed, only while the move is unconfirmed). The PIN is held only while a step runs. The unlock screen's "Approve the update with this unlock" stays. 0.1.31: the update screen and the unlock offer open with **What's new in release N** (next row), above the fingerprint and the PIN; the bare "Release notes" link becomes that section's "Full release notes" |
 | What's new | — (VettID-specific) | 0.1.31 (owner request 2026-10-10; RELEASE-UPDATES 0.3.0 §2, §5). **Where:** at the top of the update screen (reached from the banner's Update now, the notification and Settings → Vault → "Update available": every path to an update passes through it before **Approve and update**) and in the unlock screen's release offer, before "Approve the update with this unlock". There is no update path that skips it. **What:** the heading "What's new in release N"; the log entry's `summary`; its `changes` as a bulleted list; the security line ("No security fix", "Security fix: update recommended" or "Security fix: update urgently", the latter two followed by `security_text`); the label "From <host>" (vettid.org; staging builds staging.vettid.org) with "Release notes are information. What keeps your vault safe is the signed release list and the fingerprint below."; and **Full release notes**, which opens the manifest's `notes` URL in the browser. When the vault is more than one release behind, the summaries of the releases in between follow under "Also in earlier releases" (one line each, from the same `index.json`). **Source:** the channel's log `index.json` (VAULT-RELEASES §7), public and unsigned. The app fetches it only when the trusted manifest's (published or loaded canary) `notes` for release N is exactly `https://<host>/security/releases/<N>/` and `<host>` is the host of the build's pinned manifest URL (vettid.org; staging.vettid.org; the dev stack's manifest host); it then fetches `https://<host>/security/releases/index.json` and no other URL. Any other `notes` (staging S1–S8 still carry GitHub URLs until the backfill is published) means no fetch. GET without cookies or credentials, redirects refused, 10 s timeout, at most 1 MiB, JSON only. The entry used is the one whose `release` is N **and** whose `pcr0` equals the manifest's PCR0 for N; otherwise none. Shown as plain text only (no markup, no tappable links), each field cut with "…" past the RELEASE-UPDATES §5 limits (summary 160 characters, 20 changes of 280, `security_text` 1,000). Kept in memory per host, release and PCR0 until the process ends; nothing is stored on disk or in the vault. **Information only:** nothing in it is used for a decision: which release is offered, its status, `ends_at`, the fingerprint and the approval come from the signed manifest alone. **Fallback:** while loading, a progress line, and **Approve and update** stays enabled; if the fetch fails, the entry is missing or does not match, or `notes` is not a log URL: "Release notes unavailable" with **Full release notes** (when `notes` is an `https` URL, as the manifest parser already requires), and updating stays possible. Opening the screen again retries. **Notification** ("Vault updates"): before posting it the app tries the same fetch (same rules, 10 s); with an entry its text is the summary ("Release N: <summary>"), otherwise the current text; it is not updated afterwards |
@@ -1439,6 +1478,32 @@ that site's `assetlinks.json` names the new package; the app's
 `push.register` `app_id` is its application id and follows by itself.
 The staging id is never published to a store.
 
+(0.1.37, as built in vettid-android #116.) **App Link hosts per
+build.** Each build claims one account host for the same-device setup
+link (`https://<host>/vault/enroll/…`, verified): the `staging` build
+`account.staging.vettid.org` **only** (until #116 it claimed
+`account.vettid.org` as well, which a build with another package and
+signer could never verify), every other build `account.vettid.org`
+(`debug` and `devStack` claim it too and are in no `assetlinks.json`,
+so there it stays an unverified link). `https://relay.vettid.org/connect`
+(verified where the relay's `assetlinks.json` names the build) and
+`vettid://connect` are claimed by every build, so on a phone with the
+production and the staging app Android asks which one opens an
+invitation (VAULT-MESSAGING §11.10.8, "What follows the package").
+`checkReleaseApk` and `checkStagingApk` fail on the other
+environment's account host as on its application id.
+
+(0.1.37) **Moving a vault to the staging id on the same phone.** The
+old and the new staging build are two apps on one phone, and a direct
+transfer between them needs no second phone: the old app's transfer
+screen shows, under the QR, "Or paste this code on the new phone" with
+**Copy**; the new app's transfer-in screen has **Paste the code
+instead**; then approve in the old app with the PIN and the
+credential password. Done by the owner on 2026-10-11; it is the
+simplest of the paths in VAULT-MESSAGING §11.10.8 ("Moving the
+existing staging vaults"), and it binds the vault to the new app's
+signer (§7).
+
 ## 6. Phases
 
 | Phase | Contents | Exit |
@@ -1677,6 +1742,75 @@ requirement, approved by the owner 2026-10-11):
   Google); this one is from F-Droid or direct (signed by VettID).
   Continue only if you installed it yourself." (or the reverse), with
   Continue and Cancel.
+- **As built** (0.1.37; vettid-android #116; staging S10). The two
+  sentences above are in the app as written. Where the specification
+  gave no text, the app has its own, listed here so the owner can
+  reword them (they are requirements only once approved):
+  - **Where the line is.** A row of Settings → Vault status, not of
+    the devices screen. Tapping it opens a card in place with the
+    explanation above and "Signing certificate (SHA-256): …", the
+    digest in groups of eight. For class `development` the whole row
+    reads "Development build", without "Installed from:". No row
+    while the vault is not open, has no recorded signer, or reports a
+    class this build does not know.
+  - **The transfer confirmation.** Title "The new phone has another
+    version of VettID". The sentence is built from two halves, "The
+    new phone's VettID *A*; this one *B*. Continue only if you
+    installed it yourself.": *A* is "was installed from Google Play
+    (signed by Google)", "was installed from F-Droid or direct (signed
+    by VettID)", "is a development build" or, for a class the build
+    does not know, "has a different signer"; *B* is "is from Google
+    Play (signed by Google)", "is from F-Droid or direct (signed by
+    VettID)", "is a development build" or "has another signer".
+    **Continue** and **Cancel**; Cancel leads to the question whether
+    to reject the transfer. The app then sends the new app's class as
+    `signer` in the approval.
+  - **`signer_unconfirmed`** (the vault asked for a confirmation the
+    approval did not carry): "Your vault asked you to confirm the new
+    phone's version of VettID first. Nothing was counted; enter your
+    PIN and password again." The one-time key of that attempt goes
+    back to the pool.
+  - **`signer_refused` at unlock.** Title "This installation is not
+    accepted"; body, VAULT-MESSAGING §11.7.1's message ("This vault no
+    longer accepts this installation of VettID. Update the app, or
+    recover your vault with a current version."); a button "How to
+    recover your vault" opening "Recovering or moving your vault":
+    update first and try again, the PIN was not counted as wrong;
+    otherwise start a recovery on the account site and recover with a
+    current version, on this phone after removing this one or on
+    another phone (24 hours, the PIN and the credential password); and
+    "Moving your vault to a new phone directly is not possible while
+    this phone cannot open it." The PIN field is cleared and no
+    backoff is shown. The same body text answers a refused update
+    approval and a refused unlock during a recovery.
+  - **History** (titles): `device.signer_bound` "Version of VettID
+    recorded for this vault"; `device.signer_changed` "Vault moved to
+    another version of VettID"; `device.signer_refused` "An
+    installation of VettID was refused". Second line: the class
+    ("F-Droid or direct (signed by VettID)", "Google Play (signed by
+    Google)", "A development build"); "From *old* to *new*"; and for a
+    refusal "This vault release does not accept its signer"
+    (`unpinned`) or "No signer was recorded for it" (`unbound`). A
+    class the build does not know reads "another signer".
+  - **Feed and notification.** Only `device.signer_changed` is a feed
+    kind (VAULT-MESSAGING §10.9): "Your vault moved to another version
+    of VettID", "From *old* to *new*", opening Devices, notified in
+    the Security channel. `device.signer_bound` and
+    `device.signer_refused` are audit entries only and appear in
+    History.
+  - **The chain** (VAULT-MESSAGING §11.7.1, "Vaults enrolled before
+    0.27.0"). The app sends its key's certificate chain with every
+    unlock until it has seen a `signer` on its own `device.list`
+    entry, which it reads after every unlock. It starts sending again
+    after every new attestation (enrollment, a recovery's register, a
+    transfer's handshake) and after an unlock answered
+    `signer_refused`, since a host could have served an older header.
+    A `signer` it cannot read (a class it does not know, a malformed
+    digest) counts as bound, and no row is shown. The chain is left
+    out, and the unlock sent without it, when Android Keystore returns
+    none, when it has more than 10 certificates or one above 16 KiB,
+    or when the request would not fit its 12,288 bytes with it. It is
+    not part of what the unlock signature covers.
 - **The account site**, where it links to the Android app: "The Google
   Play version is signed by Google and trusts Google's signing; the
   F-Droid and direct versions are signed by VettID and do not, and

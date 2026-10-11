@@ -1,7 +1,7 @@
 ---
 title: W10-READINESS
 status: living checklist (update as items close; not a plan)
-version: 0.1.7
+version: 0.1.8
 date: 2026-10-11
 owner: Al Liebl (Mesmer)
 related:
@@ -51,6 +51,16 @@ changelog:
     per-vault signer binding (VAULT-MESSAGING 0.27.0 §11.7.1) in the
     release-1 candidate; R7 rewritten; the key called "the upload key"
     in P8, P29, B8 and step 11 is VettID's release key
+  - 0.1.8: state after staging release S10 (2026-10-11; vettid-vault
+    #62–#65; VAULT-MESSAGING 0.27.1). P9, P9a and B10 done: the signer
+    binding and the key attestation chain rules are in vettid-vault
+    `main` and ran on S10, and `prod.json` already has the single
+    `vettid` signer, `android_package` and `features: []`. New §2
+    list, "What still blocks release 1 after S10": the production
+    backend rollout with the missing enroll-code key (B11), the
+    release build signed with the owner's key (B8), and the owner's
+    decision on requiring `ends_after_days` (B12). Not the Play
+    account. §3 step 1 follows
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -83,8 +93,8 @@ dependency), **on hold** (deliberately paused by the owner).
 | P6 | Tag-signing key registered on GitHub | **done** | The release workflow's gate refuses unverified tags; `release/staging/1` and `/2` passed it (2026-10-04/05). |
 | P7 | `releasecfg/prod.json`: account, retirement principal and window, manifest keys, relay URL | **done** | `go run ./cmd/releasecfg check prod` (vettid-vault `721c3ad`, read-only) reports only `release, android_signers` missing. |
 | P8 | `releasecfg/prod.json`: the certificate digest of **VettID's release key** (called the upload certificate until 0.1.7; it signs the F-Droid and direct builds, ANDROID-PLAN 0.1.36 §7) | **done** | `31a19613…8e65`, pinned by vettid-vault #20. From 0.1.7 it is the only signer release 1 pins. |
-| P9 | `releasecfg/prod.json`: **Play app-signing** certificate digest (O8) | **not needed for release 1** (owner decision 2026-10-11; was blocked) | Release 1 pins only P8 (VAULT-RELEASES 0.1.12 §5.2). `prod.json` still holds the `TODO-O8: …` entry, which the release gate refuses; the release commit deletes it (§3 step 1). The Play certificate is pinned by a later production release, when the Play listing exists (P30). |
-| P9a | Per-vault signer binding and signer classes (VAULT-MESSAGING 0.27.0 §11.7.1) in the release-1 candidate | **pending** (engineering; the spec was approved by the owner 2026-10-11) | In release 1 (owner decision, 2026-10-11), so that no production vault is ever unbound. vettid-vault: the binding and `{digest, class}` entries, proven on staging release S10; then `prod.json` `android_signers: [{"digest": "31a19613…8e65", "class": "vettid"}]` (B10). |
+| P9 | `releasecfg/prod.json`: **Play app-signing** certificate digest (O8) | **not needed for release 1** (owner decision 2026-10-11; was blocked) | Release 1 pins only P8 (VAULT-RELEASES 0.1.12 §5.2). `prod.json` still holds the `TODO-O8: …` entry, which the release gate refuses; the release commit deletes it (§3 step 1). *0.1.8: already deleted (vettid-vault #63); `prod.json` lists the one `vettid` signer.* The Play certificate is pinned by a later production release, when the Play listing exists (P30). |
+| P9a | Per-vault signer binding and signer classes (VAULT-MESSAGING 0.27.0 §11.7.1) in the release-1 candidate | **done** (0.1.8: vettid-vault #63 and, for the key attestation chain rules, #64; both in staging release S10, published 2026-10-11, manifest serial 12; `prod.json` has `android_signers: [{digest 31a19613…8e65, class vettid}]`, `android_package: "com.vettid.app"`, `features: []`; `releasecfg check prod` now reports only `release` missing). Was: pending (engineering; the spec was approved by the owner 2026-10-11) | In release 1 (owner decision, 2026-10-11), so that no production vault is ever unbound. vettid-vault: the binding and `{digest, class}` entries, proven on staging release S10; then `prod.json` `android_signers: [{"digest": "31a19613…8e65", "class": "vettid"}]` (B10). |
 | P10 | `releasecfg/prod.json`: `release: 1` | **pending** | Set in the release commit (§3, step 1); release 0 is a deliberate placeholder. |
 | P11 | Enclave size fixed for release 1 (O6) | **done** | **Owner decision 2026-10-06: keep 1 vCPU / 5120 MiB enclave (m7g.large) for release 1; revisit when unlock queueing shows in metrics.** No change to vettid-vault `deploy/host/` (the size is pinned by `host_files_sha256` at the release commit). Basis: P20; recorded in VAULT-RELEASES 0.1.7 §8.8 and §15 O6. |
 
@@ -149,7 +159,20 @@ unblocked.
 | B7 | ~~Prod CLI profiles for the signer and retirement roles (P5)~~ **done** 2026-10-06 | owner added both profiles; `sts get-caller-identity` verified for each (P5) | — |
 | B8 | A signed Android build for the canary phone (P29): direct build signed with the upload key | the owner's hardware token is set up (2026-10-06); still needs the upload-key-signed direct build when the canary step comes (§3 step 11). Owner only (the upload key never leaves the owner's machine) | owner |
 | B9 | W9 results written up (enrollment, moves, messaging, recovery, drill, capacity) as the V5 exit-test record (VAULT-RELEASES §12.1 step 5) | **drafted**: [W9-REPORT](W9-REPORT.md), PR #136 (ready for review); its open sections are the S1/S2 key-deletion confirmations and the drill with a vault at S4 | engineering |
-| B10 | Signer binding (P9a), in release 1 by the owner's decision of 2026-10-11 | VAULT-MESSAGING 0.27.0 §11.7.1 approved (2026-10-11); engineering implements it in vettid-vault and proves it on staging release S10 | engineering |
+| B10 | ~~Signer binding (P9a), in release 1 by the owner's decision of 2026-10-11~~ **done** 2026-10-11 | VAULT-MESSAGING 0.27.0 §11.7.1 approved (2026-10-11); implemented in vettid-vault #63 with the chain rules of #64, and run on staging release S10 with real phones (VAULT-MESSAGING 0.27.1 §11.7.1 "Tests required") | — |
+| B11 | The production backend is behind master and cannot issue setup codes: the SSM parameter `/vettid-org/prod/member/enroll-code-key` does not exist (STAGING-DEVELOPMENT-PLAN §2.3, §8.3; RUNBOOK "Setup codes and app keys") | The owner creates the parameter and lifts "the prod deploy waits"; then the member API, portal and admin stacks are deployed from master and the drift check is green | owner, then engineering |
+| B12 | (0.1.8) Whether `check:manifest` must require `ends_after_days: 90` on production release 1. Today nothing does: an entry without it passes and has no checked window (VAULT-RELEASES 0.1.13 §3.5) | Owner decision; recommended: require it. A small validation change before the release entry PR (§3 step 5) | owner, then engineering |
+
+**What still blocks release 1 after S10** (0.1.8): B11 (the production
+backend rollout, with the missing enroll-code key), B8 (a release
+build of the app signed with the owner's key, for the canary phone),
+B12 (the decision above), and whatever of the older rows (B1, B2, B6,
+B9) is still open, which this revision did not check again. **Not**
+the Google Play account (P9, P30), and nothing of S10's scope: the
+feature allowlist, the per-channel package, the signer binding and the
+attestation chain fix are all in vettid-vault `main` at the commit S10
+was cut from; the release commit changes `release: 0` to `1` and
+nothing else in `prod.json`.
 
 Not blocking release 1, but blocking **first members** (§3 step 14): a
 way for members to get the app (P30, or a direct-download page for named
@@ -179,7 +202,7 @@ release's canary (steps 8–11).
 
 | Step | What | Verify | Rollback |
 |---|---|---|---|
-| 1 [1] | **Release commit** (vettid-vault): `enclave/releasecfg/prod.json` `release: 1`; (0.1.6) `features: []` and `android_package: "com.vettid.app"` (VAULT-MESSAGING 0.26.0 §11.10.8); (0.1.7) the `TODO-O8` entry deleted, leaving VettID's release certificate as the only signer, as `{digest, class: "vettid"}` (P9a; VAULT-MESSAGING 0.27.0 §11.10.8); review; merge. | `go run ./cmd/releasecfg check prod` exits 0; CI green. | Revert the PR. Nothing exists yet. |
+| 1 [1] | **Release commit** (vettid-vault): `enclave/releasecfg/prod.json` `release: 1`; (0.1.6) `features: []` and `android_package: "com.vettid.app"` (VAULT-MESSAGING 0.26.0 §11.10.8); (0.1.7) the `TODO-O8` entry deleted, leaving VettID's release certificate as the only signer, as `{digest, class: "vettid"}` (P9a; VAULT-MESSAGING 0.27.0 §11.10.8); (0.1.8) the last three are already in `main` since vettid-vault #62 and #63, so the commit sets `release: 1` only; review; merge. | `go run ./cmd/releasecfg check prod` exits 0; CI green. | Revert the PR. Nothing exists yet. |
 | 2 [1] | **Owner signs the tag**: `git tag -s release/prod/1 -m "Vault production release 1"`, push (RELEASING "A release, step by step" 1). | GitHub shows the tag *Verified*. | Until step 6 nothing references release 1: delete the tag and any draft release, fix, re-tag (owner's call). |
 | 3 [2] | **Release workflow** runs on the tag: gate, two arm64 builds, compare, attest, draft release. | All jobs green; `measurements.json` says `channel: prod`, `release: 1`; note PCR0. | Delete the draft release; as step 2. |
 | 4 [3] | **Independent rebuild** by the owner on a separate arm64 machine (RELEASING "Rebuild and match"); then publish the draft GitHub release. | `eifinfo match`/`compare` MATCH: same PCR0–2, binaries, measured sections. | Mismatch: stop, do not publish; investigate (toolchain lock, runner image). |
