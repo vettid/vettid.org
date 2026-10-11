@@ -45,7 +45,10 @@
  * never holds the code itself, only that ciphertext; cancel-link tokens are
  * stored as their SHA-256 in request-table rows that expire with the
  * recovery. The new app claims the recovery with its key (2.0.0) and
- * registers with it; a register slot answered with the host's
+ * registers with it (2.4.0: the claim also takes the typed form's
+ * `locator`, minted with the request and kept in a request-table row
+ * `recovery-locator#<locator>` that expires with the recovery; a locator is
+ * never logged or audited); a register slot answered with the host's
  * `recovery_registered` marker turns the recovery `registered` (VAULT-MESSAGING
  * 0.10.6 §11.11.7) and makes that key the recovering key.
  *
@@ -312,6 +315,13 @@ export interface RecoveryRow {
   claim_keys?: StoredKey[];
   /** 2.0.0: the claim key whose register came back `recovery_registered`. */
   recovering_key?: StoredKey;
+  /**
+   * 2.4.0 (VAULT-MESSAGING 0.25.0 §11.11.10): the typed form's locator, 12
+   * Crockford base32 characters. Absent on a recovery requested before 2.4.0.
+   * Returned only by GET /api/vault/recovery together with a code's
+   * `sealed_code`; never logged, audited or mailed.
+   */
+  locator?: string;
 }
 
 /** API-owned (2.1.0, VAULT-MESSAGING 0.16.0 §11.11.9): "Delete my vault and start over". */
@@ -1410,6 +1420,95 @@ export const MAX_CLAIM_KEYS = 10;
 
 const sha256Hex = (s: string) => createHash('sha256').update(s).digest('hex');
 
+// ---- the typed form's locator (2.4.0, VAULT-MESSAGING 0.25.0 §11.11.10) ----------------
+//
+// 60 random bits as 12 Crockford base32 characters, minted with the request.
+// It stands for the pair (vault_id, recovery_id) at the claim and is kept in
+// the clear: it is no more than the two identifiers the table holds anyway.
+// It is not derived from the code, which the API cannot read. Never logged.
+
+const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+export const LOCATOR_LENGTH = 12;
+const LOCATOR_RE = /^[0-9A-HJKMNP-TV-Z]{12}$/;
+const LOCATOR_PREFIX = 'recovery-locator#';
+/** A collision among 60-bit locators is not expected; a few draws bound the loop. */
+const LOCATOR_DRAWS = 5;
+/** Keys no row has: what a miss reads instead, so that every miss does the same work. */
+const NO_VAULT_ID = 'recovery-locator-none';
+const NO_USER_GUID = 'recovery-locator-none';
+
+/** An object so tests can stub the draw (a collision draws again). */
+export const locators = {
+  /** 60 bits from the CSPRNG, most significant 5 bits first. */
+  draw(): string {
+    let n = randomBytes(8).readBigUInt64BE() >> 4n;
+    let out = '';
+    for (let i = 0; i < LOCATOR_LENGTH; i++) {
+      out = CROCKFORD[Number(n & 31n)] + out;
+      n >>= 5n;
+    }
+    return out;
+  },
+};
+
+/** Mint a locator for the recovery and write its row (conditional: unique among the rows held). */
+async function mintLocator(vaultId: string, recoveryId: string, expiresAt: number): Promise<string> {
+  for (let i = 0; i < LOCATOR_DRAWS; i++) {
+    const locator = locators.draw();
+    try {
+      await ddb.send(
+        new PutCommand({
+          TableName: table.vaultRequests(),
+          Item: { request_id: LOCATOR_PREFIX + locator, vault_id: vaultId, op: 'recovery_locator', status: 'locator', recovery_id: recoveryId, created_at: nowIso(), expires_at: expiresAt },
+          ConditionExpression: 'attribute_not_exists(request_id)',
+        }),
+      );
+      return locator;
+    } catch (e) {
+      if ((e as Error).name !== 'ConditionalCheckFailedException') throw e;
+    }
+  }
+  throw new Error('no free recovery locator');
+}
+
+/**
+ * The pair a locator names, or null (a miss). Every call does the same three
+ * consistent reads (the locator's row, a vault row, a pointer row; rows that
+ * cannot exist stand in when there is none), and writes nothing, so timing
+ * does not tell an unknown locator from a stale one. A miss: no such row, a
+ * row past its recovery's expiry, a vault that is gone or deleted, a recovery
+ * that was replaced or cancelled, or a member whose pointer names another
+ * vault.
+ */
+async function locatorPair(locator: string, now: number): Promise<{ vault_id: string; recovery_id: string } | null> {
+  const row = (await ddb.send(new GetCommand({ TableName: table.vaultRequests(), Key: { request_id: LOCATOR_PREFIX + locator }, ConsistentRead: true }))).Item;
+  const named =
+    row && row.op === 'recovery_locator' && typeof row.vault_id === 'string' && VAULT_ID_RE.test(row.vault_id) && typeof row.recovery_id === 'string' && Number(row.expires_at) > now
+      ? { vault_id: row.vault_id, recovery_id: row.recovery_id }
+      : null;
+  const v = await vaultRow(named?.vault_id ?? NO_VAULT_ID);
+  const pointer = await readPointer(v && typeof v.user_guid === 'string' ? v.user_guid : NO_USER_GUID);
+  const r = v?.recovery;
+  const current = !!named && !!v && v.state !== 'deleted' && !!r && r.recovery_id === named.recovery_id && r.locator === locator && r.state !== 'cancelled' && pointer?.current_vault_id === v.vault_id;
+  return current ? named : null;
+}
+
+/**
+ * Misses, aggregated per source network and hour for the audit log (as
+ * failed redeems): the 1st, 10th, 100th, ... miss of each window is recorded
+ * with the count so far. Never the locator tried.
+ */
+async function auditLocatorMiss(req: MemberRequest): Promise<void> {
+  try {
+    const r = await hit(`recovery-locator-miss#${req.ip}`, Number.MAX_SAFE_INTEGER, 3600);
+    if (/^10*$/.test(String(r.count))) {
+      await audit('app', 'vault.recovery_locator_miss', req.ip, { network: req.ip, misses_this_hour: r.count });
+    }
+  } catch (e) {
+    console.error('locator miss not recorded', JSON.stringify({ error: (e as Error).name }));
+  }
+}
+
 type RecoveryState = 'pending' | 'available' | 'registered' | 'cancelled' | 'expired' | 'unavailable';
 
 /** The state the API answers; `available` and `expired` follow from the clock. */
@@ -1625,7 +1724,12 @@ router.on('POST', '/api/vault/recovery', async (req) => {
   }
   const inst = await recoveryInstance(v, now, isCanaryMember(m));
   const recoveryId = newUlid();
-  const r: RecoveryRow = { recovery_id: recoveryId, state: 'pending', requested_at: now, available_at: now + RECOVERY_DELAY_S, expires_at: now + RECOVERY_DELAY_S + RECOVERY_VALIDITY_S };
+  const expiresAt = now + RECOVERY_DELAY_S + RECOVERY_VALIDITY_S;
+  // 2.4.0: the typed form's locator, minted with the request. Its row is
+  // written first, so the recovery never names a locator without a row; a
+  // row whose request then fails names no current recovery (a miss) and expires.
+  const locator = await mintLocator(v.vault_id, recoveryId, expiresAt);
+  const r: RecoveryRow = { recovery_id: recoveryId, state: 'pending', requested_at: now, available_at: now + RECOVERY_DELAY_S, expires_at: expiresAt, locator };
   await setRecovery(v, r, v.recovery?.recovery_id ?? null, true);
   // The slot keeps the sealed code until the recovery expires.
   await enqueue('recovery', m, v, recoveryId, inst, undefined, { extra: { browser_key: bk as string }, ttlS: r.expires_at - now + 3600 });
@@ -1660,6 +1764,8 @@ router.on('GET', '/api/vault/recovery', async (req) => {
     const env = slot && slot.status === 'done' && typeof slot.envelope === 'string' ? decodeCanonicalB64(slot.envelope) : null;
     if (env && env.length === RESULT_ENVELOPE_BYTES) {
       out.sealed_code = slot!.envelope;
+      // 2.4.0: the locator only together with a code's sealed_code, never with a refusal's.
+      if (state === 'available' && typeof r.locator === 'string' && LOCATOR_RE.test(r.locator)) out.locator = r.locator;
       if (state === 'available' && !slot!.released) {
         await ddb.send(
           new UpdateCommand({
@@ -1700,17 +1806,44 @@ router.on('POST', '/api/vault/recovery/cancel-link', async (req) => {
 });
 
 // The new app (2.0.0): no session and no key at the API yet; it presents the
-// QR's vault_id and recovery_id with its own app key (§11.11.7).
+// QR's vault_id and recovery_id with its own app key (§11.11.7), or (2.4.0,
+// §11.11.10) the typed form's locator, which stands for that pair.
 router.on('POST', '/api/vault/recovery/claim', async (req) => {
-  // Signed by the key it registers, with `vault=` the QR's vault.
-  const { h, key } = await newKeyCaller(req, (x) => x.vault !== '');
+  const typed = 'locator' in req.body;
+  // Signed by the key it registers, with `vault=` the QR's vault; empty with a locator.
+  const { h, key } = await newKeyCaller(req, (x) => (typed ? x.vault === '' : x.vault !== ''));
   // Paused: refused before the body is read and before any lookup.
   await requireService();
+  if (typed) return claimByLocator(req, key);
   const vaultId = field(req.body, 'vault_id', VAULT_ID_RE, '32 lowercase hex');
   const recoveryId = field(req.body, 'recovery_id', ULID_RE, 'a ULID');
   if (vaultId !== h.vault) throw badRequest('vault_id must be the vault the request is signed for');
   await limit(`vault-recovery-claim#${vaultId}`, 10, 86_400);
   await limit(`vault-recovery-claim-net#${req.ip}`, 10, 15 * 60);
+  return claimRecovery(key, vaultId, recoveryId, 'qr');
+});
+
+/**
+ * The typed form (2.4.0): the body's syntax, the per-network limit (the
+ * scanned form's bucket; hits and misses alike), the lookup, and on a hit
+ * the scanned form's per-vault limit and code. A miss is the unknown pair's
+ * 404, writes nothing to any recovery and is charged to none.
+ */
+async function claimByLocator(req: MemberRequest, key: AppKey) {
+  if ('vault_id' in req.body || 'recovery_id' in req.body) throw badRequest('Send exactly one of {vault_id, recovery_id, app_key} or {locator, app_key}');
+  const locator = field(req.body, 'locator', LOCATOR_RE, '12 characters of 0-9A-HJKMNP-TV-Z');
+  await limit(`vault-recovery-claim-net#${req.ip}`, 10, 15 * 60);
+  const pair = await locatorPair(locator, nowS());
+  if (!pair) {
+    await auditLocatorMiss(req);
+    throw notFound('No such recovery');
+  }
+  await limit(`vault-recovery-claim#${pair.vault_id}`, 10, 86_400);
+  return claimRecovery(key, pair.vault_id, pair.recovery_id, 'typed');
+}
+
+/** The claim of the pair (`vault_id`, `recovery_id`), however the app read it. */
+async function claimRecovery(key: AppKey, vaultId: string, recoveryId: string, via: 'qr' | 'typed') {
   const now = nowS();
   const v = await vaultRow(vaultId);
   const r = v?.recovery;
@@ -1736,9 +1869,10 @@ router.on('POST', '/api/vault/recovery/claim', async (req) => {
     if ((e as Error).name === 'ConditionalCheckFailedException') throw vaultError(409, 'conflict', 'The recovery changed; try again');
     throw e;
   }
-  await audit(m.email, 'vault.recovery_claim', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id, kid: key.kid });
-  return { user_guid: m.user_guid, email_hint: emailHint(m.email) };
-});
+  await audit(m.email, 'vault.recovery_claim', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id, kid: key.kid, via });
+  // 2.4.0: the two identifiers, which the typed app has from nowhere else.
+  return { user_guid: m.user_guid, email_hint: emailHint(m.email), vault_id: v.vault_id, recovery_id: r.recovery_id };
+}
 
 /** Remember a register request on its recovery (best effort: the app's poll finds the slot anyway). */
 async function recordRegisterId(v: VaultRow, recoveryId: string, requestId: string): Promise<void> {
