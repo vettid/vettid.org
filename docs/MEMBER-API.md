@@ -1,8 +1,24 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.4.0
+version: 2.4.1
 changelog:
+  - 2.4.1 (2026-10-11, VAULT-MESSAGING §11.11.5 step 3, §11.5; owner
+    decision of 2026-10-11: a completed recovery must stop blocking a
+    new request; found on staging, where a member who had recovered
+    could not start another recovery until the old one's `expires_at`):
+    "Vault recovery": a `registered` recovery whose recovering key the
+    host reports as the vault's `app_key` has completed, and the API
+    records it as `completed`, a new ended state (`Recovery.state`,
+    with `completed_at`): it no longer blocks a recovery request or a
+    start-over, `status` no longer shows it and there is nothing left
+    to cancel. Before, the API cleared the recovery's keys at that
+    point and left it `registered` and active until `expires_at`.
+    `registered` alone still blocks, as does a registered recovery
+    with no recovering key. Audit `vault.recovery_completed`. The
+    recovery page shows a completed recovery as the last one and
+    offers a new request. No change to the queue, the enclave, the
+    request limit or any other route
   - 2.4.0 (2026-10-11, VAULT-MESSAGING 0.25.0 §11.11.10; owner decision
     of 2026-10-11, "we should allow a typed recovery code"; a draft for
     the owner's review): the recovery code can be typed. The API mints a
@@ -961,10 +977,12 @@ interface Recovery {
   recovery_id: string;                 // ULID; the queue request id
   vault_id: string;                    // the vault being recovered (HKDF info and QR payload, §11.11.2)
   state: 'pending' | 'available' | 'registered' | 'cancelled' | 'expired'
-       | 'unavailable';                // 2.1.0: the enclave refused it (no_backup or no_credential; slot code recovery_unavailable)
+       | 'unavailable'                 // 2.1.0: the enclave refused it (no_backup or no_credential; slot code recovery_unavailable)
+       | 'completed';                  // 2.4.1: the new app holds the credential and is the vault's app (ended)
   requested_at: string;                // RFC 3339
   available_at: string;                // requested_at + 24 h
   expires_at: string;                  // available_at + 24 h
+  completed_at?: string;               // 2.4.1: only with `completed`; when the API recorded it
   sealed_code?: string;                // b64 of 5,252 bytes, only while `available`
   locator?: string;                    // 2.4.0: 12 Crockford base32 characters, only together with a `sealed_code` that is a code's (never with `unavailable`)
 }
@@ -1024,13 +1042,55 @@ interface Recovery {
   `app_kid`) as `recovering_key`, with the `registered` state. It may
   `unlock`, `lock` and read `status` while the recovery is active. When
   the host writes the vault's `app_key` with the same `kid` (the recovery
-  completed), the recovery's keys are cleared.
+  completed), the recovery's keys are cleared and, since 2.4.1, the
+  recovery is recorded as `completed` (below).
+- **Completed** (2.4.1; owner decision of 2026-10-11). A recovery has
+  completed when the new app holds the credential and is the vault's
+  app (VAULT-MESSAGING §11.11.5 step 3). The API's sign of it is the
+  one it already uses to admit the new app's key and refuse the old
+  one: the recovery is `registered`, it has a `recovering_key`, and
+  the host's `app_key` on the vault row has the same `kid`. The vault
+  makes the registered app's key its app key only in the flush of a
+  successful `credential.recover` (the PIN and the credential password
+  both proved), and the host writes `app_key` after that flush is
+  stored (VAULT-MESSAGING §11.5). The API then sets the recovery's
+  state to `completed` with `completed_at`, removes its `claim_keys`
+  and `recovering_key`, and audits `vault.recovery_completed`; the
+  write is conditional on the same `recovery_id`, the state
+  `registered` and the `recovering_key` that was compared (the API's
+  own attributes only; it never names the host's `app_key` in a
+  write). It does so on the first
+  request that reads the recovery afterwards: any request signed by
+  the vault's app key, `GET /api/vault/status`, `GET
+  /api/vault/recovery`, a recovery request, a cancel or a start-over
+  request. `completed` is an ended state, whatever the clock:
+  - it does not block a new request (`POST /api/vault/recovery`, which
+    replaces it as it replaces any ended recovery; the request limit
+    and every other refusal apply unchanged) or a start-over;
+  - `GET /api/vault/status` answers `recovery: null`; `GET
+    /api/vault/recovery` answers it with `state: "completed"`, without
+    `sealed_code` or `locator`, until a new request replaces it;
+  - a cancel is a no-op (`{cancelled: false}`: nothing is enqueued or
+    mailed);
+  - claim and register are refused for it as for `registered` (`409
+    recovery_not_available`; `404` once it is replaced), and the code
+    was spent at the register.
+  `registered` alone is **not** completed: until the host's report the
+  recovery is in progress (the PIN or the password step has not
+  succeeded) and blocks as before. So does a registered recovery with
+  no `recovering_key` (its register's key was no longer among the
+  claim keys, or its keys were cleared before 2.4.1): the API has no
+  sign for it, and it ends at `expires_at`. A host that misreports
+  `app_key` gains nothing here: only the member's session can then
+  request a recovery, and that session can cancel a registered
+  recovery anyway.
 - **`browser_key`**: canonical base64 of an uncompressed P-256 point (65
   bytes, first byte `0x04`), made by the portal with WebCrypto
   (non-extractable private key kept in IndexedDB).
 - **Request.** `404 not_found` without an enrolled vault (state
   `enrolling` included); `409 recovery_active` while a recovery is
-  `pending` or `available`; `409 deletion_pending` while a start-over
+  `pending`, `available` or `registered` before its `expires_at` (never
+  for a `completed` one, 2.4.1); `409 deletion_pending` while a start-over
   is pending (2.1.0). **Backup off** (2.1.0): when the vault row's
   `credential_backup` is `false`, `409 recovery_unavailable` with
   `{error, reason: "no_backup"}`, before anything is written, enqueued,
@@ -1078,7 +1138,8 @@ interface Recovery {
   minutes). From then on `sealed_code` is not returned. `registered`
   stays active until `expires_at` (a new request is `409
   recovery_active`, `status` shows it, it can be cancelled), and reads
-  `registered` afterwards. Until vettid-vault sends the marker, a
+  `registered` afterwards, unless it completes first (2.4.1,
+  "Completed" above). Until vettid-vault sends the marker, a
   recovery stays `available` after a register, as before.
 - **Cancel** (session or link): marks the recovery `cancelled`, enqueues
   `recovery_cancel` to the same routing, emails the member and answers
@@ -1102,6 +1163,8 @@ interface Recovery {
 - **Audit:** `vault.recovery_request`, `vault.recovery_cancel` (with
   `via: session | link`), `vault.recovery_code_released` (first release),
   `vault.recovery_register`, `vault.recovery_registered` (1.1.0),
+  `vault.recovery_completed` (2.4.1; `vault_id`, `recovery_id`, the
+  key's `kid`),
   `vault.recovery_claim` (2.0.0; `via`, 2.4.0),
   `vault.recovery_locator_miss` (2.4.0). Never the code, the locator, the browser key, the token or
   envelopes.
@@ -1177,7 +1240,11 @@ credential password):
   and offered cancel and a new request. Keys of ended recoveries are
   deleted. The seal is opened with the recovery's own `vault_id`. A
   `registered` recovery is shown as "used on your new phone", without a
-  code (its key is deleted), with cancel while it is active.
+  code (its key is deleted), with cancel while it is active. A
+  `completed` recovery (2.4.1) is an ended one: the page offers a new
+  request, under "Your last recovery, requested …, was completed on
+  your new phone", and a page that was open while it completed says
+  "Your vault was recovered on your new phone."
 - **Backup off** (2.1.0): the vault tab says, when `credential_backup`
   is `false`, that the vault cannot be recovered if the phone is lost,
   and links to the start-over. The recovery page shows the API's `409
