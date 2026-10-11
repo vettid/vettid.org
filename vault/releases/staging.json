@@ -304,7 +304,7 @@
       "pcr0": "a9e3defc8bfa4c3c6f89a87afac67bc245f1ef8ac331de88505d8d4928a4bc0d9e793fb928050ba02c9f3b915ffbfb0e",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
       "pcr2": "591df284aa375ebbb619221fb348b17e4929b07b0fe386ca1a7bd13665278eba6f52fcf87e5fe0cfda55dd0e120cf1c1",
-      "seal_key": "",
+      "seal_key": "arn:aws:kms:us-east-1:347272280361:key/7b045614-4fff-4ca9-a103-2ee673fcda7b",
       "admitted_pcr0s": [
         "80a580024d4cf3d1f7955dc010ae12a0626ad4f6d542c385bf9cf5202fa37eab81f37c75a009dbc4212b22960f19d289",
         "8c26adfd1fe53025c5aea91563129bc4670bffc993531040a4a0e6f530e753bcf5a1be2cafa78bb0373a469adc88f7c8",
