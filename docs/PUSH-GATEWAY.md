@@ -1,6 +1,6 @@
 # VettID Push Gateway Protocol
 
-**Version:** 0.4.2 (draft)
+**Version:** 0.4.3 (draft)
 **Status:** Draft for review (N2; owner request of 2026-10-10: "we can
 start to design the push service for google play and apple ios").
 Implemented by `vettid/vettid-push` (the gateway) and vettid-android #109
@@ -169,13 +169,21 @@ looked at):
    `403 attestation_invalid` (metric reason `no_manifest`, §10.5) and the
    fetch is tried again **every minute** until one is trusted; wakes need
    no manifest and are not affected. A refresh that fails keeps the
-   manifest already trusted, with **no maximum age**: the
-   `manifest_refresh` metric raises the alarm after an hour (§10.5). The
-   lower-`serial` rule (a lower serial, or the same serial with other
-   bytes, is refused) is held **in memory only** and starts again with
-   the task, because the gateway keeps no state.
-   *Owner decision pending (§14.2 question 15): whether a maximum age
-   should exist.*
+   manifest already trusted, for at most **7 days** since the last
+   successful refresh (0.4.3; owner, 2026-10-11, §14.2 question 15): at
+   7 days and after, every registration is `403 attestation_invalid`
+   (metric reason `manifest_stale`, the answer itself as any other
+   attestation refusal) until a refresh succeeds, which restores trust
+   at once. A successful refresh is a fetch whose manifest verifies and
+   passes the serial rule, the same manifest served again included; a
+   `404` once a manifest is held is a failed refresh. Wakes of blobs
+   already sealed are not affected. While stale the refresh stays at
+   every 10 minutes. The `manifest_refresh` metric raises the alarm
+   after an hour (§10.5), so the limit is not reached in normal
+   operation. The lower-`serial` rule (a lower serial, or the same
+   serial with other bytes, is refused) is held **in memory only** and
+   starts again with the task, because the gateway keeps no state; a
+   restarted task has a fresh 7 days from the manifest it then trusts.
 3. checks the body: `platform` known; `token` 1–4,096 bytes of printable
    ASCII for `fcm`, 64–200 lowercase hex digits (even count) for `apns`;
    `environment` present for `apns` and absent for `fcm`; `app_id` in the
@@ -793,8 +801,9 @@ still receives everything:
     the limit only closes the open-ended case. **Not recommended: persisting the serial** across
     restarts; it would give the gateway its first stored state, and
     serving an older signed manifest needs control of the site, which
-    apps' first fetch trusts in the same way. **Not implemented**; a
-    follow-up change to the gateway if approved.
+    apps' first fetch trusts in the same way. **Answered as
+    recommended** (owner, 2026-10-11) and implemented (vettid-push #1,
+    0.4.3; §5.1 step 2).
 
 ## 15. Test vector
 
@@ -850,6 +859,12 @@ again computes another digest and refuses a good signature.
 
 ## 17. Changelog
 
+- **0.4.3** — the trusted manifest's maximum age (§5.1 step 2, §14.2
+  question 15; owner, 2026-10-11; vettid-push #1): 7 days since the
+  last successful refresh, then registrations are refused with the
+  metric reason `manifest_stale` until a refresh succeeds; wakes are
+  not affected; the serial is still not persisted. No change to the
+  wire format.
 - **0.4.2** — errata from the gateway and Android N4 implementations
   (vettid-push; vettid-android #109; a draft for the owner's review).
   Implemented behaviour written down where 0.4.1 was silent or
