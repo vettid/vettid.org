@@ -1,8 +1,23 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.4.2
+version: 2.5.0
 changelog:
+  - 2.5.0 (2026-10-12; **approved by the owner 2026-10-12** on
+    vettid.org #247, **not implemented yet**; VAULT-MESSAGING 0.29.0,
+    VAULT-LOCK 0.1.0 decisions L3–L8; takes effect with the vault's
+    "release L").
+    **`POST /api/vault/lock`** accepts an optional `unlock_id`, which
+    makes the lock a bound one; without it the lock is unconditional
+    and is carried out only if it was queued after the vault's current
+    unlock. **`GET /api/vault/requests/{id}`** for a lock returns a
+    `code` beside `done`: `locked`, `not_running` or `stale`; when no
+    instance holds the vault the API writes `not_running` itself.
+    **`VaultStatus.locked_basis`**: whether `locked` rests on a report
+    from the vault's host or on the absence of a live lease. The
+    account site's lock shows the true outcome. No change for requests
+    that omit `unlock_id` except that they can no longer lock a vault
+    opened after they were queued. See "Locks"
   - 2.4.2 (2026-10-11; editorial, as built: errata from the
     implementations of 2.4.0 and 2.4.1 and of the notice mail,
     vettid.org #215, #222, #224; approved by the owner 2026-10-11).
@@ -507,8 +522,8 @@ The vault does not depend on subscription or voting rights.
 | GET | `/api/vault/enclave` | — (`?release=<pcr0>` only to abandon an unconfirmed move, §11.10.4) | `Enclave`: the instance to seal to (below) |
 | POST | `/api/vault/enroll` | `{vault_id, request_id, instance_id, etk_kid, envelope, manifest_sha256}` (signed by the pending key; 2.0.0 adds `vault_id`, the redeem's) | `202 {vault_id, request_id}`; the queue message carries the pending key as `app_key` |
 | POST | `/api/vault/unlock` | `{vault_id, request_id, instance_id, etk_kid, envelope, manifest_sha256}` | `202 {vault_id, request_id}` |
-| POST | `/api/vault/lock` | `{vault_id, request_id}` | `202 {vault_id, request_id}` |
-| GET | `/api/vault/requests/{request_id}` | — | `{status: "queued"\|"done"\|"expired", envelope?, code?}` (§11.5) |
+| POST | `/api/vault/lock` | `{vault_id, request_id}`; 2.5.0 (with release L): also `unlock_id?` (32 lowercase hex), "Locks" | `202 {vault_id, request_id}` |
+| GET | `/api/vault/requests/{request_id}` | — | `{status: "queued"\|"done"\|"expired", envelope?, code?}` (§11.5); 2.5.0 (with release L): for a lock, `code` is `locked`, `not_running` or `stale` ("Locks") |
 
 ```ts
 interface Enclave {
@@ -521,6 +536,7 @@ interface Enclave {
 interface VaultStatus {     // advisory: written by the enclave host, never a security signal (§11.5)
   vault_id: string;
   state: 'enrolling' | 'locked' | 'unlocked';  // `unlocked` only while `leased` (below)
+  locked_basis?: 'reported' | 'no_lease';      // 2.5.0 (with release L): only with state 'locked' ("Locks")
   sealed_release: string | null;
   vault_version: string | null;
   state_version: number | string | null;
@@ -1245,6 +1261,63 @@ interface Recovery {
   be a verified identity, as for sign-in links; a failed send is logged
   and does not fail the request).
 
+### Locks (2.5.0; VAULT-MESSAGING 0.29.0 §11.5, VAULT-LOCK)
+
+*Approved by the owner 2026-10-12; not implemented yet. It describes
+the routes as they are from the deploy that accompanies the vault's
+release L; until then they behave as 2.4.2 describes.*
+
+- **`POST /api/vault/lock`** `{vault_id, request_id, unlock_id?}`.
+  Callers and limits are unchanged: the account session, the app key
+  or a recovering key, whatever the account's state; 30 in 15 minutes
+  per member. `unlock_id`, when present, MUST be 32 lowercase hex
+  characters (`400 bad_request` otherwise). The API does not know
+  whether it is right; it copies it into the queue message.
+  - **With `unlock_id`: a bound lock.** The vault locks only if the
+    value names its current unlock (VAULT-MESSAGING §10.2 "Locks").
+    Only the app has the value, from its unlock result.
+  - **Without: an unconditional lock.** This is what the account site
+    sends, what a recovering app sends, and what an app sends when it
+    does not hold the value. The enclave carries it out only if the
+    message's `enqueued_at` is later than that of the unlock that
+    opened the vault (§11.5), so a lock that waited in the queue cannot
+    lock a vault opened since.
+  - The message goes to the instance that holds the vault's live
+    lease. **When no instance holds it** the API queues nothing and
+    writes the slot itself, as before, now as `done` with
+    `code: "not_running"`.
+- **The slot.** `status` is `queued`, `done` or `expired` as before.
+  For a lock, `done` carries a `code`, written by the vault's host from
+  the enclave's answer (or by the API in the case above):
+
+  | `code` | Meaning | What a caller does |
+  |---|---|---|
+  | `locked` | the vault was running and has been locked | the lock is confirmed |
+  | `not_running` | no instance was running the vault | the lock is confirmed: there was nothing open |
+  | `stale` | the vault is open under a newer unlock; nothing was done | the app: its own unlock is over, the lock it asked for is finished. The account site: ask again (a new request is queued now, and so is newer) |
+  | (none) | the vault's release is from before L: the message was read; whether the vault locked is not known | read the status |
+
+  `expired`: the request was not carried out in time (the instance
+  went away, or the queue did not deliver it); ask again.
+  The API passes on these three codes for a slot whose `op` is `lock`
+  and for no other, beside the codes it already passes (§11.5).
+- **These answers are the host's word**, like everything in
+  `VaultStatus`: the slot is written by the vault's host, which the
+  vault's design does not trust for more than availability
+  (VAULT-MESSAGING §13.3). An app that has the vault's own answer over
+  the relay prefers it.
+- **`VaultStatus.locked_basis`**, present when `state` is `locked`:
+  - `reported`: the row says `locked` because the vault's host
+    recorded a lock or a stop (the lifecycle event `locked`, or the
+    stop notice, §11.5 "A stopped vault is locked");
+  - `no_lease`: the row says `unlocked` but no instance holds a live
+    lease, so the API reports `locked` (the rule since 1.1.0). Nothing
+    reported a lock. A vault runs only under a live lease, so this
+    means "no vault is running" once leases are current (within
+    180 s of a host's failure).
+- **Audit.** `vault.lock_request` also records whether the request was
+  bound (`bound: true|false`), never the value.
+
 ### The account site's vault pages
 
 What `sites/account` does with the routes above (enrollment, unlock,
@@ -1282,7 +1355,15 @@ credential password):
   happens in the app at an unlock), an open recovery, the last
   `credential_clone` alarm, and **Lock vault** (`POST /api/vault/lock`
   with a browser-made ULID, then up to 30 s of `requests/{id}` polling)
-  while the vault is `unlocked` or leased. The release log link is the
+  while the vault is `unlocked` or leased. 2.5.0 (with release L, "Locks"): the
+  site's lock carries no `unlock_id` (it is unconditional), and the
+  site says what the slot says: `locked` or `not_running`, "Your vault
+  is locked."; `stale`, it asks once more by itself and then, if still
+  stale, "Your vault was opened again just now. Lock it again if you
+  want it closed."; `done` without a code, `expired` or no answer in
+  30 s, "We asked your vault to lock but couldn't confirm it yet.
+  Check the status in a minute." (as today; before 2.5.0 `done` alone
+  showed "Your vault is locked."). The release log link is the
   stage's own log (`release_log_url` in `/config.json`,
   `https://<zoneName>/security/releases/`).
 - **`/account/vault/recovery/`** (gated): the request

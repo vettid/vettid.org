@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.28.0
+version: 0.29.0
 date: 2026-10-12
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -21,8 +21,31 @@ related:
   - VAULT-RELEASES.md (0.1.19; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
-  - VAULT-HOST-PROTOCOL.md (0.1.2; the enclave ↔ parent protocol as built)
+  - VAULT-HOST-PROTOCOL.md (0.1.3; the enclave ↔ parent protocol as built)
+  - VAULT-LOCK.md (0.1.0, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.29.0: normative; **approved by the owner 2026-10-12** (vettid.org
+    #247: VAULT-LOCK 0.1.0, decisions L1–L16 as recommended); **needs a
+    vault release**
+    (the placeholder "release L") and a member API deploy. Every rule
+    it adds is marked "0.29.0, release L" and binds nothing before
+    then. **A lock belongs to its unlock**: each open makes an
+    `unlock_id` (random, in memory only), carried in the unlock and
+    enroll results and in `vault.status` (§11.4, §11.3, §10.2);
+    `vault.lock {unlock_id}` is carried out only for the current unlock
+    and otherwise answered `stale_lock`; `vault.locking` names the
+    unlock it ends (§10.2, "Locks"); a device never sends `vault.lock`
+    through its durable outbox (§8.6). **Through the member API** the
+    `lock` operation carries `unlock_id` or is unconditional, an
+    unconditional lock is carried out only if it was queued after the
+    unlock, and the enclave answers after the lock with what happened:
+    `locked`, `not_running` or `stale` (§11.5). **The idle lock**
+    (new §3.6.8; §12.3; setting `idle_lock.after_seconds`, §10.8): a
+    vault that is past its owner-check deadline by that long (7 days by
+    default) locks itself; `vault.locking{reason: "idle"}`,
+    `idle_lock_at` in `vault.status` and `vault.held`. §12.3 no longer
+    says "the owner MAY set" an idle lock that was never specified.
+    §13.3: what the host can and cannot do to a lock. §15 item 37
   - 0.28.0: normative; **approved by the owner 2026-10-12** (vettid.org
     #243: D12–D22 and D24–D26 as recommended; D23 as (c), the app never
     pins a connection's identity key itself); **needs a
@@ -2100,6 +2123,62 @@ back to a held vault. The settings `owner_check.hold` (boolean, default
   but desktops and agents keep their access until the hold is turned
   back on, the vault locks or a check succeeds.
 
+#### 3.6.8 The idle lock (0.29.0, release L)
+
+*Approved by the owner 2026-10-12 (VAULT-LOCK §4, decisions L10–L14).
+It applies from release L, which is not released; it binds nothing
+before.*
+
+The hold limits what the owner's side can do with a vault whose member
+has not passed a check. It does not end the vault's running: a held
+vault keeps its keys in memory, collects, and serves the standing
+authorizations the member gave (§3.6.3), for as long as its host keeps
+it. The idle lock ends that.
+
+- **The rule.** A vault locks itself (§12.3, as for an owner request)
+  when the time is later than `owner_check.deadline` +
+  `idle_lock.after_seconds`. It compares at every request and every
+  collect cycle, as for the hold (§3.6.3), with the enclave's own
+  clock (§3.6.1).
+- **The setting** `idle_lock.after_seconds` (§10.8) is 3,600–2,592,000
+  seconds (1 hour to 30 days), default **604,800 (7 days)**. Any other
+  value is `bad_request`. There is no value for "never".
+  - *Owner only.* Only the app sets it; a desktop's `settings.set`
+    naming it is `forbidden`.
+  - *Shortening* takes effect at once, and may lock the vault at once.
+  - *Lengthening* takes effect at the next successful check: until
+    then the vault uses the value it had at the last one. Someone
+    holding an unlocked app cannot buy time with a setting.
+  - While held, `settings.*` is refused (§3.6.3), this key included.
+- **Whatever the hold says.** The idle lock applies with the hold on
+  or off (§3.6.7). With the hold off it is what ends desktops' sessions
+  and agents' running when the member does not return.
+- **After an unlock.** A vault that is unlocked when the time of the
+  rule has already passed does not lock again at once: the idle lock
+  then applies from one hour after that unlock. A successful check in
+  that hour moves the deadline, and with it the idle lock. An unlock
+  without a check gives one hour of a held vault and needs the PIN
+  each time.
+- **A call in progress** (§10.10) delays the idle lock until the call
+  ends.
+- **A vault without a credential** has no deadline (§3.6.1) and no
+  idle lock.
+- **Telling the member.** `vault.status`'s `owner_check` and
+  `vault.held` carry `idle_lock_at` (RFC 3339), the time of the rule
+  as the vault now computes it, to the devices that get `owner_check`
+  in full (§10.2). At the lock the vault sends
+  `vault.locking{reason: "idle"}` (§10.2), which wakes the app
+  (§14.2), and audits `vault.locked` with `ref` = `idle` (§10.9). No
+  feed item is made: the vault is locked, and the app says why from
+  the notice or, lacking it, from `idle_lock_at` as it last read it.
+- **What it costs.** A locked vault does not collect (§12.1): messages
+  wait at the relay up to its TTL (14 days) and are lost after that,
+  where a held vault would have kept them; standing authorizations are
+  refused; no missed call is recorded. With the defaults a member who
+  returns within 21 days of the deadline has lost nothing.
+- **What it is for** is in §13.3 and VAULT-LOCK §4.6: it is the one
+  lock a host cannot suppress.
+
 ## 4. Cryptographic construction
 
 ### 4.1 Suites
@@ -3597,6 +3676,21 @@ How each error is handled:
 | `token_used` | The open token is already spent. Restart first contact. |
 | `mailbox_unknown` | Re-resolve the address, or mark the connection `stale`. |
 
+**`vault.lock` is never retried from a durable outbox** (0.29.0,
+release L; for devices, from the app versions that implement it). A
+device MUST NOT put `vault.lock` (§10.2) in an outbox that outlives the
+attempt, and MUST give it an `exp` of at most 60 s. A lock is meant for
+the vault as it is now; one delivered later would meet whatever the
+member has done since. With an `unlock_id` a late lock is harmless
+(the vault answers `stale_lock`), so a device MAY send it again while
+its lock is unconfirmed, each time as a new request with a new `exp`.
+To a vault that announced no `unlock_id` (a release before L) a device
+sends it once, and before its next unlock waits until that request's
+`exp` has passed by the vault's clock as well as it can tell (its own
+`exp` plus a margin; the vault accepts a `ts` up to 5 minutes ahead,
+§8.4, so a phone whose clock runs ahead leaves a window it cannot
+close).
+
 **An owner device refused by its own vault.** When a deposit by an owner
 device to its own vault's mailbox answers `token_revoked`, the device
 stops sending to that mailbox, as above, and treats the answer as the
@@ -4008,17 +4102,59 @@ an answer to an unknown or expired id is dropped.
 |---|---|---|
 | `vault.enrolled` | — | §11.3 |
 | `vault.enroll.confirm` (app) | `{}` | `{}` |
-| `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; `owner_check` (0.13.0) is `{state: "ok" \| "due" \| "held", deadline, interval_seconds, failures, hold, hold_off_until?, waiting?}` to apps and desktops and `{state}` to agents (§3.6, §3.6.7). `waiting` (0.19.0) is `{messages, requests, calls, other}`, the counts of `vault.held` since the deadline (§3.6.3), present while the state is `due` or `held` for a device that receives `vault.held` (the app; desktops with an access session while `held`) and absent otherwise. A recovering app (§11.11.5) gets only `{vault_id, state_seq, header_seq}` (0.16.0): nothing about the vault's devices, connections or owner check before it has proved the credential password |
+| `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; 0.29.0, release L: also `unlock_id` (to the app and desktops, not to agents or a recovering app) and, inside `owner_check` for the app and desktops, `idle_lock_at` (RFC 3339: when the vault will lock itself if no check is passed, §3.6.8; absent for a vault without a credential); `owner_check` (0.13.0) is `{state: "ok" \| "due" \| "held", deadline, interval_seconds, failures, hold, hold_off_until?, waiting?}` to apps and desktops and `{state}` to agents (§3.6, §3.6.7). `waiting` (0.19.0) is `{messages, requests, calls, other}`, the counts of `vault.held` since the deadline (§3.6.3), present while the state is `due` or `held` for a device that receives `vault.held` (the app; desktops with an access session while `held`) and absent otherwise. A recovering app (§11.11.5) gets only `{vault_id, state_seq, header_seq}` (0.16.0): nothing about the vault's devices, connections or owner check before it has proved the credential password |
 | `vault.owner-check` (app: the holder) | `{credential, utk_id, sealed{pin, password, hold?, hold_off_until?}}` | `{credential, version, utks, deadline, interval_seconds, hold, hold_off_until?}` (§3.6.1, §3.6.7); `bad_pin`, `bad_password`, `backoff` (body `{retry_after}`, §10.1), `utk_invalid`, `stale_credential`, `credential_frozen`, `rotation_required`, `forbidden` (not the holder), `bad_request` (a PIN that is not 6–32 digits) |
-| `vault.held` (V→D, to the app and desktops in an access session) | — | `{deadline, waiting: {messages, requests, calls, other}}` (§3.6.3) |
-| `vault.lock` (app, desktop) | `{}` | `{}`; then `vault.locking` |
+| `vault.held` (V→D, to the app and desktops in an access session) | — | `{deadline, waiting: {messages, requests, calls, other}}` (§3.6.3); 0.29.0, release L: also `idle_lock_at` (§3.6.8) |
+| `vault.lock` (app, desktop) | `{}`; 0.29.0, release L: `{unlock_id}` ("Locks", below) | `{}`; then `vault.locking`. 0.29.0, release L: `stale_lock` when `unlock_id` does not name the current unlock (nothing is done); `bad_request` when it is not 32 lowercase hex characters |
 | `account.get` (app, desktop) | `{}` | `{account: <snapshot, §11.13> \| null, version, received_at, name_request?}`; `null` (and `version` 0) before any snapshot arrived (0.15.0); the snapshot carries the member's full `email` (0.20.0), which only this type returns and only to the app and desktops (§11.13); `name_request` (0.18.0) is the latest `account.name.set` request (§10.8). A change of `name_request` alone sends `sync.event{kind: "account.changed"}` with the stored snapshot's `version` repeated, not incremented (0.19.0): `version` counts snapshots only, so a device MUST NOT skip an `account.changed` whose `version` it already holds |
 | `vault.delete` (app: the holder, or the enrolling app before a credential exists) | `{confirm: "delete my vault", credential?, utk_id, sealed{pin, password?}}` | `{}`; then the deletion of §12.5. `bad_request` without the exact phrase or a needed member; `bad_pin`, `backoff`, `bad_password`, `credential_frozen` / `rotation_required` (holder during an alarm), `forbidden` (a recovering app since 0.16.0: it completes the recovery first, then deletes as the holder; a member without the credential uses §11.11.9) |
-| `vault.locking` (ephemeral) | — | `{reason?}`, with `exp` = now + 60 s; an app ignores one whose `ts` is not later than its latest successful unlock result's (§11.4, 0.23.3); `reason` is `"recovery"` when a recovery request locked the vault (§11.11.1), `"owner_check"` when ten consecutive failed owner checks did (§3.6.4, 0.13.0) |
+| `vault.locking` (ephemeral) | — | `{reason?}` (0.29.0, release L: `{reason?, unlock_id}`, the unlock this lock ends), with `exp` = now + 60 s; an app ignores one whose `ts` is not later than its latest successful unlock result's (§11.4, 0.23.3); `reason` is `"recovery"` when a recovery request locked the vault (§11.11.1), `"owner_check"` when ten consecutive failed owner checks did (§3.6.4, 0.13.0), `"idle"` for the idle lock (§3.6.8; 0.29.0, release L) |
 | `relay.token.issued` | — | `{kind: "standing" \| "reconnect", token}` |
 | `relay.token.refresh` (req) | `{}` | `{kind: "standing", token}` |
 | `identity.rotate` | — | `{rotation: <identity.rotate statement, §3.4>}` |
 | `relay.address.update` | — | `{relay: {url, mailbox, pk}, token, reconnect_token?}` |
+
+**Locks (0.29.0, release L; approved by the owner 2026-10-12,
+VAULT-LOCK §3).** A lock from a
+device belongs to the unlock it ends.
+
+- **`unlock_id`.** Each time a vault opens (a successful
+  `vault.enroll` or `vault.unlock`, §11.3, §11.4) its process makes 16
+  random bytes, written as 32 lowercase hex characters. The value is
+  kept in memory only: it is in neither the state nor the header, and
+  it ends with the process, so every earlier value is stale after any
+  lock, restart or move. It is not a secret and authorizes nothing by
+  itself. The app has it from the unlock or enroll result; any app or
+  desktop can read it in `vault.status`.
+- **A bound lock.** `vault.lock {unlock_id}`: the vault compares the
+  value with its current unlock's.
+  - Equal: it answers `{}` and locks after the batch (§12.3), sending
+    `vault.locking {unlock_id}`.
+  - Different: it answers `stale_lock` and does nothing. The device's
+    unlock is over; the vault is open under a newer one. The device
+    treats its own lock as finished and does not repeat it.
+- **Without `unlock_id`** (a device from before release L): the lock
+  is carried out as before 0.29.0, while such devices are supported;
+  after that it is answered `bad_request` (VAULT-LOCK L2). Devices
+  that implement 0.29.0 MUST send the value to a vault that announced
+  one.
+- **Idempotent.** A repeated `vault.lock` for the current unlock locks
+  once: the first locks the vault, and a locked vault collects nothing
+  (§12.1), so a later copy waits at the relay until its `exp`. If the
+  member unlocks again first, the copy names an old unlock and is
+  answered `stale_lock`.
+- **`vault.locking {unlock_id}`** names the unlock being ended, for a
+  lock from any cause. A device that holds that value knows its unlock
+  is over. A device MUST ignore a `vault.locking` whose `unlock_id` is
+  not its current one; for a notice without the member (a release
+  before L) the rule of §11.4 stays (`ts` not later than the latest
+  unlock result's).
+- **What a device may take as confirmation** that the vault is locked:
+  the vault's `{}` to its `vault.lock`; a `vault.locking` naming its
+  unlock; `stale_lock`. These are the vault's word. The member API's
+  answers (§11.5) are the host's (§13.3).
+- **Other owner devices.** A desktop locks with the value from
+  `vault.status`. Agents cannot lock.
 
 ### 10.3 Devices (§6.7)
 
@@ -5116,6 +5252,7 @@ name request: { "seq": 3, "first_name": "Ada", "last_name": "King",
 | `location.history.retention_days` | integer 1–365 | 30 |
 | `location.history.interval_seconds` | integer 60–3,600: the log's cadence | 300 |
 | `owner_check.interval_seconds` | integer 3,600–86,400: the longest time between owner checks (§3.6.2); app only (a desktop's `settings.set` naming it is `forbidden`); a shorter value applies at once, a longer one from the next check | 86,400 |
+| `idle_lock.after_seconds` (0.29.0, release L) | integer 3,600–2,592,000: how long past the owner-check deadline the vault locks itself (§3.6.8); app only (a desktop's `settings.set` naming it is `forbidden`); a shorter value applies at once, a longer one from the next successful check | 604,800 |
 | `owner_check.hold` | boolean: whether the vault holds past the deadline (§3.6.7); holder only; `settings.set` may set it `true` (at once); `false` only in a successful `vault.owner-check` (`settings.set` answers `owner_check_required`) | `true` |
 | `owner_check.hold_off_until` | RFC 3339 time at most 30 days ahead, or absent: when a hold turned off comes back on (§3.6.7); set only in a `vault.owner-check` with `hold: false`; cleared when the hold comes back on | — |
 | `app.<name>` | string of at most 4,096 bytes, or `null` to remove; `<name>` matches `[a-z0-9_.-]{1,48}`; at most 64 | — |
@@ -5261,7 +5398,8 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   a recovered app before its handshake, §11.11.5; 0.23.2),
   `vault.locked` (`device_id` = the app or desktop whose `vault.lock`,
   §10.2, locked the vault; absent for every other lock, §12.3: the
-  account site's lock route, ten failed owner checks, a recovery,
+  account site's lock route, the idle lock (0.29.0, release L: with
+  `ref` = `idle`, §3.6.8), ten failed owner checks, a recovery,
   memory pressure, a lease loss, a restart, 0.23.2); `device.paired`,
   `device.unlinked`; `connection.added`, `connection.removed`,
   `connection.stale`, `connection.reconnected`; `identity.rotated`;
@@ -8339,8 +8477,9 @@ App               Relay        Member API               SQS/Parent       Enclave
 the response slot (§11.5) with `vault.enroll.result`, sealed to `app.kem`
 and padded to exactly 4,096 bytes, its inner `re` equal to `request_id`:
 
-- `{"ok": true, "vault_id": "<id>"}`; `vault.enrolled` follows over the
-  relay;
+- `{"ok": true, "vault_id": "<id>"}` (0.29.0, release L: also
+  `"unlock_id": "<32 hex>"`, §10.2 "Locks"); `vault.enrolled` follows
+  over the relay;
 - `{"ok": false, "code": "vault_exists|release_key|manifest|attestation|bad_request|retry"}`.
 
 A request the enclave cannot read or bind (wrong key, binding failure,
@@ -8451,6 +8590,10 @@ one of:
   "release_status": "active|deprecated|retired|removed", "manifest_serial": s,
   "update": {"to": "<pcr0>", "result": "moved|refused|abandoned", "code": "<reason>"},
   "recovery_cancelled": true, "vault_bundle": "<b64>", "credential_backup": true|false}`
+  — (0.29.0, release L) `"unlock_id": "<32 hex>"` is present whenever
+  the vault resumed (with `token`): the name of this unlock (§10.2
+  "Locks"). Its absence tells the app that the release is from before
+  L, and that locks are not bound.
   — `update` is present only if the request carried `release_update`, or a
   pending move was completed (§11.10.4). After `moved` the vault is locked
   and sealed to the new release; `header_seq` is the new header's, and
@@ -8646,13 +8789,15 @@ enclave answers the parent with
 
 ```json
 { "v": 1, "request_id": "<ULID>", "status": "done|etk_unknown", "envelope": "<b64, 5,252 bytes>",
-  "code": "recovery_registered|recovery_unavailable" }
+  "code": "recovery_registered|recovery_unavailable|locked|not_running|stale" }
 ```
 
 (`envelope` absent for lock, delete and `etk_unknown`; `code` present
 only for a `recovery_register` whose sealed result is `{"ok": true}`
 (`recovery_registered`, §11.11.3, 0.10.6), or for a `recovery` the
-enclave refused (`recovery_unavailable`, §11.11.2, 0.16.0)). The parent
+enclave refused (`recovery_unavailable`, §11.11.2, 0.16.0), or, from
+release L (0.29.0), for a `lock`: `locked`, `not_running` or `stale`,
+below). The parent
 writes the response slot: `status: "done"`, the `envelope` if any, and
 `code: "etk_unknown"` when the enclave reported it, or the enclave's
 `recovery_registered` or `recovery_unavailable` (with the envelope) when
@@ -8719,6 +8864,42 @@ requests name the manifest by `manifest_sha256` and `manifest_serial`
   supply another one. Either fails `manifest` (a denial of service it can
   cause anyway); it cannot make the enclave accept a manifest the app did
   not verify, because the hash is inside the sealed, signed request.
+
+**The `lock` operation (0.29.0, release L; approved by the owner
+2026-10-12, VAULT-LOCK §3).**
+
+- The message MAY carry `"unlock_id": "<32 hex>"`, copied by the member
+  API from the lock request's body (MEMBER-API); a release before L
+  ignores it.
+- **Bound** (with `unlock_id`): the enclave hands it to the vault's
+  process, which locks only if the value names its current unlock.
+- **Unconditional** (without): the enclave keeps, with each running
+  vault, the `enqueued_at` of the enroll or unlock message that opened
+  it, and carries the lock out only if the lock's `enqueued_at` is
+  later. An equal or earlier time is stale. Both times are the member
+  API's; no clock of the enclave or of a device is compared. (The
+  queue is not ordered and a message can be delivered up to 5 minutes
+  late, after an unlock queued later.)
+- **The answer is given after the lock**, with a `code`, and the
+  status `done`:
+
+  | `code` | Meaning |
+  |---|---|
+  | `locked` | the vault was running on this instance and has been locked (the process has ended, whether or not its final flush succeeded, §12.3) |
+  | `not_running` | no process for this vault on this instance |
+  | `stale` | the vault runs under a newer unlock (another `unlock_id`, or an unlock queued at or after this lock); nothing was done |
+
+  The parent copies these three codes into the response slot for a
+  `lock` and for no other operation. When no instance holds the
+  vault's lease the member API writes `done` with `not_running`
+  itself, without a queue message.
+- A `done` without a `code` comes from a release before L, whose
+  enclave answers before it locks; it says only that the message was
+  read.
+- **The host's word.** The slot is written by the parent, and a lock's
+  answer is not sealed: `locked` and `not_running` are as trustworthy
+  as the host (§13.3). The vault's own word reaches the member's
+  devices over the relay (§10.2 "Locks").
 
 `lock`, `delete` and `account` carry no envelope. Locking is harmless, and deletion
 through the API is an operator power the host has anyway (§13.5). The API
@@ -11582,7 +11763,8 @@ not shared this way and are unchanged.
 
 | Trigger | Behaviour |
 |---|---|
-| Owner request (`vault.lock`, API lock route) | Finish the batch, flush, send `vault.locking`, stop the loop, release the lease, zeroize. |
+| Owner request (`vault.lock`, API lock route) | Finish the batch, flush, send `vault.locking`, stop the loop, release the lease, zeroize. 0.29.0, release L: only when the request belongs to the current unlock (`vault.lock {unlock_id}`, §10.2 "Locks"), or, for an unconditional lock through the API, was queued after it (§11.5); otherwise nothing is done. |
+| The idle lock (0.29.0, release L; §3.6.8) | Same as an owner request, with `vault.locking{reason: "idle"}`, when the vault is past its owner-check deadline by `idle_lock.after_seconds`. The host sees an ordinary lock. |
 | Ten consecutive failed owner checks (§3.6.4, 0.13.0) | Same as an owner request, with `vault.locking{reason: "owner_check"}`, after the audit entry and the urgent feed item. The host sees an ordinary lock. |
 | Memory pressure (the least recently active vault is evicted) | Same as an owner request. |
 | Enclave release or restart | Same if signalled. Otherwise all vaults lock through loss of memory, and their leases expire; a parent that sees the enclave restart releases the leases it held. |
@@ -11593,7 +11775,11 @@ not shared this way and are unchanged.
 | Vault deletion | Run the §7.4 revocations, then destroy the state and the header. |
 | Account cancelled | Vault routes other than lock are refused at once (§11.1); the vault is locked. After the 7-day grace period the API deletes the vault rows and the stored state and headers. |
 
-There is no idle lock by default; the owner MAY set one. The owner
+Before release L there is no idle lock: a vault that is not told to
+lock stays open until it is told, is restarted or loses its lease.
+(Until 0.29.0 this paragraph said "the owner MAY set one"; no setting
+was ever specified or built.) From release L the idle lock of §3.6.8
+applies. The owner
 check's hold (§3.6.3) is not a lock trigger: a held vault keeps running.
 Leases left by a lock expire within 60 s (relay) and 180 s (vault
 lease). Zeroizing covers the DEK and the relay, identity, KEM and
@@ -11811,7 +11997,7 @@ made up. The parent can send each of them for any `vault_id`:
 
 | Operation | What the parent gets by originating it |
 |---|---|
-| `lock` | The vault locks. Availability only |
+| `lock` | The vault locks. Availability only. From release L (0.29.0) the host can also choose a lock's `unlock_id` and `enqueued_at`, drop a lock, and write any `code` into its slot; it could lock, and fail to lock, any vault before. What it cannot do is keep a vault from the idle lock (§3.6.8), which the enclave decides alone |
 | `delete` | A running vault deletes itself with the full semantics of §12.5; otherwise its stored objects are erased. The operator power of §13.5 ("delete stored state") |
 | `account` | A running vault takes the snapshot: names and account details of the parent's choosing in what the vault shows its owner and in the core of its shared profile (§11.13 "Display only", §10.8 "Trust") |
 | `recovery` | A recovery, with a browser key of the parent's own: §11.11.2 "A recovery started by the host" |
@@ -14024,6 +14210,41 @@ Follow-ups:
     implementation, as `calls.json` did). Follow-ups: vettid-vault
     (release C2), `vettid/vettid-calls` (new), the stacks here,
     vettid-android, and a later staging release that refuses form 1.
+
+37. **Locks (0.29.0; approved by the owner 2026-10-12).** The owner asked
+    on 2026-10-12 for the specifications of two decisions, after the
+    Android lock work (vettid-android #127) and its reviews found that
+    a lock could land on a newer unlock, that the member API's `done`
+    proved nothing, and that a vault has no time after which it locks
+    by itself. The design, its options and the owner decisions L1–L16
+    are in VAULT-LOCK 0.1.0. The owner answered on vettid.org #247:
+    "247 is approved with your recommendations", so every decision is
+    as recommended. Chosen:
+    1. **A lock names its unlock** (`unlock_id`: random, in memory
+       only); a lock that names another is `stale_lock` (§10.2).
+    2. **Two kinds through the member API:** bound, and unconditional
+       (the account site: a member without the phone must be able to
+       lock). An unconditional lock is carried out only if queued
+       after the unlock, by the member API's own `enqueued_at` (§11.5).
+    3. **The answer follows the lock:** `locked`, `not_running`,
+       `stale` (§11.5). The slot's statuses do not change.
+    4. **The idle lock** rests on the owner check, the one signal that
+       is the member: past the deadline by `idle_lock.after_seconds`
+       (7 days by default, 1 hour to 30 days, no "never") the vault
+       locks (§3.6.8).
+    - *Not chosen:* a counter in the vault's state or a time as the
+      unlock's name; a per-vault counter at the member API; new slot
+      statuses; an idle lock on device activity or reachability, which
+      a phone in a drawer or in the wrong hands satisfies.
+    - *Compatibility:* additive on every path. An app before L against
+      release L, and an app that implements this against S10 or S11,
+      both keep working (VAULT-LOCK §3.6); `unlock_id` in the unlock
+      result announces the release's support.
+    Follow-ups: vettid-vault (release L: `unlock_id`,
+    the bound and unconditional lock, the answer after the lock, the
+    idle lock, vectors, MUST-COVERAGE), the member API and the account
+    site here (MEMBER-API 2.5.0), vettid-android (after #127), then
+    iOS and desktop.
 
 ## 16. Test vectors
 
