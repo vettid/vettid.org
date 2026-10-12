@@ -981,11 +981,12 @@ than S11 or the agent is not shipping (`…/vault-host-config` stream).
 | `relay-in-flight` | an instance has more than 1,638 relay requests in flight (80 % of 16 connections × 128 streams) for 3 minutes | more than a host's vaults can need (at most 1,024 long-polls): look for vault processes at their limit (`relay_vault_limit` in the record) and at the relay |
 | `relay-stream-wait` | a relay request waited more than 1 s for a stream | the record's `relay_conns`, `relay_streams`, `relay_waiting`; the relay's load balancer (rejected connections, 5xx) |
 | `relay-growth-refused` | requests waited because a bound forbade another connection | which bound: `relay_refused_max_conns` (16 connections) or `relay_refused_min_streams` (the relay announces fewer than 32 streams: "Relay" below, the stream limit check) |
-| `relay-connection-churn` | in an hour more than 32 relay connections were opened and more than 4 times the average number open | the relay or its load balancer is closing connections; `aws logs tail` the relay service; `EgressOpenedRelay` per instance |
+| `relay-connection-churn` | in an hour more than 64 relay connections were opened, summed over every instance (ordinary: 8 to 16 an hour per host, the load balancer's hourly close) | the relay or its load balancer is closing connections: `aws logs tail` the relay service; `EgressOpenedRelay` against `EgressOpenRelay` per instance in the console. With five or more busy hosts the ordinary close alone passes 64: raise `relayOpenedPerHour` (`lib/stacks/vault-host-stack.ts`) |
 | `relay-stream-limit` | twice in 3 minutes a record had requests waiting while `relay_streams` read 0 or 100 | the relay's front end must announce 128, never exactly 100 ("Relay", the stream limit check) |
 
 The first five are Metrics Insights queries over every instance (no
-alarm names an instance); the last reads the log through the metric
+alarm names an instance; one query per alarm, CloudWatch refuses a
+second: "Invalid metrics list"); the last reads the log through the metric
 filter `RelayStreamLimitSuspect`. To see that an alarm reaches the
 admin inbox (it changes nothing but the alarm's state, which the next
 evaluation sets back):

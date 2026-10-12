@@ -46,9 +46,16 @@ export const VAULT_HOST_METRIC_LIMITS = {
   inFlightShare: 0.8,
   /** Longest wait for a relay stream, milliseconds. */
   streamWaitMs: 1000,
-  /** Churn: relay connections opened in an hour above this many times the connections open (the plan says "far above 2"), and above the floor (a full set replaced twice). */
-  churnFactor: 4,
-  churnFloor: 32,
+  /**
+   * Churn: relay connections opened in an hour, over every instance.
+   * Ordinary: the load balancer closes each connection about once an hour
+   * (8 connections at 900 vaults; 16 at most), so a host opens 8 to 16 an
+   * hour, and 32 when a full set is replaced twice, which is also the
+   * burst the pool may dial at once. 64 is twice that. A host whose
+   * connections are closed as they open dials at the pool's steady rate
+   * of 2 a second, 7,200 an hour.
+   */
+  relayOpenedPerHour: 64,
   /** The stream limit Go's HTTP/2 client assumes before the relay announced one (VAULT-RELAY-SCALING §10.4). */
   assumedStreams: 100,
 } as const;
@@ -485,16 +492,17 @@ export class VettidOrgVaultHostStack extends cdk.Stack {
     // nothing and missing data is not breaching.
     const L = VAULT_HOST_METRIC_LIMITS;
     const parentQuery = (fn: 'MAX' | 'SUM', metricName: string) => `SELECT ${fn}(${metricName}) FROM ${VAULT_HOST_METRIC_SCHEMA}`;
+    // One Metrics Insights query per alarm, and nothing beside it.
     const parentAlarm = (
       cid: string,
       name: string,
       alarmDescription: string,
-      p: { metrics: cloudwatch.CfnAlarm.MetricDataQueryProperty[]; threshold: number; periods: number; orEqual?: boolean },
+      p: { metrics: cloudwatch.CfnAlarm.MetricDataQueryProperty[]; threshold: number; periods: number },
     ) => {
       const x = new cloudwatch.CfnAlarm(this, cid, {
         alarmName: resourceName(config, name),
         alarmDescription,
-        comparisonOperator: p.orEqual ? 'GreaterThanOrEqualToThreshold' : 'GreaterThanThreshold',
+        comparisonOperator: 'GreaterThanThreshold',
         threshold: p.threshold,
         evaluationPeriods: p.periods,
         datapointsToAlarm: p.periods,
@@ -536,26 +544,19 @@ export class VettidOrgVaultHostStack extends cdk.Stack {
       threshold: 0,
       periods: 1,
     });
-    // Per hour, over every instance: connections opened against the
-    // connections open. The records come once a minute, so the sum of the
-    // open counts is 60 times the average number open.
+    // Connections opened in an hour, over every instance, against a fixed
+    // number. Not against the connections open, as the plan has it: an
+    // alarm takes ONE Metrics Insights query (CloudWatch refuses a second
+    // with "Invalid metrics list", seen on staging 2026-10-12), and
+    // without a query the two metrics could only be read by naming
+    // instances.
     parentAlarm(
       'ParentRelayChurn',
       'vault-relay-connection-churn',
-      `Relay connections churn: more than ${L.churnFloor} opened in an hour and more than ${L.churnFactor} times the connections open (once or twice is the load balancer's hourly close)`,
+      `Relay connections churn: more than ${L.relayOpenedPerHour} opened in an hour over all instances (8 to 16 an hour per host is the load balancer's hourly close; 32 a full set replaced twice)`,
       {
-        metrics: [
-          { id: 'opened', returnData: false, period: 3600, expression: parentQuery('SUM', 'EgressOpenedRelay') },
-          { id: 'open', returnData: false, period: 3600, expression: parentQuery('SUM', 'EgressOpenRelay') },
-          {
-            id: 'churn',
-            returnData: true,
-            label: 'relay connection churn (1 = churning)',
-            expression: `IF(opened > ${L.churnFloor} AND opened * 60 > ${L.churnFactor} * open, 1, 0)`,
-          },
-        ],
-        threshold: 1,
-        orEqual: true,
+        metrics: [{ id: 'q', returnData: true, period: 3600, expression: parentQuery('SUM', 'EgressOpenedRelay') }],
+        threshold: L.relayOpenedPerHour,
         periods: 1,
       },
     );

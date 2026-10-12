@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.17
+version: 0.1.18
 date: 2026-10-12
 owner: Al Liebl (Mesmer)
 changelog:
@@ -136,6 +136,14 @@ changelog:
     could notify). How the parent's log reaches CloudWatch as built
     (files, not journald) and why the record needs no change to be
     read as metrics
+  - 0.1.18 (as built, a correction; vettid.org #240's churn alarm was
+    refused by CloudWatch on staging, the stack rolled back). §8.7:
+    `relay-connection-churn` is more than 64 relay connections opened
+    in an hour over every instance, a fixed number; the comparison
+    with the connections open is dropped, since an alarm takes one
+    Metrics Insights query only. What is lost is said there. All six
+    definitions were accepted by CloudWatch in the staging account
+    before this change (created under throwaway names and deleted)
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.27.4) §11.10 release updates, §12.5 deletion, §13.5, §13.9
@@ -1354,11 +1362,23 @@ release_starting`. The `vault-scaler` Lambda (host stack):
       1,000 ms in one record;
     - `relay-growth-refused`: the sum of `RelayGrowthRefused` above 0
       in one minute;
-    - `relay-connection-churn`: per hour and over every instance, more
-      than 32 relay connections opened and more than 4 times the
-      average number open ("far above twice" taken as four times; the
-      floor of 32 keeps a host whose few vaults are unlocked and locked
-      through the hour from raising it);
+    - `relay-connection-churn` (0.1.18): more than 64 relay
+      connections opened in an hour, the sum of `EgressOpenedRelay`
+      over every instance. **This differs from the text above** ("far
+      above twice `EgressOpenRelay`"): an alarm takes one Metrics
+      Insights query, so the opened and the open connections cannot be
+      compared without naming instances (0.1.17 built that comparison;
+      CloudWatch refused it). The number: the load balancer closes
+      each connection about once an hour, so a host opens 8 an hour at
+      900 vaults and 16 at most, 32 when a full set is replaced twice
+      (also the burst the pool may dial at once); 64 is twice that,
+      and a host whose connections are closed as they open dials 2 a
+      second, 7,200 an hour. What is lost: churn on a host with few
+      connections that stays under 64 an hour (up to about one
+      connection a minute) is not seen, and with five or more hosts
+      near 16 connections each the ordinary hourly close alone would
+      pass 64, so the number has to grow with the fleet (at most two
+      hosts a release, six in all, today);
     - `relay-stream-limit`: a metric filter on the host log
       (`RelayStreamLimitSuspect`, no dimension) counts the records
       with `relay_waiting` above 0 while `relay_streams` reads 0 or
