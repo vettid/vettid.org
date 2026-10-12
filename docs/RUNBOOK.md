@@ -348,6 +348,8 @@ npx cdk deploy VettidOrgRelayStack       # service; reads the refs at deploy tim
   record shows what the enclave read, as `relay_streams`; `relay_streams`
   0 or 100 with `relay_waiting` above 0 is the symptom
   (VAULT-RELEASES §8.7).
+- **Alarms** on the `rate limits` line: "Alarms on the rate limits
+  line" below.
 - **Health.** `/healthz` reads DynamoDB. Metrics worth alarming on (task
   `/metrics`, loopback): `relay_coord_errors_total`, `relay_wake_bus_up`,
   `relay_errors_total{code="internal"}`.
@@ -359,6 +361,40 @@ npx cdk deploy VettidOrgRelayStack       # service; reads the refs at deploy tim
   `relay_collect_store_queries_total` shows the ratio, and
   `relay_empty_hint_bump_failures_total` > 0 means some deposits may have
   waited up to 5 min (`RELAY_EMPTY_SKIP_MAX`).
+
+### Alarms on the rate limits line
+
+Seven alarms, `vettid-org-relay-<name>`, to the topic
+`vettid-org-security-alerts` → admin@vettid.org (the management
+account's topic, which admits this account's CloudWatch alarms since
+#214; the member API's alarms use it the same way). Six metric filters
+on `/vettid-org/prod/relay-service` read one field each from every
+task's line (`{ $.msg = "rate limits" }`) into the namespace
+`VettID/Relay`, without dimensions: the line names no task, address or
+key, and neither do the metrics. Sum adds the tasks up, Maximum is the
+worst task. No alarm says which address or key: by design nothing
+does.
+
+| Alarm | Fires when | Do |
+|---|---|---|
+| `address-refused` | the flood guard refused requests (`address_refused` > 0) in 3 of 5 minutes | One burst (a scanner, a relay deploy, a mass unlock) does not fire it; this is sustained. `addresses_refused` in the line says how many addresses. One, with `address_busiest_per_min` high: a vault host at the guard, raise `RELAY_RATE_IP_RPS` / `RELAY_RATE_IP_BURST` ("When to raise the flood guard" above; reviewed next step 200 / 4,000 with the memory bounds). Many addresses, or none of them a vault host: a flood, the guard is doing its work; watch task CPU and memory. |
+| `address-busy` | `address_busiest_per_min` ≥ 3,000 for 5 minutes (half the guard's 6,000 a minute) | A vault host near about 550 active vaults behind one address: raise `RELAY_RATE_IP_RPS` before it is refused (add it to the container environment in `lib/stacks/relay-stack.ts`, PR, `cdk deploy VettidOrgRelayStack`; rolling, no downtime). If no host has that many vaults, it is one address flooding below the guard. |
+| `key-refused` | a key was refused at its own 20/s (`key_refused` > 0) in 3 of 5 minutes | One client or vault in a loop. Usual cause: an orphan vault, whose mailbox is gone, retrying every second (§7.2 "What does not hold"): on the vault hosts, `RelayRequestErrors` and the parent's log; the vault's member can lock and unlock. `key_busiest_per_min` shows how hard. Do not raise the limit for it. |
+| `register-refused` | an address was refused new mailboxes (`register_refused` > 0, 1/s, burst 30) in 3 of 5 minutes | Someone creating mailboxes in bulk (re-registration at unlock is free, so not a vault host unlocking). DynamoDB item count and consumed writes; nothing to raise. |
+| `collectors` | a task carries ≥ 2,000 long-polls in 3 of 5 minutes | About 42 KiB each: 82 MiB of the task's 512 MiB, and nothing caps them per task. Look at task memory and restarts (ECS service metrics); scale out by hand if memory is above 70 % and the service has not (`aws ecs update-service --cluster vettid-org-relay --service vettid-org-relay --desired-count <n>`, up to 8); find out who holds them (a vault host has at most 1,024). Time to bring back the per-task caps (relay branch `ratelimit-per-key-full`). |
+| `ws-sessions` | a task carries ≥ 2,000 WebSocket sessions in 3 of 5 minutes | The same, at about 45 KiB each (88 MiB). |
+| `rate-limits-silent` | no task wrote the line for 5 minutes (missing data is the alarm) | The relay is down or not logging: `aws ecs describe-services --cluster vettid-org-relay --services vettid-org-relay --query 'services[0].[runningCount,deployments[].rolloutState,events[:5].message]'`, then `aws logs tail /vettid-org/prod/relay-service --since 15m`. An image older than protocol 0.7.0 does not write the line. The other six alarms are blind while this one is on. Also sends OK. |
+
+The thresholds are in `RELAY_ALARM_LIMITS` (`lib/stacks/relay-stack.ts`).
+2,000 long-polls or sessions on a task is a sixth of its memory, well
+below the 70 % at which the service adds tasks and far above the
+preview's handful: it means "look", not "out of memory". Raise both
+with the task size. State:
+
+```bash
+aws cloudwatch describe-alarms --alarm-name-prefix vettid-org-relay- \
+  --query 'MetricAlarms[].[AlarmName,StateValue]' --output table
+```
 
 ### After the option-B cutover: delete the SQLite-era leftovers (by hand, once)
 
@@ -635,8 +671,9 @@ aws secretsmanager get-secret-value --secret-id $S --query SecretString --output
 ### Alarms
 
 All go to the topic `vettid-org-push-alerts` → admin@vettid.org (a topic
-of its own: `vettid-org-security-alerts` accepts EventBridge only, so a
-CloudWatch alarm cannot publish to it). Names are
+of its own: when it was made `vettid-org-security-alerts` accepted
+EventBridge only; since #214 that topic admits its account's CloudWatch
+alarms too). Names are
 `vettid-org[-staging]-push-<name>`. The gateway's metrics are in the
 namespace `vettid-org/<stage>/push`; the sums the alarms need over every
 platform are metric filters on its metric lines
