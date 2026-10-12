@@ -276,29 +276,42 @@ npx cdk deploy VettidOrgRelayStack       # service; reads the refs at deploy tim
 - **Rate limits** (RELAY-PROTOCOL §7.2, relay ≥ protocol 0.7.0). Per key
   once a request is authenticated; per source address only a flood guard
   (200/s, burst 4,000, sized for a full vault host), a budget of failures
-  nobody can be held to (1/s, burst 60) and the resource caps (parked
-  collectors 3,000 per address and 6,000 per task; request bodies being
-  read 16 MiB per address and 64 MiB per task). An address out of the
-  failure budget is "penalised" for at most a minute after its last
-  failure: every properly signed request of a key with a mailbox is still
-  served; claim fetches, new mailboxes and signers without a mailbox get
-  through at one per 10 s; unsigned requests are refused. The task sets
-  none of the `RELAY_RATE_*` or `RELAY_MAX_*` variables: the defaults are
-  the spec's numbers. Each task logs one `rate limits` line a minute, at
-  info level when anything was refused or a bucket was at least half
-  used: `address_peak` (thousandths of the busiest address's flood-guard
-  burst; a vault host nearing it means more vaults per host than the
-  guard was sized for: raise `RELAY_RATE_IP_RPS`/`_BURST`), `key_peak`,
-  `collectors_peak` (parked collectors against the task's cap: raise the
-  task count or size before it reaches 1000), `bodies_peak`, and
-  `*_refused` counts per minute. Reading them: `nomailbox_refused` is a
-  client whose mailbox is gone and that keeps asking (a vault that was
-  deleted while running; it costs its host nothing); `authfail_peak` at
-  1000 with `timestamp_stale` errors rising is a host or phone with a
-  wrong clock; `authfail_refused` with `signature_invalid` errors is
-  someone sending garbage; `bodies_refused` is someone announcing bodies
-  and not sending them. Nothing identifies an address or key in logs or
-  metrics, by design. No vault-host allowlist exists or is needed.
+  nobody can be held to (1/s, burst 60) and the resource caps. An address
+  out of the failure budget is "penalised" for at most a minute after its
+  last failure: every properly signed request of a key with a mailbox is
+  still served; new mailboxes and claim fetches get through at one per
+  10 s each; unsigned requests are refused. The task sets none of the
+  `RELAY_RATE_*` or `RELAY_MAX_*` variables: the defaults are the spec's
+  numbers.
+- **Resource caps and memory.** Per task: 4,000 parked collectors
+  (long-polls and WebSocket sessions; 2,500 per address), about 45 KiB
+  each, so 180 MiB; request bodies 36 MiB; blob transfers 64 MiB; tables
+  up to 45 MiB: about 355 MiB at worst in a 512 MiB task. A mailbox's
+  first collector is always admitted (when a task is full, one collector
+  of the address holding the most is sent home with an empty answer:
+  `relay_collectors_shed_total`), so a full task shows as shedding and
+  `collectors_refused`, not as members locked out, but it is the signal
+  to add tasks. **Needed in the stack with the first deploy of this relay
+  (not yet there):** (1) `GOMEMLIMIT=400MiB` in the task's environment;
+  (2) a log metric filter on the `rate limits` line for `$.collectors`
+  (parked collectors per task) and a scaling policy on it (target about
+  2,000 per task: half the cap), because CPU and memory tracking do not
+  react to parked connections; (3) the alarm on `address_peak` or
+  `key_peak` ≥ 800.
+- **Reading the `rate limits` line** (one a minute per task, at info level
+  when anything was refused or a bucket was at least half used):
+  `address_peak` (thousandths of the busiest address's flood-guard burst;
+  a vault host nearing it means more vaults per host than the guard was
+  sized for: raise `RELAY_RATE_IP_RPS`/`_BURST`), `key_peak`,
+  `collectors_peak` and `collectors`, `bodies_peak`, and `*_refused`
+  counts per minute. `nomailbox_refused` is a client whose mailbox is
+  gone and that keeps asking (a vault that was deleted while running; it
+  costs its host nothing); `authfail_peak` at 1000 with `timestamp_stale`
+  errors rising is a host or phone with a wrong clock; `authfail_refused`
+  with `signature_invalid` errors is someone sending garbage;
+  `bodies_refused` is someone sending bodies and stalling. Nothing
+  identifies an address or key in logs or metrics, by design. No
+  vault-host allowlist exists or is needed.
   **Watch after a deploy of a new relay image:** task memory and restarts
   against `relay_active_collectors` and `relay_ws_sessions`;
   `relay_ratelimit_penalised_networks` and the refusals by limiter;
