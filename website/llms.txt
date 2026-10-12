@@ -6,7 +6,7 @@ Status, as the site states it today:
 
 - VettID is in active development. Membership is not open yet ("Membership opens soon"); the home page takes email addresses for a list.
 - Every use case on the site is marked as in build ("design, not yet product"). No production vault release has been published yet.
-- The home page describes VettID as a member-owned cooperative. The legal entity is in formation (see About).
+- VettID is being set up as a member-governed organization. Its legal entity is in formation (see About).
 - VettID is non-custodial: members hold their own keys, and no AI system processes member data.
 - LEASH is a proposed open standard, not a product. It is a position paper being prepared for the Agentic AI Foundation (AAIF), of which VettID is an associate member.
 - The Agent Connector in the repository is being rebuilt for the current vault and relay and does not work with them yet. The push gateway is in testing and not yet switched on for members.
