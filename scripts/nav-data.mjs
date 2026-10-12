@@ -64,5 +64,7 @@ export const FOOTER_LINKS = [
   { label: 'LEASH', href: '/ai/leash' },
   { label: 'Donate', href: '/donate' },
   { label: 'Open Source', href: '/open-source' },
+  { label: 'Privacy', href: '/privacy' },
+  { label: 'Terms', href: '/terms' },
   { label: 'GitHub', href: 'https://github.com/vettid', external: true },
 ];

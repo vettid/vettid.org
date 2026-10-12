@@ -292,6 +292,14 @@ describe('ends_after_days: production release 1 is kept for 90 days (VAULT-RELEA
     const f1 = validateReleaseFile(one, 'prod', ACCOUNT);
     const out1 = renderLog(buildIndex(EMPTY_INDEX, { serial: 1, releases: manifestEntries(f1) }, f1), 'prod', f1);
     const page1 = out1.get('website/security/releases/1/index.html')!;
+    // The manifest and its history are linked only once a production release exists: before that the address is a 404.
+    const MANIFEST_HREF = 'href="https://vettid.org/.well-known/vettid/pcr-manifest.json"';
+    expect(out1.get('website/security/releases/index.html')).toContain(MANIFEST_HREF);
+    const none = renderLog(EMPTY_INDEX, 'prod').get('website/security/releases/index.html')!;
+    expect(none).not.toContain(MANIFEST_HREF);
+    expect(none).not.toContain('commits/master/website/.well-known');
+    expect(none).toContain('until then there is none');
+    expect(none).not.toMatch(/staging/i); // the public site does not mention staging
     expect(page1).toContain('<dt>End date</dt><dd>Not set (90 days after a newer release replaces it)</dd>');
     expect(page1).not.toContain('12 months');
     expect(out1.get('website/security/releases/index.json')).not.toContain('ends_after');
