@@ -101,8 +101,10 @@ DELETE /v1/mailbox/{msg_id}                # ack (idempotent)
 - Structured error body: `{ code, message, retry_after? }`. Canonical codes:
   `token_invalid`, `token_revoked`, `mailbox_unknown`, `payload_too_large`,
   `quota_exceeded`, `rate_limited`, `signature_invalid`.
-- Rate limits are per-token and per-source-IP; spec states limits are relay policy,
-  protocol only defines the `429 + retry_after` contract.
+- Rate limits are per key once a request is authenticated and per source network
+  only before that (RELAY-PROTOCOL 0.7.0 §7.2; originally per-token and
+  per-source-IP); spec states limits are relay policy, protocol only defines the
+  `429 + retry_after` contract.
 - `/v1/` path versioning; spec carries a semver and a changelog section from day one.
 - Spec includes test vectors: sample keypair, sample token, sample signed request
   (makes client implementations and security review mechanical).

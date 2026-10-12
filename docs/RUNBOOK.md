@@ -273,6 +273,47 @@ npx cdk deploy VettidOrgRelayStack       # service; reads the refs at deploy tim
   backing up: losing it costs at most 90 s of replay protection (requests
   are refused, not admitted, while it is unreachable) and some wake-up
   latency.
+- **Rate limits** (RELAY-PROTOCOL §7.2, relay ≥ protocol 0.7.0; this is
+  the core of a larger design, deployed first on purpose). Per source
+  address: a flood guard of **100 requests/s, burst 300**, and 1 new
+  mailbox/s (burst 30; re-registration at unlock is free). Per key once a
+  request is authenticated: 20/s, burst 100. The task sets none of the
+  `RELAY_RATE_*` variables: the defaults are the spec's numbers.
+- **When to raise the flood guard.** One address carries a whole vault
+  host. Each task logs one `rate limits` line a minute (info level).
+  *Rate* (`RELAY_RATE_IP_RPS`, 100): a host's steady traffic reaches it at
+  about 2,500 idle vaults, 1,100 at a message a minute each, 700 at two.
+  Raise it when, for a known vault host, `address_busiest_per_min` stays
+  at 3,000 or more (half the guard). *Burst* (`RELAY_RATE_IP_BURST`,
+  300): about 100 vaults can unlock in the same instant, and 300 can
+  re-poll at once after a relay deploy; more than that are refused once
+  and are back within seconds (500 vaults: 2.5 s; 900: 7 s). Raise it if
+  `address_refused` shows up for a known host after deploys or mass
+  unlocks and those seconds matter; it is also the size of every
+  instantaneous memory cost, so not further than needed. The reviewed
+  next step for hosts of 1,000 to 2,000 vaults is 200 / 4,000 together
+  with the archived memory bounds. At ten members and four staging vaults
+  none of these should be anywhere near.
+- **What else the line says.** `key_busiest_per_min`, `key_peak`,
+  `key_refused`: one key against its 20/s. `register_refused`: an address
+  creating mailboxes faster than 1/s. `addresses_refused`: how many
+  addresses the flood guard refused in the minute. `collectors`, `parked`,
+  `ws_sessions`: what the task carries (measured: about 42 KiB per parked
+  long-poll, 45 KiB per WebSocket session; nothing caps them per task
+  yet, so watch them against the task's 512 MiB). Nothing identifies an
+  address or key in logs or metrics, by design. No vault-host allowlist
+  exists or is needed.
+- **Not protected yet** (§7.2 "What does not hold"): one address can cost
+  five times what it could (100/s); a vault whose mailbox is gone retries
+  every second; parked collectors, WebSocket sessions and stalled deposit
+  bodies (from anyone with one registered mailbox) are bounded only by
+  the flood guard. The mechanisms for these are archived (relay
+  branch `ratelimit-per-key-full`, spec branch
+  `spec/relay-rate-limits-full`) and return one by one, sized from the
+  numbers above.
+  **Watch after the deploy:** task memory and restarts against
+  `collectors` and `ws_sessions`; `address_busiest_per_min` and refusals
+  by limiter; Valkey data size and ECPU; DynamoDB consumed reads; ECS CPU.
 - **Health.** `/healthz` reads DynamoDB. Metrics worth alarming on (task
   `/metrics`, loopback): `relay_coord_errors_total`, `relay_wake_bus_up`,
   `relay_errors_total{code="internal"}`.
