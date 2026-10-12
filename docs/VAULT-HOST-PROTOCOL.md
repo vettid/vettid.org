@@ -1,7 +1,7 @@
 ---
 title: VAULT-HOST-PROTOCOL
-status: draft for the owner's review
-version: 0.1.0
+status: approved by the owner 2026-10-12 (H1–H9 as recommended)
+version: 0.1.1
 date: 2026-10-12
 owner: Al Liebl (Mesmer)
 component: vault enclave (supervisor), parent (host process)
@@ -12,6 +12,9 @@ related:
   - VAULT-RELAY-SCALING.md (0.1.2) §6, §10
   - vettid-vault `internal/hostproto`, `enclave/supervisor`, `enclave/egress`, `parent`, docs/V3-NOTES.md "Enclave ↔ parent", docs/SMOKE.md
 changelog:
+  - 0.1.1: approved by the owner 2026-10-12, decisions H1–H9 as
+    recommended: the requirements of §12 (P1–P9) are normative; the
+    open points of §13 are to be handled as decided there
   - 0.1.0: first draft, written from the code as built at vettid-vault
     `main` f3003ed (#66, for staging release S11). It describes; it
     changes nothing. Proposed requirements are in §12 and marked as
@@ -56,9 +59,8 @@ process, which never leaves the enclave (vettid-vault
 vettid-vault f3003ed. Statements in the present tense are what the code
 does. The key words MUST, MUST NOT, SHOULD and MAY (RFC 2119) appear
 only where this document repeats a rule another specification already
-makes, with the reference, and in §12, where each rule is marked
-*proposed*: the code already satisfies it, and the owner decides
-whether it becomes normative.
+makes, with the reference, and in §12, whose rules are normative since
+0.1.1 (the code at f3003ed already satisfies each of them).
 
 ## 2. Parties and channels
 
@@ -765,10 +767,10 @@ more than "the operation does not happen, or happens late".
 - learn anything per vault from `Stats`, beyond what one vault alone
   on an instance gives away (§11.2).
 
-## 12. Proposed requirements
+## 12. Requirements
 
-*Proposed. The code at f3003ed satisfies each of these. None is
-normative until the owner approves it (§13 lists the decisions).*
+*Normative since 0.1.1 (approved by the owner 2026-10-12). The code at
+f3003ed satisfies each of these.*
 
 - **P1.** The enclave MUST treat every frame, reply and egress byte
   from the parent as untrusted input, and MUST NOT base a security
@@ -803,6 +805,17 @@ normative until the owner approves it (§13 lists the decisions).*
   parsing").
 
 ## 13. Open points
+
+Decided by the owner on 2026-10-12, as recommended: point 1 is to be
+fixed in vettid-vault in a release after S11 (the enclave times the
+parent's `Ping`; a write deadline on the control connection), and
+VAULT-MESSAGING §12.3 corrected meanwhile; the `vault_id` of point 2 is
+to be dropped from that record, after which P5's last sentence is
+narrowed; the disclosures (the host row of VAULT-MESSAGING §2.2; the
+operations the host can originate, §13.3 and §11.11) go into an
+erratum with no code change; per-kind frame limits and the reader at
+the request limit follow at low priority; the rest with the next change
+to each place.
 
 Found while writing this document. Each is described where it occurs
 above; the pull request that adds this document lists them with file
