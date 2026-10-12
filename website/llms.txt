@@ -42,15 +42,17 @@ Status, as the site states it today:
 - [vettid-vault](https://github.com/vettid/vettid-vault): The vault: the Nitro Enclave supervisor and per-member vault, the host-side forwarder, the hybrid post-quantum crypto, and the reproducible image build
 - [vettid-relay](https://github.com/vettid/vettid-relay): The relay: mailboxes that hold end-to-end encrypted messages they cannot read
 - [vettid-push](https://github.com/vettid/vettid-push): The push gateway: wakes a phone with a push that carries no content. In testing; not yet switched on for members
-- [vettid-android](https://github.com/vettid/vettid-android): The Android app
-- [vettid-ios](https://github.com/vettid/vettid-ios): The iOS app
-- [vettid-desktop](https://github.com/vettid/vettid-desktop): The desktop companion: time-limited, capability-scoped sessions where the phone stays in control
+- [vettid-android](https://github.com/vettid/vettid-android): The Android app. In testing; not yet released
+- [vettid-ios](https://github.com/vettid/vettid-ios): The iOS app. Not yet released
+- [vettid-desktop](https://github.com/vettid/vettid-desktop): The desktop companion: time-limited, capability-scoped sessions where the phone stays in control. Not yet released
 - [vettid-agent](https://github.com/vettid/vettid-agent): The Agent Connector, the sidecar an AI agent will run to use its owner's vault under LEASH; being rebuilt
-- [vettid-service-vault](https://github.com/vettid/vettid-service-vault): The integration layer that lets organizations run Service Vaults
+- [vettid-service-vault](https://github.com/vettid/vettid-service-vault): The integration layer that lets organizations run Service Vaults. In build; not yet a product
 
 ## Contact
 
 - [Contact](https://vettid.org/contact): Email only. General, and LEASH, AAIF or Zero-Knowledge Trust discussions: info@vettid.org. Security: see the Security page
+- [Privacy](https://vettid.org/privacy): What this website and the mailing list record, how long it is kept, and how to have it removed
+- [Terms](https://vettid.org/terms): Terms of use for this website and the mailing list
 
 ## Optional
 
