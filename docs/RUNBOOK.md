@@ -667,7 +667,8 @@ deployed in this order with that account's profile:
 1. `VettidOrgVaultStack`: stateful (tables, data bucket, fixed roles, keys).
 2. `VettidOrgVaultHostStack`: stateless (VPC, DNS Firewall, build VPC and
    Image Builder infrastructure, DLQ, host log group, smoke-test key,
-   scaler, manifest sync, alarms). Reads the stream ARN from (1) via SSM.
+   scaler, manifest sync, alarms, among them those on the parent's
+   metrics). Reads the stream ARN from (1) via SSM.
 3. `VettidOrgVaultRelease<N>Stack`, one per entry with a `host` in
    `vault/releases/<channel>.json` (`lib/vault/release-list.ts`): AMI,
    launch template, group `vettid-org-vault-r<N>`. Reads (2)'s refs via
@@ -884,6 +885,81 @@ aws autoscaling set-desired-capacity $P --auto-scaling-group-name vettid-org-vau
 aws logs tail /aws/lambda/vettid-org-vault-scaler $P --since 30m
 ```
 
+### The parent's metrics and their alarms (from staging S11; VAULT-RELEASES §8.7)
+
+From the release that includes vettid-vault f3003ed (staging S11) each
+host's parent writes one record a minute to its log
+(`/vettid-org/<stage>/vault-host`, stream `<instance id>/vault-parent`,
+`"msg":"metrics"`) in CloudWatch's embedded metric format; CloudWatch
+takes 13 metrics from it into the namespace `VettID/Vault` with the one
+dimension `InstanceId` (9 while no enclave is connected: the four
+`Relay…` metrics come from the enclave). Hosts of earlier releases write
+none. The record also carries plain fields (`relay_conns`,
+`relay_streams`, `relay_waiting`, …) that are searchable in the log but
+are not metrics.
+
+**Check after a release from S11 on is deployed** (staging shown; an
+instance of the release must be running, a few minutes):
+
+```bash
+P="--profile vault-staging"; G=/vettid-org/staging/vault-host
+# 1. The record is in the log (the newest one; expect the 13 names, InstanceId and _aws).
+aws logs filter-log-events $P --log-group-name $G --filter-pattern '{ $.msg = "metrics" }' \
+  --start-time $(( ($(date +%s) - 600) * 1000 )) --query 'events[-1].message' --output text | python3 -m json.tool
+# 2. CloudWatch took the metrics from it: 13 names (a new metric can take
+#    some minutes to be listed; --recently-active PT3H leaves out old instances).
+aws cloudwatch list-metrics $P --namespace VettID/Vault --dimensions Name=InstanceId --recently-active PT3H \
+  --query 'Metrics[].MetricName' --output text | tr '\t' '\n' | sort -u
+#    Expect: EgressOpenKMS EgressOpenOther EgressOpenPush EgressOpenRelay
+#    EgressOpenedKMS EgressOpenedOther EgressOpenedPush EgressOpenedRelay
+#    RelayGrowthRefused RelayRequestErrors RelayRequestsInFlight
+#    RelayStreamWaitMax UnlockedVaults
+# 3. A value, as the alarms read it (the worst instance of the last 15 minutes).
+aws cloudwatch get-metric-data $P --start-time $(date -u -d '15 min ago' +%FT%TZ) --end-time $(date -u +%FT%TZ) \
+  --metric-data-queries '[{"Id":"q","Expression":"SELECT MAX(UnlockedVaults) FROM SCHEMA(\"VettID/Vault\", InstanceId)","Period":60}]' \
+  --query 'MetricDataResults[0].[Timestamps,Values]'
+# 4. The alarms: all OK (INSUFFICIENT_DATA only while no S11 host has run).
+aws cloudwatch describe-alarms $P --alarm-name-prefix vettid-org-staging-vault- \
+  --query 'MetricAlarms[].[AlarmName,StateValue,StateReason]' --output table
+```
+
+Console: CloudWatch → Metrics → All metrics → Custom namespaces →
+`VettID/Vault` → `InstanceId` (the metrics, per instance); CloudWatch →
+Alarms → All alarms, search `vault-`. Production: `--profile vault-prod`,
+`/vettid-org/prod/vault-host`, prefix `vettid-org-vault-`.
+
+If step 1 shows records and step 2 lists nothing after 15 minutes,
+CloudWatch does not read the record as metrics: look at the log group's
+`EMFValidationErrors` and `EMFParsingErrors` (namespace `AWS/Logs`,
+dimension `LogGroupName`), and at one raw event: its message must be
+the JSON document alone, with nothing before the `{`. The fix would be
+in vettid-vault (`parent/metrics.go`, or the agent's configuration in
+`deploy/host`), so in the next release; the stack has nothing to
+change. If step 1 shows nothing, the parent is not running, is older
+than S11 or the agent is not shipping (`…/vault-host-config` stream).
+
+| Alarm (`vettid-org[-staging]-vault-…`) | Fires when | Then |
+|---|---|---|
+| `unlocked-vaults` | an instance holds more than 400 unlocked vaults for 5 minutes | capacity: about 900 fit (VAULT-RELEASES §8.8); the release's `max_instances`, the scaler's caps |
+| `relay-in-flight` | an instance has more than 1,638 relay requests in flight (80 % of 16 connections × 128 streams) for 3 minutes | more than a host's vaults can need (at most 1,024 long-polls): look for vault processes at their limit (`relay_vault_limit` in the record) and at the relay |
+| `relay-stream-wait` | a relay request waited more than 1 s for a stream | the record's `relay_conns`, `relay_streams`, `relay_waiting`; the relay's load balancer (rejected connections, 5xx) |
+| `relay-growth-refused` | requests waited because a bound forbade another connection | which bound: `relay_refused_max_conns` (16 connections) or `relay_refused_min_streams` (the relay announces fewer than 32 streams: "Relay" below, the stream limit check) |
+| `relay-connection-churn` | in an hour more than 32 relay connections were opened and more than 4 times the average number open | the relay or its load balancer is closing connections; `aws logs tail` the relay service; `EgressOpenedRelay` per instance |
+| `relay-stream-limit` | twice in 3 minutes a record had requests waiting while `relay_streams` read 0 or 100 | the relay's front end must announce 128, never exactly 100 ("Relay", the stream limit check) |
+
+The first five are Metrics Insights queries over every instance (no
+alarm names an instance); the last reads the log through the metric
+filter `RelayStreamLimitSuspect`. To see that an alarm reaches the
+admin inbox (it changes nothing but the alarm's state, which the next
+evaluation sets back):
+`aws cloudwatch set-alarm-state $P --alarm-name vettid-org-staging-vault-relay-stream-wait --state-value ALARM --state-reason test`,
+then
+`aws cloudwatch describe-alarm-history $P --alarm-name vettid-org-staging-vault-relay-stream-wait --history-item-type Action --max-items 1 --query 'AlarmHistoryItems[].HistorySummary'`:
+"Successfully executed action …", not "not authorized to perform:
+SNS:Publish" (the topic admitted only the CloudTrail rules until the
+host stack that added these alarms was deployed; an alarm that fired
+before that deploy did not notify).
+
 ### Manifest sync (`vettid-org-vault-manifest-sync`, VAULT-RELEASES §7)
 
 Every 5 minutes: fetches the channel's served manifest, verifies it under
@@ -955,6 +1031,9 @@ After publishing a manifest, run it at once:
    minimum by the scaler after its 30 idle minutes (seen on r4), so a
    long run on a listed release needs a vault unlocked on it or a
    fresh scale-up.
+   From S11: with the ordinary parent running again, check that its
+   metrics arrive ("The parent's metrics and their alarms" above, steps
+   1 to 4). The self-test parent writes no metrics.
 6. After publication, the always-on minimum moves (O7): set
    `min_instances: 1` on N and `0` on N−1, deploy both release stacks.
 

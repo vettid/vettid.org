@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.16
+version: 0.1.17
 date: 2026-10-12
 owner: Al Liebl (Mesmer)
 changelog:
@@ -124,6 +124,18 @@ changelog:
     built": the plain field `relay_vault_limit`, from the staging
     release that includes vettid-vault 8f2c8bf (S11). `related` brought
     up to date
+  - 0.1.17 (as built, host stack; for staging release S11). §8.7: the
+    alarms on the parent's metrics are built in the vault account's
+    host stack (not yet verified on staging): how they are keyed
+    (the worst instance, by Metrics Insights queries; one log metric
+    filter), their thresholds, and where the in-flight alarm differs
+    from the text above it (80 % of the 16 connections a host may have,
+    not of the connections open: for the owner's approval). The alerts
+    topic admits the account's CloudWatch alarms (it admitted the
+    CloudTrail rules only, so no alarm of the host or release stacks
+    could notify). How the parent's log reaches CloudWatch as built
+    (files, not journald) and why the record needs no change to be
+    read as metrics
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.27.4) §11.10 release updates, §12.5 deletion, §13.5, §13.9
@@ -1215,7 +1227,8 @@ release_starting`. The `vault-scaler` Lambda (host stack):
 
 ### 8.7 Observability
 
-- Parent logs (journald → CloudWatch agent) to
+- Parent logs (journald → CloudWatch agent; as built, a log file the
+  agent ships: "As built (0.1.17)" below) to
   `/vettid-org/<stage>/vault-host`, one month. Release enclaves run without
   a console; their sanitized logs arrive through the parent. Nothing logged
   contains PINs, keys, envelopes or mailbox ids.
@@ -1282,8 +1295,9 @@ release_starting`. The `vault-scaler` Lambda (host stack):
     once. For the instance only: it replaces a log record that named the
     vault (VAULT-HOST-PROTOCOL §13 point 2). It is a field, not a 14th
     metric.
-  - **Alarms these call for** (not built; they belong to the vault
-    account's stack): `UnlockedVaults` above 400 on an instance;
+  - **Alarms these call for** (built in the host stack, 0.1.17, not yet
+    verified on staging: "As built (0.1.17)" below): `UnlockedVaults`
+    above 400 on an instance;
     `RelayRequestsInFlight` above 80 % of `relay_conns` × 128;
     `RelayStreamWaitMax` above 1000; any `RelayGrowthRefused`;
     `EgressOpenedRelay` in an hour far above twice `EgressOpenRelay`;
@@ -1297,6 +1311,64 @@ release_starting`. The `vault-scaler` Lambda (host stack):
     shipped log line. The record's shape is tested; the extraction is
     phase 1's exit check, to be done on staging with S11. If the parent
     logs above INFO the record is not written.
+- *As built (0.1.17; the host stack, `lib/stacks/vault-host-stack.ts`;
+  built, not yet verified on staging: RUNBOOK "The parent's metrics and
+  their alarms").*
+  - **How the record reaches CloudWatch.** Not through journald: the
+    parent's unit appends its standard error to
+    `/var/log/vettid/vault-parent.log`, and the CloudWatch agent
+    (configuration in vettid-vault `deploy/host`, part of each
+    release's AMI) ships that file line by line, unparsed, to the
+    stream `<instance id>/vault-parent`. The parent logs JSON at INFO
+    (`-debug` lowers the level, nothing raises it), so the event's
+    message is the record itself: one JSON document with `_aws` at the
+    top level beside the logger's own members (`time`, `level`, `msg`,
+    `component`), which the format allows. That is the form CloudWatch
+    Logs reads metrics from; the host role may already write the log
+    events, and the DNS firewall already admits `logs.<region>`. No
+    change to the stack or to vettid-vault was needed for the metrics
+    to arrive. The relay's name and the one-minute interval reach the
+    parent without a stack change (`vault/relay-host` → `-relay-host`;
+    the interval is the default).
+  - **How the alarms are keyed.** The only dimension is the instance,
+    and instances come and go, so no alarm names one. Five alarms ask
+    for the worst instance, or the sum over all of them, with a
+    Metrics Insights query over `SCHEMA("VettID/Vault", InstanceId)`,
+    as the control-queue age alarm does. No second dimension set in
+    the record is needed.
+  - **The alarms** (`vettid-org[-<stage>]-vault-…`, to the alerts
+    topic; missing data is not breaching, so they rest while no host
+    of S11 or later runs):
+    - `unlocked-vaults`: the highest `UnlockedVaults` above 400 for 5
+      minutes;
+    - `relay-in-flight`: the highest `RelayRequestsInFlight` above
+      1,638 for 3 minutes. **This differs from the text above:** it is
+      80 % of 16 × 128, the most a host can have, not of `relay_conns`
+      × 128. Connections are filled one after the other, so the
+      requests in flight are above 80 % of the open connections'
+      streams in ordinary operation (always from the fifth connection
+      on, and whenever the newest connection is more than 80 % full
+      below that); the alarm as first written would
+      come and go with the number of vaults. For the owner's approval;
+    - `relay-stream-wait`: the highest `RelayStreamWaitMax` above
+      1,000 ms in one record;
+    - `relay-growth-refused`: the sum of `RelayGrowthRefused` above 0
+      in one minute;
+    - `relay-connection-churn`: per hour and over every instance, more
+      than 32 relay connections opened and more than 4 times the
+      average number open ("far above twice" taken as four times; the
+      floor of 32 keeps a host whose few vaults are unlocked and locked
+      through the hour from raising it);
+    - `relay-stream-limit`: a metric filter on the host log
+      (`RelayStreamLimitSuspect`, no dimension) counts the records
+      with `relay_waiting` above 0 while `relay_streams` reads 0 or
+      100; the alarm is 2 such records in 3 minutes.
+  - **The alerts topic.** Its policy named `events.amazonaws.com`
+    alone (the CloudTrail rules), which also replaced the default that
+    lets the account's alarms publish: every alarm of the host stack
+    and of the release stacks would have failed to notify (the fault
+    #214 fixed on the security-alerts topic). It now also admits this
+    account's CloudWatch alarms.
 
 ### 8.8 Capacity
 
