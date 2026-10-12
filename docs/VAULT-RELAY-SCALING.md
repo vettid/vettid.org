@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELAY-SCALING
 status: approved by the owner 2026-10-12 (D1–D6 as recommended)
-version: 0.1.1
+version: 0.1.2
 date: 2026-10-12
 owner: Al Liebl (Mesmer)
 related:
@@ -11,6 +11,12 @@ related:
   - VAULT-RELEASES.md §8.7 (monitoring), §8.8 (capacity); STAGING-DEVELOPMENT-PLAN.md §3 row 6, D11
   - vettid-vault docs/V3-NOTES.md, docs/SMOKE.md
 changelog:
+  - 0.1.2: phase 1 as built (vettid-vault #66, merged 2026-10-12 as
+    f3003ed, for staging release S11): new §10 records what was built,
+    where it differs from the plan as approved, the bounds added beyond
+    D3 (for the owner's approval), a new requirement on the relay's
+    front end, and the known gaps. Notes in §1, §5 and §8 point to it.
+    D1–D6 are unchanged
   - 0.1.1: approved by the owner 2026-10-12; D1–D6 decided as recommended (§8)
   - 0.1.0: first draft after the owner's request of 2026-10-12 ("plan the
     enclave fix"); code read at vettid-vault and vettid-relay
@@ -42,7 +48,7 @@ vaults on a host:
    (`enclave/egress/egress.go:153-156`, `docs/V3-NOTES.md:235-240`). The
    growth comes from an undocumented detail of Go's standard library and
    no test covers it. A Go update could turn it into the wall the report
-   described.
+   described. (0.1.2: not undocumented, §10.2.)
 2. **The relay, not the enclave, decides how many connections there are.**
    D5 shares connections so the host cannot tell vaults apart by
    connection. A relay that announced a limit of 1 would get one
@@ -198,7 +204,7 @@ is what the flood guard's burst is sized for.
 |---|---|---|---|
 | 0 | Nothing in production. Correct the notes when phase 1 lands (§7). Deploy the relay limit change (PR #233, vettid-relay #8) on its own schedule: it removes today's real limit | None for this plan | n/a |
 | 1 | **Make growth deliberate** (vettid-vault, next staging release): (a) a test in `enclave/egress` that parks more requests than the server allows streams and requires every one to run, quick requests not to wait, and connections to stay within a bound (the measurement of §9.2 as a test), run on every Go update; (b) bounds owned by the enclave: a maximum of connections per host (16: room for 2,048 streams, above `MaxProcs`) and a refusal to grow when the relay announces fewer than 32 streams (requests then wait, and it is counted); (c) jitter (G); (d) counters from the supervisor to the parent, and from the parent as metrics (§6) | One vault staging release, then the next production release. No relay release, no protocol change | Tests pass; on staging, counters visible; S-release canary self-test unchanged |
-| 2 | **Load test.** Extend the self-test's synthetic vaults so each makes a throwaway relay key, registers a mailbox and holds real long-polls (today they only make a channel round trip, `enclave/vaultproc/capacity.go:107-126`), deletes its mailbox at the end; run 400 to 900 against a **staging relay** | A staging relay while the test runs (about $55 a month while up; D11) and a staging release that pins it (the relay URL is measured into the image) | 900 held for 30 minutes: no request error, wait under 1 s, connections ≤ 12; a relay rolling deploy during the run: all vaults collecting again within 60 s, no lasting `429` |
+| 2 | **Load test.** Extend the self-test's synthetic vaults so each makes a throwaway relay key, registers a mailbox and holds real long-polls (today they only make a channel round trip, `enclave/vaultproc/capacity.go:107-126`), deletes its mailbox at the end; run 400 to 900 against a **staging relay** | A staging relay while the test runs (about $55 a month while up; D11) and a staging release that pins it (the relay URL is measured into the image) | 900 held for 30 minutes: no request error, wait under 1 s, connections ≤ 12 (0.1.2: 8 expected, §10.2); a relay rolling deploy during the run: all vaults collecting again within 60 s, no lasting `429` |
 | 3 | The multiplexed watch (C) | Protocol 0.8, relay, vault | Only on a trigger of §6 |
 
 Why the load test must not use the production relay, which staging
@@ -246,7 +252,8 @@ None is made by this document.
 
 ## 8. Owner decisions
 
-Decided by the owner on 2026-10-12: all six as recommended.
+Decided by the owner on 2026-10-12: all six as recommended. (0.1.2:
+phase 1 added bounds beyond D3; they are listed in §10.3 for approval.)
 
 | # | Decision | Recommendation |
 |---|---|---|
@@ -316,3 +323,96 @@ requests parked by the server, as the relay parks collects.
   the reason for long-poll in the enclave is §2.
 - How the relay deploy of 2026-10-11 looked from the four staging vaults.
 - vsock throughput with many connections; conntrack settings of the host.
+
+## 10. Phase 1 as built (0.1.2)
+
+Implemented in vettid-vault #66 (merged 2026-10-12, f3003ed), reviewed
+independently three times, for staging release S11. No change on the
+wire to the relay or the apps, no new dependency. The normative text is
+VAULT-MESSAGING 0.27.2 §12.2 and §12.2.1; the metrics are VAULT-RELEASES
+0.1.14 §8.7.
+
+### 10.1 What was built
+
+| §5 item | Built |
+|---|---|
+| (a) test | `egress.TestGrowthAtStreamLimit`: 900 held long-polls at 128 streams per connection run together on 8 connections, quick requests beside them do not wait. Further tests for each bound and failure |
+| (b) bounds | At most 16 connections per HTTP/2 host; none further when the host announces fewer than 32 streams or none yet; more in §10.3 |
+| (c) jitter | Long-poll of a random 20 to 25 s; first poll after 0 to 1 s; retry after 0.5 to 1.5 s; backoff on `mailbox_unknown` and `timestamp_stale` |
+| (d) metrics | Counts from the supervisor to the parent; 13 metrics from the parent as embedded-metric log records |
+
+Exit test of phase 1: tests pass (done). On staging, counters visible
+and the canary self-test unchanged: open, with S11.
+
+### 10.2 Where it differs from the plan as approved
+
+- **The connection pool was replaced, not wrapped.** The plan expected
+  to bound the standard library's pool. `http.Transport` cannot be told
+  to make HTTP/2 requests wait at a bound, and does not report the
+  stream limit a host announced. The enclave now keeps its own pool on
+  `net/http`'s `ClientConn` (Go 1.26, standard library): one connection
+  with its free and used streams. The fallback of §5 ("a fixed cap
+  alone") was not needed.
+- **Fill first.** Requests fill one connection before the next is
+  opened, instead of four pools taken in turn. 900 vaults use 8
+  connections, the fewest possible (§9.2 measured 8 to 11). The exit
+  test of phase 2 should expect 8, not "≤ 12".
+- **§1 point 1 was wrong to call the growth undocumented.** Go 1.26
+  documents it at `http.HTTP2Config.StrictMaxConcurrentRequests` ("if
+  false, an additional connection will be opened if all existing
+  connections are at their limit"). It was untested here, and unbounded.
+- **Requests that fail with their connection.** The pool re-sends once
+  what the host did not process (as the old pool did); nothing else.
+- **The bounds hold for every HTTP/2 host** (relay, push gateway,
+  Google), each separately, not only the relay. KMS is untouched.
+- **The parent had no metrics before.** §6 reads as if unlocked vaults
+  per instance were already published; these are the parent's first.
+- **"Longest wait in the last minute"** is the longest in the current
+  minute and the one before, so that reading it changes nothing.
+
+### 10.3 Bounds added beyond D3 (for the owner's approval)
+
+D3 decided 16 connections and 32 streams. The reviews showed that these
+two alone can be defeated or can wedge the pool; the following were
+added. Each can be changed in a later release.
+
+| Bound | Value | Why |
+|---|---|---|
+| Rate of new connections | 2 a second after a burst of 32, failed dials included | A host that closes connections at once must not get one per request; the burst replaces every connection twice over at once |
+| Closing allowance | A connection the host is closing does not count for 30 s, then is closed; 16 let off in any 5 minutes | Without it, the load balancer's hourly close of a full set would make requests wait at the bound; with no limit on it, a host could hold 32 for good |
+| Per-vault limit | 8 relay and push requests in flight; further ones wait | With a cap on streams, 16 faulty vault processes could otherwise hold all of them. A vault needs about 3 |
+| HTTP/2 ping | After 15 s without a frame; close if unanswered in 10 s | A connection whose host is gone without closing it kept its streams and its place for good |
+| Stall | Close a connection that holds requests and answers none for 90 s | The same, for a host that answers pings only. Above any request's 80 s |
+| Backoff cap | 15 s (±50 %) on `mailbox_unknown` / `timestamp_stale` | The loop does not register again; the vault is deaf between polls |
+| Re-send | Once, for a request the host declared unprocessed | The old pool did; without it a member's invitation accept, a push registration or a wake fails on the load balancer's close |
+
+### 10.4 A requirement on the relay's front end
+
+The relay's front end MUST NOT announce exactly 100 concurrent streams.
+100 is what Go's HTTP/2 client assumes before a host has announced its
+limit, and it does not say when the announcement came; the pool
+therefore trusts a connection reading 100 only once it has answered a
+request, and fills it slowly until then (1 request, 31 after a second).
+The load balancer announces 128. Verified live on 2026-10-12, together
+with answers to HTTP/2 pings, on relay.vettid.org,
+push.staging.vettid.org and android.googleapis.com (which announces 100;
+its first request is quick, so it is not affected).
+
+### 10.5 Known gaps
+
+- A full connection that receives GOAWAY counts toward the 16 until one
+  of its requests ends (the library does not tell it from a full one):
+  about 0.2 s at 128 long-polls.
+- A dial that hangs (15 s at most) delays the requests that need a new
+  connection; they fail with it or dial next.
+- No test holds the order "state hook before first use" of a new
+  connection; a waiting request looks again every second in any case.
+- A host that lowers its stream limit below 32 after its connections
+  filled keeps up to 16 connections with one request each. Not the
+  relay as deployed.
+- D3's 16 is unchanged. At 2,000 vaults on a host only 48 of 2,048
+  streams would be spare beside the long-polls; that matters only if
+  `MaxProcs` (1,024) is raised.
+- The behaviour against the real load balancer above 128 streams, and
+  whether CloudWatch takes the metrics from the log record, are still
+  to be established (§9.4; phases 1 exit and 2).

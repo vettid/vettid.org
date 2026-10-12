@@ -1,8 +1,8 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.13
-date: 2026-10-11
+version: 0.1.14
+date: 2026-10-12
 owner: Al Liebl (Mesmer)
 changelog:
   - 0.1.0: V5 plan. Release pipeline, keys, infrastructure, release
@@ -109,6 +109,12 @@ changelog:
     channel and release number; the key attestation chain rules.
     §3.5 "As built": `security: urgent` first used, by S10. §8.8:
     S10's capacity figures. 0.1.11 marked approved
+  - 0.1.14 (editorial, as built; phase 1 of VAULT-RELAY-SCALING 0.1.2,
+    vettid-vault #66, for staging release S11; VAULT-MESSAGING 0.27.2).
+    §8.7: the parent's first metrics as built (namespace, dimension,
+    names, how they are shipped), the alarms they call for (not yet
+    built) and what is still to be verified on staging. §8.8: the relay
+    connections' capacity per host and the local measurements
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.14.0) §11.10 release updates, §12.5 deletion, §13.5, §13.9
@@ -1231,6 +1237,49 @@ release_starting`. The `vault-scaler` Lambda (host stack):
   `UpdateAssumeRolePolicy`, `DeleteInstanceProfile`,
   `RemoveRoleFromInstanceProfile` on the pinned roles. Parent EMF metrics
   come with the parent's own instrumentation (not part of W6).
+- *As built (0.1.14; vettid-vault #66, from staging release S11;
+  VAULT-RELAY-SCALING §6).* The parent's first metrics.
+  - **How.** Once a minute the parent writes one log line in
+    CloudWatch's embedded metric format (message `metrics`, level INFO)
+    to its ordinary log, which the agent ships to
+    `/vettid-org/<stage>/vault-host`; CloudWatch is to take the metrics
+    from it. No new permission and no new endpoint. Namespace
+    `VettID/Vault`; the only dimension is `InstanceId`. Nothing in the
+    record names a member, a vault, a mailbox or an address.
+  - **The 13 metrics.** `UnlockedVaults`;
+    `EgressOpenRelay`, `EgressOpenKMS`, `EgressOpenPush`,
+    `EgressOpenOther` (egress connections open, by destination; Other
+    is the attestation status list);
+    `EgressOpenedRelay`, `EgressOpenedKMS`, `EgressOpenedPush`,
+    `EgressOpenedOther` (opened since the record before);
+    `RelayRequestsInFlight` (on a stream or waiting for one);
+    `RelayStreamWaitMax` (milliseconds; the longest wait for a stream in
+    the current minute and the one before);
+    `RelayRequestErrors` (relay requests without an answer, since the
+    record before);
+    `RelayGrowthRefused` (requests that waited while a bound forbade
+    another connection, since the record before). The four `Relay…`
+    metrics come from the enclave (VAULT-MESSAGING §12.2.1 "Counts") and
+    are missing from a record written without an enclave.
+  - **Plain fields of the record** (searchable in the log, not
+    metrics): `relay_conns`, `relay_dialed`, `relay_streams` (the stream
+    limit the relay announced), `relay_waiting`,
+    `relay_refused_max_conns`, `relay_refused_min_streams`.
+  - **Alarms these call for** (not built; they belong to the vault
+    account's stack): `UnlockedVaults` above 400 on an instance;
+    `RelayRequestsInFlight` above 80 % of `relay_conns` × 128;
+    `RelayStreamWaitMax` above 1000; any `RelayGrowthRefused`;
+    `EgressOpenedRelay` in an hour far above twice `EgressOpenRelay`;
+    and `relay_streams` reading 0 or 100 while `relay_waiting` is above
+    0 (a relay front end that announces exactly 100 streams,
+    VAULT-MESSAGING §12.2.1; a log metric filter, since both are plain
+    fields).
+  - **Still not built:** request latency, lease conflicts, split-brain
+    locks, KMS errors, egress denials and queue age as metrics.
+  - **Not yet verified:** that CloudWatch takes the metrics from the
+    shipped log line. The record's shape is tested; the extraction is
+    phase 1's exit check, to be done on staging with S11. If the parent
+    logs above INFO the record is not written.
 
 ### 8.8 Capacity
 
@@ -1263,6 +1312,30 @@ canary self-test (`-capacity 400`, same host and enclave size), PASS:
 58 vaults held at the memory floor, about 907 idle unlocked vaults
 projected per host. The burst figure is unchanged; the projection is
 about 7 % lower than S3's.
+
+*Relay connections (0.1.14; VAULT-RELAY-SCALING 0.1.2 §3, §10;
+vettid-vault #66).* Memory, not the relay path, bounds vaults per host:
+
+| Measure | Value |
+|---|---|
+| Streams per connection (the relay's load balancer) | 128 |
+| Connections per host to the relay, at most | 16 (up to 32 for 30 s while the load balancer closes connections) |
+| Concurrent relay requests per host, at most | 2,048 |
+| Connections at 900 unlocked vaults | 8 |
+| Vault processes per host, at most (`MaxProcs`) | 1,024, so at most 1,024 held long-polls |
+| A quick request (deposit, ack) first waits for a stream when | more than 1,024 other requests are in flight at 1,024 vaults |
+| Relay and push requests in flight per vault, at most | 8 |
+
+*Measured locally* (2026-10-12; the enclave's egress code against a
+local HTTP/2 server at 128 streams per connection, not against the load
+balancer; phase 2 of VAULT-RELAY-SCALING measures on staging):
+
+| Measure | Result |
+|---|---|
+| 900 long-polls held, quick requests beside them | 8 connections; quick requests under 1 ms |
+| Every connection lost at once, 900 vaults, three times in a row | all polling again about 0.5 s after each loss (the vaults' own retry delay) |
+| The same at 2,000 vaults (above `MaxProcs`) | 0.5 s; 4.4 s for a second loss within 3 s of the first (the dial rate) |
+| A connection whose host goes silent without closing it | found and closed after 25 s (ping after 15 s, 10 s to answer) |
 
 *O6 decision (owner, 2026-10-06):* keep the 1 vCPU / 5120 MiB enclave on
 m7g.large for release 1; revisit when unlock queueing shows in metrics
