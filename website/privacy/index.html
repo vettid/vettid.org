@@ -161,7 +161,8 @@
     <li>This site sets no cookies and uses no analytics, no trackers and no advertising.</li>
     <li>It loads nothing from anyone but us: the pages, scripts, styles and fonts all come from vettid.org.</li>
     <li>Like every web server, ours keeps request logs. They are described below, and they are deleted after 90 days.</li>
-    <li>If you join the mailing list, we keep your email address until you ask us to remove it.</li>
+    <li>One record lasts longer: our AWS account's audit log keeps mailing-list addresses for 400 days (see &ldquo;The mailing list&rdquo;).</li>
+    <li>If you join the mailing list, we keep your email address until you unsubscribe: every mailing-list email from us has a link for that.</li>
     <li>We do not sell or share any of it.</li>
   </ul>
 
@@ -176,19 +177,22 @@
     <li><b>Firewall logs:</b> the same request as the firewall saw it, including the names and values of the request headers and a fingerprint of your browser's TLS handshake (JA3 and JA4). Cookie and Authorization header values are removed before the log is written.</li>
   </ul>
   <p>We use these logs to keep the site running, to spot and limit abuse (requests are rate-limited by IP address and by TLS fingerprint) and to count traffic. We do not use them to build a profile of you, and we do not combine them with anything else we hold.</p>
-  <p>Access logs are deleted after 90 days (an older-format copy after 30 days), firewall logs after 3 months, and the results of our own queries over the logs after 30 days.</p>
+  <p>Access logs, firewall logs and the results of our own queries over them are all deleted after 90 days. An older-format copy of the access logs is no longer written; what remains of it is deleted within 30 days of 12 October 2026.</p>
+  <p>One thing to know about these logs: when you use your mail app's unsubscribe button, the app sends a request whose address contains your unsubscribe code, so that code is in the logs for 90 days. It stays valid until it is used, and all it can do is take your address off the list. The link in the text of our emails does not put the code in the logs.</p>
 
   <h2>The mailing list</h2>
   <p>If you enter your email address in the form on the <a href="/#signup">home page</a>, this is what happens:</p>
   <ul>
     <li>Your address is sent to our sign-up service on AWS. We store it with the time you asked and the status of your request.</li>
-    <li>You get a confirmation email. Usually it is the verification email that Amazon's email service (Amazon SES) sends on our behalf; if AWS has already verified your address for us, we send our own email with a link that works once, for 48 hours. You are on the list only after you click that email's link. To send it, AWS keeps your address as a verified address in our SES account.</li>
-    <li>If you do not confirm, your address is deleted after 3 days, from our list and from SES.</li>
-    <li>When you confirm, we record the time, and a notice containing your address is emailed to the project's own administrative mailbox.</li>
-    <li>Our sign-up service's own logs never contain email addresses. They are deleted after one month.</li>
+    <li>You get a confirmation email. Usually it is the verification email that Amazon's email service (Amazon SES) sends on our behalf; if AWS has already verified your address for us, we send our own email with a link that works once, for 48 hours. You are on the list only after you click that email's link. To send it, AWS keeps your address as a verified address in our SES account. When you confirm through Amazon's email, we send one short welcome email. Every mailing-list email of ours carries your unsubscribe link; Amazon's verification email does not.</li>
+    <li>If you do not confirm, your address is deleted after 3 days from our list, and from SES if we created its record there for the list (the exceptions are under &ldquo;To leave&rdquo; below).</li>
+    <li>When you confirm, we record the time, and a notice that somebody confirmed is emailed to the project's own administrative mailbox. Since 12 October 2026 the notice carries no address.</li>
+    <li>Our sign-up service's own logs never contain email addresses. They are deleted after 90 days.</li>
   </ul>
   <p>We use the list to tell you when membership opens and to send VettID updates. That is its whole purpose. No spam, no sharing.</p>
-  <p><b>To leave,</b> email <a href="mailto:info@vettid.org">info@vettid.org</a> from the address you signed up with, or tell us which address to remove. There is no unsubscribe link today: removal is by email request, and we do it by hand, deleting the address from the list and from SES. The list's database keeps rolling backups for up to 35 days, after which the address is gone from those too.</p>
+  <p><b>To leave,</b> use the unsubscribe link in any mailing-list email, or your mail app's unsubscribe button; or email <a href="mailto:info@vettid.org">info@vettid.org</a>. You are removed from the list at once. Your address is deleted from our list storage, and from Amazon SES, normally within the hour; if that step fails it is retried. We keep the SES record if we did not create it for the list (AWS already held your address for us), if a VettID account uses the address, or if you have signed up again.</p>
+  <p>AWS's audit log of our account (CloudTrail) records each call we make to SES about your address: when the record is created, each time we check whether you have confirmed (every 15 minutes while your request is pending), and when the record is deleted. Each entry contains the address. We keep that log for 400 days, and unsubscribing does not remove your address from it.</p>
+  <p>The list's database keeps rolling backups for up to 35 days, after which the address is gone from those too.</p>
 
   <h2>When you email us</h2>
   <p>If you write to one of our addresses (general, security, donations), we get your address and whatever you put in the message, and we keep the correspondence for as long as it takes to deal with it and to keep a record of what was agreed. Our mailboxes are hosted by Proton. For security reports, the <a href="/security">security page</a> has a PGP key so you can encrypt what you send.</p>
@@ -203,7 +207,7 @@
   <p>We link to other sites: GitHub for our source code, the projects on <a href="/tools-we-trust">Tools We Trust</a>, and a few others. Once you follow a link you are on their site, under their rules.</p>
 
   <h2>Your choices</h2>
-  <p>Wherever you live, you can ask us what we hold about you, ask for a copy, ask us to correct it, or ask us to delete it. Email <a href="mailto:info@vettid.org">info@vettid.org</a>. For the mailing list, that is a single address. For request logs, tell us the IP address and the time, since the logs hold no names; they are deleted on the schedule above in any case.</p>
+  <p>Wherever you live, you can ask us what we hold about you, ask for a copy, ask us to correct it, or ask us to delete it. Email <a href="mailto:info@vettid.org">info@vettid.org</a>. For the mailing list, that is a single address; the audit-log entries described above are the exception, and expire after 400 days. For request logs, tell us the IP address and the time, since the logs hold no names; they are deleted on the schedule above in any case.</p>
 
   <h2>Age</h2>
   <p>VettID and this site's mailing list are for people aged 18 and over. We do not knowingly collect anything from anyone younger; if you think someone under 18 has joined the mailing list, tell us and we will remove the address.</p>
