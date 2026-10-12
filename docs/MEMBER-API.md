@@ -7,14 +7,17 @@ changelog:
     membership-request privacy notice, vettid.org #248: "we should only
     support removal via the link with nothing manually required",
     "declines should be kept for 30 days", "90 days for the logs", and
-    the admin notice without people's addresses; **draft: needs the
-    owner's approval**. Independent of 2.5.0: it takes effect when it
+    the admin notice without people's addresses; **approved by the
+    owner 2026-10-12** on vettid.org #250, with the wording "request
+    for early access" in the emails and on the page, as on the privacy
+    notice. Independent of 2.5.0: it takes effect when it
     is deployed, while 2.5.0 still waits for release L and its text is
     not changed). **`POST /api/public/request/withdraw`** `{token}`:
-    a person withdraws their membership request with a link, and
+    a person withdraws their request for early access with a link, and
     everything the request created is removed without an operator.
-    **A new email**, "We have your VettID membership request", sent
-    once when a request's address is verified, carries the link.
+    **A new email**, "We have your request for early access to
+    VettID", sent once when a request's address is verified, carries
+    the link.
     **Retention**: a declined request is deleted 30 days after the
     decline; a person's email address stays in the audit log for 90
     days, in a record beside the event, and the event itself is kept;
@@ -334,7 +337,10 @@ and nothing is done by hand.
   address is not one of the project's own (`…@vettid.org` and its
   sub-domains) and the mailing list has no row for it; then, in one
   transaction, the row (only if it is still `withdrawn`) and its
-  `email:<addr>` marker. Until that transaction the row still holds
+  `email:<addr>` marker (only if the marker is this request's own, by
+  its `member_guid`, or is already gone: a marker that names another
+  request, made after an admin's Delete took the old one, is left,
+  and the row goes alone). Until that transaction the row still holds
   the address, which is what keeps a new request for it from racing
   the removal. A row from before 2.6.0 has no `owns_identity`: its
   SES identity is kept (never on doubt).
@@ -346,6 +352,11 @@ and nothing is done by hand.
   table for ever; what could not be removed outside the table is
   left, audited (`request.removal_incomplete`) and alarmed
   (`RequestRemovalAbandoned`, alarm `request-removal-abandoned`).
+  A Cognito user left that way carries the old request's `user_guid`:
+  an admin's approval of a later request for the same address is
+  refused (`409`, nothing changed) until an operator has removed that
+  user, instead of making an account that cannot sign in (ADMIN-API
+  "approve").
 - **Uniform answers.** A malformed token, an unknown one, a used one,
   the token of a request that has since been approved or deleted, and
   a working one all answer `200 {ok: true}` with the same bytes, so
@@ -443,7 +454,10 @@ events are kept. What changes is where a person's address is:
   delete an event. Events written before 2.6.0 keep the address
   inside them until the operator runs
   `scripts/ops/audit-address-backfill.ts` once (dry run by default;
-  RUNBOOK "Membership requests").
+  RUNBOOK "Membership requests"). Each `--apply` run of it appends one
+  event of its own, `admin.audit_address_backfill` (actor: the
+  operator's session; detail: the counts), since changing old events
+  in place would otherwise leave no record.
 - Also holding the address after these periods, unchanged by 2.6.0:
   the tables' point-in-time-recovery backups (35 days), and the
   organization CloudTrail's record of the SES identity calls
@@ -457,8 +471,8 @@ member-supplied text (names) in them.
 - **Amazon's verification email** (SES, as before): sent by AWS when
   the request creates the address's SES identity. It cannot carry
   anything of ours.
-- **"We have your VettID membership request"** (new): sent once per
-  request by the members-stream mailer, at the moment the request
+- **"We have your request for early access to VettID"** (new): sent
+  once per request by the members-stream mailer, at the moment the request
   becomes verified (the 15-minute verification sweep, or at once for
   an address SES had already verified), which is the first moment we
   may mail the address at all. It says the address is confirmed, that
@@ -472,13 +486,17 @@ member-supplied text (names) in them.
   clicks Amazon's email); the link is then how its owner removes the
   request.
 - **"Your VettID account is ready"** (as before): on approval, or on
-  verification of a code registration.
+  verification of a code registration. A request approved while its
+  `email_verified` flag still lagged behind SES gets this email only:
+  the approval sets the flag in the same write as the state, so the
+  row is never a verified pending request and the email above is not
+  sent seconds before this one.
 - **No email** is sent for a decline, a withdrawal or an expiry.
 - **To the administrative mailbox** (`ADMIN_EMAIL`), without a name,
-  an address or a registration code: "VettID: a membership request
-  arrived" (saying whether its address is verified yet), "VettID: a
-  membership request was verified" (when a request that arrived
-  unverified becomes verified), "VettID: someone registered with a
+  an address or a registration code: "VettID: a request for early
+  access arrived" (saying whether its address is verified yet),
+  "VettID: a request for early access was verified" (when a request
+  that arrived unverified becomes verified), "VettID: someone registered with a
   registration code". Each has a link to the admin site, which is
   reachable only from VettID's own network and is where the request
   is read.

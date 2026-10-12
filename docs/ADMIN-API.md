@@ -68,7 +68,7 @@ interface Subscription {
 | Method | Path | Body | Returns |
 |---|---|---|---|
 | GET | `/admin/requests` | — | `{items: Member[], cursor}` — state `requested`, oldest first |
-| POST | `/admin/requests/{user_guid}/approve` | — | `Member` (now `registered`; Cognito user created). `409` until the address has completed SES verification (checked live). |
+| POST | `/admin/requests/{user_guid}/approve` | — | `Member` (now `registered`; Cognito user created). `409` until the address has completed SES verification (checked live; a flag that lagged is set in the same write as the state, so the person gets "Your VettID account is ready" and not the request email just before it). `409` too, with nothing changed, if Cognito already holds a user for the address under another `user_guid` (left by an earlier request's removal that was given up on, audit `request.removal_incomplete`): an operator removes that user first (RUNBOOK "Membership requests", "Removal by hand"). A user that carries this request's own `user_guid` (an approval that stopped half-way) is reused. |
 | POST | `/admin/requests/{user_guid}/reject` | `{reason?: string}` | `Member` (now `rejected`). The declined request, with the reason, is deleted automatically 30 days later (MEMBER-API 2.6.0 "Retention"); the person is not told. |
 | POST | `/admin/requests/{user_guid}/resend-verification` | — | `{ok: true}`. `409` for a `withdrawn` request. |
 | GET | `/admin/members?state=&status=&q=` | — | `{items: Member[], cursor}`. `state` ∈ registered/member (default both); `status` ∈ active/suspended/canceled; `q` = email prefix |

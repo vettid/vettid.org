@@ -1730,11 +1730,23 @@ verification links, notices.
   #   tester-<random>@test.staging.vettid.org (no AWS call)
   npm run -s staging:mail -- wait --to ADDRESS [--since ISO] [--timeout 120] [--subject REGEX]
   #   JSON {from, to, subject, date, links, text}; --since defaults to 60 s ago
-  npm run -s staging:mail -- link --to ADDRESS [--match REGEX] [--since ISO] [--timeout 120]
+  npm run -s staging:mail -- link --to ADDRESS [--match REGEX] [--since ISO] [--timeout 120] [--subject REGEX]
   #   the first matching link of the newest matching message, e.g.
   #   --match '/auth/#t='                     (account site sign-in link)
   #   --match 'email-verification\.'          (SES verification link)
+  #   --match '/request/withdraw/#w=' --subject '^We have your request'
+  #                                           (a request's withdrawal link)
   ```
+
+  **Always pass `--match` (and `--subject` when you want one mail in
+  particular) to `link`.** Without them it prints the first link of
+  the newest message, and one address now gets several mails in a
+  row: since MEMBER-API 2.6.0 a request made without a registration
+  code is answered, once verified, by "We have your request for early
+  access to VettID" (the withdrawal link), which arrives after
+  Amazon's verification mail and before any "Your VettID account is
+  ready" or sign-in link. A flow that took "the newest link" would
+  open the withdrawal page.
 
   `--profile` overrides the default `vault-staging-test-mail`. Take
   `--since` from just before the action that sends the mail, so an older
@@ -1981,8 +1993,9 @@ operator does, and does not have to do.
     07:00 UTC), with its SES identity if the request created it
     (`owns_identity`; a row from before 2.6.0 keeps the old rule:
     unless the mailing list uses the address).
-  - *Withdrawal*: the person uses the link in "We have your VettID
-    membership request" (sent once, when the address is verified).
+  - *Withdrawal*: the person uses the link in "We have your request
+    for early access to VettID" (sent once, when the address is
+    verified).
     The page is `https://account.vettid.org/request/withdraw/`; the
     button marks the row `withdrawn` and erases the names at once; the
     cleanup job's 15-minute run (`{"task":"requests"}`) removes the
@@ -1995,7 +2008,7 @@ operator does, and does not have to do.
     is its decline time).
   - *Audit log*: a person's address is kept 90 days in a record beside
     the event (`addr#<month>` partition, TTL `expires_at`); events stay.
-- **The admin notices** ("a membership request arrived", "…was
+- **The admin notices** ("a request for early access arrived", "…was
   verified", "someone registered with a registration code") carry no
   name, address or code: read the request on the admin site.
   **One-time clean-up of the admin mailbox (owner):** notices sent
@@ -2035,7 +2048,12 @@ operator does, and does not have to do.
      `npx ts-node --transpile-only --prefer-ts-exts scripts/ops/audit-address-backfill.ts [--stage staging]`
      shows what it would change, per action; add `--apply` to do it.
      Events younger than 90 days keep their address in a 90-day record;
-     older ones lose it. Safe to repeat. Look at any "UNCLASSIFIED" line
+     older ones lose it. Safe to repeat. Every `--apply` run appends one
+     audit event, `admin.audit_address_backfill` (actor: your session's
+     caller ARN; subject: the audit table; detail: the stage, the counts
+     and `completed`, which is `false` if the run stopped on an error),
+     so the admin site's audit view shows that old events were changed,
+     by whom and how many. Look at any "UNCLASSIFIED" line
      before applying (an address as actor of an action the script does
      not know: it leaves those alone). Until this has run, "addresses
      in the audit log are gone after 90 days" is true only of events
@@ -2043,14 +2061,14 @@ operator does, and does not have to do.
   2. *Requests verified before 2.6.0* have no withdrawal link and got
      no email. They are **not** mailed automatically.
      `npx ts-node --transpile-only --prefer-ts-exts scripts/ops/request-mail-backfill.ts [--stage staging]`
-     counts them; `--send` emails each of them "We have your VettID
-     membership request" with their link (`--send --guid <user_guid>`:
+     counts them; `--send` emails each of them "We have your request
+     for early access to VettID" with their link (`--send --guid <user_guid>`:
      one of them only). **That emails real people: the owner decides,
      per run.** Without it, such a request is still removed when an
      admin declines it (gone 30 days later), and "Removal by hand"
      below covers a person who asks. The same command also finds a
      request whose email failed to send.
-- **Removal by hand** remains for three things only:
+- **Removal by hand** remains for four things only:
   1. *A request verified before 2.6.0 whose owner asks by email*
      (no link, if the backfill email was not sent): send that one
      person their link,
@@ -2070,6 +2088,19 @@ operator does, and does not have to do.
      nor the mailing list
      (`aws dynamodb get-item --table-name vettid-org-mailing-list --key '{"email":{"S":"a@example.com"}}'`)
      uses it.
+  4. *Approve answers "a sign-in user from an earlier request or
+     account already exists for this address"* (`409`; the People
+     function's log has `approve refused` with the request's id): the
+     member pool holds a user under that address with another
+     `custom:user_guid`, left by a removal that was given up on
+     (`request-removal-abandoned` above) or by a half-deleted account.
+     Check that the only member row for the address is the request
+     being approved (the `email-index` query in 3: count 1, and its
+     `user_guid` is the request's), look at the stale user
+     (`aws cognito-idp admin-get-user --user-pool-id <member pool> --username a@example.com`:
+     its `custom:user_guid` names no row), delete it
+     (`aws cognito-idp admin-delete-user --user-pool-id <member pool> --username a@example.com`),
+     then approve again on the admin site.
   What remains after any removal, and for how long: the tables'
   backups (35 days), the audit log's address records (90 days from
   each event), the CloudTrail record of the SES calls (400 days).

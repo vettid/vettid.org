@@ -1,4 +1,4 @@
-// The withdrawal link from the "We have your VettID membership request" email:
+// The withdrawal link from the "We have your request for early access to VettID" email:
 //   https://account.vettid.org/request/withdraw/#w=<token>
 // (MEMBER-API 2.6.0 "Withdrawing a request": POST
 // /api/public/request/withdraw {token}.) The token is in the fragment, so it
@@ -31,9 +31,9 @@ function head(title) {
 function done() {
   fill(card,
     head('Done'),
-    el('p', {}, 'If this link belonged to a membership request we still hold, the request is withdrawn. Your name is already deleted, and the request and your email address are deleted within 15 minutes.'),
+    el('p', {}, 'If this link belonged to a request for early access we still hold, the request is withdrawn. Your name is already deleted, and the request and your email address are deleted within 15 minutes.'),
     el('p', {}, 'If the link was used before, or the request has since been approved or deleted, nothing changed. An approved request is an account: sign in to cancel it.'),
-    el('p', { class: 'muted' }, 'You can ask to join again at any time.'),
+    el('p', { class: 'muted' }, 'You can request early access again at any time.'),
     el('div', { class: 'actions' }, el('a', { class: 'btn', href: 'https://vettid.org' }, 'vettid.org')),
   );
   $('h-withdraw').focus();
@@ -42,7 +42,7 @@ function done() {
 if (!token) {
   fill(card,
     head("This link doesn't work"),
-    el('p', {}, 'Open the link from the email “We have your VettID membership request”. Use the whole link: the part after # is needed.'),
+    el('p', {}, 'Open the link from the email “We have your request for early access to VettID”. Use the whole link: the part after # is needed.'),
     el('p', {}, 'A request whose email address was never confirmed needs no link: it is deleted by itself after 14 days.'),
   );
   $('h-withdraw').focus();
@@ -57,9 +57,9 @@ if (!token) {
     if (res) done();
   });
   fill(card,
-    head('Withdraw your request to join VettID?'),
-    el('p', {}, 'This deletes your membership request, with your name and email address. Nobody has to do anything by hand, and you can ask to join again later.'),
-    el('p', {}, "If you didn't ask to join VettID, withdraw the request: somebody typed your address."),
+    head('Withdraw your request for early access to VettID?'),
+    el('p', {}, 'This deletes your request for early access, with your name and email address. Nobody has to do anything by hand, and you can request early access again later.'),
+    el('p', {}, "If you didn't ask for early access to VettID, withdraw the request: somebody typed your address."),
     el('div', { class: 'actions' }, btn),
   );
 }

@@ -1,5 +1,6 @@
 /**
- * Membership requests: the withdrawal link, the request emails and the
+ * Requests for early access (the rows in state `requested`; "membership
+ * requests" in older text): the withdrawal link, the request emails and the
  * retention periods (MEMBER-API 2.6.0 "Withdrawing a request", "Retention").
  */
 import { createHash, randomBytes } from 'node:crypto';
@@ -44,13 +45,13 @@ export const ownAddress = (email: string): boolean => /@([a-z0-9-]+\.)*vettid\.o
  */
 export function requestReceivedMail(link: string): { subject: string; text: string } {
   return {
-    subject: 'We have your VettID membership request',
+    subject: 'We have your request for early access to VettID',
     text:
-      'Your email address is confirmed, and we have your request to join VettID. ' +
+      'Your email address is confirmed, and we have your request for early access to VettID. ' +
       "An administrator will review it. If it is approved, we'll email you when your account is ready.\n\n" +
       'If you change your mind, you can withdraw the request here. That deletes it, with your name and email address:\n\n' +
       `${link}\n\n` +
-      "The link works for as long as we hold the request. If you didn't ask to join VettID, use it to remove the request.\n\n" +
+      "The link works for as long as we hold the request. If you didn't ask for early access to VettID, use it to remove the request.\n\n" +
       '— VettID\n',
   };
 }
@@ -71,19 +72,19 @@ export function adminNotice(kind: 'arrived' | 'arrived_verified' | 'verified' | 
       };
     case 'verified':
       return {
-        subject: 'VettID: a membership request was verified',
-        text: `The email address of a membership request was verified. It can be reviewed now.\nadmin: ${ADMIN_SITE}/#requests\n`,
+        subject: 'VettID: a request for early access was verified',
+        text: `The email address of a request for early access was verified. It can be reviewed now.\nadmin: ${ADMIN_SITE}/#requests\n`,
       };
     case 'arrived_verified':
       return {
-        subject: 'VettID: a membership request arrived',
-        text: `A membership request arrived. Its email address is already verified: it can be reviewed now.\nadmin: ${ADMIN_SITE}/#requests\n`,
+        subject: 'VettID: a request for early access arrived',
+        text: `A request for early access arrived. Its email address is already verified: it can be reviewed now.\nadmin: ${ADMIN_SITE}/#requests\n`,
       };
     default:
       return {
-        subject: 'VettID: a membership request arrived',
+        subject: 'VettID: a request for early access arrived',
         text:
-          'A membership request arrived. Its email address is not verified yet: there is nothing to do until it is ' +
+          'A request for early access arrived. Its email address is not verified yet: there is nothing to do until it is ' +
           `(another notice says so).\nadmin: ${ADMIN_SITE}/#requests\n`,
       };
   }

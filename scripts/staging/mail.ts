@@ -13,6 +13,11 @@
  *   npm run staging:mail -- link --to ADDRESS [--match REGEX] [--since ISO] [--timeout 120] [--subject REGEX]
  *       prints only the first link (in the newest matching message) that
  *       matches --match, e.g. '/auth/#t=' or 'email-verification\.'
+ *       Always pass --match (and --subject for one mail in particular):
+ *       one address gets several mails in a row. Since MEMBER-API 2.6.0 a
+ *       request without a code also gets "We have your request for early
+ *       access to VettID", whose link withdraws the request
+ *       (--match '/request/withdraw/#w=').
  *
  * Profile: --profile (default vault-staging-test-mail: the reader role,
  * source_profile vault-staging). Exit codes: 0 found, 2 timed out, 1 error.

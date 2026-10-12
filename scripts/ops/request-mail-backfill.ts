@@ -2,7 +2,7 @@
  * Membership requests that are verified and pending but have no withdrawal
  * link (MEMBER-API 2.6.0 "Withdrawing a request"; RUNBOOK "Membership
  * requests"): requests verified before 2.6.0 was deployed, and any whose
- * "We have your VettID membership request" email could not be sent.
+ * "We have your request for early access to VettID" email could not be sent.
  *
  *   npx ts-node --transpile-only --prefer-ts-exts scripts/ops/request-mail-backfill.ts [--stage prod|staging] [--profile P]
  *       DRY RUN (the default): counts only. Sends nothing, writes nothing.

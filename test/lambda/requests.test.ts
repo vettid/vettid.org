@@ -1,4 +1,4 @@
-// MEMBER-API 2.6.0: withdrawing a membership request by link, the 30 days of
+// MEMBER-API 2.6.0: withdrawing a request for early access by link, the 30 days of
 // a declined request, the 90 days of an address in the audit log, and the
 // admin notices without a name or an address.
 import { createHash } from 'node:crypto';
@@ -6,7 +6,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { mockClient } from 'aws-sdk-client-mock';
 import { BatchGetCommand, DeleteCommand, DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, ScanCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
-import { AdminDeleteUserCommand, AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
+import { AdminAddUserToGroupCommand, AdminCreateUserCommand, AdminDeleteUserCommand, AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
 import { CreateEmailIdentityCommand, DeleteEmailIdentityCommand, GetEmailIdentityCommand, SendEmailCommand, SESv2Client } from '@aws-sdk/client-sesv2';
 import { GetSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
@@ -256,8 +256,8 @@ describe('POST /api/public/request: whose SES identity, and the admin notice', (
   });
 
   test.each([
-    ['unverified', false, undefined, 'a membership request arrived', 'not verified yet'],
-    ['already verified', true, undefined, 'a membership request arrived', 'already verified'],
+    ['unverified', false, undefined, 'a request for early access arrived', 'not verified yet'],
+    ['already verified', true, undefined, 'a request for early access arrived', 'already verified'],
     ['with a registration code', false, '7K3QX-M9TZA', 'someone registered with a registration code', 'nothing to review'],
   ])('the admin notice (%s) carries no name, no address and no code', async (_n, verified, code, subject, says) => {
     if (verified) ses.on(GetEmailIdentityCommand).resolves({ VerifiedForSendingStatus: true });
@@ -312,7 +312,7 @@ describe('members stream: "we have your request"', () => {
     const [toPerson, toAdmin] = mails();
     expect(mails()).toHaveLength(2);
     expect(toPerson.Destination!.ToAddresses).toEqual([ADDR]);
-    expect(toPerson.Content!.Simple!.Subject!.Data).toBe('We have your VettID membership request');
+    expect(toPerson.Content!.Simple!.Subject!.Data).toBe('We have your request for early access to VettID');
     const text = toPerson.Content!.Simple!.Body!.Text!.Data!;
     const link = /https:\/\/account\.vettid\.org\/request\/withdraw\/#w=(\S+)/.exec(text)!;
     expect(requests.parseWithdrawToken(link[1])).toEqual({ user_guid: G, hash: claim.ExpressionAttributeValues![':h'] });
@@ -323,7 +323,7 @@ describe('members stream: "we have your request"', () => {
     expect(JSON.stringify(claim)).not.toContain(link[1].slice(G.length + 1));
 
     expect(toAdmin.Destination!.ToAddresses).toEqual(['admin@vettid.org']);
-    expect(mailText(toAdmin)).toContain('VettID: a membership request was verified');
+    expect(mailText(toAdmin)).toContain('VettID: a request for early access was verified');
     for (const personal of ['Ada', 'Lovelace', ADDR, 'example.org']) expect(mailText(toAdmin)).not.toContain(personal);
     expectCleanLogs();
   });
@@ -370,6 +370,14 @@ describe('members stream: "we have your request"', () => {
     await run(rec({ ...row, state: 'registered' }, row));
     expect(mails().map((m) => m.Content!.Simple!.Subject!.Data)).toEqual(['Your VettID account is ready']);
   });
+
+  test('a request approved while its flag lagged (state and flag in one write) gets "account ready" only, never "we have your request" first', async () => {
+    ddb.on(UpdateCommand).resolves({});
+    await run(rec({ ...row, state: 'registered' }, { ...row, email_verified: false }));
+    expect(mails().map((m) => m.Content!.Simple!.Subject!.Data)).toEqual(['Your VettID account is ready']);
+    expect(mails().map((m) => m.Destination!.ToAddresses![0])).toEqual([ADDR]); // and no "was verified" notice to the admin
+    expect(memberUpdates().map((u) => u.UpdateExpression)).toEqual(['SET welcome_sent = :t']);
+  });
 });
 
 describe('cleanup: removing withdrawn requests (every 15 minutes)', () => {
@@ -398,7 +406,14 @@ describe('cleanup: removing withdrawn requests (every 15 minutes)', () => {
     const [tx] = deletes();
     expect(tx).toHaveLength(2);
     expect(tx[0].Delete).toMatchObject({ TableName: 'members', Key: { user_guid: G }, ConditionExpression: '#s = :s', ExpressionAttributeValues: { ':s': 'withdrawn' } });
-    expect(tx[1].Delete).toMatchObject({ TableName: 'members', Key: { user_guid: `email:${ADDR}` } });
+    // The marker only if it is this request's own (or already gone).
+    expect(tx[1].Delete).toEqual({
+      TableName: 'members',
+      Key: { user_guid: `email:${ADDR}` },
+      ConditionExpression: 'attribute_not_exists(user_guid) OR member_guid = :g',
+      ExpressionAttributeValues: { ':g': G },
+    });
+    expect(ddb.commandCalls(DeleteCommand)).toHaveLength(0);
     expect(events()).toEqual([expect.objectContaining({ actor: 'system', action: 'request.removed', subject: G, detail: { after: 'withdraw', identity: 'deleted' } })]);
     expect(addressRecords()).toEqual([]);
     expect(emf()).toEqual([expect.objectContaining({ RequestRemovalFailures: 0, RequestRemovalAbandoned: 0 })]);
@@ -463,6 +478,28 @@ describe('cleanup: removing withdrawn requests (every 15 minutes)', () => {
   test('a row an admin deleted (or that is no longer withdrawn) meanwhile is not ours: nothing is counted or audited', async () => {
     rows(withdrawn());
     ddb.on(TransactWriteCommand).rejects(Object.assign(named('TransactionCanceledException'), { CancellationReasons: [{ Code: 'ConditionalCheckFailed' }, { Code: 'None' }] }));
+    expect(await run()).toEqual({ removed: 0, failures: 0, abandoned: 0 });
+    expect(auditPuts()).toEqual([]);
+  });
+
+  test('a marker that names another request (made after an admin\'s Delete took the old one) is not ours: it is left, and the row goes alone', async () => {
+    rows(withdrawn());
+    ddb.on(TransactWriteCommand).rejects(Object.assign(named('TransactionCanceledException'), { CancellationReasons: [{ Code: 'None' }, { Code: 'ConditionalCheckFailed' }] }));
+    ddb.on(DeleteCommand).resolves({});
+    expect(await run()).toEqual({ removed: 1, failures: 0, abandoned: 0 });
+    // The only delete outside the refused transaction is the row's own, still guarded on its state.
+    expect(ddb.commandCalls(DeleteCommand).map((c) => c.args[0].input)).toEqual([
+      { TableName: 'members', Key: { user_guid: G }, ConditionExpression: '#s = :s', ExpressionAttributeNames: { '#s': 'state' }, ExpressionAttributeValues: { ':s': 'withdrawn' } },
+    ]);
+    expect(events()).toEqual([expect.objectContaining({ action: 'request.removed', subject: G })]);
+    expect(emf()[0]).toMatchObject({ RequestRemovalFailures: 0, RequestRemovalAbandoned: 0 });
+    expectCleanLogs();
+  });
+
+  test('another request\'s marker, and the row gone meanwhile too: nothing is deleted, counted or audited', async () => {
+    rows(withdrawn());
+    ddb.on(TransactWriteCommand).rejects(Object.assign(named('TransactionCanceledException'), { CancellationReasons: [{ Code: 'None' }, { Code: 'ConditionalCheckFailed' }] }));
+    ddb.on(DeleteCommand).rejects(ccf());
     expect(await run()).toEqual({ removed: 0, failures: 0, abandoned: 0 });
     expect(auditPuts()).toEqual([]);
   });
@@ -572,6 +609,93 @@ describe('admin: decline, approve, resend', () => {
     expect(u.ExpressionAttributeNames!['#r0']).toBe('withdraw_token_hash');
   });
 
+  describe('approve, when Cognito already holds a user for the address', () => {
+    const existing = (guid: string | undefined) => {
+      ddb.on(GetCommand).resolves({ Item: pending });
+      ddb.on(UpdateCommand).resolves({ Attributes: { ...pending, state: 'registered' } });
+      idp.on(AdminCreateUserCommand).rejects(named('UsernameExistsException'));
+      idp.on(AdminAddUserToGroupCommand).resolves({});
+      idp.on(AdminGetUserCommand).callsFake((input) =>
+        input.UserPoolId === 'us-east-1_admins' ? { Enabled: true } : { UserAttributes: [{ Name: 'email', Value: ADDR }, ...(guid ? [{ Name: 'custom:user_guid', Value: guid }] : [])] },
+      );
+    };
+    const memberPoolReads = () => idp.commandCalls(AdminGetUserCommand).map((c) => c.args[0].input).filter((i) => i.UserPoolId === 'us-east-1_pool');
+
+    test.each([['another request\'s or account\'s id', G2], ['no id at all', undefined]])(
+      'a user with %s (left by an abandoned removal): refused with a clear message, and nothing is changed',
+      async (_n, guid) => {
+        existing(guid);
+        const res = await people.handler(adminEv('POST', `/admin/requests/${G}/approve`));
+        expect(res.statusCode).toBe(409);
+        const body = JSON.parse(res.body);
+        expect(body.error).toBe('conflict');
+        expect(body.message).toBe(people.STALE_USER_MESSAGE);
+        expect(body.message).toContain('a sign-in user from an earlier request or account already exists for this address');
+        expect(body.message).not.toContain(ADDR);
+        expect(memberPoolReads()).toEqual([{ UserPoolId: 'us-east-1_pool', Username: ADDR }]);
+        // Not an account: no group, no state change, no approval in the audit log.
+        expect(idp.commandCalls(AdminAddUserToGroupCommand)).toHaveLength(0);
+        expect(memberUpdates()).toEqual([]);
+        expect(auditPuts()).toEqual([]);
+        expectCleanLogs();
+      },
+    );
+
+    test('a user with this request\'s own id (an approval that stopped half-way): the approval goes through', async () => {
+      existing(G);
+      const res = await people.handler(adminEv('POST', `/admin/requests/${G}/approve`));
+      expect(res.statusCode).toBe(200);
+      expect(idp.commandCalls(AdminAddUserToGroupCommand)).toHaveLength(1);
+      expect(memberUpdates()).toHaveLength(1);
+      expect(events()).toEqual([expect.objectContaining({ action: 'request.approve', subject: G })]);
+    });
+
+    test('any other Cognito failure is still an error, and the request stays pending', async () => {
+      existing(G);
+      idp.on(AdminCreateUserCommand).rejects(named('TooManyRequestsException'));
+      const res = await people.handler(adminEv('POST', `/admin/requests/${G}/approve`));
+      expect(res.statusCode).toBe(500);
+      expect(memberUpdates()).toEqual([]);
+    });
+  });
+
+  describe('approve, when the row\'s email_verified flag lags behind SES', () => {
+    const setOf = (u: ReturnType<typeof memberUpdates>[number]) =>
+      Object.fromEntries(Object.entries(u.ExpressionAttributeNames!).filter(([k]) => k.startsWith('#s')).map(([k, name]) => [name, u.ExpressionAttributeValues![k.replace('#', ':')]]));
+
+    test('the flag is set in the same write as the state: the row is never a verified pending request, so "we have your request" is not sent just before "account ready"', async () => {
+      ddb.on(GetCommand).resolves({ Item: { ...pending, email_verified: false } });
+      ddb.on(UpdateCommand).resolves({ Attributes: { ...pending, state: 'registered' } });
+      ses.on(GetEmailIdentityCommand).resolves({ VerifiedForSendingStatus: true });
+      const res = await people.handler(adminEv('POST', `/admin/requests/${G}/approve`));
+      expect(res.statusCode).toBe(200);
+      const updates = memberUpdates();
+      expect(updates).toHaveLength(1);
+      expect(setOf(updates[0])).toMatchObject({ state: 'registered', email_verified: true });
+      expect(updates[0].ConditionExpression).toContain('#c0 = :c0'); // still guarded on `requested`
+      expect(updates[0].ExpressionAttributeValues![':c0']).toBe('requested');
+      // No write leaves the row `requested` with the flag set.
+      for (const u of updates) if (setOf(u).email_verified === true) expect(setOf(u).state).toBe('registered');
+    });
+
+    test('SES has not verified it: refused, nothing written', async () => {
+      ddb.on(GetCommand).resolves({ Item: { ...pending, email_verified: false } });
+      ses.on(GetEmailIdentityCommand).resolves({ VerifiedForSendingStatus: false });
+      const res = await people.handler(adminEv('POST', `/admin/requests/${G}/approve`));
+      expect(res.statusCode).toBe(409);
+      expect(memberUpdates()).toEqual([]);
+      expect(idp.commandCalls(AdminCreateUserCommand)).toHaveLength(0);
+    });
+
+    test('an already verified row is not rewritten', async () => {
+      ddb.on(GetCommand).resolves({ Item: pending });
+      ddb.on(UpdateCommand).resolves({ Attributes: { ...pending, state: 'registered' } });
+      await people.handler(adminEv('POST', `/admin/requests/${G}/approve`));
+      expect(setOf(memberUpdates()[0])).not.toHaveProperty('email_verified');
+      expect(ses.commandCalls(GetEmailIdentityCommand)).toHaveLength(0);
+    });
+  });
+
   test('a withdrawn request can be neither approved, declined nor re-verified', async () => {
     ddb.on(GetCommand).resolves({ Item: { ...pending, state: 'withdrawn' } });
     for (const action of ['approve', 'reject', 'resend-verification']) {
@@ -624,6 +748,19 @@ describe('audit: a person\'s address lives 90 days, the event stays', () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  test('no member route audits with the member\'s address as the actor: `audit(m.email` appears nowhere under lambda/member/', () => {
+    const base = join(__dirname, '..', '..', 'lambda', 'member');
+    const files = readdirSync(base, { recursive: true, encoding: 'utf8' }).filter((n) => n.endsWith('.ts'));
+    expect(files.length).toBeGreaterThanOrEqual(3); // public.ts, account.ts, vault.ts at least: the check reads something
+    const hits: string[] = [];
+    for (const f of files) {
+      readFileSync(join(base, f), 'utf8').split('\n').forEach((line, i) => {
+        if (/\baudit\s*\(\s*m\s*\.\s*email\b/.test(line)) hits.push(`lambda/member/${f}:${i + 1}`);
+      });
+    }
+    expect(hits).toEqual([]);
   });
 
   describe('GET /admin/audit', () => {
@@ -696,6 +833,31 @@ describe('audit: a person\'s address lives 90 days, the event stays', () => {
       expect(backfill.plan(row({ actor: 'system', action: 'request.removed' }), now)).toEqual({ removeEmail: false, unclassified: false });
     });
 
+    test('an --apply run leaves one event of its own: the operator, the table, the counts; no address; a later run leaves it alone', () => {
+      const counts = { events: 120, emailRemoved: 40, addressKept90: 25, addressGone: 15, actorRewritten: 30, unclassified: 2 };
+      const operator = 'arn:aws:sts::449757308783:assumed-role/AWSReservedSSO_AdministratorAccess_0123456789abcdef/owner@vettid.org';
+      const e = backfill.backfillEvent(operator, 'prod', 'vettid-org-audit', counts, true, '2026-10-13T09:00:00.000Z');
+      expect(e).toEqual({
+        month: '2026-10',
+        ts_id: expect.stringMatching(/^2026-10-13T09:00:00\.000Z#[0-9a-f]{12}$/),
+        ts: '2026-10-13T09:00:00.000Z',
+        actor: operator,
+        action: 'admin.audit_address_backfill',
+        subject: 'vettid-org-audit',
+        detail: { stage: 'prod', completed: true, events_scanned: 120, email_removed: 40, address_kept_90_days: 25, address_gone: 15, actor_rewritten: 30, unclassified_left: 2 },
+      });
+      expect(backfill.backfillEvent(operator, 'staging', 't', counts, false, '2026-10-13T09:00:00.000Z').detail.completed).toBe(false);
+      // The operator is staff: the next run neither rewrites nor reports this event.
+      expect(backfill.plan(e, now)).toEqual({ removeEmail: false, unclassified: false });
+    });
+
+    test('the script writes that event on --apply only, and also when the run stops on an error', () => {
+      const src = readFileSync(join(__dirname, '..', '..', 'scripts', 'ops', 'audit-address-backfill.ts'), 'utf8');
+      expect(src).toMatch(/const record = async \(completed: boolean\): Promise<void> => \{\s*if \(!apply\) return;/);
+      expect(src).toMatch(/catch \(e\) \{\s*await record\(false\)/);
+      expect(src).toMatch(/await record\(true\);/);
+    });
+
     test('every action a member route audits today is one the script knows', () => {
       const found = new Set<string>();
       for (const f of ['account.ts', 'vault.ts']) {
@@ -710,18 +872,51 @@ describe('audit: a person\'s address lives 90 days, the event stays', () => {
   });
 });
 
-describe('the emails (drafts for the owner)', () => {
+describe('the emails (the owner\'s wording: "request for early access")', () => {
   test('"we have your request": what it says', () => {
     const m = requests.requestReceivedMail('https://account.vettid.org/request/withdraw/#w=TOKEN');
-    expect(m.subject).toBe('We have your VettID membership request');
+    expect(m.subject).toBe('We have your request for early access to VettID');
     expect(m.text).toBe(
-      'Your email address is confirmed, and we have your request to join VettID. ' +
+      'Your email address is confirmed, and we have your request for early access to VettID. ' +
         "An administrator will review it. If it is approved, we'll email you when your account is ready.\n\n" +
         'If you change your mind, you can withdraw the request here. That deletes it, with your name and email address:\n\n' +
         'https://account.vettid.org/request/withdraw/#w=TOKEN\n\n' +
-        "The link works for as long as we hold the request. If you didn't ask to join VettID, use it to remove the request.\n\n" +
+        "The link works for as long as we hold the request. If you didn't ask for early access to VettID, use it to remove the request.\n\n" +
         '— VettID\n',
     );
+  });
+
+  test('the admin notices: exact texts, no "membership request"', () => {
+    expect(requests.adminNotice('arrived')).toEqual({
+      subject: 'VettID: a request for early access arrived',
+      text: 'A request for early access arrived. Its email address is not verified yet: there is nothing to do until it is (another notice says so).\nadmin: https://admin.vettid.org/#requests\n',
+    });
+    expect(requests.adminNotice('arrived_verified')).toEqual({
+      subject: 'VettID: a request for early access arrived',
+      text: 'A request for early access arrived. Its email address is already verified: it can be reviewed now.\nadmin: https://admin.vettid.org/#requests\n',
+    });
+    expect(requests.adminNotice('verified')).toEqual({
+      subject: 'VettID: a request for early access was verified',
+      text: 'The email address of a request for early access was verified. It can be reviewed now.\nadmin: https://admin.vettid.org/#requests\n',
+    });
+    expect(requests.adminNotice('registered')).toEqual({
+      subject: 'VettID: someone registered with a registration code',
+      text: 'Someone registered with a registration code. The account exists; nothing to review.\nadmin: https://admin.vettid.org/#members\n',
+    });
+  });
+
+  test('the withdraw page and its script say "request for early access", like the privacy notice, and name the email by its subject', () => {
+    const root = join(__dirname, '..', '..');
+    const page = readFileSync(join(root, 'sites', 'account', 'request', 'withdraw', 'index.html'), 'utf8');
+    const script = readFileSync(join(root, 'sites', 'account', 'js', 'request-withdraw.js'), 'utf8');
+    expect(page).toContain('<title>Withdraw a request for early access · VettID</title>');
+    expect(page).toContain('<h1>Withdraw a request for early access</h1>');
+    expect(script).toContain(`“${requests.requestReceivedMail('x').subject}”`);
+    for (const text of [page, script]) expect(text).not.toMatch(/membership request/i);
+    expect(readFileSync(join(root, 'website', 'privacy', 'index.html'), 'utf8')).toContain('Requests for early access (account.vettid.org)');
+    // The specification quotes the same subjects.
+    const spec = readFileSync(join(root, 'docs', 'MEMBER-API.md'), 'utf8').replace(/\s+/g, ' ');
+    for (const subject of [requests.requestReceivedMail('x').subject, requests.adminNotice('arrived').subject, requests.adminNotice('verified').subject]) expect(spec).toContain(`"${subject}"`);
   });
 
   test('our own addresses are never given up to SES deletion', () => {

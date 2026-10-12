@@ -17,7 +17,12 @@
  *       DRY RUN (the default): counts only, per action. Writes nothing.
  *   ... --apply
  *       makes the changes. Safe to repeat and to interrupt: an event
- *       already converted is not counted again.
+ *       already converted is not counted again. Each --apply run appends
+ *       one audit event of its own, `admin.audit_address_backfill`: the
+ *       operator (the session's caller ARN) as actor, the table as
+ *       subject, the counts as detail, and `completed: false` if the run
+ *       stopped on an error. Rewriting old events in place otherwise
+ *       leaves no record that it was done, by whom, or to how many.
  *
  * Not touched: administrators' own addresses (the actor of an admin
  * action, the subject of `admin.*` events, `paused_by`): they are staff
@@ -33,6 +38,7 @@ import { execFileSync } from 'node:child_process';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { AUDIT_ADDRESS_DAYS, addressMonth, memberActor } from '../../lambda/shared/audit';
+import { tsId } from '../../lambda/shared/ids';
 
 const REGION = 'us-east-1';
 const STAGES = {
@@ -112,6 +118,45 @@ export function plan(row: AuditRow, nowMs: number): Plan {
   return out;
 }
 
+export interface Counts {
+  events: number;
+  emailRemoved: number;
+  addressKept90: number;
+  addressGone: number;
+  actorRewritten: number;
+  unclassified: number;
+}
+
+/** The action of the record an --apply run leaves; `admin.*`, so a later run leaves its actor alone. */
+export const BACKFILL_ACTION = 'admin.audit_address_backfill';
+
+/**
+ * The one event an --apply run appends: who ran it (the operator's caller
+ * ARN: a staff identity, like an admin's address on an admin action), on
+ * which table, and how many events it changed. Counts only: no address.
+ * Pure: the tests exercise it.
+ */
+export function backfillEvent(operator: string, stage: string, tableName: string, counts: Counts, completed: boolean, ts: string): AuditRow {
+  return {
+    month: ts.slice(0, 7),
+    ts_id: tsId(ts),
+    ts,
+    actor: operator,
+    action: BACKFILL_ACTION,
+    subject: tableName,
+    detail: {
+      stage,
+      completed,
+      events_scanned: counts.events,
+      email_removed: counts.emailRemoved,
+      address_kept_90_days: counts.addressKept90,
+      address_gone: counts.addressGone,
+      actor_rewritten: counts.actorRewritten,
+      unclassified_left: counts.unclassified,
+    },
+  };
+}
+
 function flag(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
   return i < 0 ? undefined : process.argv[i + 1];
@@ -126,79 +171,105 @@ async function main(): Promise<void> {
 
   const account = execFileSync('aws', ['sts', 'get-caller-identity', '--query', 'Account', '--output', 'text', '--profile', profile], { encoding: 'utf8' }).trim();
   if (account !== stage.account) throw new Error(`profile ${profile} is account ${account}, not ${stageName}'s (${stage.account}): refusing`);
+  // The operator, for the record an --apply run leaves (below).
+  const operator = execFileSync('aws', ['sts', 'get-caller-identity', '--query', 'Arn', '--output', 'text', '--profile', profile], { encoding: 'utf8' }).trim();
   process.env.AWS_PROFILE = profile;
   const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }));
   const TableName = `${stage.prefix}-audit`;
 
-  const counts = { events: 0, emailRemoved: 0, addressKept90: 0, addressGone: 0, actorRewritten: 0, unclassified: 0 };
+  const counts: Counts = { events: 0, emailRemoved: 0, addressKept90: 0, addressGone: 0, actorRewritten: 0, unclassified: 0 };
   const byAction = new Map<string, number>();
   const unclassified = new Map<string, number>();
   const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) ?? 0) + 1);
   const now = Date.now();
 
-  let start: Record<string, unknown> | undefined;
-  do {
-    const r = await ddb.send(new ScanCommand({ TableName, ExclusiveStartKey: start }));
-    for (const item of (r.Items ?? []) as AuditRow[]) {
-      if (item.month.startsWith('addr#')) continue;
-      counts.events++;
-      const p = plan(item, now);
-      if (p.unclassified) {
-        counts.unclassified++;
-        bump(unclassified, item.action ?? '(none)');
-      }
-      if (!p.removeEmail && !p.actor) continue;
-      bump(byAction, item.action ?? '(none)');
-      if (p.removeEmail) counts.emailRemoved++;
-      if (p.removeEmail) p.addressExpiresAt ? counts.addressKept90++ : counts.addressGone++;
-      if (p.actor) counts.actorRewritten++;
-      if (!apply) continue;
+  // An --apply run is itself recorded, also when it stops half-way (what it
+  // changed until then stays changed).
+  const record = async (completed: boolean): Promise<void> => {
+    if (!apply) return;
+    await ddb.send(
+      new PutCommand({
+        TableName,
+        Item: backfillEvent(operator, stageName, TableName, counts, completed, new Date().toISOString()),
+        ConditionExpression: 'attribute_not_exists(ts_id)',
+      }),
+    );
+  };
 
-      // The address record first: if the event's update then fails, the
-      // next run finds the event unchanged and the record already there.
-      if (p.addressExpiresAt) {
-        await ddb
-          .send(
-            new PutCommand({
-              TableName,
-              Item: { month: addressMonth(item.month), ts_id: item.ts_id, email: item.detail!.email, expires_at: p.addressExpiresAt },
-              ConditionExpression: 'attribute_not_exists(ts_id)',
-            }),
-          )
-          .catch((e: Error) => {
-            if (e.name !== 'ConditionalCheckFailedException') throw e;
-          });
+  try {
+    await convert();
+  } catch (e) {
+    await record(false).catch((e2: Error) => console.error(`error: the run's own audit event could not be written: ${e2.name}`));
+    throw e;
+  }
+  await record(true);
+
+  async function convert(): Promise<void> {
+    let start: Record<string, unknown> | undefined;
+    do {
+      const r = await ddb.send(new ScanCommand({ TableName, ExclusiveStartKey: start }));
+      for (const item of (r.Items ?? []) as AuditRow[]) {
+        if (item.month.startsWith('addr#')) continue;
+        counts.events++;
+        const p = plan(item, now);
+        if (p.unclassified) {
+          counts.unclassified++;
+          bump(unclassified, item.action ?? '(none)');
+        }
+        if (!p.removeEmail && !p.actor) continue;
+        bump(byAction, item.action ?? '(none)');
+        if (p.removeEmail) counts.emailRemoved++;
+        if (p.removeEmail) p.addressExpiresAt ? counts.addressKept90++ : counts.addressGone++;
+        if (p.actor) counts.actorRewritten++;
+        if (!apply) continue;
+
+        // The address record first: if the event's update then fails, the
+        // next run finds the event unchanged and the record already there.
+        if (p.addressExpiresAt) {
+          await ddb
+            .send(
+              new PutCommand({
+                TableName,
+                Item: { month: addressMonth(item.month), ts_id: item.ts_id, email: item.detail!.email, expires_at: p.addressExpiresAt },
+                ConditionExpression: 'attribute_not_exists(ts_id)',
+              }),
+            )
+            .catch((e: Error) => {
+              if (e.name !== 'ConditionalCheckFailedException') throw e;
+            });
+        }
+        const sets: string[] = [];
+        const names: Record<string, string> = {};
+        const values: Record<string, unknown> = {};
+        if (p.actor) {
+          sets.push('#a = :a');
+          names['#a'] = 'actor';
+          values[':a'] = p.actor;
+        }
+        if (p.removeEmail) {
+          names['#d'] = 'detail';
+          names['#e'] = 'email';
+        }
+        await ddb.send(
+          new UpdateCommand({
+            TableName,
+            Key: { month: item.month, ts_id: item.ts_id },
+            UpdateExpression: `${sets.length ? `SET ${sets.join(', ')} ` : ''}${p.removeEmail ? 'REMOVE #d.#e' : ''}`.trim(),
+            ConditionExpression: 'attribute_exists(ts_id)',
+            ExpressionAttributeNames: names,
+            ...(Object.keys(values).length ? { ExpressionAttributeValues: values } : {}),
+          }),
+        );
       }
-      const sets: string[] = [];
-      const names: Record<string, string> = {};
-      const values: Record<string, unknown> = {};
-      if (p.actor) {
-        sets.push('#a = :a');
-        names['#a'] = 'actor';
-        values[':a'] = p.actor;
-      }
-      if (p.removeEmail) {
-        names['#d'] = 'detail';
-        names['#e'] = 'email';
-      }
-      await ddb.send(
-        new UpdateCommand({
-          TableName,
-          Key: { month: item.month, ts_id: item.ts_id },
-          UpdateExpression: `${sets.length ? `SET ${sets.join(', ')} ` : ''}${p.removeEmail ? 'REMOVE #d.#e' : ''}`.trim(),
-          ConditionExpression: 'attribute_exists(ts_id)',
-          ExpressionAttributeNames: names,
-          ...(Object.keys(values).length ? { ExpressionAttributeValues: values } : {}),
-        }),
-      );
-    }
-    start = r.LastEvaluatedKey;
-  } while (start);
+      start = r.LastEvaluatedKey;
+    } while (start);
+  }
 
   console.log(`${stageName} ${TableName}: ${counts.events} events${apply ? '' : ' (dry run: nothing written)'}`);
   console.log(`  detail.email ${apply ? 'removed' : 'to remove'}: ${counts.emailRemoved} (address kept in a 90-day record: ${counts.addressKept90}; older than 90 days, gone: ${counts.addressGone})`);
   console.log(`  member's address as actor ${apply ? 'replaced' : 'to replace'} by member:<id>: ${counts.actorRewritten}`);
   for (const [a, n] of [...byAction].sort()) console.log(`    ${a}: ${n}`);
+  if (apply) console.log(`  recorded: audit event ${BACKFILL_ACTION} (actor: this session; the counts above)`);
   if (counts.unclassified) {
     console.log(`  UNCLASSIFIED (an address as actor, an action this script does not know; left alone): ${counts.unclassified}`);
     for (const [a, n] of [...unclassified].sort()) console.log(`    ${a}: ${n}`);

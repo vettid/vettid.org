@@ -302,24 +302,47 @@ async function deleteRequestUser(m: MemberItem): Promise<void> {
   }
 }
 
-/** The row and its email marker, together, and only while the row is still in `state`. */
+/**
+ * The row and its email marker, together, and only while the row is still
+ * in `state`. The marker goes only if it is this request's own (or already
+ * gone): an admin's Delete removes marker and row in two calls, and a new
+ * request for the address made in between owns a new marker under the same
+ * key. A marker that names another request is not ours: it is left, and the
+ * row goes alone.
+ */
 async function deleteRequestRows(m: MemberItem, state: 'withdrawn' | 'rejected'): Promise<void> {
-  await ddb.send(
-    new TransactWriteCommand({
-      TransactItems: [
-        {
-          Delete: {
-            TableName: table.members(),
-            Key: { user_guid: m.user_guid },
-            ConditionExpression: '#s = :s',
-            ExpressionAttributeNames: { '#s': 'state' },
-            ExpressionAttributeValues: { ':s': state },
+  const row = {
+    TableName: table.members(),
+    Key: { user_guid: m.user_guid },
+    ConditionExpression: '#s = :s',
+    ExpressionAttributeNames: { '#s': 'state' },
+    ExpressionAttributeValues: { ':s': state },
+  };
+  try {
+    await ddb.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          { Delete: row },
+          {
+            Delete: {
+              TableName: table.members(),
+              Key: { user_guid: emailMarkerKey(m.email) },
+              ConditionExpression: 'attribute_not_exists(user_guid) OR member_guid = :g',
+              ExpressionAttributeValues: { ':g': m.user_guid },
+            },
           },
-        },
-        { Delete: { TableName: table.members(), Key: { user_guid: emailMarkerKey(m.email) } } },
-      ],
-    }),
-  );
+        ],
+      }),
+    );
+  } catch (e) {
+    const err = e as { name?: string; CancellationReasons?: { Code?: string }[] };
+    const [rowReason, markerReason] = err.CancellationReasons ?? [];
+    // Only "the marker is somebody else's" is handled here; a row no longer
+    // in `state` (or anything else) is the caller's to judge.
+    if (err.name !== 'TransactionCanceledException' || rowReason?.Code === 'ConditionalCheckFailed' || markerReason?.Code !== 'ConditionalCheckFailed') throw e;
+    console.warn('request removal: the email marker belongs to another request and is left', JSON.stringify({ state })); // never the address
+    await ddb.send(new DeleteCommand(row));
+  }
 }
 
 export interface RemovalCounts {

@@ -285,6 +285,26 @@ describe('VettidOrgAdminApiStack', () => {
     });
   });
 
+  test('people may read a member-pool user (approve: is a user already under the address this request\'s own?), beside creating one', () => {
+    const fns = t.findResources('AWS::Lambda::Function');
+    const roleId = Object.entries<any>(fns).find(([id]) => id.startsWith('People'))![1].Properties.Role['Fn::GetAtt'][0];
+    const stmts = Object.values<any>(t.findResources('AWS::IAM::Policy'))
+      .filter((p) => p.Properties.Roles.some((r: any) => r.Ref === roleId))
+      .flatMap((p) => p.Properties.PolicyDocument.Statement);
+    const memberPool = stmts.filter((s: any) => ([] as string[]).concat(s.Action).includes('cognito-idp:AdminCreateUser'));
+    expect(memberPool).toHaveLength(1);
+    expect(JSON.stringify(memberPool[0].Resource)).toMatch(/authmemberpoolarn/); // the member pool (SSM), not the admin pool
+    expect(([] as string[]).concat(memberPool[0].Action).sort()).toEqual([
+      'cognito-idp:AdminAddUserToGroup',
+      'cognito-idp:AdminCreateUser',
+      'cognito-idp:AdminDeleteUser',
+      'cognito-idp:AdminDisableUser',
+      'cognito-idp:AdminEnableUser',
+      'cognito-idp:AdminGetUser',
+      'cognito-idp:AdminUserGlobalSignOut',
+    ]);
+  });
+
   test('content Lambda can do everything its terms routes need', () => {
     const stmts = Object.values<any>(t.findResources('AWS::IAM::Policy'))
       .flatMap((p) => p.Properties.PolicyDocument.Statement)

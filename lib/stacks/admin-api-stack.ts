@@ -217,6 +217,8 @@ export class VettidOrgAdminApiStack extends cdk.Stack {
       new iam.PolicyStatement({
         actions: [
           'cognito-idp:AdminCreateUser',
+          // Approve reads a user that already exists under the address: is it this request's own? (MEMBER-API 2.6.0)
+          'cognito-idp:AdminGetUser',
           'cognito-idp:AdminAddUserToGroup',
           'cognito-idp:AdminDisableUser',
           'cognito-idp:AdminEnableUser',
