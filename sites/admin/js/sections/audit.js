@@ -13,8 +13,8 @@ function compact(detail) {
 
 export function render(root, { api, ui }) {
   const month = el('input', { type: 'month', name: 'month', value: currentMonth(), pattern: '\\d{4}-\\d{2}', placeholder: 'YYYY-MM' });
-  const actor = el('input', { type: 'text', name: 'actor', autocomplete: 'off', spellcheck: 'false', placeholder: 'admin email' });
-  const subject = el('input', { type: 'text', name: 'subject', autocomplete: 'off', spellcheck: 'false', placeholder: 'guid, email or code' });
+  const actor = el('input', { type: 'text', name: 'actor', autocomplete: 'off', spellcheck: 'false', placeholder: 'admin email, or member:<guid>' });
+  const subject = el('input', { type: 'text', name: 'subject', autocomplete: 'off', spellcheck: 'false', placeholder: 'guid, admin email or code' });
   const clear = el('button', { type: 'button', class: 'btn' }, 'Clear filters');
   const form = el('form', { class: 'filters', role: 'search' },
     ui.field('Month', month),
@@ -45,7 +45,8 @@ export function render(root, { api, ui }) {
       ev.actor,
       mono(ev.action),
       ev.subject ? mono(ev.subject) : muted('—'),
-      el('code', { class: 'mono detail' }, compact(ev.detail)),
+      // `email`: the person's address at the time, returned for 90 days after the event (ADMIN-API "AuditEvent").
+      el('code', { class: 'mono detail' }, compact(ev.email ? { email: ev.email, ...ev.detail } : ev.detail)),
     ],
   });
 

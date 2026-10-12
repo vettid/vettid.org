@@ -165,7 +165,10 @@ router.on('POST', '/admin/requests/{user_guid}/approve', async ({ params, actor 
     if ((e as Error).name !== 'UsernameExistsException') throw e;
   }
   await cognito.send(new AdminAddUserToGroupCommand({ UserPoolId: memberPoolId(), Username: m.email, GroupName: 'registered' }));
-  const updated = await update(m.user_guid, { state: 'requested' }, { state: 'registered' });
+  // An approved request is an account: its withdrawal link stops working
+  // here (MEMBER-API 2.6.0; the public route also refuses any state but
+  // requested and rejected).
+  const updated = await update(m.user_guid, { state: 'requested' }, { state: 'registered' }, ['withdraw_token_hash']);
   await audit(actor, 'request.approve', m.user_guid, { email: m.email });
   return view(updated);
 });
@@ -174,13 +177,21 @@ router.on('POST', '/admin/requests/{user_guid}/reject', async ({ params, body, a
   const reason = str(body, 'reason', { optional: true, max: 500 });
   const m = await getMember(params.user_guid);
   if (m.state !== 'requested') throw conflict(`Request is ${m.state}, not pending`);
-  const updated = await update(m.user_guid, { state: 'requested' }, reason ? { state: 'rejected', reject_reason: reason } : { state: 'rejected' });
+  // rejected_at starts the 30 days after which the cleanup job deletes the
+  // request (MEMBER-API 2.6.0 "Retention"); the withdrawal link keeps working.
+  const rejected_at = nowIso();
+  const updated = await update(
+    m.user_guid,
+    { state: 'requested' },
+    reason ? { state: 'rejected', rejected_at, reject_reason: reason } : { state: 'rejected', rejected_at },
+  );
   await audit(actor, 'request.reject', m.user_guid, { email: m.email, reason });
   return view(updated);
 });
 
 router.on('POST', '/admin/requests/{user_guid}/resend-verification', async ({ params, actor }) => {
   const m = await getMember(params.user_guid);
+  if (m.state === 'withdrawn') throw conflict('This request was withdrawn');
   const status = await sesVerified(m.email);
   if (status === true) {
     if (!m.email_verified) await update(m.user_guid, {}, { email_verified: true });
@@ -189,6 +200,20 @@ router.on('POST', '/admin/requests/{user_guid}/resend-verification', async ({ pa
   // SES has no "resend": recreate the identity to send a fresh verification mail.
   if (status === false) await ses.send(new DeleteEmailIdentityCommand({ EmailIdentity: m.email }));
   await ses.send(new CreateEmailIdentityCommand({ EmailIdentity: m.email }));
+  // The identity that exists now was created for this row (MEMBER-API 2.6.0:
+  // only such an identity is deleted with a withdrawn or expired request).
+  // (Not through update(): updated_at, which the 14-day reclaim reads, stays.)
+  if (m.owns_identity !== true) {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: table.members(),
+        Key: { user_guid: m.user_guid },
+        UpdateExpression: 'SET owns_identity = :t',
+        ConditionExpression: 'attribute_exists(user_guid)',
+        ExpressionAttributeValues: { ':t': true },
+      }),
+    );
+  }
   await audit(actor, 'request.resend_verification', m.user_guid, { email: m.email });
   return { ok: true };
 });
@@ -291,7 +316,8 @@ router.on('DELETE', '/admin/members/{user_guid}', async ({ params, actor }) => {
   await ddb.send(new DeleteCommand({ TableName: table.subscriptions(), Key: { user_guid: m.user_guid } }));
   await ddb.send(new DeleteCommand({ TableName: table.members(), Key: { user_guid: emailMarkerKey(m.email) } }));
   await ddb.send(new DeleteCommand({ TableName: table.members(), Key: { user_guid: m.user_guid } }));
-  // The audit stub keeps who/when, not the person's details beyond the address.
+  // The audit event keeps who and when. The address goes to its 90-day
+  // address record (lambda/shared/audit.ts), not into the event.
   await audit(actor, 'member.delete', m.user_guid, { email: m.email, state: m.state });
   return { ok: true };
 });

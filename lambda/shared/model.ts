@@ -3,7 +3,12 @@
  * (Phase 2). See docs/ACCOUNT-ADMIN-PLAN.md §5.1 and docs/ADMIN-API.md.
  */
 
-export type State = 'requested' | 'registered' | 'member' | 'rejected';
+/**
+ * `withdrawn` (MEMBER-API 2.6.0): the person withdrew the request with the
+ * link we emailed; the row waits, without the names, for the cleanup job to
+ * remove what is left (at most 15 minutes). Never an account.
+ */
+export type State = 'requested' | 'registered' | 'member' | 'rejected' | 'withdrawn';
 export type AccountStatus = 'active' | 'suspended' | 'canceled';
 
 /** Row in vettid-org-members. */
@@ -38,6 +43,21 @@ export interface MemberItem {
    * (lambda/jobs/vault-names.ts).
    */
   name_change_applied?: { vault_id: string; seq: number; first_name: string; last_name: string };
+  /**
+   * MEMBER-API 2.6.0, requests only. True when the request's own
+   * CreateEmailIdentity call succeeded: only then is the address's SES
+   * identity this flow's to delete. `false`: it was there before. Absent:
+   * a row from before 2.6.0, treated as not ours on removal.
+   */
+  owns_identity?: boolean;
+  /** SHA-256 (hex) of the secret half of the withdrawal link's token; the link itself is only in the email. */
+  withdraw_token_hash?: string;
+  /** When the "we have your request" email (with the withdrawal link) was claimed; once per request. */
+  request_mail_at?: string;
+  /** When an admin declined the request. Rows declined before 2.6.0 have none: `updated_at` is their decline time. */
+  rejected_at?: string;
+  /** `withdrawn` rows: when the person withdrew (the audit event says from which state). */
+  withdrawn_at?: string;
 }
 
 /** Row in vettid-org-subscriptions (one per member). */

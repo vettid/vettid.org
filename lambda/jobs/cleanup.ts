@@ -6,6 +6,11 @@
  * that could not be queued yet (no instance running, the service paused)
  * is tried again at the next run, and the daily retry below covers the rest.
  *
+ * Every 15 minutes (event `{task: "requests"}`, MEMBER-API 2.6.0): each
+ * withdrawn membership request is removed (row, email marker, a Cognito
+ * user left by a failed code registration, and the SES identity if the
+ * request created it and the mailing list does not use it).
+ *
  * Daily:
  *  - delete accounts canceled more than 7 days ago (Cognito user,
  *    subscription, member row + email marker; each vault is asked to delete
@@ -13,18 +18,21 @@
  *    vault_deleted notice; the audit trail stays)
  *  - retry vault deletions not yet reported
  *  - reclaim membership requests never email-verified within 14 days
+ *  - remove membership requests declined more than 30 days ago (2.6.0),
+ *    exactly as a withdrawn one
  *  - mark subscriptions past their expiry as `expired`
  */
-import { AdminDeleteUserCommand } from '@aws-sdk/client-cognito-identity-provider';
+import { AdminDeleteUserCommand, AdminGetUserCommand } from '@aws-sdk/client-cognito-identity-provider';
 import { DeleteEmailIdentityCommand } from '@aws-sdk/client-sesv2';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
-import { DeleteCommand, GetCommand, QueryCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DeleteCommand, GetCommand, QueryCommand, ScanCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { audit } from '../shared/audit';
 import { cognito, ddb, env, ses, table } from '../shared/aws';
 
 const STALE_DAYS = 14;
 import { emailMarkerKey, vaultPointerKey } from '../shared/members';
 import type { MemberItem, SubscriptionItem } from '../shared/model';
+import { DECLINED_DAYS, REMOVAL_GIVE_UP_DAYS, ownAddress } from '../shared/requests';
 import { liveLease, newUlid, pickInstance, releaseRow, requestStart, routable } from '../shared/vault-routing';
 import { vaultService } from '../shared/vault-service';
 
@@ -236,11 +244,188 @@ async function markQueued(vaultId: string, deletionId: string, nowS: number): Pr
   });
 }
 
+// ---- membership requests: withdrawn, and declined past their 30 days ---------------
+
+export const NAMESPACE = 'VettID/MemberApi';
+
+/** One EMF line (no PutMetricData right): what the request-removal alarms read. */
+export function removalEmf(failures: number, abandoned: number, now: number): string {
+  return JSON.stringify({
+    _aws: {
+      Timestamp: now,
+      CloudWatchMetrics: [{ Namespace: NAMESPACE, Dimensions: [[]], Metrics: [{ Name: 'RequestRemovalFailures', Unit: 'Count' }, { Name: 'RequestRemovalAbandoned', Unit: 'Count' }] }],
+    },
+    RequestRemovalFailures: failures,
+    RequestRemovalAbandoned: abandoned,
+  });
+}
+
+const conditionFailed = (e: unknown): boolean => {
+  const err = e as { name?: string; CancellationReasons?: { Code?: string }[] };
+  if (err.name === 'ConditionalCheckFailedException') return true;
+  return err.name === 'TransactionCanceledException' && (err.CancellationReasons ?? []).some((r) => r.Code === 'ConditionalCheckFailed');
+};
+
+/**
+ * The address's SES identity goes only if this request created it
+ * (`owns_identity`, set when the request's own CreateEmailIdentity
+ * succeeded), it is not one of the project's own addresses, and the mailing
+ * list does not use it. The request's own row is the only member row the
+ * address can have (the email marker), and it is being removed. A row from
+ * before 2.6.0 has no flag: its identity is kept (never on doubt).
+ */
+async function releaseIdentity(m: MemberItem): Promise<'deleted' | 'kept'> {
+  if (m.owns_identity !== true || ownAddress(m.email)) return 'kept';
+  const onList = await ddb.send(new GetCommand({ TableName: env('TABLE_MAILING_LIST'), Key: { email: m.email }, ConsistentRead: true }));
+  if (onList.Item) return 'kept';
+  try {
+    await ses.send(new DeleteEmailIdentityCommand({ EmailIdentity: m.email }));
+  } catch (e) {
+    if ((e as Error).name !== 'NotFoundException') throw e;
+  }
+  return 'deleted';
+}
+
+/**
+ * A request has no Cognito user, except one a failed code registration
+ * left behind (lambda/member/public.ts falls back to review). Delete it
+ * only if it carries this request's id: a user under the same address with
+ * another id is somebody's account.
+ */
+async function deleteRequestUser(m: MemberItem): Promise<void> {
+  try {
+    const u = await cognito.send(new AdminGetUserCommand({ UserPoolId: env('MEMBER_POOL_ID'), Username: m.email }));
+    if (u.UserAttributes?.find((a) => a.Name === 'custom:user_guid')?.Value !== m.user_guid) return;
+    await cognito.send(new AdminDeleteUserCommand({ UserPoolId: env('MEMBER_POOL_ID'), Username: m.email }));
+  } catch (e) {
+    if ((e as Error).name !== 'UserNotFoundException') throw e;
+  }
+}
+
+/** The row and its email marker, together, and only while the row is still in `state`. */
+async function deleteRequestRows(m: MemberItem, state: 'withdrawn' | 'rejected'): Promise<void> {
+  await ddb.send(
+    new TransactWriteCommand({
+      TransactItems: [
+        {
+          Delete: {
+            TableName: table.members(),
+            Key: { user_guid: m.user_guid },
+            ConditionExpression: '#s = :s',
+            ExpressionAttributeNames: { '#s': 'state' },
+            ExpressionAttributeValues: { ':s': state },
+          },
+        },
+        { Delete: { TableName: table.members(), Key: { user_guid: emailMarkerKey(m.email) } } },
+      ],
+    }),
+  );
+}
+
+export interface RemovalCounts {
+  removed: number;
+  failures: number;
+  abandoned: number;
+}
+
+/**
+ * Remove requests that are due: everything outside the table first (so a
+ * failure leaves the row to be retried at the next run), the rows last.
+ * One request's failure never stops the next one. After
+ * REMOVAL_GIVE_UP_DAYS of failures the rows are deleted anyway, so that no
+ * address waits in the table for ever; what could not be removed outside
+ * it (an SES identity, a Cognito user) is then the operator's to
+ * reconcile, and the alarm on RequestRemovalAbandoned says so.
+ */
+export async function removeRequests(
+  due: { m: MemberItem; since: number }[],
+  state: 'withdrawn' | 'rejected',
+  nowMs: number,
+): Promise<RemovalCounts> {
+  const counts: RemovalCounts = { removed: 0, failures: 0, abandoned: 0 };
+  const after = state === 'withdrawn' ? 'withdraw' : 'decline';
+  for (const { m, since } of due) {
+    try {
+      await deleteRequestUser(m);
+      const identity = await releaseIdentity(m);
+      await deleteRequestRows(m, state);
+      await audit('system', 'request.removed', m.user_guid, { after, identity });
+      counts.removed++;
+    } catch (e) {
+      if (conditionFailed(e)) continue; // no longer in that state (an admin deleted it meanwhile): not ours
+      console.error('request removal failed', JSON.stringify({ after, error: (e as Error).name })); // never the address
+      if (nowMs - since < REMOVAL_GIVE_UP_DAYS * 86_400_000) {
+        counts.failures++;
+        continue;
+      }
+      try {
+        await deleteRequestRows(m, state);
+        await audit('system', 'request.removal_incomplete', m.user_guid, { after });
+        counts.abandoned++;
+      } catch (e2) {
+        if (conditionFailed(e2)) continue;
+        console.error('request removal could not be abandoned', JSON.stringify({ after, error: (e2 as Error).name }));
+        counts.failures++;
+      }
+    }
+  }
+  return counts;
+}
+
+const ms = (iso: unknown): number => {
+  const t = typeof iso === 'string' ? Date.parse(iso) : NaN;
+  return Number.isFinite(t) ? t : 0; // unreadable: treated as old
+};
+
+/** Withdrawn requests (the public route marked them): all of them are due. */
+export async function removeWithdrawn(nowMs: number): Promise<RemovalCounts> {
+  const due: { m: MemberItem; since: number }[] = [];
+  for await (const item of query({
+    TableName: table.members(),
+    IndexName: 'state-index',
+    KeyConditionExpression: '#s = :w',
+    ExpressionAttributeNames: { '#s': 'state' },
+    ExpressionAttributeValues: { ':w': 'withdrawn' },
+  })) {
+    const m = item as MemberItem;
+    due.push({ m, since: ms(m.withdrawn_at ?? m.updated_at) });
+  }
+  return removeRequests(due, 'withdrawn', nowMs);
+}
+
+/**
+ * Declined requests, DECLINED_DAYS after the decline: `rejected_at`, or
+ * for a row declined before 2.6.0 its `updated_at` (the decline was the
+ * row's last change).
+ */
+export async function removeDeclined(nowMs: number): Promise<RemovalCounts> {
+  const due: { m: MemberItem; since: number }[] = [];
+  for await (const item of query({
+    TableName: table.members(),
+    IndexName: 'state-index',
+    KeyConditionExpression: '#s = :r',
+    ExpressionAttributeNames: { '#s': 'state' },
+    ExpressionAttributeValues: { ':r': 'rejected' },
+  })) {
+    const m = item as MemberItem;
+    const dueAt = ms(m.rejected_at ?? m.updated_at) + DECLINED_DAYS * 86_400_000;
+    if (dueAt <= nowMs) due.push({ m, since: dueAt });
+  }
+  return removeRequests(due, 'rejected', nowMs);
+}
+
 export const handler = async (event?: { task?: string }) => {
   // The five-minute schedule (MEMBER-API 2.1.0): start-overs only.
   if (event?.task === 'start_over') {
     const r = await executeStartOvers(Math.floor(Date.now() / 1000));
     console.log(JSON.stringify({ startOvers: r }));
+    return r;
+  }
+  // The fifteen-minute schedule (MEMBER-API 2.6.0): withdrawn requests only.
+  if (event?.task === 'requests') {
+    const r = await removeWithdrawn(Date.now());
+    console.log(removalEmf(r.failures, r.abandoned, Date.now()));
+    console.log(JSON.stringify({ withdrawn: r }));
     return r;
   }
   const now = new Date().toISOString();
@@ -315,7 +500,10 @@ export const handler = async (event?: { task?: string }) => {
     }
     await ddb.send(new DeleteCommand({ TableName: table.members(), Key: { user_guid: emailMarkerKey(m.email) } }));
     const onList = await ddb.send(new GetCommand({ TableName: env('TABLE_MAILING_LIST'), Key: { email: m.email } }));
-    if (!onList.Item) {
+    // 2.6.0: a request that found the identity already there (`owns_identity`
+    // false) leaves it; one of the project's own addresses is never deleted.
+    // A row from before 2.6.0 (no flag) keeps the rule it was created under.
+    if (!onList.Item && m.owns_identity !== false && !ownAddress(m.email)) {
       try {
         await ses.send(new DeleteEmailIdentityCommand({ EmailIdentity: m.email }));
       } catch (e) {
@@ -325,6 +513,17 @@ export const handler = async (event?: { task?: string }) => {
     await audit('system', 'request.reclaim_unverified', m.user_guid, {});
     reclaimed++;
   }
+
+  // Declined requests past their 30 days. A failure here is counted and
+  // alarmed, and never stops the rest of the run.
+  let declined: RemovalCounts = { removed: 0, failures: 0, abandoned: 0 };
+  try {
+    declined = await removeDeclined(Date.now());
+  } catch (e) {
+    console.error('declined-request sweep failed', (e as Error).name);
+    declined.failures++;
+  }
+  console.log(removalEmf(declined.failures, declined.abandoned, Date.now()));
 
   const vaultRetries = await retryVaultDeletions(Math.floor(Date.now() / 1000));
 
@@ -351,6 +550,6 @@ export const handler = async (event?: { task?: string }) => {
       expired++;
     }
   }
-  console.log(JSON.stringify({ deleted, reclaimed, expired, vaultRetries }));
-  return { deleted, reclaimed, expired, vaultRetries };
+  console.log(JSON.stringify({ deleted, reclaimed, expired, vaultRetries, declined }));
+  return { deleted, reclaimed, expired, vaultRetries, declined };
 };

@@ -11,6 +11,7 @@ import { newGuid, nowIso } from '../shared/ids';
 import { sendMail } from '../shared/mail';
 import { MemberRequest, RateLimited, memberHandler } from '../shared/member-http';
 import { emailMarkerKey, memberByEmail } from '../shared/members';
+import { adminNotice, parseWithdrawToken } from '../shared/requests';
 import { NAME_MAX, NAME_RE, trimSpaces } from '../shared/names';
 import type { MemberItem } from '../shared/model';
 import { hit } from '../shared/ratelimit';
@@ -122,6 +123,9 @@ router.on('POST', '/api/public/request', async ({ body, ip }) => {
     state: 'requested',
     account_status: 'active',
     email_verified: verified,
+    // Set to true below only if this request's own CreateEmailIdentity
+    // succeeds: an identity that was already there is never ours to delete.
+    owns_identity: false,
     created_at: now,
     updated_at: now,
   };
@@ -152,7 +156,7 @@ router.on('POST', '/api/public/request', async ({ body, ip }) => {
       await cognito.send(new AdminAddUserToGroupCommand({ UserPoolId: env('MEMBER_POOL_ID'), Username: addr, GroupName: 'registered' }));
     } catch (e) {
       // Fall back to admin review rather than leave a half-created account.
-      console.error('cognito create failed; falling back to review', e);
+      console.error('cognito create failed; falling back to review', (e as Error).name); // the error text can name the address
       await ddb.send(
         new UpdateCommand({
           TableName: table.members(),
@@ -168,10 +172,23 @@ router.on('POST', '/api/public/request', async ({ body, ip }) => {
 
   // SES verification doubles as the email opt-in (sandbox).
   if (!verified) {
+    let created = false;
     try {
       await ses.send(new CreateEmailIdentityCommand({ EmailIdentity: addr }));
+      created = true;
     } catch (e) {
       if ((e as Error).name !== 'AlreadyExistsException') throw e;
+    }
+    if (created) {
+      await ddb.send(
+        new UpdateCommand({
+          TableName: table.members(),
+          Key: { user_guid: item.user_guid },
+          UpdateExpression: 'SET owns_identity = :t',
+          ConditionExpression: 'attribute_exists(user_guid)',
+          ExpressionAttributeValues: { ':t': true },
+        }),
+      );
     }
   }
 
@@ -180,18 +197,66 @@ router.on('POST', '/api/public/request', async ({ body, ip }) => {
     invite_code: item.invite_code ?? null,
   });
   try {
-    await sendMail(
-      env('ADMIN_EMAIL'),
-      item.state === 'registered' ? `VettID: ${first_name} ${last_name} registered with a registration code` : `VettID: membership request from ${first_name} ${last_name}`,
-      `${first_name} ${last_name} <${addr}>\n` +
-        (item.state === 'registered' ? `Registered with registration code ${item.invite_code}.\n` : 'Needs review in admin (Requests).\n') +
-        'admin: https://admin.vettid.org/#requests\n',
-    );
+    // No name, no address, no code: the admin site has them (shared/requests.ts).
+    const notice = adminNotice(item.state === 'registered' ? 'registered' : verified ? 'arrived_verified' : 'arrived');
+    await sendMail(env('ADMIN_EMAIL'), notice.subject, notice.text);
   } catch (e) {
-    console.error('admin notify failed', e); // never fail the request over the notification
+    console.error('admin notify failed', (e as Error).name); // never fail the request over the notification
   }
 
   return { outcome: item.state === 'registered' ? 'registered' : 'pending_approval' };
+});
+
+/**
+ * Withdraw a request with the link from the "we have your request" email
+ * (MEMBER-API 2.6.0). POST only: opening the link is a static page, and no
+ * GET route exists here. The answer is the same for a token that withdrew a
+ * request and for one that names nothing (malformed, unknown, used, or for a
+ * request since approved: an account is not removed this way), so the route
+ * says nothing about any request or address.
+ *
+ * The one conditional write marks the row `withdrawn` and takes the names,
+ * the decline reason and the token off it. This internet-facing function
+ * deletes nothing: the cleanup job removes the row, its email marker, any
+ * Cognito user and the SES identity (if the request created it) within 15
+ * minutes (lambda/jobs/cleanup.ts, task `requests`). Until then the row
+ * still holds the address, which keeps a new request for it from racing the
+ * removal.
+ */
+router.on('POST', '/api/public/request/withdraw', async ({ body, ip }) => {
+  const limit = await hit(`withdraw#ip#${ip}`, 20, 3600);
+  if (!limit.allowed) throw new RateLimited(limit.retryAfter);
+
+  const answer = { ok: true };
+  const t = parseWithdrawToken(body.token);
+  if (!t) {
+    console.log(JSON.stringify({ msg: 'request withdraw', outcome: 'malformed' }));
+    return answer;
+  }
+  const now = nowIso();
+  let from: unknown;
+  try {
+    const r = await ddb.send(
+      new UpdateCommand({
+        TableName: table.members(),
+        Key: { user_guid: t.user_guid },
+        UpdateExpression: 'SET #s = :w, withdrawn_at = :n, updated_at = :n REMOVE withdraw_token_hash, first_name, last_name, reject_reason, invite_code',
+        ConditionExpression: 'withdraw_token_hash = :h AND #s IN (:req, :rej)',
+        ExpressionAttributeNames: { '#s': 'state' },
+        ExpressionAttributeValues: { ':h': t.hash, ':w': 'withdrawn', ':req': 'requested', ':rej': 'rejected', ':n': now },
+        ReturnValues: 'UPDATED_OLD', // the state it was in, for the audit event
+      }),
+    );
+    from = r.Attributes?.state;
+  } catch (e) {
+    if ((e as Error).name !== 'ConditionalCheckFailedException') throw e;
+    console.log(JSON.stringify({ msg: 'request withdraw', outcome: 'unknown' }));
+    return answer;
+  }
+  // No address: the row it named is going, and the audit log is not where it should live on.
+  await audit('public', 'request.withdraw', t.user_guid, { from: from === 'rejected' ? 'rejected' : 'requested' });
+  console.log(JSON.stringify({ msg: 'request withdraw', outcome: 'withdrawn' }));
+  return answer;
 });
 
 export const handler = memberHandler(router);

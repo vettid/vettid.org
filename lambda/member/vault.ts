@@ -125,7 +125,7 @@ import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { GetCommand, PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { snapshotFor } from '../shared/account-snapshot';
 import { AppHeader, AppKey, NONCE_TTL_S, TS_WINDOW_S, parseAppHeader, parseAppKey, signingInput, verifyAppSignature } from '../shared/app-auth';
-import { audit } from '../shared/audit';
+import { audit, memberActor } from '../shared/audit';
 import { ddb, env, table } from '../shared/aws';
 import {
   CODE_RE,
@@ -981,7 +981,7 @@ router.on('POST', '/api/vault/enroll', async (req) => {
     extra: { ...(c.key ? { app_key: c.key.key } : {}), account },
     slot: slotOf(c),
   });
-  await audit(m.email, 'vault.enroll_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: instanceId, release: inst.release, ...viaOf(c) });
+  await audit(memberActor(m.user_guid), 'vault.enroll_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: instanceId, release: inst.release, ...viaOf(c) });
   return new WithStatus(202, { vault_id: vault.vault_id, request_id: requestId });
 });
 
@@ -1012,7 +1012,7 @@ router.on('POST', '/api/vault/unlock', async (req) => {
     extra: account ? { account } : {},
     slot: slotOf(c),
   });
-  await audit(m.email, 'vault.unlock_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: instanceId, release: inst.release, ...viaOf(c) });
+  await audit(memberActor(m.user_guid), 'vault.unlock_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: instanceId, release: inst.release, ...viaOf(c) });
   return new WithStatus(202, { vault_id: vault.vault_id, request_id: requestId });
 });
 
@@ -1046,7 +1046,7 @@ router.on('POST', '/api/vault/lock', async (req) => {
       throw e;
     }
   }
-  await audit(m.email, 'vault.lock_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: holder?.instance_id ?? null, ...viaOf(c) });
+  await audit(memberActor(m.user_guid), 'vault.lock_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: holder?.instance_id ?? null, ...viaOf(c) });
   return new WithStatus(202, { vault_id: vault.vault_id, request_id: requestId });
 });
 
@@ -1173,7 +1173,7 @@ router.on('POST', '/api/vault/enroll-code', async (req) => {
     }),
   );
   if (pointer?.enroll_live && pointer.enroll_live !== key) await revokeIssuance(pointer.enroll_live);
-  await audit(m.email, 'vault.enroll_code_issued', m.user_guid, { expires_at: iso(row.expires_at) });
+  await audit(memberActor(m.user_guid), 'vault.enroll_code_issued', m.user_guid, { expires_at: iso(row.expires_at) });
   return new WithStatus(201, { secret, code, expires_at: iso(row.expires_at), api: apiOrigin() });
 });
 
@@ -1200,7 +1200,7 @@ router.on('DELETE', '/api/vault/enroll-code', async (req) => {
   const pointer = await readPointer(m.user_guid);
   const it = pointer?.enroll_live ? await issuance(pointer.enroll_live) : null;
   const revoked = !!it && it.user_guid === m.user_guid && issuanceState(it, nowS()) === 'live' && (await revokeIssuance(it.request_id));
-  if (revoked) await audit(m.email, 'vault.enroll_code_revoked', m.user_guid, {});
+  if (revoked) await audit(memberActor(m.user_guid), 'vault.enroll_code_revoked', m.user_guid, {});
   return { revoked };
 });
 
@@ -1254,7 +1254,7 @@ async function blockTyped(m: MemberItem, it: IssuanceRow): Promise<void> {
     _aws: { Timestamp: Date.now(), CloudWatchMetrics: [{ Namespace: 'VettID/MemberApi', Dimensions: [[]], Metrics: [{ Name: 'EnrollTypedCeiling', Unit: 'Count' }] }] },
     EnrollTypedCeiling: 1,
   }));
-  await audit(m.email, 'vault.enroll_code_typed_blocked', m.user_guid, { issued_at: iso(it.issued_at) });
+  await audit(memberActor(m.user_guid), 'vault.enroll_code_typed_blocked', m.user_guid, { issued_at: iso(it.issued_at) });
   await notify(m.email, 'VettID: many wrong setup codes were tried',
     `Someone tried many wrong codes for your account. Scan the QR code instead, or get a new code.
 
@@ -1324,7 +1324,7 @@ async function completeRedeem(m: MemberItem, key: AppKey, via: 'qr' | 'typed') {
   );
   await notify(m.email, 'VettID: your setup code was used',
     `A phone used your setup code at ${iso(now)} to set up your VettID vault. If this wasn't you, contact support@vettid.org.`);
-  await audit(m.email, 'vault.enroll_code_redeemed', m.user_guid, { vault_id: vault.vault_id, kid: key.kid, via });
+  await audit(memberActor(m.user_guid), 'vault.enroll_code_redeemed', m.user_guid, { vault_id: vault.vault_id, kid: key.kid, via });
   return { vault_id: vault.vault_id, user_guid: m.user_guid, email_hint: emailHint(m.email) };
 }
 
@@ -1567,7 +1567,7 @@ async function markRegistered(m: MemberItem, v: VaultRow, r: RecoveryRow, slot: 
     if ((e as Error).name === 'ConditionalCheckFailedException') return r; // cancelled or replaced meanwhile
     throw e;
   }
-  await audit(m.email, 'vault.recovery_registered', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id });
+  await audit(memberActor(m.user_guid), 'vault.recovery_registered', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id });
   return { ...r, state: 'registered', ...(recovering ? { recovering_key: recovering } : {}) };
 }
 
@@ -1617,7 +1617,7 @@ async function completeRecovery(m: MemberItem, v: VaultRow): Promise<VaultRow> {
     if ((e as Error).name === 'ConditionalCheckFailedException') return v; // recorded, cancelled or replaced meanwhile
     throw e;
   }
-  await audit(m.email, 'vault.recovery_completed', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id, kid });
+  await audit(memberActor(m.user_guid), 'vault.recovery_completed', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id, kid });
   const { claim_keys: _c, recovering_key: _k, ...rest } = r;
   return { ...v, recovery: { ...rest, state: 'completed', completed_at: completedAt } };
 }
@@ -1654,7 +1654,7 @@ async function refreshUnavailable(m: MemberItem, v: VaultRow, r: RecoveryRow, no
     if ((e as Error).name === 'ConditionalCheckFailedException') return r; // cancelled, registered or replaced meanwhile
     throw e;
   }
-  await audit(m.email, 'vault.recovery_unavailable', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id });
+  await audit(memberActor(m.user_guid), 'vault.recovery_unavailable', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id });
   return { ...r, state: 'unavailable' };
 }
 
@@ -1758,7 +1758,7 @@ async function cancelRecovery(m: MemberItem, found: VaultRow, via: 'session' | '
     // a cancel that could not be queued is worth knowing about.
     console.error('recovery cancel not queued', JSON.stringify({ vault_id: v.vault_id, error: (e as Error).name }));
   }
-  await audit(m.email, 'vault.recovery_cancel', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id, via });
+  await audit(memberActor(m.user_guid), 'vault.recovery_cancel', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id, via });
   await notify(m.email, 'VettID vault recovery cancelled', `The recovery of your VettID vault requested at ${iso(r.requested_at)} has been cancelled. Your apps can unlock the vault again.`);
   return true;
 }
@@ -1801,7 +1801,7 @@ router.on('POST', '/api/vault/recovery', async (req) => {
       ConditionExpression: 'attribute_not_exists(request_id)',
     }),
   );
-  await audit(m.email, 'vault.recovery_request', m.user_guid, { vault_id: v.vault_id, recovery_id: recoveryId, instance_id: inst.instance_id });
+  await audit(memberActor(m.user_guid), 'vault.recovery_request', m.user_guid, { vault_id: v.vault_id, recovery_id: recoveryId, instance_id: inst.instance_id });
   await notify(m.email, 'VettID vault recovery requested', requestedMail(`https://${env('ACCOUNT_HOST')}/vault/recovery/cancel#t=${token}`, r.available_at));
   return new WithStatus(202, { recovery_id: recoveryId, available_at: iso(r.available_at), expires_at: iso(r.expires_at) });
 });
@@ -1837,7 +1837,7 @@ router.on('GET', '/api/vault/recovery', async (req) => {
             ExpressionAttributeValues: { ':t': true },
           }),
         );
-        await audit(m.email, 'vault.recovery_code_released', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id });
+        await audit(memberActor(m.user_guid), 'vault.recovery_code_released', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id });
       }
     }
   }
@@ -1931,7 +1931,7 @@ async function claimRecovery(key: AppKey, vaultId: string, recoveryId: string, v
     if ((e as Error).name === 'ConditionalCheckFailedException') throw vaultError(409, 'conflict', 'The recovery changed; try again');
     throw e;
   }
-  await audit(m.email, 'vault.recovery_claim', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id, kid: key.kid, via });
+  await audit(memberActor(m.user_guid), 'vault.recovery_claim', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id, kid: key.kid, via });
   // 2.4.0: the two identifiers, which the typed app has from nowhere else.
   return { user_guid: m.user_guid, email_hint: emailHint(m.email), vault_id: v.vault_id, recovery_id: r.recovery_id };
 }
@@ -1982,7 +1982,7 @@ router.on('POST', '/api/vault/recovery/register', async (req) => {
     slot: { recovery_id: recoveryId, ...slotOf(c) },
   });
   await recordRegisterId(vault, recoveryId, requestId);
-  await audit(m.email, 'vault.recovery_register', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, recovery_id: recoveryId, instance_id: instanceId, ...viaOf(c) });
+  await audit(memberActor(m.user_guid), 'vault.recovery_register', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, recovery_id: recoveryId, instance_id: instanceId, ...viaOf(c) });
   return new WithStatus(202, { vault_id: vault.vault_id, request_id: requestId });
 });
 
@@ -2045,7 +2045,7 @@ async function cancelDeletion(m: MemberItem, v: VaultRow, deletionId: string, vi
     if ((e as Error).name === 'ConditionalCheckFailedException') return false; // executing, cancelled or replaced meanwhile
     throw e;
   }
-  await audit(m.email, 'vault.deletion_cancel', m.user_guid, { vault_id: v.vault_id, deletion_id: deletionId, via, ...(kid ? { kid } : {}) });
+  await audit(memberActor(m.user_guid), 'vault.deletion_cancel', m.user_guid, { vault_id: v.vault_id, deletion_id: deletionId, via, ...(kid ? { kid } : {}) });
   await notify(m.email, 'VettID vault deletion cancelled',
     `The deletion of your VettID vault requested at ${iso(d.requested_at)} has been cancelled. Your vault and everything in it stay as they are.`);
   return true;
@@ -2087,7 +2087,7 @@ router.on('POST', '/api/vault/deletion', async (req) => {
       ConditionExpression: 'attribute_not_exists(request_id)',
     }),
   );
-  await audit(m.email, 'vault.deletion_request', m.user_guid, { vault_id: v.vault_id, deletion_id: d.deletion_id, deletes_at: iso(d.deletes_at) });
+  await audit(memberActor(m.user_guid), 'vault.deletion_request', m.user_guid, { vault_id: v.vault_id, deletion_id: d.deletion_id, deletes_at: iso(d.deletes_at) });
   await notify(m.email, 'VettID: your vault will be deleted',
     deletionRequestedMail(`https://${env('ACCOUNT_HOST')}/vault/deletion/cancel#t=${token}`, d.requested_at, d.deletes_at));
   return new WithStatus(202, { deletion_id: d.deletion_id, requested_at: iso(d.requested_at), deletes_at: iso(d.deletes_at) });

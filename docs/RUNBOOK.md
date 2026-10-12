@@ -38,7 +38,7 @@ turning that off in code (or the console) first.
 | `VettidOrgPlaybooksStack` | Playbooks origin bucket (served at `/playbooks/*` by VettidOrgStack; content deployed from the vettid-playbooks repo) |
 | `VettidDevRedirectStack` | The entire vettid.dev footprint: blanket 301 → vettid.org. Permanent. |
 | `VettidOrgAuthStack` | Member + admin Cognito pools, clients, groups, admin hosted-UI domain, PIN pepper secret. Stateful. |
-| `VettidOrgDataStack` | Account/admin DynamoDB tables (`vettid-org-*`) + terms PDF bucket. Stateful. (The vault tables moved to VettidOrgVaultStack.) |
+| `VettidOrgDataStack` | Account/admin DynamoDB tables (`vettid-org-*`) + terms PDF bucket. Stateful. (The vault tables moved to VettidOrgVaultStack.) The audit table's TTL (`expires_at`) deletes only the 90-day address records ("Membership requests"). |
 | `VettidOrgAdminAccessStack` | Admin tailnet exit node (EC2 + EIP) and the CloudFront WAF allowlist keyed to its IP (admin site). |
 | `VettidOrgAdminApiStack` | Admin REST API at admin-api.vettid.org (docs/ADMIN-API.md): exit-node-IP resource policy + Cognito authorizer, 4 route-group Lambdas (people, content, system, vault-canary). |
 | `VettidOrgAdminSiteStack` | Admin SPA at admin.vettid.org (`sites/admin`), behind the exit-node web ACL. |
@@ -1969,6 +1969,132 @@ each member once its forwarder is deployed.
   `npx cdk deploy VettidDevRedirectStack -c vettidDevMailPolicy=true` — and
   keep passing the flag on every later deploy of that stack (or make it the
   default in code).
+
+## Membership requests
+
+MEMBER-API 2.6.0 ("Request states", "Withdrawing a request",
+"Retention", "Request emails") is the specification; this is what the
+operator does, and does not have to do.
+
+- **Automatic now, nothing by hand:**
+  - *Unverified request*: deleted after 14 days (daily cleanup job,
+    07:00 UTC), with its SES identity if the request created it
+    (`owns_identity`; a row from before 2.6.0 keeps the old rule:
+    unless the mailing list uses the address).
+  - *Withdrawal*: the person uses the link in "We have your VettID
+    membership request" (sent once, when the address is verified).
+    The page is `https://account.vettid.org/request/withdraw/`; the
+    button marks the row `withdrawn` and erases the names at once; the
+    cleanup job's 15-minute run (`{"task":"requests"}`) removes the
+    row, its `email:<addr>` marker, a Cognito user left by a failed
+    code registration, and the SES identity if the request created it
+    and the mailing list does not use it.
+  - *Declined request*: removed the same way 30 days after the decline
+    (daily run). At the first daily run after 2.6.0 is deployed, every
+    request declined more than 30 days earlier goes (its `updated_at`
+    is its decline time).
+  - *Audit log*: a person's address is kept 90 days in a record beside
+    the event (`addr#<month>` partition, TTL `expires_at`); events stay.
+- **The admin notices** ("a membership request arrived", "…was
+  verified", "someone registered with a registration code") carry no
+  name, address or code: read the request on the admin site.
+  **One-time clean-up of the admin mailbox (owner):** notices sent
+  before 2.6.0 carry the requester's name and address. Search
+  admin@vettid.org for subjects starting `VettID: membership request
+  from` and `VettID:` … `registered with a registration code` from
+  `no-reply@vettid.org`, delete those dated before the deploy, and
+  empty the trash (and any archive, forward or local copy). The
+  requests themselves are on the admin site, so nothing is lost.
+- **Alarms** (production: to `vettid-org-security-alerts`):
+  - `vettid-org-request-removal-failing`: the cleanup job could not
+    finish removing a withdrawn or expired request in the last hour.
+    The row (with the address, without the names) is still in the
+    table and is retried at every run for 7 days. Read the cleanup
+    function's log group for `request removal failed` and its error
+    name (no address is logged). Waiting rows:
+    `aws dynamodb query --table-name vettid-org-members --index-name state-index --key-condition-expression '#s = :w' --expression-attribute-names '{"#s":"state"}' --expression-attribute-values '{":w":{"S":"withdrawn"}}' --select COUNT`
+    (and `rejected` for declined ones). Typical causes: SES throttling
+    (clears by itself), a changed IAM policy, the mailing-list table
+    unreadable.
+  - `vettid-org-request-removal-abandoned`: after 7 days of failures
+    the job deleted the row and the marker without finishing the rest
+    (audit `request.removal_incomplete`, subject the request's id).
+    The address is no longer in the members table; an SES identity (or
+    a Cognito user) may be left. Reconcile as for the mailing list
+    ("Unsubscribe" → Alarms): compare `aws sesv2 list-email-identities`
+    with the members table and the list, and delete an address
+    identity that neither has, if a request created it (CloudTrail: a
+    `CreateEmailIdentity` by the member API's public function role
+    that succeeded).
+- **Backfills (operator, once per stage after the 2.6.0 deploy; both
+  are dry runs unless told otherwise and print counts only, never an
+  address):**
+  1. *The audit log's old events* still hold addresses inside them
+     (`detail.email`; a member's address as `actor`). The Lambdas may
+     only append to the audit table, so this needs an operator session:
+     `npx ts-node --transpile-only --prefer-ts-exts scripts/ops/audit-address-backfill.ts [--stage staging]`
+     shows what it would change, per action; add `--apply` to do it.
+     Events younger than 90 days keep their address in a 90-day record;
+     older ones lose it. Safe to repeat. Look at any "UNCLASSIFIED" line
+     before applying (an address as actor of an action the script does
+     not know: it leaves those alone). Until this has run, "addresses
+     in the audit log are gone after 90 days" is true only of events
+     written since the deploy.
+  2. *Requests verified before 2.6.0* have no withdrawal link and got
+     no email. They are **not** mailed automatically.
+     `npx ts-node --transpile-only --prefer-ts-exts scripts/ops/request-mail-backfill.ts [--stage staging]`
+     counts them; `--send` emails each of them "We have your VettID
+     membership request" with their link (`--send --guid <user_guid>`:
+     one of them only). **That emails real people: the owner decides,
+     per run.** Without it, such a request is still removed when an
+     admin declines it (gone 30 days later), and "Removal by hand"
+     below covers a person who asks. The same command also finds a
+     request whose email failed to send.
+- **Removal by hand** remains for three things only:
+  1. *A request verified before 2.6.0 whose owner asks by email*
+     (no link, if the backfill email was not sent): send that one
+     person their link,
+     `… scripts/ops/request-mail-backfill.ts --send --guid <user_guid>`
+     (the id under the name on the admin site's requests page), and
+     they withdraw it themselves; or decline it on the admin site (it
+     is deleted in 30 days). The SES identity of such a row is left:
+     see 3.
+  2. *An account* (an approved request): the member cancels it in the
+     account site, or an admin deletes it. Not the withdrawal link.
+  3. *The SES identity of an address whose row had no `owns_identity`*
+     (every row from before 2.6.0) or that an admin deleted with
+     Delete: the automatic removal leaves it (never on doubt).
+     `aws sesv2 delete-email-identity --email-identity a@example.com`
+     once you have checked that neither a member row
+     (`aws dynamodb query --table-name vettid-org-members --index-name email-index --key-condition-expression 'email = :e' --expression-attribute-values '{":e":{"S":"a@example.com"}}' --select COUNT`)
+     nor the mailing list
+     (`aws dynamodb get-item --table-name vettid-org-mailing-list --key '{"email":{"S":"a@example.com"}}'`)
+     uses it.
+  What remains after any removal, and for how long: the tables'
+  backups (35 days), the audit log's address records (90 days from
+  each event), the CloudTrail record of the SES calls (400 days).
+- **Logs of the member and admin APIs** (not changed by 2.6.0): every
+  function's own log group (errors, job counts; no addresses by
+  design) is kept **30 days** (`ApiFunction`'s default,
+  `lib/constructs/api-function.ts`): the 13 functions of
+  `VettidOrgMemberApiStack` (Public, Auth, Account, Vault, LinkMailer,
+  VaultAccountPush, VerificationsJob, CleanupJob, MembersStreamMailer,
+  VaultAlarmMailer, VaultNamesJob, VaultNoticeJob, VaultServiceWatch)
+  and the 5 of `VettidOrgAdminApiStack` (People, Content, System,
+  VaultCanary, VaultService). The member API's access log
+  (`/vettid-org/<stage>/member-api/access`: time, path, status), the
+  account and admin sites' CloudFront logs and their WAF logs are kept
+  **90 days**.
+- **A window that remains** (rare): a mailing-list sign-up for the
+  same address in the instant between the job's check of the list and
+  its `DeleteEmailIdentity` loses the identity its verification mail
+  was sent for; that sign-up then expires unverified after 3 days and
+  the person signs up again.
+- **Staging**: the same flow with `--stage staging` / `--profile
+  vault-staging` and the `vettid-org-staging-*` tables. Test
+  addresses at `test.staging.vettid.org` are the project's own: their
+  SES identities are never deleted by a removal (and IAM would refuse
+  it), so a withdrawn test request leaves its identity, as before.
 
 ## Mailing list
 
