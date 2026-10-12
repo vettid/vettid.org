@@ -1,17 +1,23 @@
 ---
 title: VAULT-HOST-PROTOCOL
 status: approved by the owner 2026-10-12 (H1–H9 as recommended)
-version: 0.1.2
+version: 0.1.3
 date: 2026-10-12
 owner: Al Liebl (Mesmer)
 component: vault enclave (supervisor), parent (host process)
 related:
-  - VAULT-MESSAGING.md (0.27.4) §2 (threat model, who sees what), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
+  - VAULT-MESSAGING.md (0.29.0) §2 (threat model, who sees what), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
   - VAULT-PLAN.md (0.1.8) §5.2 (D5: TLS in the enclave), §5.3 (D4: one process per vault)
   - VAULT-RELEASES.md (0.1.16) §3.4 (C3, C4), §8.4 (network and egress), §8.7 (observability)
   - VAULT-RELAY-SCALING.md (0.1.2) §6, §10
   - vettid-vault `internal/hostproto`, `enclave/supervisor`, `enclave/egress`, `parent`, docs/V3-NOTES.md "Enclave ↔ parent", docs/SMOKE.md
 changelog:
+  - 0.1.3: **DRAFT for the owner's review** (VAULT-LOCK 0.1.0,
+    VAULT-MESSAGING 0.29.0): what the `lock` queue operation would
+    carry and answer from the vault's release L (§6.1), and what that
+    changes for a dishonest parent (§11.3: nothing it could not do).
+    Planned, not built: the rest of this document still describes the
+    code at f3003ed and 8f2c8bf
   - 0.1.2: errata after vettid-vault #69 (main 8f2c8bf) and the
     errata of VAULT-MESSAGING 0.27.4. §6.6: `relay_vault_limit`. §7.4,
     §11.2: the log record that named a vault at its request limit is
@@ -361,6 +367,22 @@ unknown.
   message on the queue; a redelivery of a sealed request is caught by
   the replay set, or answered `etk_unknown` after an enclave restart
   (VAULT-MESSAGING §11.6, §11.9).
+- **The `lock` operation, as built (through 8f2c8bf).** The enclave
+  sets the response's status to `done` before it locks and discards
+  what the lock did; the response carries no code. Nothing protects a
+  `lock` against redelivery or late delivery: one that waited in the
+  queue (up to its 5 minutes) is carried out when it arrives, also
+  after an unlock that was queued later.
+- **The `lock` operation from release L (0.1.3; planned, DRAFT:
+  VAULT-MESSAGING 0.29.0 §11.5).** The message may carry `unlock_id`.
+  With it, the vault's process locks only if the value names its
+  current unlock; without it, the enclave locks only if the message's
+  `enqueued_at` is later than that of the message that opened the
+  vault, which it keeps with the running vault. The response is made
+  **after** the lock and carries `code`: `locked`, `not_running` or
+  `stale`. The parent copies those three codes into the slot of a
+  `lock` and of no other operation. The parent of a release before L
+  writes no code; each release runs its own parent (§10).
 
 ### 6.2 `LeaseLost` (0x11)
 
@@ -729,7 +751,7 @@ more than "the operation does not happen, or happens late".
 | `StoreDelete` reply | keep the object and say `ok`; delete anything it can reach in the bucket at any time | The parent's role can delete stored state anyway (VAULT-MESSAGING §13.5). A kept object cannot be opened without the PIN and a registered device |
 | `Credentials` reply | give no, expired, or another principal's credentials | KMS answers come over the enclave's TLS. Sealing keys release data keys only to the release's attested measurements, and the enclave checks the key's policy itself before sealing. Wrong credentials are failed unlocks |
 | `Queue`, sealed operations (`enroll`, `unlock`, `recovery_register`) | drop, delay, reorder, replay, send to another instance; change the clear members | Replays and redirected requests are refused (VAULT-MESSAGING §11.6). It cannot make one: it has no ETK and no device key. A changed `account` member reaches the vault (below) |
-| `Queue`, operations without an envelope (`lock`, `delete`, `account`, `recovery`, `recovery_cancel`) | **forge them** for any `vault_id` | `lock`: the vault locks. `delete`: a running vault deletes itself with the full semantics of VAULT-MESSAGING §12.5, otherwise its stored objects are erased; an operator power stated in §13.5. `account`: a running vault takes the snapshot, so the parent can make a vault show its owner, and put in the core of its shared profile, **names and account details of the parent's choosing**; the snapshot is display only and "not authenticated beyond the host path" (VAULT-MESSAGING §11.13, §10.8). `recovery`: with a browser key of its own the parent **starts a recovery**: a running vault locks and tells its devices why, unlocks are refused `recovery_pending`, and after the enclave's 24 h the parent can open the code. A recovery still needs an attested app, the PIN and the credential password under both backoffs, and exists only with the credential backup on (VAULT-MESSAGING §11.11). `recovery_cancel`: ends a member's recovery |
+| `Queue`, operations without an envelope (`lock`, `delete`, `account`, `recovery`, `recovery_cancel`) | **forge them** for any `vault_id` | `lock`: the vault locks. *From release L (0.1.3, planned):* a `lock` carries `unlock_id` or is ordered by `enqueued_at`, both of which the parent can read and set, and the parent writes the `code` of the answer: it can still lock any vault, drop any lock, and report `locked` for a vault it left open. The members protect an honest path against late delivery, not against the parent. What bounds a parent that keeps a vault open is the idle lock, decided in the enclave by its own clock (VAULT-MESSAGING §3.6.8). `delete`: a running vault deletes itself with the full semantics of VAULT-MESSAGING §12.5, otherwise its stored objects are erased; an operator power stated in §13.5. `account`: a running vault takes the snapshot, so the parent can make a vault show its owner, and put in the core of its shared profile, **names and account details of the parent's choosing**; the snapshot is display only and "not authenticated beyond the host path" (VAULT-MESSAGING §11.13, §10.8). `recovery`: with a browser key of its own the parent **starts a recovery**: a running vault locks and tells its devices why, unlocks are refused `recovery_pending`, and after the enclave's 24 h the parent can open the code. A recovery still needs an attested app, the PIN and the credential password under both backoffs, and exists only with the credential backup on (VAULT-MESSAGING §11.11). `recovery_cancel`: ends a member's recovery |
 | `Queue`, the manifest document | withhold it, or give another | The request fails `manifest`. It cannot make the enclave accept a manifest the app did not verify (VAULT-MESSAGING §11.5) |
 | `Queue` reply (seen by the parent) | drop it, or write another slot | The app gets no result or a result it cannot open; results are sealed. The two host codes can be forged or suppressed with the effects VAULT-MESSAGING §11.5 lists |
 | `LeaseLost` | send it for any vault, at any time; never send it | The vault locks. Never sending it leaves a vault running without a lease; if a second instance then opens the vault, the two meet at the conditional state write, and the one that finds a newer version is zeroized (the split-brain guard does not depend on leases) |
