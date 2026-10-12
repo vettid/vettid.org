@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as elasticache from 'aws-cdk-lib/aws-elasticache';
@@ -9,7 +10,7 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as route53targets from 'aws-cdk-lib/aws-route53-targets';
 import { Construct } from 'constructs';
-import { AppConfig, hostName, resourceName } from '../config';
+import { AppConfig, ORG, hostName, resourceName } from '../config';
 import { publishRef, readRef } from '../constructs/ssm-refs';
 
 export interface VettidOrgRelayStackProps extends cdk.StackProps {
@@ -32,6 +33,37 @@ const VALKEY_PORTS = ec2.Port.tcpRange(6379, 6380); // serverless: 6379 primary,
 /** Service scaling bounds (two tasks = one per AZ at minimum). */
 export const RELAY_MIN_TASKS = 2;
 export const RELAY_MAX_TASKS = 8;
+
+/** The task's memory (MiB). */
+export const RELAY_TASK_MEMORY_MIB = 512;
+
+/** Namespace of the metrics taken from the relay's `rate limits` log line. */
+export const RELAY_METRICS_NAMESPACE = 'VettID/Relay';
+
+/**
+ * Thresholds of the alarms on the relay's `rate limits` line (one a
+ * minute from each task; RELAY-PROTOCOL §7.2, RUNBOOK "Relay").
+ */
+export const RELAY_ALARM_LIMITS = {
+  /**
+   * `address_busiest_per_min`: half the flood guard's steady rate
+   * (100 requests/s = 6,000 a minute). The RUNBOOK's trigger for raising
+   * `RELAY_RATE_IP_RPS`.
+   */
+  addressBusiestPerMin: 3000,
+  /**
+   * Long-polls (`collectors`) and WebSocket sessions (`ws_sessions`) on
+   * one task; nothing caps either yet. Measured: about 42 KiB per parked
+   * long-poll and 45 KiB per session, so 2,000 are about 82 and 88 MiB:
+   * a sixth of the task's 512 MiB each, and a third together. That is
+   * well below the 70 % at which the service adds tasks, and far above
+   * what the preview needs (a vault host holds at most 1,024 long-polls,
+   * spread over the tasks): time to look, and to bring back the caps,
+   * long before memory is short.
+   */
+  collectorsPerTask: 2000,
+  wsSessionsPerTask: 2000,
+} as const;
 
 /**
  * relay.vettid.org — the VettID mailbox relay (github.com/vettid/vettid-relay,
@@ -132,7 +164,7 @@ export class VettidOrgRelayStack extends cdk.Stack {
 
     const taskDef = new ecs.FargateTaskDefinition(this, 'TaskMulti', {
       cpu: 256,
-      memoryLimitMiB: 512,
+      memoryLimitMiB: RELAY_TASK_MEMORY_MIB,
       runtimePlatform: { cpuArchitecture: ecs.CpuArchitecture.ARM64, operatingSystemFamily: ecs.OperatingSystemFamily.LINUX },
     });
     taskDef.taskRole.addToPrincipalPolicy(
@@ -267,6 +299,85 @@ export class VettidOrgRelayStack extends cdk.Stack {
       publishRef(this, config, 'relay/alb-dns-name', alb.loadBalancerDnsName);
       publishRef(this, config, 'relay/alb-hosted-zone-id', alb.loadBalancerCanonicalHostedZoneId);
       publishRef(this, config, 'relay/alb-full-name', alb.loadBalancerFullName);
+    }
+
+    // ---- Alarms on the `rate limits` line (RELAY-PROTOCOL §7.2) ---------------
+    // Each task writes one JSON line a minute (relay ≥ protocol 0.7.0) with
+    // the minute's peaks and refusals by limiter and what the task carries.
+    // Metric filters turn the fields into metrics without a dimension (the
+    // line names no task, address or key): Sum adds the tasks up, Maximum is
+    // the worst task, SampleCount the number of lines.
+    const line = logs.FilterPattern.stringValue('$.msg', '=', 'rate limits');
+    const fromLine = (cid: string, metricName: string, field: string) =>
+      new logs.MetricFilter(this, cid, { logGroup, filterPattern: line, metricNamespace: RELAY_METRICS_NAMESPACE, metricName, metricValue: `$.${field}` });
+    const minute = cdk.Duration.minutes(1);
+    const says = (text: string) => `Relay: ${text} (RUNBOOK "Relay" → Alarms).`;
+    const alarms: cloudwatch.Alarm[] = [];
+    const alarm = (cid: string, name: string, a: Omit<cloudwatch.AlarmProps, 'alarmName'>) => {
+      const x = new cloudwatch.Alarm(this, cid, { alarmName: resourceName(config, `relay-${name}`), treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING, ...a });
+      alarms.push(x);
+      return x;
+    };
+    // Refusals: in 3 of 5 minutes, so that one scanner's burst is not an alarm.
+    const refused = (cid: string, name: string, field: string, metricName: string, text: string) =>
+      alarm(cid, name, {
+        alarmDescription: says(text),
+        metric: fromLine(`${cid}Metric`, metricName, field).metric({ statistic: 'Sum', period: minute }),
+        threshold: 0,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        evaluationPeriods: 5,
+        datapointsToAlarm: 3,
+      });
+    refused('AddressRefused', 'address-refused', 'address_refused', 'AddressRefused', 'the flood guard (per source address, 100/s, burst 300) refused requests in 3 of 5 minutes');
+    refused('KeyRefused', 'key-refused', 'key_refused', 'KeyRefused', 'a key was refused at its own limit (20/s, burst 100) in 3 of 5 minutes');
+    refused('RegisterRefused', 'register-refused', 'register_refused', 'RegisterRefused', 'an address was refused new mailboxes (1/s, burst 30) in 3 of 5 minutes');
+    const L = RELAY_ALARM_LIMITS;
+    const atLeast = cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD;
+    alarm('AddressBusy', 'address-busy', {
+      alarmDescription: says(`the busiest address made ${L.addressBusiestPerMin} or more requests a minute for 5 minutes: half the flood guard (a vault host near 550 active vaults)`),
+      metric: fromLine('AddressBusiestMetric', 'AddressBusiestPerMin', 'address_busiest_per_min').metric({ statistic: 'Maximum', period: minute }),
+      threshold: L.addressBusiestPerMin,
+      comparisonOperator: atLeast,
+      evaluationPeriods: 5,
+      datapointsToAlarm: 5,
+    });
+    const collectors = fromLine('CollectorsMetric', 'Collectors', 'collectors');
+    alarm('Collectors', 'collectors', {
+      alarmDescription: says(`a task carries ${L.collectorsPerTask} or more long-polls (about 42 KiB each; nothing caps them per task yet) in 3 of 5 minutes`),
+      metric: collectors.metric({ statistic: 'Maximum', period: minute }),
+      threshold: L.collectorsPerTask,
+      comparisonOperator: atLeast,
+      evaluationPeriods: 5,
+      datapointsToAlarm: 3,
+    });
+    alarm('WsSessions', 'ws-sessions', {
+      alarmDescription: says(`a task carries ${L.wsSessionsPerTask} or more WebSocket sessions (about 45 KiB each; nothing caps them per task yet) in 3 of 5 minutes`),
+      metric: fromLine('WsSessionsMetric', 'WsSessions', 'ws_sessions').metric({ statistic: 'Maximum', period: minute }),
+      threshold: L.wsSessionsPerTask,
+      comparisonOperator: atLeast,
+      evaluationPeriods: 5,
+      datapointsToAlarm: 3,
+    });
+    // Liveness of the line itself (and so of the alarms above, which rest
+    // on it): every task writes it every minute, so five minutes without
+    // one means no task is logging. Missing data is the fault here.
+    const silent = alarm('RateLimitsSilent', 'rate-limits-silent', {
+      alarmDescription: says('no task has written its `rate limits` line for 5 minutes: the relay is down, logs at a level above info, or its log does not arrive; the other relay alarms are blind meanwhile'),
+      metric: collectors.metric({ statistic: 'SampleCount', period: cdk.Duration.minutes(5) }),
+      threshold: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+      evaluationPeriods: 1,
+      treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+    });
+    // The relay runs in production's main account, the management account,
+    // home of the security-alerts topic (VettidOrgAuditStack; it admits this
+    // account's CloudWatch alarms since #214). The member API's alarms go
+    // there the same way. No topic of its own.
+    if (this.account === ORG.management && config.stage === 'prod') {
+      const alertsTopicArn = `arn:${this.partition}:sns:${this.region}:${this.account}:${resourceName(config, 'security-alerts')}`;
+      const action = { bind: () => ({ alarmActionArn: alertsTopicArn }) };
+      for (const a of alarms) a.addAlarmAction(action);
+      silent.addOkAction(action); // the line is back
     }
 
     new cdk.CfnOutput(this, 'RelayUrl', { value: `https://${host}` });

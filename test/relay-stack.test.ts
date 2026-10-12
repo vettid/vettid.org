@@ -1,7 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { loadConfig } from '../lib/config';
-import { VettidOrgRelayStack, RELAY_MAX_TASKS, RELAY_MIN_TASKS } from '../lib/stacks/relay-stack';
+import { VettidOrgRelayStack, RELAY_ALARM_LIMITS, RELAY_MAX_TASKS, RELAY_MIN_TASKS, RELAY_TASK_MEMORY_MIB } from '../lib/stacks/relay-stack';
 import { VettidOrgRelayDataStack } from '../lib/stacks/relay-data-stack';
 
 const app = new cdk.App();
@@ -135,6 +135,108 @@ describe('service (stateless)', () => {
     // New task-definition construct id: the running SQLite task's role and
     // policy are only removed in CloudFormation's cleanup phase.
     expect(Object.keys(t.findResources('AWS::ECS::TaskDefinition'))[0]).toMatch(/^TaskMulti/);
+  });
+});
+
+describe('alarms on the `rate limits` line (RELAY-PROTOCOL §7.2)', () => {
+  // The stack as deployed: production's main account (the management account).
+  const prodApp = new cdk.App();
+  const prod = Template.fromStack(
+    new VettidOrgRelayStack(prodApp, 'RelayProd', {
+      config: loadConfig(prodApp.node),
+      relayImage: 'ghcr.io/vettid/vettid-relay@sha256:' + 'a'.repeat(64),
+      env: { account: '449757308783', region: 'us-east-1' },
+    }),
+  );
+  const alarmsOf = (x: Template) => Object.values<any>(x.findResources('AWS::CloudWatch::Alarm')).map((a) => a.Properties);
+  const byName = (x: Template, n: string) => alarmsOf(x).find((a) => a.AlarmName === `vettid-org-relay-${n}`)!;
+  const TOPIC = /arn:.*:sns:us-east-1:449757308783:vettid-org-security-alerts/;
+  const flat = (x: unknown) => JSON.stringify(x).replace(/["{}\[\],]|Fn::Join|Ref|AWS::Partition/g, '');
+
+  test('six metric filters on the service log, each reading one field of the line, without dimensions', () => {
+    const filters = Object.values<any>(prod.findResources('AWS::Logs::MetricFilter')).map((f) => f.Properties);
+    expect(filters).toHaveLength(6);
+    for (const f of filters) {
+      expect(f.FilterPattern).toBe('{ $.msg = "rate limits" }');
+      expect(f.LogGroupName).toEqual({ Ref: expect.stringMatching(/^ServiceLogs/) });
+      expect(f.MetricTransformations).toHaveLength(1);
+      expect(f.MetricTransformations[0].MetricNamespace).toBe('VettID/Relay');
+      expect(f.MetricTransformations[0].Dimensions).toBeUndefined();
+    }
+    expect(Object.fromEntries(filters.map((f) => [f.MetricTransformations[0].MetricName, f.MetricTransformations[0].MetricValue]))).toEqual({
+      AddressRefused: '$.address_refused',
+      KeyRefused: '$.key_refused',
+      RegisterRefused: '$.register_refused',
+      AddressBusiestPerMin: '$.address_busiest_per_min',
+      Collectors: '$.collectors',
+      WsSessions: '$.ws_sessions',
+    });
+  });
+
+  test.each([
+    ['address-refused', 'AddressRefused'],
+    ['key-refused', 'KeyRefused'],
+    ['register-refused', 'RegisterRefused'],
+  ])('%s: refusals in 3 of 5 minutes, summed over the tasks', (name, metric) => {
+    expect(byName(prod, name)).toMatchObject({
+      Namespace: 'VettID/Relay', MetricName: metric, Statistic: 'Sum', Period: 60,
+      ComparisonOperator: 'GreaterThanThreshold', Threshold: 0, EvaluationPeriods: 5, DatapointsToAlarm: 3, TreatMissingData: 'notBreaching',
+    });
+  });
+
+  test('address-busy: the busiest address at half the flood guard for 5 minutes', () => {
+    expect(RELAY_ALARM_LIMITS.addressBusiestPerMin).toBe((100 * 60) / 2);
+    expect(byName(prod, 'address-busy')).toMatchObject({
+      MetricName: 'AddressBusiestPerMin', Statistic: 'Maximum', Period: 60,
+      ComparisonOperator: 'GreaterThanOrEqualToThreshold', Threshold: 3000, EvaluationPeriods: 5, DatapointsToAlarm: 5, TreatMissingData: 'notBreaching',
+    });
+  });
+
+  test.each([
+    ['collectors', 'Collectors', RELAY_ALARM_LIMITS.collectorsPerTask, 42],
+    ['ws-sessions', 'WsSessions', RELAY_ALARM_LIMITS.wsSessionsPerTask, 45],
+  ])('%s: the worst task, at a threshold that is a small part of its memory', (name, metric, limit, kib) => {
+    expect(byName(prod, name)).toMatchObject({
+      MetricName: metric, Statistic: 'Maximum', Period: 60,
+      ComparisonOperator: 'GreaterThanOrEqualToThreshold', Threshold: 2000, EvaluationPeriods: 5, DatapointsToAlarm: 3, TreatMissingData: 'notBreaching',
+    });
+    // Under a fifth of the task each: both at their thresholds stay under half.
+    expect((limit * kib) / 1024).toBeLessThan(RELAY_TASK_MEMORY_MIB / 5);
+  });
+
+  test('rate-limits-silent: no line from any task for 5 minutes; missing data is the fault', () => {
+    expect(byName(prod, 'rate-limits-silent')).toMatchObject({
+      MetricName: 'Collectors', Statistic: 'SampleCount', Period: 300,
+      ComparisonOperator: 'LessThanThreshold', Threshold: 1, EvaluationPeriods: 1, TreatMissingData: 'breaching',
+    });
+    expect(flat(byName(prod, 'rate-limits-silent').OKActions)).toMatch(TOPIC);
+  });
+
+  test('every alarm notifies the security-alerts topic of the management account; no topic of its own', () => {
+    const all = alarmsOf(prod);
+    expect(all.map((a) => a.AlarmName).sort()).toEqual(
+      ['address-busy', 'address-refused', 'collectors', 'key-refused', 'rate-limits-silent', 'register-refused', 'ws-sessions'].map((n) => `vettid-org-relay-${n}`),
+    );
+    for (const a of all) {
+      expect(a.AlarmActions).toHaveLength(1);
+      expect(flat(a.AlarmActions)).toMatch(TOPIC);
+      expect(a.AlarmDescription).toContain('RUNBOOK "Relay"');
+    }
+    prod.resourceCountIs('AWS::SNS::Topic', 0);
+    prod.resourceCountIs('AWS::SNS::TopicPolicy', 0);
+  });
+
+  test('anywhere else the alarms exist without an action (the topic is the management account\'s)', () => {
+    const all = alarmsOf(t);
+    expect(all).toHaveLength(7);
+    for (const a of all) expect(a.AlarmActions).toBeUndefined();
+  });
+
+  test('the alarms change nothing else: one task definition, one service, the same log group', () => {
+    prod.resourceCountIs('AWS::ECS::TaskDefinition', 1);
+    prod.resourceCountIs('AWS::ECS::Service', 1);
+    prod.resourceCountIs('AWS::Logs::LogGroup', 1);
+    expect(Object.values<any>(t.findResources('AWS::ECS::TaskDefinition'))[0].Properties.Memory).toBe(String(RELAY_TASK_MEMORY_MIB));
   });
 });
 
