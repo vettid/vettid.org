@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.19
+version: 0.1.20
 date: 2026-10-12
 owner: Al Liebl (Mesmer)
 changelog:
@@ -154,15 +154,19 @@ changelog:
     parent's `DefaultAllow`, the stage's DNS Firewall), planned, not
     built. No other section is touched (§8.7 in particular is left
     alone)
+  - 0.1.20 (as built, vettid-vault #70 and #71, `main` 2daa9e4; for
+    staging release S11, not cut yet). §8.7: the log records the
+    unreachable-parent rule adds, and what S11 is planned to carry.
+    `related` brought up to date
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
-  - VAULT-MESSAGING.md (0.28.0) §11.10 release updates, §12.5 deletion, §13.5, §13.9
+  - VAULT-MESSAGING.md (0.29.1) §11.10 release updates, §12.5 deletion, §13.5, §13.9
   - RELEASE-UPDATES.md (0.3.3) — member-facing; §3 changes with this plan; §5 the release log
   - ANDROID-PLAN.md (0.1.37) — the app's "What's new" from the log
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2) — staging as the development channel; D1–D11
   - CALLS-PLAN.md (0.1.3) §13, CALLING-SERVICE.md (0.2.0) §5.5, §8 — the calling service's issuer in the egress controls; `calls_url`
   - MEMBER-API.md "Vault", RUNBOOK.md, ARCHITECTURE.md
-  - VAULT-HOST-PROTOCOL.md (0.1.2) — the enclave ↔ parent (vsock) protocol as built; §10 what happens if versions meet
+  - VAULT-HOST-PROTOCOL.md (0.1.4) — the enclave ↔ parent (vsock) protocol as built; §10 what happens if versions meet
   - vettid-vault docs/SMOKE.md (hardware smoke test, 2026-10-02)
 classification: public (no secrets; safe for github.com/vettid)
 ---
@@ -1385,6 +1389,33 @@ release_starting`. The `vault-scaler` Lambda (host stack):
     shipped log line. The record's shape is tested; the extraction is
     phase 1's exit check, to be done on staging with S11. If the parent
     logs above INFO the record is not written.
+- *As built (0.1.20; vettid-vault #70 and #71, `main` 2daa9e4; from
+  staging release S11, which is not cut yet).* **The unreachable
+  parent in the log** (VAULT-MESSAGING §12.3; VAULT-HOST-PROTOCOL
+  §4.3, §7.4). In `/vettid-org/<stage>/vault-host`, none naming a
+  vault:
+  - from the enclave (`source=enclave`): "no ping from the parent:
+    every vault is locked if none comes" (`silent_s`, `limit_s`,
+    `vaults`; a warning at 60 s); "parent unreachable: locking every
+    vault" (`vaults`) and "parent unreachable: every vault locked"
+    (`vaults`, `killed`); "log records dropped: the parent was not
+    reading" (`count`); "control connection takes no write timeout"
+    (an error: the 60 s write limit then bounds nothing);
+  - from the parent: "heartbeat took longer than its interval" (`ms`,
+    `interval_ms`), "lease renewal failed; will retry" and "lease lost"
+    (these two name the vault, as before).
+  - The first enclave record can reach the log only while the parent
+    reads; the two "parent unreachable" records are written when the
+    parent is, by the rule, not listening, and arrive only if the
+    connection still carries them. An alarm should rest on the
+    parent's own records and on the registry row going stale, not on
+    these. No alarm is built on any of them yet.
+  - **What S11 is planned to carry** (vettid-vault, since
+    `release/staging/10`): #66 (relay connections and metrics), #69
+    (`relay_vault_limit`), #70 and #71 (the unreachable parent), and
+    one small fix still in review at the time of writing (#72, open).
+    #67 and #68 are test vectors and documentation. `deploy/host/` is
+    unchanged since S10, so S11's `host_files_sha256` is S10's.
 - *As built (0.1.17; the host stack, `lib/stacks/vault-host-stack.ts`;
   built, not yet verified on staging: RUNBOOK "The parent's metrics and
   their alarms").*

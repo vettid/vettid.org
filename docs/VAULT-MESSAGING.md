@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.29.0
+version: 0.29.1
 date: 2026-10-12
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -21,9 +21,19 @@ related:
   - VAULT-RELEASES.md (0.1.19; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
-  - VAULT-HOST-PROTOCOL.md (0.1.3; the enclave ↔ parent protocol as built)
-  - VAULT-LOCK.md (0.1.0, design note for 0.29.0: options, owner decisions L1–L16, rollout)
+  - VAULT-HOST-PROTOCOL.md (0.1.4; the enclave ↔ parent protocol as built)
+  - VAULT-LOCK.md (0.1.1, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.29.1: editorial-normative, as built: vettid-vault #70 and #71
+    (`main` 2daa9e4), for staging release S11, which is not cut yet.
+    No wire change. §12.3: **"Parent unreachable for 120 s"** is again
+    the row's name and now means 120 s without a `Ping`, connected or
+    not; the lock takes at most 10 s more; what is and is not lost
+    (replaces 0.27.4's interim wording). §12.4: "an unreachable
+    parent". §11.1: a lease renewal without an answer fails after 10 s,
+    the rest of a pass is judged by age, retries every 5 s, and lease
+    loss is told one vault at a time. §11.10 (deployment): what
+    protects the document KMS returns
   - 0.29.0: normative; **approved by the owner 2026-10-12** (vettid.org
     #247: VAULT-LOCK 0.1.0, decisions L1–L16 as recommended); **needs a
     vault release**
@@ -8350,6 +8360,15 @@ enclave's member index object (`users/<hex SHA-256("vettid/vms/2/user" ||
     with a lease length of 180 s. A renewal that finds another holder, or
     renewals that keep failing until 15 s before the lease expires, mean
     the lease is **lost**: the enclave locks the vault (§12.3).
+    (0.29.1, as built from S11.) A renewal that gets no answer counts
+    as failed after 10 s, and never later than the moment the lease
+    would be declared lost (15 s before it ends). After one such
+    give-up, the remaining leases of that pass are judged by their age
+    alone, without further calls. While renewals fail the parent tries
+    again every 5 s. A limit: the parent tells the enclave of lost
+    leases one vault at a time, so with very many vaults the last are
+    told after their leases have ended; the conditional state write
+    (§12.3) still guards those.
   - The parent releases the lease on lock, except for the lock that an
     enroll or unlock makes of the vault it is about to open (§11.4):
     that request's lease stays, and the parent releases it only if the
@@ -9748,6 +9767,16 @@ foreign key. `seal_key` is the key's full ARN. The enclave itself verifies
 each key's policy before sealing to it (§11.10.7), so a key whose policy
 lets anything other than the release open it, or could ever be changed, is
 refused.
+
+*What protects KMS's answer (0.29.1, as built).* KMS returns the data
+key to an enclave as a CMS EnvelopedData document for the attested
+recipient key, its content encrypted with AES-256-CBC. That format
+carries **no integrity of its own**: a changed ciphertext is noticed
+only when it happens to break the padding. The document's origin and
+integrity rest on the TLS session to KMS, which the enclave terminates
+(§12.2); the enclave never takes such a document from any other source.
+A result that is not exactly 32 bytes is refused, and a wrong key fails
+closed at the state's AEAD (§3.3).
 
 Storage: the sealed header is one object **per release**
 (`vaults/<vault_id>/header/<pcr0>`); an enclave reads only its own release's
@@ -11769,7 +11798,7 @@ not shared this way and are unchanged.
 | Memory pressure (the least recently active vault is evicted) | Same as an owner request. |
 | Enclave release or restart | Same if signalled. Otherwise all vaults lock through loss of memory, and their leases expire; a parent that sees the enclave restart releases the leases it held. |
 | Parent restart (the enclave keeps running) | The enclave locks every vault before it serves the new parent, which holds no leases for them. |
-| No control connection to the parent for 120 s (0.27.4: was "Parent unreachable for 120 s") | Every vault is locked: its lease can no longer be renewed. **As built** (vettid-vault through 8f2c8bf), the 120 s run from the moment the control connection ends, checked every 10 s. A parent that keeps the connection open but does not answer is **not** counted: vaults then stay unlocked with leases nobody renews until the connection breaks (VAULT-HOST-PROTOCOL §13 point 1); the conditional state write still stops two instances from writing one vault. **From a later vault release** (owner decision of 2026-10-12, H3) a connected but silent parent counts as unreachable: the enclave times the parent's `Ping` (sent every 20 s) and treats 120 s without one as no connection, and writes on the control connection get a deadline. This row then reads "Parent unreachable" again. |
+| Parent unreachable for 120 s (0.29.1, as built from staging release S11: no `Ping` from the parent for 120 s) | While a vault runs, every vault is locked once 120 s have passed without a `Ping` from the parent (VAULT-HOST-PROTOCOL §6.3), whether the control connection is open or not. The enclave checks every 10 s, so the decision falls 120 to 130 s after the last `Ping`. **Only a `Ping` restarts the count**, counted when the enclave reads it; a connection or a hello does not. With no vault running the count restarts at each check, except that a parent found unreachable stays unreachable until its next `Ping`, also with no vault running: a vault that appears meanwhile is locked at the next check. **Once the parent is found unreachable** the enclave makes no call to it until its next `Ping`, closes the connection, and locks every vault at once; a vault not locked within 10 s is killed. So every vault has locked or been killed at most 140 s after the last `Ping`. Nothing stored is lost: a vault's last durable state is its last successful write, nothing taken from the relay since was acked (§8.3), and nothing is zeroized as a split brain. A killed vault sends no `vault.locking` to its devices. Time the enclave's own reader waits at its limit of 128 requests is not counted as the parent's silence, up to 120 s. (Releases through S10 measured the time without a control connection, so a parent that stayed connected and silent was never unreachable; 0.27.4 said so.) |
 | Lease lost (renewal failed) | Same as an owner request, without the final flush if the state write fails. |
 | Split-brain guard: a conditional state write finds a newer version | Zeroize **immediately**, without flushing or acking. |
 | Vault deletion | Run the §7.4 revocations, then destroy the state and the header. |
@@ -11821,8 +11850,8 @@ vault**.
   user and group id, is not dumpable and cannot be traced, inherits no
   file descriptor but its channel and no writable shared file or
   directory, and runs under resource limits (memory, file descriptors).
-- **Locks:** an owner request, memory pressure, a lost lease or a lost
-  parent make the supervisor ask the process to lock (flush, `vault.locking`,
+- **Locks:** an owner request, memory pressure, a lost lease or an
+  unreachable parent (§12.3) make the supervisor ask the process to lock (flush, `vault.locking`,
   exit); a process that does not exit in time is killed. A process that
   detects a split brain (§12.3) zeroizes and exits without flushing.
   Killing one vault's process affects no other vault.
