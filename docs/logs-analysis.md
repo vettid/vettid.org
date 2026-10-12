@@ -132,9 +132,9 @@ Two table rules that will bite you if skipped:
 - **Every query must pin the distribution**: `WHERE distributionid = 'E17RU9Q7P4C2QY'`.
   The table uses injected partition projection, and Athena rejects any query
   without a static equality condition on `distributionid`.
-- The legacy `cloudfront_logs` table is the old v1 (TSV) format with the old
-  column names — historical data only, aging out under the 30-day retention.
-  New analysis targets `cloudfront_logs_v2`.
+- `cloudfront_logs_v2` is the only access-log table. The legacy v1 (TSV) log
+  and its `cloudfront_logs` table are gone: the log wrote the same requests a
+  second time.
 
 ### Fields
 
@@ -288,7 +288,8 @@ LIMIT 100;
 1. **Always filter on `date`** (or the `log_hour` partition for tighter
    scans: `log_hour >= date_format(now() - interval '1' day, '%Y/%m/%d/%H')`)
    — Athena bills by data scanned.
-2. Results land in the Athena results bucket and expire after 30 days.
+2. Results land in the Athena results bucket and expire after 90 days, like
+   the logs they are copies of.
 3. CLI automation:
    ```bash
    aws athena start-query-execution \
@@ -301,8 +302,10 @@ LIMIT 100;
 
 - Access logs typically arrive within minutes; up to an hour is normal.
 - WAF telemetry arrives in near-real-time.
-- Both streams are retained **30 days**, then deleted automatically
-  (retention is set in the CDK stack if it ever needs changing).
+- Both streams, and the Athena results over them, are kept **90 days**, then
+  deleted automatically: one period for every log store of the website
+  (`WEBSITE_LOG_RETENTION_DAYS` in `lib/constructs/website-logs.ts`; RUNBOOK
+  "Logging & analysis" lists the stores).
 
 ## Privacy considerations
 

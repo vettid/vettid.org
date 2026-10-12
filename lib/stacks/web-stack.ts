@@ -12,7 +12,8 @@ import * as athena from 'aws-cdk-lib/aws-athena';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
-import { SIGNUP_ORIGIN_VERIFY_SECRET_NAME } from './signup-stack';
+import { SIGNUP_ORIGIN_VERIFY_SECRET_NAME, UNSUBSCRIBE_API_PATH } from './signup-stack';
+import { WEBSITE_LOG_RETENTION_DAYS, websiteLogGroupRetention } from '../constructs/website-logs';
 
 export interface VettidOrgStackProps extends cdk.StackProps {
   domainName: string;
@@ -42,7 +43,16 @@ export class VettidOrgStack extends cdk.Stack {
       versioned: true,
     });
 
-    // S3 bucket for CloudFront access logs
+    // One retention period for every log store of the public website
+    // (lib/constructs/website-logs.ts).
+    const logRetention = cdk.Duration.days(WEBSITE_LOG_RETENTION_DAYS);
+
+    // The bucket of the legacy (v1, TSV) CloudFront standard logs. That log
+    // is OFF: it wrote the same requests as the v2 access log below (every
+    // field it had is in the v2 log), and nothing read it. Nothing writes here any more; the bucket stays only
+    // until what it holds has expired under the rule it was written under
+    // (30 days, or the website's period if that is ever shorter), after
+    // which the empty bucket can be removed (RUNBOOK "Logging & analysis").
     const logsBucket = new s3.Bucket(this, 'LogsBucket', {
       bucketName: `${props.domainName}-logs`,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -51,8 +61,7 @@ export class VettidOrgStack extends cdk.Stack {
       enforceSSL: true,
       lifecycleRules: [
         {
-          // Delete logs after 30 days
-          expiration: cdk.Duration.days(30),
+          expiration: cdk.Duration.days(Math.min(30, WEBSITE_LOG_RETENTION_DAYS)),
         },
       ],
       objectOwnership: s3.ObjectOwnership.OBJECT_WRITER,
@@ -67,7 +76,8 @@ export class VettidOrgStack extends cdk.Stack {
       enforceSSL: true,
       lifecycleRules: [
         {
-          expiration: cdk.Duration.days(30),
+          // Query results are copies of log lines: same period as the logs.
+          expiration: logRetention,
         },
       ],
     });
@@ -83,8 +93,8 @@ export class VettidOrgStack extends cdk.Stack {
       enforceSSL: true,
       lifecycleRules: [
         {
-          // Raw request logs kept 90 days (logging spec §5: 30-90 days raw)
-          expiration: cdk.Duration.days(90),
+          // Raw request logs (logging spec §5: 30-90 days raw)
+          expiration: logRetention,
         },
       ],
     });
@@ -283,6 +293,7 @@ function handler(event) {
       '/robots.txt', '/sitemap.xml', '/llms.txt', '/humans.txt',
       '/manifest.json', '/favicon.ico', '/apple-touch-icon',
       '/404', '/index.html',
+      '/unsubscribe',
     ];
     const matchUri = (positionalConstraint: string, searchString: string): wafv2.CfnWebACL.StatementProperty => ({
       byteMatchStatement: {
@@ -294,6 +305,33 @@ function handler(event) {
     });
     const matchUriExactly = (s: string) => matchUri('EXACTLY', s);
     const matchUriPrefix = (s: string) => matchUri('STARTS_WITH', s);
+
+    // The unsubscribe POST (the page's button, and mail providers' RFC 8058
+    // one-click requests). After a mailing the providers send these from a
+    // few addresses and one TLS fingerprint, in a burst: under the general
+    // limits below most would get 429, and a 429 here is a person who
+    // believes they left the list and did not. So it is taken out of every
+    // other rate rule and given its own, higher one (rate-limit-unsubscribe).
+    // A request with a wrong token costs one index query.
+    const unsubscribePost: wafv2.CfnWebACL.StatementProperty = {
+      andStatement: {
+        statements: [
+          matchUriExactly(UNSUBSCRIBE_API_PATH),
+          {
+            byteMatchStatement: {
+              fieldToMatch: { method: {} },
+              positionalConstraint: 'EXACTLY',
+              searchString: 'POST',
+              textTransformations: [{ priority: 0, type: 'NONE' }],
+            },
+          },
+        ],
+      },
+    };
+    const notUnsubscribePost: wafv2.CfnWebACL.StatementProperty = { notStatement: { statement: unsubscribePost } };
+    const apiExceptUnsubscribePost: wafv2.CfnWebACL.StatementProperty = {
+      andStatement: { statements: [matchUriPrefix('/api/'), notUnsubscribePost] },
+    };
 
     // WAF WebACL: default allow. Primary job is telemetry — its logs are the
     // only CloudFront-compatible source of JA3/JA4 TLS fingerprints and
@@ -316,6 +354,7 @@ function handler(event) {
               limit: 300,
               aggregateKeyType: 'IP',
               evaluationWindowSec: 300,
+              scopeDownStatement: notUnsubscribePost,
             },
           },
           visibilityConfig: {
@@ -376,6 +415,7 @@ function handler(event) {
               customKeys: [
                 { ja4Fingerprint: { fallbackBehavior: 'NO_MATCH' } },
               ],
+              scopeDownStatement: notUnsubscribePost,
             },
           },
           visibilityConfig: {
@@ -397,7 +437,7 @@ function handler(event) {
               limit: 20,
               aggregateKeyType: 'IP',
               evaluationWindowSec: 300,
-              scopeDownStatement: matchUriPrefix('/api/'),
+              scopeDownStatement: apiExceptUnsubscribePost,
             },
           },
           visibilityConfig: {
@@ -424,12 +464,34 @@ function handler(event) {
               customKeys: [
                 { ja4Fingerprint: { fallbackBehavior: 'NO_MATCH' } },
               ],
-              scopeDownStatement: matchUriPrefix('/api/'),
+              scopeDownStatement: apiExceptUnsubscribePost,
             },
           },
           visibilityConfig: {
             cloudWatchMetricsEnabled: true,
             metricName: 'vettid-org-rate-limit-api-ja4',
+            sampledRequestsEnabled: true,
+          },
+        },
+        {
+          // The unsubscribe POST's own limit (see unsubscribePost above):
+          // per IP, since one provider address carries many people's
+          // requests. Far above any real burst for a list this size, and
+          // still a ceiling on someone guessing tokens (which are 256 bits).
+          name: 'rate-limit-unsubscribe',
+          priority: 7,
+          action: { block: { customResponse: { responseCode: 429 } } },
+          statement: {
+            rateBasedStatement: {
+              limit: 2000,
+              aggregateKeyType: 'IP',
+              evaluationWindowSec: 300,
+              scopeDownStatement: unsubscribePost,
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: 'vettid-org-rate-limit-unsubscribe',
             sampledRequestsEnabled: true,
           },
         },
@@ -476,7 +538,7 @@ function handler(event) {
     // WAF log group name must start with aws-waf-logs-
     const wafLogGroup = new logs.LogGroup(this, 'WafLogGroup', {
       logGroupName: 'aws-waf-logs-vettid-org',
-      retention: logs.RetentionDays.THREE_MONTHS,
+      retention: websiteLogGroupRetention(),
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
@@ -515,12 +577,9 @@ function handler(event) {
       defaultRootObject: 'index.html',
       httpVersion: cloudfront.HttpVersion.HTTP2_AND_3,
       priceClass: cloudfront.PriceClass.PRICE_CLASS_100,
-      // Enable access logging
-      enableLogging: true,
-      logBucket: logsBucket,
-      logFilePrefix: 'cloudfront/',
-      // Logging spec §5: never log Cookie header values
-      logIncludesCookies: false,
+      // Access logging is standard logging v2 only (the delivery below).
+      // The legacy standard log to logsBucket wrote the same requests a
+      // second time, under a different retention; it is off.
       webAclId: webAcl.attrArn,
       // Custom error responses for better user experience
       errorResponses: [
@@ -624,7 +683,7 @@ function handler(event) {
     }
 
     // --- CloudFront standard logging v2 (JSON Lines to S3) ---
-    // Runs alongside the legacy TSV logs; delivered via CloudWatch vended-log
+    // The site's one access log; delivered via CloudWatch vended-log
     // delivery (DeliverySource -> DeliveryDestination -> Delivery).
 
     // Vended-log delivery writes with bucket-owner-full-control from the
@@ -752,68 +811,6 @@ function handler(event) {
       databaseInput: {
         name: 'vettid_logs',
         description: 'Database for VettID CloudFront access logs',
-      },
-    });
-
-    // Create Glue Table for CloudFront logs
-    const glueTable = new glue.CfnTable(this, 'CloudFrontLogsTable', {
-      catalogId: this.account,
-      databaseName: glueDatabase.ref,
-      tableInput: {
-        name: 'cloudfront_logs',
-        description: 'CloudFront access logs table',
-        tableType: 'EXTERNAL_TABLE',
-        parameters: {
-          'EXTERNAL': 'TRUE',
-          'skip.header.line.count': '2',
-        },
-        storageDescriptor: {
-          columns: [
-            { name: 'date', type: 'date' },
-            { name: 'time', type: 'string' },
-            { name: 'location', type: 'string' },
-            { name: 'bytes', type: 'bigint' },
-            { name: 'request_ip', type: 'string' },
-            { name: 'method', type: 'string' },
-            { name: 'host', type: 'string' },
-            { name: 'uri', type: 'string' },
-            { name: 'status', type: 'int' },
-            { name: 'referrer', type: 'string' },
-            { name: 'user_agent', type: 'string' },
-            { name: 'query_string', type: 'string' },
-            { name: 'cookie', type: 'string' },
-            { name: 'result_type', type: 'string' },
-            { name: 'request_id', type: 'string' },
-            { name: 'host_header', type: 'string' },
-            { name: 'request_protocol', type: 'string' },
-            { name: 'request_bytes', type: 'bigint' },
-            { name: 'time_taken', type: 'float' },
-            { name: 'xforwarded_for', type: 'string' },
-            { name: 'ssl_protocol', type: 'string' },
-            { name: 'ssl_cipher', type: 'string' },
-            { name: 'response_result_type', type: 'string' },
-            { name: 'http_version', type: 'string' },
-            { name: 'fle_status', type: 'string' },
-            { name: 'fle_encrypted_fields', type: 'int' },
-            { name: 'c_port', type: 'int' },
-            { name: 'time_to_first_byte', type: 'float' },
-            { name: 'x_edge_detailed_result_type', type: 'string' },
-            { name: 'sc_content_type', type: 'string' },
-            { name: 'sc_content_len', type: 'bigint' },
-            { name: 'sc_range_start', type: 'bigint' },
-            { name: 'sc_range_end', type: 'bigint' },
-          ],
-          location: `s3://${logsBucket.bucketName}/cloudfront/`,
-          inputFormat: 'org.apache.hadoop.mapred.TextInputFormat',
-          outputFormat: 'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat',
-          serdeInfo: {
-            serializationLibrary: 'org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe',
-            parameters: {
-              'field.delim': '\t',
-              'serialization.format': '\t',
-            },
-          },
-        },
       },
     });
 
@@ -973,7 +970,7 @@ function handler(event) {
     // Logs bucket output
     new cdk.CfnOutput(this, 'LogsBucketName', {
       value: logsBucket.bucketName,
-      description: 'S3 bucket name for CloudFront access logs',
+      description: 'S3 bucket of the retired legacy CloudFront logs (nothing writes to it; empties itself within 30 days)',
     });
 
     // Athena database output

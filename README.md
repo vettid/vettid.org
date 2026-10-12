@@ -12,9 +12,9 @@ AWS CDK infrastructure and static content for [vettid.org](https://vettid.org).
 - **ACM**: certificate for `vettid.org` + `www.vettid.org` (DNS-validated, us-east-1)
 - **WAF** (`vettid-org-telemetry`): default-allow WebACL used purely for telemetry — its logs carry JA3/JA4 TLS fingerprints and ordered request headers (cookie/authorization redacted) to CloudWatch log group `aws-waf-logs-vettid-org`
 - **Access logs** (per `~/VettID/vettid-org-logging-spec.md`):
-  - Standard logging v2: JSON Lines to `vettid-org-access-logs` (90-day retention), queryable via Athena table `vettid_logs.cloudfront_logs_v2` (partition projection; pass `distributionid` as an injected partition)
-  - Legacy TSV logs to `vettid.org-logs` (30-day retention), queryable via `vettid_logs.cloudfront_logs`; cookies excluded
+  - Standard logging v2: JSON Lines to `vettid-org-access-logs`, queryable via Athena table `vettid_logs.cloudfront_logs_v2` (partition projection; pass `distributionid` as an injected partition). It is the site's one access log: the legacy TSV log is off.
 - **Athena**: workgroup `vettid-logs-workgroup`, results to `vettid.org-athena-results`
+- **Log retention**: one period, 90 days, for every log store of the website and its sign-up path (`WEBSITE_LOG_RETENTION_DAYS` in `lib/constructs/website-logs.ts`)
 
 ## Website
 
@@ -48,6 +48,9 @@ The mailing list uses SES identity verification as the double opt-in:
 POST /api/subscribe calls CreateEmailIdentity, SES sends its verification
 email, and a 15-minute sweep promotes verified addresses to `confirmed` in
 the `vettid-org-mailing-list` table. Works entirely inside the SES sandbox.
+Every mail to the list carries the subscriber's unsubscribe link and the
+RFC 8058 `List-Unsubscribe` headers (`lambda/signup/list-mail.mjs`); see
+RUNBOOK "Mailing list".
 
 ## Commands
 
@@ -74,7 +77,7 @@ dates to watch. CI (`.github/workflows/ci.yml`) runs build + tests +
 
 ## Log analysis
 
-See `docs/logs-analysis.md` for Athena queries against the legacy table. The v2 JSON table (`cloudfront_logs_v2`) requires injected-partition queries, e.g.:
+See `docs/logs-analysis.md` for Athena queries. The v2 JSON table (`cloudfront_logs_v2`) requires injected-partition queries, e.g.:
 
 ```sql
 SELECT * FROM vettid_logs.cloudfront_logs_v2

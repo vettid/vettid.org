@@ -1974,7 +1974,8 @@ each member once its forwarder is deployed.
 
 - Flow: `POST /api/subscribe` → SES `CreateEmailIdentity` (SES's verification
   email IS the double opt-in) → pending row in `vettid-org-mailing-list` →
-  15-min sweep confirms verified addresses.
+  15-min sweep confirms verified addresses and sends each a short welcome
+  mail (their first mail from us, carrying their unsubscribe link).
 - Addresses SES has **already** verified (e.g. VettID members) get no SES mail,
   so the API sends its own "Confirm your VettID updates subscription" email
   with a single-use link (`GET /api/subscribe/confirm?t=…`, 48 h; only the
@@ -1983,15 +1984,26 @@ each member once its forwarder is deployed.
   `https://vettid.org/?subscribed=1` (`=0` if stale). Both kinds of mail share
   the 200/hour global send cap.
 - The API only serves requests carrying CloudFront's `X-Origin-Verify` secret
-  (`vettid-org-signup/origin-verify`), and only `application/json` POSTs (415
-  otherwise). Rotating the secret: update it, then redeploy VettidOrgStack
+  (`vettid-org-signup/origin-verify`); `POST /api/subscribe` takes only
+  `application/json` (415 otherwise). Rotating the secret: update it, then redeploy VettidOrgStack
   (the Lambda re-reads it within 5 minutes).
-- The sweep reclaims (deletes) SES identities of rows that expired unverified —
-  unless the address belongs to a row in `vettid-org-members` (a pending member
-  may be mid-verification). It can never delete the `vettid.org` domain
+- The sweep reclaims (deletes) SES identities of rows that expired unverified,
+  but only an identity the list itself created (`ownsIdentity` on the row,
+  see "Unsubscribe"), and not if the address belongs to a row in
+  `vettid-org-members` (a pending member may be mid-verification). It can never delete the `vettid.org` domain
   identity (explicit IAM deny).
 - Every confirmation emails **admin@vettid.org** from `no-reply@vettid.org`
-  (SES domain identity, DKIM in the zone).
+  (SES domain identity, DKIM in the zone). The notice says that somebody
+  confirmed, how and when; it does **not** carry the address (that mailbox is
+  at another provider, outside the list's storage and its deletion). To see
+  who is on the list, export it (below).
+- **One-time clean-up of the admin mailbox (owner).** Until this change every
+  notice carried the subscriber's address. Those copies are still in the
+  admin@vettid.org mailbox and can only be removed there: search it for the
+  subject `New mailing list subscriber` from `no-reply@vettid.org`, delete
+  every result dated before the deploy of this change, and empty the trash
+  (and any archive, forward or local mail-client copy). The addresses
+  themselves are still in the table, so nothing is lost.
 - Export subscribers (the table also holds `#…` counter/link rows and
   unconfirmed rows, so filter):
   `aws dynamodb scan --table-name vettid-org-mailing-list --filter-expression '#s = :c' --expression-attribute-names '{"#s":"status"}' --expression-attribute-values '{":c":{"S":"confirmed"}}' --output json`
@@ -2001,15 +2013,185 @@ each member once its forwarder is deployed.
   design), but bulk sending to the list requires production access — request it
   in the SES console before the first newsletter.
 
+### Unsubscribe
+
+- **The token.** Every subscriber row has `unsubToken`: 32 random bytes
+  (base64url), created with the row, found through the sparse, keys-only
+  index `unsub-index`. It names the row without carrying or accepting an
+  address, works for as long as the row exists (also before confirmation),
+  and is dead once used, because unsubscribing deletes the row; signing up
+  again makes a new row with a new token. There is no server secret.
+- **The link in the mail body** is `https://vettid.org/unsubscribe/#u=<token>`.
+  The token is in the URL fragment, which browsers do not send: it reaches no
+  log. The page (`website/unsubscribe/`, `website/js/unsubscribe.js`) shows
+  one button; opening it changes nothing. The button posts the token in a
+  form body to `POST /api/subscribe/unsubscribe`, which answers 303 to
+  `/unsubscribe/done/` ("You have been removed from the VettID mailing
+  list.").
+- **The headers** (RFC 8058): `List-Unsubscribe:
+  <https://vettid.org/api/subscribe/unsubscribe?u=<token>>` and
+  `List-Unsubscribe-Post: List-Unsubscribe=One-Click`. A mail provider's
+  one-click POST to that URL removes the row and gets 200 with the same
+  sentence as text. Here the token is in the query string, so it is in the
+  CloudFront and WAF logs for their 90 days, and it stays valid until it is
+  used (a GET logs it without using it); all it can do is remove that one
+  address. A **GET** of that URL never unsubscribes (scanners and link
+  previewers fetch links): it redirects to the page above, which takes the
+  token out of the address bar and the browser history once it has read it.
+- **The answers are the same** for a valid, a used, an unknown and a
+  malformed token, so the route cannot be used to find out whether an address
+  or a token is on the list. Only a failure on our side answers differently
+  (503, "nothing was changed"). Nothing is cached (`no-store`, and `/api/*`
+  has caching disabled). Neither Lambda logs an address or a token.
+- **What is deleted, and when.**
+  - At once: the subscriber's row (address, times, status, token) and, for an
+    unconfirmed row, its confirm-link pointer. The address is off the list
+    from that moment.
+  - **Only an SES identity the list created is ever deleted.** A row carries
+    `ownsIdentity = true` only when the sign-up's own `CreateEmailIdentity`
+    call succeeded. An identity that was already there (a member's, one the
+    operator verified, anyone's: the sign-up form accepts any address, and
+    the confirmation mail it sends carries a working unsubscribe link) is
+    never touched, whatever happens to the row. A row without the flag
+    leaves no marker when it is removed. Rows from before this change have
+    no flag and are treated as not the list's. For the one subscriber
+    confirmed before this change that is also the truth: CloudTrail shows the
+    sign-up's `CreateEmailIdentity` for it answered `AlreadyExistsException`
+    (2026-08-14), so the identity was not the list's.
+  - Within 15 minutes, normally, for a row with the flag: the address's SES
+    identity. The API leaves a marker row (`#release#…`, `status = release`,
+    holding the address, so until the sweep the address is still in the
+    table) and the sweep deletes the identity, then the marker. The sweep
+    keeps the identity, and only deletes the marker, when the address belongs
+    to a member (the member table's `email:<addr>` marker row, read strongly
+    consistent, or the email index), when the address is back on the list
+    (that row then takes the flag over), or when it is one of ours
+    (`@vettid.org`).
+  - If the member lookup or SES fails, the marker stays and every sweep tries
+    again (`releaseRetry` in the sweep's log line), for 7 days. Then the
+    sweep gives up on it (`releaseAbandoned`): the address is taken off the
+    marker, the marker leaves the queue and expires after 90 days as a bare
+    count, and the SES identity is **not** deleted (never on doubt). Markers
+    are worked newest first and page by page, and independently of the
+    pending rows, so a failing one holds up nothing else.
+  - **Alarms** (to `vettid-org-security-alerts`):
+    `vettid-org-mailing-list-release-retry` (retries in four sweeps in a row:
+    an address has been waiting an hour),
+    `vettid-org-mailing-list-release-abandoned` (the sweep gave up on one),
+    `vettid-org-mailing-list-sweep-errors` (the sweep failed four times in a
+    row). What to do: read the sweep's log group for `release_failed` /
+    `member_lookup_failed` and their error names; waiting markers are
+    `aws dynamodb query --table-name vettid-org-mailing-list --index-name status-index --key-condition-expression '#s = :r' --expression-attribute-names '{"#s":"status"}' --expression-attribute-values '{":r":{"S":"release"}}'`
+    (each `target` is an address to finish by hand: steps 2 and 3 of
+    "Removal by hand", then delete the marker row). After an abandonment the
+    address is no longer in the table: compare
+    `aws sesv2 list-email-identities` with the list (export above) and the
+    members table, and delete an address identity that neither has, if the
+    list created it (CloudTrail: a `CreateEmailIdentity` by the sign-up
+    function's role that succeeded).
+  - Within 35 days: the table's point-in-time-recovery backups.
+  - **Not** deleted by unsubscribing: the organization CloudTrail (audit
+    stack, 400 days) records every SES `CreateEmailIdentity`,
+    `GetEmailIdentity` (the sweep asks once per pending row every 15
+    minutes) and `DeleteEmailIdentity` call with the address as a request
+    parameter; and
+    whatever is in the admin mailbox from before the notice lost the address
+    (clean-up above).
+- **Subscribers from before this change** have no token until one is made
+  for them. Run once after the deploy, and again right before any mailing
+  (safe to repeat; a token is never replaced):
+  `node scripts/list/unsubscribe-links.mjs` (prints counts only).
+- **Any future mailing** must be list mail as the Lambdas send it: build each
+  message with `listMessage({ to, subject, text, token })` from
+  `lambda/signup/list-mail.mjs` (it appends the link and sets both headers),
+  with the row's `unsubToken` (`ensureUnsubscribeToken()` returns it and
+  creates it if missing). For a tool that cannot import that module,
+  `node scripts/list/unsubscribe-links.mjs --links` prints, per confirmed
+  subscriber, the address, the body link and the one-click URL (tab
+  separated; they are addresses and tokens: to a terminal or a pipe, never a
+  log or a file that is kept). The headers have to be covered by the DKIM
+  signature for providers to honour them; check one delivered message before
+  the first real mailing.
+- **Limits on the unsubscribe POST.** After a mailing, providers send their
+  one-click POSTs from a few addresses in a burst, and a 429 there is a
+  person who believes they left and did not. So `POST
+  /api/subscribe/unsubscribe` is outside the site's general rate rules (300
+  and 20 per 5 minutes per IP, 600 and 50 per JA4) and has its own: WAF
+  `rate-limit-unsubscribe`, 2,000 per 5 minutes per IP, and an API throttle
+  of 50 per second (burst 100) instead of the stage's 5. A request with a
+  wrong token costs one index query. Before a mailing to more than a few
+  thousand people, look at these two numbers again
+  (`lib/stacks/web-stack.ts`, `UNSUBSCRIBE_THROTTLE` in
+  `lib/stacks/signup-stack.ts`). The GET and the pages stay under the
+  general rules.
+- **Mails the list sends today**, all with the link and headers: the
+  confirmation link (to an address SES had already verified) and the welcome
+  mail the sweep sends when an SES verification is accepted. Amazon's own
+  verification email cannot carry our link; the welcome mail is why those
+  subscribers have one.
+- **Removal by hand** (a request by email; the address is `a@example.com`):
+  1. The row: `aws dynamodb delete-item --table-name vettid-org-mailing-list --key '{"email":{"S":"a@example.com"}}' --return-values ALL_OLD`
+     (lower-case the address; the output shows what was there. If it shows a
+     `tokenHash`, also delete the key `#confirm#<tokenHash>`.)
+  2. The SES identity, unless a member uses the address:
+     `aws dynamodb query --table-name vettid-org-members --index-name email-index --key-condition-expression 'email = :e' --expression-attribute-values '{":e":{"S":"a@example.com"}}' --select COUNT`
+     and, if the count is 0,
+     `aws sesv2 delete-email-identity --email-identity a@example.com`.
+     Delete it only if the list created it: the row you deleted in step 1
+     had `ownsIdentity` true. If it had not, leave the identity.
+  3. The admin mailbox: delete any `New mailing list subscriber` notice that
+     names the address (only notices from before this change do), and the
+     request email itself once it is answered, unless it has to be kept as a
+     record of what was asked.
+  4. What remains, and for how long: the table's backups (35 days), the
+     CloudTrail record of the SES calls (400 days), and request logs, which
+     hold no address.
+- **A window that remains** (rare; recovery by hand): a member who registers
+  with an address in the instant between the sweep's member check and its
+  `DeleteEmailIdentity` loses the SES identity their verification mail was
+  sent for. The check reads the member table's marker row strongly
+  consistent, so the window is the milliseconds between two calls, not the
+  index's second. If it happens the member's link fails: use the admin
+  site's "resend verification" for that person, which creates the identity
+  again.
+
 ## Logging & analysis
 
+- **One retention period for the public website's logs: 90 days** (the
+  owner's decision of 2026-10-12). It is one constant,
+  `WEBSITE_LOG_RETENTION_DAYS` in `lib/constructs/website-logs.ts`, used by
+  every store the site and its sign-up path write to:
+  the CloudFront access logs (`vettid-org-access-logs`), the WAF log group
+  (`aws-waf-logs-vettid-org`), the Athena results bucket
+  (`vettid.org-athena-results`), and the two sign-up Lambdas' log groups
+  (VettidOrgSignupStack). To change it: change the number, deploy
+  `VettidOrgSignupStack` and `VettidOrgStack`, and change the number on the
+  privacy page. CloudWatch accepts only certain values (30, 60, 90, 120, …);
+  synth fails on any other. A shorter period also deletes what is already
+  older than it (S3 within a day or two, CloudWatch within about three); a
+  longer one keeps what exists for longer. The sign-up HTTP API writes no
+  access log. The account and admin sites, the member API and the relay have
+  their own settings (below and in their stacks) and are not touched by this
+  constant.
 - CloudFront v2 JSON logs → `s3://vettid-org-access-logs/AWSLogs/<acct>/CloudFront/cloudfront-v2/…`
-  (90-day retention) → Athena table `vettid_logs.cloudfront_logs_v2`
-  (partition projection; pass `distributionid` as injected partition).
-- Legacy TSV logs → `vettid.org-logs` (30-day) → `vettid_logs.cloudfront_logs`.
+  → Athena table `vettid_logs.cloudfront_logs_v2`
+  (partition projection; pass `distributionid` as injected partition). This is
+  the site's only access log.
+- The legacy TSV log (`vettid.org-logs`, table `vettid_logs.cloudfront_logs`)
+  is **off** and its table is gone: it wrote the same requests a second time.
+  The bucket still exists and empties itself under its 30-day rule. Once it
+  is empty (30 days after the deploy that turned the log off:
+  `aws s3 ls s3://vettid.org-logs --recursive --summarize | tail -2`), the
+  bucket and its `LogsBucket` resource and output can be removed in a later
+  change.
 - WAF telemetry (JA3/JA4 fingerprints, ordered headers, cookie/auth redacted) →
-  CloudWatch group `aws-waf-logs-vettid-org` (90-day). Join to CloudFront logs
+  CloudWatch group `aws-waf-logs-vettid-org`. Join to CloudFront logs
   on request ID.
+- Not visitor logs, and not on the website's period: the log group of the
+  CDK site-deployment helper (`/aws/lambda/VettidOrgStack-CustomCDKBucketDeployment…`:
+  file names of each site deploy), and the organization CloudTrail (audit
+  stack, 400 days), which records the SES identity calls the mailing list
+  makes, with the address (see "Unsubscribe").
 - account.vettid.org: its web ACL (`vettid-org-account`; per-IP 30/5 min on
   `/api/public/*` + `/api/auth/*`, 300/5 min on `/api/*`, IP reputation in
   count mode) logs to `aws-waf-logs-vettid-org-account`; admin.vettid.org's

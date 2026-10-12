@@ -6,6 +6,7 @@ import { VettidOrgSignupStack } from '../lib/stacks/signup-stack';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import { VettidOrgPlaybooksStack } from '../lib/stacks/playbooks-stack';
 import { VettidDevRedirectStack } from '../lib/stacks/dev-redirect-stack';
+import { WEBSITE_LOG_RETENTION_DAYS, websiteLogGroupRetention } from '../lib/constructs/website-logs';
 
 const AMAZON_CAA = [
   '0 issue "amazon.com"',
@@ -57,7 +58,7 @@ describe('VettidOrgStack', () => {
       });
     });
 
-    test('creates logs bucket with lifecycle policy', () => {
+    test('the retired legacy logs bucket keeps the 30-day rule its contents were written under', () => {
       template.hasResourceProperties('AWS::S3::Bucket', {
         BucketName: 'test.example.com-logs',
         LifecycleConfiguration: {
@@ -69,6 +70,32 @@ describe('VettidOrgStack', () => {
           ],
         },
       });
+    });
+
+    test('every log store of the website keeps the one period (90 days)', () => {
+      expect(WEBSITE_LOG_RETENTION_DAYS).toBe(90);
+      for (const BucketName of ['vettid-org-access-logs', 'test.example.com-athena-results']) {
+        template.hasResourceProperties('AWS::S3::Bucket', {
+          BucketName,
+          LifecycleConfiguration: { Rules: [{ ExpirationInDays: WEBSITE_LOG_RETENTION_DAYS, Status: 'Enabled' }] },
+        });
+      }
+      // The only log group of the stack is the WAF's.
+      const groups = Object.values<any>(template.findResources('AWS::Logs::LogGroup'));
+      expect(groups.map((g) => g.Properties)).toEqual([
+        expect.objectContaining({ LogGroupName: 'aws-waf-logs-vettid-org', RetentionInDays: WEBSITE_LOG_RETENTION_DAYS }),
+      ]);
+      // No bucket of the stack is left without an expiry except the site itself.
+      const buckets = Object.values<any>(template.findResources('AWS::S3::Bucket'));
+      const unbounded = buckets.filter((b) => !b.Properties.LifecycleConfiguration).map((b) => b.Properties.BucketName);
+      expect(unbounded).toEqual(['test.example.com-website']);
+    });
+
+    test('the period must be one CloudWatch Logs accepts', () => {
+      expect(websiteLogGroupRetention(90)).toBe(90);
+      expect(websiteLogGroupRetention(30)).toBe(30);
+      expect(() => websiteLogGroupRetention(45)).toThrow(/not a retention CloudWatch Logs accepts/);
+      expect(() => websiteLogGroupRetention(9999)).toThrow();
     });
 
     test('creates Athena results bucket', () => {
@@ -131,15 +158,45 @@ describe('VettidOrgStack', () => {
       });
     });
 
-    test('enables access logging without cookie values', () => {
-      template.hasResourceProperties('AWS::CloudFront::Distribution', {
-        DistributionConfig: {
-          Logging: Match.objectLike({
-            Prefix: 'cloudfront/',
-            IncludeCookies: false,
-          }),
-        },
-      });
+    test('the legacy standard log is off: v2 is the one access log', () => {
+      const dist = Object.values<any>(template.findResources('AWS::CloudFront::Distribution'))[0];
+      expect(dist.Properties.DistributionConfig.Logging).toBeUndefined();
+      template.resourceCountIs('AWS::Logs::Delivery', 1);
+    });
+
+    test('the unsubscribe POST is outside every general rate rule and has its own, higher one', () => {
+      const acl = Object.values<any>(template.findResources('AWS::WAFv2::WebACL'))[0];
+      const rules: any[] = acl.Properties.Rules;
+      const isUnsubPost = (st: any) =>
+        JSON.stringify(st) ===
+        JSON.stringify({
+          AndStatement: {
+            Statements: [
+              { ByteMatchStatement: { FieldToMatch: { UriPath: {} }, PositionalConstraint: 'EXACTLY', SearchString: '/api/subscribe/unsubscribe', TextTransformations: [{ Priority: 0, Type: 'NONE' }] } },
+              { ByteMatchStatement: { FieldToMatch: { Method: {} }, PositionalConstraint: 'EXACTLY', SearchString: 'POST', TextTransformations: [{ Priority: 0, Type: 'NONE' }] } },
+            ],
+          },
+        });
+      const rate = (name: string) => rules.find((r) => r.Name === name).Statement.RateBasedStatement;
+      for (const name of ['rate-limit-per-ip', 'rate-limit-per-ja4']) {
+        expect(isUnsubPost(rate(name).ScopeDownStatement.NotStatement.Statement)).toBe(true);
+      }
+      for (const name of ['rate-limit-api', 'rate-limit-api-ja4']) {
+        const [prefix, not] = rate(name).ScopeDownStatement.AndStatement.Statements;
+        expect(prefix.ByteMatchStatement).toMatchObject({ PositionalConstraint: 'STARTS_WITH', SearchString: '/api/' });
+        expect(isUnsubPost(not.NotStatement.Statement)).toBe(true);
+      }
+      // the general limits themselves are unchanged
+      expect([rate('rate-limit-per-ip').Limit, rate('rate-limit-per-ja4').Limit, rate('rate-limit-api').Limit, rate('rate-limit-api-ja4').Limit]).toEqual([300, 600, 20, 50]);
+      const own = rules.find((r) => r.Name === 'rate-limit-unsubscribe');
+      expect(own.Action).toEqual({ Block: { CustomResponse: { ResponseCode: 429 } } });
+      expect(own.Statement.RateBasedStatement).toMatchObject({ Limit: 2000, AggregateKeyType: 'IP', EvaluationWindowSec: 300 });
+      expect(isUnsubPost(own.Statement.RateBasedStatement.ScopeDownStatement)).toBe(true);
+      expect(new Set(rules.map((r) => r.Priority)).size).toBe(rules.length);
+    });
+
+    test('the unsubscribe pages are not counted as probe traffic', () => {
+      expect(JSON.stringify(template.findResources('AWS::WAFv2::WebACL'))).toContain('"SearchString":"/unsubscribe"');
     });
 
     test('attaches telemetry WAF WebACL with logging and redaction', () => {
@@ -199,7 +256,7 @@ describe('VettidOrgStack', () => {
               RateBasedStatement: Match.objectLike({
                 Limit: 20,
                 AggregateKeyType: 'IP',
-                ScopeDownStatement: Match.objectLike({ ByteMatchStatement: Match.anyValue() }),
+                ScopeDownStatement: Match.objectLike({ AndStatement: Match.anyValue() }), // /api/, except the unsubscribe POST
               }),
             },
           }),
@@ -211,7 +268,7 @@ describe('VettidOrgStack', () => {
                 Limit: 50,
                 AggregateKeyType: 'CUSTOM_KEYS',
                 CustomKeys: [Match.objectLike({ JA4Fingerprint: Match.anyValue() })],
-                ScopeDownStatement: Match.objectLike({ ByteMatchStatement: Match.anyValue() }),
+                ScopeDownStatement: Match.objectLike({ AndStatement: Match.anyValue() }), // /api/, except the unsubscribe POST
               }),
             },
           }),
@@ -302,13 +359,9 @@ describe('VettidOrgStack', () => {
       });
     });
 
-    test('creates CloudFront logs table', () => {
-      template.hasResourceProperties('AWS::Glue::Table', {
-        TableInput: {
-          Name: 'cloudfront_logs',
-          TableType: 'EXTERNAL_TABLE',
-        },
-      });
+    test('only the v2 logs table exists (the legacy cloudfront_logs table went with its log)', () => {
+      const tables = Object.values<any>(template.findResources('AWS::Glue::Table'));
+      expect(tables.map((t) => t.Properties.TableInput.Name)).toEqual(['cloudfront_logs_v2']);
     });
 
     test('creates Athena workgroup', () => {
@@ -393,13 +446,14 @@ describe('VettidOrgSignupStack', () => {
     });
   });
 
-  test('creates subscribe + confirm routes and scheduled verification sweep', () => {
-    template.hasResourceProperties('AWS::ApiGatewayV2::Route', {
-      RouteKey: 'POST /api/subscribe',
-    });
-    template.hasResourceProperties('AWS::ApiGatewayV2::Route', {
-      RouteKey: 'GET /api/subscribe/confirm',
-    });
+  test('creates subscribe, confirm and unsubscribe routes and scheduled verification sweep', () => {
+    const routes = Object.values<any>(template.findResources('AWS::ApiGatewayV2::Route')).map((r) => r.Properties.RouteKey).sort();
+    expect(routes).toEqual([
+      'GET /api/subscribe/confirm',
+      'GET /api/subscribe/unsubscribe',
+      'POST /api/subscribe',
+      'POST /api/subscribe/unsubscribe',
+    ]);
     template.hasResourceProperties('AWS::Events::Rule', {
       ScheduleExpression: 'rate(15 minutes)',
     });
@@ -414,6 +468,87 @@ describe('VettidOrgSignupStack', () => {
     }
     template.resourceCountIs('Custom::LogRetention', 0);
     expect(JSON.stringify(template.toJSON())).not.toContain('logs:PutRetentionPolicy');
+  });
+
+  test("the Lambdas' logs keep the website's one period; the API writes no access log", () => {
+    const groups = Object.values<any>(template.findResources('AWS::Logs::LogGroup'));
+    expect(groups).toHaveLength(2);
+    for (const g of groups) expect(g.Properties.RetentionInDays).toBe(WEBSITE_LOG_RETENTION_DAYS);
+    const stage = Object.values<any>(template.findResources('AWS::ApiGatewayV2::Stage'))[0];
+    expect(stage.Properties.AccessLogSettings).toBeUndefined();
+  });
+
+  test('the unsubscribe POST has its own API throttle; everything else keeps the stage default', () => {
+    const stage = Object.values<any>(template.findResources('AWS::ApiGatewayV2::Stage'))[0];
+    expect(stage.Properties.DefaultRouteSettings).toMatchObject({ ThrottlingRateLimit: 5, ThrottlingBurstLimit: 10 });
+    expect(stage.Properties.RouteSettings).toEqual({
+      'POST /api/subscribe/unsubscribe': { ThrottlingRateLimit: 50, ThrottlingBurstLimit: 100 },
+    });
+    expect(stage.DependsOn.length).toBeGreaterThanOrEqual(2); // the routes exist first
+  });
+
+  test('an unfinished unsubscribe is not silent: alarms on retries, on giving up and on a failing sweep, to the alerts topic', () => {
+    const filters = Object.values<any>(template.findResources('AWS::Logs::MetricFilter')).map((f) => f.Properties);
+    expect(filters.map((f) => f.FilterPattern).sort()).toEqual([
+      '{ ($.outcome = "sweep") && ($.releaseAbandoned > 0) }',
+      '{ ($.outcome = "sweep") && ($.releaseRetry > 0) }',
+    ]);
+    const alarms = Object.values<any>(template.findResources('AWS::CloudWatch::Alarm')).map((a) => a.Properties);
+    const byName = Object.fromEntries(alarms.map((a) => [a.AlarmName, a]));
+    expect(Object.keys(byName).sort()).toEqual([
+      'vettid-org-mailing-list-release-abandoned',
+      'vettid-org-mailing-list-release-retry',
+      'vettid-org-mailing-list-sweep-errors',
+    ]);
+    expect(byName['vettid-org-mailing-list-release-retry']).toMatchObject({ MetricName: 'releaseRetry', Namespace: 'VettID/MailingList', Period: 900, EvaluationPeriods: 4, DatapointsToAlarm: 4, Threshold: 0, ComparisonOperator: 'GreaterThanThreshold', TreatMissingData: 'notBreaching' });
+    expect(byName['vettid-org-mailing-list-release-abandoned']).toMatchObject({ MetricName: 'releaseAbandoned', EvaluationPeriods: 1, Threshold: 0 });
+    expect(byName['vettid-org-mailing-list-sweep-errors']).toMatchObject({ MetricName: 'Errors', Namespace: 'AWS/Lambda', EvaluationPeriods: 4 });
+    for (const a of alarms) {
+      expect(JSON.stringify(a.AlarmActions)).toContain(':sns:us-east-1:123456789012:vettid-org-security-alerts');
+    }
+  });
+
+  test("the sweep's read of the members table is the email index and the email marker rows only", () => {
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: 'dynamodb:GetItem',
+            Effect: 'Allow',
+            Condition: { 'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['email:*'] } },
+            Resource: Match.objectLike({ 'Fn::Join': ['', Match.arrayWith([Match.stringLikeRegexp(':table/vettid-org-members$')])] }),
+          }),
+        ]),
+      },
+    });
+  });
+
+  test('unsubscribe tokens are looked up through a sparse keys-only index', () => {
+    template.hasResourceProperties('AWS::DynamoDB::Table', {
+      GlobalSecondaryIndexes: Match.arrayWith([
+        Match.objectLike({
+          IndexName: 'unsub-index',
+          KeySchema: [{ AttributeName: 'unsubToken', KeyType: 'HASH' }],
+          Projection: { ProjectionType: 'KEYS_ONLY' },
+        }),
+      ]),
+    });
+  });
+
+  test('subscribe can unsubscribe a row but reads no member data and deletes no SES identity', () => {
+    const policies = Object.values<any>(template.findResources('AWS::IAM::Policy'));
+    const ofSubscribe = policies.filter((p) => JSON.stringify(p).includes('secretsmanager:GetSecretValue'));
+    expect(ofSubscribe).toHaveLength(1);
+    const doc = JSON.stringify(ofSubscribe[0].Properties.PolicyDocument);
+    expect(doc).toContain('dynamodb:DeleteItem');
+    expect(doc).toContain('/index/unsub-index');
+    expect(doc).not.toContain('vettid-org-members');
+    expect(doc).not.toContain('ses:DeleteEmailIdentity');
+    expect(doc).not.toContain('dynamodb:Scan');
+    // its one Query right is on the unsubscribe index
+    const queries = ofSubscribe[0].Properties.PolicyDocument.Statement.filter((st: any) => JSON.stringify(st.Action).includes('dynamodb:Query'));
+    expect(queries).toHaveLength(1);
+    expect(JSON.stringify(queries[0].Resource)).toMatch(/\/index\/unsub-index"\]\]\}$/);
   });
 
   test('origin-verify secret is generated under its fixed name and readable by subscribe only', () => {
@@ -438,6 +573,8 @@ describe('VettidOrgSignupStack', () => {
             Resource: [
               Match.objectLike({ 'Fn::Join': ['', Match.arrayWith([Match.stringLikeRegexp(':identity/vettid\\.org$')])] }),
               Match.objectLike({ 'Fn::Join': ['', Match.arrayWith([Match.stringLikeRegexp(':identity/\\*\\.vettid\\.org$')])] }),
+              Match.objectLike({ 'Fn::Join': ['', Match.arrayWith([Match.stringLikeRegexp(':identity/\\*@vettid\\.org$')])] }),
+              Match.objectLike({ 'Fn::Join': ['', Match.arrayWith([Match.stringLikeRegexp(':identity/\\*@\\*\\.vettid\\.org$')])] }),
             ],
           }),
         ]),
