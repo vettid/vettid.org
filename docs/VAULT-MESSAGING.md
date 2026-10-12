@@ -24,8 +24,9 @@ related:
   - VAULT-HOST-PROTOCOL.md (0.1.3; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.0, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
-  - 0.29.0: normative; **DRAFT for the owner's review, not approved**
-    (VAULT-LOCK 0.1.0, decisions L1–L16); **needs a vault release**
+  - 0.29.0: normative; **approved by the owner 2026-10-12** (vettid.org
+    #247: VAULT-LOCK 0.1.0, decisions L1–L16 as recommended); **needs a
+    vault release**
     (the placeholder "release L") and a member API deploy. Every rule
     it adds is marked "0.29.0, release L" and binds nothing before
     then. **A lock belongs to its unlock**: each open makes an
@@ -2124,8 +2125,9 @@ back to a held vault. The settings `owner_check.hold` (boolean, default
 
 #### 3.6.8 The idle lock (0.29.0, release L)
 
-*DRAFT for the owner's review (VAULT-LOCK §4, decisions L10–L14). It
-binds nothing before release L.*
+*Approved by the owner 2026-10-12 (VAULT-LOCK §4, decisions L10–L14).
+It applies from release L, which is not released; it binds nothing
+before.*
 
 The hold limits what the owner's side can do with a vault whose member
 has not passed a check. It does not end the vault's running: a held
@@ -4112,7 +4114,8 @@ an answer to an unknown or expired id is dropped.
 | `identity.rotate` | — | `{rotation: <identity.rotate statement, §3.4>}` |
 | `relay.address.update` | — | `{relay: {url, mailbox, pk}, token, reconnect_token?}` |
 
-**Locks (0.29.0, release L; DRAFT, VAULT-LOCK §3).** A lock from a
+**Locks (0.29.0, release L; approved by the owner 2026-10-12,
+VAULT-LOCK §3).** A lock from a
 device belongs to the unlock it ends.
 
 - **`unlock_id`.** Each time a vault opens (a successful
@@ -8862,7 +8865,8 @@ requests name the manifest by `manifest_sha256` and `manifest_serial`
   cause anyway); it cannot make the enclave accept a manifest the app did
   not verify, because the hash is inside the sealed, signed request.
 
-**The `lock` operation (0.29.0, release L; DRAFT, VAULT-LOCK §3).**
+**The `lock` operation (0.29.0, release L; approved by the owner
+2026-10-12, VAULT-LOCK §3).**
 
 - The message MAY carry `"unlock_id": "<32 hex>"`, copied by the member
   API from the lock request's body (MEMBER-API); a release before L
@@ -14207,14 +14211,15 @@ Follow-ups:
     (release C2), `vettid/vettid-calls` (new), the stacks here,
     vettid-android, and a later staging release that refuses form 1.
 
-37. **Locks (0.29.0; DRAFT for the owner's review).** The owner asked
+37. **Locks (0.29.0; approved by the owner 2026-10-12).** The owner asked
     on 2026-10-12 for the specifications of two decisions, after the
     Android lock work (vettid-android #127) and its reviews found that
     a lock could land on a newer unlock, that the member API's `done`
     proved nothing, and that a vault has no time after which it locks
     by itself. The design, its options and the owner decisions L1–L16
-    are in VAULT-LOCK 0.1.0; the text here follows its recommendations
-    and changes with the owner's answers.
+    are in VAULT-LOCK 0.1.0. The owner answered on vettid.org #247:
+    "247 is approved with your recommendations", so every decision is
+    as recommended. Chosen:
     1. **A lock names its unlock** (`unlock_id`: random, in memory
        only); a lock that names another is `stale_lock` (§10.2).
     2. **Two kinds through the member API:** bound, and unconditional
@@ -14235,7 +14240,7 @@ Follow-ups:
       release L, and an app that implements this against S10 or S11,
       both keep working (VAULT-LOCK §3.6); `unlock_id` in the unlock
       result announces the release's support.
-    Follow-ups, once approved: vettid-vault (release L: `unlock_id`,
+    Follow-ups: vettid-vault (release L: `unlock_id`,
     the bound and unconditional lock, the answer after the lock, the
     idle lock, vectors, MUST-COVERAGE), the member API and the account
     site here (MEMBER-API 2.5.0), vettid-android (after #127), then

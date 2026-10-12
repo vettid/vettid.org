@@ -1,6 +1,6 @@
 ---
 title: VAULT-LOCK
-status: draft for the owner's review (design note; the proposed normative text is in VAULT-MESSAGING 0.29.0, MEMBER-API 2.5.0 and VAULT-HOST-PROTOCOL 0.1.3, each marked "release L")
+status: approved by the owner 2026-10-12 (L1–L16 as recommended); design note; the normative text is in VAULT-MESSAGING 0.29.0, MEMBER-API 2.5.0 and VAULT-HOST-PROTOCOL 0.1.3, each rule marked "release L" (not released, not built)
 version: 0.1.0
 date: 2026-10-12
 owner: Al Liebl (Mesmer)
@@ -11,12 +11,15 @@ related:
   - VAULT-HOST-PROTOCOL.md (0.1.3) §6.1, §11.3
   - ANDROID-PLAN.md (0.1.38) §4 "Locking the vault"
   - VAULT-RELEASES.md (0.1.19) §3.4 (C2, C4)
-  - vettid-android #127 (open, in its confirmation review; head 78f741a0), vettid-vault `main` 079cde7
+  - vettid-android #127 (open, not merged at the time of writing; read at 78f741a0), vettid-vault `main` 079cde7
 changelog:
   - 0.1.0: first draft, after the owner's request of 2026-10-12
     ("please draft the specs for both vault decisions"). Code read at
     vettid-vault `main` 079cde7, this repository's `master` 64d24ff and
-    the description of vettid-android #127. Nothing here is built
+    the description of vettid-android #127. Nothing here is built.
+    **Approved by the owner 2026-10-12** on vettid.org #247 ("247 is
+    approved with your recommendations"): L1–L16 as recommended (§7).
+    No version change: it was not merged as a draft
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -24,11 +27,12 @@ classification: public (no secrets; safe for github.com/vettid)
 
 ## 1. What this is
 
-Two decisions for the owner, with the specification text each would
-need. The text is written into the documents themselves and marked
-**release L**, a placeholder for the vault release that would carry it
-(as "release C2" is for calls). Nothing changes until the owner decides
-(§7) and the release is built.
+Two decisions, taken by the owner on 2026-10-12 (§7), with the
+specification text each needs. The text is written into the documents
+themselves and marked **release L**, a placeholder for the vault
+release that will carry it (as "release C2" is for calls): the
+staging release after S11. Nothing changes for a vault or an app until
+that release is built and running.
 
 1. **A lock belongs to the unlock it ends, and says truthfully whether
    it locked.** Today a lock is "lock whatever is running", it can
@@ -38,7 +42,7 @@ need. The text is written into the documents themselves and marked
    enough.** Today a vault that is not told to lock stays open until it
    is told, restarted or loses its lease.
 
-**For a member**, if both are approved as recommended:
+**For a member**, once release L runs:
 
 - Locking the vault from the phone gives a plain answer at once in the
   usual case: "Your vault is locked." The wait of up to 40 seconds
@@ -140,7 +144,8 @@ it queued the request (§11.5). The rule:
 
 The alternative, a per-vault counter that the member API increments for
 every unlock and lock it queues, is exact but adds a write and a
-counter to every request for the sake of that residue (decision L3).
+counter to every request for the sake of that residue; it was not
+chosen (decision L3).
 
 ### 3.4 A true answer
 
@@ -246,7 +251,7 @@ the enclave's clock, and already has a deadline (F3, F4).
 | **C** | Nothing new: the owner check and the hold | As today | Nothing new | Nothing. A vault whose member never returns runs, held, for ever |
 | **D** | **The owner check stays the idle rule; a vault that has been overdue for X locks** | Nothing for a member who passes the daily check. Away longer than X past the deadline: unlock with the PIN, then the check | The vault leaves memory: its keys, its relay mailbox, its standing grants, and (with the hold off) its desktops and agents | After the lock, messages wait at the relay for 14 days and are lost after that; while only held they are collected and kept |
 
-**Recommended: D.** The exposure a lost phone creates is already
+**Decided: D** (L10). The exposure a lost phone creates is already
 bounded at the owner's side by the check (F3): after at most 24 hours
 the app, the desktops and the agents get nothing without the PIN and
 the password. What is not bounded is the vault itself: it stays open in
@@ -321,9 +326,9 @@ password.
 
 ## 5. Rollout
 
-- **Not in S11.** S11 is being cut with the scaling work and the
-  silent-parent fix. This needs approval, a vault change, a member API
-  change and review first.
+- **Not in S11** (L15). S11 is being cut with the scaling work and the
+  silent-parent fix. This needs a vault change, a member API change
+  and review first.
 - **Release L = the staging release after S11 (S12), with both
   decisions.** They touch the same code (the lock path, `vault.status`,
   `vault.locking`), and the idle lock is small once the owner check's
@@ -331,7 +336,7 @@ password.
 - **Before calls C2, and not coupled to it.** A lock that can land on a
   newer unlock is a defect members can meet today; C2 is a feature.
   If C2 is ready first, it goes first: neither needs the other.
-- **Order of work:** this specification approved; vault (release L on
+- **Order of work:** vault (release L on
   staging); member API (it may deploy before the release: older
   enclaves ignore the new members, and it writes `not_running` itself);
   account site; Android (#127 first, then the bound lock behind the
@@ -379,24 +384,27 @@ notice, the unlock and the check on one screen, History.
 
 ## 7. Owner decisions
 
-| # | Decision | Options | Recommendation |
-|---|---|---|---|
-| L1 | What names an unlock | (a) a random `unlock_id`, in memory only; (b) a counter in the vault's state; (c) the unlock result's time | **(a).** Nothing to store; every earlier value dies with the process; no clocks |
-| L2 | A `vault.lock` over the relay without `unlock_id` (apps before L) | (a) carried out as today, until no supported app sends it, then `bad_request`; (b) refused from release L | **(a).** (b) would stop older apps locking over the relay the day the release lands |
-| L3 | How an unconditional lock is kept from landing after a newer unlock | (a) compare `enqueued_at` with the unlock's (the member API's clock for both); (b) a per-vault counter kept by the member API; (c) no rule | **(a).** No new state; the residue is milliseconds between two member API processes |
-| L4 | Who may lock unconditionally | (a) the account site's session, a recovering app, the app when it does not hold the value, the member API for a cancelled account; (b) the account site only | **(a).** Locking only reduces exposure, and the lost-phone lock from the web must not depend on a value only the phone had |
-| L5 | How the true result is reported | (a) a `code` beside `done`: `locked`, `not_running`, `stale`; (b) new slot statuses | **(a).** The slot's statuses are frozen for live releases; older apps ignore a code |
-| L6 | What ends "may still be open" on the phone | (a) the vault's word, or the host's (`locked`, `not_running`, a status that is not `unlocked`); (b) the vault's word only | **(a).** A locked vault cannot speak, so (b) could never be confirmed after any lock not made over the relay. The idle lock is what bounds a host that lies |
-| L7 | The status route | (a) add `locked_basis`: `reported` or `no_lease`; (b) leave it | **(a).** It costs one member and makes the answer honest about what it rests on |
-| L8 | Lost `locked` events | (a) nothing new: the stop notice and the lease rule already cover them, and the lock's own answer now does too; (b) the vault repeats the event | **(a)** |
-| L9 | The Android workaround (#127) | (a) kept for vaults without `unlock_id`, dropped for those with it; removed when no such release remains; (b) kept everywhere | **(a)** |
-| L10 | Whether a vault locks by itself, and on what | A activity; B reachability; C the owner check only; D the owner check, then a lock after X overdue (§4.2) | **D** |
-| L11 | The default and the bounds of X | 24 h; **7 days**; 14 days. Bounds 1 h to 30 days | **7 days**, 1 h to 30 days. 24 h would lock the vault of anyone away for a weekend and gain little over the hold; 14 days leaves no margin before the relay drops messages |
-| L12 | "Never" | (a) not offered; (b) offered, set only in a successful check, with a permanent indicator like "hold is off" | **(a).** A member who wants agents to run unattended passes a check once in 30 days; a vault nobody has vouched for in a month should not be open |
-| L13 | The owner check's default interval (24 h) | (a) leave it; (b) shorten it | **(a).** Not asked; noted because it, not the idle lock, is what limits an unlocked phone in the wrong hands (§4.6) |
-| L14 | Telling the member | (a) `idle_lock_at` in `vault.status` and `vault.held`, `vault.locking{reason: "idle"}` with a wake, History `idle`; (b) the lock notice only | **(a)** |
-| L15 | Which release | (a) both in the release after S11, before calls C2 and not coupled to it; (b) decision 1 first, decision 2 later; (c) into S11 | **(a).** (c) is too late for a reviewed change |
-| L16 | The texts (ANDROID-PLAN, drafts; the account site's two lines) | approve, or change | Approve as drafts; they are final when #127 and the release L work merge |
+**Decided by the owner 2026-10-12** (vettid.org #247: "247 is approved
+with your recommendations"): every decision as recommended.
+
+| # | Decision | Options | Recommendation | Decided |
+|---|---|---|---|---|
+| L1 | What names an unlock | (a) a random `unlock_id`, in memory only; (b) a counter in the vault's state; (c) the unlock result's time | **(a).** Nothing to store; every earlier value dies with the process; no clocks | (a) |
+| L2 | A `vault.lock` over the relay without `unlock_id` (apps before L) | (a) carried out as today, until no supported app sends it, then `bad_request`; (b) refused from release L | **(a).** (b) would stop older apps locking over the relay the day the release lands | (a) |
+| L3 | How an unconditional lock is kept from landing after a newer unlock | (a) compare `enqueued_at` with the unlock's (the member API's clock for both); (b) a per-vault counter kept by the member API; (c) no rule | **(a).** No new state; the residue is milliseconds between two member API processes | (a) |
+| L4 | Who may lock unconditionally | (a) the account site's session, a recovering app, the app when it does not hold the value, the member API for a cancelled account; (b) the account site only | **(a).** Locking only reduces exposure, and the lost-phone lock from the web must not depend on a value only the phone had | (a) |
+| L5 | How the true result is reported | (a) a `code` beside `done`: `locked`, `not_running`, `stale`; (b) new slot statuses | **(a).** The slot's statuses are frozen for live releases; older apps ignore a code | (a) |
+| L6 | What ends "may still be open" on the phone | (a) the vault's word, or the host's (`locked`, `not_running`, a status that is not `unlocked`); (b) the vault's word only | **(a).** A locked vault cannot speak, so (b) could never be confirmed after any lock not made over the relay. The idle lock is what bounds a host that lies | (a) |
+| L7 | The status route | (a) add `locked_basis`: `reported` or `no_lease`; (b) leave it | **(a).** It costs one member and makes the answer honest about what it rests on | (a) |
+| L8 | Lost `locked` events | (a) nothing new: the stop notice and the lease rule already cover them, and the lock's own answer now does too; (b) the vault repeats the event | **(a)** | (a) |
+| L9 | The Android workaround (#127) | (a) kept for vaults without `unlock_id`, dropped for those with it; removed when no such release remains; (b) kept everywhere | **(a)** | (a) |
+| L10 | Whether a vault locks by itself, and on what | A activity; B reachability; C the owner check only; D the owner check, then a lock after X overdue (§4.2) | **D** | D |
+| L11 | The default and the bounds of X | 24 h; **7 days**; 14 days. Bounds 1 h to 30 days | **7 days**, 1 h to 30 days. 24 h would lock the vault of anyone away for a weekend and gain little over the hold; 14 days leaves no margin before the relay drops messages | 7 days; 1 hour to 30 days |
+| L12 | "Never" | (a) not offered; (b) offered, set only in a successful check, with a permanent indicator like "hold is off" | **(a).** A member who wants agents to run unattended passes a check once in 30 days; a vault nobody has vouched for in a month should not be open | (a): no "never" |
+| L13 | The owner check's default interval (24 h) | (a) leave it; (b) shorten it | **(a).** Not asked; noted because it, not the idle lock, is what limits an unlocked phone in the wrong hands (§4.6) | (a): unchanged |
+| L14 | Telling the member | (a) `idle_lock_at` in `vault.status` and `vault.held`, `vault.locking{reason: "idle"}` with a wake, History `idle`; (b) the lock notice only | **(a)** | (a) |
+| L15 | Which release | (a) both in the release after S11, before calls C2 and not coupled to it; (b) decision 1 first, decision 2 later; (c) into S11 | **(a).** (c) is too late for a reviewed change | (a) |
+| L16 | The texts (ANDROID-PLAN, drafts; the account site's two lines) | approve, or change | Approve as drafts; they are final when #127 and the release L work merge | approved as drafts; final when #127 and the release L work merge |
 
 ## 8. What could not be settled
 
@@ -410,10 +418,12 @@ notice, the unlock and the check on one screen, History.
   which it is; the app treats both as locked.
 - **The app side was read from the description of vettid-android #127**
   and a look at `LockGuard.kt` at 78f741a0, not from a full reading of
-  the code, and #127 is not merged. The ANDROID-PLAN text is marked
-  draft for that reason.
-- **Relay time to live.** "14 days" is §13.1's figure for the relay's
-  TTL; the default of L11 leans on it.
+  the code, and #127 is open, not merged, at the time of writing (it
+  has moved on since that commit). The ANDROID-PLAN text about it is
+  marked draft for that reason.
+- **Relay time to live.** "14 days" is VAULT-MESSAGING §13.1's figure
+  for the relay's TTL; it was not checked against the relay itself,
+  and the default of L11 leans on it.
 - **iOS and desktop** follow the same rules; nothing of theirs was
   read.
 

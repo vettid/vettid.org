@@ -12,8 +12,8 @@ related:
   - VAULT-RELAY-SCALING.md (0.1.2) §6, §10
   - vettid-vault `internal/hostproto`, `enclave/supervisor`, `enclave/egress`, `parent`, docs/V3-NOTES.md "Enclave ↔ parent", docs/SMOKE.md
 changelog:
-  - 0.1.3: **DRAFT for the owner's review** (VAULT-LOCK 0.1.0,
-    VAULT-MESSAGING 0.29.0): what the `lock` queue operation would
+  - 0.1.3: approved by the owner 2026-10-12 (vettid.org #247;
+    VAULT-LOCK 0.1.0, VAULT-MESSAGING 0.29.0): what the `lock` queue operation would
     carry and answer from the vault's release L (§6.1), and what that
     changes for a dishonest parent (§11.3: nothing it could not do).
     Planned, not built: the rest of this document still describes the
@@ -373,7 +373,7 @@ unknown.
   `lock` against redelivery or late delivery: one that waited in the
   queue (up to its 5 minutes) is carried out when it arrives, also
   after an unlock that was queued later.
-- **The `lock` operation from release L (0.1.3; planned, DRAFT:
+- **The `lock` operation from release L (0.1.3; decided, not built:
   VAULT-MESSAGING 0.29.0 §11.5).** The message may carry `unlock_id`.
   With it, the vault's process locks only if the value names its
   current unlock; without it, the enclave locks only if the message's

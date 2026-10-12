@@ -4,13 +4,15 @@ status: draft
 version: 0.1.38
 date: 2026-10-12
 changelog:
-  - 0.1.38: **DRAFT for the owner's review.** New §4 "Locking the
-    vault": (1) the member's lock as built by vettid-android #127,
-    which is **open and in its confirmation review, not merged**: the
+  - 0.1.38: approved by the owner 2026-10-12 (vettid.org #247;
+    VAULT-LOCK L9, L14, L16: the texts approved as drafts). New §4
+    "Locking the vault": (1) the member's lock as built by
+    vettid-android #127, which is **open, not merged at the time of
+    writing**: the
     pending state, what confirms a lock, the rules while pending, the
     texts as drafts; (2) what changes when the vault's release
     supports bound locks and the idle lock (VAULT-MESSAGING 0.29.0,
-    VAULT-LOCK 0.1.0, "release L"; not approved, not built). Nothing
+    VAULT-LOCK 0.1.0, "release L"; decided, not built). Nothing
     else changes
   - 0.1.37: errata from the app's implementations of 2026-10-11
     (vettid-android #113 typed recovery code, #115 brand kit, #116
@@ -1440,13 +1442,16 @@ History's export of activity metadata (0.1.17, owner decisions of
 credential material or the email, and is no backup (nothing imports
 it).
 
-### Locking the vault (0.1.38; DRAFT)
+### Locking the vault (0.1.38)
 
 *Two parts. Part 1 describes vettid-android #127 ("The member's lock
-fails secure"), read from its description at head 78f741a0. It is open
-and in its confirmation review: this text is a draft until it merges,
-and follows whatever the review changes. Part 2 is the app's side of
-VAULT-MESSAGING 0.29.0, which is not approved.*
+fails secure"), read from its description at 78f741a0. It is open, not
+merged at the time of writing: part 1 is a draft until it merges, and
+follows whatever its review changes. Part 2 is the app's side of
+VAULT-MESSAGING 0.29.0 (approved by the owner 2026-10-12), for the
+vault's release L, which is not built. The texts of both parts are
+approved as drafts (VAULT-LOCK L16) and become final when #127 and the
+release L work merge.*
 
 **1. As built by #127 (pending its merge).**
 
@@ -1488,8 +1493,8 @@ A lock the first try confirms shows no warning and no "confirmed".
 All three unlock-screen texts are live regions for screen readers (the
 warning assertive, the others polite).
 
-**2. With a vault that supports bound locks (release L; not
-approved).** The app knows from `unlock_id` in the unlock result; for a
+**2. With a vault that supports bound locks (release L; decided, not
+built).** The app knows from `unlock_id` in the unlock result; for a
 vault without it, part 1 applies unchanged.
 
 - The app keeps `unlock_id` with the pending-lock record and sends

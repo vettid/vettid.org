@@ -3,9 +3,10 @@ title: MEMBER-API
 status: v1 (Phase 2)
 version: 2.5.0
 changelog:
-  - 2.5.0 (2026-10-12; **DRAFT for the owner's review, not approved,
-    not implemented**; VAULT-MESSAGING 0.29.0, VAULT-LOCK 0.1.0
-    decisions L3–L8; takes effect with the vault's "release L").
+  - 2.5.0 (2026-10-12; **approved by the owner 2026-10-12** on
+    vettid.org #247, **not implemented yet**; VAULT-MESSAGING 0.29.0,
+    VAULT-LOCK 0.1.0 decisions L3–L8; takes effect with the vault's
+    "release L").
     **`POST /api/vault/lock`** accepts an optional `unlock_id`, which
     makes the lock a bound one; without it the lock is unconditional
     and is carried out only if it was queued after the vault's current
@@ -521,8 +522,8 @@ The vault does not depend on subscription or voting rights.
 | GET | `/api/vault/enclave` | — (`?release=<pcr0>` only to abandon an unconfirmed move, §11.10.4) | `Enclave`: the instance to seal to (below) |
 | POST | `/api/vault/enroll` | `{vault_id, request_id, instance_id, etk_kid, envelope, manifest_sha256}` (signed by the pending key; 2.0.0 adds `vault_id`, the redeem's) | `202 {vault_id, request_id}`; the queue message carries the pending key as `app_key` |
 | POST | `/api/vault/unlock` | `{vault_id, request_id, instance_id, etk_kid, envelope, manifest_sha256}` | `202 {vault_id, request_id}` |
-| POST | `/api/vault/lock` | `{vault_id, request_id}`; 2.5.0 (draft): also `unlock_id?` (32 lowercase hex), "Locks" | `202 {vault_id, request_id}` |
-| GET | `/api/vault/requests/{request_id}` | — | `{status: "queued"\|"done"\|"expired", envelope?, code?}` (§11.5); 2.5.0 (draft): for a lock, `code` is `locked`, `not_running` or `stale` ("Locks") |
+| POST | `/api/vault/lock` | `{vault_id, request_id}`; 2.5.0 (with release L): also `unlock_id?` (32 lowercase hex), "Locks" | `202 {vault_id, request_id}` |
+| GET | `/api/vault/requests/{request_id}` | — | `{status: "queued"\|"done"\|"expired", envelope?, code?}` (§11.5); 2.5.0 (with release L): for a lock, `code` is `locked`, `not_running` or `stale` ("Locks") |
 
 ```ts
 interface Enclave {
@@ -535,7 +536,7 @@ interface Enclave {
 interface VaultStatus {     // advisory: written by the enclave host, never a security signal (§11.5)
   vault_id: string;
   state: 'enrolling' | 'locked' | 'unlocked';  // `unlocked` only while `leased` (below)
-  locked_basis?: 'reported' | 'no_lease';      // 2.5.0 (draft): only with state 'locked' ("Locks")
+  locked_basis?: 'reported' | 'no_lease';      // 2.5.0 (with release L): only with state 'locked' ("Locks")
   sealed_release: string | null;
   vault_version: string | null;
   state_version: number | string | null;
@@ -1260,10 +1261,11 @@ interface Recovery {
   be a verified identity, as for sign-in links; a failed send is logged
   and does not fail the request).
 
-### Locks (2.5.0; DRAFT, VAULT-MESSAGING 0.29.0 §11.5, VAULT-LOCK)
+### Locks (2.5.0; VAULT-MESSAGING 0.29.0 §11.5, VAULT-LOCK)
 
-*Not approved and not implemented. It describes the route as it would
-be from the deploy that accompanies the vault's release L.*
+*Approved by the owner 2026-10-12; not implemented yet. It describes
+the routes as they are from the deploy that accompanies the vault's
+release L; until then they behave as 2.4.2 describes.*
 
 - **`POST /api/vault/lock`** `{vault_id, request_id, unlock_id?}`.
   Callers and limits are unchanged: the account session, the app key
@@ -1353,7 +1355,7 @@ credential password):
   happens in the app at an unlock), an open recovery, the last
   `credential_clone` alarm, and **Lock vault** (`POST /api/vault/lock`
   with a browser-made ULID, then up to 30 s of `requests/{id}` polling)
-  while the vault is `unlocked` or leased. 2.5.0 (draft, "Locks"): the
+  while the vault is `unlocked` or leased. 2.5.0 (with release L, "Locks"): the
   site's lock carries no `unlock_id` (it is unconditional), and the
   site says what the slot says: `locked` or `not_running`, "Your vault
   is locked."; `stale`, it asks once more by itself and then, if still
