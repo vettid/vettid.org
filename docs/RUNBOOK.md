@@ -275,25 +275,34 @@ npx cdk deploy VettidOrgRelayStack       # service; reads the refs at deploy tim
   latency.
 - **Rate limits** (RELAY-PROTOCOL §7.2, relay ≥ protocol 0.7.0). Per key
   once a request is authenticated; per source address only a flood guard
-  (200/s, burst 2,000, sized for a full vault host) and a budget of
-  failures nobody can be held to (1/s, burst 60). An address out of that
-  budget is "penalised": every properly signed request of a key with a
-  mailbox is still served; unsigned requests, claim fetches, new mailboxes
-  and signers without a mailbox wait (at most 10 minutes after the last
-  failure). The task sets none of the `RELAY_RATE_*` variables: the
-  defaults are the spec's numbers. Each task logs one `rate limits` line a
-  minute, at info level when anything was refused or a bucket was at least
-  half used: `address_peak` (thousandths of the busiest address's
-  flood-guard burst; a vault host nearing it means more vaults per host
-  than the guard was sized for: raise `RELAY_RATE_IP_RPS`/`_BURST`),
-  `key_peak`, `sender_peak`, and `*_refused` counts per minute. Reading
-  them: `nomailbox_refused` is a client whose mailbox is gone and that
-  keeps asking (a vault that was deleted while running; it costs its host
-  nothing); `authfail_peak` at 1000 with `timestamp_stale` errors rising
-  is a host or phone with a wrong clock; `authfail_refused` with
-  `signature_invalid` errors is someone sending garbage. Nothing
-  identifies an address or key in logs or metrics, by design. No
-  vault-host allowlist exists or is needed.
+  (200/s, burst 4,000, sized for a full vault host), a budget of failures
+  nobody can be held to (1/s, burst 60) and the resource caps (parked
+  collectors 3,000 per address and 6,000 per task; request bodies being
+  read 16 MiB per address and 64 MiB per task). An address out of the
+  failure budget is "penalised" for at most a minute after its last
+  failure: every properly signed request of a key with a mailbox is still
+  served; claim fetches, new mailboxes and signers without a mailbox get
+  through at one per 10 s; unsigned requests are refused. The task sets
+  none of the `RELAY_RATE_*` or `RELAY_MAX_*` variables: the defaults are
+  the spec's numbers. Each task logs one `rate limits` line a minute, at
+  info level when anything was refused or a bucket was at least half
+  used: `address_peak` (thousandths of the busiest address's flood-guard
+  burst; a vault host nearing it means more vaults per host than the
+  guard was sized for: raise `RELAY_RATE_IP_RPS`/`_BURST`), `key_peak`,
+  `collectors_peak` (parked collectors against the task's cap: raise the
+  task count or size before it reaches 1000), `bodies_peak`, and
+  `*_refused` counts per minute. Reading them: `nomailbox_refused` is a
+  client whose mailbox is gone and that keeps asking (a vault that was
+  deleted while running; it costs its host nothing); `authfail_peak` at
+  1000 with `timestamp_stale` errors rising is a host or phone with a
+  wrong clock; `authfail_refused` with `signature_invalid` errors is
+  someone sending garbage; `bodies_refused` is someone announcing bodies
+  and not sending them. Nothing identifies an address or key in logs or
+  metrics, by design. No vault-host allowlist exists or is needed.
+  **Watch after a deploy of a new relay image:** task memory and restarts
+  against `relay_active_collectors` and `relay_ws_sessions`;
+  `relay_ratelimit_penalised_networks` and the refusals by limiter;
+  Valkey data size and ECPU; DynamoDB consumed read capacity.
 - **Health.** `/healthz` reads DynamoDB. Metrics worth alarming on (task
   `/metrics`, loopback): `relay_coord_errors_total`, `relay_wake_bus_up`,
   `relay_errors_total{code="internal"}`.
