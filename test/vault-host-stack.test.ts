@@ -5,7 +5,7 @@ import * as path from 'path';
 import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { channelVault, loadConfig, VAULT_ROLE_NAMES } from '../lib/config';
-import { VettidOrgVaultHostStack } from '../lib/stacks/vault-host-stack';
+import { VAULT_HOST_METRIC_LIMITS, VAULT_HOST_METRIC_SCHEMA, VettidOrgVaultHostStack } from '../lib/stacks/vault-host-stack';
 import { VettidOrgVaultReleaseStack, releaseStackId } from '../lib/stacks/vault-release-stack';
 import { vaultEnv } from '../lib/stacks/vault-stack';
 import { renderBuildComponent } from '../lib/vault/image-component';
@@ -245,15 +245,97 @@ describe('VettidOrgVaultHostStack: queue, logs, alarms, refs (§8.5, §8.7)', ()
   test('every alarm notifies the vault alerts topic (admin email)', () => {
     H.t.hasResourceProperties('AWS::SNS::Subscription', { Protocol: 'email', Endpoint: 'admin@vettid.org' });
     const alarms = resources(H.json, 'AWS::CloudWatch::Alarm');
-    expect(alarms.length).toBeGreaterThanOrEqual(9);
+    expect(alarms.length).toBeGreaterThanOrEqual(15);
     for (const a of alarms) expect(str(a.Properties.AlarmActions)).toContain('Alerts');
     const names = alarms.map((a) => a.Properties.AlarmName).sort();
     expect(names).toEqual(
       expect.arrayContaining([
         'vettid-org-vault-dlq-not-empty', 'vettid-org-vault-control-queue-age', 'vettid-org-vault-start-unfulfilled', 'vettid-org-vault-start-blocked',
         'vettid-org-vault-active-release-down', 'vettid-org-vault-manifest-rejected', 'vettid-org-vault-manifest-not-in-bucket',
+        'vettid-org-vault-unlocked-vaults', 'vettid-org-vault-relay-in-flight', 'vettid-org-vault-relay-stream-wait',
+        'vettid-org-vault-relay-growth-refused', 'vettid-org-vault-relay-connection-churn', 'vettid-org-vault-relay-stream-limit',
       ]),
     );
+  });
+
+  test('the alerts topic admits this account\'s CloudWatch alarms beside the CloudTrail rules (#214\'s fault)', () => {
+    const [policy] = resources(H.json, 'AWS::SNS::TopicPolicy');
+    const st = policy.Properties.PolicyDocument.Statement;
+    expect(st.map((s: any) => s.Principal.Service).sort()).toEqual(['cloudwatch.amazonaws.com', 'events.amazonaws.com']);
+    const cw = st.find((s: any) => s.Principal.Service === 'cloudwatch.amazonaws.com');
+    expect(cw).toMatchObject({ Sid: 'AlarmsOfThisAccount', Effect: 'Allow', Action: 'sns:Publish', Resource: { Ref: expect.stringMatching(/^Alerts/) } });
+    expect(cw.Condition.StringEquals).toEqual({ 'aws:SourceAccount': '369484479783' });
+    expect(str(cw.Condition.ArnLike)).toContain(':cloudwatch:us-east-1:369484479783:alarm:*');
+  });
+
+  describe.each([['prod', H.json, 'vettid-org'], ['staging', host('staging').json, 'vettid-org-staging']])('the parent\'s metrics, %s (§8.7, VAULT-RELAY-SCALING §6)', (stage, json, prefix) => {
+    const byName = (n: string) => resources(json, 'AWS::CloudWatch::Alarm').find((a) => a.Properties.AlarmName === `${prefix}-${n}`)!;
+    const q = (fn: string, m: string) => `SELECT ${fn}(${m}) FROM SCHEMA("VettID/Vault", InstanceId)`;
+
+    test('the queries read the parent\'s namespace by instance only', () => {
+      expect(VAULT_HOST_METRIC_SCHEMA).toBe('SCHEMA("VettID/Vault", InstanceId)');
+    });
+
+    test.each([
+      ['vault-unlocked-vaults', q('MAX', 'UnlockedVaults'), 400, 5],
+      ['vault-relay-in-flight', q('MAX', 'RelayRequestsInFlight'), 1638, 3],
+      ['vault-relay-stream-wait', q('MAX', 'RelayStreamWaitMax'), 1000, 1],
+      ['vault-relay-growth-refused', q('SUM', 'RelayGrowthRefused'), 0, 1],
+    ])('%s: the worst instance, by a Metrics Insights query', (name, expression, threshold, periods) => {
+      expect(byName(name).Properties).toMatchObject({
+        ComparisonOperator: 'GreaterThanThreshold',
+        Threshold: threshold,
+        EvaluationPeriods: periods,
+        DatapointsToAlarm: periods,
+        TreatMissingData: 'notBreaching',
+        Metrics: [{ Id: 'q', Expression: expression, Period: 60, ReturnData: true }],
+      });
+      expect(str(byName(name).Properties.AlarmActions)).toContain('Alerts');
+    });
+
+    test('in flight: 80 % of 16 connections of 128 streams', () => {
+      const L = VAULT_HOST_METRIC_LIMITS;
+      expect(Math.floor(L.inFlightShare * L.relayConnections * L.relayStreams)).toBe(1638);
+    });
+
+    test('churn: connections opened in an hour over every instance, against a fixed number', () => {
+      const a = byName('vault-relay-connection-churn').Properties;
+      expect(a).toMatchObject({ ComparisonOperator: 'GreaterThanThreshold', Threshold: 64, EvaluationPeriods: 1, DatapointsToAlarm: 1, TreatMissingData: 'notBreaching' });
+      expect(a.Metrics).toEqual([{ Id: 'q', Expression: q('SUM', 'EgressOpenedRelay'), Period: 3600, ReturnData: true }]);
+      // Twice a full set of 16 connections replaced twice in the hour.
+      expect(VAULT_HOST_METRIC_LIMITS.relayOpenedPerHour).toBe(2 * 2 * VAULT_HOST_METRIC_LIMITS.relayConnections);
+    });
+
+    test('an alarm holds at most one Metrics Insights query and nothing beside it (CloudWatch refuses more: "Invalid metrics list")', () => {
+      const withQuery = resources(json, 'AWS::CloudWatch::Alarm').filter((a) => (a.Properties.Metrics ?? []).some((m: any) => /^SELECT /.test(m.Expression ?? '')));
+      expect(withQuery).toHaveLength(6); // the control-queue age and the parent's five
+      for (const a of withQuery) {
+        expect(a.Properties.Metrics).toHaveLength(1);
+        expect(a.Properties.Metrics[0].ReturnData).toBe(true);
+      }
+    });
+
+    test('the stream limit: a filter on the host log (plain fields), then an alarm', () => {
+      const f = resources(json, 'AWS::Logs::MetricFilter').find((x) => x.Properties.MetricTransformations[0].MetricName === 'RelayStreamLimitSuspect')!;
+      expect(f.Properties.FilterPattern).toBe('{ ($.msg = "metrics") && ($.relay_waiting > 0) && (($.relay_streams = 0) || ($.relay_streams = 100)) }');
+      expect(f.Properties.MetricTransformations).toEqual([{ MetricNamespace: 'VettID/Vault', MetricName: 'RelayStreamLimitSuspect', MetricValue: '1' }]);
+      expect(str(f.Properties.LogGroupName)).toContain('HostLogs');
+      expect(byName('vault-relay-stream-limit').Properties).toMatchObject({
+        Namespace: 'VettID/Vault',
+        MetricName: 'RelayStreamLimitSuspect',
+        Statistic: 'Sum',
+        Period: 60,
+        Threshold: 1,
+        ComparisonOperator: 'GreaterThanOrEqualToThreshold',
+        EvaluationPeriods: 3,
+        DatapointsToAlarm: 2,
+        TreatMissingData: 'notBreaching',
+      });
+    });
+
+    test(`${stage}: no alarm names an instance, and none carries a per-instance dimension`, () => {
+      for (const a of resources(json, 'AWS::CloudWatch::Alarm')) expect(str(a.Properties)).not.toMatch(/"InstanceId"|i-[0-9a-f]{8}/);
+    });
   });
 
   test('CloudTrail rules: key deletion/rescue/policy, lockout bypass, the pinned roles', () => {

@@ -212,7 +212,7 @@ ${opts.body}
 <footer>
   <div class="battlement-mini"></div>
 ${NAV_FOOTER}
-  <p>&copy; 2026 The VettID Project. All rights reserved.</p>
+  <p>&copy; 2026 The VettID Project. Site source available under AGPL-3.0-or-later: see <a href="/terms">Terms</a>.</p>
   <p class="footer-privacy">No trackers, no analytics, no third-party resources &mdash; this site loads nothing from anyone but us.</p>
 </footer>
 <script src="/shared/js/nav.js"></script>
@@ -224,9 +224,14 @@ ${NAV_FOOTER}
 const status = (s: string) => `<span class="status status-${esc(s)}">${esc(STATUS_TEXT[s] ?? s)}</span>`;
 const short = (pcr: string) => `${pcr.slice(0, 16)}…`;
 
-const ABOUT = `  <section>
+/**
+ * How to check a release. Until the first production release there is no
+ * manifest at the address (it would be a 404) and no history of it in the
+ * repository, so the page says so and links neither.
+ */
+const about = (published: boolean) => `  <section>
     <h2>How to check a release</h2>
-    <p>VettID lists every vault release it runs in a signed manifest at <a href="https://vettid.org/.well-known/vettid/pcr-manifest.json"><code>/.well-known/vettid/pcr-manifest.json</code></a>. Your app verifies its signature with a key built into the app, and your vault only opens in the release you approved. This log is generated from that manifest, so the two cannot disagree; the manifest's history is public in the <a href="https://github.com/vettid/vettid.org/commits/master/website/.well-known/vettid/pcr-manifest.json">vettid.org repository</a>.</p>
+${published ? `    <p>VettID lists every vault release it runs in a signed manifest at <a href="https://vettid.org/.well-known/vettid/pcr-manifest.json"><code>/.well-known/vettid/pcr-manifest.json</code></a>. Your app verifies its signature with a key built into the app, and your vault only opens in the release you approved. This log is generated from that manifest, so the two cannot disagree; the manifest's history is public in the <a href="https://github.com/vettid/vettid.org/commits/master/website/.well-known/vettid/pcr-manifest.json">vettid.org repository</a>.</p>` : `    <p>VettID will list every vault release it runs in a signed manifest at <code>https://vettid.org/.well-known/vettid/pcr-manifest.json</code>. The manifest is published at that address with the first production release; until then there is none, and nothing is served there. Your app will verify its signature with a key built into the app, and your vault will only open in the release you approved. This log is generated from that manifest, so the two cannot disagree; once it is published, the manifest's history will be public in the <a href="https://github.com/vettid/vettid.org">vettid.org repository</a>.</p>`}
     <p>Releases are built reproducibly from the public <a href="https://github.com/vettid/vettid-vault">vettid-vault</a> source. Anyone can rebuild a release from its tag and compare the measurement (PCR0) with the one listed here: <a href="https://github.com/vettid/vettid-vault/blob/main/docs/RELEASING.md#rebuild-and-match-anyone">how to rebuild and match</a>.</p>
     <p>What the statuses mean, and how long each release keeps running, is explained in <a href="https://github.com/vettid/vettid.org/blob/master/docs/RELEASE-UPDATES.md">Vault release updates</a>: a release is kept for at least 12 months after a newer one replaces it, the last 90 days with a final notice and emails, then it ends. The first release, which goes to a small group of testers, is the exception: it is kept for 90 days after release 2 replaces it.</p>
   </section>`;
@@ -260,7 +265,7 @@ ${rows}
   </section>`
     : `  <section>
     <h2>Releases</h2>
-    <p>No production release has been published yet. The first release appears here, and in the signed manifest, when the vault opens to members.</p>
+    <p>No production release has been published yet. The first release will appear here, and in the signed manifest, when the vault opens to members.</p>
   </section>`;
   return page({
     path: '/security/releases/',
@@ -274,7 +279,7 @@ ${rows}
 
 ${list}
 
-${ABOUT}`,
+${about(index.releases.length > 0)}`,
   });
 }
 

@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.16
+version: 0.1.19
 date: 2026-10-12
 owner: Al Liebl (Mesmer)
 changelog:
@@ -124,12 +124,43 @@ changelog:
     built": the plain field `relay_vault_limit`, from the staging
     release that includes vettid-vault 8f2c8bf (S11). `related` brought
     up to date
+  - 0.1.17 (as built, host stack; for staging release S11). §8.7: the
+    alarms on the parent's metrics are built in the vault account's
+    host stack (not yet verified on staging): how they are keyed
+    (the worst instance, by Metrics Insights queries; one log metric
+    filter), their thresholds, and where the in-flight alarm differs
+    from the text above it (80 % of the 16 connections a host may have,
+    not of the connections open: approved by the owner 2026-10-12). The alerts
+    topic admits the account's CloudWatch alarms (it admitted the
+    CloudTrail rules only, so no alarm of the host or release stacks
+    could notify). How the parent's log reaches CloudWatch as built
+    (files, not journald) and why the record needs no change to be
+    read as metrics
+  - 0.1.18 (as built, a correction; vettid.org #240's churn alarm was
+    refused by CloudWatch on staging, the stack rolled back). §8.7:
+    `relay-connection-churn` is more than 64 relay connections opened
+    in an hour over every instance, a fixed number; the comparison
+    with the connections open is dropped, since an alarm takes one
+    Metrics Insights query only. What is lost is said there. All six
+    definitions were accepted by CloudWatch in the staging account
+    before this change (created under throwaway names and deleted)
+  - 0.1.19 (approved by the owner 2026-10-12, vettid.org #243;
+    CALLS-PLAN 0.1.3 §13 D12–D26,
+    CALLING-SERVICE 0.2.0, VAULT-MESSAGING 0.28.0): what the staging
+    release for calls phase C2 ("release C2", not cut) needs. §5.2: the
+    optional release constant `calls_url` and what a release that
+    carries it must contain. §8.4: the calling service's credential
+    issuer joins the egress controls (the enclave's allowlist, the
+    parent's `DefaultAllow`, the stage's DNS Firewall), planned, not
+    built. No other section is touched (§8.7 in particular is left
+    alone)
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
-  - VAULT-MESSAGING.md (0.27.4) §11.10 release updates, §12.5 deletion, §13.5, §13.9
+  - VAULT-MESSAGING.md (0.28.0) §11.10 release updates, §12.5 deletion, §13.5, §13.9
   - RELEASE-UPDATES.md (0.3.3) — member-facing; §3 changes with this plan; §5 the release log
   - ANDROID-PLAN.md (0.1.37) — the app's "What's new" from the log
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2) — staging as the development channel; D1–D11
+  - CALLS-PLAN.md (0.1.3) §13, CALLING-SERVICE.md (0.2.0) §5.5, §8 — the calling service's issuer in the egress controls; `calls_url`
   - MEMBER-API.md "Vault", RUNBOOK.md, ARCHITECTURE.md
   - VAULT-HOST-PROTOCOL.md (0.1.2) — the enclave ↔ parent (vsock) protocol as built; §10 what happens if versions meet
   - vettid-vault docs/SMOKE.md (hardware smoke test, 2026-10-02)
@@ -582,6 +613,7 @@ whose value is recorded in `measurements.json`):
 | `android_package` (0.1.11) | `com.vettid.app` (staging: `com.vettid.app.staging`) | VAULT-MESSAGING 0.26.0 §11.10.8, "Android package"; STAGING-DEVELOPMENT-PLAN D5 |
 | `features` (0.1.11) | the optional features the image registers: none in release 1 (staging: all seven) | VAULT-MESSAGING 0.26.0 §11.10.8, "Feature allowlist"; STAGING-DEVELOPMENT-PLAN D4 |
 | `relay_url` | `https://relay.vettid.org` | |
+| `calls_url` (0.1.19; planned for staging "release C2"; approved by the owner 2026-10-12) | absent (staging: `https://calls.staging.vettid.org`) | VAULT-MESSAGING 0.28.0 §11.10.8; CALLING-SERVICE 0.2.0 §5; CALLS-PLAN D4 |
 
 GrapheneOS verified-boot keys and vendor roots stay in `vms/pins` (code).
 Everything that defines a release is in the tagged tree, so
@@ -634,6 +666,31 @@ duplicate digest, the bare-string form and, in `prod.json`,
   `prod.json` cannot express it. Since S10 the images also apply the
   key attestation chain rules of VAULT-MESSAGING §11.7 (the fix that
   made S10 an urgent security release).
+
+**The calling service's issuer (0.1.19; planned; approved by the owner
+2026-10-12).** `calls_url` is optional, and the release build
+refuses it unless `features` lists `calls` and it is an `https` URL of
+its own channel's host name alone (VAULT-MESSAGING §11.10.8). A staging
+release that carries it ("release C2", CALLS-PLAN §13) must also
+contain, from the same tag (C4: the host files and the parent travel
+with the release):
+
+- the enclave's release allowlist with the host of `calls_url` (Amazon's
+  roots, HTTP/2), as it has the push gateway's;
+- a `vault-parent` whose `DefaultAllow` names the issuer (§8.4);
+- the `calls` feature with the rules VAULT-MESSAGING §10.10 marks (C2);
+- a log entry (§7) that says in the member's words what changes: calls
+  can connect across networks through VettID's relay server, which
+  cannot hear them; unanswered calls end by themselves; calls can be
+  turned off per connection.
+
+Before its hosts start, the staging host stack is deployed with the
+issuer's name in the DNS Firewall (§8.4), and the calling service
+answers at that name (CALLING-SERVICE §8, §11). A release with
+`calls_url` whose issuer cannot be reached still works: its vaults give
+their devices no TURN server, as every release before it. Production's
+file has no `calls_url` and production's `features` no `calls` until
+promotion (STAGING-DEVELOPMENT-PLAN §2.4).
 
 ### 5.3 Provenance
 
@@ -1130,6 +1187,35 @@ W9 shows the baseline noise). The gateway endpoints' policies admit only
 resources of the vault account (`aws:ResourceAccount`). Flow logs (all
 traffic) to `/vettid-org/<stage>/vault-flow-logs`, one month.
 
+*Planned (0.1.19; approved by the owner 2026-10-12; CALLING-SERVICE
+0.2.0 §5.5, CALLS-PLAN §13).* The calling service's credential issuer
+is the enclave's fifth destination, from the staging release that
+carries `calls_url` (§5.2). It follows the push gateway's pattern
+exactly:
+
+- **Control 1.** The parent's `DefaultAllow` gains `calls.vettid.org`
+  and `calls.staging.vettid.org`, port 443 (one parent binary for every
+  channel; both names are listed now, CALLS-PLAN decision D25). The enclave's own release
+  allowlist gains only the host of its channel's `calls_url`.
+- **Control 2.** TLS 1.3 ends in the enclave against Amazon's roots,
+  with HTTP/2; the issuer is deployed behind an Amazon certificate for
+  that reason (CALLING-SERVICE §8.2). That the enclave completes this
+  handshake with the issuer's front is the first thing the stacks' work
+  verifies.
+- **Control 3.** `lib/vault/egress.ts` gains the stage's `callsHost`
+  (`lib/config.ts`, beside `pushHost`): `calls.staging.vettid.org` in
+  staging. **Production's DNS Firewall does not admit a calls host**
+  until production has a calling service. The snapshot test changes,
+  which is a security review item, as for any change of the allowlist.
+- **Control 4** is unchanged: the issuer is reached on TCP 443.
+- The TURN server itself (`turn.staging.vettid.org`, UDP) is **not** an
+  egress destination: no vault and no host ever talks to it. Only
+  members' devices do.
+- What the host sees of it: VAULT-HOST-PROTOCOL §11.2 (a connection to
+  the issuer's name, its times and sizes), and the parent's connection
+  count by destination class gains a class for it or counts it as
+  `other` (an implementation choice to record in §8.7 when built).
+
 ### 8.5 Registry, leases, queues
 
 Already built and specified (VAULT-MESSAGING §11.1, §11.5; MEMBER-API
@@ -1215,7 +1301,8 @@ release_starting`. The `vault-scaler` Lambda (host stack):
 
 ### 8.7 Observability
 
-- Parent logs (journald → CloudWatch agent) to
+- Parent logs (journald → CloudWatch agent; as built, a log file the
+  agent ships: "As built (0.1.17)" below) to
   `/vettid-org/<stage>/vault-host`, one month. Release enclaves run without
   a console; their sanitized logs arrive through the parent. Nothing logged
   contains PINs, keys, envelopes or mailbox ids.
@@ -1282,8 +1369,9 @@ release_starting`. The `vault-scaler` Lambda (host stack):
     once. For the instance only: it replaces a log record that named the
     vault (VAULT-HOST-PROTOCOL §13 point 2). It is a field, not a 14th
     metric.
-  - **Alarms these call for** (not built; they belong to the vault
-    account's stack): `UnlockedVaults` above 400 on an instance;
+  - **Alarms these call for** (built in the host stack, 0.1.17, not yet
+    verified on staging: "As built (0.1.17)" below): `UnlockedVaults`
+    above 400 on an instance;
     `RelayRequestsInFlight` above 80 % of `relay_conns` × 128;
     `RelayStreamWaitMax` above 1000; any `RelayGrowthRefused`;
     `EgressOpenedRelay` in an hour far above twice `EgressOpenRelay`;
@@ -1297,6 +1385,76 @@ release_starting`. The `vault-scaler` Lambda (host stack):
     shipped log line. The record's shape is tested; the extraction is
     phase 1's exit check, to be done on staging with S11. If the parent
     logs above INFO the record is not written.
+- *As built (0.1.17; the host stack, `lib/stacks/vault-host-stack.ts`;
+  built, not yet verified on staging: RUNBOOK "The parent's metrics and
+  their alarms").*
+  - **How the record reaches CloudWatch.** Not through journald: the
+    parent's unit appends its standard error to
+    `/var/log/vettid/vault-parent.log`, and the CloudWatch agent
+    (configuration in vettid-vault `deploy/host`, part of each
+    release's AMI) ships that file line by line, unparsed, to the
+    stream `<instance id>/vault-parent`. The parent logs JSON at INFO
+    (`-debug` lowers the level, nothing raises it), so the event's
+    message is the record itself: one JSON document with `_aws` at the
+    top level beside the logger's own members (`time`, `level`, `msg`,
+    `component`), which the format allows. That is the form CloudWatch
+    Logs reads metrics from; the host role may already write the log
+    events, and the DNS firewall already admits `logs.<region>`. No
+    change to the stack or to vettid-vault was needed for the metrics
+    to arrive. The relay's name and the one-minute interval reach the
+    parent without a stack change (`vault/relay-host` → `-relay-host`;
+    the interval is the default).
+  - **How the alarms are keyed.** The only dimension is the instance,
+    and instances come and go, so no alarm names one. Five alarms ask
+    for the worst instance, or the sum over all of them, with a
+    Metrics Insights query over `SCHEMA("VettID/Vault", InstanceId)`,
+    as the control-queue age alarm does. No second dimension set in
+    the record is needed.
+  - **The alarms** (`vettid-org[-<stage>]-vault-…`, to the alerts
+    topic; missing data is not breaching, so they rest while no host
+    of S11 or later runs):
+    - `unlocked-vaults`: the highest `UnlockedVaults` above 400 for 5
+      minutes;
+    - `relay-in-flight`: the highest `RelayRequestsInFlight` above
+      1,638 for 3 minutes. **This differs from the text above:** it is
+      80 % of 16 × 128, the most a host can have, not of `relay_conns`
+      × 128. Connections are filled one after the other, so the
+      requests in flight are above 80 % of the open connections'
+      streams in ordinary operation (always from the fifth connection
+      on, and whenever the newest connection is more than 80 % full
+      below that); the alarm as first written would
+      come and go with the number of vaults. Approved by the owner 2026-10-12;
+    - `relay-stream-wait`: the highest `RelayStreamWaitMax` above
+      1,000 ms in one record;
+    - `relay-growth-refused`: the sum of `RelayGrowthRefused` above 0
+      in one minute;
+    - `relay-connection-churn` (0.1.18): more than 64 relay
+      connections opened in an hour, the sum of `EgressOpenedRelay`
+      over every instance. **This differs from the text above** ("far
+      above twice `EgressOpenRelay`"): an alarm takes one Metrics
+      Insights query, so the opened and the open connections cannot be
+      compared without naming instances (0.1.17 built that comparison;
+      CloudWatch refused it). The number: the load balancer closes
+      each connection about once an hour, so a host opens 8 an hour at
+      900 vaults and 16 at most, 32 when a full set is replaced twice
+      (also the burst the pool may dial at once); 64 is twice that,
+      and a host whose connections are closed as they open dials 2 a
+      second, 7,200 an hour. What is lost: churn on a host with few
+      connections that stays under 64 an hour (up to about one
+      connection a minute) is not seen, and with five or more hosts
+      near 16 connections each the ordinary hourly close alone would
+      pass 64, so the number has to grow with the fleet (at most two
+      hosts a release, six in all, today);
+    - `relay-stream-limit`: a metric filter on the host log
+      (`RelayStreamLimitSuspect`, no dimension) counts the records
+      with `relay_waiting` above 0 while `relay_streams` reads 0 or
+      100; the alarm is 2 such records in 3 minutes.
+  - **The alerts topic.** Its policy named `events.amazonaws.com`
+    alone (the CloudTrail rules), which also replaced the default that
+    lets the account's alarms publish: every alarm of the host stack
+    and of the release stacks would have failed to notify (the fault
+    #214 fixed on the security-alerts topic). It now also admits this
+    account's CloudWatch alarms.
 
 ### 8.8 Capacity
 

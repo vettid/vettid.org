@@ -238,9 +238,9 @@
     <p>In scope for disclosure:</p>
     <ul>
       <li>The vault enclave (<a href="https://github.com/vettid/vettid-vault">vettid-vault</a>: supervisor, per-vault processes, parent forwarder), its attestation chain, release sealing and the signed release manifest.</li>
-      <li>The mobile app (Android, iOS) — credential handling, pairing, session crypto, key storage, device attestation.</li>
-      <li>The desktop app (Tauri) — session establishment, capability gating, IPC.</li>
-      <li>The agent connector — pairing flow, LEASH signing, message encryption.</li>
+      <li>The mobile app (Android, iOS; in development) — credential handling, pairing, session crypto, key storage, device attestation.</li>
+      <li>The desktop app (Tauri; in development) — session establishment, capability gating, IPC.</li>
+      <li>The agent connector (being rebuilt) — pairing flow, LEASH signing, message encryption.</li>
       <li>The account site and member API at <code>account.vettid.org</code>, and the relay at <code>relay.vettid.org</code> (<a href="https://github.com/vettid/vettid-relay">vettid-relay</a>).</li>
       <li>The admin site and admin API (private; access is restricted to VettID's own network).</li>
       <li>The web surfaces at <code>vettid.org</code>, including the <a href="/security/releases/">vault release log</a>.</li>
@@ -268,7 +268,7 @@
 
   <section>
     <h2>Vault releases</h2>
-    <p>Every vault release VettID runs is listed in a signed manifest, and your vault only opens in the release you approved. The <a href="/security/releases/">vault release log</a> shows each release's measurements, source, changes, security fixes, status and end date.</p>
+    <p>Every production vault release VettID runs will be listed in a signed manifest, and your vault only opens in the release you approved. No production release has been published yet. The <a href="/security/releases/">vault release log</a> will show each release's measurements, source, changes, security fixes, status and end date.</p>
   </section>
 
   <section>
@@ -326,35 +326,39 @@ dfUPJp1chfcTSDeC7O4JCyaDLFrTpBgfNxobpSgBALaLBd69bz7GrelAbCQa
 
   <section>
     <h2>Cryptography at a glance</h2>
-    <p>The short version: everything between your devices, your vault and your connections is encrypted end to end, and the key exchange is post-quantum hybrid. The details, from the <a href="https://github.com/vettid/vettid.org/blob/master/docs/VAULT-MESSAGING.md">vault messaging spec</a>:</p>
+    <p>The short version: VettID is built so that everything between your devices, your vault and your connections is encrypted end to end, with a post-quantum hybrid key exchange. This is the design as it is specified and implemented in the published code; it runs in testing, and no production release serves members yet. The details, from the <a href="https://github.com/vettid/vettid.org/blob/master/docs/VAULT-MESSAGING.md">vault messaging spec</a>:</p>
     <ul>
-      <li><strong>Key exchange: hybrid post-quantum.</strong> Every end-to-end key agreement combines ML-KEM-768 with X25519 in HPKE (RFC 9180; the X-Wing construction, <code>MLKEM768X25519</code>). An attacker has to break both, so traffic recorded today stays protected against a future quantum computer (&ldquo;harvest now, decrypt later&rdquo;). This covers messages, session handshakes, the Protean Credential and its one-time keys, and call keys.</li>
+      <li><strong>Key exchange: hybrid post-quantum.</strong> Every end-to-end key agreement combines ML-KEM-768 with X25519 in HPKE (RFC 9180; the X-Wing construction, <code>MLKEM768X25519</code>). An attacker has to break both, so traffic recorded today stays protected against a future quantum computer (&ldquo;harvest now, decrypt later&rdquo;). This covers messages, session handshakes, the Protean Credential and its one-time keys, and the keys for calls (calls are in development).</li>
       <li><strong>Encryption:</strong> ChaCha20-Poly1305 for sealed messages, XChaCha20-Poly1305 for sessions and for your vault's stored state. Key derivation: HKDF-SHA-256.</li>
       <li><strong>PIN and password:</strong> Argon2id. Your vault key also depends on a secret sealed to the enclave, so stolen vault data can't be brute-forced against PINs anywhere else.</li>
       <li><strong>Signatures: Ed25519, not yet post-quantum.</strong> A future quantum computer could forge signatures from then on, but signatures can't be used to read recorded traffic. Hybrid Ed25519 + ML-DSA-65 is planned; every format carries a suite or version number, so the switch is an upgrade, not a redesign.</li>
       <li><strong>Safety codes:</strong> new connections and paired devices compare a 6-digit code. Each side commits to its part before seeing the other's, so no one in the middle can steer the codes into matching (about one chance in a million per attempt).</li>
-      <li><strong>Sealing:</strong> your vault is sealed to one enclave release, through an AWS KMS key that decrypts only for an enclave attested as that release. The enclave checks the key's policy before sealing to it.</li>
-      <li><strong>Releases:</strong> the release manifest is signed (ECDSA P-256) by one of two keys pinned in every app and release image, one in AWS KMS and one on an offline hardware token. Builds are reproducible, and the <a href="/security/releases/">release log</a> lists each release's measurements.</li>
-      <li><strong>Devices:</strong> enrollment and unlock require Android hardware key attestation or iOS App Attest, verified inside the enclave.</li>
+      <li><strong>Sealing:</strong> each vault is sealed to one enclave release, through an AWS KMS key that decrypts only for an enclave attested as that release. The enclave checks the key's policy before sealing to it.</li>
+      <li><strong>Releases:</strong> the release manifest is signed (ECDSA P-256) by one of two keys pinned in every app and release image, one in AWS KMS and one on an offline hardware token. Builds are reproducible, and the <a href="/security/releases/">release log</a> will list each production release's measurements.</li>
+      <li><strong>Devices:</strong> enrollment and unlock require Android hardware key attestation, verified inside the enclave; the enclave also verifies iOS App Attest, for the iOS app, which is not released.</li>
       <li><strong>Transport:</strong> TLS on every hop, under the end-to-end layer; the relay offers hybrid post-quantum TLS. The one classical exception: an account-recovery code is sealed to your browser with P-256 for its short (48-hour) life.</li>
     </ul>
   </section>
 
   <section>
     <h2>What we log</h2>
-    <p>Honest disclosure of what the operator side can see:</p>
+    <p>Honest disclosure of what the operator side can see.</p>
+    <p><strong>Running today:</strong></p>
+    <ul>
+      <li><strong>Website</strong>: standard access logs and TLS fingerprints for traffic analysis; email addresses are never logged. The <a href="/privacy">privacy notice</a> has the detail.</li>
+      <li><strong>Account site</strong> (<code>account.vettid.org</code>): your name, email, membership state, terms acceptance, subscription and sign-in events, kept in an audit log.</li>
+      <li><strong>Relay</strong> (<code>relay.vettid.org</code>): mailbox identifiers, the keys that sign requests, timing and padded message sizes. Not who a mailbox belongs to, and not what is in a message.</li>
+    </ul>
+    <p><strong>Built, and not yet serving members.</strong> No production vault exists yet. This is what the vault service is built to record, and what it records in testing:</p>
     <ul>
       <li><strong>Enclave host</strong> (AWS EC2, outside the enclave): it forwards encrypted bytes and never parses them. TLS to the relay ends inside the enclave, so the host sees byte counts and timing on a few connections shared by all vaults, when a vault is enrolled, unlocked or locked, and the size of its encrypted state. <strong>No payload content.</strong></li>
       <li><strong>Enclave</strong> (where your plaintext lives): its operational log records only service events &mdash; a vault id, when it was locked and why (for example idle or shutdown), and error classes. Never keys, PINs, tokens, signatures, plaintext, or what your vault did.</li>
       <li><strong>Your vault&rsquo;s audit log and activity feed</strong>: kept inside your vault, encrypted with the rest of its state, tamper-evident (hash-chained), and sent only to your own devices. VettID cannot read them, and your vault tells VettID nothing about its activity beyond content-free lifecycle events (enrolled, unlocked, locked, moved to a new release, deleted) and a content-free alert if a copy of your credential is presented by someone else.</li>
-      <li><strong>Relay</strong> (<code>relay.vettid.org</code>): mailbox identifiers, the keys that sign requests, timing and padded message sizes. Not who a mailbox belongs to, and not what is in a message.</li>
       <li><strong>Member API</strong> (<code>account.vettid.org</code>): which member enrolled, unlocked or locked a vault, and when, plus routing records (vault id, enclave instance, release). Never your PIN, why an unlock failed, your mailbox, or anything inside the vault.</li>
-      <li><strong>Account site</strong>: your name, email, membership state, terms acceptance, subscription and sign-in events, kept in an audit log.</li>
       <li><strong>Vault storage</strong> (S3): your vault's state, encrypted under a key derived from your PIN, and a small header sealed to the release you approved. Opaque to the operator.</li>
-      <li><strong>Website</strong>: standard access logs and TLS fingerprints for traffic analysis; email addresses are never logged.</li>
     </ul>
     <p>Because VettID runs both the enclave hosts and the relay, it could correlate their timing. We disclose that residual metadata rather than hide it.</p>
-    <p>What the operator cannot see: any decrypted payload, your vault contents, your PIN or credential password, your session keys, your credential values. That rests on the enclave's attestation and on AWS KMS and Nitro behaving as documented, not on our promise.</p>
+    <p>What the operator will not be able to see: any decrypted payload, your vault contents, your PIN or credential password, your session keys, your credential values. That rests on the enclave's attestation and on AWS KMS and Nitro behaving as documented, not on our promise.</p>
   </section>
 
 </div>
@@ -362,9 +366,9 @@ dfUPJp1chfcTSDeC7O4JCyaDLFrTpBgfNxobpSgBALaLBd69bz7GrelAbCQa
 <footer>
   <div class="battlement-mini"></div>
 <!-- nav:footer — generated by scripts/sync-nav.mjs; edit scripts/nav-data.mjs, then `npm run sync:nav` -->
-  <p class="footer-nav"><a href="/">Home</a> &middot; <a href="/why">Why VettID</a> &middot; <a href="/about">About</a> &middot; <a href="/contact">Contact</a> &middot; <a href="/playbooks/">Playbooks</a> &middot; <a href="/tools-we-trust">Tools We Trust</a> &middot; <a href="/use-cases">Use Cases</a> &middot; <a href="/security">Security</a> &middot; <a href="/ai/leash">LEASH</a> &middot; <a href="/donate">Donate</a> &middot; <a href="/open-source">Open Source</a> &middot; <a href="https://github.com/vettid" target="_blank" rel="noopener noreferrer">GitHub</a></p>
+  <p class="footer-nav"><a href="/">Home</a> &middot; <a href="/why">Why VettID</a> &middot; <a href="/about">About</a> &middot; <a href="/contact">Contact</a> &middot; <a href="/playbooks/">Playbooks</a> &middot; <a href="/tools-we-trust">Tools We Trust</a> &middot; <a href="/use-cases">Use Cases</a> &middot; <a href="/security">Security</a> &middot; <a href="/ai/leash">LEASH</a> &middot; <a href="/donate">Donate</a> &middot; <a href="/open-source">Open Source</a> &middot; <a href="/privacy">Privacy</a> &middot; <a href="/terms">Terms</a> &middot; <a href="https://github.com/vettid" target="_blank" rel="noopener noreferrer">GitHub</a></p>
 <!-- /nav:footer -->
-  <p>&copy; 2026 The VettID Project. All rights reserved.</p>
+  <p>&copy; 2026 The VettID Project. Site source available under AGPL-3.0-or-later: see <a href="/terms">Terms</a>.</p>
   <p class="footer-privacy">No trackers, no analytics, no third-party resources &mdash; this site loads nothing from anyone but us.</p>
 </footer>
 

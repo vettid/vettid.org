@@ -1,9 +1,19 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.37
-date: 2026-10-11
+version: 0.1.38
+date: 2026-10-12
 changelog:
+  - 0.1.38: approved by the owner 2026-10-12 (vettid.org #247;
+    VAULT-LOCK L9, L14, L16: the texts approved as drafts). New §4
+    "Locking the vault": (1) the member's lock as built by
+    vettid-android #127, which is **open, not merged at the time of
+    writing**: the
+    pending state, what confirms a lock, the rules while pending, the
+    texts as drafts; (2) what changes when the vault's release
+    supports bound locks and the idle lock (VAULT-MESSAGING 0.29.0,
+    VAULT-LOCK 0.1.0, "release L"; decided, not built). Nothing
+    else changes
   - 0.1.37: errata from the app's implementations of 2026-10-11
     (vettid-android #113 typed recovery code, #115 brand kit, #116
     staging application id and signer binding; staging release S10;
@@ -1431,6 +1441,86 @@ History's export of activity metadata (0.1.17, owner decisions of
 2026-10-08, above): it never holds item values, secrets, message text,
 credential material or the email, and is no backup (nothing imports
 it).
+
+### Locking the vault (0.1.38)
+
+*Two parts. Part 1 describes vettid-android #127 ("The member's lock
+fails secure"), read from its description at 78f741a0. It is open, not
+merged at the time of writing: part 1 is a draft until it merges, and
+follows whatever its review changes. Part 2 is the app's side of
+VAULT-MESSAGING 0.29.0 (approved by the owner 2026-10-12), for the
+vault's release L, which is not built. The texts of both parts are
+approved as drafts (VAULT-LOCK L16) and become final when #127 and the
+release L work merge.*
+
+**1. As built by #127 (pending its merge).**
+
+- **The phone locks at once, in every outcome.** Lock vault (avatar
+  sheet, Settings, the held screen, the release update's lock step,
+  the background lock) sets the app to locked first, and makes the
+  lock **pending**, durably, before anything is sent. A new process
+  that finds a pending lock starts locked and tries again.
+- **Pending until confirmed.** What confirms: the vault's own answer
+  to `vault.lock` over the relay; a `vault.locking` from after this
+  phone's last unlock; `GET /api/vault/status` not saying `unlocked`.
+  **The member API's answer to the lock request never confirms**:
+  before release L it is `done` whether or not the vault locked
+  (VAULT-LOCK F8).
+- **While pending:** locked on this phone whatever the status says;
+  nothing is sent to the vault but the lock and a pending `call.end`;
+  nothing the vault sends is taken into the app. An unlock is allowed
+  and, when it succeeds, ends the pending lock.
+- **Retries:** after 1, 2, 5, 10 s, four times 30 s, then every 60 s,
+  through the member API, within the route's limit, while the app's
+  process lives (a job that survives the process is the follow-up PR).
+- **No late lock, as far as the app can see to it:** `vault.lock` goes
+  over the relay once, with `exp` 30 s, never through the outbox; and
+  every unlock first waits out an unanswered relay lock (up to 40 s).
+  A phone clock ahead of the vault's by more than 10 s, and a lock
+  still in the member API's queue, leave a window the app cannot close
+  (VAULT-LOCK F6, F7).
+
+**Texts (drafts; catalog ids as in #127).**
+
+| Where | Id | Text |
+|---|---|---|
+| Unlock screen, the first try running | `unlock.lock_locking` | "Locking your vault…" |
+| Unlock screen, from the first failed try | `unlock.lock_unconfirmed` | "Your vault may still be open" / "Your vault could not be reached, so it may still be open. This phone is locked, and VettID keeps trying to lock the vault." Action: **Try again** |
+| Unlock screen, confirmed after having been in doubt | `unlock.lock_confirmed` | "Your vault is locked." |
+| Release update, "The update did not go through", the lock unconfirmed | `release_update_failed_body_lock_pending` | "Nothing changed: your vault stays on release N. It could not be reached to lock it, so it may still be open. This phone is locked, and VettID keeps trying to lock the vault." |
+
+A lock the first try confirms shows no warning and no "confirmed".
+All three unlock-screen texts are live regions for screen readers (the
+warning assertive, the others polite).
+
+**2. With a vault that supports bound locks (release L; decided, not
+built).** The app knows from `unlock_id` in the unlock result; for a
+vault without it, part 1 applies unchanged.
+
+- The app keeps `unlock_id` with the pending-lock record and sends
+  `vault.lock {unlock_id}` and `POST /api/vault/lock {…, unlock_id}`.
+  If it does not hold the value (an install from before this version,
+  a lost record) it sends the member API lock without it.
+- **Dropped:** the wait before an unlock; "send the relay lock once"
+  (it may be retried, never through the outbox, `exp` at most 60 s).
+- **Confirms as well:** the slot's `locked` and `not_running`; the
+  vault's `stale_lock` and the slot's `stale` end the pending lock
+  too: this phone's unlock is over, and the app reads the status to
+  show what is true now.
+- A `vault.locking` is taken only if its `unlock_id` is the current
+  one (VAULT-MESSAGING §10.2 "Locks").
+- **The idle lock** (VAULT-MESSAGING §3.6.8). Settings → Security,
+  beside the check's interval: "Lock my vault by itself after" with
+  1 hour, 1 day, 7 days (default), 14 days, 30 days; a longer choice
+  says "This takes effect after your next check." The held screen says
+  when (from `idle_lock_at`). Texts, drafts:
+
+  | Where | Text |
+  |---|---|
+  | Held screen | "Your vault locks itself on <date> if you don't check in." |
+  | Notification (Security channel) and the unlock screen, after `vault.locking{reason: "idle"}` | "Your vault locked itself" / "You hadn't checked in for <N> days, so your vault locked. Unlock it with your PIN to carry on. New messages wait for up to 14 days." |
+  | History | "Vault locked itself (not checked in)" for `vault.locked` with `ref` `idle` |
+  | Settings, under the choice | "If you don't pass the daily check for this long, your vault locks itself and stops receiving until you unlock it." |
 
 ## 5. Architecture
 

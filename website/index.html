@@ -668,6 +668,15 @@
     flex-shrink: 0;
   }
 
+  /* Status marker: the /use-cases pattern (.uc-status), readable on every band */
+  .uc-status {
+    font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.1em;
+    text-transform: uppercase; color: inherit; opacity: 0.7; margin: 0 0 14px;
+  }
+  .section-subtitle + .uc-status { text-align: center; margin: -40px auto 48px; }
+  h2 + .uc-status { text-align: center; margin: -36px auto 48px; }
+  .signup-note a { color: inherit; text-decoration: underline; }
+
   /* How It Works Section */
   .how-it-works {
     padding: 96px 24px;
@@ -1267,6 +1276,7 @@
 <section class="use-cases">
   <h2>What You Can Do with VettID</h2>
   <p class="section-subtitle">Your vault isn't just secure storage &mdash; it's a foundation for a truly private digital life.</p>
+  <p class="uc-status">Status: in build &mdash; design, not yet product</p>
 
   <div class="use-cases-grid">
     <a class="use-case-card" href="/use-cases#private-connections">
@@ -1338,7 +1348,7 @@
         </svg>
       </div>
       <h3>Democratic Voting</h3>
-      <p>Participate in cooperative governance with privacy-preserving votes. Your vote counts, but no one can see how you voted.</p>
+      <p>Participate in member governance with privacy-preserving votes. Your vote counts, but no one can see how you voted.</p>
       <span class="uc-more">Learn more &rarr;</span>
     </a>
 
@@ -1422,6 +1432,7 @@
   <div class="service-highlight">
     <div class="service-highlight-content">
       <h3>For Businesses: Service Vaults</h3>
+      <p class="uc-status">Status: in build &mdash; design, not yet product</p>
       <p>Organizations can run VettID Service Vaults to interact with members securely. Reduce your risk exposure by never storing sensitive customer data &mdash; access it on-demand from the customer's vault, with their explicit consent.</p>
       <ul class="service-features">
         <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Shrink breach exposure &mdash; you can't leak what you don't store</li>
@@ -1450,6 +1461,7 @@
   <div class="service-highlight service-highlight-stacked">
     <div class="service-highlight-content">
       <h3>Everywhere You Work: Desktop Client</h3>
+      <p class="uc-status">Status: in build &mdash; design, not yet product</p>
       <p>VettID Desktop extends your vault to macOS, Windows, and Linux. Sessions are time-limited and capability-scoped &mdash; your phone stays in control. Browse connections, read feeds, and view audit logs independently. Sensitive operations like retrieving secrets or updating credentials require real-time phone approval.</p>
       <ul class="service-features">
         <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Time-bounded sessions with automatic expiry and phone-controlled renewal</li>
@@ -1464,6 +1476,7 @@
   <div class="service-highlight service-highlight-stacked">
     <div class="service-highlight-content">
       <h3>For Web3: Onboarding Without Seed Phrases</h3>
+      <p class="uc-status">Status: in build &mdash; design, not yet product</p>
       <p>The hardest part of bringing users on-chain is key custody: seed phrases get lost, custodial wallets defeat the point, and one phishing click drains an account. VettID gives every member a hardware-isolated vault that generates and holds their keys &mdash; so your users onboard with an app install and an approval tap, not a twelve-word ritual.</p>
       <ul class="service-features">
         <li><svg width="16" height="16" viewBox="0 0 16 16" fill="#ffc125"><path d="M6 10.8L3.2 8l-.9.9L6 12.6l8-8-.9-.9L6 10.8z"/></svg> Keys are generated inside the enclave &mdash; never written down, never exported</li>
@@ -1479,10 +1492,10 @@
 <!-- LEASH Announcement -->
 <section class="leash-banner">
   <div class="leash-banner-content">
-    <div class="leash-badge">New &mdash; Position Paper</div>
+    <div class="leash-badge">Position Paper</div>
     <h2>LEASH</h2>
     <p class="leash-subtitle">Lightweight Encrypted Agent Secret Handling</p>
-    <p class="leash-desc">MCP (Model Context Protocol) has become the de facto standard for connecting AI agents to tools, but it has no native mechanism for secure secret management. We're proposing one. LEASH is a companion protocol where secrets never leave the vault, humans approve every access, and every operation is auditable.</p>
+    <p class="leash-desc">MCP (Model Context Protocol) has become the de facto standard for connecting AI agents to tools. LEASH is our proposed security model for how agents use secrets. It complements MCP&rsquo;s own authorization rather than replacing it: secrets stay in the vault wherever possible, the owner decides what an agent may do, and every operation is auditable. It is framework-neutral, with MCP as its first binding. The position paper is being prepared for the Agentic AI Foundation.</p>
     <div class="leash-actions">
       <a href="https://github.com/vettid/LEASH" target="_blank" rel="noopener noreferrer" class="btn btn-outline">Read the Position Paper</a>
     </div>
@@ -1493,6 +1506,7 @@
 <section class="security">
   <h2>Security Without Compromise</h2>
   <p class="section-subtitle">VettID protects your data with hardware isolation and cryptographic proof &mdash; not promises.</p>
+  <p class="uc-status">Status: in build &mdash; no production release yet</p>
 
   <div class="security-grid">
     <div class="security-card">
@@ -1614,7 +1628,7 @@
     <div class="nitro-features">
       <div class="nitro-feature">
         <h4>Hardware Attestation</h4>
-        <p>AWS Nitro provides cryptographic proof of the exact code running in your vault. Each release's measurements (PCR values) are published in a signed manifest and our release log, and builds are reproducible, so you can rebuild from source and compare.</p>
+        <p>AWS Nitro provides cryptographic proof of the exact code running in your vault. Each production release's measurements (PCR values) will be published in a signed manifest and our release log, and builds are reproducible, so you can rebuild from source and compare.</p>
       </div>
       <div class="nitro-feature">
         <h4>Memory Isolation</h4>
@@ -1742,18 +1756,18 @@
       <use href="#coop-rook" transform="translate(16.71, 39.18)"/>
     </svg>
 
-    <h2>A <span class="highlight">Cooperative</span> Built for You</h2>
-    <p>VettID is not a corporation. We are a member-owned cooperative where every voice matters. Our governance is transparent, our priorities are aligned with yours, and our mission is simple: protect our members.</p>
-    <p>When you join VettID, you're not just a customer &mdash; you're an owner with voting rights on how we operate, what services we offer, and how we protect our community.</p>
+    <h2>A <span class="highlight">Member-Governed</span> Organization, Built for You</h2>
+    <p>VettID is being set up as a member-governed organization where every voice matters; its legal entity is in formation. Our governance will be transparent, our priorities are aligned with yours, and our mission is simple: protect our members.</p>
+    <p>When you join VettID, you won't be just a customer &mdash; members will govern the organization: how we operate, what services we offer, and how we protect our community.</p>
 
     <div class="values-grid">
       <div class="value-item">
         <h4>Democratic Governance</h4>
-        <p>One member, one vote. Major decisions are made by the community.</p>
+        <p>One member, one vote. Major decisions will be made by the members.</p>
       </div>
       <div class="value-item">
         <h4>Transparent Operations</h4>
-        <p>See how your membership fees are used to protect the community.</p>
+        <p>VettID is run on a cost-recovery basis: members&rsquo; subscriptions will pay for the resources their use consumes.</p>
       </div>
       <div class="value-item">
         <h4>No Profit Motive</h4>
@@ -1770,6 +1784,7 @@
 <!-- How It Works Section -->
 <section class="how-it-works">
   <h2>How It Works</h2>
+  <p class="uc-status">Status: membership is not open yet</p>
   <div class="steps">
     <div class="step">
       <div class="step-number">1</div>
@@ -1801,7 +1816,7 @@
     <input type="email" id="signupEmail" name="email" required maxlength="320" placeholder="you@example.com" autocomplete="email">
     <button type="submit" class="signup-btn">Join the List</button>
   </form>
-  <p class="signup-note">You'll receive a confirmation email from Amazon Web Services (our email provider) &mdash; click it to confirm your spot. No spam, no sharing, and you can leave anytime.</p>
+  <p class="signup-note">You'll receive a confirmation email from Amazon Web Services (our email provider) &mdash; click it to confirm your spot. No spam, no sharing, and you can leave anytime with the unsubscribe link in our emails: see the <a href="/privacy">privacy notice</a>.</p>
   <p class="signup-status" id="signupStatus" role="status" aria-live="polite"></p>
 </section>
 
@@ -1809,9 +1824,9 @@
 <footer>
   <div class="battlement-mini"></div>
 <!-- nav:footer — generated by scripts/sync-nav.mjs; edit scripts/nav-data.mjs, then `npm run sync:nav` -->
-  <p class="footer-nav"><a href="/">Home</a> &middot; <a href="/why">Why VettID</a> &middot; <a href="/about">About</a> &middot; <a href="/contact">Contact</a> &middot; <a href="/playbooks/">Playbooks</a> &middot; <a href="/tools-we-trust">Tools We Trust</a> &middot; <a href="/use-cases">Use Cases</a> &middot; <a href="/security">Security</a> &middot; <a href="/ai/leash">LEASH</a> &middot; <a href="/donate">Donate</a> &middot; <a href="/open-source">Open Source</a> &middot; <a href="https://github.com/vettid" target="_blank" rel="noopener noreferrer">GitHub</a></p>
+  <p class="footer-nav"><a href="/">Home</a> &middot; <a href="/why">Why VettID</a> &middot; <a href="/about">About</a> &middot; <a href="/contact">Contact</a> &middot; <a href="/playbooks/">Playbooks</a> &middot; <a href="/tools-we-trust">Tools We Trust</a> &middot; <a href="/use-cases">Use Cases</a> &middot; <a href="/security">Security</a> &middot; <a href="/ai/leash">LEASH</a> &middot; <a href="/donate">Donate</a> &middot; <a href="/open-source">Open Source</a> &middot; <a href="/privacy">Privacy</a> &middot; <a href="/terms">Terms</a> &middot; <a href="https://github.com/vettid" target="_blank" rel="noopener noreferrer">GitHub</a></p>
 <!-- /nav:footer -->
-  <p>&copy; 2026 The VettID Project. All rights reserved.</p>
+  <p>&copy; 2026 The VettID Project. Site source available under AGPL-3.0-or-later: see <a href="/terms">Terms</a>.</p>
   <p class="footer-privacy">No trackers, no analytics, no third-party resources &mdash; this site loads nothing from anyone but us.</p>
   <p class="footer-legal">Amazon Web Services, AWS, and AWS Nitro Enclaves are trademarks of Amazon.com, Inc. or its affiliates.</p>
 </footer>

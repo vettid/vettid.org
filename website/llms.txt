@@ -1,44 +1,63 @@
 # VettID
 
-> VettID is a personal security service from The VettID Project — a member-owned
-> cooperative. Each member gets a personal vault running inside a hardware-isolated
-> AWS Nitro Enclave that holds their identity, credentials, secrets, connections,
-> and AI agent access. The architecture is zero-knowledge: VettID's infrastructure
-> only ever sees encrypted data and cannot read member content, even if compelled.
+> Secure. Private. Trusted. VettID is a non-custodial identity and communications platform. Each member's identity, secrets, connections and AI agent access are guarded in a personal vault that only the member controls; the vault runs inside a hardware-isolated AWS Nitro Enclave, and VettID's infrastructure only sees encrypted data.
 
-## Pages
+Status, as the site states it today:
 
-- [Home](https://vettid.org/): what VettID does — private connections, identity
-  credentials, secure secrets, AI agent access, encrypted backup, and more
-- [Why VettID](https://vettid.org/why): the mission and editorial position — privacy
-  as a right, identity vs. anonymity as different tools, and how the position
-  shapes the architecture
-- [About](https://vettid.org/about): who builds VettID — founder Al Liebl, current
-  project status, and why it's built the way it is
-- [Contact](https://vettid.org/contact): how to reach VettID — email only, no forms
-- [Playbooks](https://vettid.org/playbooks/): Privacy Playbooks — plain-language
-  articles on security, privacy, anonymity, identity, and trust, plus step-by-step
-  playbooks for phones and accounts
-- [Tools We Trust](https://vettid.org/tools-we-trust): third-party privacy tools we
-  recommend (no affiliations, no affiliate links)
-- [Use Cases](https://vettid.org/use-cases): what you can do with VettID — each use
-  case compared with how the internet works today
-- [AI at VettID](https://vettid.org/ai): the AI section landing
-- [LEASH](https://vettid.org/ai/leash): Lightweight Encrypted Agent Secret Handling —
-  a proposed open standard for AI agents acting on your behalf without holding your
-  secrets; spec at https://github.com/vettid/LEASH
-- [AAIF Membership](https://vettid.org/ai/aaif): VettID's associate membership in the
-  Agentic AI Foundation
-- [How We Use AI](https://vettid.org/ai/how-we-use-ai): AI helps build VettID; AI
-  never sees member data — by architecture, not policy
-- [Security](https://vettid.org/security): vulnerability disclosure policy,
-  scope, severity targets, cryptography at a glance (hybrid post-quantum
-  ML-KEM-768 + X25519 key exchange; Ed25519 signatures), what the operator
-  can see, and PGP key for encrypted reports
-- [Donate](https://vettid.org/donate): support the project (Bitcoin)
-- [Open Source](https://vettid.org/open-source): the full stack is public on GitHub (AGPL-3.0) — enclave vault, relay, push gateway, apps, agent connector, infrastructure, and the LEASH proposal
+- VettID is in active development. Membership is not open yet ("Membership opens soon"); the home page takes email addresses for a list.
+- Every use case on the site is marked as in build ("design, not yet product"). No production vault release has been published yet.
+- VettID is being set up as a member-governed organization. Its legal entity is in formation (see About).
+- VettID is non-custodial: members hold their own keys, and no AI system processes member data.
+- LEASH is a proposed open standard, not a product. It is a position paper being prepared for the Agentic AI Foundation (AAIF), of which VettID is an associate member.
+- The Agent Connector in the repository is being rebuilt for the current vault and relay and does not work with them yet. The push gateway is in testing and not yet switched on for members.
+
+## Start here
+
+- [Home](https://vettid.org/): What members will do with a vault, the trust model, and what VettID can and can never see
+- [Use Cases](https://vettid.org/use-cases): Ten use cases, each compared with how the internet works today
+- [Why VettID](https://vettid.org/why): The mission and position: privacy as a right, identity and anonymity as different tools, and how that shapes the architecture
+- [About](https://vettid.org/about): Who builds VettID (founder and architect Al Liebl) and where things stand
+
+## Security
+
+- [Security](https://vettid.org/security): Vulnerability disclosure policy (how to report, scope, severity, safe harbor, PGP key), cryptography at a glance (hybrid post-quantum key exchange, ML-KEM-768 with X25519; Ed25519 signatures, not yet post-quantum), and what the operator side logs
+- [Vault release log](https://vettid.org/security/releases/): Every vault release VettID runs (measurements, source, changes, security fixes, status, end date) and how to check a release
+- [How to rebuild and match a release](https://github.com/vettid/vettid-vault/blob/main/docs/RELEASING.md#rebuild-and-match-anyone): Releases are built reproducibly; anyone can rebuild one from its tag and compare the measurement (PCR0) with the release log
+- [Vault release updates](https://github.com/vettid/vettid.org/blob/master/docs/RELEASE-UPDATES.md): What the release statuses mean and how long each release keeps running
+- [Vault messaging spec](https://github.com/vettid/vettid.org/blob/master/docs/VAULT-MESSAGING.md): The specification behind the cryptography summary
+- [security.txt](https://vettid.org/.well-known/security.txt): Security contact (RFC 9116): security@vettid.org. Do not file public GitHub issues for security findings
+
+## AI
+
+- [VettID and AI](https://vettid.org/ai): Landing page for the three pages below
+- [LEASH](https://vettid.org/ai/leash): Lightweight Encrypted Agent Secret Handling, a proposed open standard for letting AI agents act on your behalf without holding your secrets; MCP is its first binding
+- [LEASH position paper](https://github.com/vettid/LEASH): The paper itself, on GitHub
+- [VettID and the Agentic AI Foundation](https://vettid.org/ai/aaif): Why VettID is an associate member of the AAIF
+- [How We Use AI](https://vettid.org/ai/how-we-use-ai): VettID is developed with substantial help from AI (Claude, made by Anthropic), with human review; no AI system processes member data
+
+## Source code
+
+- [Open Source](https://vettid.org/open-source): The whole stack is public on GitHub under AGPL-3.0; this page lists every repository
+- [vettid.org](https://github.com/vettid/vettid.org): This website, the account and admin sites, the member and admin APIs, every AWS CDK stack, and the design docs
+- [vettid-vault](https://github.com/vettid/vettid-vault): The vault: the Nitro Enclave supervisor and per-member vault, the host-side forwarder, the hybrid post-quantum crypto, and the reproducible image build
+- [vettid-relay](https://github.com/vettid/vettid-relay): The relay: mailboxes that hold end-to-end encrypted messages they cannot read
+- [vettid-push](https://github.com/vettid/vettid-push): The push gateway: wakes a phone with a push that carries no content. In testing; not yet switched on for members
+- [vettid-android](https://github.com/vettid/vettid-android): The Android app. In testing; not yet released
+- [vettid-ios](https://github.com/vettid/vettid-ios): The iOS app. Not yet released
+- [vettid-desktop](https://github.com/vettid/vettid-desktop): The desktop companion: time-limited, capability-scoped sessions where the phone stays in control. Not yet released
+- [vettid-agent](https://github.com/vettid/vettid-agent): The Agent Connector, the sidecar an AI agent will run to use its owner's vault under LEASH; being rebuilt
+- [vettid-service-vault](https://github.com/vettid/vettid-service-vault): The integration layer that lets organizations run Service Vaults. In build; not yet a product
 
 ## Contact
 
-- Security reports: security@vettid.org (see https://vettid.org/.well-known/security.txt)
-- General: info@vettid.org
+- [Contact](https://vettid.org/contact): Email only. General, and LEASH, AAIF or Zero-Knowledge Trust discussions: info@vettid.org. Security: see the Security page
+- [Privacy](https://vettid.org/privacy): What this website and the mailing list record, how long it is kept, and how to have it removed
+- [Terms](https://vettid.org/terms): Terms of use for this website and the mailing list
+
+## Optional
+
+- [Privacy Playbooks](https://vettid.org/playbooks/): What security, privacy, anonymity, identity and trust mean, then step-by-step fixes on your own device; free and available now
+- [Tools We Trust](https://vettid.org/tools-we-trust): Third-party privacy tools VettID recommends; no affiliations, no affiliate links
+- [Donate](https://vettid.org/donate): Supporting the project; donations@vettid.org
+- [zero-knowledge-trust](https://github.com/vettid/zero-knowledge-trust): Paper: the thinking behind VettID's architecture
+- [vettid-healthcare-demo](https://github.com/vettid/vettid-healthcare-demo): Demo: three approaches to patient-record lookup compared side by side

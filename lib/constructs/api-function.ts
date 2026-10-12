@@ -24,6 +24,11 @@ export interface ApiFunctionProps {
   readonly roleName?: string;
   /** Reserved concurrency; only where invocations must not overlap (the vault scaler). */
   readonly reservedConcurrentExecutions?: number;
+  /**
+   * Log group retention. Default one month. The public website's functions
+   * pass the website's one period (lib/constructs/website-logs.ts).
+   */
+  readonly logRetention?: logs.RetentionDays;
 }
 
 /**
@@ -38,14 +43,16 @@ export interface ApiFunctionProps {
  */
 export class ApiFunction extends Construct {
   readonly fn: lambdaNode.NodejsFunction;
+  /** The function's log group (for metric filters). */
+  readonly logGroup: logs.LogGroup;
 
   constructor(scope: Construct, id: string, props: ApiFunctionProps) {
     super(scope, id);
 
-    const logGroup = new logs.LogGroup(this, 'Logs', {
-      retention: logs.RetentionDays.ONE_MONTH,
+    const logGroup = (this.logGroup = new logs.LogGroup(this, 'Logs', {
+      retention: props.logRetention ?? logs.RetentionDays.ONE_MONTH,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
-    });
+    }));
 
     this.fn = new lambdaNode.NodejsFunction(this, 'Fn', {
       entry: props.entry,

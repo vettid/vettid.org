@@ -44,6 +44,8 @@ for (const file of htmlFiles) {
 
   // 4. No stale vettid.dev references
   if (/vettid\.dev/i.test(src)) errors.push(`${rel}: references vettid.dev`);
+  // The site's source is AGPL-3.0-or-later; the footer says so (see /terms)
+  if (/All rights reserved/i.test(src)) errors.push(`${rel}: says "All rights reserved"`);
 
   // 5. Internal hrefs/srcs resolve to real files (clean URLs map to dir/index.html)
   for (const m of src.matchAll(/(?:href|src)="(\/[^"#?]*)/g)) {
@@ -153,6 +155,41 @@ for (const site of readdirSync(SITES)) {
     // Page paths built in JS: '/x/y/' or '/x/#tab' string literals.
     for (const m of src.matchAll(/['`](\/[a-z0-9][a-z0-9/-]*\/)(?:#[a-z]+)?['`]/g)) {
       if (!resolves(m[1])) errors.push(`${rel}: link to missing page ${m[1]}`);
+    }
+  }
+}
+
+// 9. llms.txt (llmstxt.org: H1, blockquote summary, H2 sections of
+// `- [name](url): notes` links) cannot rot silently: every vettid.org URL
+// is a page this tree publishes, every other URL is one a page here already
+// links (so it lists no repository the site does not), and the file is
+// ASCII because S3 serves *.txt as text/plain with no charset.
+{
+  const src = readFileSync(join(ROOT, 'llms.txt'), 'utf8');
+  const lines = src.split('\n');
+  const allHtml = htmlFiles.map((f) => readFileSync(f, 'utf8')).join('\n');
+  if (!/^# \S/.test(lines[0])) errors.push('llms.txt: first line is not an H1');
+  if (!lines.some((l) => l.startsWith('> '))) errors.push('llms.txt: no blockquote summary');
+  if (/[^\n\x20-\x7e]/.test(src)) errors.push('llms.txt: non-ASCII character (served as text/plain without a charset)');
+  if (/\bsubmitted\b/i.test(src)) errors.push('llms.txt: says "submitted" (LEASH status wording follows /ai/leash)');
+  let inLists = false;
+  for (const line of lines) {
+    if (line.startsWith('## ')) inLists = true;
+    if (inLists && line.startsWith('- ') && !/^- \[[^\]]+\]\(https:\/\/[^)\s]+\)(: \S.*)?$/.test(line)) {
+      errors.push(`llms.txt: not a "- [name](url): notes" item: ${line.slice(0, 60)}`);
+    }
+  }
+  for (const m of src.matchAll(/\]\((https:\/\/[^)\s]+)\)/g)) {
+    const url = m[1];
+    if (url.startsWith('https://vettid.org/')) {
+      const path = url.slice('https://vettid.org'.length).replace(/[#?].*$/, '');
+      // /playbooks/* is a separate CloudFront origin (see check 5)
+      if (path === '/' || path.startsWith('/playbooks/')) continue;
+      if (!existsSync(join(ROOT, path)) && !existsSync(join(ROOT, path, 'index.html'))) {
+        errors.push(`llms.txt: ${url} is not a page in website/`);
+      }
+    } else if (!allHtml.includes(`href="${url}"`)) {
+      errors.push(`llms.txt: ${url} is not linked from any page in website/`);
     }
   }
 }
