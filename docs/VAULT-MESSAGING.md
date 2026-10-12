@@ -24,8 +24,8 @@ related:
   - VAULT-HOST-PROTOCOL.md (0.1.4; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.1, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
-  - 0.29.1: editorial-normative, as built: vettid-vault #70 and #71
-    (`main` 2daa9e4), for staging release S11, which is not cut yet.
+  - 0.29.1: editorial-normative, as built: vettid-vault #70, #71 and
+    #72 (`main` 392b03c), for staging release S11, which is not cut yet.
     No wire change. §12.3: **"Parent unreachable for 120 s"** is again
     the row's name and now means 120 s without a `Ping`, connected or
     not; the lock takes at most 10 s more; what is and is not lost

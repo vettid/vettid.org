@@ -12,8 +12,8 @@ related:
   - VAULT-RELAY-SCALING.md (0.1.2) §6, §10
   - vettid-vault `internal/hostproto`, `enclave/supervisor`, `enclave/egress`, `parent`, docs/V3-NOTES.md "Enclave ↔ parent", docs/SMOKE.md
 changelog:
-  - 0.1.4: as built at vettid-vault `main` 2daa9e4 (#70, 93f32ca, and
-    #71; for staging release S11, not cut yet): **a parent that is
+  - 0.1.4: as built at vettid-vault `main` 392b03c (#70, 93f32ca; #71,
+    2daa9e4; #72, 392b03c; for staging release S11, not cut yet): **a parent that is
     connected but silent is unreachable** (owner decision H3). §4.3:
     every vault is locked 120 s after the parent's last `Ping`,
     connected or not; the lock takes 10 s at most; the vaults ended are
@@ -22,8 +22,8 @@ changelog:
     queue is full; the reader's wait at its limit is not silence. §6.2,
     §6.3, §7.3, §7.4, §9, §11.3 follow. **§12: five new requirements
     P10–P14**, each satisfied by that code. §13: point 1 closed; point 6
-    narrowed; new points 9–12. One fix is pending (vettid-vault #72,
-    open) and is described as pending
+    narrowed; new points 9–13, of which 11 is closed by #72. §3.5: an
+    ended connection takes no frame
   - 0.1.3: approved by the owner 2026-10-12 (vettid.org #247;
     VAULT-LOCK 0.1.0, VAULT-MESSAGING 0.29.0): what the `lock` queue operation would
     carry and answer from the vault's release L (§6.1), and what that
@@ -86,8 +86,8 @@ process, which never leaves the enclave (vettid-vault
 vettid-vault f3003ed (#66), which staging release S11 is to be built
 from, with the two changes of 8f2c8bf (#69, also for S11): the count
 `relay_vault_limit` (§6.6) and the log record it replaces (§7.4, §11.2,
-§13 point 2), and with the changes of 93f32ca (#70) and 2daa9e4 (#71,
-also for S11): the unreachable-parent rule and what goes with it
+§13 point 2), and with the changes of 93f32ca (#70), 2daa9e4 (#71) and
+392b03c (#72), all for S11: the unreachable-parent rule and what goes with it
 (0.1.4; §3.4, §4.3, §6.2, §6.3, §7.3, §7.4, §9). Where the commits
 differ, the text names the commit.
 Statements in the present tense are what the code does. The key words MUST, MUST NOT, SHOULD and MAY (RFC 2119) appear
@@ -219,7 +219,11 @@ failed call. Any status but the ones a caller expects is a failure.
 
 A read or write error, a malformed frame or a close ends the
 connection. Every call still waiting on it fails; frames still queued
-are dropped. Requests are never re-sent by this layer. What each side
+are dropped. An ended connection accepts no further frame, also when
+its queue has room, and a wait for queued frames to be written
+(a flush) reports success only if they were written to a connection
+that has not ended (392b03c; before, a frame could be queued onto an
+ended connection and a flush could report it written). Requests are never re-sent by this layer. What each side
 does next is §4.
 
 ## 4. The session
@@ -301,14 +305,31 @@ and has sent a descriptor.
   - **It stays unreachable until it pings**, also when no vault runs.
     A vault that appears meanwhile (an unlock that was half way) is
     locked at the next check.
-  - **The parent is told which vaults ended.** When its next `Ping` is
-    read, the `Ping` is counted first; then the enclave queues one
-    `Stopped` (§7.3) for each vault it locked or killed (`locked`,
-    `split_brain`, or `error` for a killed one); only then are calls
-    to the parent let through again. Reports that cannot be queued are
-    kept for the following `Ping`. (A `Ping` handled while its
-    connection ends can still lose or misorder a report: §13 point
-    11, fix pending.)
+  - **The parent is told which vaults ended, and is reachable again
+    only then** (392b03c). When its next `Ping` is read, the `Ping` is
+    counted first. Then the enclave sends one `Stopped` (§7.3) for
+    each vault it locked or killed (`locked`, `split_brain`, or
+    `error` for a killed one) and waits until they have been
+    **written** to the connection. Only if they were written, and that
+    connection is still the current one, are calls to the parent let
+    through again.
+    - Otherwise every report is kept, the parent stays unreachable,
+      and the `Ping` of the next connection tries again.
+    - A report may so reach the parent twice. That is harmless: no
+      vault can open while the parent is unreachable, so the second is
+      a report for a vault the parent no longer counts as running.
+    - A report for a vault that runs again by then is not sent.
+    - Vaults that ended while the reports were being written keep the
+      parent unreachable until the following `Ping` reports them.
+    - The `Ping`'s reply waits while the reports are written. At
+      recovery the parent's `Ping` call (5 s) can therefore time out,
+      and the parent then skips that tick's registry write (§6.3).
+    - Written is not read: a connection that ends after the write and
+      before the parent has read the frame still loses the report
+      (§13 point 10).
+    - At 2daa9e4 the reports were only queued, and a `Ping` handled
+      while its connection ended could lose one, or let a call through
+      before one was sent (§13 point 11).
   - **The reader's own wait** at its 128-request limit (§3.4) is not
     counted as silence, up to 120 s between two pings: a `Ping` the
     parent sent would be waiting unread.
@@ -607,6 +628,9 @@ it held one, and counts split brains.
 *93f32ca:* the enclave also sends `Stopped` for each vault it locked or
 killed while the parent was unreachable, at the parent's next `Ping`
 (§4.3): `locked`, `split_brain`, or `error` for a killed process.
+*392b03c:* such a report is kept until it has been written to a
+connection that is still the current one, so the parent may receive
+one twice; a report whose vault runs again is not sent.
 *2daa9e4:* the parent does not release the lease on a `Stopped` while
 an enroll or unlock of that vault is under way (the request took the
 lease; if it does not open the vault, it gives the lease back).
@@ -962,7 +986,7 @@ is satisfied from 8f2c8bf.*
   stored object (VAULT-MESSAGING §2.1 already says "not trusted for
   parsing").
 
-*P10–P14: added in 0.1.4. The code at vettid-vault 2daa9e4 satisfies
+*P10–P14: added in 0.1.4. The code at vettid-vault 392b03c satisfies
 each.*
 
 - **P10.** The parent MUST send `Ping` at least every 30 s while an
@@ -999,9 +1023,9 @@ the `Hello` comment is corrected (8f2c8bf) and VAULT-RELEASES 0.1.16
 lists `account`. Points 5 and 6 are open. Point 8 is new.
 
 **State at 0.1.4.** Point 1 is **closed** (vettid-vault #70 and #71,
-`main` 2daa9e4, for S11). Point 6 stays open, narrowed. Points 9 to 12
-are new; point 11 has a fix in review (vettid-vault #72, open at the
-time of writing).
+for S11). Point 11 was found and **closed** the same day (#72, `main`
+392b03c, for S11). Point 6 stays open, narrowed. Points 9, 10, 12 and
+13 are new and open.
 
 Found while writing this document. Each is described where it occurs
 above; the pull request that adds this document lists them with file
@@ -1072,15 +1096,15 @@ before. Points 1 and 2 are the ones that matter.
     other event lost with a connection stays lost. To close it: the
     enclave reports its running set at the hello, a wire change for a
     later release.
-11. **A `Ping` handled as its connection ends (0.1.4; fix pending).**
-    At 2daa9e4 a `Stopped` report can be queued onto a connection that
-    has just ended and be lost, or be kept while the parent is made
-    reachable all the same, so that an unlock opens the vault before
-    the stale report goes out and the parent then releases a running
-    vault's lease. vettid-vault #72 (open, not merged at the time of
-    writing) changes this: a report counts as told only when written
-    to the connection that is still the link's, and a report whose
-    vault runs again is dropped. Written is still not read: point 10.
+11. **A `Ping` handled as its connection ends (0.1.4). Closed in
+    vettid-vault #72 (392b03c).** At 2daa9e4 a `Stopped` report could
+    be queued onto a connection that had just ended and be lost, or be
+    kept while the parent was made reachable all the same, so that an
+    unlock opened the vault before the stale report went out and the
+    parent then released a running vault's lease. Now a report counts
+    as told only when written to the connection that is still the
+    current one, and a report whose vault runs again is dropped
+    (§4.3). Written is still not read: point 10.
 12. **The parent's other AWS calls have no time limit of their own
     (0.1.4).** None decides a lock, and none was changed: the queue's
     long poll, message delete, manifest read, slot write, and lease
@@ -1093,10 +1117,17 @@ before. Points 1 and 2 are the ones that matter.
     With a limit: the registry write and the lease renewal (10 s, new),
     lifecycle and lease-release writes (30 s), the registry row's
     delete (10 s; 60 s at shutdown).
+13. **The wait for the reports has no bound of its own (0.1.4; low).**
+    After a `Ping` the enclave waits until its whole outgoing queue is
+    written, not only the reports, and that wait has no time limit
+    beyond the 60 s each frame has. At realistic rates it is
+    immediate, and while the parent is unreachable the enclave makes
+    no calls, so little is queued. A parent that reads slowly delays
+    its own return and its `Ping`'s reply.
 
 ## 14. Sources
 
-*0.1.4:* also read at 2daa9e4: `enclave/supervisor/supervisor.go`
+*0.1.4:* also read at 392b03c: `enclave/supervisor/supervisor.go`
 (`checkParent`), `link.go` (`ping`, `hear`, `lost`), `prochost.go`
 (`LockAllWithin`), `internal/hostproto/conn.go` (`Options`),
 `parent/parent.go` (`publish`, `renew`, the `Stopped` branch),

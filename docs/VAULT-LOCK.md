@@ -14,8 +14,8 @@ related:
   - vettid-android #127 (open, not merged at the time of writing; read at 78f741a0), vettid-vault `main` 079cde7
 changelog:
   - 0.1.1: §8, the point about `no_lease`: the silent-parent fix is
-    merged in vettid-vault (#70, #71, `main` 2daa9e4; S11 not released
-    yet), and what it does and does not settle. No decision changes
+    merged in vettid-vault (#70, #71, #72, `main` 392b03c; S11 not
+    released yet), and what it does and does not settle. No decision changes
   - 0.1.0: first draft, after the owner's request of 2026-10-12
     ("please draft the specs for both vault decisions"). Code read at
     vettid-vault `main` 079cde7, this repository's `master` 64d24ff and
@@ -416,7 +416,7 @@ with your recommendations"): every decision as recommended.
   measurement exists.
 - **Whether a `no_lease` status always means "not running".**
   *0.1.1:* the silent-parent fix is merged in vettid-vault (#70, #71,
-  `main` 2daa9e4) and goes out with S11, which is not released yet.
+  #72, `main` 392b03c) and goes out with S11, which is not released yet.
   With it, a parent that hangs or stops sends no `Ping`, and its
   enclave locks or kills every vault within 140 s (VAULT-MESSAGING
   §12.3), before a lease of 180 s runs out; a parent that lives but

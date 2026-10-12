@@ -154,7 +154,7 @@ changelog:
     parent's `DefaultAllow`, the stage's DNS Firewall), planned, not
     built. No other section is touched (§8.7 in particular is left
     alone)
-  - 0.1.20 (as built, vettid-vault #70 and #71, `main` 2daa9e4; for
+  - 0.1.20 (as built, vettid-vault #70, #71 and #72, `main` 392b03c; for
     staging release S11, not cut yet). §8.7: the log records the
     unreachable-parent rule adds, and what S11 is planned to carry.
     `related` brought up to date
@@ -1389,7 +1389,7 @@ release_starting`. The `vault-scaler` Lambda (host stack):
     shipped log line. The record's shape is tested; the extraction is
     phase 1's exit check, to be done on staging with S11. If the parent
     logs above INFO the record is not written.
-- *As built (0.1.20; vettid-vault #70 and #71, `main` 2daa9e4; from
+- *As built (0.1.20; vettid-vault #70, #71 and #72, `main` 392b03c; from
   staging release S11, which is not cut yet).* **The unreachable
   parent in the log** (VAULT-MESSAGING §12.3; VAULT-HOST-PROTOCOL
   §4.3, §7.4). In `/vettid-org/<stage>/vault-host`, none naming a
@@ -1412,9 +1412,9 @@ release_starting`. The `vault-scaler` Lambda (host stack):
     these. No alarm is built on any of them yet.
   - **What S11 is planned to carry** (vettid-vault, since
     `release/staging/10`): #66 (relay connections and metrics), #69
-    (`relay_vault_limit`), #70 and #71 (the unreachable parent), and
-    one small fix still in review at the time of writing (#72, open).
-    #67 and #68 are test vectors and documentation. `deploy/host/` is
+    (`relay_vault_limit`), #70, #71 and #72 (the unreachable parent);
+    all merged, `main` 392b03c. #67 and #68 are test vectors and
+    documentation. `deploy/host/` is
     unchanged since S10, so S11's `host_files_sha256` is S10's.
 - *As built (0.1.17; the host stack, `lib/stacks/vault-host-stack.ts`;
   built, not yet verified on staging: RUNBOOK "The parent's metrics and
