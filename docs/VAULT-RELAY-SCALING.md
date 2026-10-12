@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELAY-SCALING
-status: draft for the owner's review
-version: 0.1.0
+status: approved by the owner 2026-10-12 (D1–D6 as recommended)
+version: 0.1.1
 date: 2026-10-12
 owner: Al Liebl (Mesmer)
 related:
@@ -11,6 +11,7 @@ related:
   - VAULT-RELEASES.md §8.7 (monitoring), §8.8 (capacity); STAGING-DEVELOPMENT-PLAN.md §3 row 6, D11
   - vettid-vault docs/V3-NOTES.md, docs/SMOKE.md
 changelog:
+  - 0.1.1: approved by the owner 2026-10-12; D1–D6 decided as recommended (§8)
   - 0.1.0: first draft after the owner's request of 2026-10-12 ("plan the
     enclave fix"); code read at vettid-vault and vettid-relay
     `origin/main`, AWS read-only, and two local measurements (§9)
@@ -244,6 +245,8 @@ None is made by this document.
 | RELAY-PROTOCOL (after PR #233) | Nothing for phases 1–2. Phase 3: a watch endpoint and its place in §7.2 | Phase 3 |
 
 ## 8. Owner decisions
+
+Decided by the owner on 2026-10-12: all six as recommended.
 
 | # | Decision | Recommendation |
 |---|---|---|
