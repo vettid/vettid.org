@@ -1,16 +1,18 @@
 ---
 title: RELEASE-UPDATES
 status: draft
-version: 0.3.2
-date: 2026-10-11
+version: 0.3.3
+date: 2026-10-12
 owner: Al Liebl (Mesmer)
 related:
   - VAULT-PLAN.md (D1 re-sealing per release, D3 reproducible builds)
-  - VAULT-MESSAGING.md (0.10.0) §11.10 (normative: manifest, sealing, approval, the move, app behaviour, the key check incl. retirement)
-  - VAULT-RELEASES.md (0.1.13) §3 (statuses, cadence, retirement and notices), §7 (manifest and release log)
-  - ANDROID-PLAN.md (0.1.31) §4 "Vault update", "What's new" (the app's side of §2)
+  - VAULT-MESSAGING.md (0.27.4) §11.10 (normative: manifest, sealing, approval, the move, app behaviour, the key check incl. retirement)
+  - VAULT-RELEASES.md (0.1.16) §3 (statuses, cadence, retirement and notices), §7 (manifest and release log)
+  - ANDROID-PLAN.md (0.1.37) §4 "Vault update", "What's new" (the app's side of §2)
   - ARCHITECTURE.md
 changelog:
+  - 0.3.3: `related` brought up to date (VAULT-MESSAGING 0.27.4,
+    VAULT-RELEASES 0.1.16, ANDROID-PLAN 0.1.37); no other change
   - 0.3.2: as built (vettid.org #224, MEMBER-API 2.4.2; approved by
     the owner 2026-10-11): each notice email before the end date says how
     far away the end is on the day it is sent, and names the time on

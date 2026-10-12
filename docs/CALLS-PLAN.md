@@ -1,17 +1,18 @@
 ---
 title: CALLS-PLAN
 status: approved by the owner 2026-10-11 (D1–D11 as recommended; D1 with the owner's position of §3.1)
-version: 0.1.1
-date: 2026-10-11
+version: 0.1.2
+date: 2026-10-12
 owner: Al Liebl (Mesmer)
 related:
-  - STAGING-DEVELOPMENT-PLAN.md (0.1.1) §2 rules, §2.4 promotion, §5 phase 2
+  - STAGING-DEVELOPMENT-PLAN.md (0.1.2) §2 rules, §2.4 promotion, §5 phase 2
   - CALLING-SERVICE.md (0.1.1)
-  - VAULT-MESSAGING.md (0.27.0) §10.10 calls, §7.3, §8.5, §10.4.1, §11.10.8, §14.2
-  - RELAY-PROTOCOL.md (0.6.1) §6.2–§6.4, §7.2
-  - PUSH-GATEWAY.md (0.4.3) §6, §14.2 item 13
-  - ANDROID-PLAN.md (0.1.36) §4 Notification modes, §5, §6
-  - VAULT-RELEASES.md (0.1.12) §8.4 egress
+  - VAULT-MESSAGING.md (0.27.4) §10.10 calls, §7.3, §8.5, §10.4.1, §11.10.8, §14.2
+  - RELAY-PROTOCOL.md (0.7.1) §6.2–§6.4, §7.2 (rewritten in 0.7.0: limits per key)
+  - PUSH-GATEWAY.md (0.4.4) §6, §14.2 item 13
+  - ANDROID-PLAN.md (0.1.37) §4 Notification modes, §5, §6
+  - VAULT-RELEASES.md (0.1.16) §8.4 egress
+  - vettid-android #123 (the C0 spike, not for merge) and its docs/calls/C0-FRAME-FORMAT.md
 changelog:
   - 0.1.0: first draft. State read 2026-10-11 from vettid-vault
     `origin/main` (6b50425), vettid-relay `origin/main`, vettid-android
@@ -25,6 +26,16 @@ changelog:
     default with no reservation; the "Always relay calls" switch (V9)
     is deferred; C5 becomes the fallback and hostile-network phase and
     measures how often TURN is needed (§3, §6.1, §6.4, §7, §9, §10)
+  - 0.1.2: decisions and findings since approval, in the new §12: the
+    results of C0 (vettid-android #123 and its two-phone test of
+    2026-10-12); the media stack confirmed (D2); AES-128-GCM frames
+    for now, and cipher agility as a goal (D11); a universal APK, no
+    ABI splits (owner, 2026-10-12); calls code in non-production builds
+    only, and one `call.list` after unlock to learn whether a vault has
+    calls; Telecom and its GrapheneOS proof move to C3. Sentences that
+    had become false are corrected in place, each marked "0.1.2" (§4,
+    §6.2, §6.4, §7, §8, §9, §11). The plan is otherwise unchanged and
+    stays approved
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -190,7 +201,7 @@ Central on 2026-10-11.
 
 | Option | What it is | Frame encryption | F-Droid and reproducibility |
 |---|---|---|---|
-| **A. `io.github.webrtc-sdk:android` 150.7871.01** (2026-09-05; BSD-3-Clause; arm64 library 12.3 MB) | libwebrtc with the webrtc-sdk patches (the webrtc-sdk project; whether it also publishes iOS and desktop builds was not checked here) | **Built in**: `org.webrtc.FrameCryptor` (AES-GCM), the same API the old app used | A pinned Maven Central artifact is a fixed input, so the APK stays reproducible. F-Droid's policy admits free-licensed binaries from Maven Central; whether its reviewers accept this one is **not established** |
+| **A. `io.github.webrtc-sdk:android` 150.7871.01** (2026-09-05; BSD-3-Clause; arm64 library 12.3 MB) | libwebrtc with the webrtc-sdk patches (the webrtc-sdk project; 0.1.2: it also publishes iOS/macOS, desktop C++ and Rust builds with the frame cryptor, §12.1) | **Built in**: `org.webrtc.FrameCryptor` (AES-GCM; 0.1.2: AES-128-GCM only, §12.3), the same API the old app used | A pinned Maven Central artifact is a fixed input, so the APK stays reproducible. F-Droid's policy admits free-licensed binaries from Maven Central; whether its reviewers accept this one is **not established** |
 | B. `im.conversations.webrtc:webrtc-android` 149.0.0 (2026-09-09; Apache-2.0/MIT packaging; arm64 9.0 MB) | Unpatched libwebrtc, built for the Conversations app | Only the bare `FrameEncryptor`/`FrameDecryptor` hooks: VettID would write and maintain the cipher in C++ (NDK, JNI) | Same input rule. Conversations is distributed on F-Droid, so there is precedent; our own C++ would have to build reproducibly too |
 | C. `io.getstream:stream-webrtc-android` 1.3.10 | What the old app used | `FrameCryptor` present | Last published 2025-09-11: stale, not proposed |
 | D. Build libwebrtc ourselves | Google's source, our own artifact | As B, or carry patches | Over 20 GB of downloads and about an hour per build (F-Droid admin issue 364); the toolchain itself is downloaded prebuilt. Bit-for-bit reproducibility **not established**. Much work for little gain while A and B exist |
@@ -201,7 +212,8 @@ Central on 2026-10-11.
 refuses A. A gives ready-made frame encryption (iOS and desktop later must
 interoperate frame for frame, so one shared implementation matters) and
 no security-critical C++ of our own. Its cost is trusting a
-patched fork and a larger library (about 12 MB added per architecture).
+patched fork and a larger library (about 12 MB added per architecture;
+0.1.2: 48.5 MB for the universal APK that is built, §12.4).
 It also means CALLING-SERVICE §7 changes from "ChaCha20-Poly1305,
 SFrame-style" to the FrameCryptor's AES-GCM format, keyed from `k_call`.
 
@@ -233,6 +245,9 @@ support on the test phones not established).
    answering from a notification, and Bluetooth routing all work on
    GrapheneOS without Google services and on stock Android;
 5. APK size and cold-start cost of the library.
+
+*0.1.2:* proofs 2, 3 and 5 are done, proof 1 in part, proof 4 not: it
+moves to C3 (§12.1, §12.6).
 
 ## 5. The calling service
 
@@ -356,7 +371,10 @@ limit of 20 requests a second covers every vault on one host, since the
 enclave's traffic leaves through the host's one address. Fine on
 staging; to be checked against a full production host before calls reach
 production (no exemption for vault hosts was found in
-`internal/api/middleware.go`).
+`internal/api/middleware.go`). *0.1.2:* RELAY-PROTOCOL 0.7.0 (§7.2
+there) replaces the per-address limit by limits per key, so a host's
+vaults no longer share one budget; this paragraph describes a relay
+before it.
 
 ### 6.3 Member API and portal: nothing
 
@@ -374,7 +392,7 @@ from a push wake.
 
 | Screen or surface | States | Texts to specify later |
 |---|---|---|
-| Call buttons on a connection and in a conversation | enabled; disabled (vault locked, calls off for this connection, no microphone permission) | reasons for each disabled state |
+| Call buttons on a connection and in a conversation | enabled; disabled (vault locked, calls off for this connection, no microphone permission); 0.1.2: **absent** in a build without calls code, and hidden for a vault that answers `call.list` with `unsupported_type` (§12.5) | reasons for each disabled state |
 | Outgoing call | calling; ringing; connecting; declined; busy; no answer; failed | one line per ending |
 | Incoming call (full screen and notification) | ringing; answered on another device | "<First Last> is calling", Answer, Decline |
 | In call | audio; video; reconnecting; relayed or direct indicator; muted; speaker, Bluetooth | the encryption line; "Reconnecting…" |
@@ -423,10 +441,10 @@ days of implementation and review, as ranges; owner testing is extra.
 
 | Phase | Contents | Exit test on real phones | Needs | Effort |
 |---|---|---|---|---|
-| C0 | Spike (§4): library in the `foss` flavour, audio between two phones on one Wi-Fi with hard-coded signalling, frame encryption, Telecom | The five proofs of §4, written up; the owner confirms D2 | Nothing deployed | 5–8 |
+| C0 | Spike (§4): library in the `foss` flavour, audio between two phones on one Wi-Fi with hard-coded signalling, frame encryption, Telecom (0.1.2: done except Telecom, which moves to C3; results in §12.1) | The five proofs of §4, written up; the owner confirms D2 | Nothing deployed | 5–8 |
 | C1 | Voice calls through two staging vaults, app open, same network (the vault gives no servers yet) | Pixel 10 Pro ↔ Pixel 7 on S10: call, ring-back, answer, hang up, decline, busy, no answer; time from tap to ring measured 20 times | **No vault release** (S10 as it is) | 12–18 |
 | C2 | The calling service on staging; vault fixes V1–V3, V5, V6, V8 | The same calls with one phone on mobile data and one on Wi-Fi; app killed mid-call frees both vaults within 2 minutes; glare connects one call | New service and stack; **a vault release**; host stack deploy (egress) | 12–20 |
-| C3 | Ringing with the app closed | On-phone service: rings within 2 s on both kinds of phone, screen off, including after a reboot; behaviour in Doze recorded. Google push on the Pixel 7 once Firebase exists (does not block the phase) | **A vault release** for V4 (can ride with C2's) | 6–10 |
+| C3 | Ringing with the app closed; 0.1.2: Telecom (`core-telecom`, the `phoneCall` service, `CallStyle`, answering from a notification) and its proof on GrapheneOS and stock, moved here from C0 and C1 (§12.6) | On-phone service: rings within 2 s on both kinds of phone, screen off, including after a reboot; behaviour in Doze recorded. Google push on the Pixel 7 once Firebase exists (does not block the phase) | **A vault release** for V4 (can ride with C2's) | 6–10 |
 | C4 | Video: camera, switching cameras, adding video to a voice call, network change (V7) | Video both ways for 10 minutes; walk from Wi-Fi to mobile data without the call dropping | A vault release (V7) | 8–14 |
 | C5 | The TURN fallback and hostile networks | A call from a network allowing only TCP 443; a call with relay forced on one side and on both (debug option; both on one TURN server: the old backend ran two servers because this case failed there); **the share of calls that needed TURN, counted over at least 50 real calls on mobile data and home networks** (the app records direct or relayed per call, locally) and written into this plan | App only | 4–7 |
 | C6 | Hardening: call limits and spam, battery over 24 h idle and an hour's call, Bluetooth and wired headsets, a mobile call arriving during a VettID call, accessibility, texts | A written test sheet passed on all three phones | App only | 8–12 |
@@ -448,8 +466,8 @@ two or three vault releases cover C2–C4.
   call and start a new one.
 - **iOS.** Later. To keep in mind: CallKit must show every VoIP push as
   a call, so iOS cannot use a content-free generic wake for ringing
-  (§6.5); the media stack must exist for iOS (to be checked
-  for option A in C0).
+  (§6.5); the media stack must exist for iOS (0.1.2: it does for
+  option A, §12.1; its option parity was not read).
 - **Phone-network calls**, voicemail, call recording, calls with
   non-connections.
 
@@ -462,7 +480,7 @@ connections (§3.1).
 | # | Decision | Recommendation |
 |---|---|---|
 | D1 | Direct or always-relayed media by default | **Decided: direct when possible**, TURN as the fallback only. STUN and TURN are both still needed (§3.1). The "Always relay calls" switch recommended in 0.1.0 is deferred: no privacy need, and it is not cheap. |
-| D2 | The media stack | **`io.github.webrtc-sdk:android`** (libwebrtc with built-in frame encryption), confirmed or replaced after the C0 spike; fallback the Conversations build with our own cipher. |
+| D2 | The media stack | **`io.github.webrtc-sdk:android`** (libwebrtc with built-in frame encryption), confirmed or replaced after the C0 spike; fallback the Conversations build with our own cipher. *0.1.2: confirmed after C0 (§12.2).* |
 | D3 | Where the calling service runs on staging | **The staging account**, one small instance in us-east-1, in its own network. The production home is decided at promotion. |
 | D4 | Who issues TURN credentials | **The calling service, to attested vaults only**; the shared secret never enters a vault. This adds one host name to the vaults' egress list. |
 | D5 | Voice before video | **Yes**: voice is usable from C1–C3; video follows in C4 on the same plumbing. |
@@ -471,7 +489,7 @@ connections (§3.1).
 | D8 | Ring timeout, and the TURN cost ceiling on staging | **45 s** (as built; the spec allows up to 90). **$30 a month**, with a billing alarm. |
 | D9 | Telecom integration and the full-screen ringing permission | **Yes to both**: calls behave like calls beside mobile calls; if Android does not grant the full-screen permission the call rings as a banner. |
 | D10 | "Busy" tells a connection that the member is on another call | **Keep** (it is what callers expect); the alternative is to answer nothing, as a held vault does. |
-| D11 | Change CALLING-SERVICE §7's cipher to the media stack's built-in one (AES-GCM) | **Yes**, if the spike documents the format; writing our own cipher in C++ is the larger risk. |
+| D11 | Change CALLING-SERVICE §7's cipher to the media stack's built-in one (AES-GCM) | **Yes**, if the spike documents the format; writing our own cipher in C++ is the larger risk. *0.1.2: the format is documented; it is AES-128-GCM, accepted for now (§12.3).* |
 
 ## 10. Risks
 
@@ -514,7 +532,7 @@ Read 2026-10-11, at the commits in the changelog.
   build on F-Droid uses the Maven artifact: fdroiddata's metadata and
   F-Droid's own tools (C0).
 - The FrameCryptor's key derivation and frame layout: the webrtc-sdk
-  source (C0).
+  source (C0). *0.1.2: established, §12.1.*
 - RingRTC's licence; hardware AV1 on the test phones; whether coturn
   re-checks a credential's expiry during a long call (6 h credential,
   12 h call): upstream sources and a C2 test.
@@ -524,3 +542,141 @@ Read 2026-10-11, at the commits in the changelog.
   on GrapheneOS: the Play article in full, and C0.
 - Prices other than the instance's are list prices as known, not read
   from the price API.
+
+## 12. Decisions and findings since approval (2026-10-12)
+
+Added in 0.1.2. The plan above stands as approved on 2026-10-11; this
+section records what C0 found and what was decided for C1 and after.
+Where it differs from a sentence above, this section holds, and the
+sentence is marked "0.1.2".
+
+### 12.1 What C0 found
+
+Source: vettid-android #123 ("Spike: calls C0", a draft that is not
+merged, build `fefa1d02`) and the two-phone test recorded on it on
+2026-10-12: Pixel 7 (stock Android 17) calling Pixel 10 Pro
+(GrapheneOS, Android 17), same Wi-Fi, different subnets, no vault and
+no server involved.
+
+| §4 proof | Result |
+|---|---|
+| 1. The `foss` build is reproducible with the library in it; F-Droid's tools pass | **In part.** Three builds of `fossRelease` on one machine gave the same APK (57,618,195 bytes). The artifact has no Google Play services, Firebase or Play name in its classes or native libraries. **Not done:** `fdroid scanner` and `fdroid build`, a second machine. F-Droid's main repository already carries an app built against exactly this artifact (FluffyChat 2.10.0); whether a reviewer accepts it for VettID is still not established |
+| 2. Two phones exchange Opus audio under a typed key; a wrong key gives silence | **Yes.** Connected on a direct path (host candidates, UDP, 9–10 ms round trip), Opus both ways, frame cryptor OK both ways. Sound from the Pixel 7 arrived and decrypted at the level it was recorded. The other direction is weaker evidence (the sound source hardly registered on the Pixel 10's microphone) and is to be repeated with a voice. With a wrong key, and with one side sending unencrypted, the receiver reported a decryption failure and played **silence** |
+| 3. The key and frame format written down | **Yes:** vettid-android `docs/calls/C0-FRAME-FORMAT.md`, checked against the native library by a self-check on both phones. AES-128-GCM, 16-byte tag, 12-byte IV built from the SSRC and the RTP timestamp (no randomness); the frame key is the first 16 bytes of HKDF-SHA-256 of the key; 30 bytes added per frame; one byte of each audio frame stays clear and authenticated; no replay protection of its own |
+| 4. `core-telecom`, the `phoneCall` service, the microphone after answering from a notification, Bluetooth, on GrapheneOS and stock | **Not done** on a phone; read from documentation and AOSP only. Moves to C3 (§12.6). Read: `core-telecom` 1.0.1 has no Google services in it; a call service needs the types `phoneCall` and `microphone` together; a `microphone` service cannot start at ring time from the background, so the app rings as `phoneCall` and adds `microphone` after the Answer tap |
+| 5. APK size and start-up cost | Universal `fossRelease`: 9.1 MB → 57.6 MB (+48.5 MB); arm64 alone would add 12.7 MB. The library is not loaded until a call screen opens (confirmed on both phones); load and factory creation took 55 + 27 ms (Pixel 7) and 39 + 22 ms (Pixel 10 Pro). Process memory in a call, debug build: 221 MB and 270 MB |
+
+Also found:
+
+- **Both screens off for 75 s:** audio kept flowing.
+- **GrapheneOS with the Network permission off:** the engine waits for
+  addresses for ever, with no error. The app needs a timeout and a
+  message that names the permission.
+- **A receiver that failed decryption stays deaf** after the sender's
+  key is corrected, until its own key is set again. The app must set
+  the key again or end the call on a decryption failure.
+- **The library can log key material** (the input key, the salt, the
+  derived key) when its logging is at INFO or below. The app never
+  turns that logging on; no key line appeared in `logcat` on either
+  phone with it off.
+- **One key for both directions** makes IV uniqueness rest on the two
+  senders' random SSRCs differing: the app uses two keys derived from
+  `k_call`, one per direction.
+- **Received frames are not length-checked** in the library (read from
+  the source, not tested): a peer in the call could crash the receiver.
+  A denial of service by a connection; to be reported upstream.
+- The same project publishes builds for iOS and macOS, a desktop C++
+  wrapper and Rust bindings, each with the frame cryptor. That they
+  exist was verified; whether their options match was not read.
+- Not tested in C0: speech, Bluetooth and the route chips, a mobile
+  network.
+
+### 12.2 D2: the media stack is confirmed
+
+`io.github.webrtc-sdk:android` 150.7871.01, pinned by SHA-256 in the
+build. The spike's conditions: the two-phone test passes (it did, with
+the one direction to repeat); the owner accepts AES-128 for media
+frames (§12.3); `fdroid scanner` and `fdroid build` are run on the
+recipe before C1 ends (open; risk 1 of §10 stays until then).
+
+### 12.3 D11: AES-128-GCM for now; cipher agility as a goal
+
+- **Frames are encrypted with AES-128-GCM.** The library's key provider
+  cannot reach 256-bit keys today. The app moves to 256 bits when the
+  upstream option ships (webrtc-sdk/webrtc pull request 302; its state
+  was not re-read for this document).
+- **128 bits is acceptable for a first production calls release**
+  (decision recorded 2026-10-12). It is said plainly where the cipher is
+  specified: the frame cipher is then the weakest part of a call, below
+  the key agreement's MLKEM768X25519 (CALLING-SERVICE §7, when that
+  section is rewritten for D11).
+- **Known-good algorithms only.** Nothing experimental is on in a
+  build that members use: in particular the media stack's post-quantum
+  DTLS field trial stays off outside a debug switch. Calls do not
+  depend on DTLS for their secrecy; the frame encryption under `k_call`
+  is what protects them (§3).
+- **Cipher agility is a goal.** Media suites are versioned and
+  negotiated, and the chosen suite is bound into the keys derived from
+  `k_call`, so that a suite cannot be swapped under a call and a
+  stronger one can be added without a flag day. On S10 the suite
+  travels as an SDP attribute, which nothing signs (§3 "the SDP itself
+  is not signed"): binding it into the keys is what protects it there.
+  From C2's vault release it is a signed field of the call's
+  signalling. Both go into VAULT-MESSAGING §10.10 with C2's edits
+  (§6.6).
+
+### 12.4 One universal APK
+
+Owner decision of 2026-10-12: **no ABI splits.** Every distribution
+ships one APK with all four architectures, as today. With calls
+compiled in, that APK is about 57.6 MB where it was 9.1 MB (§12.1); the
+spike's proposal of per-architecture APKs is not taken. Production
+builds are not affected until promotion (§12.5).
+
+### 12.5 Where calls code is, and how the app knows a vault has calls
+
+- **Calls code is compiled into non-production builds only.**
+  Production release builds carry **no calls code, no media library
+  and none of the calls permissions** (§4 "Permissions") until calls
+  are promoted (§7 "Promotion"; STAGING-DEVELOPMENT-PLAN §2.4). So a
+  production APK does not grow, asks for no microphone, and has nothing
+  to hide. A build check has to hold this, as the spike's own check
+  does for its code (vettid-android #123, `check<Variant>NoCallsSpike`).
+- **The app cannot read a feature list, because there is none.**
+  VAULT-MESSAGING §11.10.8 ("No list in the protocol"): no message
+  carries a release's features, and an app learns that a feature is
+  absent from `unsupported_type`. A rule of the form "show the call
+  button when the vault's release lists `calls`" cannot be built as
+  written, and this plan does not ask for one.
+- **Decision for C1: one probe.** A build that has calls code sends one
+  `call.list` after each unlock. An answer means the vault has calls,
+  and the call buttons are shown (§6.4). `unsupported_type` means it
+  does not: the buttons are hidden for that vault until the next
+  unlock. Nothing is cached across releases, since a later release may
+  turn the feature on (§11.10.8 "Turning a feature on").
+- This costs one request per unlock and tells the vault nothing it
+  does not know. Read from vettid-vault at the S10 tag by the Android
+  work for C1: `call.list` is an app and desktop type of the `calls`
+  feature (§11), and an unregistered feature's types are unknown types.
+
+### 12.6 Telecom moves to C3
+
+Telecom integration (D9 stays "yes") and proof 4 of §4, on GrapheneOS
+and on stock Android, move **from C0 and C1 to C3**, the phase that
+rings with the app closed. C1 is calls with the app open (§7): it needs
+a `microphone` foreground service started from the visible call screen,
+which C0 showed working, and no `phoneCall` service, no `CallStyle`
+notification and no Telecom registration. Those matter when a call
+arrives with the app in the background, which is C3. C1's exit test is
+unchanged.
+
+### 12.7 Edits this leaves for other documents
+
+Not made here, in addition to §6.6:
+
+- **VAULT-MESSAGING §10.10** and **CALLING-SERVICE §7**: the frame keys
+  (two direction keys from `k_call`, the provider's fixed options, test
+  vectors), ending or re-keying a call on a decryption failure, the
+  versioned media suite and where it is carried and signed (§12.3).
+- **ANDROID-PLAN** §4 to §6: the probe (§12.5), the build rule for
+  calls code, the universal APK's size, Telecom in C3.

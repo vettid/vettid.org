@@ -1,6 +1,6 @@
 # VettID Relay Protocol
 
-**Version:** 0.7.0 (draft)
+**Version:** 0.7.1 (draft)
 **Status:** Pre-implementation draft for review
 
 ## 1. Purpose & design principles
@@ -903,6 +903,41 @@ The URL prefix (`/v1`) is the major version. Backward-compatible additions
 (new optional fields, new endpoints) bump the spec's minor version without a
 prefix change. This document carries a semver and a changelog (§10).
 
+### 7.4 The HTTP/2 front end (deployment, 0.7.1)
+
+A relay that serves HTTP/2, itself or through a load balancer, announces
+how many requests a client may have open on one connection
+(`SETTINGS_MAX_CONCURRENT_STREAMS`, RFC 9113 §6.5.2). For most clients
+the number does not matter. For a vault host it does: every vault on the
+host holds one long-poll (§6.3) on connections they all share, and the
+host's enclave decides how many connections to open from the limit the
+relay announces (VAULT-MESSAGING §12.2.1).
+
+- A relay's front end **MUST NOT announce exactly 100** concurrent
+  streams. 100 is what the vault's HTTP/2 library (Go's) assumes before
+  a host has announced anything, and the library does not say when the
+  announcement arrived. A connection that reads 100 is therefore
+  trusted only once it has answered a request: until then it carries 1
+  request, after a second fewer than 32, and when its first requests
+  are all long-polls that can last up to 25 s, during which the host's
+  other vaults wait (VAULT-MESSAGING §12.2.1; VAULT-RELAY-SCALING
+  §10.4).
+- It **SHOULD announce at least 128**. Below **32** a vault host opens
+  no second connection at all, so that a relay cannot split the vaults
+  of a host over many connections and tell them apart: every request
+  beyond the limit then waits for a stream.
+- HTTP/2 already requires PING frames to be answered (RFC 9113 §6.7). A
+  vault host depends on it: it pings a connection after 15 s without a
+  frame and closes it when no answer comes within 10 s.
+
+These are requirements on a deployment, not on the wire format, and
+nothing in `/v1` changes. relay.vettid.org is behind an AWS Application
+Load Balancer, which announces 128 and answers pings; the value is not
+configurable there (read from its `SETTINGS` frame on 2026-10-12).
+Anyone who puts another front end before a relay that vault hosts use
+(another load balancer, a CDN, a reverse proxy) checks the number it
+announces first. Some servers and proxies default to exactly 100.
+
 ## 8. Security considerations
 
 1. **Payload confidentiality/integrity is out of scope by design** — payloads
@@ -1052,6 +1087,14 @@ The push gateway API is specified separately.
 
 ## 10. Changelog
 
+- **0.7.1** — a deployment requirement, no wire change (§7.4, new): a
+  relay's HTTP/2 front end MUST NOT announce exactly 100 concurrent
+  streams and SHOULD announce at least 128 (and vault hosts rely on
+  its answers to PING frames).
+  The requirement was already made of VettID's relay in
+  VAULT-MESSAGING 0.27.2 §12.2.1 and VAULT-RELAY-SCALING §10.4; it is
+  stated here because it binds whoever deploys a relay. relay.vettid.org
+  announces 128.
 - **0.7.0** — rate limiting by key (§7.2, rewritten; §8 item 5). The
   single per-address bucket in front of `/v1` (20 requests a second in the
   reference relay) counted every client behind an address as one: about 500
