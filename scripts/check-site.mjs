@@ -44,6 +44,8 @@ for (const file of htmlFiles) {
 
   // 4. No stale vettid.dev references
   if (/vettid\.dev/i.test(src)) errors.push(`${rel}: references vettid.dev`);
+  // The site's source is AGPL-3.0-or-later; the footer says so (see /terms)
+  if (/All rights reserved/i.test(src)) errors.push(`${rel}: says "All rights reserved"`);
 
   // 5. Internal hrefs/srcs resolve to real files (clean URLs map to dir/index.html)
   for (const m of src.matchAll(/(?:href|src)="(\/[^"#?]*)/g)) {
