@@ -130,7 +130,7 @@ changelog:
     (the worst instance, by Metrics Insights queries; one log metric
     filter), their thresholds, and where the in-flight alarm differs
     from the text above it (80 % of the 16 connections a host may have,
-    not of the connections open: for the owner's approval). The alerts
+    not of the connections open: approved by the owner 2026-10-12). The alerts
     topic admits the account's CloudWatch alarms (it admitted the
     CloudTrail rules only, so no alarm of the host or release stacks
     could notify). How the parent's log reaches CloudWatch as built
@@ -1349,7 +1349,7 @@ release_starting`. The `vault-scaler` Lambda (host stack):
       streams in ordinary operation (always from the fifth connection
       on, and whenever the newest connection is more than 80 % full
       below that); the alarm as first written would
-      come and go with the number of vaults. For the owner's approval;
+      come and go with the number of vaults. Approved by the owner 2026-10-12;
     - `relay-stream-wait`: the highest `RelayStreamWaitMax` above
       1,000 ms in one record;
     - `relay-growth-refused`: the sum of `RelayGrowthRefused` above 0
