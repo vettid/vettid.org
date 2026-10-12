@@ -1,9 +1,13 @@
 ---
 title: VAULT-PLAN
 status: draft
-version: 0.1.5
-date: 2026-10-09
+version: 0.1.6
+date: 2026-10-12
 changelog:
+  - 0.1.6: as built, phase 1 of VAULT-RELAY-SCALING (0.1.2; vettid-vault
+    #66): the number of shared HTTP/2 connections is bounded by the
+    enclave (D5, §5.2 "Connection pooling"; VAULT-MESSAGING 0.27.2
+    §12.2.1)
   - 0.1.5: no UnifiedPush (owner decision, 2026-10-09; PUSH-GATEWAY
     0.3.0): push gateway wakes through FCM/APNs only (§4 Later)
   - 0.1.4: owner decisions of 2026-10-08 (VAULT-MESSAGING 0.22.0 §15
@@ -230,7 +234,7 @@ calling service (TURN, SFrame), PQC Phase 2 (ML-DSA, Go 1.27).
 | D2 | **Instance:** on-demand (no Spot). Graviton m7g.large proposed; ASG parked at 0 until the preview opens. | Decided 2026-10-02 |
 | D3 | **Reproducible builds: required.** Pinned toolchain image, `-trimpath`, no secrets in the image, documented `make eif`; anyone can recompute PCR0 and compare it with the manifest. | Decided 2026-10-02 |
 | D4 | **Process model:** one OS process per unlocked vault inside the enclave, holding all of that vault's secrets and running its feature handlers; the supervisor keeps only shared duties and no per-vault secrets (§5.3). | Decided 2026-10-02; isolation requirements of §5.3 added after the V3b review |
-| D5 | **TLS terminates in the enclave**, over a few shared HTTP/2 connections per instance, with pinned roots for the allowlisted hosts (§5.2). | Decided 2026-10-02 |
+| D5 | **TLS terminates in the enclave**, over shared HTTP/2 connections per instance, with pinned roots for the allowlisted hosts (§5.2). The enclave bounds their number: one until its streams are in use, at most 16 per host (0.1.6; VAULT-RELAY-SCALING D3, VAULT-MESSAGING §12.2.1). | Decided 2026-10-02; bounds 2026-10-12 |
 | D1a | **D1 amended:** locked keys only for production releases; a release cadence; deprecated releases are move-only; releases retire after a notice window (12 months to start) and their keys are then deleted. Confidentiality is unchanged; members who never move lose access. Details and the §11.10.7 change: VAULT-RELEASES §2–§4. | Decided 2026-10-04 |
 
 ### 5.1 D1: re-sealing per release
@@ -399,9 +403,15 @@ enclave and payloads are end-to-end encrypted.
   the Nitro hypervisor, not the parent; validate with a margin, as the
   relay's timestamp checks already require a correct clock.
 - **Connection pooling.** A TLS connection per vault tells the host which
-  vault is talking, even without content. Instead, the enclave keeps a few
+  vault is talking, even without content. Instead, the enclave keeps
   shared HTTP/2 connections per instance that carry every vault's requests,
-  so per-vault timing is blurred.
+  so per-vault timing is blurred. *As built (0.1.6):* the bound is the
+  enclave's, not the relay's or the host's. Requests fill one connection
+  until its streams are in use (128 at the relay's load balancer) before
+  another is opened; at most 16 per host; none further when the host
+  announces fewer than 32 streams; at most 8 requests in flight per
+  vault. The rules, and what happens at the bounds, are VAULT-MESSAGING
+  §12.2.1.
 - **Debuggability.** The parent can't log relay errors; the enclave reports
   them in its own sanitized logs.
 

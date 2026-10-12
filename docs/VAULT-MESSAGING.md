@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.27.1
-date: 2026-10-11
+version: 0.27.2
+date: 2026-10-12
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -17,10 +17,21 @@ related:
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
-  - VAULT-RELEASES.md (0.1.13; 0.1.6 approved 2026-10-04)
+  - VAULT-RELEASES.md (0.1.14; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
 changelog:
+  - 0.27.2: editorial-normative, as built: phase 1 of
+    VAULT-RELAY-SCALING (0.1.2; vettid-vault #66, for staging release
+    S11). No wire change for the relay or the apps. §12.2: the collect
+    loop's waits are spread (a long-poll of a random 20 to 25 s, the
+    first poll and the retry after an error at a random moment, a
+    backoff when the relay refuses the poll); the shared HTTP/2
+    connections are bounded by the enclave (new §12.2.1: one connection
+    until its streams are in use, at most 16 per host, what happens at
+    the bounds, connections that close or stop answering, one re-send
+    of a request the host did not process, at most 8 requests in flight
+    per vault). §2.2: what the host sees of it
   - 0.27.1: editorial-normative, errata to 0.26.0 and 0.27.0 from
     their implementations (vettid-vault #62, #63, #64, staging release
     S10; vettid-android #116; approved by the owner 2026-10-11, all five
@@ -794,7 +805,7 @@ the relay at vettid.org allows:
 | Party | Learns | Does not learn |
 |---|---|---|
 | Relay | Mailbox ids, depositor relay keys, timing, padded sizes, blob and claim sizes | Message types, content, or which identity, device or connection a relay key belongs to |
-| Parent / host | Relay host names; TLS byte counts and timing per instance (connections are shared by all vaults, §12.2); enroll, unlock and lock events; encrypted-state size; `vault_id` ↔ instance | Relay requests (TLS terminates in the enclave, §12.2), mailbox ids, PINs, keys |
+| Parent / host | Relay host names; TLS byte counts and timing per instance (connections are shared by all vaults, §12.2); how many connections there are (1 to 16 per host, up to 32 for 30 s at most once in 5 minutes, §12.2.1) and the HTTP/2 pings on quiet ones; the enclave's own counts of relay requests for the whole instance, no finer than once a second (in flight, waiting, failed, connections; §12.2.1), nothing per vault; enroll, unlock and lock events; encrypted-state size; `vault_id` ↔ instance | Relay requests (TLS terminates in the enclave, §12.2), mailbox ids, PINs, keys |
 | Member API | Which member enrolled, unlocked or locked, and when; `vault_id`, instance lease, `vault_version`, `state_version` (§11.5); the public key of the vault's app key and when it changes, so when a transfer or recovery completed (0.15.0, §11.12); whether the vault keeps a backup copy of its credential (`credential_backup`, one bit, 0.16.0, §11.5), so whether it can be recovered; the member's name change requests (`account_name`, 0.18.0, §11.5), whose names it holds anyway | PINs; why an unlock failed (§11.4); mailbox ids; keys other than app public keys; any stable device identifier (§11.7) |
 | Network | Endpoints and timing | Everything else |
 
@@ -10657,15 +10668,34 @@ check. A held vault may still be locked by any trigger of §12.3.
 - **One collect loop per unlocked vault.** The loop runs inside the enclave
   as a signed long-poll (`wait=25`, `max=32`) or a WebSocket. During a
   rotation grace period it also collects from the old mailbox.
+- **Waits of the collect loop** (0.27.2, as built; VAULT-RELAY-SCALING
+  §4 G). Vaults on one host MUST NOT poll in step: a relay task that
+  stops answers every held poll at once. So, in the enclave:
+  - each long-poll asks for a `wait` of a random whole number of seconds
+    from 20 to 25 (not always 25);
+  - the first poll after an unlock is sent after a random 0 to 1 s;
+  - after a poll that failed (a relay or transport error the relay
+    client's own retries, RELAY-PROTOCOL §7.2, did not get past), the
+    next is sent after a random 0.5 to 1.5 s;
+  - while the relay refuses the poll with `mailbox_unknown` or
+    `timestamp_stale` (another poll will not change that by itself),
+    the wait doubles with each refusal in a row, from 1 s to 15 s, each
+    spread by half either way (so at most about 22 s). A poll that
+    succeeds, or fails for any other reason, starts it again at 1 s.
+    The cap is low on purpose: the loop does not register again, so
+    only the next poll tells the vault that its mailbox is back or its
+    clock right.
 - **Batches.** Each vault handles one batch at a time (§8.3).
 - **TLS.** The enclave terminates TLS to the relay, to AWS KMS
   (`kms.<region>.amazonaws.com`, §11.10.7), and (0.24.0) to the push
   gateway of its channel (§11.10.8, §14.3). The parent forwards only TCP
   bytes to its allowlist on port 443. The enclave pins only the
   roots for the allowlisted hosts (VAULT-PLAN §5.2), so root changes are rare
-  releases. Each instance carries every vault's relay requests over a few
+  releases. Each instance carries every vault's relay requests over
   shared HTTP/2 connections rather than one connection per vault, so the host
-  cannot attribute traffic to a vault by connection. Inside the enclave the
+  cannot attribute traffic to a vault by connection; how many there are
+  is the enclave's decision, not the host's or the relay's (§12.2.1).
+  Inside the enclave the
   collect loop therefore uses the long-poll (a WebSocket would need a
   connection of its own). AWS KMS endpoints offer only HTTP/1.1; KMS
   requests use a small pool of keep-alive connections.
@@ -10677,6 +10707,69 @@ check. A held vault may still be locked by any trigger of §12.3.
   3. drain the outbox;
   4. start collecting;
   5. renew the lease while unlocked (§11.1).
+
+#### 12.2.1 Shared connections (0.27.2, as built)
+
+*As built in vettid-vault #66 (`enclave/egress`), phase 1 of
+VAULT-RELAY-SCALING, decision D3; for staging release S11.* The rules
+hold for each HTTP/2 host of the allowlist separately (the relay, the
+push gateway, `android.googleapis.com`). KMS connections (HTTP/1.1) are
+not shared this way and are unchanged.
+
+- **Fill first.** A request takes a stream on the first connection that
+  has one free. Another connection is opened, one at a time, only when
+  every stream of every connection is in use. So one connection carries
+  every vault of a host until its streams are in use (128 at the relay's
+  load balancer), and as many vaults as possible share each.
+- **Bounds.** The enclave MUST NOT let the host or the relay choose the
+  number of connections:
+  - at most **16** connections per host (VAULT-RELAY-SCALING D3);
+  - no further connection while a connection of that host announces
+    fewer than **32** concurrent streams, or has not announced a limit
+    yet. A new connection carries one request until its limit is known,
+    fewer than 32 after one second;
+  - connections are opened at no more than 2 a second after a burst of
+    32, failed dials included.
+- **At a bound** a request waits for a stream, the oldest first, until
+  its own deadline (75 s for a relay request, 15 s for a push request),
+  and then fails. Waits and refusals are counted (below).
+- **A dial that fails** fails the request that started it and every
+  request that was waiting when it started; later ones dial again.
+- **Connections the host is closing.** A connection that takes no more
+  requests below its limit (the host sent GOAWAY) does not count toward
+  the 16 for 30 s, while its requests end, and is then closed; a request
+  still on it fails. Only 16 connections are let off the count in any
+  5 minutes; further ones count while they close. So a host has up to 32
+  connections for 30 s, at most once in 5 minutes, and 16 otherwise.
+- **Connections that stop answering.** A connection is pinged (HTTP/2
+  PING) after 15 s without a frame from the host and closed if the ping
+  is not answered within 10 s. A connection that holds requests and has
+  answered none for 90 s is closed whatever else it does.
+- **One re-send.** A request the host did not process is sent once
+  more: the connection stopped taking requests before it was sent, the
+  host's GOAWAY names it as not processed, or the host refused the
+  stream (REFUSED_STREAM). Only when its body can be sent again. Any
+  other failure goes back to the vault process (the relay client signs
+  and sends again, RELAY-PROTOCOL §7.2).
+- **Per vault.** A vault process has at most **8** relay and push
+  requests in flight; further ones wait within their own deadline. One
+  vault process therefore cannot take the shared streams from the
+  others (§12.4).
+- **Counts.** The supervisor counts, for the whole instance only: the
+  connections to the relay (open, opened), the stream limit the relay
+  announced, relay requests in flight and waiting, the longest wait for
+  a stream, relay requests that got no answer, and requests that waited
+  at a bound. The parent may ask for them; the answer is a snapshot at
+  most one second old, and asking changes nothing. Nothing in it names
+  a vault, a mailbox or an address. The parent publishes them as
+  metrics (VAULT-RELEASES §8.7).
+- **A front end that announces exactly 100 streams** is slow to fill:
+  100 is what the HTTP/2 library assumes before a host has announced
+  its limit, and it does not say when the announcement came, so such a
+  connection is trusted only once it has answered a request. The relay's
+  and the push gateway's load balancers announce 128. The relay's front
+  end MUST NOT be changed to one that announces exactly 100
+  (VAULT-RELAY-SCALING §10).
 
 ### 12.3 Lock triggers
 
