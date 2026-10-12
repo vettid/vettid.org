@@ -273,6 +273,21 @@ npx cdk deploy VettidOrgRelayStack       # service; reads the refs at deploy tim
   backing up: losing it costs at most 90 s of replay protection (requests
   are refused, not admitted, while it is unreachable) and some wake-up
   latency.
+- **Rate limits** (RELAY-PROTOCOL §7.2, relay ≥ protocol 0.7.0). Per key
+  once a request is authenticated; per source address only a flood guard
+  (200/s, burst 2,000, sized for a full vault host) and a budget of failed
+  authentications (1/s, burst 60). The task sets none of the `RELAY_RATE_*`
+  variables: the defaults are the spec's numbers. Each task logs one
+  `rate limits` line a minute, at info level when anything was refused or a
+  bucket was at least half used: `address_peak` (thousandths of the
+  busiest address's flood-guard burst; a vault host nearing it means more
+  vaults per host than the guard was sized for: raise
+  `RELAY_RATE_IP_RPS`/`_BURST`), `key_peak`, `sender_peak`, and
+  `*_refused` counts per minute. `authfail_refused` or
+  `relay_ratelimit_penalised_networks` above zero is someone failing
+  authentication repeatedly from one address (an attack, or a client with a
+  wrong clock); nothing identifies the address in logs or metrics by design.
+  No vault-host allowlist exists or is needed.
 - **Health.** `/healthz` reads DynamoDB. Metrics worth alarming on (task
   `/metrics`, loopback): `relay_coord_errors_total`, `relay_wake_bus_up`,
   `relay_errors_total{code="internal"}`.
