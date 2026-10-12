@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.14
+version: 0.1.15
 date: 2026-10-12
 owner: Al Liebl (Mesmer)
 changelog:
@@ -115,6 +115,9 @@ changelog:
     names, how they are shipped), the alarms they call for (not yet
     built) and what is still to be verified on staging. §8.8: the relay
     connections' capacity per host and the local measurements
+  - 0.1.15 (editorial, a reference only): §3.4 C4 and `related` point
+    to VAULT-HOST-PROTOCOL (0.1.0, a draft for the owner's review), the
+    enclave ↔ parent protocol as built
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.14.0) §11.10 release updates, §12.5 deletion, §13.5, §13.9
@@ -122,6 +125,7 @@ related:
   - ANDROID-PLAN.md (0.1.31) — the app's "What's new" from the log
   - STAGING-DEVELOPMENT-PLAN.md (0.1.0) — staging as the development channel; D1–D11
   - MEMBER-API.md "Vault", RUNBOOK.md, ARCHITECTURE.md
+  - VAULT-HOST-PROTOCOL.md (0.1.0, draft) — the enclave ↔ parent (vsock) protocol as built; §10 what happens if versions meet
   - vettid-vault docs/SMOKE.md (hardware smoke test, 2026-10-02)
 classification: public (no secrets; safe for github.com/vettid)
 ---
@@ -275,7 +279,7 @@ the oldest live release is removed.
 | C1 | Manifest | Format v1 and its signature label; the pinned manifest keys (rotation only through a key every live release already pins); the status set fixed at release 1 (`active`, `deprecated`, `retired`, `removed`); new fields additive only (old parsers ignore unknown members, but refuse unknown statuses) |
 | C2 | Alternate channel (app ↔ member API ↔ queue ↔ enclave) | Routes and their errors; envelope v2, suite 2, the 13,444 / 5,252-byte sizes; descriptor v1; the SQS message v1 and its ops (`enroll`, `unlock`, `lock`, `delete`, `recovery`, `recovery_cancel`, `recovery_register`); response slots; the unlock, approval and recovery signing strings. **Apps keep the oldest live release's formats.** |
 | C3 | Storage and tables | S3 keys `vaults/<vault_id>/…` and `users/<hash>/vault`, conditional-write semantics; the attributes a release's parent reads and writes (lease, registry row, response slot, lifecycle events, `alarm`); the queue name prefix. Schema changes additive only. |
-| C4 | Host | Each release runs **its own tag's parent** on its own AMI, so the vsock protocol never crosses versions. Host OS patches rebuild the AMI with the same EIF and parent. |
+| C4 | Host | Each release runs **its own tag's parent** on its own AMI, so the vsock protocol never crosses versions (the protocol as built: VAULT-HOST-PROTOCOL; what the code does if versions meet all the same: §10 there). Host OS patches rebuild the AMI with the same EIF and parent. |
 | C5 | AWS | The pinned KMS region endpoint, SigV4, IMDS credentials, the pinned Amazon roots (Amazon Root CA 1 runs to 2038) |
 | C6 | Device attestation | The Android signing-certificate digests, package name and iOS app ID pinned in the release; the pinned Google, Apple and GrapheneOS roots. Rotating the app signing key needs every live release to pin the new digest first (two digests pinned). 0.1.12: each vault is bound to the signer of its app (VAULT-MESSAGING 0.27.0 §11.7.1). **Adding** a signer to a release changes nothing for existing vaults. **Removing** one strands the vaults bound to it at that release (`signer_refused`, also at the confirming unlock of a move into it) until the member transfers or recovers to an app with a pinned signer: a release drops a signer only with the notice of a retirement (§3.5), and its log entry says so. A release's log entry also says when it adds a signer. |
 | C7 | Relay | Not needed for a move (a move locks without collecting). Ordinary unlocks collect from the relay: best effort only. The relay stays backward compatible in practice, but a deprecated release may lose messaging. |

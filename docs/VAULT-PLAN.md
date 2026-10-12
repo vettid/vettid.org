@@ -1,9 +1,12 @@
 ---
 title: VAULT-PLAN
 status: draft
-version: 0.1.6
+version: 0.1.7
 date: 2026-10-12
 changelog:
+  - 0.1.7: editorial, a reference only: §5.2 and `related` point to
+    VAULT-HOST-PROTOCOL (0.1.0, a draft for the owner's review), the
+    enclave ↔ parent protocol as built
   - 0.1.6: as built, phase 1 of VAULT-RELAY-SCALING (0.1.2; vettid-vault
     #66): the number of shared HTTP/2 connections is bounded by the
     enclave (D5, §5.2 "Connection pooling"; VAULT-MESSAGING 0.27.2
@@ -31,6 +34,7 @@ related:
   - PQC-MIGRATION.md (0.3.0)
   - MEMBER-API.md, RUNBOOK.md
   - VAULT-RELEASES.md (0.1.0) — the V5 plan
+  - VAULT-HOST-PROTOCOL.md (0.1.0, draft) — the enclave ↔ parent protocol as built
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -421,6 +425,11 @@ enclave and payloads are end-to-end encrypted.
   protocol and relay changes for what TLS already provides. Rejected.
 - *Parent TLS with padding or batching*: hides nothing structural; paths and
   tokens are still in clear to the host. Rejected.
+
+*As built (0.1.7):* the forwarder's header, and everything else that
+crosses between the enclave and the parent, is described in
+VAULT-HOST-PROTOCOL (a draft; §8 for the egress, §11 for what the parent
+sees and can do).
 
 **Decision:** terminate TLS in the enclave, over a small pool of shared
 HTTP/2 connections per instance, with pinned roots for exactly the hosts in

@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.27.2
+version: 0.27.3
 date: 2026-10-12
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -20,7 +20,12 @@ related:
   - VAULT-RELEASES.md (0.1.14; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
+  - VAULT-HOST-PROTOCOL.md (0.1.0, draft; the enclave ↔ parent protocol as built)
 changelog:
+  - 0.27.3: editorial, a reference only; nothing normative changes.
+    §13.3 and `related` point to VAULT-HOST-PROTOCOL (0.1.0, a draft for
+    the owner's review), which describes the protocol between the
+    enclave and its parent as built
   - 0.27.2: editorial-normative, as built: phase 1 of
     VAULT-RELAY-SCALING (0.1.2; vettid-vault #66, for staging release
     S11). No wire change for the relay or the apps. §12.2: the collect
@@ -10996,6 +11001,10 @@ The parent can delay, drop, reorder or replay what it forwards. Replays are
 absorbed (§11.6) and rollbacks are bounded (§13.2). It can misreport the
 advisory lifecycle and lease values, but those affect only routing and
 availability.
+
+The protocol between the enclave and the parent, and what the parent
+sees and can do for each request of it, are described as built in
+VAULT-HOST-PROTOCOL (0.1.0, a draft; §11 there).
 
 Inside the enclave, a flaw in one vault's process (a feature handler, a
 parser) reaches only that vault: its secrets live in its own process, and
