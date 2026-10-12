@@ -298,16 +298,21 @@ describe('VettidOrgVaultHostStack: queue, logs, alarms, refs (§8.5, §8.7)', ()
       expect(Math.floor(L.inFlightShare * L.relayConnections * L.relayStreams)).toBe(1638);
     });
 
-    test('churn: opened in an hour against the connections open, over every instance', () => {
+    test('churn: connections opened in an hour over every instance, against a fixed number', () => {
       const a = byName('vault-relay-connection-churn').Properties;
-      expect(a).toMatchObject({ ComparisonOperator: 'GreaterThanOrEqualToThreshold', Threshold: 1, EvaluationPeriods: 1, TreatMissingData: 'notBreaching' });
-      expect(a.Metrics).toEqual([
-        { Id: 'opened', Expression: q('SUM', 'EgressOpenedRelay'), Period: 3600, ReturnData: false },
-        { Id: 'open', Expression: q('SUM', 'EgressOpenRelay'), Period: 3600, ReturnData: false },
-        { Id: 'churn', Expression: 'IF(opened > 32 AND opened * 60 > 4 * open, 1, 0)', Label: 'relay connection churn (1 = churning)', ReturnData: true },
-      ]);
-      // Exactly one series is watched.
-      expect(a.Metrics.filter((m: any) => m.ReturnData)).toHaveLength(1);
+      expect(a).toMatchObject({ ComparisonOperator: 'GreaterThanThreshold', Threshold: 64, EvaluationPeriods: 1, DatapointsToAlarm: 1, TreatMissingData: 'notBreaching' });
+      expect(a.Metrics).toEqual([{ Id: 'q', Expression: q('SUM', 'EgressOpenedRelay'), Period: 3600, ReturnData: true }]);
+      // Twice a full set of 16 connections replaced twice in the hour.
+      expect(VAULT_HOST_METRIC_LIMITS.relayOpenedPerHour).toBe(2 * 2 * VAULT_HOST_METRIC_LIMITS.relayConnections);
+    });
+
+    test('an alarm holds at most one Metrics Insights query and nothing beside it (CloudWatch refuses more: "Invalid metrics list")', () => {
+      const withQuery = resources(json, 'AWS::CloudWatch::Alarm').filter((a) => (a.Properties.Metrics ?? []).some((m: any) => /^SELECT /.test(m.Expression ?? '')));
+      expect(withQuery).toHaveLength(6); // the control-queue age and the parent's five
+      for (const a of withQuery) {
+        expect(a.Properties.Metrics).toHaveLength(1);
+        expect(a.Properties.Metrics[0].ReturnData).toBe(true);
+      }
     });
 
     test('the stream limit: a filter on the host log (plain fields), then an alarm', () => {
