@@ -27,6 +27,35 @@ export interface VettidOrgVaultHostStackProps extends cdk.StackProps {
   readonly releases: readonly VaultReleaseSpec[];
 }
 
+/**
+ * Limits behind the alarms on the parent's metrics (VAULT-RELEASES §8.7,
+ * VAULT-RELAY-SCALING §6). The parent of a release from staging S11 on
+ * writes one embedded-metric record a minute to its log (vettid-vault
+ * parent/metrics.go): namespace `VettID/Vault`, the one dimension
+ * `InstanceId`. Instances come and go, so each alarm asks for the worst
+ * instance (or the sum over all of them) with a Metrics Insights query,
+ * as the control-queue age alarm does.
+ */
+export const VAULT_HOST_METRIC_LIMITS = {
+  /** Unlocked vaults on one instance: time to look, long before ~900 (§8.8). */
+  unlockedVaults: 400,
+  /** The enclave's bound on connections to the relay per host (VAULT-MESSAGING §12.2.1), and the streams the relay's load balancer allows on each. */
+  relayConnections: 16,
+  relayStreams: 128,
+  /** Relay requests in flight on one instance, as a share of the most it can have (connections × streams). */
+  inFlightShare: 0.8,
+  /** Longest wait for a relay stream, milliseconds. */
+  streamWaitMs: 1000,
+  /** Churn: relay connections opened in an hour above this many times the connections open (the plan says "far above 2"), and above the floor (a full set replaced twice). */
+  churnFactor: 4,
+  churnFloor: 32,
+  /** The stream limit Go's HTTP/2 client assumes before the relay announced one (VAULT-RELAY-SCALING §10.4). */
+  assumedStreams: 100,
+} as const;
+
+/** The parent's metrics, by instance (the schema of the Metrics Insights queries). */
+export const VAULT_HOST_METRIC_SCHEMA = 'SCHEMA("VettID/Vault", InstanceId)';
+
 /** The two AZs the host groups span (both offer m7g.large in both vault accounts; checked 2026-10-04). */
 export const VAULT_HOST_AZS = ['a', 'b'];
 
@@ -44,7 +73,9 @@ export const VAULT_HOST_AZS = ['a', 'b'];
  *    the builder role and the infrastructure configuration;
  *  - the shared DLQ, the host log group, the deletable smoke-test key;
  *  - the release SCALER and the MANIFEST SYNC Lambdas;
- *  - alarms and CloudTrail rules to SNS → the admin address.
+ *  - alarms and CloudTrail rules to SNS → the admin address, among them
+ *    the alarms on the parent's own metrics (§8.7; hosts from staging
+ *    release S11 write them).
  *
  * Refs for the release stacks and the hosts' boot go to SSM
  * (`/vettid-org/<stage>/vault/*`); nothing is exported.
@@ -73,6 +104,26 @@ export class VettidOrgVaultHostStack extends cdk.Stack {
     // ---- alerts ---------------------------------------------------------------------
     this.alerts = new sns.Topic(this, 'Alerts', { topicName: resourceName(config, 'vault-alerts'), displayName: `VettID vault alerts (${vault.channel})` });
     this.alerts.addSubscription(new subs.EmailSubscription(config.adminEmail));
+    // CloudWatch alarms publish as the CloudWatch service, which an SNS
+    // topic admits only when its policy names it. The statements CDK adds
+    // for the CloudTrail rule targets below cover events.amazonaws.com
+    // alone, and they replace the topic's default policy: without this
+    // statement no alarm of this stack or of a release stack can notify
+    // ("not authorized to perform: SNS:Publish" in the alarm's history;
+    // the same fault as the security-alerts topic had, #214). Only this
+    // account's alarms, never another's.
+    this.alerts.addToResourcePolicy(
+      new iam.PolicyStatement({
+        sid: 'AlarmsOfThisAccount',
+        principals: [new iam.ServicePrincipal('cloudwatch.amazonaws.com')],
+        actions: ['sns:Publish'],
+        resources: [this.alerts.topicArn],
+        conditions: {
+          StringEquals: { 'aws:SourceAccount': account },
+          ArnLike: { 'aws:SourceArn': `arn:${this.partition}:cloudwatch:${region}:${account}:alarm:*` },
+        },
+      }),
+    );
     const alarmAction = new cwActions.SnsAction(this.alerts);
     const alarm = (cid: string, a: cloudwatch.AlarmProps) => {
       const x = new cloudwatch.Alarm(this, cid, { treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING, ...a });
@@ -425,6 +476,112 @@ export class VettidOrgVaultHostStack extends cdk.Stack {
       threshold: 1,
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
       evaluationPeriods: 2,
+      datapointsToAlarm: 2,
+    });
+
+    // ---- alarms on the parent's metrics (§8.7; VAULT-RELAY-SCALING §6) -----------------
+    // Nothing here exists until a host of a release from staging S11 on
+    // runs: until then (and whenever no instance runs) the queries return
+    // nothing and missing data is not breaching.
+    const L = VAULT_HOST_METRIC_LIMITS;
+    const parentQuery = (fn: 'MAX' | 'SUM', metricName: string) => `SELECT ${fn}(${metricName}) FROM ${VAULT_HOST_METRIC_SCHEMA}`;
+    const parentAlarm = (
+      cid: string,
+      name: string,
+      alarmDescription: string,
+      p: { metrics: cloudwatch.CfnAlarm.MetricDataQueryProperty[]; threshold: number; periods: number; orEqual?: boolean },
+    ) => {
+      const x = new cloudwatch.CfnAlarm(this, cid, {
+        alarmName: resourceName(config, name),
+        alarmDescription,
+        comparisonOperator: p.orEqual ? 'GreaterThanOrEqualToThreshold' : 'GreaterThanThreshold',
+        threshold: p.threshold,
+        evaluationPeriods: p.periods,
+        datapointsToAlarm: p.periods,
+        treatMissingData: 'notBreaching',
+        metrics: p.metrics,
+        alarmActions: [this.alerts.topicArn],
+      });
+      x.node.addDependency(this.alerts);
+      return x;
+    };
+    const worst = (fn: 'MAX' | 'SUM', metricName: string): cloudwatch.CfnAlarm.MetricDataQueryProperty[] => [
+      { id: 'q', returnData: true, period: 60, expression: parentQuery(fn, metricName) },
+    ];
+    parentAlarm('ParentUnlockedVaults', 'vault-unlocked-vaults', `An instance has held more than ${L.unlockedVaults} unlocked vaults for 5 minutes: time to look at capacity (about 900 fit)`, {
+      metrics: worst('MAX', 'UnlockedVaults'),
+      threshold: L.unlockedVaults,
+      periods: 5,
+    });
+    // Connections are filled one after the other (a new one only when the
+    // open ones are full), so in-flight against the connections OPEN is
+    // near or above 80 % in ordinary operation from the fifth connection
+    // on. The share is therefore taken of the most a host can have.
+    const inFlightLimit = Math.floor(L.inFlightShare * L.relayConnections * L.relayStreams);
+    parentAlarm(
+      'ParentRelayInFlight',
+      'vault-relay-in-flight',
+      `An instance has more than ${inFlightLimit} relay requests in flight: ${L.inFlightShare * 100} % of what its ${L.relayConnections} connections of ${L.relayStreams} streams carry`,
+      { metrics: worst('MAX', 'RelayRequestsInFlight'), threshold: inFlightLimit, periods: 3 },
+    );
+    // The metric is the longest wait of this minute and the one before:
+    // one record is enough.
+    parentAlarm('ParentRelayStreamWait', 'vault-relay-stream-wait', `A relay request on an instance waited more than ${L.streamWaitMs} ms for a stream`, {
+      metrics: worst('MAX', 'RelayStreamWaitMax'),
+      threshold: L.streamWaitMs,
+      periods: 1,
+    });
+    parentAlarm('ParentRelayGrowthRefused', 'vault-relay-growth-refused', 'Relay requests on an instance waited because a bound forbade another connection (16 connections, or a relay announcing fewer than 32 streams); which bound is in the metrics record (relay_refused_max_conns, relay_refused_min_streams)', {
+      metrics: worst('SUM', 'RelayGrowthRefused'),
+      threshold: 0,
+      periods: 1,
+    });
+    // Per hour, over every instance: connections opened against the
+    // connections open. The records come once a minute, so the sum of the
+    // open counts is 60 times the average number open.
+    parentAlarm(
+      'ParentRelayChurn',
+      'vault-relay-connection-churn',
+      `Relay connections churn: more than ${L.churnFloor} opened in an hour and more than ${L.churnFactor} times the connections open (once or twice is the load balancer's hourly close)`,
+      {
+        metrics: [
+          { id: 'opened', returnData: false, period: 3600, expression: parentQuery('SUM', 'EgressOpenedRelay') },
+          { id: 'open', returnData: false, period: 3600, expression: parentQuery('SUM', 'EgressOpenRelay') },
+          {
+            id: 'churn',
+            returnData: true,
+            label: 'relay connection churn (1 = churning)',
+            expression: `IF(opened > ${L.churnFloor} AND opened * 60 > ${L.churnFactor} * open, 1, 0)`,
+          },
+        ],
+        threshold: 1,
+        orEqual: true,
+        periods: 1,
+      },
+    );
+    // relay_streams and relay_waiting are plain fields of the record, not
+    // metrics: a filter on the host log counts the records in which
+    // requests wait while the stream limit reads 0 (none announced) or 100
+    // (the client's assumption: a front end that announces exactly 100 is
+    // filled slowly for good, VAULT-RELAY-SCALING §10.4).
+    const streamLimitSuspect = new logs.MetricFilter(this, 'RelayStreamLimitSuspectMetric', {
+      logGroup: hostLogs,
+      filterPattern: logs.FilterPattern.all(
+        logs.FilterPattern.stringValue('$.msg', '=', 'metrics'),
+        logs.FilterPattern.numberValue('$.relay_waiting', '>', 0),
+        logs.FilterPattern.any(logs.FilterPattern.numberValue('$.relay_streams', '=', 0), logs.FilterPattern.numberValue('$.relay_streams', '=', L.assumedStreams)),
+      ),
+      metricNamespace: 'VettID/Vault',
+      metricName: 'RelayStreamLimitSuspect',
+      metricValue: '1',
+    });
+    alarm('ParentRelayStreamLimit', {
+      alarmName: resourceName(config, 'vault-relay-stream-limit'),
+      alarmDescription: `Relay requests on an instance wait for a stream while the relay's stream limit reads 0 or ${L.assumedStreams} (2 records in 3 minutes): check what the relay's front end announces (RUNBOOK "Relay", ${L.relayStreams} expected)`,
+      metric: streamLimitSuspect.metric({ statistic: 'Sum', period: cdk.Duration.minutes(1) }),
+      threshold: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      evaluationPeriods: 3,
       datapointsToAlarm: 2,
     });
 
