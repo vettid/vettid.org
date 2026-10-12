@@ -314,6 +314,40 @@ npx cdk deploy VettidOrgRelayStack       # service; reads the refs at deploy tim
   **Watch after the deploy:** task memory and restarts against
   `collectors` and `ws_sessions`; `address_busiest_per_min` and refusals
   by limiter; Valkey data size and ECPU; DynamoDB consumed reads; ECS CPU.
+- **HTTP/2 stream limit** (RELAY-PROTOCOL §7.4; VAULT-MESSAGING
+  §12.2.1). The front end must not announce exactly 100 concurrent
+  streams, and should announce at least 128: vault hosts size their
+  shared connections from it, and a front end announcing 100 makes
+  every vault of a host wait behind the first long-poll of each new
+  connection. The ALB announces **128** (checked 2026-10-12) and has no
+  setting for it. Check again before anything else is put in front of
+  the relay (another load balancer, a CDN, a proxy), and after such a
+  change:
+
+  ```bash
+  python3 - relay.vettid.org <<'EOF'
+  import socket, ssl, struct, sys
+  h = sys.argv[1]
+  c = ssl.create_default_context(); c.set_alpn_protocols(["h2"])
+  s = c.wrap_socket(socket.create_connection((h, 443), timeout=10), server_hostname=h)
+  s.sendall(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" + b"\x00\x00\x00\x04\x00\x00\x00\x00\x00")
+  def rd(n):
+      b = b""
+      while len(b) < n: b += s.recv(n - len(b))
+      return b
+  while True:
+      hd = rd(9); p = rd(int.from_bytes(hd[:3], "big"))
+      if hd[3] == 4 and not hd[4] & 1:   # the server's SETTINGS frame
+          print({k: v for k, v in struct.iter_unpack(">HI", p)}.get(3, "not announced")); break
+  EOF
+  ```
+
+  It prints the announced `SETTINGS_MAX_CONCURRENT_STREAMS` (expected:
+  `128`). The same check works for `push.vettid.org` and
+  `push.staging.vettid.org`. On a vault host the parent's `metrics`
+  record shows what the enclave read, as `relay_streams`; `relay_streams`
+  0 or 100 with `relay_waiting` above 0 is the symptom
+  (VAULT-RELEASES §8.7).
 - **Health.** `/healthz` reads DynamoDB. Metrics worth alarming on (task
   `/metrics`, loopback): `relay_coord_errors_total`, `relay_wake_bus_up`,
   `relay_errors_total{code="internal"}`.

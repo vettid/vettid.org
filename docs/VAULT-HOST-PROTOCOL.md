@@ -1,17 +1,26 @@
 ---
 title: VAULT-HOST-PROTOCOL
 status: approved by the owner 2026-10-12 (H1–H9 as recommended)
-version: 0.1.1
+version: 0.1.2
 date: 2026-10-12
 owner: Al Liebl (Mesmer)
 component: vault enclave (supervisor), parent (host process)
 related:
-  - VAULT-MESSAGING.md (0.27.3) §2 (threat model, who sees what), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
-  - VAULT-PLAN.md (0.1.7) §5.2 (D5: TLS in the enclave), §5.3 (D4: one process per vault)
-  - VAULT-RELEASES.md (0.1.15) §3.4 (C3, C4), §8.4 (network and egress), §8.7 (observability)
+  - VAULT-MESSAGING.md (0.27.4) §2 (threat model, who sees what), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
+  - VAULT-PLAN.md (0.1.8) §5.2 (D5: TLS in the enclave), §5.3 (D4: one process per vault)
+  - VAULT-RELEASES.md (0.1.16) §3.4 (C3, C4), §8.4 (network and egress), §8.7 (observability)
   - VAULT-RELAY-SCALING.md (0.1.2) §6, §10
   - vettid-vault `internal/hostproto`, `enclave/supervisor`, `enclave/egress`, `parent`, docs/V3-NOTES.md "Enclave ↔ parent", docs/SMOKE.md
 changelog:
+  - 0.1.2: errata after vettid-vault #69 (main 8f2c8bf) and the
+    errata of VAULT-MESSAGING 0.27.4. §6.6: `relay_vault_limit`. §7.4,
+    §11.2: the log record that named a vault at its request limit is
+    gone; what the remaining records that name a vault carry. §12 P5:
+    its last sentence narrowed to that. §13: points 2, 3, 4 and part of
+    7 closed, with where; a new point 8 (a vault process's log text
+    reaches the parent with the vault id). §4.3: the row of
+    VAULT-MESSAGING §12.3 under its new name. Each statement that
+    differs between the two commits says which commit it describes
   - 0.1.1: approved by the owner 2026-10-12, decisions H1–H9 as
     recommended: the requirements of §12 (P1–P9) are normative; the
     open points of §13 are to be handled as decided there
@@ -56,11 +65,15 @@ process, which never leaves the enclave (vettid-vault
 `internal/vaultipc`).
 
 **How to read it.** This version describes the protocol **as built** at
-vettid-vault f3003ed. Statements in the present tense are what the code
-does. The key words MUST, MUST NOT, SHOULD and MAY (RFC 2119) appear
+vettid-vault f3003ed (#66), which staging release S11 is to be built
+from, with the two changes of 8f2c8bf (#69, also for S11): the count
+`relay_vault_limit` (§6.6) and the log record it replaces (§7.4, §11.2,
+§13 point 2). Where the two commits differ, the text names the commit.
+Statements in the present tense are what the code does. The key words MUST, MUST NOT, SHOULD and MAY (RFC 2119) appear
 only where this document repeats a rule another specification already
 makes, with the reference, and in §12, whose rules are normative since
-0.1.1 (the code at f3003ed already satisfies each of them).
+0.1.1 (the code at f3003ed already satisfies each of them; P5 as
+narrowed in 0.1.2 is satisfied from 8f2c8bf).
 
 ## 2. Parties and channels
 
@@ -227,7 +240,8 @@ and has sent a descriptor.
   deletes the instance's registry row at once, so the member API stops
   routing to it.
 - **No connection for 120 s.** While it runs vaults, the enclave locks
-  every one (VAULT-MESSAGING §12.3 "Parent unreachable for 120 s"): the
+  every one (VAULT-MESSAGING §12.3 "No control connection to the parent
+  for 120 s"): the
   parent can no longer renew their leases. The check runs every 10 s.
   It measures the time **without a connection**. A connection that
   stays open while the parent does not answer is not counted (§13,
@@ -425,6 +439,7 @@ Added by vettid-vault #66 (staging release S11).
 | `relay_errors` | counter | relay requests that got no answer (not counted: a request its vault process gave up) |
 | `relay_refused_max_conns` | counter | requests that waited because the bound on connections forbade another (VAULT-MESSAGING §12.2.1) |
 | `relay_refused_min_streams` | counter | requests that waited because the relay announced too few streams for another connection |
+| `relay_vault_limit` | counter | **from 8f2c8bf (0.1.2):** vault processes that reached their own limit of 8 relay and push requests in flight (VAULT-MESSAGING §12.2.1 "Per vault"), each counted once, however often it is at the limit. Not in the reply at f3003ed |
 
 - Counters count from the enclave's start. Gauges are summed over the
   relay hosts (one, in a release), except `relay_streams` (the
@@ -502,7 +517,18 @@ message and each value cut to 200 bytes, marked `source=enclave`.
 
 The supervisor logs fixed messages with ids, counts, reasons and error
 classes: never keys, PINs, tokens, envelopes, plaintext or mailbox
-ids. Some records name a vault by its `vault_id` (§11.2).
+ids. Some records name a vault by its `vault_id`. At 8f2c8bf they are
+exactly these, and each reports how a vault's run **ended**:
+
+| Record | Carries, with the `vault_id` |
+|---|---|
+| "vault locked", "vault locked; final flush failed", "vault locked without final flush: newer state written elsewhere" | the trigger (`lease_lost`, `shutdown`, `vault_cap`, `memory_pressure`); for a failed flush the class of the error |
+| "vault process ended" | the reason (as in `Stopped`, §7.3) and the exit code |
+| "vault: …" | **whatever the vault's own process logged**, passed on by the supervisor with the vault's id: the message cut to 120 bytes and up to 8 pairs. A vault process logs two things today: "split brain: newer state written elsewhere; zeroized without flushing", and "vault run loop ended" with the first 80 bytes of the error that ended it. Only an error of the vault's start or of a state write ends the loop on its own; a relay error is retried and never does (§13 point 8) |
+
+At f3003ed there was one more, "vault at its limit of concurrent relay
+requests; further ones wait", with the `vault_id`. 8f2c8bf removed it
+(§13 point 2).
 
 ## 8. Egress connections
 
@@ -670,8 +696,9 @@ a vault is above this protocol:
 - log records that name it: that it was locked and by which trigger
   (`lease_lost`, `shutdown`, `vault_cap`, `memory_pressure`), that its
   final flush failed, that its process ended and with what code, and
-  that it reached its limit of 8 relay requests in flight
-  (§13, point 2).
+  what its own process logged when its run loop ended (§7.4). At
+  f3003ed also that it reached its limit of 8 relay requests in
+  flight; not from 8f2c8bf (§13 point 2).
 
 **What it does not see:** PINs, credential passwords, any key but
 public app keys and browser keys, vault contents, the sealed requests
@@ -770,7 +797,8 @@ more than "the operation does not happen, or happens late".
 ## 12. Requirements
 
 *Normative since 0.1.1 (approved by the owner 2026-10-12). The code at
-f3003ed satisfies each of these.*
+f3003ed satisfies each of these; P5's last sentence, narrowed in 0.1.2,
+is satisfied from 8f2c8bf.*
 
 - **P1.** The enclave MUST treat every frame, reply and egress byte
   from the parent as untrusted input, and MUST NOT base a security
@@ -789,7 +817,14 @@ f3003ed satisfies each of these.*
 - **P5.** The enclave MUST NOT send to the parent, in any frame, a
   PIN, a private or symmetric key, a token, plaintext of a vault, a
   mailbox id, or the content of a relay, KMS or push request. A log
-  record MAY name a vault by `vault_id`.
+  record MAY name a vault by `vault_id` only to report how that
+  vault's run ended: that it was locked and by which trigger, that a
+  final flush failed, that its process ended and how, a split brain,
+  or the error that ended its run loop (§7.4). A record that names a
+  vault MUST NOT carry a count, a state or a time of that vault's
+  relay, KMS or push requests, or anything else about what that vault
+  did while it ran (0.1.2; before: "A log record MAY name
+  a vault by `vault_id`").
 - **P6.** The enclave MUST answer a request kind it does not know with
   `invalid` and MUST keep the connection; the parent MUST treat any
   status but `ok` to `Stats` and `Ping` as "no answer" and carry on.
@@ -817,6 +852,13 @@ erratum with no code change; per-kind frame limits and the reader at
 the request limit follow at low priority; the rest with the next change
 to each place.
 
+**State at 0.1.2.** Point 2 is fixed in vettid-vault 8f2c8bf (#69) and
+P5 narrowed. Points 3 and 4 are disclosed in VAULT-MESSAGING 0.27.4
+(§2.2; §13.3, §11.3, §11.11.2). Point 1 is worded as built in
+VAULT-MESSAGING 0.27.4 §12.3; its fix is still to come. Of point 7,
+the `Hello` comment is corrected (8f2c8bf) and VAULT-RELEASES 0.1.16
+lists `account`. Points 5 and 6 are open. Point 8 is new.
+
 Found while writing this document. Each is described where it occurs
 above; the pull request that adds this document lists them with file
 and line. None lets the parent read or forge anything it could not
@@ -830,10 +872,12 @@ before. Points 1 and 2 are the ones that matter.
    lease renewals until the connection breaks. Notifications also
    block once 256 frames are queued (§3.4), and with them any enclave
    code that logs.
-2. **One log record tells the parent something per vault about relay
-   requests:** that a named vault reached its limit of 8 in flight
-   (§11.2). VAULT-MESSAGING §2.2 says the host learns "nothing per
-   vault" of the relay counts.
+2. **One log record told the parent something per vault about relay
+   requests** (f3003ed): that a named vault reached its limit of 8 in
+   flight. VAULT-MESSAGING §2.2 says the host learns "nothing per
+   vault" of the relay counts. *Fixed in 8f2c8bf:* the record is gone;
+   the instance-wide count `relay_vault_limit` (§6.6) takes its place,
+   and a test holds that no log record and no count names the vault.
 3. **VAULT-MESSAGING §2.2 does not list everything the parent sees per
    vault** (§11.2): the `user_guid`, the account snapshot with the
    email address and names, the browser key, and above all the key,
@@ -854,6 +898,17 @@ before. Points 1 and 2 are the ones that matter.
    are sent; the enclave and the parent read queue messages up to
    different sizes (§6.1); VAULT-RELEASES §3.4 C2 does not list the
    `account` operation.
+8. **A point to watch (0.1.2): what a vault process logs reaches the
+   parent with the vault's id.** The supervisor passes on every log
+   record of a vault process as "vault: …" with the `vault_id` (§7.4),
+   and the text is the vault process's own: for "vault run loop ended",
+   the first 80 bytes of the error, not reduced to a class as the
+   supervisor's own records are. At 8f2c8bf this carries nothing about
+   relay requests: a vault process logs only its ending, and only an
+   error of its start or of a state write ends it. But any log line
+   added to a vault process later, and any error text that later ends
+   a run loop, goes to the parent with the vault id. P5 binds such a
+   change; nothing in the code enforces it.
 
 ## 14. Sources
 

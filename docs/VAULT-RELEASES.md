@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.15
+version: 0.1.16
 date: 2026-10-12
 owner: Al Liebl (Mesmer)
 changelog:
@@ -118,14 +118,20 @@ changelog:
   - 0.1.15 (editorial, a reference only): §3.4 C4 and `related` point
     to VAULT-HOST-PROTOCOL (0.1.0, a draft for the owner's review), the
     enclave ↔ parent protocol as built
+  - 0.1.16 (errata; VAULT-HOST-PROTOCOL decision H8 and vettid-vault
+    #69). §3.4 C2: the `account` operation, in the SQS message since
+    VAULT-MESSAGING 0.15.0, was missing from the list. §8.7 "As
+    built": the plain field `relay_vault_limit`, from the staging
+    release that includes vettid-vault 8f2c8bf (S11). `related` brought
+    up to date
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
-  - VAULT-MESSAGING.md (0.14.0) §11.10 release updates, §12.5 deletion, §13.5, §13.9
-  - RELEASE-UPDATES.md (0.3.1) — member-facing; §3 changes with this plan; §5 the release log
-  - ANDROID-PLAN.md (0.1.31) — the app's "What's new" from the log
-  - STAGING-DEVELOPMENT-PLAN.md (0.1.0) — staging as the development channel; D1–D11
+  - VAULT-MESSAGING.md (0.27.4) §11.10 release updates, §12.5 deletion, §13.5, §13.9
+  - RELEASE-UPDATES.md (0.3.3) — member-facing; §3 changes with this plan; §5 the release log
+  - ANDROID-PLAN.md (0.1.37) — the app's "What's new" from the log
+  - STAGING-DEVELOPMENT-PLAN.md (0.1.2) — staging as the development channel; D1–D11
   - MEMBER-API.md "Vault", RUNBOOK.md, ARCHITECTURE.md
-  - VAULT-HOST-PROTOCOL.md (0.1.0, draft) — the enclave ↔ parent (vsock) protocol as built; §10 what happens if versions meet
+  - VAULT-HOST-PROTOCOL.md (0.1.2) — the enclave ↔ parent (vsock) protocol as built; §10 what happens if versions meet
   - vettid-vault docs/SMOKE.md (hardware smoke test, 2026-10-02)
 classification: public (no secrets; safe for github.com/vettid)
 ---
@@ -277,7 +283,7 @@ the oldest live release is removed.
 | # | Interface | What stays compatible |
 |---|---|---|
 | C1 | Manifest | Format v1 and its signature label; the pinned manifest keys (rotation only through a key every live release already pins); the status set fixed at release 1 (`active`, `deprecated`, `retired`, `removed`); new fields additive only (old parsers ignore unknown members, but refuse unknown statuses) |
-| C2 | Alternate channel (app ↔ member API ↔ queue ↔ enclave) | Routes and their errors; envelope v2, suite 2, the 13,444 / 5,252-byte sizes; descriptor v1; the SQS message v1 and its ops (`enroll`, `unlock`, `lock`, `delete`, `recovery`, `recovery_cancel`, `recovery_register`); response slots; the unlock, approval and recovery signing strings. **Apps keep the oldest live release's formats.** |
+| C2 | Alternate channel (app ↔ member API ↔ queue ↔ enclave) | Routes and their errors; envelope v2, suite 2, the 13,444 / 5,252-byte sizes; descriptor v1; the SQS message v1 and its ops (`enroll`, `unlock`, `lock`, `delete`, `recovery`, `recovery_cancel`, `recovery_register`, and `account`, which 0.1.16 adds to this list: it has been in the message since VAULT-MESSAGING 0.15.0); response slots; the unlock, approval and recovery signing strings. **Apps keep the oldest live release's formats.** |
 | C3 | Storage and tables | S3 keys `vaults/<vault_id>/…` and `users/<hash>/vault`, conditional-write semantics; the attributes a release's parent reads and writes (lease, registry row, response slot, lifecycle events, `alarm`); the queue name prefix. Schema changes additive only. |
 | C4 | Host | Each release runs **its own tag's parent** on its own AMI, so the vsock protocol never crosses versions (the protocol as built: VAULT-HOST-PROTOCOL; what the code does if versions meet all the same: §10 there). Host OS patches rebuild the AMI with the same EIF and parent. |
 | C5 | AWS | The pinned KMS region endpoint, SigV4, IMDS credentials, the pinned Amazon roots (Amazon Root CA 1 runs to 2038) |
@@ -1268,7 +1274,14 @@ release_starting`. The `vault-scaler` Lambda (host stack):
   - **Plain fields of the record** (searchable in the log, not
     metrics): `relay_conns`, `relay_dialed`, `relay_streams` (the stream
     limit the relay announced), `relay_waiting`,
-    `relay_refused_max_conns`, `relay_refused_min_streams`.
+    `relay_refused_max_conns`, `relay_refused_min_streams` (all
+    six since vettid-vault f3003ed), and, from the staging release that
+    includes vettid-vault 8f2c8bf (S11; 0.1.16), `relay_vault_limit`:
+    how many vault processes reached their own limit of 8 relay and
+    push requests in flight since the enclave started, each counted
+    once. For the instance only: it replaces a log record that named the
+    vault (VAULT-HOST-PROTOCOL §13 point 2). It is a field, not a 14th
+    metric.
   - **Alarms these call for** (not built; they belong to the vault
     account's stack): `UnlockedVaults` above 400 on an instance;
     `RelayRequestsInFlight` above 80 % of `relay_conns` × 128;

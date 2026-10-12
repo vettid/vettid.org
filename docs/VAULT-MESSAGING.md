@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.27.3
+version: 0.27.4
 date: 2026-10-12
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -17,11 +17,28 @@ related:
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
-  - VAULT-RELEASES.md (0.1.14; 0.1.6 approved 2026-10-04)
+  - VAULT-RELEASES.md (0.1.16; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
-  - VAULT-HOST-PROTOCOL.md (0.1.0, draft; the enclave ↔ parent protocol as built)
+  - VAULT-HOST-PROTOCOL.md (0.1.2; the enclave ↔ parent protocol as built)
 changelog:
+  - 0.27.4: editorial-normative; errata from VAULT-HOST-PROTOCOL
+    (decisions H3, H5, H6 of 2026-10-12) and from vettid-vault #69. No
+    wire change and no code change. **Disclosure** (what the code
+    already does): §2.2, the host row lists what the parent sees per
+    vault in the clear, the time of every state write included, and the
+    statements about blurred timing are confined to the relay
+    connections (§2.2, §12.2); §13.3, the operations the host can
+    originate (`lock`, `delete`, `account`, `recovery`,
+    `recovery_cancel`), and that §11.3's "a confirmed vault MUST NOT be
+    replaced" binds the member API and apps, not the parent; §11.11.2,
+    what a recovery started by the host gives and does not give, with
+    an open design question. **Interim wording:** §12.3, "Parent
+    unreachable for 120 s" becomes "No control connection to the parent
+    for 120 s", which is what the code measures; a connected but silent
+    parent is to count as unreachable from a later vault release.
+    **As built:** §12.2.1 "Counts", the count of vault processes at
+    their own limit (vettid-vault 8f2c8bf)
   - 0.27.3: editorial, a reference only; nothing normative changes.
     §13.3 and `related` point to VAULT-HOST-PROTOCOL (0.1.0, a draft for
     the owner's review), which describes the protocol between the
@@ -810,7 +827,7 @@ the relay at vettid.org allows:
 | Party | Learns | Does not learn |
 |---|---|---|
 | Relay | Mailbox ids, depositor relay keys, timing, padded sizes, blob and claim sizes | Message types, content, or which identity, device or connection a relay key belongs to |
-| Parent / host | Relay host names; TLS byte counts and timing per instance (connections are shared by all vaults, §12.2); how many connections there are (1 to 16 per host, up to 32 for 30 s at most once in 5 minutes, §12.2.1) and the HTTP/2 pings on quiet ones; the enclave's own counts of relay requests for the whole instance, no finer than once a second (in flight, waiting, failed, connections; §12.2.1), nothing per vault; enroll, unlock and lock events; encrypted-state size; `vault_id` ↔ instance | Relay requests (TLS terminates in the enclave, §12.2), mailbox ids, PINs, keys |
+| Parent / host | **Per instance:** relay host names; TLS byte counts and timing (connections are shared by all vaults, §12.2); how many connections there are (1 to 16 per host, up to 32 for 30 s at most once in 5 minutes, §12.2.1) and the HTTP/2 pings on quiet ones; the enclave's own counts of relay requests for the whole instance, no finer than once a second (in flight, waiting, failed, connections, vault processes at their own limit; §12.2.1), nothing per vault. **Per vault, by `vault_id`, in the clear** (0.27.4; it always did, VAULT-HOST-PROTOCOL §11.2): `vault_id` ↔ instance; the member's `user_guid`; every alternate-channel operation and when (enroll, unlock, lock, delete, recovery and its cancel and register, `account`); the **account snapshot** in enroll, unlock and `account` messages (the member's email address, first and last name, membership, terms and subscription state, §11.13); the app key's public key and a recovery's browser key; the lifecycle events of §11.5, among them name-change requests with both names and the backup bit; and **the key, the size and the time of every read and write of the vault's stored state and header** (below) | Relay requests (TLS terminates in the enclave, §12.2), mailbox ids, which peers a vault talks to, PINs, keys other than the public keys named here, vault contents |
 | Member API | Which member enrolled, unlocked or locked, and when; `vault_id`, instance lease, `vault_version`, `state_version` (§11.5); the public key of the vault's app key and when it changes, so when a transfer or recovery completed (0.15.0, §11.12); whether the vault keeps a backup copy of its credential (`credential_backup`, one bit, 0.16.0, §11.5), so whether it can be recovered; the member's name change requests (`account_name`, 0.18.0, §11.5), whose names it holds anyway | PINs; why an unlock failed (§11.4); mailbox ids; keys other than app public keys; any stable device identifier (§11.7) |
 | Network | Endpoints and timing | Everything else |
 
@@ -821,6 +838,20 @@ sees a held vault keep acking, answer with delivered receipts and serve
 standing grants, but no presence, ringing or read receipts, as with an
 absent member; the relay sees only that an owner's devices exchange
 less traffic with the vault, as during any quiet period.
+
+**The store is a per-vault activity record at the host** (0.27.4,
+disclosure). A vault writes its state whenever something durable
+changed, and each write goes through the parent under a key that names
+the vault (`vaults/<vault_id>/state`). The parent therefore sees, for
+each vault, when it was active and how large its encrypted state is,
+with no traffic analysis at all. The shared relay connections (§12.2,
+§12.2.1; VAULT-PLAN §5.2) keep the host from telling **from the relay
+connections** which vault a request belongs to; they hide nothing about
+the store. The host can line up a vault's write times with the traffic
+on the shared connections. Hiding write times (batching or padding
+writes) is **not planned now** (owner decision of 2026-10-12, H5): the
+host is VettID's own, and the member API already knows when a vault is
+unlocked.
 
 VettID operates both the host and the relay, so in its own deployment it can
 correlate their timing. This residual metadata is disclosed here rather than
@@ -7609,7 +7640,9 @@ size (§11.4).
 - **Provisional vaults.** A new vault stays **provisional** until
   `vault.enroll.confirm` arrives. If no confirmation arrives within 24 h, a
   new enrollment for the same member MAY replace it. A confirmed vault MUST
-  NOT be replaced: the enclave answers `vault_exists`.
+  NOT be replaced: the enclave answers `vault_exists`. (0.27.4: the
+  enclave decides this from stored objects the host serves, so the rule
+  holds against the member API and apps, not against the host, §13.3.)
 - **Re-enrollment.** The API assigns `vault_id` once per member: a new
   enrollment carries the member's existing `vault_id` unless the vault was
   deleted. For an enrollment whose `vault_id` already holds a vault, the
@@ -9761,6 +9794,38 @@ the older code. The API allows only one active recovery per vault.
   enclave. So a copy of the API's tables, or an operator reading them,
   cannot register a device, and neither can an API that releases the
   ciphertext early.
+- **A recovery started by the host** (0.27.4, disclosure; nothing
+  changes). The operation `recovery` carries no envelope and no
+  signature (§11.5), so the host can queue one itself, for any vault,
+  with a browser key of its own, without the member's session and
+  without the member API's email to the member (§11.11.7).
+  - *What it gives:* a running vault is locked (§11.11.1 step 2); the
+    recovery record is written into the sealed header; and the host can
+    open the code once the enclave's 24 h have passed.
+  - *What it does not give:* a device, or anything of the vault. A
+    register still needs an app that passes device attestation
+    (§11.11.3), and the recovery still needs the PIN and the credential
+    password, online, under both backoffs (§11.11.5). With the
+    credential backup off there is no recovery at all (§11.11.1).
+  - *What the member sees:* the owner's devices are sent
+    `vault.locking{reason: "recovery"}` when a running vault locks, and
+    from then on the member's app is refused `recovery_pending` at
+    every unlock (§11.4, §11.11.4) until the recovery ends. The member
+    is told by the vault, not by the host, so a host cannot hide it,
+    and the member's app can cancel it with `cancel_recovery` and the
+    PIN (§11.11.4). The `recovery` entry of `GET /api/vault/status` and
+    the member API's email come from the API and would be missing.
+  - So "an operator reading them cannot register a device" above
+    stands, and a host-started recovery is the same exposure as §13.5's
+    row "Member's email and account session (24 h, unnoticed)", without
+    the email. `recovery_cancel` has no envelope either: the host can
+    end a member's own recovery (availability).
+  - **Open design question** (not a requirement; the owner has not
+    decided): whether a later vault release should require a `recovery`
+    and a `recovery_cancel` to carry a signature of the member API,
+    under a key the release pins, which the enclave verifies. It would
+    take the power to start a recovery from the host process and leave
+    it with the member API, which VettID also runs.
 - **Residual: the portal's code.** A VettID that serves malicious portal
   code to the member's browser can read the code; the browser key protects
   data at rest, not against the page's own author. Such an attacker still
@@ -10698,7 +10763,9 @@ check. A held vault may still be locked by any trigger of §12.3.
   roots for the allowlisted hosts (VAULT-PLAN §5.2), so root changes are rare
   releases. Each instance carries every vault's relay requests over
   shared HTTP/2 connections rather than one connection per vault, so the host
-  cannot attribute traffic to a vault by connection; how many there are
+  cannot attribute traffic to a vault by connection (this is about the
+  relay connections only: the host sees each vault's state writes, §2.2);
+  how many there are
   is the enclave's decision, not the host's or the relay's (§12.2.1).
   Inside the enclave the
   collect loop therefore uses the long-poll (a WebSocket would need a
@@ -10763,8 +10830,10 @@ not shared this way and are unchanged.
 - **Counts.** The supervisor counts, for the whole instance only: the
   connections to the relay (open, opened), the stream limit the relay
   announced, relay requests in flight and waiting, the longest wait for
-  a stream, relay requests that got no answer, and requests that waited
-  at a bound. The parent may ask for them; the answer is a snapshot at
+  a stream, relay requests that got no answer, requests that waited
+  at a bound, and (0.27.4; vettid-vault 8f2c8bf, from staging release
+  S11) how many vault processes reached their own limit of 8, each
+  counted once. The parent may ask for them; the answer is a snapshot at
   most one second old, and asking changes nothing. Nothing in it names
   a vault, a mailbox or an address. The parent publishes them as
   metrics (VAULT-RELEASES §8.7).
@@ -10785,7 +10854,7 @@ not shared this way and are unchanged.
 | Memory pressure (the least recently active vault is evicted) | Same as an owner request. |
 | Enclave release or restart | Same if signalled. Otherwise all vaults lock through loss of memory, and their leases expire; a parent that sees the enclave restart releases the leases it held. |
 | Parent restart (the enclave keeps running) | The enclave locks every vault before it serves the new parent, which holds no leases for them. |
-| Parent unreachable for 120 s | Every vault is locked: its lease can no longer be renewed. |
+| No control connection to the parent for 120 s (0.27.4: was "Parent unreachable for 120 s") | Every vault is locked: its lease can no longer be renewed. **As built** (vettid-vault through 8f2c8bf), the 120 s run from the moment the control connection ends, checked every 10 s. A parent that keeps the connection open but does not answer is **not** counted: vaults then stay unlocked with leases nobody renews until the connection breaks (VAULT-HOST-PROTOCOL §13 point 1); the conditional state write still stops two instances from writing one vault. **From a later vault release** (owner decision of 2026-10-12, H3) a connected but silent parent counts as unreachable: the enclave times the parent's `Ping` (sent every 20 s) and treats 120 s without one as no connection, and writes on the control connection get a deadline. This row then reads "Parent unreachable" again. |
 | Lease lost (renewal failed) | Same as an owner request, without the final flush if the state write fails. |
 | Split-brain guard: a conditional state write finds a newer version | Zeroize **immediately**, without flushing or acking. |
 | Vault deletion | Run the §7.4 revocations, then destroy the state and the header. |
@@ -11002,9 +11071,34 @@ absorbed (§11.6) and rollbacks are bounded (§13.2). It can misreport the
 advisory lifecycle and lease values, but those affect only routing and
 availability.
 
+**It can also originate** (0.27.4, disclosure; the code always allowed
+it). Five alternate-channel operations carry no envelope (§11.5), so
+the enclave cannot tell one the member API queued from one the parent
+made up. The parent can send each of them for any `vault_id`:
+
+| Operation | What the parent gets by originating it |
+|---|---|
+| `lock` | The vault locks. Availability only |
+| `delete` | A running vault deletes itself with the full semantics of §12.5; otherwise its stored objects are erased. The operator power of §13.5 ("delete stored state") |
+| `account` | A running vault takes the snapshot: names and account details of the parent's choosing in what the vault shows its owner and in the core of its shared profile (§11.13 "Display only", §10.8 "Trust") |
+| `recovery` | A recovery, with a browser key of the parent's own: §11.11.2 "A recovery started by the host" |
+| `recovery_cancel` | A member's pending recovery ends. Availability only |
+
+The parent can also send the enclave's own requests `LeaseLost` and
+`Shutdown` at any time (the vaults lock), and withhold or replace the
+manifest document (§11.5 "What the host can do").
+
+**§11.3's "a confirmed vault MUST NOT be replaced" binds the member API
+and apps, not the parent.** The enclave decides it from what the store
+returns, and the store is the parent: a parent that answers "no such
+object" for a vault's objects and for the member's index lets an
+enrollment proceed. That gives the parent nothing beyond deleting the
+vault, which it can do (§13.5): the old state stays sealed, and the
+enrollment still needs a setup code and an attested app.
+
 The protocol between the enclave and the parent, and what the parent
 sees and can do for each request of it, are described as built in
-VAULT-HOST-PROTOCOL (0.1.0, a draft; §11 there).
+VAULT-HOST-PROTOCOL (§11 there).
 
 Inside the enclave, a flaw in one vault's process (a feature handler, a
 parser) reaches only that vault: its secrets live in its own process, and

@@ -1,9 +1,15 @@
 ---
 title: VAULT-PLAN
 status: draft
-version: 0.1.7
+version: 0.1.8
 date: 2026-10-12
 changelog:
+  - 0.1.8: errata (VAULT-HOST-PROTOCOL decision H5, 2026-10-12): §5.2
+    "Connection pooling" no longer says per-vault timing is blurred
+    without saying where: the shared connections hide a vault among the
+    others on the relay connections only; the host sees each vault's
+    state writes (VAULT-MESSAGING 0.27.4 §2.2). `related` brought up
+    to date
   - 0.1.7: editorial, a reference only: §5.2 and `related` point to
     VAULT-HOST-PROTOCOL (0.1.0, a draft for the owner's review), the
     enclave ↔ parent protocol as built
@@ -29,12 +35,12 @@ changelog:
     vault-to-vault transfer as a future item (Later), follow-ups (§8)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.10.0) — the wire and behaviour spec this plan implements
+  - VAULT-MESSAGING.md (0.27.4) — the wire and behaviour spec this plan implements
   - RELAY-PROTOCOL.md (0.4.0), RELAY-PLAN.md
   - PQC-MIGRATION.md (0.3.0)
   - MEMBER-API.md, RUNBOOK.md
-  - VAULT-RELEASES.md (0.1.0) — the V5 plan
-  - VAULT-HOST-PROTOCOL.md (0.1.0, draft) — the enclave ↔ parent protocol as built
+  - VAULT-RELEASES.md (0.1.16) — the V5 plan
+  - VAULT-HOST-PROTOCOL.md (0.1.2) — the enclave ↔ parent protocol as built
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -409,7 +415,9 @@ enclave and payloads are end-to-end encrypted.
 - **Connection pooling.** A TLS connection per vault tells the host which
   vault is talking, even without content. Instead, the enclave keeps
   shared HTTP/2 connections per instance that carry every vault's requests,
-  so per-vault timing is blurred. *As built (0.1.6):* the bound is the
+  so the host cannot tell from a relay connection which vault is
+  talking. (0.1.8: that is all it hides. The host still sees when each
+  vault writes its state, which names the vault; VAULT-MESSAGING §2.2.) *As built (0.1.6):* the bound is the
   enclave's, not the relay's or the host's. Requests fill one connection
   until its streams are in use (128 at the relay's load balancer) before
   another is opened; at most 16 per host; none further when the host
@@ -428,8 +436,8 @@ enclave and payloads are end-to-end encrypted.
 
 *As built (0.1.7):* the forwarder's header, and everything else that
 crosses between the enclave and the parent, is described in
-VAULT-HOST-PROTOCOL (a draft; §8 for the egress, §11 for what the parent
-sees and can do).
+VAULT-HOST-PROTOCOL (§8 for the egress, §11 for what the parent sees and
+can do).
 
 **Decision:** terminate TLS in the enclave, over a small pool of shared
 HTTP/2 connections per instance, with pinned roots for exactly the hosts in
