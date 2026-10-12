@@ -913,6 +913,20 @@ describe('the emails (the owner\'s wording: "request for early access")', () => 
     expect(page).toContain('<h1>Withdraw a request for early access</h1>');
     expect(script).toContain(`“${requests.requestReceivedMail('x').subject}”`);
     for (const text of [page, script]) expect(text).not.toMatch(/membership request/i);
+    // The request form, the pages that link to it and the admin site use the same wording.
+    const site = (...p: string[]) => readFileSync(join(root, 'sites', ...p), 'utf8');
+    const form = site('account', 'request', 'index.html');
+    expect(form).toContain('<title>Request early access · VettID</title>');
+    expect(form).toContain('<h1>Request early access</h1>');
+    expect(form).toContain('<button type="submit" class="btn btn-primary">Request early access</button>');
+    for (const p of [['account', 'index.html'], ['account', 'signin', 'index.html'], ['account', 'guide', 'index.html']]) expect(site(...p)).toContain('href="/request/">Request early access</a>');
+    expect(site('admin', 'js', 'sections', 'requests.js')).toContain("'Requests for early access made without a valid registration code, oldest first.");
+    expect(site('admin', 'js', 'sections', 'invites.js')).toContain("'A valid code on a request for early access skips the approval queue.");
+    for (const p of [['account', 'request', 'index.html'], ['account', 'index.html'], ['account', 'signin', 'index.html'], ['account', 'guide', 'index.html'], ['admin', 'js', 'sections', 'requests.js'], ['admin', 'js', 'sections', 'invites.js']]) {
+      // The privacy notice's anchor keeps its name; comments are not text.
+      const visible = site(...p).replace(/#membership-requests/g, '').split('\n').filter((l) => !l.trimStart().startsWith('//')).join('\n');
+      expect(visible).not.toMatch(/membership requests?|request membership/i);
+    }
     expect(readFileSync(join(root, 'website', 'privacy', 'index.html'), 'utf8')).toContain('Requests for early access (account.vettid.org)');
     // The specification quotes the same subjects.
     const spec = readFileSync(join(root, 'docs', 'MEMBER-API.md'), 'utf8').replace(/\s+/g, ' ');

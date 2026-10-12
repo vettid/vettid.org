@@ -86,6 +86,6 @@ export function render(root, { api, ui }) {
     });
   });
 
-  root.append(ui.sectionHead('Registration codes', 'A valid code on a membership request skips the approval queue. Each code is good for 2 uses by default.'), form, created, list.node);
+  root.append(ui.sectionHead('Registration codes', 'A valid code on a request for early access skips the approval queue. Each code is good for 2 uses by default.'), form, created, list.node);
   list.reload();
 }

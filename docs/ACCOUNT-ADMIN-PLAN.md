@@ -203,7 +203,7 @@ admin laptop/phone ──WireGuard (tailnet)──▶ AWS exit node (EIP) ──
 
 ### 5.1 Membership lifecycle (simplified)
 
-One form — **Request membership** — replaces vettid-dev's separate Register and
+One form — **Request early access** (called "Request membership" until 2026-10) — replaces vettid-dev's separate Register and
 Waitlist tabs. The registration code (formerly "invite code"; good for 2
 uses by default) is an optional field on it.
 
@@ -280,7 +280,7 @@ discovered:
   `Secure`, host-only, `SameSite=Strict` cookie set by the same-origin auth
   route after *server-side* token verification; ID/access tokens in memory only;
   sign-out = clear cookie (HTTP API v2 `cookies` field) + `RevokeToken`.
-- **Pages:** Request membership, Sign in, Account (profile, membership/terms,
+- **Pages:** Request early access, Sign in, Account (profile, membership/terms,
   subscription, PIN, email preferences, cancel). Vault Services tab omitted
   until the relay phase.
 - **Frontend:** plain ES modules, Night Watch tokens, shares
