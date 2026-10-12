@@ -45,7 +45,10 @@
  * never holds the code itself, only that ciphertext; cancel-link tokens are
  * stored as their SHA-256 in request-table rows that expire with the
  * recovery. The new app claims the recovery with its key (2.0.0) and
- * registers with it; a register slot answered with the host's
+ * registers with it (2.4.0: the claim also takes the typed form's
+ * `locator`, minted with the request and kept in a request-table row
+ * `recovery-locator#<locator>` that expires with the recovery; a locator is
+ * never logged or audited); a register slot answered with the host's
  * `recovery_registered` marker turns the recovery `registered` (VAULT-MESSAGING
  * 0.10.6 §11.11.7) and makes that key the recovering key.
  *
@@ -301,8 +304,12 @@ export interface RecoveryRow {
    * `registered`: a register request was answered with the enclave's marker
    * (0.10.6 §11.11.7). `unavailable` (2.1.0): the enclave refused the request
    * (its slot's `recovery_unavailable`, 0.16.0 §11.11.2); an ended state.
+   * `completed` (2.4.1): a registered recovery whose recovering key the host
+   * reported as the vault's app key (§11.11.5 step 3); an ended state.
    */
-  state: 'pending' | 'registered' | 'cancelled' | 'unavailable';
+  state: 'pending' | 'registered' | 'cancelled' | 'unavailable' | 'completed';
+  /** 2.4.1: when the API recorded the completion (epoch s). */
+  completed_at?: number;
   requested_at: number; // epoch s
   available_at: number;
   expires_at: number;
@@ -312,6 +319,13 @@ export interface RecoveryRow {
   claim_keys?: StoredKey[];
   /** 2.0.0: the claim key whose register came back `recovery_registered`. */
   recovering_key?: StoredKey;
+  /**
+   * 2.4.0 (VAULT-MESSAGING 0.25.0 §11.11.10): the typed form's locator, 12
+   * Crockford base32 characters. Absent on a recovery requested before 2.4.0.
+   * Returned only by GET /api/vault/recovery together with a code's
+   * `sealed_code`; never logged, audited or mailed.
+   */
+  locator?: string;
 }
 
 /** API-owned (2.1.0, VAULT-MESSAGING 0.16.0 §11.11.9): "Delete my vault and start over". */
@@ -585,45 +599,39 @@ async function appCaller(req: MemberRequest, roles: KeyRole[]): Promise<Caller &
   if (!match || !key || key.kid !== h.kid || !signatureOk(req, h, key)) throw unauthorized();
   const [pointer, m] = await Promise.all([readPointer(v.user_guid), memberByGuid(v.user_guid)]);
   if (!m || pointer?.current_vault_id !== v.vault_id) throw unauthorized();
-  if (match.role === 'app') await tidyKeys(v);
-  return { via: 'app', m, vault: v, key: match.key, role: match.role };
+  const vault = match.role === 'app' ? await tidyKeys(m, v) : v;
+  return { via: 'app', m, vault, key: match.key, role: match.role };
 }
 
 /**
- * Once the host's `app_key` names the pending key, or a recovery's
- * recovering key, the API's own records of it are cleared (best effort;
- * keysFor() already ignores them). The conditions name only the API's own
- * attributes.
+ * Once the host's `app_key` names the pending key, the API's own record of
+ * it is cleared (best effort; keysFor() already ignores it; the condition
+ * names only the API's own attribute). Once it names a recovery's
+ * recovering key, the recovery is recorded as completed (2.4.1,
+ * completeRecovery()), which clears its keys. Returns the row as it now is.
  */
-async function tidyKeys(v: VaultRow): Promise<void> {
+async function tidyKeys(m: MemberItem, v: VaultRow): Promise<VaultRow> {
   const appKid = isStoredKey(v.app_key) ? v.app_key.kid : null;
-  if (!appKid) return;
-  const updates: UpdateCommand[] = [];
+  if (!appKid) return v;
   if (v.app_key_pending?.kid === appKid) {
-    updates.push(new UpdateCommand({
-      TableName: table.vaults(),
-      Key: { vault_id: v.vault_id },
-      UpdateExpression: 'REMOVE app_key_pending',
-      ConditionExpression: 'app_key_pending.kid = :k',
-      ExpressionAttributeValues: { ':k': appKid },
-    }));
-  }
-  const r = v.recovery;
-  if (r && isStoredKey(r.recovering_key) && r.recovering_key.kid === appKid) {
-    updates.push(new UpdateCommand({
-      TableName: table.vaults(),
-      Key: { vault_id: v.vault_id },
-      UpdateExpression: 'REMOVE recovery.claim_keys, recovery.recovering_key',
-      ConditionExpression: 'recovery.recovery_id = :id',
-      ExpressionAttributeValues: { ':id': r.recovery_id },
-    }));
-  }
-  for (const u of updates) {
     try {
-      await ddb.send(u);
+      await ddb.send(new UpdateCommand({
+        TableName: table.vaults(),
+        Key: { vault_id: v.vault_id },
+        UpdateExpression: 'REMOVE app_key_pending',
+        ConditionExpression: 'app_key_pending.kid = :k',
+        ExpressionAttributeValues: { ':k': appKid },
+      }));
     } catch (e) {
       if ((e as Error).name !== 'ConditionalCheckFailedException') console.error('app key tidy failed', JSON.stringify({ vault_id: v.vault_id, error: (e as Error).name }));
     }
+  }
+  try {
+    return await completeRecovery(m, v);
+  } catch (e) {
+    // Best effort here: the next read of the recovery records it.
+    console.error('recovery completion not recorded', JSON.stringify({ vault_id: v.vault_id, error: (e as Error).name }));
+    return v;
   }
 }
 
@@ -1410,7 +1418,96 @@ export const MAX_CLAIM_KEYS = 10;
 
 const sha256Hex = (s: string) => createHash('sha256').update(s).digest('hex');
 
-type RecoveryState = 'pending' | 'available' | 'registered' | 'cancelled' | 'expired' | 'unavailable';
+// ---- the typed form's locator (2.4.0, VAULT-MESSAGING 0.25.0 §11.11.10) ----------------
+//
+// 60 random bits as 12 Crockford base32 characters, minted with the request.
+// It stands for the pair (vault_id, recovery_id) at the claim and is kept in
+// the clear: it is no more than the two identifiers the table holds anyway.
+// It is not derived from the code, which the API cannot read. Never logged.
+
+const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+export const LOCATOR_LENGTH = 12;
+const LOCATOR_RE = /^[0-9A-HJKMNP-TV-Z]{12}$/;
+const LOCATOR_PREFIX = 'recovery-locator#';
+/** A collision among 60-bit locators is not expected; a few draws bound the loop. */
+const LOCATOR_DRAWS = 5;
+/** Keys no row has: what a miss reads instead, so that every miss does the same work. */
+const NO_VAULT_ID = 'recovery-locator-none';
+const NO_USER_GUID = 'recovery-locator-none';
+
+/** An object so tests can stub the draw (a collision draws again). */
+export const locators = {
+  /** 60 bits from the CSPRNG, most significant 5 bits first. */
+  draw(): string {
+    let n = randomBytes(8).readBigUInt64BE() >> 4n;
+    let out = '';
+    for (let i = 0; i < LOCATOR_LENGTH; i++) {
+      out = CROCKFORD[Number(n & 31n)] + out;
+      n >>= 5n;
+    }
+    return out;
+  },
+};
+
+/** Mint a locator for the recovery and write its row (conditional: unique among the rows held). */
+async function mintLocator(vaultId: string, recoveryId: string, expiresAt: number): Promise<string> {
+  for (let i = 0; i < LOCATOR_DRAWS; i++) {
+    const locator = locators.draw();
+    try {
+      await ddb.send(
+        new PutCommand({
+          TableName: table.vaultRequests(),
+          Item: { request_id: LOCATOR_PREFIX + locator, vault_id: vaultId, op: 'recovery_locator', status: 'locator', recovery_id: recoveryId, created_at: nowIso(), expires_at: expiresAt },
+          ConditionExpression: 'attribute_not_exists(request_id)',
+        }),
+      );
+      return locator;
+    } catch (e) {
+      if ((e as Error).name !== 'ConditionalCheckFailedException') throw e;
+    }
+  }
+  throw new Error('no free recovery locator');
+}
+
+/**
+ * The pair a locator names, or null (a miss). Every call does the same three
+ * consistent reads (the locator's row, a vault row, a pointer row; rows that
+ * cannot exist stand in when there is none), and writes nothing, so timing
+ * does not tell an unknown locator from a stale one. A miss: no such row, a
+ * row past its recovery's expiry, a vault that is gone or deleted, a recovery
+ * that was replaced or cancelled, or a member whose pointer names another
+ * vault.
+ */
+async function locatorPair(locator: string, now: number): Promise<{ vault_id: string; recovery_id: string } | null> {
+  const row = (await ddb.send(new GetCommand({ TableName: table.vaultRequests(), Key: { request_id: LOCATOR_PREFIX + locator }, ConsistentRead: true }))).Item;
+  const named =
+    row && row.op === 'recovery_locator' && typeof row.vault_id === 'string' && VAULT_ID_RE.test(row.vault_id) && typeof row.recovery_id === 'string' && Number(row.expires_at) > now
+      ? { vault_id: row.vault_id, recovery_id: row.recovery_id }
+      : null;
+  const v = await vaultRow(named?.vault_id ?? NO_VAULT_ID);
+  const pointer = await readPointer(v && typeof v.user_guid === 'string' ? v.user_guid : NO_USER_GUID);
+  const r = v?.recovery;
+  const current = !!named && !!v && v.state !== 'deleted' && !!r && r.recovery_id === named.recovery_id && r.locator === locator && r.state !== 'cancelled' && pointer?.current_vault_id === v.vault_id;
+  return current ? named : null;
+}
+
+/**
+ * Misses, aggregated per source network and hour for the audit log (as
+ * failed redeems): the 1st, 10th, 100th, ... miss of each window is recorded
+ * with the count so far. Never the locator tried.
+ */
+async function auditLocatorMiss(req: MemberRequest): Promise<void> {
+  try {
+    const r = await hit(`recovery-locator-miss#${req.ip}`, Number.MAX_SAFE_INTEGER, 3600);
+    if (/^10*$/.test(String(r.count))) {
+      await audit('app', 'vault.recovery_locator_miss', req.ip, { network: req.ip, misses_this_hour: r.count });
+    }
+  } catch (e) {
+    console.error('locator miss not recorded', JSON.stringify({ error: (e as Error).name }));
+  }
+}
+
+type RecoveryState = 'pending' | 'available' | 'registered' | 'cancelled' | 'expired' | 'unavailable' | 'completed';
 
 /** The state the API answers; `available` and `expired` follow from the clock. */
 export function recoveryState(r: RecoveryRow | undefined, now: number): RecoveryState | null {
@@ -1418,13 +1515,18 @@ export function recoveryState(r: RecoveryRow | undefined, now: number): Recovery
   if (r.state === 'cancelled') return 'cancelled';
   // 2.1.0: refused by the enclave (no backup copy, or no credential); ended.
   if (r.state === 'unavailable') return 'unavailable';
+  // 2.4.1: the new app holds the credential and is the vault's app; ended.
+  if (r.state === 'completed') return 'completed';
   // The code is spent; it stays `registered` after expires_at (0.10.6 §11.11.7).
   if (r.state === 'registered') return 'registered';
   if (now >= r.expires_at) return 'expired';
   return now >= r.available_at ? 'available' : 'pending';
 }
 
-/** Pending, available or registered, before expires_at: blocks a new request, can be cancelled. */
+/**
+ * Pending, available or registered, before expires_at: blocks a new request,
+ * can be cancelled. Never a `completed` one (2.4.1), whatever the clock.
+ */
 export const recoveryActive = (r: RecoveryRow | undefined, now: number): boolean => {
   if (!r || now >= r.expires_at) return false;
   const st = recoveryState(r, now);
@@ -1469,6 +1571,57 @@ async function markRegistered(m: MemberItem, v: VaultRow, r: RecoveryRow, slot: 
   return { ...r, state: 'registered', ...(recovering ? { recovering_key: recovering } : {}) };
 }
 
+/**
+ * 2.4.1 (VAULT-MESSAGING §11.11.5 step 3, §11.5): the recovery has completed
+ * in the vault. The only sign the API has, and the one it already trusts to
+ * admit the new app and refuse the old one: the host's `app_key` on the vault
+ * row names the recovery's recovering key. The vault makes the registered
+ * app's key its app key only in the flush of a successful
+ * `credential.recover` (PIN and credential password both proved), and the
+ * host writes `app_key` after that flush is stored. `registered` alone is not
+ * it, and a recovery without a recovering key is never completed here.
+ */
+const recoveryCompleted = (v: VaultRow): boolean => {
+  const r = v.recovery;
+  return !!r && r.state === 'registered' && isStoredKey(r.recovering_key) && isStoredKey(v.app_key) && r.recovering_key.kid === v.app_key.kid;
+};
+
+/**
+ * Record a completed recovery: `registered` -> `completed`, an ended state
+ * that no longer blocks a new request, and its keys cleared. Conditional on
+ * the same recovery, still registered, with the recovering key that was
+ * compared. The condition names only the API's own attributes: the API's
+ * role may not name the host's `app_key` in a write (the table's
+ * attribute-level policy), and a later change of `app_key` (a transfer)
+ * does not undo a completion. A recovery that is not completed, or that
+ * changed meanwhile, is returned as read. Returns the vault row with its
+ * recovery as it now is.
+ */
+async function completeRecovery(m: MemberItem, v: VaultRow): Promise<VaultRow> {
+  if (!recoveryCompleted(v)) return v;
+  const r = v.recovery!;
+  const kid = r.recovering_key!.kid;
+  const completedAt = nowS();
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: table.vaults(),
+        Key: { vault_id: v.vault_id },
+        UpdateExpression: 'SET recovery.#st = :done, recovery.completed_at = :at, updated_at = :now REMOVE recovery.claim_keys, recovery.recovering_key',
+        ConditionExpression: 'recovery.recovery_id = :id AND recovery.#st = :reg AND recovery.recovering_key.kid = :k',
+        ExpressionAttributeNames: { '#st': 'state' },
+        ExpressionAttributeValues: { ':done': 'completed', ':reg': 'registered', ':id': r.recovery_id, ':k': kid, ':at': completedAt, ':now': nowIso() },
+      }),
+    );
+  } catch (e) {
+    if ((e as Error).name === 'ConditionalCheckFailedException') return v; // recorded, cancelled or replaced meanwhile
+    throw e;
+  }
+  await audit(m.email, 'vault.recovery_completed', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id, kid });
+  const { claim_keys: _c, recovering_key: _k, ...rest } = r;
+  return { ...v, recovery: { ...rest, state: 'completed', completed_at: completedAt } };
+}
+
 /** The recovery request's own slot (its request_id is the recovery_id), if it is the member's. */
 async function recoverySlot(m: MemberItem, r: RecoveryRow): Promise<Record<string, unknown> | null> {
   const slot = (await ddb.send(new GetCommand({ TableName: table.vaultRequests(), Key: { request_id: r.recovery_id }, ConsistentRead: true }))).Item;
@@ -1506,13 +1659,16 @@ async function refreshUnavailable(m: MemberItem, v: VaultRow, r: RecoveryRow, no
 }
 
 /**
- * Bring the recovery up to date from its slots: the enclave's refusal
+ * Bring the recovery up to date: its completion (2.4.1, from the vault row
+ * itself), then from its slots: the enclave's refusal
  * (2.1.0, above), then, while the code is available, the slots of its
  * register requests (they live 15 minutes): one answered with the marker
  * means the code is spent. Returns the vault row with its recovery updated.
  */
-async function refreshRecovery(m: MemberItem, v: VaultRow): Promise<VaultRow> {
-  if (!v.recovery) return v;
+async function refreshRecovery(m: MemberItem, found: VaultRow): Promise<VaultRow> {
+  if (!found.recovery) return found;
+  const v = await completeRecovery(m, found);
+  if (v !== found || !v.recovery) return v;
   const refused = await refreshUnavailable(m, v, v.recovery, nowS());
   if (refused !== v.recovery) return { ...v, recovery: refused };
   const r = v.recovery;
@@ -1587,8 +1743,10 @@ ${cancelUrl}
 You can also cancel it from any of your VettID apps or from your account page.`;
 
 /** Cancel: mark it, tell the enclave, tell the member. False: nothing to cancel (a no-op). */
-async function cancelRecovery(m: MemberItem, v: VaultRow, via: 'session' | 'link'): Promise<boolean> {
+async function cancelRecovery(m: MemberItem, found: VaultRow, via: 'session' | 'link'): Promise<boolean> {
   const now = nowS();
+  // 2.4.1: a completed recovery has ended; there is nothing to cancel.
+  const v = await completeRecovery(m, found);
   const r = v.recovery;
   if (!r || !recoveryActive(r, now)) return false;
   await setRecovery(v, { ...r, state: 'cancelled' }, r.recovery_id);
@@ -1614,7 +1772,8 @@ router.on('POST', '/api/vault/recovery', async (req) => {
   if (!key || key.length !== 65 || key[0] !== 0x04) throw badRequest('browser_key must be base64 of an uncompressed P-256 point');
   await limit(`vault-recovery#${m.user_guid}`, 3, 86_400);
   const now = nowS();
-  const v = await recoverableVault(m.user_guid);
+  // 2.4.1: a completed recovery is recorded first, so it does not block this one.
+  const v = await completeRecovery(m, await recoverableVault(m.user_guid));
   if (recoveryActive(v.recovery, now)) throw vaultError(409, 'recovery_active', 'A recovery is already in progress');
   if (deletionOf(v)) throw deletionPending();
   // 2.1.0 (VAULT-MESSAGING 0.16.0 §11.11.7): no recovery with the credential
@@ -1625,7 +1784,12 @@ router.on('POST', '/api/vault/recovery', async (req) => {
   }
   const inst = await recoveryInstance(v, now, isCanaryMember(m));
   const recoveryId = newUlid();
-  const r: RecoveryRow = { recovery_id: recoveryId, state: 'pending', requested_at: now, available_at: now + RECOVERY_DELAY_S, expires_at: now + RECOVERY_DELAY_S + RECOVERY_VALIDITY_S };
+  const expiresAt = now + RECOVERY_DELAY_S + RECOVERY_VALIDITY_S;
+  // 2.4.0: the typed form's locator, minted with the request. Its row is
+  // written first, so the recovery never names a locator without a row; a
+  // row whose request then fails names no current recovery (a miss) and expires.
+  const locator = await mintLocator(v.vault_id, recoveryId, expiresAt);
+  const r: RecoveryRow = { recovery_id: recoveryId, state: 'pending', requested_at: now, available_at: now + RECOVERY_DELAY_S, expires_at: expiresAt, locator };
   await setRecovery(v, r, v.recovery?.recovery_id ?? null, true);
   // The slot keeps the sealed code until the recovery expires.
   await enqueue('recovery', m, v, recoveryId, inst, undefined, { extra: { browser_key: bk as string }, ttlS: r.expires_at - now + 3600 });
@@ -1654,12 +1818,16 @@ router.on('GET', '/api/vault/recovery', async (req) => {
   const out: Record<string, unknown> = {
     recovery_id: r.recovery_id, vault_id: v.vault_id, state, requested_at: iso(r.requested_at), available_at: iso(r.available_at), expires_at: iso(r.expires_at),
   };
+  // 2.4.1: when the API recorded that the new app took the vault over.
+  if (state === 'completed' && typeof r.completed_at === 'number') out.completed_at = iso(r.completed_at);
   // The code from available_at; a refusal (2.1.0, `unavailable`) at once.
   if (state === 'available' || state === 'unavailable') {
     const slot = await recoverySlot(m, r);
     const env = slot && slot.status === 'done' && typeof slot.envelope === 'string' ? decodeCanonicalB64(slot.envelope) : null;
     if (env && env.length === RESULT_ENVELOPE_BYTES) {
       out.sealed_code = slot!.envelope;
+      // 2.4.0: the locator only together with a code's sealed_code, never with a refusal's.
+      if (state === 'available' && typeof r.locator === 'string' && LOCATOR_RE.test(r.locator)) out.locator = r.locator;
       if (state === 'available' && !slot!.released) {
         await ddb.send(
           new UpdateCommand({
@@ -1700,17 +1868,44 @@ router.on('POST', '/api/vault/recovery/cancel-link', async (req) => {
 });
 
 // The new app (2.0.0): no session and no key at the API yet; it presents the
-// QR's vault_id and recovery_id with its own app key (§11.11.7).
+// QR's vault_id and recovery_id with its own app key (§11.11.7), or (2.4.0,
+// §11.11.10) the typed form's locator, which stands for that pair.
 router.on('POST', '/api/vault/recovery/claim', async (req) => {
-  // Signed by the key it registers, with `vault=` the QR's vault.
-  const { h, key } = await newKeyCaller(req, (x) => x.vault !== '');
+  const typed = 'locator' in req.body;
+  // Signed by the key it registers, with `vault=` the QR's vault; empty with a locator.
+  const { h, key } = await newKeyCaller(req, (x) => (typed ? x.vault === '' : x.vault !== ''));
   // Paused: refused before the body is read and before any lookup.
   await requireService();
+  if (typed) return claimByLocator(req, key);
   const vaultId = field(req.body, 'vault_id', VAULT_ID_RE, '32 lowercase hex');
   const recoveryId = field(req.body, 'recovery_id', ULID_RE, 'a ULID');
   if (vaultId !== h.vault) throw badRequest('vault_id must be the vault the request is signed for');
   await limit(`vault-recovery-claim#${vaultId}`, 10, 86_400);
   await limit(`vault-recovery-claim-net#${req.ip}`, 10, 15 * 60);
+  return claimRecovery(key, vaultId, recoveryId, 'qr');
+});
+
+/**
+ * The typed form (2.4.0): the body's syntax, the per-network limit (the
+ * scanned form's bucket; hits and misses alike), the lookup, and on a hit
+ * the scanned form's per-vault limit and code. A miss is the unknown pair's
+ * 404, writes nothing to any recovery and is charged to none.
+ */
+async function claimByLocator(req: MemberRequest, key: AppKey) {
+  if ('vault_id' in req.body || 'recovery_id' in req.body) throw badRequest('Send exactly one of {vault_id, recovery_id, app_key} or {locator, app_key}');
+  const locator = field(req.body, 'locator', LOCATOR_RE, '12 characters of 0-9A-HJKMNP-TV-Z');
+  await limit(`vault-recovery-claim-net#${req.ip}`, 10, 15 * 60);
+  const pair = await locatorPair(locator, nowS());
+  if (!pair) {
+    await auditLocatorMiss(req);
+    throw notFound('No such recovery');
+  }
+  await limit(`vault-recovery-claim#${pair.vault_id}`, 10, 86_400);
+  return claimRecovery(key, pair.vault_id, pair.recovery_id, 'typed');
+}
+
+/** The claim of the pair (`vault_id`, `recovery_id`), however the app read it. */
+async function claimRecovery(key: AppKey, vaultId: string, recoveryId: string, via: 'qr' | 'typed') {
   const now = nowS();
   const v = await vaultRow(vaultId);
   const r = v?.recovery;
@@ -1736,9 +1931,10 @@ router.on('POST', '/api/vault/recovery/claim', async (req) => {
     if ((e as Error).name === 'ConditionalCheckFailedException') throw vaultError(409, 'conflict', 'The recovery changed; try again');
     throw e;
   }
-  await audit(m.email, 'vault.recovery_claim', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id, kid: key.kid });
-  return { user_guid: m.user_guid, email_hint: emailHint(m.email) };
-});
+  await audit(m.email, 'vault.recovery_claim', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id, kid: key.kid, via });
+  // 2.4.0: the two identifiers, which the typed app has from nowhere else.
+  return { user_guid: m.user_guid, email_hint: emailHint(m.email), vault_id: v.vault_id, recovery_id: r.recovery_id };
+}
 
 /** Remember a register request on its recovery (best effort: the app's poll finds the slot anyway). */
 async function recordRegisterId(v: VaultRow, recoveryId: string, requestId: string): Promise<void> {
@@ -1862,7 +2058,7 @@ router.on('POST', '/api/vault/deletion', async (req) => {
   await limit(`vault-deletion#${m.user_guid}`, 3, 86_400);
   const now = nowS();
   // A confirmed vault: not none, `enrolling` or deleted (404).
-  const v = await recoverableVault(m.user_guid);
+  const v = await completeRecovery(m, await recoverableVault(m.user_guid));
   if (recoveryActive(v.recovery, now)) throw vaultError(409, 'recovery_active', 'A recovery is in progress; cancel it first');
   if (deletionOf(v)) throw deletionPending();
   const d: DeletionRow = { deletion_id: newUlid(), state: 'pending', requested_at: now, deletes_at: now + DELETION_DELAY_S };

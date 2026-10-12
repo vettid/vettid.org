@@ -26,7 +26,7 @@
 import { get, post } from './api.js';
 import { $, chip, el, fill } from './dom.js';
 import * as keys from './recovery-keys.js';
-import { SealError, codeGroups, fromBase64, openSealedCode, qrPayload, toBase64 } from './recovery-code.js';
+import { LOCATOR_RE, SealError, fromBase64, openSealedCode, qrPayload, toBase64, typedForm, typedRows } from './recovery-code.js';
 import { qrModules, qrSvg } from './qr.js';
 import * as ui from './ui.js';
 import { dateTime, timeUntil } from './vault-text.js';
@@ -172,6 +172,7 @@ async function poll() {
   await load();
   if (before === 'pending' && recovery?.state === 'available') ui.showNotice('Your recovery code is ready.', 'info');
   else if (before === 'available' && recovery?.state === 'registered') ui.showNotice('Your recovery code was used on your new phone.', 'info');
+  else if (before === 'registered' && recovery?.state === 'completed') ui.showNotice('Your vault was recovered on your new phone.', 'info');
   else if (before && isActive({ state: before }) && !isActive(recovery)) ui.showNotice('The recovery is no longer in progress.', 'info');
 }
 
@@ -301,6 +302,8 @@ function renderRequest() {
 function endedText(state) {
   if (state === 'cancelled') return 'was cancelled';
   if (state === 'unavailable') return 'was refused by your vault';
+  // 2.4.1: the new phone finished it (PIN and credential password) and is the vault's app.
+  if (state === 'completed') return 'was completed on your new phone';
   if (state === 'registered') return 'was used on a new phone';
   return 'expired';
 }
@@ -455,17 +458,18 @@ function renderAvailable() {
 
   const show = el('button', { type: 'button', class: 'btn btn-primary', id: 'show-code', 'aria-controls': 'code-box', 'aria-expanded': 'false' }, 'Show the code');
   show.addEventListener('click', () => showCode(show));
+  const typable = hasLocator();
 
   fill(root,
     el('section', { class: 'card', 'aria-labelledby': 'h-rec' }, head,
       el('p', {}, chip('Ready', 'ok'), ' ', 'Scan this code with the VettID app on your new phone. It works once, until ', when(recovery.expires_at), '.'),
       el('ol', { class: 'howto' },
         el('li', {}, 'On your new phone, install VettID and choose to recover a vault. The app never signs in: the code below is all it needs from this site.'),
-        el('li', {}, 'Scan the code below (or type it). The app shows the account it belongs to (the first letter of your email and its domain): check that it is yours.'),
+        el('li', {}, typable ? 'Scan the code below, or choose "Type the code instead" in the app and type the characters shown under it. ' : 'Scan the code below. ', 'The app shows the account it belongs to (the first letter of your email and its domain): check that it is yours.'),
         el('li', {}, 'Enter your vault PIN, then your credential password. Your old app is removed.'),
       ),
       callout('warn', 'Keep this code to yourself',
-        "With this code, your vault PIN and your credential password, someone could take over your vault. Don't share it, photograph it or take a screenshot. Show it only while you scan it."),
+        "With this code, your vault PIN and your credential password, someone could take over your vault. Don't share it, photograph it or take a screenshot. Show it only while you scan or type it."),
       el('div', { class: 'actions' }, show),
       el('div', { id: 'code-box', class: 'code-box', hidden: true }),
       neverAsk(),
@@ -491,17 +495,50 @@ async function showCode(btn) {
     return;
   }
   if (!r.code) return;
+  // The typed form (2.4.0): the API's locator, the code and 4 check characters
+  // bound to this origin, computed here and never sent. A recovery requested
+  // before the API minted locators has none: the QR only.
+  let typed = null;
+  if (hasLocator()) {
+    try {
+      typed = await typedForm(location.origin, recovery.locator, r.code);
+    } catch {
+      ui.showError("The code couldn't be opened. Reload the page and try again.");
+      return;
+    }
+  }
   const box = $('code-box');
-  const groups = codeGroups(r.code);
   fill(box,
     qrSvg(qrModules(qrPayload(location.origin, recoveryVaultId(), recovery.recovery_id, r.code)), 'Recovery QR code for the VettID app'),
-    el('p', { class: 'code-label', id: 'code-label' }, 'Or type this code:'),
-    el('p', { class: 'code-text', 'aria-labelledby': 'code-label' }, groups.flatMap((g, i) => [i ? ' ' : null, el('span', {}, g)])),
+    typed ? typedCode(typed) : el('p', { class: 'code-label', id: 'typed-none' }, 'To type the code instead, cancel this recovery and start a new one.'),
   );
   box.hidden = false;
   codeShown = true;
   btn.textContent = 'Hide the code';
   btn.setAttribute('aria-expanded', 'true');
+}
+
+/** The API gave a locator with the sealed code (MEMBER-API 2.4.0); without one the code cannot be typed. */
+const hasLocator = () => typeof recovery?.locator === 'string' && LOCATOR_RE.test(recovery.locator);
+
+/**
+ * The typed form under the QR (§11.11.10): twelve groups of four in three
+ * rows, each group its own element and each row its own line. The visible
+ * characters are hidden from screen readers, which get each group spelled
+ * out with its position instead. Selectable text; no copy button.
+ */
+function typedCode(typed) {
+  return el('div', { class: 'typed', role: 'group', 'aria-labelledby': 'typed-label' },
+    el('p', { class: 'code-label', id: 'typed-label' }, "Can't scan? Type this code in the app:"),
+    el('div', { class: 'typed-code', id: 'typed-code' }, typedRows(typed).map((row) =>
+      el('div', { class: 'typed-row' }, row.flatMap((g, i) => [
+        i ? ' ' : null,
+        el('span', { class: 'typed-group' },
+          el('span', { 'aria-hidden': 'true' }, g.text),
+          el('span', { class: 'visually-hidden typed-spoken' }, `${g.spoken}.`)),
+      ])))),
+    el('p', { class: 'code-label' }, 'The code has no I, L, O or U.'),
+  );
 }
 
 /** Remove the code from the page and drop every reference to it. */

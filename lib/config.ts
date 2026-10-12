@@ -35,6 +35,14 @@ export interface AppConfig {
    * is skipped (its data stack is not). Context: relayImage.
    */
   readonly relay: { readonly image: string };
+  /**
+   * The push gateways of the main account (PUSH-GATEWAY §10): one per
+   * channel listed in context `pushStages`, in the prod app only (the
+   * staging gateway is a second service next to production's, §10.4).
+   * Empty: no push stack exists and the relay stack publishes nothing for
+   * one.
+   */
+  readonly push: { readonly gateways: readonly PushGatewayConfig[] };
   readonly adminAccess: {
     /**
      * Headscale control server the AWS exit node joins (tailscale
@@ -111,6 +119,15 @@ export interface VaultConfig {
   readonly manifestKeys: readonly string[];
   /** The relay host on the enclave host's egress allowlist (pinned in the release as relay_url). */
   readonly relayHost: string;
+  /**
+   * The push gateway host on the enclave host's egress allowlist
+   * (PUSH-GATEWAY §10.1, §10.4; VAULT-MESSAGING §11.10.8, §14.3). The
+   * channel's release constants pin the gateway URL `https://<pushHost>`
+   * (vettid-vault `enclave/releasecfg/<channel>.json`): production
+   * `push.vettid.org`, staging `push.staging.vettid.org`. Channels never
+   * cross: each host allows only its own channel's gateway.
+   */
+  readonly pushHost: string;
 }
 
 /**
@@ -134,6 +151,7 @@ const STAGE_ACCOUNTS: Record<string, { main?: string; vault?: Omit<VaultConfig, 
         'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEIcIodW3liYaxACuOdB0If8igq/oWfVOcLGbWTy1vUNzTlvsVNe3ljfqpqfTCZwtR611EYk7UPTCfjaEEMPLxfQ==',
       ],
       relayHost: 'relay.vettid.org',
+      pushHost: 'push.vettid.org',
     },
   },
   staging: {
@@ -151,9 +169,125 @@ const STAGE_ACCOUNTS: Record<string, { main?: string; vault?: Omit<VaultConfig, 
       ],
       // Staging images pin the production relay at first (VAULT-RELEASES §11.1).
       relayHost: 'relay.vettid.org',
+      // The staging gateway (PUSH-GATEWAY §10.4), unlike the relay.
+      pushHost: 'push.staging.vettid.org',
     },
   },
 };
+
+export type PushChannel = 'prod' | 'staging';
+export type PushPlatform = 'fcm' | 'apns';
+
+/** One push gateway (github.com/vettid/vettid-push; PUSH-GATEWAY §10.1, §10.4). */
+export interface PushGatewayConfig {
+  /** `PUSH_CHANNEL`: selects the pinned manifest, the APNs environments and the secret names. */
+  readonly channel: PushChannel;
+  /** The channel's `pushHost`, the same name its vault hosts may reach (lib/vault/egress.ts). */
+  readonly host: string;
+  /**
+   * Gateway image, pinned by digest. Context `pushImage` (prod),
+   * `stagingPushImage` (staging). Empty: the channel has its secrets, log
+   * group and (staging) zone, but no service yet.
+   */
+  readonly image: string;
+  /**
+   * `PUSH_PLATFORMS`: the platforms with credentials. Context
+   * `pushPlatforms` / `stagingPushPlatforms`, a comma-separated list of
+   * `fcm` and `apns`. Default **none**: a gateway starts before any
+   * credential exists and answers `platform_invalid` (§5.1 step 3). A
+   * listed platform must have its secret filled, or the tasks do not start.
+   */
+  readonly platforms: readonly PushPlatform[];
+  /** `PUSH_FCM_APP_IDS`: Android application ids accepted for `fcm` (§10.4). */
+  readonly fcmAppIds: readonly string[];
+  /** `PUSH_APNS_APP_IDS`: iOS bundle ids (the `apns-topic`) accepted for `apns` (§10.4). */
+  readonly apnsAppIds: readonly string[];
+  /**
+   * `PUSH_FCM_PROJECT` (§10.2): context `pushFcmProject` /
+   * `stagingPushFcmProject`. Empty: the gateway takes `project_id` from
+   * the `fcm` secret (a service-account key has it; a federation
+   * configuration needs it added, or this set).
+   */
+  readonly fcmProject: string;
+}
+
+/**
+ * What each channel's gateway accepts (PUSH-GATEWAY §10.4). An Android
+ * registration's `app_id` is the app's application id, which is the
+ * channel's `android_package` (VAULT-MESSAGING 0.26.0 §11.10.8, "Android
+ * package"; ANDROID-PLAN 0.1.35 §5): `com.vettid.app` in production,
+ * `com.vettid.app.staging` in staging from staging release S10 on (until
+ * then the staging build had production's id). The staging iOS app has its
+ * own bundle id too. An iOS registration's `app_id` is the app's bundle id
+ * (the `apns-topic`), never the notification service extension's.
+ */
+const PUSH_APP_IDS: Record<PushChannel, { fcm: string[]; apns: string[] }> = {
+  prod: { fcm: ['com.vettid.app'], apns: ['com.vettid.app'] },
+  staging: { fcm: ['com.vettid.app.staging'], apns: ['com.vettid.app.staging'] },
+};
+
+const PUSH_CHANNELS: readonly PushChannel[] = ['prod', 'staging'];
+
+/** Context key of a channel's gateway setting: `pushImage` (prod), `stagingPushImage` (staging). */
+export function pushContextKey(channel: PushChannel, setting: 'Image' | 'Platforms' | 'FcmProject'): string {
+  return channel === 'prod' ? `push${setting}` : `${channel}Push${setting}`;
+}
+
+const csv = (raw: unknown): string[] =>
+  (Array.isArray(raw) ? raw : String(raw ?? '').split(',')).map((v) => String(v).trim()).filter(Boolean);
+
+/**
+ * The push gateways from context (prod app only; see {@link AppConfig.push}):
+ *
+ *   -c pushStages=staging -c stagingPushImage=ghcr.io/vettid/vettid-push@sha256:…
+ *
+ * `pushStages` lists the channels whose gateway exists (`staging`, `prod`);
+ * a channel's image, platforms and Firebase project are refused unless the
+ * channel is listed, so a typo never silently deploys nothing.
+ */
+function loadPush(node: Node, stage: string): PushGatewayConfig[] {
+  if (stage !== PROD_STAGE) return [];
+  const listed = csv(node.tryGetContext('pushStages'));
+  for (const c of listed) {
+    if (!PUSH_CHANNELS.includes(c as PushChannel)) throw new Error(`context pushStages: expected "staging", "prod" or both, got ${JSON.stringify(c)}`);
+  }
+  const gateways: PushGatewayConfig[] = [];
+  for (const channel of PUSH_CHANNELS) {
+    const key = (s: 'Image' | 'Platforms' | 'FcmProject') => pushContextKey(channel, s);
+    const image = String(node.tryGetContext(key('Image')) ?? '');
+    const platforms = [...new Set(csv(node.tryGetContext(key('Platforms'))))];
+    const fcmProject = String(node.tryGetContext(key('FcmProject')) ?? '');
+    if (!listed.includes(channel)) {
+      for (const [k, v] of [[key('Image'), image], [key('Platforms'), platforms.join(',')], [key('FcmProject'), fcmProject]]) {
+        if (v) throw new Error(`context ${k} is set but pushStages does not list "${channel}"`);
+      }
+      continue;
+    }
+    // A tag can be moved; only a digest names one image (as relayImage).
+    if (image && !/^[a-z0-9][a-z0-9._\/-]*@sha256:[0-9a-f]{64}$/.test(image)) {
+      throw new Error(`context ${key('Image')}: expected an image pinned by digest (…@sha256:<64 hex>), got ${JSON.stringify(image)}`);
+    }
+    for (const p of platforms) {
+      if (p !== 'fcm' && p !== 'apns') throw new Error(`context ${key('Platforms')}: expected a list of "fcm" and "apns", got ${JSON.stringify(p)}`);
+    }
+    // Firebase project ids: 6–30 lowercase letters, digits and hyphens.
+    if (fcmProject && !/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(fcmProject)) {
+      throw new Error(`context ${key('FcmProject')}: expected a Firebase project id, got ${JSON.stringify(fcmProject)}`);
+    }
+    const host = STAGE_ACCOUNTS[channel]?.vault?.pushHost;
+    if (!host) throw new Error(`no push host for channel ${channel}`);
+    gateways.push({
+      channel,
+      host,
+      image,
+      platforms: platforms as PushPlatform[],
+      fcmAppIds: PUSH_APP_IDS[channel].fcm,
+      apnsAppIds: PUSH_APP_IDS[channel].apns,
+      fcmProject,
+    });
+  }
+  return gateways;
+}
 
 /**
  * A channel's vault configuration and stage, for tools outside the CDK app
@@ -166,30 +300,66 @@ export function channelVault(channel: 'prod' | 'staging'): { stage: string; vaul
   return { stage: channel, vault: { ...v, vaultsStreamArn: '' } };
 }
 
-/**
- * The Android app's sign-in App Link (MEMBER-API "Auth"): account.vettid.org
- * publishes /.well-known/assetlinks.json so that
- * https://account.vettid.org/auth/... opens in the app. Each entry is the
- * SHA-256 of a certificate the app is signed with: the upload key (builds
- * signed by the owner) now; the Play app-signing key is added once the Play
- * Console shows it (VAULT-RELEASES O8). The same digests are pinned in
- * vettid-vault enclave/releasecfg/prod.json `android_signers`.
- */
-export const ANDROID_APP_LINKS = {
-  packageName: 'com.vettid.app',
-  sha256CertFingerprints: [
-    '31:A1:96:13:AA:10:F2:09:E0:89:45:F9:47:F9:4F:7C:E3:E6:E5:AC:34:24:57:FF:99:69:A6:79:86:92:8E:65', // upload key (2026-10-04)
-  ],
-} as const;
+/** One stage's Android app, as its account site's Digital Asset Links statement names it. */
+export interface AndroidAppLinks {
+  /** The app's application id: the channel's `android_package` (VAULT-MESSAGING §11.10.8). */
+  readonly packageName: string;
+  /** SHA-256 of each certificate the app may be signed with: uppercase hex, colon-separated. */
+  readonly sha256CertFingerprints: readonly string[];
+}
 
-/** The Digital Asset Links statement for {@link ANDROID_APP_LINKS}. */
-export function androidAssetLinks(): unknown[] {
+/**
+ * The Android app's same-device setup link (VAULT-MESSAGING §11.12.1): each
+ * stage's account site publishes /.well-known/assetlinks.json so that
+ * https://account.<zone>/vault/enroll/... opens in that stage's app as a
+ * verified App Link. One statement per stage, never both: the app of one
+ * channel is not named on the other's site (VAULT-MESSAGING 0.26.0
+ * §11.10.8, "Android package"; STAGING-DEVELOPMENT-PLAN D5).
+ *
+ * - `prod` (account.vettid.org): `com.vettid.app`, signed with the upload
+ *   key (builds signed by the owner) now; the Play app-signing key is added
+ *   once the Play Console shows it (VAULT-RELEASES O8).
+ * - `staging` (account.staging.vettid.org, the only host the staging
+ *   build's manifest adds, vettid-android app/src/staging/AndroidManifest.xml):
+ *   `com.vettid.app.staging`, the staging build's id from the build that
+ *   goes with staging release S10 (ANDROID-PLAN 0.1.35 §5), signed with the
+ *   owner's staging signing key or the automation key.
+ *
+ * The package and the digests are the channel's `android_package` and
+ * `android_signers` in vettid-vault enclave/releasecfg/<channel>.json (there
+ * in lowercase hex without colons); a change there is a change here. A
+ * stage with no entry publishes no statement.
+ */
+export const ANDROID_APP_LINKS: Readonly<Record<string, AndroidAppLinks>> = {
+  prod: {
+    packageName: 'com.vettid.app',
+    sha256CertFingerprints: [
+      '31:A1:96:13:AA:10:F2:09:E0:89:45:F9:47:F9:4F:7C:E3:E6:E5:AC:34:24:57:FF:99:69:A6:79:86:92:8E:65', // upload key (2026-10-04)
+    ],
+  },
+  staging: {
+    packageName: 'com.vettid.app.staging',
+    // The two staging `android_signers`, in the vault's order.
+    sha256CertFingerprints: [
+      'BD:83:A0:75:3F:AA:6A:F6:F8:D8:1B:9F:76:A0:4A:C1:A4:99:EA:6C:7F:46:C6:F1:11:3D:4B:57:87:EC:B2:C4',
+      '2F:ED:27:B7:27:46:79:7A:93:1F:D4:14:FF:3D:AC:4C:D9:69:FA:0C:2F:F3:62:09:AE:05:36:5F:58:00:14:F2',
+    ],
+  },
+};
+
+/**
+ * The Digital Asset Links statement list of a stage's account site
+ * ({@link ANDROID_APP_LINKS}); null for a stage that has no app.
+ */
+export function androidAssetLinks(stage: string): unknown[] | null {
+  const links = Object.prototype.hasOwnProperty.call(ANDROID_APP_LINKS, stage) ? ANDROID_APP_LINKS[stage] : undefined;
+  if (!links) return null;
   return [{
     relation: ['delegate_permission/common.handle_all_urls'],
     target: {
       namespace: 'android_app',
-      package_name: ANDROID_APP_LINKS.packageName,
-      sha256_cert_fingerprints: [...ANDROID_APP_LINKS.sha256CertFingerprints],
+      package_name: links.packageName,
+      sha256_cert_fingerprints: [...links.sha256CertFingerprints],
     },
   }];
 }
@@ -276,6 +446,13 @@ export function vaultRoleArn(vault: VaultConfig, role: keyof typeof VAULT_ROLE_N
 
 const PROD_STAGE = 'prod';
 
+/**
+ * The stage's public vault release log (RELEASE-UPDATES §5, VAULT-RELEASES
+ * §7): on the site that serves the stage's manifest, https://<zoneName>.
+ * The notice job's RELEASE_LOG_URL and the account site's release_log_url.
+ */
+export const releaseLogBaseUrl = (config: Pick<AppConfig, 'zoneName'>) => `https://${config.zoneName}/security/releases/`;
+
 export function loadConfig(node: Node): AppConfig {
   const stage = String(node.tryGetContext('stage') ?? PROD_STAGE);
   if (!/^[a-z][a-z0-9]{0,11}$/.test(stage)) {
@@ -305,6 +482,7 @@ export function loadConfig(node: Node): AppConfig {
     relay: {
       image: String(node.tryGetContext('relayImage') ?? ''),
     },
+    push: { gateways: loadPush(node, stage) },
     adminAccess: {
       headscaleLoginServer: String(node.tryGetContext('headscaleLoginServer') ?? ''),
     },
@@ -341,14 +519,30 @@ export function hostName(config: AppConfig, sub: string): string {
  * a comma-separated string or an array. Empty: no delegation stack.
  */
 export function stageZoneNs(node: Node, stage: string): string[] {
-  const raw = node.tryGetContext(`${stage}ZoneNs`);
+  return nameServersFromContext(node, `${stage}ZoneNs`, `${stage}.vettid.org`);
+}
+
+/**
+ * The delegation of `push.<stage>.vettid.org` from the stage's zone to the
+ * push gateway's zone in the main account (VettidOrgStagePushDelegationStack,
+ * deployed in the stage's account; PUSH-GATEWAY §10.4): the four name
+ * servers of that zone (VettidOrgPushDataStack's output
+ * StagingZoneNameServers). Context `<stage>PushZoneNs`, as `<stage>ZoneNs`.
+ * Empty: no delegation stack.
+ */
+export function stagePushZoneNs(node: Node, stage: string): string[] {
+  return nameServersFromContext(node, `${stage}PushZoneNs`, `push.${stage}.vettid.org`);
+}
+
+function nameServersFromContext(node: Node, key: string, zone: string): string[] {
+  const raw = node.tryGetContext(key);
   if (raw === undefined || raw === null || raw === '') return [];
   const ns = (Array.isArray(raw) ? raw : String(raw).split(','))
     .map((v) => String(v).trim().replace(/\.$/, '').toLowerCase())
     .filter(Boolean);
   const awsNs = /^ns-\d{1,4}\.awsdns-\d{1,2}\.(com|net|org|co\.uk)$/;
   if (ns.length !== 4 || !ns.every((n) => awsNs.test(n)) || new Set(ns).size !== 4) {
-    throw new Error(`context ${stage}ZoneNs: expected the four Route 53 name servers of ${stage}.vettid.org, got ${JSON.stringify(raw)}`);
+    throw new Error(`context ${key}: expected the four Route 53 name servers of ${zone}, got ${JSON.stringify(raw)}`);
   }
   return ns;
 }

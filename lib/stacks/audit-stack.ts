@@ -6,6 +6,7 @@ import * as cwActions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as guardduty from 'aws-cdk-lib/aws-guardduty';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
@@ -109,6 +110,23 @@ export class VettidOrgAuditStack extends cdk.Stack {
       displayName: 'VettID security alerts',
     });
     topic.addSubscription(new subs.EmailSubscription(config.adminEmail));
+    // CloudWatch alarms publish as the CloudWatch service, which an SNS
+    // topic admits only when its policy names it: the statements CDK adds
+    // for the EventBridge rule targets below cover events.amazonaws.com
+    // alone, and every alarm on this topic (the heartbeats here, the
+    // member API's vault-service alarms) then fails with "not authorized
+    // to perform: SNS:Publish" (seen 2026-10-06). Only this account's
+    // alarms, never another's.
+    topic.addToResourcePolicy(new iam.PolicyStatement({
+      sid: 'AlarmsOfThisAccount',
+      principals: [new iam.ServicePrincipal('cloudwatch.amazonaws.com')],
+      actions: ['sns:Publish'],
+      resources: [topic.topicArn],
+      conditions: {
+        StringEquals: { 'aws:SourceAccount': this.account },
+        ArnLike: { 'aws:SourceArn': `arn:${this.partition}:cloudwatch:${this.region}:${this.account}:alarm:*` },
+      },
+    }));
 
     // Admit the members' forwarding rules to the default bus: each member
     // account's one forwarder role, and only from inside the organization.

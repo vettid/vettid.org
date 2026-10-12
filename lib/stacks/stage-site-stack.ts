@@ -24,10 +24,14 @@ export interface VettidOrgStageSiteStackProps extends cdk.StackProps {
  * vault:manifest -- publish --channel staging`). Until the channel's first
  * publication there is no file and the URL answers 404, which the manifest
  * sync reads as "nothing published yet". Redeploy this stack after each
- * staging publication (RUNBOOK "Staging").
+ * staging publication (RUNBOOK "Staging"): it serves the manifest and the
+ * release log together.
  *
- * No release log: the log is production's (RELEASE-UPDATES §5; staging
- * entries carry no `log`). No WAF: static files only.
+ * The staging release log (RELEASE-UPDATES §5, VAULT-RELEASES §7) is part
+ * of sites/staging: scripts/vault/release-log.ts generates it into
+ * sites/staging/security/releases/ (pages, log.css, index.json, which the
+ * staging app reads for What's new), and the publish step commits it with
+ * the manifest. No WAF: static files only.
  */
 export class VettidOrgStageSiteStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: VettidOrgStageSiteStackProps) {

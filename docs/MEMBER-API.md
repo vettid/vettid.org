@@ -1,8 +1,65 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.3.1
+version: 2.4.2
 changelog:
+  - 2.4.2 (2026-10-11; editorial, as built: errata from the
+    implementations of 2.4.0 and 2.4.1 and of the notice mail,
+    vettid.org #215, #222, #224; approved by the owner 2026-10-11).
+    No
+    route, body or status code changes. **Claim by locator** ("Vault
+    recovery"): which recoveries a locator misses (a cancelled or
+    expired one is `404`, where the scanned pair answers `409`); the
+    lookup is three consistent reads, not two; what a miss does write
+    (the request's nonce, the per-network count and the miss count;
+    nothing on any vault or recovery); a body signed for the wrong
+    form is `401` before anything else; a locator that cannot be
+    minted is `500`; the miss audit's detail; the request limit is
+    counted before the active check. **Completed** (2.4.1): the cases
+    that still block until `expires_at`, and that recoveries completed
+    before 2.4.1 are not converted. **Vault release notices**: the
+    ending mail says how far away the end is, counted in whole UTC
+    calendar days from the run that sends it, and names the time for
+    today and tomorrow (the staging drill's first notice on 2026-10-11
+    said "in 7 days" two days before the end). 2.4.0 marked approved
+  - 2.4.1 (2026-10-11, VAULT-MESSAGING §11.11.5 step 3, §11.5; owner
+    decision of 2026-10-11: a completed recovery must stop blocking a
+    new request; found on staging, where a member who had recovered
+    could not start another recovery until the old one's `expires_at`):
+    "Vault recovery": a `registered` recovery whose recovering key the
+    host reports as the vault's `app_key` has completed, and the API
+    records it as `completed`, a new ended state (`Recovery.state`,
+    with `completed_at`): it no longer blocks a recovery request or a
+    start-over, `status` no longer shows it and there is nothing left
+    to cancel. Before, the API cleared the recovery's keys at that
+    point and left it `registered` and active until `expires_at`.
+    `registered` alone still blocks, as does a registered recovery
+    with no recovering key. Audit `vault.recovery_completed`. The
+    recovery page shows a completed recovery as the last one and
+    offers a new request. No change to the queue, the enclave, the
+    request limit or any other route
+  - 2.4.0 (2026-10-11, VAULT-MESSAGING 0.25.0 §11.11.10; owner decision
+    of 2026-10-11, "we should allow a typed recovery code"; approved by
+    the owner 2026-10-11, merged as vettid.org #212): the recovery code
+    can be typed. The API mints a
+    12-character `locator` (60 random bits) with each recovery request
+    and returns it in `GET /api/vault/recovery` together with
+    `sealed_code`; `POST /api/vault/recovery/claim` also takes
+    `{locator, app_key}`, signed with an empty `vault`, and both forms
+    of the claim answer `vault_id` and `recovery_id` as well. The
+    recovery page shows the typed form (locator, code and 4 check
+    characters computed in the browser: 48 characters in 12 groups of
+    four) instead of the bare code. Additive: an app that sends the
+    scanned form and ignores unknown fields is unaffected; the queue,
+    the enclave and the register route do not change
+  - 2.3.2 (2026-10-10, VAULT-RELEASES 0.1.10 W11, RELEASE-UPDATES
+    0.3.0; editorial, as built): "Vault release notices": every notice
+    email links release notes (the ending release's entry, the newest
+    `active` release's entry and summary; the urgent email the security
+    release's entry, summary and what it fixes), taken from the stage's
+    own release log; `RELEASE_LOG_URL` and the account site's
+    `release_log_url` are per stage (`https://<zoneName>/security/releases/`,
+    staging's own log in staging)
   - 2.3.1 (2026-10-08, VAULT-MESSAGING 0.21.0; owner decision of
     2026-10-08, §15 item 29): an email address with a control
     character, C0 (U+0000–U+001F), DEL (U+007F), C1 (U+0080–U+009F),
@@ -290,7 +347,7 @@ device identifiers, and never logs envelopes.
 | `GET /api/vault/requests/{id}` | yes (the member's slots) | the key that made the request |
 | `POST /api/vault/recovery`, `GET`, `/cancel` | yes | — |
 | `POST /api/vault/recovery/cancel-link` | its token | — |
-| `POST /api/vault/recovery/claim` | — | the key being registered (`vault=` the QR's) |
+| `POST /api/vault/recovery/claim` | — | the key being registered (`vault=` the QR's; empty with a `locator`, 2.4.0) |
 | `POST /api/vault/recovery/register` | — | a claim key |
 | `POST /api/vault/deletion`, `GET` (2.1.0) | yes | — |
 | `POST /api/vault/deletion/cancel` (2.1.0) | yes | `app_key` |
@@ -868,7 +925,46 @@ A daily job (`VaultNoticeJob`, 15:00 UTC, role
 |---|---|---|
 | `ends_90`, `ends_30`, `ends_7`, `ends_1` | 90, 30, 7 and 1 days before `ends_at` (a run sends only the latest one due, so a missed day sends the current one, never a stale one) | `deprecated` or `retired` with `ends_at` |
 | `ended` | up to 14 days after `ends_at` | `removed`, not reopened for a rescue: how to ask for a rescue in the 30-day window |
-| `urgent_<U>` | in the first 30 days of release U | U is marked `security: urgent` in the release log (`https://vettid.org/security/releases/index.json`, generated from the signed manifest); sent to members on each release in U's `affects` that still runs |
+| `urgent_<U>` | in the first 30 days of release U | U is marked `security: urgent` in the stage's release log (`index.json`, generated from the signed manifest); sent to members on each release in U's `affects` that still runs |
+
+**How far away the end is** (2.4.2, as built; vettid.org #224). The
+`ends_*` mail's first sentence gives the end date and, in brackets, the
+time left: "That release ends on 2026-10-13 (in 2 days)." The time left
+is counted **from the run that sends the mail, not from the
+milestone's name**, in whole UTC calendar days (the end's UTC date
+minus the run's): "in *n* days" for two or more, "tomorrow at 15:30
+UTC" and "today at 15:30 UTC" with the end's time of day. One value
+serves every mail of a run. The milestones, the rule for which one is
+due and the subjects are unchanged ("Action needed: your VettID
+vault's software ends on *date*"; for `ends_1`, "Last day: …"); the
+`ended` mail has no such phrase. Why: a run sends the latest milestone
+due, so a release whose end date is set less than 90 days ahead, or a
+missed run, gets a milestone whose name no longer says how long is
+left. The staging drill's first notice, sent on 2026-10-11 for an end
+on 2026-10-13, was the `ends_7` mail and said "in 7 days".
+
+Every email links release notes (RELEASE-UPDATES §3, VAULT-RELEASES §3.5;
+W11). The job reads the stage's own release log, `RELEASE_LOG_URL` =
+`https://<zoneName>/security/releases/` (production
+`https://vettid.org/security/releases/`, staging
+`https://staging.vettid.org/security/releases/`), once per run
+(`index.json`, 10 s timeout, no redirects):
+
+- `ends_*` and `ended`: the ending release's notes, and the newest
+  `active` release (the highest `release_number` among the `active` rows
+  of `vault-releases`, the one the app offers) with its notes and its
+  one-line log summary, when it is newer than the ending one; plus the
+  log's index.
+- `urgent_<U>`: U's notes, its summary and its `security_text` ("What it
+  fixes").
+
+A release's link is its `notes` as the log lists it (an `https` URL;
+staging releases signed before the log rule still list their GitHub
+release URL until the next staging signing), otherwise
+`RELEASE_LOG_URL<n>/`. Summaries and `security_text` are flattened to one
+line and bounded (160 and 1,000 characters). If the log cannot be read,
+the deadline notices still go out with the links and without summaries;
+urgent emails wait for the next run.
 
 Each notice goes to a member at most once per release, end date and
 milestone: a conditional put of `vault-notice#…` in the ratelimits table
@@ -909,7 +1005,7 @@ the expiry itself.
 | GET | `/api/vault/recovery` | — | `{recovery: Recovery \| null}` |
 | POST | `/api/vault/recovery/cancel` | `{recovery_id}` | `200 {cancelled: boolean}` |
 | POST | `/api/vault/recovery/cancel-link` | `{token}` (no session) | `200 {cancelled: boolean}` |
-| POST | `/api/vault/recovery/claim` | `{vault_id, recovery_id, app_key}` (app, signed by `app_key`; 2.0.0) | `200 {user_guid, email_hint}` |
+| POST | `/api/vault/recovery/claim` | `{vault_id, recovery_id, app_key}` (scanned; 2.0.0) or `{locator, app_key}` (typed; 2.4.0); app, signed by `app_key` | `200 {user_guid, email_hint, vault_id, recovery_id}` (the two identifiers since 2.4.0) |
 | POST | `/api/vault/recovery/register` | `{vault_id, request_id, instance_id, etk_kid, envelope}` (app, signed by a claim key; 2.0.0) | `202 {vault_id, request_id}`; poll `GET /api/vault/requests/{id}` |
 
 ```ts
@@ -917,11 +1013,14 @@ interface Recovery {
   recovery_id: string;                 // ULID; the queue request id
   vault_id: string;                    // the vault being recovered (HKDF info and QR payload, §11.11.2)
   state: 'pending' | 'available' | 'registered' | 'cancelled' | 'expired'
-       | 'unavailable';                // 2.1.0: the enclave refused it (no_backup or no_credential; slot code recovery_unavailable)
+       | 'unavailable'                 // 2.1.0: the enclave refused it (no_backup or no_credential; slot code recovery_unavailable)
+       | 'completed';                  // 2.4.1: the new app holds the credential and is the vault's app (ended)
   requested_at: string;                // RFC 3339
   available_at: string;                // requested_at + 24 h
   expires_at: string;                  // available_at + 24 h
+  completed_at?: string;               // 2.4.1: only with `completed`; when the API recorded it
   sealed_code?: string;                // b64 of 5,252 bytes, only while `available`
+  locator?: string;                    // 2.4.0: 12 Crockford base32 characters, only together with a `sealed_code` that is a code's (never with `unavailable`)
 }
 ```
 
@@ -933,21 +1032,139 @@ interface Recovery {
   recovery_not_available`; `404 not_found` when `vault_id` and
   `recovery_id` do not name the vault's current recovery). Adds the key
   to `claim_keys` (at most 10; the oldest goes), audits
-  `vault.recovery_claim`, answers `user_guid` and `email_hint`. Limits: 10
+  `vault.recovery_claim`, answers `user_guid` and `email_hint` and,
+  since 2.4.0, the recovery's `vault_id` and `recovery_id`. Limits: 10
   per vault per day, 10 per source network per 15 minutes.
+- **Claim by locator** (2.4.0, VAULT-MESSAGING 0.25.0 §11.11.10): the
+  typed form. Body `{locator, app_key}`; a body with `locator` and
+  either identifier is `400`. Signed by the key being registered with
+  `vault=` empty, as the redeem. In order: the signature; the pause
+  (`503 vault_unavailable` with `service: "paused"`, before the body
+  is read, as the scanned form); the body's syntax (`locator` exactly 12 characters of
+  `0-9A-HJKMNP-TV-Z`; the app sends the canonical form, and anything
+  else is `400`); the per-network limit; the lookup.
+  - **Miss.** No such locator, or its recovery is not the vault's
+    current one (replaced), or the vault or the pointer is gone:
+    `404 not_found`, the body of an unknown pair, after the same work
+    (one read of the locator row and one of a vault row, a dummy when
+    there is none), so that timing does not tell a miss from a stale
+    hit. A miss writes nothing and is charged to no recovery.
+    As built (2.4.2):
+    - A locator whose recovery was **cancelled** or has passed
+      `expires_at` is a miss too (`404`), where the scanned pair of
+      the same recovery answers `409 recovery_not_available`. So is a
+      locator whose vault is deleted, or whose member's vault pointer
+      names another vault. A current recovery in any other state
+      (`pending`, `registered`, `unavailable`, `completed`) is a hit
+      and gets the scanned form's `409` after the per-vault limit.
+    - The work is **three** consistent reads on every call, hit or
+      miss: the locator row, a vault row and the member's pointer row
+      (dummies where there is none). The pointer is part of deciding a
+      miss, so a mismatch is a true miss, decided before the per-vault
+      limit, and charges no vault.
+    - "Writes nothing" means nothing on any vault, recovery or request
+      row. A miss does write, in the rate-limit table: the signed
+      request's nonce, the per-network count (charged before the
+      lookup) and the per-network miss count that the audit reads.
+    - A body signed for the other form is `401` before anything else
+      is looked at: a `locator` body signed with a non-empty `vault=`,
+      and a scanned body signed with an empty one.
+  - **Hit.** From here the scanned form's code runs with the row's
+    `vault_id` and `recovery_id`: the per-vault limit, the account
+    checks, `409 recovery_not_available` unless `available`, the
+    claim keys, the audit and the answer.
+  - **Limits.** Per source network, 10 per 15 minutes, in the same
+    bucket as the scanned form (`vault-recovery-claim-net#<network>`,
+    hits and misses alike); then, on a hit, the scanned form's 10 per
+    vault per day. **None is global**, as for setup codes: a search
+    for locators cannot stop anyone else's recovery.
+  - **Audit.** `vault.recovery_claim` gains `via: qr | typed`.
+    Misses are audited as `vault.recovery_locator_miss`, aggregated
+    per source network and hour (at the 1st, 10th, 100th, … miss, as
+    `vault.enroll_code_failed`); never the locator tried. (2.4.2) Its
+    detail is `{network, misses_this_hour}`. If the count or the audit
+    cannot be written, the answer is still `404`.
+- **The locator** (2.4.0). 60 bits from the API's CSPRNG as 12
+  Crockford base32 characters, minted in `POST /api/vault/recovery`.
+  Kept on the recovery (`recovery.locator`) and as a request-table
+  row `recovery-locator#<locator>` → `{vault_id, recovery_id}`,
+  written with a conditional put (a collision draws again) and
+  expiring with the recovery, like the cancel link's row. It is kept
+  in the clear: it is no more than the `vault_id` and `recovery_id`
+  it stands for, which the table holds anyway. `GET
+  /api/vault/recovery` returns it only in an answer that carries a
+  code's `sealed_code` (`available`). It is not in `status`, in any
+  email or in a log. A recovery requested before 2.4.0 has none.
+  (2.4.2) After 5 draws that all collide the request fails with `500`
+  and no recovery is recorded: nothing is enqueued, locked or mailed.
+  It has still counted toward the request limit. At 60 bits this is
+  not expected to happen.
 - **Recovering key** (2.0.0). When a register slot comes back
   `recovery_registered`, the API records that register's key (the slot's
   `app_kid`) as `recovering_key`, with the `registered` state. It may
   `unlock`, `lock` and read `status` while the recovery is active. When
   the host writes the vault's `app_key` with the same `kid` (the recovery
-  completed), the recovery's keys are cleared.
+  completed), the recovery's keys are cleared and, since 2.4.1, the
+  recovery is recorded as `completed` (below).
+- **Completed** (2.4.1; owner decision of 2026-10-11). A recovery has
+  completed when the new app holds the credential and is the vault's
+  app (VAULT-MESSAGING §11.11.5 step 3). The API's sign of it is the
+  one it already uses to admit the new app's key and refuse the old
+  one: the recovery is `registered`, it has a `recovering_key`, and
+  the host's `app_key` on the vault row has the same `kid`. The vault
+  makes the registered app's key its app key only in the flush of a
+  successful `credential.recover` (the PIN and the credential password
+  both proved), and the host writes `app_key` after that flush is
+  stored (VAULT-MESSAGING §11.5). The API then sets the recovery's
+  state to `completed` with `completed_at`, removes its `claim_keys`
+  and `recovering_key`, and audits `vault.recovery_completed`; the
+  write is conditional on the same `recovery_id`, the state
+  `registered` and the `recovering_key` that was compared (the API's
+  own attributes only; it never names the host's `app_key` in a
+  write). It does so on the first
+  request that reads the recovery afterwards: any request signed by
+  the vault's app key, `GET /api/vault/status`, `GET
+  /api/vault/recovery`, a recovery request, a cancel or a start-over
+  request. `completed` is an ended state, whatever the clock:
+  - it does not block a new request (`POST /api/vault/recovery`, which
+    replaces it as it replaces any ended recovery; the request limit
+    and every other refusal apply unchanged) or a start-over;
+  - `GET /api/vault/status` answers `recovery: null`; `GET
+    /api/vault/recovery` answers it with `state: "completed"`, without
+    `sealed_code` or `locator`, until a new request replaces it;
+  - a cancel is a no-op (`{cancelled: false}`: nothing is enqueued or
+    mailed);
+  - claim and register are refused for it as for `registered` (`409
+    recovery_not_available`; `404` once it is replaced), and the code
+    was spent at the register.
+  `registered` alone is **not** completed: until the host's report the
+  recovery is in progress (the PIN or the password step has not
+  succeeded) and blocks as before. So does a registered recovery with
+  no `recovering_key` (its register's key was no longer among the
+  claim keys, or its keys were cleared before 2.4.1): the API has no
+  sign for it, and it ends at `expires_at`. (2.4.2) All the cases
+  that still block until `expires_at`, as built: a registered
+  recovery with no `recovering_key` (the register's key had been
+  pushed out of the 10 claim keys by later claims); a register made
+  through the staging-only legacy-session path, which has no app key
+  to record; a host that never reports `app_key`; and a recovery that
+  completed **before 2.4.1 was deployed**, whose keys the older code
+  had already cleared: it is not converted and stays `registered`
+  until its `expires_at`. No migration exists or is needed: each ends
+  within 24 hours of becoming available. A host that misreports
+  `app_key` gains nothing here: only the member's session can then
+  request a recovery, and that session can cancel a registered
+  recovery anyway.
 - **`browser_key`**: canonical base64 of an uncompressed P-256 point (65
   bytes, first byte `0x04`), made by the portal with WebCrypto
   (non-extractable private key kept in IndexedDB).
 - **Request.** `404 not_found` without an enrolled vault (state
   `enrolling` included); `409 recovery_active` while a recovery is
-  `pending` or `available`; `409 deletion_pending` while a start-over
-  is pending (2.1.0). **Backup off** (2.1.0): when the vault row's
+  `pending`, `available` or `registered` before its `expires_at` (never
+  for a `completed` one, 2.4.1); `409 deletion_pending` while a start-over
+  is pending (2.1.0). (2.4.2, as built: the request limit of 3 a day is
+  counted first, so a request refused as `recovery_active` uses one
+  of the three, as one refused for the backup does.) **Backup off** (2.1.0): when the vault row's
   `credential_backup` is `false`, `409 recovery_unavailable` with
   `{error, reason: "no_backup"}`, before anything is written, enqueued,
   locked or mailed (the request still counts toward the rate limit);
@@ -994,7 +1211,8 @@ interface Recovery {
   minutes). From then on `sealed_code` is not returned. `registered`
   stays active until `expires_at` (a new request is `409
   recovery_active`, `status` shows it, it can be cancelled), and reads
-  `registered` afterwards. Until vettid-vault sends the marker, a
+  `registered` afterwards, unless it completes first (2.4.1,
+  "Completed" above). Until vettid-vault sends the marker, a
   recovery stays `available` after a register, as before.
 - **Cancel** (session or link): marks the recovery `cancelled`, enqueues
   `recovery_cancel` to the same routing, emails the member and answers
@@ -1012,12 +1230,16 @@ interface Recovery {
   available_at} | null` in `VaultStatus` (above): the active recovery
   (`pending`, `available` or `registered` before `expires_at`), so the
   app can show a recovery in progress and offer to cancel it.
-- **Rate limits:** request 3 per member per day; register 10 per member
-  per day; cancel 30 per member per 15 minutes; the cancel link 20 per
+- **Rate limits:** request 3 per member per day; claim as above;
+  register 10 per member per day; cancel 30 per member per 15 minutes; the cancel link 20 per
   source network per 15 minutes; status 60 per minute.
 - **Audit:** `vault.recovery_request`, `vault.recovery_cancel` (with
   `via: session | link`), `vault.recovery_code_released` (first release),
-  `vault.recovery_register`, `vault.recovery_registered` (1.1.0). Never the code, the browser key, the token or
+  `vault.recovery_register`, `vault.recovery_registered` (1.1.0),
+  `vault.recovery_completed` (2.4.1; `vault_id`, `recovery_id`, the
+  key's `kid`),
+  `vault.recovery_claim` (2.0.0; `via`, 2.4.0),
+  `vault.recovery_locator_miss` (2.4.0). Never the code, the locator, the browser key, the token or
   envelopes.
 - **Email** uses the system mailer (SES sandbox: the member's address must
   be a verified identity, as for sign-in links; a failed send is logged
@@ -1060,8 +1282,9 @@ credential password):
   happens in the app at an unlock), an open recovery, the last
   `credential_clone` alarm, and **Lock vault** (`POST /api/vault/lock`
   with a browser-made ULID, then up to 30 s of `requests/{id}` polling)
-  while the vault is `unlocked` or leased. The release log link is
-  production's in every stage.
+  while the vault is `unlocked` or leased. The release log link is the
+  stage's own log (`release_log_url` in `/config.json`,
+  `https://<zoneName>/security/releases/`).
 - **`/account/vault/recovery/`** (gated): the request
   (`browser_key` from a WebCrypto P-256 pair made **non-extractable**,
   kept in IndexedDB `vettid-vault-recovery`, store `keys`, keyed by
@@ -1070,8 +1293,18 @@ credential password):
   cancel, and, while `available`, the code: opened in the page (ECDH
   `deriveBits`, HKDF-SHA-256, AES-256-GCM, all WebCrypto), drawn as the
   §11.11.2 QR payload (with `api`, 2.0.0) by the vendored qrcode-generator 2.0.4 (MIT,
-  `js/vendor/`, checksum pinned in `test/site-vault.test.ts`) and as
-  text in groups of four. The code is decrypted only when the member
+  `js/vendor/`, checksum pinned in `test/site-vault.test.ts`) and, 2.4.0,
+  as the **typed form** of VAULT-MESSAGING 0.25.0 §11.11.10 under
+  "Can't scan? Type this code in the app": the API's `locator`, the
+  code and 4 check characters (the first 20 bits of SHA-256 over
+  `"vettid/vms/2/recovery-typed-check" || 0x00 || location.origin ||
+  0x00 || locator || code`, computed with WebCrypto), 48 characters
+  as twelve groups of four in three rows, each group its own element,
+  with "The code has no I, L, O or U" and no copy button. The bare
+  32-character text shown until 2.3.2 is removed. Without a `locator`
+  (a recovery requested before 2.4.0) only the QR is shown, with
+  "To type the code instead, cancel this recovery and start a new
+  one". The check characters are never sent. The code is decrypted only when the member
   presses **Show the code** and is removed from the page on **Hide**, on
   any re-render and on `pagehide`; it is never sent, logged or stored.
   Polling `GET /api/vault/recovery` is at most once a minute (once every
@@ -1080,7 +1313,11 @@ credential password):
   and offered cancel and a new request. Keys of ended recoveries are
   deleted. The seal is opened with the recovery's own `vault_id`. A
   `registered` recovery is shown as "used on your new phone", without a
-  code (its key is deleted), with cancel while it is active.
+  code (its key is deleted), with cancel while it is active. A
+  `completed` recovery (2.4.1) is an ended one: the page offers a new
+  request, under "Your last recovery, requested …, was completed on
+  your new phone", and a page that was open while it completed says
+  "Your vault was recovered on your new phone."
 - **Backup off** (2.1.0): the vault tab says, when `credential_backup`
   is `false`, that the vault cannot be recovered if the phone is lost,
   and links to the start-over. The recovery page shows the API's `409

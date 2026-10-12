@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.23.3
-date: 2026-10-10
+version: 0.27.4
+date: 2026-10-12
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -10,16 +10,208 @@ related:
   - RELAY-PLAN.md
   - PQC-MIGRATION.md
   - CALLING-SERVICE.md
-  - PUSH-GATEWAY.md
+  - PUSH-GATEWAY.md (0.4.4)
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.3.1)
-  - ANDROID-PLAN.md (0.1.17)
+  - MEMBER-API.md (2.4.2)
+  - ANDROID-PLAN.md (0.1.37)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
-  - VAULT-RELEASES.md (0.1.6, approved 2026-10-04)
+  - VAULT-RELEASES.md (0.1.16; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
+  - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
+  - VAULT-HOST-PROTOCOL.md (0.1.2; the enclave ↔ parent protocol as built)
 changelog:
+  - 0.27.4: editorial-normative; errata from VAULT-HOST-PROTOCOL
+    (decisions H3, H5, H6 of 2026-10-12) and from vettid-vault #69. No
+    wire change and no code change. **Disclosure** (what the code
+    already does): §2.2, the host row lists what the parent sees per
+    vault in the clear, the time of every state write included, and the
+    statements about blurred timing are confined to the relay
+    connections (§2.2, §12.2); §13.3, the operations the host can
+    originate (`lock`, `delete`, `account`, `recovery`,
+    `recovery_cancel`), and that §11.3's "a confirmed vault MUST NOT be
+    replaced" binds the member API and apps, not the parent; §11.11.2,
+    what a recovery started by the host gives and does not give, with
+    an open design question. **Interim wording:** §12.3, "Parent
+    unreachable for 120 s" becomes "No control connection to the parent
+    for 120 s", which is what the code measures; a connected but silent
+    parent is to count as unreachable from a later vault release.
+    **As built:** §12.2.1 "Counts", the count of vault processes at
+    their own limit (vettid-vault 8f2c8bf)
+  - 0.27.3: editorial, a reference only; nothing normative changes.
+    §13.3 and `related` point to VAULT-HOST-PROTOCOL (0.1.0, a draft for
+    the owner's review), which describes the protocol between the
+    enclave and its parent as built
+  - 0.27.2: editorial-normative, as built: phase 1 of
+    VAULT-RELAY-SCALING (0.1.2; vettid-vault #66, for staging release
+    S11). No wire change for the relay or the apps. §12.2: the collect
+    loop's waits are spread (a long-poll of a random 20 to 25 s, the
+    first poll and the retry after an error at a random moment, a
+    backoff when the relay refuses the poll); the shared HTTP/2
+    connections are bounded by the enclave (new §12.2.1: one connection
+    until its streams are in use, at most 16 per host, what happens at
+    the bounds, connections that close or stop answering, one re-send
+    of a request the host did not process, at most 8 requests in flight
+    per vault). §2.2: what the host sees of it
+  - 0.27.1: editorial-normative, errata to 0.26.0 and 0.27.0 from
+    their implementations (vettid-vault #62, #63, #64, staging release
+    S10; vettid-android #116; approved by the owner 2026-10-11, all five
+    recommendations as drafted). No wire
+    change. **Key attestation chain rules** (§11.7), enforced from S10:
+    the attestation extension on the leaf only, CAs above the
+    attestation certificate, path lengths, the attestation certificate
+    itself not required to be a CA, 1–10 certificates, validity
+    checked at an attestation. Background, plainly: until S10 the
+    enclave checked each signature up to the pinned root and read the
+    extension from the first certificate, so **a chain extended below
+    a genuinely attested key was accepted** as the attestation of
+    another key. An independent review found it on 2026-10-11 and it
+    was fixed the same day (vettid-vault #64, S10, `security: urgent`).
+    It never bypassed the PIN, the credential password, a transfer's
+    approval or the recovery code. **A phone whose attestation
+    certificates have expired cannot attach a vault** (owner decision
+    2026-10-11). Chains seen on the test phones. **Signer binding as
+    built** (§11.7.1): the staging exception is derived from the
+    measured channel and release, not a constant; the old class in
+    `device.signer_changed` when the old signer is no longer pinned; a
+    wrong `signer` in an approval is always `signer_unconfirmed`;
+    changed by digest, confirmed by class; transfers across
+    platforms; the same digest listed twice is refused;
+    `signer_refused` is decided before `recovery_pending` and
+    `backoff`, and what follows from that; its log entry (24 hours,
+    not on a rolled-back header, the shared 64 entries); a bind by
+    chain re-runs every check but the challenge and validity, is kept
+    even when the PIN then fails, and its size limit; `device_id` on
+    `device.signer_bound`; a registered recovery has no expiry in the
+    vault; the real-phone test replaced by what was run at S10 (no
+    staging vault can bind by chain). **Release check** (§11.10.8):
+    "previous release" is the highest lower tag, and rule 2 runs in
+    the release workflow. The same-phone transfer by pasted code
+    among the ways to move a staging vault. 0.25.0 and 0.26.0 marked
+    approved. **Owner decisions (2026-10-11, all as recommended):**
+    the vault will keep the last recorded Android signer across an
+    app without one (decided, not yet implemented; a vault change
+    before iOS); a vault attached while its certificates were valid
+    keeps unlocking; the consequences of `signer_refused`'s order are
+    accepted as built; confirmation stays by class (§11.7.1, §15
+    item 35) (§10.9, §11.7, §11.7.1, §11.10.8, §15
+    item 35; ANDROID-PLAN 0.1.37)
+  - 0.27.0: normative; an enclave change and a vault release (owner
+    decision of 2026-10-11, ANDROID-PLAN 0.1.36: the Play app-signing
+    key is Google's and VettID's release key is never given to Google;
+    §15 item 35; approved by the owner 2026-10-11, all eight
+    recommendations as drafted): **per-vault signer
+    binding** on Android. Until now a vault accepted an app whose
+    attestation showed any signing certificate the release pins, and
+    did not keep which. Now the digest is recorded with the attested
+    device key at enrollment, transfer and recovery; unlock and a
+    release-update approval require the recorded signer to be pinned
+    by the running release (`signer_refused`: sealed, not a PIN
+    failure, audited, no alarm); the binding changes only by a direct
+    transfer, where a change of signer is shown to the holder and must
+    be confirmed in the approval (`signer_unconfirmed`), or by a
+    completed recovery, each audited as `device.signer_changed` with
+    the old and new class; vaults enrolled earlier bind from the
+    certificate chain of the key they enrolled with
+    (`device_assertion.chain`); an attestation must report exactly one
+    signing digest; pinned signers carry a class (`vettid`,
+    `google_play`, `development`) in the release configuration, and
+    the app's `device.list` entry reports `signer{class, digest}`.
+    Android only; how it would extend to iOS (new §11.7.1; §6.7.1,
+    §10.3, §10.9, §11.3, §11.4, §11.7, §11.9, §11.10.8, §11.11.3,
+    §11.11.5, §15 item 35; ANDROID-PLAN 0.1.36, VAULT-RELEASES 0.1.12).
+    It ships with 0.26.0's constants in staging release S10, and the
+    two compose (§11.7.1, "With the staging application id"). Also,
+    editorial: §11.11.7 "Registered" follows MEMBER-API 2.4.1 (a
+    registered recovery is active until the host reports its key as
+    the vault's `app_key`, when the API records it `completed`, or
+    until `expires_at`)
+  - 0.26.0: normative; **needs a vault release** (staging S10 first;
+    owner decisions D4 and D5 of 2026-10-11, STAGING-DEVELOPMENT-PLAN
+    0.1.0 §6; §15 item 34; approved by the owner 2026-10-11, merged
+    as vettid.org #220). Two new
+    release constants (§11.10.8). **`features`**: the optional features
+    a channel's images register (`actions`, `calls`, `intro`, `leash`,
+    `location`, `presence`, `wallet`). A feature not listed is not
+    registered: its types are unknown types (`unsupported_type`, §5.3),
+    it keeps no state and none of its hooks run. Staging lists all
+    seven; production lists none, and gains one only when it has passed
+    the promotion checklist. A channel's list only grows.
+    **`android_package`**: the Android package a channel's images
+    accept in key attestation, `com.vettid.app` in production and
+    `com.vettid.app.staging` in staging (it was one constant for both
+    channels), so that a phone can hold both apps; what follows the
+    package, and how the existing staging vaults move (§10, §11.7,
+    §11.10.8, §15 item 34; VAULT-RELEASES 0.1.11, ANDROID-PLAN 0.1.35)
+  - 0.25.0: normative, additive; no enclave change and no vault release
+    (owner decision of 2026-10-11, "we should allow a typed recovery
+    code"; §15 item 33; approved by the owner 2026-10-11, merged as
+    vettid.org #212): the recovery
+    code can be **typed** when the new phone cannot scan the portal's
+    QR. The portal shows one string of 48 Crockford characters in 12
+    groups of four: a 12-character **locator** minted by the member API
+    (60 random bits; it stands for the QR's `vault_id` and
+    `recovery_id` and opens nothing), the 32-character code unchanged,
+    and 4 **check characters** computed in the browser over the
+    portal's `api` origin, the locator and the code. The app verifies
+    the check with its own origin before anything is sent (a typing
+    mistake, or a code of another environment's site, is caught on the
+    phone and is not a wrong code), claims by locator
+    (`POST /api/vault/recovery/claim {locator, app_key}`, answered with
+    `vault_id` and `recovery_id`), and from there registers exactly as
+    after a scan: the same sealed register, the same answers, the same
+    5 wrong codes, the same 24 hours, single use, PIN and credential
+    password. The bare 32-character text the portal showed "for typing"
+    is withdrawn (no app could use it since 0.15.0) (§11.11,
+    §11.11.2, §11.11.3, §11.11.6, §11.11.7, §11.11.8, new §11.11.10,
+    §13.5, §15 item 33, §16; MEMBER-API 2.4.0, ANDROID-PLAN 0.1.33)
+  - 0.24.1: editorial-normative, errata to 0.24.0 from its
+    implementation (vettid-vault #59, N3; approved, owner decision
+    2026-10-10): the
+    event is `push.token-needed` (0.24.0's `push.token_needed` broke
+    §5.3's type grammar, as `vault.owner_check` did before 0.15.2); the
+    vault's conservative readings stated as normative: what counts toward
+    `push_registrations` (every registration the gateway answered over
+    HTTP, refusals included; a failure keeps the previous registration
+    but may advance the count), a `429` without `retry_after` waits 60 s
+    and `retry_after` is capped at 3,600 s, other gateway answers
+    (`gateway_error` at registration, retried like a `5xx` at a wake),
+    the exempt quota counts every exempt wake and no retry, the lock wake
+    obeys the debounce and caps and is skipped past its 3 s budget,
+    `push.unregister` takes only `{}`, and a vault without a credential
+    answers `credential_required`. Owner decision 2026-10-10: an
+    unparsable or oversized gateway answer counts toward
+    `push_registrations`; a wake attempt waits at most 10 s (the lock
+    wake: the rest of its 3 s); the HTTP `Retry-After` header is used
+    when the body has no `retry_after`, capped at 3,600 s; at a wake a
+    `401` and the `400` codes other than `token_invalid` are retried like
+    a `5xx`; an app answered `limit` pauses registering for 24 hours
+    (§10, §10.1, §14.1, §14.2, §15 item 32; PUSH-GATEWAY 0.4.1,
+    ANDROID-PLAN 0.1.30)
+  - 0.24.0: normative, additive (owner request of 2026-10-10, "we can
+    start to design the push service for google play and apple ios";
+    §15 item 32; a draft for the owner's review): push. The app (the
+    holder) registers its FCM or APNs token with `push.register`
+    `{platform, token, app_id, environment?}` and drops it with
+    `push.unregister`; the vault keeps only the gateway's sealed wake
+    blob, a per-registration wake key and a hash of the token, never the
+    token; `push` state in `device.list`; `push.token-needed` (V→D) when
+    the gateway reports the token gone; new error `gateway_error`, limit
+    `push_registrations`; audit kinds `push.registered`,
+    `push.unregistered`, `push.token_gone`. The wake rules: after the
+    deposit of a new feed item of priority `normal` or above (not
+    `guide`), `vault.held`, `vault.locking` (not for the app's own lock)
+    and `credential.alarm`; only those three while held; a 5-second
+    debounce, 30 wakes an hour then one per 10 minutes, urgent ones
+    exempt up to 10 an hour; retries; no content and no quiet hours.
+    Both push types are allowed while held. The release constants gain
+    the gateway URL and the enclave egress the gateway's host. Owner
+    review of 2026-10-10: at most one registration per vault (§14.1);
+    message text links: only `https://` URLs are tappable, opened through
+    the operating system after showing the host, never custom schemes
+    (§10.5) (§3.6.3, §10, §10.1, §10.3, §10.5, §10.9, §11.10.8, §12.2,
+    §14; PUSH-GATEWAY 0.4.0)
   - 0.23.3: editorial-normative, from the staging S8 canary of
     2026-10-10 (pending owner approval): an unlock of a vault that is
     already unlocked locks it and opens it again in the same request
@@ -635,7 +827,7 @@ the relay at vettid.org allows:
 | Party | Learns | Does not learn |
 |---|---|---|
 | Relay | Mailbox ids, depositor relay keys, timing, padded sizes, blob and claim sizes | Message types, content, or which identity, device or connection a relay key belongs to |
-| Parent / host | Relay host names; TLS byte counts and timing per instance (connections are shared by all vaults, §12.2); enroll, unlock and lock events; encrypted-state size; `vault_id` ↔ instance | Relay requests (TLS terminates in the enclave, §12.2), mailbox ids, PINs, keys |
+| Parent / host | **Per instance:** relay host names; TLS byte counts and timing (connections are shared by all vaults, §12.2); how many connections there are (1 to 16 per host, up to 32 for 30 s at most once in 5 minutes, §12.2.1) and the HTTP/2 pings on quiet ones; the enclave's own counts of relay requests for the whole instance, no finer than once a second (in flight, waiting, failed, connections, vault processes at their own limit; §12.2.1), nothing per vault. **Per vault, by `vault_id`, in the clear** (0.27.4; it always did, VAULT-HOST-PROTOCOL §11.2): `vault_id` ↔ instance; the member's `user_guid`; every alternate-channel operation and when (enroll, unlock, lock, delete, recovery and its cancel and register, `account`); the **account snapshot** in enroll, unlock and `account` messages (the member's email address, first and last name, membership, terms and subscription state, §11.13); the app key's public key and a recovery's browser key; the lifecycle events of §11.5, among them name-change requests with both names and the backup bit; and **the key, the size and the time of every read and write of the vault's stored state and header** (below) | Relay requests (TLS terminates in the enclave, §12.2), mailbox ids, which peers a vault talks to, PINs, keys other than the public keys named here, vault contents |
 | Member API | Which member enrolled, unlocked or locked, and when; `vault_id`, instance lease, `vault_version`, `state_version` (§11.5); the public key of the vault's app key and when it changes, so when a transfer or recovery completed (0.15.0, §11.12); whether the vault keeps a backup copy of its credential (`credential_backup`, one bit, 0.16.0, §11.5), so whether it can be recovered; the member's name change requests (`account_name`, 0.18.0, §11.5), whose names it holds anyway | PINs; why an unlock failed (§11.4); mailbox ids; keys other than app public keys; any stable device identifier (§11.7) |
 | Network | Endpoints and timing | Everything else |
 
@@ -646,6 +838,20 @@ sees a held vault keep acking, answer with delivered receipts and serve
 standing grants, but no presence, ringing or read receipts, as with an
 absent member; the relay sees only that an owner's devices exchange
 less traffic with the vault, as during any quiet period.
+
+**The store is a per-vault activity record at the host** (0.27.4,
+disclosure). A vault writes its state whenever something durable
+changed, and each write goes through the parent under a key that names
+the vault (`vaults/<vault_id>/state`). The parent therefore sees, for
+each vault, when it was active and how large its encrypted state is,
+with no traffic analysis at all. The shared relay connections (§12.2,
+§12.2.1; VAULT-PLAN §5.2) keep the host from telling **from the relay
+connections** which vault a request belongs to; they hide nothing about
+the store. The host can line up a vault's write times with the traffic
+on the shared connections. Hiding write times (batching or padding
+writes) is **not planned now** (owner decision of 2026-10-12, H5): the
+host is VettID's own, and the member API already knows when a vault is
+unlocked.
 
 VettID operates both the host and the relay, so in its own deployment it can
 correlate their timing. This residual metadata is disclosed here rather than
@@ -1657,7 +1863,7 @@ every `drop.*` entry, §10.9). Allowed while held:
 
 | Sender | Types |
 |---|---|
-| The holder | `vault.owner-check`; `vault.status` (reports the hold) and `vault.lock`; `credential.utk.get` (UTKs for the check); `credential.get` and `credential.ack` (the latest blob after a lost check response, §3.5.3, and its confirmation); `credential.version`; `credential.lock`; during a clone alarm, `credential.alarm.confirm` and, in `rotation_required`, `credential.rotate` (the check is refused until the alarm closes, so the alarm's own path stays open); for a transfer opened before the hold, `device.transfer.approve` (itself a check, §3.6.1) and `device.transfer.reject`; `call.end`, and `call.ice` of a call answered before the deadline |
+| The holder | `vault.owner-check`; `vault.status` (reports the hold) and `vault.lock`; `credential.utk.get` (UTKs for the check); `credential.get` and `credential.ack` (the latest blob after a lost check response, §3.5.3, and its confirmation); `credential.version`; `credential.lock`; during a clone alarm, `credential.alarm.confirm` and, in `rotation_required`, `credential.rotate` (the check is refused until the alarm closes, so the alarm's own path stays open); `push.register` and `push.unregister` (0.24.0: the wakes for `vault.held` and the alarm depend on a current token, §14.2); for a transfer opened before the hold, `device.transfer.approve` (itself a check, §3.6.1) and `device.transfer.reject`; `call.end`, and `call.ice` of a call answered before the deadline |
 | A recovering app (§11.11.5) | Its own set, unchanged by the hold: `credential.utk.get`, `credential.recover`, `vault.status` (reduced) and the token and address types (0.16.0 removed `credential.reset` and `vault.delete` from it). A recovery completes while held and starts the clock (§3.6.1) |
 | A desktop | `vault.status`, `vault.lock`, `device.session.end{}` (its own session), `call.end` and `call.ice` of a call it answered before the deadline |
 | An agent | `vault.status`, `device.session.end{}` (its own session) |
@@ -1673,8 +1879,9 @@ deletion or a PIN change waits for the check, which takes seconds.
 **What the vault still sends its owner's devices:** responses to the
 allowed requests; `vault.held`; `vault.locking`; `credential.alarm`
 with its feed item and `sync.event`; `device.transfer.pending` for an
-open transfer; `device.unlinked`; and the token, address, rotation and
-handshake messages.
+open transfer; `device.unlinked`; `push.token-needed` (0.24.0); and the
+token, address, rotation and handshake messages. Of these, `vault.held`,
+`vault.locking` and the alarm wake the app (§14.2).
 
 **`vault.held`** (V→D, durable) is the content-free notice that lets
 the app show that something arrived:
@@ -2928,7 +3135,10 @@ Old app (holder)           Vault                  Relay             New app
    at once (0.10.3, as for any pairing, §6.7), the new app answers with
    `hs.fin` and shows the SAS, and once `hs.fin` checks out (§6.3) the
    vault sends the holder `device.transfer.pending{transfer_id, name,
-   sas}`.
+   sas}`, with (0.27.0) the new app's `signer` class and
+   `signer_changed` (§11.7.1). When the signer differs from the one the
+   vault is bound to, the holder's app says so before it asks for the
+   PIN (ANDROID-PLAN §7).
    A dropped `hs.init` (a spent or expired link, a failed attestation)
    is never answered, so the new app cannot tell it from a slow vault.
    It SHOULD stop waiting for `hs.resp` after **60 seconds** and tell its
@@ -2936,7 +3146,11 @@ Old app (holder)           Vault                  Relay             New app
    could not be verified, and offer to scan a new code (0.10.6).
 3. The holder compares the SAS and sends `device.transfer.approve` with
    its current blob and, sealed to a UTK (§3.5.4), the `password` and the
-   `pin`. The vault:
+   `pin`, and (0.27.0) `signer` when the new app's signer differs. The
+   vault:
+   - (0.27.0) answers `signer_unconfirmed` if the new app's signer
+     differs from the binding and the approval does not name its class
+     (§11.7.1); nothing is spent or counted and the transfer stays open;
    - spends the UTK;
    - checks the PIN against the vault's DEK derivation (§3.3.1): `bad_pin`
      on a mismatch, counted in the unlock backoff of §11.8 (and audited
@@ -2951,7 +3165,9 @@ Old app (holder)           Vault                  Relay             New app
      the same flush (step 4) and answers `{}`.
 4. The approval completes the transfer in **one flush**: the epoch
    becomes active; the new device record (role `app`, attestation
-   binding, unlock key); the holder becomes the new app; the old app is
+   binding, unlock key), and with it (0.27.0) the vault's signer
+   binding, audited `device.signer_changed` when the signer changed
+   (§11.7.1); the holder becomes the new app; the old app is
    **removed** as by `device.unlink` (§7.4: `device.unlinked{reason:
    "transferred"}` best effort after the response, relay key denylisted,
    unlock key and UTK pool removed). The new app receives
@@ -3437,7 +3653,12 @@ devices and access sessions, connections (with blocks and member
 authentication), messaging, the credential, items, tags, profile,
 settings, audit, feed, calls, LEASH, share rules and grants,
 critical-item use, shared actions, introductions, location, presence and
-the wallet are in §10.1–§10.18; push is reserved (§14).
+the wallet are in §10.1–§10.18, and push in §14 (0.24.0).
+
+(0.26.0) The types of the optional features (`actions`, `calls`,
+`intro`, `leash`, `location`, `presence`, `wallet`) exist only in a
+release whose channel lists the feature (§11.10.8, "Feature allowlist");
+in any other release they are unknown types (§5.3).
 
 Every flow between vaults is a set of **events** correlated by ids in
 their bodies (`request_id`, `fetch_id`, `invocation_id`), never a V↔V
@@ -3531,7 +3752,8 @@ an answer to an unknown or expired id is dropped.
 | | `audit.export` | D→V | req | The member's History export: count, PIN, audit entry; the app then reads the entries with `audit.list` (§10.9, 0.22.0) |
 | | `feed.list`, `.get`, `.update`, `.delete`, `guide.sync` | D→V | req | Activity feed; app guides as feed items (§10.9) |
 | | `feed.event` | V→D | | New feed item |
-| Push | `push.register`, `push.unregister` | D→V | req | Reserved (§14) |
+| Push | `push.register`, `push.unregister` | D→V | req | Register or drop the app's FCM or APNs token for contentless wakes (§14, 0.24.0) |
+| | `push.token-needed` | V→D | | The registration ended (the token is gone); send a fresh one (§14.2; spelled `push.token_needed` in 0.24.0) |
 
 **Calls** (CALLING-SERVICE §7, §9; §10.10):
 
@@ -3600,6 +3822,7 @@ an answer to an unknown or expired id is dropped.
     | `location_requests` | 1 per connection per 10 minutes | `location.request` (§10.16) |
     | `wallets` | 16 wallets | `wallet.create` (§10.18) |
     | `wallet_addresses` | 2,000 addresses per wallet | `wallet.address.new` (§10.18) |
+    | `push_registrations` | 20 registrations that reach the gateway per 24 hours (0.24.0); every registration the gateway answered over HTTP counts, refusals included (0.24.1) | `push.register` (§14.1) |
 
     A count that is part of a request's shape is `bad_request`, not a
     `limit`, and has no name: more than 64 fields in an item, for every
@@ -3662,11 +3885,18 @@ an answer to an unknown or expired id is dropped.
     request waits for a successful `vault.owner-check`. Answered to every
     owner-device request outside the hold's allow list, to requests held
     for approval when the hold begins, and to a `settings.set` that
-    would turn the hold off, which only a check may do (§3.6.7).
+    would turn the hold off, which only a check may do (§3.6.7);
+  - and (0.24.0) `gateway_error`: `push.register` could not complete at
+    the push gateway (unreachable, timed out, `5xx`, the gateway
+    refused the vault's attestation, or, 0.24.1, any other answer but a
+    well-formed `201` and §14.1's three `400` codes), with body
+    `{retry_after?}`; the app tries again later, after `retry_after` if
+    present (§14.1).
 - A request answered with an error changes no state, except the password
   backoff, the spent UTK and the audit log and feed entries of §3.5.3,
   and, for a failed owner check, the PIN backoff and the check's
-  `failures` (§3.6.4).
+  `failures` (§3.6.4), and, for a failed `push.register` that reached
+  the gateway, the `push_registrations` window (§14.1, 0.24.1).
   Objects that several
   owner devices can edit carry a `version` (an integer from 1, `0` before
   the first write); a change MUST name the version it was based on, and
@@ -3754,12 +3984,12 @@ an answer to an unknown or expired id is dropped.
 | `device.pair.reject` (app) | `{pairing_id}` | `{}` |
 | `device.pair.rejected` (to the new device) | — | `{}`: the owner rejected the pairing or transfer after its `hs.fin` (0.10.5); sealed under the handshake's epoch, on the device's token from `hs.init`, as `device.paired`; the device stops waiting (§6.7) |
 | `device.paired` (to the new device) | — | `{device_id, role, vault_id, release, release_number, token, session_expires_at?, transfer?, credential_version?, user_guid?}` (the release the vault runs under); `token`: the device's standing token (§7.1); it replaces the request token of a pairing's or transfer's `hs.resp` (0.10.3), and after enrollment or recovery, whose `hs.resp` already carries one, it is a fresh one (0.10.4); `transfer: true`, the credential's `credential_version` and (0.17.0) the member's `user_guid`, which its unlocks need, for a transferred app only (§6.7.1) |
-| `device.list` (app, desktop) | `{}` | `{devices: [{id, kind, state, name, ik, profile?, created_at?, last_active_at?, session_expires_at?}]}` |
+| `device.list` (app, desktop) | `{}` | `{devices: [{id, kind, state, name, ik, profile?, created_at?, last_active_at?, session_expires_at?, push?, signer?}]}`; `push` (0.24.0) only on the app's entry while it has a registration: the push state of §14.1; `signer` (0.27.0) only on an Android app's entry with a recorded signer: `{class: "vettid" \| "google_play" \| "development", digest: "<64 hex>"}`, the vault's signer binding (§11.7.1) |
 | `device.unlink` (app) | `{device_id}` | `{}`; `forbidden` for the app itself (0.9.0: it leaves by a transfer or a recovery) |
 | `device.unlinked` (to the unlinked device, best effort) | — | `{reason?}`: `"transferred"` for the old app of a transfer (§6.7.1), `"replaced"` for the old app of a recovery (§11.11.5) |
 | `device.transfer.create` (the holder) | `{}` | `{transfer_id, link, exp}`; `exists` while a transfer is open; `credential_frozen` or `rotation_required` during an alarm (§6.7.1) |
-| `device.transfer.pending` (to the holder) | — | `{transfer_id, name, sas}`; `name` is the new app's self-asserted `profile.name` |
-| `device.transfer.approve` (the holder) | `{transfer_id, credential, utk_id, sealed{password, pin}}` | `{}`: the transfer is complete (0.10.3; was `{exp}`); `bad_pin`, `backoff`, `bad_password`, `stale_credential`, `credential_frozen`, `utk_invalid` |
+| `device.transfer.pending` (to the holder) | — | `{transfer_id, name, sas, signer?, signer_changed?}`; `name` is the new app's self-asserted `profile.name`; (0.27.0, Android) `signer` is the attested class of the new app's signer and `signer_changed` whether its digest differs from the vault's binding (§11.7.1) |
+| `device.transfer.approve` (the holder) | `{transfer_id, credential, utk_id, sealed{password, pin}, signer?}` | `{}`: the transfer is complete (0.10.3; was `{exp}`); `bad_pin`, `backoff`, `bad_password`, `stale_credential`, `credential_frozen`, `utk_invalid`; (0.27.0) `signer`, the new app's class, is REQUIRED when the pending said `signer_changed: true`, else `signer_unconfirmed` (§11.7.1) |
 | `device.transfer.reject` (the holder) | `{transfer_id}` | `{}`; cancels the transfer before or after the scan, until the approval; after the new app's `hs.fin` it gets `device.pair.rejected` (0.10.5) |
 | `device.session.request` (desktop, agent) | `{seconds?}` (60–86,400, default 3,600) | `{request_id, exp}` |
 | `device.session.pending` (to apps) | — | `{request_id, device_id, role, name, seconds, exp}` |
@@ -4134,6 +4364,17 @@ item.
 | `message.delete` | `{connection_id, message_id}` | `{}`; local only |
 
 The D→V messaging types are sent by `app` or `desktop` devices.
+
+**Links** (0.24.0, owner review of 2026-10-10). `text` is plain text;
+the vault neither parses nor rewrites it. Clients make only `https://`
+URLs tappable; before opening one they show its host and ask, then hand
+the URL to the operating system, so an Android App Link or an iOS
+Universal Link opens the app verified for that domain and any other link
+opens the browser. URLs of every other scheme, custom app schemes
+(`someapp://`) included, are shown as text and never opened: any app can
+claim a custom scheme. This is how connections, and later services
+(their service vaults), reach the member through VettID's notification
+channel (PUSH-GATEWAY §12).
 
 ### 10.6 Credential (§3.5)
 
@@ -4994,7 +5235,11 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `device.transfer.approved`, `device.transferred`,
   `device.transfer.aborted`, `device.transfer.attestation_failed`
   (`ref` = `transfer_id`), `device.replaced` (`device_id` = the old app a
-  recovery removed) (§6.7.1, §11.11.5); `item.added`, `item.updated`, `item.deleted`,
+  recovery removed) (§6.7.1, §11.11.5); `device.signer_bound` (`ref` =
+  the class; 0.27.1: `device_id` = the new app at a transfer or a
+  recovery, none at enrollment or a bind by chain), `device.signer_changed` (`device_id` = the new app, `ref`
+  = `<old class>:<new class>`), `device.signer_refused` (`ref` =
+  `unpinned` or `unbound`; no `device_id`) (§11.7.1, 0.27.0); `item.added`, `item.updated`, `item.deleted`,
   `item.sensitivity_changed`, `item.revealed` (`ref` = `item_id`),
   `tag.changed` (`ref` = the registry's new version) (§10.7, §10.8);
   `settings.changed` (`ref` = the new version); `account.name_requested`,
@@ -5049,6 +5294,11 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `wallet.address_issued` (`ref` = `wallet_id`), `wallet.signed`
   (`ref` = `txid`) (§10.18); `audit.exported` (`device_id` = the app,
   `ref` = the export summary; History export, below, 0.22.0);
+  `push.registered` (`device_id` = the app, `ref` = `fcm` or `apns`),
+  `push.unregistered` (`device_id` = the app, `ref` = `app`,
+  `transferred` or `replaced`), `push.token_gone` (`device_id` = the app, `ref` =
+  the gateway's code, `token_gone`, `token_invalid` or `blob_invalid`)
+  (§14, 0.24.0; never one entry per wake);
   `drop.suppressed`;
   and `drop.<reason>` for every message the vault dropped
   or refused (§6.3, §6.6, §7.3, §8.4), with the runtime's reason, such as
@@ -5337,6 +5587,8 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
   `wallet.signed` (`ref` = `txid`), `credential.alarm` (priority
   `urgent`, `ref` = `alarm_id`), `device.transferred` (`ref` =
   `transfer_id`), `device.replaced` (`device_id` = the old app),
+  `device.signer_changed` (priority `high`, `ref` as in the audit log;
+  §11.7.1, 0.27.0),
   `credential.reset`, `owner_check.failed` (priority `high`, `ref` =
   `pin` or `password`), `connection.asks_paused` (priority `high`;
   §10.4.1, 0.23.0), `owner_check.locked` (priority `urgent`)
@@ -7388,7 +7640,9 @@ size (§11.4).
 - **Provisional vaults.** A new vault stays **provisional** until
   `vault.enroll.confirm` arrives. If no confirmation arrives within 24 h, a
   new enrollment for the same member MAY replace it. A confirmed vault MUST
-  NOT be replaced: the enclave answers `vault_exists`.
+  NOT be replaced: the enclave answers `vault_exists`. (0.27.4: the
+  enclave decides this from stored objects the host serves, so the rule
+  holds against the member API and apps, not against the host, §13.3.)
 - **Re-enrollment.** The API assigns `vault_id` once per member: a new
   enrollment carries the member's existing `vault_id` unless the vault was
   deleted. For an enrollment whose `vault_id` already holds a vault, the
@@ -7397,6 +7651,10 @@ size (§11.4).
   otherwise replaces it. The enclave also keeps its own index from a member
   to a vault and applies the same rule to a different `vault_id` of the
   same member.
+- **Signer binding** (0.27.0). The enclave records the signing-
+  certificate digest of the enrolling app's attestation with its device
+  key; it is the vault's signer binding from the first header on
+  (§11.7.1). A replaced provisional vault's binding is gone with it.
 - **App state.** The app stores `vault_id`, the pinned bundle, the release
   and `state_seq` (§13.2).
 - **Release.** The enrolling instance's release becomes the vault's
@@ -7430,7 +7688,10 @@ the app verified, exactly as in `vault.enroll` (§11.3); the host supplies
 the document (§11.5). `release_update` is present only when the member approved a release update
 (§11.10.3). The request is padded to exactly 12,288 bytes (§5.4).
 
-`device_assertion` is REQUIRED (§11.7). `sig` covers the following string,
+`device_assertion` is REQUIRED (§11.7). (0.27.0) On Android it MAY
+carry `chain`, which an app sends while the vault has not recorded its
+signer (§11.7.1); `chain` is not part of the signing string. `sig`
+covers the following string,
 where each `\n` is a literal newline:
 
 ```
@@ -7453,7 +7714,7 @@ App        Member API                   SQS/Parent                 Enclave
  |          check lease             |--enqueue--->|--vsock bytes--->|
  |<--202----|                       |             |  replay check; sealed header;
  |          |                       |             |  vault_id/user_guid; unlock key + sig;
- |          |                       |             |  device attestation sig; backoff; rollback
+ |          |                       |             |  device attestation sig; signer (§11.7.1); backoff; rollback
  |          |                       |             |  (§13.2); derive DEK; load state
  |          |<--response slot{request_id, envelope}----------------|
  |--GET /api/vault/requests/{id} (1 s poll)-->|                    |
@@ -7480,8 +7741,13 @@ one of:
   (§11.11.5). Since 0.16.0 `credential_backup` is always `true` there
   (a vault without a backup copy refuses that unlock with `no_backup`);
   apps MUST NOT rely on it and MAY ignore it.
-- `{"ok": false, "code": "bad_pin|backoff|unknown_device|attestation|state_rollback|vault_missing|manifest|wrong_release|release_key|retry|recovery_pending|no_backup",
-  "header_seq": m, "retry_after": <s>}` — `recovery_pending`: a recovery
+- `{"ok": false, "code": "bad_pin|backoff|unknown_device|attestation|signer_refused|state_rollback|vault_missing|manifest|wrong_release|release_key|retry|recovery_pending|no_backup",
+  "header_seq": m, "retry_after": <s>}` — `signer_refused` (0.27.0):
+  the device key's recorded signer is not pinned by this release, or
+  the key has no recorded signer and the request brought no valid
+  `chain`; decided after `sig` and the assertion verified and before
+  the PIN is tried, and not a PIN failure (§11.7.1).
+  `recovery_pending`: a recovery
   is in progress and the request did not cancel it (§11.11.4); it is
   answered before the PIN is tried and is not a PIN failure.
   `no_backup` (0.16.0): only to the app a recovery registered, when the
@@ -7787,7 +8053,8 @@ Android and iOS use the same challenge.
 ```json
 device_attest:    {"platform": "android", "chain": ["<b64 DER cert, leaf first>", "..."]}
                 | {"platform": "ios", "key_id": "<b64>", "attestation": "<b64 CBOR attestation object>"}
-device_assertion: {"platform": "android", "sig": "<b64 DER ECDSA P-256 signature over challenge>"}
+device_assertion: {"platform": "android", "sig": "<b64 DER ECDSA P-256 signature over challenge>",
+                   "chain": ["<b64 DER cert, leaf first>", "..."]}   # chain: optional (0.27.0, §11.7.1)
                 | {"platform": "ios", "assertion": "<b64 CBOR assertion>"}
 ```
 
@@ -7813,13 +8080,73 @@ challenge at every unlock.
     in StrongBox if the device has it and in the TEE otherwise, and sends the
     key's certificate chain.
   - The enclave verifies the chain up to a Google hardware attestation root
-    pinned in the image, then checks the attestation extension: the
+    pinned in the image (0.27.1: under the **chain rules** below), then
+    checks the attestation extension of the leaf: the
     challenge; attestation and key security level `TrustedEnvironment` or
     `StrongBox` (never `Software`); `RootOfTrust` with `deviceLocked` true and
     `verifiedBootState` `Verified`, or `SelfSigned` with an allowlisted
     `verifiedBootKey` (GrapheneOS, below); the `attestationApplicationId` package
-    name and signing-certificate digest of the VettID app; a signing-only,
+    name and signing-certificate digest of the VettID app (0.27.0:
+    exactly one digest, pinned by the release, §11.7.1); a signing-only,
     non-exportable key.
+  - **Chain rules** (0.27.1; enforced from staging release S10,
+    vettid-vault #64). "Verifies the chain" means all of these, the
+    same wherever a chain is verified: at an attestation (enrollment, a
+    transfer's `hs.init`, a recovery's register) and at a bind by chain
+    (§11.7.1).
+    1. The chain has 1–10 certificates, leaf first. Each is signed by
+       the next; the last is self-signed and carries the public key of
+       a pinned root (roots are compared by public key).
+    2. **Only the leaf (`chain[0]`) carries the attestation extension**
+       (KeyDescription, OID 1.3.6.1.4.1.11129.2.1.17). A chain in which
+       any other certificate carries it is refused. A certificate with
+       that extension is an app's own Keystore key, and what such a key
+       signs says nothing about a device. (The VettID app generates its
+       key without an attest key, so its chain never holds a second
+       one.)
+    3. Every certificate above the device's attestation certificate
+       (`chain[2]` and up, the root included) is a CA: basicConstraints
+       with cA, and keyCertSign where the certificate has a keyUsage.
+    4. Path-length constraints are honoured, the root's included: a CA
+       certificate has no more certificates between it and the leaf
+       than its pathLenConstraint allows.
+    5. `chain[1]`, the device's attestation certificate, is **not**
+       required to be a CA. The factory-provisioned attestation
+       certificates of older devices say cA FALSE with digitalSignature
+       only and sign their leaves all the same; the chains Google
+       publishes as test data for its own verifier include them. Rules
+       2 and 4 apply to it as to any certificate.
+    6. No other extension is examined. In particular the provisioning-
+       information extension of a remotely provisioned attestation
+       certificate (OID 1.3.6.1.4.1.11129.2.1.30) on `chain[1]` is
+       accepted.
+    7. **At an attestation, every certificate is within its validity
+       period** at the enclave's time. A bind by chain does not check
+       validity (§11.7.1 says why).
+
+    A chain that breaks a rule is a failed attestation, answered as
+    any other: `attestation` at enrollment, at a recovery's register
+    and at a bind by chain, and a dropped `hs.init` at a transfer
+    (§6.7.1 step 2).
+  - **A phone whose attestation certificates have expired cannot
+    attach a vault** (0.27.1; owner decision of 2026-10-11: "those
+    older devices will likely no longer get security updates and os
+    updates so i don't want to support them"). Rule 7 refuses it at
+    enrollment, as a transfer's new phone and at a recovery's register;
+    the app shows what it shows for any failed attestation. The phones
+    concerned are old ones whose factory-provisioned attestation
+    certificate has run out; a remotely provisioned phone gets fresh
+    certificates. An unlock verifies no chain, so a vault attached
+    while the certificates were valid keeps unlocking after they
+    expire (kept: owner decision, 2026-10-11; refusing at unlock
+    would lock members out of vaults they already have).
+  - **Chains seen on real phones** (0.27.1; recorded without device
+    identifiers). The chains of the app's own key generation on the two
+    test phones on 2026-10-11, a Pixel 10 Pro on GrapheneOS and a
+    Pixel 7 on stock Android, each had 5 certificates, a StrongBox key
+    and remotely provisioned certificates, 3,145 and 3,290 bytes of DER
+    in all, the attestation extension on the leaf only and every issuer
+    a CA. Both pass the rules.
   - Certificate revocation uses Google's attestation status list. The
     enclave fetches it over TLS it terminates itself, like relay traffic
     (§12.2; the parent forwards only TCP bytes to an allowlisted host), and
@@ -7832,9 +8159,17 @@ challenge at every unlock.
     `attestationVersion` 3 or later, and requires the key properties to be
     hardware-enforced: purposes within {SIGN, VERIFY} and including SIGN,
     EC P-256, origin GENERATED.
-  - The enclave stores the attested public key with that app's unlock key in
-    the sealed header. Each unlock carries a signature over `challenge` by
-    that key.
+  - The enclave stores the attested public key and (0.27.0) the signing-
+    certificate digest with that app's unlock key in the sealed header.
+    Each unlock carries a signature over `challenge` by that key, and the
+    recorded digest must still be pinned (§11.7.1).
+  - (0.26.0) The package name is the channel's `android_package`
+    (§11.10.8): `com.vettid.app` in production, `com.vettid.app.staging`
+    in staging. It is checked where an attestation is verified
+    (enrollment, a transfer, a recovery's register). An unlock and a
+    release approval check the stored key's signature and the stored
+    chain's revocation status, not the package again; (0.27.0) they do
+    check that the key's recorded signer is still pinned (§11.7.1).
 - **GrapheneOS** (owner decision, 2026-10-03; 0.9.0). GrapheneOS runs
   with the device's bootloader locked to its own signing key, so the
   attestation reports `verifiedBootState` `SelfSigned`. The enclave
@@ -7900,6 +8235,397 @@ depends on it.
 
 Desktops and agents have no platform attestation and do not unlock.
 
+#### 11.7.1 Signer binding (Android, 0.27.0)
+
+(Owner decision of 2026-10-11, ANDROID-PLAN 0.1.36 §7 "Signing and the
+two distributions"; §15 item 35. Approved by the owner 2026-10-11.)
+
+A release may pin more than one Android signing certificate: VettID's
+own, which signs the F-Droid and direct builds, and, once the app is
+on Google Play, the Play app-signing certificate, whose key Google
+holds. Until 0.27.0 the vault treated them as one set: an attestation
+was accepted if its signing digest was any pinned one, the digest was
+not kept, and nothing told the member which signer their vault's app
+has. From 0.27.0 **each vault is bound to the signer of its app**.
+
+**What an unlock proves, and what it does not.** An unlock carries no
+fresh attestation. It carries a signature by the device key that was
+attested when the app enrolled, was transferred to or registered for a
+recovery (above). That key cannot leave the installation that
+generated it, and Android replaces an installation only with one
+signed by the same key, so the signer of whatever unlocks is the
+signer recorded at attestation. The binding therefore adds no check
+that a correct phone could fail by itself. It adds what the vault did
+not have:
+
+- the signer is **recorded**, and shown to the member (below);
+- a signer that a release **stops pinning** stops unlocking (before
+  0.27.0, a key attested under a signer kept unlocking on a release
+  that no longer listed it);
+- a **change of signer** happens only where the owner proves the PIN
+  and the credential password, is confirmed explicitly in a transfer,
+  and is audited;
+- any present or future operation that presents an attestation for a
+  bound vault outside those flows is refused.
+
+It does not protect a member who installs from Google Play against a
+build signed by Google: that build has the bound signer (ANDROID-PLAN
+§7).
+
+**The signer of an attestation.** The attestation's
+`attestationApplicationId` MUST contain exactly one signing-certificate
+digest, and it MUST be pinned by the running release. (Before 0.27.0:
+one or more, all pinned. VettID's builds have one signer; an
+attestation that reports several is refused with the code of a failed
+attestation. 0.27.1: the entries are counted, not the distinct values,
+so an attestation that lists the same pinned digest twice is refused
+too.) That digest is the app's **signer**. Each pinned signer
+has a **class**, set in the release configuration (§11.10.8):
+
+| Class | Meaning | The app's text (ANDROID-PLAN §7) |
+|---|---|---|
+| `vettid` | Signed with a key only VettID holds: the F-Droid and direct builds | "F-Droid or direct (signed by VettID)" |
+| `google_play` | Signed with the Play app-signing key, which Google holds | "Google Play (signed by Google)" |
+| `development` | A development or automation key; refused in a production release's configuration | "Development build" |
+
+The class is an identifier from this table, not free text: the vault
+never supplies member-facing wording.
+
+**Recording.** The enclave stores the signer digest in the device
+binding, beside the attested public key and the chain's serial numbers,
+in the sealed header, for every Android key it attests: at enrollment
+(§11.3), at a transfer's `hs.init` (§6.7.1) and at a recovery's
+register (§11.11.3). The vault has one app (§6.7), and **the vault's
+signer binding is the signer recorded for that app's key**.
+
+- **Enrollment** binds the vault to the enrolling app's signer; audit
+  `device.signer_bound` (`ref` = the class). (0.27.1) The entry
+  carries no `device_id` at enrollment and at a bind by chain (below);
+  at a transfer or a recovery that binds a vault with no recorded
+  signer, its `device_id` is the new app.
+- **Unlock** (§11.4) and a **release-update approval** (§11.10.3), the
+  two operations that verify a device-key signature, additionally
+  require, after the signature has verified, that the key's recorded
+  signer is pinned by the running release. If it is not, the result is
+  `signer_refused` (below).
+- **Nothing else changes the binding** except the two flows that
+  replace the app, both of which prove the owner's PIN and credential
+  password:
+  - **Direct transfer** (§6.7.1). The new app's attestation gives its
+    signer. `device.transfer.pending` carries `signer` (the new app's
+    class) and `signer_changed` (whether its digest differs from the
+    binding; `false` when the vault has no recorded signer, the staging
+    case below, where the transfer simply binds and is audited
+    `device.signer_bound`). When it differs, `device.transfer.approve` MUST carry
+    `signer` equal to the new app's class; without it the vault
+    answers `signer_unconfirmed`, before it spends the UTK or tries
+    the PIN, and the transfer stays open. The binding moves to the new
+    app's signer in the flush that completes the transfer.
+    As implemented (0.27.1):
+    - **A `signer` that is not the new app's class is
+      `signer_unconfirmed` in every case**, also when nothing changed
+      and when the new app has no signer (iOS): the holder confirmed
+      something the vault is not about to do. An approval without
+      `signer` is refused only when the signer changed.
+    - **Changed is decided by digest, confirmed by class.**
+      `signer_changed` compares digests; the confirmation names a
+      class. The two are equivalent while each class has one pinned
+      certificate, which every channel file has today. If a release
+      ever pinned two certificates of one class, a transfer between
+      them would say `signer_changed: true` with the class the vault
+      already has, be confirmed by that same class and be audited
+      `<class>:<class>`: the holder could not tell which certificate.
+      A release that does so needs the confirmation to name the digest
+      first (a wire change, then). Owner decision, 2026-10-11: keep
+      the confirmation by class, on that condition.
+    - **Across platforms.** When the new app has no signer (Android to
+      iOS), `device.transfer.pending` carries neither `signer` nor
+      `signer_changed`, no confirmation is asked, and the binding ends
+      with the transfer, unaudited: the vault has no recorded signer
+      afterwards. When the old app has none (iOS, or an unbound
+      vault) and the new one is an Android app, `signer_changed` is
+      `false` and the transfer binds, audited `device.signer_bound`.
+      What that means for a later transfer back to Android is decided
+      below ("Across an iOS app").
+  - **Recovery** (§11.11). The registered key records its own signer
+    at register; the vault's binding does not move then. It moves when
+    `credential.recover` succeeds and the old app is removed
+    (§11.11.5). A recovery that is cancelled, expires or is voided
+    leaves the binding as it was.
+  - In both, when the digest changed, the vault audits
+    `device.signer_changed` (`device_id` = the new app, `ref` =
+    `<old class>:<new class>`, for example `vettid:google_play`) and
+    creates a feed item `device.signer_changed` of priority `high`
+    with the same two classes. The audit entry and the feed item carry
+    classes, not digests. (0.27.1) A pinned signer's class is the
+    running release's. For an old signer the running release no longer
+    pins, the old class is the one recorded with the binding when it
+    was made, and `unknown` if none was recorded (so `ref` may read
+    `unknown:vettid`).
+- A fresh attestation for a vault's app in any other operation (none
+  exists in 0.27.0; a later one that re-attests the device key would
+  be) MUST show the bound digest and is otherwise refused with
+  `signer_refused`, without changing the binding.
+- An enrollment never rebinds an existing vault: it is answered
+  `vault_exists`, or it replaces an unconfirmed provisional vault with
+  a new one (§11.3), which binds as any enrollment.
+
+**The refusal.** `signer_refused` is a code of `vault.unlock.result`
+(§11.4):
+
+- It is returned only inside the uniform sealed result, to a request
+  whose `sig` and `device_assertion` both verified, that is, to the
+  bound app itself. The member API and the parent see the same size
+  and path as for every other outcome (§11.4). Any other requester
+  gets what it got before: random bytes, or `attestation`.
+- It is decided before the PIN is tried and is not a PIN failure: it
+  neither counts toward nor resets the backoff (§11.8).
+- (0.27.1) **Order.** It is decided right after the device assertion
+  verifies: before `recovery_pending`, before `backoff` (a refused app
+  is answered `signer_refused` even while a backoff runs) and before
+  the header rollback check. Two consequences, stated plainly:
+  - **A refused app cannot cancel a recovery.** `cancel_recovery`
+    (§11.11.4) takes effect only after the PIN, which a refused unlock
+    never reaches. A member whose app is refused cancels a recovery
+    someone else started from the account site or the email's link.
+  - **The ways out of a refusal** are a recovery (§11.11), or an
+    unlock on a release that still accepts the key, for as long as
+    that release lives; a direct transfer needs an open vault, so an
+    unlock first. A vault whose **credential backup is off** has no
+    recovery (§11.11.1): once every release that accepts its key is
+    removed, that vault is lost. This is what removing a signer costs
+    ("A release that stops pinning a signer" below).
+
+  Both are **accepted as built** (owner decision, 2026-10-11):
+  another order would let a refused installation act on the vault.
+  Removing a signer therefore needs the same care and notice as
+  retiring a release, and a member whose vault is bound to it with
+  the backup off is told before it happens.
+- It is recorded in the sealed header's log, as the steps of a
+  recovery are (§11.11.6), at most once per 24 hours, and written to
+  the audit log at the next unlock that succeeds as
+  `device.signer_refused` (`ref` = `unpinned`, or `unbound` for the
+  case below). (0.27.1) The entry shares the recovery log's 64
+  entries, the oldest dropped first. It is **not written when the
+  stored header's `header_seq` is below the request's
+  `min_header_seq`** (a host serving an older header): the answer is
+  still `signer_refused`, but writing the entry would store the
+  rolled-back header one sequence number further on.
+- **It raises no clone alarm and no host alarm** (§3.5.9). The alarm
+  is for a second copy of the credential; it freezes the credential,
+  emails the member and forces a rotation. A signer refusal can only
+  reach the vault from the owner's own installed app, on a release
+  that does not pin its signer: a release that dropped a signer would
+  alarm every vault bound to it at once, each alarm false. A member
+  who deliberately changes store never meets the refusal at all: that
+  change goes through a transfer or a recovery, which rebind. And an
+  app the owner did not install but which carries the bound signer is
+  not something the vault can tell from the owner's. The owner learns
+  of a refusal from the app's message and the audit entry. OWNER
+  DECISION (2026-10-11): refuse and audit, no alarm.
+- The app's message: "This vault no longer accepts this installation
+  of VettID. Update the app, or recover your vault with a current
+  version."
+
+A transferred-to or recovering app whose signer is not pinned is
+refused as before 0.27.0: its attestation fails (§6.7.1 step 2,
+§11.11.3 check 6).
+
+**A release that stops pinning a signer** strands the vaults bound to
+it: they are refused at the release, including at the confirming
+unlock of a move into it (§11.10.4), until the member transfers or
+recovers to an app with a pinned signer (a release that still pins the
+old signer accepts the unlock as long as it lives). Removing a signer
+is therefore a decision of the same weight as retiring a release, with
+the same notice (VAULT-RELEASES §3.4 C6); adding one changes nothing for
+existing vaults.
+
+**Vaults enrolled before 0.27.0.** Their bindings hold no signer, and
+an unlock presents none. They are bound from the attestation they
+already made:
+
+- The Android `device_assertion` gains an optional member `chain`: the
+  certificate chain of the bound device key, the same certificates the
+  app sent at attestation (Android Keystore keeps them with the key).
+  An app of 0.27.0 or later sends it at every unlock while its
+  `device.list` entry shows no `signer`. Releases before 0.27.0 ignore
+  it (unknown members are ignored, above).
+- For a key with no recorded signer, the enclave verifies the chain as
+  at attestation (pinned root, the attestation extension's package and
+  exactly one pinned digest) with two differences: the leaf's public
+  key MUST equal the bound key and the chain's serial numbers MUST
+  equal the stored ones, and the challenge and the certificates'
+  validity periods are not checked again (both were when the chain was
+  first accepted, and the equal serials tie this chain to that one).
+  It then records the digest; audit `device.signer_bound`. A chain
+  that fails is answered `attestation`.
+  - (0.27.1) "As at attestation" is every check of §11.7 except those
+    two: the chain rules 1–6, the attestation version and security
+    levels, the key properties, the root of trust, the package and the
+    one pinned digest. **A chain the chain rules refuse leaves the key
+    unbound and is answered `attestation`**, including a chain that a
+    release before S10 accepted at attestation (one extended below an
+    attested key, changelog 0.27.1). Such a vault is attached again
+    with a genuine attestation, by a transfer or a recovery.
+  - (0.27.1) **Why validity is left out.** The certificates above the
+    leaf of a remotely provisioned key live about a week (on the test
+    phones on 2026-10-11 they ran to 2026-10-14 and 2026-10-21), so a
+    chain that was valid at enrollment has usually expired by the time
+    it is sent again. Checking validity here would refuse nearly every
+    vault this path exists for.
+  - (0.27.1) **When the binding is stored.** The binding and its
+    `device.signer_bound` entry are written with the unlock's next
+    header write. That is a successful unlock, **and also a wrong
+    PIN**, whose backoff count is a header write: a bind is kept even
+    when that same unlock then fails on the PIN. This is safe, because
+    the result does not depend on who sent the chain or on the PIN: it
+    is fixed by the certificates of the key that enrolled. An unlock
+    that ends with no header write (`recovery_pending`, `backoff`, a
+    rollback, `manifest`) leaves the key unbound, and the app sends
+    the chain again.
+  - (0.27.1) **Size.** The unlock request (12,288 bytes padded, §11.4)
+    has room for about 8,100 bytes of chain together with a
+    `release_update` and `cancel_recovery`, more than enrollment or a
+    recovery's register have, so every chain that was attested over
+    the alternate channel fits the unlock that re-sends it (real
+    chains are 3,100 to 3,300 bytes, §11.7). **Known limit:** a chain
+    attested in a transfer's `hs.init` travelled in a handshake
+    envelope, which is larger; such a chain above about 8,100 bytes
+    could not be sent again at unlock, and that vault would bind only
+    by a new transfer or a recovery. None is known.
+- A key with a recorded signer ignores `chain`.
+- **A key with no recorded signer and no valid `chain` is answered
+  `signer_refused`**, except on the staging channel, where it unlocks
+  unbound (staging vaults are disposable, and staging apps older than
+  0.27.0 exist). Staging accepts them from S10, the first staging
+  release with the rule, and refuses them from the staging release
+  after it (owner decision, 2026-10-11). No production vault is in
+  this case: 0.27.0 is in production release 1 (owner decision,
+  2026-10-11; VAULT-RELEASES 0.1.12 §5.2).
+  (0.27.1) **The exception is not a release constant.** No member of
+  the channel file turns it on: the image derives it from its
+  measured channel and release number (`staging` and release 10 or
+  lower), so a production file cannot express it and a later staging
+  file cannot bring it back. "No valid `chain`" means no chain at
+  all: a request that brings a chain which fails is answered
+  `attestation`, on staging too.
+
+**With the staging application id (0.26.0, §11.10.8 "Android
+package").** S10 carries both changes, and they compose: a staging
+vault enrolled under `com.vettid.app` is unbound, so its old build
+keeps unlocking it on S10 without a chain, exactly as "Moving the
+existing staging vaults" needs; it cannot bind by `chain`, because the
+chain's package is checked against S10's `android_package` and is the
+old one; and the transfer, recovery or new enrollment that attaches it
+to the `com.vettid.app.staging` build is a fresh attestation, which
+records the signer and binds it (no confirmation is asked, there being
+no earlier signer). A staging vault still unbound at the release after
+S10 has not been moved to the new build and is refused there.
+(0.27.1) So on staging **no vault ever binds by `chain`**: every vault
+from before S10 belongs to the old package, whose chain S10 answers
+`attestation`. The chain path is exercised by the vault's own tests
+on its test PKI, not by a staging phone.
+
+This is acceptable because the digest is not taken on trust from
+whatever unlocks first. It is read from the certificate that Google's
+attestation root signed for the very key that enrolled, so it is the
+signer of the app that enrolled, whoever presents it and whenever.
+
+**What the member sees.** The app's own entry in `device.list` (§10.3)
+carries `signer: {class, digest}` for an Android app with a recorded
+signer: `class` from the table above, `digest` the 64 lowercase hex
+digits of the certificate's SHA-256 (public: it is in every APK). The
+app shows the class in its vault status as "Installed from: …"
+(ANDROID-PLAN §7); the digest is for a details view and for support,
+not for the status line. Desktops reading `device.list` see the same
+member. The recovering app's reduced answers (§11.11.5) carry nothing
+of it.
+
+**iOS.** The rule is Android-only for now. An iOS release pins one App
+ID (team and bundle), there is one distribution path, and App Attest
+reports no signing certificate; an iOS binding has no `signer` and
+`device.list` carries none. If a second iOS path were ever pinned (a
+second App ID), the release configuration would list the App IDs with
+classes as it lists Android signers, the binding would record the App
+ID attested, and every rule above would apply with "App ID" for
+"signer digest".
+
+(0.27.1) **Across an iOS app.** As implemented, the vault's
+binding is the signer recorded for its one app's key, so a transfer
+(or a recovery) to an iOS app leaves the vault with no recorded
+signer. A later transfer back to an Android app of any pinned signer
+then needs no confirmation and is audited `device.signer_bound`, not
+`device.signer_changed`: the change of signer that §11.7.1 exists to
+show passes unseen if an iOS app was in between. No iOS app exists, so
+nothing can reach this today. **Decided (owner, 2026-10-11, as
+recommended; not yet implemented):** before the first release that
+accepts an iOS app, the vault keeps the last recorded Android signer
+across an app without one, and a transfer or recovery to an Android
+app with another signer is then `signer_changed`, confirmed and
+audited as between two Android apps. It is a vault change to make
+before iOS; nothing changes for S10 or production release 1.
+
+**Tests required.**
+
+- Attestation: one pinned digest accepted and recorded; two digests,
+  both pinned, refused; an unpinned digest refused; the class of each
+  configured signer.
+- Enrollment binds and audits `device.signer_bound`; `device.list`
+  shows `signer` on the app's entry only.
+- Unlock and a release-update approval with a bound signer the running
+  release pins: unchanged. With a bound signer the release does not
+  pin (the same vault moved to an image whose configuration omits it):
+  `signer_refused`, sealed and sized as any result; the backoff
+  counters unchanged; no alarm opened, nothing reported to the host;
+  one header-log entry per 24 hours; `device.signer_refused` in the
+  audit log after a later successful unlock.
+- A wrong `device_ik` signature or a wrong assertion never yields
+  `signer_refused`.
+- Transfer to the same signer: no `signer` needed in the approval, no
+  `device.signer_changed`. To another pinned signer:
+  `device.transfer.pending` shows `signer_changed: true`; an approval
+  without `signer`, or with the wrong class, is `signer_unconfirmed`
+  with the UTK unspent and the PIN backoff untouched; with it, the
+  transfer completes, the binding is the new signer, and
+  `device.signer_changed` is audited with both classes and in the
+  feed. To an unpinned signer: dropped as today.
+- Recovery to another pinned signer: the binding is unchanged after
+  register, after a cancel and after an expiry; changed, audited and
+  in the feed after `credential.recover`; the old app's key no longer
+  unlocks. (0.27.1) "After an expiry" is an expiry **before** the
+  register: the vault removes a recovery by time only when a register
+  arrives too late. A registered recovery's record and unlock key stay
+  in the header until it completes, is cancelled or is replaced by a
+  new request (existing behaviour, §11.11); only the registered app's
+  first handshake stops being accepted at the expiry.
+- A header written before 0.27.0: with a valid `chain`, bound and
+  audited; with a chain naming another package than the channel's
+  `android_package`, `attestation`; a transfer from an unbound vault
+  shows `signer_changed: false`, needs no `signer` and binds; with a chain for another key, with other serials, with two
+  digests or with an unpinned digest, `attestation`; without a chain,
+  `signer_refused` on a production-channel build and an unbound unlock
+  on a staging-channel build; a bound key ignores `chain`.
+- Release configuration (§11.10.8): entries without a class, an
+  unknown class, a duplicate digest, `development` in the production
+  file, and the bare-string form are each refused by the release
+  build.
+- On real phones (staging): a Pixel on stock Android and one on
+  GrapheneOS enroll and show the expected class; ~~a vault enrolled on
+  the previous staging release binds by `chain` at its first unlock~~
+  (0.27.1: cannot be run on S10, "With the staging application id"
+  above; replaced by the next item);
+  the attestation of the app as built reports exactly one digest
+  (to confirm, also for an app whose signing key was rotated, which no
+  VettID build is).
+- (0.27.1) On real phones at S10, as run on 2026-10-11: a vault of the
+  old package (`com.vettid.app`) moved to S10 keeps unlocking there,
+  unbound; a direct transfer to the `com.vettid.app.staging` app binds
+  it (`device.signer_bound`), with no confirmation asked; a transfer
+  between apps of staging's two signers (`vettid` and `development`)
+  shows the change and is refused without the confirmation; the app's
+  vault status shows the class. The app as built on both test phones
+  reported exactly one digest.
+
 ### 11.8 Rate limits and backoff
 
 **Member API limits:**
@@ -7932,6 +8658,7 @@ envelopes.
 | Unknown or expired `etk_kid` | The enclave reports `etk_unknown`; the response slot carries `code: "etk_unknown"` and no envelope (§11.5). The app refetches and retries. |
 | Decryption, binding, signature or attestation failure | Random bytes of the result's size, or the uniform sealed result (`attestation`). The API cannot tell which. |
 | Bad PIN, backoff, rollback | The uniform sealed result (§11.4) |
+| The app's signer is not pinned by the release, or was never recorded (0.27.0) | The uniform sealed result, `signer_refused` (§11.7.1). Not counted as a PIN failure; no alarm. |
 | State write conflict | The vault locks (§12.3) and the result says `retry`. |
 | The vault's release is not running | `503 release_starting` with `retry_after`; the app retries (§11.10.5). |
 | Stale, invalid or unsigned manifest; the host withheld the document or supplied another; hash or serial mismatch (§11.5) | Result code `manifest`; the app refetches the manifest and retries once. Not counted as a PIN failure. |
@@ -8623,8 +9350,26 @@ recorded in the build's measurements:
 - `retirement_principal` and `retirement_window_days` (§11.10.7; a
   channel file with another window than its channel's, 30 or 7 days, is
   malformed);
-- the Android signing-certificate digests (§11.7);
-- the relay URL (§11.3).
+- (0.26.0) `android_package`, the Android package name accepted in key
+  attestation (§11.7; "Android package" below);
+- `android_signers`, the Android signing certificates accepted in key
+  attestation for that package (§11.7): since 0.27.0 a list of 1 to 4
+  objects `{"digest": "<64 lowercase hex>", "class": "vettid" |
+  "google_play" | "development"}` with distinct digests, the class
+  being what the vault reports for a vault bound to that signer
+  (§11.7.1). The bare list of digest strings used before 0.27.0 is
+  malformed from the first release that carries the rule, and so is
+  `development` in the production file. Production release 1: one
+  entry, VettID's own certificate, class `vettid`; staging: the
+  staging certificate (`vettid`) and the automation certificate
+  (`development`);
+- the relay URL (§11.3);
+- (0.24.0) the push gateway URL (`https://push.vettid.org` in
+  production, `https://push.staging.vettid.org` in staging; optional in
+  dev, where it names the gateway stand-in, PUSH-GATEWAY §10.4). Without
+  it `push.register` is answered `unavailable` (§14.1);
+- (0.26.0) `features`, the optional features the image registers
+  ("Feature allowlist" below).
 
 GrapheneOS verified-boot keys and the vendor roots stay in code and are
 the same for every channel. A release build MUST refuse a channel file
@@ -8639,6 +9384,231 @@ production code; each image refuses sealing keys outside its channel's
 account (§11.10.2); and production keys' policies name production PCR0s
 only (§11.10.7). Apps pin per channel too: a production app pins only the
 production manifest keys and URL.
+
+**Feature allowlist (0.26.0; owner decision D4, §15 item 34).** Until
+0.26.0 every image registered every feature of §10, whether an app used
+it or not. From 0.26.0 a channel file carries `features`, the list of
+the **optional** features its images register. The names are the
+feature packages' own (vettid-vault `features/<name>`):
+
+| Feature | Its types | Section | A connection can send it |
+|---|---|---|---|
+| `actions` | `action.*` | §10.14 | `action.offered`, `.invocation`, `.result` |
+| `calls` | `call.*` | §10.10 | `call.offer`, `.answer`, `.end`, `.ice`, `.ringing` |
+| `intro` | `intro.*` | §10.15 | `intro.offer`, `.answer`, `.connect`, `.invite`, `.link`, `.closed` |
+| `leash` | `leash.*`, `agent.request` | §10.11 | nothing (apps, desktops and agents only) |
+| `location` | `location.*` | §10.16 | `location.update`, `.shared`, `.stopped`, `.requested`, `.snapshot` |
+| `presence` | `presence.*` | §10.17 | `presence.ping`, `.pong` |
+| `wallet` | `wallet.*` | §10.18 | nothing directly (only through `actions`) |
+
+The last column is what a connection may send today to a vault whose
+owner never used the feature (the `From` lists of each package's types).
+
+The other features are **always registered and are not names of the
+list**: `audit`, `feed`, `messaging`, `credential`, `items`, `grants`,
+`critical` and `connauth`, beside everything the vault core registers
+itself (lifecycle, sessions, devices, connections, settings, the
+account, push). The v1 app uses all of them.
+
+- **The file.** `features` is an array of zero or more of the seven
+  names, each at most once, in ascending byte order, so that one set has
+  one file. It is embedded with the rest of the channel file: the list
+  is in the tagged tree, in the reproducible build and in PCR0.
+- **Not listed means not registered.** The image does not construct the
+  feature. Then:
+  - each of its types is an unknown type: a message without `re` is
+    answered with `error` code `unsupported_type` and one with `re` is
+    dropped, as §5.3 says for any type the vault does not know, with the
+    same answer to an app, a desktop, an agent and a connection;
+  - it has no state: no `features.<name>` entry is created in the
+    vault's state, and nothing is migrated for it;
+  - none of its hooks run (activity, a connection or device removed,
+    the owner hold, a settings change, deletion), and it sends nothing;
+  - what others do through it is unavailable. Without `leash`: a share
+    rule for an agent is answered `not_found` (as today when no feature
+    keeps agent rules), and `device.pair.create` with `role: "agent"`
+    is answered `bad_request`, as an unknown role is (new: an agent
+    without LEASH could do nothing). Without `wallet`: the wallet
+    actions of §10.14 answer `unavailable` (as today), so `actions` may
+    be listed without `wallet`. Without `location`: `settings.set` of a
+    `location.history.*` member is answered `bad_request` (new;
+    0.27.1: matched by the prefix `location.history.`, so a member of
+    that prefix the vault does not know is refused the same way);
+    `settings.get` is unchanged.
+- **No list in the protocol.** No message carries a list of features or
+  types today, and 0.26.0 adds none: an app or a peer learns that a
+  feature is absent from `unsupported_type`. The list is public all the
+  same: it is in the tagged channel file, and a release's log entry
+  names each feature the release turns on.
+- **Turning a feature on.** A later release of the channel may add a
+  name. A vault that moves into it has no entry for the feature, so the
+  feature starts empty, as in a new vault, and its entry is written with
+  a later flush. The member is asked nothing beyond the release approval
+  (§11.10.3). This is what already happens when a release adds a
+  feature. Production adds a name only for a feature that passed
+  STAGING-DEVELOPMENT-PLAN §2.4.
+- **Never off.** A channel's list only grows. A release whose list
+  lacks a name that the channel's previous release listed is refused by
+  the release check (below), because members may hold that feature's
+  state. An image that nevertheless meets a `features.<name>` entry of
+  a feature it does not register MUST carry the entry unchanged through
+  every flush and move, and MUST NOT read, migrate or delete it.
+- **The release check** (`releasecfg check`, the release build's gate):
+  1. `features` missing, not an array of strings, a placeholder, a name
+     that is not one of the seven (an always-registered feature's name
+     included), a repeated name or names out of order: malformed.
+  2. Given the channel file of the channel's previous release (the
+     release workflow reads it from the tag
+     `release/<channel>/<N-1>`), a list that lacks one of that file's
+     names: refused. A previous file from before 0.26.0 counts as
+     listing all seven. Production release 1 has no previous release. A
+     rebuild from the tag alone runs rule 1 only.
+     (0.27.1, as built) "The previous release" is the **highest
+     existing tag `release/<channel>/<m>` with m below N**, not
+     literally N−1, so a skipped number does not skip the check; a
+     release above 1 with no such tag is refused. Rule 2 runs **in the
+     release workflow's gate** (`releasecfg check -previous <file>`),
+     on a release tag only. It is not in the image and not in a dry
+     run: nothing in an image knows its predecessor's list.
+  3. (0.27.1, as built) A placeholder in `android_package` is reported
+     as a missing value, like any placeholder (the build is refused as
+     incomplete); a value other than the channel's is malformed.
+- **The development build** has no channel file and registers
+  everything, unless its test configuration names a list, so that the
+  app is run against production's list before a production release.
+
+The initial lists:
+
+| Feature | Staging (S10) | Production release 1 | Why |
+|---|---|---|---|
+| `audit`, `feed` | always | always | History and the Notifications screen; every feature records through them |
+| `credential` | always | always | The Protean Credential (ANDROID-PLAN D3) |
+| `messaging`, `items`, `grants`, `critical`, `connauth` | always | always | ANDROID-PLAN D3 and phase A5: connections and messaging, items, share rules, grants, critical-item approvals, member authentication. The app sends `message.*`, `item.*`, `share.*`, `grant.*`, `critical-secret-use.*` and `connection.authenticate.*` |
+| `calls` | on | **off** | No app code; the calling service is not built (CALLING-SERVICE). Phase 2 of STAGING-DEVELOPMENT-PLAN §5 |
+| `leash` | on | **off** | No connector, agent or desktop works with this vault (LEASH-IMPLEMENTATION); the app sends no `leash.*`. Phase 3 |
+| `wallet` | on | **off** | No app code. Phase 4 |
+| `location` | on | **off** | No app code. Phase 5 |
+| `presence` | on | **off** | No app code. Phase 6 |
+| `actions`, `intro` | on | **off** | ANDROID-PLAN §4 lists shared actions and introductions among the later screens; the app sends no `action.*` or `intro.*`, and shows what arrives as "Not available in this version of the app" |
+
+So `staging.json` has `"features": ["actions", "calls", "intro",
+"leash", "location", "presence", "wallet"]`, which is what S1–S9
+registered (S10 changes no behaviour), and `prod.json` has
+`"features": []`.
+
+Not switched by this list: pairing a desktop and its access sessions
+(§6.7, §6.8) are core operations with no feature package. They stay
+answered in every release (§15 item 34, open for the owner).
+
+**Android package (0.26.0; owner decision D5, §15 item 34).** Until
+0.26.0 every image accepted the one package `com.vettid.app` (a constant
+in the enclave's code), and the staging app differed from the production
+app only in its signing key, so a phone could hold one of them. From
+0.26.0 the package is the release constant `android_package`:
+
+| Channel | `android_package` |
+|---|---|
+| production | `com.vettid.app` |
+| staging | `com.vettid.app.staging` |
+
+A channel file names exactly its channel's value and any other is
+malformed (as for `push_url`), so a production image can never accept
+the staging app's package, nor the reverse. It is one value, not a list.
+The development enclave's further packages (its device policy file) are
+unchanged, and the iOS app ID stays a constant in code.
+
+What follows the package, each changing with the staging release that
+first pins the new value (S10):
+
+| Where | Until S10 | From S10 |
+|---|---|---|
+| Key attestation in the staging image (§11.7) | `com.vettid.app` | `com.vettid.app.staging` |
+| The app's `staging` build type (ANDROID-PLAN §5) | no id suffix | `applicationIdSuffix ".staging"` |
+| `assetlinks.json` of account.staging.vettid.org (the same-device setup link, §11.12.1) | package `com.vettid.app` with the production upload key's digest only, so the staging build's link is not a verified App Link | package `com.vettid.app.staging` with the digests of staging's `android_signers`. Production's account site is unchanged |
+| `assetlinks.json` of relay.vettid.org (invitation links, §6.4) | `com.vettid.app` with production's and staging's digests (RELAY-PROTOCOL §6.11) | Unchanged for now: the relay is production's and is shared (STAGING-DEVELOPMENT-PLAN §3 risk 6). The staging app's invitation links open the relay's `/connect` page and its `vettid:` link, and Android asks which app when both are installed. A second statement for the staging package needs a relay release (§15 item 34) |
+| The staging push gateway's accepted Android app ids (`PUSH_FCM_APP_IDS`, PUSH-GATEWAY §10.4) | `com.vettid.app` | `com.vettid.app.staging`. The app's `push.register` `app_id` is its application id (§14.1) and follows by itself |
+| The staging Firebase project's Android app (PUSH-GATEWAY §14.1), when it exists | not created | `com.vettid.app.staging` |
+| Google Play and F-Droid | | Production's id only; the staging build is not published to a store |
+
+**Moving the existing staging vaults** (four: the test members' and the
+owner's). To Android a new package is a different app. The new staging
+build installs beside the old one with its own Keystore and has none of
+its keys; no update carries a vault across.
+
+- **S10 pins only `com.vettid.app.staging`; no release accepts both
+  ids.** This locks nobody out, because the package is checked only when
+  an attestation is verified (§11.7). The old staging build keeps
+  unlocking its vault on S9, can approve the move to S10 and keeps
+  unlocking it there. On S10 it can no longer enroll, receive a transfer
+  or register for a recovery.
+- Per vault, in this order:
+  1. Move the vault to S10 with the old build. (S9 pins the old package:
+     the new build can attach to nothing that is still sealed to S9.)
+  2. Install the new build. Do not uninstall the old one first: that
+     erases the only keys the vault knows.
+  3. Attach the vault to the new build, one of: a **direct transfer**
+     (§6.7.1), at once, when the new build is on another phone that can
+     scan the old build's QR, **or on the same phone with the pasted
+     code** (0.27.1; the simplest path, done by the owner on
+     2026-10-11: in the old build, show the transfer code and copy it;
+     in the new build, "Paste the code instead"; approve in the old
+     build with the PIN and the credential password); a **recovery** (§11.11) on the same phone,
+     24 hours, its code typed (§11.11.10) or scanned from another
+     screen; or, since staging vaults are disposable
+     (STAGING-DEVELOPMENT-PLAN §2.1), **delete the vault and enroll
+     again**.
+  4. Uninstall the old build.
+- A vault left on S9 with the old build works until S9 is removed.
+- A push registration made under the old id stops waking once the
+  gateway's list changes (PUSH-GATEWAY §5.2, step 2) and is replaced by
+  the new build's `push.register`.
+- Why not both ids for one release: bindings already made are not
+  checked again, so a second id would help no unlock; it would only
+  spare four disposable vaults a transfer or a 24-hour wait, at the
+  price of a list to specify, measure and test, and of new enrollments
+  under the old id for as long as it stayed.
+
+Production has no vault yet and nothing to move: release 1 pins
+`com.vettid.app` through the file instead of the constant. From S10 a
+phone can hold the production app and the staging app side by side.
+
+**Tests required** (0.26.0; follow-up implementations).
+
+- `releasecfg`: every refusal of rule 1 for `features`; rule 2 both ways
+  (a name dropped is refused, a name added passes), with a previous file
+  from before 0.26.0; `android_package` missing, a placeholder, another
+  channel's value; the committed files (staging: seven names and
+  `com.vettid.app.staging`; production: none and `com.vettid.app`).
+  (0.27.0) `android_signers` entries: §11.7.1's tests.
+- Vault, per optional feature, in a build without it: each of its types
+  is answered `unsupported_type` to an app and to a connection, and a
+  response of such a type is dropped; no `features.<name>` entry exists
+  after enrollment, unlock and a flush; with it, the existing vectors
+  are unchanged. With no optional feature at all, the flows the v1 app
+  uses pass.
+- Vault: a state holding an entry of an unregistered feature is byte for
+  byte the same after load, flush, lock, unlock and a move; a vault
+  enrolled without a feature and moved to a release with it uses the
+  feature and gains the entry.
+- Vault: `device.pair.create{role: "agent"}` and an agent share rule
+  without `leash`; `settings.set` of `location.history.*` without
+  `location`; a wallet action with `actions` and without `wallet`.
+- Vault, device attestation: in a channel build, an attestation naming
+  the other channel's package is refused at enrollment, at a transfer
+  and at a recovery's register; an unlock and a release approval by a
+  binding made under another package pass.
+- Build: the two channels' images of one commit differ in
+  `releasecfg_sha256` and PCR0, and each rebuilds to the same PCR0.
+- App: the `staging` variant's application id is
+  `com.vettid.app.staging` and `checkStagingApk` fails on any other; the
+  dev-stack exit test passes against a development enclave given
+  production's list.
+- vettid.org: `assetlinks.json` per stage; the push gateway's app ids
+  per channel.
+- End to end on staging at S10: a vault moved from S9 with the old
+  build; a direct transfer to the new build on a second phone; a
+  recovery to the new build on the same phone; an enrollment with the
+  new build; both builds installed on one phone.
 
 ### 11.11 Recovery
 
@@ -8678,7 +9648,8 @@ Portal      Member API                   Enclave (vault process)        Owner de
  |          (24 h; cancel from portal, email link or an owner app's unlock)  |
  |--GET /api/vault/recovery (after available_at)--> sealed code              |
  | decrypt in the browser; show the QR (rendered locally)                    |
-New app --scan QR--> POST /api/vault/recovery/claim{app_key} (0.15.0) --> user_guid
+New app --scan QR, or type the code (0.25.0, §11.11.10)-->
+         POST /api/vault/recovery/claim{app_key} (0.15.0) --> user_guid
 New app --POST /api/vault/recovery/register (signed) --queue--> code + device attestation:
          |                                       unlock key added (header)   |
 New app --POST /api/vault/unlock (PIN; enclave backoff)--> vault opens; vault_bundle
@@ -8810,13 +9781,51 @@ the older code. The API allows only one active recovery per vault.
   **version 10** (57 × 57 modules) at level M; before `api` it was 146
   bytes, version 8 (49 × 49). The app
   MUST accept any version and any level from M up.
-  The portal also shows the code as text, in groups of four, for typing.
+- **Typed form** (0.25.0). For a phone that cannot scan, the portal
+  also shows the code as text: 48 characters in 12 groups of four,
+  made of a 12-character locator from the member API, the code, and
+  4 check characters (§11.11.10). 0.10.6–0.24.1 showed the bare code
+  "in groups of four, for typing"; since 0.15.0 no app could use it
+  (it names neither the vault nor the recovery), and it is no longer
+  shown.
 - **Why the vault mints the code.** VettID's servers never hold the code
   in a usable form: the API stores only the ciphertext sealed to the
   member's browser. The 24 h delay and the expiry are enforced inside the
   enclave. So a copy of the API's tables, or an operator reading them,
   cannot register a device, and neither can an API that releases the
   ciphertext early.
+- **A recovery started by the host** (0.27.4, disclosure; nothing
+  changes). The operation `recovery` carries no envelope and no
+  signature (§11.5), so the host can queue one itself, for any vault,
+  with a browser key of its own, without the member's session and
+  without the member API's email to the member (§11.11.7).
+  - *What it gives:* a running vault is locked (§11.11.1 step 2); the
+    recovery record is written into the sealed header; and the host can
+    open the code once the enclave's 24 h have passed.
+  - *What it does not give:* a device, or anything of the vault. A
+    register still needs an app that passes device attestation
+    (§11.11.3), and the recovery still needs the PIN and the credential
+    password, online, under both backoffs (§11.11.5). With the
+    credential backup off there is no recovery at all (§11.11.1).
+  - *What the member sees:* the owner's devices are sent
+    `vault.locking{reason: "recovery"}` when a running vault locks, and
+    from then on the member's app is refused `recovery_pending` at
+    every unlock (§11.4, §11.11.4) until the recovery ends. The member
+    is told by the vault, not by the host, so a host cannot hide it,
+    and the member's app can cancel it with `cancel_recovery` and the
+    PIN (§11.11.4). The `recovery` entry of `GET /api/vault/status` and
+    the member API's email come from the API and would be missing.
+  - So "an operator reading them cannot register a device" above
+    stands, and a host-started recovery is the same exposure as §13.5's
+    row "Member's email and account session (24 h, unnoticed)", without
+    the email. `recovery_cancel` has no envelope either: the host can
+    end a member's own recovery (availability).
+  - **Open design question** (not a requirement; the owner has not
+    decided): whether a later vault release should require a `recovery`
+    and a `recovery_cancel` to carry a signature of the member API,
+    under a key the release pins, which the enclave verifies. It would
+    take the power to start a recovery from the host process and leave
+    it with the member API, which VettID also runs.
 - **Residual: the portal's code.** A VettID that serves malicious portal
   code to the member's browser can read the code; the browser key protects
   data at rest, not against the page's own author. Such an attacker still
@@ -8830,8 +9839,11 @@ the older code. The API allows only one active recovery per vault.
 
 #### 11.11.3 Register
 
-The new app scans the QR and sends `vault.recovery.register` over the
-alternate channel. Like `vault.unlock`, the request is sealed to the ETK
+The new app scans the QR, or takes the typed form (0.25.0, §11.11.10:
+the identifiers then come from the claim, §11.11.7), and sends
+`vault.recovery.register` over the alternate channel. The request is
+the same either way: the enclave cannot tell how the app read the code.
+Like `vault.unlock`, the request is sealed to the ETK
 of the instance named by `GET /api/vault/enclave` and padded to 12,288
 bytes:
 
@@ -8864,6 +9876,10 @@ then checks, in this order:
 6. the device attestation is valid (§11.7), over the challenge with this
    request's `request_id`, the `vault_id` and the inner `ts`. It is checked
    only after the code matched, so a failure leaves the code usable.
+   (0.27.0) Its signer may be any the release pins and need not be the
+   one the vault is bound to; it is recorded with the registered key and
+   becomes the vault's binding only when the recovery completes
+   (§11.7.1, §11.11.5).
 
 On success it adds the app to the header's unlock keys, with its app key,
 and sets the state to `registered`; the code is spent. Its answer to the host then also
@@ -8963,6 +9979,9 @@ not its owner check's state.
    - **The new app replaces the old one,** in the same flush:
      - the device becomes the vault's app and the credential's holder
        (§3.5.9), and the recovery record is removed;
+     - (0.27.0) the vault's signer binding becomes the signer recorded
+       for its key at register (§11.7.1); if that differs from the old
+       app's, audit and feed item `device.signer_changed`;
      - its app key becomes the vault's app key (`app_key_seq` + 1), and
        the vault reports it to the host (`app_key`, §11.5; 0.15.0): the
        old app's key is refused by the member API from then on;
@@ -9006,8 +10025,10 @@ not its owner check's state.
   - the PIN backoff (§11.8);
   - the credential password backoff (§3.5.3);
   - one recovery per vault (a new request replaces the old).
-- **Member API limits** (§11.11.7): requests, registrations, cancels and
-  status polls are rate-limited.
+- **Member API limits** (§11.11.7): requests, claims, registrations,
+  cancels and status polls are rate-limited. A claim by locator
+  (0.25.0) is limited per source network before the lookup and per
+  vault after it; none of these limits is global (§11.11.10).
 - **Audit in the vault.** Every step is recorded (`recovery.*` kinds,
   §10.9). Steps taken while the vault was locked are written from the
   header's log at the next unlock.
@@ -9025,9 +10046,9 @@ session:
 | Route | Body | Answer |
 |---|---|---|
 | `POST /api/vault/recovery` | `{browser_key}` (b64 of 65 bytes) | `202 {recovery_id, available_at, expires_at}` |
-| `GET /api/vault/recovery` | — | `{recovery: {recovery_id, vault_id, state, requested_at, available_at, expires_at, sealed_code?} \| null}` |
+| `GET /api/vault/recovery` | — | `{recovery: {recovery_id, vault_id, state, requested_at, available_at, expires_at, sealed_code?, locator?} \| null}` |
 | `POST /api/vault/recovery/cancel` | `{recovery_id}` | `200 {cancelled}` |
-| `POST /api/vault/recovery/claim` | `{vault_id, recovery_id, app_key}` | `200 {user_guid, email_hint}` (0.15.0) |
+| `POST /api/vault/recovery/claim` | `{vault_id, recovery_id, app_key}` (scanned), or `{locator, app_key}` (typed, 0.25.0) | `200 {user_guid, email_hint, vault_id, recovery_id}` (0.15.0; the two identifiers since 0.25.0) |
 | `POST /api/vault/recovery/register` | `{vault_id, request_id, instance_id, etk_kid, envelope}` | `202 {vault_id, request_id}`; the result is polled like unlock (`GET /api/vault/requests/{id}`) |
 
 - **Claim** (0.15.0). The new app, which has no session and no vault
@@ -9047,6 +10068,26 @@ session:
   (§11.11.5 step 3). Knowing `vault_id` and `recovery_id` (both in the
   QR) lets a stranger claim, which gains nothing: the enclave still
   needs the code and an attestation.
+- **Claim by locator** (0.25.0, §11.11.10). The app that was given
+  the typed form presents `{locator, app_key}`, signed by that key
+  with an empty `vault` (as a setup code's redeem, §11.12.2), because
+  it does not know the vault yet. The API looks the locator up. A
+  locator it does not hold, or one whose recovery is no longer the
+  vault's current one, is `404`, with the body and timing of an
+  unknown pair. Otherwise the API proceeds **exactly as for the pair
+  the locator names**: the same account checks, `409
+  recovery_not_available` unless the recovery is `available`, the key
+  recorded as a claim key, the same answer. The answer of either form
+  carries `vault_id` and `recovery_id` (0.25.0), which the typed app
+  needs for every later request and the sealed register body. The
+  claim is limited per source network before the lookup (so misses
+  count) and per vault after it; a miss is charged to no recovery.
+- **`locator`** (0.25.0): 12 Crockford base32 characters (60 random
+  bits), minted by the API with the request, unique among the
+  recoveries it holds, kept with the recovery and dropped when the
+  recovery expires. `GET /api/vault/recovery` returns it only
+  together with `sealed_code`. It is not derived from the code, which
+  the API cannot read, and the enclave never sees it.
 
 The email link uses its own route, `POST /api/vault/recovery/cancel-link`
 with body `{token}`, answered `200 {cancelled}` like the session's
@@ -9070,10 +10111,14 @@ cancel. It needs no session: the token stands in for it.
   `sealed_code` is no longer returned, so the portal says the code was
   used. A registered recovery stays active (it blocks a new request
   with `409 recovery_active`, it is shown in `GET /api/vault/status` and
-  it can still be cancelled, §11.11.4) until `expires_at`, and keeps
-  reading `registered` afterwards. The API cannot see the rest of the
-  recovery (unlock, `credential.recover`); the vault removes its record
-  when it completes.
+  it can still be cancelled, §11.11.4) until the host reports the
+  registered app's key as the vault's `app_key` (§11.5), when the API
+  records it as `completed`, an ended state (0.27.0; MEMBER-API 2.4.1,
+  owner decision of 2026-10-11), or until `expires_at`, after which it
+  keeps reading `registered`. The API sees nothing else of the rest of
+  the recovery (unlock, `credential.recover`): the vault makes that key
+  its app key only in the flush of a successful `credential.recover`
+  (§11.11.5 step 3), and removes its own record then.
 - **Cancelled.** `{cancelled: true}` when this call ended an active
   recovery (`pending`, `available` or `registered`), `{cancelled: false}`
   when there was nothing to cancel (it had ended already, by a cancel or
@@ -9131,6 +10176,11 @@ cancel. It needs no session: the token stands in for it.
   (§11.11.9).
 - A vault without a credential is not recoverable. It cannot exist past
   enrollment anyway (§3.5.7).
+- **The code can be typed** (owner decision, 2026-10-11: "we should
+  allow a typed recovery code"; §15 item 33). A locator from the
+  member API stands for the QR's identifiers, and check characters
+  catch typing mistakes on the phone; the enclave, the code and every
+  limit are as they were (§11.11.10).
 
 #### 11.11.9 Starting over: deleting a vault without the app
 
@@ -9193,6 +10243,166 @@ destroy a vault at once.
   cancel link as for a recovery (§11.11.7). The API audits
   `vault.deletion_request`, `vault.deletion_cancel` (`via: session |
   link | app`) and `vault.deletion_executed`; never the token.
+
+#### 11.11.10 Typed entry (0.25.0)
+
+(Owner decision of 2026-10-11: "we should allow a typed recovery code";
+§15 item 33. Approved by the owner 2026-10-11.) Enrollment already has
+"Type the code instead" (§11.12.1); recovery was camera-only, so a
+member whose new phone has a broken camera could not recover. Typed
+entry is a second way to **read** the same code. It changes nothing in
+the enclave and nothing after the claim: no vault release is needed.
+
+**The problem.** The QR carries four things: `api`, `vault_id`,
+`recovery_id` and the code (§11.11.2). The code alone (32 characters)
+does not say which vault and which recovery it belongs to; the claim
+(§11.11.7) and the enclave's hash (§11.11.2) need both, and the app has
+no account session to ask with (§11.12). Typing the two identifiers as
+well would mean 84 characters (26 for the 128-bit `vault_id`, 26 for
+the ULID, 32 for the code).
+
+**The typed form.** 48 characters of the code's alphabet
+(`0-9A-HJKMNP-TV-Z`), shown in 12 groups of four:
+
+```
+typed   = locator (12) || code (32) || check (4)
+locator = 60 random bits from the member API's CSPRNG, as 12 Crockford
+          base32 characters (most significant 5 bits first)
+check   = the first 20 bits of
+          SHA-256("vettid/vms/2/recovery-typed-check" || 0x00 || api || 0x00 || locator || code),
+          as 4 Crockford base32 characters (most significant 5 bits first)
+```
+
+- **`locator`** is minted by the member API with the recovery request
+  and stands for the pair (`vault_id`, `recovery_id`) at the claim
+  (§11.11.7). It is **not derived from the code** and is no secret that
+  opens anything: whoever holds it can do exactly what the holder of
+  the QR's two identifiers can do (claim; §11.11.7), and nothing more.
+  The API returns it to the portal only together with `sealed_code`,
+  so nobody outside the API has it before the code can be read. The
+  enclave never sees it.
+- **`code`** is the enclave's code, unchanged.
+- **`check`** is computed by the portal, in the browser, after it has
+  opened the code. `api` is the same exact string as the QR's `api`
+  (the portal's own origin, no trailing slash; ASCII), `locator` and
+  `code` in canonical form (upper case). The check characters are
+  never sent anywhere: the app verifies them and drops them. They hold
+  no secret an attacker lacks (anyone can compute them for a guess), so
+  they change nothing about guessing.
+
+**What the portal shows** (MEMBER-API 2.4.0). Under the QR, "Can't scan?
+Type this code in the app", and the 48 characters as twelve groups of
+four, in three rows of four groups. The bare 32-character text of
+0.10.6–0.24.1 is no longer shown: since 0.15.0 no app could use it.
+A recovery requested before the API mints locators has none: its page
+shows only the QR and says that typing needs a new recovery. The typed
+form is shown and removed with the QR (on **Show the code**, **Hide**,
+re-render and `pagehide`) and is never sent, logged or stored. There is
+no copy button: the code does not go to a clipboard.
+
+**What the app does.** The recover screen offers **Type the code
+instead** wherever it offers the scan (ANDROID-PLAN 0.1.33). The app:
+
+1. normalizes what is typed or pasted: spaces, hyphens and line breaks
+   are dropped; letters are upper-cased; `I` and `L` are read as `1`
+   and `O` as `0` (Crockford's look-alikes, which the canonical form
+   never contains). **`U` is not in the alphabet and is not mapped**:
+   it is refused in the field with "The code has no letter U. Check
+   whether it is a V." Any other character is refused the same way. A
+   silent guess would turn a visible mistake into a counted wrong code;
+2. at 48 characters, recomputes `check` with **its own built-in member
+   API origin** (the one it compares a QR's `api` with). On a mismatch
+   it sends nothing and says: "That code doesn't match. Compare it
+   with the account site group by group, and check that the site is
+   <the app's account host>." This is input validation, as for a QR
+   that is not a recovery QR: it is not a wrong code, reaches neither
+   the API nor the enclave, and is not counted. A typing mistake
+   passes the check with probability 2⁻²⁰;
+3. claims with the locator (§11.11.7), signed by its app key with an
+   empty `vault`, and takes `user_guid`, `email_hint`, `vault_id` and
+   `recovery_id` from the answer;
+4. continues **exactly as after a scan** with the `vault_id`,
+   `recovery_id` and `code` it now holds: the same sealed
+   `vault.recovery.register` (§11.11.3), the same result codes and the
+   same texts for them, the same count of wrong codes, then the PIN
+   and the credential password (§11.11.5).
+
+**The environment check without a QR.** The scanned `api` exists so that
+an app never acts on another environment's code. Typed entry keeps that
+in three ways: the check characters are bound to the portal's origin,
+so a staging code typed into the production app fails on the phone
+(step 2); the app only ever talks to its own built-in origin, as with a
+scan; and locators, vaults and recoveries of another environment do not
+exist at that origin, so a claim there is `404`. The typed setup code
+of §11.12.1 has always relied on the last two alone.
+
+**Wrong codes are counted as before.** The enclave decides
+(§11.11.3 check 5) and cannot tell a typed code from a scanned one. A
+typed string that names a live recovery and carries a wrong code is
+`bad_code`, counted, and the fifth voids the recovery; a typed string
+whose locator names no recovery is the claim's `404`, exactly as a QR
+whose identifiers name none, and there is no recovery to count it
+against in either case. No answer exists for a typed code that a
+scanned one does not get, and none is missing.
+
+**Why this is no cheaper path for an attacker.**
+
+- *Guessing the code.* Unchanged: 160 bits, 5 tries, inside the
+  enclave. The locator and the check characters carry nothing of the
+  code. The API learns nothing derived from the code.
+- *Enumerating recoveries.* A claim by locator is a guess at 60 bits
+  against the few recoveries that are `available` at that moment; with
+  *n* of them a guess hits with probability *n* / 2⁶⁰, under the
+  claim's per-network limit (§11.11.7). A scan's claim needs the
+  128-bit `vault_id` and the ULID, so the typed claim is weaker in
+  bits; neither is reachable online (10⁹ guesses a day against 100
+  live recoveries: 10⁻⁷ a day). A miss is `404`, identical in body and
+  timing for every miss, and cannot be charged to a recovery: there is
+  none to charge. No limit is global, as for setup codes (§11.12.1), so
+  nobody can stop other members' recoveries by guessing.
+- *What a hit would give.* What the QR's two identifiers give: a claim
+  key, the member's `user_guid` and masked `email_hint`, and the means
+  to send five wrong codes and void that one recovery (the member
+  requests again and waits 24 hours). Never the code, the PIN or the
+  password, and never a registered device.
+- *The 24 hours, the expiry and single use* are the enclave's
+  (§11.11.2) and are not touched.
+
+**Accessibility.**
+
+- Portal: each group is its own element and each row its own line; the
+  text is selectable and scales with the page; a font with a slashed
+  or dotted zero; a screen reader gets the groups one at a time
+  ("group 3 of 12"), spelled character by character, never read as
+  words. The page says the code has no I, L, O or U.
+- App: one text field, shown in groups of four as it fills, with
+  "*n* of 12 groups" beside it; paste is accepted; no autocorrect,
+  suggestions or keyboard learning; lower case is accepted; the
+  refusals of steps 1 and 2 are announced to screen readers and name
+  the group to look at when one character is refused; the entry is
+  kept across a rotation, never written to disk, and excluded from
+  screenshots and the recent-apps preview.
+
+**Tests required** (follow-up implementations).
+
+- Portal: the check characters against §16's vector for the production
+  and staging origins; the grouping; the typed form removed with the
+  QR; no bare 32-character text.
+- Member API: a locator minted per request and unique; `locator` only
+  with `sealed_code`; claim by locator: hit, miss (`404`, same body as
+  an unknown pair), stale locator of a replaced or cancelled recovery
+  (`404`), not available (`409`), paused service, both limits, the
+  answer's `vault_id` and `recovery_id`, the key recorded as a claim
+  key; the QR form unchanged.
+- App: normalization (case, spaces, hyphens, `I`/`L`/`O`, `U` and other
+  characters refused); the check against §16's vector, and a staging
+  string refused by a production build; a failed check sends no
+  request; a typed code registers with the same request bytes as the
+  scanned one for the same recovery; `bad_code` shows the same text
+  and count either way.
+- End to end on staging: a recovery completed by typing; a wrong typed
+  code counted by the vault (`recovery.bad_code` in the audit log after
+  the next unlock) and the fifth voiding the recovery.
 
 ### 11.12 Enrollment codes and app keys
 
@@ -9528,14 +10738,36 @@ check. A held vault may still be locked by any trigger of §12.3.
 - **One collect loop per unlocked vault.** The loop runs inside the enclave
   as a signed long-poll (`wait=25`, `max=32`) or a WebSocket. During a
   rotation grace period it also collects from the old mailbox.
+- **Waits of the collect loop** (0.27.2, as built; VAULT-RELAY-SCALING
+  §4 G). Vaults on one host MUST NOT poll in step: a relay task that
+  stops answers every held poll at once. So, in the enclave:
+  - each long-poll asks for a `wait` of a random whole number of seconds
+    from 20 to 25 (not always 25);
+  - the first poll after an unlock is sent after a random 0 to 1 s;
+  - after a poll that failed (a relay or transport error the relay
+    client's own retries, RELAY-PROTOCOL §7.2, did not get past), the
+    next is sent after a random 0.5 to 1.5 s;
+  - while the relay refuses the poll with `mailbox_unknown` or
+    `timestamp_stale` (another poll will not change that by itself),
+    the wait doubles with each refusal in a row, from 1 s to 15 s, each
+    spread by half either way (so at most about 22 s). A poll that
+    succeeds, or fails for any other reason, starts it again at 1 s.
+    The cap is low on purpose: the loop does not register again, so
+    only the next poll tells the vault that its mailbox is back or its
+    clock right.
 - **Batches.** Each vault handles one batch at a time (§8.3).
-- **TLS.** The enclave terminates TLS to the relay, and to AWS KMS
-  (`kms.<region>.amazonaws.com`, §11.10.7). The parent forwards only TCP
+- **TLS.** The enclave terminates TLS to the relay, to AWS KMS
+  (`kms.<region>.amazonaws.com`, §11.10.7), and (0.24.0) to the push
+  gateway of its channel (§11.10.8, §14.3). The parent forwards only TCP
   bytes to its allowlist on port 443. The enclave pins only the
   roots for the allowlisted hosts (VAULT-PLAN §5.2), so root changes are rare
-  releases. Each instance carries every vault's relay requests over a few
+  releases. Each instance carries every vault's relay requests over
   shared HTTP/2 connections rather than one connection per vault, so the host
-  cannot attribute traffic to a vault by connection. Inside the enclave the
+  cannot attribute traffic to a vault by connection (this is about the
+  relay connections only: the host sees each vault's state writes, §2.2);
+  how many there are
+  is the enclave's decision, not the host's or the relay's (§12.2.1).
+  Inside the enclave the
   collect loop therefore uses the long-poll (a WebSocket would need a
   connection of its own). AWS KMS endpoints offer only HTTP/1.1; KMS
   requests use a small pool of keep-alive connections.
@@ -9548,6 +10780,71 @@ check. A held vault may still be locked by any trigger of §12.3.
   4. start collecting;
   5. renew the lease while unlocked (§11.1).
 
+#### 12.2.1 Shared connections (0.27.2, as built)
+
+*As built in vettid-vault #66 (`enclave/egress`), phase 1 of
+VAULT-RELAY-SCALING, decision D3; for staging release S11.* The rules
+hold for each HTTP/2 host of the allowlist separately (the relay, the
+push gateway, `android.googleapis.com`). KMS connections (HTTP/1.1) are
+not shared this way and are unchanged.
+
+- **Fill first.** A request takes a stream on the first connection that
+  has one free. Another connection is opened, one at a time, only when
+  every stream of every connection is in use. So one connection carries
+  every vault of a host until its streams are in use (128 at the relay's
+  load balancer), and as many vaults as possible share each.
+- **Bounds.** The enclave MUST NOT let the host or the relay choose the
+  number of connections:
+  - at most **16** connections per host (VAULT-RELAY-SCALING D3);
+  - no further connection while a connection of that host announces
+    fewer than **32** concurrent streams, or has not announced a limit
+    yet. A new connection carries one request until its limit is known,
+    fewer than 32 after one second;
+  - connections are opened at no more than 2 a second after a burst of
+    32, failed dials included.
+- **At a bound** a request waits for a stream, the oldest first, until
+  its own deadline (75 s for a relay request, 15 s for a push request),
+  and then fails. Waits and refusals are counted (below).
+- **A dial that fails** fails the request that started it and every
+  request that was waiting when it started; later ones dial again.
+- **Connections the host is closing.** A connection that takes no more
+  requests below its limit (the host sent GOAWAY) does not count toward
+  the 16 for 30 s, while its requests end, and is then closed; a request
+  still on it fails. Only 16 connections are let off the count in any
+  5 minutes; further ones count while they close. So a host has up to 32
+  connections for 30 s, at most once in 5 minutes, and 16 otherwise.
+- **Connections that stop answering.** A connection is pinged (HTTP/2
+  PING) after 15 s without a frame from the host and closed if the ping
+  is not answered within 10 s. A connection that holds requests and has
+  answered none for 90 s is closed whatever else it does.
+- **One re-send.** A request the host did not process is sent once
+  more: the connection stopped taking requests before it was sent, the
+  host's GOAWAY names it as not processed, or the host refused the
+  stream (REFUSED_STREAM). Only when its body can be sent again. Any
+  other failure goes back to the vault process (the relay client signs
+  and sends again, RELAY-PROTOCOL §7.2).
+- **Per vault.** A vault process has at most **8** relay and push
+  requests in flight; further ones wait within their own deadline. One
+  vault process therefore cannot take the shared streams from the
+  others (§12.4).
+- **Counts.** The supervisor counts, for the whole instance only: the
+  connections to the relay (open, opened), the stream limit the relay
+  announced, relay requests in flight and waiting, the longest wait for
+  a stream, relay requests that got no answer, requests that waited
+  at a bound, and (0.27.4; vettid-vault 8f2c8bf, from staging release
+  S11) how many vault processes reached their own limit of 8, each
+  counted once. The parent may ask for them; the answer is a snapshot at
+  most one second old, and asking changes nothing. Nothing in it names
+  a vault, a mailbox or an address. The parent publishes them as
+  metrics (VAULT-RELEASES §8.7).
+- **A front end that announces exactly 100 streams** is slow to fill:
+  100 is what the HTTP/2 library assumes before a host has announced
+  its limit, and it does not say when the announcement came, so such a
+  connection is trusted only once it has answered a request. The relay's
+  and the push gateway's load balancers announce 128. The relay's front
+  end MUST NOT be changed to one that announces exactly 100
+  (VAULT-RELAY-SCALING §10).
+
 ### 12.3 Lock triggers
 
 | Trigger | Behaviour |
@@ -9557,7 +10854,7 @@ check. A held vault may still be locked by any trigger of §12.3.
 | Memory pressure (the least recently active vault is evicted) | Same as an owner request. |
 | Enclave release or restart | Same if signalled. Otherwise all vaults lock through loss of memory, and their leases expire; a parent that sees the enclave restart releases the leases it held. |
 | Parent restart (the enclave keeps running) | The enclave locks every vault before it serves the new parent, which holds no leases for them. |
-| Parent unreachable for 120 s | Every vault is locked: its lease can no longer be renewed. |
+| No control connection to the parent for 120 s (0.27.4: was "Parent unreachable for 120 s") | Every vault is locked: its lease can no longer be renewed. **As built** (vettid-vault through 8f2c8bf), the 120 s run from the moment the control connection ends, checked every 10 s. A parent that keeps the connection open but does not answer is **not** counted: vaults then stay unlocked with leases nobody renews until the connection breaks (VAULT-HOST-PROTOCOL §13 point 1); the conditional state write still stops two instances from writing one vault. **From a later vault release** (owner decision of 2026-10-12, H3) a connected but silent parent counts as unreachable: the enclave times the parent's `Ping` (sent every 20 s) and treats 120 s without one as no connection, and writes on the control connection get a deadline. This row then reads "Parent unreachable" again. |
 | Lease lost (renewal failed) | Same as an owner request, without the final flush if the state write fails. |
 | Split-brain guard: a conditional state write finds a newer version | Zeroize **immediately**, without flushing or acking. |
 | Vault deletion | Run the §7.4 revocations, then destroy the state and the header. |
@@ -9774,6 +11071,35 @@ absorbed (§11.6) and rollbacks are bounded (§13.2). It can misreport the
 advisory lifecycle and lease values, but those affect only routing and
 availability.
 
+**It can also originate** (0.27.4, disclosure; the code always allowed
+it). Five alternate-channel operations carry no envelope (§11.5), so
+the enclave cannot tell one the member API queued from one the parent
+made up. The parent can send each of them for any `vault_id`:
+
+| Operation | What the parent gets by originating it |
+|---|---|
+| `lock` | The vault locks. Availability only |
+| `delete` | A running vault deletes itself with the full semantics of §12.5; otherwise its stored objects are erased. The operator power of §13.5 ("delete stored state") |
+| `account` | A running vault takes the snapshot: names and account details of the parent's choosing in what the vault shows its owner and in the core of its shared profile (§11.13 "Display only", §10.8 "Trust") |
+| `recovery` | A recovery, with a browser key of the parent's own: §11.11.2 "A recovery started by the host" |
+| `recovery_cancel` | A member's pending recovery ends. Availability only |
+
+The parent can also send the enclave's own requests `LeaseLost` and
+`Shutdown` at any time (the vaults lock), and withhold or replace the
+manifest document (§11.5 "What the host can do").
+
+**§11.3's "a confirmed vault MUST NOT be replaced" binds the member API
+and apps, not the parent.** The enclave decides it from what the store
+returns, and the store is the parent: a parent that answers "no such
+object" for a vault's objects and for the member's index lets an
+enrollment proceed. That gives the parent nothing beyond deleting the
+vault, which it can do (§13.5): the old state stays sealed, and the
+enrollment still needs a setup code and an attested app.
+
+The protocol between the enclave and the parent, and what the parent
+sees and can do for each request of it, are described as built in
+VAULT-HOST-PROTOCOL (§11 there).
+
 Inside the enclave, a flaw in one vault's process (a feature handler, a
 parser) reaches only that vault: its secrets live in its own process, and
 it can read and write only its own objects and use only its own relay key
@@ -9847,6 +11173,7 @@ it can read and write only its own objects and use only its own relay key
 | Credential password alone | Nothing without the blob and a paired app | `credential.password.change` |
 | Member's email and account session (24 h, unnoticed) | A recovery (backup on only): one new attested app that replaces the member's app. Still needs the PIN and the password, online, under both backoffs (§11.11.2); with the backup off, nothing: no recovery (§11.11.1), only a start-over deletion after another 24 h (§11.11.9) | Cancel; the app sees `recovery_pending` and `vault.locking{recovery}`, or `deletion` in `GET /api/vault/status` |
 | VettID's API tables | Nothing: the recovery code is stored only sealed to the member's browser, and the enclave enforces the 24 h (§11.11.2); setup codes only as MACs under a key outside the tables, app keys only as public keys (§11.12) | — |
+| A typed recovery code's locator, without the code (0.25.0) | What the QR's `vault_id` and `recovery_id` give: a claim (the member's `user_guid` and masked `email_hint`) and the means to send five wrong codes, which voids that one recovery. Never the code, the PIN or the password, and no registered device. It is shown only with the code, for the code's 24 hours (§11.11.10) | The member requests a new recovery; the claim's limits (§11.11.7) |
 | A setup code (stolen, shoulder-surfed or phished; 0.15.0) | Before the member uses it, within its 5 minutes (the typed code also needs the member's email): an **empty** vault enrolled into the member's account, with the thief's phone and PIN, whose account snapshot shows the thief the masked email and membership (§11.13). Never an existing vault: a confirmed vault is never replaced (§11.3) | Single use; one live code; the member's own redeem then fails and the portal shows the code used; the member is emailed at every redemption; support deletes the vault (the host `delete`) |
 | Guessing setup codes | The QR secret: nothing (128 bits). A typed code: only one named member's, at most 800 guesses per issuance from all sources, 9.4 × 10^-10 per issuance (§11.12.1; ENROLLMENT-CODES §3.3). Flooding one member's typed entry blocks only that issuance's typed form for at most 5 minutes; the QR and every other member are unaffected (no global limit) | The limits of §11.8; the member is emailed and operations alerted at the ceiling |
 | A code of someone else's account (reverse phishing) | The member's new vault belongs to that account, whose holder could later request a recovery; it still needs the member's PIN and password after 24 h in which the member's app sees the recovery | The app shows `email_hint` before enrolling and in its account view (§11.12.1, §11.13) |
@@ -10053,19 +11380,208 @@ with its own key, and the only build that accepts canary manifests. That
 is a possible later hardening, tied to the signing of the canary
 phone's build (W10-READINESS B8), and is not done now.
 
-## 14. Push compatibility (deferred)
+## 14. Push (0.24.0)
 
-An app will send `push.register{platform, push_token, environment}` over its
-session. The vault keeps the wake key in DEK state and stores the `wake_ref`
-in the device record; `device.unlink` deletes it.
+(0.24.0, owner request of 2026-10-10; §15 item 32. Until 0.23.x this
+section was a sketch and the types were reserved.) The vault wakes its
+app through the VettID push gateway (PUSH-GATEWAY 0.4.0) so that the app
+collects without a connection of its own. A wake carries nothing from
+the vault: it means only "collect" (§14.2). Push is **opt-in per device**:
+the app registers only in a push mode (Android: "Google push", which the
+member chooses, the on-phone service staying the default, ANDROID-PLAN
+D7; iOS: "Apple push", once the member allows notifications,
+PUSH-GATEWAY §11.2). Desktops and agents never register.
 
-After depositing a user-visible message into an app's mailbox, an unlocked
-vault triggers `POST /v1/wake/{wake_ref}` with a constant per-device
-`collapse_key`.
+### 14.1 Registration
 
-A locked vault triggers no wakes. A "vault locked, messages waiting" prompt
-would need a wake path that does not depend on the DEK. That is a separate
-future decision.
+| Type | Request body | Response / event body |
+|---|---|---|
+| `push.register` (app: the holder) | `{platform: "fcm" \| "apns", token, app_id, environment?}` | `{push: <push state>}`; `bad_request`, `forbidden`, `unavailable`, `gateway_error` (body `{retry_after?}`), `limit` (`push_registrations`) |
+| `push.unregister` (app: the holder) | `{}` | `{}`; `bad_request` for any other body |
+| `push.token-needed` (V→D, to the app, durable) | — | `{reason: "token_gone" \| "token_invalid" \| "blob_invalid"}` (§14.2) |
+
+(0.24.0 spelled the event `push.token_needed`, which §5.3's type grammar
+does not allow; 0.24.1 corrected it, as 0.15.2 did for
+`vault.owner-check`. Not being message types, the audit kind
+`push.token_gone`, the limit `push_registrations` and the `reason`
+values keep `_`.)
+
+```json
+push state: { "platform": "fcm|apns", "environment": "production|sandbox?",
+              "app_id": "<id>", "state": "active", "registered_at": "<ts>",
+              "last_wake_at": "<ts>?", "last_result": "sent|rate_limited|gateway_error?" }
+```
+
+On a vault without a credential, `push.register` and `push.unregister`
+are answered `credential_required` (§3.5.7 comes first; such a vault has
+no holder). Then the **checks**, in order. Neither a failed check nor a
+failed gateway call changes the previous registration, if any: it stays.
+The only state a failure can change is the `push_registrations` window
+of check 5, which gains an entry whenever a request reached the gateway,
+refused or not (0.24.1):
+
+1. the sender: the holder (§3.5.9) only; a desktop, an agent or a
+   recovering app (§11.11.5) is answered `forbidden`. Allowed while the
+   vault is held (§3.6.3) and while a clone alarm is open: push is not a
+   credential operation, and the alarm's own wake needs a current token;
+2. the body (`bad_request`): `platform` is `fcm` or `apns`; `token` is
+   1–4,096 bytes of printable ASCII (0x21–0x7E) for `fcm`, and 64–200
+   lowercase hex digits, an even count, for `apns`; `app_id` is 1–255
+   bytes matching `[A-Za-z0-9][A-Za-z0-9._-]*` (the Android package or
+   iOS bundle id); `environment` is `production` or `sandbox`, required
+   for `apns` and absent for `fcm`;
+3. the release has a push gateway URL (§11.10.8), else `unavailable`;
+4. **idempotence**: the vault computes
+   `token_hash = SHA-256("vettid/vms/2/push-token" || lp(platform) ||
+   lp(app_id) || lp(environment) || lp(token))` (`lp` as in §10.9's
+   chain; an absent `environment` is empty). Equal to the stored
+   registration's: the vault answers its push state and contacts no one;
+5. `limit` (`push_registrations`, max 20) when 20 registrations reached
+   the gateway in the last 24 hours (a rolling window in DEK state). A
+   registration **reached the gateway** when the gateway answered its
+   `POST /v1/register` over HTTP, whatever the answer: a refusal
+   (`400`, `401`, `403`, `429`, `5xx`) counts as a `201` does. A timeout
+   or a failed connection does not count. An answer that does not parse
+   or exceeds the vault's size limit for answers is still an answer and
+   counts (owner decision 2026-10-10). The vault records the request in
+   the window even when `push.register` then fails (0.24.1). An app
+   answered `limit` stops sending `push.register` for 24 hours and
+   relies on its fallback meanwhile (ANDROID-PLAN §4 Notification
+   modes, 4: the on-phone service).
+
+**Then** the vault generates a fresh Ed25519 wake key inside the enclave
+(PUSH-GATEWAY §3), obtains an attestation document from the NSM with
+`public_key` = the wake public key and `user_data` = the request digest,
+and calls `POST /v1/register` (PUSH-GATEWAY §5.1; 10 s timeout, no
+retry inside the request). On `201` it stores, in one flush, the app's
+registration `{wake_sk, wake_blob, token_hash, platform, environment,
+app_id, registered_at, state: "active"}`, replacing and erasing any
+previous one (its key and blob), audits `push.registered`, and answers.
+**The token itself is never stored**: the vault holds it only while the
+request runs. Gateway answers: `400` (`platform_invalid`, `app_invalid`,
+`token_invalid`) → `bad_request` with the gateway's code as `message`;
+`403 attestation_invalid`, `429`, `5xx`, a timeout or no connection →
+`gateway_error` (with `retry_after` from a `429` or `502`, at most
+3,600; taken from the HTTP `Retry-After` header when the body has none,
+owner decision 2026-10-10). Every other answer (`401`, any other `4xx`, a `400` with another
+code, a `201` whose body does not parse) is also `gateway_error`
+(0.24.1).
+
+A **token rotation** is simply a new `push.register`: the new
+registration replaces the old one, and the old blob is never used again
+(the gateway keeps nothing to delete).
+
+**At most one registration per vault** (owner review of 2026-10-10):
+only the holder registers (check 1), and the holder is the one phone
+that holds the credential and needs waking. A vault keeps no list of
+registrations or wake keys; every successful `push.register` replaces
+the previous registration.
+
+**`push.unregister`** erases the registration (wake key and blob) in one
+flush and audits `push.unregistered{ref: "app"}`; without a registration
+it answers `{}` and writes nothing. No gateway call. The registration is
+also erased, with the same entry and `ref` `transferred` or `replaced`,
+when a direct transfer or a recovery removes the app (§6.7.1,
+§11.11.5), and with everything else at a vault deletion (§12.5).
+
+The push state appears in `device.list` on the app's entry (§10.3).
+`last_wake_at` and `last_result` are updated in memory and written with
+the next state flush; they are not synced to other devices.
+
+### 14.2 When the vault wakes the app
+
+A vault wakes only while **unlocked** (the wake key and blob are DEK
+state, §12.1), only an app with an `active` registration, and only
+**after the relay accepted the deposit** of one of these into that app's
+mailbox:
+
+1. a `feed.event` for a **new** feed item of priority `normal`, `high` or
+   `urgent` whose kind is not `guide` (the first item of a batch of asks
+   included; a later `count` update, `feed.updated` and `feed.deleted`
+   do not wake);
+2. `vault.held` (already at most one per 10 minutes, §3.6.3);
+3. `vault.locking`, except for a lock the app itself requested
+   (`vault.lock` from the app): the wake is sent after the notice's
+   deposit and before the vault zeroizes, one attempt, waiting at most
+   3 s, so it never delays a lock. It obeys the debounce and limits
+   below; when they would put it past the 3 s budget it is not sent.
+   Its outcome is not recorded (the vault is zeroizing): `last_wake_at`,
+   `last_result`, a `reseal` and even a dead token's erasure are lost,
+   and a dead token is found again at the first wake after the next
+   unlock (0.24.1);
+4. `credential.alarm` (§3.5.9).
+
+While the vault is held (§3.6.3) only 2, 3 and 4 occur. Nothing else
+wakes: not `message.new` (its feed item does), `sync.event`, responses,
+receipts, the token, address, rotation and handshake messages, items of
+priority `low`, guides, or call signalling (calls are left to the calls
+phase, §15 item 32). Desktops and agents are never woken.
+
+**Debounce and limits** (per registration, in memory, reset at unlock):
+
+- at most one wake in flight; a trigger less than **5 s** after the last
+  wake is deferred until 5 s after it, and every trigger meanwhile merges
+  into that one wake;
+- at most **30 wakes per rolling hour**; past that, at most one per
+  **10 minutes** until the hour's count falls below 30;
+- triggers 3 and 4, and items of priority `urgent`, skip the hourly cap
+  (they still count toward it and are still debounced), up to **10 per
+  hour**. The 10 count every wake that carried an exempt trigger,
+  whether or not the hourly cap had been reached (0.24.1);
+- a retry, including the attempt after a `429`'s wait, is part of its
+  wake: it is not counted again toward the 30 or the 10, and the caps do
+  not hold it back (0.24.1).
+
+**The request** is `POST /v1/wake {wake_blob, class: "notify"}`, signed
+with the wake key (PUSH-GATEWAY §5.2). An attempt waits at most **10 s**
+for the answer (the lock wake: what is left of its 3 s budget); a
+timeout is handled as no connection (owner decision 2026-10-10). It carries no data of the vault's,
+and the gateway sends a fixed payload (PUSH-GATEWAY §6): no item, kind,
+name, count, cursor or priority reaches the gateway, Google or Apple.
+There are no vault-side quiet hours: the phone's Do Not Disturb or Focus
+applies to the notification it builds, and the vault does not learn the
+member's time zone.
+
+**Outcomes:**
+
+- `202`: `last_result` `sent`, `last_wake_at` set; a `reseal` in the
+  answer replaces the stored blob at the next flush.
+- `410 token_gone`, `400 token_invalid`, `410 blob_invalid`: in one flush
+  the vault erases the wake key and blob, sets nothing in their place
+  (`device.list` shows no `push`), audits `push.token_gone` (`ref` = the
+  code), and deposits `push.token-needed{reason}` to the app (no wake:
+  there is no registration). The app answers with a fresh
+  `push.register` when it next runs; a wake that would have been sent is
+  lost, which is safe: the app collects at every start.
+- `429`: wait `retry_after` (from the body, else the HTTP `Retry-After`
+  header, owner decision 2026-10-10; at most 3,600 s; **60 s** when the
+  answer has neither, 0.24.1), merging triggers; `last_result` `rate_limited`.
+- `5xx`, a timeout or no connection: retry after 5 s, 30 s and 120 s
+  (each ±20 % jitter), then drop the wake; `last_result`
+  `gateway_error`. Not audited. Every answer other than `202`, `429` and
+  the three above (`401`, a `400` other than `token_invalid`, any other
+  `4xx`, a `202` whose body does not parse) is handled the same way
+  (0.24.1; owner decision 2026-10-10, PUSH-GATEWAY §7).
+
+No wake writes an audit entry or a feed item: wakes are frequent, and a
+log of them would be a timeline of the member's activity.
+
+### 14.3 Egress, attestation and privacy
+
+- The enclave reaches the gateway of its channel only (§11.10.8), over
+  TLS it terminates, through the parent's forwarder (§12.2); the host's
+  allowlist gains the gateway's name (VAULT-RELEASES §8.4 control 3).
+- The attestation at registration proves to the gateway that the wake key
+  was made by a VettID vault release the channel's manifest lists. It
+  reveals the release and the enclave's host, never the vault or the
+  member.
+- What each party learns: PUSH-GATEWAY §9. The vault keeps no token, and
+  the gateway keeps nothing; Google or Apple see the timing of wakes, as
+  the relay already sees the timing of deposits.
+- A locked vault sends no wake, so a "vault locked, messages waiting"
+  signal stays the separate future decision of ANDROID-PLAN §9
+  question 14; the app says "notifications resume after you unlock"
+  (trigger 3 tells it once).
 
 ## 15. Open questions and follow-ups
 
@@ -10082,8 +11598,7 @@ Follow-ups:
    actions are in §10.1–§10.14, and location, presence and the wallet
    (0.8.0) in §10.16–§10.18. Still open: the `sync.since` cursor, and the crash-safe write order of
    `pin.change` (with its implementation).
-3. **Push.** Specify the push-gateway integration (§14) when that service is
-   scheduled.
+3. **Push.** Specified in 0.24.0 (§14; item 32).
 4. **Desktop unlock.** Revisit if a desktop attestation mechanism becomes
    available.
 5. **Release updates.** Implementation in V3: generate the §16 release
@@ -11468,6 +12983,271 @@ Follow-ups:
     shown as no limits; Resume may be offered whenever the connection
     has declines, not only while paused).
 
+32. **Push (0.24.0).** Owner request of 2026-10-10 ("we can start to
+    design the push service for google play and apple ios"); the N2 step
+    of ANDROID-PLAN §4 Notification modes, item 10. Owner decisions it
+    follows: no UnifiedPush; VettID's service is the notification path;
+    the payload carries no content and no names; push is opt-in per
+    device (the on-phone service stays Android's default); the design
+    must work end to end once the FCM and APNs credentials exist.
+    Chosen in the draft (open for the owner's review; PUSH-GATEWAY 0.4.0
+    §14.2 has the gateway's questions):
+    1. **The vault never stores the token**, only the gateway's sealed
+       wake blob, a fresh wake key per registration and a hash of the
+       token for idempotence (§14.1).
+    2. **The holder only** registers (one app per vault); desktops and
+       agents get no push. Both push types are allowed while held and
+       during a clone alarm, so the wakes that still matter then keep
+       working.
+    3. **What wakes**: new feed items of priority `normal` and above
+       except guides (exactly what ANDROID-PLAN's Mapping notifies),
+       `vault.held`, `vault.locking` (not the app's own lock) and the
+       clone alarm; only the last three while held (answers the gaps of
+       ANDROID-PLAN §4 item 9, points 4 and 5).
+    4. **Limits**: a 5-second debounce, 30 wakes an hour then one per
+       10 minutes, urgent ones exempt up to 10 an hour; 20 registrations
+       per 24 hours.
+    5. **A dead token** erases the registration and sends
+       `push.token-needed`; the app re-registers (gap 3).
+    6. **No audit entry or feed item per wake**; registrations, removals
+       and dead tokens are audited.
+    7. **No vault-side quiet hours** (the phone's Do Not Disturb applies;
+       the vault would need the member's time zone).
+    8. **Calls** (ringing through push: FCM full-screen intents, iOS
+       PushKit and CallKit) are left to the calls phase.
+    Open points:
+    1. **The numbers** of point 4 are first guesses, to be tuned with the
+       test phones (N4).
+    2. **A DEK-free "messages waiting" signal** for locked vaults stays a
+       separate future decision (§14.3).
+    3. **Apps connected to VettID** using VettID's channel: principles in
+       PUSH-GATEWAY §12 (through the vault's feed, the member's
+       per-source control, no token access); a protocol later.
+    Follow-ups: vettid-vault N3 (`push.register`, `push.unregister`,
+    `push.token-needed`, the registration in DEK state, NSM attestation
+    for the wake key, the wake rules, debounce and limits, retries, the
+    audit kinds, `push` in `device.list`, the hold allow list, the
+    gateway URL constant, a gateway stand-in in the dev stack and
+    `vaultctl` support; tests for each); vettid.org (the egress
+    allowlist entry in `lib/vault/egress.ts`, the channel files'
+    gateway URL, the gateway stack, N4); `vettid/vettid-push` (new,
+    N4); vettid-android (the FCM provider against §14, the status line
+    from `push`, `push.token-needed`); iOS (PUSH-GATEWAY §11.2) when
+    scheduled.
+    **Errata from implementing 0.24.0 (0.24.1).** vettid-vault #59
+    (merged as 9302afe, N3) found seven points where 0.24.0 was wrong or
+    silent; each is the conservative reading the vault implements, now
+    normative (its docs/V4-NOTES.md "Push"):
+    1. The event is **`push.token-needed`**: `push.token_needed` broke
+       §5.3's type grammar (no `_` in a type), as `vault.owner_check` did
+       before 0.15.2 (§10, §14.1).
+    2. `push_registrations` counts every registration the gateway
+       answered over HTTP, refusals included; a timeout or a failed
+       connection does not count. A failed registration leaves the
+       previous one in place but may advance the count (§14.1 check 5).
+    3. A `429` without `retry_after` waits 60 s; `retry_after` is capped
+       at 3,600 s (§14.1, §14.2).
+    4. Other gateway answers: at registration, `401`, any other `4xx`
+       and an unparsable `201` are `gateway_error`; at a wake, anything
+       but `202`, `429` and the three dead-token answers is retried like
+       a `5xx` (§14.1, §14.2 Outcomes).
+    5. The exempt quota (10 an hour) counts every wake that carried an
+       exempt trigger; a retry is not counted again (§14.2).
+    6. The lock wake obeys the debounce and caps; when they would push it
+       past its 3 s budget it is not sent, and its outcome is never
+       recorded (§14.2 trigger 3).
+    7. `push.unregister` accepts only `{}`; a vault without a credential
+       answers both push requests `credential_required` (§3.5.7 runs
+       first) (§14.1).
+    Owner decision 2026-10-10 on the review of these errata: an
+    unparsable or oversized gateway answer counts toward
+    `push_registrations` (vettid-vault fixed to match); a wake attempt
+    waits at most 10 s; the `Retry-After` header is used when the body
+    has no `retry_after`, capped at 3,600 s; PUSH-GATEWAY §7 follows the
+    vault for `401` and for `400` at a wake; an app answered `limit`
+    pauses registering for 24 hours on its on-phone fallback.
+    Follow-up: vettid-android listens for `push.token-needed` and
+    handles `limit` (ANDROID-PLAN 0.1.30).
+
+33. **Typed recovery code (0.25.0).** Owner decision of 2026-10-11:
+    "we should allow a typed recovery code" (enrollment has "Type the
+    code instead"; recovery was camera-only, so a member with a broken
+    camera could not recover). Approved by the owner 2026-10-11; §11.11.10
+    is the design. Constraints it holds to: the app never has an account
+    session; the member's email is never shown beyond the masked hint
+    the claim already answers; the PIN and the credential password still
+    follow the code; the 24 hours, the 5 wrong codes and single use are
+    untouched; typing gives the same answers and the same count as
+    scanning. Chosen:
+    1. **A locator minted by the member API**, typed in front of the
+       code (12 characters, 60 bits), instead of the QR's `vault_id`
+       and `recovery_id`. Portal, member API and app only; **no enclave
+       change and no vault release**.
+    2. **Four check characters**, computed in the browser and verified
+       on the phone, bound to the portal's origin: a typing mistake or
+       a code from another environment is caught before anything is
+       sent, so it cannot use up one of the five tries.
+    3. **One string, 48 characters, 12 groups of four.**
+    Rejected:
+    - *The code alone, found by a lookup on a value derived from it*
+      (a hash, or a prefix). The API would have to hold something
+      derived from the code, which it never has (§11.11.2), delivered
+      either by the enclave (a vault release) or by the browser. A
+      mistyped code would then be a lookup miss that no recovery can be
+      charged with, so typed mistakes and typed guesses would bypass
+      the enclave's count that scanned ones meet; and a prefix handed
+      to the API is that many bits of the code given away.
+    - *Typing `vault_id` and `recovery_id` with the code:* 84
+      characters.
+    - *The member's email with the code* (as the typed setup code,
+      §11.12.1). Anyone who knows a member's email could then claim that
+      member's recovery and void it with five wrong codes, as often as
+      the member asks again, and the claim would say whether an address
+      has a recovery in progress.
+    - *A short locator* (8 characters or fewer): within reach of a
+      distributed search, and a hit lets a stranger void a recovery.
+    - *Mapping `U` to `V`:* not Crockford's rule, and a wrong guess
+      would cost a try.
+    Open for the owner: the locator's length (12, or 16 for 80 bits and
+    52 characters in 13 groups); whether to keep the check characters
+    (without them: 44 characters, and every typing mistake in the code
+    part is one of the five tries). Follow-ups: vettid.org (member API
+    2.4.0 and the recovery page), vettid-android (ANDROID-PLAN 0.1.33);
+    vettid-vault: none, except the §16 vector in its reference client's
+    tests if wanted.
+34. **Feature allowlist and the staging application id (0.26.0).**
+    Owner decisions D4 and D5 of 2026-10-11 (STAGING-DEVELOPMENT-PLAN
+    0.1.0 §6, "all as recommended"); approved by the owner 2026-10-11;
+    §11.10.8 is the design. Chosen:
+    1. **The list names the optional features only** (seven); the eight
+       the v1 app needs cannot be named, so no file can switch them off.
+       A feature added to the code later is off in every channel until a
+       channel file names it.
+    2. **`actions` and `intro` are optional too**, beyond the five
+       features D4 names: the app sends none of their types, and a
+       connection can send both to a vault whose owner never used them.
+    3. **An unlisted feature's types are unknown types**
+       (`unsupported_type`), not a new error code: release 1 freezes the
+       wire (VAULT-RELEASES §3.4 C2) and an old peer already knows this
+       answer.
+    4. **A list only grows**, in both channels, enforced by the release
+       check; an entry of an unregistered feature is carried untouched
+       if one is ever met.
+    5. **`android_package` is one value per channel**, fixed by the
+       channel as `push_url` is.
+    6. **S10 pins only the new staging id.**
+    Rejected:
+    - *A runtime switch* (a setting, or a value the host passes): it
+      would not be measured, and the host could turn a feature on.
+    - *Naming all fifteen features in the list:* a file could then omit
+      one the app needs, and the check would need a second list to
+      forbid it.
+    - *A capability list in `vault.status`:* a wire addition in the
+      release that freezes the wire, for something `unsupported_type`
+      already tells.
+    - *Deleting the state of a feature turned off:* a member's data
+      destroyed by a release they approved for another reason.
+    - *Both package ids for a transition release* (§11.10.8, "Moving the
+      existing staging vaults").
+    Open for the owner, each with the recommendation taken above:
+    - `device.pair.create{role: "agent"}` refused without `leash`
+      (recommended), or left as it is.
+    - Desktop pairing and access sessions are core and stay answered in
+      production release 1 although no desktop works with this vault
+      (recommended for release 1: no core change; the v1 app never sends
+      `device.pair.create`), or get a switch of their own.
+    - `settings.set` of `location.history.*` refused without `location`
+      (recommended), or accepted and inert.
+    - The only-grow rule on staging too (recommended: yes, with no
+      exception until one is needed), or production only.
+    - The relay's `assetlinks.json` gains a statement for the staging
+      package with its next release (recommended; until then the staging
+      app's invitation links are not verified App Links), or the staging
+      build stops declaring `relay.vettid.org`.
+    - Production's list is never run on staging hardware (channels
+      cannot cross): it is tested in the development enclave and by the
+      canary of the production candidate (VAULT-RELEASES §10.1, steps
+      8–9).
+      Accepted (recommended), or a staging release with production's
+      list is cut once before release 1, which the only-grow rule would
+      then have to allow.
+    Follow-ups, in order: vettid-vault (`releasecfg`, `features/all`,
+    `enclave/config.go`, the tests of §11.10.8, docs/MUST-COVERAGE.md);
+    vettid.org (`assetlinks.json` per stage, the staging gateway's app
+    ids); vettid-android (the `staging` application id; ANDROID-PLAN
+    0.1.35); then staging release S10 and the moves of §11.10.8;
+    vettid-relay with its next release.
+35. **Signer binding (0.27.0).** Owner decision of 2026-10-11: the
+    Play app-signing key is Google's and VettID's release key is never
+    given to Google (ANDROID-PLAN 0.1.36 §7, reversing 0.1.34), so
+    production will in time pin two signers of different standing.
+    Approved by the owner on 2026-10-11; §11.7.1 is the design. As built
+    before it (vettid-vault `main`, 2026-10-11): `vms/devattest`
+    accepts an attestation whose every digest is in the release's
+    `android_signers` and keeps the public key and serials, not the
+    digest; attestation is verified at enrollment, at a transfer's
+    `hs.init` and at a recovery's register; unlock and a release
+    approval verify a signature by the attested key and recheck the
+    serials, and never look at `android_signers` again. Chosen:
+    1. the digest is recorded with the key, and the vault's binding is
+       its app's;
+    2. unlock and approval require the recorded signer to be pinned by
+       the running release;
+    3. the binding changes only by a transfer or a completed recovery;
+       a transfer to another signer needs the holder's explicit
+       confirmation in the approval;
+    4. `signer_refused` refuses and audits; no clone alarm;
+    5. older vaults bind from the chain of the key they enrolled with,
+       sent again by the app; without it they are refused outside
+       staging;
+    6. signers carry a class in the release configuration, and the
+       app's `device.list` entry shows the class and digest;
+    7. exactly one signing digest per attestation.
+    **Answered (owner, 2026-10-11): all as recommended.** A refusal
+    raises no alarm. A transfer to another signer needs the explicit
+    confirmation. No vault setting that refuses transfers and
+    recoveries to another signer class, for now (whoever can complete
+    either already holds the PIN and the credential password, and
+    could change the setting). The rule is in production release 1,
+    so that no production vault is ever unbound. Exactly one signing
+    digest per attestation. Staging accepts unbound vaults at S10 and
+    refuses them from the staging release after it, which composes
+    with item 34's move to `com.vettid.app.staging` (§11.7.1). The
+    Play upload key is a dedicated key, and the member-facing
+    sentences stand as written (ANDROID-PLAN §7).
+    Not verified: what
+    `attestationApplicationId` reports for an app with a rotated
+    signing key or several signers (test on phones before relying on
+    "exactly one"); that the unlock request still fits its 12,288
+    bytes with a `chain` and a `release_update` together (to measure
+    in the implementation; the chain is sent only until the vault is
+    bound). Follow-ups: vettid-vault (the binding, the classes in
+    `releasecfg`, staging release S10), vettid-android (the chain, the
+    status line, the transfer warning), the account site's text,
+    production release 1's configuration (W10-READINESS).
+    **As built (0.27.1; vettid-vault #63 and #64, vettid-android #116;
+    staging S10).** The two points "not verified" are settled: the
+    app as built reported exactly one digest on both test phones (an
+    app with a rotated key is still untested, there being none), and
+    the unlock fits a chain of about 8,100 bytes beside a
+    `release_update` (measured by the vault's
+    `TestUnlockWithChainAndReleaseUpdateFits`; real chains are about
+    3,200 bytes). What the implementation chose where 0.27.0 was
+    silent is marked (0.27.1) in §11.7 and §11.7.1.
+    **Answered (owner, 2026-10-11): all as recommended** (0.27.1).
+    The binding across an iOS app (§11.7.1, "Across an iOS app"): the
+    vault will keep the last recorded Android signer when its app has
+    none, so that a return to Android under another signer is
+    confirmed and audited as a change; decided, not yet implemented,
+    a vault change before the first release that accepts an iOS app,
+    nothing for S10 or production release 1. A vault attached while
+    its phone's certificates were valid keeps unlocking after they
+    expire (§11.7). The order of `signer_refused` and what follows
+    from it are accepted as built, so removing a signer needs the
+    care and notice of retiring a release (§11.7.1). Confirmation
+    stays by class, the digest to be named before any release pins
+    two certificates of one class (§11.7.1).
+
 ## 16. Test vectors
 
 These vectors use fixed seeds and are for **test use only**. The complete
@@ -11737,7 +13517,210 @@ pending (§15, follow-up 1).
 adds it to `recovery.json` (eph scalar 32 × 0x28, nonce 12 × 0x29) with
 the 0.16.0 implementation.
 
+**0.25.0.** The typed recovery code's check characters (§11.11.10); no
+key or randomness is involved. With `locator` = `7ZK3M9QX2HTD` and
+`code` = `CDEFGHJKMNPQRSTVWXYZ0123456789AB` (TEST ONLY):
+
+```
+api = https://account.vettid.org
+  SHA-256 = d8d41816e4cf5ac83a89a6472d2ab0b63197207dc80e77e77bd95f50214ae1c4
+  check   = V3A1
+  typed   = 7ZK3 M9QX 2HTD CDEF GHJK MNPQ RSTV WXYZ 0123 4567 89AB V3A1
+api = https://account.staging.vettid.org
+  SHA-256 = 91651f858ae9b0d2a1670b77aec98f3cfd1c19b9d44208dafdece04a5e3558ce
+  check   = J5JH
+```
+
+The hashed bytes are the 33-byte label, `0x00`, the origin, `0x00` and
+the 44 characters of `locator || code`. `0xd8d41` is `11011 00011 01010
+00001`, the characters `V`, `3`, `A`, `1`.
+
 ## 17. Changelog
+
+- **0.27.1** (2026-10-11): editorial-normative; errata to 0.26.0 and
+  0.27.0 from their implementations (vettid-vault #62, #63 and #64 in
+  staging release S10; vettid-android #116); approved by the owner 2026-10-11, all five
+  recommendations as drafted. **No wire change, no new vault release**: S10 already
+  behaves as written here.
+  - §11.7: the **chain rules** (new list, rules 1–7), where 0.27.0
+    said only "verifies the chain up to a Google hardware attestation
+    root". Before S10 a chain extended below an attested key was
+    accepted: a Keystore key that was itself genuinely attested can
+    sign a further certificate, for any key and with any extension,
+    and the enclave read the extension from the first certificate
+    without asking who may issue. Found by an independent review on
+    2026-10-11 and fixed the same day (vettid-vault #64; S10's log
+    entry is `security: urgent`, affecting S3–S9). It never bypassed
+    the PIN, the credential password, a transfer's approval or the
+    recovery code: it weakened the check that the app runs on a
+    genuine, locked phone, nothing else.
+  - §11.7: a phone whose attestation certificates have expired cannot
+    attach a vault (owner decision, 2026-10-11); a vault already
+    attached keeps unlocking. The chains seen on the two test phones.
+  - §11.7.1, as built: the same digest twice is refused; `device_id`
+    on `device.signer_bound`; a `signer` that is not the new app's
+    class is always `signer_unconfirmed`; changed by digest, confirmed
+    by class, and what a second certificate in one class would need;
+    transfers across platforms; the old class of a signer no longer
+    pinned (`unknown` if none was recorded); the order of
+    `signer_refused` (before `recovery_pending` and `backoff`) and its
+    consequences (a refused app cannot cancel a recovery; a refused
+    vault with the credential backup off is lost when the last release
+    that accepts it goes); the refusal's log entry; a bind by chain
+    (the checks it re-runs, why validity is left out, that it is kept
+    when the PIN then fails, its size and the known limit for a chain
+    attested in a transfer); the staging exception is derived from the
+    measured channel and release number; no staging vault can bind by
+    chain; "after an expiry" in the recovery test; the real-phone test
+    replaced by what was run at S10 on 2026-10-11.
+  - §11.7.1, §15 item 35: owner decisions of 2026-10-11, as
+    recommended. The binding across an iOS app: the vault will keep
+    the last recorded Android signer (decided; not yet implemented).
+    Kept as built: unlocking after the certificates expire; the order
+    of `signer_refused` with its consequences; confirmation by class.
+  - §11.10.8: the release check's rule 2 as built (the highest lower
+    tag; in the release workflow, not the image); a placeholder
+    `android_package`; `location.history.` by prefix; the same-phone
+    transfer by pasted code as the simplest way to move a staging
+    vault to the new application id.
+  - §10.9: `device.signer_bound`'s `device_id`.
+  - 0.25.0 and 0.26.0 (front matter, §11.11.10, §15 items 33 and 34,
+    below): approved by the owner 2026-10-11 (vettid.org #212, #220);
+    until now they read "a draft for the owner's review".
+  - No new test vector.
+
+- **0.27.0** (2026-10-11): normative; owner decision of 2026-10-11
+  (ANDROID-PLAN 0.1.36: option (a), Google holds only the Play
+  app-signing key); §15 item 35; approved by the owner 2026-10-11, all
+  eight recommendations as drafted. **An enclave change and a vault
+  release** (staging S10 first, with 0.26.0's constants).
+  - New §11.7.1: per-vault signer binding on Android. What an unlock
+    proves; exactly one signing digest per attestation; signer
+    classes; where the digest is recorded; the check at unlock and at
+    a release-update approval; the binding changes only by a transfer
+    or a completed recovery; `signer_refused` (sealed, before the PIN,
+    audited, no alarm) and why no alarm; a release that stops pinning
+    a signer; vaults enrolled before 0.27.0 (`device_assertion.chain`);
+    what the member sees; iOS; the tests required.
+  - §11.7: `device_assertion` MAY carry `chain` on Android; the digest
+    is stored with the attested key.
+  - §10.3: `device.list` reports `signer{class, digest}` on the app's
+    entry; `device.transfer.pending` carries `signer` and
+    `signer_changed`; `device.transfer.approve` takes `signer` and
+    answers `signer_unconfirmed`. §6.7.1 steps 2 to 4 say the same.
+  - §10.9: audit kinds `device.signer_bound`, `device.signer_changed`,
+    `device.signer_refused`; feed kind `device.signer_changed`.
+  - §11.3: enrollment binds. §11.4: `signer_refused` among the unlock
+    codes. §11.9: its row. §11.11.3 check 6: a recovery may register
+    another pinned signer; the binding moves at completion.
+  - §11.10.8: `android_signers` entries are `{digest, class}`, listed
+    beside 0.26.0's `android_package`; §11.7.1 says how the binding
+    composes with the move to `com.vettid.app.staging`.
+  - Editorial: §11.11.7 "Registered" follows MEMBER-API 2.4.1 (a
+    completed recovery is recorded as `completed` and no longer blocks
+    a new request); front matter cites MEMBER-API 2.4.1.
+  - No new test vector (§16): the rule adds no cryptographic format.
+  - ANDROID-PLAN 0.1.36 carries the decision, the texts and the app's
+    screens; VAULT-RELEASES 0.1.12 the release configuration and what
+    production release 1 pins.
+
+- **0.26.0** (2026-10-11): normative; owner decisions D4 and D5 of
+  2026-10-11 (STAGING-DEVELOPMENT-PLAN 0.1.0 §6; §15 item 34); approved
+  by the owner 2026-10-11 (vettid.org #220). **Needs a vault release**
+  (staging S10 first).
+  - §11.10.8: two new release constants. `features`, the feature
+    allowlist: the seven optional features, what "not registered" means
+    (`unsupported_type`, no state, no hooks), no list in the protocol,
+    turning a feature on, never off, the release check, the initial
+    lists (staging all seven, production none). `android_package`: per
+    channel, what follows the package, how the existing staging vaults
+    move, and why S10 pins only the new id. The tests required.
+  - §10: the optional features' types exist only where the feature is
+    listed. §11.7: the package is the channel's, and is checked when an
+    attestation is verified.
+  - §15 item 34: the decisions, what was rejected, what is open.
+  - VAULT-RELEASES 0.1.11 (§5.2) and ANDROID-PLAN 0.1.35 (§5) follow.
+
+- **0.25.0** (2026-10-11): normative, additive; owner decision of
+  2026-10-11 ("we should allow a typed recovery code"; §15 item 33);
+  approved by the owner 2026-10-11 (vettid.org #212). **No enclave
+  change; no vault release.**
+  - New §11.11.10: the typed form (locator, code, check characters; 48
+    characters in 12 groups of four), what the portal shows, what the
+    app does, the environment check without a QR, how wrong codes are
+    counted, why typing is no cheaper path than scanning,
+    accessibility, and the tests required.
+  - §11.11.2: the portal shows the typed form of §11.11.10 instead of
+    the bare code "in groups of four, for typing".
+  - §11.11.3: the app reads the code from the QR or from the typed
+    form; the register is the same.
+  - §11.11.6, §11.11.7: `GET /api/vault/recovery` returns `locator`
+    with `sealed_code`; the claim takes `{locator, app_key}` as well as
+    `{vault_id, recovery_id, app_key}` and answers `vault_id` and
+    `recovery_id` too; its limits.
+  - §11.11.8: the decision. §13.5: what a locator gives. §15 item 33.
+    §16: the check characters' vector.
+  - MEMBER-API 2.4.0 and ANDROID-PLAN 0.1.33 carry the API and the
+    screens.
+
+- **0.24.1** (2026-10-10): editorial-normative, errata to 0.24.0 from
+  its implementation (vettid-vault #59, N3; approved, owner decision
+  2026-10-10;
+  §15 item 32).
+  - §10, §14.1, §14.2, §3.6.3 and every mention: the event is
+    **`push.token-needed`**. 0.24.0 wrote `push.token_needed`, which
+    §5.3's type grammar forbids and receivers reject; vettid-vault sends
+    the hyphen. Not renamed, not being message types: the audit kind
+    `push.token_gone`, the limit `push_registrations`, the `reason`
+    values.
+  - §14.1: a vault without a credential answers `push.register` and
+    `push.unregister` `credential_required` (§3.5.7 first);
+    `push.unregister` with any body but `{}` is `bad_request`; check 5
+    counts every registration the gateway answered over HTTP, refusals
+    included, not timeouts or failed connections, and the count may
+    advance when `push.register` fails ("each failure changing nothing"
+    amended: the previous registration stays); `retry_after` at most
+    3,600; `401`, any other `4xx` and an unparsable `201` are
+    `gateway_error`.
+  - §14.2: a `429` without `retry_after` waits 60 s; any wake answer but
+    `202`, `429` and the three dead-token answers is retried like a
+    `5xx`; the exempt quota counts every wake with an exempt trigger, and
+    retries are not counted again; the lock wake obeys the debounce and
+    caps, is skipped when they would exceed its 3 s budget, and its
+    outcome is not recorded.
+  - §10.1: the `push_registrations` limit, `gateway_error` and the
+    state a failed request may change follow §14.1.
+  - Owner decision 2026-10-10: §14.1 check 5 counts an unparsable or
+    oversized gateway answer too, and an app answered `limit` stops
+    registering for 24 hours; §14.1 and §14.2 use the HTTP `Retry-After`
+    header when the body has no `retry_after` (at most 3,600 s); §14.2:
+    a wake attempt waits at most 10 s (the lock wake: the rest of its
+    3 s), and at a wake a `400` other than `token_invalid` is retried
+    like a `5xx` (PUSH-GATEWAY 0.4.1 §7).
+  - §15 item 32: the errata listed.
+
+- **0.24.0** (2026-10-10): normative, additive; owner request of
+  2026-10-10 (§15 item 32); a draft for the owner's review.
+  - §14 rewritten: **Push**. `push.register{platform, token, app_id,
+    environment?}` and `push.unregister` from the holder;
+    `push.token-needed` to the app; the push state; checks, idempotence by
+    `token_hash`, attested registration with a fresh wake key, the token
+    never stored, rotation by re-registering (§14.1). The wake rules,
+    debounce and limits, outcomes and retries, no content, no quiet hours,
+    no audit per wake (§14.2). Egress, attestation and privacy (§14.3).
+  - §10: the registry's push row is no longer reserved;
+    `push.token-needed` added.
+  - §10.1: error `gateway_error` with `{retry_after?}`; limit
+    `push_registrations` (20 per 24 hours).
+  - §10.3: `push` on the app's `device.list` entry.
+  - §10.9: audit kinds `push.registered`, `push.unregistered`,
+    `push.token_gone`.
+  - §3.6.3: the holder may send `push.register` and `push.unregister`
+    while held; the vault still sends `push.token-needed`; `vault.held`,
+    `vault.locking` and the alarm wake the app.
+  - §11.10.8: the push gateway URL among the release constants.
+  - §12.2: the enclave terminates TLS to the push gateway too.
+  - §15 item 3 answered; item 32.
 
 - **0.23.2** (2026-10-09): additive, owner decision of 2026-10-09
   (§15 item 31.14).

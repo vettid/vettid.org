@@ -676,20 +676,91 @@ describe('VettidOrgAccountSiteStack', () => {
     });
   });
 
-  test('publishes the Android App Links statement for the release signing keys', () => {
+  describe('assetlinks.json per stage (VAULT-MESSAGING 0.26.0 §11.10.8, "Android package"; D5)', () => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { androidAssetLinks } = require('../lib/config');
-    const links = androidAssetLinks();
-    expect(links).toEqual([{
+    const { ANDROID_APP_LINKS, androidAssetLinks } = require('../lib/config');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require('fs') as typeof import('fs');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const path = require('path') as typeof import('path');
+
+    const PROD_STATEMENT = [{
       relation: ['delegate_permission/common.handle_all_urls'],
       target: {
         namespace: 'android_app',
         package_name: 'com.vettid.app',
         sha256_cert_fingerprints: ['31:A1:96:13:AA:10:F2:09:E0:89:45:F9:47:F9:4F:7C:E3:E6:E5:AC:34:24:57:FF:99:69:A6:79:86:92:8E:65'],
       },
-    }]);
-    const code = JSON.stringify(t.findResources('AWS::CloudFront::Function'));
-    expect(code).toContain('/.well-known/assetlinks.json');
+    }];
+    // vettid-vault enclave/releasecfg/staging.json `android_signers`, both, in its order.
+    const STAGING_SIGNERS = [
+      'bd83a0753faa6af6f8d81b9f76a04ac1a499ea6c7f46c6f1113d4b5787ecb2c4',
+      '2fed27b72746797a931fd414ff3dac4cd969fa0c2ff36209ae05365f580014f2',
+    ];
+    const colons = (hex: string) => hex.toUpperCase().match(/../g)!.join(':');
+    const STAGING_STATEMENT = [{
+      relation: ['delegate_permission/common.handle_all_urls'],
+      target: { namespace: 'android_app', package_name: 'com.vettid.app.staging', sha256_cert_fingerprints: STAGING_SIGNERS.map(colons) },
+    }];
+
+    /** The document the stage's account site deploys at /.well-known/assetlinks.json, as synthesized. */
+    function served(stage: string): { host: string; bodies: string[] } {
+      const app = new cdk.App({ context: { ...(stage === 'prod' ? {} : { stage }), 'aws:cdk:bundling-stacks': [] } });
+      const stack = new VettidOrgAccountSiteStack(app, 'AccountSite', { config: loadConfig(app.node), env });
+      const dist = Object.values<any>(Template.fromStack(stack).findResources('AWS::CloudFront::Distribution'))[0].Properties.DistributionConfig;
+      const out = app.synth().directory;
+      const bodies = fs.readdirSync(out)
+        .map((d: string) => path.join(out, d, '.well-known', 'assetlinks.json'))
+        .filter((f: string) => fs.existsSync(f))
+        .map((f: string) => fs.readFileSync(f, 'utf8'));
+      return { host: dist.Aliases[0], bodies };
+    }
+
+    test('production: com.vettid.app with the production signing certificate, as before', () => {
+      expect(androidAssetLinks('prod')).toEqual(PROD_STATEMENT);
+      const s = served('prod');
+      expect(s.host).toBe('account.vettid.org');
+      expect(s.bodies).toEqual([JSON.stringify(PROD_STATEMENT)]);
+    });
+
+    test('staging: com.vettid.app.staging with both staging signers, on the host the staging build claims', () => {
+      expect(androidAssetLinks('staging')).toEqual(STAGING_STATEMENT);
+      const s = served('staging');
+      // vettid-android app/src/staging/AndroidManifest.xml: the one App Link host the staging build adds.
+      expect(s.host).toBe('account.staging.vettid.org');
+      expect(s.bodies).toEqual([JSON.stringify(STAGING_STATEMENT)]);
+    });
+
+    test('one statement per stage: neither site names the other channel\'s package or signers', () => {
+      const prod = JSON.stringify(androidAssetLinks('prod'));
+      const staging = JSON.stringify(androidAssetLinks('staging'));
+      expect(androidAssetLinks('prod')).toHaveLength(1);
+      expect(androidAssetLinks('staging')).toHaveLength(1);
+      expect(prod).not.toContain('com.vettid.app.staging');
+      expect(staging).not.toContain('"com.vettid.app"');
+      for (const f of ANDROID_APP_LINKS.staging.sha256CertFingerprints) expect(prod).not.toContain(f);
+      for (const f of ANDROID_APP_LINKS.prod.sha256CertFingerprints) expect(staging).not.toContain(f);
+    });
+
+    test('digests are SHA-256 in uppercase colon-separated hex, each listed once', () => {
+      for (const stage of ['prod', 'staging']) {
+        const fps = ANDROID_APP_LINKS[stage].sha256CertFingerprints as string[];
+        expect(fps.length).toBeGreaterThan(0);
+        expect(new Set(fps).size).toBe(fps.length);
+        for (const f of fps) expect(f).toMatch(/^[0-9A-F]{2}(:[0-9A-F]{2}){31}$/);
+      }
+    });
+
+    test('a stage with no app publishes no statement', () => {
+      expect(androidAssetLinks('dev')).toBeNull();
+      expect(androidAssetLinks('constructor')).toBeNull();
+      expect(served('dev').bodies).toEqual([]);
+    });
+
+    test('the document is a known path of the edge function', () => {
+      const code = JSON.stringify(t.findResources('AWS::CloudFront::Function'));
+      expect(code).toContain('/.well-known/assetlinks.json');
+    });
   });
 
   describe('edge function with the real site tree', () => {
@@ -740,7 +811,7 @@ describe('VettidOrgAccountSiteStack', () => {
     const { accountSiteConfig } = require('../lib/stacks/account-site-stack');
     expect(accountSiteConfig(config)).toEqual({ stage: 'prod', release_log_url: 'https://vettid.org/security/releases/', android_app_url: null });
     expect(accountSiteConfig(loadConfig(new cdk.App({ context: { stage: 'staging', stagingAndroidAppUrl: 'https://example.org/a' } }).node)))
-      .toEqual({ stage: 'staging', release_log_url: 'https://vettid.org/security/releases/', android_app_url: 'https://example.org/a' });
+      .toEqual({ stage: 'staging', release_log_url: 'https://staging.vettid.org/security/releases/', android_app_url: 'https://example.org/a' });
     // Deployed in the revalidating pass: the site, config.json and assetlinks.json.
     const deps = Object.values<any>(t.findResources('Custom::CDKBucketDeployment')).map((r) => r.Properties);
     const html = deps.find((d) => JSON.stringify(d.Include ?? []).includes('*.json'));

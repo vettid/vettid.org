@@ -1,7 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import { Construct } from 'constructs';
-import { AppConfig, androidAssetLinks, hostName, resourceName } from '../config';
+import { AppConfig, androidAssetLinks, hostName, releaseLogBaseUrl, resourceName } from '../config';
 import { readRef } from '../constructs/ssm-refs';
 import { stageZone } from '../constructs/stage-zone';
 import { StaticSite } from '../constructs/static-site';
@@ -22,14 +22,14 @@ export const ACCOUNT_RATE_LIMITS = {
 
 /**
  * The account site's /config.json, read by sites/account/js/site-config.js:
- * the stage (staging pages say so), the public release log (production's
- * in every stage, as for the notice emails: RUNBOOK "Staging") and the
- * Android app link (null until there is one).
+ * the stage (staging pages say so), the stage's own public release log
+ * (https://<zoneName>/security/releases/, as for the notice emails;
+ * VAULT-RELEASES §7) and the Android app link (null until there is one).
  */
 export function accountSiteConfig(config: AppConfig): Record<string, unknown> {
   return {
     stage: config.stage,
-    release_log_url: `https://${config.domainName}/security/releases/`,
+    release_log_url: releaseLogBaseUrl(config),
     android_app_url: config.androidAppUrl ?? null,
   };
 }
@@ -97,14 +97,16 @@ export class VettidOrgAccountSiteStack extends cdk.Stack {
       logGroupName: `aws-waf-logs-${resourceName(config, 'account')}`,
     });
 
+    const assetLinks = androidAssetLinks(config.stage);
     new StaticSite(this, 'Site', {
       hostName: hostName(config, 'account'),
       hostedZone,
       sourceDir: 'sites/account',
       notFoundPage: '404.html',
       runtimeConfig: accountSiteConfig(config),
-      // Sign-in links open in the Android app (App Links).
-      wellKnown: { 'assetlinks.json': androidAssetLinks() },
+      // The same-device setup link opens in this stage's Android app (App
+      // Links): production names com.vettid.app, staging com.vettid.app.staging.
+      ...(assetLinks ? { wellKnown: { 'assetlinks.json': assetLinks } } : {}),
       // Signed-out visitors never get the account page shell (see COOKIES.present).
       // The recovery cancel link (/vault/recovery/cancel) is outside it: it
       // needs no session.

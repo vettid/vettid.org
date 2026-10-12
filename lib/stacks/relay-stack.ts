@@ -10,12 +10,20 @@ import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as route53targets from 'aws-cdk-lib/aws-route53-targets';
 import { Construct } from 'constructs';
 import { AppConfig, hostName, resourceName } from '../config';
-import { readRef } from '../constructs/ssm-refs';
+import { publishRef, readRef } from '../constructs/ssm-refs';
 
 export interface VettidOrgRelayStackProps extends cdk.StackProps {
   readonly config: AppConfig;
   /** Relay container image, pinned by digest (e.g. ghcr.io/vettid/vettid-relay@sha256:...). */
   readonly relayImage: string;
+  /**
+   * Publish the VPC, the ALB and its HTTPS listener through SSM for
+   * VettidOrgPushStack, whose services sit behind this load balancer
+   * (PUSH-GATEWAY §10.1). Only when a push gateway is configured: without
+   * one this stack's template is exactly what it was before push existed.
+   * Adds SSM parameters and nothing else: no existing resource changes.
+   */
+  readonly publishPushRefs?: boolean;
 }
 
 const RELAY_PORT = 8080;
@@ -250,6 +258,16 @@ export class VettidOrgRelayStack extends cdk.Stack {
 
     const target = route53.RecordTarget.fromAlias(new route53targets.LoadBalancerTarget(alb));
     new route53.ARecord(this, 'Alias', { zone: hostedZone, recordName: host, target });
+
+    if (props.publishPushRefs) {
+      publishRef(this, config, 'relay/vpc-id', vpc.vpcId);
+      publishRef(this, config, 'relay/public-subnet-ids', cdk.Fn.join(',', vpc.publicSubnets.map((s) => s.subnetId)));
+      publishRef(this, config, 'relay/alb-security-group-id', albSg.securityGroupId);
+      publishRef(this, config, 'relay/https-listener-arn', listener.listenerArn);
+      publishRef(this, config, 'relay/alb-dns-name', alb.loadBalancerDnsName);
+      publishRef(this, config, 'relay/alb-hosted-zone-id', alb.loadBalancerCanonicalHostedZoneId);
+      publishRef(this, config, 'relay/alb-full-name', alb.loadBalancerFullName);
+    }
 
     new cdk.CfnOutput(this, 'RelayUrl', { value: `https://${host}` });
   }

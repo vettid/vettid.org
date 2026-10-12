@@ -162,18 +162,66 @@ export function parsePlaintext(pt, vaultId, recoveryId) {
  * never an address it connects to.
  */
 export function qrPayload(api, vaultId, recoveryId, code) {
-  if (!/^https:\/\/[a-z0-9.-]+(:\d+)?$/.test(api) || !VAULT_ID_RE.test(vaultId) || !ULID_RE.test(recoveryId) || !CODE_RE.test(code)) throw new Error('qrPayload: bad input');
+  if (!ORIGIN_RE.test(api) || !VAULT_ID_RE.test(vaultId) || !ULID_RE.test(recoveryId) || !CODE_RE.test(code)) throw new Error('qrPayload: bad input');
   return JSON.stringify({ v: 1, t: 'r', api, vault_id: vaultId, recovery_id: recoveryId, code });
 }
 
-/** The code as text, in groups of four for typing (§11.11.2). */
-export function codeGroups(code) {
-  return code.match(/.{1,4}/g) ?? [];
+// ── the typed form (VAULT-MESSAGING 0.25.0 §11.11.10) ───────────────────
+//
+//   typed = locator (12) || code (32) || check (4)
+//   check = the first 20 bits of
+//           SHA-256("vettid/vms/2/recovery-typed-check" || 0x00 || api || 0x00 || locator || code),
+//           as 4 Crockford base32 characters (most significant 5 bits first)
+//
+// The locator comes from the member API (with `sealed_code` only); the check
+// characters are computed here and are never sent: the app verifies them
+// with its own built-in origin and drops them.
+
+const TYPED_LABEL = 'vettid/vms/2/recovery-typed-check';
+const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+/** The API's locator: 12 Crockford base32 characters (60 random bits). */
+export const LOCATOR_RE = /^[0-9A-HJKMNP-TV-Z]{12}$/;
+const ORIGIN_RE = /^https:\/\/[a-z0-9.-]+(:\d+)?$/;
+export const TYPED_LENGTH = 48;
+export const TYPED_GROUPS = 12;
+const TYPED_RE = /^[0-9A-HJKMNP-TV-Z]{48}$/;
+
+/** The 4 check characters for `api` (the portal's origin, no trailing slash), `locator` and `code`. */
+export async function typedCheck(api, locator, code, subtle = globalThis.crypto.subtle) {
+  if (typeof api !== 'string' || !ORIGIN_RE.test(api) || !LOCATOR_RE.test(locator) || !CODE_RE.test(code)) throw new Error('typedCheck: bad input');
+  const h = new Uint8Array(await subtle.digest('SHA-256', utf8(`${TYPED_LABEL}\0${api}\0${locator}${code}`)));
+  // The first 20 bits: two bytes and the high half of the third.
+  const bits = (h[0] << 12) | (h[1] << 4) | (h[2] >> 4);
+  let out = '';
+  for (let shift = 15; shift >= 0; shift -= 5) out += ALPHABET[(bits >> shift) & 31];
+  return out;
+}
+
+/** The 48 characters the member types: locator, code, check. */
+export async function typedForm(api, locator, code, subtle = globalThis.crypto.subtle) {
+  return locator + code + (await typedCheck(api, locator, code, subtle));
+}
+
+/**
+ * How the page shows the typed form: three rows of four groups of four.
+ * Each group carries its text and what a screen reader is given instead
+ * ("Group 3 of 12: 2, H, T, D"): one group at a time, spelled character by
+ * character, never read as a word.
+ */
+export function typedRows(typed) {
+  if (typeof typed !== 'string' || !TYPED_RE.test(typed)) throw new Error('typedRows: bad input');
+  const rows = [];
+  for (let g = 0; g < TYPED_GROUPS; g += 1) {
+    const text = typed.slice(g * 4, g * 4 + 4);
+    if (g % 4 === 0) rows.push([]);
+    rows[rows.length - 1].push({ text, spoken: `Group ${g + 1} of ${TYPED_GROUPS}: ${text.split('').join(', ')}` });
+  }
+  return rows;
 }
 
 // ── ids ─────────────────────────────────────────────────────────────────
 
-const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+const CROCKFORD = ALPHABET;
 
 /** A canonical ULID (48-bit ms time, 80 random bits), e.g. a lock's request_id. */
 export function newUlid(now = Date.now(), random = (n) => globalThis.crypto.getRandomValues(new Uint8Array(n))) {

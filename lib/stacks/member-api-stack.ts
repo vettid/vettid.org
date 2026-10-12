@@ -10,7 +10,7 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as sources from 'aws-cdk-lib/aws-lambda-event-sources';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
-import { AppConfig, ORG, accountPushFunctionName, enrollCodeKeyParamName, hostName, resourceName, vaultServiceParamName } from '../config';
+import { AppConfig, ORG, accountPushFunctionName, enrollCodeKeyParamName, hostName, releaseLogBaseUrl, resourceName, vaultServiceParamName } from '../config';
 import { ApiFunction } from '../constructs/api-function';
 import { HttpRouteGroup } from '../constructs/route-group';
 import { publishRef, readRef } from '../constructs/ssm-refs';
@@ -365,8 +365,9 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     g(notices, 'audit', ['PutItem']);
     vaultGrants(notices, 'vault-notices');
     notices.addToRolePolicy(sesSend);
-    // The public release log (generated from the signed manifest): urgent security releases.
-    notices.addEnvironment('RELEASE_LOG_URL', `https://${config.domainName}/security/releases/`);
+    // The stage's own public release log (generated from its signed manifest):
+    // the notes links and summaries in every email, and urgent security releases.
+    notices.addEnvironment('RELEASE_LOG_URL', releaseLogBaseUrl(config));
     new events.Rule(this, 'VaultNoticeSchedule', {
       schedule: events.Schedule.cron({ minute: '0', hour: '15' }), // 15:00 UTC daily: daytime in the Americas and Europe
       targets: [new targets.LambdaFunction(notices)],

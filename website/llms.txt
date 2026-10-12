@@ -36,7 +36,7 @@
   ML-KEM-768 + X25519 key exchange; Ed25519 signatures), what the operator
   can see, and PGP key for encrypted reports
 - [Donate](https://vettid.org/donate): support the project (Bitcoin)
-- [Open Source](https://vettid.org/open-source): the full stack is public on GitHub (AGPL-3.0) — enclave vault, relay, apps, agent connector, infrastructure, and the LEASH proposal
+- [Open Source](https://vettid.org/open-source): the full stack is public on GitHub (AGPL-3.0) — enclave vault, relay, push gateway, apps, agent connector, infrastructure, and the LEASH proposal
 
 ## Contact
 

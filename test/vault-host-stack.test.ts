@@ -119,6 +119,7 @@ describe('VettidOrgVaultHostStack: network and egress (§8.4)', () => {
       'relay.vettid.org',
       'kms.us-east-1.amazonaws.com',
       'android.googleapis.com',
+      'push.vettid.org',
       'sqs.us-east-1.amazonaws.com',
       'dynamodb.us-east-1.amazonaws.com',
       '369484479783.ddb.us-east-1.amazonaws.com',
@@ -133,6 +134,17 @@ describe('VettidOrgVaultHostStack: network and egress (§8.4)', () => {
       '*.ec2.internal',
     ]);
     expect(lists.find((l) => l.Properties.Name === 'vettid-org-vault-host-block-all')!.Properties.Domains).toEqual(['*']);
+  });
+
+  // Channels cannot cross (VAULT-MESSAGING §11.10.8, §14.3; PUSH-GATEWAY §10.4):
+  // each channel's hosts allow only that channel's push gateway.
+  test('push gateway: each channel allows only its own gateway', () => {
+    const allow = (stage: string) =>
+      resources(host(stage).json, 'AWS::Route53Resolver::FirewallDomainList')
+        .find((l) => l.Properties.Name.endsWith('vault-host-allow'))!.Properties.Domains as string[];
+    const pushHosts = (stage: string) => allow(stage).filter((d) => d.startsWith('push.'));
+    expect(pushHosts('prod')).toEqual(['push.vettid.org']);
+    expect(pushHosts('staging')).toEqual(['push.staging.vettid.org']);
   });
 
   test('DNS Firewall rules: allow the list (redirections trusted), NXDOMAIN for everything else; associated, mutation-protected', () => {

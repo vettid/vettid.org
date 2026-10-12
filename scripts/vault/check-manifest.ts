@@ -4,7 +4,8 @@
  * served manifest (signature under the keys pinned in lib/config.ts, exact
  * render of the release file, signed_serial), the history of the served
  * file in git (serials strictly increasing, successor rules), status and
- * date consistency; for production also the release log pages.
+ * date consistency, and the channel's release log pages (production
+ * website/security/releases/, staging sites/staging/security/releases/).
  *
  * Needs the full git history of the served files: CI checks out with
  * fetch-depth 0. A shallow clone fails unless MANIFEST_CHECK_ALLOW_SHALLOW=1.
@@ -61,15 +62,14 @@ function main(): number {
     const last = h[h.length - 1];
     if (last && served && last.served && last.served.equals(served)) h.pop();
     problems.push(...checkChannel({ channel, file, served, pinnedKeys: vault.manifestKeys, history: h }));
-    if (channel === 'prod') {
-      let manifest = null;
-      try {
-        manifest = served ? servedManifest(served) : null;
-      } catch {
-        // reported above
-      }
-      problems.push(...checkReleaseLog(ROOT, manifest, file).map((s) => `prod release log: ${s}`));
+    // Every channel's release log is current (VAULT-RELEASES §7 "Release notes on every channel").
+    let manifest = null;
+    try {
+      manifest = served ? servedManifest(served) : null;
+    } catch {
+      // reported above
     }
+    problems.push(...checkReleaseLog(ROOT, manifest, file).map((s) => `${channel} release log: ${s}`));
     if (!problems.length) {
       console.log(`check:manifest ${channel}: ${served ? `serial ${servedManifest(served).serial}` : 'nothing published yet'}, ${file.releases.length} release(s) listed`);
     }

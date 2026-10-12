@@ -156,6 +156,108 @@ describe('sealed recovery code: WebCrypto round trips', () => {
   });
 });
 
+describe('the typed recovery code (VAULT-MESSAGING 0.25.0 §11.11.10, §16)', () => {
+  // §16's vector (TEST ONLY).
+  const LOC = '7ZK3M9QX2HTD';
+  const VCODE = 'CDEFGHJKMNPQRSTVWXYZ0123456789AB';
+  const PROD = 'https://account.vettid.org';
+  const STAGING = 'https://account.staging.vettid.org';
+
+  test('the hashed bytes: the 33-byte label, 0x00, the origin, 0x00, the 44 characters; SHA-256 as in §16', () => {
+    const bytes = Buffer.concat([Buffer.from('vettid/vms/2/recovery-typed-check'), Buffer.from([0]), Buffer.from(PROD), Buffer.from([0]), Buffer.from(LOC + VCODE)]);
+    expect(Buffer.from('vettid/vms/2/recovery-typed-check')).toHaveLength(33);
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe('d8d41816e4cf5ac83a89a6472d2ab0b63197207dc80e77e77bd95f50214ae1c4');
+    const staging = Buffer.concat([Buffer.from('vettid/vms/2/recovery-typed-check\0'), Buffer.from(STAGING), Buffer.from([0]), Buffer.from(LOC + VCODE)]);
+    expect(createHash('sha256').update(staging).digest('hex')).toBe('91651f858ae9b0d2a1670b77aec98f3cfd1c19b9d44208dafdece04a5e3558ce');
+  });
+
+  test('the check characters for the production and the staging origin', async () => {
+    await expect(rc.typedCheck(PROD, LOC, VCODE, subtle)).resolves.toBe('V3A1');
+    await expect(rc.typedCheck(STAGING, LOC, VCODE, subtle)).resolves.toBe('J5JH');
+  });
+
+  test('the typed form: locator, code, check; 48 characters', async () => {
+    const typed = await rc.typedForm(PROD, LOC, VCODE, subtle);
+    expect(typed).toBe('7ZK3M9QX2HTDCDEFGHJKMNPQRSTVWXYZ0123456789ABV3A1');
+    expect(typed).toHaveLength(rc.TYPED_LENGTH);
+    expect(typed.slice(12, 44)).toBe(VCODE);
+  });
+
+  test('grouping: three rows of four groups of four, as §16 writes it', async () => {
+    const rows = rc.typedRows(await rc.typedForm(PROD, LOC, VCODE, subtle));
+    expect(rows.map((r: { text: string }[]) => r.map((g) => g.text).join(' '))).toEqual(['7ZK3 M9QX 2HTD CDEF', 'GHJK MNPQ RSTV WXYZ', '0123 4567 89AB V3A1']);
+    expect(rows.flat()).toHaveLength(rc.TYPED_GROUPS);
+  });
+
+  test('a screen reader gets each group with its position, spelled character by character', async () => {
+    const groups = rc.typedRows(await rc.typedForm(PROD, LOC, VCODE, subtle)).flat();
+    expect(groups[2]).toEqual({ text: '2HTD', spoken: 'Group 3 of 12: 2, H, T, D' });
+    expect(groups[11].spoken).toBe('Group 12 of 12: V, 3, A, 1');
+    groups.forEach((g: { spoken: string }, i: number) => expect(g.spoken.startsWith(`Group ${i + 1} of 12: `)).toBe(true));
+  });
+
+  test('malformed input is refused, never shown', async () => {
+    await expect(rc.typedCheck('http://account.vettid.org', LOC, VCODE, subtle)).rejects.toThrow();
+    await expect(rc.typedCheck(`${PROD}/`, LOC, VCODE, subtle)).rejects.toThrow();
+    await expect(rc.typedCheck(PROD, LOC.toLowerCase(), VCODE, subtle)).rejects.toThrow();
+    await expect(rc.typedCheck(PROD, '7ZK3M9QX2HTU', VCODE, subtle)).rejects.toThrow(); // no U
+    await expect(rc.typedCheck(PROD, LOC.slice(1), VCODE, subtle)).rejects.toThrow();
+    await expect(rc.typedCheck(PROD, LOC, VCODE.slice(1), subtle)).rejects.toThrow();
+    await expect(rc.typedCheck(PROD, undefined, VCODE, subtle)).rejects.toThrow();
+    expect(() => rc.typedRows(VCODE)).toThrow();
+    expect(() => rc.typedRows('I'.repeat(48))).toThrow();
+    for (const ok of [LOC, '0'.repeat(12)]) expect(rc.LOCATOR_RE.test(ok)).toBe(true);
+    for (const bad of ['', LOC + '0', 'ILOU00000000', LOC.toLowerCase()]) expect(rc.LOCATOR_RE.test(bad)).toBe(false);
+  });
+
+  describe('the recovery page (source)', () => {
+    const page = readFileSync(join(__dirname, '..', 'sites', 'account', 'js', 'recovery.js'), 'utf8');
+    const lib = readFileSync(join(__dirname, '..', 'sites', 'account', 'js', 'recovery-code.js'), 'utf8');
+    const css = readFileSync(join(__dirname, '..', 'sites', 'account', 'styles.css'), 'utf8');
+
+    test('no bare 32-character text: the helper and its markup are gone', () => {
+      expect(rc.codeGroups).toBeUndefined();
+      expect(lib).not.toContain('codeGroups');
+      expect(page).not.toContain('codeGroups');
+      expect(page).not.toContain('Or type this code');
+      expect(page).not.toContain('code-text');
+      // The opened code reaches only the QR payload and the typed form.
+      expect(page.match(/(?<![a-z])r\.code\b/g)).toHaveLength(3);
+      expect(page).toContain('qrPayload(location.origin, recoveryVaultId(), recovery.recovery_id, r.code)');
+      expect(page).toContain('typedForm(location.origin, recovery.locator, r.code)');
+    });
+
+    test('the typed form lives in the QR\'s box, which Hide, a re-render and pagehide empty', () => {
+      const show = page.slice(page.indexOf('async function showCode'), page.indexOf('function wipeCode'));
+      expect(show).toContain("const box = $('code-box');");
+      expect(show).toMatch(/fill\(box,\s+qrSvg\([^\n]+\n\s+typed \? typedCode\(typed\) : /);
+      expect(page.match(/typedCode\(/g)).toHaveLength(2); // its definition and that one use
+      const wipe = page.slice(page.indexOf('function wipeCode'));
+      expect(wipe.slice(0, wipe.indexOf('\n}\n'))).toContain('box.replaceChildren();');
+      expect(page).toMatch(/addEventListener\('pagehide', \(\) => \{\s+wipeCode\(\);/);
+    });
+
+    test('the texts, no copy button, nothing sent or stored', () => {
+      expect(page).toContain("Can't scan? Type this code in the app");
+      expect(page).toContain('The code has no I, L, O or U.');
+      expect(page).toContain('To type the code instead, cancel this recovery and start a new one.');
+      expect(page).not.toMatch(/clipboard|execCommand/i);
+      expect(lib).not.toMatch(/clipboard|fetch\(|localStorage|sessionStorage|console\./);
+    });
+
+    test('each group is its own element and each row its own line; a mono face with a marked zero; selectable', () => {
+      expect(page).toContain("el('div', { class: 'typed-row' }");
+      expect(page).toContain("el('span', { class: 'typed-group' }");
+      expect(page).toContain("el('span', { 'aria-hidden': 'true' }, g.text)");
+      const rule = /\.typed-code \{([^}]*)\}/.exec(css)![1];
+      expect(rule).toContain('font-family: var(--font-mono)');
+      expect(rule).toContain('font-variant-numeric: slashed-zero');
+      expect(rule).toContain('user-select: text');
+      expect(rule).toMatch(/font-size: [\d.]+rem/);
+    });
+  });
+});
+
 describe('recovery-code helpers', () => {
   test('canonical base64 only', () => {
     expect(rc.fromBase64('AAEC')).toEqual(new Uint8Array([0, 1, 2]));
@@ -163,9 +265,6 @@ describe('recovery-code helpers', () => {
     for (const bad of ['AAE', 'AA EC', 'AAF=', 'AA-_', 'AAEC\n', 123]) expect(rc.fromBase64(bad)).toBeNull();
   });
 
-  test('codeGroups: eight groups of four', () => {
-    expect(rc.codeGroups(CODE)).toEqual(['ABCD', 'EFGH', 'JKMN', 'PQRS', 'TVWX', 'YZ01', '2345', '6789']);
-  });
 
   test('qrPayload refuses malformed input', () => {
     const api = 'https://account.vettid.org';

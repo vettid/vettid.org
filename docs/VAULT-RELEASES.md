@@ -1,8 +1,8 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.8
-date: 2026-10-08
+version: 0.1.16
+date: 2026-10-12
 owner: Al Liebl (Mesmer)
 changelog:
   - 0.1.0: V5 plan. Release pipeline, keys, infrastructure, release
@@ -56,11 +56,82 @@ changelog:
     0.22.0 §15 item 30): §11 notes the member's History export as the
     one exception to "no backup or export"; it changes no recovery
     objective
+  - 0.1.9 (editorial; push N3, VAULT-MESSAGING 0.24.1 §14.3, vettid.org
+    #204, vettid-vault #59): §8.4 adds the push gateway to the egress
+    controls. The parent's `DefaultAllow` carries both
+    `push.vettid.org` and `push.staging.vettid.org` (one parent binary
+    for every channel); each stage's DNS Firewall and the enclave's
+    release allowlist admit only their own channel's host; the gateway
+    URL is `push_url` in vettid-vault `enclave/releasecfg/<channel>.json`
+  - 0.1.10 (owner request 2026-10-10, RELEASE-UPDATES 0.3.0,
+    ANDROID-PLAN 0.1.31): release notes on every channel (§7 "Release
+    notes on every channel"): a `log` is required for every release in
+    every channel from the moment it leaves `candidate`; a release's
+    `notes` is its entry in its own channel's log; staging gets a log at
+    `https://staging.vettid.org/security/releases/` generated the same
+    way; check:manifest checks both logs; staging S1–S9 backfilled with
+    short entries; notice emails link the ending and the newest release's
+    notes (§3.5). §10.1 steps 4, 5, 10 and 12 and §11.1 follow
+  - 0.1.11 (owner decisions of 2026-10-11, STAGING-DEVELOPMENT-PLAN
+    0.1.0 §6; approved by the owner 2026-10-11, merged as vettid.org
+    #220). **D2:** production
+    release 1's window is 90 days, for release 1 only, expressed as
+    `ends_after_days: 90` on its entry in `vault/releases/prod.json`;
+    the default stays 12 months and the KMS window 30 days (§3.5; §1,
+    §7, §10.3, §14, §15 O5 follow). **D4, D5:** the release constants
+    `features` and `android_package` (§5.2; VAULT-MESSAGING 0.26.0
+    §11.10.8). **D1, D11:** staging is the development channel, not
+    parked between releases; its releases are cut by hand, at most two
+    a week, and no nightly image exists; the text that said otherwise
+    now points to the plan (§1, §3.1, §3.3, §8.9, §11.1, §15 O2)
+  - 0.1.12 (owner decision 2026-10-11, ANDROID-PLAN 0.1.36,
+    VAULT-MESSAGING 0.27.0 §11.7.1; approved by the owner 2026-10-11):
+    O8 amended. Google generates and holds the Play app-signing key;
+    VettID's release key (the certificate already pinned, called the
+    upload certificate until now) signs the F-Droid and direct builds
+    and is never given to Google. **Production release 1 pins that one
+    certificate**: `TODO-O8` is removed, not filled in, and O8 no
+    longer blocks release 1. The Play certificate is added by a later
+    production release, before the Play listing goes live.
+    `android_signers` entries become `{digest, class}` and each vault
+    is bound to its app's signer (§5.2); C6 says what adding and
+    removing a signer does to existing vaults (§3.4); §12.1 and §15 O8
+    follow
+  - 0.1.13 (editorial, as built; staging release S10, vettid.org #223,
+    #228–#230, vettid-vault #62–#65; VAULT-MESSAGING 0.27.1; approved
+    by the owner 2026-10-11). §3.5: what `check:manifest` does and does
+    not check about `ends_after_days` (an `ends_at` needs release 2's
+    `published_at`; only an early `ends_at` is refused; nothing
+    requires the member on production release 1; **owner decision
+    2026-10-11: it will be required**, not yet implemented). §5.2: the feature list's only-grow
+    check runs in the release workflow against the highest lower tag;
+    the staging exception for unbound vaults is derived from the
+    channel and release number; the key attestation chain rules.
+    §3.5 "As built": `security: urgent` first used, by S10. §8.8:
+    S10's capacity figures. 0.1.11 marked approved
+  - 0.1.14 (editorial, as built; phase 1 of VAULT-RELAY-SCALING 0.1.2,
+    vettid-vault #66, for staging release S11; VAULT-MESSAGING 0.27.2).
+    §8.7: the parent's first metrics as built (namespace, dimension,
+    names, how they are shipped), the alarms they call for (not yet
+    built) and what is still to be verified on staging. §8.8: the relay
+    connections' capacity per host and the local measurements
+  - 0.1.15 (editorial, a reference only): §3.4 C4 and `related` point
+    to VAULT-HOST-PROTOCOL (0.1.0, a draft for the owner's review), the
+    enclave ↔ parent protocol as built
+  - 0.1.16 (errata; VAULT-HOST-PROTOCOL decision H8 and vettid-vault
+    #69). §3.4 C2: the `account` operation, in the SQS message since
+    VAULT-MESSAGING 0.15.0, was missing from the list. §8.7 "As
+    built": the plain field `relay_vault_limit`, from the staging
+    release that includes vettid-vault 8f2c8bf (S11). `related` brought
+    up to date
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
-  - VAULT-MESSAGING.md (0.14.0) §11.10 release updates, §12.5 deletion, §13.5, §13.9
-  - RELEASE-UPDATES.md (0.1.0) — member-facing; §3 changes with this plan
+  - VAULT-MESSAGING.md (0.27.4) §11.10 release updates, §12.5 deletion, §13.5, §13.9
+  - RELEASE-UPDATES.md (0.3.3) — member-facing; §3 changes with this plan; §5 the release log
+  - ANDROID-PLAN.md (0.1.37) — the app's "What's new" from the log
+  - STAGING-DEVELOPMENT-PLAN.md (0.1.2) — staging as the development channel; D1–D11
   - MEMBER-API.md "Vault", RUNBOOK.md, ARCHITECTURE.md
+  - VAULT-HOST-PROTOCOL.md (0.1.2) — the enclave ↔ parent (vsock) protocol as built; §10 what happens if versions meet
   - vettid-vault docs/SMOKE.md (hardware smoke test, 2026-10-02)
 classification: public (no secrets; safe for github.com/vettid)
 ---
@@ -95,7 +166,8 @@ production release 1 is tracked in W10-READINESS.
   or be listed for production, by construction (§3.1).
 - **Lifecycle.** `active` → `deprecated` (move-only) → `retired` (final
   notice) → `removed` (key scheduled for deletion, then deleted). Default
-  12 months from supersession to the deadline, configurable (§3.2).
+  12 months from supersession to the deadline, configurable (§3.2);
+  production release 1: 90 days (§3.5).
 - **Cadence.** One production release a month at most, plus security
   hotfixes; a month with nothing member-visible is skipped (§3.3).
 - **Spec changes before release 1** (§4): the §11.10.7 key check admits
@@ -119,7 +191,9 @@ production release 1 is tracked in W10-READINESS.
   live release (AMI from EC2 Image Builder, launch template, ASG). Old
   releases run on demand (§8).
 - **Cost.** About $90/month in production at steady state with one
-  always-on m7g.large; about $30 parked; staging about $10 parked (§8.9).
+  always-on m7g.large; about $30 parked. Staging is the development
+  channel and is not parked: about $100–120 a month, an estimate (§8.9;
+  STAGING-DEVELOPMENT-PLAN §3 risk 5).
 - **First deployment.** Member API vault routes dark first; staging
   release and hardware tests; production release 1 only when the Android
   app's signing key exists, because its digest is pinned in the image
@@ -149,7 +223,7 @@ promises to run a release for a bounded time, not forever.
 | Manifest key | test key in the repo | staging key (KMS, deletable) | key A (KMS) + key B (offline) |
 | Manifest URL | none (passed by vaultctl) | `https://staging.vettid.org/.well-known/vettid/pcr-manifest.json` | `https://vettid.org/.well-known/vettid/pcr-manifest.json` |
 | Sealing-key account | none | staging account | production account |
-| Release keys | dev sealer | §11.10.7 shape, retirement window 7 days, deleted after use | §11.10.7 shape, window 30 days, deleted only at retirement |
+| Release keys | dev sealer | §11.10.7 shape, retirement window 7 days, deleted when the release is removed (at most three staging releases are live, STAGING-DEVELOPMENT-PLAN §2.1, §2.5) | §11.10.7 shape, window 30 days, deleted only at retirement |
 | Device attestation | test CA | test CA **and** the real vendor roots | real vendor roots only |
 | Release numbers | 0 | its own sequence | 1, 2, 3, … |
 
@@ -182,7 +256,9 @@ that release's PCR0 (§4.2), so that §11.10.7 check 6 keeps passing.
 ### 3.3 Cadence and hotfixes
 
 - **Monthly train.** Code freezes on the first Monday; the release is cut
-  from `main` that week, spends at least a week in staging, and is
+  from `main` that week, from the commit of a staging release that
+  passes the promotion checklist (STAGING-DEVELOPMENT-PLAN §2.4, seven
+  quiet days on staging among its conditions), and is
   published in the third week. A month with no member-visible change is
   skipped: every release costs each member an approval.
 - **Hotfix.** A security fix ships as the next release number, cut from
@@ -190,8 +266,10 @@ that release's PCR0 (§4.2), so that §11.10.7 check 6 keeps passing.
   Its notes carry the urgency; members on affected releases are emailed.
   The fix is prepared in a private fork and the public source is pushed
   when the release is published (AGPL: source with the release).
-- **Never** "every merge": `main` builds a staging image nightly; only
-  the train or a hotfix creates a production release.
+- **Never** "every merge": only the train or a hotfix creates a
+  production release. Staging releases are cut by hand from a tag, at
+  most two a week (STAGING-DEVELOPMENT-PLAN §2.1); no nightly staging
+  image is built.
 
 ### 3.4 The move-only contract
 
@@ -205,11 +283,11 @@ the oldest live release is removed.
 | # | Interface | What stays compatible |
 |---|---|---|
 | C1 | Manifest | Format v1 and its signature label; the pinned manifest keys (rotation only through a key every live release already pins); the status set fixed at release 1 (`active`, `deprecated`, `retired`, `removed`); new fields additive only (old parsers ignore unknown members, but refuse unknown statuses) |
-| C2 | Alternate channel (app ↔ member API ↔ queue ↔ enclave) | Routes and their errors; envelope v2, suite 2, the 13,444 / 5,252-byte sizes; descriptor v1; the SQS message v1 and its ops (`enroll`, `unlock`, `lock`, `delete`, `recovery`, `recovery_cancel`, `recovery_register`); response slots; the unlock, approval and recovery signing strings. **Apps keep the oldest live release's formats.** |
+| C2 | Alternate channel (app ↔ member API ↔ queue ↔ enclave) | Routes and their errors; envelope v2, suite 2, the 13,444 / 5,252-byte sizes; descriptor v1; the SQS message v1 and its ops (`enroll`, `unlock`, `lock`, `delete`, `recovery`, `recovery_cancel`, `recovery_register`, and `account`, which 0.1.16 adds to this list: it has been in the message since VAULT-MESSAGING 0.15.0); response slots; the unlock, approval and recovery signing strings. **Apps keep the oldest live release's formats.** |
 | C3 | Storage and tables | S3 keys `vaults/<vault_id>/…` and `users/<hash>/vault`, conditional-write semantics; the attributes a release's parent reads and writes (lease, registry row, response slot, lifecycle events, `alarm`); the queue name prefix. Schema changes additive only. |
-| C4 | Host | Each release runs **its own tag's parent** on its own AMI, so the vsock protocol never crosses versions. Host OS patches rebuild the AMI with the same EIF and parent. |
+| C4 | Host | Each release runs **its own tag's parent** on its own AMI, so the vsock protocol never crosses versions (the protocol as built: VAULT-HOST-PROTOCOL; what the code does if versions meet all the same: §10 there). Host OS patches rebuild the AMI with the same EIF and parent. |
 | C5 | AWS | The pinned KMS region endpoint, SigV4, IMDS credentials, the pinned Amazon roots (Amazon Root CA 1 runs to 2038) |
-| C6 | Device attestation | The Android signing-certificate digests, package name and iOS app ID pinned in the release; the pinned Google, Apple and GrapheneOS roots. Rotating the app signing key needs every live release to pin the new digest first (two digests pinned). |
+| C6 | Device attestation | The Android signing-certificate digests, package name and iOS app ID pinned in the release; the pinned Google, Apple and GrapheneOS roots. Rotating the app signing key needs every live release to pin the new digest first (two digests pinned). 0.1.12: each vault is bound to the signer of its app (VAULT-MESSAGING 0.27.0 §11.7.1). **Adding** a signer to a release changes nothing for existing vaults. **Removing** one strands the vaults bound to it at that release (`signer_refused`, also at the confirming unlock of a move into it) until the member transfers or recovers to an app with a pinned signer: a release drops a signer only with the notice of a retirement (§3.5), and its log entry says so. A release's log entry also says when it adds a signer. |
 | C7 | Relay | Not needed for a move (a move locks without collecting). Ordinary unlocks collect from the relay: best effort only. The relay stays backward compatible in practice, but a deprecated release may lose messaging. |
 | C8 | Member API vault features | Lock, status, recovery and the host `delete` (account cancellation) keep working for every live release |
 
@@ -240,6 +318,14 @@ mistake or rescue a member who writes in, not extra time members are
 told to count on. Cancelling leaves the key `Disabled`; `EnableKey`
 restores it, which is why the retirement role needs both (§4.1).
 
+Every notice email links release notes (owner request 2026-10-10,
+RELEASE-UPDATES §3): emails 1–4 and the deadline email link N's `notes`
+and the `notes` and log summary of the newest `active` release (the one
+the app offers); the hotfix email of §10.2 links the hotfix's `notes`
+with its summary and `security_text`. The URLs are the channel's own log
+entries (§7 "Release notes on every channel"); a summary the job cannot
+read from the log is left out, never the link.
+
 Who is emailed: members whose vault row's `sealed_release` is N, found
 through the vaults table's `user-index`. That value is advisory (written
 by the host), which is fine for notices. Emails go through the existing
@@ -249,13 +335,73 @@ recovery are emailed the same way.
 Shortened windows: a release with a known exploited vulnerability may get
 a shorter window, never under 60 days (owner decision O5).
 
+**Production release 1: 90 days** (0.1.11; owner decision D2 of
+2026-10-11, STAGING-DEVELOPMENT-PLAN §6). Release 1 goes early to the
+owner and named testers (at most 10) and freezes its wire formats and
+pinned signers for as long as it is live (§3.4), so its window W is
+**90 days, for release 1 only**. Release 2 and every later release keep
+the default of 12 months.
+
+- *What changes.* W for one release, nothing else. The notice period,
+  the emails, the rescue and O5's floor of 60 days are as above. The
+  30 days of `ScheduleKeyDeletion` after the deadline are a different
+  thing (`retirement_window_days`, pinned in the image and in the key's
+  policy, §4.1) and stay 30.
+- *How it is expressed.* Release 1's entry in
+  `vault/releases/prod.json` carries **`ends_after_days: 90`**, from the
+  release entry PR on (§10.1 step 5). It is a member of the release list
+  only, like `host` and `log`: it is not in the manifest or the image,
+  and no enclave or app reads it. An entry without it has the default.
+  `check:manifest` accepts the member only on production release 1 and
+  only with the value 90, and then refuses an `ends_at` on that entry
+  earlier than 90 days after release 2's `published_at`. (No check knew
+  W before: `ends_at` is set by hand, §7, §10.3.)
+- *The check, as built* (0.1.13; `lib/vault/release-list.ts`).
+  - An `ends_at` on the entry is refused while release 2 is not in
+    the list or has no `published_at`: there is nothing to count the
+    90 days from.
+  - Only an **early** `ends_at` is refused. There is no upper bound: a
+    later date is a longer window, which is always allowed.
+  - The member is kept out of the manifest and out of the log's
+    `index.json`; only the release log page's "End date" line reads
+    it.
+  - **Nothing requires the member.** A production release 1 entry
+    without it passes every check, and then has no checked window at
+    all: no check knows the default of 12 months either, so its
+    `ends_at` would be whatever is typed (after `published_at`), and
+    its log page would promise "at least 12 months". The 90 days of D2
+    then rest on the release entry PR's review alone (W10-READINESS §3
+    step 5). **Decided (owner, 2026-10-11, as recommended; not yet
+    implemented):** `check:manifest` must refuse a production release
+    1 entry without `ends_after_days: 90`. A small change to the
+    validation, to make before the release entry PR (W10-READINESS
+    B12).
+- *The timeline.* W equals the notice period, so release 1 is never
+  `deprecated`: the manifest that makes release 2 `active` (T0) sets
+  release 1 `retired` with `ends_at` = T0 + 90 days. `active` to
+  `retired` is a forward step, which the manifest checks allow. Email 1
+  goes out with the notice job's next run, emails 2–4 at 30, 7 and 1
+  days, and the deadline, the rescue and the deletion follow the table.
+  The two parts marked "Not built" below are therefore needed by
+  T0 + 120 days, not a year later.
+- *What members are told.* Before T0 there is no date to show, so the
+  window itself is stated: by the owner to each tester with the
+  registration code; in release 1's log entry (`changes`: "This first
+  release is kept for 90 days after release 2 replaces it, not the
+  usual 12 months"); and on its release log page, whose "End date" line
+  reads "Not set (90 days after a newer release replaces it)" for an
+  entry with `ends_after_days`. From T0 the app, the release log and the
+  emails show the date as for any retired release (RELEASE-UPDATES
+  0.3.1 §3).
+
 *As built (W8).* The member API's daily `VaultNoticeJob` (MEMBER-API
 "Vault release notices") sends emails 1–4 (90, 30, 7, 1 days before
 `ends_at`, for `deprecated` and `retired` releases; only the latest
 milestone due) and the deadline email (`removed`, up to 14 days after
 `ends_at`, not during a rescue), plus the hotfix email of §10.2 (a release
 whose log says `security: urgent`, to members on its `affects` releases,
-for 30 days). It finds members through a new vaults-table index,
+for 30 days; 0.1.13: first used by staging S10, serial 12, whose log
+entry is `security: urgent` with `affects` S3–S9). It finds members through a new vaults-table index,
 `sealed-release-index` (projects `vault_id`, `user_guid`, `state` only;
 the `user-index` cannot answer "who is on release N"), with its own role
 (`vettid-org-member-vault-notices`: `Query` on `vault-releases` and that
@@ -432,7 +578,9 @@ whose value is recorded in `measurements.json`):
 | `manifest_keys` | SPKI of key A and key B | §6.1 |
 | `seal_account`, `seal_region` | the vault production account, `us-east-1` | owner decision O1 |
 | `retirement_principal`, `retirement_window_days` | the retirement role ARN, 30 | §4.1 |
-| `android_signers` | SHA-256 of the app signing certificate(s) | owner decision O8 |
+| `android_signers` | 1 to 4 entries `{"digest": "<SHA-256 of a signing certificate, 64 lowercase hex>", "class": "vettid" \| "google_play" \| "development"}` (0.1.12; a bare list of digests before) | owner decision O8 as amended 2026-10-11 |
+| `android_package` (0.1.11) | `com.vettid.app` (staging: `com.vettid.app.staging`) | VAULT-MESSAGING 0.26.0 §11.10.8, "Android package"; STAGING-DEVELOPMENT-PLAN D5 |
+| `features` (0.1.11) | the optional features the image registers: none in release 1 (staging: all seven) | VAULT-MESSAGING 0.26.0 §11.10.8, "Feature allowlist"; STAGING-DEVELOPMENT-PLAN D4 |
 | `relay_url` | `https://relay.vettid.org` | |
 
 GrapheneOS verified-boot keys and vendor roots stay in `vms/pins` (code).
@@ -440,6 +588,52 @@ Everything that defines a release is in the tagged tree, so
 `git checkout release/prod/N && make eif CHANNEL=prod` reproduces it; no
 `-ldflags -X` and no build-time secrets. A missing or zero value still
 fails closed.
+
+**Android signers (0.1.12; owner decision of 2026-10-11, ANDROID-PLAN
+0.1.36 §7).** Each entry names a certificate and its class
+(VAULT-MESSAGING 0.27.0 §11.7.1, §11.10.8): `vettid` for a key only
+VettID holds (the F-Droid and direct builds), `google_play` for the
+Play app-signing key, which Google generates and holds, `development`
+for a development or automation key. The file is embedded, so the
+classes are measured into the image with the digests; the vault labels
+a member's app from them and never from anything the app says. The
+release build refuses an entry without a class, an unknown class, a
+duplicate digest, the bare-string form and, in `prod.json`,
+`development`.
+
+- **Production release 1:** one entry,
+  `{"digest": "31a19613aa10f209e08945f947f94f7ce3e6e5ac342457ff9969a67986928e65", "class": "vettid"}`,
+  the certificate `prod.json` already lists. The `TODO-O8` placeholder
+  is deleted. Release 1 is for the owner and at most ten named testers
+  (STAGING-DEVELOPMENT-PLAN D7), who install the direct or F-Droid
+  build, so it does not wait for a Google Play account.
+- **The Play certificate** is added, class `google_play`, by the
+  production release cut once the owner has enrolled the app in Play
+  App Signing and read the app-signing certificate's digest there (to
+  confirm in the Play Console). An app installed from Google Play
+  cannot enroll, receive a transfer or register for a recovery on a
+  release that does not pin it, so **the Play listing does not go
+  live, on any track members can install from, before such a release
+  is `active`**. The Play upload certificate is never pinned.
+- **Signer binding** (VAULT-MESSAGING §11.7.1) is in release 1 (owner
+  decision, 2026-10-11), so that no production vault ever exists
+  unbound and none needs the binding-by-chain step.
+- **Staging:** the staging signing certificate is `vettid` and the
+  automation certificate `development` (STAGING-DEVELOPMENT-PLAN §4).
+  S10 carries this with `android_package` and `features` (0.1.11); how
+  the binding and the move to `com.vettid.app.staging` compose is in
+  VAULT-MESSAGING §11.7.1.
+- **As built** (0.1.13; vettid-vault #62–#64, in S10; VAULT-MESSAGING
+  0.27.1). The feature list's only-grow check compares with the
+  channel file at the **highest existing tag `release/<channel>/<m>`
+  below N**, and runs in the release workflow's gate on a release tag
+  (`releasecfg check -previous`), not in the image or in a rebuild
+  from the tag alone. Staging's acceptance of vaults with no recorded
+  signer is **not a constant of the file**: the image derives it from
+  its channel and release number (staging, release 10 or lower), so
+  `prod.json` cannot express it. Since S10 the images also apply the
+  key attestation chain rules of VAULT-MESSAGING §11.7 (the fix that
+  made S10 an urgent security release).
 
 ### 5.3 Provenance
 
@@ -576,7 +770,8 @@ role (trust, `PassRole`) to CloudFormation's deploy role.
   `vault/releases/<channel>.json`, below): per release its
   number, tag, commit, PCR0–2, binary hash, nitro-cli version, admitted
   PCR0s, seal-key ARN (after creation), status, `published_at`, `ends_at`,
-  window, instance settings and notes URL. CDK (keys and release stacks)
+  window, instance settings, notes URL (the release's log entry, below)
+  and log text. CDK (keys and release stacks)
   and the manifest renderer both read it.
 - **Served document:**
   `website/.well-known/vettid/pcr-manifest.json`, committed and deployed
@@ -589,13 +784,14 @@ role (trust, `PassRole`) to CloudFormation's deploy role.
   pinned key; `serial` is greater than the previous commit's; the bytes
   equal a fresh render of the release list; the size limit; every PCR0
   admitted by a live key is listed; every listed release has a release-log
-  entry.
+  entry, in every channel (below, "Release notes on every channel").
 - **`serial`:** increases by one per publication; it is never reused, even
   for a canary manifest that is never published (§10.1).
-- **Release log:** `/security/releases/` on vettid.org, one page per
-  release with the RELEASE-UPDATES §5 fields, generated from
-  the release list so it cannot disagree with the manifest. It stays
-  after a release is removed.
+- **Release log:** `/security/releases/` on each channel's site
+  (vettid.org, staging.vettid.org), one page per release with the
+  RELEASE-UPDATES §5 fields, generated from the release list so it
+  cannot disagree with the manifest. It stays after a release is
+  removed.
 - **Registry sync:** a `vault-manifest-sync` Lambda (every 5 minutes and
   after each site deploy) fetches the manifest, verifies it against the
   pinned keys, and upserts `vettid-org-vault-releases` (status, number,
@@ -626,7 +822,8 @@ role (trust, `PassRole`) to CloudFormation's deploy role.
   key per entry and one release stack per entry with `host`; synth fails on
   an invalid file. The files are also valid `vaultctl manifest render
   -releases` input (it ignores the extra members). The window is not a
-  field: `ends_at` is set explicitly per §10.3.
+  field: `ends_at` is set explicitly per §10.3. (0.1.11: one exception,
+  `ends_after_days` on production release 1, §3.5.)
 - **Served files:** production `website/.well-known/vettid/pcr-manifest.json`;
   staging `vault/staging/pcr-manifest.json`, served byte for byte at
   staging.vettid.org by `VettidOrgStageSiteStack` (W9). Staging has
@@ -671,6 +868,63 @@ role (trust, `PassRole`) to CloudFormation's deploy role.
   dropped so their entries stay. Until release 1 the index says that no
   release has been published; it is linked from `/security` and the
   sitemap.
+
+**Release notes on every channel** (owner request 2026-10-10,
+RELEASE-UPDATES 0.3.0 §5; to build, replacing the W7 rule that only
+production carries `log`):
+
+- **`log` is required for every release in every channel once it leaves
+  `candidate`**, that is, from the moment it is signed into a manifest
+  (a canary or a published one). The release-list validation
+  (`lib/vault/release-list.ts`) enforces it, so `vault:manifest sign`,
+  CDK synth and `check:manifest` all refuse a non-candidate entry without
+  it. Why there and not at publication: the signed bytes fix the `notes`
+  URL, and the text behind it must exist, reviewed, when they are
+  signed. A `candidate` may carry `log` already (it is reviewed in the
+  release PR, §10.1 steps 4 and 5).
+- **Text limits** (validation): `summary` one line, 1–160 characters;
+  `changes` 1–20 items, each 1–280 characters; `security_text` at most
+  1,000 characters; all plain text (no control characters, no markup;
+  the app shows them as written).
+- **`notes` is the channel's own log entry**:
+  `https://<zoneName>/security/releases/<n>/` (production
+  `https://vettid.org/security/releases/<n>/`, staging
+  `https://staging.vettid.org/security/releases/<n>/`), required by the
+  validation in both channels (`releaseLogUrl(channel, n)`). A new
+  successor rule: once a published release's `notes` is its log URL it
+  never changes (until now `notes` was not compared between serials,
+  which the staging backfill below relies on once).
+- **Staging log:** generated by the same code (`lib/vault/release-log.ts`
+  and `scripts/vault/release-log.ts`, given the channel) from the staging
+  manifest and `vault/releases/staging.json` into
+  `sites/staging/security/releases/` (pages and `index.json`), served by
+  `VettidOrgStageSiteStack` with the manifest. Its pages say "Staging
+  (test builds)" in the title and the intro, and link the staging
+  manifest. `vault:manifest publish --channel staging` writes and
+  commits it like production's; `check:manifest` checks both channels'
+  logs current (today: production only).
+- **`index.json`** is what the app reads (ANDROID-PLAN §4 "What's new"):
+  the existing entry fields, unchanged in shape (`release`, `pcr0`,
+  `status`, `summary`, `changes`, `security`, `security_text`, …). It is
+  public and unsigned; the app treats it as information only. Served
+  `no-cache` like every `*.json` on the sites.
+- **Links per stage:** the notice job's `RELEASE_LOG_URL` and the account
+  site's `release_log_url` are `https://<zoneName>/security/releases/`
+  (staging today links production's log). The emails take each release's
+  link from its `notes` (§3.5).
+- **Backfill (staging S1–S9).** S1–S8 are published without `log` and
+  with GitHub release URLs as `notes`; S9 is a `candidate`. The
+  implementation PR adds to each a short `log`: a one-line summary and
+  the changes taken from its existing GitHub release notes, `security:
+  none` (staging builds fix nothing for members). S1 and S2 are included
+  because they are `removed` but still listed, and the generator needs
+  text for every listed release. Their `notes` switch to their staging
+  log URLs in the next staging manifest signed after that PR (one
+  publication for all of them; S9 too if it is still unpublished then).
+  The manifests already signed (serials 1–10, and any signed before the
+  change) keep their GitHub URLs in git history; nothing is re-signed or
+  rewritten. Production has nothing to backfill: release 1 is not
+  published and its entry already needs `log` (W10-READINESS step 5).
 
 ## 8. Infrastructure
 
@@ -832,14 +1086,23 @@ out:
 1. The enclave has no network: its only path out is the parent's
    forwarder over vsock, which accepts only exact host names on port 443
    from `DefaultAllow` (the relay, `kms.us-east-1.amazonaws.com`,
-   `android.googleapis.com`) and resolves them itself, so the enclave
-   cannot choose addresses.
+   `android.googleapis.com`, and since push N3 the push gateways
+   `push.vettid.org` and `push.staging.vettid.org`) and resolves them
+   itself, so the enclave cannot choose addresses. The parent binary is
+   built once for every channel, so `DefaultAllow` (`parent.PushHosts`)
+   names both gateways; the stage's DNS Firewall (control 3) and the
+   enclave's own release allowlist each admit only their channel's
+   gateway, whose URL is the release constant `push_url` in vettid-vault
+   `enclave/releasecfg/<channel>.json` (`https://push.vettid.org` for
+   prod, `https://push.staging.vettid.org` for staging; VAULT-MESSAGING
+   §11.10.8, §14.3).
 2. TLS ends in the enclave against pinned roots (D5): a misroute can only
    fail, never be read.
-3. **Route 53 Resolver DNS Firewall** on the VPC: allow-list of the three
-   hosts plus the AWS endpoints the parent and agents use (SQS,
-   DynamoDB, S3, SSM, SSM messages, EC2 messages, CloudWatch Logs and
-   metrics, Auto Scaling); block everything else. It limits a
+3. **Route 53 Resolver DNS Firewall** on the VPC: allow-list of the
+   enclave's hosts (the relay, KMS, `android.googleapis.com` and the
+   stage's own push gateway) plus the AWS endpoints the parent and
+   agents use (SQS, DynamoDB, S3, SSM, SSM messages, EC2 messages,
+   CloudWatch Logs and metrics, Auto Scaling); block everything else. It limits a
    compromised parent too, including DNS tunnelling.
 4. Security group: no inbound; outbound TCP 443 only (plus DNS to the
    resolver). VPC Flow Logs for audit (7–30 days).
@@ -853,8 +1116,10 @@ is TLS terminated in the enclave anyway. S3 and DynamoDB use the free
 gateway endpoints. No NAT.
 
 *As built (W6).* The allowlist is `lib/vault/egress.ts` (snapshot-tested):
-the relay, `kms`, `android.googleapis.com`; `sqs`, `dynamodb` and the
-SDK's account endpoint `<account>.ddb`, `s3` and the data bucket's
+the relay, `kms`, `android.googleapis.com`, the stage's push gateway
+(`pushHost` in `lib/config.ts`: `push.vettid.org` in prod,
+`push.staging.vettid.org` in staging; vettid.org #204); `sqs`,
+`dynamodb` and the SDK's account endpoint `<account>.ddb`, `s3` and the data bucket's
 virtual host, `ssm`; `ssmmessages`, `ec2messages`, `logs`, `monitoring`,
 `autoscaling` (all `us-east-1`); `*.ec2.internal`. Allowed names may
 redirect (CNAME chains to ELB or S3 names: `TRUST_REDIRECTION_DOMAIN`);
@@ -982,6 +1247,56 @@ release_starting`. The `vault-scaler` Lambda (host stack):
   `UpdateAssumeRolePolicy`, `DeleteInstanceProfile`,
   `RemoveRoleFromInstanceProfile` on the pinned roles. Parent EMF metrics
   come with the parent's own instrumentation (not part of W6).
+- *As built (0.1.14; vettid-vault #66, from staging release S11;
+  VAULT-RELAY-SCALING §6).* The parent's first metrics.
+  - **How.** Once a minute the parent writes one log line in
+    CloudWatch's embedded metric format (message `metrics`, level INFO)
+    to its ordinary log, which the agent ships to
+    `/vettid-org/<stage>/vault-host`; CloudWatch is to take the metrics
+    from it. No new permission and no new endpoint. Namespace
+    `VettID/Vault`; the only dimension is `InstanceId`. Nothing in the
+    record names a member, a vault, a mailbox or an address.
+  - **The 13 metrics.** `UnlockedVaults`;
+    `EgressOpenRelay`, `EgressOpenKMS`, `EgressOpenPush`,
+    `EgressOpenOther` (egress connections open, by destination; Other
+    is the attestation status list);
+    `EgressOpenedRelay`, `EgressOpenedKMS`, `EgressOpenedPush`,
+    `EgressOpenedOther` (opened since the record before);
+    `RelayRequestsInFlight` (on a stream or waiting for one);
+    `RelayStreamWaitMax` (milliseconds; the longest wait for a stream in
+    the current minute and the one before);
+    `RelayRequestErrors` (relay requests without an answer, since the
+    record before);
+    `RelayGrowthRefused` (requests that waited while a bound forbade
+    another connection, since the record before). The four `Relay…`
+    metrics come from the enclave (VAULT-MESSAGING §12.2.1 "Counts") and
+    are missing from a record written without an enclave.
+  - **Plain fields of the record** (searchable in the log, not
+    metrics): `relay_conns`, `relay_dialed`, `relay_streams` (the stream
+    limit the relay announced), `relay_waiting`,
+    `relay_refused_max_conns`, `relay_refused_min_streams` (all
+    six since vettid-vault f3003ed), and, from the staging release that
+    includes vettid-vault 8f2c8bf (S11; 0.1.16), `relay_vault_limit`:
+    how many vault processes reached their own limit of 8 relay and
+    push requests in flight since the enclave started, each counted
+    once. For the instance only: it replaces a log record that named the
+    vault (VAULT-HOST-PROTOCOL §13 point 2). It is a field, not a 14th
+    metric.
+  - **Alarms these call for** (not built; they belong to the vault
+    account's stack): `UnlockedVaults` above 400 on an instance;
+    `RelayRequestsInFlight` above 80 % of `relay_conns` × 128;
+    `RelayStreamWaitMax` above 1000; any `RelayGrowthRefused`;
+    `EgressOpenedRelay` in an hour far above twice `EgressOpenRelay`;
+    and `relay_streams` reading 0 or 100 while `relay_waiting` is above
+    0 (a relay front end that announces exactly 100 streams,
+    VAULT-MESSAGING §12.2.1; a log metric filter, since both are plain
+    fields).
+  - **Still not built:** request latency, lease conflicts, split-brain
+    locks, KMS errors, egress denials and queue age as metrics.
+  - **Not yet verified:** that CloudWatch takes the metrics from the
+    shipped log line. The record's shape is tested; the extraction is
+    phase 1's exit check, to be done on staging with S11. If the parent
+    logs above INFO the record is not written.
 
 ### 8.8 Capacity
 
@@ -1009,6 +1324,36 @@ for a moment), not steady memory: 58 is the conservative figure for a
 burst of unlocks, ~980 the figure for idle unlocked vaults. Record:
 W9-REPORT §4.
 
+*Measured again (staging S10, 2026-10-11):* the same run as S10's
+canary self-test (`-capacity 400`, same host and enclave size), PASS:
+58 vaults held at the memory floor, about 907 idle unlocked vaults
+projected per host. The burst figure is unchanged; the projection is
+about 7 % lower than S3's.
+
+*Relay connections (0.1.14; VAULT-RELAY-SCALING 0.1.2 §3, §10;
+vettid-vault #66).* Memory, not the relay path, bounds vaults per host:
+
+| Measure | Value |
+|---|---|
+| Streams per connection (the relay's load balancer) | 128 |
+| Connections per host to the relay, at most | 16 (up to 32 for 30 s while the load balancer closes connections) |
+| Concurrent relay requests per host, at most | 2,048 |
+| Connections at 900 unlocked vaults | 8 |
+| Vault processes per host, at most (`MaxProcs`) | 1,024, so at most 1,024 held long-polls |
+| A quick request (deposit, ack) first waits for a stream when | more than 1,024 other requests are in flight at 1,024 vaults |
+| Relay and push requests in flight per vault, at most | 8 |
+
+*Measured locally* (2026-10-12; the enclave's egress code against a
+local HTTP/2 server at 128 streams per connection, not against the load
+balancer; phase 2 of VAULT-RELAY-SCALING measures on staging):
+
+| Measure | Result |
+|---|---|
+| 900 long-polls held, quick requests beside them | 8 connections; quick requests under 1 ms |
+| Every connection lost at once, 900 vaults, three times in a row | all polling again about 0.5 s after each loss (the vaults' own retry delay) |
+| The same at 2,000 vaults (above `MaxProcs`) | 0.5 s; 4.4 s for a second loss within 3 s of the first (the dial rate) |
+| A connection whose host goes silent without closing it | found and closed after 25 s (ping after 15 s, 10 s to answer) |
+
 *O6 decision (owner, 2026-10-06):* keep the 1 vCPU / 5120 MiB enclave on
 m7g.large for release 1; revisit when unlock queueing shows in metrics
 (unlock latency above the single-unlock figure under load; the parent's
@@ -1030,8 +1375,10 @@ release, not a redeploy (W10-READINESS R3). Plenty for the preview.
 | **Total, current release always on** | **~90** |
 | Total, parked (minimum 0, on-demand start only) | ~30 |
 
-Staging, parked: about $10 (its few keys deleted after use, a parked
-group, the shared relay or a parked staging relay). Image Builder is free
+Staging (0.1.11): no longer parked. As the development channel it is
+estimated at about $100–120 a month (one host most of the time, the
+fixed parts, three keys, the push gateway; STAGING-DEVELOPMENT-PLAN §3
+risk 5 and §8.2), on the shared production relay. Image Builder is free
 apart from about 30 minutes of build instance per AMI. GitHub's arm64
 runners are free for public repositories. The relay (~$55) is already
 running and counted in RUNBOOK. VAULT-PLAN's earlier "keys kept forever"
@@ -1072,15 +1419,15 @@ job's vault deletion. Order (W4):
 | 1 | Freeze; the release commit sets `releasecfg/prod.json` `release: N` (and any pin changes); review; merge to `main`; signed tag `release/prod/N` on that commit (vettid-vault docs/RELEASING.md) | vettid-vault | tag |
 | 2 | `release` workflow: EIF ×2 per channel, measurements, parent binaries, attestations; draft GitHub release | CI, arm64 | artifacts, PCRs |
 | 3 | Independent rebuild; PCR0 must match | owner | sign-off |
-| 4 | Staging: add the staging release to `vault/releases/staging.json`, deploy its key and release stack, hardware self-test, vaultctl end-to-end, compat run incl. a move from the previous staging release (§11) | staging | report |
-| 5 | Production PR: add N to `vault/releases/prod.json` (status `candidate`: in CDK, not in the manifest), `admitted_pcr0s` = every earlier release not `removed` (N's own PCR0 is admitted implicitly; `lib/vault/release-list.ts`) | vettid.org | PR |
+| 4 | Staging: add the staging release to `vault/releases/staging.json` (with `log` and `notes` = its staging log URL, §7), deploy its key and release stack, hardware self-test, vaultctl end-to-end, compat run incl. a move from the previous staging release (§11) | staging | report |
+| 5 | Production PR: add N to `vault/releases/prod.json` (status `candidate`: in CDK, not in the manifest; with `log`, reviewed in this PR, and `notes` = `https://vettid.org/security/releases/N/`), `admitted_pcr0s` = every earlier release not `removed` (N's own PCR0 is admitted implicitly; `lib/vault/release-list.ts`) | vettid.org | PR |
 | 6 | Deploy `VettidOrgVaultStack` (creates the key); `vaultctl keycheck` against the draft manifest | owner | key ARN in `vault/releases/prod.json` |
 | 7 | Deploy `VettidOrgVaultRelease<N>Stack` (AMI with EIF verified against measurements; group min 0, canary 1) | owner | instance |
 | 8 | Hardware self-test on the canary host (`vault-parent -selftest` against the host stack's deletable smoke key), then normal start | SSM | PASS report |
 | 9 | Canary: sign manifest `serial` s+1 with N `active` but **do not publish**; the registry row is `canary`, routed only for flagged test members (W8 adds this to the member API); canary member enrolls into N, unlocks, locks; the oldest live release's canary vault moves into N (§11.3); soak 24 h | owner, test device | canary report |
 | 10 | Publish: commit the signed manifest (N `active`, N−1 `deprecated`, any `retired`/`ends_at` changes), the release log entry, `deploy:site`; manifest sync updates routing | owner | live |
 | 11 | Previous release group to minimum 0; the always-on minimum moves to N (O7) | owner | |
-| 12 | In-app prompts follow from the manifest; no email for a routine release | — | |
+| 12 | In-app prompts follow from the manifest, with What's new from the log (ANDROID-PLAN §4); no email for a routine release | — | |
 
 *As built (W7, W8).* Step 9: `scripts/vault/manifest.ts sign` then
 `upload` (the bucket copy only; nothing is served), and the operator's
@@ -1091,7 +1438,10 @@ canary release (also before production release 1, when nothing is
 `active`), their vaults sealed to it are routed there; for everyone else
 it is unknown (410). The scaler manages a `canary` row like any release.
 The test device needs the canary manifest out of band (it is not
-served); see "The canary manifest on the test phone" below.
+served); see "The canary manifest on the test phone" below. Until step
+10 publishes N's log entry, the canary phone shows "Release notes
+unavailable" with the link for N (ANDROID-PLAN §4 "What's new"), which
+also exercises that path.
 Step 10: `manifest.ts publish` with the same signed document, so the
 canary vault's recorded serial is the published one; the manifest sync
 turns the row into an `active` one. A test member's flag is an operator
@@ -1154,6 +1504,8 @@ A monthly checklist driven by the release list (`ends_at` per release),
 with the notice job sending the emails of §3.5 automatically:
 
 1. At T0 + W − 90 days: set `retired` and `ends_at` = D; publish.
+   (Production release 1, W = 90 days: at T0, in the manifest that makes
+   release 2 `active`, §3.5.)
 2. At D: set `removed`; publish; delete the release stack (instances
    stop; `available` false; API 410); as the retirement role,
    `aws kms schedule-key-deletion --key-id <arn> --pending-window-in-days 30`;
@@ -1176,7 +1528,8 @@ tables, vault stacks, the staging manifest under staging.vettid.org,
 staging keys with the production shape and a 7-day window. Relay: the
 production relay at first (test mailboxes are harmless and the staging
 image pins it), a staging relay deployed on demand when relay changes need
-testing. Everything parked between releases.
+testing. (0.1.11) Staging is the development channel and is not parked
+between releases; its rules are STAGING-DEVELOPMENT-PLAN §2.
 
 *As built (W9, part A: CDK).* `-c stage=staging --profile vault-staging`
 builds, all in vettid-vault-staging: `VettidOrgStageDnsStack` (zone
@@ -1189,10 +1542,13 @@ manifest at the pinned `manifestUrl`). Left out: the public site, signup,
 playbooks, the admin exit node, API and site (test data from
 `npm run staging:seed`; the canary flag through the CLI), the relay
 (production's), push, and the audit stack (the organization trail and
-GuardDuty cover the account). Staging has no release log; its notices link
-to production's. Order and manual steps: RUNBOOK "Staging". Idle cost of
-the main stacks about $10/month, so parking needs nothing beyond the
-scaler's zero groups.
+GuardDuty cover the account). Staging has had no release log, its
+notices linking production's; from 0.1.10 it has its own at
+`https://staging.vettid.org/security/releases/` (§7 "Release notes on
+every channel"). Order and manual steps: RUNBOOK "Staging". Idle cost of
+the main stacks about $10/month. A release group with no leased vault
+still scales to zero (§8.6), but staging as a whole is no longer parked
+(STAGING-DEVELOPMENT-PLAN §2.1, §2.5).
 
 ### 11.2 Hardware smoke on every release candidate
 
@@ -1244,7 +1600,9 @@ the objectives above. The 7-day retention also bounds how long deleted vault dat
 
 ### 12.1 Sequence
 
-1. **Owner decisions** O1–O10 (§15). O1 and O8 block release 1.
+1. **Owner decisions** O1–O10 (§15). O1 and O8 block release 1. (0.1.12:
+   O8 as amended on 2026-10-11 no longer does; release 1 pins the
+   certificate it already lists.)
 2. **W0, W1:** spec and code changes (§4), merged.
 3. **Accounts** (W3): staging and vault production accounts, SCPs,
    permission sets; manifest keys A and B, staging manifest key.
@@ -1307,6 +1665,7 @@ Android closed beta; until then, staging carries the testing.
 | W8 | Member API: canary routing for flagged members; notice job (retirement and hotfix emails); `removed` → 410 | vettid.org | 2 d |
 | W9 | Staging stand-up, release S1/S2, hardware tests, capacity measurement, retirement drill (7 days wall time) | both | 3 d |
 | W10 | Production release 1 with the canary (blocked on the signed Android build), RUNBOOK "Vault" section | both | 2 d |
+| W11 | Release notes on every channel (§7, owner request 2026-10-10): `log` and log `notes` required in every channel; the staging log; check:manifest for both logs; notice email links (§3.5) and per-stage log URLs; the S1–S9 backfill; MEMBER-API "Vault release notices" and RUNBOOK ("Staging", "Adding a release") updated as built. The app's side is ANDROID-PLAN 0.1.31 | vettid.org, vettid-android | 1.5 d |
 
 About 25–30 engineering days, plus the Android dependency for W10.
 W4 can go any time; W2 and W3 can run beside W1; W5–W8 follow W3.
@@ -1318,7 +1677,8 @@ W4 can go any time; W2 and W3 can run beside W1; W5–W8 follow W3.
    and alarms; it remains the sharpest edge.
 2. **Release 1's code is frozen for a year or more.** Every wire and
    manifest decision in it binds the apps and the member API until it is
-   removed. Hence §4 before release 1, and a deliberately small release-1
+   removed. (0.1.11: release 1 itself is removed 90 days after release 2
+   is published, §3.5; the risk then passes to release 2.) Hence §4 before release 1, and a deliberately small release-1
    surface.
 3. **Approval fatigue.** Monthly prompts may train members to approve
    blindly, or to ignore them until the deadline. Skipping empty months and
@@ -1352,12 +1712,12 @@ All ten recommendations below were **accepted by the owner on 2026-10-04**.
 | # | Question | Recommendation |
 |---|---|---|
 | O1 | Account for production vault keys and hosts (pinned in every image; blocks release 1) | **A separate vault production account** in the existing organization, with SCPs protecting the roles and the bypass flag. The current account is the management account, which SCPs cannot restrict. (Relays stay where they are.) |
-| O2 | Staging | **A separate staging account**, full copy, parked between releases (as ACCOUNT-ADMIN-PLAN §3 already foresees) |
+| O2 | Staging | **A separate staging account**, full copy, parked between releases (as ACCOUNT-ADMIN-PLAN §3 already foresees). *2026-10-11: no longer parked; staging is the development channel (STAGING-DEVELOPMENT-PLAN D1)* |
 | O3 | Manifest key custody | **Key A in KMS** (vault account, owner-only signer role with MFA), **key B offline** on a hardware token in a safe; both pinned. A separate signing account only if a second operator joins. |
 | O4 | Cadence | **Monthly at most**, skipping months without member-visible change; hotfixes any time |
-| O5 | Retirement window | **12 months** from supersession, final notice 90 days, KMS window 30 days; for an exploited vulnerability, a shorter window of **no less than 60 days** |
+| O5 | Retirement window | **12 months** from supersession, final notice 90 days, KMS window 30 days; for an exploited vulnerability, a shorter window of **no less than 60 days**. *2026-10-11 (STAGING-DEVELOPMENT-PLAN D2): production release 1 only, 90 days (§3.5)* |
 | O6 | Instance size | **m7g.large**, enclave 1 vCPU and 5 GiB. Measured on S3 (W9, §8.8); owner 2026-10-06: kept for release 1, revisit when unlock queueing shows in metrics |
 | O7 | Always-on minimum for the current release | **0 until production members exist** (on-demand start, ~2–3 min first unlock), **1 from the Android beta** on |
-| O8 | Android signing digest(s) to pin (blocks release 1) | Pin the **Play app signing certificate and the upload certificate** used for direct builds, decided when the Android signing key is created |
+| O8 | Android signing digest(s) to pin (blocked release 1 until 2026-10-11) | Accepted 2026-10-04: pin the **Play app signing certificate and the upload certificate** used for direct builds, decided when the Android signing key is created. **Amended by the owner on 2026-10-11** (ANDROID-PLAN 0.1.36 §7; §5.2): Google generates and holds the Play app-signing key; the certificate called "upload" here is VettID's release key, which signs the F-Droid and direct builds and is never given to Google; a separate key, never pinned, uploads to Play. **Release 1 pins VettID's certificate only**; the Play certificate is pinned by a later release, before the Play listing goes live; each vault is bound to its app's signer |
 | O9 | Data bucket retention and DR | Versioned, **7-day** noncurrent retention; region loss accepted for the preview; no second-region keys |
 | O10 | Manifest size | **M1** (manifest by hash, supplied by the host) before release 1 |
