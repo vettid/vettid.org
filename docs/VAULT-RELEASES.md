@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.18
+version: 0.1.19
 date: 2026-10-12
 owner: Al Liebl (Mesmer)
 changelog:
@@ -144,12 +144,22 @@ changelog:
     Metrics Insights query only. What is lost is said there. All six
     definitions were accepted by CloudWatch in the staging account
     before this change (created under throwaway names and deleted)
+  - 0.1.19 (**a draft for the owner's review**; CALLS-PLAN 0.1.3 §13,
+    CALLING-SERVICE 0.2.0, VAULT-MESSAGING 0.28.0): what the staging
+    release for calls phase C2 ("release C2", not cut) needs. §5.2: the
+    optional release constant `calls_url` and what a release that
+    carries it must contain. §8.4: the calling service's credential
+    issuer joins the egress controls (the enclave's allowlist, the
+    parent's `DefaultAllow`, the stage's DNS Firewall), planned, not
+    built. No other section is touched (§8.7 in particular is left
+    alone)
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
-  - VAULT-MESSAGING.md (0.27.4) §11.10 release updates, §12.5 deletion, §13.5, §13.9
+  - VAULT-MESSAGING.md (0.28.0) §11.10 release updates, §12.5 deletion, §13.5, §13.9
   - RELEASE-UPDATES.md (0.3.3) — member-facing; §3 changes with this plan; §5 the release log
   - ANDROID-PLAN.md (0.1.37) — the app's "What's new" from the log
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2) — staging as the development channel; D1–D11
+  - CALLS-PLAN.md (0.1.3) §13, CALLING-SERVICE.md (0.2.0) §5.5, §8 — the calling service's issuer in the egress controls; `calls_url`
   - MEMBER-API.md "Vault", RUNBOOK.md, ARCHITECTURE.md
   - VAULT-HOST-PROTOCOL.md (0.1.2) — the enclave ↔ parent (vsock) protocol as built; §10 what happens if versions meet
   - vettid-vault docs/SMOKE.md (hardware smoke test, 2026-10-02)
@@ -602,6 +612,7 @@ whose value is recorded in `measurements.json`):
 | `android_package` (0.1.11) | `com.vettid.app` (staging: `com.vettid.app.staging`) | VAULT-MESSAGING 0.26.0 §11.10.8, "Android package"; STAGING-DEVELOPMENT-PLAN D5 |
 | `features` (0.1.11) | the optional features the image registers: none in release 1 (staging: all seven) | VAULT-MESSAGING 0.26.0 §11.10.8, "Feature allowlist"; STAGING-DEVELOPMENT-PLAN D4 |
 | `relay_url` | `https://relay.vettid.org` | |
+| `calls_url` (0.1.19; planned for staging "release C2", a draft for the owner's review) | absent (staging: `https://calls.staging.vettid.org`) | VAULT-MESSAGING 0.28.0 §11.10.8; CALLING-SERVICE 0.2.0 §5; CALLS-PLAN D4 |
 
 GrapheneOS verified-boot keys and vendor roots stay in `vms/pins` (code).
 Everything that defines a release is in the tagged tree, so
@@ -654,6 +665,31 @@ duplicate digest, the bare-string form and, in `prod.json`,
   `prod.json` cannot express it. Since S10 the images also apply the
   key attestation chain rules of VAULT-MESSAGING §11.7 (the fix that
   made S10 an urgent security release).
+
+**The calling service's issuer (0.1.19; planned, a draft for the
+owner's review).** `calls_url` is optional, and the release build
+refuses it unless `features` lists `calls` and it is an `https` URL of
+its own channel's host name alone (VAULT-MESSAGING §11.10.8). A staging
+release that carries it ("release C2", CALLS-PLAN §13) must also
+contain, from the same tag (C4: the host files and the parent travel
+with the release):
+
+- the enclave's release allowlist with the host of `calls_url` (Amazon's
+  roots, HTTP/2), as it has the push gateway's;
+- a `vault-parent` whose `DefaultAllow` names the issuer (§8.4);
+- the `calls` feature with the rules VAULT-MESSAGING §10.10 marks (C2);
+- a log entry (§7) that says in the member's words what changes: calls
+  can connect across networks through VettID's relay server, which
+  cannot hear them; unanswered calls end by themselves; calls can be
+  turned off per connection.
+
+Before its hosts start, the staging host stack is deployed with the
+issuer's name in the DNS Firewall (§8.4), and the calling service
+answers at that name (CALLING-SERVICE §8, §11). A release with
+`calls_url` whose issuer cannot be reached still works: its vaults give
+their devices no TURN server, as every release before it. Production's
+file has no `calls_url` and production's `features` no `calls` until
+promotion (STAGING-DEVELOPMENT-PLAN §2.4).
 
 ### 5.3 Provenance
 
@@ -1149,6 +1185,36 @@ resolver fails closed (the default). Query logs go to
 W9 shows the baseline noise). The gateway endpoints' policies admit only
 resources of the vault account (`aws:ResourceAccount`). Flow logs (all
 traffic) to `/vettid-org/<stage>/vault-flow-logs`, one month.
+
+*Planned (0.1.19; a draft for the owner's review; CALLING-SERVICE
+0.2.0 §5.5, CALLS-PLAN §13).* The calling service's credential issuer
+is the enclave's fifth destination, from the staging release that
+carries `calls_url` (§5.2). It follows the push gateway's pattern
+exactly:
+
+- **Control 1.** The parent's `DefaultAllow` gains `calls.vettid.org`
+  and `calls.staging.vettid.org`, port 443 (one parent binary for every
+  channel; CALLS-PLAN decision D25 asks whether production's name is
+  listed now or with production's service). The enclave's own release
+  allowlist gains only the host of its channel's `calls_url`.
+- **Control 2.** TLS 1.3 ends in the enclave against Amazon's roots,
+  with HTTP/2; the issuer is deployed behind an Amazon certificate for
+  that reason (CALLING-SERVICE §8.2). That the enclave completes this
+  handshake with the issuer's front is the first thing the stacks' work
+  verifies.
+- **Control 3.** `lib/vault/egress.ts` gains the stage's `callsHost`
+  (`lib/config.ts`, beside `pushHost`): `calls.staging.vettid.org` in
+  staging. **Production's DNS Firewall does not admit a calls host**
+  until production has a calling service. The snapshot test changes,
+  which is a security review item, as for any change of the allowlist.
+- **Control 4** is unchanged: the issuer is reached on TCP 443.
+- The TURN server itself (`turn.staging.vettid.org`, UDP) is **not** an
+  egress destination: no vault and no host ever talks to it. Only
+  members' devices do.
+- What the host sees of it: VAULT-HOST-PROTOCOL §11.2 (a connection to
+  the issuer's name, its times and sizes), and the parent's connection
+  count by destination class gains a class for it or counts it as
+  `other` (an implementation choice to record in §8.7 when built).
 
 ### 8.5 Registry, leases, queues
 
