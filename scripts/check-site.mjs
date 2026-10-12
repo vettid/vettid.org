@@ -159,6 +159,41 @@ for (const site of readdirSync(SITES)) {
   }
 }
 
+// 9. llms.txt (llmstxt.org: H1, blockquote summary, H2 sections of
+// `- [name](url): notes` links) cannot rot silently: every vettid.org URL
+// is a page this tree publishes, every other URL is one a page here already
+// links (so it lists no repository the site does not), and the file is
+// ASCII because S3 serves *.txt as text/plain with no charset.
+{
+  const src = readFileSync(join(ROOT, 'llms.txt'), 'utf8');
+  const lines = src.split('\n');
+  const allHtml = htmlFiles.map((f) => readFileSync(f, 'utf8')).join('\n');
+  if (!/^# \S/.test(lines[0])) errors.push('llms.txt: first line is not an H1');
+  if (!lines.some((l) => l.startsWith('> '))) errors.push('llms.txt: no blockquote summary');
+  if (/[^\n\x20-\x7e]/.test(src)) errors.push('llms.txt: non-ASCII character (served as text/plain without a charset)');
+  if (/\bsubmitted\b/i.test(src)) errors.push('llms.txt: says "submitted" (LEASH status wording follows /ai/leash)');
+  let inLists = false;
+  for (const line of lines) {
+    if (line.startsWith('## ')) inLists = true;
+    if (inLists && line.startsWith('- ') && !/^- \[[^\]]+\]\(https:\/\/[^)\s]+\)(: \S.*)?$/.test(line)) {
+      errors.push(`llms.txt: not a "- [name](url): notes" item: ${line.slice(0, 60)}`);
+    }
+  }
+  for (const m of src.matchAll(/\]\((https:\/\/[^)\s]+)\)/g)) {
+    const url = m[1];
+    if (url.startsWith('https://vettid.org/')) {
+      const path = url.slice('https://vettid.org'.length).replace(/[#?].*$/, '');
+      // /playbooks/* is a separate CloudFront origin (see check 5)
+      if (path === '/' || path.startsWith('/playbooks/')) continue;
+      if (!existsSync(join(ROOT, path)) && !existsSync(join(ROOT, path, 'index.html'))) {
+        errors.push(`llms.txt: ${url} is not a page in website/`);
+      }
+    } else if (!allHtml.includes(`href="${url}"`)) {
+      errors.push(`llms.txt: ${url} is not linked from any page in website/`);
+    }
+  }
+}
+
 if (errors.length) {
   console.error(`check:site FAILED (${errors.length}):`);
   for (const e of errors) console.error(`  ✗ ${e}`);
