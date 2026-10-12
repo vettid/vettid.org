@@ -89,6 +89,7 @@ let logged: jest.SpyInstance;
 beforeEach(() => {
   ddb.reset(); ses.reset(); sm.reset();
   logged = jest.spyOn(console, 'log').mockImplementation(() => undefined); // handlers log outcome shapes
+  logged.mockClear();
   sm.on(GetSecretValueCommand, { SecretId: 'origin' }).resolves({ SecretString: ORIGIN });
   ddb.on(GetCommand).resolves({});
   ddb.on(PutCommand).resolves({});
@@ -137,6 +138,7 @@ describe('subscribe: opt-in paths', () => {
     const put = ddb.commandCalls(PutCommand)[0].args[0].input;
     expect(put.Item).toMatchObject({ email: 'new@example.com', status: 'pending' });
     expect(put.Item!.unsubToken).toMatch(TOKEN); // unconfirmed rows can be unsubscribed too
+    expect(put.Item!.ownsIdentity).toBe(true); // this call created the SES identity
     expect(ses.commandCalls(SendEmailCommand)).toHaveLength(0);
   });
 
@@ -149,6 +151,7 @@ describe('subscribe: opt-in paths', () => {
     const puts = ddb.commandCalls(PutCommand).map((c) => c.args[0].input.Item!);
     const row = puts.find((i) => i.email === 'member@example.com')!;
     expect(row.status).toBe('pending_link'); // not 'pending' (the sweep would confirm it) and not 'confirmed'
+    expect(row.ownsIdentity).toBeUndefined(); // the identity was there before: never the list's to delete
     const now = Math.floor(Date.now() / 1000);
     expect(row.expiresAt).toBeGreaterThan(now + 47 * 3600);
     expect(row.expiresAt).toBeLessThanOrEqual(now + 48 * 3600);
@@ -172,6 +175,15 @@ describe('subscribe: opt-in paths', () => {
       { Name: 'List-Unsubscribe', Value: `<https://vettid.org/api/subscribe/unsubscribe?u=${row.unsubToken}>` },
       { Name: 'List-Unsubscribe-Post', Value: 'List-Unsubscribe=One-Click' },
     ]);
+  });
+
+  test('an identity that already existed unverified is not marked as the list\'s', async () => {
+    ses.on(CreateEmailIdentityCommand).rejects(Object.assign(new Error('exists'), { name: 'AlreadyExistsException' }));
+    ses.on(GetEmailIdentityCommand).resolves({ VerifiedForSendingStatus: false });
+    await subscribe.handler(post({ email: 'pending-member@example.com' }));
+    const row = ddb.commandCalls(PutCommand)[0].args[0].input.Item!;
+    expect(row).toMatchObject({ email: 'pending-member@example.com', status: 'pending' });
+    expect(row.ownsIdentity).toBeUndefined();
   });
 
   test('the global hourly cap also covers confirmation-link mail', async () => {
@@ -245,7 +257,7 @@ describe('subscribe: confirm link', () => {
 });
 
 describe('check-verifications: identity reclaim', () => {
-  const expiredRow = { email: 'x@example.com', status: 'pending', expiresAt: 1 };
+  const expiredRow = { email: 'x@example.com', status: 'pending', expiresAt: 1, ownsIdentity: true };
   beforeEach(() => {
     ddb.on(QueryCommand, { TableName: 'list', ExpressionAttributeValues: { ':pending': 'pending' } }).resolves({ Items: [expiredRow] });
     ddb.on(QueryCommand, { TableName: 'list', ExpressionAttributeValues: { ':release': 'release' } }).resolves({ Items: [] });
@@ -259,6 +271,15 @@ describe('check-verifications: identity reclaim', () => {
     const out = await check.handler();
     expect(out).toMatchObject({ reclaimed: 1, keptForMember: 0 });
     expect(ses.commandCalls(DeleteEmailIdentityCommand)).toHaveLength(1);
+  });
+
+  test('never deletes an identity the list did not create (no flag on the row), member or not', async () => {
+    ddb.on(QueryCommand, { TableName: 'list', ExpressionAttributeValues: { ':pending': 'pending' } }).resolves({ Items: [{ ...expiredRow, ownsIdentity: undefined }] });
+    ddb.on(QueryCommand, { TableName: 'members' }).resolves({ Items: [] });
+    const out = await check.handler();
+    expect(out).toMatchObject({ reclaimed: 0, keptNotOurs: 1 });
+    expect(ses.commandCalls(DeleteEmailIdentityCommand)).toHaveLength(0);
+    expect(ddb.commandCalls(DeleteCommand)).toHaveLength(1); // the expired row still goes
   });
 
   test("keeps the identity when a member row has the address (a pending member's verification)", async () => {
@@ -281,7 +302,7 @@ describe('check-verifications: identity reclaim', () => {
   test('pending_link rows are never swept to confirmed (only status=pending is queried)', async () => {
     await check.handler();
     const qs = ddb.commandCalls(QueryCommand).filter((c) => c.args[0].input.TableName === 'list').map((c) => c.args[0].input.ExpressionAttributeValues);
-    expect(qs).toEqual([{ ':pending': 'pending' }, { ':release': 'release' }]);
+    expect(qs).toEqual([{ ':release': 'release' }, { ':pending': 'pending' }]);
   });
 });
 
@@ -329,7 +350,11 @@ describe('check-verifications: confirming', () => {
 
 describe('unsubscribe: the route', () => {
   const token = 'U'.repeat(43);
-  const found = () => ddb.on(QueryCommand, { TableName: 'list', IndexName: 'unsub-index' }).resolves({ Items: [{ email: 'm@example.com', unsubToken: token }] });
+  /** The index names the row; the row (read consistently) carries the token and whether the identity is the list's. */
+  const found = (row: Record<string, unknown> = { ownsIdentity: true }) => {
+    ddb.on(QueryCommand, { TableName: 'list', IndexName: 'unsub-index' }).resolves({ Items: [{ email: 'm@example.com', unsubToken: token }] });
+    ddb.on(GetCommand, { TableName: 'list', Key: { email: 'm@example.com' } }).resolves({ Item: { email: 'm@example.com', status: 'confirmed', unsubToken: token, ...row } });
+  };
   beforeEach(() => {
     ddb.on(QueryCommand).resolves({ Items: [] });
     ddb.on(DeleteCommand).resolves({ Attributes: { email: 'm@example.com', status: 'confirmed', unsubToken: token } });
@@ -370,11 +395,41 @@ describe('unsubscribe: the route', () => {
     expect(del).toMatchObject({ Key: { email: 'm@example.com' }, ConditionExpression: 'unsubToken = :t', ExpressionAttributeValues: { ':t': token } });
     const marker = ddb.commandCalls(PutCommand)[0].args[0].input.Item!;
     expect(marker.email).toMatch(/^#release#[0-9a-f]{32}$/);
-    expect(marker).toMatchObject({ status: 'release', target: 'm@example.com' });
+    expect(marker).toMatchObject({ status: 'release', target: 'm@example.com', ownsIdentity: true });
+    expect(ddb.commandCalls(GetCommand)[0].args[0].input).toMatchObject({ Key: { email: 'm@example.com' }, ConsistentRead: true });
     expect(marker.expiresAt).toBeUndefined(); // stays until the sweep settles it
     // this function deletes no SES identity and reads no member data
     expect(ses.calls()).toHaveLength(0);
     expect(ddb.commandCalls(QueryCommand).every((c) => c.args[0].input.TableName === 'list')).toBe(true);
+  });
+
+  test('a row whose identity the list did not create is removed with NO release marker: that identity is left alone', async () => {
+    // e.g. somebody typed an address SES had already verified for something
+    // else, and the confirmation mail's unsubscribe link was pressed
+    for (const row of [{ ownsIdentity: undefined, status: 'pending_link' }, { ownsIdentity: undefined }, { ownsIdentity: 'true' }]) {
+      ddb.resetHistory();
+      found(row);
+      const res = await subscribe.handler(unsubForm(token));
+      expect(res.statusCode).toBe(303);
+      expect(ddb.commandCalls(DeleteCommand)[0].args[0].input.Key).toEqual({ email: 'm@example.com' });
+      expect(ddb.commandCalls(PutCommand)).toHaveLength(0);
+    }
+  });
+
+  test('a form body over 2,048 bytes is not parsed: nothing is looked up', async () => {
+    found();
+    const head = `u=${token}&pad=`;
+    const atCap = head + 'x'.repeat(2048 - head.length);
+    expect(atCap).toHaveLength(2048);
+    await subscribe.handler(unsubForm(token, { body: atCap }));
+    expect(ddb.commandCalls(DeleteCommand)).toHaveLength(1);
+    ddb.resetHistory();
+    const res = await subscribe.handler(unsubForm(token, { body: `${atCap}x` }));
+    expect(res.statusCode).toBe(303); // the same answer as ever
+    expect(ddb.calls()).toHaveLength(0);
+    // and base64-encoded, the cap is on the decoded body
+    await subscribe.handler(unsubForm(token, { body: Buffer.from(`${atCap}x`).toString('base64'), isBase64Encoded: true }));
+    expect(ddb.calls()).toHaveLength(0);
   });
 
   test('a base64-encoded form body works too', async () => {
@@ -412,6 +467,11 @@ describe('unsubscribe: the route', () => {
       expect(ddb.commandCalls(DeleteCommand)).toHaveLength(0);
       expect(ddb.commandCalls(PutCommand)).toHaveLength(0);
       // stale: the index still answers, the row carries another token by now
+      ddb.reset(); found({ unsubToken: 'Z'.repeat(43) });
+      out.push(await subscribe.handler(ev(token)));
+      expect(ddb.commandCalls(DeleteCommand)).toHaveLength(0);
+      expect(ddb.commandCalls(PutCommand)).toHaveLength(0);
+      // used in the same instant by another request: the conditional delete loses
       ddb.reset(); found(); ddb.on(PutCommand).resolves({});
       ddb.on(DeleteCommand).rejects(Object.assign(new Error('cond'), { name: 'ConditionalCheckFailedException' }));
       out.push(await subscribe.handler(ev(token)));
@@ -484,7 +544,7 @@ describe('unsubscribe: the route', () => {
 });
 
 describe('check-verifications: finishing an unsubscribe (release markers)', () => {
-  const marker = { email: '#release#00ff', status: 'release', target: 'gone@example.com' };
+  const marker = { email: '#release#00ff', status: 'release', target: 'gone@example.com', ownsIdentity: true, requestedAt: new Date().toISOString() };
   beforeEach(() => {
     ddb.on(QueryCommand, { TableName: 'list', ExpressionAttributeValues: { ':pending': 'pending' } }).resolves({ Items: [] });
     ddb.on(QueryCommand, { TableName: 'list', ExpressionAttributeValues: { ':release': 'release' } }).resolves({ Items: [marker] });
@@ -499,6 +559,31 @@ describe('check-verifications: finishing an unsubscribe (release markers)', () =
     expect(out).toMatchObject({ released: 1, releaseKept: 0, releaseRetry: 0 });
     expect(ses.commandCalls(DeleteEmailIdentityCommand)[0].args[0].input).toEqual({ EmailIdentity: 'gone@example.com' });
     expect(markerDeleted()).toBe(true);
+  });
+
+  test('a marker without the flag never deletes an identity: it is only cleared', async () => {
+    for (const ownsIdentity of [undefined, false, 'true']) {
+      ddb.on(QueryCommand, { TableName: 'list', ExpressionAttributeValues: { ':release': 'release' } }).resolves({ Items: [{ ...marker, ownsIdentity }] });
+      expect(await check.handler()).toMatchObject({ released: 0, releaseKept: 1 });
+    }
+    expect(ses.commandCalls(DeleteEmailIdentityCommand)).toHaveLength(0);
+    expect(markerDeleted()).toBe(true);
+  });
+
+  test('a member who registered a moment ago is seen: the email marker row is read strongly consistent', async () => {
+    ddb.on(GetCommand, { TableName: 'members', Key: { user_guid: 'email:gone@example.com' } }).resolves({ Item: { user_guid: 'email:gone@example.com', kind: 'email_marker' } });
+    const out = await check.handler();
+    expect(out).toMatchObject({ released: 0, releaseKept: 1 });
+    expect(ses.commandCalls(DeleteEmailIdentityCommand)).toHaveLength(0);
+    const get = ddb.commandCalls(GetCommand).find((c) => c.args[0].input.TableName === 'members')!.args[0].input;
+    expect(get.ConsistentRead).toBe(true);
+  });
+
+  test('a failed marker read deletes nothing either', async () => {
+    ddb.on(GetCommand, { TableName: 'members' }).rejects(new Error('boom'));
+    expect(await check.handler()).toMatchObject({ released: 0, releaseRetry: 1 });
+    expect(ses.commandCalls(DeleteEmailIdentityCommand)).toHaveLength(0);
+    expect(markerDeleted()).toBe(false);
   });
 
   test("keeps a member's identity: their account email is the same SES identity", async () => {
@@ -525,6 +610,85 @@ describe('check-verifications: finishing an unsubscribe (release markers)', () =
     expect(out).toMatchObject({ released: 0, releaseKept: 1 });
     expect(ses.commandCalls(DeleteEmailIdentityCommand)).toHaveLength(0);
     expect(markerDeleted()).toBe(true);
+    // the identity is still the list's own: the new row takes the flag, so a later unsubscribe releases it
+    const upd = ddb.commandCalls(UpdateCommand)[0].args[0].input;
+    expect(upd).toMatchObject({ Key: { email: 'gone@example.com' }, UpdateExpression: 'SET ownsIdentity = :true', ConditionExpression: 'attribute_exists(email)' });
+  });
+
+  test('every page of markers is worked, newest first: a failing one cannot hold up the rest', async () => {
+    const other = { ...marker, email: '#release#0001', target: 'second@example.com' };
+    const stuck = { ...marker, email: '#release#0002', target: 'stuck@example.com' };
+    ddb.on(QueryCommand, { TableName: 'list', ExpressionAttributeValues: { ':release': 'release' } })
+      .resolvesOnce({ Items: [stuck], LastEvaluatedKey: { email: stuck.email } })
+      .resolvesOnce({ Items: [marker, other] });
+    ses.on(DeleteEmailIdentityCommand, { EmailIdentity: 'stuck@example.com' }).rejects(Object.assign(new Error('no'), { name: 'TooManyRequestsException' }));
+    const out = await check.handler();
+    expect(out).toMatchObject({ released: 2, releaseRetry: 1, releaseAbandoned: 0 });
+    const qs = ddb.commandCalls(QueryCommand).map((c) => c.args[0].input).filter((q) => q.ExpressionAttributeValues![':release']);
+    expect(qs).toHaveLength(2);
+    expect(qs[0].ScanIndexForward).toBe(false);
+    expect(qs[1].ExclusiveStartKey).toEqual({ email: stuck.email });
+  });
+
+  test('a release that has failed for 7 days is abandoned: the address leaves the marker, the identity is NOT deleted, and it is counted', async () => {
+    const old = { ...marker, requestedAt: new Date(Date.now() - 8 * 24 * 3600 * 1000).toISOString() };
+    ddb.on(QueryCommand, { TableName: 'list', ExpressionAttributeValues: { ':release': 'release' } }).resolves({ Items: [old] });
+    ddb.on(QueryCommand, { TableName: 'members' }).rejects(new Error('boom'));
+    const out = await check.handler();
+    expect(out).toMatchObject({ released: 0, releaseRetry: 0, releaseAbandoned: 1 });
+    expect(ses.commandCalls(DeleteEmailIdentityCommand)).toHaveLength(0);
+    const upd = ddb.commandCalls(UpdateCommand)[0].args[0].input;
+    expect(upd.Key).toEqual({ email: old.email });
+    expect(upd.UpdateExpression).toBe('SET #s = :abandoned, abandonedAt = :now, expiresAt = :exp REMOVE #t');
+    expect(upd.ExpressionAttributeNames).toEqual({ '#s': 'status', '#t': 'target' });
+    expect(upd.ExpressionAttributeValues![':abandoned']).toBe('release_abandoned'); // out of the retry queue
+    expect(upd.ExpressionAttributeValues![':exp']).toBeGreaterThan(Math.floor(Date.now() / 1000) + 89 * 24 * 3600);
+    // a young marker with the same failure is only retried
+    ddb.resetHistory();
+    ddb.on(QueryCommand, { TableName: 'list', ExpressionAttributeValues: { ':release': 'release' } }).resolves({ Items: [marker] });
+    expect(await check.handler()).toMatchObject({ releaseRetry: 1, releaseAbandoned: 0 });
+    expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
+  });
+
+  test('releases are finished even when the pending rows cannot be read, and the run still fails loudly', async () => {
+    ddb.on(QueryCommand, { TableName: 'list', ExpressionAttributeValues: { ':pending': 'pending' } }).rejects(Object.assign(new Error('ddb'), { name: 'InternalServerError' }));
+    await expect(check.handler()).rejects.toThrow('ddb');
+    expect(ses.commandCalls(DeleteEmailIdentityCommand)).toHaveLength(1);
+    expect(markerDeleted()).toBe(true);
+    const sweep = logged.mock.calls.map((c) => JSON.parse(String(c[0]))).find((l) => l.outcome === 'sweep');
+    expect(sweep).toMatchObject({ released: 1, releaseRetry: 0 });
+  });
+
+  test('pending rows are confirmed even when the markers cannot be read', async () => {
+    ddb.on(QueryCommand, { TableName: 'list', ExpressionAttributeValues: { ':release': 'release' } }).rejects(new Error('ddb'));
+    ddb.on(QueryCommand, { TableName: 'list', ExpressionAttributeValues: { ':pending': 'pending' } }).resolves({ Items: [{ email: 'p@example.com', status: 'pending' }] });
+    ses.on(GetEmailIdentityCommand).resolves({ VerifiedForSendingStatus: true });
+    ddb.on(UpdateCommand).resolves({ Attributes: { unsubToken: 'T'.repeat(43) } });
+    await expect(check.handler()).rejects.toThrow('ddb');
+    expect(ddb.commandCalls(UpdateCommand)).toHaveLength(1);
+  });
+
+  test('the release path logs counts and error names only: never an address', async () => {
+    const runs: Array<() => void> = [
+      () => undefined, // released
+      () => ddb.on(QueryCommand, { TableName: 'members' }).resolves({ Items: [{ user_guid: 'g' }] }), // kept
+      () => ddb.on(QueryCommand, { TableName: 'members' }).rejects(new Error('lookup of gone@example.com failed')), // retry
+      () => {
+        ddb.on(QueryCommand, { TableName: 'members' }).resolves({ Items: [] });
+        ses.on(DeleteEmailIdentityCommand).rejects(Object.assign(new Error('gone@example.com'), { name: 'TooManyRequestsException' })); // retry
+      },
+    ];
+    for (const arrange of runs) {
+      arrange();
+      await check.handler();
+    }
+    const lines = logged.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(lines).toContain('"released":1');
+    expect(lines).toContain('"outcome":"release_failed"');
+    expect(lines).toContain('"outcome":"member_lookup_failed"');
+    expect(lines).not.toContain('example.com');
+    expect(lines).not.toContain('gone@');
+    expect(lines).not.toContain('#release#');
   });
 
   test("never deletes one of the project's own addresses", async () => {

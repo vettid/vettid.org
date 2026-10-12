@@ -12,7 +12,7 @@ import * as athena from 'aws-cdk-lib/aws-athena';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
-import { SIGNUP_ORIGIN_VERIFY_SECRET_NAME } from './signup-stack';
+import { SIGNUP_ORIGIN_VERIFY_SECRET_NAME, UNSUBSCRIBE_API_PATH } from './signup-stack';
 import { WEBSITE_LOG_RETENTION_DAYS, websiteLogGroupRetention } from '../constructs/website-logs';
 
 export interface VettidOrgStackProps extends cdk.StackProps {
@@ -306,6 +306,33 @@ function handler(event) {
     const matchUriExactly = (s: string) => matchUri('EXACTLY', s);
     const matchUriPrefix = (s: string) => matchUri('STARTS_WITH', s);
 
+    // The unsubscribe POST (the page's button, and mail providers' RFC 8058
+    // one-click requests). After a mailing the providers send these from a
+    // few addresses and one TLS fingerprint, in a burst: under the general
+    // limits below most would get 429, and a 429 here is a person who
+    // believes they left the list and did not. So it is taken out of every
+    // other rate rule and given its own, higher one (rate-limit-unsubscribe).
+    // A request with a wrong token costs one index query.
+    const unsubscribePost: wafv2.CfnWebACL.StatementProperty = {
+      andStatement: {
+        statements: [
+          matchUriExactly(UNSUBSCRIBE_API_PATH),
+          {
+            byteMatchStatement: {
+              fieldToMatch: { method: {} },
+              positionalConstraint: 'EXACTLY',
+              searchString: 'POST',
+              textTransformations: [{ priority: 0, type: 'NONE' }],
+            },
+          },
+        ],
+      },
+    };
+    const notUnsubscribePost: wafv2.CfnWebACL.StatementProperty = { notStatement: { statement: unsubscribePost } };
+    const apiExceptUnsubscribePost: wafv2.CfnWebACL.StatementProperty = {
+      andStatement: { statements: [matchUriPrefix('/api/'), notUnsubscribePost] },
+    };
+
     // WAF WebACL: default allow. Primary job is telemetry — its logs are the
     // only CloudFront-compatible source of JA3/JA4 TLS fingerprints and
     // ordered request header names (logging spec §2). One blocking rule:
@@ -327,6 +354,7 @@ function handler(event) {
               limit: 300,
               aggregateKeyType: 'IP',
               evaluationWindowSec: 300,
+              scopeDownStatement: notUnsubscribePost,
             },
           },
           visibilityConfig: {
@@ -387,6 +415,7 @@ function handler(event) {
               customKeys: [
                 { ja4Fingerprint: { fallbackBehavior: 'NO_MATCH' } },
               ],
+              scopeDownStatement: notUnsubscribePost,
             },
           },
           visibilityConfig: {
@@ -408,7 +437,7 @@ function handler(event) {
               limit: 20,
               aggregateKeyType: 'IP',
               evaluationWindowSec: 300,
-              scopeDownStatement: matchUriPrefix('/api/'),
+              scopeDownStatement: apiExceptUnsubscribePost,
             },
           },
           visibilityConfig: {
@@ -435,12 +464,34 @@ function handler(event) {
               customKeys: [
                 { ja4Fingerprint: { fallbackBehavior: 'NO_MATCH' } },
               ],
-              scopeDownStatement: matchUriPrefix('/api/'),
+              scopeDownStatement: apiExceptUnsubscribePost,
             },
           },
           visibilityConfig: {
             cloudWatchMetricsEnabled: true,
             metricName: 'vettid-org-rate-limit-api-ja4',
+            sampledRequestsEnabled: true,
+          },
+        },
+        {
+          // The unsubscribe POST's own limit (see unsubscribePost above):
+          // per IP, since one provider address carries many people's
+          // requests. Far above any real burst for a list this size, and
+          // still a ceiling on someone guessing tokens (which are 256 bits).
+          name: 'rate-limit-unsubscribe',
+          priority: 7,
+          action: { block: { customResponse: { responseCode: 429 } } },
+          statement: {
+            rateBasedStatement: {
+              limit: 2000,
+              aggregateKeyType: 'IP',
+              evaluationWindowSec: 300,
+              scopeDownStatement: unsubscribePost,
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: 'vettid-org-rate-limit-unsubscribe',
             sampledRequestsEnabled: true,
           },
         },

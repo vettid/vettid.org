@@ -43,14 +43,16 @@ export interface ApiFunctionProps {
  */
 export class ApiFunction extends Construct {
   readonly fn: lambdaNode.NodejsFunction;
+  /** The function's log group (for metric filters). */
+  readonly logGroup: logs.LogGroup;
 
   constructor(scope: Construct, id: string, props: ApiFunctionProps) {
     super(scope, id);
 
-    const logGroup = new logs.LogGroup(this, 'Logs', {
+    const logGroup = (this.logGroup = new logs.LogGroup(this, 'Logs', {
       retention: props.logRetention ?? logs.RetentionDays.ONE_MONTH,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
-    });
+    }));
 
     this.fn = new lambdaNode.NodejsFunction(this, 'Fn', {
       entry: props.entry,

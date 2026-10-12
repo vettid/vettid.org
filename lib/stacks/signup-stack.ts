@@ -5,6 +5,8 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
+import * as logs from 'aws-cdk-lib/aws-logs';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as ses from 'aws-cdk-lib/aws-ses';
@@ -21,6 +23,19 @@ export const SIGNUP_ORIGIN_VERIFY_SECRET_NAME = 'vettid-org-signup/origin-verify
 
 /** Members table (VettidOrgDataStack), consulted before reclaiming an SES identity. */
 const MEMBERS_TABLE_NAME = 'vettid-org-members';
+
+/** The main account's alarm topic (VettidOrgAuditStack; it admits CloudWatch alarms). */
+const ALERTS_TOPIC_NAME = 'vettid-org-security-alerts';
+
+/** The unsubscribe route: named by the WAF rules of the web stack too. */
+export const UNSUBSCRIBE_API_PATH = '/api/subscribe/unsubscribe';
+/**
+ * The unsubscribe POST's own API throttle. After a mailing, mail providers
+ * send their one-click POSTs from a few addresses in a burst; the stage's
+ * 5 per second would answer 429 to people who then believe they left. A
+ * miss costs one index query.
+ */
+const UNSUBSCRIBE_THROTTLE = { rateLimit: 50, burstLimit: 100 };
 
 /**
  * Mailing-list signup backed by the SES-verification opt-in pattern:
@@ -111,13 +126,14 @@ export class VettidOrgSignupStack extends cdk.Stack {
     }).fn;
     originSecret.grantRead(subscribeFn);
 
-    const checkFn = new ApiFunction(this, 'CheckVerificationsFn', {
+    const check = new ApiFunction(this, 'CheckVerificationsFn', {
       entry: 'lambda/signup/check-verifications.mjs',
       timeout: cdk.Duration.minutes(2),
       memorySize: 128,
       environment: { ...env, MEMBERS_TABLE_NAME },
       logRetention: websiteLogGroupRetention(),
-    }).fn;
+    });
+    const checkFn = check.fn;
 
     // DynamoDB least privilege (was grantReadWriteData on both):
     //  - subscribe reads a row by key and writes new rows
@@ -141,10 +157,18 @@ export class VettidOrgSignupStack extends cdk.Stack {
       actions: ['dynamodb:Query'],
       resources: [`${table.tableArn}/index/*`],
     }));
-    // Is an expiring row's address also a VettID member's? (see check-verifications.mjs)
+    // Is an expiring or released address also a VettID member's? (see
+    // check-verifications.mjs.) The email index, and a strongly consistent
+    // read of the member table's email marker rows (`email:<addr>`) and of
+    // nothing else in that table.
     checkFn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['dynamodb:Query'],
       resources: [this.formatArn({ service: 'dynamodb', resource: 'table', resourceName: `${MEMBERS_TABLE_NAME}/index/email-index` })],
+    }));
+    checkFn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:GetItem'],
+      resources: [this.formatArn({ service: 'dynamodb', resource: 'table', resourceName: MEMBERS_TABLE_NAME })],
+      conditions: { 'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['email:*'] } },
     }));
 
     // ses:SendEmail stays on '*' ON PURPOSE. Empirically, scoping it to the
@@ -197,18 +221,78 @@ export class VettidOrgSignupStack extends cdk.Stack {
       methods: [apigwv2.HttpMethod.GET],
       integration: subscribeIntegration,
     });
-    httpApi.addRoutes({
-      path: '/api/subscribe/unsubscribe',
+    const unsubscribeRoutes = httpApi.addRoutes({
+      path: UNSUBSCRIBE_API_PATH,
       methods: [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST],
       integration: subscribeIntegration,
     });
-    new apigwv2.HttpStage(this, 'DefaultStage', {
+    const stage = new apigwv2.HttpStage(this, 'DefaultStage', {
       httpApi,
       stageName: '$default',
       autoDeploy: true,
       // Modest global throttle: this is a single public form
       throttle: { rateLimit: 5, burstLimit: 10 },
     });
+    // ...except the unsubscribe POST (UNSUBSCRIBE_THROTTLE).
+    const cfnStage = stage.node.defaultChild as apigwv2.CfnStage;
+    // (RouteSettings is free-form JSON to CDK: CloudFormation's own key names.)
+    cfnStage.routeSettings = {
+      [`POST ${UNSUBSCRIBE_API_PATH}`]: {
+        ThrottlingRateLimit: UNSUBSCRIBE_THROTTLE.rateLimit,
+        ThrottlingBurstLimit: UNSUBSCRIBE_THROTTLE.burstLimit,
+      },
+    };
+    for (const r of unsubscribeRoutes) stage.node.addDependency(r); // route settings name an existing route
+
+    // ---- Alarms: an unsubscribe that is not finished must not be silent ----
+    // The sweep logs one line per run with its counts. To the main account's
+    // alarm topic; RUNBOOK "Mailing list" → Unsubscribe says what to do.
+    const sweepCount = (cid: string, field: string) =>
+      new logs.MetricFilter(this, cid, {
+        logGroup: check.logGroup,
+        filterPattern: logs.FilterPattern.all(
+          logs.FilterPattern.stringValue('$.outcome', '=', 'sweep'),
+          logs.FilterPattern.numberValue(`$.${field}`, '>', 0),
+        ),
+        metricNamespace: 'VettID/MailingList',
+        metricName: field,
+        metricValue: `$.${field}`,
+      }).metric({ statistic: 'Sum', period: cdk.Duration.minutes(15) });
+    const says = (text: string) => `Mailing list: ${text} (RUNBOOK "Mailing list" → Unsubscribe).`;
+    const alarms = [
+      // Four sweeps in a row: one failed lookup is retried and is not news.
+      new cloudwatch.Alarm(this, 'ReleaseRetryAlarm', {
+        alarmName: 'vettid-org-mailing-list-release-retry',
+        alarmDescription: says('for an hour the sweep has not been able to finish an unsubscribe: an address is still held in a release marker and in SES'),
+        metric: sweepCount('ReleaseRetryMetric', 'releaseRetry'),
+        threshold: 0,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        evaluationPeriods: 4,
+        datapointsToAlarm: 4,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      }),
+      new cloudwatch.Alarm(this, 'ReleaseAbandonedAlarm', {
+        alarmName: 'vettid-org-mailing-list-release-abandoned',
+        alarmDescription: says('the sweep gave up on an unsubscribe after 7 days: the address is off the list and off its marker, but its SES identity was not deleted; reconcile by hand'),
+        metric: sweepCount('ReleaseAbandonedMetric', 'releaseAbandoned'),
+        threshold: 0,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        evaluationPeriods: 1,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      }),
+      new cloudwatch.Alarm(this, 'SweepErrorsAlarm', {
+        alarmName: 'vettid-org-mailing-list-sweep-errors',
+        alarmDescription: says('the sweep has failed four times in a row: confirmations and unsubscribes are not being finished'),
+        metric: checkFn.metricErrors({ statistic: 'Sum', period: cdk.Duration.minutes(15) }),
+        threshold: 0,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        evaluationPeriods: 4,
+        datapointsToAlarm: 4,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      }),
+    ];
+    const alertsTopicArn = this.formatArn({ service: 'sns', resource: ALERTS_TOPIC_NAME, arnFormat: cdk.ArnFormat.NO_RESOURCE_NAME });
+    for (const a of alarms) a.addAlarmAction({ bind: () => ({ alarmActionArn: alertsTopicArn }) });
 
     // e.g. abc123.execute-api.us-east-1.amazonaws.com
     this.apiDomain = cdk.Fn.select(2, cdk.Fn.split('/', httpApi.apiEndpoint));

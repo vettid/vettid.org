@@ -12,6 +12,13 @@
   if (!ask || !missing || !form || !field) return;
 
   var m = /^#u=([A-Za-z0-9_-]{43})$/.exec(window.location.hash);
+  // The token is in the form now (or was no token): take it out of the
+  // address bar and the browser's history.
+  if (window.location.hash && window.history && window.history.replaceState) {
+    try {
+      window.history.replaceState(null, '', window.location.pathname);
+    } catch (e) { /* the page works without it */ }
+  }
   if (!m) {
     missing.hidden = false;
     return;

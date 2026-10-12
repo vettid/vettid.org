@@ -44,10 +44,12 @@ const AWAITING_LINK = 'pending_link';
 // address (same convention as the send-quota sentinel).
 const confirmKey = (hash) => `#confirm#${hash}`;
 // Release markers '#release#<random>' → email, status 'release': "this
-// address just left the list; delete its SES identity unless something else
-// uses it". The sweep (check-verifications.mjs) does that within its next
-// run: it, not this internet-facing function, may read the members' email
-// index and delete identities.
+// address just left the list, and the list created its SES identity; delete
+// the identity unless something else uses it". The sweep
+// (check-verifications.mjs) does that within its next run: it, not this
+// internet-facing function, may read the members table and delete
+// identities. A row whose identity the list did NOT create (ownsIdentity
+// not set) leaves no marker: that identity is not ours to delete.
 const RELEASE = 'release';
 const releaseKey = () => `#release#${randomBytes(16).toString('hex')}`;
 const sha256 = (s) => createHash('sha256').update(s).digest('hex');
@@ -188,8 +190,13 @@ const subscribe = async (event) => {
   }
 
   let alreadyVerified = false;
+  // True only when THIS call created the identity. An identity that was
+  // there before (a member's, the operator's, anyone's) is never the list's
+  // to delete, whatever happens to the row later.
+  let createdIdentity = false;
   try {
     await ses.send(new CreateEmailIdentityCommand({ EmailIdentity: email }));
+    createdIdentity = true;
   } catch (err) {
     if (err?.name !== 'AlreadyExistsException') {
       console.log(JSON.stringify({ outcome: 'ses_error', code: err?.name }));
@@ -215,6 +222,7 @@ const subscribe = async (event) => {
         status: 'pending',
         requestedAt: now.toISOString(),
         unsubToken: newUnsubscribeToken(),
+        ...(createdIdentity ? { ownsIdentity: true } : {}),
         // TTL: unconfirmed rows purge after 3 days (SES links expire in 24h)
         expiresAt: nowSec + 3 * 24 * 3600,
       },
@@ -333,9 +341,10 @@ const formField = (event, name) => {
   return new URLSearchParams(raw).get(name) ?? '';
 };
 
-// Removes the row the token names, and leaves a release marker for the
-// sweep. Returns the row's former status, or undefined if the token names
-// nothing (unknown, already used, or stale after a re-subscribe).
+// Removes the row the token names and, if the list created the address's
+// SES identity, leaves a release marker for the sweep. Returns the row's
+// former status, or undefined if the token names nothing (unknown, already
+// used, or stale after a re-subscribe). Cost of a miss: the one index query.
 const removeSubscription = async (token) => {
   const found = await ddb.send(new QueryCommand({
     TableName: TABLE,
@@ -347,13 +356,19 @@ const removeSubscription = async (token) => {
   const email = found.Items?.[0]?.email;
   if (typeof email !== 'string' || email.startsWith('#')) return undefined;
 
+  // The index has keys only; the row says whether the identity is ours.
+  const row = await ddb.send(new GetCommand({ TableName: TABLE, Key: { email }, ConsistentRead: true }));
+  if (row.Item?.unsubToken !== token) return undefined;
+
   // Marker first: if the delete then fails, the sweep finds the row still
   // there and keeps the identity. The other order could lose the marker and
   // leave the address in SES with nothing to say so.
-  await ddb.send(new PutCommand({
-    TableName: TABLE,
-    Item: { email: releaseKey(), status: RELEASE, requestedAt: new Date().toISOString(), target: email },
-  }));
+  if (row.Item.ownsIdentity === true) {
+    await ddb.send(new PutCommand({
+      TableName: TABLE,
+      Item: { email: releaseKey(), status: RELEASE, requestedAt: new Date().toISOString(), target: email, ownsIdentity: true },
+    }));
+  }
   let old;
   try {
     const res = await ddb.send(new DeleteCommand({

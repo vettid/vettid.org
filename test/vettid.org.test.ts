@@ -164,6 +164,37 @@ describe('VettidOrgStack', () => {
       template.resourceCountIs('AWS::Logs::Delivery', 1);
     });
 
+    test('the unsubscribe POST is outside every general rate rule and has its own, higher one', () => {
+      const acl = Object.values<any>(template.findResources('AWS::WAFv2::WebACL'))[0];
+      const rules: any[] = acl.Properties.Rules;
+      const isUnsubPost = (st: any) =>
+        JSON.stringify(st) ===
+        JSON.stringify({
+          AndStatement: {
+            Statements: [
+              { ByteMatchStatement: { FieldToMatch: { UriPath: {} }, PositionalConstraint: 'EXACTLY', SearchString: '/api/subscribe/unsubscribe', TextTransformations: [{ Priority: 0, Type: 'NONE' }] } },
+              { ByteMatchStatement: { FieldToMatch: { Method: {} }, PositionalConstraint: 'EXACTLY', SearchString: 'POST', TextTransformations: [{ Priority: 0, Type: 'NONE' }] } },
+            ],
+          },
+        });
+      const rate = (name: string) => rules.find((r) => r.Name === name).Statement.RateBasedStatement;
+      for (const name of ['rate-limit-per-ip', 'rate-limit-per-ja4']) {
+        expect(isUnsubPost(rate(name).ScopeDownStatement.NotStatement.Statement)).toBe(true);
+      }
+      for (const name of ['rate-limit-api', 'rate-limit-api-ja4']) {
+        const [prefix, not] = rate(name).ScopeDownStatement.AndStatement.Statements;
+        expect(prefix.ByteMatchStatement).toMatchObject({ PositionalConstraint: 'STARTS_WITH', SearchString: '/api/' });
+        expect(isUnsubPost(not.NotStatement.Statement)).toBe(true);
+      }
+      // the general limits themselves are unchanged
+      expect([rate('rate-limit-per-ip').Limit, rate('rate-limit-per-ja4').Limit, rate('rate-limit-api').Limit, rate('rate-limit-api-ja4').Limit]).toEqual([300, 600, 20, 50]);
+      const own = rules.find((r) => r.Name === 'rate-limit-unsubscribe');
+      expect(own.Action).toEqual({ Block: { CustomResponse: { ResponseCode: 429 } } });
+      expect(own.Statement.RateBasedStatement).toMatchObject({ Limit: 2000, AggregateKeyType: 'IP', EvaluationWindowSec: 300 });
+      expect(isUnsubPost(own.Statement.RateBasedStatement.ScopeDownStatement)).toBe(true);
+      expect(new Set(rules.map((r) => r.Priority)).size).toBe(rules.length);
+    });
+
     test('the unsubscribe pages are not counted as probe traffic', () => {
       expect(JSON.stringify(template.findResources('AWS::WAFv2::WebACL'))).toContain('"SearchString":"/unsubscribe"');
     });
@@ -225,7 +256,7 @@ describe('VettidOrgStack', () => {
               RateBasedStatement: Match.objectLike({
                 Limit: 20,
                 AggregateKeyType: 'IP',
-                ScopeDownStatement: Match.objectLike({ ByteMatchStatement: Match.anyValue() }),
+                ScopeDownStatement: Match.objectLike({ AndStatement: Match.anyValue() }), // /api/, except the unsubscribe POST
               }),
             },
           }),
@@ -237,7 +268,7 @@ describe('VettidOrgStack', () => {
                 Limit: 50,
                 AggregateKeyType: 'CUSTOM_KEYS',
                 CustomKeys: [Match.objectLike({ JA4Fingerprint: Match.anyValue() })],
-                ScopeDownStatement: Match.objectLike({ ByteMatchStatement: Match.anyValue() }),
+                ScopeDownStatement: Match.objectLike({ AndStatement: Match.anyValue() }), // /api/, except the unsubscribe POST
               }),
             },
           }),
@@ -445,6 +476,51 @@ describe('VettidOrgSignupStack', () => {
     for (const g of groups) expect(g.Properties.RetentionInDays).toBe(WEBSITE_LOG_RETENTION_DAYS);
     const stage = Object.values<any>(template.findResources('AWS::ApiGatewayV2::Stage'))[0];
     expect(stage.Properties.AccessLogSettings).toBeUndefined();
+  });
+
+  test('the unsubscribe POST has its own API throttle; everything else keeps the stage default', () => {
+    const stage = Object.values<any>(template.findResources('AWS::ApiGatewayV2::Stage'))[0];
+    expect(stage.Properties.DefaultRouteSettings).toMatchObject({ ThrottlingRateLimit: 5, ThrottlingBurstLimit: 10 });
+    expect(stage.Properties.RouteSettings).toEqual({
+      'POST /api/subscribe/unsubscribe': { ThrottlingRateLimit: 50, ThrottlingBurstLimit: 100 },
+    });
+    expect(stage.DependsOn.length).toBeGreaterThanOrEqual(2); // the routes exist first
+  });
+
+  test('an unfinished unsubscribe is not silent: alarms on retries, on giving up and on a failing sweep, to the alerts topic', () => {
+    const filters = Object.values<any>(template.findResources('AWS::Logs::MetricFilter')).map((f) => f.Properties);
+    expect(filters.map((f) => f.FilterPattern).sort()).toEqual([
+      '{ ($.outcome = "sweep") && ($.releaseAbandoned > 0) }',
+      '{ ($.outcome = "sweep") && ($.releaseRetry > 0) }',
+    ]);
+    const alarms = Object.values<any>(template.findResources('AWS::CloudWatch::Alarm')).map((a) => a.Properties);
+    const byName = Object.fromEntries(alarms.map((a) => [a.AlarmName, a]));
+    expect(Object.keys(byName).sort()).toEqual([
+      'vettid-org-mailing-list-release-abandoned',
+      'vettid-org-mailing-list-release-retry',
+      'vettid-org-mailing-list-sweep-errors',
+    ]);
+    expect(byName['vettid-org-mailing-list-release-retry']).toMatchObject({ MetricName: 'releaseRetry', Namespace: 'VettID/MailingList', Period: 900, EvaluationPeriods: 4, DatapointsToAlarm: 4, Threshold: 0, ComparisonOperator: 'GreaterThanThreshold', TreatMissingData: 'notBreaching' });
+    expect(byName['vettid-org-mailing-list-release-abandoned']).toMatchObject({ MetricName: 'releaseAbandoned', EvaluationPeriods: 1, Threshold: 0 });
+    expect(byName['vettid-org-mailing-list-sweep-errors']).toMatchObject({ MetricName: 'Errors', Namespace: 'AWS/Lambda', EvaluationPeriods: 4 });
+    for (const a of alarms) {
+      expect(JSON.stringify(a.AlarmActions)).toContain(':sns:us-east-1:123456789012:vettid-org-security-alerts');
+    }
+  });
+
+  test("the sweep's read of the members table is the email index and the email marker rows only", () => {
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: 'dynamodb:GetItem',
+            Effect: 'Allow',
+            Condition: { 'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['email:*'] } },
+            Resource: Match.objectLike({ 'Fn::Join': ['', Match.arrayWith([Match.stringLikeRegexp(':table/vettid-org-members$')])] }),
+          }),
+        ]),
+      },
+    });
   });
 
   test('unsubscribe tokens are looked up through a sparse keys-only index', () => {
