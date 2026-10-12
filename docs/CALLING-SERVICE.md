@@ -1,12 +1,12 @@
 ---
 title: CALLING-SERVICE
-status: draft for the owner's review (0.2.0; decisions D12–D26 of CALLS-PLAN §13.5 are open)
+status: approved by the owner 2026-10-12 (D12–D26 of CALLS-PLAN §13.5; D23 as (c))
 version: 0.2.0
 date: 2026-10-12
 owner: Al Liebl (Mesmer)
 component: calling-service (optional, media plane only): a STUN/TURN server and a credential issuer
 related:
-  - CALLS-PLAN.md (0.1.3) §3, §5, §7, §9 D1–D11, §12, §13 (phase C2 and its decisions D12–D26)
+  - CALLS-PLAN.md (0.1.3) §3, §5, §7, §9 D1–D11, §12, §13 (phase C2; D12–D26, decided 2026-10-12)
   - VAULT-MESSAGING.md (0.28.0) §10.10 calls, §11.10.8 `calls_url`
   - PUSH-GATEWAY.md (0.4.4) §5.1 (the attestation check this service reuses), §10 (the deployment it is modelled on)
   - RELAY-PROTOCOL.md (0.7.1) §4.1 signed requests, §7.1 error bodies
@@ -19,7 +19,10 @@ changelog:
     sidecar in one container, the shared secret inside the vault,
     ChaCha20-Poly1305 SFrame
   - 0.2.0 (2026-10-12): rewritten so that phase C2 of CALLS-PLAN can be
-    built from it; a draft for the owner's review. Follows the owner's
+    built from it. **Approved by the owner 2026-10-12** on vettid.org
+    #243 ("d23 should be c, all other d recommendations are approved":
+    D12–D22 and D24–D26 as recommended; D23, an app-side pin of a
+    connection's identity key, never). Follows the owner's
     decisions of 2026-10-11 and 2026-10-12 (CALLS-PLAN §9 D1, D3, D4,
     D8, D11 and §12). **The shared secret never enters a vault:** a
     small issuer gives short-lived TURN credentials to attested vaults
@@ -64,10 +67,11 @@ different service and never this one.
 This version describes what **phase C2** builds on staging. §12 lists
 what is not in C2.
 
-**Draft.** Where a number or a choice here is one of the open owner
-decisions of CALLS-PLAN §13.5, it is that decision's recommendation and
-carries its number (D12–D26). What the owner has already decided is
-cited as decided (D1, D3, D4, D8, D11; CALLS-PLAN §9 and §12).
+**Decided.** Where a number or a choice here carries a decision's
+number (D12–D26), the owner decided it on 2026-10-12 (CALLS-PLAN
+§13.5). Earlier decisions are cited the same way (D1, D3, D4, D8, D11;
+CALLS-PLAN §9 and §12). Nothing here is built yet; what is still to be
+verified is in §13.
 
 ## 2. Position in the architecture
 
@@ -608,8 +612,9 @@ stacks' pull request (not in this one). Its parts:
   overflow provider (0.1.1's Cloudflare profile); an appliance profile.
   The artifacts are published so that a self-hoster can run them, and
   nothing more is promised for self-hosting in C2.
-- The push wake for a ringing call (V4, phase C3; D24 asks whether it
-  rides in C2's vault release).
+- The push wake for a ringing call (V4) is not this service's: it is a
+  vault rule, and it rides in C2's vault release (D24) once its
+  VAULT-MESSAGING §14.2 text is written and approved.
 - Any measurement of how often TURN is needed (C5).
 
 ## 13. Not established, and how C2 finds out

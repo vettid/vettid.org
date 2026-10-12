@@ -10,7 +10,7 @@ related:
   - RELAY-PLAN.md
   - PQC-MIGRATION.md
   - CALLING-SERVICE.md (0.2.0)
-  - CALLS-PLAN.md (0.1.3) §13 (phase C2; decisions D12–D26)
+  - CALLS-PLAN.md (0.1.3) §13 (phase C2; decisions D12–D26, decided 2026-10-12)
   - PUSH-GATEWAY.md (0.4.4)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.4.2)
@@ -23,11 +23,13 @@ related:
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
   - VAULT-HOST-PROTOCOL.md (0.1.2; the enclave ↔ parent protocol as built)
 changelog:
-  - 0.28.0: normative; **a draft for the owner's review**; **needs a
+  - 0.28.0: normative; **approved by the owner 2026-10-12** (vettid.org
+    #243: D12–D22 and D24–D26 as recommended; D23 as (c), the app never
+    pins a connection's identity key itself); **needs a
     vault release** (staging "release C2", CALLS-PLAN 0.1.3 §13) and a
     host stack deploy. Calls, phase C2 (CALLS-PLAN V1, V2, V3, V5, V6,
     V8 and what phase C1 found; owner decisions of 2026-10-11 and
-    2026-10-12, CALLS-PLAN §9 and §12; open decisions D12–D26 there).
+    2026-10-12, CALLS-PLAN §9 and §12, and D12–D26 of §13.5).
     §10.10 is rewritten around what S10 runs and what C2 adds, each
     C2 rule marked. **Servers and credentials** in the signed ICE
     configuration: the shared secret never enters a vault; the vault
@@ -5667,8 +5669,9 @@ two devices of the call hold. Sent by `app` or `desktop` devices, and by
 connections where marked; never by agents. A vault takes part in at most
 one call at a time.
 
-**Release C2 (0.28.0).** Text marked **(C2)** is a draft for the owner's
-review and applies from the staging release that first carries it, called
+**Release C2 (0.28.0).** Text marked **(C2)** was approved by the owner
+on 2026-10-12 (CALLS-PLAN §13.5, D12–D26) and applies from the staging
+release that first carries it, called
 **release C2** here because it is not cut yet (CALLS-PLAN §7 phase C2;
 its number is written here when it has one). Everything not so marked is
 what staging release S10 runs. "S10" below stands for S10 and any later
@@ -6079,9 +6082,13 @@ calls, as it is for everything else of the member (§2.1).
 | A vault leaves out or changes the ICE servers of its own devices | Its own devices' vault signs them; nobody else can | **Unchanged**; from C2 the list is no longer empty |
 | Both vaults see both members' addresses in the signalling | Yes (accepted, CALLS-PLAN D1) | **Unchanged** |
 
-Whether a device should also pin a connection's `ik` itself, so that
-the `peer_ik` check holds against the member's own vault as well, is
-decision D23 (CALLS-PLAN §13.5; §15 item 36).
+**No device pins a connection's `ik` itself** (owner decision D23 of
+2026-10-12, option (c): never). A member's own vault is trusted, for
+calls and for messages alike (§2.1), so a device takes each
+connection's `ik` from its vault, keeps no pin of its own, and has no
+"identity changed" warning. The `peer_ik` check (rule 6 of "Rules for a
+device") is therefore not a defence against the member's own vault, by
+design.
 
 **Vault-signed ICE configuration** (CALLING-SERVICE §5). Each vault gives
 only its own devices an ICE configuration, for each call, signed by its
@@ -6409,10 +6416,13 @@ out      = header || sealed || iv || 0x0C || key_index                          
    one on the connection's details; an event that names one connection
    and carries another's key is refused; a call from a connection that
    is unknown, pending, stale or blocked in the app is refused. **What
-   it does not add:** protection against the member's own vault. The
-   connection list, with each `ik`, comes from that same vault, as
-   `peer_ik` does: a vault that lied would lie in both, consistently.
-   That is the residual above.
+   it does not add, by design:** protection against the member's own
+   vault. The connection list, with each `ik`, comes from that same
+   vault, as `peer_ik` does: a vault that lied would lie in both,
+   consistently. The check binds a call to the connection the vault
+   names and to the fingerprint the app shows, and nothing more. The
+   owner decided on 2026-10-12 (D23) that the app never pins the key
+   itself: the member's own vault is trusted ("Residual").
 7. **A hang-up before a lock.** A locked vault collects nothing: the
    device ends a live call and waits (two seconds at most) for its
    `call.end` to be with the relay before it asks the vault to lock.
@@ -10079,7 +10089,7 @@ recorded in the build's measurements:
   it `push.register` is answered `unavailable` (§14.1);
 - (0.26.0) `features`, the optional features the image registers
   ("Feature allowlist" below);
-- (0.28.0, release C2; a draft for the owner's review) `calls_url`,
+- (0.28.0, release C2; approved by the owner 2026-10-12) `calls_url`,
   the calling service's credential issuer (§10.10 "Servers and
   credentials"; CALLING-SERVICE §5): `https://calls.staging.vettid.org`
   in staging. **Optional**: a channel file without it gives its devices
@@ -13976,7 +13986,7 @@ Follow-ups:
     stays by class, the digest to be named before any release pins
     two certificates of one class (§11.7.1).
 
-36. **Calls, phase C2 (0.28.0).** A draft for the owner's review. The
+36. **Calls, phase C2 (0.28.0).** The
     owner said on 2026-10-12 to start the C2 design so that C2 can
     begin as soon as C1's two-phone test passes. It follows the
     decisions already made (CALLS-PLAN §9 D1–D11 and §12: direct media
@@ -13987,15 +13997,22 @@ Follow-ups:
     versioned, negotiated suites bound into the keys, signed in C2's
     vault release; key confirmation before microphone audio before a
     second suite is ever offered; calls off in production until
-    promotion). **Open, each with options and a recommendation, in
-    CALLS-PLAN §13.5:** D12 the liveness mechanism; D13 credentials per
-    call or per unlock window; D14 their lifetime; D15, D16 the relay's
-    caps; D17 where the issuer lives; D18 TURN over TLS in C2 or C5;
-    D19 logging; D20 the transition from S10's unsigned form and when
-    it is refused; D21 glare; D22 the call limits; D23 whether a device
-    pins a connection's `ik` itself; D24 whether the push wake for a
-    ringing call (V4, §14.2) rides in the same release; D25 the
-    parent's allowlist; D26 key confirmation in every form 2 call.
+    promotion). **Answered (owner, 2026-10-12, on vettid.org #243):
+    "d23 should be c, all other d recommendations are approved."** So,
+    as recommended (CALLS-PLAN §13.5): D12 liveness by
+    `call.keepalive`; D13 a pool of credentials, one per call; D14
+    6 hours; D15, D16 the relay's caps and its daily stop; D17 the
+    issuer as its own service; D18 TURN over TLS in C5; D19 counters
+    only; D20 both forms in C2, form 1 refused by a later staging
+    release and never accepted in production; D21 glare; D22 the call
+    limits; D24 the push wake for a ringing call (V4) rides in release
+    C2; D25 the parent's allowlist names both channels' issuers; D26
+    key confirmation in every form 2 call. **D23, as (c): the app
+    never pins a connection's identity key itself.** A member's own
+    vault is trusted, for calls and messages alike (§2.1); there is no
+    app-side pin and no changed-key warning (§10.10 "Residual").
+    **Still to write before release C2 is cut:** the §14.2 text for
+    V4's wake (D24), to be approved by the owner first.
     **Taken from code, not decided here:** everything of §10.10 not
     marked (C2) (vettid-vault `features/calls`, `vms/callwire` at
     `079cde7`), and "Media suites and keys" (vettid-android
@@ -14323,7 +14340,7 @@ iv     11223344000003c0000003c0
 sealed 780a14a5d44d9ba28ccf9ad78a82e7855c69d9584297c8aef4c5bf19d8a503b6d6aae36a11223344000003c0000003c00c00
 ```
 
-Key confirmation (release C2). Computed for this draft with Python's
+Key confirmation (release C2). Computed for this version with Python's
 `hmac` only (the same script reproduces the first `k_dir` and frame key
 above); **to be confirmed by the vault's and the app's
 implementations**, which add them, and vectors for `m2` and its
@@ -14338,8 +14355,10 @@ offered "2 1", chosen "1": confirm = 670880acb3774ddf276f017d5dba3338777143e27d0
 
 ## 17. Changelog
 
-- **0.28.0** (2026-10-12): normative; **a draft for the owner's
-  review**; needs a vault release (staging "release C2") and a host
+- **0.28.0** (2026-10-12): normative; **approved by the owner
+  2026-10-12** (vettid.org #243; D12–D26 of CALLS-PLAN §13.5 as
+  recommended, except D23, decided as (c): the app never pins a
+  connection's identity key itself); needs a vault release (staging "release C2") and a host
   stack deploy. Calls, phase C2 (CALLS-PLAN 0.1.3 §13; CALLING-SERVICE
   0.2.0). Nothing changes for a vault before release C2, and nothing
   for production, which has no calls.

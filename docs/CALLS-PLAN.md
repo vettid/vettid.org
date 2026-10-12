@@ -1,12 +1,12 @@
 ---
 title: CALLS-PLAN
-status: approved by the owner 2026-10-11 (D1–D11 as recommended; D1 with the owner's position of §3.1)
+status: approved by the owner 2026-10-11 (D1–D11 as recommended; D1 with the owner's position of §3.1) and 2026-10-12 (§13, D12–D26 as recommended; D23 as (c))
 version: 0.1.3
 date: 2026-10-12
 owner: Al Liebl (Mesmer)
 related:
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2) §2 rules, §2.4 promotion, §5 phase 2
-  - CALLING-SERVICE.md (0.2.0, a draft for the owner's review; 0.1.1 is what §5.1 describes)
+  - CALLING-SERVICE.md (0.2.0, approved by the owner 2026-10-12; 0.1.1 is what §5.1 describes)
   - VAULT-MESSAGING.md (0.28.0) §10.10 calls, §7.3, §8.5, §10.4.1, §11.10.8, §14.2
   - RELAY-PROTOCOL.md (0.7.1) §6.2–§6.4, §7.2 (rewritten in 0.7.0: limits per key)
   - PUSH-GATEWAY.md (0.4.4) §6, §14.2 item 13
@@ -43,10 +43,13 @@ changelog:
     start the C2 design so that C2 can begin as soon as C1's two-phone
     test passes. The edits that §6.6 and §12.7 listed for
     CALLING-SERVICE, VAULT-MESSAGING §10.10 and VAULT-RELEASES are made
-    with this version, as drafts (CALLING-SERVICE 0.2.0, VAULT-MESSAGING
+    with this version (CALLING-SERVICE 0.2.0, VAULT-MESSAGING
     0.28.0, VAULT-RELEASES 0.1.19). Sentences that C2's design changes
-    are marked "0.1.3" (§5.2, §6.6, §7, §12.7). **The plan stays
-    approved as it was; §13 and D12–D26 are not approved yet**
+    are marked "0.1.3" (§5.2, §6.6, §7, §12.7). **Approved by the
+    owner 2026-10-12** on vettid.org #243 ("d23 should be c, all other
+    d recommendations are approved"): D12–D22 and D24–D26 as
+    recommended; D23 as (c), the app never pins a connection's identity
+    key itself (§13.5)
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -429,9 +432,10 @@ V4's wake class in the vault is named so that it can carry over.
 ### 6.6 Proposed edits to other documents (not made in this PR)
 
 *0.1.3:* the edits to CALLING-SERVICE, to VAULT-MESSAGING §10.10,
-§11.10.8 and §15 item 6, and to VAULT-RELEASES §8.4 are now made, as
-drafts for the owner's review, for C2's part (V1–V3, V5, V6, V8). V4
-(§14.2), V7 (`call.update`), ANDROID-PLAN, PUSH-GATEWAY, RUNBOOK and
+§11.10.8 and §15 item 6, and to VAULT-RELEASES §8.4 are now made and
+approved (2026-10-12), for C2's part (V1–V3, V5, V6, V8). V4 (§14.2) is
+C2's first spec follow-up: it rides in C2's vault release (D24) and its
+text is to be written and approved before that release is cut. V7 (`call.update`), ANDROID-PLAN, PUSH-GATEWAY, RUNBOOK and
 STAGING-DEVELOPMENT-PLAN are still to do.
 
 - **VAULT-MESSAGING**: §10.10 (V2–V8: timeouts, keep-alive, glare,
@@ -467,7 +471,7 @@ days of implementation and review, as ranges; owner testing is extra.
 | C2 | The calling service on staging; vault fixes V1–V3, V5, V6, V8; 0.1.3: also the media suites as signed members and key confirmation (§12.3), detailed in §13 | The same calls with one phone on mobile data and one on Wi-Fi; app killed mid-call frees both vaults within 2 minutes; glare connects one call (0.1.3: in measurable steps, §13.4) | New service and stack; **a vault release**; host stack deploy (egress) | 12–20 (0.1.3: 14–22, for the added scope, §13.6) |
 | C3 | Ringing with the app closed; 0.1.2: Telecom (`core-telecom`, the `phoneCall` service, `CallStyle`, answering from a notification) and its proof on GrapheneOS and stock, moved here from C0 and C1 (§12.6) | On-phone service: rings within 2 s on both kinds of phone, screen off, including after a reboot; behaviour in Doze recorded. Google push on the Pixel 7 once Firebase exists (does not block the phase) | **A vault release** for V4 (can ride with C2's) | 6–10 |
 | C4 | Video: camera, switching cameras, adding video to a voice call, network change (V7) | Video both ways for 10 minutes; walk from Wi-Fi to mobile data without the call dropping | A vault release (V7) | 8–14 |
-| C5 | The TURN fallback and hostile networks | A call from a network allowing only TCP 443; a call with relay forced on one side and on both (debug option; both on one TURN server: the old backend ran two servers because this case failed there); **the share of calls that needed TURN, counted over at least 50 real calls on mobile data and home networks** (the app records direct or relayed per call, locally) and written into this plan | App only (0.1.3: and a stack deploy, if TLS on 443 waits for C5 as D18 recommends) | 4–7 |
+| C5 | The TURN fallback and hostile networks | A call from a network allowing only TCP 443; a call with relay forced on one side and on both (debug option; both on one TURN server: the old backend ran two servers because this case failed there); **the share of calls that needed TURN, counted over at least 50 real calls on mobile data and home networks** (the app records direct or relayed per call, locally) and written into this plan | App only (0.1.3: and a stack deploy for TURN over TLS on 443, which D18 puts here) | 4–7 |
 | C6 | Hardening: call limits and spam, battery over 24 h idle and an hour's call, Bluetooth and wired headsets, a mobile call arriving during a VettID call, accessibility, texts | A written test sheet passed on all three phones | App only | 8–12 |
 | Promotion | STAGING-DEVELOPMENT-PLAN §2.4: specs merged, a published staging release, both kinds of phone, a move to the next release with call history intact, seven quiet days, the production calling service deployed, the owner's approval | — | A production vault release with `calls` listed; a production calling service | 3–5 plus the seven days |
 
@@ -693,8 +697,8 @@ unchanged.
 
 ### 12.7 Edits this leaves for other documents
 
-Not made here, in addition to §6.6 (*0.1.3:* the first item is made, as
-a draft, in VAULT-MESSAGING 0.28.0 §10.10 and CALLING-SERVICE 0.2.0 §6;
+Not made here, in addition to §6.6 (*0.1.3:* the first item is made,
+approved 2026-10-12, in VAULT-MESSAGING 0.28.0 §10.10 and CALLING-SERVICE 0.2.0 §6;
 the media section of CALLING-SERVICE is §6 there, not §7):
 
 - **VAULT-MESSAGING §10.10** and **CALLING-SERVICE §7**: the frame keys
@@ -704,14 +708,14 @@ the media section of CALLING-SERVICE is §6 there, not §7):
 - **ANDROID-PLAN** §4 to §6: the probe (§12.5), the build rule for
   calls code, the universal APK's size, Telecom in C3.
 
-## 13. Phase C2 (0.1.3; a draft for the owner's review)
+## 13. Phase C2 (0.1.3; approved by the owner 2026-10-12)
 
 Added in 0.1.3. The owner said on 2026-10-12: start the C2 design now,
 so that C2 can begin as soon as C1's two-phone test passes. This
 section is that design at the level of the plan. The specifications are
-CALLING-SERVICE 0.2.0 and VAULT-MESSAGING 0.28.0 §10.10, both drafts.
-Nothing here is built, and nothing here is approved until the owner
-answers §13.5.
+CALLING-SERVICE 0.2.0 and VAULT-MESSAGING 0.28.0 §10.10. The owner
+approved it on 2026-10-12 with the decisions of §13.5. Nothing here is
+built yet.
 
 State when written: C1's first three pull requests are merged
 (vettid-android #124–#126); the fourth and the two-phone exit test are
@@ -758,17 +762,20 @@ code or key is involved anywhere in this.
 
 | Repository | Work | Spec |
 |---|---|---|
-| **vettid-vault** (a staging release, "release C2") | **V1, V8:** an issuer client: a request with a fresh key and an attestation, the pool of 4, one credential per call, the limits and backoff; the release constant `calls_url` and its checks; the enclave's allowlist entry; the parent's `DefaultAllow`; remove the `Coturn` issuer that holds a secret. **V2:** the ring timer in housekeeping. **V3:** `call.keepalive`, watched calls, the 90 s rule. **V5:** `call.permission.set` and `.list`, the unanswered-call counts, merged missed calls. **V6:** glare. **Signed suites:** form 2 of the shares, both forms vouched, the form checks. `call.list`'s new members. Vectors for `m2` and the confirmation in `calls.json`. MUST-COVERAGE for all of it | VAULT-MESSAGING 0.28.0 §10.10, §11.10.8; VAULT-RELEASES 0.1.19 §5.2 |
+| **vettid-vault** (a staging release, "release C2") | **V1, V8:** an issuer client: a request with a fresh key and an attestation, the pool of 4, one credential per call, the limits and backoff; the release constant `calls_url` and its checks; the enclave's allowlist entry; the parent's `DefaultAllow`; remove the `Coturn` issuer that holds a secret. **V2:** the ring timer in housekeeping. **V3:** `call.keepalive`, watched calls, the 90 s rule. **V5:** `call.permission.set` and `.list`, the unanswered-call counts, merged missed calls. **V6:** glare. **Signed suites:** form 2 of the shares, both forms vouched, the form checks. `call.list`'s new members. Vectors for `m2` and the confirmation in `calls.json`. **V4** (the push wake for a ringing call; D24), once its §14.2 text is approved. MUST-COVERAGE for all of it | VAULT-MESSAGING 0.28.0 §10.10, §11.10.8; VAULT-RELEASES 0.1.19 §5.2 |
 | **vettid-calls** (new, AGPL-3.0) | The issuer (Go; the attestation and manifest code shared with vettid-push); the coturn image with its configuration and `turn-agent`; `callsctl`; reproducible builds in CI; a README | CALLING-SERVICE 0.2.0 §4, §5, §7, §10 |
 | **vettid.org** | `VettidOrgCallsDataStack` and `VettidOrgCallsStack` in the staging app; `callsHost` in `lib/config.ts` and `lib/vault/egress.ts` (snapshot test); the host stack deploy; RUNBOOK "Calling service"; the release list entry and log text for release C2; the open source page lists `vettid-calls` | CALLING-SERVICE §8, §10, §11; VAULT-RELEASES §8.4 |
-| **vettid-android** | Learn the vault's level from `call.list` (`v`); form 2 (`suites`, `ek_sig2`, `suite`, `offered`), key confirmation with the microphone held back on the callee; `keepalive` and `call.keepalive`; the stale sweep by `device_id`, `exp` and `now`; glare (`superseded_by`); "Calls: allowed / off" on a connection and the limited state; relay or direct recorded per call; a debug-only forced-relay switch to test the fallback (§3.1); all of it while still working against S10 | VAULT-MESSAGING §10.10 "Call forms", "Key confirmation", "Liveness", "Glare", "Mixed releases" |
+| **vettid-android** | Learn the vault's level from `call.list` (`v`); form 2 (`suites`, `ek_sig2`, `suite`, `offered`), key confirmation with the microphone held back on the callee; `keepalive` and `call.keepalive`; the stale sweep by `device_id`, `exp` and `now`; glare (`superseded_by`); "Calls: allowed / off" on a connection and the limited state; relay or direct recorded per call; a debug-only forced-relay switch to test the fallback (§3.1); all of it while still working against S10. No pin of a connection's identity key (D23): `docs/calls/CALL-MEDIA.md` §7 rule 6 stops calling that an open question | VAULT-MESSAGING §10.10 "Call forms", "Key confirmation", "Liveness", "Glare", "Mixed releases" |
 
 No relay change, no member API change, no push gateway change.
 
 ### 13.3 Order
 
-1. **The owner answers §13.5**; the two draft specifications are
-   corrected to the answers and merged.
+1. **Done 2026-10-12:** the owner answered §13.5 and the
+   specifications say what was decided. **First spec follow-up:** the
+   VAULT-MESSAGING §14.2 text for the push wake of a ringing call (V4),
+   which rides in release C2 (D24); it is written and approved before
+   step 6.
 2. **The handshake test first** (stacks, a day): the issuer's front
    deployed with a stub behind it, and a development enclave completes
    a TLS 1.3, HTTP/2 handshake against it under the pinned Amazon
@@ -789,7 +796,7 @@ No relay change, no member API change, no push gateway change.
    part of C2.
 
 Steps 2 to 5 need no vault release. Step 6 is the one release of C2;
-V4 (C3's push wake) can ride in it if D24 says so.
+V4 (C3's push wake) rides in it (D24).
 
 ### 13.4 Exit test
 
@@ -819,31 +826,33 @@ share of calls that need TURN (C5).
 
 ### 13.5 Owner decisions for C2
 
-Each has a recommendation; "as recommended" answers all. D12–D26
-continue §9's numbering. What earlier decisions already settle is not
+**Answered (owner, 2026-10-12, on vettid.org #243): "d23 should be c,
+all other d recommendations are approved."** So D12–D22 and D24–D26 are
+decided as recommended, and **D23 is decided as (c): never.** The last
+column says what holds. D12–D26 continue §9's numbering. What earlier decisions already settle is not
 asked again: D1 (direct by default, "Always relay" deferred), D3 (the
 staging account, one small instance), D4 (credentials from the calling
 service to attested vaults), D8 (45 s, $30), D11 and §12.3 (suite 1 now,
 suite 2 registered, signed suites in C2's release, key confirmation
 before a second suite).
 
-| # | Decision | Options | Recommendation |
-|---|---|---|---|
-| D12 | How a vault learns that a call's device is gone (V3) | (a) The device sends `call.keepalive` every 30 s; the vault ends the call after 90 s without one. (b) The vault asks and the device answers: the same traffic, more state. (c) Nothing new: rely on the other phone noticing and hanging up, which already frees both vaults when that phone is alive. (d) Tie it to the device's session: not buildable, an app has no session and the relay does not tell a vault who is connected | **(a)**, as §6.1 V3 proposed. It is the only one that meets "within 2 minutes" when both phones die. Its cost, said plainly: the relay then sees one small deposit every 30 s during a call, so a call's length is visible to it as a pattern |
-| D13 | TURN credentials per call or per unlock window | (a) One credential per unlock window, renewed hourly (the approved §5.1 text): every call of the window shows the server the same username. (b) A fetch per call: call setup waits for the issuer, and the issuer and the host see when calls happen. (c) **A pool of 4 fetched at unlock and refilled in the background, one credential used per call** | **(c)**. It keeps what (a) was chosen for (a call never waits, the issuer does not learn call times) and gives each call its own username, which is what V8 wants |
-| D14 | How long a credential lives | 2 h; **6 h** (the vault's constant today, and §5.3's limit); 13 h (longer than the longest call) | **6 h**, with a credential never handed out in its last 2 h, and exit test step 12 to find out whether the server cuts a call at expiry. If it does, the lifetime is revisited before C4 |
-| D15 | The relay's bandwidth cap per call, and what the member sees at it | (a) 3 Mbit/s now (§5.3's proposal, sized for video). (b) **256 kbit/s while calls are voice only, 3 Mbit/s with C4.** At the cap packets are dropped: voice never reaches it. Text for a call that could not get a relay: (i) the plain "could not connect" in C2, the reason in the call diagnostics, a specific text in C6; (ii) a specific text now | **(b)** and **(i)**. A relay that carries only voice-sized streams is of no use to an abuser |
-| D16 | Total caps on staging, and whether the relay stops by itself | Caps: 100 allocations and 4 Mbit/s in total. (a) Alarms only. (b) **An alarm at 5 GB in a day, and at 30 GB in a day the relay is switched off until the operator turns it on** | **(b)**. The bandwidth caps alone do not bound cost (4 Mbit/s all day is 43 GB); the stop does, at under $3 for the worst day. While it is off, direct calls work and relayed ones do not connect |
-| D17 | Where the credential issuer lives | (a) **Its own small service from `vettid-calls`, in the staging account**, as a Go function behind CloudFront (D4 and §5.2, with CloudFront in place of API Gateway). (b) In the push gateway's process: no new egress name, no host deploy, 2–3 days saved; but the TURN secret then lives in the management account beside the push credentials, two services release together, and D3's separation is given up. (c) In the member API: it knows members, and the enclave does not reach it. (d) On the TURN instance: the most probed machine would parse HTTPS and attestations, and it cannot have an Amazon certificate | **(a)**. It is a stated exception to "functions are Node": the attestation verifier exists in Go and should not be written twice |
-| D18 | TURN over TLS on 443 in C2 or in C5 | (a) C2: C5 then stays app-only as §7 has it, at the price of a certificate and its renewal on the instance now. (b) **C5** | **(b)**. C2's exit test does not need it; C5 gains a small stack deploy |
-| D19 | Logging and retention on the TURN server | (a) **Counters only; coturn's own log discarded on the instance; no flow logs; the issuer logs starts and errors for 14 days.** (b) The session log kept on the instance for 24 h. (c) Shipped to CloudWatch for 14 days | **(a)**, as §5.3 has it, with (b) as a manual step during an abuse incident only, written in the runbook |
-| D20 | S10's unsigned form beside C2's signed one | (a) **Both in C2:** an offer carries both signatures so that an S10 vault or a C1 app on the other side still works; only suite 1 while that lasts; the first staging release cut after every release without C2 is removed refuses the unsigned form; **production never accepts it**. (b) A hard cut at C2: simpler, but calls between a moved and an unmoved staging vault fail silently, and the app needs both forms anyway to keep working against S10. (c) Keep both for good: then no second suite, ever | **(a)** |
-| D21 | Glare (V6) | (a) **The lower `call_id` wins; the phone whose call lost answers the winning call by itself**, while its outgoing-call screen is still showing. (b) The same, but that phone rings and the member taps Answer. (c) As today: both busy | **(a)**. The member asked for this call seconds earlier; (b) makes two people who are calling each other wait for each other |
-| D22 | The call limits (V5) | The proposal of §3: **3 unanswered calls in 10 minutes or 10 in 24 hours** per connection, then no ring and one merged missed-call item. To confirm: a declined call counts as unanswered; an answered call or a call back clears the counts; "Calls: off" stops both directions (the member's own calls to that connection too) | **As proposed**, with those three points |
-| D23 | Should the app pin a connection's identity key itself, so that the call's `peer_ik` check also holds against the member's own vault | What it would take: a store on each device of every connection's key, taken at the first sight or when the member compares the verification code; the vault handing the device each key rotation with its proof, and the device checking it; a warning screen for a changed key and a way to accept it; re-pinning after a transfer, a recovery or a new desktop, where the store starts empty and the vault must be believed again. What it would give: the member's own vault could no longer listen to a call by swapping key shares without the phone noticing, provided the other member's vault is honest. It would protect calls only: the member's own vault still reads every message and holds the member's identity key. Options: (a) in C2; (b) **later**, as a design of its own across calls and messages, if the threat model is changed to distrust the member's own enclave; (c) never | **(b)**: not in C2. It is a change of the threat model (VAULT-MESSAGING §2.1 trusts a member's own vault), not a call feature, and for calls alone it buys little |
-| D24 | Does the push wake for a ringing call (V4, a C3 item) ride in C2's vault release | (a) **Yes, if its text for VAULT-MESSAGING §14.2 is approved before the release is cut**: one release and one round of moves fewer. (b) Its own release with C3 | **(a)** |
-| D25 | The parent's allowlist names the issuer of both channels now | (a) **`calls.staging.vettid.org` and `calls.vettid.org`**, as it names both push gateways: production's DNS Firewall does not admit the name, and production has no `calls_url`. (b) Staging's only: production's name then needs another parent change later | **(a)** |
-| D26 | Key confirmation in every signed-form call, or only when more than one suite is offered | (a) **Every call.** (b) Only with two or more suites offered | **(a)**: one path, tested from the first day, and audio is never sent to a device that has not shown it holds the key |
+| # | Decision | Options | Recommendation | Decided (2026-10-12) |
+|---|---|---|---|---|
+| D12 | How a vault learns that a call's device is gone (V3) | (a) The device sends `call.keepalive` every 30 s; the vault ends the call after 90 s without one. (b) The vault asks and the device answers: the same traffic, more state. (c) Nothing new: rely on the other phone noticing and hanging up, which already frees both vaults when that phone is alive. (d) Tie it to the device's session: not buildable, an app has no session and the relay does not tell a vault who is connected | **(a)**, as §6.1 V3 proposed. It is the only one that meets "within 2 minutes" when both phones die. Its cost, said plainly: the relay then sees one small deposit every 30 s during a call, so a call's length is visible to it as a pattern | **As recommended** |
+| D13 | TURN credentials per call or per unlock window | (a) One credential per unlock window, renewed hourly (the approved §5.1 text): every call of the window shows the server the same username. (b) A fetch per call: call setup waits for the issuer, and the issuer and the host see when calls happen. (c) **A pool of 4 fetched at unlock and refilled in the background, one credential used per call** | **(c)**. It keeps what (a) was chosen for (a call never waits, the issuer does not learn call times) and gives each call its own username, which is what V8 wants | **As recommended** |
+| D14 | How long a credential lives | 2 h; **6 h** (the vault's constant today, and §5.3's limit); 13 h (longer than the longest call) | **6 h**, with a credential never handed out in its last 2 h, and exit test step 12 to find out whether the server cuts a call at expiry. If it does, the lifetime is revisited before C4 | **As recommended** |
+| D15 | The relay's bandwidth cap per call, and what the member sees at it | (a) 3 Mbit/s now (§5.3's proposal, sized for video). (b) **256 kbit/s while calls are voice only, 3 Mbit/s with C4.** At the cap packets are dropped: voice never reaches it. Text for a call that could not get a relay: (i) the plain "could not connect" in C2, the reason in the call diagnostics, a specific text in C6; (ii) a specific text now | **(b)** and **(i)**. A relay that carries only voice-sized streams is of no use to an abuser | **As recommended** |
+| D16 | Total caps on staging, and whether the relay stops by itself | Caps: 100 allocations and 4 Mbit/s in total. (a) Alarms only. (b) **An alarm at 5 GB in a day, and at 30 GB in a day the relay is switched off until the operator turns it on** | **(b)**. The bandwidth caps alone do not bound cost (4 Mbit/s all day is 43 GB); the stop does, at under $3 for the worst day. While it is off, direct calls work and relayed ones do not connect | **As recommended** |
+| D17 | Where the credential issuer lives | (a) **Its own small service from `vettid-calls`, in the staging account**, as a Go function behind CloudFront (D4 and §5.2, with CloudFront in place of API Gateway). (b) In the push gateway's process: no new egress name, no host deploy, 2–3 days saved; but the TURN secret then lives in the management account beside the push credentials, two services release together, and D3's separation is given up. (c) In the member API: it knows members, and the enclave does not reach it. (d) On the TURN instance: the most probed machine would parse HTTPS and attestations, and it cannot have an Amazon certificate | **(a)**. It is a stated exception to "functions are Node": the attestation verifier exists in Go and should not be written twice | **As recommended** |
+| D18 | TURN over TLS on 443 in C2 or in C5 | (a) C2: C5 then stays app-only as §7 has it, at the price of a certificate and its renewal on the instance now. (b) **C5** | **(b)**. C2's exit test does not need it; C5 gains a small stack deploy | **As recommended:** C5, which therefore needs a stack deploy |
+| D19 | Logging and retention on the TURN server | (a) **Counters only; coturn's own log discarded on the instance; no flow logs; the issuer logs starts and errors for 14 days.** (b) The session log kept on the instance for 24 h. (c) Shipped to CloudWatch for 14 days | **(a)**, as §5.3 has it, with (b) as a manual step during an abuse incident only, written in the runbook | **As recommended** |
+| D20 | S10's unsigned form beside C2's signed one | (a) **Both in C2:** an offer carries both signatures so that an S10 vault or a C1 app on the other side still works; only suite 1 while that lasts; the first staging release cut after every release without C2 is removed refuses the unsigned form; **production never accepts it**. (b) A hard cut at C2: simpler, but calls between a moved and an unmoved staging vault fail silently, and the app needs both forms anyway to keep working against S10. (c) Keep both for good: then no second suite, ever | **(a)** | **As recommended** |
+| D21 | Glare (V6) | (a) **The lower `call_id` wins; the phone whose call lost answers the winning call by itself**, while its outgoing-call screen is still showing. (b) The same, but that phone rings and the member taps Answer. (c) As today: both busy | **(a)**. The member asked for this call seconds earlier; (b) makes two people who are calling each other wait for each other | **As recommended** |
+| D22 | The call limits (V5) | The proposal of §3: **3 unanswered calls in 10 minutes or 10 in 24 hours** per connection, then no ring and one merged missed-call item. To confirm: a declined call counts as unanswered; an answered call or a call back clears the counts; "Calls: off" stops both directions (the member's own calls to that connection too) | **As proposed**, with those three points | **As recommended** |
+| D23 | Should the app pin a connection's identity key itself, so that the call's `peer_ik` check also holds against the member's own vault | What it would take: a store on each device of every connection's key, taken at the first sight or when the member compares the verification code; the vault handing the device each key rotation with its proof, and the device checking it; a warning screen for a changed key and a way to accept it; re-pinning after a transfer, a recovery or a new desktop, where the store starts empty and the vault must be believed again. What it would give: the member's own vault could no longer listen to a call by swapping key shares without the phone noticing, provided the other member's vault is honest. It would protect calls only: the member's own vault still reads every message and holds the member's identity key. Options: (a) in C2; (b) later, as a design of its own across calls and messages, if the threat model is changed to distrust the member's own enclave; (c) **never** | Recommended was (b). The owner chose otherwise | **(c) Never.** The app does not pin a connection's identity key itself, keeps no pin store and shows no changed-key warning. The member's own vault is trusted, for calls and messages alike (VAULT-MESSAGING §2.1). The `peer_ik` check binds a call to the connection the vault names and to the fingerprint shown; it is not a defence against the member's own vault, by design |
+| D24 | Does the push wake for a ringing call (V4, a C3 item) ride in C2's vault release | (a) **Yes, if its text for VAULT-MESSAGING §14.2 is approved before the release is cut**: one release and one round of moves fewer. (b) Its own release with C3 | **(a)** | **As recommended:** it rides in release C2. Its §14.2 text is still to be written and approved before the release is cut |
+| D25 | The parent's allowlist names the issuer of both channels now | (a) **`calls.staging.vettid.org` and `calls.vettid.org`**, as it names both push gateways: production's DNS Firewall does not admit the name, and production has no `calls_url`. (b) Staging's only: production's name then needs another parent change later | **(a)** | **As recommended** |
+| D26 | Key confirmation in every signed-form call, or only when more than one suite is offered | (a) **Every call.** (b) Only with two or more suites offered | **(a)**: one path, tested from the first day, and audio is never sent to a device that has not shown it holds the key | **As recommended** |
 
 ### 13.6 Effort
 
@@ -891,8 +900,8 @@ Found while writing this, by reading vettid-vault `origin/main`
    was not established, so 0.2.0 puts the issuer behind CloudFront and
    tests the handshake first.
 6. **§5.2's Go issuer as a function** meets the repository's convention
-   that functions are Node through `ApiFunction` (RUNBOOK). D17 asks
-   for the exception.
+   that functions are Node through `ApiFunction` (RUNBOOK). D17 grants
+   the exception.
 7. **§5.1's "a credential at unlock, renewed hourly"** gives every call
    of an hour the same TURN username, which works against V8's aim.
    D13's pool answers it.
@@ -920,7 +929,8 @@ Found while writing this, by reading vettid-vault `origin/main`
   attestation per request at production scale.
 - The share of calls that need TURN (C5), and so the real traffic cost.
 - Whether C1's last pull request and its two-phone test change anything
-  written here. They are not done; the drafts are corrected if they do.
+  written here. They are not done; the specifications are corrected
+  if they do.
 - The state of the media stack's 256-bit option (webrtc-sdk/webrtc pull
   request 302) was not re-read.
 - The vectors for the key confirmation in VAULT-MESSAGING §16 were
