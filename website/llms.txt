@@ -1,7 +1,7 @@
 # VettID
 
-> VettID is a personal security service from The VettID Project — a member-owned
-> cooperative. Each member gets a personal vault running inside a hardware-isolated
+> VettID is a personal security service from The VettID Project — a member-governed
+> organization whose legal entity is in formation. Each member gets a personal vault running inside a hardware-isolated
 > AWS Nitro Enclave that holds their identity, credentials, secrets, connections,
 > and AI agent access. The architecture is zero-knowledge: VettID's infrastructure
 > only ever sees encrypted data and cannot read member content, even if compelled.
@@ -37,6 +37,8 @@
   can see, and PGP key for encrypted reports
 - [Donate](https://vettid.org/donate): support the project (Bitcoin)
 - [Open Source](https://vettid.org/open-source): the full stack is public on GitHub (AGPL-3.0) — enclave vault, relay, push gateway, apps, agent connector, infrastructure, and the LEASH proposal
+- [Privacy](https://vettid.org/privacy): what this website and the mailing list record, how long it is kept, and how to have it removed
+- [Terms](https://vettid.org/terms): terms of use for this website and the mailing list
 
 ## Contact
 

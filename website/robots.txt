@@ -1,5 +1,5 @@
 # VettID Robots.txt
-# Updated: 2026-08-12
+# Updated: 2026-08-17
 
 User-agent: *
 Allow: /

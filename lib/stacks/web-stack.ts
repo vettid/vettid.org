@@ -289,6 +289,7 @@ function handler(event) {
     const CONTENT_PREFIXES = [
       '/why', '/security', '/donate', '/open-source', '/playbooks',
       '/about', '/ai', '/contact', '/tools-we-trust', '/use-cases',
+      '/privacy', '/terms',
       '/assets/', '/js/', '/shared/', '/api/', '/.well-known/',
       '/robots.txt', '/sitemap.xml', '/llms.txt', '/humans.txt',
       '/manifest.json', '/favicon.ico', '/apple-touch-icon',
