@@ -5,24 +5,32 @@
 //                                via our own single-use confirmation link
 //   GET  /api/subscribe/confirm  ?t=<token> from that link; confirms and
 //                                302s back to the site
+//   GET  /api/subscribe/unsubscribe  ?u=<token>: never unsubscribes (mail
+//                                scanners and link previewers fetch links);
+//                                302s to the site's /unsubscribe/ page, which
+//                                has the one button
+//   POST /api/subscribe/unsubscribe  removes the subscription: the page's
+//                                form (token in the body), or a mail
+//                                provider's RFC 8058 one-click POST (token
+//                                in the query string, no cookies)
 //
 // Every request must carry CloudFront's X-Origin-Verify secret: the
 // execute-api URL is public, and without the check anyone could skip the
 // site's WAF rate limits by calling it directly.
-// Privacy: never log email addresses; log shapes and outcomes only.
+// Privacy: never log email addresses or tokens; log shapes and outcomes only.
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { SESv2Client, CreateEmailIdentityCommand, GetEmailIdentityCommand, SendEmailCommand } from '@aws-sdk/client-sesv2';
+import { SESv2Client, CreateEmailIdentityCommand, GetEmailIdentityCommand } from '@aws-sdk/client-sesv2';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
+import { SITE, UNSUB_INDEX, UNSUB_TOKEN_RE, listMessage, newUnsubscribeToken, notifyAdmin } from './list-mail.mjs';
 
 const ses = new SESv2Client({});
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const secrets = new SecretsManagerClient({});
 const TABLE = process.env.TABLE_NAME;
 
-const SITE = 'https://vettid.org';
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
 
 // Our own confirmation links (already-SES-verified addresses) live 48h.
@@ -35,6 +43,13 @@ const AWAITING_LINK = 'pending_link';
 // Pointer items '#confirm#<sha256(token)>' → email. '#' can't begin a real
 // address (same convention as the send-quota sentinel).
 const confirmKey = (hash) => `#confirm#${hash}`;
+// Release markers '#release#<random>' → email, status 'release': "this
+// address just left the list; delete its SES identity unless something else
+// uses it". The sweep (check-verifications.mjs) does that within its next
+// run: it, not this internet-facing function, may read the members' email
+// index and delete identities.
+const RELEASE = 'release';
+const releaseKey = () => `#release#${randomBytes(16).toString('hex')}`;
 const sha256 = (s) => createHash('sha256').update(s).digest('hex');
 
 // Global outbound circuit breaker: a backstop for the WAF per-IP/per-JA4
@@ -95,59 +110,31 @@ const json = (statusCode, body) => ({
   body: JSON.stringify(body),
 });
 const ok = (body) => json(200, body);
-const redirect = (location) => ({
-  statusCode: 302,
+const redirect = (location, statusCode = 302) => ({
+  statusCode,
   headers: { location, 'cache-control': 'no-store' },
   body: '',
+});
+const text = (statusCode, body) => ({
+  statusCode,
+  headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+  body,
 });
 
 // ---- mail -----------------------------------------------------------------------
 
-const notifyAdmin = async (email, how) => {
-  // Best-effort: a notification failure must never fail the subscription.
-  // In the SES sandbox this succeeds only once ADMIN_EMAIL is verified.
-  try {
-    await ses.send(new SendEmailCommand({
-      FromEmailAddress: `VettID Mailing List <${process.env.SENDER_EMAIL}>`,
-      Destination: { ToAddresses: [process.env.ADMIN_EMAIL] },
-      Content: {
-        Simple: {
-          Subject: { Data: 'New mailing list subscriber' },
-          Body: {
-            Text: {
-              Data:
-                `A subscriber just confirmed their spot on the vettid.org mailing list.\n\n` +
-                `Email: ${email}\n` +
-                `Confirmed via: ${how}\n` +
-                `At: ${new Date().toISOString()}\n`,
-            },
-          },
-        },
-      },
-    }));
-  } catch (err) {
-    console.log(JSON.stringify({ outcome: 'notify_failed', code: err?.name }));
-  }
-};
-
-const sendConfirmLink = (email, token) =>
-  ses.send(new SendEmailCommand({
-    FromEmailAddress: `VettID <${process.env.SENDER_EMAIL}>`,
-    Destination: { ToAddresses: [email] },
-    Content: {
-      Simple: {
-        Subject: { Data: 'Confirm your VettID updates subscription' },
-        Body: {
-          Text: {
-            Data:
-              `Someone (hopefully you) asked to receive VettID updates at this address.\n\n` +
-              `To confirm, open this link within 48 hours:\n\n` +
-              `${SITE}/api/subscribe/confirm?t=${token}\n\n` +
-              `If this wasn't you, ignore this email and you won't hear from us.\n`,
-          },
-        },
-      },
-    },
+// The confirmation mail is list mail too: it carries the unsubscribe link
+// and headers (the token works before confirmation as well).
+const sendConfirmLink = (email, token, unsubToken) =>
+  ses.send(listMessage({
+    to: email,
+    subject: 'Confirm your VettID updates subscription',
+    text:
+      `Someone (hopefully you) asked to receive VettID updates at this address.\n\n` +
+      `To confirm, open this link within 48 hours:\n\n` +
+      `${SITE}/api/subscribe/confirm?t=${token}\n\n` +
+      `If this wasn't you, ignore this email and you won't hear from us.\n`,
+    token: unsubToken,
   }));
 
 // ---- POST /api/subscribe --------------------------------------------------------
@@ -227,6 +214,7 @@ const subscribe = async (event) => {
         email,
         status: 'pending',
         requestedAt: now.toISOString(),
+        unsubToken: newUnsubscribeToken(),
         // TTL: unconfirmed rows purge after 3 days (SES links expire in 24h)
         expiresAt: nowSec + 3 * 24 * 3600,
       },
@@ -243,11 +231,12 @@ const subscribe = async (event) => {
   // is stored.
   const token = randomBytes(32).toString('base64url');
   const hash = sha256(token);
+  const unsubToken = newUnsubscribeToken();
   const expiresAt = nowSec + CONFIRM_TTL_SECONDS;
   try {
     await ddb.send(new PutCommand({
       TableName: TABLE,
-      Item: { email, status: AWAITING_LINK, requestedAt: now.toISOString(), tokenHash: hash, expiresAt },
+      Item: { email, status: AWAITING_LINK, requestedAt: now.toISOString(), tokenHash: hash, unsubToken, expiresAt },
       ConditionExpression: 'attribute_not_exists(email)',
     }));
   } catch (err) {
@@ -260,7 +249,7 @@ const subscribe = async (event) => {
     Item: { email: confirmKey(hash), target: email, expiresAt },
   }));
   try {
-    await sendConfirmLink(email, token);
+    await sendConfirmLink(email, token, unsubToken);
   } catch (err) {
     console.log(JSON.stringify({ outcome: 'confirm_send_failed', code: err?.name }));
     return ok({ ok: false, error: 'temporary failure, try again later' });
@@ -298,7 +287,8 @@ const confirm = async (event) => {
     await ddb.send(new UpdateCommand({
       TableName: TABLE,
       Key: { email },
-      UpdateExpression: 'SET #s = :confirmed, confirmedAt = :now REMOVE expiresAt, tokenHash',
+      // unsubToken: only rows created before unsubscribe existed lack one.
+      UpdateExpression: 'SET #s = :confirmed, confirmedAt = :now, unsubToken = if_not_exists(unsubToken, :u) REMOVE expiresAt, tokenHash',
       ConditionExpression: '#s = :awaiting AND tokenHash = :h AND expiresAt > :nowSec',
       ExpressionAttributeNames: { '#s': 'status' },
       ExpressionAttributeValues: {
@@ -307,6 +297,7 @@ const confirm = async (event) => {
         ':h': hash,
         ':now': new Date().toISOString(),
         ':nowSec': nowSec,
+        ':u': newUnsubscribeToken(),
       },
     }));
   } catch (err) {
@@ -314,9 +305,105 @@ const confirm = async (event) => {
     console.log(JSON.stringify({ outcome: 'confirm_stale' }));
     return failed;
   }
-  await notifyAdmin(email, 'confirmation link (address was already SES-verified)');
+  // The pointer names the address: drop it now rather than at its TTL.
+  try {
+    await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { email: confirmKey(hash) } }));
+  } catch (err) {
+    console.log(JSON.stringify({ outcome: 'confirm_pointer_kept', code: err?.name })); // its TTL removes it
+  }
+  await notifyAdmin(ses, 'confirmation link (address was already SES-verified)');
   console.log(JSON.stringify({ outcome: 'confirmed_link' }));
   return done;
+};
+
+// ---- /api/subscribe/unsubscribe -------------------------------------------------
+
+// GET: never unsubscribes and never looks anything up, so it answers every
+// token alike. The token moves into the fragment, out of later requests.
+const unsubscribePage = (event) => {
+  const token = event.queryStringParameters?.u ?? '';
+  return redirect(UNSUB_TOKEN_RE.test(token) ? `${SITE}/unsubscribe/#u=${token}` : `${SITE}/unsubscribe/`);
+};
+
+const formField = (event, name) => {
+  const mediaType = String(event.headers?.['content-type'] ?? '').split(';')[0].trim().toLowerCase();
+  if (mediaType !== 'application/x-www-form-urlencoded') return '';
+  const raw = event.isBase64Encoded ? Buffer.from(event.body ?? '', 'base64').toString('utf8') : (event.body ?? '');
+  if (raw.length > 2048) return '';
+  return new URLSearchParams(raw).get(name) ?? '';
+};
+
+// Removes the row the token names, and leaves a release marker for the
+// sweep. Returns the row's former status, or undefined if the token names
+// nothing (unknown, already used, or stale after a re-subscribe).
+const removeSubscription = async (token) => {
+  const found = await ddb.send(new QueryCommand({
+    TableName: TABLE,
+    IndexName: UNSUB_INDEX,
+    KeyConditionExpression: 'unsubToken = :t',
+    ExpressionAttributeValues: { ':t': token },
+    Limit: 1,
+  }));
+  const email = found.Items?.[0]?.email;
+  if (typeof email !== 'string' || email.startsWith('#')) return undefined;
+
+  // Marker first: if the delete then fails, the sweep finds the row still
+  // there and keeps the identity. The other order could lose the marker and
+  // leave the address in SES with nothing to say so.
+  await ddb.send(new PutCommand({
+    TableName: TABLE,
+    Item: { email: releaseKey(), status: RELEASE, requestedAt: new Date().toISOString(), target: email },
+  }));
+  let old;
+  try {
+    const res = await ddb.send(new DeleteCommand({
+      TableName: TABLE,
+      Key: { email },
+      // Single use, and only for the row that still carries THIS token.
+      ConditionExpression: 'unsubToken = :t',
+      ExpressionAttributeValues: { ':t': token },
+      ReturnValues: 'ALL_OLD',
+    }));
+    old = res.Attributes ?? {};
+  } catch (err) {
+    if (err?.name !== 'ConditionalCheckFailedException') throw err;
+    return undefined;
+  }
+  // An unconfirmed row's confirm-link pointer names the address too.
+  if (typeof old.tokenHash === 'string') {
+    try {
+      await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { email: confirmKey(old.tokenHash) } }));
+    } catch (err) {
+      console.log(JSON.stringify({ outcome: 'confirm_pointer_kept', code: err?.name })); // its TTL removes it
+    }
+  }
+  return old.status ?? 'unknown';
+};
+
+const REMOVED = 'You have been removed from the VettID mailing list.\n';
+
+const unsubscribe = async (event) => {
+  // The answer depends on the request's shape only, never on the token: the
+  // same for a valid, a used, an unknown and a malformed one, so the route
+  // cannot be used to test whether an address (or a token) is on the list.
+  //   token in the query string: a mail provider's one-click POST → 200 text
+  //   token in the form body:    the site's page → 303 to the "removed" page
+  const fromQuery = typeof event.queryStringParameters?.u === 'string';
+  const token = fromQuery ? event.queryStringParameters.u : formField(event, 'u');
+  const answer = fromQuery ? text(200, REMOVED) : redirect(`${SITE}/unsubscribe/done/`, 303);
+  if (!UNSUB_TOKEN_RE.test(token)) {
+    console.log(JSON.stringify({ outcome: 'unsubscribe_malformed' }));
+    return answer;
+  }
+  try {
+    const was = await removeSubscription(token);
+    console.log(JSON.stringify(was ? { outcome: 'unsubscribed', was, oneClick: fromQuery } : { outcome: 'unsubscribe_unknown' }));
+  } catch (err) {
+    // Do not tell someone they were removed when they were not.
+    console.log(JSON.stringify({ outcome: 'unsubscribe_failed', code: err?.name }));
+    return text(503, 'Something went wrong and nothing was changed. Please try again, or write to info@vettid.org.\n');
+  }
+  return answer;
 };
 
 // ---- entry ----------------------------------------------------------------------
@@ -330,5 +417,7 @@ export const handler = async (event) => {
   const path = event.rawPath;
   if (method === 'GET' && path === '/api/subscribe/confirm') return confirm(event);
   if (method === 'POST' && path === '/api/subscribe') return subscribe(event);
+  if (method === 'GET' && path === '/api/subscribe/unsubscribe') return unsubscribePage(event);
+  if (method === 'POST' && path === '/api/subscribe/unsubscribe') return unsubscribe(event);
   return json(404, { ok: false, error: 'not found' });
 };

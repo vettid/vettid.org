@@ -6,6 +6,7 @@ import { VettidOrgSignupStack } from '../lib/stacks/signup-stack';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import { VettidOrgPlaybooksStack } from '../lib/stacks/playbooks-stack';
 import { VettidDevRedirectStack } from '../lib/stacks/dev-redirect-stack';
+import { WEBSITE_LOG_RETENTION_DAYS, websiteLogGroupRetention } from '../lib/constructs/website-logs';
 
 const AMAZON_CAA = [
   '0 issue "amazon.com"',
@@ -57,7 +58,7 @@ describe('VettidOrgStack', () => {
       });
     });
 
-    test('creates logs bucket with lifecycle policy', () => {
+    test('the retired legacy logs bucket keeps the 30-day rule its contents were written under', () => {
       template.hasResourceProperties('AWS::S3::Bucket', {
         BucketName: 'test.example.com-logs',
         LifecycleConfiguration: {
@@ -69,6 +70,32 @@ describe('VettidOrgStack', () => {
           ],
         },
       });
+    });
+
+    test('every log store of the website keeps the one period (90 days)', () => {
+      expect(WEBSITE_LOG_RETENTION_DAYS).toBe(90);
+      for (const BucketName of ['vettid-org-access-logs', 'test.example.com-athena-results']) {
+        template.hasResourceProperties('AWS::S3::Bucket', {
+          BucketName,
+          LifecycleConfiguration: { Rules: [{ ExpirationInDays: WEBSITE_LOG_RETENTION_DAYS, Status: 'Enabled' }] },
+        });
+      }
+      // The only log group of the stack is the WAF's.
+      const groups = Object.values<any>(template.findResources('AWS::Logs::LogGroup'));
+      expect(groups.map((g) => g.Properties)).toEqual([
+        expect.objectContaining({ LogGroupName: 'aws-waf-logs-vettid-org', RetentionInDays: WEBSITE_LOG_RETENTION_DAYS }),
+      ]);
+      // No bucket of the stack is left without an expiry except the site itself.
+      const buckets = Object.values<any>(template.findResources('AWS::S3::Bucket'));
+      const unbounded = buckets.filter((b) => !b.Properties.LifecycleConfiguration).map((b) => b.Properties.BucketName);
+      expect(unbounded).toEqual(['test.example.com-website']);
+    });
+
+    test('the period must be one CloudWatch Logs accepts', () => {
+      expect(websiteLogGroupRetention(90)).toBe(90);
+      expect(websiteLogGroupRetention(30)).toBe(30);
+      expect(() => websiteLogGroupRetention(45)).toThrow(/not a retention CloudWatch Logs accepts/);
+      expect(() => websiteLogGroupRetention(9999)).toThrow();
     });
 
     test('creates Athena results bucket', () => {
@@ -131,15 +158,14 @@ describe('VettidOrgStack', () => {
       });
     });
 
-    test('enables access logging without cookie values', () => {
-      template.hasResourceProperties('AWS::CloudFront::Distribution', {
-        DistributionConfig: {
-          Logging: Match.objectLike({
-            Prefix: 'cloudfront/',
-            IncludeCookies: false,
-          }),
-        },
-      });
+    test('the legacy standard log is off: v2 is the one access log', () => {
+      const dist = Object.values<any>(template.findResources('AWS::CloudFront::Distribution'))[0];
+      expect(dist.Properties.DistributionConfig.Logging).toBeUndefined();
+      template.resourceCountIs('AWS::Logs::Delivery', 1);
+    });
+
+    test('the unsubscribe pages are not counted as probe traffic', () => {
+      expect(JSON.stringify(template.findResources('AWS::WAFv2::WebACL'))).toContain('"SearchString":"/unsubscribe"');
     });
 
     test('attaches telemetry WAF WebACL with logging and redaction', () => {
@@ -302,13 +328,9 @@ describe('VettidOrgStack', () => {
       });
     });
 
-    test('creates CloudFront logs table', () => {
-      template.hasResourceProperties('AWS::Glue::Table', {
-        TableInput: {
-          Name: 'cloudfront_logs',
-          TableType: 'EXTERNAL_TABLE',
-        },
-      });
+    test('only the v2 logs table exists (the legacy cloudfront_logs table went with its log)', () => {
+      const tables = Object.values<any>(template.findResources('AWS::Glue::Table'));
+      expect(tables.map((t) => t.Properties.TableInput.Name)).toEqual(['cloudfront_logs_v2']);
     });
 
     test('creates Athena workgroup', () => {
@@ -393,13 +415,14 @@ describe('VettidOrgSignupStack', () => {
     });
   });
 
-  test('creates subscribe + confirm routes and scheduled verification sweep', () => {
-    template.hasResourceProperties('AWS::ApiGatewayV2::Route', {
-      RouteKey: 'POST /api/subscribe',
-    });
-    template.hasResourceProperties('AWS::ApiGatewayV2::Route', {
-      RouteKey: 'GET /api/subscribe/confirm',
-    });
+  test('creates subscribe, confirm and unsubscribe routes and scheduled verification sweep', () => {
+    const routes = Object.values<any>(template.findResources('AWS::ApiGatewayV2::Route')).map((r) => r.Properties.RouteKey).sort();
+    expect(routes).toEqual([
+      'GET /api/subscribe/confirm',
+      'GET /api/subscribe/unsubscribe',
+      'POST /api/subscribe',
+      'POST /api/subscribe/unsubscribe',
+    ]);
     template.hasResourceProperties('AWS::Events::Rule', {
       ScheduleExpression: 'rate(15 minutes)',
     });
@@ -414,6 +437,42 @@ describe('VettidOrgSignupStack', () => {
     }
     template.resourceCountIs('Custom::LogRetention', 0);
     expect(JSON.stringify(template.toJSON())).not.toContain('logs:PutRetentionPolicy');
+  });
+
+  test("the Lambdas' logs keep the website's one period; the API writes no access log", () => {
+    const groups = Object.values<any>(template.findResources('AWS::Logs::LogGroup'));
+    expect(groups).toHaveLength(2);
+    for (const g of groups) expect(g.Properties.RetentionInDays).toBe(WEBSITE_LOG_RETENTION_DAYS);
+    const stage = Object.values<any>(template.findResources('AWS::ApiGatewayV2::Stage'))[0];
+    expect(stage.Properties.AccessLogSettings).toBeUndefined();
+  });
+
+  test('unsubscribe tokens are looked up through a sparse keys-only index', () => {
+    template.hasResourceProperties('AWS::DynamoDB::Table', {
+      GlobalSecondaryIndexes: Match.arrayWith([
+        Match.objectLike({
+          IndexName: 'unsub-index',
+          KeySchema: [{ AttributeName: 'unsubToken', KeyType: 'HASH' }],
+          Projection: { ProjectionType: 'KEYS_ONLY' },
+        }),
+      ]),
+    });
+  });
+
+  test('subscribe can unsubscribe a row but reads no member data and deletes no SES identity', () => {
+    const policies = Object.values<any>(template.findResources('AWS::IAM::Policy'));
+    const ofSubscribe = policies.filter((p) => JSON.stringify(p).includes('secretsmanager:GetSecretValue'));
+    expect(ofSubscribe).toHaveLength(1);
+    const doc = JSON.stringify(ofSubscribe[0].Properties.PolicyDocument);
+    expect(doc).toContain('dynamodb:DeleteItem');
+    expect(doc).toContain('/index/unsub-index');
+    expect(doc).not.toContain('vettid-org-members');
+    expect(doc).not.toContain('ses:DeleteEmailIdentity');
+    expect(doc).not.toContain('dynamodb:Scan');
+    // its one Query right is on the unsubscribe index
+    const queries = ofSubscribe[0].Properties.PolicyDocument.Statement.filter((st: any) => JSON.stringify(st.Action).includes('dynamodb:Query'));
+    expect(queries).toHaveLength(1);
+    expect(JSON.stringify(queries[0].Resource)).toMatch(/\/index\/unsub-index"\]\]\}$/);
   });
 
   test('origin-verify secret is generated under its fixed name and readable by subscribe only', () => {
@@ -438,6 +497,8 @@ describe('VettidOrgSignupStack', () => {
             Resource: [
               Match.objectLike({ 'Fn::Join': ['', Match.arrayWith([Match.stringLikeRegexp(':identity/vettid\\.org$')])] }),
               Match.objectLike({ 'Fn::Join': ['', Match.arrayWith([Match.stringLikeRegexp(':identity/\\*\\.vettid\\.org$')])] }),
+              Match.objectLike({ 'Fn::Join': ['', Match.arrayWith([Match.stringLikeRegexp(':identity/\\*@vettid\\.org$')])] }),
+              Match.objectLike({ 'Fn::Join': ['', Match.arrayWith([Match.stringLikeRegexp(':identity/\\*@\\*\\.vettid\\.org$')])] }),
             ],
           }),
         ]),

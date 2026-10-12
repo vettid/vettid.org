@@ -10,6 +10,7 @@ import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as ses from 'aws-cdk-lib/aws-ses';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import { ApiFunction } from '../constructs/api-function';
+import { websiteLogGroupRetention } from '../constructs/website-logs';
 
 /**
  * Secret CloudFront adds to the public site's /api/* origin requests
@@ -32,8 +33,17 @@ const MEMBERS_TABLE_NAME = 'vettid-org-members';
  *                          VettID member), we email our own single-use link
  *                          instead (row status pending_link, 48h).
  *   GET /api/subscribe/confirm?t=…  → that link: confirm, 302 to the site.
+ *   GET|POST /api/subscribe/unsubscribe  → leave the list. Every row has a
+ *                          random unsubscribe token (looked up through the
+ *                          sparse unsub-index); list mail carries it in a
+ *                          link and in the RFC 8058 List-Unsubscribe headers
+ *                          (lambda/signup/list-mail.mjs). GET only redirects
+ *                          to the site's /unsubscribe/ page; POST deletes
+ *                          the row and leaves a release marker.
  *   every 15 minutes     → check pending rows against GetEmailIdentity and
- *                          flip verified ones to confirmed.
+ *                          flip verified ones to confirmed (and send the
+ *                          welcome mail); for each release marker, delete
+ *                          the SES identity unless a member uses it.
  *
  * Unconfirmed rows expire via TTL after 3 days (SES verification links die
  * after 24h anyway). Responses never reveal whether an address was already
@@ -73,6 +83,13 @@ export class VettidOrgSignupStack extends cdk.Stack {
       partitionKey: { name: 'status', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'requestedAt', type: dynamodb.AttributeType.STRING },
     });
+    // Unsubscribe token → row. Sparse (only subscriber rows have the
+    // attribute) and keys only: the lookup needs nothing but the address.
+    table.addGlobalSecondaryIndex({
+      indexName: 'unsub-index',
+      partitionKey: { name: 'unsubToken', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.KEYS_ONLY,
+    });
 
     const originSecret = new secretsmanager.Secret(this, 'OriginVerify', {
       secretName: SIGNUP_ORIGIN_VERIFY_SECRET_NAME,
@@ -90,6 +107,7 @@ export class VettidOrgSignupStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(10),
       memorySize: 128,
       environment: { ...env, ORIGIN_VERIFY_SECRET_ARN: originSecret.secretArn },
+      logRetention: websiteLogGroupRetention(),
     }).fn;
     originSecret.grantRead(subscribeFn);
 
@@ -98,6 +116,7 @@ export class VettidOrgSignupStack extends cdk.Stack {
       timeout: cdk.Duration.minutes(2),
       memorySize: 128,
       environment: { ...env, MEMBERS_TABLE_NAME },
+      logRetention: websiteLogGroupRetention(),
     }).fn;
 
     // DynamoDB least privilege (was grantReadWriteData on both):
@@ -105,9 +124,19 @@ export class VettidOrgSignupStack extends cdk.Stack {
     //  - check queries the status GSI and updates/deletes rows
     // GetItem/PutItem for subscriber rows and confirm-link pointers;
     // UpdateItem for the atomic global-send-quota counter (sentinel key in
-    // the same table) and for confirming via link.
-    table.grant(subscribeFn, 'dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem');
-    table.grant(checkFn, 'dynamodb:UpdateItem', 'dynamodb:DeleteItem');
+    // the same table) and for confirming via link; DeleteItem for
+    // unsubscribing (and for used confirm-link pointers). PutItem also
+    // writes the release markers. GetItem on the sweep: is a released
+    // address back on the list?
+    table.grant(subscribeFn, 'dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem');
+    table.grant(checkFn, 'dynamodb:GetItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem');
+    // Unsubscribe token → address: that one index, nothing else. Subscribe
+    // gets no read of the members table and may not delete SES identities;
+    // the sweep, which already has both, finishes an unsubscribe.
+    subscribeFn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:Query'],
+      resources: [`${table.tableArn}/index/unsub-index`],
+    }));
     checkFn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['dynamodb:Query'],
       resources: [`${table.tableArn}/index/*`],
@@ -133,16 +162,18 @@ export class VettidOrgSignupStack extends cdk.Stack {
 
     checkFn.addToRolePolicy(new iam.PolicyStatement({
       // DeleteEmailIdentity reclaims identities of subscribers who never
-      // verified (identity-quota-exhaustion guard).
+      // verified (identity-quota-exhaustion guard) and of those who
+      // unsubscribed.
       actions: ['ses:GetEmailIdentity', 'ses:DeleteEmailIdentity', 'ses:SendEmail'],
       resources: ['*'],
     }));
-    // ...but never the sending domain itself: a bug (or a crafted row) must
-    // not be able to delete the vettid.org domain identity.
+    // ...but never the sending domain itself, nor one of the project's own
+    // addresses: a bug (or a crafted row) must not be able to delete the
+    // vettid.org domain identity or an @vettid.org identity.
     checkFn.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.DENY,
       actions: ['ses:DeleteEmailIdentity'],
-      resources: ['vettid.org', '*.vettid.org'].map((d) =>
+      resources: ['vettid.org', '*.vettid.org', '*@vettid.org', '*@*.vettid.org'].map((d) =>
         this.formatArn({ service: 'ses', resource: 'identity', resourceName: d })),
     }));
 
@@ -164,6 +195,11 @@ export class VettidOrgSignupStack extends cdk.Stack {
     httpApi.addRoutes({
       path: '/api/subscribe/confirm',
       methods: [apigwv2.HttpMethod.GET],
+      integration: subscribeIntegration,
+    });
+    httpApi.addRoutes({
+      path: '/api/subscribe/unsubscribe',
+      methods: [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST],
       integration: subscribeIntegration,
     });
     new apigwv2.HttpStage(this, 'DefaultStage', {

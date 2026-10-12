@@ -1,10 +1,16 @@
-// Scheduled every 15 minutes: promote pending subscribers whose SES identity
-// verification succeeded (the user accepted the SES verification email).
-// Privacy: never log email addresses; log counts only.
+// Scheduled every 15 minutes:
+//  - promote pending subscribers whose SES identity verification succeeded
+//    (the user accepted the SES verification email), and send them the
+//    welcome mail: the first mail of ours they get, and so the first with
+//    their unsubscribe link;
+//  - finish unsubscribes: for each release marker subscribe.mjs left, delete
+//    the address's SES identity unless something else uses it.
+// Privacy: never log email addresses or tokens; log counts only.
 
-import { SESv2Client, GetEmailIdentityCommand, SendEmailCommand, DeleteEmailIdentityCommand } from '@aws-sdk/client-sesv2';
+import { SESv2Client, GetEmailIdentityCommand, DeleteEmailIdentityCommand } from '@aws-sdk/client-sesv2';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, QueryCommand, UpdateCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, QueryCommand, UpdateCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
+import { listMessage, newUnsubscribeToken, notifyAdmin } from './list-mail.mjs';
 
 const ses = new SESv2Client({});
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
@@ -13,9 +19,10 @@ const TABLE = process.env.TABLE_NAME;
 // verification as the opt-in). Never reclaim an identity a member row uses.
 const MEMBERS_TABLE = process.env.MEMBERS_TABLE_NAME;
 
-// True if any member row (any state) uses this address. Errors count as
-// "in use": a failed lookup must never lead to deleting someone's identity.
-const usedByMember = async (email) => {
+// Does any member row (any state) use this address? 'unknown' when the
+// lookup fails: a failed lookup must never lead to deleting someone's
+// identity.
+const memberUse = async (email) => {
   try {
     const res = await ddb.send(new QueryCommand({
       TableName: MEMBERS_TABLE,
@@ -24,40 +31,82 @@ const usedByMember = async (email) => {
       ExpressionAttributeValues: { ':e': email },
       Limit: 1,
     }));
-    return (res.Items?.length ?? 0) > 0;
+    return (res.Items?.length ?? 0) > 0 ? 'yes' : 'no';
   } catch (err) {
     console.log(JSON.stringify({ outcome: 'member_lookup_failed', code: err?.name }));
-    return true;
+    return 'unknown';
   }
 };
+const usedByMember = async (email) => (await memberUse(email)) !== 'no';
 
-const notifyAdmin = async (email, how) => {
-  // Best-effort: a notification failure must never fail the subscription.
-  // In the SES sandbox this succeeds only once ADMIN_EMAIL is verified.
+// The project's own addresses (admin@, no-reply@, …) are never reclaimed.
+const ownAddress = (email) => /@([a-z0-9-]+\.)*vettid\.org$/.test(email);
+
+const sendWelcome = async (email, token) => {
+  // Best-effort, like the admin notice: the subscription stands either way,
+  // and every later mailing carries the link too.
   try {
-    await ses.send(new SendEmailCommand({
-      FromEmailAddress: `VettID Mailing List <${process.env.SENDER_EMAIL}>`,
-      Destination: { ToAddresses: [process.env.ADMIN_EMAIL] },
-      Content: {
-        Simple: {
-          Subject: { Data: 'New mailing list subscriber' },
-          Body: {
-            Text: {
-              Data:
-                `A subscriber just confirmed their spot on the vettid.org mailing list.\n\n` +
-                `Email: ${email}\n` +
-                `Confirmed via: ${how}\n` +
-                `At: ${new Date().toISOString()}\n`,
-            },
-          },
-        },
-      },
+    await ses.send(listMessage({
+      to: email,
+      subject: 'You are on the VettID mailing list',
+      text:
+        `Thanks for confirming. You are on the VettID mailing list: we will write when membership opens, ` +
+        `and with VettID updates. That is all we use this address for.\n`,
+      token,
     }));
   } catch (err) {
-    console.log(JSON.stringify({ outcome: 'notify_failed', code: err?.name }));
+    console.log(JSON.stringify({ outcome: 'welcome_failed', code: err?.name }));
   }
 };
 
+// Finishes unsubscribes. A marker stays until it is settled one way or the
+// other, so a failure is retried at the next sweep instead of leaving an
+// address in SES for good. The marker has no TTL for the same reason.
+const releaseIdentities = async () => {
+  const markers = await ddb.send(new QueryCommand({
+    TableName: TABLE,
+    IndexName: 'status-index',
+    KeyConditionExpression: '#s = :release',
+    ExpressionAttributeNames: { '#s': 'status' },
+    ExpressionAttributeValues: { ':release': 'release' },
+    Limit: 200,
+  }));
+  let released = 0;
+  let releaseKept = 0;
+  let releaseRetry = 0;
+  for (const marker of markers.Items ?? []) {
+    const email = marker.target;
+    try {
+      let keep = typeof email !== 'string' || ownAddress(email);
+      if (!keep) {
+        // Back on the list already (signed up again, or the row's delete did
+        // not happen): the row owns the identity again.
+        const row = await ddb.send(new GetCommand({ TableName: TABLE, Key: { email } }));
+        keep = Boolean(row.Item);
+      }
+      if (!keep) {
+        const use = await memberUse(email);
+        if (use === 'unknown') { releaseRetry += 1; continue; }
+        keep = use === 'yes';
+      }
+      if (keep) {
+        releaseKept += 1;
+      } else {
+        try {
+          await ses.send(new DeleteEmailIdentityCommand({ EmailIdentity: email }));
+        } catch (err) {
+          if (err?.name !== 'NotFoundException') throw err; // already gone
+        }
+        released += 1;
+      }
+      await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { email: marker.email } }));
+    } catch (err) {
+      releaseRetry += 1;
+      console.log(JSON.stringify({ outcome: 'release_failed', code: err?.name }));
+    }
+  }
+  return { released, releaseKept, releaseRetry };
+};
 
 export const handler = async () => {
   const pending = await ddb.send(new QueryCommand({
@@ -115,20 +164,36 @@ export const handler = async () => {
       continue;
     }
 
-    await ddb.send(new UpdateCommand({
-      TableName: TABLE,
-      Key: { email: item.email },
-      UpdateExpression: 'SET #s = :confirmed, confirmedAt = :now REMOVE expiresAt',
-      ExpressionAttributeNames: { '#s': 'status' },
-      ExpressionAttributeValues: {
-        ':confirmed': 'confirmed',
-        ':now': new Date().toISOString(),
-      },
-    }));
-    await notifyAdmin(item.email, 'SES verification email accepted');
+    let token;
+    try {
+      const res = await ddb.send(new UpdateCommand({
+        TableName: TABLE,
+        Key: { email: item.email },
+        // unsubToken: only rows created before unsubscribe existed lack one.
+        UpdateExpression: 'SET #s = :confirmed, confirmedAt = :now, unsubToken = if_not_exists(unsubToken, :u) REMOVE expiresAt',
+        // Still pending: not unsubscribed (or expired) since the query.
+        ConditionExpression: '#s = :pending',
+        ExpressionAttributeNames: { '#s': 'status' },
+        ExpressionAttributeValues: {
+          ':confirmed': 'confirmed',
+          ':pending': 'pending',
+          ':now': new Date().toISOString(),
+          ':u': newUnsubscribeToken(),
+        },
+        ReturnValues: 'ALL_NEW',
+      }));
+      token = res.Attributes?.unsubToken;
+    } catch (err) {
+      if (err?.name !== 'ConditionalCheckFailedException') throw err;
+      continue;
+    }
+    if (token) await sendWelcome(item.email, token);
+    await notifyAdmin(ses, 'SES verification email accepted');
     confirmed += 1;
   }
 
-  console.log(JSON.stringify({ outcome: 'sweep', confirmed, stillPending, reclaimed, keptForMember }));
-  return { confirmed, stillPending, reclaimed, keptForMember };
+  const releases = await releaseIdentities();
+
+  console.log(JSON.stringify({ outcome: 'sweep', confirmed, stillPending, reclaimed, keptForMember, ...releases }));
+  return { confirmed, stillPending, reclaimed, keptForMember, ...releases };
 };
