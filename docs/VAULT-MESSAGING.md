@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.27.4
+version: 0.28.0
 date: 2026-10-12
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -9,7 +9,8 @@ related:
   - RELAY-PROTOCOL.md (0.6.0)
   - RELAY-PLAN.md
   - PQC-MIGRATION.md
-  - CALLING-SERVICE.md
+  - CALLING-SERVICE.md (0.2.0)
+  - CALLS-PLAN.md (0.1.3) §13 (phase C2; decisions D12–D26, decided 2026-10-12)
   - PUSH-GATEWAY.md (0.4.4)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.4.2)
@@ -17,11 +18,49 @@ related:
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
-  - VAULT-RELEASES.md (0.1.16; 0.1.6 approved 2026-10-04)
+  - VAULT-RELEASES.md (0.1.19; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
   - VAULT-HOST-PROTOCOL.md (0.1.2; the enclave ↔ parent protocol as built)
 changelog:
+  - 0.28.0: normative; **approved by the owner 2026-10-12** (vettid.org
+    #243: D12–D22 and D24–D26 as recommended; D23 as (c), the app never
+    pins a connection's identity key itself); **needs a
+    vault release** (staging "release C2", CALLS-PLAN 0.1.3 §13) and a
+    host stack deploy. Calls, phase C2 (CALLS-PLAN V1, V2, V3, V5, V6,
+    V8 and what phase C1 found; owner decisions of 2026-10-11 and
+    2026-10-12, CALLS-PLAN §9 and §12, and D12–D26 of §13.5).
+    §10.10 is rewritten around what S10 runs and what C2 adds, each
+    C2 rule marked. **Servers and credentials** in the signed ICE
+    configuration: the shared secret never enters a vault; the vault
+    fetches short-lived TURN credentials from the calling service's
+    issuer with an attestation and a key made for the one request,
+    keeps a pool of 4 in memory and uses one per call (new release
+    constant `calls_url`, §11.10.8). **A ring timer in the vault**: an
+    unanswered call ends at its `exp` and the missed call is recorded
+    by the vault. **Liveness**: `call.keepalive` every 30 s from the
+    call's device, the call ended after 90 s without one. **Glare**:
+    the lower `call_id` wins and one call connects. **Permission and
+    limits**: calls allowed or off per connection
+    (`call.permission.set`, `.list`), a limit on unanswered calls,
+    merged missed calls. **`call.list`** gains `v`, `now`, `exp` and
+    `device_id`. **Media suites as signed members** of both shares
+    (form 2: `suites`, `suite`, `offered`; the exact bytes signed) and
+    **key confirmation** before microphone audio (`confirm`), with the
+    rules that keep S10's unsigned form from weakening a call while
+    both exist, and when that form is retired. **Media suites and
+    keys** lifted from vettid-android `docs/calls/CALL-MEDIA.md`
+    unchanged: the registry, the SDP attributes, the direction keys,
+    the frame cryptor's options, the frame key, the encrypted frame,
+    the rules for a device. What each party sees and can do after C2;
+    the residual (a member's own vault) is unchanged. **As built,
+    corrected:** at S10 the ICE list is empty and devices have host
+    candidates only (the text said "host and server-reflexive");
+    `call.ice` is limited to 256 a call for both directions together;
+    `call.start` also answers `owner_check_required` and `internal`;
+    the issuer that held coturn's secret in the vault was never
+    deployed and is withdrawn (§15 item 6 closed). (§8.5, §10, §10.1,
+    §10.9, §10.10, §11.10.8, §15 items 6 and 36, §16)
   - 0.27.4: editorial-normative; errata from VAULT-HOST-PROTOCOL
     (decisions H3, H5, H6 of 2026-10-12) and from vettid-vault #69. No
     wire change and no code change. **Disclosure** (what the code
@@ -3532,7 +3571,7 @@ same rule to their local storage.
 | Class | Types | Ack | Dedupe | Staleness |
 |---|---|---|---|---|
 | durable | everything not listed below | after flush | persisted | `ts` window |
-| ephemeral | `call.ice`, `call.ringing`, `location.update`, `presence.ping`, `presence.pong`, `presence.result`, `vault.locking` | after handling | in memory, 10 min | `exp` required |
+| ephemeral | `call.ice`, `call.ringing`, `call.keepalive` (0.28.0, release C2), `location.update`, `presence.ping`, `presence.pong`, `presence.result`, `vault.locking` | after handling | in memory, 10 min | `exp` required |
 
 A vault forwards ephemeral messages from memory: they are deposited after
 the batch's flush, behind any queued deposits to the same mailbox, once
@@ -3708,10 +3747,12 @@ an answer to an unknown or expired id is dropped.
 | | `message.deliver`, `message.receipt` | V↔V | | Message; delivered or read receipt |
 | | `message.new` | V→D | | Incoming message |
 | | `message.list`, `.get`, `.read`, `.delete` | D→V | req | History and read state |
-| Calls | `call.start`, `call.list` | D→V | req | Place a call (the vault issues its signed ICE config, CALLING-SERVICE §6); call history (§10.10) |
+| Calls | `call.start`, `call.list` | D→V | req | Place a call (the vault issues its signed ICE config, CALLING-SERVICE §5); call history (§10.10) |
 | | `call.offer` | V↔V, V→D | | SDP and the caller device's KEM `ek`; to devices with their vault's signed ICE config |
 | | `call.answer` | D→V, V↔V, V→D | | SDP and the answering device's KEM `enc` |
 | | `call.ice`, `call.ringing` | any | | Trickle ICE; the callee rings (ephemeral) |
+| | `call.keepalive` | D→V | | The call's device is alive (ephemeral; 0.28.0, release C2) |
+| | `call.permission.set`, `.list` | D→V | req | Calls allowed or off per connection (0.28.0, release C2) |
 | | `call.end` | any | | Hang up, decline, busy, timeout, answered elsewhere |
 | Devices & agents | `device.pair.create`, `.approve`, `.reject`, `device.list`, `device.unlink` | D→V | req | Pairing and management (§6.7) |
 | | `device.pair.pending` | V→D | | Awaiting approval (`sas`) |
@@ -3755,7 +3796,7 @@ an answer to an unknown or expired id is dropped.
 | Push | `push.register`, `push.unregister` | D→V | req | Register or drop the app's FCM or APNs token for contentless wakes (§14, 0.24.0) |
 | | `push.token-needed` | V→D | | The registration ended (the token is gone); send a fresh one (§14.2; spelled `push.token_needed` in 0.24.0) |
 
-**Calls** (CALLING-SERVICE §7, §9; §10.10):
+**Calls** (CALLING-SERVICE §6; §10.10):
 
 - `call.offer` carries a fresh ephemeral KEM `ek`, generated by the
   calling device, which keeps its private half.
@@ -3765,9 +3806,12 @@ an answer to an unknown or expired id is dropped.
   `K = ctx.Export("vettid/vms/2/call-key", 32)`, and from it
   `k_call = HKDF-SHA-256(ikm = K, salt = "vettid-call-v1", info = call_id)`.
   The vaults relay `ek` and `enc` and never hold `k_call`.
+- (0.28.0) `k_call` is never a frame key: each device derives two
+  direction keys from it, bound to the negotiated media suite, and from
+  those the frame keys (§10.10 "Media suites and keys").
 - Offers carry `exp`, 45 s by default.
-- `call.offer`, `call.answer` and `call.end` are durable. `call.ice` and
-  `call.ringing` are ephemeral.
+- `call.offer`, `call.answer` and `call.end` are durable. `call.ice`,
+  `call.ringing` and (0.28.0) `call.keepalive` are ephemeral.
 - A locked callee cannot answer, so the call times out.
 
 ### 10.1 Common rules and `sync.event`
@@ -3850,6 +3894,8 @@ an answer to an unknown or expired id is dropped.
       session ended while it was held (§6.8);
     - `approval_timeout`: no app decided a held request in time (§6.8);
     - `busy`: `call.start` while a call is ringing or active (§10.10);
+    - `calls_off` (0.28.0, release C2): `call.start` to a connection
+      whose calls the member turned off (§10.10);
     - `credential_locked`: the operation signs with the credential key
       and the unlock window is closed (§3.5.3, §10.4);
     - `blocked`: `connection.invite.accept` of an invitation from a
@@ -5265,7 +5311,10 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `connection.asks_muted`, `connection.asks_unmuted` (`connection_id`;
   §10.4.1, 0.23.0); `call.outgoing`,
   `call.incoming`, `call.answered`, `call.ended` (`ref` = `call_id`, no
-  SDP or keys) (§10.10); `leash.grant.issued`, `leash.grant.updated`,
+  SDP or keys), `drop.call_share` (§10.10); (0.28.0, release C2)
+  `drop.call_glare`, `drop.call_off`, `drop.call_rate` (`connection_id`,
+  `ref` = `call_id`), `call.permission_off`, `call.permission_on`
+  (`connection_id`) (§10.10); `leash.grant.issued`, `leash.grant.updated`,
   `leash.grant.revoked`, `leash.rate_limited` (`device_id` = the agent,
   `ref` = `grant_id`), `leash.agent.suspended`, `leash.agent.resumed`,
   `leash.referrals_limited`, and, summarised per agent and hour,
@@ -5562,7 +5611,10 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
   `title` and `body`), so that a device can catch up. The response `seq`
   is the current counter. `limit` is 1–500 (default 100).
 - `count` (0.23.0) is present, from 2, only on the feed item of a batch
-  of a connection's asks: the number of asks it stands for (§10.4.1).
+  of a connection's asks: the number of asks it stands for (§10.4.1);
+  and (0.28.0, release C2) on a `call.missed` item that stands for
+  several missed calls of one connection (§10.10 "Permission and
+  limits").
 - `feed.update` sets `status` (`active`, `read` or `archived`) and/or
   `priority`; changes send `sync.event` `feed.updated` or `feed.deleted`.
 - Kinds the vault creates: `connection.request` (`ref` = `pending_id`),
@@ -5612,9 +5664,19 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
 1:1 voice and video calls between connections (CALLING-SERVICE). Signalling
 travels over the relay inside the E2E sessions: device → its vault →
 the peer vault → the peer's devices. Media flows directly or through TURN,
-end-to-end encrypted under `k_call`, which only the two devices of the
-call hold. Sent by `app` or `desktop` devices, and by connections where
-marked; never by agents. A vault takes part in at most one call at a time.
+end-to-end encrypted under keys derived from `k_call`, which only the
+two devices of the call hold. Sent by `app` or `desktop` devices, and by
+connections where marked; never by agents. A vault takes part in at most
+one call at a time.
+
+**Release C2 (0.28.0).** Text marked **(C2)** was approved by the owner
+on 2026-10-12 (CALLS-PLAN §13.5, D12–D26) and applies from the staging
+release that first carries it, called
+**release C2** here because it is not cut yet (CALLS-PLAN §7 phase C2;
+its number is written here when it has one). Everything not so marked is
+what staging release S10 runs. "S10" below stands for S10 and any later
+release before C2: none of them changes calls. Production has no calls
+(`features` without `calls`, §11.10.8) until promotion.
 
 **Devices.** An app, or a desktop within its access session (§6.8), places
 and answers calls, each with its own key exchange. The access session is
@@ -5630,16 +5692,19 @@ new one on the other device.
 
 | Type | Request body | Response / event body |
 |---|---|---|
-| `call.start` (D→V) | `{connection_id, call_id, media: "audio" \| "video", sdp, ek, ek_sig}` | `{call_id, exp, ice_config, ice_sig}`; `busy`, `exists`, `not_found`, `connection_unavailable`, `bad_request` (also for a share signature that does not verify) |
-| `call.offer` (V↔V, with `exp`) | — | `{call_id, media, sdp, ek, device_ik, device_sig, vault_sig}` |
-| `call.offer` (V→D, with `exp`) | — | `{call_id, connection_id, media, sdp, ek, device_ik, device_sig, vault_sig, peer_ik, exp, ice_config, ice_sig}` |
+| `call.start` (D→V) | `{connection_id, call_id, media: "audio" \| "video", sdp, ek, ek_sig}`; (C2) also `suites, ek_sig2, keepalive` | `{call_id, exp, ice_config, ice_sig}`; `busy`, `exists`, `not_found`, `connection_unavailable`, `owner_check_required`, `bad_request` (also for a share signature that does not verify), `internal`; (C2) `calls_off` |
+| `call.offer` (V↔V, with `exp`) | — | `{call_id, media, sdp, ek, device_ik, device_sig, vault_sig}`; (C2) also `suites, device_sig2, vault_sig2` |
+| `call.offer` (V→D, with `exp`) | — | `{call_id, connection_id, media, sdp, ek, device_ik, device_sig, vault_sig, peer_ik, exp, ice_config, ice_sig}`; (C2) also `suites, device_sig2, vault_sig2` |
 | `call.ringing` (D→V, V↔V, V→D; ephemeral) | — | `{call_id}` |
-| `call.answer` (D→V) | — | `{call_id, sdp, enc, enc_sig}` |
-| `call.answer` (V↔V) | — | `{call_id, sdp, enc, device_ik, device_sig, vault_sig}` |
-| `call.answer` (V→D) | — | `{call_id, sdp, enc, device_ik, device_sig, vault_sig, peer_ik}` |
+| `call.answer` (D→V) | — | `{call_id, sdp, enc, enc_sig}`; (C2) also `keepalive`, and in form 2 `suite, offered, confirm` |
+| `call.answer` (V↔V) | — | `{call_id, sdp, enc, device_ik, device_sig, vault_sig}`; (C2) in form 2 also `suite, offered, confirm` |
+| `call.answer` (V→D) | — | `{call_id, sdp, enc, device_ik, device_sig, vault_sig, peer_ik}`; (C2) in form 2 also `suite, offered, confirm` |
 | `call.ice` (D→V, V↔V, V→D; ephemeral) | — | `{call_id, candidates: [{candidate, sdp_mid?, sdp_mline_index?}]}` |
-| `call.end` (D→V, V↔V, V→D) | — | `{call_id, reason}` |
-| `call.list` (D→V) | `{limit?}` (1–200, default 50) | `{calls: [{call_id, connection_id, direction: "in" \| "out", media, state, reason?, started_at, answered_at?, ended_at?}]}`, newest first |
+| `call.keepalive` (C2; D→V; ephemeral) | — | `{call_id}` |
+| `call.end` (D→V, V↔V, V→D) | — | `{call_id, reason}`; (C2) V→D also `superseded_by?` |
+| `call.list` (D→V) | `{limit?}` (1–200, default 50) | `{calls: [{call_id, connection_id, direction: "in" \| "out", media, state, reason?, started_at, answered_at?, ended_at?}]}`, newest first; (C2) also `v: 2`, `now`, and per call `exp`, `device_id?` |
+| `call.permission.set` (C2; D→V) | `{connection_id, allowed}` (`allowed` boolean) | `{}`; `not_found` |
+| `call.permission.list` (C2; D→V) | `{}` | `{connections: [{connection_id, allowed, limited}]}`: only the connections for which `allowed` is false or `limited` is true |
 
 - `call_id` is a ULID chosen by the calling device (it is signed into the
   share before the vault sees it); the vault refuses one already in use
@@ -5650,13 +5715,26 @@ new one on the other device.
   1,024 bytes, `sdp_mid` at most 64 bytes, `sdp_mline_index` 0–1,023.
   `reason` is `hangup`, `decline`, `busy`, `timeout`,
   `answered_elsewhere`, `unavailable` or `failed`. `state` is `ringing`,
-  `active` or `ended`.
+  `active` or `ended`. (C2) No reason is added: an S10 vault answers an
+  unknown reason `bad_request`, so C2 uses the seven.
+- (C2) `suites` and `offered` are arrays of 1 to 8 integers, each
+  1–65,535, none repeated, the preferred first; `suite` is one such
+  integer; `confirm` is 32 bytes in standard base64 ("Call forms" and
+  "Key confirmation" below). `superseded_by` is a `call_id` ("Glare").
+  `now` and `exp` are timestamps of the vault's clock; `device_id` is
+  the vault's id of the call's device (as `device.list` gives it),
+  absent while an incoming call rings. `keepalive`, when present, is
+  `true` ("Liveness").
 - **Placing a call.** The caller's device generates the ephemeral KEM key,
   signs its share (below) and sends `call.start`. The vault refuses with
   `busy` while another call is ringing or active, checks and vouches for
   the share, sends the connection `call.offer` with `exp` = now + 45 s,
   records the sending device as the call's device, and answers with its
-  signed ICE configuration.
+  signed ICE configuration. When `call.start` fails in any way other
+  than the vault's own refusal after the request may have left (no
+  answer in time, a lost response, an answer that does not verify), the
+  device SHOULD send `call.end{hangup}` for the same `call_id`, so that
+  a call the vault did place does not ring on for nobody.
 - **Ringing.** The callee's vault drops an offer without `exp` or with an
   `exp` more than 90 s ahead, and treats a repeated `call_id` as a
   duplicate. A **held** vault (§3.6.3, 0.13.0) rings no device and does
@@ -5666,11 +5744,16 @@ new one on the other device.
   (`call.end{unavailable}` to them only); a call answered before it
   continues until it ends. A held caller's `call.start` is answered
   `owner_check_required`. Otherwise, if a call is ringing or active the
-  vault answers `call.end{busy}`. Otherwise it sends every owner app and desktop (within its access
+  vault answers `call.end{busy}` ((C2) except in a glare, below).
+  Otherwise it sends every owner app and desktop (within its access
   session, §9.1) `call.offer` with the same `exp` and its own signed ICE
   configuration. A ringing device MAY send `call.ringing`, which the vault
   forwards once to the caller's vault, which forwards it to the call's
-  device.
+  device. A device rings for `exp` minus the event's `ts`, both the
+  vault's clock, whatever its own clock says. **A callee's device
+  gathers no candidates and opens no connection before the member
+  answers**, so that calling someone never reveals their address
+  unanswered.
 - **Answering.** The first answer wins. The first device to send `call.answer` (with `enc`,
   §10, the call key) becomes the callee's call device; the vault forwards
   the answer to the caller's vault and tells its other devices
@@ -5681,7 +5764,8 @@ new one on the other device.
 - **ICE.** A device's `call.ice` is forwarded to the peer vault, which
   forwards it to its call's device, or to every owner device while its
   call is still ringing. Only the call's device may send it; a vault
-  forwards at most 256 per call. `call.ice` and `call.ringing` are
+  forwards at most 256 per call, **both directions counted together**
+  (as built). `call.ice` and `call.ringing` are
   ephemeral (`exp` = now + 30 s) and forwarded from memory (§8.5).
 - **Ending.** The call's device, or any owner device while an incoming
   call rings (declining), sends `call.end`; the vault forwards it to the
@@ -5690,11 +5774,164 @@ new one on the other device.
   that ends before it was answered (or is answered `busy`) is a missed
   call (feed `call.missed`). Removing or blocking the connection ends its
   live calls (`unavailable`). A ringing call stops counting as busy at its
-  `exp`, an active call 12 h after it was answered.
+  `exp`, an active call 12 h after it was answered. **A device SHOULD
+  end a call 12 hours after it was answered** (`call.end{hangup}`): the
+  vault stops counting it as live then, and it keeps every call inside
+  the frame cipher's limit ("The encrypted frame").
 - **Authority.** A vault acts on a call message from a connection only
   for a call with that connection, and on one from a device only as
   stated above; anything else is dropped.
 - **History.** The vault keeps the latest 200 calls (no SDP, no keys).
+
+**What S10 leaves to the device.** An S10 vault has no timer and no
+liveness check. Against it:
+
+- the **calling** device MUST send `call.end{timeout}` at `exp`; a
+  **callee's** device MUST NOT (its vault would end the call and record
+  no missed call): it stops ringing at `exp` and waits. If the caller's
+  app has died, no missed call is recorded and the record stays
+  `ringing`;
+- a call whose device died stays `active`, and the vault busy, for up to
+  12 h unless the peer's `call.end` arrives. After unlock a device
+  SHOULD end the calls its vault still holds live while the app has
+  none. `call.list` gives it neither the call's device nor a vault time
+  there, so it judges by its own clock against `started_at`, which is
+  right only while one app is the member's only call device;
+- two members calling each other at once both get `busy`;
+- the ICE configuration has no servers, so only two devices on one
+  network connect.
+
+The rules marked (C2) below end each of these. "Mixed releases" says
+what a device does while both kinds of vault exist.
+
+**Ring timer (C2; CALLS-PLAN V2).** A vault ends an unanswered call
+itself.
+
+- At the first housekeeping at or after a `ringing` call's `exp`, and no
+  later than 30 s after it (housekeeping runs with every collect, at
+  least every 25 s, §12.2), the vault sets the call `ended` with reason
+  `timeout` and sends its owner devices `call.end{timeout}`.
+- For an **outgoing** call it also sends the peer vault
+  `call.end{timeout}` (an S10 peer records its missed call from it; a C2
+  peer has ended the call itself and ignores it).
+- For an **incoming** call it records the missed call (feed
+  `call.missed`) and sends the caller's vault nothing: that vault ends
+  its own record by its own timer.
+- A `call.end` for a call that has ended is ignored, from anyone. So a
+  calling device MAY keep sending `call.end{timeout}` at `exp`: against
+  S10 it is required, against C2 it only arrives first. A callee's
+  device still MUST NOT send `timeout`: it stops ringing at `exp`
+  (by the rule under "Ringing") and the vault's `call.end{timeout}`
+  follows.
+- A missed call is recorded once per call, by whichever comes first:
+  the vault's timer, the peer's `call.end`, `busy`, or the hold.
+- An offer that expired while the vault was locked is dropped before
+  this feature sees it (§8.4), as today: no missed call. Not changed in
+  C2.
+
+**Liveness (C2; CALLS-PLAN V3, decision D12).** A vault learns that the
+device of an active call is gone.
+
+- The call's device sends `call.keepalive{call_id}` to its own vault:
+  the first as soon as the call is `active` on it (the callee after its
+  `call.answer`, the caller when it has accepted the answer), then every
+  **30 s** until the call ends. It is ephemeral (`exp` = now + 30 s,
+  §8.5). The vault notes the time **in memory only**: it writes no
+  state, forwards nothing and records nothing in the audit log.
+- A `call.keepalive` from a device that is not the call's device is
+  dropped. One for a call that is not `active` is answered
+  `call.end{unavailable}` to that device, so a device learns that its
+  vault no longer holds the call.
+- **A call is watched when its device said it would send
+  keep-alives**: `keepalive: true` in its `call.start` or in its
+  `call.answer`. The vault records that with the call (those are state
+  writes already). A device that knows its vault to be C2 ("Mixed
+  releases") MUST send it, in either form.
+- A watched, `active` call whose last keep-alive is more than **90 s**
+  old is ended at the next housekeeping, so within 120 s of the last
+  keep-alive: `ended` with reason `failed`, `call.end{failed}` to the
+  peer vault and to the owner devices, audited `call.ended`. The 90 s
+  count from the answer until the first keep-alive, and from the unlock
+  for a call that was active when the vault was unlocked (the times are
+  not in the state).
+- A call that is not watched (its device is an app from before C2)
+  keeps S10's rule: live for 12 h. That is what lets an S10-era app use
+  a C2 vault. A later release refuses unwatched calls ("Mixed
+  releases").
+- A device that starts with no call in progress, and finds in
+  `call.list` a live call whose `device_id` is its own, MUST end it
+  (`call.end{failed}` for an active call, `call.end{timeout}` for its
+  own outgoing ringing call past `exp` by `now`). With `v: 2` it uses
+  `device_id`, `exp` and `now` and never its own clock; it leaves other
+  devices' calls alone.
+- What this shows: the relay sees one small deposit every 30 s from a
+  device to its vault while a call lasts (§2.2), so the length of a call
+  is visible to it as a pattern, where S10 showed only the bursts at
+  its start and end.
+
+**Glare (C2; CALLS-PLAN V6, decision D21).** When two members call each
+other at once, one call connects.
+
+- A vault that receives `call.offer` *Y* from a connection while its own
+  outgoing call *X* **to that same connection** is `ringing` compares
+  the two `call_id`s as their 26 ASCII bytes. **The lower one wins.**
+- *X* wins: the vault does not ring for *Y*, does not answer it (no
+  `busy`), records no missed call and no call record, and audits
+  `drop.call_glare` (`ref` = *Y*). *X* goes on.
+- *Y* wins: the vault ends *X* (`ended`, reason `busy`), sends its
+  owner devices `call.end{call_id: X, reason: "busy", superseded_by: Y}`
+  and the peer vault nothing, and then handles *Y* as any offer: every
+  owner device rings.
+- The device that placed *X*, on `call.end` with `superseded_by` = *Y*
+  followed or preceded by the offer *Y* from the same connection, while
+  its screen still shows the outgoing call, **answers *Y* without
+  asking** (the member asked for this call seconds ago). Any other
+  device rings as usual and is told `answered_elsewhere`. A device
+  that does not know `superseded_by` shows "busy" and then rings for
+  *Y*; the member answers by hand.
+- Both vaults apply the same rule to the same two ids, so they agree.
+  Any other pair of calls is not a glare: an offer from another
+  connection, or one that arrives when the outgoing call has been
+  answered or has ended, is handled as before.
+- With an S10 vault on one side, glare ends as at S10 (`busy` both
+  ways) or the losing side's call times out; at most one spurious
+  missed call results.
+
+**Permission and limits (C2; CALLS-PLAN V5, decisions D6, D7, D22).**
+
+- **Calls allowed or off, per connection.** `call.permission.set`
+  (app, or desktop within its session; not delegable, §10.11) sets it;
+  the default for every connection is allowed. `call.permission.list`
+  gives the connections that differ from the default, and a change of
+  `allowed` or of `limited` sends
+  `sync.event{kind: "call.permission", connection_id}` to every owner
+  device. A change by the member is audited `call.permission_off` or
+  `call.permission_on` (`connection_id`). The state is the feature's
+  DEK state and is dropped with the connection.
+- **Off** means: an offer from that connection rings no device, is not
+  answered (no `busy`, no `call.end`), creates no call record, no
+  missed call and no wake, and is audited `drop.call_off`. The caller
+  times out as with a locked callee and cannot tell the two apart. The
+  member's own `call.start` to that connection is answered `calls_off`.
+- **Unanswered calls are limited.** The vault counts, per connection,
+  the incoming calls that ended without being answered (missed,
+  declined, `busy`, suppressed by this rule). When a connection has
+  **3 in the last 10 minutes or 10 in the last 24 hours**, a further
+  offer from it rings no device and is not answered; it is recorded as
+  an ended call with reason `unavailable` and as a missed call, and
+  audited `drop.call_rate`. `limited` is true while that holds. An answered call from the
+  connection, or a call the member places to it, clears the counts.
+  The counts (at most 10 times per connection) are DEK state.
+- **Missed calls merge.** A missed call from a connection whose
+  `call.missed` feed item is still `active` and less than 24 hours old
+  updates that item instead of creating one: a new `seq`, `ref` = the
+  latest `call_id`, and `count` (§10.9; present from 2) the number of
+  missed calls it stands for. Once the member has read, archived or
+  deleted the item, the next missed call creates a new one. As for any
+  `count` update, it does not wake the app (§14.2).
+- Blocking a connection is unchanged, and so is the limit of 60 durable
+  messages a minute per connection (§7.3). Calls are not asks: muting
+  a connection's asks (§10.4.1) does not change its calls.
 
 **Signed key-exchange shares.** The device that makes a share (the
 caller's `ek`, the answerer's `enc`) signs it with its identity key; its
@@ -5708,6 +5945,24 @@ device_sig = Ed25519(device ik, "vettid/vms/2/call-share" || m)       # ek_sig /
 vault_sig  = Ed25519(vault ik,  "vettid/vms/2/call-vouch" || device_ik (32) || m)
 ```
 
+That is **form 1**, the only form at S10. (C2) **Form 2** signs the
+media suites with the share:
+
+```
+m2          = role || 0x00 || call_id || 0x00 || media || 0x00 || suites || 0x00 || share
+              role "offer2":  share = ek,  media = "audio" | "video", suites = list(offered)
+              role "answer2": share = enc, media = "",                suites = chosen || 0x00 || list(offered)
+              list(x): the numbers of x in decimal without leading zeros, joined by one space   e.g. "2 1"
+              chosen:  the answer's `suite` in decimal without leading zeros                    e.g. "1"
+device_sig2 = Ed25519(device ik, "vettid/vms/2/call-share" || m2)     # ek_sig2; in a form 2 answer, enc_sig
+vault_sig2  = Ed25519(vault ik,  "vettid/vms/2/call-vouch" || device_ik (32) || m2)
+```
+
+The labels are those of form 1; the roles differ, and a role is
+followed by 0x00, so a signature of one form never verifies as the
+other. `offered` in an answer is the caller's list **as the answering
+device read it** in the offer's `suites`.
+
 What each party checks:
 
 | Party | Checks | On failure |
@@ -5716,14 +5971,126 @@ What each party checks:
 | The peer vault (V↔V `call.offer`, `call.answer`) | `vault_sig` under the connection's pinned `ik` (§6.3, followed through `identity.rotate`), and `device_sig` under `device_ik` | Drops (audited `drop.call_share`): an offer rings nobody; an answer is not passed on and the call keeps ringing until it ends or times out |
 | The peer device (V→D `call.offer`, `call.answer`) | `vault_sig` under `peer_ik` (the connection's `ik` as its own vault has it on record, the same as `connection.get` returns) and `device_sig` under `device_ik` | MUST NOT use the share (no answer, no media key) |
 
-The relay, the hosts and the peer vault therefore cannot swap a share
-unnoticed. **Residual:** each member's own vault can. It vouches for which
+(C2) Each party checks, the same way and with the same result on
+failure, **every form that a message carries**: in an offer with
+`suites`, both pairs of signatures; in an answer with `suite`, the one
+pair, over `m2`. A vault vouches for a form only after it has verified
+the device's signature of that form, and only for a well-formed list
+(the limits above). The vaults do not judge the choice: whether `suite`
+is in `offered`, and whether `offered` is what the caller sent, is for
+the calling device, which alone knows what it sent.
+
+**Call forms (C2).** How the two forms travel while both exist:
+
+- **`call.start`.** A device whose vault answers `call.list` with
+  `v: 2` sends both: `ek_sig` over `m`, and `suites` with `ek_sig2`
+  over `m2`. Its SDP also still carries `a=vettid-media-suites`
+  ("Media suites and keys"), with the same list. A vault refuses
+  (`bad_request`) `suites` without `ek_sig2` or the reverse. A
+  `call.start` without `suites` is a form 1 call from a device of
+  before C2, and is accepted.
+- **`call.offer`.** The vault passes on what it vouched for: form 1
+  always, form 2 when the device sent it. A vault that receives
+  `suites` without both `device_sig2` and `vault_sig2`, or a form 2
+  signature that does not verify, drops the offer (`drop.call_share`).
+  An S10 vault knows none of the new members: it verifies form 1 and
+  passes on form 1 only.
+- **The answering device** uses **form 2 when the offer it received
+  has `suites`**, and form 1 otherwise. In form 2 it chooses from the
+  signed `suites` (the SDP attribute is ignored and removed), and its
+  `call.answer` carries `suite`, `offered`, `confirm` and `enc_sig`
+  over `m2`; its SDP carries no VettID attribute. In form 1 it answers
+  as at S10. An answer is in exactly one form.
+- **The calling device**, for an answer with `suite`: verifies the
+  signatures over `m2`; requires `offered` to equal the list it sent
+  and `suite` to be in it and in its registry; verifies `confirm`. For
+  an answer without `suite` (the offer's form 2 did not reach the
+  answering device: an S10 vault or an older app is on the path, or a
+  vault removed it) it applies the form 1 rules.
+- **Fail closed.** Three rules keep the form 1 path from weakening a
+  call:
+  1. in form 1 a device chooses **suite 1 only**, and does not ring for
+     a form 1 offer that does not list it;
+  2. a device that offered any suite other than 1 MUST refuse a form 1
+     answer (`call.end{failed}`);
+  3. a device MUST NOT offer any suite other than 1 in a `call.start`
+     that carries a form 1 signature.
+
+  Every `call.start` carries form 1 while S10-era vaults and apps
+  exist, so **no second suite is offered until form 1 is retired**
+  ("Mixed releases"). That is the owner's condition (CALLS-PLAN
+  §12.3): key confirmation before microphone audio is required before
+  a second suite is ever offered, and form 1 has none.
+- Who can remove form 2 from a message: the two vaults, nobody else
+  (the members travel inside the E2E sessions). What they gain is a
+  call under form 1's rules, which is suite 1 with the keys still bound
+  to the negotiation, exactly what S10 gives.
+
+**Key confirmation (C2).** In form 2 no microphone audio is sent under
+keys the other device has not confirmed.
+
+```
+k_confirm = HKDF-SHA-256(ikm = k_call, salt = "vettid/vms/2/call-confirm", info = call_id, L = 32)
+confirm   = HMAC-SHA-256(k_confirm, chosen || 0x00 || list(offered) || 0x00 || call_id)
+```
+
+with `chosen` and `list(offered)` as in `m2` (the list as the answering
+device read it).
+
+- The **answering device** computes `confirm` when it has `k_call` and
+  sends it in `call.answer`. It sets its keys and enables both
+  cryptors, and **keeps its microphone track disabled until its
+  receiving cryptor first reports a frame decrypted**. That happens
+  only for a frame under the keys it derived, so it proves that the
+  caller holds the same `k_call` and the same view of what was
+  negotiated. If no frame has decrypted 20 s after its connection is
+  established, it ends the call (`call.end{failed}`).
+- The **calling device** verifies `confirm` (in constant time) before
+  it sets any key. A missing or wrong `confirm` in a form 2 answer:
+  it uses nothing of the answer, sends `call.end{failed}` and tells
+  the member that the call could not be encrypted. Once its keys are
+  set it **sends frames at once, muted or not** (a muted or disabled
+  track still sends encrypted silence), because the answering device
+  waits for them.
+- Each device derives `k_confirm` before it wipes `k_call`, and wipes
+  it after use.
+- `confirm` is not part of `m2`. Only the two devices can compute it,
+  so a signature adds nothing to it; a vault that removes or changes
+  it makes the call fail and gains nothing.
+- HKDF-SHA-256 and HMAC-SHA-256 are used for every suite of the
+  registry today. A suite with another KDF would name its confirmation
+  function in the registry.
+- What it does not do: it does not protect against the member's own
+  vault ("Residual"), which, if it swapped the shares, holds `k_call`
+  and can compute `confirm`.
+
+**Residual.** The relay, the hosts and the peer vault cannot swap a
+share unnoticed. **Each member's own vault can.** It vouches for which
 `device_ik` is its member's device and tells its own devices `peer_ik`, so
 it could substitute a share in either direction of its member's calls (and
 then learn `k_call`). A member's own vault is trusted for that member's
 calls, as it is for everything else of the member (§2.1).
 
-**Vault-signed ICE configuration** (CALLING-SERVICE §6). Each vault gives
+(C2) **After C2 the residual is the same, and narrower around it:**
+
+| | S10 | From C2, in form 2 |
+|---|---|---|
+| The member's own vault swaps a share and learns `k_call` | Possible; trusted (§2.1) | **Unchanged** |
+| A vault changes the list of suites or the choice | Undetected at signalling time; the keys then differ and nothing is heard; audio may be sent under the weaker suite's keys until the failure shows | Rejected by the signature check before the callee rings or the caller uses the answer. A member's own vault could still do it together with a swapped share (the row above) |
+| Audio sent before the other side is known to hold the keys | Yes | No (key confirmation) |
+| A vault changes the SDP (fingerprint, candidates, sections) | Possible: the SDP is not signed. Media that is not encrypted under the call's keys is never played ("Rules for a device") | **Unchanged** |
+| A vault leaves out or changes the ICE servers of its own devices | Its own devices' vault signs them; nobody else can | **Unchanged**; from C2 the list is no longer empty |
+| Both vaults see both members' addresses in the signalling | Yes (accepted, CALLS-PLAN D1) | **Unchanged** |
+
+**No device pins a connection's `ik` itself** (owner decision D23 of
+2026-10-12, option (c): never). A member's own vault is trusted, for
+calls and for messages alike (§2.1), so a device takes each
+connection's `ik` from its vault, keeps no pin of its own, and has no
+"identity changed" warning. The `peer_ik` check (rule 6 of "Rules for a
+device") is therefore not a defence against the member's own vault, by
+design.
+
+**Vault-signed ICE configuration** (CALLING-SERVICE §5). Each vault gives
 only its own devices an ICE configuration, for each call, signed by its
 `ik`:
 
@@ -5741,16 +6108,368 @@ ice_sig    = standard base64 of Ed25519(vault ik, "vettid/vms/2/ice" || those by
   `call_id` is the call's and `exp` has not passed, and MUST NOT use
   servers from any other source. The calling service therefore cannot
   inject or reorder servers.
-- The servers and short-lived credentials come from the vault's ICE
-  issuer (CALLING-SERVICE §5: coturn `use-auth-secret` or a managed
-  provider), valid 6 h. Without a calling service the list is empty and
-  devices use host and server-reflexive candidates. How the issuer's
-  shared secret reaches the vault is open (CALLING-SERVICE §10).
+- **At S10 the list is always empty**: release builds have no issuer.
+  Devices then have host candidates only (no server-reflexive ones:
+  those need a STUN server), so only two devices on one network
+  connect. The configuration is signed all the same, with `exp` = now
+  + 6 h. 0.27.4 and earlier said that the servers come from an issuer
+  in the vault that holds coturn's shared secret; that was never
+  deployed and is withdrawn (§15 item 6).
+
+(C2; CALLS-PLAN V1, V8, decisions D4, D13, D14) **Servers and
+credentials.** The shared secret never enters a vault. The vault gets
+short-lived credentials from the calling service's issuer and passes
+them on.
+
+- **The issuer** is named by the release constant `calls_url`
+  (§11.10.8). Without it the list stays empty, as at S10. The vault
+  reaches it through the parent's forwarder over TLS it terminates
+  (§12.2); the enclave's and the parent's allowlists and the host's DNS
+  Firewall gain its name (VAULT-RELEASES §8.4).
+- **The request** is CALLING-SERVICE §5.2: `POST /v1/credentials
+  {count}`, signed per RELAY-PROTOCOL §4.1 with an Ed25519 key **made
+  for that one request** and discarded after it, with a Nitro
+  attestation document whose `public_key` is that key and whose
+  `user_data` is the request's digest, as for `push.register` (§14.1).
+  The key MUST NOT be any other key of the vault. An attempt waits at
+  most 10 s.
+- **The answer** gives the STUN URLs, the TURN URLs and up to 4
+  credentials `{username, credential, exp}`. The vault accepts only an
+  answer in which every URL passes the rules above, there are at most
+  4 URLs of each kind, each `username` and `credential` is 1–512 bytes
+  without control characters, and each `exp` is in the future and at
+  most 6 h ahead; otherwise the answer is discarded as a failed
+  attempt. The vault does not interpret a username.
+- **The pool.** The vault keeps up to **4** credentials and the URLs
+  **in memory only**: never in its state, never in a flush, gone at
+  lock. It asks for 4 within 5 s of unlock, and again (for as many as
+  are missing) when fewer than 2 usable ones are left. A credential is
+  **usable** while its `exp` is more than 2 h away.
+- **One credential, one call.** A call's ICE configuration has one
+  entry with the STUN URLs and, if the pool has a usable credential,
+  one entry with the TURN URLs and that credential. `exp` of the
+  configuration is the credential's `exp`, or now + 6 h without one.
+  The vault **retires** a credential when a call that carried it was
+  placed (`call.start` succeeded) or answered on this side; a
+  credential that only went out with offers nobody answered is used
+  again. So two calls of a member never show the TURN server the same
+  username, and a connection that rings without being answered cannot
+  empty the pool.
+- **Never waiting, almost.** If the pool has no usable credential when
+  a configuration is needed, the vault MAY wait up to 2 s for a request
+  in flight, or start one if its limits allow, and then answers with
+  what it has. With no credential the entry is left out; with no URLs
+  known the list is empty.
+- **The vault's limits:** at most 4 requests in an hour and 24 in a
+  day, per vault, in memory, reset at unlock. After a failed attempt
+  it waits 1, 5 and 15 minutes (each ±20 %), then 30 minutes between
+  attempts. A failure is not audited and creates no feed item.
+- **A device** gives the credentials to its media stack and nowhere
+  else: not to a log, a diagnostic, a crash report or another app.
+
+**Media suites and keys.** This is the one normative source for what
+two devices must agree on to encrypt a call's media. It was written as
+vettid-android `docs/calls/CALL-MEDIA.md` for phase C1 and is lifted
+here; the numbers, labels and formulas are those, unchanged, because an
+iOS or desktop client has to match them byte for byte. Marks, as there:
+**[S]** read from the media stack's source, **[I]** inferred, **[D]**
+confirmed on two phones in the C0 test (2026-10-12).
+
+A media suite fixes everything two devices must agree on to encrypt a
+call's media frames. The registry is closed and versioned: a number is
+never reused or redefined, and a device uses only suites it finds in
+its own copy.
+
+| id | Frame cipher | Frame key | KDF | Label of the direction keys | Label of the frame key | Transport | State |
+|---|---|---|---|---|---|---|---|
+| 1 | AES-GCM, the media stack's frame-cryptor format ("The encrypted frame") | 128 bits | HKDF-SHA-256 | `vettid/vms/2/call-media` | `vettid/vms/2/call-frame` | DTLS-SRTP as the stack negotiates it; no post-quantum DTLS required | **in use** |
+| 2 | the same format | 256 bits | HKDF-SHA-256 | `vettid/vms/2/call-media` | `vettid/vms/2/call-frame` | the same | **registered, not offered**: the stack's key provider derives 128-bit keys only until a release carries its 256-bit option (webrtc-sdk/webrtc PR #302). Its frame-key derivation (below, with L = 32) is to be confirmed against that release before an engine offers it |
+
+What a device **offers** is the registry cut down to what its media
+engine can do, in the registry's order of preference (2 before 1), and
+further by rule 3 of "Call forms". Today every engine can do suite 1
+only. Adding a suite is a registry entry and the engine's capability;
+the negotiation, the derivation and the signalling do not change.
+"Transport" is part of the suite so that a later suite can require, for
+example, a post-quantum DTLS key exchange: an engine whose transport
+cannot meet a suite's expectation does not offer it. No suite requires
+it today, and the stack's post-quantum DTLS field trial is off in every
+build that members use (owner: known-good algorithms only, CALLS-PLAN
+§12.3).
+
+*Negotiation in form 1* (in the SDP, which nothing signs):
+
+- The **offer**'s SDP carries one session-level attribute (before the
+  first `m=` line): `a=vettid-media-suites:<n> <n> …` — the caller's
+  suites as decimal numbers without leading zeros, 1 to 8 of them, each
+  1–65535, no repeats, separated by exactly one space, the preferred
+  one first.
+- The **answer**'s SDP carries one session-level attribute
+  `a=vettid-media-suite:<n>`: the first suite of the caller's list, **in
+  the caller's order**, that the answerer can do (and, by rule 1 of
+  "Call forms", suite 1). Numbers the answerer does not know are skipped
+  (a newer caller may list suites an older answerer has never heard of).
+- The attribute names are case-sensitive and lower-case as written;
+  lines end in CRLF or LF. `offered` in the key derivation is the
+  **parsed list written again** (decimal numbers joined by one space),
+  which for a well-formed attribute is its value byte for byte; a value
+  that is not in that form is malformed.
+- A device hands the SDP to its media stack without these attributes
+  (they are VettID's, not the stack's).
+
+*Negotiation in form 2 (C2):* the caller's list is `suites` of the
+offer, the choice is `suite` of the answer, both signed ("Call forms").
+The choice is the first suite of the caller's list, in the caller's
+order, that the answerer can do.
+
+*In both forms:*
+
+- **One audio section.** An offer or an answer has exactly one `m=`
+  line; it is `m=audio`, and every payload type on it has an `a=rtpmap`
+  whose codec is `opus`. A device MUST refuse any other SDP before it
+  reaches its media stack: a second audio section, video or a data
+  channel would be media that the frame encryption prepared for the one
+  audio section does not cover. (Video is phase C4 and will change this
+  rule with its own text.)
+- **What a callee's device does with an offer it cannot use**
+  (the suites missing, repeated, misplaced or malformed; more or other
+  than one Opus audio section; no suite in common): it does not ring
+  and **sends nothing**, as for a share that does not verify. Another
+  of the member's devices may be able to take the call; if none does,
+  the call times out.
+- **What a caller's device does with an answer it cannot use** (the
+  same faults; a suite that is not in the list **it sent**, its own
+  copy, never a list read back from anywhere; a suite not in its
+  registry): it uses nothing of the answer, sends `call.end{failed}`
+  and tells the member that the call could not be encrypted.
+- A call never continues on another suite or without one.
+- **The suite is fixed before the phone rings**: the callee chooses
+  when it checks the offer.
+
+*What protects the negotiation.* In form 1 the attribute is not signed
+by anyone. The relay and the hosts cannot change it, but either vault
+can. So the protection does not depend on the attribute arriving
+intact: the chosen suite **and the caller's whole list** are inputs of
+the direction keys. The caller derives from the list it sent and the
+choice it read; the answerer from the list it read and the choice it
+made. After a changed list or choice the two devices hold different
+keys, no frame decrypts, and the call ends `failed`: **nothing is
+heard**, on any suite. But audio may be **sent** under the weaker
+suite's keys until a receiver notices, and an attacker who also drops
+the media packets keeps both from noticing. That gains ciphertext under
+the weaker suite, not the audio. With one suite in use it cannot
+matter; it is why form 1 is confined to suite 1 and why form 2 signs
+the negotiation and confirms the keys. Form 2 does not change the
+derivation, which keeps binding the keys to what was negotiated.
+
+*The direction keys.*
+
+```
+k_dir = HKDF-SHA-256(ikm  = k_call,
+                     salt = the chosen suite's direction-key label     ("vettid/vms/2/call-media"),
+                     info = chosen || 0x00 || offered || 0x00 || direction || 0x00 || call_id,
+                     L    = 32)
+
+chosen    the suite of the answer, decimal ASCII                          e.g. "1"
+offered   the caller's list as sent: decimal numbers joined by one space  e.g. "2 1"
+          (numbers the answerer does not know included)
+direction "caller" for frames the calling device sends,
+          "callee" for frames the answering device sends
+call_id   the call's id (a ULID), as in the signalling
+```
+
+- The calling device encrypts with `k_dir("caller")` and decrypts with
+  `k_dir("callee")`; the answering device the reverse. Each device
+  wipes `k_call` once it has the two keys (and, in form 2,
+  `k_confirm`), and both keys when the call ends.
+- A direction key is 32 bytes for every suite: it is key *material* for
+  the suite's frame-key derivation.
+- Two keys, because the frame cipher's IV holds no randomness: with one
+  key for both directions its uniqueness would rest on the two senders'
+  SSRCs differing.
+- `k_call` (§10, the call key) is therefore the input of these
+  derivations and never a frame key itself.
+
+*The frame cryptor's configuration and the frame key.* The media stack
+on Android is `io.github.webrtc-sdk:android:150.7871.01`; its frame
+cryptor is `api/crypto/frame_crypto_transformer.{h,cc}` of
+`webrtc-sdk/webrtc` at `73cb8180` **[S]**. The same C++ is wrapped by
+the family's iOS/macOS, desktop and Rust builds; that their options
+match was not read (CALLS-PLAN §12.1). Key provider options, fixed for
+every platform:
+
+| Option | Value | Why |
+|---|---|---|
+| `sharedKey` | false (per-participant keys) | one key per direction |
+| `keyDerivationAlgorithm` | HKDF | not PBKDF2 (100,000 rounds for nothing: the input is a key, not a password) |
+| `ratchetSalt` | the ASCII bytes of `vettid/vms/2/call-frame` | the frame-key derivation's salt |
+| `ratchetWindowSize` | 0 | no ratchet: one fresh key a call |
+| `uncryptedMagicBytes` | empty | otherwise a frame ending in them is played without decryption **[S]** |
+| `failureTolerance` | 10 | decryption failures after which the receiver reports `DECRYPTIONFAILED` |
+| `keyRingSize` | 1 | key index 0 only |
+| `discardFrameWhenCryptorNotReady` | true | belt only: it concerns empty frames, and upstream's `KeyProviderOptions` copy constructor does not copy it, so its value inside the provider is not determined **[S]**. Nothing here relies on it |
+
+One sender cryptor (on the audio sender, participant id `send`) and one
+receiver cryptor (on the audio receiver, participant id `receive`);
+`setKey("send", 0, k_dir(mine))`, `setKey("receive", 0, k_dir(theirs))`.
+The participant id only selects a key in the provider: it is not in the
+frame and not in any derivation **[S]**.
+
+```
+frame_key = HKDF-SHA-256(ikm = k_dir, salt = the suite's frame-key label, info = 128 bytes of 0x00, L = 16 (suite 1) | 32 (suite 2))
+```
+
+In the library release in use the length 16 is a literal, whatever the
+length of the material **[S]**, **[D]**: that is suite 1. AES-256-GCM
+exists in the code but cannot be reached through the key provider
+**[S]**; upstream PR #302 adds a key size. Suite 2 is that option, once
+a release has it. The state of that pull request was not re-read for
+this version.
+
+*The encrypted frame* **[S]** **[D]**.
+
+```
+header   = frame[0 .. u)                    u = clear bytes (audio: 1, for Opus the TOC byte)
+iv       = BE32(ssrc) || BE32(rtp_timestamp) || BE32(rtp_timestamp - (n mod 65535))      n = per-SSRC frame counter, from 0
+sealed   = AES-GCM(frame_key, iv, aad = header, plaintext = frame[u ..))                 ciphertext || 16-byte tag
+out      = header || sealed || iv || 0x0C || key_index                                   key_index = 0x00
+```
+
+- It runs on encoded frames, after the encoder and before RTP
+  packetization, so RTP headers, RTCP and DTLS-SRTP underneath are
+  untouched. A frame grows by 30 bytes (12 kbit/s at 50 Opus frames a
+  second).
+- The receiver reads the IV and the key index from the frame. A frame
+  that fails authentication is **dropped**: the decoder gets nothing,
+  so the listener hears silence, never noise or clear audio.
+- The two trailer bytes are not authenticated (changing them only makes
+  the frame undecryptable) **[I]**.
+- An empty frame (length 0) passes through unchanged in both
+  directions, with or without a key: it carries nothing.
+- **Suite 1 has 128-bit frame keys.** `k_call` comes from
+  MLKEM768X25519 (NIST category 3); AES-128 is category 1, so **the
+  frame cipher is the weakest part of a call's confidentiality**. The
+  owner accepted it for a first production release of calls
+  (2026-10-12); suite 2 follows when the media stack can do it.
+- **The IV is deterministic.** It is unique under a key while (SSRC,
+  RTP timestamp) does not repeat with the same counter value: within
+  one RTP stream until the timestamp wraps (about 24.8 hours of Opus at
+  48 kHz). One key per direction removes the cross-sender case, and the
+  12-hour end of a call ("Ending") keeps every call well inside the
+  wrap.
+- **No replay protection** at this layer (SRTP's replay window
+  underneath covers the network; a TURN server holds no SRTP key)
+  **[S]**.
+- **Hostile frames.** The stack reads the trailer and the IV by offsets
+  from the end of a frame without checking its length **[I]** (not
+  tested). Only the other device of the call can produce valid SRTP, so
+  it is a possible crash by a connection the member took a call from,
+  not a key or content exposure. To be reported upstream before
+  production.
+
+*Rules for a device.*
+
+1. **Never enable the media stack's logging.** Both key derivations log
+   the input key, the salt and the derived key at severity INFO **[S]**.
+2. **Both cryptors are created and enabled before any SDP is applied**,
+   and never disabled during a call: a disabled cryptor passes clear
+   audio in both directions **[S]**. **No media exists outside them:**
+   the SDP is checked to be one Opus audio section before it is
+   applied, and after the other side's SDP has been applied the device
+   checks that its peer connection has exactly one transceiver and that
+   it is the one carrying the cryptors; anything else ends the call as
+   not encrypted.
+3. **Remote `a=ssrc:` and `a=ssrc-group:` lines are removed** before
+   the other side's SDP is handed to the stack. Why: with an SSRC
+   announced, the stack attaches the receiver's frame decryption to
+   that one stream; RTP that arrives on any other SSRC of the section
+   gets a default stream created with the section's *default*
+   transformer, which is then none, and is decoded and played **[S]**.
+   A vault able to rewrite the unsigned SDP's fingerprint and
+   candidates could so pass the genuine encrypted audio on and add
+   clear audio of its own. With no SSRC announced, the receiver is
+   "unsignalled": its decryption is stored as the section's default and
+   is given to the first and to every later stream **[S]**, so audio on
+   any SSRC is decrypted under the call's key or dropped. Second lock:
+   a device that ever sees more than one received audio stream in its
+   statistics ends the call as not encrypted. (Still to be shown on two
+   phones.)
+4. **A sender without a key sends nothing** **[S]**: the calling
+   device, which has no key before the answer, sends no audio until it
+   has set its key.
+5. **Media that does not decrypt under the call's keys is never
+   played**, and the call does not continue without it: on
+   `DECRYPTIONFAILED` of the receiver, on any cryptor error, or on a
+   missing-key report once the keys have been set and media flows, the
+   device ends the call with `call.end{failed}` and says that the call
+   could not be encrypted. It does not set the key again: a receiver
+   that reported `DECRYPTIONFAILED` drops every further frame until its
+   key is set **[S]** **[D]**, and with one fresh key a call a second
+   attempt with the same key cannot succeed where the first did not.
+6. **A call is bound to the identity the app shows.** Before a device
+   uses an offer or an answer it checks that `peer_ik` in the event is
+   the key whose fingerprint the app shows on that connection's details
+   (§10.8), then the share under it; for an answer, the connection is
+   the one the call was placed to, whatever the event says. An event
+   for a connection the app does not know as active is not used.
+   **What this adds:** a call cannot be bound to another key than the
+   one on the connection's details; an event that names one connection
+   and carries another's key is refused; a call from a connection that
+   is unknown, pending, stale or blocked in the app is refused. **What
+   it does not add, by design:** protection against the member's own
+   vault. The connection list, with each `ik`, comes from that same
+   vault, as `peer_ik` does: a vault that lied would lie in both,
+   consistently. The check binds a call to the connection the vault
+   names and to the fingerprint the app shows, and nothing more. The
+   owner decided on 2026-10-12 (D23) that the app never pins the key
+   itself: the member's own vault is trusted ("Residual").
+7. **A hang-up before a lock.** A locked vault collects nothing: the
+   device ends a live call and waits (two seconds at most) for its
+   `call.end` to be with the relay before it asks the vault to lock.
+
+Test vectors: §16 and vettid-vault `testdata/vectors/calls.json`.
+
+**Mixed releases (C2; decision D20).** A device learns its vault's
+level from the one `call.list` it sends after each unlock (CALLS-PLAN
+§12.5): `unsupported_type` means no calls; an answer without `v` means
+S10; `v: 2` means C2. Nothing is cached across an unlock. A vault never
+learns a peer vault's level and does not need to.
+
+| Device | Its vault | What happens |
+|---|---|---|
+| C2 app | S10 | The app sends form 1 only, no `keepalive` and no `call.keepalive` (an S10 vault answers an unknown type `unsupported_type`); it sends `call.end{timeout}` as caller; it runs the stale sweep by its own clock; no servers. Everything "What S10 leaves to the device" says |
+| app from before C2 | C2 | The vault accepts form 1 `call.start`; ends unanswered calls itself; does not watch the call (the app announces no keep-alives), so a dead app's call is held 12 h as at S10 unless the peer ends it; gives servers, which the app uses; applies glare, permission and limits. The app ignores members it does not know (`v`, `now`, `exp`, `device_id`, `superseded_by`, `suites`), and has no screen for the permission |
+| C2 app | C2, peer side S10 or older app | The offer carries both forms; the S10 side uses form 1; the answer comes back in form 1 and is accepted under the fail-closed rules. Glare and timeouts as stated under each rule |
+| C2 app | C2, peer side C2 | Form 2 with key confirmation |
+
+- An app MUST keep working against an S10 vault for as long as a
+  staging release without C2 is not `removed` (VAULT-RELEASES §3.2).
+- **Retiring form 1.** A later staging release (decision D20: the
+  first one cut after S10 and every other release without C2 is
+  `removed`) refuses form 1 and unwatched calls: a `call.start`
+  without `suites` or without `keepalive: true` is `bad_request`, an
+  offer without `suites` rings nobody (`drop.call_share`), and a
+  `call.answer` from a device without `keepalive: true` is answered
+  `call.end{unavailable}`. From that release a device may offer a second suite.
+  **Production never accepts form 1:** the first production release
+  with `calls` is cut after that point (STAGING-DEVELOPMENT-PLAN §2.4).
+
+**What each party can see and do after C2.**
+
+| Party | Sees | Can do | Cannot |
+|---|---|---|---|
+| The relay | Deposits to and from a vault's and a device's mailboxes: sizes and times, the burst at a call's start and end, and one deposit every 30 s during it | Delay or drop signalling: a call fails or does not ring | Read or change signalling |
+| The vault host (parent) | The same for its vaults; each state write's time (a call's start, answer and end are state writes; a keep-alive is not); the enclave's connections to the issuer (§2.2; VAULT-HOST-PROTOCOL §11.2) | The same, and keep the vault from the issuer (then no TURN) | Read signalling, credentials or anything in the enclave |
+| The member's own vault | Its member's calls: who, when, how long, audio or video; SDP and candidates in memory while it forwards them; the TURN credentials it hands out | Everything of "Residual" | Read media unless it swapped a share, which it can |
+| The other member's vault | The same for the call it is in, including this member's SDP and candidates (addresses) | Refuse or drop the call; change the unsigned SDP so that the call fails | Swap a share, change the suites or the choice (form 2), learn `k_call`, see this side's TURN credential |
+| The calling service | CALLING-SERVICE §9: addresses and traffic of relayed calls; for the issuer a vault host's address and a release | Refuse service | Read media; name a member |
+| A network observer | UDP between the phone and the TURN server or another address | Block it | Read or change media |
 
 **PQC.** `k_call` comes from MLKEM768X25519 (suite 2, PQC Phase 1).
 DTLS-SRTP below the frame encryption is classical and not relied upon
-(CALLING-SERVICE §7). The ICE configuration's signature is Ed25519 and
-becomes hybrid with suite 3.
+(CALLING-SERVICE §6). With media suite 1 the frame cipher is AES-128-GCM
+("The encrypted frame"). The ICE configuration's signature and the
+share signatures are Ed25519 and become hybrid with suite 3.
 
 ### 10.11 LEASH: the member's agents
 
@@ -9369,7 +10088,17 @@ recorded in the build's measurements:
   dev, where it names the gateway stand-in, PUSH-GATEWAY §10.4). Without
   it `push.register` is answered `unavailable` (§14.1);
 - (0.26.0) `features`, the optional features the image registers
-  ("Feature allowlist" below).
+  ("Feature allowlist" below);
+- (0.28.0, release C2; approved by the owner 2026-10-12) `calls_url`,
+  the calling service's credential issuer (§10.10 "Servers and
+  credentials"; CALLING-SERVICE §5): `https://calls.staging.vettid.org`
+  in staging. **Optional**: a channel file without it gives its devices
+  an empty ICE server list, as every release before C2 does. It MAY be
+  present only when `features` lists `calls`; it is an `https` URL of
+  a host name alone (no path, no port, no user), and a channel file
+  names only its own channel's host (as for the push gateway URL);
+  anything else is malformed. Production's file does not have it until
+  production has a calling service.
 
 GrapheneOS verified-boot keys and the vendor roots stay in code and are
 the same for every channel. A release build MUST refuse a channel file
@@ -9394,7 +10123,7 @@ feature packages' own (vettid-vault `features/<name>`):
 | Feature | Its types | Section | A connection can send it |
 |---|---|---|---|
 | `actions` | `action.*` | §10.14 | `action.offered`, `.invocation`, `.result` |
-| `calls` | `call.*` | §10.10 | `call.offer`, `.answer`, `.end`, `.ice`, `.ringing` |
+| `calls` | `call.*` | §10.10 | `call.offer`, `.answer`, `.end`, `.ice`, `.ringing` (0.28.0: `call.keepalive` and `call.permission.*` are device types only) |
 | `intro` | `intro.*` | §10.15 | `intro.offer`, `.answer`, `.connect`, `.invite`, `.link`, `.closed` |
 | `leash` | `leash.*`, `agent.request` | §10.11 | nothing (apps, desktops and agents only) |
 | `location` | `location.*` | §10.16 | `location.update`, `.shared`, `.stopped`, `.requested`, `.snapshot` |
@@ -9437,7 +10166,11 @@ account, push). The v1 app uses all of them.
     `settings.get` is unchanged.
 - **No list in the protocol.** No message carries a list of features or
   types today, and 0.26.0 adds none: an app or a peer learns that a
-  feature is absent from `unsupported_type`. The list is public all the
+  feature is absent from `unsupported_type`. (0.28.0) For calls that is
+  the intended probe: a build with calls code sends one `call.list`
+  after each unlock (CALLS-PLAN §12.5), and from release C2 the answer's
+  `v` also tells it which call rules its vault has (§10.10 "Mixed
+  releases"). The list is public all the
   same: it is in the tagged channel file, and a release's log entry
   names each feature the release turns on.
 - **Turning a feature on.** A later release of the channel may add a
@@ -11606,6 +12339,11 @@ Follow-ups:
    app UX review of the approval screen.
 6. **ICE issuer secret.** How the coturn shared secret (or a managed
    provider's credentials) reaches the enclave (CALLING-SERVICE §5, §10).
+   **Closed (0.28.0; owner decision D4 of 2026-10-11, CALLS-PLAN §9):**
+   it does not. The calling service's issuer gives short-lived
+   credentials to attested vaults (§10.10 "Servers and credentials";
+   CALLING-SERVICE 0.2.0 §5), and no secret of the service is in any
+   enclave.
 7. **LEASH HTTP action.** LEASH's HTTP action (the vault makes a
    request with an injected secret) needs egress from the enclave beyond
    the relay and KMS allowlist, and waits for a decision on enclave
@@ -13248,6 +13986,45 @@ Follow-ups:
     stays by class, the digest to be named before any release pins
     two certificates of one class (§11.7.1).
 
+36. **Calls, phase C2 (0.28.0).** The
+    owner said on 2026-10-12 to start the C2 design so that C2 can
+    begin as soon as C1's two-phone test passes. It follows the
+    decisions already made (CALLS-PLAN §9 D1–D11 and §12: direct media
+    by default with TURN as the fallback; STUN and TURN both needed, on
+    one small instance in the staging account; credentials issued to
+    attested vaults only; AES-128-GCM frames until the media stack has
+    a 256-bit option, suite 2 registered; known-good algorithms only;
+    versioned, negotiated suites bound into the keys, signed in C2's
+    vault release; key confirmation before microphone audio before a
+    second suite is ever offered; calls off in production until
+    promotion). **Answered (owner, 2026-10-12, on vettid.org #243):
+    "d23 should be c, all other d recommendations are approved."** So,
+    as recommended (CALLS-PLAN §13.5): D12 liveness by
+    `call.keepalive`; D13 a pool of credentials, one per call; D14
+    6 hours; D15, D16 the relay's caps and its daily stop; D17 the
+    issuer as its own service; D18 TURN over TLS in C5; D19 counters
+    only; D20 both forms in C2, form 1 refused by a later staging
+    release and never accepted in production; D21 glare; D22 the call
+    limits; D24 the push wake for a ringing call (V4) rides in release
+    C2; D25 the parent's allowlist names both channels' issuers; D26
+    key confirmation in every form 2 call. **D23, as (c): the app
+    never pins a connection's identity key itself.** A member's own
+    vault is trusted, for calls and messages alike (§2.1); there is no
+    app-side pin and no changed-key warning (§10.10 "Residual").
+    **Still to write before release C2 is cut:** the §14.2 text for
+    V4's wake (D24), to be approved by the owner first.
+    **Taken from code, not decided here:** everything of §10.10 not
+    marked (C2) (vettid-vault `features/calls`, `vms/callwire` at
+    `079cde7`), and "Media suites and keys" (vettid-android
+    `docs/calls/CALL-MEDIA.md` and `core/vault` `CallApi.kt` at
+    `19a60a7a`). **Not verified:** that phase C1's fourth pull request
+    and its two-phone test change none of this (they are not done);
+    the state of webrtc-sdk/webrtc pull request 302; a vector for
+    `m2` and the signatures over it (they come with the vault's
+    implementation, as `calls.json` did). Follow-ups: vettid-vault
+    (release C2), `vettid/vettid-calls` (new), the stacks here,
+    vettid-android, and a later staging release that refuses form 1.
+
 ## 16. Test vectors
 
 These vectors use fixed seeds and are for **test use only**. The complete
@@ -13535,7 +14312,87 @@ The hashed bytes are the 33-byte label, `0x00`, the origin, `0x00` and
 the 44 characters of `locator || code`. `0xd8d41` is `11011 00011 01010
 00001`, the characters `V`, `3`, `A`, `1`.
 
+**0.28.0.** Calls (§10.10). The key agreement, the shares of form 1
+and the signed ICE configuration are in vettid-vault's `calls.json`
+(not printed here). From it, `call_id` = `01JB2Z6V9K3M4N5P6Q7R8S9T50`
+and `k_call` =
+`249a59aa1f48257c5fcf41f064b7ea6e39266b392f7f013e5416ee1a016ab528`
+(TEST ONLY). The direction and frame keys below are those of
+vettid-android `docs/calls/CALL-MEDIA.md` §8, computed there twice
+(the app's `CallVectorsTest`, and independently in Python):
+
+```
+offered "1",   chosen "1": k_dir("caller") = df07dfb74e30ab8b952a864b0214911649859b9d371d50cc04daa84d5c952c08
+                           frame key        = df487affce123283952f691628c1c2de
+offered "1",   chosen "1": k_dir("callee") = 8e8b93784e37abb2257c2d42e47a0839e5aee933610f511c218199ebb7da637e
+                           frame key        = 81e8788d323103611d582bd089af9be4
+offered "2 1", chosen "2": k_dir("caller") = 129e7ea015351c448613b72d821141780fbc2681c9562f2b47894d999c609617
+                           frame key (suite 2, 32 bytes; provisional) = e2637ed9e4ab88d26b3f34869104e58d355e1eb7b6c5b7d3aea521bda4fd83da
+offered "2 1", chosen "1": k_dir("caller") = eb7c3d3b7c0d8d3a42b85e908c9f9dbf5b76a56a11e91d0e9138134c7328aec0
+```
+
+One audio frame under the first frame key: frame
+`78797a7b7c7d7e7f808182838485868788898a8b` (20 bytes, the first one
+clear), SSRC `0x11223344`, RTP timestamp 960, counter 0:
+
+```
+iv     11223344000003c0000003c0
+sealed 780a14a5d44d9ba28ccf9ad78a82e7855c69d9584297c8aef4c5bf19d8a503b6d6aae36a11223344000003c0000003c00c00
+```
+
+Key confirmation (release C2). Computed for this version with Python's
+`hmac` only (the same script reproduces the first `k_dir` and frame key
+above); **to be confirmed by the vault's and the app's
+implementations**, which add them, and vectors for `m2` and its
+signatures, to `calls.json`:
+
+```
+k_confirm                         = 12c88150b1abc8da386bf6a3696d93d62822219b8bd78e261a0f76f324ba3745
+offered "1",   chosen "1": confirm = 1de1b870c70b6d31341e16cae1da4c3f0e37c464c36829f680928bce9a956c98
+offered "2 1", chosen "2": confirm = c1c16037039feb19baac8ccba435c2a14da34589c9168de751f308a49b3191ae
+offered "2 1", chosen "1": confirm = 670880acb3774ddf276f017d5dba3338777143e27d0e73f20e7f30d711e11d02
+```
+
 ## 17. Changelog
+
+- **0.28.0** (2026-10-12): normative; **approved by the owner
+  2026-10-12** (vettid.org #243; D12–D26 of CALLS-PLAN §13.5 as
+  recommended, except D23, decided as (c): the app never pins a
+  connection's identity key itself); needs a vault release (staging "release C2") and a host
+  stack deploy. Calls, phase C2 (CALLS-PLAN 0.1.3 §13; CALLING-SERVICE
+  0.2.0). Nothing changes for a vault before release C2, and nothing
+  for production, which has no calls.
+  - §10.10, rewritten: what S10 runs, and each C2 rule marked (C2).
+    New types `call.keepalive`, `call.permission.set`,
+    `call.permission.list`. New members: `suites`, `ek_sig2`,
+    `keepalive` (`call.start`); `suites`, `device_sig2`, `vault_sig2`
+    (`call.offer`); `suite`, `offered`, `confirm`, `keepalive`
+    (`call.answer`); `superseded_by` (`call.end` to devices); `v`,
+    `now`, `exp`, `device_id` (`call.list`). New error code
+    `calls_off`. No new `call.end` reason.
+  - The ring timer (V2), liveness (V3), glare (V6), permission and
+    limits (V5), servers and credentials in the ICE configuration
+    (V1, V8).
+  - Form 2 of the signed shares (`offer2`, `answer2`: the exact
+    bytes), key confirmation, the three fail-closed rules while S10's
+    form 1 exists, "Mixed releases" and the retirement of form 1.
+  - "Media suites and keys": vettid-android `docs/calls/CALL-MEDIA.md`
+    lifted as the normative source (registry, attributes, direction
+    keys, frame cryptor options, frame key, encrypted frame, rules).
+  - What each party can see and do after C2; "Residual" compared
+    before and after.
+  - As built, corrected: host candidates only at S10; the 256
+    `call.ice` are for both directions together; `call.start`'s
+    `owner_check_required` and `internal`; a device's
+    `call.end{hangup}` after a failed `call.start`; ring time from
+    the vault's clock; the 12-hour end of a call.
+  - §8.5, §10 (registry and "Calls"), §10.1 (`calls_off`), §10.9
+    (audit kinds; `count` on `call.missed`), §11.10.8 (`calls_url`;
+    the `call.list` probe), §15 item 6 (closed) and item 36 (new),
+    §16 (the media-key vectors; provisional key-confirmation vectors).
+
+- **0.27.2 to 0.27.4** (2026-10-12): editorial-normative errata; see
+  the front matter.
 
 - **0.27.1** (2026-10-11): editorial-normative; errata to 0.26.0 and
   0.27.0 from their implementations (vettid-vault #62, #63 and #64 in
