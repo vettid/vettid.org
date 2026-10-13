@@ -255,3 +255,28 @@ export function tokenFromHash(hash) {
   const t = params.get('t');
   return t && TOKEN_RE.test(t) ? t : null;
 }
+
+// ── A cancel the API answered 404 (MEMBER-API 2.6.3) ────────────────────
+
+/** The cancel route's own 404: `not_found`. A 404 without that code (not the API's JSON) is an ordinary error. */
+export function cancelNotFound(err) {
+  return err?.status === 404 && err?.code === 'not_found';
+}
+
+/**
+ * What the recovery page does after a cancel answered `404 not_found` and
+ * the state was reloaded. `loaded`: the reload succeeded; `recovery`: the
+ * recovery it fetched (null: none); `oldId`: the recovery the cancel named;
+ * `active`: the fetched recovery is in progress.
+ * The old recovery's key is deleted only when the reload confirms that the
+ * API no longer names that recovery.
+ *  - reload_failed: nothing is known; the key stays (error).
+ *  - still_current: the API still names it; the key stays (error).
+ *  - replaced: a newer recovery is in progress (notice).
+ *  - gone: the vault has no recovery in progress (notice).
+ */
+export function cancelGoneOutcome({ loaded, recovery, oldId, active }) {
+  if (!loaded) return { deleteKey: false, kind: 'reload_failed' };
+  if (recovery && recovery.recovery_id === oldId) return { deleteKey: false, kind: 'still_current' };
+  return { deleteKey: true, kind: recovery && active ? 'replaced' : 'gone' };
+}
