@@ -171,7 +171,8 @@ export function admittedAtKeyCreation(releases: readonly ReleaseEntry[], release
  * 0.1.24 rule. The keys of staging releases 1 to 11 were created before
  * it and can never change: release 11's admits releases 7 to 10 only, so
  * staging releases 3 to 6 (removed 2026-10-13, keys deleted 2026-10-20)
- * can be rescued only into release 10, and only while it is `active`.
+ * could be rescued only into release 10, and only while it was `active`
+ * (until 2026-10-13, when release 11 was published).
  * rescueTargetProblems starts with the release named here.
  */
 export const RESCUE_RULE_FROM: Record<Channel, number> = { prod: 1, staging: 12 };

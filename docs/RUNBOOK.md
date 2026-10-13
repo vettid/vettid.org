@@ -875,9 +875,11 @@ extra release is harmless to the key check, but the manifest must list
 it while the key lives).
 
 Staging releases 1 to 11 have keys from before this rule. Release 11's
-key admits 7 to 10 only, so staging 3 to 6 (removed 2026-10-13) can be
-rescued only into release 10, only while it is `active`, until their
-keys are deleted on 2026-10-20.
+key admits 7 to 10 only, so staging 3 to 6 (removed 2026-10-13) could be
+rescued only into release 10, only while it was `active`; release 11 is
+`active` since 2026-10-13, so they have no target any more. Their keys
+are deleted on 2026-10-20 (release 3's some hours after the others: its
+deletion was scheduled again after the rescue rehearsal of 2026-10-13).
 
 1. `npx cdk diff VettidOrgVaultStack --profile vault-prod`: exactly one new
    `Custom::VettidReleaseKey` and its SSM parameter. Read its `Policy`
