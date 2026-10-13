@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.29.2
+version: 0.29.3
 date: 2026-10-13
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -13,7 +13,7 @@ related:
   - CALLS-PLAN.md (0.1.3) §13 (phase C2; decisions D12–D26, decided 2026-10-12)
   - PUSH-GATEWAY.md (0.4.4)
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.6.1)
+  - MEMBER-API.md (2.6.2)
   - ANDROID-PLAN.md (0.1.37)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -21,9 +21,21 @@ related:
   - VAULT-RELEASES.md (0.1.19; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
-  - VAULT-HOST-PROTOCOL.md (0.1.5; the enclave ↔ parent protocol as built)
+  - VAULT-HOST-PROTOCOL.md (0.1.6; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.29.3: editorial-normative erratum, as built in vettid-vault #75
+    (the parent only; the enclave and its measurements do not change);
+    approved by the owner 2026-10-13. No wire change. §11.1,
+    "Instances and leases": **a parent whose queue is gone while it
+    runs creates it again** under the same name, and after a
+    disconnection it publishes its registry row only after checking
+    for its queue (VAULT-HOST-PROTOCOL 0.1.6 §9, §13 point 12).
+    §11.1, the member gate, as built in vettid.org #254 (MEMBER-API
+    2.6.2): **an account that is not active keeps lock and the two
+    cancels** (of a pending vault deletion and of a pending recovery),
+    and a suspended account is treated as a cancelled one; before, the
+    sentence named lock only
   - 0.29.2: editorial-normative errata, as built; approved by the owner
     2026-10-13. No wire change, no new vault release. **The member
     API** (vettid.org #253, MEMBER-API 2.6.1). §11.5: `GET
@@ -8335,8 +8347,11 @@ current terms: the vault keeps working when the terms change, and the
 portal and the app (through the account snapshot, §11.13) ask the member
 to accept. Lock and status stay available for an existing vault
 whatever the account state, because locking only reduces exposure.
-Cancelling the account blocks vault access (every route but lock) at once;
-after the 7-day grace period the API deletes the member's vault rows, the
+An account that is not active (cancelled by the member, or suspended)
+is refused every vault route at once except lock and the two cancels:
+of a pending vault deletion (session, app key or the email link) and of
+a pending recovery (session or the email link) (0.29.3; MEMBER-API 2.6.2
+"Access"). After a cancelled account's 7-day grace period the API deletes the member's vault rows, the
 stored encrypted state and headers (`vaults/<vault_id>/`), and the
 enclave's member index object (`users/<hex SHA-256("vettid/vms/2/user" ||
 0x00 || user_guid)>/vault`, which holds only a `vault_id`) (§11.5).
@@ -8348,7 +8363,12 @@ enclave's member index object (`users/<hex SHA-256("vettid/vms/2/user" ||
   prefix `vettid-org-`), which the parent creates at boot and deletes at
   shutdown. `instance_id` matches `[A-Za-z0-9_-]{1,48}`. The API sends only
   to that name in its own account. A sweeper removes queues of instances
-  that have gone away.
+  that have gone away. A parent whose queue is gone while it runs (swept
+  while its enclave was disconnected, or deleted by hand) creates it
+  again under the same name, and after a disconnection it publishes its
+  registry row only after checking for its queue; SQS's refusal of a
+  recently deleted name withholds the row, another failure of the check
+  does not.
 - The instance publishes `{instance_id, release, queue_url, descriptor,
   attestation, heartbeat_at}` to an **instance registry** and heartbeats at
   least every 30 s. An instance whose `heartbeat_at` is more than 90 s old

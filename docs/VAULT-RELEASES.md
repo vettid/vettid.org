@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.21
+version: 0.1.22
 date: 2026-10-13
 owner: Al Liebl (Mesmer)
 changelog:
@@ -164,15 +164,30 @@ changelog:
     (the Go version of the enclave image) and #74 (a `Ping` read while
     the vaults are being locked, VAULT-HOST-PROTOCOL 0.1.5 §4.3); no
     log record changes. `related` brought up to date
+  - 0.1.22 (owner decision of 2026-10-13: the current version and 3 to
+    5 older versions are enough; as built in vettid.org #258; approved
+    by the owner 2026-10-13). **The data bucket keeps fewer old
+    versions**: two lifecycle rules, one that removes a noncurrent
+    version 1 day after it was replaced unless it is one of the 5
+    newest noncurrent versions of its object, and the rule the bucket
+    always had, which removes every noncurrent version after 7 days.
+    §8.2: the bucket's retention. §11.4: the objective for stored state
+    after an operator or code error (24 hours for any version, then
+    the 5 newest older versions, for at most 7 days), and the sentence
+    on deleted vault data. §14: O9. **Nobody gets a shell on a vault
+    host** (owner decision of 2026-10-13; vettid.org #252): §8.3, the
+    "Instance" bullet: no interactive access, Run Command only; before,
+    it said "SSM Session Manager only (sessions logged)". `related`
+    brought up to date
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
-  - VAULT-MESSAGING.md (0.29.2) §11.10 release updates, §12.5 deletion, §13.5, §13.9
+  - VAULT-MESSAGING.md (0.29.3) §11.10 release updates, §12.5 deletion, §13.5, §13.9
   - RELEASE-UPDATES.md (0.3.3) — member-facing; §3 changes with this plan; §5 the release log
   - ANDROID-PLAN.md (0.1.37) — the app's "What's new" from the log
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2) — staging as the development channel; D1–D11
   - CALLS-PLAN.md (0.1.3) §13, CALLING-SERVICE.md (0.2.0) §5.5, §8 — the calling service's issuer in the egress controls; `calls_url`
   - MEMBER-API.md "Vault", RUNBOOK.md, ARCHITECTURE.md
-  - VAULT-HOST-PROTOCOL.md (0.1.5) — the enclave ↔ parent (vsock) protocol as built; §10 what happens if versions meet
+  - VAULT-HOST-PROTOCOL.md (0.1.6) — the enclave ↔ parent (vsock) protocol as built; §10 what happens if versions meet
   - vettid-vault docs/SMOKE.md (hardware smoke test, 2026-10-02)
 classification: public (no secrets; safe for github.com/vettid)
 ---
@@ -1086,8 +1101,10 @@ group (`vault-drain`, 300 s, default CONTINUE); per-release alarm: desired
 
 **Data bucket** `vettid-org-vault-data-<account>`: block public access,
 SSE-S3 (objects are already DEK-encrypted or KMS-sealed), TLS only,
-versioned, noncurrent versions and delete markers expire after **7 days**
-(O9). Prefixes: `vaults/`, `users/`, `manifests/`. Conditional writes
+versioned; a noncurrent version expires 1 day after it was replaced
+unless it is one of the 5 newest noncurrent versions of its object, and
+in any case after **7 days**; a delete marker expires once no version is
+left under it (O9). Prefixes: `vaults/`, `users/`, `manifests/`. Conditional writes
 (`If-None-Match`, `If-Match`) work on versioned buckets. Host access is
 limited to `vaults/*`, `users/*` and reading `manifests/*`; the cleanup job
 deletes `vaults/*` and `users/*` (VAULT-PLAN V5 account deletion).
@@ -1102,8 +1119,11 @@ editing the bucket policy first.
 
 - **Instance:** Graviton `m7g.large`, on demand (D2), Nitro Enclaves on,
   IMDSv2 with hop limit 1, encrypted gp3 root (20 GiB), no key pair, no
-  inbound, SSM Session Manager only (sessions logged), public IPv4 in a
-  public subnet.
+  inbound, no interactive access (Session Manager sessions, EC2 Instance
+  Connect and the serial console are denied to every principal by the
+  Vault OU policy); operated through Systems Manager Run Command only
+  (each command is recorded in CloudTrail and reported; its content is
+  not recorded), public IPv4 in a public subnet.
 - **AMI:** EC2 Image Builder, one image per release, built at deploy time
   by the release stack (`CfnImage`; the AMI id feeds the launch template
   directly). The component installs, from pinned sources with checksums:
@@ -1785,7 +1805,7 @@ the ad-hoc tool for testing hardware questions outside a release.
 | AZ loss | RTO ≤ 15 min | groups span two AZs |
 | Region loss (us-east-1) | accepted: vaults unavailable until it returns | keys are single-region (check 2 refuses multi-region keys) |
 | Stored state, AWS failure | RPO 0 | S3 durability, conditional writes |
-| Stored state, operator or code error | ≤ 7 days to restore an object version | versioning, 7-day noncurrent retention; a restored older version is a rollback that apps detect and warn about (§13.2) |
+| Stored state, operator or code error | ≤ 24 hours to restore any object version; after that only the 5 newest older versions of an object, for at most 7 days | versioning; noncurrent versions kept 1 day, then the 5 newest, none beyond 7 days; a restored older version is a rollback that apps detect and warn about (§13.2) |
 | Key deleted by mistake | 30 days to cancel | KMS window, CloudTrail alarm |
 | Host role deleted | catastrophic, prevented | §6.3 |
 
@@ -1793,7 +1813,7 @@ No backup or export outside the service (owner decision, 2026-10-03).
 The one exception, the member's History export of activity metadata
 from the app (owner decisions of 2026-10-08, VAULT-MESSAGING 0.22.0
 §10.9), is no backup: nothing restores from it, and it changes none of
-the objectives above. The 7-day retention also bounds how long deleted vault data lingers.
+the objectives above. No noncurrent version is kept longer than 7 days, which also bounds how long deleted vault data lingers.
 
 ## 12. First deployment
 
@@ -1918,5 +1938,5 @@ All ten recommendations below were **accepted by the owner on 2026-10-04**.
 | O6 | Instance size | **m7g.large**, enclave 1 vCPU and 5 GiB. Measured on S3 (W9, §8.8); owner 2026-10-06: kept for release 1, revisit when unlock queueing shows in metrics |
 | O7 | Always-on minimum for the current release | **0 until production members exist** (on-demand start, ~2–3 min first unlock), **1 from the Android beta** on |
 | O8 | Android signing digest(s) to pin (blocked release 1 until 2026-10-11) | Accepted 2026-10-04: pin the **Play app signing certificate and the upload certificate** used for direct builds, decided when the Android signing key is created. **Amended by the owner on 2026-10-11** (ANDROID-PLAN 0.1.36 §7; §5.2): Google generates and holds the Play app-signing key; the certificate called "upload" here is VettID's release key, which signs the F-Droid and direct builds and is never given to Google; a separate key, never pinned, uploads to Play. **Release 1 pins VettID's certificate only**; the Play certificate is pinned by a later release, before the Play listing goes live; each vault is bound to its app's signer |
-| O9 | Data bucket retention and DR | Versioned, **7-day** noncurrent retention; region loss accepted for the preview; no second-region keys |
+| O9 | Data bucket retention and DR | Versioned; noncurrent versions kept **1 day, then the 5 newest, none beyond 7 days** (owner, 2026-10-13; before: 7 days); region loss accepted for the preview; no second-region keys |
 | O10 | Manifest size | **M1** (manifest by hash, supplied by the host) before release 1 |
