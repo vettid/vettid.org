@@ -30,7 +30,12 @@ changelog:
     "Instances and leases": **a parent whose queue is gone while it
     runs creates it again** under the same name, and after a
     disconnection it publishes its registry row only after checking
-    for its queue (VAULT-HOST-PROTOCOL 0.1.6 §9, §13 point 12)
+    for its queue (VAULT-HOST-PROTOCOL 0.1.6 §9, §13 point 12).
+    §11.1, the member gate, as built in vettid.org #254 (MEMBER-API
+    2.6.2): **an account that is not active keeps lock and the two
+    cancels** (of a pending vault deletion and of a pending recovery),
+    and a suspended account is treated as a cancelled one; before, the
+    sentence named lock only
   - 0.29.2: editorial-normative errata, as built; approved by the owner
     2026-10-13. No wire change, no new vault release. **The member
     API** (vettid.org #253, MEMBER-API 2.6.1). §11.5: `GET
@@ -8342,8 +8347,11 @@ current terms: the vault keeps working when the terms change, and the
 portal and the app (through the account snapshot, §11.13) ask the member
 to accept. Lock and status stay available for an existing vault
 whatever the account state, because locking only reduces exposure.
-Cancelling the account blocks vault access (every route but lock) at once;
-after the 7-day grace period the API deletes the member's vault rows, the
+An account that is not active (cancelled by the member, or suspended)
+is refused every vault route at once except lock and the two cancels:
+of a pending vault deletion (session, app key or the email link) and of
+a pending recovery (session or the email link) (0.29.3; MEMBER-API 2.6.2
+"Access"). After a cancelled account's 7-day grace period the API deletes the member's vault rows, the
 stored encrypted state and headers (`vaults/<vault_id>/`), and the
 enclave's member index object (`users/<hex SHA-256("vettid/vms/2/user" ||
 0x00 || user_guid)>/vault`, which holds only a `vault_id`) (§11.5).

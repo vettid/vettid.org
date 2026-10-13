@@ -174,7 +174,11 @@ changelog:
     §8.2: the bucket's retention. §11.4: the objective for stored state
     after an operator or code error (24 hours for any version, then
     the 5 newest older versions, for at most 7 days), and the sentence
-    on deleted vault data. §14: O9. `related` brought up to date
+    on deleted vault data. §14: O9. **Nobody gets a shell on a vault
+    host** (owner decision of 2026-10-13; vettid.org #252): §8.3, the
+    "Instance" bullet: no interactive access, Run Command only; before,
+    it said "SSM Session Manager only (sessions logged)". `related`
+    brought up to date
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.29.3) §11.10 release updates, §12.5 deletion, §13.5, §13.9
@@ -1115,8 +1119,11 @@ editing the bucket policy first.
 
 - **Instance:** Graviton `m7g.large`, on demand (D2), Nitro Enclaves on,
   IMDSv2 with hop limit 1, encrypted gp3 root (20 GiB), no key pair, no
-  inbound, SSM Session Manager only (sessions logged), public IPv4 in a
-  public subnet.
+  inbound, no interactive access (Session Manager sessions, EC2 Instance
+  Connect and the serial console are denied to every principal by the
+  Vault OU policy); operated through Systems Manager Run Command only
+  (each command is recorded in CloudTrail and reported; its content is
+  not recorded), public IPv4 in a public subnet.
 - **AMI:** EC2 Image Builder, one image per release, built at deploy time
   by the release stack (`CfnImage`; the AMI id feeds the launch template
   directly). The component installs, from pinned sources with checksums:
