@@ -393,6 +393,11 @@ export const timing = {
  *  - lock: any account holder with a vault, whatever the account state,
  *    including a canceled account in its grace period (locking only
  *    reduces exposure);
+ *  - cancelling a recovery or a start-over: any account holder too,
+ *    whatever the account state, with the session, the email link or (the
+ *    start-over) the app key. Cancelling only keeps the vault as it is, and
+ *    a suspended account must not lose the one thing its owner can still do
+ *    against a deletion or a recovery somebody else asked for;
  *  - status, request polling, reading and revoking a setup code: an active
  *    account (cancellation blocks them);
  *  - issuing a setup code, the recovery request and its status: an active
@@ -1895,7 +1900,8 @@ router.on('GET', '/api/vault/recovery', async (req) => {
 });
 
 router.on('POST', '/api/vault/recovery/cancel', async (req) => {
-  const m = await loadActiveAccount(req);
+  // Whatever the account state, as for lock ("member gate" above): a cancel only keeps the vault as it is.
+  const m = await loadAccountHolder(req);
   const recoveryId = field(req.body, 'recovery_id', ULID_RE, 'a ULID');
   await limit(`vault-recovery-cancel#${m.user_guid}`, 30, 15 * 60);
   const v = activeVault((await currentVault(m.user_guid)).vault);
@@ -2171,14 +2177,12 @@ router.on('GET', '/api/vault/deletion', async (req) => {
 });
 
 // The portal's session, or the vault's app signed by its app key (§11.11.9).
+// Whatever the account state, as for lock ("member gate" above): a
+// suspended or canceled account can still stop its vault's deletion.
 router.on('POST', '/api/vault/deletion/cancel', async (req) => {
-  let c: Caller;
-  if (req.appHeader !== undefined) {
-    c = await appCaller(req, ['app']);
-    requireActive(c.m);
-  } else {
-    c = { via: 'session', m: await loadActiveAccount(req), vault: null, key: null, role: null };
-  }
+  const c: Caller = req.appHeader !== undefined
+    ? await appCaller(req, ['app'])
+    : { via: 'session', m: await loadAccountHolder(req), vault: null, key: null, role: null };
   const m = c.m;
   const deletionId = field(req.body, 'deletion_id', ULID_RE, 'a ULID');
   await limit(`vault-deletion-cancel#${m.user_guid}`, 30, 15 * 60);

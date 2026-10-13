@@ -150,6 +150,16 @@ export class VettidOrgAdminApiStack extends cdk.Stack {
       entry: 'lambda/admin/people.ts',
       environment: { ...env, MEMBER_POOL_ID: readRef(this, config, 'auth/member-pool-id'), ACCOUNT_PUSH_FN: accountPushFunctionName(config) },
     }).fn;
+    // Cancelling a member's pending vault deletion (the admin's cancel, and
+    // on reinstating an account) goes through the member API's start-over
+    // cancel function, invoked synchronously with `{task:
+    // "cancel_start_over", user_guid}`: this API holds no right on the vault
+    // tables. That function runs only this task; the cleanup job itself
+    // (its daily and scheduled runs) is not invocable from here. The ARN
+    // comes from SSM, so VettidOrgMemberApiStack is deployed first.
+    const startOverCancelFnArn = readRef(this, config, 'member-api/start-over-cancel-fn-arn');
+    people.addEnvironment('START_OVER_CANCEL_FN', startOverCancelFnArn);
+    people.addToRolePolicy(new iam.PolicyStatement({ actions: ['lambda:InvokeFunction'], resources: [startOverCancelFnArn] }));
     // Reinstating a member or extending a subscription sends the member's
     // running vault a fresh account snapshot (MEMBER-API 2.0.0), through the
     // member API's account-push function, by its fixed name.

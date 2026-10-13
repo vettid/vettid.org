@@ -4,8 +4,10 @@ import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 export class HttpError extends Error {
   constructor(
     readonly status: number,
-    readonly code: 'bad_request' | 'unauthorized' | 'forbidden' | 'not_found' | 'conflict' | 'internal',
+    readonly code: 'bad_request' | 'unauthorized' | 'forbidden' | 'not_found' | 'conflict' | 'internal' | 'recovery_active',
     message: string,
+    /** Further members of the error body, beside `error` and `message` (the admin API's `recovery_active`). */
+    readonly detail?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -113,7 +115,7 @@ export function parseBody(event: APIGatewayProxyEvent): Record<string, unknown> 
 
 /** Convert an unexpected error into a 500 without leaking internals. */
 export function errorResponse(err: unknown): APIGatewayProxyResult {
-  if (err instanceof HttpError) return json(err.status, { error: err.code, message: err.message });
+  if (err instanceof HttpError) return json(err.status, { ...(err.detail ?? {}), error: err.code, message: err.message });
   console.error('unhandled', err);
   return json(500, { error: 'internal', message: 'Internal error' });
 }
