@@ -42,7 +42,10 @@ describe('the trail bucket is write-once', () => {
     expect(lifecycle[0].Status).toBe('Enabled');
     expect(lifecycle[0].ExpirationInDays).toBe(days);
     // Without this the expired (then unlocked) versions would stay for ever.
-    expect(lifecycle[0].NoncurrentVersionExpiration).toEqual({ NoncurrentDays: 30 });
+    // One day: a record is gone 402 to 403 days after delivery (each of the
+    // two steps is rounded up to midnight UTC), which is what "400 days" in
+    // the privacy notice can honestly mean.
+    expect(lifecycle[0].NoncurrentVersionExpiration).toEqual({ NoncurrentDays: 1 });
   });
 
   test('nothing in the stack tries to empty or delete it', () => {

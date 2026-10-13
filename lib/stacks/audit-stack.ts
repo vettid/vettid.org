@@ -70,8 +70,14 @@ export class VettidOrgAuditStack extends cdk.Stack {
     // its versioning, turning Object Lock off again. Lowering the default
     // here later shortens the lock of new objects only. CloudFormation sets
     // this on the existing bucket in place. The lifecycle rule keeps
-    // working: its expiry at 400 days adds a delete marker (never refused),
-    // and the version itself goes 30 days later, when its lock has ended.
+    // working: its expiry at 400 days (rounded up to midnight UTC, so never
+    // before the lock ends) adds a delete marker, which the lock does not
+    // refuse, and the version itself is removed a day after that (owner
+    // decision, 2026-10-13: 1 day, not 30, so that "400 days" is true to
+    // within the rule's rounding: gone 402 to 403 days after delivery). A
+    // locked version hidden earlier by a hand-made delete marker stays
+    // until its lock ends; an unlocked one (delivered before the lock was
+    // turned on) is removed a day after it is hidden.
     // Never autoDeleteObjects, never a removal policy other than RETAIN: a
     // locked bucket cannot be emptied, and a stack that tries fails.
     const trailBucket = new s3.Bucket(this, 'TrailBucket', {
@@ -87,7 +93,7 @@ export class VettidOrgAuditStack extends cdk.Stack {
         {
           transitions: [{ storageClass: s3.StorageClass.GLACIER_INSTANT_RETRIEVAL, transitionAfter: cdk.Duration.days(90) }],
           expiration: cdk.Duration.days(TRAIL_RETENTION_DAYS),
-          noncurrentVersionExpiration: cdk.Duration.days(30),
+          noncurrentVersionExpiration: cdk.Duration.days(1),
         },
       ],
     });

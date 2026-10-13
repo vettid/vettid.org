@@ -1990,11 +1990,15 @@ for this one trail only (`aws:SourceArn` on all three of its statements).
   default that is lowered or removed by someone else is a way to make
   *future* records deletable, and is a thing to check (below).
 
-**What still works.** Reading, as before. The lifecycle rule: after 400
-days it puts a delete marker on a file (the lock never refuses a
-marker), and 30 days later, the lock being over, the file itself is
-removed; so a record is gone for good about 430 days after delivery,
-and storage stops growing after that. Files smaller than 128 KB (nearly
+**What still works.** Reading, as before. The lifecycle rule: 400 days
+after delivery, at the next midnight UTC (so never before the lock
+ends), it puts a delete marker on a file, which the lock does not
+refuse; one day after that, again at the next midnight, the file itself
+is removed (1 day since this change, 30 before: owner decision,
+2026-10-13). So a record is gone for good 402 to 403 days after its
+delivery, a day or two more if S3's lifecycle run is late, and storage
+stops growing after that. "400 days" in the privacy notice means this.
+Files smaller than 128 KB (nearly
 all of them) stay in the standard storage class; the rule's move to
 Glacier Instant Retrieval at 90 days applies to the larger ones. Volume
 in October 2026: about 12 to 16 MB and 3,400 files a day for the whole
@@ -2003,7 +2007,13 @@ Object Lock itself costs nothing.
 
 **What it does not cover.**
 
-- Files delivered **before** the deploy (from 2026-10-01) carry no lock.
+- Files delivered **before** the deploy (from 2026-10-01) carry no lock,
+  and the 1-day rule above makes them easier to lose than before: one
+  that gets a delete marker, by mistake or on purpose, is removed for
+  good a day later (30 days before this change), so there is about a
+  day to notice and delete the marker. A locked file in the same
+  situation is not removed until its lock ends. Giving the old files a
+  lock ends that difference.
   They can be given one by hand, one version at a time
   (`aws s3api put-object-retention --bucket <bucket> --key <key>
   --version-id <id> --retention
@@ -2011,8 +2021,9 @@ Object Lock itself costs nothing.
   date set too late cannot be corrected.
 - A deletion *request* is not refused: `delete-object` without a version
   id adds a delete marker, and the file then looks deleted in a plain
-  listing. It is still there (`list-object-versions`); deleting the
-  marker (by its version id) brings it back.
+  listing. A locked file is still there (`list-object-versions`) until
+  its lock ends, and deleting the marker (by its version id) brings it
+  back; it is then removed at the end of its lock, not two days later.
 - Stopping the record at its source. The trail lives in the management
   account, which no service control policy can bind (the `ProtectAuditTrail`
   statement of `vettid-workloads-baseline` covers the member accounts
