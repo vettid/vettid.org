@@ -29,6 +29,7 @@ import {
   ReleaseFile,
   consistencyProblems,
   manifestEntries,
+  admittedExtraProblems,
   renderManifest,
   rescueOverdueProblems,
   rescueTargetProblems,
@@ -47,7 +48,7 @@ export interface ChannelCheck {
   file: ReleaseFile;
   /** The served document now (working tree), or null. */
   served: Buffer | null;
-  /** The time of the check (default: now); read only for a rescue in progress (rescueOverdueProblems). */
+  /** The time of the check (default: now); read for a rescue in progress and a keyless candidate's list (rescueOverdueProblems, admittedExtraProblems). */
   now?: Date;
   pinnedKeys: readonly string[];
   /**
@@ -80,6 +81,23 @@ const toParsed = (m: { serial: number; issued_at: string; releases: ManifestEntr
   issued_at: m.issued_at,
   releases: m.releases as ManifestEntry[],
 });
+
+/**
+ * What `vault:manifest sign` refuses before it signs the manifest of
+ * `file` with `serial` and `issuedAt` after `prev` (the served manifest,
+ * or null): status and date consistency, a rescue target for every
+ * removed release still in its window, a keyless candidate's list, and
+ * the successor rules.
+ */
+export function signProblems(file: ReleaseFile, serial: number, issuedAt: string, prev: { serial: number; releases: readonly ManifestEntry[] } | null, now: Date = new Date()): string[] {
+  const entries = manifestEntries(file);
+  return [
+    ...consistencyProblems(entries, issuedAt),
+    ...rescueTargetProblems(file, issuedAt),
+    ...admittedExtraProblems(file, now),
+    ...(prev ? successorProblems(prev, { serial, releases: entries }) : []),
+  ];
+}
 
 export function checkChannel(c: ChannelCheck): string[] {
   const out: string[] = [];
@@ -136,7 +154,7 @@ export function checkChannel(c: ChannelCheck): string[] {
       }
     }
   }
-  for (const s of rescueOverdueProblems(c.file, c.now)) p(s);
+  for (const s of [...rescueOverdueProblems(c.file, c.now), ...admittedExtraProblems(c.file, c.now)]) p(s);
 
   // The sequence of published versions, ending with the current one.
   const seq = [...versions, { commit: 'working tree', m: c.served ? (current ?? safeParse(c.served)) : null }];

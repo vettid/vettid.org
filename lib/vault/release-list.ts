@@ -192,8 +192,35 @@ export function rescueTargetProblems(file: ReleaseFile, issuedAt: string): strin
   if (target.release < RESCUE_RULE_FROM[file.channel]) return [];
   const out: string[] = [];
   for (const e of file.releases) {
+    if (e.status === 'removed' && e.ends_at !== undefined && e.ends_at > issuedAt) {
+      out.push(`release ${e.release}: removed, but its ends_at ${e.ends_at} is after the manifest's issued_at: a removed release's ends_at is the time it ended, and its rescue window counts from it (VAULT-RELEASES §3.5)`);
+    }
     if (e.release < target.release && rescuable(e, file.channel, issuedAt) && !target.admitted_pcr0s.includes(e.pcr0)) {
       out.push(`release ${e.release} is removed and can be rescued until ${rescueEndsAt(e, file.channel)}, but the key of release ${target.release}, the newest active release, does not admit it: a rescued vault would have nowhere to move (VAULT-RELEASES §3.5)`);
+    }
+  }
+  return out;
+}
+
+/**
+ * A candidate whose key does not exist yet names a `removed` release that
+ * can no longer be rescued (its window is over, or it has no `ends_at`).
+ * Harmless to the enclave's key check (any listed release numbered at or
+ * below the target may be named), but the manifest must then list that
+ * release for as long as the new key lives. Depends on the time, so it is
+ * not part of the file validation: `check:manifest` and `vault:manifest
+ * sign` report it.
+ */
+export function admittedExtraProblems(file: ReleaseFile, now: Date = new Date()): string[] {
+  const at = whole(now);
+  const out: string[] = [];
+  for (const e of file.releases.filter((r) => r.status === 'candidate' && r.seal_key === '')) {
+    const due = admittedAtKeyCreation(file.releases, e.release, file.channel, at);
+    for (const a of e.admitted_pcr0s) {
+      const r = file.releases.find((x) => x.pcr0 === a)!;
+      if (!due.includes(r)) {
+        out.push(`release ${e.release}: admitted_pcr0s names release ${r.release}, which is removed and can no longer be rescued (VAULT-RELEASES §6.2): take it out of the list; if this release's key was already created with this list, write its ARN into seal_key`);
+      }
     }
   }
   return out;
@@ -294,7 +321,9 @@ const sealKeyRe = (account: string) => new RegExp(`^arn:aws:kms:us-east-1:${acco
  * Checks a release file against the plan's rules. `account` is the
  * channel's vault account (every seal key must be there, §3.1). `now` is
  * read by one rule only: what a candidate whose key does not exist yet
- * (`seal_key: ""`) must admit (admittedAtKeyCreation).
+ * (`seal_key: ""`) must admit (admittedAtKeyCreation). Time can only
+ * shorten that list, so a file that passes never starts to fail by time
+ * alone (CDK synth runs this, also to destroy a stack).
  */
 export function validateReleaseFile(raw: unknown, channel: Channel, account: string, now: Date = new Date()): ReleaseFile {
   const bad = (what: string): never => {
@@ -331,7 +360,7 @@ export function validateReleaseFile(raw: unknown, channel: Channel, account: str
     for (const a of admitted) {
       if (typeof a !== 'string' || !pcr0s.has(a)) at('admitted_pcr0s may only name earlier releases that are still listed (§7: every PCR0 a live key admits is listed)');
     }
-    // A key that does not exist yet (§6.2, 0.1.24): its list is exactly what a key created now admits.
+    // A key that does not exist yet (§6.2, 0.1.24): its list names at least what a key created now admits.
     if (candidate && e.seal_key === '') {
       const due = admittedAtKeyCreation(seen, n, channel, at0);
       for (const d of due) {
@@ -341,12 +370,7 @@ export function validateReleaseFile(raw: unknown, channel: Channel, account: str
             : `admitted_pcr0s must name release ${d.release} (${d.status}): every earlier release that is not removed may move into this one (VAULT-RELEASES §6.2)`);
         }
       }
-      for (const a of admitted) {
-        const r = pcr0s.get(a as string)!;
-        if (!due.some((d) => d.release === r)) {
-          at(`admitted_pcr0s names release ${r}, which is removed and can no longer be rescued (VAULT-RELEASES §6.2); if this release's key was already created with this list, write its ARN into seal_key`);
-        }
-      }
+      // A release named beyond those is not refused here but by admittedExtraProblems (check:manifest, sign).
     }
     if (e.published_at !== undefined && !isTime(e.published_at)) at('published_at must be RFC 3339 in whole seconds UTC');
     if (!candidate && e.published_at === undefined) at('published_at is required once the release is in a manifest');

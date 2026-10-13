@@ -189,6 +189,8 @@ changelog:
     an `active` release, a rescued vault had nowhere to move once a
     release created after the removal was `active` (seen on staging
     2026-10-13). §3.5: the rule, how the window is counted, the check,
+    the one case without a target (a release removed while an older
+    one is the newest `active`),
     why a move into a `deprecated` release was not chosen, and the
     staging releases whose keys are older than the rule. §6.2: the
     key policy. §7: the checks, and the list member `rescue`. §10.1
@@ -396,17 +398,21 @@ restores it, which is why the retirement role needs both (§4.1).
 
 **A rescue always has a target** (0.1.24; owner decision of
 2026-10-13). A rescued vault can do one thing: move, and only into an
-`active` release whose key admits N's PCR0 (§3.2; N's own enclave
-refuses any other target, and KMS refuses the seal). So every key
-created while N can still be rescued admits N:
+`active` release numbered above N whose key admits N's PCR0 (§3.2; N's
+own enclave refuses any other target, and KMS refuses the seal). The
+enclave accepts any such release; the release list's checks and the app
+choose the newest `active` one. So every key created while N can still
+be rescued admits N:
 
 - *The rule.* A new release's key admits every earlier release that is
   not `removed`, and every `removed` release whose rescue window is not
   over when the key is created (§6.2).
 - *The window.* It is counted from the release list: N's `ends_at` plus
   the channel's `retirement_window_days` (30 in production, 7 in
-  staging). A `removed` entry therefore keeps its `ends_at`. The list
-  does not know the day KMS deletes the key, which is later when
+  staging). A `removed` entry therefore keeps its `ends_at`, which is
+  the time the release ended and is never in the future: the checks
+  refuse a `removed` entry whose `ends_at` is after the manifest's
+  `issued_at`. The list does not know the day KMS deletes the key, which is later when
   deletion was scheduled late or again after a rescue; nothing is
   promised for that extra time.
 - *No `ends_at`.* A `removed` entry without `ends_at` is a release that
@@ -417,7 +423,15 @@ created while N can still be rescued admits N:
   `removed` release still in its window (at the manifest's `issued_at`)
   is not admitted by the key of the newest `active` release. So neither
   removing a release nor publishing a new one can leave a rescue
-  without a target (§7, §10.3).
+  without a target (§7, §10.3). The same two checks, not CDK synth,
+  report a candidate's list that names a `removed` release past its
+  window: naming it is harmless to the key check, but the manifest
+  would have to list it for as long as the new key lives.
+- *The one case without a target.* A release that was published and is
+  then removed while an older release is the newest `active` one has
+  no target: the enclave refuses a move to a lower release number. No
+  check reports it; removing such a release ends its vaults and is the
+  owner's decision each time.
 - *The alternative not chosen:* letting a rescued vault move into the
   newest release whose key admits it, even a `deprecated` one. Every
   published enclave image refuses a move whose target is not `active`,
@@ -963,7 +977,9 @@ role (trust, `PassRole`) to CloudFormation's deploy role.
   (`lib/vault/release-list.ts`): per release the manifest fields, `status`
   (`candidate` or a manifest status), `admitted_pcr0s` (fixed at key
   creation; 0.1.24: while `seal_key` is empty the validation refuses
-  any list but the one of §6.2, judged at the time of the check), an
+  a list that leaves out a release of §6.2, judged at the time of the
+  check, and `check:manifest` and `vault:manifest sign` report one that
+  names a `removed` release past its window), an
   optional `host` (the release stack's pins; absent: no stack; 0.1.24:
   on a `removed` entry only together with `rescue: true`, the marker of
   a rescue in progress, §10.3 step 3, which like `host` is never in the
@@ -1010,8 +1026,10 @@ role (trust, `PassRole`) to CloudFormation's deploy role.
   `retired` within 90 days of `ends_at`, nothing past its `ends_at` still
   running); every admitted PCR0 listed; (0.1.24) a rescue target for
   every `removed` release still in its window, an `ends_at` on every
-  `removed` release that was ever published as running, and no
-  `rescue: true` entry past its window; for production, the release log
+  `removed` release that was ever published as running, none of them
+  after the manifest's `issued_at`, no `rescue: true` entry past its
+  window, and no candidate without a key that names a `removed`
+  release past its window; for production, the release log
   pages current.
 - **Release log:** `/security/releases/` (`lib/vault/release-log.ts`,
   `scripts/vault/release-log.ts`): an index (number, publication date,
@@ -1711,7 +1729,7 @@ job's vault deletion. Order (W4):
 | 2 | `release` workflow: EIF ×2 per channel, measurements, parent binaries, attestations; draft GitHub release | CI, arm64 | artifacts, PCRs |
 | 3 | Independent rebuild; PCR0 must match | owner | sign-off |
 | 4 | Staging: add the staging release to `vault/releases/staging.json` (with `log` and `notes` = its staging log URL, §7), deploy its key and release stack, hardware self-test, vaultctl end-to-end, compat run incl. a move from the previous staging release (§11) | staging | report |
-| 5 | Production PR: add N to `vault/releases/prod.json` (status `candidate`: in CDK, not in the manifest; with `log`, reviewed in this PR, and `notes` = `https://vettid.org/security/releases/N/`), `admitted_pcr0s` = every earlier release not `removed` and every `removed` one that can still be rescued (§6.2; the validation refuses any other list while `seal_key` is empty; N's own PCR0 is admitted implicitly; `lib/vault/release-list.ts`) | vettid.org | PR |
+| 5 | Production PR: add N to `vault/releases/prod.json` (status `candidate`: in CDK, not in the manifest; with `log`, reviewed in this PR, and `notes` = `https://vettid.org/security/releases/N/`), `admitted_pcr0s` = every earlier release not `removed` and every `removed` one that can still be rescued (§6.2; while `seal_key` is empty the validation refuses a list that leaves one out, and `check:manifest` and `vault:manifest sign` one that names a `removed` release past its window; N's own PCR0 is admitted implicitly; `lib/vault/release-list.ts`) | vettid.org | PR |
 | 6 | Deploy `VettidOrgVaultStack` (creates the key); `vaultctl keycheck` against the draft manifest | owner | key ARN in `vault/releases/prod.json` |
 | 7 | Deploy `VettidOrgVaultRelease<N>Stack` (AMI with EIF verified against measurements; group min 0, canary 1) | owner | instance |
 | 8 | Hardware self-test on the canary host (`vault-parent -selftest` against the host stack's deletable smoke key), then normal start | SSM | PASS report |
@@ -1815,9 +1833,16 @@ with the notice job sending the emails of §3.5 automatically:
    key of the newest `active` release admits N); set
    `rescue: true` on its `vault-releases` row (the member API routes a
    `removed` release only then); the member moves into the newest
-   `active` release; remove `rescue` from the row; delete the release
+   `active` release and unlocks there. The rescue is done when an
+   unlock in the target release has succeeded, not when the vault
+   row's `sealed_release` names the target: the row changes as soon as
+   N has sealed the header, before the target has opened the vault,
+   and until then N must stay routed. Then remove `rescue` from the
+   row; delete the release
    stack and drop `host` and `rescue` from the entry; then schedule the
-   deletion again as in step 2. KMS takes the full window again, so the
+   deletion again as in step 2. In production both list edits are
+   merged to master before the deploy they belong to, like any release
+   list change. KMS takes the full window again, so the
    key outlives D+30 by the time the rescue took; the rescue window
    stays D … D+30. While an entry carries `rescue: true`, the
    validation refuses a release list in which the newest `active`
