@@ -1,21 +1,39 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.6.0
+version: 2.6.1
 changelog:
-  - 2.6.1 (proposed 2026-10-12, vettid.org #251; **needs the owner's
-    approval**: not approved yet, and the `version` line above stays
-    2.6.0 until it is). No route, answer or email changes. "Retention"
-    gains the rule "What is named by the address is deleted only by
-    its owner" (the email marker and the Cognito user go only if they
-    carry the id of the row being deleted, in every deletion) and
-    "The daily sweeps" (a canceled account and an unverified request:
-    row and marker in one transaction; what could not be removed after
-    the row is named in the audit event's `incomplete` and alarmed).
-    Audit events of a deletion may carry `sign_in_user: "left"`,
-    `email_marker: "left"` and `incomplete: [...]` in their detail.
-    ADMIN-API: `DELETE /admin/members/{user_guid}` answers `404` when
-    the row was removed by something else after the call read it.
+  - 2.6.1 (2026-10-13; editorial, errata as built; each clause below
+    is separate and names what it follows, so that further clauses can
+    be added).
+    *Vault recovery, as built in vettid.org #253 (VAULT-MESSAGING
+    0.29.2); approved by the owner 2026-10-13:*
+    **The recovery code leaves the API by one route only.** `GET
+    /api/vault/requests/{id}` passes on `envelope` and `code` only for
+    the slot of an enroll, unlock, lock or recovery register request;
+    a recovery request's own slot, and any other slot (recovery
+    cancel, the jobs' `account` and `delete`, an operation not in the
+    list), answers `{status}` only, for a session and an app key
+    alike; no client read a result from those, and a future operation
+    must be added to the list deliberately. `sealed_code` comes only
+    from `GET /api/vault/recovery`: a code's while `available`, a
+    refusal's at once (`unavailable`), as "Status" already said.
+    **The release is audited before the code is returned:**
+    `vault.recovery_code_released` is written first and the release
+    recorded after it, so a failed audit write leaves the code
+    unreleased (retried by the first request more than 60 seconds
+    later); a request that meets a release in progress, or arrives
+    within those 60 seconds, answers `available` without
+    `sealed_code` and `locator`, which is a new answer a client can
+    see even when nothing fails (two first requests together).
+    **The scanned claim's limits are ordered as the typed form's:**
+    the per-network limit, the lookup, and the per-vault limit only
+    for a pair that names the vault's recovery, in whatever state; a
+    miss (a vault with no recovery at all among them) does the same
+    two reads in every case and is charged to no vault; the two
+    refusals after the per-vault limit (member row gone, account not
+    active) are stated. See "Two kinds of caller", "Access", "Vault
+    recovery" (Claim, Status, Audit)
   - 2.6.0 (2026-10-12; owner decisions of 2026-10-12, made on the
     membership-request privacy notice, vettid.org #248: "we should only
     support removal via the link with nothing manually required",
@@ -413,46 +431,6 @@ and nothing is done by hand.
 | A person's email address in the audit log | **90 days** from the event | DynamoDB TTL on the address record |
 | The audit events themselves | kept | — |
 
-**What is named by the address is deleted only by its owner.** The
-`email:<addr>` marker and the Cognito user are keyed by the address,
-not by the request or account, and an address can be requested again
-as soon as its marker is gone. Every deletion (an admin's Delete, the
-14-day reclaim, the deletion after a cancellation, the removal of a
-withdrawn or declined request) therefore deletes the marker only if
-its `member_guid` is the row being deleted (or the marker is already
-gone), and the Cognito user only if its `custom:user_guid` is. One
-that names another id belongs to a newer request or account for the
-address: it is left, and the row still goes. The function that did
-it (the cleanup job, or the admin API for an admin's Delete) logs a
-warning by id, never the address, and the deletion's audit event says
-so in its detail: `sign_in_user: "left"`, `email_marker: "left"`
-(`member.delete`, `member.delete_after_cancel`,
-`request.reclaim_unverified`, `request.removed`,
-`request.removal_incomplete`). The 14-day reclaim then leaves the SES
-identity too, since the newer request's verification runs on it.
-Cognito has no conditional delete, so its check is a read just before
-the delete.
-
-**The daily sweeps (a canceled account past its date, the 14-day
-reclaim).** The row is deleted first, under its guard (still
-`canceled` and past `delete_after`; still `requested` and unverified),
-in one transaction with its own marker. First, because the guard is
-what protects a person who changed their mind: an account an admin
-reinstated, or a request verified, after the job's query is not
-touched at all. Together with the marker, so that an address is never
-left reserved by a marker with no row. What is removed after the row
-(a canceled account's sign-in user, subscription and vaults; a
-request's SES identity) cannot be retried from the row, so each step
-is tried on its own, a failure skips neither the next step nor the
-next row, and the audit event names what was not removed
-(`incomplete: ["sign_in_user" | "subscription" | "vaults" |
-"ses_identity", …]`), counted as `RequestRemovalAbandoned` for the
-operator to reconcile. A row whose transaction fails for another
-reason stays, is counted as `RequestRemovalFailures`, and is tried
-again at the next run. (Unlike a withdrawn or declined request, which
-cannot go back to being wanted: there everything outside the table
-goes first and the rows last, retried for 7 days.)
-
 **Declined requests (owner decision of 2026-10-12: "declines should be
 kept for 30 days").** `POST /admin/requests/{id}/reject` records
 `rejected_at`. The members table has no TTL, and a TTL could remove
@@ -671,7 +649,7 @@ device identifiers, and never logs envelopes.
 | `POST /api/vault/unlock` | — | `app_key`, recovering key |
 | `POST /api/vault/lock` | yes | `app_key`, recovering key |
 | `GET /api/vault/status` | yes | `app_key`, recovering key |
-| `GET /api/vault/requests/{id}` | yes (the member's slots) | the key that made the request |
+| `GET /api/vault/requests/{id}` | yes (the member's slots; the result only for enroll, unlock, lock and recovery register, 2.6.1) | the key that made the request |
 | `POST /api/vault/recovery`, `GET`, `/cancel` | yes | — |
 | `POST /api/vault/recovery/cancel-link` | its token | — |
 | `POST /api/vault/recovery/claim` | — | the key being registered (`vault=` the QR's; empty with a `locator`, 2.4.0) |
@@ -835,7 +813,7 @@ The vault does not depend on subscription or voting rights.
 | POST | `/api/vault/enroll` | `{vault_id, request_id, instance_id, etk_kid, envelope, manifest_sha256}` (signed by the pending key; 2.0.0 adds `vault_id`, the redeem's) | `202 {vault_id, request_id}`; the queue message carries the pending key as `app_key` |
 | POST | `/api/vault/unlock` | `{vault_id, request_id, instance_id, etk_kid, envelope, manifest_sha256}` | `202 {vault_id, request_id}` |
 | POST | `/api/vault/lock` | `{vault_id, request_id}`; 2.5.0 (with release L): also `unlock_id?` (32 lowercase hex), "Locks" | `202 {vault_id, request_id}` |
-| GET | `/api/vault/requests/{request_id}` | — | `{status: "queued"\|"done"\|"expired", envelope?, code?}` (§11.5); 2.5.0 (with release L): for a lock, `code` is `locked`, `not_running` or `stale` ("Locks") |
+| GET | `/api/vault/requests/{request_id}` | — | `{status: "queued"\|"done"\|"expired", envelope?, code?}` (§11.5); 2.5.0 (with release L): for a lock, `code` is `locked`, `not_running` or `stale` ("Locks"). 2.6.1: `envelope` and `code` only for the slot of an `enroll`, `unlock`, `lock` or recovery `register` request; any other slot the member owns, a recovery request's own slot among them, answers `{status}` only ("Vault recovery", Status) |
 
 ```ts
 interface Enclave {
@@ -1361,8 +1339,33 @@ interface Recovery {
   `recovery_id` do not name the vault's current recovery). Adds the key
   to `claim_keys` (at most 10; the oldest goes), audits
   `vault.recovery_claim`, answers `user_guid` and `email_hint` and,
-  since 2.4.0, the recovery's `vault_id` and `recovery_id`. Limits: 10
-  per vault per day, 10 per source network per 15 minutes.
+  since 2.4.0, the recovery's `vault_id` and `recovery_id`. Limits
+  (order as built, 2.6.1): after the signature and the pause, the
+  body's syntax and `vault_id` being the vault the request is signed
+  for (`400`; counted against neither limit); then 10 per source
+  network per 15 minutes, hits and misses alike, counted before the
+  lookup; then the lookup; then, only when the pair names the vault's
+  recovery, 10 per vault per day.
+  - **The pair names the vault's recovery** when the vault exists and
+    is not deleted, its recovery has that `recovery_id`, and the
+    member's pointer names that vault. The recovery's state does not
+    matter: a `pending`, cancelled, expired, `registered`,
+    `unavailable` or `completed` recovery is a hit, counts against the
+    vault and then answers `409 recovery_not_available`.
+  - **A miss** (no such vault, a vault with no recovery at all, another
+    `recovery_id`, a deleted vault, a pointer that names another
+    vault) is `404 not_found` with one body, after the same two
+    consistent reads in every case: the vault row of the `vault_id`
+    sent, and a pointer row (the member's, or a key that no row has
+    when there is no vault). It writes nothing on any vault, recovery
+    or request row and is charged to no vault. It does write, in the
+    rate-limit table, the signed request's nonce and the per-network
+    count. Scanned misses are not audited.
+  - **After the per-vault limit** the account checks run, and two
+    refusals there have already counted against the vault: the right
+    pair of a member whose row is gone answers the miss's `404
+    not_found`, and the right pair of an account that is not active
+    answers `403 forbidden`.
 - **Claim by locator** (2.4.0, VAULT-MESSAGING 0.25.0 §11.11.10): the
   typed form. Body `{locator, app_key}`; a body with `locator` and
   either identifier is `400`. Signed by the key being registered with
@@ -1511,7 +1514,24 @@ interface Recovery {
   the answer is `{recovery: null}`, not `404`; likewise for a vault that
   never had a recovery. `available` from `available_at` to `expires_at` while not
   cancelled; `sealed_code` is the slot's envelope, returned only then (and
-  absent if the host has not answered yet). The portal decrypts it and
+  absent if the host has not answered yet), or at once for a refusal
+  (`unavailable`, below). (2.6.1) No other route returns it: `GET
+  /api/vault/requests/{id}` answers `{status}` only for the recovery's
+  own slot (its id is the `recovery_id`), whatever the recovery's state
+  and until the slot expires, one hour after the recovery.
+  (2.6.1) A code's `sealed_code` is returned only after
+  `vault.recovery_code_released` has been written: the API marks the slot
+  (`releasing`), writes the event, then records the release
+  (`released`). If the audit write fails the request fails (`500`) and
+  the code stays unreleased; the release is tried again by the first
+  request that arrives more than 60 seconds after the failed attempt
+  began. Until then, and likewise while another request is releasing
+  (two requests can arrive together with nothing failing), a request
+  answers `200` with `state: "available"` and without `sealed_code`
+  and `locator`, unless the release has been recorded meanwhile; the
+  page asks again. The event is written once, except when a
+  release fails after the audit write and before it is recorded, in
+  which case the retry writes it again. The portal decrypts it and
   renders the QR locally.
   The sealed answer may instead be a refusal (`error: "no_credential"`
   or, 2.1.0, `"no_backup"`, VAULT-MESSAGING §11.11.2): the vault cannot
@@ -1562,7 +1582,7 @@ interface Recovery {
   register 10 per member per day; cancel 30 per member per 15 minutes; the cancel link 20 per
   source network per 15 minutes; status 60 per minute.
 - **Audit:** `vault.recovery_request`, `vault.recovery_cancel` (with
-  `via: session | link`), `vault.recovery_code_released` (first release),
+  `via: session | link`), `vault.recovery_code_released` (first release; written before the code is returned, 2.6.1),
   `vault.recovery_register`, `vault.recovery_registered` (1.1.0),
   `vault.recovery_completed` (2.4.1; `vault_id`, `recovery_id`, the
   key's `kid`),
