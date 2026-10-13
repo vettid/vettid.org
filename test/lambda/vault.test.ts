@@ -55,10 +55,14 @@ const tbl = (t: string) => (db[t] ??= new Map());
 const put = (t: string, item: any) => tbl(t).set(item[KEYS[t]], item);
 const getItem = (t: string, k: string) => tbl(t).get(k);
 const ccf = () => Object.assign(new Error('ccf'), { name: 'ConditionalCheckFailedException' });
+/** Tests set these to make a put, or an update of a request row, fail (cleared before each test). */
+let failPut: ((input: any) => boolean) | undefined;
+let failUpdate: ((input: any) => boolean) | undefined;
 
 function installFakeDdb() {
   ddb.on(GetCommand).callsFake((i) => ({ Item: tbl(i.TableName).get(i.Key[KEYS[i.TableName]]) }));
   ddb.on(PutCommand).callsFake((i) => {
+    if (failPut?.(i)) throw Object.assign(new Error('unavailable'), { name: 'InternalServerError' });
     const k = i.Item[KEYS[i.TableName]];
     if (i.ConditionExpression?.startsWith('attribute_not_exists') && tbl(i.TableName).has(k)) throw ccf();
     tbl(i.TableName).set(k, structuredClone(i.Item));
@@ -152,7 +156,13 @@ function installFakeDdb() {
     } else if (t === 'requests' && i.UpdateExpression.startsWith('SET #st = :used')) {
       if (!cur || cur.state !== v[':live'] || !(cur.expires_at > v[':now']) || (v[':f'] !== undefined && cur.typed_blocked !== v[':f'])) throw ccf();
       Object.assign(cur, { state: v[':used'], used_at: v[':now'], used_via: v[':via'] });
+    } else if (t === 'requests' && i.UpdateExpression === 'SET releasing = :now') {
+      // The release of a recovery code: one request at a time, and never once it is recorded.
+      expect(i.ConditionExpression).toBe('attribute_exists(request_id) AND attribute_not_exists(released) AND (attribute_not_exists(releasing) OR releasing < :stale)');
+      if (!cur || cur.released !== undefined || (cur.releasing !== undefined && !(cur.releasing < v[':stale']))) throw ccf();
+      cur.releasing = v[':now'];
     } else if (t === 'requests') {
+      if (failUpdate?.(i)) throw Object.assign(new Error('unavailable'), { name: 'InternalServerError' });
       if (cur && i.UpdateExpression.startsWith('SET released')) cur.released = true;
       else if (cur) cur.status = v[':e'];
     }
@@ -312,6 +322,8 @@ const sent = () => sqs.commandCalls(SendMessageCommand).map((c) => ({ url: c.arg
 let logs: string[];
 beforeEach(() => {
   db = {};
+  failPut = undefined;
+  failUpdate = undefined;
   ddb.reset(); sm.reset(); sqs.reset(); sesMock.reset(); ssm.reset();
   switchValue = undefined;
   vaultService.resetVaultServiceCache();
@@ -1368,6 +1380,11 @@ describe('vault recovery', () => {
       expect(await poll(rid)).toEqual({ status: 200, body: { status: 'done' } });
       at(NOW + 172_800 - 5);
       expect(await poll(rid)).toEqual({ status: 200, body: { status: 'done' } });
+      // The slot outlives the recovery by an hour: status only then too, and after that it is gone.
+      at(NOW + 172_800 + 1800);
+      expect(await poll(rid)).toEqual({ status: 200, body: { status: 'done' } });
+      at(NOW + 172_800 + 3601);
+      expect((await poll(rid)).status).toBe(404);
       expect(released()).toHaveLength(0);
       expect(getItem('requests', rid).released).toBeUndefined();
     });
@@ -1395,13 +1412,105 @@ describe('vault recovery', () => {
       expect((await call('GET', '/api/vault/recovery')).body.recovery).toMatchObject({ state: 'unavailable', sealed_code: sealedCode });
     });
 
-    test('the slots of the other operations still answer their envelope and code', async () => {
-      const RESULT = Buffer.alloc(5_252, 0x55).toString('base64');
-      for (const [i, op] of ['enroll', 'unlock', 'lock', 'recovery_register', 'recovery_cancel'].entries()) {
+    const RESULT = Buffer.alloc(5_252, 0x55).toString('base64');
+    const slotOf = (op: unknown) => {
+      const row: Record<string, unknown> = { request_id: RID2, vault_id: VID, user_guid: 'g1', op, status: 'done', envelope: RESULT, code: 'etk_unknown', created_at: new Date(NOW_MS).toISOString(), expires_at: NOW + 800 };
+      if (op === undefined) delete row.op;
+      put('requests', row);
+    };
+
+    test('the slots of the operations a client polls still answer their envelope and code', async () => {
+      for (const [i, op] of ['enroll', 'unlock', 'lock', 'recovery_register'].entries()) {
         at(NOW + 10 + i);
-        put('requests', { request_id: RID2, vault_id: VID, user_guid: 'g1', op, status: 'done', envelope: RESULT, code: 'etk_unknown', created_at: new Date(NOW_MS).toISOString(), expires_at: NOW + 800 });
+        slotOf(op);
         expect((await poll(RID2)).body).toEqual({ status: 'done', envelope: RESULT, code: 'etk_unknown' });
       }
+    });
+
+    test('fail closed: a slot of any other operation, of one spelled differently, or with no `op`, answers its status only', async () => {
+      for (const [i, op] of ['recovery', 'Recovery', 'RECOVERY', ' recovery', 'recovery_cancel', 'account', 'delete', 'something_new', '', undefined, null, 7, ['unlock']].entries()) {
+        at(NOW + 10 + i);
+        slotOf(op);
+        expect((await poll(RID2)).body).toEqual({ status: 'done' });
+      }
+    });
+
+    describe('the release is on record before the code is returned', () => {
+      const isRelease = (i: any) => i.TableName === 'audit' && i.Item?.action === 'vault.recovery_code_released';
+      const status = () => call('GET', '/api/vault/recovery');
+
+      test('the audit write fails: no code in that answer or the next; a later request records the release once and returns the code', async () => {
+        const rid = await request();
+        answer(rid);
+        at(NOW + 86_400);
+        failPut = isRelease;
+        expect((await status()).status).toBe(500);
+        expect(released()).toHaveLength(0);
+        expect(getItem('requests', rid).released).toBeUndefined();
+        // The audit log is back, but the failed attempt is not yet old enough to retry: still no code.
+        failPut = undefined;
+        at(NOW + 86_400 + 5);
+        let r = await status();
+        expect(r.body.recovery).toMatchObject({ state: 'available' });
+        expect(r.body.recovery.sealed_code).toBeUndefined();
+        expect(r.body.recovery.locator).toBeUndefined();
+        expect(released()).toHaveLength(0);
+        at(NOW + 86_400 + 61);
+        r = await status();
+        expect(r.body.recovery).toMatchObject({ state: 'available', sealed_code: sealedCode });
+        expect(released().map((a) => a.detail)).toEqual([{ vault_id: VID, recovery_id: rid }]);
+        expect(getItem('requests', rid).released).toBe(true);
+        expect((await status()).body.recovery.sealed_code).toBe(sealedCode);
+        expect(released()).toHaveLength(1);
+      });
+
+      test('while the audit log keeps failing the code is never returned', async () => {
+        const rid = await request();
+        answer(rid);
+        failPut = isRelease;
+        for (const t of [0, 61, 200, 3600]) {
+          at(NOW + 86_400 + t);
+          const r = await status();
+          expect(r.status).toBe(500);
+          expect(JSON.stringify(r.body)).not.toContain(sealedCode);
+          expect(getItem('requests', rid).released).toBeUndefined();
+        }
+        expect(released()).toHaveLength(0);
+      });
+
+      test('concurrent requests: one writes the event; none returns the code before it is recorded', async () => {
+        const rid = await request();
+        answer(rid);
+        at(NOW + 86_400);
+        const answers = await Promise.all([status(), status(), status()]);
+        expect(answers.map((a) => a.status)).toEqual([200, 200, 200]);
+        expect(answers.filter((a) => a.body.recovery.sealed_code === sealedCode).length).toBeGreaterThanOrEqual(1);
+        expect(released()).toHaveLength(1);
+        // Another request's release in progress, not yet recorded: no code and no second event.
+        delete getItem('requests', rid).released;
+        getItem('requests', rid).releasing = NOW + 86_400;
+        const r = await status();
+        expect(r.body.recovery).toMatchObject({ state: 'available' });
+        expect(r.body.recovery.sealed_code).toBeUndefined();
+        expect(released()).toHaveLength(1);
+        // Recorded meanwhile: the code, still one event.
+        getItem('requests', rid).released = true;
+        expect((await status()).body.recovery.sealed_code).toBe(sealedCode);
+        expect(released()).toHaveLength(1);
+      });
+
+      test('the event is written but recording it on the slot fails: no code then; the retry writes the event again rather than release unrecorded', async () => {
+        const rid = await request();
+        answer(rid);
+        at(NOW + 86_400);
+        failUpdate = (i) => i.UpdateExpression === 'SET released = :t';
+        expect((await status()).status).toBe(500);
+        expect(released()).toHaveLength(1);
+        failUpdate = undefined;
+        at(NOW + 86_400 + 61);
+        expect((await status()).body.recovery.sealed_code).toBe(sealedCode);
+        expect(released()).toHaveLength(2);
+      });
     });
   });
 
@@ -2416,6 +2525,46 @@ describe('recovery claim and the recovering key', () => {
       const r = await claimFrom('2001:db8:99:1::1', { vault_id: VID, recovery_id: rid });
       expect(r.status).toBe(429);
       expect(r.body.error).toBe('rate_limited');
+    });
+
+    test('a recovery in any state is the vault\'s recovery: cancelled, expired, registered, refused or completed is 409, and counts', async () => {
+      const row = () => getItem('vaults', VID).recovery;
+      const pending = structuredClone(row());
+      const cases: [string, number, () => void | Promise<unknown>][] = [
+        ['cancelled', NOW + 86_400 + 5, () => call('POST', '/api/vault/recovery/cancel', { recovery_id: rid })],
+        ['expired', NOW + 172_800 + 5, () => {}],
+        ['registered', NOW + 86_400 + 5, () => void (row().state = 'registered')],
+        ['unavailable', NOW + 86_400 + 5, () => void (row().state = 'unavailable')],
+        ['completed', NOW + 86_400 + 5, () => void Object.assign(row(), { state: 'completed', completed_at: NOW + 86_400 })],
+      ];
+      for (const [i, [state, when, enter]] of cases.entries()) {
+        getItem('vaults', VID).recovery = structuredClone(pending);
+        for (const k of rl('vault-recovery-claim#')) tbl('rl').delete(k);
+        at(when);
+        await enter();
+        if (state !== 'expired') expect(row().state).toBe(state);
+        const r = await claimFrom(`2001:db8:${i + 1}:1::1`, { vault_id: VID, recovery_id: rid });
+        expect([state, r.status, r.body.error]).toEqual([state, 409, 'recovery_not_available']);
+        expect([state, perVault()]).toEqual([state, [1]]);
+        expect(row().claim_keys).toBeUndefined();
+      }
+    });
+
+    test('the right pair of a member whose row is gone is the 404 of a miss, and of a canceled account 403; both count against the vault', async () => {
+      at(NOW + 86_400 + 5);
+      const member = structuredClone(getItem('members', 'g1'));
+      put('members', { ...member, account_status: 'canceled' });
+      const canceled = await claimFrom('2001:db8:1:1::1', { vault_id: VID, recovery_id: rid });
+      expect([canceled.status, canceled.body.error]).toEqual([403, 'forbidden']);
+      expect(perVault()).toEqual([1]);
+      tbl('members').delete('g1');
+      const gone = await claimFrom('2001:db8:2:1::1', { vault_id: VID, recovery_id: rid });
+      expect(gone).toEqual({ status: 404, body: { error: 'not_found', message: 'No such recovery' } });
+      expect(perVault()).toEqual([2]);
+      expect(getItem('vaults', VID).recovery.claim_keys).toBeUndefined();
+      // The member's row back: the claim succeeds.
+      put('members', member);
+      expect((await claimFrom('2001:db8:3:1::1', { vault_id: VID, recovery_id: rid })).status).toBe(200);
     });
 
     test('the per-network limit comes first: 10 per 15 minutes, misses count, and the 11th is refused before any lookup', async () => {
