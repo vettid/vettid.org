@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.29.2
+version: 0.29.3
 date: 2026-10-13
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -13,7 +13,7 @@ related:
   - CALLS-PLAN.md (0.1.3) §13 (phase C2; decisions D12–D26, decided 2026-10-12)
   - PUSH-GATEWAY.md (0.4.4)
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.6.1)
+  - MEMBER-API.md (2.6.2)
   - ANDROID-PLAN.md (0.1.37)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -21,9 +21,16 @@ related:
   - VAULT-RELEASES.md (0.1.19; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
-  - VAULT-HOST-PROTOCOL.md (0.1.5; the enclave ↔ parent protocol as built)
+  - VAULT-HOST-PROTOCOL.md (0.1.6; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.29.3: editorial-normative erratum, as built in vettid-vault #75
+    (the parent only; the enclave and its measurements do not change);
+    approved by the owner 2026-10-13. No wire change. §11.1,
+    "Instances and leases": **a parent whose queue is gone while it
+    runs creates it again** under the same name, and after a
+    disconnection it publishes its registry row only after checking
+    for its queue (VAULT-HOST-PROTOCOL 0.1.6 §9, §13 point 12)
   - 0.29.2: editorial-normative errata, as built; approved by the owner
     2026-10-13. No wire change, no new vault release. **The member
     API** (vettid.org #253, MEMBER-API 2.6.1). §11.5: `GET
@@ -8348,7 +8355,12 @@ enclave's member index object (`users/<hex SHA-256("vettid/vms/2/user" ||
   prefix `vettid-org-`), which the parent creates at boot and deletes at
   shutdown. `instance_id` matches `[A-Za-z0-9_-]{1,48}`. The API sends only
   to that name in its own account. A sweeper removes queues of instances
-  that have gone away.
+  that have gone away. A parent whose queue is gone while it runs (swept
+  while its enclave was disconnected, or deleted by hand) creates it
+  again under the same name, and after a disconnection it publishes its
+  registry row only after checking for its queue; SQS's refusal of a
+  recently deleted name withholds the row, another failure of the check
+  does not.
 - The instance publishes `{instance_id, release, queue_url, descriptor,
   attestation, heartbeat_at}` to an **instance registry** and heartbeats at
   least every 30 s. An instance whose `heartbeat_at` is more than 90 s old

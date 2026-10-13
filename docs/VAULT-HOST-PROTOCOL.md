@@ -1,17 +1,27 @@
 ---
 title: VAULT-HOST-PROTOCOL
 status: approved by the owner 2026-10-12 (H1–H9 as recommended)
-version: 0.1.5
+version: 0.1.6
 date: 2026-10-13
 owner: Al Liebl (Mesmer)
 component: vault enclave (supervisor), parent (host process)
 related:
-  - VAULT-MESSAGING.md (0.29.2) §2 (threat model, who sees what), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
+  - VAULT-MESSAGING.md (0.29.3) §2 (threat model, who sees what), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
   - VAULT-PLAN.md (0.1.8) §5.2 (D5: TLS in the enclave), §5.3 (D4: one process per vault)
   - VAULT-RELEASES.md (0.1.16) §3.4 (C3, C4), §8.4 (network and egress), §8.7 (observability)
   - VAULT-RELAY-SCALING.md (0.1.2) §6, §10
   - vettid-vault `internal/hostproto`, `enclave/supervisor`, `enclave/egress`, `parent`, docs/V3-NOTES.md "Enclave ↔ parent", docs/SMOKE.md
 changelog:
+  - 0.1.6: as built in vettid-vault #75 (the parent only; the enclave
+    and its measurements do not change); approved by the owner
+    2026-10-13. No wire change. §9: **a stored object is at most
+    67,108,583 bytes**, the largest a `StoreGet` reply can carry; the
+    parent answers `error` for a larger one, on read and on write (it
+    read back at most 48 MiB before, a limit the table did not have).
+    §13 point 12: **the parent creates its queue again** after a
+    receive that finds the queue gone, and checks that the queue
+    exists, with a limit of 10 s, before the first registry row after
+    a disconnection (VAULT-MESSAGING 0.29.3 §11.1)
   - 0.1.5: erratum, as built at vettid-vault `main` a852e36 (#74, for
     staging release S11, not cut yet); approved by the owner
     2026-10-13. No wire change. §4.3: **a `Ping` read while the vaults
@@ -784,6 +794,7 @@ version, or with `len` 0, is closed without an answer.
 | Lease | 180 s, renewed every 60 s | parent |
 | Store key | 256 bytes, the characters of §5.2 | both; the prefixes by the parent |
 | Store version | 1 to 256 bytes | enclave |
+| Stored object (`data` of a `StoreGet` reply and of a `StorePut`) | 67,108,583 bytes: the frame body less 281 (a reply's kind, id and field count, three field lengths, the status and a 256-byte version) | parent; a larger object is answered `error`, on read and on write |
 | Descriptor, attestation | 4,096 and 32,768 bytes | parent |
 | Log record | 16 pairs, 200 bytes a value | parent |
 | Egress header, connect, answer | 10 s, 10 s (parent); 15 s (enclave) | each |
@@ -1072,6 +1083,11 @@ for S11). Point 11 was found and **closed** the same day (#72, `main`
 a852e36, for S11) brought the code to §4.3's rule that the parent is
 reachable again only once it has been told.
 
+**State at 0.1.6.** Point 12 is reworded for vettid-vault #75 (the
+queue is created again when a receive finds it gone; the check before
+the first registry row after a disconnection has a limit of 10 s). It
+stays open.
+
 Found while writing this document. Each is described where it occurs
 above; the pull request that adds this document lists them with file
 and line. None lets the parent read or forge anything it could not
@@ -1158,10 +1174,12 @@ before. Points 1 and 2 are the ones that matter.
     visibility time); the store get, put and delete and the
     credentials the enclave asks for (the enclave gives up after 60 s;
     the parent's handler stays, one of 128); the sweeper's list,
-    heartbeat read and queue delete; the queue's creation at start.
-    With a limit: the registry write and the lease renewal (10 s, new),
-    lifecycle and lease-release writes (30 s), the registry row's
-    delete (10 s; 60 s at shutdown).
+    heartbeat read and queue delete; the queue's creation at start and
+    after a receive that finds the queue gone. With a limit: the
+    registry write and the lease renewal (10 s, new), the check that
+    the queue exists before the first registry row after a
+    disconnection (10 s), lifecycle and lease-release writes (30 s),
+    the registry row's delete (10 s; 60 s at shutdown).
 13. **The wait for the reports has no bound of its own (0.1.4; low).**
     After a `Ping` the enclave waits until its whole outgoing queue is
     written, not only the reports, and that wait has no time limit
