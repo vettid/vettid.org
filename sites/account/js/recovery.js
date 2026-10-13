@@ -26,7 +26,7 @@
 import { get, post } from './api.js';
 import { $, chip, el, fill } from './dom.js';
 import * as keys from './recovery-keys.js';
-import { LOCATOR_RE, SealError, fromBase64, openSealedCode, qrPayload, toBase64, typedForm, typedRows } from './recovery-code.js';
+import { LOCATOR_RE, SealError, cancelGoneOutcome, cancelNotFound, fromBase64, openSealedCode, qrPayload, toBase64, typedForm, typedRows } from './recovery-code.js';
 import { qrModules, qrSvg } from './qr.js';
 import * as ui from './ui.js';
 import { dateTime, timeUntil } from './vault-text.js';
@@ -57,20 +57,28 @@ const recoveryVaultId = () => recovery?.vault_id ?? vault?.vault_id;
 
 // ── Loading ─────────────────────────────────────────────────────────────
 
+/**
+ * Loads the state from the API and draws it. Returns the recovery this call
+ * fetched (or null when there is none), or false when the state could not
+ * be loaded (an error is drawn instead). The value is this call's own: the
+ * page's `recovery` can be replaced by another load (the poll, pageshow).
+ */
 async function load({ focus } = {}) {
   clearTimers();
+  let fetched = null;
   try {
     const st = await get('/api/vault/status');
     vault = st?.vault ?? null;
     recovery = null;
     if (vault && vault.state !== 'enrolling') {
-      recovery = (await get('/api/vault/recovery'))?.recovery ?? null;
+      fetched = (await get('/api/vault/recovery'))?.recovery ?? null;
+      recovery = fetched;
     }
   } catch (err) {
     wipeCode();
     if (err.code === 'terms_required') renderTermsRequired();
     else renderLoadError(err);
-    return;
+    return false;
   }
   canStore ??= await keys.supported();
   if (canStore) await keys.prune(needsKey(recovery) ? recovery : null);
@@ -78,6 +86,7 @@ async function load({ focus } = {}) {
   render();
   schedule();
   if (focus) $(focus)?.focus();
+  return fetched;
 }
 
 /** Work out what this browser can do with the current recovery (without keeping the code). */
@@ -383,7 +392,20 @@ async function cancelRecovery(b) {
   });
   if (!ok) return;
   const id = recovery.recovery_id;
-  const res = await ui.busy(b, () => post('/api/vault/recovery/cancel', { recovery_id: id }), { busyLabel: 'Cancelling…' });
+  let gone = false;
+  const res = await ui.busy(b, () => post('/api/vault/recovery/cancel', { recovery_id: id }), {
+    busyLabel: 'Cancelling…',
+    onError: (err) => {
+      // MEMBER-API 2.6.3: the route's own 404 (`not_found`) when this is no
+      // longer the vault's current recovery. Any other 404 is an ordinary error.
+      if (cancelNotFound(err)) gone = true;
+      else ui.showError(err);
+    },
+  });
+  if (gone) {
+    await recoveryGone(id);
+    return;
+  }
   if (!res) return;
   wipeCode();
   await keys.deleteKey(id).catch(() => {});
@@ -391,6 +413,27 @@ async function cancelRecovery(b) {
   // MEMBER-API 1.1.0: {cancelled: false} when the recovery had already ended.
   if (res.cancelled === false) ui.showNotice('There was nothing left to cancel: this recovery had already ended.', 'info');
   else ui.showNotice("The recovery is cancelled. We've emailed you a confirmation.");
+}
+
+/**
+ * The API answered `404 not_found` to a cancel: the recovery this page
+ * showed is no longer the vault's current one (a newer one replaced it, or
+ * the vault no longer has it). Nothing was cancelled. Reload, show what the
+ * API says now, and drop the old recovery's key only when that reload
+ * confirms it (recovery-code.js, cancelGoneOutcome). A newer recovery's
+ * key is stored under its own id and is kept. When the reload fails the
+ * key stays: the next load that succeeds removes it if the recovery is
+ * really gone (keys.prune).
+ */
+async function recoveryGone(id) {
+  wipeCode();
+  const fetched = await load({ focus: 'h-rec' });
+  const out = cancelGoneOutcome({ loaded: fetched !== false, recovery: fetched || null, oldId: id, active: isActive(fetched || null) });
+  if (out.deleteKey) await keys.deleteKey(id).catch(() => {});
+  if (out.kind === 'reload_failed') ui.showError("We couldn't check your recovery. Reload the page; if it still shows, cancel it again.");
+  else if (out.kind === 'still_current') ui.showError("The recovery couldn't be cancelled. Reload the page and try again.");
+  else if (out.kind === 'replaced') ui.showNotice('That recovery is no longer there: a newer one has replaced it. Nothing was cancelled. This page now shows the newer recovery.', 'info');
+  else ui.showNotice('That recovery is no longer there: it was replaced, or your vault no longer has it. Nothing was cancelled.', 'info');
 }
 
 function noKeyCallout() {
