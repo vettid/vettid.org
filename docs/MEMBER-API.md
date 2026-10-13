@@ -1,8 +1,24 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.6.3
+version: 2.6.4
 changelog:
+  - 2.6.4 (2026-10-13; editorial errata, as built; approved by the
+    owner 2026-10-13). No route, answer or email changes: the text
+    is corrected to what the API does.
+    **The recovery's cancel link is not single-use** ("Vault
+    recovery", Request): its token is not used up, it stays usable
+    until the recovery's `expires_at`, and a second use answers
+    `{cancelled: false}`, as Cancel already said. **Nor is the
+    deletion's cancel link** ("Vault deletion: start over", Request):
+    it stays usable until `deletes_at`, a use after the deletion was
+    cancelled answers `{cancelled: false}`, and from `deletes_at` it
+    answers `404`. The withdrawal link of "Withdrawing a request" is
+    used up by its one use, as that section says, and is not changed.
+    **The sender of the request emails is `no-reply@<zone>`** ("Request
+    emails"), the stage's own sending domain: `no-reply@vettid.org` in
+    production and `no-reply@staging.vettid.org` on staging; the text
+    named production's address only
   - 2.6.3 (2026-10-13; editorial, erratum as built; approved by the
     owner 2026-10-13). No route, answer or email changes: the text
     is corrected to what the API does.
@@ -609,7 +625,9 @@ events are kept. What changes is where a person's address is:
 
 ### Request emails (2.6.0)
 
-All from `VettID <no-reply@vettid.org>`, plain text, and with no
+All from `VettID <no-reply@<zone>>`, where `<zone>` is the stage's own
+DNS zone and sending domain (`no-reply@vettid.org` in production,
+`no-reply@staging.vettid.org` on staging), plain text, and with no
 member-supplied text (names) in them.
 
 - **Amazon's verification email** (SES, as before): sent by AWS when
@@ -1649,10 +1667,12 @@ interface Recovery {
   (with `browser_key`) to the leaseholder, or to a live instance of the
   vault's `sealed_release` (`503 release_starting` as for the enclave
   route). It emails the member: what happened, when the code becomes
-  available, and a single-use cancel link
+  available, and a cancel link
   (`https://account.vettid.org/vault/recovery/cancel#t=<token>`; the API
   stores only the token's SHA-256, in a request-table row that expires
-  with the recovery).
+  with the recovery). The link is not used up by a cancel (2.6.4, as
+  built): it stays usable until the recovery's `expires_at`, and a
+  second use answers `{cancelled: false}` (Cancel, below).
 - **Status.** Without an enrolled vault (none, `enrolling` or deleted)
   the answer is `{recovery: null}`, not `404`; likewise for a vault that
   never had a recovery. `available` from `available_at` to `expires_at` while not
@@ -2051,9 +2071,12 @@ interface Deletion {
   {deletion_id, state: pending, requested_at, deletes_at}` on the vault
   row and emails the member: the vault and everything in it will be
   deleted at `deletes_at` and cannot be restored; how to cancel; a
-  single-use cancel link
+  cancel link
   (`https://account.vettid.org/vault/deletion/cancel#t=<token>`, stored
   as its SHA-256 in a request-table row that expires at `deletes_at`).
+  The link is not used up by a cancel (2.6.4, as built): it stays
+  usable until `deletes_at`, a use after the deletion was cancelled
+  answers `{cancelled: false}`, and from `deletes_at` it answers `404`.
   Nothing is enqueued and the vault is not locked.
 - **Cancel** (session, link or app): conditional on `state = pending`;
   removes the record, emails the member, answers `{cancelled: true}`;
