@@ -77,6 +77,15 @@ accounts keep their own KMS and pinned-role rules (VettidOrgVaultHostStack),
 which predate this and stay local to the keys they guard. RUNBOOK
 "Security alerts" lists the rules and how to test them.
 
+The trail's bucket, `vettid-org-cloudtrail-449757308783`, is in the
+management account and is write-once: S3 Object Lock in compliance mode
+locks every delivered file for 400 days, against every principal of the
+account, root included (owner decision, 2026-10-13; RUNBOOK "The audit
+trail is write-once"). The trail itself can still be stopped or changed
+by an administrator of the management account, which no SCP binds; that
+is alerted, not prevented. A separate log-archive account is a later
+step, not part of this.
+
 ## 3. Moving the Proteus website
 
 The site and its DNS zone move to the `proteus` account with no change for

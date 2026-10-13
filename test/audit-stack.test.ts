@@ -16,6 +16,65 @@ test('multi-region trail with log-file validation, incl. global events', () => {
   });
 });
 
+describe('the trail bucket is write-once', () => {
+  const buckets = Object.entries<any>(t.findResources('AWS::S3::Bucket'));
+  const [bucketId, bucket] = buckets[0];
+
+  test('Object Lock, compliance mode, 400 days for every new object, on the same bucket', () => {
+    expect(buckets).toHaveLength(1);
+    // The logical id and the name are what keep CloudFormation updating the
+    // existing bucket in place instead of making another one.
+    expect(bucketId).toBe('TrailBucketA831CE63');
+    expect(bucket.Properties.BucketName).toBe(`vettid-org-cloudtrail-${ORG.management}`);
+    expect(bucket.Properties.ObjectLockEnabled).toBe(true);
+    expect(bucket.Properties.ObjectLockConfiguration).toEqual({
+      ObjectLockEnabled: 'Enabled',
+      Rule: { DefaultRetention: { Mode: 'COMPLIANCE', Days: 400 } },
+    });
+    // Object Lock needs versioning, and S3 refuses to suspend it afterwards.
+    expect(bucket.Properties.VersioningConfiguration).toEqual({ Status: 'Enabled' });
+  });
+
+  test('the lifecycle rule agrees with the lock: expiry no earlier than the lock ends, then the old version goes', () => {
+    const lifecycle = bucket.Properties.LifecycleConfiguration.Rules;
+    expect(lifecycle).toHaveLength(1);
+    const days = bucket.Properties.ObjectLockConfiguration.Rule.DefaultRetention.Days;
+    expect(lifecycle[0].Status).toBe('Enabled');
+    expect(lifecycle[0].ExpirationInDays).toBe(days);
+    // Without this the expired (then unlocked) versions would stay for ever.
+    expect(lifecycle[0].NoncurrentVersionExpiration).toEqual({ NoncurrentDays: 30 });
+  });
+
+  test('nothing in the stack tries to empty or delete it', () => {
+    expect(bucket.DeletionPolicy).toBe('Retain');
+    expect(bucket.UpdateReplacePolicy).toBe('Retain');
+    // autoDeleteObjects would add this custom resource (and a tag on the bucket).
+    t.resourceCountIs('Custom::S3AutoDeleteObjects', 0);
+    expect(JSON.stringify(bucket.Properties.Tags ?? [])).not.toContain('auto-delete-objects');
+  });
+
+  test('the bucket admits CloudTrail only for this trail: every CloudTrail statement carries aws:SourceArn', () => {
+    const policies = Object.values<any>(t.findResources('AWS::S3::BucketPolicy'));
+    expect(policies).toHaveLength(1);
+    const text = (v: any) => JSON.stringify(v).replace(/[^A-Za-z0-9:/*.-]+/g, ' ');
+    const cloudtrail = policies[0].Properties.PolicyDocument.Statement.filter((st: any) => st.Principal?.Service === 'cloudtrail.amazonaws.com');
+    expect(cloudtrail.map((st: any) => [st.Action, text(st.Resource).match(/AWSLogs\S+/)?.[0]])).toEqual([
+      ['s3:GetBucketAcl', undefined],
+      ['s3:PutObject', `AWSLogs/${ORG.management}/*`],
+      ['s3:PutObject', `AWSLogs/${ORG.id}/*`],
+    ]);
+    for (const st of cloudtrail) {
+      expect(st.Effect).toBe('Allow');
+      expect(text(st.Condition.StringEquals['aws:SourceArn'])).toMatch(new RegExp(`:cloudtrail:us-east-1:${ORG.management}:trail/vettid-org-trail $`));
+    }
+    // The two writes still require the ACL header beside the new condition.
+    for (const st of cloudtrail.slice(1)) expect(st.Condition.StringEquals['s3:x-amz-acl']).toBe('bucket-owner-full-control');
+    // No statement admits any other principal.
+    const others = policies[0].Properties.PolicyDocument.Statement.filter((st: any) => !cloudtrail.includes(st));
+    expect(others.map((st: any) => st.Effect)).toEqual(['Deny']);
+  });
+});
+
 test('trail bucket: private, TLS-only, versioned, retained, lifecycle-managed', () => {
   t.hasResource('AWS::S3::Bucket', {
     DeletionPolicy: 'Retain',

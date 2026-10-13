@@ -1958,6 +1958,104 @@ vettid-org-security-alert-heartbeat --query
 'MetricAlarms[].[AlarmName,StateValue]' --output text` shows `OK` for
 each member once its forwarder is deployed.
 
+### The audit trail is write-once
+
+The organization trail `vettid-org-trail` delivers into
+`vettid-org-cloudtrail-449757308783` (management account). Since the
+deploy of this change the bucket has **S3 Object Lock in compliance mode
+with a default retention of 400 days** (owner decision, 2026-10-13):
+every log and digest file delivered from then on is locked for 400 days
+from its delivery. During that time nobody can delete that file,
+overwrite it or shorten its lock: no administrator, not the root user,
+not AWS support. The bucket policy also admits the CloudTrail service
+for this one trail only (`aws:SourceArn` on all three of its statements).
+
+**What can no longer be done, by anyone:**
+
+- Remove or change a delivered record before its 400 days are over. That
+  includes a record that should not be there: a secret someone put into
+  a request parameter, or personal data. The trail does hold personal
+  data: for example the email address in every SES identity call of the
+  mailing list and of early-access requests (the privacy notice says so,
+  and says 400 days). A leaked secret is dealt with by rotating it,
+  never by editing the trail.
+- Empty or delete the bucket until 400 days after the last delivery, or
+  give its name to another bucket. Closing the AWS account is the only
+  way to end the storage earlier, and this is the organization's
+  management account.
+- Suspend the bucket's versioning, or turn Object Lock off again.
+- Shorten the lock of objects already delivered. Lowering the default
+  (in `lib/stacks/audit-stack.ts`, or with
+  `put-object-lock-configuration`) changes it for new objects only; so a
+  default that is lowered or removed by someone else is a way to make
+  *future* records deletable, and is a thing to check (below).
+
+**What still works.** Reading, as before. The lifecycle rule: after 400
+days it puts a delete marker on a file (the lock never refuses a
+marker), and 30 days later, the lock being over, the file itself is
+removed; so a record is gone for good about 430 days after delivery,
+and storage stops growing after that. Files smaller than 128 KB (nearly
+all of them) stay in the standard storage class; the rule's move to
+Glacier Instant Retrieval at 90 days applies to the larger ones. Volume
+in October 2026: about 12 to 16 MB and 3,400 files a day for the whole
+organization, so about 6 GB held at any time, under $0.20 a month;
+Object Lock itself costs nothing.
+
+**What it does not cover.**
+
+- Files delivered **before** the deploy (from 2026-10-01) carry no lock.
+  They can be given one by hand, one version at a time
+  (`aws s3api put-object-retention --bucket <bucket> --key <key>
+  --version-id <id> --retention
+  '{"Mode":"COMPLIANCE","RetainUntilDate":"<delivery + 400 days>"}'`); a
+  date set too late cannot be corrected.
+- A deletion *request* is not refused: `delete-object` without a version
+  id adds a delete marker, and the file then looks deleted in a plain
+  listing. It is still there (`list-object-versions`); deleting the
+  marker (by its version id) brings it back.
+- Stopping the record at its source. The trail lives in the management
+  account, which no service control policy can bind (the `ProtectAuditTrail`
+  statement of `vettid-workloads-baseline` covers the member accounts
+  only). An administrator there can stop the trail, delete it, point it
+  elsewhere or change its event selectors. Each of these is emailed
+  (`AuditTampering`: `StopLogging`, `DeleteTrail`, `UpdateTrail`,
+  `PutEventSelectors`), except when CloudFormation's CDK execution role
+  makes the call. A changed bucket policy, which can stop deliveries, is
+  emailed as `S3PublicAccess`, with the same exception. Nothing is
+  emailed today when the bucket's Object Lock default or its lifecycle
+  rule is changed, or when the trail fails to deliver.
+- The log-file validation digests are locked like the logs, so a gap in
+  the record stays provable (`aws cloudtrail validate-logs`); what
+  happened in the gap is not recorded anywhere.
+
+**Checks** (after the deploy, and whenever in doubt):
+
+```bash
+B=vettid-org-cloudtrail-449757308783
+# 1. The lock: Enabled, COMPLIANCE, 400 days.
+aws s3api get-object-lock-configuration --bucket $B
+aws s3api get-bucket-versioning --bucket $B                  # Enabled
+# 2. Deliveries go on (wait 15 minutes after a deploy): a recent time, no error.
+aws cloudtrail get-trail-status --name vettid-org-trail \
+  --query '[IsLogging,LatestDeliveryTime,LatestDeliveryError,LatestDigestDeliveryTime,LatestDigestDeliveryError]'
+# 3. A file delivered after the deploy is locked, and deleting it is refused.
+P=AWSLogs/o-kualrldevn/449757308783/CloudTrail/us-east-1/$(date -u +%Y/%m/%d)/
+read -r K V < <(aws s3api list-object-versions --bucket $B --prefix $P \
+  --query 'reverse(sort_by(Versions,&LastModified))[0].[Key,VersionId]' --output text)
+aws s3api head-object --bucket $B --key "$K" --version-id "$V" \
+  --query '[LastModified,ObjectLockMode,ObjectLockRetainUntilDate]'   # COMPLIANCE, delivery + 400 days
+aws s3api delete-object --bucket $B --key "$K" --version-id "$V"       # must fail: AccessDenied
+```
+
+Step 3 always names the version (`--version-id`): that is the call the
+lock refuses. Without it the call succeeds and only adds a delete
+marker (above). If deliveries stop after a deploy (step 2 shows an
+error), the default retention can be taken off again while the cause is
+found (`aws s3api put-object-lock-configuration --bucket $B
+--object-lock-configuration '{"ObjectLockEnabled":"Enabled"}'`; files
+already locked stay locked), and the previous bucket policy comes back
+by deploying the previous commit.
+
 ## DNS
 
 - Route53 is authoritative for **vettid.org** and **vettid.dev**; the registrar

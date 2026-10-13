@@ -24,6 +24,14 @@ const ORG_ID = ORG.id;
  */
 const STANDARD_SSO_ROLE_PREFIX = 'AWSReservedSSO_VettIDAdmin_';
 
+/**
+ * How long the organization trail's records are kept, and for how long each
+ * one is locked against deletion (the same number on purpose: the lock ends
+ * when the lifecycle expiry begins). The privacy notice and RUNBOOK state
+ * this number; change them with it.
+ */
+const TRAIL_RETENTION_DAYS = 400;
+
 export interface VettidOrgAuditStackProps extends cdk.StackProps {
   readonly config: AppConfig;
 }
@@ -53,18 +61,32 @@ export class VettidOrgAuditStack extends cdk.Stack {
     const { config } = props;
 
     // ---- CloudTrail -------------------------------------------------------
+    // Write-once (owner decision, 2026-10-13): S3 Object Lock in compliance
+    // mode, every new object version locked for 400 days from its delivery.
+    // Until then nobody can delete or overwrite it or shorten its lock: no
+    // administrator, not the root user, not AWS support. What that rules
+    // out for good (RUNBOOK "The audit trail is write-once"): removing a
+    // record from the trail, emptying or deleting this bucket, suspending
+    // its versioning, turning Object Lock off again. Lowering the default
+    // here later shortens the lock of new objects only. CloudFormation sets
+    // this on the existing bucket in place. The lifecycle rule keeps
+    // working: its expiry at 400 days adds a delete marker (never refused),
+    // and the version itself goes 30 days later, when its lock has ended.
+    // Never autoDeleteObjects, never a removal policy other than RETAIN: a
+    // locked bucket cannot be emptied, and a stack that tries fails.
     const trailBucket = new s3.Bucket(this, 'TrailBucket', {
       bucketName: `${resourceName(config, 'cloudtrail')}-${this.account}`,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
       enforceSSL: true,
       versioned: true,
+      objectLockDefaultRetention: s3.ObjectLockRetention.compliance(cdk.Duration.days(TRAIL_RETENTION_DAYS)),
       objectOwnership: s3.ObjectOwnership.BUCKET_OWNER_ENFORCED,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       lifecycleRules: [
         {
           transitions: [{ storageClass: s3.StorageClass.GLACIER_INSTANT_RETRIEVAL, transitionAfter: cdk.Duration.days(90) }],
-          expiration: cdk.Duration.days(400),
+          expiration: cdk.Duration.days(TRAIL_RETENTION_DAYS),
           noncurrentVersionExpiration: cdk.Duration.days(30),
         },
       ],
@@ -83,6 +105,23 @@ export class VettidOrgAuditStack extends cdk.Stack {
       isOrganizationTrail: true,
       orgId: ORG_ID,
     });
+    // The bucket policy statements the Trail construct writes for the
+    // CloudTrail service: only its statement for the organization's prefix
+    // names the trail. Without that, CloudTrail acting for a trail of any
+    // other AWS account may read this bucket's ACL and write under this
+    // account's prefix. So every one of them gets aws:SourceArn = this
+    // trail, as CloudTrail's documented bucket policy has it. (The construct
+    // keeps its statements to itself, hence overrides by position; the test
+    // holds every CloudTrail statement of the template to the condition.)
+    const trailArn = `arn:${this.partition}:cloudtrail:${this.region}:${this.account}:trail/${resourceName(config, 'trail')}`;
+    const statements: any[] = this.resolve(trailBucket.policy!.document).Statement;
+    const unconditioned = statements.flatMap((st, i) =>
+      st.Principal?.Service === 'cloudtrail.amazonaws.com' && st.Condition?.StringEquals?.['aws:SourceArn'] === undefined ? [i] : []);
+    if (unconditioned.length !== 2) throw new Error(`Trail bucket policy: expected 2 CloudTrail statements without aws:SourceArn, found ${unconditioned.length}`);
+    for (const i of unconditioned) {
+      (trailBucket.policy!.node.defaultChild as s3.CfnBucketPolicy).addOverride(
+        `Properties.PolicyDocument.Statement.${i}.Condition.StringEquals.aws:SourceArn`, trailArn);
+    }
     // Who read or wrote membership terms (data events; cents per month).
     const termsBucket = s3.Bucket.fromBucketName(this, 'TermsBucket', readRef(this, config, 'data/terms-bucket-name'));
     trail.addS3EventSelector([{ bucket: termsBucket }], { readWriteType: cloudtrail.ReadWriteType.ALL, includeManagementEvents: false });
