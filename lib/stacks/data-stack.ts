@@ -24,7 +24,8 @@ export interface VettidOrgDataStackProps extends cdk.StackProps {
  *   terms              membership terms versions (PDF in the terms bucket)
  *   subscriptions      one row per member
  *   subscription-types plans (free trial now; `paid` flag for later)
- *   audit              append-only admin + security events
+ *   audit              append-only admin + security events; a person's
+ *                      address beside an event expires after 90 days (TTL)
  *   ratelimits         rate-limit and PIN-lockout counters (TTL)
  *   magic-links        single-use sign-in tokens, stored hashed (TTL)
  *
@@ -94,8 +95,14 @@ export class VettidOrgDataStack extends cdk.Stack {
     // audit: append-only. PK = month bucket (YYYY-MM), SK = `<iso ts>#<ulid>`,
     // so "recent events" is one Query; GSIs answer "what did this admin do"
     // and "what happened to this member". Writers get PutItem only.
+    //
+    // Events never expire. TTL is for the address records only (MEMBER-API
+    // 2.6.0 "Retention", lambda/shared/audit.ts): a person's email address
+    // is written beside the event, under `addr#<month>` with `expires_at`
+    // 90 days on, and DynamoDB deletes it. No event carries `expires_at`.
     table('audit', { name: 'month', type: S }, {
       sortKey: { name: 'ts_id', type: S },
+      timeToLiveAttribute: 'expires_at',
       globalSecondaryIndexes: [
         { indexName: 'actor-index', partitionKey: { name: 'actor', type: S }, sortKey: { name: 'ts_id', type: S } },
         { indexName: 'subject-index', partitionKey: { name: 'subject', type: S }, sortKey: { name: 'ts_id', type: S } },

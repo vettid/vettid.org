@@ -30,7 +30,10 @@ const member = {
 };
 const ALLOWED_ATTRS = ['user_guid', 'vault_canary', 'updated_at']; // the IAM dynamodb:Attributes limit
 
-const audits = () => ddb.commandCalls(PutCommand).filter((c) => c.args[0].input.TableName === 'audit').map((c) => c.args[0].input.Item);
+// The events; a person's address is in a separate 90-day record beside each (MEMBER-API 2.6.0, lambda/shared/audit.ts).
+const auditPuts = () => ddb.commandCalls(PutCommand).filter((c) => c.args[0].input.TableName === 'audit').map((c) => c.args[0].input.Item!);
+const audits = () => auditPuts().filter((i) => !String(i.month).startsWith('addr#'));
+const addresses = () => auditPuts().filter((i) => String(i.month).startsWith('addr#'));
 
 beforeEach(() => {
   ddb.reset();
@@ -69,7 +72,8 @@ test('set: writes only the flag (within the IAM attribute limit), audits member.
   expect(upd.ConditionExpression).toBe('attribute_exists(#k)');
   expect(Object.values(upd.ExpressionAttributeNames!).every((a) => ALLOWED_ATTRS.includes(a as string))).toBe(true);
 
-  expect(audits()).toEqual([expect.objectContaining({ actor: 'boss@vettid.org', action: 'member.vault_canary.set', subject: G1, detail: { email: 'tester@example.org' } })]);
+  expect(audits()).toEqual([expect.objectContaining({ actor: 'boss@vettid.org', action: 'member.vault_canary.set', subject: G1, detail: {} })]);
+  expect(addresses()).toEqual([{ month: expect.stringMatching(/^addr#\d{4}-\d{2}$/), ts_id: audits()[0].ts_id, email: 'tester@example.org', expires_at: expect.any(Number) }]);
 });
 
 test.each(['registered', 'requested', 'rejected'])('set refuses a %s (409) and writes nothing', async (state) => {

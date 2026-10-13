@@ -15,8 +15,8 @@ import {
   type UserType,
 } from '@aws-sdk/client-cognito-identity-provider';
 import { CreateEmailIdentityCommand, GetEmailIdentityCommand } from '@aws-sdk/client-sesv2';
-import { QueryCommand } from '@aws-sdk/lib-dynamodb';
-import { audit } from '../shared/audit';
+import { BatchGetCommand, type BatchGetCommandOutput, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { addressMonth, audit } from '../shared/audit';
 import { adminHandler } from '../shared/admin-handler';
 import { cognito, ddb, env, ses, table } from '../shared/aws';
 import { Router, badRequest, conflict, decodeCursor, email, encodeCursor, forbidden, notFound, str } from '../shared/http';
@@ -119,6 +119,30 @@ router.on('DELETE', '/admin/admins/{email}', async ({ params, actor }) => {
   return { ok: true };
 });
 
+/**
+ * The address records of a page of events (lambda/shared/audit.ts): present
+ * for 90 days after an event that named a person's address. DynamoDB's TTL
+ * deletes late (up to two days), so an expired record is not returned.
+ */
+async function addresses(rows: { month: string; ts_id: string }[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const nowS = Math.floor(Date.now() / 1000);
+  for (let i = 0; i < rows.length; i += 100) {
+    let keys: Record<string, unknown>[] | undefined = rows.slice(i, i + 100).map((x) => ({ month: addressMonth(x.month), ts_id: x.ts_id }));
+    // A few rounds at most: unprocessed keys are throttling, not data.
+    for (let round = 0; keys?.length && round < 5; round++) {
+      const got: BatchGetCommandOutput = await ddb.send(new BatchGetCommand({ RequestItems: { [table.audit()]: { Keys: keys } } }));
+      for (const a of got.Responses?.[table.audit()] ?? []) {
+        if (typeof a.email === 'string' && typeof a.expires_at === 'number' && a.expires_at > nowS) {
+          out.set(`${String(a.month).slice('addr#'.length)}|${a.ts_id}`, a.email);
+        }
+      }
+      keys = got.UnprocessedKeys?.[table.audit()]?.Keys;
+    }
+  }
+  return out;
+}
+
 router.on('GET', '/admin/audit', async ({ query }) => {
   const base = { TableName: table.audit(), ScanIndexForward: false, Limit: 100, ExclusiveStartKey: decodeCursor(query.cursor) };
   let r;
@@ -131,7 +155,12 @@ router.on('GET', '/admin/audit', async ({ query }) => {
     if (!/^\d{4}-\d{2}$/.test(month)) throw badRequest('month must be YYYY-MM');
     r = await ddb.send(new QueryCommand({ ...base, KeyConditionExpression: '#m = :m', ExpressionAttributeNames: { '#m': 'month' }, ExpressionAttributeValues: { ':m': month } }));
   }
-  const items = (r.Items ?? []).map((i) => ({ ts: i.ts, actor: i.actor, action: i.action, subject: i.subject, detail: i.detail ?? {} }));
+  const rows = r.Items ?? [];
+  const emails = await addresses(rows as { month: string; ts_id: string }[]);
+  const items = rows.map((i) => {
+    const email = emails.get(`${i.month}|${i.ts_id}`);
+    return { ts: i.ts, actor: i.actor, action: i.action, subject: i.subject, detail: i.detail ?? {}, ...(email ? { email } : {}) };
+  });
   return { items, cursor: encodeCursor(r.LastEvaluatedKey) };
 });
 

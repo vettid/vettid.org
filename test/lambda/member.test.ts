@@ -109,9 +109,10 @@ describe('POST /api/public/request', () => {
     expect(tx[2].Update!.ConditionExpression).toContain('uses < max_uses');
     expect(idp.commandCalls(AdminCreateUserCommand)[0].args[0].input.MessageAction).toBe('SUPPRESS');
     // Admin notice uses the member-facing name ("registration code"); the API field stays invite_code.
+    // 2.6.0: no name, no address and no code in it (test/lambda/requests.test.ts).
     const notice = ses.commandCalls(SendEmailCommand)[0].args[0].input.Content!.Simple!;
     expect(notice.Subject!.Data).toContain('registered with a registration code');
-    expect(notice.Body!.Text!.Data).toContain('Registered with registration code 7K3QX-M9TZA.');
+    expect(notice.Body!.Text!.Data).not.toContain('7K3QX');
   });
 
   test('bad code silently falls back to review (no oracle)', async () => {

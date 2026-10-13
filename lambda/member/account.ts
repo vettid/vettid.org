@@ -16,7 +16,7 @@ import {
 import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { GetCommand, PutCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
-import { audit } from '../shared/audit';
+import { audit, memberActor } from '../shared/audit';
 import { cognito, ddb, env, s3, table } from '../shared/aws';
 import { HttpError, Router, badRequest, conflict, forbidden, notFound, str } from '../shared/http';
 import { nowIso } from '../shared/ids';
@@ -149,7 +149,7 @@ router.on('POST', '/api/account/terms/accept', async (req) => {
   if (m.state !== 'member') {
     await cognito.send(new AdminAddUserToGroupCommand({ UserPoolId: poolId(), Username: m.email, GroupName: 'member' }));
   }
-  await audit(m.email, 'member.accept_terms', m.user_guid, { version_id: t.version_id, sha256: t.sha256, from_state: m.state });
+  await audit(memberActor(m.user_guid), 'member.accept_terms', m.user_guid, { version_id: t.version_id, sha256: t.sha256, from_state: m.state });
   await pushAccountSnapshot(m.user_guid);
   return me(updated);
 });
@@ -218,7 +218,7 @@ router.on('POST', '/api/account/subscription', async (req) => {
     throw e;
   }
   await ddb.send(new PutCommand({ TableName: table.subscriptions(), Item: sub }));
-  await audit(m.email, 'subscription.start', m.user_guid, { type_id: t.type_id, expires_at: sub.expires_at });
+  await audit(memberActor(m.user_guid), 'subscription.start', m.user_guid, { type_id: t.type_id, expires_at: sub.expires_at });
   await pushAccountSnapshot(m.user_guid);
   return me({ ...m, has_used_trial: true });
 });
@@ -228,7 +228,7 @@ router.on('POST', '/api/account/subscription/cancel', async (req) => {
   const sub = await subscriptionOf(m.user_guid);
   if (!sub || sub.status === 'canceled' || sub.status === 'expired') throw conflict('No active subscription');
   await ddb.send(new PutCommand({ TableName: table.subscriptions(), Item: { ...sub, status: 'canceled' } }));
-  await audit(m.email, 'subscription.cancel', m.user_guid, { type_id: sub.type_id });
+  await audit(memberActor(m.user_guid), 'subscription.cancel', m.user_guid, { type_id: sub.type_id });
   await pushAccountSnapshot(m.user_guid);
   return me(m);
 });
@@ -242,7 +242,7 @@ router.on('POST', '/api/account/pin', async (req) => {
   if (problem) throw badRequest(problem);
   if (m.pin_hash) await requirePin(m, req.body.current_pin);
   const updated = await setFields(m, { pin_hash: await hashPin(m.user_guid, pin as string) });
-  await audit(m.email, m.pin_hash ? 'member.pin_change' : 'member.pin_enable', m.user_guid);
+  await audit(memberActor(m.user_guid), m.pin_hash ? 'member.pin_change' : 'member.pin_enable', m.user_guid);
   await pinNotice(m, m.pin_hash ? 'changed' : 'set');
   return me(updated);
 });
@@ -252,7 +252,7 @@ router.on('DELETE', '/api/account/pin', async (req) => {
   if (!m.pin_hash) throw conflict('No PIN is set');
   await requirePin(m, req.body.current_pin);
   const updated = await setFields(m, {}, ['pin_hash']);
-  await audit(m.email, 'member.pin_disable', m.user_guid);
+  await audit(memberActor(m.user_guid), 'member.pin_disable', m.user_guid);
   await pinNotice(m, 'removed');
   return me(updated);
 });
@@ -280,7 +280,7 @@ router.on('POST', '/api/account/cancel', async (req) => {
   await setFields(m, { account_status: 'canceled', delete_after: deleteAfter });
   await cognito.send(new AdminDisableUserCommand({ UserPoolId: poolId(), Username: m.email }));
   await cognito.send(new AdminUserGlobalSignOutCommand({ UserPoolId: poolId(), Username: m.email }));
-  await audit(m.email, 'member.cancel', m.user_guid, { delete_after: deleteAfter });
+  await audit(memberActor(m.user_guid), 'member.cancel', m.user_guid, { delete_after: deleteAfter });
   await pushAccountSnapshot(m.user_guid);
   req.setCookies.push(...clearSessionCookies());
   return { ok: true };

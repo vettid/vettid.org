@@ -207,7 +207,8 @@ export class VettidOrgAdminApiStack extends cdk.Stack {
 
     // Audit is append-only for every writer; only `system` may read it.
     for (const fn of [people, content, system, vaultCanary, vaultService]) grantTable(fn, 'audit', ['PutItem']);
-    grantTable(system, 'audit', ['Query'], true);
+    // BatchGetItem: the 90-day address records beside a page of events (lambda/shared/audit.ts).
+    grantTable(system, 'audit', ['Query', 'BatchGetItem'], true);
 
     grantTable(people, 'members', ['GetItem', 'Query', 'Scan', 'UpdateItem', 'DeleteItem'], true);
     grantTable(people, 'invites', ['Scan', 'PutItem', 'UpdateItem', 'DeleteItem']);
@@ -216,6 +217,8 @@ export class VettidOrgAdminApiStack extends cdk.Stack {
       new iam.PolicyStatement({
         actions: [
           'cognito-idp:AdminCreateUser',
+          // Approve reads a user that already exists under the address: is it this request's own? (MEMBER-API 2.6.0)
+          'cognito-idp:AdminGetUser',
           'cognito-idp:AdminAddUserToGroup',
           'cognito-idp:AdminDisableUser',
           'cognito-idp:AdminEnableUser',

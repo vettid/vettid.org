@@ -1,8 +1,33 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.5.0
+version: 2.6.0
 changelog:
+  - 2.6.0 (2026-10-12; owner decisions of 2026-10-12, made on the
+    membership-request privacy notice, vettid.org #248: "we should only
+    support removal via the link with nothing manually required",
+    "declines should be kept for 30 days", "90 days for the logs", and
+    the admin notice without people's addresses; **approved by the
+    owner 2026-10-12** on vettid.org #250, with the wording "request
+    for early access" in the emails and on the page, as on the privacy
+    notice. Independent of 2.5.0: it takes effect when it
+    is deployed, while 2.5.0 still waits for release L and its text is
+    not changed). **`POST /api/public/request/withdraw`** `{token}`:
+    a person withdraws their request for early access with a link, and
+    everything the request created is removed without an operator.
+    **A new email**, "We have your request for early access to
+    VettID", sent once when a request's address is verified, carries
+    the link.
+    **Retention**: a declined request is deleted 30 days after the
+    decline; a person's email address stays in the audit log for 90
+    days, in a record beside the event, and the event itself is kept;
+    a member's own actions are audited under `member:<user_guid>`
+    instead of their address. **The admin notice** of a request
+    carries no name, address or code, and a second one says when a
+    request is verified. A new row state, `withdrawn` (never an
+    account, gone within 15 minutes). No change to
+    `POST /api/public/request`, its answers, or any other route. See
+    "Withdrawing a request", "Retention", "Request emails"
   - 2.5.0 (2026-10-12; **approved by the owner 2026-10-12** on
     vettid.org #247, **not implemented yet**; VAULT-MESSAGING 0.29.0,
     VAULT-LOCK 0.1.0 decisions L3–L8; takes effect with the vault's
@@ -224,6 +249,7 @@ Responses are `Cache-Control: no-store`.
 | Method | Path | Body | Returns |
 |---|---|---|---|
 | POST | `/api/public/request` | `{email, first_name, last_name, invite_code?: string, consent: true}` | `{outcome}` (below). `invite_code` is the optional **registration code** (field name kept for compatibility). Names: trimmed of leading and trailing U+0020 spaces only (2.2.1), then letters, spaces, `'’.-`, ≤ 40 chars (so never a control character: C0, DEL, C1, U+2028 or U+2029, 2.3.1). Email: trimmed and lower-cased, at most 254 characters, one `@` with a dot in the domain, no white space and (2.3.1) no C0, DEL, C1, U+2028 or U+2029 (the snapshot `email`'s rule, VAULT-MESSAGING 0.21.0 §11.13). Global hourly cap (past it: same answer, nothing created). Requests never email-verified are deleted after 14 days. |
+| POST | `/api/public/request/withdraw` | `{token}` | `{ok: true}` always (2.6.0, "Withdrawing a request") |
 
 `consent` must be `true`: while SES is in sandbox, we can only email
 addresses that have verified with SES, and that verification **is** the
@@ -241,6 +267,239 @@ links).
 
 Duplicate requests for an address that already exists return
 `"pending_approval"` (no existence oracle). Rate-limited per IP.
+
+### Request states
+
+| What happened | The row | What else exists |
+|---|---|---|
+| Request made, address not verified | `requested`, `email_verified: false` | the `email:<addr>` marker row; an SES identity (created by the request, or already there) |
+| Address verified, waiting for review | `requested`, `email_verified: true` | the same; since 2.6.0 the hash of the withdrawal token on the row |
+| Declined by an admin | `rejected` (`rejected_at`, `reject_reason?`) | the same |
+| Withdrawn by the person (2.6.0) | `withdrawn` (`withdrawn_at`; no names) | the same, until the cleanup job's next run (every 15 minutes) |
+| Approved, or made with a valid code | `registered`: **an account** | the marker, the SES identity, a Cognito user |
+
+A request has no Cognito user. The one exception: a registration with
+a valid code whose Cognito call failed half-way falls back to
+`requested` and can leave a user behind; removal looks for it (below).
+The same address cannot have a second row in any state: a new request
+for an address whose request is pending, declined or being withdrawn
+answers `"pending_approval"` and creates nothing, as for any existing
+address.
+
+`owns_identity` (2.6.0) on the row says whose the SES identity is:
+`true` only when the request's own `CreateEmailIdentity` call succeeded
+(or an admin's "resend verification" created it for this row); `false`
+when the identity was already there (the mailing list's, an earlier
+account's, one the operator verified). Rows from before 2.6.0 have no
+flag.
+
+### Withdrawing a request (2.6.0)
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| POST | `/api/public/request/withdraw` | `{token}` | `200 {ok: true}`, **always the same**: for a token that withdrew a request and for one that names nothing |
+
+**Owner decision of 2026-10-12**: a request is removed with the link,
+and nothing is done by hand.
+
+- **The token** is `<user_guid>.<secret>`: the row's id, a dot, and 32
+  random bytes (base64url, 43 characters). The id finds the row with
+  one conditional write, so there is no index, no pointer row and no
+  server secret; the secret is what authorizes, and only its SHA-256
+  is stored (`withdraw_token_hash` on the row). It is made when the
+  "we have your request" email is sent ("Request emails") and exists
+  nowhere but in that email. It does not expire while the request is
+  held, and it is dead once used, once the request is approved (the
+  hash is removed with the approval) or once the row is gone.
+- **The link** is `https://account.vettid.org/request/withdraw/#w=<token>`:
+  a static page of the account site with the token in the URL
+  **fragment**, which a browser never sends, so it reaches no log.
+  The page takes it out of the address bar and the history, and shows
+  one button. **Opening the link changes nothing** (mail scanners and
+  link previews open links), and the API has no `GET` for it: the
+  path answers `404` to anything but `POST`. The button `POST`s the
+  token as JSON with the `X-VettID-CSRF` header, like every other
+  call of the site. It is not list mail and carries no
+  `List-Unsubscribe` headers.
+- **What the POST does**: one conditional update of the row the token
+  names, only if its hash matches and the row is `requested` or
+  `rejected`. It sets `state: withdrawn` and `withdrawn_at`, and
+  removes the token hash,
+  **the first and last name, the decline reason** and a code, at
+  once. The function that serves the public routes can delete
+  nothing: no row, no SES identity, no Cognito user.
+- **What is removed, and when.** Every 15 minutes the cleanup job
+  takes each `withdrawn` row and removes, in this order: a Cognito
+  user under the address, only if it carries this request's
+  `user_guid` (the half-failed code registration above; any other
+  user under that address is somebody's account and is left); the SES
+  identity of the address, only if `owns_identity` is `true`, the
+  address is not one of the project's own (`…@vettid.org` and its
+  sub-domains) and the mailing list has no row for it; then, in one
+  transaction, the row (only if it is still `withdrawn`) and its
+  `email:<addr>` marker (only if the marker is this request's own, by
+  its `member_guid`, or is already gone: a marker that names another
+  request, made after an admin's Delete took the old one, is left,
+  and the row goes alone). Until that transaction the row still holds
+  the address, which is what keeps a new request for it from racing
+  the removal. A row from before 2.6.0 has no `owns_identity`: its
+  SES identity is kept (never on doubt).
+- **A failure** leaves the row for the next run (every 15 minutes),
+  never stops the next request's removal, and is counted
+  (`VettID/MemberApi` `RequestRemovalFailures`, alarm
+  `request-removal-failing`). After 7 days of failures the row and
+  the marker are deleted anyway, so that no address waits in the
+  table for ever; what could not be removed outside the table is
+  left, audited (`request.removal_incomplete`) and alarmed
+  (`RequestRemovalAbandoned`, alarm `request-removal-abandoned`).
+  A Cognito user left that way carries the old request's `user_guid`:
+  an admin's approval of a later request for the same address is
+  refused (`409`, nothing changed) until an operator has removed that
+  user, instead of making an account that cannot sign in (ADMIN-API
+  "approve").
+- **Uniform answers.** A malformed token, an unknown one, a used one,
+  the token of a request that has since been approved or deleted, and
+  a working one all answer `200 {ok: true}` with the same bytes, so
+  the route says nothing about any request or address. Only a failure
+  on our side answers differently (`500`), and the per-network limit
+  (20 an hour, `429`), neither of which depends on the token. The
+  account site's WAF limit for `/api/public/*` (30 per 5 minutes per
+  IP) applies as to the request route.
+- **An approved request is an account.** The link does nothing for it
+  (same answer). An account is cancelled by its member
+  (`POST /api/account/cancel`) or deleted by an admin; neither is
+  routed through this link.
+- **Each state.** Unverified: there is no link, and none is needed:
+  the request is deleted after 14 days (below). Verified and pending:
+  the link from the email. Declined: the same link keeps working
+  until the request is deleted ("Retention"). Requests verified
+  before 2.6.0 was deployed have no token and got no email; they are
+  not mailed automatically (the operator's
+  `scripts/ops/request-mail-backfill.ts`, a dry run by default, can
+  send them the email: an owner decision, RUNBOOK "Membership
+  requests").
+- **Audit:** `request.withdraw` (actor `public`, subject the request's
+  `user_guid`, `from: requested | rejected`), `request.removed`
+  (actor `system`; `after: withdraw | decline`, `identity: deleted |
+  kept`), `request.removal_incomplete`. **None carries the address.**
+- **Logs:** neither the route nor the job logs an address, a name or
+  a token; outcomes and error names only.
+- **The admin site** shows nothing new: a withdrawn request is no
+  longer in the requests list (it lists `requested`), and a
+  `withdrawn` row can be neither approved, declined nor re-verified
+  (`409`).
+
+### Retention (2.6.0)
+
+| What | How long | By what |
+|---|---|---|
+| A request whose address is never verified | 14 days from the request | the daily cleanup job (as before; since 2.6.0 it leaves an SES identity the request did not create) |
+| A verified request waiting for review | no limit (until approved, declined or withdrawn) | — |
+| A declined request: the row, its reason, its marker | **30 days** from the decline | the daily cleanup job (07:00 UTC), removed exactly as a withdrawn one |
+| A withdrawn request | names and decline reason: at once; the rest at the cleanup job's next run (every 15 minutes) | the cleanup job |
+| A person's email address in the audit log | **90 days** from the event | DynamoDB TTL on the address record |
+| The audit events themselves | kept | — |
+
+**Declined requests (owner decision of 2026-10-12: "declines should be
+kept for 30 days").** `POST /admin/requests/{id}/reject` records
+`rejected_at`. The members table has no TTL, and a TTL could remove
+neither the marker row nor the SES identity, so the daily cleanup job
+does it: a `rejected` row whose `rejected_at` is more than 30 days old
+is removed as in "Withdrawing a request" (Cognito user if it is the
+request's, SES identity if the request created it and nothing else
+uses it, then row and marker together). It runs once a day, so a
+declined request is gone between 30 and 31 days after the decline.
+A row declined before 2.6.0 has no `rejected_at`: its `updated_at`
+is used, which is the time of the decline (nothing changes a declined
+row afterwards, except an admin's "resend verification" that finds
+the address verified). So at the first run
+after the deploy every request declined more than 30 days earlier is
+deleted. While a declined row exists, a new request from the same
+address is answered as any existing address and creates nothing (as
+before); after it is deleted the address can request again. The
+person is not told of a decline (as before).
+
+**The audit log (owner decision of 2026-10-12: "90 days for the
+logs").** The audit table is the account system's security record:
+what an admin did to whom, what a member did, what the jobs did. Its
+events are kept. What changes is where a person's address is:
+
+- An event **never contains a requester's or member's address**. It
+  names the person by `subject`, their `user_guid`.
+- Where the caller knows the address at the time (a new request, an
+  admin approving, declining, re-verifying, suspending, reinstating
+  or deleting, clearing a PIN, the canary flag), it is written to a
+  separate **address record** in the same table: partition
+  `addr#<YYYY-MM>`, the event's own `ts_id`, `email`, and
+  `expires_at` 90 days after the event. DynamoDB's TTL deletes it
+  (within about two days of the expiry; the admin API stops returning
+  it at the expiry). It has no `actor` or `subject`, so it is in no
+  index and no listing of events.
+- What a member does themselves (terms, subscription, PIN, cancel,
+  every vault route) is recorded with the actor
+  `member:<user_guid>`, not their address, and writes no address
+  record: while the account exists its row gives the address.
+- So after a request or an account is deleted, the log still says
+  that id X was requested, approved by admin A, deleted by admin B,
+  and when; who X was can be read for 90 days after each event that
+  recorded the address, and not after. Deleting an account writes
+  the address once more (`member.delete`), into a record that expires
+  90 days after the deletion; the automatic deletion after a
+  cancellation (`member.delete_after_cancel`) and a withdrawal
+  record no address at all.
+- Not covered, on purpose: an administrator's own address (the actor
+  of what they did, the subject of `admin.*` events). Those are staff
+  identities and the point of the record.
+- Writers still hold `PutItem` only: nothing running can alter or
+  delete an event. Events written before 2.6.0 keep the address
+  inside them until the operator runs
+  `scripts/ops/audit-address-backfill.ts` once (dry run by default;
+  RUNBOOK "Membership requests"). Each `--apply` run of it appends one
+  event of its own, `admin.audit_address_backfill` (actor: the
+  operator's session; detail: the counts), since changing old events
+  in place would otherwise leave no record.
+- Also holding the address after these periods, unchanged by 2.6.0:
+  the tables' point-in-time-recovery backups (35 days), and the
+  organization CloudTrail's record of the SES identity calls
+  (400 days).
+
+### Request emails (2.6.0)
+
+All from `VettID <no-reply@vettid.org>`, plain text, and with no
+member-supplied text (names) in them.
+
+- **Amazon's verification email** (SES, as before): sent by AWS when
+  the request creates the address's SES identity. It cannot carry
+  anything of ours.
+- **"We have your request for early access to VettID"** (new): sent
+  once per request by the members-stream mailer, at the moment the request
+  becomes verified (the 15-minute verification sweep, or at once for
+  an address SES had already verified), which is the first moment we
+  may mail the address at all. It says the address is confirmed, that
+  an administrator will review the request, and gives the withdrawal
+  link. The mailer claims the send on the row first (`request_mail_at`
+  and the token hash, conditional on the row still being a verified
+  request without a token), so a retry cannot send twice; if the send
+  fails the token hash is taken off again and the failure is logged
+  by error name. An address somebody else typed into the form gets
+  this email only if SES had already verified it (or its owner
+  clicks Amazon's email); the link is then how its owner removes the
+  request.
+- **"Your VettID account is ready"** (as before): on approval, or on
+  verification of a code registration. A request approved while its
+  `email_verified` flag still lagged behind SES gets this email only:
+  the approval sets the flag in the same write as the state, so the
+  row is never a verified pending request and the email above is not
+  sent seconds before this one.
+- **No email** is sent for a decline, a withdrawal or an expiry.
+- **To the administrative mailbox** (`ADMIN_EMAIL`), without a name,
+  an address or a registration code: "VettID: a request for early
+  access arrived" (saying whether its address is verified yet),
+  "VettID: a request for early access was verified" (when a request
+  that arrived unverified becomes verified), "VettID: someone registered with a
+  registration code". Each has a link to the admin site, which is
+  reachable only from VettID's own network and is where the request
+  is read.
 
 ## Auth
 

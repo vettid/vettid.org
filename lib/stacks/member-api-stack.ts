@@ -35,7 +35,8 @@ export const originVerifySecretName = (config: AppConfig) => `${resourceName(con
 /**
  * Stateless: the member API (docs/MEMBER-API.md), served same-origin behind
  * account.vettid.org. Four route groups (public, auth, account, vault) plus the
- * background jobs: SES-verification sweep, daily cleanup/expiry, and the
+ * background jobs: SES-verification sweep, daily cleanup/expiry (and, every
+ * 15 minutes, the removal of withdrawn membership requests, 2.6.0), and the
  * members-stream welcome mailer, the vault credential-clone alarm mailer and
  * the vault-names job (2.2.0).
  *
@@ -132,7 +133,8 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
       resources: [`arn:${this.partition}:ses:${this.region}:${this.account}:identity/${config.domainName}`, `arn:${this.partition}:ses:${this.region}:${this.account}:identity/*.${config.domainName}`],
     });
 
-    // public: request membership
+    // public: request membership, and withdraw a request (2.6.0: one
+    // conditional UpdateItem; this function can delete nothing)
     g(pub, 'members', ['Query', 'PutItem', 'UpdateItem'], true);
     g(pub, 'invites', ['UpdateItem']);
     g(pub, 'ratelimits', ['UpdateItem']);
@@ -297,11 +299,46 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     cleanup.addEnvironment('TABLE_MAILING_LIST', resourceName(config, 'mailing-list'));
     sesIdentity(cleanup, ['DeleteEmailIdentity']);
     cleanup.addToRolePolicy(denyDomainIdentityDelete);
-    cognitoActions(cleanup, ['AdminDeleteUser']);
+    // AdminGetUser: a removed request's Cognito user (left by a failed code
+    // registration) is deleted only if it carries that request's id.
+    cognitoActions(cleanup, ['AdminDeleteUser', 'AdminGetUser']);
     new events.Rule(this, 'CleanupSchedule', {
       schedule: events.Schedule.cron({ minute: '0', hour: '7' }), // 07:00 UTC daily
       targets: [new targets.LambdaFunction(cleanup)],
     });
+    // Withdrawn membership requests (MEMBER-API 2.6.0 "Withdrawing a
+    // request"): the public route only marks the row; this job, which
+    // already holds the rights to delete rows, Cognito users and SES
+    // identities, removes what the request created, every 15 minutes. The
+    // daily run removes requests declined more than 30 days ago the same way.
+    new events.Rule(this, 'RequestRemovalSchedule', {
+      schedule: events.Schedule.rate(cdk.Duration.minutes(15)),
+      targets: [new targets.LambdaFunction(cleanup, { event: events.RuleTargetInput.fromObject({ task: 'requests' }) })],
+    });
+    // A removal that is not finished must not be silent (EMF from the
+    // cleanup job; RUNBOOK "Membership requests").
+    const removalMetric = (metricName: string) =>
+      new cloudwatch.Metric({ namespace: 'VettID/MemberApi', metricName, statistic: 'Sum', period: cdk.Duration.hours(1) });
+    const removalAlarms = [
+      new cloudwatch.Alarm(this, 'RequestRemovalFailing', {
+        alarmName: resourceName(config, 'request-removal-failing'),
+        alarmDescription: 'RequestRemovalFailing: the cleanup job could not finish removing a withdrawn or expired membership request; its row (with the address) is still in the members table and is retried every run for 7 days (RUNBOOK "Membership requests").',
+        metric: removalMetric('RequestRemovalFailures'),
+        threshold: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        evaluationPeriods: 1,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      }),
+      new cloudwatch.Alarm(this, 'RequestRemovalAbandoned', {
+        alarmName: resourceName(config, 'request-removal-abandoned'),
+        alarmDescription: 'RequestRemovalAbandoned: after 7 days of failures the cleanup job deleted a membership request\'s rows without finishing the rest; an SES identity or a Cognito user may be left: reconcile by hand (RUNBOOK "Membership requests").',
+        metric: removalMetric('RequestRemovalAbandoned'),
+        threshold: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        evaluationPeriods: 1,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      }),
+    ];
     // "Delete my vault and start over" (MEMBER-API 2.1.0, VAULT-MESSAGING
     // 0.16.0 §11.11.9): the same job, every 5 minutes, sends the host's
     // `delete` for each start-over past its 24 h.
@@ -310,6 +347,8 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
       targets: [new targets.LambdaFunction(cleanup, { event: events.RuleTargetInput.fromObject({ task: 'start_over' }) })],
     });
 
+    // "Account ready" and, 2.6.0, "we have your request" (with the
+    // withdrawal link; UpdateItem stores the token's hash on the row).
     const mailer = job('MembersStreamMailer', 'lambda/jobs/members-stream.ts', cdk.Duration.seconds(30));
     g(mailer, 'members', ['UpdateItem']);
     mailer.addToRolePolicy(sesSend);
@@ -430,6 +469,7 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
       const alertsTopicArn = `arn:${this.partition}:sns:${this.region}:${this.account}:${resourceName(config, 'security-alerts')}`;
       const action = { bind: () => ({ alarmActionArn: alertsTopicArn }) };
       for (const a of pausedAlarms) a.addAlarmAction(action);
+      for (const a of removalAlarms) a.addAlarmAction(action);
       typedCeiling.addAlarmAction(action);
       pausedAlarms[0].addOkAction(action); // "resumed"; the 24 h alarm's OK would say it twice
       watchSilent.addAlarmAction(action);

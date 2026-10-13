@@ -24,11 +24,15 @@ endpoint is disabled). Reachable **only** from the admin exit node's egress IP
 - **Pagination:** list endpoints take `?cursor=` and return
   `{ "items": [...], "cursor": "<opaque>" | null }`. Default page size 50.
 - **Audit:** every mutating call writes an audit event (actor = caller email).
+  The address of the person acted on is not in the event: it is in a
+  record beside it that is deleted after 90 days (MEMBER-API 2.6.0
+  "Retention"; `AuditEvent.email` below).
 
 ## Types
 
 ```ts
-type State = 'requested' | 'registered' | 'member' | 'rejected';
+type State = 'requested' | 'registered' | 'member' | 'rejected'
+  | 'withdrawn';   // MEMBER-API 2.6.0: withdrawn by the person; no names; gone within 15 minutes; in no list
 type AccountStatus = 'active' | 'suspended' | 'canceled';
 
 interface Member {
@@ -64,9 +68,9 @@ interface Subscription {
 | Method | Path | Body | Returns |
 |---|---|---|---|
 | GET | `/admin/requests` | — | `{items: Member[], cursor}` — state `requested`, oldest first |
-| POST | `/admin/requests/{user_guid}/approve` | — | `Member` (now `registered`; Cognito user created). `409` until the address has completed SES verification (checked live). |
-| POST | `/admin/requests/{user_guid}/reject` | `{reason?: string}` | `Member` (now `rejected`) |
-| POST | `/admin/requests/{user_guid}/resend-verification` | — | `{ok: true}` |
+| POST | `/admin/requests/{user_guid}/approve` | — | `Member` (now `registered`; Cognito user created). `409` until the address has completed SES verification (checked live; a flag that lagged is set in the same write as the state, so the person gets "Your VettID account is ready" and not the request email just before it). `409` too, with nothing changed, if Cognito already holds a user for the address under another `user_guid` (left by an earlier request's removal that was given up on, audit `request.removal_incomplete`): an operator removes that user first (RUNBOOK "Membership requests", "Removal by hand"). A user that carries this request's own `user_guid` (an approval that stopped half-way) is reused. |
+| POST | `/admin/requests/{user_guid}/reject` | `{reason?: string}` | `Member` (now `rejected`). The declined request, with the reason, is deleted automatically 30 days later (MEMBER-API 2.6.0 "Retention"); the person is not told. |
+| POST | `/admin/requests/{user_guid}/resend-verification` | — | `{ok: true}`. `409` for a `withdrawn` request. |
 | GET | `/admin/members?state=&status=&q=` | — | `{items: Member[], cursor}`. `state` ∈ registered/member (default both); `status` ∈ active/suspended/canceled; `q` = email prefix |
 | GET | `/admin/members/{user_guid}` | — | `Member` |
 | POST | `/admin/members/{user_guid}/suspend` | `{reason: string}` | `Member` |
@@ -204,7 +208,7 @@ presigned download link.
 | POST | `/admin/admins/{email}/disable` | — | `Admin` (not self) |
 | POST | `/admin/admins/{email}/enable` | — | `Admin` |
 | DELETE | `/admin/admins/{email}` | — | `{ok: true}` (not self) |
-| GET | `/admin/audit?month=YYYY-MM&actor=&subject=` | — | `{items: AuditEvent[], cursor}` newest first; `actor` / `subject` filter (exact) instead of month |
+| GET | `/admin/audit?month=YYYY-MM&actor=&subject=` | — | `{items: AuditEvent[], cursor}` newest first; `actor` / `subject` filter (exact) instead of month. A person's events are found by `subject` (their `user_guid`), not by their address. Events written before MEMBER-API 2.6.0 still carry `detail.email` and a member's address as `actor` until the backfill has run (RUNBOOK "Membership requests"). |
 
 ```ts
 interface Admin {
@@ -213,7 +217,10 @@ interface Admin {
   created_at: string;
 }
 interface AuditEvent {
-  ts: string; actor: string; action: string; subject: string;
+  ts: string;
+  actor: string;                   // an admin's email, `member:<user_guid>` (a member's own action), `public`, `app` or `system`
+  action: string; subject: string;
   detail: Record<string, unknown>;
+  email?: string;                  // the address of the person the event is about, at the time; present for 90 days after the event, then gone (MEMBER-API 2.6.0 "Retention")
 }
 ```
