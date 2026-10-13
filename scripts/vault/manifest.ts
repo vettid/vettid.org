@@ -50,13 +50,12 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { AppConfig, channelVault, resourceName } from '../../lib/config';
-import { checkChannel, servedManifest } from '../../lib/vault/manifest-check';
+import { checkChannel, servedManifest, signProblems } from '../../lib/vault/manifest-check';
 import {
   CHANNELS,
   Channel,
   RELEASE_LOG_DIRS,
   SERVED_PATHS,
-  consistencyProblems,
   manifestEntries,
   notesToSwitch,
   readReleaseFile,
@@ -64,7 +63,6 @@ import {
   releaseFilePath,
   renderManifest,
   sha256Hex,
-  successorProblems,
 } from '../../lib/vault/release-list';
 import { ManifestError, verifyServed } from '../../lambda/shared/manifest';
 import { writeReleaseLog } from './release-log';
@@ -186,7 +184,7 @@ function sign(c: Ctx, flags: Record<string, string | true>): void {
   const serial = Math.max(prev?.serial ?? 0, file.signed_serial) + 1;
   const issuedAt = typeof flags['issued-at'] === 'string' ? flags['issued-at'] : nowSeconds();
   const ours = renderManifest(serial, issuedAt, entries);
-  const problems = [...consistencyProblems(entries, issuedAt), ...(prev ? successorProblems(prev, { serial, releases: entries }) : [])];
+  const problems = signProblems(file, serial, issuedAt, prev);
   if (problems.length) throw new Error(`refusing to sign:\n  ${problems.join('\n  ')}`);
 
   // vaultctl renders and checks too; both renders must agree byte for byte.

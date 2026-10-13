@@ -853,8 +853,31 @@ routes until VettidOrgVaultStack is redeployed.
 A key per entry of `vault/releases/<channel>.json` (W7): add release N
 with `status: "candidate"`, its PCR0–2, `seal_key: ""`, `notes` (production:
 `https://vettid.org/security/releases/<N>/`) and `admitted_pcr0s` = the
-PCR0s of every release not `removed` (never changed afterwards). `npm test`
-and `npm run check:manifest` validate the file.
+PCR0s of every earlier release not `removed`, **and of every `removed`
+release that can still be rescued**: one whose `ends_at` is less than
+the channel's deletion window ago (30 days in production, 7 in
+staging). Never changed afterwards. Why the removed ones: a rescued
+vault can only move into an `active` release whose key admits it, so a
+key that leaves them out ends their rescue the day its release is
+published (VAULT-RELEASES 0.1.24 §3.5, §6.2; owner decision of
+2026-10-13). `npm test`, CDK synth and `npm run check:manifest` validate
+the file. While `seal_key` is empty they refuse a list that leaves one
+of those releases out. A list that names too much, a `removed` release
+whose window is over or that has no `ends_at` (a failed canary), is
+reported by `npm run check:manifest` and `vault:manifest sign` only:
+CDK synth and `npm test` do not fail for it, so no command of the
+channel stops working because a window ended. The list is judged at
+the time of the check, so write the entry, create the key (step 2) and
+write its ARN (step 3) on the same day. If `check:manifest` reports a
+release named too much before the key is created, take it out of the
+list; if the key already exists with that list, write its ARN (the
+extra release is harmless to the key check, but the manifest must list
+it while the key lives).
+
+Staging releases 1 to 11 have keys from before this rule. Release 11's
+key admits 7 to 10 only, so staging 3 to 6 (removed 2026-10-13) can be
+rescued only into release 10, only while it is `active`, until their
+keys are deleted on 2026-10-20.
 
 1. `npx cdk diff VettidOrgVaultStack --profile vault-prod`: exactly one new
    `Custom::VettidReleaseKey` and its SSM parameter. Read its `Policy`
@@ -1250,7 +1273,10 @@ and re-checks everything with this repository's own render and verifier:
 1. Edit `vault/releases/prod.json` for the publication: N `active` with
    `published_at` and its `log` (summary, changes, security), N−1
    `deprecated`, any `retired`/`ends_at`/`removed` changes (§10.3).
-2. `npm run vault:manifest -- sign --channel prod`: refuses while any
+2. `npm run vault:manifest -- sign --channel prod`: refuses a manifest
+   in which a `removed` release that can still be rescued is not
+   admitted by the newest `active` release's key ("Removing a release
+   and rescue" below); refuses while any
    release's `notes` is not its release log entry (`npm run vault:manifest --
    notes --channel <c>` switches them; only staging S1–S9 ever had other
    notes), then serial = max(served,
@@ -1275,7 +1301,8 @@ and re-checks everything with this repository's own render and verifier:
    the manifest sync (above) so routing follows at once.
 
 If the canary fails, never publish that document: edit the file (N
-`removed`, no `host`), sign the next serial when there is something to
+`removed`, no `host`, no `ends_at`: nobody was on it, so it is not
+rescued and no later key admits it), sign the next serial when there is something to
 publish, and delete the canary row. `check:manifest` refuses a served
 manifest that is not exactly a render of the file, a lower or repeated
 serial, a dropped or backwards-moving release, and a serial above
@@ -1486,23 +1513,97 @@ the account deletions it held back, and members' apps retry on their own.
 
 ### Removing a release and rescue
 
-At D (§10.3 step 2): `npx cdk destroy VettidOrgVaultRelease<N>Stack --profile vault-prod`
+**Before a release is removed, and before a new release is published:
+a rescue must have a target** (VAULT-RELEASES 0.1.24 §3.5). A rescued
+vault can only move into the newest `active` release, and only if that
+release's key admits it. Check in `vault/releases/<channel>.json`, as it
+will be after the edit: the PCR0 of every `removed` release whose
+`ends_at` is less than the deletion window ago (30 days in production,
+7 in staging), the release being removed included, is in the
+`admitted_pcr0s` of the newest `active` release. `vault:manifest sign`
+makes the same check and refuses to sign, and `check:manifest` refuses
+the served manifest. If it fails, do not publish: wait until the
+window of the release left out is over, or keep the current `active`
+release until then. (Staging releases through 11 are not checked: their
+keys are older than the rule, "Creating a release key" above.)
+
+One case has no target and no check: a release that is removed while
+an older release is the newest `active` one (the enclave refuses a move
+to a lower number). Removing such a release ends its vaults; ask the
+owner first.
+
+At D (§10.3 step 2): set the entry `removed` and keep its `ends_at`,
+the time the release ended, never a later one
+(the rescue window counts from it; `check:manifest` refuses a published
+release that is `removed` without one, and a `removed` entry whose
+`ends_at` is after the manifest's `issued_at`), sign and publish, then
+`npx cdk destroy VettidOrgVaultRelease<N>Stack --profile vault-prod`
 (instances drain; the `group-name` ref goes, so the next manifest sync sets
 `available` false), then remove the entry's `host` in
 `vault/releases/<channel>.json` (the entry itself stays while the manifest
-lists the release).
-Rescue (step 3): cancel and enable the key as the retirement role,
-re-add the entry and deploy the release stack, then
+lists the release), and schedule the key's deletion ("Retirement" above).
 
-```bash
-aws dynamodb update-item --profile vault-prod --table-name vettid-org-vault-releases \
-  --key '{"release":{"S":"<pcr0>"}}' --update-expression 'SET rescue = :t' --expression-attribute-values '{":t":{"BOOL":true}}'
-```
+Rescue (step 3), within the window. Nothing is signed or published: the
+entry stays `removed` and the manifest does not change.
 
-The member API routes the vaults of that release again and the scaler
-starts it on demand. `rescue` is release-wide (every vault sealed to it is
-routed while it is set). Remove it (`REMOVE rescue`) when the member has
-moved; the scaler then stops the group at once.
+1. The target: the newest `active` release admits N (the check above).
+   Without it, stop: the vault cannot move. (The enclave accepts any
+   `active` release above N whose key admits it; the list and the app
+   choose the newest.)
+2. The key, as the retirement role:
+   `aws kms cancel-key-deletion --key-id <arn>`, then
+   `aws kms enable-key --key-id <arn>` (cancelling leaves it `Disabled`);
+   `aws kms describe-key --key-id <arn> --query KeyMetadata.KeyState`
+   must answer `Enabled`.
+3. The release stack: in `vault/releases/<channel>.json` give N's entry
+   its `host` again (as it was before the removal: `git log -p` on the
+   file) **together with `"rescue": true`**, `min_instances: 0`. The
+   validation allows `host` on a `removed` entry only with that marker,
+   and the marker only while the newest `active` release admits N; the
+   marker is never in the manifest. In production the edit is a PR
+   merged to master before the deploy, like any release list change:
+   the daily drift check ("Production drift") compares master with
+   what is deployed, so it stays clean during the rescue; with an
+   unmerged edit it would report the host stack as changed and the
+   release stack as deployed but not in master. `npm run check:manifest`, then
+   `npx cdk diff VettidOrgVaultStack VettidOrgVaultHostStack VettidOrgVaultRelease<N>Stack --profile vault-prod`
+   (the host stack only gains N's PCR0 on the smoke key; the release
+   stack is new; **`VettidOrgVaultStack` must show no change**: `cdk
+   deploy` of the other two deploys it too, as their dependency, and
+   it holds the release keys) and deploy the host and release stacks.
+   The image is built again from the release's assets and its pinned
+   base AMI; if that AMI is gone, set the current one ("Adding a
+   release" step 1). Run the manifest sync so that `available` is true.
+4. Routing:
+
+   ```bash
+   aws dynamodb update-item --profile vault-prod --table-name vettid-org-vault-releases \
+     --key '{"release":{"S":"<pcr0>"}}' --update-expression 'SET rescue = :t' --expression-attribute-values '{":t":{"BOOL":true}}'
+   ```
+
+   The member API routes the vaults of that release again and the scaler
+   starts it on demand. `rescue` is release-wide (every vault sealed to
+   it is routed while it is set).
+5. The member unlocks and approves the move into the newest `active`
+   release (the app offers only the move), then unlocks again there.
+   **The move is confirmed when an unlock in the target release has
+   succeeded** (the member sees the vault open, and the app shows the
+   target release). The vault row's `sealed_release` is not
+   the sign: it names the target as soon as N has sealed the header,
+   before the target has opened the vault. Until the confirmation N
+   must stay routed, because going back (an abandon) is served by N.
+6. The way back, only after that confirmation: `REMOVE rescue` on the
+   row (the scaler then stops the group at once); `npx cdk destroy
+   VettidOrgVaultRelease<N>Stack`; remove `host` and `rescue` from the
+   entry (in production: a second PR, merged before the deploy, after
+   which the drift check is clean again) and deploy the host stack;
+   schedule the key's deletion again ("Retirement" above). KMS takes
+   the full window again, so the key's deletion date is no longer
+   `ends_at` plus the window.
+
+`check:manifest` fails while an entry carries `rescue: true` past its
+window (`ends_at` plus the window): end the rescue. CDK synth does not
+fail for that, so the stack can still be destroyed.
 
 ### Network and egress
 
