@@ -48,7 +48,7 @@ turning that off in code (or the console) first.
 | `VettidOrgStageDnsStack` | **Staging only** (vettid-vault-staging): zone `staging.vettid.org`, its CAA, the SES domain identity `staging.vettid.org` (DKIM records), SSM `dns/zone-id`. Stateful. |
 | `VettidOrgStageSiteStack` | **Staging only**: https://staging.vettid.org (`sites/staging`), serving the staging channel's manifest from `vault/staging/pcr-manifest.json`. |
 | `VettidOrgStageTestMailStack` | **Staging only, test infrastructure**: MX for `test.staging.vettid.org`, the SES receipt rule set storing its mail in `vettid-org-staging-test-mail-<account>` (7 days), the owner-only reader role. See "Staging" → "Test mail". Never in prod. |
-| `VettidOrgAuditStack` | Management account: the organization CloudTrail trail (management events of every account, plus S3 data events on the terms bucket and the two vault data buckets) and its bucket, the GuardDuty detector (administrator for the organization), Access Analyzer, the security-alert rules and topic `vettid-org-security-alerts`, and the default-bus policy admitting the member accounts' forwarders. Stateful. See "Security alerts". |
+| `VettidOrgAuditStack` | Management account: the organization CloudTrail trail (management events of every account, plus S3 data events on the terms bucket and, writes only, on the two vault data buckets) and its bucket, the GuardDuty detector (administrator for the organization), Access Analyzer, the security-alert rules and topic `vettid-org-security-alerts`, and the default-bus policy admitting the member accounts' forwarders. Stateful. See "Security alerts". |
 | `VettidOrgVaultAlertForwardStack` | **In the vault account** (prod: vettid-vault-prod; staging: vettid-vault-staging): the one rule forwarding its CloudTrail events to the management account's bus. See "Security alerts". |
 | `VettidOrgProteusAlertForwardStack` | **In the proteus account** (605628228301): the same forwarder. Deployed from this repository with `--profile proteus`. See "Security alerts". |
 | `VettidOrgCiReadOnlyStack`, `VettidOrgVaultCiReadOnlyStack` | Prod only, one per production account (management; vettid-vault-prod with `--profile vault-prod`): the GitHub Actions OIDC provider and the read-only role `vettid-org-ci-drift-readonly` for the drift check. See "Production drift". |
@@ -1892,7 +1892,7 @@ How events get there:
   `vettid-org-security-alert-forwarder`), that sends every CloudTrail
   write call (read-only calls excluded; refused calls included) and every
   console sign-in to the management account's default bus. Data events
-  (the object calls on the vault data bucket, "Vault data events" below)
+  (the object writes on the vault data bucket, "Vault data events" below)
   are not forwarded: they are kept in the trail, and the host makes them
   all day. The pattern also names Session Manager's `StartSession` and
   `ResumeSession`, as a precaution that by itself changes nothing:
@@ -2022,15 +2022,17 @@ alerts is objects copied or destroyed, not read.
   as taken. Terminate the instance (its group starts a new one; the
   credentials die with it within hours), end the Identity Center
   session that made the call, and read the data events of the bucket
-  from that time on ("Vault data events").
+  from that time on ("Vault data events": they show what was written or
+  deleted, not what was read).
 - **`VaultHostProfileLaunch`.** An instance was started with the host
   role outside the release groups, so something other than a released
   image holds the credentials that read and delete sealed objects. No
   procedure does this (image builds and rebuilds use
   `vettid-org[-staging]-vault-image-builder`). Find the instance
   (`responseElements.instancesSet.items[].instanceId` in the event),
-  terminate it, and read the data events of the bucket for calls from
-  it: its session name in `userIdentity.arn` is its instance id.
+  terminate it, and read the data events of the bucket for writes and
+  deletions from it: its session name in `userIdentity.arn` is its
+  instance id. What it read is not recorded.
 - **`VaultHostLaunchPath`.** The indirect ways to the same thing: a
   launch template or group that Auto Scaling would launch from (those
   launches are not reported, as release groups launch hosts all day), a
@@ -2055,12 +2057,28 @@ alerts is objects copied or destroyed, not read.
 
 ### Vault data events
 
-The organization trail records every object call on
+The organization trail records every **write** on
 `vettid-org-vault-data-369484479783` and
-`vettid-org-staging-vault-data-347272280361`, reads included: who (the
-role and, for a host, the instance id as session name), when, from where
+`vettid-org-staging-vault-data-347272280361`: `PutObject`,
+`DeleteObject` and `DeleteObjects`, `CopyObject`, the multipart calls
+(`CreateMultipartUpload`, `UploadPart`, `UploadPartCopy`,
+`CompleteMultipartUpload`, `AbortMultipartUpload`) and the calls that
+change an object's tags, ACL or restore state. For each: who (the role
+and, for a host, the instance id as session name), when, from where
 (`sourceIPAddress`, `vpcEndpointId`), which key, and the error if it was
-refused. They are in the trail bucket with the account's management
+refused.
+
+**Reads are not recorded** (`GetObject`, `HeadObject`, the list calls),
+by the owner's decision: the trail is not to be a record
+of every time a member's vault is opened. The accepted cost: after an
+incident the trail shows what was changed or destroyed and by whom, and
+**cannot show whether anything was taken**. The objects are sealed to
+release keys, so a copy is not readable; and GuardDuty's S3 protection
+(below) reads object calls on its own, reads included, whatever the
+trail records, and reports unusual access as findings. It keeps no
+record that can be searched afterwards.
+
+The records are in the trail bucket with the account's management
 events, same files and format, kept 400 days; they are **not** in
 CloudTrail's Event history (management events only) and not on the alert
 bus. To read a day:
@@ -2072,28 +2090,26 @@ zcat /tmp/trail/*.json.gz | jq -c '.Records[] | select(.eventCategory == "Data")
   | [.eventTime, .eventName, .userIdentity.arn, .sourceIPAddress, .vpcEndpointId, .requestParameters.key, .errorCode]'
 ```
 
-Normal: every call under `vaults/`, `users/` and `smoke/` is by
+Normal: every write under `vaults/`, `users/` and `smoke/` is by
 `assumed-role/vettid-org-vault-host/i-…` of a running release host,
 through the host VPC's S3 endpoint; `manifests/` is written by the
-manifest signer role and read by the hosts and the manifest sync. Worth
-a look: the host role from an instance id that is not a release host or
-without the endpoint, any other principal (the bucket policy refuses it,
-so with an error), or reads of many vaults by one instance in a short
-time.
+manifest signer role. Worth a look: the host role from an instance id
+that is not a release host or without the endpoint, any other principal
+(the bucket policy refuses it, so with an error), or deletions or
+overwrites of many vaults by one instance in a short time.
 
 Cost: CloudTrail charges $0.10 per 100,000 data events ($1 per million),
 so it follows vault activity. Staging wrote about 2,200 object versions
 a day in October 2026 (a handful of test vaults): about 66,000 writes a
-month, at most as many reads, under $0.20. A thousand vaults at that
-per-vault rate would be about 33 million events and $33 a month, plus
-well under $1 of storage (a record is about 0.15 KB compressed). If that
-ever matters, `WRITE_ONLY` on the selector in `lib/stacks/audit-stack.ts`
-halves it and gives up knowing what was read.
+month, under $0.10. A thousand vaults at that per-vault rate would be
+about 16.5 million events and $16.50 a month, plus well under $1 of
+storage (a record is about 0.15 KB compressed).
 
 GuardDuty S3 protection for the member accounts is set once, from the
 management account (it is an organization setting of the GuardDuty
-administrator; $0.80 per million object calls it reads, so of the same
-order as the data events). `ALL` for the members is what the
+administrator; $0.80 per million object calls it reads, reads and
+writes alike and independent of the trail's selector, so up to a few
+times the data events' cost). `ALL` for the members is what the
 organization already has; the feature is the change. The first command
 sends an `AuditTampering` email:
 
@@ -2648,8 +2664,9 @@ durable backup.
 Lambda/DynamoDB/S3 in pennies at current traffic.
 
 Vault data events (organization trail) and GuardDuty S3 protection: under
-$0.50/month today; about $1 plus $0.80 per million object calls on the
-vault data buckets ("Vault data events").
+$0.50/month today; $1 per million object writes on the vault data
+buckets (trail) plus $0.80 per million object calls, reads included
+(GuardDuty) ("Vault data events").
 
 Relay (when deployed), at idle: ~$55/month — ALB ~$16, two 0.25 vCPU tasks
 ~$15, four public IPv4 addresses ~$15, Valkey Serverless minimum ~$6, logs

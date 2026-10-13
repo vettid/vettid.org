@@ -455,7 +455,7 @@ export const vaultDataBucketName = (stage: string, account: string): string =>
 
 /**
  * The vault data bucket of every channel, production first. The
- * organization trail records their object calls, an alert rule watches
+ * organization trail records their object writes, an alert rule watches
  * their configuration (VettidOrgAuditStack) and the Vault OU policy
  * (lib/org/scp-vault.json) names them; test/audit-stack.test.ts keeps the
  * three in step with VettidOrgVaultStack.

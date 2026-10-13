@@ -34,7 +34,7 @@ export interface VettidOrgAuditStackProps extends cdk.StackProps {
  * Account-level audit and detection (security review, 2026-10-01):
  *  - CloudTrail: one multi-region trail with log-file validation into a
  *    dedicated, retained bucket; S3 data events on the membership-terms bucket
- *    and on the vault data buckets of both vault accounts
+ *    and, writes only, on the vault data buckets of both vault accounts
  *  - GuardDuty detector (us-east-1)
  *  - IAM Access Analyzer (account scope) for anything shared externally
  *  - EventBridge → SNS → email alerts for high-signal events, for every
@@ -89,18 +89,20 @@ export class VettidOrgAuditStack extends cdk.Stack {
     // Who read or wrote membership terms (data events; cents per month).
     const termsBucket = s3.Bucket.fromBucketName(this, 'TermsBucket', readRef(this, config, 'data/terms-bucket-name'));
     trail.addS3EventSelector([{ bucket: termsBucket }], { readWriteType: cloudtrail.ReadWriteType.ALL, includeManagementEvents: false });
-    // Every object call on the vault data buckets (the vault accounts'; an
-    // organization trail records member buckets by ARN): who read, wrote or
-    // deleted which sealed object, from where. Reads too: the objects are
-    // sealed, so the question after an incident is "was anything taken",
-    // and only read events answer it. The enclave host is the main caller,
-    // so the volume follows vault activity: $1 per million events (RUNBOOK
-    // "Vault data events" has the arithmetic; WRITE_ONLY here halves it at
-    // the price of that answer). The records land in the trail bucket with
-    // the management events, under the member account's prefix.
+    // Every write on the vault data buckets (the vault accounts'; an
+    // organization trail records member buckets by ARN): who put, copied
+    // or deleted which sealed object, from where. WRITES ONLY, by the
+    // owner's decision: reads (GetObject, HeadObject, lists)
+    // are not recorded, so the trail shows what was changed or destroyed
+    // and cannot show whether anything was taken. That is the accepted
+    // cost of not keeping a record of every time a vault is opened. The
+    // enclave host is the main caller, so the volume follows vault
+    // activity: $1 per million events (RUNBOOK "Vault data events" has the
+    // arithmetic). The records land in the trail bucket with the
+    // management events, under the member account's prefix.
     trail.addS3EventSelector(
       vaultDataBucketNames().map((name, i) => ({ bucket: s3.Bucket.fromBucketName(this, `VaultDataBucket${i}`, name) })),
-      { readWriteType: cloudtrail.ReadWriteType.ALL, includeManagementEvents: false },
+      { readWriteType: cloudtrail.ReadWriteType.WRITE_ONLY, includeManagementEvents: false },
     );
 
     // ---- GuardDuty + Access Analyzer ---------------------------------------

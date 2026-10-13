@@ -58,7 +58,7 @@ export class VettidOrgAlertForwardStack extends cdk.Stack {
         // Writes only (including denied attempts). An event without the field
         // is forwarded too: anything-but never matches a missing field.
         //
-        // Not data events: the organization trail records every object call
+        // Not data events: the organization trail records every object write
         // on the vault data buckets (VettidOrgAuditStack), and CloudTrail
         // puts recorded data events on this bus as well. The host writes
         // sealed objects all day; they belong in the trail, not on the

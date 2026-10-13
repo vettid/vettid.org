@@ -27,7 +27,7 @@ test('trail bucket: private, TLS-only, versioned, retained, lifecycle-managed', 
   });
 });
 
-test('data events: the terms bucket as before, and every object call (reads too) on both vault data buckets', () => {
+test('data events: the terms bucket as before (reads and writes), and writes only on both vault data buckets', () => {
   const selectors = Object.values<any>(t.findResources('AWS::CloudTrail::Trail'))[0].Properties.EventSelectors;
   // Unchanged: management events, then the terms bucket's selector alone.
   expect(selectors).toHaveLength(3);
@@ -37,7 +37,9 @@ test('data events: the terms bucket as before, and every object call (reads too)
   expect(JSON.stringify(selectors[1].DataResources[0].Values)).not.toContain('vault-data');
   // New: the vault data buckets, whole ("arn:aws:s3:::<bucket>/", an empty prefix).
   expect(vaultDataBucketNames()).toEqual(['vettid-org-vault-data-369484479783', 'vettid-org-staging-vault-data-347272280361']);
-  expect(selectors[2]).toMatchObject({ IncludeManagementEvents: false, ReadWriteType: 'All' });
+  // Writes only (the owner's decision): reads of vault objects are not recorded.
+  expect(selectors[2]).toMatchObject({ IncludeManagementEvents: false, ReadWriteType: 'WriteOnly' });
+  expect(selectors.map((x: any) => x.ReadWriteType)).toEqual(['All', 'All', 'WriteOnly']);
   expect(selectors[2].DataResources).toHaveLength(1);
   expect(selectors[2].DataResources[0].Type).toBe('AWS::S3::Object');
   const arns = selectors[2].DataResources[0].Values.map((v: any) => v['Fn::Join'][1].filter((x: any) => typeof x === 'string').join(''));
