@@ -433,12 +433,13 @@ export class VettidOrgAuditStack extends cdk.Stack {
     // by hand. Either one differing or missing means someone else. Image
     // Builder drives its build instances with Run Command on every image
     // build; a release group's launches are Auto Scaling's.
-    const notService = (service: string, role: string) => [
-      { userIdentity: { invokedBy: events.Match.anythingBut(service) } },
-      { userIdentity: { invokedBy: events.Match.doesNotExist() } },
-      { userIdentity: { sessionContext: { sessionIssuer: { userName: events.Match.anythingBut(role) } } } },
-      { userIdentity: { sessionContext: { sessionIssuer: { userName: events.Match.doesNotExist() } } } },
+    const notServiceIdentity = (service: string, role: string) => [
+      { invokedBy: events.Match.anythingBut(service) },
+      { invokedBy: events.Match.doesNotExist() },
+      { sessionContext: { sessionIssuer: { userName: events.Match.anythingBut(role) } } },
+      { sessionContext: { sessionIssuer: { userName: events.Match.doesNotExist() } } },
     ];
+    const notService = (service: string, role: string) => notServiceIdentity(service, role).map((who) => ({ userIdentity: who }));
     apiCall(
       'VaultHostAccess',
       'operator access to an instance in a vault account (a Run Command or another way to have the SSM agent run one; or an interactive session, Instance Connect or serial console call, which the Vault OU policy denies)',
@@ -471,11 +472,17 @@ export class VettidOrgAuditStack extends cdk.Stack {
       ['aws.ec2'],
       {
         eventName: ['RunInstances'],
+        // Two "or" lists that must both hold. They sit at different levels
+        // (the profile's place under `detail`, the caller under
+        // `userIdentity`), so each is written once: their cross product,
+        // twelve alternatives, is longer than the 2,048 characters
+        // EventBridge allows a pattern (test/event-pattern-size.test.ts).
         $or: [
           { responseElements: { instancesSet: { items: { iamInstanceProfile: { arn: hostProfile } } } } },
           { requestParameters: { iamInstanceProfile: { arn: hostProfile } } },
           { requestParameters: { iamInstanceProfile: { name: [VAULT_ROLE_NAMES.host] } } },
-        ].flatMap((profile) => notService('autoscaling.amazonaws.com', 'AWSServiceRoleForAutoScaling').map((who) => ({ ...profile, ...who }))),
+        ],
+        userIdentity: { $or: notServiceIdentity('autoscaling.amazonaws.com', 'AWSServiceRoleForAutoScaling') },
       },
       vaultAccounts,
     );

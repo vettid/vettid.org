@@ -2252,6 +2252,14 @@ How events get there:
   region in the member accounts. (Calls attempted in other regions are
   still in the organization trail, just not alerted.)
 
+A rule's event pattern may be at most 2,048 characters as compact JSON
+(EventBridge refuses a longer one and the stack rolls back, as the first
+deploy of the vault account rules did). `test/event-pattern-size.test.ts`
+holds every rule to 1,800. A pattern that needs two "or" lists at once
+grows as their product when written as one list: put them at different
+levels of the pattern, as `VaultHostProfileLaunch` does (the profile's
+place under `detail`, the caller under `userIdentity`).
+
 The rules (all in VettidOrgAuditStack; "outside a deploy" = not by
 CloudFormation's CDK execution role `cdk-*-cfn-exec-role-*`, the same
 pattern the SCPs exempt):

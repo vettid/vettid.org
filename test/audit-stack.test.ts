@@ -335,6 +335,16 @@ describe('vault accounts: the data bucket, the hosts, the host role', () => {
     expect(matching(apiCall(vaultStaging, 'aws.ec2', 'RunInstances', AUTO_SCALING, launched(vaultStaging)))).toEqual(['VaultHostProfileLaunch']);
     expect(matching(apiCall(vaultStaging, 'aws.ec2', 'RunInstances', IMAGE_BUILDER, { ...launched(vaultStaging), ...by(vaultStaging, IMAGE_BUILDER, 'imagebuilder.amazonaws.com') }))).toEqual(['VaultHostProfileLaunch']);
   });
+  test('both conditions are required: the caller alone, or the profile alone, is not enough', () => {
+    const builder = `arn:aws:iam::${vaultStaging}:instance-profile/vettid-org-staging-vault-image-builder`;
+    // A person, another profile; a root launch with no session context, another profile.
+    expect(matching(apiCall(vaultStaging, 'aws.ec2', 'RunInstances', SSO_ADMIN, launched(vaultStaging, builder)))).toEqual([]);
+    expect(matching(apiCall(vaultStaging, 'aws.ec2', 'RunInstances', 'iam-user', launched(vaultStaging, builder)))).toEqual([]);
+    // A person, no profile at all.
+    expect(matching(apiCall(vaultStaging, 'aws.ec2', 'RunInstances', SSO_ADMIN, { requestParameters: { instanceType: 'm7g.large' } }))).toEqual([]);
+    // The host profile, an IAM user (no session context, no principal).
+    expect(matching(apiCall(vaultStaging, 'aws.ec2', 'RunInstances', 'iam-user', launched(vaultStaging)))).toEqual(['VaultHostProfileLaunch']);
+  });
   test.each([vaultProd, vaultStaging])('anything else launching an instance with the host profile in %s alerts', (acct) => {
     // From a template (profile in the response), by name, by ARN, and a refused attempt.
     expect(matching(apiCall(acct, 'aws.ec2', 'RunInstances', SSO_ADMIN, launched(acct)))).toEqual(['VaultHostProfileLaunch']);
@@ -402,6 +412,25 @@ describe('vault accounts: the data bucket, the hosts, the host role', () => {
     ]);
     expect(rule('VaultHostAccess').EventPattern.detail.eventSource).toEqual(['ssm.amazonaws.com', 'ec2-instance-connect.amazonaws.com', 'ec2.amazonaws.com']);
     expect(names('VaultHostProfileLaunch')).toEqual(['RunInstances']);
+    // Its two conditions, each written once and both required: the profile's
+    // place (under `detail`) and the caller (under `userIdentity`). As one
+    // list of their twelve combinations the pattern is longer than EventBridge
+    // accepts (test/event-pattern-size.test.ts).
+    const launch = rule('VaultHostProfileLaunch').EventPattern.detail;
+    expect(Object.keys(launch).sort()).toEqual(['$or', 'eventName', 'userIdentity']);
+    expect(launch.$or).toEqual([
+      { responseElements: { instancesSet: { items: { iamInstanceProfile: { arn: [{ suffix: `:instance-profile/${VAULT_ROLE_NAMES.host}` }] } } } } },
+      { requestParameters: { iamInstanceProfile: { arn: [{ suffix: `:instance-profile/${VAULT_ROLE_NAMES.host}` }] } } },
+      { requestParameters: { iamInstanceProfile: { name: [VAULT_ROLE_NAMES.host] } } },
+    ]);
+    expect(launch.userIdentity).toEqual({
+      $or: [
+        { invokedBy: [{ 'anything-but': ['autoscaling.amazonaws.com'] }] },
+        { invokedBy: [{ exists: false }] },
+        { sessionContext: { sessionIssuer: { userName: [{ 'anything-but': ['AWSServiceRoleForAutoScaling'] }] } } },
+        { sessionContext: { sessionIssuer: { userName: [{ exists: false }] } } },
+      ],
+    });
     expect(names('VaultHostLaunchPath')).toEqual(LAUNCH_PATH.map(([, n]) => n).sort());
     expect([...rule('VaultHostLaunchPath').EventPattern.source].sort()).toEqual(['aws.autoscaling', 'aws.ec2', 'aws.iam']);
     // No exception of any kind on the launch path or the bucket rule.
