@@ -58,6 +58,8 @@ const ccf = () => Object.assign(new Error('ccf'), { name: 'ConditionalCheckFaile
 /** Tests set these to make a put, or an update of a request row, fail (cleared before each test). */
 let failPut: ((input: any) => boolean) | undefined;
 let failUpdate: ((input: any) => boolean) | undefined;
+/** Called before an update is applied: what another request did in between. */
+let onUpdate: ((input: any) => void) | undefined;
 
 function installFakeDdb() {
   ddb.on(GetCommand).callsFake((i) => ({ Item: tbl(i.TableName).get(i.Key[KEYS[i.TableName]]) }));
@@ -69,6 +71,7 @@ function installFakeDdb() {
     return {};
   });
   ddb.on(UpdateCommand).callsFake((i) => {
+    onUpdate?.(i);
     const t = i.TableName;
     const k = i.Key[KEYS[t]];
     const cur = tbl(t).get(k);
@@ -324,6 +327,7 @@ beforeEach(() => {
   db = {};
   failPut = undefined;
   failUpdate = undefined;
+  onUpdate = undefined;
   ddb.reset(); sm.reset(); sqs.reset(); sesMock.reset(); ssm.reset();
   switchValue = undefined;
   vaultService.resetVaultServiceCache();
@@ -1499,6 +1503,24 @@ describe('vault recovery', () => {
         expect(released()).toHaveLength(1);
       });
 
+      test('another request finishes the release between this one\'s read and its mark: the code, from a fresh read, and no second event', async () => {
+        const rid = await request();
+        answer(rid);
+        at(NOW + 86_400);
+        // The other request holds the mark when this one reads the slot...
+        getItem('requests', rid).releasing = NOW + 86_400;
+        // ...and has written the event and recorded the release by the time this one tries to take the mark.
+        // (A new row object: the one this request read stays as it was, unreleased.)
+        onUpdate = (i) => {
+          if (i.UpdateExpression !== 'SET releasing = :now') return;
+          put('audit', { ts_id: 'other-request', action: 'vault.recovery_code_released', detail: { vault_id: VID, recovery_id: rid } });
+          put('requests', { ...getItem('requests', rid), released: true });
+        };
+        const r = await status();
+        expect(r.body.recovery).toMatchObject({ state: 'available', sealed_code: sealedCode, locator: getItem('vaults', VID).recovery.locator });
+        expect(released()).toHaveLength(1);
+      });
+
       test('the event is written but recording it on the slot fails: no code then; the retry writes the event again rather than release unrecorded', async () => {
         const rid = await request();
         answer(rid);
@@ -1951,6 +1973,26 @@ describe('app request signing', () => {
     put('requests', { request_id: RID2, vault_id: VID, user_guid: 'g1', op: 'lock', status: 'done', created_at: new Date(NOW_MS).toISOString(), expires_at: NOW + 800 });
     jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + 2000);
     expect((await call('GET', `/api/vault/requests/${RID2}`, undefined, { app: app() })).status).toBe(404);
+  });
+
+  test('an app gets a result only for the operations a client polls: its own slot of any other operation, or of none, answers status only', async () => {
+    const RESULT = Buffer.alloc(5_252, 0x66).toString('base64');
+    const own = (op: unknown) => {
+      const row: Record<string, unknown> = { request_id: RID2, vault_id: VID, user_guid: 'g1', op, app_kid: keyOf('g1').kid, status: 'done', envelope: RESULT, code: 'etk_unknown', created_at: new Date(NOW_MS).toISOString(), expires_at: NOW + 800 };
+      if (op === undefined) delete row.op;
+      put('requests', row);
+    };
+    const poll = () => call('GET', `/api/vault/requests/${RID2}`, undefined, { app: app() });
+    for (const [i, op] of ['recovery', 'Recovery', 'recovery_cancel', 'account', 'delete', 'something_new', '', undefined].entries()) {
+      jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + (i + 1) * 1000);
+      own(op);
+      expect(await poll()).toEqual({ status: 200, body: { status: 'done' } });
+    }
+    for (const [i, op] of ['enroll', 'unlock', 'lock', 'recovery_register'].entries()) {
+      jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + (i + 20) * 1000);
+      own(op);
+      expect(await poll()).toEqual({ status: 200, body: { status: 'done', envelope: RESULT, code: 'etk_unknown' } });
+    }
   });
 
   test('the pending key may call enclave, enroll and poll; not unlock, lock or status', async () => {
