@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.29.5
+version: 0.29.6
 date: 2026-10-13
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -24,6 +24,13 @@ related:
   - VAULT-HOST-PROTOCOL.md (0.1.6; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.29.6: editorial-normative erratum, for the owner's approval
+    (owner decision of 2026-10-13: rescue must always have a target;
+    VAULT-RELEASES 0.1.24 §3.5, §6.2). No wire change, no new vault
+    release, no change to any enclave check. §11.10.2: **a release's
+    sealing policy also admits every `removed` release that can
+    still be rescued when its key is created**; before, only the
+    releases not `removed`
   - 0.29.5: editorial errata, as built; approved by the owner
     2026-10-13. No wire change, no new vault release, no change to
     the member API (MEMBER-API 2.6.4). §11.11.7: **the session's
@@ -9810,8 +9817,9 @@ Each release R has a **sealing key** `SK_R` with two operations:
   enclave attested as release R** (its PCR0).
 - **seal**: create an object sealed to R. It is available only to enclaves
   attested as a release that R's sealing policy admits: R itself, and the
-  releases allowed to move vaults into R (every release not `removed`
-  when R's key is created, VAULT-RELEASES §6.2).
+  releases allowed to move vaults into R (every earlier release not
+  `removed` when R's key is created, and every `removed` release that
+  can still be rescued then, §11.10.5; VAULT-RELEASES §6.2).
 
 Neither operation gives the host any key material. A sealed object is
 authenticated encryption under a fresh data key that only an attested

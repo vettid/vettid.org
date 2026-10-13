@@ -18,9 +18,10 @@ export interface ReleaseKeyPolicyInput {
   /** The release's PCR0 (96 lowercase hex). */
   readonly pcr0: string;
   /**
-   * PCR0s of the releases admitted to seal for this one: every release not
-   * `removed` when this key is created (they may all move into it). Never
-   * the release's own PCR0.
+   * PCR0s of the releases admitted to seal for this one: every earlier
+   * release not `removed` when this key is created (they may all move into
+   * it), and every `removed` one that can still be rescued then
+   * (VAULT-RELEASES 0.1.24 §6.2). Never the release's own PCR0.
    */
   readonly admittedPcr0s: readonly string[];
   readonly hostRoleArn: string;

@@ -3,13 +3,18 @@ import * as path from 'path';
 import { createPublicKey, generateKeyPairSync, sign } from 'node:crypto';
 import * as cdk from 'aws-cdk-lib';
 import { channelVault, loadConfig, releaseLogBaseUrl } from '../lib/config';
-import { checkChannel } from '../lib/vault/manifest-check';
+import { checkChannel, signProblems } from '../lib/vault/manifest-check';
 import { EMPTY_INDEX, buildIndex, noEndDate, renderLog, withoutNav } from '../lib/vault/release-log';
 import {
   FIRST_RELEASE_WINDOW,
   LEGACY_STAGING_NOTES_THROUGH,
   RELEASE_LOG_HOSTS,
+  RESCUE_RULE_FROM,
+  RESCUE_WINDOW_DAYS,
+  SERVED_PATHS,
   ReleaseFile,
+  admittedAtKeyCreation,
+  admittedExtraProblems,
   consistencyProblems,
   hostSpecs,
   keySpecs,
@@ -20,6 +25,10 @@ import {
   releaseLogIndexUrl,
   releaseLogUrl,
   renderManifest,
+  rescuable,
+  rescueEndsAt,
+  rescueOverdueProblems,
+  rescueTargetProblems,
   successorProblems,
   validateReleaseFile,
 } from '../lib/vault/release-list';
@@ -472,10 +481,11 @@ describe('check:manifest (VAULT-RELEASES §7)', () => {
 
   test('every PCR0 a key admits stays listed', () => {
     const f = sample();
-    f.releases[0].status = 'removed';
+    Object.assign(f.releases[0], { status: 'removed', ends_at: '2027-02-20T00:00:00Z' }); // ended before the manifest's issued_at (0.1.24)
     delete f.releases[0].host;
-    const ok = validateReleaseFile(f, 'prod', ACCOUNT);
-    expect(checkChannel({ channel: 'prod', file: ok, served: publish(ok, 3), pinnedKeys: [SPKI], history: [] })).toEqual([]);
+    const now = new Date('2027-03-01T00:00:00Z');
+    const ok = validateReleaseFile(f, 'prod', ACCOUNT, now);
+    expect(checkChannel({ channel: 'prod', file: ok, served: publish(ok, 3), pinnedKeys: [SPKI], history: [], now })).toEqual([]);
   });
 });
 
@@ -578,6 +588,267 @@ describe('release log (RELEASE-UPDATES §5)', () => {
     }
     expect(JSON.parse(out.get('sites/staging/security/releases/index.json')!).releases.map((r: any) => r.notes))
       .toEqual([releaseLogUrl('staging', 2), releaseLogUrl('staging', 1)]);
+  });
+});
+
+describe('a rescue always has a target (VAULT-RELEASES 0.1.24 §3.5, §6.2, §10.3)', () => {
+  /**
+   * Production: 1 removed (ended 2028-02-15, so its key is deleted
+   * 2028-03-16), 2 deprecated, 3 active, 4 a candidate whose key does not
+   * exist yet.
+   */
+  const ENDED = '2028-02-15T00:00:00Z';
+  const IN_WINDOW = new Date('2028-03-01T00:00:00Z');
+  const AFTER_WINDOW = new Date('2028-03-16T00:00:00Z');
+  const list = (): any => {
+    const f = sample();
+    const [r1, r2, r3] = f.releases;
+    Object.assign(r1, { status: 'removed', ends_at: ENDED });
+    delete r1.host;
+    r2.status = 'deprecated';
+    Object.assign(r3, { status: 'active', seal_key: keyArn(3), published_at: '2028-01-15T12:00:00Z', host: host(3), log: log('Third release.') });
+    f.releases.push({ release: 4, status: 'candidate', pcr0: pcr('d'), pcr1: pcr('7'), pcr2: pcr('8'), seal_key: '',
+      admitted_pcr0s: [pcr('a'), pcr('b'), pcr('c')], notes: releaseLogUrl('prod', 4) });
+    return f;
+  };
+  const check = (f: any, now: Date, channel: 'prod' | 'staging' = 'prod') => () => validateReleaseFile(f, channel, ACCOUNT, now);
+  /** The staging list as committed on 2026-10-13 (serial 13: 1 to 6 removed, 7 to 9 deprecated, 10 active, 11 a candidate with its key), frozen. */
+  const SA = channelVault('staging').vault.account;
+  const frozen = (): any => JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/vault/staging-2026-10-13.json'), 'utf8'));
+  const rel = (f: any, n: number): any => f.releases.find((e: any) => e.release === n);
+  const OCT14 = new Date('2026-10-14T00:00:00Z');
+
+  test('the window is the pending window of the channel\'s key deletion, counted from ends_at', () => {
+    for (const ch of ['prod', 'staging'] as const) expect(RESCUE_WINDOW_DAYS[ch]).toBe(channelVault(ch).vault.retirementWindowDays);
+    const r = { status: 'removed' as const, ends_at: ENDED };
+    expect(rescueEndsAt(r, 'prod')).toBe('2028-03-16T00:00:00Z');
+    expect(rescueEndsAt(r, 'staging')).toBe('2028-02-22T00:00:00Z');
+    expect(rescuable(r, 'prod', '2028-03-15T23:59:59Z')).toBe(true);
+    expect(rescuable(r, 'prod', '2028-03-16T00:00:00Z')).toBe(false);
+    // Not removed, or removed without ends_at (a failed canary: no member was ever on it): nothing to rescue.
+    expect(rescueEndsAt({ status: 'retired', ends_at: ENDED }, 'prod')).toBeNull();
+    expect(rescuable({ status: 'removed' }, 'prod', '2028-02-16T00:00:00Z')).toBe(false);
+  });
+
+  test('a key that does not exist yet admits every earlier release not removed and every removed one still in its window', () => {
+    const f = validateReleaseFile(list(), 'prod', ACCOUNT, IN_WINDOW);
+    expect(admittedAtKeyCreation(f.releases, 4, 'prod', '2028-03-01T00:00:00Z').map((e) => e.release)).toEqual([1, 2, 3]);
+    expect(admittedAtKeyCreation(f.releases, 4, 'prod', '2028-03-16T00:00:00Z').map((e) => e.release)).toEqual([2, 3]);
+  });
+
+  test('refuses a candidate that leaves out a removed release that can still be rescued', () => {
+    const f = list();
+    f.releases[3].admitted_pcr0s = [pcr('b'), pcr('c')]; // the rule until 0.1.23: every release not removed
+    expect(check(f, IN_WINDOW)).toThrow(/release 4: admitted_pcr0s must name release 1: it is removed but can be rescued until 2028-03-16T00:00:00Z/);
+    expect(check(f, AFTER_WINDOW)).not.toThrow(); // the window is over: release 1's key is deleted
+  });
+
+  test('refuses a candidate that leaves out a release that is not removed', () => {
+    const f = list();
+    f.releases[3].admitted_pcr0s = [pcr('a'), pcr('c')];
+    expect(check(f, IN_WINDOW)).toThrow(/release 4: admitted_pcr0s must name release 2 \(deprecated\)/);
+  });
+
+  test('still refuses stale ones, in check:manifest and sign, not at synth: a removed release past its window or without ends_at', () => {
+    // The file validation (CDK synth) never starts to fail by time alone: the same file passes before and after the window.
+    const late = validateReleaseFile(list(), 'prod', ACCOUNT, AFTER_WINDOW);
+    expect(admittedExtraProblems(late, IN_WINDOW)).toEqual([]);
+    expect(admittedExtraProblems(late, AFTER_WINDOW)).toEqual([expect.stringMatching(/^release 4: admitted_pcr0s names release 1, which is removed and can no longer be rescued/)]);
+    expect(checkChannel({ channel: 'prod', file: late, served: publish(late, 3, '2028-03-01T00:00:00Z'), pinnedKeys: [SPKI], history: [], now: AFTER_WINDOW }).join())
+      .toMatch(/prod: release 4: admitted_pcr0s names release 1, which is removed and can no longer be rescued/);
+    expect(signProblems(late, 4, '2028-03-16T00:00:00Z', null, AFTER_WINDOW).join()).toMatch(/release 4: admitted_pcr0s names release 1/);
+    const canary = list();
+    delete canary.releases[0].ends_at; // removed without ever holding a member's vault (§10.1)
+    expect(admittedExtraProblems(validateReleaseFile(canary, 'prod', ACCOUNT, IN_WINDOW), IN_WINDOW).join()).toMatch(/names release 1, which is removed and can no longer be rescued/);
+    // A PCR0 that is not listed is refused by the file validation, as before.
+    const unknown = list();
+    unknown.releases[3].admitted_pcr0s.push(pcr('e'));
+    expect(check(unknown, IN_WINDOW)).toThrow(/admitted_pcr0s may only name earlier releases that are still listed/);
+  });
+
+  test('a key that exists is never re-judged: its list was fixed when it was created', () => {
+    const f = list();
+    Object.assign(f.releases[3], { seal_key: keyArn(4), admitted_pcr0s: [pcr('b'), pcr('c')] });
+    expect(check(f, IN_WINDOW)).not.toThrow();
+    f.releases[3].admitted_pcr0s = [pcr('a'), pcr('b'), pcr('c')];
+    expect(check(f, AFTER_WINDOW)).not.toThrow();
+    expect(admittedExtraProblems(validateReleaseFile(f, 'prod', ACCOUNT, AFTER_WINDOW), AFTER_WINDOW)).toEqual([]);
+  });
+
+  test('sign refuses what check:manifest refuses: no rescue target, a removed release that ends in the future', () => {
+    const f = list();
+    Object.assign(f.releases[3], { status: 'active', seal_key: keyArn(4), admitted_pcr0s: [pcr('b'), pcr('c')], published_at: '2028-02-20T12:00:00Z', host: host(4), log: log('Fourth release.') });
+    f.releases[2].status = 'deprecated';
+    const gap = validateReleaseFile(f, 'prod', ACCOUNT, IN_WINDOW);
+    expect(signProblems(gap, 4, '2028-03-01T00:00:00Z', null, IN_WINDOW)).toEqual([expect.stringMatching(/^release 1 is removed and can be rescued until/)]);
+    expect(signProblems(gap, 4, '2028-03-16T00:00:00Z', null, AFTER_WINDOW)).toEqual([]);
+    // The successor rules are part of it.
+    expect(signProblems(gap, 4, '2028-03-16T00:00:00Z', { serial: 4, releases: manifestEntries(gap) }, AFTER_WINDOW).join()).toMatch(/serial 4 is not above the previous 4/);
+    // ends_at on a removed entry is the time it ended: never after the manifest's issued_at.
+    const ok = validateReleaseFile(list(), 'prod', ACCOUNT, IN_WINDOW);
+    expect(signProblems(ok, 4, '2028-02-14T00:00:00Z', null, IN_WINDOW).join()).toMatch(/release 1: removed, but its ends_at 2028-02-15T00:00:00Z is after the manifest's issued_at/);
+    expect(signProblems(ok, 4, '2028-02-15T00:00:00Z', null, IN_WINDOW)).toEqual([]);
+  });
+
+  test('the manifest: every removed release still in its window is admitted by the newest active release\'s key', () => {
+    const ok = validateReleaseFile(list(), 'prod', ACCOUNT, IN_WINDOW);
+    expect(rescueTargetProblems(ok, '2028-03-01T00:00:00Z')).toEqual([]); // release 3 admits 1 and 2
+    // Release 4, created without release 1, becomes active while release 1 can still be rescued.
+    const f = list();
+    Object.assign(f.releases[3], { status: 'active', seal_key: keyArn(4), admitted_pcr0s: [pcr('b'), pcr('c')], published_at: '2028-02-20T12:00:00Z', host: host(4), log: log('Fourth release.') });
+    f.releases[2].status = 'deprecated';
+    f.signed_serial = 5;
+    const gap = validateReleaseFile(f, 'prod', ACCOUNT, IN_WINDOW);
+    expect(rescueTargetProblems(gap, '2028-03-01T00:00:00Z')).toEqual([
+      expect.stringMatching(/^release 1 is removed and can be rescued until 2028-03-16T00:00:00Z, but the key of release 4, the newest active release, does not admit it/),
+    ]);
+    expect(rescueTargetProblems(gap, '2028-03-16T00:00:00Z')).toEqual([]);
+    // check:manifest and `vault:manifest publish` (checkChannel) refuse that manifest; a later one, after the window, passes.
+    const served = (issuedAt: string) => checkChannel({ channel: 'prod', file: gap, served: publish(gap, 5, issuedAt), pinnedKeys: [SPKI], history: [], now: IN_WINDOW });
+    expect(served('2028-03-01T00:00:00Z').join()).toMatch(/prod: release 1 is removed and can be rescued until/);
+    expect(served('2028-03-16T00:00:00Z')).toEqual([]);
+  });
+
+  test('the live lists: every removed release still in its window at the served manifest\'s issued_at has a target', () => {
+    for (const ch of ['prod', 'staging'] as const) {
+      const real = readReleaseFile(ROOT, ch, channelVault(ch).vault.account);
+      const servedPath = path.join(ROOT, SERVED_PATHS[ch]);
+      if (!fs.existsSync(servedPath)) continue; // nothing published yet
+      const m = JSON.parse(Buffer.from(JSON.parse(fs.readFileSync(servedPath, 'utf8')).manifest, 'base64').toString());
+      expect(rescueTargetProblems(real, m.issued_at)).toEqual([]);
+    }
+  });
+
+  test('staging as of 2026-10-13 (frozen): the gap, and what a release 12 entered then must admit', () => {
+    const f = validateReleaseFile(frozen(), 'staging', SA, OCT14);
+    const n = (pcr0: string) => f.releases.find((e) => e.pcr0 === pcr0)!.release;
+    // Release 11's key admits 7 to 10 only, while 3 to 6 can be rescued until 2026-10-20.
+    expect(rel(f, 11).admitted_pcr0s.map(n)).toEqual([7, 8, 9, 10]);
+    expect(f.releases.filter((e) => rescuable(e, 'staging', '2026-10-14T00:00:00Z')).map((e) => e.release)).toEqual([3, 4, 5, 6]);
+    expect(rescueEndsAt(rel(f, 3), 'staging')).toBe('2026-10-20T15:30:00Z');
+    // A release 12 entered then must admit them (and 7 to 11); one that follows the old rule is refused.
+    const twelve = (admitted: number[]) => {
+      const raw = frozen();
+      raw.releases.push({ release: 12, status: 'candidate', pcr0: pcr('d'), pcr1: pcr('7'), pcr2: pcr('8'), seal_key: '',
+        admitted_pcr0s: admitted.map((x) => rel(raw, x).pcr0), notes: releaseLogUrl('staging', 12) });
+      return raw;
+    };
+    expect(() => validateReleaseFile(twelve([7, 8, 9, 10, 11]), 'staging', SA, OCT14)).toThrow(/release 12: admitted_pcr0s must name release 3: it is removed but can be rescued until 2026-10-20T15:30:00Z/);
+    expect(() => validateReleaseFile(twelve([3, 4, 5, 6, 7, 8, 9, 10, 11]), 'staging', SA, OCT14)).not.toThrow();
+    const after = new Date('2026-10-20T15:39:09Z');
+    expect(() => validateReleaseFile(twelve([7, 8, 9, 10, 11]), 'staging', SA, after)).not.toThrow();
+    // The longer list still validates after the window (synth does not break by time); check:manifest then asks to shorten it.
+    const long = validateReleaseFile(twelve([3, 4, 5, 6, 7, 8, 9, 10, 11]), 'staging', SA, after);
+    expect(admittedExtraProblems(long, after).map((p) => p.match(/names release (\d+)/)![1])).toEqual(['3', '4', '5', '6']);
+  });
+
+  test('keys older than the rule: staging through release 11 is not checked; the same list in production is', () => {
+    expect(RESCUE_RULE_FROM).toEqual({ prod: 1, staging: 12 });
+    // Staging with release 11 active (serial 14) while 3 to 6 can still be rescued: its key cannot change, no problem is reported.
+    const s14 = frozen();
+    rel(s14, 10).status = 'deprecated';
+    Object.assign(rel(s14, 11), { status: 'active', published_at: '2026-10-13T18:35:58Z' });
+    const staging = validateReleaseFile(s14, 'staging', SA, OCT14);
+    expect(rescueTargetProblems(staging, '2026-10-13T18:35:58Z')).toEqual([]);
+    // The same shape in production, where every key follows the rule: one problem per release left out.
+    const prod = frozen();
+    prod.channel = 'prod';
+    for (const e of prod.releases) {
+      e.seal_key = e.seal_key.replace(SA, ACCOUNT);
+      e.notes = releaseLogUrl('prod', e.release);
+      if (e.host) e.host.tag = `release/prod/${e.release}`;
+    }
+    rel(prod, 10).status = 'deprecated';
+    Object.assign(rel(prod, 11), { status: 'active', published_at: '2026-10-13T18:35:58Z' });
+    const p = validateReleaseFile(prod, 'prod', ACCOUNT, OCT14);
+    // In production the window is 30 days, so 1 and 2 (ended 2026-10-05 and -06) count too.
+    expect(rescueTargetProblems(p, '2026-10-13T18:35:58Z').map((x) => x.match(/^release (\d+) is removed and can be rescued until .* the key of release 11/)![1])).toEqual(['1', '2', '3', '4', '5', '6']);
+    // And from staging release 12 on it is checked: a release 12 that leaves 3 to 6 out, active on 2026-10-14.
+    const s12 = frozen();
+    rel(s12, 10).status = 'deprecated';
+    Object.assign(rel(s12, 11), { status: 'deprecated', published_at: '2026-10-13T18:35:58Z' });
+    s12.releases.push({ release: 12, status: 'active', pcr0: pcr('d'), pcr1: pcr('7'), pcr2: pcr('8'), seal_key: rel(s12, 11).seal_key.replace(/[0-9a-f]{12}$/, '000000000012'),
+      admitted_pcr0s: [7, 8, 9, 10, 11].map((x) => rel(s12, x).pcr0), published_at: '2026-10-14T00:00:00Z', notes: releaseLogUrl('staging', 12), log: log('Twelve.') });
+    expect(rescueTargetProblems(validateReleaseFile(s12, 'staging', SA, OCT14), '2026-10-14T00:00:00Z').map((x) => x.match(/^release (\d+) /)![1])).toEqual(['3', '4', '5', '6']);
+  });
+
+  test('a published release that is removed carries its ends_at (the window counts from it)', () => {
+    const before = list();
+    Object.assign(before.releases[0], { status: 'retired', host: host(1) });
+    before.releases.pop();
+    const b = validateReleaseFile(before, 'prod', ACCOUNT, IN_WINDOW);
+    const after = list();
+    after.releases.pop();
+    delete after.releases[0].ends_at;
+    const a = validateReleaseFile(after, 'prod', ACCOUNT, IN_WINDOW);
+    const history = [{ commit: 'a'.repeat(40), served: publish(b, 2, '2028-02-01T00:00:00Z') }];
+    expect(checkChannel({ channel: 'prod', file: a, served: publish(a, 3, '2028-03-01T00:00:00Z'), pinnedKeys: [SPKI], history, now: IN_WINDOW }).join())
+      .toMatch(/release 1 was published and is now removed without ends_at/);
+    // Never published as running (a failed canary): no ends_at is needed.
+    expect(checkChannel({ channel: 'prod', file: a, served: publish(a, 3, '2028-03-01T00:00:00Z'), pinnedKeys: [SPKI], history: [], now: IN_WINDOW })).toEqual([]);
+  });
+
+  describe('a rescue in progress: `rescue: true` and `host` on a removed entry (§10.3 step 3)', () => {
+    const rescue = (): any => {
+      const f = list();
+      Object.assign(f.releases[0], { rescue: true, host: host(1) });
+      return f;
+    };
+
+    test('the entry stays removed in the manifest; CDK builds its release stack and keeps its key', () => {
+      const f = validateReleaseFile(rescue(), 'prod', ACCOUNT, IN_WINDOW);
+      expect(hostSpecs(f).map((s) => s.release)).toEqual([1, 2, 3]);
+      expect(keySpecs(f).map((k) => k.release)).toEqual([1, 2, 3, 4]);
+      const m = manifestEntries(f);
+      expect(m[0]).toMatchObject({ release: 1, status: 'removed', ends_at: ENDED });
+      expect(Object.keys(m[0])).not.toContain('rescue');
+      // The same bytes as without the rescue: nothing is signed or published to start or end one.
+      const plain = validateReleaseFile(list(), 'prod', ACCOUNT, IN_WINDOW);
+      expect(renderManifest(4, '2028-03-01T00:00:00Z', m).equals(renderManifest(4, '2028-03-01T00:00:00Z', manifestEntries(plain)))).toBe(true);
+      expect(checkChannel({ channel: 'prod', file: f, served: publish(plain, 3, '2028-03-01T00:00:00Z'), pinnedKeys: [SPKI], history: [], now: IN_WINDOW })).toEqual([]);
+    });
+
+    test.each([
+      ['host on a removed entry without rescue', (f: any) => delete f.releases[0].rescue, /release 1: a removed release has no release stack .* except during a rescue/],
+      ['rescue without host', (f: any) => delete f.releases[0].host, /release 1: rescue is set only together with host/],
+      ['rescue on a release that is not removed', (f: any) => (f.releases[1].rescue = true), /release 2: rescue is set only on a removed release/],
+      ['rescue: false', (f: any) => (f.releases[0].rescue = false), /release 1: rescue must be true or absent/],
+      ['a rescue of a release without ends_at', (f: any) => { delete f.releases[0].ends_at; f.releases[3].admitted_pcr0s = [pcr('b'), pcr('c')]; }, /release 1: a release without ends_at never held a member's vault/],
+      ['a rescue the newest active release does not admit', (f: any) => (f.releases[2].admitted_pcr0s = [pcr('b')]), /release 1: rescue is set, but the key of release 3, the newest active release, does not admit it/],
+      ['a rescue with no active release', (f: any) => { f.releases[2].status = 'deprecated'; }, /release 1: rescue is set, but no release is active/],
+      // Release 3 published, then removed while release 2 is the active one again: moves only go forward, so it has no target.
+      ['a rescue of a release above the newest active one', (f: any) => {
+        delete f.releases[0].rescue; delete f.releases[0].host;
+        f.releases[1].status = 'active'; delete f.releases[1].ends_at;
+        Object.assign(f.releases[2], { status: 'removed', ends_at: ENDED, rescue: true });
+      }, /release 3: rescue is set, but the key of release 2, the newest active release, does not admit it/],
+    ])('refuses %s', (_what, change, re) => {
+      const f = rescue();
+      change(f);
+      expect(check(f, IN_WINDOW)).toThrow(re);
+    });
+
+    test('past its window the file still validates (the stack must be destroyable); check:manifest reports it', () => {
+      const f = rescue();
+      const late = validateReleaseFile(f, 'prod', ACCOUNT, AFTER_WINDOW);
+      expect(rescueOverdueProblems(late, IN_WINDOW)).toEqual([]);
+      expect(rescueOverdueProblems(late, AFTER_WINDOW)).toEqual([expect.stringMatching(/^release 1: rescue is set, but its rescue window ended at 2028-03-16T00:00:00Z/)]);
+      expect(checkChannel({ channel: 'prod', file: late, served: publish(late, 3, '2028-03-01T00:00:00Z'), pinnedKeys: [SPKI], history: [], now: AFTER_WINDOW }).join())
+        .toMatch(/prod: release 1: rescue is set, but its rescue window ended/);
+    });
+
+    test('staging release 3 as it would be rescued (frozen list of 2026-10-13): into release 10 while it is active, not once release 11 is', () => {
+      const h = (n: number) => ({ ...host(n), tag: `release/staging/${n}` });
+      const f = frozen();
+      Object.assign(rel(f, 3), { rescue: true, host: h(3) });
+      expect(() => validateReleaseFile(f, 'staging', SA, OCT14)).not.toThrow();
+      // With release 11 active (serial 14), whose key admits 7 to 10 only, the rescue has no target.
+      const g = frozen();
+      Object.assign(rel(g, 3), { rescue: true, host: h(3) });
+      rel(g, 10).status = 'deprecated';
+      Object.assign(rel(g, 11), { status: 'active', published_at: '2026-10-13T18:35:58Z' });
+      expect(() => validateReleaseFile(g, 'staging', SA, OCT14)).toThrow(/release 3: rescue is set, but the key of release 11, the newest active release, does not admit it/);
+    });
   });
 });
 
