@@ -5,7 +5,7 @@ import * as path from 'path';
 import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { channelVault, loadConfig, VAULT_ROLE_NAMES } from '../lib/config';
-import { VAULT_HOST_METRIC_LIMITS, VAULT_HOST_METRIC_SCHEMA, VettidOrgVaultHostStack } from '../lib/stacks/vault-host-stack';
+import { VAULT_DATA_BUCKET_ALARM_BYTES, VAULT_HOST_METRIC_LIMITS, VAULT_HOST_METRIC_SCHEMA, VettidOrgVaultHostStack } from '../lib/stacks/vault-host-stack';
 import { VettidOrgVaultReleaseStack, releaseStackId } from '../lib/stacks/vault-release-stack';
 import { vaultEnv } from '../lib/stacks/vault-stack';
 import { renderBuildComponent } from '../lib/vault/image-component';
@@ -256,6 +256,26 @@ describe('VettidOrgVaultHostStack: queue, logs, alarms, refs (§8.5, §8.7)', ()
         'vettid-org-vault-relay-growth-refused', 'vettid-org-vault-relay-connection-churn', 'vettid-org-vault-relay-stream-limit',
       ]),
     );
+  });
+
+  test('the data bucket\'s size (S3\'s daily metric, every version) alarms over 10 GiB, on both channels', () => {
+    for (const [h, name, bucket] of [[H, 'vettid-org-vault-data-bucket-size', 'vettid-org-vault-data-369484479783'], [host('staging'), 'vettid-org-staging-vault-data-bucket-size', 'vettid-org-staging-vault-data-347272280361']] as const) {
+      const [a] = resources(h.json, 'AWS::CloudWatch::Alarm').filter((x) => x.Properties.AlarmName === name);
+      expect(a.Properties).toMatchObject({
+        Namespace: 'AWS/S3',
+        MetricName: 'BucketSizeBytes',
+        Dimensions: expect.arrayContaining([{ Name: 'BucketName', Value: bucket }, { Name: 'StorageType', Value: 'StandardStorage' }]),
+        Statistic: 'Maximum',
+        Period: 86400,
+        Threshold: 10 * 1024 ** 3,
+        ComparisonOperator: 'GreaterThanThreshold',
+        EvaluationPeriods: 2,
+        DatapointsToAlarm: 1,
+        TreatMissingData: 'notBreaching',
+      });
+      expect(a.Properties.Threshold).toBe(VAULT_DATA_BUCKET_ALARM_BYTES);
+      expect(str(a.Properties.AlarmActions)).toContain('Alerts');
+    }
   });
 
   test('the alerts topic admits this account\'s CloudWatch alarms beside the CloudTrail rules (#214\'s fault)', () => {

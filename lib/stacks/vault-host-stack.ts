@@ -60,6 +60,20 @@ export const VAULT_HOST_METRIC_LIMITS = {
   assumedStreams: 100,
 } as const;
 
+/**
+ * The data bucket's size that raises an alarm, in bytes (10 GiB). The
+ * staging bucket held about 7.4 GB on 2026-10-13, nearly all of it old
+ * versions of two test vaults' state under the 7-day rule, and should
+ * fall to a third of that or less under the version cap
+ * (VAULT_DATA_VERSIONS, vault-stack.ts); production held no vaults. The
+ * threshold sits above that day's size so that the alarm is quiet while
+ * the cap takes effect and fires when the bucket outgrows what it held
+ * before the cap. Lower it once the size has settled; raise it as vaults
+ * are added (a vault costs about its state's size times the writes of a
+ * day or two).
+ */
+export const VAULT_DATA_BUCKET_ALARM_BYTES = 10 * 1024 ** 3;
+
 /** The parent's metrics, by instance (the schema of the Metrics Insights queries). */
 export const VAULT_HOST_METRIC_SCHEMA = 'SCHEMA("VettID/Vault", InstanceId)';
 
@@ -410,6 +424,25 @@ export class VettidOrgVaultHostStack extends cdk.Stack {
       threshold: 0,
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
       evaluationPeriods: 1,
+    });
+    // The data bucket (VaultStack) holds every version of every vault's
+    // state. S3 reports its size once a day (all versions, the current and
+    // the noncurrent ones), a day or so late: the alarm looks at the last
+    // two daily values and needs one of them over the threshold.
+    alarm('DataBucketSize', {
+      alarmName: resourceName(config, 'vault-data-bucket-size'),
+      alarmDescription: `The vault data bucket holds more than ${VAULT_DATA_BUCKET_ALARM_BYTES / 1024 ** 3} GiB (all versions): see RUNBOOK, "The data bucket's old versions and its size alarm"`,
+      metric: new cloudwatch.Metric({
+        namespace: 'AWS/S3',
+        metricName: 'BucketSizeBytes',
+        dimensionsMap: { BucketName: dataBucket, StorageType: 'StandardStorage' },
+        statistic: 'Maximum',
+        period: cdk.Duration.days(1),
+      }),
+      threshold: VAULT_DATA_BUCKET_ALARM_BYTES,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      evaluationPeriods: 2,
+      datapointsToAlarm: 1,
     });
     // Per-instance queues come and go, so the age alarm is a Metrics
     // Insights query over every control queue (the DLQ has its own alarm).

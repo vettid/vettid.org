@@ -4,12 +4,13 @@ import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { mockClient } from 'aws-sdk-client-mock';
 import { CreateKeyCommand, KMSClient } from '@aws-sdk/client-kms';
-import { AppConfig, loadConfig, VAULT_RELEASE_KEY_FUNCTION_NAME, VAULT_ROLE_NAMES } from '../lib/config';
+import { AppConfig, loadConfig, VAULT_RELEASE_KEY_FUNCTION_NAME, VAULT_ROLE_NAMES, vaultDataBucketNames } from '../lib/config';
 import { VettidOrgVaultStack, vaultEnv } from '../lib/stacks/vault-stack';
 import { VettidOrgMemberApiStack } from '../lib/stacks/member-api-stack';
 import { checkPolicy, failedCheck, ManifestRelease } from '../lambda/shared/keypolicy';
 import { vaultApiRoleName, VAULT_API_CONSUMERS } from '../lib/vault/access';
 import { handler, parseProps, preflight, propsHash } from '../lambda/vault/release-key';
+import { VAULT_DATA_VERSIONS } from '../lib/stacks/vault-stack';
 
 const pcr = (b: string) => b.repeat(48);
 const P1 = pcr('a1');
@@ -255,14 +256,28 @@ describe('release-key custom resource handler', () => {
 });
 
 describe('VettidOrgVaultStack: data bucket and manifest key', () => {
-  test('versioned, SSE, public access blocked, TLS only, 7-day noncurrent retention', () => {
+  test('versioned, SSE, public access blocked, TLS only; old versions: all for a day, then the 5 newest, none past 7 days', () => {
     prod.t.hasResourceProperties('AWS::S3::Bucket', {
       BucketName: 'vettid-org-vault-data-369484479783',
       VersioningConfiguration: { Status: 'Enabled' },
       BucketEncryption: { ServerSideEncryptionConfiguration: [{ ServerSideEncryptionByDefault: { SSEAlgorithm: 'AES256' } }] },
       PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true },
-      LifecycleConfiguration: { Rules: [{ NoncurrentVersionExpiration: { NoncurrentDays: 7 }, ExpiredObjectDeleteMarker: true, AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }, Status: 'Enabled' }] },
     });
+    // Exact, on both channels: the 7-day rule is unchanged (it is what
+    // removes a deleted vault's last versions and its delete marker), the
+    // cap is a second rule, and neither has a prefix or a tag filter.
+    for (const s of [prod, synth('staging', [])]) {
+      const [[, bucket]] = resources(s.json, 'AWS::S3::Bucket');
+      expect(bucket.Properties.LifecycleConfiguration).toEqual({
+        Rules: [
+          { NoncurrentVersionExpiration: { NoncurrentDays: 7 }, ExpiredObjectDeleteMarker: true, AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }, Status: 'Enabled' },
+          { Id: 'KeepNewestNoncurrentVersions', NoncurrentVersionExpiration: { NoncurrentDays: 1, NewerNoncurrentVersions: 5 }, Status: 'Enabled' },
+        ],
+      });
+      expect(bucket.DeletionPolicy).toBe('Retain');
+      expect(bucket.UpdateReplacePolicy).toBe('Retain');
+    }
+    expect(VAULT_DATA_VERSIONS).toEqual({ keepAllDays: 1, keepNewest: 5, maxDays: 7 });
   });
 
   test('vault data is denied to every principal but the host role; manifests are written by the signer only', () => {
@@ -486,5 +501,63 @@ describe('Vault OU SCP (lib/org/scp-vault.json)', () => {
       ArnNotLike: { 'aws:PrincipalArn': `arn:aws:iam::*:role/${VAULT_ROLE_NAMES.releaseKeyCreator}` },
     });
     expect(raw).toContain(`function:${VAULT_RELEASE_KEY_FUNCTION_NAME}`);
+  });
+
+  describe('the vault data buckets', () => {
+    const s = scp.Statement.find((x: any) => x.Sid === 'ProtectVaultDataBuckets');
+    const bucketOf = (stage: string) => resources(synth(stage, []).json, 'AWS::S3::Bucket')[0][1].Properties.BucketName;
+
+    test('exactly the data bucket of each channel, as the vault stack names it', () => {
+      expect(vaultDataBucketNames()).toEqual([bucketOf('prod'), bucketOf('staging')]);
+      expect(s.Resource).toEqual(vaultDataBucketNames().map((b) => `arn:aws:s3:::${b}`));
+      // Bucket ARNs only: no object call is denied here (the bucket policy keeps objects to the host role).
+      for (const r of s.Resource) expect(r).not.toMatch(/[*/]/);
+    });
+
+    test('denies the calls that can destroy or expose the data: lifecycle, versioning, bucket policy, deletion', () => {
+      expect([...s.Action].sort()).toEqual(['s3:DeleteBucket', 's3:DeleteBucketPolicy', 's3:PutBucketPolicy', 's3:PutBucketVersioning', 's3:PutLifecycleConfiguration']);
+    });
+
+    test('a deploy still can: only the CDK execution role is exempt (as in the other SCP statements)', () => {
+      expect(s.Condition).toEqual({ ArnNotLike: { 'aws:PrincipalArn': 'arn:aws:iam::*:role/cdk-*-cfn-exec-role-*' } });
+    });
+
+    test('nothing a release needs: no other statement touches S3, and this one no object, tag or notification call', () => {
+      const s3Statements = scp.Statement.filter((x: any) => [x.Action].flat().some((a: string) => a.startsWith('s3:')));
+      expect(s3Statements.map((x: any) => x.Sid)).toEqual(['ProtectVaultDataBuckets']);
+      for (const a of s.Action) expect(a).not.toMatch(/Object|\*/);
+    });
+  });
+
+  describe('no interactive access to an instance', () => {
+    const s = scp.Statement.find((x: any) => x.Sid === 'NoInteractiveSessions');
+
+    test('sessions of every kind, EC2 Instance Connect and the serial console are denied', () => {
+      // StartSession is the one call behind every session document (shell,
+      // interactive command, port forwarding, SSH over Session Manager).
+      expect([...s.Action].sort()).toEqual([
+        'ec2-instance-connect:*',
+        'ec2:CreateInstanceConnectEndpoint',
+        'ec2:EnableSerialConsoleAccess',
+        'ssm:ResumeSession',
+        'ssm:StartSession',
+      ]);
+      expect(s.Resource).toBe('*');
+    });
+
+    test('to everyone: no exception inside the account, the CDK execution role included (no deploy opens a session)', () => {
+      expect(s.Condition).toBeUndefined();
+      expect(s.NotAction).toBeUndefined();
+    });
+
+    test('Run Command stays: nothing in the policy denies SendCommand or the agent\'s channels', () => {
+      const actions: string[] = scp.Statement.flatMap((x: any) => [x.Action].flat());
+      const denies = (action: string) => actions.some((a) => new RegExp('^' + a.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$').test(action));
+      expect(denies('ssm:StartSession')).toBe(true);
+      expect(denies('ec2-instance-connect:SendSSHPublicKey')).toBe(true);
+      for (const a of ['ssm:SendCommand', 'ssm:GetCommandInvocation', 'ssm:ListCommandInvocations', 'ssm:UpdateInstanceInformation', 'ssmmessages:OpenControlChannel', 'ec2messages:GetMessages']) {
+        expect({ a, denied: denies(a) }).toEqual({ a, denied: false });
+      }
+    });
   });
 });

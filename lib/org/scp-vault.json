@@ -55,6 +55,36 @@
       "Condition": {
         "ArnNotLike": { "aws:PrincipalArn": "arn:aws:iam::*:role/cdk-*-cfn-exec-role-*" }
       }
+    },
+    {
+      "Sid": "ProtectVaultDataBuckets",
+      "Effect": "Deny",
+      "Action": [
+        "s3:PutLifecycleConfiguration",
+        "s3:PutBucketVersioning",
+        "s3:PutBucketPolicy",
+        "s3:DeleteBucketPolicy",
+        "s3:DeleteBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::vettid-org-vault-data-369484479783",
+        "arn:aws:s3:::vettid-org-staging-vault-data-347272280361"
+      ],
+      "Condition": {
+        "ArnNotLike": { "aws:PrincipalArn": "arn:aws:iam::*:role/cdk-*-cfn-exec-role-*" }
+      }
+    },
+    {
+      "Sid": "NoInteractiveSessions",
+      "Effect": "Deny",
+      "Action": [
+        "ssm:StartSession",
+        "ssm:ResumeSession",
+        "ec2-instance-connect:*",
+        "ec2:CreateInstanceConnectEndpoint",
+        "ec2:EnableSerialConsoleAccess"
+      ],
+      "Resource": "*"
     }
   ]
 }

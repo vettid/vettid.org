@@ -57,13 +57,57 @@ export function render(root, ctx) {
         : ui.action('Reinstate', async () => {
             const ok = await ui.confirm({
               title: 'Reinstate member',
-              body: [`Re-enable sign-in for ${m.email}?`],
+              body: [
+                `Re-enable sign-in for ${m.email}?`,
+                'A vault deletion that was pending is cancelled first, and the member is emailed that it was.',
+              ],
               confirmLabel: 'Reinstate',
             });
             if (!ok) return;
-            row.update(await api.post(`/admin/members/${id}/reinstate`));
+            let updated;
+            try {
+              updated = await api.post(`/admin/members/${id}/reinstate`);
+            } catch (e) {
+              // A recovery of the member's vault is still active: it was not
+              // stopped by the suspension and works again once the account
+              // is active. The API reinstates only after a confirmation.
+              if (e?.code !== 'recovery_active') throw e;
+              const anyway = await ui.confirm({
+                title: 'A vault recovery is still active',
+                body: [
+                  e.message,
+                  'A vault deletion that was pending has already been cancelled. The account is still not active.',
+                ],
+                confirmLabel: 'Reinstate anyway',
+                tone: 'danger',
+              });
+              if (!anyway) return;
+              updated = await api.post(`/admin/members/${id}/reinstate`, { allow_active_recovery: true });
+            }
+            row.update(updated);
             ui.toast(`Reinstated ${m.email}.`);
           });
+
+      // A suspension can be half done (the status is written first; ending
+      // the sessions can fail after it). Repeating it finishes the rest.
+      const suspendAgain = m.account_status === 'suspended'
+        ? ui.action('Suspend again', async () => {
+            const v = await ui.dialog({
+              title: 'Suspend again',
+              body: [
+                `${m.email} is already suspended. This disables sign-in and ends the sessions again; it changes nothing else.`,
+                'Use it when Suspend answered an error, or when the audit log has no "member.suspend" event for this suspension.',
+              ],
+              fields: [{ name: 'reason', label: 'Reason (required; recorded in the audit log)', type: 'textarea', required: true, maxlength: 500 }],
+              confirmLabel: 'Suspend again',
+              tone: 'danger',
+              enableWhen: (x) => x.reason.length > 0,
+            });
+            if (!v) return;
+            row.update(await api.post(`/admin/members/${id}/suspend`, { reason: v.reason }));
+            ui.toast(`Suspended ${m.email} again: sign-in is disabled and the sessions are ended.`);
+          })
+        : null;
 
       const extend = m.subscription
         ? ui.action('Extend', async () => {
@@ -97,6 +141,26 @@ export function render(root, ctx) {
           })
         : null;
 
+      // "Delete my vault and start over" (MEMBER-API): the 24 hours a member
+      // has to cancel. Support cancels it for a member who did not ask for
+      // it. The list does not know whether one is pending; the answer says.
+      const cancelVaultDeletion = m.state === 'member'
+        ? ui.action('Cancel vault deletion', async () => {
+            const ok = await ui.confirm({
+              title: 'Cancel pending vault deletion',
+              body: [
+                `Cancel the pending deletion of ${m.email}'s vault ("Delete my vault and start over")?`,
+                'Use this when the member says they did not ask for it. If the account looks taken over, suspend it first: the deletion waits while the account is suspended. The member is emailed that it was cancelled.',
+                'A deletion that is already being carried out cannot be cancelled.',
+              ],
+              confirmLabel: 'Cancel the deletion',
+            });
+            if (!ok) return;
+            const r = await api.post(`/admin/members/${id}/vault/deletion/cancel`);
+            ui.toast(r.cancelled ? `Cancelled the vault deletion for ${m.email}.` : `${m.email} has no pending vault deletion.`);
+          })
+        : null;
+
       const remove = ui.action('Delete', async () => {
         const v = await ui.dialog({
           title: 'Delete member permanently',
@@ -126,7 +190,7 @@ export function render(root, ctx) {
         chip(m.account_status, STATUS_TONE[m.account_status] ?? 'mute'),
         subscriptionCell(m.subscription),
         m.voting_rights ? chip('yes', 'ok') : muted('no'),
-        ui.rowActions(suspendOrReinstate, extend, clearPin, canary, remove),
+        ui.rowActions(suspendOrReinstate, suspendAgain, extend, clearPin, cancelVaultDeletion, canary, remove),
       ];
     },
   });
