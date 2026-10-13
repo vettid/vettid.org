@@ -1,8 +1,8 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.20
-date: 2026-10-12
+version: 0.1.21
+date: 2026-10-13
 owner: Al Liebl (Mesmer)
 changelog:
   - 0.1.0: V5 plan. Release pipeline, keys, infrastructure, release
@@ -158,15 +158,21 @@ changelog:
     staging release S11, not cut yet). §8.7: the log records the
     unreachable-parent rule adds, and what S11 is planned to carry.
     `related` brought up to date
+  - 0.1.21 (as built, vettid-vault #73 and #74, `main` a852e36; for
+    staging release S11, not cut yet; approved by the owner
+    2026-10-13). §8.7: what S11 is planned to carry now includes #73
+    (the Go version of the enclave image) and #74 (a `Ping` read while
+    the vaults are being locked, VAULT-HOST-PROTOCOL 0.1.5 §4.3); no
+    log record changes. `related` brought up to date
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
-  - VAULT-MESSAGING.md (0.29.1) §11.10 release updates, §12.5 deletion, §13.5, §13.9
+  - VAULT-MESSAGING.md (0.29.2) §11.10 release updates, §12.5 deletion, §13.5, §13.9
   - RELEASE-UPDATES.md (0.3.3) — member-facing; §3 changes with this plan; §5 the release log
   - ANDROID-PLAN.md (0.1.37) — the app's "What's new" from the log
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2) — staging as the development channel; D1–D11
   - CALLS-PLAN.md (0.1.3) §13, CALLING-SERVICE.md (0.2.0) §5.5, §8 — the calling service's issuer in the egress controls; `calls_url`
   - MEMBER-API.md "Vault", RUNBOOK.md, ARCHITECTURE.md
-  - VAULT-HOST-PROTOCOL.md (0.1.4) — the enclave ↔ parent (vsock) protocol as built; §10 what happens if versions meet
+  - VAULT-HOST-PROTOCOL.md (0.1.5) — the enclave ↔ parent (vsock) protocol as built; §10 what happens if versions meet
   - vettid-vault docs/SMOKE.md (hardware smoke test, 2026-10-02)
 classification: public (no secrets; safe for github.com/vettid)
 ---
@@ -1413,7 +1419,11 @@ release_starting`. The `vault-scaler` Lambda (host stack):
   - **What S11 is planned to carry** (vettid-vault, since
     `release/staging/10`): #66 (relay connections and metrics), #69
     (`relay_vault_limit`), #70, #71 and #72 (the unreachable parent);
-    all merged, `main` 392b03c. #67 and #68 are test vectors and
+    and (0.1.21) #73 (the enclave image and the smoke script are built
+    with Go 1.26.9) and #74 (a `Ping` read while the vaults are being
+    locked does not make the parent reachable; VAULT-HOST-PROTOCOL
+    0.1.5 §4.3);
+    all merged, `main` a852e36. #67 and #68 are test vectors and
     documentation. `deploy/host/` is
     unchanged since S10, so S11's `host_files_sha256` is S10's.
 - *As built (0.1.17; the host stack, `lib/stacks/vault-host-stack.ts`;

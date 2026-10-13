@@ -356,6 +356,28 @@ npx cdk deploy VettidOrgRelayStack       # service; reads the refs at deploy tim
 - **Data.** Everything stored is ciphertext the relay cannot read. Table
   has deletion protection, no PITR (messages live ≤ 14 days); the blob
   bucket expires objects after 8 days.
+- **Table throughput ceiling.** The table is on-demand with a maximum:
+  **2,000 write and 2,000 read units a second** (its index `due`: 100
+  and 100), `RELAY_TABLE_LIMITS` in `lib/stacks/relay-data-stack.ts`,
+  where the sizing is written out. Above it DynamoDB throttles: deposits,
+  acks and registrations fail or are retried, for every tenant, until
+  the load is back under it (short bursts may pass; the maximum is a
+  target, not exact). Without it the only bound was the account quota of
+  40,000 units a second, about $2,160 a day in writes; with it, about
+  $108 a day in writes and $22 in reads. Measured use (October 2026, ten
+  members): 27 write units a second in the busiest minute; a vault host
+  of 900 vaults at a message a minute each is about 300. To raise it:
+  change the numbers, PR, `npx cdk diff VettidOrgRelayDataStack` (the
+  table must show as modified in place, never replaced), `npx cdk deploy
+  VettidOrgRelayDataStack`, then `VettidOrgRelayStack` (two alarm
+  thresholds follow the numbers). In an emergency the same from the CLI,
+  and put it in code afterwards, or the next deploy of the data stack
+  takes it back:
+  `aws dynamodb update-table --table-name vettid-org-relay --on-demand-throughput MaxReadRequestUnits=<n>,MaxWriteRequestUnits=<n>`.
+  It caps the rate, not what is stored: nothing limits the table's size
+  but the mailbox quotas and the 14-day lifetime
+  (`aws dynamodb describe-table --table-name vettid-org-relay --query 'Table.[ItemCount,TableSizeBytes]'`,
+  refreshed about every six hours).
 - **Empty hints.** Idle long-polls mostly skip DynamoDB (Valkey knows the
   mailbox is empty); `relay_collect_store_skips_total` vs
   `relay_collect_store_queries_total` shows the ratio, and
@@ -364,7 +386,8 @@ npx cdk deploy VettidOrgRelayStack       # service; reads the refs at deploy tim
 
 ### Alarms on the rate limits line
 
-Seven alarms, `vettid-org-relay-<name>`, to the topic
+Eleven alarms, `vettid-org-relay-<name>` (seven on the line, four on the
+table: "Alarms on the table" below), to the topic
 `vettid-org-security-alerts` → admin@vettid.org (the management
 account's topic, which admits this account's CloudWatch alarms since
 #214; the member API's alarms use it the same way). Six metric filters
@@ -383,7 +406,21 @@ does.
 | `register-refused` | an address was refused new mailboxes (`register_refused` > 0, 1/s, burst 30) in 3 of 5 minutes | Someone creating mailboxes in bulk (re-registration at unlock is free, so not a vault host unlocking). DynamoDB item count and consumed writes; nothing to raise. |
 | `collectors` | a task carries ≥ 2,000 long-polls in 3 of 5 minutes | About 42 KiB each: 82 MiB of the task's 512 MiB, and nothing caps them per task. Look at task memory and restarts (ECS service metrics); scale out by hand if memory is above 70 % and the service has not (`aws ecs update-service --cluster vettid-org-relay --service vettid-org-relay --desired-count <n>`, up to 8); find out who holds them (a vault host has at most 1,024). Time to bring back the per-task caps (relay branch `ratelimit-per-key-full`). |
 | `ws-sessions` | a task carries ≥ 2,000 WebSocket sessions in 3 of 5 minutes | The same, at about 45 KiB each (88 MiB). |
-| `rate-limits-silent` | no task wrote the line for 5 minutes (missing data is the alarm) | The relay is down or not logging: `aws ecs describe-services --cluster vettid-org-relay --services vettid-org-relay --query 'services[0].[runningCount,deployments[].rolloutState,events[:5].message]'`, then `aws logs tail /vettid-org/prod/relay-service --since 15m`. An image older than protocol 0.7.0 does not write the line. The other six alarms are blind while this one is on. Also sends OK. |
+| `rate-limits-silent` | no task wrote the line for 5 minutes (missing data is the alarm) | The relay is down or not logging: `aws ecs describe-services --cluster vettid-org-relay --services vettid-org-relay --query 'services[0].[runningCount,deployments[].rolloutState,events[:5].message]'`, then `aws logs tail /vettid-org/prod/relay-service --since 15m`. An image older than protocol 0.7.0 does not write the line. The other six alarms on the line are blind while this one is on (the four on the table are not). Also sends OK. |
+
+#### Alarms on the table
+
+Four alarms on DynamoDB's own metrics for the table (`AWS/DynamoDB`,
+`TableName` = `vettid-org-relay`), which do not depend on the line:
+they keep working while `rate-limits-silent` is on. The metrics have
+data only in minutes with requests, so missing data is not an alarm.
+
+| Alarm | Fires when | Do |
+|---|---|---|
+| `table-writes-high` | 60,000 or more write units a minute for 5 minutes (half the ceiling of 2,000 a second) | Somebody is writing a lot: deposits of large messages, or many of them. With `address-busy` or `address-refused` on: one address. Is it a known vault host (a migration, a mass unlock, real growth)? Then raise the ceiling before it throttles ("Table throughput ceiling" above). If not, it is a flood kept at the ceiling: the bill is bounded (about $108 a day at most), tenants are throttled only once `table-throttled` fires; watch the table's size, and do not raise the ceiling for it. |
+| `table-reads-high` | 60,000 or more read units a minute for 5 minutes (half the ceiling) | The same for reads (collects of large mailboxes). Health checks read the table too, so do not let real use sit at the read ceiling: raise it. |
+| `table-write-volume` | 360,000 or more write units in an hour (100 a second on average; at most about 180 MB of messages stored) | 65 times the busiest hour of the preview. A slow fill below the other alarms shows here: table size and item count (`describe-table`, above), `register-refused`, the hour's `ConsumedWriteCapacityUnits` in the console. Real growth reaches it at about 300 vaults at a message a minute: then raise `tableWriteUnitsPerHour`. |
+| `table-throttled` | DynamoDB throttled the table or its index (read or write events, or throttled deposit transactions) in 3 of 5 minutes | Tenants are being refused or delayed now. With `table-writes-high` or `table-reads-high`: the ceiling is reached, decide as above (real use: raise it; a flood: leave it, it is what bounds the bill). Without them: a hot partition (one mailbox written or read beyond a partition's 1,000 write or 3,000 read units a second), or the index's ceiling (mass rotation, `register-refused`). |
 
 The thresholds are in `RELAY_ALARM_LIMITS` (`lib/stacks/relay-stack.ts`).
 2,000 long-polls or sessions on a task is a sixth of its memory, well
