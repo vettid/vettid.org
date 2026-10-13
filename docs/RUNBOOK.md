@@ -1050,8 +1050,8 @@ After publishing a manifest, run it at once:
    The image build takes about 20–40 minutes; a hash or PCR0 mismatch
    fails the build and the deploy (logs: `/aws/imagebuilder/vettid-org-vault-r<N>-<hash>`).
 5. Canary: `aws autoscaling set-desired-capacity --auto-scaling-group-name vettid-org-vault-r<N> --desired-capacity 1`,
-   then the self-test through SSM on that instance, per vettid-vault
-   docs/SMOKE.md:
+   then the self-test on that instance through Run Command ("No
+   interactive access to hosts" below), per vettid-vault docs/SMOKE.md:
    ```bash
    systemctl stop vault-parent      # also stops the enclave (vault-enclave is PartOf the parent)
    systemctl start vault-enclave    # a fresh enclave, which dials the self-test parent
@@ -1087,7 +1087,7 @@ After publishing a manifest, run it at once:
 From S3 on, the release image's self-test can measure how many vaults one
 host holds (vettid-vault docs/SMOKE.md, "Capacity measurement"). Run it on
 a host of the release under test, the same way as the canary self-test,
-through SSM with `executionTimeout` of at least 7200 s:
+through Run Command with `executionTimeout` of at least 7200 s:
 
 ```bash
 systemctl stop vault-parent      # also stops the enclave (PartOf)
@@ -1387,12 +1387,69 @@ moved; the scaler then stops the group at once.
 ### Network and egress
 
 Hosts: public subnets in two AZs of the host VPC, no NAT, no inbound,
-outbound TCP 443 only, SSM Session Manager only. Route 53 Resolver DNS
+outbound TCP 443 only, no SSH key and no interactive access: commands
+through Systems Manager Run Command only (next section). Route 53 Resolver DNS
 Firewall answers only the names in `lib/vault/egress.ts` (NXDOMAIN for the
 rest; query logs in `/vettid-org/<stage>/vault-dns`, metric
 `DnsQueriesBlocked`); S3 and DynamoDB gateway endpoints admit only this
 account's resources. AMIs are built in a separate build VPC without the
 firewall (the builder needs GitHub and the package repositories).
+
+### No interactive access to hosts
+
+Nobody gets a shell on an instance in a vault account (the owner's
+decision of 2026-10-13), in staging or production. What makes it so:
+
+- The Vault OU policy (`lib/org/scp-vault.json`, statement
+  `NoInteractiveSessions`) denies, to every principal in both accounts
+  with no exception: `ssm:StartSession` and `ssm:ResumeSession` (one call
+  starts every kind of session: the shell, an interactive command, port
+  forwarding, SSH over Session Manager, whatever the session document),
+  every EC2 Instance Connect call (a temporary SSH key, the serial
+  console's key, an Instance Connect tunnel), creating an Instance
+  Connect endpoint, and turning on the serial console (it is off in both
+  accounts).
+- The hosts themselves: the security group has no inbound rule, the
+  launch template has no key pair, and neither account has one.
+
+What an operator does instead: **Run Command**, one command at a time.
+It runs as root, through the SSM agent, without a terminal:
+
+```bash
+P="--profile vault-staging"; I=<instance id>
+C=$(aws ssm send-command $P --instance-ids $I --document-name AWS-RunShellScript \
+  --comment "S12 self-test" --parameters 'commands=["systemctl is-active vault-parent"]' \
+  --query Command.CommandId --output text)
+aws ssm get-command-invocation $P --command-id $C --instance-id $I \
+  --query '[Status,StandardOutputContent,StandardErrorContent]' --output text
+```
+
+Give every command a `--comment` (it is in CloudTrail; the commands
+themselves are not). The output comes back up to 24,000 characters:
+for more, write to a file on the host and `grep` or `tail` it with a
+second command, as "Capacity measurement" does. A long command takes
+`executionTimeout` in `--parameters`. Each `send-command` by a person
+sends a `VaultHostAccess` email ("Security alerts"); that is intended.
+Image Builder's own commands on its build instances and a patch
+baseline, should one ever be wanted, are Run Command too and are not
+affected (the hosts are replaced by a new release's image, not patched
+in place).
+
+Run Command is still any command as root. What the policy removes is
+the terminal: unattributed keystrokes with nothing recorded. It does
+not stop an administrator from running a script.
+
+**Break-glass.** A shell on a host takes a change of the organization
+policy, which only an administrator of the management account can make
+(nothing inside a vault account can): remove the two `ssm:` actions
+from the statement, `scripts/vault/apply-scp.sh --apply`, open the
+session, put the file back and apply again. Each apply emails
+`OrgOrSsoChanges`, and the session emails `VaultHostAccess`. Say in
+the release or incident notes why it was needed.
+
+The exit node in the management account ("Admin access") is not a
+vault host and is not under this policy: its Session Manager access is
+unchanged.
 
 ### The Android app link (account site)
 
@@ -1894,7 +1951,7 @@ pattern the SCPs exempt):
 | `KmsKeyPolicy` | `PutKeyPolicy` outside a deploy (management and proteus) |
 | `S3PublicAccess` | bucket policy, ACL, ownership controls, bucket- or account-level public access block (outside a deploy) |
 | `VaultDataBucketConfig` | a vault data bucket's lifecycle rule, versioning or bucket policy changed, or the bucket deleted — always, deploys and refused attempts included (vault accounts) |
-| `VaultHostAccess` | a Session Manager session (`StartSession`, `ResumeSession`) or a Run Command (`SendCommand`) in a vault account, except Image Builder's commands on its build instance |
+| `VaultHostAccess` | a Run Command (`SendCommand`) in a vault account, except Image Builder's commands on its build instance; and every interactive way in, which the Vault OU policy denies, so normally as a refused attempt: a Session Manager session (`StartSession`, `ResumeSession`), EC2 Instance Connect (`SendSSHPublicKey`, `SendSerialConsoleSSHPublicKey`, `OpenTunnel`, `CreateInstanceConnectEndpoint`), the serial console switch (`EnableSerialConsoleAccess`) |
 | `VaultHostProfileLaunch` | `RunInstances` with the instance profile `vettid-org-vault-host` by anything but Auto Scaling (vault accounts; refused attempts included) |
 | `VaultHostLaunchPath` | a launch template or its version, an Auto Scaling group or launch configuration, an instance-profile association, or a role added to an instance profile — outside a deploy (vault accounts) |
 | `SecurityGroupOpenToWorld` | ingress from `0.0.0.0/0` or `::/0` (outside a deploy) |
@@ -1935,19 +1992,23 @@ alerts is objects copied or destroyed, not read.
   AccessDenied` means the SCP refused the call and nothing changed; find
   out who tried. A bucket policy change outside a deploy also arrives as
   `S3PublicAccess`.
-- **`VaultHostAccess`.** Someone opened a shell or ran a command on an
-  instance in a vault account. CloudTrail keeps who, when, from where
-  and on which instance (`requestParameters.target` for a session,
-  `.instanceIds` and `.documentName` for a command), not what was typed
-  or run: a command's parameters are recorded as hidden and sessions are
-  not logged in the vault accounts. Expected when the owner runs a
-  release's self-test or capacity measurement in staging ("Adding a
-  release", "Capacity measurement"); one email per command. Not expected
-  in production. If it was not you: treat the host role's credentials on
-  that instance as taken. Terminate the instance (its group starts a new
-  one; the credentials die with it within hours), end the Identity
-  Center session that made the call, and read the data events of the
-  bucket from the time of the session on ("Vault data events").
+- **`VaultHostAccess`.** Look at `event` and `error` first.
+  `SendCommand`: someone ran a command on an instance in a vault
+  account. CloudTrail keeps who, when, from where, on which instance
+  (`requestParameters.instanceIds`), the document and the comment, not
+  the command: its parameters are recorded as hidden. Expected when the
+  owner runs a release's self-test or capacity measurement ("Adding a
+  release", "Capacity measurement"); one email per command. Any other
+  event is an interactive way in ("No interactive access to hosts"):
+  with `error: AccessDenied` the policy refused it and nothing happened,
+  but someone tried; **without an error the policy is not in force**
+  (detached, edited, or the account moved out of the Vault OU): check
+  `OrgOrSsoChanges` emails and re-apply it. For a command or a session
+  that was not you: treat the host role's credentials on that instance
+  as taken. Terminate the instance (its group starts a new one; the
+  credentials die with it within hours), end the Identity Center
+  session that made the call, and read the data events of the bucket
+  from that time on ("Vault data events").
 - **`VaultHostProfileLaunch`.** An instance was started with the host
   role outside the release groups, so something other than a released
   image holds the credentials that read and delete sealed objects. No
@@ -2092,15 +2153,17 @@ aws events disable-rule --name vettid-org-security-alert-forward --profile vault
 ```
 
 The vault account rules, in staging. A command on a running host
-(expect a `VaultHostAccess` email; a session,
-`aws ssm start-session --target <instance id>`, must send one too), and
-the bucket's versioning set to what it already is (before the SCP is
-applied: a `VaultDataBucketConfig` email and no change; after: the same
-email with `error: AccessDenied`):
+(it runs; expect a `VaultHostAccess` email), a session (once the SCP is
+applied it must be refused with `AccessDeniedException` and still send
+a `VaultHostAccess` email, with `event: StartSession` and `error:
+AccessDenied`), and the bucket's versioning set to what it already is
+(before the SCP is applied: a `VaultDataBucketConfig` email and no
+change; after: the same email with `error: AccessDenied`):
 
 ```bash
 aws ssm send-command --profile vault-staging --instance-ids <instance id> \
   --document-name AWS-RunShellScript --parameters 'commands=["true"]' --comment "alert test"
+aws ssm start-session --profile vault-staging --target <instance id>
 aws s3api put-bucket-versioning --profile vault-staging \
   --bucket vettid-org-staging-vault-data-347272280361 --versioning-configuration Status=Enabled
 ```

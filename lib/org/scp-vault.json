@@ -73,6 +73,18 @@
       "Condition": {
         "ArnNotLike": { "aws:PrincipalArn": "arn:aws:iam::*:role/cdk-*-cfn-exec-role-*" }
       }
+    },
+    {
+      "Sid": "NoInteractiveSessions",
+      "Effect": "Deny",
+      "Action": [
+        "ssm:StartSession",
+        "ssm:ResumeSession",
+        "ec2-instance-connect:*",
+        "ec2:CreateInstanceConnectEndpoint",
+        "ec2:EnableSerialConsoleAccess"
+      ],
+      "Resource": "*"
     }
   ]
 }

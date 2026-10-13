@@ -412,19 +412,34 @@ export class VettidOrgAuditStack extends cdk.Stack {
       requestParameters: { bucketName: vaultDataBucketNames() },
     });
 
-    // A shell or a command on an instance in a vault account. CloudTrail
-    // records that it happened and on which instance, not what was typed or
-    // run. Image Builder drives its build instances with Run Command on
-    // every image build (invokedBy is set by AWS, not by the caller).
+    // A command on an instance in a vault account, or an attempt at an
+    // interactive way in. Run Command is how hosts are operated (a
+    // release's self-test, the capacity measurement): CloudTrail records
+    // that a command ran and on which instance, not what it was. Sessions,
+    // EC2 Instance Connect and the serial console are denied to everyone
+    // by the Vault OU policy (lib/org/scp-vault.json), so those arrive as
+    // refused attempts, or as a sign that the policy is off. Image Builder
+    // drives its build instances with Run Command on every image build
+    // (invokedBy is set by AWS, not by the caller). Matched by the event's
+    // own source field: the calls come from three services.
     const not = (service: string) => [
       { userIdentity: { invokedBy: events.Match.anythingBut(service) } },
       { userIdentity: { invokedBy: events.Match.doesNotExist() } },
     ];
     apiCall(
       'VaultHostAccess',
-      'operator access to an instance in a vault account (Session Manager session or Run Command)',
-      ['aws.ssm'],
-      { eventName: ['StartSession', 'ResumeSession', 'SendCommand'], $or: not('imagebuilder.amazonaws.com') },
+      'operator access to an instance in a vault account (a Run Command, or an interactive session, Instance Connect or serial console call, which the Vault OU policy denies)',
+      events.Match.prefix('aws.'),
+      {
+        eventSource: ['ssm.amazonaws.com', 'ec2-instance-connect.amazonaws.com', 'ec2.amazonaws.com'],
+        eventName: [
+          'SendCommand',
+          'StartSession', 'ResumeSession',
+          'SendSSHPublicKey', 'SendSerialConsoleSSHPublicKey', 'OpenTunnel', 'CreateInstanceConnectEndpoint',
+          'EnableSerialConsoleAccess',
+        ],
+        $or: not('imagebuilder.amazonaws.com'),
+      },
       vaultAccounts,
     );
 

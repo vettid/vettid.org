@@ -267,6 +267,16 @@ describe('vault accounts: the data bucket, the hosts, the host role', () => {
     expect(matching(apiCall(MGMT, 'aws.s3', 'PutBucketLifecycle', SSO_ADMIN, bucket('vettid-org-cloudtrail-449757308783')))).toEqual([]);
   });
 
+  test.each([vaultProd, vaultStaging])('an interactive way in, which the Vault OU policy refuses, alerts as an attempt in %s (and as a success if the policy is off)', (acct) => {
+    const denied = { errorCode: 'AccessDenied' };
+    expect(matching(apiCall(acct, 'aws.ssm', 'StartSession', SSO_ADMIN, { ...denied, requestParameters: { target: 'i-0b08e5d23f265790d', documentName: 'AWS-StartPortForwardingSession' } }))).toEqual(['VaultHostAccess']);
+    expect(matching(apiCall(acct, 'aws.ec2-instance-connect', 'SendSSHPublicKey', SSO_ADMIN, denied))).toEqual(['VaultHostAccess']);
+    expect(matching(apiCall(acct, 'aws.ec2-instance-connect', 'SendSerialConsoleSSHPublicKey', SSO_ADMIN))).toEqual(['VaultHostAccess']);
+    expect(matching(apiCall(acct, 'aws.ec2', 'EnableSerialConsoleAccess', SSO_ADMIN, denied))).toEqual(['VaultHostAccess']);
+    expect(matching(apiCall(acct, 'aws.ec2', 'CreateInstanceConnectEndpoint', 'iam-user', denied))).toEqual(['VaultHostAccess']);
+    // Not every EC2 call: a release group's own launches and terminations stay quiet.
+    expect(matching(apiCall(acct, 'aws.ec2', 'TerminateInstances', SSO_ADMIN))).toEqual([]);
+  });
   test.each([vaultProd, vaultStaging])('a session or a command on an instance in %s alerts', (acct) => {
     expect(matching(apiCall(acct, 'aws.ssm', 'StartSession', SSO_ADMIN, { requestParameters: { target: 'i-0b08e5d23f265790d' } }))).toEqual(['VaultHostAccess']);
     expect(matching(apiCall(acct, 'aws.ssm', 'StartSession', SSO_ADMIN, { readOnly: true }))).toEqual(['VaultHostAccess']);

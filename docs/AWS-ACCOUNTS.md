@@ -57,7 +57,10 @@ which is why the vault's production keys need an account of their own
   is `lib/org/scp-vault.json` (policy `vettid-vault-key-protection`,
   attached to the Vault OU by `scripts/vault/apply-scp.sh`; W5); it also
   denies changing the lifecycle, versioning or bucket policy of the vault
-  data buckets, and deleting them, except by the CDK execution role. The
+  data buckets, and deleting them, except by the CDK execution role, and
+  denies every interactive way onto an instance (Session Manager
+  sessions, EC2 Instance Connect, the serial console) to everyone:
+  vault hosts are operated through Run Command only. The
   security-alert forwarders are protected by `lib/org/scp-alert-forwarder.json`
   (policy `vettid-alert-forwarder-protection`, attached to the Workloads OU
   by `scripts/org/apply-alert-forwarder-scp.sh`; §2.1).

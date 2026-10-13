@@ -513,4 +513,36 @@ describe('Vault OU SCP (lib/org/scp-vault.json)', () => {
       for (const a of s.Action) expect(a).not.toMatch(/Object|\*/);
     });
   });
+
+  describe('no interactive access to an instance', () => {
+    const s = scp.Statement.find((x: any) => x.Sid === 'NoInteractiveSessions');
+
+    test('sessions of every kind, EC2 Instance Connect and the serial console are denied', () => {
+      // StartSession is the one call behind every session document (shell,
+      // interactive command, port forwarding, SSH over Session Manager).
+      expect([...s.Action].sort()).toEqual([
+        'ec2-instance-connect:*',
+        'ec2:CreateInstanceConnectEndpoint',
+        'ec2:EnableSerialConsoleAccess',
+        'ssm:ResumeSession',
+        'ssm:StartSession',
+      ]);
+      expect(s.Resource).toBe('*');
+    });
+
+    test('to everyone: no exception inside the account, the CDK execution role included (no deploy opens a session)', () => {
+      expect(s.Condition).toBeUndefined();
+      expect(s.NotAction).toBeUndefined();
+    });
+
+    test('Run Command stays: nothing in the policy denies SendCommand or the agent\'s channels', () => {
+      const actions: string[] = scp.Statement.flatMap((x: any) => [x.Action].flat());
+      const denies = (action: string) => actions.some((a) => new RegExp('^' + a.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$').test(action));
+      expect(denies('ssm:StartSession')).toBe(true);
+      expect(denies('ec2-instance-connect:SendSSHPublicKey')).toBe(true);
+      for (const a of ['ssm:SendCommand', 'ssm:GetCommandInvocation', 'ssm:ListCommandInvocations', 'ssm:UpdateInstanceInformation', 'ssmmessages:OpenControlChannel', 'ec2messages:GetMessages']) {
+        expect({ a, denied: denies(a) }).toEqual({ a, denied: false });
+      }
+    });
+  });
 });
