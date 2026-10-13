@@ -1352,6 +1352,59 @@ describe('vault recovery', () => {
     expect((await call('GET', '/api/vault/status')).body.vault.recovery).toEqual({ state: 'pending', available_at: new Date((NOW + 86_400) * 1000).toISOString() });
   });
 
+  describe('the recovery\'s own slot through GET /api/vault/requests/{id}', () => {
+    const poll = (rid: string) => call('GET', `/api/vault/requests/${rid}`);
+    const released = () => [...tbl('audit').values()].filter((a) => a.action === 'vault.recovery_code_released');
+
+    test('status only, before and after available_at: never the sealed code, no release recorded', async () => {
+      const rid = await request();
+      expect(await poll(rid)).toEqual({ status: 200, body: { status: 'queued' } });
+      answer(rid);
+      // Before the 24 hours, seconds after the request.
+      at(NOW + 5);
+      expect(await poll(rid)).toEqual({ status: 200, body: { status: 'done' } });
+      // And after them: the code is the status route's to release.
+      at(NOW + 86_400 + 5);
+      expect(await poll(rid)).toEqual({ status: 200, body: { status: 'done' } });
+      at(NOW + 172_800 - 5);
+      expect(await poll(rid)).toEqual({ status: 200, body: { status: 'done' } });
+      expect(released()).toHaveLength(0);
+      expect(getItem('requests', rid).released).toBeUndefined();
+    });
+
+    test('GET /api/vault/recovery still releases it from available_at, with its audit event, after the slot was polled', async () => {
+      const rid = await request();
+      answer(rid);
+      at(NOW + 5);
+      expect((await poll(rid)).body).toEqual({ status: 'done' });
+      expect((await call('GET', '/api/vault/recovery')).body.recovery.sealed_code).toBeUndefined();
+      at(NOW + 86_400);
+      expect((await poll(rid)).body).toEqual({ status: 'done' });
+      expect(released()).toHaveLength(0);
+      const r = await call('GET', '/api/vault/recovery');
+      expect(r.body.recovery).toMatchObject({ recovery_id: rid, state: 'available', sealed_code: sealedCode, locator: getItem('vaults', VID).recovery.locator });
+      expect(released().map((a) => a.detail)).toEqual([{ vault_id: VID, recovery_id: rid }]);
+      expect(getItem('requests', rid).released).toBe(true);
+    });
+
+    test('a refusal\'s slot answers its status only too; the status route returns the sealed refusal', async () => {
+      const rid = await request();
+      Object.assign(answer(rid), { code: 'recovery_unavailable' });
+      at(NOW + 5);
+      expect((await poll(rid)).body).toEqual({ status: 'done' });
+      expect((await call('GET', '/api/vault/recovery')).body.recovery).toMatchObject({ state: 'unavailable', sealed_code: sealedCode });
+    });
+
+    test('the slots of the other operations still answer their envelope and code', async () => {
+      const RESULT = Buffer.alloc(5_252, 0x55).toString('base64');
+      for (const [i, op] of ['enroll', 'unlock', 'lock', 'recovery_register', 'recovery_cancel'].entries()) {
+        at(NOW + 10 + i);
+        put('requests', { request_id: RID2, vault_id: VID, user_guid: 'g1', op, status: 'done', envelope: RESULT, code: 'etk_unknown', created_at: new Date(NOW_MS).toISOString(), expires_at: NOW + 800 });
+        expect((await poll(RID2)).body).toEqual({ status: 'done', envelope: RESULT, code: 'etk_unknown' });
+      }
+    });
+  });
+
   test('register: only while available, like an unlock', async () => {
     const rid = await request();
     answer(rid);
@@ -2331,6 +2384,76 @@ describe('recovery claim and the recovering key', () => {
     });
   });
 
+  describe('the scanned form\'s limits: the network first, the vault only for its own recovery', () => {
+    const rl = (prefix: string) => [...tbl('rl').keys()].filter((k) => String(k).startsWith(prefix));
+    const perVault = () => rl('vault-recovery-claim#').map((k) => getItem('rl', k).count);
+    /** A scanned claim from another source network. */
+    const claimFrom = (ip: string, body: Record<string, unknown>, vault = VID, key = newApp) =>
+      call('POST', '/api/vault/recovery/claim', { ...body, app_key: key.b64 }, { app: { key, vault }, guid: 'nobody', headers: { 'cloudfront-viewer-address': `${ip}:443` } });
+
+    test('a known vault_id with a wrong recovery_id does not use the vault\'s daily allowance', async () => {
+      at(NOW + 86_400 + 5);
+      // More than the vault's 10 a day, from as many networks, each with a key just made.
+      for (let i = 0; i < 12; i++) {
+        const r = await claimFrom(`2001:db8:${i + 1}:1::1`, { vault_id: VID, recovery_id: RID }, VID, keyOf(`stranger-${i}`));
+        expect(r).toEqual({ status: 404, body: { error: 'not_found', message: 'No such recovery' } });
+      }
+      expect(rl('vault-recovery-claim#')).toHaveLength(0);
+      expect(rl('vault-recovery-claim-net#')).toHaveLength(12);
+      expect(getItem('vaults', VID).recovery.claim_keys).toBeUndefined();
+      // The member's new app still claims.
+      expect((await claim({ vault_id: VID, recovery_id: rid })).status).toBe(200);
+      expect(perVault()).toEqual([1]);
+    });
+
+    test('a pair that names the vault\'s recovery counts, whatever the claim then answers', async () => {
+      // Pending: 409, counted.
+      expect((await claim({ vault_id: VID, recovery_id: rid })).status).toBe(409);
+      expect(perVault()).toEqual([1]);
+      at(NOW + 3600);
+      for (let i = 0; i < 9; i++) expect((await claimFrom(`2001:db8:${i + 1}:1::1`, { vault_id: VID, recovery_id: rid })).status).toBe(409);
+      expect(perVault()).toEqual([10]);
+      const r = await claimFrom('2001:db8:99:1::1', { vault_id: VID, recovery_id: rid });
+      expect(r.status).toBe(429);
+      expect(r.body.error).toBe('rate_limited');
+    });
+
+    test('the per-network limit comes first: 10 per 15 minutes, misses count, and the 11th is refused before any lookup', async () => {
+      at(NOW + 86_400 + 5);
+      for (let i = 0; i < 10; i++) expect((await claim({ vault_id: VID, recovery_id: RID })).status).toBe(404);
+      const gets = ddb.commandCalls(GetCommand).filter((c) => c.args[0].input.TableName === 'vaults').length;
+      // The right pair from the same network is refused too, uncounted for the vault.
+      expect((await claim({ vault_id: VID, recovery_id: rid })).status).toBe(429);
+      expect(ddb.commandCalls(GetCommand).filter((c) => c.args[0].input.TableName === 'vaults')).toHaveLength(gets);
+      expect(rl('vault-recovery-claim#')).toHaveLength(0);
+      // Another network is not affected.
+      expect((await claimFrom('2001:db8:77:1::1', { vault_id: VID, recovery_id: rid })).status).toBe(200);
+    });
+
+    test('every miss is the same 404 after the same reads: an unknown vault, another recovery, a deleted vault, a pointer elsewhere', async () => {
+      at(NOW + 86_400 + 5);
+      const OTHER = 'e'.repeat(32);
+      const miss = async (n: number, vid: string, recoveryId: string) => {
+        const before = ddb.commandCalls(GetCommand).length;
+        const r = await claimFrom(`2001:db8:${n}:1::1`, { vault_id: vid, recovery_id: recoveryId }, vid);
+        expect(r.status).toBe(404);
+        return { body: r.body, reads: ddb.commandCalls(GetCommand).slice(before).map((c) => c.args[0].input.TableName) };
+      };
+      const unknownVault = await miss(1, OTHER, rid);
+      const otherRecovery = await miss(2, VID, RID);
+      expect(otherRecovery).toEqual(unknownVault);
+      expect(unknownVault.reads.filter((t) => t === 'vaults')).toHaveLength(2);
+      const pointer = structuredClone(getItem('vaults', 'user#g1'));
+      put('vaults', { ...pointer, current_vault_id: OTHER });
+      expect(await miss(3, VID, rid)).toEqual(unknownVault);
+      put('vaults', pointer);
+      getItem('vaults', VID).state = 'deleted';
+      expect(await miss(4, VID, rid)).toEqual(unknownVault);
+      expect(rl('vault-recovery-claim#')).toHaveLength(0);
+      expect(getItem('vaults', VID).recovery.claim_keys).toBeUndefined();
+    });
+  });
+
   test('at most 10 claim keys; the oldest goes; 10 claims per vault per day', async () => {
     at(NOW + 86_400 + 5);
     const keys = Array.from({ length: 10 }, (_, i) => keyOf(`claimer-${i}`));
@@ -2760,7 +2883,7 @@ describe('2.4.0: the recovery locator and the claim by locator', () => {
   });
 
   describe('the scanned form is unchanged', () => {
-    test('a recovery without a locator (requested before 2.4.0) is claimed by its pair; its limits keep their order', async () => {
+    test('a recovery without a locator (requested before 2.4.0) is claimed by its pair', async () => {
       const rid = await request();
       answer(rid);
       const loc = locatorOf();
@@ -2770,10 +2893,10 @@ describe('2.4.0: the recovery locator and the claim by locator', () => {
       expect((await claim({ locator: loc })).status).toBe(404);
       const r = await claim({ vault_id: VID, recovery_id: rid }, { vault: VID });
       expect(r).toEqual({ status: 200, body: { user_guid: 'g1', email_hint: 'g***@x.org', vault_id: VID, recovery_id: rid } });
-      // An unknown pair still counts against the vault it names (as before 2.4.0) and audits no miss.
+      // An unknown pair counts against the network only, never the vault it names, and audits no miss.
       const n = audits('vault.recovery_locator_miss').length;
       expect((await claim({ vault_id: VID, recovery_id: RID }, { vault: VID })).status).toBe(404);
-      expect(getItem('rl', rl('vault-recovery-claim#')[0]).count).toBe(2);
+      expect(getItem('rl', rl('vault-recovery-claim#')[0]).count).toBe(1);
       expect(audits('vault.recovery_locator_miss')).toHaveLength(n);
       // The body must still name the vault the request is signed for.
       expect((await claim({ vault_id: 'e'.repeat(32), recovery_id: rid }, { vault: VID })).status).toBe(400);

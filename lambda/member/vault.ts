@@ -1076,6 +1076,11 @@ router.on('GET', '/api/vault/requests/{id}', async (req) => {
   // vault.unlock.result, or random bytes of the same size) is opaque here;
   // anything but exactly 5,252 bytes is not passed on.
   const out: Record<string, unknown> = { status };
+  // A recovery request's own slot (its id is the recovery_id) holds the
+  // sealed recovery code. Only GET /api/vault/recovery releases that, from
+  // available_at and with its audit event: here the slot answers its status
+  // and nothing else (no envelope, no code), at any time.
+  if (item.op === 'recovery') return out;
   if (status === 'done') {
     const env = typeof item.envelope === 'string' ? decodeCanonicalB64(item.envelope) : null;
     if (env && env.length === RESULT_ENVELOPE_BYTES) out.envelope = item.envelope;
@@ -1880,10 +1885,30 @@ router.on('POST', '/api/vault/recovery/claim', async (req) => {
   const vaultId = field(req.body, 'vault_id', VAULT_ID_RE, '32 lowercase hex');
   const recoveryId = field(req.body, 'recovery_id', ULID_RE, 'a ULID');
   if (vaultId !== h.vault) throw badRequest('vault_id must be the vault the request is signed for');
-  await limit(`vault-recovery-claim#${vaultId}`, 10, 86_400);
+  // The per-network limit first (hits and misses alike), then the lookup;
+  // the vault's daily allowance is charged only to a pair that names the
+  // vault's recovery, as in the typed form. Otherwise anyone who knows a
+  // vault_id could spend the allowance of a recovery they cannot claim.
   await limit(`vault-recovery-claim-net#${req.ip}`, 10, 15 * 60);
+  if (!(await scannedPair(vaultId, recoveryId))) throw notFound('No such recovery');
+  await limit(`vault-recovery-claim#${vaultId}`, 10, 86_400);
   return claimRecovery(key, vaultId, recoveryId, 'qr');
 });
+
+/**
+ * Whether the scanned pair names a vault's recovery: the vault exists, is not
+ * deleted, its recovery has that id and its member's pointer names it. Every
+ * call does the same two consistent reads (the vault row and a pointer row,
+ * one that cannot exist when there is no vault) and writes nothing, so timing
+ * does not tell an unknown vault from a known vault with another recovery.
+ * A recovery in any state is a hit here (a cancelled or expired one gets its
+ * 409 from the claim, as before).
+ */
+async function scannedPair(vaultId: string, recoveryId: string): Promise<boolean> {
+  const v = await vaultRow(vaultId);
+  const pointer = await readPointer(v && typeof v.user_guid === 'string' ? v.user_guid : NO_USER_GUID);
+  return !!v && v.state !== 'deleted' && v.recovery?.recovery_id === recoveryId && pointer?.current_vault_id === v.vault_id;
+}
 
 /**
  * The typed form (2.4.0): the body's syntax, the per-network limit (the
