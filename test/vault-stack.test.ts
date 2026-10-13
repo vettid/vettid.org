@@ -10,6 +10,7 @@ import { VettidOrgMemberApiStack } from '../lib/stacks/member-api-stack';
 import { checkPolicy, failedCheck, ManifestRelease } from '../lambda/shared/keypolicy';
 import { vaultApiRoleName, VAULT_API_CONSUMERS } from '../lib/vault/access';
 import { handler, parseProps, preflight, propsHash } from '../lambda/vault/release-key';
+import { VAULT_DATA_VERSIONS } from '../lib/stacks/vault-stack';
 
 const pcr = (b: string) => b.repeat(48);
 const P1 = pcr('a1');
@@ -255,14 +256,28 @@ describe('release-key custom resource handler', () => {
 });
 
 describe('VettidOrgVaultStack: data bucket and manifest key', () => {
-  test('versioned, SSE, public access blocked, TLS only, 7-day noncurrent retention', () => {
+  test('versioned, SSE, public access blocked, TLS only; old versions: all for a day, then the 5 newest, none past 7 days', () => {
     prod.t.hasResourceProperties('AWS::S3::Bucket', {
       BucketName: 'vettid-org-vault-data-369484479783',
       VersioningConfiguration: { Status: 'Enabled' },
       BucketEncryption: { ServerSideEncryptionConfiguration: [{ ServerSideEncryptionByDefault: { SSEAlgorithm: 'AES256' } }] },
       PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true },
-      LifecycleConfiguration: { Rules: [{ NoncurrentVersionExpiration: { NoncurrentDays: 7 }, ExpiredObjectDeleteMarker: true, AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }, Status: 'Enabled' }] },
     });
+    // Exact, on both channels: the 7-day rule is unchanged (it is what
+    // removes a deleted vault's last versions and its delete marker), the
+    // cap is a second rule, and neither has a prefix or a tag filter.
+    for (const s of [prod, synth('staging', [])]) {
+      const [[, bucket]] = resources(s.json, 'AWS::S3::Bucket');
+      expect(bucket.Properties.LifecycleConfiguration).toEqual({
+        Rules: [
+          { NoncurrentVersionExpiration: { NoncurrentDays: 7 }, ExpiredObjectDeleteMarker: true, AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }, Status: 'Enabled' },
+          { Id: 'KeepNewestNoncurrentVersions', NoncurrentVersionExpiration: { NoncurrentDays: 1, NewerNoncurrentVersions: 5 }, Status: 'Enabled' },
+        ],
+      });
+      expect(bucket.DeletionPolicy).toBe('Retain');
+      expect(bucket.UpdateReplacePolicy).toBe('Retain');
+    }
+    expect(VAULT_DATA_VERSIONS).toEqual({ keepAllDays: 1, keepNewest: 5, maxDays: 7 });
   });
 
   test('vault data is denied to every principal but the host role; manifests are written by the signer only', () => {

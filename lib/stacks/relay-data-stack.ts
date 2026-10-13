@@ -13,6 +13,53 @@ export interface VettidOrgRelayDataStackProps extends cdk.StackProps {
 export const RELAY_BLOB_TTL_DAYS = 7;
 
 /**
+ * Ceiling on the table's on-demand throughput, in request units a second
+ * (RUNBOOK "Relay" → "Table throughput ceiling"). On-demand has no ceiling
+ * of its own below the account quota (40,000 units a second per table),
+ * and the relay's limits are per address, per key and per mailbox: without
+ * one, what the table can be made to cost is bounded only by that quota.
+ *
+ * Sizing. A write unit is 1 KB written, doubled inside a transaction; a
+ * deposit is a transaction (counters, the message, the token's usage) and
+ * an ack deletes the message: about 4 + 2 × KB units to deposit and
+ * 1 + KB to ack.
+ *
+ *  - Measured, 10 days to 2026-10-13 (ten members, four staging vaults):
+ *    busiest minute 1,634 write units (27 a second) and 494 read units
+ *    (8 a second); busiest hour 5,486 write units (1.5 a second).
+ *  - Projected (RELAY-PROTOCOL §7.2): a vault host of 900 vaults at a
+ *    message a minute each is 15 messages a second, about 300 write units
+ *    a second at 4 KB a message.
+ *  - The most one address may ask for is the flood guard, 100 requests a
+ *    second. If every one of them were a deposit of 8 KB that is
+ *    100 × (4 + 2 × 8) = 2,000 write units a second; a real mix (a third
+ *    each of collects, acks and deposits, 4 KB) is under 600.
+ *
+ * So 2,000 is a whole flood guard of deposits from one address, about
+ * seven hosts of the projected size, and 70 times the busiest minute
+ * seen. Reads: an owner request costs one or two strongly consistent
+ * reads, so a flood guard of them is about 200 a second; 2,000 is ten
+ * times that. The index holds only the keys of rotated mailboxes (one
+ * small write per rotation, at most one a second per address).
+ *
+ * At the ceiling DynamoDB throttles: the relay's requests fail or are
+ * retried, for every tenant, until the load is back under it. That is the
+ * trade: the ceiling is below what the table would otherwise serve at once
+ * (its warm throughput, 4,000 write units a second), so a flood is felt
+ * as throttling sooner, and in return the bill is bounded at about $108 a
+ * day in writes and $22 in reads ($0.625 and $0.125 a million units)
+ * instead of $2,160 and $432 at the quota. The ceiling is a target, not
+ * exact: DynamoDB lets short bursts exceed it. Health checks read the
+ * table, which is one more reason the read ceiling is far above real load.
+ */
+export const RELAY_TABLE_LIMITS = {
+  maxWriteRequestUnits: 2000,
+  maxReadRequestUnits: 2000,
+  indexMaxWriteRequestUnits: 100,
+  indexMaxReadRequestUnits: 100,
+} as const;
+
+/**
  * The relay's durable state (hosting option B), kept apart from the service
  * so the service stack deploys freely (RUNBOOK "CDK conventions"):
  *
@@ -20,7 +67,8 @@ export const RELAY_BLOB_TTL_DAYS = 7;
  *    counters, consumed open tokens, claims, blob metadata. Layout and the
  *    reference definition: vettid-relay internal/store/dynamo (pk/sk
  *    strings, TTL attribute ttl_s, KEYS_ONLY GSI "due" on gpk/gsk).
- *    On-demand capacity: no capacity planning, idles at $0.
+ *    On-demand capacity: no capacity planning, idles at $0; a ceiling
+ *    on its throughput (RELAY_TABLE_LIMITS) bounds what it can cost.
  *  - one S3 bucket for blob bodies (blobs/<mailbox>/<blob id>), expiring a
  *    day after the relay's blob TTL as a backstop (the relay deletes blobs
  *    on DELETE and when it purges a rotated mailbox).
@@ -41,7 +89,10 @@ export class VettidOrgRelayDataStack extends cdk.Stack {
       tableName: resourceName(config, 'relay'),
       partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
-      billing: dynamodb.Billing.onDemand(),
+      billing: dynamodb.Billing.onDemand({
+        maxReadRequestUnits: RELAY_TABLE_LIMITS.maxReadRequestUnits,
+        maxWriteRequestUnits: RELAY_TABLE_LIMITS.maxWriteRequestUnits,
+      }),
       timeToLiveAttribute: 'ttl_s',
       globalSecondaryIndexes: [
         {
@@ -50,6 +101,8 @@ export class VettidOrgRelayDataStack extends cdk.Stack {
           partitionKey: { name: 'gpk', type: dynamodb.AttributeType.STRING },
           sortKey: { name: 'gsk', type: dynamodb.AttributeType.NUMBER },
           projectionType: dynamodb.ProjectionType.KEYS_ONLY,
+          maxReadRequestUnits: RELAY_TABLE_LIMITS.indexMaxReadRequestUnits,
+          maxWriteRequestUnits: RELAY_TABLE_LIMITS.indexMaxWriteRequestUnits,
         },
       ],
       // Ephemeral ciphertext (messages live ≤ 14 days): no PITR, like the

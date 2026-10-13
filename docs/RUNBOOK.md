@@ -356,6 +356,28 @@ npx cdk deploy VettidOrgRelayStack       # service; reads the refs at deploy tim
 - **Data.** Everything stored is ciphertext the relay cannot read. Table
   has deletion protection, no PITR (messages live ≤ 14 days); the blob
   bucket expires objects after 8 days.
+- **Table throughput ceiling.** The table is on-demand with a maximum:
+  **2,000 write and 2,000 read units a second** (its index `due`: 100
+  and 100), `RELAY_TABLE_LIMITS` in `lib/stacks/relay-data-stack.ts`,
+  where the sizing is written out. Above it DynamoDB throttles: deposits,
+  acks and registrations fail or are retried, for every tenant, until
+  the load is back under it (short bursts may pass; the maximum is a
+  target, not exact). Without it the only bound was the account quota of
+  40,000 units a second, about $2,160 a day in writes; with it, about
+  $108 a day in writes and $22 in reads. Measured use (October 2026, ten
+  members): 27 write units a second in the busiest minute; a vault host
+  of 900 vaults at a message a minute each is about 300. To raise it:
+  change the numbers, PR, `npx cdk diff VettidOrgRelayDataStack` (the
+  table must show as modified in place, never replaced), `npx cdk deploy
+  VettidOrgRelayDataStack`, then `VettidOrgRelayStack` (two alarm
+  thresholds follow the numbers). In an emergency the same from the CLI,
+  and put it in code afterwards, or the next deploy of the data stack
+  takes it back:
+  `aws dynamodb update-table --table-name vettid-org-relay --on-demand-throughput MaxReadRequestUnits=<n>,MaxWriteRequestUnits=<n>`.
+  It caps the rate, not what is stored: nothing limits the table's size
+  but the mailbox quotas and the 14-day lifetime
+  (`aws dynamodb describe-table --table-name vettid-org-relay --query 'Table.[ItemCount,TableSizeBytes]'`,
+  refreshed about every six hours).
 - **Empty hints.** Idle long-polls mostly skip DynamoDB (Valkey knows the
   mailbox is empty); `relay_collect_store_skips_total` vs
   `relay_collect_store_queries_total` shows the ratio, and
@@ -364,7 +386,8 @@ npx cdk deploy VettidOrgRelayStack       # service; reads the refs at deploy tim
 
 ### Alarms on the rate limits line
 
-Seven alarms, `vettid-org-relay-<name>`, to the topic
+Eleven alarms, `vettid-org-relay-<name>` (seven on the line, four on the
+table: "Alarms on the table" below), to the topic
 `vettid-org-security-alerts` → admin@vettid.org (the management
 account's topic, which admits this account's CloudWatch alarms since
 #214; the member API's alarms use it the same way). Six metric filters
@@ -383,7 +406,21 @@ does.
 | `register-refused` | an address was refused new mailboxes (`register_refused` > 0, 1/s, burst 30) in 3 of 5 minutes | Someone creating mailboxes in bulk (re-registration at unlock is free, so not a vault host unlocking). DynamoDB item count and consumed writes; nothing to raise. |
 | `collectors` | a task carries ≥ 2,000 long-polls in 3 of 5 minutes | About 42 KiB each: 82 MiB of the task's 512 MiB, and nothing caps them per task. Look at task memory and restarts (ECS service metrics); scale out by hand if memory is above 70 % and the service has not (`aws ecs update-service --cluster vettid-org-relay --service vettid-org-relay --desired-count <n>`, up to 8); find out who holds them (a vault host has at most 1,024). Time to bring back the per-task caps (relay branch `ratelimit-per-key-full`). |
 | `ws-sessions` | a task carries ≥ 2,000 WebSocket sessions in 3 of 5 minutes | The same, at about 45 KiB each (88 MiB). |
-| `rate-limits-silent` | no task wrote the line for 5 minutes (missing data is the alarm) | The relay is down or not logging: `aws ecs describe-services --cluster vettid-org-relay --services vettid-org-relay --query 'services[0].[runningCount,deployments[].rolloutState,events[:5].message]'`, then `aws logs tail /vettid-org/prod/relay-service --since 15m`. An image older than protocol 0.7.0 does not write the line. The other six alarms are blind while this one is on. Also sends OK. |
+| `rate-limits-silent` | no task wrote the line for 5 minutes (missing data is the alarm) | The relay is down or not logging: `aws ecs describe-services --cluster vettid-org-relay --services vettid-org-relay --query 'services[0].[runningCount,deployments[].rolloutState,events[:5].message]'`, then `aws logs tail /vettid-org/prod/relay-service --since 15m`. An image older than protocol 0.7.0 does not write the line. The other six alarms on the line are blind while this one is on (the four on the table are not). Also sends OK. |
+
+#### Alarms on the table
+
+Four alarms on DynamoDB's own metrics for the table (`AWS/DynamoDB`,
+`TableName` = `vettid-org-relay`), which do not depend on the line:
+they keep working while `rate-limits-silent` is on. The metrics have
+data only in minutes with requests, so missing data is not an alarm.
+
+| Alarm | Fires when | Do |
+|---|---|---|
+| `table-writes-high` | 60,000 or more write units a minute for 5 minutes (half the ceiling of 2,000 a second) | Somebody is writing a lot: deposits of large messages, or many of them. With `address-busy` or `address-refused` on: one address. Is it a known vault host (a migration, a mass unlock, real growth)? Then raise the ceiling before it throttles ("Table throughput ceiling" above). If not, it is a flood kept at the ceiling: the bill is bounded (about $108 a day at most), tenants are throttled only once `table-throttled` fires; watch the table's size, and do not raise the ceiling for it. |
+| `table-reads-high` | 60,000 or more read units a minute for 5 minutes (half the ceiling) | The same for reads (collects of large mailboxes). Health checks read the table too, so do not let real use sit at the read ceiling: raise it. |
+| `table-write-volume` | 360,000 or more write units in an hour (100 a second on average; at most about 180 MB of messages stored) | 65 times the busiest hour of the preview. A slow fill below the other alarms shows here: table size and item count (`describe-table`, above), `register-refused`, the hour's `ConsumedWriteCapacityUnits` in the console. Real growth reaches it at about 300 vaults at a message a minute: then raise `tableWriteUnitsPerHour`. |
+| `table-throttled` | DynamoDB throttled the table or its index (read or write events, or throttled deposit transactions) in 3 of 5 minutes | Tenants are being refused or delayed now. With `table-writes-high` or `table-reads-high`: the ceiling is reached, decide as above (real use: raise it; a flood: leave it, it is what bounds the bill). Without them: a hot partition (one mailbox written or read beyond a partition's 1,000 write or 3,000 read units a second), or the index's ceiling (mass rotation, `register-refused`). |
 
 The thresholds are in `RELAY_ALARM_LIMITS` (`lib/stacks/relay-stack.ts`).
 2,000 long-polls or sessions on a task is a sixth of its memory, well
@@ -1005,6 +1042,89 @@ SNS:Publish" (the topic admitted only the CloudTrail rules until the
 host stack that added these alarms was deployed; an alarm that fired
 before that deploy did not notify).
 
+### The data bucket's old versions and its size alarm
+
+The data bucket (`vettid-org[-staging]-vault-data-<account>`,
+`VettidOrgVaultStack`) is versioned. A vault's state is one object,
+`vaults/<vault_id>/state`, rewritten in full at every change (with its
+header, `vaults/<vault_id>/header/<pcr0>`), so a busy vault leaves
+hundreds of old versions a day and they are nearly all of the bucket's
+bytes. Nothing reads an old version: the hosts read and write the current
+one only (conditional writes), and an old version is there for an
+operator to restore by hand (VAULT-RELEASES §8.2, §11.4).
+
+Two lifecycle rules, over every key (`VAULT_DATA_VERSIONS` in
+`lib/stacks/vault-stack.ts`); S3 removes a version as soon as either
+allows it:
+
+1. No old version is kept more than **7 days** after it was replaced or
+   deleted; a delete marker goes once nothing is left under it;
+   unfinished multipart uploads go after a day. This is the rule the
+   bucket has had from the start.
+2. An old version goes **1 day** after it was replaced, unless it is one
+   of the **5 newest** old versions of its object (owner, 2026-10-13).
+
+S3 counts from the moment a version was replaced, rounds up to the next
+midnight UTC and removes some time after that, so "1 day" is between 24
+and 48 hours, and a little more.
+
+| Object | What is kept beside the current version |
+|---|---|
+| Of an idle vault (no write for a week) | nothing: its 5 newest old versions went when they reached 7 days |
+| Of a vault written 600 times a day | every version of the last 24 to 48 hours (600 to 1,200 of them), and nothing older. The 5 newest are always among those, so the count of 5 changes nothing for such a vault: the 1 day is what bounds it |
+| Of a vault written a few times a week | the 5 newest old versions, each for at most 7 days |
+| Of a deleted vault | all it wrote in its last 24 to 48 hours, then its 5 newest versions, until 7 days after the deletion; then the delete marker goes too. The same bound as before: rule 1 is what removes them, rule 2 alone would keep those 5 for ever |
+
+What this gives up: an operator could restore any state of the last 7
+days and can now restore any state of the last 24 hours, plus the 5
+versions before that. For a busy vault those 5 are seconds or minutes of
+history, not days. The 24 hours are therefore the time there is to notice
+a fault that damages state at every write (a bad release, an operator
+error) and still find a good version: a fault noticed on the second day is
+too late for a vault that kept writing. State and header are written
+together and restored together (the header names the state it belongs
+to), so both have the same rule; restoring means editing the bucket
+policy first (it denies `vaults/*` to everyone but the host role) and
+shows in the app as a rollback (VAULT-RELEASES §13.2).
+
+To see the rules and that they work (read-only; the size is S3's daily
+metric, a day or so late, and it counts every version):
+
+```bash
+P="--profile vault-staging"; B=vettid-org-staging-vault-data-347272280361
+aws s3api get-bucket-lifecycle-configuration $P --bucket $B
+aws cloudwatch get-metric-statistics $P --namespace AWS/S3 --metric-name BucketSizeBytes \
+  --dimensions Name=BucketName,Value=$B Name=StorageType,Value=StandardStorage \
+  --start-time "$(date -u -d '10 days ago' +%FT00:00:00Z)" --end-time "$(date -u +%FT%TZ)" \
+  --period 86400 --statistics Maximum --query 'sort_by(Datapoints,&Timestamp)[].[Timestamp,Maximum]' --output table
+# NumberOfObjects (StorageType=AllStorageTypes) counts versions and delete markers too.
+```
+
+After a deploy that changes the rules, S3 needs up to two days to act on
+them; the size then falls over the following days.
+
+**Alarm `vettid-org[-staging]-vault-data-bucket-size`** (host stack, to
+the vault alerts topic like the others): the bucket holds more than
+10 GiB (`VAULT_DATA_BUCKET_ALARM_BYTES` in
+`lib/stacks/vault-host-stack.ts`; staging held about 7.4 GB under the
+7-day rule on 2026-10-13). When it fires:
+
+1. Look at the size over the last days (the command above). A step up
+   over one or two days is a vault writing more or larger state than
+   before; a slow rise is more vaults.
+2. Check that both lifecycle rules are there and `Enabled`. A bucket
+   whose rules were removed or disabled grows without bound.
+3. Find what writes: the parent's metrics and the host log say which
+   instance is busy; the storage metric does not say which vault. A
+   vault that rewrites its state in a loop is a bug to report in
+   vettid-vault, not something to fix in the bucket.
+4. If the growth is ordinary (more vaults), raise the threshold. A vault
+   costs about its state's size times the writes of one to two days.
+
+Do not delete versions by hand to make room: the bucket policy forbids
+it to everyone but the host role, and the 24 hours of versions are the
+only way back from a fault that damages state.
+
 ### Manifest sync (`vettid-org-vault-manifest-sync`, VAULT-RELEASES §7)
 
 Every 5 minutes: fetches the channel's served manifest, verifies it under
@@ -1622,7 +1742,8 @@ session | link | app`), `vault.deletion_executed`.
 - *Member says "I didn't ask for this"* within the 24 hours: they cancel
   from the email link, the account page or the app. After `executing` it
   cannot be cancelled; the vault is gone once the host deletes it (stored
-  versions stay 7 days, sealed, and are not restorable by support).
+  versions stay at most 7 days, sealed, and are not restorable by support;
+  "The data bucket's old versions and its size alarm").
 - *Stuck in `executing`*: as for an account deletion: look at
   `deletion_requested_at`, the release's routability and the host logs;
   the daily retry keeps trying and logs `vault deletion pending` after 30
@@ -2342,6 +2463,55 @@ operator does, and does not have to do.
      admin declines it (gone 30 days later), and "Removal by hand"
      below covers a person who asks. The same command also finds a
      request whose email failed to send.
+- **"… is left" in the logs** (cleanup function, admin people
+  function; level warn, with a `user_guid`, never an address):
+  `the email marker belongs to another request and is left` and
+  `the sign-in user under … address carries another id and is left`.
+  A deletion found that the marker or the Cognito user under the
+  address belongs to a newer request or account for the same address
+  (MEMBER-API "Retention"), did not touch it, and deleted the rest.
+  The deletion's audit event says the same in its detail
+  (`sign_in_user: "left"`, `email_marker: "left"`).
+  Nothing to do for the marker. For a sign-in user, check that a
+  member row with that user's `custom:user_guid` exists
+  (`aws cognito-idp admin-get-user --user-pool-id <member pool> --username a@example.com`,
+  then `aws dynamodb get-item --table-name vettid-org-members --key '{"user_guid":{"S":"<that id>"}}'`):
+  if none does, it is a leftover (an abandoned removal above) and
+  `aws cognito-idp admin-delete-user` removes it; an approval for the
+  address is refused until then.
+  An admin's Delete that answers "No such member" for a row that was
+  on the page a moment ago: the cleanup job (or another admin) removed
+  the row first. This Delete did not delete it and wrote no
+  `member.delete` event; the page still shows the row until it is
+  reloaded. By then it had already removed the member's own Cognito
+  user and subscription row if they were still there, and it removes
+  an email marker that still names the row. It does not finish the
+  rest of what the other deletion does (vaults, the SES identity):
+  that is the other deletion's, and its own audit event says if any
+  of it was not removed (`incomplete`, below).
+- **The daily run's other two removals** (a canceled account past its
+  date; an unverified request after 14 days) delete the row first,
+  with its marker, and the rest after (MEMBER-API "Retention", "The
+  daily sweeps"). They use the two alarms below:
+  - `request-removal-failing` also means: the row of one of these
+    could not be deleted (log: `canceled account: not removed` /
+    `unverified request: not removed`, with the id and the error
+    name). Nothing was touched; the next daily run tries again.
+  - `request-removal-abandoned` also means: the row and marker are
+    gone, and something of the member's own outside the row is not
+    (log: `… removed, but not all of it`, with the id, `not_removed`
+    and the error name; the audit event `member.delete_after_cancel`
+    or `request.reclaim_unverified` for that id lists it in
+    `incomplete`). It is not retried. By hand, for the id in the
+    event: `subscription`: delete the row with that `user_guid` from
+    the subscriptions table; `vaults`: query the vaults table's
+    `user-index` for the id; rows with `deletion_requested_at` are
+    retried by the job itself, the others are the operator's (section
+    "Vault"; and delete the pointer row `user#<id>`); `sign_in_user`:
+    the user is disabled since the cancellation and carries that id,
+    `aws cognito-idp list-users --user-pool-id <member pool> --query "Users[?Attributes[?Name=='custom:user_guid' && Value=='<id>']].Username"`,
+    then `admin-delete-user` (until then an approval for that address
+    is refused); `ses_identity`: reconcile as for an abandonment below.
 - **Removal by hand** remains for four things only:
   1. *A request verified before 2.6.0 whose owner asks by email*
      (no link, if the backfill email was not sent): send that one
