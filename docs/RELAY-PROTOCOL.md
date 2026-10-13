@@ -1,6 +1,6 @@
 # VettID Relay Protocol
 
-**Version:** 0.7.1 (draft)
+**Version:** 0.8.0 (draft)
 **Status:** Pre-implementation draft for review
 
 ## 1. Purpose & design principles
@@ -32,7 +32,7 @@ Conformance keywords MUST, SHOULD, MAY are per RFC 2119.
 | Identity & signing | Ed25519 (RFC 8032) |
 | Deposit tokens | PASETO v4.public (Ed25519-signed) |
 | Hashing | SHA-256 |
-| Message IDs | ULID (Crockford base32, 26 chars) |
+| Message IDs | ULID (Crockford base32, 26 chars, upper case). Clients MUST send an id exactly as the relay issued it; a relay need not accept another spelling |
 | Transport | HTTPS (TLS ≥ 1.2); WebSocket over TLS for streaming collect |
 
 All base64 in this spec is standard RFC 4648 base64 **with** padding unless
@@ -279,7 +279,12 @@ POST /v1/mailbox/{mailbox_id}        (deposit token §5 + signed request §4.1)
 - Larger content uses the **claim-check convention**: the deposited payload is a
   small encrypted envelope pointing at externally stored ciphertext. Blob
   storage is explicitly out of protocol scope.
-- The relay assigns the ULID; per-mailbox ULID order is arrival order.
+- The relay assigns the ULID; per-mailbox ULID order is arrival order: a
+  message deposited later never has a smaller id, whatever the relay's
+  clock does. (vettid-relay: with the shared store this holds per mailbox
+  across all processes; with the SQLite store it holds for the one process
+  that may use a database file, and after a restart against the messages
+  still stored.)
 - **Wake-on-deposit:** if the recipient has a parked long-poll request (§6.3) or
   an open WebSocket (§6.4), the relay SHOULD deliver the message to it
   immediately upon successful deposit, without waiting for a poll interval.
@@ -331,6 +336,38 @@ lease semantics. Client frames: `{ "ack": "<msg_id>" }`. WebSocket support is
 OPTIONAL for relays and clients; long-poll is the mandatory baseline. When the
 mailbox is deleted (§6.10) the relay closes the session with close code
 **4404** and reason `mailbox_unknown`.
+
+**The window (0.8.0).** A relay MAY bound the messages it has sent on a
+session that are not yet acked there (§7.2: vettid-relay sends more while
+fewer than 97 are outstanding, and up to 128 when whole batches are
+waiting), sending more only as acks arrive or leases end; clients SHOULD
+ack each message as soon as it is handled. An ack by
+`DELETE /v1/mailbox/{msg_id}` (§6.5) deletes the message but does not make
+room on the session before its lease ends. Order across redelivery is not
+guaranteed.
+
+Until the first lease of an unacked message ends, a session with a full
+window is sent nothing more (a message deposited then arrives when those
+leases end, up to one visibility timeout later). From then on vettid-relay
+sends the unacked ones again in passes from the oldest to the newest the
+session had been sent when the pass began: once per visibility timeout a
+batch, taken before anything else when it is due, of at least 32 messages
+and of 96 when nothing else is outstanding (which needs the previous batch
+to have been written out in time: a slow reader gets a smaller batch,
+never under 32). New messages are sent the rest of the time; they wait
+only for a due batch's frames, unless the session itself has left more
+than 64 unacked. An unacked message is thus sent again once in every pass.
+A pass over n such messages is at most ⌈n/32⌉ batches, one visibility
+timeout apart and never more than two: at most ⌈n/32⌉ visibility timeouts
+for a session that acks the new messages it gets, 2⌈n/32⌉ in the worst
+case, ⌈n/96⌉ for a session with nothing else outstanding, until the
+message is acked or expires.
+
+**Close codes (0.8.0).** A frame that is anything else, or whose `msg_id`
+is not a ULID in upper case, ends the session with close code **1008** (a
+frame larger than the relay reads, 1,024 bytes in vettid-relay, ends it
+with **1009**). A session ended because an ack frame was refused by a rate
+limit (§7.2) is closed with **1013** and reason `rate_limited`.
 
 ### 6.5 Ack
 
@@ -645,7 +682,10 @@ or the IPv6 /64), with a budget **separate** from the `/v1` limits (§7.2), so
 that scanning can never use up the budget of mailbox traffic. The limiter
 SHOULD be local to the relay process (no shared-store round trip), so
 scanner bursts stay cheap. Over the limit: `429` `rate_limited` with
-`retry_after` (§7.1, §7.2) and `Cache-Control: no-store`.
+`retry_after` (§7.1, §7.2) and `Cache-Control: no-store`. The health check
+is outside every limit, so what a request to it costs is bounded another
+way: a relay SHOULD answer it (`/healthz` in vettid-relay) from a store
+check no older than a few seconds (vettid-relay: 2 s).
 
 **Logging.** Nothing about these requests that could identify an invitation
 or a visitor is logged. The fragment never reaches the relay; in addition, a
@@ -703,25 +743,34 @@ with a separate budget.
 
 The rest of this section (0.7.0) says how a relay SHOULD limit, and gives
 the reference relay's numbers. None of it is visible to a client except as
-fewer or more `429`s.
+fewer or more `429`s (to WebSocket upgrades too, under limits 7 to 9) and,
+on a WebSocket session, as close code 1013 `rate_limited` when an ack frame
+is refused by a rate limit (§6.4).
 
 **Principle.** A client's address is the right key for a limit only while
 the caller is unauthenticated. Addresses are shared: every vault on a vault
 host reaches the relay from that host's one address (hundreds of vaults),
 and phones behind a carrier NAT share theirs. So once a request is
 attributed to a key, the relay limits the **key**. "Network" below means
-the IPv4 address or the IPv6 /64.
+the IPv4 address or the IPv6 /64. (Whoever holds a larger IPv6 prefix holds
+many networks, a /48 65,536 of them: every per-network limit below then
+binds per /64 only, and what bounds such a holder is what is not keyed on
+a network: the per-process and per-key limits.)
 
 **The limits.**
 
 | | Limit | Key | vettid-relay default | Applies |
 |---|---|---|---|---|
 | 1 | flood guard | network | 100/s, burst 300 | to every `/v1` request, first, before anything is parsed |
-| 2 | per key | signing key | 20/s, burst 100 | once the request is authenticated: on owner routes after the signature verified, was no replay, and the signer's mailbox exists; on registration and mailbox deletion after the signature verified |
+| 2 | per key | signing key | 20/s, burst 100 | once the request is authenticated: on owner routes after the signature verified, was no replay, and the signer's mailbox exists; on registration and mailbox deletion after the signature verified; and to every ack frame of a WebSocket session (§6.4) that does not name a message sent on that session and still leased to it (a message received elsewhere, an id acked before, an ack after the lease ended, an id that names nothing): such a frame draws on the flood guard (1) and on this limit like the `DELETE /v1/mailbox/{msg_id}` it stands for, and the session is closed with 1013 `rate_limited` when either is empty. An ack frame is uncharged once for each message in the window: a duplicate ack is charged, and so is a duplicate ack after a lease ended |
 | 3 | new mailboxes | network | 1/s, burst 30 | to a registration that creates a mailbox, and to a rotation (§6.7). Registering an existing key again draws nothing (clients do that routinely, §6.1) |
 | 4 | per sender | token `sub` (an open token's `jti`, §5.6) | 5/s, burst 20 | to deposits, after §5.3 step 7; to blob uploads after step 6, before their body |
 | 5 | claim fetches | network | 1/s, burst 10 | to `GET /v1/claim/{id}` (§6.9), the one unauthenticated operation |
 | 6 | collectors | mailbox | 4 | to parked long-polls and WebSocket sessions together |
+| 7 | WebSocket sessions | relay process | 4,000 | to upgrades of `GET /v1/mailbox/ws`; beyond it `429` with `retry_after` 5. Long-poll is not affected |
+| 8 | WebSocket sessions per network | network, per relay process | 1,024 | to an upgrade for a mailbox that already has a WebSocket session on that process; the first session of a mailbox is admitted beyond it, up to 9. `429` with `retry_after` 5 |
+| 9 | WebSocket sessions per network, ceiling | network, per relay process | 2,000 | to every upgrade, a mailbox's first session included: no network holds more on a process. `429` with `retry_after` 5. At least 8 and at most 7 |
+| 10 | WebSocket window | session | 128 messages | to messages sent on a session and not yet acked there: the relay leases a further batch (32) only while it fits, so it pauses at 97 or more outstanding, until acks arrive or leases end |
 
 Nothing else is keyed on a network. A request that is properly signed by a
 key with a mailbox can be refused on account of its network only by the
@@ -752,8 +801,9 @@ registered). The key and sender limits apply only after the caller has
 proved the key is its own.
 
 **`retry_after`** is the whole seconds until one request is allowed, at
-least 1. A mailbox at its collector maximum gets 1; a relay that cannot
-reach its replay store sheds signed requests with 5.
+least 1. A mailbox at its collector maximum gets 1; a relay process at its
+maximum of WebSocket sessions (7), a network at its maximum (8) or at its
+ceiling (9), and a relay that cannot reach its replay store answer with 5.
 
 **Where the numbers come from (informative).** One unlocked vault, read
 from vettid-vault (`vault/relay.go`, `vault/inbound.go`, relayclient),
@@ -817,11 +867,20 @@ sender's budget, and an unauthorized deposit's body is not read.
   address can keep about 2,500 parked (100/s × 25 s; 500 before), plus the
   burst: at a measured 42 KiB each, about 105 to 120 MiB across the
   relay's processes. WebSocket sessions cost one request each and do not
-  end: an address can hold 4 per mailbox it registered **on each relay
-  process**, 30 mailboxes at once and one more a second, so about 14,500
-  sessions per process after an hour (640 MiB at a measured 45 KiB): more
-  than a process has. (Before, registrations were not budgeted at all and
-  this took minutes.)
+  end. A network can hold 1,024 **on each relay process** (8) after about
+  4 minutes, and beyond that one per mailbox it registered up to 2,000 (9;
+  about 88 MiB at a measured 45 KiB) after about 20 minutes, and no more:
+  one network cannot fill a process (7: 4,000), two can. The counts are
+  per process, so a network can hold 2,000 on each process; and per
+  network, so the holder of a larger IPv6 prefix is bounded by 7 only. A
+  vault host with more than 2,000 vaults behind one address on one process
+  exceeds 9: its further vaults are refused the upgrade and must collect
+  by long-poll, or the operator raises it. (Clients SHOULD fall back to
+  long-poll on a `429` upgrade; a client that only retries the WebSocket
+  stays without a collector.) A session that does not ack costs, with no
+  request, up to its window (10) in leases per visibility timeout and as
+  many uncharged ack frames: about 2 of each a second per session, about
+  4,300 a second for the 2,000 sessions of one network on a process.
 - **A deposit's body can still be made to stall.** It is read after the
   deposit token verified but before the request signature and the
   per-sender limit, and it has no deadline of its own. Anyone with one
@@ -851,7 +910,7 @@ the measurement named says it is needed; the relay reports all of them
 | Mechanism | What it adds | Measurement that justifies it |
 |---|---|---|
 | a higher flood guard (rate and burst: 200/s, burst 4,000 was reviewed for hosts of 1,000 to 2,000 vaults) | larger hosts | rate: the busiest address at half the guard for minutes (3,000 requests a minute). Burst: refusals of a known host after relay deploys or mass unlocks |
-| caps on parked collectors per network and process, with the first collector of a mailbox always admitted; a maximum lifetime for WebSocket sessions | bounded memory for parked connections | collectors per process against its memory; any WebSocket use |
+| caps on parked long-polls per network and process (WebSocket sessions have theirs: 7, 8, 9); session counts shared between processes; a maximum lifetime for WebSocket sessions | bounded memory for parked connections | collectors per process against its memory; refusals under 8 and 9; sessions per process |
 | body memory counted as it arrives, a pace for bodies (deposits included), separate pools | bounded memory and time for stalled bodies: the follow-up for the deposit case above | connections held open in body reads; process memory under stalled requests |
 | a per-network budget of failed authentications, with signature-first handling for a network that used it up | garbage refused cheaply | refusals and error rates by code from single addresses |
 | holding a key that signs properly but has no mailbox, with a growing `retry_after` | an orphaned client stops costing a store read per retry | `mailbox_unknown` answers per minute |
@@ -863,8 +922,10 @@ and go, and would give whoever gains use of a listed address an unlimited
 relay.
 
 **Shared state.** With several relay processes, limits 1 to 5 are shared
-(their observable budget is the same however requests are spread); limit
-6 is per process. If the shared store cannot be reached, the shared limits
+(their observable budget is the same however requests are spread); limits
+6 to 9 are per process (a client that reconnects to another process is
+counted there afresh), and 10, with the order of re-sends, is each
+session's own. If the shared store cannot be reached, the shared limits
 fall back to per-process buckets (limits are best-effort policy;
 availability matters more), while signed requests are shed with `429` as
 long as replays cannot be recorded (§4.1).
@@ -877,7 +938,11 @@ the number of networks the flood guard refused; and the parked collectors
 and WebSocket sessions it carries. These are what the limits above are to
 be re-sized from. vettid-relay exports `relay_ratelimit_allowed_total`,
 `relay_ratelimit_refused_total`, `relay_ratelimit_peak_permille` (by
-limiter: `address`, `key`, `sender`, `register`, `claim`, `web`),
+limiter: `address`, `key`, `sender`, `register`, `claim`, `web`;
+`relay_ratelimit_refused_total` also has `ws_sessions`, `ws_network` and
+`ws_network_hard`, the upgrades refused under 7, 8 and 9, which the
+`rate limits` line ends with as `ws_sessions_refused`,
+`ws_network_refused` and `ws_network_hard_refused`),
 `relay_ratelimit_busiest_per_minute` (`address`, `key`),
 `relay_active_collectors`, `relay_parked_collectors` and
 `relay_ws_sessions`, and logs all of it once a minute in one `rate limits`
@@ -887,15 +952,25 @@ line.
 `_BURST`: `RELAY_RATE_IP` (1), `RELAY_RATE_KEY` (2),
 `RELAY_RATE_REGISTER` (3), `RELAY_RATE_SENDER` (4),
 `RELAY_RATE_CLAIM_GET` (5), `RELAY_RATE_WEB` (§6.11); and
-`RELAY_MAX_COLLECTORS_PER_MAILBOX` (6). Every rate and burst must be
-greater than zero.
+`RELAY_MAX_COLLECTORS_PER_MAILBOX` (6), `RELAY_MAX_WS_SESSIONS` (7),
+`RELAY_MAX_WS_SESSIONS_PER_NETWORK` (8) and
+`RELAY_MAX_WS_SESSIONS_PER_NETWORK_HARD` (9), with 8 ≤ 9 ≤ 7 (the relay
+refuses to start otherwise). The window (10) is not configurable. Every
+rate and burst must be greater than zero.
 
-**Clients.** Nothing changes on the wire. Clients SHOULD retry a `429` no
+**Clients.** Nothing changes on the wire, except for WebSocket sessions
+(0.8.0): an upgrade can be answered `429` under limits 7 to 9, and a
+session can be closed with 1013 `rate_limited` when an ack frame is refused
+by a rate limit (§6.4). Clients SHOULD retry a `429` no
 sooner than `retry_after`, with their own jitter; SHOULD treat
 `mailbox_unknown` on their **own** mailbox as final until they have
 registered again (stop collecting, register, resume; or stop, if the
 mailbox was deleted on purpose) instead of asking again every second; and
-SHOULD treat `timestamp_stale` as a wrong local clock and back off.
+SHOULD treat `timestamp_stale` as a wrong local clock and back off. A
+client whose WebSocket upgrade is answered `429` SHOULD collect by
+long-poll and try the WebSocket again no sooner than `retry_after`, with
+backoff; a client whose session is closed with 1013 SHOULD back off before
+reconnecting.
 
 ### 7.3 Versioning
 
@@ -1087,6 +1162,26 @@ The push gateway API is specified separately.
 
 ## 10. Changelog
 
+- **0.8.0** — WebSocket sessions are bounded, as built in vettid-relay #9;
+  approved by the owner 2026-10-13. Until now the limits of §7.2 applied
+  to a session's upgrade request only. Now (§6.4, §7.2): a relay process
+  carries a maximum of sessions (7: 4,000 in the reference relay), and of
+  one network a maximum (8: 1,024) beyond which only the first session of
+  a mailbox is admitted, up to a ceiling (9: 2,000); a refused upgrade is
+  `429` with `retry_after` 5 and long-poll is not affected. A session has
+  a window of messages sent and not yet acked (10: 128); a session that
+  lets leases end is sent the unacked messages again in rationed batches,
+  one per visibility timeout, with new messages in between. An ack frame
+  that does not answer a message in the window is charged to the flood
+  guard and the key's limit like the `DELETE` it stands for. Close codes:
+  **1008** for a frame that is not an ack of a well-formed id, **1013**
+  with reason `rate_limited` when a charged ack is refused. Message ids
+  are upper case and clients MUST send them as issued (§2); ULID order
+  holds whatever the relay's clock does (§6.2). The health check answers
+  from a store check a few seconds old at most (§6.11). New refusal
+  counts and three configuration variables (§7.2). For clients: fall back
+  to long-poll on a `429` upgrade, back off after 1013; no new endpoint,
+  field or error code.
 - **0.7.1** — a deployment requirement, no wire change (§7.4, new): a
   relay's HTTP/2 front end MUST NOT announce exactly 100 concurrent
   streams and SHOULD announce at least 128 (and vault hosts rely on
