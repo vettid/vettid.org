@@ -2,7 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { loadConfig } from '../lib/config';
 import { VettidOrgRelayStack, RELAY_ALARM_LIMITS, RELAY_MAX_TASKS, RELAY_MIN_TASKS, RELAY_TASK_MEMORY_MIB } from '../lib/stacks/relay-stack';
-import { VettidOrgRelayDataStack } from '../lib/stacks/relay-data-stack';
+import { VettidOrgRelayDataStack, RELAY_TABLE_LIMITS } from '../lib/stacks/relay-data-stack';
 
 const app = new cdk.App();
 const env = { account: '123456789012', region: 'us-east-1' };
@@ -212,10 +212,58 @@ describe('alarms on the `rate limits` line (RELAY-PROTOCOL §7.2)', () => {
     expect(flat(byName(prod, 'rate-limits-silent').OKActions)).toMatch(TOPIC);
   });
 
+  // The table's own metrics (AWS/DynamoDB), by the table name the data stack publishes.
+  const TABLE = { Name: 'TableName', Value: { Ref: expect.stringMatching(/^SsmParameterValuevettidorgprodrelaytablename/) } };
+
+  test.each([
+    ['table-writes-high', 'ConsumedWriteCapacityUnits', RELAY_TABLE_LIMITS.maxWriteRequestUnits],
+    ['table-reads-high', 'ConsumedReadCapacityUnits', RELAY_TABLE_LIMITS.maxReadRequestUnits],
+  ])('%s: half the table\'s ceiling for 5 minutes', (name, metric, perSecond) => {
+    expect(RELAY_ALARM_LIMITS.tableBusyShare).toBe(0.5);
+    expect(byName(prod, name)).toMatchObject({
+      Namespace: 'AWS/DynamoDB', MetricName: metric, Dimensions: [TABLE], Statistic: 'Sum', Period: 60,
+      ComparisonOperator: 'GreaterThanOrEqualToThreshold', Threshold: (perSecond * 60) / 2, EvaluationPeriods: 5, DatapointsToAlarm: 5, TreatMissingData: 'notBreaching',
+    });
+  });
+
+  test('table-write-volume: an hour of writes far above the measured use and far below the ceiling', () => {
+    expect(byName(prod, 'table-write-volume')).toMatchObject({
+      Namespace: 'AWS/DynamoDB', MetricName: 'ConsumedWriteCapacityUnits', Dimensions: [TABLE], Statistic: 'Sum', Period: 3600,
+      ComparisonOperator: 'GreaterThanOrEqualToThreshold', Threshold: RELAY_ALARM_LIMITS.tableWriteUnitsPerHour, EvaluationPeriods: 1, TreatMissingData: 'notBreaching',
+    });
+    const perSecond = RELAY_ALARM_LIMITS.tableWriteUnitsPerHour / 3600;
+    expect(perSecond).toBeGreaterThan(10 * (5486 / 3600)); // the busiest hour measured (2026-10)
+    expect(perSecond).toBeLessThanOrEqual(RELAY_TABLE_LIMITS.maxWriteRequestUnits / 10);
+  });
+
+  test('table-throttled: any throttling of the table or its index in 3 of 5 minutes; a metric without data counts as 0', () => {
+    const a = byName(prod, 'table-throttled');
+    expect(a).toMatchObject({ ComparisonOperator: 'GreaterThanThreshold', Threshold: 0, EvaluationPeriods: 5, DatapointsToAlarm: 3, TreatMissingData: 'notBreaching' });
+    const expr = a.Metrics.filter((m: any) => m.Expression);
+    expect(expr).toEqual([expect.objectContaining({ Expression: 'FILL(tw, 0) + FILL(tr, 0) + FILL(iw, 0) + FILL(ir, 0) + FILL(tx, 0)', ReturnData: true })]);
+    const INDEX = { Name: 'GlobalSecondaryIndexName', Value: 'due' };
+    const read = Object.fromEntries(
+      a.Metrics.filter((m: any) => m.MetricStat).map((m: any) => {
+        expect(m.MetricStat).toMatchObject({ Period: 60, Stat: 'Sum', Metric: { Namespace: 'AWS/DynamoDB' } });
+        return [m.Id, [m.MetricStat.Metric.MetricName, m.MetricStat.Metric.Dimensions]];
+      }),
+    );
+    expect(read).toEqual({
+      tw: ['WriteThrottleEvents', [TABLE]],
+      tr: ['ReadThrottleEvents', [TABLE]],
+      iw: ['WriteThrottleEvents', [INDEX, TABLE]],
+      ir: ['ReadThrottleEvents', [INDEX, TABLE]],
+      tx: ['ThrottledRequests', [{ Name: 'Operation', Value: 'TransactWriteItems' }, TABLE]],
+    });
+  });
+
   test('every alarm notifies the security-alerts topic of the management account; no topic of its own', () => {
     const all = alarmsOf(prod);
     expect(all.map((a) => a.AlarmName).sort()).toEqual(
-      ['address-busy', 'address-refused', 'collectors', 'key-refused', 'rate-limits-silent', 'register-refused', 'ws-sessions'].map((n) => `vettid-org-relay-${n}`),
+      [
+        'address-busy', 'address-refused', 'collectors', 'key-refused', 'rate-limits-silent', 'register-refused',
+        'table-reads-high', 'table-throttled', 'table-write-volume', 'table-writes-high', 'ws-sessions',
+      ].map((n) => `vettid-org-relay-${n}`),
     );
     for (const a of all) {
       expect(a.AlarmActions).toHaveLength(1);
@@ -228,7 +276,7 @@ describe('alarms on the `rate limits` line (RELAY-PROTOCOL §7.2)', () => {
 
   test('anywhere else the alarms exist without an action (the topic is the management account\'s)', () => {
     const all = alarmsOf(t);
-    expect(all).toHaveLength(7);
+    expect(all).toHaveLength(11);
     for (const a of all) expect(a.AlarmActions).toBeUndefined();
   });
 
@@ -269,6 +317,32 @@ describe('data (stateful)', () => {
     data.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
       AttributeDefinitions: Match.arrayWith([{ AttributeName: 'gsk', AttributeType: 'N' }]),
     });
+  });
+
+  test('table: a ceiling on on-demand throughput, on the table and on its index', () => {
+    const L = RELAY_TABLE_LIMITS;
+    data.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
+      BillingMode: 'PAY_PER_REQUEST',
+      WriteOnDemandThroughputSettings: { MaxWriteRequestUnits: L.maxWriteRequestUnits },
+      GlobalSecondaryIndexes: [Match.objectLike({ IndexName: 'due', WriteOnDemandThroughputSettings: { MaxWriteRequestUnits: L.indexMaxWriteRequestUnits } })],
+      Replicas: [
+        Match.objectLike({
+          ReadOnDemandThroughputSettings: { MaxReadRequestUnits: L.maxReadRequestUnits },
+          GlobalSecondaryIndexes: [{ IndexName: 'due', ReadOnDemandThroughputSettings: { MaxReadRequestUnits: L.indexMaxReadRequestUnits } }],
+        }),
+      ],
+    });
+    // One address at the whole flood guard (100 requests a second), every
+    // request a transactional deposit of 8 KB (4 + 2 × KB write units),
+    // stays within the ceiling; so does ten times the busiest minute measured.
+    expect(L.maxWriteRequestUnits).toBeGreaterThanOrEqual(100 * (4 + 2 * 8));
+    expect(L.maxWriteRequestUnits).toBeGreaterThan(10 * (1634 / 60));
+    expect(L.maxReadRequestUnits).toBeGreaterThan(10 * (494 / 60));
+    // And far below the account's per-table quota, which was the only bound.
+    expect(L.maxWriteRequestUnits).toBeLessThanOrEqual(40000 / 10);
+    expect(L.maxReadRequestUnits).toBeLessThanOrEqual(40000 / 10);
+    // Still one table, one logical id: an in-place update, never a replacement.
+    expect(Object.keys(data.findResources('AWS::DynamoDB::GlobalTable'))).toEqual(['TableCD117FA1']);
   });
 
   test('blob bucket: private, TLS-only, expires a day after the blob TTL, retained', () => {
