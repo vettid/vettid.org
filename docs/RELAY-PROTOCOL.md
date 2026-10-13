@@ -743,7 +743,9 @@ with a separate budget.
 
 The rest of this section (0.7.0) says how a relay SHOULD limit, and gives
 the reference relay's numbers. None of it is visible to a client except as
-fewer or more `429`s.
+fewer or more `429`s (to WebSocket upgrades too, under limits 7 to 9) and,
+on a WebSocket session, as close code 1013 `rate_limited` when an ack frame
+is refused by a rate limit (§6.4).
 
 **Principle.** A client's address is the right key for a limit only while
 the caller is unauthenticated. Addresses are shared: every vault on a vault
@@ -956,7 +958,10 @@ line.
 refuses to start otherwise). The window (10) is not configurable. Every
 rate and burst must be greater than zero.
 
-**Clients.** Nothing changes on the wire. Clients SHOULD retry a `429` no
+**Clients.** Nothing changes on the wire, except for WebSocket sessions
+(0.8.0): an upgrade can be answered `429` under limits 7 to 9, and a
+session can be closed with 1013 `rate_limited` when an ack frame is refused
+by a rate limit (§6.4). Clients SHOULD retry a `429` no
 sooner than `retry_after`, with their own jitter; SHOULD treat
 `mailbox_unknown` on their **own** mailbox as final until they have
 registered again (stop collecting, register, resume; or stop, if the
