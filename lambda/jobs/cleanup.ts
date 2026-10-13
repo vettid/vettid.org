@@ -29,7 +29,7 @@ import { audit } from '../shared/audit';
 import { ddb, env, ses, table } from '../shared/aws';
 
 const STALE_DAYS = 14;
-import { deleteOwnSignInUser, ownEmailMarkerDelete, vaultPointerKey } from '../shared/members';
+import { deleteOwnSignInUser, leftBehind, ownEmailMarkerDelete, vaultPointerKey } from '../shared/members';
 import type { MemberItem, SubscriptionItem } from '../shared/model';
 import { DECLINED_DAYS, REMOVAL_GIVE_UP_DAYS, ownAddress } from '../shared/requests';
 import { liveLease, newUlid, pickInstance, releaseRow, requestStart, routable } from '../shared/vault-routing';
@@ -291,63 +291,52 @@ async function releaseIdentity(m: MemberItem): Promise<'deleted' | 'kept'> {
  * only if it carries this request's id: a user under the same address with
  * another id is somebody's account.
  */
-async function deleteRequestUser(m: MemberItem): Promise<void> {
-  await deleteOwnSignInUser(m);
+async function deleteRequestUser(m: MemberItem): Promise<'deleted' | 'none' | 'other'> {
+  const r = await deleteOwnSignInUser(m);
+  if (r === 'other') console.warn('request removal: the sign-in user under its address carries another id and is left', JSON.stringify({ user_guid: m.user_guid })); // never the address
+  return r;
 }
 
-/**
- * The email marker of a member whose row this run has just deleted: only
- * if it is that member's own (or already gone). False if it names another
- * request or account: one made for the address after somebody else (an
- * admin's Delete) removed the old marker. That marker is left, and the
- * address is then no longer this member's to clean up after.
- */
-async function deleteOwnMarker(m: MemberItem, what: string): Promise<boolean> {
-  try {
-    await ddb.send(new DeleteCommand(ownEmailMarkerDelete(m)));
-    return true;
-  } catch (e) {
-    if ((e as Error).name !== 'ConditionalCheckFailedException') throw e;
-    console.warn(`${what}: the email marker belongs to another request and is left`, JSON.stringify({ user_guid: m.user_guid })); // never the address
-    return false;
-  }
-}
+type RowDelete = { TableName: string; Key: { user_guid: string }; ConditionExpression: string; ExpressionAttributeNames?: Record<string, string>; ExpressionAttributeValues?: Record<string, unknown> };
 
 /**
- * The row and its email marker, together, and only while the row is still
- * in `state`. The marker goes only if it is this request's own (or already
- * gone): an admin's Delete removes marker and row in two calls, and a new
- * request for the address made in between owns a new marker under the same
- * key. A marker that names another request is not ours: it is left, and the
- * row goes alone.
+ * A member's row and its email marker, in one transaction, so that neither
+ * is ever there without the other: the row only under `row`'s own guard,
+ * the marker only if it is this member's own (or already gone). A marker
+ * that names another request (made for the address after somebody else
+ * removed the old marker) is not ours: it is left ('left'), and the row
+ * goes alone, still under its guard. A row that fails its guard throws a
+ * failed condition (see `conditionFailed`): nothing was deleted.
  */
-async function deleteRequestRows(m: MemberItem, state: 'withdrawn' | 'rejected'): Promise<void> {
-  const row = {
-    TableName: table.members(),
-    Key: { user_guid: m.user_guid },
-    ConditionExpression: '#s = :s',
-    ExpressionAttributeNames: { '#s': 'state' },
-    ExpressionAttributeValues: { ':s': state },
-  };
+async function deleteRowAndOwnMarker(m: MemberItem, row: RowDelete, what: string): Promise<'deleted' | 'left'> {
   try {
-    await ddb.send(
-      new TransactWriteCommand({
-        TransactItems: [
-          { Delete: row },
-          { Delete: ownEmailMarkerDelete(m) },
-        ],
-      }),
-    );
+    await ddb.send(new TransactWriteCommand({ TransactItems: [{ Delete: row }, { Delete: ownEmailMarkerDelete(m) }] }));
+    return 'deleted';
   } catch (e) {
     const err = e as { name?: string; CancellationReasons?: { Code?: string }[] };
     const [rowReason, markerReason] = err.CancellationReasons ?? [];
-    // Only "the marker is somebody else's" is handled here; a row no longer
-    // in `state` (or anything else) is the caller's to judge.
+    // Only "the marker is somebody else's" is handled here; a row that
+    // fails its guard (or anything else) is the caller's to judge.
     if (err.name !== 'TransactionCanceledException' || rowReason?.Code === 'ConditionalCheckFailed' || markerReason?.Code !== 'ConditionalCheckFailed') throw e;
-    console.warn('request removal: the email marker belongs to another request and is left', JSON.stringify({ state })); // never the address
+    console.warn(`${what}: the email marker belongs to another request and is left`, JSON.stringify({ user_guid: m.user_guid })); // never the address
     await ddb.send(new DeleteCommand(row));
+    return 'left';
   }
 }
+
+/** A request's row, only while it is still in `state`, with its own marker. */
+const deleteRequestRows = (m: MemberItem, state: 'withdrawn' | 'rejected') =>
+  deleteRowAndOwnMarker(
+    m,
+    {
+      TableName: table.members(),
+      Key: { user_guid: m.user_guid },
+      ConditionExpression: '#s = :s',
+      ExpressionAttributeNames: { '#s': 'state' },
+      ExpressionAttributeValues: { ':s': state },
+    },
+    'request removal',
+  );
 
 export interface RemovalCounts {
   removed: number;
@@ -373,10 +362,10 @@ export async function removeRequests(
   const after = state === 'withdrawn' ? 'withdraw' : 'decline';
   for (const { m, since } of due) {
     try {
-      await deleteRequestUser(m);
+      const user = await deleteRequestUser(m);
       const identity = await releaseIdentity(m);
-      await deleteRequestRows(m, state);
-      await audit('system', 'request.removed', m.user_guid, { after, identity });
+      const marker = await deleteRequestRows(m, state);
+      await audit('system', 'request.removed', m.user_guid, { after, identity, ...leftBehind(user, marker) });
       counts.removed++;
     } catch (e) {
       if (conditionFailed(e)) continue; // no longer in that state (an admin deleted it meanwhile): not ours
@@ -386,8 +375,8 @@ export async function removeRequests(
         continue;
       }
       try {
-        await deleteRequestRows(m, state);
-        await audit('system', 'request.removal_incomplete', m.user_guid, { after });
+        const marker = await deleteRequestRows(m, state);
+        await audit('system', 'request.removal_incomplete', m.user_guid, { after, ...leftBehind(undefined, marker) });
         counts.abandoned++;
       } catch (e2) {
         if (conditionFailed(e2)) continue;
@@ -456,6 +445,31 @@ export const handler = async (event?: { task?: string }) => {
     return r;
   }
   const now = new Date().toISOString();
+  // Both sweeps below delete the row FIRST, under its guard and in one
+  // transaction with its own email marker, and everything else after.
+  //  - The guard is what protects a person who changed their mind: an
+  //    account an admin reinstated after the query, a request verified or
+  //    approved after it. If the guard fails, nothing at all is touched.
+  //    (Row last would need a claim on the row that reinstate respects; the
+  //    job's role cannot write to a member row.)
+  //  - Marker and row together: an address is never left reserved by a
+  //    marker with no row behind it.
+  //  - What comes after the row cannot be retried from the row. So each
+  //    step is tried on its own, a failure never skips the next step or
+  //    the next row, and what could not be removed is named in the audit
+  //    event (`incomplete`), logged and alarmed (RequestRemovalAbandoned),
+  //    for the operator to reconcile (RUNBOOK "Membership requests").
+  let failures = 0; // the row could not be deleted: it is still there, and the next run tries again
+  let incomplete = 0; // the row is gone, something of its own outside it is not
+  const afterRow = (what: string, m: MemberItem, undone: string[]) => async <T>(name: string, f: () => Promise<T>): Promise<T | undefined> => {
+    try {
+      return await f();
+    } catch (e) {
+      console.error(`${what}: removed, but not all of it`, JSON.stringify({ user_guid: m.user_guid, not_removed: name, error: (e as Error).name })); // never the address
+      undone.push(name);
+      return undefined;
+    }
+  };
   let deleted = 0;
   for (const state of ['registered', 'member']) {
     for await (const item of query({
@@ -467,33 +481,41 @@ export const handler = async (event?: { task?: string }) => {
       ExpressionAttributeValues: { ':s': state, ':c': 'canceled', ':now': now },
     })) {
       const m = item as MemberItem;
-      // Delete the member row FIRST, conditionally: if an admin reinstated
-      // the account after our query, the condition fails and nothing else
-      // is touched.
+      let marker: 'deleted' | 'left';
       try {
-        await ddb.send(
-          new DeleteCommand({
+        marker = await deleteRowAndOwnMarker(
+          m,
+          {
             TableName: table.members(),
             Key: { user_guid: m.user_guid },
             ConditionExpression: 'account_status = :c AND delete_after < :now',
             ExpressionAttributeValues: { ':c': 'canceled', ':now': now },
-          }),
+          },
+          'canceled account',
         );
       } catch (e) {
-        if ((e as Error).name === 'ConditionalCheckFailedException') continue;
-        throw e;
+        if (conditionFailed(e)) continue; // reinstated (or deleted by an admin) meanwhile: not ours
+        console.error('canceled account: not removed', JSON.stringify({ user_guid: m.user_guid, error: (e as Error).name })); // never the address
+        failures++;
+        continue;
       }
-      // The sign-in user and the marker are named by the address, not by
-      // the account: each goes only if it is this account's own. One that
-      // names another id belongs to a request or account made for the
-      // address since, and is left.
-      if ((await deleteOwnSignInUser(m)) === 'other') {
+      const undone: string[] = [];
+      const step = afterRow('canceled account', m, undone);
+      // The sign-in user is named by the address, not by the account: it
+      // goes only if it is this account's own. One that carries another id
+      // belongs to a request or account made for the address since.
+      const user = await step('sign_in_user', () => deleteOwnSignInUser(m));
+      if (user === 'other') {
         console.warn('canceled account: the sign-in user under its address carries another id and is left', JSON.stringify({ user_guid: m.user_guid })); // never the address
       }
-      await ddb.send(new DeleteCommand({ TableName: table.subscriptions(), Key: { user_guid: m.user_guid } }));
-      await deleteOwnMarker(m, 'canceled account');
-      const vaultIds = await deleteVaults(m.user_guid, Math.floor(Date.now() / 1000));
-      await audit('system', 'member.delete_after_cancel', m.user_guid, vaultIds.length ? { vault_ids: vaultIds } : {});
+      await step('subscription', () => ddb.send(new DeleteCommand({ TableName: table.subscriptions(), Key: { user_guid: m.user_guid } })));
+      const vaultIds = (await step('vaults', () => deleteVaults(m.user_guid, Math.floor(Date.now() / 1000)))) ?? [];
+      await audit('system', 'member.delete_after_cancel', m.user_guid, {
+        ...(vaultIds.length ? { vault_ids: vaultIds } : {}),
+        ...leftBehind(user, marker),
+        ...(undone.length ? { incomplete: undone } : {}),
+      });
+      if (undone.length) incomplete++;
       deleted++;
     }
   }
@@ -513,36 +535,45 @@ export const handler = async (event?: { task?: string }) => {
     ExpressionAttributeValues: { ':r': 'requested', ':before': staleBefore, ':f': false },
   })) {
     const m = item as MemberItem;
+    let marker: 'deleted' | 'left';
     try {
-      await ddb.send(
-        new DeleteCommand({
+      marker = await deleteRowAndOwnMarker(
+        m,
+        {
           TableName: table.members(),
           Key: { user_guid: m.user_guid },
           ConditionExpression: '#s = :r AND email_verified = :f',
           ExpressionAttributeNames: { '#s': 'state' },
           ExpressionAttributeValues: { ':r': 'requested', ':f': false },
-        }),
+        },
+        'unverified request',
       );
     } catch (e) {
-      if ((e as Error).name === 'ConditionalCheckFailedException') continue;
-      throw e;
+      if (conditionFailed(e)) continue; // verified, approved, declined or deleted meanwhile: not ours
+      console.error('unverified request: not removed', JSON.stringify({ user_guid: m.user_guid, error: (e as Error).name })); // never the address
+      failures++;
+      continue;
     }
+    const undone: string[] = [];
     // A marker that names another request: the address has been requested
     // again, and its SES identity is what that request's verification runs
     // on. Neither is this row's to delete.
-    const ownMarker = await deleteOwnMarker(m, 'unverified request');
-    const onList = ownMarker ? await ddb.send(new GetCommand({ TableName: env('TABLE_MAILING_LIST'), Key: { email: m.email } })) : null;
-    // 2.6.0: a request that found the identity already there (`owns_identity`
-    // false) leaves it; one of the project's own addresses is never deleted.
-    // A row from before 2.6.0 (no flag) keeps the rule it was created under.
-    if (onList && !onList.Item && m.owns_identity !== false && !ownAddress(m.email)) {
-      try {
-        await ses.send(new DeleteEmailIdentityCommand({ EmailIdentity: m.email }));
-      } catch (e) {
-        if ((e as Error).name !== 'NotFoundException') throw e;
-      }
+    if (marker === 'deleted') {
+      await afterRow('unverified request', m, undone)('ses_identity', async () => {
+        const onList = await ddb.send(new GetCommand({ TableName: env('TABLE_MAILING_LIST'), Key: { email: m.email } }));
+        // 2.6.0: a request that found the identity already there (`owns_identity`
+        // false) leaves it; one of the project's own addresses is never deleted.
+        // A row from before 2.6.0 (no flag) keeps the rule it was created under.
+        if (onList.Item || m.owns_identity === false || ownAddress(m.email)) return;
+        try {
+          await ses.send(new DeleteEmailIdentityCommand({ EmailIdentity: m.email }));
+        } catch (e) {
+          if ((e as Error).name !== 'NotFoundException') throw e;
+        }
+      });
     }
-    await audit('system', 'request.reclaim_unverified', m.user_guid, {});
+    await audit('system', 'request.reclaim_unverified', m.user_guid, { ...leftBehind(undefined, marker), ...(undone.length ? { incomplete: undone } : {}) });
+    if (undone.length) incomplete++;
     reclaimed++;
   }
 
@@ -555,7 +586,9 @@ export const handler = async (event?: { task?: string }) => {
     console.error('declined-request sweep failed', (e as Error).name);
     declined.failures++;
   }
-  console.log(removalEmf(declined.failures, declined.abandoned, Date.now()));
+  // One alarm for "a removal is waiting" and one for "a removal ended
+  // unfinished", whatever was being removed.
+  console.log(removalEmf(declined.failures + failures, declined.abandoned + incomplete, Date.now()));
 
   const vaultRetries = await retryVaultDeletions(Math.floor(Date.now() / 1000));
 
@@ -582,6 +615,6 @@ export const handler = async (event?: { task?: string }) => {
       expired++;
     }
   }
-  console.log(JSON.stringify({ deleted, reclaimed, expired, vaultRetries, declined }));
-  return { deleted, reclaimed, expired, vaultRetries, declined };
+  console.log(JSON.stringify({ deleted, reclaimed, expired, vaultRetries, declined, failures, incomplete }));
+  return { deleted, reclaimed, expired, vaultRetries, declined, failures, incomplete };
 };

@@ -730,10 +730,9 @@ describe('things named by the address (the email marker, the sign-in user) are d
     );
   const memberDeletes = () => ddb.commandCalls(DeleteCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'members');
   const userDeletes = () => idp.commandCalls(AdminDeleteUserCommand).map((c) => c.args[0].input);
-  const markerIsAnothers = () => ddb.on(DeleteCommand).callsFake((input) => {
-    if (String(input.Key?.user_guid).startsWith('email:')) throw ccf();
-    return {};
-  });
+  const markerDeletes = () => memberDeletes().filter((i) => String(i.Key!.user_guid).startsWith('email:'));
+  const txs = () => ddb.commandCalls(TransactWriteCommand).map((c) => c.args[0].input.TransactItems!.map((i) => i.Delete));
+  const emf = () => logged.map((l) => { try { return JSON.parse(l); } catch { return {}; } }).filter((l) => l._aws);
 
   describe('DELETE /admin/members/{id}', () => {
     const account = { user_guid: G, email: ADDR, first_name: 'Ada', last_name: 'Lovelace', state: 'registered', account_status: 'active', email_verified: true };
@@ -767,7 +766,8 @@ describe('things named by the address (the email marker, the sign-in user) are d
         expect(res.statusCode).toBe(200);
         expect(userDeletes()).toEqual([]);
         expect(ddb.commandCalls(TransactWriteCommand)).toHaveLength(1);
-        expect(events()).toEqual([expect.objectContaining({ action: 'member.delete', subject: G })]);
+        // The record itself says that the sign-in user under the address was not removed.
+        expect(events()).toEqual([expect.objectContaining({ action: 'member.delete', subject: G, detail: { state: 'registered', sign_in_user: 'left' } })]);
         expect(logged.join('\n')).toContain('the sign-in user under this address carries another id and is left');
         expectCleanLogs();
       },
@@ -779,9 +779,12 @@ describe('things named by the address (the email marker, the sign-in user) are d
       expect(userDeletes()).toEqual([]);
     });
 
-    test('a failing Cognito read or delete stops before anything is deleted from the table; no "ok"', async () => {
-      memberUser(G);
-      idp.on(AdminDeleteUserCommand).rejects(named('TooManyRequestsException'));
+    test.each([
+      ['read', () => idp.on(AdminGetUserCommand).callsFake((input) => { if (input.UserPoolId === 'us-east-1_admins') return { Enabled: true }; throw named('TooManyRequestsException'); })],
+      ['read (an answer that is not a user)', () => idp.on(AdminGetUserCommand).callsFake((input) => (input.UserPoolId === 'us-east-1_admins' ? { Enabled: true } : undefined))],
+      ['delete', () => { memberUser(G); idp.on(AdminDeleteUserCommand).rejects(named('TooManyRequestsException')); }],
+    ])('a failing Cognito %s stops before anything is deleted from the table: 500, no "ok", no audit', async (_n, arrange) => {
+      arrange();
       const res = await del();
       expect(res.statusCode).toBe(500);
       expect(ddb.commandCalls(TransactWriteCommand)).toHaveLength(0);
@@ -794,7 +797,7 @@ describe('things named by the address (the email marker, the sign-in user) are d
       const res = await del();
       expect(res.statusCode).toBe(200);
       expect(memberDeletes()).toEqual([ROW]);
-      expect(events()).toEqual([expect.objectContaining({ action: 'member.delete', subject: G })]);
+      expect(events()).toEqual([expect.objectContaining({ action: 'member.delete', subject: G, detail: { state: 'registered', email_marker: 'left' } })]);
       expect(logged.join('\n')).toContain('the email marker belongs to another request and is left');
       expectCleanLogs();
     });
@@ -803,12 +806,20 @@ describe('things named by the address (the email marker, the sign-in user) are d
       ['in the transaction', () => ddb.on(TransactWriteCommand).rejects(canceledTx('ConditionalCheckFailed', 'None'))],
       ['with the marker another request\'s too', () => ddb.on(TransactWriteCommand).rejects(canceledTx('ConditionalCheckFailed', 'ConditionalCheckFailed'))],
       ['between the transaction and the row\'s own delete', () => { ddb.on(TransactWriteCommand).rejects(canceledTx('None', 'ConditionalCheckFailed')); ddb.on(DeleteCommand, { TableName: 'members' }).rejects(ccf()); }],
-    ])('the row was removed by someone else meanwhile (%s): 404, not "ok"; no marker is touched and no delete is audited', async (_n, arrange) => {
+    ])('the row was removed by someone else meanwhile (%s): 404, not "ok", and no delete is audited; a marker that still names the row goes, and only such a one', async (_n, arrange) => {
       arrange();
       const res = await del();
       expect(res.statusCode).toBe(404);
       expect(JSON.parse(res.body)).toMatchObject({ error: 'not_found', message: 'No such member' });
-      expect(memberDeletes().filter((i) => String(i.Key!.user_guid).startsWith('email:'))).toEqual([]);
+      // Not "or already gone" here: strictly a marker that names this row.
+      expect(markerDeletes()).toEqual([{ ...OWN_MARKER, ConditionExpression: 'member_guid = :g' }]);
+      expect(auditPuts()).toEqual([]);
+    });
+
+    test('the row is gone and the leftover marker cannot be deleted (not a failed condition): an error, not a 404 that hides it', async () => {
+      ddb.on(TransactWriteCommand).rejects(canceledTx('ConditionalCheckFailed', 'None'));
+      ddb.on(DeleteCommand, { TableName: 'members' }).rejects(named('InternalServerError'));
+      expect((await del()).statusCode).toBe(500);
       expect(auditPuts()).toEqual([]);
     });
 
@@ -822,69 +833,196 @@ describe('things named by the address (the email marker, the sign-in user) are d
     });
   });
 
+  // The daily run's two sweeps delete the row first (its guard protects a
+  // person who changed their mind), in one transaction with its own marker;
+  // what comes after cannot be retried from the row, so it is recorded.
   describe('cleanup, daily run: a canceled account past its date', () => {
     const canceled = { user_guid: G, email: ADDR, state: 'member', account_status: 'canceled', delete_after: '2020-01-01T00:00:00Z' };
+    const second = { ...canceled, user_guid: G2, email: 'second@example.net' };
+    const due = (...items: Record<string, unknown>[]) =>
+      ddb.on(QueryCommand).callsFake((input) => (input.ExpressionAttributeValues?.[':c'] === 'canceled' && input.ExpressionAttributeValues?.[':s'] === 'member' ? { Items: items } : { Items: [] }));
+    const ROW = { TableName: 'members', Key: { user_guid: G }, ConditionExpression: 'account_status = :c AND delete_after < :now', ExpressionAttributeValues: { ':c': 'canceled', ':now': expect.any(String) } };
     beforeEach(() => {
-      ddb.on(QueryCommand).callsFake((input) => (input.ExpressionAttributeValues?.[':c'] === 'canceled' && input.ExpressionAttributeValues?.[':s'] === 'member' ? { Items: [canceled] } : { Items: [] }));
+      due(canceled);
       ddb.on(DeleteCommand).resolves({});
+      ddb.on(TransactWriteCommand).resolves({});
       idp.on(AdminDeleteUserCommand).resolves({});
     });
 
-    test('its own sign-in user and its own marker go', async () => {
+    test('row and its own marker go first, in one transaction under the row\'s guard; then its own sign-in user, subscription and vault pointer', async () => {
       memberUser(G);
       const r = await cleanup.handler();
-      expect(r.deleted).toBe(1);
+      expect(r).toMatchObject({ deleted: 1, failures: 0, incomplete: 0 });
+      expect(txs()).toEqual([[ROW, OWN_MARKER]]);
+      expect(memberDeletes()).toEqual([]); // nothing in the members table is deleted outside the transaction
       expect(userDeletes()).toEqual([{ UserPoolId: 'us-east-1_pool', Username: ADDR }]);
-      expect(memberDeletes().filter((i) => String(i.Key!.user_guid).startsWith('email:'))).toEqual([OWN_MARKER]);
+      expect(ddb.commandCalls(DeleteCommand).map((c) => c.args[0].input)).toEqual([{ TableName: 'subs', Key: { user_guid: G } }, { TableName: 'vaults', Key: { vault_id: `user#${G}` } }]);
+      expect(events()).toEqual([expect.objectContaining({ action: 'member.delete_after_cancel', subject: G, detail: {} })]);
+      expect(emf()[0]).toMatchObject({ RequestRemovalFailures: 0, RequestRemovalAbandoned: 0 });
     });
 
-    test('a sign-in user and a marker that name another request or account are left; the account is still removed and audited', async () => {
-      memberUser(G2);
-      markerIsAnothers();
+    test('reinstated after the query (the row fails its guard): nothing at all is touched', async () => {
+      memberUser(G);
+      ddb.on(TransactWriteCommand).rejects(canceledTx('ConditionalCheckFailed', 'None'));
       const r = await cleanup.handler();
-      expect(r.deleted).toBe(1);
+      expect(r).toMatchObject({ deleted: 0, failures: 0, incomplete: 0 });
+      expect(idp.commandCalls(AdminGetUserCommand)).toHaveLength(0);
       expect(userDeletes()).toEqual([]);
-      expect(events()).toEqual([expect.objectContaining({ action: 'member.delete_after_cancel', subject: G })]);
+      expect(ddb.commandCalls(DeleteCommand)).toHaveLength(0);
+      expect(auditPuts()).toEqual([]);
+    });
+
+    test('a sign-in user and a marker that name another request or account are left, and the audit event says so; the account is still removed', async () => {
+      memberUser(G2);
+      ddb.on(TransactWriteCommand).rejects(canceledTx('None', 'ConditionalCheckFailed'));
+      const r = await cleanup.handler();
+      expect(r).toMatchObject({ deleted: 1, failures: 0, incomplete: 0 });
+      expect(userDeletes()).toEqual([]);
+      expect(memberDeletes()).toEqual([ROW]); // the row alone, still under its guard
+      expect(events()).toEqual([expect.objectContaining({ action: 'member.delete_after_cancel', subject: G, detail: { sign_in_user: 'left', email_marker: 'left' } })]);
       expect(logged.join('\n')).toContain('canceled account: the email marker belongs to another request and is left');
       expect(logged.join('\n')).toContain('canceled account: the sign-in user under its address carries another id and is left');
+      expectCleanLogs();
+    });
+
+    test('another request\'s marker, and reinstated before the row\'s own delete: nothing else is touched', async () => {
+      ddb.on(TransactWriteCommand).rejects(canceledTx('None', 'ConditionalCheckFailed'));
+      ddb.on(DeleteCommand, { TableName: 'members' }).rejects(ccf());
+      const r = await cleanup.handler();
+      expect(r).toMatchObject({ deleted: 0, failures: 0, incomplete: 0 });
+      expect(idp.commandCalls(AdminGetUserCommand)).toHaveLength(0);
+      expect(auditPuts()).toEqual([]);
+    });
+
+    test('a failure after the row (Cognito throttled): the marker is already gone with the row, the later steps and the next account still run, and the audit event and the alarm say what was not removed', async () => {
+      due(canceled, second);
+      idp.on(AdminGetUserCommand).callsFake((input) => {
+        if (input.Username === ADDR) throw Object.assign(new Error(`throttled ${ADDR}`), { name: 'TooManyRequestsException' });
+        return { UserAttributes: [{ Name: 'custom:user_guid', Value: G2 }] };
+      });
+      const r = await cleanup.handler();
+      expect(r).toMatchObject({ deleted: 2, failures: 0, incomplete: 1 });
+      expect(txs().map((t) => t.map((d) => d!.Key!.user_guid))).toEqual([[G, `email:${ADDR}`], [G2, 'email:second@example.net']]);
+      // The first account's subscription and vault pointer were not skipped.
+      expect(ddb.commandCalls(DeleteCommand).map((c) => c.args[0].input.Key)).toEqual(expect.arrayContaining([{ user_guid: G }, { vault_id: `user#${G}` }, { user_guid: G2 }, { vault_id: `user#${G2}` }]));
+      expect(userDeletes().map((u) => u.Username)).toEqual(['second@example.net']);
+      expect(events()).toEqual([
+        expect.objectContaining({ action: 'member.delete_after_cancel', subject: G, detail: { incomplete: ['sign_in_user'] } }),
+        expect.objectContaining({ action: 'member.delete_after_cancel', subject: G2, detail: {} }),
+      ]);
+      expect(emf()[0]).toMatchObject({ RequestRemovalFailures: 0, RequestRemovalAbandoned: 1 });
+      expect(logged.join('\n')).toContain('canceled account: removed, but not all of it');
+      expect(logged.join('\n')).toContain('TooManyRequestsException');
+      expectCleanLogs();
+    });
+
+    test('a failing subscription or vault step is recorded the same way', async () => {
+      memberUser(G);
+      ddb.on(DeleteCommand).rejects(named('InternalServerError'));
+      const r = await cleanup.handler();
+      expect(r).toMatchObject({ deleted: 1, incomplete: 1 });
+      expect(userDeletes()).toHaveLength(1);
+      expect(events()).toEqual([expect.objectContaining({ action: 'member.delete_after_cancel', detail: { incomplete: ['subscription', 'vaults'] } })]);
+    });
+
+    test('the transaction itself fails: the row is still there for the next run, nothing else is touched, it is counted for the alarm, and the next account and the rest of the run go on', async () => {
+      due(canceled, second);
+      memberUser(G2);
+      ddb.on(TransactWriteCommand).callsFake((input) => {
+        if (input.TransactItems[0].Delete.Key.user_guid === G) throw named('ProvisionedThroughputExceededException');
+        return {};
+      });
+      const r = await cleanup.handler();
+      expect(r).toMatchObject({ deleted: 1, failures: 1, incomplete: 0, reclaimed: 0 });
+      expect(idp.commandCalls(AdminGetUserCommand).map((c) => c.args[0].input.Username)).toEqual(['second@example.net']);
+      expect(ddb.commandCalls(DeleteCommand).map((c) => c.args[0].input.Key)).not.toContainEqual({ user_guid: G });
+      expect(events()).toEqual([expect.objectContaining({ subject: G2 })]);
+      expect(emf()[0]).toMatchObject({ RequestRemovalFailures: 1, RequestRemovalAbandoned: 0 });
       expectCleanLogs();
     });
   });
 
   describe('cleanup, daily run: the 14-day reclaim of an unverified request', () => {
     const stale = { user_guid: G, email: ADDR, state: 'requested', email_verified: false, owns_identity: true };
+    const ROW = { TableName: 'members', Key: { user_guid: G }, ConditionExpression: '#s = :r AND email_verified = :f', ExpressionAttributeNames: { '#s': 'state' }, ExpressionAttributeValues: { ':r': 'requested', ':f': false } };
+    const listReads = () => ddb.commandCalls(GetCommand).filter((c) => c.args[0].input.TableName === 'list');
     beforeEach(() => {
       ddb.on(QueryCommand).callsFake((input) => (input.ExpressionAttributeValues?.[':before'] ? { Items: [stale] } : { Items: [] }));
       ddb.on(DeleteCommand).resolves({});
+      ddb.on(TransactWriteCommand).resolves({});
       ddb.on(GetCommand, { TableName: 'list' }).resolves({});
       ses.on(DeleteEmailIdentityCommand).resolves({});
     });
 
-    test('its own marker goes, and the SES identity it created', async () => {
+    test('row and its own marker go in one transaction under the row\'s guard; then the SES identity it created', async () => {
       const r = await cleanup.handler();
-      expect(r.reclaimed).toBe(1);
-      expect(memberDeletes().filter((i) => String(i.Key!.user_guid).startsWith('email:'))).toEqual([OWN_MARKER]);
+      expect(r).toMatchObject({ reclaimed: 1, failures: 0, incomplete: 0 });
+      expect(txs()).toEqual([[ROW, OWN_MARKER]]);
+      expect(memberDeletes()).toEqual([]);
       expect(ses.commandCalls(DeleteEmailIdentityCommand).map((c) => c.args[0].input.EmailIdentity)).toEqual([ADDR]);
+      expect(events()).toEqual([expect.objectContaining({ action: 'request.reclaim_unverified', subject: G, detail: {} })]);
     });
 
-    test('a marker that names another request: the address has been requested again, so neither the marker nor the SES identity is touched; the row is still reclaimed', async () => {
-      markerIsAnothers();
+    test('verified, approved or deleted after the query (the row fails its guard): nothing is touched', async () => {
+      ddb.on(TransactWriteCommand).rejects(canceledTx('ConditionalCheckFailed', 'None'));
       const r = await cleanup.handler();
-      expect(r.reclaimed).toBe(1);
+      expect(r).toMatchObject({ reclaimed: 0, failures: 0, incomplete: 0 });
+      expect(ddb.commandCalls(DeleteCommand)).toHaveLength(0);
+      expect(listReads()).toHaveLength(0);
       expect(ses.commandCalls(DeleteEmailIdentityCommand)).toHaveLength(0);
-      expect(events()).toEqual([expect.objectContaining({ action: 'request.reclaim_unverified', subject: G })]);
+      expect(auditPuts()).toEqual([]);
+    });
+
+    test('a marker that names another request: the address has been requested again, so neither the marker nor the SES identity is touched; the row is still reclaimed, and the audit event says the marker was left', async () => {
+      ddb.on(TransactWriteCommand).rejects(canceledTx('None', 'ConditionalCheckFailed'));
+      const r = await cleanup.handler();
+      expect(r).toMatchObject({ reclaimed: 1, incomplete: 0 });
+      expect(memberDeletes()).toEqual([ROW]);
+      expect(listReads()).toHaveLength(0);
+      expect(ses.commandCalls(DeleteEmailIdentityCommand)).toHaveLength(0);
+      expect(events()).toEqual([expect.objectContaining({ action: 'request.reclaim_unverified', subject: G, detail: { email_marker: 'left' } })]);
       expect(logged.join('\n')).toContain('unverified request: the email marker belongs to another request and is left');
       expectCleanLogs();
     });
 
-    test('any other failure of the marker delete is an error, not "left"', async () => {
-      ddb.on(DeleteCommand).callsFake((input) => {
-        if (String(input.Key?.user_guid).startsWith('email:')) throw named('InternalServerError');
-        return {};
-      });
-      await expect(cleanup.handler()).rejects.toMatchObject({ name: 'InternalServerError' });
-      expect(ses.commandCalls(DeleteEmailIdentityCommand)).toHaveLength(0);
+    test.each([
+      ['the mailing-list read', () => ddb.on(GetCommand, { TableName: 'list' }).rejects(named('InternalServerError'))],
+      ['the SES delete', () => ses.on(DeleteEmailIdentityCommand).rejects(Object.assign(new Error(`no ${ADDR}`), { name: 'TooManyRequestsException' }))],
+    ])('a failure after the row (%s): no marker is left behind, the identity is recorded as not removed and alarmed, and the run goes on', async (_n, arrange) => {
+      arrange();
+      const r = await cleanup.handler();
+      expect(r).toMatchObject({ reclaimed: 1, failures: 0, incomplete: 1 });
+      expect(txs()).toEqual([[ROW, OWN_MARKER]]);
+      expect(events()).toEqual([expect.objectContaining({ action: 'request.reclaim_unverified', subject: G, detail: { incomplete: ['ses_identity'] } })]);
+      expect(emf()[0]).toMatchObject({ RequestRemovalFailures: 0, RequestRemovalAbandoned: 1 });
+      expect(logged.join('\n')).toContain('unverified request: removed, but not all of it');
+      expectCleanLogs();
     });
+
+    test('the transaction itself fails: the row is still there for the next run, nothing else is touched, it is counted for the alarm, and the run goes on', async () => {
+      ddb.on(TransactWriteCommand).rejects(canceledTx('None', 'TransactionConflict'));
+      const r = await cleanup.handler();
+      expect(r).toMatchObject({ reclaimed: 0, failures: 1, incomplete: 0, expired: 0 });
+      expect(ddb.commandCalls(DeleteCommand)).toHaveLength(0);
+      expect(ses.commandCalls(DeleteEmailIdentityCommand)).toHaveLength(0);
+      expect(auditPuts()).toEqual([]);
+      expect(emf()[0]).toMatchObject({ RequestRemovalFailures: 1, RequestRemovalAbandoned: 0 });
+    });
+  });
+
+  test('a withdrawn request: a sign-in user and a marker that are somebody else\'s are left, and `request.removed` says so', async () => {
+    const now = Date.now();
+    ddb.on(QueryCommand).callsFake((input) => (input.ExpressionAttributeValues?.[':w'] === 'withdrawn'
+      ? { Items: [{ user_guid: G, email: ADDR, state: 'withdrawn', owns_identity: true, withdrawn_at: new Date(now - 60_000).toISOString() }] }
+      : { Items: [] }));
+    ddb.on(GetCommand, { TableName: 'list' }).resolves({});
+    ses.on(DeleteEmailIdentityCommand).resolves({});
+    memberUser(G2);
+    ddb.on(TransactWriteCommand).rejects(canceledTx('None', 'ConditionalCheckFailed'));
+    ddb.on(DeleteCommand).resolves({});
+    expect(await cleanup.handler({ task: 'requests' })).toEqual({ removed: 1, failures: 0, abandoned: 0 });
+    expect(events()).toEqual([expect.objectContaining({ action: 'request.removed', subject: G, detail: { after: 'withdraw', identity: 'deleted', sign_in_user: 'left', email_marker: 'left' } })]);
+    expectCleanLogs();
   });
 });
 

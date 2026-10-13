@@ -44,7 +44,7 @@ export async function deleteOwnSignInUser(m: { email: string; user_guid: string 
   const UserPoolId = env('MEMBER_POOL_ID');
   try {
     const u = await cognito.send(new AdminGetUserCommand({ UserPoolId, Username: m.email }));
-    if (u?.UserAttributes?.find((a) => a.Name === 'custom:user_guid')?.Value !== m.user_guid) return 'other';
+    if (u.UserAttributes?.find((a) => a.Name === 'custom:user_guid')?.Value !== m.user_guid) return 'other';
     await cognito.send(new AdminDeleteUserCommand({ UserPoolId, Username: m.email }));
     return 'deleted';
   } catch (e) {
@@ -76,6 +76,16 @@ export async function memberByGuid(guid: string): Promise<MemberItem | null> {
   const r = await ddb.send(new GetCommand({ TableName: table.members(), Key: { user_guid: guid } }));
   return (r.Item as MemberItem | undefined) ?? null;
 }
+
+/**
+ * For the audit event of a deletion: what, of the things named by the
+ * address, was found to be somebody else's and left. The record itself
+ * then shows that the address was not cleared by this deletion. No address.
+ */
+export const leftBehind = (signInUser: 'deleted' | 'none' | 'other' | undefined, marker: 'deleted' | 'left' | undefined) => ({
+  ...(signInUser === 'other' ? { sign_in_user: 'left' } : {}),
+  ...(marker === 'left' ? { email_marker: 'left' } : {}),
+});
 
 /** Account holders who may sign in and use the account site. */
 export const canSignIn = (m: MemberItem | null): m is MemberItem =>

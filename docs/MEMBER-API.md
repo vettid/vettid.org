@@ -3,6 +3,19 @@ title: MEMBER-API
 status: v1 (Phase 2)
 version: 2.6.0
 changelog:
+  - 2.6.1 (proposed 2026-10-12, vettid.org #251; **needs the owner's
+    approval**: not approved yet, and the `version` line above stays
+    2.6.0 until it is). No route, answer or email changes. "Retention"
+    gains the rule "What is named by the address is deleted only by
+    its owner" (the email marker and the Cognito user go only if they
+    carry the id of the row being deleted, in every deletion) and
+    "The daily sweeps" (a canceled account and an unverified request:
+    row and marker in one transaction; what could not be removed after
+    the row is named in the audit event's `incomplete` and alarmed).
+    Audit events of a deletion may carry `sign_in_user: "left"`,
+    `email_marker: "left"` and `incomplete: [...]` in their detail.
+    ADMIN-API: `DELETE /admin/members/{user_guid}` answers `404` when
+    the row was removed by something else after the call read it.
   - 2.6.0 (2026-10-12; owner decisions of 2026-10-12, made on the
     membership-request privacy notice, vettid.org #248: "we should only
     support removal via the link with nothing manually required",
@@ -409,11 +422,36 @@ withdrawn or declined request) therefore deletes the marker only if
 its `member_guid` is the row being deleted (or the marker is already
 gone), and the Cognito user only if its `custom:user_guid` is. One
 that names another id belongs to a newer request or account for the
-address: it is left, the row still goes, and the cleanup job logs it
-(by id, never the address). The 14-day reclaim then leaves the SES
+address: it is left, and the row still goes. The function that did
+it (the cleanup job, or the admin API for an admin's Delete) logs a
+warning by id, never the address, and the deletion's audit event says
+so in its detail: `sign_in_user: "left"`, `email_marker: "left"`
+(`member.delete`, `member.delete_after_cancel`,
+`request.reclaim_unverified`, `request.removed`,
+`request.removal_incomplete`). The 14-day reclaim then leaves the SES
 identity too, since the newer request's verification runs on it.
 Cognito has no conditional delete, so its check is a read just before
 the delete.
+
+**The daily sweeps (a canceled account past its date, the 14-day
+reclaim).** The row is deleted first, under its guard (still
+`canceled` and past `delete_after`; still `requested` and unverified),
+in one transaction with its own marker. First, because the guard is
+what protects a person who changed their mind: an account an admin
+reinstated, or a request verified, after the job's query is not
+touched at all. Together with the marker, so that an address is never
+left reserved by a marker with no row. What is removed after the row
+(a canceled account's sign-in user, subscription and vaults; a
+request's SES identity) cannot be retried from the row, so each step
+is tried on its own, a failure skips neither the next step nor the
+next row, and the audit event names what was not removed
+(`incomplete: ["sign_in_user" | "subscription" | "vaults" |
+"ses_identity", …]`), counted as `RequestRemovalAbandoned` for the
+operator to reconcile. A row whose transaction fails for another
+reason stays, is counted as `RequestRemovalFailures`, and is tried
+again at the next run. (Unlike a withdrawn or declined request, which
+cannot go back to being wanted: there everything outside the table
+goes first and the rows last, retried for 7 days.)
 
 **Declined requests (owner decision of 2026-10-12: "declines should be
 kept for 30 days").** `POST /admin/requests/{id}/reject` records
