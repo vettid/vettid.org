@@ -1,6 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
-import { ALERT_FORWARDER_ROLE_NAME, ORG, loadConfig } from '../lib/config';
+import { ALERT_FORWARDER_ROLE_NAME, ORG, VAULT_ROLE_NAMES, loadConfig, vaultDataBucketNames } from '../lib/config';
 import { VettidOrgAuditStack } from '../lib/stacks/audit-stack';
 import { matchesPattern } from './event-pattern';
 
@@ -27,6 +27,25 @@ test('trail bucket: private, TLS-only, versioned, retained, lifecycle-managed', 
   });
 });
 
+test('data events: the terms bucket as before (reads and writes), and writes only on both vault data buckets', () => {
+  const selectors = Object.values<any>(t.findResources('AWS::CloudTrail::Trail'))[0].Properties.EventSelectors;
+  // Unchanged: management events, then the terms bucket's selector alone.
+  expect(selectors).toHaveLength(3);
+  expect(selectors[0]).toEqual({ IncludeManagementEvents: true, ReadWriteType: 'All' });
+  expect(selectors[1]).toMatchObject({ IncludeManagementEvents: false, ReadWriteType: 'All' });
+  expect(selectors[1].DataResources).toHaveLength(1);
+  expect(JSON.stringify(selectors[1].DataResources[0].Values)).not.toContain('vault-data');
+  // New: the vault data buckets, whole ("arn:aws:s3:::<bucket>/", an empty prefix).
+  expect(vaultDataBucketNames()).toEqual(['vettid-org-vault-data-369484479783', 'vettid-org-staging-vault-data-347272280361']);
+  // Writes only (the owner's decision): reads of vault objects are not recorded.
+  expect(selectors[2]).toMatchObject({ IncludeManagementEvents: false, ReadWriteType: 'WriteOnly' });
+  expect(selectors.map((x: any) => x.ReadWriteType)).toEqual(['All', 'All', 'WriteOnly']);
+  expect(selectors[2].DataResources).toHaveLength(1);
+  expect(selectors[2].DataResources[0].Type).toBe('AWS::S3::Object');
+  const arns = selectors[2].DataResources[0].Values.map((v: any) => v['Fn::Join'][1].filter((x: any) => typeof x === 'string').join(''));
+  expect(arns).toEqual(vaultDataBucketNames().map((b) => `arn::s3:::${b}/`));
+});
+
 test('GuardDuty and Access Analyzer are on', () => {
   t.hasResourceProperties('AWS::GuardDuty::Detector', { Enable: true });
   t.hasResourceProperties('AWS::AccessAnalyzer::Analyzer', { Type: 'ACCOUNT' });
@@ -48,6 +67,10 @@ const RULES = [
   'KmsKeyPolicy',
   'VaultServiceSwitch',
   'S3PublicAccess',
+  'VaultDataBucketConfig',
+  'VaultHostAccess',
+  'VaultHostProfileLaunch',
+  'VaultHostLaunchPath',
   'SecurityGroupOpenToWorld',
   'GuardDutyFindings',
 ] as const;
@@ -107,7 +130,7 @@ function signIn(account: string, who: Who, detail: Record<string, any> = {}) {
 const { vaultProd, vaultStaging, proteus } = ORG.members;
 const MGMT = ORG.management;
 
-test('fifteen alert rules (plus one heartbeat rule per member), each to the emailed SNS topic, each naming the account', () => {
+test('nineteen alert rules (plus one heartbeat rule per member), each to the emailed SNS topic, each naming the account', () => {
   t.resourceCountIs('AWS::Events::Rule', RULES.length + Object.keys(ORG.members).length);
   t.hasResourceProperties('AWS::SNS::Subscription', { Protocol: 'email', Endpoint: 'admin@vettid.org' });
   const topicId = Object.keys(t.findResources('AWS::SNS::Topic'))[0];
@@ -215,6 +238,187 @@ describe('sign-ins', () => {
     expect(matching(signIn(MGMT, 'root', { additionalEventData: { MFAUsed: 'No' } }))).toEqual(['RootActivity', 'ConsoleSignInRisk']);
     expect(matching(signIn(proteus, SSO_ADMIN, { responseElements: { ConsoleLogin: 'Failure' } }))).toEqual(['ConsoleSignInRisk']);
   });
+});
+
+describe('vault accounts: the data bucket, the hosts, the host role', () => {
+  const [prodBucket, stagingBucket] = vaultDataBucketNames();
+  const bucket = (bucketName: string) => ({ requestParameters: { bucketName } });
+  const AUTO_SCALING = { userName: 'AWSServiceRoleForAutoScaling', arn: 'arn:aws:sts::{acct}:assumed-role/AWSServiceRoleForAutoScaling/AutoScaling' };
+  const IMAGE_BUILDER = { userName: 'AWSServiceRoleForImageBuilder', arn: 'arn:aws:sts::{acct}:assumed-role/AWSServiceRoleForImageBuilder/ImageBuilder' };
+  /** As CloudTrail records a call a service made: `invokedBy` beside the role. */
+  const by = (account: string, who: Who, service: string) => ({ userIdentity: { ...identity(account, who), invokedBy: service } });
+
+  test('lifecycle, versioning or deletion of a vault data bucket alerts, whoever does it (a deploy too), also when refused', () => {
+    for (const who of [SSO_ADMIN, CFN_EXEC, 'iam-user'] as Who[]) {
+      // CloudTrail's name for PutBucketLifecycleConfiguration is PutBucketLifecycle.
+      expect(matching(apiCall(vaultStaging, 'aws.s3', 'PutBucketLifecycle', who, bucket(stagingBucket)))).toEqual(['VaultDataBucketConfig']);
+      expect(matching(apiCall(vaultProd, 'aws.s3', 'PutBucketVersioning', who, bucket(prodBucket)))).toEqual(['VaultDataBucketConfig']);
+    }
+    expect(matching(apiCall(vaultProd, 'aws.s3', 'DeleteBucketLifecycle', SSO_ADMIN, bucket(prodBucket)))).toEqual(['VaultDataBucketConfig']);
+    expect(matching(apiCall(vaultProd, 'aws.s3', 'DeleteBucket', SSO_ADMIN, { ...bucket(prodBucket), errorCode: 'AccessDenied' }))).toEqual(['VaultDataBucketConfig']);
+  });
+  test('its bucket policy: always here, and by S3PublicAccess too outside a deploy', () => {
+    expect(matching(apiCall(vaultProd, 'aws.s3', 'PutBucketPolicy', CFN_EXEC, bucket(prodBucket)))).toEqual(['VaultDataBucketConfig']);
+    expect(matching(apiCall(vaultProd, 'aws.s3', 'DeleteBucketPolicy', SSO_ADMIN, bucket(prodBucket)))).toEqual(['S3PublicAccess', 'VaultDataBucketConfig']);
+  });
+  test('other buckets are as before: quiet for lifecycle and versioning, in any account', () => {
+    const other = bucket('vettid-org-staging-test-mail-347272280361');
+    expect(matching(apiCall(vaultStaging, 'aws.s3', 'PutBucketLifecycle', CFN_EXEC, other))).toEqual([]);
+    expect(matching(apiCall(vaultStaging, 'aws.s3', 'PutBucketVersioning', SSO_ADMIN, other))).toEqual([]);
+    expect(matching(apiCall(vaultStaging, 'aws.s3', 'DeleteBucket', SSO_ADMIN, other))).toEqual([]);
+    expect(matching(apiCall(MGMT, 'aws.s3', 'PutBucketLifecycle', SSO_ADMIN, bucket('vettid-org-cloudtrail-449757308783')))).toEqual([]);
+  });
+
+  test.each([vaultProd, vaultStaging])('an interactive way in, which the Vault OU policy refuses, alerts as an attempt in %s (and as a success if the policy is off)', (acct) => {
+    const denied = { errorCode: 'AccessDenied' };
+    expect(matching(apiCall(acct, 'aws.ssm', 'StartSession', SSO_ADMIN, { ...denied, requestParameters: { target: 'i-0b08e5d23f265790d', documentName: 'AWS-StartPortForwardingSession' } }))).toEqual(['VaultHostAccess']);
+    expect(matching(apiCall(acct, 'aws.ec2-instance-connect', 'SendSSHPublicKey', SSO_ADMIN, denied))).toEqual(['VaultHostAccess']);
+    expect(matching(apiCall(acct, 'aws.ec2-instance-connect', 'SendSerialConsoleSSHPublicKey', SSO_ADMIN))).toEqual(['VaultHostAccess']);
+    expect(matching(apiCall(acct, 'aws.ec2', 'EnableSerialConsoleAccess', SSO_ADMIN, denied))).toEqual(['VaultHostAccess']);
+    expect(matching(apiCall(acct, 'aws.ec2', 'CreateInstanceConnectEndpoint', 'iam-user', denied))).toEqual(['VaultHostAccess']);
+    // Not every EC2 call: a release group's own launches and terminations stay quiet.
+    expect(matching(apiCall(acct, 'aws.ec2', 'TerminateInstances', SSO_ADMIN))).toEqual([]);
+  });
+  test.each([vaultProd, vaultStaging])('a session or a command on an instance in %s alerts', (acct) => {
+    expect(matching(apiCall(acct, 'aws.ssm', 'StartSession', SSO_ADMIN, { requestParameters: { target: 'i-0b08e5d23f265790d' } }))).toEqual(['VaultHostAccess']);
+    expect(matching(apiCall(acct, 'aws.ssm', 'StartSession', SSO_ADMIN, { readOnly: true }))).toEqual(['VaultHostAccess']);
+    expect(matching(apiCall(acct, 'aws.ssm', 'ResumeSession', 'iam-user'))).toEqual(['VaultHostAccess']);
+    expect(matching(apiCall(acct, 'aws.ssm', 'SendCommand', SSO_ADMIN, { requestParameters: { instanceIds: ['i-0b08e5d23f265790d'], documentName: 'AWS-RunShellScript' } }))).toEqual(['VaultHostAccess']);
+    expect(matching(apiCall(acct, 'aws.ssm', 'SendCommand', SSO_ADMIN, { errorCode: 'AccessDenied' }))).toEqual(['VaultHostAccess']);
+  });
+  test.each([vaultProd, vaultStaging])('the other ways to make the SSM agent run a document in %s alert: association, automation, maintenance-window task', (acct) => {
+    // A State Manager association is fetched by the agent itself: there is no SendCommand to see.
+    const association = { requestParameters: { name: 'AWS-RunShellScript', targets: [{ key: 'InstanceIds', values: ['i-0b08e5d23f265790d'] }] } };
+    for (const name of ['CreateAssociation', 'CreateAssociationBatch', 'UpdateAssociation', 'StartAssociationsOnce']) {
+      expect({ name, rules: matching(apiCall(acct, 'aws.ssm', name, SSO_ADMIN, association)) }).toEqual({ name, rules: ['VaultHostAccess'] });
+    }
+    for (const name of ['StartAutomationExecution', 'StartChangeRequestExecution', 'RegisterTaskWithMaintenanceWindow', 'UpdateMaintenanceWindowTask']) {
+      expect({ name, rules: matching(apiCall(acct, 'aws.ssm', name, SSO_ADMIN)) }).toEqual({ name, rules: ['VaultHostAccess'] });
+    }
+    // Through a deploy as well: no stack here makes an association.
+    expect(matching(apiCall(acct, 'aws.ssm', 'CreateAssociation', CFN_EXEC, by(acct, CFN_EXEC, 'cloudformation.amazonaws.com')))).toEqual(['VaultHostAccess']);
+  });
+  test('the only exception is Image Builder itself: its service principal AND its service-linked role', () => {
+    const SSM_SERVICE = { userName: 'AWSServiceRoleForAmazonSSM', arn: 'arn:aws:sts::{acct}:assumed-role/AWSServiceRoleForAmazonSSM/ssm' };
+    // Another service sending a command (an automation or a maintenance window does it this way).
+    expect(matching(apiCall(vaultStaging, 'aws.ssm', 'SendCommand', SSM_SERVICE, by(vaultStaging, SSM_SERVICE, 'ssm.amazonaws.com')))).toEqual(['VaultHostAccess']);
+    // A person's call that a service relayed, and Image Builder's principal with another role.
+    expect(matching(apiCall(vaultStaging, 'aws.ssm', 'SendCommand', SSO_ADMIN, by(vaultStaging, SSO_ADMIN, 'ssm.amazonaws.com')))).toEqual(['VaultHostAccess']);
+    expect(matching(apiCall(vaultStaging, 'aws.ssm', 'SendCommand', SSO_ADMIN, by(vaultStaging, SSO_ADMIN, 'imagebuilder.amazonaws.com')))).toEqual(['VaultHostAccess']);
+    // Its role without its principal (a role of that name cannot be made by hand; still not trusted alone).
+    expect(matching(apiCall(vaultStaging, 'aws.ssm', 'SendCommand', IMAGE_BUILDER))).toEqual(['VaultHostAccess']);
+    // The pattern itself: exactly these four alternatives, each of which means "someone else".
+    expect(rule('VaultHostAccess').EventPattern.detail.$or).toEqual([
+      { userIdentity: { invokedBy: [{ 'anything-but': ['imagebuilder.amazonaws.com'] }] } },
+      { userIdentity: { invokedBy: [{ exists: false }] } },
+      { userIdentity: { sessionContext: { sessionIssuer: { userName: [{ 'anything-but': ['AWSServiceRoleForImageBuilder'] }] } } } },
+      { userIdentity: { sessionContext: { sessionIssuer: { userName: [{ exists: false }] } } } },
+    ]);
+  });
+  test('Image Builder driving its build instance does not; nor sessions in the other accounts, nor other SSM calls', () => {
+    expect(matching(apiCall(vaultStaging, 'aws.ssm', 'SendCommand', IMAGE_BUILDER, by(vaultStaging, IMAGE_BUILDER, 'imagebuilder.amazonaws.com')))).toEqual([]);
+    expect(matching(apiCall(MGMT, 'aws.ssm', 'StartSession', SSO_ADMIN))).toEqual([]);
+    expect(matching(apiCall(proteus, 'aws.ssm', 'SendCommand', SSO_ADMIN))).toEqual([]);
+    expect(matching(apiCall(vaultStaging, 'aws.ssm', 'PutParameter', CFN_EXEC, { requestParameters: { name: '/vettid-org/staging/vault/dlq-name' } }))).toEqual([]);
+  });
+
+  const hostProfileArn = (acct: string) => `arn:aws:iam::${acct}:instance-profile/${VAULT_ROLE_NAMES.host}`;
+  const launched = (acct: string, profileArn = hostProfileArn(acct)) => ({
+    // A launch from a template: the request names the template only, the response the profile.
+    requestParameters: { instancesSet: { items: [{ minCount: 1, maxCount: 1 }] }, launchTemplate: { launchTemplateId: 'lt-0c71b2e1336763458', version: '1' } },
+    responseElements: { instancesSet: { items: [{ instanceId: 'i-1', iamInstanceProfile: { arn: profileArn, id: 'AIPA' } }] } },
+  });
+  test('a release group launching a host (Auto Scaling, through its service-linked role) is quiet; nothing else is', () => {
+    expect(matching(apiCall(vaultStaging, 'aws.ec2', 'RunInstances', AUTO_SCALING, { ...launched(vaultStaging), ...by(vaultStaging, AUTO_SCALING, 'autoscaling.amazonaws.com') }))).toEqual([]);
+    // Auto Scaling's principal with another role, its role without the principal, another service.
+    expect(matching(apiCall(vaultStaging, 'aws.ec2', 'RunInstances', SSO_ADMIN, { ...launched(vaultStaging), ...by(vaultStaging, SSO_ADMIN, 'autoscaling.amazonaws.com') }))).toEqual(['VaultHostProfileLaunch']);
+    expect(matching(apiCall(vaultStaging, 'aws.ec2', 'RunInstances', AUTO_SCALING, launched(vaultStaging)))).toEqual(['VaultHostProfileLaunch']);
+    expect(matching(apiCall(vaultStaging, 'aws.ec2', 'RunInstances', IMAGE_BUILDER, { ...launched(vaultStaging), ...by(vaultStaging, IMAGE_BUILDER, 'imagebuilder.amazonaws.com') }))).toEqual(['VaultHostProfileLaunch']);
+  });
+  test.each([vaultProd, vaultStaging])('anything else launching an instance with the host profile in %s alerts', (acct) => {
+    // From a template (profile in the response), by name, by ARN, and a refused attempt.
+    expect(matching(apiCall(acct, 'aws.ec2', 'RunInstances', SSO_ADMIN, launched(acct)))).toEqual(['VaultHostProfileLaunch']);
+    expect(matching(apiCall(acct, 'aws.ec2', 'RunInstances', SSO_ADMIN, { requestParameters: { iamInstanceProfile: { name: VAULT_ROLE_NAMES.host } } }))).toEqual(['VaultHostProfileLaunch']);
+    expect(matching(apiCall(acct, 'aws.ec2', 'RunInstances', 'iam-user', { requestParameters: { iamInstanceProfile: { arn: hostProfileArn(acct) } }, errorCode: 'Client.UnauthorizedOperation' }))).toEqual(['VaultHostProfileLaunch']);
+    // Through CloudFormation as well: a stack is not a release group.
+    expect(matching(apiCall(acct, 'aws.ec2', 'RunInstances', CFN_EXEC, { ...launched(acct), ...by(acct, CFN_EXEC, 'cloudformation.amazonaws.com') }))).toEqual(['VaultHostProfileLaunch']);
+  });
+  test('instances with another profile are quiet: an image build, a deploy\'s template check', () => {
+    const builder = `arn:aws:iam::${vaultStaging}:instance-profile/vettid-org-staging-vault-image-builder`;
+    expect(matching(apiCall(vaultStaging, 'aws.ec2', 'RunInstances', IMAGE_BUILDER, { ...launched(vaultStaging, builder), requestParameters: { iamInstanceProfile: { name: 'vettid-org-staging-vault-image-builder' } }, ...by(vaultStaging, IMAGE_BUILDER, 'imagebuilder.amazonaws.com') }))).toEqual([]);
+    expect(matching(apiCall(vaultStaging, 'aws.ec2', 'RunInstances', SSO_ADMIN, launched(vaultStaging, builder)))).toEqual([]);
+    // CloudFormation validates a launch template with a dry run: no response, no profile in the request.
+    expect(matching(apiCall(vaultStaging, 'aws.ec2', 'RunInstances', CFN_EXEC, { requestParameters: launched(vaultStaging).requestParameters, errorCode: 'Client.DryRunOperation', ...by(vaultStaging, CFN_EXEC, 'cloudformation.amazonaws.com') }))).toEqual([]);
+    // Not a look-alike name either.
+    expect(matching(apiCall(vaultStaging, 'aws.ec2', 'RunInstances', SSO_ADMIN, launched(vaultStaging, hostProfileArn(vaultStaging) + '-2')))).toEqual([]);
+  });
+
+  const LAUNCH_PATH: Array<[string, string]> = [
+    ['aws.ec2', 'CreateLaunchTemplate'], ['aws.ec2', 'CreateLaunchTemplateVersion'], ['aws.ec2', 'ModifyLaunchTemplate'],
+    ['aws.autoscaling', 'CreateAutoScalingGroup'], ['aws.autoscaling', 'UpdateAutoScalingGroup'], ['aws.autoscaling', 'CreateLaunchConfiguration'],
+    ['aws.autoscaling', 'StartInstanceRefresh'],
+    ['aws.ec2', 'AssociateIamInstanceProfile'], ['aws.ec2', 'ReplaceIamInstanceProfileAssociation'],
+    ['aws.iam', 'AddRoleToInstanceProfile'],
+  ];
+  test.each(LAUNCH_PATH)('the ways around it alert, whoever does it (%s %s): a person, and a deploy too', (source, name) => {
+    for (const acct of [vaultProd, vaultStaging]) {
+      expect(matching(apiCall(acct, source, name, SSO_ADMIN))).toEqual(['VaultHostLaunchPath']);
+      expect(matching(apiCall(acct, source, name, 'iam-user', { errorCode: 'AccessDenied' }))).toEqual(['VaultHostLaunchPath']);
+      // No exception for the CDK execution role: whoever can pass it to a stack of
+      // their own would otherwise get a host through Auto Scaling with no email.
+      expect(matching(apiCall(acct, source, name, CFN_EXEC, by(acct, CFN_EXEC, 'cloudformation.amazonaws.com')))).toEqual(['VaultHostLaunchPath']);
+    }
+  });
+  test('a release, as it deploys: three emails for a new release stack, one for a removed one', () => {
+    const cfn = (source: string, name: string) => matching(apiCall(vaultStaging, source, name, CFN_EXEC, by(vaultStaging, CFN_EXEC, 'cloudformation.amazonaws.com')));
+    // New: the template, the group (created empty), then its sizes.
+    const deploy = [cfn('aws.ec2', 'CreateLaunchTemplate'), cfn('aws.autoscaling', 'CreateAutoScalingGroup'), cfn('aws.autoscaling', 'UpdateAutoScalingGroup')];
+    expect(deploy.flat()).toEqual(['VaultHostLaunchPath', 'VaultHostLaunchPath', 'VaultHostLaunchPath']);
+    // Removed: sizes to zero, then the deletions, which nothing reports.
+    const destroy = [cfn('aws.autoscaling', 'UpdateAutoScalingGroup'), cfn('aws.autoscaling', 'DeleteAutoScalingGroup'), cfn('aws.ec2', 'DeleteLaunchTemplate')];
+    expect(destroy.flat()).toEqual(['VaultHostLaunchPath']);
+  });
+  test('the scaler and a group\'s own activity are quiet, and so are the same calls in the other accounts', () => {
+    const scaler = { userName: 'vettid-org-staging-vault-scaler', arn: 'arn:aws:sts::{acct}:assumed-role/vettid-org-staging-vault-scaler/fn' };
+    expect(matching(apiCall(vaultStaging, 'aws.autoscaling', 'SetDesiredCapacity', scaler))).toEqual([]);
+    expect(matching(apiCall(vaultStaging, 'aws.autoscaling', 'CompleteLifecycleAction', SSO_ADMIN))).toEqual([]);
+    expect(matching(apiCall(MGMT, 'aws.ec2', 'CreateLaunchTemplate', SSO_ADMIN))).toEqual([]);
+    expect(matching(apiCall(proteus, 'aws.iam', 'AddRoleToInstanceProfile', SSO_ADMIN))).toEqual([]);
+  });
+
+  // Every event name of the four rules, exactly: a name dropped from a rule,
+  // or added to one, fails here.
+  test('the event names of each rule', () => {
+    const names = (id: RuleId) => [...rule(id).EventPattern.detail.eventName].sort();
+    expect(names('VaultDataBucketConfig')).toEqual([
+      'DeleteBucket', 'DeleteBucketLifecycle', 'DeleteBucketPolicy',
+      'PutBucketLifecycle', 'PutBucketLifecycleConfiguration', 'PutBucketPolicy', 'PutBucketVersioning',
+    ]);
+    expect(names('VaultHostAccess')).toEqual([
+      'CreateAssociation', 'CreateAssociationBatch', 'CreateInstanceConnectEndpoint', 'EnableSerialConsoleAccess', 'OpenTunnel',
+      'RegisterTaskWithMaintenanceWindow', 'ResumeSession', 'SendCommand', 'SendSSHPublicKey', 'SendSerialConsoleSSHPublicKey',
+      'StartAssociationsOnce', 'StartAutomationExecution', 'StartChangeRequestExecution', 'StartSession',
+      'UpdateAssociation', 'UpdateMaintenanceWindowTask',
+    ]);
+    expect(rule('VaultHostAccess').EventPattern.detail.eventSource).toEqual(['ssm.amazonaws.com', 'ec2-instance-connect.amazonaws.com', 'ec2.amazonaws.com']);
+    expect(names('VaultHostProfileLaunch')).toEqual(['RunInstances']);
+    expect(names('VaultHostLaunchPath')).toEqual(LAUNCH_PATH.map(([, n]) => n).sort());
+    expect([...rule('VaultHostLaunchPath').EventPattern.source].sort()).toEqual(['aws.autoscaling', 'aws.ec2', 'aws.iam']);
+    // No exception of any kind on the launch path or the bucket rule.
+    expect(Object.keys(rule('VaultHostLaunchPath').EventPattern.detail)).toEqual(['eventName']);
+    expect(Object.keys(rule('VaultDataBucketConfig').EventPattern.detail).sort()).toEqual(['eventName', 'requestParameters']);
+    for (const id of ['VaultHostAccess', 'VaultHostProfileLaunch', 'VaultHostLaunchPath'] as RuleId[]) {
+      expect(rule(id).EventPattern.account).toEqual([vaultProd, vaultStaging]);
+    }
+  });
+  test.each(['PutBucketLifecycle', 'PutBucketLifecycleConfiguration', 'DeleteBucketLifecycle', 'PutBucketVersioning', 'PutBucketPolicy', 'DeleteBucketPolicy', 'DeleteBucket'])(
+    'vault data bucket: %s by a deploy alerts',
+    (name) => expect(matching(apiCall(vaultStaging, 'aws.s3', name, CFN_EXEC, bucket(stagingBucket)))).toEqual(['VaultDataBucketConfig']),
+  );
+  test.each([['aws.ec2-instance-connect', 'OpenTunnel'], ['aws.ec2-instance-connect', 'SendSSHPublicKey'], ['aws.ec2', 'CreateInstanceConnectEndpoint']])(
+    'Instance Connect: %s %s alerts',
+    (source, name) => expect(matching(apiCall(vaultProd, source, name, SSO_ADMIN))).toEqual(['VaultHostAccess']),
+  );
 });
 
 test('security group open to the world (IPv4 or IPv6) alerts outside a deploy', () => {

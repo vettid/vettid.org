@@ -7,6 +7,12 @@
 #   scripts/vault/apply-scp.sh            # dry run: shows what it would do
 #   scripts/vault/apply-scp.sh --apply    # creates/updates and attaches
 #
+# The policy also denies changing the lifecycle, versioning or bucket policy
+# of the vault data buckets, and deleting them, to everyone but
+# CloudFormation's CDK execution role (RUNBOOK "Never delete or rename"),
+# and every interactive way onto an instance, to everyone (RUNBOOK "No
+# interactive access to hosts").
+#
 # Env: AWS_PROFILE (management account; default profile), VAULT_OU (default
 # the Vault OU). Deploy VettidOrgVaultStack in both vault accounts FIRST: the
 # SCP only allows the lockout bypass to the release-key creator role, which
@@ -18,7 +24,7 @@
 set -euo pipefail
 
 NAME="vettid-vault-key-protection"
-DESC="Vault OU: protect the roles named in release key policies; lockout bypass only by the release-key creator"
+DESC="Vault OU: protect the roles named in release key policies and the vault data buckets; lockout bypass only by the release-key creator; no interactive sessions"
 VAULT_OU="${VAULT_OU:-ou-kuf0-plfg393o}"
 FILE="$(cd "$(dirname "$0")/../.." && pwd)/lib/org/scp-vault.json"
 APPLY=false
