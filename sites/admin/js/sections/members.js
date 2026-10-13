@@ -64,7 +64,27 @@ export function render(root, ctx) {
               confirmLabel: 'Reinstate',
             });
             if (!ok) return;
-            row.update(await api.post(`/admin/members/${id}/reinstate`));
+            let updated;
+            try {
+              updated = await api.post(`/admin/members/${id}/reinstate`);
+            } catch (e) {
+              // A recovery of the member's vault is still active: it was not
+              // stopped by the suspension and works again once the account
+              // is active. The API reinstates only after a confirmation.
+              if (e?.code !== 'recovery_active') throw e;
+              const anyway = await ui.confirm({
+                title: 'A vault recovery is still active',
+                body: [
+                  e.message,
+                  'A vault deletion that was pending has already been cancelled. The account is still not active.',
+                ],
+                confirmLabel: 'Reinstate anyway',
+                tone: 'danger',
+              });
+              if (!anyway) return;
+              updated = await api.post(`/admin/members/${id}/reinstate`, { allow_active_recovery: true });
+            }
+            row.update(updated);
             ui.toast(`Reinstated ${m.email}.`);
           });
 

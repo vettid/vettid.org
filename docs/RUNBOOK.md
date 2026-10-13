@@ -1559,41 +1559,57 @@ session | link | app`), `vault.deletion_executed`.
 - *The account looks taken over* (the member did not ask for the
   deletion, or for a recovery, and someone else may hold their mailbox
   or session). In this order, on the admin site's **Members** page:
-  1. **Suspend** the account (with the reason). Sign-in stops and the
-     sessions end within the hour. From that moment the pending
-     deletion is **not carried out**: the cleanup job's 5-minute run
-     reads the member's row and leaves the deletion `pending` for an
+  1. **Suspend** the account (with the reason). Suspend writes the
+     status first and then disables sign-in and ends the sessions
+     (within the hour). From the status write on, a pending deletion is
+     **not carried out**: the cleanup job's 5-minute run reads the
+     member's row before each deletion and leaves it `pending` for an
      account that is not active, for as long as it stays that way
-     (its log line `{"startOversHeld": n}` counts them; no alarm).
-     Suspending cancels nothing by itself.
+     (metric `StartOverHeldNotActive`; no alarm, see below). If Suspend
+     answers an error, press it again: the account may already be
+     suspended (the row says so after a reload), and the repeat finishes
+     the sign-out. The one case suspending cannot catch is a run of the
+     job that read the row as active just before the status was
+     written. Suspending cancels nothing by itself.
   2. **Cancel vault deletion** on the member's row
      (`POST /admin/members/{user_guid}/vault/deletion/cancel`). It
      answers "cancelled" (audit `member.vault_deletion_cancel`, the
      member is emailed "VettID vault deletion cancelled … by VettID
      support"), "no pending vault deletion" (nothing to do; repeating
      it is harmless), or an error that it is already being carried out
-     (`409`: it was `executing` before the account was suspended;
-     nothing stops it then, as above). It works whatever the account
-     status, so it is also the way to cancel for a member who cannot
-     reach the link, the account page or the app.
+     (`409`, state `executing`: see the next entry). It works whatever
+     the account status, so it is also the way to cancel for a member
+     who cannot reach the link, the account page or the app. If it
+     answers an internal error, press it again: when the second answer
+     is "no pending vault deletion", the first one did cancel (its
+     audit event or email failed); the cancel function's log has
+     `{"startOverCancel":{"user_guid","vault_id","deletion_id"}}` for
+     every record it removed.
   3. *A recovery the member did not ask for* has no admin cancel. While
-     the account is suspended it cannot go on: the code is not
-     released (`GET /api/vault/recovery` answers 403) and a new app can
-     neither claim it nor register. The member can cancel it with the
+     the account is suspended it is **blocked, not stopped**: the code
+     is not released (`GET /api/vault/recovery` answers 403) and a new
+     app can neither claim it nor register, but its clock runs on
+     (code after 24 hours, usable for 24 more), and it works again the
+     moment the account is active. The member can cancel it with the
      link in the "recovery requested" email at any time, suspended or
-     not. It expires 48 hours after the request; if it could still be
-     active when the account is reinstated, have the member cancel it
-     on the account page first thing, or wait until it has expired
-     before reinstating.
+     not.
   4. **Reinstate** when the member has their mailbox back. Reinstating
-     cancels a vault deletion that is still pending (step 2 not done,
-     or a deletion nobody noticed) before it enables sign-in, with
-     the same email and audit event (`on: reinstate`): a deletion that
-     waited through a suspension is never carried out afterwards. If
-     that cancel cannot be made (the cleanup function or the vault
-     tables are unreachable) Reinstate answers an error and changes
-     nothing; try again. A member who does want to start over asks
-     again and gets a new 24 hours.
+     first cancels a vault deletion that is still pending (step 2 not
+     done, or a deletion nobody noticed), with the same email and
+     audit event (`on: reinstate`), so that a deletion which waited
+     through a suspension is not carried out afterwards. Then, if a
+     recovery is still active, it stops and shows a warning with the
+     recovery's state and the time it stays usable until (`409
+     recovery_active`; the pending deletion has been cancelled by
+     then, the account is still suspended). Unless the member says the
+     recovery is theirs: have them cancel it with the email link, or
+     wait until that time has passed, and press Reinstate again.
+     **Reinstate anyway** reinstates with the recovery alive (audit
+     `member.reinstate_with_active_recovery` beside `member.reinstate`).
+     If the cancel of the deletion cannot be made (the cancel function
+     or the vault tables are unreachable) Reinstate answers an error
+     and the account stays suspended; try again. A member who does
+     want to start over asks again and gets a new 24 hours.
 
   What the member sees while suspended: sign-in is refused; the app
   and the account page answer "This account is not active" for
@@ -1605,25 +1621,82 @@ session | link | app`), `vault.deletion_executed`.
   the pending deletion from its status, which a suspended account
   cannot fetch, so in practice a suspended member cancels with the
   link or asks support.
+- *"Already being carried out" (`executing`)*: the 24 hours passed
+  with the account active and the job took the deletion. Nothing
+  cancels it: not the member, not **Cancel vault deletion** (`409`),
+  not a suspension, also when the host's `delete` has not been sent
+  yet (`deletion.queued_at` absent: the vault service is paused or no
+  instance was running; the job tries again at every run and does not
+  ask about the account for these). If such a deletion must be
+  stopped while it is still unqueued, it is a change by hand on the
+  vault row in the vault account (remove `deletion` and
+  `deletion_requested_at` in one update, with the condition that
+  `deletion.queued_at` does not exist), and the owner's decision.
 - *A canceled account* (the member cancelled the account during the 24
   hours): the deletion is held in the same way, and the vault goes
   with the account after its 7 days (the daily run, as for every
-  canceled account). An admin's reinstate inside the 7 days cancels the
-  pending deletion as above.
+  canceled account; from then on the row has `deletion_requested_at`
+  and the 5-minute run leaves it to the daily retry). An admin's
+  reinstate inside the 7 days cancels the pending deletion as above.
+- *A held deletion without a member* (alarm
+  `vettid-org-start-over-held-no-member`, metric
+  `StartOverHeldNoMember`; three 5-minute runs in a row): a vault has
+  a pending deletion past its time and no member row. The job holds
+  it and never erases a vault because a row is missing. It happens
+  when an admin **Delete**s a member who had a pending deletion (that
+  Delete does not touch vaults), or when an account's own deletion
+  removed the row and then failed before it reached the vault. The
+  vault and its stored objects stay until someone decides:
+  1. Find it: scan the vaults table (vault account) for rows with
+     `deletion.state = pending` and `deletes_at` in the past
+     (`aws dynamodb scan --table-name vettid-org-vaults --filter-expression "attribute_exists(deletion) AND attribute_not_exists(deletion_requested_at)" --projection-expression "vault_id, user_guid, deletion"`),
+     and check that the members table has no row for that `user_guid`.
+  2. Find out why the member is gone: the audit log by `subject` =
+     that `user_guid` (`member.delete` by an admin, or
+     `member.delete_after_cancel` by the job).
+  3. The member was deleted and the vault is to go (the usual case):
+     set `deletion_requested_at` on the vault row to a time more than
+     an hour ago
+     (`aws dynamodb update-item --table-name vettid-org-vaults --key '{"vault_id":{"S":"<vault_id>"}}' --update-expression "SET deletion_requested_at = :t" --condition-expression "attribute_exists(vault_id) AND attribute_not_exists(deletion_requested_at)" --expression-attribute-values '{":t":{"N":"<epoch seconds, an hour or more ago>"}}'`).
+     The next daily run asks the vault to delete itself exactly as for
+     a canceled account, the usual notice removes the rows, and the
+     5-minute run stops counting it at once.
+  4. The row was removed by mistake and the vault is to stay: restore
+     the member first; or, to keep the vault without a member, remove
+     the `deletion` record
+     (`--update-expression "REMOVE deletion" --condition-expression "deletion.#s = :p"`
+     with `#s` = `state`, `:p` = `pending`).
+  The alarm returns to OK within 15 minutes of either.
+- *Held because the member row cannot be read* (alarm
+  `vettid-org-start-over-held-read-error`, metric
+  `StartOverHeldReadError`; three runs in a row): no due deletion is
+  carried out while this lasts, and none is lost: each is tried again
+  every 5 minutes. The cleanup function's log has
+  `start-over held: the member row could not be read` with the error
+  name. `AccessDeniedException`: the function's role lost
+  `dynamodb:GetItem` on the members table (`VettidOrgMemberApiStack`
+  not deployed, or deployed without it). Anything else is the table.
+- *Held for a suspended or canceled account* is not alarmed: it is
+  what a suspension is for, and a reinstatement ends it by cancelling
+  the deletion. `StartOverHeldNotActive` (namespace `VettID/MemberApi`)
+  shows how many are held at each run.
 - *Stuck in `executing`*: as for an account deletion: look at
   `deletion_requested_at`, the release's routability and the host logs;
   the daily retry keeps trying and logs `vault deletion pending` after 30
   days.
 
 **Deploy order for the hold and the admin cancel.**
-`VettidOrgMemberApiStack` first (the cleanup function's new task and its
-read of the members table; it publishes the function's ARN as SSM
-`/vettid-org/<stage>/member-api/cleanup-fn-arn`), then
+`VettidOrgMemberApiStack` first: the cleanup job's read of the members
+table, the two alarms, and a second function, `StartOverCancel`, which
+runs only the cancel of a member's pending deletion under the cleanup
+job's role; its ARN is published as SSM
+`/vettid-org/<stage>/member-api/start-over-cancel-fn-arn`. Then
 `VettidOrgAdminApiStack` (it reads that parameter, so its deploy fails
-until the first one is done; the people function may invoke the cleanup
-function and nothing else new), then the admin site. Nothing changes in
-the vault account. Between the two deploys the admin API is the old one
-and behaves as before.
+until the first one is done; the people function may invoke that
+function, not the cleanup job), then the admin site. Nothing changes
+in the vault account, and no existing function, log group or table is
+replaced. Between the two deploys the admin API is the old one and
+behaves as before.
 
 **Deploy order for 2.1.0.** `VettidOrgVaultStack` (vault account: the
 host's `credential_backup` grant and the API roles' `deletion` attribute in

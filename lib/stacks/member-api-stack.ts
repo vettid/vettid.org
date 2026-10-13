@@ -295,7 +295,8 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     vaultGrants(cleanup, 'cleanup');
     readSwitch(cleanup); // no deletion is queued while the vault service is paused
     // A start-over is carried out only for an active account: the 5-minute
-    // run reads the member's row first (one consistent GetItem; no write).
+    // run reads the member's row first (one consistent GetItem). The job
+    // still cannot put or update a member row (it deletes them, above).
     g(cleanup, 'members', ['GetItem']);
     // stale-request reclaim: keep identities the mailing list still uses
     tableGrant(this, config, cleanup, 'mailing-list', ['GetItem']);
@@ -349,6 +350,47 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
       schedule: events.Schedule.rate(cdk.Duration.minutes(5)),
       targets: [new targets.LambdaFunction(cleanup, { event: events.RuleTargetInput.fromObject({ task: 'start_over' }) })],
     });
+    // A due start-over is carried out only for an active account; the run
+    // writes what it held, by reason, at every run (EMF from the cleanup
+    // job). Two of the reasons must not be silent. Three runs in a row: one
+    // failed read is retried at the next run by itself, and during the
+    // daily run a member row is gone for a moment before its vaults are
+    // asked to delete themselves. A suspended or canceled account
+    // (StartOverHeldNotActive) is an admin's or the member's own doing and
+    // is ended by a reinstatement, which cancels the deletion: a metric, no
+    // alarm.
+    const heldMetric = (metricName: string) =>
+      new cloudwatch.Metric({ namespace: 'VettID/MemberApi', metricName, statistic: 'Maximum', period: cdk.Duration.minutes(5) });
+    const heldAlarm = (id: string, name: string, metricName: string, alarmDescription: string) =>
+      new cloudwatch.Alarm(this, id, {
+        alarmName: resourceName(config, name),
+        alarmDescription,
+        metric: heldMetric(metricName),
+        threshold: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        evaluationPeriods: 3,
+        datapointsToAlarm: 3,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+    const startOverAlarms = [
+      heldAlarm('StartOverHeldNoMember', 'start-over-held-no-member', 'StartOverHeldNoMember',
+        'StartOverHeldNoMember: a vault has a pending "delete my vault and start over" past its time and its member row is gone (an admin deleted the member, or an account deletion did not reach its vaults). The deletion is held and the vault is kept until an operator decides (RUNBOOK "No recovery with the backup off; start over", "A held deletion without a member").'),
+      heldAlarm('StartOverHeldReadError', 'start-over-held-read-error', 'StartOverHeldReadError',
+        'StartOverHeldReadError: for three runs in a row the cleanup job could not read a member row, so the vault deletions that are due are held and none is carried out (a missing permission on the members table, or the table itself; RUNBOOK "No recovery with the backup off; start over").'),
+    ];
+    // The admin API's cancel of a member's pending start-over: a second
+    // function on the cleanup job's module that runs only that task
+    // (`cancelHandler`), under the cleanup job's role, so that nothing
+    // changes in the vault account's table policy and the admin API can
+    // invoke this function without being able to start the job's runs. Its
+    // generated ARN is published for VettidOrgAdminApiStack.
+    const startOverCancel = new ApiFunction(this, 'StartOverCancel', {
+      entry: 'lambda/jobs/cleanup.ts',
+      handler: 'cancelHandler',
+      environment: env,
+      role: cleanup.role!,
+      description: "Cancels one member's pending vault deletion for the admin API (task cancel_start_over only)",
+    }).fn;
 
     // "Account ready" and, 2.6.0, "we have your request" (with the
     // withdrawal link; UpdateItem stores the token's hash on the row).
@@ -473,6 +515,7 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
       const action = { bind: () => ({ alarmActionArn: alertsTopicArn }) };
       for (const a of pausedAlarms) a.addAlarmAction(action);
       for (const a of removalAlarms) a.addAlarmAction(action);
+      for (const a of startOverAlarms) a.addAlarmAction(action);
       typedCeiling.addAlarmAction(action);
       pausedAlarms[0].addOkAction(action); // "resumed"; the 24 h alarm's OK would say it twice
       watchSilent.addAlarmAction(action);
@@ -518,11 +561,6 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     }
 
     publishRef(this, config, 'member-api/domain', cdk.Fn.select(2, cdk.Fn.split('/', api.apiEndpoint)));
-    // The admin API cancels a member's pending vault deletion through the
-    // cleanup job (task `cancel_start_over`): the job already may write
-    // `deletion` on the vault row, and the admin API holds no right in the
-    // vault account. Its generated name is published, not fixed: renaming
-    // the function would replace it and its log group.
-    publishRef(this, config, 'member-api/cleanup-fn-arn', cleanup.functionArn);
+    publishRef(this, config, 'member-api/start-over-cancel-fn-arn', startOverCancel.functionArn);
   }
 }

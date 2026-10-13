@@ -27,6 +27,7 @@ import { audit } from '../shared/audit';
 import { cognito, ddb, env, ses, table } from '../shared/aws';
 import { adminHandler } from '../shared/admin-handler';
 import { Router, badRequest, conflict, decodeCursor, encodeCursor, int, notFound, str } from '../shared/http';
+import { HttpError } from '../shared/http';
 import { inviteCode, nowIso } from '../shared/ids';
 import { emailMarkerKey } from '../shared/members';
 import { sendMail } from '../shared/mail';
@@ -314,17 +315,17 @@ function requireAccount(m: MemberItem) {
 const lambdaClient = new LambdaClient({});
 
 /**
- * Ask the member API's cleanup job to cancel the member's pending vault
- * deletion (its task `cancel_start_over`). This function holds no right on
- * the vault tables; the job does, and removes the record only while it is
- * still `pending`. Anything but the job's own well-formed answer is an
- * error (a job from before this task would run its daily work and answer
- * something else): the caller then changes nothing.
+ * Ask the member API's start-over cancel function to cancel the member's
+ * pending vault deletion (its task `cancel_start_over`; it runs under the
+ * cleanup job's role and does nothing else). This function holds no right
+ * on the vault tables; that one removes the record only while it is still
+ * `pending`. Anything but its own well-formed answer is an error: the
+ * caller then reports nothing as cancelled and goes no further.
  */
 async function requestDeletionCancel(userGuid: string): Promise<StartOverCancel> {
   const out = await lambdaClient.send(
     new InvokeCommand({
-      FunctionName: env('CLEANUP_FN'),
+      FunctionName: env('START_OVER_CANCEL_FN'),
       InvocationType: 'RequestResponse',
       Payload: Buffer.from(JSON.stringify({ task: 'cancel_start_over', user_guid: userGuid })),
     }),
@@ -335,8 +336,11 @@ async function requestDeletionCancel(userGuid: string): Promise<StartOverCancel>
   } catch {
     r = null;
   }
-  if (!r || r.ok !== true || r.task !== 'cancel_start_over' || !Array.isArray(r.cancelled) || !Array.isArray(r.executing) || typeof r.changed !== 'number') {
-    console.error('vault deletion cancel: the cleanup job did not answer as expected', JSON.stringify({ user_guid: userGuid, function_error: out.FunctionError ?? null }));
+  if (
+    !r || r.ok !== true || r.task !== 'cancel_start_over' ||
+    !Array.isArray(r.cancelled) || !Array.isArray(r.executing) || !Array.isArray(r.recoveries) || typeof r.changed !== 'number'
+  ) {
+    console.error('vault deletion cancel: the cancel function did not answer as expected', JSON.stringify({ user_guid: userGuid, function_error: out.FunctionError ?? null }));
     throw new Error('vault deletion cancel failed');
   }
   return r as StartOverCancel;
@@ -346,10 +350,16 @@ const epochIso = (s: number | null): string | null => (typeof s === 'number' ? n
 
 /**
  * Cancel the member's pending vault deletion, audit it and tell the member.
- * `on: 'reinstate'` marks the cancel that reinstating an account makes.
- * `409` if the record changed while it was being cancelled (the member
- * cancelled it, or it was just carried out): the admin repeats the call and
- * sees which.
+ * `on: 'reinstate'` marks the cancel that a reinstatement makes. The email
+ * says only what is true whatever happens next (a reinstatement can still
+ * fail, or wait for the admin's answer about a recovery). `409` if the
+ * record changed while it was being cancelled (the member cancelled it, or
+ * it was just carried out): the admin repeats the call and sees which.
+ *
+ * The record is removed before the audit event is written. If that write
+ * fails the caller answers 500 although the deletion is cancelled; the
+ * cancel function's own log line (`startOverCancel`, with the ids) is then
+ * the record, and a repeat answers "nothing pending".
  */
 async function cancelVaultDeletion(m: MemberItem, actor: string, on?: 'reinstate'): Promise<StartOverCancel> {
   const r = await requestDeletionCancel(m.user_guid);
@@ -362,8 +372,8 @@ async function cancelVaultDeletion(m: MemberItem, actor: string, on?: 'reinstate
       await sendMail(
         m.email,
         'VettID vault deletion cancelled',
-        `The deletion of your VettID vault${when ? ` requested at ${when}` : ''} has been cancelled by VettID support` +
-          `${on ? ', because your account was reinstated' : ''}. Your vault and everything in it stay as they are.\n\n` +
+        `The deletion of your VettID vault${when ? ` requested at ${when}` : ''} has been cancelled by VettID support. ` +
+          'Your vault and everything in it stay as they are.\n\n' +
           'If you still want to delete your vault and start over, ask again on your account page; the 24 hours then start again.\n\n' +
           'If you did not ask for the deletion, secure your email account, and contact support@vettid.org if anything else looks wrong.\n\n— VettID\n',
       );
@@ -375,34 +385,78 @@ async function cancelVaultDeletion(m: MemberItem, actor: string, on?: 'reinstate
   return r;
 }
 
+/**
+ * Suspend. The status is written first (as the member's own cancellation
+ * does, lambda/member/account.ts): from that write on the account cannot
+ * sign in (the sign-in trigger reads the row) and the cleanup job carries
+ * out no vault deletion for it, whatever happens to the two Cognito calls
+ * after it. If one of them fails, Suspend answers an error with the account
+ * already suspended, and a repeat finishes the rest: for an account that is
+ * already suspended it makes the two calls again (both are safe to repeat)
+ * and writes the event, without changing the stored reason.
+ */
 router.on('POST', '/admin/members/{user_guid}/suspend', async ({ params, body, actor }) => {
   const reason = str(body, 'reason', { max: 500 });
   const m = await getMember(params.user_guid);
   requireAccount(m);
-  if (m.account_status !== 'active') throw conflict(`Account is ${m.account_status}`);
+  if (m.account_status !== 'active' && m.account_status !== 'suspended') throw conflict(`Account is ${m.account_status}`);
+  const updated = m.account_status === 'active'
+    ? await update(m.user_guid, { account_status: 'active' }, { account_status: 'suspended', suspend_reason: reason })
+    : m;
   await cognito.send(new AdminDisableUserCommand({ UserPoolId: memberPoolId(), Username: m.email }));
   await cognito.send(new AdminUserGlobalSignOutCommand({ UserPoolId: memberPoolId(), Username: m.email }));
-  const updated = await update(m.user_guid, { account_status: 'active' }, { account_status: 'suspended', suspend_reason: reason });
   await audit(actor, 'member.suspend', m.user_guid, { email: m.email, reason });
   return view(updated);
 });
 
-router.on('POST', '/admin/members/{user_guid}/reinstate', async ({ params, actor }) => {
+/**
+ * Reinstate. In this order:
+ *  1. While the account is still not active (the cleanup job carries out no
+ *     vault deletion for it): a vault deletion that was pending when the
+ *     account was suspended or canceled is cancelled, and the member is
+ *     told. Its 24 hours may be over, and they passed while the member
+ *     could not cancel on the account page or in the app; without this it
+ *     would be carried out within minutes of the reinstatement. A member
+ *     who wants the deletion asks again and gets the full 24 hours.
+ *  2. A recovery that is still active is not cancelled (only the member
+ *     API's vault routes can tell the enclave) and its clock did not stop
+ *     while the account was not active: it works again the moment the
+ *     account is active. So the reinstatement is refused (`409
+ *     recovery_active`, with the recovery) until the admin repeats it with
+ *     `allow_active_recovery: true`.
+ *  3. Sign-in is enabled, and the status is written last: until that write
+ *     the row still says suspended or canceled, so a failure anywhere
+ *     before it leaves an account that cannot sign in and whose deletions
+ *     are held, and a repeat finishes.
+ * If the cancel cannot be made the account stays as it is. This is the only
+ * code that makes an account active again; whatever else ever does must
+ * cancel a pending vault deletion first, as here.
+ */
+router.on('POST', '/admin/members/{user_guid}/reinstate', async ({ params, body, actor }) => {
+  const allow = body.allow_active_recovery;
+  if (allow !== undefined && typeof allow !== 'boolean') throw badRequest('allow_active_recovery must be true or false');
   const m = await getMember(params.user_guid);
   requireAccount(m);
   if (m.account_status === 'active') throw conflict('Account is already active');
-  // First, while the account is still not active (the cleanup job carries
-  // out no vault deletion for it): a vault deletion that was pending when
-  // the account was suspended or canceled is cancelled, and the member is
-  // told. Its 24 hours may be over, and they passed while the member could
-  // not cancel on the account page or in the app; without this it would be
-  // carried out within minutes of the reinstatement. A member who wants the
-  // deletion asks again and gets the full 24 hours. If the cancel cannot be
-  // made, nothing is changed and the account stays as it is.
-  await cancelVaultDeletion(m, actor, 'reinstate');
+  const { recoveries } = await cancelVaultDeletion(m, actor, 'reinstate');
+  const shown = recoveries.map((r) => ({ vault_id: r.vault_id, recovery_id: r.recovery_id, state: r.state, available_at: epochIso(r.available_at), expires_at: epochIso(r.expires_at) }));
+  if (shown.length && allow !== true) {
+    const r = shown[0];
+    throw new HttpError(
+      409,
+      'recovery_active',
+      `A recovery of this member's vault is ${r.state}${r.state === 'pending' && r.available_at ? ` (its code becomes available at ${r.available_at})` : ''} and stays usable until ${r.expires_at}. ` +
+        'It was not stopped by the suspension and will work again as soon as the account is active. If the member did not ask for it, wait until it has expired, ' +
+        'or have the member cancel it with the link in the "recovery requested" email. To reinstate anyway, confirm.',
+      { recoveries: shown },
+    );
+  }
   await cognito.send(new AdminEnableUserCommand({ UserPoolId: memberPoolId(), Username: m.email }));
   const updated = await update(m.user_guid, { account_status: m.account_status }, { account_status: 'active' }, ['suspend_reason', 'delete_after']);
   await audit(actor, 'member.reinstate', m.user_guid, { email: m.email, from: m.account_status });
+  for (const r of shown) {
+    await audit(actor, 'member.reinstate_with_active_recovery', m.user_guid, { email: m.email, vault_id: r.vault_id, recovery_id: r.recovery_id, state: r.state, expires_at: r.expires_at });
+  }
   await pushAccountSnapshot(m.user_guid); // the vault's account snapshot (MEMBER-API 2.0.0)
   return view(updated);
 });
@@ -450,7 +504,9 @@ router.on('POST', '/admin/members/{user_guid}/clear-pin', async ({ params, actor
  * looks taken over; the deletion waits while the account is suspended).
  * `{cancelled: true}` when a pending deletion was removed; `{cancelled:
  * false}` when there was none (so a repeat is harmless); `409` when it is
- * already being carried out, which nothing can stop.
+ * already being carried out (`executing`). That includes one whose `delete`
+ * could not be queued yet (the vault service paused, no instance running):
+ * it is past its 24 hours and is not cancellable here either.
  */
 router.on('POST', '/admin/members/{user_guid}/vault/deletion/cancel', async ({ params, actor }) => {
   const m = await getMember(params.user_guid);

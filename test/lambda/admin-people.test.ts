@@ -149,18 +149,18 @@ describe("a member's pending vault deletion", () => {
   /* eslint-enable */
   const lambda = mockClient(LambdaClient);
   const ses = mockClient(SESv2Client);
-  const FN = 'arn:aws:lambda:us-east-1:123456789012:function:Member-CleanupJobFn';
+  const FN = 'arn:aws:lambda:us-east-1:123456789012:function:Member-StartOverCancelFn';
   const VID = 'a'.repeat(32);
   const DID = '01JB2Z6V9K3M4N5P6Q7R8S9T0V';
   const member = { ...pending, state: 'member', email: 'ada@example.org', account_status: 'suspended', suspend_reason: 'taken over?' };
   const path = `/admin/members/${G1}/vault/deletion/cancel`;
   let order: string[];
 
-  const answer = (a: Record<string, unknown>) => ({ ok: true, task: 'cancel_start_over', cancelled: [], executing: [], changed: 0, ...a });
+  const answer = (a: Record<string, unknown>) => ({ ok: true, task: 'cancel_start_over', cancelled: [], executing: [], changed: 0, recoveries: [], ...a });
   const job = (a: unknown, FunctionError?: string) =>
     lambda.on(InvokeCommand).callsFake(() => {
       order.push('cancel');
-      return { StatusCode: 200, FunctionError, Payload: Buffer.from(JSON.stringify(a)) };
+      return { StatusCode: 200, FunctionError, Payload: Buffer.from(a === undefined ? 'not json' : JSON.stringify(a)) };
     });
   const one = { vault_id: VID, deletion_id: DID, requested_at: 1_791_800_000 };
   const audits = () => ddb.commandCalls(PutCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'audit').map((i) => i.Item as Record<string, any>);
@@ -172,7 +172,7 @@ describe("a member's pending vault deletion", () => {
   }));
 
   beforeEach(() => {
-    process.env.CLEANUP_FN = FN;
+    process.env.START_OVER_CANCEL_FN = FN;
     lambda.reset();
     ses.reset();
     ses.on(SendEmailCommand).resolves({});
@@ -193,7 +193,7 @@ describe("a member's pending vault deletion", () => {
     ses.restore();
   });
 
-  test('cancel: the cleanup job is asked (synchronously, for this member only); audited with the admin as actor; the member is told', async () => {
+  test('cancel: the cancel function is asked (synchronously, for this member only); audited with the admin as actor; the member is told', async () => {
     job(answer({ cancelled: [one] }));
     const res = await handler(event('POST', path));
     expect({ status: res.statusCode, body: JSON.parse(res.body) }).toEqual({ status: 200, body: { cancelled: true } });
@@ -259,9 +259,14 @@ describe("a member's pending vault deletion", () => {
   });
 
   test.each([
-    ['the job failed', { errorMessage: 'boom' }, 'Unhandled'],
-    ['an answer that is not the task\'s (a job from before it runs its daily work)', { deleted: 0, reclaimed: 0, expired: 0, vaultRetries: 0 }, undefined],
+    ['the function failed', { errorMessage: 'boom' }, 'Unhandled'],
+    ['a failed function whose payload looks like an answer', { ok: true, task: 'cancel_start_over', cancelled: [{ vault_id: 'a'.repeat(32), deletion_id: 'x', requested_at: 1 }], executing: [], changed: 0, recoveries: [] }, 'Unhandled'],
+    ['an answer that is not this task\'s (the daily run\'s)', { deleted: 0, reclaimed: 0, expired: 0, vaultRetries: 0 }, undefined],
+    ['a well-formed answer of another task', { ok: true, task: 'start_over', cancelled: [{ vault_id: 'a'.repeat(32), deletion_id: 'x', requested_at: 1 }], executing: [], changed: 0, recoveries: [] }, undefined],
+    ['an answer that does not say ok', { task: 'cancel_start_over', cancelled: [], executing: [], changed: 0, recoveries: [] }, undefined],
     ['an answer without its lists', { ok: true, task: 'cancel_start_over' }, undefined],
+    ['an answer without the recoveries (so that "no active recovery" is never assumed)', { ok: true, task: 'cancel_start_over', cancelled: [], executing: [], changed: 0 }, undefined],
+    ['an answer that is not JSON', undefined, undefined],
   ])('%s: 500, and nothing is reported as cancelled', async (_name, a, fnError) => {
     job(a, fnError);
     const err = jest.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -270,6 +275,27 @@ describe("a member's pending vault deletion", () => {
     expect(events()).toHaveLength(0);
     expect(mails()).toHaveLength(0);
     err.mockRestore();
+  });
+
+  test('the member is told even if the email cannot be sent: the cancel stands, is audited and is answered', async () => {
+    job(answer({ cancelled: [one] }));
+    ses.on(SendEmailCommand).rejects(Object.assign(new Error('rejected'), { name: 'MessageRejected' }));
+    const err = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const res = await handler(event('POST', path));
+    expect({ status: res.statusCode, body: JSON.parse(res.body) }).toEqual({ status: 200, body: { cancelled: true } });
+    expect(events().map((e) => e.action)).toEqual(['member.vault_deletion_cancel']);
+    expect(err.mock.calls).toEqual([['vault deletion cancel notice failed', 'MessageRejected']]);
+  });
+
+  test('the audit write fails after the record was removed: 500 (the cancel was made; the cancel function logged it; a repeat answers nothing pending)', async () => {
+    job(answer({ cancelled: [one] }));
+    ddb.on(PutCommand).rejects(new Error('audit down'));
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect((await handler(event('POST', path))).statusCode).toBe(500);
+    ddb.on(PutCommand).resolves({});
+    job(answer({}));
+    const res = await handler(event('POST', path));
+    expect({ status: res.statusCode, body: JSON.parse(res.body) }).toEqual({ status: 200, body: { cancelled: false } });
   });
 
   test('reinstate: a pending vault deletion is cancelled first, while the account is still not active; audited (on: reinstate); the member is told', async () => {
@@ -282,8 +308,10 @@ describe("a member's pending vault deletion", () => {
       ['member.vault_deletion_cancel', { vault_id: VID, deletion_id: DID, on: 'reinstate' }],
       ['member.reinstate', { from: 'suspended' }],
     ]);
-    expect(mails()).toEqual([{ to: 'ada@example.org', subject: 'VettID vault deletion cancelled', text: expect.stringContaining('has been cancelled by VettID support, because your account was reinstated.') }]);
+    // The email says nothing about the reinstatement: it is sent when the deletion is cancelled, and stays true if the rest fails.
+    expect(mails()).toEqual([{ to: 'ada@example.org', subject: 'VettID vault deletion cancelled', text: expect.stringContaining('has been cancelled by VettID support. Your vault and everything in it stay as they are.') }]);
     expect(mails()[0].text).toContain('ask again on your account page; the 24 hours then start again');
+    expect(mails()[0].text).not.toMatch(/reinstat/i);
   });
 
   test('reinstate: from canceled too; with nothing pending it is as before (no cancel event, no mail)', async () => {
@@ -303,7 +331,7 @@ describe("a member's pending vault deletion", () => {
 
   test.each([
     ['the cancel cannot be made', { errorMessage: 'boom' }, 'Unhandled', 500],
-    ['the deletion changed meanwhile', { ok: true, task: 'cancel_start_over', cancelled: [], executing: [], changed: 1 }, undefined, 409],
+    ['the deletion changed meanwhile', { ok: true, task: 'cancel_start_over', cancelled: [], executing: [], changed: 1, recoveries: [] }, undefined, 409],
   ])('reinstate: %s: the account stays as it is (sign-in not enabled, status not changed)', async (_name, a, fnError, status) => {
     job(a, fnError);
     const err = jest.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -320,12 +348,147 @@ describe("a member's pending vault deletion", () => {
     expect(order).toEqual([]);
   });
 
-  test('suspend does not touch a pending vault deletion (it waits; nothing is asked of the job)', async () => {
-    ddb.on(GetCommand).resolves({ Item: { ...member, account_status: 'active' } });
-    idp.on(AdminDisableUserCommand).resolves({});
-    idp.on(AdminUserGlobalSignOutCommand).resolves({});
-    job(answer({ cancelled: [one] }));
-    expect((await handler(event('POST', `/admin/members/${G1}/suspend`, { reason: 'looks taken over' }))).statusCode).toBe(200);
-    expect(lambda.commandCalls(InvokeCommand)).toHaveLength(0);
+  test('reinstate: sign-in is enabled before the status is written, and a failure there leaves the account not active (so deletions stay held); a repeat finishes', async () => {
+    job(answer({}));
+    idp.on(AdminEnableUserCommand).callsFake(() => {
+      order.push('enable');
+      throw Object.assign(new Error('throttled'), { name: 'TooManyRequestsException' });
+    });
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect((await handler(event('POST', `/admin/members/${G1}/reinstate`))).statusCode).toBe(500);
+    expect(order).toEqual(['cancel', 'enable']); // no status write
+    expect(events().filter((e) => e.action === 'member.reinstate')).toHaveLength(0);
+    order = [];
+    idp.on(AdminEnableUserCommand).callsFake(() => (order.push('enable'), {}));
+    expect((await handler(event('POST', `/admin/members/${G1}/reinstate`))).statusCode).toBe(200);
+    expect(order).toEqual(['cancel', 'enable', 'update']);
+  });
+
+  // ---- reinstating with a recovery still active ----
+
+  const recovery = { vault_id: VID, recovery_id: '01JB2Z6V9K3M4N5P6Q7R8S9T0X', state: 'available', available_at: 1_791_800_000, expires_at: 1_791_886_400 };
+  const shown = { ...recovery, available_at: new Date(recovery.available_at * 1000).toISOString(), expires_at: new Date(recovery.expires_at * 1000).toISOString() };
+
+  test('reinstate: an active recovery is not cancelled and not ignored: 409 recovery_active with the recovery, the account stays not active; a pending deletion is cancelled all the same', async () => {
+    job(answer({ cancelled: [one], recoveries: [recovery] }));
+    const res = await handler(event('POST', `/admin/members/${G1}/reinstate`));
+    expect(res.statusCode).toBe(409);
+    const body = JSON.parse(res.body);
+    expect(body).toEqual({ error: 'recovery_active', message: expect.stringContaining(`is available and stays usable until ${shown.expires_at}`), recoveries: [shown] });
+    expect(body.message).toMatch(/not stopped by the suspension/);
+    expect(order).toEqual(['cancel']);
+    expect(events().map((e) => [e.action, e.detail])).toEqual([['member.vault_deletion_cancel', { vault_id: VID, deletion_id: DID, on: 'reinstate' }]]);
+    expect(mails().map((m) => m.subject)).toEqual(['VettID vault deletion cancelled']);
+    // Saying false, or nothing, is not a confirmation.
+    job(answer({ recoveries: [recovery] }));
+    for (const b of [{ allow_active_recovery: false }, {}, undefined]) {
+      expect((await handler(event('POST', `/admin/members/${G1}/reinstate`, b))).statusCode).toBe(409);
+    }
+    expect(order).toEqual(['cancel', 'cancel', 'cancel', 'cancel']);
+    expect(events().filter((e) => e.action === 'member.reinstate')).toHaveLength(0);
+  });
+
+  test('reinstate: a pending recovery says when its code becomes available', async () => {
+    job(answer({ recoveries: [{ ...recovery, state: 'pending' }] }));
+    const body = JSON.parse((await handler(event('POST', `/admin/members/${G1}/reinstate`))).body);
+    expect(body.message).toContain(`is pending (its code becomes available at ${shown.available_at}) and stays usable until ${shown.expires_at}`);
+  });
+
+  test('reinstate: with the confirmation it goes on, and the event beside member.reinstate records the recovery that was allowed', async () => {
+    job(answer({ recoveries: [recovery] }));
+    const res = await handler(event('POST', `/admin/members/${G1}/reinstate`, { allow_active_recovery: true }));
+    expect(res.statusCode).toBe(200);
+    expect(order).toEqual(['cancel', 'enable', 'update']);
+    expect(events().map((e) => [e.action, e.detail])).toEqual([
+      ['member.reinstate', { from: 'suspended' }],
+      ['member.reinstate_with_active_recovery', { vault_id: VID, recovery_id: recovery.recovery_id, state: 'available', expires_at: shown.expires_at }],
+    ]);
+  });
+
+  test('reinstate: the confirmation changes nothing when no recovery is active, and must be a boolean', async () => {
+    job(answer({}));
+    expect((await handler(event('POST', `/admin/members/${G1}/reinstate`, { allow_active_recovery: true }))).statusCode).toBe(200);
+    expect(events().map((e) => e.action)).toEqual(['member.reinstate']);
+    order = [];
+    expect((await handler(event('POST', `/admin/members/${G1}/reinstate`, { allow_active_recovery: 'yes' }))).statusCode).toBe(400);
+    expect(order).toEqual([]);
+  });
+
+  test('the admin cancel of a deletion does not ask about a recovery', async () => {
+    job(answer({ cancelled: [one], recoveries: [recovery] }));
+    const res = await handler(event('POST', path));
+    expect({ status: res.statusCode, body: JSON.parse(res.body) }).toEqual({ status: 200, body: { cancelled: true } });
+  });
+
+  // ---- suspend: the status first ----
+
+  describe('suspend', () => {
+    const active = { ...member, account_status: 'active', suspend_reason: undefined };
+    const fail = () => Object.assign(new Error('throttled'), { name: 'TooManyRequestsException' });
+    const suspend = () => handler(event('POST', `/admin/members/${G1}/suspend`, { reason: 'looks taken over' }));
+    beforeEach(() => {
+      ddb.on(GetCommand).resolves({ Item: active });
+      ddb.on(UpdateCommand).callsFake((input) => {
+        order.push('status');
+        return { Attributes: { ...active, account_status: 'suspended', suspend_reason: input.ExpressionAttributeValues[':s1'] } };
+      });
+      idp.on(AdminDisableUserCommand).callsFake(() => (order.push('disable'), {}));
+      idp.on(AdminUserGlobalSignOutCommand).callsFake(() => (order.push('signout'), {}));
+      jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    });
+
+    test('the status is written first (conditional on active), then sign-in is disabled and the sessions ended; audited as before', async () => {
+      const res = await suspend();
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body)).toMatchObject({ user_guid: G1, account_status: 'suspended' });
+      expect(order).toEqual(['status', 'disable', 'signout']);
+      const upd = ddb.commandCalls(UpdateCommand)[0].args[0].input;
+      expect(Object.values(upd.ExpressionAttributeValues!)).toEqual(expect.arrayContaining(['suspended', 'looks taken over', 'active']));
+      expect(upd.ConditionExpression).toContain('#c0 = :c0');
+      expect(events().map((e) => [e.actor, e.action, e.subject, e.detail])).toEqual([['boss@vettid.org', 'member.suspend', G1, { reason: 'looks taken over' }]]);
+    });
+
+    test.each([['disabling sign-in', AdminDisableUserCommand, ['status', 'disable']], ['ending the sessions', AdminUserGlobalSignOutCommand, ['status', 'disable', 'signout']]] as const)(
+      '%s fails: the account is already suspended (the status was written), Suspend answers an error and no event; a repeat finishes without writing the status again',
+      async (_name, command, sofar) => {
+        idp.on(command as any).callsFake(() => {
+          order.push(command === AdminDisableUserCommand ? 'disable' : 'signout');
+          throw fail();
+        });
+        expect((await suspend()).statusCode).toBe(500);
+        expect(order).toEqual(sofar);
+        expect(events()).toHaveLength(0);
+        // The repeat: the row now says suspended.
+        order = [];
+        ddb.on(GetCommand).resolves({ Item: { ...active, account_status: 'suspended', suspend_reason: 'looks taken over' } });
+        idp.on(command as any).callsFake(() => (order.push(command === AdminDisableUserCommand ? 'disable' : 'signout'), {}));
+        const res = await suspend();
+        expect(res.statusCode).toBe(200);
+        expect(JSON.parse(res.body)).toMatchObject({ account_status: 'suspended' });
+        expect(order).toEqual(['disable', 'signout']);
+        expect(events().map((e) => [e.action, e.detail])).toEqual([['member.suspend', { reason: 'looks taken over' }]]);
+      },
+    );
+
+    test('the status write fails (another admin changed the account): 409, and Cognito is not touched', async () => {
+      ddb.on(UpdateCommand).rejects(Object.assign(new Error('c'), { name: 'ConditionalCheckFailedException' }));
+      expect((await suspend()).statusCode).toBe(409);
+      expect(order).toEqual([]);
+      expect(events()).toHaveLength(0);
+    });
+
+    test('a canceled account is still refused (409), and a request that is not an account', async () => {
+      ddb.on(GetCommand).resolves({ Item: { ...active, account_status: 'canceled' } });
+      expect((await suspend()).statusCode).toBe(409);
+      ddb.on(GetCommand).resolves({ Item: pending });
+      expect((await suspend()).statusCode).toBe(409);
+      expect(order).toEqual([]);
+    });
+
+    test('suspending does not touch a pending vault deletion (it waits; the cancel function is not asked)', async () => {
+      job(answer({ cancelled: [one] }));
+      expect((await suspend()).statusCode).toBe(200);
+      expect(lambda.commandCalls(InvokeCommand)).toHaveLength(0);
+    });
   });
 });
