@@ -60,6 +60,7 @@ import {
   manifestEntries,
   notesToSwitch,
   readReleaseFile,
+  rescueTargetProblems,
   releaseLogUrl,
   releaseFilePath,
   renderManifest,
@@ -186,7 +187,11 @@ function sign(c: Ctx, flags: Record<string, string | true>): void {
   const serial = Math.max(prev?.serial ?? 0, file.signed_serial) + 1;
   const issuedAt = typeof flags['issued-at'] === 'string' ? flags['issued-at'] : nowSeconds();
   const ours = renderManifest(serial, issuedAt, entries);
-  const problems = [...consistencyProblems(entries, issuedAt), ...(prev ? successorProblems(prev, { serial, releases: entries }) : [])];
+  const problems = [
+    ...consistencyProblems(entries, issuedAt),
+    ...rescueTargetProblems(file, issuedAt),
+    ...(prev ? successorProblems(prev, { serial, releases: entries }) : []),
+  ];
   if (problems.length) throw new Error(`refusing to sign:\n  ${problems.join('\n  ')}`);
 
   // vaultctl renders and checks too; both renders must agree byte for byte.

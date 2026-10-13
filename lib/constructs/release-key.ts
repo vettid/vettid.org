@@ -9,7 +9,7 @@ export interface ReleaseKeySpec {
   readonly release: number;
   /** The release's PCR0 (96 lowercase hex). */
   readonly pcr0: string;
-  /** PCR0s of every release not `removed` when this key is created (§6.2). */
+  /** PCR0s of every earlier release not `removed`, or `removed` and still rescuable, when this key is created (§6.2). */
   readonly admittedPcr0s: readonly string[];
 }
 

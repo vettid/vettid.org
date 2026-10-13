@@ -16,7 +16,12 @@
  *    dropped before it is removed, statuses only forward, PCRs, keys and
  *    publication dates unchanged);
  *  - statuses and dates are consistent (§3.2, §3.5);
- *  - every PCR0 a listed release's key admits is listed (§11.10.1).
+ *  - every PCR0 a listed release's key admits is listed (§11.10.1);
+ *  - a rescue always has a target (VAULT-RELEASES 0.1.24 §3.5): every
+ *    removed release that can still be rescued is admitted by the newest
+ *    active release's key; a published release that is removed carries
+ *    its `ends_at` (the rescue window counts from it); a rescue in
+ *    progress is within its window.
  */
 import { ManifestError, parseManifest, verifyServed } from '../../lambda/shared/manifest';
 import {
@@ -25,6 +30,8 @@ import {
   consistencyProblems,
   manifestEntries,
   renderManifest,
+  rescueOverdueProblems,
+  rescueTargetProblems,
   successorProblems,
 } from './release-list';
 
@@ -40,6 +47,8 @@ export interface ChannelCheck {
   file: ReleaseFile;
   /** The served document now (working tree), or null. */
   served: Buffer | null;
+  /** The time of the check (default: now); read only for a rescue in progress (rescueOverdueProblems). */
+  now?: Date;
   pinnedKeys: readonly string[];
   /**
    * Earlier versions of the served file, oldest first (from the history of
@@ -119,7 +128,15 @@ export function checkChannel(c: ChannelCheck): string[] {
         if (!listed.has(a)) p(`release ${e.release}'s key admits a PCR0 the manifest does not list (§11.10.1: every admitted PCR0 stays listed)`);
       }
     }
+    for (const s of rescueTargetProblems(c.file, current.issued_at)) p(s);
+    // The rescue window counts from ends_at: a release that was ever published as running must carry it once removed.
+    for (const e of current.releases.filter((r) => r.status === 'removed' && !r.ends_at)) {
+      if (versions.some((v) => v.m?.releases.some((r) => r.release === e.release && r.status !== 'removed'))) {
+        p(`release ${e.release} was published and is now removed without ends_at: set ends_at to the time it ended (its rescue window counts from it, VAULT-RELEASES §3.5)`);
+      }
+    }
   }
+  for (const s of rescueOverdueProblems(c.file, c.now)) p(s);
 
   // The sequence of published versions, ending with the current one.
   const seq = [...versions, { commit: 'working tree', m: c.served ? (current ?? safeParse(c.served)) : null }];

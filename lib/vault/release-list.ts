@@ -10,8 +10,8 @@
  * The file is also a valid `vaultctl manifest render -releases` input: that
  * parser reads `releases[].{release, pcr0, pcr1, pcr2, seal_key, status,
  * published_at, ends_at, notes}`, ignores every other member (`host`,
- * `log`, `admitted_pcr0s`, `ends_after_days`) and leaves `candidate`
- * entries out.
+ * `log`, `admitted_pcr0s`, `ends_after_days`, `rescue`) and leaves
+ * `candidate` entries out.
  *
  * Plain Node (fs, crypto) only: imported by the CDK app, the scripts and
  * the tests, never by a Lambda.
@@ -68,7 +68,11 @@ export interface ReleaseEntry {
   readonly pcr2: string;
   /** The sealing key's ARN; empty only for a `candidate` whose key does not exist yet (§10.1 step 6). */
   readonly seal_key: string;
-  /** PCR0s of every release not `removed` when this release's key was created (§6.2); never changes. */
+  /**
+   * PCR0s of every earlier release that was not `removed`, or was `removed`
+   * and could still be rescued, when this release's key was created (§6.2;
+   * admittedAtKeyCreation); never changes.
+   */
   readonly admitted_pcr0s: readonly string[];
   /** RFC 3339, whole seconds UTC. Required once the release is in a manifest. */
   readonly published_at?: string;
@@ -80,8 +84,21 @@ export interface ReleaseEntry {
    * (legacyStagingNotes) until the next staging signing switches them.
    */
   readonly notes: string;
-  /** Null or absent: no release stack (not built yet, or deleted at `removed`). */
+  /**
+   * Null or absent: no release stack (not built yet, or deleted at
+   * `removed`). A `removed` entry has one only during a rescue (`rescue`).
+   */
   readonly host?: HostEntry | null;
+  /**
+   * `true` only while a `removed` release is reopened for a rescue
+   * (VAULT-RELEASES §10.3 step 3): the one case in which a `removed`
+   * entry has a `host`, so that CDK builds its release stack again. The
+   * manifest status stays `removed`. A member of the release list only,
+   * like `host` and `log`: never in the manifest. (The routing row's
+   * `rescue` attribute on `vault-releases` is another thing, set by the
+   * operator once the stack is up.)
+   */
+  readonly rescue?: true;
   /** Required once the release leaves `candidate` (signed into a manifest), in every channel. */
   readonly log?: ReleaseLog;
   /**
@@ -107,6 +124,93 @@ export const FIRST_RELEASE_WINDOW = { channel: 'prod', release: 1, days: 90, suc
 
 /** `t` plus whole days, RFC 3339 in whole seconds UTC. */
 const addDays = (t: string, days: number) => new Date(Date.parse(t) + days * 86_400_000).toISOString().replace('.000Z', 'Z');
+
+/** A time as the list writes it: RFC 3339 in whole seconds UTC. */
+const whole = (t: Date) => new Date(Math.floor(t.getTime() / 1000) * 1000).toISOString().replace('.000Z', 'Z');
+
+/**
+ * The rescue window after a release's `ends_at`, in days: the pending
+ * window of its key's deletion (VAULT-RELEASES §3.5; `retirementWindowDays`
+ * in lib/config.ts, pinned in every key policy; a test checks they agree).
+ */
+export const RESCUE_WINDOW_DAYS: Record<Channel, number> = { prod: 30, staging: 7 };
+
+/**
+ * The end of a `removed` release's rescue window (VAULT-RELEASES 0.1.24
+ * §3.5): its `ends_at` plus the channel's window, or null for a release
+ * that is not `removed` or has no `ends_at`. A `removed` entry without
+ * `ends_at` is a release that never held a member's vault (a failed
+ * canary, §10.1): there is nothing to rescue, and no later key admits it.
+ * The list does not know the day KMS deletes the key (deletion may be
+ * scheduled later than `ends_at`, and is scheduled again after a rescue);
+ * the window VettID promises is counted from `ends_at`.
+ */
+export function rescueEndsAt(e: Pick<ReleaseEntry, 'status' | 'ends_at'>, channel: Channel): string | null {
+  return e.status === 'removed' && e.ends_at !== undefined ? addDays(e.ends_at, RESCUE_WINDOW_DAYS[channel]) : null;
+}
+
+/** True while a `removed` release can still be rescued at `at` (RFC 3339, whole seconds UTC). */
+export function rescuable(e: Pick<ReleaseEntry, 'status' | 'ends_at'>, channel: Channel, at: string): boolean {
+  const end = rescueEndsAt(e, channel);
+  return end !== null && at < end;
+}
+
+/**
+ * What a key created at `at` for the entry numbered `release` admits
+ * (VAULT-RELEASES 0.1.24 §6.2; owner decision of 2026-10-13: a rescue
+ * must always have a target): every earlier release that is not
+ * `removed` (they may all move into it), and every earlier `removed`
+ * release that can still be rescued at `at`.
+ */
+export function admittedAtKeyCreation(releases: readonly ReleaseEntry[], release: number, channel: Channel, at: string): ReleaseEntry[] {
+  return releases.filter((e) => e.release < release && (e.status !== 'removed' || rescuable(e, channel, at)));
+}
+
+/**
+ * The first release of each channel whose key was created under the
+ * 0.1.24 rule. The keys of staging releases 1 to 11 were created before
+ * it and can never change: release 11's admits releases 7 to 10 only, so
+ * staging releases 3 to 6 (removed 2026-10-13, keys deleted 2026-10-20)
+ * can be rescued only into release 10, and only while it is `active`.
+ * rescueTargetProblems starts with the release named here.
+ */
+export const RESCUE_RULE_FROM: Record<Channel, number> = { prod: 1, staging: 12 };
+
+/**
+ * "A rescue always has a target", for one manifest (VAULT-RELEASES 0.1.24
+ * §3.5, §10.3): at the manifest's `issued_at`, every `removed` release
+ * that can still be rescued must be admitted by the key of the newest
+ * `active` release, the one a rescued vault moves into. Run before a
+ * manifest is signed (`vault:manifest sign`) and on the served one
+ * (`check:manifest`), so neither removing a release nor publishing a new
+ * one can leave a rescue without a target.
+ */
+export function rescueTargetProblems(file: ReleaseFile, issuedAt: string): string[] {
+  const active = file.releases.filter((e) => e.status === 'active');
+  if (!active.length) return []; // consistencyProblems reports it
+  const target = active[active.length - 1];
+  if (target.release < RESCUE_RULE_FROM[file.channel]) return [];
+  const out: string[] = [];
+  for (const e of file.releases) {
+    if (e.release < target.release && rescuable(e, file.channel, issuedAt) && !target.admitted_pcr0s.includes(e.pcr0)) {
+      out.push(`release ${e.release} is removed and can be rescued until ${rescueEndsAt(e, file.channel)}, but the key of release ${target.release}, the newest active release, does not admit it: a rescued vault would have nowhere to move (VAULT-RELEASES §3.5)`);
+    }
+  }
+  return out;
+}
+
+/**
+ * The time-dependent rule of a rescue in progress (an entry with
+ * `rescue: true`): its window is not over. Not part of the file
+ * validation, which CDK synth runs: a rescue that outlasts its window
+ * must still be torn down with `cdk destroy`. `check:manifest` reports it.
+ */
+export function rescueOverdueProblems(file: ReleaseFile, now: Date = new Date()): string[] {
+  const at = whole(now);
+  return file.releases
+    .filter((e) => e.rescue === true && !rescuable(e, file.channel, at))
+    .map((e) => `release ${e.release}: rescue is set, but its rescue window ended at ${rescueEndsAt(e, file.channel)}: end the rescue (RUNBOOK "Removing a release and rescue")`);
+}
 
 export interface ReleaseFile {
   readonly channel: Channel;
@@ -188,9 +292,11 @@ const sealKeyRe = (account: string) => new RegExp(`^arn:aws:kms:us-east-1:${acco
 
 /**
  * Checks a release file against the plan's rules. `account` is the
- * channel's vault account (every seal key must be there, §3.1).
+ * channel's vault account (every seal key must be there, §3.1). `now` is
+ * read by one rule only: what a candidate whose key does not exist yet
+ * (`seal_key: ""`) must admit (admittedAtKeyCreation).
  */
-export function validateReleaseFile(raw: unknown, channel: Channel, account: string): ReleaseFile {
+export function validateReleaseFile(raw: unknown, channel: Channel, account: string, now: Date = new Date()): ReleaseFile {
   const bad = (what: string): never => {
     throw new Error(`vault/releases/${channel}.json: ${what}`);
   };
@@ -201,6 +307,8 @@ export function validateReleaseFile(raw: unknown, channel: Channel, account: str
   if (!Array.isArray(f.releases)) bad('releases must be an array');
   const entries = f.releases as Record<string, unknown>[];
   const pcr0s = new Map<string, number>();
+  const seen: ReleaseEntry[] = [];
+  const at0 = whole(now);
   let last = 0;
   for (const e of entries) {
     if (!e || typeof e !== 'object' || Array.isArray(e)) bad('entry is not an object');
@@ -223,6 +331,23 @@ export function validateReleaseFile(raw: unknown, channel: Channel, account: str
     for (const a of admitted) {
       if (typeof a !== 'string' || !pcr0s.has(a)) at('admitted_pcr0s may only name earlier releases that are still listed (§7: every PCR0 a live key admits is listed)');
     }
+    // A key that does not exist yet (§6.2, 0.1.24): its list is exactly what a key created now admits.
+    if (candidate && e.seal_key === '') {
+      const due = admittedAtKeyCreation(seen, n, channel, at0);
+      for (const d of due) {
+        if (!admitted.includes(d.pcr0)) {
+          at(d.status === 'removed'
+            ? `admitted_pcr0s must name release ${d.release}: it is removed but can be rescued until ${rescueEndsAt(d, channel)}, and a rescued vault must be able to move into this release (VAULT-RELEASES §6.2)`
+            : `admitted_pcr0s must name release ${d.release} (${d.status}): every earlier release that is not removed may move into this one (VAULT-RELEASES §6.2)`);
+        }
+      }
+      for (const a of admitted) {
+        const r = pcr0s.get(a as string)!;
+        if (!due.some((d) => d.release === r)) {
+          at(`admitted_pcr0s names release ${r}, which is removed and can no longer be rescued (VAULT-RELEASES §6.2); if this release's key was already created with this list, write its ARN into seal_key`);
+        }
+      }
+    }
     if (e.published_at !== undefined && !isTime(e.published_at)) at('published_at must be RFC 3339 in whole seconds UTC');
     if (!candidate && e.published_at === undefined) at('published_at is required once the release is in a manifest');
     if (e.ends_at !== undefined) {
@@ -231,7 +356,14 @@ export function validateReleaseFile(raw: unknown, channel: Channel, account: str
       if (e.published_at !== undefined && (e.ends_at as string) <= (e.published_at as string)) at('ends_at must be after published_at');
     }
     if (e.status === 'retired' && e.ends_at === undefined) at('a retired release needs its ends_at (§3.5)');
-    if (e.status === 'removed' && e.host) at('a removed release has no release stack (§10.3 step 2: delete it, then drop host)');
+    if (e.rescue !== undefined) {
+      if (e.rescue !== true) at('rescue must be true or absent');
+      if (e.status !== 'removed') at('rescue is set only on a removed release (§10.3 step 3)');
+      if (!e.host) at('rescue is set only together with host (the release stack of the rescue, §10.3 step 3); drop both when the rescue ends');
+      if (e.ends_at === undefined) at('a release without ends_at never held a member\'s vault and cannot be rescued (§10.3 step 3)');
+    } else if (e.status === 'removed' && e.host) {
+      at('a removed release has no release stack (§10.3 step 2: delete it, then drop host), except during a rescue (rescue: true, §10.3 step 3)');
+    }
     if (typeof e.notes !== 'string' || !/^https:\/\/[^\s/@]+\/\S*$/.test(e.notes) || e.notes.length > 1024) at('notes must be an https URL');
     const legacy = channel === 'staging' && n <= LEGACY_STAGING_NOTES_THROUGH && e.notes === legacyStagingNotes(n);
     if (e.notes !== releaseLogUrl(channel, n) && !legacy) at(`notes must be ${releaseLogUrl(channel, n)} (its release log entry)`);
@@ -246,6 +378,15 @@ export function validateReleaseFile(raw: unknown, channel: Channel, account: str
       if (e.ends_after_days !== w.days) at(`ends_after_days must be ${w.days} (VAULT-RELEASES §3.5), got ${JSON.stringify(e.ends_after_days)}`);
     }
     pcr0s.set(e.pcr0 as string, n);
+    seen.push(e as unknown as ReleaseEntry);
+  }
+  // A rescue needs a target (§10.3 step 3): the newest active release, which the app offers, admits the rescued one.
+  const actives = seen.filter((e) => e.status === 'active');
+  for (const e of seen.filter((r) => r.rescue === true)) {
+    const target = actives[actives.length - 1];
+    if (!target || target.release < e.release || !target.admitted_pcr0s.includes(e.pcr0)) {
+      bad(`release ${e.release}: rescue is set, but ${target ? `the key of release ${target.release}, the newest active release, does not admit it` : 'no release is active'}: a rescued vault would have nowhere to move (§10.3 step 3)`);
+    }
   }
   // Production release 1's window: its ends_at is no earlier than 90 days
   // after release 2's published_at (§3.5). ISO times of one shape compare as strings.
@@ -307,8 +448,8 @@ export function notesToSwitch(file: ReleaseFile): number[] {
   return file.releases.filter((e) => e.notes !== releaseLogUrl(file.channel, e.release)).map((e) => e.release);
 }
 
-export function readReleaseFile(root: string, channel: Channel, account: string): ReleaseFile {
-  return validateReleaseFile(JSON.parse(readFileSync(releaseFilePath(root, channel), 'utf8')), channel, account);
+export function readReleaseFile(root: string, channel: Channel, account: string, now: Date = new Date()): ReleaseFile {
+  return validateReleaseFile(JSON.parse(readFileSync(releaseFilePath(root, channel), 'utf8')), channel, account, now);
 }
 
 /** The release stacks (entries with a `host`). */
@@ -360,8 +501,8 @@ export interface ManifestEntry {
 /**
  * The entries a manifest of this list carries: every non-candidate, in
  * release order. Only the manifest members (§11.10.1) are copied: the
- * list's own (`host`, `log`, `admitted_pcr0s`, `ends_after_days`) never
- * reach the signed bytes.
+ * list's own (`host`, `log`, `admitted_pcr0s`, `ends_after_days`,
+ * `rescue`) never reach the signed bytes.
  */
 export function manifestEntries(file: ReleaseFile): ManifestEntry[] {
   return file.releases
