@@ -1,17 +1,29 @@
 ---
 title: VAULT-HOST-PROTOCOL
 status: approved by the owner 2026-10-12 (H1–H9 as recommended)
-version: 0.1.4
-date: 2026-10-12
+version: 0.1.5
+date: 2026-10-13
 owner: Al Liebl (Mesmer)
 component: vault enclave (supervisor), parent (host process)
 related:
-  - VAULT-MESSAGING.md (0.29.1) §2 (threat model, who sees what), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
+  - VAULT-MESSAGING.md (0.29.2) §2 (threat model, who sees what), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
   - VAULT-PLAN.md (0.1.8) §5.2 (D5: TLS in the enclave), §5.3 (D4: one process per vault)
   - VAULT-RELEASES.md (0.1.16) §3.4 (C3, C4), §8.4 (network and egress), §8.7 (observability)
   - VAULT-RELAY-SCALING.md (0.1.2) §6, §10
   - vettid-vault `internal/hostproto`, `enclave/supervisor`, `enclave/egress`, `parent`, docs/V3-NOTES.md "Enclave ↔ parent", docs/SMOKE.md
 changelog:
+  - 0.1.5: erratum, as built at vettid-vault `main` a852e36 (#74, for
+    staging release S11, not cut yet); approved by the owner
+    2026-10-13. No wire change. §4.3: **a `Ping` read while the vaults
+    are being locked is counted and leaves the parent unreachable**;
+    the first `Ping` read after the lock tells the parent which vaults
+    ended, and only then is it reachable again. A vault that appears
+    under an unreachable parent is locked at the next check only if no
+    `Ping` was read meanwhile; otherwise 120 to 130 s after that
+    `Ping`, unless the parent becomes reachable first. §6.3 and §7.3
+    follow. §12: P13 also names the `Stopped` reports; the statement
+    under P10–P14 names a852e36 and what S11 is planned to carry (#66,
+    #69, #70, #71, #72, #73, #74). §14: what was read
   - 0.1.4: as built at vettid-vault `main` 392b03c (#70, 93f32ca; #71,
     2daa9e4; #72, 392b03c; for staging release S11, not cut yet): **a parent that is
     connected but silent is unreachable** (owner decision H3). §4.3:
@@ -88,7 +100,9 @@ from, with the two changes of 8f2c8bf (#69, also for S11): the count
 `relay_vault_limit` (§6.6) and the log record it replaces (§7.4, §11.2,
 §13 point 2), and with the changes of 93f32ca (#70), 2daa9e4 (#71) and
 392b03c (#72), all for S11: the unreachable-parent rule and what goes with it
-(0.1.4; §3.4, §4.3, §6.2, §6.3, §7.3, §7.4, §9). Where the commits
+(0.1.4; §3.4, §4.3, §6.2, §6.3, §7.3, §7.4, §9), and with the change
+of a852e36 (#74, also for S11): a `Ping` read while the vaults are
+being locked (0.1.5; §4.3, §6.3, §7.3). Where the commits
 differ, the text names the commit.
 Statements in the present tense are what the code does. The key words MUST, MUST NOT, SHOULD and MAY (RFC 2119) appear
 only where this document repeats a rule another specification already
@@ -295,19 +309,33 @@ and has sent a descriptor.
     has (it dials again as usual, and a hello changes nothing); and it
     locks **every vault in parallel**. A vault process that has not
     locked after **10 s** is killed. Every vault has locked or been
-    killed at most 140 s after the last `Ping`.
+    killed at most 140 s after the last `Ping` (a vault that appears
+    afterwards: see the next point but one).
   - **What a vault loses:** nothing that was stored. Its final flush
     fails at once (no call is made); its last durable state is its
     last successful write, and nothing taken from the relay since was
     acked. A failed flush is not a conflict: nothing is zeroized as a
     split brain. A vault that is killed sends its devices no
     `vault.locking`.
-  - **It stays unreachable until it pings**, also when no vault runs.
-    A vault that appears meanwhile (an unlock that was half way) is
-    locked at the next check.
+  - **It stays unreachable until it pings and has been told** (next
+    point), also when no vault runs. A vault that appears meanwhile
+    (an unlock that was half way) is locked at the next check,
+    provided no `Ping` was read since the parent was found
+    unreachable. A `Ping` that is read and leaves the parent
+    unreachable (read while the vaults were being locked, or its
+    reports could not be written) still restarts the one clock: such a
+    vault is then locked 120 to 130 s after that `Ping`, unless a
+    later `Ping` makes the parent reachable first. Until then every
+    call it makes to the parent fails.
   - **The parent is told which vaults ended, and is reachable again
-    only then** (392b03c). When its next `Ping` is read, the `Ping` is
-    counted first. Then the enclave sends one `Stopped` (§7.3) for
+    only then** (392b03c; a852e36). When a `Ping` is read, it is
+    counted first. A `Ping` read while the vaults are still being
+    locked or killed (up to 10 s, and until each has been recorded as
+    ended) is only counted: there is nothing to tell yet and the
+    parent stays unreachable. That is the usual case for the first
+    `Ping` on the new connection, which a live parent sends as soon as
+    it has the descriptor. At the first `Ping` read after that, the
+    enclave sends one `Stopped` (§7.3) for
     each vault it locked or killed (`locked`, `split_brain`, or
     `error` for a killed one) and waits until they have been
     **written** to the connection. Only if they were written, and that
@@ -330,6 +358,10 @@ and has sent a descriptor.
     - At 2daa9e4 the reports were only queued, and a `Ping` handled
       while its connection ended could lose one, or let a call through
       before one was sent (§13 point 11).
+    - At 392b03c a `Ping` read while the vaults were being locked
+      found no report to write and made the parent reachable, so a
+      call could go through before the parent had been told anything
+      (corrected in a852e36, #74).
   - **The reader's own wait** at its 128-request limit (§3.4) is not
     counted as silence, up to 120 s between two pings: a `Ping` the
     parent sent would be waiting unread.
@@ -499,8 +531,10 @@ The parent sends it every 20 s, and once whenever a descriptor
 arrives (§7.1), before it writes the instance's
 registry row, and waits 5 s. The registry write that follows has 10 s
 (93f32ca; before, a table that did not answer stopped the pings that
-follow). The enclave counts each `Ping` it reads as the parent being
-reachable (§4.3); nothing else counts. Without an `ok` it does not write the
+follow). The enclave counts each `Ping` it reads on the one clock of
+§4.3; nothing else counts. (0.1.5: a parent that was found unreachable
+is reachable again only when §4.3 says so, not at every `Ping`
+read.) Without an `ok` it does not write the
 row, so an instance whose enclave does not answer stops being routed
 to (the row's heartbeat goes stale, VAULT-MESSAGING §11.1). `count`
 becomes the row's `load`.
@@ -631,6 +665,9 @@ killed while the parent was unreachable, at the parent's next `Ping`
 *392b03c:* such a report is kept until it has been written to a
 connection that is still the current one, so the parent may receive
 one twice; a report whose vault runs again is not sent.
+*a852e36:* the reports are not sent at a `Ping` read while those
+vaults are still being locked or killed, but at the first `Ping` read
+after that (§4.3).
 *2daa9e4:* the parent does not release the lease on a `Stopped` while
 an enroll or unlock of that vault is under way (the request took the
 lease; if it does not open the vault, it gives the lease back).
@@ -986,8 +1023,11 @@ is satisfied from 8f2c8bf.*
   stored object (VAULT-MESSAGING §2.1 already says "not trusted for
   parsing").
 
-*P10–P14: added in 0.1.4. The code at vettid-vault 392b03c satisfies
-each.*
+*P10–P14: added in 0.1.4; P13 extended in 0.1.5. The code at
+vettid-vault a852e36 satisfies each (what staging release S11 is
+planned to carry: #66, #69, #70, #71, #72, #73, #74). P13 as extended
+is satisfied from a852e36 (#74); as first written it was satisfied at
+392b03c.*
 
 - **P10.** The parent MUST send `Ping` at least every 30 s while an
   enclave is connected, and MUST NOT let a table write delay the next
@@ -999,7 +1039,8 @@ each.*
   120 s have passed without a `Ping`, and MUST NOT count a connection,
   a hello or any other frame as a `Ping`.
 - **P13.** The enclave MUST NOT call a parent it has found unreachable
-  before it has read that parent's next `Ping`.
+  before it has read that parent's next `Ping` and has written the
+  `Stopped` reports (§4.3).
 - **P14.** The enclave MUST NOT let a log record wait for the parent.
 
 ## 13. Open points
@@ -1026,6 +1067,10 @@ lists `account`. Points 5 and 6 are open. Point 8 is new.
 for S11). Point 11 was found and **closed** the same day (#72, `main`
 392b03c, for S11). Point 6 stays open, narrowed. Points 9, 10, 12 and
 13 are new and open.
+
+**State at 0.1.5.** No point changes. vettid-vault #74 (`main`
+a852e36, for S11) brought the code to §4.3's rule that the parent is
+reachable again only once it has been told.
 
 Found while writing this document. Each is described where it occurs
 above; the pull request that adds this document lists them with file
@@ -1126,6 +1171,11 @@ before. Points 1 and 2 are the ones that matter.
     its own return and its `Ping`'s reply.
 
 ## 14. Sources
+
+*0.1.5:* also read at a852e36: `enclave/supervisor/link.go` (`ping`,
+`hear`, `lost`, `locked`), `supervisor.go` (`checkParent`, `maintain`),
+`prochost.go` (`LockAllWithin`), `parent/parent.go` (the `Ping` sent
+when a descriptor arrives), and the description of vettid-vault #74.
 
 *0.1.4:* also read at 392b03c: `enclave/supervisor/supervisor.go`
 (`checkParent`), `link.go` (`ping`, `hear`, `lost`), `prochost.go`

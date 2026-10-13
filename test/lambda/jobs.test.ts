@@ -1,7 +1,7 @@
 import { mockClient } from 'aws-sdk-client-mock';
-import { DeleteCommand, DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DeleteCommand, DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, ScanCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
-import { AdminDeleteUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
+import { AdminDeleteUserCommand, AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
 import { DeleteEmailIdentityCommand, SendEmailCommand, SESv2Client } from '@aws-sdk/client-sesv2';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
@@ -37,19 +37,25 @@ beforeEach(() => {
   ddb.on(QueryCommand).resolves({ Items: [] });
   ddb.on(ScanCommand).resolves({ Items: [] });
   sqs.on(SendMessageCommand).resolves({});
+  // The sign-in user under the canceled account's address is its own.
+  idp.on(AdminGetUserCommand).resolves({ UserAttributes: [{ Name: 'custom:user_guid', Value: 'g1' }] });
 });
 
 describe('cleanup job', () => {
   const canceled = { user_guid: 'g1', email: 'gone@x.org', state: 'member', account_status: 'canceled', delete_after: '2020-01-01T00:00:00Z' };
 
   test('a member reinstated after the query is left completely alone', async () => {
-    ddb.on(QueryCommand, { TableName: 'members', ExpressionAttributeValues: { ':s': 'member', ':c': 'canceled', ':now': expect.anything() } } as any).resolves({ Items: [canceled] });
     ddb.on(QueryCommand).callsFake((input) => (input.ExpressionAttributeValues?.[':c'] === 'canceled' && input.ExpressionAttributeValues?.[':s'] === 'member' ? { Items: [canceled] } : { Items: [] }));
-    ddb.on(DeleteCommand).rejects(ccf()); // conditional row delete fails: reinstated
+    // The row's guard fails in the transaction with its marker: reinstated.
+    ddb.on(TransactWriteCommand).rejects(Object.assign(new Error('t'), { name: 'TransactionCanceledException', CancellationReasons: [{ Code: 'ConditionalCheckFailed' }, { Code: 'None' }] }));
     const r = await cleanup.handler();
-    expect(r.deleted).toBe(0);
+    expect(r).toMatchObject({ deleted: 0, failures: 0, incomplete: 0 });
+    expect(ddb.commandCalls(TransactWriteCommand)).toHaveLength(1); // only the guarded attempt
+    expect(ddb.commandCalls(TransactWriteCommand)[0].args[0].input.TransactItems![0].Delete).toMatchObject({ Key: { user_guid: 'g1' }, ConditionExpression: 'account_status = :c AND delete_after < :now' });
+    expect(idp.commandCalls(AdminGetUserCommand)).toHaveLength(0);
     expect(idp.commandCalls(AdminDeleteUserCommand)).toHaveLength(0);
-    expect(ddb.commandCalls(DeleteCommand)).toHaveLength(1); // only the guarded attempt
+    expect(ddb.commandCalls(DeleteCommand)).toHaveLength(0);
+    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
   });
 
   const R = 'c'.repeat(96);
@@ -86,7 +92,10 @@ describe('cleanup job', () => {
     expect(mark).toMatchObject({ Key: { vault_id: 'a'.repeat(32) }, UpdateExpression: 'SET deletion_requested_at = :t' });
     const vaultDeletes = ddb.commandCalls(DeleteCommand).filter((c) => c.args[0].input.TableName === 'vaults').map((c) => c.args[0].input.Key);
     expect(vaultDeletes).toEqual([{ vault_id: 'b'.repeat(32) }, { vault_id: 'user#g1' }]);
-    expect(ddb.commandCalls(DeleteCommand)[0].args[0].input).toMatchObject({ TableName: 'members', Key: { user_guid: 'g1' } });
+    // Row and its own marker went first, together; then the account's own sign-in user.
+    expect(ddb.commandCalls(TransactWriteCommand).map((c) => c.args[0].input.TransactItems!.map((i) => i.Delete!.Key))).toEqual([[{ user_guid: 'g1' }, { user_guid: 'email:gone@x.org' }]]);
+    expect(ddb.commandCalls(DeleteCommand).filter((c) => c.args[0].input.TableName === 'members')).toHaveLength(0);
+    expect(idp.commandCalls(AdminDeleteUserCommand).map((c) => c.args[0].input.Username)).toEqual(['gone@x.org']);
   });
 
   test('no live instance: a start is requested, the deletion is marked, nothing is queued', async () => {
@@ -154,18 +163,17 @@ describe('cleanup job', () => {
   test('stale unverified request: row + marker removed; SES identity kept if the mailing list uses it', async () => {
     const stale = { user_guid: 'g2', email: 'list@x.org', state: 'requested', email_verified: false };
     ddb.on(QueryCommand).callsFake((input) => (input.ExpressionAttributeValues?.[':r'] === 'requested' ? { Items: [stale] } : { Items: [] }));
-    ddb.on(DeleteCommand).resolves({});
     ddb.on(GetCommand, { TableName: 'list' }).resolves({ Item: { email: 'list@x.org' } });
     const r = await cleanup.handler();
     expect(r.reclaimed).toBe(1);
-    expect(ddb.commandCalls(DeleteCommand).map((c) => c.args[0].input.Key)).toEqual([{ user_guid: 'g2' }, { user_guid: 'email:list@x.org' }]);
+    expect(ddb.commandCalls(TransactWriteCommand).map((c) => c.args[0].input.TransactItems!.map((i) => i.Delete!.Key))).toEqual([[{ user_guid: 'g2' }, { user_guid: 'email:list@x.org' }]]);
+    expect(ddb.commandCalls(DeleteCommand)).toHaveLength(0);
     expect(ses.commandCalls(DeleteEmailIdentityCommand)).toHaveLength(0);
   });
 
   test('stale unverified request not on the list: its SES identity is deleted too', async () => {
     const stale = { user_guid: 'g3', email: 'nobody@x.org', state: 'requested', email_verified: false };
     ddb.on(QueryCommand).callsFake((input) => (input.ExpressionAttributeValues?.[':r'] === 'requested' ? { Items: [stale] } : { Items: [] }));
-    ddb.on(DeleteCommand).resolves({});
     ddb.on(GetCommand, { TableName: 'list' }).resolves({});
     ses.on(DeleteEmailIdentityCommand).resolves({});
     await cleanup.handler();
@@ -364,8 +372,16 @@ describe('cleanup job: start-overs (MEMBER-API 2.1.0, VAULT-MESSAGING 0.16.0 §1
     });
     ddb.on(DeleteCommand).resolves({});
     idp.on(AdminDeleteUserCommand).resolves({});
-    expect((await cleanup.handler()).deleted).toBe(1);
+    expect(await cleanup.handler()).toMatchObject({ deleted: 1, failures: 0, incomplete: 0 });
     expect(memberReads()).toHaveLength(0); // the account's deletion does not ask whether the account is active
+    // The row went first, under its guard and in one transaction with its own
+    // marker; no member row is deleted outside it; then the account's own sign-in user.
+    const [tx] = ddb.commandCalls(TransactWriteCommand).map((c) => c.args[0].input.TransactItems!);
+    expect(ddb.commandCalls(TransactWriteCommand)).toHaveLength(1);
+    expect(tx.map((i) => i.Delete!.Key)).toEqual([{ user_guid: 'g1' }, { user_guid: 'email:gone@x.org' }]);
+    expect(tx[0].Delete).toMatchObject({ TableName: 'members', ConditionExpression: 'account_status = :c AND delete_after < :now' });
+    expect(ddb.commandCalls(DeleteCommand).filter((c) => c.args[0].input.TableName === 'members')).toHaveLength(0);
+    expect(idp.commandCalls(AdminDeleteUserCommand).map((c) => c.args[0].input.Username)).toEqual(['gone@x.org']);
     const [send] = sqs.commandCalls(SendMessageCommand);
     expect(JSON.parse(send.args[0].input.MessageBody!)).toMatchObject({ op: 'delete', vault_id: 'a'.repeat(32), user_guid: 'g1' });
     expect(vaultUpdates().map((u) => u.UpdateExpression)).toEqual(['SET deletion_requested_at = :t']);

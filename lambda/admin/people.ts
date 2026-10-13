@@ -6,12 +6,10 @@
 import {
   AdminAddUserToGroupCommand,
   AdminCreateUserCommand,
-  AdminDeleteUserCommand,
   AdminDisableUserCommand,
   AdminEnableUserCommand,
   AdminGetUserCommand,
   AdminUserGlobalSignOutCommand,
-  UserNotFoundException,
 } from '@aws-sdk/client-cognito-identity-provider';
 import { CreateEmailIdentityCommand, DeleteEmailIdentityCommand, GetEmailIdentityCommand } from '@aws-sdk/client-sesv2';
 import {
@@ -21,6 +19,7 @@ import {
   PutCommand,
   QueryCommand,
   ScanCommand,
+  TransactWriteCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { audit } from '../shared/audit';
@@ -29,7 +28,7 @@ import { adminHandler } from '../shared/admin-handler';
 import { Router, badRequest, conflict, decodeCursor, encodeCursor, int, notFound, str } from '../shared/http';
 import { HttpError } from '../shared/http';
 import { inviteCode, nowIso } from '../shared/ids';
-import { emailMarkerKey } from '../shared/members';
+import { deleteOwnSignInUser, leftBehind, ownEmailMarkerDelete } from '../shared/members';
 import { sendMail } from '../shared/mail';
 import { MemberItem, MemberView, SubscriptionItem, toMemberView } from '../shared/model';
 import { pushAccountSnapshot } from '../shared/account-snapshot';
@@ -476,19 +475,63 @@ router.on('POST', '/admin/members/{user_guid}/reinstate', async ({ params, body,
   return view(updated);
 });
 
+/**
+ * Delete (ADMIN-API "Members"). The sign-in user and the email marker are
+ * named by the address, not by the member, and the address can be requested
+ * again the moment its marker is gone. So between reading the row and
+ * deleting, the cleanup job may have removed this member and somebody may
+ * have made a new request for the address: its marker and its sign-in user
+ * sit under the same names. Each thing is therefore deleted only if it is
+ * this member's own, and "deleted" is answered only if this call deleted
+ * the row.
+ */
 router.on('DELETE', '/admin/members/{user_guid}', async ({ params, actor }) => {
   const m = await getMember(params.user_guid);
-  try {
-    await cognito.send(new AdminDeleteUserCommand({ UserPoolId: memberPoolId(), Username: m.email }));
-  } catch (e) {
-    if (!(e instanceof UserNotFoundException) && (e as Error).name !== 'UserNotFoundException') throw e;
+  // First, so that a failure leaves the row and Delete can be repeated.
+  const user = await deleteOwnSignInUser(m);
+  if (user === 'other') {
+    console.warn('member delete: the sign-in user under this address carries another id and is left', JSON.stringify({ user_guid: m.user_guid })); // never the address
   }
   await ddb.send(new DeleteCommand({ TableName: table.subscriptions(), Key: { user_guid: m.user_guid } }));
-  await ddb.send(new DeleteCommand({ TableName: table.members(), Key: { user_guid: emailMarkerKey(m.email) } }));
-  await ddb.send(new DeleteCommand({ TableName: table.members(), Key: { user_guid: m.user_guid } }));
+  // Row and marker together: the row only if it is still there, the marker
+  // only if it is this member's own (or already gone).
+  const row = { TableName: table.members(), Key: { user_guid: m.user_guid }, ConditionExpression: 'attribute_exists(user_guid)' };
+  // The row was removed by someone else since it was read (the cleanup job,
+  // another admin). Not deleted by this call: no `member.delete` event, no
+  // "ok". A marker that still names the row would reserve the address with
+  // nothing behind it, and nothing would find it again: it goes now.
+  const gone = async () => {
+    try {
+      await ddb.send(new DeleteCommand({ ...ownEmailMarkerDelete(m), ConditionExpression: 'member_guid = :g' }));
+    } catch (e) {
+      if ((e as Error).name !== 'ConditionalCheckFailedException') throw e; // already gone, or another request's
+    }
+    return notFound('No such member');
+  };
+  let marker: 'deleted' | 'left' = 'deleted';
+  try {
+    await ddb.send(new TransactWriteCommand({ TransactItems: [{ Delete: row }, { Delete: ownEmailMarkerDelete(m) }] }));
+  } catch (e) {
+    const err = e as { name?: string; CancellationReasons?: { Code?: string }[] };
+    const [rowReason, markerReason] = err.CancellationReasons ?? [];
+    if (err.name !== 'TransactionCanceledException') throw e;
+    if (rowReason?.Code === 'ConditionalCheckFailed') throw await gone();
+    if (markerReason?.Code !== 'ConditionalCheckFailed') throw e;
+    // The marker names another request: it is left, and the row goes alone.
+    console.warn('member delete: the email marker belongs to another request and is left', JSON.stringify({ user_guid: m.user_guid })); // never the address
+    marker = 'left';
+    try {
+      await ddb.send(new DeleteCommand(row));
+    } catch (e2) {
+      if ((e2 as Error).name !== 'ConditionalCheckFailedException') throw e2;
+      throw await gone();
+    }
+  }
   // The audit event keeps who and when. The address goes to its 90-day
-  // address record (lambda/shared/audit.ts), not into the event.
-  await audit(actor, 'member.delete', m.user_guid, { email: m.email, state: m.state });
+  // address record (lambda/shared/audit.ts), not into the event. What was
+  // found to be somebody else's and left is named (`sign_in_user`,
+  // `email_marker`: 'left'), so the record shows what this Delete did not clear.
+  await audit(actor, 'member.delete', m.user_guid, { email: m.email, state: m.state, ...leftBehind(user, marker) });
   return { ok: true };
 });
 

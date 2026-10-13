@@ -339,6 +339,15 @@ export interface DeletionRow {
 }
 
 type Op = 'enroll' | 'unlock' | 'lock' | 'recovery' | 'recovery_cancel' | 'recovery_register';
+/**
+ * The operations whose result `GET /api/vault/requests/{id}` passes on (the
+ * envelope and the code): those a client makes with its own request id and
+ * polls at once, each result sealed to the app that asked. Never `recovery`,
+ * whose slot holds the sealed recovery code. The other slots (`recovery_cancel`
+ * here, `account` and `delete` from the jobs) have ids the API makes and never
+ * returns, and no result for a client.
+ */
+const POLLED_OPS: ReadonlySet<string> = new Set<Op>(['enroll', 'unlock', 'lock', 'recovery_register']);
 
 // ---- errors (§11.1, §11.9, §11.10.5) ------------------------------------------------
 // Bodies carry the MEMBER-API `error` and also the spec's `code`.
@@ -1081,6 +1090,13 @@ router.on('GET', '/api/vault/requests/{id}', async (req) => {
   // vault.unlock.result, or random bytes of the same size) is opaque here;
   // anything but exactly 5,252 bytes is not passed on.
   const out: Record<string, unknown> = { status };
+  // A recovery request's own slot (its id is the recovery_id) holds the
+  // sealed recovery code. Only GET /api/vault/recovery releases that, from
+  // available_at and with its audit event: here the slot answers its status
+  // and nothing else (no envelope, no code), at any time. So does any slot
+  // that is not one of the operations a client polls for its result, and a
+  // slot without an `op` (fail closed).
+  if (typeof item.op !== 'string' || !POLLED_OPS.has(item.op)) return out;
   if (status === 'done') {
     const env = typeof item.envelope === 'string' ? decodeCanonicalB64(item.envelope) : null;
     if (env && env.length === RESULT_ENVELOPE_BYTES) out.envelope = item.envelope;
@@ -1811,6 +1827,50 @@ router.on('POST', '/api/vault/recovery', async (req) => {
   return new WithStatus(202, { recovery_id: recoveryId, available_at: iso(r.available_at), expires_at: iso(r.expires_at) });
 });
 
+/** After this long an unfinished release (its audit write failed, or the function died) may be tried again. */
+export const RELEASE_RETRY_S = 60;
+
+/**
+ * Whether the recovery code may be returned now: only when its release is on
+ * record. The slot's `released` is set after `vault.recovery_code_released`
+ * has been written, never before, so a failed audit write leaves the code
+ * unreleased (the request fails; a later one tries again). Of the requests
+ * that find it unreleased, the one that takes the slot's `releasing` mark
+ * (conditional) writes the event; the others answer without the code unless
+ * the release has been recorded meanwhile (the page asks again). The event is
+ * written once, except when a release fails after its audit write and before
+ * `released` is set: the next attempt then writes it again, which errs on
+ * the side of the record.
+ */
+async function codeReleased(m: MemberItem, v: VaultRow, r: RecoveryRow, slot: Record<string, unknown>, now: number): Promise<boolean> {
+  if (slot.released === true) return true;
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: table.vaultRequests(),
+        Key: { request_id: r.recovery_id },
+        UpdateExpression: 'SET releasing = :now',
+        ConditionExpression: 'attribute_exists(request_id) AND attribute_not_exists(released) AND (attribute_not_exists(releasing) OR releasing < :stale)',
+        ExpressionAttributeValues: { ':now': now, ':stale': now - RELEASE_RETRY_S },
+      }),
+    );
+  } catch (e) {
+    if ((e as Error).name !== 'ConditionalCheckFailedException') throw e;
+    // Another request is releasing it, or has: the code only if that is recorded.
+    return (await recoverySlot(m, r))?.released === true;
+  }
+  await audit(memberActor(m.user_guid), 'vault.recovery_code_released', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id });
+  await ddb.send(
+    new UpdateCommand({
+      TableName: table.vaultRequests(),
+      Key: { request_id: r.recovery_id },
+      UpdateExpression: 'SET released = :t',
+      ExpressionAttributeValues: { ':t': true },
+    }),
+  );
+  return true;
+}
+
 router.on('GET', '/api/vault/recovery', async (req) => {
   const m = await loadVaultMember(req);
   await limit(`vault-recovery-status#${m.user_guid}`, 60, 60);
@@ -1829,21 +1889,11 @@ router.on('GET', '/api/vault/recovery', async (req) => {
   if (state === 'available' || state === 'unavailable') {
     const slot = await recoverySlot(m, r);
     const env = slot && slot.status === 'done' && typeof slot.envelope === 'string' ? decodeCanonicalB64(slot.envelope) : null;
-    if (env && env.length === RESULT_ENVELOPE_BYTES) {
+    // A code is returned only once its release is on record (a refusal has no release).
+    if (env && env.length === RESULT_ENVELOPE_BYTES && (state === 'unavailable' || (await codeReleased(m, v, r, slot!, now)))) {
       out.sealed_code = slot!.envelope;
       // 2.4.0: the locator only together with a code's sealed_code, never with a refusal's.
       if (state === 'available' && typeof r.locator === 'string' && LOCATOR_RE.test(r.locator)) out.locator = r.locator;
-      if (state === 'available' && !slot!.released) {
-        await ddb.send(
-          new UpdateCommand({
-            TableName: table.vaultRequests(),
-            Key: { request_id: r.recovery_id },
-            UpdateExpression: 'SET released = :t',
-            ExpressionAttributeValues: { ':t': true },
-          }),
-        );
-        await audit(memberActor(m.user_guid), 'vault.recovery_code_released', m.user_guid, { vault_id: v.vault_id, recovery_id: r.recovery_id });
-      }
     }
   }
   return { recovery: out };
@@ -1886,10 +1936,30 @@ router.on('POST', '/api/vault/recovery/claim', async (req) => {
   const vaultId = field(req.body, 'vault_id', VAULT_ID_RE, '32 lowercase hex');
   const recoveryId = field(req.body, 'recovery_id', ULID_RE, 'a ULID');
   if (vaultId !== h.vault) throw badRequest('vault_id must be the vault the request is signed for');
-  await limit(`vault-recovery-claim#${vaultId}`, 10, 86_400);
+  // The per-network limit first (hits and misses alike), then the lookup;
+  // the vault's daily allowance is charged only to a pair that names the
+  // vault's recovery, as in the typed form. Otherwise anyone who knows a
+  // vault_id could spend the allowance of a recovery they cannot claim.
   await limit(`vault-recovery-claim-net#${req.ip}`, 10, 15 * 60);
+  if (!(await scannedPair(vaultId, recoveryId))) throw notFound('No such recovery');
+  await limit(`vault-recovery-claim#${vaultId}`, 10, 86_400);
   return claimRecovery(key, vaultId, recoveryId, 'qr');
 });
+
+/**
+ * Whether the scanned pair names a vault's recovery: the vault exists, is not
+ * deleted, its recovery has that id and its member's pointer names it. Every
+ * call does the same two consistent reads (the vault row and a pointer row,
+ * one that cannot exist when there is no vault) and writes nothing, so timing
+ * does not tell an unknown vault from a known vault with another recovery.
+ * A recovery in any state is a hit here (a cancelled or expired one gets its
+ * 409 from the claim, as before).
+ */
+async function scannedPair(vaultId: string, recoveryId: string): Promise<boolean> {
+  const v = await vaultRow(vaultId);
+  const pointer = await readPointer(v && typeof v.user_guid === 'string' ? v.user_guid : NO_USER_GUID);
+  return !!v && v.state !== 'deleted' && v.recovery?.recovery_id === recoveryId && pointer?.current_vault_id === v.vault_id;
+}
 
 /**
  * The typed form (2.4.0): the body's syntax, the per-network limit (the

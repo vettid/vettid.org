@@ -25,6 +25,26 @@ import {
 // assume the manifest-signer and retirement roles (lib/constructs/owner-trust.ts).
 export { OWNER_PERMISSION_SET } from '../constructs/owner-trust';
 
+/**
+ * Old versions of the data bucket's objects (owner, 2026-10-13: the
+ * current version and a few older ones are enough). A vault's state is one
+ * object rewritten in full at every change, so its old versions are where
+ * the bucket's bytes go. S3 removes a noncurrent version when it has been
+ * noncurrent for more than `keepAllDays` AND `keepNewest` newer noncurrent
+ * versions of the object exist, or when it has been noncurrent for more
+ * than `maxDays`, whichever comes first. S3 counts days from the moment a
+ * version was replaced, rounds up to the next midnight UTC and removes
+ * some time after that.
+ */
+export const VAULT_DATA_VERSIONS = {
+  /** Every version replaced within this many days is kept (1 is the least S3 accepts). */
+  keepAllDays: 1,
+  /** Beyond that, this many of the newest noncurrent versions of each object (S3 allows 1 to 100). */
+  keepNewest: 5,
+  /** No noncurrent version is kept longer than this; it also bounds how long a deleted vault's objects stay (VAULT-RELEASES §11.4). */
+  maxDays: 7,
+} as const;
+
 export interface VettidOrgVaultStackProps extends cdk.StackProps {
   readonly config: AppConfig;
   /** Release keys to hold (none yet; W7 feeds them from releases.json). */
@@ -153,8 +173,17 @@ export class VettidOrgVaultStack extends cdk.Stack {
     };
 
     // ---- data bucket (§8.2) -----------------------------------------------------
-    // Objects are already DEK-encrypted or KMS-sealed, so SSE-S3. Versioned;
-    // noncurrent versions and delete markers go after 7 days (O9).
+    // Objects are already DEK-encrypted or KMS-sealed, so SSE-S3. Versioned.
+    // Two lifecycle rules over every key (VAULT_DATA_VERSIONS):
+    //  - the first is the rule the bucket has always had: no noncurrent
+    //    version outlives 7 days (O9), a delete marker goes once nothing
+    //    is left under it, unfinished multipart uploads go after a day;
+    //  - the second caps what is kept inside those 7 days: a noncurrent
+    //    version older than 1 day (the least S3 accepts) goes unless it
+    //    is one of the 5 newest noncurrent versions of its object.
+    // S3 removes a version as soon as either rule allows it. The first
+    // rule is what removes the last 5 versions of a deleted vault: the
+    // second alone would keep them, and the delete marker, for ever.
     this.dataBucket = new s3.Bucket(this, 'DataBucket', {
       bucketName: `${resourceName(config, 'vault-data')}-${vault.account}`,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -165,9 +194,14 @@ export class VettidOrgVaultStack extends cdk.Stack {
       removalPolicy: retain,
       lifecycleRules: [
         {
-          noncurrentVersionExpiration: cdk.Duration.days(7),
+          noncurrentVersionExpiration: cdk.Duration.days(VAULT_DATA_VERSIONS.maxDays),
           expiredObjectDeleteMarker: true,
           abortIncompleteMultipartUploadAfter: cdk.Duration.days(1),
+        },
+        {
+          id: 'KeepNewestNoncurrentVersions',
+          noncurrentVersionExpiration: cdk.Duration.days(VAULT_DATA_VERSIONS.keepAllDays),
+          noncurrentVersionsToRetain: VAULT_DATA_VERSIONS.keepNewest,
         },
       ],
     });
