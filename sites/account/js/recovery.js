@@ -57,6 +57,7 @@ const recoveryVaultId = () => recovery?.vault_id ?? vault?.vault_id;
 
 // ── Loading ─────────────────────────────────────────────────────────────
 
+/** Loads the state from the API and draws it. False when it could not be loaded (an error is drawn instead). */
 async function load({ focus } = {}) {
   clearTimers();
   try {
@@ -70,7 +71,7 @@ async function load({ focus } = {}) {
     wipeCode();
     if (err.code === 'terms_required') renderTermsRequired();
     else renderLoadError(err);
-    return;
+    return false;
   }
   canStore ??= await keys.supported();
   if (canStore) await keys.prune(needsKey(recovery) ? recovery : null);
@@ -78,6 +79,7 @@ async function load({ focus } = {}) {
   render();
   schedule();
   if (focus) $(focus)?.focus();
+  return true;
 }
 
 /** Work out what this browser can do with the current recovery (without keeping the code). */
@@ -383,7 +385,19 @@ async function cancelRecovery(b) {
   });
   if (!ok) return;
   const id = recovery.recovery_id;
-  const res = await ui.busy(b, () => post('/api/vault/recovery/cancel', { recovery_id: id }), { busyLabel: 'Cancelling…' });
+  let gone = false;
+  const res = await ui.busy(b, () => post('/api/vault/recovery/cancel', { recovery_id: id }), {
+    busyLabel: 'Cancelling…',
+    onError: (err) => {
+      // MEMBER-API 2.6.3: 404 when this is no longer the vault's current recovery.
+      if (err?.status === 404) gone = true;
+      else ui.showError(err);
+    },
+  });
+  if (gone) {
+    await recoveryGone(id);
+    return;
+  }
   if (!res) return;
   wipeCode();
   await keys.deleteKey(id).catch(() => {});
@@ -391,6 +405,27 @@ async function cancelRecovery(b) {
   // MEMBER-API 1.1.0: {cancelled: false} when the recovery had already ended.
   if (res.cancelled === false) ui.showNotice('There was nothing left to cancel: this recovery had already ended.', 'info');
   else ui.showNotice("The recovery is cancelled. We've emailed you a confirmation.");
+}
+
+/**
+ * The API answered 404 to a cancel: the recovery this page showed is no
+ * longer the vault's current one (a newer one replaced it, or the vault has
+ * none). Nothing was cancelled. Show what the API says now, and drop the
+ * old recovery's key; a newer recovery's key is stored under its own id and
+ * is kept.
+ */
+async function recoveryGone(id) {
+  wipeCode();
+  const loaded = await load({ focus: 'h-rec' });
+  if (loaded && recovery?.recovery_id === id) {
+    // The API still names it: nothing is known to have ended, so its key stays.
+    ui.showError("The recovery couldn't be cancelled. Reload the page and try again.");
+    return;
+  }
+  // When the state could not be loaded the page still holds the old recovery; the 404 is what counts.
+  await keys.deleteKey(id).catch(() => {});
+  if (loaded && isActive(recovery)) ui.showNotice('That recovery is no longer there: a newer one has replaced it. Nothing was cancelled. This page now shows the newer recovery.', 'info');
+  else ui.showNotice('That recovery is no longer there: it was replaced or has ended. Nothing was cancelled.', 'info');
 }
 
 function noKeyCallout() {

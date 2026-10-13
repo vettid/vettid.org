@@ -27,7 +27,7 @@ function done(cancelled) {
     head(cancelled ? 'Recovery cancelled' : 'Nothing left to cancel'),
     cancelled
       ? el('p', {}, "The recovery of your vault is cancelled, and we've emailed you a confirmation. Your VettID app can unlock your vault again with your vault PIN.")
-      : el('p', {}, 'This recovery had already ended: it was cancelled before, or its 48 hours are over. Nothing changed.'),
+      : el('p', {}, 'This recovery had already ended: it was cancelled before, it was completed on a new phone, or your vault refused it. Nothing changed.'),
     el('p', {}, "If you didn't start this recovery, someone may be able to read your email or use your VettID account:"),
     el('ul', { class: 'rec-points' },
       el('li', {}, 'Secure your email account: change its password and turn on two-step sign-in.'),
@@ -57,12 +57,14 @@ if (!token) {
     const res = await ui.busy(btn, () => publicPost('/api/vault/recovery/cancel-link', { token }), {
       busyLabel: 'Cancelling…',
       onError: (err) => {
-        if (err.status === 404) invalid('It may have been used already, or the recovery it belongs to has ended (it was cancelled, or its 48 hours are over).');
+        if (err.status === 404) invalid('The recovery it belongs to is no longer there: its 48 hours are over, or a newer recovery has replaced it. If neither is the case, copy the whole link from the email again.');
         else if (err.status === 400) invalid("It looks incomplete. Copy the whole link from the email, including the part after #.");
         else ui.showError(err);
       },
     });
     // MEMBER-API 1.1.0: {cancelled: boolean}; an older answer ({}) means it was handled.
+    // 2.6.3: false is a recovery that ended before its 48 hours were over
+    // (cancelled, completed or refused); after them the link answers 404.
     if (res) done(res.cancelled !== false);
   });
   fill(card,

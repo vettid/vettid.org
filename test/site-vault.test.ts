@@ -255,6 +255,52 @@ describe('the typed recovery code (VAULT-MESSAGING 0.25.0 §11.11.10, §16)', ()
       expect(rule).toContain('user-select: text');
       expect(rule).toMatch(/font-size: [\d.]+rem/);
     });
+
+    test('a cancel answered 404 (MEMBER-API 2.6.3): the state is reloaded, the old key goes, the member is told', () => {
+      const cancel = page.slice(page.indexOf('async function cancelRecovery'), page.indexOf('async function recoveryGone'));
+      // Only a 404 takes the new path; every other error is shown as before.
+      expect(cancel).toMatch(/onError: \(err\) => \{\s+\/\/[^\n]+\n\s+if \(err\?\.status === 404\) gone = true;\s+else ui\.showError\(err\);/);
+      expect(cancel).toMatch(/if \(gone\) \{\s+await recoveryGone\(id\);\s+return;\s+\}\s+if \(!res\) return;/);
+      // The answers 200 keep their handling and their texts.
+      expect(cancel).toContain("if (res.cancelled === false) ui.showNotice('There was nothing left to cancel: this recovery had already ended.', 'info');");
+      expect(cancel).toContain(`else ui.showNotice("The recovery is cancelled. We've emailed you a confirmation.");`);
+      expect(page).not.toContain('No such recovery');
+
+      const gone = page.slice(page.indexOf('async function recoveryGone'), page.indexOf('function noKeyCallout'));
+      // Reload first; the key is deleted by the old recovery's id, and not when the API still names that recovery.
+      const reload = gone.indexOf("const loaded = await load({ focus: 'h-rec' });");
+      const keep = gone.indexOf('if (loaded && recovery?.recovery_id === id) {');
+      const drop = gone.indexOf('await keys.deleteKey(id).catch(() => {});');
+      expect(gone.indexOf('wipeCode();')).toBeGreaterThan(0);
+      expect(reload).toBeGreaterThan(gone.indexOf('wipeCode();'));
+      expect(keep).toBeGreaterThan(reload);
+      expect(gone.slice(keep, drop)).toMatch(/ui\.showError\([^\n]+\);\s+return;\s+\}/);
+      expect(drop).toBeGreaterThan(keep);
+      expect(gone.match(/deleteKey\(/g)).toHaveLength(1);
+      expect(gone).not.toMatch(/keys\.prune|deleteKey\(recovery/);
+      expect(gone).toContain('That recovery is no longer there: a newer one has replaced it. Nothing was cancelled. This page now shows the newer recovery.');
+      expect(gone).toContain('That recovery is no longer there: it was replaced or has ended. Nothing was cancelled.');
+      expect(gone).toContain("The recovery couldn't be cancelled. Reload the page and try again.");
+      // load() says whether it could load, and still prunes by the recovery the API names.
+      const load = page.slice(page.indexOf('async function load'), page.indexOf('async function classify'));
+      expect(load).toMatch(/else renderLoadError\(err\);\s+return false;/);
+      expect(load).toMatch(/return true;\n\}/);
+      expect(load).toContain('await keys.prune(needsKey(recovery) ? recovery : null);');
+    });
+  });
+
+  describe('the cancel link\'s page (source)', () => {
+    const page = readFileSync(join(__dirname, '..', 'sites', 'account', 'js', 'recovery-cancel.js'), 'utf8');
+
+    test('the texts say what the link route answers (MEMBER-API 2.6.3)', () => {
+      // {cancelled: false}: ended before its 48 hours were over; never an expiry, which is 404.
+      expect(page).toContain('This recovery had already ended: it was cancelled before, it was completed on a new phone, or your vault refused it. Nothing changed.');
+      expect(page).not.toContain('it was cancelled before, or its 48 hours are over');
+      // 404: expired or replaced; a second use of the link is not a 404.
+      expect(page).toContain("if (err.status === 404) invalid('The recovery it belongs to is no longer there: its 48 hours are over, or a newer recovery has replaced it. If neither is the case, copy the whole link from the email again.');");
+      expect(page).not.toContain('It may have been used already');
+      expect(page).toContain('if (res) done(res.cancelled !== false);');
+    });
   });
 });
 
