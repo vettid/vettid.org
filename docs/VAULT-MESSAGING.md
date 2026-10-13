@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.29.6
+version: 0.29.7
 date: 2026-10-13
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -21,9 +21,22 @@ related:
   - VAULT-RELEASES.md (0.1.19; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
-  - VAULT-HOST-PROTOCOL.md (0.1.6; the enclave ↔ parent protocol as built)
+  - VAULT-HOST-PROTOCOL.md (0.1.7; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.29.7: correction of the document to the system as built; approved
+    by the owner 2026-10-13. No wire change, no code change, no new
+    vault release. **The PIN backoff and the password backoff do not
+    hold against a host that replays stored objects.** §11.11.2, "A
+    recovery started by the host": what it does not give, what protects
+    the member and the comparison with §13.5 are corrected (the section
+    said the recovery ran "under both backoffs", that the host cannot
+    hide it from the member, and that the exposure was the same as with
+    the member's email and account session); "Residual: the portal's
+    code" gets the same qualification. §11.11.6: the enclave limits are
+    kept in objects the host stores, and hold against everyone except
+    such a host. §13.2, "Residual risks": one more item
+    (VAULT-HOST-PROTOCOL 0.1.7 §11.3, §11.4)
   - 0.29.6: editorial-normative erratum, for the owner's approval
     (owner decision of 2026-10-13: rescue must always have a target;
     VAULT-RELEASES 0.1.24 §3.5, §6.2). No wire change, no new vault
@@ -10817,24 +10830,37 @@ the older code. The API allows only one active recovery per vault.
   - *What it gives:* a running vault is locked (§11.11.1 step 2); the
     recovery record is written into the sealed header; and the host can
     open the code once the enclave's 24 h have passed.
-  - *What it does not give:* a device, or anything of the vault. A
-    register still needs an app that passes device attestation
-    (§11.11.3), and the recovery still needs the PIN and the credential
-    password, online, under both backoffs (§11.11.5). With the
-    credential backup off there is no recovery at all (§11.11.1).
+  - *What it does not give by itself:* anything of the vault. A register
+    still needs an app that passes device attestation (§11.11.3), and
+    the recovery still needs the PIN and then the credential password,
+    online (§11.11.5). **Neither backoff holds against a host that
+    replays stored objects** (§13.2): the PIN backoff is in the sealed
+    header and the password backoff in the state, the host stores both,
+    a newly registered app has no minimums, and an app raises its
+    minimums only from a result the host delivers. Such a host can
+    register its own attested phone against a pending header it kept,
+    and then try PINs, and after the PIN passwords, at the speed of the
+    app. With the credential backup off, and never on in any copy the
+    host still holds, there is no recovery at all (§11.11.1).
   - *What the member sees:* the owner's devices are sent
     `vault.locking{reason: "recovery"}` when a running vault locks, and
     from then on the member's app is refused `recovery_pending` at
     every unlock (§11.4, §11.11.4) until the recovery ends. The member
-    is told by the vault, not by the host, so a host cannot hide it,
-    and the member's app can cancel it with `cancel_recovery` and the
+    is told by the vault, not by the host. That is a protection only
+    against a host that serves the current header: a host that keeps the
+    header with the pending record aside and serves the member's app the
+    one from before it shows the member nothing, and can undo a cancel
+    by serving the earlier header again. Against a host that does not
+    replay, the member's app can cancel with `cancel_recovery` and the
     PIN (§11.11.4). The `recovery` entry of `GET /api/vault/status` and
     the member API's email come from the API and would be missing.
-  - So "an operator reading them cannot register a device" above
-    stands, and a host-started recovery is the same exposure as §13.5's
-    row "Member's email and account session (24 h, unnoticed)", without
-    the email. `recovery_cancel` has no envelope either: the host can
-    end a member's own recovery (availability).
+  - So "an operator reading them cannot register a device" above stands
+    for an operator who only reads. A host that starts a recovery and
+    replays stored objects is a larger exposure than §13.5's row
+    "Member's email and account session (24 h, unnoticed)": no email, no
+    notice to the member's devices, and no working backoff.
+    `recovery_cancel` has no envelope either: the host can end a
+    member's own recovery (availability).
   - **Open design question** (not a requirement; the owner has not
     decided): whether a later vault release should require a `recovery`
     and a `recovery_cancel` to carry a signature of the member API,
@@ -10846,7 +10872,9 @@ the older code. The API allows only one active recovery per vault.
   data at rest, not against the page's own author. Such an attacker still
   needs the PIN and the password, guessed online under the enclave's
   backoffs. The same holds for an attacker who controls the member's email
-  and account session for 24 h without being noticed.
+  and account session for 24 h without being noticed. The backoffs do not
+  hold if the attacker is also a host that replays stored objects ("A
+  recovery started by the host" above).
 - **PQC exception.** The browser seal uses P-256 ECDH, the only key
   agreement in WebCrypto. A recorded ciphertext is worthless to a future
   quantum attacker, because the code expires within 48 h and is
@@ -11040,6 +11068,12 @@ not its owner check's state.
   - the PIN backoff (§11.8);
   - the credential password backoff (§3.5.3);
   - one recovery per vault (a new request replaces the old).
+
+  These limits are kept in the sealed header and in the state, which the
+  host stores. They hold against everyone except a host that replays stored
+  objects (§13.2). Such a host can serve a copy in which the wrong codes,
+  wrong PINs and wrong passwords were never counted, and in which a recovery
+  that was used, cancelled or replaced is still pending.
 - **Member API limits** (§11.11.7): requests, claims, registrations,
   cancels and status polls are rate-limited. A claim, scanned or by locator,
   is limited per source network before the lookup and per
@@ -12092,6 +12126,9 @@ client**:
 - A consistent rollback of both objects, served to a device that has never
   seen the newer values, goes undetected.
 - An attacker holding a registered, attested device can omit the minimums.
+- A device registered by a recovery has no minimums, and no device raises
+  its minimums from a result the host withholds: against a host that
+  replays, the PIN backoff and the password backoff do not hold (§11.11.2).
 
 The split-brain guard (§12.3) separately catches stale writers.
 
