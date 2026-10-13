@@ -48,7 +48,7 @@ turning that off in code (or the console) first.
 | `VettidOrgStageDnsStack` | **Staging only** (vettid-vault-staging): zone `staging.vettid.org`, its CAA, the SES domain identity `staging.vettid.org` (DKIM records), SSM `dns/zone-id`. Stateful. |
 | `VettidOrgStageSiteStack` | **Staging only**: https://staging.vettid.org (`sites/staging`), serving the staging channel's manifest from `vault/staging/pcr-manifest.json`. |
 | `VettidOrgStageTestMailStack` | **Staging only, test infrastructure**: MX for `test.staging.vettid.org`, the SES receipt rule set storing its mail in `vettid-org-staging-test-mail-<account>` (7 days), the owner-only reader role. See "Staging" → "Test mail". Never in prod. |
-| `VettidOrgAuditStack` | Management account: the organization CloudTrail trail and its bucket, the GuardDuty detector (administrator for the organization), Access Analyzer, the security-alert rules and topic `vettid-org-security-alerts`, and the default-bus policy admitting the member accounts' forwarders. Stateful. See "Security alerts". |
+| `VettidOrgAuditStack` | Management account: the organization CloudTrail trail (management events of every account, plus S3 data events on the terms bucket and, writes only, on the two vault data buckets) and its bucket, the GuardDuty detector (administrator for the organization), Access Analyzer, the security-alert rules and topic `vettid-org-security-alerts`, and the default-bus policy admitting the member accounts' forwarders. Stateful. See "Security alerts". |
 | `VettidOrgVaultAlertForwardStack` | **In the vault account** (prod: vettid-vault-prod; staging: vettid-vault-staging): the one rule forwarding its CloudTrail events to the management account's bus. See "Security alerts". |
 | `VettidOrgProteusAlertForwardStack` | **In the proteus account** (605628228301): the same forwarder. Deployed from this repository with `--profile proteus`. See "Security alerts". |
 | `VettidOrgCiReadOnlyStack`, `VettidOrgVaultCiReadOnlyStack` | Prod only, one per production account (management; vettid-vault-prod with `--profile vault-prod`): the GitHub Actions OIDC provider and the read-only role `vettid-org-ci-drift-readonly` for the drift check. See "Production drift". |
@@ -838,6 +838,13 @@ routes until VettidOrgVaultStack is redeployed.
   a release from the stack leaves its key alone (RETAIN; the custom
   resource's delete does nothing). A changed release entry fails the
   deploy (the key is immutable): add a new release instead.
+- The vault data bucket (`vettid-org[-staging]-vault-data-<account>`):
+  there is no export and no snapshot, so its lifecycle rule, its
+  versioning and its bucket policy are what stands between a mistake and
+  every member's vault. The same SCP denies changing them, and deleting
+  the bucket, to everyone but CloudFormation's CDK execution role; every
+  such call, a deploy's included, is emailed (`VaultDataBucketConfig`,
+  "Security alerts"). Change them only in `lib/stacks/vault-stack.ts`.
 - Break-glass for any of this: detach or edit `vettid-vault-key-protection`
   from the management account.
 
@@ -1163,8 +1170,8 @@ After publishing a manifest, run it at once:
    The image build takes about 20–40 minutes; a hash or PCR0 mismatch
    fails the build and the deploy (logs: `/aws/imagebuilder/vettid-org-vault-r<N>-<hash>`).
 5. Canary: `aws autoscaling set-desired-capacity --auto-scaling-group-name vettid-org-vault-r<N> --desired-capacity 1`,
-   then the self-test through SSM on that instance, per vettid-vault
-   docs/SMOKE.md:
+   then the self-test on that instance through Run Command ("No
+   interactive access to hosts" below), per vettid-vault docs/SMOKE.md:
    ```bash
    systemctl stop vault-parent      # also stops the enclave (vault-enclave is PartOf the parent)
    systemctl start vault-enclave    # a fresh enclave, which dials the self-test parent
@@ -1200,7 +1207,7 @@ After publishing a manifest, run it at once:
 From S3 on, the release image's self-test can measure how many vaults one
 host holds (vettid-vault docs/SMOKE.md, "Capacity measurement"). Run it on
 a host of the release under test, the same way as the canary self-test,
-through SSM with `executionTimeout` of at least 7200 s:
+through Run Command with `executionTimeout` of at least 7200 s:
 
 ```bash
 systemctl stop vault-parent      # also stops the enclave (PartOf)
@@ -1500,12 +1507,72 @@ moved; the scaler then stops the group at once.
 ### Network and egress
 
 Hosts: public subnets in two AZs of the host VPC, no NAT, no inbound,
-outbound TCP 443 only, SSM Session Manager only. Route 53 Resolver DNS
+outbound TCP 443 only, no SSH key and no interactive access: commands
+through Systems Manager Run Command only (next section). Route 53 Resolver DNS
 Firewall answers only the names in `lib/vault/egress.ts` (NXDOMAIN for the
 rest; query logs in `/vettid-org/<stage>/vault-dns`, metric
 `DnsQueriesBlocked`); S3 and DynamoDB gateway endpoints admit only this
 account's resources. AMIs are built in a separate build VPC without the
 firewall (the builder needs GitHub and the package repositories).
+
+### No interactive access to hosts
+
+Nobody gets a shell on an instance in a vault account (the owner's
+decision of 2026-10-13), in staging or production. What makes it so:
+
+- The Vault OU policy (`lib/org/scp-vault.json`, statement
+  `NoInteractiveSessions`) denies, to every principal in both accounts
+  with no exception: `ssm:StartSession` and `ssm:ResumeSession` (one call
+  starts every kind of session: the shell, an interactive command, port
+  forwarding, SSH over Session Manager, whatever the session document),
+  every EC2 Instance Connect call (a temporary SSH key, the serial
+  console's key, an Instance Connect tunnel), creating an Instance
+  Connect endpoint, and turning on the serial console (it is off in both
+  accounts).
+- The hosts themselves: the security group has no inbound rule, the
+  launch template has no key pair, and neither account has one.
+
+What an operator does instead: **Run Command**, one command at a time.
+It runs as root, through the SSM agent, without a terminal:
+
+```bash
+P="--profile vault-staging"; I=<instance id>
+C=$(aws ssm send-command $P --instance-ids $I --document-name AWS-RunShellScript \
+  --comment "S12 self-test" --parameters 'commands=["systemctl is-active vault-parent"]' \
+  --query Command.CommandId --output text)
+aws ssm get-command-invocation $P --command-id $C --instance-id $I \
+  --query '[Status,StandardOutputContent,StandardErrorContent]' --output text
+```
+
+Give every command a `--comment` (it is in CloudTrail; the commands
+themselves are not). The output comes back up to 24,000 characters:
+for more, write to a file on the host and `grep` or `tail` it with a
+second command, as "Capacity measurement" does. A long command takes
+`executionTimeout` in `--parameters`. Each `send-command` by a person
+sends a `VaultHostAccess` email ("Security alerts"); that is intended.
+So does every other way to have the agent run a document (a State
+Manager association, an automation, a maintenance-window task); none is
+used here, so use none.
+Image Builder's own commands on its build instances and a patch
+baseline, should one ever be wanted, are Run Command too and are not
+affected (the hosts are replaced by a new release's image, not patched
+in place).
+
+Run Command is still any command as root. What the policy removes is
+the terminal: unattributed keystrokes with nothing recorded. It does
+not stop an administrator from running a script.
+
+**Break-glass.** A shell on a host takes a change of the organization
+policy, which only an administrator of the management account can make
+(nothing inside a vault account can): remove the two `ssm:` actions
+from the statement, `scripts/vault/apply-scp.sh --apply`, open the
+session, put the file back and apply again. Each apply emails
+`OrgOrSsoChanges`, and the session emails `VaultHostAccess`. Say in
+the release or incident notes why it was needed.
+
+The exit node in the management account ("Admin access") is not a
+vault host and is not under this policy: its Session Manager access is
+unchanged.
 
 ### The Android app link (account site)
 
@@ -2137,7 +2204,15 @@ How events get there:
   `vettid-org-security-alert-forward` (role
   `vettid-org-security-alert-forwarder`), that sends every CloudTrail
   write call (read-only calls excluded; refused calls included) and every
-  console sign-in to the management account's default bus. Stacks:
+  console sign-in to the management account's default bus. Data events
+  (the object writes on the vault data bucket, "Vault data events" below)
+  are not forwarded: they are kept in the trail, and the host makes them
+  all day. The pattern also names Session Manager's `StartSession` and
+  `ResumeSession`, as a precaution that by itself changes nothing:
+  EventBridge gives read-only management calls only to a rule in state
+  `ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS`, and the rule is in
+  the ordinary `ENABLED` state ("Testing an alert" says when that would
+  have to change). Stacks:
   `VettidOrgVaultAlertForwardStack` (vault-prod; in staging, vault-staging)
   and `VettidOrgProteusAlertForwardStack` (proteus; an organization-level
   control, so it lives here, not in the proteus-web-site repository).
@@ -2168,6 +2243,10 @@ How events get there:
   or edit it there.
 - **GuardDuty findings** of all accounts arrive in the management account
   directly: it is the GuardDuty administrator (members auto-enabled).
+  S3 protection (GuardDuty's own reading of object calls, for findings
+  such as unusual downloads or deletions) is a per-feature organization
+  setting, not in any stack: "Vault data events" below has the one-time
+  command.
 - us-east-1 only: global events (IAM, STS, sign-in, Organizations,
   Identity Center) land there, and the Workloads SCP denies every other
   region in the member accounts. (Calls attempted in other regions are
@@ -2191,6 +2270,10 @@ pattern the SCPs exempt):
 | `KmsKeyDeletion` | `ScheduleKeyDeletion`, `CancelKeyDeletion`, `DisableKey`, `DeleteImportedKeyMaterial` — always, deploys included (management and proteus) |
 | `KmsKeyPolicy` | `PutKeyPolicy` outside a deploy (management and proteus) |
 | `S3PublicAccess` | bucket policy, ACL, ownership controls, bucket- or account-level public access block (outside a deploy) |
+| `VaultDataBucketConfig` | a vault data bucket's lifecycle rule, versioning or bucket policy changed, or the bucket deleted — always, deploys and refused attempts included (vault accounts) |
+| `VaultHostAccess` | in a vault account, except by Image Builder itself (its service principal and its service-linked role) on its build instances: a Run Command (`SendCommand`) and the other ways to have the SSM agent run a document, deploys included (`CreateAssociation`, `CreateAssociationBatch`, `UpdateAssociation`, `StartAssociationsOnce`; `StartAutomationExecution`, `StartChangeRequestExecution`; `RegisterTaskWithMaintenanceWindow`, `UpdateMaintenanceWindowTask`); and every interactive way in, which the Vault OU policy denies, so normally as a refused attempt: a Session Manager session (`StartSession`, `ResumeSession`), EC2 Instance Connect (`SendSSHPublicKey`, `SendSerialConsoleSSHPublicKey`, `OpenTunnel`, `CreateInstanceConnectEndpoint`), the serial console switch (`EnableSerialConsoleAccess`) |
+| `VaultHostProfileLaunch` | `RunInstances` with the instance profile `vettid-org-vault-host` by anything but Auto Scaling through its service-linked role (vault accounts; refused attempts included) |
+| `VaultHostLaunchPath` | `CreateLaunchTemplate`, `CreateLaunchTemplateVersion`, `ModifyLaunchTemplate`; `CreateAutoScalingGroup`, `UpdateAutoScalingGroup`, `CreateLaunchConfiguration`, `StartInstanceRefresh`; `AssociateIamInstanceProfile`, `ReplaceIamInstanceProfileAssociation`; `AddRoleToInstanceProfile` — always, **deploys included** (vault accounts): a release deploy sends three, a release's removal one |
 | `SecurityGroupOpenToWorld` | ingress from `0.0.0.0/0` or `::/0` (outside a deploy) |
 | `GuardDutyFindings` | GuardDuty findings of severity ≥ 4 (medium) in any account |
 | alarm `vettid-org-security-alert-heartbeat-<account>` | no forwarding heartbeat from that member for 3 hours (OK email when it resumes) |
@@ -2202,6 +2285,157 @@ also emailed to admin@vettid.org), so the central KMS rules skip those
 accounts rather than send every key event twice. A release key's
 scheduled deletion by the retirement role is expected and is still
 reported there.
+
+### The vault account alerts: what they mean, what to do
+
+All four concern the sealed vault objects in the data bucket. The host
+role `vettid-org-vault-host` is the only principal the bucket policy
+admits to them, and its credentials do not open them: a release key
+decrypts only for an attested enclave. So the worst case behind these
+alerts is objects copied or destroyed, not read.
+
+- **`VaultDataBucketConfig`.** Expected only while a deploy of
+  `VettidOrgVaultStack` that changes the bucket's definition runs (`who`
+  is then `…/cdk-hnb659fds-cfn-exec-role-…/AWSCloudFormation`, and the
+  change is in the merged diff). Anything else, at once: read the
+  bucket's state with that account's profile
+  (`aws s3api get-bucket-lifecycle-configuration`, `get-bucket-versioning`,
+  `get-bucket-policy`, each with `--bucket <name>`) and compare with
+  `lib/stacks/vault-stack.ts`: versioning `Enabled`; the lifecycle
+  rules exactly as the stack's `lifecycleRules` has them (noncurrent
+  versions kept for the days written there, expired delete markers
+  removed, incomplete uploads aborted), and **no** rule that expires
+  current objects; the two deny statements. If it differs, deploy
+  `VettidOrgVaultStack` to put it back **the same day**: an expiry rule
+  takes effect at the next midnight UTC and noncurrent versions go only
+  after their days, so an early repair loses nothing (objects that already have a
+  delete marker come back by deleting the marker). An `error:
+  AccessDenied` means the SCP refused the call and nothing changed; find
+  out who tried. A bucket policy change outside a deploy also arrives as
+  `S3PublicAccess`.
+- **`VaultHostAccess`.** Look at `event` and `error` first.
+  `SendCommand`: someone ran a command on an instance in a vault
+  account. CloudTrail keeps who, when, from where, on which instance
+  (`requestParameters.instanceIds`), the document and the comment, not
+  the command: its parameters are recorded as hidden. Expected when the
+  owner runs a release's self-test or capacity measurement ("Adding a
+  release", "Capacity measurement"); one email per command, typically
+  three to ten on a release day. An association, an automation or a
+  maintenance-window task (`CreateAssociation`,
+  `StartAutomationExecution`, `RegisterTaskWithMaintenanceWindow` and
+  their variants) makes the agent run a document without a visible
+  `SendCommand`; no procedure and no stack uses one in a vault account,
+  so treat it as a command that was not you, and delete the association
+  or task. Any other event is an interactive way in ("No interactive access to hosts"):
+  with `error: AccessDenied` the policy refused it and nothing happened,
+  but someone tried; **without an error the policy is not in force**
+  (detached, edited, or the account moved out of the Vault OU): check
+  `OrgOrSsoChanges` emails and re-apply it. For a command or a session
+  that was not you: treat the host role's credentials on that instance
+  as taken. Terminate the instance (its group starts a new one; the
+  credentials die with it within hours), end the Identity Center
+  session that made the call, and read the data events of the bucket
+  from that time on ("Vault data events": they show what was written or
+  deleted, not what was read).
+- **`VaultHostProfileLaunch`.** An instance was started with the host
+  role outside the release groups, so something other than a released
+  image holds the credentials that read and delete sealed objects. No
+  procedure does this (image builds and rebuilds use
+  `vettid-org[-staging]-vault-image-builder`). Find the instance
+  (`responseElements.instancesSet.items[].instanceId` in the event),
+  terminate it, and read the data events of the bucket for writes and
+  deletions from it: its session name in `userIdentity.arn` is its
+  instance id. What it read is not recorded.
+- **`VaultHostLaunchPath`.** The indirect ways to the same thing: a
+  launch template or group that Auto Scaling would launch from (those
+  launches are not reported, as release groups launch hosts all day), a
+  refresh of a group's instances, a profile attached to a running
+  instance, a role put into another profile. Reported whoever does it,
+  a deploy too: a stack is how hosts come to exist, so a stack nobody
+  reviewed must not be quiet. **Expected, with `who` ending in
+  `…cfn-exec-role-…/AWSCloudFormation`, while you deploy:** three emails
+  for a new `VettidOrgVaultRelease<N>Stack` (`CreateLaunchTemplate`,
+  `CreateAutoScalingGroup`, `UpdateAutoScalingGroup`, within a minute),
+  one `UpdateAutoScalingGroup` for a release stack that is destroyed or
+  whose `min_instances` or `max_instances` changed, one
+  `AddRoleToInstanceProfile` for a first deploy of the vault or host
+  stack. Check the group or template name against the release you are
+  deploying (`vettid-org[-staging]-vault-r<N>`). Also expected: one
+  `AddRoleToInstanceProfile` when a temporary profile is made by hand
+  for an independent rebuild. Anything else, or any of these when
+  nobody is deploying: look at the event's `requestParameters` for the
+  instance profile, the user data and the role. If it names
+  `vettid-org-vault-host`, delete what was created (the stack, the
+  template, the group) and proceed as for `VaultHostProfileLaunch`.
+
+### Vault data events
+
+The organization trail records every **write** on
+`vettid-org-vault-data-369484479783` and
+`vettid-org-staging-vault-data-347272280361`: `PutObject`,
+`DeleteObject` and `DeleteObjects`, `CopyObject`, the multipart calls
+(`CreateMultipartUpload`, `UploadPart`, `UploadPartCopy`,
+`CompleteMultipartUpload`, `AbortMultipartUpload`) and the calls that
+change an object's tags, ACL or restore state. For each: who (the role
+and, for a host, the instance id as session name), when, from where
+(`sourceIPAddress`, `vpcEndpointId`), which key, and the error if it was
+refused.
+
+**Reads are not recorded** (`GetObject`, `HeadObject`, the list calls),
+by the owner's decision: the trail is not to be a record
+of every time a member's vault is opened. The accepted cost: after an
+incident the trail shows what was changed or destroyed and by whom, and
+**cannot show whether anything was taken**. The objects are sealed to
+release keys, so a copy is not readable; and GuardDuty's S3 protection
+(below) reads object calls on its own, reads included, whatever the
+trail records, and reports unusual access as findings. It keeps no
+record that can be searched afterwards.
+
+The records are in the trail bucket with the account's management
+events, same files and format, kept 400 days; they are **not** in
+CloudTrail's Event history (management events only) and not on the alert
+bus. To read a day:
+
+```bash
+A=347272280361; D=2026/10/14      # account, UTC day
+aws s3 sync "s3://vettid-org-cloudtrail-449757308783/AWSLogs/o-kualrldevn/$A/CloudTrail/us-east-1/$D/" /tmp/trail/
+zcat /tmp/trail/*.json.gz | jq -c '.Records[] | select(.eventCategory == "Data")
+  | [.eventTime, .eventName, .userIdentity.arn, .sourceIPAddress, .vpcEndpointId, .requestParameters.key, .errorCode]'
+```
+
+Normal: every write under `vaults/`, `users/` and `smoke/` is by
+`assumed-role/vettid-org-vault-host/i-…` of a running release host,
+through the host VPC's S3 endpoint; `manifests/` is written by the
+manifest signer role. Worth a look: the host role from an instance id
+that is not a release host or without the endpoint, any other principal
+(the bucket policy refuses it, so with an error), or deletions or
+overwrites of many vaults by one instance in a short time.
+
+Cost: CloudTrail charges $0.10 per 100,000 data events ($1 per million),
+so it follows vault activity. Staging wrote about 2,200 object versions
+a day in October 2026 (a handful of test vaults): about 66,000 writes a
+month, under $0.10. A thousand vaults at that per-vault rate would be
+about 16.5 million events and $16.50 a month, plus well under $1 of
+storage (a record is about 0.15 KB compressed).
+
+GuardDuty S3 protection for the member accounts is set once, from the
+management account (it is an organization setting of the GuardDuty
+administrator; $0.80 per million object calls it reads, reads and
+writes alike and independent of the trail's selector, so up to a few
+times the data events' cost). `ALL` for the members is what the
+organization already has; the feature is the change. The first command
+sends an `AuditTampering` email:
+
+```bash
+D=$(aws guardduty list-detectors --query 'DetectorIds[0]' --output text)
+aws guardduty update-organization-configuration --detector-id "$D" \
+  --auto-enable-organization-members ALL --features '[{"Name":"S3_DATA_EVENTS","AutoEnable":"ALL"}]'
+# Members follow within a day; to see, and to do it at once if needed:
+aws guardduty get-member-detectors --detector-id "$D" --account-ids 369484479783 347272280361 605628228301 \
+  --query 'MemberDataSourceConfigurations[].[AccountId,Features[?Name==`S3_DATA_EVENTS`]|[0].Status]' --output text
+aws guardduty update-member-detectors --detector-id "$D" --account-ids 369484479783 347272280361 605628228301 \
+  --features '[{"Name":"S3_DATA_EVENTS","Status":"ENABLED"}]'
+```
 
 ### Deploying
 
@@ -2222,6 +2456,18 @@ scripts/org/apply-alert-forwarder-scp.sh --apply
 
 Later changes to the forwarder stacks deploy as usual: CloudFormation
 runs as the CDK execution role, which the SCP exempts.
+
+A change that makes the trail record more data events (as the vault data
+buckets' did) deploys the other way round, so that the new events are
+never forwarded: the staging forwarder, the production forwarder, the
+proteus forwarder, **then** VettidOrgAuditStack (`--exclusively` each,
+as above; a forwarder stack depends on the audit stack only for the
+first deployment's order). The rules for the vault accounts exist only
+once the audit stack is deployed: nothing emails `VaultDataBucketConfig`,
+`VaultHostAccess` or the launch rules before that. The vault data
+bucket's protection and the ban on interactive sessions are part of the
+Vault OU policy: `scripts/vault/apply-scp.sh` (dry run), then `--apply`
+("Vault", first deployment, step 6).
 
 A new member account: add it to `ORG.members` (lib/config.ts), add its
 forwarder stack in `lib/app.ts`, deploy VettidOrgAuditStack (bus policy),
@@ -2265,6 +2511,34 @@ email showing `error: AccessDenied`; nothing changes):
 ```bash
 aws events disable-rule --name vettid-org-security-alert-forward --profile vault-staging
 ```
+
+The vault account rules, in staging, **after VettidOrgAuditStack is
+deployed** (before that nothing matches and no email comes). A command on a running host
+(it runs; expect a `VaultHostAccess` email), a session (once the SCP is
+applied it must be refused with `AccessDeniedException` and still send
+a `VaultHostAccess` email, with `event: StartSession` and `error:
+AccessDenied`), and the bucket's versioning set to what it already is
+(before the SCP is applied: a `VaultDataBucketConfig` email and no
+change; after: the same email with `error: AccessDenied`):
+
+```bash
+aws ssm send-command --profile vault-staging --instance-ids <instance id> \
+  --document-name AWS-RunShellScript --parameters 'commands=["true"]' --comment "alert test"
+aws ssm start-session --profile vault-staging --target <instance id>
+aws s3api put-bucket-versioning --profile vault-staging \
+  --bucket vettid-org-staging-vault-data-347272280361 --versioning-configuration Status=Enabled
+```
+
+If the refused session sends no email while the command does:
+CloudTrail classes `StartSession` as read-only, and EventBridge gives
+read-only management calls only to rules in state
+`ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS`. Look the event up
+(Event history, `StartSession`, field `readOnly`). The remedy is that
+state on two rules: each vault account's forwarding rule (its pattern
+already names the session calls and lets no other read-only call
+through, so nothing else is forwarded) and `VaultHostAccess`. It is a
+code change with its own review, not something to set by hand: the
+forwarding rule is under the forwarder SCP.
 
 Heartbeats: `aws cloudwatch describe-alarms --alarm-name-prefix
 vettid-org-security-alert-heartbeat --query
@@ -2750,6 +3024,11 @@ durable backup.
 
 ~$7–8: WAF telemetry (~$5, intentional), two Route53 zones ($1), CloudFront/
 Lambda/DynamoDB/S3 in pennies at current traffic.
+
+Vault data events (organization trail) and GuardDuty S3 protection: under
+$0.50/month today; $1 per million object writes on the vault data
+buckets (trail) plus $0.80 per million object calls, reads included
+(GuardDuty) ("Vault data events").
 
 Relay (when deployed), at idle: ~$55/month — ALB ~$16, two 0.25 vCPU tasks
 ~$15, four public IPv4 addresses ~$15, Valkey Serverless minimum ~$6, logs

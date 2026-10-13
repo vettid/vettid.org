@@ -16,7 +16,8 @@ export const MANAGEMENT_BUS_ARN = `arn:aws:events:us-east-1:${ORG.management}:ev
  * default event bus only; the organization trail records them centrally but
  * does not put them on the management account's bus. So each member account
  * gets exactly one rule that forwards its CloudTrail events, unfiltered
- * except for read-only calls, to the management account's default bus.
+ * except for read-only calls and data events, to the management account's
+ * default bus.
  * VettidOrgAuditStack matches and emails them there: one place for the rules,
  * the allow-lists and the SNS subscription (RUNBOOK "Security alerts").
  *
@@ -56,7 +57,29 @@ export class VettidOrgAlertForwardStack extends cdk.Stack {
         detailType: ['AWS API Call via CloudTrail', 'AWS Console Sign In via CloudTrail'],
         // Writes only (including denied attempts). An event without the field
         // is forwarded too: anything-but never matches a missing field.
-        detail: { $or: [{ readOnly: [false] }, { readOnly: events.Match.doesNotExist() }] },
+        //
+        // Not data events: the organization trail records every object write
+        // on the vault data buckets (VettidOrgAuditStack), and CloudTrail
+        // puts recorded data events on this bus as well. The host writes
+        // sealed objects all day; they belong in the trail, not on the
+        // alert bus (each forwarded event is paid for). EventBridge has no
+        // "and" of two "or" lists, so the cross product.
+        //
+        // Session Manager's session calls by name, as a precaution: the
+        // alert on access to a vault host depends on them, and no record
+        // of one was at hand to read its readOnly flag from. It only has
+        // an effect together with the rule state
+        // ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS (EventBridge gives
+        // read-only management events to no other rule), which this rule
+        // does not have: RUNBOOK "Testing an alert" says when to set it.
+        detail: {
+          $or: [
+            ...[{ readOnly: [false] }, { readOnly: events.Match.doesNotExist() }].flatMap((write) =>
+              [{ eventCategory: events.Match.anythingBut('Data') }, { eventCategory: events.Match.doesNotExist() }].map((category) => ({ ...write, ...category })),
+            ),
+            { eventSource: ['ssm.amazonaws.com'], eventName: ['StartSession', 'ResumeSession'] },
+          ],
+        },
       },
       targets: [new targets.EventBus(managementBus, { role })],
     });
