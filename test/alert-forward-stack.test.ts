@@ -73,6 +73,35 @@ describe('what is forwarded', () => {
     expect(matchesPattern(pattern, { 'detail-type': 'GuardDuty Finding', source: 'aws.guardduty', detail: { severity: 8 } })).toBe(false);
     expect(matchesPattern(pattern, { 'detail-type': 'Scheduled Event', source: 'aws.events', detail: {} })).toBe(false);
   });
+  test('management events with their category, as CloudTrail sends them', () => {
+    expect(matchesPattern(pattern, ct({ readOnly: false, eventCategory: 'Management', managementEvent: true }))).toBe(true);
+    expect(matchesPattern(pattern, ct({ eventCategory: 'Management' }))).toBe(true);
+    expect(matchesPattern(pattern, ct({ readOnly: true, eventCategory: 'Management' }))).toBe(false);
+  });
+  test('not data events: object calls on the vault data bucket stay in the trail, off the alert bus', () => {
+    const s3 = (eventName: string, readOnly: boolean) => ({
+      ...ct({ eventName, readOnly, eventCategory: 'Data', managementEvent: false, eventSource: 's3.amazonaws.com' }),
+      source: 'aws.s3',
+    });
+    expect(matchesPattern(pattern, s3('PutObject', false))).toBe(false);
+    expect(matchesPattern(pattern, s3('DeleteObject', false))).toBe(false);
+    expect(matchesPattern(pattern, s3('GetObject', true))).toBe(false);
+    // The bucket's configuration is a management call and is forwarded.
+    expect(matchesPattern(pattern, { ...ct({ eventName: 'PutBucketLifecycle', readOnly: false, eventCategory: 'Management' }), source: 'aws.s3' })).toBe(true);
+  });
+  // A precaution in the pattern only: EventBridge hands read-only management
+  // events to a rule in state ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS
+  // alone, and this rule stays ENABLED (asserted below).
+  test('the pattern names the Session Manager session calls, read-only or not; the rule state is left alone', () => {
+    expect(rules[0].Properties.State).toBe('ENABLED');
+    const ssm = (eventName: string, readOnly: boolean) => ({ ...ct({ eventName, readOnly, eventCategory: 'Management', eventSource: 'ssm.amazonaws.com' }), source: 'aws.ssm' });
+    for (const ro of [true, false]) {
+      expect(matchesPattern(pattern, ssm('StartSession', ro))).toBe(true);
+      expect(matchesPattern(pattern, ssm('ResumeSession', ro))).toBe(true);
+    }
+    expect(matchesPattern(pattern, ssm('SendCommand', false))).toBe(true);
+    expect(matchesPattern(pattern, ssm('DescribeSessions', true))).toBe(false);
+  });
 });
 
 describe('placement in the app', () => {

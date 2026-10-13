@@ -14,7 +14,8 @@ import { AppConfig, VaultConfig, resourceName } from '../config';
  *    (including the SDK's account-based endpoint), S3 (path and the data
  *    bucket's virtual host; the gateway endpoint carries the traffic), SSM
  *    parameters at boot.
- *  - The agents: SSM Session Manager (ssm, ssmmessages, ec2messages), the
+ *  - The agents: the SSM agent, for Run Command (ssm, ssmmessages,
+ *    ec2messages; interactive sessions are denied by the Vault OU policy), the
  *    CloudWatch agent (logs, monitoring), the lifecycle hook completion
  *    (autoscaling).
  *  - The VPC's own names (`*.ec2.internal`): resolved inside the VPC only.
