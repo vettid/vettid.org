@@ -427,8 +427,9 @@ with your recommendations"): every decision as recommended.
   enclave locks or kills every vault within 140 s (VAULT-MESSAGING
   §12.3), before a lease of 180 s runs out (*0.1.2:* the 140 s are
   for the vaults that run when the parent is found unreachable; a
-  vault whose unlock was half way then is locked at the next check
-  after it appears, the checks being 10 s apart, and until then every
+  vault whose unlock was half way then is locked at a later check:
+  the next, the checks being 10 s apart, unless a `Ping` was read
+  meanwhile, and then 120 to 130 s after that `Ping`; until then every
   call it makes to the parent fails, VAULT-HOST-PROTOCOL 0.1.5 §4.3,
   as built at vettid-vault `main` a852e36); a parent that lives but
   cannot renew tells the enclave "lease lost" 15 s before the lease
