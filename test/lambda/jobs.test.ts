@@ -190,7 +190,12 @@ describe('cleanup job: start-overs (MEMBER-API 2.1.0, VAULT-MESSAGING 0.16.0 §1
     ddb.on(GetCommand, { TableName: 'instances' } as any).resolves({ Item: { instance_id: 'i1', release: R, queue_url: QP + 'i1', descriptor: 'd', attestation: 'a', heartbeat_at: nowS() } });
     ddb.on(GetCommand, { TableName: 'releases' } as any).resolves({ Item: { release: R, release_number: 3, status: 'active' } });
     ddb.on(UpdateCommand).resolves({});
+    member({ account_status: 'active' });
   });
+  // The member the job reads before it carries a start-over out.
+  const member = (m: Record<string, unknown> | null) =>
+    ddb.on(GetCommand, { TableName: 'members' } as any).resolves(m ? { Item: { user_guid: 'g1', email: 'g1@x.org', state: 'member', ...m } } : {});
+  const memberReads = () => ddb.commandCalls(GetCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'members');
 
   test('a pending one past deletes_at: marked executing (conditional), the host delete queued, queued_at set, audited', async () => {
     ddb.on(ScanCommand).resolves({ Items: [row({ state: 'pending', deletes_at: nowS() - 5 })] });
@@ -247,6 +252,171 @@ describe('cleanup job: start-overs (MEMBER-API 2.1.0, VAULT-MESSAGING 0.16.0 §1
     ddb.on(ScanCommand).resolves({ Items: [] });
     await cleanup.handler();
     expect(ddb.commandCalls(ScanCommand).map((c) => c.args[0].input.FilterExpression)).not.toContain('attribute_exists(deletion) AND #s <> :d');
+  });
+
+  // ---- only for an active account ----
+
+  afterEach(() => jest.restoreAllMocks()); // the console spies below, also after a failed assertion
+
+  test('an active account: the member row is read (consistently) before anything is written', async () => {
+    ddb.on(ScanCommand).resolves({ Items: [row({ state: 'pending', deletes_at: nowS() - 5 })] });
+    expect(await cleanup.executeStartOvers(nowS())).toEqual({ executed: 1, retried: 0, held: 0 });
+    expect(memberReads()).toEqual([{ TableName: 'members', Key: { user_guid: 'g1' }, ConsistentRead: true }]);
+    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(1);
+  });
+
+  test.each([
+    ['suspended', { account_status: 'suspended' }],
+    ['canceled (its vaults go with the account, by the daily run)', { account_status: 'canceled', delete_after: '2099-01-01T00:00:00Z' }],
+    ['not an account', { state: 'requested', account_status: 'active' }],
+    ['without a member row', null],
+  ])('a due deletion of an account that is %s stays pending: not marked, not queued, not audited, not cancelled', async (_name, m) => {
+    member(m);
+    ddb.on(ScanCommand).resolves({ Items: [row({ state: 'pending', deletes_at: nowS() - 5 })] });
+    expect(await cleanup.executeStartOvers(nowS())).toEqual({ executed: 0, retried: 0, held: 1 });
+    expect(memberReads()).toHaveLength(1);
+    expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
+    expect(ddb.commandCalls(DeleteCommand)).toHaveLength(0);
+    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
+    expect(audits()).toHaveLength(0);
+  });
+
+  test('the member row cannot be read: held (nothing is deleted on doubt), and the run goes on to the next vault', async () => {
+    ddb.on(GetCommand, { TableName: 'members', Key: { user_guid: 'g1' } } as any).rejects(Object.assign(new Error('x'), { name: 'ProvisionedThroughputExceededException' }));
+    ddb.on(GetCommand, { TableName: 'members', Key: { user_guid: 'g2' } } as any).resolves({ Item: { user_guid: 'g2', state: 'member', account_status: 'active' } });
+    ddb.on(ScanCommand).resolves({ Items: [
+      row({ state: 'pending', deletes_at: nowS() - 5 }),
+      row({ state: 'pending', deletes_at: nowS() - 5 }, { vault_id: 'b'.repeat(32), user_guid: 'g2' }),
+      row({ state: 'pending', deletes_at: nowS() - 5 }, { vault_id: 'c'.repeat(32), user_guid: undefined }), // no owner on the row
+    ] });
+    const err = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(await cleanup.executeStartOvers(nowS())).toEqual({ executed: 1, retried: 0, held: 2 });
+    expect(vaultUpdates().map((u) => u.Key)).toEqual([{ vault_id: 'b'.repeat(32) }, { vault_id: 'b'.repeat(32) }, { vault_id: 'b'.repeat(32) }]);
+    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(1);
+    expect(err.mock.calls.map((c) => String(c[0]))).toEqual(['start-over held: the member row could not be read']);
+    err.mockRestore();
+  });
+
+  test('held for as long as the account is suspended, whatever the time passed; active again (had the reinstatement not cancelled it): carried out', async () => {
+    member({ account_status: 'suspended' });
+    ddb.on(ScanCommand).resolves({ Items: [row({ state: 'pending', deletes_at: nowS() - 30 * 86_400 })] });
+    for (let i = 0; i < 3; i++) expect(await run()).toEqual({ executed: 0, retried: 0 });
+    expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
+    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
+    member({ account_status: 'active' });
+    expect(await run()).toEqual({ executed: 1, retried: 0 });
+  });
+
+  test('the run reports what it held on a line of its own; the startOvers line keeps its two fields', async () => {
+    const log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    member({ account_status: 'suspended' });
+    ddb.on(ScanCommand).resolves({ Items: [row({ state: 'pending', deletes_at: nowS() - 5 })] });
+    expect(await run()).toEqual({ executed: 0, retried: 0 });
+    expect(log.mock.calls.map((c) => c[0])).toEqual(['{"startOvers":{"executed":0,"retried":0}}', '{"startOversHeld":1}']);
+    log.mockClear();
+    member({ account_status: 'active' });
+    expect(await run()).toEqual({ executed: 1, retried: 0 });
+    expect(log.mock.calls.map((c) => c[0])).toEqual(['{"startOvers":{"executed":1,"retried":0}}']);
+    log.mockRestore();
+  });
+
+  test('not yet due: the member row is not read; one already executing is not held back by a later suspension', async () => {
+    member({ account_status: 'suspended' });
+    ddb.on(ScanCommand).resolves({ Items: [
+      row({ state: 'pending', deletes_at: nowS() + 60 }),
+      row({ state: 'executing', deletes_at: nowS() - 300 }, { vault_id: 'b'.repeat(32), deletion_requested_at: nowS() - 300 }),
+    ] });
+    expect(await cleanup.executeStartOvers(nowS())).toEqual({ executed: 0, retried: 1, held: 0 });
+    expect(memberReads()).toHaveLength(0);
+  });
+
+  test("a pending start-over on a vault the account's own deletion already asked to delete: left to the daily retry, not held", async () => {
+    member(null); // the account was deleted after its 7 days; its row is gone
+    ddb.on(ScanCommand).resolves({ Items: [row({ state: 'pending', deletes_at: nowS() - 5 }, { deletion_requested_at: nowS() - 60 })] });
+    expect(await cleanup.executeStartOvers(nowS())).toEqual({ executed: 0, retried: 0, held: 0 });
+    expect(memberReads()).toHaveLength(0);
+    expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
+    expect(audits()).toHaveLength(0);
+  });
+
+  test('a canceled account past its 7 days: its vault is asked to delete itself as before, pending start-over or not', async () => {
+    const gone = { user_guid: 'g1', email: 'gone@x.org', state: 'member', account_status: 'canceled', delete_after: '2020-01-01T00:00:00Z' };
+    ddb.on(QueryCommand).callsFake((input) => {
+      if (input.TableName === 'vaults') return { Items: [row({ state: 'pending', deletes_at: nowS() + 3600 })] };
+      if (input.TableName === 'instances') return { Items: [] };
+      return input.ExpressionAttributeValues?.[':c'] === 'canceled' && input.ExpressionAttributeValues?.[':s'] === 'member' ? { Items: [gone] } : { Items: [] };
+    });
+    ddb.on(DeleteCommand).resolves({});
+    idp.on(AdminDeleteUserCommand).resolves({});
+    expect((await cleanup.handler()).deleted).toBe(1);
+    expect(memberReads()).toHaveLength(0); // the account's deletion does not ask whether the account is active
+    const [send] = sqs.commandCalls(SendMessageCommand);
+    expect(JSON.parse(send.args[0].input.MessageBody!)).toMatchObject({ op: 'delete', vault_id: 'a'.repeat(32), user_guid: 'g1' });
+    expect(vaultUpdates().map((u) => u.UpdateExpression)).toEqual(['SET deletion_requested_at = :t']);
+    expect(audits()).toEqual([expect.objectContaining({ action: 'member.delete_after_cancel', detail: { vault_ids: ['a'.repeat(32)] } })]);
+  });
+
+  // ---- the admin API's cancel (task cancel_start_over) ----
+
+  describe('task cancel_start_over (from the admin API)', () => {
+    const G = '11111111-2222-4333-8444-555555555555';
+    const cancel = (user_guid: unknown = G) => cleanup.handler({ task: 'cancel_start_over', user_guid });
+    const vaults = (items: Record<string, unknown>[]) => ddb.on(QueryCommand, { TableName: 'vaults' } as any).resolves({ Items: items });
+
+    test('a pending one is removed, only if it is still that deletion and pending; the answer names it', async () => {
+      const requested_at = nowS() - 86_500;
+      vaults([row({ state: 'pending', deletes_at: nowS() - 5, requested_at }, { user_guid: G })]);
+      expect(await cancel()).toEqual({ ok: true, task: 'cancel_start_over', cancelled: [{ vault_id: 'a'.repeat(32), deletion_id: DID, requested_at }], executing: [], changed: 0 });
+      expect(ddb.commandCalls(QueryCommand).map((c) => c.args[0].input)).toEqual([expect.objectContaining({ TableName: 'vaults', IndexName: 'user-index', KeyConditionExpression: 'user_guid = :g', ExpressionAttributeValues: { ':g': G } })]);
+      expect(ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input)).toEqual([{
+        TableName: 'vaults', Key: { vault_id: 'a'.repeat(32) }, UpdateExpression: 'REMOVE deletion',
+        ConditionExpression: 'deletion.deletion_id = :id AND deletion.#st = :p', ExpressionAttributeNames: { '#st': 'state' }, ExpressionAttributeValues: { ':id': DID, ':p': 'pending' },
+      }]);
+      // Nothing else: no vault is asked to delete itself, no row is deleted, no member row is read, nothing is audited here (the admin API audits).
+      expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
+      expect(ddb.commandCalls(DeleteCommand)).toHaveLength(0);
+      expect(ddb.commandCalls(ScanCommand)).toHaveLength(0);
+      expect(ddb.commandCalls(GetCommand)).toHaveLength(0);
+      expect(audits()).toHaveLength(0);
+    });
+
+    test('not due yet: cancelled all the same; none, a deleted vault or a malformed record: nothing to do (so a repeat is harmless)', async () => {
+      vaults([row({ state: 'pending', deletes_at: nowS() + 3600 }, { user_guid: G })]);
+      expect((await cancel()).cancelled).toHaveLength(1);
+      ddb.resetHistory();
+      vaults([
+        { vault_id: 'b'.repeat(32), user_guid: G, state: 'locked' },
+        row({ state: 'pending', deletes_at: nowS() - 5 }, { vault_id: 'c'.repeat(32), user_guid: G, state: 'deleted' }),
+        { vault_id: 'd'.repeat(32), user_guid: G, state: 'locked', deletion: { state: 'pending' } },
+        row({ state: 'cancelled', deletes_at: nowS() - 5 }, { vault_id: 'e'.repeat(32), user_guid: G }),
+      ]);
+      expect(await cancel()).toEqual({ ok: true, task: 'cancel_start_over', cancelled: [], executing: [], changed: 0 });
+      expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
+    });
+
+    test('one already executing is reported and left as it is', async () => {
+      vaults([row({ state: 'executing', deletes_at: nowS() - 600, queued_at: nowS() - 300 }, { user_guid: G })]);
+      expect(await cancel()).toEqual({ ok: true, task: 'cancel_start_over', cancelled: [], executing: [{ vault_id: 'a'.repeat(32), deletion_id: DID }], changed: 0 });
+      expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
+    });
+
+    test('changed between the read and the write (the member cancelled, or it was just carried out): counted, not reported as cancelled', async () => {
+      vaults([row({ state: 'pending', deletes_at: nowS() - 5 }, { user_guid: G })]);
+      ddb.on(UpdateCommand).rejects(ccf());
+      expect(await cancel()).toEqual({ ok: true, task: 'cancel_start_over', cancelled: [], executing: [], changed: 1 });
+    });
+
+    test('anything but an account id is refused before any read; the task never falls through to the daily run', async () => {
+      for (const bad of [undefined, '', 'g1', 'email:someone@x.org', 'user#' + G, { S: G }]) {
+        await expect(cleanup.handler({ task: 'cancel_start_over', user_guid: bad })).rejects.toThrow('user_guid is not an account id');
+      }
+      await expect(cleanup.handler({ task: 'cancel_start_over' })).rejects.toThrow('user_guid is not an account id');
+      expect(ddb.calls()).toHaveLength(0);
+      vaults([]);
+      await cancel();
+      expect(ddb.commandCalls(QueryCommand).filter((c) => c.args[0].input.TableName !== 'vaults')).toHaveLength(0);
+      expect(idp.calls()).toHaveLength(0);
+    });
   });
 });
 

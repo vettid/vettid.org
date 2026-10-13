@@ -57,7 +57,10 @@ export function render(root, ctx) {
         : ui.action('Reinstate', async () => {
             const ok = await ui.confirm({
               title: 'Reinstate member',
-              body: [`Re-enable sign-in for ${m.email}?`],
+              body: [
+                `Re-enable sign-in for ${m.email}?`,
+                'A vault deletion that was pending is cancelled first, and the member is emailed that it was.',
+              ],
               confirmLabel: 'Reinstate',
             });
             if (!ok) return;
@@ -97,6 +100,26 @@ export function render(root, ctx) {
           })
         : null;
 
+      // "Delete my vault and start over" (MEMBER-API): the 24 hours a member
+      // has to cancel. Support cancels it for a member who did not ask for
+      // it. The list does not know whether one is pending; the answer says.
+      const cancelVaultDeletion = m.state === 'member'
+        ? ui.action('Cancel vault deletion', async () => {
+            const ok = await ui.confirm({
+              title: 'Cancel pending vault deletion',
+              body: [
+                `Cancel the pending deletion of ${m.email}'s vault ("Delete my vault and start over")?`,
+                'Use this when the member says they did not ask for it. If the account looks taken over, suspend it first: the deletion waits while the account is suspended. The member is emailed that it was cancelled.',
+                'A deletion that is already being carried out cannot be cancelled.',
+              ],
+              confirmLabel: 'Cancel the deletion',
+            });
+            if (!ok) return;
+            const r = await api.post(`/admin/members/${id}/vault/deletion/cancel`);
+            ui.toast(r.cancelled ? `Cancelled the vault deletion for ${m.email}.` : `${m.email} has no pending vault deletion.`);
+          })
+        : null;
+
       const remove = ui.action('Delete', async () => {
         const v = await ui.dialog({
           title: 'Delete member permanently',
@@ -126,7 +149,7 @@ export function render(root, ctx) {
         chip(m.account_status, STATUS_TONE[m.account_status] ?? 'mute'),
         subscriptionCell(m.subscription),
         m.voting_rights ? chip('yes', 'ok') : muted('no'),
-        ui.rowActions(suspendOrReinstate, extend, clearPin, canary, remove),
+        ui.rowActions(suspendOrReinstate, extend, clearPin, cancelVaultDeletion, canary, remove),
       ];
     },
   });

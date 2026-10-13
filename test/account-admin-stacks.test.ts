@@ -250,11 +250,31 @@ describe('VettidOrgAdminApiStack', () => {
 
   test('people may invoke the member API account push, by its fixed name (MEMBER-API 2.0.0)', () => {
     const all = Object.values<any>(t.findResources('AWS::IAM::Policy')).flatMap((p) => p.Properties.PolicyDocument.Statement);
-    const inv = all.filter((x: any) => JSON.stringify(x.Action).includes('lambda:InvokeFunction'));
+    const inv = all.filter((x: any) => JSON.stringify(x.Action).includes('lambda:InvokeFunction') && JSON.stringify(x.Resource).includes('account-push'));
     expect(inv).toHaveLength(1);
     expect(JSON.stringify(inv[0].Resource)).toContain(':function:vettid-org-member-account-push');
     const fns = Object.values<any>(t.findResources('AWS::Lambda::Function')).filter((f) => f.Properties.Environment?.Variables?.ACCOUNT_PUSH_FN);
     expect(fns.map((f) => f.Properties.Environment.Variables.ACCOUNT_PUSH_FN)).toEqual(['vettid-org-member-account-push']);
+  });
+
+  test("people may invoke the member API's cleanup job (to cancel a member's pending vault deletion), by its ARN from SSM; nothing else is invoked, and no admin function reaches the vault tables", () => {
+    const policies = Object.values<any>(t.findResources('AWS::IAM::Policy'));
+    const all = policies.flatMap((p) => p.Properties.PolicyDocument.Statement);
+    const inv = all.filter((x: any) => JSON.stringify(x.Action).includes('lambda:InvokeFunction'));
+    expect(inv).toHaveLength(2); // the account push and the cleanup job
+    const cleanupInv = inv.filter((x: any) => !JSON.stringify(x.Resource).includes('account-push'));
+    expect(cleanupInv).toHaveLength(1);
+    expect(cleanupInv[0].Action).toBe('lambda:InvokeFunction');
+    const param = Object.entries<any>(t.toJSON().Parameters).find(([, v]) => v.Default === '/vettid-org/prod/member-api/cleanup-fn-arn')!;
+    expect(param[1].Type).toBe('AWS::SSM::Parameter::Value<String>');
+    expect(cleanupInv[0].Resource).toEqual({ Ref: param[0] });
+    // Only the people function, and it gets the same ARN to call.
+    const withEnv = Object.entries<any>(t.findResources('AWS::Lambda::Function')).filter(([, f]) => f.Properties.Environment?.Variables?.CLEANUP_FN);
+    expect(withEnv.map(([id]) => id.startsWith('People'))).toEqual([true]);
+    expect(withEnv[0][1].Properties.Environment.Variables.CLEANUP_FN).toEqual({ Ref: param[0] });
+    const peopleRole = withEnv[0][1].Properties.Role['Fn::GetAtt'][0];
+    expect(policies.filter((p) => JSON.stringify(p.Properties.PolicyDocument.Statement).includes(`"Ref":"${param[0]}"`)).map((p) => p.Properties.Roles)).toEqual([[{ Ref: peopleRole }]]);
+    expect(JSON.stringify(all)).not.toMatch(/table\/vettid-org-vault/);
   });
 
   test('resource policy allows only the exit-node egress IP (from SSM)', () => {
@@ -455,6 +475,13 @@ describe('VettidOrgMemberApiStack', () => {
       // The mailing list is only read (is the address on it?).
       const list = stmts.filter((s: any) => JSON.stringify(s.Resource).includes('table/vettid-org-mailing-list'));
       expect(actions(list)).toEqual(['dynamodb:GetItem']);
+    });
+
+    test("the cleanup job reads a member's row (a start-over is carried out only for an active account) and still cannot write one; its ARN is published for the admin API", () => {
+      const members = stmtsOf(/vault-cleanup|Cleanup/).filter((s: any) => JSON.stringify(s.Resource).includes('table/vettid-org-members'));
+      expect([...new Set(actions(members))].sort()).toEqual(['dynamodb:DeleteItem', 'dynamodb:GetItem', 'dynamodb:Query']);
+      const param = Object.values<any>(t.findResources('AWS::SSM::Parameter')).find((p) => p.Properties.Name === '/vettid-org/prod/member-api/cleanup-fn-arn')!;
+      expect(JSON.stringify(param.Properties.Value)).toMatch(/"Fn::GetAtt":\["CleanupJobFn[0-9A-F]+","Arn"\]/);
     });
 
     test('alarms on the EMF metrics the cleanup job writes: a removal that fails, and one given up on', () => {

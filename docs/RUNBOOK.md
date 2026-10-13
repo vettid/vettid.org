@@ -1556,10 +1556,74 @@ session | link | app`), `vault.deletion_executed`.
   from the email link, the account page or the app. After `executing` it
   cannot be cancelled; the vault is gone once the host deletes it (stored
   versions stay 7 days, sealed, and are not restorable by support).
+- *The account looks taken over* (the member did not ask for the
+  deletion, or for a recovery, and someone else may hold their mailbox
+  or session). In this order, on the admin site's **Members** page:
+  1. **Suspend** the account (with the reason). Sign-in stops and the
+     sessions end within the hour. From that moment the pending
+     deletion is **not carried out**: the cleanup job's 5-minute run
+     reads the member's row and leaves the deletion `pending` for an
+     account that is not active, for as long as it stays that way
+     (its log line `{"startOversHeld": n}` counts them; no alarm).
+     Suspending cancels nothing by itself.
+  2. **Cancel vault deletion** on the member's row
+     (`POST /admin/members/{user_guid}/vault/deletion/cancel`). It
+     answers "cancelled" (audit `member.vault_deletion_cancel`, the
+     member is emailed "VettID vault deletion cancelled … by VettID
+     support"), "no pending vault deletion" (nothing to do; repeating
+     it is harmless), or an error that it is already being carried out
+     (`409`: it was `executing` before the account was suspended;
+     nothing stops it then, as above). It works whatever the account
+     status, so it is also the way to cancel for a member who cannot
+     reach the link, the account page or the app.
+  3. *A recovery the member did not ask for* has no admin cancel. While
+     the account is suspended it cannot go on: the code is not
+     released (`GET /api/vault/recovery` answers 403) and a new app can
+     neither claim it nor register. The member can cancel it with the
+     link in the "recovery requested" email at any time, suspended or
+     not. It expires 48 hours after the request; if it could still be
+     active when the account is reinstated, have the member cancel it
+     on the account page first thing, or wait until it has expired
+     before reinstating.
+  4. **Reinstate** when the member has their mailbox back. Reinstating
+     cancels a vault deletion that is still pending (step 2 not done,
+     or a deletion nobody noticed) before it enables sign-in, with
+     the same email and audit event (`on: reinstate`): a deletion that
+     waited through a suspension is never carried out afterwards. If
+     that cancel cannot be made (the cleanup function or the vault
+     tables are unreachable) Reinstate answers an error and changes
+     nothing; try again. A member who does want to start over asks
+     again and gets a new 24 hours.
+
+  What the member sees while suspended: sign-in is refused; the app
+  and the account page answer "This account is not active" for
+  everything except lock and the two cancels (deletion, recovery),
+  which keep working with a session that has not yet ended, the
+  vault's app key or the email link. The deletion's email link stops
+  working at the original `deletes_at`, held or not; after that the
+  cancel is support's (step 2) or the reinstatement's. The app reads
+  the pending deletion from its status, which a suspended account
+  cannot fetch, so in practice a suspended member cancels with the
+  link or asks support.
+- *A canceled account* (the member cancelled the account during the 24
+  hours): the deletion is held in the same way, and the vault goes
+  with the account after its 7 days (the daily run, as for every
+  canceled account). An admin's reinstate inside the 7 days cancels the
+  pending deletion as above.
 - *Stuck in `executing`*: as for an account deletion: look at
   `deletion_requested_at`, the release's routability and the host logs;
   the daily retry keeps trying and logs `vault deletion pending` after 30
   days.
+
+**Deploy order for the hold and the admin cancel.**
+`VettidOrgMemberApiStack` first (the cleanup function's new task and its
+read of the members table; it publishes the function's ARN as SSM
+`/vettid-org/<stage>/member-api/cleanup-fn-arn`), then
+`VettidOrgAdminApiStack` (it reads that parameter, so its deploy fails
+until the first one is done; the people function may invoke the cleanup
+function and nothing else new), then the admin site. Nothing changes in
+the vault account. Between the two deploys the admin API is the old one
+and behaves as before.
 
 **Deploy order for 2.1.0.** `VettidOrgVaultStack` (vault account: the
 host's `credential_backup` grant and the API roles' `deletion` attribute in

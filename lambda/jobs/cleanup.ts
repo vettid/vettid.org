@@ -5,6 +5,11 @@
  * vault is asked to delete itself (the host's `delete`, as below); one
  * that could not be queued yet (no instance running, the service paused)
  * is tried again at the next run, and the daily retry below covers the rest.
+ * A start-over is carried out only while its member's account is active: for
+ * a suspended or canceled account it stays pending (the member could not
+ * cancel it in the usual ways). On request (event `{task:
+ * "cancel_start_over", user_guid}`, from the admin API, which holds no right
+ * on the vault tables) a member's pending start-over is cancelled.
  *
  * Every 15 minutes (event `{task: "requests"}`, MEMBER-API 2.6.0): each
  * withdrawn membership request is removed (row, email marker, a Cognito
@@ -35,6 +40,7 @@ import type { MemberItem, SubscriptionItem } from '../shared/model';
 import { DECLINED_DAYS, REMOVAL_GIVE_UP_DAYS, ownAddress } from '../shared/requests';
 import { liveLease, newUlid, pickInstance, releaseRow, requestStart, routable } from '../shared/vault-routing';
 import { vaultService } from '../shared/vault-service';
+import { canSignIn } from '../shared/members';
 
 async function* query(input: ConstructorParameters<typeof QueryCommand>[0]) {
   let start: Record<string, unknown> | undefined;
@@ -181,10 +187,23 @@ async function retryVaultDeletions(nowS: number): Promise<number> {
  * `executing` one never queued is tried again at each run. The vault's
  * `deleted` report then brings the vault_deleted notice, which emails the
  * member and removes the rows.
+ *
+ * Only for an active account. A due deletion whose member is suspended or
+ * canceled, has no row, or could not be read stays `pending` and is counted
+ * in `held`: it is neither carried out nor cancelled. The 24 hours exist so
+ * that the member can cancel, and an account that is not active cannot use
+ * the account page or the app; suspending is also what support does when an
+ * account looks taken over. Reinstating the account cancels the deletion
+ * (lambda/admin/people.ts), so a held one is never carried out later without
+ * a new request. A canceled account's vaults go with the account, by the
+ * daily run above. The member row is read consistently just before the
+ * conditional write; the two tables are in different AWS accounts, so they
+ * cannot be written in one transaction.
  */
-export async function executeStartOvers(nowS: number): Promise<{ executed: number; retried: number }> {
+export async function executeStartOvers(nowS: number): Promise<{ executed: number; retried: number; held: number }> {
   let executed = 0;
   let retried = 0;
+  let held = 0;
   let start: Record<string, unknown> | undefined;
   do {
     const r = await ddb.send(
@@ -201,6 +220,13 @@ export async function executeStartOvers(nowS: number): Promise<{ executed: numbe
       const d = v.deletion;
       if (!d || typeof d.deletion_id !== 'string' || typeof d.deletes_at !== 'number' || v.state === 'deleted') continue;
       if (d.state === 'pending' && d.deletes_at <= nowS) {
+        // The account's own deletion already asked this vault to delete
+        // itself (the member row is gone): the daily retry has it.
+        if (typeof v.deletion_requested_at === 'number') continue;
+        if (!(await accountActive(v.user_guid))) {
+          held++;
+          continue;
+        }
         try {
           await ddb.send(
             new UpdateCommand({
@@ -227,7 +253,86 @@ export async function executeStartOvers(nowS: number): Promise<{ executed: numbe
     }
     start = r.LastEvaluatedKey;
   } while (start);
-  return { executed, retried };
+  return { executed, retried, held };
+}
+
+/**
+ * Whether a start-over may be carried out for this member: the account is
+ * one that can sign in (lambda/shared/members.ts), which is what the
+ * member's own cancel on the account page needs. Read consistently. No row,
+ * an unreadable row or a failed read is "no": on doubt nothing is deleted,
+ * and the next run asks again.
+ */
+async function accountActive(userGuid: unknown): Promise<boolean> {
+  if (typeof userGuid !== 'string' || !userGuid) return false;
+  try {
+    const r = await ddb.send(new GetCommand({ TableName: table.members(), Key: { user_guid: userGuid }, ConsistentRead: true }));
+    return canSignIn((r.Item as MemberItem | undefined) ?? null);
+  } catch (e) {
+    console.error('start-over held: the member row could not be read', JSON.stringify({ error: (e as Error).name })); // never the address
+    return false;
+  }
+}
+
+const USER_GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** What the task `cancel_start_over` answers (the admin API checks `ok` and `task`). */
+export interface StartOverCancel {
+  ok: true;
+  task: 'cancel_start_over';
+  /** Pending start-overs this call removed (`requested_at` in epoch seconds). */
+  cancelled: { vault_id: string; deletion_id: string; requested_at: number | null }[];
+  /** Start-overs already being carried out: they cannot be cancelled. */
+  executing: { vault_id: string; deletion_id: string }[];
+  /** Start-overs that changed between the read and the write (cancelled by the member, or just carried out). */
+  changed: number;
+}
+
+/**
+ * Cancel a member's pending start-over for the admin API (ADMIN-API
+ * "People"; also when an account is reinstated). The admin API's functions
+ * hold no right on the vault tables; this job already may write `deletion`.
+ * Exactly the member's own cancel: the record is removed only if it is the
+ * same deletion and still `pending`, so one that is `executing` is never
+ * undone here and a repeat finds nothing. The caller audits and tells the
+ * member.
+ */
+export async function cancelStartOvers(userGuid: unknown): Promise<StartOverCancel> {
+  if (typeof userGuid !== 'string' || !USER_GUID_RE.test(userGuid)) throw new Error('cancel_start_over: user_guid is not an account id');
+  const out: StartOverCancel = { ok: true, task: 'cancel_start_over', cancelled: [], executing: [], changed: 0 };
+  for await (const item of query({
+    TableName: table.vaults(),
+    IndexName: 'user-index',
+    KeyConditionExpression: 'user_guid = :g',
+    ExpressionAttributeValues: { ':g': userGuid },
+  })) {
+    const v = item as VaultRowLite & { deletion?: { requested_at?: unknown } };
+    const d = v.deletion;
+    if (!d || typeof d.deletion_id !== 'string' || v.state === 'deleted') continue;
+    if (d.state === 'executing') {
+      out.executing.push({ vault_id: v.vault_id, deletion_id: d.deletion_id });
+      continue;
+    }
+    if (d.state !== 'pending') continue;
+    try {
+      await ddb.send(
+        new UpdateCommand({
+          TableName: table.vaults(),
+          Key: { vault_id: v.vault_id },
+          UpdateExpression: 'REMOVE deletion',
+          ConditionExpression: 'deletion.deletion_id = :id AND deletion.#st = :p',
+          ExpressionAttributeNames: { '#st': 'state' },
+          ExpressionAttributeValues: { ':id': d.deletion_id, ':p': 'pending' },
+        }),
+      );
+    } catch (e) {
+      if ((e as Error).name !== 'ConditionalCheckFailedException') throw e;
+      out.changed++;
+      continue;
+    }
+    out.cancelled.push({ vault_id: v.vault_id, deletion_id: d.deletion_id, requested_at: typeof d.requested_at === 'number' ? d.requested_at : null });
+  }
+  return out;
 }
 
 async function markQueued(vaultId: string, deletionId: string, nowS: number): Promise<void> {
@@ -437,11 +542,19 @@ export async function removeDeclined(nowMs: number): Promise<RemovalCounts> {
   return removeRequests(due, 'rejected', nowMs);
 }
 
-export const handler = async (event?: { task?: string }) => {
+export const handler = async (event?: { task?: string; user_guid?: unknown }) => {
+  // From the admin API (a synchronous invoke): cancel one member's pending start-over.
+  if (event?.task === 'cancel_start_over') {
+    const c = await cancelStartOvers(event.user_guid);
+    console.log(JSON.stringify({ startOverCancel: { cancelled: c.cancelled.length, executing: c.executing.length, changed: c.changed } }));
+    return c;
+  }
   // The five-minute schedule (MEMBER-API 2.1.0): start-overs only.
   if (event?.task === 'start_over') {
-    const r = await executeStartOvers(Math.floor(Date.now() / 1000));
+    const { held, ...r } = await executeStartOvers(Math.floor(Date.now() / 1000));
     console.log(JSON.stringify({ startOvers: r }));
+    // Its own line, only when there is something to say (the line above is unchanged).
+    if (held) console.log(JSON.stringify({ startOversHeld: held }));
     return r;
   }
   // The fifteen-minute schedule (MEMBER-API 2.6.0): withdrawn requests only.

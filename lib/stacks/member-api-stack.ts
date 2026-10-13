@@ -294,6 +294,9 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     // here; unreported deletions are retried (Scan) and flagged after 30 days.
     vaultGrants(cleanup, 'cleanup');
     readSwitch(cleanup); // no deletion is queued while the vault service is paused
+    // A start-over is carried out only for an active account: the 5-minute
+    // run reads the member's row first (one consistent GetItem; no write).
+    g(cleanup, 'members', ['GetItem']);
     // stale-request reclaim: keep identities the mailing list still uses
     tableGrant(this, config, cleanup, 'mailing-list', ['GetItem']);
     cleanup.addEnvironment('TABLE_MAILING_LIST', resourceName(config, 'mailing-list'));
@@ -515,5 +518,11 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     }
 
     publishRef(this, config, 'member-api/domain', cdk.Fn.select(2, cdk.Fn.split('/', api.apiEndpoint)));
+    // The admin API cancels a member's pending vault deletion through the
+    // cleanup job (task `cancel_start_over`): the job already may write
+    // `deletion` on the vault row, and the admin API holds no right in the
+    // vault account. Its generated name is published, not fixed: renaming
+    // the function would replace it and its log group.
+    publishRef(this, config, 'member-api/cleanup-fn-arn', cleanup.functionArn);
   }
 }
