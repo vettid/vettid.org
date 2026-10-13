@@ -2794,7 +2794,9 @@ operator does, and does not have to do.
   `vettid-org-members` (a pending member may be mid-verification). It can never delete the `vettid.org` domain
   identity (explicit IAM deny).
 - Every confirmation emails **admin@vettid.org** from `no-reply@vettid.org`
-  (SES domain identity, DKIM in the zone). The notice says that somebody
+  (SES domain identity, DKIM in the zone). That sender is fixed in
+  `VettidOrgSignupStack`, which is part of the production app only: a
+  stage has no mailing list. The notice says that somebody
   confirmed, how and when; it does **not** carry the address (that mailbox is
   at another provider, outside the list's storage and its deletion). To see
   who is on the list, export it (below).

@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.29.4
+version: 0.29.5
 date: 2026-10-13
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -13,7 +13,7 @@ related:
   - CALLS-PLAN.md (0.1.3) §13 (phase C2; decisions D12–D26, decided 2026-10-12)
   - PUSH-GATEWAY.md (0.4.4)
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.6.3)
+  - MEMBER-API.md (2.6.4)
   - ANDROID-PLAN.md (0.1.37)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -24,6 +24,19 @@ related:
   - VAULT-HOST-PROTOCOL.md (0.1.6; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.29.5: editorial errata, as built; approved by the owner
+    2026-10-13. No wire change, no new vault release, no change to
+    the member API (MEMBER-API 2.6.4). §11.11.7: **the session's
+    recovery cancel needs only a session of the account holder**,
+    whatever the account's status or terms (MEMBER-API 2.6.2); the
+    request and the status need a session of an active member with
+    the current terms, as the section said of all three. **A
+    `registered` recovery blocks a new request too** (`409
+    recovery_active`); Request named `pending` and `available` only.
+    **The cancel links are not single-use** (§11.11.7 Request, the
+    recovery's; §11.11.9, the deletion's): a link stays usable until
+    the recovery's `expires_at` or the deletion's `deletes_at`, and a
+    second use answers `{cancelled: false}`
   - 0.29.4: editorial erratum, as built; approved by the owner
     2026-10-13. No wire change, no new vault release, no change to
     the member API (MEMBER-API 2.6.3). §11.11.7: **the session's
@@ -11032,10 +11045,12 @@ not its owner check's state.
 
 #### 11.11.7 Member API routes
 
-All routes follow MEMBER-API conventions. The first three require a
-member session and the current terms (the portal); the last two are the
-new app's (0.15.0), signed by its app key (§11.12.2) and needing no
-session:
+All routes follow MEMBER-API conventions. The first three are the
+portal's. The request and the status require a session of an active
+member with the current terms. The cancel requires only a session of
+the account holder, whatever the account's status or terms (0.29.5, as
+built; MEMBER-API 2.6.2). The last two are the new app's (0.15.0),
+signed by its app key (§11.12.2) and needing no session:
 
 | Route | Body | Answer |
 |---|---|---|
@@ -11127,8 +11142,9 @@ for it.
   recovery that a newer one has replaced) is `404`, not `false`
   (0.29.4, as built; MEMBER-API 2.6.3 lists every answer).
 - **Request.** The API accepts a request only for a vault in a state other
-  than `enrolling`, and only when no recovery is `pending` or `available`
-  (`409 recovery_active`). **Backup off** (0.16.0): when the vault row's
+  than `enrolling`, and only when no recovery is `pending`, `available`
+  or `registered` before its `expires_at`
+  (`409 recovery_active`; 0.29.5, as built). **Backup off** (0.16.0): when the vault row's
   `credential_backup` (§11.5) is `false`, the API answers `409
   recovery_unavailable` with `reason: "no_backup"`, enqueues nothing,
   locks nothing and sends no email; the portal says that the vault
@@ -11137,8 +11153,11 @@ for it.
   release) the API forwards the request and the enclave decides
   (§11.11.1). The API also answers `409 deletion_pending` while a
   start-over deletion is pending (§11.11.9). It records the recovery on the vault row and
-  sends the member an email with a single-use cancel link (a random
-  256-bit token; the API stores its SHA-256).
+  sends the member an email with a cancel link (a random
+  256-bit token; the API stores its SHA-256). The link is not used up
+  by a cancel: it stays usable until the recovery's `expires_at`, and a
+  second use answers `{cancelled: false}` (Cancelled, above; 0.29.5, as
+  built).
 - **Refused by the enclave** (0.16.0). When the request's slot comes
   back with `code: "recovery_unavailable"` (§11.11.2), the API records
   the recovery as `unavailable` (an ended state), returns the slot's
@@ -11215,9 +11234,11 @@ destroy a vault at once.
   with the backup on it says that a recovery would keep the vault.
 - **24 hours, emails, cancel.** `deletes_at` = request + 24 h. The API
   emails the member at once (what will be deleted, when, that nothing
-  can be restored, and a single-use cancel link,
+  can be restored, and a cancel link,
   `https://account.vettid.org/vault/deletion/cancel#t=<token>`, stored
-  as its SHA-256 only), and again on a cancel. A deletion is cancelled
+  as its SHA-256 only), and again on a cancel. The link is not used up
+  by a cancel: it stays usable until `deletes_at`, and a second use
+  answers `{cancelled: false}` (0.29.5, as built). A deletion is cancelled
   from the portal, the email link or the vault's app (its app key); the
   app learns of it from `deletion: {deletion_id, state, deletes_at}`
   in `GET /api/vault/status` (0.16.1: the id its cancel names), which it reads after every unlock and whenever
