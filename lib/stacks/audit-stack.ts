@@ -63,8 +63,10 @@ export class VettidOrgAuditStack extends cdk.Stack {
     // ---- CloudTrail -------------------------------------------------------
     // Write-once (owner decision, 2026-10-13): S3 Object Lock in compliance
     // mode, every new object version locked for 400 days from its delivery.
-    // Until then nobody can delete or overwrite it or shorten its lock: no
-    // administrator, not the root user, not AWS support. What that rules
+    // Until then nobody can delete or change that version or shorten its
+    // lock: no administrator, not the root user, not AWS support. (A new
+    // version can still be put over the same key; the delivered one stays
+    // underneath.) What that rules
     // out for good (RUNBOOK "The audit trail is write-once"): removing a
     // record from the trail, emptying or deleting this bucket, suspending
     // its versioning, turning Object Lock off again. Lowering the default
@@ -80,8 +82,9 @@ export class VettidOrgAuditStack extends cdk.Stack {
     // turned on) is removed a day after it is hidden.
     // Never autoDeleteObjects, never a removal policy other than RETAIN: a
     // locked bucket cannot be emptied, and a stack that tries fails.
+    const trailBucketName = `${resourceName(config, 'cloudtrail')}-${this.account}`;
     const trailBucket = new s3.Bucket(this, 'TrailBucket', {
-      bucketName: `${resourceName(config, 'cloudtrail')}-${this.account}`,
+      bucketName: trailBucketName,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
       enforceSSL: true,
@@ -119,6 +122,8 @@ export class VettidOrgAuditStack extends cdk.Stack {
     // trail, as CloudTrail's documented bucket policy has it. (The construct
     // keeps its statements to itself, hence overrides by position; the test
     // holds every CloudTrail statement of the template to the condition.)
+    // Add nothing to this bucket's policy after these lines: a statement
+    // added later could change the positions the overrides were found at.
     const trailArn = `arn:${this.partition}:cloudtrail:${this.region}:${this.account}:trail/${resourceName(config, 'trail')}`;
     const statements: any[] = this.resolve(trailBucket.policy!.document).Statement;
     const unconditioned = statements.flatMap((st, i) =>
@@ -360,6 +365,35 @@ export class VettidOrgAuditStack extends cdk.Stack {
           'DeleteRule', 'DisableRule', 'RemoveTargets', 'PutPermission', 'RemovePermission',
         ],
         ...notDeploy,
+      },
+    );
+
+    // The trail's bucket is write-once (above), and these calls are the
+    // ways left to weaken that from now on: an Object Lock default lowered
+    // or removed (new records become deletable), a lifecycle rule that
+    // hides records or removes the ones not yet locked, a bucket policy
+    // that stops deliveries. Versioning and deletion are refused by S3
+    // while the lock holds; an attempt is still worth an email. Always
+    // reported, deploys included: a deploy changes them only when this
+    // bucket's definition changes, which is rare and worth a look. A bucket
+    // policy change outside a deploy is reported by S3PublicAccess as well.
+    apiCall(
+      'TrailBucketConfig',
+      'audit trail bucket: Object Lock default, lifecycle, versioning or bucket policy changed, or the bucket deleted (deploys included)',
+      ['aws.s3'],
+      {
+        eventName: [
+          'PutBucketObjectLockConfiguration', // the name CloudTrail gives PutObjectLockConfiguration
+          'PutObjectLockConfiguration',
+          'PutBucketLifecycle', // the name CloudTrail gives PutBucketLifecycleConfiguration
+          'PutBucketLifecycleConfiguration',
+          'DeleteBucketLifecycle',
+          'PutBucketVersioning',
+          'PutBucketPolicy',
+          'DeleteBucketPolicy',
+          'DeleteBucket',
+        ],
+        requestParameters: { bucketName: [trailBucketName] },
       },
     );
 

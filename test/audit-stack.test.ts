@@ -104,6 +104,7 @@ const RULES = [
   'IamCredentialChanges',
   'IamRoleOrPolicyChanges',
   'AuditTampering',
+  'TrailBucketConfig',
   'OrgOrSsoChanges',
   'CentralRootSession',
   'KmsKeyDeletion',
@@ -237,6 +238,48 @@ test('S3 bucket policy / public access block changes alert outside a deploy', ()
   expect(matching(apiCall(vaultStaging, 'aws.s3', 'PutBucketPolicy', SSO_ADMIN))).toEqual(['S3PublicAccess']);
   expect(matching(apiCall(proteus, 'aws.s3', 'DeleteBucketPublicAccessBlock', 'iam-user'))).toEqual(['S3PublicAccess']);
   expect(matching(apiCall(proteus, 'aws.s3', 'PutBucketPolicy', CFN_EXEC))).toEqual([]);
+});
+
+describe('the audit trail bucket\'s configuration (TrailBucketConfig)', () => {
+  const TRAIL_BUCKET = `vettid-org-cloudtrail-${MGMT}`;
+  const onBucket = (bucketName: string, extra: Record<string, any> = {}) => ({ requestParameters: { bucketName }, ...extra });
+  // PutBucketObjectLockConfiguration and PutBucketLifecycle are the names
+  // CloudTrail records for PutObjectLockConfiguration and
+  // PutBucketLifecycleConfiguration (S3 user guide, "Amazon S3 CloudTrail events").
+  const CALLS = [
+    'PutBucketObjectLockConfiguration', 'PutObjectLockConfiguration', 'PutBucketLifecycle', 'PutBucketLifecycleConfiguration',
+    'DeleteBucketLifecycle', 'PutBucketVersioning', 'DeleteBucket',
+  ];
+
+  test('the rule names exactly these calls on exactly this bucket', () => {
+    const pattern = rule('TrailBucketConfig').EventPattern;
+    expect(pattern.source).toEqual(['aws.s3']);
+    expect(pattern.detail.requestParameters).toEqual({ bucketName: [TRAIL_BUCKET] });
+    expect([...pattern.detail.eventName].sort()).toEqual([...CALLS, 'PutBucketPolicy', 'DeleteBucketPolicy'].sort());
+    // Deploys included: nothing in the pattern looks at who made the call.
+    expect(JSON.stringify(pattern)).not.toContain('userIdentity');
+  });
+  test.each(CALLS)('%s alerts, whoever makes it: a person, root, a deploy, and when it was refused', (name) => {
+    expect(matching(apiCall(MGMT, 'aws.s3', name, SSO_ADMIN, onBucket(TRAIL_BUCKET)))).toEqual(['TrailBucketConfig']);
+    expect(matching(apiCall(MGMT, 'aws.s3', name, CFN_EXEC, onBucket(TRAIL_BUCKET)))).toEqual(['TrailBucketConfig']);
+    expect(matching(apiCall(MGMT, 'aws.s3', name, 'root', onBucket(TRAIL_BUCKET)))).toEqual(['RootActivity', 'TrailBucketConfig']);
+    expect(matching(apiCall(MGMT, 'aws.s3', name, SSO_ADMIN, onBucket(TRAIL_BUCKET, { errorCode: 'AccessDenied' })))).toEqual(['TrailBucketConfig']);
+  });
+  test('a bucket policy change: by a deploy this rule alone, by a person S3PublicAccess as well', () => {
+    for (const name of ['PutBucketPolicy', 'DeleteBucketPolicy']) {
+      expect(matching(apiCall(MGMT, 'aws.s3', name, CFN_EXEC, onBucket(TRAIL_BUCKET)))).toEqual(['TrailBucketConfig']);
+      expect(matching(apiCall(MGMT, 'aws.s3', name, SSO_ADMIN, onBucket(TRAIL_BUCKET)))).toEqual(['TrailBucketConfig', 'S3PublicAccess']);
+    }
+  });
+  test('other buckets, and reads of this one, are quiet', () => {
+    for (const name of CALLS) {
+      expect(matching(apiCall(MGMT, 'aws.s3', name, SSO_ADMIN, onBucket('vettid-org-site-bucket')))).toEqual([]);
+      expect(matching(apiCall(MGMT, 'aws.s3', name, SSO_ADMIN, onBucket(`${TRAIL_BUCKET}-copy`)))).toEqual([]);
+      expect(matching(apiCall(MGMT, 'aws.s3', name, SSO_ADMIN))).toEqual([]);
+    }
+    expect(matching(apiCall(MGMT, 'aws.s3', 'GetBucketObjectLockConfiguration', SSO_ADMIN, onBucket(TRAIL_BUCKET)))).toEqual([]);
+    expect(matching(apiCall(MGMT, 'aws.s3', 'GetBucketLifecycle', SSO_ADMIN, onBucket(TRAIL_BUCKET)))).toEqual([]);
+  });
 });
 
 describe('audit and alerting tampering', () => {
