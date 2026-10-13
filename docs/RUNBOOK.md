@@ -998,6 +998,89 @@ SNS:Publish" (the topic admitted only the CloudTrail rules until the
 host stack that added these alarms was deployed; an alarm that fired
 before that deploy did not notify).
 
+### The data bucket's old versions and its size alarm
+
+The data bucket (`vettid-org[-staging]-vault-data-<account>`,
+`VettidOrgVaultStack`) is versioned. A vault's state is one object,
+`vaults/<vault_id>/state`, rewritten in full at every change (with its
+header, `vaults/<vault_id>/header/<pcr0>`), so a busy vault leaves
+hundreds of old versions a day and they are nearly all of the bucket's
+bytes. Nothing reads an old version: the hosts read and write the current
+one only (conditional writes), and an old version is there for an
+operator to restore by hand (VAULT-RELEASES §8.2, §11.4).
+
+Two lifecycle rules, over every key (`VAULT_DATA_VERSIONS` in
+`lib/stacks/vault-stack.ts`); S3 removes a version as soon as either
+allows it:
+
+1. No old version is kept more than **7 days** after it was replaced or
+   deleted; a delete marker goes once nothing is left under it;
+   unfinished multipart uploads go after a day. This is the rule the
+   bucket has had from the start.
+2. An old version goes **1 day** after it was replaced, unless it is one
+   of the **5 newest** old versions of its object (owner, 2026-10-13).
+
+S3 counts from the moment a version was replaced, rounds up to the next
+midnight UTC and removes some time after that, so "1 day" is between 24
+and 48 hours, and a little more.
+
+| Object | What is kept beside the current version |
+|---|---|
+| Of an idle vault (no write for a week) | nothing: its 5 newest old versions went when they reached 7 days |
+| Of a vault written 600 times a day | every version of the last 24 to 48 hours (600 to 1,200 of them), and nothing older. The 5 newest are always among those, so the count of 5 changes nothing for such a vault: the 1 day is what bounds it |
+| Of a vault written a few times a week | the 5 newest old versions, each for at most 7 days |
+| Of a deleted vault | all it wrote in its last 24 to 48 hours, then its 5 newest versions, until 7 days after the deletion; then the delete marker goes too. The same bound as before: rule 1 is what removes them, rule 2 alone would keep those 5 for ever |
+
+What this gives up: an operator could restore any state of the last 7
+days and can now restore any state of the last 24 hours, plus the 5
+versions before that. For a busy vault those 5 are seconds or minutes of
+history, not days. The 24 hours are therefore the time there is to notice
+a fault that damages state at every write (a bad release, an operator
+error) and still find a good version: a fault noticed on the second day is
+too late for a vault that kept writing. State and header are written
+together and restored together (the header names the state it belongs
+to), so both have the same rule; restoring means editing the bucket
+policy first (it denies `vaults/*` to everyone but the host role) and
+shows in the app as a rollback (VAULT-RELEASES §13.2).
+
+To see the rules and that they work (read-only; the size is S3's daily
+metric, a day or so late, and it counts every version):
+
+```bash
+P="--profile vault-staging"; B=vettid-org-staging-vault-data-347272280361
+aws s3api get-bucket-lifecycle-configuration $P --bucket $B
+aws cloudwatch get-metric-statistics $P --namespace AWS/S3 --metric-name BucketSizeBytes \
+  --dimensions Name=BucketName,Value=$B Name=StorageType,Value=StandardStorage \
+  --start-time "$(date -u -d '10 days ago' +%FT00:00:00Z)" --end-time "$(date -u +%FT%TZ)" \
+  --period 86400 --statistics Maximum --query 'sort_by(Datapoints,&Timestamp)[].[Timestamp,Maximum]' --output table
+# NumberOfObjects (StorageType=AllStorageTypes) counts versions and delete markers too.
+```
+
+After a deploy that changes the rules, S3 needs up to two days to act on
+them; the size then falls over the following days.
+
+**Alarm `vettid-org[-staging]-vault-data-bucket-size`** (host stack, to
+the vault alerts topic like the others): the bucket holds more than
+10 GiB (`VAULT_DATA_BUCKET_ALARM_BYTES` in
+`lib/stacks/vault-host-stack.ts`; staging held about 7.4 GB under the
+7-day rule on 2026-10-13). When it fires:
+
+1. Look at the size over the last days (the command above). A step up
+   over one or two days is a vault writing more or larger state than
+   before; a slow rise is more vaults.
+2. Check that both lifecycle rules are there and `Enabled`. A bucket
+   whose rules were removed or disabled grows without bound.
+3. Find what writes: the parent's metrics and the host log say which
+   instance is busy; the storage metric does not say which vault. A
+   vault that rewrites its state in a loop is a bug to report in
+   vettid-vault, not something to fix in the bucket.
+4. If the growth is ordinary (more vaults), raise the threshold. A vault
+   costs about its state's size times the writes of one to two days.
+
+Do not delete versions by hand to make room: the bucket policy forbids
+it to everyone but the host role, and the 24 hours of versions are the
+only way back from a fault that damages state.
+
 ### Manifest sync (`vettid-org-vault-manifest-sync`, VAULT-RELEASES §7)
 
 Every 5 minutes: fetches the channel's served manifest, verifies it under
@@ -1555,7 +1638,8 @@ session | link | app`), `vault.deletion_executed`.
 - *Member says "I didn't ask for this"* within the 24 hours: they cancel
   from the email link, the account page or the app. After `executing` it
   cannot be cancelled; the vault is gone once the host deletes it (stored
-  versions stay 7 days, sealed, and are not restorable by support).
+  versions stay at most 7 days, sealed, and are not restorable by support;
+  "The data bucket's old versions and its size alarm").
 - *Stuck in `executing`*: as for an account deletion: look at
   `deletion_requested_at`, the release's routability and the host logs;
   the daily retry keeps trying and logs `vault deletion pending` after 30
