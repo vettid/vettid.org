@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.22
+version: 0.1.23
 date: 2026-10-13
 owner: Al Liebl (Mesmer)
 changelog:
@@ -179,6 +179,8 @@ changelog:
     "Instance" bullet: no interactive access, Run Command only; before,
     it said "SSM Session Manager only (sessions logged)". `related`
     brought up to date
+  - 0.1.23 (editorial, as built; staging release S11, 2026-10-13;
+    approved by the owner 2026-10-13). §8.8: S11's capacity figures
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.29.3) §11.10 release updates, §12.5 deletion, §13.5, §13.9
@@ -1548,6 +1550,15 @@ canary self-test (`-capacity 400`, same host and enclave size), PASS:
 58 vaults held at the memory floor, about 907 idle unlocked vaults
 projected per host. The burst figure is unchanged; the projection is
 about 7 % lower than S3's.
+
+*Measured again (staging S11, 2026-10-13):* the same run on S11's
+canary host after its self-test (`-capacity 400`, same host and enclave
+size), PASS: 58 vaults held at the memory floor, about 894 idle
+unlocked vaults projected per host (4.5 MiB steady marginal memory per
+vault), unlock p50 193 ms / 393 ms / 817 ms at concurrency 1 / 2 / 4,
+idle CPU 0.9 ms per vault per minute. S11's hardening of the vault
+process (the system call filter, no user namespaces) leaves the figures
+where S10's were.
 
 *Relay connections (0.1.14; VAULT-RELAY-SCALING 0.1.2 §3, §10;
 vettid-vault #66).* Memory, not the relay path, bounds vaults per host:
