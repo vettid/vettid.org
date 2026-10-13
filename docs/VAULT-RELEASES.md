@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.24
+version: 0.1.25
 date: 2026-10-13
 owner: Al Liebl (Mesmer)
 changelog:
@@ -201,6 +201,12 @@ changelog:
     not be carried out: the validation refused `host` on a `removed`
     entry, and a status never goes back). No enclave, key or release
     list entry changes
+  - 0.1.25 (editorial, as built; approved by the owner 2026-10-13).
+    §3.5: the rescue of staging release 3 was rehearsed on 2026-10-13
+    (a vault moved from release 3 into release 10), so its key's
+    deletion was scheduled again and falls seven days after that, later
+    than the keys of releases 4 to 6; and with release 11 `active`
+    since that day, staging 3 to 6 have no rescue target any more
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.29.3) §11.10 release updates, §12.5 deletion, §13.5, §13.9
@@ -442,9 +448,13 @@ be rescued admits N:
 - *Keys older than the rule (staging).* The keys of staging releases 1
   to 11 were created before it and cannot change. Release 11's key
   admits releases 7 to 10 only. Staging releases 3 to 6 (removed
-  2026-10-13) can therefore be rescued only into release 10, and only
-  while release 10 is `active`, until their keys are deleted on
-  2026-10-20; once release 11 is `active` they have no target. The
+  2026-10-13) could therefore be rescued only into release 10, and only
+  while release 10 was `active`; since release 11 became `active`
+  (2026-10-13) they have no target. Their keys are deleted on
+  2026-10-20, release 3's some hours later than the others: its rescue
+  was rehearsed on 2026-10-13 (a vault moved from release 3 into
+  release 10), and its key's deletion was scheduled again afterwards
+  with the full seven days. The
   check starts with staging release 12. Production has no release yet,
   so every production key follows the rule.
 
