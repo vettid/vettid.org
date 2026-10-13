@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.29.3
+version: 0.29.4
 date: 2026-10-13
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -13,7 +13,7 @@ related:
   - CALLS-PLAN.md (0.1.3) §13 (phase C2; decisions D12–D26, decided 2026-10-12)
   - PUSH-GATEWAY.md (0.4.4)
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.6.2)
+  - MEMBER-API.md (2.6.3)
   - ANDROID-PLAN.md (0.1.37)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -24,6 +24,16 @@ related:
   - VAULT-HOST-PROTOCOL.md (0.1.6; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.29.4: editorial erratum, as built; approved by the owner
+    2026-10-13. No wire change, no new vault release, no change to
+    the member API (MEMBER-API 2.6.3). §11.11.7: **the session's
+    recovery cancel answers `404` for a `recovery_id` that is not the
+    vault's current recovery**, and the email link answers `404` for
+    a token the API does not hold, one past the recovery's
+    `expires_at` or one of a replaced recovery; before, the section
+    gave `200 {cancelled}` as the only answer of both. `{cancelled:
+    false}` is the answer for the vault's current recovery once it
+    has ended
   - 0.29.3: editorial-normative erratum, as built in vettid-vault #75
     (the parent only; the enclave and its measurements do not change);
     approved by the owner 2026-10-13. No wire change. §11.1,
@@ -11031,7 +11041,7 @@ session:
 |---|---|---|
 | `POST /api/vault/recovery` | `{browser_key}` (b64 of 65 bytes) | `202 {recovery_id, available_at, expires_at}` |
 | `GET /api/vault/recovery` | — | `{recovery: {recovery_id, vault_id, state, requested_at, available_at, expires_at, sealed_code?, locator?} \| null}` |
-| `POST /api/vault/recovery/cancel` | `{recovery_id}` | `200 {cancelled}` |
+| `POST /api/vault/recovery/cancel` | `{recovery_id}` | `200 {cancelled}`; `404` when `recovery_id` is not the vault's current recovery (0.29.4, as built) |
 | `POST /api/vault/recovery/claim` | `{vault_id, recovery_id, app_key}` (scanned), or `{locator, app_key}` (typed, 0.25.0) | `200 {user_guid, email_hint, vault_id, recovery_id}` (0.15.0; the two identifiers since 0.25.0) |
 | `POST /api/vault/recovery/register` | `{vault_id, request_id, instance_id, etk_kid, envelope}` | `202 {vault_id, request_id}`; the result is polled like unlock (`GET /api/vault/requests/{id}`) |
 
@@ -11075,7 +11085,10 @@ session:
 
 The email link uses its own route, `POST /api/vault/recovery/cancel-link`
 with body `{token}`, answered `200 {cancelled}` like the session's
-cancel. It needs no session: the token stands in for it.
+cancel, and `404` for a token the API does not hold, one past the
+recovery's `expires_at` or one of a recovery that a newer one has
+replaced (0.29.4, as built). It needs no session: the token stands in
+for it.
 
 - **No vault.** Without an enrolled vault (none, `enrolling` or
   deleted), `GET /api/vault/recovery` answers `{recovery: null}`, not
@@ -11105,9 +11118,14 @@ cancel. It needs no session: the token stands in for it.
   (§11.11.5 step 3), and removes its own record then.
 - **Cancelled.** `{cancelled: true}` when this call ended an active
   recovery (`pending`, `available` or `registered`), `{cancelled: false}`
-  when there was nothing to cancel (it had ended already, by a cancel or
+  when the recovery named is the vault's current one and there was
+  nothing to cancel (it had ended already, by a cancel or
   its expiry). The cancel link stays usable until
-  the recovery's `expires_at`, so a second use answers `false`.
+  the recovery's `expires_at`, so a second use answers `false`, and
+  after `expires_at` the link answers `404`. A `recovery_id` that is
+  not the vault's current recovery (no vault, no recovery, or a
+  recovery that a newer one has replaced) is `404`, not `false`
+  (0.29.4, as built; MEMBER-API 2.6.3 lists every answer).
 - **Request.** The API accepts a request only for a vault in a state other
   than `enrolling`, and only when no recovery is `pending` or `available`
   (`409 recovery_active`). **Backup off** (0.16.0): when the vault row's

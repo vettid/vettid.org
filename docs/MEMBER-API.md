@@ -1,8 +1,25 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.6.2
+version: 2.6.3
 changelog:
+  - 2.6.3 (2026-10-13; editorial, erratum as built; approved by the
+    owner 2026-10-13). No route, answer or email changes: the text
+    is corrected to what the API does.
+    **`POST /api/vault/recovery/cancel` answers `404 not_found` for a
+    `recovery_id` that is not the current recovery of the member's
+    vault** (no vault, a deleted vault, a vault with no recovery, or
+    another id, such as that of a recovery a newer one has replaced);
+    the route table said `200 {cancelled}` only. `{cancelled: false}`
+    is the answer only for the vault's current recovery once it has
+    ended. **Every answer of the two cancel routes is listed**
+    (`200` with `true` or `false`, `400`, `401`, `403`, `404`, `409`,
+    `429`), for the session and for the email link. **The email link
+    is not uniform**: a token the API does not hold, one past the
+    recovery's `expires_at` and one of a replaced recovery answer
+    `404`, unlike the withdrawal link of "Withdrawing a request",
+    which answers the same for every token. See "Vault recovery"
+    (the route table, Cancel)
   - 2.6.2 (2026-10-13; as built in vettid.org #251 and #254; approved
     by the owner 2026-10-13; each clause below is separate and names
     what it follows).
@@ -1424,8 +1441,8 @@ the expiry itself.
 |---|---|---|---|
 | POST | `/api/vault/recovery` | `{browser_key}` | `202 {recovery_id, available_at, expires_at}` |
 | GET | `/api/vault/recovery` | — | `{recovery: Recovery \| null}` |
-| POST | `/api/vault/recovery/cancel` | `{recovery_id}` | `200 {cancelled: boolean}` |
-| POST | `/api/vault/recovery/cancel-link` | `{token}` (no session) | `200 {cancelled: boolean}` |
+| POST | `/api/vault/recovery/cancel` | `{recovery_id}` | `200 {cancelled: boolean}`; `404 not_found` when `recovery_id` is not the current recovery of the member's vault (Cancel, below) |
+| POST | `/api/vault/recovery/cancel-link` | `{token}` (no session) | `200 {cancelled: boolean}`; `404 not_found` for a token that is unknown, past the recovery's `expires_at` or of a replaced recovery (Cancel, below) |
 | POST | `/api/vault/recovery/claim` | `{vault_id, recovery_id, app_key}` (scanned; 2.0.0) or `{locator, app_key}` (typed; 2.4.0); app, signed by `app_key` | `200 {user_guid, email_hint, vault_id, recovery_id}` (the two identifiers since 2.4.0) |
 | POST | `/api/vault/recovery/register` | `{vault_id, request_id, instance_id, etk_kid, envelope}` (app, signed by a claim key; 2.0.0) | `202 {vault_id, request_id}`; poll `GET /api/vault/requests/{id}` |
 
@@ -1695,6 +1712,49 @@ interface Recovery {
   no-op answered `{cancelled: false}`. The link stays valid until the
   recovery's `expires_at`, so its second use answers `false`; a link of a
   recovery that a newer one has replaced is `404`.
+  **The answers of the session route** (2.6.3, as built).
+  `recovery_id` must name the current recovery of the member's vault,
+  which is the one recorded on the vault's row, in whatever state.
+  - `200 {cancelled: true}`: it is the current recovery, it was
+    `pending`, `available` or `registered` before its `expires_at`,
+    and this call cancelled it.
+  - `200 {cancelled: false}`: it is the current recovery and it has
+    ended: it was cancelled already, it is `unavailable` or
+    `completed`, or it has passed its `expires_at`. Nothing is
+    enqueued or mailed, and no cancel is audited.
+  - `404 not_found`: it is not the current recovery. The member has
+    no vault, the vault is deleted, the vault has no recovery, or the
+    vault's recovery has another id (a recovery that a newer one has
+    replaced, or an id that was never the member's). The answer is
+    the same in each case.
+  - `409 conflict`: the recovery was replaced between the read and
+    the write. A repeat then answers `404`.
+  - `400 bad_request`: `recovery_id` is not a ULID. `401`: no
+    session. `403 forbidden`: the session's account row is gone or
+    carries another email address; never for the account's status
+    or its terms alone (Access, above). `429 rate_limited`: the
+    limit below.
+  **The answers of the link route** (2.6.3, as built).
+  - `200 {cancelled: true}`: the token's recovery is still the
+    vault's current one and was active, and this call cancelled it.
+  - `200 {cancelled: false}`: the token's recovery is still the
+    vault's current one and is before its `expires_at`, but has
+    ended (cancelled already, as on the link's second use;
+    `unavailable`; `completed`).
+  - `404 not_found`: a token the API does not hold; a token whose
+    recovery has passed its `expires_at` (the token's row expires
+    with the recovery, so the link never answers `false` for an
+    expiry); a token of a recovery that a newer one has replaced; or
+    a token whose member or vault row is gone. The body is the same
+    in each case.
+  - `409 conflict`: as for the session route. `400 bad_request`: the
+    token is not 43 base64url characters. `429 rate_limited`: the
+    limit below, counted before the token is looked at.
+  The link works whatever the account's status. Its answers are not
+  uniform, unlike the withdrawal link's ("Withdrawing a request"):
+  `404` and `200` tell a token the API holds from one it does not.
+  The token is 256 random bits, and the route is limited per source
+  network.
 - **Register.** Like unlock (envelope exactly 13,444 bytes, routing,
   `request_id` once), and only while the recovery is `available`
   (`409 recovery_not_available`), signed by one of its claim keys, which
