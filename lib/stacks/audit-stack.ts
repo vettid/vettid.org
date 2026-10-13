@@ -415,30 +415,44 @@ export class VettidOrgAuditStack extends cdk.Stack {
     // A command on an instance in a vault account, or an attempt at an
     // interactive way in. Run Command is how hosts are operated (a
     // release's self-test, the capacity measurement): CloudTrail records
-    // that a command ran and on which instance, not what it was. Sessions,
-    // EC2 Instance Connect and the serial console are denied to everyone
-    // by the Vault OU policy (lib/org/scp-vault.json), so those arrive as
-    // refused attempts, or as a sign that the policy is off. Image Builder
-    // drives its build instances with Run Command on every image build
-    // (invokedBy is set by AWS, not by the caller). Matched by the event's
-    // own source field: the calls come from three services.
-    const not = (service: string) => [
+    // that a command ran and on which instance, not what it was. The SSM
+    // agent runs documents for more than SendCommand, so every call that
+    // can make it run one is here: a State Manager association (the agent
+    // fetches those itself, with no SendCommand), an automation, a
+    // maintenance-window task. None is in use in the vault accounts.
+    // Sessions, EC2 Instance Connect and the serial console are denied to
+    // everyone by the Vault OU policy (lib/org/scp-vault.json), so those
+    // arrive as refused attempts, or as a sign that the policy is off.
+    // Matched by the event's own source field: the calls come from three
+    // services.
+    //
+    // "Not this AWS service acting through its own service-linked role":
+    // both fields are set by AWS, and a role with that name cannot be made
+    // by hand. Either one differing or missing means someone else. Image
+    // Builder drives its build instances with Run Command on every image
+    // build; a release group's launches are Auto Scaling's.
+    const notService = (service: string, role: string) => [
       { userIdentity: { invokedBy: events.Match.anythingBut(service) } },
       { userIdentity: { invokedBy: events.Match.doesNotExist() } },
+      { userIdentity: { sessionContext: { sessionIssuer: { userName: events.Match.anythingBut(role) } } } },
+      { userIdentity: { sessionContext: { sessionIssuer: { userName: events.Match.doesNotExist() } } } },
     ];
     apiCall(
       'VaultHostAccess',
-      'operator access to an instance in a vault account (a Run Command, or an interactive session, Instance Connect or serial console call, which the Vault OU policy denies)',
+      'operator access to an instance in a vault account (a Run Command or another way to have the SSM agent run one; or an interactive session, Instance Connect or serial console call, which the Vault OU policy denies)',
       events.Match.prefix('aws.'),
       {
         eventSource: ['ssm.amazonaws.com', 'ec2-instance-connect.amazonaws.com', 'ec2.amazonaws.com'],
         eventName: [
           'SendCommand',
+          'CreateAssociation', 'CreateAssociationBatch', 'UpdateAssociation', 'StartAssociationsOnce',
+          'StartAutomationExecution', 'StartChangeRequestExecution',
+          'RegisterTaskWithMaintenanceWindow', 'UpdateMaintenanceWindowTask',
           'StartSession', 'ResumeSession',
           'SendSSHPublicKey', 'SendSerialConsoleSSHPublicKey', 'OpenTunnel', 'CreateInstanceConnectEndpoint',
           'EnableSerialConsoleAccess',
         ],
-        $or: not('imagebuilder.amazonaws.com'),
+        $or: notService('imagebuilder.amazonaws.com', 'AWSServiceRoleForImageBuilder'),
       },
       vaultAccounts,
     );
@@ -459,26 +473,30 @@ export class VettidOrgAuditStack extends cdk.Stack {
           { responseElements: { instancesSet: { items: { iamInstanceProfile: { arn: hostProfile } } } } },
           { requestParameters: { iamInstanceProfile: { arn: hostProfile } } },
           { requestParameters: { iamInstanceProfile: { name: [VAULT_ROLE_NAMES.host] } } },
-        ].flatMap((profile) => not('autoscaling.amazonaws.com').map((who) => ({ ...profile, ...who }))),
+        ].flatMap((profile) => notService('autoscaling.amazonaws.com', 'AWSServiceRoleForAutoScaling').map((who) => ({ ...profile, ...who }))),
       },
       vaultAccounts,
     );
     // ... and the ways to get Auto Scaling, or an instance that already
-    // runs, to do it instead: a launch template or group, a profile swapped
-    // on an instance, a role put into another profile. Only deploys do
-    // these in a vault account.
+    // runs, to do it instead: a launch template or group, a refresh of a
+    // group's instances, a profile swapped on an instance, a role put into
+    // another profile. Deploys included, unlike most rules here: a release
+    // stack is how hosts come to exist, and anyone who can pass the CDK
+    // execution role to a stack of their own would otherwise get a host
+    // through Auto Scaling with no email at all. A release deploy sends
+    // three (template, group, the group's sizes) and a release's removal
+    // one; RUNBOOK lists them as expected.
     apiCall(
       'VaultHostLaunchPath',
-      'launch template, Auto Scaling group or instance profile created, changed or attached in a vault account (outside a deploy)',
+      'launch template, Auto Scaling group or instance profile created, changed or attached in a vault account (deploys included: expected for a release, RUNBOOK "Security alerts")',
       ['aws.ec2', 'aws.autoscaling', 'aws.iam'],
       {
         eventName: [
           'CreateLaunchTemplate', 'CreateLaunchTemplateVersion', 'ModifyLaunchTemplate',
-          'CreateAutoScalingGroup', 'UpdateAutoScalingGroup', 'CreateLaunchConfiguration',
+          'CreateAutoScalingGroup', 'UpdateAutoScalingGroup', 'CreateLaunchConfiguration', 'StartInstanceRefresh',
           'AssociateIamInstanceProfile', 'ReplaceIamInstanceProfileAssociation',
           'AddRoleToInstanceProfile',
         ],
-        ...notDeploy,
       },
       vaultAccounts,
     );

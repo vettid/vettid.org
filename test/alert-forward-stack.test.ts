@@ -89,7 +89,11 @@ describe('what is forwarded', () => {
     // The bucket's configuration is a management call and is forwarded.
     expect(matchesPattern(pattern, { ...ct({ eventName: 'PutBucketLifecycle', readOnly: false, eventCategory: 'Management' }), source: 'aws.s3' })).toBe(true);
   });
-  test('Session Manager sessions whatever their readOnly flag says', () => {
+  // A precaution in the pattern only: EventBridge hands read-only management
+  // events to a rule in state ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS
+  // alone, and this rule stays ENABLED (asserted below).
+  test('the pattern names the Session Manager session calls, read-only or not; the rule state is left alone', () => {
+    expect(rules[0].Properties.State).toBe('ENABLED');
     const ssm = (eventName: string, readOnly: boolean) => ({ ...ct({ eventName, readOnly, eventCategory: 'Management', eventSource: 'ssm.amazonaws.com' }), source: 'aws.ssm' });
     for (const ro of [true, false]) {
       expect(matchesPattern(pattern, ssm('StartSession', ro))).toBe(true);

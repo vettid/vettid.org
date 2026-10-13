@@ -65,8 +65,13 @@ export class VettidOrgAlertForwardStack extends cdk.Stack {
         // alert bus (each forwarded event is paid for). EventBridge has no
         // "and" of two "or" lists, so the cross product.
         //
-        // Session Manager sessions whatever their readOnly flag says: the
-        // alert on operator access to a vault host depends on them.
+        // Session Manager's session calls by name, as a precaution: the
+        // alert on access to a vault host depends on them, and no record
+        // of one was at hand to read its readOnly flag from. It only has
+        // an effect together with the rule state
+        // ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS (EventBridge gives
+        // read-only management events to no other rule), which this rule
+        // does not have: RUNBOOK "Testing an alert" says when to set it.
         detail: {
           $or: [
             ...[{ readOnly: [false] }, { readOnly: events.Match.doesNotExist() }].flatMap((write) =>

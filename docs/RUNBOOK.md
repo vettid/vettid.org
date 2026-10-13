@@ -1430,6 +1430,9 @@ for more, write to a file on the host and `grep` or `tail` it with a
 second command, as "Capacity measurement" does. A long command takes
 `executionTimeout` in `--parameters`. Each `send-command` by a person
 sends a `VaultHostAccess` email ("Security alerts"); that is intended.
+So does every other way to have the agent run a document (a State
+Manager association, an automation, a maintenance-window task); none is
+used here, so use none.
 Image Builder's own commands on its build instances and a patch
 baseline, should one ever be wanted, are Run Command too and are not
 affected (the hosts are replaced by a new release's image, not patched
@@ -1891,8 +1894,12 @@ How events get there:
   console sign-in to the management account's default bus. Data events
   (the object calls on the vault data bucket, "Vault data events" below)
   are not forwarded: they are kept in the trail, and the host makes them
-  all day. Session Manager's `StartSession` and `ResumeSession` are
-  forwarded whatever their read-only flag says. Stacks:
+  all day. The pattern also names Session Manager's `StartSession` and
+  `ResumeSession`, as a precaution that by itself changes nothing:
+  EventBridge gives read-only management calls only to a rule in state
+  `ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS`, and the rule is in
+  the ordinary `ENABLED` state ("Testing an alert" says when that would
+  have to change). Stacks:
   `VettidOrgVaultAlertForwardStack` (vault-prod; in staging, vault-staging)
   and `VettidOrgProteusAlertForwardStack` (proteus; an organization-level
   control, so it lives here, not in the proteus-web-site repository).
@@ -1951,9 +1958,9 @@ pattern the SCPs exempt):
 | `KmsKeyPolicy` | `PutKeyPolicy` outside a deploy (management and proteus) |
 | `S3PublicAccess` | bucket policy, ACL, ownership controls, bucket- or account-level public access block (outside a deploy) |
 | `VaultDataBucketConfig` | a vault data bucket's lifecycle rule, versioning or bucket policy changed, or the bucket deleted — always, deploys and refused attempts included (vault accounts) |
-| `VaultHostAccess` | a Run Command (`SendCommand`) in a vault account, except Image Builder's commands on its build instance; and every interactive way in, which the Vault OU policy denies, so normally as a refused attempt: a Session Manager session (`StartSession`, `ResumeSession`), EC2 Instance Connect (`SendSSHPublicKey`, `SendSerialConsoleSSHPublicKey`, `OpenTunnel`, `CreateInstanceConnectEndpoint`), the serial console switch (`EnableSerialConsoleAccess`) |
-| `VaultHostProfileLaunch` | `RunInstances` with the instance profile `vettid-org-vault-host` by anything but Auto Scaling (vault accounts; refused attempts included) |
-| `VaultHostLaunchPath` | a launch template or its version, an Auto Scaling group or launch configuration, an instance-profile association, or a role added to an instance profile — outside a deploy (vault accounts) |
+| `VaultHostAccess` | in a vault account, except by Image Builder itself (its service principal and its service-linked role) on its build instances: a Run Command (`SendCommand`) and the other ways to have the SSM agent run a document, deploys included (`CreateAssociation`, `CreateAssociationBatch`, `UpdateAssociation`, `StartAssociationsOnce`; `StartAutomationExecution`, `StartChangeRequestExecution`; `RegisterTaskWithMaintenanceWindow`, `UpdateMaintenanceWindowTask`); and every interactive way in, which the Vault OU policy denies, so normally as a refused attempt: a Session Manager session (`StartSession`, `ResumeSession`), EC2 Instance Connect (`SendSSHPublicKey`, `SendSerialConsoleSSHPublicKey`, `OpenTunnel`, `CreateInstanceConnectEndpoint`), the serial console switch (`EnableSerialConsoleAccess`) |
+| `VaultHostProfileLaunch` | `RunInstances` with the instance profile `vettid-org-vault-host` by anything but Auto Scaling through its service-linked role (vault accounts; refused attempts included) |
+| `VaultHostLaunchPath` | `CreateLaunchTemplate`, `CreateLaunchTemplateVersion`, `ModifyLaunchTemplate`; `CreateAutoScalingGroup`, `UpdateAutoScalingGroup`, `CreateLaunchConfiguration`, `StartInstanceRefresh`; `AssociateIamInstanceProfile`, `ReplaceIamInstanceProfileAssociation`; `AddRoleToInstanceProfile` — always, **deploys included** (vault accounts): a release deploy sends three, a release's removal one |
 | `SecurityGroupOpenToWorld` | ingress from `0.0.0.0/0` or `::/0` (outside a deploy) |
 | `GuardDutyFindings` | GuardDuty findings of severity ≥ 4 (medium) in any account |
 | alarm `vettid-org-security-alert-heartbeat-<account>` | no forwarding heartbeat from that member for 3 hours (OK email when it resumes) |
@@ -1981,13 +1988,14 @@ alerts is objects copied or destroyed, not read.
   bucket's state with that account's profile
   (`aws s3api get-bucket-lifecycle-configuration`, `get-bucket-versioning`,
   `get-bucket-policy`, each with `--bucket <name>`) and compare with
-  `lib/stacks/vault-stack.ts`: versioning `Enabled`; one rule that expires
-  noncurrent versions after 7 days, removes expired delete markers and
-  aborts incomplete uploads after 1 day, and **no** rule that expires
+  `lib/stacks/vault-stack.ts`: versioning `Enabled`; the lifecycle
+  rules exactly as the stack's `lifecycleRules` has them (noncurrent
+  versions kept for the days written there, expired delete markers
+  removed, incomplete uploads aborted), and **no** rule that expires
   current objects; the two deny statements. If it differs, deploy
   `VettidOrgVaultStack` to put it back **the same day**: an expiry rule
-  takes effect at the next midnight UTC and noncurrent versions go 7 days
-  later, so an early repair loses nothing (objects that already have a
+  takes effect at the next midnight UTC and noncurrent versions go only
+  after their days, so an early repair loses nothing (objects that already have a
   delete marker come back by deleting the marker). An `error:
   AccessDenied` means the SCP refused the call and nothing changed; find
   out who tried. A bucket policy change outside a deploy also arrives as
@@ -1998,8 +2006,14 @@ alerts is objects copied or destroyed, not read.
   (`requestParameters.instanceIds`), the document and the comment, not
   the command: its parameters are recorded as hidden. Expected when the
   owner runs a release's self-test or capacity measurement ("Adding a
-  release", "Capacity measurement"); one email per command. Any other
-  event is an interactive way in ("No interactive access to hosts"):
+  release", "Capacity measurement"); one email per command, typically
+  three to ten on a release day. An association, an automation or a
+  maintenance-window task (`CreateAssociation`,
+  `StartAutomationExecution`, `RegisterTaskWithMaintenanceWindow` and
+  their variants) makes the agent run a document without a visible
+  `SendCommand`; no procedure and no stack uses one in a vault account,
+  so treat it as a command that was not you, and delete the association
+  or task. Any other event is an interactive way in ("No interactive access to hosts"):
   with `error: AccessDenied` the policy refused it and nothing happened,
   but someone tried; **without an error the policy is not in force**
   (detached, edited, or the account moved out of the Vault OU): check
@@ -2020,13 +2034,24 @@ alerts is objects copied or destroyed, not read.
 - **`VaultHostLaunchPath`.** The indirect ways to the same thing: a
   launch template or group that Auto Scaling would launch from (those
   launches are not reported, as release groups launch hosts all day), a
-  profile attached to a running instance, a role put into another
-  profile. Deploys of the release stacks do the first two as the CDK
-  execution role and are not reported. By a person: look at the event's
-  `requestParameters` for the instance profile and the role. If it names
-  `vettid-org-vault-host`, delete what was created and proceed as for
-  `VaultHostProfileLaunch`; if it is a temporary profile for a rebuild,
-  nothing to do.
+  refresh of a group's instances, a profile attached to a running
+  instance, a role put into another profile. Reported whoever does it,
+  a deploy too: a stack is how hosts come to exist, so a stack nobody
+  reviewed must not be quiet. **Expected, with `who` ending in
+  `…cfn-exec-role-…/AWSCloudFormation`, while you deploy:** three emails
+  for a new `VettidOrgVaultRelease<N>Stack` (`CreateLaunchTemplate`,
+  `CreateAutoScalingGroup`, `UpdateAutoScalingGroup`, within a minute),
+  one `UpdateAutoScalingGroup` for a release stack that is destroyed or
+  whose `min_instances` or `max_instances` changed, one
+  `AddRoleToInstanceProfile` for a first deploy of the vault or host
+  stack. Check the group or template name against the release you are
+  deploying (`vettid-org[-staging]-vault-r<N>`). Also expected: one
+  `AddRoleToInstanceProfile` when a temporary profile is made by hand
+  for an independent rebuild. Anything else, or any of these when
+  nobody is deploying: look at the event's `requestParameters` for the
+  instance profile, the user data and the role. If it names
+  `vettid-org-vault-host`, delete what was created (the stack, the
+  template, the group) and proceed as for `VaultHostProfileLaunch`.
 
 ### Vault data events
 
@@ -2104,10 +2129,16 @@ Later changes to the forwarder stacks deploy as usual: CloudFormation
 runs as the CDK execution role, which the SCP exempts.
 
 A change that makes the trail record more data events (as the vault data
-buckets' did): forwarders first, so that the new events are never
-forwarded, then VettidOrgAuditStack. The vault data bucket's protection
-is part of the Vault OU policy: `scripts/vault/apply-scp.sh` (dry run),
-then `--apply` ("Vault", first deployment, step 6).
+buckets' did) deploys the other way round, so that the new events are
+never forwarded: the staging forwarder, the production forwarder, the
+proteus forwarder, **then** VettidOrgAuditStack (`--exclusively` each,
+as above; a forwarder stack depends on the audit stack only for the
+first deployment's order). The rules for the vault accounts exist only
+once the audit stack is deployed: nothing emails `VaultDataBucketConfig`,
+`VaultHostAccess` or the launch rules before that. The vault data
+bucket's protection and the ban on interactive sessions are part of the
+Vault OU policy: `scripts/vault/apply-scp.sh` (dry run), then `--apply`
+("Vault", first deployment, step 6).
 
 A new member account: add it to `ORG.members` (lib/config.ts), add its
 forwarder stack in `lib/app.ts`, deploy VettidOrgAuditStack (bus policy),
@@ -2152,7 +2183,8 @@ email showing `error: AccessDenied`; nothing changes):
 aws events disable-rule --name vettid-org-security-alert-forward --profile vault-staging
 ```
 
-The vault account rules, in staging. A command on a running host
+The vault account rules, in staging, **after VettidOrgAuditStack is
+deployed** (before that nothing matches and no email comes). A command on a running host
 (it runs; expect a `VaultHostAccess` email), a session (once the SCP is
 applied it must be refused with `AccessDeniedException` and still send
 a `VaultHostAccess` email, with `event: StartSession` and `error:
@@ -2167,6 +2199,17 @@ aws ssm start-session --profile vault-staging --target <instance id>
 aws s3api put-bucket-versioning --profile vault-staging \
   --bucket vettid-org-staging-vault-data-347272280361 --versioning-configuration Status=Enabled
 ```
+
+If the refused session sends no email while the command does:
+CloudTrail classes `StartSession` as read-only, and EventBridge gives
+read-only management calls only to rules in state
+`ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS`. Look the event up
+(Event history, `StartSession`, field `readOnly`). The remedy is that
+state on two rules: each vault account's forwarding rule (its pattern
+already names the session calls and lets no other read-only call
+through, so nothing else is forwarded) and `VaultHostAccess`. It is a
+code change with its own review, not something to set by hand: the
+forwarding rule is under the forwarder SCP.
 
 Heartbeats: `aws cloudwatch describe-alarms --alarm-name-prefix
 vettid-org-security-alert-heartbeat --query
