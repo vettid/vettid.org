@@ -2422,7 +2422,13 @@ Files smaller than 128 KB (nearly all of them) stay in the standard
 storage class; the rule's move to Glacier Instant Retrieval at 90 days
 applies to the larger ones. Volume in October 2026: about 4,700 files
 and 12 to 16 MB a day for the whole organization, so about 6 GB held at
-any time, under $0.20 a month; Object Lock itself costs nothing.
+any time, under $0.20 a month; Object Lock itself costs nothing. The
+vault data events ("Vault data events": writes and deletes on the two
+vault data buckets) are delivered here as well and are locked like the
+rest; their object keys carry vault and member identifiers. At a
+thousand vaults, by that section's estimate of 16.5 million events a
+month, they would add about 2.5 GB a month, some 33 GB held at any time,
+under $1 a month of storage.
 
 **What it does not cover.**
 

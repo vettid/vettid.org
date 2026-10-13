@@ -193,7 +193,7 @@ function signIn(account: string, who: Who, detail: Record<string, any> = {}) {
 const { vaultProd, vaultStaging, proteus } = ORG.members;
 const MGMT = ORG.management;
 
-test('nineteen alert rules (plus one heartbeat rule per member), each to the emailed SNS topic, each naming the account', () => {
+test('twenty alert rules (plus one heartbeat rule per member), each to the emailed SNS topic, each naming the account', () => {
   t.resourceCountIs('AWS::Events::Rule', RULES.length + Object.keys(ORG.members).length);
   t.hasResourceProperties('AWS::SNS::Subscription', { Protocol: 'email', Endpoint: 'admin@vettid.org' });
   const topicId = Object.keys(t.findResources('AWS::SNS::Topic'))[0];
@@ -303,6 +303,13 @@ describe('the audit trail bucket\'s configuration (TrailBucketConfig)', () => {
     expect(matching(apiCall(MGMT, 'aws.s3', 'GetBucketObjectLockConfiguration', SSO_ADMIN, onBucket(TRAIL_BUCKET)))).toEqual([]);
     expect(matching(apiCall(MGMT, 'aws.s3', 'GetBucketLifecycle', SSO_ADMIN, onBucket(TRAIL_BUCKET)))).toEqual([]);
   });
+  test('the vault data buckets keep their own rule, and this one stays out of it', () => {
+    for (const [acct, name] of [[vaultProd, 'vettid-org-vault-data-369484479783'], [vaultStaging, 'vettid-org-staging-vault-data-347272280361']]) {
+      for (const call of ['PutBucketLifecycle', 'PutBucketVersioning', 'DeleteBucket']) {
+        expect(matching(apiCall(acct, 'aws.s3', call, CFN_EXEC, onBucket(name)))).toEqual(['VaultDataBucketConfig']);
+      }
+    }
+  });
 });
 
 describe('audit and alerting tampering', () => {
@@ -371,7 +378,8 @@ describe('vault accounts: the data bucket, the hosts, the host role', () => {
     expect(matching(apiCall(vaultStaging, 'aws.s3', 'PutBucketLifecycle', CFN_EXEC, other))).toEqual([]);
     expect(matching(apiCall(vaultStaging, 'aws.s3', 'PutBucketVersioning', SSO_ADMIN, other))).toEqual([]);
     expect(matching(apiCall(vaultStaging, 'aws.s3', 'DeleteBucket', SSO_ADMIN, other))).toEqual([]);
-    expect(matching(apiCall(MGMT, 'aws.s3', 'PutBucketLifecycle', SSO_ADMIN, bucket('vettid-org-cloudtrail-449757308783')))).toEqual([]);
+    // The audit trail's own bucket has its own rule, and never this one.
+    expect(matching(apiCall(MGMT, 'aws.s3', 'PutBucketLifecycle', SSO_ADMIN, bucket('vettid-org-cloudtrail-449757308783')))).toEqual(['TrailBucketConfig']);
   });
 
   test.each([vaultProd, vaultStaging])('an interactive way in, which the Vault OU policy refuses, alerts as an attempt in %s (and as a success if the policy is off)', (acct) => {
