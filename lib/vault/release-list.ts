@@ -186,15 +186,18 @@ export const RESCUE_RULE_FROM: Record<Channel, number> = { prod: 1, staging: 12 
  * one can leave a rescue without a target.
  */
 export function rescueTargetProblems(file: ReleaseFile, issuedAt: string): string[] {
-  const active = file.releases.filter((e) => e.status === 'active');
-  if (!active.length) return []; // consistencyProblems reports it
-  const target = active[active.length - 1];
-  if (target.release < RESCUE_RULE_FROM[file.channel]) return [];
   const out: string[] = [];
+  // On every channel and whatever the newest active release: the windows count from ends_at.
   for (const e of file.releases) {
     if (e.status === 'removed' && e.ends_at !== undefined && e.ends_at > issuedAt) {
       out.push(`release ${e.release}: removed, but its ends_at ${e.ends_at} is after the manifest's issued_at: a removed release's ends_at is the time it ended, and its rescue window counts from it (VAULT-RELEASES §3.5)`);
     }
+  }
+  const active = file.releases.filter((e) => e.status === 'active');
+  if (!active.length) return out; // consistencyProblems reports it
+  const target = active[active.length - 1];
+  if (target.release < RESCUE_RULE_FROM[file.channel]) return out;
+  for (const e of file.releases) {
     if (e.release < target.release && rescuable(e, file.channel, issuedAt) && !target.admitted_pcr0s.includes(e.pcr0)) {
       out.push(`release ${e.release} is removed and can be rescued until ${rescueEndsAt(e, file.channel)}, but the key of release ${target.release}, the newest active release, does not admit it: a rescued vault would have nowhere to move (VAULT-RELEASES §3.5)`);
     }
