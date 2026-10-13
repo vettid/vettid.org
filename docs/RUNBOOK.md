@@ -2189,6 +2189,55 @@ operator does, and does not have to do.
      admin declines it (gone 30 days later), and "Removal by hand"
      below covers a person who asks. The same command also finds a
      request whose email failed to send.
+- **"… is left" in the logs** (cleanup function, admin people
+  function; level warn, with a `user_guid`, never an address):
+  `the email marker belongs to another request and is left` and
+  `the sign-in user under … address carries another id and is left`.
+  A deletion found that the marker or the Cognito user under the
+  address belongs to a newer request or account for the same address
+  (MEMBER-API "Retention"), did not touch it, and deleted the rest.
+  The deletion's audit event says the same in its detail
+  (`sign_in_user: "left"`, `email_marker: "left"`).
+  Nothing to do for the marker. For a sign-in user, check that a
+  member row with that user's `custom:user_guid` exists
+  (`aws cognito-idp admin-get-user --user-pool-id <member pool> --username a@example.com`,
+  then `aws dynamodb get-item --table-name vettid-org-members --key '{"user_guid":{"S":"<that id>"}}'`):
+  if none does, it is a leftover (an abandoned removal above) and
+  `aws cognito-idp admin-delete-user` removes it; an approval for the
+  address is refused until then.
+  An admin's Delete that answers "No such member" for a row that was
+  on the page a moment ago: the cleanup job (or another admin) removed
+  the row first. This Delete did not delete it and wrote no
+  `member.delete` event; the page still shows the row until it is
+  reloaded. By then it had already removed the member's own Cognito
+  user and subscription row if they were still there, and it removes
+  an email marker that still names the row. It does not finish the
+  rest of what the other deletion does (vaults, the SES identity):
+  that is the other deletion's, and its own audit event says if any
+  of it was not removed (`incomplete`, below).
+- **The daily run's other two removals** (a canceled account past its
+  date; an unverified request after 14 days) delete the row first,
+  with its marker, and the rest after (MEMBER-API "Retention", "The
+  daily sweeps"). They use the two alarms below:
+  - `request-removal-failing` also means: the row of one of these
+    could not be deleted (log: `canceled account: not removed` /
+    `unverified request: not removed`, with the id and the error
+    name). Nothing was touched; the next daily run tries again.
+  - `request-removal-abandoned` also means: the row and marker are
+    gone, and something of the member's own outside the row is not
+    (log: `… removed, but not all of it`, with the id, `not_removed`
+    and the error name; the audit event `member.delete_after_cancel`
+    or `request.reclaim_unverified` for that id lists it in
+    `incomplete`). It is not retried. By hand, for the id in the
+    event: `subscription`: delete the row with that `user_guid` from
+    the subscriptions table; `vaults`: query the vaults table's
+    `user-index` for the id; rows with `deletion_requested_at` are
+    retried by the job itself, the others are the operator's (section
+    "Vault"; and delete the pointer row `user#<id>`); `sign_in_user`:
+    the user is disabled since the cancellation and carries that id,
+    `aws cognito-idp list-users --user-pool-id <member pool> --query "Users[?Attributes[?Name=='custom:user_guid' && Value=='<id>']].Username"`,
+    then `admin-delete-user` (until then an approval for that address
+    is refused); `ses_identity`: reconcile as for an abandonment below.
 - **Removal by hand** remains for four things only:
   1. *A request verified before 2.6.0 whose owner asks by email*
      (no link, if the backfill email was not sent): send that one
