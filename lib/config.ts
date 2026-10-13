@@ -447,6 +447,24 @@ export function vaultRoleArn(vault: VaultConfig, role: keyof typeof VAULT_ROLE_N
 const PROD_STAGE = 'prod';
 
 /**
+ * A stage's vault data bucket (VettidOrgVaultStack; VAULT-RELEASES §8.2):
+ * `vettid-org[-<stage>]-vault-data-<vault account>`.
+ */
+export const vaultDataBucketName = (stage: string, account: string): string =>
+  `vettid-org-${stage === PROD_STAGE ? '' : `${stage}-`}vault-data-${account}`;
+
+/**
+ * The vault data bucket of every channel, production first. The
+ * organization trail records their object calls, an alert rule watches
+ * their configuration (VettidOrgAuditStack) and the Vault OU policy
+ * (lib/org/scp-vault.json) names them; test/audit-stack.test.ts keeps the
+ * three in step with VettidOrgVaultStack.
+ */
+export function vaultDataBucketNames(): string[] {
+  return Object.entries(STAGE_ACCOUNTS).flatMap(([stage, a]) => (a.vault ? [vaultDataBucketName(stage, a.vault.account)] : []));
+}
+
+/**
  * The stage's public vault release log (RELEASE-UPDATES §5, VAULT-RELEASES
  * §7): on the site that serves the stage's manifest, https://<zoneName>.
  * The notice job's RELEASE_LOG_URL and the account site's release_log_url.

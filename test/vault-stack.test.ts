@@ -4,7 +4,7 @@ import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { mockClient } from 'aws-sdk-client-mock';
 import { CreateKeyCommand, KMSClient } from '@aws-sdk/client-kms';
-import { AppConfig, loadConfig, VAULT_RELEASE_KEY_FUNCTION_NAME, VAULT_ROLE_NAMES } from '../lib/config';
+import { AppConfig, loadConfig, VAULT_RELEASE_KEY_FUNCTION_NAME, VAULT_ROLE_NAMES, vaultDataBucketNames } from '../lib/config';
 import { VettidOrgVaultStack, vaultEnv } from '../lib/stacks/vault-stack';
 import { VettidOrgMemberApiStack } from '../lib/stacks/member-api-stack';
 import { checkPolicy, failedCheck, ManifestRelease } from '../lambda/shared/keypolicy';
@@ -486,5 +486,31 @@ describe('Vault OU SCP (lib/org/scp-vault.json)', () => {
       ArnNotLike: { 'aws:PrincipalArn': `arn:aws:iam::*:role/${VAULT_ROLE_NAMES.releaseKeyCreator}` },
     });
     expect(raw).toContain(`function:${VAULT_RELEASE_KEY_FUNCTION_NAME}`);
+  });
+
+  describe('the vault data buckets', () => {
+    const s = scp.Statement.find((x: any) => x.Sid === 'ProtectVaultDataBuckets');
+    const bucketOf = (stage: string) => resources(synth(stage, []).json, 'AWS::S3::Bucket')[0][1].Properties.BucketName;
+
+    test('exactly the data bucket of each channel, as the vault stack names it', () => {
+      expect(vaultDataBucketNames()).toEqual([bucketOf('prod'), bucketOf('staging')]);
+      expect(s.Resource).toEqual(vaultDataBucketNames().map((b) => `arn:aws:s3:::${b}`));
+      // Bucket ARNs only: no object call is denied here (the bucket policy keeps objects to the host role).
+      for (const r of s.Resource) expect(r).not.toMatch(/[*/]/);
+    });
+
+    test('denies the calls that can destroy or expose the data: lifecycle, versioning, bucket policy, deletion', () => {
+      expect([...s.Action].sort()).toEqual(['s3:DeleteBucket', 's3:DeleteBucketPolicy', 's3:PutBucketPolicy', 's3:PutBucketVersioning', 's3:PutLifecycleConfiguration']);
+    });
+
+    test('a deploy still can: only the CDK execution role is exempt (as in the other SCP statements)', () => {
+      expect(s.Condition).toEqual({ ArnNotLike: { 'aws:PrincipalArn': 'arn:aws:iam::*:role/cdk-*-cfn-exec-role-*' } });
+    });
+
+    test('nothing a release needs: no other statement touches S3, and this one no object, tag or notification call', () => {
+      const s3Statements = scp.Statement.filter((x: any) => [x.Action].flat().some((a: string) => a.startsWith('s3:')));
+      expect(s3Statements.map((x: any) => x.Sid)).toEqual(['ProtectVaultDataBuckets']);
+      for (const a of s.Action) expect(a).not.toMatch(/Object|\*/);
+    });
   });
 });
