@@ -400,6 +400,21 @@ and nothing is done by hand.
 | A person's email address in the audit log | **90 days** from the event | DynamoDB TTL on the address record |
 | The audit events themselves | kept | — |
 
+**What is named by the address is deleted only by its owner.** The
+`email:<addr>` marker and the Cognito user are keyed by the address,
+not by the request or account, and an address can be requested again
+as soon as its marker is gone. Every deletion (an admin's Delete, the
+14-day reclaim, the deletion after a cancellation, the removal of a
+withdrawn or declined request) therefore deletes the marker only if
+its `member_guid` is the row being deleted (or the marker is already
+gone), and the Cognito user only if its `custom:user_guid` is. One
+that names another id belongs to a newer request or account for the
+address: it is left, the row still goes, and the cleanup job logs it
+(by id, never the address). The 14-day reclaim then leaves the SES
+identity too, since the newer request's verification runs on it.
+Cognito has no conditional delete, so its check is a read just before
+the delete.
+
 **Declined requests (owner decision of 2026-10-12: "declines should be
 kept for 30 days").** `POST /admin/requests/{id}/reject` records
 `rejected_at`. The members table has no TTL, and a TTL could remove

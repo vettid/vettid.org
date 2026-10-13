@@ -22,15 +22,14 @@
  *    exactly as a withdrawn one
  *  - mark subscriptions past their expiry as `expired`
  */
-import { AdminDeleteUserCommand, AdminGetUserCommand } from '@aws-sdk/client-cognito-identity-provider';
 import { DeleteEmailIdentityCommand } from '@aws-sdk/client-sesv2';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { DeleteCommand, GetCommand, QueryCommand, ScanCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { audit } from '../shared/audit';
-import { cognito, ddb, env, ses, table } from '../shared/aws';
+import { ddb, env, ses, table } from '../shared/aws';
 
 const STALE_DAYS = 14;
-import { emailMarkerKey, vaultPointerKey } from '../shared/members';
+import { deleteOwnSignInUser, ownEmailMarkerDelete, vaultPointerKey } from '../shared/members';
 import type { MemberItem, SubscriptionItem } from '../shared/model';
 import { DECLINED_DAYS, REMOVAL_GIVE_UP_DAYS, ownAddress } from '../shared/requests';
 import { liveLease, newUlid, pickInstance, releaseRow, requestStart, routable } from '../shared/vault-routing';
@@ -293,12 +292,24 @@ async function releaseIdentity(m: MemberItem): Promise<'deleted' | 'kept'> {
  * another id is somebody's account.
  */
 async function deleteRequestUser(m: MemberItem): Promise<void> {
+  await deleteOwnSignInUser(m);
+}
+
+/**
+ * The email marker of a member whose row this run has just deleted: only
+ * if it is that member's own (or already gone). False if it names another
+ * request or account: one made for the address after somebody else (an
+ * admin's Delete) removed the old marker. That marker is left, and the
+ * address is then no longer this member's to clean up after.
+ */
+async function deleteOwnMarker(m: MemberItem, what: string): Promise<boolean> {
   try {
-    const u = await cognito.send(new AdminGetUserCommand({ UserPoolId: env('MEMBER_POOL_ID'), Username: m.email }));
-    if (u.UserAttributes?.find((a) => a.Name === 'custom:user_guid')?.Value !== m.user_guid) return;
-    await cognito.send(new AdminDeleteUserCommand({ UserPoolId: env('MEMBER_POOL_ID'), Username: m.email }));
+    await ddb.send(new DeleteCommand(ownEmailMarkerDelete(m)));
+    return true;
   } catch (e) {
-    if ((e as Error).name !== 'UserNotFoundException') throw e;
+    if ((e as Error).name !== 'ConditionalCheckFailedException') throw e;
+    console.warn(`${what}: the email marker belongs to another request and is left`, JSON.stringify({ user_guid: m.user_guid })); // never the address
+    return false;
   }
 }
 
@@ -323,14 +334,7 @@ async function deleteRequestRows(m: MemberItem, state: 'withdrawn' | 'rejected')
       new TransactWriteCommand({
         TransactItems: [
           { Delete: row },
-          {
-            Delete: {
-              TableName: table.members(),
-              Key: { user_guid: emailMarkerKey(m.email) },
-              ConditionExpression: 'attribute_not_exists(user_guid) OR member_guid = :g',
-              ExpressionAttributeValues: { ':g': m.user_guid },
-            },
-          },
+          { Delete: ownEmailMarkerDelete(m) },
         ],
       }),
     );
@@ -479,13 +483,15 @@ export const handler = async (event?: { task?: string }) => {
         if ((e as Error).name === 'ConditionalCheckFailedException') continue;
         throw e;
       }
-      try {
-        await cognito.send(new AdminDeleteUserCommand({ UserPoolId: env('MEMBER_POOL_ID'), Username: m.email }));
-      } catch (e) {
-        if ((e as Error).name !== 'UserNotFoundException') throw e;
+      // The sign-in user and the marker are named by the address, not by
+      // the account: each goes only if it is this account's own. One that
+      // names another id belongs to a request or account made for the
+      // address since, and is left.
+      if ((await deleteOwnSignInUser(m)) === 'other') {
+        console.warn('canceled account: the sign-in user under its address carries another id and is left', JSON.stringify({ user_guid: m.user_guid })); // never the address
       }
       await ddb.send(new DeleteCommand({ TableName: table.subscriptions(), Key: { user_guid: m.user_guid } }));
-      await ddb.send(new DeleteCommand({ TableName: table.members(), Key: { user_guid: emailMarkerKey(m.email) } }));
+      await deleteOwnMarker(m, 'canceled account');
       const vaultIds = await deleteVaults(m.user_guid, Math.floor(Date.now() / 1000));
       await audit('system', 'member.delete_after_cancel', m.user_guid, vaultIds.length ? { vault_ids: vaultIds } : {});
       deleted++;
@@ -521,12 +527,15 @@ export const handler = async (event?: { task?: string }) => {
       if ((e as Error).name === 'ConditionalCheckFailedException') continue;
       throw e;
     }
-    await ddb.send(new DeleteCommand({ TableName: table.members(), Key: { user_guid: emailMarkerKey(m.email) } }));
-    const onList = await ddb.send(new GetCommand({ TableName: env('TABLE_MAILING_LIST'), Key: { email: m.email } }));
+    // A marker that names another request: the address has been requested
+    // again, and its SES identity is what that request's verification runs
+    // on. Neither is this row's to delete.
+    const ownMarker = await deleteOwnMarker(m, 'unverified request');
+    const onList = ownMarker ? await ddb.send(new GetCommand({ TableName: env('TABLE_MAILING_LIST'), Key: { email: m.email } })) : null;
     // 2.6.0: a request that found the identity already there (`owns_identity`
     // false) leaves it; one of the project's own addresses is never deleted.
     // A row from before 2.6.0 (no flag) keeps the rule it was created under.
-    if (!onList.Item && m.owns_identity !== false && !ownAddress(m.email)) {
+    if (onList && !onList.Item && m.owns_identity !== false && !ownAddress(m.email)) {
       try {
         await ses.send(new DeleteEmailIdentityCommand({ EmailIdentity: m.email }));
       } catch (e) {

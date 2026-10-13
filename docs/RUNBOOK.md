@@ -2068,6 +2068,23 @@ operator does, and does not have to do.
      admin declines it (gone 30 days later), and "Removal by hand"
      below covers a person who asks. The same command also finds a
      request whose email failed to send.
+- **"… is left" in the logs** (cleanup function, admin people
+  function; level warn, with a `user_guid`, never an address):
+  `the email marker belongs to another request and is left` and
+  `the sign-in user under … address carries another id and is left`.
+  A deletion found that the marker or the Cognito user under the
+  address belongs to a newer request or account for the same address
+  (MEMBER-API "Retention"), did not touch it, and deleted the rest.
+  Nothing to do for the marker. For a sign-in user, check that a
+  member row with that user's `custom:user_guid` exists
+  (`aws cognito-idp admin-get-user --user-pool-id <member pool> --username a@example.com`,
+  then `aws dynamodb get-item --table-name vettid-org-members --key '{"user_guid":{"S":"<that id>"}}'`):
+  if none does, it is a leftover (an abandoned removal above) and
+  `aws cognito-idp admin-delete-user` removes it; an approval for the
+  address is refused until then.
+  An admin's Delete that answers "No such member" for a row that was
+  on the page a moment ago: the cleanup job (or another admin) removed
+  it first; nothing is left to delete.
 - **Removal by hand** remains for four things only:
   1. *A request verified before 2.6.0 whose owner asks by email*
      (no link, if the backfill email was not sent): send that one
