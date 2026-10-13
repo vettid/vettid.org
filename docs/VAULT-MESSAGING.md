@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.29.1
-date: 2026-10-12
+version: 0.29.2
+date: 2026-10-13
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -13,7 +13,7 @@ related:
   - CALLS-PLAN.md (0.1.3) §13 (phase C2; decisions D12–D26, decided 2026-10-12)
   - PUSH-GATEWAY.md (0.4.4)
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.4.2)
+  - MEMBER-API.md (2.6.1)
   - ANDROID-PLAN.md (0.1.37)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -21,9 +21,24 @@ related:
   - VAULT-RELEASES.md (0.1.19; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
-  - VAULT-HOST-PROTOCOL.md (0.1.4; the enclave ↔ parent protocol as built)
-  - VAULT-LOCK.md (0.1.1, design note for 0.29.0: options, owner decisions L1–L16, rollout)
+  - VAULT-HOST-PROTOCOL.md (0.1.5; the enclave ↔ parent protocol as built)
+  - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.29.2: editorial-normative errata, as built; approved by the owner
+    2026-10-13. No wire change, no new vault release. **The member
+    API** (vettid.org #253, MEMBER-API 2.6.1). §11.5: `GET
+    /api/vault/requests/{id}` returns `envelope` and `code` only for
+    the slot of an enroll, unlock, lock or recovery register request;
+    the slot of a recovery request never returns the sealed code.
+    §11.11.6, §11.11.7: either form of the claim is limited per source
+    network before the lookup and per vault after it, on a hit only; a
+    miss is charged to no recovery and to no vault. **The unreachable
+    parent** (vettid-vault #74, `main` a852e36, for staging release
+    S11, which is not cut yet; VAULT-HOST-PROTOCOL 0.1.5 §4.3). §12.3,
+    "Parent unreachable for 120 s": the parent is reachable again only
+    once a `Ping` has been read and it has been told which vaults
+    ended; when a vault that appears meanwhile is locked; the 140 s
+    are for the vaults that ran when the parent was found unreachable
   - 0.29.1: editorial-normative, as built: vettid-vault #70, #71 and
     #72 (`main` 392b03c), for staging release S11, which is not cut yet.
     No wire change. §12.3: **"Parent unreachable for 120 s"** is again
@@ -8825,7 +8840,13 @@ for a request it did not forward (lease held elsewhere, §11.1) or that
 the enclave could not read (no answer). It writes only slots that are
 still `queued`, and no other `code`. `GET /api/vault/requests/{id}`
 returns `{status, envelope?, code?}`; `code` matches `[a-z_][a-z0-9_]*`
-and is a host code. It never carries a sealed outcome, with two
+and is a host code. It returns `envelope` and `code` only for the
+slot of an `enroll`, `unlock`, `lock` or recovery `register` request;
+the slot of any other operation answers `{status}` only. So the
+slot of a recovery request never returns the sealed code, which
+leaves the member API only through the recovery's status route
+(§11.11.7). An operation added later must be added to that list
+deliberately, or its result is not returned. A `code` never carries a sealed outcome, with two
 exceptions. `recovery_unavailable` (0.16.0) tells the member API that
 the enclave refused a recovery request (§11.11.2), so that it ends the
 recovery at once; it says no more than the backup bit the host already
@@ -10969,9 +10990,9 @@ not its owner check's state.
   - the credential password backoff (§3.5.3);
   - one recovery per vault (a new request replaces the old).
 - **Member API limits** (§11.11.7): requests, claims, registrations,
-  cancels and status polls are rate-limited. A claim by locator
-  (0.25.0) is limited per source network before the lookup and per
-  vault after it; none of these limits is global (§11.11.10).
+  cancels and status polls are rate-limited. A claim, scanned or by locator,
+  is limited per source network before the lookup and per
+  vault after it, on a hit only; none of these limits is global (§11.11.10).
 - **Audit in the vault.** Every step is recorded (`recovery.*` kinds,
   §10.9). Steps taken while the vault was locked are written from the
   header's log at the next unlock.
@@ -11022,9 +11043,9 @@ session:
   recovery_not_available` unless the recovery is `available`, the key
   recorded as a claim key, the same answer. The answer of either form
   carries `vault_id` and `recovery_id` (0.25.0), which the typed app
-  needs for every later request and the sealed register body. The
+  needs for every later request and the sealed register body. Either form of the
   claim is limited per source network before the lookup (so misses
-  count) and per vault after it; a miss is charged to no recovery.
+  count) and per vault after it; a miss is charged to no recovery and to no vault.
 - **`locator`** (0.25.0): 12 Crockford base32 characters (60 random
   bits), minted by the API with the request, unique among the
   recoveries it holds, kept with the recovery and dropped when the
@@ -11798,7 +11819,7 @@ not shared this way and are unchanged.
 | Memory pressure (the least recently active vault is evicted) | Same as an owner request. |
 | Enclave release or restart | Same if signalled. Otherwise all vaults lock through loss of memory, and their leases expire; a parent that sees the enclave restart releases the leases it held. |
 | Parent restart (the enclave keeps running) | The enclave locks every vault before it serves the new parent, which holds no leases for them. |
-| Parent unreachable for 120 s (0.29.1, as built from staging release S11: no `Ping` from the parent for 120 s) | While a vault runs, every vault is locked once 120 s have passed without a `Ping` from the parent (VAULT-HOST-PROTOCOL §6.3), whether the control connection is open or not. The enclave checks every 10 s, so the decision falls 120 to 130 s after the last `Ping`. **Only a `Ping` restarts the count**, counted when the enclave reads it; a connection or a hello does not. With no vault running the count restarts at each check, except that a parent found unreachable stays unreachable until its next `Ping`, also with no vault running: a vault that appears meanwhile is locked at the next check. **Once the parent is found unreachable** the enclave makes no call to it until its next `Ping`, closes the connection, and locks every vault at once; a vault not locked within 10 s is killed. So every vault has locked or been killed at most 140 s after the last `Ping`. Nothing stored is lost: a vault's last durable state is its last successful write, nothing taken from the relay since was acked (§8.3), and nothing is zeroized as a split brain. A killed vault sends no `vault.locking` to its devices. Time the enclave's own reader waits at its limit of 128 requests is not counted as the parent's silence, up to 120 s. (Releases through S10 measured the time without a control connection, so a parent that stayed connected and silent was never unreachable; 0.27.4 said so.) |
+| Parent unreachable for 120 s (0.29.1 and 0.29.2, as built from staging release S11: no `Ping` from the parent for 120 s) | While a vault runs, every vault is locked once 120 s have passed without a `Ping` from the parent (VAULT-HOST-PROTOCOL §6.3), whether the control connection is open or not. The enclave checks every 10 s, so the decision falls 120 to 130 s after the last `Ping`. **Only a `Ping` restarts the count**, counted when the enclave reads it; a connection or a hello does not. With no vault running the count restarts at each check, except that a parent found unreachable stays unreachable, also with no vault running, until a `Ping` has been read and the parent has been told which vaults ended (0.29.2; VAULT-HOST-PROTOCOL §4.3: a `Ping` read while the vaults are still being locked is counted and leaves it unreachable). A vault that appears meanwhile is locked at the next check, provided no `Ping` was read since the parent was found unreachable; if one was read and left the parent unreachable, such a vault is locked 120 to 130 s after that `Ping`, unless a later `Ping` makes the parent reachable first, and until then every call it makes to the parent fails. **Once the parent is found unreachable** the enclave makes no call to it until it is reachable again, closes the connection, and locks every vault at once; a vault not locked within 10 s is killed. So every vault that ran when the parent was found unreachable has locked or been killed at most 140 s after the last `Ping`. Nothing stored is lost: a vault's last durable state is its last successful write, nothing taken from the relay since was acked (§8.3), and nothing is zeroized as a split brain. A killed vault sends no `vault.locking` to its devices. Time the enclave's own reader waits at its limit of 128 requests is not counted as the parent's silence, up to 120 s. (Releases through S10 measured the time without a control connection, so a parent that stayed connected and silent was never unreachable; 0.27.4 said so.) |
 | Lease lost (renewal failed) | Same as an owner request, without the final flush if the state write fails. |
 | Split-brain guard: a conditional state write finds a newer version | Zeroize **immediately**, without flushing or acking. |
 | Vault deletion | Run the §7.4 revocations, then destroy the state and the header. |

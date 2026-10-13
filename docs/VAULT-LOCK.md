@@ -1,18 +1,24 @@
 ---
 title: VAULT-LOCK
 status: approved by the owner 2026-10-12 (L1–L16 as recommended); design note; the normative text is in VAULT-MESSAGING 0.29.0, MEMBER-API 2.5.0 and VAULT-HOST-PROTOCOL 0.1.3, each rule marked "release L" (not released, not built)
-version: 0.1.1
-date: 2026-10-12
+version: 0.1.2
+date: 2026-10-13
 owner: Al Liebl (Mesmer)
 component: vault (enclave), member API, account site, apps
 related:
-  - VAULT-MESSAGING.md (0.29.1) §3.6 (owner check, hold; new §3.6.8), §8.6, §10.2, §10.8, §11.4, §11.5, §12.3, §13.3, §15 item 37
+  - VAULT-MESSAGING.md (0.29.2) §3.6 (owner check, hold; new §3.6.8), §8.6, §10.2, §10.8, §11.4, §11.5, §12.3, §13.3, §15 item 37
   - MEMBER-API.md (2.5.0) "Vault": the lock route, the response slot, `VaultStatus`
-  - VAULT-HOST-PROTOCOL.md (0.1.4) §6.1, §11.3
+  - VAULT-HOST-PROTOCOL.md (0.1.5) §6.1, §11.3
   - ANDROID-PLAN.md (0.1.38) §4 "Locking the vault"
   - VAULT-RELEASES.md (0.1.19) §3.4 (C2, C4)
   - vettid-android #127 (open, not merged at the time of writing; read at 78f741a0), vettid-vault `main` 079cde7
 changelog:
+  - 0.1.2: §8, the point about `no_lease`, following
+    VAULT-HOST-PROTOCOL 0.1.5 §4.3 and VAULT-MESSAGING 0.29.2 §12.3
+    (as built at vettid-vault `main` a852e36, for S11): the 140 s are
+    for the vaults that run when the parent is found unreachable; a
+    vault whose unlock was half way then is locked at a later check.
+    Approved by the owner 2026-10-13. No decision changes
   - 0.1.1: §8, the point about `no_lease`: the silent-parent fix is
     merged in vettid-vault (#70, #71, #72, `main` 392b03c; S11 not
     released yet), and what it does and does not settle. No decision changes
@@ -419,7 +425,12 @@ with your recommendations"): every decision as recommended.
   #72, `main` 392b03c) and goes out with S11, which is not released yet.
   With it, a parent that hangs or stops sends no `Ping`, and its
   enclave locks or kills every vault within 140 s (VAULT-MESSAGING
-  §12.3), before a lease of 180 s runs out; a parent that lives but
+  §12.3), before a lease of 180 s runs out (*0.1.2:* the 140 s are
+  for the vaults that run when the parent is found unreachable; a
+  vault whose unlock was half way then is locked at the next check
+  after it appears, the checks being 10 s apart, and until then every
+  call it makes to the parent fails, VAULT-HOST-PROTOCOL 0.1.5 §4.3,
+  as built at vettid-vault `main` a852e36); a parent that lives but
   cannot renew tells the enclave "lease lost" 15 s before the lease
   ends. So with an honest host, no live lease means no vault running,
   with two residues: the parent tells lost leases one vault at a time,
