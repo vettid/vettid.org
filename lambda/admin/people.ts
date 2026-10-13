@@ -393,7 +393,13 @@ async function cancelVaultDeletion(m: MemberItem, actor: string, on?: 'reinstate
  * after it. If one of them fails, Suspend answers an error with the account
  * already suspended, and a repeat finishes the rest: for an account that is
  * already suspended it makes the two calls again (both are safe to repeat)
- * and writes the event, without changing the stored reason.
+ * and writes the event, without changing the stored reason; that event
+ * carries `repeat: true`, because its `reason` is the one typed now and the
+ * row keeps the first one. Until a suspension has its `member.suspend`
+ * event it may be half done: the row says suspended, but sign-in may not be
+ * disabled and the sessions may not be ended. Such a session reaches only
+ * lock and the two cancels (every other account and vault route reads the
+ * row), and Reinstate ends the sessions itself before it enables sign-in.
  */
 router.on('POST', '/admin/members/{user_guid}/suspend', async ({ params, body, actor }) => {
   const reason = str(body, 'reason', { max: 500 });
@@ -405,7 +411,7 @@ router.on('POST', '/admin/members/{user_guid}/suspend', async ({ params, body, a
     : m;
   await cognito.send(new AdminDisableUserCommand({ UserPoolId: memberPoolId(), Username: m.email }));
   await cognito.send(new AdminUserGlobalSignOutCommand({ UserPoolId: memberPoolId(), Username: m.email }));
-  await audit(actor, 'member.suspend', m.user_guid, { email: m.email, reason });
+  await audit(actor, 'member.suspend', m.user_guid, { email: m.email, reason, ...(m.account_status === 'suspended' ? { repeat: true } : {}) });
   return view(updated);
 });
 
@@ -424,10 +430,18 @@ router.on('POST', '/admin/members/{user_guid}/suspend', async ({ params, body, a
  *     account is active. So the reinstatement is refused (`409
  *     recovery_active`, with the recovery) until the admin repeats it with
  *     `allow_active_recovery: true`.
- *  3. Sign-in is enabled, and the status is written last: until that write
- *     the row still says suspended or canceled, so a failure anywhere
- *     before it leaves an account that cannot sign in and whose deletions
- *     are held, and a repeat finishes.
+ *  3. The member's sessions are ended, then sign-in is enabled, and the
+ *     status is written last. The sessions are ended here too because a
+ *     suspension can be half done (its sign-out failed and nobody repeated
+ *     it): without this, a session from before the suspension would be
+ *     fully usable again the moment the account is active. Until the
+ *     status write the row still says suspended or canceled, so a failure
+ *     anywhere before it leaves an account whose routes are closed and
+ *     whose deletions are held, and a repeat finishes. A failure after it
+ *     (the event, the snapshot) leaves the account active; a repeat then
+ *     answers 409 "already active".
+ * The record that the admin allowed an active recovery is written before
+ * sign-in is enabled, so it exists whatever fails afterwards.
  * If the cancel cannot be made the account stays as it is. This is the only
  * code that makes an account active again; whatever else ever does must
  * cancel a pending vault deletion first, as here.
@@ -451,12 +465,13 @@ router.on('POST', '/admin/members/{user_guid}/reinstate', async ({ params, body,
       { recoveries: shown },
     );
   }
-  await cognito.send(new AdminEnableUserCommand({ UserPoolId: memberPoolId(), Username: m.email }));
-  const updated = await update(m.user_guid, { account_status: m.account_status }, { account_status: 'active' }, ['suspend_reason', 'delete_after']);
-  await audit(actor, 'member.reinstate', m.user_guid, { email: m.email, from: m.account_status });
   for (const r of shown) {
     await audit(actor, 'member.reinstate_with_active_recovery', m.user_guid, { email: m.email, vault_id: r.vault_id, recovery_id: r.recovery_id, state: r.state, expires_at: r.expires_at });
   }
+  await cognito.send(new AdminUserGlobalSignOutCommand({ UserPoolId: memberPoolId(), Username: m.email }));
+  await cognito.send(new AdminEnableUserCommand({ UserPoolId: memberPoolId(), Username: m.email }));
+  const updated = await update(m.user_guid, { account_status: m.account_status }, { account_status: 'active' }, ['suspend_reason', 'delete_after']);
+  await audit(actor, 'member.reinstate', m.user_guid, { email: m.email, from: m.account_status });
   await pushAccountSnapshot(m.user_guid); // the vault's account snapshot (MEMBER-API 2.0.0)
   return view(updated);
 });

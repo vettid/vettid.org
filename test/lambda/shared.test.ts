@@ -148,3 +148,22 @@ describe('rate-limit keys from CloudFront-Viewer-Address', () => {
     expect(expandIPv6('1::2::3')).toBeNull();
   });
 });
+
+describe('errorResponse (the admin API)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { HttpError, errorResponse } = require('../../lambda/shared/http');
+
+  test("an error's detail is added beside `error` and `message` and can never replace them", () => {
+    const res = errorResponse(new HttpError(409, 'recovery_active', 'A recovery is active', { recoveries: [{ recovery_id: 'r1' }], error: 'ok', message: 'nothing to see' }));
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.body)).toEqual({ error: 'recovery_active', message: 'A recovery is active', recoveries: [{ recovery_id: 'r1' }] });
+  });
+
+  test('an error without detail keeps the two members only; anything else is a 500 that says nothing', () => {
+    expect(JSON.parse(errorResponse(new HttpError(404, 'not_found', 'No such member')).body)).toEqual({ error: 'not_found', message: 'No such member' });
+    const err = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const res = errorResponse(Object.assign(new Error('secret'), { detail: { leaked: true } }));
+    expect({ status: res.statusCode, body: JSON.parse(res.body) }).toEqual({ status: 500, body: { error: 'internal', message: 'Internal error' } });
+    err.mockRestore();
+  });
+});

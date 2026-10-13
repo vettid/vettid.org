@@ -1560,17 +1560,29 @@ session | link | app`), `vault.deletion_executed`.
   deletion, or for a recovery, and someone else may hold their mailbox
   or session). In this order, on the admin site's **Members** page:
   1. **Suspend** the account (with the reason). Suspend writes the
-     status first and then disables sign-in and ends the sessions
-     (within the hour). From the status write on, a pending deletion is
-     **not carried out**: the cleanup job's 5-minute run reads the
-     member's row before each deletion and leaves it `pending` for an
-     account that is not active, for as long as it stays that way
-     (metric `StartOverHeldNotActive`; no alarm, see below). If Suspend
-     answers an error, press it again: the account may already be
-     suspended (the row says so after a reload), and the repeat finishes
-     the sign-out. The one case suspending cannot catch is a run of the
-     job that read the row as active just before the status was
+     status first, then disables sign-in, then ends the sessions, and
+     writes the `member.suspend` event last. From the status write on,
+     a pending deletion is **not carried out**: the cleanup job's
+     5-minute run reads the member's row before each deletion and
+     leaves it `pending` for an account that is not active, for as
+     long as it stays that way (metric `StartOverHeldNotActive`; no
+     alarm, see below). The one case suspending cannot catch is a run
+     of the job that read the row as active just before the status was
      written. Suspending cancels nothing by itself.
+     **A suspension can be half done.** If Suspend answers an error
+     after the status was written, the row says `suspended` but
+     sign-in may not be disabled and the sessions may not be ended.
+     The sign of it is a suspended account with **no `member.suspend`
+     event** for this suspension in the audit log (by `subject`, the
+     member's id). Until it is finished, a session from before the
+     suspension keeps renewing itself; it reaches only lock and the
+     two cancels, because every other account and vault route reads
+     the row. Finish it with **Suspend again** on the suspended row
+     (it disables sign-in and ends the sessions again and writes
+     `member.suspend` with `repeat: true`; the stored reason stays the
+     first one). It is safe to press on any suspended account.
+     Reinstate also ends the sessions before it enables sign-in, so a
+     half-done suspension cannot hand an old session back.
   2. **Cancel vault deletion** on the member's row
      (`POST /admin/members/{user_guid}/vault/deletion/cancel`). It
      answers "cancelled" (audit `member.vault_deletion_cancel`, the
@@ -1604,18 +1616,28 @@ session | link | app`), `vault.deletion_executed`.
      then, the account is still suspended). Unless the member says the
      recovery is theirs: have them cancel it with the email link, or
      wait until that time has passed, and press Reinstate again.
+     When it goes on, it ends the member's sessions before it enables
+     sign-in (a half-done suspension cannot hand an old session back).
      **Reinstate anyway** reinstates with the recovery alive (audit
-     `member.reinstate_with_active_recovery` beside `member.reinstate`).
+     `member.reinstate_with_active_recovery`, written before sign-in
+     is enabled, then `member.reinstate`). The warning can be wrong in
+     one case: a recovery that the member's new app has just completed
+     is shown as `registered` until the API has recorded it.
      If the cancel of the deletion cannot be made (the cancel function
-     or the vault tables are unreachable) Reinstate answers an error
-     and the account stays suspended; try again. A member who does
+     or the vault tables are unreachable), or a step before the status
+     write fails, Reinstate answers an error and the account stays
+     suspended; try again. If it answers an error and the row then
+     says `active`, the reinstatement was made and only its event or
+     the vault's snapshot failed; pressing it again answers "already
+     active". A member who does
      want to start over asks again and gets a new 24 hours.
 
   What the member sees while suspended: sign-in is refused; the app
   and the account page answer "This account is not active" for
   everything except lock and the two cancels (deletion, recovery),
-  which keep working with a session that has not yet ended, the
-  vault's app key or the email link. The deletion's email link stops
+  which keep working with the vault's app key, the email link, or a
+  session from before the suspension (it ends within the hour once
+  the suspension's sign-out was made; see "half done" above). The deletion's email link stops
   working at the original `deletes_at`, held or not; after that the
   cancel is support's (step 2) or the reinstatement's. The app reads
   the pending deletion from its status, which a suspended account
@@ -1627,11 +1649,44 @@ session | link | app`), `vault.deletion_executed`.
   not a suspension, also when the host's `delete` has not been sent
   yet (`deletion.queued_at` absent: the vault service is paused or no
   instance was running; the job tries again at every run and does not
-  ask about the account for these). If such a deletion must be
-  stopped while it is still unqueued, it is a change by hand on the
-  vault row in the vault account (remove `deletion` and
-  `deletion_requested_at` in one update, with the condition that
-  `deletion.queued_at` does not exist), and the owner's decision.
+  ask about the account for these). Stopping such a deletion while it
+  is still unqueued is the owner's decision and a change by hand, and
+  it is **not safe without stopping the job first**: the job sends the
+  queue message and only then writes `queued_at`, and it acts on the
+  row as its scan read it, so a run in progress, the next 5-minute
+  run or the daily retry can queue the `delete` after a by-hand update
+  has succeeded. In this order:
+  1. **Pause the vault service** (admin site, **Vault service**, with
+     the reason; "Pausing the vault service"). While it is paused the
+     job queues no `delete` and requests no start. It takes effect in
+     the job within about 30 seconds (its cache). If the service
+     cannot be paused, disable both schedules of the cleanup function
+     instead (the rules `StartOverSchedule` and `CleanupSchedule` of
+     `VettidOrgMemberApiStack`, `aws events disable-rule`), and enable
+     them again in step 5.
+  2. **Wait 6 minutes**: longer than the function's timeout (5
+     minutes) plus the cache, so that a run that started before the
+     pause has ended.
+  3. **Check that nothing was queued.** Read the vault row
+     consistently
+     (`aws dynamodb get-item --consistent-read --table-name vettid-org-vaults --key '{"vault_id":{"S":"<vault_id>"}}'`):
+     `deletion.state` is `executing`, `deletion.queued_at` is absent
+     and `state` is not `deleted`. `queued_at` absent is not quite
+     proof: the job sends first and writes `queued_at` after, so a
+     send whose write then failed leaves no mark on the row. That
+     write failing ends the run with an error, so also check that no
+     invocation of the cleanup function failed since the deletion
+     became `executing` (audit `vault.deletion_executed` has the time
+     and `queued: false`; the function's `Errors` metric, or its log).
+     If the row or the log says it may have been queued, stop here:
+     the vault is being deleted and nothing takes the message back.
+  4. **Remove both marks in one update**, conditional on what step 3
+     saw:
+     `aws dynamodb update-item --table-name vettid-org-vaults --key '{"vault_id":{"S":"<vault_id>"}}' --update-expression "REMOVE deletion, deletion_requested_at" --condition-expression "deletion.deletion_id = :id AND deletion.#s = :ex AND attribute_not_exists(deletion.queued_at)" --expression-attribute-names '{"#s":"state"}' --expression-attribute-values '{":id":{"S":"<deletion_id>"},":ex":{"S":"executing"}}'`.
+     Both must go: with `deletion_requested_at` left, the daily retry
+     deletes the vault. Read the row again and see neither.
+  5. **Resume the vault service** (or enable the two rules), and tell
+     the member; no email is sent for a change by hand.
 - *A canceled account* (the member cancelled the account during the 24
   hours): the deletion is held in the same way, and the vault goes
   with the account after its 7 days (the daily run, as for every

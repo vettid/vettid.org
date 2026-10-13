@@ -88,6 +88,27 @@ export function render(root, ctx) {
             ui.toast(`Reinstated ${m.email}.`);
           });
 
+      // A suspension can be half done (the status is written first; ending
+      // the sessions can fail after it). Repeating it finishes the rest.
+      const suspendAgain = m.account_status === 'suspended'
+        ? ui.action('Suspend again', async () => {
+            const v = await ui.dialog({
+              title: 'Suspend again',
+              body: [
+                `${m.email} is already suspended. This disables sign-in and ends the sessions again; it changes nothing else.`,
+                'Use it when Suspend answered an error, or when the audit log has no "member.suspend" event for this suspension.',
+              ],
+              fields: [{ name: 'reason', label: 'Reason (required; recorded in the audit log)', type: 'textarea', required: true, maxlength: 500 }],
+              confirmLabel: 'Suspend again',
+              tone: 'danger',
+              enableWhen: (x) => x.reason.length > 0,
+            });
+            if (!v) return;
+            row.update(await api.post(`/admin/members/${id}/suspend`, { reason: v.reason }));
+            ui.toast(`Suspended ${m.email} again: sign-in is disabled and the sessions are ended.`);
+          })
+        : null;
+
       const extend = m.subscription
         ? ui.action('Extend', async () => {
             const v = await ui.dialog({
@@ -169,7 +190,7 @@ export function render(root, ctx) {
         chip(m.account_status, STATUS_TONE[m.account_status] ?? 'mute'),
         subscriptionCell(m.subscription),
         m.voting_rights ? chip('yes', 'ok') : muted('no'),
-        ui.rowActions(suspendOrReinstate, extend, clearPin, cancelVaultDeletion, canary, remove),
+        ui.rowActions(suspendOrReinstate, suspendAgain, extend, clearPin, cancelVaultDeletion, canary, remove),
       ];
     },
   });

@@ -186,6 +186,10 @@ describe("a member's pending vault deletion", () => {
       order.push('enable');
       return {};
     });
+    idp.on(AdminUserGlobalSignOutCommand).callsFake(() => {
+      order.push('signout');
+      return {};
+    });
   });
   afterEach(() => jest.restoreAllMocks()); // the console spies, also after a failed assertion
   afterAll(() => {
@@ -303,7 +307,7 @@ describe("a member's pending vault deletion", () => {
     const res = await handler(event('POST', `/admin/members/${G1}/reinstate`));
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.body)).toMatchObject({ user_guid: G1, account_status: 'active' });
-    expect(order).toEqual(['cancel', 'enable', 'update']);
+    expect(order).toEqual(['cancel', 'signout', 'enable', 'update']);
     expect(events().map((e) => [e.action, e.detail])).toEqual([
       ['member.vault_deletion_cancel', { vault_id: VID, deletion_id: DID, on: 'reinstate' }],
       ['member.reinstate', { from: 'suspended' }],
@@ -318,7 +322,7 @@ describe("a member's pending vault deletion", () => {
     ddb.on(GetCommand).resolves({ Item: { ...member, account_status: 'canceled', delete_after: '2026-10-20T00:00:00Z' } });
     job(answer({}));
     expect((await handler(event('POST', `/admin/members/${G1}/reinstate`))).statusCode).toBe(200);
-    expect(order).toEqual(['cancel', 'enable', 'update']);
+    expect(order).toEqual(['cancel', 'signout', 'enable', 'update']);
     expect(events().map((e) => [e.action, e.detail])).toEqual([['member.reinstate', { from: 'canceled' }]]);
     expect(mails()).toHaveLength(0);
   });
@@ -326,7 +330,7 @@ describe("a member's pending vault deletion", () => {
   test('reinstate: one already being carried out does not stop the reinstatement', async () => {
     job(answer({ executing: [{ vault_id: VID, deletion_id: DID }] }));
     expect((await handler(event('POST', `/admin/members/${G1}/reinstate`))).statusCode).toBe(200);
-    expect(order).toEqual(['cancel', 'enable', 'update']);
+    expect(order).toEqual(['cancel', 'signout', 'enable', 'update']);
   });
 
   test.each([
@@ -356,12 +360,12 @@ describe("a member's pending vault deletion", () => {
     });
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
     expect((await handler(event('POST', `/admin/members/${G1}/reinstate`))).statusCode).toBe(500);
-    expect(order).toEqual(['cancel', 'enable']); // no status write
+    expect(order).toEqual(['cancel', 'signout', 'enable']); // no status write
     expect(events().filter((e) => e.action === 'member.reinstate')).toHaveLength(0);
     order = [];
     idp.on(AdminEnableUserCommand).callsFake(() => (order.push('enable'), {}));
     expect((await handler(event('POST', `/admin/members/${G1}/reinstate`))).statusCode).toBe(200);
-    expect(order).toEqual(['cancel', 'enable', 'update']);
+    expect(order).toEqual(['cancel', 'signout', 'enable', 'update']);
   });
 
   // ---- reinstating with a recovery still active ----
@@ -398,11 +402,43 @@ describe("a member's pending vault deletion", () => {
     job(answer({ recoveries: [recovery] }));
     const res = await handler(event('POST', `/admin/members/${G1}/reinstate`, { allow_active_recovery: true }));
     expect(res.statusCode).toBe(200);
-    expect(order).toEqual(['cancel', 'enable', 'update']);
+    expect(order).toEqual(['cancel', 'signout', 'enable', 'update']);
     expect(events().map((e) => [e.action, e.detail])).toEqual([
-      ['member.reinstate', { from: 'suspended' }],
       ['member.reinstate_with_active_recovery', { vault_id: VID, recovery_id: recovery.recovery_id, state: 'available', expires_at: shown.expires_at }],
+      ['member.reinstate', { from: 'suspended' }],
     ]);
+  });
+
+  test('reinstate: the record of the allowed recovery is written before sign-in is enabled, so it exists when a later step fails', async () => {
+    job(answer({ recoveries: [recovery] }));
+    ddb.on(PutCommand).callsFake((input) => {
+      if (input.TableName === 'audit' && input.Item.action) order.push(`audit:${input.Item.action}`);
+      return {};
+    });
+    idp.on(AdminEnableUserCommand).callsFake(() => {
+      order.push('enable');
+      throw Object.assign(new Error('throttled'), { name: 'TooManyRequestsException' });
+    });
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect((await handler(event('POST', `/admin/members/${G1}/reinstate`, { allow_active_recovery: true }))).statusCode).toBe(500);
+    expect(order).toEqual(['cancel', 'audit:member.reinstate_with_active_recovery', 'signout', 'enable']);
+    expect(events().map((e) => e.action)).toEqual(['member.reinstate_with_active_recovery']);
+  });
+
+  test("reinstate: the member's sessions are ended before sign-in is enabled (a suspension may have been half done); if that fails the account stays not active", async () => {
+    job(answer({}));
+    expect((await handler(event('POST', `/admin/members/${G1}/reinstate`))).statusCode).toBe(200);
+    expect(order).toEqual(['cancel', 'signout', 'enable', 'update']);
+    expect(idp.commandCalls(AdminUserGlobalSignOutCommand).map((c) => c.args[0].input)).toEqual([{ UserPoolId: 'us-east-1_pool', Username: 'ada@example.org' }]);
+    order = [];
+    idp.on(AdminUserGlobalSignOutCommand).callsFake(() => {
+      order.push('signout');
+      throw Object.assign(new Error('throttled'), { name: 'TooManyRequestsException' });
+    });
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect((await handler(event('POST', `/admin/members/${G1}/reinstate`))).statusCode).toBe(500);
+    expect(order).toEqual(['cancel', 'signout']); // sign-in not enabled, status not written
+    expect(events().filter((e) => e.action === 'member.reinstate')).toHaveLength(1); // the first call's only
   });
 
   test('reinstate: the confirmation changes nothing when no recovery is active, and must be a boolean', async () => {
@@ -445,7 +481,7 @@ describe("a member's pending vault deletion", () => {
       const upd = ddb.commandCalls(UpdateCommand)[0].args[0].input;
       expect(Object.values(upd.ExpressionAttributeValues!)).toEqual(expect.arrayContaining(['suspended', 'looks taken over', 'active']));
       expect(upd.ConditionExpression).toContain('#c0 = :c0');
-      expect(events().map((e) => [e.actor, e.action, e.subject, e.detail])).toEqual([['boss@vettid.org', 'member.suspend', G1, { reason: 'looks taken over' }]]);
+      expect(events().map((e) => [e.actor, e.action, e.subject, e.detail])).toEqual([['boss@vettid.org', 'member.suspend', G1, { reason: 'looks taken over' }]]); // no `repeat` on a first suspension
     });
 
     test.each([['disabling sign-in', AdminDisableUserCommand, ['status', 'disable']], ['ending the sessions', AdminUserGlobalSignOutCommand, ['status', 'disable', 'signout']]] as const)(
@@ -466,7 +502,9 @@ describe("a member's pending vault deletion", () => {
         expect(res.statusCode).toBe(200);
         expect(JSON.parse(res.body)).toMatchObject({ account_status: 'suspended' });
         expect(order).toEqual(['disable', 'signout']);
-        expect(events().map((e) => [e.action, e.detail])).toEqual([['member.suspend', { reason: 'looks taken over' }]]);
+        // The repeat's event says so: its reason is the one given now, the row keeps the first.
+        expect(events().map((e) => [e.action, e.detail])).toEqual([['member.suspend', { reason: 'looks taken over', repeat: true }]]);
+        expect(ddb.commandCalls(UpdateCommand)).toHaveLength(1); // the first attempt's only
       },
     );
 
