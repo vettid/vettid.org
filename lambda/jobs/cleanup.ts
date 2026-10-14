@@ -242,8 +242,8 @@ export interface OrphanVaultCounts {
  * deleted, a never-sealed row deleted, the pointer row deleted), audited
  * `vault.orphan_deletion_requested` and alarmed (OrphanVaultDeletions);
  * from then on the daily retry has them. A member row that is back removes
- * the mark. A vault an operator put on hold (`orphan_hold: true`, set by
- * hand, RUNBOOK) keeps all of its member's vaults out of this, marked or
+ * the mark. A vault an operator put on hold (`orphan_hold`, set by hand,
+ * RUNBOOK; any value counts) keeps all of its member's vaults out of this, marked or
  * not. So the first run after this was deployed only marks the vaults that
  * are already without a member (also those whose start-over is held for a
  * missing row) and deletes nothing for 7 days.
@@ -329,7 +329,13 @@ export async function deleteOrphanVaults(nowS: number): Promise<OrphanVaultCount
   }
 
   for (const [guid, rows] of orphans) {
-    if (rows.some((v) => v.orphan_hold === true)) {
+    // Any `orphan_hold` is a hold, whatever its type or value (fail safe):
+    // a hold typed by hand as "true" or 1 must not be ignored.
+    const holds = rows.filter((v) => v.orphan_hold !== undefined);
+    if (holds.length) {
+      for (const v of holds.filter((x) => x.orphan_hold !== true)) {
+        console.warn('orphaned vaults: orphan_hold is not the boolean true; treated as a hold', JSON.stringify({ vault_id: v.vault_id, type: typeof v.orphan_hold }));
+      }
       counts.operator_held++;
       continue;
     }

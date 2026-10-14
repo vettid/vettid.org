@@ -2020,7 +2020,10 @@ session | link | app`), `vault.deletion_executed`.
   - **Waiting** (metric `OrphanVaultsWaiting`, no alarm): marked, the
     7 days not over.
   - **The member row is back** (restored): the next run removes
-    `orphan_seen_at` (`cleared`); nothing else.
+    `orphan_seen_at` (`cleared`); nothing else. Only a run that sees
+    the row clears the mark: a member row restored and lost again
+    between two 07:00 runs keeps its first mark, and its 7 days are not
+    restarted.
   - **Deleted** (alarm `vettid-org-orphan-vault-deletions`, metric
     `OrphanVaultDeletions`): 7 days or more after the mark of every
     one of that member's vaults, the member row still missing and no
@@ -2033,6 +2036,9 @@ session | link | app`), `vault.deletion_executed`.
     mistake, or the vault is wanted for an investigation): put it on
     hold before the 7 days are over. In the vault account:
     `aws dynamodb update-item --table-name vettid-org-vaults --key '{"vault_id":{"S":"<vault_id>"}}' --update-expression "SET orphan_hold = :t" --condition-expression "attribute_exists(vault_id) AND attribute_not_exists(deletion_requested_at)" --expression-attribute-values '{":t":{"BOOL":true}}'`.
+    Any `orphan_hold` attribute counts as a hold, whatever its type or
+    value (a value other than the boolean true is logged as a warning);
+    to end it, remove the attribute.
     A hold on any one of a member's vaults keeps all of that member's
     vaults out of the scan: none is marked or deleted (metric
     `OrphanVaultsOperatorHeld`, no alarm). If the vault also has a

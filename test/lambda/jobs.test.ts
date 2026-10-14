@@ -700,6 +700,17 @@ describe('cleanup job: vaults whose member row is gone (daily run)', () => {
     expect(emf()).toMatchObject({ OrphanVaultsOperatorHeld: 1, OrphanVaultDeletions: 0, OrphanVaultsHeld: 0 });
   });
 
+  test.each([['the string "true"', 'true'], ['the number 1', 1], ['false (still present)', false], ['null', null]])('a hold written as %s is still a hold (fail safe), with a warning', async (_n, hold) => {
+    table([vault({ orphan_seen_at: nowS() - 30 * DAY, orphan_hold: hold })]);
+    members([]);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await cleanup.handler();
+    expect(vaultWrites()).toEqual([]);
+    nothingIrreversible();
+    expect(emf()).toMatchObject({ OrphanVaultsOperatorHeld: 1, OrphanVaultDeletions: 0 });
+    expect(warn.mock.calls.map((c) => String(c[0]))).toContain('orphaned vaults: orphan_hold is not the boolean true; treated as a hold');
+  });
+
   test('the first run after the deploy: vaults already without a member (one with a start-over held for the missing row, as after an old admin Delete) are only marked', async () => {
     const DID = '01JB2Z6V9K3M4N5P6Q7R8S9T0V';
     members(['x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7', 'x8', 'x9', 'x10', 'x11', 'x12']);

@@ -2115,7 +2115,10 @@ Its own audit log goes with it, so the member is told by email.
   - An operator can keep a vault without a member by setting
     `orphan_hold: true` on its row by hand (RUNBOOK "Vaults without a
     member"); a hold on any of a member's vaults keeps all of them out,
-    marked or not (`OrphanVaultsOperatorHeld`). The job never writes it.
+    marked or not (`OrphanVaultsOperatorHeld`). Any `orphan_hold`
+    attribute counts as a hold, whatever its type or value (one that is
+    not the boolean true is logged as a warning). The job never writes
+    it.
   On doubt nothing is written: a member row that cannot be read leaves
   its vaults for the next run; and a run that finds more members
   without a row than 5, or than 15 % of the owners it read (one is
