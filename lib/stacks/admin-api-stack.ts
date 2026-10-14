@@ -160,6 +160,13 @@ export class VettidOrgAdminApiStack extends cdk.Stack {
     const startOverCancelFnArn = readRef(this, config, 'member-api/start-over-cancel-fn-arn');
     people.addEnvironment('START_OVER_CANCEL_FN', startOverCancelFnArn);
     people.addToRolePolicy(new iam.PolicyStatement({ actions: ['lambda:InvokeFunction'], resources: [startOverCancelFnArn] }));
+    // Delete refuses while the member has a vault that is not deleted: it
+    // asks the member API's member-vaults function (`{task:
+    // "member_vaults", user_guid}`, read only, that task only), by its ARN
+    // from SSM, as above.
+    const memberVaultsFnArn = readRef(this, config, 'member-api/member-vaults-fn-arn');
+    people.addEnvironment('MEMBER_VAULTS_FN', memberVaultsFnArn);
+    people.addToRolePolicy(new iam.PolicyStatement({ actions: ['lambda:InvokeFunction'], resources: [memberVaultsFnArn] }));
     // Reinstating a member or extending a subscription sends the member's
     // running vault a fresh account snapshot (MEMBER-API 2.0.0), through the
     // member API's account-push function, by its fixed name.

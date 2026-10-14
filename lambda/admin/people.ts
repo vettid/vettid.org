@@ -33,7 +33,7 @@ import { sendMail } from '../shared/mail';
 import { MemberItem, MemberView, SubscriptionItem, toMemberView } from '../shared/model';
 import { pushAccountSnapshot } from '../shared/account-snapshot';
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
-import type { StartOverCancel } from '../jobs/cleanup';
+import type { MemberVaults, StartOverCancel } from '../jobs/cleanup';
 
 const PAGE = 50;
 const memberPoolId = () => env('MEMBER_POOL_ID');
@@ -345,6 +345,41 @@ async function requestDeletionCancel(userGuid: string): Promise<StartOverCancel>
   return r as StartOverCancel;
 }
 
+/**
+ * Ask the member API's member-vaults function (its task `member_vaults`,
+ * read only; it runs under the cleanup job's role) which of the member's
+ * vaults are not deleted. Anything but its own well-formed answer is an
+ * error: Delete then answers 500 and changes nothing, so "no vault" is never
+ * taken from a failure.
+ */
+async function requestMemberVaults(userGuid: string): Promise<MemberVaults> {
+  const out = await lambdaClient.send(
+    new InvokeCommand({
+      FunctionName: env('MEMBER_VAULTS_FN'),
+      InvocationType: 'RequestResponse',
+      Payload: Buffer.from(JSON.stringify({ task: 'member_vaults', user_guid: userGuid })),
+    }),
+  );
+  let r: Partial<MemberVaults> | null = null;
+  try {
+    r = out.FunctionError || !out.Payload ? null : (JSON.parse(Buffer.from(out.Payload).toString('utf8')) as Partial<MemberVaults>);
+  } catch {
+    r = null;
+  }
+  if (!r || r.ok !== true || r.task !== 'member_vaults' || !Array.isArray(r.vaults)) {
+    console.error('member delete: the member-vaults function did not answer as expected', JSON.stringify({ user_guid: userGuid, function_error: out.FunctionError ?? null }));
+    throw new Error('member vaults check failed');
+  }
+  return r as MemberVaults;
+}
+
+/** Delete, while the member still has a vault (ADMIN-API "People"). */
+export const VAULT_EXISTS_MESSAGE =
+  'Not deleted: this member still has a vault. Nothing was changed. ' +
+  "An administrator's Delete does not delete a vault, and a vault without its member would be left behind. " +
+  'The vault goes when the member deletes it (in the app, or "Delete my vault and start over" on the account page), ' +
+  'or with the account 7 days after the member cancels it. Delete the member after that.';
+
 const epochIso = (s: number | null): string | null => (typeof s === 'number' ? new Date(s * 1000).toISOString() : null);
 
 /**
@@ -484,9 +519,21 @@ router.on('POST', '/admin/members/{user_guid}/reinstate', async ({ params, body,
  * sit under the same names. Each thing is therefore deleted only if it is
  * this member's own, and "deleted" is answered only if this call deleted
  * the row.
+ *
+ * Refused while the member has a vault that is not deleted (`409
+ * vault_exists`, nothing changed): this function cannot reach the vault
+ * tables, and removing the member row first would leave the vault without
+ * a member. The check comes before anything is deleted. A vault enrolled
+ * between the check and the row's deletion is found by the cleanup job's
+ * daily orphan scan, which asks it to delete itself.
  */
 router.on('DELETE', '/admin/members/{user_guid}', async ({ params, actor }) => {
   const m = await getMember(params.user_guid);
+  const { vaults } = await requestMemberVaults(m.user_guid);
+  if (vaults.length) {
+    console.warn('member delete refused: the member has a vault', JSON.stringify({ user_guid: m.user_guid, vaults: vaults.length })); // never the address
+    throw new HttpError(409, 'vault_exists', VAULT_EXISTS_MESSAGE, { vaults: vaults.map((v) => ({ vault_id: v.vault_id, state: v.state })) });
+  }
   // First, so that a failure leaves the row and Delete can be repeated.
   const user = await deleteOwnSignInUser(m);
   if (user === 'other') {
