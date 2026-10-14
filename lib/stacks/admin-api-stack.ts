@@ -162,7 +162,8 @@ export class VettidOrgAdminApiStack extends cdk.Stack {
     people.addToRolePolicy(new iam.PolicyStatement({ actions: ['lambda:InvokeFunction'], resources: [startOverCancelFnArn] }));
     // Delete refuses while the member has a vault that is not deleted: it
     // asks the member API's member-vaults function (`{task:
-    // "member_vaults", user_guid}`, read only, that task only), by its ARN
+    // "member_vaults", user_guid}`, that task only; its role may only Query
+    // the vaults table and its user-index), by its ARN
     // from SSM, as above.
     const memberVaultsFnArn = readRef(this, config, 'member-api/member-vaults-fn-arn');
     people.addEnvironment('MEMBER_VAULTS_FN', memberVaultsFnArn);

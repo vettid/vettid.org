@@ -610,35 +610,108 @@ describe('cleanup job: vaults whose member row is gone (daily run)', () => {
   });
   afterEach(() => jest.restoreAllMocks());
 
-  test("the member row is gone and nobody asked the vault: it is asked to delete itself exactly as for a canceled account (the host's delete, the mark, a never-sealed row and the pointer row deleted), audited, counted", async () => {
+  const DAY = 86_400;
+  const vaultWrites = () => ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'vaults');
+  const MARK = { UpdateExpression: 'SET orphan_seen_at = :t', ConditionExpression: 'attribute_exists(vault_id) AND attribute_not_exists(orphan_seen_at) AND attribute_not_exists(deletion_requested_at)' };
+  const nothingIrreversible = () => {
+    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
+    expect(vaultWrites().filter((i) => i.UpdateExpression !== MARK.UpdateExpression && i.UpdateExpression !== 'REMOVE orphan_seen_at')).toEqual([]);
+    expect(vaultDeletes()).toEqual([]);
+    expect(audits()).toEqual([]);
+  };
+
+  test('first sight of a vault without a member row: only marked (conditional, never moved), warned and counted for the alarm; nothing irreversible', async () => {
     table([vault(), vault({ vault_id: B, state: 'enrolling', sealed_release: undefined, lease: undefined })]);
     members([]);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     const r = await cleanup.handler();
     expect(memberReads()).toEqual([{ TableName: 'members', Key: { user_guid: 'g7' }, ConsistentRead: true }]); // once per owner, consistently
-    const [send] = sqs.commandCalls(SendMessageCommand);
-    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(1);
-    expect(send.args[0].input.QueueUrl).toBe(QP + 'i1');
-    expect(JSON.parse(send.args[0].input.MessageBody!)).toMatchObject({ v: 1, op: 'delete', vault_id: A, user_guid: 'g7' });
-    expect(ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'vaults')).toEqual([expect.objectContaining({ Key: { vault_id: A }, UpdateExpression: 'SET deletion_requested_at = :t' })]);
-    expect(vaultDeletes()).toEqual([{ vault_id: B }, { vault_id: 'user#g7' }]);
-    expect(audits()).toEqual([expect.objectContaining({ actor: 'system', action: 'vault.orphan_deletion_requested', subject: 'g7', detail: { vault_ids: [A, B] } })]);
-    expect(lines()).toContain('{"vaultOrphans":{"requested":1,"held":0,"read_errors":0,"failures":0}}');
-    expect(emf()).toMatchObject({ OrphanVaultDeletions: 1, OrphanVaultsHeld: 0 });
+    expect(vaultWrites()).toEqual([
+      expect.objectContaining({ Key: { vault_id: A }, ...MARK, ExpressionAttributeValues: { ':t': expect.any(Number) } }),
+      expect.objectContaining({ Key: { vault_id: B }, ...MARK }),
+    ]);
+    nothingIrreversible();
+    expect(warn.mock.calls.map((c) => String(c[0]))).toContain('orphaned vaults: a vault without a member row, marked');
+    expect(lines()).toContain('{"vaultOrphans":{"marked":2,"waiting":0,"cleared":0,"requested":0,"operator_held":0,"held":0,"read_errors":0,"failures":0}}');
+    expect(emf()).toMatchObject({ OrphanVaultsSeen: 2, OrphanVaultsWaiting: 0, OrphanVaultDeletions: 0, OrphanVaultsOperatorHeld: 0, OrphanVaultsHeld: 0 });
     // The summary line and the answer are as before.
     expect(Object.keys(r)).toEqual(['deleted', 'reclaimed', 'expired', 'vaultRetries', 'declined', 'failures', 'incomplete']);
     expect(lines()).toContain(JSON.stringify(r));
   });
 
-  test('a member who still has a row: nothing is touched; the run still writes its zeros', async () => {
+  test('a mark that is already there is not moved (the conditional write fails quietly)', async () => {
     table([vault()]);
+    members([]);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    ddb.on(UpdateCommand).rejects(ccf());
+    await cleanup.handler();
+    expect(emf()).toMatchObject({ OrphanVaultsSeen: 0, OrphanVaultsHeld: 0 });
+    nothingIrreversible();
+  });
+
+  test('inside the 7 days: waiting, nothing written', async () => {
+    table([vault({ orphan_seen_at: nowS() - 6 * DAY })]);
+    members([]);
+    await cleanup.handler();
+    expect(vaultWrites()).toEqual([]);
+    nothingIrreversible();
+    expect(emf()).toMatchObject({ OrphanVaultsSeen: 0, OrphanVaultsWaiting: 1, OrphanVaultDeletions: 0 });
+  });
+
+  test("7 days after the mark, the member row still missing: asked to delete itself exactly as for a canceled account (the host's delete, the mark, a never-sealed row and the pointer row deleted), audited, alarmed", async () => {
+    const seen = nowS() - 7 * DAY - 60;
+    table([vault({ orphan_seen_at: seen }), vault({ vault_id: B, state: 'enrolling', sealed_release: undefined, lease: undefined, orphan_seen_at: seen + 30 })]);
+    members([]);
+    await cleanup.handler();
+    const [send] = sqs.commandCalls(SendMessageCommand);
+    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(1);
+    expect(send.args[0].input.QueueUrl).toBe(QP + 'i1');
+    expect(JSON.parse(send.args[0].input.MessageBody!)).toMatchObject({ v: 1, op: 'delete', vault_id: A, user_guid: 'g7' });
+    expect(vaultWrites()).toEqual([expect.objectContaining({ Key: { vault_id: A }, UpdateExpression: 'SET deletion_requested_at = :t' })]);
+    expect(vaultDeletes()).toEqual([{ vault_id: B }, { vault_id: 'user#g7' }]);
+    expect(audits()).toEqual([expect.objectContaining({ actor: 'system', action: 'vault.orphan_deletion_requested', subject: 'g7', detail: { vault_ids: [A, B], orphan_seen_at: seen } })]);
+    expect(emf()).toMatchObject({ OrphanVaultsSeen: 0, OrphanVaultDeletions: 1, OrphanVaultsHeld: 0 });
+  });
+
+  test("one of the member's vaults marked long ago, another not yet: the new one is marked and nothing is deleted until every mark is 7 days old", async () => {
+    table([vault({ orphan_seen_at: nowS() - 30 * DAY }), vault({ vault_id: B })]);
+    members([]);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await cleanup.handler();
+    expect(vaultWrites()).toEqual([expect.objectContaining({ Key: { vault_id: B }, ...MARK })]);
+    nothingIrreversible();
+  });
+
+  test('the member row is back (a restore, a read that was wrong): the mark is removed, nothing else', async () => {
+    table([vault({ orphan_seen_at: nowS() - 30 * DAY }), vault({ vault_id: B })]);
     members(['g7']);
     await cleanup.handler();
-    expect(memberReads()).toHaveLength(1);
-    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
-    expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
-    expect(vaultDeletes()).toEqual([]);
-    expect(audits()).toEqual([]);
-    expect(emf()).toMatchObject({ OrphanVaultDeletions: 0, OrphanVaultsHeld: 0 });
+    expect(vaultWrites()).toEqual([{ TableName: 'vaults', Key: { vault_id: A }, UpdateExpression: 'REMOVE orphan_seen_at', ConditionExpression: 'attribute_exists(orphan_seen_at)' }]);
+    nothingIrreversible();
+    expect(lines()).toContain('{"vaultOrphans":{"marked":0,"waiting":0,"cleared":1,"requested":0,"operator_held":0,"held":0,"read_errors":0,"failures":0}}');
+  });
+
+  test("an operator's hold on one vault keeps all of that member's vaults out: not marked, not deleted, however old the mark", async () => {
+    table([vault({ orphan_seen_at: nowS() - 30 * DAY }), vault({ vault_id: B, orphan_hold: true })]);
+    members([]);
+    await cleanup.handler();
+    expect(vaultWrites()).toEqual([]);
+    nothingIrreversible();
+    expect(emf()).toMatchObject({ OrphanVaultsOperatorHeld: 1, OrphanVaultDeletions: 0, OrphanVaultsHeld: 0 });
+  });
+
+  test('the first run after the deploy: vaults already without a member (one with a start-over held for the missing row, as after an old admin Delete) are only marked', async () => {
+    const DID = '01JB2Z6V9K3M4N5P6Q7R8S9T0V';
+    members(['x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7', 'x8', 'x9', 'x10', 'x11', 'x12']);
+    table([
+      vault({ deletion: { deletion_id: DID, state: 'pending', deletes_at: nowS() - 90 * DAY } }),
+      vault({ vault_id: B, user_guid: 'g8' }),
+      ...Array.from({ length: 12 }, (_, i) => vault({ vault_id: String.fromCharCode(100 + i).repeat(32), user_guid: `x${i + 1}` })),
+    ]);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await cleanup.handler();
+    expect(vaultWrites().map((i) => [i.Key, i.UpdateExpression])).toEqual([[{ vault_id: A }, MARK.UpdateExpression], [{ vault_id: B }, MARK.UpdateExpression]]);
+    nothingIrreversible();
   });
 
   test("rows the scan's filter should not have returned are checked again and skipped: already asked, deleted, no owner, a pointer row", async () => {
@@ -652,41 +725,68 @@ describe('cleanup job: vaults whose member row is gone (daily run)', () => {
     await cleanup.handler();
     expect(ddb.commandCalls(ScanCommand).map((c) => c.args[0].input).find((i) => i.FilterExpression === ORPHAN_SCAN)).toMatchObject({ TableName: 'vaults', ExpressionAttributeNames: { '#s': 'state' }, ExpressionAttributeValues: { ':d': 'deleted' } });
     expect(memberReads()).toEqual([]);
-    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
-    expect(vaultDeletes()).toEqual([]);
+    expect(vaultWrites()).toEqual([]);
+    nothingIrreversible();
   });
 
-  test('a member row that cannot be read: nothing is deleted on doubt; the next owner is still handled; counted for the alarm', async () => {
-    table([vault(), vault({ vault_id: B, user_guid: 'g8' })]);
-    members([], ['g7']);
+  test('a member row that cannot be read: nothing written for it; the next owner is still handled; counted for the alarm', async () => {
+    const old = nowS() - 8 * DAY;
+    members(['p1', 'p2', 'p3', 'p4', 'p5', 'p6'], ['g7']);
+    table([vault({ orphan_seen_at: old }), vault({ vault_id: B, user_guid: 'g8', orphan_seen_at: old }), ...['p1', 'p2', 'p3', 'p4', 'p5', 'p6'].map((g, i) => vault({ vault_id: String(i).repeat(32), user_guid: g }))]);
     const err = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     await cleanup.handler();
     expect(sqs.commandCalls(SendMessageCommand).map((c) => JSON.parse(c.args[0].input.MessageBody!).vault_id)).toEqual([B]);
     expect(audits().map((a) => a!.subject)).toEqual(['g8']);
-    expect(lines()).toContain('{"vaultOrphans":{"requested":1,"held":0,"read_errors":1,"failures":0}}');
     expect(emf()).toMatchObject({ OrphanVaultDeletions: 1, OrphanVaultsHeld: 1 });
     expect(err.mock.calls.map((c) => String(c[0]))).toContain('orphaned vaults: a member row could not be read');
   });
 
-  test(`more than ${5} members without a row in one run: none is asked (a wrong or damaged members table is more likely); held and alarmed`, async () => {
+  test(`more than ${5} members without a row: none is marked or asked, at every run until that is no longer so; held and alarmed`, async () => {
     expect(cleanup.ORPHAN_LIMIT).toBe(5);
-    table(Array.from({ length: 6 }, (_, i) => vault({ vault_id: String(i).repeat(32), user_guid: `g${i}` })));
-    members([]);
+    const present = Array.from({ length: 60 }, (_, i) => `p${i}`);
+    const rows = (n: number) => [
+      ...Array.from({ length: n }, (_, i) => vault({ vault_id: String(i).repeat(32), user_guid: `g${i}`, orphan_seen_at: nowS() - 30 * DAY })),
+      ...present.map((g, i) => vault({ vault_id: `${i}`.padStart(32, 'f'), user_guid: g })),
+    ];
+    members(present);
+    table(rows(6));
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    await cleanup.handler();
-    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
-    expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
-    expect(vaultDeletes()).toEqual([]);
-    expect(audits()).toEqual([]);
-    expect(emf()).toMatchObject({ OrphanVaultDeletions: 0, OrphanVaultsHeld: 6 });
-    expect(warn.mock.calls.map((c) => String(c[0]))).toContain('orphaned vaults: held, more members without a row than one run deletes');
-
-    // Five are within the limit.
+    for (let i = 0; i < 2; i++) {
+      ddb.resetHistory(); log.mockClear();
+      await cleanup.handler();
+      expect(vaultWrites()).toEqual([]);
+      nothingIrreversible();
+      expect(emf()).toMatchObject({ OrphanVaultsSeen: 0, OrphanVaultDeletions: 0, OrphanVaultsHeld: 6 });
+    }
+    expect(warn.mock.calls.map((c) => String(c[0]))).toContain('orphaned vaults: held, more members without a row than one run accepts');
+    // Five, among 65 owners, are within both limits.
     ddb.resetHistory(); log.mockClear();
-    table(Array.from({ length: 5 }, (_, i) => vault({ vault_id: String(i).repeat(32), user_guid: `g${i}` })));
+    table(rows(5));
     await cleanup.handler();
     expect(audits()).toHaveLength(5);
-    expect(emf()).toMatchObject({ OrphanVaultDeletions: 5, OrphanVaultsHeld: 0 });
+  });
+
+  test(`more than ${15} % of the owners without a row (a members table restored from an older backup): held, however few`, async () => {
+    expect(cleanup.ORPHAN_SHARE).toBe(0.15);
+    const old = nowS() - 30 * DAY;
+    // 2 of 10 owners (20 %): held.
+    members(['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8']);
+    const others = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8'].map((g, i) => vault({ vault_id: `${i}`.padStart(32, 'f'), user_guid: g }));
+    table([vault({ orphan_seen_at: old }), vault({ vault_id: B, user_guid: 'g8', orphan_seen_at: old }), ...others]);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await cleanup.handler();
+    nothingIrreversible();
+    expect(emf()).toMatchObject({ OrphanVaultsHeld: 2 });
+    // 1 of 9 (at least one is always allowed): handled.
+    ddb.resetHistory(); log.mockClear();
+    table([vault({ orphan_seen_at: old }), ...others]);
+    await cleanup.handler();
+    expect(audits()).toHaveLength(1);
+    // A single owner, without a row: one is allowed.
+    ddb.resetHistory(); log.mockClear();
+    table([vault({ orphan_seen_at: old })]);
+    await cleanup.handler();
+    expect(audits()).toHaveLength(1);
   });
 
   test('the scan itself fails: the rest of the run goes on, and the failure is counted for the alarm', async () => {

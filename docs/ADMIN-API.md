@@ -104,7 +104,8 @@ tables. It invokes three functions of the member API: the account push
 the start-over cancel, which removes a pending deletion record and
 reports an active recovery and does nothing else; and (MEMBER-API
 2.6.5) the member-vaults check, which lists the member's vaults that
-are not deleted, for Delete, and writes nothing.
+are not deleted, for Delete, under a role of its own that may only
+Query the vaults table and its `user-index`.
 
 **Registration codes.** Members and the admin site call these
 *registration codes* (formerly "invite codes"); each is good for 2 uses by

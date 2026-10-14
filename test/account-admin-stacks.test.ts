@@ -527,14 +527,22 @@ describe('VettidOrgMemberApiStack', () => {
       expect(Object.values<any>(t.findResources('AWS::Lambda::Permission')).filter((p) => JSON.stringify(p.Properties.FunctionName).includes(cancel[0]))).toEqual([]);
     });
 
-    test("the member-vaults check: a third function on the cleanup module that runs only memberVaultsHandler, under the cleanup job's role; its ARN is published; no schedule targets it", () => {
+    test("the member-vaults check: a third function on the cleanup module that runs only memberVaultsHandler, under a fixed-name role of its own that may only Query the vaults table and its user-index; its ARN is published; no schedule targets it", () => {
       const fns = Object.entries<any>(t.findResources('AWS::Lambda::Function'));
       const check = fns.find(([id]) => id.startsWith('MemberVaults'))!;
       const cleanupFn = fns.find(([id]) => id.startsWith('CleanupJob'))!;
       expect(check[1].Properties.Handler).toBe('index.memberVaultsHandler');
-      expect(check[1].Properties.Role).toEqual(cleanupFn[1].Properties.Role);
-      expect(Object.entries<any>(t.findResources('AWS::IAM::Role')).filter(([id]) => id.startsWith('MemberVaults'))).toEqual([]);
-      expect(Object.keys(t.findResources('AWS::IAM::Policy')).filter((id) => id.startsWith('MemberVaults'))).toEqual([]);
+      expect(check[1].Properties.Role).not.toEqual(cleanupFn[1].Properties.Role);
+      const roleId = check[1].Properties.Role['Fn::GetAtt'][0];
+      expect(t.findResources('AWS::IAM::Role')[roleId].Properties.RoleName).toBe('vettid-org-member-member-vaults');
+      const stmts = Object.values<any>(t.findResources('AWS::IAM::Policy'))
+        .filter((p) => JSON.stringify(p.Properties.Roles).includes(roleId))
+        .flatMap((p) => p.Properties.PolicyDocument.Statement);
+      const dynamo = stmts.filter((x: any) => JSON.stringify(x.Action).includes('dynamodb:'));
+      expect([...new Set(dynamo.flatMap((x: any) => [].concat(x.Action)))]).toEqual(['dynamodb:Query']);
+      expect(dynamo.flatMap((x: any) => [].concat(x.Resource)).map((r: any) => String(r).replace(/^.*:table\//, '')).sort()).toEqual(['vettid-org-vaults', 'vettid-org-vaults/index/user-index']);
+      // Nothing else but its logs: no queue, no other table, no SES, no Cognito.
+      expect(stmts.filter((x: any) => !JSON.stringify(x.Action).includes('dynamodb:') && !JSON.stringify(x.Action).includes('logs:') && !JSON.stringify(x.Action).includes('xray:'))).toEqual([]);
       const param = Object.values<any>(t.findResources('AWS::SSM::Parameter')).find((p) => p.Properties.Name === '/vettid-org/prod/member-api/member-vaults-fn-arn')!;
       expect(param.Properties.Value).toEqual({ 'Fn::GetAtt': [check[0], 'Arn'] });
       const targets = Object.values<any>(t.findResources('AWS::Events::Rule')).flatMap((r) => r.Properties.Targets ?? []);
@@ -542,16 +550,25 @@ describe('VettidOrgMemberApiStack', () => {
       expect(Object.values<any>(t.findResources('AWS::Lambda::Permission')).filter((p) => JSON.stringify(p.Properties.FunctionName).includes(check[0]))).toEqual([]);
     });
 
-    test('vaults without a member: an alarm on what the daily run held, could not read or could not ask (OrphanVaultsHeld), as the removal alarms; none on the deletions themselves', () => {
-      t.hasResourceProperties('AWS::CloudWatch::Alarm', {
-        AlarmName: 'vettid-org-orphan-vaults-held', Namespace: 'VettID/MemberApi', MetricName: 'OrphanVaultsHeld', Statistic: 'Sum', Period: 3600,
-        EvaluationPeriods: 1, Threshold: 1, ComparisonOperator: 'GreaterThanOrEqualToThreshold', TreatMissingData: 'notBreaching',
-      });
-      expect(Object.values<any>(t.findResources('AWS::CloudWatch::Alarm')).filter((a) => a.Properties.MetricName === 'OrphanVaultDeletions')).toEqual([]);
+    test('vaults without a member: alarms on the first sighting, on the deletions and on what was held, as the removal alarms; none on waiting or operator-held ones', () => {
+      for (const [name, metric] of [['vettid-org-orphan-vaults-seen', 'OrphanVaultsSeen'], ['vettid-org-orphan-vault-deletions', 'OrphanVaultDeletions'], ['vettid-org-orphan-vaults-held', 'OrphanVaultsHeld']]) {
+        t.hasResourceProperties('AWS::CloudWatch::Alarm', {
+          AlarmName: name, Namespace: 'VettID/MemberApi', MetricName: metric, Statistic: 'Sum', Period: 3600,
+          EvaluationPeriods: 1, Threshold: 1, ComparisonOperator: 'GreaterThanOrEqualToThreshold', TreatMissingData: 'notBreaching',
+        });
+      }
+      for (const m of ['OrphanVaultsWaiting', 'OrphanVaultsOperatorHeld']) expect(Object.values<any>(t.findResources('AWS::CloudWatch::Alarm')).filter((a) => a.Properties.MetricName === m)).toEqual([]);
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const emf = JSON.parse(require('../lambda/jobs/cleanup').orphanVaultEmf({ requested: 2, held: 0, read_errors: 1, failures: 1 }, 0));
-      expect(emf._aws.CloudWatchMetrics).toEqual([{ Namespace: 'VettID/MemberApi', Dimensions: [[]], Metrics: [{ Name: 'OrphanVaultDeletions', Unit: 'Count' }, { Name: 'OrphanVaultsHeld', Unit: 'Count' }] }]);
-      expect([emf.OrphanVaultDeletions, emf.OrphanVaultsHeld]).toEqual([2, 2]);
+      const emf = JSON.parse(require('../lambda/jobs/cleanup').orphanVaultEmf({ marked: 3, waiting: 4, cleared: 9, requested: 2, operator_held: 5, held: 0, read_errors: 1, failures: 1 }, 0));
+      expect(emf._aws.CloudWatchMetrics[0].Namespace).toBe('VettID/MemberApi');
+      expect(emf._aws.CloudWatchMetrics[0].Dimensions).toEqual([[]]);
+      expect(emf._aws.CloudWatchMetrics[0].Metrics.map((m: any) => m.Name)).toEqual(['OrphanVaultsSeen', 'OrphanVaultsWaiting', 'OrphanVaultDeletions', 'OrphanVaultsOperatorHeld', 'OrphanVaultsHeld']);
+      expect([emf.OrphanVaultsSeen, emf.OrphanVaultsWaiting, emf.OrphanVaultDeletions, emf.OrphanVaultsOperatorHeld, emf.OrphanVaultsHeld]).toEqual([3, 4, 2, 5, 2]);
+    });
+
+    test('the cleanup job may write orphan_seen_at on a vault row (and still nothing else new)', () => {
+      const upd = stmtsOf(/vault-cleanup|Cleanup/).filter((x: any) => [].concat(x.Action).includes('dynamodb:UpdateItem' as never) && JSON.stringify(x.Resource).includes('table/vettid-org-vaults'));
+      expect(upd.map((x: any) => x.Condition['ForAllValues:StringEquals']['dynamodb:Attributes'])).toEqual([['vault_id', 'deletion_requested_at', 'deletion', 'orphan_seen_at']]);
     });
 
     test('held start-overs: alarms on a missing member row and on a failed read (three runs in a row), on the metrics the job writes; none on a suspended account', () => {
@@ -600,9 +617,9 @@ describe('VettidOrgMemberApiStack', () => {
       expect(held.map((a) => a.Properties.AlarmName).sort()).toEqual(['vettid-org-start-over-held-no-member', 'vettid-org-start-over-held-read-error']);
       for (const a of held) expect(JSON.stringify(a.Properties.AlarmActions)).toContain(`:sns:us-east-1:${ORG.management}:vettid-org-security-alerts`);
       // And the one on vaults without a member.
-      const orphans = Object.values<any>(p.findResources('AWS::CloudWatch::Alarm')).filter((a) => a.Properties.AlarmName === 'vettid-org-orphan-vaults-held');
-      expect(orphans).toHaveLength(1);
-      expect(JSON.stringify(orphans[0].Properties.AlarmActions)).toContain(`:sns:us-east-1:${ORG.management}:vettid-org-security-alerts`);
+      const orphans = Object.values<any>(p.findResources('AWS::CloudWatch::Alarm')).filter((a) => String(a.Properties.AlarmName).startsWith('vettid-org-orphan-vault'));
+      expect(orphans.map((a) => a.Properties.AlarmName).sort()).toEqual(['vettid-org-orphan-vault-deletions', 'vettid-org-orphan-vaults-held', 'vettid-org-orphan-vaults-seen']);
+      for (const a of orphans) expect(JSON.stringify(a.Properties.AlarmActions)).toContain(`:sns:us-east-1:${ORG.management}:vettid-org-security-alerts`);
     });
 
     test('function logs keep the retention they had (one month): not changed by 2.6.0', () => {
@@ -702,7 +719,7 @@ describe('VettidOrgMemberApiStack', () => {
       // The cleanup job may only mark a deletion requested.
       const mark = stmts().filter((s: any) => String(str(s.Condition)).includes('deletion_requested_at'));
       expect(mark).toHaveLength(1);
-      expect(mark[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(['vault_id', 'deletion_requested_at', 'deletion']);
+      expect(mark[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(['vault_id', 'deletion_requested_at', 'deletion', 'orphan_seen_at']); // 2.6.5: the orphan mark
     });
 
     test('the queue URL prefix is pinned to the vault account and region', () => {

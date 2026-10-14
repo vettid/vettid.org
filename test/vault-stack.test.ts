@@ -314,7 +314,7 @@ describe('cross-account access (VAULT-RELEASES §8.1)', () => {
       expect(replica.DeletionProtectionEnabled).toBe(true);
       for (const s of replica.ResourcePolicy?.PolicyDocument.Statement ?? []) {
         expect(s.Principal).toEqual({ AWS: 'arn:aws:iam::449757308783:root' });
-        expect(s.Condition.ArnEquals['aws:PrincipalArn']).toMatch(/^arn:aws:iam::449757308783:role\/vettid-org-member-(vault|cleanup|vault-alarms|vault-notices|account-push|vault-names)$/);
+        expect(s.Condition.ArnEquals['aws:PrincipalArn']).toMatch(/^arn:aws:iam::449757308783:role\/vettid-org-member-(vault|cleanup|vault-alarms|vault-notices|account-push|vault-names|member-vaults)$/);
         expect(str(s.Action)).not.toMatch(/dynamodb:\*|BatchWrite|DeleteTable|UpdateTable/);
       }
     }
@@ -396,7 +396,14 @@ describe('cross-account access (VAULT-RELEASES §8.1)', () => {
     const attrsOf = (role: string) => writes.filter((s: any) => str(s.Condition).includes(role)).flatMap((s: any) => s.Condition['ForAllValues:StringEquals']?.['dynamodb:Attributes'] ?? []);
     expect(writes.flatMap((s: any) => s.Condition['ForAllValues:StringEquals']?.['dynamodb:Attributes'] ?? [])).not.toContain('credential_backup');
     expect(attrsOf('member-vault"')).toContain('deletion');
-    expect(attrsOf('member-cleanup"')).toEqual(['vault_id', 'deletion_requested_at', 'deletion']);
+    expect(attrsOf('member-cleanup"')).toEqual(['vault_id', 'deletion_requested_at', 'deletion', 'orphan_seen_at']); // 2.6.5: the orphan mark
+  });
+
+  test("2.6.5: the admin API's member-vaults check may only Query the vaults table and its user-index, nothing else anywhere", () => {
+    const tables = resources(prod.json, 'AWS::DynamoDB::GlobalTable');
+    const mine = tables.flatMap(([, t]) => t.Properties.Replicas[0].ResourcePolicy?.PolicyDocument.Statement ?? []).filter((s: any) => str(s.Condition).includes('member-member-vaults"'));
+    expect(mine.flatMap((s: any) => [].concat(s.Action))).toEqual(['dynamodb:Query', 'dynamodb:Query']);
+    expect(mine.flatMap((s: any) => [].concat(s.Resource)).map((r: string) => r.replace(/^.*:table\//, ''))).toEqual(['vettid-org-vaults', 'vettid-org-vaults/index/user-index']);
   });
 
   test('the control-queue policy the parent applies admits the three senders only', () => {

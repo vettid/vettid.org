@@ -6,23 +6,32 @@ changelog:
   - 2.6.5 (2026-10-14; as built; wording for the owner's approval).
     No member API route, request or response shape changes.
     **The daily run finds vaults whose member row is gone** ("Vault
-    deletion", Account cancellation): a vault row with an owner, not
+    deletion", Vaults without a member): a vault row with an owner, not
     `deleted` and not yet asked to delete itself, whose member row a
-    consistent read does not find, is asked to delete itself exactly
-    as for a canceled account (the host's `delete`, a never-sealed row
-    and the pointer row deleted), audited
-    `vault.orphan_deletion_requested`. An account deletion that stopped
-    after the member row and before the vaults is therefore finished
-    by the next daily run. On doubt nothing is deleted: an unreadable
-    member row leaves its vaults for the next run, and a run that
-    finds more than 5 members without a row asks none of them. New
-    metrics `OrphanVaultDeletions` and `OrphanVaultsHeld` (namespace
-    `VettID/MemberApi`), the latter alarmed (`vettid-org-orphan-vaults-held`);
-    new log line `{"vaultOrphans": …}`. **A start-over held for a
-    missing member row** ("Vault deletion: start over", Held) is still
-    never carried out by the 5-minute run, but its vault is now deleted
-    by the next daily run, as above; it no longer waits for an
-    operator. **A canceled account's SES identity goes with the
+    consistent read does not find, is first only marked
+    (`orphan_seen_at`, never moved; metric `OrphanVaultsSeen`,
+    alarmed). If the member row is still missing 7 days after the mark
+    of each of that member's vaults, and no operator has put one of
+    them on hold (`orphan_hold`, set by hand), they are asked to delete
+    themselves exactly as for a canceled account (the host's `delete`,
+    a never-sealed row and the pointer row deleted), audited
+    `vault.orphan_deletion_requested` and alarmed
+    (`OrphanVaultDeletions`). A member row that is back clears the
+    mark. An account deletion that stopped after the member row and
+    before the vaults is therefore finished 7 days later. On doubt
+    nothing is written: an unreadable member row leaves its vaults for
+    the next run, and a run that finds more than 5 members without a
+    row, or more than 15 % of the owners it read, marks and asks none
+    of them. New metrics `OrphanVaultsSeen`, `OrphanVaultsWaiting`,
+    `OrphanVaultDeletions`, `OrphanVaultsOperatorHeld`,
+    `OrphanVaultsHeld` (namespace `VettID/MemberApi`); alarms
+    `vettid-org-orphan-vaults-seen`, `-orphan-vault-deletions`,
+    `-orphan-vaults-held`; new log line `{"vaultOrphans": …}`. **A
+    start-over held for a missing member row** ("Vault deletion: start
+    over", Held) is still never carried out by the 5-minute run; its
+    vault now goes through the same marking and 7 days, unless an
+    operator holds it. The first daily run after the deploy only
+    marks. **A canceled account's SES identity goes with the
     account** ("Retention"): under the 14-day reclaim's rule (kept if
     the mailing list uses the address, if the request found the
     identity already there, or for an address under vettid.org), and
@@ -33,12 +42,15 @@ changelog:
     **ADMIN-API: Delete refuses while the member has a vault** that is
     not deleted (`409 vault_exists`, nothing changed), so an admin's
     Delete no longer leaves a vault without a member. IAM: a third
-    function on the cleanup module, `MemberVaults`, runs only the
-    read-only task `member_vaults` under the cleanup job's role; the
-    admin people function may invoke it (its ARN in SSM
-    `member-api/member-vaults-fn-arn`); nothing changes in the vault
-    account. No existing log line, metric or alarm is renamed or
-    removed
+    function on the cleanup module, `MemberVaults`, runs only the task
+    `member_vaults` under a fixed-name role of its own
+    (`vettid-org-member-member-vaults`) that may only Query the vaults
+    table and its `user-index`; the admin people function may invoke
+    it (its ARN in SSM `member-api/member-vaults-fn-arn`). The cleanup
+    job may also write `orphan_seen_at` on a vault row. Both are in the
+    vault account's table policy too, so `VettidOrgVaultStack` is
+    deployed first (RUNBOOK "Deploy order for 2.6.5"). No existing
+    log line, metric or alarm is renamed or removed
   - 2.6.4 (2026-10-13; editorial errata, as built; approved by the
     owner 2026-10-13). No route, answer or email changes: the text
     is corrected to what the API does.
@@ -2086,23 +2098,41 @@ Its own audit log goes with it, so the member is told by email.
   leave vaults that nothing names any more. So each daily run also
   scans the vault rows that have an owner, are not `deleted` and have
   no `deletion_requested_at`, and reads each owner's member row (a
-  consistent read). For an owner without a row it does what the
-  account deletion does: each of that member's vaults is asked to
-  delete itself as above, a never-sealed row and the pointer row are
-  deleted, and the audit event `vault.orphan_deletion_requested`
-  (actor `system`, subject the `user_guid`, detail `vault_ids`) is
-  written; from then on the daily retry has them. On doubt nothing is
-  deleted: a member row that cannot be read leaves its vaults for the
-  next run, and a run that finds more than 5 members without a row
-  asks none of them (a wrong or damaged members table is then more
-  likely than stopped deletions) and leaves it to an operator
-  (RUNBOOK "Vaults without a member"). Metrics at every daily run
-  (namespace `VettID/MemberApi`, no dimensions): `OrphanVaultDeletions`
-  (members whose vaults were asked) and `OrphanVaultsHeld` (members
-  held, unreadable or failed), the latter alarmed
-  (`vettid-org-orphan-vaults-held`; production: the security-alerts
-  topic). An admin's Delete refuses while the member has a vault
-  (ADMIN-API "People"), so it does not leave one behind.
+  consistent read). Nothing irreversible happens at first sight:
+  - A vault whose member row is missing gets `orphan_seen_at` (a
+    conditional write; a mark is never moved), counted as
+    `OrphanVaultsSeen` and alarmed, so that an operator hears of it
+    while the vault still exists.
+  - When the member row is still missing 7 days or more after the
+    mark of every one of that member's vaults, the run does what the
+    account deletion does: each vault is asked to delete itself as
+    above, a never-sealed row and the pointer row are deleted, and the
+    audit event `vault.orphan_deletion_requested` (actor `system`,
+    subject the `user_guid`, detail `vault_ids`, `orphan_seen_at`) is
+    written; from then on the daily retry has them.
+    `OrphanVaultDeletions` counts these and is alarmed.
+  - A member row that is back removes the mark.
+  - An operator can keep a vault without a member by setting
+    `orphan_hold: true` on its row by hand (RUNBOOK "Vaults without a
+    member"); a hold on any of a member's vaults keeps all of them out,
+    marked or not (`OrphanVaultsOperatorHeld`). The job never writes it.
+  On doubt nothing is written: a member row that cannot be read leaves
+  its vaults for the next run; and a run that finds more members
+  without a row than 5, or than 15 % of the owners it read (one is
+  always allowed), marks and asks none of them, at every run until
+  that is no longer so. That protects against a wrong or damaged
+  members table, above all one restored from an older backup, in which
+  every member who joined since would look gone; the 7 days cover
+  what the limits miss. `OrphanVaultsHeld` counts what was held,
+  unreadable or failed, and is alarmed. All five metrics are written at
+  every daily run (namespace `VettID/MemberApi`, no dimensions); the
+  three alarms (`vettid-org-orphan-vaults-seen`,
+  `-orphan-vault-deletions`, `-orphan-vaults-held`) go to the
+  security-alerts topic in production. The first daily run after 2.6.5
+  is deployed only marks the vaults already without a member, and
+  deletes nothing for 7 days. An admin's Delete refuses while the
+  member has a vault (ADMIN-API "People"), so it does not leave one
+  behind.
 - **Status.** A `deleted` vault row reads as no vault (`{vault: null}`).
 - **Stored versions.** The data bucket keeps noncurrent versions for 7
   days (VAULT-RELEASES §8.2, §11.4): the erased objects, still sealed,
@@ -2196,10 +2226,11 @@ interface Deletion {
   `vettid-org-start-over-held-no-member`, `-read-error`; production:
   the security-alerts topic); a deletion held for a suspended or
   canceled account is not alarmed. A deletion with no member row is
-  never carried out by this run; 2.6.5: the next daily run asks its
-  vault to delete itself as for a canceled account ("Vault deletion",
-  Vaults without a member), after which this run leaves it to the
-  daily retry (RUNBOOK).
+  never carried out by this run; 2.6.5: the daily run marks its vault
+  and, if the member row is still missing 7 days later and no operator
+  holds the vault, asks it to delete itself as for a canceled account
+  ("Vault deletion", Vaults without a member), after which this run
+  leaves it to the daily retry (RUNBOOK).
 - **What the hold does not cover.** A deletion that is already
   `executing` is not held back by a later suspension, including one
   whose `delete` could not be queued yet. The members table and the

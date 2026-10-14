@@ -346,8 +346,8 @@ async function requestDeletionCancel(userGuid: string): Promise<StartOverCancel>
 }
 
 /**
- * Ask the member API's member-vaults function (its task `member_vaults`,
- * read only; it runs under the cleanup job's role) which of the member's
+ * Ask the member API's member-vaults function (its task `member_vaults`;
+ * its own role may only Query the vaults table and its user-index) which of the member's
  * vaults are not deleted. Anything but its own well-formed answer is an
  * error: Delete then answers 500 and changes nothing, so "no vault" is never
  * taken from a failure.
