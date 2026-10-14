@@ -166,6 +166,7 @@ export function render(root, ctx) {
           title: 'Delete member permanently',
           body: [
             `This removes ${m.email}'s sign-in and personal data. Only the audit trail is kept. This cannot be undone.`,
+            'A member who still has a vault is not deleted: the API refuses and says why.',
           ],
           fields: [{ name: 'confirm', label: `Type ${m.email} to confirm` }],
           confirmLabel: 'Delete permanently',

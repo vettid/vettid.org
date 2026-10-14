@@ -1987,32 +1987,97 @@ session | link | app`), `vault.deletion_executed`.
 - *A held deletion without a member* (alarm
   `vettid-org-start-over-held-no-member`, metric
   `StartOverHeldNoMember`; three 5-minute runs in a row): a vault has
-  a pending deletion past its time and no member row. The job holds
-  it and never erases a vault because a row is missing. It happens
-  when an admin **Delete**s a member who had a pending deletion (that
-  Delete does not touch vaults), or when an account's own deletion
-  removed the row and then failed before it reached the vault. The
-  vault and its stored objects stay until someone decides:
-  1. Find it: scan the vaults table (vault account) for rows with
-     `deletion.state = pending` and `deletes_at` in the past
-     (`aws dynamodb scan --table-name vettid-org-vaults --filter-expression "attribute_exists(deletion) AND attribute_not_exists(deletion_requested_at)" --projection-expression "vault_id, user_guid, deletion"`),
-     and check that the members table has no row for that `user_guid`.
-  2. Find out why the member is gone: the audit log by `subject` =
-     that `user_guid` (`member.delete` by an admin, or
-     `member.delete_after_cancel` by the job).
-  3. The member was deleted and the vault is to go (the usual case):
-     set `deletion_requested_at` on the vault row to a time more than
-     an hour ago
-     (`aws dynamodb update-item --table-name vettid-org-vaults --key '{"vault_id":{"S":"<vault_id>"}}' --update-expression "SET deletion_requested_at = :t" --condition-expression "attribute_exists(vault_id) AND attribute_not_exists(deletion_requested_at)" --expression-attribute-values '{":t":{"N":"<epoch seconds, an hour or more ago>"}}'`).
-     The next daily run asks the vault to delete itself exactly as for
-     a canceled account, the usual notice removes the rows, and the
-     5-minute run stops counting it at once.
-  4. The row was removed by mistake and the vault is to stay: restore
-     the member first; or, to keep the vault without a member, remove
-     the `deletion` record
-     (`--update-expression "REMOVE deletion" --condition-expression "deletion.#s = :p"`
-     with `#s` = `state`, `:p` = `pending`).
-  The alarm returns to OK within 15 minutes of either.
+  a pending deletion past its time and no member row. The 5-minute run
+  holds it and never carries a start-over out because a row is
+  missing. It happens when an account's own deletion removed the row
+  and then failed before it reached the vault (or, before admin
+  **Delete** refused while a vault exists, when an admin deleted a
+  member who had one). The daily run (07:00 UTC) marks such a vault
+  (`orphan_seen_at`, alarm `vettid-org-orphan-vaults-seen`) and, if
+  the member row is still missing 7 days after the mark and no
+  operator holds it, asks it to delete itself as for a canceled
+  account; from then on the row has `deletion_requested_at`, the
+  5-minute run stops counting it, and this alarm returns to OK. Until
+  then it stays in ALARM. See *Vaults without a member* below for
+  finding out why, and for keeping the vault.
+- *Vaults without a member* (MEMBER-API 2.6.5; metrics from the daily
+  run, namespace `VettID/MemberApi`). The daily run scans the vaults
+  table for rows with a `user_guid`, not `deleted` and without
+  `deletion_requested_at`, and reads each owner's member row
+  consistently. Log line
+  `{"vaultOrphans":{marked, waiting, cleared, requested, operator_held, held, read_errors, failures}}`.
+  - **First sight** (alarm `vettid-org-orphan-vaults-seen`, metric
+    `OrphanVaultsSeen`; log `orphaned vaults: a vault without a member
+    row, marked` with `vault_id` and `user_guid`): the row gets
+    `orphan_seen_at` (epoch seconds; never moved by a later run). This
+    is the warning: nothing is deleted yet. Find out why the member is
+    gone: the audit log by `subject` = the `user_guid`
+    (`member.delete` by an admin, `member.delete_after_cancel` by the
+    job). The first run after 2.6.5 was deployed marks every vault
+    already without a member, including those held under
+    `StartOverHeldNoMember` from earlier admin Deletes, and deletes
+    nothing for 7 days.
+  - **Waiting** (metric `OrphanVaultsWaiting`, no alarm): marked, the
+    7 days not over.
+  - **The member row is back** (restored): the next run removes
+    `orphan_seen_at` (`cleared`); nothing else. Only a run that sees
+    the row clears the mark: a member row restored and lost again
+    between two 07:00 runs keeps its first mark, and its 7 days are not
+    restarted.
+  - **Deleted** (alarm `vettid-org-orphan-vault-deletions`, metric
+    `OrphanVaultDeletions`): 7 days or more after the mark of every
+    one of that member's vaults, the member row still missing and no
+    hold, the run does what the account deletion does for a canceled
+    account: the host's `delete` to each vault not yet deleted, a
+    never-sealed row and the pointer row deleted; audit
+    `vault.orphan_deletion_requested` (subject: the `user_guid`,
+    detail: `vault_ids`, `orphan_seen_at`). This cannot be undone.
+  - **To keep a vault without a member** (the row was removed by
+    mistake, or the vault is wanted for an investigation): put it on
+    hold before the 7 days are over. In the vault account:
+    `aws dynamodb update-item --table-name vettid-org-vaults --key '{"vault_id":{"S":"<vault_id>"}}' --update-expression "SET orphan_hold = :t" --condition-expression "attribute_exists(vault_id) AND attribute_not_exists(deletion_requested_at)" --expression-attribute-values '{":t":{"BOOL":true}}'`.
+    Any `orphan_hold` attribute counts as a hold, whatever its type or
+    value (a value other than the boolean true is logged as a warning);
+    to end it, remove the attribute.
+    A hold on any one of a member's vaults keeps all of that member's
+    vaults out of the scan: none is marked or deleted (metric
+    `OrphanVaultsOperatorHeld`, no alarm). If the vault also has a
+    pending start-over, remove that record too, or
+    `StartOverHeldNoMember` stays in ALARM
+    (`--update-expression "REMOVE deletion" --condition-expression "deletion.#s = :p"`
+    with `#s` = `state`, `:p` = `pending`). To end the hold:
+    `--update-expression "REMOVE orphan_hold" --condition-expression "attribute_exists(orphan_hold)"`;
+    a mark older than 7 days then leads to the deletion at the next
+    run, so restore the member row first if the vault is to stay.
+    Better still, restore the member row: the mark is then cleared.
+    The job never writes `orphan_hold`; the vault account's table
+    policy does not even let it.
+  - **Held** (alarm `vettid-org-orphan-vaults-held`, metric
+    `OrphanVaultsHeld`):
+    - `orphaned vaults: held, more members without a row than one run
+      accepts`: more than 5 members without a row, or more than 15 %
+      of the owners the run read (one is always allowed). The run
+      then marks and asks none of them, and does so at every daily
+      run for as long as that is the case. That many at once is more
+      likely a wrong or damaged members table (above all one restored
+      from an older backup, which lacks every member who joined since)
+      than stopped deletions. Check the members table (point-in-time
+      recovery, the stack's `TABLE_MEMBERS`) first. When the members
+      are really gone, the vaults can be asked one at a time by hand
+      (below), or `ORPHAN_LIMIT` / `ORPHAN_SHARE` in
+      `lambda/jobs/cleanup.ts` raised for one deploy; the 7 days from
+      each mark still apply.
+    - `orphaned vaults: a member row could not be read` (with the
+      error name): as for `StartOverHeldReadError` above; tried again
+      the next day.
+    - `orphaned vaults: not all marked or asked to delete themselves`
+      or `a mark could not be cleared`: a failed table or queue call;
+      tried again the next day.
+  - To ask one vault by hand (instead of waiting), set
+    `deletion_requested_at` on its row to a time more than an hour ago
+    (`aws dynamodb update-item --table-name vettid-org-vaults --key '{"vault_id":{"S":"<vault_id>"}}' --update-expression "SET deletion_requested_at = :t" --condition-expression "attribute_exists(vault_id) AND attribute_not_exists(deletion_requested_at)" --expression-attribute-values '{":t":{"N":"<epoch seconds, an hour or more ago>"}}'`);
+    the daily retry then asks it as for a canceled account.
+  - Deploying: see **Deploy order for 2.6.5** below.
 - *Held because the member row cannot be read* (alarm
   `vettid-org-start-over-held-read-error`, metric
   `StartOverHeldReadError`; three runs in a row): no due deletion is
@@ -2043,6 +2108,23 @@ function, not the cleanup job), then the admin site. Nothing changes
 in the vault account, and no existing function, log group or table is
 replaced. Between the two deploys the admin API is the old one and
 behaves as before.
+
+**Deploy order for 2.6.5 (vaults without a member, admin Delete
+refused while a vault exists).** `VettidOrgVaultStack` first (vault
+account: the vaults table's resource policy gains the cleanup job's
+`orphan_seen_at` attribute and the new role
+`vettid-org-member-member-vaults`, Query on the table and its
+`user-index` only). Then `VettidOrgMemberApiStack`: the orphan step
+and its three alarms, and a third function, `MemberVaults`, under that
+role of its own; its ARN is published as SSM
+`/vettid-org/<stage>/member-api/member-vaults-fn-arn`. Then
+`VettidOrgAdminApiStack` (it reads that parameter, so its deploy fails
+until the member API's is done; the people function may invoke that
+function), then the admin site. In the other order the job's first
+mark is refused by the vault account (logged, `OrphanVaultsHeld`) and
+nothing is deleted. Between the member API's and the admin API's
+deploys, Delete behaves as before. The first daily run after the
+member API's deploy only marks; nothing is deleted for 7 days.
 
 **Deploy order for 2.1.0.** `VettidOrgVaultStack` (vault account: the
 host's `credential_backup` grant and the API roles' `deletion` attribute in
