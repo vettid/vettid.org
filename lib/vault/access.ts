@@ -22,8 +22,8 @@ import { AppConfig, VaultConfig, resourceName } from '../config';
 export const VAULT_TABLES = ['vaults', 'vault-instances', 'vault-requests', 'vault-releases'] as const;
 export type VaultTable = (typeof VAULT_TABLES)[number];
 
-export type VaultApiConsumer = 'vault' | 'cleanup' | 'vault-alarms' | 'vault-notices' | 'account-push' | 'vault-names';
-export const VAULT_API_CONSUMERS: VaultApiConsumer[] = ['vault', 'cleanup', 'vault-alarms', 'vault-notices', 'account-push', 'vault-names'];
+export type VaultApiConsumer = 'vault' | 'cleanup' | 'vault-alarms' | 'vault-notices' | 'account-push' | 'vault-names' | 'member-vaults';
+export const VAULT_API_CONSUMERS: VaultApiConsumer[] = ['vault', 'cleanup', 'vault-alarms', 'vault-notices', 'account-push', 'vault-names', 'member-vaults'];
 
 /** The vaults table's index of vaults by sealed release (keys plus user_guid and state), for the notice job (W8). */
 export const SEALED_RELEASE_INDEX = 'sealed-release-index';
@@ -80,11 +80,14 @@ export const VAULT_API_ACCESS: Record<VaultApiConsumer, VaultApiAccess> = {
   // Daily cleanup: canceled accounts' vaults are asked to delete themselves
   // (§12.5); never-sealed rows and pointer rows are deleted here. Every 5
   // minutes (MEMBER-API 2.1.0): start-overs past their 24 h, marked in the
-  // API's `deletion` (state, queued_at).
+  // API's `deletion` (state, queued_at). Daily (MEMBER-API 2.6.5): a vault
+  // whose member row is gone gets `orphan_seen_at` at first sight (cleared
+  // if the member row is back). `orphan_hold` is an operator's, set by
+  // hand; the job only reads it.
   cleanup: {
     tables: [
       { table: 'vaults', actions: ['Query', 'Scan', 'DeleteItem'], indexes: true },
-      { table: 'vaults', actions: ['UpdateItem'], attributes: ['vault_id', 'deletion_requested_at', 'deletion'] },
+      { table: 'vaults', actions: ['UpdateItem'], attributes: ['vault_id', 'deletion_requested_at', 'deletion', 'orphan_seen_at'] },
       { table: 'vault-instances', actions: ['GetItem', 'Query'], indexes: true },
       { table: 'vault-releases', actions: ['GetItem'] },
       { table: 'vault-releases', actions: ['UpdateItem'], attributes: ['release', 'start_requested_at', 'start_requests'] },
@@ -125,6 +128,18 @@ export const VAULT_API_ACCESS: Record<VaultApiConsumer, VaultApiAccess> = {
       { table: 'vault-requests', actions: ['PutItem'] },
     ],
     sendsToControlQueues: true,
+    readsVaultsStream: false,
+  },
+  // The admin API's Delete asks whether a member still has a vault
+  // (MEMBER-API 2.6.5, ADMIN-API "People"): Query on the table (consistent
+  // reads of the pointer row and each vault row) and on the user-index.
+  // Nothing else: it writes nothing and sends nothing.
+  'member-vaults': {
+    tables: [
+      { table: 'vaults', actions: ['Query'] },
+      { table: 'vaults', actions: ['Query'], indexes: ['user-index'] },
+    ],
+    sendsToControlQueues: false,
     readsVaultsStream: false,
   },
   // Name changes from the vault (MEMBER-API 2.2.0, VAULT-MESSAGING 0.18.0

@@ -22,6 +22,13 @@ export interface ApiFunctionProps {
    * role with basic execution rights.
    */
   readonly roleName?: string;
+  /**
+   * Run under another function's role instead of one of its own; only for a
+   * second entry point of the same module that must act under a role
+   * another account's policy already names (the start-over cancel, which
+   * shares the cleanup job's). Nothing is added to that role here.
+   */
+  readonly role?: iam.IRole;
   /** Reserved concurrency; only where invocations must not overlap (the vault scaler). */
   readonly reservedConcurrentExecutions?: number;
   /**
@@ -64,7 +71,9 @@ export class ApiFunction extends Construct {
       description: props.description,
       functionName: props.functionName,
       reservedConcurrentExecutions: props.reservedConcurrentExecutions,
-      role: props.roleName
+      role: props.role
+        ? props.role
+        : props.roleName
         ? new iam.Role(this, 'Role', {
             roleName: props.roleName,
             assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),

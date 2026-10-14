@@ -853,8 +853,33 @@ routes until VettidOrgVaultStack is redeployed.
 A key per entry of `vault/releases/<channel>.json` (W7): add release N
 with `status: "candidate"`, its PCR0–2, `seal_key: ""`, `notes` (production:
 `https://vettid.org/security/releases/<N>/`) and `admitted_pcr0s` = the
-PCR0s of every release not `removed` (never changed afterwards). `npm test`
-and `npm run check:manifest` validate the file.
+PCR0s of every earlier release not `removed`, **and of every `removed`
+release that can still be rescued**: one whose `ends_at` is less than
+the channel's deletion window ago (30 days in production, 7 in
+staging). Never changed afterwards. Why the removed ones: a rescued
+vault can only move into an `active` release whose key admits it, so a
+key that leaves them out ends their rescue the day its release is
+published (VAULT-RELEASES 0.1.24 §3.5, §6.2; owner decision of
+2026-10-13). `npm test`, CDK synth and `npm run check:manifest` validate
+the file. While `seal_key` is empty they refuse a list that leaves one
+of those releases out. A list that names too much, a `removed` release
+whose window is over or that has no `ends_at` (a failed canary), is
+reported by `npm run check:manifest` and `vault:manifest sign` only:
+CDK synth and `npm test` do not fail for it, so no command of the
+channel stops working because a window ended. The list is judged at
+the time of the check, so write the entry, create the key (step 2) and
+write its ARN (step 3) on the same day. If `check:manifest` reports a
+release named too much before the key is created, take it out of the
+list; if the key already exists with that list, write its ARN (the
+extra release is harmless to the key check, but the manifest must list
+it while the key lives).
+
+Staging releases 1 to 11 have keys from before this rule. Release 11's
+key admits 7 to 10 only, so staging 3 to 6 (removed 2026-10-13) could be
+rescued only into release 10, only while it was `active`; release 11 is
+`active` since 2026-10-13, so they have no target any more. Their keys
+are deleted on 2026-10-20 (release 3's some hours after the others: its
+deletion was scheduled again after the rescue rehearsal of 2026-10-13).
 
 1. `npx cdk diff VettidOrgVaultStack --profile vault-prod`: exactly one new
    `Custom::VettidReleaseKey` and its SSM parameter. Read its `Policy`
@@ -1250,7 +1275,10 @@ and re-checks everything with this repository's own render and verifier:
 1. Edit `vault/releases/prod.json` for the publication: N `active` with
    `published_at` and its `log` (summary, changes, security), N−1
    `deprecated`, any `retired`/`ends_at`/`removed` changes (§10.3).
-2. `npm run vault:manifest -- sign --channel prod`: refuses while any
+2. `npm run vault:manifest -- sign --channel prod`: refuses a manifest
+   in which a `removed` release that can still be rescued is not
+   admitted by the newest `active` release's key ("Removing a release
+   and rescue" below); refuses while any
    release's `notes` is not its release log entry (`npm run vault:manifest --
    notes --channel <c>` switches them; only staging S1–S9 ever had other
    notes), then serial = max(served,
@@ -1275,7 +1303,8 @@ and re-checks everything with this repository's own render and verifier:
    the manifest sync (above) so routing follows at once.
 
 If the canary fails, never publish that document: edit the file (N
-`removed`, no `host`), sign the next serial when there is something to
+`removed`, no `host`, no `ends_at`: nobody was on it, so it is not
+rescued and no later key admits it), sign the next serial when there is something to
 publish, and delete the canary row. `check:manifest` refuses a served
 manifest that is not exactly a render of the file, a lower or repeated
 serial, a dropped or backwards-moving release, and a serial above
@@ -1486,23 +1515,97 @@ the account deletions it held back, and members' apps retry on their own.
 
 ### Removing a release and rescue
 
-At D (§10.3 step 2): `npx cdk destroy VettidOrgVaultRelease<N>Stack --profile vault-prod`
+**Before a release is removed, and before a new release is published:
+a rescue must have a target** (VAULT-RELEASES 0.1.24 §3.5). A rescued
+vault can only move into the newest `active` release, and only if that
+release's key admits it. Check in `vault/releases/<channel>.json`, as it
+will be after the edit: the PCR0 of every `removed` release whose
+`ends_at` is less than the deletion window ago (30 days in production,
+7 in staging), the release being removed included, is in the
+`admitted_pcr0s` of the newest `active` release. `vault:manifest sign`
+makes the same check and refuses to sign, and `check:manifest` refuses
+the served manifest. If it fails, do not publish: wait until the
+window of the release left out is over, or keep the current `active`
+release until then. (Staging releases through 11 are not checked: their
+keys are older than the rule, "Creating a release key" above.)
+
+One case has no target and no check: a release that is removed while
+an older release is the newest `active` one (the enclave refuses a move
+to a lower number). Removing such a release ends its vaults; ask the
+owner first.
+
+At D (§10.3 step 2): set the entry `removed` and keep its `ends_at`,
+the time the release ended, never a later one
+(the rescue window counts from it; `check:manifest` refuses a published
+release that is `removed` without one, and a `removed` entry whose
+`ends_at` is after the manifest's `issued_at`), sign and publish, then
+`npx cdk destroy VettidOrgVaultRelease<N>Stack --profile vault-prod`
 (instances drain; the `group-name` ref goes, so the next manifest sync sets
 `available` false), then remove the entry's `host` in
 `vault/releases/<channel>.json` (the entry itself stays while the manifest
-lists the release).
-Rescue (step 3): cancel and enable the key as the retirement role,
-re-add the entry and deploy the release stack, then
+lists the release), and schedule the key's deletion ("Retirement" above).
 
-```bash
-aws dynamodb update-item --profile vault-prod --table-name vettid-org-vault-releases \
-  --key '{"release":{"S":"<pcr0>"}}' --update-expression 'SET rescue = :t' --expression-attribute-values '{":t":{"BOOL":true}}'
-```
+Rescue (step 3), within the window. Nothing is signed or published: the
+entry stays `removed` and the manifest does not change.
 
-The member API routes the vaults of that release again and the scaler
-starts it on demand. `rescue` is release-wide (every vault sealed to it is
-routed while it is set). Remove it (`REMOVE rescue`) when the member has
-moved; the scaler then stops the group at once.
+1. The target: the newest `active` release admits N (the check above).
+   Without it, stop: the vault cannot move. (The enclave accepts any
+   `active` release above N whose key admits it; the list and the app
+   choose the newest.)
+2. The key, as the retirement role:
+   `aws kms cancel-key-deletion --key-id <arn>`, then
+   `aws kms enable-key --key-id <arn>` (cancelling leaves it `Disabled`);
+   `aws kms describe-key --key-id <arn> --query KeyMetadata.KeyState`
+   must answer `Enabled`.
+3. The release stack: in `vault/releases/<channel>.json` give N's entry
+   its `host` again (as it was before the removal: `git log -p` on the
+   file) **together with `"rescue": true`**, `min_instances: 0`. The
+   validation allows `host` on a `removed` entry only with that marker,
+   and the marker only while the newest `active` release admits N; the
+   marker is never in the manifest. In production the edit is a PR
+   merged to master before the deploy, like any release list change:
+   the daily drift check ("Production drift") compares master with
+   what is deployed, so it stays clean during the rescue; with an
+   unmerged edit it would report the host stack as changed and the
+   release stack as deployed but not in master. `npm run check:manifest`, then
+   `npx cdk diff VettidOrgVaultStack VettidOrgVaultHostStack VettidOrgVaultRelease<N>Stack --profile vault-prod`
+   (the host stack only gains N's PCR0 on the smoke key; the release
+   stack is new; **`VettidOrgVaultStack` must show no change**: `cdk
+   deploy` of the other two deploys it too, as their dependency, and
+   it holds the release keys) and deploy the host and release stacks.
+   The image is built again from the release's assets and its pinned
+   base AMI; if that AMI is gone, set the current one ("Adding a
+   release" step 1). Run the manifest sync so that `available` is true.
+4. Routing:
+
+   ```bash
+   aws dynamodb update-item --profile vault-prod --table-name vettid-org-vault-releases \
+     --key '{"release":{"S":"<pcr0>"}}' --update-expression 'SET rescue = :t' --expression-attribute-values '{":t":{"BOOL":true}}'
+   ```
+
+   The member API routes the vaults of that release again and the scaler
+   starts it on demand. `rescue` is release-wide (every vault sealed to
+   it is routed while it is set).
+5. The member unlocks and approves the move into the newest `active`
+   release (the app offers only the move), then unlocks again there.
+   **The move is confirmed when an unlock in the target release has
+   succeeded** (the member sees the vault open, and the app shows the
+   target release). The vault row's `sealed_release` is not
+   the sign: it names the target as soon as N has sealed the header,
+   before the target has opened the vault. Until the confirmation N
+   must stay routed, because going back (an abandon) is served by N.
+6. The way back, only after that confirmation: `REMOVE rescue` on the
+   row (the scaler then stops the group at once); `npx cdk destroy
+   VettidOrgVaultRelease<N>Stack`; remove `host` and `rescue` from the
+   entry (in production: a second PR, merged before the deploy, after
+   which the drift check is clean again) and deploy the host stack;
+   schedule the key's deletion again ("Retirement" above). KMS takes
+   the full window again, so the key's deletion date is no longer
+   `ends_at` plus the window.
+
+`check:manifest` fails while an entry carries `rescue: true` past its
+window (`ends_at` plus the window): end the rescue. CDK synth does not
+fail for that, so the stack can still be destroyed.
 
 ### Network and egress
 
@@ -1744,10 +1847,284 @@ session | link | app`), `vault.deletion_executed`.
   cannot be cancelled; the vault is gone once the host deletes it (stored
   versions stay at most 7 days, sealed, and are not restorable by support;
   "The data bucket's old versions and its size alarm").
+- *The account looks taken over* (the member did not ask for the
+  deletion, or for a recovery, and someone else may hold their mailbox
+  or session). In this order, on the admin site's **Members** page:
+  1. **Suspend** the account (with the reason). Suspend writes the
+     status first, then disables sign-in, then ends the sessions, and
+     writes the `member.suspend` event last. From the status write on,
+     a pending deletion is **not carried out**: the cleanup job's
+     5-minute run reads the member's row before each deletion and
+     leaves it `pending` for an account that is not active, for as
+     long as it stays that way (metric `StartOverHeldNotActive`; no
+     alarm, see below). The one case suspending cannot catch is a run
+     of the job that read the row as active just before the status was
+     written. Suspending cancels nothing by itself.
+     **A suspension can be half done.** If Suspend answers an error
+     after the status was written, the row says `suspended` but
+     sign-in may not be disabled and the sessions may not be ended.
+     The sign of it is a suspended account with **no `member.suspend`
+     event** for this suspension in the audit log (by `subject`, the
+     member's id). Until it is finished, a session from before the
+     suspension keeps renewing itself; it reaches only lock and the
+     two cancels, because every other account and vault route reads
+     the row. Finish it with **Suspend again** on the suspended row
+     (it disables sign-in and ends the sessions again and writes
+     `member.suspend` with `repeat: true`; the stored reason stays the
+     first one). It is safe to press on any suspended account.
+     Reinstate also ends the sessions before it enables sign-in, so a
+     half-done suspension cannot hand an old session back.
+  2. **Cancel vault deletion** on the member's row
+     (`POST /admin/members/{user_guid}/vault/deletion/cancel`). It
+     answers "cancelled" (audit `member.vault_deletion_cancel`, the
+     member is emailed "VettID vault deletion cancelled … by VettID
+     support"), "no pending vault deletion" (nothing to do; repeating
+     it is harmless), or an error that it is already being carried out
+     (`409`, state `executing`: see the next entry). It works whatever
+     the account status, so it is also the way to cancel for a member
+     who cannot reach the link, the account page or the app. If it
+     answers an internal error, press it again: when the second answer
+     is "no pending vault deletion", the first one did cancel (its
+     audit event or email failed); the cancel function's log has
+     `{"startOverCancel":{"user_guid","vault_id","deletion_id"}}` for
+     every record it removed.
+  3. *A recovery the member did not ask for* has no admin cancel. While
+     the account is suspended it is **blocked, not stopped**: the code
+     is not released (`GET /api/vault/recovery` answers 403) and a new
+     app can neither claim it nor register, but its clock runs on
+     (code after 24 hours, usable for 24 more), and it works again the
+     moment the account is active. The member can cancel it with the
+     link in the "recovery requested" email at any time, suspended or
+     not.
+  4. **Reinstate** when the member has their mailbox back. Reinstating
+     first cancels a vault deletion that is still pending (step 2 not
+     done, or a deletion nobody noticed), with the same email and
+     audit event (`on: reinstate`), so that a deletion which waited
+     through a suspension is not carried out afterwards. Then, if a
+     recovery is still active, it stops and shows a warning with the
+     recovery's state and the time it stays usable until (`409
+     recovery_active`; the pending deletion has been cancelled by
+     then, the account is still suspended). Unless the member says the
+     recovery is theirs: have them cancel it with the email link, or
+     wait until that time has passed, and press Reinstate again.
+     When it goes on, it ends the member's sessions before it enables
+     sign-in (a half-done suspension cannot hand an old session back).
+     **Reinstate anyway** reinstates with the recovery alive (audit
+     `member.reinstate_with_active_recovery`, written before sign-in
+     is enabled, then `member.reinstate`). The warning can be wrong in
+     one case: a recovery that the member's new app has just completed
+     is shown as `registered` until the API has recorded it.
+     If the cancel of the deletion cannot be made (the cancel function
+     or the vault tables are unreachable), or a step before the status
+     write fails, Reinstate answers an error and the account stays
+     suspended; try again. If it answers an error and the row then
+     says `active`, the reinstatement was made and only its event or
+     the vault's snapshot failed; pressing it again answers "already
+     active". A member who does
+     want to start over asks again and gets a new 24 hours.
+
+  What the member sees while suspended: sign-in is refused; the app
+  and the account page answer "This account is not active" for
+  everything except lock and the two cancels (deletion, recovery),
+  which keep working with the vault's app key, the email link, or a
+  session from before the suspension (it ends within the hour once
+  the suspension's sign-out was made; see "half done" above). The deletion's email link stops
+  working at the original `deletes_at`, held or not; after that the
+  cancel is support's (step 2) or the reinstatement's. The app reads
+  the pending deletion from its status, which a suspended account
+  cannot fetch, so in practice a suspended member cancels with the
+  link or asks support.
+- *"Already being carried out" (`executing`)*: the 24 hours passed
+  with the account active and the job took the deletion. Nothing
+  cancels it: not the member, not **Cancel vault deletion** (`409`),
+  not a suspension, also when the host's `delete` has not been sent
+  yet (`deletion.queued_at` absent: the vault service is paused or no
+  instance was running; the job tries again at every run and does not
+  ask about the account for these). Stopping such a deletion while it
+  is still unqueued is the owner's decision and a change by hand, and
+  it is **not safe without stopping the job first**: the job sends the
+  queue message and only then writes `queued_at`, and it acts on the
+  row as its scan read it, so a run in progress, the next 5-minute
+  run or the daily retry can queue the `delete` after a by-hand update
+  has succeeded. In this order:
+  1. **Pause the vault service** (admin site, **Vault service**, with
+     the reason; "Pausing the vault service"). While it is paused the
+     job queues no `delete` and requests no start. It takes effect in
+     the job within about 30 seconds (its cache). If the service
+     cannot be paused, disable both schedules of the cleanup function
+     instead (the rules `StartOverSchedule` and `CleanupSchedule` of
+     `VettidOrgMemberApiStack`, `aws events disable-rule`), and enable
+     them again in step 5.
+  2. **Wait 6 minutes**: longer than the function's timeout (5
+     minutes) plus the cache, so that a run that started before the
+     pause has ended.
+  3. **Check that nothing was queued.** Read the vault row
+     consistently
+     (`aws dynamodb get-item --consistent-read --table-name vettid-org-vaults --key '{"vault_id":{"S":"<vault_id>"}}'`):
+     `deletion.state` is `executing`, `deletion.queued_at` is absent
+     and `state` is not `deleted`. `queued_at` absent is not quite
+     proof: the job sends first and writes `queued_at` after, so a
+     send whose write then failed leaves no mark on the row. That
+     write failing ends the run with an error, so also check that no
+     invocation of the cleanup function failed since the deletion
+     became `executing` (audit `vault.deletion_executed` has the time
+     and `queued: false`; the function's `Errors` metric, or its log).
+     If the row or the log says it may have been queued, stop here:
+     the vault is being deleted and nothing takes the message back.
+  4. **Remove both marks in one update**, conditional on what step 3
+     saw:
+     `aws dynamodb update-item --table-name vettid-org-vaults --key '{"vault_id":{"S":"<vault_id>"}}' --update-expression "REMOVE deletion, deletion_requested_at" --condition-expression "deletion.deletion_id = :id AND deletion.#s = :ex AND attribute_not_exists(deletion.queued_at)" --expression-attribute-names '{"#s":"state"}' --expression-attribute-values '{":id":{"S":"<deletion_id>"},":ex":{"S":"executing"}}'`.
+     Both must go: with `deletion_requested_at` left, the daily retry
+     deletes the vault. Read the row again and see neither.
+  5. **Resume the vault service** (or enable the two rules), and tell
+     the member; no email is sent for a change by hand.
+- *A canceled account* (the member cancelled the account during the 24
+  hours): the deletion is held in the same way, and the vault goes
+  with the account after its 7 days (the daily run, as for every
+  canceled account; from then on the row has `deletion_requested_at`
+  and the 5-minute run leaves it to the daily retry). An admin's
+  reinstate inside the 7 days cancels the pending deletion as above.
+- *A held deletion without a member* (alarm
+  `vettid-org-start-over-held-no-member`, metric
+  `StartOverHeldNoMember`; three 5-minute runs in a row): a vault has
+  a pending deletion past its time and no member row. The 5-minute run
+  holds it and never carries a start-over out because a row is
+  missing. It happens when an account's own deletion removed the row
+  and then failed before it reached the vault (or, before admin
+  **Delete** refused while a vault exists, when an admin deleted a
+  member who had one). The daily run (07:00 UTC) marks such a vault
+  (`orphan_seen_at`, alarm `vettid-org-orphan-vaults-seen`) and, if
+  the member row is still missing 7 days after the mark and no
+  operator holds it, asks it to delete itself as for a canceled
+  account; from then on the row has `deletion_requested_at`, the
+  5-minute run stops counting it, and this alarm returns to OK. Until
+  then it stays in ALARM. See *Vaults without a member* below for
+  finding out why, and for keeping the vault.
+- *Vaults without a member* (MEMBER-API 2.6.5; metrics from the daily
+  run, namespace `VettID/MemberApi`). The daily run scans the vaults
+  table for rows with a `user_guid`, not `deleted` and without
+  `deletion_requested_at`, and reads each owner's member row
+  consistently. Log line
+  `{"vaultOrphans":{marked, waiting, cleared, requested, operator_held, held, read_errors, failures}}`.
+  - **First sight** (alarm `vettid-org-orphan-vaults-seen`, metric
+    `OrphanVaultsSeen`; log `orphaned vaults: a vault without a member
+    row, marked` with `vault_id` and `user_guid`): the row gets
+    `orphan_seen_at` (epoch seconds; never moved by a later run). This
+    is the warning: nothing is deleted yet. Find out why the member is
+    gone: the audit log by `subject` = the `user_guid`
+    (`member.delete` by an admin, `member.delete_after_cancel` by the
+    job). The first run after 2.6.5 was deployed marks every vault
+    already without a member, including those held under
+    `StartOverHeldNoMember` from earlier admin Deletes, and deletes
+    nothing for 7 days.
+  - **Waiting** (metric `OrphanVaultsWaiting`, no alarm): marked, the
+    7 days not over.
+  - **The member row is back** (restored): the next run removes
+    `orphan_seen_at` (`cleared`); nothing else. Only a run that sees
+    the row clears the mark: a member row restored and lost again
+    between two 07:00 runs keeps its first mark, and its 7 days are not
+    restarted.
+  - **Deleted** (alarm `vettid-org-orphan-vault-deletions`, metric
+    `OrphanVaultDeletions`): 7 days or more after the mark of every
+    one of that member's vaults, the member row still missing and no
+    hold, the run does what the account deletion does for a canceled
+    account: the host's `delete` to each vault not yet deleted, a
+    never-sealed row and the pointer row deleted; audit
+    `vault.orphan_deletion_requested` (subject: the `user_guid`,
+    detail: `vault_ids`, `orphan_seen_at`). This cannot be undone.
+  - **To keep a vault without a member** (the row was removed by
+    mistake, or the vault is wanted for an investigation): put it on
+    hold before the 7 days are over. In the vault account:
+    `aws dynamodb update-item --table-name vettid-org-vaults --key '{"vault_id":{"S":"<vault_id>"}}' --update-expression "SET orphan_hold = :t" --condition-expression "attribute_exists(vault_id) AND attribute_not_exists(deletion_requested_at)" --expression-attribute-values '{":t":{"BOOL":true}}'`.
+    Any `orphan_hold` attribute counts as a hold, whatever its type or
+    value (a value other than the boolean true is logged as a warning);
+    to end it, remove the attribute.
+    A hold on any one of a member's vaults keeps all of that member's
+    vaults out of the scan: none is marked or deleted (metric
+    `OrphanVaultsOperatorHeld`, no alarm). If the vault also has a
+    pending start-over, remove that record too, or
+    `StartOverHeldNoMember` stays in ALARM
+    (`--update-expression "REMOVE deletion" --condition-expression "deletion.#s = :p"`
+    with `#s` = `state`, `:p` = `pending`). To end the hold:
+    `--update-expression "REMOVE orphan_hold" --condition-expression "attribute_exists(orphan_hold)"`;
+    a mark older than 7 days then leads to the deletion at the next
+    run, so restore the member row first if the vault is to stay.
+    Better still, restore the member row: the mark is then cleared.
+    The job never writes `orphan_hold`; the vault account's table
+    policy does not even let it.
+  - **Held** (alarm `vettid-org-orphan-vaults-held`, metric
+    `OrphanVaultsHeld`):
+    - `orphaned vaults: held, more members without a row than one run
+      accepts`: more than 5 members without a row, or more than 15 %
+      of the owners the run read (one is always allowed). The run
+      then marks and asks none of them, and does so at every daily
+      run for as long as that is the case. That many at once is more
+      likely a wrong or damaged members table (above all one restored
+      from an older backup, which lacks every member who joined since)
+      than stopped deletions. Check the members table (point-in-time
+      recovery, the stack's `TABLE_MEMBERS`) first. When the members
+      are really gone, the vaults can be asked one at a time by hand
+      (below), or `ORPHAN_LIMIT` / `ORPHAN_SHARE` in
+      `lambda/jobs/cleanup.ts` raised for one deploy; the 7 days from
+      each mark still apply.
+    - `orphaned vaults: a member row could not be read` (with the
+      error name): as for `StartOverHeldReadError` above; tried again
+      the next day.
+    - `orphaned vaults: not all marked or asked to delete themselves`
+      or `a mark could not be cleared`: a failed table or queue call;
+      tried again the next day.
+  - To ask one vault by hand (instead of waiting), set
+    `deletion_requested_at` on its row to a time more than an hour ago
+    (`aws dynamodb update-item --table-name vettid-org-vaults --key '{"vault_id":{"S":"<vault_id>"}}' --update-expression "SET deletion_requested_at = :t" --condition-expression "attribute_exists(vault_id) AND attribute_not_exists(deletion_requested_at)" --expression-attribute-values '{":t":{"N":"<epoch seconds, an hour or more ago>"}}'`);
+    the daily retry then asks it as for a canceled account.
+  - Deploying: see **Deploy order for 2.6.5** below.
+- *Held because the member row cannot be read* (alarm
+  `vettid-org-start-over-held-read-error`, metric
+  `StartOverHeldReadError`; three runs in a row): no due deletion is
+  carried out while this lasts, and none is lost: each is tried again
+  every 5 minutes. The cleanup function's log has
+  `start-over held: the member row could not be read` with the error
+  name. `AccessDeniedException`: the function's role lost
+  `dynamodb:GetItem` on the members table (`VettidOrgMemberApiStack`
+  not deployed, or deployed without it). Anything else is the table.
+- *Held for a suspended or canceled account* is not alarmed: it is
+  what a suspension is for, and a reinstatement ends it by cancelling
+  the deletion. `StartOverHeldNotActive` (namespace `VettID/MemberApi`)
+  shows how many are held at each run.
 - *Stuck in `executing`*: as for an account deletion: look at
   `deletion_requested_at`, the release's routability and the host logs;
   the daily retry keeps trying and logs `vault deletion pending` after 30
   days.
+
+**Deploy order for the hold and the admin cancel.**
+`VettidOrgMemberApiStack` first: the cleanup job's read of the members
+table, the two alarms, and a second function, `StartOverCancel`, which
+runs only the cancel of a member's pending deletion under the cleanup
+job's role; its ARN is published as SSM
+`/vettid-org/<stage>/member-api/start-over-cancel-fn-arn`. Then
+`VettidOrgAdminApiStack` (it reads that parameter, so its deploy fails
+until the first one is done; the people function may invoke that
+function, not the cleanup job), then the admin site. Nothing changes
+in the vault account, and no existing function, log group or table is
+replaced. Between the two deploys the admin API is the old one and
+behaves as before.
+
+**Deploy order for 2.6.5 (vaults without a member, admin Delete
+refused while a vault exists).** `VettidOrgVaultStack` first (vault
+account: the vaults table's resource policy gains the cleanup job's
+`orphan_seen_at` attribute and the new role
+`vettid-org-member-member-vaults`, Query on the table and its
+`user-index` only). Then `VettidOrgMemberApiStack`: the orphan step
+and its three alarms, and a third function, `MemberVaults`, under that
+role of its own; its ARN is published as SSM
+`/vettid-org/<stage>/member-api/member-vaults-fn-arn`. Then
+`VettidOrgAdminApiStack` (it reads that parameter, so its deploy fails
+until the member API's is done; the people function may invoke that
+function), then the admin site. In the other order the job's first
+mark is refused by the vault account (logged, `OrphanVaultsHeld`) and
+nothing is deleted. Between the member API's and the admin API's
+deploys, Delete behaves as before. The first daily run after the
+member API's deploy only marks; nothing is deleted for 7 days.
 
 **Deploy order for 2.1.0.** `VettidOrgVaultStack` (vault account: the
 host's `credential_backup` grant and the API roles' `deletion` attribute in
@@ -2059,6 +2436,14 @@ How events get there:
   Identity Center) land there, and the Workloads SCP denies every other
   region in the member accounts. (Calls attempted in other regions are
   still in the organization trail, just not alerted.)
+
+A rule's event pattern may be at most 2,048 characters as compact JSON
+(EventBridge refuses a longer one and the stack rolls back, as the first
+deploy of the vault account rules did). `test/event-pattern-size.test.ts`
+holds every rule to 1,800. A pattern that needs two "or" lists at once
+grows as their product when written as one list: put them at different
+levels of the pattern, as `VaultHostProfileLaunch` does (the profile's
+place under `detail`, the caller under `userIdentity`).
 
 The rules (all in VettidOrgAuditStack; "outside a deploy" = not by
 CloudFormation's CDK execution role `cdk-*-cfn-exec-role-*`, the same
@@ -2846,7 +3231,9 @@ operator does, and does not have to do.
   `vettid-org-members` (a pending member may be mid-verification). It can never delete the `vettid.org` domain
   identity (explicit IAM deny).
 - Every confirmation emails **admin@vettid.org** from `no-reply@vettid.org`
-  (SES domain identity, DKIM in the zone). The notice says that somebody
+  (SES domain identity, DKIM in the zone). That sender is fixed in
+  `VettidOrgSignupStack`, which is part of the production app only: a
+  stage has no mailing list. The notice says that somebody
   confirmed, how and when; it does **not** carry the address (that mailbox is
   at another provider, outside the list's storage and its deletion). To see
   who is on the list, export it (below).

@@ -1,8 +1,145 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.6.1
+version: 2.6.5
 changelog:
+  - 2.6.5 (2026-10-14; as built; wording for the owner's approval).
+    No member API route, request or response shape changes.
+    **The daily run finds vaults whose member row is gone** ("Vault
+    deletion", Vaults without a member): a vault row with an owner, not
+    `deleted` and not yet asked to delete itself, whose member row a
+    consistent read does not find, is first only marked
+    (`orphan_seen_at`, never moved; metric `OrphanVaultsSeen`,
+    alarmed). If the member row is still missing 7 days after the mark
+    of each of that member's vaults, and no operator has put one of
+    them on hold (`orphan_hold`, set by hand), they are asked to delete
+    themselves exactly as for a canceled account (the host's `delete`,
+    a never-sealed row and the pointer row deleted), audited
+    `vault.orphan_deletion_requested` and alarmed
+    (`OrphanVaultDeletions`). A member row that is back clears the
+    mark. An account deletion that stopped after the member row and
+    before the vaults is therefore finished 7 days later. On doubt
+    nothing is written: an unreadable member row leaves its vaults for
+    the next run, and a run that finds more than 5 members without a
+    row, or more than 15 % of the owners it read, marks and asks none
+    of them. New metrics `OrphanVaultsSeen`, `OrphanVaultsWaiting`,
+    `OrphanVaultDeletions`, `OrphanVaultsOperatorHeld`,
+    `OrphanVaultsHeld` (namespace `VettID/MemberApi`); alarms
+    `vettid-org-orphan-vaults-seen`, `-orphan-vault-deletions`,
+    `-orphan-vaults-held`; new log line `{"vaultOrphans": …}`. **A
+    start-over held for a missing member row** ("Vault deletion: start
+    over", Held) is still never carried out by the 5-minute run; its
+    vault now goes through the same marking and 7 days, unless an
+    operator holds it. The first daily run after the deploy only
+    marks. **A canceled account's SES identity goes with the
+    account** ("Retention"): under the 14-day reclaim's rule (kept if
+    the mailing list uses the address, if the request found the
+    identity already there, or for an address under vettid.org), and
+    only when the account's own email marker went with the row and the
+    sign-in user under the address was its own or none;
+    `member.delete_after_cancel` gains `identity: "deleted" | "kept"`
+    in its detail, and `ses_identity` can appear in its `incomplete`.
+    **ADMIN-API: Delete refuses while the member has a vault** that is
+    not deleted (`409 vault_exists`, nothing changed), so an admin's
+    Delete no longer leaves a vault without a member. IAM: a third
+    function on the cleanup module, `MemberVaults`, runs only the task
+    `member_vaults` under a fixed-name role of its own
+    (`vettid-org-member-member-vaults`) that may only Query the vaults
+    table and its `user-index`; the admin people function may invoke
+    it (its ARN in SSM `member-api/member-vaults-fn-arn`). The cleanup
+    job may also write `orphan_seen_at` on a vault row. Both are in the
+    vault account's table policy too, so `VettidOrgVaultStack` is
+    deployed first (RUNBOOK "Deploy order for 2.6.5"). No existing
+    log line, metric or alarm is renamed or removed
+  - 2.6.4 (2026-10-13; editorial errata, as built; approved by the
+    owner 2026-10-13). No route, answer or email changes: the text
+    is corrected to what the API does.
+    **The recovery's cancel link is not single-use** ("Vault
+    recovery", Request): its token is not used up, it stays usable
+    until the recovery's `expires_at`, and a second use answers
+    `{cancelled: false}`, as Cancel already said. **Nor is the
+    deletion's cancel link** ("Vault deletion: start over", Request):
+    it stays usable until `deletes_at`, a use after the deletion was
+    cancelled answers `{cancelled: false}`, and from `deletes_at` it
+    answers `404`. The withdrawal link of "Withdrawing a request" is
+    used up by its one use, as that section says, and is not changed.
+    **The sender of the request emails is `no-reply@<zone>`** ("Request
+    emails"), the stage's own sending domain: `no-reply@vettid.org` in
+    production and `no-reply@staging.vettid.org` on staging; the text
+    named production's address only
+  - 2.6.3 (2026-10-13; editorial, erratum as built; approved by the
+    owner 2026-10-13). No route, answer or email changes: the text
+    is corrected to what the API does.
+    **`POST /api/vault/recovery/cancel` answers `404 not_found` for a
+    `recovery_id` that is not the current recovery of the member's
+    vault** (no vault, a deleted vault, a vault with no recovery, or
+    another id, such as that of a recovery a newer one has replaced);
+    the route table said `200 {cancelled}` only. `{cancelled: false}`
+    is the answer only for the vault's current recovery once it has
+    ended. **Every answer of the two cancel routes is listed**
+    (`200` with `true` or `false`, `400`, `401`, `403`, `404`, `409`,
+    `429`), for the session and for the email link. **The email link
+    is not uniform**: a token the API does not hold, one past the
+    recovery's `expires_at` and one of a replaced recovery answer
+    `404`, unlike the withdrawal link of "Withdrawing a request",
+    which answers the same for every token. See "Vault recovery"
+    (the route table, Cancel)
+  - 2.6.2 (2026-10-13; as built in vettid.org #251 and #254; approved
+    by the owner 2026-10-13; each clause below is separate and names
+    what it follows).
+    *What is named by the address, as built in vettid.org #251:* no
+    member API route, answer or email changes. "Retention"
+    gains the rule "What is named by the address is deleted only by
+    its owner" (the email marker and the Cognito user go only if they
+    carry the id of the row being deleted, in every deletion) and
+    "The daily sweeps" (a canceled account and an unverified request:
+    row and marker in one transaction; what could not be removed after
+    the row is named in the audit event's `incomplete` and alarmed).
+    Audit events of a deletion may carry `sign_in_user: "left"`,
+    `email_marker: "left"` and `incomplete: [...]` in their detail.
+    ADMIN-API: `DELETE /admin/members/{user_guid}` answers `404` when
+    the row was removed by something else after the call read it.
+    *A pending vault deletion and the account's status, as built in
+    vettid.org #254 (ADMIN-API "People"):*
+    **A pending "delete my vault and start over" is carried out only for
+    an active account**: the cleanup job reads the member's row before it
+    sets `executing`, and for an account that is suspended or canceled,
+    or whose row is missing or unreadable, the deletion stays `pending`,
+    neither carried out nor cancelled, whatever the time passed. **What
+    is held is counted and two reasons are alarmed**: metrics
+    `StartOverHeldNotActive`, `StartOverHeldNoMember`,
+    `StartOverHeldReadError` at every run; alarms on the last two after
+    three runs in a row. A deletion whose member row is gone is held for
+    an operator and never carried out by the job.
+    **Reinstating an account cancels its pending deletion** first, and
+    the member is emailed; a member who wants the deletion asks again
+    for a new 24 hours. **Reinstating warns about an active recovery**:
+    a recovery is blocked, not stopped, while the account is not active,
+    so ADMIN-API `reinstate` answers `409 recovery_active` until the
+    admin confirms; it does not cancel the recovery.
+    **The cancels work whatever the account's status**:
+    `POST /api/vault/deletion/cancel` (session or app key) and
+    `POST /api/vault/recovery/cancel` (session) no longer answer `403`
+    to a suspended or canceled account, as `lock` never did; the two
+    email links already worked. No other vault route is open to an
+    account that is not active. **An admin can cancel a member's pending
+    deletion**: ADMIN-API
+    `POST /admin/members/{user_guid}/vault/deletion/cancel`
+    (`{cancelled}`; `409` once `executing`), audited
+    `member.vault_deletion_cancel`, the member emailed. **Suspend writes
+    the status first**, so the hold begins with that write; a repeat
+    finishes a suspension that failed half-way (ADMIN-API: `suspend` on
+    a suspended account answers `200`, not `409` as before), and
+    **Reinstate ends the member's sessions** before it enables sign-in.
+    **No member API request or response shape changes**, and no
+    existing audit event, log line, metric or alarm changes. A canceled
+    account's vaults are deleted with the account after its 7 days, as
+    before. IAM: the cleanup job's role may `GetItem` on the members
+    table; a second function, `StartOverCancel`, runs only the cancel
+    under that role; the admin people function may invoke that function
+    (its ARN in SSM `member-api/start-over-cancel-fn-arn`) and not the
+    cleanup job; nothing changes in the vault account. See "Retention",
+    "Access", "Vault recovery" (Access), "Vault deletion: start over"
   - 2.6.1 (2026-10-13; editorial, errata as built; each clause below
     is separate and names what it follows, so that further clauses can
     be added).
@@ -427,9 +564,66 @@ and nothing is done by hand.
 | A request whose address is never verified | 14 days from the request | the daily cleanup job (as before; since 2.6.0 it leaves an SES identity the request did not create) |
 | A verified request waiting for review | no limit (until approved, declined or withdrawn) | — |
 | A declined request: the row, its reason, its marker | **30 days** from the decline | the daily cleanup job (07:00 UTC), removed exactly as a withdrawn one |
+| A canceled account: the row, its marker, the sign-in user, the subscription, the vaults, and (2.6.5) the address's SES identity | **7 days** from the cancellation | the daily cleanup job; the SES identity under the 14-day reclaim's rule (below) |
 | A withdrawn request | names and decline reason: at once; the rest at the cleanup job's next run (every 15 minutes) | the cleanup job |
 | A person's email address in the audit log | **90 days** from the event | DynamoDB TTL on the address record |
 | The audit events themselves | kept | — |
+
+**What is named by the address is deleted only by its owner (2.6.2).** The
+`email:<addr>` marker and the Cognito user are keyed by the address,
+not by the request or account, and an address can be requested again
+as soon as its marker is gone. Every deletion (an admin's Delete, the
+14-day reclaim, the deletion after a cancellation, the removal of a
+withdrawn or declined request) therefore deletes the marker only if
+its `member_guid` is the row being deleted (or the marker is already
+gone), and the Cognito user only if its `custom:user_guid` is. One
+that names another id belongs to a newer request or account for the
+address: it is left, and the row still goes. The function that did
+it (the cleanup job, or the admin API for an admin's Delete) logs a
+warning by id, never the address, and the deletion's audit event says
+so in its detail: `sign_in_user: "left"`, `email_marker: "left"`
+(`member.delete`, `member.delete_after_cancel`,
+`request.reclaim_unverified`, `request.removed`,
+`request.removal_incomplete`). The 14-day reclaim then leaves the SES
+identity too, since the newer request's verification runs on it.
+Cognito has no conditional delete, so its check is a read just before
+the delete.
+
+**The daily sweeps (a canceled account past its date, the 14-day
+reclaim) (2.6.2).** The row is deleted first, under its guard (still
+`canceled` and past `delete_after`; still `requested` and unverified),
+in one transaction with its own marker. First, because the guard is
+what protects a person who changed their mind: an account an admin
+reinstated, or a request verified, after the job's query is not
+touched at all. Together with the marker, so that an address is never
+left reserved by a marker with no row. What is removed after the row
+(a canceled account's sign-in user, subscription, vaults and, 2.6.5,
+SES identity; a request's SES identity) cannot be retried from the
+row, so each step is tried on its own, a failure skips neither the
+next step nor the next row, and the audit event names what was not
+removed (`incomplete: ["sign_in_user" | "subscription" | "vaults" |
+"ses_identity", …]`), counted as `RequestRemovalAbandoned` for the
+operator to reconcile. The vaults are found again by the next daily
+run ("Vault deletion", Vaults without a member, 2.6.5).
+
+**A canceled account's SES identity (2.6.5).** When the daily run
+deletes an account 7 days after its cancellation, the address's SES
+identity goes under the same rule as the 14-day reclaim's: it is kept
+if the mailing list uses the address, if the request found the
+identity already there (`owns_identity: false`), or if the address is
+one of the project's own (under vettid.org); otherwise it is deleted
+(an account from before 2.6.0, whose row has no flag, had its
+identity created by its request). It is deleted only when the
+account's own email marker went with the row and the sign-in user
+under the address was this account's own or there was none: a marker
+or a user that names another id (or a user that could not be
+checked) means the address may be in use again, and the identity is
+left. The audit event `member.delete_after_cancel` says which:
+`identity: "deleted" | "kept"`. A row whose transaction fails for another
+reason stays, is counted as `RequestRemovalFailures`, and is tried
+again at the next run. (Unlike a withdrawn or declined request, which
+cannot go back to being wanted: there everything outside the table
+goes first and the rows last, retried for 7 days.)
 
 **Declined requests (owner decision of 2026-10-12: "declines should be
 kept for 30 days").** `POST /admin/requests/{id}/reject` records
@@ -496,7 +690,9 @@ events are kept. What changes is where a person's address is:
 
 ### Request emails (2.6.0)
 
-All from `VettID <no-reply@vettid.org>`, plain text, and with no
+All from `VettID <no-reply@<zone>>`, where `<zone>` is the stage's own
+DNS zone and sending domain (`no-reply@vettid.org` in production,
+`no-reply@staging.vettid.org` on staging), plain text, and with no
 member-supplied text (names) in them.
 
 - **Amazon's verification email** (SES, as before): sent by AWS when
@@ -797,14 +993,33 @@ The vault does not depend on subscription or voting rights.
 - `lock`, `status` and `requests/{id}` stay available for an existing vault
   whatever the account state (`registered`, terms out of date), because
   locking only reduces exposure.
-- **Cancelling the account** blocks every vault route except `lock` at once
-  (`403 forbidden`); `lock` keeps working, with the portal's session or
-  the app key, until the vault rows are deleted.
+- **Cancelling the account** blocks every vault route except `lock` and
+  the two cancels (`POST /api/vault/deletion/cancel`,
+  `POST /api/vault/recovery/cancel`) at once (`403 forbidden`); `lock`
+  and the cancels keep working, with the portal's session or (lock, the
+  deletion's cancel) the app key, until the vault rows are deleted.
   After the 7-day grace period the daily cleanup job deletes the member's
   vault rows (every `vault_id` they had, and the pointer row). Deleting the
   stored objects under `vaults/<vault_id>/` (encrypted state and sealed
   headers) is a TODO in the cleanup job until the vault data bucket exists
   (VAULT-PLAN V5); nothing is stored there before then.
+- **A suspended account** (2.6.2) is treated the same way: every vault
+  route answers `403 forbidden` except `lock` and the two cancels. A
+  suspended account cannot sign in, so a session is one from before the
+  suspension. It ends within the hour once the suspension has ended
+  the sessions; if that step of the suspension failed (ADMIN-API,
+  `suspend`), the session keeps renewing itself until the suspension is
+  repeated or the account is reinstated, which ends it, and in that
+  time it reaches only `lock` and the two cancels. The app key and the
+  email links need no session. Cancelling only keeps the vault as it is,
+  and suspending is what support does when an account looks taken over:
+  it must not take away the member's way to stop a deletion or a
+  recovery that someone else asked for. The other checks on the two
+  cancels are unchanged and are now the only ones: the session's
+  address must be the member row's, the vault must be the member's own
+  (the pointer row and the vault row's owner), and an app request must
+  be signed by the vault's `app_key` (not a pending or a claim key).
+  No other vault route is open to an account that is not active.
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
@@ -1309,8 +1524,8 @@ the expiry itself.
 |---|---|---|---|
 | POST | `/api/vault/recovery` | `{browser_key}` | `202 {recovery_id, available_at, expires_at}` |
 | GET | `/api/vault/recovery` | — | `{recovery: Recovery \| null}` |
-| POST | `/api/vault/recovery/cancel` | `{recovery_id}` | `200 {cancelled: boolean}` |
-| POST | `/api/vault/recovery/cancel-link` | `{token}` (no session) | `200 {cancelled: boolean}` |
+| POST | `/api/vault/recovery/cancel` | `{recovery_id}` | `200 {cancelled: boolean}`; `404 not_found` when `recovery_id` is not the current recovery of the member's vault (Cancel, below) |
+| POST | `/api/vault/recovery/cancel-link` | `{token}` (no session) | `200 {cancelled: boolean}`; `404 not_found` for a token that is unknown, past the recovery's `expires_at` or of a replaced recovery (Cancel, below) |
 | POST | `/api/vault/recovery/claim` | `{vault_id, recovery_id, app_key}` (scanned; 2.0.0) or `{locator, app_key}` (typed; 2.4.0); app, signed by `app_key` | `200 {user_guid, email_hint, vault_id, recovery_id}` (the two identifiers since 2.4.0) |
 | POST | `/api/vault/recovery/register` | `{vault_id, request_id, instance_id, etk_kid, envelope}` (app, signed by a claim key; 2.0.0) | `202 {vault_id, request_id}`; poll `GET /api/vault/requests/{id}` |
 
@@ -1330,10 +1545,21 @@ interface Recovery {
 }
 ```
 
-- **Access.** Request, status and cancel are the portal's and need a
-  session of an active `member` with the current terms. Claim and register
-  (2.0.0) are the new app's: signed, no session, an active account. The
-  cancel link needs no session, only its token.
+- **Access.** Request and status are the portal's and need a session of
+  an active `member` with the current terms. Cancel is the portal's and
+  needs a session of the account holder, whatever the account's state or
+  status (2.6.2: a suspended or canceled account can still cancel;
+  "Access"). Claim and register (2.0.0) are the new app's: signed, no
+  session, an active account. The cancel link needs no session, only its
+  token, and works whatever the account's status.
+- **An account that is not active (2.6.2).** A recovery is then
+  blocked, not stopped: the status (and with it the code) answers
+  `403`, and so do claim and register, but `available_at` and
+  `expires_at` do not move. A recovery that is still before
+  `expires_at` when the account becomes active again is usable again at
+  once. The admin API therefore reinstates an account with an active
+  recovery only after the admin has confirmed it (ADMIN-API,
+  `reinstate`, `409 recovery_active`); it does not cancel the recovery.
 - **Claim** (2.0.0). Only while the recovery is `available` (`409
   recovery_not_available`; `404 not_found` when `vault_id` and
   `recovery_id` do not name the vault's current recovery). Adds the key
@@ -1506,10 +1732,12 @@ interface Recovery {
   (with `browser_key`) to the leaseholder, or to a live instance of the
   vault's `sealed_release` (`503 release_starting` as for the enclave
   route). It emails the member: what happened, when the code becomes
-  available, and a single-use cancel link
+  available, and a cancel link
   (`https://account.vettid.org/vault/recovery/cancel#t=<token>`; the API
   stores only the token's SHA-256, in a request-table row that expires
-  with the recovery).
+  with the recovery). The link is not used up by a cancel (2.6.4, as
+  built): it stays usable until the recovery's `expires_at`, and a
+  second use answers `{cancelled: false}` (Cancel, below).
 - **Status.** Without an enrolled vault (none, `enrolling` or deleted)
   the answer is `{recovery: null}`, not `404`; likewise for a vault that
   never had a recovery. `available` from `available_at` to `expires_at` while not
@@ -1569,6 +1797,49 @@ interface Recovery {
   no-op answered `{cancelled: false}`. The link stays valid until the
   recovery's `expires_at`, so its second use answers `false`; a link of a
   recovery that a newer one has replaced is `404`.
+  **The answers of the session route** (2.6.3, as built).
+  `recovery_id` must name the current recovery of the member's vault,
+  which is the one recorded on the vault's row, in whatever state.
+  - `200 {cancelled: true}`: it is the current recovery, it was
+    `pending`, `available` or `registered` before its `expires_at`,
+    and this call cancelled it.
+  - `200 {cancelled: false}`: it is the current recovery and it has
+    ended: it was cancelled already, it is `unavailable` or
+    `completed`, or it has passed its `expires_at`. Nothing is
+    enqueued or mailed, and no cancel is audited.
+  - `404 not_found`: it is not the current recovery. The member has
+    no vault, the vault is deleted, the vault has no recovery, or the
+    vault's recovery has another id (a recovery that a newer one has
+    replaced, or an id that was never the member's). The answer is
+    the same in each case.
+  - `409 conflict`: the recovery was replaced between the read and
+    the write. A repeat then answers `404`.
+  - `400 bad_request`: `recovery_id` is not a ULID. `401`: no
+    session. `403 forbidden`: the session's account row is gone or
+    carries another email address; never for the account's status
+    or its terms alone (Access, above). `429 rate_limited`: the
+    limit below.
+  **The answers of the link route** (2.6.3, as built).
+  - `200 {cancelled: true}`: the token's recovery is still the
+    vault's current one and was active, and this call cancelled it.
+  - `200 {cancelled: false}`: the token's recovery is still the
+    vault's current one and is before its `expires_at`, but has
+    ended (cancelled already, as on the link's second use;
+    `unavailable`; `completed`).
+  - `404 not_found`: a token the API does not hold; a token whose
+    recovery has passed its `expires_at` (the token's row expires
+    with the recovery, so the link never answers `false` for an
+    expiry); a token of a recovery that a newer one has replaced; or
+    a token whose member or vault row is gone. The body is the same
+    in each case.
+  - `409 conflict`: as for the session route. `400 bad_request`: the
+    token is not 43 base64url characters. `429 rate_limited`: the
+    limit below, counted before the token is looked at.
+  The link works whatever the account's status. Its answers are not
+  uniform, unlike the withdrawal link's ("Withdrawing a request"):
+  `404` and `200` tell a token the API holds from one it does not.
+  The token is 256 random bits, and the route is limited per source
+  network.
 - **Register.** Like unlock (envelope exactly 13,444 bytes, routing,
   `request_id` once), and only while the recovery is `available`
   (`409 recovery_not_available`), signed by one of its claim keys, which
@@ -1822,6 +2093,49 @@ Its own audit log goes with it, so the member is told by email.
   instance erases its stored objects. Rows of vaults that never reach
   `deleted` within 30 days are logged for operations, not dropped
   silently.
+- **Vaults without a member (2.6.5).** The member row goes first, and
+  the vaults are asked after it; a run that stops in between would
+  leave vaults that nothing names any more. So each daily run also
+  scans the vault rows that have an owner, are not `deleted` and have
+  no `deletion_requested_at`, and reads each owner's member row (a
+  consistent read). Nothing irreversible happens at first sight:
+  - A vault whose member row is missing gets `orphan_seen_at` (a
+    conditional write; a mark is never moved), counted as
+    `OrphanVaultsSeen` and alarmed, so that an operator hears of it
+    while the vault still exists.
+  - When the member row is still missing 7 days or more after the
+    mark of every one of that member's vaults, the run does what the
+    account deletion does: each vault is asked to delete itself as
+    above, a never-sealed row and the pointer row are deleted, and the
+    audit event `vault.orphan_deletion_requested` (actor `system`,
+    subject the `user_guid`, detail `vault_ids`, `orphan_seen_at`) is
+    written; from then on the daily retry has them.
+    `OrphanVaultDeletions` counts these and is alarmed.
+  - A member row that is back removes the mark.
+  - An operator can keep a vault without a member by setting
+    `orphan_hold: true` on its row by hand (RUNBOOK "Vaults without a
+    member"); a hold on any of a member's vaults keeps all of them out,
+    marked or not (`OrphanVaultsOperatorHeld`). Any `orphan_hold`
+    attribute counts as a hold, whatever its type or value (one that is
+    not the boolean true is logged as a warning). The job never writes
+    it.
+  On doubt nothing is written: a member row that cannot be read leaves
+  its vaults for the next run; and a run that finds more members
+  without a row than 5, or than 15 % of the owners it read (one is
+  always allowed), marks and asks none of them, at every run until
+  that is no longer so. That protects against a wrong or damaged
+  members table, above all one restored from an older backup, in which
+  every member who joined since would look gone; the 7 days cover
+  what the limits miss. `OrphanVaultsHeld` counts what was held,
+  unreadable or failed, and is alarmed. All five metrics are written at
+  every daily run (namespace `VettID/MemberApi`, no dimensions); the
+  three alarms (`vettid-org-orphan-vaults-seen`,
+  `-orphan-vault-deletions`, `-orphan-vaults-held`) go to the
+  security-alerts topic in production. The first daily run after 2.6.5
+  is deployed only marks the vaults already without a member, and
+  deletes nothing for 7 days. An admin's Delete refuses while the
+  member has a vault (ADMIN-API "People"), so it does not leave one
+  behind.
 - **Status.** A `deleted` vault row reads as no vault (`{vault: null}`).
 - **Stored versions.** The data bucket keeps noncurrent versions for 7
   days (VAULT-RELEASES §8.2, §11.4): the erased objects, still sealed,
@@ -1844,7 +2158,7 @@ vault at once (owner decision, 2026-10-06).
 |---|---|---|---|
 | POST | `/api/vault/deletion` | `{confirm: "delete my vault"}` | `202 {deletion_id, requested_at, deletes_at}` |
 | GET | `/api/vault/deletion` | — | `{deletion: Deletion \| null}` |
-| POST | `/api/vault/deletion/cancel` | `{deletion_id}` (portal session, or the vault's app signed by its `app_key`) | `200 {cancelled: boolean}` |
+| POST | `/api/vault/deletion/cancel` | `{deletion_id}` (portal session, or the vault's app signed by its `app_key`; 2.6.2: whatever the account's status) | `200 {cancelled: boolean}` |
 | POST | `/api/vault/deletion/cancel-link` | `{token}` (no session) | `200 {cancelled: boolean}` |
 
 ```ts
@@ -1865,25 +2179,104 @@ interface Deletion {
   {deletion_id, state: pending, requested_at, deletes_at}` on the vault
   row and emails the member: the vault and everything in it will be
   deleted at `deletes_at` and cannot be restored; how to cancel; a
-  single-use cancel link
+  cancel link
   (`https://account.vettid.org/vault/deletion/cancel#t=<token>`, stored
   as its SHA-256 in a request-table row that expires at `deletes_at`).
+  The link is not used up by a cancel (2.6.4, as built): it stays
+  usable until `deletes_at`, a use after the deletion was cancelled
+  answers `{cancelled: false}`, and from `deletes_at` it answers `404`.
   Nothing is enqueued and the vault is not locked.
 - **Cancel** (session, link or app): conditional on `state = pending`;
   removes the record, emails the member, answers `{cancelled: true}`;
   otherwise `{cancelled: false}`. The app sees `deletion` (with its
   `deletion_id`, 2.1.1) in `GET /api/vault/status` and offers the
-  cancel.
-- **Execution.** The cleanup job (every 5 minutes) takes each `pending`
-  deletion past `deletes_at`, sets `executing` (conditional) and
-  enqueues the operation `delete` exactly as for an account
-  cancellation (below; `deletion_requested_at`, retries, the 30-day
-  log). The `vault_deleted` notice emails the member and deletes the
-  rows; the portal then offers **Set up your vault** (a new setup code).
+  cancel. 2.6.2: all three work whatever the account's status
+  (suspended, canceled), because a cancel only keeps the vault as it is
+  ("Access"). `GET /api/vault/deletion` and `status` still need an
+  active account, so a suspended member's app or page cannot read the
+  `deletion_id` after the suspension: in practice a suspended member
+  uses the email link, which stops working at `deletes_at` as before, or
+  asks support (ADMIN-API,
+  `POST /admin/members/{user_guid}/vault/deletion/cancel`).
+- **Execution.** The cleanup job (every 5 minutes) looks at each
+  `pending` deletion past `deletes_at` and does one of three things.
+  1. **Carried out**, if the member's account is active: it sets
+     `executing` (conditional) and enqueues the operation `delete`
+     exactly as for an account cancellation (below;
+     `deletion_requested_at`, retries, the 30-day log). The
+     `vault_deleted` notice emails the member and deletes the rows; the
+     portal then offers **Set up your vault** (a new setup code).
+  2. **Held**, if the account is not active: the deletion stays
+     `pending`, neither carried out nor cancelled, however long ago
+     `deletes_at` was (below).
+  3. **Left to the daily retry**, if the vault row already has
+     `deletion_requested_at`: the account's own deletion has asked this
+     vault to delete itself (the member row is gone by then). The
+     5-minute run neither holds it nor sets `executing`; the vault is
+     deleted by the account deletion's retries.
+- **Held: only an active account's deletion is carried out (2.6.2).**
+  Before it sets `executing` the job reads the member's row (a
+  consistent read) and holds the deletion for one of three reasons,
+  which it writes as metrics at every run (namespace `VettID/MemberApi`,
+  no dimensions): `StartOverHeldNotActive` (the account is suspended or
+  canceled, or the row is not an account), `StartOverHeldNoMember` (no
+  member row, or no owner on the vault row) and
+  `StartOverHeldReadError` (the row could not be read). The 24 hours
+  exist so that the member can cancel, and suspending an account is
+  what support does when it looks taken over. On doubt nothing is
+  deleted. `StartOverHeldNoMember` and `StartOverHeldReadError` are
+  alarmed after three runs in a row (alarms
+  `vettid-org-start-over-held-no-member`, `-read-error`; production:
+  the security-alerts topic); a deletion held for a suspended or
+  canceled account is not alarmed. A deletion with no member row is
+  never carried out by this run; 2.6.5: the daily run marks its vault
+  and, if the member row is still missing 7 days later and no operator
+  holds the vault, asks it to delete itself as for a canceled account
+  ("Vault deletion", Vaults without a member), after which this run
+  leaves it to the daily retry (RUNBOOK).
+- **What the hold does not cover.** A deletion that is already
+  `executing` is not held back by a later suspension, including one
+  whose `delete` could not be queued yet. The members table and the
+  vaults table are in different AWS accounts, so the job's read and its
+  write are not one transaction: a suspension whose status is written
+  after the job read the row as active, and before the job's write,
+  does not stop that deletion. The admin API's `suspend` writes the
+  status before anything else, so the hold begins with that write.
+- **Reinstating the account cancels the deletion (2.6.2).** When an
+  admin reinstates the account (from suspended or canceled), a deletion
+  still `pending` is cancelled first, while the account is still not
+  active, and the member is emailed that it was. A deletion that waited
+  through a suspension is therefore not carried out on its old date.
+  This holds because the admin API's `reinstate` is the only thing that
+  makes an account active again; anything added later that does so must
+  cancel a pending deletion first. A member who wants to start over
+  asks again and gets a new 24 hours and a new link. If the cancel
+  cannot be made, the account is not reinstated.
+- **A canceled account.** Its pending deletion is held like a suspended
+  account's; its vaults are deleted with the account after the 7-day
+  grace period, as for every canceled account ("Vault deletion",
+  Account cancellation), whether or not a start-over was pending (case
+  3 above from then on).
+- **An admin can cancel** a pending deletion for the member, whatever
+  the account's status (ADMIN-API,
+  `POST /admin/members/{user_guid}/vault/deletion/cancel`): removal
+  under the same condition as the member's cancel (the same deletion,
+  still `pending`), decided from consistent reads of the member's
+  pointer row and vault rows; an email to the member; the audit event
+  `member.vault_deletion_cancel`. Unlike the member's cancel it does not
+  set the vault row's `updated_at`.
 - **Rate limits:** request 3 per member per day; cancel 30 per member
   per 15 minutes; the link 20 per source network per 15 minutes.
 - **Audit:** `vault.deletion_request`, `vault.deletion_cancel` (`via:
   session | link | app`), `vault.deletion_executed`. Never the token.
+  2.6.2: `member.vault_deletion_cancel` (actor: the admin; detail
+  `vault_id`, `deletion_id`, and `on: "reinstate"` when a reinstatement
+  made it) for a cancel by an admin. The existing events are unchanged.
+  A held deletion writes no event; the job's metrics count them. The
+  function that makes an admin's cancel also logs
+  `{"startOverCancel": {user_guid, vault_id, deletion_id}}` for each
+  record it removes, so a record exists if the audit event could not be
+  written.
 
 **Left to the API by the spec, decided here:** the shape of `Enclave`; the
 `vault_id` encoding; reuse of `vault_id` on re-enrollment; liveness (90 s
@@ -1938,7 +2331,14 @@ The API can write only its own attributes on `vaults` and
 `vault-releases` (never a lease, `sealed_release` or a status), cannot write
 the instance registry, and can `sqs:SendMessage` only to
 `vettid-org-vault-control-*` queues. Only the cleanup job and the deletion
-notice can delete vault rows. These limits are enforced twice: by the
+notice can delete vault rows. The admin API holds no right in the vault
+account: to cancel a member's pending deletion it invokes a second
+function of the member API, which runs only that task (event `{task:
+"cancel_start_over", user_guid}`; any other task is refused) under the
+cleanup job's role `vettid-org-member-cleanup`. The admin API cannot
+invoke the cleanup job itself. The cleanup job's role may read a
+member's row (`GetItem`) to learn whether the account is active; it can
+delete member rows, as before, and cannot put or update one. These limits are enforced twice: by the
 three functions' IAM policies here (fixed role names
 `vettid-org-member-vault`, `-cleanup`, `-vault-alarms`) and by the vault
 account's table, stream and queue resource policies, rendered from the same

@@ -153,6 +153,16 @@ export function buildApp(app: cdk.App): void {
       const pushDelegation = new VettidOrgStagePushDelegationStack(app, 'VettidOrgStagePushDelegationStack', { config, nameServers: pushNs, env });
       pushDelegation.addStackDependency(dnsStack);
     }
+    // TEMPORARY vault hardware smoke test, as in the prod app below: only with
+    // `-c vaultSmoke=true`, in this stage's own account (staging: the vault
+    // account too); destroy it when the test is done.
+    if (app.node.tryGetContext('vaultSmoke') === 'true' || app.node.tryGetContext('vaultSmoke') === true) {
+      new VettidOrgVaultSmokeStack(app, 'VettidOrgVaultSmokeStack', {
+        config,
+        pcr0: String(app.node.tryGetContext('vaultSmokePcr0') ?? ''),
+        env,
+      });
+    }
     return;
   }
 

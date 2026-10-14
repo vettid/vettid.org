@@ -20,7 +20,10 @@ endpoint is disabled). Reachable **only** from the admin exit node's egress IP
 - **Bodies:** JSON in, JSON out. Times are ISO-8601 UTC strings.
 - **Errors:** non-2xx with `{ "error": "<code>", "message": "<human text>" }`.
   Codes: `bad_request`, `unauthorized`, `forbidden`, `not_found`, `conflict`,
-  `internal`.
+  `internal`, `recovery_active` (`409`, from `reinstate` only, with a
+  `recoveries` list beside the two members), and `vault_exists` (`409`,
+  from `DELETE /admin/members/{user_guid}` only, with a `vaults` list
+  beside the two members; MEMBER-API 2.6.5).
 - **Pagination:** list endpoints take `?cursor=` and return
   `{ "items": [...], "cursor": "<opaque>" | null }`. Default page size 50.
 - **Audit:** every mutating call writes an audit event (actor = caller email).
@@ -73,15 +76,36 @@ interface Subscription {
 | POST | `/admin/requests/{user_guid}/resend-verification` | — | `{ok: true}`. `409` for a `withdrawn` request. |
 | GET | `/admin/members?state=&status=&q=` | — | `{items: Member[], cursor}`. `state` ∈ registered/member (default both); `status` ∈ active/suspended/canceled; `q` = email prefix |
 | GET | `/admin/members/{user_guid}` | — | `Member` |
-| POST | `/admin/members/{user_guid}/suspend` | `{reason: string}` | `Member` |
-| POST | `/admin/members/{user_guid}/reinstate` | — | `Member` |
-| DELETE | `/admin/members/{user_guid}` | — | `{ok: true}` (permanent; Cognito user + data removed, audit kept) |
+| POST | `/admin/members/{user_guid}/suspend` | `{reason: string}` | `Member`. The status is written first, then sign-in is disabled and the sessions are ended: from the status write on the account cannot sign in and none of its pending vault deletions is carried out. If a later step fails the answer is `500` with the account already suspended and no `member.suspend` event: the suspension is half done (sign-in may not be disabled, the sessions may not be ended; such a session reaches only `lock` and the two vault cancels), and repeating the call finishes it. For an account that is already suspended the call answers `200` (MEMBER-API 2.6.2; it answered `409` before), repeats the two sign-in steps, writes `member.suspend` with `repeat: true` in its detail and the reason given now, and leaves the stored reason as it is. `409` for a canceled account. |
+| POST | `/admin/members/{user_guid}/reinstate` | `{allow_active_recovery?: boolean}` | `Member`. In this order: (1) a vault deletion of the member that is still pending is cancelled (MEMBER-API "Vault deletion: start over"; the member is emailed; audited `member.vault_deletion_cancel` with `on: "reinstate"`), so that a deletion which waited through the suspension is not carried out when the account is active again; (2) if a recovery of the member's vault is still active (pending, available or registered, before its `expires_at`), the answer is `409 recovery_active` with `recoveries: [{vault_id, recovery_id, state, available_at, expires_at}]` and the account stays as it is, unless the body says `allow_active_recovery: true`; the recovery is not cancelled either way, and with the confirmation the event `member.reinstate_with_active_recovery` is written at this point, before sign-in is enabled; (3) the member's sessions are ended (a suspension whose sign-out failed must not hand an old session back), sign-in is enabled, and the status is written last; then `member.reinstate` is written and the vault gets its account snapshot. Step 1 is made before step 2 answers, so a `409 recovery_active` means a pending deletion has already been cancelled. `409` also if the deletion changed while it was being cancelled (repeat the call). `500` has two meanings, told apart by the member's `account_status`: if a step up to and including the status write failed (the cancel could not be made, or was made and could not be recorded; ending the sessions; enabling sign-in), the account is still not active, a pending deletion may already have been cancelled, and a repeat finishes; if the step after the status write failed (the `member.reinstate` event), the account is active, and a repeat answers `409` "already active"; a snapshot that could not be requested is logged and does not fail the call. The recovery shown can be one that has just completed in the vault and is not yet recorded as completed (`registered`): the warning is then a false alarm. |
+| DELETE | `/admin/members/{user_guid}` | — | `{ok: true}` (permanent; Cognito user + data removed, audit kept). Refused while the member has a vault that is not deleted (MEMBER-API 2.6.5): `409 vault_exists` with `vaults: [{vault_id, state}]` and a message that says why and what to do (the vault goes when the member deletes it, in the app or by "Delete my vault and start over", or with the account 7 days after the member cancels it; delete the member after that); nothing is changed and nothing is audited. A vault whose deletion was asked for and not yet reported still counts. The check is made first, through the member API's member-vaults function; if it cannot be made the answer is `500` and nothing is changed. `{ok: true}` means this call deleted the row: if the row was removed by something else after the call read it (the cleanup job, another admin), the answer is `404` `No such member`, as for an unknown id, and no `member.delete` is audited. The Cognito user and the `email:<addr>` marker go only if they are this member's own (`custom:user_guid`, `member_guid`); ones that belong to a newer request or account for the same address are left, and the `member.delete` audit event then says so in its detail (`sign_in_user: "left"`, `email_marker: "left"`); the answer is the same (MEMBER-API 2.6.2 "Retention"). |
 | POST | `/admin/members/{user_guid}/clear-pin` | — | `Member` — removes the PIN and its lockout; the member is emailed a notice. Audited. |
+| POST | `/admin/members/{user_guid}/vault/deletion/cancel` | — | `{cancelled: boolean}`. Cancels the member's pending "Delete my vault and start over" (MEMBER-API "Vault deletion: start over"), whatever the account status: `true` when a pending deletion was removed (the member is emailed; audited `member.vault_deletion_cancel`, detail `vault_id`, `deletion_id`); `false` when there was none, so a repeat is harmless. `409` when the deletion is already being carried out (`executing`, also when its `delete` has not been queued yet: it cannot be cancelled), when it changed while it was being cancelled (repeat the call), or when the row is not an account; `404` for an unknown member. `500` if the cancel could not be made, or was made and its audit event could not be written (a repeat then answers `false`). A pending recovery has no admin cancel. |
 | POST | `/admin/members/{user_guid}/subscription/extend` | `{days: number}` (1–366) | `Member` |
 | GET | `/admin/invites` | — | `{items: Invite[], cursor}` (registration codes) |
 | POST | `/admin/invites` | `{max_uses: number (1–1000), expires_in_days: number (1–365), note?: string}` | `Invite`. The admin site's form defaults `max_uses` to 2. |
 | POST | `/admin/invites/{code}/expire` | — | `Invite` |
 | DELETE | `/admin/invites/{code}` | — | `{ok: true}` |
+
+**A pending vault deletion, a recovery, and the account's status
+(MEMBER-API 2.6.2).** A
+member's "Delete my vault and start over" is carried out 24 hours after
+the request only while the account is active. Suspending an account
+does not cancel it but stops it from being carried out, from the
+moment the status is written; reinstating the account cancels it. A
+recovery is blocked while the account is not active, but its times do
+not move, and no admin route cancels it: `reinstate` warns about an
+active one and asks for a confirmation. Support's order when an account
+looks taken over is: suspend, cancel the vault deletion, reinstate when
+the member has their mailbox back (RUNBOOK "No recovery with the backup
+off; start over"). The people function has no right on the vault
+tables. It invokes three functions of the member API: the account push
+(the member's running vault gets its account snapshot), as before;
+the start-over cancel, which removes a pending deletion record and
+reports an active recovery and does nothing else; and (MEMBER-API
+2.6.5) the member-vaults check, which lists the member's vaults that
+are not deleted, for Delete, under a role of its own that may only
+Query the vaults table and its `user-index`.
 
 **Registration codes.** Members and the admin site call these
 *registration codes* (formerly "invite codes"); each is good for 2 uses by

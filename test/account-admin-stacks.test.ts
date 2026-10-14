@@ -250,11 +250,47 @@ describe('VettidOrgAdminApiStack', () => {
 
   test('people may invoke the member API account push, by its fixed name (MEMBER-API 2.0.0)', () => {
     const all = Object.values<any>(t.findResources('AWS::IAM::Policy')).flatMap((p) => p.Properties.PolicyDocument.Statement);
-    const inv = all.filter((x: any) => JSON.stringify(x.Action).includes('lambda:InvokeFunction'));
+    const inv = all.filter((x: any) => JSON.stringify(x.Action).includes('lambda:InvokeFunction') && JSON.stringify(x.Resource).includes('account-push'));
     expect(inv).toHaveLength(1);
     expect(JSON.stringify(inv[0].Resource)).toContain(':function:vettid-org-member-account-push');
     const fns = Object.values<any>(t.findResources('AWS::Lambda::Function')).filter((f) => f.Properties.Environment?.Variables?.ACCOUNT_PUSH_FN);
     expect(fns.map((f) => f.Properties.Environment.Variables.ACCOUNT_PUSH_FN)).toEqual(['vettid-org-member-account-push']);
+  });
+
+  test("people may invoke the member API's start-over cancel function (to cancel a member's pending vault deletion), by its ARN from SSM; nothing else is invoked (not the cleanup job), and no admin function reaches the vault tables", () => {
+    const policies = Object.values<any>(t.findResources('AWS::IAM::Policy'));
+    const all = policies.flatMap((p) => p.Properties.PolicyDocument.Statement);
+    const inv = all.filter((x: any) => JSON.stringify(x.Action).includes('lambda:InvokeFunction'));
+    expect(inv).toHaveLength(3); // the account push, the start-over cancel and the member-vaults check
+    const cancelParam = Object.entries<any>(t.toJSON().Parameters).find(([, v]) => v.Default === '/vettid-org/prod/member-api/start-over-cancel-fn-arn')!;
+    const cancelInv = inv.filter((x: any) => JSON.stringify(x.Resource) === JSON.stringify({ Ref: cancelParam[0] }));
+    expect(cancelInv).toHaveLength(1);
+    expect(cancelInv[0].Action).toBe('lambda:InvokeFunction');
+    const param = Object.entries<any>(t.toJSON().Parameters).find(([, v]) => v.Default === '/vettid-org/prod/member-api/start-over-cancel-fn-arn')!;
+    expect(param[1].Type).toBe('AWS::SSM::Parameter::Value<String>');
+    expect(cancelInv[0].Resource).toEqual({ Ref: param[0] }); // that one function: no wildcard, no other ARN
+    expect(JSON.stringify(t.toJSON().Parameters)).not.toContain('cleanup-fn-arn');
+    // Only the people function, and it gets the same ARN to call.
+    const withEnv = Object.entries<any>(t.findResources('AWS::Lambda::Function')).filter(([, f]) => f.Properties.Environment?.Variables?.START_OVER_CANCEL_FN);
+    expect(withEnv.map(([id]) => id.startsWith('People'))).toEqual([true]);
+    expect(withEnv[0][1].Properties.Environment.Variables.START_OVER_CANCEL_FN).toEqual({ Ref: param[0] });
+    const peopleRole = withEnv[0][1].Properties.Role['Fn::GetAtt'][0];
+    expect(policies.filter((p) => JSON.stringify(p.Properties.PolicyDocument.Statement).includes(`"Ref":"${param[0]}"`)).map((p) => p.Properties.Roles)).toEqual([[{ Ref: peopleRole }]]);
+    expect(JSON.stringify(all)).not.toMatch(/table\/vettid-org-vault/);
+  });
+
+  test("people may invoke the member API's member-vaults function (Delete refuses while the member has a vault), by its ARN from SSM, and only people", () => {
+    const policies = Object.values<any>(t.findResources('AWS::IAM::Policy'));
+    const all = policies.flatMap((p) => p.Properties.PolicyDocument.Statement);
+    const param = Object.entries<any>(t.toJSON().Parameters).find(([, v]) => v.Default === '/vettid-org/prod/member-api/member-vaults-fn-arn')!;
+    expect(param[1].Type).toBe('AWS::SSM::Parameter::Value<String>');
+    const inv = all.filter((x: any) => JSON.stringify(x.Resource) === JSON.stringify({ Ref: param[0] }));
+    expect(inv.map((x: any) => x.Action)).toEqual(['lambda:InvokeFunction']);
+    const withEnv = Object.entries<any>(t.findResources('AWS::Lambda::Function')).filter(([, f]) => f.Properties.Environment?.Variables?.MEMBER_VAULTS_FN);
+    expect(withEnv.map(([id]) => id.startsWith('People'))).toEqual([true]);
+    expect(withEnv[0][1].Properties.Environment.Variables.MEMBER_VAULTS_FN).toEqual({ Ref: param[0] });
+    const peopleRole = withEnv[0][1].Properties.Role['Fn::GetAtt'][0];
+    expect(policies.filter((p) => JSON.stringify(p.Properties.PolicyDocument.Statement).includes(`"Ref":"${param[0]}"`)).map((p) => p.Properties.Roles)).toEqual([[{ Ref: peopleRole }]]);
   });
 
   test('resource policy allows only the exit-node egress IP (from SSM)', () => {
@@ -410,7 +446,7 @@ describe('VettidOrgMemberApiStack', () => {
   const t = Template.fromStack(new VettidOrgMemberApiStack(apiApp, 'MemberApi', { config: loadConfig(apiApp.node), env }));
 
   test('four route groups + link mailer + eight jobs (incl. the vault notice job, W8, the vault service watch, the account push, 2.0.0, and the vault-names job, 2.2.0)', () => {
-    t.resourceCountIs('AWS::Lambda::Function', 13);
+    t.resourceCountIs('AWS::Lambda::Function', 15); // and the start-over cancel and the member-vaults check, two more entry points of the cleanup module
     for (const p of ['/api/public', '/api/auth', '/api/account', '/api/vault']) {
       t.hasResourceProperties('AWS::ApiGatewayV2::Route', { RouteKey: `ANY ${p}/{proxy+}` });
     }
@@ -457,6 +493,104 @@ describe('VettidOrgMemberApiStack', () => {
       expect(actions(list)).toEqual(['dynamodb:GetItem']);
     });
 
+    test("the cleanup job reads a member's row (a start-over is carried out only for an active account); it can delete one, as before, and cannot put or update one", () => {
+      const members = stmtsOf(/vault-cleanup|Cleanup/).filter((s: any) => JSON.stringify(s.Resource).includes('table/vettid-org-members'));
+      expect([...new Set(actions(members))].sort()).toEqual(['dynamodb:DeleteItem', 'dynamodb:GetItem', 'dynamodb:Query']);
+      // The read is on the table only, not on an index.
+      const get = members.filter((s: any) => ([] as string[]).concat(s.Action).includes('dynamodb:GetItem'));
+      expect(get).toHaveLength(1);
+      expect(JSON.stringify(get[0].Resource)).not.toContain('/index/');
+    });
+
+    test('the start-over cancel: a second function on the cleanup module that runs only cancelHandler, under the cleanup job\'s role (no role, policy or vault-account grant of its own); its ARN is published; no schedule targets it', () => {
+      const fns = Object.entries<any>(t.findResources('AWS::Lambda::Function'));
+      const cancel = fns.find(([id]) => id.startsWith('StartOverCancel'))!;
+      const cleanupFn = fns.find(([id]) => id.startsWith('CleanupJob'))!;
+      expect(cancel[1].Properties.Handler).toBe('index.cancelHandler');
+      expect(cleanupFn[1].Properties.Handler).toBe('index.handler');
+      expect(cancel[1].Properties.Role).toEqual(cleanupFn[1].Properties.Role);
+      expect(cancel[1].Properties.FunctionName).toBeUndefined();
+      expect(cleanupFn[1].Properties.FunctionName).toBeUndefined(); // still its generated name: not replaced
+      // One role with the fixed name the vault account's policies know, and no role or policy made for the new function.
+      const roles = Object.entries<any>(t.findResources('AWS::IAM::Role'));
+      expect(roles.filter(([, r]) => r.Properties.RoleName === 'vettid-org-member-cleanup')).toHaveLength(1);
+      expect(roles.filter(([id]) => id.startsWith('StartOverCancel'))).toEqual([]);
+      expect(Object.keys(t.findResources('AWS::IAM::Policy')).filter((id) => id.startsWith('StartOverCancel'))).toEqual([]);
+      const param = Object.values<any>(t.findResources('AWS::SSM::Parameter')).find((p) => p.Properties.Name === '/vettid-org/prod/member-api/start-over-cancel-fn-arn')!;
+      expect(param.Properties.Value).toEqual({ 'Fn::GetAtt': [cancel[0], 'Arn'] });
+      // The schedules still target the cleanup job only, with what they sent before.
+      const targets = Object.values<any>(t.findResources('AWS::Events::Rule')).flatMap((r) => r.Properties.Targets ?? []);
+      expect(targets.filter((x: any) => JSON.stringify(x.Arn).includes(cancel[0]))).toEqual([]);
+      const cleanupInputs = targets.filter((x: any) => JSON.stringify(x.Arn).includes(cleanupFn[0])).map((x: any) => x.Input).sort();
+      expect(cleanupInputs).toEqual(['{"task":"requests"}', '{"task":"start_over"}', undefined]);
+      // Nobody in this stack may invoke it (the admin API does, from its own stack).
+      expect(Object.values<any>(t.findResources('AWS::Lambda::Permission')).filter((p) => JSON.stringify(p.Properties.FunctionName).includes(cancel[0]))).toEqual([]);
+    });
+
+    test("the member-vaults check: a third function on the cleanup module that runs only memberVaultsHandler, under a fixed-name role of its own that may only Query the vaults table and its user-index; its ARN is published; no schedule targets it", () => {
+      const fns = Object.entries<any>(t.findResources('AWS::Lambda::Function'));
+      const check = fns.find(([id]) => id.startsWith('MemberVaults'))!;
+      const cleanupFn = fns.find(([id]) => id.startsWith('CleanupJob'))!;
+      expect(check[1].Properties.Handler).toBe('index.memberVaultsHandler');
+      expect(check[1].Properties.Role).not.toEqual(cleanupFn[1].Properties.Role);
+      const roleId = check[1].Properties.Role['Fn::GetAtt'][0];
+      expect(t.findResources('AWS::IAM::Role')[roleId].Properties.RoleName).toBe('vettid-org-member-member-vaults');
+      const stmts = Object.values<any>(t.findResources('AWS::IAM::Policy'))
+        .filter((p) => JSON.stringify(p.Properties.Roles).includes(roleId))
+        .flatMap((p) => p.Properties.PolicyDocument.Statement);
+      const dynamo = stmts.filter((x: any) => JSON.stringify(x.Action).includes('dynamodb:'));
+      expect([...new Set(dynamo.flatMap((x: any) => [].concat(x.Action)))]).toEqual(['dynamodb:Query']);
+      expect(dynamo.flatMap((x: any) => [].concat(x.Resource)).map((r: any) => String(r).replace(/^.*:table\//, '')).sort()).toEqual(['vettid-org-vaults', 'vettid-org-vaults/index/user-index']);
+      // Nothing else but its logs: no queue, no other table, no SES, no Cognito.
+      expect(stmts.filter((x: any) => !JSON.stringify(x.Action).includes('dynamodb:') && !JSON.stringify(x.Action).includes('logs:') && !JSON.stringify(x.Action).includes('xray:'))).toEqual([]);
+      const param = Object.values<any>(t.findResources('AWS::SSM::Parameter')).find((p) => p.Properties.Name === '/vettid-org/prod/member-api/member-vaults-fn-arn')!;
+      expect(param.Properties.Value).toEqual({ 'Fn::GetAtt': [check[0], 'Arn'] });
+      const targets = Object.values<any>(t.findResources('AWS::Events::Rule')).flatMap((r) => r.Properties.Targets ?? []);
+      expect(targets.filter((x: any) => JSON.stringify(x.Arn).includes(check[0]))).toEqual([]);
+      expect(Object.values<any>(t.findResources('AWS::Lambda::Permission')).filter((p) => JSON.stringify(p.Properties.FunctionName).includes(check[0]))).toEqual([]);
+    });
+
+    test('vaults without a member: alarms on the first sighting, on the deletions and on what was held, as the removal alarms; none on waiting or operator-held ones', () => {
+      for (const [name, metric] of [['vettid-org-orphan-vaults-seen', 'OrphanVaultsSeen'], ['vettid-org-orphan-vault-deletions', 'OrphanVaultDeletions'], ['vettid-org-orphan-vaults-held', 'OrphanVaultsHeld']]) {
+        t.hasResourceProperties('AWS::CloudWatch::Alarm', {
+          AlarmName: name, Namespace: 'VettID/MemberApi', MetricName: metric, Statistic: 'Sum', Period: 3600,
+          EvaluationPeriods: 1, Threshold: 1, ComparisonOperator: 'GreaterThanOrEqualToThreshold', TreatMissingData: 'notBreaching',
+        });
+      }
+      for (const m of ['OrphanVaultsWaiting', 'OrphanVaultsOperatorHeld']) expect(Object.values<any>(t.findResources('AWS::CloudWatch::Alarm')).filter((a) => a.Properties.MetricName === m)).toEqual([]);
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const emf = JSON.parse(require('../lambda/jobs/cleanup').orphanVaultEmf({ marked: 3, waiting: 4, cleared: 9, requested: 2, operator_held: 5, held: 0, read_errors: 1, failures: 1 }, 0));
+      expect(emf._aws.CloudWatchMetrics[0].Namespace).toBe('VettID/MemberApi');
+      expect(emf._aws.CloudWatchMetrics[0].Dimensions).toEqual([[]]);
+      expect(emf._aws.CloudWatchMetrics[0].Metrics.map((m: any) => m.Name)).toEqual(['OrphanVaultsSeen', 'OrphanVaultsWaiting', 'OrphanVaultDeletions', 'OrphanVaultsOperatorHeld', 'OrphanVaultsHeld']);
+      expect([emf.OrphanVaultsSeen, emf.OrphanVaultsWaiting, emf.OrphanVaultDeletions, emf.OrphanVaultsOperatorHeld, emf.OrphanVaultsHeld]).toEqual([3, 4, 2, 5, 2]);
+    });
+
+    test('the cleanup job may write orphan_seen_at on a vault row (and still nothing else new)', () => {
+      const upd = stmtsOf(/vault-cleanup|Cleanup/).filter((x: any) => [].concat(x.Action).includes('dynamodb:UpdateItem' as never) && JSON.stringify(x.Resource).includes('table/vettid-org-vaults'));
+      expect(upd.map((x: any) => x.Condition['ForAllValues:StringEquals']['dynamodb:Attributes'])).toEqual([['vault_id', 'deletion_requested_at', 'deletion', 'orphan_seen_at']]);
+    });
+
+    test('held start-overs: alarms on a missing member row and on a failed read (three runs in a row), on the metrics the job writes; none on a suspended account', () => {
+      const alarm = (name: string) => Object.values<any>(t.findResources('AWS::CloudWatch::Alarm')).find((a) => a.Properties.AlarmName === name)!;
+      for (const [name, metric] of [['vettid-org-start-over-held-no-member', 'StartOverHeldNoMember'], ['vettid-org-start-over-held-read-error', 'StartOverHeldReadError']]) {
+        expect(alarm(name).Properties).toMatchObject({
+          Namespace: 'VettID/MemberApi', MetricName: metric, Statistic: 'Maximum', Period: 300,
+          Threshold: 1, ComparisonOperator: 'GreaterThanOrEqualToThreshold', EvaluationPeriods: 3, DatapointsToAlarm: 3, TreatMissingData: 'notBreaching',
+        });
+        expect(alarm(name).Properties.Dimensions).toBeUndefined();
+        expect(alarm(name).Properties.AlarmActions).toBeUndefined(); // not the management account here; production is below
+        expect(alarm(name).Properties.AlarmDescription).toContain('RUNBOOK');
+      }
+      expect(Object.values<any>(t.findResources('AWS::CloudWatch::Alarm')).filter((a) => a.Properties.MetricName === 'StartOverHeldNotActive')).toEqual([]);
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const emf = JSON.parse(require('../lambda/jobs/cleanup').startOverEmf({ not_active: 1, no_member: 2, read_error: 3 }, 0));
+      expect(emf._aws.CloudWatchMetrics[0].Namespace).toBe('VettID/MemberApi');
+      expect(emf._aws.CloudWatchMetrics[0].Dimensions).toEqual([[]]);
+      expect(emf._aws.CloudWatchMetrics[0].Metrics.map((m: any) => m.Name)).toEqual(['StartOverHeldNotActive', 'StartOverHeldNoMember', 'StartOverHeldReadError']);
+      expect([emf.StartOverHeldNotActive, emf.StartOverHeldNoMember, emf.StartOverHeldReadError]).toEqual([1, 2, 3]);
+    });
+
     test('alarms on the EMF metrics the cleanup job writes: a removal that fails, and one given up on', () => {
       for (const [name, metric] of [['vettid-org-request-removal-failing', 'RequestRemovalFailures'], ['vettid-org-request-removal-abandoned', 'RequestRemovalAbandoned']]) {
         t.hasResourceProperties('AWS::CloudWatch::Alarm', {
@@ -478,11 +612,19 @@ describe('VettidOrgMemberApiStack', () => {
       const alarms = Object.values<any>(p.findResources('AWS::CloudWatch::Alarm')).filter((a) => String(a.Properties.AlarmName).startsWith('vettid-org-request-removal-'));
       expect(alarms).toHaveLength(2);
       for (const a of alarms) expect(JSON.stringify(a.Properties.AlarmActions)).toContain(`:sns:us-east-1:${ORG.management}:vettid-org-security-alerts`);
+      // The two held-start-over alarms too.
+      const held = Object.values<any>(p.findResources('AWS::CloudWatch::Alarm')).filter((a) => String(a.Properties.AlarmName).startsWith('vettid-org-start-over-held-'));
+      expect(held.map((a) => a.Properties.AlarmName).sort()).toEqual(['vettid-org-start-over-held-no-member', 'vettid-org-start-over-held-read-error']);
+      for (const a of held) expect(JSON.stringify(a.Properties.AlarmActions)).toContain(`:sns:us-east-1:${ORG.management}:vettid-org-security-alerts`);
+      // And the one on vaults without a member.
+      const orphans = Object.values<any>(p.findResources('AWS::CloudWatch::Alarm')).filter((a) => String(a.Properties.AlarmName).startsWith('vettid-org-orphan-vault'));
+      expect(orphans.map((a) => a.Properties.AlarmName).sort()).toEqual(['vettid-org-orphan-vault-deletions', 'vettid-org-orphan-vaults-held', 'vettid-org-orphan-vaults-seen']);
+      for (const a of orphans) expect(JSON.stringify(a.Properties.AlarmActions)).toContain(`:sns:us-east-1:${ORG.management}:vettid-org-security-alerts`);
     });
 
     test('function logs keep the retention they had (one month): not changed by 2.6.0', () => {
       const groups = Object.values<any>(t.findResources('AWS::Logs::LogGroup')).filter((g) => !g.Properties.LogGroupName);
-      expect(groups.length).toBe(13);
+      expect(groups.length).toBe(15); // the start-over cancel function's own, and the member-vaults check's
       for (const g of groups) expect(g.Properties.RetentionInDays).toBe(30);
     });
   });
@@ -577,7 +719,7 @@ describe('VettidOrgMemberApiStack', () => {
       // The cleanup job may only mark a deletion requested.
       const mark = stmts().filter((s: any) => String(str(s.Condition)).includes('deletion_requested_at'));
       expect(mark).toHaveLength(1);
-      expect(mark[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(['vault_id', 'deletion_requested_at', 'deletion']);
+      expect(mark[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(['vault_id', 'deletion_requested_at', 'deletion', 'orphan_seen_at']); // 2.6.5: the orphan mark
     });
 
     test('the queue URL prefix is pinned to the vault account and region', () => {

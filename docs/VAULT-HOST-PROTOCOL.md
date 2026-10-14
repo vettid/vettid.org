@@ -1,17 +1,43 @@
 ---
 title: VAULT-HOST-PROTOCOL
 status: approved by the owner 2026-10-12 (H1–H9 as recommended)
-version: 0.1.5
-date: 2026-10-13
+version: 0.1.8
+date: 2026-10-14
 owner: Al Liebl (Mesmer)
 component: vault enclave (supervisor), parent (host process)
 related:
-  - VAULT-MESSAGING.md (0.29.2) §2 (threat model, who sees what), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
+  - VAULT-MESSAGING.md (0.29.7) §2 (threat model, who sees what), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
   - VAULT-PLAN.md (0.1.8) §5.2 (D5: TLS in the enclave), §5.3 (D4: one process per vault)
   - VAULT-RELEASES.md (0.1.16) §3.4 (C3, C4), §8.4 (network and egress), §8.7 (observability)
   - VAULT-RELAY-SCALING.md (0.1.2) §6, §10
   - vettid-vault `internal/hostproto`, `enclave/supervisor`, `enclave/egress`, `parent`, docs/V3-NOTES.md "Enclave ↔ parent", docs/SMOKE.md
 changelog:
+  - 0.1.8: as built in vettid-vault #77 (the parent only); approved by
+    the owner 2026-10-14. §2: the parent closes a connection on the
+    control or egress port whose peer is not its enclave's context id
+    (16 as deployed) before reading from it; a development build on TCP
+    answers loopback peers only. No wire change.
+  - 0.1.7: correction of the document to the system as built; approved
+    by the owner 2026-10-13. No wire change and no code change. §11.4
+    item 4: **the enclave's PIN and password backoffs do not limit a
+    parent that also replays stored objects**; the item said that a
+    recovery started by the parent is guessed "online under the
+    enclave's backoffs", and that the owner's devices cannot unlock
+    without seeing it. Both counters are kept in objects the parent
+    stores, and the owner's devices see a recovery only while the
+    parent serves them the header that records it. §11.3, the
+    `recovery` part of the row of operations without an envelope, says
+    the same (VAULT-MESSAGING 0.29.7 §11.11.2, §11.11.6, §13.2)
+  - 0.1.6: as built in vettid-vault #75 (the parent only; the enclave
+    and its measurements do not change); approved by the owner
+    2026-10-13. No wire change. §9: **a stored object is at most
+    67,108,583 bytes**, the largest a `StoreGet` reply can carry; the
+    parent answers `error` for a larger one, on read and on write (it
+    read back at most 48 MiB before, a limit the table did not have).
+    §13 point 12: **the parent creates its queue again** after a
+    receive that finds the queue gone, and checks that the queue
+    exists, with a limit of 10 s, before the first registry row after
+    a disconnection (VAULT-MESSAGING 0.29.3 §11.1)
   - 0.1.5: erratum, as built at vettid-vault `main` a852e36 (#74, for
     staging release S11, not cut yet); approved by the owner
     2026-10-13. No wire change. §4.3: **a `Ping` read while the vaults
@@ -133,6 +159,16 @@ Neither channel is authenticated or encrypted, on purpose: vsock
 connects the enclave to its own parent instance and to nothing else,
 and the parent is the party that is not trusted. A secret shared with
 it would add nothing (vettid-vault docs/V3-NOTES.md).
+
+The parent closes a connection on either port whose peer context id is not
+its enclave's (16 as deployed) before reading from it; a development build
+on TCP answers loopback peers only (0.1.8, as built in vettid-vault #77).
+This keeps an unprivileged process on the host from taking the enclave's
+place as the parent's session, from the store calls and from the egress
+forwarder. It does not bind root or anyone who can run an enclave or a
+guest with that context id, and it does not protect the instance role's
+credentials, which the host's metadata service gives to any process on the
+host. The enclave relies on none of it.
 
 **Writes.** Every write on a vsock connection, in both directions and
 on both channels, is at most **16 KiB** (16,384 bytes). Larger data is
@@ -784,6 +820,7 @@ version, or with `len` 0, is closed without an answer.
 | Lease | 180 s, renewed every 60 s | parent |
 | Store key | 256 bytes, the characters of §5.2 | both; the prefixes by the parent |
 | Store version | 1 to 256 bytes | enclave |
+| Stored object (`data` of a `StoreGet` reply and of a `StorePut`) | 67,108,583 bytes: the frame body less 281 (a reply's kind, id and field count, three field lengths, the status and a 256-byte version) | parent; a larger object is answered `error`, on read and on write |
 | Descriptor, attestation | 4,096 and 32,768 bytes | parent |
 | Log record | 16 pairs, 200 bytes a value | parent |
 | Egress header, connect, answer | 10 s, 10 s (parent); 15 s (enclave) | each |
@@ -913,7 +950,7 @@ more than "the operation does not happen, or happens late".
 | `StoreDelete` reply | keep the object and say `ok`; delete anything it can reach in the bucket at any time | The parent's role can delete stored state anyway (VAULT-MESSAGING §13.5). A kept object cannot be opened without the PIN and a registered device |
 | `Credentials` reply | give no, expired, or another principal's credentials | KMS answers come over the enclave's TLS. Sealing keys release data keys only to the release's attested measurements, and the enclave checks the key's policy itself before sealing. Wrong credentials are failed unlocks |
 | `Queue`, sealed operations (`enroll`, `unlock`, `recovery_register`) | drop, delay, reorder, replay, send to another instance; change the clear members | Replays and redirected requests are refused (VAULT-MESSAGING §11.6). It cannot make one: it has no ETK and no device key. A changed `account` member reaches the vault (below) |
-| `Queue`, operations without an envelope (`lock`, `delete`, `account`, `recovery`, `recovery_cancel`) | **forge them** for any `vault_id` | `lock`: the vault locks. *From release L (0.1.3, planned):* a `lock` carries `unlock_id` or is ordered by `enqueued_at`, both of which the parent can read and set, and the parent writes the `code` of the answer: it can still lock any vault, drop any lock, and report `locked` for a vault it left open. The members protect an honest path against late delivery, not against the parent. What bounds a parent that keeps a vault open is the idle lock, decided in the enclave by its own clock (VAULT-MESSAGING §3.6.8). `delete`: a running vault deletes itself with the full semantics of VAULT-MESSAGING §12.5, otherwise its stored objects are erased; an operator power stated in §13.5. `account`: a running vault takes the snapshot, so the parent can make a vault show its owner, and put in the core of its shared profile, **names and account details of the parent's choosing**; the snapshot is display only and "not authenticated beyond the host path" (VAULT-MESSAGING §11.13, §10.8). `recovery`: with a browser key of its own the parent **starts a recovery**: a running vault locks and tells its devices why, unlocks are refused `recovery_pending`, and after the enclave's 24 h the parent can open the code. A recovery still needs an attested app, the PIN and the credential password under both backoffs, and exists only with the credential backup on (VAULT-MESSAGING §11.11). `recovery_cancel`: ends a member's recovery |
+| `Queue`, operations without an envelope (`lock`, `delete`, `account`, `recovery`, `recovery_cancel`) | **forge them** for any `vault_id` | `lock`: the vault locks. *From release L (0.1.3, planned):* a `lock` carries `unlock_id` or is ordered by `enqueued_at`, both of which the parent can read and set, and the parent writes the `code` of the answer: it can still lock any vault, drop any lock, and report `locked` for a vault it left open. The members protect an honest path against late delivery, not against the parent. What bounds a parent that keeps a vault open is the idle lock, decided in the enclave by its own clock (VAULT-MESSAGING §3.6.8). `delete`: a running vault deletes itself with the full semantics of VAULT-MESSAGING §12.5, otherwise its stored objects are erased; an operator power stated in §13.5. `account`: a running vault takes the snapshot, so the parent can make a vault show its owner, and put in the core of its shared profile, **names and account details of the parent's choosing**; the snapshot is display only and "not authenticated beyond the host path" (VAULT-MESSAGING §11.13, §10.8). `recovery`: with a browser key of its own the parent **starts a recovery**: a running vault locks and tells its devices why, unlocks are refused `recovery_pending`, and after the enclave's 24 h the parent can open the code. The devices are told only if the vault was running when the recovery began, and see `recovery_pending` only while the parent serves them the header that records it; a parent that serves an earlier header shows them nothing (§11.4 item 4). A recovery still needs an attested app, the PIN and the credential password, and exists only with the credential backup on (VAULT-MESSAGING §11.11); the two backoffs do not limit a parent that also replays stored objects (§11.4 item 4). `recovery_cancel`: ends a member's recovery |
 | `Queue`, the manifest document | withhold it, or give another | The request fails `manifest`. It cannot make the enclave accept a manifest the app did not verify (VAULT-MESSAGING §11.5) |
 | `Queue` reply (seen by the parent) | drop it, or write another slot | The app gets no result or a result it cannot open; results are sealed. The two host codes can be forged or suppressed with the effects VAULT-MESSAGING §11.5 lists |
 | `LeaseLost` | send it for any vault, at any time; never send it | The vault locks. Never sending it leaves a vault running without a lease; if a second instance then opens the vault, the two meet at the conditional state write, and the one that finds a newer version is zeroized (the split-brain guard does not depend on leases) |
@@ -940,11 +977,22 @@ more than "the operation does not happen, or happens late".
    VAULT-MESSAGING §13.2 leaves open: toward a device that has not
    seen the newer values, or consistently for both objects.
 4. **Start or cancel a recovery** (`recovery`, `recovery_cancel`). It
-   gets the code after the enclave's 24 h. It does not get a device:
-   that needs device attestation, and then the PIN and the credential
-   password, guessed online under the enclave's backoffs. The owner's
-   devices are told when the vault locks for it, and cannot unlock
-   without seeing it.
+   gets the code after the enclave's 24 h. A register then needs a
+   genuine phone running the published app (device attestation), which
+   an operator can supply. After it, the PIN and then the credential
+   password are guessed online. **The enclave's backoffs do not limit
+   a parent that also replays stored objects (item 3):** both counters
+   are kept in objects the parent stores, a newly registered app holds
+   no minimums to refuse an older copy, and an app learns of a counted
+   failure only from an answer the host delivers (VAULT-MESSAGING
+   §13.2). Against such a parent the vault is protected by the
+   strength of the PIN and then of the credential password, not by a
+   rate. The owner's devices are told only if the vault was running
+   when the recovery began, and see `recovery_pending` only while the
+   parent serves them the header that records it; a parent that serves
+   them the earlier header shows them nothing, and can undo a cancel
+   the same way. A vault that has never kept a backup copy of its
+   credential cannot be recovered and is not exposed to this.
 5. **Give a vault a false account snapshot** (`account`, or the member
    of an enroll or unlock): false names in the vault's shared profile
    core, false membership details shown to the owner. VettID holds
@@ -1072,6 +1120,15 @@ for S11). Point 11 was found and **closed** the same day (#72, `main`
 a852e36, for S11) brought the code to §4.3's rule that the parent is
 reachable again only once it has been told.
 
+**State at 0.1.6.** Point 12 is reworded for vettid-vault #75 (the
+queue is created again when a receive finds it gone; the check before
+the first registry row after a disconnection has a limit of 10 s). It
+stays open.
+
+**State at 0.1.7.** No point changes.
+
+**State at 0.1.8.** No point changes.
+
 Found while writing this document. Each is described where it occurs
 above; the pull request that adds this document lists them with file
 and line. None lets the parent read or forge anything it could not
@@ -1158,10 +1215,12 @@ before. Points 1 and 2 are the ones that matter.
     visibility time); the store get, put and delete and the
     credentials the enclave asks for (the enclave gives up after 60 s;
     the parent's handler stays, one of 128); the sweeper's list,
-    heartbeat read and queue delete; the queue's creation at start.
-    With a limit: the registry write and the lease renewal (10 s, new),
-    lifecycle and lease-release writes (30 s), the registry row's
-    delete (10 s; 60 s at shutdown).
+    heartbeat read and queue delete; the queue's creation at start and
+    after a receive that finds the queue gone. With a limit: the
+    registry write and the lease renewal (10 s, new), the check that
+    the queue exists before the first registry row after a
+    disconnection (10 s), lifecycle and lease-release writes (30 s),
+    the registry row's delete (10 s; 60 s at shutdown).
 13. **The wait for the reports has no bound of its own (0.1.4; low).**
     After a `Ping` the enclave waits until its whole outgoing queue is
     written, not only the reports, and that wait has no time limit
