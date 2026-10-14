@@ -114,19 +114,39 @@ export const RELAY_FLOW_LOG_RETENTION = logs.RetentionDays.ONE_MONTH;
  * per source IP, and blocks near the limit, not exactly at it).
  *
  * 60,000 per 5 minutes is 200 a second, twice the relay's flood guard
- * (100/s, RELAY-PROTOCOL §7.2): WAF refuses only an address the relay
- * already refuses, but before it costs task CPU, log lines or Valkey
- * ECPU. A vault host of 900 vaults (the projected size) sends 36 requests
- * a second idle and about 81 at a message a minute per vault: 10,800 and
- * 24,300 in 5 minutes, 18 % and 41 % of the limit. Raise this with the
- * flood guard (keep it at twice the guard).
+ * (100/s, RELAY-PROTOCOL §7.2). The two do not refuse alike: the flood
+ * guard only slows an address down to its rate (requests over it are
+ * answered `429`, the rest go through), while WAF, once an address's
+ * 5-minute estimate passes the limit, blocks *every* request from it
+ * until the estimate drops, which can take minutes. A client retrying
+ * faster than about 200 a second (a vault host whose retries run away)
+ * would then lose all of its relay traffic for minutes, not just the
+ * excess. In return WAF stops a flood before it costs task CPU, log lines
+ * or Valkey ECPU. A vault host of 900 vaults (the projected size) sends
+ * 36 requests a second idle and about 81 at a message a minute per vault:
+ * 10,800 and 24,300 in 5 minutes, 18 % and 41 % of the limit. Raise this
+ * with the flood guard (keep it at twice the guard).
+ *
+ * `mode`: the rule starts in `count` (WAF only counts the addresses it
+ * would block; the `waf-rate-limit` alarm says when one does). Switch it
+ * to `block` after a week of normal traffic without a count (RUNBOOK
+ * "Relay" → "The load balancer's web ACL"): a one-line, reviewed change.
  */
-export const RELAY_WAF_RATE_LIMIT = {
+export const RELAY_WAF_RATE_LIMIT: {
+  readonly requests: number;
+  readonly windowSeconds: number;
+  readonly retryAfterSeconds: number;
+  readonly mode: 'count' | 'block';
+} = {
   requests: 60_000,
   windowSeconds: 300,
-  /** `retry_after` and `Retry-After` of the refusal. */
+  /**
+   * `retry_after` and `Retry-After` of the refusal: a minimum. The block
+   * lasts until WAF's estimate falls below the limit, which can be longer.
+   */
   retryAfterSeconds: 60,
-} as const;
+  mode: 'count',
+};
 
 /**
  * relay.vettid.org — the VettID mailbox relay (github.com/vettid/vettid-relay,
@@ -275,8 +295,18 @@ export class VettidOrgRelayStack extends cdk.Stack {
       retention: RELAY_FLOW_LOG_RETENTION,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
+    // The role VPC Flow Logs assumes to write the group: only for this
+    // account's flow logs (confused-deputy guard).
+    const flowLogRole = new iam.Role(this, 'FlowLogRole', {
+      assumedBy: new iam.ServicePrincipal('vpc-flow-logs.amazonaws.com', {
+        conditions: {
+          StringEquals: { 'aws:SourceAccount': this.account },
+          ArnLike: { 'aws:SourceArn': `arn:${this.partition}:ec2:${this.region}:${this.account}:vpc-flow-log/*` },
+        },
+      }),
+    });
     vpc.addFlowLog('FlowLog', {
-      destination: ec2.FlowLogDestination.toCloudWatchLogs(flowLogGroup),
+      destination: ec2.FlowLogDestination.toCloudWatchLogs(flowLogGroup, flowLogRole),
       trafficType: ec2.FlowLogTrafficType.REJECT,
     });
 
@@ -359,9 +389,10 @@ export class VettidOrgRelayStack extends cdk.Stack {
     // One rate-based rule (RELAY_WAF_RATE_LIMIT), keyed on the source
     // address of the connection to the load balancer (the client's: nothing
     // sits in front of it). WAF sees each HTTP request and a WebSocket's
-    // upgrade, not the frames inside a session. The refusal is the relay's
-    // own `rate_limited` error, so clients back off as they would for the
-    // flood guard. The push gateway's requests on this load balancer are
+    // upgrade, not the frames inside a session. In `block` mode the refusal
+    // is the relay's own `rate_limited` error, so clients back off as they
+    // would for the flood guard; in `count` mode (the start) WAF only
+    // counts. The push gateway's requests on this load balancer are
     // counted too. No managed rule groups: the relay authenticates every
     // request that does anything.
     const W = RELAY_WAF_RATE_LIMIT;
@@ -372,25 +403,27 @@ export class VettidOrgRelayStack extends cdk.Stack {
       customResponseBodies: {
         'rate-limited': {
           contentType: 'APPLICATION_JSON',
-          content: JSON.stringify({ code: 'rate_limited', message: 'too many requests from this address', retry_after: W.retryAfterSeconds }),
+          content: JSON.stringify({ code: 'rate_limited', message: 'too many requests from this address; retry after at least retry_after seconds', retry_after: W.retryAfterSeconds }),
         },
       },
       rules: [
         {
           name: 'rate-limit-per-ip',
           priority: 0,
-          action: {
-            block: {
-              customResponse: {
-                responseCode: 429,
-                customResponseBodyKey: 'rate-limited',
-                responseHeaders: [
-                  { name: 'Retry-After', value: String(W.retryAfterSeconds) },
-                  { name: 'Cache-Control', value: 'no-store' },
-                ],
+          action: W.mode === 'block'
+            ? {
+              block: {
+                customResponse: {
+                  responseCode: 429,
+                  customResponseBodyKey: 'rate-limited',
+                  responseHeaders: [
+                    { name: 'Retry-After', value: String(W.retryAfterSeconds) },
+                    { name: 'Cache-Control', value: 'no-store' },
+                  ],
+                },
               },
-            },
-          },
+            }
+            : { count: {} },
           statement: { rateBasedStatement: { limit: W.requests, evaluationWindowSec: W.windowSeconds, aggregateKeyType: 'IP' } },
           visibilityConfig: { cloudWatchMetricsEnabled: true, metricName: resourceName(config, 'relay-rate-limit'), sampledRequestsEnabled: true },
         },
@@ -596,6 +629,22 @@ export class VettidOrgRelayStack extends cdk.Stack {
       }),
       threshold: RELAY_LOG_INGEST_BYTES_PER_DAY,
       comparisonOperator: atLeast,
+      evaluationPeriods: 1,
+    });
+    // ---- The web ACL's rate rule (RELAY_WAF_RATE_LIMIT) -------------------------
+    // WAF's own metric for the rule (dimension Rule = the rule's metric
+    // name): requests it counted (count mode) or blocked (block mode).
+    alarm('WafRateLimit', 'waf-rate-limit', {
+      alarmDescription: says(`WAF's rate rule (${W.requests} requests per ${W.windowSeconds / 60} minutes per address) ${W.mode === 'block' ? 'blocked' : 'would have blocked (count mode)'} requests in the last 5 minutes: one address is above twice the flood guard. A vault host? Then raise the limit with the flood guard`),
+      metric: new cloudwatch.Metric({
+        namespace: 'AWS/WAFV2',
+        metricName: W.mode === 'block' ? 'BlockedRequests' : 'CountedRequests',
+        dimensionsMap: { WebACL: resourceName(config, 'relay'), Region: this.region, Rule: resourceName(config, 'relay-rate-limit') },
+        statistic: 'Sum',
+        period: cdk.Duration.minutes(5),
+      }),
+      threshold: 0,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
       evaluationPeriods: 1,
     });
     // Liveness of the line itself (and so of the alarms on it, which rest

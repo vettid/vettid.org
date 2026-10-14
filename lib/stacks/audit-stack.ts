@@ -42,12 +42,25 @@ const TRAIL_RETENTION_DAYS = 400;
  *  - a daily cost budget for this account's own costs: $15, about five
  *    times its normal (about $3 a day in October 2026);
  *  - a Cost Anomaly Detection subscription that alerts on an anomaly of
- *    $40 or more, on the account's services monitor.
+ *    $40 or more, on the account's services monitor;
+ *  - the organization's monthly cost budget (every account, through
+ *    consolidated billing): $500, alerting as actual spend passes $200
+ *    and every $50 after that, and when the month is forecast past $500.
+ *    A budget has at most five notifications (AWS Budgets CreateBudget),
+ *    so it is two budgets with the same $500 limit, one per range.
  * Both are a backstop a day late at best (Budgets data is updated a few
  * times a day); CloudWatch alarms remain the first line.
  */
 export const COST_ALERTS = {
   mainAccountDailyUsd: 15,
+  monthlyUsd: 500,
+  /** Actual monthly spend at which to alert, split by budget (≤ 5 notifications each). */
+  monthlyActualAlertsUsd: [
+    [200, 250, 300, 350, 400],
+    [450, 500],
+  ],
+  /** Forecast monthly spend at which to alert (on the second budget). */
+  monthlyForecastAlertUsd: 500,
   anomalyImpactUsd: 40,
   /**
    * The services monitor Cost Anomaly Detection created in this account
@@ -694,8 +707,7 @@ export class VettidOrgAuditStack extends cdk.Stack {
     // ---- Cost alerts (COST_ALERTS) ---------------------------------------------
     // AWS Budgets and Cost Anomaly Detection publish as their own services,
     // which the topic admits only when its policy names them; only for this
-    // account's budgets and subscriptions. The organization's monthly budget
-    // ("My Monthly Cost Budget") was made in the console and stays there.
+    // account's budgets and subscriptions.
     topic.addToResourcePolicy(new iam.PolicyStatement({
       sid: 'BudgetsOfThisAccount',
       principals: [new iam.ServicePrincipal('budgets.amazonaws.com')],
@@ -749,6 +761,31 @@ export class VettidOrgAuditStack extends cdk.Stack {
       }),
     });
     anomalies.node.addDependency(topicPolicy);
+    // The organization's monthly budget, in two parts (COST_ALERTS). It
+    // replaces the console-made "My Monthly Cost Budget" ($200), which is
+    // deleted by hand once these exist (RUNBOOK "Cost alerts").
+    const toTopic = [{ subscriptionType: 'SNS', address: topic.topicArn }];
+    const above = (notificationType: 'ACTUAL' | 'FORECASTED', usd: number) => ({
+      notification: { notificationType, comparisonOperator: 'GREATER_THAN', threshold: usd, thresholdType: 'ABSOLUTE_VALUE' },
+      subscribers: toTopic,
+    });
+    COST_ALERTS.monthlyActualAlertsUsd.forEach((alerts, i) => {
+      const forecast = i === COST_ALERTS.monthlyActualAlertsUsd.length - 1 ? [above('FORECASTED', COST_ALERTS.monthlyForecastAlertUsd)] : [];
+      const monthly = new budgets.CfnBudget(this, `MonthlyBudget${i + 1}`, {
+        budget: {
+          // Budget names allow letters, digits, spaces and _.:/=+-%@ only.
+          budgetName: `${resourceName(config, `monthly-${COST_ALERTS.monthlyUsd}`)} ${alerts[0]}-${alerts[alerts.length - 1]}`,
+          budgetType: 'COST',
+          timeUnit: 'MONTHLY',
+          budgetLimit: { amount: COST_ALERTS.monthlyUsd, unit: 'USD' },
+          metrics: ['UnblendedCost'],
+          // Every account's costs, without credits and refunds.
+          filterExpression: { not: { dimensions: { key: 'RECORD_TYPE', values: ['Credit', 'Refund'] } } },
+        },
+        notificationsWithSubscribers: [...alerts.map((usd) => above('ACTUAL', usd)), ...forecast],
+      });
+      monthly.node.addDependency(topicPolicy);
+    });
 
     new cdk.CfnOutput(this, 'AlertTopicArn', { value: topic.topicArn });
   }
