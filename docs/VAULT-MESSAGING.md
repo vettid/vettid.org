@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.30.0
+version: 0.31.0
 date: 2026-10-14
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -24,6 +24,25 @@ related:
   - VAULT-HOST-PROTOCOL.md (0.1.7; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.31.0: normative, as built in vettid-vault #84; approved by the
+    owner 2026-10-14 (owner decisions of 2026-10-13). **Only the
+    member's app approves a connection's pending invocation, and only
+    the app creates or accepts connections.** `action.respond{approve:
+    true}` from a desktop or an agent is answered `forbidden`, whether
+    or not the invocation exists, and the invocation stays pending for
+    the app; a denial is accepted from either (§6.8, §10.14).
+    `connection.invite.create`, `connection.invite.accept`,
+    `connection.approve`, `intro.create` and `intro.accept` are
+    app-only: a desktop or an agent is answered `forbidden` at once,
+    never held and never delegated, and a desktop request held before
+    its type became app-only is answered `forbidden` when an app
+    approves it. Before, the invitation and introduction types were
+    step-up types for desktops and `connection.approve` was open to
+    them. A desktop may still decline (`connection.decline`,
+    `intro.decline`) and deny. A desktop app hides the actions it
+    cannot take. §3.1, §6.4 "Who approves", §6.8, §10.4, §10.14 (the
+    rules and the `action.respond` row, which before listed desktops as
+    approvers), §10.15 and the §13.5 desktop row are updated to match
   - 0.30.0: normative, as built in vettid-vault #83; approved by the
     owner 2026-10-14. **The push gateway verifies that a
     registration's token belongs to the caller** (PUSH-GATEWAY 0.5.0).
@@ -1040,7 +1059,7 @@ hidden. Traffic-analysis resistance is a non-goal (as in RELAY-PROTOCOL
 |---|---|---|
 | Vault | yes | One per member, inside the enclave. Identified to VettID by an opaque `vault_id` (§11.5). |
 | Owner device, role `app` | yes | A phone or tablet installation. **Exactly one per vault** (§6.7): the holder of the Protean Credential (§3.5) and the only role that may unlock (§11.7). |
-| Owner device, role `desktop` | yes | Does not unlock in 0.2. |
+| Owner device, role `desktop` | yes | Does not unlock in 0.2. Never creates or accepts connections: inviting, accepting an invitation, approving a connection request, starting or accepting an introduction are the app's (§6.4); it may decline. |
 | Owner device, role `agent` | yes | Acts under LEASH grants. Never unlocks. |
 | Peer vault | yes | A connection's vault |
 | Enclave instance | no | Holds the enclave transport key (ETK, §11.2) |
@@ -3064,9 +3083,15 @@ Rules:
     with their SAS, so an app can show a request again at any time; the
     ends are announced as `sync.event{kind: "connection.request"}` and
     `connection.event`.
-- **Who approves.** Connection requests are approved or declined by an
-  owner device of role `app` or `desktop`. Agents MUST NOT create, accept,
-  approve or decline invitations.
+- **Who approves.** Only the member's phone (role `app`) creates or
+  accepts connections: `connection.invite.create`,
+  `connection.invite.accept` and `connection.approve` are app-only, and a
+  desktop's or agent's request of them is answered `forbidden` at once,
+  never held (§6.8). A desktop may decline a request
+  (`connection.decline`), cancel or list invitations and list requests.
+  Agents MUST NOT create, accept, approve or decline invitations. A
+  desktop app hides the actions it cannot take: approve, invite, accept
+  and introduce.
 - **Revocation.** The inviter MAY revoke an outstanding invite at any time
   with `connection.invite.cancel`. The vault denylists the open token's `jti`
   and DELETEs the claim. `connection.invite.list` shows outstanding invites.
@@ -3492,20 +3517,26 @@ current access session, so a request made within a session renews it.
   of them are **step-up types**: the vault holds each such request until
   an app approves it (below). They are the types that reveal a secret
   item's values, change items, tags that sharing may depend on, the
-  profile or the settings, create or accept an invitation, remove a
-  connection or lift a block, or disclose data to a connection or change
-  what connections can obtain: `item.put`, `item.reveal`, `item.tag`,
-  `item.sensitivity`, `item.delete`, `tag.delete`, `tag.merge`,
-  `profile.set`, `settings.set`, `share.rule.set`, `share.decide`,
-  `connection.invite.create`, `connection.invite.accept`,
-  `connection.remove`, `block.remove`, `grant.decide`,
-  `action.configure`, `intro.create`, `intro.accept`,
+  profile or the settings, remove a connection or lift a block, or
+  disclose data to a connection or change what connections can obtain:
+  `item.put`, `item.reveal`, `item.tag`, `item.sensitivity`,
+  `item.delete`, `tag.delete`, `tag.merge`, `profile.set`,
+  `settings.set`, `share.rule.set`, `share.decide`, `connection.remove`,
+  `block.remove`, `grant.decide`, `action.configure`,
   `location.share.start`, `location.history.list`, `.delete` and
   `.share`, and `presence.set`. Apps are never held. (Types that use the credential,
   such as `critical-secret-use.approve`, signed `leash.grant.issue`,
   `wallet.create` and `wallet.sign`, are app-only. A step-up type's app-only form, such as a critical
   item's `item.put` or an agent's `share.rule.set`, is answered
-  `forbidden` to a desktop at once, never held, §10.7, §10.12.)
+  `forbidden` to a desktop at once, never held, §10.7, §10.12. Creating
+  or accepting a connection is app-only too: `connection.invite.create`,
+  `connection.invite.accept`, `connection.approve`, `intro.create` and
+  `intro.accept` are answered `forbidden` to a desktop at once, never
+  held; a desktop may decline (`connection.decline`, `intro.decline`).
+  Likewise only an app approves a connection's pending invocation:
+  `action.respond{approve: true}` from a desktop is answered `forbidden`
+  at once, never held, and the invocation stays pending; a desktop may
+  deny one with `action.respond{approve: false}`, §10.14.)
 - An **agent** may send only the types listed for agents in §10, unless
   its LEASH grants (§10.11) allow more. For an agent's `agent.request`,
   and for its request of a type that a desktop may send but agents are
@@ -3515,7 +3546,9 @@ current access session, so a request made within a session renews it.
   is refused. Types only apps may send are never delegated. A referred
   request is executed on approval only if a grant still covers it then
   (otherwise `forbidden`): revoking a grant also stops what it had
-  referred.
+  referred. An agent's approval (`action.respond{approve: true}`) is
+  never delegated and is refused in any case; its denial is accepted as
+  a desktop's is (§10.14).
 - Fan-out reaches a desktop only within its access session (§9.1).
 
 **Approvals.** A held request is kept for at most 5 minutes, at most 8 per
@@ -4296,16 +4329,16 @@ device belongs to the unlock it ends.
 
 | Type | Request body | Response / event body |
 |---|---|---|
-| `connection.invite.create` | `{ttl_seconds: 600 \| 3600 \| 86400 \| 604800}` | `{invite_id, link, exp, remote}` |
+| `connection.invite.create` (app) | `{ttl_seconds: 600 \| 3600 \| 86400 \| 604800}` | `{invite_id, link, exp, remote}` |
 | `connection.invite.list` | `{}` | `{invites: [{invite_id, exp, remote}]}` |
 | `connection.invite.cancel` | `{invite_id}` | `{}` |
-| `connection.invite.accept` | `{link}` (the bare payload, §6.4) | `{connection_id, state: "waiting", remote, exp, name?}`: an outgoing request (§6.4); the SAS follows in `connection.request.outgoing` once the handshake has run (0.10.3); `name` is the bundle's `hint.name`. `exists` with body `{connection_id}` for a vault already connected or requested; `blocked`, `limit`, `claim_unavailable`, `bad_request`, `accept_failed`; `internal` from a vault without the account's names (§10.8, 0.19.0) |
+| `connection.invite.accept` (app) | `{link}` (the bare payload, §6.4) | `{connection_id, state: "waiting", remote, exp, name?}`: an outgoing request (§6.4); the SAS follows in `connection.request.outgoing` once the handshake has run (0.10.3); `name` is the bundle's `hint.name`. `exists` with body `{connection_id}` for a vault already connected or requested; `blocked`, `limit`, `claim_unavailable`, `bad_request`, `accept_failed`; `internal` from a vault without the account's names (§10.8, 0.19.0) |
 | `connection.request.pending` (incoming, to apps and desktops) | — | `{pending_id, invite_id, sas, remote, state, exp, profile?, introduced_by?}`, once `hs.fin` has checked out; `state` is `pending`, or `approved` under in-person auto-approval (§6.4) |
 | `connection.request.outgoing` (to apps and desktops, the accepting device included) | — | `{connection_id, sas, remote, exp, name?, introduced_by?}`, once the vault has sent `hs.fin` and knows the SAS (0.10.3), whichever device accepted or for an introduction (§10.15) |
 | `connection.request.list` | `{}` | `{incoming: [{pending_id, invite_id, sas, remote, state, peer_approved, created_at, exp, profile?, introduced_by?}], outgoing: [{connection_id, sas?, remote, state, peer_approved, created_at, exp, name?, introduced_by?}]}` |
 | `connection.approved` (V↔V, session mode under the handshake's epoch) | — | `{token, reconnect_token}`: the standing and reconnect tokens for the peer (§6.4, §7.1); sent once, at the member's approval; ignored once the connection is active (0.10.4) |
 | `connection.declined` (V↔V, as `connection.approved`) | — | `{}`: the member declined (or blocked) the request; sent once, at the decline, when the vault holds the handshake's epoch and the peer's request token; the receiver ends the request (`peer_declined`), or removes the connection if it is already active (§6.4, 0.10.5) |
-| `connection.approve`, `.decline` | `{pending_id}` (an incoming request) or `{connection_id}` (an outgoing one), exactly one | `{}`; `not_found` for an unknown or ended request; `bad_request` for an approval while the SAS is not yet known (0.10.3); a decline is accepted in any state, `waiting` included (0.10.4) |
+| `connection.approve` (app), `.decline` (app, desktop) | `{pending_id}` (an incoming request) or `{connection_id}` (an outgoing one), exactly one | `{}`; `not_found` for an unknown or ended request; `bad_request` for an approval while the SAS is not yet known (0.10.3); a decline is accepted in any state, `waiting` included (0.10.4) |
 | `connection.list` | `{}` | `{connections: [<connection>]}` |
 | `connection.get` | `{connection_id}` | `<connection>` |
 | `connection.update` | `{connection_id, version, alias?, note?, tags?, favorite?, archived?}` (at least one) | `{version}` |
@@ -4343,10 +4376,11 @@ connection: { "id": "<id>", "kind": "connection", "state": "active", "name": "..
   request's expiry and (0.10.5) the peer's decline (`peer_declined`, to
   every app and desktop).
 
-The D→V types above are sent by `app` or `desktop` devices (§6.4 "Who
-approves"); for desktops, `connection.invite.create`,
-`connection.invite.accept`, `connection.remove` and `block.remove` are
-step-up types (§6.8).
+The D→V types above are sent by `app` or `desktop` devices, except
+`connection.invite.create`, `connection.invite.accept` and
+`connection.approve`, which only the app sends (`forbidden` to a
+desktop, §6.4 "Who approves"); for desktops, `connection.remove` and
+`block.remove` are step-up types (§6.8).
 
 - **Metadata.** `alias` (at most 128 bytes), `note` (at most 1,024 bytes),
   `tags` (at most 16 distinct tags matching `[a-z0-9_.-]{1,32}`),
@@ -7834,6 +7868,11 @@ starts in `default-deny`:
 | `default-allow` | every active connection | at once, without asking |
 
 - A **sensitive** action cannot be `default-allow` (`bad_request`).
+- **Only the member's app approves** a pending invocation of any
+  action. A desktop or an agent may deny one, but its
+  `action.respond{approve: true}` is answered `forbidden` (whether or not
+  the invocation exists) and the invocation stays pending for the app
+  (§6.8). Denying is always allowed.
 - A **critical** action can only be `default-deny` or
   `prompt-each-time`, and is approved only by an **app within the
   credential's unlock window** (§3.5.3; `credential_locked` otherwise):
@@ -7856,7 +7895,7 @@ when none). The receiving vault keeps the latest list per connection
 | `action.invoke` (app, desktop) | `{connection_id, action_id, params}` | `{invocation_id}` |
 | `action.invocation` (V↔V) | — | `{invocation_id, action_id, version, params}` |
 | `action.pending` (V→D, apps and desktops) | — | `{invocation_id, connection_id, action_id, sensitivity, params, exp}` |
-| `action.respond` (app, desktop; critical: app in the unlock window) | `{invocation_id, approve}` | `{status}`: the result sent |
+| `action.respond` (app; desktop: deny only; critical: app in the unlock window) | `{invocation_id, approve}`; `approve: true` only from an app (`forbidden` otherwise) | `{status}`: the result sent |
 | `action.result` (V↔V) | — | `{invocation_id, status: "ok", result}` or `{invocation_id, status: "denied" \| "expired" \| "unavailable"}` |
 | `action.result` (V→D, apps and desktops) | — | `{connection_id, invocation_id, action_id, status, result?}` |
 
@@ -7951,10 +7990,10 @@ A vault             B vault (introducer)              C vault
 
 | Type | Request body | Response / event body |
 |---|---|---|
-| `intro.create` (app; desktop: step-up) | `{a, c, to_a: {name, note?}, to_c: {name, note?}}` | `{intro_id, exp}` |
+| `intro.create` (app) | `{a, c, to_a: {name, note?}, to_c: {name, note?}}` | `{intro_id, exp}` |
 | `intro.cancel` (app, desktop) | `{intro_id}` | `{}` |
 | `intro.list` (app, desktop) | `{}` | `{made: [{intro_id, a, c, state, exp}], received: [{intro_id, connection_id, peer, state, exp}]}` |
-| `intro.accept`, `intro.decline` (app; desktop: step-up for accept) | `{intro_id}` | `{}` |
+| `intro.accept` (app), `intro.decline` (app, desktop) | `{intro_id}` | `{}` |
 | `intro.offer` (V↔V, B → A, C) | — | `{intro_id, peer: {name, note?}, exp}` |
 | `intro.answer` (V↔V, A, C → B) | — | `{intro_id, accept}` |
 | `intro.connect` (V↔V, B → A) | — | `{intro_id, peer_ik}` |
@@ -12223,7 +12262,7 @@ it can read and write only its own objects and use only its own relay key
 | An unlocked app, or a desktop in an access session, in someone else's hands, without the PIN and the password (0.13.0) | What its role allows until the deadline; then nothing: the vault holds, the app hides its cached content, desktops' sessions are suspended; ten wrong guesses lock the vault, which then needs the PIN to open (§3.6) | Recovery; a shorter `owner_check.interval_seconds` |
 | A thief who holds the app and knows both the PIN and the password | Everything the app can do: the check passes, and the hold changes nothing (§13.8) | Recovery (§11.11), which replaces the app; change the PIN and the password |
 | The vault's desktops and agents, or an unlocked app, in someone else's hands while the member has turned the hold off (§3.6.7) | The app: nothing past the deadline but the check, as with the hold on. Desktops and agents: what their sessions and grants allow, until the hold comes back on (`hold_off_until` or the member), the vault locks or a check succeeds. Nobody can turn the hold off, or keep it off, without the PIN and the password; ten failed checks still lock the vault | Turn the hold on (no check needed); `device.session.end`, `device.unlink`, `leash.grant.revoke`; `vault.lock` through the account site; recovery |
-| Desktop | Within an access session, what desktops may send; step-up types (secret items' values, item and tag changes, profile, settings, share rules and decisions, invitations, removals, grant decisions, action configurations, introductions, location shares, the location log, the presence policy) only with an app's approval; never critical items or wallet spends; nothing after the session ends (§6.8) | `device.session.end`; unlink |
+| Desktop | Within an access session, what desktops may send; step-up types (secret items' values, item and tag changes, profile, settings, share rules and decisions, removals, grant decisions, action configurations, location shares, the location log, the presence policy) only with an app's approval; never critical items or wallet spends; never invites, accepts or approves a connection, starts or accepts an introduction, or approves an invocation (it may decline and deny); nothing after the session ends (§6.8) | `device.session.end`; unlink |
 | Agent | Paused while the vault is held (§3.6.3): refused in the vault, and its delegations rejected by relying parties within `status_ttl` + 60 s. Otherwise, within its access session, only what its LEASH grants cover: through `ask` grants nothing without an app's approval of each request (at most 20 referrals an hour), through `auto` grants up to their rate limits; LEASH operations only on the `data` and `secret` items its share rules include, never critical ones; never app-only types, invitations, credential, device or grant management. Refused requests are throttled and repeated ones suspend it; its activity is summarised in the audit log, so it cannot push older entries out (§10.11) | `leash.grant.revoke`, `device.session.end`, `device.unlink`; suspension is automatic |
 | A LEASH delegation (every grant) | A claim, to relying parties that trust the member's credential key, that the agent holds that scope, until the grant's `expires_at` if any; the vault never relies on it. A relying party that requires a status statement accepts a revoked delegation for at most its `status_ttl` (≤ 1 h, default 15 min) plus 60 s of skew (LEASH §3.5's bound); one that does not can be shown it until `exp` (§10.11) | `leash.grant.revoke` (no new statements); a shorter `status_ttl` |
 | The vault's `ik` as status issuer | Signing statements that keep a revoked or suspended agent's delegations "valid" for relying parties; it grants nothing in the vault itself. An approved release does only what §10.11 says (§2.1) | Rotate the `ik` (§3.4): the chain moves the issuer; revoke the grants |
