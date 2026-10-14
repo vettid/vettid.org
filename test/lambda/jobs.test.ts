@@ -371,6 +371,8 @@ describe('cleanup job: start-overs (MEMBER-API 2.1.0, VAULT-MESSAGING 0.16.0 §1
       return input.ExpressionAttributeValues?.[':c'] === 'canceled' && input.ExpressionAttributeValues?.[':s'] === 'member' ? { Items: [gone] } : { Items: [] };
     });
     ddb.on(DeleteCommand).resolves({});
+    ddb.on(GetCommand, { TableName: 'list' } as any).resolves({});
+    ses.on(DeleteEmailIdentityCommand).resolves({});
     idp.on(AdminDeleteUserCommand).resolves({});
     expect(await cleanup.handler()).toMatchObject({ deleted: 1, failures: 0, incomplete: 0 });
     expect(memberReads()).toHaveLength(0); // the account's deletion does not ask whether the account is active
@@ -385,7 +387,7 @@ describe('cleanup job: start-overs (MEMBER-API 2.1.0, VAULT-MESSAGING 0.16.0 §1
     const [send] = sqs.commandCalls(SendMessageCommand);
     expect(JSON.parse(send.args[0].input.MessageBody!)).toMatchObject({ op: 'delete', vault_id: 'a'.repeat(32), user_guid: 'g1' });
     expect(vaultUpdates().map((u) => u.UpdateExpression)).toEqual(['SET deletion_requested_at = :t']);
-    expect(audits()).toEqual([expect.objectContaining({ action: 'member.delete_after_cancel', detail: { vault_ids: ['a'.repeat(32)] } })]);
+    expect(audits()).toEqual([expect.objectContaining({ action: 'member.delete_after_cancel', detail: { vault_ids: ['a'.repeat(32)], identity: 'deleted' } })]);
   });
 
   // ---- the admin API's cancel (its own function, handler cancelHandler) ----
@@ -570,6 +572,295 @@ describe('cleanup job: start-overs (MEMBER-API 2.1.0, VAULT-MESSAGING 0.16.0 §1
       await cleanup.handler({ task: 'cancel_start_over', user_guid: G });
       expect(removes().filter((u) => u.UpdateExpression === 'REMOVE deletion')).toHaveLength(0);
     });
+  });
+});
+
+describe('cleanup job: vaults whose member row is gone (daily run)', () => {
+  const R = 'c'.repeat(96);
+  const QP = 'https://sqs.us-east-1.amazonaws.com/123456789012/vettid-org-vault-control-';
+  const nowS = () => Math.floor(Date.now() / 1000);
+  const A = 'a'.repeat(32);
+  const B = 'b'.repeat(32);
+  const vault = (extra: Record<string, unknown> = {}) => ({ vault_id: A, user_guid: 'g7', state: 'locked', sealed_release: R, lease: { instance_id: 'i1', lease_expires_at: nowS() + 60 }, ...extra });
+  const ORPHAN_SCAN = 'attribute_exists(user_guid) AND attribute_not_exists(deletion_requested_at) AND #s <> :d';
+  /** The vaults table: the orphan scan answers `scan`; the retry scan nothing; the user-index each owner's rows. */
+  const table = (scan: Record<string, unknown>[]) => {
+    ddb.on(ScanCommand).callsFake((input) => ({ Items: input.FilterExpression === ORPHAN_SCAN ? scan : [] }));
+    ddb.on(QueryCommand).callsFake((input) => (input.TableName === 'vaults' && input.IndexName === 'user-index' ? { Items: scan.filter((v) => v.user_guid === input.ExpressionAttributeValues?.[':g']) } : { Items: [] }));
+  };
+  const members = (present: string[], failing: string[] = []) =>
+    ddb.on(GetCommand).callsFake((input) => {
+      if (input.TableName === 'instances') return { Item: { instance_id: 'i1', release: R, queue_url: QP + 'i1', descriptor: 'd', attestation: 'a', heartbeat_at: nowS() } };
+      if (input.TableName !== 'members') return {};
+      const g = input.Key.user_guid;
+      if (failing.includes(g)) throw Object.assign(new Error('x'), { name: 'ProvisionedThroughputExceededException' });
+      return present.includes(g) ? { Item: { user_guid: g, state: 'member', account_status: 'active' } } : {};
+    });
+  const memberReads = () => ddb.commandCalls(GetCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'members');
+  const audits = () => ddb.commandCalls(PutCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'audit').map((i) => i.Item);
+  const vaultDeletes = () => ddb.commandCalls(DeleteCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'vaults').map((i) => i.Key);
+  let log: jest.SpyInstance;
+  const lines = () => log.mock.calls.map((c) => String(c[0]));
+  const emf = () => lines().map((l) => JSON.parse(l)).find((l) => l._aws && 'OrphanVaultDeletions' in l);
+
+  beforeEach(() => {
+    ddb.on(UpdateCommand).resolves({});
+    ddb.on(DeleteCommand).resolves({});
+    log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  const DAY = 86_400;
+  const vaultWrites = () => ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'vaults');
+  const MARK = { UpdateExpression: 'SET orphan_seen_at = :t', ConditionExpression: 'attribute_exists(vault_id) AND attribute_not_exists(orphan_seen_at) AND attribute_not_exists(deletion_requested_at)' };
+  const nothingIrreversible = () => {
+    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
+    expect(vaultWrites().filter((i) => i.UpdateExpression !== MARK.UpdateExpression && i.UpdateExpression !== 'REMOVE orphan_seen_at')).toEqual([]);
+    expect(vaultDeletes()).toEqual([]);
+    expect(audits()).toEqual([]);
+  };
+
+  test('first sight of a vault without a member row: only marked (conditional, never moved), warned and counted for the alarm; nothing irreversible', async () => {
+    table([vault(), vault({ vault_id: B, state: 'enrolling', sealed_release: undefined, lease: undefined })]);
+    members([]);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const r = await cleanup.handler();
+    expect(memberReads()).toEqual([{ TableName: 'members', Key: { user_guid: 'g7' }, ConsistentRead: true }]); // once per owner, consistently
+    expect(vaultWrites()).toEqual([
+      expect.objectContaining({ Key: { vault_id: A }, ...MARK, ExpressionAttributeValues: { ':t': expect.any(Number) } }),
+      expect.objectContaining({ Key: { vault_id: B }, ...MARK }),
+    ]);
+    nothingIrreversible();
+    expect(warn.mock.calls.map((c) => String(c[0]))).toContain('orphaned vaults: a vault without a member row, marked');
+    expect(lines()).toContain('{"vaultOrphans":{"marked":2,"waiting":0,"cleared":0,"requested":0,"operator_held":0,"held":0,"read_errors":0,"failures":0}}');
+    expect(emf()).toMatchObject({ OrphanVaultsSeen: 2, OrphanVaultsWaiting: 0, OrphanVaultDeletions: 0, OrphanVaultsOperatorHeld: 0, OrphanVaultsHeld: 0 });
+    // The summary line and the answer are as before.
+    expect(Object.keys(r)).toEqual(['deleted', 'reclaimed', 'expired', 'vaultRetries', 'declined', 'failures', 'incomplete']);
+    expect(lines()).toContain(JSON.stringify(r));
+  });
+
+  test('a mark that is already there is not moved (the conditional write fails quietly)', async () => {
+    table([vault()]);
+    members([]);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    ddb.on(UpdateCommand).rejects(ccf());
+    await cleanup.handler();
+    expect(emf()).toMatchObject({ OrphanVaultsSeen: 0, OrphanVaultsHeld: 0 });
+    nothingIrreversible();
+  });
+
+  test('inside the 7 days: waiting, nothing written', async () => {
+    table([vault({ orphan_seen_at: nowS() - 6 * DAY })]);
+    members([]);
+    await cleanup.handler();
+    expect(vaultWrites()).toEqual([]);
+    nothingIrreversible();
+    expect(emf()).toMatchObject({ OrphanVaultsSeen: 0, OrphanVaultsWaiting: 1, OrphanVaultDeletions: 0 });
+  });
+
+  test("7 days after the mark, the member row still missing: asked to delete itself exactly as for a canceled account (the host's delete, the mark, a never-sealed row and the pointer row deleted), audited, alarmed", async () => {
+    const seen = nowS() - 7 * DAY - 60;
+    table([vault({ orphan_seen_at: seen }), vault({ vault_id: B, state: 'enrolling', sealed_release: undefined, lease: undefined, orphan_seen_at: seen + 30 })]);
+    members([]);
+    await cleanup.handler();
+    const [send] = sqs.commandCalls(SendMessageCommand);
+    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(1);
+    expect(send.args[0].input.QueueUrl).toBe(QP + 'i1');
+    expect(JSON.parse(send.args[0].input.MessageBody!)).toMatchObject({ v: 1, op: 'delete', vault_id: A, user_guid: 'g7' });
+    expect(vaultWrites()).toEqual([expect.objectContaining({ Key: { vault_id: A }, UpdateExpression: 'SET deletion_requested_at = :t' })]);
+    expect(vaultDeletes()).toEqual([{ vault_id: B }, { vault_id: 'user#g7' }]);
+    expect(audits()).toEqual([expect.objectContaining({ actor: 'system', action: 'vault.orphan_deletion_requested', subject: 'g7', detail: { vault_ids: [A, B], orphan_seen_at: seen } })]);
+    expect(emf()).toMatchObject({ OrphanVaultsSeen: 0, OrphanVaultDeletions: 1, OrphanVaultsHeld: 0 });
+  });
+
+  test("one of the member's vaults marked long ago, another not yet: the new one is marked and nothing is deleted until every mark is 7 days old", async () => {
+    table([vault({ orphan_seen_at: nowS() - 30 * DAY }), vault({ vault_id: B })]);
+    members([]);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await cleanup.handler();
+    expect(vaultWrites()).toEqual([expect.objectContaining({ Key: { vault_id: B }, ...MARK })]);
+    nothingIrreversible();
+  });
+
+  test('the member row is back (a restore, a read that was wrong): the mark is removed, nothing else', async () => {
+    table([vault({ orphan_seen_at: nowS() - 30 * DAY }), vault({ vault_id: B })]);
+    members(['g7']);
+    await cleanup.handler();
+    expect(vaultWrites()).toEqual([{ TableName: 'vaults', Key: { vault_id: A }, UpdateExpression: 'REMOVE orphan_seen_at', ConditionExpression: 'attribute_exists(orphan_seen_at)' }]);
+    nothingIrreversible();
+    expect(lines()).toContain('{"vaultOrphans":{"marked":0,"waiting":0,"cleared":1,"requested":0,"operator_held":0,"held":0,"read_errors":0,"failures":0}}');
+  });
+
+  test("an operator's hold on one vault keeps all of that member's vaults out: not marked, not deleted, however old the mark", async () => {
+    table([vault({ orphan_seen_at: nowS() - 30 * DAY }), vault({ vault_id: B, orphan_hold: true })]);
+    members([]);
+    await cleanup.handler();
+    expect(vaultWrites()).toEqual([]);
+    nothingIrreversible();
+    expect(emf()).toMatchObject({ OrphanVaultsOperatorHeld: 1, OrphanVaultDeletions: 0, OrphanVaultsHeld: 0 });
+  });
+
+  test.each([['the string "true"', 'true'], ['the number 1', 1], ['false (still present)', false], ['null', null]])('a hold written as %s is still a hold (fail safe), with a warning', async (_n, hold) => {
+    table([vault({ orphan_seen_at: nowS() - 30 * DAY, orphan_hold: hold })]);
+    members([]);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await cleanup.handler();
+    expect(vaultWrites()).toEqual([]);
+    nothingIrreversible();
+    expect(emf()).toMatchObject({ OrphanVaultsOperatorHeld: 1, OrphanVaultDeletions: 0 });
+    expect(warn.mock.calls.map((c) => String(c[0]))).toContain('orphaned vaults: orphan_hold is not the boolean true; treated as a hold');
+  });
+
+  test('the first run after the deploy: vaults already without a member (one with a start-over held for the missing row, as after an old admin Delete) are only marked', async () => {
+    const DID = '01JB2Z6V9K3M4N5P6Q7R8S9T0V';
+    members(['x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7', 'x8', 'x9', 'x10', 'x11', 'x12']);
+    table([
+      vault({ deletion: { deletion_id: DID, state: 'pending', deletes_at: nowS() - 90 * DAY } }),
+      vault({ vault_id: B, user_guid: 'g8' }),
+      ...Array.from({ length: 12 }, (_, i) => vault({ vault_id: String.fromCharCode(100 + i).repeat(32), user_guid: `x${i + 1}` })),
+    ]);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await cleanup.handler();
+    expect(vaultWrites().map((i) => [i.Key, i.UpdateExpression])).toEqual([[{ vault_id: A }, MARK.UpdateExpression], [{ vault_id: B }, MARK.UpdateExpression]]);
+    nothingIrreversible();
+  });
+
+  test("rows the scan's filter should not have returned are checked again and skipped: already asked, deleted, no owner, a pointer row", async () => {
+    table([
+      vault({ deletion_requested_at: nowS() - 60 }),
+      vault({ vault_id: B, state: 'deleted' }),
+      vault({ vault_id: 'c'.repeat(32), user_guid: undefined }),
+      { vault_id: 'user#g7', current_vault_id: A },
+    ]);
+    members([]);
+    await cleanup.handler();
+    expect(ddb.commandCalls(ScanCommand).map((c) => c.args[0].input).find((i) => i.FilterExpression === ORPHAN_SCAN)).toMatchObject({ TableName: 'vaults', ExpressionAttributeNames: { '#s': 'state' }, ExpressionAttributeValues: { ':d': 'deleted' } });
+    expect(memberReads()).toEqual([]);
+    expect(vaultWrites()).toEqual([]);
+    nothingIrreversible();
+  });
+
+  test('a member row that cannot be read: nothing written for it; the next owner is still handled; counted for the alarm', async () => {
+    const old = nowS() - 8 * DAY;
+    members(['p1', 'p2', 'p3', 'p4', 'p5', 'p6'], ['g7']);
+    table([vault({ orphan_seen_at: old }), vault({ vault_id: B, user_guid: 'g8', orphan_seen_at: old }), ...['p1', 'p2', 'p3', 'p4', 'p5', 'p6'].map((g, i) => vault({ vault_id: String(i).repeat(32), user_guid: g }))]);
+    const err = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    await cleanup.handler();
+    expect(sqs.commandCalls(SendMessageCommand).map((c) => JSON.parse(c.args[0].input.MessageBody!).vault_id)).toEqual([B]);
+    expect(audits().map((a) => a!.subject)).toEqual(['g8']);
+    expect(emf()).toMatchObject({ OrphanVaultDeletions: 1, OrphanVaultsHeld: 1 });
+    expect(err.mock.calls.map((c) => String(c[0]))).toContain('orphaned vaults: a member row could not be read');
+  });
+
+  test(`more than ${5} members without a row: none is marked or asked, at every run until that is no longer so; held and alarmed`, async () => {
+    expect(cleanup.ORPHAN_LIMIT).toBe(5);
+    const present = Array.from({ length: 60 }, (_, i) => `p${i}`);
+    const rows = (n: number) => [
+      ...Array.from({ length: n }, (_, i) => vault({ vault_id: String(i).repeat(32), user_guid: `g${i}`, orphan_seen_at: nowS() - 30 * DAY })),
+      ...present.map((g, i) => vault({ vault_id: `${i}`.padStart(32, 'f'), user_guid: g })),
+    ];
+    members(present);
+    table(rows(6));
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    for (let i = 0; i < 2; i++) {
+      ddb.resetHistory(); log.mockClear();
+      await cleanup.handler();
+      expect(vaultWrites()).toEqual([]);
+      nothingIrreversible();
+      expect(emf()).toMatchObject({ OrphanVaultsSeen: 0, OrphanVaultDeletions: 0, OrphanVaultsHeld: 6 });
+    }
+    expect(warn.mock.calls.map((c) => String(c[0]))).toContain('orphaned vaults: held, more members without a row than one run accepts');
+    // Five, among 65 owners, are within both limits.
+    ddb.resetHistory(); log.mockClear();
+    table(rows(5));
+    await cleanup.handler();
+    expect(audits()).toHaveLength(5);
+  });
+
+  test(`more than ${15} % of the owners without a row (a members table restored from an older backup): held, however few`, async () => {
+    expect(cleanup.ORPHAN_SHARE).toBe(0.15);
+    const old = nowS() - 30 * DAY;
+    // 2 of 10 owners (20 %): held.
+    members(['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8']);
+    const others = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8'].map((g, i) => vault({ vault_id: `${i}`.padStart(32, 'f'), user_guid: g }));
+    table([vault({ orphan_seen_at: old }), vault({ vault_id: B, user_guid: 'g8', orphan_seen_at: old }), ...others]);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await cleanup.handler();
+    nothingIrreversible();
+    expect(emf()).toMatchObject({ OrphanVaultsHeld: 2 });
+    // 1 of 9 (at least one is always allowed): handled.
+    ddb.resetHistory(); log.mockClear();
+    table([vault({ orphan_seen_at: old }), ...others]);
+    await cleanup.handler();
+    expect(audits()).toHaveLength(1);
+    // A single owner, without a row: one is allowed.
+    ddb.resetHistory(); log.mockClear();
+    table([vault({ orphan_seen_at: old })]);
+    await cleanup.handler();
+    expect(audits()).toHaveLength(1);
+  });
+
+  test('the scan itself fails: the rest of the run goes on, and the failure is counted for the alarm', async () => {
+    ddb.on(ScanCommand).callsFake((input) => {
+      if (input.FilterExpression === ORPHAN_SCAN) throw Object.assign(new Error('x'), { name: 'InternalServerError' });
+      return { Items: [] };
+    });
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const r = await cleanup.handler();
+    expect(r).toMatchObject({ vaultRetries: 0, expired: 0 });
+    expect(emf()).toMatchObject({ OrphanVaultDeletions: 0, OrphanVaultsHeld: 1 });
+  });
+
+  test('a start-over held for a missing member row is not carried out by the 5-minute run; once the daily scan has asked the vault, that run leaves it to the retry', async () => {
+    const DID = '01JB2Z6V9K3M4N5P6Q7R8S9T0V';
+    const pending = vault({ deletion: { deletion_id: DID, state: 'pending', deletes_at: nowS() - 5 } });
+    members([]);
+    ddb.on(ScanCommand).resolves({ Items: [pending] });
+    expect((await cleanup.executeStartOvers(nowS())).held).toEqual({ not_active: 0, no_member: 1, read_error: 0 });
+    ddb.on(ScanCommand).resolves({ Items: [{ ...pending, deletion_requested_at: nowS() - 60 }] });
+    expect((await cleanup.executeStartOvers(nowS())).held).toEqual({ not_active: 0, no_member: 0, read_error: 0 });
+    expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
+  });
+});
+
+describe('task member_vaults (the function the admin API invokes before a Delete)', () => {
+  const G = '11111111-2222-4333-8444-555555555555';
+  const A = 'a'.repeat(32);
+  const B = 'b'.repeat(32);
+  const check = (user_guid: unknown = G) => cleanup.memberVaultsHandler({ task: 'member_vaults', user_guid });
+  const vaults = (t: { pointer?: string; index: Record<string, unknown>[]; base: Record<string, unknown>[] }) =>
+    ddb.on(QueryCommand).callsFake((input) => {
+      if (input.TableName !== 'vaults') return { Items: [] };
+      if (input.IndexName) return { Items: t.index };
+      const id = input.ExpressionAttributeValues?.[':id'];
+      if (id === `user#${G}`) return { Items: t.pointer ? [{ vault_id: id, current_vault_id: t.pointer }] : [] };
+      return { Items: t.base.filter((r) => r.vault_id === id) };
+    });
+
+  test("the member's vaults that are not deleted, each read again from the base table, consistently; the current one found through the pointer even when the index does not list it", async () => {
+    vaults({ pointer: A, index: [{ vault_id: B, user_guid: G }], base: [{ vault_id: A, user_guid: G, state: 'locked' }, { vault_id: B, user_guid: G, state: 'deleted' }] });
+    expect(await check()).toEqual({ ok: true, task: 'member_vaults', vaults: [{ vault_id: A, state: 'locked' }] });
+    const reads = ddb.commandCalls(QueryCommand).map((c) => c.args[0].input).filter((i) => !i.IndexName);
+    expect(reads.every((i) => i.ConsistentRead === true)).toBe(true);
+    expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
+    expect(ddb.commandCalls(DeleteCommand)).toHaveLength(0);
+  });
+
+  test("a deletion asked for and not yet reported still counts; a row of another member, and none at all, do not", async () => {
+    vaults({ index: [{ vault_id: A, user_guid: G }, { vault_id: B, user_guid: G }], base: [{ vault_id: A, user_guid: G, state: 'locked', deletion_requested_at: 1 }, { vault_id: B, user_guid: 'other' }] });
+    expect((await check()).vaults).toEqual([{ vault_id: A, state: 'locked' }]);
+    vaults({ index: [], base: [] });
+    expect((await check()).vaults).toEqual([]);
+  });
+
+  test('a failed read fails the task (never "no vault"); anything but an account id, or another task, is refused before any read', async () => {
+    ddb.on(QueryCommand).rejects(Object.assign(new Error('x'), { name: 'AccessDeniedException' }));
+    await expect(check()).rejects.toThrow();
+    ddb.resetHistory();
+    await expect(check('email:a@b.c')).rejects.toThrow('not an account id');
+    await expect(cleanup.memberVaultsHandler({ task: 'cancel_start_over', user_guid: G })).rejects.toThrow('member_vaults only');
+    await expect(cleanup.memberVaultsHandler()).rejects.toThrow('member_vaults only');
+    expect(ddb.commandCalls(QueryCommand)).toHaveLength(0);
   });
 });
 

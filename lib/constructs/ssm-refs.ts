@@ -45,6 +45,10 @@ export type SsmRefKey =
   // deletion and does nothing else; the admin API invokes it (it runs under
   // the cleanup job's role, which holds the right to the vault tables).
   | 'member-api/start-over-cancel-fn-arn'
+  // The member API's function that lists a member's vaults that are not
+  // deleted (read only); the admin API's Delete invokes it and refuses
+  // while there is one.
+  | 'member-api/member-vaults-fn-arn'
   // A non-prod stage's own zone (VettidOrgStageDnsStack); prod's site
   // stacks look vettid.org up instead (cached in cdk.context.json).
   | 'dns/zone-id'

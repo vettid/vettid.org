@@ -343,6 +343,31 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       }),
     ];
+    // Vaults whose member row is gone (an account deletion that stopped
+    // before its vault step): the daily run marks them at first sight and
+    // asks them to delete themselves as for a canceled account 7 days later
+    // (EMF at every daily run). Three alarms, as the removal alarms: the
+    // first sighting (a warning while the vault still exists), the
+    // deletions themselves (irreversible), and what was held, unreadable or
+    // failed.
+    const orphanAlarm = (id: string, name: string, metricName: string, alarmDescription: string) =>
+      new cloudwatch.Alarm(this, id, {
+        alarmName: resourceName(config, name),
+        alarmDescription,
+        metric: removalMetric(metricName),
+        threshold: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        evaluationPeriods: 1,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+    const orphanAlarms = [
+      orphanAlarm('OrphanVaultsSeen', 'orphan-vaults-seen', 'OrphanVaultsSeen',
+        'OrphanVaultsSeen: the daily cleanup run found a vault whose member row is gone and marked it (orphan_seen_at). Unless the member row is back or an operator holds it (orphan_hold), the vault is asked to delete itself 7 days after the mark, which cannot be undone. Check why the member is gone now (RUNBOOK "Vaults without a member").'),
+      orphanAlarm('OrphanVaultDeletions', 'orphan-vault-deletions', 'OrphanVaultDeletions',
+        'OrphanVaultDeletions: the daily cleanup run asked the vaults of a member whose row has been gone for 7 days since the mark to delete themselves, as for a canceled account (audit vault.orphan_deletion_requested; RUNBOOK "Vaults without a member").'),
+      orphanAlarm('OrphanVaultsHeld', 'orphan-vaults-held', 'OrphanVaultsHeld',
+        'OrphanVaultsHeld: the daily cleanup run found vaults whose member row is gone and did not handle all of them: more members without a row than one run accepts (more than 5, or more than 15 % of the owners: a wrong members table, or one restored from an older backup, is more likely; held at every run until that is no longer so), a member row it could not read, or a write that failed. Nothing was deleted on doubt (RUNBOOK "Vaults without a member").'),
+    ];
     // "Delete my vault and start over" (MEMBER-API 2.1.0, VAULT-MESSAGING
     // 0.16.0 §11.11.9): the same job, every 5 minutes, sends the host's
     // `delete` for each start-over past its 24 h.
@@ -374,7 +399,7 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
       });
     const startOverAlarms = [
       heldAlarm('StartOverHeldNoMember', 'start-over-held-no-member', 'StartOverHeldNoMember',
-        'StartOverHeldNoMember: a vault has a pending "delete my vault and start over" past its time and its member row is gone (an admin deleted the member, or an account deletion did not reach its vaults). The deletion is held and the vault is kept until an operator decides (RUNBOOK "No recovery with the backup off; start over", "A held deletion without a member").'),
+        'StartOverHeldNoMember: a vault has a pending "delete my vault and start over" past its time and its member row is gone (an account deletion did not reach its vaults, or an admin deleted the member before Delete refused while a vault exists). The start-over is held; the daily cleanup run marks the vault (OrphanVaultsSeen) and, if the member row is still missing 7 days later and no operator holds the vault, asks it to delete itself as for a canceled account (OrphanVaultDeletions) (RUNBOOK "No recovery with the backup off; start over", "A held deletion without a member").'),
       heldAlarm('StartOverHeldReadError', 'start-over-held-read-error', 'StartOverHeldReadError',
         'StartOverHeldReadError: for three runs in a row the cleanup job could not read a member row, so the vault deletions that are due are held and none is carried out (a missing permission on the members table, or the table itself; RUNBOOK "No recovery with the backup off; start over").'),
     ];
@@ -391,6 +416,21 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
       role: cleanup.role!,
       description: "Cancels one member's pending vault deletion for the admin API (task cancel_start_over only)",
     }).fn;
+    // The admin API's Delete refuses while the member has a vault that is
+    // not deleted (ADMIN-API "People"). It asks this third function on the
+    // cleanup job's module, which runs only the task `member_vaults`
+    // (`memberVaultsHandler`). Its own fixed-name role may only Query the
+    // vaults table and its user-index (lib/vault/access.ts, consumer
+    // `member-vaults`): it can neither write nor send. Its ARN is
+    // published for VettidOrgAdminApiStack.
+    const memberVaults = new ApiFunction(this, 'MemberVaults', {
+      entry: 'lambda/jobs/cleanup.ts',
+      handler: 'memberVaultsHandler',
+      environment: vaultTableEnv,
+      roleName: vaultApiRoleName(config, 'member-vaults'),
+      description: "Lists one member's vaults that are not deleted, for the admin API's Delete (task member_vaults only)",
+    }).fn;
+    vaultGrants(memberVaults, 'member-vaults');
 
     // "Account ready" and, 2.6.0, "we have your request" (with the
     // withdrawal link; UpdateItem stores the token's hash on the row).
@@ -516,6 +556,7 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
       for (const a of pausedAlarms) a.addAlarmAction(action);
       for (const a of removalAlarms) a.addAlarmAction(action);
       for (const a of startOverAlarms) a.addAlarmAction(action);
+      for (const a of orphanAlarms) a.addAlarmAction(action);
       typedCeiling.addAlarmAction(action);
       pausedAlarms[0].addOkAction(action); // "resumed"; the 24 h alarm's OK would say it twice
       watchSilent.addAlarmAction(action);
@@ -562,5 +603,6 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
 
     publishRef(this, config, 'member-api/domain', cdk.Fn.select(2, cdk.Fn.split('/', api.apiEndpoint)));
     publishRef(this, config, 'member-api/start-over-cancel-fn-arn', startOverCancel.functionArn);
+    publishRef(this, config, 'member-api/member-vaults-fn-arn', memberVaults.functionArn);
   }
 }

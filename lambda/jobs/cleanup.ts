@@ -14,7 +14,11 @@
  * (event `{task: "cancel_start_over", user_guid}`): the admin API, which
  * holds no right on the vault tables, invokes it to cancel a member's
  * pending start-over. It shares this job's role. `handler` below does not
- * know that task.
+ * know that task. A third function runs `memberVaultsHandler` and nothing
+ * else (event `{task: "member_vaults", user_guid}`), under a role of its
+ * own that may only Query the vaults table and its user-index: the admin
+ * API's Delete asks it whether the member still has a vault, and refuses
+ * while one exists.
  *
  * Every 15 minutes (event `{task: "requests"}`, MEMBER-API 2.6.0): each
  * withdrawn membership request is removed (row, email marker, a Cognito
@@ -25,7 +29,12 @@
  *  - delete accounts canceled more than 7 days ago (Cognito user,
  *    subscription, member row + email marker; each vault is asked to delete
  *    itself, VAULT-MESSAGING 0.9.0 §12.5, and its row goes with the
- *    vault_deleted notice; the audit trail stays)
+ *    vault_deleted notice; the SES identity of the address goes under the
+ *    14-day reclaim's rule; the audit trail stays)
+ *  - mark the vaults whose member row is gone, and that nobody asked yet;
+ *    7 days after the mark, the member row still missing and no operator
+ *    hold, ask them to delete themselves as for a canceled account (an
+ *    account deletion that stopped before its vault step)
  *  - retry vault deletions not yet reported
  *  - reclaim membership requests never email-verified within 14 days
  *  - remove membership requests declined more than 30 days ago (2.6.0),
@@ -182,6 +191,220 @@ async function retryVaultDeletions(nowS: number): Promise<number> {
   return n;
 }
 
+/** More members without a row than this in one daily run, and the run holds all of them. */
+export const ORPHAN_LIMIT = 5;
+/**
+ * Also held when the members without a row are more than this share of the
+ * owners the run read (at least one is always allowed). It binds in small
+ * tables, where ORPHAN_LIMIT could be every member; see deleteOrphanVaults.
+ */
+export const ORPHAN_SHARE = 0.15;
+/** A vault is asked to delete itself only this long after `orphan_seen_at`, its member row still missing. */
+export const ORPHAN_GRACE_S = 7 * 86_400;
+
+/** What one daily run did with vaults whose member row is gone. */
+export interface OrphanVaultCounts {
+  /** Vault rows seen without a member row for the first time: `orphan_seen_at` written (the warning). */
+  marked: number;
+  /** Vault rows marked by an earlier run and still inside their 7 days. */
+  waiting: number;
+  /** Vault rows whose member row is back: `orphan_seen_at` removed. */
+  cleared: number;
+  /** Members whose vaults were asked to delete themselves (as for a canceled account). */
+  requested: number;
+  /** Members without a row with a vault an operator holds (`orphan_hold`): left alone. */
+  operator_held: number;
+  /** Members without a row left because the run found too many of them (nothing written for any). */
+  held: number;
+  /** Member rows that could not be read: their vaults are left for the next run. */
+  read_errors: number;
+  /** Members whose vaults could not all be marked or asked (the sweep itself failing counts one): tried again at the next run. */
+  failures: number;
+}
+
+/**
+ * Vault rows whose member row is gone (MEMBER-API "Vault deletion",
+ * Vaults without a member). The daily account deletion removes the member
+ * row first, under its guard, and asks the member's vaults to delete
+ * themselves after it; if it stops in between (a timeout, a failed call),
+ * nothing else would ever come back to those vaults, because the row that
+ * named them is gone. This scan finds them: a vault row with an owner, not
+ * `deleted` and without `deletion_requested_at` (nobody asked it yet).
+ * Each owner's member row is read consistently.
+ *
+ * Nothing irreversible happens at first sight. A vault without a member
+ * row first gets `orphan_seen_at` (a conditional write: an existing mark is
+ * never moved), counted as OrphanVaultsSeen and alarmed, so that an
+ * operator hears of it while the vault still exists. Only when the member
+ * row is still missing ORPHAN_GRACE_S (7 days) after the mark of every one
+ * of that member's vaults are they deleted, exactly as for a canceled
+ * account (`deleteVaults`: the host's `delete` to each vault not yet
+ * deleted, a never-sealed row deleted, the pointer row deleted), audited
+ * `vault.orphan_deletion_requested` and alarmed (OrphanVaultDeletions);
+ * from then on the daily retry has them. A member row that is back removes
+ * the mark. A vault an operator put on hold (`orphan_hold`, set by hand,
+ * RUNBOOK; any value counts) keeps all of its member's vaults out of this, marked or
+ * not. So the first run after this was deployed only marks the vaults that
+ * are already without a member (also those whose start-over is held for a
+ * missing row) and deletes nothing for 7 days.
+ *
+ * On doubt nothing is written: a member row that cannot be read leaves
+ * its vaults for the next run (`read_errors`); and a run that finds more
+ * members without a row than ORPHAN_LIMIT, or than ORPHAN_SHARE of the
+ * owners it read, marks and asks none of them (`held`), at every run until
+ * that is no longer so. The case it protects against is a wrong or damaged
+ * members table, above all one restored from an older backup: every
+ * member who joined after the backup would look gone. A normal day has
+ * none or one stopped deletion; 15 % is far above that and below what a
+ * restore weeks old would lose while the membership grows. The fixed count
+ * binds from about 34 owners up, the share below that. The grace period
+ * covers what both miss: a restore that is put right within 7 days
+ * clears the marks again.
+ */
+export async function deleteOrphanVaults(nowS: number): Promise<OrphanVaultCounts> {
+  const counts: OrphanVaultCounts = { marked: 0, waiting: 0, cleared: 0, requested: 0, operator_held: 0, held: 0, read_errors: 0, failures: 0 };
+  type OrphanRow = VaultRowLite & { orphan_seen_at?: unknown; orphan_hold?: unknown };
+  const owners = new Map<string, OrphanRow[]>();
+  let start: Record<string, unknown> | undefined;
+  do {
+    const r = await ddb.send(
+      new ScanCommand({
+        TableName: table.vaults(),
+        FilterExpression: 'attribute_exists(user_guid) AND attribute_not_exists(deletion_requested_at) AND #s <> :d',
+        ExpressionAttributeNames: { '#s': 'state' },
+        ExpressionAttributeValues: { ':d': 'deleted' },
+        ExclusiveStartKey: start,
+      }),
+    );
+    for (const item of r.Items ?? []) {
+      const v = item as OrphanRow;
+      // Checked again here: what the scan's filter says is not relied on.
+      if (typeof v.user_guid !== 'string' || !v.user_guid || typeof v.vault_id !== 'string' || v.vault_id.startsWith('user#')) continue;
+      if (v.state === 'deleted' || typeof v.deletion_requested_at === 'number') continue;
+      owners.set(v.user_guid, [...(owners.get(v.user_guid) ?? []), v]);
+    }
+    start = r.LastEvaluatedKey;
+  } while (start);
+
+  const orphans: [string, OrphanRow[]][] = [];
+  let read = 0;
+  for (const [guid, rows] of owners) {
+    let present: boolean;
+    try {
+      const r = await ddb.send(new GetCommand({ TableName: table.members(), Key: { user_guid: guid }, ConsistentRead: true }));
+      present = !!r?.Item;
+      read++;
+    } catch (e) {
+      console.error('orphaned vaults: a member row could not be read', JSON.stringify({ user_guid: guid, error: (e as Error).name }));
+      counts.read_errors++;
+      continue;
+    }
+    if (!present) {
+      orphans.push([guid, rows]);
+      continue;
+    }
+    // The member row is back (restored, or the read before was wrong): the mark goes.
+    for (const v of rows.filter((x) => typeof x.orphan_seen_at === 'number')) {
+      try {
+        await ddb.send(new UpdateCommand({
+          TableName: table.vaults(),
+          Key: { vault_id: v.vault_id },
+          UpdateExpression: 'REMOVE orphan_seen_at',
+          ConditionExpression: 'attribute_exists(orphan_seen_at)',
+        }));
+        counts.cleared++;
+      } catch (e) {
+        if ((e as Error).name === 'ConditionalCheckFailedException') continue;
+        console.error('orphaned vaults: a mark could not be cleared', JSON.stringify({ vault_id: v.vault_id, error: (e as Error).name }));
+        counts.failures++;
+      }
+    }
+  }
+
+  const allowed = Math.max(1, Math.floor(read * ORPHAN_SHARE));
+  if (orphans.length > ORPHAN_LIMIT || orphans.length > allowed) {
+    console.warn('orphaned vaults: held, more members without a row than one run accepts', JSON.stringify({ members: orphans.length, owners: read, limit: Math.min(ORPHAN_LIMIT, allowed) }));
+    counts.held = orphans.length;
+    return counts;
+  }
+
+  for (const [guid, rows] of orphans) {
+    // Any `orphan_hold` is a hold, whatever its type or value (fail safe):
+    // a hold typed by hand as "true" or 1 must not be ignored.
+    const holds = rows.filter((v) => v.orphan_hold !== undefined);
+    if (holds.length) {
+      for (const v of holds.filter((x) => x.orphan_hold !== true)) {
+        console.warn('orphaned vaults: orphan_hold is not the boolean true; treated as a hold', JSON.stringify({ vault_id: v.vault_id, type: typeof v.orphan_hold }));
+      }
+      counts.operator_held++;
+      continue;
+    }
+    try {
+      let due = true;
+      for (const v of rows) {
+        if (typeof v.orphan_seen_at === 'number') {
+          if (v.orphan_seen_at > nowS - ORPHAN_GRACE_S) {
+            due = false;
+            counts.waiting++;
+          }
+          continue;
+        }
+        due = false;
+        try {
+          await ddb.send(new UpdateCommand({
+            TableName: table.vaults(),
+            Key: { vault_id: v.vault_id },
+            UpdateExpression: 'SET orphan_seen_at = :t',
+            ConditionExpression: 'attribute_exists(vault_id) AND attribute_not_exists(orphan_seen_at) AND attribute_not_exists(deletion_requested_at)',
+            ExpressionAttributeValues: { ':t': nowS },
+          }));
+          counts.marked++;
+          console.warn('orphaned vaults: a vault without a member row, marked', JSON.stringify({ vault_id: v.vault_id, user_guid: guid }));
+        } catch (e) {
+          if ((e as Error).name !== 'ConditionalCheckFailedException') throw e; // marked or asked meanwhile
+        }
+      }
+      if (!due) continue;
+      const seen = Math.min(...rows.map((v) => v.orphan_seen_at as number));
+      const vaultIds = await deleteVaults(guid, nowS);
+      await audit('system', 'vault.orphan_deletion_requested', guid, { vault_ids: vaultIds, orphan_seen_at: seen });
+      counts.requested++;
+    } catch (e) {
+      console.error('orphaned vaults: not all marked or asked to delete themselves', JSON.stringify({ user_guid: guid, error: (e as Error).name }));
+      counts.failures++;
+    }
+  }
+  return counts;
+}
+
+/**
+ * One EMF line per daily run (no PutMetricData right), zeros included, so
+ * that the alarms return to OK by themselves.
+ */
+export function orphanVaultEmf(c: OrphanVaultCounts, now: number): string {
+  return JSON.stringify({
+    _aws: {
+      Timestamp: now,
+      CloudWatchMetrics: [{
+        Namespace: NAMESPACE,
+        Dimensions: [[]],
+        Metrics: [
+          { Name: 'OrphanVaultsSeen', Unit: 'Count' },
+          { Name: 'OrphanVaultsWaiting', Unit: 'Count' },
+          { Name: 'OrphanVaultDeletions', Unit: 'Count' },
+          { Name: 'OrphanVaultsOperatorHeld', Unit: 'Count' },
+          { Name: 'OrphanVaultsHeld', Unit: 'Count' },
+        ],
+      }],
+    },
+    OrphanVaultsSeen: c.marked,
+    OrphanVaultsWaiting: c.waiting,
+    OrphanVaultDeletions: c.requested,
+    OrphanVaultsOperatorHeld: c.operator_held,
+    OrphanVaultsHeld: c.held + c.read_errors + c.failures,
+  });
+}
+
 /**
  * Start-overs (MEMBER-API 2.1.0, VAULT-MESSAGING 0.16.0 §11.11.9): a
  * `pending` deletion past `deletes_at` becomes `executing` (conditional on
@@ -210,9 +433,14 @@ async function retryVaultDeletions(nowS: number): Promise<number> {
  * daily retry and counts nothing.
  *
  * `no_member` without that mark is an orphan: the member row was removed by
- * something that did not ask the vault to delete itself (an admin's
- * Delete). It is held, never erased on a missing row, and alarmed for an
- * operator to decide (RUNBOOK). The member row is read consistently just
+ * something that did not ask the vault to delete itself (an account
+ * deletion that stopped before its vault step, or an admin's Delete from
+ * before it refused while a vault exists). This run holds it and never
+ * carries the start-over out on a missing row; it is alarmed. The daily
+ * run's orphan scan (`deleteOrphanVaults`) marks the vault and, if the
+ * member row is still missing 7 days later and no operator holds it, asks
+ * it to delete itself as for a canceled account; from then on it is the
+ * first case above. The member row is read consistently just
  * before the conditional write; the two tables are in different AWS
  * accounts, so they cannot be written in one transaction, and a suspension
  * written between this run's read and its write does not stop that
@@ -380,6 +608,65 @@ async function consistentRow(vaultId: string): Promise<Record<string, unknown> |
 }
 
 /**
+ * The ids of a member's vaults, from the pointer row (read consistently:
+ * the current vault, which the index may not list yet) and the
+ * eventually consistent `user-index` (earlier vaults). Ids only: the
+ * caller reads each row again with `consistentRow`.
+ */
+async function memberVaultIds(userGuid: string): Promise<Set<string>> {
+  const ids = new Set<string>();
+  const pointer = await consistentRow(vaultPointerKey(userGuid));
+  if (typeof pointer?.current_vault_id === 'string') ids.add(pointer.current_vault_id);
+  for await (const item of query({
+    TableName: table.vaults(),
+    IndexName: 'user-index',
+    KeyConditionExpression: 'user_guid = :g',
+    ExpressionAttributeValues: { ':g': userGuid },
+  })) {
+    if (typeof item.vault_id === 'string') ids.add(item.vault_id);
+  }
+  return ids;
+}
+
+/** What the task `member_vaults` answers (the admin API checks `ok` and `task`). */
+export interface MemberVaults {
+  ok: true;
+  task: 'member_vaults';
+  /** The member's vaults that are not `deleted` (a deletion asked for and not yet reported included). */
+  vaults: { vault_id: string; state: string | null }[];
+}
+
+/**
+ * A member's vaults that are not deleted, for the admin API's Delete,
+ * which refuses while there is one (ADMIN-API "People"). It only reads: the
+ * same reads as the cancel below (the pointer row and the index for the
+ * ids, each row again from the base table, consistently). A row that
+ * names another member is not this member's. Any failed read fails the
+ * task, so the caller never takes "no vault" from an error.
+ */
+export async function memberVaults(userGuid: unknown): Promise<MemberVaults> {
+  if (typeof userGuid !== 'string' || !USER_GUID_RE.test(userGuid)) throw new Error('member_vaults: user_guid is not an account id');
+  const out: MemberVaults = { ok: true, task: 'member_vaults', vaults: [] };
+  for (const id of await memberVaultIds(userGuid)) {
+    const v = (await consistentRow(id)) as VaultRowLite | null;
+    if (!v || v.user_guid !== userGuid || v.state === 'deleted') continue;
+    out.vaults.push({ vault_id: v.vault_id, state: typeof v.state === 'string' ? v.state : null });
+  }
+  return out;
+}
+
+/**
+ * The handler of a third function (lib/stacks/member-api-stack.ts,
+ * `MemberVaults`, its own role: Query on the vaults table and its
+ * user-index only), which the admin API may invoke: it runs the task
+ * `member_vaults` and nothing else of this module.
+ */
+export const memberVaultsHandler = async (event?: { task?: string; user_guid?: unknown }): Promise<MemberVaults> => {
+  if (event?.task !== 'member_vaults') throw new Error('this function runs the task member_vaults only');
+  return memberVaults(event.user_guid);
+};
+
+/**
  * Cancel a member's pending start-over for the admin API (ADMIN-API
  * "People"; also when an account is reinstated). The admin API's functions
  * hold no right on the vault tables; this job's role already may write
@@ -406,18 +693,7 @@ async function consistentRow(vaultId: string): Promise<Record<string, unknown> |
 export async function cancelStartOvers(userGuid: unknown, nowS = Math.floor(Date.now() / 1000)): Promise<StartOverCancel> {
   if (typeof userGuid !== 'string' || !USER_GUID_RE.test(userGuid)) throw new Error('cancel_start_over: user_guid is not an account id');
   const out: StartOverCancel = { ok: true, task: 'cancel_start_over', cancelled: [], executing: [], changed: 0, recoveries: [] };
-  const ids = new Set<string>();
-  const pointer = await consistentRow(vaultPointerKey(userGuid));
-  if (typeof pointer?.current_vault_id === 'string') ids.add(pointer.current_vault_id);
-  for await (const item of query({
-    TableName: table.vaults(),
-    IndexName: 'user-index',
-    KeyConditionExpression: 'user_guid = :g',
-    ExpressionAttributeValues: { ':g': userGuid },
-  })) {
-    if (typeof item.vault_id === 'string') ids.add(item.vault_id);
-  }
-  for (const id of ids) {
+  for (const id of await memberVaultIds(userGuid)) {
     const v = (await consistentRow(id)) as CancelRow | null;
     if (!v || v.user_guid !== userGuid || v.state === 'deleted') continue;
     const rec = v.recovery;
@@ -501,6 +777,29 @@ async function releaseIdentity(m: MemberItem): Promise<'deleted' | 'kept'> {
   if (m.owns_identity !== true || ownAddress(m.email)) return 'kept';
   const onList = await ddb.send(new GetCommand({ TableName: env('TABLE_MAILING_LIST'), Key: { email: m.email }, ConsistentRead: true }));
   if (onList.Item) return 'kept';
+  try {
+    await ses.send(new DeleteEmailIdentityCommand({ EmailIdentity: m.email }));
+  } catch (e) {
+    if ((e as Error).name !== 'NotFoundException') throw e;
+  }
+  return 'deleted';
+}
+
+/**
+ * The SES identity of an address whose row the daily run has just deleted
+ * (a request never verified within 14 days; an account deleted 7 days after
+ * its cancellation). Kept if the mailing list uses the address, if the row
+ * found the identity already there when it was created (`owns_identity`
+ * false, 2.6.0), or if the address is one of the project's own (under
+ * vettid.org); otherwise deleted. A row from before 2.6.0 (no flag) keeps
+ * the rule it was created under: its request created the identity. The
+ * caller calls this only when the row's own email marker went with it: a
+ * marker that names another request or account means the address is in use
+ * again, and its identity with it.
+ */
+async function releaseIdentityOfGoneRow(m: MemberItem): Promise<'deleted' | 'kept'> {
+  const onList = await ddb.send(new GetCommand({ TableName: env('TABLE_MAILING_LIST'), Key: { email: m.email }, ConsistentRead: true }));
+  if (onList.Item || m.owns_identity === false || ownAddress(m.email)) return 'kept';
   try {
     await ses.send(new DeleteEmailIdentityCommand({ EmailIdentity: m.email }));
   } catch (e) {
@@ -684,7 +983,8 @@ export const handler = async (event?: { task?: string }) => {
   //    step is tried on its own, a failure never skips the next step or
   //    the next row, and what could not be removed is named in the audit
   //    event (`incomplete`), logged and alarmed (RequestRemovalAbandoned),
-  //    for the operator to reconcile (RUNBOOK "Membership requests").
+  //    for the operator to reconcile (RUNBOOK "Membership requests"). The
+  //    vaults are the exception: the orphan scan below finds them again.
   let failures = 0; // the row could not be deleted: it is still there, and the next run tries again
   let incomplete = 0; // the row is gone, something of its own outside it is not
   const afterRow = (what: string, m: MemberItem, undone: string[]) => async <T>(name: string, f: () => Promise<T>): Promise<T | undefined> => {
@@ -736,8 +1036,17 @@ export const handler = async (event?: { task?: string }) => {
       }
       await step('subscription', () => ddb.send(new DeleteCommand({ TableName: table.subscriptions(), Key: { user_guid: m.user_guid } })));
       const vaultIds = (await step('vaults', () => deleteVaults(m.user_guid, Math.floor(Date.now() / 1000)))) ?? [];
+      // The address's SES identity, under the 14-day reclaim's rule, and only
+      // while nothing else uses the address: its marker went with the row
+      // and the sign-in user under it was this account's own or none. One
+      // that carries another id (or could not be checked) means the address
+      // may have been requested again, and its identity is that request's.
+      const identity = marker === 'deleted' && (user === 'deleted' || user === 'none')
+        ? await step('ses_identity', () => releaseIdentityOfGoneRow(m))
+        : 'kept';
       await audit('system', 'member.delete_after_cancel', m.user_guid, {
         ...(vaultIds.length ? { vault_ids: vaultIds } : {}),
+        ...(identity ? { identity } : {}),
         ...leftBehind(user, marker),
         ...(undone.length ? { incomplete: undone } : {}),
       });
@@ -785,18 +1094,7 @@ export const handler = async (event?: { task?: string }) => {
     // again, and its SES identity is what that request's verification runs
     // on. Neither is this row's to delete.
     if (marker === 'deleted') {
-      await afterRow('unverified request', m, undone)('ses_identity', async () => {
-        const onList = await ddb.send(new GetCommand({ TableName: env('TABLE_MAILING_LIST'), Key: { email: m.email } }));
-        // 2.6.0: a request that found the identity already there (`owns_identity`
-        // false) leaves it; one of the project's own addresses is never deleted.
-        // A row from before 2.6.0 (no flag) keeps the rule it was created under.
-        if (onList.Item || m.owns_identity === false || ownAddress(m.email)) return;
-        try {
-          await ses.send(new DeleteEmailIdentityCommand({ EmailIdentity: m.email }));
-        } catch (e) {
-          if ((e as Error).name !== 'NotFoundException') throw e;
-        }
-      });
+      await afterRow('unverified request', m, undone)('ses_identity', () => releaseIdentityOfGoneRow(m));
     }
     await audit('system', 'request.reclaim_unverified', m.user_guid, { ...leftBehind(undefined, marker), ...(undone.length ? { incomplete: undone } : {}) });
     if (undone.length) incomplete++;
@@ -815,6 +1113,20 @@ export const handler = async (event?: { task?: string }) => {
   // One alarm for "a removal is waiting" and one for "a removal ended
   // unfinished", whatever was being removed.
   console.log(removalEmf(declined.failures + failures, declined.abandoned + incomplete, Date.now()));
+
+  // Vaults whose member row is gone and that nobody asked to delete: the
+  // account deletion above stopped before its vault step finished, in this
+  // run or an earlier one. Lines of their own (the summary line below is
+  // unchanged); a failure here never stops the rest of the run.
+  let orphans: OrphanVaultCounts = { marked: 0, waiting: 0, cleared: 0, requested: 0, operator_held: 0, held: 0, read_errors: 0, failures: 0 };
+  try {
+    orphans = await deleteOrphanVaults(Math.floor(Date.now() / 1000));
+  } catch (e) {
+    console.error('orphaned-vault sweep failed', (e as Error).name);
+    orphans.failures++;
+  }
+  console.log(JSON.stringify({ vaultOrphans: orphans }));
+  console.log(orphanVaultEmf(orphans, Date.now()));
 
   const vaultRetries = await retryVaultDeletions(Math.floor(Date.now() / 1000));
 

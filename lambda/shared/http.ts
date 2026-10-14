@@ -4,9 +4,9 @@ import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 export class HttpError extends Error {
   constructor(
     readonly status: number,
-    readonly code: 'bad_request' | 'unauthorized' | 'forbidden' | 'not_found' | 'conflict' | 'internal' | 'recovery_active',
+    readonly code: 'bad_request' | 'unauthorized' | 'forbidden' | 'not_found' | 'conflict' | 'internal' | 'recovery_active' | 'vault_exists',
     message: string,
-    /** Further members of the error body, beside `error` and `message` (the admin API's `recovery_active`). */
+    /** Further members of the error body, beside `error` and `message` (the admin API's `recovery_active` and `vault_exists`). */
     readonly detail?: Record<string, unknown>,
   ) {
     super(message);
