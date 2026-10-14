@@ -56,7 +56,7 @@ export function render(root, { api, ui }) {
   });
 
   root.append(
-    ui.sectionHead('Requests', 'Membership requests made without a valid registration code, oldest first. Approving creates the account (registered); the member becomes a member once they accept the current terms.'),
+    ui.sectionHead('Requests', 'Requests for early access made without a valid registration code, oldest first. Approving creates the account (registered); the member becomes a member once they accept the current terms.'),
     list.node,
   );
   list.reload();

@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.29.0
-date: 2026-10-12
+version: 0.29.7
+date: 2026-10-13
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -13,7 +13,7 @@ related:
   - CALLS-PLAN.md (0.1.3) §13 (phase C2; decisions D12–D26, decided 2026-10-12)
   - PUSH-GATEWAY.md (0.4.4)
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.4.2)
+  - MEMBER-API.md (2.6.4)
   - ANDROID-PLAN.md (0.1.37)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -21,9 +21,89 @@ related:
   - VAULT-RELEASES.md (0.1.19; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
-  - VAULT-HOST-PROTOCOL.md (0.1.3; the enclave ↔ parent protocol as built)
-  - VAULT-LOCK.md (0.1.0, design note for 0.29.0: options, owner decisions L1–L16, rollout)
+  - VAULT-HOST-PROTOCOL.md (0.1.7; the enclave ↔ parent protocol as built)
+  - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.29.7: correction of the document to the system as built; approved
+    by the owner 2026-10-13. No wire change, no code change, no new
+    vault release. **The PIN backoff and the password backoff do not
+    hold against a host that replays stored objects.** §11.11.2, "A
+    recovery started by the host": what it does not give, what protects
+    the member and the comparison with §13.5 are corrected (the section
+    said the recovery ran "under both backoffs", that the host cannot
+    hide it from the member, and that the exposure was the same as with
+    the member's email and account session); "Residual: the portal's
+    code" gets the same qualification. §11.11.6: the enclave limits are
+    kept in objects the host stores, and hold against everyone except
+    such a host. §13.2, "Residual risks": one more item
+    (VAULT-HOST-PROTOCOL 0.1.7 §11.3, §11.4)
+  - 0.29.6: editorial-normative erratum, for the owner's approval
+    (owner decision of 2026-10-13: rescue must always have a target;
+    VAULT-RELEASES 0.1.24 §3.5, §6.2). No wire change, no new vault
+    release, no change to any enclave check. §11.10.2: **a release's
+    sealing policy also admits every `removed` release that can
+    still be rescued when its key is created**; before, only the
+    releases not `removed`
+  - 0.29.5: editorial errata, as built; approved by the owner
+    2026-10-13. No wire change, no new vault release, no change to
+    the member API (MEMBER-API 2.6.4). §11.11.7: **the session's
+    recovery cancel needs only a session of the account holder**,
+    whatever the account's status or terms (MEMBER-API 2.6.2); the
+    request and the status need a session of an active member with
+    the current terms, as the section said of all three. **A
+    `registered` recovery blocks a new request too** (`409
+    recovery_active`); Request named `pending` and `available` only.
+    **The cancel links are not single-use** (§11.11.7 Request, the
+    recovery's; §11.11.9, the deletion's): a link stays usable until
+    the recovery's `expires_at` or the deletion's `deletes_at`, and a
+    second use answers `{cancelled: false}`
+  - 0.29.4: editorial erratum, as built; approved by the owner
+    2026-10-13. No wire change, no new vault release, no change to
+    the member API (MEMBER-API 2.6.3). §11.11.7: **the session's
+    recovery cancel answers `404` for a `recovery_id` that is not the
+    vault's current recovery**, and the email link answers `404` for
+    a token the API does not hold, one past the recovery's
+    `expires_at` or one of a replaced recovery; before, the section
+    gave `200 {cancelled}` as the only answer of both. `{cancelled:
+    false}` is the answer for the vault's current recovery once it
+    has ended
+  - 0.29.3: editorial-normative erratum, as built in vettid-vault #75
+    (the parent only; the enclave and its measurements do not change);
+    approved by the owner 2026-10-13. No wire change. §11.1,
+    "Instances and leases": **a parent whose queue is gone while it
+    runs creates it again** under the same name, and after a
+    disconnection it publishes its registry row only after checking
+    for its queue (VAULT-HOST-PROTOCOL 0.1.6 §9, §13 point 12).
+    §11.1, the member gate, as built in vettid.org #254 (MEMBER-API
+    2.6.2): **an account that is not active keeps lock and the two
+    cancels** (of a pending vault deletion and of a pending recovery),
+    and a suspended account is treated as a cancelled one; before, the
+    sentence named lock only
+  - 0.29.2: editorial-normative errata, as built; approved by the owner
+    2026-10-13. No wire change, no new vault release. **The member
+    API** (vettid.org #253, MEMBER-API 2.6.1). §11.5: `GET
+    /api/vault/requests/{id}` returns `envelope` and `code` only for
+    the slot of an enroll, unlock, lock or recovery register request;
+    the slot of a recovery request never returns the sealed code.
+    §11.11.6, §11.11.7: either form of the claim is limited per source
+    network before the lookup and per vault after it, on a hit only; a
+    miss is charged to no recovery and to no vault. **The unreachable
+    parent** (vettid-vault #74, `main` a852e36, for staging release
+    S11, which is not cut yet; VAULT-HOST-PROTOCOL 0.1.5 §4.3). §12.3,
+    "Parent unreachable for 120 s": the parent is reachable again only
+    once a `Ping` has been read and it has been told which vaults
+    ended; when a vault that appears meanwhile is locked; the 140 s
+    are for the vaults that ran when the parent was found unreachable
+  - 0.29.1: editorial-normative, as built: vettid-vault #70, #71 and
+    #72 (`main` 392b03c), for staging release S11, which is not cut yet.
+    No wire change. §12.3: **"Parent unreachable for 120 s"** is again
+    the row's name and now means 120 s without a `Ping`, connected or
+    not; the lock takes at most 10 s more; what is and is not lost
+    (replaces 0.27.4's interim wording). §12.4: "an unreachable
+    parent". §11.1: a lease renewal without an answer fails after 10 s,
+    the rest of a pass is judged by age, retries every 5 s, and lease
+    loss is told one vault at a time. §11.10 (deployment): what
+    protects the document KMS returns
   - 0.29.0: normative; **approved by the owner 2026-10-12** (vettid.org
     #247: VAULT-LOCK 0.1.0, decisions L1–L16 as recommended); **needs a
     vault release**
@@ -8310,8 +8390,11 @@ current terms: the vault keeps working when the terms change, and the
 portal and the app (through the account snapshot, §11.13) ask the member
 to accept. Lock and status stay available for an existing vault
 whatever the account state, because locking only reduces exposure.
-Cancelling the account blocks vault access (every route but lock) at once;
-after the 7-day grace period the API deletes the member's vault rows, the
+An account that is not active (cancelled by the member, or suspended)
+is refused every vault route at once except lock and the two cancels:
+of a pending vault deletion (session, app key or the email link) and of
+a pending recovery (session or the email link) (0.29.3; MEMBER-API 2.6.2
+"Access"). After a cancelled account's 7-day grace period the API deletes the member's vault rows, the
 stored encrypted state and headers (`vaults/<vault_id>/`), and the
 enclave's member index object (`users/<hex SHA-256("vettid/vms/2/user" ||
 0x00 || user_guid)>/vault`, which holds only a `vault_id`) (§11.5).
@@ -8323,7 +8406,12 @@ enclave's member index object (`users/<hex SHA-256("vettid/vms/2/user" ||
   prefix `vettid-org-`), which the parent creates at boot and deletes at
   shutdown. `instance_id` matches `[A-Za-z0-9_-]{1,48}`. The API sends only
   to that name in its own account. A sweeper removes queues of instances
-  that have gone away.
+  that have gone away. A parent whose queue is gone while it runs (swept
+  while its enclave was disconnected, or deleted by hand) creates it
+  again under the same name, and after a disconnection it publishes its
+  registry row only after checking for its queue; SQS's refusal of a
+  recently deleted name withholds the row, another failure of the check
+  does not.
 - The instance publishes `{instance_id, release, queue_url, descriptor,
   attestation, heartbeat_at}` to an **instance registry** and heartbeats at
   least every 30 s. An instance whose `heartbeat_at` is more than 90 s old
@@ -8350,6 +8438,15 @@ enclave's member index object (`users/<hex SHA-256("vettid/vms/2/user" ||
     with a lease length of 180 s. A renewal that finds another holder, or
     renewals that keep failing until 15 s before the lease expires, mean
     the lease is **lost**: the enclave locks the vault (§12.3).
+    (0.29.1, as built from S11.) A renewal that gets no answer counts
+    as failed after 10 s, and never later than the moment the lease
+    would be declared lost (15 s before it ends). After one such
+    give-up, the remaining leases of that pass are judged by their age
+    alone, without further calls. While renewals fail the parent tries
+    again every 5 s. A limit: the parent tells the enclave of lost
+    leases one vault at a time, so with very many vaults the last are
+    told after their leases have ended; the conditional state write
+    (§12.3) still guards those.
   - The parent releases the lease on lock, except for the lock that an
     enroll or unlock makes of the vault it is about to open (§11.4):
     that request's lease stays, and the parent releases it only if the
@@ -8806,7 +8903,13 @@ for a request it did not forward (lease held elsewhere, §11.1) or that
 the enclave could not read (no answer). It writes only slots that are
 still `queued`, and no other `code`. `GET /api/vault/requests/{id}`
 returns `{status, envelope?, code?}`; `code` matches `[a-z_][a-z0-9_]*`
-and is a host code. It never carries a sealed outcome, with two
+and is a host code. It returns `envelope` and `code` only for the
+slot of an `enroll`, `unlock`, `lock` or recovery `register` request;
+the slot of any other operation answers `{status}` only. So the
+slot of a recovery request never returns the sealed code, which
+leaves the member API only through the recovery's status route
+(§11.11.7). An operation added later must be added to that list
+deliberately, or its result is not returned. A `code` never carries a sealed outcome, with two
 exceptions. `recovery_unavailable` (0.16.0) tells the member API that
 the enclave refused a recovery request (§11.11.2), so that it ends the
 recovery at once; it says no more than the backup bit the host already
@@ -9727,8 +9830,9 @@ Each release R has a **sealing key** `SK_R` with two operations:
   enclave attested as release R** (its PCR0).
 - **seal**: create an object sealed to R. It is available only to enclaves
   attested as a release that R's sealing policy admits: R itself, and the
-  releases allowed to move vaults into R (every release not `removed`
-  when R's key is created, VAULT-RELEASES §6.2).
+  releases allowed to move vaults into R (every earlier release not
+  `removed` when R's key is created, and every `removed` release that
+  can still be rescued then, §11.10.5; VAULT-RELEASES §6.2).
 
 Neither operation gives the host any key material. A sealed object is
 authenticated encryption under a fresh data key that only an attested
@@ -9748,6 +9852,16 @@ foreign key. `seal_key` is the key's full ARN. The enclave itself verifies
 each key's policy before sealing to it (§11.10.7), so a key whose policy
 lets anything other than the release open it, or could ever be changed, is
 refused.
+
+*What protects KMS's answer (0.29.1, as built).* KMS returns the data
+key to an enclave as a CMS EnvelopedData document for the attested
+recipient key, its content encrypted with AES-256-CBC. That format
+carries **no integrity of its own**: a changed ciphertext is noticed
+only when it happens to break the padding. The document's origin and
+integrity rest on the TLS session to KMS, which the enclave terminates
+(§12.2); the enclave never takes such a document from any other source.
+A result that is not exactly 32 bytes is refused, and a wrong key fails
+closed at the state's AEAD (§3.3).
 
 Storage: the sealed header is one object **per release**
 (`vaults/<vault_id>/header/<pcr0>`); an enclave reads only its own release's
@@ -10716,24 +10830,37 @@ the older code. The API allows only one active recovery per vault.
   - *What it gives:* a running vault is locked (§11.11.1 step 2); the
     recovery record is written into the sealed header; and the host can
     open the code once the enclave's 24 h have passed.
-  - *What it does not give:* a device, or anything of the vault. A
-    register still needs an app that passes device attestation
-    (§11.11.3), and the recovery still needs the PIN and the credential
-    password, online, under both backoffs (§11.11.5). With the
-    credential backup off there is no recovery at all (§11.11.1).
+  - *What it does not give by itself:* anything of the vault. A register
+    still needs an app that passes device attestation (§11.11.3), and
+    the recovery still needs the PIN and then the credential password,
+    online (§11.11.5). **Neither backoff holds against a host that
+    replays stored objects** (§13.2): the PIN backoff is in the sealed
+    header and the password backoff in the state, the host stores both,
+    a newly registered app has no minimums, and an app raises its
+    minimums only from a result the host delivers. Such a host can
+    register its own attested phone against a pending header it kept,
+    and then try PINs, and after the PIN passwords, at the speed of the
+    app. With the credential backup off, and never on in any copy the
+    host still holds, there is no recovery at all (§11.11.1).
   - *What the member sees:* the owner's devices are sent
     `vault.locking{reason: "recovery"}` when a running vault locks, and
     from then on the member's app is refused `recovery_pending` at
     every unlock (§11.4, §11.11.4) until the recovery ends. The member
-    is told by the vault, not by the host, so a host cannot hide it,
-    and the member's app can cancel it with `cancel_recovery` and the
+    is told by the vault, not by the host. That is a protection only
+    against a host that serves the current header: a host that keeps the
+    header with the pending record aside and serves the member's app the
+    one from before it shows the member nothing, and can undo a cancel
+    by serving the earlier header again. Against a host that does not
+    replay, the member's app can cancel with `cancel_recovery` and the
     PIN (§11.11.4). The `recovery` entry of `GET /api/vault/status` and
     the member API's email come from the API and would be missing.
-  - So "an operator reading them cannot register a device" above
-    stands, and a host-started recovery is the same exposure as §13.5's
-    row "Member's email and account session (24 h, unnoticed)", without
-    the email. `recovery_cancel` has no envelope either: the host can
-    end a member's own recovery (availability).
+  - So "an operator reading them cannot register a device" above stands
+    for an operator who only reads. A host that starts a recovery and
+    replays stored objects is a larger exposure than §13.5's row
+    "Member's email and account session (24 h, unnoticed)": no email, no
+    notice to the member's devices, and no working backoff.
+    `recovery_cancel` has no envelope either: the host can end a
+    member's own recovery (availability).
   - **Open design question** (not a requirement; the owner has not
     decided): whether a later vault release should require a `recovery`
     and a `recovery_cancel` to carry a signature of the member API,
@@ -10745,7 +10872,9 @@ the older code. The API allows only one active recovery per vault.
   data at rest, not against the page's own author. Such an attacker still
   needs the PIN and the password, guessed online under the enclave's
   backoffs. The same holds for an attacker who controls the member's email
-  and account session for 24 h without being noticed.
+  and account session for 24 h without being noticed. The backoffs do not
+  hold if the attacker is also a host that replays stored objects ("A
+  recovery started by the host" above).
 - **PQC exception.** The browser seal uses P-256 ECDH, the only key
   agreement in WebCrypto. A recorded ciphertext is worthless to a future
   quantum attacker, because the code expires within 48 h and is
@@ -10939,10 +11068,16 @@ not its owner check's state.
   - the PIN backoff (§11.8);
   - the credential password backoff (§3.5.3);
   - one recovery per vault (a new request replaces the old).
+
+  These limits are kept in the sealed header and in the state, which the
+  host stores. They hold against everyone except a host that replays stored
+  objects (§13.2). Such a host can serve a copy in which the wrong codes,
+  wrong PINs and wrong passwords were never counted, and in which a recovery
+  that was used, cancelled or replaced is still pending.
 - **Member API limits** (§11.11.7): requests, claims, registrations,
-  cancels and status polls are rate-limited. A claim by locator
-  (0.25.0) is limited per source network before the lookup and per
-  vault after it; none of these limits is global (§11.11.10).
+  cancels and status polls are rate-limited. A claim, scanned or by locator,
+  is limited per source network before the lookup and per
+  vault after it, on a hit only; none of these limits is global (§11.11.10).
 - **Audit in the vault.** Every step is recorded (`recovery.*` kinds,
   §10.9). Steps taken while the vault was locked are written from the
   header's log at the next unlock.
@@ -10952,16 +11087,18 @@ not its owner check's state.
 
 #### 11.11.7 Member API routes
 
-All routes follow MEMBER-API conventions. The first three require a
-member session and the current terms (the portal); the last two are the
-new app's (0.15.0), signed by its app key (§11.12.2) and needing no
-session:
+All routes follow MEMBER-API conventions. The first three are the
+portal's. The request and the status require a session of an active
+member with the current terms. The cancel requires only a session of
+the account holder, whatever the account's status or terms (0.29.5, as
+built; MEMBER-API 2.6.2). The last two are the new app's (0.15.0),
+signed by its app key (§11.12.2) and needing no session:
 
 | Route | Body | Answer |
 |---|---|---|
 | `POST /api/vault/recovery` | `{browser_key}` (b64 of 65 bytes) | `202 {recovery_id, available_at, expires_at}` |
 | `GET /api/vault/recovery` | — | `{recovery: {recovery_id, vault_id, state, requested_at, available_at, expires_at, sealed_code?, locator?} \| null}` |
-| `POST /api/vault/recovery/cancel` | `{recovery_id}` | `200 {cancelled}` |
+| `POST /api/vault/recovery/cancel` | `{recovery_id}` | `200 {cancelled}`; `404` when `recovery_id` is not the vault's current recovery (0.29.4, as built) |
 | `POST /api/vault/recovery/claim` | `{vault_id, recovery_id, app_key}` (scanned), or `{locator, app_key}` (typed, 0.25.0) | `200 {user_guid, email_hint, vault_id, recovery_id}` (0.15.0; the two identifiers since 0.25.0) |
 | `POST /api/vault/recovery/register` | `{vault_id, request_id, instance_id, etk_kid, envelope}` | `202 {vault_id, request_id}`; the result is polled like unlock (`GET /api/vault/requests/{id}`) |
 
@@ -10993,9 +11130,9 @@ session:
   recovery_not_available` unless the recovery is `available`, the key
   recorded as a claim key, the same answer. The answer of either form
   carries `vault_id` and `recovery_id` (0.25.0), which the typed app
-  needs for every later request and the sealed register body. The
+  needs for every later request and the sealed register body. Either form of the
   claim is limited per source network before the lookup (so misses
-  count) and per vault after it; a miss is charged to no recovery.
+  count) and per vault after it; a miss is charged to no recovery and to no vault.
 - **`locator`** (0.25.0): 12 Crockford base32 characters (60 random
   bits), minted by the API with the request, unique among the
   recoveries it holds, kept with the recovery and dropped when the
@@ -11005,7 +11142,10 @@ session:
 
 The email link uses its own route, `POST /api/vault/recovery/cancel-link`
 with body `{token}`, answered `200 {cancelled}` like the session's
-cancel. It needs no session: the token stands in for it.
+cancel, and `404` for a token the API does not hold, one past the
+recovery's `expires_at` or one of a recovery that a newer one has
+replaced (0.29.4, as built). It needs no session: the token stands in
+for it.
 
 - **No vault.** Without an enrolled vault (none, `enrolling` or
   deleted), `GET /api/vault/recovery` answers `{recovery: null}`, not
@@ -11035,12 +11175,18 @@ cancel. It needs no session: the token stands in for it.
   (§11.11.5 step 3), and removes its own record then.
 - **Cancelled.** `{cancelled: true}` when this call ended an active
   recovery (`pending`, `available` or `registered`), `{cancelled: false}`
-  when there was nothing to cancel (it had ended already, by a cancel or
+  when the recovery named is the vault's current one and there was
+  nothing to cancel (it had ended already, by a cancel or
   its expiry). The cancel link stays usable until
-  the recovery's `expires_at`, so a second use answers `false`.
+  the recovery's `expires_at`, so a second use answers `false`, and
+  after `expires_at` the link answers `404`. A `recovery_id` that is
+  not the vault's current recovery (no vault, no recovery, or a
+  recovery that a newer one has replaced) is `404`, not `false`
+  (0.29.4, as built; MEMBER-API 2.6.3 lists every answer).
 - **Request.** The API accepts a request only for a vault in a state other
-  than `enrolling`, and only when no recovery is `pending` or `available`
-  (`409 recovery_active`). **Backup off** (0.16.0): when the vault row's
+  than `enrolling`, and only when no recovery is `pending`, `available`
+  or `registered` before its `expires_at`
+  (`409 recovery_active`; 0.29.5, as built). **Backup off** (0.16.0): when the vault row's
   `credential_backup` (§11.5) is `false`, the API answers `409
   recovery_unavailable` with `reason: "no_backup"`, enqueues nothing,
   locks nothing and sends no email; the portal says that the vault
@@ -11049,8 +11195,11 @@ cancel. It needs no session: the token stands in for it.
   release) the API forwards the request and the enclave decides
   (§11.11.1). The API also answers `409 deletion_pending` while a
   start-over deletion is pending (§11.11.9). It records the recovery on the vault row and
-  sends the member an email with a single-use cancel link (a random
-  256-bit token; the API stores its SHA-256).
+  sends the member an email with a cancel link (a random
+  256-bit token; the API stores its SHA-256). The link is not used up
+  by a cancel: it stays usable until the recovery's `expires_at`, and a
+  second use answers `{cancelled: false}` (Cancelled, above; 0.29.5, as
+  built).
 - **Refused by the enclave** (0.16.0). When the request's slot comes
   back with `code: "recovery_unavailable"` (§11.11.2), the API records
   the recovery as `unavailable` (an ended state), returns the slot's
@@ -11127,9 +11276,11 @@ destroy a vault at once.
   with the backup on it says that a recovery would keep the vault.
 - **24 hours, emails, cancel.** `deletes_at` = request + 24 h. The API
   emails the member at once (what will be deleted, when, that nothing
-  can be restored, and a single-use cancel link,
+  can be restored, and a cancel link,
   `https://account.vettid.org/vault/deletion/cancel#t=<token>`, stored
-  as its SHA-256 only), and again on a cancel. A deletion is cancelled
+  as its SHA-256 only), and again on a cancel. The link is not used up
+  by a cancel: it stays usable until `deletes_at`, and a second use
+  answers `{cancelled: false}` (0.29.5, as built). A deletion is cancelled
   from the portal, the email link or the vault's app (its app key); the
   app learns of it from `deletion: {deletion_id, state, deletes_at}`
   in `GET /api/vault/status` (0.16.1: the id its cancel names), which it reads after every unlock and whenever
@@ -11769,7 +11920,7 @@ not shared this way and are unchanged.
 | Memory pressure (the least recently active vault is evicted) | Same as an owner request. |
 | Enclave release or restart | Same if signalled. Otherwise all vaults lock through loss of memory, and their leases expire; a parent that sees the enclave restart releases the leases it held. |
 | Parent restart (the enclave keeps running) | The enclave locks every vault before it serves the new parent, which holds no leases for them. |
-| No control connection to the parent for 120 s (0.27.4: was "Parent unreachable for 120 s") | Every vault is locked: its lease can no longer be renewed. **As built** (vettid-vault through 8f2c8bf), the 120 s run from the moment the control connection ends, checked every 10 s. A parent that keeps the connection open but does not answer is **not** counted: vaults then stay unlocked with leases nobody renews until the connection breaks (VAULT-HOST-PROTOCOL §13 point 1); the conditional state write still stops two instances from writing one vault. **From a later vault release** (owner decision of 2026-10-12, H3) a connected but silent parent counts as unreachable: the enclave times the parent's `Ping` (sent every 20 s) and treats 120 s without one as no connection, and writes on the control connection get a deadline. This row then reads "Parent unreachable" again. |
+| Parent unreachable for 120 s (0.29.1 and 0.29.2, as built from staging release S11: no `Ping` from the parent for 120 s) | While a vault runs, every vault is locked once 120 s have passed without a `Ping` from the parent (VAULT-HOST-PROTOCOL §6.3), whether the control connection is open or not. The enclave checks every 10 s, so the decision falls 120 to 130 s after the last `Ping`. **Only a `Ping` restarts the count**, counted when the enclave reads it; a connection or a hello does not. With no vault running the count restarts at each check, except that a parent found unreachable stays unreachable, also with no vault running, until a `Ping` has been read and the parent has been told which vaults ended (0.29.2; VAULT-HOST-PROTOCOL §4.3: a `Ping` read while the vaults are still being locked is counted and leaves it unreachable). A vault that appears meanwhile is locked at the next check, provided no `Ping` was read since the parent was found unreachable; if one was read and left the parent unreachable, such a vault is locked 120 to 130 s after that `Ping`, unless a later `Ping` makes the parent reachable first, and until then every call it makes to the parent fails. **Once the parent is found unreachable** the enclave makes no call to it until it is reachable again, closes the connection, and locks every vault at once; a vault not locked within 10 s is killed. So every vault that ran when the parent was found unreachable has locked or been killed at most 140 s after the last `Ping`. Nothing stored is lost: a vault's last durable state is its last successful write, nothing taken from the relay since was acked (§8.3), and nothing is zeroized as a split brain. A killed vault sends no `vault.locking` to its devices. Time the enclave's own reader waits at its limit of 128 requests is not counted as the parent's silence, up to 120 s. (Releases through S10 measured the time without a control connection, so a parent that stayed connected and silent was never unreachable; 0.27.4 said so.) |
 | Lease lost (renewal failed) | Same as an owner request, without the final flush if the state write fails. |
 | Split-brain guard: a conditional state write finds a newer version | Zeroize **immediately**, without flushing or acking. |
 | Vault deletion | Run the §7.4 revocations, then destroy the state and the header. |
@@ -11821,8 +11972,8 @@ vault**.
   user and group id, is not dumpable and cannot be traced, inherits no
   file descriptor but its channel and no writable shared file or
   directory, and runs under resource limits (memory, file descriptors).
-- **Locks:** an owner request, memory pressure, a lost lease or a lost
-  parent make the supervisor ask the process to lock (flush, `vault.locking`,
+- **Locks:** an owner request, memory pressure, a lost lease or an
+  unreachable parent (§12.3) make the supervisor ask the process to lock (flush, `vault.locking`,
   exit); a process that does not exit in time is killed. A process that
   detects a split brain (§12.3) zeroizes and exits without flushing.
   Killing one vault's process affects no other vault.
@@ -11975,6 +12126,9 @@ client**:
 - A consistent rollback of both objects, served to a device that has never
   seen the newer values, goes undetected.
 - An attacker holding a registered, attested device can omit the minimums.
+- A device registered by a recovery has no minimums, and no device raises
+  its minimums from a result the host withholds: against a host that
+  replays, the PIN backoff and the password backoff do not hold (§11.11.2).
 
 The split-brain guard (§12.3) separately catches stale writers.
 

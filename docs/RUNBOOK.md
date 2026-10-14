@@ -38,7 +38,7 @@ turning that off in code (or the console) first.
 | `VettidOrgPlaybooksStack` | Playbooks origin bucket (served at `/playbooks/*` by VettidOrgStack; content deployed from the vettid-playbooks repo) |
 | `VettidDevRedirectStack` | The entire vettid.dev footprint: blanket 301 → vettid.org. Permanent. |
 | `VettidOrgAuthStack` | Member + admin Cognito pools, clients, groups, admin hosted-UI domain, PIN pepper secret. Stateful. |
-| `VettidOrgDataStack` | Account/admin DynamoDB tables (`vettid-org-*`) + terms PDF bucket. Stateful. (The vault tables moved to VettidOrgVaultStack.) |
+| `VettidOrgDataStack` | Account/admin DynamoDB tables (`vettid-org-*`) + terms PDF bucket. Stateful. (The vault tables moved to VettidOrgVaultStack.) The audit table's TTL (`expires_at`) deletes only the 90-day address records ("Membership requests"). |
 | `VettidOrgAdminAccessStack` | Admin tailnet exit node (EC2 + EIP) and the CloudFront WAF allowlist keyed to its IP (admin site). |
 | `VettidOrgAdminApiStack` | Admin REST API at admin-api.vettid.org (docs/ADMIN-API.md): exit-node-IP resource policy + Cognito authorizer, 4 route-group Lambdas (people, content, system, vault-canary). |
 | `VettidOrgAdminSiteStack` | Admin SPA at admin.vettid.org (`sites/admin`), behind the exit-node web ACL. |
@@ -48,7 +48,7 @@ turning that off in code (or the console) first.
 | `VettidOrgStageDnsStack` | **Staging only** (vettid-vault-staging): zone `staging.vettid.org`, its CAA, the SES domain identity `staging.vettid.org` (DKIM records), SSM `dns/zone-id`. Stateful. |
 | `VettidOrgStageSiteStack` | **Staging only**: https://staging.vettid.org (`sites/staging`), serving the staging channel's manifest from `vault/staging/pcr-manifest.json`. |
 | `VettidOrgStageTestMailStack` | **Staging only, test infrastructure**: MX for `test.staging.vettid.org`, the SES receipt rule set storing its mail in `vettid-org-staging-test-mail-<account>` (7 days), the owner-only reader role. See "Staging" → "Test mail". Never in prod. |
-| `VettidOrgAuditStack` | Management account: the organization CloudTrail trail and its bucket, the GuardDuty detector (administrator for the organization), Access Analyzer, the security-alert rules and topic `vettid-org-security-alerts`, and the default-bus policy admitting the member accounts' forwarders. Stateful. See "Security alerts". |
+| `VettidOrgAuditStack` | Management account: the organization CloudTrail trail (management events of every account, plus S3 data events on the terms bucket and, writes only, on the two vault data buckets) and its bucket, the GuardDuty detector (administrator for the organization), Access Analyzer, the security-alert rules and topic `vettid-org-security-alerts`, and the default-bus policy admitting the member accounts' forwarders. Stateful. See "Security alerts". |
 | `VettidOrgVaultAlertForwardStack` | **In the vault account** (prod: vettid-vault-prod; staging: vettid-vault-staging): the one rule forwarding its CloudTrail events to the management account's bus. See "Security alerts". |
 | `VettidOrgProteusAlertForwardStack` | **In the proteus account** (605628228301): the same forwarder. Deployed from this repository with `--profile proteus`. See "Security alerts". |
 | `VettidOrgCiReadOnlyStack`, `VettidOrgVaultCiReadOnlyStack` | Prod only, one per production account (management; vettid-vault-prod with `--profile vault-prod`): the GitHub Actions OIDC provider and the read-only role `vettid-org-ci-drift-readonly` for the drift check. See "Production drift". |
@@ -356,6 +356,28 @@ npx cdk deploy VettidOrgRelayStack       # service; reads the refs at deploy tim
 - **Data.** Everything stored is ciphertext the relay cannot read. Table
   has deletion protection, no PITR (messages live ≤ 14 days); the blob
   bucket expires objects after 8 days.
+- **Table throughput ceiling.** The table is on-demand with a maximum:
+  **2,000 write and 2,000 read units a second** (its index `due`: 100
+  and 100), `RELAY_TABLE_LIMITS` in `lib/stacks/relay-data-stack.ts`,
+  where the sizing is written out. Above it DynamoDB throttles: deposits,
+  acks and registrations fail or are retried, for every tenant, until
+  the load is back under it (short bursts may pass; the maximum is a
+  target, not exact). Without it the only bound was the account quota of
+  40,000 units a second, about $2,160 a day in writes; with it, about
+  $108 a day in writes and $22 in reads. Measured use (October 2026, ten
+  members): 27 write units a second in the busiest minute; a vault host
+  of 900 vaults at a message a minute each is about 300. To raise it:
+  change the numbers, PR, `npx cdk diff VettidOrgRelayDataStack` (the
+  table must show as modified in place, never replaced), `npx cdk deploy
+  VettidOrgRelayDataStack`, then `VettidOrgRelayStack` (two alarm
+  thresholds follow the numbers). In an emergency the same from the CLI,
+  and put it in code afterwards, or the next deploy of the data stack
+  takes it back:
+  `aws dynamodb update-table --table-name vettid-org-relay --on-demand-throughput MaxReadRequestUnits=<n>,MaxWriteRequestUnits=<n>`.
+  It caps the rate, not what is stored: nothing limits the table's size
+  but the mailbox quotas and the 14-day lifetime
+  (`aws dynamodb describe-table --table-name vettid-org-relay --query 'Table.[ItemCount,TableSizeBytes]'`,
+  refreshed about every six hours).
 - **Empty hints.** Idle long-polls mostly skip DynamoDB (Valkey knows the
   mailbox is empty); `relay_collect_store_skips_total` vs
   `relay_collect_store_queries_total` shows the ratio, and
@@ -364,7 +386,8 @@ npx cdk deploy VettidOrgRelayStack       # service; reads the refs at deploy tim
 
 ### Alarms on the rate limits line
 
-Seven alarms, `vettid-org-relay-<name>`, to the topic
+Eleven alarms, `vettid-org-relay-<name>` (seven on the line, four on the
+table: "Alarms on the table" below), to the topic
 `vettid-org-security-alerts` → admin@vettid.org (the management
 account's topic, which admits this account's CloudWatch alarms since
 #214; the member API's alarms use it the same way). Six metric filters
@@ -383,7 +406,21 @@ does.
 | `register-refused` | an address was refused new mailboxes (`register_refused` > 0, 1/s, burst 30) in 3 of 5 minutes | Someone creating mailboxes in bulk (re-registration at unlock is free, so not a vault host unlocking). DynamoDB item count and consumed writes; nothing to raise. |
 | `collectors` | a task carries ≥ 2,000 long-polls in 3 of 5 minutes | About 42 KiB each: 82 MiB of the task's 512 MiB, and nothing caps them per task. Look at task memory and restarts (ECS service metrics); scale out by hand if memory is above 70 % and the service has not (`aws ecs update-service --cluster vettid-org-relay --service vettid-org-relay --desired-count <n>`, up to 8); find out who holds them (a vault host has at most 1,024). Time to bring back the per-task caps (relay branch `ratelimit-per-key-full`). |
 | `ws-sessions` | a task carries ≥ 2,000 WebSocket sessions in 3 of 5 minutes | The same, at about 45 KiB each (88 MiB). |
-| `rate-limits-silent` | no task wrote the line for 5 minutes (missing data is the alarm) | The relay is down or not logging: `aws ecs describe-services --cluster vettid-org-relay --services vettid-org-relay --query 'services[0].[runningCount,deployments[].rolloutState,events[:5].message]'`, then `aws logs tail /vettid-org/prod/relay-service --since 15m`. An image older than protocol 0.7.0 does not write the line. The other six alarms are blind while this one is on. Also sends OK. |
+| `rate-limits-silent` | no task wrote the line for 5 minutes (missing data is the alarm) | The relay is down or not logging: `aws ecs describe-services --cluster vettid-org-relay --services vettid-org-relay --query 'services[0].[runningCount,deployments[].rolloutState,events[:5].message]'`, then `aws logs tail /vettid-org/prod/relay-service --since 15m`. An image older than protocol 0.7.0 does not write the line. The other six alarms on the line are blind while this one is on (the four on the table are not). Also sends OK. |
+
+#### Alarms on the table
+
+Four alarms on DynamoDB's own metrics for the table (`AWS/DynamoDB`,
+`TableName` = `vettid-org-relay`), which do not depend on the line:
+they keep working while `rate-limits-silent` is on. The metrics have
+data only in minutes with requests, so missing data is not an alarm.
+
+| Alarm | Fires when | Do |
+|---|---|---|
+| `table-writes-high` | 60,000 or more write units a minute for 5 minutes (half the ceiling of 2,000 a second) | Somebody is writing a lot: deposits of large messages, or many of them. With `address-busy` or `address-refused` on: one address. Is it a known vault host (a migration, a mass unlock, real growth)? Then raise the ceiling before it throttles ("Table throughput ceiling" above). If not, it is a flood kept at the ceiling: the bill is bounded (about $108 a day at most), tenants are throttled only once `table-throttled` fires; watch the table's size, and do not raise the ceiling for it. |
+| `table-reads-high` | 60,000 or more read units a minute for 5 minutes (half the ceiling) | The same for reads (collects of large mailboxes). Health checks read the table too, so do not let real use sit at the read ceiling: raise it. |
+| `table-write-volume` | 360,000 or more write units in an hour (100 a second on average; at most about 180 MB of messages stored) | 65 times the busiest hour of the preview. A slow fill below the other alarms shows here: table size and item count (`describe-table`, above), `register-refused`, the hour's `ConsumedWriteCapacityUnits` in the console. Real growth reaches it at about 300 vaults at a message a minute: then raise `tableWriteUnitsPerHour`. |
+| `table-throttled` | DynamoDB throttled the table or its index (read or write events, or throttled deposit transactions) in 3 of 5 minutes | Tenants are being refused or delayed now. With `table-writes-high` or `table-reads-high`: the ceiling is reached, decide as above (real use: raise it; a flood: leave it, it is what bounds the bill). Without them: a hot partition (one mailbox written or read beyond a partition's 1,000 write or 3,000 read units a second), or the index's ceiling (mass rotation, `register-refused`). |
 
 The thresholds are in `RELAY_ALARM_LIMITS` (`lib/stacks/relay-stack.ts`).
 2,000 long-polls or sessions on a task is a sixth of its memory, well
@@ -801,6 +838,13 @@ routes until VettidOrgVaultStack is redeployed.
   a release from the stack leaves its key alone (RETAIN; the custom
   resource's delete does nothing). A changed release entry fails the
   deploy (the key is immutable): add a new release instead.
+- The vault data bucket (`vettid-org[-staging]-vault-data-<account>`):
+  there is no export and no snapshot, so its lifecycle rule, its
+  versioning and its bucket policy are what stands between a mistake and
+  every member's vault. The same SCP denies changing them, and deleting
+  the bucket, to everyone but CloudFormation's CDK execution role; every
+  such call, a deploy's included, is emailed (`VaultDataBucketConfig`,
+  "Security alerts"). Change them only in `lib/stacks/vault-stack.ts`.
 - Break-glass for any of this: detach or edit `vettid-vault-key-protection`
   from the management account.
 
@@ -809,8 +853,33 @@ routes until VettidOrgVaultStack is redeployed.
 A key per entry of `vault/releases/<channel>.json` (W7): add release N
 with `status: "candidate"`, its PCR0–2, `seal_key: ""`, `notes` (production:
 `https://vettid.org/security/releases/<N>/`) and `admitted_pcr0s` = the
-PCR0s of every release not `removed` (never changed afterwards). `npm test`
-and `npm run check:manifest` validate the file.
+PCR0s of every earlier release not `removed`, **and of every `removed`
+release that can still be rescued**: one whose `ends_at` is less than
+the channel's deletion window ago (30 days in production, 7 in
+staging). Never changed afterwards. Why the removed ones: a rescued
+vault can only move into an `active` release whose key admits it, so a
+key that leaves them out ends their rescue the day its release is
+published (VAULT-RELEASES 0.1.24 §3.5, §6.2; owner decision of
+2026-10-13). `npm test`, CDK synth and `npm run check:manifest` validate
+the file. While `seal_key` is empty they refuse a list that leaves one
+of those releases out. A list that names too much, a `removed` release
+whose window is over or that has no `ends_at` (a failed canary), is
+reported by `npm run check:manifest` and `vault:manifest sign` only:
+CDK synth and `npm test` do not fail for it, so no command of the
+channel stops working because a window ended. The list is judged at
+the time of the check, so write the entry, create the key (step 2) and
+write its ARN (step 3) on the same day. If `check:manifest` reports a
+release named too much before the key is created, take it out of the
+list; if the key already exists with that list, write its ARN (the
+extra release is harmless to the key check, but the manifest must list
+it while the key lives).
+
+Staging releases 1 to 11 have keys from before this rule. Release 11's
+key admits 7 to 10 only, so staging 3 to 6 (removed 2026-10-13) could be
+rescued only into release 10, only while it was `active`; release 11 is
+`active` since 2026-10-13, so they have no target any more. Their keys
+are deleted on 2026-10-20 (release 3's some hours after the others: its
+deletion was scheduled again after the rescue rehearsal of 2026-10-13).
 
 1. `npx cdk diff VettidOrgVaultStack --profile vault-prod`: exactly one new
    `Custom::VettidReleaseKey` and its SSM parameter. Read its `Policy`
@@ -998,6 +1067,89 @@ SNS:Publish" (the topic admitted only the CloudTrail rules until the
 host stack that added these alarms was deployed; an alarm that fired
 before that deploy did not notify).
 
+### The data bucket's old versions and its size alarm
+
+The data bucket (`vettid-org[-staging]-vault-data-<account>`,
+`VettidOrgVaultStack`) is versioned. A vault's state is one object,
+`vaults/<vault_id>/state`, rewritten in full at every change (with its
+header, `vaults/<vault_id>/header/<pcr0>`), so a busy vault leaves
+hundreds of old versions a day and they are nearly all of the bucket's
+bytes. Nothing reads an old version: the hosts read and write the current
+one only (conditional writes), and an old version is there for an
+operator to restore by hand (VAULT-RELEASES §8.2, §11.4).
+
+Two lifecycle rules, over every key (`VAULT_DATA_VERSIONS` in
+`lib/stacks/vault-stack.ts`); S3 removes a version as soon as either
+allows it:
+
+1. No old version is kept more than **7 days** after it was replaced or
+   deleted; a delete marker goes once nothing is left under it;
+   unfinished multipart uploads go after a day. This is the rule the
+   bucket has had from the start.
+2. An old version goes **1 day** after it was replaced, unless it is one
+   of the **5 newest** old versions of its object (owner, 2026-10-13).
+
+S3 counts from the moment a version was replaced, rounds up to the next
+midnight UTC and removes some time after that, so "1 day" is between 24
+and 48 hours, and a little more.
+
+| Object | What is kept beside the current version |
+|---|---|
+| Of an idle vault (no write for a week) | nothing: its 5 newest old versions went when they reached 7 days |
+| Of a vault written 600 times a day | every version of the last 24 to 48 hours (600 to 1,200 of them), and nothing older. The 5 newest are always among those, so the count of 5 changes nothing for such a vault: the 1 day is what bounds it |
+| Of a vault written a few times a week | the 5 newest old versions, each for at most 7 days |
+| Of a deleted vault | all it wrote in its last 24 to 48 hours, then its 5 newest versions, until 7 days after the deletion; then the delete marker goes too. The same bound as before: rule 1 is what removes them, rule 2 alone would keep those 5 for ever |
+
+What this gives up: an operator could restore any state of the last 7
+days and can now restore any state of the last 24 hours, plus the 5
+versions before that. For a busy vault those 5 are seconds or minutes of
+history, not days. The 24 hours are therefore the time there is to notice
+a fault that damages state at every write (a bad release, an operator
+error) and still find a good version: a fault noticed on the second day is
+too late for a vault that kept writing. State and header are written
+together and restored together (the header names the state it belongs
+to), so both have the same rule; restoring means editing the bucket
+policy first (it denies `vaults/*` to everyone but the host role) and
+shows in the app as a rollback (VAULT-RELEASES §13.2).
+
+To see the rules and that they work (read-only; the size is S3's daily
+metric, a day or so late, and it counts every version):
+
+```bash
+P="--profile vault-staging"; B=vettid-org-staging-vault-data-347272280361
+aws s3api get-bucket-lifecycle-configuration $P --bucket $B
+aws cloudwatch get-metric-statistics $P --namespace AWS/S3 --metric-name BucketSizeBytes \
+  --dimensions Name=BucketName,Value=$B Name=StorageType,Value=StandardStorage \
+  --start-time "$(date -u -d '10 days ago' +%FT00:00:00Z)" --end-time "$(date -u +%FT%TZ)" \
+  --period 86400 --statistics Maximum --query 'sort_by(Datapoints,&Timestamp)[].[Timestamp,Maximum]' --output table
+# NumberOfObjects (StorageType=AllStorageTypes) counts versions and delete markers too.
+```
+
+After a deploy that changes the rules, S3 needs up to two days to act on
+them; the size then falls over the following days.
+
+**Alarm `vettid-org[-staging]-vault-data-bucket-size`** (host stack, to
+the vault alerts topic like the others): the bucket holds more than
+10 GiB (`VAULT_DATA_BUCKET_ALARM_BYTES` in
+`lib/stacks/vault-host-stack.ts`; staging held about 7.4 GB under the
+7-day rule on 2026-10-13). When it fires:
+
+1. Look at the size over the last days (the command above). A step up
+   over one or two days is a vault writing more or larger state than
+   before; a slow rise is more vaults.
+2. Check that both lifecycle rules are there and `Enabled`. A bucket
+   whose rules were removed or disabled grows without bound.
+3. Find what writes: the parent's metrics and the host log say which
+   instance is busy; the storage metric does not say which vault. A
+   vault that rewrites its state in a loop is a bug to report in
+   vettid-vault, not something to fix in the bucket.
+4. If the growth is ordinary (more vaults), raise the threshold. A vault
+   costs about its state's size times the writes of one to two days.
+
+Do not delete versions by hand to make room: the bucket policy forbids
+it to everyone but the host role, and the 24 hours of versions are the
+only way back from a fault that damages state.
+
 ### Manifest sync (`vettid-org-vault-manifest-sync`, VAULT-RELEASES §7)
 
 Every 5 minutes: fetches the channel's served manifest, verifies it under
@@ -1043,8 +1195,8 @@ After publishing a manifest, run it at once:
    The image build takes about 20–40 minutes; a hash or PCR0 mismatch
    fails the build and the deploy (logs: `/aws/imagebuilder/vettid-org-vault-r<N>-<hash>`).
 5. Canary: `aws autoscaling set-desired-capacity --auto-scaling-group-name vettid-org-vault-r<N> --desired-capacity 1`,
-   then the self-test through SSM on that instance, per vettid-vault
-   docs/SMOKE.md:
+   then the self-test on that instance through Run Command ("No
+   interactive access to hosts" below), per vettid-vault docs/SMOKE.md:
    ```bash
    systemctl stop vault-parent      # also stops the enclave (vault-enclave is PartOf the parent)
    systemctl start vault-enclave    # a fresh enclave, which dials the self-test parent
@@ -1080,7 +1232,7 @@ After publishing a manifest, run it at once:
 From S3 on, the release image's self-test can measure how many vaults one
 host holds (vettid-vault docs/SMOKE.md, "Capacity measurement"). Run it on
 a host of the release under test, the same way as the canary self-test,
-through SSM with `executionTimeout` of at least 7200 s:
+through Run Command with `executionTimeout` of at least 7200 s:
 
 ```bash
 systemctl stop vault-parent      # also stops the enclave (PartOf)
@@ -1123,7 +1275,10 @@ and re-checks everything with this repository's own render and verifier:
 1. Edit `vault/releases/prod.json` for the publication: N `active` with
    `published_at` and its `log` (summary, changes, security), N−1
    `deprecated`, any `retired`/`ends_at`/`removed` changes (§10.3).
-2. `npm run vault:manifest -- sign --channel prod`: refuses while any
+2. `npm run vault:manifest -- sign --channel prod`: refuses a manifest
+   in which a `removed` release that can still be rescued is not
+   admitted by the newest `active` release's key ("Removing a release
+   and rescue" below); refuses while any
    release's `notes` is not its release log entry (`npm run vault:manifest --
    notes --channel <c>` switches them; only staging S1–S9 ever had other
    notes), then serial = max(served,
@@ -1148,7 +1303,8 @@ and re-checks everything with this repository's own render and verifier:
    the manifest sync (above) so routing follows at once.
 
 If the canary fails, never publish that document: edit the file (N
-`removed`, no `host`), sign the next serial when there is something to
+`removed`, no `host`, no `ends_at`: nobody was on it, so it is not
+rescued and no later key admits it), sign the next serial when there is something to
 publish, and delete the canary row. `check:manifest` refuses a served
 manifest that is not exactly a render of the file, a lower or repeated
 serial, a dropped or backwards-moving release, and a serial above
@@ -1359,33 +1515,167 @@ the account deletions it held back, and members' apps retry on their own.
 
 ### Removing a release and rescue
 
-At D (§10.3 step 2): `npx cdk destroy VettidOrgVaultRelease<N>Stack --profile vault-prod`
+**Before a release is removed, and before a new release is published:
+a rescue must have a target** (VAULT-RELEASES 0.1.24 §3.5). A rescued
+vault can only move into the newest `active` release, and only if that
+release's key admits it. Check in `vault/releases/<channel>.json`, as it
+will be after the edit: the PCR0 of every `removed` release whose
+`ends_at` is less than the deletion window ago (30 days in production,
+7 in staging), the release being removed included, is in the
+`admitted_pcr0s` of the newest `active` release. `vault:manifest sign`
+makes the same check and refuses to sign, and `check:manifest` refuses
+the served manifest. If it fails, do not publish: wait until the
+window of the release left out is over, or keep the current `active`
+release until then. (Staging releases through 11 are not checked: their
+keys are older than the rule, "Creating a release key" above.)
+
+One case has no target and no check: a release that is removed while
+an older release is the newest `active` one (the enclave refuses a move
+to a lower number). Removing such a release ends its vaults; ask the
+owner first.
+
+At D (§10.3 step 2): set the entry `removed` and keep its `ends_at`,
+the time the release ended, never a later one
+(the rescue window counts from it; `check:manifest` refuses a published
+release that is `removed` without one, and a `removed` entry whose
+`ends_at` is after the manifest's `issued_at`), sign and publish, then
+`npx cdk destroy VettidOrgVaultRelease<N>Stack --profile vault-prod`
 (instances drain; the `group-name` ref goes, so the next manifest sync sets
 `available` false), then remove the entry's `host` in
 `vault/releases/<channel>.json` (the entry itself stays while the manifest
-lists the release).
-Rescue (step 3): cancel and enable the key as the retirement role,
-re-add the entry and deploy the release stack, then
+lists the release), and schedule the key's deletion ("Retirement" above).
 
-```bash
-aws dynamodb update-item --profile vault-prod --table-name vettid-org-vault-releases \
-  --key '{"release":{"S":"<pcr0>"}}' --update-expression 'SET rescue = :t' --expression-attribute-values '{":t":{"BOOL":true}}'
-```
+Rescue (step 3), within the window. Nothing is signed or published: the
+entry stays `removed` and the manifest does not change.
 
-The member API routes the vaults of that release again and the scaler
-starts it on demand. `rescue` is release-wide (every vault sealed to it is
-routed while it is set). Remove it (`REMOVE rescue`) when the member has
-moved; the scaler then stops the group at once.
+1. The target: the newest `active` release admits N (the check above).
+   Without it, stop: the vault cannot move. (The enclave accepts any
+   `active` release above N whose key admits it; the list and the app
+   choose the newest.)
+2. The key, as the retirement role:
+   `aws kms cancel-key-deletion --key-id <arn>`, then
+   `aws kms enable-key --key-id <arn>` (cancelling leaves it `Disabled`);
+   `aws kms describe-key --key-id <arn> --query KeyMetadata.KeyState`
+   must answer `Enabled`.
+3. The release stack: in `vault/releases/<channel>.json` give N's entry
+   its `host` again (as it was before the removal: `git log -p` on the
+   file) **together with `"rescue": true`**, `min_instances: 0`. The
+   validation allows `host` on a `removed` entry only with that marker,
+   and the marker only while the newest `active` release admits N; the
+   marker is never in the manifest. In production the edit is a PR
+   merged to master before the deploy, like any release list change:
+   the daily drift check ("Production drift") compares master with
+   what is deployed, so it stays clean during the rescue; with an
+   unmerged edit it would report the host stack as changed and the
+   release stack as deployed but not in master. `npm run check:manifest`, then
+   `npx cdk diff VettidOrgVaultStack VettidOrgVaultHostStack VettidOrgVaultRelease<N>Stack --profile vault-prod`
+   (the host stack only gains N's PCR0 on the smoke key; the release
+   stack is new; **`VettidOrgVaultStack` must show no change**: `cdk
+   deploy` of the other two deploys it too, as their dependency, and
+   it holds the release keys) and deploy the host and release stacks.
+   The image is built again from the release's assets and its pinned
+   base AMI; if that AMI is gone, set the current one ("Adding a
+   release" step 1). Run the manifest sync so that `available` is true.
+4. Routing:
+
+   ```bash
+   aws dynamodb update-item --profile vault-prod --table-name vettid-org-vault-releases \
+     --key '{"release":{"S":"<pcr0>"}}' --update-expression 'SET rescue = :t' --expression-attribute-values '{":t":{"BOOL":true}}'
+   ```
+
+   The member API routes the vaults of that release again and the scaler
+   starts it on demand. `rescue` is release-wide (every vault sealed to
+   it is routed while it is set).
+5. The member unlocks and approves the move into the newest `active`
+   release (the app offers only the move), then unlocks again there.
+   **The move is confirmed when an unlock in the target release has
+   succeeded** (the member sees the vault open, and the app shows the
+   target release). The vault row's `sealed_release` is not
+   the sign: it names the target as soon as N has sealed the header,
+   before the target has opened the vault. Until the confirmation N
+   must stay routed, because going back (an abandon) is served by N.
+6. The way back, only after that confirmation: `REMOVE rescue` on the
+   row (the scaler then stops the group at once); `npx cdk destroy
+   VettidOrgVaultRelease<N>Stack`; remove `host` and `rescue` from the
+   entry (in production: a second PR, merged before the deploy, after
+   which the drift check is clean again) and deploy the host stack;
+   schedule the key's deletion again ("Retirement" above). KMS takes
+   the full window again, so the key's deletion date is no longer
+   `ends_at` plus the window.
+
+`check:manifest` fails while an entry carries `rescue: true` past its
+window (`ends_at` plus the window): end the rescue. CDK synth does not
+fail for that, so the stack can still be destroyed.
 
 ### Network and egress
 
 Hosts: public subnets in two AZs of the host VPC, no NAT, no inbound,
-outbound TCP 443 only, SSM Session Manager only. Route 53 Resolver DNS
+outbound TCP 443 only, no SSH key and no interactive access: commands
+through Systems Manager Run Command only (next section). Route 53 Resolver DNS
 Firewall answers only the names in `lib/vault/egress.ts` (NXDOMAIN for the
 rest; query logs in `/vettid-org/<stage>/vault-dns`, metric
 `DnsQueriesBlocked`); S3 and DynamoDB gateway endpoints admit only this
 account's resources. AMIs are built in a separate build VPC without the
 firewall (the builder needs GitHub and the package repositories).
+
+### No interactive access to hosts
+
+Nobody gets a shell on an instance in a vault account (the owner's
+decision of 2026-10-13), in staging or production. What makes it so:
+
+- The Vault OU policy (`lib/org/scp-vault.json`, statement
+  `NoInteractiveSessions`) denies, to every principal in both accounts
+  with no exception: `ssm:StartSession` and `ssm:ResumeSession` (one call
+  starts every kind of session: the shell, an interactive command, port
+  forwarding, SSH over Session Manager, whatever the session document),
+  every EC2 Instance Connect call (a temporary SSH key, the serial
+  console's key, an Instance Connect tunnel), creating an Instance
+  Connect endpoint, and turning on the serial console (it is off in both
+  accounts).
+- The hosts themselves: the security group has no inbound rule, the
+  launch template has no key pair, and neither account has one.
+
+What an operator does instead: **Run Command**, one command at a time.
+It runs as root, through the SSM agent, without a terminal:
+
+```bash
+P="--profile vault-staging"; I=<instance id>
+C=$(aws ssm send-command $P --instance-ids $I --document-name AWS-RunShellScript \
+  --comment "S12 self-test" --parameters 'commands=["systemctl is-active vault-parent"]' \
+  --query Command.CommandId --output text)
+aws ssm get-command-invocation $P --command-id $C --instance-id $I \
+  --query '[Status,StandardOutputContent,StandardErrorContent]' --output text
+```
+
+Give every command a `--comment` (it is in CloudTrail; the commands
+themselves are not). The output comes back up to 24,000 characters:
+for more, write to a file on the host and `grep` or `tail` it with a
+second command, as "Capacity measurement" does. A long command takes
+`executionTimeout` in `--parameters`. Each `send-command` by a person
+sends a `VaultHostAccess` email ("Security alerts"); that is intended.
+So does every other way to have the agent run a document (a State
+Manager association, an automation, a maintenance-window task); none is
+used here, so use none.
+Image Builder's own commands on its build instances and a patch
+baseline, should one ever be wanted, are Run Command too and are not
+affected (the hosts are replaced by a new release's image, not patched
+in place).
+
+Run Command is still any command as root. What the policy removes is
+the terminal: unattributed keystrokes with nothing recorded. It does
+not stop an administrator from running a script.
+
+**Break-glass.** A shell on a host takes a change of the organization
+policy, which only an administrator of the management account can make
+(nothing inside a vault account can): remove the two `ssm:` actions
+from the statement, `scripts/vault/apply-scp.sh --apply`, open the
+session, put the file back and apply again. Each apply emails
+`OrgOrSsoChanges`, and the session emails `VaultHostAccess`. Say in
+the release or incident notes why it was needed.
+
+The exit node in the management account ("Admin access") is not a
+vault host and is not under this policy: its Session Manager access is
+unchanged.
 
 ### The Android app link (account site)
 
@@ -1555,11 +1845,204 @@ session | link | app`), `vault.deletion_executed`.
 - *Member says "I didn't ask for this"* within the 24 hours: they cancel
   from the email link, the account page or the app. After `executing` it
   cannot be cancelled; the vault is gone once the host deletes it (stored
-  versions stay 7 days, sealed, and are not restorable by support).
+  versions stay at most 7 days, sealed, and are not restorable by support;
+  "The data bucket's old versions and its size alarm").
+- *The account looks taken over* (the member did not ask for the
+  deletion, or for a recovery, and someone else may hold their mailbox
+  or session). In this order, on the admin site's **Members** page:
+  1. **Suspend** the account (with the reason). Suspend writes the
+     status first, then disables sign-in, then ends the sessions, and
+     writes the `member.suspend` event last. From the status write on,
+     a pending deletion is **not carried out**: the cleanup job's
+     5-minute run reads the member's row before each deletion and
+     leaves it `pending` for an account that is not active, for as
+     long as it stays that way (metric `StartOverHeldNotActive`; no
+     alarm, see below). The one case suspending cannot catch is a run
+     of the job that read the row as active just before the status was
+     written. Suspending cancels nothing by itself.
+     **A suspension can be half done.** If Suspend answers an error
+     after the status was written, the row says `suspended` but
+     sign-in may not be disabled and the sessions may not be ended.
+     The sign of it is a suspended account with **no `member.suspend`
+     event** for this suspension in the audit log (by `subject`, the
+     member's id). Until it is finished, a session from before the
+     suspension keeps renewing itself; it reaches only lock and the
+     two cancels, because every other account and vault route reads
+     the row. Finish it with **Suspend again** on the suspended row
+     (it disables sign-in and ends the sessions again and writes
+     `member.suspend` with `repeat: true`; the stored reason stays the
+     first one). It is safe to press on any suspended account.
+     Reinstate also ends the sessions before it enables sign-in, so a
+     half-done suspension cannot hand an old session back.
+  2. **Cancel vault deletion** on the member's row
+     (`POST /admin/members/{user_guid}/vault/deletion/cancel`). It
+     answers "cancelled" (audit `member.vault_deletion_cancel`, the
+     member is emailed "VettID vault deletion cancelled … by VettID
+     support"), "no pending vault deletion" (nothing to do; repeating
+     it is harmless), or an error that it is already being carried out
+     (`409`, state `executing`: see the next entry). It works whatever
+     the account status, so it is also the way to cancel for a member
+     who cannot reach the link, the account page or the app. If it
+     answers an internal error, press it again: when the second answer
+     is "no pending vault deletion", the first one did cancel (its
+     audit event or email failed); the cancel function's log has
+     `{"startOverCancel":{"user_guid","vault_id","deletion_id"}}` for
+     every record it removed.
+  3. *A recovery the member did not ask for* has no admin cancel. While
+     the account is suspended it is **blocked, not stopped**: the code
+     is not released (`GET /api/vault/recovery` answers 403) and a new
+     app can neither claim it nor register, but its clock runs on
+     (code after 24 hours, usable for 24 more), and it works again the
+     moment the account is active. The member can cancel it with the
+     link in the "recovery requested" email at any time, suspended or
+     not.
+  4. **Reinstate** when the member has their mailbox back. Reinstating
+     first cancels a vault deletion that is still pending (step 2 not
+     done, or a deletion nobody noticed), with the same email and
+     audit event (`on: reinstate`), so that a deletion which waited
+     through a suspension is not carried out afterwards. Then, if a
+     recovery is still active, it stops and shows a warning with the
+     recovery's state and the time it stays usable until (`409
+     recovery_active`; the pending deletion has been cancelled by
+     then, the account is still suspended). Unless the member says the
+     recovery is theirs: have them cancel it with the email link, or
+     wait until that time has passed, and press Reinstate again.
+     When it goes on, it ends the member's sessions before it enables
+     sign-in (a half-done suspension cannot hand an old session back).
+     **Reinstate anyway** reinstates with the recovery alive (audit
+     `member.reinstate_with_active_recovery`, written before sign-in
+     is enabled, then `member.reinstate`). The warning can be wrong in
+     one case: a recovery that the member's new app has just completed
+     is shown as `registered` until the API has recorded it.
+     If the cancel of the deletion cannot be made (the cancel function
+     or the vault tables are unreachable), or a step before the status
+     write fails, Reinstate answers an error and the account stays
+     suspended; try again. If it answers an error and the row then
+     says `active`, the reinstatement was made and only its event or
+     the vault's snapshot failed; pressing it again answers "already
+     active". A member who does
+     want to start over asks again and gets a new 24 hours.
+
+  What the member sees while suspended: sign-in is refused; the app
+  and the account page answer "This account is not active" for
+  everything except lock and the two cancels (deletion, recovery),
+  which keep working with the vault's app key, the email link, or a
+  session from before the suspension (it ends within the hour once
+  the suspension's sign-out was made; see "half done" above). The deletion's email link stops
+  working at the original `deletes_at`, held or not; after that the
+  cancel is support's (step 2) or the reinstatement's. The app reads
+  the pending deletion from its status, which a suspended account
+  cannot fetch, so in practice a suspended member cancels with the
+  link or asks support.
+- *"Already being carried out" (`executing`)*: the 24 hours passed
+  with the account active and the job took the deletion. Nothing
+  cancels it: not the member, not **Cancel vault deletion** (`409`),
+  not a suspension, also when the host's `delete` has not been sent
+  yet (`deletion.queued_at` absent: the vault service is paused or no
+  instance was running; the job tries again at every run and does not
+  ask about the account for these). Stopping such a deletion while it
+  is still unqueued is the owner's decision and a change by hand, and
+  it is **not safe without stopping the job first**: the job sends the
+  queue message and only then writes `queued_at`, and it acts on the
+  row as its scan read it, so a run in progress, the next 5-minute
+  run or the daily retry can queue the `delete` after a by-hand update
+  has succeeded. In this order:
+  1. **Pause the vault service** (admin site, **Vault service**, with
+     the reason; "Pausing the vault service"). While it is paused the
+     job queues no `delete` and requests no start. It takes effect in
+     the job within about 30 seconds (its cache). If the service
+     cannot be paused, disable both schedules of the cleanup function
+     instead (the rules `StartOverSchedule` and `CleanupSchedule` of
+     `VettidOrgMemberApiStack`, `aws events disable-rule`), and enable
+     them again in step 5.
+  2. **Wait 6 minutes**: longer than the function's timeout (5
+     minutes) plus the cache, so that a run that started before the
+     pause has ended.
+  3. **Check that nothing was queued.** Read the vault row
+     consistently
+     (`aws dynamodb get-item --consistent-read --table-name vettid-org-vaults --key '{"vault_id":{"S":"<vault_id>"}}'`):
+     `deletion.state` is `executing`, `deletion.queued_at` is absent
+     and `state` is not `deleted`. `queued_at` absent is not quite
+     proof: the job sends first and writes `queued_at` after, so a
+     send whose write then failed leaves no mark on the row. That
+     write failing ends the run with an error, so also check that no
+     invocation of the cleanup function failed since the deletion
+     became `executing` (audit `vault.deletion_executed` has the time
+     and `queued: false`; the function's `Errors` metric, or its log).
+     If the row or the log says it may have been queued, stop here:
+     the vault is being deleted and nothing takes the message back.
+  4. **Remove both marks in one update**, conditional on what step 3
+     saw:
+     `aws dynamodb update-item --table-name vettid-org-vaults --key '{"vault_id":{"S":"<vault_id>"}}' --update-expression "REMOVE deletion, deletion_requested_at" --condition-expression "deletion.deletion_id = :id AND deletion.#s = :ex AND attribute_not_exists(deletion.queued_at)" --expression-attribute-names '{"#s":"state"}' --expression-attribute-values '{":id":{"S":"<deletion_id>"},":ex":{"S":"executing"}}'`.
+     Both must go: with `deletion_requested_at` left, the daily retry
+     deletes the vault. Read the row again and see neither.
+  5. **Resume the vault service** (or enable the two rules), and tell
+     the member; no email is sent for a change by hand.
+- *A canceled account* (the member cancelled the account during the 24
+  hours): the deletion is held in the same way, and the vault goes
+  with the account after its 7 days (the daily run, as for every
+  canceled account; from then on the row has `deletion_requested_at`
+  and the 5-minute run leaves it to the daily retry). An admin's
+  reinstate inside the 7 days cancels the pending deletion as above.
+- *A held deletion without a member* (alarm
+  `vettid-org-start-over-held-no-member`, metric
+  `StartOverHeldNoMember`; three 5-minute runs in a row): a vault has
+  a pending deletion past its time and no member row. The job holds
+  it and never erases a vault because a row is missing. It happens
+  when an admin **Delete**s a member who had a pending deletion (that
+  Delete does not touch vaults), or when an account's own deletion
+  removed the row and then failed before it reached the vault. The
+  vault and its stored objects stay until someone decides:
+  1. Find it: scan the vaults table (vault account) for rows with
+     `deletion.state = pending` and `deletes_at` in the past
+     (`aws dynamodb scan --table-name vettid-org-vaults --filter-expression "attribute_exists(deletion) AND attribute_not_exists(deletion_requested_at)" --projection-expression "vault_id, user_guid, deletion"`),
+     and check that the members table has no row for that `user_guid`.
+  2. Find out why the member is gone: the audit log by `subject` =
+     that `user_guid` (`member.delete` by an admin, or
+     `member.delete_after_cancel` by the job).
+  3. The member was deleted and the vault is to go (the usual case):
+     set `deletion_requested_at` on the vault row to a time more than
+     an hour ago
+     (`aws dynamodb update-item --table-name vettid-org-vaults --key '{"vault_id":{"S":"<vault_id>"}}' --update-expression "SET deletion_requested_at = :t" --condition-expression "attribute_exists(vault_id) AND attribute_not_exists(deletion_requested_at)" --expression-attribute-values '{":t":{"N":"<epoch seconds, an hour or more ago>"}}'`).
+     The next daily run asks the vault to delete itself exactly as for
+     a canceled account, the usual notice removes the rows, and the
+     5-minute run stops counting it at once.
+  4. The row was removed by mistake and the vault is to stay: restore
+     the member first; or, to keep the vault without a member, remove
+     the `deletion` record
+     (`--update-expression "REMOVE deletion" --condition-expression "deletion.#s = :p"`
+     with `#s` = `state`, `:p` = `pending`).
+  The alarm returns to OK within 15 minutes of either.
+- *Held because the member row cannot be read* (alarm
+  `vettid-org-start-over-held-read-error`, metric
+  `StartOverHeldReadError`; three runs in a row): no due deletion is
+  carried out while this lasts, and none is lost: each is tried again
+  every 5 minutes. The cleanup function's log has
+  `start-over held: the member row could not be read` with the error
+  name. `AccessDeniedException`: the function's role lost
+  `dynamodb:GetItem` on the members table (`VettidOrgMemberApiStack`
+  not deployed, or deployed without it). Anything else is the table.
+- *Held for a suspended or canceled account* is not alarmed: it is
+  what a suspension is for, and a reinstatement ends it by cancelling
+  the deletion. `StartOverHeldNotActive` (namespace `VettID/MemberApi`)
+  shows how many are held at each run.
 - *Stuck in `executing`*: as for an account deletion: look at
   `deletion_requested_at`, the release's routability and the host logs;
   the daily retry keeps trying and logs `vault deletion pending` after 30
   days.
+
+**Deploy order for the hold and the admin cancel.**
+`VettidOrgMemberApiStack` first: the cleanup job's read of the members
+table, the two alarms, and a second function, `StartOverCancel`, which
+runs only the cancel of a member's pending deletion under the cleanup
+job's role; its ARN is published as SSM
+`/vettid-org/<stage>/member-api/start-over-cancel-fn-arn`. Then
+`VettidOrgAdminApiStack` (it reads that parameter, so its deploy fails
+until the first one is done; the people function may invoke that
+function, not the cleanup job), then the admin site. Nothing changes
+in the vault account, and no existing function, log group or table is
+replaced. Between the two deploys the admin API is the old one and
+behaves as before.
 
 **Deploy order for 2.1.0.** `VettidOrgVaultStack` (vault account: the
 host's `credential_backup` grant and the API roles' `deletion` attribute in
@@ -1730,11 +2213,23 @@ verification links, notices.
   #   tester-<random>@test.staging.vettid.org (no AWS call)
   npm run -s staging:mail -- wait --to ADDRESS [--since ISO] [--timeout 120] [--subject REGEX]
   #   JSON {from, to, subject, date, links, text}; --since defaults to 60 s ago
-  npm run -s staging:mail -- link --to ADDRESS [--match REGEX] [--since ISO] [--timeout 120]
+  npm run -s staging:mail -- link --to ADDRESS [--match REGEX] [--since ISO] [--timeout 120] [--subject REGEX]
   #   the first matching link of the newest matching message, e.g.
   #   --match '/auth/#t='                     (account site sign-in link)
   #   --match 'email-verification\.'          (SES verification link)
+  #   --match '/request/withdraw/#w=' --subject '^We have your request'
+  #                                           (a request's withdrawal link)
   ```
+
+  **Always pass `--match` (and `--subject` when you want one mail in
+  particular) to `link`.** Without them it prints the first link of
+  the newest message, and one address now gets several mails in a
+  row: since MEMBER-API 2.6.0 a request made without a registration
+  code is answered, once verified, by "We have your request for early
+  access to VettID" (the withdrawal link), which arrives after
+  Amazon's verification mail and before any "Your VettID account is
+  ready" or sign-in link. A flow that took "the newest link" would
+  open the withdrawal page.
 
   `--profile` overrides the default `vault-staging-test-mail`. Take
   `--since` from just before the action that sends the mail, so an older
@@ -1812,7 +2307,15 @@ How events get there:
   `vettid-org-security-alert-forward` (role
   `vettid-org-security-alert-forwarder`), that sends every CloudTrail
   write call (read-only calls excluded; refused calls included) and every
-  console sign-in to the management account's default bus. Stacks:
+  console sign-in to the management account's default bus. Data events
+  (the object writes on the vault data bucket, "Vault data events" below)
+  are not forwarded: they are kept in the trail, and the host makes them
+  all day. The pattern also names Session Manager's `StartSession` and
+  `ResumeSession`, as a precaution that by itself changes nothing:
+  EventBridge gives read-only management calls only to a rule in state
+  `ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS`, and the rule is in
+  the ordinary `ENABLED` state ("Testing an alert" says when that would
+  have to change). Stacks:
   `VettidOrgVaultAlertForwardStack` (vault-prod; in staging, vault-staging)
   and `VettidOrgProteusAlertForwardStack` (proteus; an organization-level
   control, so it lives here, not in the proteus-web-site repository).
@@ -1843,10 +2346,22 @@ How events get there:
   or edit it there.
 - **GuardDuty findings** of all accounts arrive in the management account
   directly: it is the GuardDuty administrator (members auto-enabled).
+  S3 protection (GuardDuty's own reading of object calls, for findings
+  such as unusual downloads or deletions) is a per-feature organization
+  setting, not in any stack: "Vault data events" below has the one-time
+  command.
 - us-east-1 only: global events (IAM, STS, sign-in, Organizations,
   Identity Center) land there, and the Workloads SCP denies every other
   region in the member accounts. (Calls attempted in other regions are
   still in the organization trail, just not alerted.)
+
+A rule's event pattern may be at most 2,048 characters as compact JSON
+(EventBridge refuses a longer one and the stack rolls back, as the first
+deploy of the vault account rules did). `test/event-pattern-size.test.ts`
+holds every rule to 1,800. A pattern that needs two "or" lists at once
+grows as their product when written as one list: put them at different
+levels of the pattern, as `VaultHostProfileLaunch` does (the profile's
+place under `detail`, the caller under `userIdentity`).
 
 The rules (all in VettidOrgAuditStack; "outside a deploy" = not by
 CloudFormation's CDK execution role `cdk-*-cfn-exec-role-*`, the same
@@ -1866,6 +2381,10 @@ pattern the SCPs exempt):
 | `KmsKeyDeletion` | `ScheduleKeyDeletion`, `CancelKeyDeletion`, `DisableKey`, `DeleteImportedKeyMaterial` — always, deploys included (management and proteus) |
 | `KmsKeyPolicy` | `PutKeyPolicy` outside a deploy (management and proteus) |
 | `S3PublicAccess` | bucket policy, ACL, ownership controls, bucket- or account-level public access block (outside a deploy) |
+| `VaultDataBucketConfig` | a vault data bucket's lifecycle rule, versioning or bucket policy changed, or the bucket deleted — always, deploys and refused attempts included (vault accounts) |
+| `VaultHostAccess` | in a vault account, except by Image Builder itself (its service principal and its service-linked role) on its build instances: a Run Command (`SendCommand`) and the other ways to have the SSM agent run a document, deploys included (`CreateAssociation`, `CreateAssociationBatch`, `UpdateAssociation`, `StartAssociationsOnce`; `StartAutomationExecution`, `StartChangeRequestExecution`; `RegisterTaskWithMaintenanceWindow`, `UpdateMaintenanceWindowTask`); and every interactive way in, which the Vault OU policy denies, so normally as a refused attempt: a Session Manager session (`StartSession`, `ResumeSession`), EC2 Instance Connect (`SendSSHPublicKey`, `SendSerialConsoleSSHPublicKey`, `OpenTunnel`, `CreateInstanceConnectEndpoint`), the serial console switch (`EnableSerialConsoleAccess`) |
+| `VaultHostProfileLaunch` | `RunInstances` with the instance profile `vettid-org-vault-host` by anything but Auto Scaling through its service-linked role (vault accounts; refused attempts included) |
+| `VaultHostLaunchPath` | `CreateLaunchTemplate`, `CreateLaunchTemplateVersion`, `ModifyLaunchTemplate`; `CreateAutoScalingGroup`, `UpdateAutoScalingGroup`, `CreateLaunchConfiguration`, `StartInstanceRefresh`; `AssociateIamInstanceProfile`, `ReplaceIamInstanceProfileAssociation`; `AddRoleToInstanceProfile` — always, **deploys included** (vault accounts): a release deploy sends three, a release's removal one |
 | `SecurityGroupOpenToWorld` | ingress from `0.0.0.0/0` or `::/0` (outside a deploy) |
 | `GuardDutyFindings` | GuardDuty findings of severity ≥ 4 (medium) in any account |
 | alarm `vettid-org-security-alert-heartbeat-<account>` | no forwarding heartbeat from that member for 3 hours (OK email when it resumes) |
@@ -1877,6 +2396,157 @@ also emailed to admin@vettid.org), so the central KMS rules skip those
 accounts rather than send every key event twice. A release key's
 scheduled deletion by the retirement role is expected and is still
 reported there.
+
+### The vault account alerts: what they mean, what to do
+
+All four concern the sealed vault objects in the data bucket. The host
+role `vettid-org-vault-host` is the only principal the bucket policy
+admits to them, and its credentials do not open them: a release key
+decrypts only for an attested enclave. So the worst case behind these
+alerts is objects copied or destroyed, not read.
+
+- **`VaultDataBucketConfig`.** Expected only while a deploy of
+  `VettidOrgVaultStack` that changes the bucket's definition runs (`who`
+  is then `…/cdk-hnb659fds-cfn-exec-role-…/AWSCloudFormation`, and the
+  change is in the merged diff). Anything else, at once: read the
+  bucket's state with that account's profile
+  (`aws s3api get-bucket-lifecycle-configuration`, `get-bucket-versioning`,
+  `get-bucket-policy`, each with `--bucket <name>`) and compare with
+  `lib/stacks/vault-stack.ts`: versioning `Enabled`; the lifecycle
+  rules exactly as the stack's `lifecycleRules` has them (noncurrent
+  versions kept for the days written there, expired delete markers
+  removed, incomplete uploads aborted), and **no** rule that expires
+  current objects; the two deny statements. If it differs, deploy
+  `VettidOrgVaultStack` to put it back **the same day**: an expiry rule
+  takes effect at the next midnight UTC and noncurrent versions go only
+  after their days, so an early repair loses nothing (objects that already have a
+  delete marker come back by deleting the marker). An `error:
+  AccessDenied` means the SCP refused the call and nothing changed; find
+  out who tried. A bucket policy change outside a deploy also arrives as
+  `S3PublicAccess`.
+- **`VaultHostAccess`.** Look at `event` and `error` first.
+  `SendCommand`: someone ran a command on an instance in a vault
+  account. CloudTrail keeps who, when, from where, on which instance
+  (`requestParameters.instanceIds`), the document and the comment, not
+  the command: its parameters are recorded as hidden. Expected when the
+  owner runs a release's self-test or capacity measurement ("Adding a
+  release", "Capacity measurement"); one email per command, typically
+  three to ten on a release day. An association, an automation or a
+  maintenance-window task (`CreateAssociation`,
+  `StartAutomationExecution`, `RegisterTaskWithMaintenanceWindow` and
+  their variants) makes the agent run a document without a visible
+  `SendCommand`; no procedure and no stack uses one in a vault account,
+  so treat it as a command that was not you, and delete the association
+  or task. Any other event is an interactive way in ("No interactive access to hosts"):
+  with `error: AccessDenied` the policy refused it and nothing happened,
+  but someone tried; **without an error the policy is not in force**
+  (detached, edited, or the account moved out of the Vault OU): check
+  `OrgOrSsoChanges` emails and re-apply it. For a command or a session
+  that was not you: treat the host role's credentials on that instance
+  as taken. Terminate the instance (its group starts a new one; the
+  credentials die with it within hours), end the Identity Center
+  session that made the call, and read the data events of the bucket
+  from that time on ("Vault data events": they show what was written or
+  deleted, not what was read).
+- **`VaultHostProfileLaunch`.** An instance was started with the host
+  role outside the release groups, so something other than a released
+  image holds the credentials that read and delete sealed objects. No
+  procedure does this (image builds and rebuilds use
+  `vettid-org[-staging]-vault-image-builder`). Find the instance
+  (`responseElements.instancesSet.items[].instanceId` in the event),
+  terminate it, and read the data events of the bucket for writes and
+  deletions from it: its session name in `userIdentity.arn` is its
+  instance id. What it read is not recorded.
+- **`VaultHostLaunchPath`.** The indirect ways to the same thing: a
+  launch template or group that Auto Scaling would launch from (those
+  launches are not reported, as release groups launch hosts all day), a
+  refresh of a group's instances, a profile attached to a running
+  instance, a role put into another profile. Reported whoever does it,
+  a deploy too: a stack is how hosts come to exist, so a stack nobody
+  reviewed must not be quiet. **Expected, with `who` ending in
+  `…cfn-exec-role-…/AWSCloudFormation`, while you deploy:** three emails
+  for a new `VettidOrgVaultRelease<N>Stack` (`CreateLaunchTemplate`,
+  `CreateAutoScalingGroup`, `UpdateAutoScalingGroup`, within a minute),
+  one `UpdateAutoScalingGroup` for a release stack that is destroyed or
+  whose `min_instances` or `max_instances` changed, one
+  `AddRoleToInstanceProfile` for a first deploy of the vault or host
+  stack. Check the group or template name against the release you are
+  deploying (`vettid-org[-staging]-vault-r<N>`). Also expected: one
+  `AddRoleToInstanceProfile` when a temporary profile is made by hand
+  for an independent rebuild. Anything else, or any of these when
+  nobody is deploying: look at the event's `requestParameters` for the
+  instance profile, the user data and the role. If it names
+  `vettid-org-vault-host`, delete what was created (the stack, the
+  template, the group) and proceed as for `VaultHostProfileLaunch`.
+
+### Vault data events
+
+The organization trail records every **write** on
+`vettid-org-vault-data-369484479783` and
+`vettid-org-staging-vault-data-347272280361`: `PutObject`,
+`DeleteObject` and `DeleteObjects`, `CopyObject`, the multipart calls
+(`CreateMultipartUpload`, `UploadPart`, `UploadPartCopy`,
+`CompleteMultipartUpload`, `AbortMultipartUpload`) and the calls that
+change an object's tags, ACL or restore state. For each: who (the role
+and, for a host, the instance id as session name), when, from where
+(`sourceIPAddress`, `vpcEndpointId`), which key, and the error if it was
+refused.
+
+**Reads are not recorded** (`GetObject`, `HeadObject`, the list calls),
+by the owner's decision: the trail is not to be a record
+of every time a member's vault is opened. The accepted cost: after an
+incident the trail shows what was changed or destroyed and by whom, and
+**cannot show whether anything was taken**. The objects are sealed to
+release keys, so a copy is not readable; and GuardDuty's S3 protection
+(below) reads object calls on its own, reads included, whatever the
+trail records, and reports unusual access as findings. It keeps no
+record that can be searched afterwards.
+
+The records are in the trail bucket with the account's management
+events, same files and format, kept 400 days; they are **not** in
+CloudTrail's Event history (management events only) and not on the alert
+bus. To read a day:
+
+```bash
+A=347272280361; D=2026/10/14      # account, UTC day
+aws s3 sync "s3://vettid-org-cloudtrail-449757308783/AWSLogs/o-kualrldevn/$A/CloudTrail/us-east-1/$D/" /tmp/trail/
+zcat /tmp/trail/*.json.gz | jq -c '.Records[] | select(.eventCategory == "Data")
+  | [.eventTime, .eventName, .userIdentity.arn, .sourceIPAddress, .vpcEndpointId, .requestParameters.key, .errorCode]'
+```
+
+Normal: every write under `vaults/`, `users/` and `smoke/` is by
+`assumed-role/vettid-org-vault-host/i-…` of a running release host,
+through the host VPC's S3 endpoint; `manifests/` is written by the
+manifest signer role. Worth a look: the host role from an instance id
+that is not a release host or without the endpoint, any other principal
+(the bucket policy refuses it, so with an error), or deletions or
+overwrites of many vaults by one instance in a short time.
+
+Cost: CloudTrail charges $0.10 per 100,000 data events ($1 per million),
+so it follows vault activity. Staging wrote about 2,200 object versions
+a day in October 2026 (a handful of test vaults): about 66,000 writes a
+month, under $0.10. A thousand vaults at that per-vault rate would be
+about 16.5 million events and $16.50 a month, plus well under $1 of
+storage (a record is about 0.15 KB compressed).
+
+GuardDuty S3 protection for the member accounts is set once, from the
+management account (it is an organization setting of the GuardDuty
+administrator; $0.80 per million object calls it reads, reads and
+writes alike and independent of the trail's selector, so up to a few
+times the data events' cost). `ALL` for the members is what the
+organization already has; the feature is the change. The first command
+sends an `AuditTampering` email:
+
+```bash
+D=$(aws guardduty list-detectors --query 'DetectorIds[0]' --output text)
+aws guardduty update-organization-configuration --detector-id "$D" \
+  --auto-enable-organization-members ALL --features '[{"Name":"S3_DATA_EVENTS","AutoEnable":"ALL"}]'
+# Members follow within a day; to see, and to do it at once if needed:
+aws guardduty get-member-detectors --detector-id "$D" --account-ids 369484479783 347272280361 605628228301 \
+  --query 'MemberDataSourceConfigurations[].[AccountId,Features[?Name==`S3_DATA_EVENTS`]|[0].Status]' --output text
+aws guardduty update-member-detectors --detector-id "$D" --account-ids 369484479783 347272280361 605628228301 \
+  --features '[{"Name":"S3_DATA_EVENTS","Status":"ENABLED"}]'
+```
 
 ### Deploying
 
@@ -1897,6 +2567,18 @@ scripts/org/apply-alert-forwarder-scp.sh --apply
 
 Later changes to the forwarder stacks deploy as usual: CloudFormation
 runs as the CDK execution role, which the SCP exempts.
+
+A change that makes the trail record more data events (as the vault data
+buckets' did) deploys the other way round, so that the new events are
+never forwarded: the staging forwarder, the production forwarder, the
+proteus forwarder, **then** VettidOrgAuditStack (`--exclusively` each,
+as above; a forwarder stack depends on the audit stack only for the
+first deployment's order). The rules for the vault accounts exist only
+once the audit stack is deployed: nothing emails `VaultDataBucketConfig`,
+`VaultHostAccess` or the launch rules before that. The vault data
+bucket's protection and the ban on interactive sessions are part of the
+Vault OU policy: `scripts/vault/apply-scp.sh` (dry run), then `--apply`
+("Vault", first deployment, step 6).
 
 A new member account: add it to `ORG.members` (lib/config.ts), add its
 forwarder stack in `lib/app.ts`, deploy VettidOrgAuditStack (bus policy),
@@ -1941,6 +2623,34 @@ email showing `error: AccessDenied`; nothing changes):
 aws events disable-rule --name vettid-org-security-alert-forward --profile vault-staging
 ```
 
+The vault account rules, in staging, **after VettidOrgAuditStack is
+deployed** (before that nothing matches and no email comes). A command on a running host
+(it runs; expect a `VaultHostAccess` email), a session (once the SCP is
+applied it must be refused with `AccessDeniedException` and still send
+a `VaultHostAccess` email, with `event: StartSession` and `error:
+AccessDenied`), and the bucket's versioning set to what it already is
+(before the SCP is applied: a `VaultDataBucketConfig` email and no
+change; after: the same email with `error: AccessDenied`):
+
+```bash
+aws ssm send-command --profile vault-staging --instance-ids <instance id> \
+  --document-name AWS-RunShellScript --parameters 'commands=["true"]' --comment "alert test"
+aws ssm start-session --profile vault-staging --target <instance id>
+aws s3api put-bucket-versioning --profile vault-staging \
+  --bucket vettid-org-staging-vault-data-347272280361 --versioning-configuration Status=Enabled
+```
+
+If the refused session sends no email while the command does:
+CloudTrail classes `StartSession` as read-only, and EventBridge gives
+read-only management calls only to rules in state
+`ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS`. Look the event up
+(Event history, `StartSession`, field `readOnly`). The remedy is that
+state on two rules: each vault account's forwarding rule (its pattern
+already names the session calls and lets no other read-only call
+through, so nothing else is forwarded) and `VaultHostAccess`. It is a
+code change with its own review, not something to set by hand: the
+forwarding rule is under the forwarder SCP.
+
 Heartbeats: `aws cloudwatch describe-alarms --alarm-name-prefix
 vettid-org-security-alert-heartbeat --query
 'MetricAlarms[].[AlarmName,StateValue]' --output text` shows `OK` for
@@ -1970,6 +2680,200 @@ each member once its forwarder is deployed.
   keep passing the flag on every later deploy of that stack (or make it the
   default in code).
 
+## Membership requests
+
+MEMBER-API 2.6.0 ("Request states", "Withdrawing a request",
+"Retention", "Request emails") is the specification; this is what the
+operator does, and does not have to do.
+
+- **Automatic now, nothing by hand:**
+  - *Unverified request*: deleted after 14 days (daily cleanup job,
+    07:00 UTC), with its SES identity if the request created it
+    (`owns_identity`; a row from before 2.6.0 keeps the old rule:
+    unless the mailing list uses the address).
+  - *Withdrawal*: the person uses the link in "We have your request
+    for early access to VettID" (sent once, when the address is
+    verified).
+    The page is `https://account.vettid.org/request/withdraw/`; the
+    button marks the row `withdrawn` and erases the names at once; the
+    cleanup job's 15-minute run (`{"task":"requests"}`) removes the
+    row, its `email:<addr>` marker, a Cognito user left by a failed
+    code registration, and the SES identity if the request created it
+    and the mailing list does not use it.
+  - *Declined request*: removed the same way 30 days after the decline
+    (daily run). At the first daily run after 2.6.0 is deployed, every
+    request declined more than 30 days earlier goes (its `updated_at`
+    is its decline time).
+  - *Audit log*: a person's address is kept 90 days in a record beside
+    the event (`addr#<month>` partition, TTL `expires_at`); events stay.
+- **The admin notices** ("a request for early access arrived", "…was
+  verified", "someone registered with a registration code") carry no
+  name, address or code: read the request on the admin site.
+  **One-time clean-up of the admin mailbox (owner):** notices sent
+  before 2.6.0 carry the requester's name and address. Search
+  admin@vettid.org for subjects starting `VettID: membership request
+  from` and `VettID:` … `registered with a registration code` from
+  `no-reply@vettid.org`, delete those dated before the deploy, and
+  empty the trash (and any archive, forward or local copy). The
+  requests themselves are on the admin site, so nothing is lost.
+- **Alarms** (production: to `vettid-org-security-alerts`):
+  - `vettid-org-request-removal-failing`: the cleanup job could not
+    finish removing a withdrawn or expired request in the last hour.
+    The row (with the address, without the names) is still in the
+    table and is retried at every run for 7 days. Read the cleanup
+    function's log group for `request removal failed` and its error
+    name (no address is logged). Waiting rows:
+    `aws dynamodb query --table-name vettid-org-members --index-name state-index --key-condition-expression '#s = :w' --expression-attribute-names '{"#s":"state"}' --expression-attribute-values '{":w":{"S":"withdrawn"}}' --select COUNT`
+    (and `rejected` for declined ones). Typical causes: SES throttling
+    (clears by itself), a changed IAM policy, the mailing-list table
+    unreadable.
+  - `vettid-org-request-removal-abandoned`: after 7 days of failures
+    the job deleted the row and the marker without finishing the rest
+    (audit `request.removal_incomplete`, subject the request's id).
+    The address is no longer in the members table; an SES identity (or
+    a Cognito user) may be left. Reconcile as for the mailing list
+    ("Unsubscribe" → Alarms): compare `aws sesv2 list-email-identities`
+    with the members table and the list, and delete an address
+    identity that neither has, if a request created it (CloudTrail: a
+    `CreateEmailIdentity` by the member API's public function role
+    that succeeded).
+- **Backfills (operator, once per stage after the 2.6.0 deploy; both
+  are dry runs unless told otherwise and print counts only, never an
+  address):**
+  1. *The audit log's old events* still hold addresses inside them
+     (`detail.email`; a member's address as `actor`). The Lambdas may
+     only append to the audit table, so this needs an operator session:
+     `npx ts-node --transpile-only --prefer-ts-exts scripts/ops/audit-address-backfill.ts [--stage staging]`
+     shows what it would change, per action; add `--apply` to do it.
+     Events younger than 90 days keep their address in a 90-day record;
+     older ones lose it. Safe to repeat. Every `--apply` run appends one
+     audit event, `admin.audit_address_backfill` (actor: your session's
+     caller ARN; subject: the audit table; detail: the stage, the counts
+     and `completed`, which is `false` if the run stopped on an error),
+     so the admin site's audit view shows that old events were changed,
+     by whom and how many. Look at any "UNCLASSIFIED" line
+     before applying (an address as actor of an action the script does
+     not know: it leaves those alone). Until this has run, "addresses
+     in the audit log are gone after 90 days" is true only of events
+     written since the deploy.
+  2. *Requests verified before 2.6.0* have no withdrawal link and got
+     no email. They are **not** mailed automatically.
+     `npx ts-node --transpile-only --prefer-ts-exts scripts/ops/request-mail-backfill.ts [--stage staging]`
+     counts them; `--send` emails each of them "We have your request
+     for early access to VettID" with their link (`--send --guid <user_guid>`:
+     one of them only). **That emails real people: the owner decides,
+     per run.** Without it, such a request is still removed when an
+     admin declines it (gone 30 days later), and "Removal by hand"
+     below covers a person who asks. The same command also finds a
+     request whose email failed to send.
+- **"… is left" in the logs** (cleanup function, admin people
+  function; level warn, with a `user_guid`, never an address):
+  `the email marker belongs to another request and is left` and
+  `the sign-in user under … address carries another id and is left`.
+  A deletion found that the marker or the Cognito user under the
+  address belongs to a newer request or account for the same address
+  (MEMBER-API "Retention"), did not touch it, and deleted the rest.
+  The deletion's audit event says the same in its detail
+  (`sign_in_user: "left"`, `email_marker: "left"`).
+  Nothing to do for the marker. For a sign-in user, check that a
+  member row with that user's `custom:user_guid` exists
+  (`aws cognito-idp admin-get-user --user-pool-id <member pool> --username a@example.com`,
+  then `aws dynamodb get-item --table-name vettid-org-members --key '{"user_guid":{"S":"<that id>"}}'`):
+  if none does, it is a leftover (an abandoned removal above) and
+  `aws cognito-idp admin-delete-user` removes it; an approval for the
+  address is refused until then.
+  An admin's Delete that answers "No such member" for a row that was
+  on the page a moment ago: the cleanup job (or another admin) removed
+  the row first. This Delete did not delete it and wrote no
+  `member.delete` event; the page still shows the row until it is
+  reloaded. By then it had already removed the member's own Cognito
+  user and subscription row if they were still there, and it removes
+  an email marker that still names the row. It does not finish the
+  rest of what the other deletion does (vaults, the SES identity):
+  that is the other deletion's, and its own audit event says if any
+  of it was not removed (`incomplete`, below).
+- **The daily run's other two removals** (a canceled account past its
+  date; an unverified request after 14 days) delete the row first,
+  with its marker, and the rest after (MEMBER-API "Retention", "The
+  daily sweeps"). They use the two alarms below:
+  - `request-removal-failing` also means: the row of one of these
+    could not be deleted (log: `canceled account: not removed` /
+    `unverified request: not removed`, with the id and the error
+    name). Nothing was touched; the next daily run tries again.
+  - `request-removal-abandoned` also means: the row and marker are
+    gone, and something of the member's own outside the row is not
+    (log: `… removed, but not all of it`, with the id, `not_removed`
+    and the error name; the audit event `member.delete_after_cancel`
+    or `request.reclaim_unverified` for that id lists it in
+    `incomplete`). It is not retried. By hand, for the id in the
+    event: `subscription`: delete the row with that `user_guid` from
+    the subscriptions table; `vaults`: query the vaults table's
+    `user-index` for the id; rows with `deletion_requested_at` are
+    retried by the job itself, the others are the operator's (section
+    "Vault"; and delete the pointer row `user#<id>`); `sign_in_user`:
+    the user is disabled since the cancellation and carries that id,
+    `aws cognito-idp list-users --user-pool-id <member pool> --query "Users[?Attributes[?Name=='custom:user_guid' && Value=='<id>']].Username"`,
+    then `admin-delete-user` (until then an approval for that address
+    is refused); `ses_identity`: reconcile as for an abandonment below.
+- **Removal by hand** remains for four things only:
+  1. *A request verified before 2.6.0 whose owner asks by email*
+     (no link, if the backfill email was not sent): send that one
+     person their link,
+     `… scripts/ops/request-mail-backfill.ts --send --guid <user_guid>`
+     (the id under the name on the admin site's requests page), and
+     they withdraw it themselves; or decline it on the admin site (it
+     is deleted in 30 days). The SES identity of such a row is left:
+     see 3.
+  2. *An account* (an approved request): the member cancels it in the
+     account site, or an admin deletes it. Not the withdrawal link.
+  3. *The SES identity of an address whose row had no `owns_identity`*
+     (every row from before 2.6.0) or that an admin deleted with
+     Delete: the automatic removal leaves it (never on doubt).
+     `aws sesv2 delete-email-identity --email-identity a@example.com`
+     once you have checked that neither a member row
+     (`aws dynamodb query --table-name vettid-org-members --index-name email-index --key-condition-expression 'email = :e' --expression-attribute-values '{":e":{"S":"a@example.com"}}' --select COUNT`)
+     nor the mailing list
+     (`aws dynamodb get-item --table-name vettid-org-mailing-list --key '{"email":{"S":"a@example.com"}}'`)
+     uses it.
+  4. *Approve answers "a sign-in user from an earlier request or
+     account already exists for this address"* (`409`; the People
+     function's log has `approve refused` with the request's id): the
+     member pool holds a user under that address with another
+     `custom:user_guid`, left by a removal that was given up on
+     (`request-removal-abandoned` above) or by a half-deleted account.
+     Check that the only member row for the address is the request
+     being approved (the `email-index` query in 3: count 1, and its
+     `user_guid` is the request's), look at the stale user
+     (`aws cognito-idp admin-get-user --user-pool-id <member pool> --username a@example.com`:
+     its `custom:user_guid` names no row), delete it
+     (`aws cognito-idp admin-delete-user --user-pool-id <member pool> --username a@example.com`),
+     then approve again on the admin site.
+  What remains after any removal, and for how long: the tables'
+  backups (35 days), the audit log's address records (90 days from
+  each event), the CloudTrail record of the SES calls (400 days).
+- **Logs of the member and admin APIs** (not changed by 2.6.0): every
+  function's own log group (errors, job counts; no addresses by
+  design) is kept **30 days** (`ApiFunction`'s default,
+  `lib/constructs/api-function.ts`): the 13 functions of
+  `VettidOrgMemberApiStack` (Public, Auth, Account, Vault, LinkMailer,
+  VaultAccountPush, VerificationsJob, CleanupJob, MembersStreamMailer,
+  VaultAlarmMailer, VaultNamesJob, VaultNoticeJob, VaultServiceWatch)
+  and the 5 of `VettidOrgAdminApiStack` (People, Content, System,
+  VaultCanary, VaultService). The member API's access log
+  (`/vettid-org/<stage>/member-api/access`: time, path, status), the
+  account and admin sites' CloudFront logs and their WAF logs are kept
+  **90 days**.
+- **A window that remains** (rare): a mailing-list sign-up for the
+  same address in the instant between the job's check of the list and
+  its `DeleteEmailIdentity` loses the identity its verification mail
+  was sent for; that sign-up then expires unverified after 3 days and
+  the person signs up again.
+- **Staging**: the same flow with `--stage staging` / `--profile
+  vault-staging` and the `vettid-org-staging-*` tables. Test
+  addresses at `test.staging.vettid.org` are the project's own: their
+  SES identities are never deleted by a removal (and IAM would refuse
+  it), so a withdrawn test request leaves its identity, as before.
+
 ## Mailing list
 
 - Flow: `POST /api/subscribe` → SES `CreateEmailIdentity` (SES's verification
@@ -1993,7 +2897,9 @@ each member once its forwarder is deployed.
   `vettid-org-members` (a pending member may be mid-verification). It can never delete the `vettid.org` domain
   identity (explicit IAM deny).
 - Every confirmation emails **admin@vettid.org** from `no-reply@vettid.org`
-  (SES domain identity, DKIM in the zone). The notice says that somebody
+  (SES domain identity, DKIM in the zone). That sender is fixed in
+  `VettidOrgSignupStack`, which is part of the production app only: a
+  stage has no mailing list. The notice says that somebody
   confirmed, how and when; it does **not** carry the address (that mailbox is
   at another provider, outside the list's storage and its deletion). To see
   who is on the list, export it (below).
@@ -2231,6 +3137,11 @@ durable backup.
 
 ~$7–8: WAF telemetry (~$5, intentional), two Route53 zones ($1), CloudFront/
 Lambda/DynamoDB/S3 in pennies at current traffic.
+
+Vault data events (organization trail) and GuardDuty S3 protection: under
+$0.50/month today; $1 per million object writes on the vault data
+buckets (trail) plus $0.80 per million object calls, reads included
+(GuardDuty) ("Vault data events").
 
 Relay (when deployed), at idle: ~$55/month — ALB ~$16, two 0.25 vCPU tasks
 ~$15, four public IPv4 addresses ~$15, Valkey Serverless minimum ~$6, logs

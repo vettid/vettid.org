@@ -1,17 +1,62 @@
 ---
 title: VAULT-HOST-PROTOCOL
 status: approved by the owner 2026-10-12 (H1–H9 as recommended)
-version: 0.1.3
-date: 2026-10-12
+version: 0.1.7
+date: 2026-10-13
 owner: Al Liebl (Mesmer)
 component: vault enclave (supervisor), parent (host process)
 related:
-  - VAULT-MESSAGING.md (0.29.0) §2 (threat model, who sees what), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
+  - VAULT-MESSAGING.md (0.29.7) §2 (threat model, who sees what), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
   - VAULT-PLAN.md (0.1.8) §5.2 (D5: TLS in the enclave), §5.3 (D4: one process per vault)
   - VAULT-RELEASES.md (0.1.16) §3.4 (C3, C4), §8.4 (network and egress), §8.7 (observability)
   - VAULT-RELAY-SCALING.md (0.1.2) §6, §10
   - vettid-vault `internal/hostproto`, `enclave/supervisor`, `enclave/egress`, `parent`, docs/V3-NOTES.md "Enclave ↔ parent", docs/SMOKE.md
 changelog:
+  - 0.1.7: correction of the document to the system as built; approved
+    by the owner 2026-10-13. No wire change and no code change. §11.4
+    item 4: **the enclave's PIN and password backoffs do not limit a
+    parent that also replays stored objects**; the item said that a
+    recovery started by the parent is guessed "online under the
+    enclave's backoffs", and that the owner's devices cannot unlock
+    without seeing it. Both counters are kept in objects the parent
+    stores, and the owner's devices see a recovery only while the
+    parent serves them the header that records it. §11.3, the
+    `recovery` part of the row of operations without an envelope, says
+    the same (VAULT-MESSAGING 0.29.7 §11.11.2, §11.11.6, §13.2)
+  - 0.1.6: as built in vettid-vault #75 (the parent only; the enclave
+    and its measurements do not change); approved by the owner
+    2026-10-13. No wire change. §9: **a stored object is at most
+    67,108,583 bytes**, the largest a `StoreGet` reply can carry; the
+    parent answers `error` for a larger one, on read and on write (it
+    read back at most 48 MiB before, a limit the table did not have).
+    §13 point 12: **the parent creates its queue again** after a
+    receive that finds the queue gone, and checks that the queue
+    exists, with a limit of 10 s, before the first registry row after
+    a disconnection (VAULT-MESSAGING 0.29.3 §11.1)
+  - 0.1.5: erratum, as built at vettid-vault `main` a852e36 (#74, for
+    staging release S11, not cut yet); approved by the owner
+    2026-10-13. No wire change. §4.3: **a `Ping` read while the vaults
+    are being locked is counted and leaves the parent unreachable**;
+    the first `Ping` read after the lock tells the parent which vaults
+    ended, and only then is it reachable again. A vault that appears
+    under an unreachable parent is locked at the next check only if no
+    `Ping` was read meanwhile; otherwise 120 to 130 s after that
+    `Ping`, unless the parent becomes reachable first. §6.3 and §7.3
+    follow. §12: P13 also names the `Stopped` reports; the statement
+    under P10–P14 names a852e36 and what S11 is planned to carry (#66,
+    #69, #70, #71, #72, #73, #74). §14: what was read
+  - 0.1.4: as built at vettid-vault `main` 392b03c (#70, 93f32ca; #71,
+    2daa9e4; #72, 392b03c; for staging release S11, not cut yet): **a parent that is
+    connected but silent is unreachable** (owner decision H3). §4.3:
+    every vault is locked 120 s after the parent's last `Ping`,
+    connected or not; the lock takes 10 s at most; the vaults ended are
+    reported at the next `Ping`. §3.4: a write deadline of 60 s on the
+    enclave's side; `Log` records are dropped, not waited for, when the
+    queue is full; the reader's wait at its limit is not silence. §6.2,
+    §6.3, §7.3, §7.4, §9, §11.3 follow. **§12: five new requirements
+    P10–P14**, each satisfied by that code. §13: point 1 closed; point 6
+    narrowed; new points 9–13, of which 11 is closed by #72. §3.5: an
+    ended connection takes no frame
   - 0.1.3: approved by the owner 2026-10-12 (vettid.org #247;
     VAULT-LOCK 0.1.0, VAULT-MESSAGING 0.29.0): what the `lock` queue operation would
     carry and answer from the vault's release L (§6.1), and what that
@@ -74,7 +119,12 @@ process, which never leaves the enclave (vettid-vault
 vettid-vault f3003ed (#66), which staging release S11 is to be built
 from, with the two changes of 8f2c8bf (#69, also for S11): the count
 `relay_vault_limit` (§6.6) and the log record it replaces (§7.4, §11.2,
-§13 point 2). Where the two commits differ, the text names the commit.
+§13 point 2), and with the changes of 93f32ca (#70), 2daa9e4 (#71) and
+392b03c (#72), all for S11: the unreachable-parent rule and what goes with it
+(0.1.4; §3.4, §4.3, §6.2, §6.3, §7.3, §7.4, §9), and with the change
+of a852e36 (#74, also for S11): a `Ping` read while the vaults are
+being locked (0.1.5; §4.3, §6.3, §7.3). Where the commits
+differ, the text names the commit.
 Statements in the present tense are what the code does. The key words MUST, MUST NOT, SHOULD and MAY (RFC 2119) appear
 only where this document repeats a rule another specification already
 makes, with the reference, and in §12, whose rules are normative since
@@ -177,7 +227,9 @@ failed call. Any status but the ones a caller expects is a failure.
   When 128 requests of the peer are being handled, the receiver stops
   reading the connection until one ends. It then reads nothing:
   further requests, notifications and **replies to its own requests**
-  all wait (§13, point 6).
+  all wait (§13, point 6). The enclave does not count the time its
+  own reader waits there as the parent's silence (§4.3), for up to
+  120 s of it between two pings (93f32ca).
 - **Notifications are handled in the order they were sent**, on the
   reader, before the next frame is read.
 - **Replies** may arrive in any order.
@@ -185,14 +237,28 @@ failed call. Any status but the ones a caller expects is a failure.
   enclave relies on that: the lifecycle events of a queue request
   (§7.2) are queued before the request's reply, so the parent has them
   first (VAULT-MESSAGING §11.5).
-- **Outgoing frames** wait in a queue of 256. When it is full, a sender
-  blocks until the writer has written one. Writes have no deadline.
+- **Outgoing frames** wait in a queue of 256.
+  - *The enclave's side (93f32ca).* A frame that is not written within
+    **60 s** ends the connection. When the queue is full, a `Log`
+    record is **dropped and counted**, never waited for; the count is
+    sent later in a record of its own (§7.4). Every other sender
+    (`Lifecycle`, `Stopped`, `Descriptor`, requests, replies) waits
+    until the writer has written one, so for 60 s at most. Nothing the
+    parent acts on is dropped while the connection lives.
+  - *The parent's side.* A sender blocks until the writer has written
+    one. Its writes have no deadline.
+  - Before 93f32ca neither side had a deadline and every sender
+    waited, logging included.
 
 ### 3.5 The end of a connection
 
 A read or write error, a malformed frame or a close ends the
 connection. Every call still waiting on it fails; frames still queued
-are dropped. Requests are never re-sent by this layer. What each side
+are dropped. An ended connection accepts no further frame, also when
+its queue has room, and a wait for queued frames to be written
+(a flush) reports success only if they were written to a connection
+that has not ended (392b03c; before, a frame could be queued onto an
+ended connection and a flush could report it written). Requests are never re-sent by this layer. What each side
 does next is §4.
 
 ## 4. The session
@@ -245,13 +311,85 @@ and has sent a descriptor.
   successful hello it sends its current descriptor again. The parent
   deletes the instance's registry row at once, so the member API stops
   routing to it.
-- **No connection for 120 s.** While it runs vaults, the enclave locks
-  every one (VAULT-MESSAGING §12.3 "No control connection to the parent
-  for 120 s"): the
-  parent can no longer renew their leases. The check runs every 10 s.
-  It measures the time **without a connection**. A connection that
-  stays open while the parent does not answer is not counted (§13,
-  point 1).
+- **No `Ping` for 120 s: the parent is unreachable** (93f32ca;
+  VAULT-MESSAGING §12.3 "Parent unreachable for 120 s"). Through
+  8f2c8bf the enclave measured the time without a connection, and a
+  parent that stayed connected and silent was never unreachable (§13
+  point 1). Now:
+  - **One clock:** the time since the parent's last `Ping` (§6.3),
+    counted when the enclave reads the request, before it answers. A
+    new connection, a hello or any other frame does not restart it.
+  - **Checked every 10 s, while a vault runs.** With no vault running
+    there is nothing to lock and the count restarts at each check, so
+    a vault opened later has the whole 120 s. More than 120 s without
+    a `Ping`: the parent is unreachable. The decision so falls 120 to
+    130 s after the last `Ping`.
+  - **Then, at once:** the enclave makes **no call to the parent**
+    until its next `Ping` is read, whether or not there is a
+    connection (calls fail immediately); it closes the connection it
+    has (it dials again as usual, and a hello changes nothing); and it
+    locks **every vault in parallel**. A vault process that has not
+    locked after **10 s** is killed. Every vault has locked or been
+    killed at most 140 s after the last `Ping` (a vault that appears
+    afterwards: see the next point but one).
+  - **What a vault loses:** nothing that was stored. Its final flush
+    fails at once (no call is made); its last durable state is its
+    last successful write, and nothing taken from the relay since was
+    acked. A failed flush is not a conflict: nothing is zeroized as a
+    split brain. A vault that is killed sends its devices no
+    `vault.locking`.
+  - **It stays unreachable until it pings and has been told** (next
+    point), also when no vault runs. A vault that appears meanwhile
+    (an unlock that was half way) is locked at the next check,
+    provided no `Ping` was read since the parent was found
+    unreachable. A `Ping` that is read and leaves the parent
+    unreachable (read while the vaults were being locked, or its
+    reports could not be written) still restarts the one clock: such a
+    vault is then locked 120 to 130 s after that `Ping`, unless a
+    later `Ping` makes the parent reachable first. Until then every
+    call it makes to the parent fails.
+  - **The parent is told which vaults ended, and is reachable again
+    only then** (392b03c; a852e36). When a `Ping` is read, it is
+    counted first. A `Ping` read while the vaults are still being
+    locked or killed (up to 10 s, and until each has been recorded as
+    ended) is only counted: there is nothing to tell yet and the
+    parent stays unreachable. That is the usual case for the first
+    `Ping` on the new connection, which a live parent sends as soon as
+    it has the descriptor. At the first `Ping` read after that, the
+    enclave sends one `Stopped` (§7.3) for
+    each vault it locked or killed (`locked`, `split_brain`, or
+    `error` for a killed one) and waits until they have been
+    **written** to the connection. Only if they were written, and that
+    connection is still the current one, are calls to the parent let
+    through again.
+    - Otherwise every report is kept, the parent stays unreachable,
+      and the `Ping` of the next connection tries again.
+    - A report may so reach the parent twice. That is harmless: no
+      vault can open while the parent is unreachable, so the second is
+      a report for a vault the parent no longer counts as running.
+    - A report for a vault that runs again by then is not sent.
+    - Vaults that ended while the reports were being written keep the
+      parent unreachable until the following `Ping` reports them.
+    - The `Ping`'s reply waits while the reports are written. At
+      recovery the parent's `Ping` call (5 s) can therefore time out,
+      and the parent then skips that tick's registry write (§6.3).
+    - Written is not read: a connection that ends after the write and
+      before the parent has read the frame still loses the report
+      (§13 point 10).
+    - At 2daa9e4 the reports were only queued, and a `Ping` handled
+      while its connection ended could lose one, or let a call through
+      before one was sent (§13 point 11).
+    - At 392b03c a `Ping` read while the vaults were being locked
+      found no report to write and made the parent reachable, so a
+      call could go through before the parent had been told anything
+      (corrected in a852e36, #74).
+  - **The reader's own wait** at its 128-request limit (§3.4) is not
+    counted as silence, up to 120 s between two pings: a `Ping` the
+    parent sent would be waiting unread.
+  - **Warning.** After 60 s without a `Ping` while a vault runs the
+    enclave logs once (§7.4).
+  - A `Ping` shows that the peer of the socket is alive, not that
+    leases are renewed; the enclave cannot see the lease table (§11.3).
 - **The parent shuts down** (SIGTERM). It sends `Shutdown` (§6.4),
   waits up to 60 s for the enclave to lock every vault, deletes the
   registry row and the queue, and closes.
@@ -395,6 +533,14 @@ The enclave locks the vault (VAULT-MESSAGING §12.3 "Lease lost"). The
 parent sends it when a lease renewal finds another holder, or renewals
 keep failing until 15 s before the lease ends. It waits 60 s.
 
+*93f32ca, 2daa9e4:* a renewal that gets **no answer** now counts as
+failed, after 10 s and never later than 15 s before the lease ends
+(before, it waited for ever and nobody was told). Once one renewal of
+a pass was given up, the rest of the pass makes no call and judges
+each lease by its age alone. While renewals fail the next pass comes
+after 5 s, not 60. `LeaseLost` is still sent **one vault at a time**,
+each waiting for its lock (§13 point 9).
+
 ### 6.3 `Ping` (0x12)
 
 | | Fields |
@@ -402,8 +548,14 @@ keep failing until 15 s before the lease ends. It waits 60 s.
 | Request | none |
 | Reply `ok` | `count`: the number of vaults running, decimal |
 
-The parent sends it every 20 s, before it writes the instance's
-registry row, and waits 5 s. Without an `ok` it does not write the
+The parent sends it every 20 s, and once whenever a descriptor
+arrives (§7.1), before it writes the instance's
+registry row, and waits 5 s. The registry write that follows has 10 s
+(93f32ca; before, a table that did not answer stopped the pings that
+follow). The enclave counts each `Ping` it reads on the one clock of
+§4.3; nothing else counts. (0.1.5: a parent that was found unreachable
+is reachable again only when §4.3 says so, not at every `Ping`
+read.) Without an `ok` it does not write the
 row, so an instance whose enclave does not answer stops being routed
 to (the row's heartbeat goes stale, VAULT-MESSAGING §11.1). `count`
 becomes the row's `load`.
@@ -528,6 +680,19 @@ A vault's process ended on its own. Reasons: `locked`, `moved`,
 parent removes the vault from its running set, releases its lease if
 it held one, and counts split brains.
 
+*93f32ca:* the enclave also sends `Stopped` for each vault it locked or
+killed while the parent was unreachable, at the parent's next `Ping`
+(§4.3): `locked`, `split_brain`, or `error` for a killed process.
+*392b03c:* such a report is kept until it has been written to a
+connection that is still the current one, so the parent may receive
+one twice; a report whose vault runs again is not sent.
+*a852e36:* the reports are not sent at a `Ping` read while those
+vaults are still being locked or killed, but at the first `Ping` read
+after that (§4.3).
+*2daa9e4:* the parent does not release the lease on a `Stopped` while
+an enroll or unlock of that vault is under way (the request took the
+lease; if it does not open the vault, it gives the lease back).
+
 ### 7.4 `Log` (0x23)
 
 Fields: `level`, `message`, then pairs `key`, `value`.
@@ -551,6 +716,20 @@ exactly these, and each reports how a vault's run **ended**:
 At f3003ed there was one more, "vault at its limit of concurrent relay
 requests; further ones wait", with the `vault_id`. 8f2c8bf removed it
 (§13 point 2).
+
+*New records (93f32ca), none naming a vault:*
+
+| Record | Pairs | When |
+|---|---|---|
+| "no ping from the parent: every vault is locked if none comes" | `silent_s`, `limit_s`, `vaults` | once, at the first check after 60 s without a `Ping` while a vault runs |
+| "parent unreachable: locking every vault" | `vaults` | when the parent is found unreachable |
+| "parent unreachable: every vault locked" | `vaults`, `killed` | when the lock has ended |
+| "log records dropped: the parent was not reading" | `count` (since the enclave's start) | when the count has grown and a record can be sent |
+| "control connection takes no write timeout" | `error` | once, if the socket refuses a write deadline (the 60 s then bound nothing) |
+
+The parent's own log gains "heartbeat took longer than its interval"
+(`ms`, `interval_ms`) when a `Ping` and its registry write take more
+than the heartbeat interval.
 
 ## 8. Egress connections
 
@@ -609,7 +788,9 @@ version, or with `len` 0, is closed without an answer.
 | Hello answer | 30 s | enclave |
 | Reconnect | 200 ms, doubling to 5 s | enclave |
 | Any enclave request (store, credentials) | 60 s | enclave |
-| Lock every vault when there is no connection | after 120 s, checked every 10 s | enclave |
+| Parent unreachable: lock every vault | 120 s without a `Ping`, checked every 10 s (through 8f2c8bf: without a connection) | enclave |
+| Lock of every vault, then kill | 10 s | enclave |
+| Frame write, enclave → parent | 60 s, then the connection ends | enclave |
 | `Queue` answer | 100 s | parent |
 | `Queue` requests at once | 8 sent (parent); 1 handled (enclave) | each |
 | Queue message read | 24,576 bytes (enclave); 32,768 bytes (parent, routing members) | each |
@@ -618,10 +799,13 @@ version, or with `len` 0, is closed without an answer.
 | `LeaseLost`, `Shutdown` answer | 60 s | parent |
 | `Stats` answer renewed | at most once a second | enclave |
 | Heartbeat (`Ping`, then the registry row) | every 20 s | parent |
+| Registry row write | 10 s | parent |
+| Lease renewal without an answer; the next pass after a failed one | 10 s (never later than 15 s before the lease ends); 5 s | parent |
 | Metrics (`Stats`, then the record) | every 60 s | parent |
 | Lease | 180 s, renewed every 60 s | parent |
 | Store key | 256 bytes, the characters of §5.2 | both; the prefixes by the parent |
 | Store version | 1 to 256 bytes | enclave |
+| Stored object (`data` of a `StoreGet` reply and of a `StorePut`) | 67,108,583 bytes: the frame body less 281 (a reply's kind, id and field count, three field lengths, the status and a 256-byte version) | parent; a larger object is answered `error`, on read and on write |
 | Descriptor, attestation | 4,096 and 32,768 bytes | parent |
 | Log record | 16 pairs, 200 bytes a value | parent |
 | Egress header, connect, answer | 10 s, 10 s (parent); 15 s (enclave) | each |
@@ -751,11 +935,11 @@ more than "the operation does not happen, or happens late".
 | `StoreDelete` reply | keep the object and say `ok`; delete anything it can reach in the bucket at any time | The parent's role can delete stored state anyway (VAULT-MESSAGING §13.5). A kept object cannot be opened without the PIN and a registered device |
 | `Credentials` reply | give no, expired, or another principal's credentials | KMS answers come over the enclave's TLS. Sealing keys release data keys only to the release's attested measurements, and the enclave checks the key's policy itself before sealing. Wrong credentials are failed unlocks |
 | `Queue`, sealed operations (`enroll`, `unlock`, `recovery_register`) | drop, delay, reorder, replay, send to another instance; change the clear members | Replays and redirected requests are refused (VAULT-MESSAGING §11.6). It cannot make one: it has no ETK and no device key. A changed `account` member reaches the vault (below) |
-| `Queue`, operations without an envelope (`lock`, `delete`, `account`, `recovery`, `recovery_cancel`) | **forge them** for any `vault_id` | `lock`: the vault locks. *From release L (0.1.3, planned):* a `lock` carries `unlock_id` or is ordered by `enqueued_at`, both of which the parent can read and set, and the parent writes the `code` of the answer: it can still lock any vault, drop any lock, and report `locked` for a vault it left open. The members protect an honest path against late delivery, not against the parent. What bounds a parent that keeps a vault open is the idle lock, decided in the enclave by its own clock (VAULT-MESSAGING §3.6.8). `delete`: a running vault deletes itself with the full semantics of VAULT-MESSAGING §12.5, otherwise its stored objects are erased; an operator power stated in §13.5. `account`: a running vault takes the snapshot, so the parent can make a vault show its owner, and put in the core of its shared profile, **names and account details of the parent's choosing**; the snapshot is display only and "not authenticated beyond the host path" (VAULT-MESSAGING §11.13, §10.8). `recovery`: with a browser key of its own the parent **starts a recovery**: a running vault locks and tells its devices why, unlocks are refused `recovery_pending`, and after the enclave's 24 h the parent can open the code. A recovery still needs an attested app, the PIN and the credential password under both backoffs, and exists only with the credential backup on (VAULT-MESSAGING §11.11). `recovery_cancel`: ends a member's recovery |
+| `Queue`, operations without an envelope (`lock`, `delete`, `account`, `recovery`, `recovery_cancel`) | **forge them** for any `vault_id` | `lock`: the vault locks. *From release L (0.1.3, planned):* a `lock` carries `unlock_id` or is ordered by `enqueued_at`, both of which the parent can read and set, and the parent writes the `code` of the answer: it can still lock any vault, drop any lock, and report `locked` for a vault it left open. The members protect an honest path against late delivery, not against the parent. What bounds a parent that keeps a vault open is the idle lock, decided in the enclave by its own clock (VAULT-MESSAGING §3.6.8). `delete`: a running vault deletes itself with the full semantics of VAULT-MESSAGING §12.5, otherwise its stored objects are erased; an operator power stated in §13.5. `account`: a running vault takes the snapshot, so the parent can make a vault show its owner, and put in the core of its shared profile, **names and account details of the parent's choosing**; the snapshot is display only and "not authenticated beyond the host path" (VAULT-MESSAGING §11.13, §10.8). `recovery`: with a browser key of its own the parent **starts a recovery**: a running vault locks and tells its devices why, unlocks are refused `recovery_pending`, and after the enclave's 24 h the parent can open the code. The devices are told only if the vault was running when the recovery began, and see `recovery_pending` only while the parent serves them the header that records it; a parent that serves an earlier header shows them nothing (§11.4 item 4). A recovery still needs an attested app, the PIN and the credential password, and exists only with the credential backup on (VAULT-MESSAGING §11.11); the two backoffs do not limit a parent that also replays stored objects (§11.4 item 4). `recovery_cancel`: ends a member's recovery |
 | `Queue`, the manifest document | withhold it, or give another | The request fails `manifest`. It cannot make the enclave accept a manifest the app did not verify (VAULT-MESSAGING §11.5) |
 | `Queue` reply (seen by the parent) | drop it, or write another slot | The app gets no result or a result it cannot open; results are sealed. The two host codes can be forged or suppressed with the effects VAULT-MESSAGING §11.5 lists |
 | `LeaseLost` | send it for any vault, at any time; never send it | The vault locks. Never sending it leaves a vault running without a lease; if a second instance then opens the vault, the two meet at the conditional state write, and the one that finds a newer version is zeroized (the split-brain guard does not depend on leases) |
-| `Ping` | not ask; ignore the answer | Learns the number of running vaults, which it has from the lifecycle events. Routing only |
+| `Ping` | not send it; send it and renew no lease; ignore the answer | Not sending it locks every vault after 120 s (§4.3): **denial of service only**. Sending it proves only that the peer is alive: a parent can ping and renew nothing, and what then stops two instances writing one vault is the conditional state write, as before. It learns the number of running vaults, which it has from the lifecycle events |
 | `Shutdown` | send it at any time | Every vault locks, with its flush |
 | `Selftest` | send it to an enclave it put in self-test mode | §6.5: no vault, no ETK, no secret in the report |
 | `Stats` | ask as often as it likes | The same snapshot for a second; asking changes nothing; instance-wide counts only (§6.6, §11.2) |
@@ -763,7 +947,7 @@ more than "the operation does not happen, or happens late".
 | `Lifecycle`, `Stopped` | drop, change or invent what it writes to the tables | The values are advisory and serve routing and the account site only (VAULT-MESSAGING §11.5 "Lifecycle values are advisory"). It can suppress the member's email about a clone alarm, not the vault's own alert, freeze and audit entry |
 | `Log` | read, drop | Sees what §11.2 lists |
 | Egress | refuse or fail a connect; connect elsewhere; drop, delay, cut or change bytes; hold a connection open and silent; close connections to make the enclave open more | Anything but the named host with a certificate under the pinned roots fails the TLS handshake. Changed bytes end the TLS session. A silent connection is pinged after 15 s and closed after 10 s more, and closed after 90 s without an answer in any case. The number of connections is bounded by the enclave whatever the host does (VAULT-MESSAGING §12.2.1). It cannot tell from a connection which vault a request belongs to |
-| The control connection itself | close it; keep it open and silent; send malformed or very large frames; send more than 128 requests at once | Closed: the enclave dials again, and locks every vault after 120 s without a connection. Malformed: the enclave closes it. The rest: §13, points 1, 5 and 6 |
+| The control connection itself | close it; keep it open and silent; send malformed or very large frames; send more than 128 requests at once | Closed, or open and silent: every vault is locked 120 s after the last `Ping` (§4.3). A peer that stops reading loses the connection after 60 s (§3.4). Malformed: the enclave closes it. The rest: §13, points 5 and 6 |
 
 ### 11.4 What a dishonest parent can do, at most
 
@@ -778,11 +962,22 @@ more than "the operation does not happen, or happens late".
    VAULT-MESSAGING §13.2 leaves open: toward a device that has not
    seen the newer values, or consistently for both objects.
 4. **Start or cancel a recovery** (`recovery`, `recovery_cancel`). It
-   gets the code after the enclave's 24 h. It does not get a device:
-   that needs device attestation, and then the PIN and the credential
-   password, guessed online under the enclave's backoffs. The owner's
-   devices are told when the vault locks for it, and cannot unlock
-   without seeing it.
+   gets the code after the enclave's 24 h. A register then needs a
+   genuine phone running the published app (device attestation), which
+   an operator can supply. After it, the PIN and then the credential
+   password are guessed online. **The enclave's backoffs do not limit
+   a parent that also replays stored objects (item 3):** both counters
+   are kept in objects the parent stores, a newly registered app holds
+   no minimums to refuse an older copy, and an app learns of a counted
+   failure only from an answer the host delivers (VAULT-MESSAGING
+   §13.2). Against such a parent the vault is protected by the
+   strength of the PIN and then of the credential password, not by a
+   rate. The owner's devices are told only if the vault was running
+   when the recovery began, and see `recovery_pending` only while the
+   parent serves them the header that records it; a parent that serves
+   them the earlier header shows them nothing, and can undo a cancel
+   the same way. A vault that has never kept a backup copy of its
+   credential cannot be recovered and is not exposed to this.
 5. **Give a vault a false account snapshot** (`account`, or the member
    of an enroll or unlock): false names in the vault's shared profile
    core, false membership details shown to the owner. VettID holds
@@ -861,6 +1056,26 @@ is satisfied from 8f2c8bf.*
   stored object (VAULT-MESSAGING §2.1 already says "not trusted for
   parsing").
 
+*P10–P14: added in 0.1.4; P13 extended in 0.1.5. The code at
+vettid-vault a852e36 satisfies each (what staging release S11 is
+planned to carry: #66, #69, #70, #71, #72, #73, #74). P13 as extended
+is satisfied from a852e36 (#74); as first written it was satisfied at
+392b03c.*
+
+- **P10.** The parent MUST send `Ping` at least every 30 s while an
+  enclave is connected, and MUST NOT let a table write delay the next
+  one. (As built: every 20 s, and the registry write has 10 s. No code
+  refuses a larger `-heartbeat` setting; it is an operator's error.)
+- **P11.** The parent MUST treat a lease renewal that gets no answer
+  as a failed renewal.
+- **P12.** While a vault runs, the enclave MUST lock every vault once
+  120 s have passed without a `Ping`, and MUST NOT count a connection,
+  a hello or any other frame as a `Ping`.
+- **P13.** The enclave MUST NOT call a parent it has found unreachable
+  before it has read that parent's next `Ping` and has written the
+  `Stopped` reports (§4.3).
+- **P14.** The enclave MUST NOT let a log record wait for the parent.
+
 ## 13. Open points
 
 Decided by the owner on 2026-10-12, as recommended: point 1 is to be
@@ -881,12 +1096,30 @@ VAULT-MESSAGING 0.27.4 §12.3; its fix is still to come. Of point 7,
 the `Hello` comment is corrected (8f2c8bf) and VAULT-RELEASES 0.1.16
 lists `account`. Points 5 and 6 are open. Point 8 is new.
 
+**State at 0.1.4.** Point 1 is **closed** (vettid-vault #70 and #71,
+for S11). Point 11 was found and **closed** the same day (#72, `main`
+392b03c, for S11). Point 6 stays open, narrowed. Points 9, 10, 12 and
+13 are new and open.
+
+**State at 0.1.5.** No point changes. vettid-vault #74 (`main`
+a852e36, for S11) brought the code to §4.3's rule that the parent is
+reachable again only once it has been told.
+
+**State at 0.1.6.** Point 12 is reworded for vettid-vault #75 (the
+queue is created again when a receive finds it gone; the check before
+the first registry row after a disconnection has a limit of 10 s). It
+stays open.
+
+**State at 0.1.7.** No point changes.
+
 Found while writing this document. Each is described where it occurs
 above; the pull request that adds this document lists them with file
 and line. None lets the parent read or forge anything it could not
 before. Points 1 and 2 are the ones that matter.
 
 1. **A parent that stays connected but silent is not "unreachable".**
+   *Closed in 0.1.4 (vettid-vault #70, #71): §4.3, §3.4. What follows
+   describes the code through 8f2c8bf.*
    The 120 s rule of VAULT-MESSAGING §12.3 is measured from the loss
    of the connection (§4.3). The enclave sends nothing that the parent
    must answer in time except its own store and credential requests,
@@ -915,7 +1148,9 @@ before. Points 1 and 2 are the ones that matter.
    their kind, and up to 128 requests are held in memory at once
    before the enclave looks at them.
 6. **At 128 requests in flight the reader stops reading replies too**
-   (§3.4). An honest parent sends about a dozen at most.
+   (§3.4). An honest parent sends about a dozen at most. *0.1.4:* still
+   open; but the time the enclave's reader waits there no longer
+   counts against the parent as silence (up to 120 s, §4.3).
 7. Smaller: the `Hello` comment in the code names fewer fields than
    are sent; the enclave and the parent read queue messages up to
    different sizes (§6.1); VAULT-RELEASES §3.4 C2 does not list the
@@ -931,8 +1166,64 @@ before. Points 1 and 2 are the ones that matter.
    added to a vault process later, and any error text that later ends
    a run loop, goes to the parent with the vault id. P5 binds such a
    change; nothing in the code enforces it.
+9. **`LeaseLost` goes one vault at a time (0.1.4).** The parent tells
+   the enclave of each lost lease in turn and waits for each lock (up
+   to 60 s). With hundreds of vaults whose leases are lost together
+   (the lease table not answering) the last are told after their
+   leases have ended. The conditional state write guards those. To
+   close it: one request that locks them together.
+10. **Lifecycle events lost with a connection (0.1.4, narrowed).**
+    Frames queued on a connection that ends are lost, and so is an
+    event raised while there is none. The vaults ended by the
+    unreachable lock are now reported (§4.3), so the parent's running
+    set and the leases come right. What a `locked` event carries
+    besides (the app key, the backup bit) is not sent again, and any
+    other event lost with a connection stays lost. To close it: the
+    enclave reports its running set at the hello, a wire change for a
+    later release.
+11. **A `Ping` handled as its connection ends (0.1.4). Closed in
+    vettid-vault #72 (392b03c).** At 2daa9e4 a `Stopped` report could
+    be queued onto a connection that had just ended and be lost, or be
+    kept while the parent was made reachable all the same, so that an
+    unlock opened the vault before the stale report went out and the
+    parent then released a running vault's lease. Now a report counts
+    as told only when written to the connection that is still the
+    current one, and a report whose vault runs again is dropped
+    (§4.3). Written is still not read: point 10.
+12. **The parent's other AWS calls have no time limit of their own
+    (0.1.4).** None decides a lock, and none was changed: the queue's
+    long poll, message delete, manifest read, slot write, and lease
+    acquire, read and take-over on the request path (a hang holds one
+    of the 8 request workers; the message comes back after its
+    visibility time); the store get, put and delete and the
+    credentials the enclave asks for (the enclave gives up after 60 s;
+    the parent's handler stays, one of 128); the sweeper's list,
+    heartbeat read and queue delete; the queue's creation at start and
+    after a receive that finds the queue gone. With a limit: the
+    registry write and the lease renewal (10 s, new), the check that
+    the queue exists before the first registry row after a
+    disconnection (10 s), lifecycle and lease-release writes (30 s),
+    the registry row's delete (10 s; 60 s at shutdown).
+13. **The wait for the reports has no bound of its own (0.1.4; low).**
+    After a `Ping` the enclave waits until its whole outgoing queue is
+    written, not only the reports, and that wait has no time limit
+    beyond the 60 s each frame has. At realistic rates it is
+    immediate, and while the parent is unreachable the enclave makes
+    no calls, so little is queued. A parent that reads slowly delays
+    its own return and its `Ping`'s reply.
 
 ## 14. Sources
+
+*0.1.5:* also read at a852e36: `enclave/supervisor/link.go` (`ping`,
+`hear`, `lost`, `locked`), `supervisor.go` (`checkParent`, `maintain`),
+`prochost.go` (`LockAllWithin`), `parent/parent.go` (the `Ping` sent
+when a descriptor arrives), and the description of vettid-vault #74.
+
+*0.1.4:* also read at 392b03c: `enclave/supervisor/supervisor.go`
+(`checkParent`), `link.go` (`ping`, `hear`, `lost`), `prochost.go`
+(`LockAllWithin`), `internal/hostproto/conn.go` (`Options`),
+`parent/parent.go` (`publish`, `renew`, the `Stopped` branch),
+`enclave/cms`, and the descriptions of vettid-vault #70, #71 and #72.
 
 Read at vettid-vault `main` f3003ed:
 

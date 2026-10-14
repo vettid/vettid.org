@@ -1,8 +1,8 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.19
-date: 2026-10-12
+version: 0.1.25
+date: 2026-10-13
 owner: Al Liebl (Mesmer)
 changelog:
   - 0.1.0: V5 plan. Release pipeline, keys, infrastructure, release
@@ -154,15 +154,70 @@ changelog:
     parent's `DefaultAllow`, the stage's DNS Firewall), planned, not
     built. No other section is touched (§8.7 in particular is left
     alone)
+  - 0.1.20 (as built, vettid-vault #70, #71 and #72, `main` 392b03c; for
+    staging release S11, not cut yet). §8.7: the log records the
+    unreachable-parent rule adds, and what S11 is planned to carry.
+    `related` brought up to date
+  - 0.1.21 (as built, vettid-vault #73 and #74, `main` a852e36; for
+    staging release S11, not cut yet; approved by the owner
+    2026-10-13). §8.7: what S11 is planned to carry now includes #73
+    (the Go version of the enclave image) and #74 (a `Ping` read while
+    the vaults are being locked, VAULT-HOST-PROTOCOL 0.1.5 §4.3); no
+    log record changes. `related` brought up to date
+  - 0.1.22 (owner decision of 2026-10-13: the current version and 3 to
+    5 older versions are enough; as built in vettid.org #258; approved
+    by the owner 2026-10-13). **The data bucket keeps fewer old
+    versions**: two lifecycle rules, one that removes a noncurrent
+    version 1 day after it was replaced unless it is one of the 5
+    newest noncurrent versions of its object, and the rule the bucket
+    always had, which removes every noncurrent version after 7 days.
+    §8.2: the bucket's retention. §11.4: the objective for stored state
+    after an operator or code error (24 hours for any version, then
+    the 5 newest older versions, for at most 7 days), and the sentence
+    on deleted vault data. §14: O9. **Nobody gets a shell on a vault
+    host** (owner decision of 2026-10-13; vettid.org #252): §8.3, the
+    "Instance" bullet: no interactive access, Run Command only; before,
+    it said "SSM Session Manager only (sessions logged)". `related`
+    brought up to date
+  - 0.1.23 (editorial, as built; staging release S11, 2026-10-13;
+    approved by the owner 2026-10-13). §8.8: S11's capacity figures
+  - 0.1.24 (owner decision of 2026-10-13: rescue must always have a
+    target; approved by the owner 2026-10-13. 0.1.23 is the
+    staging S11 capacity entry of vettid.org #270). **A new release's
+    key also admits every `removed` release that can still be
+    rescued** when the key is created, that is, whose `ends_at` plus
+    the channel's deletion window has not passed; before, it admitted
+    only the releases not `removed`, and since a vault moves only into
+    an `active` release, a rescued vault had nowhere to move once a
+    release created after the removal was `active` (seen on staging
+    2026-10-13). §3.5: the rule, how the window is counted, the check,
+    the one case without a target (a release removed while an older
+    one is the newest `active`),
+    why a move into a `deprecated` release was not chosen, and the
+    staging releases whose keys are older than the rule. §6.2: the
+    key policy. §7: the checks, and the list member `rescue`. §10.1
+    step 5 and the failed canary. §10.3 steps 2 and 3: a check before
+    a release is removed or a new one published; **how the release
+    stack of a rescue is built**: the entry stays `removed` and
+    carries `host` with `rescue: true` (the procedure of 0.1.2 could
+    not be carried out: the validation refused `host` on a `removed`
+    entry, and a status never goes back). No enclave, key or release
+    list entry changes
+  - 0.1.25 (editorial, as built; approved by the owner 2026-10-13).
+    §3.5: the rescue of staging release 3 was rehearsed on 2026-10-13
+    (a vault moved from release 3 into release 10), so its key's
+    deletion was scheduled again and falls seven days after that, later
+    than the keys of releases 4 to 6; and with release 11 `active`
+    since that day, staging 3 to 6 have no rescue target any more
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
-  - VAULT-MESSAGING.md (0.28.0) §11.10 release updates, §12.5 deletion, §13.5, §13.9
+  - VAULT-MESSAGING.md (0.29.3) §11.10 release updates, §12.5 deletion, §13.5, §13.9
   - RELEASE-UPDATES.md (0.3.3) — member-facing; §3 changes with this plan; §5 the release log
   - ANDROID-PLAN.md (0.1.37) — the app's "What's new" from the log
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2) — staging as the development channel; D1–D11
   - CALLS-PLAN.md (0.1.3) §13, CALLING-SERVICE.md (0.2.0) §5.5, §8 — the calling service's issuer in the egress controls; `calls_url`
   - MEMBER-API.md "Vault", RUNBOOK.md, ARCHITECTURE.md
-  - VAULT-HOST-PROTOCOL.md (0.1.2) — the enclave ↔ parent (vsock) protocol as built; §10 what happens if versions meet
+  - VAULT-HOST-PROTOCOL.md (0.1.6) — the enclave ↔ parent (vsock) protocol as built; §10 what happens if versions meet
   - vettid-vault docs/SMOKE.md (hardware smoke test, 2026-10-02)
 classification: public (no secrets; safe for github.com/vettid)
 ---
@@ -338,7 +393,7 @@ months, set per release in the release list, §7):
 | T0 + W − 90 days | N `retired`, `ends_at` = D | on demand | email 1; in-app final warning with the date |
 | D − 30, − 7, − 1 days | | | emails 2–4 |
 | **D = T0 + W** (the deadline) | N `removed` | instances stopped; API answers `410 release_unavailable`; **`ScheduleKeyDeletion(30 days)`** | email: the release has ended; how to ask for a rescue |
-| D … D + 30 | | key `PendingDeletion` | **rescue on request**: `CancelKeyDeletion`, `EnableKey`, start an instance, the member moves, deletion is scheduled again |
+| D … D + 30 | | key `PendingDeletion` | **rescue on request**: `CancelKeyDeletion`, `EnableKey`, start an instance, the member moves into the newest `active` release (its key admits N, below), deletion is scheduled again |
 | D + 30 | entry stays while a live key admits N (§4.2) | key deleted | email: the vault could not be opened and its data is erased; enroll a new vault |
 | D + 37 | | the stored objects of vaults still sealed to N are deleted (they can never be opened), and their rows | |
 
@@ -348,6 +403,62 @@ deletion *is* the end of service. The 30 days are a buffer to abort a
 mistake or rescue a member who writes in, not extra time members are
 told to count on. Cancelling leaves the key `Disabled`; `EnableKey`
 restores it, which is why the retirement role needs both (§4.1).
+
+**A rescue always has a target** (0.1.24; owner decision of
+2026-10-13). A rescued vault can do one thing: move, and only into an
+`active` release numbered above N whose key admits N's PCR0 (§3.2; N's
+own enclave refuses any other target, and KMS refuses the seal). The
+enclave accepts any such release; the release list's checks and the app
+choose the newest `active` one. So every key created while N can still
+be rescued admits N:
+
+- *The rule.* A new release's key admits every earlier release that is
+  not `removed`, and every `removed` release whose rescue window is not
+  over when the key is created (§6.2).
+- *The window.* It is counted from the release list: N's `ends_at` plus
+  the channel's `retirement_window_days` (30 in production, 7 in
+  staging). A `removed` entry therefore keeps its `ends_at`, which is
+  the time the release ended and is never in the future: the checks
+  refuse a `removed` entry whose `ends_at` is after the manifest's
+  `issued_at`. The list does not know the day KMS deletes the key, which is later when
+  deletion was scheduled late or again after a rescue; nothing is
+  promised for that extra time.
+- *No `ends_at`.* A `removed` entry without `ends_at` is a release that
+  never held a member's vault (a failed canary, §10.1). It cannot be
+  rescued, and no later key admits it.
+- *The check.* `vault:manifest sign` before a manifest is signed, and
+  `check:manifest` on the served one, refuse a manifest in which a
+  `removed` release still in its window (at the manifest's `issued_at`)
+  is not admitted by the key of the newest `active` release. So neither
+  removing a release nor publishing a new one can leave a rescue
+  without a target (§7, §10.3). The same two checks, not CDK synth,
+  report a candidate's list that names a `removed` release past its
+  window: naming it is harmless to the key check, but the manifest
+  would have to list it for as long as the new key lives.
+- *The one case without a target.* A release that was published and is
+  then removed while an older release is the newest `active` one has
+  no target: the enclave refuses a move to a lower release number. No
+  check reports it; removing such a release ends its vaults and is the
+  owner's decision each time.
+- *The alternative not chosen:* letting a rescued vault move into the
+  newest release whose key admits it, even a `deprecated` one. Every
+  published enclave image refuses a move whose target is not `active`,
+  and an image cannot change; a release able to do it would have to
+  exist before the release to be rescued. It would also leave the
+  member on a release that is itself ending, with a second move to
+  make.
+- *Keys older than the rule (staging).* The keys of staging releases 1
+  to 11 were created before it and cannot change. Release 11's key
+  admits releases 7 to 10 only. Staging releases 3 to 6 (removed
+  2026-10-13) could therefore be rescued only into release 10, and only
+  while release 10 was `active`; since release 11 became `active`
+  (2026-10-13) they have no target. Their keys are deleted on
+  2026-10-20, release 3's some hours later than the others: its rescue
+  was rehearsed on 2026-10-13 (a vault moved from release 3 into
+  release 10), and its key's deletion was scheduled again afterwards
+  with the full seven days. The
+  check starts with staging release 12. Production has no release yet,
+  so every production key follows the rule.
 
 Every notice email links release notes (owner request 2026-10-10,
 RELEASE-UPDATES §3): emails 1–4 and the deadline email link N's `notes`
@@ -763,8 +874,11 @@ resource (`aws-kms.Key` always adds an administrator statement):
   `/vettid-org/<stage>/vault/releases/<n>/seal-key-arn`.
 - The policy, from the spec's normative example plus §4.1: `Decrypt` for
   the host role with the release's PCR0; `GenerateDataKey` for the host
-  role with the PCR0s of release N and of **every release not `removed`**
-  when N is created (all of them may still move into N); reads for the
+  role with the PCR0s of release N, of **every earlier release not
+  `removed`** when N's key is created (all of them may still move into
+  N) and, from 0.1.24, of **every `removed` release that can still be
+  rescued** then (its `ends_at` plus the channel's window has not
+  passed, §3.5: a rescued vault moves into N); reads for the
   host role and the retirement role; the two retirement statements.
   `kms:CallerAccount` on every attestation statement.
 - **Immutable resource:** an update with changed properties fails the
@@ -840,7 +954,9 @@ role (trust, `PassRole`) to CloudFormation's deploy role.
 - **CI check** (`npm run check:manifest`): the signature verifies under a
   pinned key; `serial` is greater than the previous commit's; the bytes
   equal a fresh render of the release list; the size limit; every PCR0
-  admitted by a live key is listed; every listed release has a release-log
+  admitted by a live key is listed; every `removed` release that can
+  still be rescued is admitted by the newest `active` release's key
+  (0.1.24, §3.5); every listed release has a release-log
   entry, in every channel (below, "Release notes on every channel").
 - **`serial`:** increases by one per publication; it is never reused, even
   for a canary manifest that is never published (§10.1).
@@ -872,8 +988,14 @@ role (trust, `PassRole`) to CloudFormation's deploy role.
 - **Release lists:** `vault/releases/prod.json` and `staging.json`
   (`lib/vault/release-list.ts`): per release the manifest fields, `status`
   (`candidate` or a manifest status), `admitted_pcr0s` (fixed at key
-  creation), an optional `host` (the release stack's pins; absent: no
-  stack) and, in production, `log` (summary, changes, `security`: `none`,
+  creation; 0.1.24: while `seal_key` is empty the validation refuses
+  a list that leaves out a release of §6.2, judged at the time of the
+  check, and `check:manifest` and `vault:manifest sign` report one that
+  names a `removed` release past its window), an
+  optional `host` (the release stack's pins; absent: no stack; 0.1.24:
+  on a `removed` entry only together with `rescue: true`, the marker of
+  a rescue in progress, §10.3 step 3, which like `host` is never in the
+  manifest) and, in production, `log` (summary, changes, `security`: `none`,
   `recommended` or `urgent`, `security_text`, `affects`). Plus
   `signed_serial`, the highest serial ever signed. CDK builds one release
   key per entry and one release stack per entry with `host`; synth fails on
@@ -914,7 +1036,12 @@ role (trust, `PassRole`) to CloudFormation's deploy role.
   never deleted once published); status and date consistency (an active
   release, deprecated or retired ones older than it, `ends_at` on retired,
   `retired` within 90 days of `ends_at`, nothing past its `ends_at` still
-  running); every admitted PCR0 listed; for production, the release log
+  running); every admitted PCR0 listed; (0.1.24) a rescue target for
+  every `removed` release still in its window, an `ends_at` on every
+  `removed` release that was ever published as running, none of them
+  after the manifest's `issued_at`, no `rescue: true` entry past its
+  window, and no candidate without a key that names a `removed`
+  release past its window; for production, the release log
   pages current.
 - **Release log:** `/security/releases/` (`lib/vault/release-log.ts`,
   `scripts/vault/release-log.ts`): an index (number, publication date,
@@ -1076,8 +1203,10 @@ group (`vault-drain`, 300 s, default CONTINUE); per-release alarm: desired
 
 **Data bucket** `vettid-org-vault-data-<account>`: block public access,
 SSE-S3 (objects are already DEK-encrypted or KMS-sealed), TLS only,
-versioned, noncurrent versions and delete markers expire after **7 days**
-(O9). Prefixes: `vaults/`, `users/`, `manifests/`. Conditional writes
+versioned; a noncurrent version expires 1 day after it was replaced
+unless it is one of the 5 newest noncurrent versions of its object, and
+in any case after **7 days**; a delete marker expires once no version is
+left under it (O9). Prefixes: `vaults/`, `users/`, `manifests/`. Conditional writes
 (`If-None-Match`, `If-Match`) work on versioned buckets. Host access is
 limited to `vaults/*`, `users/*` and reading `manifests/*`; the cleanup job
 deletes `vaults/*` and `users/*` (VAULT-PLAN V5 account deletion).
@@ -1092,8 +1221,11 @@ editing the bucket policy first.
 
 - **Instance:** Graviton `m7g.large`, on demand (D2), Nitro Enclaves on,
   IMDSv2 with hop limit 1, encrypted gp3 root (20 GiB), no key pair, no
-  inbound, SSM Session Manager only (sessions logged), public IPv4 in a
-  public subnet.
+  inbound, no interactive access (Session Manager sessions, EC2 Instance
+  Connect and the serial console are denied to every principal by the
+  Vault OU policy); operated through Systems Manager Run Command only
+  (each command is recorded in CloudTrail and reported; its content is
+  not recorded), public IPv4 in a public subnet.
 - **AMI:** EC2 Image Builder, one image per release, built at deploy time
   by the release stack (`CfnImage`; the AMI id feeds the launch template
   directly). The component installs, from pinned sources with checksums:
@@ -1385,6 +1517,37 @@ release_starting`. The `vault-scaler` Lambda (host stack):
     shipped log line. The record's shape is tested; the extraction is
     phase 1's exit check, to be done on staging with S11. If the parent
     logs above INFO the record is not written.
+- *As built (0.1.20; vettid-vault #70, #71 and #72, `main` 392b03c; from
+  staging release S11, which is not cut yet).* **The unreachable
+  parent in the log** (VAULT-MESSAGING §12.3; VAULT-HOST-PROTOCOL
+  §4.3, §7.4). In `/vettid-org/<stage>/vault-host`, none naming a
+  vault:
+  - from the enclave (`source=enclave`): "no ping from the parent:
+    every vault is locked if none comes" (`silent_s`, `limit_s`,
+    `vaults`; a warning at 60 s); "parent unreachable: locking every
+    vault" (`vaults`) and "parent unreachable: every vault locked"
+    (`vaults`, `killed`); "log records dropped: the parent was not
+    reading" (`count`); "control connection takes no write timeout"
+    (an error: the 60 s write limit then bounds nothing);
+  - from the parent: "heartbeat took longer than its interval" (`ms`,
+    `interval_ms`), "lease renewal failed; will retry" and "lease lost"
+    (these two name the vault, as before).
+  - The first enclave record can reach the log only while the parent
+    reads; the two "parent unreachable" records are written when the
+    parent is, by the rule, not listening, and arrive only if the
+    connection still carries them. An alarm should rest on the
+    parent's own records and on the registry row going stale, not on
+    these. No alarm is built on any of them yet.
+  - **What S11 is planned to carry** (vettid-vault, since
+    `release/staging/10`): #66 (relay connections and metrics), #69
+    (`relay_vault_limit`), #70, #71 and #72 (the unreachable parent);
+    and (0.1.21) #73 (the enclave image and the smoke script are built
+    with Go 1.26.9) and #74 (a `Ping` read while the vaults are being
+    locked does not make the parent reachable; VAULT-HOST-PROTOCOL
+    0.1.5 §4.3);
+    all merged, `main` a852e36. #67 and #68 are test vectors and
+    documentation. `deploy/host/` is
+    unchanged since S10, so S11's `host_files_sha256` is S10's.
 - *As built (0.1.17; the host stack, `lib/stacks/vault-host-stack.ts`;
   built, not yet verified on staging: RUNBOOK "The parent's metrics and
   their alarms").*
@@ -1488,6 +1651,15 @@ canary self-test (`-capacity 400`, same host and enclave size), PASS:
 projected per host. The burst figure is unchanged; the projection is
 about 7 % lower than S3's.
 
+*Measured again (staging S11, 2026-10-13):* the same run on S11's
+canary host after its self-test (`-capacity 400`, same host and enclave
+size), PASS: 58 vaults held at the memory floor, about 894 idle
+unlocked vaults projected per host (4.5 MiB steady marginal memory per
+vault), unlock p50 193 ms / 393 ms / 817 ms at concurrency 1 / 2 / 4,
+idle CPU 0.9 ms per vault per minute. S11's hardening of the vault
+process (the system call filter, no user namespaces) leaves the figures
+where S10's were.
+
 *Relay connections (0.1.14; VAULT-RELAY-SCALING 0.1.2 §3, §10;
 vettid-vault #66).* Memory, not the relay path, bounds vaults per host:
 
@@ -1578,7 +1750,7 @@ job's vault deletion. Order (W4):
 | 2 | `release` workflow: EIF ×2 per channel, measurements, parent binaries, attestations; draft GitHub release | CI, arm64 | artifacts, PCRs |
 | 3 | Independent rebuild; PCR0 must match | owner | sign-off |
 | 4 | Staging: add the staging release to `vault/releases/staging.json` (with `log` and `notes` = its staging log URL, §7), deploy its key and release stack, hardware self-test, vaultctl end-to-end, compat run incl. a move from the previous staging release (§11) | staging | report |
-| 5 | Production PR: add N to `vault/releases/prod.json` (status `candidate`: in CDK, not in the manifest; with `log`, reviewed in this PR, and `notes` = `https://vettid.org/security/releases/N/`), `admitted_pcr0s` = every earlier release not `removed` (N's own PCR0 is admitted implicitly; `lib/vault/release-list.ts`) | vettid.org | PR |
+| 5 | Production PR: add N to `vault/releases/prod.json` (status `candidate`: in CDK, not in the manifest; with `log`, reviewed in this PR, and `notes` = `https://vettid.org/security/releases/N/`), `admitted_pcr0s` = every earlier release not `removed` and every `removed` one that can still be rescued (§6.2; while `seal_key` is empty the validation refuses a list that leaves one out, and `check:manifest` and `vault:manifest sign` one that names a `removed` release past its window; N's own PCR0 is admitted implicitly; `lib/vault/release-list.ts`) | vettid.org | PR |
 | 6 | Deploy `VettidOrgVaultStack` (creates the key); `vaultctl keycheck` against the draft manifest | owner | key ARN in `vault/releases/prod.json` |
 | 7 | Deploy `VettidOrgVaultRelease<N>Stack` (AMI with EIF verified against measurements; group min 0, canary 1) | owner | instance |
 | 8 | Hardware self-test on the canary host (`vault-parent -selftest` against the host stack's deletable smoke key), then normal start | SSM | PASS report |
@@ -1640,8 +1812,9 @@ VAULT-MESSAGING §11.10.1, 0.14.0):
 
 If the canary fails before step 10: the manifest s+1 is never published
 (the next one is s+2); N's group is deleted; N becomes `removed` in
-the release list (it admits nothing, and no later key admits it) and its
-key is scheduled for deletion at once (no member was ever on it). The
+the release list, without `ends_at` (no member was ever on it, so there
+is nothing to rescue and no later key admits it, §3.5), and its
+key is scheduled for deletion at once. The
 fix ships as N+1. On the test phone the tester removes the canary
 manifest (Settings → Attestation). The phone has used serial s+1, so it
 refuses the published s: a vault on an older release that it unlocked
@@ -1664,15 +1837,38 @@ with the notice job sending the emails of §3.5 automatically:
 1. At T0 + W − 90 days: set `retired` and `ends_at` = D; publish.
    (Production release 1, W = 90 days: at T0, in the manifest that makes
    release 2 `active`, §3.5.)
-2. At D: set `removed`; publish; delete the release stack (instances
-   stop; `available` false; API 410); as the retirement role,
+2. At D: check that a rescue of N has a target (N's PCR0 is in the
+   `admitted_pcr0s` of the newest `active` release; `vault:manifest
+   sign` refuses the manifest otherwise, §3.5); set `removed`, keeping
+   `ends_at`; publish; delete the release stack (instances
+   stop; `available` false; API 410) and drop the entry's `host`; as the
+   retirement role,
    `aws kms schedule-key-deletion --key-id <arn> --pending-window-in-days 30`;
    the deadline email goes out.
 3. Rescue (D … D+30), on a member's request: as the retirement role,
-   `cancel-key-deletion`, `enable-key`; redeploy the release stack and set
+   `cancel-key-deletion`, `enable-key`; give N's entry in the release
+   list its `host` again together with `rescue: true` and deploy the
+   release stack (0.1.24: the entry stays `removed`, the manifest does
+   not change and nothing is signed; the validation allows `host` on a
+   `removed` entry only with `rescue: true`, and that only while the
+   key of the newest `active` release admits N); set
    `rescue: true` on its `vault-releases` row (the member API routes a
-   `removed` release only then); the member moves; remove `rescue`; then
-   step 2 again.
+   `removed` release only then); the member moves into the newest
+   `active` release and unlocks there. The rescue is done when an
+   unlock in the target release has succeeded, not when the vault
+   row's `sealed_release` names the target: the row changes as soon as
+   N has sealed the header, before the target has opened the vault,
+   and until then N must stay routed. Then remove `rescue` from the
+   row; delete the release
+   stack and drop `host` and `rescue` from the entry; then schedule the
+   deletion again as in step 2. In production both list edits are
+   merged to master before the deploy they belong to, like any release
+   list change. KMS takes the full window again, so the
+   key outlives D+30 by the time the rescue took; the rescue window
+   stays D … D+30. While an entry carries `rescue: true`, the
+   validation refuses a release list in which the newest `active`
+   release does not admit it: end the rescue before publishing such a
+   release.
 4. D+30: the key is deleted; the final email; D+37 the cleanup job deletes
    the stored objects and rows of vaults still sealed to N.
 5. Drop N from the manifest once no live key admits it.
@@ -1744,7 +1940,7 @@ the ad-hoc tool for testing hardware questions outside a release.
 | AZ loss | RTO ≤ 15 min | groups span two AZs |
 | Region loss (us-east-1) | accepted: vaults unavailable until it returns | keys are single-region (check 2 refuses multi-region keys) |
 | Stored state, AWS failure | RPO 0 | S3 durability, conditional writes |
-| Stored state, operator or code error | ≤ 7 days to restore an object version | versioning, 7-day noncurrent retention; a restored older version is a rollback that apps detect and warn about (§13.2) |
+| Stored state, operator or code error | ≤ 24 hours to restore any object version; after that only the 5 newest older versions of an object, for at most 7 days | versioning; noncurrent versions kept 1 day, then the 5 newest, none beyond 7 days; a restored older version is a rollback that apps detect and warn about (§13.2) |
 | Key deleted by mistake | 30 days to cancel | KMS window, CloudTrail alarm |
 | Host role deleted | catastrophic, prevented | §6.3 |
 
@@ -1752,7 +1948,7 @@ No backup or export outside the service (owner decision, 2026-10-03).
 The one exception, the member's History export of activity metadata
 from the app (owner decisions of 2026-10-08, VAULT-MESSAGING 0.22.0
 §10.9), is no backup: nothing restores from it, and it changes none of
-the objectives above. The 7-day retention also bounds how long deleted vault data lingers.
+the objectives above. No noncurrent version is kept longer than 7 days, which also bounds how long deleted vault data lingers.
 
 ## 12. First deployment
 
@@ -1877,5 +2073,5 @@ All ten recommendations below were **accepted by the owner on 2026-10-04**.
 | O6 | Instance size | **m7g.large**, enclave 1 vCPU and 5 GiB. Measured on S3 (W9, §8.8); owner 2026-10-06: kept for release 1, revisit when unlock queueing shows in metrics |
 | O7 | Always-on minimum for the current release | **0 until production members exist** (on-demand start, ~2–3 min first unlock), **1 from the Android beta** on |
 | O8 | Android signing digest(s) to pin (blocked release 1 until 2026-10-11) | Accepted 2026-10-04: pin the **Play app signing certificate and the upload certificate** used for direct builds, decided when the Android signing key is created. **Amended by the owner on 2026-10-11** (ANDROID-PLAN 0.1.36 §7; §5.2): Google generates and holds the Play app-signing key; the certificate called "upload" here is VettID's release key, which signs the F-Droid and direct builds and is never given to Google; a separate key, never pinned, uploads to Play. **Release 1 pins VettID's certificate only**; the Play certificate is pinned by a later release, before the Play listing goes live; each vault is bound to its app's signer |
-| O9 | Data bucket retention and DR | Versioned, **7-day** noncurrent retention; region loss accepted for the preview; no second-region keys |
+| O9 | Data bucket retention and DR | Versioned; noncurrent versions kept **1 day, then the 5 newest, none beyond 7 days** (owner, 2026-10-13; before: 7 days); region loss accepted for the preview; no second-region keys |
 | O10 | Manifest size | **M1** (manifest by hash, supplied by the host) before release 1 |

@@ -55,16 +55,23 @@ const tbl = (t: string) => (db[t] ??= new Map());
 const put = (t: string, item: any) => tbl(t).set(item[KEYS[t]], item);
 const getItem = (t: string, k: string) => tbl(t).get(k);
 const ccf = () => Object.assign(new Error('ccf'), { name: 'ConditionalCheckFailedException' });
+/** Tests set these to make a put, or an update of a request row, fail (cleared before each test). */
+let failPut: ((input: any) => boolean) | undefined;
+let failUpdate: ((input: any) => boolean) | undefined;
+/** Called before an update is applied: what another request did in between. */
+let onUpdate: ((input: any) => void) | undefined;
 
 function installFakeDdb() {
   ddb.on(GetCommand).callsFake((i) => ({ Item: tbl(i.TableName).get(i.Key[KEYS[i.TableName]]) }));
   ddb.on(PutCommand).callsFake((i) => {
+    if (failPut?.(i)) throw Object.assign(new Error('unavailable'), { name: 'InternalServerError' });
     const k = i.Item[KEYS[i.TableName]];
     if (i.ConditionExpression?.startsWith('attribute_not_exists') && tbl(i.TableName).has(k)) throw ccf();
     tbl(i.TableName).set(k, structuredClone(i.Item));
     return {};
   });
   ddb.on(UpdateCommand).callsFake((i) => {
+    onUpdate?.(i);
     const t = i.TableName;
     const k = i.Key[KEYS[t]];
     const cur = tbl(t).get(k);
@@ -152,7 +159,13 @@ function installFakeDdb() {
     } else if (t === 'requests' && i.UpdateExpression.startsWith('SET #st = :used')) {
       if (!cur || cur.state !== v[':live'] || !(cur.expires_at > v[':now']) || (v[':f'] !== undefined && cur.typed_blocked !== v[':f'])) throw ccf();
       Object.assign(cur, { state: v[':used'], used_at: v[':now'], used_via: v[':via'] });
+    } else if (t === 'requests' && i.UpdateExpression === 'SET releasing = :now') {
+      // The release of a recovery code: one request at a time, and never once it is recorded.
+      expect(i.ConditionExpression).toBe('attribute_exists(request_id) AND attribute_not_exists(released) AND (attribute_not_exists(releasing) OR releasing < :stale)');
+      if (!cur || cur.released !== undefined || (cur.releasing !== undefined && !(cur.releasing < v[':stale']))) throw ccf();
+      cur.releasing = v[':now'];
     } else if (t === 'requests') {
+      if (failUpdate?.(i)) throw Object.assign(new Error('unavailable'), { name: 'InternalServerError' });
       if (cur && i.UpdateExpression.startsWith('SET released')) cur.released = true;
       else if (cur) cur.status = v[':e'];
     }
@@ -312,6 +325,9 @@ const sent = () => sqs.commandCalls(SendMessageCommand).map((c) => ({ url: c.arg
 let logs: string[];
 beforeEach(() => {
   db = {};
+  failPut = undefined;
+  failUpdate = undefined;
+  onUpdate = undefined;
   ddb.reset(); sm.reset(); sqs.reset(); sesMock.reset(); ssm.reset();
   switchValue = undefined;
   vaultService.resetVaultServiceCache();
@@ -1352,6 +1368,174 @@ describe('vault recovery', () => {
     expect((await call('GET', '/api/vault/status')).body.vault.recovery).toEqual({ state: 'pending', available_at: new Date((NOW + 86_400) * 1000).toISOString() });
   });
 
+  describe('the recovery\'s own slot through GET /api/vault/requests/{id}', () => {
+    const poll = (rid: string) => call('GET', `/api/vault/requests/${rid}`);
+    const released = () => [...tbl('audit').values()].filter((a) => a.action === 'vault.recovery_code_released');
+
+    test('status only, before and after available_at: never the sealed code, no release recorded', async () => {
+      const rid = await request();
+      expect(await poll(rid)).toEqual({ status: 200, body: { status: 'queued' } });
+      answer(rid);
+      // Before the 24 hours, seconds after the request.
+      at(NOW + 5);
+      expect(await poll(rid)).toEqual({ status: 200, body: { status: 'done' } });
+      // And after them: the code is the status route's to release.
+      at(NOW + 86_400 + 5);
+      expect(await poll(rid)).toEqual({ status: 200, body: { status: 'done' } });
+      at(NOW + 172_800 - 5);
+      expect(await poll(rid)).toEqual({ status: 200, body: { status: 'done' } });
+      // The slot outlives the recovery by an hour: status only then too, and after that it is gone.
+      at(NOW + 172_800 + 1800);
+      expect(await poll(rid)).toEqual({ status: 200, body: { status: 'done' } });
+      at(NOW + 172_800 + 3601);
+      expect((await poll(rid)).status).toBe(404);
+      expect(released()).toHaveLength(0);
+      expect(getItem('requests', rid).released).toBeUndefined();
+    });
+
+    test('GET /api/vault/recovery still releases it from available_at, with its audit event, after the slot was polled', async () => {
+      const rid = await request();
+      answer(rid);
+      at(NOW + 5);
+      expect((await poll(rid)).body).toEqual({ status: 'done' });
+      expect((await call('GET', '/api/vault/recovery')).body.recovery.sealed_code).toBeUndefined();
+      at(NOW + 86_400);
+      expect((await poll(rid)).body).toEqual({ status: 'done' });
+      expect(released()).toHaveLength(0);
+      const r = await call('GET', '/api/vault/recovery');
+      expect(r.body.recovery).toMatchObject({ recovery_id: rid, state: 'available', sealed_code: sealedCode, locator: getItem('vaults', VID).recovery.locator });
+      expect(released().map((a) => a.detail)).toEqual([{ vault_id: VID, recovery_id: rid }]);
+      expect(getItem('requests', rid).released).toBe(true);
+    });
+
+    test('a refusal\'s slot answers its status only too; the status route returns the sealed refusal', async () => {
+      const rid = await request();
+      Object.assign(answer(rid), { code: 'recovery_unavailable' });
+      at(NOW + 5);
+      expect((await poll(rid)).body).toEqual({ status: 'done' });
+      expect((await call('GET', '/api/vault/recovery')).body.recovery).toMatchObject({ state: 'unavailable', sealed_code: sealedCode });
+    });
+
+    const RESULT = Buffer.alloc(5_252, 0x55).toString('base64');
+    const slotOf = (op: unknown) => {
+      const row: Record<string, unknown> = { request_id: RID2, vault_id: VID, user_guid: 'g1', op, status: 'done', envelope: RESULT, code: 'etk_unknown', created_at: new Date(NOW_MS).toISOString(), expires_at: NOW + 800 };
+      if (op === undefined) delete row.op;
+      put('requests', row);
+    };
+
+    test('the slots of the operations a client polls still answer their envelope and code', async () => {
+      for (const [i, op] of ['enroll', 'unlock', 'lock', 'recovery_register'].entries()) {
+        at(NOW + 10 + i);
+        slotOf(op);
+        expect((await poll(RID2)).body).toEqual({ status: 'done', envelope: RESULT, code: 'etk_unknown' });
+      }
+    });
+
+    test('fail closed: a slot of any other operation, of one spelled differently, or with no `op`, answers its status only', async () => {
+      for (const [i, op] of ['recovery', 'Recovery', 'RECOVERY', ' recovery', 'recovery_cancel', 'account', 'delete', 'something_new', '', undefined, null, 7, ['unlock']].entries()) {
+        at(NOW + 10 + i);
+        slotOf(op);
+        expect((await poll(RID2)).body).toEqual({ status: 'done' });
+      }
+    });
+
+    describe('the release is on record before the code is returned', () => {
+      const isRelease = (i: any) => i.TableName === 'audit' && i.Item?.action === 'vault.recovery_code_released';
+      const status = () => call('GET', '/api/vault/recovery');
+
+      test('the audit write fails: no code in that answer or the next; a later request records the release once and returns the code', async () => {
+        const rid = await request();
+        answer(rid);
+        at(NOW + 86_400);
+        failPut = isRelease;
+        expect((await status()).status).toBe(500);
+        expect(released()).toHaveLength(0);
+        expect(getItem('requests', rid).released).toBeUndefined();
+        // The audit log is back, but the failed attempt is not yet old enough to retry: still no code.
+        failPut = undefined;
+        at(NOW + 86_400 + 5);
+        let r = await status();
+        expect(r.body.recovery).toMatchObject({ state: 'available' });
+        expect(r.body.recovery.sealed_code).toBeUndefined();
+        expect(r.body.recovery.locator).toBeUndefined();
+        expect(released()).toHaveLength(0);
+        at(NOW + 86_400 + 61);
+        r = await status();
+        expect(r.body.recovery).toMatchObject({ state: 'available', sealed_code: sealedCode });
+        expect(released().map((a) => a.detail)).toEqual([{ vault_id: VID, recovery_id: rid }]);
+        expect(getItem('requests', rid).released).toBe(true);
+        expect((await status()).body.recovery.sealed_code).toBe(sealedCode);
+        expect(released()).toHaveLength(1);
+      });
+
+      test('while the audit log keeps failing the code is never returned', async () => {
+        const rid = await request();
+        answer(rid);
+        failPut = isRelease;
+        for (const t of [0, 61, 200, 3600]) {
+          at(NOW + 86_400 + t);
+          const r = await status();
+          expect(r.status).toBe(500);
+          expect(JSON.stringify(r.body)).not.toContain(sealedCode);
+          expect(getItem('requests', rid).released).toBeUndefined();
+        }
+        expect(released()).toHaveLength(0);
+      });
+
+      test('concurrent requests: one writes the event; none returns the code before it is recorded', async () => {
+        const rid = await request();
+        answer(rid);
+        at(NOW + 86_400);
+        const answers = await Promise.all([status(), status(), status()]);
+        expect(answers.map((a) => a.status)).toEqual([200, 200, 200]);
+        expect(answers.filter((a) => a.body.recovery.sealed_code === sealedCode).length).toBeGreaterThanOrEqual(1);
+        expect(released()).toHaveLength(1);
+        // Another request's release in progress, not yet recorded: no code and no second event.
+        delete getItem('requests', rid).released;
+        getItem('requests', rid).releasing = NOW + 86_400;
+        const r = await status();
+        expect(r.body.recovery).toMatchObject({ state: 'available' });
+        expect(r.body.recovery.sealed_code).toBeUndefined();
+        expect(released()).toHaveLength(1);
+        // Recorded meanwhile: the code, still one event.
+        getItem('requests', rid).released = true;
+        expect((await status()).body.recovery.sealed_code).toBe(sealedCode);
+        expect(released()).toHaveLength(1);
+      });
+
+      test('another request finishes the release between this one\'s read and its mark: the code, from a fresh read, and no second event', async () => {
+        const rid = await request();
+        answer(rid);
+        at(NOW + 86_400);
+        // The other request holds the mark when this one reads the slot...
+        getItem('requests', rid).releasing = NOW + 86_400;
+        // ...and has written the event and recorded the release by the time this one tries to take the mark.
+        // (A new row object: the one this request read stays as it was, unreleased.)
+        onUpdate = (i) => {
+          if (i.UpdateExpression !== 'SET releasing = :now') return;
+          put('audit', { ts_id: 'other-request', action: 'vault.recovery_code_released', detail: { vault_id: VID, recovery_id: rid } });
+          put('requests', { ...getItem('requests', rid), released: true });
+        };
+        const r = await status();
+        expect(r.body.recovery).toMatchObject({ state: 'available', sealed_code: sealedCode, locator: getItem('vaults', VID).recovery.locator });
+        expect(released()).toHaveLength(1);
+      });
+
+      test('the event is written but recording it on the slot fails: no code then; the retry writes the event again rather than release unrecorded', async () => {
+        const rid = await request();
+        answer(rid);
+        at(NOW + 86_400);
+        failUpdate = (i) => i.UpdateExpression === 'SET released = :t';
+        expect((await status()).status).toBe(500);
+        expect(released()).toHaveLength(1);
+        failUpdate = undefined;
+        at(NOW + 86_400 + 61);
+        expect((await status()).body.recovery.sealed_code).toBe(sealedCode);
+        expect(released()).toHaveLength(2);
+      });
+    });
+  });
+
   test('register: only while available, like an unlock', async () => {
     const rid = await request();
     answer(rid);
@@ -1789,6 +1973,26 @@ describe('app request signing', () => {
     put('requests', { request_id: RID2, vault_id: VID, user_guid: 'g1', op: 'lock', status: 'done', created_at: new Date(NOW_MS).toISOString(), expires_at: NOW + 800 });
     jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + 2000);
     expect((await call('GET', `/api/vault/requests/${RID2}`, undefined, { app: app() })).status).toBe(404);
+  });
+
+  test('an app gets a result only for the operations a client polls: its own slot of any other operation, or of none, answers status only', async () => {
+    const RESULT = Buffer.alloc(5_252, 0x66).toString('base64');
+    const own = (op: unknown) => {
+      const row: Record<string, unknown> = { request_id: RID2, vault_id: VID, user_guid: 'g1', op, app_kid: keyOf('g1').kid, status: 'done', envelope: RESULT, code: 'etk_unknown', created_at: new Date(NOW_MS).toISOString(), expires_at: NOW + 800 };
+      if (op === undefined) delete row.op;
+      put('requests', row);
+    };
+    const poll = () => call('GET', `/api/vault/requests/${RID2}`, undefined, { app: app() });
+    for (const [i, op] of ['recovery', 'Recovery', 'recovery_cancel', 'account', 'delete', 'something_new', '', undefined].entries()) {
+      jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + (i + 1) * 1000);
+      own(op);
+      expect(await poll()).toEqual({ status: 200, body: { status: 'done' } });
+    }
+    for (const [i, op] of ['enroll', 'unlock', 'lock', 'recovery_register'].entries()) {
+      jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + (i + 20) * 1000);
+      own(op);
+      expect(await poll()).toEqual({ status: 200, body: { status: 'done', envelope: RESULT, code: 'etk_unknown' } });
+    }
   });
 
   test('the pending key may call enclave, enroll and poll; not unlock, lock or status', async () => {
@@ -2331,6 +2535,116 @@ describe('recovery claim and the recovering key', () => {
     });
   });
 
+  describe('the scanned form\'s limits: the network first, the vault only for its own recovery', () => {
+    const rl = (prefix: string) => [...tbl('rl').keys()].filter((k) => String(k).startsWith(prefix));
+    const perVault = () => rl('vault-recovery-claim#').map((k) => getItem('rl', k).count);
+    /** A scanned claim from another source network. */
+    const claimFrom = (ip: string, body: Record<string, unknown>, vault = VID, key = newApp) =>
+      call('POST', '/api/vault/recovery/claim', { ...body, app_key: key.b64 }, { app: { key, vault }, guid: 'nobody', headers: { 'cloudfront-viewer-address': `${ip}:443` } });
+
+    test('a known vault_id with a wrong recovery_id does not use the vault\'s daily allowance', async () => {
+      at(NOW + 86_400 + 5);
+      // More than the vault's 10 a day, from as many networks, each with a key just made.
+      for (let i = 0; i < 12; i++) {
+        const r = await claimFrom(`2001:db8:${i + 1}:1::1`, { vault_id: VID, recovery_id: RID }, VID, keyOf(`stranger-${i}`));
+        expect(r).toEqual({ status: 404, body: { error: 'not_found', message: 'No such recovery' } });
+      }
+      expect(rl('vault-recovery-claim#')).toHaveLength(0);
+      expect(rl('vault-recovery-claim-net#')).toHaveLength(12);
+      expect(getItem('vaults', VID).recovery.claim_keys).toBeUndefined();
+      // The member's new app still claims.
+      expect((await claim({ vault_id: VID, recovery_id: rid })).status).toBe(200);
+      expect(perVault()).toEqual([1]);
+    });
+
+    test('a pair that names the vault\'s recovery counts, whatever the claim then answers', async () => {
+      // Pending: 409, counted.
+      expect((await claim({ vault_id: VID, recovery_id: rid })).status).toBe(409);
+      expect(perVault()).toEqual([1]);
+      at(NOW + 3600);
+      for (let i = 0; i < 9; i++) expect((await claimFrom(`2001:db8:${i + 1}:1::1`, { vault_id: VID, recovery_id: rid })).status).toBe(409);
+      expect(perVault()).toEqual([10]);
+      const r = await claimFrom('2001:db8:99:1::1', { vault_id: VID, recovery_id: rid });
+      expect(r.status).toBe(429);
+      expect(r.body.error).toBe('rate_limited');
+    });
+
+    test('a recovery in any state is the vault\'s recovery: cancelled, expired, registered, refused or completed is 409, and counts', async () => {
+      const row = () => getItem('vaults', VID).recovery;
+      const pending = structuredClone(row());
+      const cases: [string, number, () => void | Promise<unknown>][] = [
+        ['cancelled', NOW + 86_400 + 5, () => call('POST', '/api/vault/recovery/cancel', { recovery_id: rid })],
+        ['expired', NOW + 172_800 + 5, () => {}],
+        ['registered', NOW + 86_400 + 5, () => void (row().state = 'registered')],
+        ['unavailable', NOW + 86_400 + 5, () => void (row().state = 'unavailable')],
+        ['completed', NOW + 86_400 + 5, () => void Object.assign(row(), { state: 'completed', completed_at: NOW + 86_400 })],
+      ];
+      for (const [i, [state, when, enter]] of cases.entries()) {
+        getItem('vaults', VID).recovery = structuredClone(pending);
+        for (const k of rl('vault-recovery-claim#')) tbl('rl').delete(k);
+        at(when);
+        await enter();
+        if (state !== 'expired') expect(row().state).toBe(state);
+        const r = await claimFrom(`2001:db8:${i + 1}:1::1`, { vault_id: VID, recovery_id: rid });
+        expect([state, r.status, r.body.error]).toEqual([state, 409, 'recovery_not_available']);
+        expect([state, perVault()]).toEqual([state, [1]]);
+        expect(row().claim_keys).toBeUndefined();
+      }
+    });
+
+    test('the right pair of a member whose row is gone is the 404 of a miss, and of a canceled account 403; both count against the vault', async () => {
+      at(NOW + 86_400 + 5);
+      const member = structuredClone(getItem('members', 'g1'));
+      put('members', { ...member, account_status: 'canceled' });
+      const canceled = await claimFrom('2001:db8:1:1::1', { vault_id: VID, recovery_id: rid });
+      expect([canceled.status, canceled.body.error]).toEqual([403, 'forbidden']);
+      expect(perVault()).toEqual([1]);
+      tbl('members').delete('g1');
+      const gone = await claimFrom('2001:db8:2:1::1', { vault_id: VID, recovery_id: rid });
+      expect(gone).toEqual({ status: 404, body: { error: 'not_found', message: 'No such recovery' } });
+      expect(perVault()).toEqual([2]);
+      expect(getItem('vaults', VID).recovery.claim_keys).toBeUndefined();
+      // The member's row back: the claim succeeds.
+      put('members', member);
+      expect((await claimFrom('2001:db8:3:1::1', { vault_id: VID, recovery_id: rid })).status).toBe(200);
+    });
+
+    test('the per-network limit comes first: 10 per 15 minutes, misses count, and the 11th is refused before any lookup', async () => {
+      at(NOW + 86_400 + 5);
+      for (let i = 0; i < 10; i++) expect((await claim({ vault_id: VID, recovery_id: RID })).status).toBe(404);
+      const gets = ddb.commandCalls(GetCommand).filter((c) => c.args[0].input.TableName === 'vaults').length;
+      // The right pair from the same network is refused too, uncounted for the vault.
+      expect((await claim({ vault_id: VID, recovery_id: rid })).status).toBe(429);
+      expect(ddb.commandCalls(GetCommand).filter((c) => c.args[0].input.TableName === 'vaults')).toHaveLength(gets);
+      expect(rl('vault-recovery-claim#')).toHaveLength(0);
+      // Another network is not affected.
+      expect((await claimFrom('2001:db8:77:1::1', { vault_id: VID, recovery_id: rid })).status).toBe(200);
+    });
+
+    test('every miss is the same 404 after the same reads: an unknown vault, another recovery, a deleted vault, a pointer elsewhere', async () => {
+      at(NOW + 86_400 + 5);
+      const OTHER = 'e'.repeat(32);
+      const miss = async (n: number, vid: string, recoveryId: string) => {
+        const before = ddb.commandCalls(GetCommand).length;
+        const r = await claimFrom(`2001:db8:${n}:1::1`, { vault_id: vid, recovery_id: recoveryId }, vid);
+        expect(r.status).toBe(404);
+        return { body: r.body, reads: ddb.commandCalls(GetCommand).slice(before).map((c) => c.args[0].input.TableName) };
+      };
+      const unknownVault = await miss(1, OTHER, rid);
+      const otherRecovery = await miss(2, VID, RID);
+      expect(otherRecovery).toEqual(unknownVault);
+      expect(unknownVault.reads.filter((t) => t === 'vaults')).toHaveLength(2);
+      const pointer = structuredClone(getItem('vaults', 'user#g1'));
+      put('vaults', { ...pointer, current_vault_id: OTHER });
+      expect(await miss(3, VID, rid)).toEqual(unknownVault);
+      put('vaults', pointer);
+      getItem('vaults', VID).state = 'deleted';
+      expect(await miss(4, VID, rid)).toEqual(unknownVault);
+      expect(rl('vault-recovery-claim#')).toHaveLength(0);
+      expect(getItem('vaults', VID).recovery.claim_keys).toBeUndefined();
+    });
+  });
+
   test('at most 10 claim keys; the oldest goes; 10 claims per vault per day', async () => {
     at(NOW + 86_400 + 5);
     const keys = Array.from({ length: 10 }, (_, i) => keyOf(`claimer-${i}`));
@@ -2760,7 +3074,7 @@ describe('2.4.0: the recovery locator and the claim by locator', () => {
   });
 
   describe('the scanned form is unchanged', () => {
-    test('a recovery without a locator (requested before 2.4.0) is claimed by its pair; its limits keep their order', async () => {
+    test('a recovery without a locator (requested before 2.4.0) is claimed by its pair', async () => {
       const rid = await request();
       answer(rid);
       const loc = locatorOf();
@@ -2770,10 +3084,10 @@ describe('2.4.0: the recovery locator and the claim by locator', () => {
       expect((await claim({ locator: loc })).status).toBe(404);
       const r = await claim({ vault_id: VID, recovery_id: rid }, { vault: VID });
       expect(r).toEqual({ status: 200, body: { user_guid: 'g1', email_hint: 'g***@x.org', vault_id: VID, recovery_id: rid } });
-      // An unknown pair still counts against the vault it names (as before 2.4.0) and audits no miss.
+      // An unknown pair counts against the network only, never the vault it names, and audits no miss.
       const n = audits('vault.recovery_locator_miss').length;
       expect((await claim({ vault_id: VID, recovery_id: RID }, { vault: VID })).status).toBe(404);
-      expect(getItem('rl', rl('vault-recovery-claim#')[0]).count).toBe(2);
+      expect(getItem('rl', rl('vault-recovery-claim#')[0]).count).toBe(1);
       expect(audits('vault.recovery_locator_miss')).toHaveLength(n);
       // The body must still name the vault the request is signed for.
       expect((await claim({ vault_id: 'e'.repeat(32), recovery_id: rid }, { vault: VID })).status).toBe(400);
@@ -3061,5 +3375,211 @@ describe('2.1.0: delete my vault and start over (§11.11.9)', () => {
   test('the app cannot request one (session routes only)', async () => {
     expect((await call('POST', '/api/vault/deletion', CONFIRM, { app: { key: keyOf('g1'), vault: VID } })).status).toBe(401);
     expect(getItem('vaults', VID).deletion).toBeUndefined();
+  });
+});
+
+// A suspended (or canceled) account keeps the cancels and gains nothing else.
+describe('an account that is not active: the cancels stay, nothing else opens', () => {
+  const BK = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64');
+  const CONFIRM = { confirm: 'delete my vault' };
+  const mails = () => sesMock.commandCalls(SendEmailCommand).map((c) => ({
+    to: c.args[0].input.Destination!.ToAddresses![0],
+    subject: c.args[0].input.Content!.Simple!.Subject!.Data!,
+    text: c.args[0].input.Content!.Simple!.Body!.Text!.Data!,
+  }));
+  const audits = (action: string) => [...tbl('audit').values()].filter((a) => a.action === action);
+  const noSession = { headers: {}, guid: 'nobody' };
+  const app = () => ({ key: keyOf('g1'), vault: VID });
+  const setStatus = (account_status: string) => void (getItem('members', 'g1').account_status = account_status);
+
+  beforeEach(() => {
+    release(R0, 4);
+    instance('i-1', R0);
+    vaultOf('g1', { vault_id: VID, state: 'locked', sealed_release: R0, credential_backup: true, app_key: { key: keyOf('g1').b64, kid: keyOf('g1').kid, seq: 1 } });
+  });
+
+  describe.each(['suspended', 'canceled'])('%s', (status) => {
+    test('a pending vault deletion is cancelled from the session: removed, mailed, audited', async () => {
+      const id = (await call('POST', '/api/vault/deletion', CONFIRM)).body.deletion_id;
+      setStatus(status);
+      expect(await call('POST', '/api/vault/deletion/cancel', { deletion_id: id })).toEqual({ status: 200, body: { cancelled: true } });
+      expect(getItem('vaults', VID).deletion).toBeUndefined();
+      expect(await call('POST', '/api/vault/deletion/cancel', { deletion_id: id })).toEqual({ status: 200, body: { cancelled: false } });
+      expect(mails().filter((m) => m.subject === 'VettID vault deletion cancelled')).toHaveLength(1);
+      expect(audits('vault.deletion_cancel').map((a) => a.detail.via)).toEqual(['session']);
+    });
+
+    test("a pending vault deletion is cancelled by the vault's app key; another key is still 401", async () => {
+      const id = (await call('POST', '/api/vault/deletion', CONFIRM)).body.deletion_id;
+      setStatus(status);
+      expect((await call('POST', '/api/vault/deletion/cancel', { deletion_id: id }, { app: { key: keyOf('stranger'), vault: VID } })).status).toBe(401);
+      expect(getItem('vaults', VID).deletion.state).toBe('pending');
+      expect(await call('POST', '/api/vault/deletion/cancel', { deletion_id: id }, { app: app() })).toEqual({ status: 200, body: { cancelled: true } });
+      expect(getItem('vaults', VID).deletion).toBeUndefined();
+      expect(audits('vault.deletion_cancel')[0].detail).toMatchObject({ via: 'app', kid: keyOf('g1').kid });
+    });
+
+    test('a pending vault deletion is cancelled by the email link, without a session', async () => {
+      await call('POST', '/api/vault/deletion', CONFIRM);
+      const token = /deletion\/cancel#t=([A-Za-z0-9_-]{43})/.exec(mails()[0].text)![1];
+      setStatus(status);
+      expect(await call('POST', '/api/vault/deletion/cancel-link', { token }, noSession)).toEqual({ status: 200, body: { cancelled: true } });
+      expect(getItem('vaults', VID).deletion).toBeUndefined();
+      expect(audits('vault.deletion_cancel').map((a) => a.detail.via)).toEqual(['link']);
+    });
+
+    test('a pending recovery is cancelled from the session and the enclave is told; the email link works too', async () => {
+      const rid = (await call('POST', '/api/vault/recovery', { browser_key: BK })).body.recovery_id;
+      const token = /recovery\/cancel#t=([A-Za-z0-9_-]{43})/.exec(mails()[0].text)![1];
+      setStatus(status);
+      expect(await call('POST', '/api/vault/recovery/cancel', { recovery_id: rid })).toEqual({ status: 200, body: { cancelled: true } });
+      expect(getItem('vaults', VID).recovery.state).toBe('cancelled');
+      expect(sent().map((m) => m.msg.op)).toEqual(['recovery', 'recovery_cancel']);
+      expect(mails().filter((m) => m.subject === 'VettID vault recovery cancelled')).toHaveLength(1);
+      expect(audits('vault.recovery_cancel').map((a) => a.detail.via)).toEqual(['session']);
+      // The link of a second recovery, made while the account was active again.
+      setStatus('active');
+      jest.spyOn(Date, 'now').mockReturnValue((NOW + 10) * 1000);
+      await call('POST', '/api/vault/recovery', { browser_key: BK });
+      const token2 = /recovery\/cancel#t=([A-Za-z0-9_-]{43})/.exec(mails().filter((m) => m.subject === 'VettID vault recovery requested')[1].text)![1];
+      expect(token2).not.toBe(token);
+      setStatus(status);
+      expect(await call('POST', '/api/vault/recovery/cancel-link', { token: token2 }, noSession)).toEqual({ status: 200, body: { cancelled: true } });
+      expect(getItem('vaults', VID).recovery.state).toBe('cancelled');
+    });
+
+    // The checks below are the only guards left on the two cancel routes now
+    // that the account's status is not one of them.
+    describe('a cancel still needs the session or the key of the account it is for', () => {
+      const VID2 = 'e'.repeat(32);
+      let id: string;
+      let rid: string;
+      const intact = () => {
+        expect(getItem('vaults', VID).deletion).toMatchObject({ deletion_id: id, state: 'pending' });
+        expect(audits('vault.deletion_cancel')).toHaveLength(0);
+        expect(mails().filter((m) => m.subject === 'VettID vault deletion cancelled')).toHaveLength(0);
+      };
+
+      beforeEach(async () => {
+        // g2 is another member, active, with a vault and an app key of their own.
+        vaultOf('g2', { vault_id: VID2, state: 'locked', sealed_release: R0, app_key: { key: keyOf('g2').b64, kid: keyOf('g2').kid, seq: 1 } });
+        id = (await call('POST', '/api/vault/deletion', CONFIRM)).body.deletion_id;
+        setStatus(status);
+      });
+
+      test("another member's session: their own vault has no such deletion ({cancelled: false}); nothing of g1's is touched", async () => {
+        expect(await call('POST', '/api/vault/deletion/cancel', { deletion_id: id }, { guid: 'g2' })).toEqual({ status: 200, body: { cancelled: false } });
+        intact();
+      });
+
+      test("another member's app key: signed for their own vault it finds no such deletion; signed for g1's vault it is 401", async () => {
+        expect(await call('POST', '/api/vault/deletion/cancel', { deletion_id: id }, { app: { key: keyOf('g2'), vault: VID2 } })).toEqual({ status: 200, body: { cancelled: false } });
+        expect((await call('POST', '/api/vault/deletion/cancel', { deletion_id: id }, { app: { key: keyOf('g2'), vault: VID } })).status).toBe(401);
+        intact();
+      });
+
+      test('a session that names no member: 403', async () => {
+        expect((await call('POST', '/api/vault/deletion/cancel', { deletion_id: id }, { guid: 'nobody' })).status).toBe(403);
+        intact();
+      });
+
+      test("a session whose address is not the member row's (the address changed hands): 403 on both cancels", async () => {
+        getItem('members', 'g1').email = 'someone-else@x.org'; // the session still says g1@x.org
+        expect((await call('POST', '/api/vault/deletion/cancel', { deletion_id: id })).status).toBe(403);
+        expect((await call('POST', '/api/vault/recovery/cancel', { recovery_id: RID })).status).toBe(403);
+        intact();
+      });
+
+      test("a pointer that names somebody else's vault gives no access to it (the vault row's owner is checked)", async () => {
+        put('vaults', { vault_id: 'user#g2', current_vault_id: VID });
+        expect(await call('POST', '/api/vault/deletion/cancel', { deletion_id: id }, { guid: 'g2' })).toEqual({ status: 200, body: { cancelled: false } });
+        intact();
+      });
+
+      test("a link row that names another member for this vault cancels nothing (404): the link's member must own the vault", async () => {
+        const token = 'L'.repeat(43);
+        put('requests', { request_id: `dcancel#${createHash('sha256').update(token).digest('hex')}`, vault_id: VID, user_guid: 'g2', op: 'deletion_cancel_link', status: 'link', deletion_id: id, expires_at: NOW + 3600 });
+        expect((await call('POST', '/api/vault/deletion/cancel-link', { token }, noSession)).status).toBe(404);
+        intact();
+      });
+
+      test("only the vault's app key: a pending key and a recovery's claim key are 401", async () => {
+        const pendingKey = keyOf('pending-phone');
+        getItem('vaults', VID).app_key_pending = { key: pendingKey.b64, kid: pendingKey.kid, until: NOW + 3600 };
+        expect((await call('POST', '/api/vault/deletion/cancel', { deletion_id: id }, { app: { key: pendingKey, vault: VID } })).status).toBe(401);
+        const claimKey = keyOf('claim-phone');
+        getItem('vaults', VID).recovery = { recovery_id: RID, state: 'pending', requested_at: NOW - 90_000, available_at: NOW - 3600, expires_at: NOW + 82_800, claim_keys: [{ key: claimKey.b64, kid: claimKey.kid }] };
+        expect((await call('POST', '/api/vault/deletion/cancel', { deletion_id: id }, { app: { key: claimKey, vault: VID } })).status).toBe(401);
+        intact();
+      });
+
+      test("a recovery: another member's session finds no such recovery (404), also through a pointer that names this vault; a link row for another member is 404", async () => {
+        setStatus('active');
+        getItem('vaults', VID).deletion = undefined;
+        rid = (await call('POST', '/api/vault/recovery', { browser_key: BK })).body.recovery_id;
+        setStatus(status);
+        expect((await call('POST', '/api/vault/recovery/cancel', { recovery_id: rid }, { guid: 'g2' })).status).toBe(404);
+        put('vaults', { vault_id: 'user#g2', current_vault_id: VID });
+        expect((await call('POST', '/api/vault/recovery/cancel', { recovery_id: rid }, { guid: 'g2' })).status).toBe(404);
+        const token = 'R'.repeat(43);
+        put('requests', { request_id: `rcancel#${createHash('sha256').update(token).digest('hex')}`, vault_id: VID, user_guid: 'g2', op: 'recovery_cancel_link', status: 'link', recovery_id: rid, expires_at: NOW + 3600 });
+        expect((await call('POST', '/api/vault/recovery/cancel-link', { token }, noSession)).status).toBe(404);
+        expect(getItem('vaults', VID).recovery).toMatchObject({ recovery_id: rid, state: 'pending' });
+        expect(audits('vault.recovery_cancel')).toHaveLength(0);
+      });
+    });
+
+    test('nothing else opens: no request, no status, no code, no recovery step', async () => {
+      const id = (await call('POST', '/api/vault/deletion', CONFIRM)).body.deletion_id;
+      setStatus(status);
+      const before = sent().length;
+      for (const [method, path, body, opts] of [
+        ['POST', '/api/vault/deletion', CONFIRM],
+        ['GET', '/api/vault/deletion'],
+        ['GET', '/api/vault/status'],
+        ['GET', '/api/vault/status', undefined, { app: app() }],
+        ['GET', `/api/vault/requests/${RID}`],
+        ['GET', `/api/vault/requests/${RID}`, undefined, { app: app() }],
+        ['POST', '/api/vault/recovery', { browser_key: BK }],
+        ['GET', '/api/vault/recovery'],
+        ['POST', '/api/vault/enroll-code', {}],
+        ['GET', '/api/vault/enroll-code'],
+        ['DELETE', '/api/vault/enroll-code'],
+        ['GET', '/api/vault/enclave', undefined, { app: app() }],
+        ['POST', '/api/vault/unlock', { vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA }, { app: app() }],
+      ] as [string, string, unknown?, EvOpts?][]) {
+        const r = await call(method, path, body, opts);
+        expect({ method, path, via: opts ? 'app' : 'session', status: r.status }).toEqual({ method, path, via: opts ? 'app' : 'session', status: 403 });
+      }
+      expect(sent()).toHaveLength(before);
+      expect(getItem('vaults', VID).deletion).toMatchObject({ deletion_id: id, state: 'pending' });
+      expect(audits('vault.deletion_request')).toHaveLength(1);
+    });
+
+    test('a recovery asked for before is blocked, not stopped: its code is not released and a new app can neither claim it nor register; its clock runs on', async () => {
+      const rid = (await call('POST', '/api/vault/recovery', { browser_key: BK })).body.recovery_id;
+      Object.assign(getItem('requests', rid), { status: 'done', envelope: Buffer.alloc(5_252, 3).toString('base64') });
+      jest.spyOn(Date, 'now').mockReturnValue((NOW + 86_400 + 5) * 1000);
+      for (const i of tbl('instances').values()) i.heartbeat_at = NOW + 86_400;
+      setStatus(status);
+      expect((await call('GET', '/api/vault/recovery')).status).toBe(403);
+      const phone = keyOf('new-phone');
+      const claim = await call('POST', '/api/vault/recovery/claim', { vault_id: VID, recovery_id: rid, app_key: phone.b64 }, { app: { key: phone, vault: VID }, guid: 'nobody' });
+      expect(claim.status).toBe(403);
+      expect(getItem('vaults', VID).recovery.claim_keys).toBeUndefined();
+      expect(audits('vault.recovery_code_released')).toHaveLength(0);
+      expect(getItem('requests', rid).released).toBeUndefined();
+      // A key that had claimed the recovery before the account stopped being active cannot register either.
+      getItem('vaults', VID).recovery.claim_keys = [{ key: phone.b64, kid: phone.kid }];
+      const before = sent().length;
+      const reg = await call('POST', '/api/vault/recovery/register', { vault_id: VID, request_id: RID2, instance_id: 'i-1', etk_kid: KID, envelope: ENV }, { app: { key: phone, vault: VID }, guid: 'nobody' });
+      expect(reg.status).toBe(403);
+      expect(sent()).toHaveLength(before);
+      expect(getItem('requests', RID2)).toBeUndefined();
+      // Nothing was paused: the recovery is the same record with the same times, and it is usable again once the account is active.
+      expect(getItem('vaults', VID).recovery).toMatchObject({ recovery_id: rid, state: 'pending', available_at: NOW + 86_400, expires_at: NOW + 172_800 });
+      setStatus('active');
+      expect((await call('GET', '/api/vault/recovery')).body.recovery).toMatchObject({ recovery_id: rid, state: 'available', sealed_code: expect.any(String) });
+    });
   });
 });

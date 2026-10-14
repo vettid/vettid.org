@@ -12,6 +12,7 @@ import * as route53targets from 'aws-cdk-lib/aws-route53-targets';
 import { Construct } from 'constructs';
 import { AppConfig, ORG, hostName, resourceName } from '../config';
 import { publishRef, readRef } from '../constructs/ssm-refs';
+import { RELAY_TABLE_LIMITS } from './relay-data-stack';
 
 export interface VettidOrgRelayStackProps extends cdk.StackProps {
   readonly config: AppConfig;
@@ -63,6 +64,23 @@ export const RELAY_ALARM_LIMITS = {
    */
   collectorsPerTask: 2000,
   wsSessionsPerTask: 2000,
+  /**
+   * The table's consumed units in a minute, as a share of its ceiling
+   * (RELAY_TABLE_LIMITS, units a second): half, like `address-busy`. At
+   * 2,000 a second that is 60,000 units a minute, 36 times the busiest
+   * minute measured for writes and 120 times for reads.
+   */
+  tableBusyShare: 0.5,
+  /**
+   * Write units in one hour: 100 a second on average, a twentieth of the
+   * ceiling and 65 times the busiest hour measured (5,486). Written bytes
+   * have no metric of their own; write units are their measure (a unit
+   * is 1 KB, 2 units in a transaction), so this is at most 180 MB of
+   * messages stored in the hour, and what a slow fill below the other
+   * alarms would show as. A vault host of the projected size (900 vaults,
+   * about 300 a second) is above it: raise it with the membership.
+   */
+  tableWriteUnitsPerHour: 360_000,
 } as const;
 
 /**
@@ -358,7 +376,55 @@ export class VettidOrgRelayStack extends cdk.Stack {
       evaluationPeriods: 5,
       datapointsToAlarm: 3,
     });
-    // Liveness of the line itself (and so of the alarms above, which rest
+    // ---- The table's ceiling (RELAY_TABLE_LIMITS, VettidOrgRelayDataStack) ---
+    // DynamoDB's own metrics for the table. They have data only in minutes
+    // with requests (or throttling), so missing data is not a breach.
+    const tableDims = { TableName: tableName };
+    const indexDims = { ...tableDims, GlobalSecondaryIndexName: 'due' };
+    const tableMetric = (metricName: string, dimensionsMap: Record<string, string>, period = minute) =>
+      new cloudwatch.Metric({ namespace: 'AWS/DynamoDB', metricName, dimensionsMap, statistic: 'Sum', period });
+    const T = RELAY_TABLE_LIMITS;
+    const busy = (cid: string, name: string, metricName: string, what: string, perSecond: number) =>
+      alarm(cid, name, {
+        alarmDescription: says(`the table took ${L.tableBusyShare * perSecond * 60} or more ${what} units a minute for 5 minutes: half its ceiling of ${perSecond} a second, above which DynamoDB throttles every tenant`),
+        metric: tableMetric(metricName, tableDims),
+        threshold: L.tableBusyShare * perSecond * 60,
+        comparisonOperator: atLeast,
+        evaluationPeriods: 5,
+        datapointsToAlarm: 5,
+      });
+    busy('TableWritesHigh', 'table-writes-high', 'ConsumedWriteCapacityUnits', 'write', T.maxWriteRequestUnits);
+    busy('TableReadsHigh', 'table-reads-high', 'ConsumedReadCapacityUnits', 'read', T.maxReadRequestUnits);
+    alarm('TableWriteVolume', 'table-write-volume', {
+      alarmDescription: says(`the table took ${L.tableWriteUnitsPerHour} or more write units in an hour (100 a second on average; up to 180 MB of messages stored): far above the preview's use, and how a slow fill of the table shows`),
+      metric: tableMetric('ConsumedWriteCapacityUnits', tableDims, cdk.Duration.hours(1)),
+      threshold: L.tableWriteUnitsPerHour,
+      comparisonOperator: atLeast,
+      evaluationPeriods: 1,
+    });
+    // Throttling, whatever its cause (the ceiling, the index's, a hot
+    // partition): the table's and the index's read and write events, and
+    // throttled deposits (a deposit is a TransactWriteItems request).
+    alarm('TableThrottled', 'table-throttled', {
+      alarmDescription: says('DynamoDB throttled the relay\'s table or its index in 3 of 5 minutes: requests are failing or slow for every tenant'),
+      metric: new cloudwatch.MathExpression({
+        expression: 'FILL(tw, 0) + FILL(tr, 0) + FILL(iw, 0) + FILL(ir, 0) + FILL(tx, 0)',
+        label: 'throttle events',
+        period: minute,
+        usingMetrics: {
+          tw: tableMetric('WriteThrottleEvents', tableDims),
+          tr: tableMetric('ReadThrottleEvents', tableDims),
+          iw: tableMetric('WriteThrottleEvents', indexDims),
+          ir: tableMetric('ReadThrottleEvents', indexDims),
+          tx: tableMetric('ThrottledRequests', { ...tableDims, Operation: 'TransactWriteItems' }),
+        },
+      }),
+      threshold: 0,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      evaluationPeriods: 5,
+      datapointsToAlarm: 3,
+    });
+    // Liveness of the line itself (and so of the alarms on it, which rest
     // on it): every task writes it every minute, so five minutes without
     // one means no task is logging. Missing data is the fault here.
     const silent = alarm('RateLimitsSilent', 'rate-limits-silent', {

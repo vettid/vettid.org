@@ -1,12 +1,15 @@
 # VettID Push Gateway Protocol
 
-**Version:** 0.4.4 (draft)
+**Version:** 0.4.5 (draft)
 **Status:** Draft for review (N2; owner request of 2026-10-10: "we can
 start to design the push service for google play and apple ios").
 Implemented by `vettid/vettid-push` (the gateway) and vettid-android #109
 (the app's Google push mode), N4; 0.4.2 carries their errata. 0.4.2
 and 0.4.3 approved by the owner 2026-10-11. Deployed for staging since
-2026-10-11 (§10.4); 0.4.4 writes down the deployment as built
+2026-10-11 (§10.4); 0.4.4 writes down the deployment as built; 0.4.5
+moves the replay check behind the authenticating checks and caps the
+replay records of one key (vettid-push #2), approved by the owner
+2026-10-13
 **Companion to:** VettID Relay Protocol (Appendix A), VAULT-MESSAGING
 0.24.1 §14 (`push.register`, the vault's wake rules), ANDROID-PLAN D7
 
@@ -52,7 +55,9 @@ Design principles:
    inside the blob.
 5. **Same auth grammar as the relay.** Signed requests per Relay Protocol
    §4.1: identical canonical digest, headers, freshness window and replay
-   rules. No new signature mechanism.
+   rule (a request seen before, while its timestamp is fresh, is
+   refused). Where the replay check sits among the gateway's checks is
+   the gateway's own (§5.1, §5.2; 0.4.5). No new signature mechanism.
 
 Conformance keywords MUST, SHOULD, MAY are per RFC 2119.
 
@@ -126,15 +131,23 @@ ct        = XChaCha20-Poly1305(blob_key[key_id], nonce,
 
 Base path `/v1`. Requests are signed per Relay Protocol §4.1
 (`X-VettID-Key` = the wake public key, `X-VettID-Timestamp`,
-`X-VettID-Sig`; 90 s freshness; replay cache). Error bodies follow Relay
-Protocol §7.1. `GET /v1/health` is unauthenticated and returns `200 {}`.
+`X-VettID-Sig`; 90 s freshness; a replay cache, consulted at the step
+§5.1 and §5.2 name). Error bodies follow Relay Protocol §7.1. `GET /v1/health` is unauthenticated and returns `200 {}`.
 
 `X-VettID-Timestamp` is RFC 3339 and **may carry fractional seconds**
 (the vault's client sends them); the canonical digest uses the header's
 string exactly as sent, never a re-formatted time (0.4.2; §15). A request
 body is at most 16 KiB. When the replay cache is full the request is
 answered `429 rate_limited` with `retry_after` 1 rather than admitted
-unrecorded, as the relay does (0.4.2).
+unrecorded, as the relay does (0.4.2). (0.4.5) The gateway consults the
+replay cache later than the relay does: only after the check that ties
+the request's key to a registration (§5.1 step 2, §5.2 step 2), so only
+such a request is recorded, answered `replay_detected`, or shed because
+the cache is full. Freshness and the replay check use one reading of the
+clock. One key has at most 32 live records in the cache (§8); a request
+beyond that is `429 rate_limited` with the time until the first of them
+expires. The cap is judged first: a request from a key at its cap is
+`429` even if it was seen before, not `replay_detected`.
 
 ### 5.1 Register
 
@@ -153,7 +166,7 @@ comes first, before the body is read or the signature checked, as on the
 relay; a request over it is `429 rate_limited` and nothing else of it is
 looked at):
 
-1. checks the signature, freshness and replay cache (Relay §4.1);
+1. checks the signature and freshness (Relay §4.1);
 2. **verifies the attestation** (`attestation_invalid` otherwise): a
    COSE_Sign1 Nitro attestation document whose certificate chain ends at
    the pinned AWS Nitro Enclaves root; `timestamp` within 300 s of now;
@@ -190,6 +203,13 @@ looked at):
    serial with other bytes, is refused) is held **in memory only** and
    starts again with the task, because the gateway keeps no state; a
    restarted task has a fresh 7 days from the manifest it then trusts.
+   (0.4.5) Once the attestation has verified, and before the body is
+   checked, the request is checked against the replay cache and recorded
+   in it (`replay_detected`; `429 rate_limited` when the key has its cap
+   of records or the cache is full). A request refused at step 1 or 2 is
+   not recorded, so a signed request from a stranger takes no place in
+   the cache; sent again it is checked afresh. A request refused at step
+   3 or 4 is recorded: the same bytes sent again are `replay_detected`.
 3. checks the body: `platform` known; `token` 1–4,096 bytes of printable
    ASCII for `fcm`, 64–200 lowercase hex digits (even count) for `apns`;
    `environment` present for `apns` and absent for `fcm`; `app_id` in the
@@ -227,14 +247,28 @@ POST /v1/wake
 
 0. (0.4.2) The per-address wake limit of §8, before the body is read or
    the signature checked, as on the relay.
-1. Signature, freshness, replay cache.
+1. Signature and freshness. (0.4.5) Then the body: one that is not a
+   wake, or whose `class` is not `notify`, is `bad_request` before the
+   blob is opened.
 2. Open the blob; its `k` MUST equal `X-VettID-Key`. A blob that does not
    open, has another channel, an unknown or deleted key, or another key
    than the signer is answered `blob_invalid`, identically in every case
    (no oracle). (0.4.2) So is a blob whose record the gateway would no
    longer seal: a platform it has no credentials for now, an `app_id`
    since removed from the channel's list, or `sandbox` where it is no
-   longer accepted.
+   longer accepted. (0.4.5) Once the blob has passed this step, and
+   before step 3, the request is checked against the replay cache and
+   recorded in it (`replay_detected`; `429 rate_limited` when the key
+   has its cap of records or the cache is full). The cap is judged
+   before the lookup: a request from a key at its cap is
+   `429 rate_limited` even if it was seen before. A request refused at
+   step 1 or 2 is not recorded, so a signed request from a stranger
+   takes no place in the cache; sent again it is checked afresh (it may
+   by then be `timestamp_stale`, or over the per-address limit). A
+   request refused from step 3 on (`rate_limited` at the per-token
+   limit, `provider_unavailable`, `token_gone`, `token_invalid`) is
+   recorded: the same bytes sent again are `replay_detected`, so a retry
+   must be signed anew.
 3. Rate limits (§8): the **per-token** limit (0.4.2: the per-address
    limit is step 0).
 4. Coalescing: a wake for the same token within 2 s of the previous one
@@ -302,7 +336,7 @@ Codes (grammar per Relay Protocol §7.1):
 | 400 | `bad_request`, `platform_invalid`, `app_invalid`, `token_invalid` | Body (§5.1 step 3). `token_invalid` also at a wake, when the platform refuses the token itself: FCM `INVALID_ARGUMENT` **and every other FCM `400`**, FCM `SENDER_ID_MISMATCH` (the token is another Firebase project's); APNs `BadDeviceToken` and `DeviceTokenNotForTopic` (the token is another app's) (0.4.2) | Registration refused; at a wake, `token_invalid` as `token_gone` and the other codes retried like a `5xx` (owner decision 2026-10-10) |
 | 410 | `token_gone` | FCM `UNREGISTERED` (whatever its status) and any FCM `404`; **any APNs `410`** (`Unregistered`, `ExpiredToken`) (0.4.2) | Drop the registration, ask the app for a new token |
 | 410 | `blob_invalid` | §5.2 step 2 | Same as `token_gone` |
-| 429 | `rate_limited` (+ `retry_after`) | §8; a full replay cache (§5, `retry_after` 1); or the platform's own `429` (APNs `TooManyRequests`, FCM `QUOTA_EXCEEDED`), with the platform's `Retry-After` capped at 3,600 s (0.4.2) | Wait, merge triggers |
+| 429 | `rate_limited` (+ `retry_after`) | §8; a full replay cache (§5, `retry_after` 1); a key at its cap of replay records (§8; `retry_after` up to 181); or the platform's own `429` (APNs `TooManyRequests`, FCM `QUOTA_EXCEEDED`), with the platform's `Retry-After` capped at 3,600 s (0.4.2) | Wait, merge triggers |
 | 502 | `provider_unavailable` (+ `retry_after`?) | Platform 5xx, timeout or no connection. (0.4.2) Also when the platform refuses **the gateway**, not the token: APNs `403` (`InvalidProviderToken`, `ExpiredProviderToken`, …), FCM `401`/`403`, a failed Google access-token fetch; and any other refusal a fixed payload should never meet (APNs `BadTopic`, `TopicDisallowed`, another `400`; an unknown answer). These raise the alarm of §10.5; no vault loses its registration over a fault of the gateway's | Retry with backoff |
 | 500 | `internal` | | Retry with backoff |
 | 404 | `not_found` | Any other path or method (0.4.2) | Not sent by a vault |
@@ -339,14 +373,50 @@ lock wake: what is left of its 3 s budget), longer than this gateway's
   address, or the IPv6 /64). The per-token limit needs the opened blob,
   so it comes at §5.2 step 3, and a coalesced wake counts toward it.
 - A full replay cache (200,000 entries) answers `429 rate_limited`
-  (§5, 0.4.2).
+  (§5, 0.4.2). (0.4.5) Only requests that passed §5.1 step 2 or §5.2
+  step 2 are recorded, so requests signed by keys the gateway does not
+  know cannot fill it.
+- (0.4.5) **Per key**: at most **32 live replay records** for one
+  `X-VettID-Key`, registration and wakes together. A key belongs to one
+  registration and so to one token (§3); a record lives at most 181 s,
+  in which the per-token limit admits at most 14 wakes (the burst of 10
+  and 4 of refill), and every further wake is refused at that limit
+  whatever the vault does. With the registration that is 15 requests of
+  any use; the cap is twice that, rounded up to 32 (and follows the
+  per-token limit if an operator raises it). A request over the cap is
+  `429 rate_limited` with `retry_after` set to the time until the key's
+  first record expires; it is not recorded, the token's allowance is not
+  charged, and no other key's request is affected. The cap is judged
+  first: a request from a key at its cap is `429` even if it was seen
+  before. The count is kept only for keys that passed step 2 and hold a
+  record, at most 32 entries a key, so a stranger's key never enters it;
+  like the cache it lives in the task's memory.
 - Counters live in each task's memory; with N tasks the effective limits
   are up to N times higher, which is acceptable for an abuse bound and
-  avoids any shared store.
+  avoids any shared store. (0.4.5) So does the replay cache, unlike the
+  relay's: a request is accepted at most once by each task, so a
+  captured wake can be sent once more per further task within its 90 s,
+  each a contentless wake that counts against the token's limit on that
+  task.
 - **Abuse model.** Without a genuine vault's attestation nobody can
   register, and without the blob and its wake key nobody can wake. A
   stolen token alone is useless. A compromised vault enclave could wake
   only the tokens it holds blobs for (its own app), within the limits.
+  (0.4.5) Filling the replay cache, which has every wake and
+  registration answered `429`, takes 200,000 live records of requests
+  that passed step 2, at most 32 to a key: at least 6,250 registered
+  wake keys, each with its blob, sending within the per-address limits.
+  Only a compromised vault enclave holds such keys (a member's own app
+  never sees a wake key), and one such enclave is enough: every
+  registration it makes has a new key, so at 30 registrations a minute
+  from one address it has 6,250 of them in about 3.5 hours, and blobs do
+  not expire. Less is needed to degrade the service than to stop it. The
+  cache is in 32 shards of 6,250 records, and a record's shard is
+  derived from its key and signature, which the signer can steer by its
+  choice of timestamp: about 196 registered keys can keep one shard
+  full, and then roughly 1 request in 32, from any vault, is shed with
+  `429` (`retry_after` 1); the retry, signed anew, falls in another
+  shard 31 times in 32.
 
 ## 9. Privacy & security considerations
 
@@ -576,8 +646,9 @@ root, runs only as channel `dev` (its blobs open nowhere else), and the
   (every `500 internal`; the "any `internal`" alarm reads it). The EMF
   namespace is **`vettid-org/<channel>/push`**. Every dimension value
   comes from a closed set: `reason` includes `no_manifest` (§5.1 step
-  2); `scope` is `address_register`, `address_wake`, `token` or
-  `replay_cache`; a wake's `outcome` is `sent`, `coalesced`, an error
+  2); `scope` is `address_register`, `address_wake`, `token`,
+  `replay_cache` or (0.4.5) `key` (a key at its cap of replay records,
+  §8); a wake's `outcome` is `sent`, `coalesced`, an error
   code of §7, or `provider_auth`, `provider_rejected`,
   `provider_rate_limited`, `provider_unavailable`.
 - **Logs**: errors and starts only, 14 days, in
@@ -953,6 +1024,43 @@ again computes another digest and refuses a good signature.
 
 ## 17. Changelog
 
+- **0.4.5** — the replay cache holds only requests whose key the
+  gateway knows (vettid-push #2; approved by the owner 2026-10-13).
+  Until now a request was recorded as soon as its signature verified,
+  so signed requests from any key could fill the cache and have every
+  wake and registration answered `429`. **Order (§5, §5.1, §5.2):**
+  step 1 is the signature and freshness only. A registration is checked
+  against the replay cache and recorded after its attestation has
+  verified (step 2) and before its body is checked (step 3); a wake
+  after its blob has opened for the signer and its record is one the
+  gateway would still seal (step 2), and before the per-token limit
+  (step 3). A wake body that is not a wake, or whose class is not
+  `notify`, is `bad_request` before the blob is opened. **Answers:** a
+  request refused before the replay check (`signature_invalid`,
+  `timestamp_stale`, `attestation_invalid`, `blob_invalid`, a wake's
+  `bad_request`) leaves no record and, sent again, is checked afresh;
+  it is no longer answered `replay_detected`. A request refused after
+  it (a registration's body faults, a wake's `rate_limited` at the
+  per-token limit, `provider_unavailable`, `token_gone`,
+  `token_invalid`) is recorded as before, so a retry must be signed
+  anew. `replay_detected` and a full cache's `429 rate_limited`
+  (`retry_after` 1) are now answered only to a request that passed
+  step 2. Freshness and the replay check use one reading of the clock.
+  **Abuse (§8):** one key has at most 32 live replay records (twice
+  what the per-token limit can admit in a record's 181 s, with the
+  registration); beyond that the key's own requests are
+  `429 rate_limited` until a record expires, and no other key is
+  affected, so one registered wake key cannot fill the cache either.
+  The cap is judged before the replay lookup, so a request from a key
+  at its cap is `429` even if it was seen before. What remains is
+  written down: a compromised enclave with 6,250 registered keys can
+  fill the cache, and one with about 196 can fill one of its 32 shards.
+  The cache is per task, like the counters, so a request can be
+  accepted once by each task. §7: the `429` row names the per-key cap.
+  §10.5: `rate_limited` has the new `scope` value `key`. §1 principle
+  5: the replay rule is the relay's, its place in the order is not. No
+  change to the wire format, the codes, the payloads or the vault's
+  side.
 - **0.4.4** — the deployment as built (vettid.org #213, #216, #217,
   #223; vettid-push #1; approved by the owner 2026-10-11). No change to
   the wire format or to the gateway's behaviour. §10.1: two stacks

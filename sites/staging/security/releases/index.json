@@ -1,9 +1,38 @@
 {
-  "serial": 12,
+  "serial": 14,
   "releases": [
     {
-      "release": 10,
+      "release": 11,
       "status": "active",
+      "published_at": "2026-10-13T18:35:58Z",
+      "pcr0": "398b654dfcd98079fe558e4a2a2c000877fd59b4f9298383dc66ed0d54f6706938e1620f2d1d80b8cb02dca2eef3e72b",
+      "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
+      "pcr2": "1b715f0fc3b953f4c64d0954eec5e869e8e548ac59c036c65f36acb599b31aad02e51540b51930a80bb6491a5b8a454c",
+      "seal_key": "arn:aws:kms:us-east-1:347272280361:key/ac1e7051-49de-44f3-b3cb-aa75bb744345",
+      "notes": "https://staging.vettid.org/security/releases/11/",
+      "tag": "release/staging/11",
+      "source_commit": "a450941cc4f0f7241001852d3426df3ff61b064b",
+      "summary": "Release 11 locks your vault when its host goes silent and tightens what a vault's process may do inside the enclave.",
+      "changes": [
+        "If the host your vault runs on stops answering for two minutes, your vault now locks itself. Unlock it again with your PIN; nothing is lost.",
+        "Hardening: the process that runs your vault inside the enclave is refused more of the system functions it never needs, and can no longer create a private system environment of its own. Every release is tested for this on real hardware before it is offered.",
+        "The enclave is built with a newer version of its programming language, which includes fixes to the network and encryption code it uses.",
+        "Fix: a vault whose stored state had grown very large could be saved but not read back. The host now reads everything it can write.",
+        "Fewer and steadier connections between vaults and the relay. Nothing changes in how your messages are delivered."
+      ],
+      "security": "recommended",
+      "security_text": "Release 11 closes ways in which a fault in one vault's process could have reached beyond that vault inside the enclave, and updates the enclave's network and encryption code to a version with security fixes. We know of no use of either against any vault. Your PIN and credential password were not exposed.",
+      "affects": [
+        7,
+        8,
+        9,
+        10
+      ],
+      "listed": true
+    },
+    {
+      "release": 10,
+      "status": "deprecated",
       "published_at": "2026-10-11T22:24:04Z",
       "pcr0": "a9e3defc8bfa4c3c6f89a87afac67bc245f1ef8ac331de88505d8d4928a4bc0d9e793fb928050ba02c9f3b915ffbfb0e",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
@@ -95,8 +124,9 @@
     },
     {
       "release": 6,
-      "status": "deprecated",
+      "status": "removed",
       "published_at": "2026-10-09T01:32:42Z",
+      "ends_at": "2026-10-13T15:39:09Z",
       "pcr0": "c6dd654f6b261f616f9115b215600eb992365943c52177adc86bafdba0fd7138c0dfe6558d8b2052ff1aed4dee50232f",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
       "pcr2": "14d4ca2f4f830aecddd9ab18ec3f4e1a98fdadf90a473a97f549aaaebd4494bfd28693d1493cb8e2fed58b7448811924",
@@ -115,8 +145,9 @@
     },
     {
       "release": 5,
-      "status": "deprecated",
+      "status": "removed",
       "published_at": "2026-10-08T13:34:56Z",
+      "ends_at": "2026-10-13T15:39:09Z",
       "pcr0": "e9f9005d31ba54e64aec4db3c7044aa8c290bae8c65246e6a1692fae7ea40d2dae8bf41c3a4b0575c7066d23ac5e3f1a",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
       "pcr2": "4b159971caca1dc08731712d748e4cf1d2d8bca225e37b1d8cf99221413ebdeb6affdd1f749dbedac50e213404c41fd9",
@@ -136,8 +167,9 @@
     },
     {
       "release": 4,
-      "status": "deprecated",
+      "status": "removed",
       "published_at": "2026-10-07T10:08:46Z",
+      "ends_at": "2026-10-13T15:39:09Z",
       "pcr0": "8c26adfd1fe53025c5aea91563129bc4670bffc993531040a4a0e6f530e753bcf5a1be2cafa78bb0373a469adc88f7c8",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
       "pcr2": "cad60816833136190c86c25ce70503240feb510d154328465dae9ab0f52606508370e8a8d6a4c3fc0eb4eae7cb58e8c5",
@@ -159,7 +191,7 @@
     },
     {
       "release": 3,
-      "status": "retired",
+      "status": "removed",
       "published_at": "2026-10-06T17:47:53Z",
       "ends_at": "2026-10-13T15:30:00Z",
       "pcr0": "80a580024d4cf3d1f7955dc010ae12a0626ad4f6d542c385bf9cf5202fa37eab81f37c75a009dbc4212b22960f19d289",

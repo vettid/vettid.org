@@ -1,6 +1,6 @@
 {
   "channel": "staging",
-  "signed_serial": 12,
+  "signed_serial": 14,
   "releases": [
     {
       "release": 1,
@@ -47,7 +47,7 @@
     },
     {
       "release": 3,
-      "status": "retired",
+      "status": "removed",
       "pcr0": "80a580024d4cf3d1f7955dc010ae12a0626ad4f6d542c385bf9cf5202fa37eab81f37c75a009dbc4212b22960f19d289",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
       "pcr2": "268ee4b7b2a51e904504ee2cfbb3ade2640a9af7c465bb412640839881bf002abdbb77950dc546d2a4157696eb8f5219",
@@ -58,17 +58,6 @@
       "published_at": "2026-10-06T17:47:53Z",
       "ends_at": "2026-10-13T15:30:00Z",
       "notes": "https://staging.vettid.org/security/releases/3/",
-      "host": {
-        "tag": "release/staging/3",
-        "source_commit": "5cd11db5e29b07d0ebc24a50d5c7615d0b0a8856",
-        "measurements_sha256": "a6af7ccc551c9724cc20da714c120f3b4e05259a250494ee054d007c99f7dd13",
-        "host_files_sha256": "c0b36acafa89e4110a0d497fb8b6c552c3bfd8c86eabda5757ff5c8d4210410a",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-065b1b834d2a83a7a",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Test build with notices for declined connections and pairings, recovery fixes and a capacity self-test.",
         "changes": [
@@ -82,7 +71,7 @@
     },
     {
       "release": 4,
-      "status": "deprecated",
+      "status": "removed",
       "pcr0": "8c26adfd1fe53025c5aea91563129bc4670bffc993531040a4a0e6f530e753bcf5a1be2cafa78bb0373a469adc88f7c8",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
       "pcr2": "cad60816833136190c86c25ce70503240feb510d154328465dae9ab0f52606508370e8a8d6a4c3fc0eb4eae7cb58e8c5",
@@ -91,18 +80,8 @@
         "80a580024d4cf3d1f7955dc010ae12a0626ad4f6d542c385bf9cf5202fa37eab81f37c75a009dbc4212b22960f19d289"
       ],
       "published_at": "2026-10-07T10:08:46Z",
+      "ends_at": "2026-10-13T15:39:09Z",
       "notes": "https://staging.vettid.org/security/releases/4/",
-      "host": {
-        "tag": "release/staging/4",
-        "source_commit": "f5cf1277105d1ae12a1db588df6f60cdf1438776",
-        "measurements_sha256": "8fa4c8f38baa1e57425f456c0005de34a56e355b46459b642a0a33737c2f0091",
-        "host_files_sha256": "c0b36acafa89e4110a0d497fb8b6c552c3bfd8c86eabda5757ff5c8d4210410a",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-065b1b834d2a83a7a",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Test build adding the daily owner check, enrollment codes, delegation statements and stricter credential and recovery rules.",
         "changes": [
@@ -118,7 +97,7 @@
     },
     {
       "release": 5,
-      "status": "deprecated",
+      "status": "removed",
       "pcr0": "e9f9005d31ba54e64aec4db3c7044aa8c290bae8c65246e6a1692fae7ea40d2dae8bf41c3a4b0575c7066d23ac5e3f1a",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
       "pcr2": "4b159971caca1dc08731712d748e4cf1d2d8bca225e37b1d8cf99221413ebdeb6affdd1f749dbedac50e213404c41fd9",
@@ -128,18 +107,8 @@
         "8c26adfd1fe53025c5aea91563129bc4670bffc993531040a4a0e6f530e753bcf5a1be2cafa78bb0373a469adc88f7c8"
       ],
       "published_at": "2026-10-08T13:34:56Z",
+      "ends_at": "2026-10-13T15:39:09Z",
       "notes": "https://staging.vettid.org/security/releases/5/",
-      "host": {
-        "tag": "release/staging/5",
-        "source_commit": "26b71409a83e537656019a63d7caffedab545cfd",
-        "measurements_sha256": "c32092faf2a5592bbb7dbe602d599f35ed650dfcd80aa77c3d5c8cd64b61d903",
-        "host_files_sha256": "c0b36acafa89e4110a0d497fb8b6c552c3bfd8c86eabda5757ff5c8d4210410a",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-065b1b834d2a83a7a",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Test build with your name always shared with connections, your full email in the account view, history search and item limits.",
         "changes": [
@@ -153,7 +122,7 @@
     },
     {
       "release": 6,
-      "status": "deprecated",
+      "status": "removed",
       "pcr0": "c6dd654f6b261f616f9115b215600eb992365943c52177adc86bafdba0fd7138c0dfe6558d8b2052ff1aed4dee50232f",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
       "pcr2": "14d4ca2f4f830aecddd9ab18ec3f4e1a98fdadf90a473a97f549aaaebd4494bfd28693d1493cb8e2fed58b7448811924",
@@ -164,18 +133,8 @@
         "e9f9005d31ba54e64aec4db3c7044aa8c290bae8c65246e6a1692fae7ea40d2dae8bf41c3a4b0575c7066d23ac5e3f1a"
       ],
       "published_at": "2026-10-09T01:32:42Z",
+      "ends_at": "2026-10-13T15:39:09Z",
       "notes": "https://staging.vettid.org/security/releases/6/",
-      "host": {
-        "tag": "release/staging/6",
-        "source_commit": "403d7d9c3afa2194bd397a15b3e0b672eb8b2d2a",
-        "measurements_sha256": "15b8cd181600e8d1db527f20ab312512b8e2cd6cbc5ee4e6f900bcb0952572b6",
-        "host_files_sha256": "c0b36acafa89e4110a0d497fb8b6c552c3bfd8c86eabda5757ff5c8d4210410a",
-        "nitro_cli_version": "1.5.0",
-        "base_ami": "ami-065b1b834d2a83a7a",
-        "ami_revision": 0,
-        "min_instances": 0,
-        "max_instances": 2
-      },
       "log": {
         "summary": "Test build adding History export and one template item per contact point.",
         "changes": [
@@ -300,7 +259,7 @@
     },
     {
       "release": 10,
-      "status": "active",
+      "status": "deprecated",
       "pcr0": "a9e3defc8bfa4c3c6f89a87afac67bc245f1ef8ac331de88505d8d4928a4bc0d9e793fb928050ba02c9f3b915ffbfb0e",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
       "pcr2": "591df284aa375ebbb619221fb348b17e4929b07b0fe386ca1a7bd13665278eba6f52fcf87e5fe0cfda55dd0e120cf1c1",
@@ -345,6 +304,51 @@
           7,
           8,
           9
+        ]
+      }
+    },
+    {
+      "release": 11,
+      "status": "active",
+      "published_at": "2026-10-13T18:35:58Z",
+      "pcr0": "398b654dfcd98079fe558e4a2a2c000877fd59b4f9298383dc66ed0d54f6706938e1620f2d1d80b8cb02dca2eef3e72b",
+      "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
+      "pcr2": "1b715f0fc3b953f4c64d0954eec5e869e8e548ac59c036c65f36acb599b31aad02e51540b51930a80bb6491a5b8a454c",
+      "seal_key": "arn:aws:kms:us-east-1:347272280361:key/ac1e7051-49de-44f3-b3cb-aa75bb744345",
+      "admitted_pcr0s": [
+        "2303feb157143c5393fe55e8dd880f0ebc82f982c5f0e2a64e0d1c3b53e306d5c36641544185c1dfed7d7834188864e8",
+        "8eebbb1012f55e131ab24a8259d1e714ffc6cc2f9ea090c41e3773702979fd0756134b7035773f8b58ab174f864f5f7d",
+        "8ab041980ae3cd122b9e09f04a165b13aa01cfb5378d31c35830c05f129072b2f0889cbed1f492c0fdfb13f0af8c303e",
+        "a9e3defc8bfa4c3c6f89a87afac67bc245f1ef8ac331de88505d8d4928a4bc0d9e793fb928050ba02c9f3b915ffbfb0e"
+      ],
+      "notes": "https://staging.vettid.org/security/releases/11/",
+      "host": {
+        "tag": "release/staging/11",
+        "source_commit": "a450941cc4f0f7241001852d3426df3ff61b064b",
+        "measurements_sha256": "e82ee027752f82dbcf5f234db95f308094e962f445ea732695a6454067c49c95",
+        "host_files_sha256": "c0b36acafa89e4110a0d497fb8b6c552c3bfd8c86eabda5757ff5c8d4210410a",
+        "nitro_cli_version": "1.5.0",
+        "base_ami": "ami-01ef1060bc43e3f91",
+        "ami_revision": 0,
+        "min_instances": 0,
+        "max_instances": 2
+      },
+      "log": {
+        "summary": "Release 11 locks your vault when its host goes silent and tightens what a vault's process may do inside the enclave.",
+        "changes": [
+          "If the host your vault runs on stops answering for two minutes, your vault now locks itself. Unlock it again with your PIN; nothing is lost.",
+          "Hardening: the process that runs your vault inside the enclave is refused more of the system functions it never needs, and can no longer create a private system environment of its own. Every release is tested for this on real hardware before it is offered.",
+          "The enclave is built with a newer version of its programming language, which includes fixes to the network and encryption code it uses.",
+          "Fix: a vault whose stored state had grown very large could be saved but not read back. The host now reads everything it can write.",
+          "Fewer and steadier connections between vaults and the relay. Nothing changes in how your messages are delivered."
+        ],
+        "security": "recommended",
+        "security_text": "Release 11 closes ways in which a fault in one vault's process could have reached beyond that vault inside the enclave, and updates the enclave's network and encryption code to a version with security fixes. We know of no use of either against any vault. Your PIN and credential password were not exposed.",
+        "affects": [
+          7,
+          8,
+          9,
+          10
         ]
       }
     }

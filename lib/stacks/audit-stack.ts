@@ -12,7 +12,9 @@ import * as sns from 'aws-cdk-lib/aws-sns';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as subs from 'aws-cdk-lib/aws-sns-subscriptions';
 import { Construct } from 'constructs';
-import { ALERT_FORWARDER_ROLE_NAME, ALERT_HEARTBEAT_RULE_NAME, AppConfig, ORG, ORG_MEMBER_ACCOUNTS, resourceName } from '../config';
+import {
+  ALERT_FORWARDER_ROLE_NAME, ALERT_HEARTBEAT_RULE_NAME, AppConfig, ORG, ORG_MEMBER_ACCOUNTS, VAULT_ROLE_NAMES, resourceName, vaultDataBucketNames,
+} from '../config';
 import { readRef } from '../constructs/ssm-refs';
 
 /** AWS Organizations organization (docs/AWS-ACCOUNTS.md). */
@@ -32,6 +34,7 @@ export interface VettidOrgAuditStackProps extends cdk.StackProps {
  * Account-level audit and detection (security review, 2026-10-01):
  *  - CloudTrail: one multi-region trail with log-file validation into a
  *    dedicated, retained bucket; S3 data events on the membership-terms bucket
+ *    and, writes only, on the vault data buckets of both vault accounts
  *  - GuardDuty detector (us-east-1)
  *  - IAM Access Analyzer (account scope) for anything shared externally
  *  - EventBridge → SNS → email alerts for high-signal events, for every
@@ -86,6 +89,21 @@ export class VettidOrgAuditStack extends cdk.Stack {
     // Who read or wrote membership terms (data events; cents per month).
     const termsBucket = s3.Bucket.fromBucketName(this, 'TermsBucket', readRef(this, config, 'data/terms-bucket-name'));
     trail.addS3EventSelector([{ bucket: termsBucket }], { readWriteType: cloudtrail.ReadWriteType.ALL, includeManagementEvents: false });
+    // Every write on the vault data buckets (the vault accounts'; an
+    // organization trail records member buckets by ARN): who put, copied
+    // or deleted which sealed object, from where. WRITES ONLY, by the
+    // owner's decision: reads (GetObject, HeadObject, lists)
+    // are not recorded, so the trail shows what was changed or destroyed
+    // and cannot show whether anything was taken. That is the accepted
+    // cost of not keeping a record of every time a vault is opened. The
+    // enclave host is the main caller, so the volume follows vault
+    // activity: $1 per million events (RUNBOOK "Vault data events" has the
+    // arithmetic). The records land in the trail bucket with the
+    // management events, under the member account's prefix.
+    trail.addS3EventSelector(
+      vaultDataBucketNames().map((name, i) => ({ bucket: s3.Bucket.fromBucketName(this, `VaultDataBucket${i}`, name) })),
+      { readWriteType: cloudtrail.ReadWriteType.WRITE_ONLY, includeManagementEvents: false },
+    );
 
     // ---- GuardDuty + Access Analyzer ---------------------------------------
     new guardduty.CfnDetector(this, 'GuardDuty', {
@@ -370,6 +388,127 @@ export class VettidOrgAuditStack extends cdk.Stack {
       ],
       ...notDeploy,
     });
+
+    // ---- The vault accounts: data bucket, hosts, the host role -----------------
+    const vaultAccounts = { account: [ORG.members.vaultProd, ORG.members.vaultStaging] };
+
+    // There is no export or snapshot of vault data, so these calls can
+    // destroy it for good: an expiry rule or suspended versioning removes
+    // every object and then every older version; the bucket policy is what
+    // keeps the objects to the host role. Rare and important: always
+    // reported, deploys included (a deploy changes them only when the vault
+    // stack's bucket definition changes). The Vault OU policy also denies
+    // them to everyone but the CDK execution role; a refused attempt is
+    // reported with its error. A bucket policy change outside a deploy is
+    // reported by S3PublicAccess as well.
+    apiCall('VaultDataBucketConfig', 'vault data bucket: lifecycle, versioning or bucket policy changed, or the bucket deleted (deploys included)', ['aws.s3'], {
+      eventName: [
+        'PutBucketLifecycle', // the name CloudTrail gives PutBucketLifecycleConfiguration
+        'PutBucketLifecycleConfiguration',
+        'DeleteBucketLifecycle',
+        'PutBucketVersioning',
+        'PutBucketPolicy',
+        'DeleteBucketPolicy',
+        'DeleteBucket',
+      ],
+      requestParameters: { bucketName: vaultDataBucketNames() },
+    });
+
+    // A command on an instance in a vault account, or an attempt at an
+    // interactive way in. Run Command is how hosts are operated (a
+    // release's self-test, the capacity measurement): CloudTrail records
+    // that a command ran and on which instance, not what it was. The SSM
+    // agent runs documents for more than SendCommand, so every call that
+    // can make it run one is here: a State Manager association (the agent
+    // fetches those itself, with no SendCommand), an automation, a
+    // maintenance-window task. None is in use in the vault accounts.
+    // Sessions, EC2 Instance Connect and the serial console are denied to
+    // everyone by the Vault OU policy (lib/org/scp-vault.json), so those
+    // arrive as refused attempts, or as a sign that the policy is off.
+    // Matched by the event's own source field: the calls come from three
+    // services.
+    //
+    // "Not this AWS service acting through its own service-linked role":
+    // both fields are set by AWS, and a role with that name cannot be made
+    // by hand. Either one differing or missing means someone else. Image
+    // Builder drives its build instances with Run Command on every image
+    // build; a release group's launches are Auto Scaling's.
+    const notServiceIdentity = (service: string, role: string) => [
+      { invokedBy: events.Match.anythingBut(service) },
+      { invokedBy: events.Match.doesNotExist() },
+      { sessionContext: { sessionIssuer: { userName: events.Match.anythingBut(role) } } },
+      { sessionContext: { sessionIssuer: { userName: events.Match.doesNotExist() } } },
+    ];
+    const notService = (service: string, role: string) => notServiceIdentity(service, role).map((who) => ({ userIdentity: who }));
+    apiCall(
+      'VaultHostAccess',
+      'operator access to an instance in a vault account (a Run Command or another way to have the SSM agent run one; or an interactive session, Instance Connect or serial console call, which the Vault OU policy denies)',
+      events.Match.prefix('aws.'),
+      {
+        eventSource: ['ssm.amazonaws.com', 'ec2-instance-connect.amazonaws.com', 'ec2.amazonaws.com'],
+        eventName: [
+          'SendCommand',
+          'CreateAssociation', 'CreateAssociationBatch', 'UpdateAssociation', 'StartAssociationsOnce',
+          'StartAutomationExecution', 'StartChangeRequestExecution',
+          'RegisterTaskWithMaintenanceWindow', 'UpdateMaintenanceWindowTask',
+          'StartSession', 'ResumeSession',
+          'SendSSHPublicKey', 'SendSerialConsoleSSHPublicKey', 'OpenTunnel', 'CreateInstanceConnectEndpoint',
+          'EnableSerialConsoleAccess',
+        ],
+        $or: notService('imagebuilder.amazonaws.com', 'AWSServiceRoleForImageBuilder'),
+      },
+      vaultAccounts,
+    );
+
+    // The host role's credentials are what reads and deletes sealed vault
+    // objects. The release stacks hand them to instances through their
+    // Auto Scaling groups only, so: an instance launched with the host
+    // instance profile by anything else (the profile is in the request for
+    // a direct launch, in the response for a launch from a template), ...
+    const hostProfile = events.Match.suffix(`:instance-profile/${VAULT_ROLE_NAMES.host}`);
+    apiCall(
+      'VaultHostProfileLaunch',
+      `an instance was launched with the vault host instance profile (${VAULT_ROLE_NAMES.host}) by something other than Auto Scaling`,
+      ['aws.ec2'],
+      {
+        eventName: ['RunInstances'],
+        // Two "or" lists that must both hold. They sit at different levels
+        // (the profile's place under `detail`, the caller under
+        // `userIdentity`), so each is written once: their cross product,
+        // twelve alternatives, is longer than the 2,048 characters
+        // EventBridge allows a pattern (test/event-pattern-size.test.ts).
+        $or: [
+          { responseElements: { instancesSet: { items: { iamInstanceProfile: { arn: hostProfile } } } } },
+          { requestParameters: { iamInstanceProfile: { arn: hostProfile } } },
+          { requestParameters: { iamInstanceProfile: { name: [VAULT_ROLE_NAMES.host] } } },
+        ],
+        userIdentity: { $or: notServiceIdentity('autoscaling.amazonaws.com', 'AWSServiceRoleForAutoScaling') },
+      },
+      vaultAccounts,
+    );
+    // ... and the ways to get Auto Scaling, or an instance that already
+    // runs, to do it instead: a launch template or group, a refresh of a
+    // group's instances, a profile swapped on an instance, a role put into
+    // another profile. Deploys included, unlike most rules here: a release
+    // stack is how hosts come to exist, and anyone who can pass the CDK
+    // execution role to a stack of their own would otherwise get a host
+    // through Auto Scaling with no email at all. A release deploy sends
+    // three (template, group, the group's sizes) and a release's removal
+    // one; RUNBOOK lists them as expected.
+    apiCall(
+      'VaultHostLaunchPath',
+      'launch template, Auto Scaling group or instance profile created, changed or attached in a vault account (deploys included: expected for a release, RUNBOOK "Security alerts")',
+      ['aws.ec2', 'aws.autoscaling', 'aws.iam'],
+      {
+        eventName: [
+          'CreateLaunchTemplate', 'CreateLaunchTemplateVersion', 'ModifyLaunchTemplate',
+          'CreateAutoScalingGroup', 'UpdateAutoScalingGroup', 'CreateLaunchConfiguration', 'StartInstanceRefresh',
+          'AssociateIamInstanceProfile', 'ReplaceIamInstanceProfileAssociation',
+          'AddRoleToInstanceProfile',
+        ],
+      },
+      vaultAccounts,
+    );
 
     apiCall('SecurityGroupOpenToWorld', 'security group opened to the whole internet (outside a deploy)', ['aws.ec2'], {
       eventName: ['AuthorizeSecurityGroupIngress'],

@@ -55,7 +55,12 @@ which is why the vault's production keys need an account of their own
   roles and deny `kms:PutKeyPolicy` with the lockout bypass except by the
   release-key custom resource's role (VAULT-RELEASES §6). The vault part
   is `lib/org/scp-vault.json` (policy `vettid-vault-key-protection`,
-  attached to the Vault OU by `scripts/vault/apply-scp.sh`; W5). The
+  attached to the Vault OU by `scripts/vault/apply-scp.sh`; W5); it also
+  denies changing the lifecycle, versioning or bucket policy of the vault
+  data buckets, and deleting them, except by the CDK execution role, and
+  denies every interactive way onto an instance (Session Manager
+  sessions, EC2 Instance Connect, the serial console) to everyone:
+  vault hosts are operated through Run Command only. The
   security-alert forwarders are protected by `lib/org/scp-alert-forwarder.json`
   (policy `vettid-alert-forwarder-protection`, attached to the Workloads OU
   by `scripts/org/apply-alert-forwarder-scp.sh`; §2.1).
@@ -64,8 +69,8 @@ which is why the vault's production keys need an account of their own
 
 | | Management (449757308783) | Members (vault prod 369484479783, vault staging 347272280361, proteus 605628228301) |
 |---|---|---|
-| CloudTrail | organization trail `vettid-org-trail` (VettidOrgAuditStack) | recorded by the organization trail; members cannot stop or change it (SCP) |
-| GuardDuty | detector and organization administrator | members, auto-enabled; findings reach the administrator |
+| CloudTrail | organization trail `vettid-org-trail` (VettidOrgAuditStack) | recorded by the organization trail; members cannot stop or change it (SCP). Management events of every account; data events on the two vault data buckets, writes only (put, copy, delete, multipart; reads are not recorded) |
+| GuardDuty | detector and organization administrator | members, auto-enabled; findings reach the administrator. S3 protection for members is an organization setting made by hand (RUNBOOK "Vault data events") |
 | Alert rules and email | VettidOrgAuditStack: all rules, topic `vettid-org-security-alerts` → admin@vettid.org, a heartbeat alarm per member | one forwarding rule each (`VettidOrg*AlertForwardStack`) sending CloudTrail write calls and console sign-ins to the management account's default bus, plus an hourly heartbeat |
 | SCP | — (SCPs cannot restrict it) | `vettid-alert-forwarder-protection` (`lib/org/scp-alert-forwarder.json`, Workloads OU): only the CDK execution role may change the forwarder rules and role |
 
