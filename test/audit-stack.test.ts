@@ -1,7 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { ALERT_FORWARDER_ROLE_NAME, ORG, VAULT_ROLE_NAMES, loadConfig, vaultDataBucketNames } from '../lib/config';
-import { VettidOrgAuditStack } from '../lib/stacks/audit-stack';
+import { COST_ALERTS, VettidOrgAuditStack } from '../lib/stacks/audit-stack';
 import { matchesPattern } from './event-pattern';
 
 const app = new cdk.App();
@@ -683,5 +683,71 @@ test('the alerts topic admits this account\'s CloudWatch alarms, and only them',
   });
   const policies = Object.values(json.Resources).filter((r: any) => r.Type === 'AWS::SNS::TopicPolicy') as any[];
   const services = policies.flatMap((p) => p.Properties.PolicyDocument.Statement.map((s: any) => s.Principal?.Service));
-  expect(new Set(services)).toEqual(new Set(['events.amazonaws.com', 'cloudwatch.amazonaws.com']));
+  expect(new Set(services)).toEqual(new Set(['events.amazonaws.com', 'cloudwatch.amazonaws.com', 'budgets.amazonaws.com', 'costalerts.amazonaws.com']));
+});
+
+describe('cost alerts', () => {
+  const statements = (Object.values(json.Resources).filter((r: any) => r.Type === 'AWS::SNS::TopicPolicy') as any[])
+    .flatMap((p) => p.Properties.PolicyDocument.Statement);
+  const sid = (s: string) => statements.find((x: any) => x.Sid === s);
+  const topicId = Object.keys(t.findResources('AWS::SNS::Topic', { Properties: { TopicName: 'vettid-org-security-alerts' } }))[0];
+
+  test('the topic admits AWS Budgets and Cost Anomaly Detection for this account only', () => {
+    expect(sid('BudgetsOfThisAccount')).toMatchObject({
+      Effect: 'Allow', Principal: { Service: 'budgets.amazonaws.com' }, Action: 'sns:Publish',
+      Condition: { StringEquals: { 'aws:SourceAccount': ORG.management }, ArnLike: { 'aws:SourceArn': expect.anything() } },
+    });
+    expect(JSON.stringify(sid('BudgetsOfThisAccount').Condition.ArnLike)).toContain(`:budgets::${ORG.management}:*`);
+    expect(sid('CostAnomaliesOfThisAccount')).toMatchObject({
+      Effect: 'Allow', Principal: { Service: 'costalerts.amazonaws.com' }, Action: 'sns:Publish',
+      Condition: { StringEquals: { 'aws:SourceAccount': ORG.management } },
+    });
+  });
+
+  test('a daily cost budget of $15 for this account\'s own costs, to the security-alerts topic', () => {
+    expect(COST_ALERTS.mainAccountDailyUsd).toBe(15);
+    const budgets = Object.values<any>(t.findResources('AWS::Budgets::Budget'));
+    expect(budgets).toHaveLength(1); // the organization's monthly budget is not in CDK
+    const b = budgets[0];
+    expect(b.Properties.Budget).toEqual({
+      BudgetName: 'vettid-org-main-account-daily',
+      BudgetType: 'COST',
+      TimeUnit: 'DAILY',
+      BudgetLimit: { Amount: 15, Unit: 'USD' },
+      Metrics: ['UnblendedCost'],
+      FilterExpression: {
+        And: [
+          { Dimensions: { Key: 'LINKED_ACCOUNT', Values: [ORG.management] } },
+          { Not: { Dimensions: { Key: 'RECORD_TYPE', Values: ['Credit', 'Refund'] } } },
+        ],
+      },
+    });
+    expect(b.Properties.NotificationsWithSubscribers).toEqual([
+      {
+        Notification: { NotificationType: 'ACTUAL', ComparisonOperator: 'GREATER_THAN', Threshold: 100, ThresholdType: 'PERCENTAGE' },
+        Subscribers: [{ SubscriptionType: 'SNS', Address: { Ref: topicId } }],
+      },
+    ]);
+    // Created after the topic admits Budgets, or Budgets refuses the topic.
+    expect(b.DependsOn).toEqual(expect.arrayContaining([expect.stringMatching(/^AlertsPolicy/)]));
+  });
+
+  test('cost anomalies of $40 or more on the account\'s services monitor, as found, to the topic', () => {
+    expect(COST_ALERTS.anomalyImpactUsd).toBe(40);
+    const subs = Object.values<any>(t.findResources('AWS::CE::AnomalySubscription'));
+    expect(subs).toHaveLength(1);
+    expect(subs[0].Properties).toMatchObject({
+      SubscriptionName: 'vettid-org-cost-anomalies',
+      MonitorArnList: [COST_ALERTS.servicesMonitorArn],
+      Frequency: 'IMMEDIATE',
+      Subscribers: [{ Type: 'SNS', Address: { Ref: topicId } }],
+    });
+    expect(JSON.parse(subs[0].Properties.ThresholdExpression)).toEqual({
+      Dimensions: { Key: 'ANOMALY_TOTAL_IMPACT_ABSOLUTE', MatchOptions: ['GREATER_THAN_OR_EQUAL'], Values: ['40'] },
+    });
+    expect(COST_ALERTS.servicesMonitorArn).toMatch(new RegExp(`^arn:aws:ce::${ORG.management}:anomalymonitor/`));
+    // No monitor of its own: an account has one services monitor, AWS's.
+    t.resourceCountIs('AWS::CE::AnomalyMonitor', 0);
+    expect(subs[0].DependsOn).toEqual(expect.arrayContaining([expect.stringMatching(/^AlertsPolicy/)]));
+  });
 });

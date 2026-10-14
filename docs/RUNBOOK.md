@@ -386,8 +386,9 @@ npx cdk deploy VettidOrgRelayStack       # service; reads the refs at deploy tim
 
 ### Alarms on the rate limits line
 
-Eleven alarms, `vettid-org-relay-<name>` (seven on the line, four on the
-table: "Alarms on the table" below), to the topic
+Sixteen alarms, `vettid-org-relay-<name>` (seven on the line, four on the
+table: "Alarms on the table" below, five on Valkey and log volume:
+"Alarms on Valkey and log volume"), to the topic
 `vettid-org-security-alerts` → admin@vettid.org (the management
 account's topic, which admits this account's CloudWatch alarms since
 #214; the member API's alarms use it the same way). Six metric filters
@@ -421,6 +422,40 @@ data only in minutes with requests, so missing data is not an alarm.
 | `table-reads-high` | 60,000 or more read units a minute for 5 minutes (half the ceiling) | The same for reads (collects of large mailboxes). Health checks read the table too, so do not let real use sit at the read ceiling: raise it. |
 | `table-write-volume` | 360,000 or more write units in an hour (100 a second on average; at most about 180 MB of messages stored) | 65 times the busiest hour of the preview. A slow fill below the other alarms shows here: table size and item count (`describe-table`, above), `register-refused`, the hour's `ConsumedWriteCapacityUnits` in the console. Real growth reaches it at about 300 vaults at a message a minute: then raise `tableWriteUnitsPerHour`. |
 | `table-throttled` | DynamoDB throttled the table or its index (read or write events, or throttled deposit transactions) in 3 of 5 minutes | Tenants are being refused or delayed now. With `table-writes-high` or `table-reads-high`: the ceiling is reached, decide as above (real use: raise it; a flood: leave it, it is what bounds the bill). Without them: a hot partition (one mailbox written or read beyond a partition's 1,000 write or 3,000 read units a second), or the index's ceiling (mass rotation, `register-refused`). |
+
+#### Alarms on Valkey and log volume
+
+Five more alarms, to the same topic, on AWS's own metrics (they do not
+depend on the line either). Valkey: `AWS/ElastiCache`, `clusterId` =
+`vettid-org-relay`; limits in `RELAY_VALKEY_LIMITS` (1 GB, 100,000 ECPU
+a second; the alarms at 75 %).
+
+| Alarm | Fires when | Do |
+|---|---|---|
+| `valkey-storage` | Valkey holds 750 MB or more in 3 of 5 minutes | Measured use is tens of KB. At 1 GB the cache evicts keys with a TTL (every relay key has one), replay records included. Look for one address sending signed requests under fresh keys at the flood guard (`address-busy`, `address-refused`). Raising the limit only moves the point where eviction starts. |
+| `valkey-ecpu` | 4,500,000 or more ECPUs in a minute, in 3 of 5 minutes (75 % of 100,000 a second) | At the limit Valkey throttles, the replay check fails and every signed request is answered `429`. With `address-busy` on: a flood; otherwise real growth, raise `RELAY_VALKEY_LIMITS.ecpuPerSecond` (about $0.0023 per million ECPU). |
+| `valkey-evictions` | any eviction in a minute | Valkey is full: replay protection is weakened while it lasts. As `valkey-storage`. |
+| `valkey-errors` | any throttled command, throttled IAM authentication (failed connections), or command, key or channel authorization failure in a minute | Throttling: as `valkey-ecpu`. Authorization failures: the relay used a key or channel outside `relay:*` (a relay bug; its log, warn level). IAM throttling: too many new connections at once (tasks restarting in a loop: ECS service events). |
+| `log-volume` | the service log and the VPC flow log ingested 500 MB or more in a day (normal: 1 to 2 MB) | `aws logs tail /vettid-org/prod/relay-service --since 1h` for what repeats; `/vettid-org/prod/relay-vpc-flow` for rejected traffic. Ingestion is $0.50 a GB. |
+
+#### The load balancer's web ACL, deletion protection, flow log
+
+- **WAF** (`vettid-org-relay`, regional, on the relay's load balancer):
+  one rate-based rule, 60,000 requests per 5 minutes per source address
+  (`RELAY_WAF_RATE_LIMIT`), twice the relay's flood guard, so it refuses
+  only an address the relay refuses anyway, before it reaches a task.
+  The refusal is `429` with the relay's `rate_limited` body and
+  `retry_after` 60. A 900-vault host sends about 24,300 in 5 minutes at a
+  message a minute per vault. When the flood guard is raised, raise this
+  with it (keep it at twice the guard). Who was blocked: WAF console →
+  web ACL → Sampled requests; counts in the metric
+  `vettid-org-relay-rate-limit` (`AWS/WAFV2`).
+- **Deletion protection** is on: to delete the load balancer (only with
+  the stack), turn it off first.
+- **No access log**, on purpose: it would record full paths (mailbox and
+  message ids) next to client addresses.
+- **VPC flow log**: rejected traffic only, in
+  `/vettid-org/prod/relay-vpc-flow`, kept 30 days.
 
 The thresholds are in `RELAY_ALARM_LIMITS` (`lib/stacks/relay-stack.ts`).
 2,000 long-polls or sessions on a task is a sixth of its memory, well
@@ -2364,6 +2399,33 @@ deletion-protected as in prod; tearing staging down means turning
 termination protection off in code first, and the zone (RETAIN) keeps its
 name servers unless it is deleted by hand, after which
 `stagingZoneNs` and the delegation must be updated.
+
+## Cost alerts
+
+All to `vettid-org-security-alerts` → admin@vettid.org, except the
+organization's monthly budget, which emails its own list.
+
+- **Daily budget for the management account** (`vettid-org-main-account-daily`,
+  VettidOrgAuditStack): $15 of this account's own costs in a day (about
+  five times normal), alert when the actual cost passes it. Budgets data
+  is updated a few times a day, so the alert comes up to a day late: it
+  is a backstop behind the CloudWatch alarms.
+- **Cost anomalies** (`vettid-org-cost-anomalies`, VettidOrgAuditStack):
+  an anomaly with an impact of $40 or more on the account's services
+  monitor (`Default-Services-Monitor`, made by AWS), sent as found. The
+  console's `Default-Services-Subscription` ($100 and 40 %, daily email)
+  still exists alongside.
+- **The organization's monthly budget** ("My Monthly Cost Budget", $300,
+  every account through consolidated billing) was made in the console and
+  is changed there or with the CLI, not in CDK. To change its amount
+  (keeps its filter and alerts):
+
+  ```bash
+  aws budgets update-budget --account-id 449757308783 --new-budget "$(aws budgets describe-budget --account-id 449757308783 --budget-name 'My Monthly Cost Budget' --query Budget --output json | jq -c '.BudgetLimit.Amount = "300" | del(.CalculatedSpend, .LastUpdatedTime, .HealthStatus)')"
+  ```
+
+What to do: Cost Explorer (management account), by service and by
+linked account for the day; for the relay, its alarms above.
 
 ## Security alerts (every account in the organization)
 
