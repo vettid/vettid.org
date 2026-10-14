@@ -351,6 +351,56 @@
           10
         ]
       }
+    },
+    {
+      "release": 12,
+      "status": "candidate",
+      "pcr0": "859733fa15df56bfedcb8c3a0a1524e9287aea6a8fa01d798d0f8c8df32cc2cbf32cdc5102bbd89b1f6c6e05e478e4bf",
+      "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
+      "pcr2": "97706f0cfe2c2bd700982b5711332974a41c2ffbb829946e1af84c4c0c2229bfa2e7412877b5801ec6806a62fb475753",
+      "seal_key": "",
+      "admitted_pcr0s": [
+        "80a580024d4cf3d1f7955dc010ae12a0626ad4f6d542c385bf9cf5202fa37eab81f37c75a009dbc4212b22960f19d289",
+        "8c26adfd1fe53025c5aea91563129bc4670bffc993531040a4a0e6f530e753bcf5a1be2cafa78bb0373a469adc88f7c8",
+        "e9f9005d31ba54e64aec4db3c7044aa8c290bae8c65246e6a1692fae7ea40d2dae8bf41c3a4b0575c7066d23ac5e3f1a",
+        "c6dd654f6b261f616f9115b215600eb992365943c52177adc86bafdba0fd7138c0dfe6558d8b2052ff1aed4dee50232f",
+        "2303feb157143c5393fe55e8dd880f0ebc82f982c5f0e2a64e0d1c3b53e306d5c36641544185c1dfed7d7834188864e8",
+        "8eebbb1012f55e131ab24a8259d1e714ffc6cc2f9ea090c41e3773702979fd0756134b7035773f8b58ab174f864f5f7d",
+        "8ab041980ae3cd122b9e09f04a165b13aa01cfb5378d31c35830c05f129072b2f0889cbed1f492c0fdfb13f0af8c303e",
+        "a9e3defc8bfa4c3c6f89a87afac67bc245f1ef8ac331de88505d8d4928a4bc0d9e793fb928050ba02c9f3b915ffbfb0e",
+        "398b654dfcd98079fe558e4a2a2c000877fd59b4f9298383dc66ed0d54f6706938e1620f2d1d80b8cb02dca2eef3e72b"
+      ],
+      "notes": "https://staging.vettid.org/security/releases/12/",
+      "host": {
+        "tag": "release/staging/12",
+        "source_commit": "5339f8bf136fbdee82f952ba1c04164368807aa6",
+        "measurements_sha256": "1a25294d5466d6dae449f08be50f2bddfaf9d159d81fff239d568bedd99286b0",
+        "host_files_sha256": "4f4eea4f88ca7be3edda684a6ae4101ea7d84342e13f5e73ea425afe01d6edc8",
+        "nitro_cli_version": "1.5.0",
+        "base_ami": "ami-09e274cdb5d58e11e",
+        "ami_revision": 0,
+        "min_instances": 0,
+        "max_instances": 2
+      },
+      "log": {
+        "summary": "Release 12 fixes an unlock that could fail when several vaults unlocked at once, keeps vaults further apart, and lets only your phone approve connections.",
+        "changes": [
+          "Fix: when several vaults on the same host unlocked at the same moment, an unlock could fail, and trying again worked. This was in every earlier staging release. Unlocks no longer fail this way.",
+          "Hardening: each vault process on a host now runs under an identity that is never given to another vault, anything a vault's process leaves running is stopped when it ends, and a vault's process can no longer write files.",
+          "Hardening: a vault's process can reach the record that names your vault, and your previous vault when you enroll again, only as far as enrolling and erasing need.",
+          "Only your phone can now approve a connection request, create or accept an invitation, start or accept an introduction, or approve a connection's request. A desktop can still decline or deny them; its older pending ones are refused.",
+          "Push registration now checks that a push token really belongs to the phone registering it: VettID's push service sends the phone a code and your vault confirms it. Nothing changes for you until push notifications arrive in a later app update."
+        ],
+        "security": "recommended",
+        "security_text": "Release 12 closes ways in which a fault in one vault's process could have reached another vault's process on the same host: an identity could be given again to the next vault, and something a process left running could have outlived it. It also narrows what a vault's process may write to the record that names a member's vault. We know of no use of any of these against any vault. Your PIN and credential password were not exposed.",
+        "affects": [
+          7,
+          8,
+          9,
+          10,
+          11
+        ]
+      }
     }
   ]
 }
