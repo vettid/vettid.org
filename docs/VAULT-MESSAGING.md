@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.29.7
-date: 2026-10-13
+version: 0.30.0
+date: 2026-10-14
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -11,7 +11,7 @@ related:
   - PQC-MIGRATION.md
   - CALLING-SERVICE.md (0.2.0)
   - CALLS-PLAN.md (0.1.3) §13 (phase C2; decisions D12–D26, decided 2026-10-12)
-  - PUSH-GATEWAY.md (0.4.4)
+  - PUSH-GATEWAY.md (0.5.0)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.6.4)
   - ANDROID-PLAN.md (0.1.37)
@@ -24,6 +24,21 @@ related:
   - VAULT-HOST-PROTOCOL.md (0.1.7; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.30.0: normative, as built in vettid-vault #83; approved by the
+    owner 2026-10-14. **The push gateway verifies that a
+    registration's token belongs to the caller** (PUSH-GATEWAY 0.5.0).
+    `push.register` answers push state `pending` while the gateway's
+    challenge code is on its way to the token by push. The new
+    `push.confirm{code}` returns that code, and the vault confirms the
+    registration with it (§14.1). Push state `state` takes `pending`.
+    Idempotence holds for 30 days, after which the same token
+    registers again (renewal; blobs are honoured 90 days); a pending
+    registration of the same token under 10 minutes old is answered
+    without a new challenge. `push.confirm` is on the holder's allow
+    list while held (§3.6.3). The type table (§10), `gateway_error`,
+    the `push_registrations` limit and the rule on the state a failed
+    request may change (§10.1), the wake outcomes (§14.2) and the
+    attestation (§14.3) are updated to match
   - 0.29.7: correction of the document to the system as built; approved
     by the owner 2026-10-13. No wire change, no code change, no new
     vault release. **The PIN backoff and the password backoff do not
@@ -2005,7 +2020,7 @@ every `drop.*` entry, §10.9). Allowed while held:
 
 | Sender | Types |
 |---|---|
-| The holder | `vault.owner-check`; `vault.status` (reports the hold) and `vault.lock`; `credential.utk.get` (UTKs for the check); `credential.get` and `credential.ack` (the latest blob after a lost check response, §3.5.3, and its confirmation); `credential.version`; `credential.lock`; during a clone alarm, `credential.alarm.confirm` and, in `rotation_required`, `credential.rotate` (the check is refused until the alarm closes, so the alarm's own path stays open); `push.register` and `push.unregister` (0.24.0: the wakes for `vault.held` and the alarm depend on a current token, §14.2); for a transfer opened before the hold, `device.transfer.approve` (itself a check, §3.6.1) and `device.transfer.reject`; `call.end`, and `call.ice` of a call answered before the deadline |
+| The holder | `vault.owner-check`; `vault.status` (reports the hold) and `vault.lock`; `credential.utk.get` (UTKs for the check); `credential.get` and `credential.ack` (the latest blob after a lost check response, §3.5.3, and its confirmation); `credential.version`; `credential.lock`; during a clone alarm, `credential.alarm.confirm` and, in `rotation_required`, `credential.rotate` (the check is refused until the alarm closes, so the alarm's own path stays open); `push.register`, `push.confirm` (0.30.0) and `push.unregister` (0.24.0: the wakes for `vault.held` and the alarm depend on a current token, §14.2); for a transfer opened before the hold, `device.transfer.approve` (itself a check, §3.6.1) and `device.transfer.reject`; `call.end`, and `call.ice` of a call answered before the deadline |
 | A recovering app (§11.11.5) | Its own set, unchanged by the hold: `credential.utk.get`, `credential.recover`, `vault.status` (reduced) and the token and address types (0.16.0 removed `credential.reset` and `vault.delete` from it). A recovery completes while held and starts the clock (§3.6.1) |
 | A desktop | `vault.status`, `vault.lock`, `device.session.end{}` (its own session), `call.end` and `call.ice` of a call it answered before the deadline |
 | An agent | `vault.status`, `device.session.end{}` (its own session) |
@@ -3967,7 +3982,7 @@ an answer to an unknown or expired id is dropped.
 | | `audit.export` | D→V | req | The member's History export: count, PIN, audit entry; the app then reads the entries with `audit.list` (§10.9, 0.22.0) |
 | | `feed.list`, `.get`, `.update`, `.delete`, `guide.sync` | D→V | req | Activity feed; app guides as feed items (§10.9) |
 | | `feed.event` | V→D | | New feed item |
-| Push | `push.register`, `push.unregister` | D→V | req | Register or drop the app's FCM or APNs token for contentless wakes (§14, 0.24.0) |
+| Push | `push.register`, `push.confirm`, `push.unregister` | D→V | req | Register, confirm (with the code the gateway pushed to the token, 0.30.0) or drop the app's FCM or APNs token for contentless wakes (§14, 0.24.0) |
 | | `push.token-needed` | V→D | | The registration ended (the token is gone); send a fresh one (§14.2; spelled `push.token_needed` in 0.24.0) |
 
 **Calls** (CALLING-SERVICE §6; §10.10):
@@ -4040,7 +4055,7 @@ an answer to an unknown or expired id is dropped.
     | `location_requests` | 1 per connection per 10 minutes | `location.request` (§10.16) |
     | `wallets` | 16 wallets | `wallet.create` (§10.18) |
     | `wallet_addresses` | 2,000 addresses per wallet | `wallet.address.new` (§10.18) |
-    | `push_registrations` | 20 registrations that reach the gateway per 24 hours (0.24.0); every registration the gateway answered over HTTP counts, refusals included (0.24.1) | `push.register` (§14.1) |
+    | `push_registrations` | 20 registrations that reach the gateway per 24 hours (0.24.0); every registration the gateway answered over HTTP counts, refusals included (0.24.1); (0.30.0) a `push.confirm` does not count | `push.register` (§14.1) |
 
     A count that is part of a request's shape is `bad_request`, not a
     `limit`, and has no name: more than 64 fields in an item, for every
@@ -4109,14 +4124,20 @@ an answer to an unknown or expired id is dropped.
   - and (0.24.0) `gateway_error`: `push.register` could not complete at
     the push gateway (unreachable, timed out, `5xx`, the gateway
     refused the vault's attestation, or, 0.24.1, any other answer but a
-    well-formed `201` and §14.1's three `400` codes), with body
-    `{retry_after?}`; the app tries again later, after `retry_after` if
-    present (§14.1).
+    well-formed `202` (0.30.0; a `201` until 0.29.x) and §14.1's three
+    `400` codes), with body `{retry_after?}`; the app tries again
+    later, after `retry_after` if present (§14.1). (0.30.0) Also
+    `push.confirm`: the challenge expired (message
+    `challenge_expired`), the gateway refused the code (message
+    `challenge_invalid`), or the gateway could not be reached; the app
+    registers again (§14.1).
 - A request answered with an error changes no state, except the password
   backoff, the spent UTK and the audit log and feed entries of §3.5.3,
   and, for a failed owner check, the PIN backoff and the check's
   `failures` (§3.6.4), and, for a failed `push.register` that reached
-  the gateway, the `push_registrations` window (§14.1, 0.24.1).
+  the gateway, the `push_registrations` window (§14.1, 0.24.1), and,
+  for a failed `push.confirm`, the erasure of the pending registration
+  where §14.1 says so (0.30.0).
   Objects that several
   owner devices can edit carry a `version` (an integer from 1, `0` before
   the first write); a change MUST name the version it was based on, and
@@ -12457,7 +12478,7 @@ phone's build (W10-READINESS B8), and is not done now.
 
 (0.24.0, owner request of 2026-10-10; §15 item 32. Until 0.23.x this
 section was a sketch and the types were reserved.) The vault wakes its
-app through the VettID push gateway (PUSH-GATEWAY 0.4.0) so that the app
+app through the VettID push gateway (PUSH-GATEWAY 0.5.0) so that the app
 collects without a connection of its own. A wake carries nothing from
 the vault: it means only "collect" (§14.2). Push is **opt-in per device**:
 the app registers only in a push mode (Android: "Google push", which the
@@ -12470,6 +12491,7 @@ PUSH-GATEWAY §11.2). Desktops and agents never register.
 | Type | Request body | Response / event body |
 |---|---|---|
 | `push.register` (app: the holder) | `{platform: "fcm" \| "apns", token, app_id, environment?}` | `{push: <push state>}`; `bad_request`, `forbidden`, `unavailable`, `gateway_error` (body `{retry_after?}`), `limit` (`push_registrations`) |
+| `push.confirm` (app: the holder; 0.30.0) | `{code}` | `{push: <push state>}` (`active`); `bad_request` (message `no_pending_registration` without a pending registration), `forbidden`, `unavailable`, `gateway_error` (message `challenge_expired` or `challenge_invalid`, or body `{retry_after?}`) |
 | `push.unregister` (app: the holder) | `{}` | `{}`; `bad_request` for any other body |
 | `push.token-needed` (V→D, to the app, durable) | — | `{reason: "token_gone" \| "token_invalid" \| "blob_invalid"}` (§14.2) |
 
@@ -12481,12 +12503,17 @@ values keep `_`.)
 
 ```json
 push state: { "platform": "fcm|apns", "environment": "production|sandbox?",
-              "app_id": "<id>", "state": "active", "registered_at": "<ts>",
+              "app_id": "<id>", "state": "active|pending", "registered_at": "<ts>",
               "last_wake_at": "<ts>?", "last_result": "sent|rate_limited|gateway_error?" }
 ```
 
-On a vault without a credential, `push.register` and `push.unregister`
-are answered `credential_required` (§3.5.7 comes first; such a vault has
+(0.30.0) `pending` is a registration waiting for `push.confirm`. Its
+`registered_at` is when the vault sent it to the gateway, and it has no
+`last_wake_at` or `last_result`. `device.list` shows only the
+registration in force.
+
+On a vault without a credential, `push.register`, `push.confirm`
+(0.30.0) and `push.unregister` are answered `credential_required` (§3.5.7 comes first; such a vault has
 no holder). Then the **checks**, in order. Neither a failed check nor a
 failed gateway call changes the previous registration, if any: it stays.
 The only state a failure can change is the `push_registrations` window
@@ -12508,12 +12535,22 @@ refused or not (0.24.1):
    `token_hash = SHA-256("vettid/vms/2/push-token" || lp(platform) ||
    lp(app_id) || lp(environment) || lp(token))` (`lp` as in §10.9's
    chain; an absent `environment` is empty). Equal to the stored
-   registration's: the vault answers its push state and contacts no one;
+   registration's, and that registration is less than **30 days** old
+   (its `registered_at`): the vault answers its push state and contacts
+   no one. From 30 days the vault registers again through the gateway
+   (a **renewal**, with a new challenge), because the gateway honours a
+   blob for 90 days from its confirmation (PUSH-GATEWAY §4). The app
+   sends `push.register` at every open, so a phone in use renews well
+   before then. Likewise, equal to the pending registration's (below)
+   while that is less than 10 minutes old: the vault answers its push
+   state `pending` and contacts no one, so no new challenge is made and
+   nothing is counted (0.30.0);
 5. `limit` (`push_registrations`, max 20) when 20 registrations reached
    the gateway in the last 24 hours (a rolling window in DEK state). A
    registration **reached the gateway** when the gateway answered its
    `POST /v1/register` over HTTP, whatever the answer: a refusal
-   (`400`, `401`, `403`, `429`, `5xx`) counts as a `201` does. A timeout
+   (`400`, `401`, `403`, `429`, `5xx`) counts as a `202` does (a `201`
+   until 0.29.x). A timeout
    or a failed connection does not count. An answer that does not parse
    or exceeds the vault's size limit for answers is still an answer and
    counts (owner decision 2026-10-10). The vault records the request in
@@ -12526,10 +12563,15 @@ refused or not (0.24.1):
 (PUSH-GATEWAY §3), obtains an attestation document from the NSM with
 `public_key` = the wake public key and `user_data` = the request digest,
 and calls `POST /v1/register` (PUSH-GATEWAY §5.1; 10 s timeout, no
-retry inside the request). On `201` it stores, in one flush, the app's
-registration `{wake_sk, wake_blob, token_hash, platform, environment,
-app_id, registered_at, state: "active"}`, replacing and erasing any
-previous one (its key and blob), audits `push.registered`, and answers.
+retry inside the request). (0.30.0) The gateway sends a challenge code
+to the token by push and answers `202 {pending}`. The vault keeps the
+pending registration `{wake_sk, pending, token_hash, platform,
+environment, app_id, started_at}` in DEK state and answers push state
+`pending`. It keeps **only the latest** pending registration: a new one
+replaces an earlier one and erases its wake key, so a code is always
+tried against the newest challenge. A `push.register` that fails keeps
+the earlier pending registration. The registration in force, if any,
+stays in force until the confirmation. Nothing is audited.
 **The token itself is never stored**: the vault holds it only while the
 request runs. Gateway answers: `400` (`platform_invalid`, `app_invalid`,
 `token_invalid`) → `bad_request` with the gateway's code as `message`;
@@ -12537,25 +12579,59 @@ request runs. Gateway answers: `400` (`platform_invalid`, `app_invalid`,
 `gateway_error` (with `retry_after` from a `429` or `502`, at most
 3,600; taken from the HTTP `Retry-After` header when the body has none,
 owner decision 2026-10-10). Every other answer (`401`, any other `4xx`, a `400` with another
-code, a `201` whose body does not parse) is also `gateway_error`
-(0.24.1).
+code, a `202` whose body does not parse, and since 0.30.0 a `201`) is
+also `gateway_error` (0.24.1).
 
-A **token rotation** is simply a new `push.register`: the new
-registration replaces the old one, and the old blob is never used again
+**`push.confirm{code}`** (0.30.0), from the holder only (as check 1).
+`code` is 1–64 base64url characters, and the body has no other member
+(`bad_request`). The release must have a gateway (`unavailable`). Then:
+
+1. without a pending registration of this app: `bad_request`, message
+   `no_pending_registration`;
+2. **10 minutes** or more after the pending registration was sent:
+   `gateway_error`, message `challenge_expired`; the pending
+   registration is erased and the gateway is not called;
+3. the vault calls `POST /v1/confirm {pending, code}` signed by the
+   pending registration's wake key, without an attestation (10 s
+   timeout, no retry inside the request). On `201` it stores, in one
+   flush, the app's registration `{wake_sk, wake_blob, token_hash,
+   platform, environment, app_id, registered_at, state: "active"}`,
+   with `registered_at` = now, replacing and erasing any previous one
+   (its key and blob) and the pending registration. It audits
+   `push.registered` and answers the push state. `403
+   challenge_invalid`, any other answer below `500` but `429` and
+   `201`, a `201` whose body does not parse, or an answer over the
+   vault's size limit for answers: `gateway_error` (message
+   `challenge_invalid` for the first), and the pending registration is
+   erased. `429`, `5xx`, a timeout or no connection: `gateway_error`
+   (with `retry_after` from a `429` or `502`), and the pending
+   registration is kept, so the same code may be sent again within the
+   10 minutes.
+
+A confirmation does not count toward `push_registrations`. The app
+answers any `gateway_error` by registering again.
+
+A **token rotation** is simply a new `push.register` and its
+`push.confirm`: once confirmed, the new registration replaces the old
+one, and the old blob is never used again
 (the gateway keeps nothing to delete).
 
 **At most one registration per vault** (owner review of 2026-10-10):
 only the holder registers (check 1), and the holder is the one phone
 that holds the credential and needs waking. A vault keeps no list of
-registrations or wake keys; every successful `push.register` replaces
-the previous registration.
+registrations or wake keys; every successful `push.confirm` replaces
+the previous registration, and every `push.register` that the gateway
+answers with a pending registration replaces the previous pending
+registration (0.30.0).
 
-**`push.unregister`** erases the registration (wake key and blob) in one
-flush and audits `push.unregistered{ref: "app"}`; without a registration
-it answers `{}` and writes nothing. No gateway call. The registration is
-also erased, with the same entry and `ref` `transferred` or `replaced`,
-when a direct transfer or a recovery removes the app (§6.7.1,
-§11.11.5), and with everything else at a vault deletion (§12.5).
+**`push.unregister`** erases the registration (wake key and blob), and
+a pending registration (0.30.0), in one flush, and audits
+`push.unregistered{ref: "app"}` when there was a registration; without
+either it answers `{}` and writes nothing. No gateway call. The
+registration is also erased, with the same entry and `ref`
+`transferred` or `replaced`, and so is a pending registration, when a
+direct transfer or a recovery removes the app (§6.7.1, §11.11.5), and
+with everything else at a vault deletion (§12.5).
 
 The push state appears in `device.list` on the app's entry (§10.3).
 `last_wake_at` and `last_result` are updated in memory and written with
@@ -12625,7 +12701,11 @@ member's time zone.
   code), and deposits `push.token-needed{reason}` to the app (no wake:
   there is no registration). The app answers with a fresh
   `push.register` when it next runs; a wake that would have been sent is
-  lost, which is safe: the app collects at every start.
+  lost, which is safe: the app collects at every start. (0.30.0) The
+  gateway also answers `blob_invalid` for a blob more than 90 days past
+  its confirmation (PUSH-GATEWAY §4). The same handling applies, and
+  the app's next `push.register` registers the same token again. A
+  pending registration is not affected.
 - `429`: wait `retry_after` (from the body, else the HTTP `Retry-After`
   header, owner decision 2026-10-10; at most 3,600 s; **60 s** when the
   answer has neither, 0.24.1), merging triggers; `last_result` `rate_limited`.
@@ -12647,7 +12727,9 @@ log of them would be a timeline of the member's activity.
 - The attestation at registration proves to the gateway that the wake key
   was made by a VettID vault release the channel's manifest lists. It
   reveals the release and the enclave's host, never the vault or the
-  member.
+  member. (0.30.0) A blob is issued only once the vault returns the
+  code the gateway pushed to the token, which only the app holding the
+  token receives and hands to its own vault (PUSH-GATEWAY §5.1).
 - What each party learns: PUSH-GATEWAY §9. The vault keeps no token, and
   the gateway keeps nothing; Google or Apple see the timing of wakes, as
   the relay already sees the timing of deposits.
