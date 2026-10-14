@@ -1,6 +1,6 @@
 # VettID Push Gateway Protocol
 
-**Version:** 0.4.5 (draft)
+**Version:** 0.5.0 (draft)
 **Status:** Draft for review (N2; owner request of 2026-10-10: "we can
 start to design the push service for google play and apple ios").
 Implemented by `vettid/vettid-push` (the gateway) and vettid-android #109
@@ -9,7 +9,10 @@ and 0.4.3 approved by the owner 2026-10-11. Deployed for staging since
 2026-10-11 (§10.4); 0.4.4 writes down the deployment as built; 0.4.5
 moves the replay check behind the authenticating checks and caps the
 replay records of one key (vettid-push #2), approved by the owner
-2026-10-13
+2026-10-13; 0.5.0 verifies that the registering vault's app holds the
+push token (a challenge push the app must return) and gives wake blobs
+a maximum age of 90 days (vettid-push #4), approved by the owner
+2026-10-14
 **Companion to:** VettID Relay Protocol (Appendix A), VAULT-MESSAGING
 0.24.1 §14 (`push.register`, the vault's wake rules), ANDROID-PLAN D7
 
@@ -39,8 +42,10 @@ Design principles:
 1. **Zero content.** Pushes carry no message data, no sender, no name, no
    count, no cursor and no mailbox id. The platform payload is **fixed per
    platform** (§6): every wake of a channel is byte-identical apart from
-   the identifiers the platform adds itself. Google and Apple learn that
-   VettID woke a device, and when; nothing else.
+   the identifiers the platform adds itself. A registration's challenge
+   (§5.1) is a silent push whose only variable part is a random code.
+   Google and Apple learn that VettID woke a device, and when; nothing
+   else.
 2. **Unlinkability.** The gateway cannot associate a push token with a
    member, a vault or a relay mailbox. Each registration has its own wake
    key (§3), unrelated to every relay, identity or credential key.
@@ -49,10 +54,13 @@ Design principles:
    it can open and only the registering vault keeps (in its DEK state). A
    breach of the gateway's storage yields no tokens, because there is no
    token storage.
-4. **Only genuine vaults register.** Registration carries a Nitro Enclaves
-   attestation document of a VettID vault release listed in the channel's
-   signed release manifest (§5.1). Wakes are signed by the wake key bound
-   inside the blob.
+4. **Only genuine vaults register, and only for their own app's token.**
+   Registration carries a Nitro Enclaves attestation document of a VettID
+   vault release listed in the channel's signed release manifest (§5.1),
+   and a wake blob is issued only once the vault returns a code that the
+   gateway sent to the token by push (§5.1), which only the app holding
+   the token receives. Wakes are signed by the wake key bound inside the
+   blob.
 5. **Same auth grammar as the relay.** Signed requests per Relay Protocol
    §4.1: identical canonical digest, headers, freshness window and replay
    rule (a request seen before, while its timestamp is fresh, is
@@ -66,7 +74,7 @@ Conformance keywords MUST, SHOULD, MAY are per RFC 2119.
 | Role | Description |
 |---|---|
 | **Vault** | The member's vault (enclave). Registers the app's push token, keeps the wake blob and wake key in DEK state, decides when to wake (VAULT-MESSAGING §14.2). The only caller of the gateway. |
-| **App** | The VettID app installation (one per vault). Obtains its FCM or APNs token from the OS and sends it to its vault over its end-to-end session (`push.register`). Never talks to the gateway. |
+| **App** | The VettID app installation (one per vault). Obtains its FCM or APNs token from the OS and sends it to its vault over its end-to-end session (`push.register`), and returns the registration's challenge code, received by push, to its vault (`push.confirm`). Never talks to the gateway. |
 | **Gateway** | This service. Holds the FCM and APNs credentials and the blob keys; verifies attestations; opens blobs per send and forgets them. |
 | **Platform** | FCM or APNs. Delivers the fixed payload to the device. |
 
@@ -108,7 +116,7 @@ ct        = XChaCha20-Poly1305(blob_key[key_id], nonce,
   the other). `nonce` is random. A blob is at most **6,144** bytes. The
   record is JSON, so a token's `"` and `\` double inside it: a
   registration whose sealed blob would exceed 6,144 bytes is refused
-  `400 token_invalid` (§5.1 step 3). Only a token of nearly 4,096 bytes
+  `400 token_invalid` (§5.1 step 5; 0.5.0, step 3 before). Only a token of nearly 4,096 bytes
   made mostly of those two characters gets there; no real token does
   (0.4.2).
 - `key_id` is 4 random bytes; in the blob-keys secret (§10.2) it is
@@ -126,6 +134,16 @@ ct        = XChaCha20-Poly1305(blob_key[key_id], nonce,
   §10.2), and either takes effect when the tasks next start (0.4.2).
 - The vault treats the blob as opaque; it never sees inside it. The vault
   does not keep the token (only a hash, VAULT-MESSAGING §14.1).
+- (0.5.0) `i` is the time the blob was issued (the confirmation, §5.1).
+  A blob is honoured for **90 days** from `i`; at a wake after that it is
+  answered `blob_invalid` (§5.2 step 2), and the vault registers again,
+  which verifies the token again. A reseal keeps `i`. The vault
+  re-registers when its registration is older than 30 days
+  (VAULT-MESSAGING §14.1), so in normal use the limit is not reached.
+  The same keys also seal a **pending registration** (§5.1): the record
+  with the challenge code added as `"c"`, under
+  `aad = "vettid/push/1/pending" || 0x00 || channel`, so it never opens
+  as a wake blob, nor the reverse.
 
 ## 5. Endpoints
 
@@ -149,6 +167,9 @@ beyond that is `429 rate_limited` with the time until the first of them
 expires. The cap is judged first: a request from a key at its cap is
 `429` even if it was seen before, not `replay_detected`.
 
+(0.5.0) Registration is two requests, `POST /v1/register` and
+`POST /v1/confirm`, both signed by the registration's wake key.
+
 ### 5.1 Register
 
 ```
@@ -158,6 +179,10 @@ X-VettID-Attestation: <base64 Nitro attestation document>
   "token": "<platform push token>",
   "app_id": "<Android package / iOS bundle id>",
   "environment": "production" | "sandbox" }     # apns only; required there
+→ 202 { "pending": "<pending registration>" }
+
+POST /v1/confirm
+{ "pending": "<pending registration>", "code": "<challenge code>" }
 → 201 { "wake_blob": "<blob>" }
 ```
 
@@ -208,8 +233,9 @@ looked at):
    in it (`replay_detected`; `429 rate_limited` when the key has its cap
    of records or the cache is full). A request refused at step 1 or 2 is
    not recorded, so a signed request from a stranger takes no place in
-   the cache; sent again it is checked afresh. A request refused at step
-   3 or 4 is recorded: the same bytes sent again are `replay_detected`.
+   the cache; sent again it is checked afresh. A request refused from
+   step 3 on (0.5.0: steps 3 to 6) is recorded: the same bytes sent
+   again are `replay_detected`.
 3. checks the body: `platform` known; `token` 1–4,096 bytes of printable
    ASCII for `fcm`, 64–200 lowercase hex digits (even count) for `apns`;
    `environment` present for `apns` and absent for `fcm`; `app_id` in the
@@ -230,12 +256,42 @@ looked at):
    calls, and the gateway cannot disagree. (The vault's test stand-in
    answers an `environment` fault `token_invalid`; no vault depends on
    the difference.);
-4. seals and returns the blob. Nothing is written anywhere. A record too
-   large for a blob is `400 token_invalid` (§4, 0.4.2).
+4. (0.5.0) the **per-token challenge limit** (§8: 10 an hour, burst 5,
+   apart from the token's wakes; `429 rate_limited`);
+5. makes a random 16-byte challenge code (base64url, 22 characters) and
+   seals the record with it as a pending registration (§4), issued now.
+   Nothing is written anywhere. A record too large is `400 token_invalid`
+   (§4, 0.4.2);
+6. sends the challenge (§6) to the token **synchronously**, with a 5 s
+   timeout. A send that fails is answered as a wake's would be (§7:
+   `token_gone`, `token_invalid`, `rate_limited`, `provider_unavailable`),
+   and no pending registration is returned; otherwise `202 {pending}`.
 
-Registering never contacts the platform: a bad token shows up at the first
-wake (§7). The same body registered twice yields two different blobs; both
-work (the vault keeps one).
+The confirmation, `POST /v1/confirm`, in order: the per-address limit
+(§8, the registration rate, apart from registrations); signature and
+freshness; the body (one object with exactly `pending` and `code`, both
+strings, the code 1–64 characters and the pending registration at most
+6,144 bytes, else `bad_request`); the pending registration must open,
+its `k` must equal `X-VettID-Key`, it must be at most **10 minutes** old
+(and not issued in the future), the code must equal the one sealed in it
+(constant-time), and its record must be one the gateway would still seal
+(as §5.2 step 2). Every failure there is **`403 challenge_invalid`**,
+identically (no oracle), and is not recorded in the replay cache. Then
+the replay cache is checked and recorded, and the wake blob of the
+record, with `i` = now, is returned `201`.
+
+(0.5.0) A code does not name its pending registration, and FCM's collapse
+key `c` may drop an older undelivered code. A code checked against
+another pending registration fails `challenge_invalid`. So the vault
+keeps only its latest pending registration, and the app sends only the
+latest code (VAULT-MESSAGING §14.1).
+
+(0.5.0) Registering sends one challenge push to the token, so a dead
+token shows up at registration. The code reaches only the app that holds
+the token, and the blob is issued only for the code, so a vault that
+learned another phone's token gets no blob for it. The same body
+registered and confirmed twice yields two different blobs; both work
+(the vault keeps one).
 
 ### 5.2 Wake
 
@@ -253,7 +309,8 @@ POST /v1/wake
 2. Open the blob; its `k` MUST equal `X-VettID-Key`. A blob that does not
    open, has another channel, an unknown or deleted key, or another key
    than the signer is answered `blob_invalid`, identically in every case
-   (no oracle). (0.4.2) So is a blob whose record the gateway would no
+   (no oracle). (0.5.0) So is a blob more than 90 days past its `i` (§4);
+   only the `blob_expired` metric tells it apart. (0.4.2) So is a blob whose record the gateway would no
    longer seal: a platform it has no credentials for now, an `app_id`
    since removed from the channel's list, or `sandbox` where it is no
    longer accepted. (0.4.5) Once the blob has passed this step, and
@@ -325,6 +382,16 @@ extension sets grouping on the phone. No `interruption-level` in the
 payload: the extension sets it on the phone (§11.2), so Apple does not
 learn which wakes are security alarms.
 
+**Challenge (0.5.0).** **FCM:**
+`{ "message": { "token": "<t>", "data": { "c": "<code>" }, "android": { "priority": "HIGH", "collapse_key": "c", "ttl": "600s" } } }`.
+**APNs:** `apns-push-type: background`, `apns-priority: 5`,
+`apns-topic: <app_id>`, `apns-expiration: <now + 600>`, payload
+`{"aps":{"content-available":1},"c":"<code>"}`. Nothing is shown on
+either platform; the code is random and tells the platform nothing.
+Apple delivers background pushes to an app in the foreground, where the
+app registers. One started in the background may wait until the app is
+next in front.
+
 ## 7. Errors and failure feedback
 
 Codes (grammar per Relay Protocol §7.1):
@@ -333,11 +400,12 @@ Codes (grammar per Relay Protocol §7.1):
 |---|---|---|---|
 | 401 | `signature_invalid`, `timestamp_stale`, `replay_detected` | Auth | At registration `gateway_error`, no retry; at a wake retried like a `5xx` (owner decision 2026-10-10) |
 | 403 | `attestation_invalid` | Registration only | `gateway_error`; the app may retry later |
-| 400 | `bad_request`, `platform_invalid`, `app_invalid`, `token_invalid` | Body (§5.1 step 3). `token_invalid` also at a wake, when the platform refuses the token itself: FCM `INVALID_ARGUMENT` **and every other FCM `400`**, FCM `SENDER_ID_MISMATCH` (the token is another Firebase project's); APNs `BadDeviceToken` and `DeviceTokenNotForTopic` (the token is another app's) (0.4.2) | Registration refused; at a wake, `token_invalid` as `token_gone` and the other codes retried like a `5xx` (owner decision 2026-10-10) |
-| 410 | `token_gone` | FCM `UNREGISTERED` (whatever its status) and any FCM `404`; **any APNs `410`** (`Unregistered`, `ExpiredToken`) (0.4.2) | Drop the registration, ask the app for a new token |
+| 403 | `challenge_invalid` | Confirmation only (§5.1): a wrong code, another signer, a pending registration older than 10 minutes or one that does not open (0.5.0); also a record the gateway would no longer seal | `gateway_error`; the app registers again |
+| 400 | `bad_request`, `platform_invalid`, `app_invalid`, `token_invalid` | Body (§5.1 step 3). `token_invalid` also at a wake, when the platform refuses the token itself: FCM `INVALID_ARGUMENT` **and every other FCM `400`**, FCM `SENDER_ID_MISMATCH` (the token is another Firebase project's); APNs `BadDeviceToken` and `DeviceTokenNotForTopic` (the token is another app's) (0.4.2); also at registration, for the challenge's send (0.5.0) | Registration refused; at a wake, `token_invalid` as `token_gone` and the other codes retried like a `5xx` (owner decision 2026-10-10) |
+| 410 | `token_gone` | FCM `UNREGISTERED` (whatever its status) and any FCM `404`; **any APNs `410`** (`Unregistered`, `ExpiredToken`) (0.4.2); also at registration, for the challenge's send (0.5.0) | Drop the registration, ask the app for a new token |
 | 410 | `blob_invalid` | §5.2 step 2 | Same as `token_gone` |
-| 429 | `rate_limited` (+ `retry_after`) | §8; a full replay cache (§5, `retry_after` 1); a key at its cap of replay records (§8; `retry_after` up to 181); or the platform's own `429` (APNs `TooManyRequests`, FCM `QUOTA_EXCEEDED`), with the platform's `Retry-After` capped at 3,600 s (0.4.2) | Wait, merge triggers |
-| 502 | `provider_unavailable` (+ `retry_after`?) | Platform 5xx, timeout or no connection. (0.4.2) Also when the platform refuses **the gateway**, not the token: APNs `403` (`InvalidProviderToken`, `ExpiredProviderToken`, …), FCM `401`/`403`, a failed Google access-token fetch; and any other refusal a fixed payload should never meet (APNs `BadTopic`, `TopicDisallowed`, another `400`; an unknown answer). These raise the alarm of §10.5; no vault loses its registration over a fault of the gateway's | Retry with backoff |
+| 429 | `rate_limited` (+ `retry_after`) | §8; a full replay cache (§5, `retry_after` 1); a key at its cap of replay records (§8; `retry_after` up to 181); or the platform's own `429` (APNs `TooManyRequests`, FCM `QUOTA_EXCEEDED`), with the platform's `Retry-After` capped at 3,600 s (0.4.2); also at registration, for the challenge's send (0.5.0) | Wait, merge triggers |
+| 502 | `provider_unavailable` (+ `retry_after`?) | Platform 5xx, timeout or no connection. (0.4.2) Also when the platform refuses **the gateway**, not the token: APNs `403` (`InvalidProviderToken`, `ExpiredProviderToken`, …), FCM `401`/`403`, a failed Google access-token fetch; and any other refusal a fixed payload should never meet (APNs `BadTopic`, `TopicDisallowed`, another `400`; an unknown answer). These raise the alarm of §10.5; no vault loses its registration over a fault of the gateway's; also at registration, for the challenge's send (0.5.0) | Retry with backoff |
 | 500 | `internal` | | Retry with backoff |
 | 404 | `not_found` | Any other path or method (0.4.2) | Not sent by a vault |
 
@@ -365,6 +433,11 @@ lock wake: what is left of its 3 s budget), longer than this gateway's
   key, in memory only, never persisted or logged): at most **60 wakes per
   hour**, burst 10. The vault's own limits are lower (VAULT-MESSAGING
   §14.2), so this bounds only a misbehaving or compromised caller.
+- (0.5.0) **Challenges per token**: at most **10 an hour**, burst 5,
+  counted apart from wakes so that challenges cannot use up a token's
+  wake allowance. Confirmations are limited per source address at the
+  registration rate. The per-key replay cap counts the confirmation too
+  (32 with the defaults).
 - **Per source address**: registrations 30 per minute; wakes 6,000 per
   minute (vault hosts carry many vaults behind one address). (0.4.2)
   Applied **before the signature check**, as on the relay, so an
@@ -381,9 +454,9 @@ lock wake: what is left of its 3 s budget), longer than this gateway's
   registration and so to one token (§3); a record lives at most 181 s,
   in which the per-token limit admits at most 14 wakes (the burst of 10
   and 4 of refill), and every further wake is refused at that limit
-  whatever the vault does. With the registration that is 15 requests of
-  any use; the cap is twice that, rounded up to 32 (and follows the
-  per-token limit if an operator raises it). A request over the cap is
+  whatever the vault does. With the registration and (0.5.0) its
+  confirmation that is 16 requests of any use; the cap is twice that, 32
+  (and follows the per-token limit if an operator raises it). A request over the cap is
   `429 rate_limited` with `retry_after` set to the time until the key's
   first record expires; it is not recorded, the token's allowance is not
   charged, and no other key's request is affected. The cap is judged
@@ -399,9 +472,32 @@ lock wake: what is left of its 3 s budget), longer than this gateway's
   each a contentless wake that counts against the token's limit on that
   task.
 - **Abuse model.** Without a genuine vault's attestation nobody can
-  register, and without the blob and its wake key nobody can wake. A
-  stolen token alone is useless. A compromised vault enclave could wake
-  only the tokens it holds blobs for (its own app), within the limits.
+  register; without receiving the token's challenge push nobody can
+  complete a registration (0.5.0); and without the blob and its wake key
+  nobody can wake. A token someone has learned therefore gives them no
+  blob, a member with a genuine vault included: the code reaches only
+  the phone that holds the token, which hands it only to its own vault.
+  What remains:
+  (a) a learned token can be sent challenge pushes, which show nothing
+  and are limited per token (above);
+  (b) **the per-token challenge limit can be spent by someone else.** A
+  member who knows a phone's token can, from their own genuine vault,
+  register it again and again and use up its challenges (5 at once,
+  then one every 6 minutes, per task). While this goes on, that phone's
+  own registrations and 30-day renewals are refused `429`; once its
+  blob is 90 days old the phone is no longer woken (Android falls back
+  to the on-phone service; iOS has no fallback). The limit cannot tell
+  the two vaults apart, and no burst size helps against a caller who
+  may register 30 times a minute per address. The limit is kept because
+  it is what bounds challenge pushes to a learned token; the abuse is
+  made visible instead: `rate_limited{scope=challenge}` raises an alarm
+  (§10.5), and the operator can raise the limit or block the address;
+  (c) whoever can read the token's pushes (the platform, or the phone)
+  could complete a registration, but needs a genuine vault's
+  attestation as well.
+  A compromised vault enclave could wake only the tokens it holds blobs
+  for (its own app's), within the limits, and for at most 90 days from
+  each blob's issue.
   (0.4.5) Filling the replay cache, which has every wake and
   registration answered `429`, takes 200,000 live records of requests
   that passed step 2, at most 32 to a key: at least 6,250 registered
@@ -409,8 +505,11 @@ lock wake: what is left of its 3 s budget), longer than this gateway's
   Only a compromised vault enclave holds such keys (a member's own app
   never sees a wake key), and one such enclave is enough: every
   registration it makes has a new key, so at 30 registrations a minute
-  from one address it has 6,250 of them in about 3.5 hours, and blobs do
-  not expire. Less is needed to degrade the service than to stop it. The
+  from one address it has 6,250 of them in about 3.5 hours. (0.5.0) Each
+  registration now also needs a challenge answered from a phone holding
+  the token, at most 10 an hour per token and task. Fresh tokens are
+  cheap on a phone the attacker controls, so this slows the attack
+  rather than bounding it; the blobs expire after 90 days. Less is needed to degrade the service than to stop it. The
   cache is in 32 shards of 6,250 records, and a record's shard is
   derived from its key and signature, which the signer can steer by its
   choice of timestamp: about 196 registered keys can keep one shard
@@ -424,7 +523,8 @@ lock wake: what is left of its 3 s budget), longer than this gateway's
    platform, environment, app id, the wake public key, the time, and the
    source address (a vault host's, shared by every vault on it). At
    registration also the release's PCRs and the enclave's module id from
-   the attestation (which host ran the vault then). It never learns a
+   the attestation (which host ran the vault then). At registration it
+   also sends one challenge push to the token (0.5.0). It never learns a
    member, a vault id, a mailbox, a sender, a message or a size, and it
    **stores none** of the above.
 2. **What platforms learn**: that the VettID app on a device was woken at
@@ -633,7 +733,10 @@ vault's dev stack publishes it as `nitro_root`) or
 `PUSH_DEV_NITRO_ROOT_FILE` (PEM), and the accepted PCR0s from
 `PUSH_DEV_PCR0S` in place of a manifest. It refuses the real AWS Nitro
 root, runs only as channel `dev` (its blobs open nowhere else), and the
-`PUSH_DEV_*` variables are refused without `-dev`.
+`PUSH_DEV_*` variables are refused without `-dev`. (0.5.0) It records
+registration challenges with their codes (`GET /dev/push` →
+`challenges`), so that the dev stack can play the app; `registrations`
+counts completed registrations.
 
 ### 10.5 Observability without personal data
 
@@ -650,7 +753,14 @@ root, runs only as channel `dev` (its blobs open nowhere else), and the
   `replay_cache` or (0.4.5) `key` (a key at its cap of replay records,
   §8); a wake's `outcome` is `sent`, `coalesced`, an error
   code of §7, or `provider_auth`, `provider_rejected`,
-  `provider_rate_limited`, `provider_unavailable`.
+  `provider_rate_limited`, `provider_unavailable`. (0.5.0)
+  **`challenges{platform,outcome}`** (a registration's challenge send:
+  `sent` or a provider outcome), **`confirmations{platform,outcome}`**
+  (`ok` or the error code), **`blob_expired`** (wakes refused for age);
+  `scope` also takes `challenge` and `address_confirm`.
+  `registrations{outcome=ok}` means the challenge was sent and a pending
+  registration returned. The gateway's configuration gains
+  `PUSH_RATE_CHALLENGE_PER_HOUR` / `PUSH_RATE_CHALLENGE_BURST` (10 / 5).
 - **Logs**: errors and starts only, 14 days, in
   `/vettid-org/<stage>/push-service`; never a token, blob, wake key,
   attestation document, source address or per-request line. ALB access
@@ -671,7 +781,11 @@ root, runs only as channel `dev` (its blobs open nowhere else), and the
   alarm, **`no-healthy-task`**, fires when the load balancer has had
   no healthy task for 3 minutes, and reports the recovery too. The
   sums the alarms need across platforms come from metric filters on
-  the gateway's own metric lines.
+  the gateway's own metric lines. (0.5.0) **Challenge limit:** more
+  than 20 `rate_limited{scope=challenge}` in an hour, summed over
+  platforms (§8, abuse model (b)). To be adjusted once real traffic
+  shows a baseline. (Not yet in `VettidOrgPushStack`, which builds the
+  six alarms above; the gateway already emits the metric.)
 
 ## 11. Client behaviour (informative)
 
@@ -708,6 +822,12 @@ root, runs only as channel `dev` (its blobs open nowhere else), and the
    app and erased the registration itself, or was deleted with it
    (VAULT-MESSAGING §14.1), and the phone has no session left to send it
    over. The app deletes its FCM token locally and at Google.
+5. (0.5.0) The vault answers `push.register` with push state `pending`
+   while the challenge is outstanding. A data message with `c` is the
+   challenge, not a wake: the app collects nothing and shows nothing,
+   and within 10 minutes sends `push.confirm{code}` to its vault. The
+   on-phone service keeps running until the registration is `active`.
+   A code that arrives when none is expected is dropped.
 
 ### 11.2 iOS: Apple push (the iOS default)
 
@@ -726,7 +846,11 @@ modes: **Apple push** (the default) and **Off**.
   app fetches only while open, as on Android. The same warning ("Not
   recommended…").
 - The app re-registers whenever the OS gives a token different from the
-  one last registered, and on `push.token-needed`.
+  one last registered, and on `push.token-needed`. (0.5.0) The challenge
+  arrives as a background push while the app is in front (it registers
+  in front). The app sends `push.confirm{code}` to its vault; if a
+  challenge started in the background does not arrive, the app
+  registers again when next in front.
 
 **How a wake is handled: a notification service extension (recommended).**
 
@@ -1013,7 +1137,9 @@ again computes another digest and refuses a good signature.
 1. app obtains an FCM/APNs token from the OS (after the member opted in)
 2. app ──session (E2E)──▶ vault: push.register{platform, token, app_id, env?}
 3. vault: new wake key; ──POST /v1/register + attestation──▶ gateway
-4. gateway verifies, seals ──▶ vault keeps {wake key, wake_blob}; drops the token
+4. gateway verifies, sends a challenge code ──push──▶ app ──session──▶ vault
+   (push.confirm); vault ──POST /v1/confirm {pending, code}──▶ gateway (0.5.0)
+4a. gateway checks the code, seals ──▶ vault keeps {wake key, wake_blob}; drops the token
 5. ... a peer's message reaches the vault; the vault deposits feed.event /
    message.new into the app's mailbox (relay) ...
 6. vault (debounced) ──POST /v1/wake {wake_blob}──▶ gateway
@@ -1024,6 +1150,37 @@ again computes another digest and refuses a good signature.
 
 ## 17. Changelog
 
+- **0.5.0** — registration verifies the push token, and wake blobs
+  expire (as built in vettid-push #4; approved by the
+  owner 2026-10-14). A registration proved that a genuine vault release
+  was calling, but not that the token in it was its own app's: a member
+  with a modified app and their own genuine vault could have a blob
+  sealed for a token they had learned. **Registration is two steps
+  (§5, §5.1):** `POST /v1/register` checks as before, then the
+  per-token challenge limit, sends a silent challenge push with a
+  random 16-byte code to the token, and answers
+  `202 {"pending"}`, a pending registration sealed under the blob keys
+  with its own associated data (§4); `POST /v1/confirm
+  {"pending","code"}`, signed by the same wake key within 10 minutes,
+  returns `201 {"wake_blob"}`. Every refused confirmation is the same
+  `403 challenge_invalid` (§7) and leaves no replay record. A failed
+  challenge send is answered as a failed wake, so a dead token shows up
+  at registration. **Wake blobs expire (§4, §5.2):** a blob more than
+  90 days past its issue time `i` (the confirmation) is `blob_invalid`;
+  a reseal keeps `i`; the vault renews after 30 days. **Payloads (§6):**
+  the challenge for FCM and APNs. **Limits (§8):** challenges 10 an
+  hour, burst 5, per token apart from wakes; confirmations per address
+  at the registration rate; the per-key replay cap counts the
+  confirmation (32 with the defaults). The abuse model states what
+  remains, including that someone else can spend a token's challenge
+  limit (§8 (b)). **Observability (§10.5):** metrics `challenges`,
+  `confirmations`, `blob_expired`, `rate_limited` scopes `challenge`
+  and `address_confirm`; `registrations{outcome=ok}` now counts
+  challenges sent; a proposed challenge-limit alarm. §1 principles 1
+  and 4, §2, §9.1, §10.4 (the dev stand-in's `challenges`), §11.1 and
+  §11.2 (`push.confirm`), §16 follow. The vault's side (`push.confirm`,
+  the pending state, renewal after 30 days) is VAULT-MESSAGING §14.1's
+  to specify.
 - **0.4.5** — the replay cache holds only requests whose key the
   gateway knows (vettid-push #2; approved by the owner 2026-10-13).
   Until now a request was recorded as soon as its signature verified,
