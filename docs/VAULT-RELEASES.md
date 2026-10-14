@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.25
+version: 0.1.26
 date: 2026-10-13
 owner: Al Liebl (Mesmer)
 changelog:
@@ -209,6 +209,8 @@ changelog:
     deletion was scheduled again and falls seven days after that, later
     than the keys of releases 4 to 6; and with release 11 `active`
     since that day, staging 3 to 6 have no rescue target any more
+  - 0.1.26 (editorial, as built; staging release S12, 2026-10-14;
+    approved by the owner 2026-10-14). §8.8: S12's capacity figures
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.29.3) §11.10 release updates, §12.5 deletion, §13.5, §13.9
@@ -1659,6 +1661,14 @@ vault), unlock p50 193 ms / 393 ms / 817 ms at concurrency 1 / 2 / 4,
 idle CPU 0.9 ms per vault per minute. S11's hardening of the vault
 process (the system call filter, no user namespaces) leaves the figures
 where S10's were.
+
+*Measured again (staging S12, 2026-10-14):* the same run on S12's canary
+host (same host and enclave size), PASS: 58 vaults held at the memory floor,
+about 890 idle unlocked vaults projected per host (4.5 MiB marginal), unlock
+p50 197 ms / 403 ms / 840 ms at concurrency 1 / 2 / 4, idle CPU 1.5 ms per
+vault per minute. S12 fixes a race that could crash a vault process when
+several unlocks ran at once on one vCPU (vettid-vault #85); this run's
+concurrent unlocks all completed.
 
 *Relay connections (0.1.14; VAULT-RELAY-SCALING 0.1.2 §3, §10;
 vettid-vault #66).* Memory, not the relay path, bounds vaults per host:
