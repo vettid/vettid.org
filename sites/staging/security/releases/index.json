@@ -1,9 +1,39 @@
 {
-  "serial": 14,
+  "serial": 15,
   "releases": [
     {
-      "release": 11,
+      "release": 12,
       "status": "active",
+      "published_at": "2026-10-14T22:31:53Z",
+      "pcr0": "859733fa15df56bfedcb8c3a0a1524e9287aea6a8fa01d798d0f8c8df32cc2cbf32cdc5102bbd89b1f6c6e05e478e4bf",
+      "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
+      "pcr2": "97706f0cfe2c2bd700982b5711332974a41c2ffbb829946e1af84c4c0c2229bfa2e7412877b5801ec6806a62fb475753",
+      "seal_key": "arn:aws:kms:us-east-1:347272280361:key/c9e6489a-91b4-422f-a953-c75d015e4eac",
+      "notes": "https://staging.vettid.org/security/releases/12/",
+      "tag": "release/staging/12",
+      "source_commit": "5339f8bf136fbdee82f952ba1c04164368807aa6",
+      "summary": "Release 12 fixes an unlock that could fail when several vaults unlocked at once, keeps vaults further apart, and lets only your phone approve connections.",
+      "changes": [
+        "Fix: when several vaults on the same host unlocked at the same moment, an unlock could fail, and trying again worked. This was in every earlier staging release. Unlocks no longer fail this way.",
+        "Hardening: each vault process on a host now runs under an identity that is never given to another vault, anything a vault's process leaves running is stopped when it ends, and a vault's process can no longer write files.",
+        "Hardening: a vault's process can reach the record that names your vault, and your previous vault when you enroll again, only as far as enrolling and erasing need.",
+        "Only your phone can now approve a connection request, create or accept an invitation, start or accept an introduction, or approve a connection's request. A desktop can still decline or deny them; its older pending ones are refused.",
+        "Push registration now checks that a push token really belongs to the phone registering it: VettID's push service sends the phone a code and your vault confirms it. Nothing changes for you until push notifications arrive in a later app update."
+      ],
+      "security": "recommended",
+      "security_text": "Release 12 closes ways in which a fault in one vault's process could have reached another vault's process on the same host: an identity could be given again to the next vault, and something a process left running could have outlived it. It also narrows what a vault's process may write to the record that names a member's vault. We know of no use of any of these against any vault. Your PIN and credential password were not exposed.",
+      "affects": [
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "listed": true
+    },
+    {
+      "release": 11,
+      "status": "deprecated",
       "published_at": "2026-10-13T18:35:58Z",
       "pcr0": "398b654dfcd98079fe558e4a2a2c000877fd59b4f9298383dc66ed0d54f6706938e1620f2d1d80b8cb02dca2eef3e72b",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
