@@ -9,6 +9,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as route53targets from 'aws-cdk-lib/aws-route53-targets';
+import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import { Construct } from 'constructs';
 import { AppConfig, ORG, hostName, resourceName } from '../config';
 import { publishRef, readRef } from '../constructs/ssm-refs';
@@ -82,6 +83,70 @@ export const RELAY_ALARM_LIMITS = {
    */
   tableWriteUnitsPerHour: 360_000,
 } as const;
+
+/**
+ * The Valkey cache's usage limits and the share of each at which its
+ * alarms fire (AWS's advice for ElastiCache Serverless: 75 %). At the
+ * storage limit the cache evicts keys with a TTL (every relay key has
+ * one), so replay records can go early; at the ECPU limit it throttles,
+ * and every signed request is refused while the replay check fails.
+ */
+export const RELAY_VALKEY_LIMITS = {
+  dataStorageGb: 1,
+  ecpuPerSecond: 100_000,
+  alarmShare: 0.75,
+} as const;
+
+/**
+ * What the relay's log groups (the service log and the VPC flow log) may
+ * ingest in a day before an alarm: 500 MB, about 250 times the service
+ * log's measured 1 to 2 MB a day (October 2026).
+ */
+export const RELAY_LOG_INGEST_BYTES_PER_DAY = 500_000_000;
+
+/** How long the relay VPC's flow log is kept. */
+export const RELAY_FLOW_LOG_RETENTION = logs.RetentionDays.ONE_MONTH;
+
+/**
+ * The web ACL's rate-based rule on the relay's load balancer: requests a
+ * source address may make in the evaluation window before WAF answers
+ * `429` (AWS WAF counts the requests of the window looking back from now,
+ * per source IP, and blocks near the limit, not exactly at it).
+ *
+ * 60,000 per 5 minutes is 200 a second, twice the relay's flood guard
+ * (100/s, RELAY-PROTOCOL §7.2). The two do not refuse alike: the flood
+ * guard only slows an address down to its rate (requests over it are
+ * answered `429`, the rest go through), while WAF, once an address's
+ * 5-minute estimate passes the limit, blocks *every* request from it
+ * until the estimate drops, which can take minutes. A client retrying
+ * faster than about 200 a second (a vault host whose retries run away)
+ * would then lose all of its relay traffic for minutes, not just the
+ * excess. In return WAF stops a flood before it costs task CPU, log lines
+ * or Valkey ECPU. A vault host of 900 vaults (the projected size) sends
+ * 36 requests a second idle and about 81 at a message a minute per vault:
+ * 10,800 and 24,300 in 5 minutes, 18 % and 41 % of the limit. Raise this
+ * with the flood guard (keep it at twice the guard).
+ *
+ * `mode`: the rule starts in `count` (WAF only counts the addresses it
+ * would block; the `waf-rate-limit` alarm says when one does). Switch it
+ * to `block` after a week of normal traffic without a count (RUNBOOK
+ * "Relay" → "The load balancer's web ACL"): a one-line, reviewed change.
+ */
+export const RELAY_WAF_RATE_LIMIT: {
+  readonly requests: number;
+  readonly windowSeconds: number;
+  readonly retryAfterSeconds: number;
+  readonly mode: 'count' | 'block';
+} = {
+  requests: 60_000,
+  windowSeconds: 300,
+  /**
+   * `retry_after` and `Retry-After` of the refusal: a minimum. The block
+   * lasts until WAF's estimate falls below the limit, which can be longer.
+   */
+  retryAfterSeconds: 60,
+  mode: 'count',
+};
 
 /**
  * relay.vettid.org — the VettID mailbox relay (github.com/vettid/vettid-relay,
@@ -171,8 +236,8 @@ export class VettidOrgRelayStack extends cdk.Stack {
       subnetIds: vpc.publicSubnets.map((s) => s.subnetId),
       userGroupId: valkeyUsers.userGroupId,
       cacheUsageLimits: {
-        dataStorage: { maximum: 1, unit: 'GB' },
-        ecpuPerSecond: { maximum: 100000 },
+        dataStorage: { maximum: RELAY_VALKEY_LIMITS.dataStorageGb, unit: 'GB' },
+        ecpuPerSecond: { maximum: RELAY_VALKEY_LIMITS.ecpuPerSecond },
       },
       snapshotRetentionLimit: 0, // nothing worth restoring
     });
@@ -218,6 +283,31 @@ export class VettidOrgRelayStack extends cdk.Stack {
       logGroupName: `/vettid-org/${config.stage}/relay-service`,
       retention: logs.RetentionDays.ONE_MONTH,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    // VPC flow log: rejected traffic only (what the security groups turned
+    // away: scans of the tasks' and the load balancer's public addresses,
+    // anything trying a port that is not open). Accepted flows are not
+    // logged: they would grow with every request a flood brings, and the
+    // relay counts its own traffic. CloudWatch Logs, kept 30 days.
+    const flowLogGroup = new logs.LogGroup(this, 'FlowLogs', {
+      logGroupName: `/vettid-org/${config.stage}/relay-vpc-flow`,
+      retention: RELAY_FLOW_LOG_RETENTION,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+    // The role VPC Flow Logs assumes to write the group: only for this
+    // account's flow logs (confused-deputy guard).
+    const flowLogRole = new iam.Role(this, 'FlowLogRole', {
+      assumedBy: new iam.ServicePrincipal('vpc-flow-logs.amazonaws.com', {
+        conditions: {
+          StringEquals: { 'aws:SourceAccount': this.account },
+          ArnLike: { 'aws:SourceArn': `arn:${this.partition}:ec2:${this.region}:${this.account}:vpc-flow-log/*` },
+        },
+      }),
+    });
+    vpc.addFlowLog('FlowLog', {
+      destination: ec2.FlowLogDestination.toCloudWatchLogs(flowLogGroup, flowLogRole),
+      trafficType: ec2.FlowLogTrafficType.REJECT,
     });
 
     taskDef.addContainer('Relay', {
@@ -288,8 +378,59 @@ export class VettidOrgRelayStack extends cdk.Stack {
       securityGroup: albSg,
       idleTimeout: cdk.Duration.seconds(75), // > 25 s long-poll; WebSockets ping within this
       dropInvalidHeaderFields: true,
+      deletionProtection: true,
+      // No access log, on purpose: it would record each request's full
+      // path, which carries mailbox and message ids, next to the client's
+      // address (RELAY-PROTOCOL §8). WAF's sampled requests serve an incident.
     });
     alb.addRedirect({ sourcePort: 80, targetPort: 443 });
+
+    // ---- WAF on the load balancer: a per-address rate limit -------------------
+    // One rate-based rule (RELAY_WAF_RATE_LIMIT), keyed on the source
+    // address of the connection to the load balancer (the client's: nothing
+    // sits in front of it). WAF sees each HTTP request and a WebSocket's
+    // upgrade, not the frames inside a session. In `block` mode the refusal
+    // is the relay's own `rate_limited` error, so clients back off as they
+    // would for the flood guard; in `count` mode (the start) WAF only
+    // counts. The push gateway's requests on this load balancer are
+    // counted too. No managed rule groups: the relay authenticates every
+    // request that does anything.
+    const W = RELAY_WAF_RATE_LIMIT;
+    const webAcl = new wafv2.CfnWebACL(this, 'WebAcl', {
+      name: resourceName(config, 'relay'),
+      scope: 'REGIONAL',
+      defaultAction: { allow: {} },
+      customResponseBodies: {
+        'rate-limited': {
+          contentType: 'APPLICATION_JSON',
+          content: JSON.stringify({ code: 'rate_limited', message: 'too many requests from this address; retry after at least retry_after seconds', retry_after: W.retryAfterSeconds }),
+        },
+      },
+      rules: [
+        {
+          name: 'rate-limit-per-ip',
+          priority: 0,
+          action: W.mode === 'block'
+            ? {
+              block: {
+                customResponse: {
+                  responseCode: 429,
+                  customResponseBodyKey: 'rate-limited',
+                  responseHeaders: [
+                    { name: 'Retry-After', value: String(W.retryAfterSeconds) },
+                    { name: 'Cache-Control', value: 'no-store' },
+                  ],
+                },
+              },
+            }
+            : { count: {} },
+          statement: { rateBasedStatement: { limit: W.requests, evaluationWindowSec: W.windowSeconds, aggregateKeyType: 'IP' } },
+          visibilityConfig: { cloudWatchMetricsEnabled: true, metricName: resourceName(config, 'relay-rate-limit'), sampledRequestsEnabled: true },
+        },
+      ],
+      visibilityConfig: { cloudWatchMetricsEnabled: true, metricName: resourceName(config, 'relay-waf'), sampledRequestsEnabled: true },
+    });
+    new wafv2.CfnWebACLAssociation(this, 'WebAclAssociation', { resourceArn: alb.loadBalancerArn, webAclArn: webAcl.attrArn });
     const listener = alb.addListener('Https', {
       port: 443,
       certificates: [certificate],
@@ -423,6 +564,88 @@ export class VettidOrgRelayStack extends cdk.Stack {
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
       evaluationPeriods: 5,
       datapointsToAlarm: 3,
+    });
+    // ---- Valkey (RELAY_VALKEY_LIMITS) ------------------------------------------
+    // ElastiCache Serverless metrics, by the cache's name (dimension clusterId).
+    const V = RELAY_VALKEY_LIMITS;
+    const cacheMetric = (metricName: string, statistic: string) =>
+      new cloudwatch.Metric({ namespace: 'AWS/ElastiCache', metricName, dimensionsMap: { clusterId: cacheName }, statistic, period: minute });
+    const storageBytes = V.alarmShare * V.dataStorageGb * 1_000_000_000;
+    alarm('ValkeyStorage', 'valkey-storage', {
+      alarmDescription: says(`Valkey holds ${storageBytes / 1_000_000} MB or more in 3 of 5 minutes: ${V.alarmShare * 100} % of its ${V.dataStorageGb} GB limit, at which it evicts keys (replay records among them)`),
+      metric: cacheMetric('BytesUsedForCache', 'Maximum'),
+      threshold: storageBytes,
+      comparisonOperator: atLeast,
+      evaluationPeriods: 5,
+      datapointsToAlarm: 3,
+    });
+    const ecpuPerMinute = V.alarmShare * V.ecpuPerSecond * 60;
+    alarm('ValkeyEcpu', 'valkey-ecpu', {
+      alarmDescription: says(`Valkey used ${ecpuPerMinute} or more ECPUs a minute in 3 of 5 minutes: ${V.alarmShare * 100} % of its limit of ${V.ecpuPerSecond} a second, at which it throttles commands`),
+      metric: cacheMetric('ElastiCacheProcessingUnits', 'Sum'),
+      threshold: ecpuPerMinute,
+      comparisonOperator: atLeast,
+      evaluationPeriods: 5,
+      datapointsToAlarm: 3,
+    });
+    alarm('ValkeyEvictions', 'valkey-evictions', {
+      alarmDescription: says('Valkey evicted keys: it is full, and replay records may have gone before their time (replay protection is weakened until it is not)'),
+      metric: cacheMetric('Evictions', 'Sum'),
+      threshold: 0,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      evaluationPeriods: 1,
+    });
+    // Errors: throttled commands (the ECPU limit: signed requests are refused
+    // while it lasts), IAM authentication throttled (new connections fail),
+    // and commands, keys or channels outside the relay user's access string.
+    alarm('ValkeyErrors', 'valkey-errors', {
+      alarmDescription: says('Valkey throttled commands, refused connections (IAM authentication throttled) or refused a command, key or channel outside the relay\'s access: the relay\'s coordination is failing'),
+      metric: new cloudwatch.MathExpression({
+        expression: 'FILL(thr, 0) + FILL(iam, 0) + FILL(cmd, 0) + FILL(key, 0) + FILL(chan, 0)',
+        label: 'Valkey errors',
+        period: minute,
+        usingMetrics: {
+          thr: cacheMetric('ThrottledCmds', 'Sum'),
+          iam: cacheMetric('IamAuthenticationThrottling', 'Sum'),
+          cmd: cacheMetric('CommandAuthorizationFailures', 'Sum'),
+          key: cacheMetric('KeyAuthorizationFailures', 'Sum'),
+          chan: cacheMetric('ChannelAuthorizationFailures', 'Sum'),
+        },
+      }),
+      threshold: 0,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      evaluationPeriods: 1,
+    });
+    // ---- Log volume (RELAY_LOG_INGEST_BYTES_PER_DAY) ---------------------------
+    const ingested = (group: logs.LogGroup) =>
+      new cloudwatch.Metric({ namespace: 'AWS/Logs', metricName: 'IncomingBytes', dimensionsMap: { LogGroupName: group.logGroupName }, statistic: 'Sum', period: cdk.Duration.days(1) });
+    alarm('LogVolume', 'log-volume', {
+      alarmDescription: says(`the relay's log groups (service and VPC flow log) ingested ${RELAY_LOG_INGEST_BYTES_PER_DAY / 1_000_000} MB or more in a day: about 250 times normal, and $0.50 a GB`),
+      metric: new cloudwatch.MathExpression({
+        expression: 'FILL(svc, 0) + FILL(flow, 0)',
+        label: 'bytes ingested',
+        period: cdk.Duration.days(1),
+        usingMetrics: { svc: ingested(logGroup), flow: ingested(flowLogGroup) },
+      }),
+      threshold: RELAY_LOG_INGEST_BYTES_PER_DAY,
+      comparisonOperator: atLeast,
+      evaluationPeriods: 1,
+    });
+    // ---- The web ACL's rate rule (RELAY_WAF_RATE_LIMIT) -------------------------
+    // WAF's own metric for the rule (dimension Rule = the rule's metric
+    // name): requests it counted (count mode) or blocked (block mode).
+    alarm('WafRateLimit', 'waf-rate-limit', {
+      alarmDescription: says(`WAF's rate rule (${W.requests} requests per ${W.windowSeconds / 60} minutes per address) ${W.mode === 'block' ? 'blocked' : 'would have blocked (count mode)'} requests in the last 5 minutes: one address is above twice the flood guard. A vault host? Then raise the limit with the flood guard`),
+      metric: new cloudwatch.Metric({
+        namespace: 'AWS/WAFV2',
+        metricName: W.mode === 'block' ? 'BlockedRequests' : 'CountedRequests',
+        dimensionsMap: { WebACL: resourceName(config, 'relay'), Region: this.region, Rule: resourceName(config, 'relay-rate-limit') },
+        statistic: 'Sum',
+        period: cdk.Duration.minutes(5),
+      }),
+      threshold: 0,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      evaluationPeriods: 1,
     });
     // Liveness of the line itself (and so of the alarms on it, which rest
     // on it): every task writes it every minute, so five minutes without

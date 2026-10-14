@@ -1,7 +1,9 @@
 import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { loadConfig } from '../lib/config';
-import { VettidOrgRelayStack, RELAY_ALARM_LIMITS, RELAY_MAX_TASKS, RELAY_MIN_TASKS, RELAY_TASK_MEMORY_MIB } from '../lib/stacks/relay-stack';
+import {
+  VettidOrgRelayStack, RELAY_ALARM_LIMITS, RELAY_LOG_INGEST_BYTES_PER_DAY, RELAY_MAX_TASKS, RELAY_MIN_TASKS, RELAY_TASK_MEMORY_MIB, RELAY_VALKEY_LIMITS, RELAY_WAF_RATE_LIMIT,
+} from '../lib/stacks/relay-stack';
 import { VettidOrgRelayDataStack, RELAY_TABLE_LIMITS } from '../lib/stacks/relay-data-stack';
 
 const app = new cdk.App();
@@ -130,8 +132,8 @@ describe('service (stateless)', () => {
   test('SQLite-era resources are gone from the stack (deleted by hand after cutover); new service log group', () => {
     t.resourceCountIs('AWS::S3::Bucket', 0);
     const groups = Object.values<any>(t.findResources('AWS::Logs::LogGroup'));
-    expect(groups.map((g) => g.Properties.LogGroupName)).toEqual(['/vettid-org/prod/relay-service']);
-    expect(groups[0].DeletionPolicy).toBe('Retain');
+    expect(groups.map((g) => g.Properties.LogGroupName)).toEqual(['/vettid-org/prod/relay-service', '/vettid-org/prod/relay-vpc-flow']);
+    for (const g of groups) expect(g.DeletionPolicy).toBe('Retain');
     // New task-definition construct id: the running SQLite task's role and
     // policy are only removed in CloudFormation's cleanup phase.
     expect(Object.keys(t.findResources('AWS::ECS::TaskDefinition'))[0]).toMatch(/^TaskMulti/);
@@ -257,12 +259,78 @@ describe('alarms on the `rate limits` line (RELAY-PROTOCOL §7.2)', () => {
     });
   });
 
+  // ElastiCache Serverless metrics, by the cache's name.
+  const CACHE = [{ Name: 'clusterId', Value: 'vettid-org-relay' }];
+
+  test('valkey-storage: 75 % of the 1 GB limit (where eviction starts) in 3 of 5 minutes', () => {
+    expect(RELAY_VALKEY_LIMITS).toEqual({ dataStorageGb: 1, ecpuPerSecond: 100000, alarmShare: 0.75 });
+    expect(byName(prod, 'valkey-storage')).toMatchObject({
+      Namespace: 'AWS/ElastiCache', MetricName: 'BytesUsedForCache', Dimensions: CACHE, Statistic: 'Maximum', Period: 60,
+      ComparisonOperator: 'GreaterThanOrEqualToThreshold', Threshold: 750_000_000, EvaluationPeriods: 5, DatapointsToAlarm: 3, TreatMissingData: 'notBreaching',
+    });
+    // The alarm and the cache's own limit come from the same numbers.
+    t.hasResourceProperties('AWS::ElastiCache::ServerlessCache', {
+      CacheUsageLimits: { DataStorage: { Maximum: 1, Unit: 'GB' }, ECPUPerSecond: { Maximum: 100000 } },
+    });
+  });
+
+  test('valkey-ecpu: 75 % of 100,000 ECPU a second, as a one-minute sum, in 3 of 5 minutes', () => {
+    expect(byName(prod, 'valkey-ecpu')).toMatchObject({
+      Namespace: 'AWS/ElastiCache', MetricName: 'ElastiCacheProcessingUnits', Dimensions: CACHE, Statistic: 'Sum', Period: 60,
+      ComparisonOperator: 'GreaterThanOrEqualToThreshold', Threshold: 0.75 * 100000 * 60, EvaluationPeriods: 5, DatapointsToAlarm: 3, TreatMissingData: 'notBreaching',
+    });
+  });
+
+  test('valkey-evictions: any eviction', () => {
+    expect(byName(prod, 'valkey-evictions')).toMatchObject({
+      Namespace: 'AWS/ElastiCache', MetricName: 'Evictions', Dimensions: CACHE, Statistic: 'Sum', Period: 60,
+      ComparisonOperator: 'GreaterThanThreshold', Threshold: 0, EvaluationPeriods: 1, TreatMissingData: 'notBreaching',
+    });
+  });
+
+  test('valkey-errors: any throttled command, throttled IAM authentication or authorization failure', () => {
+    const a = byName(prod, 'valkey-errors');
+    expect(a).toMatchObject({ ComparisonOperator: 'GreaterThanThreshold', Threshold: 0, EvaluationPeriods: 1, TreatMissingData: 'notBreaching' });
+    expect(a.Metrics.filter((m: any) => m.Expression)).toEqual([
+      expect.objectContaining({ Expression: 'FILL(thr, 0) + FILL(iam, 0) + FILL(cmd, 0) + FILL(key, 0) + FILL(chan, 0)', ReturnData: true }),
+    ]);
+    const read = Object.fromEntries(
+      a.Metrics.filter((m: any) => m.MetricStat).map((m: any) => {
+        expect(m.MetricStat).toMatchObject({ Period: 60, Stat: 'Sum', Metric: { Namespace: 'AWS/ElastiCache', Dimensions: CACHE } });
+        return [m.Id, m.MetricStat.Metric.MetricName];
+      }),
+    );
+    expect(read).toEqual({
+      thr: 'ThrottledCmds',
+      iam: 'IamAuthenticationThrottling',
+      cmd: 'CommandAuthorizationFailures',
+      key: 'KeyAuthorizationFailures',
+      chan: 'ChannelAuthorizationFailures',
+    });
+  });
+
+  test('log-volume: 500 MB a day ingested by the service log and the flow log together', () => {
+    expect(RELAY_LOG_INGEST_BYTES_PER_DAY).toBe(500_000_000);
+    const a = byName(prod, 'log-volume');
+    expect(a).toMatchObject({ ComparisonOperator: 'GreaterThanOrEqualToThreshold', Threshold: 500_000_000, EvaluationPeriods: 1, TreatMissingData: 'notBreaching' });
+    expect(a.Metrics.filter((m: any) => m.Expression)).toEqual([expect.objectContaining({ Expression: 'FILL(svc, 0) + FILL(flow, 0)', ReturnData: true })]);
+    const groups = Object.fromEntries(
+      a.Metrics.filter((m: any) => m.MetricStat).map((m: any) => {
+        expect(m.MetricStat).toMatchObject({ Period: 86400, Stat: 'Sum', Metric: { Namespace: 'AWS/Logs', MetricName: 'IncomingBytes' } });
+        return [m.Id, m.MetricStat.Metric.Dimensions[0].Value.Ref];
+      }),
+    );
+    expect(groups.svc).toMatch(/^ServiceLogs/);
+    expect(groups.flow).toMatch(/^FlowLogs/);
+  });
+
   test('every alarm notifies the security-alerts topic of the management account; no topic of its own', () => {
     const all = alarmsOf(prod);
     expect(all.map((a) => a.AlarmName).sort()).toEqual(
       [
-        'address-busy', 'address-refused', 'collectors', 'key-refused', 'rate-limits-silent', 'register-refused',
-        'table-reads-high', 'table-throttled', 'table-write-volume', 'table-writes-high', 'ws-sessions',
+        'address-busy', 'address-refused', 'collectors', 'key-refused', 'log-volume', 'rate-limits-silent', 'register-refused',
+        'table-reads-high', 'table-throttled', 'table-write-volume', 'table-writes-high',
+        'valkey-ecpu', 'valkey-errors', 'valkey-evictions', 'valkey-storage', 'waf-rate-limit', 'ws-sessions',
       ].map((n) => `vettid-org-relay-${n}`),
     );
     for (const a of all) {
@@ -276,15 +344,121 @@ describe('alarms on the `rate limits` line (RELAY-PROTOCOL §7.2)', () => {
 
   test('anywhere else the alarms exist without an action (the topic is the management account\'s)', () => {
     const all = alarmsOf(t);
-    expect(all).toHaveLength(11);
+    expect(all).toHaveLength(17);
     for (const a of all) expect(a.AlarmActions).toBeUndefined();
   });
 
   test('the alarms change nothing else: one task definition, one service, the same log group', () => {
     prod.resourceCountIs('AWS::ECS::TaskDefinition', 1);
     prod.resourceCountIs('AWS::ECS::Service', 1);
-    prod.resourceCountIs('AWS::Logs::LogGroup', 1);
+    prod.resourceCountIs('AWS::Logs::LogGroup', 2); // the service log and the VPC flow log
     expect(Object.values<any>(t.findResources('AWS::ECS::TaskDefinition'))[0].Properties.Memory).toBe(String(RELAY_TASK_MEMORY_MIB));
+  });
+});
+
+describe('edge: WAF, deletion protection, no access log, flow log', () => {
+  test('a regional web ACL on the relay ALB: one rate-based rule, 60,000 requests per 5 minutes per source IP', () => {
+    expect(RELAY_WAF_RATE_LIMIT).toMatchObject({ requests: 60000, windowSeconds: 300, retryAfterSeconds: 60 });
+    const acls = Object.values<any>(t.findResources('AWS::WAFv2::WebACL')).map((a) => a.Properties);
+    expect(acls).toHaveLength(1);
+    const acl = acls[0];
+    expect(acl).toMatchObject({ Name: 'vettid-org-relay', Scope: 'REGIONAL', DefaultAction: { Allow: {} } });
+    expect(acl.Rules).toHaveLength(1);
+    expect(acl.Rules[0]).toMatchObject({
+      Name: 'rate-limit-per-ip',
+      Statement: { RateBasedStatement: { Limit: 60000, EvaluationWindowSec: 300, AggregateKeyType: 'IP' } },
+      VisibilityConfig: { CloudWatchMetricsEnabled: true, MetricName: 'vettid-org-relay-rate-limit', SampledRequestsEnabled: true },
+    });
+    expect(acl.Rules[0].Statement.RateBasedStatement.ScopeDownStatement).toBeUndefined();
+    // The relay's own error body (RELAY-PROTOCOL §7.1), ready for block mode.
+    expect(JSON.parse(acl.CustomResponseBodies['rate-limited'].Content)).toEqual({ code: 'rate_limited', message: expect.stringContaining('at least'), retry_after: 60 });
+    // Attached to the stack's load balancer.
+    const assoc = Object.values<any>(t.findResources('AWS::WAFv2::WebACLAssociation')).map((a) => a.Properties);
+    expect(assoc).toHaveLength(1);
+    expect(assoc[0].ResourceArn).toEqual({ Ref: expect.stringMatching(/^Alb/) });
+    expect(assoc[0].WebACLArn).toEqual({ 'Fn::GetAtt': [expect.stringMatching(/^WebAcl/), 'Arn'] });
+  });
+
+  test('the rule deploys in COUNT mode: it blocks nothing until switched to block', () => {
+    expect(RELAY_WAF_RATE_LIMIT.mode).toBe('count');
+    const acl = Object.values<any>(t.findResources('AWS::WAFv2::WebACL'))[0].Properties;
+    expect(acl.Rules[0].Action).toEqual({ Count: {} });
+  });
+
+  test('block mode answers 429 with the relay\'s body and Retry-After (a minimum)', () => {
+    const blockApp = new cdk.App();
+    const saved = RELAY_WAF_RATE_LIMIT.mode;
+    (RELAY_WAF_RATE_LIMIT as { mode: string }).mode = 'block';
+    try {
+      const b = Template.fromStack(new VettidOrgRelayStack(blockApp, 'RelayBlock', { config: loadConfig(blockApp.node), relayImage: 'ghcr.io/vettid/vettid-relay@sha256:' + 'a'.repeat(64), env }));
+      const rule = Object.values<any>(b.findResources('AWS::WAFv2::WebACL'))[0].Properties.Rules[0];
+      expect(rule.Action).toEqual({
+        Block: {
+          CustomResponse: {
+            ResponseCode: 429,
+            CustomResponseBodyKey: 'rate-limited',
+            ResponseHeaders: [{ Name: 'Retry-After', Value: '60' }, { Name: 'Cache-Control', Value: 'no-store' }],
+          },
+        },
+      });
+      const a = Object.values<any>(b.findResources('AWS::CloudWatch::Alarm')).map((x) => x.Properties).find((x) => x.AlarmName === 'vettid-org-relay-waf-rate-limit');
+      expect(a.MetricName).toBe('BlockedRequests');
+    } finally {
+      (RELAY_WAF_RATE_LIMIT as { mode: string }).mode = saved;
+    }
+  });
+
+  test('waf-rate-limit: any request the rule counts (count mode), by the ACL, region and rule metric', () => {
+    const a = Object.values<any>(t.findResources('AWS::CloudWatch::Alarm')).map((x) => x.Properties).find((x) => x.AlarmName === 'vettid-org-relay-waf-rate-limit');
+    expect(a).toMatchObject({
+      Namespace: 'AWS/WAFV2', MetricName: 'CountedRequests', Statistic: 'Sum', Period: 300,
+      ComparisonOperator: 'GreaterThanThreshold', Threshold: 0, EvaluationPeriods: 1, TreatMissingData: 'notBreaching',
+    });
+    expect(Object.fromEntries(a.Dimensions.map((d: any) => [d.Name, d.Value]))).toEqual({
+      WebACL: 'vettid-org-relay', Region: 'us-east-1', Rule: 'vettid-org-relay-rate-limit',
+    });
+  });
+
+  test('the WAF limit is twice the flood guard, and a 900-vault host is well under it', () => {
+    const perWindow = (perSecond: number) => perSecond * RELAY_WAF_RATE_LIMIT.windowSeconds;
+    expect(RELAY_WAF_RATE_LIMIT.requests).toBe(2 * perWindow(100)); // flood guard 100/s (§7.2)
+    // §7.2: a host of 900 vaults sends 36/s idle, about 81/s at a message a minute per vault.
+    expect(perWindow(81)).toBeLessThan(RELAY_WAF_RATE_LIMIT.requests / 2);
+    // Even an address at the flood guard plus its whole burst is not blocked by WAF.
+    expect(perWindow(100) + 300).toBeLessThan(RELAY_WAF_RATE_LIMIT.requests);
+  });
+
+  test('ALB: deletion protection on, no access log', () => {
+    const alb = Object.values<any>(t.findResources('AWS::ElasticLoadBalancingV2::LoadBalancer'))[0].Properties;
+    const attrs = Object.fromEntries(alb.LoadBalancerAttributes.map((a: any) => [a.Key, a.Value]));
+    expect(attrs['deletion_protection.enabled']).toBe('true');
+    // No access log (paths carry mailbox ids) and no connection log: no
+    // attribute turns either on, and no bucket exists to receive one.
+    const logAttrs = Object.entries(attrs).filter(([k]) => k.startsWith('access_logs.') || k.startsWith('connection_logs.'));
+    for (const [k, v] of logAttrs) expect([k, v]).toEqual([k, 'false']);
+    t.resourceCountIs('AWS::S3::Bucket', 0);
+  });
+
+  test('VPC flow log: rejected traffic only, to CloudWatch Logs kept 30 days', () => {
+    const logs = Object.values<any>(t.findResources('AWS::EC2::FlowLog')).map((f) => f.Properties);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({ ResourceType: 'VPC', TrafficType: 'REJECT', LogDestinationType: 'cloud-watch-logs' });
+    expect(logs[0].ResourceId).toEqual({ Ref: expect.stringMatching(/^Vpc/) });
+    expect(logs[0].LogGroupName).toEqual({ Ref: expect.stringMatching(/^FlowLogs/) });
+    t.hasResourceProperties('AWS::Logs::LogGroup', { LogGroupName: '/vettid-org/prod/relay-vpc-flow', RetentionInDays: 30 });
+    // The role it assumes trusts VPC Flow Logs only for this account's flow logs.
+    const roleId = logs[0].DeliverLogsPermissionArn['Fn::GetAtt'][0];
+    const trust = t.toJSON().Resources[roleId].Properties.AssumeRolePolicyDocument.Statement;
+    expect(trust).toHaveLength(1);
+    expect(trust[0]).toMatchObject({
+      Principal: { Service: 'vpc-flow-logs.amazonaws.com' },
+      Condition: { StringEquals: { 'aws:SourceAccount': '123456789012' }, ArnLike: { 'aws:SourceArn': expect.anything() } },
+    });
+  });
+
+  test('every log group of the stack has a retention', () => {
+    const groups = Object.values<any>(t.findResources('AWS::Logs::LogGroup')).map((g) => g.Properties);
+    for (const g of groups) expect(g.RetentionInDays).toBe(30);
   });
 });
 
