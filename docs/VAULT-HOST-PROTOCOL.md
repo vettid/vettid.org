@@ -1,8 +1,8 @@
 ---
 title: VAULT-HOST-PROTOCOL
 status: approved by the owner 2026-10-12 (H1–H9 as recommended)
-version: 0.1.7
-date: 2026-10-13
+version: 0.1.8
+date: 2026-10-14
 owner: Al Liebl (Mesmer)
 component: vault enclave (supervisor), parent (host process)
 related:
@@ -12,6 +12,11 @@ related:
   - VAULT-RELAY-SCALING.md (0.1.2) §6, §10
   - vettid-vault `internal/hostproto`, `enclave/supervisor`, `enclave/egress`, `parent`, docs/V3-NOTES.md "Enclave ↔ parent", docs/SMOKE.md
 changelog:
+  - 0.1.8: as built in vettid-vault #77 (the parent only); approved by
+    the owner 2026-10-14. §2: the parent closes a connection on the
+    control or egress port whose peer is not its enclave's context id
+    (16 as deployed) before reading from it; a development build on TCP
+    answers loopback peers only. No wire change.
   - 0.1.7: correction of the document to the system as built; approved
     by the owner 2026-10-13. No wire change and no code change. §11.4
     item 4: **the enclave's PIN and password backoffs do not limit a
@@ -154,6 +159,16 @@ Neither channel is authenticated or encrypted, on purpose: vsock
 connects the enclave to its own parent instance and to nothing else,
 and the parent is the party that is not trusted. A secret shared with
 it would add nothing (vettid-vault docs/V3-NOTES.md).
+
+The parent closes a connection on either port whose peer context id is not
+its enclave's (16 as deployed) before reading from it; a development build
+on TCP answers loopback peers only (0.1.8, as built in vettid-vault #77).
+This keeps an unprivileged process on the host from taking the enclave's
+place as the parent's session, from the store calls and from the egress
+forwarder. It does not bind root or anyone who can run an enclave or a
+guest with that context id, and it does not protect the instance role's
+credentials, which the host's metadata service gives to any process on the
+host. The enclave relies on none of it.
 
 **Writes.** Every write on a vsock connection, in both directions and
 on both channels, is at most **16 KiB** (16,384 bytes). Larger data is
@@ -1111,6 +1126,8 @@ the first registry row after a disconnection has a limit of 10 s). It
 stays open.
 
 **State at 0.1.7.** No point changes.
+
+**State at 0.1.8.** No point changes.
 
 Found while writing this document. Each is described where it occurs
 above; the pull request that adds this document lists them with file
