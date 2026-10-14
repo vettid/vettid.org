@@ -16,6 +16,68 @@ test('multi-region trail with log-file validation, incl. global events', () => {
   });
 });
 
+describe('the trail bucket is write-once', () => {
+  const buckets = Object.entries<any>(t.findResources('AWS::S3::Bucket'));
+  const [bucketId, bucket] = buckets[0];
+
+  test('Object Lock, compliance mode, 400 days for every new object, on the same bucket', () => {
+    expect(buckets).toHaveLength(1);
+    // The logical id and the name are what keep CloudFormation updating the
+    // existing bucket in place instead of making another one.
+    expect(bucketId).toBe('TrailBucketA831CE63');
+    expect(bucket.Properties.BucketName).toBe(`vettid-org-cloudtrail-${ORG.management}`);
+    expect(bucket.Properties.ObjectLockEnabled).toBe(true);
+    expect(bucket.Properties.ObjectLockConfiguration).toEqual({
+      ObjectLockEnabled: 'Enabled',
+      Rule: { DefaultRetention: { Mode: 'COMPLIANCE', Days: 400 } },
+    });
+    // Object Lock needs versioning, and S3 refuses to suspend it afterwards.
+    expect(bucket.Properties.VersioningConfiguration).toEqual({ Status: 'Enabled' });
+  });
+
+  test('the lifecycle rule agrees with the lock: expiry no earlier than the lock ends, then the old version goes', () => {
+    const lifecycle = bucket.Properties.LifecycleConfiguration.Rules;
+    expect(lifecycle).toHaveLength(1);
+    const days = bucket.Properties.ObjectLockConfiguration.Rule.DefaultRetention.Days;
+    expect(lifecycle[0].Status).toBe('Enabled');
+    expect(lifecycle[0].ExpirationInDays).toBe(days);
+    // Without this the expired (then unlocked) versions would stay for ever.
+    // One day: a record is gone 402 to 403 days after delivery (each of the
+    // two steps is rounded up to midnight UTC), which is what "400 days" in
+    // the privacy notice can honestly mean.
+    expect(lifecycle[0].NoncurrentVersionExpiration).toEqual({ NoncurrentDays: 1 });
+  });
+
+  test('nothing in the stack tries to empty or delete it', () => {
+    expect(bucket.DeletionPolicy).toBe('Retain');
+    expect(bucket.UpdateReplacePolicy).toBe('Retain');
+    // autoDeleteObjects would add this custom resource (and a tag on the bucket).
+    t.resourceCountIs('Custom::S3AutoDeleteObjects', 0);
+    expect(JSON.stringify(bucket.Properties.Tags ?? [])).not.toContain('auto-delete-objects');
+  });
+
+  test('the bucket admits CloudTrail only for this trail: every CloudTrail statement carries aws:SourceArn', () => {
+    const policies = Object.values<any>(t.findResources('AWS::S3::BucketPolicy'));
+    expect(policies).toHaveLength(1);
+    const text = (v: any) => JSON.stringify(v).replace(/[^A-Za-z0-9:/*.-]+/g, ' ');
+    const cloudtrail = policies[0].Properties.PolicyDocument.Statement.filter((st: any) => st.Principal?.Service === 'cloudtrail.amazonaws.com');
+    expect(cloudtrail.map((st: any) => [st.Action, text(st.Resource).match(/AWSLogs\S+/)?.[0]])).toEqual([
+      ['s3:GetBucketAcl', undefined],
+      ['s3:PutObject', `AWSLogs/${ORG.management}/*`],
+      ['s3:PutObject', `AWSLogs/${ORG.id}/*`],
+    ]);
+    for (const st of cloudtrail) {
+      expect(st.Effect).toBe('Allow');
+      expect(text(st.Condition.StringEquals['aws:SourceArn'])).toMatch(new RegExp(`:cloudtrail:us-east-1:${ORG.management}:trail/vettid-org-trail $`));
+    }
+    // The two writes still require the ACL header beside the new condition.
+    for (const st of cloudtrail.slice(1)) expect(st.Condition.StringEquals['s3:x-amz-acl']).toBe('bucket-owner-full-control');
+    // No statement admits any other principal.
+    const others = policies[0].Properties.PolicyDocument.Statement.filter((st: any) => !cloudtrail.includes(st));
+    expect(others.map((st: any) => st.Effect)).toEqual(['Deny']);
+  });
+});
+
 test('trail bucket: private, TLS-only, versioned, retained, lifecycle-managed', () => {
   t.hasResource('AWS::S3::Bucket', {
     DeletionPolicy: 'Retain',
@@ -61,6 +123,7 @@ const RULES = [
   'IamCredentialChanges',
   'IamRoleOrPolicyChanges',
   'AuditTampering',
+  'TrailBucketConfig',
   'OrgOrSsoChanges',
   'CentralRootSession',
   'KmsKeyDeletion',
@@ -130,7 +193,7 @@ function signIn(account: string, who: Who, detail: Record<string, any> = {}) {
 const { vaultProd, vaultStaging, proteus } = ORG.members;
 const MGMT = ORG.management;
 
-test('nineteen alert rules (plus one heartbeat rule per member), each to the emailed SNS topic, each naming the account', () => {
+test('twenty alert rules (plus one heartbeat rule per member), each to the emailed SNS topic, each naming the account', () => {
   t.resourceCountIs('AWS::Events::Rule', RULES.length + Object.keys(ORG.members).length);
   t.hasResourceProperties('AWS::SNS::Subscription', { Protocol: 'email', Endpoint: 'admin@vettid.org' });
   const topicId = Object.keys(t.findResources('AWS::SNS::Topic'))[0];
@@ -200,6 +263,55 @@ test('S3 bucket policy / public access block changes alert outside a deploy', ()
   expect(matching(apiCall(proteus, 'aws.s3', 'PutBucketPolicy', CFN_EXEC))).toEqual([]);
 });
 
+describe('the audit trail bucket\'s configuration (TrailBucketConfig)', () => {
+  const TRAIL_BUCKET = `vettid-org-cloudtrail-${MGMT}`;
+  const onBucket = (bucketName: string, extra: Record<string, any> = {}) => ({ requestParameters: { bucketName }, ...extra });
+  // PutBucketObjectLockConfiguration and PutBucketLifecycle are the names
+  // CloudTrail records for PutObjectLockConfiguration and
+  // PutBucketLifecycleConfiguration (S3 user guide, "Amazon S3 CloudTrail events").
+  const CALLS = [
+    'PutBucketObjectLockConfiguration', 'PutObjectLockConfiguration', 'PutBucketLifecycle', 'PutBucketLifecycleConfiguration',
+    'DeleteBucketLifecycle', 'PutBucketVersioning', 'DeleteBucket',
+  ];
+
+  test('the rule names exactly these calls on exactly this bucket', () => {
+    const pattern = rule('TrailBucketConfig').EventPattern;
+    expect(pattern.source).toEqual(['aws.s3']);
+    expect(pattern.detail.requestParameters).toEqual({ bucketName: [TRAIL_BUCKET] });
+    expect([...pattern.detail.eventName].sort()).toEqual([...CALLS, 'PutBucketPolicy', 'DeleteBucketPolicy'].sort());
+    // Deploys included: nothing in the pattern looks at who made the call.
+    expect(JSON.stringify(pattern)).not.toContain('userIdentity');
+  });
+  test.each(CALLS)('%s alerts, whoever makes it: a person, root, a deploy, and when it was refused', (name) => {
+    expect(matching(apiCall(MGMT, 'aws.s3', name, SSO_ADMIN, onBucket(TRAIL_BUCKET)))).toEqual(['TrailBucketConfig']);
+    expect(matching(apiCall(MGMT, 'aws.s3', name, CFN_EXEC, onBucket(TRAIL_BUCKET)))).toEqual(['TrailBucketConfig']);
+    expect(matching(apiCall(MGMT, 'aws.s3', name, 'root', onBucket(TRAIL_BUCKET)))).toEqual(['RootActivity', 'TrailBucketConfig']);
+    expect(matching(apiCall(MGMT, 'aws.s3', name, SSO_ADMIN, onBucket(TRAIL_BUCKET, { errorCode: 'AccessDenied' })))).toEqual(['TrailBucketConfig']);
+  });
+  test('a bucket policy change: by a deploy this rule alone, by a person S3PublicAccess as well', () => {
+    for (const name of ['PutBucketPolicy', 'DeleteBucketPolicy']) {
+      expect(matching(apiCall(MGMT, 'aws.s3', name, CFN_EXEC, onBucket(TRAIL_BUCKET)))).toEqual(['TrailBucketConfig']);
+      expect(matching(apiCall(MGMT, 'aws.s3', name, SSO_ADMIN, onBucket(TRAIL_BUCKET)))).toEqual(['TrailBucketConfig', 'S3PublicAccess']);
+    }
+  });
+  test('other buckets, and reads of this one, are quiet', () => {
+    for (const name of CALLS) {
+      expect(matching(apiCall(MGMT, 'aws.s3', name, SSO_ADMIN, onBucket('vettid-org-site-bucket')))).toEqual([]);
+      expect(matching(apiCall(MGMT, 'aws.s3', name, SSO_ADMIN, onBucket(`${TRAIL_BUCKET}-copy`)))).toEqual([]);
+      expect(matching(apiCall(MGMT, 'aws.s3', name, SSO_ADMIN))).toEqual([]);
+    }
+    expect(matching(apiCall(MGMT, 'aws.s3', 'GetBucketObjectLockConfiguration', SSO_ADMIN, onBucket(TRAIL_BUCKET)))).toEqual([]);
+    expect(matching(apiCall(MGMT, 'aws.s3', 'GetBucketLifecycle', SSO_ADMIN, onBucket(TRAIL_BUCKET)))).toEqual([]);
+  });
+  test('the vault data buckets keep their own rule, and this one stays out of it', () => {
+    for (const [acct, name] of [[vaultProd, 'vettid-org-vault-data-369484479783'], [vaultStaging, 'vettid-org-staging-vault-data-347272280361']]) {
+      for (const call of ['PutBucketLifecycle', 'PutBucketVersioning', 'DeleteBucket']) {
+        expect(matching(apiCall(acct, 'aws.s3', call, CFN_EXEC, onBucket(name)))).toEqual(['VaultDataBucketConfig']);
+      }
+    }
+  });
+});
+
 describe('audit and alerting tampering', () => {
   test('CloudTrail/GuardDuty changes alert even when the SCP denied them', () => {
     expect(matching(apiCall(vaultProd, 'aws.cloudtrail', 'StopLogging', SSO_ADMIN, { errorCode: 'AccessDenied' }))).toEqual(['AuditTampering']);
@@ -266,7 +378,8 @@ describe('vault accounts: the data bucket, the hosts, the host role', () => {
     expect(matching(apiCall(vaultStaging, 'aws.s3', 'PutBucketLifecycle', CFN_EXEC, other))).toEqual([]);
     expect(matching(apiCall(vaultStaging, 'aws.s3', 'PutBucketVersioning', SSO_ADMIN, other))).toEqual([]);
     expect(matching(apiCall(vaultStaging, 'aws.s3', 'DeleteBucket', SSO_ADMIN, other))).toEqual([]);
-    expect(matching(apiCall(MGMT, 'aws.s3', 'PutBucketLifecycle', SSO_ADMIN, bucket('vettid-org-cloudtrail-449757308783')))).toEqual([]);
+    // The audit trail's own bucket has its own rule, and never this one.
+    expect(matching(apiCall(MGMT, 'aws.s3', 'PutBucketLifecycle', SSO_ADMIN, bucket('vettid-org-cloudtrail-449757308783')))).toEqual(['TrailBucketConfig']);
   });
 
   test.each([vaultProd, vaultStaging])('an interactive way in, which the Vault OU policy refuses, alerts as an attempt in %s (and as a success if the policy is off)', (acct) => {
