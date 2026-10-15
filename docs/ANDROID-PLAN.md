@@ -1965,7 +1965,8 @@ password too."
   phone key, the device key and the app key and erases its local state,
   then shows "Your vault has moved to your new phone. VettID has removed
   its keys from this phone." Until then it offers **The move didn't
-  finish**: "Use this if your new phone cannot open your vault." It asks
+  finish**: "Use this if your new phone cannot open your vault. If your
+  new phone opens the vault, ignore this." It asks
   for the PIN and unlocks with this phone's own keys; on success: "This
   phone is your vault's phone again. Start the move again when you are
   ready."; otherwise: "Your vault could not be opened from this phone.
@@ -1976,6 +1977,17 @@ password too."
   recovery does by itself.
 
 **Other screens.**
+
+- **A connection suspended for two successors** (`identity.rotate_conflict`):
+  the connection's tile shows "Suspended: verify again" and its detail
+  explains "This connection's vault announced two different new keys.
+  That can mean someone holds an old copy of their vault. Nothing is sent
+  or received until you check." It shows both candidates' fingerprints
+  (8 groups of 4 hex digits each) and asks the member to compare them
+  with the fingerprint the other person reads from their own app, in
+  person or on a call; **This one matches** (for either) sends
+  `connection.rotation.resolve`, after a confirmation; **Neither matches**
+  offers to remove the connection and invite again with a safety code.
 
 - Settings → Security → **New phone secret** (`vault.secret.renew`): the
   PIN and the password; "Your phone now uses a new secret for this

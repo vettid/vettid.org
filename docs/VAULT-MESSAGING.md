@@ -1199,7 +1199,10 @@ enclave's TLS connections to the recovery attempt counter, an S3 bucket
 in the vault's AWS account (§11.14.4): it sees when a vault calls it,
 and VettID, which owns the bucket, reads every record's name and time,
 among them when each member was last present (§11.14.5). The names are
-opaque and say nothing beyond which records belong to one vault.
+opaque and say nothing beyond which records belong to one vault. The
+state object also names its `dek_version` in the clear (§11.14.1), which
+tells the host how many times a vault's DEK was replaced, so roughly how
+many changes of PIN, password or phone it had.
 
 VettID operates both the host and the relay, so in its own deployment it can
 correlate their timing. This residual metadata is disclosed here rather than
@@ -1344,8 +1347,11 @@ data.
 in the sealed header under a key derived from the PIN, the pepper and a
 secret that only the member's phone can produce, and replaced at every
 change of PIN, password or phone (§11.14.1, §11.14.2). The derivation
-below applies to the releases before R. The at-rest formats below apply
-to all.
+below applies to the releases before R. The header format below
+applies to all; the state's `0x01` layout below is for the releases
+before R. Release R writes and reads only the `0x02` layout of §11.14.1
+and refuses a `0x01` state (no vault is carried into release R), and
+its lifecycle reports raise `state_version` accordingly (§11.5).
 
 The DEK is derived from the PIN and a secret that only the sealed header
 holds, so that stolen vault state cannot be brute-forced against PINs
@@ -1369,11 +1375,11 @@ The reference implementation stores vault state and the sealed header as:
 state  = 0x01 || state_seq (8, big-endian) || nonce (24)
          || XChaCha20-Poly1305(DEK, nonce, aad, state_json)
 aad    = "vettid/vms/2/state" || 0x00 || vault_id || 0x00 || state[0:9]
-header = Seal_R(header_json, aad = "vettid/vms/2/header" || 0x00 || vault_id)   # sealed to release R (§11.10.2)
+header = Seal_rel(header_json, aad = "vettid/vms/2/header" || 0x00 || vault_id)   # sealed to the vault's release (§11.10.2)
 ```
 
-`Seal_R` encrypts under a fresh AES-256 data key from KMS `GenerateDataKey`
-on release R's key (§11.10.2), with the key ARN in the object and in the
+`Seal_rel` encrypts under a fresh AES-256 data key from KMS
+`GenerateDataKey` on that release's key (§11.10.2), with the key ARN in the object and in the
 AAD, all lengths 2 bytes big-endian:
 
 ```
@@ -1451,11 +1457,22 @@ sig_new = Ed25519(new_ik, "vettid/vms/2/rotate" || m)
   the carrier's choice, so the receiver keeps neither: it **suspends the
   connection** (it sends nothing to and accepts nothing from either key),
   audits `identity.rotate_conflict` and makes a feed item of priority
-  `high` for its member. The connection resumes only after the two
-  members verify each other again out of band: they compare the vault
-  key fingerprint (§10.8) and the member confirms the successor it
-  shows, or they reconnect with a new invitation and safety code
-  (§6.4). A vault
+  `high` for its member, with both candidates' key fingerprints
+  (§10.8). The connection resumes only after the two members verify each
+  other again out of band: they compare the fingerprint the other member's
+  app shows with the two candidates, and the member's app sends the
+  holder-only **`connection.rotation.resolve {connection_id, new_ik}`**
+  (answered `{}`, or `not_found` when the connection has no conflict or
+  `new_ik` is neither candidate), which keeps that successor and drops the
+  other; or they reconnect with a new invitation and safety code (§6.4).
+  Desktops and agents cannot send it. *Residual:* the carrier, or a
+  replaying host that holds an old copy of a vault, can after any
+  rotation of that vault send a second successor to each of its
+  connections and so suspend all of them until each is verified again
+  out of band. It could already deny the traffic by dropping it; the
+  suspension makes that denial persistent. A vault sends its own
+  rotation notices only after the state write that holds the rotation
+  (§11.14.2). A vault
   rotates its relay key, `ik`, `kem` and wake key at a completed
   recovery (§11.14.6 step 6).
 - **ETK** rotates at least every 24 h and on every enclave start.
@@ -4325,6 +4342,7 @@ an answer to an unknown or expired id is dropped.
 | | `connection.request.pending`, `connection.request.outgoing` | V→D | | An incoming request awaiting approval (profile, `sas`, `remote`); an outgoing one (`sas`) (§6.4) |
 | | `connection.request.list` | D→V | req | Pending incoming and outgoing requests with their SAS (§6.4) |
 | | `connection.approve`, `.decline`, `.list`, `.get`, `.remove`, `.update` | D→V | req | Approve or decline a request; manage connections; the owner's own metadata |
+| | `connection.rotation.resolve` | D→V (the holder) | req | (0.33.0, release R) Keep one of two successors of a connection's identity key after out-of-band verification (§3.4) |
 | | `connection.approved` | V↔V | | The member approved the request after comparing the SAS; the standing and reconnect tokens (§6.4, 0.10.3) |
 | | `connection.declined` | V↔V | | The member declined (or blocked) the request (§6.4, 0.10.5) |
 | | `connection.removed` | V↔V | | Notify the peer |
@@ -9915,7 +9933,7 @@ Nothing secret is stored:
 
 | Store | Contents | Retention |
 |---|---|---|
-| Vault table | **`app_key`** (0.15.0: `{key, kid, seq}`, the public key of the vault's app key as the enclave last reported it, written by the host; and the API's own `app_key_pending` and recovery claim keys, §11.12), `user_guid`, **`vault_id`** (opaque, 128-bit random, 32 lowercase hex characters, assigned by the API at a member's first enrollment; the routing key for alternate-channel requests), `state` (`enrolling`, `locked`, `unlocked`, `deleted`), **lease** (`instance_id`, `lease_expires_at`), **`sealed_release`** (the PCR0 the vault is sealed to; routing aid, §11.10.5), **`vault_version`** (release that last opened the vault), **`state_version`** (vault-state format version), **`alarm`** (`kind`, `alarm_id`, `at`, `emailed_at`; the last host alarm, below) and `alarm_pending`, **`credential_backup`** (0.16.0: whether the vault keeps a backup copy of its credential, as last reported, below; absent until a release of 0.16.0 reports it), the API's own `deletion` record (§11.11.9), **`name_change`** (0.18.0: `{seq, first_name, last_name, at}`, the vault's latest name request, written by the host) and `name_change_pending`, the API's `name_change_result` (§10.8, below), `created_at`, `updated_at` | account lifetime |
+| Vault table | **`app_key`** (0.15.0: `{key, kid, seq}`, the public key of the vault's app key as the enclave last reported it, written by the host; and the API's own `app_key_pending` and recovery claim keys, §11.12; (0.33.0, release R) `app_key_next` `{key, kid, seq}`, the host-written next key of a replacement in progress, §11.14.2), `user_guid`, **`vault_id`** (opaque, 128-bit random, 32 lowercase hex characters, assigned by the API at a member's first enrollment; the routing key for alternate-channel requests), `state` (`enrolling`, `locked`, `unlocked`, `deleted`), **lease** (`instance_id`, `lease_expires_at`), **`sealed_release`** (the PCR0 the vault is sealed to; routing aid, §11.10.5), **`vault_version`** (release that last opened the vault), **`state_version`** (vault-state format version), **`alarm`** (`kind`, `alarm_id`, `at`, `emailed_at`; the last host alarm, below) and `alarm_pending`, **`credential_backup`** (0.16.0: whether the vault keeps a backup copy of its credential, as last reported, below; absent until a release of 0.16.0 reports it), the API's own `deletion` record (§11.11.9), **`name_change`** (0.18.0: `{seq, first_name, last_name, at}`, the vault's latest name request, written by the host) and `name_change_pending`, the API's `name_change_result` (§10.8, below), `created_at`, `updated_at` | account lifetime |
 | Instance registry | `instance_id`, **`release`** (PCR0 from its descriptor), queue URL, descriptor, attestation, `heartbeat_at` | while the instance is live |
 | Request table (response slots) | `request_id`, `vault_id`, `op`, `status` (`queued`, `done`, `expired`), opaque response `envelope` (≤ 8 KiB) and/or a host `code` | TTL 15 min |
 | Audit log | enroll, unlock and lock requests: member, time, `vault_id`, request id, never PINs or envelopes | MEMBER-API audit retention |
@@ -9933,10 +9951,12 @@ Nothing secret is stored:
   together with the header write that made the change, and the parent
   writes it after that store succeeds. (0.33.0, release R) A
   replacement of the app is written in three steps (§11.14.2): the event
-  **`app_key_pending`** (the same two values) goes with the first header
-  write and the parent writes it as `app_key_pending` on the row
+  **`app_key_next`** (the same two values) goes with the first header
+  write and the parent writes it as `app_key_next` on the row
   (conditional on its `seq` being higher than `app_key`'s); `app_key`
-  goes with the third, and the parent then clears `app_key_pending`. The parent writes `app_key = {key,
+  goes with the third, and the parent then clears `app_key_next`.
+  `unlocked` and `locked` also carry `next` (bool): whether the header
+  has a `next` part (§11.14.2). The parent writes `app_key = {key,
   kid, seq}` on the vault row **whatever the lease**, conditional only on
   `seq` being higher than the row's (a stale instance can only report an
   older one), except that `enrolled` always replaces it (a replaced
@@ -13268,13 +13288,24 @@ DEK from `DEK_0` to `DEK_1` is done in three steps:
 
 **The app key during the three steps.** Where the event replaces the
 app (a transfer, a recovery), the vault hands the parent the lifecycle
-event **`app_key_pending`** (the next key and its `app_key_seq`) with the
+event **`app_key_next`** (the next key and its `app_key_seq`) with the
 header write of step 1, and the event `app_key` with the header write of
 step 3 (§11.5). The member API accepts requests signed by the current
-key and by the pending one from `app_key_pending` until `app_key` makes
-the pending key current (MEMBER-API "Recovery from release R"). A
-dropped step 3 therefore never locks the new phone out of the member
-API, and a restore (below) resets the row to the old key.
+key and by the next one from `app_key_next` until `app_key` makes
+it current (MEMBER-API "Recovery from release R"). A dropped step 3
+therefore never locks the new phone out of the member API, and a
+restore (below) resets the row to the old key.
+
+**Ending the next key when the replacement is abandoned.** When the
+vault drops a `next` part (the old phone unlocked first; a transfer's
+10 minutes ran out; step 1 is written again for a new attempt), it hands
+the parent, with that header write, the event `app_key` repeating the
+current key with `next_cleared: true`, and the parent removes
+`app_key_next`. The parent also removes it whenever an `unlocked` or
+`locked` report shows a header without a `next` part (those reports
+carry `next: false`), and the member API ignores an `app_key_next`
+older than 24 hours. So the old and the new key are both accepted only
+while a replacement is really in progress.
 
 At an unlock the enclave accepts the current wrap or, if a `next` part
 exists, the `next` one, and holds both keys through it. If the state is
@@ -13310,12 +13341,18 @@ earlier version **1 day** after it was replaced unless it is among the 5
 newest earlier versions of its object, and never more than **7 days**
 (VAULT-RELEASES §8.2). So the restore is **safe within 24 hours of the
 failure**, and possible up to 7 days only if the state object was
-written fewer than 5 times since. For a transfer it also needs the old
-phone to still hold its keys (§11.14.10). **Recovery does not help in
-this case**, whether the credential backup is on or off: the header's
+written fewer than 5 times since. **Before a restore, recovery cannot
+help**, whether the credential backup is on or off: the header's
 `opener` is for the earlier DEK and the state is under the later one
-(§11.14.6 answers `stored_mismatch`). A stranded vault that is not
-restored in time is lost.
+(§11.14.6 answers `stored_mismatch`). **After the restore** the vault is
+the complete vault from before the event. For a transfer, the member
+then needs the old phone (which keeps its keys for up to 7 days,
+§11.14.10), or, with the credential backup on, a recovery with a new
+phone, the PIN and the password after the quiet period. For a PIN or
+password change the member still holds the phone and unlocks with the
+old PIN; a recovery would be answered `closed`, because the change closed
+the old generation before step 1. A stranded vault that is not restored
+in time is lost.
 
 Three further rules:
 
@@ -13697,8 +13734,9 @@ binding and replay rules of §11.3 and §11.6 and then, **in this order**:
    going on), which ends this attempt's wait; takes the DEK from the
    `opener` whose `dek_version` the state names (on a header with a
    `next` part there are two; if the state now names neither, because it
-   changed after step 2, the answer is `stored_mismatch` with the attempt
-   used and ended by the success record, and nothing changes); loads the state (with `state.state_seq >=
+   changed after step 2, or the state does not decrypt under the DEK the
+   `opener` gave, the answer is `stored_mismatch` with the attempt used
+   and ended by the success record, and nothing changes); loads the state (with `state.state_seq >=
    header.state_seq`, §13.2); opens the vault's backup copy of the
    credential with the same password (§3.5.6); and then, in the order of
    writes of §11.14.2: rotates the CEK and re-keys every critical item
@@ -13709,9 +13747,12 @@ binding and replay rules of §11.3 and §11.6 and then, **in this order**:
    key, identity and KEM keys and wake key** (§3.4, §14; a rotation that
    cannot be made never fails the recovery, §11.14.2). The notices to
    removed devices, `device.unlinked{replaced}` and any pending unlink's
-   `device.unlinked{transferred}` (§11.14.10), are deposited **before the
-   relay key switches**, under the old relay key and the tokens those
-   devices issued for it, which the new key could not use; records "attempt
+   `device.unlinked{transferred}` (§11.14.10), are deposited only after
+   step 2 of the order of writes is confirmed (like every notice of an
+   event, they follow its durable state write), and are signed with the
+   **old relay key**, which the vault keeps in memory for them during the
+   rotation's grace period, with the tokens those devices issued for it,
+   which the new key could not use; records "attempt
    *k* succeeded" in the state; removes the recovery record; and replaces
    the DEK for the request's PIN and the phone's secret. `MarkPresent` is
    first sent only after step 2 of the order of writes is confirmed, so
@@ -13989,7 +14030,7 @@ From release R:
 
 | Type | Request body | Response body |
 |---|---|---|
-| `credential.create` | `{utk_id, sealed{pin, password}}` | as before; also arms (§11.14.3), waiting up to 60 s inside the request for the heavy-derivation permit and otherwise leaving arming to the next owner check (`recovery.state: "needs_check"`), never answering `busy`. `pin` is verified against the vault's unlock key as in an owner check; `weak_password` (§11.14.7) |
+| `credential.create` | `{utk_id, sealed{pin, password}}` | as before; also arms (§11.14.3), waiting up to 60 s inside the request for the heavy-derivation permit and otherwise leaving arming to the next owner check (`recovery.state: "needs_check"`), never answering `busy`; a counter that cannot be reached likewise leaves it at `needs_check`, not an error. `pin` is verified against the vault's unlock key as in an owner check; `weak_password` (§11.14.7) |
 | `pin.change` (the holder; a credential operation) | `{credential, utk_id, sealed{pin, new_pin, password, new_unlock_secret}}` | `{credential, version, utks, epoch_advanced: true}`; `bad_pin`, `bad_password`, `backoff`, `busy`, `counter_unavailable`, `retry`, `bad_request` (a `new_pin` that is not 6–32 digits, or a `new_unlock_secret` that is not 32 bytes) |
 | `credential.password.change` | `{credential, utk_id, sealed{pin, password, new_password}}` | as before; `bad_pin`, `weak_password`, `busy`, `counter_unavailable`, `retry` |
 | `credential.reset` | unchanged | as before; `weak_password`, `busy`, `counter_unavailable`, `retry` |
@@ -14034,7 +14075,7 @@ From release R:
    and the old app tries again), opens the current wrap and makes a new
    `opener`, and replaces the DEK for the PIN and the new phone's secret
    in the order of writes of §11.14.2: the new phone's unlock key and app
-   key in step 1's `next` part (`app_key_pending`), the new device record
+   key in step 1's `next` part (`app_key_next`), the new device record
    and the removal of the old app in step 2, the promotion in step 3
    (`app_key`). The approval answer is `{"unlink": "after_new_unlock"}`
    (before release R, `{}`); a failed step 1 is answered `retry`.
@@ -14105,9 +14146,10 @@ after the approval, whichever comes first.**
   screen says: "This phone keeps your vault's keys until your new phone
   has finished the move, for at most 7 days. Before you give this phone
   away, remove VettID from it or reset it."
-- Without the old phone, or after the restore is no longer possible
-  (§11.14.2), a vault stranded by that fault is lost, with or without the
-  credential backup.
+- A vault stranded by that fault and restored in time (§11.14.2) needs
+  the old phone or, with the credential backup on, a recovery after the
+  restore. One that is not restored in time is lost, with or without the
+  backup.
 
 #### 11.14.11 What the member sees: status, audit, feed and emails
 
@@ -17249,6 +17291,7 @@ Follow-ups:
     - *Chosen beyond the decisions* (each for the owner's review): the
       names `vault.recovery.open`, `vault.secret.renew`,
       `recovery_attempt`, `device_secret`, `transfer_incomplete`,
+      `connection.rotation.resolve`, `app_key_next`,
       `weak_password`, `counter_unavailable`; `pin.change` and
       `vault.secret.renew` as credential operations carrying the next
       epoch's secret in the UTK-sealed payload; the `opener`'s own label
@@ -17258,7 +17301,7 @@ Follow-ups:
       successors of one identity key suspends itself until the members
       verify again (`identity.rotate_conflict`); `stored_mismatch`,
       checked before an attempt is spent, with the state's clear
-      `dek_version` (format `0x02`); `app_key_pending` at the first header
+      `dek_version` (format `0x02`); `app_key_next` at the first header
       write; the new phone's "Finish the move"
       unlock right after a transfer, so that the old phone's keys are
       normally deleted within minutes; a pending unlink kept in the

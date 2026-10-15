@@ -21,7 +21,7 @@ changelog:
     the attempt email and the completion email, and for the account
     site's recovery page; a release that refuses recovery answers
     `recovery_unavailable` with `reason: "not_offered"` (new `reason` on
-    `Recovery`); a pending app key (`app_key_pending`) accepted beside
+    `Recovery`); a pending app key (`app_key_next`) accepted beside
     the current one during a transfer or recovery. The API never
     learns an attempt's outcome or the count. VettID can suppress every
     email; said where they are specified. The section heading's stale
@@ -1947,11 +1947,15 @@ Everything above holds except where this says otherwise.*
   does not unlock from release R).
 - **The pending app key.** A transfer or a recovery replaces the app in
   three writes (VAULT-MESSAGING §11.14.2). The host writes
-  `app_key_pending` (`{key, kid, seq}`, `seq` one above `app_key`'s) with
-  the first and `app_key` with the third. While `app_key_pending` is set
-  the API accepts requests signed by either key as the vault's app key;
-  when `app_key` reaches the pending `seq` the pending entry is cleared
-  and the old key is refused. A restore by an operator (RUNBOOK) resets
+  `app_key_next` (`{key, kid, seq}`, `seq` one above `app_key`'s) with
+  the first and `app_key` with the third. While `app_key_next` is set,
+  and for at most 24 hours after it was written, the API accepts
+  requests signed by either key as the vault's app key; when `app_key`
+  reaches its `seq` it is cleared and the old key is refused. It is also
+  cleared when the vault abandons the replacement (`app_key` repeated
+  with `next_cleared: true`) and when an `unlocked` or `locked` report
+  says `next: false` (VAULT-MESSAGING §11.14.2). This is not the redeem's
+  `app_key_pending` above. A restore by an operator (RUNBOOK) resets
   `app_key` to the old header's key and clears the pending one, the one
   case in which `seq` goes down.
 - **Completed** is noticed as before, from the host's `app_key`; the

@@ -25,7 +25,7 @@ changelog:
     rules and each operation's calls. §6.6: `Stats` gains
     `heavy_kdf_free`. §6.1: the queue operation `recovery_open`, and
     the signature members of `recovery` and `recovery_cancel`, the
-    lifecycle event `app_key_pending`, and a clear `reason` on
+    lifecycle event `app_key_next`, and a clear `reason` on
     `recovery_unavailable`. §8: the
     counter bucket's host on both allowlists. §9: the S3 timeouts.
     §11.2, §11.3, §11.4 item 4: what the parent sees of the counter
@@ -580,10 +580,12 @@ unknown.
   (with `retry_at` and `expires`) from a `recovery_open` answer into its
   slot, `not_before`, `expires` and `earliest` from a `recovery` answer,
   and a `recovery_unavailable`'s clear `reason`, as it copies
-  `recovery_registered`. It writes the lifecycle event `app_key_pending`
+  `recovery_registered`. It writes the lifecycle event `app_key_next`
   (sent with the first header write of a replacement of the app) as the
-  row's `app_key_pending`, and clears it when `app_key` reaches its
-  `seq` (VAULT-MESSAGING §11.5, §11.14.2).
+  row's `app_key_next`, and clears it when `app_key` reaches its
+  `seq`, when an `app_key` event carries `next_cleared: true`, or when an
+  `unlocked` or `locked` report says `next: false` (VAULT-MESSAGING
+  §11.5, §11.14.2).
 
 ### 6.2 `LeaseLost` (0x11)
 

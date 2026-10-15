@@ -1209,18 +1209,21 @@ unlock**, and a recovery is answered `stored_mismatch` (the member's
 apps see failed unlocks; a transfer's new phone never finishes the
 move). The state to restore is **the last version written before the
 failed change**: find it by time (just before the member's change) and
-check its clear header, whose `dek_version` (the eight bytes after the
-format byte `0x02` and `state_seq`) must be the one the current header's wrap names,
-one lower than the newer versions'. Do not simply take "the newest old
+check its clear header (`dek_version`, the eight bytes after the
+format byte `0x02` and `state_seq`): take the version with the highest
+`dek_version` below that of the newest versions (the operator cannot
+read the sealed header, and does not need to). Do not simply take "the newest old
 version". By rule 2 above it lasts **at least 24 hours** after the
 failure, and up to 7 days only while the state object has been written
 fewer than 5 times since (rule 1 removes it at 7 days in any case).
 Act within 24 hours:
 
-1. Confirm with the member which change failed and when, and that the
-   phone that made it (for a transfer: the **old** phone, which keeps its
-   keys until the new phone has unlocked, for at most 7 days) still has
-   the app.
+1. Confirm with the member which change failed and when. Afterwards the
+   member needs, for a PIN or password change, the phone that made it
+   (with the old PIN); for a transfer, the **old** phone (which keeps its
+   keys until the new phone has unlocked, for at most 7 days), or, with
+   the credential backup on, a recovery after the restore (a new phone,
+   the PIN and the password, after the quiet period).
 2. Make sure no instance holds the vault unlocked: send the host's
    `lock` for it, and check that the vault row is `locked` with no lease
    (VAULT-MESSAGING §11.5). A running vault would overwrite the restore
@@ -1230,7 +1233,7 @@ Act within 24 hours:
    copy-object --copy-source "$B/vaults/<vault_id>/state?versionId=<id>"`),
    and put the policy back. Do not touch the header.
 4. Reset the vault row's `app_key` to the key the current (old) header
-   names, with its `app_key_seq`, and remove `app_key_pending`, so that
+   names, with its `app_key_seq`, and remove `app_key_next`, so that
    the member API accepts the old phone again (it otherwise accepts a
    new key only with a higher `app_key_seq`).
 5. The member uses "The move didn't finish" on the old phone (for a
@@ -1242,7 +1245,9 @@ Act within 24 hours:
 
 After the earlier state is gone the vault cannot be opened by anyone,
 recovery included, whatever its credential backup setting: the member
-can only start over. Never do this for a vault whose member did not ask:
+can only start over. The new phone of a failed transfer gets unreadable
+answers after a restore; its app says "This phone is not your vault's
+phone any more. Use your old phone, or recover your vault."  Never do this for a vault whose member did not ask:
 it undoes the member's change.
 
 ### Manifest sync (`vettid-org-vault-manifest-sync`, VAULT-RELEASES §7)
