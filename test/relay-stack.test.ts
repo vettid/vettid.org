@@ -218,13 +218,16 @@ describe('alarms on the `rate limits` line (RELAY-PROTOCOL §7.2)', () => {
   const TABLE = { Name: 'TableName', Value: { Ref: expect.stringMatching(/^SsmParameterValuevettidorgprodrelaytablename/) } };
 
   test.each([
-    ['table-writes-high', 'ConsumedWriteCapacityUnits', RELAY_TABLE_LIMITS.maxWriteRequestUnits],
-    ['table-reads-high', 'ConsumedReadCapacityUnits', RELAY_TABLE_LIMITS.maxReadRequestUnits],
-  ])('%s: half the table\'s ceiling for 5 minutes', (name, metric, perSecond) => {
-    expect(RELAY_ALARM_LIMITS.tableBusyShare).toBe(0.5);
+    ['table-writes-high', 'ConsumedWriteCapacityUnits', RELAY_ALARM_LIMITS.tableWritesBusyPerSecond, RELAY_TABLE_LIMITS.maxWriteRequestUnits],
+    ['table-reads-high', 'ConsumedReadCapacityUnits', RELAY_ALARM_LIMITS.tableReadsBusyPerSecond, RELAY_TABLE_LIMITS.maxReadRequestUnits],
+  ])('%s: a fixed rate for 5 minutes, well below the table\'s ceiling', (name, metric, perSecond, ceiling) => {
+    // 1,000 a second, not a share of the ceiling: raising the write ceiling
+    // to 10,000 must not make a flood five times bigger before anyone hears.
+    expect(perSecond).toBe(1000);
+    expect(perSecond).toBeLessThanOrEqual(ceiling / 2);
     expect(byName(prod, name)).toMatchObject({
       Namespace: 'AWS/DynamoDB', MetricName: metric, Dimensions: [TABLE], Statistic: 'Sum', Period: 60,
-      ComparisonOperator: 'GreaterThanOrEqualToThreshold', Threshold: (perSecond * 60) / 2, EvaluationPeriods: 5, DatapointsToAlarm: 5, TreatMissingData: 'notBreaching',
+      ComparisonOperator: 'GreaterThanOrEqualToThreshold', Threshold: perSecond * 60, EvaluationPeriods: 5, DatapointsToAlarm: 5, TreatMissingData: 'notBreaching',
     });
   });
 
@@ -513,7 +516,10 @@ describe('data (stateful)', () => {
     expect(L.maxWriteRequestUnits).toBeGreaterThan(10 * (1634 / 60));
     expect(L.maxReadRequestUnits).toBeGreaterThan(10 * (494 / 60));
     // And far below the account's per-table quota, which was the only bound.
-    expect(L.maxWriteRequestUnits).toBeLessThanOrEqual(40000 / 10);
+    // One full host or one address at the flood guard (about 2,000 write
+    // units a second with collects and acks) is at most a quarter of it.
+    expect(L.maxWriteRequestUnits).toBeGreaterThanOrEqual(4 * 2000);
+    expect(L.maxWriteRequestUnits).toBeLessThanOrEqual(40000 / 4);
     expect(L.maxReadRequestUnits).toBeLessThanOrEqual(40000 / 10);
     // Still one table, one logical id: an in-place update, never a replacement.
     expect(Object.keys(data.findResources('AWS::DynamoDB::GlobalTable'))).toEqual(['TableCD117FA1']);

@@ -35,9 +35,13 @@ export const RELAY_BLOB_TTL_DAYS = 7;
  *    100 × (4 + 2 × 8) = 2,000 write units a second; a real mix (a third
  *    each of collects, acks and deposits, 4 KB) is under 600.
  *
- * So 2,000 is a whole flood guard of deposits from one address, about
- * seven hosts of the projected size, and 70 times the busiest minute
- * seen. Reads: an owner request costs one or two strongly consistent
+ * Counting every write of a message (RELAY-PROTOCOL 0.9.4 §7.2 "Where the
+ * numbers come from": deposit transaction, collect lease, ack delete and
+ * counter adjust) a 4 KB message costs about 21 write units, so one full
+ * host of 900 vaults at three messages a minute is about 1,800 to 1,900 a
+ * second, and one address at the flood guard 1,600 to 2,500. The owner
+ * raised the write ceiling from 2,000 to 10,000 on 2026-10-15: one such
+ * address or host is then about a quarter of it. Reads: an owner request costs one or two strongly consistent
  * reads, so a flood guard of them is about 200 a second; 2,000 is ten
  * times that. The index holds only the keys of rotated mailboxes (one
  * small write per rotation, at most one a second per address).
@@ -45,15 +49,15 @@ export const RELAY_BLOB_TTL_DAYS = 7;
  * At the ceiling DynamoDB throttles: the relay's requests fail or are
  * retried, for every tenant, until the load is back under it. That is the
  * trade: the ceiling is below what the table would otherwise serve at once
- * (its warm throughput, 4,000 write units a second), so a flood is felt
- * as throttling sooner, and in return the bill is bounded at about $108 a
- * day in writes and $22 in reads ($0.625 and $0.125 a million units)
+ * (the write ceiling is now above its warm throughput of 4,000 write units a
+ * second; DynamoDB serves bursts above that as it scales the table), and in
+ * return the bill is bounded at about $540 a day in writes and $22 in reads ($0.625 and $0.125 a million units)
  * instead of $2,160 and $432 at the quota. The ceiling is a target, not
  * exact: DynamoDB lets short bursts exceed it. Health checks read the
  * table, which is one more reason the read ceiling is far above real load.
  */
 export const RELAY_TABLE_LIMITS = {
-  maxWriteRequestUnits: 2000,
+  maxWriteRequestUnits: 10000,
   maxReadRequestUnits: 2000,
   indexMaxWriteRequestUnits: 100,
   indexMaxReadRequestUnits: 100,

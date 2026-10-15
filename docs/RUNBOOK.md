@@ -357,20 +357,24 @@ npx cdk deploy VettidOrgRelayStack       # service; reads the refs at deploy tim
   has deletion protection, no PITR (messages live ≤ 14 days); the blob
   bucket expires objects after 8 days.
 - **Table throughput ceiling.** The table is on-demand with a maximum:
-  **2,000 write and 2,000 read units a second** (its index `due`: 100
-  and 100), `RELAY_TABLE_LIMITS` in `lib/stacks/relay-data-stack.ts`,
+  **10,000 write and 2,000 read units a second** (its index `due`: 100
+  and 100; writes raised from 2,000 on 2026-10-15), `RELAY_TABLE_LIMITS` in `lib/stacks/relay-data-stack.ts`,
   where the sizing is written out. Above it DynamoDB throttles: deposits,
   acks and registrations fail or are retried, for every tenant, until
   the load is back under it (short bursts may pass; the maximum is a
   target, not exact). Without it the only bound was the account quota of
   40,000 units a second, about $2,160 a day in writes; with it, about
-  $108 a day in writes and $22 in reads. Measured use (October 2026, ten
-  members): 27 write units a second in the busiest minute; a vault host
-  of 900 vaults at a message a minute each is about 300. To raise it:
+  $540 a day in writes and $22 in reads. Measured use (October 2026, ten
+  members): 27 write units a second in the busiest minute. A 4 KB message
+  costs about 21 write units with its collect and ack (RELAY-PROTOCOL
+  §7.2), so one host of 900 vaults at three messages a minute is about
+  1,800 to 1,900, and one address at the flood guard 1,600 to 2,500: a
+  quarter of the ceiling. The table's warm throughput is 4,000 write
+  units a second; DynamoDB serves more as it scales the table. To raise it:
   change the numbers, PR, `npx cdk diff VettidOrgRelayDataStack` (the
   table must show as modified in place, never replaced), `npx cdk deploy
-  VettidOrgRelayDataStack`, then `VettidOrgRelayStack` (two alarm
-  thresholds follow the numbers). In an emergency the same from the CLI,
+  VettidOrgRelayDataStack`, then `VettidOrgRelayStack` (the table alarms
+  name the ceiling in their text; their thresholds are fixed numbers). In an emergency the same from the CLI,
   and put it in code afterwards, or the next deploy of the data stack
   takes it back:
   `aws dynamodb update-table --table-name vettid-org-relay --on-demand-throughput MaxReadRequestUnits=<n>,MaxWriteRequestUnits=<n>`.
@@ -418,8 +422,8 @@ data only in minutes with requests, so missing data is not an alarm.
 
 | Alarm | Fires when | Do |
 |---|---|---|
-| `table-writes-high` | 60,000 or more write units a minute for 5 minutes (half the ceiling of 2,000 a second) | Somebody is writing a lot: deposits of large messages, or many of them. With `address-busy` or `address-refused` on: one address. Is it a known vault host (a migration, a mass unlock, real growth)? Then raise the ceiling before it throttles ("Table throughput ceiling" above). If not, it is a flood kept at the ceiling: the bill is bounded (about $108 a day at most), tenants are throttled only once `table-throttled` fires; watch the table's size, and do not raise the ceiling for it. |
-| `table-reads-high` | 60,000 or more read units a minute for 5 minutes (half the ceiling) | The same for reads (collects of large mailboxes). Health checks read the table too, so do not let real use sit at the read ceiling: raise it. |
+| `table-writes-high` | 60,000 or more write units a minute for 5 minutes (1,000 a second, a tenth of the ceiling of 10,000; a fixed number, `RELAY_ALARM_LIMITS.tableWritesBusyPerSecond`) | Somebody is writing a lot: deposits of large messages, or many of them. With `address-busy` or `address-refused` on: one address. Is it a known vault host (a migration, a mass unlock, real growth)? Then check the ceiling still leaves room ("Table throughput ceiling" above) and raise this alarm with the membership. If not, it is a flood: the bill is bounded (about $540 a day at most at the ceiling, about $54 a day at this alarm's rate), tenants are throttled only once `table-throttled` fires; watch the table's size, and do not raise the ceiling for it. |
+| `table-reads-high` | 60,000 or more read units a minute for 5 minutes (1,000 a second, half the read ceiling; `RELAY_ALARM_LIMITS.tableReadsBusyPerSecond`) | The same for reads (collects of large mailboxes). Health checks read the table too, so do not let real use sit at the read ceiling: raise it. |
 | `table-write-volume` | 360,000 or more write units in an hour (100 a second on average; at most about 180 MB of messages stored) | 65 times the busiest hour of the preview. A slow fill below the other alarms shows here: table size and item count (`describe-table`, above), `register-refused`, the hour's `ConsumedWriteCapacityUnits` in the console. Real growth reaches it at about 300 vaults at a message a minute: then raise `tableWriteUnitsPerHour`. |
 | `table-throttled` | DynamoDB throttled the table or its index (read or write events, or throttled deposit transactions) in 3 of 5 minutes | Tenants are being refused or delayed now. With `table-writes-high` or `table-reads-high`: the ceiling is reached, decide as above (real use: raise it; a flood: leave it, it is what bounds the bill). Without them: a hot partition (one mailbox written or read beyond a partition's 1,000 write or 3,000 read units a second), or the index's ceiling (mass rotation, `register-refused`). |
 

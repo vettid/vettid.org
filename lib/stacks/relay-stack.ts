@@ -66,12 +66,18 @@ export const RELAY_ALARM_LIMITS = {
   collectorsPerTask: 2000,
   wsSessionsPerTask: 2000,
   /**
-   * The table's consumed units in a minute, as a share of its ceiling
-   * (RELAY_TABLE_LIMITS, units a second): half, like `address-busy`. At
-   * 2,000 a second that is 60,000 units a minute, 36 times the busiest
-   * minute measured for writes and 120 times for reads.
+   * The table's consumed units a second, held for 5 minutes, at which
+   * `table-writes-high` / `table-reads-high` fire. Fixed numbers, not a
+   * share of the ceiling (RELAY_TABLE_LIMITS): the write ceiling was raised
+   * to 10,000 (2026-10-15) to leave room for a full host, and the alarm
+   * stays where a flood or a host near its limit is worth a look. 1,000
+   * writes a second is a tenth of the write ceiling, about half of one
+   * full host or one address at the flood guard, 36 times the busiest
+   * minute measured, and about $54 a day if it lasted. Reads: half their
+   * ceiling of 2,000.
    */
-  tableBusyShare: 0.5,
+  tableWritesBusyPerSecond: 1000,
+  tableReadsBusyPerSecond: 1000,
   /**
    * Write units in one hour: 100 a second on average, a twentieth of the
    * ceiling and 65 times the busiest hour measured (5,486). Written bytes
@@ -525,17 +531,17 @@ export class VettidOrgRelayStack extends cdk.Stack {
     const tableMetric = (metricName: string, dimensionsMap: Record<string, string>, period = minute) =>
       new cloudwatch.Metric({ namespace: 'AWS/DynamoDB', metricName, dimensionsMap, statistic: 'Sum', period });
     const T = RELAY_TABLE_LIMITS;
-    const busy = (cid: string, name: string, metricName: string, what: string, perSecond: number) =>
+    const busy = (cid: string, name: string, metricName: string, what: string, busyPerSecond: number, ceiling: number) =>
       alarm(cid, name, {
-        alarmDescription: says(`the table took ${L.tableBusyShare * perSecond * 60} or more ${what} units a minute for 5 minutes: half its ceiling of ${perSecond} a second, above which DynamoDB throttles every tenant`),
+        alarmDescription: says(`the table took ${busyPerSecond * 60} or more ${what} units a minute for 5 minutes (${busyPerSecond} a second; its ceiling is ${ceiling} a second, above which DynamoDB throttles every tenant)`),
         metric: tableMetric(metricName, tableDims),
-        threshold: L.tableBusyShare * perSecond * 60,
+        threshold: busyPerSecond * 60,
         comparisonOperator: atLeast,
         evaluationPeriods: 5,
         datapointsToAlarm: 5,
       });
-    busy('TableWritesHigh', 'table-writes-high', 'ConsumedWriteCapacityUnits', 'write', T.maxWriteRequestUnits);
-    busy('TableReadsHigh', 'table-reads-high', 'ConsumedReadCapacityUnits', 'read', T.maxReadRequestUnits);
+    busy('TableWritesHigh', 'table-writes-high', 'ConsumedWriteCapacityUnits', 'write', L.tableWritesBusyPerSecond, T.maxWriteRequestUnits);
+    busy('TableReadsHigh', 'table-reads-high', 'ConsumedReadCapacityUnits', 'read', L.tableReadsBusyPerSecond, T.maxReadRequestUnits);
     alarm('TableWriteVolume', 'table-write-volume', {
       alarmDescription: says(`the table took ${L.tableWriteUnitsPerHour} or more write units in an hour (100 a second on average; up to 180 MB of messages stored): far above the preview's use, and how a slow fill of the table shows`),
       metric: tableMetric('ConsumedWriteCapacityUnits', tableDims, cdk.Duration.hours(1)),
