@@ -1,8 +1,31 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.6.5
+version: 2.7.0
 changelog:
+  - 2.7.0 (2026-10-15; **wording for the owner's approval**, with
+    VAULT-MESSAGING 0.33.0 §11.14; for the vault's "release R", not
+    built). "Vault recovery", **Recovery from release R**: the API signs
+    every `recovery` and `recovery_cancel` queue operation with the
+    **recovery request key** (ECDSA P-256 in AWS KMS, usable for signing
+    by the vault function only); new route **`POST
+    /api/vault/recovery/open`** (signed by the recovering key, forwarded
+    only while `registered`, 30 per recovery per day and 10 per source
+    network per 15 minutes, audit `vault.recovery_open`); the recovering
+    key may no longer call `unlock` or `lock`; `available_at` and
+    `expires_at` come from the enclave's clear `not_before` and
+    `expires` and may be later than 24 and 48 hours (new member
+    `earliest`), and `expires_at` moves with each wait; a slot's
+    `recovery_attempt` sends the member an email per counted attempt
+    (audit `vault.recovery_attempt`); new texts for the request email,
+    the attempt email and the completion email, and for the account
+    site's recovery page; a release that refuses recovery answers
+    `recovery_unavailable` with `reason: "not_offered"` (new `reason` on
+    `Recovery`); a pending app key (`app_key_next`) accepted beside
+    the current one during a transfer or recovery. The API never
+    learns an attempt's outcome or the count. VettID can suppress every
+    email; said where they are specified. The section heading's stale
+    "VAULT-MESSAGING 0.4.1" is corrected
   - 2.6.5 (2026-10-14; as built; wording for the owner's approval).
     No member API route, request or response shape changes.
     **The daily run finds vaults whose member row is gone** ("Vault
@@ -1503,7 +1526,7 @@ and the deletion of the stored objects of vaults still sealed to a
 deleted key (D + 37), which needs the cleanup role in the data bucket's
 policy (VAULT-RELEASES §3.5, §8.2).
 
-### Vault recovery (VAULT-MESSAGING 0.4.1 §11.11)
+### Vault recovery (VAULT-MESSAGING §11.11; from release R also §11.14)
 
 For a member who has lost their app (VAULT-MESSAGING 0.9.0: a vault has
 one app). The portal asks; the vault is locked at once; after 24 hours the
@@ -1528,6 +1551,7 @@ the expiry itself.
 | POST | `/api/vault/recovery/cancel-link` | `{token}` (no session) | `200 {cancelled: boolean}`; `404 not_found` for a token that is unknown, past the recovery's `expires_at` or of a replaced recovery (Cancel, below) |
 | POST | `/api/vault/recovery/claim` | `{vault_id, recovery_id, app_key}` (scanned; 2.0.0) or `{locator, app_key}` (typed; 2.4.0); app, signed by `app_key` | `200 {user_guid, email_hint, vault_id, recovery_id}` (the two identifiers since 2.4.0) |
 | POST | `/api/vault/recovery/register` | `{vault_id, request_id, instance_id, etk_kid, envelope}` (app, signed by a claim key; 2.0.0) | `202 {vault_id, request_id}`; poll `GET /api/vault/requests/{id}` |
+| POST | `/api/vault/recovery/open` | `{vault_id, request_id, instance_id, etk_kid, envelope}` (2.7.0, release R; app, signed by the recovering key) | `202 {vault_id, request_id}`; poll `GET /api/vault/requests/{id}` (Recovery from release R, below) |
 
 ```ts
 interface Recovery {
@@ -1537,8 +1561,10 @@ interface Recovery {
        | 'unavailable'                 // 2.1.0: the enclave refused it (no_backup or no_credential; slot code recovery_unavailable)
        | 'completed';                  // 2.4.1: the new app holds the credential and is the vault's app (ended)
   requested_at: string;                // RFC 3339
-  available_at: string;                // requested_at + 24 h
-  expires_at: string;                  // available_at + 24 h
+  available_at: string;                // requested_at + 24 h (2.7.0, release R: the enclave's not_before, which may be later)
+  expires_at: string;                  // available_at + 24 h (2.7.0, release R: the enclave's expires, moved by each wait)
+  earliest?: true;                     // 2.7.0: available_at is still the API's own estimate (or the enclave's, when it could not read its counter)
+  reason?: 'no_backup' | 'no_credential' | 'not_offered';  // 2.7.0: only with `unavailable`, from the slot's clear reason
   completed_at?: string;               // 2.4.1: only with `completed`; when the API recorded it
   sealed_code?: string;                // b64 of 5,252 bytes, only while `available`
   locator?: string;                    // 2.4.0: 12 Crockford base32 characters, only together with a `sealed_code` that is a code's (never with `unavailable`)
@@ -1858,11 +1884,131 @@ interface Recovery {
   `vault.recovery_completed` (2.4.1; `vault_id`, `recovery_id`, the
   key's `kid`),
   `vault.recovery_claim` (2.0.0; `via`, 2.4.0),
-  `vault.recovery_locator_miss` (2.4.0). Never the code, the locator, the browser key, the token or
+  `vault.recovery_locator_miss` (2.4.0), `vault.recovery_open` and
+  `vault.recovery_attempt` (2.7.0, release R). Never the code, the locator, the browser key, the token or
   envelopes.
 - **Email** uses the system mailer (SES sandbox: the member's address must
   be a verified identity, as for sign-in links; a failed send is logged
   and does not fail the request).
+
+#### Recovery from release R (2.7.0)
+
+*Wording for the owner's approval, with VAULT-MESSAGING 0.33.0 §11.14.
+It applies to vaults of release R and later, and binds nothing before.
+Everything above holds except where this says otherwise.*
+
+- **Signed queue operations.** The API signs every `recovery` and
+  `recovery_cancel` it enqueues (VAULT-MESSAGING §11.14.8): the string
+  `"vettid/vms/2/recovery-request" \n op \n vault_id \n user_guid \n
+  request_id \n signed_at \n hex(SHA-256(browser_key))` (the last line
+  empty for a cancel), signed with the **recovery request key**, an
+  ECDSA P-256 key in AWS KMS in the account that runs the member API
+  (`alias/vettid-org-recovery-request`; staging
+  `alias/vettid-org-staging-recovery-request`), whose key policy allows `Sign` to
+  the member API's vault function only; the message carries
+  `signed_at`, `key_id` and `sig`. The vault releases pin its public
+  key (`recovery_request_keys`). A refused signature is answered with
+  random bytes and nothing happens; the API treats it like an enclave
+  that cannot answer. The signature does nothing against VettID as a
+  whole, which holds the key; in production it separates the member
+  API's account from the vault's, and on staging, where both run in one
+  account, two roles only.
+- **Times.** `POST /api/vault/recovery` still answers request + 24 h and
+  + 48 h, now the earliest possible times, with `earliest: true`. When
+  the request's slot returns the enclave's clear `not_before`,
+  `expires` and `earliest`, the API stores them as `available_at` and
+  `expires_at` (a vault cannot be recovered until 72 hours after its
+  member was last present, and not during a wait), and drops
+  `earliest` unless the enclave set it. The code is released from
+  `available_at` as before.
+- **`POST /api/vault/recovery/open`.** Body `{vault_id, request_id,
+  instance_id, etk_kid, envelope}` (envelope exactly 13,444 bytes, as
+  an unlock), signed by the recovery's `recovering_key`. Forwarded only
+  while the recovery is `registered` and before its `expires_at` (`409
+  recovery_not_available` otherwise); enqueued as `recovery_open` with
+  that key as `app_key`, to a live instance of the vault's
+  `sealed_release`, preferring one whose registry row shows
+  `heavy_kdf_free` (VAULT-HOST-PROTOCOL §6.6). The result is polled with
+  `GET /api/vault/requests/{id}`, which returns `envelope` and `code`
+  for this slot. Limits: 30 per recovery per day and 10 per source
+  network per 15 minutes. **These limits save work; the bound on
+  guessing is the vault's attempt counter, not the API.** Audit
+  `vault.recovery_open` (`vault_id`, `recovery_id`, `request_id`; never
+  the outcome, which the API cannot read).
+- **A counted attempt.** When an open's slot comes back with `code:
+  "recovery_attempt"`, the API audits `vault.recovery_attempt`, moves
+  the recovery's `expires_at` to the slot's `expires` when present
+  (the recovery stays open across waits with the same code), and
+  emails the member (below). It learns that an attempt was counted and
+  when the next is possible, never whether it was right, and never the
+  number of attempts used, which the vault reports to its owner only.
+- **The recovering key** may call `enclave`, `open` and poll its own
+  requests; `unlock` and `lock` are refused `403` (a registered phone
+  does not unlock from release R).
+- **The pending app key.** A transfer or a recovery replaces the app in
+  three writes (VAULT-MESSAGING §11.14.2). The host writes
+  `app_key_next` (`{key, kid, seq}`, `seq` one above `app_key`'s) with
+  the first and `app_key` with the third. While `app_key_next` is set,
+  with no time limit, the API accepts requests signed by either key as
+  the vault's app key; when `app_key` reaches its `seq` it is cleared and
+  the old key is refused. It is also cleared when the vault abandons the
+  replacement (`app_key` repeated with `next_cleared: true`) and when an
+  `unlocked` or `locked` report says `next: false` with an `app_key_seq`
+  at least the next key's `seq` or a `header_seq` at least that of the
+  write that carried it, so that a stale report never clears it
+  (VAULT-MESSAGING §11.14.2). This is not the redeem's
+  `app_key_pending` above. A restore by an operator (RUNBOOK) resets
+  `app_key` to the old header's key and clears the pending one, the one
+  case in which `seq` goes down.
+- **Completed** is noticed as before, from the host's `app_key`; the
+  vault makes the registered key its app key when the recovery open
+  completes (VAULT-MESSAGING §11.14.6 step 6).
+- **A release that refuses recovery** (VAULT-MESSAGING §11.14.13): the
+  slot's `recovery_unavailable` carries the clear `reason:
+  "not_offered"` (the API cannot read the sealed refusal); the API ends
+  the recovery as `unavailable` with that `reason` and the account site
+  says "This vault's release does not offer recovery. Your vault gains
+  recovery only after you move it to a release that does, which needs
+  your phone."
+- **Emails** (texts are drafts for the owner's wording). VettID can
+  suppress every email, and an attacker who is VettID needs none: they
+  are a notice against an attacker who is someone else.
+  - *Request*: "A recovery of your VettID vault was requested from your
+    account. Your vault has been locked. If nobody cancels, a one-time
+    recovery code becomes available on your account page at
+    {available_at} at the earliest, for 24 hours. The time can be later:
+    a vault cannot be recovered until three days after its app was last
+    used with the PIN and the password. Your account page shows the
+    exact time. A new phone then needs the code, your vault PIN and your
+    credential password, entered together. There are ten attempts in
+    all. After the first two, each wrong attempt is followed by a wait,
+    which starts at one day and grows to thirty days. You get an email
+    for every attempt. The new app replaces your current app, which is
+    removed; your desktops and agents stay paired. If you did not ask
+    for this, cancel it now: {cancel_url}. If you still have your phone,
+    open the VettID app and enter your PIN and password there: that also
+    stops this recovery."
+  - *Attempt*: "An attempt was made to open your VettID vault with a
+    recovery, on {time}. Attempts are limited to ten, and after the
+    first two each wrong one is followed by a growing wait. If this was
+    you and it did not work, the app on your new phone shows when you
+    can try again. If this was not you, cancel the recovery now:
+    {cancel_url}. If you still have your phone, open the VettID app and
+    enter your PIN and password."
+  - *Completed*: "Your VettID vault was recovered on {time} and is now
+    on a new phone. Your old app was removed."
+  - The cancel email is unchanged.
+- **The account site's recovery page** (drafts): before the request,
+  "Recovering takes at least 24 hours, and up to three days if your app
+  was used recently. You will need a new phone, your vault PIN and your
+  credential password. You have ten attempts at the PIN and password
+  together. The first two can be made at once. After that, each wrong
+  attempt is followed by a wait: one day, then two, four, eight and
+  sixteen days, then thirty days each. If all ten are wrong, this vault
+  cannot be recovered."; while waiting, "Your recovery code will be
+  ready on {date} at {time}" and, while `earliest`, "at the earliest";
+  and "The app on your new phone shows how many attempts are left." The
+  page cannot show the count.
 
 ### Locks (2.5.0; VAULT-MESSAGING 0.29.0 §11.5, VAULT-LOCK)
 

@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.27
+version: 0.1.28
 date: 2026-10-15
 owner: Al Liebl (Mesmer)
 changelog:
@@ -225,6 +225,24 @@ changelog:
     filter checks (#88), and the checks required on a source-built
     kernel (#87). §14: risks 11 (the allow list, #88) and 12 (no
     current kernels from AWS, #87)
+  - 0.1.28 (**wording for the owner's approval**, with VAULT-MESSAGING
+    0.33.0 §11.14; for the vault's "release R", not built). §5.2: the
+    release constants `recovery_counter`, `recovery_request_keys`,
+    `recovery_wait_unit_seconds`, `recovery_quiet_seconds`,
+    `recovery_offered` and `android_min_version_code`, and **the build
+    rule that keeps staging's short wait unit and any test clock out of
+    a production image**, with a test on the production image. §8.2:
+    the recovery counter bucket per channel (Object Lock in compliance
+    mode, no default retention, no rule that expires a current version
+    or a vault's newest present record), the host role's five grants on
+    it, the recovery request key in the member API's account, and the
+    data bucket's version rule as the window (24 hours safe, up to 7
+    days) for repairing the one write fault a DEK replacement cannot
+    survive. §8.4: the counter bucket's host in
+    the egress controls. §8.8: the heavy key derivation's permit and its
+    effect on capacity (estimates). §3.5: an earlier release stays a way
+    around a later counter until its key is deleted. §12: production
+    release 1 may refuse recovery, never ship the earlier recovery
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.29.3) §11.10 release updates, §12.5 deletion, §13.5, §13.9
@@ -570,6 +588,19 @@ In-app: `GET /api/vault/status` carries the release's number, status,
 D + 37 deletion of stored objects (they need the cleanup role in the
 bucket policy, §8.2); both wait until a release first nears its end.
 
+**A stronger recovery counter does not reach vaults sealed to an
+earlier release** (0.1.28; VAULT-MESSAGING 0.33.0 §11.14.13). A vault
+that moves to a release with a stronger counter leaves its earlier
+header sealed under the earlier key, and the earlier genuine image
+still runs and asks only its own counter. Until that key is deleted
+(at least 90 days of notice and the 30-day window), VettID can run the
+earlier release on the old header. A member without a phone cannot
+move the vault at all. That is why production's first release with
+recovery carries both S3 and the outside store (release "R2"); the rule
+for ending a release once the counter group (release "R3") exists is
+decided when R3 is specified. On staging the earlier release is ended
+and its key deleted after the 7-day window.
+
 ## 4. Spec changes needed before release 1
 
 Release 1's code is frozen once members are on it, and C1/C2 bind every
@@ -767,6 +798,11 @@ whose value is recorded in `measurements.json`):
 | `features` (0.1.11) | the optional features the image registers: none in release 1 (staging: all seven) | VAULT-MESSAGING 0.26.0 §11.10.8, "Feature allowlist"; STAGING-DEVELOPMENT-PLAN D4 |
 | `relay_url` | `https://relay.vettid.org` | |
 | `calls_url` (0.1.19; planned for staging "release C2"; approved by the owner 2026-10-12) | absent (staging: `https://calls.staging.vettid.org`) | VAULT-MESSAGING 0.28.0 §11.10.8; CALLING-SERVICE 0.2.0 §5; CALLS-PLAN D4 |
+| `recovery_counter` (0.1.28, release R) | `{bucket, account, region}` of production's counter bucket (§8.2); staging: its own bucket in the staging account | VAULT-MESSAGING 0.33.0 §11.14.4; VAULT-HOST-PROTOCOL §8.1 |
+| `recovery_request_keys` (0.1.28, release R) | one or two `{key_id, spki}` of the member API's recovery request key (§8.2) | VAULT-MESSAGING 0.33.0 §11.14.8 |
+| `recovery_wait_unit_seconds`, `recovery_quiet_seconds` (0.1.28, release R) | 86,400 and 259,200 (staging: 600 and 259,200) | VAULT-MESSAGING 0.33.0 §11.14.6, §11.14.14 |
+| `recovery_offered` (0.1.28, release R) | `true`; `false` only for a production release that ships before the outside store (§12) | VAULT-MESSAGING 0.33.0 §11.14.13 |
+| `android_min_version_code` (0.1.28, release R) | the first app version code that implements release R | VAULT-MESSAGING 0.33.0 §11.14.14 |
 
 GrapheneOS verified-boot keys and vendor roots stay in `vms/pins` (code).
 Everything that defines a release is in the tagged tree, so
@@ -819,6 +855,18 @@ duplicate digest, the bare-string form and, in `prod.json`,
   `prod.json` cannot express it. Since S10 the images also apply the
   key attestation chain rules of VAULT-MESSAGING §11.7 (the fix that
   made S10 an urgent security release).
+
+**Recovery constants and the production build rule (0.1.28; wording
+for the owner's approval; release R).** Staging tests recovery's waits
+with a wait unit of 10 minutes; production's is 24 hours. The release
+build MUST refuse a `prod.json` whose `recovery_wait_unit_seconds` is
+below 86,400 or whose `recovery_quiet_seconds` is below 259,200, MUST
+refuse a production image in which a test clock can be set (the
+development stack's recovery clock, `RecoveryNow` in vettid-vault, is
+compiled out of release images), and MUST refuse a `recovery_counter`
+that names another channel's bucket or account. A test run on the
+production image itself asserts all three, as for `features`. The
+quiet period is the same on staging, so staging tests it in real time.
 
 **The calling service's issuer (0.1.19; planned; approved by the owner
 2026-10-12).** `calls_url` is optional, and the release build
@@ -1273,6 +1321,45 @@ cleanup job's object deletion (D + 37, W8) is not granted yet: W8 adds its
 role to that exception. Restoring an older object version (§11.4) means
 editing the bucket policy first.
 
+*0.1.28 (release R).* The data bucket's version rule is also what
+makes the one write fault of a DEK replacement repairable
+(VAULT-MESSAGING §11.14.2): a store that confirmed a header it did not
+keep leaves the earlier state as a noncurrent version beside the header
+that is still current, and an operator restores it (RUNBOOK). Under the
+rule that is **safe within 24 hours** of the failure (rule 2: 1 day unless
+among the 5 newest noncurrent versions) and possible up to **7 days**
+only while the state was written fewer than 5 times since (rule 1). The
+rule MUST NOT be shortened below either: 1 day with the 5 newest kept,
+and 7 days at most. It is VettID's own rule and protects nobody against
+VettID; members cannot check it.
+
+**Recovery counter bucket** (0.1.28, release R; VAULT-HOST-PROTOCOL
+§8.1). One per channel, in `VettidOrgVaultStack` of the vault account
+(production: the vault production account; staging: the staging
+account), named `vettid-org-vault-recovery-<account>`, RETAIN: Object
+Lock enabled at creation, versioning on, block public access, SSE-S3,
+TLS only, **no default retention**, and **no lifecycle rule that expires
+a current version**. A rule MAY expire noncurrent versions of present
+markers whose locks have ended, and MUST NOT remove a vault's newest
+present record: after its 96-hour lock its existence rests on VettID,
+and a vault with none cannot be recovered. The host role gets
+`s3:PutObject`, `s3:PutObjectRetention`, `s3:GetObjectVersion`,
+`s3:GetObjectRetention` and `s3:ListBucketVersions` on it and nothing
+else; no role used by the hosts gets a delete, bypass-governance,
+legal-hold or configuration permission. The bucket's name, account and
+region are the release constant `recovery_counter`. No principal can
+shorten or delete a compliance-locked version, the root user included;
+AWS acting for VettID could, which VAULT-MESSAGING §11.14.12 states.
+
+**Recovery request key** (0.1.28, release R; VAULT-MESSAGING
+§11.14.8). An ECDSA P-256 KMS key (`SIGN_VERIFY`) in the account that
+runs the member API, alias `alias/vettid-org-recovery-request` (staging
+`alias/vettid-org-staging-recovery-request`), RETAIN, whose
+policy allows `kms:Sign` to the member API's vault function only and
+`kms:GetPublicKey` to the release build; its public key is pinned in
+`recovery_request_keys`. A replacement is pinned beside the old key for
+one release first.
+
 ### 8.3 Hosts and the AMI
 
 - **Instance:** Graviton `m7g.large`, on demand (D2), Nitro Enclaves on,
@@ -1351,6 +1438,16 @@ out:
    compromised parent too, including DNS tunnelling.
 4. Security group: no inbound; outbound TCP 443 only (plus DNS to the
    resolver). VPC Flow Logs for audit (7–30 days).
+
+(0.1.28, release R) The recovery counter bucket's virtual-hosted name
+(`vettid-org-vault-recovery-<account>.s3.us-east-1.amazonaws.com`) is
+added to `DefaultAllow`, to the enclave's release allowlist (Amazon's
+roots) and, already admitted as S3, to the DNS Firewall. In the VPC the
+parent's connection to it goes through the S3 gateway endpoint, like all
+S3 traffic in the region; the endpoint's policy admits resources of the
+vault account (`aws:ResourceAccount`, below), and the counter bucket is
+one. TLS still ends in the enclave. A release that carries the name also
+carries the parent that admits it (C4).
 
 **KMS: public endpoint, no interface endpoint.** An interface endpoint
 with private DNS would serve the same name and an Amazon certificate, so
@@ -1748,6 +1845,19 @@ balancer; phase 2 of VAULT-RELAY-SCALING measures on staging):
 | The same at 2,000 vaults (above `MaxProcs`) | 0.5 s; 4.4 s for a second loss within 3 s of the first (the dial rate) |
 | A connection whose host goes silent without closing it | found and closed after 25 s (ping after 15 s, 10 s to answer) |
 
+*The heavy key derivation (0.1.28, release R; estimates, to be measured
+on staging).* A recovery wrap's derivation needs 1 GiB and about 3 to 5
+seconds of the enclave's one processor. The supervisor gives one permit
+at a time, only while free memory is at least the memory-pressure floor
+(15 %, about 768 MiB) plus 1.2 GiB; otherwise the request is answered
+`busy` and nothing is reserved (owner decision of 2026-10-14). Reserving
+the room always would cost about 270 idle vaults per host (about 620
+instead of 894). While a derivation runs, unlocks on that enclave take
+several seconds longer; at most about 12 to 20 derivations a minute fit
+one enclave, so a burst of enrollments arms in turn. The `m7g.xlarge`
+step below removes most of this. The parent records `heavy_kdf_free`
+from `Stats` (VAULT-HOST-PROTOCOL §6.6).
+
 *O6 decision (owner, 2026-10-06):* keep the 1 vCPU / 5120 MiB enclave on
 m7g.large for release 1; revisit when unlock queueing shows in metrics
 (unlock latency above the single-unlock figure under load; the parent's
@@ -2065,6 +2175,17 @@ Nothing new until the Android app ships (V6): enrollment needs it. The
 account site can show vault status. The first production users are the
 owner's canary vaults. Recommendation: time production release 1 with the
 Android closed beta; until then, staging carries the testing.
+
+**Recovery in production release 1** (0.1.28; owner decision of
+2026-10-15; VAULT-MESSAGING 0.33.0 §11.14.13). Release 1 carries
+recovery only if it carries release R's recovery **and** the outside
+store (release "R2"). Otherwise it ships with `recovery_offered: false`:
+every recovery request is refused without locking the vault, and the
+account site and the app say that recovery is not available in this
+release yet (a member who loses the phone can then only start over,
+VAULT-MESSAGING §11.11.9). It never ships the recovery of the releases
+before R, because every vault sealed to a release stays open to that
+release's method until its sealing key is deleted.
 
 ### 12.3 Rollback
 

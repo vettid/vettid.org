@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.32.1
+version: 0.33.0
 date: 2026-10-15
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -13,17 +13,68 @@ related:
   - CALLS-PLAN.md (0.1.3) §13 (phase C2; decisions D12–D26, decided 2026-10-12)
   - PUSH-GATEWAY.md (0.5.0)
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.6.4)
-  - ANDROID-PLAN.md (0.1.39)
+  - MEMBER-API.md (2.7.0)
+  - ANDROID-PLAN.md (0.1.40)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
-  - VAULT-RELEASES.md (0.1.19; 0.1.6 approved 2026-10-04)
+  - VAULT-RELEASES.md (0.1.28; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
-  - VAULT-HOST-PROTOCOL.md (0.1.9; the enclave ↔ parent protocol as built)
+  - VAULT-HOST-PROTOCOL.md (0.1.10; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.33.0: normative once approved; **wording for the owner's
+    approval** (owner decisions of 2026-10-13 to 2026-10-15, the open
+    questions as recommended; the old phone's keys after a transfer as
+    decided by the owner on 2026-10-15);
+    **needs a vault release** (the placeholder "release R", R for
+    recovery), an app release and a member API deploy. Every rule it
+    adds is marked "0.33.0, release R" and binds nothing before then.
+    **Recovery is rebuilt** (new §11.14): a recovery wrap of a random
+    recovery key under the PIN and the credential password together
+    (Argon2id at 1 GiB, `busy` when there is no room), opened by the new
+    `vault.recovery.open`; **ten attempts for the life of a pair**, two
+    at once and then one after each wait of 1, 2, 4, 8, 16, 30, 30 and
+    30 days, each counted before it is tested **at an attempt counter
+    outside everything the host stores** (S3 objects under Object Lock
+    in compliance mode, VAULT-HOST-PROTOCOL §8.1) and checked again right
+    after against the attempt's own time; a **72-hour quiet period**
+    since the member was last present; a new generation (ten new
+    attempts) at every change of PIN or password, and none until a
+    change after ten used; the code valid across waits; every attempt in
+    History and by email (`recovery_attempt`). **Every unlock needs a
+    secret that only the phone's hardware can produce** (a non-exportable
+    HMAC key; `unlock_secret`, `device_secret`), the DEK is random and
+    **replaced at every change of PIN, password or phone**, written in
+    three steps so that a crash or a dropped write never strands a vault
+    but in one stated case. `pin.change` is specified as a credential
+    operation; `credential.create` and `credential.password.change`
+    carry both secrets so that recovery is armed at once; new
+    `vault.secret.renew`. New passwords: 12 characters, not common, a
+    guessability estimate of 10^10, NFC. Recovery requests are signed by
+    the member API (§11.11.2's open question, decided). A completed
+    recovery rotates the vault's long-lived keys; a connection keeps the
+    first successor of an identity key (§3.4). Transfers carry the new
+    phone's secret and the password-and-PIN approval makes a new
+    `opener`, the app key is reported pending at the first header write;
+    the old phone deletes its keys at the new phone's first unlock from
+    storage or 7 days after the approval, whichever comes first. A
+    stored state and header that do not belong together are refused
+    `stored_mismatch` before an attempt is spent; the state object names
+    its `dek_version` in the clear (format 0x02). The old recovery path (`credential.recover`, the
+    recovering device) is removed in release R. What VettID can and
+    cannot do, the residual if AWS acted for VettID, the sealing-key
+    qualification and the offline costs are stated (§11.14.12, §13.5).
+    The outside store (release "R2", Google Cloud Storage) and the
+    counter group (release "R3") are specified later; production
+    release 1 may ship with recovery refused, never with the old
+    recovery, and production's first release with recovery carries the
+    outside store (§11.14.13). Pointers in §1, §2.2, §3.2, §3.3,
+    §3.3.1, §3.4, §3.5.1, §3.5.5, §3.5.6, §3.6.1, §3.6.3, §6.2, §6.7.1,
+    §10, §10.1, §10.2, §10.6, §10.9, §11.3, §11.4, §11.5, §11.7,
+    §11.10.8, §11.11, §12.5, §13.2, §13.3, §13.5; §15 item 39; §16
+    vectors
   - 0.32.1: errata to the attachments text of 0.32.0, found while
     building release A (vettid-vault #92 to #94); approved by the owner
     2026-10-15. (1) §7.1: `owner_device` goes only on the standing
@@ -983,6 +1034,9 @@ vaults of its connections. It covers:
 - delivery semantics (§8, §9);
 - the message-type registry (§10);
 - enrollment, unlock and recovery over an alternate channel (§11);
+  (0.33.0, release R) recovery rebuilt around an attempt counter outside
+  everything the host stores, and a secret only the member's phone can
+  produce in every unlock (§11.14);
 - locked vaults (§12).
 
 The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are to be read as
@@ -1140,7 +1194,15 @@ unlocked. (0.32.0, release A) Attachments add objects under
 `vaults/<vault_id>/att/`, so the host also sees when a vault stores or
 deletes an attachment, its approximate size and how many it holds;
 the relay sees each attachment's blob sizes and times (§10.5.1, "What
-each party learns").
+each party learns"). (0.33.0, release R) The host also carries the
+enclave's TLS connections to the recovery attempt counter, an S3 bucket
+in the vault's AWS account (§11.14.4): it sees when a vault calls it,
+and VettID, which owns the bucket, reads every record's name and time,
+among them when each member was last present (§11.14.5). The names are
+opaque and say nothing beyond which records belong to one vault. The
+state object also names its `dek_version` in the clear (§11.14.1), which
+tells the host how many times a vault's DEK was replaced, so roughly how
+many changes of PIN, password or phone it had.
 
 VettID operates both the host and the relay, so in its own deployment it can
 correlate their timing. This residual metadata is disclosed here rather than
@@ -1157,7 +1219,8 @@ hidden. Traffic-analysis resistance is a non-goal (as in RELAY-PROTOCOL
   there (§13.5);
 - loss of the stored vault state itself. Recovery when the app is lost
   is §11.11; it needs the state, the PIN and the credential password,
-  and exists only with the credential backup on (§3.5.6);
+  and exists only with the credential backup on (§3.5.6). (0.33.0,
+  release R: §11.14);
 - a lost or replaced app with the credential backup off (0.16.0, owner
   decision of 2026-10-06). There is no recovery and no path back into
   that vault: nothing in it is ever released to anyone without the
@@ -1193,7 +1256,8 @@ key `ek` is 1,216 bytes. The decapsulation (private) key is stored as its
 | Session epoch keys | both ends | Session-mode envelopes | One epoch (§6.5) | DEK state / device storage |
 | Ephemeral KEM key | handshake initiator | Forward secrecy | One handshake | Memory |
 | ETK (KEM key) | enclave instance | Alternate channel | ≤ 24 h, regenerated at every start | Enclave memory only |
-| DEK | vault | Encrypting vault state | While unlocked | Enclave memory only |
+| DEK | vault | Encrypting vault state | While unlocked; (0.33.0, release R) random, replaced at every change of PIN, password or phone (§11.14.2) | Enclave memory only; (release R) wrapped in the sealed header under the PIN and the phone's secret, and under the recovery key (§11.14.1, §11.14.3) |
+| Phone key (0.33.0, release R; HMAC-SHA-256) | the vault's app | Computing the unlock secret that every unlock needs (§11.14.1) | Life of the installation | Android Keystore, StrongBox or TEE, non-exportable, not bound to user authentication |
 | Device attestation key | app (Android Keystore key, iOS App Attest key) | Device attestation (§11.7) | Life of the installation | StrongBox / TEE / Secure Enclave (platform) |
 | Wake key (Ed25519) | vault | Push gateway (§14) | PUSH-GATEWAY §3 | DEK state |
 | CEK (KEM key) | vault | Sealing the Protean Credential (§3.5) | Until `credential.rotate`, `credential.reset` or the vault's deletion | DEK state |
@@ -1240,6 +1304,10 @@ Rules for all keys:
 - (0.32.0, release A) the **attachment index**: one entry per
   stored attachment, with its key `k_att` and its transfer state; the
   attachments themselves are separate objects (§10.5.1);
+- (0.33.0, release R) `dek_version`, in the state's authenticated
+  header; the recovery attempts the vault has recorded from the counter
+  and any success not yet confirmed there; a transfer's pending unlink
+  (§11.14.1, §11.14.6, §11.14.10);
 - feature data.
 
 The **sealed header** is a small record sealed to the enclave's attestation,
@@ -1262,12 +1330,28 @@ contains:
   its current blob (§3.5.6), so whether it can be recovered (§11.11.1);
   the vault writes it at every header write and in the flush that
   changes it;
-- `state_seq` and `header_seq` (§13.2).
+- `state_seq` and `header_seq` (§13.2);
+- (0.33.0, release R) `dek_wrap`, `dek_version` and `secret_check`, in
+  place of a derived DEK (§11.14.1); while a DEK is being replaced, a
+  `next` part (§11.14.2); and `recovery.counter_key`,
+  `recovery.generation` and, while armed, `recovery.wrap` (§11.14.3).
+  The recovery record (§11.11) also holds the last wrong pair's tag and
+  the count of `wrong_again` answers (§11.14.6).
 
 The sealed header MUST NOT contain the relay key, session keys or feature
 data.
 
 #### 3.3.1 DEK derivation and at-rest formats
+
+(0.33.0, release R) From release R the DEK is 32 random bytes, wrapped
+in the sealed header under a key derived from the PIN, the pepper and a
+secret that only the member's phone can produce, and replaced at every
+change of PIN, password or phone (§11.14.1, §11.14.2). The derivation
+below applies to the releases before R. The header format below
+applies to all; the state's `0x01` layout below is for the releases
+before R. Release R writes and reads only the `0x02` layout of §11.14.1
+and refuses a `0x01` state (no vault is carried into release R), and
+its lifecycle reports raise `state_version` accordingly (§11.5).
 
 The DEK is derived from the PIN and a secret that only the sealed header
 holds, so that stolen vault state cannot be brute-forced against PINs
@@ -1291,11 +1375,11 @@ The reference implementation stores vault state and the sealed header as:
 state  = 0x01 || state_seq (8, big-endian) || nonce (24)
          || XChaCha20-Poly1305(DEK, nonce, aad, state_json)
 aad    = "vettid/vms/2/state" || 0x00 || vault_id || 0x00 || state[0:9]
-header = Seal_R(header_json, aad = "vettid/vms/2/header" || 0x00 || vault_id)   # sealed to release R (§11.10.2)
+header = Seal_rel(header_json, aad = "vettid/vms/2/header" || 0x00 || vault_id)   # sealed to the vault's release (§11.10.2)
 ```
 
-`Seal_R` encrypts under a fresh AES-256 data key from KMS `GenerateDataKey`
-on release R's key (§11.10.2), with the key ARN in the object and in the
+`Seal_rel` encrypts under a fresh AES-256 data key from KMS
+`GenerateDataKey` on that release's key (§11.10.2), with the key ARN in the object and in the
 AAD, all lengths 2 bytes big-endian:
 
 ```
@@ -1365,6 +1449,32 @@ sig_new = Ed25519(new_ik, "vettid/vms/2/rotate" || m)
   A receiver MUST reject chains longer than 32 links.
 - The chain resolves to the last link's `new_ik` and `new_kem`; an empty
   chain resolves to the stored keys.
+- (0.33.0, release R) **One successor per key.** A receiver that has
+  accepted a statement with a given `old_ik` keeps that successor. A
+  later, valid statement with the same `old_ik` and a different
+  `new_ik` means two copies of that vault are rotating, for example an
+  old copy run by a host that replays (§11.14.2). Which arrived first is
+  the carrier's choice, so the receiver keeps neither: it **suspends the
+  connection** (it sends nothing to and accepts nothing from either key),
+  audits `identity.rotate_conflict` and makes a feed item of priority
+  `high` for its member, with both candidates' key fingerprints
+  (§10.8). The connection resumes only after the two members verify each
+  other again out of band: they compare the fingerprint the other member's
+  app shows with the two candidates, and the member's app sends the
+  holder-only **`connection.rotation.resolve {connection_id, new_ik}`**
+  (answered `{}`, or `not_found` when the connection has no conflict or
+  `new_ik` is neither candidate), which keeps that successor and drops the
+  other; or they reconnect with a new invitation and safety code (§6.4).
+  A desktop or an agent is answered `forbidden`. *Residual:* the carrier, or a
+  replaying host that holds an old copy of a vault, can after any
+  rotation of that vault send a second successor to each of its
+  connections and so suspend all of them until each is verified again
+  out of band. It could already deny the traffic by dropping it; the
+  suspension makes that denial persistent. A vault sends its own
+  rotation notices only after the state write that holds the rotation
+  (§11.14.2). A vault
+  rotates its relay key, `ik`, `kem` and wake key at a completed
+  recovery (§11.14.6 step 6).
 - **ETK** rotates at least every 24 h and on every enclave start.
 
 ### 3.5 The Protean Credential
@@ -1424,8 +1534,11 @@ transport. Its three rotating mechanisms map as follows:
 - **UTK/LTK pairs.** One-time transaction keys, each an MLKEM768X25519 key pair.
   - The vault keeps the private halves (LTKs) in DEK state.
   - It gives the public halves (UTKs) to one app (§3.5.4).
-- **Password.** A UTF-8 string of 8–1,024 bytes. It travels only inside a
-  UTK-sealed payload. The enclave sees it transiently, as it sees the PIN
+- **Password.** A UTF-8 string of 8–1,024 bytes; (0.33.0, release R)
+  normalized to NFC, and a password that is set needs at least 12
+  characters, must not be common and must pass a guessability estimate
+  (§11.14.7). It travels only inside a UTK-sealed payload (from release
+  R also inside a recovery open sealed to the ETK, §11.14.6). The enclave sees it transiently, as it sees the PIN
   (§12.4), and MUST NOT store or log it.
 
 #### 3.5.2 Format
@@ -1628,7 +1741,8 @@ item's values seals them to a **one-time reply key** instead:
 #### 3.5.5 Lifecycle
 
 - **Create.** `credential.create` comes from an app, with
-  `{utk_id, sealed{password}}`.
+  `{utk_id, sealed{password}}` ((0.33.0, release R) `sealed{pin,
+  password}`, so that the vault arms its recovery at once, §11.14.9).
   - The vault generates the CEK and the credential key, seals version 1
     with no items, and returns the blob.
   - A vault has at most one credential.
@@ -1645,6 +1759,8 @@ item's values seals them to a **one-time reply key** instead:
     (§11.11.5); both rotate the CEK, so the old holder's copy is dead.
 - **Password change.** `credential.password.change` re-seals the content
   under the new password (and, like every use, under a new CEK).
+  (0.33.0, release R) It also carries the PIN, closes the recovery
+  generation and arms the next, and replaces the DEK (§11.14.9).
 - **Rotate.** `credential.rotate` generates a new credential key.
   - It rotates the vault's `ik` and `kem` in the same flush (§3.4).
   - The vault signs a **credential-key rotation statement** with the old
@@ -1743,7 +1859,13 @@ the holder confirms it (§3.5.3), then only its hash and version.
   one, and **everything in it is lost**, not only the critical items.
   An app approving a desktop's `settings.set` that turns it off (§6.8)
   shows the same warning. The app SHOULD repeat it where it shows the
-  setting while it is off.
+  setting while it is off. (0.33.0, release R) The warning also says
+  that with the backup off, clearing the app's data or losing the phone
+  ends the vault. (A storage fault while moving to a new phone that is
+  not repaired in time can end a vault with or without the backup,
+  §11.14.2.) Turning the backup
+  off closes the recovery generation and needs the attempt counter
+  (`counter_unavailable` otherwise, §11.14.3).
 - Moving to a new phone while holding the old one is a direct transfer
   (§6.7.1), which works with the backup off.
 - Turning the backup on again stores the copy at the next use of the
@@ -1966,7 +2088,9 @@ vault:
    the header's KDF parameters and compares it with the DEK in memory in
    constant time. A mismatch is `bad_pin`, counted in the §11.8 backoff
    (`header_seq` + 1) and audited `vault.pin_failed`; the password is not
-   tried;
+   tried. (0.33.0, release R) The comparison is of the `unlock_key`
+   derived from `pin`, the pepper and the phone's secret held in memory
+   since the unlock, with the one in memory (§11.14.1);
 6. refuses with `backoff` while the password backoff of §3.5.3 runs, with
    `retry_after` as in step 4;
 7. **opens the credential** with the password (§3.5.3 step 5):
@@ -1978,7 +2102,13 @@ vault:
    applies a hold change the payload carries (§3.6.7); ends the hold if
    the vault was held; audits `owner_check.passed`; and answers
    `{credential, version, utks, deadline, interval_seconds, hold,
-   hold_off_until?}`.
+   hold_off_until?}`. (0.33.0, release R) It also marks the member
+   present at the attempt counter, arms the recovery if the vault is not
+   armed for its current generation (which can answer `busy`, leaving
+   the check passed and the arming to the next check), records the
+   counter's attempts in the audit log, and the answer carries
+   `recovery: {state, present_recorded}`; a presence the counter could
+   not record passes the check with a notice (§11.14.5).
 
 A `bad_pin` (step 5) or `bad_password` (step 7) is a **failed check**
 (§3.6.4). Other refusals (`backoff`, `utk_invalid`, `stale_credential`,
@@ -2002,7 +2132,8 @@ password, or sets them, and writes the record as a check does:
   carries the PIN, the current password and the new one, and starts the
   clock fresh. Its `bad_pin` and `bad_password` are failed checks too;
 - **a completed recovery**: `credential.recover` (§11.11.5), after the
-  registered app's unlock with the PIN;
+  registered app's unlock with the PIN; (0.33.0, release R) the
+  successful recovery open, which proves both together (§11.14.6);
 - **a completed transfer**: `device.transfer.approve` (§6.7.1), which
   carries the PIN and the password. Its `bad_pin` and `bad_password` are
   failed checks too;
@@ -2024,7 +2155,8 @@ the vault a new credential (`credential.reset`) starts it fresh.
 
 **Nothing else resets it.** An unlock (the PIN only), `credential.unlock`
 or any other credential operation (the password only), `pin.change` and
-`credential.password.change` do not. *Rationale for one dedicated
+`credential.password.change` do not; nor, from release R, does
+`vault.secret.renew` (§11.14.9). *Rationale for one dedicated
 operation:*
 
 - The check must work on a running vault, which may stay unlocked for
@@ -2034,6 +2166,10 @@ operation:*
   (§3.5.2) does not fit, and it has no UTK, no E2E session and so no
   holder identity for the clone rule (§3.5.9). Carrying the password
   there would widen what the host-routed path carries, for no gain.
+  (0.33.0, release R: the recovery open does carry the password on
+  that path, sealed to the ETK like the PIN, because recovery tests the
+  two only together, §11.14.6. The everyday unlock still carries the PIN
+  alone.)
 - Counting "an unlock plus some credential operation within N minutes"
   would make the clock depend on two requests and a window between them.
   A single request that carries both secrets under one UTK is one place
@@ -2163,7 +2299,7 @@ every `drop.*` entry, §10.9). Allowed while held:
 | Sender | Types |
 |---|---|
 | The holder | `vault.owner-check`; `vault.status` (reports the hold) and `vault.lock`; `credential.utk.get` (UTKs for the check); `credential.get` and `credential.ack` (the latest blob after a lost check response, §3.5.3, and its confirmation); `credential.version`; `credential.lock`; during a clone alarm, `credential.alarm.confirm` and, in `rotation_required`, `credential.rotate` (the check is refused until the alarm closes, so the alarm's own path stays open); `push.register`, `push.confirm` (0.30.0) and `push.unregister` (0.24.0: the wakes for `vault.held` and the alarm depend on a current token, §14.2); for a transfer opened before the hold, `device.transfer.approve` (itself a check, §3.6.1) and `device.transfer.reject`; `call.end`, and `call.ice` of a call answered before the deadline |
-| A recovering app (§11.11.5) | Its own set, unchanged by the hold: `credential.utk.get`, `credential.recover`, `vault.status` (reduced) and the token and address types (0.16.0 removed `credential.reset` and `vault.delete` from it). A recovery completes while held and starts the clock (§3.6.1) |
+| A recovering app (§11.11.5) | Its own set, unchanged by the hold: `credential.utk.get`, `credential.recover`, `vault.status` (reduced) and the token and address types (0.16.0 removed `credential.reset` and `vault.delete` from it). A recovery completes while held and starts the clock (§3.6.1). (0.33.0, release R) No such app exists: a recovery completes in the open, and the phone is the holder from its first message (§11.14.6) |
 | A desktop | `vault.status`, `vault.lock`, `device.session.end{}` (its own session), `call.end` and `call.ice` of a call it answered before the deadline |
 | An agent | `vault.status`, `device.session.end{}` (its own session) |
 | Any device | The handshake (`hs.init`, `hs.resp`, `hs.fin`: rekeys and reconnects), `relay.token.issued`, `relay.token.refresh`, `relay.address.update` |
@@ -2706,6 +2842,7 @@ hs.init: { "purpose": "app|desktop|agent|connection|rekey|reconnect",
            "rotations": [ ],
            "device_attest": { },
            "api_key": "<b64 SPKI DER, P-256; a transfer's hs.init only>",
+           "unlock_secret": "<b64 32 bytes; a transfer's hs.init only, 0.33.0, release R>",
            "sas_commit": "<b64 32 bytes>" }
 hs.resp: { "token": "...", "reconnect_token": "...", "suite": 2,
            "rotations": [ ], "sas_nonce": "<b64 n_R, 32 bytes>", "sig": "<b64>" }
@@ -2733,6 +2870,11 @@ Field rules:
   enrolling or recovering app gave its key in the sealed request). A
   transfer `hs.init` without a well-formed key is dropped like one with
   an invalid attestation.
+- `unlock_secret` (0.33.0, release R) is the new phone's unlock secret
+  (§11.14.1). It is REQUIRED in the `hs.init` of a transfer to a vault of
+  release R and MUST be absent otherwise; a transfer `hs.init` without
+  32 bytes there is dropped like one with an invalid attestation. The
+  vault keeps it in memory only (§11.14.10).
 - **SAS commitment** (0.10.3, §6.3). For purposes `app`, `desktop`,
   `agent` and `connection`, `hs.init` MUST carry `sas_commit`, and
   `hs.resp` and `hs.fin` MUST carry `sas_nonce`; for `rekey` and
@@ -3493,6 +3635,13 @@ Rules:
 
 #### 6.7.1 Direct transfer to a new phone
 
+(0.33.0, release R) From release R a transfer also carries the new
+phone's unlock secret, makes a new recovery `opener` with the approval's
+PIN and password (so it can be answered `busy`), replaces the DEK in
+three writes, and the old app keeps its keys until the new phone's first
+unlock or for at most 7 days: §11.14.10, which takes precedence over this section where they
+differ.
+
 A member who still holds the old phone moves the app, and with it the
 credential, to a new phone without the 24 h wait of a recovery (owner
 decision, 2026-10-03). The old app's session, the PIN and the credential
@@ -3632,9 +3781,9 @@ and the new app's handshake state is dropped. A commitment mismatch at
 | The new app goes offline before its `hs.fin` | No SAS is shown; the transfer times out after 10 minutes; nothing changes. |
 | The new app goes offline after its `hs.fin` | The approval still completes the transfer. `device.paired` waits in the new app's mailbox (relay TTL); if the new app never returns, the member recovers (§11.11), as when a new app is lost after a transfer. |
 | The old app goes offline before approving | The transfer times out; nothing changes. |
-| The old app goes offline after approving | Nothing is needed from it: the approval completed the transfer. The old app learns of its removal from `device.unlinked` (best effort), and then erases its local state (owner decision, 2026-10-05). A refused relay key alone is not proof of removal: the app offers the member an erase instead of erasing by itself. The refused relay key is a `403 token_revoked` (RELAY-PROTOCOL §5.3 step 6, §7.1) on a deposit to the device's own vault mailbox: the vault has put the device's relay key on its denylist as a `sub` (§7.4). The same holds for the old app of a recovery (§11.11.5). What the device does on that answer: §8.6. |
+| The old app goes offline after approving | Nothing is needed from it: the approval completed the transfer. The old app learns of its removal from `device.unlinked` (best effort), and then erases its local state (owner decision, 2026-10-05); (0.33.0, release R) that notice is sent only after the new phone's first unlock from storage (§11.14.10). A refused relay key alone is not proof of removal: the app offers the member an erase instead of erasing by itself. The refused relay key is a `403 token_revoked` (RELAY-PROTOCOL §5.3 step 6, §7.1) on a deposit to the device's own vault mailbox: the vault has put the device's relay key on its denylist as a `sub` (§7.4). The same holds for the old app of a recovery (§11.11.5). What the device does on that answer: §8.6. |
 | A clone alarm opens (§3.5.9) | An open transfer is aborted. |
-| The vault locks | The transfer and its pending handshake are kept in vault state; its 10 minutes still run and are checked at the next unlock, which aborts an expired one. |
+| The vault locks | The transfer and its pending handshake are kept in vault state; its 10 minutes still run and are checked at the next unlock, which aborts an expired one. (0.33.0, release R: the new phone's secret is held in memory only, so a lock before the approval ends the transfer, which is started again, §11.14.10.) |
 | A recovery completes (§11.11.5) | An open transfer is aborted (`replaced`). |
 
 OWNER DECISION (recommended: as specified): the transfer does not
@@ -4170,6 +4319,8 @@ an answer to an unknown or expired id is dropped.
 | | `vault.enrolled` | V→D sealed | | Attestation, vault bundle, `vault_id`, token |
 | | `vault.enroll.confirm` | D→V | req | End the provisional state |
 | | `vault.unlock` / `vault.unlock.result` | ACh | | PIN unlock (§11.4) |
+| | `vault.recovery.open` / `vault.recovery.open.result` | ACh | | (0.33.0, release R) A recovery attempt: the PIN and the password together, counted before it is tested (§11.14.6) |
+| | `vault.secret.renew` | D→V | req | (0.33.0, release R) A new unlock secret for the same phone (§11.14.9) |
 | | `vault.lock`, `vault.status`, `vault.delete` | D→V | req | Lock, status, delete (§7.4 first) |
 | | `vault.locking` | V→D | | Graceful lock notice (ephemeral) |
 | | `vault.owner-check` | D→V | req | The daily owner check: PIN and credential password together (§3.6, 0.13.0; spelled `vault.owner_check` before 0.15.2) |
@@ -4179,7 +4330,7 @@ an answer to an unknown or expired id is dropped.
 | | `relay.address.update`, `identity.rotate` | any | | Rotation (§3.4) |
 | Credential | `credential.create`, `.get`, `.version`, `.unlock`, `.lock`, `.rotate`, `.password.change`, `.recover`, `.reset` | D→V | req | Protean Credential lifecycle (§3.5, §10.6) |
 | | `credential.alarm` / `credential.alarm.confirm` | V→D / D→V | — / req | Clone alarm to the holder; its confirmation (§3.5.9) |
-| | `pin.change` | D→V | req | Re-derive the DEK and re-seal the header (§10.6) |
+| | `pin.change` | D→V | req | Re-derive the DEK and re-seal the header (§10.6); (0.33.0, release R) a credential operation that replaces the DEK and starts a new recovery generation (§11.14.9) |
 | Items & profile | `item.put`, `.get`, `.reveal`, `.list`, `.tag`, `.sensitivity`, `.delete` | D→V | req | The member's items: `data`, `secret` and `critical` (§10.7) |
 | | `tag.list`, `.set`, `.delete`, `.merge` | D→V | req | The tag registry; rename and merge (§10.8) |
 | | `profile.get`, `profile.set`, `settings.get`, `settings.set` | D→V | req | Display name and photo, the read-only core; owner policy (§10.8) |
@@ -4191,6 +4342,7 @@ an answer to an unknown or expired id is dropped.
 | | `connection.request.pending`, `connection.request.outgoing` | V→D | | An incoming request awaiting approval (profile, `sas`, `remote`); an outgoing one (`sas`) (§6.4) |
 | | `connection.request.list` | D→V | req | Pending incoming and outgoing requests with their SAS (§6.4) |
 | | `connection.approve`, `.decline`, `.list`, `.get`, `.remove`, `.update` | D→V | req | Approve or decline a request; manage connections; the owner's own metadata |
+| | `connection.rotation.resolve` | D→V (the holder) | req | (0.33.0, release R) Keep one of two successors of a connection's identity key after out-of-band verification (§3.4) |
 | | `connection.approved` | V↔V | | The member approved the request after comparing the SAS; the standing and reconnect tokens (§6.4, 0.10.3) |
 | | `connection.declined` | V↔V | | The member declined (or blocked) the request (§6.4, 0.10.5) |
 | | `connection.removed` | V↔V | | Notify the peer |
@@ -4352,6 +4504,17 @@ an answer to an unknown or expired id is dropped.
   - `credential_required`: the vault has no credential (§3.5.7), or a
     recovery needs one (§11.11.5);
   - `bad_pin`: the current PIN given to `pin.change` is wrong;
+  - (0.33.0, release R) `weak_password`: a password being set breaks a
+    rule of §11.14.7, with body `{reason}` (`short`, `repeated`,
+    `common`, `same_as_pin`, `guessable`); `counter_unavailable`: the
+    change needs the recovery attempt counter, which could not be
+    reached, and nothing was changed (§11.14.3); `busy` also answers an
+    operation that needs the heavy key derivation when the enclave has
+    no room for it, with nothing changed (§11.14.3); `retry` answers
+    `pin.change`, `credential.password.change`, `credential.reset`,
+    `vault.secret.renew` and `device.transfer.approve` when the first
+    header write of a DEK replacement could not be stored and read back,
+    with nothing changed but the spent UTK (§11.14.2);
   - and (0.5.0):
     - `session_required`: a desktop or agent has no access session
       (§6.8);
@@ -4485,8 +4648,8 @@ an answer to an unknown or expired id is dropped.
 |---|---|---|
 | `vault.enrolled` | — | §11.3 |
 | `vault.enroll.confirm` (app) | `{}` | `{}` |
-| `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; 0.29.0, release L: also `unlock_id` (to the app and desktops, not to agents or a recovering app) and, inside `owner_check` for the app and desktops, `idle_lock_at` (RFC 3339: when the vault will lock itself if no check is passed, §3.6.8; absent for a vault without a credential); `owner_check` (0.13.0) is `{state: "ok" \| "due" \| "held", deadline, interval_seconds, failures, hold, hold_off_until?, waiting?}` to apps and desktops and `{state}` to agents (§3.6, §3.6.7). `waiting` (0.19.0) is `{messages, requests, calls, other}`, the counts of `vault.held` since the deadline (§3.6.3), present while the state is `due` or `held` for a device that receives `vault.held` (the app; desktops with an access session while `held`) and absent otherwise. (0.32.0, release A) To the app and desktops also `attachments: {count, bytes, max_count, max_bytes}`: the stored attachments, their bytes counted as for `attachment_storage`, and the two bounds (§10.5.1). A recovering app (§11.11.5) gets only `{vault_id, state_seq, header_seq}` (0.16.0): nothing about the vault's devices, connections or owner check before it has proved the credential password |
-| `vault.owner-check` (app: the holder) | `{credential, utk_id, sealed{pin, password, hold?, hold_off_until?}}` | `{credential, version, utks, deadline, interval_seconds, hold, hold_off_until?}` (§3.6.1, §3.6.7); `bad_pin`, `bad_password`, `backoff` (body `{retry_after}`, §10.1), `utk_invalid`, `stale_credential`, `credential_frozen`, `rotation_required`, `forbidden` (not the holder), `bad_request` (a PIN that is not 6–32 digits) |
+| `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; 0.29.0, release L: also `unlock_id` (to the app and desktops, not to agents or a recovering app) and, inside `owner_check` for the app and desktops, `idle_lock_at` (RFC 3339: when the vault will lock itself if no check is passed, §3.6.8; absent for a vault without a credential); `owner_check` (0.13.0) is `{state: "ok" \| "due" \| "held", deadline, interval_seconds, failures, hold, hold_off_until?, waiting?}` to apps and desktops and `{state}` to agents (§3.6, §3.6.7). `waiting` (0.19.0) is `{messages, requests, calls, other}`, the counts of `vault.held` since the deadline (§3.6.3), present while the state is `due` or `held` for a device that receives `vault.held` (the app; desktops with an access session while `held`) and absent otherwise. (0.32.0, release A) To the app and desktops also `attachments: {count, bytes, max_count, max_bytes}`: the stored attachments, their bytes counted as for `attachment_storage`, and the two bounds (§10.5.1). A recovering app (§11.11.5) gets only `{vault_id, state_seq, header_seq}` (0.16.0): nothing about the vault's devices, connections or owner check before it has proved the credential password. (0.33.0, release R) To the app also `recovery: {state, attempts, present_recorded_at, counter}`, to desktops `recovery: {state}` (§11.14.11) |
+| `vault.owner-check` (app: the holder) | `{credential, utk_id, sealed{pin, password, hold?, hold_off_until?}}` | `{credential, version, utks, deadline, interval_seconds, hold, hold_off_until?}` (§3.6.1, §3.6.7); (0.33.0, release R) also `recovery: {state, present_recorded}` (§11.14.5); `bad_pin`, `bad_password`, `backoff` (body `{retry_after}`, §10.1), `utk_invalid`, `stale_credential`, `credential_frozen`, `rotation_required`, `forbidden` (not the holder), `bad_request` (a PIN that is not 6–32 digits) |
 | `vault.held` (V→D, to the app and desktops in an access session) | — | `{deadline, waiting: {messages, requests, calls, other}}` (§3.6.3); 0.29.0, release L: also `idle_lock_at` (§3.6.8) |
 | `vault.lock` (app, desktop) | `{}`; 0.29.0, release L: `{unlock_id}` ("Locks", below) | `{}`; then `vault.locking`. 0.29.0, release L: `stale_lock` when `unlock_id` does not name the current unlock (nothing is done); `bad_request` when it is not 32 lowercase hex characters |
 | `account.get` (app, desktop) | `{}` | `{account: <snapshot, §11.13> \| null, version, received_at, name_request?}`; `null` (and `version` 0) before any snapshot arrived (0.15.0); the snapshot carries the member's full `email` (0.20.0), which only this type returns and only to the app and desktops (§11.13); `name_request` (0.18.0) is the latest `account.name.set` request (§10.8). A change of `name_request` alone sends `sync.event{kind: "account.changed"}` with the stored snapshot's `version` repeated, not incremented (0.19.0): `version` counts snapshots only, so a device MUST NOT skip an `account.changed` whose `version` it already holds |
@@ -4551,10 +4714,10 @@ device belongs to the unlock it ends.
 | `device.paired` (to the new device) | — | `{device_id, role, vault_id, release, release_number, token, session_expires_at?, transfer?, credential_version?, user_guid?}` (the release the vault runs under); `token`: the device's standing token (§7.1); it replaces the request token of a pairing's or transfer's `hs.resp` (0.10.3), and after enrollment or recovery, whose `hs.resp` already carries one, it is a fresh one (0.10.4); `transfer: true`, the credential's `credential_version` and (0.17.0) the member's `user_guid`, which its unlocks need, for a transferred app only (§6.7.1) |
 | `device.list` (app, desktop) | `{}` | `{devices: [{id, kind, state, name, ik, profile?, created_at?, last_active_at?, session_expires_at?, push?, signer?}]}`; `push` (0.24.0) only on the app's entry while it has a registration: the push state of §14.1; `signer` (0.27.0) only on an Android app's entry with a recorded signer: `{class: "vettid" \| "google_play" \| "development", digest: "<64 hex>"}`, the vault's signer binding (§11.7.1) |
 | `device.unlink` (app) | `{device_id}` | `{}`; `forbidden` for the app itself (0.9.0: it leaves by a transfer or a recovery) |
-| `device.unlinked` (to the unlinked device, best effort) | — | `{reason?}`: `"transferred"` for the old app of a transfer (§6.7.1), `"replaced"` for the old app of a recovery (§11.11.5) |
+| `device.unlinked` (to the unlinked device, best effort) | — | `{reason?}`: `"transferred"` for the old app of a transfer (§6.7.1), `"replaced"` for the old app of a recovery (§11.11.5); (0.33.0, release R) a transfer's also carries `transfer_id`, and is sent only after the new phone's first unlock from storage (§11.14.10) |
 | `device.transfer.create` (the holder) | `{}` | `{transfer_id, link, exp}`; `exists` while a transfer is open; `credential_frozen` or `rotation_required` during an alarm (§6.7.1) |
 | `device.transfer.pending` (to the holder) | — | `{transfer_id, name, sas, signer?, signer_changed?}`; `name` is the new app's self-asserted `profile.name`; (0.27.0, Android) `signer` is the attested class of the new app's signer and `signer_changed` whether its digest differs from the vault's binding (§11.7.1) |
-| `device.transfer.approve` (the holder) | `{transfer_id, credential, utk_id, sealed{password, pin}, signer?}` | `{}`: the transfer is complete (0.10.3; was `{exp}`); `bad_pin`, `backoff`, `bad_password`, `stale_credential`, `credential_frozen`, `utk_invalid`; (0.27.0) `signer`, the new app's class, is REQUIRED when the pending said `signer_changed: true`, else `signer_unconfirmed` (§11.7.1) |
+| `device.transfer.approve` (the holder) | `{transfer_id, credential, utk_id, sealed{password, pin}, signer?}` | `{}`: the transfer is complete (0.10.3; was `{exp}`); (0.33.0, release R) `{"unlink": "after_new_unlock"}`, and also `busy` and `retry` with nothing but the UTK spent (§11.14.10); `bad_pin`, `backoff`, `bad_password`, `stale_credential`, `credential_frozen`, `utk_invalid`; (0.27.0) `signer`, the new app's class, is REQUIRED when the pending said `signer_changed: true`, else `signer_unconfirmed` (§11.7.1) |
 | `device.transfer.reject` (the holder) | `{transfer_id}` | `{}`; cancels the transfer before or after the scan, until the approval; after the new app's `hs.fin` it gets `device.pair.rejected` (0.10.5) |
 | `device.session.request` (desktop, agent) | `{seconds?}` (60–86,400, default 3,600) | `{request_id, exp}` |
 | `device.session.pending` (to apps) | — | `{request_id, device_id, role, name, seconds, exp}` |
@@ -4592,6 +4755,7 @@ device belongs to the unlock it ends.
 | `connection.get` | `{connection_id}` | `<connection>` |
 | `connection.update` | `{connection_id, version, alias?, note?, tags?, favorite?, archived?}` (at least one) | `{version}` |
 | `connection.remove` | `{connection_id}` | `{}` |
+| `connection.rotation.resolve` (0.33.0, release R; the holder only) | `{connection_id, new_ik}` | `{}`: keeps that successor of the connection's identity key and drops the other (§3.4); `not_found` when the connection has no conflict or `new_ik` is neither candidate; `forbidden` to a desktop or an agent |
 | `connection.removed` (V↔V) | — | `{}` |
 | `connection.event` | — | `{connection_id, event: "added" \| "removed" \| "stale" \| "rekeyed" \| "reconnected" \| "failed" \| "profile", pending_id?, reason?}`; `profile`: the connection's shared profile changed (§10.8); `failed`: an outgoing request ended without a connection other than by its member's decline (§6.4, 0.10.4); `reason`, only with `failed`: `declined` when the peer declined (0.10.5), absent for an expiry or an aborted handshake; `pending_id` with `added` on the inviter's side names the request it came from (on the accepter's side `connection_id` is the accept's) |
 | `block.add` | `{connection_id \| pending_id, note?}` (exactly one of the ids) | `{block_id}` |
@@ -5631,19 +5795,20 @@ for `credential`, `utk_id` and `sealed`.
 | Type | Request body | Response body |
 |---|---|---|
 | `credential.utk.get` | `{}` | `{utks}` (tops the app's pool up to 20) |
-| `credential.create` | `{utk_id, sealed{password}}` | `{credential, version, key, utks}`; `exists` if the vault has a credential |
+| `credential.create` | `{utk_id, sealed{password}}`; (0.33.0, release R) `{utk_id, sealed{pin, password}}` | `{credential, version, key, utks}`; `exists` if the vault has a credential; (release R) `weak_password`, `bad_pin` (§11.14.9) |
 | `credential.get` | `{}` | `{credential, version, updated_at}`: the latest blob, to the holder only (§3.5.9); `not_found` if the vault holds none (§3.5.6) |
 | `credential.ack` | `{version}` | `{}`: the app holds this version (§3.5.3) |
 | `credential.version` | `{}` | `{exists, version?, key?, updated_at?, alarm?}`; `alarm` = `{alarm_id, state, at}` while a clone alarm is open (§3.5.9) |
 | `credential.unlock` | `{credential, utk_id, sealed{password}}` | `{credential, version, expires_at, utks}` (§3.5.3 unlock window) |
 | `credential.lock` | `{}` | `{}` |
 | `credential.rotate` | `{credential, utk_id, sealed{password}}` | `{credential, version, key, utks}`; the vault also rotates `ik` and `kem` (§3.4) |
-| `credential.password.change` | `{credential, utk_id, sealed{password, new_password}}` | `{credential, version, utks}` |
-| `credential.recover` | `{utk_id, sealed{password}}` | `{credential, version, utks}` (§11.11.5). 0.9.0 removed the member-supplied `credential`; 0.16.0 removed `credential_lost`: a vault without a backup copy never gets this far (§11.11.1) |
+| `credential.password.change` | `{credential, utk_id, sealed{password, new_password}}`; (0.33.0, release R) `sealed{pin, password, new_password}` | `{credential, version, utks}`; (release R) `bad_pin`, `weak_password`, `busy`, `counter_unavailable`, `retry` (§11.14.9) |
+| `credential.recover` | `{utk_id, sealed{password}}` | `{credential, version, utks}` (§11.11.5). (0.33.0, release R) Removed: `forbidden`; a recovery completes in the open (§11.14.6). 0.9.0 removed the member-supplied `credential`; 0.16.0 removed `credential_lost`: a vault without a backup copy never gets this far (§11.11.1) |
 | `credential.reset` | the holder (0.15.2): `{credential, utk_id, sealed{pin, password, new_password}}` | `{credential, version, key, utks}`: a new credential; the old credential and every critical item are destroyed (§3.5.5). Answers as an owner check does (§3.6.1: `bad_pin`, `bad_password`, `backoff`, `credential_frozen`, `rotation_required`, …) and is refused while the vault is held (§3.6.3). 0.16.0 removed the recovering app's form `{utk_id, sealed{password}}`: `forbidden` |
 | `credential.alarm` (V→D, to the holder; durable) | — | `{alarm_id, kind: "clone", state: "frozen", at, presenter: "holder" \| "other", version}`: an urgent alert (§3.5.9) |
 | `credential.alarm.confirm` | `{alarm_id, mine: bool}` | `{state: "rotation_required"}`; `not_found` if no such alarm is open (§3.5.9) |
-| `pin.change` | `{pin, new_pin}` | `{}`; `bad_pin` if `pin` is wrong; `bad_request` if `new_pin` is not 6–32 digits (§11.3) |
+| `pin.change` | `{pin, new_pin}` | `{}`; `bad_pin` if `pin` is wrong; `bad_request` if `new_pin` is not 6–32 digits (§11.3). (0.33.0, release R) The holder's credential operation `{credential, utk_id, sealed{pin, new_pin, password, new_unlock_secret}}`, answered `{credential, version, utks, epoch_advanced: true}` (§11.14.9) |
+| `vault.secret.renew` (0.33.0, release R) | `{credential, utk_id, sealed{pin, password, new_unlock_secret}}` | `{credential, version, utks}` (§11.14.9) |
 
 - `key` is the credential key's public key (base64). `version` is the
   credential's version (§3.5.2). In the `item.*` types, whose own
@@ -5654,7 +5819,10 @@ for `credential`, `utk_id` and `sealed`.
   devices (also after a `credential.reset`).
 - **`pin.change`** re-derives the DEK from `new_pin` (§3.3.1, fresh salt)
   and re-encrypts the state and the header. Its crash-safe write order is
-  specified together with its implementation (§15).
+  specified together with its implementation (§15). (0.33.0, release R:
+  specified, and built, in release R: §11.14.2, §11.14.9. From release R
+  `credential.create` carries `sealed{pin, password}` and
+  `credential.password.change` `sealed{pin, password, new_password}`.)
 - 0.7.0 removed `credential.secret.add`, `.get`, `.list`, `.delete` and
   `.catalog`: critical secrets are critical items (§10.7), and what a
   connection may use is decided by share rules (§10.12).
@@ -6475,7 +6643,11 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `recovery.requested`, `recovery.replaced`, `recovery.bad_code`,
   `recovery.attestation_failed`, `recovery.registered`,
   `recovery.device_paired`, `recovery.completed`, `recovery.cancelled`,
-  `recovery.expired`, `recovery.voided` (§11.11.6); `message.sent`,
+  `recovery.expired`, `recovery.voided` (§11.11.6); (0.33.0, release R)
+  `recovery.attempt`, `recovery.attempts_used`, `recovery.armed`,
+  `recovery.generation_closed`, `recovery.presence_unrecorded`,
+  `identity.rotation_failed`, `identity.rotate_conflict`,
+  `device.secret_renewed` (§11.14.11); `message.sent`,
   `message.received` (no content; `ref` = `message_id`);
   (0.32.0, release A) `message.attachment_sent` (the
   attachment is stored in this vault and its message sent; `ref` =
@@ -9499,13 +9671,18 @@ leave enclave memory.
 
 ```json
 { "user_guid": "<from the redeem, §11.12.1>", "request_id": "<ULID>", "nonce": "<b64 32 B>",
-  "pin": "<digits>",
+  "pin": "<digits>", "unlock_secret": "<b64 32 bytes; 0.33.0, release R>",
   "app": { "ik": "<b64>", "kem": "<b64 ek>",
            "relay": {"url": "<base>", "mailbox": "<id>", "pk": "<b64>"},
            "open_token": "<open token for MB(app), ≤ 10 min>", "name": "<device name>",
            "device_attest": { }, "api_key": "<b64 SPKI DER, P-256>" },
   "manifest_sha256": "<64 hex>", "manifest_serial": 7 }
 ```
+
+(0.33.0, release R) `unlock_secret` is REQUIRED from release R: the
+enclave makes a random DEK and writes `dek_wrap` and `secret_check`
+(§11.14.1), and `recovery.counter_key`; a request without it is
+`bad_request`.
 
 `device_attest` is REQUIRED (§11.7). `app.api_key` (0.15.0) is REQUIRED:
 the app key that signs the app's member API requests (§11.12); the vault
@@ -9620,6 +9797,7 @@ size (§11.4).
 ```json
 { "user_guid": "...", "vault_id": "...", "request_id": "<ULID>",
   "device_ik": "<b64>", "pin": "<digits>",
+  "unlock_secret": "<b64 32 bytes; 0.33.0, release R>",
   "min_state_seq": 1234, "min_header_seq": 1301,
   "token": "<fresh standing token for MB(device), sub = vault relay key>",
   "device_assertion": { },
@@ -9652,7 +9830,11 @@ hex(SHA-256(manifest_bytes)) \n to_pcr0_hex_or_empty
 lowercase, and there is no trailing newline. No field may contain CR or LF.
 When the request carries `cancel_recovery` (present only as `true`,
 §11.11.4), the string has a thirteenth line, the literal
-`cancel_recovery`.
+`cancel_recovery`. (0.33.0, release R) From release R `unlock_secret`
+is REQUIRED (`bad_request` without 32 bytes, before any work on the
+PIN), and the string ends with one more line after all of these,
+`hex(SHA-256(unlock_secret))`, so that a request cannot be replayed
+with another secret.
 
 ```
 App        Member API                   SQS/Parent                 Enclave
@@ -9690,8 +9872,10 @@ one of:
   (§11.11.4); `vault_bundle` and, after it, `credential_backup` (0.10.6) only for the app a recovery registered
   (§11.11.5). Since 0.16.0 `credential_backup` is always `true` there
   (a vault without a backup copy refuses that unlock with `no_backup`);
-  apps MUST NOT rely on it and MAY ignore it.
-- `{"ok": false, "code": "bad_pin|backoff|unknown_device|attestation|signer_refused|state_rollback|vault_missing|manifest|wrong_release|release_key|retry|recovery_pending|no_backup",
+  apps MUST NOT rely on it and MAY ignore it. (0.33.0, release R)
+  Neither member exists from release R: a registered phone does not
+  unlock (§11.14.6).
+- `{"ok": false, "code": "bad_pin|backoff|unknown_device|attestation|signer_refused|state_rollback|vault_missing|manifest|wrong_release|release_key|retry|recovery_pending|no_backup|device_secret|transfer_incomplete",
   "header_seq": m, "retry_after": <s>}` — `signer_refused` (0.27.0):
   the device key's recorded signer is not pinned by this release, or
   the key has no recorded signer and the request brought no valid
@@ -9705,6 +9889,13 @@ one of:
   credential (§11.11.5 step 1). Nothing else is in the body: no token,
   no `vault_bundle`; the vault removes the recovery and the registered
   unlock key and locks again.
+  (0.33.0, release R) Two more codes: `device_secret`, the
+  `unlock_secret` does not match the vault's `secret_check`, decided
+  before the PIN is tried and not a PIN failure (the app tries the next
+  epoch once, then shows that this phone no longer holds the vault's
+  keys); and `transfer_incomplete`, the requesting app is the new phone
+  of a transfer whose state write is not stored (§11.14.2). `no_backup`
+  is not used from release R.
 
 **Unlock of a running vault (0.23.3).** An unlock of a vault that is
 already unlocked is processed like any other: there is no "already
@@ -9743,7 +9934,7 @@ Nothing secret is stored:
 
 | Store | Contents | Retention |
 |---|---|---|
-| Vault table | **`app_key`** (0.15.0: `{key, kid, seq}`, the public key of the vault's app key as the enclave last reported it, written by the host; and the API's own `app_key_pending` and recovery claim keys, §11.12), `user_guid`, **`vault_id`** (opaque, 128-bit random, 32 lowercase hex characters, assigned by the API at a member's first enrollment; the routing key for alternate-channel requests), `state` (`enrolling`, `locked`, `unlocked`, `deleted`), **lease** (`instance_id`, `lease_expires_at`), **`sealed_release`** (the PCR0 the vault is sealed to; routing aid, §11.10.5), **`vault_version`** (release that last opened the vault), **`state_version`** (vault-state format version), **`alarm`** (`kind`, `alarm_id`, `at`, `emailed_at`; the last host alarm, below) and `alarm_pending`, **`credential_backup`** (0.16.0: whether the vault keeps a backup copy of its credential, as last reported, below; absent until a release of 0.16.0 reports it), the API's own `deletion` record (§11.11.9), **`name_change`** (0.18.0: `{seq, first_name, last_name, at}`, the vault's latest name request, written by the host) and `name_change_pending`, the API's `name_change_result` (§10.8, below), `created_at`, `updated_at` | account lifetime |
+| Vault table | **`app_key`** (0.15.0: `{key, kid, seq}`, the public key of the vault's app key as the enclave last reported it, written by the host; and the API's own `app_key_pending` and recovery claim keys, §11.12; (0.33.0, release R) `app_key_next` `{key, kid, seq}`, the host-written next key of a replacement in progress, §11.14.2), `user_guid`, **`vault_id`** (opaque, 128-bit random, 32 lowercase hex characters, assigned by the API at a member's first enrollment; the routing key for alternate-channel requests), `state` (`enrolling`, `locked`, `unlocked`, `deleted`), **lease** (`instance_id`, `lease_expires_at`), **`sealed_release`** (the PCR0 the vault is sealed to; routing aid, §11.10.5), **`vault_version`** (release that last opened the vault), **`state_version`** (vault-state format version), **`alarm`** (`kind`, `alarm_id`, `at`, `emailed_at`; the last host alarm, below) and `alarm_pending`, **`credential_backup`** (0.16.0: whether the vault keeps a backup copy of its credential, as last reported, below; absent until a release of 0.16.0 reports it), the API's own `deletion` record (§11.11.9), **`name_change`** (0.18.0: `{seq, first_name, last_name, at}`, the vault's latest name request, written by the host) and `name_change_pending`, the API's `name_change_result` (§10.8, below), `created_at`, `updated_at` | account lifetime |
 | Instance registry | `instance_id`, **`release`** (PCR0 from its descriptor), queue URL, descriptor, attestation, `heartbeat_at` | while the instance is live |
 | Request table (response slots) | `request_id`, `vault_id`, `op`, `status` (`queued`, `done`, `expired`), opaque response `envelope` (≤ 8 KiB) and/or a host `code` | TTL 15 min |
 | Audit log | enroll, unlock and lock requests: member, time, `vault_id`, request id, never PINs or envelopes | MEMBER-API audit retention |
@@ -9759,7 +9950,17 @@ Nothing secret is stored:
   the same two values when a transfer (§6.7.1) or a recovery (§11.11.5)
   replaces the app. The enclave hands the `app_key` event to the parent
   together with the header write that made the change, and the parent
-  writes it after that store succeeds. The parent writes `app_key = {key,
+  writes it after that store succeeds. (0.33.0, release R) A
+  replacement of the app is written in three steps (§11.14.2): the event
+  **`app_key_next`** (the same two values) goes with the first header
+  write and the parent writes it as `app_key_next` on the row
+  (conditional on its `seq` being higher than `app_key`'s); `app_key`
+  goes with the third, and the parent then clears `app_key_next`. An
+  `app_key` event with `next_cleared: true` repeats the current key with
+  the same `seq`: the parent skips the `app_key` write and applies the
+  clear (§11.14.2).
+  `unlocked` and `locked` also carry `next` (bool): whether the header
+  has a `next` part (§11.14.2). The parent writes `app_key = {key,
   kid, seq}` on the vault row **whatever the lease**, conditional only on
   `seq` being higher than the row's (a stale instance can only report an
   older one), except that `enrolled` always replaces it (a replaced
@@ -9842,19 +10043,28 @@ Nothing secret is stored:
 with a DLQ after 3 receives:
 
 ```json
-{ "v": 1, "op": "enroll|unlock|lock|delete|recovery|recovery_cancel|recovery_register|account",
+{ "v": 1, "op": "enroll|unlock|lock|delete|recovery|recovery_cancel|recovery_register|recovery_open|account",
   "vault_id": "...", "user_guid": "...", "request_id": "<ULID>",
-  "etk_kid": "<16 hex; enroll, unlock and recovery_register only>",
-  "envelope": "<b64; enroll, unlock and recovery_register only>",
+  "etk_kid": "<16 hex; enroll, unlock, recovery_register and recovery_open only>",
+  "envelope": "<b64; enroll, unlock, recovery_register and recovery_open only>",
   "manifest_sha256": "<64 hex; enroll and unlock only>",
   "browser_key": "<b64 65-byte P-256 point; recovery only>",
-  "app_key": "<b64 SPKI DER; enroll and recovery_register only>",
+  "app_key": "<b64 SPKI DER; enroll, recovery_register and recovery_open only>",
   "account": { "...": "the account snapshot, §11.13; enroll, unlock and account only" },
+  "signed_at": "<RFC 3339; recovery and recovery_cancel only, 0.33.0, release R>",
+  "key_id": "<recovery and recovery_cancel only, 0.33.0, release R>",
+  "sig": "<b64 DER; recovery and recovery_cancel only, 0.33.0, release R>",
   "enqueued_at": "<RFC 3339>" }
 ```
 
-`app_key` (0.15.0) is REQUIRED for `enroll` and `recovery_register` and
-absent otherwise: the key the request was signed with at the API, which
+(0.33.0, release R) `recovery_open` carries `etk_kid`, `envelope` and
+`app_key` like `recovery_register` (§11.14.6). `signed_at`, `key_id`
+and `sig` are the member API's signature over a `recovery` or
+`recovery_cancel` (§11.14.8); they are REQUIRED for both from release
+R.
+
+`app_key` (0.15.0) is REQUIRED for `enroll` and `recovery_register`
+(0.33.0, release R: and `recovery_open`) and absent otherwise: the key the request was signed with at the API, which
 the enclave binds to the sealed `app.api_key` (§11.3, §11.11.3).
 `account` (0.15.0) is REQUIRED for `account` and, since 0.18.0, for
 `enroll`, and OPTIONAL for `unlock` (the API includes it whenever it can
@@ -9877,8 +10087,21 @@ enclave answers the parent with
 
 ```json
 { "v": 1, "request_id": "<ULID>", "status": "done|etk_unknown", "envelope": "<b64, 5,252 bytes>",
-  "code": "recovery_registered|recovery_unavailable|locked|not_running|stale" }
+  "code": "recovery_registered|recovery_unavailable|recovery_attempt|locked|not_running|stale" }
 ```
+
+(0.33.0, release R) The answer to a `recovery` also carries, in the
+clear, `not_before`, `expires` and `earliest` (§11.14.5), and a
+`recovery_unavailable` also a clear `reason` (`no_backup`,
+`no_credential` or `not_offered`, §11.14.13), the one thing the member
+API needs from the sealed refusal, and the answer
+to a `recovery_open` that was counted carries `code:
+"recovery_attempt"` with `retry_at` and `expires` when a wait began
+(§11.14.11). The parent copies them into the slot like the other codes,
+and `GET /api/vault/requests/{id}` returns `envelope` and `code` for the
+slot of a `recovery_open` too. These say that an attempt was counted and
+when the next is possible, never whether the guess was right; VettID,
+which owns the counter's bucket, sees that already.
 
 (`envelope` absent for lock, delete and `etk_unknown`; `code` present
 only for a `recovery_register` whose sealed result is `{"ok": true}`
@@ -10025,6 +10248,15 @@ the lease: the vault is not left open.
   request inside keeps its own replay protection above.
 
 ### 11.7 Device attestation (REQUIRED for enroll and unlock)
+
+(0.33.0, release R) From release R the app also holds a **phone key**,
+an HMAC key with the same properties as the device attestation key, and
+sends the unlock secret it computes with every enrollment, unlock,
+recovery open and transfer `hs.init` (§11.14.1); and the release
+constant `android_min_version_code` is checked against the attestation's
+version code at enrollment, a transfer's `hs.init` and a recovery's
+register (§11.14.14). The recovery open carries `device_assertion` like
+an unlock.
 
 Enroll and unlock MUST carry platform device attestation: **Android hardware
 key attestation** or **iOS App Attest**. Only role `app` can produce it,
@@ -11384,7 +11616,17 @@ recorded in the build's measurements:
   a host name alone (no path, no port, no user), and a channel file
   names only its own channel's host (as for the push gateway URL);
   anything else is malformed. Production's file does not have it until
-  production has a calling service.
+  production has a calling service;
+- (0.33.0, release R) `recovery_counter`: `{bucket, account, region}`
+  of the attempt counter's S3 bucket (§11.14.4; VAULT-HOST-PROTOCOL
+  §8.1), different for staging and production; `recovery_request_keys`:
+  one or two `{key_id, spki}` (base64 SPKI DER, P-256) of the member
+  API's recovery request key (§11.14.8); `recovery_wait_unit_seconds`
+  (86,400 in production, 600 on staging) and `recovery_quiet_seconds`
+  (259,200 in both), with the build rules of §11.14.14;
+  `recovery_offered` (`true`, or `false` for a production release that
+  refuses every recovery, §11.14.13); `android_min_version_code`
+  (§11.14.14).
 
 GrapheneOS verified-boot keys and the vendor roots stay in code and are
 the same for every channel. A release build MUST refuse a channel file
@@ -11631,6 +11873,14 @@ phone can hold the production app and the staging app side by side.
 
 ### 11.11 Recovery
 
+(0.33.0, release R) From release R, recovery is §11.14 together with
+this section: the request, the code, its typed form, the register, the
+cancel and the start-over stay as written here, except that a register
+only records the phone (it adds no unlock key), the code's validity
+follows §11.14.5, the requests are signed (§11.14.8), and §11.11.5's
+unlock, password and handover are replaced by the recovery open of
+§11.14.6. Release R's image cannot perform §11.11.5.
+
 Recovery lets a member who has lost **their app** (the vault's one app,
 §6.7) get back into their vault. A member who still holds the old phone
 uses a direct transfer instead (§6.7.1). They need:
@@ -11743,7 +11993,10 @@ the older code. The API allows only one active recovery per vault.
   The code itself is never stored or logged, by the enclave or the API.
 - **When it is valid.** The code is valid from `not_before` = request + 24 h
   until `expires` = `not_before` + 24 h. The enclave enforces these times
-  with its own clock, independently of the API.
+  with its own clock, independently of the API. (0.33.0, release R)
+  `not_before` is the latest of the request + 24 h, the end of the
+  72-hour quiet period and the end of a running wait, and `expires`
+  moves with each wait (§11.14.5, §11.14.6).
 - **Wrong codes.** After 5 wrong codes the recovery is void and its record
   is removed.
 - **Sealed to the browser.** The portal makes a P-256 key pair in the
@@ -11755,7 +12008,7 @@ the older code. The API allows only one active recovery per vault.
   k   = HKDF-SHA-256(ikm = ECDH(eph, browser_key), salt = eph || browser_key,
                      info = "vettid/vms/2/recovery-code-seal" || 0x00 || vault_id || 0x00 || recovery_id, L = 32)
   pt  = {"v":1,"vault_id","recovery_id","code","not_before","expires_at"} || 0x00 padding
-      | {"v":1,"vault_id","recovery_id","error":"no_credential"|"no_backup"} || 0x00 padding
+      | {"v":1,"vault_id","recovery_id","error":"no_credential"|"no_backup"|"not_offered"} || 0x00 padding   (not_offered: 0.33.0, §11.14.13)
   ```
 
   The second form tells the portal that the vault cannot be recovered
@@ -11857,7 +12110,10 @@ the older code. The API allows only one active recovery per vault.
     and a `recovery_cancel` to carry a signature of the member API,
     under a key the release pins, which the enclave verifies. It would
     take the power to start a recovery from the host process and leave
-    it with the member API, which VettID also runs.
+    it with the member API, which VettID also runs. (0.33.0: decided;
+    release R requires it, §11.14.8. From release R the host that starts
+    a recovery and replays stored objects gets at most the attempts of
+    §11.14.6, counted outside what it stores.)
 - **Residual: the portal's code.** A VettID that serves malicious portal
   code to the member's browser can read the code; the browser key protects
   data at rest, not against the page's own author. Such an attacker still
@@ -11916,7 +12172,10 @@ then checks, in this order:
    (§11.7.1, §11.11.5).
 
 On success it adds the app to the header's unlock keys, with its app key,
-and sets the state to `registered`; the code is spent. Its answer to the host then also
+and sets the state to `registered`; the code is spent. (0.33.0, release
+R: it records the phone's keys, app key and attestation binding in the
+recovery record only; a registered phone can send nothing but
+`vault.recovery.open`, §11.14.6.) Its answer to the host then also
 carries the clear marker `code: "recovery_registered"` (§11.5, 0.10.6),
 which the host copies into the response slot, so that the member API
 stops releasing the spent code (§11.11.7). Any other answer, `ok: false`
@@ -11954,6 +12213,9 @@ because it only reduces exposure. Owner apps learn of the recovery from
 (§11.11.7), or from `recovery_pending`, and can cancel from there.
 
 #### 11.11.5 Unlock, password and handover
+
+(0.33.0, release R) Replaced from release R by the recovery open
+(§11.14.6); this section describes the releases before R.
 
 Only a vault with a backup copy of its credential gets here (§11.11.1,
 §11.11.3). Until the password has been proved against that copy, the
@@ -12059,6 +12321,10 @@ not its owner check's state.
   - the PIN backoff (§11.8);
   - the credential password backoff (§3.5.3);
   - one recovery per vault (a new request replaces the old).
+  - (0.33.0, release R) In place of the two backoffs: ten attempts at
+    the PIN and password together for the life of the pair, with the
+    waits of §11.14.6, and the 72-hour quiet period (§11.14.5), counted
+    outside everything the host stores (§11.14.4).
 
   These limits are kept in the sealed header and in the state, which the
   host stores. They hold against everyone except a host that replays stored
@@ -12092,6 +12358,7 @@ signed by its app key (§11.12.2) and needing no session:
 | `POST /api/vault/recovery/cancel` | `{recovery_id}` | `200 {cancelled}`; `404` when `recovery_id` is not the vault's current recovery (0.29.4, as built) |
 | `POST /api/vault/recovery/claim` | `{vault_id, recovery_id, app_key}` (scanned), or `{locator, app_key}` (typed, 0.25.0) | `200 {user_guid, email_hint, vault_id, recovery_id}` (0.15.0; the two identifiers since 0.25.0) |
 | `POST /api/vault/recovery/register` | `{vault_id, request_id, instance_id, etk_kid, envelope}` | `202 {vault_id, request_id}`; the result is polled like unlock (`GET /api/vault/requests/{id}`) |
+| `POST /api/vault/recovery/open` (0.33.0, release R) | `{vault_id, request_id, instance_id, etk_kid, envelope}`, signed by the recovering key | `202 {vault_id, request_id}`; polled likewise; forwarded only while the recovery is `registered` (`409 recovery_not_available`) (MEMBER-API "Vault recovery") |
 
 - **Claim** (0.15.0). The new app, which has no session and no vault
   key at the API yet, presents the QR's `vault_id` and `recovery_id` with
@@ -12768,6 +13035,1375 @@ desktops only (owner decision of 2026-10-07, §15 item 28).
   as the account's, never as verified (§10.8). Membership and terms are
   enforced by the member API (§11.1).
 
+### 11.14 Recovery and unlock from release R (0.33.0, release R)
+
+*Owner decisions of 2026-10-13 to 2026-10-15; wording for the owner's
+approval. It applies from **release R**, which is not built: the first
+staging vault release that carries this section ("R" for recovery). It
+binds nothing before. Every rule elsewhere in this document marked
+"0.33.0, release R" points here. The old phone's keys after a transfer
+(§11.14.10) were decided by the owner on 2026-10-15.*
+
+**Why.** Until release R the limits on guessing a PIN and a credential
+password during a recovery are kept in the sealed header and the vault
+state (§11.11.6), which the host stores. They hold against everyone but
+a host that replays stored objects, and VettID runs the host. A host
+can start a recovery for any vault, register its own attested phone,
+and then guess the PIN and after it the password at the speed of the
+app (§11.11.2 "A recovery started by the host", §13.2). Release R moves
+the count of attempts out of everything the host stores, tests the PIN
+and the password only together, and adds a secret that only the
+member's phone can produce to every unlock.
+
+**What changes for a member.**
+
+- Recovery still starts on the account site, still shows a one-time
+  code after at least 24 hours, and still needs a new phone, the PIN
+  and the credential password. The member keeps nothing new.
+- On the new phone the PIN and the password are entered on **one
+  screen** and tested **together**. The answer is "right" or "PIN or
+  password is wrong", never which one.
+- There are **ten attempts in total** for one PIN and password, for the
+  life of that pair, not ten a day. The first two can be made at once;
+  after that each wrong attempt is followed by a **wait** of 1, 2, 4, 8
+  and 16 days, then 30 days each. Typing the same wrong pair again on
+  the same phone is not counted again, and the app shows what was
+  typed before it is sent.
+- A recovery cannot succeed until **72 hours** after the member last
+  proved both secrets to a running vault (an owner check, §3.6). A
+  member who passed an owner check within the last three days cannot be
+  recovered; a member who has just lost the phone waits up to three
+  days instead of one. VettID can prevent owner checks by not running
+  the service; if it does so for three days, only the ten attempts,
+  their waits and the member's password protect the vault.
+- Every attempt is counted before it is tested, recorded where the host
+  cannot remove it, shown in the app's History and sent by email.
+- Changing the PIN or the password ends every attempt against the old
+  pair and gives ten new ones. After ten used attempts recovery is off
+  until one of the two changes.
+- A new credential password needs at least 12 characters, must not be a
+  common password and must pass an estimate of how hard it is to guess.
+- **Unlocking also needs a secret that only the phone's hardware can
+  produce.** Someone who holds everything VettID stores can no longer
+  test PINs against it without the member's phone.
+- A transfer to a new phone needs the password as well as the PIN
+  (as before release R), takes a few seconds longer and can be answered
+  "busy, try again".
+- No iPhone app can unlock a vault of release R until the phone-held
+  secret is designed for iOS (§15 item 39).
+
+**What this rests on, said once.** The count of attempts is kept in
+Amazon S3 under Object Lock in compliance mode (§11.14.4,
+VAULT-HOST-PROTOCOL §8.1). AWS documents that such a lock cannot be
+shortened or removed by any user, including the account's root user.
+VettID owns that AWS account, and this design assumes that AWS could
+act for the account's owner if it chose to. Until a second record
+outside AWS exists (§11.14.13), read "ten attempts" as "ten attempts,
+unless AWS were to act for VettID".
+
+**Staging vaults from before release R** cannot move into it: the
+sealed header and the DEK change shape. They are deleted and enrolled
+again (§11.14.14). Production has no vault.
+
+#### 11.14.1 The phone-held unlock secret and the random DEK
+
+From release R this replaces §3.3.1's derivation of the DEK. The
+state's at-rest format gains the DEK's version in the clear (authenticated
+as part of the AAD), so that the enclave can read it before it holds any
+DEK:
+
+```
+state = 0x02 || state_seq (8, big-endian) || dek_version (8, big-endian) || nonce (24)
+        || XChaCha20-Poly1305(DEK, nonce, aad, state_json)
+aad   = "vettid/vms/2/state" || 0x00 || vault_id || 0x00 || state[0:17]
+```
+
+**The DEK** is 32 random bytes made by the enclave. It has a version,
+`dek_version` (1 at enrollment), and is **replaced** at every event
+meant to take power away from an old secret or an old phone
+(§11.14.2). It is never stored in the clear. The state names the
+`dek_version` it is encrypted under (above). The sealed header holds the
+current DEK wrapped:
+
+```
+x            = Argon2id(PIN, salt, t = 3, m = 64 MiB, p = 1, 32)
+unlock_key   = HKDF-SHA-256(ikm = x || unlock_secret, salt = pepper,
+                            info = "vettid/vms/2/unlock-key" || 0x00 || vault_id, L = 32)
+dek_wrap     = nonce (24) || XChaCha20-Poly1305(unlock_key, nonce, aad, DEK)
+aad          = "vettid/vms/2/dek-wrap" || 0x00 || vault_id || 0x00 || dek_version (8, big-endian)
+secret_check = HMAC-SHA-256(key = pepper,
+                            msg = "vettid/vms/2/unlock-secret-check" || 0x00 || vault_id || 0x00 || unlock_secret)
+```
+
+- `unlock_secret` is exactly 32 bytes, supplied by the vault's app
+  with `vault.enroll` (§11.3), every `vault.unlock` (§11.4), a recovery
+  open (§11.14.6), a transfer's `hs.init` (§11.14.10), `pin.change` and
+  `vault.secret.renew` (§11.14.9). The enclave uses it for the
+  derivation above, keeps it and `unlock_key` in the vault process's
+  memory while the vault is unlocked, and never writes either anywhere.
+- A request that carries no `unlock_secret`, or one that is not 32
+  bytes, is `bad_request` before any work on the PIN. **There is no
+  PIN-only path in release R.**
+- If the secret sent matches neither `secret_check` nor, while a `next`
+  part exists, `secret_check_next` (§11.14.2), the answer is
+  `device_secret`: decided before the PIN is tried and not counted as a
+  PIN failure. `secret_check` does not depend on the PIN, so it cannot
+  test one; guessing the secret through it means guessing 256 bits.
+- A wrong PIN gives an `unlock_key` under which `dek_wrap` does not
+  open: `bad_pin`, counted in the backoff of §11.8 as before. The
+  everyday parameters stay `t = 3`, `m = 64 MiB`, `p = 1`, so an unlock
+  costs what it cost before.
+- **The PIN check in a running vault** (an owner check, §3.6.1 step 5;
+  a transfer's approval; `vault.delete`; `credential.reset`; a name
+  change; a History export) derives `unlock_key` from the PIN sent, the
+  pepper and the secret held in memory since the unlock, and compares it
+  in constant time with the `unlock_key` in memory. Nothing is stored
+  for it, and nothing on the wire changes.
+- The enclave cannot judge the secret's quality and accepts any 32
+  bytes. An app that sent a constant would have a vault without this
+  protection, and nobody could tell; that is the same trust in the
+  published app as the rest of §11.7.
+- `opener` (§11.14.3) holds the same DEK under the recovery key. It is
+  the only way to the DEK without the phone's secret, and it needs the
+  PIN and the password together at the heavy parameters.
+
+**What the enclave stores, against the rule "nothing that lets the PIN
+be tested without the phone's secret".**
+
+| Stored | Where | Can the PIN be tested with it, without the secret |
+|---|---|---|
+| `dek_wrap`, `dek_wrap_next` | header | No: `unlock_key` needs the secret |
+| `secret_check`, the KDF parameters, the pepper, the §11.8 backoff counters | header | No: none depends on the PIN |
+| The recovery wrap and its `opener`s (§11.14.3) | header | Only the PIN and the password together, at the heavy parameters |
+| `last_wrong` (§11.14.6) | header | Only a wrong pair, at the heavy parameters |
+| The state | store | No: the DEK is random. (Before release R the state itself was the test: it decrypts under a DEK derived from the PIN) |
+| The credential's backup copy, the owner-check record, the audit log | state | No: they are inside the state, and none holds the PIN |
+| A request in transit (`vault.enroll`, `vault.unlock`, the recovery open) | the queue, briefly | It holds the PIN and the secret themselves, sealed to the ETK (§13.5, row "ETK") |
+
+**On the phone** (§11.7; ANDROID-PLAN §4 "Recovery and unlock from
+release R"). At enrollment, at a transfer and at a recovery the app
+creates a new non-exportable HMAC-SHA-256 key in the Android Keystore,
+the **phone key**, in StrongBox where the phone has it and in the
+trusted execution environment otherwise, with exactly the properties of
+its device attestation key and its app key. The secret is
+
+```
+unlock_secret = HMAC-SHA-256(phone key, "vettid/vms/2/unlock-secret" || 0x00 || vault_id || 0x00 || epoch (8, big-endian))
+```
+
+computed by the phone's hardware each time it is needed and held in the
+app's memory only while a request is built.
+
+- `epoch` is a counter the app keeps: 1 at enrollment, at a transfer and
+  at a recovery (each makes a new phone key), and one higher at each
+  `pin.change` and `vault.secret.renew`. The app moves to the new epoch
+  when it has the answer; if the answer was lost, an unlock answered
+  `device_secret` is tried once more with the next epoch.
+- The key's security level, as the Keystore reports it, MUST be
+  `TrustedEnvironment` or `StrongBox`. The app refuses to enroll, to
+  receive a transfer or to recover where it would be `Software`. A phone
+  whose StrongBox does not offer the key falls back to the trusted
+  execution environment, as for the other two keys.
+- The phone key MUST NOT be bound to user authentication or to an
+  unlocked screen. Android destroys such keys when certain phone
+  settings change; the three keys are lost together or not at all.
+- The secret is sent only inside a request sealed to the ETK, a
+  transfer's `hs.init` sealed to the vault, or a UTK-sealed payload;
+  never over the relay in the clear, never to the member API.
+- The enclave cannot see how the phone holds the secret and relies on
+  the app being the published one, which device attestation shows.
+- **Clearing the app's data, or restoring the phone from a backup,**
+  loses the phone key with the device key and the app key, as before
+  (Keystore keys are not backed up, and the app's data is excluded from
+  backups). With the credential backup on the member recovers; with it
+  off the vault cannot be brought back (§3.5.6). The app cannot ask the
+  vault which applies; the account site shows the backup bit.
+
+**iOS** is not designed: the Secure Enclave holds elliptic-curve keys,
+not HMAC keys, so the construction does not carry over as it stands.
+It must be designed before an iOS app can unlock a vault of release R
+(§15 item 39).
+
+**What the secret protects against, in one sentence:** someone who has
+what VettID stores and has never run code as the member's app on the
+member's phone. One exposure of the secret lasts until the member
+changes the PIN or asks for a new secret (§11.14.9); with the DEK
+replaced then, the old secret opens no later stored state. Malware that
+runs as the app can take the secret while a request is built, as it can
+take the PIN.
+
+#### 11.14.2 Replacing the DEK, and the order of writes
+
+**When.** The DEK is replaced at a PIN change, a password change, a
+`credential.reset`, a transfer's approval, a completed recovery, and
+`vault.secret.renew`. An old wrap then opens only the state as it was
+when that wrap was replaced, which the host could already present as a
+rollback (§13.2), and **no later stored state**. It costs no extra
+computing: the vault encrypts its whole state at every write.
+
+**What an old copy still holds.** The state holds the vault's relay
+key, identity and KEM keys, rotation chain, tokens and wake key
+(§3.3). Replacing the DEK does not change them. With the sealing intact,
+an old phone, the old PIN, an old header and the old state are a second
+running copy of the vault that a replaying host can connect to the
+relay; with a broken sealing the same keys are read out of the old
+copy. Removing that needs those keys rotated (§3.4). **A completed
+recovery rotates them** (§11.14.6 step 6); a PIN change, a password
+change and a transfer do not, and the app offers the rotation after
+each. A rotation is written in the event's state write and its notices
+go out afterwards; a connection that cannot be reached delays its own
+notice only, and a rotation that cannot be made at all is audited
+(`identity.rotation_failed`) and offered again: **it never fails the
+event**. The holder of an old copy also holds the old identity key and
+can announce a rotation of its own; a connection keeps the first
+successor it accepted (§3.4), and the relay and the host that carry the
+notices are VettID's. So the rotation ends the old keys against someone
+who is not on the message path, and against VettID only once the
+connections have accepted the member's rotation.
+
+**The order of writes.** The vault stores the state and the header as
+two objects, state first, and the header may lag by one write (§13.2).
+From release R the header holds the wraps, so every replacement of the
+DEK from `DEK_0` to `DEK_1` is done in three steps:
+
+1. **Header with both.** Write a header that keeps everything current
+   (the `dek_wrap` of `DEK_0`, the current unlock keys, the current
+   recovery wrap) and adds a `next` part: the new `dek_version`; the
+   next KDF parameters and salt (a fresh salt when the PIN changes);
+   `dek_wrap_next`, which holds **both `DEK_0` and `DEK_1`** under the new
+   unlock key; `secret_check_next` (as `secret_check`, with the new
+   secret); the new phone's unlock key and app key, with the next
+   `app_key_seq`, where there is one; and, for an armed vault, **always** the recovery wrap
+   and the `opener` for `DEK_1` (§11.14.3 says where the recovery key comes
+   from). Read it back from the store. If either fails nothing has
+   changed and the request is answered `retry`.
+
+   ```
+   dek_wrap_next = nonce (24) || XChaCha20-Poly1305(unlock_key_next, nonce, aad, DEK_0 || DEK_1)
+   aad           = "vettid/vms/2/dek-wrap-next" || 0x00 || vault_id || 0x00 || dek_version of DEK_1 (8, big-endian)
+   ```
+
+2. **State under `DEK_1`.** Write the state with the event applied (the new
+   app, the removed app, the new credential version, "attempt *k*
+   succeeded" for a recovery), encrypted under `DEK_1`.
+3. **Header promoted.** Write the header with `next` made current and
+   the old wrap, the old phone's unlock key and the old recovery wrap
+   removed.
+
+**The app key during the three steps.** Where the event replaces the
+app (a transfer, a recovery), the vault hands the parent the lifecycle
+event **`app_key_next`** (the next key and its `app_key_seq`) with the
+header write of step 1, and the event `app_key` with the header write of
+step 3 (§11.5). The member API accepts requests signed by the current
+key and by the next one from `app_key_next` until `app_key` makes
+it current (MEMBER-API "Recovery from release R"). A dropped step 3
+therefore never locks the new phone out of the member API, and a
+restore (below) resets the row to the old key.
+
+**Ending the next key when the replacement is abandoned.** When the
+vault drops a `next` part (the old phone unlocked first; a transfer's
+10 minutes ran out; step 1 is written again for a new attempt), it hands
+the parent, with that header write, the event `app_key` repeating the
+current key with `next_cleared: true`, and the parent removes
+`app_key_next`; the repeated key has the same `seq`, so the parent skips
+the `app_key` write itself and applies only the clear. The parent also
+removes it when an `unlocked` or `locked` report shows a header without
+a `next` part (those reports carry `next: false`), but only if that
+report's `app_key_seq` is at least the next key's `seq` or its
+`header_seq` is at least that of the header write that carried
+`app_key_next`: a stale report, which the parent writes whatever the
+lease, never clears a replacement in progress. There is no time limit:
+a transfer or recovery stopped after step 2 with the vault locked for
+days leaves only the new phone able to unlock, and the member API must
+still accept its key. So the old and the new key are both accepted only
+while a replacement is really in progress.
+
+At an unlock the enclave accepts the current wrap or, if a `next` part
+exists, the `next` one, and holds both keys through it. If the state is
+already under `DEK_1` it finishes step 3. If it is still under `DEK_0`, the
+event is repeated, because it needs more than an unlock carries: a
+transfer's approval, a PIN change or a password change is sent again
+from the old phone; a recovery open is sent again from the new phone and
+answered **through the `next` wrap, without a new attempt** (the PIN
+and that phone's secret open it, and the password must open the
+credential). When the old phone unlocks first, the `next` part is
+dropped. A header is never sealed to another release with a `next` part
+in it: the move happens inside an unlock (§11.10.4), which first
+promotes or drops it.
+
+| The run ends, or the host drops a write | What is stored | Who can unlock | What the member does |
+|---|---|---|---|
+| Before step 1 is stored | old header, old state | The old phone with the old PIN | Tries again |
+| After step 1, before step 2 | header with both, old state | The old phone with the old PIN (`DEK_0`); the new phone or new PIN reaches `DEK_0` through the `next` wrap, and a new phone's unlock is answered `transfer_incomplete`. The member API accepts the old and the pending app key | Repeats the approval or the change from the old phone, or the open from the new phone, which costs no attempt |
+| After step 2, before step 3 | header with both, new state | The new phone or new PIN (`DEK_1`); the old phone or old PIN is out from here on | Unlocks; step 3 is done then |
+| After step 3 | new header, new state | The new phone or new PIN only | Nothing |
+| The host serves the old header again later | old header, new state | Nobody through that header; the current header still works | Sees a failed unlock; this is the host's doing |
+| **The store confirmed step 1 but did not keep it, and step 2 is stored** | old header, new state | **Nobody** | Below |
+
+**The one case no order can make safe** is a store that answers
+"written" for a header it does not keep: the read-back in step 1 catches
+a store that loses it at once, and nothing catches one that loses it
+later. A host that does this on purpose has destroyed the vault, which
+it can do at any time by deleting it (§13.5). For a fault, the earlier
+state with the header that is still current is a complete vault from
+before the event, and restoring that state version is an operator
+procedure (RUNBOOK) that undoes the event. The data bucket keeps an
+earlier version **1 day** after it was replaced unless it is among the 5
+newest earlier versions of its object, and never more than **7 days**
+(VAULT-RELEASES §8.2). So the restore is **safe within 24 hours of the
+failure**, and possible up to 7 days only if the state object was
+written fewer than 5 times since. **Before a restore, recovery cannot
+help**, whether the credential backup is on or off: the header's
+`opener` is for the earlier DEK and the state is under the later one
+(§11.14.6 answers `stored_mismatch`). **After the restore** the vault is
+the complete vault from before the event. For a transfer, the member
+then needs the old phone (which keeps its keys for up to 7 days,
+§11.14.10), or, with the credential backup on, a recovery with a new
+phone, the PIN and the password after the quiet period. For a PIN or
+password change the member still holds the phone and unlocks with the
+old PIN; a recovery would be answered `closed`, because the change closed
+the old generation before step 1. A stranded vault that is not restored
+in time is lost.
+
+Three further rules:
+
+- *A new phone that unlocks while the state is still the old one* (a
+  transfer between steps 1 and 2) is not a device in that state. The
+  unlock is answered `transfer_incomplete`; the vault does not resume.
+- *A header whose `next` part is never promoted* (a host that drops every
+  step 3): the old wrap opens only old states. After a recovery the
+  uncounted path through the `next` wrap stays open for as long as step
+  3 is withheld; only the recovered phone can use it, since it needs
+  that phone's secret, and its password test is bounded by the
+  credential's own backoff (§3.5.3), not by the counter.
+- *The data bucket's version rule* (VAULT-RELEASES §8.2: an earlier
+  version is removed after 1 day unless it is among the 5 newest, and
+  every earlier version after 7 days; S3 counts from the replacement and
+  rounds up to the next midnight UTC). Against VettID as an attacker it
+  means nothing: VettID sets the rule and can copy every version first,
+  and every residual in this section is written for that reader. For an
+  operator who keeps to it, old headers and states exist for one to two
+  days, or up to a week for a rarely written vault, so a sealing broken
+  later exposes at most about the last week's replaced secrets.
+  Members cannot check that the rule is kept.
+
+#### 11.14.3 The recovery wrap, generations and arming
+
+**The sealed header gains** (§3.3):
+
+- `recovery.counter_key`: 32 random bytes made at enrollment and never
+  changed. The attempt counter's names are derived from it, so that
+  nobody outside an enclave of the vault's release can compute them
+  (VAULT-HOST-PROTOCOL §8.1).
+- `recovery.generation`: an unsigned integer naming one pair of PIN and
+  password; 0 until the vault is first armed.
+- `recovery.wrap`, present only while the vault is armed: `{v: 1,
+  generation, kdf: {alg: "argon2id", t, m, p, salt}, wrap, opener}`, and
+  in a `next` part (§11.14.2) the `opener` for the next DEK.
+
+```
+secrets = len(PIN) (2, big-endian) || PIN || len(password) (2, big-endian) || password
+x       = Argon2id(secrets, salt, t = 3, m = 1 GiB (1,048,576 KiB), p = 1, 32)
+K       = HKDF-SHA-256(ikm = x, salt = pepper,
+                       info = "vettid/vms/2/recovery-wrap" || 0x00 || vault_id || 0x00 || generation (8, big-endian), L = 32)
+wrap    = nonce (24) || XChaCha20-Poly1305(K, nonce, aad_w, recovery_key)
+aad_w   = "vettid/vms/2/recovery-wrap" || 0x00 || vault_id || 0x00 || generation (8, big-endian)
+opener  = nonce (24) || XChaCha20-Poly1305(recovery_key, nonce, aad_o, DEK)
+aad_o   = "vettid/vms/2/recovery-opener" || 0x00 || vault_id || 0x00 || generation (8, big-endian) || dek_version (8, big-endian)
+```
+
+- `PIN` is its ASCII digits; `password` its UTF-8 bytes after
+  normalization to Unicode form NFC (§11.14.7). `salt` is 16 random
+  bytes, fresh for every wrap. The enclave refuses parameters below
+  `t = 3`, `m = 1 GiB` for this wrap; the DEK's and the credential's own
+  derivations keep theirs.
+- `recovery_key` is 32 random bytes, fresh for every wrap, never stored
+  outside `wrap` and never logged or sent. It stands between the wrap
+  and the DEK so that a later path (people the member trusts, for
+  example) can supply it another way without touching this wrap. Such a
+  path is not part of release R; the intent is that it would be
+  specified separately and share the generation's ten attempts.
+- A wrong PIN, a wrong password, or both, give a `K` under which `wrap`
+  does not open. Neither secret can be tested by itself through it.
+- **The heavy derivation** (1 GiB, 3 passes, 1 lane; estimated 3 to 5
+  seconds on the enclave's one processor, to be measured on staging)
+  runs at arming, at each change of PIN or password, at each operation
+  that replaces the DEK (below) and at each recovery open; not at the
+  daily owner check unless that check arms. The supervisor gives out
+  **one permit at a time**, and only when free memory is at least the
+  memory-pressure floor (§12.3) plus 1.2 GiB. Without a permit the
+  request is answered **`busy`** before anything is changed or spent,
+  and tried again. No room is reserved for it (owner decision of
+  2026-10-14). The instance reports whether a permit is free in `Stats`
+  (VAULT-HOST-PROTOCOL §6.6), and the member API SHOULD send a recovery
+  open to an instance of the release that showed one. A host kept full
+  on purpose denies changes and opens; it disarms nobody.
+
+**Arming.** The vault makes the wrap, in the same flush, whenever it has
+just verified the PIN and the password in one request (an owner check,
+`credential.create`, `credential.reset`, `pin.change`,
+`credential.password.change`, a transfer's approval, `vault.secret.renew`);
+it keeps a backup copy of the credential (§3.5.6); the password meets
+rules 1, 2 and 5 of §11.14.7; the header has no wrap for the current
+generation; and the counter reports the generation open and not used up.
+`credential.create`, `pin.change` and `credential.password.change`
+carry both secrets from release R (§11.14.9), so a new vault and a vault
+whose secret just changed are armed at once.
+
+**Every operation that replaces the DEK keeps the vault armed.** Making
+an `opener` needs the recovery key, which only the heavy derivation on
+the pair can give. So each such operation carries the PIN and the
+password, takes the permit first, and is refused with `busy`, with
+nothing changed, if there is none:
+
+| Operation | Where the recovery key comes from |
+|---|---|
+| PIN change, password change, `credential.reset` | A new generation: a new recovery key and a new wrap for the new pair, computed **before** the old generation is closed |
+| A transfer's approval | The approval's PIN and password open the current wrap; a new `opener` is made |
+| A completed recovery | In hand from the open |
+| `vault.secret.renew` | The request's PIN and password open the current wrap |
+| Any of these with no wrap (the backup off, or ten attempts used) | Nothing: there is no wrap to keep |
+
+No operation removes a recovery wrap without putting its replacement
+into the same `next` part, except those meant to disarm: turning the
+backup off and the tenth used attempt.
+
+**Disarming and new generations.** A PIN change, a password change,
+`credential.reset` and turning the backup off each **close the
+generation at the counter first** (`Close`, §11.14.4), after computing
+the new wrap where there is one. Only when the counter has confirmed the
+close does the vault complete the change, remove the old wrap and raise
+`recovery.generation` by one. If the counter does not confirm, the
+change fails with `counter_unavailable` and nothing is changed.
+
+- **A completed recovery and a completed transfer do not change the
+  generation**: the pair is the same, so the recovery key and the
+  attempts already used stay. The `opener` is made again for the new
+  DEK.
+- **Ten used attempts.** When the counter reports all ten of the current
+  generation used, the vault removes the wrap, reports `recovery.state:
+  "change_required"` and does not arm again until a PIN or password
+  change has completed. The same PIN and password are never armed again.
+- **Recovery turned off and on with unchanged secrets.** If the backup is
+  turned on again and neither secret changed, the vault arms the next
+  generation only if the counter shows **no** used attempt in the closed
+  one; otherwise `change_required`. The same applies to a generation
+  closed by a change that then failed to complete.
+- **A change of the PIN alone renews the attempts at the same
+  password.** Someone who learns each new PIN gets ten more guesses at
+  an unchanged password at every PIN change. The password carries the
+  weight (§11.14.7), so the app tells a member who sees attempts that
+  were not theirs to change the **password**.
+- **After a completed recovery** the attempts used stay used (the same
+  generation), and the app urges a change of PIN or password, which
+  gives ten new ones.
+- **Deleting a vault closes its generation.** `vault.delete` and the
+  queue operation `delete` (§12.5) call `Close` before anything is
+  erased; the deletion goes ahead whether or not the close was
+  confirmed, and the answer says which.
+
+**What VettID can and cannot do here.** It can store and replay every
+header the vault ever had, including headers with older wraps; each
+belongs to a generation, and the counter decides whether that
+generation has attempts left. It cannot test the wrap outside an
+enclave, test the PIN without the password through it, make a wrap for
+secrets it does not know, or start a generation, which happens only
+inside an unlocked vault with the member's secrets. All of this rests on
+the sealed header staying sealed (§11.14.12).
+
+#### 11.14.4 The attempt counter
+
+The attempt counter is what records, outside everything the host
+stores, how many attempts each generation has used, the waits, and when
+the member was last present. Only the vault's own process calls it, over
+TLS that ends inside the enclave and that the host carries but cannot
+read or alter. Every operation names a vault and a generation by values
+derived from `recovery.counter_key`.
+
+| Operation | Answers | Meaning |
+|---|---|---|
+| `Status(vault, g)` | `{used, of: 10, closed, wait_until?, attempts: [{n, at, success}], present_at?, now}`, or `unavailable` | Reads. `used` counts spent and lost attempts. Every time is the counter's own |
+| `Spend(vault, g, n)` | `spent{at, wait_until}`, `lost{used, wait_until}`, `exhausted`, `closed`, `wait{wait_until}`, `unavailable` | Takes attempt `n`, which must be the next, and records the wait `W(n)` after it in the same step. `at` is the counter's time of the attempt. If `n` is already taken the answer is `wait`; **the caller never tries another number** |
+| `Confirm(vault, g, n)` | `{closed, present_at?, attempts: [...], now}`, `unavailable` | A read the counter begins only after `Spend` was confirmed |
+| `Succeed(vault, g, n)` | `recorded`, `unavailable` | Attempt `n` was a success, which ends its wait; called only after the wrap opened |
+| `Close(vault, g)` | `closed`, `unavailable` | Ends generation `g` for ever; may be repeated |
+| `MarkPresent(vault)` | `recorded{at}`, `unavailable` | The member is present now, by the counter's clock |
+
+**Guarantees.** Each must hold against a party that stores everything
+the enclave stores, starts any number of genuine enclaves, and drops,
+delays or replays anything between them.
+
+- **G1, no rollback.** Once `Spend` answered `spent` or `lost`, every
+  later `Status` for that generation counts it, for as long as any sealed
+  header of that generation can still be opened by an enclave. Release R
+  meets it with a 100-year lock; a header still openable after that (its
+  release's sealing key alive for a century) is the residual.
+- **G2, no fork.** For each attempt of a generation, at most one caller
+  in the world is answered `spent`.
+- **G3, at most ten.** `Spend` answers `spent` at most ten times for one
+  generation.
+- **G4, final close.** No attempt whose `Spend` began after `Close`
+  answered `closed` is tested. It is met by `Confirm`, after the spend:
+  a caller that looked before the close and spends after it sees the
+  close and tests nothing.
+- **G5, presence only moves forward.** The party above can make
+  `present_at` later than the truth, which blocks a recovery and, between
+  a member's `Spend` and its `Confirm`, uses that attempt up without a
+  test. It cannot make it earlier, remove a present record less than 72
+  hours old, or influence `now`. No attempt is tested if a present record
+  is later than `at` minus 72 hours, if there is none, or if `Confirm`'s
+  own counter time is more than 10 minutes after `at`. **A present
+  record's lock (96 hours) exceeds 72 hours by more than that span**, so
+  a `Confirm` in time always shows every present record that matters.
+- **G6, one clock.** `present_at`, `at` and `now` come from one clock,
+  which is not the host's.
+- **G7, one counter.** What the enclave talks to is fixed in the measured
+  release (§11.10.8, `recovery_counter`): it can tell the real counter
+  from a copy or a fresh one.
+- **G8, failures fall on the safe side.** Any outcome the counter cannot
+  classify counts as used (`lost`). `unavailable` is answered only when
+  nothing was used. The enclave never retries a `Spend` by itself.
+- **G9, waits only grow.** A recorded wait can be made longer, which only
+  blocks, never shorter or removed; a success record cannot be made by
+  anyone who has not opened the wrap.
+
+The interface does not promise that the counter can be reached, that
+VettID cannot see when it is called, or that VettID cannot use up a
+vault's attempts by running recoveries (that is the ten).
+
+**In release R the counter is one record: S3 objects under Object Lock
+in compliance mode** in a bucket of the vault's AWS account, pinned in
+the release, reached from the enclave over its own TLS through the
+egress (VAULT-HOST-PROTOCOL §8.1, which defines the object names and the
+calls): an attempt is a create-only write of a locked token followed by
+a complete versions listing that must show exactly one entry, the
+enclave's own; a close, a success and a wait are locked objects; a
+present record is a locked version of one marker object; the counter's
+times are S3's `LastModified` and `Date`. Tokens, close and success
+records are locked for 100 years, wait records until the wait's end,
+present records for 96 hours. Later releases add records that must
+agree, the stricter answer winning (§11.14.13).
+
+**Who could break a guarantee in release R, and who would see it.**
+Nobody with VettID's AWS permissions alone: no permission deletes,
+shortens or unlocks a compliance-locked version, the root user's
+included, and the enclave refuses a bucket, account or lock it did not
+expect. AWS acting for VettID could remove locked records; that would
+undo G1 to G5 and G9 for the records removed, and nobody outside AWS
+and VettID would see it. Closing VettID's AWS account would remove the
+records and, with them, the sealing keys of every vault (§11.10.2), so
+every vault would be lost and none opened.
+
+#### 11.14.5 Presence and the quiet period
+
+- **Present.** The member is present when a running vault has verified,
+  or been given, both the PIN and the credential password: a successful
+  `vault.owner-check`, and each event §3.6.1 lists as starting the owner
+  check's clock in a vault that has a credential (the first
+  `credential.create`, `credential.reset`, a completed transfer, a
+  completed recovery). At each of them the vault calls `MarkPresent`. An
+  unlock, `credential.unlock`, any other credential operation,
+  `pin.change`, `credential.password.change` and `vault.secret.renew` do
+  not mark the member present, exactly as they do not reset the owner
+  check's clock.
+- **The rule.** A recovery attempt is tested only if the counter's newest
+  present record for the vault is at least **259,200 seconds (72 hours)**
+  older than the attempt's own time `at` (§11.14.6 step 4b), both by the
+  counter's clock. A vault with no present record is refused. Nothing
+  resets the 72 hours but `MarkPresent`; nothing the host or the member
+  API sends does.
+- **When the counter cannot record it.** The owner check still passes
+  and its deadline moves; its answer carries `recovery:
+  {present_recorded: false}`. The vault tries again every 60 seconds for
+  up to an hour while it stays unlocked, and the app shows a notice until
+  a later answer or `vault.status` says the presence was recorded. **A
+  member who sees that notice cannot act on it:** changing the PIN or the
+  password and turning recovery off all need the counter, which is what
+  was cut. A status that stays `unavailable` at every read for 24 hours
+  is shown with the urgency of a used attempt (§11.14.11).
+- **The code, the quiet period and the waits fit together.** At a
+  request (§11.11.1) the enclave reads the present record and the
+  generation's waits and sets
+
+  ```
+  not_before = the latest of  now + 24 h,
+                              now + 72 h − age of the newest present record,
+                              now + time left of a running wait
+  expires    = not_before + 24 h
+  ```
+
+  where `now` is the enclave's clock and the age and time left are
+  measured by the counter's clock, so that the two clocks are never
+  compared. If the counter cannot be reached, `not_before` is now + 72 h
+  and the answer marks it as an estimate (`earliest`); a running wait
+  may make the true time later, and the open decides in any case. The
+  answer to the host carries `not_before`, `expires` and `earliest` in
+  the clear, beside the sealed code, so that the member API shows the
+  right time (§11.11.7). A register is accepted from `not_before`; opens
+  from the register until `expires`. When a wait begins during a
+  recovery, `expires` moves to the wait's end plus 24 hours
+  (§11.14.6), so **a recovery stays open across waits with one code**,
+  for up to about 122 days.
+
+**Said plainly.** A member who really has lost the phone waits until 72
+hours after the last owner check, and at least 24. The 24 hours, the
+email and the cancel link are no barrier to VettID, which needs no
+email and can begin a recovery whenever it likes: against VettID the
+quiet period is the only delay, and VettID decides whether a member
+**can** be present (an owner check needs VettID to run the vault, and
+recording it needs the enclave to reach the counter). By refusing either
+for 72 hours, for one member or for all, it makes that member absent. A
+real outage of three days does the same for everyone. The member is
+told and can do nothing about it. VettID also sees when each member was
+last present (it owns the bucket; the clear `not_before` tells the
+host).
+
+#### 11.14.6 Opening a recovery
+
+From release R this replaces §11.11.5 steps 1 to 3. The registered
+phone sends **`vault.recovery.open`** over the alternate channel, sealed
+to the instance's ETK and padded to 12,288 bytes (§5.4):
+
+```json
+{ "user_guid": "...", "vault_id": "...", "request_id": "<ULID>", "recovery_id": "<ULID>",
+  "device_ik": "<b64>", "pin": "<digits>", "password": "<string>", "unlock_secret": "<b64, 32 bytes>",
+  "token": "<open token for MB(app), as a registered app's unlock carried it before release R>",
+  "device_assertion": { }, "manifest_sha256": "<64 hex>", "manifest_serial": 7,
+  "sig": "<b64 Ed25519 by device_ik>" }
+```
+
+`sig` covers, with literal newlines and no trailing newline (the
+conventions of §11.4):
+
+```
+"vettid/vms/2/recovery-open" \n user_guid \n vault_id \n request_id \n recovery_id \n ts \n etk_kid_hex \n
+hex(SHA-256(secrets)) \n hex(SHA-256(token)) \n hex(SHA-256(manifest_bytes)) \n hex(SHA-256(unlock_secret))
+```
+
+`secrets` is the byte string of §11.14.3. The enclave applies the
+binding and replay rules of §11.3 and §11.6 and then, **in this order**:
+
+1. reads the sealed header. The recovery record must exist, name this
+   `recovery_id`, be `registered`, name `device_ik` as its phone and not
+   be past `expires`; `sig` and the device assertion (§11.7) must verify.
+   Otherwise random bytes, or `no_recovery`, `expired`, `attestation`,
+   `manifest`, as for an unlock;
+2. requires an armed header (`recovery.wrap` for `recovery.generation`):
+   otherwise `not_armed`. Then reads the state object's clear
+   `dek_version` (§11.14.1) and requires an `opener` in the header for
+   it (the current one, or the `next` one): otherwise
+   **`stored_mismatch`**, with nothing used. The stored state and header
+   do not belong together (§11.14.2, the one case no order fixes; or a
+   rollback, §13.2), and no attempt could open the vault;
+   - **2a.** takes the heavy-derivation permit (`busy` without one;
+     nothing used), computes `x` and from it this pair's tag (below). If
+     the tag equals the last wrong pair **this phone** sent in this
+     recovery, the answer is `wrong_again`; nothing is used or tested.
+     At most three `wrong_again` answers are given in one recovery; after
+     the third this step is skipped and a repeat counts like any attempt.
+     (The count is in the header, so it limits someone with the member's
+     account session, not a replaying host, which has this denial of
+     service anyway);
+3. asks the counter for the generation's status and the present record
+   (`Status`). This first look saves work and gives a clear answer; **it
+   decides nothing by itself**:
+   - the counter cannot be reached: `counter_unavailable`, nothing used;
+   - the generation is closed: `closed`; no attempt left: `exhausted`;
+   - no present record, or one younger than 72 hours by the counter's
+     clock: `quiet` with `retry_at`, nothing used;
+   - a wait is running: `wait` with `retry_at`, nothing used;
+   - **3b.** if more than 60 seconds have passed, by the enclave's own
+     clock, since the status request was **sent**, the answer is `retry`
+     and nothing is used;
+4. **spends one attempt** (`Spend`), naming exactly the next attempt
+   after those the status showed:
+   - `spent{at}`: go on;
+   - `lost`: the enclave tests nothing and answers `attempt_lost`; the
+     attempt counts as used and its wait runs;
+   - `exhausted`, `closed`, `wait`, `unavailable`: as in step 3;
+   - **4b.** reads the counter again with a request sent after the spend
+     was confirmed (`Confirm`) and decides against `at`. The guess is
+     tested only if: the generation has no close record; the read's own
+     counter time is **no more than 10 minutes after `at`**; the vault
+     has a present record and none is later than `at` minus 72 hours;
+     `at` is no more than 10 minutes after the counter's time of the
+     status of step 3; every earlier attempt of the generation without a
+     success record is at least its wait `W(k)` older than `at`, and this
+     attempt is the highest-numbered, with none missing below it. (The
+     enclave-clock 60 seconds of step 3b are judged only before the spend:
+     the two 10-minute limits use the counter's clock, on which the design
+     rests, and a second enclave-clock limit here could only turn an
+     honest member's slow S3 calls into untested attempts.) If any fails,
+     the attempt stays
+     used, **nothing is tested**, and the answer is `closed`, `quiet` or
+     `wait` with `attempts`. If the read cannot be made or confirmed, the
+     answer is `attempt_lost`;
+5. **only then** derives `K` from `x` and tries the wrap. If it does not
+   open, the answer is `wrong`, and the enclave writes the pair's tag into
+   the recovery record;
+6. if it opens: records the success (`Succeed`, tried three times before
+   going on), which ends this attempt's wait; takes the DEK from the
+   `opener` whose `dek_version` the state names (on a header with a
+   `next` part there are two; if the state now names neither, because it
+   changed after step 2, or the state does not decrypt under the DEK the
+   `opener` gave, the answer is `stored_mismatch` with the attempt used
+   and ended by the success record, and nothing changes); loads the state (with `state.state_seq >=
+   header.state_seq`, §13.2); opens the vault's backup copy of the
+   credential with the same password (§3.5.6); and then, in the order of
+   writes of §11.14.2: rotates the CEK and re-keys every critical item
+   (§10.7); makes the phone the vault's app and the credential's holder;
+   moves the signer binding (§11.7.1); makes its app key the vault's app
+   key; removes every other device of role `app` (`device.unlinked{reason:
+   "replaced"}`); keeps desktops and agents; **rotates the vault's relay
+   key, identity and KEM keys and wake key** (§3.4, §14; a rotation that
+   cannot be made never fails the recovery, §11.14.2). The notices to
+   removed devices, `device.unlinked{replaced}` and any pending unlink's
+   `device.unlinked{transferred}` (§11.14.10), are deposited only after
+   step 2 of the order of writes is confirmed (like every notice of an
+   event, they follow its durable state write), and are signed with the
+   **old relay key**, which the vault keeps in memory for them during the
+   rotation's grace period, with the tokens those devices issued for it,
+   which the new key could not use; records "attempt
+   *k* succeeded" in the state; removes the recovery record; and replaces
+   the DEK for the request's PIN and the phone's secret. `MarkPresent` is
+   first sent only after step 2 of the order of writes is confirmed, so
+   that a failed completion does not start a new quiet period; `Succeed`
+   and `MarkPresent` are sent again at every later unlock and owner check
+   until the counter confirms them. Then it answers `ok`, and the vault
+   runs.
+
+**A right entry that could not be completed.** If the run ends after the
+wrap opened and before step 1 of the order of writes is stored, the
+attempt is used and the member must open again, which uses another
+attempt although the entry was right; its wait is ended by the success
+record. If `Succeed` could not be recorded either (two faults in a row),
+the next open meets the wait of an attempt that was right; the success is
+then recorded at the next open that succeeds. The app says "The last
+attempt was right but could not be completed" when an open after an
+`ok`-less run is answered `wait` or `attempt_lost`. Once step 1 is
+stored, repeating costs nothing (the `next` wrap).
+
+**What counts as an attempt.** A request that reached step 4 and for
+which the counter answered `spent` or `lost`. Refusals in steps 1 to 3b
+are not attempts. An attempt is used before the guess is tested and
+whether or not anyone receives the answer; one that step 4b refuses to
+test is used all the same.
+
+**`vault.recovery.open.result`** is sealed to the phone's `kem` recorded
+at register and padded to 4,096 bytes:
+
+- `{"ok": true, "state_seq", "header_seq", "token", "vault_bundle",
+  "release", "release_number", "unlock_id", "attempts": {"used": n,
+  "of": 10}}`. `vault_bundle` carries the vault's rotated keys;
+- `{"ok": false, "code": "wrong|wrong_again|attempt_lost|quiet|wait|busy|exhausted|closed|not_armed|stored_mismatch|counter_unavailable|no_recovery|expired|attestation|manifest|wrong_release|retry|bad_request",
+  "attempts": {"used": n, "of": 10}, "retry_at": "<ts>"}`. `attempts`
+  is present whenever the counter answered. `retry_at` comes with
+  `quiet` and `wait`, and with `wrong` and `attempt_lost` when a wait
+  began. `retry` means nothing was used (step 3b, or step 1 of the order
+  of writes failed). `stored_mismatch` means the vault's stored data
+  cannot be opened by any entry; from step 2 nothing was used, from step
+  6 the right attempt was used; the app says "Your entry was right, but
+  the vault's stored data could not be opened. Contact VettID." (from
+  step 2: "The vault's stored data could not be opened. Nothing was
+  used. Contact VettID.").
+
+After `ok` the phone sends `hs.init` with purpose `app` and `ctx` =
+`recovery_id`, accepted without approval as for the first app (§11.3),
+and fetches the credential with `credential.get` as the holder (the blob
+does not fit the result).
+
+**The schedule of waits.** The ten attempts of a generation are numbered
+1 to 10. After attempt *k* was used and was not a success, no further
+attempt is accepted until `W(k)` has passed, in units of
+`recovery_wait_unit_seconds` (§11.10.8; 86,400 s in production):
+
+| After attempt | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `W(k)`, in units (production) | 0 | 1 (24 h) | 2 | 4 | 8 | 16 | 30 | 30 | 30 | no next: used up |
+| Earliest next, from attempt 2 | — | 1 d | 3 d | 7 d | 15 d | 31 d | 61 d | 91 d | 121 d | — |
+
+- **How the wait is kept.** In the step in which attempt *k* is spent,
+  before the guess is tested, the enclave also writes the attempt's
+  **wait record**, locked until the counter's time plus `W(k)`, and reads
+  the lock back; if it cannot, the attempt is `lost`. A wait record is
+  read as "any version of its name still locked", from a versions
+  listing.
+- **The binding rule is the attempts' own times.** In one complete
+  listing, every attempt *k* without a success record must have a
+  counter time at least `W(k)` before the attempt being spent (step 4b),
+  and before the current counter time at a first look (step 3). The later
+  of that and the wait record ends the wait.
+- **A success ends its own wait**: a wait record whose attempt has a
+  success record is ignored.
+- **The ten are for the life of a pair, and a success does not give them
+  back.** A member who recovers on the third try has seven left; at a
+  later recovery there are no "two at once", and the first wrong entry
+  is followed by a wait of four days or more.
+- **The same wrong pair is counted once.** After `wrong` the recovery
+  record keeps one tag, of the last wrong pair only:
+
+  ```
+  last_wrong = HMAC-SHA-256(key = HKDF-SHA-256(ikm = x, salt = pepper, info = "vettid/vms/2/recovery-wrong-tag", L = 32),
+                            msg = vault_id || 0x00 || recovery_id || 0x00 || device_ik (32 bytes))
+  ```
+
+  compared in constant time at the next open from the same phone (step
+  2a). It is bound to the registered phone's key, since an uncounted
+  answer is a free test and a member's wrong pair is usually one slip
+  from the right one. A host that drops or replays the header write
+  makes the same wrong pair count twice, which costs the member an
+  attempt and gains the host nothing. A pair typed again on another
+  phone or in a later recovery is counted.
+- **The recovery stays open across waits.** When a wait begins, the
+  enclave moves the recovery record's `expires` to the wait's end plus
+  24 hours and says so in the clear (`retry_at`, `expires`, with the
+  marker of §11.14.11). The phone stays registered. If that header write
+  is lost, the member requests a new recovery, whose `not_before`
+  respects the wait (§11.14.5).
+- While a recovery is open the member's old app is refused
+  `recovery_pending` (§11.11.4); a member who still has it cancels.
+  After a cancel by unlock (`cancel_recovery`), the app sends an owner
+  check at once, which marks the member present (§11.14.5) and restarts
+  the quiet period.
+
+**Why a held-back answer gains nothing.** Every byte between the
+enclave and the counter passes through the host, which can hold any
+request or answer back. The rule above is: **a guess is tested only if
+its own attempt was spent at a counter time `at` at which the generation
+was open, the member had been absent for 72 hours, and every earlier
+wait had run out**, and only if the read after the spend was made within
+10 minutes of `at`. Holding back the status makes the enclave spend
+later, at a true later `at` that the read after it judges. Holding back
+the spend's answer for more than 10 minutes makes step 4b refuse.
+Holding back the read after the spend tests late an attempt that was
+spent rightly; it gains no attempt, which carries `at`, is counted and
+shown, and starts its wait. Many enclaves at once all name the same next
+attempt, and only one gets it. So within one absence VettID can test at
+most the attempts the schedule allows in that absence, and cannot carry
+an unspent guess out of it.
+
+**A host can turn a member's own attempts into untested ones**, in three
+ways: by holding back the counter's answers (`attempt_lost`), by holding
+the spend's answer past 10 minutes, or by writing a present record
+between the spend and the read after it (`quiet` with an attempt used).
+A slow service with nobody at fault can do the first two. Ten times ends
+the vault's recovery without a guess tested. Such a host can also delete
+the vault (§13.5); it is stated because it needs no phone and no guess.
+A host that drops step 1 of the order of writes after a right guess
+every time can likewise use up all ten attempts with the member's
+correct entries.
+
+**What is removed in release R.** The device state "recovering"
+(§11.11.5 step 2), `credential.recover` (§10.6), a registered phone's
+entry among the header's unlock keys (§11.11.3), `vault_bundle` and
+`credential_backup` in `vault.unlock.result` (§11.4), the recovering
+app's row in the hold's allow list (§3.6.3), and the member API's
+permission for a recovering key to call `unlock` and `lock`
+(§11.11.7). Release R's image cannot perform the recovery of §11.11.5.
+§11.8's PIN backoff and §3.5.3's password backoff stay for the everyday
+unlock and for credential operations; recovery does not use them.
+Until both secrets are proved together a registered phone has nothing:
+no running vault, no token, no public keys of the vault.
+
+**Someone with the member's account session or email who is not
+VettID.** Against a present member the quiet period stops them. Against
+a member who has just lost the phone, they can request a recovery, read
+the code, register their own phone, use the two immediate attempts and
+then one at the end of each wait, and cancel the member's own requests
+from the same session. Ten wrong pairs end the vault's recovery for
+good. The power to destroy is not new (the same session can delete the
+vault through "start over", §11.11.9, after a delay and with a cancel
+link); what is new is that wrong guesses use up the member's attempts
+and start waits. The member is told by email at each attempt, unless
+the attacker also reads and deletes the mail. A rule that the first
+phone to make a counted attempt keeps the recovery would let this
+attacker hold it against the member for months, and is not adopted.
+
+**Other cases.** A desktop cannot pass an owner check and is no help in
+a recovery, and does not delay one. A recovery that completes on a phone
+the member did not mean removes every other app, and with the phone-held
+secret a removed phone comes back only through a transfer or another
+recovery. A member API that lies about time or account status can still
+delete a vault through the unsigned `account` and `delete` operations
+(§13.3); none of that is new.
+
+#### 11.14.7 Passwords
+
+From release R this replaces §3.5.1's "A UTF-8 string of 8–1,024
+bytes".
+
+- **One form.** The enclave normalizes every password to Unicode form
+  NFC before any use: before the checks below, before the recovery wrap
+  and before the credential's password key. The app does the same. (A
+  new phone whose keyboard produces another encoding of the same letters
+  would otherwise spend the member's attempts on a right password.)
+- **Every password** is valid UTF-8 of at most 1,024 bytes. **A password
+  that is set** (`credential.create`, the `new_password` of
+  `credential.password.change` and `credential.reset`) must also:
+  1. have at least **12 characters**, counted as Unicode scalar values;
+  2. not be one character repeated;
+  3. not be on the release's **common-password list**, compared after
+     lowering ASCII letters;
+  4. not equal the PIN;
+  5. have an **estimated guessability** of at least **10^10 guesses**
+     by the release's estimator.
+
+  A password that breaks a rule is refused with `weak_password` and a
+  `reason` (`short`, `repeated`, `common`, `same_as_pin`, `guessable`),
+  after the UTK is opened and before anything else changes.
+- **The estimator** is in the manner of zxcvbn: it looks for dictionary
+  words, names, keyboard runs, repeats, sequences and dates and estimates
+  how many guesses a well-informed attacker needs. It runs in the enclave,
+  which decides, and in the app, which tells the member while typing;
+  both with no network, the word lists being part of the release image
+  and of the app. No online service is asked. The enclave's verdict is
+  final. Both are tested against one shared file of passwords with
+  expected verdicts, and the app's threshold is set a little higher than
+  the vault's, so that a password the app accepts is rarely refused.
+  **The 10^10 figure is tried with real people on phones on staging
+  before production**; a different figure is a change to this section.
+  The estimate is a model and can be wrong in both directions.
+- **The list** is one file in vettid-vault, one password per line, lower
+  case, sorted: a published list of the 100,000 most common passwords
+  cut to the entries of 12 or more characters, with VettID's own obvious
+  words added. It is compiled into the image, so it is part of what
+  members approve, and its SHA-256 is printed in the release notes.
+- **Licences.** The estimator's code and word lists, and the list's
+  source, are used only after their licences have been read and allow
+  it; nothing ships before.
+- **Passwords that already exist** are checked only when set, but
+  **recovery is armed only for a password that meets rules 1, 2 and 5**
+  (§11.14.3): at an owner check the vault holds the password and checks
+  them. A vault whose password does not meet them stays disarmed,
+  reports `recovery.state: "change_required"`, and the app asks for a
+  new password.
+
+Twelve characters and a list do not make a password strong; they remove
+the passwords an attacker would try first. The PIN adds little against
+a guesser with ten tries (ten guesses find a measurable share of chosen
+6-digit PINs); the password carries the weight.
+
+#### 11.14.8 Signed recovery requests
+
+From release R the operations `recovery` and `recovery_cancel`
+(§11.5) carry a signature of the member API, and the enclave verifies
+it. This settles §11.11.2's open design question.
+
+- **Who signs.** The member API, with the **recovery request key**: an
+  ECDSA P-256 key that exists only in AWS KMS, in the account that runs
+  the member API, usable for signing by the member API's vault function
+  and nothing else (MEMBER-API "Vault recovery").
+- **What is signed**, with literal newlines and no trailing newline:
+
+  ```
+  "vettid/vms/2/recovery-request" \n op \n vault_id \n user_guid \n request_id \n signed_at \n hex(SHA-256(browser_key))
+  ```
+
+  `op` is `recovery` or `recovery_cancel`; `signed_at` is RFC 3339 in
+  UTC to the second; for a cancel the last line is empty. The queue
+  message carries `signed_at`, `key_id` and `sig` (base64 of the DER
+  signature) in the clear.
+- **What the release pins.** `recovery_request_keys` (§11.10.8): one or
+  two public keys with their `key_id`, so that a key can be replaced by
+  a release that still accepts the old one.
+- **What the enclave verifies**, before it locks a running vault and
+  before it reads or writes the header: the signature under a pinned
+  key; that `op`, `vault_id`, `user_guid`, `request_id` and the browser
+  key are those of the queue message; that `signed_at` is within 5
+  minutes of its clock; and that `request_id` has not been seen (§11.6).
+  A `recovery` that fails is answered with random bytes of the sealed
+  code's size and nothing is locked or recorded; a `recovery_cancel`
+  that fails is ignored. (Before release R the instance asked a running
+  vault whether to refuse and then locked it, with no signature checked
+  first; the signature now comes first.)
+- The replay set is per instance (§11.6), so a signed request can be
+  sent again to another instance within the five minutes. That gains
+  nothing: a second `recovery` with the same `request_id` writes the
+  same record or is refused by the header's state, and a cancel is
+  harmless to repeat.
+
+**What it protects against, and what it does not.** It takes the power
+to start or cancel a recovery from someone who controls the host and
+the vault's AWS account but not the member API's signing key. It does
+**nothing** against VettID as a whole, which holds that key, and nothing
+about the other operations without an envelope (`lock`, `delete`,
+`account`), which the host can still forge (§13.3). In production the
+member API and the vault run in two AWS accounts with one owner and one
+sign-in, and the management account administers the vault account's
+organization: the signature helps against an intruder inside the vault
+account only. On staging both run in one account, and the signature
+separates two roles there and no more; staging proves nothing about this
+separation.
+
+#### 11.14.9 Changes of PIN, password and phone secret
+
+From release R:
+
+| Type | Request body | Response body |
+|---|---|---|
+| `credential.create` | `{utk_id, sealed{pin, password}}` | as before; also arms (§11.14.3), waiting up to 60 s inside the request for the heavy-derivation permit and otherwise leaving arming to the next owner check (`recovery.state: "needs_check"`), never answering `busy`; a counter that cannot be reached likewise leaves it at `needs_check`, not an error. `pin` is verified against the vault's unlock key as in an owner check; `weak_password` (§11.14.7) |
+| `pin.change` (the holder; a credential operation) | `{credential, utk_id, sealed{pin, new_pin, password, new_unlock_secret}}` | `{credential, version, utks, epoch_advanced: true}`; `bad_pin`, `bad_password`, `backoff`, `busy`, `counter_unavailable`, `retry`, `bad_request` (a `new_pin` that is not 6–32 digits, or a `new_unlock_secret` that is not 32 bytes) |
+| `credential.password.change` | `{credential, utk_id, sealed{pin, password, new_password}}` | as before; `bad_pin`, `weak_password`, `busy`, `counter_unavailable`, `retry` |
+| `credential.reset` | unchanged | as before; `weak_password`, `busy`, `counter_unavailable`, `retry` |
+| `vault.secret.renew` (the holder; a credential operation) | `{credential, utk_id, sealed{pin, password, new_unlock_secret}}` | `{credential, version, utks}`; `bad_pin`, `bad_password`, `backoff`, `busy`, `retry` |
+
+- **`pin.change`** verifies the PIN and the password as an owner check
+  does (§3.6.1 steps 1–7, its `bad_pin` and `bad_password` counting as
+  failed checks), takes the permit and computes the new generation's wrap
+  for the new pair, closes the old generation, derives a new
+  `unlock_key` from `new_pin`, a fresh salt, the pepper and
+  `new_unlock_secret` (the phone's next epoch, §11.14.1), and replaces
+  the DEK in the order of writes of §11.14.2. It is refused while the
+  vault is held (§3.6.3), as before. It replaces 0.32.1's "re-derives
+  the DEK from `new_pin` … and re-encrypts", whose write order was left
+  open (§15).
+- **`credential.password.change`** carries the PIN, which is verified;
+  it closes the generation and arms the next in the same change, and
+  replaces the DEK; the PIN and the secret do not change.
+- **`vault.secret.renew`** gives the phone a new secret with the PIN
+  unchanged: it opens the current wrap with the pair, wraps a replaced
+  DEK for the PIN and `new_unlock_secret`, and makes a new `opener`. The
+  generation does not change. The app offers it in Settings, and after a
+  member reports a phone that ran code it should not have.
+- **Turning the credential backup off** closes the generation
+  (§11.14.3); with the counter unreachable the setting is refused
+  `counter_unavailable`.
+- None of these marks the member present (§11.14.5). The app sends an
+  owner check right after a change only where the change did not arm.
+
+#### 11.14.10 Transfer from release R
+
+§6.7.1 holds, with these changes:
+
+1. **The new phone's secret.** The new app creates its phone key and
+   sends `unlock_secret` (epoch 1) in its `hs.init` (purpose `app`),
+   which is sealed to the vault (§6.2). The vault keeps it **in memory
+   only** until the holder's approval; if the vault locks first, the
+   transfer ends and is started again.
+2. **The approval** carries the PIN and the password, as before. The
+   vault verifies both, takes the heavy-derivation permit (`busy`
+   without one; nothing is spent but the UTK, the transfer stays open,
+   and the old app tries again), opens the current wrap and makes a new
+   `opener`, and replaces the DEK for the PIN and the new phone's secret
+   in the order of writes of §11.14.2: the new phone's unlock key and app
+   key in step 1's `next` part (`app_key_next`), the new device record
+   and the removal of the old app in step 2, the promotion in step 3
+   (`app_key`). The approval answer is `{"unlink": "after_new_unlock"}`
+   (before release R, `{}`); a failed step 1 is answered `retry`.
+3. **A new phone that unlocks before step 2 is stored** is answered
+   `transfer_incomplete` and repeats nothing itself: the app says "The
+   move to this phone did not finish. Approve it again on your old
+   phone."
+4. **The new phone finishes the move.** Right after `device.paired` and
+   the credential fetch, the new app asks for the PIN and sends
+   `vault.lock` and then `vault.unlock` with its own secret ("Finish the
+   move"). That unlock reads the stored header and state, so it proves
+   that both writes of the transfer are durable.
+
+**The old phone's keys after a transfer** (decided by the owner on
+2026-10-15). *This replaces the earlier rule that the old app erases
+itself on `device.unlinked{reason: "transferred"}` sent at the
+approval.* The old app deletes its keys **when it receives that notice,
+sent only after the new phone's first unlock from storage, or 7 days
+after the approval, whichever comes first.**
+
+- At the approval the old app is removed from the vault exactly as
+  before (its relay key denylisted, its unlock key and UTK pool removed;
+  §7.4), but the vault **does not** send `device.unlinked` then. It
+  keeps, in its state, a **pending unlink**: the old device's mailbox,
+  the deposit token it issued to the vault, the `transfer_id` and the
+  transfer's `dek_version`.
+- **`device.unlinked{reason: "transferred", transfer_id}`** is deposited
+  to the old app only after the vault's then current app has completed
+  its **first successful unlock from the stored objects under that
+  `dek_version` or a later one** (the "Finish the move" unlock, or any
+  later one; a completed recovery's open counts the same, and sends it
+  before its relay key switches, §11.14.6). The vault then deletes the
+  pending unlink. A pending unlink whose token has expired is deleted
+  unsent; one older than 7 days is deleted too.
+- The old app, once its approval was answered `{"unlink":
+  "after_new_unlock"}`, keeps its phone key, device key, app key and local
+  state, records the approval's time, and does nothing with the vault: it
+  shows "Finish the move on your new phone". On
+  `device.unlinked{transferred}`, **or at its first start 7 days or more
+  after the approval**, it deletes the phone key, the device key and the
+  app key and erases its local state. Until then it offers **"The move
+  didn't finish"**: an unlock with its own keys and the PIN, which
+  succeeds only if the transfer's state write was not stored, or after
+  an operator restored the earlier state (§11.14.2, RUNBOOK); the old
+  phone is then the vault's app again and the member starts a new
+  transfer. A refused relay key alone is still not proof of removal
+  (§6.7.1, the old app offline).
+- **Why.** Until the new phone has unlocked, the old phone is the way
+  back from the one write fault no order can fix (§11.14.2): if the new
+  state is not durable the new phone cannot unlock, and the earlier
+  header and state, restored in time, open with the old phone and the
+  PIN. Once the new phone has unlocked from storage that case no longer
+  exists. After 7 days no restore is possible in any case, so the old
+  keys serve nothing.
+- **The residual until then.** With an honest host the old phone opens
+  nothing after step 3: its unlock key is gone, its secret opens no
+  current wrap and the DEK was replaced. With a host that replays, the
+  old phone, the PIN, the old header and the old state are a running copy
+  of the vault as it was, with working relay and identity keys (§11.14.2,
+  "What an old copy still holds"), **until the old phone deletes its
+  keys**. The notice cannot shorten that against such a host: the host
+  also carries the relay traffic and can withhold `device.unlinked`, and
+  a pending unlink whose standing token has expired is deleted unsent.
+  So the bound against it is the 7 days, and only if the old app runs
+  after them; a phone that is off, or never opens the app again, keeps
+  the keys until it is wiped. Against an honest host the notice usually
+  arrives within minutes, at "Finish the move". The old phone's last
+  screen says: "This phone keeps your vault's keys until your new phone
+  has finished the move, for at most 7 days. Before you give this phone
+  away, remove VettID from it or reset it."
+- A vault stranded by that fault and restored in time (§11.14.2) needs
+  the old phone or, with the credential backup on, a recovery after the
+  restore. One that is not restored in time is lost, with or without the
+  backup.
+
+#### 11.14.11 What the member sees: status, audit, feed and emails
+
+- **`vault.status`** gains, for the app,
+
+  ```json
+  "recovery": { "state": "armed|off|needs_check|change_required|unknown",
+                "attempts": {"used": 0, "of": 10},
+                "present_recorded_at": "<ts>", "counter": "ok|unavailable" }
+  ```
+
+  and `{state}` alone for desktops (agents: nothing). `off`: the backup
+  is off. `needs_check`: the backup is on and the next owner check will
+  arm. `change_required`: §11.14.3, §11.14.7. `unknown`: the counter
+  could not be read; the app MUST NOT show that as zero attempts used.
+  When `counter` has been `unavailable` at every read for 24 hours, the
+  app shows it with the urgency of a used attempt and says why.
+- **The record a host cannot drop.** The counter holds, for each
+  generation, every attempt with its counter time and which one, if any,
+  succeeded. Whenever the vault reads the counter's status while unlocked
+  (each owner check, a completed recovery), it writes one audit entry for
+  each attempt it has not recorded: kind `recovery.attempt`, `ref` =
+  `<generation>/<n>`, `at` = the counter's time, `outcome` = `success` or
+  `not_success` (a wrong pair and a lost attempt look the same to the
+  counter, which records before the test), `source` = `counter`. Each
+  makes a feed item (`urgent` unless the member completed a recovery in
+  that generation since) and shows in History. When `attempts.used`
+  rises the vault also audits `recovery.attempts_used`.
+- **The details a host can drop.** The header's recovery log (§11.11)
+  also notes each open with its outcome as the enclave knew it (`wrong`,
+  `wrong_again`, `attempt_lost`, `quiet`, `wait`, `busy`, `ok`), the
+  `recovery_id` and the phone's name, and the vault adds them to the
+  matching counter entries. A host that drops header writes removes these
+  details, not the counter's entries; History shows "details not
+  available".
+- **The email trail.** The member API cannot read an open's outcome. For
+  an open that was counted (`spent` or `lost`), the enclave's answer to
+  the host carries the clear marker **`code: "recovery_attempt"`**, with
+  `retry_at` and `expires` when a wait began, beside the sealed result
+  (§11.5). It does not say whether the guess was right. The member API
+  sends an email for each, and moves the recovery's `expires_at` to
+  `expires` (MEMBER-API "Vault recovery"). **VettID can suppress every
+  email**, and an attacker who is VettID needs none: the emails are a
+  notice against an attacker who is someone else. A member with no
+  device learns of attempts only by email.
+- **New audit kinds** (§10.9): `recovery.attempt`,
+  `recovery.attempts_used`, `recovery.armed` (`ref` = the generation),
+  `recovery.generation_closed` (`ref` = the generation, with the reason
+  `pin`, `password`, `reset`, `backup_off`, `exhausted` or `delete`),
+  `recovery.presence_unrecorded`, `identity.rotation_failed`,
+  `identity.rotate_conflict` (§3.4), `device.secret_renewed`. Feed:
+  `recovery.attempt` (as above), `recovery.change_required` (`high`),
+  `recovery.counter_unavailable` (`urgent`, after 24 hours).
+
+#### 11.14.12 What VettID can and cannot do from release R
+
+**It can:** wait for a member's three-day absence, or cause one by not
+running the service or by cutting the enclave's way to the counter, and
+then test at most the attempts the schedule allows, each counted, shown
+and mailed (mail it can suppress); use up a member's attempts without a
+test (§11.14.6), which forces a change of secret and can leave a member
+who then loses the phone without recovery; make recoveries wait by
+keeping enclaves full (`busy`); see when each member was last present;
+start a recovery, since it holds the recovery request key; delete any
+present record older than its 96-hour lock, which can only make
+recoveries refuse (a vault with no present record cannot be recovered);
+delete any vault, as before (§13.5).
+
+**It cannot,** for as long as the counter's guarantees hold: get an
+eleventh attempt for a generation by replaying a header, running many
+enclaves, registering more phones or starting more recoveries; test an
+attempt against a member whose presence was recorded within the 72
+hours before that attempt's own time; shorten a wait; learn which of
+the two secrets was wrong; test a PIN against stored objects without the
+member's phone.
+
+**AWS acting for VettID.** If AWS removed locked records at VettID's
+request, VettID could remove a generation's tokens, waits and close
+records and test further pairs, and remove present records younger
+than their lock, shortening the quiet period. The count would then be bounded only by the second record
+outside AWS, which production requires (§11.14.13).
+
+**A broken sealing.** Every vault's sealed header rests on a KMS key
+whose policy lets no principal change it (§11.10.7). AWS's documentation
+says that for a key nobody can manage, "you must contact AWS Support to
+regain access to the KMS key". If AWS restored VettID's control of a
+sealing key, VettID could open every sealed header of that release
+outside an enclave and read the pepper; no counter is involved. What
+remains is the cost of guessing offline (estimates, at about 4 seconds
+and 1 GiB per guess through the recovery wrap and an assumed 0.04 US
+dollars per core-hour; a determined attacker pays less):
+
+| The attacker has | Ordinary data (messages, connections, profile, `data` and `secret` items) | Critical items' values |
+|---|---|---|
+| Before release R: a broken sealing, no phone | Every PIN against the stored state at 0.2 s each: about 56 core-hours, a few US dollars; the password is not needed | Then the password against the credential's own key (64 MiB): about 20,000 US dollars for a password at 10^10 guesses |
+| Release R: a broken sealing, no phone | Only through the recovery wrap, PIN and password together: up to about 400,000 US dollars for a password at 10^10 guesses if the PIN is known, multiplied when it is not (a factor of 10 to 1,000 for chosen PINs, up to 1,000,000 for a random one) | The same single cost: the pair that opens the wrap opens the credential |
+| Release R: a broken sealing and the phone's secret | As before release R: the PIN alone, a few US dollars | As before: the password at the credential's lighter setting |
+
+"The phone's secret" means making the phone's hardware key compute it:
+the phone itself and a way to run code as the VettID app on it, or a
+break of its key store. A broken sealing still gives, in every case,
+who the member is, the vault's size and activity times, the public keys
+in the header and the tag of the last wrong recovery pair, which tests
+guesses at a wrong pair only.
+
+**The isolation the sealing needs.** Release R MUST also carry the
+change that stops a compromised vault process from having another
+vault's sealed header opened for it (§12.4); without it one vault's
+compromise opens every header of the release, and no counter matters.
+
+#### 11.14.13 Later records, and production
+
+The counter interface allows several records that must agree, the
+stricter answer winning. Two more are specified later:
+
+- **Release "R2": a second record outside AWS.** The tokens and the
+  close records are mirrored in **Google Cloud Storage under a locked
+  object retention**, written before the guess is tested like the S3
+  records; presence is **not** mirrored (losing present records would
+  shorten the quiet period, not add attempts, and one write per attempt
+  tells the outside party far less than one per vault per day); the
+  wait goes outside as a time on the spent record. Requirements: no act
+  open to VettID as a customer of AWS, and no act of AWS at VettID's
+  request, can remove or reorder a record; answers are authenticated by
+  TLS ending in the enclave under pinned roots, and the store's identity
+  (the project's number and the bucket's creation time, which the
+  provider vouches for) is pinned in the measured release; a store that
+  cannot be reached is `unavailable`, and one that answers but is not the
+  pinned one, or was created after the release was built, or holds fewer
+  records than S3, counts as **every attempt used** (fail closed); the
+  outside party learns only opaque names, write times and that the
+  customer is VettID; its absence stops recovery opens and changes of
+  secret, never an everyday unlock or owner check. Known weakness: the
+  customer can remove the lien that protects the project from deletion,
+  so the pinned identity must be something the customer cannot choose or
+  carry over; that and the rest are tried before R2 is specified.
+  Holding the outside account by an independent party, not VettID, would
+  change who can ask the provider for an exception; it needs no code and
+  can be added at any time. Azure confidential ledger is considered only
+  if experiments show that its identity can be followed from a pinned
+  start across a provider-side recovery.
+- **Release "R3": the counter group.** A small group of enclaves keeping
+  the table only in memory and replicating it, with its own document.
+  A group that has lost its memory counts, for each generation it is
+  asked about, as **one attempt used and a wait of 30 units**, not as
+  "never again"; a replacement group is named in the signed release
+  manifest, with a serial the enclave refuses to see go down. Under that
+  rule the group is a second record and a 30-day delay against VettID
+  with AWS's help, not a second bound; the bound that survives AWS
+  acting for VettID is R2's.
+
+**Production.**
+
+- **Production release 1 MAY ship with recovery refused in the enclave**
+  if release R and the outside store are not ready: its channel file then
+  sets `recovery_offered` to `false` (§11.10.8), and the enclave refuses
+  every recovery request without locking the vault, as for a vault with
+  the backup off (§11.11.1), with the sealed refusal `error:
+  "not_offered"` and the clear marker `recovery_unavailable` with the
+  clear `reason: "not_offered"` (§11.5), which the member API can read
+  (it cannot read the sealed refusal). The account site and the app say
+  the truth: "This vault's release does not offer recovery. Your vault
+  gains recovery only after you move it to a release that does, which
+  needs your phone (an update approved in the app)." A member who loses
+  the phone first can only start over (§11.11.9). It MUST NOT ship
+  with the recovery of §11.11.5: every vault sealed to a release stays
+  open to that release's method until the release's sealing key is
+  destroyed.
+- **The first production release with recovery carries S3 and the
+  outside store (R2)**; it does not wait for the counter group.
+- **An earlier release stays a way around a later one until its sealing
+  key is gone.** A vault that moves from one release to a stronger one
+  leaves its old header sealed under the old key, and the old genuine
+  image still runs. With the outside store in production's first release
+  with recovery, this arises only when the group is added; the rule for
+  ending the earlier release then is decided with R3 (VAULT-RELEASES
+  §3.5). On staging the earlier release is ended and its key deleted
+  after the 7-day window.
+
+#### 11.14.14 Staging, build rules and tests
+
+- **Build rules.** `recovery_wait_unit_seconds` and
+  `recovery_quiet_seconds` are constants of the channel file (§11.10.8).
+  A production build MUST fail if the wait unit is below 86,400, if the
+  quiet period is below 259,200, or if a test clock can be set (the
+  development stack's recovery clock, `RecoveryNow`, MUST NOT be
+  reachable in a release image). The staging and production counter
+  buckets have different pinned names and accounts. A test asserts all
+  three on the production image. Staging uses a wait unit of 600 seconds
+  and the production quiet period; one test runs in real time as far as
+  the 96-hour wait.
+- **Minimum app version.** The release constant `android_min_version_code`
+  is checked against the version code in the key attestation at a
+  recovery's register (and at enrollment and a transfer's `hs.init`);
+  an older app is answered `attestation`. No security rule depends on
+  it: an app from before release R cannot unlock a vault of release R
+  anyway, since it sends no secret.
+- **Re-enrolment on staging.** Release R runs and a new test vault has
+  enrolled; each earlier staging test vault is deleted; every earlier
+  staging release that still has a sealing key is ended, which schedules
+  its key's deletion after the 7-day window (until then the old headers
+  of the test vaults can still be attacked with the earlier method; they
+  hold test data only); the test vaults are enrolled again on release R
+  with passwords that pass §11.14.7.
+- **Tests required** (beside the MUST-coverage of every rule above): a
+  test store that keeps every header version, serves whichever it is
+  told, withholds results and runs several vault processes at once,
+  first against the earlier release (it must show the earlier attack
+  working) and then against release R, where it must show: a status
+  answer delivered late, with an owner check or a password change in
+  between, never leads to a run of the heavy derivation on the wrap; a
+  late answer to the read after the spend tests one attempt whose own
+  time met every condition and no second without its wait; many enclaves
+  on one status spend one attempt; the run ended after each step of a DEK
+  replacement, for a transfer, a recovery, a PIN change and a password
+  change, and each header write dropped with and without a false
+  "written", gives exactly the table of §11.14.2; an older header served
+  after each event opens nothing newer; a transfer stopped after step 2
+  and then a recovery uses the right `opener`; a stand-in for S3 that
+  succeeds a conditional create over a delete marker, answers an error
+  for a stored write, inserts versions with old dates and deletes
+  anything unlocked never yields an extra test. On the two test phones:
+  the phone key in StrongBox or the fallback, its level read back, the
+  same secret twice; unlock, owner check, a transfer between the phones
+  with "Finish the move" and the old phone's deletion after it, and a PIN
+  change; the app's data cleared, then recovery; a wrong secret from a
+  test build answered `device_secret` with the PIN backoff untouched; a
+  full recovery with the attempts listed in History; a wrong pair counted,
+  shown and mailed; the same wrong pair counted once; the schedule
+  (`wait` with the right `retry_at`); ten wrong pairs, `exhausted`, a
+  password change and ten fresh attempts; a request within 24 hours of an
+  owner check answered `quiet` and then succeeding; the way to S3 cut:
+  `counter_unavailable` with nothing used, the presence notice, a
+  password change refused; a full enclave: `busy` with nothing used and
+  no vault locked for memory; an unsigned and a wrongly signed `recovery`
+  from the host: nothing locked or recorded; passwords too short, common
+  or guessable refused by the app and, from a test build that skips the
+  app's check, by the vault.
+- **Measurements before the numbers are final**, on a staging host: the
+  heavy derivation's time and memory with other vaults running; how often
+  `busy` occurs; the S3 round trips and how often the read after a spend
+  takes more than a few seconds.
+
 ## 12. Locked vaults and the collect manager
 
 ### 12.1 Locked
@@ -13012,6 +14648,10 @@ converges to "deleted", never to a vault that runs again:
    issued is revoked at the relay by `jti` and every peer's relay key by
    `sub` (§7.4); open invitation claims are deleted; a transfer ends. The
    requester's `{}` follows. Nothing else in the batch is handled.
+   (0.33.0, release R) Before this step the vault closes its recovery
+   generation at the attempt counter (`Close`, §11.14.3); the deletion
+   goes ahead whether or not the close was confirmed, and the answer
+   says which.
 2. **Relay mailbox, then drain** (0.9.1): the vault deletes its own relay
    mailbox (RELAY-PROTOCOL 0.5.0 §6.10, `DELETE /v1/mailbox` signed with
    the vault relay key), once. With it go every message waiting there,
@@ -13159,6 +14799,16 @@ client**:
 - A device registered by a recovery has no minimums, and no device raises
   its minimums from a result the host withholds: against a host that
   replays, the PIN backoff and the password backoff do not hold (§11.11.2).
+  (0.33.0, release R) From release R a recovery does not use those
+  backoffs: its attempts are counted outside everything the host stores
+  (§11.14.4). The everyday PIN backoff still does not hold against a host
+  that replays and also holds the member's own phone. An old header and
+  the state of its time still open with that time's PIN and phone, or with
+  that time's pair through its recovery wrap; with the DEK replaced at
+  every change, they open nothing written later, though the long-lived
+  keys inside such a copy keep working until rotated (§11.14.2). Because
+  the header now holds the wraps, a change of DEK is written in three
+  steps (§11.14.2).
 
 The split-brain guard (§12.3) separately catches stale writers.
 
@@ -13184,8 +14834,8 @@ made up. The parent can send each of them for any `vault_id`:
 | `lock` | The vault locks. Availability only. From release L (0.29.0) the host can also choose a lock's `unlock_id` and `enqueued_at`, drop a lock, and write any `code` into its slot; it could lock, and fail to lock, any vault before. What it cannot do is keep a vault from the idle lock (§3.6.8), which the enclave decides alone |
 | `delete` | A running vault deletes itself with the full semantics of §12.5; otherwise its stored objects are erased. The operator power of §13.5 ("delete stored state") |
 | `account` | A running vault takes the snapshot: names and account details of the parent's choosing in what the vault shows its owner and in the core of its shared profile (§11.13 "Display only", §10.8 "Trust") |
-| `recovery` | A recovery, with a browser key of the parent's own: §11.11.2 "A recovery started by the host" |
-| `recovery_cancel` | A member's pending recovery ends. Availability only |
+| `recovery` | A recovery, with a browser key of the parent's own: §11.11.2 "A recovery started by the host". (0.33.0, release R) Signed by the member API and verified before anything is locked (§11.14.8): the parent alone can no longer start one; VettID as a whole, which holds the signing key, still can |
+| `recovery_cancel` | A member's pending recovery ends. Availability only. (0.33.0, release R) Signed likewise |
 
 The parent can also send the enclave's own requests `LeaseLost` and
 `Shutdown` at any time (the vaults lock), and withhold or replace the
@@ -13227,7 +14877,7 @@ it can read and write only its own objects and use only its own relay key
 | A remote invitation link, held or substituted in transit (0.10.3) | Completing a handshake: a pending request on the inviter's side and a request token for 8 small deposits that are dropped until approval (§6.4, §7.1). A party in the middle that substitutes the link makes the two members' codes match with probability about 10^-6 per attempt, one attempt per invitation or accept (§6.3). Since 0.10.5 it also learns when the member declines (`connection.declined`, §6.4): that the request was seen and refused, and roughly when; nothing else. A party in the middle can make either half look declined, which it could already do by staying silent | The members compare the SAS and decline; the request expires; `connection.invite.cancel` |
 | Session epoch key | Read and forge messages in that epoch and direction. Vault-to-vault epochs last at most 24 h. | Next rekey |
 | Vault `ik` or `kem` | Impersonate the vault in new handshakes and read new `hs.init`s | Credential rotation, `identity.rotate`, rekey |
-| ETK | PINs in requests sealed to it (≤ 25 h). Requires breaking the enclave. | Enclave restart |
+| ETK | PINs in requests sealed to it (≤ 25 h); (0.33.0, release R) also the phones' unlock secrets, and the passwords of recovery opens. Requires breaking the enclave. | Enclave restart |
 | Owner app (the vault's one app) | Whatever its role allows, including unlock attempts if the PIN is known; with the PIN and the password, a transfer to another phone (§6.7.1). Since 0.13.0 only until the owner check's deadline (at most 24 h after the member's last check): then nothing but the check, which needs the PIN and the password, under both backoffs, with a lock after 10 consecutive failures (§3.6) | Recovery (§11.11), which replaces it |
 | An unlocked app, or a desktop in an access session, in someone else's hands, without the PIN and the password (0.13.0) | What its role allows until the deadline; then nothing: the vault holds, the app hides its cached content, desktops' sessions are suspended; ten wrong guesses lock the vault, which then needs the PIN to open (§3.6) | Recovery; a shorter `owner_check.interval_seconds` |
 | A thief who holds the app and knows both the PIN and the password | Everything the app can do: the check passes, and the hold changes nothing (§13.8) | Recovery (§11.11), which replaces the app; change the PIN and the password |
@@ -13260,6 +14910,9 @@ it can read and write only its own objects and use only its own relay key
 | The Bitcoin libraries (btcd) | Parsing PSBTs from the member's own app and deriving keys, in the vault's process only (never the supervisor), so a flaw reaches only that vault (§12.4, §13.3) | A release update |
 | A call's media key `k_call` | That call's media; it exists only on the two devices of the call, whose key-exchange shares are signed by the devices and vouched for by their vaults (§10.10) | Hang up |
 | PIN alone | Nothing without a registered, attested app | `pin.change` |
+| (0.33.0, release R) The phone's unlock secret | With the PIN and a sealed header and state of that time, the vault as stored then; with a broken sealing as well, the PIN offline for a few US dollars (§11.14.12). Nothing written after the member's next `pin.change` or `vault.secret.renew`, which replace the DEK | `vault.secret.renew` or `pin.change` |
+| (0.33.0, release R) The recovery attempt counter (VettID's AWS account) | Nothing by VettID's permissions alone: compliance-locked records cannot be shortened or deleted by any principal, the root user included. AWS acting for VettID could remove records, which would give further attempts at a pair (§11.14.4, §11.14.12). VettID can always use up a vault's attempts, keep members from being recorded as present, and see the times of attempts and presence | A second record outside AWS (§11.14.13) |
+| (0.33.0, release R) VettID starting a recovery for any vault | At most the attempts of §11.14.6 at the PIN and password together, none tested against a member whose presence was recorded within 72 hours of the attempt's own time, each counted before it is tested, shown in History and mailed (mail VettID can suppress); ten wrong pairs end that vault's recovery until the member changes a secret | The member changes the password (and the PIN) |
 | An app's copy of the Protean Credential | Nothing without the current CEK, which only the vault holds and which rotates at every use; password guesses only online, through the holder's session with a UTK, under the backoff (§3.5.8). Presenting it while it is not the current blob is a clone: refused, the app alerted, the member emailed, credential operations frozen until a forced rotation (§3.5.9) | Any use of the credential (a new CEK; the old blob is dead); the forced rotation |
 | A clone presented through the holder's session (a stolen session and an old copy, or a restored phone backup) | Nothing: refused with `credential_frozen`, never opened; the alarm freezes credential operations (messaging continues) until the holder confirms and rotates (§3.5.9) | `credential.alarm.confirm`, then `credential.rotate`; change the password and PIN if it was not the member |
 | A thief with the app's session and the PIN, without the password | No deletion: the holder's `vault.delete` needs the password too (§12.5) | — |
@@ -13274,7 +14927,7 @@ it can read and write only its own objects and use only its own relay key
 | A History export file the member saved (0.22.0) | Activity metadata only: the exported audit entries with the names of connections, devices and items as the app showed them, their times, kinds, references and chain fields; never values, secrets, message text, credential material or the email. Unencrypted, wherever the member saved it; VettID and the vault cannot reach or delete it. Making one needs the holder's app and the PIN, and is audited `audit.exported` (§10.9) | Delete the file |
 | An app's session keys | No password or secret value (UTK and reply-key sealing), no replay (single-use UTKs), no redirected payloads (§3.5.4) | Unlink the device |
 | Credential password alone | Nothing without the blob and a paired app | `credential.password.change` |
-| Member's email and account session (24 h, unnoticed) | A recovery (backup on only): one new attested app that replaces the member's app. Still needs the PIN and the password, online, under both backoffs (§11.11.2); with the backup off, nothing: no recovery (§11.11.1), only a start-over deletion after another 24 h (§11.11.9) | Cancel; the app sees `recovery_pending` and `vault.locking{recovery}`, or `deletion` in `GET /api/vault/status` |
+| Member's email and account session (24 h, unnoticed) | A recovery (backup on only): one new attested app that replaces the member's app. Still needs the PIN and the password, online, under both backoffs (§11.11.2); (0.33.0, release R) under the ten attempts, their waits and the quiet period instead, which also means wrong guesses use up the member's attempts (§11.14.6); with the backup off, nothing: no recovery (§11.11.1), only a start-over deletion after another 24 h (§11.11.9) | Cancel; the app sees `recovery_pending` and `vault.locking{recovery}`, or `deletion` in `GET /api/vault/status` |
 | VettID's API tables | Nothing: the recovery code is stored only sealed to the member's browser, and the enclave enforces the 24 h (§11.11.2); setup codes only as MACs under a key outside the tables, app keys only as public keys (§11.12) | — |
 | A typed recovery code's locator, without the code (0.25.0) | What the QR's `vault_id` and `recovery_id` give: a claim (the member's `user_guid` and masked `email_hint`) and the means to send five wrong codes, which voids that one recovery. Never the code, the PIN or the password, and no registered device. It is shown only with the code, for the code's 24 hours (§11.11.10) | The member requests a new recovery; the claim's limits (§11.11.7) |
 | A setup code (stolen, shoulder-surfed or phished; 0.15.0) | Before the member uses it, within its 5 minutes (the typed code also needs the member's email): an **empty** vault enrolled into the member's account, with the thief's phone and PIN, whose account snapshot shows the thief the masked email and membership (§11.13). Never an existing vault: a confirmed vault is never replaced (§11.3) | Single use; one live code; the member's own redeem then fails and the portal shows the code used; the member is emailed at every redemption; support deletes the vault (the host `delete`) |
@@ -13282,11 +14935,11 @@ it can read and write only its own objects and use only its own relay key
 | A code of someone else's account (reverse phishing) | The member's new vault belongs to that account, whose holder could later request a recovery; it still needs the member's PIN and password after 24 h in which the member's app sees the recovery | The app shows `email_hint` before enrolling and in its account view (§11.12.1, §11.13) |
 | An app key (0.15.0) | Member API calls as the vault's app: unlock attempts still need the unlock key, the device assertion and the PIN; lock and status. Hardware-held: in practice, the phone | Transfer or recovery replaces it (§11.12.2) |
 | A member session (0.15.0) | No longer any vault request but `status`, `lock` and the recovery routes; issuing a setup code (useful only to an account without a confirmed vault) | Sign out; the redemption email |
-| Decrypted vault state (DEK) | Everything in it (`data` and `secret` items included), plus offline guessing of the credential password against the current CEK and the latest blob (§3.5.8); critical items' values stay encrypted under item keys that only the credential, sealed under the password, holds (§10.7) | Rotate the relay key and the credential; change the password |
+| Decrypted vault state (DEK) | Everything in it (`data` and `secret` items included), plus offline guessing of the credential password against the current CEK and the latest blob (§3.5.8); critical items' values stay encrypted under item keys that only the credential, sealed under the password, holds (§10.7). (0.33.0, release R) Getting the DEK without the enclave needs a broken sealing and then either the phone's secret and the PIN, or the PIN and the password together through the recovery wrap at the heavy parameters (§11.14.12's table) | Rotate the relay key and the credential; change the password |
 | A critical item key (from an old blob with its CEK and the password, or from a compromised release during an operation) | That item's ciphertext of that generation only; nothing after the item's next use, which re-keys it (§10.7) | Use the item, or `credential.rotate` (re-keys every item) |
 | An old release, after members moved away | Vaults still sealed to it. A moved vault only if the host serves it a stale header and state **and** an app sends it the PIN; apps never send a PIN to an older release than they last unlocked into (§11.10.6). Residual: an owner device that never learned of the move. | Members move forward; the app warns about `deprecated` and `retired` releases; the release ends at its `ends_at` (§11.10.5) |
 | Manifest key | Listing a release as `active`, or marking one `removed` (routing only: the API stops routing it). A vault still moves only with the member's approval, and only to a sealing key in the pinned namespace. A manifest the host supplies must match the hash in the sealed request (§11.5). | Rotate the key in a release; apps pin two keys |
-| Sealing-key policy (VettID's AWS account) | A key whose policy let anything other than its release decrypt, or could be changed later, would expose the pepper and allow offline PIN guessing against stored state. The enclave refuses to seal to such a key: before sealing it reads the policy, metadata and grants from KMS over TLS it terminates and checks them (§11.10.7). | Nothing to recover: the check runs before any seal, and a passing policy can never change; only the pinned retirement principal can delete the key, after notice (below) |
+| Sealing-key policy (VettID's AWS account) | A key whose policy let anything other than its release decrypt, or could be changed later, would expose the pepper and allow offline PIN guessing against stored state (0.33.0, release R: guessing as in §11.14.12's table, which without the member's phone means the PIN and the password together at the heavy parameters). The enclave refuses to seal to such a key: before sealing it reads the policy, metadata and grants from KMS over TLS it terminates and checks them (§11.10.7). | Nothing to recover: the check runs before any seal, and a passing policy can never change, unless AWS restores the account owner's control of the key (0.33.0: AWS documents a support path for keys nobody can manage, §11.14.12); only the pinned retirement principal can delete the key, after notice (below) |
 | Retirement principal (0.10.0) | Scheduling the deletion of a release key, always with the pinned window: 30 days later every vault still sealed to that release is permanently unopenable. Availability only, never confidentiality: it cannot read, open, move or re-key anything, change the policy or add grants. | Cancel the deletion within the 30 days (`CancelKeyDeletion`, `EnableKey`); a CloudTrail alarm on every `ScheduleKeyDeletion` (VAULT-RELEASES §8.7) |
 
 As operator of the host, queues and API, VettID **can**:
@@ -15591,6 +17244,107 @@ Follow-ups:
     vettid-android (ANDROID-PLAN 0.1.39), then iOS and
     desktop.
 
+39. **Recovery rebuilt; the phone-held unlock secret (0.33.0, release R;
+    wording for the owner's approval).** Recovery's limits on guessing
+    were kept in objects the host stores, so they did not hold against a
+    host that replays (§11.11.2, §13.2). The owner decided, from
+    2026-10-13 to 2026-10-15:
+    1. a recovery wrap of the vault's recovery key under the PIN and the
+       password together, with an attempt counter outside everything the
+       host stores, first S3 objects under Object Lock in compliance
+       mode; the bound may rest on AWS's documented S3 behaviour, with
+       the assumption that AWS could act for the account owner stated;
+    2. ten attempts at the pair together for the life of the pair; after
+       ten, one of the two must change; two attempts at once, then one
+       after each wait of 1, 2, 4, 8, 16, 30, 30 and 30 days, kept by the
+       counter's clock; the same wrong pair counted once; the app shows
+       what was typed before it is sent;
+    3. a quiet period of 72 hours since the member was last present (an
+       owner check and the events that start its clock);
+    4. new passwords: 12 characters, not common, and an estimated
+       guessability of at least 10^10 guesses, tried with real people
+       before it is final; licences checked before anything ships;
+    5. a heavy key derivation for the recovery wrap (1 GiB), answered
+       `busy` when there is no room, with no room reserved;
+    6. a secret that only the phone's hardware can produce in every
+       unlock, in this release: a hardware HMAC key, not bound to the
+       screen lock; the DEK random and replaced at every change of PIN,
+       password or phone;
+    7. every attempt shown to the member, in History and by email; the
+       host told in the clear that an attempt was counted;
+    8. signed recovery requests, built as specified with their limits
+       stated; staging vaults deleted and enrolled again;
+    9. (2026-10-15, the open questions as recommended) changes and
+       enrollment carry both secrets so that recovery is armed at once;
+       `pin.change` built in release R; the same ten attempts after a
+       completed recovery, the app urging a change; an owner check passes
+       with a notice when presence cannot be recorded; one code for a
+       recovery that stays open across waits; with the backup off, a lost
+       write during a transfer can end the vault, said in the warning;
+       the vault's long-lived keys rotated at a completed recovery, a
+       failed rotation never failing it; a short wait unit on staging
+       only, kept out of production by build rules; a minimum app
+       version constant; production release 1 may ship with recovery
+       refused, never with the recovery of §11.11.5; production does not
+       wait for the counter group, and its first release with recovery
+       carries S3 and the outside store (Google Cloud Storage; Azure
+       confidential ledger only if experiments prove it); the rule for
+       ending a release once a stronger one exists is decided with the
+       counter group; no iOS unlock for release R, designed before iOS
+       work resumes; the design and its residual published with this
+       specification; a lost group memory counts as one attempt and a
+       30-day wait, the replacement group named in the signed manifest;
+       an independent holder for the outside account looked for now;
+    10. (2026-10-15) the old phone's app deletes its phone key, device
+        key and app key when it learns that the vault has confirmed the
+        new phone's first successful unlock after the transfer, or 7
+        days after the approval, whichever comes first (§11.14.10).
+    - *Chosen beyond the decisions* (each for the owner's review): the
+      names `vault.recovery.open`, `vault.secret.renew`,
+      `recovery_attempt`, `device_secret`, `transfer_incomplete`,
+      `connection.rotation.resolve`, `app_key_next`,
+      `weak_password`, `counter_unavailable`; `pin.change` and
+      `vault.secret.renew` as credential operations carrying the next
+      epoch's secret in the UTK-sealed payload; the `opener`'s own label
+      and its `dek_version` in the AAD; the S3 object names, keyed with
+      `recovery.counter_key` so that a name cannot be made before its
+      first write (VAULT-HOST-PROTOCOL §8.1); a connection that sees two
+      successors of one identity key suspends itself until the members
+      verify again (`identity.rotate_conflict`); `stored_mismatch`,
+      checked before an attempt is spent, with the state's clear
+      `dek_version` (format `0x02`); `app_key_next` at the first header
+      write; the new phone's "Finish the move"
+      unlock right after a transfer, so that the old phone's keys are
+      normally deleted within minutes; a pending unlink kept in the
+      state with the old device's token; `Stats` telling whether a
+      heavy-derivation permit is free, so that the member API can route
+      a recovery open; `recovery_offered` as the release constant for a
+      release that refuses recovery; `android_min_version_code` also
+      checked at enrollment and a transfer; the presence notice retried
+      every 60 seconds for an hour.
+    - *Not chosen:* a cheap tag for the same-wrong-pair answer (with a
+      broken sealing it would be a cheap test for a pair one slip from
+      the right one); "the first phone to make a counted attempt keeps
+      the recovery" (an attacker with the member's session would hold it
+      for months); letting a member who cannot be recorded as present put
+      the vault into a state of their choosing (it would live in stored
+      state a replaying host can undo, and a fault could destroy vaults);
+      writing header and state as one object; keeping one DEK for the
+      vault's life (a replaced secret or phone would keep its power over
+      later data against a host that replays); binding the phone key to
+      the screen lock.
+    - *Specified later:* the outside store (release "R2", §11.14.13), with
+      its experiments; the counter group (release "R3"), with its own
+      document; the phone-held secret on iOS.
+    Follow-ups: vettid-vault (release R: everything of §11.14, the S3
+    adapter and its egress host, the removal of §11.11.5's path, the
+    vectors of §16, the adversarial test store, MUST-coverage),
+    vettid.org (the counter bucket, the recovery request key, the
+    `open` route, the emails and the account site; MEMBER-API 2.7.0,
+    VAULT-HOST-PROTOCOL 0.1.10, VAULT-RELEASES 0.1.28), vettid-android
+    (ANDROID-PLAN 0.1.40), then iOS once the phone-held secret is
+    designed for it.
+
 ## 16. Test vectors
 
 These vectors use fixed seeds and are for **test use only**. The complete
@@ -15955,6 +17709,81 @@ libsodium (PyNaCl 1.6.2), **to be confirmed by those implementations**
              27c31a13e25a09270008056b278ab92e665d38321504e5bb799b843807a69b25
              394581e7b1c74a02a67ba26917                                 (77 B)
   store key: vaults/test-vault-0001/att/01jb2z6v9k3m4n5p6q7r8s9t60
+```
+
+**0.33.0, release R.** The derivations of §11.14 cross implementations:
+the app computes the unlock secret and the recovery open's signing
+string, and the vault derives the keys and wraps. **Required before
+release R is cut:** vettid-vault adds `recovery.json` entries for the
+recovery wrap, the `opener`, `last_wrong`, the counter's object names
+and the open's and the request's signing strings, and `unlock.json` for
+the unlock key, `dek_wrap`, `dek_wrap_next`, `secret_check` and the
+phone's unlock secret, with the Argon2id outputs computed from the
+inputs (the 1 GiB derivation included) where these excerpts start from
+a fixed `x`. The Go and Kotlin implementations reproduce them byte for
+byte. Values computed for this document with Python's `hmac`,
+`cryptography` 50.0.0 (HKDF) and libsodium (PyNaCl), **to be confirmed
+by those implementations** (TEST ONLY):
+
+```
+§11.14.3 recovery wrap                                          (recovery.json)
+  vault_id : test-vault-0001   PIN : 123456   password : correct horse battery staple
+  secrets  : 0006313233343536001c636f727265637420686f727365206261747465727920737461706c65
+  SHA-256(secrets) : 6286862e0e08397dc6b79b2b39f3e37ea03fd8a21ca6c1d09bf33fe9d89e5452
+  x (stand-in for the Argon2id output) : 32 x 0x31     pepper : 32 x 0x32    generation : 1
+  K        : eed3b4582a8e58183008274885b713b80e054aba79d8c9c0fb9d50e04e9c13ac
+  recovery_key : 32 x 0x33   nonce : 24 x 0x34
+  wrap     : 343434343434343434343434343434343434343434343434
+             1e4e898261636a4818354295d8f18c80bb6f74cd32faf796a7dd51256e2c47965ef579b8096d083518f59a16f4c7b1ae   (72 B)
+  DEK : 32 x 0x35   dek_version : 1   nonce : 24 x 0x36
+  opener   : 363636363636363636363636363636363636363636363636
+             feb4842d8bba2e7ea8f663fedb68b5ed8dacb56c049b00c3d1f55fe742c578ff6978ebc27968acfcfbda3294b7c5077f   (72 B)
+
+§11.14.6 last wrong pair                                        (recovery.json)
+  recovery_id : 01JB2Z6V9K3M4N5P6Q7R8S9T30   device_ik : 32 x 0x04 (raw)   x, pepper as above
+  tag key    : 839935de75963e30ae4ceda99254561c2a69b2aa55e7eee355aafa8e07ed6193
+  last_wrong : 2ea0aae12ca8f3f7102a8ee4efd2682d9a46cb3577c2c649a37c89ea48821d34
+
+§11.14.6 open signing string                                    (recovery.json)
+  user_guid test-user-guid, request_id 01JB2Z6V9K3M4N5P6Q7R8S9T31, recovery_id as above,
+  ts 2026-10-15T12:00:00.000Z, etk_kid 40d6c2c8471844a9, secrets as above,
+  token "test-token", manifest bytes "manifest", unlock_secret 32 x 0x42
+  SHA-256(string) : 82ff1eb1b573f3976fce3f6a1095e03ddfc59e42ca18bbc5be1cd9e0a2c58240
+
+§11.14.8 recovery request signing string                        (recovery.json)
+  "vettid/vms/2/recovery-request\nrecovery\ntest-vault-0001\ntest-user-guid\n
+   01JB2Z6V9K3M4N5P6Q7R8S9T32\n2026-10-15T12:00:00Z\n" hex(SHA-256(04 || 64 x 0x61))
+  hex(SHA-256(browser_key)) : 70df3b62f5b39f1dc6d347b3835fc57a945b689e609500d9ba3f8a6e06cbafa7
+  SHA-256(string)           : f2f13d600b7e4f438171e03451a91c0c1bd8d79a18342558a9f60b32297e89a1
+
+§11.14.1 unlock                                                 (unlock.json)
+  x (stand-in for Argon2id(PIN), 64 MiB) : 32 x 0x41   unlock_secret : 32 x 0x42   pepper : 32 x 0x32
+  unlock_key   : bede45517cf0d7c4448b8c55eef6a33dd9c6b3da18c83c25c357bc45e48af952
+  DEK : 32 x 0x35   dek_version : 1   nonce : 24 x 0x43
+  dek_wrap     : 434343434343434343434343434343434343434343434343
+                 d2aa6bac61e76d83925647254c77fd7a6a63148432cf511eb22c8bad1345a1ad8a9473e229eda25520fdfbdee0962796   (72 B)
+  secret_check : 89f9fa1389f2e7ecfd0521ab27b39207d867a8acd3f99cd23ba19b3c357ccfde
+
+§11.14.2 dek_wrap_next (DEK_0 = 32 x 0x35, DEK_1 = 32 x 0x37, dek_version 2)   (unlock.json)
+  next unlock_secret : 32 x 0x45   unlock_key_next : ee25462f13ed11e5da8edeaff79472f91670918da6fada8aab8f55975765c1a3
+  nonce : 24 x 0x46
+  dek_wrap_next : 464646464646464646464646464646464646464646464646
+                  449ad8681c2613fc6d0b9e6a5225f6117fa90c3aa415d9cacfba8c5824c4e9c973a8c8cb9bb4fcc5afa33d629c9268d1
+                  53c83541056969d0c66680c201254038b517b7bb2c294d580f330b536bd4bcc4                     (104 B)
+
+§11.14.1 the phone's unlock secret                              (unlock.json)
+  phone key : 32 x 0x44   vault_id : test-vault-0001
+  epoch 1 : 84ae0b66319d60524f6dcffa6fa3c540669caa0f13a2b1cc01c49305d4af7836
+  epoch 2 : 03bbaea3348d1fdb182a3474faf655f7f444c74be38ab84423ec21f3a2587f07
+
+VAULT-HOST-PROTOCOL §8.1 counter object names                   (recovery.json)
+  counter_key : 32 x 0x51   vault_id : test-vault-0001   generation : 1
+  vault_tag : 486f02bad2b24e6b020d1211ab3bb070
+  present   : recovery/v1/486f02bad2b24e6b020d1211ab3bb070/present-94b1a52264abd447e9becade916aab4f
+  token 1   : recovery/v1/486f02bad2b24e6b020d1211ab3bb070/g0000000000000001/t01-2124cc9d1a43ea50ee44f20a1bbd6b5d
+  wait 2    : recovery/v1/486f02bad2b24e6b020d1211ab3bb070/g0000000000000001/w02-b270c8be143728446662bd950cba5128
+  success 1 : recovery/v1/486f02bad2b24e6b020d1211ab3bb070/g0000000000000001/s01-a6137b69bdad29e9324bb5a311cbbb8a
+  close     : recovery/v1/486f02bad2b24e6b020d1211ab3bb070/g0000000000000001/c-9959b12f3b2e807bac9851cd64d3fd9c
 ```
 
 ## 17. Changelog

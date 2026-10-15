@@ -1,17 +1,37 @@
 ---
 title: VAULT-HOST-PROTOCOL
 status: approved by the owner 2026-10-12 (H1–H9 as recommended)
-version: 0.1.9
+version: 0.1.10
 date: 2026-10-15
 owner: Al Liebl (Mesmer)
 component: vault enclave (supervisor), parent (host process)
 related:
-  - VAULT-MESSAGING.md (0.29.7) §2 (threat model, who sees what), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
+  - VAULT-MESSAGING.md (0.33.0) §2 (threat model, who sees what), §11.14 (release R: recovery and the attempt counter), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
   - VAULT-PLAN.md (0.1.8) §5.2 (D5: TLS in the enclave), §5.3 (D4: one process per vault)
   - VAULT-RELEASES.md (0.1.16) §3.4 (C3, C4), §8.4 (network and egress), §8.7 (observability)
   - VAULT-RELAY-SCALING.md (0.1.2) §6, §10
   - vettid-vault `internal/hostproto`, `enclave/supervisor`, `enclave/egress`, `parent`, docs/V3-NOTES.md "Enclave ↔ parent", docs/SMOKE.md
 changelog:
+  - 0.1.10: **wording for the owner's approval**, with VAULT-MESSAGING
+    0.33.0 §11.14 (recovery rebuilt; owner decisions of 2026-10-13 to
+    2026-10-15); binds nothing before the vault release that
+    implements it ("release R"). No new control-connection request.
+    New §8.1: **the recovery attempt counter** in an S3 bucket under
+    Object Lock in compliance mode, reached from the enclave over its
+    own TLS through the egress like KMS: the bucket, the instance
+    role's five permissions (no delete or bypass), the virtual-hosted
+    name with the expected owner signed, the object names keyed with
+    the vault's counter key, retention and read-back, the reading
+    rules and each operation's calls. §6.6: `Stats` gains
+    `heavy_kdf_free`. §6.1: the queue operation `recovery_open`, and
+    the signature members of `recovery` and `recovery_cancel`, the
+    lifecycle event `app_key_next`, and a clear `reason` on
+    `recovery_unavailable`. §8: the
+    counter bucket's host on both allowlists. §9: the S3 timeouts.
+    §11.2, §11.3, §11.4 item 4: what the parent sees of the counter
+    and what it can do; a recovery started by the parent alone is
+    refused, and one started with the member API's key is bounded by
+    the counter. §12: P16 to P18
   - 0.1.9: **approved by the owner 2026-10-15** (vettid.org #288),
     with VAULT-MESSAGING 0.32.0, the message
     attachments of its §10.5.1 (owner decisions of 2026-10-15); binds
@@ -550,6 +570,25 @@ unknown.
   `stale`. The parent copies those three codes into the slot of a
   `lock` and of no other operation. The parent of a release before L
   writes no code; each release runs its own parent (§10).
+- **Recovery from release R (0.1.10; wording for the owner's approval:
+  VAULT-MESSAGING 0.33.0 §11.5, §11.14).** A new operation
+  `recovery_open` carries a sealed envelope like `recovery_register`
+  (the parent leases nothing for it and treats it as it treats a
+  register). `recovery` and `recovery_cancel` carry `signed_at`,
+  `key_id` and `sig`, which the enclave verifies before anything else
+  and the parent passes on unread. The parent copies `recovery_attempt`
+  (with `retry_at` and `expires`) from a `recovery_open` answer into its
+  slot, `not_before`, `expires` and `earliest` from a `recovery` answer,
+  and a `recovery_unavailable`'s clear `reason`, as it copies
+  `recovery_registered`. It writes the lifecycle event `app_key_next`
+  (sent with the first header write of a replacement of the app) as the
+  row's `app_key_next`, and clears it when `app_key` reaches its
+  `seq`, when an `app_key` event carries `next_cleared: true` (it skips
+  the `app_key` write itself, whose `seq` is unchanged), or when an
+  `unlocked` or `locked` report says `next: false` with an `app_key_seq`
+  at least the next key's `seq` or a `header_seq` at least that of the
+  write that carried it; never on time alone (VAULT-MESSAGING §11.5,
+  §11.14.2).
 
 ### 6.2 `LeaseLost` (0x11)
 
@@ -643,6 +682,7 @@ Added by vettid-vault #66 (staging release S11).
 | `relay_refused_max_conns` | counter | requests that waited because the bound on connections forbade another (VAULT-MESSAGING §12.2.1) |
 | `relay_refused_min_streams` | counter | requests that waited because the relay announced too few streams for another connection |
 | `relay_vault_limit` | counter | **from 8f2c8bf (0.1.2):** vault processes that reached their own limit of 8 relay and push requests in flight (VAULT-MESSAGING §12.2.1 "Per vault"), each counted once, however often it is at the limit. Not in the reply at f3003ed |
+| `heavy_kdf_free` | gauge | **(0.1.10, release R)** 1 if the instance could give a permit for the heavy key derivation of a recovery wrap now (VAULT-MESSAGING §11.14.3), else 0. The parent writes it into the registry row with its metrics, and the member API prefers such an instance for a recovery open |
 
 - Counters count from the enclave's start. Gauges are summed over the
   relay hosts (one, in a release), except `relay_streams` (the
@@ -789,7 +829,8 @@ version, or with `len` 0, is closed without an answer.
 - **Allowlists, twice.** The parent's: exact host names, port 443
   only: the relay, `kms.<region>.amazonaws.com`,
   `android.googleapis.com`, and both push gateways
-  (VAULT-RELEASES §8.4). The parent resolves the name; the enclave
+  (VAULT-RELEASES §8.4); (0.1.10, release R) also the recovery
+  counter bucket's virtual-hosted name (§8.1). The parent resolves the name; the enclave
   cannot choose an address. The enclave's own: the same hosts for its
   channel, fixed in the measured image; it asks for no other.
 - **TLS is the enclave's.** Inside the stream the enclave runs TLS 1.3
@@ -804,6 +845,114 @@ version, or with `len` 0, is closed without an answer.
   parent does not limit their number.
 - The parent counts the connections it has open and has opened, by
   destination class (relay, KMS, push, other), for its metrics.
+
+### 8.1 The recovery attempt counter (0.1.10, release R)
+
+*Wording for the owner's approval, with VAULT-MESSAGING 0.33.0
+§11.14.4. Normative from release R; it binds nothing before.*
+
+The enclave keeps the recovery attempt counter of VAULT-MESSAGING
+§11.14.4 as objects in an S3 bucket under Object Lock in compliance
+mode. It reaches S3 like KMS: over an egress connection (§8) on which it
+runs its own TLS, signing its own requests (SigV4) with the instance
+role's credentials (§5.5). The parent carries the ciphertext and takes
+no part. **The counter is not in the data bucket and never goes through
+`StoreGet`, `StorePut` or `StoreDelete`.**
+
+**The bucket.** One per channel, in the vault's AWS account (production:
+the vault production account; staging: the staging account), named in
+the release constant `recovery_counter` `{bucket, account, region}`
+(VAULT-MESSAGING §11.10.8): Object Lock enabled, versioning enabled (it
+cannot be suspended once Object Lock is on), Block Public Access fully
+on, **no default retention** and no lifecycle rule that expires current
+versions (VAULT-RELEASES §8.2). The enclave never relies on a bucket
+setting: it sets and reads back the lock of every object it writes.
+
+**The instance role** may call, on that bucket only: `s3:PutObject`,
+`s3:PutObjectRetention`, `s3:GetObjectVersion`,
+`s3:GetObjectRetention` and `s3:ListBucketVersions`. It has no delete,
+bypass-governance or legal-hold permission, and no permission on the
+bucket's configuration. The parent holds the same credentials (§5.5) and
+can therefore make the same calls; what it can do with them is in §11.3.
+
+**Every call** goes to the bucket's virtual-hosted name
+(`<bucket>.s3.<region>.amazonaws.com`, on both allowlists of §8), with
+`x-amz-expected-bucket-owner` set to the pinned account and signed, so
+that the signature covers the bucket name and the owner. The enclave
+refuses an access-point or other alias and follows no redirect.
+
+**Object names.** All names of a vault share one prefix and are keyed
+with the vault's `recovery.counter_key` (from its sealed header), so
+that nobody outside an enclave of the vault's release can compute a
+name before it is first written:
+
+```
+vault_tag = hex(first 16 bytes of HMAC-SHA-256(counter_key, "vettid/vms/2/counter/vault" || 0x00 || vault_id))
+mac(kind, g, n) = hex(first 16 bytes of HMAC-SHA-256(counter_key,
+                  "vettid/vms/2/counter/name" || 0x00 || vault_id || 0x00 || g (8, big-endian)
+                  || 0x00 || kind || 0x00 || n (8, big-endian)))
+
+recovery/v1/<vault_tag>/present-<mac("present", 0, 0)>                 the present marker (one key, many versions)
+recovery/v1/<vault_tag>/g<g, 16 hex>/t<nn>-<mac("t", g, n)>            the token of attempt n (nn = 01 … 10)
+recovery/v1/<vault_tag>/g<g, 16 hex>/w<nn>-<mac("w", g, n)>            the wait record after attempt n
+recovery/v1/<vault_tag>/g<g, 16 hex>/s<nn>-<mac("s", g, n)>            the success record of attempt n
+recovery/v1/<vault_tag>/g<g, 16 hex>/c-<mac("c", g, 0)>                the close record of generation g
+```
+
+`kind` is the ASCII string shown. An entry under a vault's prefix whose
+name does not match a name the enclave computes is ignored. Each body
+is 32 fresh random bytes. The vectors are in VAULT-MESSAGING §16.
+
+**Retention.** Every object is written with
+`x-amz-object-lock-mode: COMPLIANCE` and a retain-until date: tokens,
+success and close records **100 years** from the write; a wait record
+the counter time of the attempt's listing plus `W(n)`; a present marker
+version **96 hours**. After every write the enclave reads the lock of
+the version it wrote back (`GetObjectRetention` by version id) and goes
+on only if the mode is `COMPLIANCE` and the date is not earlier than the
+one asked for. It never treats "mode is `COMPLIANCE`" alone as locked:
+a lock whose date has passed still reads `COMPLIANCE`.
+
+**Reading.** The enclave decides from **complete versions listings**
+only (`ListObjectVersions` with a prefix, following the markers to the
+end; every version and every delete marker counts), never from
+`HeadObject`, `GetObject` or `ListObjectsV2` without a version id. The
+counter's time of a listing is the `Date` header of its last page; the
+time of a record is its `LastModified`.
+
+- *A name is used* if the listing holds any version or delete marker
+  with exactly that name.
+- *The present time* is the greatest `LastModified` over every entry of
+  the marker's name. No entry means no present record (refused, not
+  "never present").
+- *A wait is running* while any version of a wait record's name is
+  locked by the listing's time, unless the attempt has a success record;
+  and, binding, while any attempt without a success record is younger
+  than its `W(n)` (VAULT-MESSAGING §11.14.6).
+
+**The operations** of VAULT-MESSAGING §11.14.4:
+
+| Operation | Calls |
+|---|---|
+| `Status`, `Confirm` | One complete versions listing of `recovery/v1/<vault_tag>/` (the marker and every generation). `Confirm` is sent only after `Spend`'s step 4 below has answered |
+| `Spend(g, n)` | (1) The listing, and a refusal from it: closed, used up, or a wait running by its time. (2) `PutObject` of token `n` with `If-None-Match: *`, the lock headers and a random body. `200` with a version id: go on; `412`: answer `wait`, and **never try another name**; any other answer (`409`, `5xx`, a timeout): the outcome is unknown, go on without a version id and never write that name again. (3) A complete versions listing of the token's name: go on only if there is **exactly one** entry, a version and not a delete marker, and it is the enclave's own (its version id from step 2, or, without one, `GetObject` by that version id returns the enclave's random body). (4) The lock read back. (5) The wait record `w<nn>`, written and read back the same way (create-only; `412` means another caller's, which is fine). Any step after (2) that does not end in "exactly one, mine, locked" is `lost`. Then `spent`, with `at` = the token's `LastModified` |
+| `Succeed(g, n)` | Create-only write of `s<nn>`, lock read back |
+| `Close(g)` | Create-only write of the close record (`412`: closed already), lock read back. Any entry under that name means closed |
+| `MarkPresent` | One `PutObject` (not multipart, never a copy) of a new version of the marker, lock read back; `recorded{at}` with its `LastModified` |
+
+- A conditional create can succeed over a delete marker, so the listing
+  after the write, not the condition, is the safeguard. A write answered
+  with an error may have been stored. A multipart upload or a replica
+  can carry a time earlier than its arrival, which can only make a
+  record look older; that is why the newest time is taken for presence
+  and why no rule uses "the earliest version wins".
+- **Timeouts.** Each S3 request: 15 s for the answer's headers and 30 s
+  in all; the enclave does not retry a `Spend` by itself (a retry is the
+  member's next open). The 60-second and 10-minute limits of
+  VAULT-MESSAGING §11.14.6 are judged as written there.
+- **Cost.** About five requests per attempt and two per owner check:
+  at 100,000 vaults, a few hundred US dollars a year, dominated by the
+  daily present marker (estimate).
 
 ## 9. Timeouts and limits, in one place
 
@@ -840,6 +989,7 @@ version, or with `len` 0, is closed without an answer.
 | Log record | 16 pairs, 200 bytes a value | parent |
 | Egress header, connect, answer | 10 s, 10 s (parent); 15 s (enclave) | each |
 | Egress destination | the allowlist, port 443 | both |
+| Recovery counter request (0.1.10, release R) | 15 s to the answer's headers, 30 s in all; no retry of a `Spend` | enclave |
 
 ## 10. Versions and unknown kinds
 
@@ -918,7 +1068,19 @@ a vault is above this protocol:
   (VAULT-MESSAGING §11.13);
 - of each answer: its status, its size (fixed), and the two host
   codes `recovery_registered` and `recovery_unavailable`
-  (VAULT-MESSAGING §11.5);
+  (VAULT-MESSAGING §11.5); (0.1.10, release R) also
+  `recovery_attempt` with `retry_at` and `expires`, the clear
+  `not_before`, `expires` and `earliest` of a recovery, the member API's
+  signature on `recovery` and `recovery_cancel`, and the `recovery_open`
+  operation;
+- (0.1.10, release R) the recovery counter's connections (§8.1): when
+  the enclave opens one and the sizes and times of its ciphertext. They
+  are not shared with other hosts' traffic, so each burst marks a
+  recovery open, a change of secret or an owner check of some vault on
+  the instance. VettID, which owns the bucket, also reads every
+  object's name and time there: which records belong to one vault (not
+  which vault), every attempt's time and outcome class, and every
+  present time;
 - every lifecycle event (§7.2): that the vault was enrolled, unlocked,
   locked, moved or deleted, and when; its release and state version;
   its app key's public key and count; the backup bit; a name change
@@ -970,7 +1132,7 @@ more than "the operation does not happen, or happens late".
 | `StoreDelete` reply | keep the object and say `ok`; delete anything it can reach in the bucket at any time | The parent's role can delete stored state anyway (VAULT-MESSAGING §13.5). A kept object cannot be opened without the PIN and a registered device |
 | `Credentials` reply | give no, expired, or another principal's credentials | KMS answers come over the enclave's TLS. Sealing keys release data keys only to the release's attested measurements, and the enclave checks the key's policy itself before sealing. Wrong credentials are failed unlocks |
 | `Queue`, sealed operations (`enroll`, `unlock`, `recovery_register`) | drop, delay, reorder, replay, send to another instance; change the clear members | Replays and redirected requests are refused (VAULT-MESSAGING §11.6). It cannot make one: it has no ETK and no device key. A changed `account` member reaches the vault (below) |
-| `Queue`, operations without an envelope (`lock`, `delete`, `account`, `recovery`, `recovery_cancel`) | **forge them** for any `vault_id` | `lock`: the vault locks. *From release L (0.1.3, planned):* a `lock` carries `unlock_id` or is ordered by `enqueued_at`, both of which the parent can read and set, and the parent writes the `code` of the answer: it can still lock any vault, drop any lock, and report `locked` for a vault it left open. The members protect an honest path against late delivery, not against the parent. What bounds a parent that keeps a vault open is the idle lock, decided in the enclave by its own clock (VAULT-MESSAGING §3.6.8). `delete`: a running vault deletes itself with the full semantics of VAULT-MESSAGING §12.5, otherwise its stored objects are erased; an operator power stated in §13.5. `account`: a running vault takes the snapshot, so the parent can make a vault show its owner, and put in the core of its shared profile, **names and account details of the parent's choosing**; the snapshot is display only and "not authenticated beyond the host path" (VAULT-MESSAGING §11.13, §10.8). `recovery`: with a browser key of its own the parent **starts a recovery**: a running vault locks and tells its devices why, unlocks are refused `recovery_pending`, and after the enclave's 24 h the parent can open the code. The devices are told only if the vault was running when the recovery began, and see `recovery_pending` only while the parent serves them the header that records it; a parent that serves an earlier header shows them nothing (§11.4 item 4). A recovery still needs an attested app, the PIN and the credential password, and exists only with the credential backup on (VAULT-MESSAGING §11.11); the two backoffs do not limit a parent that also replays stored objects (§11.4 item 4). `recovery_cancel`: ends a member's recovery |
+| `Queue`, operations without an envelope (`lock`, `delete`, `account`, `recovery`, `recovery_cancel`) | **forge them** for any `vault_id` | `lock`: the vault locks. *From release L (0.1.3, planned):* a `lock` carries `unlock_id` or is ordered by `enqueued_at`, both of which the parent can read and set, and the parent writes the `code` of the answer: it can still lock any vault, drop any lock, and report `locked` for a vault it left open. The members protect an honest path against late delivery, not against the parent. What bounds a parent that keeps a vault open is the idle lock, decided in the enclave by its own clock (VAULT-MESSAGING §3.6.8). `delete`: a running vault deletes itself with the full semantics of VAULT-MESSAGING §12.5, otherwise its stored objects are erased; an operator power stated in §13.5. `account`: a running vault takes the snapshot, so the parent can make a vault show its owner, and put in the core of its shared profile, **names and account details of the parent's choosing**; the snapshot is display only and "not authenticated beyond the host path" (VAULT-MESSAGING §11.13, §10.8). `recovery` (0.1.10, release R: signed by the member API, VAULT-MESSAGING §11.14.8; the parent alone can no longer start or cancel one, and a forged one locks nothing): with a browser key of its own the parent **starts a recovery**: a running vault locks and tells its devices why, unlocks are refused `recovery_pending`, and after the enclave's 24 h the parent can open the code. The devices are told only if the vault was running when the recovery began, and see `recovery_pending` only while the parent serves them the header that records it; a parent that serves an earlier header shows them nothing (§11.4 item 4). A recovery still needs an attested app, the PIN and the credential password, and exists only with the credential backup on (VAULT-MESSAGING §11.11); the two backoffs do not limit a parent that also replays stored objects (§11.4 item 4). `recovery_cancel`: ends a member's recovery |
 | `Queue`, the manifest document | withhold it, or give another | The request fails `manifest`. It cannot make the enclave accept a manifest the app did not verify (VAULT-MESSAGING §11.5) |
 | `Queue` reply (seen by the parent) | drop it, or write another slot | The app gets no result or a result it cannot open; results are sealed. The two host codes can be forged or suppressed with the effects VAULT-MESSAGING §11.5 lists |
 | `LeaseLost` | send it for any vault, at any time; never send it | The vault locks. Never sending it leaves a vault running without a lease; if a second instance then opens the vault, the two meet at the conditional state write, and the one that finds a newer version is zeroized (the split-brain guard does not depend on leases) |
@@ -981,6 +1143,7 @@ more than "the operation does not happen, or happens late".
 | `Descriptor` | withhold it, publish an old one, publish another enclave's | Apps verify the attestation, the measurements and the expiry (VAULT-MESSAGING §11.2, §11.10.6). A request sealed to a key this enclave does not hold is answered `etk_unknown` |
 | `Lifecycle`, `Stopped` | drop, change or invent what it writes to the tables | The values are advisory and serve routing and the account site only (VAULT-MESSAGING §11.5 "Lifecycle values are advisory"). It can suppress the member's email about a clone alarm, not the vault's own alert, freeze and audit entry |
 | `Log` | read, drop | Sees what §11.2 lists |
+| Egress, to the recovery counter (0.1.10, release R) | as for any egress; and, with the instance role's credentials, call the bucket itself: add versions to names it has seen (a present marker version makes a member look present, which blocks recoveries and, between a member's spend and its read, uses that attempt up; a token or wait version uses attempts up), write names it can compute (none it has not seen), lengthen locks | Never fewer attempts used, a shorter wait, an older presence or a tested guess it was not entitled to: the enclave reads complete listings, takes the newest presence, requires "exactly one, mine, locked", and decides each attempt against its own time within 10 minutes (§8.1; VAULT-MESSAGING §11.14.6). Denial of service and the use of a vault's attempts only. What no permission gives, removing a locked version, AWS could do for the account owner (VAULT-MESSAGING §11.14.12) |
 | Egress | refuse or fail a connect; connect elsewhere; drop, delay, cut or change bytes; hold a connection open and silent; close connections to make the enclave open more | Anything but the named host with a certificate under the pinned roots fails the TLS handshake. Changed bytes end the TLS session. A silent connection is pinged after 15 s and closed after 10 s more, and closed after 90 s without an answer in any case. The number of connections is bounded by the enclave whatever the host does (VAULT-MESSAGING §12.2.1). It cannot tell from a connection which vault a request belongs to |
 | The control connection itself | close it; keep it open and silent; send malformed or very large frames; send more than 128 requests at once | Closed, or open and silent: every vault is locked 120 s after the last `Ping` (§4.3). A peer that stops reading loses the connection after 60 s (§3.4). Malformed: the enclave closes it. The rest: §13, points 5 and 6 |
 
@@ -996,7 +1159,13 @@ more than "the operation does not happen, or happens late".
 3. **Roll a vault back** to an older stored state, within what
    VAULT-MESSAGING §13.2 leaves open: toward a device that has not
    seen the newer values, or consistently for both objects.
-4. **Start or cancel a recovery** (`recovery`, `recovery_cancel`). It
+4. **Start or cancel a recovery** (`recovery`, `recovery_cancel`).
+   (0.1.10, release R: only with the member API's signature, so only
+   as VettID as a whole; and then its attempts are the ten of
+   VAULT-MESSAGING §11.14.6, at the PIN and the password together,
+   counted outside what it stores, none tested against a member whose
+   presence was recorded in the 72 hours before the attempt. The rest
+   of this item describes the releases before R.) It
    gets the code after the enclave's 24 h. A register then needs a
    genuine phone running the published app (device attestation), which
    an operator can supply. After it, the PIN and then the credential
@@ -1135,6 +1304,20 @@ built.*
   attachment object's key when it is written, and could always keep
   or delete the objects it stores; skipping the sweep leaves only
   objects encrypted under keys that the deletion destroyed.
+
+*P16–P18: added in 0.1.10 (wording for the owner's approval, with
+VAULT-MESSAGING 0.33.0); normative from release R, not built.*
+
+- **P16.** The enclave MUST reach the recovery counter only over its
+  own TLS to the bucket's virtual-hosted name pinned in the release,
+  with `x-amz-expected-bucket-owner` signed on every call, and MUST
+  NOT reach it through the store requests of §5.
+- **P17.** The enclave MUST decide every counter question from complete
+  versions listings and read-back locks as §8.1 says, MUST NOT retry a
+  `Spend` by itself, and MUST treat any outcome it cannot classify as an
+  attempt used.
+- **P18.** The instance role MUST NOT hold a delete, bypass-governance,
+  legal-hold or bucket-configuration permission on the counter bucket.
 
 ## 13. Open points
 
