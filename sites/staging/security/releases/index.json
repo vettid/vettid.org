@@ -1,9 +1,39 @@
 {
-  "serial": 15,
+  "serial": 16,
   "releases": [
     {
-      "release": 12,
+      "release": 13,
       "status": "active",
+      "published_at": "2026-10-15T22:19:32Z",
+      "pcr0": "0f4d7915f5fc56aa7d705e82ddd14ec48e48ce3bb99217792b3e67bee9a6db6bd74dee16971d750f4af3a294e2bccdb2",
+      "pcr1": "985277a497e71af128434e93c3a5860f7bbb6dba7878738c163d80505a195556bff047ab7fbf5790841e9ef75c557618",
+      "pcr2": "f9d9201f67f7259c74c017862f4cb508377c4316a90fdd0b0ad4fd483d72614392857bd987e4ab3821bffb1e33c30ab1",
+      "seal_key": "arn:aws:kms:us-east-1:347272280361:key/85e5eb62-c2ab-4963-8ae3-d1951a5eca92",
+      "notes": "https://staging.vettid.org/security/releases/13/",
+      "tag": "release/staging/13",
+      "source_commit": "0969bd48fa51d8d8e460f76b4e9b264533f44a45",
+      "summary": "Release 13 runs your vault on a newer, hardened kernel, lets its process use only the system calls it needs, and fixes long conversations that would not open.",
+      "changes": [
+        "Fix: opening a long conversation could fail with no answer, and trying again failed the same way. Messages now come in pages, newest first, and a reply too large to send is answered with an error instead of silence.",
+        "Hardening: the enclave now runs Linux 6.6.158, built by VettID from kernel.org source with a hardened configuration and reproduced on two builders, instead of the older kernel supplied with AWS's tools. Every release carries a copy of it and its source.",
+        "Hardening: the kernel now refuses module loading, kernel replacement, user namespaces and other features a vault does not use, and the vault does not start unless these settings hold.",
+        "Hardening: a vault's process may now make only the system calls it is known to need, may not start other programs, and cannot see other vaults' processes."
+      ],
+      "security": "recommended",
+      "security_text": "Release 13 narrows what a fault in a vault's process could reach: the enclave's kernel is current and hardened, and a vault's process can use only the parts of it the vault needs. Earlier releases ran an older kernel and refused only a short list of system calls. We know of no use of this against any vault. Your PIN and credential password were not exposed.",
+      "affects": [
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "listed": true
+    },
+    {
+      "release": 12,
+      "status": "deprecated",
       "published_at": "2026-10-14T22:31:53Z",
       "pcr0": "859733fa15df56bfedcb8c3a0a1524e9287aea6a8fa01d798d0f8c8df32cc2cbf32cdc5102bbd89b1f6c6e05e478e4bf",
       "pcr1": "3b4a7e1b5f13c5a1000b3ed32ef8995ee13e9876329f9bc72650b918329ef9cf4e2e4d1e1e37375dab0ba56ba0974d03",
