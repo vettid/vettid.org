@@ -236,8 +236,9 @@ changelog:
     mode, no default retention, no rule that expires a current version
     or a vault's newest present record), the host role's five grants on
     it, the recovery request key in the member API's account, and the
-    data bucket's 7-day minimum as a deadline for the one write fault
-    a DEK replacement cannot survive. §8.4: the counter bucket's host in
+    data bucket's version rule as the window (24 hours safe, up to 7
+    days) for repairing the one write fault a DEK replacement cannot
+    survive. §8.4: the counter bucket's host in
     the egress controls. §8.8: the heavy key derivation's permit and its
     effect on capacity (estimates). §3.5: an earlier release stays a way
     around a later counter until its key is deleted. §12: production
@@ -1323,10 +1324,14 @@ editing the bucket policy first.
 *0.1.28 (release R).* The data bucket's version rule is also what
 makes the one write fault of a DEK replacement repairable
 (VAULT-MESSAGING §11.14.2): a store that confirmed a header it did not
-keep leaves the earlier state and header as noncurrent versions, and an
-operator restores both **within 7 days** (RUNBOOK). The rule MUST NOT be
-shortened below 7 days. It is VettID's own rule and protects nobody
-against VettID; members cannot check it.
+keep leaves the earlier state as a noncurrent version beside the header
+that is still current, and an operator restores it (RUNBOOK). Under the
+rule that is **safe within 24 hours** of the failure (rule 2: 1 day unless
+among the 5 newest noncurrent versions) and possible up to **7 days**
+only while the state was written fewer than 5 times since (rule 1). The
+rule MUST NOT be shortened below either: 1 day with the 5 newest kept,
+and 7 days at most. It is VettID's own rule and protects nobody against
+VettID; members cannot check it.
 
 **Recovery counter bucket** (0.1.28, release R; VAULT-HOST-PROTOCOL
 §8.1). One per channel, in `VettidOrgVaultStack` of the vault account
@@ -1348,7 +1353,8 @@ AWS acting for VettID could, which VAULT-MESSAGING §11.14.12 states.
 
 **Recovery request key** (0.1.28, release R; VAULT-MESSAGING
 §11.14.8). An ECDSA P-256 KMS key (`SIGN_VERIFY`) in the account that
-runs the member API, alias `vettid-recovery-request`, RETAIN, whose
+runs the member API, alias `alias/vettid-org-recovery-request` (staging
+`alias/vettid-org-staging-recovery-request`), RETAIN, whose
 policy allows `kms:Sign` to the member API's vault function only and
 `kms:GetPublicKey` to the release build; its public key is pinned in
 `recovery_request_keys`. A replacement is pinned beside the old key for
@@ -1436,10 +1442,12 @@ out:
 (0.1.28, release R) The recovery counter bucket's virtual-hosted name
 (`vettid-org-vault-recovery-<account>.s3.us-east-1.amazonaws.com`) is
 added to `DefaultAllow`, to the enclave's release allowlist (Amazon's
-roots) and, already admitted as S3, to the DNS Firewall. The enclave
-reaches it over the public endpoint with TLS it terminates, not through
-the gateway endpoint's private path, and a release that carries it
-also carries the parent that admits it (C4).
+roots) and, already admitted as S3, to the DNS Firewall. In the VPC the
+parent's connection to it goes through the S3 gateway endpoint, like all
+S3 traffic in the region; the endpoint's policy admits resources of the
+vault account (`aws:ResourceAccount`, below), and the counter bucket is
+one. TLS still ends in the enclave. A release that carries the name also
+carries the parent that admits it (C4).
 
 **KMS: public endpoint, no interface endpoint.** An interface endpoint
 with private DNS would serve the same name and an Amazon certificate, so

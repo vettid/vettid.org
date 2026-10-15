@@ -20,7 +20,9 @@ changelog:
     (audit `vault.recovery_attempt`); new texts for the request email,
     the attempt email and the completion email, and for the account
     site's recovery page; a release that refuses recovery answers
-    `recovery_unavailable` with `reason: "not_offered"`. The API never
+    `recovery_unavailable` with `reason: "not_offered"` (new `reason` on
+    `Recovery`); a pending app key (`app_key_pending`) accepted beside
+    the current one during a transfer or recovery. The API never
     learns an attempt's outcome or the count. VettID can suppress every
     email; said where they are specified. The section heading's stale
     "VAULT-MESSAGING 0.4.1" is corrected
@@ -1562,6 +1564,7 @@ interface Recovery {
   available_at: string;                // requested_at + 24 h (2.7.0, release R: the enclave's not_before, which may be later)
   expires_at: string;                  // available_at + 24 h (2.7.0, release R: the enclave's expires, moved by each wait)
   earliest?: true;                     // 2.7.0: available_at is still the API's own estimate (or the enclave's, when it could not read its counter)
+  reason?: 'no_backup' | 'no_credential' | 'not_offered';  // 2.7.0: only with `unavailable`, from the slot's clear reason
   completed_at?: string;               // 2.4.1: only with `completed`; when the API recorded it
   sealed_code?: string;                // b64 of 5,252 bytes, only while `available`
   locator?: string;                    // 2.4.0: 12 Crockford base32 characters, only together with a `sealed_code` that is a code's (never with `unavailable`)
@@ -1900,7 +1903,8 @@ Everything above holds except where this says otherwise.*
   request_id \n signed_at \n hex(SHA-256(browser_key))` (the last line
   empty for a cancel), signed with the **recovery request key**, an
   ECDSA P-256 key in AWS KMS in the account that runs the member API
-  (alias `vettid-recovery-request`), whose key policy allows `Sign` to
+  (`alias/vettid-org-recovery-request`; staging
+  `alias/vettid-org-staging-recovery-request`), whose key policy allows `Sign` to
   the member API's vault function only; the message carries
   `signed_at`, `key_id` and `sig`. The vault releases pin its public
   key (`recovery_request_keys`). A refused signature is answered with
@@ -1941,14 +1945,25 @@ Everything above holds except where this says otherwise.*
 - **The recovering key** may call `enclave`, `open` and poll its own
   requests; `unlock` and `lock` are refused `403` (a registered phone
   does not unlock from release R).
+- **The pending app key.** A transfer or a recovery replaces the app in
+  three writes (VAULT-MESSAGING §11.14.2). The host writes
+  `app_key_pending` (`{key, kid, seq}`, `seq` one above `app_key`'s) with
+  the first and `app_key` with the third. While `app_key_pending` is set
+  the API accepts requests signed by either key as the vault's app key;
+  when `app_key` reaches the pending `seq` the pending entry is cleared
+  and the old key is refused. A restore by an operator (RUNBOOK) resets
+  `app_key` to the old header's key and clears the pending one, the one
+  case in which `seq` goes down.
 - **Completed** is noticed as before, from the host's `app_key`; the
   vault makes the registered key its app key when the recovery open
   completes (VAULT-MESSAGING §11.14.6 step 6).
 - **A release that refuses recovery** (VAULT-MESSAGING §11.14.13): the
-  enclave's sealed refusal says `not_offered`, with the slot's
-  `recovery_unavailable`; the API ends the recovery as `unavailable`
-  with `reason: "not_offered"` and the account site says "Recovery is
-  not available in this vault release yet."
+  slot's `recovery_unavailable` carries the clear `reason:
+  "not_offered"` (the API cannot read the sealed refusal); the API ends
+  the recovery as `unavailable` with that `reason` and the account site
+  says "This vault's release does not offer recovery. Your vault gains
+  recovery only after you move it to a release that does, which needs
+  your phone."
 - **Emails** (texts are drafts for the owner's wording). VettID can
   suppress every email, and an attacker who is VettID needs none: they
   are a notice against an attacker who is someone else.

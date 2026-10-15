@@ -19,8 +19,9 @@ changelog:
     list and an on-device guessability estimate, with the texts and the
     test with real people; **transfer**: the new phone's Finish the move
     and the old phone keeping its keys until the vault confirms the new
-    phone's first unlock (**proposed, owner to approve**; no Delete now,
-    no seven-day timer); New phone secret; the backup warning; the
+    phone's first unlock or for at most 7 days, decided by the owner on
+    2026-10-15 (no Delete now), with "The move didn't finish";
+    `stored_mismatch`; New phone secret; the backup warning; the
     minimum app version. The table rows Recovery (new phone) and
     Transfer (new phone) point there; `:core:keystore` gains the
     phone key. The texts are drafts
@@ -631,7 +632,7 @@ rows below say "Vault" for the screens and "item" for the data.
 | Pending deletion | — | When `GET /api/vault/status` shows `deletion` (a start-over requested on the portal, VAULT-MESSAGING §11.11.9): an urgent banner with the time left and **Cancel deletion** (`POST /api/vault/deletion/cancel {deletion_id}`, signed by the app key, with the `deletion_id` from the status's `deletion: {deletion_id, state, deletes_at}`, MEMBER-API 2.1.1) |
 | Vault update | — (VettID-specific) | 0.1.19 (owner decision of 2026-10-09). **Banner** at the top of the shell while the trusted manifest lists an `active` release newer than the vault's: "A new vault release is available (release N)" with Update now and a close button (back after 24 h; a newer release or a change to the end-date warning shows at once), or, for a `retired` release or a `deprecated` one with an `ends_at`, the urgent "Your vault's release ends on <date>. Update now to keep your vault" (also back after 24 h). The offer is read from the manifest at app start, on return to the foreground and after every unlock (no other polling). **Notification**: one local notification per release on the "Vault updates" channel, its tap opens the update screen; the POST_NOTIFICATIONS permission is asked once, when the first banner shows. **Update screen** (banner, notification, Settings → Vault → "Update available"): the release number, the PCR0 fingerprint, "Anyone can rebuild it and compare the fingerprint", the release notes, the vault PIN and **Approve and update** (no credential password: the owner check, when due, comes first through the shell's gate). Then, over every screen: lock → the unlock with the approved `release_update` (built as at the unlock screen) → `update: moved` → the unlock that reaches N+1 with the same PIN ("Updating your vault…", three steps; "Release N is starting. This can take a few minutes." while the API answers `503 release_starting`). Outcomes: done; refused (`target`, `downgrade`, `approval`, `seal_key`, `pending`, `write`, each explained; the vault stays on its release and is open); a wrong PIN or the backoff (the vault is locked, nothing moved; "Approve and update" again or "Unlock without updating"); N+1 does not open (try again, or **Return to release N**, confirmed, only while the move is unconfirmed). The PIN is held only while a step runs. The unlock screen's "Approve the update with this unlock" stays. 0.1.31: the update screen and the unlock offer open with **What's new in release N** (next row), above the fingerprint and the PIN; the bare "Release notes" link becomes that section's "Full release notes" |
 | What's new | — (VettID-specific) | 0.1.31 (owner request 2026-10-10; RELEASE-UPDATES 0.3.0 §2, §5). **Where:** at the top of the update screen (reached from the banner's Update now, the notification and Settings → Vault → "Update available": every path to an update passes through it before **Approve and update**) and in the unlock screen's release offer, before "Approve the update with this unlock". There is no update path that skips it. **What:** the heading "What's new in release N"; the log entry's `summary`; its `changes` as a bulleted list; the security line ("No security fix", "Security fix: update recommended" or "Security fix: update urgently", the latter two followed by `security_text`); the label "From <host>" (vettid.org; staging builds staging.vettid.org) with "Release notes are information. What keeps your vault safe is the signed release list and the fingerprint below."; and **Full release notes**, which opens the manifest's `notes` URL in the browser. When the vault is more than one release behind, the summaries of the releases in between follow under "Also in earlier releases" (one line each, from the same `index.json`). **Source:** the channel's log `index.json` (VAULT-RELEASES §7), public and unsigned. The app fetches it only when the trusted manifest's (published or loaded canary) `notes` for release N is exactly `https://<host>/security/releases/<N>/` and `<host>` is the host of the build's pinned manifest URL (vettid.org; staging.vettid.org; the dev stack's manifest host); it then fetches `https://<host>/security/releases/index.json` and no other URL. Any other `notes` (staging S1–S8 still carry GitHub URLs until the backfill is published) means no fetch. GET without cookies or credentials, redirects refused, 10 s timeout, at most 1 MiB, JSON only. The entry used is the one whose `release` is N **and** whose `pcr0` equals the manifest's PCR0 for N; otherwise none. Shown as plain text only (no markup, no tappable links), each field cut with "…" past the RELEASE-UPDATES §5 limits (summary 160 characters, 20 changes of 280, `security_text` 1,000). Kept in memory per host, release and PCR0 until the process ends; nothing is stored on disk or in the vault. **Information only:** nothing in it is used for a decision: which release is offered, its status, `ends_at`, the fingerprint and the approval come from the signed manifest alone. **Fallback:** while loading, a progress line, and **Approve and update** stays enabled; if the fetch fails, the entry is missing or does not match, or `notes` is not a log URL: "Release notes unavailable" with **Full release notes** (when `notes` is an `https` URL, as the manifest parser already requires), and updating stays possible. Opening the screen again retries. **Notification** ("Vault updates"): before posting it the app tries the same fetch (same rules, 10 s); with an entry its text is the summary ("Release N: <summary>"), otherwise the current text; it is not updated afterwards |
-| Transfer (new phone) | — (VettID-specific) | (0.1.40, release R: the phone key and its secret in `hs.init`, then **Finish the move**; the old phone keeps its keys until then, proposed; §4 "Recovery and unlock from release R".) Scan the old phone's transfer QR → compare the SAS → wait for the approval → `device.paired{transfer}`: the app stores its `vault_id` and the member's `user_guid` (VAULT-MESSAGING 0.17.0 §6.7.1) like an enrolled phone, so that it unlocks later with the PIN. Without `user_guid` (a vault release before 0.17.0) the transfer still completes and the app warns: "This phone cannot unlock your vault after it locks until your vault is updated" |
+| Transfer (new phone) | — (VettID-specific) | (0.1.40, release R: the phone key and its secret in `hs.init`, then **Finish the move**; the old phone keeps its keys until then, for at most 7 days; §4 "Recovery and unlock from release R".) Scan the old phone's transfer QR → compare the SAS → wait for the approval → `device.paired{transfer}`: the app stores its `vault_id` and the member's `user_guid` (VAULT-MESSAGING 0.17.0 §6.7.1) like an enrolled phone, so that it unlocks later with the PIN. Without `user_guid` (a vault release before 0.17.0) the transfer still completes and the app warns: "This phone cannot unlock your vault after it locks until your vault is updated" |
 | Onboarding | Sign-in flow | Scan the setup QR from the account portal, or type its short code with the account's email (no sign-in in the app, VAULT-MESSAGING 0.15.0 §11.12) → confirm the account (`email_hint`) → enroll vault (PIN, credential password) → first connection guide |
 
 **History** (0.1.11, owner decision of 2026-10-07). The member's audit
@@ -1770,8 +1771,8 @@ already has the blob calls.
 *Wording for the owner's approval, with VAULT-MESSAGING 0.33.0 §11.14.
 For vaults of release R, which is not built; nothing changes for a vault
 of an earlier release. The texts are drafts for the owner's wording.
-One rule, the old phone's keys after a transfer, is* **proposed (owner
-to approve)**.*
+The old phone's keys after a transfer were decided by the owner on
+2026-10-15.*
 
 **The phone key** (`:core:keystore`; VAULT-MESSAGING §11.14.1).
 
@@ -1855,6 +1856,7 @@ step of the "Recovery (new phone)" row).
 | `wait` | "You can try again on {retry_at}. Nothing was used." (with one more used: as `attempt_lost`) |
 | `busy` | "The service is busy right now. Nothing was used. Try again in a minute." |
 | `retry` | "The service was too slow just now. Nothing was used. Try again." |
+| `stored_mismatch` | Before an attempt: "The vault's stored data could not be opened. Nothing was used. Contact VettID." After a right attempt: "Your entry was right, but the vault's stored data could not be opened. Contact VettID." |
 | `exhausted` | "All 10 attempts for this vault have been used. It cannot be recovered. You can delete it on the account site and start over." |
 | `closed` | "The PIN or the password of this vault was changed, or its recovery was turned off, after this recovery began. This recovery cannot continue." |
 | `not_armed` | "Recovery was not set up for this vault." |
@@ -1951,17 +1953,24 @@ password too."
 - *Old phone, approving.* As before, the PIN and the password together.
   `busy`: "The service is busy right now. Nothing was moved. Try again
   in a minute." (the transfer stays open).
-- *Old phone, after the approval* — **proposed (owner to approve).** The
-  approval answer `{"unlink": "after_new_unlock"}` means: keep the keys.
-  The app shows, and keeps showing at every start: "Finish the move on
-  your new phone. This phone keeps your vault's keys until your new
-  phone has finished the move. Don't give this phone away before then.
-  You can always remove VettID from it or reset it." It sends nothing to
-  the vault. On `device.unlinked{reason: "transferred"}` it deletes the
+- *Old phone, after the approval* (decided by the owner on
+  2026-10-15). The approval answer `{"unlink": "after_new_unlock"}`
+  means: keep the keys, and record the approval's time. The app shows,
+  and keeps showing at every start: "Finish the move on your new phone.
+  This phone keeps your vault's keys until your new phone has finished
+  the move, for at most 7 days. Before you give this phone away, remove
+  VettID from it or reset it." It sends nothing to the vault. On
+  `device.unlinked{reason: "transferred"}`, or at its first start 7 days
+  or more after the approval, whichever comes first, it deletes the
   phone key, the device key and the app key and erases its local state,
   then shows "Your vault has moved to your new phone. VettID has removed
-  its keys from this phone." There is no "Delete now" button and no
-  seven-day timer.
+  its keys from this phone." Until then it offers **The move didn't
+  finish**: "Use this if your new phone cannot open your vault." It asks
+  for the PIN and unlocks with this phone's own keys; on success: "This
+  phone is your vault's phone again. Start the move again when you are
+  ready."; otherwise: "Your vault could not be opened from this phone.
+  Contact VettID within a day of the failed move: it may be repairable."
+  There is no "Delete now" button.
 - After a transfer, a PIN change or a password change the app offers to
   rotate the vault's keys (`credential.rotate`), which a completed
   recovery does by itself.
@@ -1974,9 +1983,14 @@ password too."
   phone; it replaces the vault's DEK, so the old secret opens no later
   stored state.
 - The credential backup's off-warning gains: "With this off, clearing
-  the app's data or losing this phone ends the vault. If a move to a new
-  phone fails and is not repaired within a week, it can end the vault
-  too."
+  the app's data or losing this phone ends the vault."
+- **A right entry that could not be completed** (an open after a run
+  that ended without `ok` answered `wait` or `attempt_lost`): "The last
+  attempt was right but could not be completed. {n} of 10 left. You can
+  try again on {retry_at}."
+- **After a cancel from the app** (an unlock with `cancel_recovery`), the
+  app sends an owner check at once (the PIN and the password on one
+  screen), which records that the member is present.
 - The minimum app version: an app older than the release's
   `android_min_version_code` is refused at enrollment, a transfer and a
   recovery's register with `attestation`; the app shows "Update VettID

@@ -1205,28 +1205,45 @@ owner's approval). From release R a change of the DEK writes the header,
 then the state, then the header again. If the store confirmed the first
 header write but did not keep it, and the state write was kept, the
 stored header and state no longer belong together and **no phone can
-unlock** (the member's apps see failed unlocks; a transfer's new phone
-never finishes the move). The earlier state, which belongs with the
-header that is still current, is then the newest old version of
-`vaults/<vault_id>/state`, and it lasts **at least 7 days** after the
-failure (rule 1 above), not longer. Within those 7 days:
+unlock**, and a recovery is answered `stored_mismatch` (the member's
+apps see failed unlocks; a transfer's new phone never finishes the
+move). The state to restore is **the last version written before the
+failed change**: find it by time (just before the member's change) and
+check its clear header, whose `dek_version` (the eight bytes after the
+format byte `0x02` and `state_seq`) must be the one the current header's wrap names,
+one lower than the newer versions'. Do not simply take "the newest old
+version". By rule 2 above it lasts **at least 24 hours** after the
+failure, and up to 7 days only while the state object has been written
+fewer than 5 times since (rule 1 removes it at 7 days in any case).
+Act within 24 hours:
 
 1. Confirm with the member which change failed and when, and that the
    phone that made it (for a transfer: the **old** phone, which keeps its
-   keys until the new phone has unlocked) still has the app.
-2. Lift the bucket policy's denial for this one key (as for any restore),
-   copy the state version from before the failed change back as the
-   current version (`aws s3api copy-object --copy-source
-   "$B/vaults/<vault_id>/state?versionId=<id>"`), and put the policy
-   back. Do not touch the header.
-3. The member unlocks with that phone and the PIN of before the change,
-   and repeats the change (for a transfer: approves a new one). The app
-   shows the restore as a rollback, which it is.
+   keys until the new phone has unlocked, for at most 7 days) still has
+   the app.
+2. Make sure no instance holds the vault unlocked: send the host's
+   `lock` for it, and check that the vault row is `locked` with no lease
+   (VAULT-MESSAGING §11.5). A running vault would overwrite the restore
+   with its next flush.
+3. Lift the bucket policy's denial for this one key (as for any restore),
+   copy the chosen state version back as the current version (`aws s3api
+   copy-object --copy-source "$B/vaults/<vault_id>/state?versionId=<id>"`),
+   and put the policy back. Do not touch the header.
+4. Reset the vault row's `app_key` to the key the current (old) header
+   names, with its `app_key_seq`, and remove `app_key_pending`, so that
+   the member API accepts the old phone again (it otherwise accepts a
+   new key only with a higher `app_key_seq`).
+5. The member uses "The move didn't finish" on the old phone (for a
+   change of PIN or password: unlocks with the PIN of before the change)
+   and repeats the change (for a transfer: approves a new one). The old
+   phone never saw the newer state, so its minimums pass and it sees no
+   rollback; the new phone is no device of the restored state and is
+   refused.
 
-After 7 days the earlier state is gone and the vault cannot be restored.
-With the credential backup on, the member can recover instead; with it
-off, the vault is lost. Never do this for a vault whose member did not
-ask: it undoes the member's change.
+After the earlier state is gone the vault cannot be opened by anyone,
+recovery included, whatever its credential backup setting: the member
+can only start over. Never do this for a vault whose member did not ask:
+it undoes the member's change.
 
 ### Manifest sync (`vettid-org-vault-manifest-sync`, VAULT-RELEASES §7)
 

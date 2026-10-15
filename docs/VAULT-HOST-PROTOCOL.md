@@ -24,7 +24,9 @@ changelog:
     the vault's counter key, retention and read-back, the reading
     rules and each operation's calls. §6.6: `Stats` gains
     `heavy_kdf_free`. §6.1: the queue operation `recovery_open`, and
-    the signature members of `recovery` and `recovery_cancel`. §8: the
+    the signature members of `recovery` and `recovery_cancel`, the
+    lifecycle event `app_key_pending`, and a clear `reason` on
+    `recovery_unavailable`. §8: the
     counter bucket's host on both allowlists. §9: the S3 timeouts.
     §11.2, §11.3, §11.4 item 4: what the parent sees of the counter
     and what it can do; a recovery started by the parent alone is
@@ -576,8 +578,12 @@ unknown.
   `key_id` and `sig`, which the enclave verifies before anything else
   and the parent passes on unread. The parent copies `recovery_attempt`
   (with `retry_at` and `expires`) from a `recovery_open` answer into its
-  slot, and `not_before`, `expires` and `earliest` from a `recovery`
-  answer, as it copies `recovery_registered`.
+  slot, `not_before`, `expires` and `earliest` from a `recovery` answer,
+  and a `recovery_unavailable`'s clear `reason`, as it copies
+  `recovery_registered`. It writes the lifecycle event `app_key_pending`
+  (sent with the first header write of a replacement of the app) as the
+  row's `app_key_pending`, and clears it when `app_key` reaches its
+  `seq` (VAULT-MESSAGING §11.5, §11.14.2).
 
 ### 6.2 `LeaseLost` (0x11)
 
