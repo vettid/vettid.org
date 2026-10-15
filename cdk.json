@@ -97,7 +97,7 @@
     "@aws-cdk/aws-ec2:requirePrivateSubnetsForEgressOnlyInternetGateway": true,
     "@aws-cdk/aws-s3:publicAccessBlockedByDefault": true,
     "@aws-cdk/aws-lambda:useCdkManagedLogGroup": true,
-    "relayImage": "ghcr.io/vettid/vettid-relay@sha256:d61680438d2602dc3ae0b7ed369e6edac1959c08202a9d7a2bc7f9e41c360ff7",
+    "relayImage": "ghcr.io/vettid/vettid-relay@sha256:48635101722580dae758c391dc8ffe0d12d82a5ccc28b5fda013562cdf20e1ea",
     "vaultsStreamArn": "arn:aws:dynamodb:us-east-1:369484479783:table/vettid-org-vaults/stream/2026-10-04T16:29:56.236",
     "stagingZoneNs": "ns-500.awsdns-62.com,ns-1176.awsdns-19.org,ns-1560.awsdns-03.co.uk,ns-947.awsdns-54.net",
     "pushStages": "staging",
