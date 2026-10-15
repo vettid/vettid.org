@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.28
+version: 0.1.29
 date: 2026-10-15
 owner: Al Liebl (Mesmer)
 changelog:
@@ -243,6 +243,8 @@ changelog:
     effect on capacity (estimates). §3.5: an earlier release stays a way
     around a later counter until its key is deleted. §12: production
     release 1 may refuse recovery, never ship the earlier recovery
+  - 0.1.29 (editorial, as built; staging release S13, 2026-10-15).
+    §8.8: S13's capacity figures, next to S12's
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.29.3) §11.10 release updates, §12.5 deletion, §13.5, §13.9
@@ -1820,6 +1822,15 @@ p50 197 ms / 403 ms / 840 ms at concurrency 1 / 2 / 4, idle CPU 1.5 ms per
 vault per minute. S12 fixes a race that could crash a vault process when
 several unlocks ran at once on one vCPU (vettid-vault #85); this run's
 concurrent unlocks all completed.
+
+*Measured again (staging S13, 2026-10-15):* the same run on S13's canary
+host (same host and enclave size), PASS: 57 vaults held at the memory floor,
+about 905 idle unlocked vaults projected per host (4.4 MiB marginal), unlock
+p50 219 ms / 452 ms / 912 ms at concurrency 1 / 2 / 4, idle CPU 2.2 ms per
+vault per minute. S13's enclave runs the 6.6.158 kernel with its hardened
+configuration: unlocks are about 10% slower than S12's on 4.14, as the
+hardware run of vettid-vault #87 and #88 measured, and memory capacity is
+unchanged.
 
 *Relay connections (0.1.14; VAULT-RELAY-SCALING 0.1.2 §3, §10;
 vettid-vault #66).* Memory, not the relay path, bounds vaults per host:

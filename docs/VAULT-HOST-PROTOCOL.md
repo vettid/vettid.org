@@ -1,17 +1,35 @@
 ---
 title: VAULT-HOST-PROTOCOL
 status: approved by the owner 2026-10-12 (H1–H9 as recommended)
-version: 0.1.10
+version: 0.1.11
 date: 2026-10-15
 owner: Al Liebl (Mesmer)
 component: vault enclave (supervisor), parent (host process)
 related:
-  - VAULT-MESSAGING.md (0.33.0) §2 (threat model, who sees what), §11.14 (release R: recovery and the attempt counter), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
+  - VAULT-MESSAGING.md (0.33.1) §2 (threat model, who sees what), §11.14 (release R: recovery and the attempt counter), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
   - VAULT-PLAN.md (0.1.8) §5.2 (D5: TLS in the enclave), §5.3 (D4: one process per vault)
   - VAULT-RELEASES.md (0.1.16) §3.4 (C3, C4), §8.4 (network and egress), §8.7 (observability)
   - VAULT-RELAY-SCALING.md (0.1.2) §6, §10
   - vettid-vault `internal/hostproto`, `enclave/supervisor`, `enclave/egress`, `parent`, docs/V3-NOTES.md "Enclave ↔ parent", docs/SMOKE.md
 changelog:
+  - 0.1.11: as built in vettid-vault #94 (the parent only), for
+    release A; P15's wording was approved by the owner 2026-10-15
+    (0.1.9) and this states how it is met. No wire change. §12 P15:
+    **the vault row's `att_sweep_pending`**, set in the same
+    conditional update that marks the row `deleted` and removed once
+    the prefix is empty; **a parent's start resumes the sweeps that
+    rows still record** (a Scan of the vault table for the attribute,
+    retried with a backoff); the row is read again before each pass
+    and the sweep stops if it says the vault is no longer `deleted`
+    (a row that is gone does not stop it); an `enrolled` event for the
+    same vault id removes the record; the member API keeps a deleted
+    vault's row while the record is set (MEMBER-API 2.7.1). The host
+    role's permissions are corrected: it has always listed the whole
+    data bucket (a missing object is `NoSuchKey` only with
+    `s3:ListBucket`), which covers the sweep's listing; 0.1.9 said it
+    could list `manifests/*` only. It gains `dynamodb:Scan` on the
+    vault table, limited to `vault_id` and `att_sweep_pending`, and may
+    write `att_sweep_pending`
   - 0.1.10: **wording for the owner's approval**, with VAULT-MESSAGING
     0.33.0 §11.14 (recovery rebuilt; owner decisions of 2026-10-13 to
     2026-10-15); binds nothing before the vault release that
@@ -1298,12 +1316,34 @@ built.*
   behind then. Every path that erases a vault reports `deleted`,
   also one that finishes an erase from a header that records
   `deleting` (VAULT-MESSAGING §12.5 "Convergence"; as built, those
-  paths do not report it). The host role needs `s3:ListBucket` on the data bucket
-  for the prefixes `vaults/*/att/*` only (today it may list
-  `manifests/*` only). A dishonest parent gains nothing: it sees every
+  paths do not report it). (0.1.11) The host role lists the data
+  bucket for this (its `s3:ListBucket` has no prefix condition, which a
+  missing object's `NoSuchKey` needs; 0.1.9 said otherwise) and deletes
+  under `vaults/*`. A dishonest parent gains nothing: it sees every
   attachment object's key when it is written, and could always keep
   or delete the objects it stores; skipping the sweep leaves only
   objects encrypted under keys that the deletion destroyed.
+
+  *How P15 is met (0.1.11, as built in vettid-vault #94).* The update
+  that marks the row `deleted` also sets **`att_sweep_pending = true`**
+  on it; the parent removes it (condition: the row is still `deleted`)
+  once a listing of the prefix comes back empty. Before each pass the
+  parent reads the row again (consistent read): a row that says the
+  vault is no longer `deleted` stops the sweep (a vault id enrolled
+  again, whose `enrolled` event also removes the attribute); a row
+  that is gone does not. Passes are retried with a backoff from 5 s
+  doubling to 5 minutes, one sweep per vault at a time. **A parent's
+  start resumes every sweep a row still records**: it scans the vault
+  table (filter `attribute_exists(att_sweep_pending)`, projection
+  `vault_id`; retried with the same backoff until the scan succeeds),
+  so a sweep survives a parent's restart or replacement. A sweep that
+  never ends (the bucket refusing the parent) leaves the row in place;
+  it is visible to operations (RUNBOOK "Vault attachment sweep"). The
+  member API keeps a deleted vault's row while `att_sweep_pending` is
+  set and removes it afterwards (MEMBER-API 2.7.1, "Vault deletion").
+  Permissions: the host role may Scan the vault table only for
+  `vault_id` and `att_sweep_pending`, and write `att_sweep_pending`
+  among its attributes (vettid.org `lib/stacks/vault-stack.ts`).
 
 *P16–P18: added in 0.1.10 (wording for the owner's approval, with
 VAULT-MESSAGING 0.33.0); normative from release R, not built.*
