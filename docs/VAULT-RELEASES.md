@@ -1,8 +1,8 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.26
-date: 2026-10-13
+version: 0.1.27
+date: 2026-10-15
 owner: Al Liebl (Mesmer)
 changelog:
   - 0.1.0: V5 plan. Release pipeline, keys, infrastructure, release
@@ -211,6 +211,20 @@ changelog:
     since that day, staging 3 to 6 have no rescue target any more
   - 0.1.26 (editorial, as built; staging release S12, 2026-10-14;
     approved by the owner 2026-10-14). §8.8: S12's capacity figures
+  - 0.1.27 (approved by the owner 2026-10-15; the wording of
+    vettid-vault #79, #88 and #87). §5.1: the enclave kernel blobs are
+    not the nitro-cli package's (Linux 4.14): today the lock pins AWS's
+    `aws-nitro-enclaves-sdk-bootstrap` v6.6.79 set (#79), what the lock
+    records for it, and the kernel blob set version in
+    `measurements.json`; a blob set vettid-vault builds from kernel.org
+    source (#87) is adopted later, by a change of the toolchain lock
+    that no release has yet. New §5.4: the weekly enclave kernel
+    currency check, a warning, not a block (#87). §10.1 step 2: the
+    kernel warning answered in the release notes. §11.2: the
+    self-test's required and informational kernel and system-call
+    filter checks (#88), and the checks required on a source-built
+    kernel (#87). §14: risks 11 (the allow list, #88) and 12 (no
+    current kernels from AWS, #87)
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.29.3) §11.10 release updates, §12.5 deletion, §13.5, §13.9
@@ -685,24 +699,50 @@ in turn caps cadence × window.
 
 ### 5.1 The EIF in CI
 
-`nitro-cli build-enclave` needs Docker and the nitro-cli kernel and init
-blobs, not the Nitro Enclaves device (that is needed only to run an
-EIF), so a GitHub arm64 runner can build it. The blobs are part of PCR0,
-so they are pinned like the toolchain:
+`nitro-cli build-enclave` needs Docker and the enclave kernel, command
+line, init and NSM module blobs, not the Nitro Enclaves device (that is
+needed only to run an EIF), so a GitHub arm64 runner can build it. The
+blobs are part of PCR0, so they are pinned like the toolchain.
+
+The blobs are not the nitro-cli package's (Linux 4.14 in every version
+to date, unmaintained). (0.1.27, approved by the owner 2026-10-15.)
+
+- **Today** (vettid-vault #79): the lock pins the set AWS publishes
+  with an `aws-nitro-enclaves-sdk-bootstrap` release (`v6.6.79`, Linux
+  6.6.79), of which vettid-vault keeps a copy as a release asset.
+- **Later, by a change of the toolchain lock** (vettid-vault #87; not
+  made yet, so no release uses it): a blob set (kernel, its config,
+  command line, init, linuxkit, NSM placeholder) that vettid-vault
+  builds from kernel.org source with a pinned compiler and a reviewed
+  config, twice, byte for byte (`release/kernel`, `docs/KERNEL.md`),
+  published as a vettid-vault release asset together with the
+  corresponding source. The lock then pins the set by archive and
+  per-file SHA-256 and by the hash of the kernel's input lock, and names
+  the kernel release the enclave's self-test requires. The change needs
+  the hardware run of §11.2.
+
+The workflow:
 
 - A new `release` workflow in vettid-vault, on `ubuntu-26.04-arm` (moved
   from 24.04 on 2026-10-05; measurements identical), runs
   the build inside `amazonlinux:2023` pinned by digest, with the
   `aws-nitro-enclaves-cli` package at a pinned version (1.5.0 today)
   verified by RPM checksum, and the runner's Docker socket mounted.
+  The blob set is downloaded from `blobs_url`, checked by the archive's
+  SHA-256 and installed from `blobs_dir` in place of the package's.
   `scripts/build-eif.sh` is reused; `eif-toolchain.lock` records the
-  container digest, package version and the SHA-256 of each blob.
+  container digest, package version, the blob set's source
+  (`blobs_version`, `blobs_url`, `blobs_dir`; for a source-built set
+  also the kernel input lock's SHA-256 and the kernel release), the RPM
+  checksums and the SHA-256 of the archive and of each blob
+  (vettid-vault `docs/RELEASING.md`, "Changing the toolchain", shows
+  how to check them by hand).
   `NITRO_CLI_ARTIFACTS` is set per build.
 - It builds twice from clean (the existing `enclave-image` job already
   proves byte-identical binaries) and requires identical PCR0/1/2.
 - Outputs, per channel (`prod`, `staging`): `vault-enclave.eif`,
   `measurements.json` (commit, binary SHA-256, PCR0–2, nitro-cli version,
-  toolchain lock hash), the `vault-parent` arm64 binary and its SHA-256.
+  kernel blob set version, toolchain lock hash), the `vault-parent` arm64 binary and its SHA-256.
 - **Confirm in W2:** the CI-built EIF's PCR0 equals one built on a
   Graviton host from the same commit with `run-on-host.sh build`. If
   nitro-cli cannot run in the container, the fallback is the same build
@@ -818,6 +858,20 @@ promotion (STAGING-DEVELOPMENT-PLAN §2.4).
   the PCR0s must match. The release log explains how anyone can repeat it.
 - The attestations are convenience; the authority members rely on is the
   PCR0 in the signed manifest, checked by attestation and by KMS.
+
+### 5.4 Enclave kernel currency
+
+(0.1.27, approved by the owner 2026-10-15; from vettid-vault #87.)
+vettid-vault checks weekly whether the enclave kernel is the newest
+point release of its kernel.org longterm series and whether kernel.org
+marks the series end of life; when a newer point release exists it
+opens an issue with the change to make. When the pinned kernel is more
+than 30 days behind the first newer point release, or its series is end
+of life, the weekly check and the release workflow show a warning. It is
+a warning, not a block: the maintainer moves the kernel at the next
+monthly release, or says in the release notes why not. A kernel change
+needs the hardware run (§11.2). The check applies to whichever set the
+lock pins (§5.1): with AWS's 6.6.79 pinned today it warns on every run.
 
 ## 6. Keys
 
@@ -1757,7 +1811,7 @@ job's vault deletion. Order (W4):
 | # | Step | Who / where | Output |
 |---|---|---|---|
 | 1 | Freeze; the release commit sets `releasecfg/prod.json` `release: N` (and any pin changes); review; merge to `main`; signed tag `release/prod/N` on that commit (vettid-vault docs/RELEASING.md) | vettid-vault | tag |
-| 2 | `release` workflow: EIF ×2 per channel, measurements, parent binaries, attestations; draft GitHub release | CI, arm64 | artifacts, PCRs |
+| 2 | `release` workflow: EIF ×2 per channel, measurements, parent binaries, attestations; draft GitHub release; the run's enclave kernel warning, if any (§5.4), is answered in the release notes (moved, or why not) | CI, arm64 | artifacts, PCRs |
 | 3 | Independent rebuild; PCR0 must match | owner | sign-off |
 | 4 | Staging: add the staging release to `vault/releases/staging.json` (with `log` and `notes` = its staging log URL, §7), deploy its key and release stack, hardware self-test, vaultctl end-to-end, compat run incl. a move from the previous staging release (§11) | staging | report |
 | 5 | Production PR: add N to `vault/releases/prod.json` (status `candidate`: in CDK, not in the manifest; with `log`, reviewed in this PR, and `notes` = `https://vettid.org/security/releases/N/`), `admitted_pcr0s` = every earlier release not `removed` and every `removed` one that can still be rescued (§6.2; while `seal_key` is empty the validation refuses a list that leaves one out, and `check:manifest` and `vault:manifest sign` one that names a `removed` release past its window; N's own PCR0 is admitted implicitly; `lib/vault/release-list.ts`) | vettid.org | PR |
@@ -1921,6 +1975,22 @@ the release's own AMI (both channels) rather than a host build, with the
 deletable smoke key in each account. `VettidOrgVaultSmokeStack` stays as
 the ad-hoc tool for testing hardware questions outside a release.
 
+(0.1.27, approved by the owner 2026-10-15; vettid-vault #88 and #87.)
+Its required kernel checks (the `kernel.*` checks marked required:
+user namespaces, unprivileged bpf, io_uring, the kernel settings the
+enclave has, `/proc` hidepid) and the vault process's filter checks
+(`vault_process.seccomp_installed`, `vault_process.seccomp_refuses_*`)
+must pass; a release whose self-test reports any of them failed is not
+published. The informational ones are reported only: `kernel.release`,
+`kernel.yama_ptrace_scope` (AWS's arm64 kernel has no Yama), the
+settings an older kernel lacks (`absent: …`),
+`vault_process.seccomp_unfiltered_*` and
+`vault_process.seccomp_allow_list`. On a source-built kernel (once the
+lock pins one, §5.1) the self-test's kernel checks are also required:
+release and command line as pinned, lockdown, Yama, no module support,
+user namespaces, unprivileged BPF; `kernel.release` and
+`kernel.yama_ptrace_scope` are then required, not informational.
+
 ### 11.3 The move-only contract
 
 - **Compat matrix in vettid-vault CI** (nightly and on PRs touching
@@ -2068,6 +2138,16 @@ W4 can go any time; W2 and W3 can run beside W1; W5–W8 follow W3.
     canary-only app build with separate signing would close this; it is
     a possible later hardening tied to the canary build's signing
     (W10-READINESS B8), not done now.
+11. **The vault process's system-call filter is an allow list**
+    (0.1.27; vettid-vault #88). A Go or library update that makes a
+    call not on it fails with EPERM in the vault process; the e2e
+    suite, the strict-filter workload test and the hardware self-test
+    of every release candidate are what catch it.
+12. **AWS does not publish current enclave kernels** (0.1.27;
+    vettid-vault #87): 4.14 in nitro-cli; one 6.6 build, February 2025.
+    VettID builds its own from kernel.org source (§5.1, once the lock
+    adopts it); that kernel is tested on Nitro only by VettID's
+    hardware runs, so every kernel change needs one.
 
 ## 15. Owner decisions
 

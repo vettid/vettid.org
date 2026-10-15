@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.31.0
-date: 2026-10-14
+version: 0.31.1
+date: 2026-10-15
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -24,6 +24,16 @@ related:
   - VAULT-HOST-PROTOCOL.md (0.1.7; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.31.1: normative, as built in vettid-vault #88; approved by the
+    owner 2026-10-15. §12.4: a vault process also runs under a
+    **system-call filter that is an allow list** (the calls it needs,
+    some with restricted arguments; every other refused), and before
+    the first vault process starts the supervisor closes user
+    namespaces, unprivileged bpf, io_uring, module and kernel loading
+    and the kernel's address and log disclosure for the whole enclave,
+    and hides every process's `/proc` entries from other users; no
+    vault process starts while any is open. The rest of the document is
+    unchanged
   - 0.31.0: normative, as built in vettid-vault #84; approved by the
     owner 2026-10-14 (owner decisions of 2026-10-13). **Only the
     member's app approves a connection's pending invocation, and only
@@ -12031,7 +12041,19 @@ vault**.
 - **Isolation of the processes from each other:** each runs under its own
   user and group id, is not dumpable and cannot be traced, inherits no
   file descriptor but its channel and no writable shared file or
-  directory, and runs under resource limits (memory, file descriptors).
+  directory, runs under resource limits (memory, file descriptors), and
+  under a system-call filter that is an allow list: the calls the vault
+  process needs (its memory, threads, signals to itself, clocks, random
+  bytes, its own descriptors), some only with restricted arguments;
+  every other call is refused, so that it can create no socket, write no
+  file, start no process or program, reach no other process, and use no
+  kernel interface it does not need, also on a newer kernel. Before the
+  first vault process starts, the supervisor closes user namespaces,
+  unprivileged bpf, io_uring, module and kernel loading and the kernel's
+  address and log disclosure for the whole enclave, and hides every
+  process's `/proc` entries from other users; a vault process is not
+  started while any of these is open (0.31.1, as built in vettid-vault
+  #88).
 - **Locks:** an owner request, memory pressure, a lost lease or an
   unreachable parent (§12.3) make the supervisor ask the process to lock (flush, `vault.locking`,
   exit); a process that does not exit in time is killed. A process that
