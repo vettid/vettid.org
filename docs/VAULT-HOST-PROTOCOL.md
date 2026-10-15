@@ -1,8 +1,8 @@
 ---
 title: VAULT-HOST-PROTOCOL
 status: approved by the owner 2026-10-12 (H1–H9 as recommended)
-version: 0.1.8
-date: 2026-10-14
+version: 0.1.9
+date: 2026-10-15
 owner: Al Liebl (Mesmer)
 component: vault enclave (supervisor), parent (host process)
 related:
@@ -12,6 +12,18 @@ related:
   - VAULT-RELAY-SCALING.md (0.1.2) §6, §10
   - vettid-vault `internal/hostproto`, `enclave/supervisor`, `enclave/egress`, `parent`, docs/V3-NOTES.md "Enclave ↔ parent", docs/SMOKE.md
 changelog:
+  - 0.1.9: **approved by the owner 2026-10-15** (vettid.org #288),
+    with VAULT-MESSAGING 0.32.0, the message
+    attachments of its §10.5.1 (owner decisions of 2026-10-15); binds
+    nothing before the vault release that implements them ("release
+    A"). No wire change. §5.2: two key rows, an attachment's content
+    and thumbnail under `vaults/<vault_id>/att/`. §9: an attachment
+    object is at most 8,257,577 bytes. §11.2: what the parent sees of
+    them. §12: a new requirement **P15: the parent deletes every
+    object under `vaults/<vault_id>/att/` after a vault is reported
+    `deleted`**, because an erase without the vault's DEK cannot read
+    the attachment index (VAULT-MESSAGING §12.5); it needs the host
+    role to list that prefix
   - 0.1.8: as built in vettid-vault #77 (the parent only); approved by
     the owner 2026-10-14. §2: the parent closes a connection on the
     control or egress port whose peer is not its enclave's context id
@@ -447,6 +459,8 @@ for any other. The enclave uses:
 |---|---|
 | `vaults/<vault_id>/state` | the vault's state, encrypted under its DEK |
 | `vaults/<vault_id>/header/<pcr0>` | the header sealed to that release (VAULT-MESSAGING §11.10.2) |
+| `vaults/<vault_id>/att/<att_id>` | (0.1.9, release A) an attachment's content, encrypted under its own key, which only the vault's state holds (VAULT-MESSAGING §10.5.1). `att_id` is a ULID written in lower case, as keys allow |
+| `vaults/<vault_id>/att/<att_id>.t` | (0.1.9, release A) the same attachment's thumbnail |
 | `users/<hex SHA-256 of the member's user_guid, labelled>/vault` | which vault the member enrolled; holds only a `vault_id` |
 | `smoke/<run id>/object` | the self-test only, with a parent started for it (§6.5) |
 
@@ -821,6 +835,7 @@ version, or with `len` 0, is closed without an answer.
 | Store key | 256 bytes, the characters of §5.2 | both; the prefixes by the parent |
 | Store version | 1 to 256 bytes | enclave |
 | Stored object (`data` of a `StoreGet` reply and of a `StorePut`) | 67,108,583 bytes: the frame body less 281 (a reply's kind, id and field count, three field lengths, the status and a 256-byte version) | parent; a larger object is answered `error`, on read and on write |
+| Attachment object (0.1.9, release A) | 8,257,577 bytes: 41 plus the padded plaintext of the largest content (VAULT-MESSAGING §5.5, §10.5.1), so no larger than the relay's `max_blob_bytes`; a thumbnail at most 34,857 | enclave (it writes no larger one); within the stored-object limit above |
 | Descriptor, attestation | 4,096 and 32,768 bytes | parent |
 | Log record | 16 pairs, 200 bytes a value | parent |
 | Egress header, connect, answer | 10 s, 10 s (parent); 15 s (enclave) | each |
@@ -913,7 +928,12 @@ a vault is above this protocol:
   the release of a header; the size of the ciphertext; the version;
   and the moment of every read, write and delete. A vault writes its
   state when something durable changed, so the times of its writes
-  are a record of when that vault was active;
+  are a record of when that vault was active. (0.1.9, release
+  A) Attachment objects (§5.2) add: when the vault stored, read or
+  deleted an attachment or its thumbnail, the size of each (padded:
+  VAULT-MESSAGING §5.5), and so how many attachments the vault
+  holds and when its member opened one. Not what they show, their
+  type or name, or which connection or message they belong to;
 - log records that name it: that it was locked and by which trigger
   (`lease_lost`, `shutdown`, `vault_cap`, `memory_pressure`), that its
   final flush failed, that its process ended and with what code, and
@@ -1090,6 +1110,31 @@ is satisfied from a852e36 (#74); as first written it was satisfied at
   before it has read that parent's next `Ping` and has written the
   `Stopped` reports (§4.3).
 - **P14.** The enclave MUST NOT let a log record wait for the parent.
+
+*P15: added in 0.1.9 (approved by the owner 2026-10-15, vettid.org
+#288, with VAULT-MESSAGING 0.32.0); normative from release A, not
+built.*
+
+- **P15.** After the parent records a vault's `deleted` lifecycle
+  event (§7.2), whether the vault deleted itself or its stored objects
+  were erased without it, and only once its own conditional update has
+  marked the vault's row `deleted` (not when that update is refused,
+  for instance because another instance holds the lease), the parent
+  MUST delete every object whose
+  key starts with `vaults/<vault_id>/att/` (listing that prefix, a
+  missing object counting as deleted), and MUST retry until the prefix
+  is empty. The enclave deletes the attachments it has indexed
+  (VAULT-MESSAGING §12.5 step 4), but an erase without the vault's
+  DEK cannot read that index; this sweep is what leaves no attachment
+  behind then. Every path that erases a vault reports `deleted`,
+  also one that finishes an erase from a header that records
+  `deleting` (VAULT-MESSAGING §12.5 "Convergence"; as built, those
+  paths do not report it). The host role needs `s3:ListBucket` on the data bucket
+  for the prefixes `vaults/*/att/*` only (today it may list
+  `manifests/*` only). A dishonest parent gains nothing: it sees every
+  attachment object's key when it is written, and could always keep
+  or delete the objects it stores; skipping the sweep leaves only
+  objects encrypted under keys that the deletion destroyed.
 
 ## 13. Open points
 
