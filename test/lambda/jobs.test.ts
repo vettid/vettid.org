@@ -998,7 +998,7 @@ describe('vault alarm mailer (VAULT-MESSAGING 0.9.0 §11.5)', () => {
       expect(text).toContain('cannot be restored');
       expect(text).not.toContain(VID);
       const [rowDel, ptrDel] = deletes();
-      expect(rowDel).toMatchObject({ Key: { vault_id: VID }, ConditionExpression: '#s = :deleted', ExpressionAttributeValues: { ':deleted': 'deleted' } });
+      expect(rowDel).toMatchObject({ Key: { vault_id: VID }, ConditionExpression: '#s = :deleted AND attribute_not_exists(att_sweep_pending)', ExpressionAttributeValues: { ':deleted': 'deleted' } });
       expect(ptrDel).toMatchObject({ Key: { vault_id: 'user#g1' }, ConditionExpression: 'current_vault_id = :id', ExpressionAttributeValues: { ':id': VID } });
       expect(audits()[0].detail).toMatchObject({ kind: 'vault_deleted', mailed: true });
     });
@@ -1023,6 +1023,64 @@ describe('vault alarm mailer (VAULT-MESSAGING 0.9.0 §11.5)', () => {
       await expect(alarms.processRecord(rec(del()))).rejects.toThrow('x');
       expect(deletes()).toHaveLength(0);
       err.mockRestore();
+    });
+
+    describe('2.7.1: the row is kept while the attachment sweep is pending (VAULT-HOST-PROTOCOL P15)', () => {
+      const swept = (extra: Record<string, unknown> = {}) =>
+        ({ vault_id: VID, user_guid: 'g1', state: 'deleted', alarm: { kind: 'vault_deleted', alarm_id: AID, at: 1_790_000_000, handled_at: 1_790_000_100 }, ...extra });
+
+      test('sweep pending: mailed, pointer removed, the row kept and stamped handled (only the alarm map is written)', async () => {
+        ddb.on(DeleteCommand, { Key: { vault_id: VID } } as any).rejects(ccf()); // att_sweep_pending is set
+        ddb.on(DeleteCommand, { Key: { vault_id: 'user#g1' } } as any).resolves({});
+        expect(await alarms.processRecord(rec(del({ att_sweep_pending: true })))).toBe('mailed');
+        expect(ses.commandCalls(SendEmailCommand)).toHaveLength(1);
+        expect(deletes().map((d) => d.Key!.vault_id)).toEqual([VID, 'user#g1']);
+        const stamp = updates().find((u) => u.UpdateExpression === 'SET alarm.handled_at = :now')!;
+        expect(stamp).toMatchObject({ Key: { vault_id: VID }, ConditionExpression: 'alarm.alarm_id = :id', ExpressionAttributeValues: { ':id': AID } });
+        expect(typeof stamp.ExpressionAttributeValues![':now']).toBe('number');
+        expect(JSON.stringify(stamp)).not.toContain('state');
+      });
+
+      test('sweep pending and no member: audited, the row kept and stamped as well', async () => {
+        ddb.on(DeleteCommand, { Key: { vault_id: VID } } as any).rejects(ccf());
+        ddb.on(DeleteCommand, { Key: { vault_id: 'user#g1' } } as any).resolves({});
+        ddb.on(GetCommand, { TableName: 'members' } as any).resolves({});
+        expect(await alarms.processRecord(rec(del({ att_sweep_pending: true })))).toBe('not_mailed');
+        expect(updates().filter((u) => u.UpdateExpression === 'SET alarm.handled_at = :now')).toHaveLength(1);
+      });
+
+      test('a row removed at once (no sweep pending, as before release A) is not stamped', async () => {
+        ddb.on(DeleteCommand).resolves({});
+        expect(await alarms.processRecord(rec(del()))).toBe('mailed');
+        expect(updates().filter((u) => u.UpdateExpression === 'SET alarm.handled_at = :now')).toHaveLength(0);
+      });
+
+      test('the follow-up (sweep done, notice handled): the row goes under the same condition; nothing is mailed or claimed', async () => {
+        ddb.on(DeleteCommand).resolves({});
+        expect(await alarms.processRecord(rec(swept()))).toBe('removed');
+        expect(deletes()).toEqual([expect.objectContaining({ Key: { vault_id: VID }, ConditionExpression: '#s = :deleted AND attribute_not_exists(att_sweep_pending)' })]);
+        expect(ses.commandCalls(SendEmailCommand)).toHaveLength(0);
+        expect(updates()).toHaveLength(0);
+        expect(audits()).toHaveLength(0);
+      });
+
+      test('the follow-up does nothing while the sweep is pending, before the notice was handled, or for another state or kind', async () => {
+        ddb.on(DeleteCommand).resolves({});
+        const r = await Promise.all([
+          alarms.processRecord(rec(swept({ att_sweep_pending: true }))),
+          alarms.processRecord(rec(swept({ alarm: { kind: 'vault_deleted', alarm_id: AID, at: 1 } }))), // the claim's own record
+          alarms.processRecord(rec(swept({ state: 'locked' }))),
+          alarms.processRecord(rec(swept({ alarm: { kind: 'credential_clone', alarm_id: AID, at: 1, handled_at: 2 } }))),
+          alarms.processRecord(rec(swept({ vault_id: 'user#g1' }))),
+        ]);
+        expect(r).toEqual(['ignored', 'ignored', 'ignored', 'ignored', 'ignored']);
+        expect(deletes()).toHaveLength(0);
+      });
+
+      test('the follow-up losing its condition (the sweep pending again, the row gone) is not an error', async () => {
+        ddb.on(DeleteCommand).rejects(ccf());
+        expect(await alarms.processRecord(rec(swept()))).toBe('ignored');
+      });
     });
   });
 });

@@ -582,7 +582,22 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
           batchSize: 10,
           retryAttempts: 3,
           bisectBatchOnError: true,
-          filters: [lambda.FilterCriteria.filter({ eventName: lambda.FilterRule.isEqual('MODIFY'), dynamodb: { NewImage: { alarm_pending: { BOOL: lambda.FilterRule.isEqual(true) } } } })],
+          filters: [
+            lambda.FilterCriteria.filter({ eventName: lambda.FilterRule.isEqual('MODIFY'), dynamodb: { NewImage: { alarm_pending: { BOOL: lambda.FilterRule.isEqual(true) } } } }),
+            // MEMBER-API 2.7.1 (VAULT-HOST-PROTOCOL P15): a deleted vault's
+            // row kept for the parent's attachment sweep goes once its notice
+            // was handled and the sweep is done (att_sweep_pending removed).
+            lambda.FilterCriteria.filter({
+              eventName: lambda.FilterRule.isEqual('MODIFY'),
+              dynamodb: {
+                NewImage: {
+                  state: { S: lambda.FilterRule.isEqual('deleted') },
+                  att_sweep_pending: { BOOL: lambda.FilterRule.notExists() },
+                  alarm: { M: { kind: { S: lambda.FilterRule.isEqual('vault_deleted') }, handled_at: { N: lambda.FilterRule.exists() } } },
+                },
+              },
+            }),
+          ],
         }),
       );
       names.addEventSource(

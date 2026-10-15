@@ -27,6 +27,18 @@
  * so the member is emailed (no rate limit: one notice per deletion), then
  * the vault row (still `deleted`) and the member's pointer row (if it still
  * names this vault) are removed, so the next enrollment is a fresh one.
+ *
+ * Release A (VAULT-HOST-PROTOCOL 0.1.11, P15; MEMBER-API 2.7.1): the
+ * parent's update that marks the row `deleted` also sets
+ * `att_sweep_pending`, and removes it once it has deleted every object under
+ * `vaults/<vault_id>/att/`. A restarted parent resumes the sweeps that rows
+ * still record, so the vault row is kept while `att_sweep_pending` is set:
+ * the notice is handled as before (mail, audit, pointer row), the alarm is
+ * stamped `alarm.handled_at`, and the row goes when a later stream record
+ * shows it `deleted`, handled and no longer pending (a second filter on the
+ * event source; the parent's removal of `att_sweep_pending` is that record).
+ * The stamp is what tells the follow-up that the notice was handled, so a
+ * row is never removed while its notice could still need a retry.
  */
 import type { DynamoDBRecord, DynamoDBStreamHandler } from 'aws-lambda';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
@@ -84,8 +96,9 @@ interface AlarmRow {
   vault_id: string;
   user_guid?: string;
   state?: unknown;
-  alarm?: { kind?: unknown; alarm_id?: unknown; at?: unknown };
+  alarm?: { kind?: unknown; alarm_id?: unknown; at?: unknown; handled_at?: unknown };
   alarm_pending?: unknown;
+  att_sweep_pending?: unknown;
 }
 
 const isCcf = (e: unknown) => (e as Error).name === 'ConditionalCheckFailedException';
@@ -142,21 +155,53 @@ async function markEmailed(vaultId: string, alarmId: string, now: number): Promi
   }
 }
 
-/** Remove a deleted vault's row and the member's pointer to it (§12.5). */
-async function removeRows(vaultId: string, guid: string | undefined): Promise<void> {
+/**
+ * Remove a deleted vault's row, unless the parent's attachment sweep is
+ * still pending on it (P15). Returns whether the row went; false also when
+ * it is gone already or no longer `deleted`.
+ */
+async function removeVaultRow(vaultId: string): Promise<boolean> {
   try {
     await ddb.send(
       new DeleteCommand({
         TableName: table.vaults(),
         Key: { vault_id: vaultId },
-        ConditionExpression: '#s = :deleted',
+        ConditionExpression: '#s = :deleted AND attribute_not_exists(att_sweep_pending)',
         ExpressionAttributeNames: { '#s': 'state' },
         ExpressionAttributeValues: { ':deleted': 'deleted' },
       }),
     );
+    return true;
   } catch (e) {
     if (!isCcf(e)) throw e;
+    return false;
   }
+}
+
+/** The notice was handled: the follow-up record may remove the row (only the alarm map is written). */
+async function markHandled(vaultId: string, alarmId: string, now: number): Promise<void> {
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: table.vaults(),
+        Key: { vault_id: vaultId },
+        UpdateExpression: 'SET alarm.handled_at = :now',
+        ConditionExpression: 'alarm.alarm_id = :id',
+        ExpressionAttributeValues: { ':now': now, ':id': alarmId },
+      }),
+    );
+  } catch (e) {
+    if (!isCcf(e)) throw e; // the row is gone, or a newer alarm replaced this one
+  }
+}
+
+/**
+ * After the deletion notice (§12.5): the vault row goes (or, while the
+ * attachment sweep is pending, is stamped handled and kept for the
+ * follow-up), and the member's pointer row goes if it still names it.
+ */
+async function removeRows(vaultId: string, guid: string | undefined, alarmId: string): Promise<void> {
+  if (!(await removeVaultRow(vaultId))) await markHandled(vaultId, alarmId, Math.floor(Date.now() / 1000));
   if (!guid) return;
   try {
     await ddb.send(
@@ -172,10 +217,22 @@ async function removeRows(vaultId: string, guid: string | undefined): Promise<vo
   }
 }
 
+/** A deleted vault's row whose notice was handled and whose sweep is done: the follow-up removes it. */
+const sweptAndHandled = (row: AlarmRow) =>
+  row.alarm_pending === undefined &&
+  row.att_sweep_pending === undefined &&
+  row.state === 'deleted' &&
+  row.alarm?.kind === 'vault_deleted' &&
+  typeof row.alarm.handled_at === 'number';
+
 /** Handle one stream record. Exported for tests. */
-export async function processRecord(rec: DynamoDBRecord): Promise<'ignored' | 'claimed_elsewhere' | 'mailed' | 'not_mailed'> {
+export async function processRecord(rec: DynamoDBRecord): Promise<'ignored' | 'claimed_elsewhere' | 'mailed' | 'not_mailed' | 'removed'> {
   if (rec.eventName === 'REMOVE' || !rec.dynamodb?.NewImage) return 'ignored';
   const row = unmarshall(rec.dynamodb.NewImage as Parameters<typeof unmarshall>[0]) as AlarmRow;
+  if (sweptAndHandled(row)) {
+    if (typeof row.vault_id !== 'string' || !VAULT_ID_RE.test(row.vault_id)) return 'ignored';
+    return (await removeVaultRow(row.vault_id)) ? 'removed' : 'ignored';
+  }
   const a = row.alarm;
   if (row.alarm_pending !== true || !a || typeof a.alarm_id !== 'string' || !ALARM_ID_RE.test(a.alarm_id)) return 'ignored';
   if (typeof row.vault_id !== 'string' || !VAULT_ID_RE.test(row.vault_id)) return 'ignored';
@@ -189,7 +246,7 @@ export async function processRecord(rec: DynamoDBRecord): Promise<'ignored' | 'c
   const deletion = kind === 'vault_deleted';
   const notMailed = async (reason: string) => {
     await audit('system', 'vault.alarm_email', subject, { ...detail, mailed: false, reason });
-    if (deletion) await removeRows(vaultId, row.user_guid);
+    if (deletion) await removeRows(vaultId, row.user_guid, alarmId);
     return 'not_mailed' as const;
   };
 
@@ -212,7 +269,7 @@ export async function processRecord(rec: DynamoDBRecord): Promise<'ignored' | 'c
     throw e;
   }
   await audit('system', 'vault.alarm_email', subject, { ...detail, mailed: true });
-  if (deletion) await removeRows(vaultId, row.user_guid);
+  if (deletion) await removeRows(vaultId, row.user_guid, alarmId);
   else await markEmailed(vaultId, alarmId, Math.floor(Date.now() / 1000));
   return 'mailed';
 }

@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.33.0
+version: 0.33.1
 date: 2026-10-15
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -13,7 +13,7 @@ related:
   - CALLS-PLAN.md (0.1.3) §13 (phase C2; decisions D12–D26, decided 2026-10-12)
   - PUSH-GATEWAY.md (0.5.0)
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.7.0)
+  - MEMBER-API.md (2.7.1)
   - ANDROID-PLAN.md (0.1.40)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -21,9 +21,28 @@ related:
   - VAULT-RELEASES.md (0.1.28; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
-  - VAULT-HOST-PROTOCOL.md (0.1.10; the enclave ↔ parent protocol as built)
+  - VAULT-HOST-PROTOCOL.md (0.1.11; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.33.1: errata to the attachments text (0.32.0, 0.32.1) from the
+    attachments build; **approved by the owner 2026-10-15 (as built in
+    vettid-vault #93)**; release A. Independent of 0.33.0's release R.
+    (1) §7.2, §10.1: the one fresh standing token in 24 hours bounds
+    the refreshes after `quota_exceeded` (the latest standing token
+    issued to the connection has 3 or more days left); every other
+    refresh from a connection, near a token's end, gets at most one
+    fresh standing token an hour. (2) §7.3, §10.5.1 receiving: an
+    attachment that waits for an upload holds only its thumbnail
+    against the store limits; the limits are checked again when its
+    blob arrives and when its fetch starts. (3) §10.5.1 fetching: the
+    120 s are counted from the request's arrival; the wait for the
+    instance's admission ("Transfers and memory") is part of the 30 s,
+    after which the answer is `busy`. (4) §10.5.1 deletion: the record
+    of deleted outgoing attachments keeps at most 4,096 (`attachments`),
+    the newest; a `missing` for one no longer kept is ignored, as for a
+    `message_id` the vault never sent. VAULT-HOST-PROTOCOL 0.1.11
+    (P15's record and resumption) and MEMBER-API 2.7.1 (the row kept
+    for it) follow
   - 0.33.0: normative once approved; **wording for the owner's
     approval** (owner decisions of 2026-10-13 to 2026-10-15, the open
     questions as recommended; the old phone's keys after a transfer as
@@ -3972,12 +3991,13 @@ denylisted when the request or pairing ends without one (§7.4).
   issuing vault (0.32.1) takes a refresh as one after `quota_exceeded`
   when the latest standing token it issued to that connection still
   has 3 or more days left (a refresh for an ending token comes later,
-  above). **Every refresh from a connection, whatever its reason, gets
-  at most one fresh standing token in 24 hours**; within that, the
-  vault answers `too_soon` (body `{allowed_after}`), and the peer asks
-  again after `allowed_after`. A standing token lasts up to 30 days and
-  is refreshed in its last 3, so the bound never stops an ordinary
-  refresh for long. The old token's
+  above). **A refresh after `quota_exceeded` gets at most one fresh
+  standing token in 24 hours** from a connection; (0.33.1) **every
+  other refresh from it, near a token's end, at most one an hour**.
+  Within either bound the vault answers `too_soon` (body
+  `{allowed_after}`), and the peer asks again after `allowed_after`. A
+  standing token lasts up to 30 days and is refreshed in its last 3, so
+  neither bound stops an ordinary refresh for long. The old token's
   `jti` is denylisted when the fresh one is issued (§7.4), so a refresh
   never doubles what a connection may deposit; the vault's own
   limits (§7.3) are what bound a connection's attachments. A token's
@@ -4008,8 +4028,8 @@ top of that, the vault limits each peer to:
   already counted do not count again;
 - (0.32.0, release A) 256 MiB of stored attachments received
   from it, an attachment whose transfer is in progress counted at its
-  declared size and one that waits for an upload not at all
-  (`peer_storage`, §10.5.1; 0.32.1), so that one connection cannot fill the vault's store
+  declared size and one that waits for an upload by its thumbnail
+  only (`peer_storage`, §10.5.1; 0.32.1, 0.33.1), so that one connection cannot fill the vault's store
   for the others or for the member's own sending;
 - (0.32.0, release A) as a sender, 64 fresh uploads and 256
   MiB per rolling 24 hours on its `missing` (`peer_reuploads`), at the
@@ -4492,8 +4512,9 @@ an answer to an unknown or expired id is dropped.
   - (0.18.0) `too_soon`: `account.name.set` within 30 days of the last
     applied name change, with body `{allowed_after}` (RFC 3339, §10.8);
     (0.32.0, release A) also a peer's `relay.token.refresh`
-    within 24 hours of the last fresh standing token that refreshes
-    gave that connection, whatever the reason (§7.2; 0.32.1);
+    after `quota_exceeded` within 24 hours of the last fresh standing
+    token that refreshes gave that connection, and (0.33.1) any other
+    refresh within an hour of it (§7.2; 0.32.1);
   - `bad_password`, `backoff`, `stale_credential`, `utk_invalid`: §3.5.3,
     §3.5.4. Since 0.17.0 a `backoff` error response's body is
     `{retry_after}`: the whole seconds, rounded up and at least 1, until
@@ -5156,7 +5177,7 @@ from a peer).
 | `photo_max_side` | 8,192 pixels | `width` and `height`; recipients decode nothing larger (ANDROID-PLAN) |
 | `attachment_storage` | 1,073,741,824 bytes (1 GiB) | per vault: the stored content and thumbnails of every attachment, sent and received (owner decision 3) |
 | `attachments` | 4,096 | stored attachments per vault (bounds the index in vault state) |
-| `peer_storage` | 268,435,456 bytes (256 MiB, a quarter of `attachment_storage`) | stored attachments received from one connection, an attachment whose fetch is in progress counted at its declared size (0.32.1: a waiting one not at all) |
+| `peer_storage` | 268,435,456 bytes (256 MiB, a quarter of `attachment_storage`) | stored attachments received from one connection, an attachment whose fetch is in progress counted at its declared size (0.32.1, 0.33.1: a waiting one by its thumbnail only) |
 | `peer_attachments` | 64 attachments and 268,435,456 bytes (256 MiB) per rolling 24 hours | accepted from one connection (§7.3) |
 | `peer_reuploads` | 64 uploads and 268,435,456 bytes per rolling 24 hours | uploads the sender's vault makes again for one connection on its `missing` |
 | `attachment_transfers` | 2 per vault; per enclave instance by memory (below), at most 4 until measured | blob transfers in progress at once |
@@ -5431,7 +5452,10 @@ connection:
    fetch, a minute or two at most), this one's included if it named a
    blob. An attachment that waits for an upload (a deliver without a
    blob, or one waiting for the sender, its backoff or its turn) holds
-   no room (owner decision of 2026-10-15). A refusal stores the message (its `text`, if any) with the
+   only its thumbnail, whose object is stored (owner decision of
+   2026-10-15; 0.33.1: the thumbnail counts like any stored object).
+   (0.33.1) The limits are checked again when its blob arrives (a
+   deliver that names one) and when its fetch starts (step 2). A refusal stores the message (its `text`, if any) with the
    attachment `failed`, answers `message.attachment.status{refused,
    reason?}` (`rate` or `type`; **no reason for `full`**, so that the
    sender learns only that it could not be delivered, not that this
@@ -5530,8 +5554,11 @@ below):
   `PUT /v1/blob/{device_mailbox}` under the standing token the device
   issued it (§7.1), and answers `{blob, expires_at}`. (0.32.1) The
   vault starts the transfer within 30 s of the request or answers
-  `busy`; the whole request, from its arrival to the answer, takes at
-  most 120 s, after which the vault stops the transfer, deletes any
+  `busy`; (0.33.1) those 30 s include the wait for the instance's
+  admission ("Transfers and memory", below) and for the vault's own
+  `attachment_transfers`. The whole request takes at most 120 s,
+  (0.33.1) counted from the request's arrival, admission wait included,
+  to the answer; after that the vault stops the transfer, deletes any
   blob it uploaded for it, and answers `relay_error`.
   The device fetches the blob from its own mailbox, deletes it there,
   checks it as in sending step 5 (with its own type and dimension
@@ -5671,7 +5698,10 @@ deleted outgoing attachment (its `connection_id`, `message_id`,
 `sent_at` and whether it was `delivered` or `refused`; no key, no
 object) until its `missing_window` ends, so that a later `missing` is
 answered as "Delivery to the peer" says: `withdrawn{deleted}`, or
-ignored if it was `delivered` or `refused` before the deletion. Vault
+ignored if it was `delivered` or `refused` before the deletion.
+(0.33.1) The record keeps at most 4,096 (`attachments`) deleted
+attachments, the newest; a `missing` for one no longer kept is
+ignored, as for a `message_id` the vault never sent. Vault
 deletion erases every attachment (§12.5). An attachment
 is never deleted for its age: it is kept until the member deletes its
 message or the vault (owner decision 3). When `attachment_storage` is

@@ -671,10 +671,26 @@ describe('VettidOrgMemberApiStack', () => {
       expect(instanceWrites).toHaveLength(0);
     });
 
-    test('the alarm mailer: only the vaults stream records with alarm_pending, and may only clear the alarm flag', () => {
+    test('the alarm mailer: only the vaults stream records with alarm_pending, or (2.7.1) of a deleted row handled and swept, and may only clear the alarm flag', () => {
       t.hasResourceProperties('AWS::Lambda::EventSourceMapping', {
         StartingPosition: 'LATEST',
-        FilterCriteria: { Filters: [{ Pattern: JSON.stringify({ eventName: ['MODIFY'], dynamodb: { NewImage: { alarm_pending: { BOOL: [true] } } } }) }] },
+        FilterCriteria: {
+          Filters: [
+            { Pattern: JSON.stringify({ eventName: ['MODIFY'], dynamodb: { NewImage: { alarm_pending: { BOOL: [true] } } } }) },
+            {
+              Pattern: JSON.stringify({
+                eventName: ['MODIFY'],
+                dynamodb: {
+                  NewImage: {
+                    state: { S: ['deleted'] },
+                    att_sweep_pending: { BOOL: [{ exists: false }] },
+                    alarm: { M: { kind: { S: ['vault_deleted'] }, handled_at: { N: [{ exists: true }] } } },
+                  },
+                },
+              }),
+            },
+          ],
+        },
       });
       const alarmWrites = stmts().filter(
         (s: any) => str(s.Action) === '"dynamodb:UpdateItem"' && str(s.Resource).includes('table/vettid-org-vaults"') && str(s.Condition).includes('alarm_pending'),
