@@ -357,16 +357,20 @@ npx cdk deploy VettidOrgRelayStack       # service; reads the refs at deploy tim
   has deletion protection, no PITR (messages live ≤ 14 days); the blob
   bucket expires objects after 8 days.
 - **Table throughput ceiling.** The table is on-demand with a maximum:
-  **2,000 write and 2,000 read units a second** (its index `due`: 100
-  and 100), `RELAY_TABLE_LIMITS` in `lib/stacks/relay-data-stack.ts`,
+  **10,000 write and 2,000 read units a second** (its index `due`: 100
+  and 100; writes raised from 2,000 on 2026-10-15), `RELAY_TABLE_LIMITS` in `lib/stacks/relay-data-stack.ts`,
   where the sizing is written out. Above it DynamoDB throttles: deposits,
   acks and registrations fail or are retried, for every tenant, until
   the load is back under it (short bursts may pass; the maximum is a
   target, not exact). Without it the only bound was the account quota of
   40,000 units a second, about $2,160 a day in writes; with it, about
-  $108 a day in writes and $22 in reads. Measured use (October 2026, ten
-  members): 27 write units a second in the busiest minute; a vault host
-  of 900 vaults at a message a minute each is about 300. To raise it:
+  $540 a day in writes and $22 in reads. Measured use (October 2026, ten
+  members): 27 write units a second in the busiest minute. A 4 KB message
+  costs about 21 write units with its collect and ack (RELAY-PROTOCOL
+  §7.2), so one host of 900 vaults at three messages a minute is about
+  1,800 to 1,900, and one address at the flood guard 1,600 to 2,500: a
+  quarter of the ceiling. The table's warm throughput is 4,000 write
+  units a second; DynamoDB serves more as it scales the table. To raise it:
   change the numbers, PR, `npx cdk diff VettidOrgRelayDataStack` (the
   table must show as modified in place, never replaced), `npx cdk deploy
   VettidOrgRelayDataStack`, then `VettidOrgRelayStack` (two alarm

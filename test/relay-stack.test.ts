@@ -513,7 +513,10 @@ describe('data (stateful)', () => {
     expect(L.maxWriteRequestUnits).toBeGreaterThan(10 * (1634 / 60));
     expect(L.maxReadRequestUnits).toBeGreaterThan(10 * (494 / 60));
     // And far below the account's per-table quota, which was the only bound.
-    expect(L.maxWriteRequestUnits).toBeLessThanOrEqual(40000 / 10);
+    // One full host or one address at the flood guard (about 2,000 write
+    // units a second with collects and acks) is at most a quarter of it.
+    expect(L.maxWriteRequestUnits).toBeGreaterThanOrEqual(4 * 2000);
+    expect(L.maxWriteRequestUnits).toBeLessThanOrEqual(40000 / 4);
     expect(L.maxReadRequestUnits).toBeLessThanOrEqual(40000 / 10);
     // Still one table, one logical id: an in-place update, never a replacement.
     expect(Object.keys(data.findResources('AWS::DynamoDB::GlobalTable'))).toEqual(['TableCD117FA1']);
