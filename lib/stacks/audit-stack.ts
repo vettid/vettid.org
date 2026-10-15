@@ -731,13 +731,16 @@ export class VettidOrgAuditStack extends cdk.Stack {
       conditions: { StringEquals: { 'aws:SourceAccount': this.account } },
     }));
     const topicPolicy = topic.node.findChild('Policy');
+    // Changing a budget's notifications or subscribers replaces it, and the
+    // new budget is created before the old one is deleted, so the name must
+    // change with them (AWS refuses a second budget of the same name).
     const budgetSubscribers = [
       { subscriptionType: 'SNS', address: topic.topicArn },
       { subscriptionType: 'EMAIL', address: COST_ALERTS.budgetEmail },
     ];
     const dailyBudget = new budgets.CfnBudget(this, 'MainAccountDailyBudget', {
       budget: {
-        budgetName: resourceName(config, 'main-account-daily'),
+        budgetName: resourceName(config, 'main-account-daily-15'),
         budgetType: 'COST',
         timeUnit: 'DAILY',
         budgetLimit: { amount: COST_ALERTS.mainAccountDailyUsd, unit: 'USD' },
@@ -782,7 +785,7 @@ export class VettidOrgAuditStack extends cdk.Stack {
       const monthly = new budgets.CfnBudget(this, `MonthlyBudget${i + 1}`, {
         budget: {
           // Budget names allow letters, digits, spaces and _.:/=+-%@ only.
-          budgetName: `${resourceName(config, `monthly-${COST_ALERTS.monthlyUsd}`)} ${alerts[0]}-${alerts[alerts.length - 1]}`,
+          budgetName: `${resourceName(config, `monthly-${COST_ALERTS.monthlyUsd}`)} alerts ${alerts[0]}-${alerts[alerts.length - 1]}`,
           budgetType: 'COST',
           timeUnit: 'MONTHLY',
           budgetLimit: { amount: COST_ALERTS.monthlyUsd, unit: 'USD' },

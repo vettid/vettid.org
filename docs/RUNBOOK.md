@@ -2418,7 +2418,7 @@ console-made budget they replaced did. The anomaly subscription stays on
 the topic only: Cost Anomaly Detection sends to an SNS topic only as
 found (`IMMEDIATE`), and to email only daily or weekly.
 
-- **Daily budget for the management account** (`vettid-org-main-account-daily`,
+- **Daily budget for the management account** (`vettid-org-main-account-daily-15`,
   VettidOrgAuditStack): $15 of this account's own costs in a day (about
   five times normal), alert when the actual cost passes it. Budgets data
   is updated a few times a day, so the alert comes up to a day late: it
@@ -2433,9 +2433,11 @@ found (`IMMEDIATE`), and to email only daily or weekly.
   as actual spend passes $200, $250, $300, $350, $400, $450 and $500, and
   when the month is forecast past $500. A budget holds at most five
   notifications, so it is two budgets with the same $500 limit:
-  `vettid-org-monthly-500 200-400` and `vettid-org-monthly-500 450-500`
+  `vettid-org-monthly-500 alerts 200-400` and `vettid-org-monthly-500 alerts 450-500`
   (the second carries the forecast). Amounts in `COST_ALERTS`
-  (`lib/stacks/audit-stack.ts`). They replaced the console-made "My
+  (`lib/stacks/audit-stack.ts`). Changing a budget's notifications or
+  subscribers replaces it, so its name must change in the same commit
+  (AWS refuses a second budget of the same name). They replaced the console-made "My
   Monthly Cost Budget" ($200), deleted after they were deployed.
 
 What to do: Cost Explorer (management account), by service and by
