@@ -218,13 +218,16 @@ describe('alarms on the `rate limits` line (RELAY-PROTOCOL §7.2)', () => {
   const TABLE = { Name: 'TableName', Value: { Ref: expect.stringMatching(/^SsmParameterValuevettidorgprodrelaytablename/) } };
 
   test.each([
-    ['table-writes-high', 'ConsumedWriteCapacityUnits', RELAY_TABLE_LIMITS.maxWriteRequestUnits],
-    ['table-reads-high', 'ConsumedReadCapacityUnits', RELAY_TABLE_LIMITS.maxReadRequestUnits],
-  ])('%s: half the table\'s ceiling for 5 minutes', (name, metric, perSecond) => {
-    expect(RELAY_ALARM_LIMITS.tableBusyShare).toBe(0.5);
+    ['table-writes-high', 'ConsumedWriteCapacityUnits', RELAY_ALARM_LIMITS.tableWritesBusyPerSecond, RELAY_TABLE_LIMITS.maxWriteRequestUnits],
+    ['table-reads-high', 'ConsumedReadCapacityUnits', RELAY_ALARM_LIMITS.tableReadsBusyPerSecond, RELAY_TABLE_LIMITS.maxReadRequestUnits],
+  ])('%s: a fixed rate for 5 minutes, well below the table\'s ceiling', (name, metric, perSecond, ceiling) => {
+    // 1,000 a second, not a share of the ceiling: raising the write ceiling
+    // to 10,000 must not make a flood five times bigger before anyone hears.
+    expect(perSecond).toBe(1000);
+    expect(perSecond).toBeLessThanOrEqual(ceiling / 2);
     expect(byName(prod, name)).toMatchObject({
       Namespace: 'AWS/DynamoDB', MetricName: metric, Dimensions: [TABLE], Statistic: 'Sum', Period: 60,
-      ComparisonOperator: 'GreaterThanOrEqualToThreshold', Threshold: (perSecond * 60) / 2, EvaluationPeriods: 5, DatapointsToAlarm: 5, TreatMissingData: 'notBreaching',
+      ComparisonOperator: 'GreaterThanOrEqualToThreshold', Threshold: perSecond * 60, EvaluationPeriods: 5, DatapointsToAlarm: 5, TreatMissingData: 'notBreaching',
     });
   });
 
