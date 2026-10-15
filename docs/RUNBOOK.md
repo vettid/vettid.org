@@ -1199,6 +1199,35 @@ Do not delete versions by hand to make room: the bucket policy forbids
 it to everyone but the host role, and the 24 hours of versions are the
 only way back from a fault that damages state.
 
+**A vault nobody can unlock after a change of PIN, password or phone**
+(vault release R; VAULT-MESSAGING 0.33.0 §11.14.2; wording for the
+owner's approval). From release R a change of the DEK writes the header,
+then the state, then the header again. If the store confirmed the first
+header write but did not keep it, and the state write was kept, the
+stored header and state no longer belong together and **no phone can
+unlock** (the member's apps see failed unlocks; a transfer's new phone
+never finishes the move). The earlier state, which belongs with the
+header that is still current, is then the newest old version of
+`vaults/<vault_id>/state`, and it lasts **at least 7 days** after the
+failure (rule 1 above), not longer. Within those 7 days:
+
+1. Confirm with the member which change failed and when, and that the
+   phone that made it (for a transfer: the **old** phone, which keeps its
+   keys until the new phone has unlocked) still has the app.
+2. Lift the bucket policy's denial for this one key (as for any restore),
+   copy the state version from before the failed change back as the
+   current version (`aws s3api copy-object --copy-source
+   "$B/vaults/<vault_id>/state?versionId=<id>"`), and put the policy
+   back. Do not touch the header.
+3. The member unlocks with that phone and the PIN of before the change,
+   and repeats the change (for a transfer: approves a new one). The app
+   shows the restore as a rollback, which it is.
+
+After 7 days the earlier state is gone and the vault cannot be restored.
+With the credential backup on, the member can recover instead; with it
+off, the vault is lost. Never do this for a vault whose member did not
+ask: it undoes the member's change.
+
 ### Manifest sync (`vettid-org-vault-manifest-sync`, VAULT-RELEASES §7)
 
 Every 5 minutes: fetches the channel's served manifest, verifies it under
