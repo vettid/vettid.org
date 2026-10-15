@@ -63,6 +63,11 @@ export const COST_ALERTS = {
   monthlyForecastAlertUsd: 500,
   anomalyImpactUsd: 40,
   /**
+   * The budgets also email this address directly, as the console-made
+   * budget they replace did; the topic delivers to admin@vettid.org.
+   */
+  budgetEmail: 'al@vettid.org',
+  /**
    * The services monitor Cost Anomaly Detection created in this account
    * (Default-Services-Monitor, 2025-10-28). An account has one monitor of
    * that kind, so the subscription uses it rather than making another.
@@ -726,6 +731,10 @@ export class VettidOrgAuditStack extends cdk.Stack {
       conditions: { StringEquals: { 'aws:SourceAccount': this.account } },
     }));
     const topicPolicy = topic.node.findChild('Policy');
+    const budgetSubscribers = [
+      { subscriptionType: 'SNS', address: topic.topicArn },
+      { subscriptionType: 'EMAIL', address: COST_ALERTS.budgetEmail },
+    ];
     const dailyBudget = new budgets.CfnBudget(this, 'MainAccountDailyBudget', {
       budget: {
         budgetName: resourceName(config, 'main-account-daily'),
@@ -745,7 +754,7 @@ export class VettidOrgAuditStack extends cdk.Stack {
       notificationsWithSubscribers: [
         {
           notification: { notificationType: 'ACTUAL', comparisonOperator: 'GREATER_THAN', threshold: 100, thresholdType: 'PERCENTAGE' },
-          subscribers: [{ subscriptionType: 'SNS', address: topic.topicArn }],
+          subscribers: budgetSubscribers,
         },
       ],
     });
@@ -764,10 +773,9 @@ export class VettidOrgAuditStack extends cdk.Stack {
     // The organization's monthly budget, in two parts (COST_ALERTS). It
     // replaces the console-made "My Monthly Cost Budget" ($200), which is
     // deleted by hand once these exist (RUNBOOK "Cost alerts").
-    const toTopic = [{ subscriptionType: 'SNS', address: topic.topicArn }];
     const above = (notificationType: 'ACTUAL' | 'FORECASTED', usd: number) => ({
       notification: { notificationType, comparisonOperator: 'GREATER_THAN', threshold: usd, thresholdType: 'ABSOLUTE_VALUE' },
-      subscribers: toTopic,
+      subscribers: budgetSubscribers,
     });
     COST_ALERTS.monthlyActualAlertsUsd.forEach((alerts, i) => {
       const forecast = i === COST_ALERTS.monthlyActualAlertsUsd.length - 1 ? [above('FORECASTED', COST_ALERTS.monthlyForecastAlertUsd)] : [];
