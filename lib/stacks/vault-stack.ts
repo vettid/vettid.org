@@ -121,7 +121,12 @@ export class VettidOrgVaultStack extends cdk.Stack {
         tableName: vaultTableName(config, key),
         partitionKey,
         billing: dynamodb.Billing.onDemand(),
-        encryption: dynamodb.TableEncryptionV2.awsManagedKey(),
+        // DynamoDB's own key, not the account's AWS-managed aws/dynamodb key:
+        // an AWS-managed key can't be used from another account, and the
+        // production member API reads these tables from the API account
+        // (the resource policies below admit its roles). With DynamoDB's
+        // own key a caller needs no KMS permission at all.
+        encryption: dynamodb.TableEncryptionV2.dynamoOwnedKey(),
         pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
         deletionProtection: true,
         removalPolicy: retain,

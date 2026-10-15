@@ -78,6 +78,20 @@ describe('VettidOrgVaultStack: the roles named in key policies (guardrail, VAULT
     expect(roleNames.every((n) => typeof n === 'string')).toBe(true); // every role here has a fixed name
   });
 
+  test('the tables use DynamoDB\'s own key: the API account\'s roles can read them with no KMS permission', () => {
+    // The account's AWS-managed aws/dynamodb key can't be used from another
+    // account, so the production member API (API account) could not read
+    // these tables at all.
+    for (const stage of ['prod', 'staging']) {
+      const tables = resources(stage === 'prod' ? prod.json : synth('staging').json, 'AWS::DynamoDB::GlobalTable');
+      expect(tables).toHaveLength(4);
+      for (const [id, r] of tables) {
+        const sse = r.Properties.SSESpecification;
+        expect({ id, kms: sse?.SSEType ?? null, enabled: sse?.SSEEnabled ?? false }).toEqual({ id, kms: null, enabled: false });
+      }
+    }
+  });
+
   test('the host role holds no KMS permission (the key policies name it)', () => {
     const host = resources(prod.json, 'AWS::IAM::Role').find(([, r]) => r.Properties.RoleName === VAULT_ROLE_NAMES.host)![0];
     const hostStmts = resources(prod.json, 'AWS::IAM::Policy')
