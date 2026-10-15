@@ -583,9 +583,12 @@ unknown.
   `recovery_registered`. It writes the lifecycle event `app_key_next`
   (sent with the first header write of a replacement of the app) as the
   row's `app_key_next`, and clears it when `app_key` reaches its
-  `seq`, when an `app_key` event carries `next_cleared: true`, or when an
-  `unlocked` or `locked` report says `next: false` (VAULT-MESSAGING
-  §11.5, §11.14.2).
+  `seq`, when an `app_key` event carries `next_cleared: true` (it skips
+  the `app_key` write itself, whose `seq` is unchanged), or when an
+  `unlocked` or `locked` report says `next: false` with an `app_key_seq`
+  at least the next key's `seq` or a `header_seq` at least that of the
+  write that carried it; never on time alone (VAULT-MESSAGING §11.5,
+  §11.14.2).
 
 ### 6.2 `LeaseLost` (0x11)
 

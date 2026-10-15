@@ -1465,7 +1465,7 @@ sig_new = Ed25519(new_ik, "vettid/vms/2/rotate" || m)
   (answered `{}`, or `not_found` when the connection has no conflict or
   `new_ik` is neither candidate), which keeps that successor and drops the
   other; or they reconnect with a new invitation and safety code (§6.4).
-  Desktops and agents cannot send it. *Residual:* the carrier, or a
+  A desktop or an agent is answered `forbidden`. *Residual:* the carrier, or a
   replaying host that holds an old copy of a vault, can after any
   rotation of that vault send a second successor to each of its
   connections and so suspend all of them until each is verified again
@@ -4755,6 +4755,7 @@ device belongs to the unlock it ends.
 | `connection.get` | `{connection_id}` | `<connection>` |
 | `connection.update` | `{connection_id, version, alias?, note?, tags?, favorite?, archived?}` (at least one) | `{version}` |
 | `connection.remove` | `{connection_id}` | `{}` |
+| `connection.rotation.resolve` (0.33.0, release R; the holder only) | `{connection_id, new_ik}` | `{}`: keeps that successor of the connection's identity key and drops the other (§3.4); `not_found` when the connection has no conflict or `new_ik` is neither candidate; `forbidden` to a desktop or an agent |
 | `connection.removed` (V↔V) | — | `{}` |
 | `connection.event` | — | `{connection_id, event: "added" \| "removed" \| "stale" \| "rekeyed" \| "reconnected" \| "failed" \| "profile", pending_id?, reason?}`; `profile`: the connection's shared profile changed (§10.8); `failed`: an outgoing request ended without a connection other than by its member's decline (§6.4, 0.10.4); `reason`, only with `failed`: `declined` when the peer declined (0.10.5), absent for an expiry or an aborted handshake; `pending_id` with `added` on the inviter's side names the request it came from (on the accepter's side `connection_id` is the accept's) |
 | `block.add` | `{connection_id \| pending_id, note?}` (exactly one of the ids) | `{block_id}` |
@@ -9954,7 +9955,10 @@ Nothing secret is stored:
   **`app_key_next`** (the same two values) goes with the first header
   write and the parent writes it as `app_key_next` on the row
   (conditional on its `seq` being higher than `app_key`'s); `app_key`
-  goes with the third, and the parent then clears `app_key_next`.
+  goes with the third, and the parent then clears `app_key_next`. An
+  `app_key` event with `next_cleared: true` repeats the current key with
+  the same `seq`: the parent skips the `app_key` write and applies the
+  clear (§11.14.2).
   `unlocked` and `locked` also carry `next` (bool): whether the header
   has a `next` part (§11.14.2). The parent writes `app_key = {key,
   kid, seq}` on the vault row **whatever the lease**, conditional only on
@@ -13301,10 +13305,17 @@ vault drops a `next` part (the old phone unlocked first; a transfer's
 10 minutes ran out; step 1 is written again for a new attempt), it hands
 the parent, with that header write, the event `app_key` repeating the
 current key with `next_cleared: true`, and the parent removes
-`app_key_next`. The parent also removes it whenever an `unlocked` or
-`locked` report shows a header without a `next` part (those reports
-carry `next: false`), and the member API ignores an `app_key_next`
-older than 24 hours. So the old and the new key are both accepted only
+`app_key_next`; the repeated key has the same `seq`, so the parent skips
+the `app_key` write itself and applies only the clear. The parent also
+removes it when an `unlocked` or `locked` report shows a header without
+a `next` part (those reports carry `next: false`), but only if that
+report's `app_key_seq` is at least the next key's `seq` or its
+`header_seq` is at least that of the header write that carried
+`app_key_next`: a stale report, which the parent writes whatever the
+lease, never clears a replacement in progress. There is no time limit:
+a transfer or recovery stopped after step 2 with the vault locked for
+days leaves only the new phone able to unlock, and the member API must
+still accept its key. So the old and the new key are both accepted only
 while a replacement is really in progress.
 
 At an unlock the enclave accepts the current wrap or, if a `next` part
