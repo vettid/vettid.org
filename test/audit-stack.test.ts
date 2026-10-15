@@ -715,7 +715,7 @@ describe('cost alerts', () => {
     expect(COST_ALERTS.mainAccountDailyUsd).toBe(15);
     const b = t.findResources('AWS::Budgets::Budget').MainAccountDailyBudget;
     expect(b.Properties.Budget).toEqual({
-      BudgetName: 'vettid-org-main-account-daily',
+      BudgetName: 'vettid-org-main-account-daily-15',
       BudgetType: 'COST',
       TimeUnit: 'DAILY',
       BudgetLimit: { Amount: 15, Unit: 'USD' },
@@ -742,7 +742,7 @@ describe('cost alerts', () => {
     const all = t.findResources('AWS::Budgets::Budget');
     expect(Object.keys(all).sort()).toEqual(['MainAccountDailyBudget', 'MonthlyBudget1', 'MonthlyBudget2']);
     const monthly = [all.MonthlyBudget1, all.MonthlyBudget2];
-    expect(monthly.map((b) => b.Properties.Budget.BudgetName)).toEqual(['vettid-org-monthly-500 200-400', 'vettid-org-monthly-500 450-500']);
+    expect(monthly.map((b) => b.Properties.Budget.BudgetName)).toEqual(['vettid-org-monthly-500 alerts 200-400', 'vettid-org-monthly-500 alerts 450-500']);
     for (const b of monthly) {
       expect(b.Properties.Budget).toEqual({
         BudgetName: expect.stringMatching(/^[0-9A-Za-z _.:/=+%@-]+$/), // the characters AWS allows
