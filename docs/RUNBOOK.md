@@ -2412,7 +2412,11 @@ name servers unless it is deleted by hand, after which
 
 ## Cost alerts
 
-All to `vettid-org-security-alerts` → admin@vettid.org.
+All to `vettid-org-security-alerts` → admin@vettid.org. The three budgets
+also email al@vettid.org directly (`COST_ALERTS.budgetEmail`), as the
+console-made budget they replaced did. The anomaly subscription stays on
+the topic only: Cost Anomaly Detection sends to an SNS topic only as
+found (`IMMEDIATE`), and to email only daily or weekly.
 
 - **Daily budget for the management account** (`vettid-org-main-account-daily`,
   VettidOrgAuditStack): $15 of this account's own costs in a day (about

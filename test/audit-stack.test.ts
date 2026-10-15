@@ -704,7 +704,14 @@ describe('cost alerts', () => {
     });
   });
 
-  test('a daily cost budget of $15 for this account\'s own costs, to the security-alerts topic', () => {
+  // Budget alerts go to the topic (admin@vettid.org) and also by email to
+  // al@vettid.org directly, as the console-made budget did.
+  const budgetSubscribers = [
+    { SubscriptionType: 'SNS', Address: { Ref: topicId } },
+    { SubscriptionType: 'EMAIL', Address: 'al@vettid.org' },
+  ];
+
+  test('a daily cost budget of $15 for this account\'s own costs, to the security-alerts topic and al@vettid.org', () => {
     expect(COST_ALERTS.mainAccountDailyUsd).toBe(15);
     const b = t.findResources('AWS::Budgets::Budget').MainAccountDailyBudget;
     expect(b.Properties.Budget).toEqual({
@@ -723,7 +730,7 @@ describe('cost alerts', () => {
     expect(b.Properties.NotificationsWithSubscribers).toEqual([
       {
         Notification: { NotificationType: 'ACTUAL', ComparisonOperator: 'GREATER_THAN', Threshold: 100, ThresholdType: 'PERCENTAGE' },
-        Subscribers: [{ SubscriptionType: 'SNS', Address: { Ref: topicId } }],
+        Subscribers: budgetSubscribers,
       },
     ]);
     // Created after the topic admits Budgets, or Budgets refuses the topic.
@@ -748,7 +755,7 @@ describe('cost alerts', () => {
       expect(b.Properties.NotificationsWithSubscribers.length).toBeLessThanOrEqual(5);
       for (const n of b.Properties.NotificationsWithSubscribers) {
         expect(n.Notification).toMatchObject({ ComparisonOperator: 'GREATER_THAN', ThresholdType: 'ABSOLUTE_VALUE' });
-        expect(n.Subscribers).toEqual([{ SubscriptionType: 'SNS', Address: { Ref: topicId } }]);
+        expect(n.Subscribers).toEqual(budgetSubscribers);
       }
       expect(b.DependsOn).toEqual(expect.arrayContaining([expect.stringMatching(/^AlertsPolicy/)]));
     }
