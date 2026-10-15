@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.31.1
+version: 0.32.0
 date: 2026-10-15
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,16 +14,67 @@ related:
   - PUSH-GATEWAY.md (0.5.0)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.6.4)
-  - ANDROID-PLAN.md (0.1.37)
+  - ANDROID-PLAN.md (0.1.39)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
   - VAULT-RELEASES.md (0.1.19; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
-  - VAULT-HOST-PROTOCOL.md (0.1.7; the enclave ↔ parent protocol as built)
+  - VAULT-HOST-PROTOCOL.md (0.1.9; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.32.0: normative; **approved by the owner 2026-10-15**
+    (vettid.org #288: owner decisions of 2026-10-15, and the open
+    questions as the coordinator recommended, §15 item 38); **needs a
+    vault release** (the placeholder "release A") and an app release.
+    Every rule it adds is marked "0.32.0, release A" (or "0.32.0" for
+    the rules that apply to every message) and binds nothing before
+    then. As approved: attachments are **app-only** (desktops and
+    agents neither send nor fetch them; agents do not learn that a
+    message has one); a recipient's full store reaches the sender only
+    as a generic refusal; device tokens carry `owner_device` so that
+    each mailbox keeps room for one blob from the owner's own devices
+    (§7.1; RELAY-PROTOCOL 0.9.2). **Photo attachments** (new §10.5.1): one attachment
+    per message, a photo of at most about 8 MiB (the relay's
+    `max_blob_bytes`); the phone uploads it to its own vault, which
+    stores a copy and sends a fresh one to the connection's vault,
+    which stores its own; phones fetch on demand
+    (`message.attachment.get`) and keep nothing. New types
+    `message.attachment.get`, `.discard`, `.deliver` and `.status`;
+    `attachment` on `message.send` and `message.new`; `message.send`
+    is answered once its checks pass and the attachment's progress
+    follows as `sync.event`. At-rest format and object keys; an index
+    in vault state, created in the same flush as its message, objects
+    written after it; the relay mailbox's shared blob storage (§1.2):
+    blobs deleted once fetched, good or bad, uploads only on the
+    recipient's request once that storage is full, orphans purged;
+    a 1 GiB store per vault, 4,096 attachments, 256 MiB per
+    connection; per-connection limits (§7.3); 2 transfers per vault
+    and an instance admission by available memory (at most 4 until
+    measured); held and locked behaviour; a 7-day window after which
+    the sender is told, and fresh uploads on the recipient's `missing`
+    within 30 days, asked for only when the recipient's mailbox has
+    room, with a backoff and in turn across a connection's waiting
+    attachments, and answered `withdrawn` when the sender will not
+    upload; device and peer blobs deleted only after the content is
+    stored; agents send and fetch none; connections removed or
+    stale; deletion; audit and feed kinds (§10.9), `limit` names, the
+    error code `response_too_large` and a `sync.event` kind (§10.1),
+    storage use in `vault.status` (§10.2). §5.5: **the blob layout
+    gains a version byte and Padmé padding with the length inside**,
+    before anything uses it, with vectors (§16). §7.2: a token after
+    `quota_exceeded`, the old one denylisted; §8.6 tells the token's
+    quota from the mailbox's. §8.1: **a response that cannot be sealed
+    is answered `response_too_large`, never silence**; §8.2:
+    `message.list`, `message.get` and `message.attachment.get` are
+    volatile. §12.5 erases attachments by their recorded versions,
+    every convergence path reports `deleted`, and the parent sweeps
+    the prefix after it (VAULT-HOST-PROTOCOL 0.1.9). **Also
+    a gap closed for every message** (new §10.5.2): `message.list`
+    pages are at most 131,072 bytes and continue with `before` and
+    `next_before`; until now a long conversation's list could not fit
+    §5.5, and the vault as built then sent no answer
   - 0.31.1: normative, as built in vettid-vault #88; approved by the
     owner 2026-10-15. §12.4: a vault process also runs under a
     **system-call filter that is an allow list** (the calls it needs,
@@ -922,7 +973,8 @@ described in RFC 2119.
      - enrollment, PIN and credential;
      - items (the member's data, with tags and share rules), profile
        and settings;
-     - 1:1 connections and messaging;
+     - 1:1 connections and messaging (0.32.0: with photo
+       attachments, §10.5.1);
      - calls, with signalling over the relay;
      - device and agent pairing;
      - LEASH;
@@ -980,18 +1032,40 @@ This document uses the following RELAY-PROTOCOL 0.6.0 features:
   by §12.5);
 - **web endpoints**, `/connect` and `/.well-known/assetlinks.json`
   (§6.11; new in 0.6.0, used by §6.4's invitation URL);
+- (0.32.0, release A) **blob transfer**, `PUT /v1/blob`,
+  `GET` and `DELETE /v1/blob/{blob_id}` (§6.8; used by §5.5 and the
+  attachments of §10.5.1);
 - fractional-second timestamps (§4.1);
 - relay **policy values** advertised at registration:
   - `max_token_lifetime_seconds`;
   - `open_token_max_lifetime_seconds`;
-  - `claim_ttl_seconds`.
+  - `claim_ttl_seconds`;
+  - (0.32.0) `max_blob_bytes` and `blob_ttl_seconds`. A vault
+    and an app offer attachments only when the relay advertises both.
+  - (0.32.0) A mailbox's **blob storage cap** (RELAY-PROTOCOL
+    §6.8: blobs deposited to the mailbox and the claims it created;
+    64 MiB at vettid.org) is shared by every depositor: the owner's
+    devices, every connection, and the vault's own claims. It, not a
+    token's quota, is what a blob upload usually meets first: eight
+    blobs of 8 MiB fill it. §10.5.1 is written around it (blobs deleted
+    once fetched, uploads only on request once it is full, orphans
+    purged). RELAY-PROTOCOL 0.9.2 adds its advertisement
+    (`max_mailbox_blob_bytes`), a share per sender in bytes and in
+    number (`max_sender_blob_bytes`, `max_sender_blobs`), a `quota` member in the error body that
+    tells it from a token's quota, an owner's list of its mailbox's
+    blobs, and room kept in it for one blob from the owner's own
+    devices, whose tokens carry `owner_device` (§7.1); until a relay
+    has them, a vault reads the first
+    `quota_exceeded` on an upload as the token's (§8.6).
 
 The policy values are relay policy, not protocol constants. Clients MUST read
 them from the registration `limits` and MUST NOT exceed them. For reference,
 the relay at vettid.org allows:
 
 - open tokens and claims up to 7 days;
-- token lifetimes up to 400 days, for the reconnect tokens of §6.6.
+- token lifetimes up to 400 days, for the reconnect tokens of §6.6;
+- blobs of up to 8,388,608 bytes, kept up to 7 days, at most 64 MiB of
+  blobs and claims per mailbox.
 
 ## 2. Threat model
 
@@ -1037,7 +1111,11 @@ the store. The host can line up a vault's write times with the traffic
 on the shared connections. Hiding write times (batching or padding
 writes) is **not planned now** (owner decision of 2026-10-12, H5): the
 host is VettID's own, and the member API already knows when a vault is
-unlocked.
+unlocked. (0.32.0, release A) Attachments add objects under
+`vaults/<vault_id>/att/`, so the host also sees when a vault stores or
+deletes an attachment, its approximate size and how many it holds;
+the relay sees each attachment's blob sizes and times (§10.5.1, "What
+each party learns").
 
 VettID operates both the host and the relay, so in its own deployment it can
 correlate their timing. This residual metadata is disclosed here rather than
@@ -1134,6 +1212,9 @@ Rules for all keys:
   - its pinned suite and its state (`pending`, `active` or `stale`);
 - the issued-token registry, the dedupe store, the response cache and the
   outbox (§8);
+- (0.32.0, release A) the **attachment index**: one entry per
+  stored attachment, with its key `k_att` and its transfer state; the
+  attachments themselves are separate objects (§10.5.1);
 - feature data.
 
 The **sealed header** is a small record sealed to the enclave's attestation,
@@ -1997,6 +2078,13 @@ the hold off, `"held"` with it on.
   (§8.3): messages, receipts, profile updates, rotations, reconnects,
   rekeys and token refreshes. Delivered receipts are sent as usual; read
   receipts need the member and are not;
+- (0.32.0, release A) **attachments**: fetching and storing
+  the attachments of incoming messages, answering
+  `message.attachment.status`, and delivering the attachments of
+  messages sent before the deadline, with their retries and fresh
+  uploads (§10.5.1 "Held and locked"). The owner's `message.send`,
+  `message.attachment.get` and `message.attachment.discard` are not on
+  the allow list below;
 - the relay mailbox, tokens, sessions and their rekeys, toward devices
   and peers alike;
 - **standing authorizations the member already gave a connection**:
@@ -2500,13 +2588,52 @@ length + 16) against the bucket sizes before decrypting.
      blob = nonce (24, random) || XChaCha20-Poly1305(key, nonce, aad = "vettid/vms/2/blob", content)
      ```
 
+     (0.32.0, release A) **replaced** by a versioned, padded
+     layout, before anything uses the one above (vettid-vault has it in
+     tests only; no app uses it):
+
+     ```
+     blob   = ver (1: 0x01) || nonce (24, random) || XChaCha20-Poly1305(key, nonce, aad, framed)
+     aad    = "vettid/vms/2/blob" || 0x00 || ver
+     framed = uint32be(len(content)) || content || 0x00 * (Padme(4 + len(content)) - 4 - len(content))
+     Padme(L): E = floor(log2 L); S = floor(log2 E) + 1; z = E - S;
+               round L up to a multiple of 2^z
+     ```
+
+     Padmé is used only for L ≥ 5 (it is undefined below 2), which
+     always holds here: `len(content)` is at least 1.
+
+     A receiver MUST reject a blob whose `ver` it does not know, whose
+     framed length is not exactly `Padme(4 + len)`, whose `len` exceeds
+     the framed length less 4, or whose padding is not all zero. The
+     blob is `41 + Padme(4 + len(content))` bytes. **Why:** the version
+     byte lets a later version change the cipher (it is in the AAD, so it
+     cannot be swapped); the padding hides a blob's exact size from the
+     relay, and from the host for the stored objects of §10.5.1, which
+     use the same framing. Padmé (Nikitin et al., 2019) was chosen over
+     fixed buckets: its overhead is at most about 11% and it leaks only
+     O(log log L) bits of the length (about 5 bits for a photo of 1 to
+     8 MiB, rounded to 32 to 128 KiB), where buckets of 64 KiB leak about
+     7 bits over the same range and add up to 64 KiB to small blobs.
+
   2. Upload `blob` with `PUT /v1/blob/{recipient_mailbox}`.
   3. Send a message whose body carries `{"blob": {"id", "key", "sha256",
      "size", "mime", "name"}}`, where `sha256` is SHA-256 of `blob` (the
      uploaded bytes) and `size` is the length of `content`. The receiver
-     MUST check `sha256`, in constant time, before decrypting.
+     MUST check `sha256`, in constant time, before decrypting
+     (0.32.0: and `size` against the framed `len` after).
+     (0.32.0) `name` is optional; a receiver treats `mime` and
+     `name` as the sender's claims (§10.5.1).
 
   Names and MIME types never leave the ciphertext.
+- (0.32.0) **Where it is used.** Message attachments
+  (§10.5.1) are the first use: from a device to its vault, between
+  vaults, and from a vault to its device. A blob key MUST be used for
+  one blob only. The layout above is fixed by a vector (§16) that the
+  vault and every app reproduce byte for byte. A blob's recipient
+  deletes it from its mailbox once it has fetched it, whether or not it
+  passes its checks: a mailbox's blob storage is shared by every
+  depositor (§1.2).
 - If the relay does not support blobs, the operation fails with
   `payload_too_large`.
 
@@ -3621,6 +3748,22 @@ policy (§1.2).
 
 Devices never hold tokens for peers, and peers never hold tokens for devices.
 
+(0.32.0, release A; owner decision of 2026-10-15) **Device tokens are
+marked.** Every token the vault mints for one of its **own devices**
+(the standing tokens of the first row, at pairing, in handshakes, in
+`relay.token.issued` and in unlock results) carries the claim
+`owner_device: true` (RELAY-PROTOCOL 0.9.2 §5.2). No other token
+carries it: not a peer's, not a request, reconnect or open token, and
+not the open token of a new device's first contact. The relay keeps
+room for one blob of the maximum size in the vault's mailbox for
+uploads under such tokens (RELAY-PROTOCOL §6.8), so that connections
+filling the mailbox's blob storage can never stop the member's own
+phone from sending a photo. Only the vault can set the claim: tokens
+are signed by the mailbox's own key. A device token minted before
+release A lacks it; the vault re-mints every device's standing token
+at the first unlock under release A (§7.2), whatever its remaining
+lifetime.
+
 **Request tokens** (0.10.3) cover only the rest of a handshake that
 awaits approval (§6.4, §6.7): a holder may deposit `hs.resp`, `hs.fin`,
 `connection.approved` and (0.10.5) `connection.declined` with it, and the
@@ -3645,6 +3788,18 @@ denylisted when the request or pairing ends without one (§7.4).
   token has less than 10 days left.
 - A holder MAY send `relay.token.refresh` when its token has less than
   3 days left, or after `token_expired`.
+- (0.32.0, release A) A peer vault MAY also send it after the
+  relay answered `quota_exceeded` to a deposit or a blob upload under
+  its standing token: a blob's bytes count against the token's
+  `quota.bytes` (RELAY-PROTOCOL §6.8), and 512 MiB is about 64
+  attachments of 8 MiB. The issuing vault answers with a fresh
+  standing token at most once per connection in 24 hours, and
+  otherwise with `too_soon` (body `{allowed_after}`). The old token's
+  `jti` is denylisted when the fresh one is issued (§7.4), so a refresh
+  never doubles what a connection may deposit; the vault's own
+  limits (§7.3) are what bound a connection's attachments. A token's
+  quota still bounds what a connection can leave at the relay while
+  the vault is locked.
 
 **On unlock**, the vault first:
 
@@ -3663,9 +3818,27 @@ The relay enforces each token's `quota` and its own per-sender limits. On
 top of that, the vault limits each peer to:
 
 - 60 durable messages per minute;
-- 1 `presence.ping` answered per minute (§10.17).
+- 1 `presence.ping` answered per minute (§10.17);
+- (0.32.0, release A) 64 attachments and 256 MiB of
+  attachments (`size` plus the thumbnail) accepted per rolling 24
+  hours (`peer_attachments`, §10.5.1). Fresh uploads of an attachment
+  already counted do not count again;
+- (0.32.0, release A) 256 MiB of stored attachments received
+  from it, those being fetched counted at their declared size
+  (`peer_storage`), so that one connection cannot fill the vault's store
+  for the others or for the member's own sending;
+- (0.32.0, release A) as a sender, 64 fresh uploads and 256
+  MiB per rolling 24 hours on its `missing` (`peer_reuploads`), at the
+  lowest priority; uploads the relay refuses before reading their body
+  do not count (§10.5.1).
 
-Excess messages are acked, dropped and audited.
+Excess messages are acked, dropped and audited. (0.32.0) An
+attachment over `peer_attachments` is not dropped silently (over
+`peer_storage` it is refused with reason `full`, §10.5.1): its message is
+stored, the attachment is `failed` (`rate`), the peer is answered
+`message.attachment.status{refused, reason: "rate"}`, the blob is
+deleted, and the refusal is audited `drop.attachment_rate` (bounded
+like every `drop.*` entry, §10.9).
 
 ### 7.4 Revocation
 
@@ -3720,6 +3893,14 @@ lease and a 14-day TTL (the defaults).
 - A response whose `re` matches no pending request is acked and dropped.
 - Interactive requests SHOULD time out after 30 s, unless the type defines
   its own timeout.
+- (0.32.0) **A response is never silence.** A response that
+  cannot be sealed within §5.5's bound (its padded inner plaintext
+  would exceed 245,760 bytes) is replaced by an `error` response with
+  code `response_too_large`, which the vault caches and sends instead.
+  Until 0.31.0 nothing said what happens then, and the vault as built
+  sent nothing, so the device's request timed out (§10.5.2). Every type
+  whose answer can grow (lists) SHOULD bound its pages by size, as
+  `message.list` does (§10.5.2).
 
 ### 8.2 Dedupe and idempotency
 
@@ -3737,8 +3918,16 @@ vault state, so they are not in the outbox either. They are deposited from memor
 batch's flush, behind any queued deposits to the same mailbox, and are
 lost if that deposit fails or the vault stops first. A retransmission of
 such a request is therefore executed again. This is allowed only for types
-whose only side effects are audit and feed entries. No type of this
-document needs it today: `item.reveal` of a critical item seals the
+whose only side effects are audit and feed entries. (0.32.0)
+It is also used for reads whose answers are large and that change no
+state: `message.list`, `message.get` and both parts of
+`message.attachment.get` are volatile. Cached, they would put pages of
+up to 128 KiB and thumbnails of up to 44 KiB into vault state for 24
+hours, and a cached `message.attachment.get{content}` would hand a
+retransmission a blob reference that was already fetched and deleted.
+A retransmission of one of them is executed again (a new upload, for
+`content`). Before 0.32.0 no type of this
+document needed it: `item.reveal` of a critical item seals the
 values to a one-time reply key instead (§3.5.4), so its response is
 cached normally.
 
@@ -3813,6 +4002,7 @@ How each error is handled:
 | `token_revoked` | Terminal. Stop sending to that mailbox. |
 | `token_used` | The open token is already spent. Restart first contact. |
 | `mailbox_unknown` | Re-resolve the address, or mark the connection `stale`. |
+| `quota_exceeded` (0.32.0) | Not retried at once, and handled by what is used up (RELAY-PROTOCOL 0.9.2 §7.1 `quota`): **`token`**: a peer vault MAY ask for a fresh token (§7.2) and retries once with it; **`mailbox` or `mailbox_blobs` or `sender_blobs`**: a fresh token does not help; a deposit waits in the outbox and is retried with backoff, and a blob upload is not retried: the vault waits until the recipient asks for it (§10.5.1 "Delivery to the peer"). A relay that sends no `quota` is read as `token` the first time and as the mailbox after a fresh token. A device does not upload again on its own: it tells the member and retries later. |
 
 **`vault.lock` is never retried from a durable outbox** (0.29.0,
 release L; for devices, from the app versions that implement it). A
@@ -3979,6 +4169,8 @@ an answer to an unknown or expired id is dropped.
 | | `message.deliver`, `message.receipt` | V↔V | | Message; delivered or read receipt |
 | | `message.new` | V→D | | Incoming message |
 | | `message.list`, `.get`, `.read`, `.delete` | D→V | req | History and read state |
+| | `message.attachment.get`, `.discard` | D→V | req | A message's attachment, uploaded to the device's mailbox, or its thumbnail inline; delete an abandoned upload (§10.5.1; 0.32.0, release A) |
+| | `message.attachment.deliver`, `message.attachment.status` | V↔V | | A message with an attachment, or a fresh upload of it; stored, missing, refused or withdrawn (§10.5.1; 0.32.0, release A) |
 | Calls | `call.start`, `call.list` | D→V | req | Place a call (the vault issues its signed ICE config, CALLING-SERVICE §5); call history (§10.10) |
 | | `call.offer` | V↔V, V→D | | SDP and the caller device's KEM `ek`; to devices with their vault's signed ICE config |
 | | `call.answer` | D→V, V↔V, V→D | | SDP and the answering device's KEM `enc` |
@@ -4099,6 +4291,9 @@ an answer to an unknown or expired id is dropped.
     | `wallets` | 16 wallets | `wallet.create` (§10.18) |
     | `wallet_addresses` | 2,000 addresses per wallet | `wallet.address.new` (§10.18) |
     | `push_registrations` | 20 registrations that reach the gateway per 24 hours (0.24.0); every registration the gateway answered over HTTP counts, refusals included (0.24.1); (0.30.0) a `push.confirm` does not count | `push.register` (§14.1) |
+    | `attachment_storage` (0.32.0, release A) | 1,073,741,824 bytes of stored attachments, content and thumbnails, sent and received | `message.send` with an attachment (§10.5.1) |
+    | `attachments` (0.32.0, release A) | 4,096 stored attachments | `message.send` with an attachment |
+    | `attachment_fetches` (0.32.0, release A) | 2 `content` fetches in progress per device | `message.attachment.get` |
 
     A count that is part of a request's shape is `bad_request`, not a
     `limit`, and has no name: more than 64 fields in an item, for every
@@ -4109,6 +4304,9 @@ an answer to an unknown or expired id is dropped.
     a connection's asks are bounded by §10.4.1's constants;
   - (0.18.0) `too_soon`: `account.name.set` within 30 days of the last
     applied name change, with body `{allowed_after}` (RFC 3339, §10.8);
+    (0.32.0, release A) also a peer's `relay.token.refresh`
+    after `quota_exceeded` within 24 hours of the last one it was
+    granted (§7.2);
   - `bad_password`, `backoff`, `stale_credential`, `utk_invalid`: §3.5.3,
     §3.5.4. Since 0.17.0 a `backoff` error response's body is
     `{retry_after}`: the whole seconds, rounded up and at least 1, until
@@ -4126,6 +4324,9 @@ an answer to an unknown or expired id is dropped.
       session ended while it was held (§6.8);
     - `approval_timeout`: no app decided a held request in time (§6.8);
     - `busy`: `call.start` while a call is ringing or active (§10.10);
+      (0.32.0, release A) also `message.attachment.get` when
+      no transfer could start within 30 s (§10.5.1); the device tries
+      again later;
     - `calls_off` (0.28.0, release C2): `call.start` to a connection
       whose calls the member turned off (§10.10);
     - `credential_locked`: the operation signs with the credential key
@@ -4164,6 +4365,8 @@ an answer to an unknown or expired id is dropped.
     owner-device request outside the hold's allow list, to requests held
     for approval when the hold begins, and to a `settings.set` that
     would turn the hold off, which only a check may do (§3.6.7);
+  - and (0.32.0) `response_too_large`: the response could
+    not be sealed within §5.5's bound (§8.1); no body;
   - and (0.24.0) `gateway_error`: `push.register` could not complete at
     the push gateway (unreachable, timed out, `5xx`, the gateway
     refused the vault's attestation, or, 0.24.1, any other answer but a
@@ -4195,6 +4398,7 @@ an answer to an unknown or expired id is dropped.
   |---|---|
   | `message.receipt` | `connection_id`, `message_id`, `receipt` (`delivered` \| `read`) |
   | `message.read` | `connection_id`, `message_id` |
+  | `message.attachment` | `connection_id`, `message_id`, `state`, `reason?`: an attachment's state changed (§10.5.1; 0.32.0, release A) |
   | `device.paired` | `device_id`, `role` |
   | `device.unlinked` | `device_id` |
   | `device.transferred` | `device_id` (the new app), `old_device_id` (§6.7.1) |
@@ -4246,7 +4450,7 @@ an answer to an unknown or expired id is dropped.
 |---|---|---|
 | `vault.enrolled` | — | §11.3 |
 | `vault.enroll.confirm` (app) | `{}` | `{}` |
-| `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; 0.29.0, release L: also `unlock_id` (to the app and desktops, not to agents or a recovering app) and, inside `owner_check` for the app and desktops, `idle_lock_at` (RFC 3339: when the vault will lock itself if no check is passed, §3.6.8; absent for a vault without a credential); `owner_check` (0.13.0) is `{state: "ok" \| "due" \| "held", deadline, interval_seconds, failures, hold, hold_off_until?, waiting?}` to apps and desktops and `{state}` to agents (§3.6, §3.6.7). `waiting` (0.19.0) is `{messages, requests, calls, other}`, the counts of `vault.held` since the deadline (§3.6.3), present while the state is `due` or `held` for a device that receives `vault.held` (the app; desktops with an access session while `held`) and absent otherwise. A recovering app (§11.11.5) gets only `{vault_id, state_seq, header_seq}` (0.16.0): nothing about the vault's devices, connections or owner check before it has proved the credential password |
+| `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; 0.29.0, release L: also `unlock_id` (to the app and desktops, not to agents or a recovering app) and, inside `owner_check` for the app and desktops, `idle_lock_at` (RFC 3339: when the vault will lock itself if no check is passed, §3.6.8; absent for a vault without a credential); `owner_check` (0.13.0) is `{state: "ok" \| "due" \| "held", deadline, interval_seconds, failures, hold, hold_off_until?, waiting?}` to apps and desktops and `{state}` to agents (§3.6, §3.6.7). `waiting` (0.19.0) is `{messages, requests, calls, other}`, the counts of `vault.held` since the deadline (§3.6.3), present while the state is `due` or `held` for a device that receives `vault.held` (the app; desktops with an access session while `held`) and absent otherwise. (0.32.0, release A) To the app and desktops also `attachments: {count, bytes, max_count, max_bytes}`: the stored attachments, their bytes counted as for `attachment_storage`, and the two bounds (§10.5.1). A recovering app (§11.11.5) gets only `{vault_id, state_seq, header_seq}` (0.16.0): nothing about the vault's devices, connections or owner check before it has proved the credential password |
 | `vault.owner-check` (app: the holder) | `{credential, utk_id, sealed{pin, password, hold?, hold_off_until?}}` | `{credential, version, utks, deadline, interval_seconds, hold, hold_off_until?}` (§3.6.1, §3.6.7); `bad_pin`, `bad_password`, `backoff` (body `{retry_after}`, §10.1), `utk_invalid`, `stale_credential`, `credential_frozen`, `rotation_required`, `forbidden` (not the holder), `bad_request` (a PIN that is not 6–32 digits) |
 | `vault.held` (V→D, to the app and desktops in an access session) | — | `{deadline, waiting: {messages, requests, calls, other}}` (§3.6.3); 0.29.0, release L: also `idle_lock_at` (§3.6.8) |
 | `vault.lock` (app, desktop) | `{}`; 0.29.0, release L: `{unlock_id}` ("Locks", below) | `{}`; then `vault.locking`. 0.29.0, release L: `stale_lock` when `unlock_id` does not name the current unlock (nothing is done); `bad_request` when it is not 32 lowercase hex characters |
@@ -4681,16 +4885,25 @@ item.
 
 | Type | Request body | Response / event body |
 |---|---|---|
-| `message.send` | `{connection_id, text}`; `text` 1 byte to 16 KiB (larger content uses the blob flow, §5.5) | `{message_id, sent_at}` |
-| `message.deliver` (V↔V) | — | `{message_id (ULID), text, sent_at}`; idempotent by `message_id` |
+| `message.send` | `{connection_id, text}`; `text` 1 byte to 16 KiB (larger content uses the blob flow, §5.5). (0.32.0, release A) `{connection_id, text?, attachment?}`: with `attachment` (§10.5.1) `text` is optional, 0 bytes to 16 KiB (a caption) | `{message_id, sent_at}`; (0.32.0, release A) with an attachment also `att_id`, answered once the request's checks passed; the attachment's progress follows as `sync.event{message.attachment}` (§10.5.1 "Sending") |
+| `message.deliver` (V↔V) | — | `{message_id (ULID), text, sent_at}`; idempotent by `message_id`. (0.32.0) A message with an attachment travels as `message.attachment.deliver` instead (§10.5.1) |
 | `message.receipt` (V↔V) | — | `{message_id, receipt: "delivered" \| "read", at}` |
-| `message.new` | — | `{connection_id, message_id, direction: "in" \| "out", text, sent_at, delivered, read}` |
-| `message.list` | `{connection_id, limit?}` (1–500, default 100) | `{messages: [<message.new body>, ...]}`, oldest first |
-| `message.get` | `{connection_id, message_id}` | `<message.new body>` |
+| `message.new` | — | `{connection_id, message_id, direction: "in" \| "out", text, sent_at, delivered, read}`; (0.32.0, release A) also `attachment?`, the device view of §10.5.1 with `thumb` (to a desktop without `thumb` and `name`; never to agents); `text` is `""` for an attachment without a caption |
+| `message.list` | `{connection_id, limit?}` (1–500, default 100); (0.32.0) also `before?` (§10.5.2) | `{messages: [<message.new body>, ...]}`, oldest first; (0.32.0) at most 131,072 bytes, with `next_before?` (§10.5.2); attachments without `thumb`; volatile (§8.2) |
+| `message.get` | `{connection_id, message_id}` | `<message.new body>`; (0.32.0) an attachment without `thumb`; volatile (§8.2) |
 | `message.read` | `{connection_id, message_id}` | `{}`; the vault sends a read receipt |
-| `message.delete` | `{connection_id, message_id}` | `{}`; local only |
+| `message.delete` | `{connection_id, message_id}` | `{}`; local only; (0.32.0, release A) erases the message's stored attachment (§10.5.1 "Deletion") |
+| `message.attachment.get` (app; 0.32.0, release A) | `{connection_id, message_id, part?: "content" \| "thumb"}` (default `content`) | `content`: `{blob: {id, key, sha256, size, mime, name?}, expires_at}`, a blob the vault uploaded to the requesting device's mailbox; `thumb`: `{thumb}` inline. §10.5.1 "Fetching". Volatile (§8.2) |
+| `message.attachment.discard` (app; 0.32.0, release A) | `{blob_id}` | `{}`: the vault deletes a blob its device uploaded and will not send, unless an attachment names it (§10.5.1 "Sending") |
+| `message.attachment.deliver` (V↔V; 0.32.0, release A) | — | `{message_id (ULID), text?, sent_at, attachment: <peer view>}`: a message with an attachment, and a fresh upload of the same attachment after `missing`; idempotent by `message_id` and blob `id` (§10.5.1) |
+| `message.attachment.status` (V↔V; 0.32.0, release A) | — | `{message_id, status: "stored" \| "missing" \| "refused" \| "withdrawn", reason?, at}`; `withdrawn` from the sender, the others from the recipient (§10.5.1 "Receiving", "Delivery to the peer") |
 
 The D→V messaging types are sent by `app` or `desktop` devices.
+(0.32.0, release A) Attachments are app-only: a desktop sends none
+and fetches none, and `message.attachment.get` and `.discard` are the
+app's alone (§10.5.1 "Desktops"). An agent may send some messaging
+types under a grant (§10.11), but never with an attachment, and does
+not learn that a message has one (§10.5.1 "Agents").
 
 **Links** (0.24.0, owner review of 2026-10-10). `text` is plain text;
 the vault neither parses nor rewrites it. Clients make only `https://`
@@ -4702,6 +4915,630 @@ opens the browser. URLs of every other scheme, custom app schemes
 claim a custom scheme. This is how connections, and later services
 (their service vaults), reach the member through VettID's notification
 channel (PUSH-GATEWAY §12).
+
+#### 10.5.1 Attachments (0.32.0, release A)
+
+*Approved by the owner 2026-10-15 (vettid.org #288; owner decisions
+of 2026-10-15, §15 item 38). It applies from a vault release that
+implements it, called "release A" here, and an app release, which are
+not released; it binds nothing before.*
+
+A message may carry **one attachment**: in this version, a photo. The
+member's phone uploads it to its own vault, which keeps a copy for the
+member's history and sends a fresh copy to the connection's vault,
+which keeps its own copy for its member. A phone never stores one: it
+fetches the photo from its vault when the member opens it and keeps it
+in memory only (ANDROID-PLAN "Photo attachments"). Relay blobs are a
+transfer mechanism only (RELAY-PROTOCOL §6.8): every blob is deleted by
+its recipient once fetched, good or bad, and expires after
+`blob_ttl_seconds` (7 days) otherwise.
+
+**One per message.** A message has at most one attachment; a member who
+sends several photos sends several messages (the app sends them in
+order, the caption with the first). One per message keeps a message's
+state one value (sent, delivered, failed), keeps every limit below a
+single check per message, and keeps each message to one transfer of at
+most 8 MiB. Several would need partial failure states, a quota check
+over a set and a message larger than one transfer slot. A later
+version may add an array member without changing this one.
+
+**Kinds.** `kind` is `"photo"`, the only kind of this version. Other
+files are for a later version (owner decision 4); a vault refuses any
+other `kind` (`bad_request` from a device; `refused` with reason `type`
+from a peer).
+
+**Constants** (release constants of release A):
+
+| Name | Value | What |
+|---|---|---|
+| `attachment_max_bytes` | 8,257,532 at vettid.org: the largest content whose blob (§5.5: 41 bytes plus the padded plaintext) fits the relay's `max_blob_bytes` (8,388,608) | `size`, the content's length |
+| `thumb_max_bytes` | 32,768 | a thumbnail's decoded length (owner decision 5) |
+| `photo_types` | `image/jpeg`, `image/png`, `image/webp` | the types a vault and an app accept, by sniffing (below) |
+| `photo_max_side` | 8,192 pixels | `width` and `height`; recipients decode nothing larger (ANDROID-PLAN) |
+| `attachment_storage` | 1,073,741,824 bytes (1 GiB) | per vault: the stored content and thumbnails of every attachment, sent and received (owner decision 3) |
+| `attachments` | 4,096 | stored attachments per vault (bounds the index in vault state) |
+| `peer_storage` | 268,435,456 bytes (256 MiB, a quarter of `attachment_storage`) | stored attachments received from one connection, those being fetched counted at their declared size |
+| `peer_attachments` | 64 attachments and 268,435,456 bytes (256 MiB) per rolling 24 hours | accepted from one connection (§7.3) |
+| `peer_reuploads` | 64 uploads and 268,435,456 bytes per rolling 24 hours | uploads the sender's vault makes again for one connection on its `missing` |
+| `attachment_transfers` | 2 per vault; per enclave instance by memory (below), at most 4 until measured | blob transfers in progress at once |
+| `attachment_fetches` | 2 per device | `content` fetches of one device in progress |
+| `attachment_window` | 7 days | how long a sender's vault waits for the peer's `stored` before it tells its member (owner decision 8) |
+| `missing_window` | 30 days | how long a sender's vault answers a `missing`, from its own `sent_at`; and how long a recipient waits for an upload, from the message's arrival in its own vault (never from the peer's `sent_at`) |
+| `missing_backoff` | 10 minutes, doubling to 24 hours | between two `missing` for the same attachment |
+| `missing_turn` | 24 hours | how long a recipient keeps asking for one attachment of a connection before it moves to the next one waiting (round robin) |
+| `attachment_reoffers` | 3 | uploads of one attachment after the first; so at most 4 fetches of it by the recipient |
+
+**The views.**
+
+```json
+blob:        { "id": "<blob_id>", "key": "<b64 32>", "sha256": "<b64 32>", "size": 812345,
+               "mime": "image/jpeg", "name": "photo.jpg" }
+device send: { "blob": <blob>, "kind": "photo", "width": 2560, "height": 1920, "thumb": "<b64>" }
+peer view:   { "blob": <blob>?, "kind": "photo", "size": 812345, "width": 2560, "height": 1920,
+               "thumb": "<b64>", "expires_at": "<ts>"? }
+device view: { "att_id": "<ULID>", "kind": "photo", "mime": "image/jpeg"?, "size": 812345,
+               "width": 2560, "height": 1920, "name": "photo.jpg"?, "state": "stored",
+               "reason": "<code>"?, "thumb": "<b64>"? }
+```
+
+- `blob` is §5.5's claim-check reference: `id` the relay's `blob_id`,
+  `key` the fresh 256-bit blob key, `sha256` the SHA-256 of the
+  uploaded bytes, `size` the content's length (1 to
+  `attachment_max_bytes`), `mime` the sender's claim (a string of at
+  most 64 bytes; never used to decode, below), `name` optional, at most
+  255 bytes of UTF-8 (apps send none for a photo). A blob key is used
+  for one blob only.
+- The **peer view** carries `size` itself, and `blob` with
+  `expires_at` only when the sender's vault uploaded one: without them
+  the recipient asks for the upload when it can take it ("Delivery to
+  the peer").
+- `width` and `height` are integers from 1 to `photo_max_side`: the
+  sender's claim, for laying out a placeholder; recipients decode with
+  their own bounds and never trust them.
+- `thumb` is the thumbnail, base64, its decoded length 1 to
+  `thumb_max_bytes`, one of `photo_types` by sniffing. It travels
+  inline, inside the encrypted message, never as a blob.
+- The **device view** never carries a blob key or a blob id. `size` is
+  the declared size until the content is stored, then the stored one
+  (they are equal, or the attachment failed). `mime` is present only
+  once the content is stored, and is then the type **the vault
+  sniffed**, never the sender's claim. `name` is present only when the
+  sender sent one, as stored. `thumb` is present in `message.new` and in
+  `message.attachment.get{part: "thumb"}` only; `message.list` and
+  `message.get` leave it out (§10.5.2).
+- `state` and `reason`:
+
+  | Direction | `state` | Meaning |
+  |---|---|---|
+  | out | `preparing` | the message is stored; the vault is fetching the device's upload and checking it |
+  | out | `sending` | stored in this vault; being uploaded to the peer, or waiting for the peer's request or its `stored` |
+  | out | `delivered` | the peer's vault reported `stored` |
+  | out | `failed` | `reason`: `bad` or `type` (the device's upload failed the checks of "Sending"), `unsupported` (the peer's release has no attachments), `refused` (the peer refused it; then also its reason when the peer gave one: `refused:rate`, `refused:type`; a refusal because the peer's store is full carries none and reaches the member as a generic "couldn't be delivered"), `missing` (the peer could not use any upload, after `attachment_reoffers`), `unconfirmed` (no `stored` within `attachment_window`), `removed` (the connection was removed or blocked first) |
+  | in | `fetching` | the message is stored; the vault is fetching the attachment, or waiting to ask for it or for its upload |
+  | in | `stored` | stored in this vault; `message.attachment.get` serves it |
+  | in | `failed` | `reason`: `full` (`attachment_storage`, `attachments` or `peer_storage`), `rate` (`peer_attachments`), `type` (not an accepted type), `bad` (hash, length, padding or decryption failed on every fetch, at most `attachment_reoffers` + 1), `expired` (no usable upload within `missing_window` of its arrival), `withdrawn` (the sender said it will not upload it: `withdrawn:deleted`, `withdrawn:limit`, `withdrawn:expired`), `removed` (the connection was removed or blocked first) |
+
+  An `unconfirmed` attachment becomes `delivered` if a `stored` still
+  arrives, and `sending` again on a `missing` within `missing_window`.
+
+**Sniffing.** Wherever this section says "by sniffing", the type is
+decided from the content's first bytes and nothing else: `image/jpeg`
+starts `FF D8 FF`; `image/png` starts `89 50 4E 47 0D 0A 1A 0A`;
+`image/webp` starts `52 49 46 46` (`RIFF`), any 4 bytes, `57 45 42 50`
+(`WEBP`). Anything else is not an accepted type. The vault does no
+other parsing of the content: no image decoder runs in the enclave.
+
+**At rest.** Each stored attachment has a fresh 32-byte key `k_att`,
+kept only in the attachment's index entry (DEK state, §3.3), and two
+objects under the vault's prefix (VAULT-HOST-PROTOCOL §5.2), the
+content and the thumbnail, framed and padded as a blob's plaintext
+(§5.5), so that the host sees the same coarse sizes as the relay:
+
+```
+object = 0x01 || nonce (24, random) || XChaCha20-Poly1305(k_att, nonce, aad, framed)
+framed = §5.5's padded plaintext of the content (part "c") or the thumbnail (part "t")
+aad    = "vettid/vms/2/att" || 0x00 || vault_id || 0x00 || att_id || 0x00 || part || 0x00 || object[0]
+key    = vaults/<vault_id>/att/<lowercase att_id>      (content)
+         vaults/<vault_id>/att/<lowercase att_id>.t    (thumbnail)
+```
+
+`att_id` in the AAD is the canonical ULID, upper case as everywhere in
+this document (§5.3); only the store key spells it in lower case,
+because store keys allow lower case only (VAULT-HOST-PROTOCOL §5.2).
+The stored objects never reuse a blob's key or bytes. Thumbnails are
+objects, not state: vault state is rewritten whole at every flush
+(§8.3), and 4,096 thumbnails of 32 KiB would make it 128 MiB. A
+thumbnail is held in its entry only until its object is written
+(below).
+
+**The index** (vault state, §3.3) has one entry per attachment:
+`att_id`, `connection_id`, `message_id`, direction, `kind`, the sniffed
+`mime`, `size`, the thumbnail's length, `width`, `height`, `name`,
+`k_att`, the state and reason; for each of the two objects a flag
+**written** and, once written, its store version (so that a delete is
+conditional without a read, VAULT-HOST-PROTOCOL §5.4); while the
+thumbnail is not written, the thumbnail itself; and while a transfer is
+due, its blob reference, its expiry, the inner `id` of the
+`message.attachment.deliver` that carried it, and its counts.
+
+**Write order.** An object is never written before an entry that names
+it is in a flushed state, and an entry is never removed before its
+objects are deleted. The entry is created **in the same flush as its
+message and the request's or event's inner-`id` record** (§8.2,
+§8.3), before the ack, with both objects not written and the thumbnail
+held in the entry. A crash before that flush loses nothing: the
+message is redelivered (or the request retransmitted) and handled
+afresh. After it, the vault writes the thumbnail object and, in a later
+flush, marks it written and drops the thumbnail from the entry; the
+content object is written when the content is at hand and marked
+written in the flush that sets the state. At unlock the vault finishes
+what a lock or crash interrupted, from the flags: it writes a thumbnail
+object that is not written yet (from the entry), resumes a transfer
+whose content is not written, and for an entry that is being erased
+deletes its objects (a missing object counting as deleted) before
+removing it. Message deletion and vault deletion therefore find every
+object (below, §12.5), although the enclave cannot list the store.
+
+**Sending** (D→V, then V↔V):
+
+1. The app prepares the photo (ANDROID-PLAN): it removes EXIF and
+   location data and re-encodes and downscales the photo, makes the
+   thumbnail, seals the photo as a §5.5 blob under a fresh key, and
+   uploads it with `PUT /v1/blob/{vault_mailbox}`, its vault's own
+   mailbox, under its standing token (§7.1).
+2. It sends `message.send{connection_id, text?, attachment: <device
+   send>}`.
+3. The vault checks the request: the shape (above); that the
+   connection is active (`not_found`, `connection_unavailable` as for
+   text); the thumbnail (decoded length, an accepted type by sniffing;
+   else `bad_request`); and `limit` for `attachment_storage` (`max` the
+   bound, `size` what the store would reach with this `size` and
+   thumbnail) or `attachments`. Its declared `size` is reserved against
+   both until the content is stored or the attachment fails.
+4. In one flush it stores the message, its entry (direction out, state
+   `preparing`, the blob reference to its own mailbox, both objects not
+   written, the thumbnail held) and the request's inner-`id` record and
+   response, and answers `{message_id, sent_at, att_id}` (§8.3). It
+   sends `message.new` (with `thumb`) to its other devices. The
+   response is cached as any (§8.2): a retransmission of the request,
+   the app's **Retry** included, gets the same answer and starts
+   nothing twice.
+5. In the background it writes the thumbnail object, fetches the blob
+   from its own mailbox (`GET /v1/blob/{id}`, signed by the vault relay
+   key) and checks it: at most `max_blob_bytes`, `sha256` in
+   constant time, decryption, the framing and padding (§5.5), the
+   content's length equal to `size`, and an accepted type by sniffing.
+   A failure ends in `failed` (`bad`, or `type`), and the blob is
+   deleted at once (`DELETE /v1/blob/{id}`); `blob_unknown` from the
+   relay is `bad`. **The message is then not sent at all**: its caption
+   is never delivered, the member's devices show it as not sent, and
+   the member sends the photo again as a new message. The device
+   learns the state from `sync.event` (below).
+6. It writes the content object and in one flush marks it written, sets
+   the state `sending` and audits `message.attachment_sent`. **Only
+   then** does it delete the device's blob from its mailbox: a crash
+   before that flush leaves the blob in place for the next unlock to
+   fetch again, and the device, which already dropped the photo, loses
+   nothing.
+7. It uploads a **fresh** blob of the content (a new key) to the peer's
+   mailbox with `PUT /v1/blob/{peer_mailbox}` under the standing token
+   the peer issued it, records the reference, and queues
+   `message.attachment.deliver{message_id, text?, sent_at, attachment:
+   <peer view>}` in the outbox (§8.3). It keeps that message's inner
+   `id` in the entry: an `unsupported_type` response with that `re`
+   (§5.3) is matched to the entry, as a pending request is (§8.1),
+   until the entry is `delivered` or `failed` or 14 days have passed.
+
+Every refusal of a `message.send` that names a blob deletes the blob
+from the vault's mailbox (best effort): only the vault can delete it.
+**`message.attachment.discard{blob_id}`** (D→V, the app only;
+`{}`) asks the vault to delete a blob its device uploaded and will not
+send: the app's **Cancel** before `message.send`. The vault deletes
+only a blob that it can tell this device uploaded: one whose uploader,
+in the relay's list of the mailbox's blobs (RELAY-PROTOCOL 0.9.2 §6.8), is that device's relay key, and that no index entry or
+pending `message.send` names. It answers `{}` in every case (a blob it
+may not delete, an unknown one, or `blob_unknown`), so the answer tells
+a device nothing about other depositors' blobs. Without that list the
+vault deletes nothing, and the blob expires after the blob TTL.
+
+**Delivery to the peer.** The upload of step 7 can be refused:
+
+- a transient failure (a `429` with `retry_after`, a `5xx`, a transport
+  error) is retried with §8.6's backoff, at most once every 10 minutes
+  after the first hour, until `attachment_window` ends;
+- `quota_exceeded` for the **token** (RELAY-PROTOCOL §7.1 `quota`:
+  `token`; before a relay sends `quota`, the first `quota_exceeded`):
+  the vault asks for a fresh token (§7.2) and tries once more with it;
+- `quota_exceeded` for the **mailbox's blob storage or this sender's
+  share of it** (`quota`: `mailbox_blobs` or `sender_blobs`; before a
+  relay sends `quota`, a second `quota_exceeded` after a fresh token,
+  or one when no fresh token may be asked for): the vault **does not
+  retry the upload**. It sends `message.attachment.deliver` without
+  `blob` and `expires_at`, and uploads only when the recipient asks for
+  it with `message.attachment.status{missing}` (below). A full mailbox
+  is not emptied by uploading into it again, and every refused upload
+  costs 8 MiB of traffic;
+- `token_revoked` and `mailbox_unknown` end the delivery as for any
+  deposit (§8.6); the attachment becomes `failed` (`unconfirmed`) at
+  the end of the window.
+
+The peer answers with `message.attachment.status`:
+
+- `stored`: state `delivered`; the sender's vault keeps its copy for
+  its member's history. A later `missing` is ignored.
+- `missing`: "send it now": the peer has no usable upload (none was
+  made, or it expired, was deleted or failed its checks). The sender's
+  vault, matching by connection and `message_id`, uploads a fresh blob
+  and sends `message.attachment.deliver` again with the same
+  `message_id`, at most `attachment_reoffers` times per attachment and
+  within `peer_reuploads` per connection, at a lower priority than every
+  other transfer. It does so while the attachment is `sending` or
+  `failed` (`unconfirmed`), up to `missing_window` after its own
+  `sent_at`, and as long as it still stores the attachment. This is how
+  a recipient that stayed locked longer than the blob's 7 days still
+  gets the photo (owner decision 8).
+  - **It never ignores a `missing` silently.** When it will not upload,
+    it answers `message.attachment.status{withdrawn, reason}`:
+    `deleted` (the member deleted the message, or the attachment is
+    gone), `limit` (the `attachment_reoffers` are spent; the sender's
+    own state becomes `failed` (`missing`)), or `expired` (past
+    `missing_window`). The recipient fails the attachment at once
+    (`withdrawn:<reason>`). A `missing` for an attachment that is
+    `delivered` or `refused`, or for a `message_id` the vault never
+    sent, is ignored (the recipient has its answer, or there is none).
+  - **When `peer_reuploads` is used up** the request is kept and served
+    when the rolling budget allows, within a day; it is not withdrawn.
+    A locked sender serves it after its next unlock. In both cases the
+    recipient's round robin (Receiving step 3) keeps the connection's
+    other attachments moving meanwhile.
+  - **An upload the relay refuses for the recipient's blob storage**
+    (`mailbox_blobs` or `sender_blobs`, checked before the body is
+    read) is answered with a `message.attachment.deliver` without
+    `blob`, as above. It moved no content, so it counts neither as a
+    reoffer nor against `peer_reuploads`; the recipient's
+    `missing_backoff` is what bounds such rounds.
+- `refused`: `failed` (`refused:<reason>`).
+
+If no `stored` arrives within `attachment_window` of `sent_at`, the
+attachment is `failed` (`unconfirmed`), audited
+`message.attachment_failed` and announced to the member with the feed
+item `message.attachment_failed` (`ref` = `message_id`; priority
+`normal`). A sender's vault that was locked when the window ended makes
+one delivery attempt after its next unlock before it marks the
+attachment `failed`. A peer whose release has no attachments answers
+`message.attachment.deliver`, an event of a type it does not know, with
+`unsupported_type` (§5.3): the attachment is `failed` (`unsupported`)
+at once, with the same audit entry and feed item. Each change of state
+reaches the owner's devices as `sync.event{kind: "message.attachment",
+connection_id, message_id, state, reason?}`.
+
+**Receiving** (V↔V). On `message.attachment.deliver` from an active
+connection:
+
+1. **A new `message_id`:** the vault checks the shape (a malformed one
+   is dropped and audited `drop.attachment_malformed`), then its
+   limits: `peer_attachments` (§7.3), `peer_storage`,
+   `attachment_storage` and `attachments`, each counted with the
+   declared `size` and the thumbnail, and every attachment still
+   `fetching` counted at its declared size. The thumbnail is checked as
+   in sending step 3 (an unaccepted one is `refused` with reason
+   `type`). A refusal stores the message (its `text`, if any) with the
+   attachment `failed`, answers `message.attachment.status{refused,
+   reason?}` (`rate` or `type`; **no reason for `full`**, so that the
+   sender learns only that it could not be delivered, not that this
+   vault is full: owner decision of 2026-10-15; the member's own app
+   sees `failed (full)` and the feed item), deletes the blob from its own
+   mailbox if one was named, audits `message.attachment_refused`
+   (`full`, `type`) or `drop.attachment_rate` (`rate`), and for `full`
+   creates the feed item `message.attachment_refused` (`ref` =
+   `message_id`, priority `normal`), so that the member learns that the
+   vault is full. Otherwise, in one flush, it stores the message and
+   the entry (state `fetching`, the blob reference if one was named,
+   both objects not written, the thumbnail held) with the inner-`id`
+   record, audits `message.received` as for text, and acks (§8.3). It
+   sends `message.new` (with `thumb`) and the delivered receipt as for
+   text, then writes the thumbnail object (write order, above).
+2. If a blob was named, in the background the vault fetches it from
+   its own mailbox and checks it as in sending step 5 (with `size`,
+   `sha256`, the framing, and an accepted type by sniffing). A blob that
+   fails is deleted from the mailbox at once. A blob that passes is
+   written as the content object, and in one flush the vault marks it
+   written, sets the entry `stored` and audits
+   `message.attachment_received`; **only then** does it delete the blob
+   from its mailbox (so a crash before the flush fetches it again after
+   the unlock) and answer `message.attachment.status{stored}`. Either
+   way, every blob it fetched is deleted, good or bad.
+3. If no blob was named, or the fetch is answered `blob_unknown`, or
+   the blob fails a check, the entry waits for an upload, and the vault
+   asks for it with `message.attachment.status{missing}`:
+   - for **at most one attachment of a connection at a time**, and only
+     when it has no fetch of that connection in progress, so that a
+     connection's uploads into its mailbox come one by one;
+   - only when its mailbox has room for the attachment: when the relay
+     lists the mailbox's blobs (RELAY-PROTOCOL 0.9.2 §6.8), its
+     `max_bytes` less `used_bytes` is at least the blob's padded size
+     (§5.5). Without the list the vault cannot tell, and only the
+     backoff below bounds the rounds. Several connections may pass the
+     check at once for the last free room; the relay refuses all but
+     one upload before its body, and the others are answered without
+     a blob and asked again after the backoff, which is harmless;
+   - at most once per `missing_backoff` for the same attachment (10
+     minutes, doubling up to 24 hours). The backoff is the
+     attachment's own and does not restart when its turn comes round
+     again: it starts again at 10 minutes only after an upload of it
+     arrives;
+   - **in turn**: after `missing_turn` (24 hours) of asking for one
+     attachment without an upload, the vault moves to the next waiting
+     attachment of that connection, oldest first, and comes back to
+     the first in its next turn; so one attachment that cannot come
+     (a locked sender, a used-up budget) never holds back the photos
+     after it.
+
+   A `withdrawn` from the sender fails the entry at once
+   (`withdrawn:<reason>`). A transient failure of the fetch is retried
+   as in delivery. A blob that is not one of `photo_types` is `refused`
+   with reason `type`. After `attachment_reoffers` + 1 fetches that
+   failed their checks the entry is `failed` (`bad`); without a usable
+   upload within `missing_window` of **the message's arrival in this
+   vault** it is `failed` (`expired`); each is audited
+   `message.attachment_failed`.
+4. **A known `message_id`** whose entry is `fetching` and that this
+   vault asked for with `missing`: a fresh upload; the vault replaces
+   the blob reference and fetches it (step 2). For an entry in any
+   other state, a blob `id` it already had, or a fresh upload it did
+   not ask for, the message is ignored (idempotence, §10), and a named
+   blob it will not fetch is deleted from its mailbox.
+
+The peer's `mime` and `name` are kept as claims: the vault records its
+sniffed type in their place for `mime`, and serves `name` only as text
+(apps sanitize it, ANDROID-PLAN). There is no scanning of the content:
+it is end-to-end encrypted, and the checks are the recipient's
+(owner decision 6).
+
+**Orphan blobs.** A blob that nobody will fetch fills the mailbox's
+blob storage, which every depositor shares (RELAY-PROTOCOL §6.8): a
+device's abandoned upload, a peer's upload whose message never came.
+A vault deletes a blob in its own mailbox as soon as it has fetched it
+or will not fetch it (above). Once a relay lists a mailbox's blobs to
+its owner (RELAY-PROTOCOL 0.9.2 §6.8), the vault, after its collect
+loop has drained the mailbox once since the unlock and then once a
+day, deletes every blob older than 24 hours that no index entry and no
+pending `message.send` names.
+
+**Fetching** (D→V). `message.attachment.get{connection_id, message_id,
+part?}` from the app (a desktop is answered `forbidden`, "Desktops"
+below):
+
+- `part: "thumb"`: the thumbnail, inline: `{thumb}`.
+- `part: "content"` (the default): the vault reads the content object,
+  decrypts it, seals it as a fresh §5.5 blob, uploads it with
+  `PUT /v1/blob/{device_mailbox}` under the standing token the device
+  issued it (§7.1), and answers `{blob, expires_at}` within 120 s (a
+  vault that has not started the transfer within 30 s answers `busy`).
+  The device fetches the blob from its own mailbox, deletes it there,
+  checks it as in sending step 5 (with its own type and dimension
+  checks, ANDROID-PLAN), and keeps the photo in memory only.
+- Both parts are **volatile responses** (§8.2): never cached and never
+  in vault state. A retransmission is executed again; for `content`
+  that is a new upload with a new key, and the device uses the answer
+  to the request it is waiting for.
+- Errors: `not_found` (no such message, or it has no attachment);
+  `unavailable` (the attachment is not `stored`); `limit`
+  `attachment_fetches` (`max` 2: two `content` fetches of this device in
+  progress); `relay_error` (the upload to the device's mailbox failed);
+  `owner_check_required` while held (below). The shape is checked before
+  the hold: `message.attachment.get{}` is `bad_request` whether or not
+  the vault is held (the availability probe, "Compatibility").
+
+**Transfers and memory.** A vault runs at most **2 blob transfers at
+once** (`attachment_transfers`): every fetch from its mailbox and every
+upload, of sending, delivery, receiving and fetching alike. Its
+owner's `message.attachment.get` is started before background
+transfers, and reuploads after `missing` come last.
+
+A transfer of 8 MiB is held several times over: in the vault process
+(the received blob, the plaintext, the new blob or the at-rest object)
+and in the supervisor (the relay proxy's body, the inter-process
+frames, a `StorePut` passed to the parent), about **6 to 8 copies**,
+plus the Go collector's headroom: about 64 MiB per transfer at the
+largest size. The memory-pressure lock (§12.3) locks the least recently
+active vault when the instance runs low, whatever the cause, so a
+connection's photos must not be able to lock other members' vaults.
+Therefore:
+
+- **Admission by memory.** The supervisor admits a transfer only while
+  the instance's available memory, less the supervisor's memory reserve
+  (vettid-vault `MemoryReserve`, 15% of the enclave's memory by
+  default, below which the memory-pressure lock acts), is at least the
+  per-transfer budget × (the transfers in flight + 1), so that the
+  transfers already admitted, which may not have reached their peak,
+  are counted; otherwise the transfer waits, never more than its
+  vault's 2. When available memory less the reserve is below one
+  budget even with nothing in flight, every transfer waits, and an
+  owner's `message.attachment.get` that cannot start within 30 s is
+  answered `busy`, as intended: the instance is short of memory, and
+  locking other members' vaults would be worse. Waiting transfers are
+  admitted by priority, then first come
+  first served: an owner's `message.attachment.get` first, then
+  sending, delivery and receiving, and reuploads after `missing` last,
+  across all the instance's vaults. The budget is measured on the release
+  (the peak of one 8 MiB transfer through both processes, with the
+  collector's headroom), and is **64 MiB until measured**. Until the
+  measurement, an instance also runs **at most 4 transfers** at once.
+- **Memory back after each transfer.** A transfer's buffers are dropped
+  (plaintext zeroized) when it ends, and a vault process returns memory
+  to the system after a transfer of more than 1 MiB (Go's
+  `debug.FreeOSMemory`), so that the instance's available memory
+  recovers before the next admission.
+- **GOMEMLIMIT.** A vault process's `GOMEMLIMIT` (512 MiB) covers its
+  2 transfers with room for its state; the admission, not the limit,
+  protects the instance.
+- **A test** (MUST-COVERAGE): an instance with many unlocked idle
+  vaults and as many 8 MiB transfers queued as the admission allows,
+  plus more waiting, never reaches the memory-pressure threshold, and
+  every queued transfer completes.
+
+The supervisor's counts for the parent (`Stats`, VAULT-HOST-PROTOCOL
+§6.6) MAY include the instance's total of transfers and of waiting
+ones, never a vault's. Relay limits apply as to any client: the
+per-sender limit, blob transfer slots and blob byte budgets
+(RELAY-PROTOCOL 0.9.0 §7.2, limits 12 and 13: a blob byte budget per
+authenticated key, so per vault, under a higher ceiling per network,
+and transfer slots).
+A `429` is retried after `retry_after`.
+
+**Held and locked.** While the vault is held for the owner check
+(§3.6.3) it keeps collecting and storing: receiving (all steps),
+statuses, and the delivery of attachments sent before the deadline
+continue, as for text. Its owner's devices get no `message.new` and no
+`sync.event`; arrivals count in `vault.held`'s `messages`.
+`message.send`, `message.attachment.get` (once its shape passed) and
+`message.attachment.discard` are not on the hold's allow list:
+`owner_check_required`; a `message.send` refused that way still
+deletes its blob. A **locked** vault does nothing (§12.1): uploads to
+its mailbox succeed and wait up to the blob TTL (7 days),
+`message.attachment.deliver` up to the message TTL (14 days). After an
+unlock the vault fetches what is still there; an expired blob is
+answered `missing`, and the sender's vault uploads again (above).
+Transfers in progress at a lock start again after the next unlock, from
+the index. The windows are measured by the vault's clock, also across
+a lock.
+
+**Connections.** When a connection is **removed or blocked** (§7.4),
+the vault cancels its transfers for that connection, deletes any blob
+of that connection's it holds in its mailbox, and sets its entries
+that are `preparing`, `sending` or `fetching` to `failed` (`removed`);
+stored attachments stay with their messages, as the messages do. While
+a connection is **stale**, uploads to it pause (its mailbox cannot be
+reached) and the windows keep running; on a reconnect (§6.6) they
+resume.
+
+**Desktops** (owner decision of 2026-10-15: app-only for now). A
+desktop neither sends nor fetches attachments: its `message.send`
+with `attachment`, its `message.attachment.get` (either part) and its
+`message.attachment.discard` are answered `forbidden`, as any type its
+role may not send (§10.1), and change nothing. In `message.new`,
+`message.list` and `message.get` a desktop gets the device view
+without `thumb` and `name`, so that it can show that a message has a
+photo and send the member to the phone for it. `sync.event{kind:
+"message.attachment"}` reaches it as any `sync.event`.
+
+**Agents** (owner decisions 7 and of 2026-10-15). An agent sends no
+attachment, fetches none, and **is not told that a message has one**.
+`message.send` with `attachment` from an agent, whatever its grants,
+is answered `forbidden`; `message.attachment.get` and
+`message.attachment.discard` are not delegable (§10.11). To an agent a
+message with an attachment is **its caption alone**: `text` is the
+caption and there is no `attachment` member; a message with an
+attachment and **no caption does not exist** for the agent:
+`message.list` leaves it out (its paging and budget count only what the
+agent is given), and `message.get`, `message.read` and a `before`
+naming it are answered `not_found`. That is the least an agent can
+learn while the captions it reads stay whole: an empty message would
+itself tell that something was sent. `message.new` and `sync.event`
+never reach agents (§9.1, §10.1).
+
+**Deletion.** `message.delete` of a message with an attachment, in its
+flush, marks the entry `erasing`; the vault then deletes both objects
+(conditionally on their recorded versions; a missing object counts as
+deleted) and removes the entry in a later flush, and cancels a
+transfer in progress (deleting the blob from its own mailbox when it
+held one there). `k_att` goes with the entry, so a noncurrent version
+of an object kept by the bucket's versioning (7 days, §12.5) can no
+longer be decrypted by the vault. It is local, as for text: the peer's
+copy is the peer's. A later `missing` for a deleted attachment is
+ignored. Vault deletion erases every attachment (§12.5). An attachment
+is never deleted for its age: it is kept until the member deletes its
+message or the vault (owner decision 3). When `attachment_storage` is
+full, new attachments are refused (sending: `limit`; receiving:
+`refused` with reason `full` and the feed item), and the member frees
+space by deleting messages. `vault.status` tells the app and desktops
+how full it is (§10.2). A connection's received attachments use at
+most `peer_storage`, so one connection cannot fill the store for the
+others or for the member's own sending.
+
+**History and search.** The audit entries carry ids only (`ref` =
+`message_id`, with the connection), never a name, type, size,
+dimension, caption or thumbnail; History search (§10.9) matches them by
+kind and connection names, as every entry. The feed items carry the
+same references. No search reads attachment content or names. The
+History export (§10.9) contains the entries as for any kind.
+
+**What each party learns** (§2.2). The relay sees each blob's padded
+size (§5.5) and time, which mailbox it was uploaded to and by which
+relay key, and its fetch and deletion: so that a vault received or sent
+an attachment of roughly a given size, and later that a device fetched
+one of the same padded size. Content, names and types stay inside the
+ciphertext. The host sees the attachment objects' keys, padded sizes
+and write, read and delete times (VAULT-HOST-PROTOCOL §11.2): when a
+vault stored or deleted an attachment, its rough size and how many the
+vault holds.
+
+**Compatibility.** A device learns that its vault has release A as it
+learns any feature (§11.10.8, "No list in the protocol"): it sends
+`message.attachment.get{}` once after each unlock; `unsupported_type`
+means no attachments, `bad_request` means release A (also while
+held). An app MUST NOT send `message.send` with `attachment` to a vault
+without release A, which would ignore the member and send the caption
+alone. An app before release A on a vault of release A shows a message
+with an attachment by its `text`, which is `""` without a caption: an
+empty bubble. That is accepted (no placeholder text is invented in the
+vault, which has no language); the member updates the app. A peer
+vault without release A answers `message.attachment.deliver` with
+`unsupported_type` (above). `message.deliver` is unchanged: a message
+without an attachment uses it as before.
+
+#### 10.5.2 Paging `message.list` (0.32.0)
+
+*Approved by the owner 2026-10-15 (vettid.org #288). It closes a gap
+found while writing §10.5.1 and applies to every message, with or
+without attachments, from the first vault release that implements it.*
+
+**The gap.** `message.list` returns up to 500 messages (100 by default)
+of up to 16 KiB of text each, but every response must fit the
+245,760-byte padded inner plaintext of §5.5. 100 messages averaging
+more than about 2.4 KiB already exceed it, and 500 messages of 16 KiB
+are about 8 MiB. Until 0.31.0 the specification did not say what a
+vault does then. As built (vettid-vault `features/messaging`, main
+6c61584), the response is built and cached (§8.2) but cannot be
+sealed, and nothing is sent: the app's request times out, and a
+retransmission within 24 hours meets the same cached response. §8.1
+now says what happens to any response that cannot be sealed.
+
+**The rule.** `message.list` takes `{connection_id, limit?, before?}`
+and answers `{messages, next_before?}`:
+
+- `before` (optional) is a **position**: the `message_id` of a message
+  of that connection, and the page holds the messages that the vault
+  stored before it, in arrival order, exclusive. Without it the page
+  ends with the newest message. A `message_id` the vault does not hold
+  (unknown, or deleted since) is `not_found`, and the app starts again
+  from the newest.
+- The vault takes messages newest first, from `before` or the newest,
+  and stops at `limit` messages, or before the message whose addition
+  would make the response's `body` exceed **131,072 bytes** as the
+  vault serializes it. One message is at most about 100 KiB (16 KiB of
+  text with every character escaped, plus its members), so a page
+  always holds at least one message when one is older than `before`,
+  and never exceeds the budget.
+- The page is returned oldest first, as before. `next_before` is the
+  `message_id` of its oldest message, present only when older messages
+  remain; the app continues with `before` = `next_before`.
+- Attachments in a page have no `thumb`; the app fetches thumbnails
+  with `message.attachment.get{part: "thumb"}` as it shows them
+  (§10.5.1).
+- `message.list` and `message.get` responses are **volatile** (§8.2):
+  never cached and never in vault state. They are reads, and caching
+  pages of up to 128 KiB in state for 24 hours would make the state
+  object grow with every scroll.
+
+131,072 bytes leaves room under §5.5's bound for the inner members
+around `body`. An app before 0.32.0 ignores `next_before` and sees the
+newest page: fewer messages than it asked for, where today it receives
+nothing. `message.get` returns one message and needs no paging. The
+other list types are to be checked against §5.5 the same way
+(§15 item 38); until then §8.1's rule answers an oversized response
+with an error instead of silence.
 
 ### 10.6 Credential (§3.5)
 
@@ -5579,6 +6416,16 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `recovery.device_paired`, `recovery.completed`, `recovery.cancelled`,
   `recovery.expired`, `recovery.voided` (§11.11.6); `message.sent`,
   `message.received` (no content; `ref` = `message_id`);
+  (0.32.0, release A) `message.attachment_sent` (the
+  attachment is stored in this vault and its message sent; `ref` =
+  `message_id`), `message.attachment_received` (an incoming attachment
+  is stored; `ref` = `message_id`), `message.attachment_failed` (`ref`
+  = `<message_id>:<reason>`, a reason of §10.5.1, either direction),
+  `message.attachment_refused` (an incoming one refused; `ref` =
+  `<message_id>:<reason>`, `full` or `type`), each with
+  `connection_id` and never a name, type, size or thumbnail; and the
+  drops `drop.attachment_malformed` and `drop.attachment_rate` (§7.3,
+  §10.5.1);
   `connection.blocked`, `connection.unblocked` (`ref` = `block_id`);
   `connection.request.peer_declined` (`ref` = `pending_id` or the
   outgoing request's `connection_id`; for a decline that reaches an
@@ -5904,7 +6751,12 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
   `connection.request.peer_declined` (`ref` = `pending_id` or
   `connection_id`, the latter always after activation; 0.10.5, 0.10.6), `connection.added`, `connection.removed`, `connection.stale`,
   `device.pair.pending`, `device.paired`, `device.unlinked`,
-  `message.received` (`ref` = `message_id`), `credential.password_failed`,
+  `message.received` (`ref` = `message_id`), (0.32.0, release
+  A) `message.attachment_failed` (an outgoing attachment failed:
+  `unsupported`, `refused`, `missing` or `unconfirmed`) and
+  `message.attachment_refused` (an incoming one was refused because
+  the vault is full) (`ref` = `message_id`, priority `normal`;
+  §10.5.1), `credential.password_failed`,
   `item.revealed` (`ref` = `item_id`; critical items), `credential.rotated`,
   `device.session.pending` (`ref` = `request_id`), `approval.pending`
   (`ref` = `approval_id`), `connection.authenticate.requested`
@@ -6801,6 +7653,14 @@ grant: { "grant_id": "<ULID>", "agent_id": "<device id>", "version": 1, "scope":
   |---|---|
   | `items.read` | `agent.request` (`catalog`, `item.get`, `item.use`) on the items the grant's share rule includes (below) |
   | `connection.list`, `connection.get`, `message.send`, `message.list`, `message.get`, `message.read`, `profile.get`, `action.list`, `action.invoke` | That owner type: the **delegable** types |
+
+  (0.32.0, release A) A grant of `message.send` never covers
+  an attachment: `message.send` with `attachment` from an agent is
+  answered `forbidden`. `message.attachment.get` and
+  `message.attachment.discard` are not delegable. An agent is not told
+  that a message has an attachment: it sees a message with a caption as
+  the caption alone, and a message without a caption not at all
+  (§10.5.1 "Agents"; owner decision of 2026-10-15).
 
   No other type is delegable. In particular an agent is never given a type
   only apps may send, `item.*`, `tag.*` or `share.*` (it sees items only
@@ -12102,20 +12962,42 @@ converges to "deleted", never to a vault that runs again:
    queued as the fallback. Then the outbox is delivered once, best effort:
    the notices go to the connections' and devices' own mailboxes.
 3. **Zeroize**: every key and the DEK are wiped; the vault is locked and
-   its process exits (§12.4).
+   its process exits (§12.4). (0.32.0, release A) Before it
+   does, the vault takes from its attachment index the store key and
+   recorded version of every attachment object that is written, a list
+   that holds no key material, for step 4.
 4. **Erase**, through the parent's store with conditional deletes, a
-   missing object counting as deleted: the state object; the headers of
+   missing object counting as deleted: (0.32.0, release A)
+   first every attachment object of that list, content and thumbnail
+   (§10.5.1), each conditional on its recorded version, so that no
+   object needs a read first (a conflict is handled as for the state:
+   read the current version and delete it); then the state object; the headers of
    every release the vault knew (a pending move's target and source),
    its own release's header last, since that header is the deletion
    marker; and the enclave's member index object if it still names this
    vault (§11.5).
+   (0.32.0) An erase without the DEK cannot read the index:
+   the host's `delete` of a vault that is not running, and step 4
+   finished from a header that records `deleting` (below). There the
+   **parent** deletes every object under `vaults/<vault_id>/att/` once
+   the vault is reported `deleted`, and does the same after every
+   `deleted` event, so that a crash between the attachment deletes and
+   the state's cannot leave objects behind (VAULT-HOST-PROTOCOL 0.1.9, P15): only after its own conditional update has marked
+   the vault's row `deleted`, never on a refusal of that update (a
+   lease another instance holds included). The parent learns nothing
+   by it: it sees every attachment object's key when it is written.
 5. **Report** the lifecycle event `deleted` (§11.5). The parent marks the
    row `deleted` and records the `vault_deleted` notice; the member API
    emails the member and deletes the vault rows (MEMBER-API).
 
 **Convergence.** A header that records `deleting` is never opened again:
 an unlock, a recovery request, registration or cancellation that reads
-it finishes step 4 instead (and answers as for a missing vault). A crash
+it finishes step 4 instead (and answers as for a missing vault).
+(0.32.0, release A) Each of those paths then also reports
+`deleted` (step 5), as the vault's own deletion and the host's erase
+do; as built (vettid-vault `vault/unlock.go`, `vault/recovery.go`) they
+erase without reporting, so the parent's attachment sweep would never
+run for exactly the crash it exists for. A crash
 after step 1 therefore loses at most the best-effort notices, the relay
 mailbox deletion and the revocations, never the deletion of the vault.
 Deletion is idempotent.
@@ -12138,9 +13020,13 @@ There, messages already deposited expire after `message_ttl_seconds` (14
 days) and the registration stays, empty, with a key nobody holds.
 
 **What is left.** Nothing of the vault's contents: state, headers and
-index are erased, and the DEK, CEK and keys existed only in the
+index are erased (0.32.0: and the attachment objects), and the
+DEK, CEK and keys existed only in the
 enclave's memory. The member API keeps its own audit records
-(MEMBER-API).
+(MEMBER-API). (0.32.0) Attachments the vault uploaded to its
+connections' mailboxes before the deletion are theirs to fetch and
+expire after the blob TTL (7 days); what a connection's vault stored is
+that vault's, as for messages.
 
 - **Stored versions** (0.16.0, stated). The data bucket is versioned and
   keeps noncurrent versions and delete markers for **7 days**
@@ -12148,7 +13034,8 @@ enclave's memory. The member API keeps its own audit records
   headers survive as noncurrent versions for up to 7 days after step 4.
   They are the same sealed objects as before: the state under the DEK,
   which needs the PIN and an approved release (§3.3.1), and the headers
-  sealed to the release. Nobody but the host role can read them, and
+  sealed to the release (0.32.0: and attachment objects under
+  keys held only in that state, §10.5.1). Nobody but the host role can read them, and
   restoring one needs a bucket-policy change (VAULT-RELEASES §8.2). A
   restored vault would be a rollback that the apps detect (§13.2);
   after a start-over (§11.11.9) no app holds it, and with the backup
@@ -14543,6 +15430,105 @@ Follow-ups:
     site here (MEMBER-API 2.5.0), vettid-android (after #127), then
     iOS and desktop.
 
+38. **Message attachments (0.32.0; approved by the owner 2026-10-15, vettid.org #288).** The owner
+    asked for a plan for attachments (phone → own vault → peer vault →
+    peer phone) and decided on 2026-10-15:
+    1. at most 8 MiB, the relay's `max_blob_bytes`; one attachment per
+       message unless several were trivial (they are not: §10.5.1
+       "One per message");
+    2. both vaults store the attachment: the sender's for its
+       member's history, the recipient's because the phone keeps
+       nothing and relay blobs expire after 7 days; the phone fetches
+       on demand;
+    3. kept until deleted, with a per-vault store (1 GiB);
+       new attachments refused with a clear notice when it is full;
+       `message.delete` and vault deletion erase the objects, which
+       are indexed in state because the enclave cannot list the store;
+    4. photos first, from the camera and the Android Photo Picker;
+       other files later; the sender strips EXIF and location data and
+       re-encodes and downscales;
+    5. a thumbnail of at most 32 KiB, made by the sender, inline in the
+       encrypted message;
+    6. no scanning; the recipient sniffs the type against an
+       allowlist, ignores the peer's MIME type for decoding, bounds
+       pixel dimensions and sanitizes names;
+    7. no attachments for agents, to send or to fetch;
+    8. a recipient locked past the blob's 7 days: the sender's vault
+       keeps its copy, retries, and tells its member after 7 days;
+    9. the relay's blob byte budget per vault key under a higher
+       ceiling per network: vettid-relay #10, merged as RELAY-PROTOCOL
+       0.9.0 §7.2 (its numbers are that version's).
+    - *Chosen beyond the decisions* (each for the owner's review): a
+      new V↔V type for a message with an attachment, so that a peer
+      without release A answers `unsupported_type` at once instead of
+      dropping the message or keeping the caption alone; a sender that
+      remembers that message's inner id to match the answer;
+      `message.send` answered after its checks, the transfer reported
+      by `sync.event`, so that a lost or late answer creates no
+      duplicate; the relay mailbox's shared blob storage treated as the
+      real limit: blobs deleted once fetched, uploads only on the
+      recipient's `missing` once it is full, one requested upload per
+      connection at a time, with a backoff and a 24-hour turn, an
+      explicit `withdrawn` from a sender that will not upload, `message.attachment.discard` for an
+      abandoned upload, and orphans purged once the relay lists a
+      mailbox's blobs (RELAY-PROTOCOL 0.9.2); fresh uploads on
+      `missing` at most 3 times, within 30 days and a per-connection
+      budget; a recipient fetches one attachment at most 4 times;
+      thumbnails as objects, not in state; the at-rest key per
+      attachment, so a deleted entry makes old object versions
+      unreadable; blobs versioned and padded with Padmé; an instance
+      admission by available memory (a transfer of 8 MiB is 6 to 8
+      copies across the two processes, so 16 at once would be up to
+      1 GiB, and the memory-pressure lock would hit other members);
+      `message.list`, `.get` and `message.attachment.get` volatile; a
+      quarter of the store per connection; the parent's sweep of
+      `vaults/<vault_id>/att/` after a deletion (it needs a
+      `s3:ListBucket` grant limited to that prefix for the host role).
+    - *Not chosen:* forwarding without storing (the phone keeps
+      nothing, and a recipient locked past 7 days would lose the
+      photo); the blob as received stored as is (the relay's and the
+      host's bytes would match); an image decoder in the enclave (the
+      vault sniffs; apps decode under bounds); uploads retried on a
+      full mailbox (they cannot succeed and move 8 MiB each); fixed
+      64 KiB padding buckets (more leakage over the photo range, and
+      large overhead on small blobs).
+    - *The `message.list` gap* (§10.5.2): found while writing this; its
+      fix applies to every message, and §8.1's rule (an error instead
+      of silence) to every type. Other list types bound their pages
+      by count only (`audit.list`, `feed.list`, `connection.list`,
+      `item.list` among them); each is to be checked against §5.5, as a
+      follow-up, not changed here.
+    - *Decided by the owner on 2026-10-15* (vettid.org #288, the open
+      questions as the coordinator recommended): (1) Padmé padding
+      and the version byte, as written; (2) a refusal because the
+      recipient's store is full reaches the sender only as a generic
+      "couldn't be delivered"; (3) sending and fetching attachments
+      are app-only: desktops are answered `forbidden`; (4) the
+      numbers as written; (5) one token refresh per connection per day
+      after `quota_exceeded`, the old token denylisted; (6) the host
+      role may list `vaults/*/att/*` for P15; (7) agents are not told
+      of attachments: a captioned message is its caption alone, one
+      without a caption is absent; (8) vettid-relay #10 and #11 merged
+      first (RELAY-PROTOCOL 0.9.0 and 0.9.1), and this change is
+      RELAY-PROTOCOL 0.9.2, on top of them; (9) `FLAG_SECURE` on the app's photo viewer; (10) §8.1's
+      rule now, the other list types checked later; (11) each mailbox
+      keeps room for one blob of the maximum size for the owner's own
+      devices, recognised by the `owner_device` claim the vault sets
+      when it mints their tokens (§7.1; RELAY-PROTOCOL §5.2, §6.8).
+    Follow-ups: vettid-vault (release A: the relay client's blob
+    methods, sending, receiving, storing, `message.attachment.get`, the
+    limits, the transfer admission, deletion, the blob and at-rest
+    vectors, `message.list` paging, `response_too_large`, volatile
+    reads, the `deleted` report on every convergence path,
+    MUST-COVERAGE), vettid-relay (a pull request for RELAY-PROTOCOL
+    0.9.2: the `owner_device` room, the blob checks against the
+    declared length, the per-sender share, `quota` in the error body,
+    the owner's blob list; it restores the sender key that #10 stopped
+    storing), the host
+    role's grant and the parent's sweep here and in vettid-vault,
+    vettid-android (ANDROID-PLAN 0.1.39), then iOS and
+    desktop.
+
 ## 16. Test vectors
 
 These vectors use fixed seeds and are for **test use only**. The complete
@@ -14869,6 +15855,44 @@ k_confirm                         = 12c88150b1abc8da386bf6a3696d93d62822219b8bd7
 offered "1",   chosen "1": confirm = 1de1b870c70b6d31341e16cae1da4c3f0e37c464c36829f680928bce9a956c98
 offered "2 1", chosen "2": confirm = c1c16037039feb19baac8ccba435c2a14da34589c9168de751f308a49b3191ae
 offered "2 1", chosen "1": confirm = 670880acb3774ddf276f017d5dba3338777143e27d0e73f20e7f30d711e11d02
+```
+
+**0.32.0.** The claim-check blob of §5.5 had no vector, and
+attachments (§10.5.1) make it cross-implementation: the app seals what
+the vault opens and the other way round. **Required before release A
+is cut:** vettid-vault adds `blob.json` (the versioned, padded blob of
+§5.5: key, nonce, content, the framed plaintext, the blob, its
+`sha256`; and blobs that MUST fail: one flipped byte, refused before
+decryption; an unknown `ver`; over-padding; a non-zero padding byte; a
+`len` beyond the framed length) and `attachment.json` (the at-rest
+object of §10.5.1 for parts `c` and `t`), and the Go and Kotlin
+implementations reproduce both byte for byte; Swift and Rust when they
+implement attachments. Values computed for this document with
+libsodium (PyNaCl 1.6.2), **to be confirmed by those implementations**
+(TEST ONLY):
+
+```
+§5.5 blob, ver 0x01                                             (blob.json)
+  key     : 32 x 0x41      nonce : 24 x 0x42
+  content : ffd8ffe0566574744944206174746163686d656e7420766563746f7221   (29 B)
+  framed  : 0000001d || content || 000000      (Padme(33) = 36 B)
+  aad     : 7665747469642f766d732f322f626c6f620001   ("vettid/vms/2/blob" 00 01)
+  blob    : 014242424242424242424242424242424242424242424242428bc717db7fb8a4
+            45febbaabd807a58775e41934164fe8ddcfe8093c4c77c2064248d7c6ef71c3e
+            c55301e7618822969b753ca385                                  (77 B)
+  sha256  : c156a871b2f92daf27207407440629c2d0f3c2190508ef17ab799e8d5a923920
+            (b64 wVaocbL5La8nIHQHRAYpwtDzwhkFCO8Xq3mejVqSOSA=)
+
+§10.5.1 at-rest object, part "c"                                (attachment.json)
+  k_att    : 32 x 0x43     nonce : 24 x 0x44
+  vault_id : test-vault-0001    att_id : 01JB2Z6V9K3M4N5P6Q7R8S9T60 (upper case in the AAD)
+  framed   : as above
+  aad      : 7665747469642f766d732f322f61747400746573742d7661756c742d30303031
+             0030314a42325a3656394b334d344e35503651375238533954363000630001
+  object   : 014444444444444444444444444444444444444444444444445a4d7539364528
+             27c31a13e25a09270008056b278ab92e665d38321504e5bb799b843807a69b25
+             394581e7b1c74a02a67ba26917                                 (77 B)
+  store key: vaults/test-vault-0001/att/01jb2z6v9k3m4n5p6q7r8s9t60
 ```
 
 ## 17. Changelog

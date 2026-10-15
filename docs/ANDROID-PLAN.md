@@ -1,9 +1,30 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.38
-date: 2026-10-12
+version: 0.1.39
+date: 2026-10-15
 changelog:
+  - 0.1.39: **approved by the owner 2026-10-15** (vettid.org #288;
+    owner decisions of 2026-10-15; VAULT-MESSAGING 0.32.0
+    §10.5.1, which needs the vault's "release A"). New §4
+    "Photo attachments": photos from the app's own camera screen or the
+    Android Photo Picker, with no media or storage permission (the
+    profile photo stays camera-only); prepared in memory: EXIF and
+    location removed, re-encoded as JPEG, long edge 2,560 pixels, a
+    thumbnail of at most 32 KiB; sent through the vault; fetched on
+    demand and checked before decoding (sniffed type, bounded
+    dimensions, sanitized names); a memory-only cache wiped at lock;
+    a warning before saving or sharing, and sharing without a file;
+    History labels; a data-directory scan test. §4 Conversation row
+    and §5 modules (`:core:media`) follow. Revised the same day:
+    the camera captures to memory only;
+    `message.send` is answered after its checks and the transfer
+    follows by `sync.event`; Retry re-sends the same request and never
+    uploads again; Cancel discards the upload at the vault
+    (`message.attachment.discard`); thumbnails decoded under bounds too,
+    and only the first frame of an animated image; the viewer is
+    excluded from screenshots and the recent-apps snapshot
+    (`FLAG_SECURE`). The texts are drafts.
   - 0.1.38: approved by the owner 2026-10-12 (vettid.org #247;
     VAULT-LOCK L9, L14, L16: the texts approved as drafts). New §4
     "Locking the vault": (1) the member's lock as built by
@@ -574,7 +595,7 @@ rows below say "Vault" for the screens and "item" for the data.
 | Screen | Proton analogue | Notes |
 |---|---|---|
 | Messages | Inbox | Conversations by connection; Unread chip; the floating action button starts a new message (pick a connection, then the conversation) |
-| Conversation | Message detail | Bubbles in a card list; pill actions (reply, more). Links in a message (0.1.29, VAULT-MESSAGING 0.24.0 §10.5): only `https://` URLs are tappable; a tap asks "Open link to <host>?" and then hands the URL to Android, so a verified App Link opens its app and any other link the browser; every other scheme, custom app schemes included, stays plain text |
+| Conversation | Message detail | Bubbles in a card list; pill actions (reply, more). Links in a message (0.1.29, VAULT-MESSAGING 0.24.0 §10.5): only `https://` URLs are tappable; a tap asks "Open link to <host>?" and then hands the URL to Android, so a verified App Link opens its app and any other link the browser; every other scheme, custom app schemes included, stays plain text. (0.1.39) Photos: a photo button in the composer, thumbnails in bubbles, a viewer (§4 "Photo attachments") |
 | Connections | Contacts | Initial tiles, status (pending / active / stale / blocked); a star marks favourites (the owner's `favorite` flag, `connection.update`), whose tiles are teal; the floating action button invites a connection (0.1.11: QR or link, or scan the other's QR), the only invite entry point besides empty states. Each is titled "First Last" from the profile's core (VAULT-MESSAGING 0.18.0 §10.8), the display name, if any, as secondary text. Incoming requests show the requester's names the same way. Only between activation and the first `profile.update`, when the request's names are not at hand: "Name not shared yet"; never "Unnamed connection" |
 | Connection detail | — | Titled "First Last" (never an alias), the display name secondary. Profile shared with you (the names labelled as the name on their VettID account, never "verified"; display name, photo and items labelled as shared by them), sharing both ways ("You share with <First>": every share rule a row with its own settings, opening its editor or deleted after a confirmation, "Add a rule" up to 64, 0.1.20), a connection's requests (0.1.22, VAULT-MESSAGING 0.23.0 §10.4.1: muted, paused after several declines, declined ones in cooldown, with Mute/Unmute, Resume and "Allow declined requests again"), authenticate, the vault key fingerprint (`ik`, 8 groups of 4 hex digits, §10.8: the lasting identity check). The action bar: message, favourite, History, remove (confirmed). No safety code (it belongs to connecting: the invite and request screens), no alias or notes, no edit or block (0.1.13; blocking stays on an incoming request) |
 | Approvals | — (VettID-specific) | Pending connection requests, grant requests, critical-item uses, share-rule decisions; approve/deny; critical items need the credential password. 0.1.22: a connection's asks within 10 minutes are one entry ("Sam asks for 3 things"), a connection whose asks are paused is a notice (resume, or remove the connection), a share question names the rule that asks first and warns when declining stops an item already shared, one question per item and connection |
@@ -1522,6 +1543,208 @@ vault without it, part 1 applies unchanged.
   | History | "Vault locked itself (not checked in)" for `vault.locked` with `ref` `idle` |
   | Settings, under the choice | "If you don't pass the daily check for this long, your vault locks itself and stops receiving until you unlock it." |
 
+### Photo attachments (0.1.39)
+
+*Approved by the owner 2026-10-15 (vettid.org #288); the app's side
+of VAULT-MESSAGING 0.32.0 §10.5.1, which needs the vault's "release
+A". Not built. The texts are drafts, open to the owner's rewording.*
+
+**Availability.** After each unlock the app sends
+`message.attachment.get{}` once: `unsupported_type` means the vault has
+no attachments, and the conversation shows no attach button;
+`bad_request` means it has. The relay must advertise `max_blob_bytes`
+and `blob_ttl_seconds` (VAULT-MESSAGING §1.2). The app never sends
+`message.send` with an attachment to a vault without release A.
+
+**Choosing a photo.** The conversation's composer gets a photo button
+with two choices:
+
+- **Take a photo**: the app's own camera screen (CameraX, as for the
+  profile photo, but the rear camera first, with a switch), "Retake"
+  and "Use photo". No system camera intent. The shot is taken into
+  memory (`ImageCapture.takePicture` with an `OnImageCapturedCallback`),
+  never with `OutputFileOptions`: no file is written, not even
+  briefly.
+- **Choose photos**: the Android **Photo Picker**
+  (`ActivityResultContracts.PickMultipleVisualMedia`, images only, at
+  most 10), which hands the app only the photos the member picks. The
+  app asks for **no** media or storage permission
+  (`READ_MEDIA_IMAGES`, `READ_MEDIA_VISUAL_USER_SELECTED`,
+  `READ_EXTERNAL_STORAGE` stay out of the manifest; a build check
+  fails if one appears). Where the system has no Photo Picker (Android
+  12 without the Google Play system update), the contract falls back
+  to the system document picker, which needs no permission either.
+- **The profile photo stays camera-only** (0.1.12, 0.1.14): this
+  extends the rule for message photos only. The profile photo is the
+  member's face shown to every connection, taken fresh; a message photo
+  is a chosen picture, and the Photo Picker shares only what is
+  chosen.
+
+**Preparing it, in memory.** For each photo, before anything is sent:
+
+1. Read it from the picker's URI or the camera into memory; no copy in
+   the cache directory or anywhere else on disk.
+2. Read its bounds first (`ImageDecoder` header or
+   `inJustDecodeBounds`) and refuse a picture larger than 16,384 pixels
+   on a side or 100 megapixels ("This photo is too large to send").
+3. Decode with a sample size, apply the EXIF orientation to the pixels,
+   downscale so the long edge is at most **2,560 pixels**, and
+   re-encode as **JPEG** (quality 85, lowered in steps until the result
+   is at most 8,257,532 bytes, VAULT-MESSAGING's `attachment_max_bytes`).
+   The encoder writes pixels only: **no EXIF, XMP, ICC profile beyond
+   sRGB, GPS or camera data** survives (owner decision 4). Nothing of
+   the original file is sent.
+4. Make the thumbnail from the same pixels: long edge 320 pixels,
+   JPEG, quality lowered until it is at most 32,768 bytes.
+5. The preview shows the prepared photo (not the original) with
+   "Location and camera details are removed before sending", the
+   caption field, **Send** and **Cancel**.
+
+**Sending.** Seal the photo as a VAULT-MESSAGING §5.5 blob under a
+fresh key (`:core:crypto`: the versioned, padded layout, with the §16
+vector), upload it to the vault's mailbox with `PUT /v1/blob`, then
+send `message.send` with the attachment (`name` absent). The vault
+answers once its checks pass (`{message_id, sent_at, att_id}`); the
+bubble then follows the attachment's state from
+`sync.event{message.attachment}`: "Preparing", "Sending", "Delivered".
+
+- **Cancel** before `message.send` sends
+  `message.attachment.discard{blob_id}`, so that the vault deletes the
+  upload at once instead of leaving 8 MiB in its mailbox's shared blob
+  storage for 7 days.
+- **Retry** after a lost or late answer (a timeout, `busy`, a relay
+  error) re-sends **the same request, with the same inner id**: the
+  vault answers it from its cache or handles it once. It **never
+  uploads again**: every abandoned upload fills the mailbox's shared
+  storage, and a few would lock the member out of sending for a week.
+  The prepared bytes stay in memory until the answer arrives or the
+  member cancels, and are dropped at a lock.
+- The upload itself refused with `quota_exceeded` (the vault's mailbox
+  is full) is not retried by the app: "Your vault can't take more
+  photos right now. Try again later." The app tries the upload again
+  only when the member taps Send again.
+- A photo whose upload the vault rejected (`failed`, `bad` or `type`)
+  shows the whole message as not sent, "This photo couldn't be sent";
+  its caption was not delivered either (VAULT-MESSAGING §10.5.1). The
+  member sends it again as a new message from the picker.
+
+Several photos are sent one after another, each as its own message,
+the caption with the first, the next upload starting after the
+previous message's answer. A `limit` `attachment_storage` or
+`attachments` answer says "Your vault is full. Delete messages with
+photos to make room." with the store's use from `vault.status`.
+
+**The bubble.** A photo shows its thumbnail (from `message.new`, or
+fetched with `message.attachment.get{part: "thumb"}` as it scrolls into
+view), with the caption under it. Outgoing: "Sending", "Delivered",
+"Not delivered" with the reason ("Sam's VettID can't receive photos
+yet", "Couldn't be delivered" for any refusal by Sam's vault (it does not say
+why when Sam's vault is full, VAULT-MESSAGING §10.5.1), "Not confirmed
+after 7 days"). Incoming: "Receiving…", the photo, or "Not received"
+with the reason ("Your vault is full", "Too many photos from Sam
+today", "This file type isn't supported", "It never arrived", "Sam's vault can no longer send it" for `withdrawn`). A
+missing thumbnail shows a neutral placeholder sized from `width` and
+`height`, clamped. A thumbnail is decoded only after the same checks as
+a photo (below), with tighter bounds: its type sniffed, its header read
+first, and anything over **1,024 pixels on a side** refused (the
+sender makes 320). TalkBack reads "Photo from Sam", the caption and the
+state.
+
+**Viewing.** Tapping a photo sends `message.attachment.get{part:
+"content"}`, fetches the blob from the app's own mailbox, checks
+`sha256` (constant time) and the length, decrypts, deletes the blob at
+the relay, and then, before decoding:
+
+- **sniffs the type** from the first bytes against JPEG, PNG and WebP
+  and ignores the `mime` the peer sent; anything else shows "This file
+  type isn't supported" and is not decoded;
+- **bounds the decode**: reads the header first and refuses more than
+  8,192 pixels on a side or 40 megapixels (VAULT-MESSAGING
+  `photo_max_side`), then decodes with a target size no larger than the
+  screen; of an animated WebP or PNG (APNG) only the **first frame** is
+  decoded, for photos and thumbnails alike;
+- **sanitizes the name** when one was sent: control and bidirectional
+  formatting characters, path separators and leading dots removed, at
+  most 64 characters shown, and never used as a file name.
+
+The viewer offers zoom, **Save to phone** and **Share**. It sets
+`FLAG_SECURE`: Android writes the recent-apps snapshot of a screen to
+disk, and a photo must not end up there; screenshots of the viewer are
+blocked with it.
+
+**Memory only, wiped at lock.** Attachments follow the rule "nothing
+kept outside an open vault" (§4 Notifications, 10): thumbnails, photos (encoded
+and decoded) and prepared uploads live in an in-memory cache only (at
+most 64 MiB of photos and 8 MiB of thumbnails, least recently used out
+first), never in Room, a file, DataStore or `SavedStateHandle` (beyond
+`message_id`), and never in an image library's disk cache (if one is
+used, its disk cache is off). The cache is cleared at lock, on entering
+the hold or the due state, at a wipe, at an unlink and when the process
+ends. Nothing from a photo goes to logs or crash reports (ids at debug
+level only). Notifications say "Photo from Sam Lee" (with previews on,
+also the caption) and never carry the image or the thumbnail.
+
+**Saving and sharing leave VettID.** **Save to phone** and **Share**
+each first show: "This puts the photo outside VettID. Other apps on
+this phone, and anyone you share it with, can keep it." with
+**Continue** and **Cancel**. Save writes through
+`MediaStore` to Pictures/VettID, named `VettID_<yyyyMMdd_HHmmss>` with
+the extension of the sniffed type, without asking for a permission.
+Share hands the bytes to the chosen app through the app's own content
+provider, streamed from memory through a pipe (no file is written);
+the provider refuses every read once the vault is locked. What another
+app does with it is outside VettID; History does not record a save or a
+share (they are phone-side).
+
+**History and the feed.** New labels for the audit kinds of
+VAULT-MESSAGING §10.9: "Photo sent to <First Last>", "Photo received
+from <First Last>", "Photo not delivered" or "Photo not received"
+(with the reason), "Photo refused (vault full)" and, for the drops,
+"Photos from <First Last> refused (too many today)". The feed items
+`message.attachment_failed` and `message.attachment_refused` open the
+conversation at the message. While held or due, nothing of the above
+is shown (§6 Owner check, 4).
+
+**Module.** `:core:media` (new): reading picker and camera input into
+memory, bounds, orientation, downscale, JPEG encoding without metadata,
+thumbnails, sniffing and bounded decoding; no Android permission, no
+disk. `:core:crypto` gains the §5.5 blob seal and open, `:core:relay`
+already has the blob calls.
+
+**Tests.**
+
+- Unit: the §16 blob vector both ways, and a flipped byte refused
+  before decryption; a JPEG with GPS, camera EXIF and an orientation
+  tag comes out with **no APP1 or APP13 segment, no XMP and no GPS**,
+  correctly rotated, long edge 2,560 at most, under the size bound;
+  the thumbnail under 32 KiB; sniffing (JPEG, PNG, WebP accepted; GIF,
+  HEIC, SVG, text and a JPEG named `.png` with `mime` `image/png`
+  treated by its bytes); a decompression bomb (a small PNG declaring
+  60,000 × 60,000 pixels) refused from its header before any
+  allocation; names with `../`, right-to-left overrides and control
+  characters sanitized; the cache's bound and its clearing at lock,
+  hold, wipe and unlink; a thumbnail declaring 4,000 pixels refused
+  from its header; an animated WebP and an APNG decoded to their first
+  frame only; Retry re-sends the same inner id and makes no upload;
+  Cancel sends `message.attachment.discard`; the camera path writes no
+  file (a test that watches the app's directories during a capture);
+  the viewer's window has `FLAG_SECURE`.
+- Manifest check: no media or storage permission in any build type or
+  distribution.
+- **Privacy, data directory scan:** after sending, receiving, viewing,
+  saving (cancelled) and sharing (cancelled) photos, lock the vault
+  and scan the app's files, cache, databases, `no_backup`, code cache
+  and its external app directories: no JPEG, PNG or WebP signature,
+  no byte run of the test photo or its thumbnail, no blob id, `att_id`
+  or blob key is found (as for item metadata and the feed).
+- Instrumented, dev stack: a photo both ways with a `vaultctl` peer;
+  the recipient's vault locked past the blob's 7 days (the injectable
+  clock) and the photo still arriving after its unlock; a full store;
+  a peer without release A (`unsupported_type`); held: the photo
+  arrives and shows only after the check.
+- Manual: both test phones against staging; the Photo Picker on
+  GrapheneOS and on stock Android.
+
 ## 5. Architecture
 
 Multi-module Gradle, Kotlin, Jetpack Compose + Material3, Hilt, coroutines
@@ -1531,7 +1754,8 @@ one (translation-ready), accessibility labels required in review.
 
 | Module | Contents |
 |---|---|
-| `:core:crypto` | Suite 2 (HPKE MLKEM768X25519 / HKDF-SHA256 / ChaCha20-Poly1305), XChaCha20 sessions, Ed25519, Argon2id; envelope v2; handshake and epochs; credential UTK/reply-key sealing. **Must pass the vettid-vault test vectors byte for byte.** |
+| `:core:crypto` | Suite 2 (HPKE MLKEM768X25519 / HKDF-SHA256 / ChaCha20-Poly1305), XChaCha20 sessions, Ed25519, Argon2id; envelope v2; handshake and epochs; credential UTK/reply-key sealing; (0.1.39) the §5.5 blob seal and open. **Must pass the vettid-vault test vectors byte for byte.** |
+| `:core:media` | (0.1.39) Photos in memory: picker and camera input, bounds, orientation, downscale, JPEG without metadata, thumbnails, type sniffing, bounded decoding (§4 "Photo attachments") |
 | `:core:keystore` | Android Keystore keys (device identity, relay key wrapping, device attestation key with StrongBox/TEE, the biometric-gated app-data key) |
 | `:core:attestation` | Ported Nitro attestation + PCR manifest verification; Android key attestation for enrollment/unlock (§11.7) |
 | `:core:relay` | Relay client (RELAY-PROTOCOL 0.6): register, signed requests, tokens, deposit, collect (long-poll / WebSocket), ack, claims, blobs |
