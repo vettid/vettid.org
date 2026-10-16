@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.33.2
+version: 0.34.0
 date: 2026-10-16
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,7 +14,7 @@ related:
   - PUSH-GATEWAY.md (0.5.0)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.7.1)
-  - ANDROID-PLAN.md (0.1.40)
+  - ANDROID-PLAN.md (0.1.41)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
@@ -24,6 +24,26 @@ related:
   - VAULT-HOST-PROTOCOL.md (0.1.12; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.34.0: release R (0.33.0); **wording for the owner's approval**
+    (owner decisions of 2026-10-16). (1) **`attempt_used`**: every
+    `vault.recovery.open.result` says whether that request used one of
+    the ten attempts (`true` exactly when the counter answered `spent`
+    or `lost` for it), so that the app no longer infers it from `code`,
+    `attempts` or `retry_at` (§11.14.6). (2) **Release capabilities**
+    (new §11.10.9): a release from R names the protocol capabilities it
+    implements, `recovery_r` and `attachments`, as a constant of its
+    image, in its **ETK descriptor** (§11.2), which its attestation
+    binds, and in a **transfer's bundle** (§6.4, §6.7.1), which the
+    QR's hash binds. The app reads them before it chooses the enroll,
+    unlock, transfer or recovery path; a descriptor or bundle without
+    them is a release before R. The app remembers per vault that it has
+    seen `recovery_r` and from then on never uses a path from before R
+    for that vault (§11.10.6). Neither the host, the member API nor the
+    relay can add or remove a name, and the vault refuses every request
+    of the shape before R, so a false or missing list can only make a
+    request fail, never weaken it. The release number still comes from
+    the manifest entry that the attested PCRs match (§11.10.1).
+    ANDROID-PLAN 0.1.41 follows
   - 0.33.2: release R (0.33.0): **the attempt counter's lock period is
     per channel**; **owner decision 2026-10-16**. §11.14.4: token,
     success and close records are locked for **one day on staging** and
@@ -3104,6 +3124,11 @@ Bundle rules:
 - `exp` is RFC 3339 UTC in **whole seconds** (`YYYY-MM-DDTHH:MM:SSZ`, no
   fraction) and MUST equal the QR `e`. This is the only whole-second
   timestamp in this document; inner timestamps use milliseconds (§5.3).
+- (0.34.0, release R) A bundle of `kind` `app` (a transfer, §6.7.1)
+  carries `"capabilities": [...]` after `exp`: the vault's release
+  capabilities, as in its ETK descriptor (§11.10.9). The QR's `h` binds
+  it. Other kinds do not carry it. A bundle of `kind` `app` without it
+  comes from a release before R.
 
 The bundle is protected and published as follows:
 
@@ -3713,7 +3738,10 @@ Old app (holder)           Vault                  Relay             New app
    exp}`; audit `device.transfer.started`.
 2. The new app scans the QR and sends `hs.init` (purpose `app`) with
    `device_attest`, which is REQUIRED (§11.7), and its app key `api_key`
-   (0.15.0, §6.2, §11.12). An invalid attestation drops
+   (0.15.0, §6.2, §11.12). (0.34.0, release R) It reads the bundle's
+   `capabilities` first: with `recovery_r` it sends the `hs.init` of
+   §11.14.10 (with `unlock_secret`), without it the one of this section
+   (§11.10.9). An invalid attestation drops
    the `hs.init` (audit `device.transfer.attestation_failed`); the holder
    sees no pending transfer. Otherwise the vault answers with `hs.resp`
    at once (0.10.3, as for any pairing, §6.7), the new app answers with
@@ -9686,12 +9714,19 @@ publishes a **descriptor**:
 
 ```json
 { "v": 1, "suite": 2, "instance_id": "<id>", "kid": "<hex>", "etk": "<b64 ek>",
-  "release": "<PCR0 hex>", "not_after": "<RFC 3339, ≤ issue + 24 h>" }
+  "release": "<PCR0 hex>", "not_after": "<RFC 3339, ≤ issue + 24 h>",
+  "capabilities": ["attachments", "recovery_r"] }
 ```
 
 The enclave obtains a Nitro attestation document whose `user_data` is
 `SHA-256("vettid/vms/2/etk" || descriptor_bytes)`. The member API serves the
 exact descriptor bytes together with the attestation document.
+
+(0.34.0, release R) `capabilities` is the list of §11.10.9, a constant
+of the image. It is REQUIRED from release R and absent before; an app
+reads an absent member as an empty list, and refuses a descriptor whose
+member is present but malformed, as it refuses any malformed descriptor.
+Apps that do not know the member ignore it (§5.3).
 
 The app MUST:
 
@@ -9705,7 +9740,11 @@ The app MUST:
    less than 26 h old;
 4. tell the user before sending a PIN if `release` differs from the release
    the app last unlocked into ("vault software was updated"), and never send
-   a PIN to an older release than that one (§11.10.6).
+   a PIN to an older release than that one (§11.10.6);
+5. (0.34.0, release R) choose the request's shape from the descriptor's
+   `capabilities` and the vault's stored capabilities (§11.10.9), and
+   send nothing to an instance that lacks a capability this vault is
+   known to have.
 
 The previous ETK stays valid for 1 h after rotation. ETK private keys never
 leave enclave memory.
@@ -11326,7 +11365,8 @@ Several releases run at once.
 
 The app stores, per vault: the **release it last unlocked into** (PCR0 and
 release number), the highest manifest `serial` it has seen, `state_seq`,
-and `header_seq` **per release** (§13.2): each release has its own header
+(0.34.0, release R) whether it has seen `recovery_r` for this vault
+(§11.10.9), and `header_seq` **per release** (§13.2): each release has its own header
 object, and a move, or failures under N+1, raise only N+1's `header_seq`.
 In every unlock, `min_header_seq` is the value it holds for the release
 the request is sealed to; when it abandons a move it therefore sends N's
@@ -11339,6 +11379,10 @@ or abandoned.
   `manifest_serial` in the unlock request (§11.10.1).
 - It MUST NOT send a PIN to a release with a **lower** release number than
   the one it last unlocked into (a rollback; it shows an error).
+- (0.34.0, release R) Once it has seen `recovery_r` for a vault, it MUST
+  NOT send that vault a request of a shape from before release R, and
+  treats an instance whose descriptor lacks `recovery_r` as a rollback
+  (§11.10.9).
 - If the routed release is **newer** than the stored one and listed in the
   manifest, the vault was moved from another device. The app tells the user
   ("vault software was updated") before sending the PIN, as §11.2 step 4
@@ -11918,6 +11962,94 @@ phone can hold the production app and the staging app side by side.
   build; a direct transfer to the new build on a second phone; a
   recovery to the new build on the same phone; an enrollment with the
   new build; both builds installed on one phone.
+
+#### 11.10.9 Release capabilities (0.34.0, release R)
+
+*Owner decision of 2026-10-16; wording for the owner's approval.* The
+app needs to know whether its vault implements release R **before** it
+chooses how to enroll, unlock, receive a transfer or recover: a vault of
+release R refuses the requests of earlier releases, and a vault of an
+earlier release (on staging, up to release 14) refuses release R's.
+
+**The list.** From release R every image carries a constant list of the
+**capabilities** it implements: lowercase names of 1 to 32 characters
+`[a-z0-9_]`, unique, sorted, at most 32. It is compiled into the image,
+so PCR0 covers it; it is not a member of the channel file, and nothing
+the host, the member API or the relay sends changes it. These names are
+not the optional features of §11.10.8, which the channel file chooses.
+
+| Name | Meaning | From |
+|---|---|---|
+| `recovery_r` | §11.14: the phone-held unlock secret in enrollment, unlock and a transfer's `hs.init`, the recovery open, and none of the recovery of §11.11.5. Listed whatever `recovery_offered` says (§11.14.13) | release R |
+| `attachments` | Message attachments (§7.3, §10.5.1) | listed from release R; release A implements them without saying so |
+
+A name is added to this table only with the release that implements it,
+and a release that lists a name implements it fully. A release before R
+lists nothing, whatever it implements. Apps ignore names they do not
+know.
+
+**Where the app reads it.**
+
+| The app is about to | It reads | Bound by |
+|---|---|---|
+| enroll | the descriptor of the instance `GET /api/vault/enclave` names (an `active` release, §11.1) | the instance's attestation (§11.2) |
+| unlock, and a recovery's register and open | the descriptor of the instance the vault is routed to (its `sealed_release`, §11.10.5) | the instance's attestation |
+| receive a transfer (the new phone) | the transfer bundle's `capabilities` (§6.4) | the QR's `h`, shown by the old phone |
+
+It reads them every time; a descriptor or bundle without the member is a
+release before R. The release **number** is not repeated: the app takes
+it, as before, from the manifest entry that the attested PCRs match
+(§11.10.1).
+
+**Choosing the path.** With `recovery_r` the app uses release R's
+requests (§11.14: `unlock_secret` in `vault.enroll`, `vault.unlock` and
+a transfer's `hs.init`; `vault.recovery.open` after the register).
+Without it, it uses the requests of the earlier sections, and offers a
+recovery only as that release defines it (§11.11). The app MUST NOT try
+one path and fall back to the other on a refusal.
+
+**Remembering it.** The app stores, per vault, that it has seen
+`recovery_r` (§11.10.6), once a verified descriptor of the vault's
+routed instance or a transfer bundle for the vault listed it, or a
+request of release R's shape succeeded. The mark is kept until the
+vault's local state is erased. From then on the app:
+
+- never sends that vault a request of a shape from before release R;
+- refuses an instance whose descriptor lacks `recovery_r` as it refuses a
+  lower release number (§11.10.6): it sends nothing, and says "This
+  vault's software is older than the software this phone last used with
+  it. Contact VettID." No release that follows R drops `recovery_r`.
+
+**Why nobody can use this to weaken a vault of release R.**
+
+- **The host, the member API and the relay cannot change the list.** The
+  descriptor is bound by its attestation's `user_data`, and the bundle by
+  the hash in the QR the old phone shows; a list with a name added or
+  removed fails those checks. What they can do is route the app to
+  another genuine instance, or hold requests back.
+- **Routing to an older release** is refused by the release-number rule
+  and by the mark above for a phone that knows the vault. A phone that
+  does not (a recovery on a new phone) can be sent to an older release's
+  instance; that instance cannot open a header sealed to release R's key
+  (§11.10.2), so the request fails and nothing is tested, and the PIN and
+  password go only to a genuine enclave whose attestation the app checked.
+- **The vault decides for itself.** A vault of release R refuses every
+  request of an earlier shape (`bad_request` without `unlock_secret`, a
+  transfer `hs.init` without it, no `credential.recover`), so an app that
+  chose the wrong path is refused; it never gets the weaker treatment.
+- **The other way round**, a list naming `recovery_r` for an earlier
+  release, would need an image that says so, which only a release
+  built from that code can be. Such a vault refuses release R's requests
+  as malformed.
+
+**Alternatives not taken.** The list in the signed manifest entry: it
+would rest on the manifest key's word about an image rather than the
+image's own, and would need the enclave to check its entry. `vault.status`
+or the handshake: they need a running vault, after the unlock. A field
+the member API or the relay adds: the host could change it. A table in
+the app from release number to capabilities: an app release for every
+vault release, per channel. Trying release R's request and falling back:
+a refusal can be forged by the host, which is a downgrade.
 
 ### 11.11 Recovery
 
@@ -13149,6 +13281,10 @@ act for the account's owner if it chose to. Until a second record
 outside AWS exists (§11.14.13), read "ten attempts" as "ten attempts,
 unless AWS were to act for VettID".
 
+**Which path the app takes** (0.34.0): the app learns whether a vault
+implements release R from the release capabilities of §11.10.9, in the
+attested descriptor or a transfer's bundle, before it sends anything.
+
 **Staging vaults from before release R** cannot move into it: the
 sealed header and the DEK change shape. They are deleted and enrolled
 again (§11.14.14). Production has no vault.
@@ -13867,19 +14003,55 @@ test is used all the same.
 at register and padded to 4,096 bytes:
 
 - `{"ok": true, "state_seq", "header_seq", "token", "vault_bundle",
-  "release", "release_number", "unlock_id", "attempts": {"used": n,
-  "of": 10}}`. `vault_bundle` carries the vault's rotated keys;
+  "release", "release_number", "unlock_id", "attempt_used": true|false,
+  "attempts": {"used": n, "of": 10}}`. `vault_bundle` carries the vault's
+  rotated keys;
 - `{"ok": false, "code": "wrong|wrong_again|attempt_lost|quiet|wait|busy|exhausted|closed|not_armed|stored_mismatch|counter_unavailable|no_recovery|expired|attestation|manifest|wrong_release|retry|bad_request",
-  "attempts": {"used": n, "of": 10}, "retry_at": "<ts>"}`. `attempts`
+  "attempt_used": true|false, "attempts": {"used": n, "of": 10},
+  "retry_at": "<ts>"}`. `attempts`
   is present whenever the counter answered. `retry_at` comes with
   `quiet` and `wait`, and with `wrong` and `attempt_lost` when a wait
-  began. `retry` means nothing was used (step 3b, or step 1 of the order
-  of writes failed). `stored_mismatch` means the vault's stored data
-  cannot be opened by any entry; from step 2 nothing was used, from step
+  began. `retry` means that nothing was tested and the request can be
+  sent again; (0.34.0) whether an attempt was used is `attempt_used`
+  (until 0.33.2 this sentence said that nothing was used, which is not
+  so when the run ended after the spend). (0.34.0) Two codes the
+  list above omitted: `device_secret`, in a repeat through the `next`
+  wrap (§11.14.2) whose `unlock_secret` does not match the one the
+  stopped completion recorded, and `vault_missing`, the stored state
+  could not be read; neither uses an attempt. `stored_mismatch` means
+  the vault's stored data cannot be opened by any entry; from step 2 nothing was used, from step
   6 the right attempt was used; the app says "Your entry was right, but
   the vault's stored data could not be opened. Contact VettID." (from
   step 2: "The vault's stored data could not be opened. Nothing was
   used. Contact VettID.").
+- (0.34.0) **`attempt_used`** is REQUIRED in every result, `ok` or not.
+  It is `true` exactly when **this request** reached step 4 and the
+  counter answered its `Spend` with `spent` or `lost` (an outcome the
+  counter could not classify is `lost`, G8), and `false` otherwise. It
+  says nothing about other requests: `attempts.used` is the generation's
+  total, which another phone or an earlier request may have raised. By
+  answer:
+
+  | Answer | `attempt_used` |
+  |---|---|
+  | `attempt_lost` | `true` |
+  | `ok`, `wrong` | `true` |
+  | `quiet`, `wait`, `closed`, `exhausted` | `false` from step 3, or from a `Spend` that took nothing; `true` when step 4b refused to test a spent attempt |
+  | `stored_mismatch` | `false` from step 2; `true` from step 6 |
+  | `retry` | `false` from step 3b; `true` after a spent attempt whose run ended before step 1 of the order of writes was stored (the entry may have been right) |
+  | every other code (`wrong_again`, `busy`, `counter_unavailable`, `not_armed`, `no_recovery`, `expired`, `attestation`, `manifest`, `wrong_release`, `bad_request`, `device_secret`, `vault_missing`) | `false` |
+
+  A repeat through the `next` wrap, once step 1 of the order of writes
+  is stored (§11.14.2; "A right entry that could not be completed"),
+  spends no attempt: every answer to it, `ok` and `wrong` included, has
+  `attempt_used: false`.
+
+  The app shows an attempt as used for this request if and only if
+  `attempt_used` is `true`; it does not infer it from `code`, `attempts`
+  or `retry_at`. An answer it cannot read (random bytes, §11.4) carries
+  nothing: the app says the attempt may have been used and shows the
+  count from the next readable answer or `vault.status`. The clear
+  `recovery_attempt` marker (§11.5) is set for the same requests.
 
 After `ok` the phone sends `hs.init` with purpose `app` and `ctx` =
 `recovery_id`, accepted without approval as for the first app (§11.3),
@@ -14474,6 +14646,15 @@ stricter answer winning. Two more are specified later:
   from the host: nothing locked or recorded; passwords too short, common
   or guessable refused by the app and, from a test build that skips the
   app's check, by the vault.
+- (0.34.0) **Capabilities and `attempt_used`.** Vault: the descriptor
+  of every release image, and a transfer's bundle, carry exactly the
+  image's list, and the descriptor still verifies under its attestation;
+  no other bundle kind carries it; `attempt_used` for every answer of
+  the table in §11.14.6, including a run that ended after the spend and
+  a repeat through the `next` wrap. App: a descriptor without the member
+  takes the earlier path; with `recovery_r`, release R's; a vault marked
+  as seen with `recovery_r` refuses an instance or a bundle without it
+  and sends nothing; a malformed member refuses the descriptor.
 - **Measurements before the numbers are final**, on a staging host: the
   heavy derivation's time and memory with other vaults running; how often
   `busy` occurs; the S3 round trips and how often the read after a spend
