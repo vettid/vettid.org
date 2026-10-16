@@ -14121,8 +14121,10 @@ open again. It resumes with an ordinary `vault.unlock` (§11.4):
   recovery's completion replaces it (with any handshake of it under way);
   it does not expire. It is ordinary vault state, encrypted, written with
   the state's conditional writes and bound to the header's `state_seq`,
-  so a host can bring it back after the pairing only by serving older
-  state, which the unlock refuses (§13.2) or the phone already rejects.
+  so a host can bring it back after the pairing only by serving an older
+  header and state. The unlock refuses that only through the phone's
+  `min_header_seq` (§11.4, §13.2): a header older than the one this phone
+  has seen is `state_rollback`.
 - **Who gets the bundle.** Only an unlock that authenticates as **that**
   phone, with its `sig`, device assertion, `unlock_secret` and the PIN
   like any unlock from release R, while the invitation exists. Its

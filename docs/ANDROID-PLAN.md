@@ -1915,8 +1915,9 @@ step of the "Recovery (new phone)" row).
    readable answer either, since the recovery record is gone), the app
    asks for the PIN and sends `vault.unlock` with
    the phone's secret. A result with `vault_bundle` gives it the vault and
-   a token; it then runs the first handshake as after `ok`. The unlock can
-   be repeated until the handshake completes.
+   a token, and means the app **must send `hs.init` again**: the unlock
+   dropped any handshake in progress, so a pending `hs.fin` is refused.
+   The unlock can be repeated until the handshake completes.
 
    While a wait runs the screen shows the date and time of the next
    possible attempt with a countdown, and the app keeps the registered
