@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.33.1
-date: 2026-10-15
+version: 0.33.2
+date: 2026-10-16
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -21,9 +21,23 @@ related:
   - VAULT-RELEASES.md (0.1.28; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
-  - VAULT-HOST-PROTOCOL.md (0.1.11; the enclave ↔ parent protocol as built)
+  - VAULT-HOST-PROTOCOL.md (0.1.12; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.33.2: release R (0.33.0): **the attempt counter's lock period is
+    per channel**; **owner decision 2026-10-16**. §11.14.4: token,
+    success and close records are locked for **one day on staging** and
+    **100 years in production** (until now 100 years on both). The
+    period is part of the measured release: the enclave takes it from
+    its own channel, it is not a member of the channel file, and
+    nothing the host or the bucket supplies changes it; the bucket has
+    no default retention. A token is locked for at least its wait plus
+    one day, so it is never removable while the wait it starts runs,
+    and an attempt whose token lock does not outlast its wait is
+    `lost` (as built in vettid-vault #97). Wait records (until the
+    wait's end) and present records (96 hours) are unchanged. G1 on
+    staging holds for that period only. §11.10.8 and §11.14.14 say so;
+    VAULT-HOST-PROTOCOL 0.1.12 §8.1 follows
   - 0.33.1: errata to the attachments text (0.32.0, 0.32.1) from the
     attachments build; **approved by the owner 2026-10-15 (as built in
     vettid-vault #93)**; release A. Independent of 0.33.0's release R.
@@ -11656,7 +11670,9 @@ recorded in the build's measurements:
   (259,200 in both), with the build rules of §11.14.14;
   `recovery_offered` (`true`, or `false` for a production release that
   refuses every recovery, §11.14.13); `android_min_version_code`
-  (§11.14.14).
+  (§11.14.14). The counter's lock period (0.33.2, §11.14.4: one day on
+  staging, 100 years in production) is not a member: it follows from the
+  channel the image is built for, so no channel file can express it.
 
 GrapheneOS verified-boot keys and the vendor roots stay in code and are
 the same for every channel. A release build MUST refuse a channel file
@@ -13566,8 +13582,11 @@ delays or replays anything between them.
 - **G1, no rollback.** Once `Spend` answered `spent` or `lost`, every
   later `Status` for that generation counts it, for as long as any sealed
   header of that generation can still be opened by an enclave. Release R
-  meets it with a 100-year lock; a header still openable after that (its
-  release's sealing key alive for a century) is the residual.
+  meets it in production with a 100-year lock; a header still openable
+  after that (its release's sealing key alive for a century) is the
+  residual. On staging the lock is one day (0.33.2, below), so there G1
+  holds for a day after the attempt, or until its wait has ended and a
+  day more if that is later: staging's vaults are test vaults.
 - **G2, no fork.** For each attempt of a generation, at most one caller
   in the world is answered `spent`.
 - **G3, at most ten.** `Spend` answers `spent` at most ten times for one
@@ -13609,10 +13628,21 @@ calls): an attempt is a create-only write of a locked token followed by
 a complete versions listing that must show exactly one entry, the
 enclave's own; a close, a success and a wait are locked objects; a
 present record is a locked version of one marker object; the counter's
-times are S3's `LastModified` and `Date`. Tokens, close and success
-records are locked for 100 years, wait records until the wait's end,
-present records for 96 hours. Later releases add records that must
-agree, the stricter answer winning (§11.14.13).
+times are S3's `LastModified` and `Date`. **Close and success records
+are locked for the channel's period: 100 years in production, one day
+on staging** (0.33.2, owner decision 2026-10-16). A token is locked for
+the period, or for its wait `W(n)` plus one day if that is longer, so a
+token can never be removed while the wait it starts runs (a wait record
+counts only while its attempt's token is listed); an attempt whose
+token lock read back ends before the token's own time plus `W(n)` is
+`lost`. Wait records are locked until the wait's end, present records
+for 96 hours. **The period is part of the measured release**: the
+enclave takes it from the channel it was built for (§11.10.8); it is not
+a member of the channel file, the host cannot supply it, and the enclave
+sets and reads back the date of every record itself, so the bucket has
+**no default retention** and nothing in its configuration changes a
+lock. Later releases add records that must agree, the stricter answer
+winning (§11.14.13).
 
 **Who could break a guarantee in release R, and who would see it.**
 Nobody with VettID's AWS permissions alone: no permission deletes,
@@ -14379,7 +14409,8 @@ stricter answer winning. Two more are specified later:
   development stack's recovery clock, `RecoveryNow`, MUST NOT be
   reachable in a release image). The staging and production counter
   buckets have different pinned names and accounts. A test asserts all
-  three on the production image. Staging uses a wait unit of 600 seconds
+  three on the production image, and (0.33.2) that it locks the counter's
+  token, success and close records for 100 years. Staging uses a wait unit of 600 seconds
   and the production quiet period; one test runs in real time as far as
   the 96-hour wait.
 - **Minimum app version.** The release constant `android_min_version_code`

@@ -1,17 +1,24 @@
 ---
 title: VAULT-HOST-PROTOCOL
 status: approved by the owner 2026-10-12 (H1–H9 as recommended)
-version: 0.1.11
-date: 2026-10-15
+version: 0.1.12
+date: 2026-10-16
 owner: Al Liebl (Mesmer)
 component: vault enclave (supervisor), parent (host process)
 related:
-  - VAULT-MESSAGING.md (0.33.1) §2 (threat model, who sees what), §11.14 (release R: recovery and the attempt counter), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
+  - VAULT-MESSAGING.md (0.33.2) §2 (threat model, who sees what), §11.14 (release R: recovery and the attempt counter), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
   - VAULT-PLAN.md (0.1.8) §5.2 (D5: TLS in the enclave), §5.3 (D4: one process per vault)
   - VAULT-RELEASES.md (0.1.16) §3.4 (C3, C4), §8.4 (network and egress), §8.7 (observability)
   - VAULT-RELAY-SCALING.md (0.1.2) §6, §10
   - vettid-vault `internal/hostproto`, `enclave/supervisor`, `enclave/egress`, `parent`, docs/V3-NOTES.md "Enclave ↔ parent", docs/SMOKE.md
 changelog:
+  - 0.1.12: with VAULT-MESSAGING 0.33.2 (owner decision 2026-10-16),
+    for release R. No wire change. §8.1 retention: token, success and
+    close records are locked for the channel's period, **one day on
+    staging and 100 years in production**, a token for at least its
+    wait plus one day; the period is part of the measured release (never
+    from the host, the channel file or the bucket), and the bucket has
+    no default retention
   - 0.1.11: as built in vettid-vault #94 (the parent only), for
     release A; P15's wording was approved by the owner 2026-10-15
     (0.1.9) and this states how it is met. No wire change. §12 P15:
@@ -922,14 +929,22 @@ name does not match a name the enclave computes is ignored. Each body
 is 32 fresh random bytes. The vectors are in VAULT-MESSAGING §16.
 
 **Retention.** Every object is written with
-`x-amz-object-lock-mode: COMPLIANCE` and a retain-until date: tokens,
-success and close records **100 years** from the write; a wait record
-the counter time of the attempt's listing plus `W(n)`; a present marker
-version **96 hours**. After every write the enclave reads the lock of
+`x-amz-object-lock-mode: COMPLIANCE` and a retain-until date, counted
+from the counter time of the listing before the write: success and close
+records the channel's period, **100 years in production and one day on
+staging** (0.1.12); a token the period, or `W(n)` plus one day if that
+is longer, so that it outlasts the wait it starts; a wait record the
+counter time of the attempt's listing plus `W(n)`; a present marker
+version **96 hours**. The period is part of the measured release
+(VAULT-MESSAGING §11.14.4): the enclave takes it from the channel it was
+built for, never from the host, the channel file or the bucket, which
+has no default retention. After every write the enclave reads the lock of
 the version it wrote back (`GetObjectRetention` by version id) and goes
 on only if the mode is `COMPLIANCE` and the date is not earlier than the
-one asked for. It never treats "mode is `COMPLIANCE`" alone as locked:
-a lock whose date has passed still reads `COMPLIANCE`.
+one asked for (for a token, also not earlier than its own `LastModified`
+plus `W(n)`; otherwise the attempt is `lost`). It never treats "mode is
+`COMPLIANCE`" alone as locked: a lock whose date has passed still reads
+`COMPLIANCE`.
 
 **Reading.** The enclave decides from **complete versions listings**
 only (`ListObjectVersions` with a prefix, following the markers to the
