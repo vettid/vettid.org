@@ -1,9 +1,20 @@
 import * as cdk from 'aws-cdk-lib';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import * as kms from 'aws-cdk-lib/aws-kms';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 import { AppConfig, resourceName } from '../config';
+import { OWNER_PERMISSION_SET } from '../constructs/owner-trust';
 import { publishRef } from '../constructs/ssm-refs';
+import { vaultApiRoleName } from '../vault/access';
+
+/**
+ * The recovery request key's alias (VAULT-MESSAGING §11.14.8, VAULT-RELEASES
+ * §8.2, release R): `alias/vettid-org-recovery-request` in production,
+ * `alias/vettid-org-staging-recovery-request` on staging.
+ */
+export const recoveryRequestKeyAlias = (config: AppConfig): string => `alias/${resourceName(config, 'recovery-request')}`;
 
 export interface VettidOrgDataStackProps extends cdk.StackProps {
   readonly config: AppConfig;
@@ -28,6 +39,13 @@ export interface VettidOrgDataStackProps extends cdk.StackProps {
  *                      address beside an event expires after 90 days (TTL)
  *   ratelimits         rate-limit and PIN-lockout counters (TTL)
  *   magic-links        single-use sign-in tokens, stored hashed (TTL)
+ *
+ * Also the vault's recovery request key (release R, VAULT-MESSAGING
+ * §11.14.8): an ECDSA P-256 KMS key in the account that runs the member API,
+ * with which the member API's vault function signs every `recovery` and
+ * `recovery_cancel` queue operation. It is here, not in the member API
+ * stack, because vault releases pin its public key: it must outlive any
+ * redeploy of the API, and replacing it needs a release that pins both.
  *
  * The vault tables (vaults, vault-instances, vault-requests, vault-releases)
  * moved to the vault account's VettidOrgVaultStack (VAULT-RELEASES §8.1,
@@ -146,6 +164,69 @@ export class VettidOrgDataStack extends cdk.Stack {
         pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: false },
       });
     }
+
+    // ---- the recovery request key (release R; VAULT-RELEASES §8.2) -------------------
+    // Policy: the account may administer the key but not sign with it;
+    // kms:Sign is for the member API's vault function only (its fixed-name
+    // role, matched by aws:PrincipalArn so the policy is valid before that
+    // role exists), with ECDSA_SHA_256 over a digest the function computes;
+    // everyone else is denied kms:Sign outright. The owner's permission set
+    // (who fills in the vault release's channel files) may read the public
+    // key; the release pins it as `recovery_request_keys`. RETAIN: vault
+    // releases pin the public key, and a replacement must first be pinned
+    // beside it for one release (VAULT-RELEASES §8.2).
+    const vaultRole = `arn:aws:iam::${this.account}:role/${vaultApiRoleName(config, 'vault')}`;
+    const ownerRole = `arn:aws:iam::${this.account}:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_${OWNER_PERMISSION_SET}_*`;
+    const root = new iam.AccountRootPrincipal();
+    const recoveryKey = new kms.Key(this, 'RecoveryRequestKey', {
+      alias: recoveryRequestKeyAlias(config),
+      description: `VettID ${config.stage} recovery request key (VAULT-MESSAGING §11.14.8): the member API's vault function signs recovery and recovery_cancel. Pinned in vault releases: do not delete.`,
+      keySpec: kms.KeySpec.ECC_NIST_P256,
+      keyUsage: kms.KeyUsage.SIGN_VERIFY,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      policy: new iam.PolicyDocument({
+        statements: [
+          new iam.PolicyStatement({
+            sid: 'AdministerButNotSign',
+            principals: [root],
+            actions: [
+              'kms:Create*', 'kms:Describe*', 'kms:Enable*', 'kms:List*', 'kms:Put*', 'kms:Update*', 'kms:Revoke*',
+              'kms:Disable*', 'kms:Get*', 'kms:Delete*', 'kms:TagResource', 'kms:UntagResource',
+              'kms:ScheduleKeyDeletion', 'kms:CancelKeyDeletion',
+            ],
+            resources: ['*'],
+          }),
+          new iam.PolicyStatement({
+            sid: 'MemberApiVaultFunctionSigns',
+            principals: [root],
+            actions: ['kms:Sign'],
+            resources: ['*'],
+            conditions: {
+              ArnEquals: { 'aws:PrincipalArn': vaultRole },
+              StringEquals: { 'kms:SigningAlgorithm': 'ECDSA_SHA_256', 'kms:MessageType': 'DIGEST' },
+            },
+          }),
+          new iam.PolicyStatement({
+            sid: 'NobodyElseSigns',
+            effect: iam.Effect.DENY,
+            principals: [new iam.AnyPrincipal()],
+            actions: ['kms:Sign'],
+            resources: ['*'],
+            conditions: { ArnNotEquals: { 'aws:PrincipalArn': vaultRole } },
+          }),
+          new iam.PolicyStatement({
+            sid: 'OwnerReadsPublicKey',
+            principals: [root],
+            actions: ['kms:GetPublicKey', 'kms:DescribeKey'],
+            resources: ['*'],
+            conditions: { ArnLike: { 'aws:PrincipalArn': ownerRole } },
+          }),
+        ],
+      }),
+    });
+    publishRef(this, config, 'data/recovery-request-key-arn', recoveryKey.keyArn);
+    publishRef(this, config, 'data/recovery-request-key-id', recoveryKey.keyId);
+    new cdk.CfnOutput(this, 'RecoveryRequestKeyId', { value: recoveryKey.keyId });
 
     publishRef(this, config, 'data/terms-bucket-name', this.termsBucket.bucketName);
     publishRef(this, config, 'data/members-stream-arn', this.tables.members.tableStreamArn!);

@@ -2,7 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import { Template, Match } from 'aws-cdk-lib/assertions';
 import { loadConfig } from '../lib/config';
 import { VettidOrgAuthStack } from '../lib/stacks/auth-stack';
-import { VettidOrgDataStack } from '../lib/stacks/data-stack';
+import { VettidOrgDataStack, recoveryRequestKeyAlias } from '../lib/stacks/data-stack';
 import { VettidOrgAdminAccessStack } from '../lib/stacks/admin-access-stack';
 
 const env = { account: '123456789012', region: 'us-east-1' };
@@ -146,6 +146,47 @@ describe('VettidOrgDataStack', () => {
     t.hasResource('AWS::S3::Bucket', {
       DeletionPolicy: 'Retain',
       Properties: Match.objectLike({ VersioningConfiguration: { Status: 'Enabled' } }),
+    });
+  });
+
+  // Release R (VAULT-MESSAGING §11.14.8, VAULT-RELEASES §8.2).
+  describe('the recovery request key', () => {
+    const keys = Object.values<any>(t.findResources('AWS::KMS::Key'));
+    const st = () => keys[0].Properties.KeyPolicy.Statement as any[];
+    const vaultRole = 'arn:aws:iam::123456789012:role/vettid-org-member-vault';
+    const actions = (x: any): string[] => [].concat(x.Action);
+
+    test('ECDSA P-256 signing key, retained, aliased per stage', () => {
+      expect(keys).toHaveLength(1);
+      expect(keys[0].Properties).toMatchObject({ KeySpec: 'ECC_NIST_P256', KeyUsage: 'SIGN_VERIFY' });
+      expect(keys[0].Properties.EnableKeyRotation).toBeFalsy();
+      expect({ d: keys[0].DeletionPolicy, u: keys[0].UpdateReplacePolicy }).toEqual({ d: 'Retain', u: 'Retain' });
+      t.hasResourceProperties('AWS::KMS::Alias', { AliasName: 'alias/vettid-org-recovery-request' });
+      const staging = loadConfig(new cdk.App({ context: { stage: 'staging' } }).node);
+      expect(recoveryRequestKeyAlias(staging)).toBe('alias/vettid-org-staging-recovery-request');
+      t.hasResourceProperties('AWS::SSM::Parameter', { Name: '/vettid-org/prod/data/recovery-request-key-arn' });
+      t.hasResourceProperties('AWS::SSM::Parameter', { Name: '/vettid-org/prod/data/recovery-request-key-id' });
+    });
+
+    test('kms:Sign is allowed to the member API vault function only (ECDSA_SHA_256 over a digest), and denied to everyone else', () => {
+      const allows = st().filter((x) => x.Effect !== 'Deny' && actions(x).some((a) => a === 'kms:Sign' || a === 'kms:*' || a === 'kms:Sign*' || a === '*'));
+      expect(allows).toHaveLength(1);
+      expect(allows[0]).toMatchObject({
+        Sid: 'MemberApiVaultFunctionSigns',
+        Action: 'kms:Sign',
+        Condition: { ArnEquals: { 'aws:PrincipalArn': vaultRole }, StringEquals: { 'kms:SigningAlgorithm': 'ECDSA_SHA_256', 'kms:MessageType': 'DIGEST' } },
+      });
+      const deny = st().find((x) => x.Effect === 'Deny');
+      expect(deny).toMatchObject({ Sid: 'NobodyElseSigns', Principal: { AWS: '*' }, Action: 'kms:Sign', Condition: { ArnNotEquals: { 'aws:PrincipalArn': vaultRole } } });
+      // The administrator statement holds no Sign (and no wildcard that would include it).
+      const admin = st().find((x) => x.Sid === 'AdministerButNotSign');
+      for (const a of actions(admin)) expect(a).not.toMatch(/^kms:(\*|Sign|S\*)/);
+    });
+
+    test('the owner (who fills in the release channel files) may read the public key', () => {
+      const read = st().find((x) => x.Sid === 'OwnerReadsPublicKey');
+      expect(read.Action).toEqual(['kms:GetPublicKey', 'kms:DescribeKey']);
+      expect(read.Condition).toEqual({ ArnLike: { 'aws:PrincipalArn': 'arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_VettIDAdmin_*' } });
     });
   });
 });
@@ -647,6 +688,21 @@ describe('VettidOrgMemberApiStack', () => {
   describe('vault route group', () => {
     const stmts = () => Object.values<any>(t.findResources('AWS::IAM::Policy')).flatMap((p) => p.Properties.PolicyDocument.Statement);
     const str = (x: unknown) => JSON.stringify(x);
+
+    test('release R: kms:Sign on the recovery request key, for the vault routes only; its id and ARN from SSM', () => {
+      const signs = stmts().filter((s: any) => str(s.Action).includes('kms:Sign'));
+      expect(signs).toHaveLength(1);
+      expect(signs[0].Action).toBe('kms:Sign');
+      expect(signs[0].Condition).toEqual({ StringEquals: { 'kms:SigningAlgorithm': 'ECDSA_SHA_256', 'kms:MessageType': 'DIGEST' } });
+      expect(str(signs[0].Resource)).toMatch(/^\{"Ref":"SsmParameterValue.*recoveryrequestkeyarn/);
+      const vaultFn = Object.values<any>(t.findResources('AWS::Lambda::Function')).find((f) => f.Properties.Environment?.Variables?.RECOVERY_REQUEST_KEY_ID);
+      expect(vaultFn).toBeDefined();
+      expect(str(vaultFn.Properties.Environment.Variables.RECOVERY_REQUEST_KEY_ARN)).toContain('recoveryrequestkeyarn');
+      const withKey = Object.values<any>(t.findResources('AWS::Lambda::Function')).filter((f) => f.Properties.Environment?.Variables?.RECOVERY_REQUEST_KEY_ARN);
+      expect(withKey).toHaveLength(1);
+      const params = Object.values<any>(t.toJSON().Parameters).map((v) => v.Default);
+      expect(params).toEqual(expect.arrayContaining(['/vettid-org/prod/data/recovery-request-key-arn', '/vettid-org/prod/data/recovery-request-key-id']));
+    });
 
     test('sqs:SendMessage only to vettid-org-vault-control-* queues, and nothing else on SQS', () => {
       const sqsStmts = stmts().filter((s: any) => str(s.Action).includes('sqs:'));

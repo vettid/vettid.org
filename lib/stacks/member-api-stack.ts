@@ -226,6 +226,18 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     g(vault, 'audit', ['PutItem']);
     vaultGrants(vault, 'vault');
     vault.addToRolePolicy(sesSend); // recovery notices (VAULT-MESSAGING §11.11), setup-code emails
+    // The recovery request key (release R, VAULT-MESSAGING §11.14.8; held by
+    // VettidOrgDataStack, whose key policy admits this role alone to
+    // kms:Sign): every `recovery` and `recovery_cancel` queue operation is
+    // signed with it. RECOVERY_REQUEST_KEY_ID is the `key_id` the vault
+    // release pins beside the public key (`recovery_request_keys`).
+    vault.addEnvironment('RECOVERY_REQUEST_KEY_ARN', readRef(this, config, 'data/recovery-request-key-arn'));
+    vault.addEnvironment('RECOVERY_REQUEST_KEY_ID', readRef(this, config, 'data/recovery-request-key-id'));
+    vault.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['kms:Sign'],
+      resources: [readRef(this, config, 'data/recovery-request-key-arn')],
+      conditions: { StringEquals: { 'kms:SigningAlgorithm': 'ECDSA_SHA_256', 'kms:MessageType': 'DIGEST' } },
+    }));
     // k_code (MEMBER-API 2.0.0 "Setup codes"): the HMAC key of the setup
     // codes, an SSM SecureString an operator creates once (RUNBOOK "Setup
     // codes"). Read here only; the AWS-managed aws/ssm key decrypts it for

@@ -120,6 +120,7 @@ describe('VettidOrgVaultHostStack: network and egress (§8.4)', () => {
       'kms.us-east-1.amazonaws.com',
       'android.googleapis.com',
       'push.vettid.org',
+      'vettid-org-vault-recovery-369484479783.s3.us-east-1.amazonaws.com',
       'sqs.us-east-1.amazonaws.com',
       'dynamodb.us-east-1.amazonaws.com',
       '369484479783.ddb.us-east-1.amazonaws.com',
@@ -145,6 +146,19 @@ describe('VettidOrgVaultHostStack: network and egress (§8.4)', () => {
     const pushHosts = (stage: string) => allow(stage).filter((d) => d.startsWith('push.'));
     expect(pushHosts('prod')).toEqual(['push.vettid.org']);
     expect(pushHosts('staging')).toEqual(['push.staging.vettid.org']);
+  });
+
+  // Release R (VAULT-HOST-PROTOCOL §8.1; VAULT-RELEASES §8.4): the enclave
+  // reaches its channel's recovery counter bucket by its virtual-hosted name,
+  // and no other channel's. The name is the one the release pins
+  // (vettid-vault enclave/releasecfg/<channel>.json `recovery_counter`).
+  test('recovery counter: each channel allows only its own bucket host, the one its release pins', () => {
+    const allow = (stage: string) =>
+      resources(host(stage).json, 'AWS::Route53Resolver::FirewallDomainList')
+        .find((l) => l.Properties.Name.endsWith('vault-host-allow'))!.Properties.Domains as string[];
+    const counter = (stage: string) => allow(stage).filter((d) => d.includes('vault-recovery'));
+    expect(counter('prod')).toEqual(['vettid-org-vault-recovery-369484479783.s3.us-east-1.amazonaws.com']);
+    expect(counter('staging')).toEqual(['vettid-org-vault-recovery-347272280361.s3.us-east-1.amazonaws.com']);
   });
 
   test('DNS Firewall rules: allow the list (redirections trusted), NXDOMAIN for everything else; associated, mutation-protected', () => {

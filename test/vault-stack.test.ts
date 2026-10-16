@@ -4,13 +4,13 @@ import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { mockClient } from 'aws-sdk-client-mock';
 import { CreateKeyCommand, KMSClient } from '@aws-sdk/client-kms';
-import { AppConfig, loadConfig, VAULT_RELEASE_KEY_FUNCTION_NAME, VAULT_ROLE_NAMES, vaultDataBucketNames } from '../lib/config';
+import { AppConfig, loadConfig, VAULT_RELEASE_KEY_FUNCTION_NAME, VAULT_ROLE_NAMES, vaultDataBucketNames, vaultRecoveryBucketName } from '../lib/config';
 import { VettidOrgVaultStack, vaultEnv } from '../lib/stacks/vault-stack';
 import { VettidOrgMemberApiStack } from '../lib/stacks/member-api-stack';
 import { checkPolicy, failedCheck, ManifestRelease } from '../lambda/shared/keypolicy';
 import { vaultApiRoleName, VAULT_API_CONSUMERS } from '../lib/vault/access';
 import { handler, parseProps, preflight, propsHash } from '../lambda/vault/release-key';
-import { VAULT_DATA_VERSIONS } from '../lib/stacks/vault-stack';
+import { VAULT_DATA_VERSIONS, VAULT_RECOVERY_HOST_BUCKET_ACTIONS, VAULT_RECOVERY_HOST_OBJECT_ACTIONS, VAULT_RECOVERY_NONCURRENT_DAYS } from '../lib/stacks/vault-stack';
 
 const pcr = (b: string) => b.repeat(48);
 const P1 = pcr('a1');
@@ -281,7 +281,7 @@ describe('VettidOrgVaultStack: data bucket and manifest key', () => {
     // removes a deleted vault's last versions and its delete marker), the
     // cap is a second rule, and neither has a prefix or a tag filter.
     for (const s of [prod, synth('staging', [])]) {
-      const [[, bucket]] = resources(s.json, 'AWS::S3::Bucket');
+      const [, bucket] = resources(s.json, 'AWS::S3::Bucket').find(([, b]) => b.Properties.BucketName.includes('vault-data'))!;
       expect(bucket.Properties.LifecycleConfiguration).toEqual({
         Rules: [
           { NoncurrentVersionExpiration: { NoncurrentDays: 7 }, ExpiredObjectDeleteMarker: true, AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }, Status: 'Enabled' },
@@ -295,7 +295,7 @@ describe('VettidOrgVaultStack: data bucket and manifest key', () => {
   });
 
   test('vault data is denied to every principal but the host role; manifests are written by the signer only', () => {
-    const [[, policy]] = resources(prod.json, 'AWS::S3::BucketPolicy');
+    const [, policy] = resources(prod.json, 'AWS::S3::BucketPolicy').find(([, p]) => str(p.Properties.Bucket).includes('DataBucket'))!;
     const st = policy.Properties.PolicyDocument.Statement;
     expect(st.some((s: any) => s.Effect === 'Deny' && str(s.Condition).includes('aws:SecureTransport'))).toBe(true);
     const data = st.find((s: any) => s.Sid === 'VaultDataHostOnly');
@@ -312,6 +312,136 @@ describe('VettidOrgVaultStack: data bucket and manifest key', () => {
     expect(signers).toHaveLength(1);
     expect(signers[0].Principal).toEqual({ AWS: 'arn:aws:iam::369484479783:role/vettid-org-vault-manifest-signer' });
     prod.t.hasResourceProperties('AWS::KMS::Alias', { AliasName: 'alias/vettid-org-vault-manifest' });
+  });
+});
+
+describe('VettidOrgVaultStack: recovery attempt counter bucket (release R, VAULT-HOST-PROTOCOL §8.1, VAULT-RELEASES §8.2)', () => {
+  const staging = synth('staging', []);
+  const counterOf = (json: any) => resources(json, 'AWS::S3::Bucket').find(([, b]) => String(b.Properties.BucketName).includes('vault-recovery'))!;
+  const hostStatements = (json: any) => {
+    const role = resources(json, 'AWS::IAM::Role').find(([, r]) => r.Properties.RoleName === VAULT_ROLE_NAMES.host)![0];
+    return resources(json, 'AWS::IAM::Policy').filter(([, p]) => str(p.Properties.Roles).includes(role)).flatMap(([, p]) => p.Properties.PolicyDocument.Statement);
+  };
+  const touchesCounter = (st: any, id: string) => str(st.Resource).includes(id) || [].concat(st.Resource).includes('*' as never);
+
+  // The vault release pins exactly these (vettid-vault
+  // enclave/releasecfg/<channel>.json `recovery_counter`); the release build
+  // refuses another prefix or another channel's account.
+  test('one per channel, named vettid-org-vault-recovery-<vault account> (no stage), as the release pins it', () => {
+    expect(vaultRecoveryBucketName('369484479783')).toBe('vettid-org-vault-recovery-369484479783');
+    expect(counterOf(prod.json)[1].Properties.BucketName).toBe('vettid-org-vault-recovery-369484479783');
+    expect(counterOf(staging.json)[1].Properties.BucketName).toBe('vettid-org-vault-recovery-347272280361');
+    expect(resources(prod.json, 'AWS::S3::Bucket')).toHaveLength(2);
+    prod.t.hasResourceProperties('AWS::SSM::Parameter', { Name: '/vettid-org/prod/vault/recovery-bucket-name' });
+  });
+
+  test('Object Lock enabled at creation with NO default retention; versioned; SSE-S3; public access blocked; owner-enforced; retained', () => {
+    for (const s of [prod, staging]) {
+      const [, b] = counterOf(s.json);
+      expect(b.Properties.ObjectLockEnabled).toBe(true);
+      // No ObjectLockConfiguration, so no `Rule`: a default retention would
+      // lock objects the enclave did not mean to lock; the enclave sets and
+      // reads back every lock itself.
+      expect(b.Properties.ObjectLockConfiguration).toBeUndefined();
+      expect(str(b.Properties)).not.toMatch(/DefaultRetention|"Mode"|LegalHold/);
+      expect(b.Properties.VersioningConfiguration).toEqual({ Status: 'Enabled' });
+      expect(b.Properties.BucketEncryption).toEqual({ ServerSideEncryptionConfiguration: [{ ServerSideEncryptionByDefault: { SSEAlgorithm: 'AES256' } }] });
+      expect(b.Properties.PublicAccessBlockConfiguration).toEqual({ BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true });
+      expect(b.Properties.OwnershipControls).toEqual({ Rules: [{ ObjectOwnership: 'BucketOwnerEnforced' }] });
+      expect({ d: b.DeletionPolicy, u: b.UpdateReplacePolicy }).toEqual({ d: 'Retain', u: 'Retain' });
+      // No replication, notification, website, inventory or logging target.
+      expect(Object.keys(b.Properties).sort()).toEqual([
+        'BucketEncryption', 'BucketName', 'LifecycleConfiguration', 'ObjectLockEnabled', 'OwnershipControls',
+        'PublicAccessBlockConfiguration', 'Tags', 'VersioningConfiguration',
+      ].filter((k) => k !== 'Tags' || 'Tags' in b.Properties));
+    }
+  });
+
+  test('no lifecycle rule expires a current version (so never a vault\'s newest present record) or a delete marker', () => {
+    for (const s of [prod, staging]) {
+      const rules = counterOf(s.json)[1].Properties.LifecycleConfiguration.Rules;
+      expect(rules).toEqual([
+        { Id: 'OldVersionsOfUnlockedRecords', NoncurrentVersionExpiration: { NoncurrentDays: 30 }, AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }, Status: 'Enabled' },
+      ]);
+      for (const r of rules) {
+        expect(r.ExpirationInDays).toBeUndefined();
+        expect(r.ExpirationDate).toBeUndefined();
+        expect(r.ExpiredObjectDeleteMarker).toBeUndefined();
+        expect(r.Transitions ?? r.NoncurrentVersionTransitions).toBeUndefined();
+        // Longer than the 96-hour lock of a present record; S3 never removes a locked version anyway.
+        expect(r.NoncurrentVersionExpiration.NoncurrentDays).toBeGreaterThan(4);
+      }
+    }
+    expect(VAULT_RECOVERY_NONCURRENT_DAYS).toBe(30);
+  });
+
+  test('bucket policy: TLS only, and nothing that allows anyone anything', () => {
+    const [id] = counterOf(prod.json);
+    const [, policy] = resources(prod.json, 'AWS::S3::BucketPolicy').find(([, p]) => str(p.Properties.Bucket).includes(id))!;
+    const st = policy.Properties.PolicyDocument.Statement;
+    expect(st).toHaveLength(1);
+    expect(st[0]).toMatchObject({ Effect: 'Deny', Principal: { AWS: '*' }, Action: 's3:*', Condition: { Bool: { 'aws:SecureTransport': 'false' } } });
+  });
+
+  test('the host role: exactly the five calls of §8.1, on that bucket only', () => {
+    for (const s of [prod, staging]) {
+      const [id] = counterOf(s.json);
+      const st = hostStatements(s.json).filter((x: any) => str(x.Resource).includes(id));
+      expect(st.map((x: any) => [x.Action, x.Resource])).toEqual([
+        [['s3:PutObject', 's3:PutObjectRetention', 's3:GetObjectVersion', 's3:GetObjectRetention'], { 'Fn::Join': ['', [{ 'Fn::GetAtt': [id, 'Arn'] }, '/*']] }],
+        ['s3:ListBucketVersions', { 'Fn::GetAtt': [id, 'Arn'] }],
+      ]);
+      for (const x of st) expect(x.Condition).toBeUndefined();
+    }
+    expect([...VAULT_RECOVERY_HOST_OBJECT_ACTIONS, ...VAULT_RECOVERY_HOST_BUCKET_ACTIONS]).toHaveLength(5);
+  });
+
+  // P18 (VAULT-HOST-PROTOCOL §12): the instance role MUST NOT hold a delete,
+  // bypass-governance, legal-hold or bucket-configuration permission on the
+  // counter bucket. Checked over every statement of the role (its inline
+  // policies; the one managed policy, AmazonSSMManagedInstanceCore, has no
+  // S3 action at all) and over every policy in the stack.
+  test('P18: no role in the stack may delete, bypass, hold or reconfigure on the counter bucket', () => {
+    const forbidden = [
+      /^s3:\*$/, /^s3:Delete/i, /^s3:Bypass/i, /LegalHold/i, /^s3:PutBucket/i, /^s3:PutLifecycle/i, /^s3:PutObjectLockConfiguration$/i,
+      /^s3:PutEncryption/i, /^s3:PutReplication/i, /^s3:PutAccelerate/i, /^s3:PutIntelligent/i, /^s3:PutInventory/i, /^s3:PutAnalytics/i, /^s3:PutMetrics/i,
+      /^s3:CreateAccessPoint/i, /^s3:PutAccessPoint/i, /^s3:RestoreObject/i, /^s3:ReplicateDelete/i, /^s3:ObjectOwnerOverrideToBucketOwner/i, /^s3:PutObjectAcl/i, /^s3:PutBucketAcl/i,
+    ];
+    const isForbidden = (a: string) => forbidden.some((re) => re.test(a)) || a === '*';
+    expect(isForbidden('s3:DeleteObjectVersion') && isForbidden('s3:BypassGovernanceRetention') && isForbidden('s3:PutObjectLegalHold')).toBe(true);
+    expect(isForbidden('s3:PutBucketObjectLockConfiguration') && isForbidden('s3:PutLifecycleConfiguration') && isForbidden('s3:PutBucketPolicy')).toBe(true);
+    for (const s of [prod, staging]) {
+      const [id] = counterOf(s.json);
+      for (const st of hostStatements(s.json)) {
+        const actions: string[] = [].concat(st.Action ?? st.NotAction);
+        if (st.NotAction) expect(st.Effect).toBe('Deny');
+        if (st.Effect !== 'Allow') continue;
+        // An allow that reaches the counter bucket (by name or by "*") holds none of them.
+        if (touchesCounter(st, id)) for (const a of actions) expect({ a, forbidden: isForbidden(a) }).toEqual({ a, forbidden: false });
+        // No S3 wildcard and no S3 grant on "*" anywhere on the role.
+        for (const a of actions) if (a.startsWith('s3:')) expect({ a, resource: st.Resource }).not.toEqual({ a, resource: '*' });
+      }
+      for (const st of statements(s.json)) {
+        if (st.Effect !== 'Allow' || !touchesCounter(st, id)) continue;
+        for (const a of [].concat(st.Action) as string[]) expect({ a, forbidden: isForbidden(a) }).toEqual({ a, forbidden: false });
+      }
+      // The managed policy the role carries is the SSM agent's only.
+      const [, role] = resources(s.json, 'AWS::IAM::Role').find(([, r]) => r.Properties.RoleName === VAULT_ROLE_NAMES.host)!;
+      expect(str(role.Properties.ManagedPolicyArns)).toMatch(/AmazonSSMManagedInstanceCore/);
+      expect(role.Properties.ManagedPolicyArns).toHaveLength(1);
+      expect(role.Properties.Policies).toBeUndefined();
+    }
+  });
+
+  test('release R slot members and app_key_next: the host may write them, on those tables only', () => {
+    const slotWrites = hostStatements(prod.json).filter((x: any) => x.Action === 'dynamodb:UpdateItem' && str(x.Resource).includes('Tablevaultrequests'));
+    expect(slotWrites).toHaveLength(1);
+    expect(slotWrites[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(
+      ['request_id', 'status', 'envelope', 'code', 'not_before', 'expires', 'earliest', 'retry_at', 'reason'],
+    );
+    // The member API never writes app_key_next (only the host does; the API reads it).
+    const vaults = resources(prod.json, 'AWS::DynamoDB::GlobalTable').find(([, t]) => t.Properties.TableName === 'vettid-org-vaults')![1];
+    expect(str(vaults.Properties.Replicas[0].ResourcePolicy.PolicyDocument)).not.toContain('app_key_next');
   });
 });
 
@@ -400,7 +530,7 @@ describe('cross-account access (VAULT-RELEASES §8.1)', () => {
     const hostVaultWrites = statements(prod.json).filter((s: any) => s.Action === 'dynamodb:UpdateItem' && (s.Condition?.['ForAllValues:StringEquals']?.['dynamodb:Attributes'] ?? []).includes('lease'));
     expect(hostVaultWrites).toHaveLength(1);
     expect(hostVaultWrites[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(
-      ['vault_id', 'lease', 'updated_at', 'sealed_release', 'vault_version', 'state_version', 'state', 'alarm', 'alarm_pending', 'app_key', 'credential_backup', 'name_change', 'name_change_pending', 'att_sweep_pending'],
+      ['vault_id', 'lease', 'updated_at', 'sealed_release', 'vault_version', 'state_version', 'state', 'alarm', 'alarm_pending', 'app_key', 'credential_backup', 'name_change', 'name_change_pending', 'att_sweep_pending', 'app_key_next'],
     );
   });
 
@@ -432,7 +562,8 @@ describe('cross-account access (VAULT-RELEASES §8.1)', () => {
 
     test('the host lists the data bucket (no prefix condition: missing objects are NoSuchKey) and deletes under vaults/*, which holds att/', () => {
       const st = hostPolicy();
-      const lists = st.filter((s: any) => str(s.Action).includes('s3:ListBucket'));
+      // s3:ListBucket itself (release R adds s3:ListBucketVersions on the counter bucket, not here).
+      const lists = st.filter((s: any) => [].concat(s.Action).includes('s3:ListBucket' as never));
       expect(lists).toHaveLength(1);
       expect(lists[0].Condition).toBeUndefined();
       expect(str(lists[0].Resource)).toContain('DataBucket');
@@ -572,7 +703,8 @@ describe('Vault OU SCP (lib/org/scp-vault.json)', () => {
 
   describe('the vault data buckets', () => {
     const s = scp.Statement.find((x: any) => x.Sid === 'ProtectVaultDataBuckets');
-    const bucketOf = (stage: string) => resources(synth(stage, []).json, 'AWS::S3::Bucket')[0][1].Properties.BucketName;
+    const bucketOf = (stage: string) =>
+      resources(synth(stage, []).json, 'AWS::S3::Bucket').map(([, b]) => b.Properties.BucketName).find((n: string) => n.includes('vault-data'));
 
     test('exactly the data bucket of each channel, as the vault stack names it', () => {
       expect(vaultDataBucketNames()).toEqual([bucketOf('prod'), bucketOf('staging')]);
