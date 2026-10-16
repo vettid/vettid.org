@@ -18,7 +18,8 @@ changelog:
     staging and 100 years in production**, a token for at least its
     wait plus one day; the period is part of the measured release (never
     from the host, the channel file or the bucket), and the bucket has
-    no default retention
+    no default retention. A wait record's date is stated as built: the
+    token's own time plus `W(n)` (0.1.10 said the attempt's listing)
   - 0.1.11: as built in vettid-vault #94 (the parent only), for
     release A; P15's wording was approved by the owner 2026-10-15
     (0.1.9) and this states how it is met. No wire change. §12 P15:
@@ -929,13 +930,14 @@ name does not match a name the enclave computes is ignored. Each body
 is 32 fresh random bytes. The vectors are in VAULT-MESSAGING §16.
 
 **Retention.** Every object is written with
-`x-amz-object-lock-mode: COMPLIANCE` and a retain-until date, counted
-from the counter time of the listing before the write: success and close
-records the channel's period, **100 years in production and one day on
-staging** (0.1.12); a token the period, or `W(n)` plus one day if that
-is longer, so that it outlasts the wait it starts; a wait record the
-counter time of the attempt's listing plus `W(n)`; a present marker
-version **96 hours**. The period is part of the measured release
+`x-amz-object-lock-mode: COMPLIANCE` and a retain-until date: success
+and close records the channel's period, **100 years in production and
+one day on staging** (0.1.12), from the counter time of the listing
+before the write; a token the period, or `W(n)` plus one day if that is
+longer, from the counter time of `Spend`'s listing, so that it outlasts
+the wait it starts; a wait record the token's own time (its
+`LastModified`, `at`) plus `W(n)`; a present marker version **96
+hours** from the counter time of the listing before the write. The period is part of the measured release
 (VAULT-MESSAGING §11.14.4): the enclave takes it from the channel it was
 built for, never from the host, the channel file or the bucket, which
 has no default retention. After every write the enclave reads the lock of

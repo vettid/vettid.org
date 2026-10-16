@@ -35,8 +35,10 @@ changelog:
     one day, so it is never removable while the wait it starts runs,
     and an attempt whose token lock does not outlast its wait is
     `lost` (as built in vettid-vault #97). Wait records (until the
-    wait's end) and present records (96 hours) are unchanged. G1 on
-    staging holds for that period only. §11.10.8 and §11.14.14 say so;
+    wait's end, the token's own time plus `W(n)`) and present records
+    (96 hours) are unchanged. On staging G1 to G4 and G9 hold for that
+    period only, and "Who could break a guarantee" states what deleting
+    an unlocked record there does. §11.10.8 and §11.14.14 say so;
     VAULT-HOST-PROTOCOL 0.1.12 §8.1 follows
   - 0.33.1: errata to the attachments text (0.32.0, 0.32.1) from the
     attachments build; **approved by the owner 2026-10-15 (as built in
@@ -13584,9 +13586,7 @@ delays or replays anything between them.
   header of that generation can still be opened by an enclave. Release R
   meets it in production with a 100-year lock; a header still openable
   after that (its release's sealing key alive for a century) is the
-  residual. On staging the lock is one day (0.33.2, below), so there G1
-  holds for a day after the attempt, or until its wait has ended and a
-  day more if that is later: staging's vaults are test vaults.
+  residual. On staging it holds for the lock period only (below).
 - **G2, no fork.** For each attempt of a generation, at most one caller
   in the world is answered `spent`.
 - **G3, at most ten.** `Spend` answers `spent` at most ten times for one
@@ -13616,6 +13616,11 @@ delays or replays anything between them.
   blocks, never shorter or removed; a success record cannot be made by
   anyone who has not opened the wrap.
 
+**On staging (0.33.2) G1 to G4 and G9 hold only while the records they
+rest on are locked**: a day from a record's write, and for a token
+until its wait has ended and a day more if that is later. Staging's
+vaults are test vaults. Production is unchanged.
+
 The interface does not promise that the counter can be reached, that
 VettID cannot see when it is called, or that VettID cannot use up a
 vault's attempts by running recoveries (that is the ten).
@@ -13635,8 +13640,8 @@ the period, or for its wait `W(n)` plus one day if that is longer, so a
 token can never be removed while the wait it starts runs (a wait record
 counts only while its attempt's token is listed); an attempt whose
 token lock read back ends before the token's own time plus `W(n)` is
-`lost`. Wait records are locked until the wait's end, present records
-for 96 hours. **The period is part of the measured release**: the
+`lost`. Wait records are locked until the wait's end (the token's own
+time plus `W(n)`), present records for 96 hours. **The period is part of the measured release**: the
 enclave takes it from the channel it was built for (§11.10.8); it is not
 a member of the channel file, the host cannot supply it, and the enclave
 sets and reads back the date of every record itself, so the bucket has
@@ -13645,12 +13650,21 @@ lock. Later releases add records that must agree, the stricter answer
 winning (§11.14.13).
 
 **Who could break a guarantee in release R, and who would see it.**
-Nobody with VettID's AWS permissions alone: no permission deletes,
-shortens or unlocks a compliance-locked version, the root user's
-included, and the enclave refuses a bucket, account or lock it did not
-expect. AWS acting for VettID could remove locked records; that would
-undo G1 to G5 and G9 for the records removed, and nobody outside AWS
-and VettID would see it. Closing VettID's AWS account would remove the
+In production, nobody with VettID's AWS permissions alone: no
+permission deletes, shortens or unlocks a compliance-locked version,
+the root user's included, and the enclave refuses a bucket, account or
+lock it did not expect. AWS acting for VettID could remove locked
+records; that would undo G1 to G5 and G9 for the records removed, and
+nobody outside AWS and VettID would see it. **On staging (0.33.2)**,
+once a record's one-day lock has passed, anyone with delete permission
+in the staging account can remove it, and nobody outside VettID would
+see it: deleting tokens hands back their attempts, so a generation can
+be given more than ten; deleting a close record reopens a closed
+generation, so a vault no longer sees it as closed and does not move
+past it; and deleting a token while its success record stays lets the
+attempt number, when used again, inherit that success and skip its
+wait. These consequences are staging's only; production keeps its
+100-year locks. Closing VettID's AWS account would remove the
 records and, with them, the sealing keys of every vault (§11.10.2), so
 every vault would be lost and none opened.
 
