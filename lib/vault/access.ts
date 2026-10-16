@@ -22,8 +22,8 @@ import { AppConfig, VaultConfig, resourceName } from '../config';
 export const VAULT_TABLES = ['vaults', 'vault-instances', 'vault-requests', 'vault-releases'] as const;
 export type VaultTable = (typeof VAULT_TABLES)[number];
 
-export type VaultApiConsumer = 'vault' | 'cleanup' | 'vault-alarms' | 'vault-notices' | 'account-push' | 'vault-names' | 'member-vaults';
-export const VAULT_API_CONSUMERS: VaultApiConsumer[] = ['vault', 'cleanup', 'vault-alarms', 'vault-notices', 'account-push', 'vault-names', 'member-vaults'];
+export type VaultApiConsumer = 'vault' | 'cleanup' | 'vault-alarms' | 'vault-notices' | 'account-push' | 'vault-names' | 'member-vaults' | 'vault-attempts';
+export const VAULT_API_CONSUMERS: VaultApiConsumer[] = ['vault', 'cleanup', 'vault-alarms', 'vault-notices', 'account-push', 'vault-names', 'member-vaults', 'vault-attempts'];
 
 /** The vaults table's index of vaults by sealed release (keys plus user_guid and state), for the notice job (W8). */
 export const SEALED_RELEASE_INDEX = 'sealed-release-index';
@@ -44,6 +44,12 @@ export interface VaultTableGrant {
    * never widens it.
    */
   readonly attributes?: string[];
+  /**
+   * Fine-grained access control by key: the request may only name items
+   * whose partition key matches one of these patterns
+   * (`ForAllValues:StringLike dynamodb:LeadingKeys`).
+   */
+  readonly leadingKeys?: string[];
 }
 
 export interface VaultApiAccess {
@@ -142,6 +148,34 @@ export const VAULT_API_ACCESS: Record<VaultApiConsumer, VaultApiAccess> = {
     sendsToControlQueues: false,
     readsVaultsStream: false,
   },
+  // Counted recovery attempts (MEMBER-API 2.7.0, release R): every 5
+  // minutes, finds the open slots the enclave marked `recovery_attempt` that
+  // were not noticed (a filtered Scan of the request table), claims and
+  // marks them, writes a cancel link (PutItem), and moves the recovery's
+  // `expires_at` (on the vault row, the API's own `recovery` only). It sends
+  // nothing to any queue and never touches a host-written attribute.
+  'vault-attempts': {
+    tables: [
+      { table: 'vaults', actions: ['GetItem'] },
+      { table: 'vaults', actions: ['UpdateItem'], attributes: ['vault_id', 'recovery', 'updated_at'] },
+      // Scan: the unnoticed attempt slots. PutItem: only the cancel links it
+      // mints (`rcancel#<sha256>`). UpdateItem: only the notice's own
+      // attributes on a slot, and `expires_at` on the slot, locator and
+      // link rows (`code` and `recovery_id` because its conditions name
+      // them; dynamodb:Attributes covers every attribute a request names).
+      // Every update the job makes is conditional on attribute_exists, so
+      // none creates an item (lambda/member/vault.ts, tested).
+      { table: 'vault-requests', actions: ['Scan'] },
+      { table: 'vault-requests', actions: ['PutItem'], leadingKeys: ['rcancel#*'] },
+      {
+        table: 'vault-requests',
+        actions: ['UpdateItem'],
+        attributes: ['request_id', 'expires_at', 'recovery_id', 'code', 'attempt_noticing', 'attempt_notice_tries', 'attempt_noticed_at', 'attempt_notice_failed'],
+      },
+    ],
+    sendsToControlQueues: false,
+    readsVaultsStream: false,
+  },
   // Name changes from the vault (MEMBER-API 2.2.0, VAULT-MESSAGING 0.18.0
   // §10.8, §11.5), fed by the vaults stream: reads the member's pointer row,
   // clears `name_change_pending` (and puts it back after a failure) and
@@ -205,6 +239,15 @@ export function vaultDlqName(config: AppConfig): string {
 const attributeCondition = (attrs: string[] | undefined) =>
   attrs ? { 'ForAllValues:StringEquals': { 'dynamodb:Attributes': attrs } } : {};
 
+const leadingKeyCondition = (keys: string[] | undefined) =>
+  keys ? { 'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': keys } } : {};
+
+/** A grant's fine-grained conditions (attributes, leading keys), or undefined. */
+export function grantConditions(g: VaultTableGrant): Record<string, unknown> | undefined {
+  const c = { ...attributeCondition(g.attributes), ...leadingKeyCondition(g.leadingKeys) };
+  return Object.keys(c).length ? c : undefined;
+}
+
 /**
  * Resource-policy statements (plain JSON) for one vault table: every grant of
  * every consumer on it, each to the account root of the API account narrowed
@@ -226,6 +269,7 @@ export function vaultTableResourceStatements(config: AppConfig, vault: VaultConf
         Condition: {
           ArnEquals: { 'aws:PrincipalArn': vaultApiRoleArn(config, vault, consumer) },
           ...attributeCondition(g.attributes),
+          ...leadingKeyCondition(g.leadingKeys),
         },
       });
     });
