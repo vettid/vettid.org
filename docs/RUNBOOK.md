@@ -167,9 +167,11 @@ digests), so nothing a build produces changes.
   workflow logs in instead.
 - The packages are public (the upstream images are public), so the other
   repositories' workflows, service containers and anyone else pull them
-  without credentials. GitHub creates a new container package private: after
-  the first run that adds an image, set it to public once (Package settings →
-  Danger zone → Change visibility → Public; there is no API for it).
+  without credentials. Packages this public repository's workflow creates
+  come up public (the first run's ten did); if one ever comes up private,
+  set it public once (Package settings → Danger zone → Change visibility;
+  there is no API for it): `skopeo inspect --no-creds` on its digest must
+  answer without a login.
 - Each consumer keeps the upstream reference in a comment or lock next to
   the mirror reference. Locks and Dockerfiles that are inputs to a
   reproducible build (vettid-vault `release/eif-toolchain.lock`,
