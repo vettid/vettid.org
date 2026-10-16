@@ -409,6 +409,12 @@ describe('status and date consistency (§3.2, §3.5)', () => {
     x[1].status = 'deprecated';
     expect(consistencyProblems(x, '2027-03-01T00:00:00Z').join()).toMatch(/no active release/);
   });
+  test('two active releases', () => {
+    const x = e();
+    x[0].status = 'active';
+    delete x[0].ends_at;
+    expect(consistencyProblems(x, '2027-03-01T00:00:00Z')).toEqual([expect.stringMatching(/releases 1, 2 are all active: one manifest has exactly one active release/)]);
+  });
   test('published after issued_at', () => expect(consistencyProblems(e(), '2027-02-01T00:00:00Z').join()).toMatch(/release 2: published_at/));
 });
 

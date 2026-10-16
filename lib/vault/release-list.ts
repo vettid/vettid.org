@@ -604,6 +604,10 @@ export function consistencyProblems(entries: readonly ManifestEntry[], issuedAt:
   const out: string[] = [];
   const active = entries.filter((e) => e.status === 'active');
   if (active.length === 0 && entries.some((e) => e.status !== 'removed')) out.push('no active release, but releases still run (nothing to move to)');
+  // One active release per manifest (VAULT-RELEASES §3.2: a release becomes deprecated when a newer one becomes active).
+  // With the successor rule (no way back to active), every release enrolled into after release R is active carries
+  // release R's capabilities (VAULT-MESSAGING 0.34.0 §11.10.9): an older release cannot be offered for enrollment beside it.
+  if (active.length > 1) out.push(`releases ${active.map((e) => e.release).join(', ')} are all active: one manifest has exactly one active release (deprecate the older ones)`);
   const newestActive = active.length ? Math.max(...active.map((e) => e.release)) : 0;
   for (const e of entries) {
     if (e.published_at > issuedAt) out.push(`release ${e.release}: published_at is after the manifest's issued_at`);

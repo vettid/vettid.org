@@ -1,9 +1,18 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.40
-date: 2026-10-15
+version: 0.1.41
+date: 2026-10-16
 changelog:
+  - 0.1.41: **approved by the owner 2026-10-16** (owner decisions of
+    2026-10-16; VAULT-MESSAGING 0.34.0). §4 "Recovery and unlock from
+    release R": **recovery is on by default**; the app learns whether
+    the vault implements release R from the **release capabilities**
+    (`recovery_r`) in the attested ETK descriptor, or in a transfer's
+    bundle, before it chooses the enroll, unlock, transfer or recovery
+    path; once it has seen `recovery_r` for a vault it never takes a
+    path from before release R for it. The recovery answers' texts
+    follow the result's **`attempt_used`**, not the code
   - 0.1.40: **wording for the owner's approval** (owner decisions of
     2026-10-13 to 2026-10-15; VAULT-MESSAGING 0.33.0 §11.14, which
     needs the vault's "release R"). New §4 "Recovery and unlock from
@@ -1774,6 +1783,37 @@ of an earlier release. The texts are drafts for the owner's wording.
 The old phone's keys after a transfer were decided by the owner on
 2026-10-15.*
 
+**Which path, and recovery on by default** (0.1.41; owner decision of
+2026-10-16; VAULT-MESSAGING 0.34.0 §11.10.9).
+
+- Recovery is **on by default** in every build; there is no switch that
+  turns release R's paths off.
+- Before every enrollment, unlock, recovery register and recovery open,
+  the app reads `capabilities` from the descriptor it has just verified
+  (`:core:altchan`, `EnclaveVerifier`); before a transfer's `hs.init`
+  the new phone reads it from the bundle. With `recovery_r`: release R's
+  requests (the phone key and `unlock_secret`, `vault.recovery.open`).
+  Without it: the requests of the earlier release, unchanged, **with that
+  release's earlier recovery** (owner decision of 2026-10-16). With
+  `recovery_r` but without `recovery_offered`: recovery is hidden for
+  that vault (no recovery entry point, Settings → Vault status shows
+  "This vault's release does not offer recovery."). Never one path and
+  then the other after a refusal.
+- **Remembered per vault**: once a verified descriptor of the vault's
+  instance or a transfer bundle listed `recovery_r`, or a request of
+  release R's shape succeeded, the app stores the mark with `vault_id`
+  (erased only with the vault's local state). From then on, an instance
+  without `recovery_r` is refused before anything is sent: "This
+  vault's software is older than the software this phone last used with
+  it. Contact VettID."
+- A descriptor whose `capabilities` member is malformed is refused like
+  any malformed descriptor; unknown names are ignored; a missing member
+  is an empty list.
+- Tests: a descriptor without the member, with `recovery_r`, malformed,
+  and with an unknown name; the mark set by each of its three sources
+  and kept across restarts; a marked vault offered an instance without
+  `recovery_r` sends nothing; a transfer bundle with and without it.
+
 **The phone key** (`:core:keystore`; VAULT-MESSAGING §11.14.1).
 
 - At enrollment, at a transfer (the new phone) and at a recovery the app
@@ -1843,7 +1883,15 @@ step of the "Recovery (new phone)" row).
    recovered and you would have to start over with an empty one. Check
    both entries before you go on."
 5. `vault.recovery.open` through `POST /api/vault/recovery/open`, then
-   the answer:
+   the answer. (0.1.41) Whether this attempt was used comes **only**
+   from the result's `attempt_used`: "with one more used" in the table
+   means `attempt_used: true`, "nothing was used" means `false`, and
+   `{n}` is `attempts.used` subtracted from 10. A `retry` with
+   `attempt_used: true`: "Something went wrong on the way. One attempt
+   was used, and your PIN and password were not judged wrong. {n} of 10
+   left. Try again." An answer the app
+   cannot read: "We could not read the vault's answer. This attempt may
+   have been used." and the count from the next answer:
 
 | Answer | Text |
 |---|---|
@@ -1861,6 +1909,15 @@ step of the "Recovery (new phone)" row).
 | `closed` | "The PIN or the password of this vault was changed, or its recovery was turned off, after this recovery began. This recovery cannot continue." |
 | `not_armed` | "Recovery was not set up for this vault." |
 | `counter_unavailable` | "We cannot check the attempt record now. Nothing was used. Try again later." |
+
+   **A lost `ok`** (0.1.41; owner decision of 2026-10-16): when the open's
+   answer never arrives or cannot be read (an open sent again gets no
+   readable answer either, since the recovery record is gone), the app
+   asks for the PIN and sends `vault.unlock` with
+   the phone's secret. A result with `vault_bundle` gives it the vault and
+   a token, and means the app **must send `hs.init` again**: the unlock
+   dropped any handshake in progress, so a pending `hs.fin` is refused.
+   The unlock can be repeated until the handshake completes.
 
    While a wait runs the screen shows the date and time of the next
    possible attempt with a countdown, and the app keeps the registered
