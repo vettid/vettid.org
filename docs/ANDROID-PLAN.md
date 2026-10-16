@@ -1911,8 +1911,9 @@ step of the "Recovery (new phone)" row).
 | `counter_unavailable` | "We cannot check the attempt record now. Nothing was used. Try again later." |
 
    **A lost `ok`** (0.1.41; owner decision of 2026-10-16): when the open's
-   answer never arrives or cannot be read, and an open again is answered
-   `no_recovery`, the app asks for the PIN and sends `vault.unlock` with
+   answer never arrives or cannot be read (an open sent again gets no
+   readable answer either, since the recovery record is gone), the app
+   asks for the PIN and sends `vault.unlock` with
    the phone's secret. A result with `vault_bundle` gives it the vault and
    a token; it then runs the first handshake as after `ok`. The unlock can
    be repeated until the handshake completes.
