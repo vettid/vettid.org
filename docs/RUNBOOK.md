@@ -942,6 +942,17 @@ routes until VettidOrgVaultStack is redeployed.
   the bucket, to everyone but CloudFormation's CDK execution role; every
   such call, a deploy's included, is emailed (`VaultDataBucketConfig`,
   "Security alerts"). Change them only in `lib/stacks/vault-stack.ts`.
+- The recovery attempt counter bucket (`vettid-org-vault-recovery-<account>`,
+  from vault release R): Object Lock in compliance mode. Once it exists it
+  **can never be deleted, by anyone**, and its locked objects cannot be
+  deleted or shortened until their dates (100 years for most of them).
+  The vault release pins its exact name and account. See "Recovery from
+  release R" below.
+- The recovery request key (`alias/vettid-org-recovery-request`, staging
+  `alias/vettid-org-staging-recovery-request`; in `VettidOrgDataStack`
+  of the member API's account): vault releases pin its public key and key
+  id. Never schedule its deletion or disable it while a live release pins
+  it; a replacement is pinned beside it for one release first.
 - Break-glass for any of this: detach or edit `vettid-vault-key-protection`
   from the management account.
 
@@ -1380,6 +1391,171 @@ role's `dynamodb:Scan` statement).
   MEMBER-API and the `vault-alarms` function's log first.
 - Never delete objects under another vault's prefix, and never delete a
   row that is not `deleted`.
+
+### Recovery from release R: the counter bucket, the request key and the deploy order
+
+*Vault release R (VAULT-MESSAGING 0.33.0 §11.14; VAULT-HOST-PROTOCOL
+0.1.11 §8.1, P16 to P18; MEMBER-API 2.7.0; VAULT-RELEASES 0.1.29 §5.2,
+§8.2, §8.4). Built in vettid.org and vettid-vault; **not deployed**. Nothing
+here is done before the owner has decided the point below.*
+
+Release R keeps each vault's recovery attempts outside everything the host
+stores: as objects in an S3 bucket under **Object Lock in compliance
+mode**, which the enclave writes, locks and reads back over its own TLS.
+The member API signs every `recovery` and `recovery_cancel` with a KMS key
+that the release pins. Three pieces, each in its own stack:
+
+| Piece | Stack and account | Name |
+|---|---|---|
+| Counter bucket | `VettidOrgVaultStack`, the vault account | `vettid-org-vault-recovery-347272280361` (staging), `vettid-org-vault-recovery-369484479783` (prod) |
+| Its host name on the DNS Firewall | `VettidOrgVaultHostStack`, the vault account | `<bucket>.s3.us-east-1.amazonaws.com` |
+| Recovery request key | `VettidOrgDataStack`, the member API's account | `alias/vettid-org-staging-recovery-request` (staging, 347272280361), `alias/vettid-org-recovery-request` (prod, 449757308783) |
+| Signing, `POST /api/vault/recovery/open`, the new slot members | `VettidOrgMemberApiStack`, the member API's account | |
+
+**Owner's decision before the first deploy: the bucket is irreversible.**
+Creating the counter bucket cannot be undone, and this is meant:
+
+- Object Lock is enabled when the bucket is created and can never be
+  turned off; versioning can never be suspended.
+- The enclave writes every record with a **compliance-mode** lock: tokens,
+  success and close records for **100 years**, wait records until the
+  wait ends, presence records for 96 hours. AWS documents that no user can
+  shorten or remove a compliance lock, **including the account's root
+  user**, and that a version under such a lock cannot be deleted.
+- So once the first vault of release R has written a record, the bucket
+  can never be emptied and therefore **never be deleted**, the objects in
+  it can never be deleted before their dates, and closing the AWS account
+  is the only way to remove them (and it removes every vault with them,
+  VAULT-MESSAGING §11.14.4). The name is pinned in the release
+  (`recovery_counter`), so it can never be renamed either.
+- Storage costs are tiny (32-byte objects), but they run for as long as the
+  account exists.
+
+Production's bucket is needed only for a production release that offers
+recovery (`recovery_offered: true`); production release 1 may ship with
+recovery refused (VAULT-RELEASES §12). The owner may therefore decide to
+create staging's bucket now and production's later; the CDK creates both
+whenever `VettidOrgVaultStack` is deployed to each account, so hold the
+production vault stack deploy until then.
+
+**The bucket, as built** (`lib/stacks/vault-stack.ts`; tested in
+`test/vault-stack.test.ts`): Object Lock enabled at creation, **no default
+retention**, versioning, Block Public Access, SSE-S3, bucket-owner
+enforced, TLS only (bucket policy), RETAIN. One lifecycle rule: a version
+that has been **noncurrent** for 30 days is removed if its lock has
+ended (S3 never removes a locked version), plus incomplete multipart
+uploads after a day; no rule touches a current version, so a vault's
+newest presence record (the marker's current version) is never removed.
+The host role `vettid-org-vault-host` may call exactly
+`s3:PutObject`, `s3:PutObjectRetention`, `s3:GetObjectVersion` and
+`s3:GetObjectRetention` on `<bucket>/*` and `s3:ListBucketVersions` on the
+bucket: no delete, bypass-governance, legal-hold or configuration
+permission (P18). The S3 gateway endpoint's policy already admits every
+bucket of the vault account (`aws:ResourceAccount`). The host role may
+also write `app_key_next` on the vaults table and the slot members
+`not_before`, `expires`, `earliest`, `retry_at` and `reason`.
+
+**The request key, as built** (`lib/stacks/data-stack.ts`; tested in
+`test/account-admin-stacks.test.ts`): ECDSA P-256, `SIGN_VERIFY`, RETAIN.
+Its policy lets the account administer it but not sign; allows `kms:Sign`
+(ECDSA_SHA_256 over a digest) to the member API's vault function role
+`vettid-org[-staging]-member-vault` only, and denies `kms:Sign` to every
+other principal; and lets the owner's permission set read the public key
+(`kms:GetPublicKey`, `kms:DescribeKey`) to fill in the release's channel
+files. The member API reads its ARN and key id from SSM
+(`/vettid-org/<stage>/data/recovery-request-key-arn`, `-key-id`) at
+deploy time, so **the member API cannot be deployed before the data
+stack**.
+
+**Deploy order** (staging first; production only after the owner's
+decision above and when a production release with recovery is near):
+
+```bash
+aws sso login
+# 1. Vault account: the counter bucket (IRREVERSIBLE, see above), the host
+#    role's grants, the new attributes. The diff must show exactly: + the
+#    bucket, its policy and an SSM ref, ~ HostRoleDefaultPolicy, + output.
+npx cdk diff   VettidOrgVaultStack -c stage=staging --profile vault-staging
+npx cdk deploy VettidOrgVaultStack -c stage=staging --profile vault-staging
+#    The DNS Firewall allowlist gains the bucket's host name (~ DnsAllowList only).
+npx cdk diff   VettidOrgVaultHostStack -c stage=staging --profile vault-staging
+npx cdk deploy VettidOrgVaultHostStack -c stage=staging --profile vault-staging
+# 2. Member API account: the request key (+ key, alias, two SSM refs, output).
+npx cdk diff   VettidOrgDataStack -c stage=staging --profile vault-staging
+npx cdk deploy VettidOrgDataStack -c stage=staging --profile vault-staging
+# 3. The member API (signing, the open route, the slot members): ~ the vault
+#    function's policy and environment, ~ every function's code.
+npx cdk diff   VettidOrgMemberApiStack -c stage=staging --profile vault-staging
+npx cdk deploy VettidOrgMemberApiStack -c stage=staging --profile vault-staging
+# 4. Release R's hosts: only after its channel file pins the key (below),
+#    as for any release ("Adding a release").
+```
+
+In production the vault account is `--profile vault-prod` and the member
+API's account the default profile (no `-c stage`).
+
+Check after step 1 (staging shown):
+
+```bash
+B=vettid-org-vault-recovery-347272280361; P="--profile vault-staging"
+aws s3api get-object-lock-configuration --bucket $B $P   # ObjectLockEnabled: Enabled, and NO "Rule"
+aws s3api get-bucket-versioning --bucket $B $P            # Enabled
+aws s3api get-public-access-block --bucket $B $P          # all four true
+aws s3api get-bucket-lifecycle-configuration --bucket $B $P   # NoncurrentVersionExpiration only
+aws iam simulate-principal-policy $P \
+  --policy-source-arn arn:aws:iam::347272280361:role/vettid-org-vault-host \
+  --action-names s3:DeleteObject s3:DeleteObjectVersion s3:BypassGovernanceRetention \
+                 s3:PutObjectLegalHold s3:PutBucketObjectLockConfiguration s3:PutLifecycleConfiguration \
+  --resource-arns arn:aws:s3:::$B arn:aws:s3:::$B/x \
+  --query 'EvaluationResults[].[EvalActionName,EvalDecision]' --output text   # every one implicitDeny
+```
+
+If `get-object-lock-configuration` ever shows a `Rule` (a default
+retention), stop and tell the owner: it would lock objects the enclave did
+not mean to lock, and it is not removable from objects already written.
+
+**Filling in vettid-vault's channel files** (after step 2; a pull request
+in vettid-vault, as for any release constant; VAULT-RELEASES §5.2):
+
+```bash
+A=alias/vettid-org-staging-recovery-request; P="--profile vault-staging"   # prod: alias/vettid-org-recovery-request, default profile
+aws kms describe-key   --key-id $A $P --query KeyMetadata.KeyId --output text      # the key_id
+aws kms get-public-key --key-id $A $P --query PublicKey --output text              # the spki (base64 DER)
+aws kms get-public-key --key-id $A $P --query '[KeySpec,KeyUsage,SigningAlgorithms]'  # ECC_NIST_P256, SIGN_VERIFY, ECDSA_SHA_256
+```
+
+- In `enclave/releasecfg/staging.json` (or `prod.json`) replace the
+  placeholders of `recovery_request_keys` with `{"key_id": "<KeyId>",
+  "spki": "<PublicKey>"}`. The `key_id` is the KMS key id (the UUID), the
+  same value the member API sends as `key_id` (its
+  `RECOVERY_REQUEST_KEY_ID`); a release refuses a message whose `key_id`
+  it does not pin. To replace the key later, pin the new one beside the
+  old one in one release first.
+- Set `android_min_version_code` to the version code of the first app
+  build of release R (the Android app's own release notes give it); the
+  enclave refuses an older app at a recovery's register, an enrollment
+  and a transfer's `hs.init`.
+- Check that `recovery_counter` names this channel's bucket and account
+  (the release build refuses another channel's).
+
+**What the member API deploy (step 3) changes for vaults of earlier
+releases.** Earlier enclaves ignore the signature members. The recovering
+key may no longer unlock or lock (`403`): the recovery of releases before
+R (`credential.recover` after an unlock) no longer works through the API,
+so an earlier-release vault on staging can only be recovered until this
+deploy; staging's earlier vaults are deleted and enrolled again on release
+R anyway (VAULT-MESSAGING §11.14.14). `available_at` is now marked
+`earliest` until a slot of release R says otherwise. The request email has
+the text of release R.
+
+**Watching it work.** `vault.recovery_open` and `vault.recovery_attempt`
+in the audit table; the member gets one email per counted attempt. A
+recovery request that KMS could not sign answers `503` and writes nothing
+(log line `recovery request not signed`); a cancel that could not be
+signed is recorded as cancelled at the API but not queued (log line
+`recovery cancel not queued`). The bucket's own records: VettID owns the
+bucket and can list it (names are opaque per vault), which
+VAULT-HOST-PROTOCOL §11.2 discloses.
 
 ### Manifest sync (`vettid-org-vault-manifest-sync`, VAULT-RELEASES §7)
 
