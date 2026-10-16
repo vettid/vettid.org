@@ -14,6 +14,10 @@
 # only re-verified. Docker Hub is used anonymously unless the repository
 # has a DOCKERHUB_TOKEN secret (and DOCKERHUB_USERNAME variable).
 #
+# Dependabot's pull requests (action bumps of this file) are skipped: their
+# token cannot write packages, and they add no image. The weekly run (or a
+# workflow_dispatch after merging) covers them.
+#
 # Actions are pinned by commit SHA (tag in the comment).
 name: Image mirror
 
@@ -35,7 +39,9 @@ concurrency:
 
 jobs:
   mirror:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
     runs-on: ubuntu-26.04
     timeout-minutes: 60
     permissions:
