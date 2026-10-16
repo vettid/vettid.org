@@ -42,7 +42,13 @@ changelog:
     relay can add or remove a name, and the vault refuses every request
     of the shape before R, so a false or missing list can only make a
     request fail, never weaken it. The release number still comes from
-    the manifest entry that the attested PCRs match (§11.10.1).
+    the manifest entry that the attested PCRs match (§11.10.1). (3) A
+    channel's manifest has exactly one `active` release, and the one that
+    makes a release with `recovery_r` active deprecates every older one,
+    so that a first enrollment cannot be steered to a release without R
+    (§11.10.9; enforced by vettid.org's manifest checks). (4) A bundle
+    of another kind with `capabilities` is refused. `attempt_used` is
+    `true` if and only if the spend happened, `vault_missing` included.
     ANDROID-PLAN 0.1.41 follows
   - 0.33.2: release R (0.33.0): **the attempt counter's lock period is
     per channel**; **owner decision 2026-10-16**. §11.14.4: token,
@@ -3127,7 +3133,9 @@ Bundle rules:
 - (0.34.0, release R) A bundle of `kind` `app` (a transfer, §6.7.1)
   carries `"capabilities": [...]` after `exp`: the vault's release
   capabilities, as in its ETK descriptor (§11.10.9). The QR's `h` binds
-  it. Other kinds do not carry it. A bundle of `kind` `app` without it
+  it. Other kinds do not carry it, and a scanner MUST refuse a bundle of
+  another kind that has the member, as a malformed bundle. A bundle of
+  `kind` `app` without it
   comes from a release before R.
 
 The bundle is protected and published as follows:
@@ -11997,7 +12005,23 @@ know.
 | receive a transfer (the new phone) | the transfer bundle's `capabilities` (§6.4) | the QR's `h`, shown by the old phone |
 
 It reads them every time; a descriptor or bundle without the member is a
-release before R. The release **number** is not repeated: the app takes
+release before R.
+
+**One `active` release, and none without R after R.** A first
+enrollment has no mark to remember (below), and the member API chooses
+the instance (§11.1). So that it cannot steer a new enrollment to a
+release without R, which could never move into R later (§11.14:
+release R refuses a vault from before it): a channel's manifest lists
+**exactly one** `active` release (VAULT-RELEASES §3.2: a release becomes
+`deprecated` when a newer one becomes `active`), and the manifest that
+makes a release with `recovery_r` `active` sets every older release
+`deprecated` or later in the same publication. A release never returns
+to `active` (§11.10.1, the successor rule), and every later release
+keeps `recovery_r` (below), so from then on every release a member can
+enroll into has it. vettid.org's manifest checks refuse a manifest with
+more than one `active` release before it is signed and in CI. The app
+does not refuse to enroll into a release without `recovery_r`: production
+has none with it yet. The release **number** is not repeated: the app takes
 it, as before, from the manifest entry that the attested PCRs match
 (§11.10.1).
 
@@ -14018,7 +14042,8 @@ at register and padded to 4,096 bytes:
   list above omitted: `device_secret`, in a repeat through the `next`
   wrap (§11.14.2) whose `unlock_secret` does not match the one the
   stopped completion recorded, and `vault_missing`, the stored state
-  could not be read; neither uses an attempt. `stored_mismatch` means
+  could not be read; `device_secret` never uses an attempt, and
+  `vault_missing` uses one only after the spend (the table below). `stored_mismatch` means
   the vault's stored data cannot be opened by any entry; from step 2 nothing was used, from step
   6 the right attempt was used; the app says "Your entry was right, but
   the vault's stored data could not be opened. Contact VettID." (from
@@ -14037,9 +14062,13 @@ at register and padded to 4,096 bytes:
   | `attempt_lost` | `true` |
   | `ok`, `wrong` | `true` |
   | `quiet`, `wait`, `closed`, `exhausted` | `false` from step 3, or from a `Spend` that took nothing; `true` when step 4b refused to test a spent attempt |
-  | `stored_mismatch` | `false` from step 2; `true` from step 6 |
-  | `retry` | `false` from step 3b; `true` after a spent attempt whose run ended before step 1 of the order of writes was stored (the entry may have been right) |
-  | every other code (`wrong_again`, `busy`, `counter_unavailable`, `not_armed`, `no_recovery`, `expired`, `attestation`, `manifest`, `wrong_release`, `bad_request`, `device_secret`, `vault_missing`) | `false` |
+  | `stored_mismatch`, `vault_missing` | `false` before the spend (step 2; a stored state that cannot be read); `true` after it (step 6: the state, the keys or the backup copy cannot be opened) |
+  | `retry` | `false` from step 3b; `true` whenever the spend happened: the run ended at any point after it, before or after step 1 of the order of writes was stored, including a failure to register at the relay or to store steps 2 and 3 (the entry may have been right) |
+  | every other code (`wrong_again`, `busy`, `counter_unavailable`, `not_armed`, `no_recovery`, `expired`, `attestation`, `manifest`, `wrong_release`, `bad_request`, `device_secret`) | `false` |
+
+  Said once: **`attempt_used` is `true` if and only if the spend
+  happened**, whatever went wrong after it; the codes above are only the
+  ones that can follow it.
 
   A repeat through the `next` wrap, once step 1 of the order of writes
   is stored (§11.14.2; "A right entry that could not be completed"),
