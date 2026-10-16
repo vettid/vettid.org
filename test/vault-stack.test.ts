@@ -433,6 +433,16 @@ describe('VettidOrgVaultStack: recovery attempt counter bucket (release R, VAULT
     }
   });
 
+  test('release R: the request table admits the attempts sweep (Scan) and no other member API role to Scan', () => {
+    const reqs = resources(prod.json, 'AWS::DynamoDB::GlobalTable').find(([, t]) => t.Properties.TableName === 'vettid-org-vault-requests')![1];
+    const st = reqs.Properties.Replicas[0].ResourcePolicy.PolicyDocument.Statement;
+    const scans = st.filter((x: any) => str(x.Action).includes('dynamodb:Scan'));
+    expect(scans.map((x: any) => x.Condition.ArnEquals['aws:PrincipalArn'])).toEqual(['arn:aws:iam::449757308783:role/vettid-org-member-vault-attempts']);
+    const vaults = resources(prod.json, 'AWS::DynamoDB::GlobalTable').find(([, t]) => t.Properties.TableName === 'vettid-org-vaults')![1];
+    const w = vaults.Properties.Replicas[0].ResourcePolicy.PolicyDocument.Statement.filter((x: any) => str(x.Condition).includes('member-vault-attempts"') && str(x.Action).includes('UpdateItem'));
+    expect(w.map((x: any) => x.Condition['ForAllValues:StringEquals']['dynamodb:Attributes'])).toEqual([['vault_id', 'recovery', 'updated_at']]);
+  });
+
   test('release R slot members and app_key_next: the host may write them, on those tables only', () => {
     const slotWrites = hostStatements(prod.json).filter((x: any) => x.Action === 'dynamodb:UpdateItem' && str(x.Resource).includes('Tablevaultrequests'));
     expect(slotWrites).toHaveLength(1);
@@ -458,7 +468,7 @@ describe('cross-account access (VAULT-RELEASES §8.1)', () => {
       expect(replica.DeletionProtectionEnabled).toBe(true);
       for (const s of replica.ResourcePolicy?.PolicyDocument.Statement ?? []) {
         expect(s.Principal).toEqual({ AWS: 'arn:aws:iam::449757308783:root' });
-        expect(s.Condition.ArnEquals['aws:PrincipalArn']).toMatch(/^arn:aws:iam::449757308783:role\/vettid-org-member-(vault|cleanup|vault-alarms|vault-notices|account-push|vault-names|member-vaults)$/);
+        expect(s.Condition.ArnEquals['aws:PrincipalArn']).toMatch(/^arn:aws:iam::449757308783:role\/vettid-org-member-(vault|cleanup|vault-alarms|vault-notices|account-push|vault-names|member-vaults|vault-attempts)$/);
         expect(str(s.Action)).not.toMatch(/dynamodb:\*|BatchWrite|DeleteTable|UpdateTable/);
       }
     }

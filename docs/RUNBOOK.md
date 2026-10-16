@@ -1430,6 +1430,11 @@ Creating the counter bucket cannot be undone, and this is meant:
   (`recovery_counter`), so it can never be renamed either.
 - Storage costs are tiny (32-byte objects), but they run for as long as the
   account exists.
+- Until the first locked write the bucket is still an ordinary, empty
+  bucket and **can** be deleted (empty it, then delete it; versioning and
+  Object Lock do not prevent deleting an empty bucket). After that first
+  record it never can. A bucket created by mistake must therefore be
+  removed before release R's hosts run against it.
 
 Production's bucket is needed only for a production release that offers
 recovery (`recovery_offered: true`); production release 1 may ship with
@@ -1493,6 +1498,32 @@ npx cdk deploy VettidOrgMemberApiStack -c stage=staging --profile vault-staging
 
 In production the vault account is `--profile vault-prod` and the member
 API's account the default profile (no `-c stage`).
+
+**Smoke test after step 3** (staging): on a test vault, start a recovery
+from the account site (or `POST /api/vault/recovery` with a session) and
+cancel it at once. It must answer `202`, not `503 vault_unavailable`
+("Recovery requests cannot be signed right now"), and the member API's
+log group must show no `recovery request not signed` and no `recovery
+cancel not queued`. Before release R's hosts run, the enclave ignores the
+signature, so this proves only that KMS signs; with release R it also
+proves the pinned key matches (a wrong key makes the enclave answer the
+request with random bytes, and the recovery never shows a code).
+
+```bash
+aws logs filter-log-events --profile vault-staging \
+  --log-group-name /aws/lambda/<the VaultFunction's name> --start-time $(( ($(date +%s) - 900) * 1000 )) \
+  --filter-pattern '"recovery request not signed"' --query 'events[].message'   # expect []
+```
+
+**The attempt emails.** A counted attempt is mailed when the new phone
+polls its open, at a status read, at the next open, or at the latest by
+the 5-minute job `VaultAttemptsJob` (role `vettid-org[-staging]-member-vault-attempts`,
+which scans the request table). Open slots live as long as their recovery
+plus an hour, so none expires unnoticed. A notice that failed (mail,
+audit or link) is retried after 5 minutes, and given up after 24 tries
+(log line `recovery attempt notice abandoned`; the slot keeps
+`attempt_notice_failed`). The job writes `RecoveryAttemptsUnnoticed` and
+`RecoveryAttemptNoticeFailures` (namespace `VettID/MemberApi`).
 
 Check after step 1 (staging shown):
 

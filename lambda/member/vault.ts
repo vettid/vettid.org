@@ -141,7 +141,7 @@
  */
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
-import { GetCommand, PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { GetCommand, PutCommand, QueryCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { snapshotFor } from '../shared/account-snapshot';
 import { AppHeader, AppKey, NONCE_TTL_S, TS_WINDOW_S, parseAppHeader, parseAppKey, signingInput, verifyAppSignature } from '../shared/app-auth';
 import { audit, memberActor } from '../shared/audit';
@@ -591,17 +591,20 @@ const isStoredKey = (k: unknown): k is StoredKey =>
 
 /**
  * The host's pending app key (2.7.0, release R), while it counts: set, a
- * key, not the current key, and (when both carry one) with a `seq` above
- * `app_key`'s. The host clears it by the rules of VAULT-MESSAGING §11.14.2;
- * one it failed to clear after `app_key` reached its `seq` is not accepted
- * here. There is no time limit.
+ * key with a `seq`, not the current key, and with a `seq` above
+ * `app_key`'s (an `app_key` without `seq` admits no pending key). The
+ * host clears it by the rules of VAULT-MESSAGING §11.14.2; one it failed
+ * to clear after `app_key` reached its `seq` is not accepted here. There
+ * is no time limit.
  */
 export function pendingAppKey(v: Pick<VaultRow, 'app_key' | 'app_key_next'>): StoredKey | null {
   const n = v.app_key_next;
-  if (!isStoredKey(n)) return null;
+  if (!isStoredKey(n) || typeof n.seq !== 'number') return null;
   const cur = isStoredKey(v.app_key) ? v.app_key : null;
   if (cur && cur.kid === n.kid) return null;
-  if (cur && typeof cur.seq === 'number' && !(typeof n.seq === 'number' && n.seq > cur.seq)) return null;
+  // Staleness is judged by seq only: an app_key without one cannot be
+  // compared, so a pending key beside it is not accepted.
+  if (cur && !(typeof cur.seq === 'number' && n.seq > cur.seq)) return null;
   return n;
 }
 
@@ -1198,7 +1201,7 @@ router.on('GET', '/api/vault/requests/{id}', async (req) => {
     if (isAttemptSlot(item) && VAULT_ID_RE.test(String(item.vault_id))) {
       try {
         const v = await vaultRow(String(item.vault_id));
-        if (v?.recovery && v.user_guid === m.user_guid && v.recovery.recovery_id === item.recovery_id) await noticeAttempt(m, v, v.recovery, item);
+        if (v && v.user_guid === m.user_guid) await noticeAttempt(m, v, v.recovery, item);
       } catch (e) {
         console.error('recovery attempt not noticed', JSON.stringify({ request_id: requestId, error: (e as Error).name }));
       }
@@ -1741,7 +1744,8 @@ const cancelUrlOf = (token: string) => `https://${env('ACCOUNT_HOST')}/vault/rec
  * `earliest` stays only if the enclave set it (it could not read its
  * counter). The API keeps its own floor: never earlier than request + 24 h,
  * never open for less than 24 h, and never longer than RECOVERY_MAX_SPAN_S
- * after the request. A release before R sends none of them: the API's own
+ * after the request (a `not_before` past that cap is shown as it is, and
+ * the recovery expires at the cap without becoming available). A release before R sends none of them: the API's own
  * times stand, marked `earliest`. Returns the recovery as it now is.
  */
 async function applyEnclaveTimes(v: VaultRow, r: RecoveryRow, slot: Record<string, unknown> | null): Promise<RecoveryRow> {
@@ -1749,9 +1753,11 @@ async function applyEnclaveTimes(v: VaultRow, r: RecoveryRow, slot: Record<strin
   const notBefore = slotTime(slot.not_before);
   const expires = slotTime(slot.expires);
   if (notBefore === null || expires === null) return r;
+  // Never a time earlier than the enclave's. With a not_before past the cap
+  // the recovery can never become available: it is kept pending and ends
+  // (expired) at the cap, and the account site shows the enclave's time.
   const availableAt = Math.max(r.requested_at + RECOVERY_DELAY_S, notBefore);
   const expiresAt = Math.min(r.requested_at + RECOVERY_MAX_SPAN_S, Math.max(expires, availableAt + RECOVERY_VALIDITY_S));
-  if (expiresAt <= availableAt) return r; // only a span shorter than a day past the cap: keep the API's own times
   const earliest = slot.earliest === true;
   const before = r.expires_at;
   try {
@@ -1772,69 +1778,162 @@ async function applyEnclaveTimes(v: VaultRow, r: RecoveryRow, slot: Record<strin
   return { ...rest, available_at: availableAt, expires_at: expiresAt, enclave_times: true, ...(earliest ? { earliest: true } : {}) };
 }
 
-const attemptMail = (at: number, cancelUrl: string) => `An attempt was made to open your VettID vault with a recovery, on ${iso(at)}.
+const attemptMail = (at: number, cancelUrl: string | null) => `An attempt was made to open your VettID vault with a recovery, on ${iso(at)}.
 
 Attempts are limited to ten, and after the first two each wrong one is followed by a growing wait. If this was you and it did not work, the app on your new phone shows when you can try again.
 
-If this was not you, cancel the recovery now:
-${cancelUrl}
+${cancelUrl ? `If this was not you, cancel the recovery now:
+${cancelUrl}` : 'If this was not you, sign in to your account page and check that no recovery is in progress.'}
 
 If you still have your phone, open the VettID app and enter your PIN and password.`;
 
+/** 2.7.0: a notice that did not finish (its mail, audit or link failed) may be taken up again after this long. */
+export const ATTEMPT_RETRY_S = 300;
+/** 2.7.0: after this many tries the notice is given up, recorded and logged (an address SES will never deliver to). */
+export const ATTEMPT_MAX_TRIES = 24;
+
 /**
  * 2.7.0 (release R; VAULT-MESSAGING §11.14.11): an open's slot answered with
- * the enclave's `recovery_attempt` is a counted attempt. Once per slot (a
- * conditional mark on the slot comes first, so a retry or a concurrent poll
- * never mails twice): the recovery's `expires_at` moves to the slot's
- * `expires` when that is later (a wait began; the recovery stays open with
- * the same code), the attempt is audited, and the member is mailed with a
- * fresh cancel link. The API learns that an attempt was counted and when the
+ * the enclave's `recovery_attempt` is a counted attempt. The member is told
+ * once per slot, whatever the phone does afterwards: from the app's poll,
+ * from a status read, from the next open, or from the 5-minute sweep
+ * (sweepAttempts), whichever comes first.
+ *
+ * Claim, then work, then record (as the code's release: `releasing` /
+ * `released`): a conditional claim (`attempt_noticing`, with a count of
+ * tries) lets one caller at a time work on the slot; the recovery's
+ * `expires_at` moves to the slot's `expires` when that is later and the
+ * recovery is still registered (a wait began; it stays open with the same
+ * code); the attempt is audited; the member is mailed with a fresh cancel
+ * link; and only then is `attempt_noticed_at` set. A notice that failed
+ * anywhere is taken up again ATTEMPT_RETRY_S after its claim (it may then
+ * audit twice, which errs on the side of the record); after
+ * ATTEMPT_MAX_TRIES it is given up and logged. An attempt whose recovery
+ * has since been cancelled or replaced is still mailed and audited; it
+ * moves nothing. The API learns that an attempt was counted and when the
  * next is possible, never whether it was right or how many were used.
  * Returns the recovery as it now is.
  */
-async function noticeAttempt(m: MemberItem, v: VaultRow, r: RecoveryRow, slot: Record<string, unknown>): Promise<RecoveryRow> {
-  if (!isAttemptSlot(slot) || slot.recovery_id !== r.recovery_id || slot.user_guid !== m.user_guid || typeof slot.request_id !== 'string') return r;
-  const noticedAt = nowS();
+async function noticeAttempt(m: MemberItem, v: VaultRow, r: RecoveryRow | undefined, slot: Record<string, unknown>): Promise<RecoveryRow | undefined> {
+  if (!isAttemptSlot(slot) || slot.user_guid !== m.user_guid || slot.vault_id !== v.vault_id || typeof slot.request_id !== 'string') return r;
+  if (slot.attempt_noticed_at !== undefined) return r;
+  const now = nowS();
+  let tries: number;
   try {
+    const res = await ddb.send(new UpdateCommand({
+      TableName: table.vaultRequests(),
+      Key: { request_id: slot.request_id },
+      UpdateExpression: 'SET attempt_noticing = :now, attempt_notice_tries = if_not_exists(attempt_notice_tries, :zero) + :one',
+      ConditionExpression: 'attribute_exists(request_id) AND code = :c AND attribute_not_exists(attempt_noticed_at) AND (attribute_not_exists(attempt_noticing) OR attempt_noticing < :stale)',
+      ExpressionAttributeValues: { ':now': now, ':zero': 0, ':one': 1, ':c': ATTEMPT_CODE, ':stale': now - ATTEMPT_RETRY_S },
+      ReturnValues: 'UPDATED_NEW',
+    }));
+    tries = Number(res.Attributes?.attempt_notice_tries ?? 1);
+  } catch (e) {
+    if ((e as Error).name === 'ConditionalCheckFailedException') return r; // noticed, or being noticed
+    throw e;
+  }
+  const done = async (extra: Record<string, unknown> = {}) => {
     await ddb.send(new UpdateCommand({
       TableName: table.vaultRequests(),
       Key: { request_id: slot.request_id },
-      UpdateExpression: 'SET attempt_noticed_at = :now',
-      ConditionExpression: 'attribute_exists(request_id) AND code = :c AND attribute_not_exists(attempt_noticed_at)',
-      ExpressionAttributeValues: { ':now': noticedAt, ':c': ATTEMPT_CODE },
+      UpdateExpression: `SET attempt_noticed_at = :now${extra.failed ? ', attempt_notice_failed = :t' : ''} REMOVE attempt_noticing`,
+      ExpressionAttributeValues: { ':now': nowS(), ...(extra.failed ? { ':t': true } : {}) },
     }));
-  } catch (e) {
-    if ((e as Error).name === 'ConditionalCheckFailedException') return r; // noticed already
-    throw e;
+  };
+  if (tries > ATTEMPT_MAX_TRIES) {
+    console.error('recovery attempt notice abandoned', JSON.stringify({ vault_id: v.vault_id, request_id: slot.request_id, tries }));
+    await done({ failed: true });
+    return r;
   }
+  // The recovery the attempt was made in, if it is still the vault's.
+  const current = r && r.recovery_id === slot.recovery_id ? r : null;
   let out = r;
   const expires = slotTime(slot.expires);
-  const moved = expires === null ? null : Math.min(r.requested_at + RECOVERY_MAX_SPAN_S, expires);
-  if (moved !== null && moved > r.expires_at && r.state === 'registered') {
-    try {
-      await ddb.send(new UpdateCommand({
-        TableName: table.vaults(),
-        Key: { vault_id: v.vault_id },
-        UpdateExpression: 'SET recovery.expires_at = :x, updated_at = :now',
-        ConditionExpression: 'recovery.recovery_id = :id AND recovery.#st = :reg AND recovery.expires_at < :x',
-        ExpressionAttributeNames: { '#st': 'state' },
-        ExpressionAttributeValues: { ':x': moved, ':id': r.recovery_id, ':reg': 'registered', ':now': nowIso() },
-      }));
-      out = { ...r, expires_at: moved };
-      await extendRecoveryRows(r, moved);
-    } catch (e) {
-      if ((e as Error).name !== 'ConditionalCheckFailedException') throw e; // ended, replaced or moved further meanwhile
+  if (current && current.state === 'registered' && expires !== null) {
+    const moved = Math.min(current.requested_at + RECOVERY_MAX_SPAN_S, expires);
+    if (moved > current.expires_at) {
+      try {
+        await ddb.send(new UpdateCommand({
+          TableName: table.vaults(),
+          Key: { vault_id: v.vault_id },
+          UpdateExpression: 'SET recovery.expires_at = :x, updated_at = :now',
+          ConditionExpression: 'recovery.recovery_id = :id AND recovery.#st = :reg AND recovery.expires_at < :x',
+          ExpressionAttributeNames: { '#st': 'state' },
+          ExpressionAttributeValues: { ':x': moved, ':id': current.recovery_id, ':reg': 'registered', ':now': nowIso() },
+        }));
+        out = { ...current, expires_at: moved };
+        await extendRecoveryRows(current, moved);
+      } catch (e) {
+        if ((e as Error).name !== 'ConditionalCheckFailedException') throw e; // ended, replaced or moved further meanwhile
+      }
     }
   }
   const retryAt = slotTime(slot.retry_at);
   await audit(memberActor(m.user_guid), 'vault.recovery_attempt', m.user_guid, {
-    vault_id: v.vault_id, recovery_id: r.recovery_id, request_id: slot.request_id,
+    vault_id: v.vault_id, recovery_id: slot.recovery_id, request_id: slot.request_id,
     ...(retryAt !== null ? { retry_at: iso(retryAt) } : {}), ...(expires !== null ? { expires: iso(expires) } : {}),
   });
   const attemptAt = Date.parse(String(slot.created_at));
-  const link = await mintCancelLink(v, m, r.recovery_id, Math.max(out.expires_at, noticedAt + 3600));
-  await notify(m.email, 'VettID vault recovery: an attempt was made', attemptMail(Number.isFinite(attemptAt) ? Math.floor(attemptAt / 1000) : noticedAt, cancelUrlOf(link.token)));
+  // A cancel link only for a recovery that can still be cancelled.
+  const live = current && out && recoveryActive(out, nowS()) ? out : null;
+  const link = live ? await mintCancelLink(v, m, live.recovery_id, Math.max(live.expires_at, now + 3600)) : null;
+  // Not notify(): a failed send must leave the notice to be taken up again.
+  await sendMail(m.email, 'VettID vault recovery: an attempt was made', attemptMail(Number.isFinite(attemptAt) ? Math.floor(attemptAt / 1000) : now, link ? cancelUrlOf(link.token) : null));
+  await done();
   return out;
+}
+
+/** Notice the counted attempts among a recovery's open slots (each a read), oldest first. */
+async function noticeOpenSlots(m: MemberItem, v: VaultRow, r: RecoveryRow): Promise<RecoveryRow> {
+  let cur: RecoveryRow = r;
+  for (const id of (r.open_ids ?? []).slice(-MAX_OPEN_IDS)) {
+    if (!ULID_RE.test(id)) continue;
+    const slot = (await ddb.send(new GetCommand({ TableName: table.vaultRequests(), Key: { request_id: id }, ConsistentRead: true }))).Item;
+    if (isAttemptSlot(slot) && slot!.attempt_noticed_at === undefined) cur = (await noticeAttempt(m, v, cur, slot!)) ?? cur;
+  }
+  return cur;
+}
+
+/**
+ * 2.7.0: the backstop that does not depend on any client (lambda/jobs/
+ * vault-attempts.ts, every 5 minutes). It finds every open slot the
+ * enclave marked as a counted attempt that has not been noticed (or whose
+ * notice stalled for ATTEMPT_RETRY_S) and notices it. Open slots live as
+ * long as their recovery (plus an hour), so none expires unnoticed. The
+ * request table is small (slots, links, locators, setup-code issuances),
+ * so a filtered Scan is the simplest complete search. Returns the counts.
+ */
+export async function sweepAttempts(): Promise<{ found: number; noticed: number; failed: number }> {
+  const now = nowS();
+  let found = 0;
+  let noticed = 0;
+  let failed = 0;
+  let start: Record<string, unknown> | undefined;
+  do {
+    const page = await ddb.send(new ScanCommand({
+      TableName: table.vaultRequests(),
+      FilterExpression: '#op = :op AND code = :c AND attribute_not_exists(attempt_noticed_at) AND (attribute_not_exists(attempt_noticing) OR attempt_noticing < :stale)',
+      ExpressionAttributeNames: { '#op': 'op' },
+      ExpressionAttributeValues: { ':op': 'recovery_open', ':c': ATTEMPT_CODE, ':stale': now - ATTEMPT_RETRY_S },
+      ExclusiveStartKey: start,
+    }));
+    for (const slot of page.Items ?? []) {
+      if (!isAttemptSlot(slot) || !VAULT_ID_RE.test(String(slot.vault_id))) continue;
+      found++;
+      try {
+        const [v, m] = await Promise.all([vaultRow(String(slot.vault_id)), memberByGuid(String(slot.user_guid))]);
+        if (!v || !m || v.user_guid !== m.user_guid) continue; // the vault or the member is gone: nobody to tell
+        await noticeAttempt(m, v, v.recovery, slot);
+        noticed++;
+      } catch (e) {
+        failed++;
+        console.error('recovery attempt not noticed', JSON.stringify({ request_id: slot.request_id, error: (e as Error).name }));
+      }
+    }
+    start = page.LastEvaluatedKey;
+  } while (start);
+  return { found, noticed, failed };
 }
 
 /**
@@ -1986,12 +2085,7 @@ async function refreshRecovery(m: MemberItem, found: VaultRow): Promise<VaultRow
   // 2.7.0: a registered recovery's opens (their slots live 15 minutes): each
   // counted attempt is noticed once.
   if (r.state === 'registered' && r.open_ids?.length) {
-    let cur = r;
-    for (const id of r.open_ids.slice(-MAX_OPEN_IDS)) {
-      if (!ULID_RE.test(id)) continue;
-      const slot = (await ddb.send(new GetCommand({ TableName: table.vaultRequests(), Key: { request_id: id }, ConsistentRead: true }))).Item;
-      if (isAttemptSlot(slot) && slot!.attempt_noticed_at === undefined) cur = await noticeAttempt(m, v, cur, slot!);
-    }
+    const cur = await noticeOpenSlots(m, v, r);
     return cur === r ? v : { ...v, recovery: cur };
   }
   if (recoveryState(r, nowS()) !== 'available' || !r.register_ids?.length) return v;
@@ -2102,10 +2196,27 @@ router.on('POST', '/api/vault/recovery', async (req) => {
   const bk = req.body.browser_key;
   const key = typeof bk === 'string' ? decodeCanonicalB64(bk) : null;
   if (!key || key.length !== 65 || key[0] !== 0x04) throw badRequest('browser_key must be base64 of an uncompressed P-256 point');
+  // 2.7.0 (§11.14.8): signed first, before the request limit is counted and
+  // before anything is written, so that a key that cannot sign (a KMS
+  // outage) neither uses up the member's three requests nor leaves anything
+  // behind. A member without an enrolled vault gets the 404 below, counted.
+  const recoveryId = newUlid();
+  const pre = activeVault((await currentVault(m.user_guid)).vault);
+  let sig;
+  if (pre && pre.state !== 'enrolling') {
+    try {
+      sig = await signRecoveryRequest('recovery', pre.vault_id, m.user_guid, recoveryId, key);
+    } catch (e) {
+      console.error('recovery request not signed', JSON.stringify({ vault_id: pre.vault_id, error: (e as Error).name }));
+      throw signingUnavailable();
+    }
+  }
   await limit(`vault-recovery#${m.user_guid}`, 3, 86_400);
   const now = nowS();
   // 2.4.1: a completed recovery is recorded first, so it does not block this one.
   const v = await completeRecovery(m, await recoverableVault(m.user_guid));
+  // The vault the signature names (it changed in between only if the member enrolled anew).
+  if (!sig || v.vault_id !== pre!.vault_id) throw vaultError(409, 'conflict', 'The vault changed; try again');
   if (recoveryActive(v.recovery, now)) throw vaultError(409, 'recovery_active', 'A recovery is already in progress');
   if (deletionOf(v)) throw deletionPending();
   // 2.1.0 (VAULT-MESSAGING 0.16.0 §11.11.7): no recovery with the credential
@@ -2115,17 +2226,7 @@ router.on('POST', '/api/vault/recovery', async (req) => {
     throw vaultError(409, 'recovery_unavailable', 'This vault cannot be recovered: its credential backup is off. You can delete it and start over.', { reason: 'no_backup' });
   }
   const inst = await recoveryInstance(v, now, isCanaryMember(m));
-  const recoveryId = newUlid();
   const expiresAt = now + RECOVERY_DELAY_S + RECOVERY_VALIDITY_S;
-  // 2.7.0 (§11.14.8): signed before anything is written, so a key that
-  // cannot sign leaves nothing behind (no locator, no recovery, no mail).
-  let sig;
-  try {
-    sig = await signRecoveryRequest('recovery', v.vault_id, m.user_guid, recoveryId, key);
-  } catch (e) {
-    console.error('recovery request not signed', JSON.stringify({ vault_id: v.vault_id, error: (e as Error).name }));
-    throw signingUnavailable();
-  }
   // 2.4.0: the typed form's locator, minted with the request. Its row is
   // written first, so the recovery never names a locator without a row; a
   // row whose request then fails names no current recovery (a miss) and expires.
@@ -2442,11 +2543,17 @@ router.on('POST', '/api/vault/recovery/open', async (req) => {
   await requireRoutable(inst, isCanaryMember(m));
   // Only the vault's own release can open its header.
   if (vault.sealed_release && inst.release !== vault.sealed_release) throw instanceMoved();
+  // Every earlier counted attempt is noticed (mailed, audited) before
+  // another open goes out, whether or not the phone ever polled it.
+  const cur = await noticeOpenSlots(m, vault, r);
+  // The slot lives as long as the recovery (plus an hour), not 15 minutes,
+  // so a counted attempt can still be noticed by the sweep however late.
   await enqueue('recovery_open', m, vault, requestId, inst, { etk_kid: etkKid, envelope, manifest_sha256: manifestSha256 }, {
     extra: { app_key: c.key.key },
     slot: { recovery_id: r.recovery_id, ...slotOf(c) },
+    ttlS: Math.max(REQUEST_TTL_S, cur.expires_at + 3600 - now),
   });
-  await recordOpenId(vault, r, requestId);
+  await recordOpenId(vault, cur, requestId);
   // Never the outcome, which the API cannot read.
   await audit(memberActor(m.user_guid), 'vault.recovery_open', m.user_guid, { vault_id: vault.vault_id, recovery_id: r.recovery_id, request_id: requestId, instance_id: instanceId });
   return new WithStatus(202, { vault_id: vault.vault_id, request_id: requestId });

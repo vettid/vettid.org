@@ -490,6 +490,21 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     names.addToRolePolicy(sesSend);
     accountPush.grantInvoke(names);
     names.addEnvironment('ACCOUNT_PUSH_FN', accountPush.functionName);
+    // Counted recovery attempts (MEMBER-API 2.7.0, release R): the backstop
+    // that mails the member for every attempt whatever the phone does
+    // (lambda/jobs/vault-attempts.ts). A schedule, not a stream of the
+    // request table: no stream to enable in the vault account and no stream
+    // ARN to carry into context after a deploy; the open slots live as long
+    // as their recovery, so a 5-minute sweep misses none; the table is small.
+    const attempts = job('VaultAttemptsJob', 'lambda/jobs/vault-attempts.ts', cdk.Duration.minutes(2), vaultApiRoleName(config, 'vault-attempts'));
+    g(attempts, 'members', ['GetItem']);
+    g(attempts, 'audit', ['PutItem']);
+    vaultGrants(attempts, 'vault-attempts');
+    attempts.addToRolePolicy(sesSend);
+    new events.Rule(this, 'VaultAttemptsSchedule', {
+      schedule: events.Schedule.rate(cdk.Duration.minutes(5)),
+      targets: [new targets.LambdaFunction(attempts)],
+    });
     // Release notices (VAULT-RELEASES §3.5, §10.2; W8): daily, emails the
     // members whose vault is sealed to an ending release (90/30/7/1 days
     // before ends_at, then "ended") or to one an urgent security release

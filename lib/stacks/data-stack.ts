@@ -170,9 +170,14 @@ export class VettidOrgDataStack extends cdk.Stack {
     // kms:Sign is for the member API's vault function only (its fixed-name
     // role, matched by aws:PrincipalArn so the policy is valid before that
     // role exists), with ECDSA_SHA_256 over a digest the function computes;
-    // everyone else is denied kms:Sign outright. The owner's permission set
-    // (who fills in the vault release's channel files) may read the public
-    // key; the release pins it as `recovery_request_keys`. RETAIN: vault
+    // everyone else is denied kms:Sign outright. Reading the public key is
+    // NOT restricted: the administrator statement's kms:Get* lets any
+    // principal of the account whose IAM policy allows it call
+    // kms:GetPublicKey (a public key is no secret). The OwnerReadsPublicKey
+    // statement only records who is meant to read it (the owner, who fills
+    // in the vault release's channel files; the release pins it as
+    // `recovery_request_keys`); it grants nothing the administrator
+    // statement does not. RETAIN: vault
     // releases pin the public key, and a replacement must first be pinned
     // beside it for one release (VAULT-RELEASES §8.2).
     const vaultRole = `arn:aws:iam::${this.account}:role/${vaultApiRoleName(config, 'vault')}`;

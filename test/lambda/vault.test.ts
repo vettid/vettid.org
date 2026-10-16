@@ -1,5 +1,5 @@
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { GetSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
@@ -195,11 +195,19 @@ function installFakeDdb() {
       // 2.7.0 extendRecoveryRows: only later, only a row that names the recovery (the slot is keyed by it).
       if (!cur || !(cur.expires_at < v[':exp']) || (v[':rid'] !== undefined && cur.recovery_id !== v[':rid'])) throw ccf();
       cur.expires_at = v[':exp'];
-    } else if (t === 'requests' && i.UpdateExpression === 'SET attempt_noticed_at = :now') {
-      // 2.7.0 noticeAttempt: once per slot.
-      expect(i.ConditionExpression).toBe('attribute_exists(request_id) AND code = :c AND attribute_not_exists(attempt_noticed_at)');
-      if (!cur || cur.code !== v[':c'] || cur.attempt_noticed_at !== undefined) throw ccf();
+    } else if (t === 'requests' && i.UpdateExpression.startsWith('SET attempt_noticing = :now')) {
+      // 2.7.0 noticeAttempt's claim: one caller at a time; a stalled claim may be taken again.
+      expect(i.ConditionExpression).toBe('attribute_exists(request_id) AND code = :c AND attribute_not_exists(attempt_noticed_at) AND (attribute_not_exists(attempt_noticing) OR attempt_noticing < :stale)');
+      if (!cur || cur.code !== v[':c'] || cur.attempt_noticed_at !== undefined || (cur.attempt_noticing !== undefined && !(cur.attempt_noticing < v[':stale']))) throw ccf();
+      cur.attempt_noticing = v[':now'];
+      cur.attempt_notice_tries = (cur.attempt_notice_tries ?? v[':zero']) + v[':one'];
+      return { Attributes: { attempt_noticing: cur.attempt_noticing, attempt_notice_tries: cur.attempt_notice_tries } };
+    } else if (t === 'requests' && i.UpdateExpression.startsWith('SET attempt_noticed_at = :now')) {
+      // ...and its record, only after the mail.
+      if (!cur) throw ccf();
       cur.attempt_noticed_at = v[':now'];
+      if (v[':t']) cur.attempt_notice_failed = true;
+      delete cur.attempt_noticing;
     } else if (t === 'requests' && i.UpdateExpression === 'SET releasing = :now') {
       // The release of a recovery code: one request at a time, and never once it is recorded.
       expect(i.ConditionExpression).toBe('attribute_exists(request_id) AND attribute_not_exists(released) AND (attribute_not_exists(releasing) OR releasing < :stale)');
@@ -211,6 +219,16 @@ function installFakeDdb() {
       else if (cur) cur.status = v[':e'];
     }
     return {};
+  });
+  ddb.on(ScanCommand).callsFake((i) => {
+    // 2.7.0 sweepAttempts: the unnoticed counted attempts (or stalled notices).
+    if (i.TableName !== 'requests') throw new Error(`unexpected scan of ${i.TableName}`);
+    const v = i.ExpressionAttributeValues;
+    return {
+      Items: [...tbl('requests').values()]
+        .filter((x) => x.op === v[':op'] && x.code === v[':c'] && x.attempt_noticed_at === undefined && (x.attempt_noticing === undefined || x.attempt_noticing < v[':stale']))
+        .map((x) => structuredClone(x)),
+    };
   });
   ddb.on(QueryCommand).callsFake((i) => {
     const v = i.ExpressionAttributeValues;
@@ -3732,7 +3750,7 @@ describe('2.7.0: recovery from release R', () => {
       expect(rid2).not.toBe(rid);
     });
 
-    test('KMS cannot sign: the request is 503 and leaves nothing (no recovery, locator, link, queue message or mail); it still counts', async () => {
+    test('KMS cannot sign: the request is 503 and leaves nothing (no recovery, locator, link, queue message or mail), and is not counted', async () => {
       kmsDown = true;
       const r = await call('POST', '/api/vault/recovery', { browser_key: BK });
       expect(r).toMatchObject({ status: 503, body: { error: 'vault_unavailable', retry_after: 60 } });
@@ -3741,7 +3759,8 @@ describe('2.7.0: recovery from release R', () => {
       expect(sent()).toHaveLength(0);
       expect(mails()).toHaveLength(0);
       expect(audits('vault.recovery_request')).toHaveLength(0);
-      expect(getItem('rl', `vault-recovery#g1#${NOW - (NOW % DAY)}`).count).toBe(1);
+      // Signed before the limit is counted: a KMS outage does not use up the member's three a day.
+      expect(getItem('rl', `vault-recovery#g1#${NOW - (NOW % DAY)}`)).toBeUndefined();
     });
 
     test('KMS cannot sign a cancel: the recovery is cancelled at the API and mailed; nothing unsigned is queued', async () => {
@@ -3819,6 +3838,17 @@ describe('2.7.0: recovery from release R', () => {
       await call('GET', '/api/vault/recovery', undefined, { guid: 'g2' });
       expect(getItem('vaults', 'e'.repeat(32)).recovery.expires_at).toBe(NOW + vault.RECOVERY_MAX_SPAN_S);
       expect(vault.RECOVERY_MAX_SPAN_S).toBe(130 * DAY);
+    });
+
+    test('F3: a not_before past the cap is shown as the enclave gave it; the recovery ends at the cap without becoming available', async () => {
+      const rid = await request();
+      answer(rid, { not_before: isoS(NOW + 200 * DAY), expires: isoS(NOW + 201 * DAY) });
+      const g = (await call('GET', '/api/vault/recovery')).body.recovery;
+      expect(g).toMatchObject({ state: 'pending', available_at: isoS(NOW + 200 * DAY), expires_at: isoS(NOW + vault.RECOVERY_MAX_SPAN_S) });
+      at(NOW + vault.RECOVERY_MAX_SPAN_S);
+      const e = (await call('GET', '/api/vault/recovery')).body.recovery;
+      expect(e.state).toBe('expired');
+      expect(e.sealed_code).toBeUndefined();
     });
 
     test('applied once: a later change of the slot moves nothing', async () => {
@@ -3956,6 +3986,9 @@ describe('2.7.0: recovery from release R', () => {
     const result = Buffer.alloc(5_252, 0x44).toString('base64');
     const counted = (extra: Record<string, unknown> = {}) =>
       Object.assign(getItem('requests', RID2), { status: 'done', envelope: result, code: 'recovery_attempt', ...extra });
+    const sweep = () => vault.sweepAttempts();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const jobHandler = () => require('../../lambda/jobs/vault-attempts').handler();
     beforeEach(async () => {
       registered();
       expect((await open()).status).toBe(202);
@@ -4025,12 +4058,21 @@ describe('2.7.0: recovery from release R', () => {
       expect(mails()).toHaveLength(0);
     });
 
-    test('an attempt after a cancel is still mailed and audited, but moves nothing', async () => {
+    test('an attempt after a cancel is still mailed and audited (by the sweep), with no cancel link, and moves nothing', async () => {
       getItem('vaults', VID).recovery.state = 'cancelled';
       counted({ expires: isoS(NOW + 5 * DAY) });
-      await call('GET', `/api/vault/requests/${RID2}`, undefined, signed).catch(() => undefined);
-      // The recovering key no longer authenticates after a cancel; a status read by the member notices nothing either (not registered).
+      // The recovering key no longer authenticates after a cancel, and a status read sweeps only a registered recovery.
+      expect((await call('GET', `/api/vault/requests/${RID2}`, undefined, signed)).status).toBe(401);
+      await call('GET', '/api/vault/recovery');
+      expect(mails()).toHaveLength(0);
+      await sweep();
+      expect(audits('vault.recovery_attempt')).toHaveLength(1);
+      const [mail] = mails();
+      expect(mail.subject).toBe('VettID vault recovery: an attempt was made');
+      expect(mail.text).not.toMatch(/cancel#t=/);
+      expect(mail.text).toMatch(/check that no recovery is in progress/);
       expect(getItem('vaults', VID).recovery.expires_at).toBe(NOW + DAY - 60);
+      expect([...tbl('requests').values()].filter((x) => x.op === 'recovery_cancel_link' && x.recovery_id === RID)).toHaveLength(1); // only registered()'s own
     });
 
     test('a failure while noticing never hides the open\'s result from the app', async () => {
@@ -4039,6 +4081,75 @@ describe('2.7.0: recovery from release R', () => {
       const p = await call('GET', `/api/vault/requests/${RID2}`, undefined, signed);
       expect(p.body).toEqual({ status: 'done', envelope: result, code: 'recovery_attempt' });
       expect(logs.join('\n')).toContain('recovery attempt not noticed');
+      // Claimed but not recorded: it is taken up again, not lost.
+      expect(getItem('requests', RID2).attempt_noticed_at).toBeUndefined();
+      expect(getItem('requests', RID2).attempt_noticing).toBe(NOW);
+    });
+
+    test('F2: a notice whose mail fails is retried after ATTEMPT_RETRY_S (not before), and recorded only once mailed', async () => {
+      counted();
+      sesMock.on(SendEmailCommand).rejectsOnce(Object.assign(new Error('throttled'), { name: 'TooManyRequestsException' }));
+      await call('GET', `/api/vault/requests/${RID2}`, undefined, signed);
+      expect(getItem('requests', RID2).attempt_noticed_at).toBeUndefined();
+      expect(getItem('requests', RID2).attempt_notice_tries).toBe(1);
+      // Within the retry window: neither a poll nor the sweep takes it again.
+      at(NOW + 60);
+      await call('GET', `/api/vault/requests/${RID2}`, undefined, signed);
+      expect(await sweep()).toEqual({ found: 0, noticed: 0, failed: 0 });
+      expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(1);
+      // After it: the sweep retries, mails and records.
+      at(NOW + vault.ATTEMPT_RETRY_S + 1);
+      expect(await sweep()).toEqual({ found: 1, noticed: 1, failed: 0 });
+      expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(2);
+      expect(getItem('requests', RID2)).toMatchObject({ attempt_noticed_at: NOW + vault.ATTEMPT_RETRY_S + 1, attempt_notice_tries: 2 });
+      expect(getItem('requests', RID2).attempt_noticing).toBeUndefined();
+      // The failed first try had already audited: the retry audits again (errs on the side of the record).
+      expect(audits('vault.recovery_attempt')).toHaveLength(2);
+      // Recorded: never again.
+      at(NOW + 3 * vault.ATTEMPT_RETRY_S);
+      expect(await sweep()).toEqual({ found: 0, noticed: 0, failed: 0 });
+    });
+
+    test('F2: after ATTEMPT_MAX_TRIES the notice is given up, recorded as failed and logged', async () => {
+      counted({ attempt_notice_tries: vault.ATTEMPT_MAX_TRIES, attempt_noticing: NOW - vault.ATTEMPT_RETRY_S - 1 });
+      expect(await sweep()).toMatchObject({ found: 1 });
+      expect(getItem('requests', RID2)).toMatchObject({ attempt_notice_failed: true, attempt_noticed_at: NOW });
+      expect(mails()).toHaveLength(0);
+      expect(logs.join('\n')).toContain('recovery attempt notice abandoned');
+      expect(vault.ATTEMPT_MAX_TRIES).toBe(24);
+    });
+
+    test('F1: an attempt the phone never polls is mailed by the 5-minute sweep (the job), once; its slot lives as long as the recovery', async () => {
+      // The open's slot outlives 15 minutes: the recovery's expires_at plus an hour.
+      expect(getItem('requests', RID2).expires_at).toBe(NOW + DAY - 60 + 3600);
+      counted({ expires: isoS(NOW + 5 * DAY) });
+      at(NOW + 40 * 60); // long after the old 15-minute slot life; nobody polls or reads the status
+      const r = await jobHandler();
+      expect(r).toEqual({ found: 1, noticed: 1, failed: 0 });
+      expect(audits('vault.recovery_attempt')).toHaveLength(1);
+      expect(mails().map((m) => m.subject)).toEqual(['VettID vault recovery: an attempt was made']);
+      expect(getItem('vaults', VID).recovery.expires_at).toBe(NOW + 5 * DAY);
+      expect(logs.join('\n')).toContain('"RecoveryAttemptsUnnoticed":1');
+      expect(await jobHandler()).toEqual({ found: 0, noticed: 0, failed: 0 });
+      expect(mails()).toHaveLength(1);
+    });
+
+    test('F1: the next open notices every earlier counted attempt before it is forwarded', async () => {
+      counted();
+      const id3 = '01JB2Z6V9K3M4N5P6Q7R8S9T3B';
+      expect((await open({ ...OPEN, request_id: id3 })).status).toBe(202);
+      expect(audits('vault.recovery_attempt')).toHaveLength(1);
+      expect(mails()).toHaveLength(1);
+      expect(getItem('vaults', VID).recovery.open_ids).toEqual([RID2, id3]);
+    });
+
+    test('the sweep skips slots whose vault or member is gone, and counts a failed notice for the next run', async () => {
+      counted();
+      const other = '01JB2Z6V9K3M4N5P6Q7R8S9T3C';
+      put('requests', { request_id: other, op: 'recovery_open', status: 'done', code: 'recovery_attempt', vault_id: 'e'.repeat(32), user_guid: 'gone', recovery_id: RID, created_at: '2026-10-02T12:00:00.000Z', expires_at: NOW + DAY });
+      sesMock.on(SendEmailCommand).rejectsOnce(new Error('ses down'));
+      expect(await sweep()).toEqual({ found: 2, noticed: 0, failed: 1 });
+      expect(getItem('requests', other).attempt_noticing).toBeUndefined();
     });
   });
 
@@ -4086,6 +4197,10 @@ describe('2.7.0: recovery from release R', () => {
       expect(vault.pendingAppKey({ app_key: { key: oldApp.b64, kid: oldApp.kid, seq: 3 }, app_key_next: { key: next.b64, kid: next.kid } })).toBeNull();
       expect(vault.pendingAppKey({ app_key: { key: next.b64, kid: next.kid, seq: 1 }, app_key_next: { key: next.b64, kid: next.kid, seq: 2 } })).toBeNull();
       expect(vault.pendingAppKey({ app_key: { key: oldApp.b64, kid: oldApp.kid, seq: 1 }, app_key_next: { kid: next.kid, seq: 2 } as never })).toBeNull();
+      // An app_key without seq cannot be compared: no pending key beside it; nor a pending key without one.
+      expect(vault.pendingAppKey({ app_key: { key: oldApp.b64, kid: oldApp.kid }, app_key_next: { key: next.b64, kid: next.kid, seq: 2 } })).toBeNull();
+      expect(vault.pendingAppKey({ app_key_next: { key: next.b64, kid: next.kid } })).toBeNull();
+      expect(vault.pendingAppKey({ app_key_next: { key: next.b64, kid: next.kid, seq: 1 } })).toMatchObject({ kid: next.kid });
       expect(vault.pendingAppKey({ app_key: { key: oldApp.b64, kid: oldApp.kid, seq: 1 }, app_key_next: { key: next.b64, kid: next.kid, seq: 2 } })).toMatchObject({ kid: next.kid });
       getItem('vaults', VID).app_key_next = { key: next.b64, kid: next.kid, seq: 1 };
       expect((await call('GET', '/api/vault/status', undefined, as(next))).status).toBe(401);

@@ -183,7 +183,12 @@ describe('VettidOrgDataStack', () => {
       for (const a of actions(admin)) expect(a).not.toMatch(/^kms:(\*|Sign|S\*)/);
     });
 
-    test('the owner (who fills in the release channel files) may read the public key', () => {
+    // Not a restriction: the administrator statement's kms:Get* already lets
+    // any account principal with an IAM grant read the public key, which is
+    // no secret. The statement names who is meant to read it.
+    test('the public key is readable by the owner (and, through the administrator statement, by any account principal IAM allows)', () => {
+      const admin = st().find((x) => x.Sid === 'AdministerButNotSign');
+      expect(actions(admin)).toContain('kms:Get*');
       const read = st().find((x) => x.Sid === 'OwnerReadsPublicKey');
       expect(read.Action).toEqual(['kms:GetPublicKey', 'kms:DescribeKey']);
       expect(read.Condition).toEqual({ ArnLike: { 'aws:PrincipalArn': 'arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_VettIDAdmin_*' } });
@@ -487,7 +492,7 @@ describe('VettidOrgMemberApiStack', () => {
   const t = Template.fromStack(new VettidOrgMemberApiStack(apiApp, 'MemberApi', { config: loadConfig(apiApp.node), env }));
 
   test('four route groups + link mailer + eight jobs (incl. the vault notice job, W8, the vault service watch, the account push, 2.0.0, and the vault-names job, 2.2.0)', () => {
-    t.resourceCountIs('AWS::Lambda::Function', 15); // and the start-over cancel and the member-vaults check, two more entry points of the cleanup module
+    t.resourceCountIs('AWS::Lambda::Function', 16); // and the start-over cancel and the member-vaults check, two more entry points of the cleanup module; 2.7.0: the recovery attempts sweep
     for (const p of ['/api/public', '/api/auth', '/api/account', '/api/vault']) {
       t.hasResourceProperties('AWS::ApiGatewayV2::Route', { RouteKey: `ANY ${p}/{proxy+}` });
     }
@@ -665,7 +670,7 @@ describe('VettidOrgMemberApiStack', () => {
 
     test('function logs keep the retention they had (one month): not changed by 2.6.0', () => {
       const groups = Object.values<any>(t.findResources('AWS::Logs::LogGroup')).filter((g) => !g.Properties.LogGroupName);
-      expect(groups.length).toBe(15); // the start-over cancel function's own, and the member-vaults check's
+      expect(groups.length).toBe(16); // the start-over cancel function's own, and the member-vaults check's; 2.7.0: the attempts sweep's
       for (const g of groups) expect(g.Properties.RetentionInDays).toBe(30);
     });
   });
@@ -704,6 +709,22 @@ describe('VettidOrgMemberApiStack', () => {
       expect(params).toEqual(expect.arrayContaining(['/vettid-org/prod/data/recovery-request-key-arn', '/vettid-org/prod/data/recovery-request-key-id']));
     });
 
+    test('release R: the recovery attempts sweep runs every 5 minutes under its own role; it scans the request table and writes only the API\'s `recovery`', () => {
+      const roleId = Object.entries<any>(t.findResources('AWS::IAM::Role')).find(([, r]) => r.Properties.RoleName === 'vettid-org-member-vault-attempts')![0];
+      const fns = Object.entries<any>(t.findResources('AWS::Lambda::Function')).filter(([, f]) => str(f.Properties.Role).includes(roleId));
+      expect(fns).toHaveLength(1);
+      const rule = Object.values<any>(t.findResources('AWS::Events::Rule')).find((r) => str(r.Properties.Targets).includes(fns[0][0]));
+      expect(rule.Properties.ScheduleExpression).toBe('rate(5 minutes)');
+      const pol = Object.values<any>(t.findResources('AWS::IAM::Policy')).filter((p) => str(p.Properties.Roles).includes(roleId)).flatMap((p) => p.Properties.PolicyDocument.Statement);
+      expect(str(pol)).not.toContain('sqs:');
+      expect(str(pol)).not.toContain('kms:');
+      const vaultWrite = pol.find((x: any) => x.Action === 'dynamodb:UpdateItem' && str(x.Resource).includes('table/vettid-org-vaults'));
+      expect(vaultWrite.Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(['vault_id', 'recovery', 'updated_at']);
+      const scans = pol.filter((x: any) => str(x.Action).includes('dynamodb:Scan'));
+      expect(scans).toHaveLength(1);
+      expect(str(scans[0].Resource)).toContain('table/vettid-org-vault-requests');
+    });
+
     test('sqs:SendMessage only to vettid-org-vault-control-* queues, and nothing else on SQS', () => {
       const sqsStmts = stmts().filter((s: any) => str(s.Action).includes('sqs:'));
       expect(sqsStmts).toHaveLength(3); // the vault routes, the cleanup job's vault deletions (§12.5), the account push (2.0.0)
@@ -717,7 +738,7 @@ describe('VettidOrgMemberApiStack', () => {
       const writes = stmts().filter(
         (s: any) => /dynamodb:(PutItem|UpdateItem)/.test(str(s.Action)) && /table\/vettid-org-(vaults|vault-releases)"/.test(str(s.Resource)),
       );
-      expect(writes).toHaveLength(6); // the API's two, the alarm mailer's, the cleanup job's deletion mark and start request, the vault-names job's (2.2.0)
+      expect(writes).toHaveLength(7); // the API's two, the alarm mailer's, the cleanup job's deletion mark and start request, the vault-names job's (2.2.0), the attempts sweep's (2.7.0)
       for (const w of writes) {
         const attrs: string[] = w.Condition['ForAllValues:StringEquals']['dynamodb:Attributes'];
         for (const f of ['lease', 'sealed_release', 'vault_version', 'state_version', 'status', 'available']) expect(attrs).not.toContain(f);

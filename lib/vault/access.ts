@@ -22,8 +22,8 @@ import { AppConfig, VaultConfig, resourceName } from '../config';
 export const VAULT_TABLES = ['vaults', 'vault-instances', 'vault-requests', 'vault-releases'] as const;
 export type VaultTable = (typeof VAULT_TABLES)[number];
 
-export type VaultApiConsumer = 'vault' | 'cleanup' | 'vault-alarms' | 'vault-notices' | 'account-push' | 'vault-names' | 'member-vaults';
-export const VAULT_API_CONSUMERS: VaultApiConsumer[] = ['vault', 'cleanup', 'vault-alarms', 'vault-notices', 'account-push', 'vault-names', 'member-vaults'];
+export type VaultApiConsumer = 'vault' | 'cleanup' | 'vault-alarms' | 'vault-notices' | 'account-push' | 'vault-names' | 'member-vaults' | 'vault-attempts';
+export const VAULT_API_CONSUMERS: VaultApiConsumer[] = ['vault', 'cleanup', 'vault-alarms', 'vault-notices', 'account-push', 'vault-names', 'member-vaults', 'vault-attempts'];
 
 /** The vaults table's index of vaults by sealed release (keys plus user_guid and state), for the notice job (W8). */
 export const SEALED_RELEASE_INDEX = 'sealed-release-index';
@@ -138,6 +138,21 @@ export const VAULT_API_ACCESS: Record<VaultApiConsumer, VaultApiAccess> = {
     tables: [
       { table: 'vaults', actions: ['Query'] },
       { table: 'vaults', actions: ['Query'], indexes: ['user-index'] },
+    ],
+    sendsToControlQueues: false,
+    readsVaultsStream: false,
+  },
+  // Counted recovery attempts (MEMBER-API 2.7.0, release R): every 5
+  // minutes, finds the open slots the enclave marked `recovery_attempt` that
+  // were not noticed (a filtered Scan of the request table), claims and
+  // marks them, writes a cancel link (PutItem), and moves the recovery's
+  // `expires_at` (on the vault row, the API's own `recovery` only). It sends
+  // nothing to any queue and never touches a host-written attribute.
+  'vault-attempts': {
+    tables: [
+      { table: 'vaults', actions: ['GetItem'] },
+      { table: 'vaults', actions: ['UpdateItem'], attributes: ['vault_id', 'recovery', 'updated_at'] },
+      { table: 'vault-requests', actions: ['Scan', 'GetItem', 'PutItem', 'UpdateItem'] },
     ],
     sendsToControlQueues: false,
     readsVaultsStream: false,
