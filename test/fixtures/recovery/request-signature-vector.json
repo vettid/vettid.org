@@ -1,0 +1,19 @@
+{
+  "_source": "vettid-vault rel-r/3-unlock (06fadcd), vms/recovery.RequestSigningString and testdata/vectors/recovery.json (release_r: request_signing_string, cancel_signing_string); the signatures by Go crypto/ecdsa SignASN1 over SHA-256 of those strings, under the P-256 key whose scalar is SHA-256(\"vettid recovery request key: cross-language test vector\"). Regenerate with a throwaway Go program; never a real key.",
+  "browser_key_hex": "0461616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+  "vault_id": "test-vault-0001",
+  "user_guid": "test-user-guid",
+  "signed_at": "2026-10-15T12:00:00Z",
+  "recovery": {
+    "request_id": "01JB2Z6V9K3M4N5P6Q7R8S9T32",
+    "signing_string": "vettid/vms/2/recovery-request\nrecovery\ntest-vault-0001\ntest-user-guid\n01JB2Z6V9K3M4N5P6Q7R8S9T32\n2026-10-15T12:00:00Z\n70df3b62f5b39f1dc6d347b3835fc57a945b689e609500d9ba3f8a6e06cbafa7",
+    "go_sig": "MEUCIFCb3KsRW3bNKRqm9O5/PsNnlDqV2oU87Wk1vRJ7dQ4DAiEAghOzZBvSud1nN/v5g9LkE99LAZgF1NxT79HWMtR8NzI="
+  },
+  "recovery_cancel": {
+    "request_id": "01JB2Z6V9K3M4N5P6Q7R8S9T33",
+    "signing_string": "vettid/vms/2/recovery-request\nrecovery_cancel\ntest-vault-0001\ntest-user-guid\n01JB2Z6V9K3M4N5P6Q7R8S9T33\n2026-10-15T12:00:00Z\n",
+    "go_sig": "MEUCIQC1FZSz89LJo+QSzXa6MkLF+vVbl4Op3TgiJeJfJ0Sg6QIgAouw5XWJe7PF4K69V/5mVrzaF3xp4E6XiIkZGxNYzDo="
+  },
+  "key_scalar_seed": "vettid recovery request key: cross-language test vector",
+  "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAERXWA8fd9hE6vDLmerJHcKP3+6+6yZxSQXkUoWLlrNRzqxaLeA7LkYNxRkEG9rmIEmWfHuuEJ/DAyIbt4GcrkMQ=="
+}

@@ -4,7 +4,9 @@ import { GetSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-sec
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
-import { KeyObject, createHash, generateKeyPairSync, randomBytes, sign as cryptoSign } from 'node:crypto';
+import { KMSClient, SignCommand } from '@aws-sdk/client-kms';
+import { KeyObject, createHash, generateKeyPairSync, randomBytes, sign as cryptoSign, verify as cryptoVerify } from 'node:crypto';
+import { keyFromScalar, signDigest } from './ecdsa-prehash';
 
 // "tok-<guid>" ID tokens verify as that user; anything else is expired.
 jest.mock('aws-jwt-verify', () => ({
@@ -26,6 +28,9 @@ Object.assign(process.env, {
   VAULT_QUEUE_URL_PREFIX: QUEUE_PREFIX, SENDER_EMAIL: 'no-reply@vettid.org', ACCOUNT_HOST: 'account.vettid.org',
   VAULT_SERVICE_PARAM: '/vettid-org/prod/switch/vault-service',
   ENROLL_CODE_KEY_PARAM: '/vettid-org/prod/member/enroll-code-key',
+  // 2.7.0: the recovery request key (VettidOrgDataStack).
+  RECOVERY_REQUEST_KEY_ARN: 'arn:aws:kms:us-east-1:123456789012:key/11111111-2222-4333-8444-555555555555',
+  RECOVERY_REQUEST_KEY_ID: '11111111-2222-4333-8444-555555555555',
 });
 
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -39,6 +44,12 @@ const sm = mockClient(SecretsManagerClient);
 const sqs = mockClient(SQSClient);
 const sesMock = mockClient(SESv2Client);
 const ssm = mockClient(SSMClient);
+const kms = mockClient(KMSClient);
+/** The KMS stand-in's key: a fixed P-256 scalar; signatures are real ECDSA over the digest the API sends (MessageType DIGEST). */
+const RRK_D = BigInt('0x' + createHash('sha256').update('vault.test recovery request key').digest('hex'));
+const RRK = keyFromScalar(RRK_D);
+/** Tests set this to make KMS refuse to sign (cleared before each test). */
+let kmsDown = false;
 
 /** The vault service switch as SSM holds it (undefined: no parameter, on). */
 let switchValue: string | undefined;
@@ -99,10 +110,31 @@ function installFakeDdb() {
       delete r.recovering_key;
       cur.updated_at = v[':now'];
     } else if (t === 'vaults' && i.UpdateExpression.startsWith('SET recovery.#st')) {
-      // markRegistered: pending -> registered, same recovery only.
+      // markRegistered: pending -> registered, same recovery only; refreshUnavailable: pending -> unavailable (2.7.0: with its reason).
       if (!cur?.recovery || cur.recovery.recovery_id !== v[':id'] || cur.recovery.state !== v[':pending']) throw ccf();
       cur.recovery.state = v[':reg'] ?? v[':un'];
       if (v[':rk']) cur.recovery.recovering_key = structuredClone(v[':rk']);
+      if (v[':reason']) cur.recovery.reason = v[':reason'];
+      cur.updated_at = v[':now'];
+    } else if (t === 'vaults' && i.UpdateExpression.startsWith('SET recovery.available_at = :a')) {
+      // 2.7.0 applyEnclaveTimes: once, while pending, same recovery.
+      expect(i.ConditionExpression).toBe('recovery.recovery_id = :id AND recovery.#st = :pending AND attribute_not_exists(recovery.enclave_times)');
+      const r = cur?.recovery;
+      if (!r || r.recovery_id !== v[':id'] || r.state !== v[':pending'] || r.enclave_times !== undefined) throw ccf();
+      Object.assign(r, { available_at: v[':a'], expires_at: v[':x'], enclave_times: true });
+      if (i.UpdateExpression.includes('REMOVE recovery.earliest')) delete r.earliest;
+      else r.earliest = true;
+      cur.updated_at = v[':now'];
+    } else if (t === 'vaults' && i.UpdateExpression === 'SET recovery.expires_at = :x, updated_at = :now') {
+      // 2.7.0 noticeAttempt: a registered recovery's expiry only moves later.
+      expect(i.ConditionExpression).toBe('recovery.recovery_id = :id AND recovery.#st = :reg AND recovery.expires_at < :x');
+      const r = cur?.recovery;
+      if (!r || r.recovery_id !== v[':id'] || r.state !== v[':reg'] || !(r.expires_at < v[':x'])) throw ccf();
+      r.expires_at = v[':x'];
+      cur.updated_at = v[':now'];
+    } else if (t === 'vaults' && i.UpdateExpression.startsWith('SET recovery.open_ids')) {
+      if (!cur?.recovery || cur.recovery.recovery_id !== v[':id']) throw ccf();
+      cur.recovery.open_ids = structuredClone(v[':ids']);
       cur.updated_at = v[':now'];
     } else if (t === 'vaults' && i.UpdateExpression.startsWith('SET recovery.claim_keys')) {
       if (!cur?.recovery || cur.recovery.recovery_id !== v[':id']) throw ccf();
@@ -159,6 +191,15 @@ function installFakeDdb() {
     } else if (t === 'requests' && i.UpdateExpression.startsWith('SET #st = :used')) {
       if (!cur || cur.state !== v[':live'] || !(cur.expires_at > v[':now']) || (v[':f'] !== undefined && cur.typed_blocked !== v[':f'])) throw ccf();
       Object.assign(cur, { state: v[':used'], used_at: v[':now'], used_via: v[':via'] });
+    } else if (t === 'requests' && i.UpdateExpression === 'SET expires_at = :exp') {
+      // 2.7.0 extendRecoveryRows: only later, only a row that names the recovery (the slot is keyed by it).
+      if (!cur || !(cur.expires_at < v[':exp']) || (v[':rid'] !== undefined && cur.recovery_id !== v[':rid'])) throw ccf();
+      cur.expires_at = v[':exp'];
+    } else if (t === 'requests' && i.UpdateExpression === 'SET attempt_noticed_at = :now') {
+      // 2.7.0 noticeAttempt: once per slot.
+      expect(i.ConditionExpression).toBe('attribute_exists(request_id) AND code = :c AND attribute_not_exists(attempt_noticed_at)');
+      if (!cur || cur.code !== v[':c'] || cur.attempt_noticed_at !== undefined) throw ccf();
+      cur.attempt_noticed_at = v[':now'];
     } else if (t === 'requests' && i.UpdateExpression === 'SET releasing = :now') {
       // The release of a recovery code: one request at a time, and never once it is recorded.
       expect(i.ConditionExpression).toBe('attribute_exists(request_id) AND attribute_not_exists(released) AND (attribute_not_exists(releasing) OR releasing < :stale)');
@@ -328,7 +369,12 @@ beforeEach(() => {
   failPut = undefined;
   failUpdate = undefined;
   onUpdate = undefined;
-  ddb.reset(); sm.reset(); sqs.reset(); sesMock.reset(); ssm.reset();
+  ddb.reset(); sm.reset(); sqs.reset(); sesMock.reset(); ssm.reset(); kms.reset();
+  kmsDown = false;
+  kms.on(SignCommand).callsFake((i) => {
+    if (kmsDown) throw Object.assign(new Error('kms down'), { name: 'KMSInternalException' });
+    return { KeyId: process.env.RECOVERY_REQUEST_KEY_ARN, SigningAlgorithm: 'ECDSA_SHA_256', Signature: signDigest(RRK_D, i.Message) };
+  });
   switchValue = undefined;
   vaultService.resetVaultServiceCache();
   ssm.on(GetParameterCommand).callsFake(() => {
@@ -1303,10 +1349,16 @@ describe('vault recovery', () => {
   test('request: recorded, queued with the browser key and no envelope, mailed with a cancel link, audited', async () => {
     const rid = await request();
     const row = getItem('vaults', VID);
-    expect(row.recovery).toEqual({ recovery_id: rid, state: 'pending', requested_at: NOW, available_at: NOW + 86_400, expires_at: NOW + 172_800, locator: expect.stringMatching(/^[0-9A-HJKMNP-TV-Z]{12}$/) });
+    // 2.7.0: the times are the earliest possible until the enclave's slot says; the request email's link is remembered (by its hash).
+    expect(row.recovery).toEqual({
+      recovery_id: rid, state: 'pending', requested_at: NOW, available_at: NOW + 86_400, expires_at: NOW + 172_800, locator: expect.stringMatching(/^[0-9A-HJKMNP-TV-Z]{12}$/),
+      earliest: true, cancel_key: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
     const [m] = sent();
     expect(m.url).toBe(QUEUE_PREFIX + 'i-1');
     expect(m.msg).toMatchObject({ v: 1, op: 'recovery', vault_id: VID, user_guid: 'g1', request_id: rid, browser_key: BK });
+    // 2.7.0 (§11.14.8): signed with the recovery request key.
+    expect(m.msg).toMatchObject({ signed_at: '2026-10-02T12:00:00Z', key_id: '11111111-2222-4333-8444-555555555555', sig: expect.any(String) });
     expect(m.msg.envelope).toBeUndefined();
     expect(m.msg.etk_kid).toBeUndefined();
     // The slot keeps the sealed code until the recovery expires.
@@ -2362,9 +2414,10 @@ describe('recovery claim and the recovering key', () => {
     at(NOW + 86_400 + 7);
     expect((await call('GET', `/api/vault/requests/${RID2}`, undefined, signed)).body.code).toBe('recovery_registered');
     expect(getItem('vaults', VID).recovery).toMatchObject({ state: 'registered', recovering_key: { key: newApp.b64, kid: newApp.kid } });
-    // The recovering key may unlock, read status and lock while the recovery is active.
+    // The recovering key may read status while the recovery is active; 2.7.0 (release R): it may not unlock or lock (403).
     expect((await call('GET', '/api/vault/status', undefined, signed)).body.vault.recovery.state).toBe('registered');
-    expect((await call('POST', '/api/vault/unlock', UNLOCK, signed)).status).toBe(202);
+    expect((await call('POST', '/api/vault/unlock', UNLOCK, signed))).toMatchObject({ status: 403, body: { error: 'forbidden' } });
+    expect((await call('POST', '/api/vault/lock', { vault_id: VID, request_id: '01JB2Z6V9K3M4N5P6Q7R8S9T0Y' }, signed)).status).toBe(403);
     // The old phone still unlocks too until the enclave reports the new app key.
     expect((await call('GET', '/api/vault/status', undefined, { app: { key: keyOf('old-phone'), vault: VID } })).status).toBe(200);
     // The host writes the new key: the old key is refused, the recovery's keys are cleared.
@@ -2396,8 +2449,8 @@ describe('recovery claim and the recovering key', () => {
 
     test('registered is not completed: the PIN and password step has not succeeded, so it still blocks and can be cancelled', async () => {
       await register();
-      // The recovering app unlocks (the PIN step), but the host has not reported its key.
-      expect((await call('POST', '/api/vault/unlock', UNLOCK, signed)).status).toBe(202);
+      // The recovering app tries (2.7.0: an unlock is refused; it would open), but the host has not reported its key.
+      expect((await call('POST', '/api/vault/unlock', UNLOCK, signed)).status).toBe(403);
       expect((await call('POST', '/api/vault/recovery', { browser_key: BK })).body.error).toBe('recovery_active');
       expect((await call('GET', '/api/vault/recovery')).body.recovery.state).toBe('registered');
       expect(getItem('vaults', VID).recovery.state).toBe('registered');
@@ -2452,10 +2505,14 @@ describe('recovery claim and the recovering key', () => {
       expect(JSON.stringify(done)).not.toContain(oldLocator);
       // The new recovery is an ordinary one: pending, queued, mailed, with its own locator and no keys.
       const rec = getItem('vaults', VID).recovery;
-      expect(rec).toEqual({ recovery_id: rid2, state: 'pending', requested_at: NOW + 86_400 + 600, available_at: NOW + 2 * 86_400 + 600, expires_at: NOW + 3 * 86_400 + 600, locator: expect.stringMatching(/^[0-9A-HJKMNP-TV-Z]{12}$/) });
+      expect(rec).toEqual({
+        recovery_id: rid2, state: 'pending', requested_at: NOW + 86_400 + 600, available_at: NOW + 2 * 86_400 + 600, expires_at: NOW + 3 * 86_400 + 600,
+        locator: expect.stringMatching(/^[0-9A-HJKMNP-TV-Z]{12}$/), earliest: true, cancel_key: expect.stringMatching(/^[0-9a-f]{64}$/),
+      });
       expect(rec.locator).not.toBe(oldLocator);
       expect(sent().slice(before).map((m) => m.msg.op)).toEqual(['recovery']);
-      expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(mailsBefore + 1);
+      // 2.7.0: the completion is mailed, then the new request.
+      expect(sesMock.commandCalls(SendEmailCommand).slice(mailsBefore).map((c) => c.args[0].input.Content!.Simple!.Subject!.Data)).toEqual(['VettID vault recovered', 'VettID vault recovery requested']);
       // The old recovery is gone for good: its pair and its locator name no current recovery.
       const other = keyOf('another-phone');
       expect((await claim({ vault_id: VID, recovery_id: rid }, other)).status).toBe(404);
@@ -2479,7 +2536,7 @@ describe('recovery claim and the recovering key', () => {
       });
       expect(getItem('vaults', VID).recovery).toEqual({
         recovery_id: rid, state: 'completed', requested_at: NOW, available_at: NOW + 86_400, expires_at: NOW + 172_800, locator: oldLocator,
-        register_ids: [RID2], completed_at: NOW + 86_400 + 60,
+        register_ids: [RID2], completed_at: NOW + 86_400 + 60, earliest: true, cancel_key: expect.stringMatching(/^[0-9a-f]{64}$/),
       });
       expect((await call('GET', '/api/vault/status')).body.vault.recovery).toBeNull();
       // Recorded once, however often it is read.
@@ -2506,7 +2563,8 @@ describe('recovery claim and the recovering key', () => {
       expect((await call('POST', '/api/vault/recovery/cancel-link', { token }, { guid: 'nobody' })).body).toEqual({ cancelled: false });
       expect(getItem('vaults', VID).recovery.state).toBe('completed');
       expect(sent()).toHaveLength(before);
-      expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(mailsBefore);
+      // 2.7.0: the only mail is the completion's (recorded by the first cancel call), never a cancel.
+      expect(sesMock.commandCalls(SendEmailCommand).slice(mailsBefore).map((c) => c.args[0].input.Content!.Simple!.Subject!.Data)).toEqual(['VettID vault recovered']);
       expect(audits('vault.recovery_cancel')).toHaveLength(0);
     });
 
@@ -2737,7 +2795,7 @@ describe('2.4.0: the recovery locator and the claim by locator', () => {
 
     test('the request answers no locator; it is in no email, audit entry or log', async () => {
       const r = await call('POST', '/api/vault/recovery', { browser_key: BK });
-      expect(r.body).toEqual({ recovery_id: expect.any(String), available_at: expect.any(String), expires_at: expect.any(String) });
+      expect(r.body).toEqual({ recovery_id: expect.any(String), available_at: expect.any(String), expires_at: expect.any(String), earliest: true });
       const loc = locatorOf();
       const mailed = JSON.stringify(sesMock.commandCalls(SendEmailCommand).map((c) => c.args[0].input));
       expect(mailed).not.toContain(loc);
@@ -3580,6 +3638,470 @@ describe('an account that is not active: the cancels stay, nothing else opens', 
       expect(getItem('vaults', VID).recovery).toMatchObject({ recovery_id: rid, state: 'pending', available_at: NOW + 86_400, expires_at: NOW + 172_800 });
       setStatus('active');
       expect((await call('GET', '/api/vault/recovery')).body.recovery).toMatchObject({ recovery_id: rid, state: 'available', sealed_code: expect.any(String) });
+    });
+  });
+});
+
+// ---- release R (MEMBER-API 2.7.0, VAULT-MESSAGING 0.33.0 §11.14) ---------------------------
+
+describe('2.7.0: recovery from release R', () => {
+  const BK = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64');
+  const BK_RAW = Buffer.from(BK, 'base64');
+  const newApp = keyOf('r-new-phone');
+  const oldApp = keyOf('r-old-phone');
+  const signed = { app: { key: newApp, vault: VID } };
+  const audits = (action: string) => [...tbl('audit').values()].filter((a) => a.action === action);
+  const mails = () => sesMock.commandCalls(SendEmailCommand).map((c) => ({
+    subject: c.args[0].input.Content!.Simple!.Subject!.Data!, text: c.args[0].input.Content!.Simple!.Body!.Text!.Data!,
+  }));
+  const at = (s: number) => {
+    jest.spyOn(Date, 'now').mockReturnValue(s * 1000);
+    for (const i of tbl('instances').values()) i.heartbeat_at = s - 10;
+  };
+  const isoS = (s: number) => new Date(s * 1000).toISOString();
+  const H = 3600;
+  const DAY = 86_400;
+  /** What the enclave verifies (vettid-vault enclave/recoverysig.go), built here independently of the API's code. */
+  const verifies = (msg: any, browserKey?: Buffer) => {
+    const last = browserKey ? createHash('sha256').update(browserKey).digest('hex') : '';
+    const s = ['vettid/vms/2/recovery-request', msg.op, msg.vault_id, msg.user_guid, msg.request_id, msg.signed_at, last].join('\n');
+    return cryptoVerify('sha256', Buffer.from(s), { key: RRK.pub, dsaEncoding: 'der' }, Buffer.from(msg.sig, 'base64'));
+  };
+  const request = async () => {
+    const r = await call('POST', '/api/vault/recovery', { browser_key: BK });
+    expect(r.status).toBe(202);
+    return r.body.recovery_id as string;
+  };
+  /** The enclave's answer into the recovery's own slot (release R: with its clear times). */
+  const answer = (rid: string, extra: Record<string, unknown> = {}) =>
+    Object.assign(getItem('requests', rid), { status: 'done', envelope: Buffer.alloc(5_252, 0x33).toString('base64'), ...extra });
+  /** A recovery already registered to newApp (as markRegistered leaves it). */
+  const registered = (extra: Record<string, unknown> = {}) => {
+    const v = getItem('vaults', VID);
+    v.recovery = {
+      recovery_id: RID, state: 'registered', requested_at: NOW - 3 * DAY, available_at: NOW - 2 * DAY + 60, expires_at: NOW + DAY - 60, locator: 'ABCDEFGHJKMN',
+      claim_keys: [{ key: newApp.b64, kid: newApp.kid }], recovering_key: { key: newApp.b64, kid: newApp.kid }, cancel_key: 'c'.repeat(64), ...extra,
+    };
+    put('requests', { request_id: `recovery-locator#ABCDEFGHJKMN`, vault_id: VID, op: 'recovery_locator', status: 'locator', recovery_id: RID, expires_at: NOW + DAY - 60 });
+    put('requests', { request_id: `rcancel#${'c'.repeat(64)}`, vault_id: VID, user_guid: 'g1', op: 'recovery_cancel_link', status: 'link', recovery_id: RID, expires_at: NOW + DAY - 60 });
+  };
+  const OPEN = { vault_id: VID, request_id: RID2, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA };
+  const open = (body: Record<string, unknown> = OPEN, opts: EvOpts = signed) => call('POST', '/api/vault/recovery/open', body, opts);
+
+  beforeEach(() => {
+    release(R0, 14);
+    instance('i-1', R0);
+    vaultOf('g1', { vault_id: VID, state: 'locked', sealed_release: R0, app_key: { key: oldApp.b64, kid: oldApp.kid, seq: 1 } });
+  });
+
+  describe('signed recovery and recovery_cancel (§11.14.8)', () => {
+    test('the request is signed over its own members (op, vault, member, request id, signed_at, SHA-256 of the raw browser key)', async () => {
+      const rid = await request();
+      const [m] = sent();
+      expect(m.msg).toMatchObject({ op: 'recovery', request_id: rid, signed_at: '2026-10-02T12:00:00Z', key_id: process.env.RECOVERY_REQUEST_KEY_ID });
+      expect(verifies(m.msg, BK_RAW)).toBe(true);
+      // Mutation-minded: the same signature fails over any other member, or over the base64 instead of the raw point.
+      expect(verifies({ ...m.msg, vault_id: 'e'.repeat(32) }, BK_RAW)).toBe(false);
+      expect(verifies({ ...m.msg, op: 'recovery_cancel' }, BK_RAW)).toBe(false);
+      expect(verifies(m.msg, Buffer.from(BK))).toBe(false);
+      expect(verifies(m.msg)).toBe(false);
+      // The digest KMS was asked to sign, nothing else.
+      const [k] = kms.commandCalls(SignCommand);
+      expect(k.args[0].input).toMatchObject({ KeyId: process.env.RECOVERY_REQUEST_KEY_ARN, MessageType: 'DIGEST', SigningAlgorithm: 'ECDSA_SHA_256' });
+      expect(Object.keys(m.msg)).toEqual(['v', 'op', 'vault_id', 'user_guid', 'request_id', 'browser_key', 'signed_at', 'key_id', 'sig', 'enqueued_at']);
+    });
+
+    test('a cancel (session and link) is signed with an empty last line and its own request id', async () => {
+      const rid = await request();
+      const token = /cancel#t=([A-Za-z0-9_-]{43})/.exec(mails()[0].text)![1];
+      expect((await call('POST', '/api/vault/recovery/cancel', { recovery_id: rid })).body).toEqual({ cancelled: true });
+      const c = sent().pop()!;
+      expect(c.msg).toMatchObject({ op: 'recovery_cancel', signed_at: '2026-10-02T12:00:00Z', key_id: process.env.RECOVERY_REQUEST_KEY_ID });
+      expect(c.msg.request_id).not.toBe(rid);
+      expect(c.msg.browser_key).toBeUndefined();
+      expect(verifies(c.msg)).toBe(true);
+      expect(verifies(c.msg, BK_RAW)).toBe(false);
+      // The link of a later recovery: also signed.
+      const rid2 = await request();
+      const token2 = /cancel#t=([A-Za-z0-9_-]{43})/.exec(mails().pop()!.text)![1];
+      expect(token2).not.toBe(token);
+      expect((await call('POST', '/api/vault/recovery/cancel-link', { token: token2 }, { guid: 'nobody' })).body).toEqual({ cancelled: true });
+      const c2 = sent().pop()!;
+      expect(c2.msg.op).toBe('recovery_cancel');
+      expect(verifies(c2.msg)).toBe(true);
+      expect(rid2).not.toBe(rid);
+    });
+
+    test('KMS cannot sign: the request is 503 and leaves nothing (no recovery, locator, link, queue message or mail); it still counts', async () => {
+      kmsDown = true;
+      const r = await call('POST', '/api/vault/recovery', { browser_key: BK });
+      expect(r).toMatchObject({ status: 503, body: { error: 'vault_unavailable', retry_after: 60 } });
+      expect(getItem('vaults', VID).recovery).toBeUndefined();
+      expect([...tbl('requests').values()]).toEqual([]);
+      expect(sent()).toHaveLength(0);
+      expect(mails()).toHaveLength(0);
+      expect(audits('vault.recovery_request')).toHaveLength(0);
+      expect(getItem('rl', `vault-recovery#g1#${NOW - (NOW % DAY)}`).count).toBe(1);
+    });
+
+    test('KMS cannot sign a cancel: the recovery is cancelled at the API and mailed; nothing unsigned is queued', async () => {
+      const rid = await request();
+      kmsDown = true;
+      expect((await call('POST', '/api/vault/recovery/cancel', { recovery_id: rid })).body).toEqual({ cancelled: true });
+      expect(getItem('vaults', VID).recovery.state).toBe('cancelled');
+      expect(sent().map((m) => m.msg.op)).toEqual(['recovery']);
+      expect(mails().map((m) => m.subject)).toEqual(['VettID vault recovery requested', 'VettID vault recovery cancelled']);
+      expect(logs.join('\n')).toContain('recovery cancel not queued');
+    });
+
+    test('the request email says "at the earliest", the three days and the ten attempts', async () => {
+      await request();
+      const t = mails()[0].text;
+      expect(t).toContain(`${isoS(NOW + DAY)} at the earliest`);
+      expect(t).toMatch(/three days after its app was last used/);
+      expect(t).toMatch(/ten attempts in all/);
+      expect(t).toMatch(/cancel#t=[A-Za-z0-9_-]{43}/);
+    });
+  });
+
+  describe("the enclave's times in the recovery's own slot (§11.14.5)", () => {
+    test('not_before and expires become available_at and expires_at; earliest goes; the code waits for them; the rows that live with the recovery follow', async () => {
+      const rid = await request();
+      const locator = getItem('vaults', VID).recovery.locator;
+      const cancelKey = getItem('vaults', VID).recovery.cancel_key;
+      expect((await call('GET', '/api/vault/recovery')).body.recovery).toMatchObject({ state: 'pending', earliest: true, available_at: isoS(NOW + DAY) });
+      answer(rid, { not_before: isoS(NOW + 72 * H), expires: isoS(NOW + 96 * H) });
+      const g = (await call('GET', '/api/vault/recovery')).body.recovery;
+      expect(g).toMatchObject({ state: 'pending', available_at: isoS(NOW + 72 * H), expires_at: isoS(NOW + 96 * H) });
+      expect(g.earliest).toBeUndefined();
+      expect(getItem('vaults', VID).recovery).toMatchObject({ available_at: NOW + 72 * H, expires_at: NOW + 96 * H, enclave_times: true });
+      expect(getItem('vaults', VID).recovery.earliest).toBeUndefined();
+      expect(getItem('requests', rid).expires_at).toBe(NOW + 96 * H + H);
+      expect(getItem('requests', `recovery-locator#${locator}`).expires_at).toBe(NOW + 96 * H);
+      expect(getItem('requests', `rcancel#${cancelKey}`).expires_at).toBe(NOW + 96 * H);
+      // At the old 24 hours: still pending, no code, nothing claimable.
+      at(NOW + DAY + 5);
+      const p = (await call('GET', '/api/vault/recovery')).body.recovery;
+      expect(p.state).toBe('pending');
+      expect(p.sealed_code).toBeUndefined();
+      expect(audits('vault.recovery_code_released')).toHaveLength(0);
+      at(NOW + 72 * H);
+      expect((await call('GET', '/api/vault/recovery')).body.recovery).toMatchObject({ state: 'available', sealed_code: expect.any(String) });
+      at(NOW + 96 * H);
+      expect((await call('GET', '/api/vault/recovery')).body.recovery.state).toBe('expired');
+    });
+
+    test('a claim before the enclave time is refused even if nobody read the status (the claim applies the times itself)', async () => {
+      const rid = await request();
+      answer(rid, { not_before: isoS(NOW + 72 * H), expires: isoS(NOW + 96 * H) });
+      at(NOW + DAY + 5);
+      const r = await call('POST', '/api/vault/recovery/claim', { vault_id: VID, recovery_id: rid, app_key: newApp.b64 }, { app: { key: newApp, vault: VID }, guid: 'nobody' });
+      expect(r.body.error).toBe('recovery_not_available');
+      expect(getItem('vaults', VID).recovery.available_at).toBe(NOW + 72 * H);
+    });
+
+    test("the enclave's earliest keeps the estimate marked", async () => {
+      const rid = await request();
+      answer(rid, { not_before: isoS(NOW + 72 * H), expires: isoS(NOW + 96 * H), earliest: true });
+      expect((await call('GET', '/api/vault/recovery')).body.recovery).toMatchObject({ available_at: isoS(NOW + 72 * H), earliest: true });
+      expect(getItem('vaults', VID).recovery.earliest).toBe(true);
+    });
+
+    test('the API keeps its floor (never before request + 24 h, open at least 24 h) and its cap (130 days)', async () => {
+      const rid = await request();
+      answer(rid, { not_before: isoS(NOW + H), expires: isoS(NOW + 2 * H) });
+      await call('GET', '/api/vault/recovery');
+      expect(getItem('vaults', VID).recovery).toMatchObject({ available_at: NOW + DAY, expires_at: NOW + 2 * DAY });
+      // Another vault: a far expiry is capped.
+      vaultOf('g2', { vault_id: 'e'.repeat(32), state: 'locked', sealed_release: R0 });
+      const r2 = (await call('POST', '/api/vault/recovery', { browser_key: BK }, { guid: 'g2' })).body.recovery_id;
+      answer(r2, { not_before: isoS(NOW + 72 * H), expires: isoS(NOW + 400 * DAY) });
+      await call('GET', '/api/vault/recovery', undefined, { guid: 'g2' });
+      expect(getItem('vaults', 'e'.repeat(32)).recovery.expires_at).toBe(NOW + vault.RECOVERY_MAX_SPAN_S);
+      expect(vault.RECOVERY_MAX_SPAN_S).toBe(130 * DAY);
+    });
+
+    test('applied once: a later change of the slot moves nothing', async () => {
+      const rid = await request();
+      answer(rid, { not_before: isoS(NOW + 72 * H), expires: isoS(NOW + 96 * H) });
+      await call('GET', '/api/vault/recovery');
+      Object.assign(getItem('requests', rid), { not_before: isoS(NOW + 30 * H), expires: isoS(NOW + 54 * H) });
+      await call('GET', '/api/vault/recovery');
+      expect(getItem('vaults', VID).recovery).toMatchObject({ available_at: NOW + 72 * H, expires_at: NOW + 96 * H });
+    });
+
+    test('a release before R (no times in the slot) and malformed times: the API\'s own times stand, still marked earliest', async () => {
+      const rid = await request();
+      answer(rid);
+      await call('GET', '/api/vault/recovery');
+      expect(getItem('vaults', VID).recovery).toMatchObject({ available_at: NOW + DAY, expires_at: NOW + 2 * DAY, earliest: true });
+      Object.assign(getItem('requests', rid), { not_before: 'tomorrow', expires: isoS(NOW + 96 * H) });
+      await call('GET', '/api/vault/recovery');
+      expect(getItem('vaults', VID).recovery.enclave_times).toBeUndefined();
+      expect(vault.slotTime('2026-10-05T12:00:00Z')).toBe(Date.UTC(2026, 9, 5, 12) / 1000);
+      expect(vault.slotTime('2026-10-05T12:00:00.4Z')).toBe(Date.UTC(2026, 9, 5, 12) / 1000 + 1); // rounded up, never earlier
+      for (const bad of ['2026-10-05', '2026-10-05 12:00:00Z', 1_760_000_000, null, '']) expect(vault.slotTime(bad)).toBeNull();
+    });
+  });
+
+  describe('a refused recovery and its reason (§11.14.13)', () => {
+    test('not_offered: unavailable with the reason, audited with it; an unknown reason is not passed on', async () => {
+      const rid = await request();
+      answer(rid, { code: 'recovery_unavailable', reason: 'not_offered' });
+      expect((await call('GET', '/api/vault/recovery')).body.recovery).toMatchObject({ state: 'unavailable', reason: 'not_offered', sealed_code: expect.any(String) });
+      expect(audits('vault.recovery_unavailable')[0].detail).toEqual({ vault_id: VID, recovery_id: rid, reason: 'not_offered' });
+      vaultOf('g2', { vault_id: 'e'.repeat(32), state: 'locked', sealed_release: R0 });
+      const r2 = (await call('POST', '/api/vault/recovery', { browser_key: BK }, { guid: 'g2' })).body.recovery_id;
+      answer(r2, { code: 'recovery_unavailable', reason: 'because' });
+      const g2 = (await call('GET', '/api/vault/recovery', undefined, { guid: 'g2' })).body.recovery;
+      expect(g2.state).toBe('unavailable');
+      expect(g2.reason).toBeUndefined();
+    });
+  });
+
+  describe('POST /api/vault/recovery/open (§11.14.6)', () => {
+    beforeEach(() => registered());
+
+    test('signed by the recovering key while registered: queued as recovery_open with that key, the manifest hash and nothing else; audited without an outcome', async () => {
+      const r = await open();
+      expect(r).toEqual({ status: 202, body: { vault_id: VID, request_id: RID2 } });
+      const [m] = sent();
+      expect(m.url).toBe(QUEUE_PREFIX + 'i-1');
+      expect(Object.keys(m.msg)).toEqual(['v', 'op', 'vault_id', 'user_guid', 'request_id', 'etk_kid', 'envelope', 'manifest_sha256', 'app_key', 'enqueued_at']);
+      expect(m.msg).toMatchObject({ v: 1, op: 'recovery_open', vault_id: VID, user_guid: 'g1', request_id: RID2, etk_kid: KID, envelope: ENV, manifest_sha256: MSHA, app_key: newApp.b64 });
+      expect(getItem('requests', RID2)).toMatchObject({ op: 'recovery_open', status: 'queued', recovery_id: RID, app_kid: newApp.kid, instance_id: 'i-1' });
+      expect(getItem('vaults', VID).recovery.open_ids).toEqual([RID2]);
+      const [a] = audits('vault.recovery_open');
+      expect(a.detail).toEqual({ vault_id: VID, recovery_id: RID, request_id: RID2, instance_id: 'i-1' });
+      expect(kms.commandCalls(SignCommand)).toHaveLength(0); // opens are the phone's, sealed; the API signs nothing here
+    });
+
+    test('only the recovering key: a claim key, the old app key, a session or an unsigned call are refused, nothing queued', async () => {
+      const claimOnly = keyOf('r-claim-only');
+      getItem('vaults', VID).recovery.claim_keys.push({ key: claimOnly.b64, kid: claimOnly.kid });
+      expect((await open(OPEN, { app: { key: claimOnly, vault: VID } })).status).toBe(401);
+      expect((await open({ ...OPEN, request_id: RID }, { app: { key: oldApp, vault: VID } })).status).toBe(401);
+      expect((await open(OPEN, {})).status).toBe(401);
+      expect(sent()).toHaveLength(0);
+    });
+
+    test('not while the recovery is not registered and active: cancelled, expired, pending or completed → refused', async () => {
+      for (const patch of [{ state: 'cancelled' }, { expires_at: NOW - 1 }, { state: 'pending' }, { state: 'completed' }]) {
+        registered(patch);
+        const r = await open();
+        expect({ patch, ok: r.status === 202 }).toEqual({ patch, ok: false });
+        expect([401, 409]).toContain(r.status);
+      }
+      // Completed by the host's report: the recovering key is the app key now, and opens nothing.
+      registered();
+      getItem('vaults', VID).app_key = { key: newApp.b64, kid: newApp.kid, seq: 2 };
+      expect((await open()).status).toBe(401);
+      expect(sent().filter((m) => m.msg.op === 'recovery_open')).toHaveLength(0);
+    });
+
+    test('body checks: the envelope is an unlock-sized sealed request to etk_kid; manifest_sha256 is required; the vault must be the signed one', async () => {
+      expect((await open({ ...OPEN, envelope: envelope(5_252) })).status).toBe(400);
+      expect((await open({ ...OPEN, envelope: envelope(13_444, 'fedcba9876543210') })).status).toBe(400);
+      const { manifest_sha256: _m, ...noManifest } = OPEN;
+      expect((await open(noManifest)).status).toBe(400);
+      expect((await open({ ...OPEN, request_id: 'nope' })).status).toBe(400);
+      expect((await open({ ...OPEN, vault_id: 'e'.repeat(32) })).status).toBe(404);
+      expect(sent()).toHaveLength(0);
+    });
+
+    test('routing: the leaseholder or, with none, a live instance of the sealed release; another release is instance_moved', async () => {
+      release(R1, 15);
+      instance('i-9', R1);
+      expect((await open({ ...OPEN, instance_id: 'i-9' })).body.error).toBe('instance_moved');
+      instance('i-2', R0);
+      getItem('vaults', VID).lease = { instance_id: 'i-2', lease_expires_at: NOW + 60 };
+      expect((await open({ ...OPEN, request_id: RID })).body.error).toBe('instance_moved');
+      expect((await open({ ...OPEN, request_id: RID, instance_id: 'i-2' })).status).toBe(202);
+      expect(sent().pop()!.url).toBe(QUEUE_PREFIX + 'i-2');
+    });
+
+    test('limits: 10 per source network per 15 minutes, 30 per recovery per day (they save work; the vault counts attempts)', async () => {
+      const ids = Array.from({ length: 12 }, (_, i) => `01JB2Z6V9K3M4N5P6Q7R8S9V${'0123456789AB'[i]}0`);
+      for (let i = 0; i < 10; i++) expect((await open({ ...OPEN, request_id: ids[i] })).status).toBe(202);
+      expect((await open({ ...OPEN, request_id: ids[10] })).status).toBe(429);
+      // Another network: allowed until the recovery's 30 a day.
+      const perRecovery = `vault-recovery-open#${RID}#${NOW - (NOW % DAY)}`;
+      expect(getItem('rl', perRecovery).count).toBe(10); // the refused 11th was stopped at the network limit, before this one
+      tbl('rl').set(perRecovery, { key: perRecovery, count: 30 });
+      const other = { app: { key: newApp, vault: VID }, headers: { 'cloudfront-viewer-address': '198.51.100.7:443' } };
+      expect((await open({ ...OPEN, request_id: ids[11] }, other)).status).toBe(429);
+      expect(vault.OPEN_LIMIT_PER_NETWORK).toBe(10);
+      expect(vault.OPEN_LIMIT_PER_RECOVERY).toBe(30);
+      // Only the last few open ids are kept on the recovery.
+      expect(getItem('vaults', VID).recovery.open_ids).toEqual(ids.slice(0, 10).slice(-vault.MAX_OPEN_IDS));
+    });
+
+    test('paused service: 503, nothing queued', async () => {
+      paused();
+      expect((await open()).body).toMatchObject({ error: 'vault_unavailable', service: 'paused' });
+      expect(sent()).toHaveLength(0);
+    });
+
+    test('the recovering key may not unlock or lock (403), but may poll its open and read status', async () => {
+      const UNLOCK = { vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA };
+      expect((await call('POST', '/api/vault/unlock', UNLOCK, signed)).status).toBe(403);
+      expect((await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID }, signed)).status).toBe(403);
+      expect((await open()).status).toBe(202);
+      expect((await call('GET', `/api/vault/requests/${RID2}`, undefined, signed)).body).toEqual({ status: 'queued' });
+      expect((await call('GET', '/api/vault/status', undefined, signed)).status).toBe(200);
+    });
+  });
+
+  describe('a counted attempt (`recovery_attempt`, §11.14.11)', () => {
+    const result = Buffer.alloc(5_252, 0x44).toString('base64');
+    const counted = (extra: Record<string, unknown> = {}) =>
+      Object.assign(getItem('requests', RID2), { status: 'done', envelope: result, code: 'recovery_attempt', ...extra });
+    beforeEach(async () => {
+      registered();
+      expect((await open()).status).toBe(202);
+    });
+
+    test('the poll passes the result on; the attempt is audited and mailed once, with a cancel link that works; a wait moves expires_at and the rows', async () => {
+      counted({ retry_at: isoS(NOW + 4 * DAY), expires: isoS(NOW + 5 * DAY) });
+      const p = await call('GET', `/api/vault/requests/${RID2}`, undefined, signed);
+      expect(p.body).toEqual({ status: 'done', envelope: result, code: 'recovery_attempt' });
+      expect(getItem('vaults', VID).recovery.expires_at).toBe(NOW + 5 * DAY);
+      expect(getItem('requests', 'recovery-locator#ABCDEFGHJKMN').expires_at).toBe(NOW + 5 * DAY);
+      expect(getItem('requests', `rcancel#${'c'.repeat(64)}`).expires_at).toBe(NOW + 5 * DAY);
+      const [a] = audits('vault.recovery_attempt');
+      expect(a.detail).toEqual({ vault_id: VID, recovery_id: RID, request_id: RID2, retry_at: isoS(NOW + 4 * DAY), expires: isoS(NOW + 5 * DAY) });
+      const [mail] = mails();
+      expect(mail.subject).toBe('VettID vault recovery: an attempt was made');
+      // The time is the open's (its slot's created_at), not the moment the API noticed it.
+      expect(mail.text).toContain(`on ${new Date(Math.floor(Date.parse(getItem('requests', RID2).created_at) / 1000) * 1000).toISOString()}`);
+      // It never says whether the attempt was right, nor how many are used or left.
+      expect(mail.text).not.toMatch(/was (wrong|right|correct)|succeeded|failed|attempts? (left|used)|\d+ of 10/i);
+      // Polled again, read again: nothing more.
+      await call('GET', `/api/vault/requests/${RID2}`, undefined, signed);
+      await call('GET', '/api/vault/recovery');
+      expect(audits('vault.recovery_attempt')).toHaveLength(1);
+      expect(mails()).toHaveLength(1);
+      // The recovery stays open across the wait, with the same code: still active days later.
+      at(NOW + 3 * DAY);
+      expect((await call('GET', '/api/vault/recovery')).body.recovery.state).toBe('registered');
+      expect((await call('POST', '/api/vault/recovery', { browser_key: BK })).body.error).toBe('recovery_active');
+      // The link in the attempt mail cancels it.
+      const token = /cancel#t=([A-Za-z0-9_-]{43})/.exec(mail.text)![1];
+      expect((await call('POST', '/api/vault/recovery/cancel-link', { token }, { guid: 'nobody' })).body).toEqual({ cancelled: true });
+      expect(getItem('vaults', VID).recovery.state).toBe('cancelled');
+    });
+
+    test('noticed from the status reads too, without the app\'s poll (open_ids), once', async () => {
+      counted();
+      await call('GET', '/api/vault/recovery');
+      await call('GET', '/api/vault/status');
+      expect(audits('vault.recovery_attempt')).toHaveLength(1);
+      expect(mails().map((m) => m.subject)).toEqual(['VettID vault recovery: an attempt was made']);
+      expect(getItem('vaults', VID).recovery.expires_at).toBe(NOW + DAY - 60); // no wait began: unchanged
+    });
+
+    test('expires_at only moves later, and never past the cap', async () => {
+      counted({ expires: isoS(NOW + H) });
+      await call('GET', `/api/vault/requests/${RID2}`, undefined, signed);
+      expect(getItem('vaults', VID).recovery.expires_at).toBe(NOW + DAY - 60);
+      expect(mails()).toHaveLength(1);
+      // Another attempt with an expiry beyond 130 days after the request.
+      const id3 = '01JB2Z6V9K3M4N5P6Q7R8S9T3A';
+      expect((await open({ ...OPEN, request_id: id3 })).status).toBe(202);
+      Object.assign(getItem('requests', id3), { status: 'done', envelope: result, code: 'recovery_attempt', expires: isoS(NOW + 400 * DAY) });
+      await call('GET', `/api/vault/requests/${id3}`, undefined, signed);
+      expect(getItem('vaults', VID).recovery.expires_at).toBe(NOW - 3 * DAY + vault.RECOVERY_MAX_SPAN_S);
+    });
+
+    test('an open answered without the marker (not counted: busy, quiet, wait…) mails and audits nothing', async () => {
+      Object.assign(getItem('requests', RID2), { status: 'done', envelope: result });
+      await call('GET', `/api/vault/requests/${RID2}`, undefined, signed);
+      await call('GET', '/api/vault/recovery');
+      expect(audits('vault.recovery_attempt')).toHaveLength(0);
+      expect(mails()).toHaveLength(0);
+      // The marker on any other op's slot is not an attempt either.
+      Object.assign(getItem('requests', RID2), { op: 'recovery_register', code: 'recovery_attempt' });
+      await call('GET', '/api/vault/recovery');
+      expect(mails()).toHaveLength(0);
+    });
+
+    test('an attempt after a cancel is still mailed and audited, but moves nothing', async () => {
+      getItem('vaults', VID).recovery.state = 'cancelled';
+      counted({ expires: isoS(NOW + 5 * DAY) });
+      await call('GET', `/api/vault/requests/${RID2}`, undefined, signed).catch(() => undefined);
+      // The recovering key no longer authenticates after a cancel; a status read by the member notices nothing either (not registered).
+      expect(getItem('vaults', VID).recovery.expires_at).toBe(NOW + DAY - 60);
+    });
+
+    test('a failure while noticing never hides the open\'s result from the app', async () => {
+      counted();
+      failPut = (i) => i.TableName === 'requests' && String(i.Item?.request_id).startsWith('rcancel#');
+      const p = await call('GET', `/api/vault/requests/${RID2}`, undefined, signed);
+      expect(p.body).toEqual({ status: 'done', envelope: result, code: 'recovery_attempt' });
+      expect(logs.join('\n')).toContain('recovery attempt not noticed');
+    });
+  });
+
+  describe('the heavy derivation\'s permit: a recovering phone\'s enclave (VAULT-HOST-PROTOCOL §6.6)', () => {
+    beforeEach(() => {
+      registered();
+      instance('i-1', R0, { load: 0, heavy_kdf_free: false });
+      instance('i-2', R0, { load: 5, heavy_kdf_free: true });
+    });
+
+    test('prefers an instance that shows heavy_kdf_free; everyone else gets the least loaded', async () => {
+      expect((await call('GET', '/api/vault/enclave', undefined, signed)).body.instance_id).toBe('i-2');
+      expect((await call('GET', '/api/vault/enclave', undefined, { app: { key: oldApp, vault: VID } })).body.instance_id).toBe('i-1');
+    });
+
+    test('none free: the least loaded live instance, as before', async () => {
+      getItem('instances', 'i-2').heavy_kdf_free = false;
+      expect((await call('GET', '/api/vault/enclave', undefined, signed)).body.instance_id).toBe('i-1');
+    });
+
+    test('a leaseholder is still the leaseholder', async () => {
+      getItem('vaults', VID).lease = { instance_id: 'i-1', lease_expires_at: NOW + 60 };
+      expect((await call('GET', '/api/vault/enclave', undefined, signed)).body.instance_id).toBe('i-1');
+    });
+  });
+
+  describe('the pending app key (`app_key_next`, §11.14.2)', () => {
+    const next = keyOf('r-next-phone');
+    const UNLOCK = { vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA };
+    const as = (k: TestKey) => ({ app: { key: k, vault: VID } });
+
+    test('while set and ahead of app_key, both keys are the vault\'s app key; when app_key reaches it, only the new one', async () => {
+      getItem('vaults', VID).app_key_next = { key: next.b64, kid: next.kid, seq: 2, header_seq: 40 };
+      expect((await call('POST', '/api/vault/unlock', UNLOCK, as(next))).status).toBe(202);
+      expect((await call('GET', '/api/vault/status', undefined, as(oldApp))).status).toBe(200);
+      expect((await call('GET', '/api/vault/status', undefined, as(next))).status).toBe(200);
+      // The host's step 3: app_key is the next key (the host also clears app_key_next; a left-over one is ignored).
+      getItem('vaults', VID).app_key = { key: next.b64, kid: next.kid, seq: 2 };
+      expect((await call('GET', '/api/vault/status', undefined, as(oldApp))).status).toBe(401);
+      expect((await call('GET', '/api/vault/status', undefined, as(next))).status).toBe(200);
+    });
+
+    test('a pending key that is not ahead of app_key, or names it, counts for nothing', async () => {
+      expect(vault.pendingAppKey({ app_key: { key: oldApp.b64, kid: oldApp.kid, seq: 3 }, app_key_next: { key: next.b64, kid: next.kid, seq: 3 } })).toBeNull();
+      expect(vault.pendingAppKey({ app_key: { key: oldApp.b64, kid: oldApp.kid, seq: 3 }, app_key_next: { key: next.b64, kid: next.kid } })).toBeNull();
+      expect(vault.pendingAppKey({ app_key: { key: next.b64, kid: next.kid, seq: 1 }, app_key_next: { key: next.b64, kid: next.kid, seq: 2 } })).toBeNull();
+      expect(vault.pendingAppKey({ app_key: { key: oldApp.b64, kid: oldApp.kid, seq: 1 }, app_key_next: { kid: next.kid, seq: 2 } as never })).toBeNull();
+      expect(vault.pendingAppKey({ app_key: { key: oldApp.b64, kid: oldApp.kid, seq: 1 }, app_key_next: { key: next.b64, kid: next.kid, seq: 2 } })).toMatchObject({ kid: next.kid });
+      getItem('vaults', VID).app_key_next = { key: next.b64, kid: next.kid, seq: 1 };
+      expect((await call('GET', '/api/vault/status', undefined, as(next))).status).toBe(401);
+    });
+
+    test('a recovery between its first and third write: the recovering key is the pending app key, so it may unlock (the vault decides)', async () => {
+      registered();
+      getItem('vaults', VID).app_key_next = { key: newApp.b64, kid: newApp.kid, seq: 2, header_seq: 7 };
+      expect((await call('POST', '/api/vault/unlock', UNLOCK, signed)).status).toBe(202);
+      // Not completed yet: only app_key's report completes a recovery.
+      expect(getItem('vaults', VID).recovery.state).toBe('registered');
+      getItem('vaults', VID).app_key = { key: newApp.b64, kid: newApp.kid, seq: 2 };
+      await call('GET', '/api/vault/recovery');
+      expect(getItem('vaults', VID).recovery.state).toBe('completed');
+      expect(mails().map((m) => m.subject)).toEqual(['VettID vault recovered']);
+      expect(mails()[0].text).toContain('is now on a new phone');
     });
   });
 });

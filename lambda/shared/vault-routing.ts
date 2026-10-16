@@ -20,6 +20,12 @@ export interface InstanceRow {
   attestation: string;
   heartbeat_at: number;
   load?: number;
+  /**
+   * Release R (VAULT-HOST-PROTOCOL 0.1.10 §6.6): whether the instance could
+   * give the heavy key derivation's permit (1 GiB) at its last metrics
+   * write. Advisory; a recovery open goes preferably to such an instance.
+   */
+  heavy_kdf_free?: boolean;
 }
 
 export interface ReleaseRow {
@@ -113,8 +119,14 @@ export async function releaseRow(release: string): Promise<ReleaseRow | null> {
   return (r.Item as ReleaseRow | undefined) ?? null;
 }
 
-/** A live instance of `release`, least loaded first, then freshest heartbeat. */
-export async function pickInstance(release: string, now: number): Promise<InstanceRow | null> {
+/**
+ * A live instance of `release`, least loaded first, then freshest heartbeat.
+ * `preferHeavyKdf` (release R, a recovering phone's enclave, MEMBER-API 2.7.0):
+ * of the same candidates, the first whose row shows `heavy_kdf_free`, else
+ * the first live one as before. The flag is read from the instance's own row
+ * (the release index projects only `load`), so it costs no extra read.
+ */
+export async function pickInstance(release: string, now: number, preferHeavyKdf = false): Promise<InstanceRow | null> {
   const r = await ddb.send(
     new QueryCommand({
       TableName: table.vaultInstances(),
@@ -127,11 +139,14 @@ export async function pickInstance(release: string, now: number): Promise<Instan
   const candidates = ((r.Items ?? []) as Pick<InstanceRow, 'instance_id' | 'heartbeat_at' | 'load'>[]).sort(
     (a, b) => (a.load ?? 0) - (b.load ?? 0) || b.heartbeat_at - a.heartbeat_at,
   );
+  let first: InstanceRow | null = null;
   for (const c of candidates.slice(0, 5)) {
     const i = await liveInstance(c.instance_id, now);
-    if (i && i.release === release) return i;
+    if (!i || i.release !== release) continue;
+    if (!preferHeavyKdf || i.heavy_kdf_free === true) return i;
+    first ??= i;
   }
-  return null;
+  return first;
 }
 
 /**
