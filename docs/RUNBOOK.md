@@ -147,6 +147,41 @@ gh workflow run drift.yml --repo vettid/vettid.org --ref master
 A second user of GitHub OIDC in either account must import this stack's
 provider (IAM allows one per URL per account), not create another.
 
+## CI image mirror
+
+The CI of vettid-vault, vettid-relay and vettid-push pulls its container
+images from `ghcr.io/vettid/mirror/<name>`, by digest, not from Docker Hub
+or Amazon ECR Public: both limit anonymous pulls per IP address, and the
+shared GitHub runners hit those limits ("Data limit exceeded"). The images
+are the upstream ones byte for byte (same index and per-platform manifest
+digests), so nothing a build produces changes.
+
+- The list: `.github/mirror/images.txt` (upstream reference with digest,
+  and alternative upstream repositories serving the same digest).
+- The copy: `.github/workflows/image-mirror.yml` → `.github/mirror/mirror.sh`
+  (skopeo `copy --all --preserve-digests`), weekly, on demand, and on a
+  pull request that changes the list. It verifies that the mirror serves
+  each pinned digest and warns if an upstream stops serving one.
+- Docker Hub is used anonymously (one manifest request per image a week).
+  With a `DOCKERHUB_TOKEN` secret and a `DOCKERHUB_USERNAME` variable the
+  workflow logs in instead.
+- The packages are public (the upstream images are public), so the other
+  repositories' workflows, service containers and anyone else pull them
+  without credentials. GitHub creates a new container package private: after
+  the first run that adds an image, set it to public once (Package settings →
+  Danger zone → Change visibility → Public; there is no API for it).
+- Each consumer keeps the upstream reference in a comment or lock next to
+  the mirror reference. Locks and Dockerfiles that are inputs to a
+  reproducible build (vettid-vault `release/eif-toolchain.lock`,
+  `release/kernel/kernel.lock`, the Dockerfiles) keep the upstream
+  reference; CI sets `VETTID_IMAGE_MIRROR=ghcr.io/vettid/mirror` and the
+  build scripts pull the same digest from the mirror. An independent
+  rebuild leaves it unset and pulls from upstream.
+
+Updating an image: change its digest in the consumer and add the new line
+here in the same week (the pull request run copies it); keep old lines
+while released commits still name them.
+
 ## CDK conventions (new stacks)
 
 Applies to everything added from the account/admin work onward

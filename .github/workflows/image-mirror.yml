@@ -1,0 +1,71 @@
+# CI image mirror (docs/RUNBOOK.md "CI image mirror").
+#
+# Copies every image pinned in .github/mirror/images.txt to
+# ghcr.io/vettid/mirror/<name> with the same digests (multi-arch indexes
+# included) and verifies that the mirror serves exactly those digests.
+# The other repos' CI pulls from the mirror by digest instead of from
+# Docker Hub or Amazon ECR Public, whose anonymous pull limits fail jobs
+# on shared runners ("Data limit exceeded").
+#
+# Weekly and on demand; also on a pull request that changes the list or
+# this workflow (same-repository branches only), so a new digest is in the
+# mirror before the change that uses it merges. A copy is by digest, so a
+# run can only ever add the pinned content; images already mirrored are
+# only re-verified. Docker Hub is used anonymously unless the repository
+# has a DOCKERHUB_TOKEN secret (and DOCKERHUB_USERNAME variable).
+#
+# Actions are pinned by commit SHA (tag in the comment).
+name: Image mirror
+
+on:
+  schedule:
+    - cron: '17 4 * * 1' # weekly, Monday 04:17 UTC
+  workflow_dispatch:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/mirror/**'
+      - '.github/workflows/image-mirror.yml'
+
+permissions: {}
+
+concurrency:
+  group: image-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write # ghcr.io/vettid/mirror/*
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: skopeo
+        run: |
+          command -v skopeo >/dev/null || { sudo apt-get update -q && sudo apt-get install -y -q skopeo; }
+          skopeo --version
+      - name: log in (GHCR; Docker Hub only if a token is configured)
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | skopeo login ghcr.io -u "$GHCR_USER" --password-stdin
+          if [ -n "$DOCKERHUB_TOKEN" ] && [ -n "$DOCKERHUB_USERNAME" ]; then
+            printf '%s' "$DOCKERHUB_TOKEN" | skopeo login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin
+          else
+            echo "Docker Hub: anonymous"
+          fi
+      - name: copy and verify
+        env:
+          MIRROR: ghcr.io/vettid/mirror
+        run: bash .github/mirror/mirror.sh .github/mirror/images.txt
+      - name: log out
+        if: always()
+        run: skopeo logout --all || true
