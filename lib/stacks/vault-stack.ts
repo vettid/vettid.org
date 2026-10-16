@@ -308,12 +308,16 @@ export class VettidOrgVaultStack extends cdk.Stack {
     // parent/aws.go PendingSweeps, as merged in #94). Scan cannot be narrowed
     // by key; the conditions confine what it may return to those two
     // attributes (the AWS pattern for attribute-level reads: a request that
-    // names other attributes, or asks for all of them, is refused). A sparse
+    // names other attributes, or asks for all of them, is refused). A request
+    // that names no attributes at all carries no dynamodb:Attributes key, and
+    // ForAllValues passes on an empty set, so the Null condition requires the
+    // key to be present: a Scan without a projection is refused. A sparse
     // index with Query would read fewer items, but needs a vault release
     // that queries it; the table holds a few hundred rows.
     h(['dynamodb:Scan'], [t.vaults.tableArn], {
       'ForAllValues:StringEquals': { 'dynamodb:Attributes': ['vault_id', 'att_sweep_pending'] },
       StringEqualsIfExists: { 'dynamodb:Select': 'SPECIFIC_ATTRIBUTES' },
+      Null: { 'dynamodb:Attributes': 'false' },
     });
     h(['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:DeleteItem'], [t['vault-instances'].tableArn]);
     h(['dynamodb:UpdateItem'], [t['vault-requests'].tableArn], onlyAttributes(['request_id', 'status', 'envelope', 'code']));
