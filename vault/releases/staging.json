@@ -1,6 +1,6 @@
 {
   "channel": "staging",
-  "signed_serial": 16,
+  "signed_serial": 17,
   "releases": [
     {
       "release": 1,
@@ -405,7 +405,7 @@
     },
     {
       "release": 13,
-      "status": "active",
+      "status": "deprecated",
       "published_at": "2026-10-15T22:19:32Z",
       "pcr0": "0f4d7915f5fc56aa7d705e82ddd14ec48e48ce3bb99217792b3e67bee9a6db6bd74dee16971d750f4af3a294e2bccdb2",
       "pcr1": "985277a497e71af128434e93c3a5860f7bbb6dba7878738c163d80505a195556bff047ab7fbf5790841e9ef75c557618",
@@ -457,7 +457,8 @@
     },
     {
       "release": 14,
-      "status": "candidate",
+      "status": "active",
+      "published_at": "2026-10-16T11:59:06Z",
       "pcr0": "082e1380273fd025f934e24941d6d91513e8e9e70d8d28ae3ea1dcc63b82c04bc0ee2ca495598df6355c1042ad90ec7e",
       "pcr1": "985277a497e71af128434e93c3a5860f7bbb6dba7878738c163d80505a195556bff047ab7fbf5790841e9ef75c557618",
       "pcr2": "5d301c2831f6c41e4466ad07126303f84346fbbe3cc804467f631d9ad93ff0e6ae8f94b6ac4247d74170a0ac5891fba9",
@@ -486,6 +487,18 @@
         "ami_revision": 0,
         "min_instances": 0,
         "max_instances": 2
+      },
+      "log": {
+        "summary": "Release 14 lets your vault send and receive photos in messages with your connections.",
+        "changes": [
+          "New: a message can carry one photo (JPEG, PNG or WebP, up to about 8 MB). Your phone sends it to your vault, which keeps a copy for your history and sends a copy to your connection's vault for them.",
+          "Your phone never stores photos: it fetches one from your vault when you open it and keeps it only in memory.",
+          "Your vault keeps up to 1 GB of photos, sent and received, and accepts at most a quarter of that from any one connection. If a photo cannot be delivered within 7 days, your vault tells you.",
+          "Photos travel through VettID's relay encrypted end to end and padded so their size reveals little. Each copy on the relay is deleted once it has been fetched, and after 7 days at the latest.",
+          "Sending and viewing photos needs the next app update; until then nothing changes for you.",
+          "Built from vettid-vault commit 3dda2b0 (tag release/staging/14) and independently rebuilt on 2026-10-16 with a matching PCR0."
+        ],
+        "security": "none"
       }
     }
   ]
