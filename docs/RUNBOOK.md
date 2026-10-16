@@ -180,9 +180,20 @@ digests), so nothing a build produces changes.
   build scripts pull the same digest from the mirror. An independent
   rebuild leaves it unset and pulls from upstream.
 
-Updating an image: change its digest in the consumer and add the new line
-here in the same week (the pull request run copies it); keep old lines
-while released commits still name them.
+Updating an image: first add the new line here and merge it (its pull
+request run copies the image; check that run is green), and only then open
+the consumer's pull request that uses the new digest: a consumer pointing
+at a digest the mirror lacks fails its CI. Keep old lines while released
+commits still name them. Dependabot pull requests skip the job (their
+token cannot write packages); the weekly run covers them, or run the
+workflow by hand after merging one.
+
+Pins nobody bumps automatically, to refresh by hand now and then (resolve
+the tag's current digest, add the line, then update the consumers):
+`moby/buildkit:buildx-stable-1` (setup-buildx-action `driver-opts`),
+`tonistiigi/binfmt:latest` (setup-qemu-action `image`) and
+`docker/dockerfile:1` (the relay and push Dockerfiles' `# syntax` line and
+their CI's `BUILDKIT_SYNTAX`), in vettid-relay and vettid-push.
 
 ## CDK conventions (new stacks)
 
