@@ -4,7 +4,7 @@ status: draft
 version: 0.1.41
 date: 2026-10-16
 changelog:
-  - 0.1.41: **wording for the owner's approval** (owner decisions of
+  - 0.1.41: **approved by the owner 2026-10-16** (owner decisions of
     2026-10-16; VAULT-MESSAGING 0.34.0). §4 "Recovery and unlock from
     release R": **recovery is on by default**; the app learns whether
     the vault implements release R from the **release capabilities**
@@ -1793,8 +1793,12 @@ The old phone's keys after a transfer were decided by the owner on
   (`:core:altchan`, `EnclaveVerifier`); before a transfer's `hs.init`
   the new phone reads it from the bundle. With `recovery_r`: release R's
   requests (the phone key and `unlock_secret`, `vault.recovery.open`).
-  Without it: the requests of the earlier release, unchanged. Never one
-  path and then the other after a refusal.
+  Without it: the requests of the earlier release, unchanged, **with that
+  release's earlier recovery** (owner decision of 2026-10-16). With
+  `recovery_r` but without `recovery_offered`: recovery is hidden for
+  that vault (no recovery entry point, Settings → Vault status shows
+  "This vault's release does not offer recovery."). Never one path and
+  then the other after a refusal.
 - **Remembered per vault**: once a verified descriptor of the vault's
   instance or a transfer bundle listed `recovery_r`, or a request of
   release R's shape succeeded, the app stores the mark with `vault_id`

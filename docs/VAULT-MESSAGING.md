@@ -24,8 +24,11 @@ related:
   - VAULT-HOST-PROTOCOL.md (0.1.12; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
-  - 0.34.0: release R (0.33.0); **wording for the owner's approval**
-    (owner decisions of 2026-10-16). (1) **`attempt_used`**: every
+  - 0.34.0: release R (0.33.0); **approved by the owner 2026-10-16**
+    (vettid.org #311; owner decisions of 2026-10-16: the name
+    `capabilities`; `recovery_offered` listed only when the release
+    offers recovery; a vault without `recovery_r` keeps its release's
+    earlier recovery). (1) **`attempt_used`**: every
     `vault.recovery.open.result` says whether that request used one of
     the ten attempts (`true` exactly when the counter answered `spent`
     or `lost` for it), so that the app no longer infers it from `code`,
@@ -47,7 +50,10 @@ changelog:
     makes a release with `recovery_r` active deprecates every older one,
     so that a first enrollment cannot be steered to a release without R
     (§11.10.9; enforced by vettid.org's manifest checks). (4) A bundle
-    of another kind with `capabilities` is refused. `attempt_used` is
+    of another kind with `capabilities` is refused. (5) `recovery_offered`
+    is listed exactly when the release's measured `recovery_offered` is
+    `true`; without it beside `recovery_r` the app hides recovery.
+    `attempt_used` is
     `true` if and only if the spend happened, `vault_missing` included.
     ANDROID-PLAN 0.1.41 follows
   - 0.33.2: release R (0.33.0): **the attempt counter's lock period is
@@ -9723,7 +9729,7 @@ publishes a **descriptor**:
 ```json
 { "v": 1, "suite": 2, "instance_id": "<id>", "kid": "<hex>", "etk": "<b64 ek>",
   "release": "<PCR0 hex>", "not_after": "<RFC 3339, ≤ issue + 24 h>",
-  "capabilities": ["attachments", "recovery_r"] }
+  "capabilities": ["attachments", "recovery_offered", "recovery_r"] }
 ```
 
 The enclave obtains a Nitro attestation document whose `user_data` is
@@ -11973,7 +11979,10 @@ phone can hold the production app and the staging app side by side.
 
 #### 11.10.9 Release capabilities (0.34.0, release R)
 
-*Owner decision of 2026-10-16; wording for the owner's approval.* The
+*Owner decisions of 2026-10-16 (approved with vettid.org #311): the
+member is named `capabilities`; a release that does not offer recovery
+says so by leaving out `recovery_offered`; a vault without `recovery_r`
+keeps its release's earlier recovery.* The
 app needs to know whether its vault implements release R **before** it
 chooses how to enroll, unlock, receive a transfer or recover: a vault of
 release R refuses the requests of earlier releases, and a vault of an
@@ -11981,14 +11990,16 @@ earlier release (on staging, up to release 14) refuses release R's.
 
 **The list.** From release R every image carries a constant list of the
 **capabilities** it implements: lowercase names of 1 to 32 characters
-`[a-z0-9_]`, unique, sorted, at most 32. It is compiled into the image,
-so PCR0 covers it; it is not a member of the channel file, and nothing
-the host, the member API or the relay sends changes it. These names are
+`[a-z0-9_]`, unique, sorted, at most 32. It comes from the image's code
+and its measured release constants (`recovery_offered`, §11.10.8), so
+PCR0 covers it; it is not a member of the channel file of its own, and
+nothing the host, the member API or the relay sends changes it. These names are
 not the optional features of §11.10.8, which the channel file chooses.
 
 | Name | Meaning | From |
 |---|---|---|
 | `recovery_r` | §11.14: the phone-held unlock secret in enrollment, unlock and a transfer's `hs.init`, the recovery open, and none of the recovery of §11.11.5. Listed whatever `recovery_offered` says (§11.14.13) | release R |
+| `recovery_offered` | The release offers recovery: its channel file's `recovery_offered` is `true` (§11.14.13). **Listed only then**; a release with `recovery_r` and without this name refuses every recovery request `not_offered`, and the app hides recovery for its vaults (it does not offer to start one and says, where the member looks for it, "This vault's release does not offer recovery", §11.14.13) | release R |
 | `attachments` | Message attachments (§7.3, §10.5.1) | listed from release R; release A implements them without saying so |
 
 A name is added to this table only with the release that implements it,
@@ -12028,8 +12039,10 @@ it, as before, from the manifest entry that the attested PCRs match
 **Choosing the path.** With `recovery_r` the app uses release R's
 requests (§11.14: `unlock_secret` in `vault.enroll`, `vault.unlock` and
 a transfer's `hs.init`; `vault.recovery.open` after the register).
-Without it, it uses the requests of the earlier sections, and offers a
-recovery only as that release defines it (§11.11). The app MUST NOT try
+With `recovery_r` and without `recovery_offered`, it hides recovery
+(above). Without `recovery_r`, it uses the requests of the earlier
+sections and **keeps that release's earlier recovery** (§11.11; owner
+decision of 2026-10-16). The app MUST NOT try
 one path and fall back to the other on a refusal.
 
 **Remembering it.** The app stores, per vault, that it has seen
@@ -14596,7 +14609,9 @@ stricter answer winning. Two more are specified later:
   the backup off (§11.11.1), with the sealed refusal `error:
   "not_offered"` and the clear marker `recovery_unavailable` with the
   clear `reason: "not_offered"` (§11.5), which the member API can read
-  (it cannot read the sealed refusal). The account site and the app say
+  (it cannot read the sealed refusal). (0.34.0) Its capabilities leave
+  out `recovery_offered` (§11.10.9), so the app knows before the member
+  tries. The account site and the app say
   the truth: "This vault's release does not offer recovery. Your vault
   gains recovery only after you move it to a release that does, which
   needs your phone (an update approved in the app)." A member who loses
@@ -14677,7 +14692,8 @@ stricter answer winning. Two more are specified later:
   app's check, by the vault.
 - (0.34.0) **Capabilities and `attempt_used`.** Vault: the descriptor
   of every release image, and a transfer's bundle, carry exactly the
-  image's list, and the descriptor still verifies under its attestation;
+  image's list (`recovery_offered` exactly when the release constant is
+  `true`), and the descriptor still verifies under its attestation;
   no other bundle kind carries it; `attempt_used` for every answer of
   the table in §11.14.6, including a run that ended after the spend and
   a repeat through the `next` wrap. App: a descriptor without the member
