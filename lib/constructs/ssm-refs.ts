@@ -24,6 +24,11 @@ export type SsmRefKey =
   | 'auth/pin-pepper-secret-arn'
   | 'data/terms-bucket-name'
   | 'data/members-stream-arn'
+  // The recovery request key (VettidOrgDataStack; VAULT-MESSAGING §11.14.8,
+  // release R): the member API's vault function signs `recovery` and
+  // `recovery_cancel` with it.
+  | 'data/recovery-request-key-arn'
+  | 'data/recovery-request-key-id'
   | 'relay/table-name'
   | 'relay/table-arn'
   | 'relay/blob-bucket-name'
@@ -60,6 +65,7 @@ export type SsmRefKey =
   // Vault account (VettidOrgVaultStack); read by the host stack and the
   // enclave host's boot script (VAULT-RELEASES §8.3), all in that account.
   | 'vault/data-bucket-name'
+  | 'vault/recovery-bucket-name'
   | 'vault/host-role-arn'
   | 'vault/host-instance-profile-name'
   | 'vault/retirement-role-arn'

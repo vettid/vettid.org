@@ -2,7 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import { Template, Match } from 'aws-cdk-lib/assertions';
 import { loadConfig } from '../lib/config';
 import { VettidOrgAuthStack } from '../lib/stacks/auth-stack';
-import { VettidOrgDataStack } from '../lib/stacks/data-stack';
+import { VettidOrgDataStack, recoveryRequestKeyAlias } from '../lib/stacks/data-stack';
 import { VettidOrgAdminAccessStack } from '../lib/stacks/admin-access-stack';
 
 const env = { account: '123456789012', region: 'us-east-1' };
@@ -146,6 +146,52 @@ describe('VettidOrgDataStack', () => {
     t.hasResource('AWS::S3::Bucket', {
       DeletionPolicy: 'Retain',
       Properties: Match.objectLike({ VersioningConfiguration: { Status: 'Enabled' } }),
+    });
+  });
+
+  // Release R (VAULT-MESSAGING §11.14.8, VAULT-RELEASES §8.2).
+  describe('the recovery request key', () => {
+    const keys = Object.values<any>(t.findResources('AWS::KMS::Key'));
+    const st = () => keys[0].Properties.KeyPolicy.Statement as any[];
+    const vaultRole = 'arn:aws:iam::123456789012:role/vettid-org-member-vault';
+    const actions = (x: any): string[] => [].concat(x.Action);
+
+    test('ECDSA P-256 signing key, retained, aliased per stage', () => {
+      expect(keys).toHaveLength(1);
+      expect(keys[0].Properties).toMatchObject({ KeySpec: 'ECC_NIST_P256', KeyUsage: 'SIGN_VERIFY' });
+      expect(keys[0].Properties.EnableKeyRotation).toBeFalsy();
+      expect({ d: keys[0].DeletionPolicy, u: keys[0].UpdateReplacePolicy }).toEqual({ d: 'Retain', u: 'Retain' });
+      t.hasResourceProperties('AWS::KMS::Alias', { AliasName: 'alias/vettid-org-recovery-request' });
+      const staging = loadConfig(new cdk.App({ context: { stage: 'staging' } }).node);
+      expect(recoveryRequestKeyAlias(staging)).toBe('alias/vettid-org-staging-recovery-request');
+      t.hasResourceProperties('AWS::SSM::Parameter', { Name: '/vettid-org/prod/data/recovery-request-key-arn' });
+      t.hasResourceProperties('AWS::SSM::Parameter', { Name: '/vettid-org/prod/data/recovery-request-key-id' });
+    });
+
+    test('kms:Sign is allowed to the member API vault function only (ECDSA_SHA_256 over a digest), and denied to everyone else', () => {
+      const allows = st().filter((x) => x.Effect !== 'Deny' && actions(x).some((a) => a === 'kms:Sign' || a === 'kms:*' || a === 'kms:Sign*' || a === '*'));
+      expect(allows).toHaveLength(1);
+      expect(allows[0]).toMatchObject({
+        Sid: 'MemberApiVaultFunctionSigns',
+        Action: 'kms:Sign',
+        Condition: { ArnEquals: { 'aws:PrincipalArn': vaultRole }, StringEquals: { 'kms:SigningAlgorithm': 'ECDSA_SHA_256', 'kms:MessageType': 'DIGEST' } },
+      });
+      const deny = st().find((x) => x.Effect === 'Deny');
+      expect(deny).toMatchObject({ Sid: 'NobodyElseSigns', Principal: { AWS: '*' }, Action: 'kms:Sign', Condition: { ArnNotEquals: { 'aws:PrincipalArn': vaultRole } } });
+      // The administrator statement holds no Sign (and no wildcard that would include it).
+      const admin = st().find((x) => x.Sid === 'AdministerButNotSign');
+      for (const a of actions(admin)) expect(a).not.toMatch(/^kms:(\*|Sign|S\*)/);
+    });
+
+    // Not a restriction: the administrator statement's kms:Get* already lets
+    // any account principal with an IAM grant read the public key, which is
+    // no secret. The statement names who is meant to read it.
+    test('the public key is readable by the owner (and, through the administrator statement, by any account principal IAM allows)', () => {
+      const admin = st().find((x) => x.Sid === 'AdministerButNotSign');
+      expect(actions(admin)).toContain('kms:Get*');
+      const read = st().find((x) => x.Sid === 'OwnerReadsPublicKey');
+      expect(read.Action).toEqual(['kms:GetPublicKey', 'kms:DescribeKey']);
+      expect(read.Condition).toEqual({ ArnLike: { 'aws:PrincipalArn': 'arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_VettIDAdmin_*' } });
     });
   });
 });
@@ -446,7 +492,7 @@ describe('VettidOrgMemberApiStack', () => {
   const t = Template.fromStack(new VettidOrgMemberApiStack(apiApp, 'MemberApi', { config: loadConfig(apiApp.node), env }));
 
   test('four route groups + link mailer + eight jobs (incl. the vault notice job, W8, the vault service watch, the account push, 2.0.0, and the vault-names job, 2.2.0)', () => {
-    t.resourceCountIs('AWS::Lambda::Function', 15); // and the start-over cancel and the member-vaults check, two more entry points of the cleanup module
+    t.resourceCountIs('AWS::Lambda::Function', 16); // and the start-over cancel and the member-vaults check, two more entry points of the cleanup module; 2.7.0: the recovery attempts sweep
     for (const p of ['/api/public', '/api/auth', '/api/account', '/api/vault']) {
       t.hasResourceProperties('AWS::ApiGatewayV2::Route', { RouteKey: `ANY ${p}/{proxy+}` });
     }
@@ -624,7 +670,7 @@ describe('VettidOrgMemberApiStack', () => {
 
     test('function logs keep the retention they had (one month): not changed by 2.6.0', () => {
       const groups = Object.values<any>(t.findResources('AWS::Logs::LogGroup')).filter((g) => !g.Properties.LogGroupName);
-      expect(groups.length).toBe(15); // the start-over cancel function's own, and the member-vaults check's
+      expect(groups.length).toBe(16); // the start-over cancel function's own, and the member-vaults check's; 2.7.0: the attempts sweep's
       for (const g of groups) expect(g.Properties.RetentionInDays).toBe(30);
     });
   });
@@ -648,6 +694,47 @@ describe('VettidOrgMemberApiStack', () => {
     const stmts = () => Object.values<any>(t.findResources('AWS::IAM::Policy')).flatMap((p) => p.Properties.PolicyDocument.Statement);
     const str = (x: unknown) => JSON.stringify(x);
 
+    test('release R: kms:Sign on the recovery request key, for the vault routes only; its id and ARN from SSM', () => {
+      const signs = stmts().filter((s: any) => str(s.Action).includes('kms:Sign'));
+      expect(signs).toHaveLength(1);
+      expect(signs[0].Action).toBe('kms:Sign');
+      expect(signs[0].Condition).toEqual({ StringEquals: { 'kms:SigningAlgorithm': 'ECDSA_SHA_256', 'kms:MessageType': 'DIGEST' } });
+      expect(str(signs[0].Resource)).toMatch(/^\{"Ref":"SsmParameterValue.*recoveryrequestkeyarn/);
+      const vaultFn = Object.values<any>(t.findResources('AWS::Lambda::Function')).find((f) => f.Properties.Environment?.Variables?.RECOVERY_REQUEST_KEY_ID);
+      expect(vaultFn).toBeDefined();
+      expect(str(vaultFn.Properties.Environment.Variables.RECOVERY_REQUEST_KEY_ARN)).toContain('recoveryrequestkeyarn');
+      const withKey = Object.values<any>(t.findResources('AWS::Lambda::Function')).filter((f) => f.Properties.Environment?.Variables?.RECOVERY_REQUEST_KEY_ARN);
+      expect(withKey).toHaveLength(1);
+      const params = Object.values<any>(t.toJSON().Parameters).map((v) => v.Default);
+      expect(params).toEqual(expect.arrayContaining(['/vettid-org/prod/data/recovery-request-key-arn', '/vettid-org/prod/data/recovery-request-key-id']));
+    });
+
+    test('release R: the recovery attempts sweep runs every 5 minutes under its own role; it scans the request table and writes only the API\'s `recovery`', () => {
+      const roleId = Object.entries<any>(t.findResources('AWS::IAM::Role')).find(([, r]) => r.Properties.RoleName === 'vettid-org-member-vault-attempts')![0];
+      const fns = Object.entries<any>(t.findResources('AWS::Lambda::Function')).filter(([, f]) => str(f.Properties.Role).includes(roleId));
+      expect(fns).toHaveLength(1);
+      const rule = Object.values<any>(t.findResources('AWS::Events::Rule')).find((r) => str(r.Properties.Targets).includes(fns[0][0]));
+      expect(rule.Properties.ScheduleExpression).toBe('rate(5 minutes)');
+      const pol = Object.values<any>(t.findResources('AWS::IAM::Policy')).filter((p) => str(p.Properties.Roles).includes(roleId)).flatMap((p) => p.Properties.PolicyDocument.Statement);
+      expect(str(pol)).not.toContain('sqs:');
+      expect(str(pol)).not.toContain('kms:');
+      const vaultWrite = pol.find((x: any) => x.Action === 'dynamodb:UpdateItem' && str(x.Resource).includes('table/vettid-org-vaults'));
+      expect(vaultWrite.Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(['vault_id', 'recovery', 'updated_at']);
+      const scans = pol.filter((x: any) => str(x.Action).includes('dynamodb:Scan'));
+      expect(scans).toHaveLength(1);
+      expect(str(scans[0].Resource)).toContain('table/vettid-org-vault-requests');
+      expect(scans[0].Condition).toBeUndefined();
+      // N1: on the request table it may put only cancel links and update only the notice's attributes.
+      const reqStmts = pol.filter((x: any) => str(x.Resource).includes('table/vettid-org-vault-requests'));
+      expect(reqStmts.map((x: any) => x.Action).sort()).toEqual(['dynamodb:PutItem', 'dynamodb:Scan', 'dynamodb:UpdateItem']);
+      expect(reqStmts.find((x: any) => x.Action === 'dynamodb:PutItem').Condition).toEqual({ 'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['rcancel#*'] } });
+      expect(reqStmts.find((x: any) => x.Action === 'dynamodb:UpdateItem').Condition).toEqual({
+        'ForAllValues:StringEquals': {
+          'dynamodb:Attributes': ['request_id', 'expires_at', 'recovery_id', 'code', 'attempt_noticing', 'attempt_notice_tries', 'attempt_noticed_at', 'attempt_notice_failed'],
+        },
+      });
+    });
+
     test('sqs:SendMessage only to vettid-org-vault-control-* queues, and nothing else on SQS', () => {
       const sqsStmts = stmts().filter((s: any) => str(s.Action).includes('sqs:'));
       expect(sqsStmts).toHaveLength(3); // the vault routes, the cleanup job's vault deletions (§12.5), the account push (2.0.0)
@@ -661,7 +748,7 @@ describe('VettidOrgMemberApiStack', () => {
       const writes = stmts().filter(
         (s: any) => /dynamodb:(PutItem|UpdateItem)/.test(str(s.Action)) && /table\/vettid-org-(vaults|vault-releases)"/.test(str(s.Resource)),
       );
-      expect(writes).toHaveLength(6); // the API's two, the alarm mailer's, the cleanup job's deletion mark and start request, the vault-names job's (2.2.0)
+      expect(writes).toHaveLength(7); // the API's two, the alarm mailer's, the cleanup job's deletion mark and start request, the vault-names job's (2.2.0), the attempts sweep's (2.7.0)
       for (const w of writes) {
         const attrs: string[] = w.Condition['ForAllValues:StringEquals']['dynamodb:Attributes'];
         for (const f of ['lease', 'sealed_release', 'vault_version', 'state_version', 'status', 'available']) expect(attrs).not.toContain(f);

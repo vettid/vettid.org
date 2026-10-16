@@ -454,6 +454,18 @@ export const vaultDataBucketName = (stage: string, account: string): string =>
   `vettid-org-${stage === PROD_STAGE ? '' : `${stage}-`}vault-data-${account}`;
 
 /**
+ * A channel's recovery attempt counter bucket (VettidOrgVaultStack;
+ * VAULT-RELEASES §8.2, VAULT-HOST-PROTOCOL §8.1, release R):
+ * `vettid-org-vault-recovery-<vault account>`, with no stage in the name.
+ * The vault release pins exactly this name, the account and the region
+ * (vettid-vault `enclave/releasecfg/<channel>.json`, `recovery_counter`;
+ * its build refuses any other prefix). NEVER rename: a bucket under Object
+ * Lock in compliance mode can never be deleted, and a release that pins the
+ * name could not reach a new one.
+ */
+export const vaultRecoveryBucketName = (account: string): string => `vettid-org-vault-recovery-${account}`;
+
+/**
  * The vault data bucket of every channel, production first. The
  * organization trail records their object writes, an alert rule watches
  * their configuration (VettidOrgAuditStack) and the Vault OU policy

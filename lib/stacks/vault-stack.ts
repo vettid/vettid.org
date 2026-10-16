@@ -4,7 +4,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
-import { AppConfig, VAULT_RELEASE_KEY_FUNCTION_NAME, VAULT_ROLE_NAMES, VaultConfig, resourceName, vaultRoleArn } from '../config';
+import { AppConfig, VAULT_RELEASE_KEY_FUNCTION_NAME, VAULT_ROLE_NAMES, VaultConfig, resourceName, vaultRecoveryBucketName, vaultRoleArn } from '../config';
 import { ApiFunction } from '../constructs/api-function';
 import { ReleaseKey, ReleaseKeySpec } from '../constructs/release-key';
 import { publishRef } from '../constructs/ssm-refs';
@@ -45,6 +45,22 @@ export const VAULT_DATA_VERSIONS = {
   maxDays: 7,
 } as const;
 
+/**
+ * The recovery counter bucket's one lifecycle rule (release R): a version
+ * that has been noncurrent this many days is removed, if its lock has ended
+ * (S3 never removes a locked version). Never a rule on current versions.
+ */
+export const VAULT_RECOVERY_NONCURRENT_DAYS = 30;
+
+/**
+ * What the enclave host role may do on the recovery counter bucket
+ * (VAULT-HOST-PROTOCOL §8.1, P18): write a new object or version, set and
+ * read its lock, read a version, list versions. Nothing that deletes,
+ * bypasses or holds a lock, or touches the bucket's configuration.
+ */
+export const VAULT_RECOVERY_HOST_OBJECT_ACTIONS = ['s3:PutObject', 's3:PutObjectRetention', 's3:GetObjectVersion', 's3:GetObjectRetention'] as const;
+export const VAULT_RECOVERY_HOST_BUCKET_ACTIONS = ['s3:ListBucketVersions'] as const;
+
 export interface VettidOrgVaultStackProps extends cdk.StackProps {
   readonly config: AppConfig;
   /** Release keys to hold (none yet; W7 feeds them from releases.json). */
@@ -58,6 +74,8 @@ export interface VettidOrgVaultStackProps extends cdk.StackProps {
  *  - the vault tables (moved here from VettidOrgDataStack, §8.1), with
  *    resource policies that admit exactly the member API's grants;
  *  - the vault data bucket;
+ *  - the recovery attempt counter bucket (release R; Object Lock in
+ *    compliance mode, which can never be undone);
  *  - the enclave HOST role and the key RETIREMENT role, with fixed names:
  *    every release key's policy names them forever (§6.3);
  *  - manifest signing key A and the owner-only signer role (§6.1);
@@ -70,6 +88,8 @@ export class VettidOrgVaultStack extends cdk.Stack {
   readonly hostRole: iam.Role;
   readonly retirementRole: iam.Role;
   readonly dataBucket: s3.Bucket;
+  /** The recovery attempt counter (release R; Object Lock, compliance mode, irreversible). */
+  readonly recoveryBucket: s3.Bucket;
   readonly tables: Record<VaultTable, dynamodb.TableV2>;
   readonly releaseKeys: ReleaseKey[] = [];
 
@@ -211,6 +231,50 @@ export class VettidOrgVaultStack extends cdk.Stack {
       ],
     });
 
+    // ---- recovery attempt counter bucket (§8.2, release R) ----------------------
+    // VAULT-HOST-PROTOCOL §8.1, VAULT-MESSAGING §11.14.4. The enclave keeps
+    // each vault's recovery attempts here as objects it writes with a
+    // compliance-mode lock and reads back; it relies on no bucket setting.
+    // IRREVERSIBLE once deployed: Object Lock cannot be turned off, a
+    // compliance-locked version cannot be shortened or deleted by anyone
+    // (the root user included) until its date, and in production tokens and
+    // close records are locked for 100 years, so the bucket can never be
+    // emptied and never deleted (staging: 1 day, set by the vault release
+    // for its channel, so a staging bucket can be emptied later). Hence
+    // RETAIN, and a fixed name the vault release pins
+    // (`recovery_counter`): never rename it.
+    //  - Object Lock enabled at creation, with NO default retention: a
+    //    default would lock objects the enclave did not mean to lock, and the
+    //    enclave sets every lock itself.
+    //  - Versioning on (Object Lock requires it, and it cannot be suspended).
+    //  - No lifecycle rule that expires a current version or a vault's newest
+    //    present record (VAULT-RELEASES §8.2). The one rule below expires
+    //    NONCURRENT versions only, 30 days after they were replaced: S3 never
+    //    removes a version that is still locked, the newest present record is
+    //    the marker's current version, and every other record is created once
+    //    (If-None-Match), so in practice this removes old present-marker
+    //    versions whose 96-hour locks have ended. It keeps the enclave's
+    //    complete versions listings short. Incomplete multipart uploads (the
+    //    host never makes one) go after a day.
+    const recoveryBucket = new s3.Bucket(this, 'RecoveryCounterBucket', {
+      bucketName: vaultRecoveryBucketName(vault.account),
+      objectLockEnabled: true,
+      versioned: true,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      objectOwnership: s3.ObjectOwnership.BUCKET_OWNER_ENFORCED,
+      removalPolicy: retain,
+      lifecycleRules: [
+        {
+          id: 'OldVersionsOfUnlockedRecords',
+          noncurrentVersionExpiration: cdk.Duration.days(VAULT_RECOVERY_NONCURRENT_DAYS),
+          abortIncompleteMultipartUploadAfter: cdk.Duration.days(1),
+        },
+      ],
+    });
+    this.recoveryBucket = recoveryBucket;
+
     // ---- manifest signing key A (§6.1) ------------------------------------------
     const signerRole = new iam.Role(this, 'ManifestSignerRole', {
       roleName: VAULT_ROLE_NAMES.manifestSigner,
@@ -299,9 +363,14 @@ export class VettidOrgVaultStack extends cdk.Stack {
     // `att_sweep_pending` (VAULT-HOST-PROTOCOL P15, release A): set in the
     // update that marks a vault `deleted`, removed once its
     // `vaults/<vault_id>/att/` prefix is empty or the vault id is enrolled again.
+    // `app_key_next` (release R, VAULT-HOST-PROTOCOL 0.1.10 §6.1,
+    // VAULT-MESSAGING §11.14.2): {key, kid, seq, header_seq}, the app key a
+    // transfer or recovery is putting in place, written with the header
+    // write of step 1 and cleared by the rules there (parent/aws.go
+    // appKeyNext); the member API accepts it beside `app_key` while it is set.
     h(['dynamodb:UpdateItem'], [t.vaults.tableArn], onlyAttributes([
       'vault_id', 'lease', 'updated_at', 'sealed_release', 'vault_version', 'state_version', 'state', 'alarm', 'alarm_pending', 'app_key', 'credential_backup',
-      'name_change', 'name_change_pending', 'att_sweep_pending',
+      'name_change', 'name_change_pending', 'att_sweep_pending', 'app_key_next',
     ]));
     // P15's resumption at the parent's start: a Scan filtered on
     // attribute_exists(att_sweep_pending), projecting vault_id (vettid-vault
@@ -320,7 +389,13 @@ export class VettidOrgVaultStack extends cdk.Stack {
       Null: { 'dynamodb:Attributes': 'false' },
     });
     h(['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:DeleteItem'], [t['vault-instances'].tableArn]);
-    h(['dynamodb:UpdateItem'], [t['vault-requests'].tableArn], onlyAttributes(['request_id', 'status', 'envelope', 'code']));
+    // Response slots. Release R (VAULT-HOST-PROTOCOL 0.1.10 §6.1, parent/aws.go
+    // WriteSlot) adds the enclave's clear members, copied beside `code`: a
+    // recovery's `not_before`, `expires` and `earliest`; a counted open's
+    // `retry_at` and `expires`; a refusal's `reason`.
+    h(['dynamodb:UpdateItem'], [t['vault-requests'].tableArn], onlyAttributes([
+      'request_id', 'status', 'envelope', 'code', 'not_before', 'expires', 'earliest', 'retry_at', 'reason',
+    ]));
     h(['s3:GetObject', 's3:PutObject', 's3:DeleteObject'], ['vaults/*', 'users/*', 'smoke/*'].map((p) => this.dataBucket.arnForObjects(p)));
     h(['s3:GetObject'], [this.dataBucket.arnForObjects('manifests/*')]);
     // NoSuchKey (not AccessDenied) for a missing object needs ListBucket,
@@ -330,6 +405,13 @@ export class VettidOrgVaultStack extends cdk.Stack {
     // `vaults/*` above covers its deletes. Narrowing it would turn missing
     // objects into AccessDenied for the parent's store.
     h(['s3:ListBucket'], [this.dataBucket.bucketArn]);
+    // The recovery attempt counter (release R, VAULT-HOST-PROTOCOL §8.1, P18):
+    // exactly these five actions, on that bucket only. The enclave signs its
+    // own requests with the role's credentials (the parent holds the same,
+    // §5.5). No delete, bypass-governance, legal-hold or configuration
+    // permission, here or anywhere else on this role (test/vault-stack.test.ts).
+    h([...VAULT_RECOVERY_HOST_OBJECT_ACTIONS], [recoveryBucket.arnForObjects('*')]);
+    h([...VAULT_RECOVERY_HOST_BUCKET_ACTIONS], [recoveryBucket.bucketArn]);
     h(['ssm:GetParameter', 'ssm:GetParameters', 'ssm:GetParametersByPath'], [`arn:aws:ssm:${config.region}:${vault.account}:parameter/vettid-org/${config.stage}/vault/*`]);
     h(['logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams'], [`arn:aws:logs:${config.region}:${vault.account}:log-group:/vettid-org/${config.stage}/vault-host:*`]);
     h(['cloudwatch:PutMetricData'], ['*'], { StringEquals: { 'cloudwatch:namespace': 'VettID/Vault' } });
@@ -380,6 +462,7 @@ export class VettidOrgVaultStack extends cdk.Stack {
 
     // ---- refs ---------------------------------------------------------------------
     publishRef(this, config, 'vault/data-bucket-name', this.dataBucket.bucketName);
+    publishRef(this, config, 'vault/recovery-bucket-name', recoveryBucket.bucketName);
     publishRef(this, config, 'vault/host-role-arn', this.hostRole.roleArn);
     publishRef(this, config, 'vault/host-instance-profile-name', VAULT_ROLE_NAMES.host);
     publishRef(this, config, 'vault/retirement-role-arn', this.retirementRole.roleArn);
@@ -399,6 +482,7 @@ export class VettidOrgVaultStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'VaultsStreamArn', { value: t.vaults.tableStreamArn! });
     new cdk.CfnOutput(this, 'ManifestKeyArn', { value: manifestKey.keyArn });
     new cdk.CfnOutput(this, 'DataBucketName', { value: this.dataBucket.bucketName });
+    new cdk.CfnOutput(this, 'RecoveryCounterBucketName', { value: recoveryBucket.bucketName });
   }
 }
 

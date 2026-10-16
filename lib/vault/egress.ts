@@ -1,4 +1,4 @@
-import { AppConfig, VaultConfig, resourceName } from '../config';
+import { AppConfig, VaultConfig, resourceName, vaultRecoveryBucketName } from '../config';
 
 /**
  * The enclave hosts' DNS allowlist (VAULT-RELEASES §8.4 control 3): Route 53
@@ -9,7 +9,11 @@ import { AppConfig, VaultConfig, resourceName } from '../config';
  *  - The enclave's own egress (the parent's forwarder allowlist,
  *    parent.DefaultAllow): the relay, the pinned KMS endpoint, Google's
  *    attestation status list, the push gateway of the vault's channel
- *    (VAULT-MESSAGING §14.3; PUSH-GATEWAY §10.1).
+ *    (VAULT-MESSAGING §14.3; PUSH-GATEWAY §10.1), and (release R) the
+ *    recovery counter bucket's virtual-hosted name, which the enclave
+ *    reaches over its own TLS (VAULT-HOST-PROTOCOL §8.1; VAULT-RELEASES
+ *    §8.4). Its traffic, like all S3 traffic, goes through the gateway
+ *    endpoint, whose policy admits this account's buckets.
  *  - What the parent uses (AWS SDK, the vault's own account): SQS, DynamoDB
  *    (including the SDK's account-based endpoint), S3 (path and the data
  *    bucket's virtual host; the gateway endpoint carries the traffic), SSM
@@ -33,6 +37,7 @@ export function vaultHostDnsAllowlist(config: AppConfig, vault: VaultConfig): st
     aws('kms'),
     'android.googleapis.com',
     vault.pushHost,
+    `${vaultRecoveryBucketName(vault.account)}.s3.${r}.amazonaws.com`,
     // parent
     aws('sqs'),
     aws('dynamodb'),
