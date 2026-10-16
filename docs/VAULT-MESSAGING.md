@@ -52,8 +52,12 @@ changelog:
     (§11.10.9; enforced by vettid.org's manifest checks). (4) A bundle
     of another kind with `capabilities` is refused. (5) `recovery_offered`
     is listed exactly when the release's measured `recovery_offered` is
-    `true`; without it beside `recovery_r` the app hides recovery.
-    `attempt_used` is
+    `true`; without it beside `recovery_r` the app hides recovery. (6) **A
+    lost `ok` is resumed** (owner decision of 2026-10-16): until the
+    recovered phone's first handshake completes, that phone's own
+    `vault.unlock` (its unlock secret and the PIN) carries `vault_bundle`
+    and a fresh token again, repeatably, with no attempt used and no call
+    to the counter (§11.4, §11.14.6). `attempt_used` is
     `true` if and only if the spend happened, `vault_missing` included.
     ANDROID-PLAN 0.1.41 follows
   - 0.33.2: release R (0.33.0): **the attempt counter's lock period is
@@ -9973,7 +9977,10 @@ one of:
   (a vault without a backup copy refuses that unlock with `no_backup`);
   apps MUST NOT rely on it and MAY ignore it. (0.33.0, release R)
   Neither member exists from release R: a registered phone does not
-  unlock (§11.14.6).
+  unlock (§11.14.6). (0.34.0; owner decision of 2026-10-16) The one
+  exception is `vault_bundle` in the result of the **recovered** phone's
+  own unlock before its first handshake, which resumes a lost `ok`
+  (§11.14.6, "A lost `ok`"); `credential_backup` stays absent.
 - `{"ok": false, "code": "bad_pin|backoff|unknown_device|attestation|signer_refused|state_rollback|vault_missing|manifest|wrong_release|release_key|retry|recovery_pending|no_backup|device_secret|transfer_incomplete",
   "header_seq": m, "retry_after": <s>}` — `signer_refused` (0.27.0):
   the device key's recorded signer is not pinned by this release, or
@@ -14099,6 +14106,42 @@ After `ok` the phone sends `hs.init` with purpose `app` and `ctx` =
 `recovery_id`, accepted without approval as for the first app (§11.3),
 and fetches the credential with `credential.get` as the holder (the blob
 does not fit the result).
+
+**A lost `ok`** (0.34.0; owner decision of 2026-10-16). The vault has
+removed the recovery record when it answers `ok`, so a phone that never
+receives that answer has neither `vault_bundle` nor a token, and cannot
+open again. It resumes with an ordinary `vault.unlock` (§11.4):
+
+- **What marks the phone.** The completion leaves, in the vault state,
+  the phone's first-handshake invitation (`ctx` = `recovery_id`, bound
+  to the phone's `ik`, relay key and `kem`). While it exists the phone
+  is one of the header's unlock keys, under the DEK the completion
+  replaced for the request's PIN and the phone's secret. It is removed
+  only when that phone's first handshake **completes**, or when a later
+  recovery's completion replaces it (with any handshake of it under way);
+  it does not expire. It is ordinary vault state, encrypted, written with
+  the state's conditional writes and bound to the header's `state_seq`,
+  so a host can bring it back after the pairing only by serving older
+  state, which the unlock refuses (§13.2) or the phone already rejects.
+- **Who gets the bundle.** Only an unlock that authenticates as **that**
+  phone, with its `sig`, device assertion, `unlock_secret` and the PIN
+  like any unlock from release R, while the invitation exists. Its
+  result carries `vault_bundle` (the vault's current, rotated keys) and,
+  as every unlock, a fresh standing `token`. Every other device's unlock
+  carries neither bundle nor anything new.
+- **The unlock restarts the pairing.** It renews the invitation for 24
+  hours from the unlock and drops a first handshake that was begun and
+  not completed, so the phone can send `hs.init` again. It may be
+  repeated, also when its own answer is lost, until the handshake
+  completes. No attempt is used and the counter is not called; the
+  quiet period, the presence and the attempts are untouched.
+- **After the pairing** the invitation is gone, and no unlock result
+  carries `vault_bundle`.
+- **Other events.** A later recovery's completion removes the earlier
+  phone's invitation (the newer phone is the vault's app). A transfer
+  needs a paired holder and so cannot start before the pairing. A cancel
+  concerns an open recovery, and there is none after `ok`. Deleting the
+  vault (§11.11.9) removes everything.
 
 **The schedule of waits.** The ten attempts of a generation are numbered
 1 to 10. After attempt *k* was used and was not a success, no further
