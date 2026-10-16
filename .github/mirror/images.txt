@@ -1,0 +1,35 @@
+# Container images VettID's CI pulls, copied to ghcr.io/vettid/mirror/<name>
+# by .github/workflows/image-mirror.yml (docs/RUNBOOK.md "CI image mirror").
+#
+# One image per line: the upstream reference pinned by digest, then
+# optionally other upstream repositories that serve the same digest (tried
+# in order when the first refuses, e.g. a registry's anonymous data limit).
+# <name> is the last path component of the repository; the mirror tag is
+# <tag>-<first 12 hex digits of the digest>. Consumers pull by digest only:
+#   ghcr.io/vettid/mirror/<name>@sha256:<digest>
+# and keep this upstream reference in a comment next to it.
+#
+# Adding or changing a digest here and merging (or running the workflow)
+# copies it; old digests stay in the mirror for older commits.
+
+# vettid-vault: LocalStack (ci.yml integration, compat.yml, integration/docker-compose.yml)
+public.ecr.aws/localstack/localstack:4.9@sha256:59373b4a27dba3ec15c4db0b7455f0cb68c8a42300e2cbbe362b440f9a131697 docker.io/localstack/localstack
+# vettid-vault: Dockerfile.enclave builder base (reproducible enclave binary)
+public.ecr.aws/docker/library/debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 docker.io/library/debian
+# vettid-vault: release/Dockerfile.eif-builder base (release/eif-toolchain.lock base_image)
+public.ecr.aws/docker/library/amazonlinux:2023@sha256:5b29412077a463b4a3a8fbc99a8cdf4b929f38a3ecc8dac10328d8f36b0099b8 docker.io/library/amazonlinux
+# vettid-vault: enclave kernel build container (release/kernel/kernel.lock nix_image)
+docker.io/nixos/nix:2.21.4@sha256:91b689f94a101aa67f95034dffd9a4858e85d0946f67c64dd65ed241644454b9
+
+# vettid-relay, vettid-push: Dockerfile build stage
+docker.io/library/golang:1.26-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c public.ecr.aws/docker/library/golang
+# vettid-relay, vettid-push: Dockerfile frontend (# syntax=docker/dockerfile:1, as resolved 2026-10-15)
+docker.io/docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
+# vettid-relay, vettid-push: docker/setup-buildx-action BuildKit (buildx-stable-1, v0.33.1, as resolved 2026-10-15)
+docker.io/moby/buildkit:buildx-stable-1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+# vettid-relay, vettid-push: docker/setup-qemu-action binfmt (latest, as resolved 2026-10-15)
+docker.io/tonistiigi/binfmt:latest@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+
+# vettid-relay: shared-backend service containers and make deps-up
+docker.io/amazon/dynamodb-local:3.3.1@sha256:ff89bd48ff32cd8d9be5fee8873b65b8854dc408f1afe881be6eb00247bc0dab
+docker.io/valkey/valkey:8.1.10-alpine@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507
