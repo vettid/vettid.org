@@ -3773,6 +3773,14 @@ describe('2.7.0: recovery from release R', () => {
       expect(logs.join('\n')).toContain('recovery cancel not queued');
     });
 
+    test('N2: a looser 10-an-hour limit before signing, so a burst never reaches KMS; the 3 a day stay after it', async () => {
+      kmsDown = true;
+      for (let i = 0; i < 10; i++) expect((await call('POST', '/api/vault/recovery', { browser_key: BK })).status).toBe(503);
+      expect((await call('POST', '/api/vault/recovery', { browser_key: BK })).status).toBe(429);
+      expect(kms.commandCalls(SignCommand)).toHaveLength(10);
+      expect(getItem('rl', `vault-recovery#g1#${NOW - (NOW % DAY)}`)).toBeUndefined();
+    });
+
     test('the request email says "at the earliest", the three days and the ten attempts', async () => {
       await request();
       const t = mails()[0].text;
@@ -4141,6 +4149,54 @@ describe('2.7.0: recovery from release R', () => {
       expect(audits('vault.recovery_attempt')).toHaveLength(1);
       expect(mails()).toHaveLength(1);
       expect(getItem('vaults', VID).recovery.open_ids).toEqual([RID2, id3]);
+    });
+
+    test('N1: the sweep\'s writes to the request table: puts only cancel links, and every update is conditional on the item existing', async () => {
+      counted({ expires: isoS(NOW + 5 * DAY) });
+      ddb.resetHistory();
+      expect(await sweep()).toEqual({ found: 1, noticed: 1, failed: 0 });
+      const puts = ddb.commandCalls(PutCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'requests');
+      expect(puts.length).toBeGreaterThan(0);
+      for (const i of puts) expect(String(i.Item!.request_id)).toMatch(/^rcancel#[0-9a-f]{64}$/);
+      const updates = ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'requests');
+      expect(updates.map((i) => i.UpdateExpression)).toEqual(expect.arrayContaining([
+        expect.stringMatching(/^SET attempt_noticing/), expect.stringMatching(/^SET attempt_noticed_at/), 'SET expires_at = :exp',
+      ]));
+      const allowed = ['request_id', 'expires_at', 'recovery_id', 'code', 'attempt_noticing', 'attempt_notice_tries', 'attempt_noticed_at', 'attempt_notice_failed'];
+      for (const i of updates) {
+        expect({ u: i.UpdateExpression, c: i.ConditionExpression }).toEqual({ u: i.UpdateExpression, c: expect.stringContaining('attribute_exists(request_id)') });
+        // Every attribute it names is one the job's grant allows (lib/vault/access.ts `vault-attempts`).
+        const named = `${i.UpdateExpression} ${i.ConditionExpression}`.replace(/:[a-z_]+/g, '').match(/[a-z_]+/g)!
+          .filter((w) => !['SET', 'REMOVE', 'AND', 'OR', 'if_not_exists', 'attribute_exists', 'attribute_not_exists'].includes(w));
+        for (const a of named) expect({ a, allowed: allowed.includes(a) }).toEqual({ a, allowed: true });
+      }
+      const vaultUpdates = ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'vaults');
+      for (const i of vaultUpdates) expect(i.ConditionExpression).toMatch(/recovery\.recovery_id = :id/);
+    });
+
+    test('N3: while an earlier attempt cannot be mailed, no further open is forwarded (503, fail-safe); once noticed or given up, opens go on', async () => {
+      counted();
+      sesMock.on(SendEmailCommand).rejects(new Error('ses down'));
+      const id3 = '01JB2Z6V9K3M4N5P6Q7R8S9T3D';
+      const r1 = await open({ ...OPEN, request_id: id3 });
+      expect(r1).toMatchObject({ status: 503, body: { error: 'attempt_notice_pending', retry_after: vault.ATTEMPT_RETRY_S } });
+      expect(sent().filter((m) => m.msg.op === 'recovery_open')).toHaveLength(1); // only the first open
+      // Still claimed (within 5 minutes): still refused, and no second send is tried meanwhile.
+      at(NOW + 60);
+      expect((await open({ ...OPEN, request_id: id3 })).status).toBe(503);
+      expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(1);
+      // Given up after ATTEMPT_MAX_TRIES (recorded as failed): opens go on.
+      Object.assign(getItem('requests', RID2), { attempt_notice_tries: vault.ATTEMPT_MAX_TRIES, attempt_noticing: NOW - vault.ATTEMPT_RETRY_S });
+      at(NOW + 120);
+      expect((await open({ ...OPEN, request_id: id3 })).status).toBe(202);
+      expect(getItem('requests', RID2).attempt_notice_failed).toBe(true);
+    });
+
+    test('a status read during an SES outage still answers (the notice failure is logged)', async () => {
+      counted();
+      sesMock.on(SendEmailCommand).rejects(new Error('ses down'));
+      expect((await call('GET', '/api/vault/recovery')).status).toBe(200);
+      expect(logs.join('\n')).toContain('recovery attempt not noticed');
     });
 
     test('the sweep skips slots whose vault or member is gone, and counts a failed notice for the next run', async () => {

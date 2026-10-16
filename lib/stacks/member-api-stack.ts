@@ -21,6 +21,7 @@ import {
   vaultApiRoleName,
   vaultControlQueueArnPattern,
   vaultControlQueueUrlPrefix,
+  grantConditions,
   vaultGrantResources,
   vaultTableArn,
 } from '../vault/access';
@@ -199,7 +200,7 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
             // Attribute-level write limits (fine-grained access control).
             // ForAllValues is vacuously true if a request carried no attribute
             // list, so this narrows, and never widens, the plain grant.
-            conditions: grant.attributes ? { 'ForAllValues:StringEquals': { 'dynamodb:Attributes': grant.attributes } } : undefined,
+            conditions: grantConditions(grant),
           }),
         );
       }

@@ -1525,6 +1525,22 @@ audit or link) is retried after 5 minutes, and given up after 24 tries
 `attempt_notice_failed`). The job writes `RecoveryAttemptsUnnoticed` and
 `RecoveryAttemptNoticeFailures` (namespace `VettID/MemberApi`).
 
+Two consequences, both on the safe side:
+
+- **A mail failure blocks opens.** Every open first notices the
+  recovery's earlier counted attempts, and is refused (`503
+  attempt_notice_pending`, nothing forwarded) while one of them is not
+  recorded as noticed. With SES failing, opens stay refused until the
+  notice succeeds or is given up (24 tries, each retried once its claim is
+  5 minutes stale: about 2 hours at the job's pace). Fail-safe: no further
+  attempt goes out while the member cannot be told of the last one. An SES
+  outage shows as `RecoveryAttemptNoticeFailures` and `recovery attempt
+  not noticed` lines; a status read still answers.
+- **A mail can arrive twice, rarely:** when the send succeeded but the
+  record afterwards (`attempt_noticed_at`) failed, the notice is taken up
+  again after 5 minutes and mailed again. Its audit entry can likewise be
+  written twice.
+
 Check after step 1 (staging shown):
 
 ```bash

@@ -723,6 +723,16 @@ describe('VettidOrgMemberApiStack', () => {
       const scans = pol.filter((x: any) => str(x.Action).includes('dynamodb:Scan'));
       expect(scans).toHaveLength(1);
       expect(str(scans[0].Resource)).toContain('table/vettid-org-vault-requests');
+      expect(scans[0].Condition).toBeUndefined();
+      // N1: on the request table it may put only cancel links and update only the notice's attributes.
+      const reqStmts = pol.filter((x: any) => str(x.Resource).includes('table/vettid-org-vault-requests'));
+      expect(reqStmts.map((x: any) => x.Action).sort()).toEqual(['dynamodb:PutItem', 'dynamodb:Scan', 'dynamodb:UpdateItem']);
+      expect(reqStmts.find((x: any) => x.Action === 'dynamodb:PutItem').Condition).toEqual({ 'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['rcancel#*'] } });
+      expect(reqStmts.find((x: any) => x.Action === 'dynamodb:UpdateItem').Condition).toEqual({
+        'ForAllValues:StringEquals': {
+          'dynamodb:Attributes': ['request_id', 'expires_at', 'recovery_id', 'code', 'attempt_noticing', 'attempt_notice_tries', 'attempt_noticed_at', 'attempt_notice_failed'],
+        },
+      });
     });
 
     test('sqs:SendMessage only to vettid-org-vault-control-* queues, and nothing else on SQS', () => {

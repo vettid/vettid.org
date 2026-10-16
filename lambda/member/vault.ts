@@ -1543,7 +1543,7 @@ export const MAX_CLAIM_KEYS = 10;
  * that a host cannot keep a recovery open, and blocking, for ever.
  */
 export const RECOVERY_MAX_SPAN_S = 130 * 86_400;
-/** 2.7.0: the open requests remembered on a recovery (their slots live 15 minutes). */
+/** 2.7.0: the open requests remembered on a recovery (their slots live as long as the recovery, plus an hour). */
 export const MAX_OPEN_IDS = 10;
 /** 2.7.0: opens forwarded per recovery per day, and per source network per 15 minutes (they save work; the vault's counter bounds guessing). */
 export const OPEN_LIMIT_PER_RECOVERY = 30;
@@ -1838,6 +1838,7 @@ async function noticeAttempt(m: MemberItem, v: VaultRow, r: RecoveryRow | undefi
       TableName: table.vaultRequests(),
       Key: { request_id: slot.request_id },
       UpdateExpression: `SET attempt_noticed_at = :now${extra.failed ? ', attempt_notice_failed = :t' : ''} REMOVE attempt_noticing`,
+      ConditionExpression: 'attribute_exists(request_id)', // never creates an item
       ExpressionAttributeValues: { ':now': nowS(), ...(extra.failed ? { ':t': true } : {}) },
     }));
   };
@@ -1884,15 +1885,28 @@ async function noticeAttempt(m: MemberItem, v: VaultRow, r: RecoveryRow | undefi
   return out;
 }
 
-/** Notice the counted attempts among a recovery's open slots (each a read), oldest first. */
-async function noticeOpenSlots(m: MemberItem, v: VaultRow, r: RecoveryRow): Promise<RecoveryRow> {
+/**
+ * Notice the counted attempts among a recovery's open slots (each a read),
+ * oldest first. A notice that fails is logged, not thrown. Returns the
+ * recovery as it now is and how many counted attempts are still not
+ * recorded as noticed (being noticed elsewhere, or failing).
+ */
+async function noticeOpenSlots(m: MemberItem, v: VaultRow, r: RecoveryRow): Promise<{ r: RecoveryRow; unnoticed: number }> {
   let cur: RecoveryRow = r;
+  let unnoticed = 0;
   for (const id of (r.open_ids ?? []).slice(-MAX_OPEN_IDS)) {
     if (!ULID_RE.test(id)) continue;
     const slot = (await ddb.send(new GetCommand({ TableName: table.vaultRequests(), Key: { request_id: id }, ConsistentRead: true }))).Item;
-    if (isAttemptSlot(slot) && slot!.attempt_noticed_at === undefined) cur = (await noticeAttempt(m, v, cur, slot!)) ?? cur;
+    if (!isAttemptSlot(slot) || slot!.attempt_noticed_at !== undefined) continue;
+    try {
+      cur = (await noticeAttempt(m, v, cur, slot!)) ?? cur;
+    } catch (e) {
+      console.error('recovery attempt not noticed', JSON.stringify({ request_id: id, error: (e as Error).name }));
+    }
+    const after = (await ddb.send(new GetCommand({ TableName: table.vaultRequests(), Key: { request_id: id }, ConsistentRead: true }))).Item;
+    if (after && after.attempt_noticed_at === undefined) unnoticed++;
   }
-  return cur;
+  return { r: cur, unnoticed };
 }
 
 /**
@@ -2082,10 +2096,10 @@ async function refreshRecovery(m: MemberItem, found: VaultRow): Promise<VaultRow
   if (pending.state !== v0.recovery.state) return { ...v0, recovery: pending };
   const v = pending === v0.recovery ? v0 : { ...v0, recovery: pending };
   const r = v.recovery!;
-  // 2.7.0: a registered recovery's opens (their slots live 15 minutes): each
+  // 2.7.0: a registered recovery's opens (their slots live as long as the recovery, plus an hour): each
   // counted attempt is noticed once.
   if (r.state === 'registered' && r.open_ids?.length) {
-    const cur = await noticeOpenSlots(m, v, r);
+    const { r: cur } = await noticeOpenSlots(m, v, r);
     return cur === r ? v : { ...v, recovery: cur };
   }
   if (recoveryState(r, nowS()) !== 'available' || !r.register_ids?.length) return v;
@@ -2200,6 +2214,9 @@ router.on('POST', '/api/vault/recovery', async (req) => {
   // before anything is written, so that a key that cannot sign (a KMS
   // outage) neither uses up the member's three requests nor leaves anything
   // behind. A member without an enrolled vault gets the 404 below, counted.
+  // A looser limit before the signature (each one is a KMS call): 10 an
+  // hour per member. The 3 a day are counted after it succeeds.
+  await limit(`vault-recovery-sign#${m.user_guid}`, 10, 3600);
   const recoveryId = newUlid();
   const pre = activeVault((await currentVault(m.user_guid)).vault);
   let sig;
@@ -2544,8 +2561,14 @@ router.on('POST', '/api/vault/recovery/open', async (req) => {
   // Only the vault's own release can open its header.
   if (vault.sealed_release && inst.release !== vault.sealed_release) throw instanceMoved();
   // Every earlier counted attempt is noticed (mailed, audited) before
-  // another open goes out, whether or not the phone ever polled it.
-  const cur = await noticeOpenSlots(m, vault, r);
+  // another open goes out, whether or not the phone ever polled it. Fail
+  // safe: while one cannot be recorded as noticed (its mail keeps failing,
+  // or another caller is noticing it right now), no further open is
+  // forwarded, until it is noticed or given up (ATTEMPT_MAX_TRIES).
+  const { r: cur, unnoticed } = await noticeOpenSlots(m, vault, r);
+  if (unnoticed > 0) {
+    throw vaultError(503, 'attempt_notice_pending', 'An earlier attempt has not been reported to you by email yet. Try again in a few minutes.', { retry_after: ATTEMPT_RETRY_S });
+  }
   // The slot lives as long as the recovery (plus an hour), not 15 minutes,
   // so a counted attempt can still be noticed by the sweep however late.
   await enqueue('recovery_open', m, vault, requestId, inst, { etk_kid: etkKid, envelope, manifest_sha256: manifestSha256 }, {

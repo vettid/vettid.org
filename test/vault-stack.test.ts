@@ -438,6 +438,11 @@ describe('VettidOrgVaultStack: recovery attempt counter bucket (release R, VAULT
     const st = reqs.Properties.Replicas[0].ResourcePolicy.PolicyDocument.Statement;
     const scans = st.filter((x: any) => str(x.Action).includes('dynamodb:Scan'));
     expect(scans.map((x: any) => x.Condition.ArnEquals['aws:PrincipalArn'])).toEqual(['arn:aws:iam::449757308783:role/vettid-org-member-vault-attempts']);
+    // N1: the same narrowing on the vault account's side (rendered from the same matrix).
+    const mine = st.filter((x: any) => str(x.Condition).includes('member-vault-attempts"'));
+    expect(mine.find((x: any) => x.Action.includes('dynamodb:PutItem')).Condition['ForAllValues:StringLike']).toEqual({ 'dynamodb:LeadingKeys': ['rcancel#*'] });
+    expect(mine.find((x: any) => x.Action.includes('dynamodb:UpdateItem')).Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toContain('attempt_noticed_at');
+    expect(mine.some((x: any) => str(x.Action).includes('GetItem') || str(x.Action).includes('DeleteItem'))).toBe(false);
     const vaults = resources(prod.json, 'AWS::DynamoDB::GlobalTable').find(([, t]) => t.Properties.TableName === 'vettid-org-vaults')![1];
     const w = vaults.Properties.Replicas[0].ResourcePolicy.PolicyDocument.Statement.filter((x: any) => str(x.Condition).includes('member-vault-attempts"') && str(x.Action).includes('UpdateItem'));
     expect(w.map((x: any) => x.Condition['ForAllValues:StringEquals']['dynamodb:Attributes'])).toEqual([['vault_id', 'recovery', 'updated_at']]);
