@@ -421,6 +421,9 @@ describe('cross-account access (VAULT-RELEASES §8.1)', () => {
           Condition: {
             'ForAllValues:StringEquals': { 'dynamodb:Attributes': ['vault_id', 'att_sweep_pending'] },
             StringEqualsIfExists: { 'dynamodb:Select': 'SPECIFIC_ATTRIBUTES' },
+            // A Scan naming no attributes carries no dynamodb:Attributes key
+            // (ForAllValues would pass on the empty set): it must be refused.
+            Null: { 'dynamodb:Attributes': 'false' },
           },
         },
       ]);
