@@ -237,9 +237,11 @@ export class VettidOrgVaultStack extends cdk.Stack {
     // compliance-mode lock and reads back; it relies on no bucket setting.
     // IRREVERSIBLE once deployed: Object Lock cannot be turned off, a
     // compliance-locked version cannot be shortened or deleted by anyone
-    // (the root user included) until its date, and tokens and close records
-    // are locked for 100 years, so the bucket can never be emptied and never
-    // deleted. Hence RETAIN, and a fixed name the vault release pins
+    // (the root user included) until its date, and in production tokens and
+    // close records are locked for 100 years, so the bucket can never be
+    // emptied and never deleted (staging: 1 day, set by the vault release
+    // for its channel, so a staging bucket can be emptied later). Hence
+    // RETAIN, and a fixed name the vault release pins
     // (`recovery_counter`): never rename it.
     //  - Object Lock enabled at creation, with NO default retention: a
     //    default would lock objects the enclave did not mean to lock, and the

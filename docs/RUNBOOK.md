@@ -945,7 +945,9 @@ routes until VettidOrgVaultStack is redeployed.
 - The recovery attempt counter bucket (`vettid-org-vault-recovery-<account>`,
   from vault release R): Object Lock in compliance mode. Once it exists it
   **can never be deleted, by anyone**, and its locked objects cannot be
-  deleted or shortened until their dates (100 years for most of them).
+  deleted or shortened until their dates (in production 100 years for
+  most of them; in staging at most 1 day after the write, or the end of
+  a longer wait).
   The vault release pins its exact name and account. See "Recovery from
   release R" below.
 - The recovery request key (`alias/vettid-org-recovery-request`, staging
@@ -1418,16 +1420,24 @@ Creating the counter bucket cannot be undone, and this is meant:
 - Object Lock is enabled when the bucket is created and can never be
   turned off; versioning can never be suspended.
 - The enclave writes every record with a **compliance-mode** lock: tokens,
-  success and close records for **100 years**, wait records until the
-  wait ends, presence records for 96 hours. AWS documents that no user can
+  success and close records for **100 years** in production and **1 day**
+  in staging, wait records until the wait ends, presence records for 96
+  hours. The period is part of the measured vault release for each
+  channel; nothing the host or an operator sends can change it. AWS documents that no user can
   shorten or remove a compliance lock, **including the account's root
   user**, and that a version under such a lock cannot be deleted.
-- So once the first vault of release R has written a record, the bucket
-  can never be emptied and therefore **never be deleted**, the objects in
+- So in production, once the first vault of release R has written a
+  record, the bucket can never be emptied and therefore **never be
+  deleted**, the objects in
   it can never be deleted before their dates, and closing the AWS account
   is the only way to remove them (and it removes every vault with them,
   VAULT-MESSAGING §11.14.4). The name is pinned in the release
   (`recovery_counter`), so it can never be renamed either.
+- In staging (owner's decision, 2026-10-16) the records are locked for
+  1 day, so once no vault writes any more, every lock ends within a day
+  (or at the end of the longest wait, at most 30 days) and the staging
+  bucket can then be emptied and deleted. Staging therefore does not test
+  the 100-year period itself; everything else is the same.
 - Storage costs are tiny (32-byte objects), but they run for as long as the
   account exists.
 - Until the first locked write the bucket is still an ordinary, empty
