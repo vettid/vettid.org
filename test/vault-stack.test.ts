@@ -400,8 +400,54 @@ describe('cross-account access (VAULT-RELEASES §8.1)', () => {
     const hostVaultWrites = statements(prod.json).filter((s: any) => s.Action === 'dynamodb:UpdateItem' && (s.Condition?.['ForAllValues:StringEquals']?.['dynamodb:Attributes'] ?? []).includes('lease'));
     expect(hostVaultWrites).toHaveLength(1);
     expect(hostVaultWrites[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(
-      ['vault_id', 'lease', 'updated_at', 'sealed_release', 'vault_version', 'state_version', 'state', 'alarm', 'alarm_pending', 'app_key', 'credential_backup', 'name_change', 'name_change_pending'],
+      ['vault_id', 'lease', 'updated_at', 'sealed_release', 'vault_version', 'state_version', 'state', 'alarm', 'alarm_pending', 'app_key', 'credential_backup', 'name_change', 'name_change_pending', 'att_sweep_pending'],
     );
+  });
+
+  describe('P15, the attachment sweep (VAULT-HOST-PROTOCOL 0.1.11, release A)', () => {
+    const vaultsArn = { 'Fn::GetAtt': [expect.stringMatching(/^Tablevaults/), 'Arn'] };
+    const hostPolicy = () => {
+      const role = resources(prod.json, 'AWS::IAM::Role').find(([, r]) => r.Properties.RoleName === VAULT_ROLE_NAMES.host)![0];
+      return resources(prod.json, 'AWS::IAM::Policy').filter(([, p]) => str(p.Properties.Roles).includes(role)).flatMap(([, p]) => p.Properties.PolicyDocument.Statement);
+    };
+
+    test('the host may Scan the vaults table only for vault_id and att_sweep_pending, and no other table', () => {
+      const scans = hostPolicy().filter((s: any) => [].concat(s.Action).some((a: string) => a === 'dynamodb:Scan' || a === 'dynamodb:*'));
+      expect(scans).toEqual([
+        {
+          Effect: 'Allow',
+          Action: 'dynamodb:Scan',
+          Resource: vaultsArn,
+          Condition: {
+            'ForAllValues:StringEquals': { 'dynamodb:Attributes': ['vault_id', 'att_sweep_pending'] },
+            StringEqualsIfExists: { 'dynamodb:Select': 'SPECIFIC_ATTRIBUTES' },
+            // A Scan naming no attributes carries no dynamodb:Attributes key
+            // (ForAllValues would pass on the empty set): it must be refused.
+            Null: { 'dynamodb:Attributes': 'false' },
+          },
+        },
+      ]);
+      expect(hostPolicy().filter((s: any) => str(s.Action).includes('dynamodb:Query'))).toEqual([]);
+    });
+
+    test('the host lists the data bucket (no prefix condition: missing objects are NoSuchKey) and deletes under vaults/*, which holds att/', () => {
+      const st = hostPolicy();
+      const lists = st.filter((s: any) => str(s.Action).includes('s3:ListBucket'));
+      expect(lists).toHaveLength(1);
+      expect(lists[0].Condition).toBeUndefined();
+      expect(str(lists[0].Resource)).toContain('DataBucket');
+      expect(str(lists[0].Resource)).not.toContain('/*');
+      const deletes = st.filter((s: any) => str(s.Action).includes('s3:DeleteObject'));
+      expect(deletes).toHaveLength(1);
+      expect(str(deletes[0].Resource)).toContain('"/vaults/*"');
+    });
+
+    test('a same-account principal: the table resource policy carries no host statement and denies nothing', () => {
+      const vaults = resources(prod.json, 'AWS::DynamoDB::GlobalTable').find(([, t]) => t.Properties.TableName === 'vettid-org-vaults')![1];
+      const rp = vaults.Properties.Replicas[0].ResourcePolicy.PolicyDocument.Statement;
+      expect(rp.filter((s: any) => s.Effect !== 'Allow')).toEqual([]);
+      expect(str(rp)).not.toContain(VAULT_ROLE_NAMES.host);
+    });
   });
 
   test('2.1.0: only the host writes credential_backup; the API (and the cleanup job) write the start-over `deletion`', () => {

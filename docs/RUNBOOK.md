@@ -1287,6 +1287,89 @@ answers after a restore; its app says "This phone is not your vault's
 phone any more. Use your old phone, or recover your vault."  Never do this for a vault whose member did not ask:
 it undoes the member's change.
 
+### Vault attachment sweep (P15; from the vault's attachments release, "release A")
+
+Photos sent in messages are stored as objects of their own,
+`vaults/<vault_id>/att/<att_id>` and `…/<att_id>.t` (thumbnail),
+encrypted under keys that only the vault's state holds. A vault that
+deletes itself deletes them; a vault erased without its key (for example
+an account cancelled while its release cannot start) cannot find them. So
+after the parent marks a vault's row `deleted` it deletes every object
+under `vaults/<vault_id>/att/` itself, and retries until the prefix is
+empty (VAULT-HOST-PROTOCOL §12 P15, 0.1.11):
+
+- The update that marks the row `deleted` also sets
+  `att_sweep_pending = true` on it; the parent removes the attribute when
+  a listing of the prefix comes back empty.
+- A parent's start scans the vaults table for rows with
+  `att_sweep_pending` and resumes those sweeps (a restart, a replaced
+  instance or another release's host picks them up).
+- The `vault-alarms` job keeps the row while the attribute is set (it
+  sends the deletion email and removes the pointer row as before), and
+  removes it when the parent's removal of the attribute comes through the
+  stream (MEMBER-API 2.7.1).
+- Permissions (in `VettidOrgVaultStack`): the host role lists the whole
+  bucket and deletes under `vaults/*` (both unchanged), may write
+  `att_sweep_pending`, and may Scan the vaults table for `vault_id` and
+  `att_sweep_pending` only. Hosts of a release before release A neither
+  set nor sweep anything.
+
+**Check** (staging shown; production: `--profile vault-prod`, the table
+`vettid-org-vaults` and the bucket `vettid-org-vault-data-369484479783`).
+A sweep normally ends within seconds of the deletion, so a pending row
+older than an hour, or any pending row with no host running, needs a
+look.
+
+```bash
+P="--profile vault-staging"; T=vettid-org-staging-vaults; B=vettid-org-staging-vault-data-347272280361
+G=/vettid-org/staging/vault-host
+# 1. Sweeps not finished: rows that still record one (expect none, or only very recent deletions).
+aws dynamodb scan $P --table-name $T --filter-expression 'attribute_exists(att_sweep_pending)' \
+  --projection-expression 'vault_id, #s, updated_at' --expression-attribute-names '{"#s":"state"}' --output table
+# 2. For one of them: what is left under its prefix (listing is allowed to operators;
+#    reading the objects is not, by the bucket policy).
+V=<vault_id>; aws s3api list-objects-v2 $P --bucket $B --prefix "vaults/$V/att/" --query 'KeyCount'
+# 3. What the parents said about it (the last day).
+aws logs filter-log-events $P --log-group-name $G --filter-pattern "\"attachment sweep\" \"$V\"" \
+  --start-time $(( ($(date +%s) - 86400) * 1000 )) --query 'events[].message' --output text
+# 4. A deleted vault's row whose sweep is done but which the job did not remove (expect none):
+aws dynamodb scan $P --table-name $T --filter-expression '#s = :d AND attribute_not_exists(att_sweep_pending)' \
+  --expression-attribute-names '{"#s":"state"}' --expression-attribute-values '{":d":{"S":"deleted"}}' \
+  --projection-expression 'vault_id, updated_at, alarm' --output table
+```
+
+Log lines (the parent, stream `<instance id>/vault-parent`):
+`attachment sweep` (a pass, with how many it deleted), `attachment sweep
+done`, `attachment sweep incomplete` and `attachment sweep: row not read`
+or `record not removed` (retried, 5 s doubling to 5 minutes), `attachment
+sweep stopped: the vault is no longer deleted` (the vault id was enrolled
+again; nothing more to do), `pending attachment sweeps not read` (the
+start's scan failed; retried, most likely a permission: check the host
+role's `dynamodb:Scan` statement).
+
+**What to do.**
+
+- *Pending, a host running, `incomplete` repeating:* the error in the
+  line says why (an S3 `AccessDenied` is the host role's grants or the
+  bucket policy; compare with `lib/stacks/vault-stack.ts` and the drift
+  check). The parent keeps retrying; once fixed, it finishes by itself.
+- *Pending, no host running* (the scaler stopped every group): the sweep
+  resumes at the next host's start. Nothing is lost meanwhile: the
+  objects are encrypted under keys the deletion destroyed. Starting a
+  host of the active release (a start request, "How the scaler works")
+  makes it finish sooner.
+- *Pending, no objects left (step 2 says 0) and no parent finishing it:*
+  remove the record by hand; the job then removes the row:
+  `aws dynamodb update-item $P --table-name $T --key '{"vault_id":{"S":"<vault_id>"}}' --update-expression 'REMOVE att_sweep_pending' --condition-expression '#s = :d' --expression-attribute-names '{"#s":"state"}' --expression-attribute-values '{":d":{"S":"deleted"}}'`.
+- *Step 4 lists a row:* if its `alarm` has `handled_at`, the stream's
+  retries ran out; delete it by hand
+  (`aws dynamodb delete-item $P --table-name $T --key '{"vault_id":{"S":"<vault_id>"}}' --condition-expression '#s = :d AND attribute_not_exists(att_sweep_pending)' …`).
+  Without `handled_at` the deletion email has not been handled yet
+  (`alarm_pending` set) or was never recorded: see "Vault alarms" in
+  MEMBER-API and the `vault-alarms` function's log first.
+- Never delete objects under another vault's prefix, and never delete a
+  row that is not `deleted`.
+
 ### Manifest sync (`vettid-org-vault-manifest-sync`, VAULT-RELEASES §7)
 
 Every 5 minutes: fetches the channel's served manifest, verifies it under

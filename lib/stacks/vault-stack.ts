@@ -296,15 +296,39 @@ export class VettidOrgVaultStack extends cdk.Stack {
     // only here, from the enclave's reports. `name_change` and
     // `name_change_pending` (0.18.0 §11.5, MEMBER-API 2.2.0): the vault's
     // name request from the event `account_name`, which only the host writes.
+    // `att_sweep_pending` (VAULT-HOST-PROTOCOL P15, release A): set in the
+    // update that marks a vault `deleted`, removed once its
+    // `vaults/<vault_id>/att/` prefix is empty or the vault id is enrolled again.
     h(['dynamodb:UpdateItem'], [t.vaults.tableArn], onlyAttributes([
       'vault_id', 'lease', 'updated_at', 'sealed_release', 'vault_version', 'state_version', 'state', 'alarm', 'alarm_pending', 'app_key', 'credential_backup',
-      'name_change', 'name_change_pending',
+      'name_change', 'name_change_pending', 'att_sweep_pending',
     ]));
+    // P15's resumption at the parent's start: a Scan filtered on
+    // attribute_exists(att_sweep_pending), projecting vault_id (vettid-vault
+    // parent/aws.go PendingSweeps, as merged in #94). Scan cannot be narrowed
+    // by key; the conditions confine what it may return to those two
+    // attributes (the AWS pattern for attribute-level reads: a request that
+    // names other attributes, or asks for all of them, is refused). A request
+    // that names no attributes at all carries no dynamodb:Attributes key, and
+    // ForAllValues passes on an empty set, so the Null condition requires the
+    // key to be present: a Scan without a projection is refused. A sparse
+    // index with Query would read fewer items, but needs a vault release
+    // that queries it; the table holds a few hundred rows.
+    h(['dynamodb:Scan'], [t.vaults.tableArn], {
+      'ForAllValues:StringEquals': { 'dynamodb:Attributes': ['vault_id', 'att_sweep_pending'] },
+      StringEqualsIfExists: { 'dynamodb:Select': 'SPECIFIC_ATTRIBUTES' },
+      Null: { 'dynamodb:Attributes': 'false' },
+    });
     h(['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:DeleteItem'], [t['vault-instances'].tableArn]);
     h(['dynamodb:UpdateItem'], [t['vault-requests'].tableArn], onlyAttributes(['request_id', 'status', 'envelope', 'code']));
     h(['s3:GetObject', 's3:PutObject', 's3:DeleteObject'], ['vaults/*', 'users/*', 'smoke/*'].map((p) => this.dataBucket.arnForObjects(p)));
     h(['s3:GetObject'], [this.dataBucket.arnForObjects('manifests/*')]);
-    // NoSuchKey (not AccessDenied) for a missing object needs ListBucket.
+    // NoSuchKey (not AccessDenied) for a missing object needs ListBucket,
+    // without a prefix condition (S3's check for a missing key carries no
+    // `s3:prefix`). The same grant covers P15's listing of
+    // `vaults/<vault_id>/att/` (VAULT-HOST-PROTOCOL 0.1.11); DeleteObject on
+    // `vaults/*` above covers its deletes. Narrowing it would turn missing
+    // objects into AccessDenied for the parent's store.
     h(['s3:ListBucket'], [this.dataBucket.bucketArn]);
     h(['ssm:GetParameter', 'ssm:GetParameters', 'ssm:GetParametersByPath'], [`arn:aws:ssm:${config.region}:${vault.account}:parameter/vettid-org/${config.stage}/vault/*`]);
     h(['logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams'], [`arn:aws:logs:${config.region}:${vault.account}:log-group:/vettid-org/${config.stage}/vault-host:*`]);

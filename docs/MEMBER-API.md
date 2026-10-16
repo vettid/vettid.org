@@ -1,8 +1,19 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.7.0
+version: 2.7.1
 changelog:
+  - 2.7.1 (2026-10-15; with VAULT-HOST-PROTOCOL 0.1.11, P15, for the
+    vault's attachments release "release A"; built in this repository,
+    not deployed). No route, request or response changes. "Vault
+    deletion", **Rows**: the `vault-alarms` job keeps a deleted vault's
+    row while the parent's attachment sweep is pending on it
+    (`att_sweep_pending`), so that a restarted parent can resume the
+    sweep; it stamps the notice handled (`alarm.handled_at`) and removes
+    the row when a later stream record shows it `deleted`, handled and
+    no longer pending (a second event-source filter). The pointer row
+    goes with the notice, as before. No IAM change: the stamp writes
+    only `alarm`, and the job's DeleteItem was unconditioned
   - 2.7.0 (2026-10-15; **wording for the owner's approval**, with
     VAULT-MESSAGING 0.33.0 §11.14; for the vault's "release R", not
     built). "Vault recovery", **Recovery from release R**: the API signs
@@ -2203,7 +2214,8 @@ whatever the lease: `alarm = {kind: "credential_clone", alarm_id, at}`
   failed send is logged).
 - **IAM.** Only the enclave host writes `alarm` and sets `alarm_pending`;
   the alarm Lambda may only clear `alarm_pending` and set
-  `alarm.emailed_at` (conditional update), and read `members`. The member
+  `alarm.emailed_at` or (2.7.1) `alarm.handled_at` (conditional update),
+  and read `members`. The member
   API never writes either.
 
 ### Vault deletion (VAULT-MESSAGING 0.9.0 §12.5)
@@ -2225,9 +2237,27 @@ Its own audit log goes with it, so the member is told by email.
   No rate limit applies (one notice per deletion). Audit:
   `vault.alarm_email` with `kind: vault_deleted`.
 - **Rows.** After the email (or when no member is found) the Lambda
-  deletes the vault row (condition: `state = deleted`) and the pointer
-  row `user#<guid>` if it still names this vault, so the member's next
-  enrollment is a fresh one with a new `vault_id`.
+  deletes the vault row (condition: `state = deleted` and, 2.7.1, no
+  `att_sweep_pending`) and the pointer row `user#<guid>` if it still
+  names this vault, so the member's next enrollment is a fresh one with
+  a new `vault_id`.
+- **Rows kept for the attachment sweep** (2.7.1; VAULT-HOST-PROTOCOL
+  P15, from the vault's release A). The parent's update that marks the
+  row `deleted` also sets `att_sweep_pending = true`, and the parent
+  removes it once it has deleted every object under
+  `vaults/<vault_id>/att/`; a parent that restarts finds the sweeps
+  left pending by that attribute. While it is set, the row's delete
+  fails its condition: the Lambda then stamps `alarm.handled_at`
+  (epoch seconds; condition: the same `alarm_id`) and keeps the row.
+  The vaults stream's second filter for the Lambda passes the records
+  whose new image has `state = deleted`, no `att_sweep_pending` and an
+  `alarm` of kind `vault_deleted` with `handled_at`; for those the
+  Lambda deletes the row under the same condition, and mails, claims
+  and audits nothing. The parent's removal of `att_sweep_pending` is
+  such a record (or the stamp itself, when the sweep finished first).
+  The stamp is what keeps a row whose notice may still be retried (a
+  failed send) from being removed. A row still pending is listed by
+  RUNBOOK "Vault attachment sweep".
 - **Account cancellation.** After the 7-day grace period the cleanup job
   enqueues the operation `delete` (§11.5 SQS message, no envelope) for
   each of the member's vaults not yet `deleted`, to the leaseholder or
