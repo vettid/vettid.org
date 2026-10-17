@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.36.0
+version: 0.37.0
 date: 2026-10-17
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -15,16 +15,46 @@ related:
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.7.1)
   - ANDROID-PLAN.md (0.1.43)
-  - IOS-PLAN.md (0.1.1)
+  - IOS-PLAN.md (0.1.1; §9.1 VA1–VA3)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
-  - VAULT-RELEASES.md (0.1.28; 0.1.6 approved 2026-10-04)
+  - VAULT-RELEASES.md (0.1.31; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
   - VAULT-HOST-PROTOCOL.md (0.1.12; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.37.0: approved by the owner 2026-10-17 (as built in vettid-vault #104, #105, #106). The vault tasks VA2
+    and VA3 of IOS-PLAN §9.1, and the vault follow-ups of ANDROID-PLAN
+    0.1.42 §4 "Questions and vault follow-ups" (owner, 2026-10-17:
+    ANDROID-PLAN questions 16–27 as recommended). (1) **The iOS App ID
+    per channel** (§11.7, §11.10.8): the release constant `ios_app_id`,
+    `3X25CJ86MV.com.vettid.app` in production and
+    `3X25CJ86MV.com.vettid.app.staging` in staging (team ID confirmed
+    by the owner 2026-10-17), one value, the other channel's malformed,
+    as `android_package`. It replaces the App ID constant in code; a
+    build without complete channel constants accepts no App ID. It is
+    checked at an attestation and at every assertion. The development
+    enclave's device policy gains iOS members: the pinned Apple root,
+    further App IDs and the development environment. (2) **`testnet4`**
+    is a network name of its own (§10.18, §10.14); `testnet` keeps
+    meaning testnet3 for new wallets. (3) **`wallet.update` moves the
+    next indices forward** (`accounts`, app only), so that after an import the
+    vault never issues an address the app found used (§10.18). (4)
+    §10.18 lists every `invalid_psbt` reason, says that outputs are
+    shown re-encoded for the wallet's network and that
+    `wallet.address.used` ignores addresses the vault did not issue.
+    (5) **`location.share.stop` is allowed while due or held** (§3.6.3),
+    as `vault.lock` is. (6) **`sync.event{location.request.closed}`**
+    when a pending location request is answered or expires (§10.16);
+    §10.16 says that the end of a share at its expiry is not announced.
+    (7) Presence (§10.17): removing a connection that is in `except` is
+    a new policy version with `presence.changed`; what `last_active`
+    counts; the 5-minute tolerance for a `last_active` ahead of the
+    asking vault's clock. As built in vettid-vault #104 (1), #105
+    (2, 3) and #106 (5–7); VAULT-RELEASES
+    0.1.31 adds the constant to §5.2
   - 0.36.0: normative; approved by the owner 2026-10-17 (owner decisions of
     2026-10-17); follows 0.35.0; no enclave change and no vault release
     (the vault accepts any 32-byte `unlock_secret`). **Android's
@@ -2446,9 +2476,9 @@ every `drop.*` entry, §10.9). Allowed while held:
 
 | Sender | Types |
 |---|---|
-| The holder | `vault.owner-check`; `vault.status` (reports the hold) and `vault.lock`; `credential.utk.get` (UTKs for the check); `credential.get` and `credential.ack` (the latest blob after a lost check response, §3.5.3, and its confirmation); `credential.version`; `credential.lock`; during a clone alarm, `credential.alarm.confirm` and, in `rotation_required`, `credential.rotate` (the check is refused until the alarm closes, so the alarm's own path stays open); `push.register`, `push.confirm` (0.30.0) and `push.unregister` (0.24.0: the wakes for `vault.held` and the alarm depend on a current token, §14.2); for a transfer opened before the hold, `device.transfer.approve` (itself a check, §3.6.1) and `device.transfer.reject`; `call.end`, and `call.ice` of a call answered before the deadline |
+| The holder | `vault.owner-check`; `vault.status` (reports the hold) and `vault.lock`; `credential.utk.get` (UTKs for the check); `credential.get` and `credential.ack` (the latest blob after a lost check response, §3.5.3, and its confirmation); `credential.version`; `credential.lock`; during a clone alarm, `credential.alarm.confirm` and, in `rotation_required`, `credential.rotate` (the check is refused until the alarm closes, so the alarm's own path stays open); `push.register`, `push.confirm` (0.30.0) and `push.unregister` (0.24.0: the wakes for `vault.held` and the alarm depend on a current token, §14.2); for a transfer opened before the hold, `device.transfer.approve` (itself a check, §3.6.1) and `device.transfer.reject`; `call.end`, and `call.ice` of a call answered before the deadline; (0.37.0) `location.share.stop` (§10.16): ending a disclosure is always possible, as locking is |
 | A recovering app (§11.11.5) | Its own set, unchanged by the hold: `credential.utk.get`, `credential.recover`, `vault.status` (reduced) and the token and address types (0.16.0 removed `credential.reset` and `vault.delete` from it). A recovery completes while held and starts the clock (§3.6.1). (0.33.0, release R) No such app exists: a recovery completes in the open, and the phone is the holder from its first message (§11.14.6) |
-| A desktop | `vault.status`, `vault.lock`, `device.session.end{}` (its own session), `call.end` and `call.ice` of a call it answered before the deadline |
+| A desktop | `vault.status`, `vault.lock`, `device.session.end{}` (its own session), `call.end` and `call.ice` of a call it answered before the deadline, (0.37.0) `location.share.stop` |
 | An agent | `vault.status`, `device.session.end{}` (its own session) |
 | Any device | The handshake (`hs.init`, `hs.resp`, `hs.fin`: rekeys and reconnects), `relay.token.issued`, `relay.token.refresh`, `relay.address.update` |
 
@@ -9123,6 +9153,10 @@ and `version`, a parameter and a result schema, and a sensitivity:
 - Catalog version 3 (0.8.0) makes the wallet actions available and adds
   `address` to `wallet.request-payment` (version 1 was never available,
   so its number is kept).
+- (0.37.0) `wallet.request-address`'s `network` may be `testnet4`
+  (§10.18, "Networks"); its `result_schema` lists it. The catalog
+  version stays 3: the result is shown to the requesting member, and an
+  app that does not know a network name shows it as it is.
 - `param_schema` and `result_schema` (JSON Schema 2020-12 documents in
   `action.list`) describe the shapes above for apps. The vault checks
   parameters with its own strict parser per action, never with a general
@@ -9384,7 +9418,14 @@ A app            A vault                          B vault                 B apps
   ends it and tells the connection (`location.stopped`); of an incoming
   share it deletes it and asks the sharer to stop (`location.stopped`),
   which ends it there (`location.event{stopped, direction: out}`). At
-  `expires_at` both vaults end the share without a message. The receiving
+  `expires_at` both vaults end the share without a message. (0.37.0, as
+  built) The vault ends expired shares and requests when it next handles
+  a message, and only then sends `sync.event{location.share.changed,
+  state: "ended"}`; nothing is sent at the moment of expiry, to the
+  source device or any other. Apps keep their own timer from
+  `expires_at` (the source device stops sending positions then) and
+  treat the event as confirmation. Stopping is allowed while the vault
+  is due or held (§3.6.3), as locking is. The receiving
   vault deletes an incoming share **with its positions** when it stops or
   expires; nothing of it is kept.
 - **Requests.** `location.request` sends `location.requested`; the
@@ -9396,6 +9437,15 @@ A app            A vault                          B vault                 B apps
   cap and the ask rate apply; it has no cooldown. A suppressed request
   does not use the one-per-10-minutes allowance (0.23.1): only a request
   that reaches the member does.
+- **A request closes** (0.37.0) when a share of the same connection
+  names it (`request_id`) or at its expiry (24 h, found when the vault
+  next handles a message). Either way the vault sends
+  `sync.event{kind: "location.request.closed", request_id, reason:
+  "answered" | "expired"}` to every owner device, so that a request
+  answered on one device stops being shown as pending on the others.
+  The request's feed item is not changed by the vault (a batched item
+  can stand for several asks, §10.4.1); an app that shows it marks it
+  read with `feed.update` when the request it stands for closes.
 - Removing or blocking a connection drops every share and request with
   it (§7.4).
 - **Audit and feed.** `location.share.started`, `location.share.stopped`
@@ -9403,7 +9453,8 @@ A app            A vault                          B vault                 B apps
   `location.share.ended`, `location.requested` (both sides) (`ref` =
   `share_id` or `request_id`, never a position); feed items
   `location.shared` and `location.request`; `sync.event`
-  `location.share.changed{share_id, state: "active" | "ended"}`.
+  `location.share.changed{share_id, state: "active" | "ended"}` and
+  (0.37.0) `location.request.closed{request_id, reason}`.
 - **Retention is the peer's.** The receiving vault deletes positions as
   above, but the receiving member's devices have seen them, and a vault
   is only trusted for what its own member decides (§2.1): precision,
@@ -9497,13 +9548,24 @@ Presence is on demand (§9.2): no heartbeats.
   refusal is indistinguishable from a locked or offline vault.
   `last_active` is the newest activity of the member's apps and desktops
   (§10.3), rounded down to 5 minutes; it is absent when none is known.
+  (0.37.0, as built) "Activity" is the newest non-ephemeral message the
+  vault received from any of them, whether the member caused it or not:
+  an app's background catch-up (`sync.since`, `feed.list`), a lock or a
+  push registration counts as much as a message the member sent. So
+  `last_active` says when one of the member's devices last talked to the
+  vault, not when the member last used one, and apps SHOULD label it
+  that way ("Last seen").
 - The asking vault accepts a pong only for a pending ping it sent to that
   connection, before its `exp`, with `state` `available`, `busy` or
-  `away` and `last_active` not in the future, and sends the asking device
+  `away` and `last_active` not in the future (0.37.0, as built: at most
+  5 minutes ahead of the asking vault's clock, for skew), and sends the asking device
   `presence.result` from memory (`exp` = now + 60 s). Anything else is
   dropped without an audit entry. Pings are not audited.
 - Removing or blocking a connection removes it from `except` and drops
-  its pings (§7.4). Agents never ask or answer.
+  its pings (§7.4). (0.37.0) Removing it from `except` is a change of the
+  policy: a new `version` and `presence.changed`, so that a
+  `presence.set` with the version before it is a `conflict` (§10.1).
+  Agents never ask or answer.
 
 ### 10.18 Wallet
 
@@ -9537,7 +9599,7 @@ app (chain source)                                   vault
 | `wallet.create` (app) | `{name, network?, address_type?, tags?, credential, utk_id, sealed{password, item?}}`; `item` = `{mnemonic, passphrase?}` to import a phrase | `<wallet>` and `{credential, credential_version, utks}`; `limit`, `bad_request` |
 | `wallet.list` (app, desktop) | `{}` | `{wallets: [<wallet>]}` |
 | `wallet.get` (app, desktop) | `{wallet_id}` | `<wallet>` |
-| `wallet.update` (app, desktop) | `{wallet_id, version, address_type}` | `{version}`; `conflict` |
+| `wallet.update` (app, desktop) | `{wallet_id, version, address_type?, accounts?: [{type, next_receive?, next_change?}]}` (at least one of the two; 0.37.0: `accounts`, app only) | `{version}`; `conflict`, `bad_request`, `forbidden` (`accounts` from a desktop) |
 | `wallet.address.new` (app, desktop) | `{wallet_id, type?, change?, label?}` | `<address>`; `limit` |
 | `wallet.address.list` (app, desktop) | `{wallet_id, type?, change?, after?, limit?}` | `{addresses: [<address>], next?}` |
 | `wallet.address.used` (app, desktop) | `{wallet_id, addresses: [<address string>]}` (1–256) | `{marked, version}` |
@@ -9564,10 +9626,16 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
            "total_in_sats", "sending_sats", "change_sats", "fee_sats", "vsize" }
 ```
 
-- **Networks.** `network` is `mainnet` (the default), `testnet` (testnet3
-  and testnet4), `signet` or `regtest`; coin type 0 on mainnet and 1
-  otherwise. A release accepts `mainnet`, `testnet` and `signet`;
-  `regtest` only development builds. `xpub` is an account key in BIP32
+- **Networks.** `network` is `mainnet` (the default), `testnet`
+  (testnet3), `testnet4` (0.37.0), `signet` or `regtest`; coin type 0 on
+  mainnet and 1 otherwise. A release accepts `mainnet`, `testnet`,
+  `testnet4` and `signet`; `regtest` only development builds. testnet3
+  and testnet4 share their encodings (addresses, `tpub`, coin type 1),
+  so the vault cannot tell them apart: the name is what tells the app
+  which chain a wallet is on. Before 0.37.0 `testnet` covered both, so
+  a `testnet` wallet created before it may be on either; the app asks
+  the member (ANDROID-PLAN §4 "Wallet", question 16). A wallet's
+  `network` never changes. `xpub` is an account key in BIP32
   serialisation (`xpub`/`tpub` versions, for both accounts);
   `fingerprint` is the master key's.
 - **Accounts.** Every wallet holds the BIP86 account m/86'/c'/0' (`type`
@@ -9582,6 +9650,20 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
   `wallet.create{address_type}` or afterwards with `wallet.update`
   (versioned, §10.1). Coins of either account can be spent, together, in
   any PSBT, and change can go to either account.
+- **Moving the next indices** (0.37.0). The vault issues each chain's
+  addresses in order from its `next_receive` / `next_change`. After an
+  import the app moves them past the highest index its chain source
+  shows used, with `wallet.update{accounts: [{type, next_receive?,
+  next_change?}]}` (1–2 entries, one per `type`, each naming at least
+  one index, 0 to 1,048,576), so that the vault never issues a used
+  address again. An index only moves forward: a value below the
+  account's current one is `bad_request`, the same value changes
+  nothing. The update is versioned and applied all or nothing, with or
+  without `address_type`, and sends `wallet.changed`. Only the app moves
+  indices (`forbidden` from a desktop): a moved index cannot be moved
+  back, and one moved to the limit ends that account's addresses. The skipped
+  addresses are not issued: they are not in `wallet.address.list` and
+  do not count against the 2,000.
 - **Create.** One credential operation (§3.5.3). Without `item` the vault
   generates 256 bits of entropy (a 24-word phrase); with it, it imports
   `mnemonic` (12, 15, 18, 21 or 24 BIP39 English words, any case and
@@ -9605,6 +9687,11 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
   most 2,000 addresses per wallet, both accounts together.
   `wallet.address.used` records addresses the app saw funded, so that a
   connection's address is replaced (`wallet.request-address`, §10.14).
+  It marks only addresses the vault issued (0.37.0, as built): another
+  address of the wallet's network, such as one the app derived itself
+  or one skipped by moving the next index, is ignored without an error,
+  and `marked` counts only those marked now. A string that is not an
+  address in the wallet's network's encoding is `bad_request`.
   `wallet.address.list` lists one account and chain (`type` defaults to
   `address_type`); `next` pages by `index`; `limit` 1–500 (default 100).
 - **The signing policy.** The vault signs a PSBT (`psbt`: standard base64
@@ -9629,19 +9716,54 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     these verified outputs; no duplicate inputs, no finalised or
     partially signed inputs; sighash SIGHASH_ALL, or for P2TR
     SIGHASH_DEFAULT (the absent sighash) or SIGHASH_ALL;
-  - every output is a standard address (P2PKH, P2SH, P2WPKH, P2WSH or
-    P2TR) of the wallet's network, of at least 330 sats; an output with
-    one of the accounts' derivations (BIP32 or taproot, as for inputs),
-    re-derived and checked, is **change**;
+  - every output is a standard script (P2PKH, P2SH, P2WPKH, P2WSH or
+    P2TR), of at least 330 sats, which the summary shows as an address
+    **encoded for the wallet's network** (0.37.0, as built). An output
+    is a script, not an address, so the vault cannot tell for which
+    network it was written: a mainnet address pasted into a test
+    wallet's PSBT is shown as the test address of the same script. The
+    app checks the payee's network itself, before it builds the PSBT,
+    and compares the summary's addresses with what the member entered.
+    An output with one of the accounts' derivations (BIP32 or taproot,
+    as for inputs), re-derived and checked, is **change**;
   - the fee (inputs minus outputs) is positive and at most 1,000 sat/vB of
     the signed transaction's virtual size (its stripped size, plus per
     input a P2WPKH witness of 108 weight units or a P2TR one of 66, 67
     with SIGHASH_ALL).
 
   Otherwise the answer is `invalid_psbt` with a short reason as
-  `message` (`malformed`, `foreign_input`, `previous_tx`,
-  `derivation_key`, `internal_key`, `input_script`, `fee_rate`,
-  `other_payee`, …). `wallet.psbt.inspect` applies the same checks
+  `message`. (0.37.0, as built) The reasons, all of them, so that apps
+  can give each a text:
+
+  | Reason | Meaning |
+  |---|---|
+  | `size` | empty, or more than 65,536 bytes |
+  | `malformed` | not a BIP174 PSBT that parses |
+  | `shape` | 0 or more than 64 inputs or outputs, or the PSBT's input and output maps do not match the transaction's |
+  | `version` | transaction version not 1 or 2 |
+  | `duplicate_input` | the same outpoint twice |
+  | `previous_tx` | an input without the full previous transaction, or one whose txid or output index does not match the outpoint |
+  | `witness_utxo` | `witness_utxo` differs from the previous transaction's output |
+  | `sighash` | a sighash other than SIGHASH_ALL (or, for P2TR, absent) |
+  | `input_script` | an input that is finalised, partially signed, or carries a redeem or witness script or taproot script-path data |
+  | `amount` | a previous output's amount is zero, negative or above 21 million BTC |
+  | `foreign_input` | an input with no derivation of the wallet's fingerprint |
+  | `no_account` | the wallet has no account to check against (not expected) |
+  | `derivation_path` | a derivation of the wallet's fingerprint that is not m/84'/c'/0'/{0,1}/i or m/86'/c'/0'/{0,1}/i below the index limit, or a taproot derivation with leaf hashes |
+  | `derivation_key` | the derivation's key is not the key the vault derives for that path |
+  | `derivation_script` | the derived key's script is not the input's (or the change output's) script |
+  | `internal_key` | `tap_internal_key` differs from the derived key |
+  | `output_amount` | an output below 330 sats or above 21 million BTC |
+  | `output_script` | an output that is not a standard script |
+  | `fee` | outputs not below inputs (no positive fee), or inputs above 21 million BTC |
+  | `fee_rate` | the fee is above 1,000 sat/vB |
+  | `wrong_seed` | at `wallet.sign`: the decrypted phrase does not give the stored account keys |
+  | `other_payee` | `wallet.request-payment` (§10.14): an output to an address other than the requested one or the wallet's change |
+  | `amount_mismatch` | `wallet.request-payment`: the outputs to the requested address do not add up to `amount_sats` |
+  | `payee_network` | `wallet.request-payment`: the requested address is not an address of the wallet's network |
+
+  An app shows an unknown reason as a generic refusal: a later release
+  may add one. `wallet.psbt.inspect` applies the same checks
   without the credential and returns the summary that `wallet.sign`
   would sign for; apps MUST show it (the payees, amounts, change and fee)
   to the member before asking for the password.
@@ -9663,7 +9785,7 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
   `next_change` moves past the change the PSBT used.
 - Agents never use wallets: no wallet type is delegable (§10.11).
   Desktops read, issue addresses, choose the receiving account and
-  inspect, but never create or sign.
+  inspect, but never create, sign or (0.37.0) move the next indices.
 - **Change notices.** `sync.event` `wallet.changed{wallet_id, version}`
   (created, receiving account changed, addresses issued or used),
   `wallet.signed{wallet_id, txid}`, `wallet.deleted{wallet_id}`.
@@ -10633,7 +10755,21 @@ challenge at every unlock.
     the production environment. It then stores the attested public key and
     counter with that app's unlock key in the sealed header.
   - Each unlock carries an assertion over `challenge`. The enclave checks the
-    signature and that the counter increases.
+    signature, the App ID and that the counter increases.
+  - (0.37.0) The App ID is the release constant `ios_app_id`
+    (§11.10.8, "iOS App ID"): the channel's one value,
+    `<team id>.<bundle id>`, compared with the authenticator data's
+    `rpIdHash` at the attestation and at every assertion. A build
+    without complete channel constants accepts none (iOS fails closed,
+    as Android does without a package). The development environment
+    (aaguid `appattestdevelop`) is refused by every release image.
+  - (0.37.0) The development enclave's device policy file (devenclave
+    builds only) may add `apple_app_attest_root` (the pinned Apple root
+    beside the TEST CA), `ios_app_ids` (App IDs accepted besides the
+    TEST App ID, for the debug and dev-stack builds) and
+    `ios_development_environment` (accept `appattestdevelop`), so that
+    a development build on a real iPhone can enroll against a local
+    stack. Release images cannot load the file.
 
 **Rationale.** Both checks are local cryptography against pinned vendor
 roots, so they need no VettID credentials and no third-party API call (Play
@@ -11967,7 +12103,8 @@ A channel file names exactly its channel's value and any other is
 malformed (as for `push_url`), so a production image can never accept
 the staging app's package, nor the reverse. It is one value, not a list.
 The development enclave's further packages (its device policy file) are
-unchanged, and the iOS app ID stays a constant in code.
+unchanged, and the iOS app ID stays a constant in code (until 0.37.0,
+"iOS App ID" below).
 
 What follows the package, each changing with the staging release that
 first pins the new value (S10):
@@ -12024,6 +12161,36 @@ Production has no vault yet and nothing to move: release 1 pins
 `com.vettid.app` through the file instead of the constant. From S10 a
 phone can hold the production app and the staging app side by side.
 
+**iOS App ID (0.37.0; IOS-PLAN §9.1 VA2; team ID confirmed by the
+owner 2026-10-17).** Until 0.37.0 every image accepted the one App ID
+`3X25CJ86MV.com.vettid.app` (a constant in the enclave's code), so a
+staging image would have accepted the production iOS app and the
+reverse. From 0.37.0 the App ID is the release constant `ios_app_id`:
+
+| Channel | `ios_app_id` |
+|---|---|
+| production | `3X25CJ86MV.com.vettid.app` |
+| staging | `3X25CJ86MV.com.vettid.app.staging` |
+
+The rules are the Android package's: a channel file names exactly its
+channel's value and any other (the other channel's, another team's, a
+development bundle id) is malformed; one value, not a list; a
+placeholder fails the release gate. The image compares it with the
+`rpIdHash` of an App Attest attestation (enrollment, a transfer's
+`hs.init`, a recovery's register) and of **every assertion** (unlock,
+recovery open, release approval), since the assertion's authenticator
+data names the App ID too; so, unlike the Android package, an iOS
+binding made under another App ID does not unlock. No iOS app has
+enrolled on any release, so no vault is affected. The first release of
+each channel that pins it says so in its release log entry
+(VAULT-RELEASES §3.4, C6); a later change of the App ID would strand
+every iOS vault of that channel at the release that makes it, and is
+made only with the notice of a retirement, as a removed signer is.
+What follows the App ID outside the vault: the iOS app's bundle id per
+build (IOS-PLAN §5), `apple-app-site-association` on each account host
+(IOS-PLAN §9.2), and the push gateway's APNs topic (PUSH-GATEWAY
+§11.2).
+
 **Tests required** (0.26.0; follow-up implementations).
 
 - `releasecfg`: every refusal of rule 1 for `features`; rule 2 both ways
@@ -12031,7 +12198,14 @@ phone can hold the production app and the staging app side by side.
   from before 0.26.0; `android_package` missing, a placeholder, another
   channel's value; the committed files (staging: seven names and
   `com.vettid.app.staging`; production: none and `com.vettid.app`).
-  (0.27.0) `android_signers` entries: §11.7.1's tests.
+  (0.27.0) `android_signers` entries: §11.7.1's tests. (0.37.0)
+  `ios_app_id` likewise: missing, a placeholder, another channel's
+  value, another team, a development bundle id, a list.
+- (0.37.0) Vault, App Attest: each channel's configuration accepts an
+  attestation and an assertion of its own App ID and refuses the other
+  channel's; a build without channel constants refuses both; a release
+  configuration has no development App ID and refuses the development
+  environment.
 - Vault, per optional feature, in a build without it: each of its types
   is answered `unsupported_type` to an app and to a connection, and a
   response of such a type is dropped; no `features.<name>` entry exists
