@@ -44,7 +44,12 @@ changelog:
     is confirmed; never in purgeable storage. First-run cleanup of the
     keychain, deletes at a wipe and at the end of a transfer's keep
     period, no software key in release or staging builds, and why the
-    alternatives were not chosen. §11.7, §11.14's summary, §15 item 39
+    alternatives were not chosen. A locked iPhone is never treated as
+    lost keys ("Unlock your iPhone", then a retry); with four
+    unconfirmed candidates a new change is refused until an unlock,
+    never by dropping one. The protection class is stricter than
+    Android's rule, with `AfterFirstUnlockThisDeviceOnly` and its
+    residual named as the fallback. §11.7, §11.14's summary, §15 item 39
     and §16 (the `phone_ios` vectors, with values) follow. Nothing
     changes for Android. IOS-PLAN 0.1.1 follows
   - 0.34.0: release R (0.33.0); **approved by the owner 2026-10-16**
@@ -13481,20 +13486,33 @@ app creates a new Secure Enclave P-256 key-agreement key
 - its access control is `privateKeyUsage` only, with the protection
   class `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`: the Secure
   Enclave uses the key only while the iPhone is unlocked. Every request
-  that carries the secret is one the member starts by typing the PIN,
-  so the iPhone is unlocked whenever the key is needed, and code that
-  runs on a locked iPhone, even after its first unlock, cannot make the
-  Secure Enclave compute the secret (§11.14.12: a broken sealing plus
-  the phone's secret takes the PIN offline). iOS deletes neither the key
-  nor its keychain item when the passcode is changed or turned off, so
-  this is not a binding to the screen lock in the sense of the Android
-  rule above: the three keys are still lost together or not at all;
+  that carries the secret is started in the app in the foreground (most
+  of them by typing the PIN; a transfer's `hs.init` and the candidate
+  retry below carry it without a new PIN entry), so the iPhone is
+  unlocked whenever the key is needed, and code that runs on a locked
+  iPhone, even after its first unlock, cannot make the Secure Enclave
+  compute the secret (§11.14.12: a broken sealing plus the phone's
+  secret takes the PIN offline);
 - it is not bound to biometry or to the passcode (`biometryCurrentSet`
   is invalidated when a fingerprint or face is added; `userPresence`
   would add a prompt to every unlock);
 - its key blob (`dataRepresentation`, usable only by this iPhone's
   Secure Enclave) is kept in the keychain with the same class,
   `kSecAttrSynchronizable` false, under a label that names `key_vault`.
+
+**The protection class is stricter than Android's rule, and is for the
+owner's approval.** Android forbids binding the phone key to an unlocked
+screen (above) because Android destroys such keys when certain settings
+change; the reason recorded with that choice (§15 item 39, decision 6)
+is that the three keys are lost together or not at all. iOS deletes
+neither `WhenUnlockedThisDeviceOnly` nor `AfterFirstUnlockThisDeviceOnly`
+items when the passcode is changed or turned off, so the stricter class
+keeps that rule while refusing the key on a locked iPhone. **The
+fallback** is `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, the
+app key's class. Its residual, the same as Android's today: on a locked
+iPhone after its first unlock, code running as the app can have the
+Secure Enclave compute the current and candidate secrets, and with a
+broken sealing the PIN then falls offline cheaply (§11.14.12).
 
 `key_vault` is the vault id the key was made for, or the empty string
 for a key made at a transfer to this phone (the new phone does not know
@@ -13535,15 +13553,28 @@ Android and is always the epoch of the same record as `pub(E_e)`.
   tmp, which iOS may empty. A lost record is a lost secret.
 - **Each later use.** The stored `pub(E_e)` is parsed with full point
   validation: a point not on the curve, the point at infinity or an
-  encoding other than 65-byte uncompressed is refused as keys that no
+  encoding other than 65-byte uncompressed counts as keys that no
   longer work. The Secure Enclave computes `z_e`; the app derives the
   secret, compares its tag with `check_e`, and builds the request. `z_e`
   and the secret are held in memory only while a request is built.
 - **The "keys usable" check** (the app tests that its keys work, not
   only that they exist) recomputes the current record's secret, compares
-  its tag with `check_e` and discards it. A mismatch, or a Secure
-  Enclave that refuses, is the "this phone no longer holds the keys"
-  path. `check_e` tests nothing but guesses at the 256-bit secret.
+  its tag with `check_e` and discards it. `check_e` tests nothing but
+  guesses at the 256-bit secret.
+- **Lost keys, and a locked iPhone.** Only these count as keys this
+  phone no longer holds, and lead to the "this phone no longer holds
+  the keys" path (and from there to a recovery, which replaces `P`): a
+  tag that does not match `check_e`; a stored `pub(E_e)` that does not
+  parse; the keychain item of `P`, or the record, missing while the
+  keychain and the file store are readable; or a key that iOS reports
+  invalid. **A refusal because the iPhone is locked or has not been
+  unlocked since it started** (the keychain's
+  `errSecInteractionNotAllowed`, a Secure Enclave or file-protection
+  refusal for the same reason; any class refuses before the first
+  unlock) is temporary and never counts as lost keys: the app keeps
+  every key and record, says "Unlock your iPhone, then try again", and
+  retries once it is unlocked. Treating it as a loss would turn a
+  temporary refusal into a real one.
 
 **Retries and lost answers.** On Android the secret of an epoch can be
 computed again at any time; on an iPhone it exists only while its
@@ -13552,7 +13583,12 @@ record does. So:
 - **Candidates.** Besides the current record the app keeps, as
   candidates, the records of the next epoch that it sent in a
   `pin.change` or `vault.secret.renew` whose answer it did not get, at
-  most four.
+  most four. While four are unconfirmed the app refuses a new
+  `pin.change` or `vault.secret.renew` before anything is sent and asks
+  the member to unlock first ("Unlock your vault first, then try
+  again"): the unlock confirms one of them or the current record. The
+  oldest candidate is **never** dropped to make room, since it may be
+  the one the vault holds.
 - **Reuse on retry.** A retry of the same request reuses its record. A
   new `E` is made only for a new operation the member starts, and the
   earlier unconfirmed record stays a candidate.
@@ -18243,8 +18279,12 @@ and truncated encodings, epoch 0 and a `key_vault` with a 0x00 byte.
 The reference function is used by the vectors only; the vault never
 calls it. The Swift implementation reproduces them, computing ECDH in
 both directions with software stand-ins for the Secure Enclave key.
-The iPhone values below were computed with Go's `crypto/ecdh` and
-`crypto/hkdf` and checked with Python's `cryptography` 50.0.0. Values computed for this document with Python's `hmac`,
+The iPhone values below, the end-to-end `unlock_key` and
+`secret_check` included, were computed with Go's `crypto/ecdh`,
+`crypto/hkdf` and `crypto/hmac` and checked with Python's
+`cryptography` 50.0.0 (the same code reproduces the `unlock_key` and
+`secret_check` of 32 x 0x42 above); `dek_wrap` under these keys arrives
+with vettid-vault's `unlock.json`. Values computed for this document with Python's `hmac`,
 `cryptography` 50.0.0 (HKDF) and libsodium (PyNaCl), **to be confirmed
 by those implementations** (TEST ONLY):
 
@@ -18316,6 +18356,20 @@ by those implementations** (TEST ONLY):
   key_vault "" (a transfer's new phone), E_1, epoch 1 :
             unlock_secret 417e8255ff4d7ffb33120f8b5a70d1878f728f597dd5de8c7606565f0d4895cc
             check         3a12751cd1b3e2a53728adda53e9d401
+  info_1 (185 B) : 7665747469642f766d732f322f756e6c6f636b2d7365637265742d696f7300746573742d
+                   7661756c742d30303031000000000000000001041bec1250aa8f78275f99a6663688f310
+                   85848d0ed92f1203e447125f927b7486976e19d2eecfd3d40f935f10be09e63bcbc8a24a
+                   71efb67848d97725c3a0dc730472dabf79df448c7a5bfaecb7bc0dbc990a0ffd43b7a52b
+                   502c860ac0ab8340ff239d8129976e853067907d98c231e9e349f8aedfc1e1ccb2fa47fe
+                   4945de2460
+  end to end, through §11.14.1 unlock above (x : 32 x 0x41, pepper : 32 x 0x32, vault_id : test-vault-0001):
+    epoch 1   unlock_key   c62a381da79b90f73004b06e83e5c50102f0c1af6cef9dade936acf71a87a5e0
+              secret_check b25667bbca0901faa080ace5d92f317d46adbb0b0543ae227da0f78367526b69
+    epoch 2   unlock_key   9a179f25ba0cded41d14c6bcb854637df8650645732e7edf2e37ecfca07597ad
+              secret_check 8c1da453b5ab92bf5affdad9c460f0a0b617c8db349bdaade91764f5a89afeac
+    key_vault "" (the vault's own vault_id is still test-vault-0001)
+              unlock_key   bbf1eb9f19ec263d821395609e266d906c7a8aa4a6c573003df116e241cf9e22
+              secret_check 0eed2888668319b2b085f09d8b94de8c65c3e5b2bfd15cb636e63bd511d1acac
 
 VAULT-HOST-PROTOCOL §8.1 counter object names                   (recovery.json)
   counter_key : 32 x 0x51   vault_id : test-vault-0001   generation : 1
