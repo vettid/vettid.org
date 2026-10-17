@@ -1,9 +1,14 @@
 ---
 title: AGENT-PLAN
 status: draft
-version: 0.1.2
+version: 0.1.3
 date: 2026-10-17
 changelog:
+  - 0.1.3: owner decisions of 2026-10-17 during A1: the TPM protector
+    keeps no key on the TPM, so `forget` cannot make an old copy of the
+    state file recovered from the disk unopenable on the same computer
+    (accepted; §4.2); a Windows passphrase file, or a regular file given
+    by descriptor, must pass the same owner-only check as the state file.
   - 0.1.2: the owner's answers of 2026-10-17 to §7.3: Q1 recorded as a
     known difference in LEASH-IMPLEMENTATION; Q2 waits; Q3, Q4 and Q5
     in VAULT-MESSAGING 0.40.0 (a bound on access-session prompts, then
@@ -332,9 +337,21 @@ connector.
   it anywhere. `vettid-agent status` says "not bound to this computer"
   for it, and the plan records that this mode does not meet LEASH
   §3.4's platform binding.
+  (Owner decision, 2026-10-17.) A passphrase file, or a regular file
+  given by descriptor, must be owner-only on every platform: mode 0600
+  or 0400 and owned by the operator on POSIX, and on Windows the same
+  owner-only DACL check as the state file.
 - **Wipe** (`forget`, `device.unlinked`): overwrite and delete the state
-  file, delete the protector's key (TPM object, Keychain item), drop the
+  file, delete the protector's key (the Keychain item; the TPM and
+  DPAPI protectors keep none outside the file), drop the
   in-memory device. A behaviour change here is a §9 rule 6 path.
+  (Owner decision, 2026-10-17.) The TPM protector keeps no object on
+  the TPM: the sealed object lives only in the state file. So after
+  `forget`, an old copy of the state file recovered from the disk (a
+  backup, a snapshot, an SSD's remapped blocks) can still be opened on
+  the same computer until its TPM is cleared. Reaching such a copy
+  needs raw disk access on that computer plus TPM access; DPAPI behaves
+  the same way. Accepted for v1, and said in the README.
 
 ### 4.3 Pairing (§6.7)
 
