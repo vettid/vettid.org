@@ -1,10 +1,12 @@
 ---
 title: IOS-PLAN
-status: draft (for the owner's approval)
+status: approved (owner, 2026-10-17)
 version: 0.1.0
 date: 2026-10-17
 changelog:
-  - 0.1.0: first version, for the owner's approval. The plan that a
+  - 0.1.0: approved by the owner 2026-10-17, with the team ID
+    confirmed as `3X25CJ86MV` (ID3). ID9 waits for an independent
+    review before it is recorded in VAULT-MESSAGING. First version. The plan that a
     Claude Code instance on the owner's Mac follows to rebuild the
     VettID iOS app in `vettid/vettid-ios` against the current
     architecture, as the Android app was rebuilt (ANDROID-PLAN 0.1.41).
@@ -138,7 +140,7 @@ the Mac agent does not reopen them.
 |---|---|---|---|---|
 | ID1 | **Rewrite in `vettid-ios`** | Fresh rewrite in the same repository; old code tagged `legacy-v1-final` and on branch `legacy/v1`, removed from `master` in I0.1 | Refactor in place (carries NATS and the old credential everywhere) | I0 |
 | ID2 | **Bundle ids** (owner) | `com.vettid.app` (release), `com.vettid.app.staging` (staging, never published to the App Store), `com.vettid.app.dev` (debug), `com.vettid.app.devstack` (dev stack); the notification extension `<id>.NotificationService` (phase P). The same names as the Android application ids and PUSH-GATEWAY §14.1 | One id for all builds (staging and production could not be told apart by the vault) | I0 |
-| ID3 | **Team ID** (owner) | The owner's Apple Developer team. Until it is known the project uses `TEAMID_TBD` in **one** file, `Config/Signing.xcconfig` (`DEVELOPMENT_TEAM = TEAMID_TBD`), and nowhere else. The vault currently pins `3X25CJ86MV`, which the 2026-05 Xcode project also used: the owner confirms it or gives the new one, and VA2 (§9) pins it per channel | — | I1 (real iPhone) |
+| ID3 | **Team ID** (owner) | **`3X25CJ86MV`** (owner, 2026-10-17). The owner's Apple Developer team. Until it is known the project uses `TEAMID_TBD` in **one** file, `Config/Signing.xcconfig` (`DEVELOPMENT_TEAM = TEAMID_TBD`), and nowhere else. The vault currently pins `3X25CJ86MV`, which the 2026-05 Xcode project also used: the owner confirms it or gives the new one, and VA2 (§9) pins it per channel | — | I1 (real iPhone) |
 | ID4 | **Minimum iOS** | **iOS 17** (SwiftUI Observation, the `sceneCaptureState` trait, current `NavigationStack`; every iOS 17 iPhone has a Secure Enclave and App Attest) | iOS 16 (the old app; more workarounds), iOS 18 | I0 |
 | ID5 | **UI and language** | SwiftUI, Swift 6 language mode with strict concurrency, UIKit only where SwiftUI cannot (camera, the secure layer of §6.4); String Catalogs with the Android English texts, translation-ready; VoiceOver labels required in review | UIKit throughout | I0 |
 | ID6 | **Crypto libraries** | CryptoKit for SHA-256, HMAC, HKDF, X25519, ChaCha20-Poly1305 (IETF) and the Secure Enclave; **libsodium** (`swift-sodium`, ISC) for Ed25519 (deterministic signatures: CryptoKit's Ed25519 signatures are randomized and cannot reproduce the vectors), XChaCha20-Poly1305 and Argon2id; **ML-KEM-768 from `mlkem-native`** (PQ Code Package, Apache-2.0/ISC/MIT, C, with derandomized key generation and encapsulation) as a SwiftPM C target; the X-Wing combiner and RFC 9180 base-mode HPKE written in Swift and proven by the vectors | CryptoKit's post-quantum HPKE where the OS offers it (cannot be driven with the vectors' fixed randomness, so a second implementation would be needed for tests); BoringSSL through `swift-crypto` | I0 |
@@ -613,8 +615,8 @@ it may open vettid.org issues when it finds what is needed.
 ## 10. Owner prerequisites
 
 1. **Apple Developer Program** (the owner has an account): the **team
-   ID** into `Config/Signing.xcconfig` (ID3) and into VA2; whether
-   `3X25CJ86MV` is that team. If the membership later converts to an
+   ID** `3X25CJ86MV` (confirmed 2026-10-17) into
+   `Config/Signing.xcconfig` (ID3) and into VA2. If the membership later converts to an
    organisation (PUSH-GATEWAY §14.1 question 12), confirm the team ID
    stays the same: a new team ID is a new App ID, and production vaults
    would need a release pinning both (C6) before any build moves.
