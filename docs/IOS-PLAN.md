@@ -1,9 +1,35 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.0
+version: 0.1.1
 date: 2026-10-17
 changelog:
+  - 0.1.1: **approved by the owner 2026-10-17** (vettid.org #320),
+    with the stricter protection class as decided, the two §14 texts as
+    approved, and replaced records kept 7 days as on Android. ID9 as
+    recorded in
+    VAULT-MESSAGING 0.35.0 §11.14.1 ("On an iPhone"): §6.3 rewritten
+    to match it, with the record of each epoch's public key stored
+    before sending, reused on retry, tried after a `device_secret`
+    answer, replaced records deleted 7 days after a later epoch is
+    confirmed or at a wipe, with an earlier-secret step only when the
+    member asks (as Android, VAULT-MESSAGING 0.36.0 §11.14.1 rule 7);
+    `key_vault` fixed for the life of the key (`""` for a transfer's
+    new phone); the encodings (32-byte x-coordinate, SEC1 uncompressed
+    keys, both public keys in `info`); key confirmation at creation and
+    a 16-byte check tag; the phone key `WhenUnlockedThisDeviceOnly`
+    (§6.1); first-run cleanup and explicit deletes; no software phone
+    key in Release or Staging builds; why the alternatives were not
+    chosen; a locked iPhone never treated as lost keys; a fifth
+    unconfirmed change refused, never by dropping a candidate; the
+    stricter class as decided, `AfterFirstUnlockThisDeviceOnly` and its
+    residual recorded as not chosen; two §14 texts; "missing" decided by the
+    lookup's own answer with protected data available before and after;
+    the first-run marker a file read from Application Support and the
+    cleanup only while protected data is available; typed secrets
+    dropped when the screen locks. The comparison with Android in §6.3 is corrected. §1, §2
+    ID9, §6.1, §7 (the `phone_ios` vectors and their plan), I0.7, I1.4,
+    "What blocks what" and §9.2 follow
   - 0.1.0: approved by the owner 2026-10-17, with the team ID
     confirmed as `3X25CJ86MV` (ID3). ID9 waits for an independent
     review before it is recorded in VAULT-MESSAGING. First version. The plan that a
@@ -25,7 +51,7 @@ changelog:
 owner: Al Liebl (Mesmer)
 related:
   - ANDROID-PLAN.md (0.1.41) — the Android app; this plan mirrors it
-  - VAULT-MESSAGING.md (0.34.0) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.35.0) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
   - RELAY-PROTOCOL.md (0.9.4), MEMBER-API.md (2.7.1)
@@ -127,8 +153,9 @@ vettid-android, and likewise for every `core/<m>/…/` and
   made by a hardware key. §11.14.1 specifies it for Android only (a
   Keystore HMAC key) and says "iOS is not designed … It must be
   designed before an iOS app can unlock a vault of release R (§15 item
-  39)". §6.3 proposes the design; it needs the owner's decision and a
-  VAULT-MESSAGING change before I1 can finish.
+  39)". VAULT-MESSAGING 0.35.0 records the iPhone design of §6.3
+  (ID9) in §11.14.1, approved by the owner on 2026-10-17; I1.4 merges
+  only once that version is on `master`.
 
 ## 2. Decisions
 
@@ -146,7 +173,7 @@ the Mac agent does not reopen them.
 | ID6 | **Crypto libraries** | CryptoKit for SHA-256, HMAC, HKDF, X25519, ChaCha20-Poly1305 (IETF) and the Secure Enclave; **libsodium** (`swift-sodium`, ISC) for Ed25519 (deterministic signatures: CryptoKit's Ed25519 signatures are randomized and cannot reproduce the vectors), XChaCha20-Poly1305 and Argon2id; **ML-KEM-768 from `mlkem-native`** (PQ Code Package, Apache-2.0/ISC/MIT, C, with derandomized key generation and encapsulation) as a SwiftPM C target; the X-Wing combiner and RFC 9180 base-mode HPKE written in Swift and proven by the vectors | CryptoKit's post-quantum HPKE where the OS offers it (cannot be driven with the vectors' fixed randomness, so a second implementation would be needed for tests); BoringSSL through `swift-crypto` | I0 |
 | ID7 | **v1 scope** | As ANDROID-PLAN D3 plus photo attachments: enrollment, unlock, Protean Credential, owner check, lock, settings, release updates; connections, messaging, approvals, the feed, History; photos; items, share rules; recovery and transfer. Later: calls, devices and agents, wallet, presence, location (§8, "Later") | — | — |
 | ID8 | **Release R only** | The iOS app supports **only** vaults whose release lists `recovery_r` (VAULT-MESSAGING §11.10.9). It never implements the enroll, unlock, transfer or recovery paths from before release R; a descriptor without `recovery_r` gets "This vault's release is too old for the iPhone app" (§14) | Implementing both paths, as Android did during the change | I1 |
-| ID9 | **Phone-held unlock secret on iOS** (owner) | §6.3: a Secure Enclave P-256 key-agreement key per vault; per epoch, a fresh ephemeral key pair whose private half is discarded at once; `unlock_secret` from the ECDH of the two with HKDF. Recorded in VAULT-MESSAGING §11.14.1 by a vettid.org PR before I1.4 merges | (b) a random 32-byte secret stored ECIES-encrypted to a Secure Enclave key; (c) ECDH of the enclave key with its own public key (one long-lived value for every epoch: a leak would outlive `vault.secret.renew`) | I1.4 |
+| ID9 | **Phone-held unlock secret on iOS** (owner) | **Approved 2026-10-17.** §6.3, as recorded in VAULT-MESSAGING 0.35.0 §11.14.1: a Secure Enclave P-256 key-agreement key per `key_vault`, `WhenUnlockedThisDeviceOnly`; per epoch, a fresh software key pair whose private half is dropped after a key confirmation, its public key stored before the secret is sent and kept until 7 days after a later epoch is confirmed; `unlock_secret` = HKDF over the ECDH x-coordinate with both public keys in `info`; a 16-byte check tag | (b) a random 32-byte secret stored ECIES-encrypted to a Secure Enclave key (same security, Apple-specific format); (c) ECDH of the enclave key with its own public key (one long-lived value for every epoch: a leak would outlive `vault.secret.renew`); (d) a stateless form with each epoch's point hashed to the curve (code that ran as the app could compute future epochs; no hash-to-curve in CryptoKit or Go's standard library) | I1.4 |
 | ID10 | **Screen capture** (owner) | Always: a cover in the app switcher and content hidden while the screen is recorded, mirrored or shared. On the screens Android holds secure individually (`SecureWindow`: the typed recovery code, and the same list as Android), also the secure-text-field layer that iOS leaves out of screenshots, behind one component with a runtime self-check (§6.4) | Only the cover and capture hiding (screenshots possible everywhere) | I1.5 |
 | ID11 | **Keyboards and autofill** | Third-party keyboards refused app-wide; the vault PIN on an in-app keypad; no AutoFill and no "Save Password?" on any secret field; no autocorrect, suggestions or learning (§6.5) | System keyboard for the PIN | I1.5 |
 | ID12 | **Notifications before APNs** | None in the background: the app shows activity when open, and schedules **local** notifications for the owner check's early warning (ANDROID-PLAN §6 owner check, item 5). Settings → Notifications says Apple push is not available yet. Apple push (PUSH-GATEWAY §11.2, notification service extension) is phase P, after the owner's APNs actions | Background App Refresh as a stopgap (rare, unpredictable wakes; not worth its code before APNs) | I1 |
@@ -251,7 +278,7 @@ keys, the dev stack's hosts, or any `VettIDTesting` symbol fails CI
 |---|---|---|
 | Device attestation key (§11.7) | Keystore EC P-256, attested with the challenge, StrongBox or TEE | **App Attest key** (`DCAppAttestService.generateKey`, `attestKey` with `clientDataHash` = the challenge); its `keyId` kept in the keychain. Assertions: `generateAssertion(keyId, clientDataHash:)` with the challenge (unlock, recovery open) or SHA-256 of the approval string (§11.10.3) |
 | App key (§11.12.2) | Keystore P-256 signing key, no user authentication | **Secure Enclave P-256 signing key** (`SecureEnclave.P256.Signing.PrivateKey`), access control `.privateKeyUsage` only, `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, so that lock and polling work in the background; SPKI from `publicKey.derRepresentation`; `akid` = first 16 bytes of SHA-256(SPKI) |
-| Phone key (§11.14.1, release R) | Keystore HMAC-SHA-256 key, not bound to authentication | **Secure Enclave P-256 key-agreement key**, same access rules as the app key; §6.3 |
+| Phone key (§11.14.1, release R) | Keystore HMAC-SHA-256 key, not bound to authentication | **Secure Enclave P-256 key-agreement key** (`SecureEnclave.P256.KeyAgreement.PrivateKey`), access control `.privateKeyUsage` only, **`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`** (stricter than the app key's class and than Android's rule, as the owner decided; `AfterFirstUnlockThisDeviceOnly` not chosen: it is used only in requests started in the app in the foreground, so never while the iPhone is locked; a refusal while locked is never lost keys); its key blob in the keychain with the same class, not synchronizable, labelled with its `key_vault`; plus one record per epoch in the encrypted file store; §6.3 |
 | Identity, relay and session keys (Ed25519, X25519, ML-KEM seeds) | Seeds wrapped by a Keystore AES key (`SeedWrapper.kt`) | Seeds wrapped (AES-GCM) under a key derived from a Secure Enclave key agreement, stored in the keychain `AfterFirstUnlockThisDeviceOnly`; plaintext seeds only in memory, zeroized after use |
 | Local data (caches, records) | Files under a Keystore AES-GCM key (`KeystoreFileStore.kt`, format `0x01 ‖ iv ‖ AES-GCM`) | The same file format under a keychain-held key; files `NSFileProtectionCompleteUntilFirstUserAuthentication`, the app's data directory excluded from backups (`isExcludedFromBackup`); atomic replace on write |
 | App-lock key (D6/ID17) | Keystore key bound to BiometricPrompt class 3 | Secure Enclave key with `.biometryCurrentSet` or `.devicePasscode` per the member's choice |
@@ -264,9 +291,24 @@ must not destroy them). **After a restore or migration** keychain items
 may come back while the Secure Enclave keys and the App Attest key do
 not; the app must test that each key is *usable* (sign or agree once),
 not only present, and show ANDROID-PLAN §4's "this phone no longer
-holds the keys" path. The simulator has neither a Secure Enclave nor
+holds the keys" path. **Keychain items survive removing the app**
+(the app's files do not): on its first run after an install the app
+deletes every VettID keychain item and Secure Enclave key it finds
+before it does anything else, so that stale keys are never taken for
+usable ones. "First run" is decided by reading the content of a marker
+file in Application Support (written after the cleanup, by atomic
+replace), never from `UserDefaults`, which comes back empty before the
+first unlock. The cleanup runs only while
+`isProtectedDataAvailable` is true and the marker file's absence is a
+"no such file" answer as in §6.3; a launch before the first unlock
+(a background launch, for example) deletes nothing and leaves the
+check for a later launch. A wipe, and the end of
+a transfer's keep period on the old phone, delete every key and record
+explicitly. The simulator has neither a Secure Enclave nor
 App Attest: tests there use software keys behind the same protocols
-(`PhoneSecretSource`, `Attester`), as Android's tests do.
+(`PhoneSecretSource`, `Attester`), as Android's tests do; the software
+phone key is compiled only into Debug, DevStack and test targets, never
+into Release or Staging (§6.3).
 
 ### 6.2 App Attest
 
@@ -306,50 +348,217 @@ App Attest: tests there use software keys behind the same protocols
   attestation object, assertions (stable device identifiers, §11.7
   "Rationale").
 
-### 6.3 The phone-held unlock secret on iOS (proposal for ID9)
+### 6.3 The phone-held unlock secret on iOS (ID9)
 
 VAULT-MESSAGING §11.14.1 requires a 32-byte `unlock_secret` that only
 the phone's hardware can produce, recomputed for each request, with an
 epoch (1 at enrollment, transfer and recovery; +1 at `pin.change` and
 `vault.secret.renew`). Android computes
 `HMAC-SHA-256(phone key, "vettid/vms/2/unlock-secret" ‖ 0x00 ‖ vault_id ‖ 0x00 ‖ epoch)`
-in the Keystore. The Secure Enclave has no HMAC keys. Proposal:
+in the Keystore. The Secure Enclave has no HMAC keys. VAULT-MESSAGING
+0.35.0 §11.14.1 ("On an iPhone") records the iPhone design, approved
+by the owner on 2026-10-17; that text is normative, and this section says how
+to build it.
 
 ```
-phone key  P = a Secure Enclave P-256 key-agreement key, per vault
-               (privateKeyUsage; AfterFirstUnlockThisDeviceOnly; not
-               bound to biometry or passcode)
+phone key P   = a Secure Enclave P-256 key-agreement key, one per key_vault
+                (.privateKeyUsage only; WhenUnlockedThisDeviceOnly; not
+                synchronizable; not bound to biometry or passcode)
+key_vault     = the vault id, or "" for a key made at a transfer to this
+                phone; fixed for the life of the key, stored with it
 at each new epoch e (enrollment, transfer, recovery, pin.change,
-vault.secret.renew):
-  E_e        = a fresh software P-256 key pair; keep pub(E_e), destroy
-               priv(E_e) immediately after computing z_e once
-  z_e        = ECDH(priv(E_e), pub(P))   (= ECDH(priv(P), pub(E_e)))
-store pub(E_e) with the epoch (encrypted file store, §6.1)
+vault.secret.renew), unless a retry reuses a stored record:
+  E_e         = a fresh software P-256 key pair
+  z_e         = ECDH(priv(E_e), pub(P)): x-coordinate, 32 bytes, big-endian
+  require       the Secure Enclave's ECDH(priv(P), pub(E_e)) == z_e
+  drop          priv(E_e) (never written, logged or reported)
+  store         record (key_vault, epoch, pub(E_e), check_e), atomically,
+                BEFORE the first request that carries the secret
 each time the secret is needed:
-  z_e        = ECDH(priv(P), pub(E_e))   computed by the Secure Enclave
-  unlock_secret = HKDF-SHA-256(ikm = z_e, salt = empty,
-                    info = "vettid/vms/2/unlock-secret-ios" ‖ 0x00 ‖ vault_id
-                           ‖ 0x00 ‖ epoch (8, big-endian), L = 32)
+  z_e         = ECDH(priv(P), pub(E_e))   by the Secure Enclave, from the
+                stored pub(E_e) parsed with full point validation
+  info_e      = "vettid/vms/2/unlock-secret-ios" ‖ 0x00 ‖ key_vault ‖ 0x00
+                ‖ epoch (8, big-endian) ‖ pub(P) (65) ‖ pub(E_e) (65)
+  unlock_secret = HKDF-SHA-256(ikm = z_e, salt = empty, info = info_e, L = 32)
+  check_e     = first 16 bytes of HMAC-SHA-256(unlock_secret,
+                "vettid/vms/2/unlock-secret-ios-check")
 ```
 
-- The vault is unaffected: it accepts any 32 bytes (§11.14.1) and
+Public keys are SEC1 uncompressed (`x963Representation` in CryptoKit,
+`PublicKey.Bytes()` in Go's `crypto/ecdh`); `salt = empty` is
+`salt: Data()` in CryptoKit, 32 zero bytes by RFC 5869.
+
+- **The vault is unaffected**: it accepts any 32 bytes (§11.14.1) and
   never learns how they were made. No vault release is needed.
-- Like Android, the long-lived secret stays in hardware; one epoch's
-  secret exposed (malware running as the app) says nothing about the
-  next epoch, because each epoch's `z_e` needs a new `E_e` whose private
-  half no longer exists.
-- `pub(E_e)` lost with the app's data is the same event as losing the
-  keys (§6.1), with the same consequences as on Android.
-- Alternatives (ID9): (b) store a random secret encrypted to a Secure
-  Enclave key (equivalent strength, one more stored secret per epoch);
-  (c) ECDH of `P` with its own public key (one value for all epochs: a
-  leak would outlive a renewal).
-- **Where it is decided**: the owner approves ID9; then a vettid.org
-  PR (not the Mac agent) adds the iOS paragraph to §11.14.1, closes
-  that part of §15 item 39, and adds a vector (inputs: a fixed `z_e`,
-  `vault_id`, epochs 1 and 2) generated with Go's standard library.
-  Until then I1.4 implements the `PhoneSecretSource` protocol with a
-  software key in tests only, and no build may enroll a staging vault.
+  `pub(E_e)` never leaves the phone.
+- **`key_vault`.** A transfer's new phone does not know the vault id
+  when it sends `hs.init`, so its key's `key_vault` is `""`, at
+  `hs.init` and at every later unlock, exactly as Android
+  (`UnlockSecret.message`, `keepPhoneKey("")` in `VaultManager.kt`) and
+  vettid-vault's reference client (`client/phonekey.go`) do. The
+  keychain label of `P` and the records are bound to `key_vault`, never
+  to a vault id the app learns later: filling it in would change every
+  secret and lock the member out.
+- **Storing and reusing `pub(E)`.** Android's secret for an epoch can be
+  computed again at any time (`PhoneSecrets.secret(s, ahead)`), so its
+  retries resend the same value and its lost-answer rule simply tries
+  `ahead = 1`. On an iPhone the secret of an epoch exists only while
+  its record does, so `PhoneSecrets` on iOS keeps, in one file of the
+  encrypted file store (§6.1, excluded from backups, atomic replace),
+  the **current** record and up to four **candidates**: next-epoch
+  records sent in a `pin.change` or `vault.secret.renew` whose answer
+  did not arrive. While four are unconfirmed, a new `pin.change` or
+  renew is refused before anything is sent, with "Unlock your vault
+  first" (§14); the unlock confirms one of them or the current record.
+  The oldest candidate is never dropped to make room: it may be the one
+  the vault holds.
+  1. The record is written **before** the request that carries its
+     secret is built. A crash after the write and before the send
+     leaves a harmless candidate; the reverse order could leave the
+     vault holding a secret the phone can no longer make.
+  2. A **retry** of the same request reuses its record. A new `E` is
+     made only for a new operation the member starts; an earlier
+     unconfirmed record stays a candidate.
+  3. A candidate becomes current on its operation's answer, or when an
+     unlock answered `device_secret` with the current record is tried
+     with the candidates, newest first, and one gets `ok`, `bad_pin` or
+     `transfer_incomplete` (`UnlockEpoch.confirmsNext`). Answers decided
+     before the secret check prove nothing.
+  4. When a candidate is confirmed, the record it replaces and every
+     other candidate become **replaced records** (not counted in the
+     four). They are deleted **7 days** after that confirmation, or at
+     a wipe, whichever comes first, as on Android (VAULT-MESSAGING
+     0.36.0 §11.14.1 rule 6): the 7 days count from the confirmation,
+     or from when the app notices its clock is behind it, so a clock
+     set back never extends them. Nothing is deleted before a later
+     record is confirmed. The old phone of a transfer keeps its current
+     record through the keep period (§11.14.10).
+  5. **The earlier secret, only when the member asks** (rule 7 there):
+     while a replaced record exists, the "this phone no longer holds
+     the keys" screen offers an explicit step that tries the replaced
+     records, newest first, each once, never automatically. Only `ok`,
+     or `transfer_incomplete` for an unfinished transfer, makes that
+     record current again; `bad_pin` changes nothing. After `ok`: a
+     History entry on the phone and an immediate prompt for a new phone
+     secret (`vault.secret.renew`). This serves an operator restore of
+     the state from before a change (§11.14.2).
+  6. Records are **never** kept in Caches or tmp, which iOS may empty:
+     a lost record is a lost secret, and with the credential backup off
+     a lost vault.
+  7. **Epoch 1**: where Android calls `PhoneSecrets.reuseOrCreate`
+     (enrollment, a transfer's `hs.init`, a recovery's register, a retry
+     whose earlier try may have reached the vault), iOS reuses `P` and
+     the epoch-1 record when both exist for the same `key_vault` and
+     pass the "keys usable" check, and makes new ones otherwise.
+- **Key confirmation and the "keys usable" check** (§6.1). The two-way
+  ECDH at creation proves that the Secure Enclave path works before the
+  vault holds the secret. `check_e` lets the app test, before sending,
+  that `P` and the stored `pub(E_e)` still give that epoch's secret:
+  the check recomputes it, compares the tag and discards it. The tag
+  tests nothing but guesses at a 256-bit secret.
+- **Lost keys against a locked iPhone.** Only these lead to the "this
+  phone no longer holds the keys" path (and so to a recovery, which
+  replaces `P`): a tag mismatch; a stored `pub(E_e)` that does not
+  parse; the keychain item of `P` or the record missing; a key iOS
+  reports invalid (the key blob refused as invalid for a reason other
+  than the lock state). **Missing** is decided only like this:
+  `UIApplication.shared.isProtectedDataAvailable` is true before the
+  lookup, the lookup itself answers `errSecItemNotFound` (keychain) or
+  `NSFileReadNoSuchFileError` / `ENOENT` (file store), and
+  `isProtectedDataAvailable` is still true after it. Any other error,
+  or protected data that went away in between, is the locked case. Do
+  not replace this with a separate "is storage readable" probe: a
+  sentinel item of class `AfterFirstUnlock` reads fine on a locked
+  iPhone while `P`'s `WhenUnlocked` item does not, so only the answer
+  of the lookup for the item itself counts. A refusal because the iPhone is locked, or has not
+  been unlocked since it started (`errSecInteractionNotAllowed`, a
+  Secure Enclave or file-protection refusal for that reason; every
+  class refuses before the first unlock), is temporary: keep every key
+  and record, show "Unlock your iPhone" (§14) and retry once
+  `UIApplication.protectedDataDidBecomeAvailableNotification` arrives
+  or the member taps again. Treating it as a loss would turn a
+  temporary refusal into a real loss. The retry never keeps a typed PIN
+  or password in memory while the iPhone is locked: typed secrets are
+  dropped on `protectedDataWillBecomeUnavailableNotification` (and when
+  the app leaves the foreground), and the member is asked for them
+  again before the retry.
+- **Why `WhenUnlockedThisDeviceOnly`**, not the app key's
+  `AfterFirstUnlockThisDeviceOnly`: the app key must work in the
+  background (lock, polling); the phone key is needed only for
+  enrollment, unlock, a transfer's `hs.init`, a recovery open,
+  `pin.change` and renew, all started in the app in the foreground
+  (most of them by typing the PIN; `hs.init` and the candidate retry
+  carry the secret without a new PIN entry), so the iPhone is unlocked
+  then. With this class, code that runs on a locked iPhone after its
+  first unlock cannot make the Secure Enclave compute the secret.
+  **This is stricter than Android**, whose rule forbids binding the
+  phone key to an unlocked screen, and the owner decided it on
+  2026-10-17.
+  It keeps the reason behind that rule (VAULT-MESSAGING §15 item 39,
+  decision 6: the three keys are lost together or not at all), because
+  a passcode change, or turning the passcode off, deletes neither iOS
+  class. **Not chosen**: `AfterFirstUnlockThisDeviceOnly`, with the
+  residual Android has today: on a locked iPhone after its first
+  unlock, code running as the app can have the Secure Enclave compute
+  the current and candidate secrets, and with a broken sealing the PIN
+  then falls offline cheaply (VAULT-MESSAGING §11.14.12). On an iPhone
+  with no passcode the key is usable whenever the phone is on, as on an
+  Android phone without a screen lock.
+- **Removal, first run and wipes.** Removing the app deletes its files,
+  and so the records, but keeps keychain items: the old `P` is then
+  useless for every epoch, and the first-run cleanup of §6.1 deletes it.
+  A wipe, `PhoneSecrets.delete` and the end of a transfer's keep period
+  delete `P` and every record explicitly.
+- **No software phone key in Release or Staging builds.** iOS has no
+  report of where a key-agreement key lives, unlike the Keystore level
+  Android checks (`PhoneKey.holdsPhoneKey`). Release code creates `P`
+  only as `SecureEnclave.P256.KeyAgreement.PrivateKey` and refuses to
+  enroll, receive a transfer or recover when `SecureEnclave.isAvailable`
+  is false (§14, "No secure hardware"). The software
+  `PhoneSecretSource` is compiled only into Debug, DevStack and test
+  targets (`#if DEBUG` or a test-only target), and I0.1's release check
+  fails on its symbol in a Release or Staging archive.
+- **Compared with Android.** As on Android, the long-lived key stays in
+  hardware and one leaked secret says nothing about another epoch.
+  Unlike on Android, code that ran as the app earlier cannot have
+  computed the secret of an epoch created after it stopped running,
+  because that epoch's `E_e` did not exist yet. As on Android, a
+  replaced record is kept 7 days for the earlier-secret step and then
+  deleted, after which nothing on the phone can compute that epoch's
+  secret again.
+- **In memory**: `z_e`, the HKDF output and the secret are overwritten
+  after the request is built (`SymmetricKey` or explicitly zeroed
+  buffers where possible; Swift may still copy), as Android does with
+  `next.fill(0)`.
+- **Alternatives, and why not** (ID9):
+  - (b) a random secret per epoch stored as
+    `SecKeyCreateEncryptedData(pub(P), .eciesEncryptionCofactorVariableIVX963SHA256AESGCM, s_e)`:
+    the same security and the same per-epoch record (a ciphertext as
+    useless without the Secure Enclave as `pub(E)`); its GCM tag would
+    give key confirmation, but Apple's format (X9.63 KDF with the
+    ephemeral key as shared info, a variable IV) is harder to specify in
+    VAULT-MESSAGING and to reproduce in Go vectors. `check_e` gives the
+    same confirmation.
+  - (c) ECDH of `P` with its own public key: one static value; even with
+    the epoch in `info`, one leak of `z` gives every past and future
+    epoch offline, and renew would end nothing.
+  - (d) stateless: each epoch's point `H_e` hashed to the curve (RFC
+    9380) from `key_vault` and the epoch, `z_e = ECDH(priv(P), H_e)`:
+    Android's behaviour with no records, but code that ran as the app
+    could compute future epochs, a `P` left by a removed app could
+    compute every epoch, and hash-to-curve is in neither CryptoKit's
+    public API nor Go's standard library.
+  - Never make the design "deterministic" by deriving `priv(E_e)` from
+    public inputs: `pub(P)` is not secret, so anyone could compute
+    `z_e = priv(E_e)·pub(P)` without the phone. Never move `pub(E_e)` to
+    the vault: the Secure Enclave would compute on points a host could
+    choose.
+- **Where it is decided**: the owner approved ID9 on 2026-10-17 with
+  VAULT-MESSAGING 0.35.0; vettid-vault then adds the `phone_ios`
+  vectors (§7; the values are already in VAULT-MESSAGING §16). Until
+  that version is on `master`, I1.4 implements `PhoneSecretSource`
+  with a software key in tests only, and no build may enroll a staging
+  vault.
 
 ### 6.4 Screen capture and the app switcher (FLAG_SECURE equivalents)
 
@@ -462,7 +671,8 @@ a skip.**
 | vettid-android `core/altchan/src/test/resources/vectors/recovery-qr.json` (generated with vettid-vault code; its `SOURCE.md` says how) | recovery and transfer QR parsing | `core/altchan/src/test/…/RecoveryQrVectorsTest.kt` | I0.5 |
 | `…/altchan.json` | §11 ETK descriptor, sealed requests, devatt challenge | `VectorsTest.kt` | I0.6 |
 | `…/appkey.json` | §11.12.2 app key and signed requests (Android has no copy yet) | — (new) | I0.6 |
-| `…/unlock.json`, `…/recovery.json`, `testdata/passwords/verdicts.json` | §11.14 unlock secret per epoch (the Android HMAC form; the iOS vector comes with ID9), recovery `secrets` string, the open's signing string, password verdicts | `ReleaseRVectorsTest.kt`, `PasswordRulesTest` | I0.7 |
+| `…/unlock.json`, `…/recovery.json`, `testdata/passwords/verdicts.json` | §11.14 unlock secret per epoch (the Android HMAC form, `phone`), recovery `secrets` string, the open's signing string, password verdicts | `ReleaseRVectorsTest.kt`, `PasswordRulesTest` | I0.7 |
+| `…/unlock.json`, object `phone_ios` (VAULT-MESSAGING 0.35.0 §16; values there until the file has them) | §11.14.1 "On an iPhone": the public keys, `z_e`, `info_e`, `unlock_secret` and `check_e` for epochs 1 and 2, the `key_vault` `""` form, the same secrets through the unlock key, `secret_check` and `dek_wrap`; the refusals | — (new) | I0.7 |
 | `…/blob.json`, `…/attachment.json` | §5.5 blob seal, §10.5.1 attachments | `BlobVectorsTest.kt` | I0.8 |
 | `…/release.json` | §11.10 release manifest | `core/attestation/src/test/…/ReleaseVectorsTest.kt` | I0.9 |
 | RELAY-PROTOCOL §9 (values in the spec) | mailbox ids, PASETO deposit token, signed deposit | `core/relay/src/test/…/VectorsTest.kt` | I0.10 |
@@ -472,6 +682,30 @@ Also: the estimator word lists from vettid-vault
 `vms/recovery/common-passwords.txt` and `estimator-words.txt`, at the
 recorded commit. CI runs gitleaks with an allowlist for the public
 vector values, like vettid-android's `.gitleaks.toml`.
+
+**The `phone_ios` vectors** (generated in vettid-vault with Go's
+standard library only, `crypto/ecdh`, `crypto/hkdf` and `crypto/hmac`,
+by a reference function that the vectors use and the vault never
+calls):
+
+1. **Full ECDH, not a fixed `z_e`**: `priv(P)` = 32 × 0x46,
+   `priv(E_1)` = 32 × 0x47, `priv(E_2)` = 32 × 0x48, `key_vault`
+   `test-vault-0001`, epochs 1 and 2. The Swift test imports `priv(E)`
+   as a software key and `priv(P)` as a software stand-in for the Secure
+   Enclave key, computes ECDH in both directions and compares every
+   intermediate value (`info_e` in hex, so that an encoding mistake
+   shows).
+2. **A transfer's new phone**: `key_vault` `""`, the same keys, epoch 1.
+3. **Not the Android form**: the outputs differ from `phone.epoch_*`
+   (guards against the wrong label).
+4. **End to end**: the iPhone secrets through the existing unlock key,
+   `secret_check` and `dek_wrap` derivation, so that one vector shows
+   the iPhone secret working with the vault's unchanged formulas.
+5. **Refusals**: a `pub(E)` off the curve (x valid, y + 1), the point at
+   infinity, compressed and truncated encodings, epoch 0, a `key_vault`
+   containing 0x00.
+
+Device and unit tests that go with them are in I1.4.
 
 ## 8. Phases and PRs
 
@@ -492,7 +726,7 @@ I2 #36, I3 #37, I4/P/later #38.
 | I0.4 | ML-KEM-768 C target, X-Wing, HPKE base mode with a test-only derandomized hook; envelope v2 sealed and session; padding | §4.3, §5 | `hpke/Hpke.kt`, `envelope/*` | `hpke.json`, `envelope_*.json`; the derand hook absent from Release (release check) |
 | I0.5 | Handshake, key schedule, epochs, rotation, invite and claim blob, QR parsing | §6.1–§6.6 | `session/*`, `invite/Invite.kt`, `ClaimBlob.kt` | `handshake.json`, `invite.json`, `recovery-qr.json` |
 | I0.6 | Alternate channel crypto: descriptor, sealed requests, devatt challenge, capabilities parsing, app key request signing | §11.1–§11.4, §11.7, §11.10.9, §11.12.2 | `altchan/AltChannel.kt`, `Capabilities.kt`, `DeviceAttest.kt` | `altchan.json`, `appkey.json` |
-| I0.7 | Release R: unlock secret (the HMAC form behind `PhoneSecretSource`, for the vector), recovery strings, password rules and estimator | §11.14.1, §11.14.6–§11.14.8 | `altchan/ReleaseR.kt`, `PasswordRules.kt` | `unlock.json`, `recovery.json`, `verdicts.json` at the vault's floor and the app's |
+| I0.7 | Release R: unlock secret (the HMAC form behind `PhoneSecretSource`, for the vector; the iPhone form's derivation and record format from software keys), recovery strings, password rules and estimator | §11.14.1, §11.14.6–§11.14.8 | `altchan/ReleaseR.kt`, `PasswordRules.kt` | `unlock.json` (`phone` and `phone_ios`, refusals included), `recovery.json`, `verdicts.json` at the vault's floor and the app's |
 | I0.8 | Credential (UTK/LTK sealing, CEK rotation), blob seal, grant seal | §3.5, §5.5, §10.5.1, §10.12 | `credential/Credential.kt`, `grant/GrantSeal.kt` | `blob.json`, `attachment.json`; credential round trips against the Go reference (`vaultctl`) outputs where §16 has none |
 | I0.9 | `VettIDAttestation`: Nitro document, PCRs, release manifest, canary manifest | §11.2, §11.10.1, §11.10.7, §13.9 | `core/attestation/*`, `CanaryManifest.kt` | `release.json`; a real staging attestation document (fetched from the staging enclave route) verifies against the pinned Nitro root |
 | I0.10 | Relay auth, PASETO v4.public, mailbox ids | RELAY-PROTOCOL §3–§5, §9 | `core/relay/…/RelayAuth.kt`, `Paseto.kt`, `DepositToken.kt` | RELAY-PROTOCOL §9 values |
@@ -506,7 +740,7 @@ I2 #36, I3 #37, I4/P/later #38.
 | I1.1 | Relay client (HTTP, WebSocket and long-poll collect, ack, blobs, claims) and member API client | RELAY-PROTOCOL §6; MEMBER-API "Vault (alternate channel)" | `core/relay/*`, `core/altchan/MemberApiClient.kt`, `MemberAuth.kt` | Tests against `URLProtocol` fakes for every error of RELAY-PROTOCOL §7 |
 | I1.2 | Vault client: typed §10 calls, dedupe, outbox, sync events; `FakeVault` | §8, §10.1–§10.3 | `core/vault/*`, `core/testing/…/FakeVault.kt` | Unit tests per call; retry and dedupe as §8.2/§8.6 |
 | I1.3 | `VettIDTesting`: the TEST iOS attester (Swift port of vettid-vault `internal/enclavetest/devattest.go`: TEST Apple CA from `TestKey(P-384, 0x51)` (root) and `TestKey(P-384, 0x52)` (intermediate), as Android ports `TestKey` for its TEST CA, App ID `TESTTEAM00.com.vettid.app`; certificates with `swift-certificates`, test targets only), dev stack helpers and a runner script | §11.7 | `core/testing/…/TestAndroidAttester.kt`, `DevStack.kt` | **A2-equivalent**: an XCTest on the simulator enrolls a vault on the dev stack, unlocks, and exchanges a message with the `vaultctl` peer |
-| I1.4 | `VettIDKeys`: Secure Enclave app key, seed wrapping, encrypted file store, the real App Attest attester, the phone key of ID9, the "keys usable" check | §11.7, §11.12.2, §11.14.1; §6.1–§6.3 | `core/keystore/*`, `core/data/…/KeystoreFileStore.kt`, `PhoneSecrets.kt`, `core/altchan/…/Attester.kt` | iPhone tests: keys sign and agree with the phone locked (after first unlock); a deleted key is detected as unusable; App Attest attestation verifies with vettid-vault's `devattest` against Apple's root in a test harness (VA1). **Merges only after ID9 is recorded in VAULT-MESSAGING** |
+| I1.4 | `VettIDKeys`: Secure Enclave app key, seed wrapping, encrypted file store, the real App Attest attester, the phone key of ID9, the "keys usable" check | §11.7, §11.12.2, §11.14.1; §6.1–§6.3 | `core/keystore/*`, `core/data/…/KeystoreFileStore.kt`, `PhoneSecrets.kt`, `core/altchan/…/Attester.kt` | iPhone tests: the app key and the seed keys sign and agree with the phone locked (after first unlock); the phone key's ECDH fails while the screen is locked and works once it is unlocked; a passcode change, and turning the passcode off, keep the phone key; a deleted key is detected as unusable; after removing and reinstalling the app, the first-run cleanup removes the keychain items and the old phone key is not used; the iPhone locked during a request (and a start before first unlock) gives "Unlock your iPhone" and a retry, never the "no longer holds the keys" path, with every key and record kept, and the typed PIN dropped and asked for again; a launch before first unlock (a background launch after a reboot) deletes nothing in the first-run cleanup; a lookup during which protected data goes away is not "missing"; Release and Staging archives contain no software `PhoneSecretSource` (release check). Unit tests (software source) for every lost-answer case of §6.3: a renew's answer lost then an unlock; a renew's answer lost then a retry; two renews with the first answer lost; a crash between storing the record and sending; a fifth change while four candidates are unconfirmed is refused before sending and no candidate is dropped; a replaced record kept 7 days after the confirmation and deleted then (and at a wipe), not extended by a clock set back; the earlier-secret step only from the member's tap, moving back only on `ok` or `transfer_incomplete`, not on `bad_pin`, with the History entry and the new-secret prompt after `ok`; after each, the vault (the Go reference client's rules, or a fake that follows `vault/opendek.go`) is reachable. App Attest attestation verifies with vettid-vault's `devattest` against Apple's root in a test harness (VA1). **Merges only after VAULT-MESSAGING 0.35.0 (ID9, approved 2026-10-17) is on `master`** |
 | I1.5 | Secure input and capture protection: keypad, secret fields, keyboard refusal, the three protections of §6.4, backup exclusion | §6.4, §6.5 | `core/ui/…/Autofill.kt`, `SecretKeyboard.kt`, `SecureWindow.kt`, `core/data/…/ScreenshotAllowance.kt` | iPhone: no AutoFill bar or save prompt on any secret screen; a third-party keyboard is not offered; switcher shows the cover; recording hides content |
 | I1.6 | Onboarding: setup code by QR, typed or Universal Link; PIN; credential password; enroll; first unlock; Finish setup | §11.3, §11.12.1, §11.14.1, §11.14.7, §3.5.5; ENROLLMENT-CODES §3–§4 | `feature/onboarding/…/OnboardingScreens.kt`, `OnboardingViewModel.kt`, `core/altchan/…/AltChannelFlow.kt`, `SetupCode.kt`, `core/data/…/account/SetupLinkInbox.kt`, `FinishSetupGate.kt` | Screen-catalog entries for every state; ID8's refusal for a pre-R descriptor |
 | I1.7 | Unlock, owner check and held screen, lock (VAULT-LOCK as Android implements it), app lock, local wipe rules | §3.6, §11.4, §11.8, §12, VAULT-LOCK §3–§4 (normative in §11.5 and the "release L" rules) | `feature/onboarding/…/UnlockScreen.kt`, `OwnerCheckScreen.kt`, `core/data/…/vault/OwnerCheck*.kt`, `Lock*.kt`, `HolderWatch.kt`, `RefusalWatch.kt`, `wipe/LocalWipe.kt`, `lock/AppLock.kt` | The owner-check tests of ANDROID-PLAN §6 item 9 with the dev stack's clock; wrong PIN, wrong password, ten-failure lock; lock pending and confirmed |
@@ -576,7 +810,7 @@ CALLS-PLAN §12; `calls.json`), **devices and agents** (§6.8, §10.11;
 |---|---|
 | I0 | nothing |
 | I1 on the simulator (exit a) | nothing (TEST attester, software phone key) |
-| I1.4 merge | ID9 recorded in VAULT-MESSAGING |
+| I1.4 merge | VAULT-MESSAGING 0.35.0 (ID9, approved) on `master` |
 | I1 on an iPhone against the dev stack | VA3 |
 | I1 on an iPhone against staging (exit b), and everything after on a device | ID3 (team ID), VA2 (staging App ID), ID9; VA1 recommended first |
 | I3.3 transfers between Android and iOS | VA4 (in the same staging release as VA2 if possible) |
@@ -602,8 +836,9 @@ it may open vettid.org issues when it finds what is needed.
 
 ### 9.2 vettid.org work (owner approval)
 
-- VAULT-MESSAGING: the iOS paragraph of §11.14.1 and its vector (ID9);
-  §11.7's iOS bullet for VA2 and VA3; correct the "not built" wording
+- VAULT-MESSAGING: the iOS paragraph of §11.14.1 and its vectors (ID9;
+  recorded in 0.35.0, approved 2026-10-17), then the `phone_ios` object in
+  vettid-vault's `unlock.json`; §11.7's iOS bullet for VA2 and VA3; correct the "not built" wording
   of VAULT-PLAN §7 risk 6 and STAGING-DEVELOPMENT-PLAN §5 row I.
 - `apple-app-site-association` on `account.vettid.org`,
   `account.staging.vettid.org` and `relay.vettid.org` (`applinks` for
@@ -746,5 +981,10 @@ Every other text is the Android app's.
 - **Help → Privacy (ID18)**: "When you set up, move or recover a vault,
   your iPhone asks Apple to vouch for the VettID app. Apple learns that
   VettID was set up on an iPhone, nothing about your vault."
+- **Phone locked during a request (§6.3; approved 2026-10-17)**:
+  "Unlock your iPhone, then try again."
+- **Four unconfirmed changes (§6.3; approved 2026-10-17)**: "Unlock your vault first, then
+  try again. VettID needs to confirm your last change before it can
+  make another."
 - **Help → Keyboards (ID11)**: "VettID uses only Apple's keyboard, so
   that other keyboards never see your PIN, password or codes."
