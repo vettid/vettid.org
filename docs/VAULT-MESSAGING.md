@@ -25,7 +25,7 @@ related:
   - VAULT-HOST-PROTOCOL.md (0.1.12; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
-  - 0.36.0: normative; **for the owner's approval** (owner decisions of
+  - 0.36.0: normative; approved by the owner 2026-10-17 (owner decisions of
     2026-10-17); follows 0.35.0; no enclave change and no vault release
     (the vault accepts any 32-byte `unlock_secret`). **Android's
     phone-held unlock secret gets fresh randomness per epoch**
@@ -13587,7 +13587,8 @@ replaced is **replaced**.
    opened, so accepting it would let one served old header and a typed
    PIN make the old record current and get the real one deleted 7 days
    later. On `bad_pin` the records stay as they are and the member may
-   type the PIN again. After an `ok` the app writes a History entry and
+   type the PIN again. After an `ok` the app records it in History (on the phone for
+   now; a vault History event may follow in a later release) and
    asks the member for a new phone secret (`vault.secret.renew`) at once:
    the vault is back on an older secret, which unwanted code may have
    computed. This is the case of §11.14.2 where an operator restored the

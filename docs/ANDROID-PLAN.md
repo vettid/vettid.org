@@ -4,7 +4,7 @@ status: draft
 version: 0.1.43
 date: 2026-10-17
 changelog:
-  - 0.1.43: **for the owner's approval** (owner decisions of
+  - 0.1.43: approved by the owner 2026-10-17, texts as drafted (owner decisions of
     2026-10-17; VAULT-MESSAGING 0.36.0). §4 "Recovery and unlock from
     release R": the phone key's secret gets 32 fresh random bytes per
     epoch (form 2, the same Keystore key), kept in `account.bin` with
@@ -1987,7 +1987,8 @@ finish) makes it current again. **`bad_pin` changes nothing**: it shows
 only that a header the host served matched the secret, and nothing
 opened. The app then says "That PIN did not open your vault with the
 earlier secret. Nothing was changed. Enter the PIN you had before your
-last change and try again." On `ok` the app adds a History entry
+last change and try again." On `ok` the app adds a History entry, shown on the phone for now (a
+vault History event may follow in a later release)
 ("Opened with this phone's earlier secret on {date} at {time}. Your
 vault had been put back to how it was before your last change.") and
 asks for a new phone secret at once: "Your vault is open as it was
