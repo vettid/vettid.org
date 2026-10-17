@@ -1838,8 +1838,8 @@ unchanged.
 *Measured again (staging S14, 2026-10-16):* the same run on S14's canary
 host (same host and enclave size), PASS: 57 vaults held at the memory floor,
 about 933 idle unlocked vaults projected per host, unlock p50 224 ms /
-459 ms / 944 ms at concurrency 1 / 2 / 4, idle CPU 2.3 ms per vault per
-minute.
+459 ms / 944 ms at concurrency 1 / 2 / 4, 4.2 MiB marginal per vault,
+idle CPU 2.3 ms per vault per minute.
 
 *Measured again (staging S15, release R, 2026-10-16):* the same run
 (`-capacity 400`) on S15's canary host, instance `i-0a91921ab7de639a3`
