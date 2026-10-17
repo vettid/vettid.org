@@ -477,6 +477,8 @@ Small PRs on `vettid-ios`, one topic each, every one with its tests.
 Exit tests run on the simulator unless they say "iPhone". "Dev stack"
 is vettid-vault's `cmd/devstack` (§12). Spec sections are
 VAULT-MESSAGING unless named.
+Each phase is tracked as an issue in vettid-ios: I0 #34, I1 #35,
+I2 #36, I3 #37, I4/P/later #38.
 
 ### I0 — Skeleton, CI, crypto core
 
