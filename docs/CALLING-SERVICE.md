@@ -1,8 +1,8 @@
 ---
 title: CALLING-SERVICE
 status: approved by the owner 2026-10-12 (D12–D26 of CALLS-PLAN §13.5; D23 as (c))
-version: 0.2.0
-date: 2026-10-12
+version: 0.2.1
+date: 2026-10-17
 owner: Al Liebl (Mesmer)
 component: calling-service (optional, media plane only): a STUN/TURN server and a credential issuer
 related:
@@ -37,6 +37,17 @@ changelog:
     specified in VAULT-MESSAGING §10.10 and only summarised here (§6);
     the SFrame text is gone. "Relay additions" is gone: the relay
     carries no call-specific type (CALLS-PLAN §6.2)
+  - 0.2.1 (2026-10-17): for the owner's approval. (1) **The total
+    bandwidth cap is sized for C4's video** (§7.2, §7.3): `bps-capacity`
+    120 Mbit/s on staging, was 4 Mbit/s (D16). coturn reserves
+    `max-bps` for every allocation, used or not, and a phone keeps every
+    relay allocation it made for the life of a call, so 4 Mbit/s fitted
+    15 voice allocations and a single one at C4's 3 Mbit/s; 120 Mbit/s
+    is 40 at 3 Mbit/s. (2) **How refusals are counted** (§10): coturn
+    has no counter for refused allocations, so `turn-agent` reads
+    coturn's verbose log through a pipe, counts the refusal lines in
+    memory and drops every line (owner approval of 2026-10-17). As built
+    in vettid-calls
 classification: public (no secrets; safe for github.com/vettid)
 review-cycle: 6 months or upon WebRTC PQC / AWS milestone, whichever first
 ---
@@ -342,7 +353,7 @@ version when the image is built (§13).
 | Bandwidth per allocation | `max-bps`: **256 kbit/s** in each direction while calls are voice only; 3 Mbit/s when video arrives in C4 (D15) | A voice call with frame encryption uses about 60–90 kbit/s each way. A low cap makes the relay useless for anything else |
 | Allocations per credential | `user-quota`: **10** | One device may allocate once per network interface, address family and transport; 10 covers that and stops one credential serving a crowd |
 | Allocations in total | `total-quota`: **100** on staging (D16) | |
-| Bandwidth in total | `bps-capacity`: **4 Mbit/s** on staging (D16) | Bounds the cost of the worst day (§7.3) |
+| Bandwidth in total | `bps-capacity`: **120 Mbit/s** on staging (0.2.1; 4 Mbit/s until then, D16) | coturn reserves `max-bps` out of it for **every allocation, used or not**, and a phone keeps every relay allocation it made for the life of a call: one per TURN URL (UDP and TCP) per network, so up to 8 per call, relayed or direct. 120 Mbit/s is **40 allocations at C4's 3 Mbit/s**, five video calls at that worst count, which is every call staging's testers (at most 10) can hold at once. While calls are voice only it admits 469, so `total-quota` binds first. It stays under a `t4g.small`'s baseline network bandwidth (128 Mbit/s). Cost is bounded by the daily stop (§7.3) |
 | Allocation lifetime | coturn's default (10 minutes, refreshed by the client) | A dead client's allocation goes within 10 minutes |
 | STUN | no RFC 5780 behaviour discovery, no pre-RFC 5389 compatibility, no software attribute | Smaller answers, nothing to fingerprint |
 | Management | no CLI listener, no web admin | |
@@ -363,7 +374,9 @@ connect"; its call diagnostics record the TURN error. A specific text is
 C6's (D15).
 
 The daily stop exists because the bandwidth caps alone do not bound
-cost: 4 Mbit/s for a whole day is about 43 GB. At 30 GB a day's traffic
+cost: (0.2.1) 120 Mbit/s for a whole day would be about 1.3 TB, and a
+server relaying at that rate would reach 30 GB in about 35 minutes
+(4 Mbit/s, the cap until 0.2.1, was about 43 GB a day). At 30 GB a day's traffic
 beyond the account's free allowance costs under $3.
 
 ### 7.4 IPv6
@@ -545,6 +558,14 @@ address, a username or a single request is kept anywhere.
   (current), `allocations_refused{reason}` (`quota_user`, `quota_total`,
   `capacity`), `auth_failures`, `bytes_relayed`, `stun_bindings`, and a
   heartbeat. No dimension holds an address or a username.
+  (0.2.1) coturn has no counter for refused allocations and writes them
+  only to its verbose log, so coturn runs verbose with its log going to
+  `turn-agent` through a pipe; `turn-agent` matches each line against
+  fixed texts, adds to `allocations_refused`, and drops the line. No
+  line, address, username or session id is stored, written or sent.
+  `capacity` counts the refusals that mean the server is full
+  (bandwidth fully reserved, no relay socket left), not those about the
+  request itself.
 - **No VPC flow logs** on this network: they would be a record of which
   address used the relay when, that is, of who called when.
 - **The issuer.** Metrics `requests{outcome}`,
