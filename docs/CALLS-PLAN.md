@@ -1,15 +1,15 @@
 ---
 title: CALLS-PLAN
 status: approved by the owner 2026-10-11 (D1–D11 as recommended; D1 with the owner's position of §3.1) and 2026-10-12 (§13, D12–D26 as recommended; D23 as (c))
-version: 0.1.3
-date: 2026-10-12
+version: 0.1.4
+date: 2026-10-17
 owner: Al Liebl (Mesmer)
 related:
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2) §2 rules, §2.4 promotion, §5 phase 2
   - CALLING-SERVICE.md (0.2.0, approved by the owner 2026-10-12; 0.1.1 is what §5.1 describes)
-  - VAULT-MESSAGING.md (0.28.0) §10.10 calls, §7.3, §8.5, §10.4.1, §11.10.8, §14.2
+  - VAULT-MESSAGING.md (0.28.0) §10.10 calls, §7.3, §8.5, §10.4.1, §11.10.8; (0.38.0) §14.2 trigger 5, the call wake (V4)
   - RELAY-PROTOCOL.md (0.7.1) §6.2–§6.4, §7.2 (rewritten in 0.7.0: limits per key)
-  - PUSH-GATEWAY.md (0.4.4) §6, §14.2 item 13
+  - PUSH-GATEWAY.md (0.4.4) §6, §14.2 item 13; (0.5.1) §8
   - ANDROID-PLAN.md (0.1.37) §4 Notification modes, §5, §6
   - VAULT-RELEASES.md (0.1.19) §5.2 `calls_url`, §8.4 egress
   - vettid-android #123 (the C0 spike, not for merge) and its docs/calls/C0-FRAME-FORMAT.md
@@ -50,6 +50,15 @@ changelog:
     d recommendations are approved"): D12–D22 and D24–D26 as
     recommended; D23 as (c), the app never pins a connection's identity
     key itself (§13.5)
+  - 0.1.4 (2026-10-17): V4 specified. The VAULT-MESSAGING §14.2 text
+    for the push wake of a ringing call is written and its wording
+    approved by the owner 2026-10-17 (VAULT-MESSAGING 0.38.0, trigger
+    5: the ordinary `notify` wake, no 5 s debounce, its own cap of 20
+    an hour, no wake once the call stopped ringing; PUSH-GATEWAY 0.5.1
+    §8 notes the per-token limit and the 2 s coalescing). §6.1 V4,
+    §6.6, §7 (C3's exit test: a call within 2 s of another wake), §13.2,
+    §13.3 step 1 and D24 say so, each marked "0.1.4". The plan is
+    otherwise unchanged and stays approved
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -348,7 +357,7 @@ $30 a month, with a billing alarm.
 | V1 | Wire an ICE issuer that fetches credentials from the calling service (§5.1); `calls_url` constant | `release.go:102` passes none; `Coturn` assumes a secret in the vault |
 | V2 | End a ringing call at its `exp` from housekeeping: `timeout`, `call.end` to the devices, a missed call for incoming | No timer exists; housekeeping runs with every collect, at least every 25 s |
 | V3 | A liveness rule for active calls: the call's device sends a keep-alive (proposal: every 30 s; the call ends after 90 s of silence), and an app that restarts ends its stale call | Today a dead device leaves the vault busy for up to 12 h |
-| V4 | A push wake for `call.offer` to the app, exempt from the 5 s debounce and counted separately from the hourly cap | `wakeClass` wakes only for feed items, `vault.held` and the alarm |
+| V4 | A push wake for `call.offer` to the app, exempt from the 5 s debounce and counted separately from the hourly cap. *0.1.4:* specified in VAULT-MESSAGING 0.38.0 §14.2 (trigger 5, the call wake), wording approved 2026-10-17 | `wakeClass` wakes only for feed items, `vault.held` and the alarm |
 | V5 | Per-connection call permission, a limit on unanswered calls, missed calls merged per connection (§3) | No call-specific limit exists |
 | V6 | Glare: when an offer arrives from the connection the vault is itself calling, the call with the lower `call_id` wins and the other ends quietly | Both end `busy` today |
 | V7 | `call.update` (a new offer/answer inside an active call) for network changes and for adding or dropping video | Not in §10.10 |
@@ -435,7 +444,9 @@ V4's wake class in the vault is named so that it can carry over.
 §11.10.8 and §15 item 6, and to VAULT-RELEASES §8.4 are now made and
 approved (2026-10-12), for C2's part (V1–V3, V5, V6, V8). V4 (§14.2) is
 C2's first spec follow-up: it rides in C2's vault release (D24) and its
-text is to be written and approved before that release is cut. V7 (`call.update`), ANDROID-PLAN, PUSH-GATEWAY, RUNBOOK and
+text is to be written and approved before that release is cut
+(*0.1.4:* done: VAULT-MESSAGING 0.38.0 §14.2, wording approved by the
+owner 2026-10-17; PUSH-GATEWAY 0.5.1 §8 and §14.2 item 13 with it). V7 (`call.update`), ANDROID-PLAN, PUSH-GATEWAY, RUNBOOK and
 STAGING-DEVELOPMENT-PLAN are still to do.
 
 - **VAULT-MESSAGING**: §10.10 (V2–V8: timeouts, keep-alive, glare,
@@ -469,7 +480,7 @@ days of implementation and review, as ranges; owner testing is extra.
 | C0 | Spike (§4): library in the `foss` flavour, audio between two phones on one Wi-Fi with hard-coded signalling, frame encryption, Telecom (0.1.2: done except Telecom, which moves to C3; results in §12.1) | The five proofs of §4, written up; the owner confirms D2 | Nothing deployed | 5–8 |
 | C1 | Voice calls through two staging vaults, app open, same network (the vault gives no servers yet) | Pixel 10 Pro ↔ Pixel 7 on S10: call, ring-back, answer, hang up, decline, busy, no answer; time from tap to ring measured 20 times | **No vault release** (S10 as it is) | 12–18 |
 | C2 | The calling service on staging; vault fixes V1–V3, V5, V6, V8; 0.1.3: also the media suites as signed members and key confirmation (§12.3), detailed in §13 | The same calls with one phone on mobile data and one on Wi-Fi; app killed mid-call frees both vaults within 2 minutes; glare connects one call (0.1.3: in measurable steps, §13.4) | New service and stack; **a vault release**; host stack deploy (egress) | 12–20 (0.1.3: 14–22, for the added scope, §13.6) |
-| C3 | Ringing with the app closed; 0.1.2: Telecom (`core-telecom`, the `phoneCall` service, `CallStyle`, answering from a notification) and its proof on GrapheneOS and stock, moved here from C0 and C1 (§12.6) | On-phone service: rings within 2 s on both kinds of phone, screen off, including after a reboot; behaviour in Doze recorded. Google push on the Pixel 7 once Firebase exists (does not block the phase) | **A vault release** for V4 (can ride with C2's) | 6–10 |
+| C3 | Ringing with the app closed; 0.1.2: Telecom (`core-telecom`, the `phoneCall` service, `CallStyle`, answering from a notification) and its proof on GrapheneOS and stock, moved here from C0 and C1 (§12.6) | On-phone service: rings within 2 s on both kinds of phone, screen off, including after a reboot; behaviour in Doze recorded. Google push on the Pixel 7 once Firebase exists (does not block the phase); *0.1.4:* including a call that rings within 2 s of another wake of the same phone (the gateway answers that wake without a second push, PUSH-GATEWAY §5.2 step 4; the app woken by the first push must still find the offer) | **A vault release** for V4 (can ride with C2's) | 6–10 |
 | C4 | Video: camera, switching cameras, adding video to a voice call, network change (V7) | Video both ways for 10 minutes; walk from Wi-Fi to mobile data without the call dropping | A vault release (V7) | 8–14 |
 | C5 | The TURN fallback and hostile networks | A call from a network allowing only TCP 443; a call with relay forced on one side and on both (debug option; both on one TURN server: the old backend ran two servers because this case failed there); **the share of calls that needed TURN, counted over at least 50 real calls on mobile data and home networks** (the app records direct or relayed per call, locally) and written into this plan | App only (0.1.3: and a stack deploy for TURN over TLS on 443, which D18 puts here) | 4–7 |
 | C6 | Hardening: call limits and spam, battery over 24 h idle and an hour's call, Bluetooth and wired headsets, a mobile call arriving during a VettID call, accessibility, texts | A written test sheet passed on all three phones | App only | 8–12 |
@@ -762,7 +773,7 @@ code or key is involved anywhere in this.
 
 | Repository | Work | Spec |
 |---|---|---|
-| **vettid-vault** (a staging release, "release C2") | **V1, V8:** an issuer client: a request with a fresh key and an attestation, the pool of 4, one credential per call, the limits and backoff; the release constant `calls_url` and its checks; the enclave's allowlist entry; the parent's `DefaultAllow`; remove the `Coturn` issuer that holds a secret. **V2:** the ring timer in housekeeping. **V3:** `call.keepalive`, watched calls, the 90 s rule. **V5:** `call.permission.set` and `.list`, the unanswered-call counts, merged missed calls. **V6:** glare. **Signed suites:** form 2 of the shares, both forms vouched, the form checks. `call.list`'s new members. Vectors for `m2` and the confirmation in `calls.json`. **V4** (the push wake for a ringing call; D24), once its §14.2 text is approved. MUST-COVERAGE for all of it | VAULT-MESSAGING 0.28.0 §10.10, §11.10.8; VAULT-RELEASES 0.1.19 §5.2 |
+| **vettid-vault** (a staging release, "release C2") | **V1, V8:** an issuer client: a request with a fresh key and an attestation, the pool of 4, one credential per call, the limits and backoff; the release constant `calls_url` and its checks; the enclave's allowlist entry; the parent's `DefaultAllow`; remove the `Coturn` issuer that holds a secret. **V2:** the ring timer in housekeeping. **V3:** `call.keepalive`, watched calls, the 90 s rule. **V5:** `call.permission.set` and `.list`, the unanswered-call counts, merged missed calls. **V6:** glare. **Signed suites:** form 2 of the shares, both forms vouched, the form checks. `call.list`'s new members. Vectors for `m2` and the confirmation in `calls.json`. **V4** (the push wake for a ringing call; D24), once its §14.2 text is approved (*0.1.4:* approved 2026-10-17, VAULT-MESSAGING 0.38.0). MUST-COVERAGE for all of it | VAULT-MESSAGING 0.28.0 §10.10, §11.10.8; VAULT-RELEASES 0.1.19 §5.2 |
 | **vettid-calls** (new, AGPL-3.0) | The issuer (Go; the attestation and manifest code shared with vettid-push); the coturn image with its configuration and `turn-agent`; `callsctl`; reproducible builds in CI; a README | CALLING-SERVICE 0.2.0 §4, §5, §7, §10 |
 | **vettid.org** | `VettidOrgCallsDataStack` and `VettidOrgCallsStack` in the staging app; `callsHost` in `lib/config.ts` and `lib/vault/egress.ts` (snapshot test); the host stack deploy; RUNBOOK "Calling service"; the release list entry and log text for release C2; the open source page lists `vettid-calls` | CALLING-SERVICE §8, §10, §11; VAULT-RELEASES §8.4 |
 | **vettid-android** | Learn the vault's level from `call.list` (`v`); form 2 (`suites`, `ek_sig2`, `suite`, `offered`), key confirmation with the microphone held back on the callee; `keepalive` and `call.keepalive`; the stale sweep by `device_id`, `exp` and `now`; glare (`superseded_by`); "Calls: allowed / off" on a connection and the limited state; relay or direct recorded per call; a debug-only forced-relay switch to test the fallback (§3.1); all of it while still working against S10. No pin of a connection's identity key (D23): `docs/calls/CALL-MEDIA.md` §7 rule 6 stops calling that an open question | VAULT-MESSAGING §10.10 "Call forms", "Key confirmation", "Liveness", "Glare", "Mixed releases" |
@@ -775,7 +786,8 @@ No relay change, no member API change, no push gateway change.
    specifications say what was decided. **First spec follow-up:** the
    VAULT-MESSAGING §14.2 text for the push wake of a ringing call (V4),
    which rides in release C2 (D24); it is written and approved before
-   step 6.
+   step 6. *0.1.4:* written, and its wording approved by the owner
+   2026-10-17 (VAULT-MESSAGING 0.38.0 §14.2 trigger 5).
 2. **The handshake test first** (stacks, a day): the issuer's front
    deployed with a stub behind it, and a development enclave completes
    a TLS 1.3, HTTP/2 handshake against it under the pinned Amazon
@@ -850,7 +862,7 @@ before a second suite).
 | D21 | Glare (V6) | (a) **The lower `call_id` wins; the phone whose call lost answers the winning call by itself**, while its outgoing-call screen is still showing. (b) The same, but that phone rings and the member taps Answer. (c) As today: both busy | **(a)**. The member asked for this call seconds earlier; (b) makes two people who are calling each other wait for each other | **As recommended** |
 | D22 | The call limits (V5) | The proposal of §3: **3 unanswered calls in 10 minutes or 10 in 24 hours** per connection, then no ring and one merged missed-call item. To confirm: a declined call counts as unanswered; an answered call or a call back clears the counts; "Calls: off" stops both directions (the member's own calls to that connection too) | **As proposed**, with those three points | **As recommended** |
 | D23 | Should the app pin a connection's identity key itself, so that the call's `peer_ik` check also holds against the member's own vault | What it would take: a store on each device of every connection's key, taken at the first sight or when the member compares the verification code; the vault handing the device each key rotation with its proof, and the device checking it; a warning screen for a changed key and a way to accept it; re-pinning after a transfer, a recovery or a new desktop, where the store starts empty and the vault must be believed again. What it would give: the member's own vault could no longer listen to a call by swapping key shares without the phone noticing, provided the other member's vault is honest. It would protect calls only: the member's own vault still reads every message and holds the member's identity key. Options: (a) in C2; (b) later, as a design of its own across calls and messages, if the threat model is changed to distrust the member's own enclave; (c) **never** | Recommended was (b). The owner chose otherwise | **(c) Never.** The app does not pin a connection's identity key itself, keeps no pin store and shows no changed-key warning. The member's own vault is trusted, for calls and messages alike (VAULT-MESSAGING §2.1). The `peer_ik` check binds a call to the connection the vault names and to the fingerprint shown; it is not a defence against the member's own vault, by design |
-| D24 | Does the push wake for a ringing call (V4, a C3 item) ride in C2's vault release | (a) **Yes, if its text for VAULT-MESSAGING §14.2 is approved before the release is cut**: one release and one round of moves fewer. (b) Its own release with C3 | **(a)** | **As recommended:** it rides in release C2. Its §14.2 text is still to be written and approved before the release is cut |
+| D24 | Does the push wake for a ringing call (V4, a C3 item) ride in C2's vault release | (a) **Yes, if its text for VAULT-MESSAGING §14.2 is approved before the release is cut**: one release and one round of moves fewer. (b) Its own release with C3 | **(a)** | **As recommended:** it rides in release C2. Its §14.2 text is still to be written and approved before the release is cut. *0.1.4:* written and approved 2026-10-17 (VAULT-MESSAGING 0.38.0) |
 | D25 | The parent's allowlist names the issuer of both channels now | (a) **`calls.staging.vettid.org` and `calls.vettid.org`**, as it names both push gateways: production's DNS Firewall does not admit the name, and production has no `calls_url`. (b) Staging's only: production's name then needs another parent change later | **(a)** | **As recommended** |
 | D26 | Key confirmation in every signed-form call, or only when more than one suite is offered | (a) **Every call.** (b) Only with two or more suites offered | **(a)**: one path, tested from the first day, and audio is never sent to a device that has not shown it holds the key | **As recommended** |
 

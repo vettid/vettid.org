@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.37.0
+version: 0.38.0
 date: 2026-10-17
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -10,8 +10,8 @@ related:
   - RELAY-PLAN.md
   - PQC-MIGRATION.md
   - CALLING-SERVICE.md (0.2.0)
-  - CALLS-PLAN.md (0.1.3) §13 (phase C2; decisions D12–D26, decided 2026-10-12)
-  - PUSH-GATEWAY.md (0.5.0)
+  - CALLS-PLAN.md (0.1.4) §6.1 V4, §13 (phase C2; decisions D12–D26, decided 2026-10-12)
+  - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.7.1)
   - ANDROID-PLAN.md (0.1.43)
@@ -25,6 +25,24 @@ related:
   - VAULT-HOST-PROTOCOL.md (0.1.12; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.38.0: release C2: **the push wake for a ringing call** (CALLS-PLAN
+    V4, decision D24); wording approved by the owner 2026-10-17 (the
+    wake is the ordinary `notify` wake; no 5 s debounce for it; its own
+    cap of 20 an hour; no wake once the call stopped ringing; only an
+    offer that rings an owner device wakes; what it reveals said
+    plainly; and no suppression when the app is known to be connected:
+    one path). New trigger 5 of §14.2: `call.offer` to the app for an
+    incoming call that rings the member's devices; an offer that rings
+    no device wakes nobody. A call wake is sent as soon as no wake is in
+    flight, counts toward its own cap of 20 call wakes per rolling hour
+    and not toward the 30 or the 10, and past it is handled as an
+    ordinary trigger. It is sent only while its call is `ringing`, and
+    its retries stop at the call's `exp` or when the call stops
+    ringing. On the wire it is the same `POST /v1/wake` with `class`
+    `notify`, so the gateway, Google and Apple cannot tell it from any
+    other wake; "What a call wake shows" states the timing it reveals.
+    §10.10 "Ringing" says that a ringing offer wakes the app; §15 item
+    32 point 8 records it. Binds nothing before release C2
   - 0.37.0: approved by the owner 2026-10-17 (as built in vettid-vault #104, #105, #106). The vault tasks VA2
     and VA3 of IOS-PLAN §9.1, and the vault follow-ups of ANDROID-PLAN
     0.1.42 §4 "Questions and vault follow-ups" (owner, 2026-10-17:
@@ -7314,7 +7332,8 @@ new one on the other device.
   vault answers `call.end{busy}` ((C2) except in a glare, below).
   Otherwise it sends every owner app and desktop (within its access
   session, §9.1) `call.offer` with the same `exp` and its own signed ICE
-  configuration. A ringing device MAY send `call.ringing`, which the vault
+  configuration. (C2) An offer that rings the member's app also wakes it
+  (§14.2 trigger 5). A ringing device MAY send `call.ringing`, which the vault
   forwards once to the caller's vault, which forwards it to the call's
   device. A device rings for `exp` minus the event's `ts`, both the
   vault's clock, whatever its own clock says. **A callee's device
@@ -16257,12 +16276,21 @@ mailbox:
    and a dead token is found again at the first wake after the next
    unlock (0.24.1);
 4. `credential.alarm` (§3.5.9).
+5. **(C2; CALLS-PLAN V4, decision D24)** `call.offer` (V→D) to the app,
+   for an incoming call that rings the member's devices (§10.10
+   "Ringing"). An offer that rings no device wakes nobody: calls off for
+   the connection, the unanswered-call limit, a held vault, a call
+   answered `busy`, a glare in which the vault's own call wins, a
+   duplicate or an offer whose `exp` has passed. Its wake is a **call
+   wake** (below).
 
-While the vault is held (§3.6.3) only 2, 3 and 4 occur. Nothing else
-wakes: not `message.new` (its feed item does), `sync.event`, responses,
-receipts, the token, address, rotation and handshake messages, items of
-priority `low`, guides, or call signalling (calls are left to the calls
-phase, §15 item 32). Desktops and agents are never woken.
+While the vault is held (§3.6.3) only 2, 3 and 4 occur (a held vault
+rings no device). Nothing else wakes: not `message.new` (its feed item
+does), `sync.event`, responses, receipts, the token, address, rotation and
+handshake messages, items of priority `low`, guides, or call signalling
+other than trigger 5: not `call.answer`, `call.ice`, `call.ringing`,
+`call.keepalive` or `call.end` (a missed call wakes through its feed item,
+trigger 1). Desktops and agents are never woken.
 
 **Debounce and limits** (per registration, in memory, reset at unlock):
 
@@ -16275,6 +16303,14 @@ phase, §15 item 32). Desktops and agents are never woken.
   (they still count toward it and are still debounced), up to **10 per
   hour**. The 10 count every wake that carried an exempt trigger,
   whether or not the hourly cap had been reached (0.24.1);
+- **(C2) a call wake** (trigger 5) is not deferred by the 5 s rule: it is
+  sent as soon as no wake is in flight, and a trigger that arrives while
+  it waits merges into it. It counts toward neither the 30 nor the 10,
+  but toward its own cap of **20 call wakes per rolling hour**; past
+  that, trigger 5 is handled as an ordinary trigger (debounced, under the
+  30). A call wake is sent only while its call is still `ringing`: if the
+  call was answered, declined, ended, timed out or superseded before the
+  wake could go out, it is not sent and is not counted;
 - a retry, including the attempt after a `429`'s wait, is part of its
   wake: it is not counted again toward the 30 or the 10, and the caps do
   not hold it back (0.24.1).
@@ -16287,7 +16323,12 @@ and the gateway sends a fixed payload (PUSH-GATEWAY §6): no item, kind,
 name, count, cursor or priority reaches the gateway, Google or Apple.
 There are no vault-side quiet hours: the phone's Do Not Disturb or Focus
 applies to the notification it builds, and the vault does not learn the
-member's time zone.
+member's time zone. **(C2)** A call wake is the same request with the
+same `class`: the gateway sends the same fixed payload, so neither it nor
+Google or Apple can tell a call wake from any other wake. (The iOS phase
+will need a distinct PushKit wake, which Apple requires to be reported as
+a call; that is a PUSH-GATEWAY change for then, and the vault's call wake
+class is kept separate so that it can carry over, CALLS-PLAN §6.5.)
 
 **Outcomes:**
 
@@ -16313,9 +16354,23 @@ member's time zone.
   the three above (`401`, a `400` other than `token_invalid`, any other
   `4xx`, a `202` whose body does not parse) is handled the same way
   (0.24.1; owner decision 2026-10-10, PUSH-GATEWAY §7).
+- **(C2)** For a call wake, a `429` whose wait ends after the call's
+  `exp`, and the retries after `5xx`, a timeout or no connection that
+  fall after the call's `exp` (with a 45 s ring: the 120 s retry, and the
+  30 s retry of a wake sent late in the ring), are dropped, and so is any
+  retry once the call is no longer `ringing`. `last_result` and
+  `last_wake_at` are set as for any wake.
 
 No wake writes an audit entry or a feed item: wakes are frequent, and a
 log of them would be a timeline of the member's activity.
+
+**(C2) What a call wake shows.** Because it is not debounced, the gateway
+and Google or Apple see a wake within about a second of the moment a call
+starts ringing, and they see a wake each time a caller calls again, up to
+the per-connection limit (§10.10, at most 3 unanswered calls in 10
+minutes). They do not learn that it was a call, from whom, whether it was
+answered, or how long it lasted: the payload is the fixed one, and nothing
+of the call reaches the gateway.
 
 ### 14.3 Egress, attestation and privacy
 
@@ -17771,8 +17826,8 @@ Follow-ups:
        and dead tokens are audited.
     7. **No vault-side quiet hours** (the phone's Do Not Disturb applies;
        the vault would need the member's time zone).
-    8. **Calls** (ringing through push: FCM full-screen intents, iOS
-       PushKit and CallKit) are left to the calls phase.
+    8. **Calls**: (0.38.0, release C2) a ringing call wakes the app
+       (§14.2 trigger 5); the iOS VoIP wake is left to the iOS phase.
     Open points:
     1. **The numbers** of point 4 are first guesses, to be tuned with the
        test phones (N4).
