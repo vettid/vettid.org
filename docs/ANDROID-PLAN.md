@@ -1,9 +1,29 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.42
+version: 0.1.43
 date: 2026-10-17
 changelog:
+  - 0.1.43: approved by the owner 2026-10-17, texts as drafted (owner decisions of
+    2026-10-17; VAULT-MESSAGING 0.36.0). §4 "Recovery and unlock from
+    release R": the phone key's secret gets 32 fresh random bytes per
+    epoch (form 2, the same Keystore key), kept in `account.bin` with
+    the epoch in one atomic write, and nothing sent unless that write is
+    durable; at epoch 1 the key, then the record, then the request;
+    current, candidate (at most four; a fifth change refused until the
+    member unlocks again) and replaced records; the unlock order;
+    replaced records deleted 7 days after confirmation; "Try the earlier
+    secret" on the "no longer holds the keys" screen, only from its
+    button, moved by `ok` and never by `bad_pin`, followed by a History
+    entry and a prompt for a new phone secret; only a definite loss of
+    the key or of `account.bin` counts as lost keys; a build refuses a
+    record format it does not know without writing or wiping anything;
+    staging phones keep form 1 until their next renew or PIN
+    change, with no prompt. "New phone secret" corrected: a new secret
+    alone does not end what code that ran as the app could reach, and
+    on Android before form 2 it did not end that code's hold on the
+    secret either; the text lands in the app before the formula. Tests
+    follow
   - 0.1.42: approved by the owner 2026-10-17, questions 16–27 as
     recommended (§9). (Owner decisions of 2026-10-17, D8; VAULT-MESSAGING 0.34.0 §10.16–§10.18; CALLS-PLAN
     0.1.3). New §4 "Wallet, presence, location and video": the app's
@@ -1853,15 +1873,73 @@ The old phone's keys after a transfer were decided by the owner on
 - It reads the key's security level back. `Software`: the app refuses to
   enroll, to receive a transfer or to recover, with "This phone cannot
   keep your vault's keys in its secure hardware."
-- `unlock_secret = HMAC-SHA-256(phone key, "vettid/vms/2/unlock-secret"
-  || 0x00 || vault_id || 0x00 || epoch (8 bytes, big-endian))`, computed
-  by the hardware each time it is needed, held in memory only while a
-  request is built and zeroized after. The app stores `epoch` beside
-  `vault_id`: 1 after enrollment, a transfer or a recovery, one higher
-  after each `pin.change` and `vault.secret.renew` once their answer
-  arrived. An unlock answered `device_secret` is tried once with the
-  next epoch (the answer to a change may have been lost); if that fails
-  too, the app shows "no longer holds the keys" (below).
+- (0.1.43; VAULT-MESSAGING 0.36.0) `unlock_secret = HMAC-SHA-256(phone
+  key, "vettid/vms/2/unlock-secret-2" || 0x00 || key_vault || 0x00 ||
+  epoch (8 bytes, big-endian) || r (32))`, computed by the hardware each
+  time it is needed, held in memory only while a request is built and
+  zeroized after. `key_vault` is the vault id the key was made for, `""`
+  for a transfer's new phone. `r` is 32 fresh bytes from `SecureRandom`
+  for each epoch, so that code that once ran as the app cannot have
+  computed a later epoch's secret. `epoch` is 1 after enrollment, a
+  transfer or a recovery, one higher at each `pin.change` and
+  `vault.secret.renew`.
+- **The records** (`LocalAccount` in `account.bin`, the Keystore-encrypted
+  file store in `noBackupFilesDir`): the current record
+  `(key_vault, epoch, r)`, up to four candidates, and the replaced records
+  with the time they were replaced. A candidate is written in the same
+  atomic write as its epoch, and the request that carries its secret is
+  built only after that write is known to be durable: `RecordStore.update`
+  returns `false` and writes nothing for a stale, closed or unreadable
+  record, and the phone-secret callers of `updateLocal` must check it
+  (today they ignore it). A failed or dropped write stops the operation:
+  nothing is sent, and the member sees "This phone could not save what it
+  needs for this change. Nothing was sent. Try again." A retry of the
+  same request reuses the candidate; a new change the member starts
+  makes a new one. `pin.change` and `vault.secret.renew` use a new
+  candidate instead of the next counter value under the old rule.
+- **Epoch 1** (enrollment, a transfer to this phone, a recovery's
+  register): create the Keystore key, then write the record
+  (`key_vault`, epoch 1, `r`), then send. A phone key that no record
+  names, found at start-up or at the next attempt, was never sent: the
+  app deletes it and makes a new key and a new record.
+- **Unlock order.** The current record; after `device_secret`, the
+  candidates newest first, each once, `UnlockEpoch.confirmsNext`
+  deciding (`ok`, `bad_pin`, `transfer_incomplete` make that candidate
+  current; an answer decided before the secret check stops the tries
+  with nothing changed). An `ok` with the current record makes the
+  candidates replaced records. When the current record and every
+  candidate are answered `device_secret`, the app shows "no longer holds
+  the keys" (below).
+- **Never dropped.** No answer but a confirmation moves the current
+  record; `retry`, `busy`, `bad_pin`, `bad_password`, `backoff`,
+  `counter_unavailable`, a refusal or no answer leave it in place.
+- **Deletion.** Replaced records are deleted 7 days after the
+  confirmation that replaced them (the clock rule of the old phone's keep
+  period: a clock set back never extends it), or at a wipe. The wipe
+  removes the phone key and every record.
+- **Keystore errors.** Only a definite loss leads to "no longer holds
+  the keys": the phone key missing, or `KeyPermanentlyInvalidatedException`;
+  for `account.bin`, the file missing, or a decryption that fails while
+  its Keystore AES key works. Any other Keystore or StrongBox refusal,
+  the record's AES key included, is shown as "Your phone's secure
+  hardware did not answer. Nothing was sent. Try again." and changes no
+  record. (Today every Keystore error of the phone key is treated as a
+  lost key; this changes with the formula.)
+- **An older build.** The account record gains a format number; a build
+  that meets a format it does not know refuses to start ("This version
+  of VettID is older than the one that set up this phone. Install the
+  current version.") rather than compute a secret by an older rule. The
+  refusal writes nothing, wipes nothing and makes no key. Builds before
+  this change ignore unknown fields: they cannot apply the rule, and
+  their next write of the record would drop `r`. Android refuses to
+  install a release build over a newer `versionCode`, so this concerns
+  debug and test builds only. A test installs an older debug build over
+  a form 2 record and checks that nothing is wiped and no new key is
+  made.
+- **Staging phones** hold form 1 records (no `r`, the label
+  `vettid/vms/2/unlock-secret`). They keep them, with no prompt, and the
+  app computes each record with its own rule; the next renew, PIN change
+  or new phone key makes a form 2 record.
 - It is sent in `vault.enroll`, `vault.unlock` and
   `vault.recovery.open` (sealed to the ETK), in a transfer's `hs.init`
   (sealed to the vault), and as `new_unlock_secret` in the UTK-sealed
@@ -1872,12 +1950,19 @@ The old phone's keys after a transfer were decided by the owner on
 - **No iOS unlock** for a vault of release R until the secret is designed
   for iOS (VAULT-MESSAGING §15 item 39).
 - Tested on both test phones: the key in StrongBox or the fallback, its
-  level read back, the same secret twice, and that no screen-lock change
-  removes it.
+  level read back, the same secret twice for the same record and a
+  different one for a different `r` (the 85-byte message of form 2), and
+  that no screen-lock change removes it.
+- Modules: `:core:keystore` unchanged (the same HMAC key);
+  `:core:crypto` `UnlockSecret` takes `r` under the new label and keeps
+  the form 1 function for old records; `:core:data` `PhoneSecretState`
+  becomes the list of records, with `PhoneSecrets` making a candidate
+  (stored first) and confirming one; `keepPhoneKey` and the recovery's
+  register store `r` with the new key.
 
 **"This phone no longer holds the keys"** (an unlock answered
-`device_secret` twice, or a missing phone key while the app holds a
-`vault_id`): "This phone no longer holds the keys of your vault. That
+`device_secret` with the current record and every candidate, or a
+definite loss of the phone key while the app holds a `vault_id`): "This phone no longer holds the keys of your vault. That
 happens when the app's data was cleared or the phone was set up again
 from a backup. Nothing was disclosed. Whether you can get back into the
 vault depends on one of its settings. If its credential backup was on
@@ -1889,6 +1974,30 @@ one. If you still have a phone on which VettID works, use 'Move to a
 new phone' there instead. The account site tells you which of these
 applies." The app cannot ask the vault; the account site reads the
 backup bit.
+
+(0.1.43) **Try the earlier secret.** While a replaced record exists
+(at most 7 days after a PIN change or a new phone secret), the screen
+also shows: "Use this only if your vault was put back to how it was
+before your last PIN change or new phone secret. This phone can then
+try the secret it used before that change. Enter the PIN you had before
+that change." with **Try the earlier secret**. Only this button tries a
+replaced record, never the app on its own: newest first, each once.
+Only `ok` (or `transfer_incomplete`, for a transfer that did not
+finish) makes it current again. **`bad_pin` changes nothing**: it shows
+only that a header the host served matched the secret, and nothing
+opened. The app then says "That PIN did not open your vault with the
+earlier secret. Nothing was changed. Enter the PIN you had before your
+last change and try again." On `ok` the app adds a History entry, shown on the phone for now (a
+vault History event may follow in a later release)
+("Opened with this phone's earlier secret on {date} at {time}. Your
+vault had been put back to how it was before your last change.") and
+asks for a new phone secret at once: "Your vault is open as it was
+before your last change. It is back on an older secret, which something
+that once ran as VettID on this phone may have known. Get a new phone
+secret now." with **New phone secret** (the PIN and the password, as in
+Settings) and **Later**; the app asks again at each start until it is
+done. If no earlier secret opens it: "The earlier secret did not open
+your vault either." and the screen above.
 
 **Recovery on the new phone** (replaces the PIN step and the password
 step of the "Recovery (new phone)" row).
@@ -1984,7 +2093,8 @@ step of the "Recovery (new phone)" row).
 **Change PIN** (Settings → Vault → PIN; `pin.change`, now a credential
 operation). One flow: the current PIN, the new PIN twice (the app's
 weak-PIN rules as at enrollment), then the credential password, sent
-together with the next epoch's secret. Texts: success "Your PIN was
+together with a new epoch's secret (0.1.43: a new candidate, stored
+first). Texts: success "Your PIN was
 changed. Your vault's recovery now has 10 new attempts for the new PIN
 and your password."; `busy`: "The service is busy right now. Nothing
 was changed. Try again in a minute."; `counter_unavailable`: "Your PIN
@@ -1992,7 +2102,12 @@ cannot be changed right now, because your vault cannot reach its
 recovery record. Nothing was changed. Try again later."; `bad_pin` and
 `bad_password` as at the owner check (they count as failed checks). The
 app moves to the next epoch only with the answer. Refused while the
-vault is held, as before. When the member came from a "not you" notice
+vault is held, as before. (0.1.43) Refused before anything is sent
+while four earlier changes are unanswered, for a PIN change and a new
+phone secret alike: "Lock your vault and unlock it again first. Earlier
+changes from this phone got no answer, and this phone needs to learn
+which one your vault holds before it makes another. Nothing was
+changed." When the member came from a "not you" notice
 about attempts, the app says first: "Changing only the PIN gives
 whoever is guessing ten new tries at the same password. Change your
 password too."
@@ -2075,9 +2190,17 @@ password too."
 
 - Settings → Security → **New phone secret** (`vault.secret.renew`): the
   PIN and the password; "Your phone now uses a new secret for this
-  vault." For a member who fears that something ran as the app on this
-  phone; it replaces the vault's DEK, so the old secret opens no later
-  stored state.
+  vault." It replaces the vault's DEK, so a secret that leaked by
+  another route opens no later stored state. (0.1.43) The screen says,
+  before the PIN: "If something ran as VettID on this phone, a new
+  secret alone is not enough: move your vault to another phone, or
+  recover it." Until the form 2 secret ships, code that ran as the app
+  could have computed the next secret in advance, so on Android only a
+  new phone key (a transfer or a recovery) ended that exposure; from
+  form 2 a new secret made after such code is gone ends it for the
+  secret, but not for the device's other keys. This text lands in the
+  app before the formula change. The four-unanswered refusal of "Change
+  PIN" applies here too.
 - The credential backup's off-warning gains: "With this off, clearing
   the app's data or losing this phone ends the vault."
 - **A right entry that could not be completed** (an open after a run
@@ -2093,7 +2216,22 @@ password too."
   to continue."
 
 **Tests.** Unit: the secret's formula against VAULT-MESSAGING §16's
-vectors; the epoch after a lost answer; the password rules and the
+vectors (`phone` for form 1, `phone_2` for form 2); the epoch after a
+lost answer; (0.1.43) the records against a fake vault that follows the
+vault's order of writes: store before send (a stop after the store and
+before the send leaves a candidate that a retry reuses and a new change
+keeps; a store that drops or refuses the write stops the operation with
+nothing sent), epoch 1 (a key with no record at start-up is replaced
+by a new key and record), the earlier secret moved by `ok` but not by
+`bad_pin`, with its History entry and the new-secret prompt, a temporary
+refusal of `account.bin`'s Keystore key that changes nothing, a renew answer lost then an unlock, two lost renews then an
+unlock (newest first), a lost renew then a PIN change, an unlock with
+the current record that drops the vault's `next` part, every non-`ok`
+answer leaving the current record, the fifth change refused, replaced
+records deleted after 7 days and not later with the clock set back, the
+earlier secret tried only from its button, a temporary Keystore error
+that changes nothing, a form 1 record moving to form 2, the wipe leaving
+no record and no key, and no `r` or secret in any log or crash report; the password rules and the
 shared verdict file; NFC. Instrumented, dev stack: enrollment, unlock,
 recovery to `ok`, every answer of the table, the check-before-sending
 step (no entry on disk; `FLAG_SECURE`), a transfer with Finish the move

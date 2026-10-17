@@ -1,6 +1,6 @@
 # VettID Push Gateway Protocol
 
-**Version:** 0.5.0 (draft)
+**Version:** 0.5.1 (draft)
 **Status:** Draft for review (N2; owner request of 2026-10-10: "we can
 start to design the push service for google play and apple ios").
 Implemented by `vettid/vettid-push` (the gateway) and vettid-android #109
@@ -12,7 +12,8 @@ replay records of one key (vettid-push #2), approved by the owner
 2026-10-13; 0.5.0 verifies that the registering vault's app holds the
 push token (a challenge push the app must return) and gives wake blobs
 a maximum age of 90 days (vettid-push #4), approved by the owner
-2026-10-14
+2026-10-14; 0.5.1 notes the vault's wake for a ringing call (no change
+to the gateway)
 **Companion to:** VettID Relay Protocol (Appendix A), VAULT-MESSAGING
 0.24.1 §14 (`push.register`, the vault's wake rules), ANDROID-PLAN D7
 
@@ -433,6 +434,16 @@ lock wake: what is left of its 3 s budget), longer than this gateway's
   key, in memory only, never persisted or logged): at most **60 wakes per
   hour**, burst 10. The vault's own limits are lower (VAULT-MESSAGING
   §14.2), so this bounds only a misbehaving or compromised caller.
+  (0.5.1) From release C2 the vault also wakes the app for a ringing
+  call (VAULT-MESSAGING 0.38.0 §14.2 trigger 5): the same `notify` wake,
+  not debounced, under a cap of its own of 20 an hour. The vault's
+  caps together (30 an hour, then one per 10 minutes; 10 exempt; 20
+  call wakes) can reach this limit only in an hour at every cap at
+  once, or in a burst of more than 10 wakes; a call wake answered `429`
+  with a wait past the call's `exp` is dropped, and the missed call
+  wakes through its feed item. A call wake within 2 s of another
+  wake of the same token is coalesced (§5.2 step 4): the app woken by
+  the first push collects after it starts, so it still finds the offer.
 - (0.5.0) **Challenges per token**: at most **10 an hour**, burst 5,
   counted apart from wakes so that challenges cannot use up a token's
   wake allowance. Confirmations are limited per source address at the
@@ -535,6 +546,9 @@ lock wake: what is left of its 3 s budget), longer than this gateway's
    deposit with a wake a second later. Mitigations: the gateway keeps
    **no per-request logs** (§10.5), shares no datastore with the relay,
    and the vault's debounce (VAULT-MESSAGING §14.2) blurs bursts.
+   (0.5.1) A ringing call's wake is not debounced, so it follows the
+   call's start within about a second (VAULT-MESSAGING §14.2 "What a
+   call wake shows"); it still does not say that it is a call.
 4. **Gateway compromise** (live memory, credentials): the attacker can
    send contentless pushes to the tokens of wakes passing through while
    it lasts (annoyance, battery), and read nothing. Stored data yields
@@ -1066,7 +1080,11 @@ still receives everything:
 13. **Calls.** Ringing calls need FCM high priority with a full-screen
     intent on Android and PushKit (VoIP pushes, which must report a
     CallKit call at once) on iOS. **Recommended: leave to the calls
-    phase**; missed calls already notify as feed items.
+    phase**; missed calls already notify as feed items. (0.5.1)
+    **Answered for Android: no change.** The vault's call wake is the
+    ordinary `notify` wake, whose fixed payload is already high priority
+    (VAULT-MESSAGING 0.38.0 §14.2, CALLS-PLAN §6.5). The iOS VoIP wake
+    (PushKit) is a change for the iOS phase.
 14. **Connected apps** (§12). **Answered** (owner review of 2026-10-10):
     connections already use the channel through messaging; links are
     `https://` only; services come with the service vault.
@@ -1150,6 +1168,12 @@ again computes another digest and refuses a good signature.
 
 ## 17. Changelog
 
+- **0.5.1** — the vault's wake for a ringing call (VAULT-MESSAGING
+  0.38.0 §14.2 trigger 5, release C2; CALLS-PLAN V4). No change to the
+  gateway: the call wake is the ordinary `notify` wake. §8 says how the
+  vault's caps compare with the per-token limit and what the 2 s
+  coalescing does to a call wake; §9 item 3 notes that a call wake is
+  not debounced; §14.2 item 13 is answered for Android.
 - **0.5.0** — registration verifies the push token, and wake blobs
   expire (as built in vettid-push #4; approved by the
   owner 2026-10-14). A registration proved that a genuine vault release

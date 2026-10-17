@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.34.0
-date: 2026-10-16
+version: 0.38.0
+date: 2026-10-17
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -10,20 +10,145 @@ related:
   - RELAY-PLAN.md
   - PQC-MIGRATION.md
   - CALLING-SERVICE.md (0.2.0)
-  - CALLS-PLAN.md (0.1.3) §13 (phase C2; decisions D12–D26, decided 2026-10-12)
-  - PUSH-GATEWAY.md (0.5.0)
+  - CALLS-PLAN.md (0.1.4) §6.1 V4, §13 (phase C2; decisions D12–D26, decided 2026-10-12)
+  - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.7.1)
-  - ANDROID-PLAN.md (0.1.41)
+  - ANDROID-PLAN.md (0.1.43)
+  - IOS-PLAN.md (0.1.1; §9.1 VA1–VA3)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
-  - VAULT-RELEASES.md (0.1.28; 0.1.6 approved 2026-10-04)
+  - VAULT-RELEASES.md (0.1.31; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
   - VAULT-HOST-PROTOCOL.md (0.1.12; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.38.0: release C2: **the push wake for a ringing call** (CALLS-PLAN
+    V4, decision D24); wording approved by the owner 2026-10-17 (the
+    wake is the ordinary `notify` wake; no 5 s debounce for it; its own
+    cap of 20 an hour; no wake once the call stopped ringing; only an
+    offer that rings an owner device wakes; what it reveals said
+    plainly; and no suppression when the app is known to be connected:
+    one path). New trigger 5 of §14.2: `call.offer` to the app for an
+    incoming call that rings the member's devices; an offer that rings
+    no device wakes nobody. A call wake is sent as soon as no wake is in
+    flight, counts toward its own cap of 20 call wakes per rolling hour
+    and not toward the 30 or the 10, and past it is handled as an
+    ordinary trigger. It is sent only while its call is `ringing`, and
+    its retries stop at the call's `exp` or when the call stops
+    ringing. On the wire it is the same `POST /v1/wake` with `class`
+    `notify`, so the gateway, Google and Apple cannot tell it from any
+    other wake; "What a call wake shows" states the timing it reveals.
+    §10.10 "Ringing" says that a ringing offer wakes the app; §15 item
+    32 point 8 records it. Binds nothing before release C2
+  - 0.37.0: approved by the owner 2026-10-17 (as built in vettid-vault #104, #105, #106). The vault tasks VA2
+    and VA3 of IOS-PLAN §9.1, and the vault follow-ups of ANDROID-PLAN
+    0.1.42 §4 "Questions and vault follow-ups" (owner, 2026-10-17:
+    ANDROID-PLAN questions 16–27 as recommended). (1) **The iOS App ID
+    per channel** (§11.7, §11.10.8): the release constant `ios_app_id`,
+    `3X25CJ86MV.com.vettid.app` in production and
+    `3X25CJ86MV.com.vettid.app.staging` in staging (team ID confirmed
+    by the owner 2026-10-17), one value, the other channel's malformed,
+    as `android_package`. It replaces the App ID constant in code; a
+    build without complete channel constants accepts no App ID. It is
+    checked at an attestation and at every assertion. The development
+    enclave's device policy gains iOS members: the pinned Apple root,
+    further App IDs and the development environment. (2) **`testnet4`**
+    is a network name of its own (§10.18, §10.14); `testnet` keeps
+    meaning testnet3 for new wallets. (3) **`wallet.update` moves the
+    next indices forward** (`accounts`, app only), so that after an import the
+    vault never issues an address the app found used (§10.18). (4)
+    §10.18 lists every `invalid_psbt` reason, says that outputs are
+    shown re-encoded for the wallet's network and that
+    `wallet.address.used` ignores addresses the vault did not issue.
+    (5) **`location.share.stop` is allowed while due or held** (§3.6.3),
+    as `vault.lock` is. (6) **`sync.event{location.request.closed}`**
+    when a pending location request is answered or expires (§10.16);
+    §10.16 says that the end of a share at its expiry is not announced.
+    (7) Presence (§10.17): removing a connection that is in `except` is
+    a new policy version with `presence.changed`; what `last_active`
+    counts; the 5-minute tolerance for a `last_active` ahead of the
+    asking vault's clock. As built in vettid-vault #104 (1), #105
+    (2, 3) and #106 (5–7); VAULT-RELEASES
+    0.1.31 adds the constant to §5.2
+  - 0.36.0: normative; approved by the owner 2026-10-17 (owner decisions of
+    2026-10-17); follows 0.35.0; no enclave change and no vault release
+    (the vault accepts any 32-byte `unlock_secret`). **Android's
+    phone-held unlock secret gets fresh randomness per epoch**
+    (§11.14.1): 32 random bytes `r` per epoch, mixed into the HMAC
+    message under the new label `vettid/vms/2/unlock-secret-2` with the
+    same Keystore key, and stored with the epoch in one atomic write of
+    the account record, so that code that ran as the app can no longer
+    compute the secret of an epoch created after it stopped running. The
+    formula names `key_vault` (the vault id, or `""` after a transfer),
+    as the app always computed it. Rules for records and lost answers:
+    store before send; reuse on automatic retries; a new change makes a
+    new candidate and keeps the unconfirmed ones, at most four, and a
+    fifth change is refused until the member unlocks; confirmation only
+    by the operation's answer or by the existing rule during an unlock
+    (`ok`, `bad_pin`, `transfer_incomplete` after `device_secret`), and
+    an `ok` with the current record ends the candidates; the current
+    record is never dropped on another answer; replaced records deleted
+    7 days after a later epoch is confirmed; an explicit "try the earlier
+    secret" step, offered only while a replaced record exists and never
+    automatic, moved only by `ok` (or `transfer_incomplete`), never by
+    `bad_pin`, and followed by a History entry and a new phone secret,
+    for an operator restore of §11.14.2; a failed or dropped record write
+    stops the operation before anything is sent; at epoch 1 the key, then
+    the record, then the request; only a definite loss of the phone key
+    or the account record counts as lost keys; an app refuses to start on
+    an account record whose format it does not know, writing and wiping
+    nothing. Staging phones keep
+    their form 1 record, with no prompt, until their next renew, PIN
+    change or new phone key. Corrected: §11.14.1 "What the secret
+    protects against", §11.14.9 (`vault.secret.renew`), §11.14.12 and
+    the §13.5 row "The phone's unlock secret", which said that a renew or
+    a PIN change ends any exposure; on Android before this change, code
+    that ran as the app could compute later epochs in advance and only a
+    new phone key ended that. §11.14.2's restore for a PIN change now
+    names the earlier secret; §16 gains the `phone_2` vectors, with
+    values. ANDROID-PLAN 0.1.43 follows
+  - 0.35.0: normative, additive; **approved by the owner 2026-10-17**
+    (vettid.org #320; the stricter protection class as decided, the
+    texts "Unlock your iPhone, then try again." and "Unlock your vault
+    first, then try again. VettID needs to confirm your last change
+    before it can make another." as approved, and replaced records kept 7
+    days as on Android); no
+    enclave change and no vault release (the vault accepts any 32-byte
+    `unlock_secret`). **The phone-held unlock secret on an iPhone**
+    (§11.14.1, "On an iPhone"; IOS-PLAN ID9): a Secure Enclave P-256
+    key-agreement key per `key_vault` (`privateKeyUsage`,
+    `WhenUnlockedThisDeviceOnly`, not synchronizable, not bound to
+    biometry or the passcode); for each epoch a fresh software key pair
+    whose private half is dropped after a key confirmation at creation;
+    `unlock_secret` = HKDF-SHA-256 over the 32-byte x-coordinate, with
+    both public keys (SEC1 uncompressed) in `info` under the label
+    `vettid/vms/2/unlock-secret-ios`; a 16-byte check tag for the
+    "keys usable" check. `key_vault` is fixed for the life of the key,
+    `""` for a transfer's new phone, as on Android. The record of each
+    epoch is stored before the request that carries its secret, reused
+    on a retry, kept as a candidate while its answer is lost and tried
+    after a `device_secret` answer; replaced records deleted 7 days
+    after a later epoch is confirmed (a clock set back never extends
+    this) or at a wipe, and tried only from an explicit step the member
+    takes, as on Android (0.36.0, §11.14.1 rule 7); never in purgeable
+    storage. First-run cleanup of the
+    keychain, deletes at a wipe and at the end of a transfer's keep
+    period, no software key in release or staging builds, and why the
+    alternatives were not chosen. A locked iPhone is never treated as
+    lost keys ("Unlock your iPhone", then a retry); with four
+    unconfirmed candidates a new change is refused until an unlock,
+    never by dropping one. The protection class is stricter than
+    Android's rule, decided by the owner; `AfterFirstUnlockThisDeviceOnly`
+    and its residual are recorded as not chosen. "Missing" counts only when protected
+    data is available before and after the lookup and the lookup itself
+    answers not found; the first-run cleanup reads a marker file and
+    runs only while protected data is available; typed secrets are
+    dropped when the screen locks. §11.7, §11.14's summary, §15 item 39
+    and §16 (the `phone_ios` vectors, with values) follow. Nothing
+    changes for Android. IOS-PLAN 0.1.1 follows
   - 0.34.0: release R (0.33.0); **approved by the owner 2026-10-16**
     (vettid.org #311; owner decisions of 2026-10-16: the name
     `capabilities`; `recovery_offered` listed only when the release
@@ -2369,9 +2494,9 @@ every `drop.*` entry, §10.9). Allowed while held:
 
 | Sender | Types |
 |---|---|
-| The holder | `vault.owner-check`; `vault.status` (reports the hold) and `vault.lock`; `credential.utk.get` (UTKs for the check); `credential.get` and `credential.ack` (the latest blob after a lost check response, §3.5.3, and its confirmation); `credential.version`; `credential.lock`; during a clone alarm, `credential.alarm.confirm` and, in `rotation_required`, `credential.rotate` (the check is refused until the alarm closes, so the alarm's own path stays open); `push.register`, `push.confirm` (0.30.0) and `push.unregister` (0.24.0: the wakes for `vault.held` and the alarm depend on a current token, §14.2); for a transfer opened before the hold, `device.transfer.approve` (itself a check, §3.6.1) and `device.transfer.reject`; `call.end`, and `call.ice` of a call answered before the deadline |
+| The holder | `vault.owner-check`; `vault.status` (reports the hold) and `vault.lock`; `credential.utk.get` (UTKs for the check); `credential.get` and `credential.ack` (the latest blob after a lost check response, §3.5.3, and its confirmation); `credential.version`; `credential.lock`; during a clone alarm, `credential.alarm.confirm` and, in `rotation_required`, `credential.rotate` (the check is refused until the alarm closes, so the alarm's own path stays open); `push.register`, `push.confirm` (0.30.0) and `push.unregister` (0.24.0: the wakes for `vault.held` and the alarm depend on a current token, §14.2); for a transfer opened before the hold, `device.transfer.approve` (itself a check, §3.6.1) and `device.transfer.reject`; `call.end`, and `call.ice` of a call answered before the deadline; (0.37.0) `location.share.stop` (§10.16): ending a disclosure is always possible, as locking is |
 | A recovering app (§11.11.5) | Its own set, unchanged by the hold: `credential.utk.get`, `credential.recover`, `vault.status` (reduced) and the token and address types (0.16.0 removed `credential.reset` and `vault.delete` from it). A recovery completes while held and starts the clock (§3.6.1). (0.33.0, release R) No such app exists: a recovery completes in the open, and the phone is the holder from its first message (§11.14.6) |
-| A desktop | `vault.status`, `vault.lock`, `device.session.end{}` (its own session), `call.end` and `call.ice` of a call it answered before the deadline |
+| A desktop | `vault.status`, `vault.lock`, `device.session.end{}` (its own session), `call.end` and `call.ice` of a call it answered before the deadline, (0.37.0) `location.share.stop` |
 | An agent | `vault.status`, `device.session.end{}` (its own session) |
 | Any device | The handshake (`hs.init`, `hs.resp`, `hs.fin`: rekeys and reconnects), `relay.token.issued`, `relay.token.refresh`, `relay.address.update` |
 
@@ -7207,7 +7332,8 @@ new one on the other device.
   vault answers `call.end{busy}` ((C2) except in a glare, below).
   Otherwise it sends every owner app and desktop (within its access
   session, §9.1) `call.offer` with the same `exp` and its own signed ICE
-  configuration. A ringing device MAY send `call.ringing`, which the vault
+  configuration. (C2) An offer that rings the member's app also wakes it
+  (§14.2 trigger 5). A ringing device MAY send `call.ringing`, which the vault
   forwards once to the caller's vault, which forwards it to the call's
   device. A device rings for `exp` minus the event's `ts`, both the
   vault's clock, whatever its own clock says. **A callee's device
@@ -9046,6 +9172,10 @@ and `version`, a parameter and a result schema, and a sensitivity:
 - Catalog version 3 (0.8.0) makes the wallet actions available and adds
   `address` to `wallet.request-payment` (version 1 was never available,
   so its number is kept).
+- (0.37.0) `wallet.request-address`'s `network` may be `testnet4`
+  (§10.18, "Networks"); its `result_schema` lists it. The catalog
+  version stays 3: the result is shown to the requesting member, and an
+  app that does not know a network name shows it as it is.
 - `param_schema` and `result_schema` (JSON Schema 2020-12 documents in
   `action.list`) describe the shapes above for apps. The vault checks
   parameters with its own strict parser per action, never with a general
@@ -9307,7 +9437,14 @@ A app            A vault                          B vault                 B apps
   ends it and tells the connection (`location.stopped`); of an incoming
   share it deletes it and asks the sharer to stop (`location.stopped`),
   which ends it there (`location.event{stopped, direction: out}`). At
-  `expires_at` both vaults end the share without a message. The receiving
+  `expires_at` both vaults end the share without a message. (0.37.0, as
+  built) The vault ends expired shares and requests when it next handles
+  a message, and only then sends `sync.event{location.share.changed,
+  state: "ended"}`; nothing is sent at the moment of expiry, to the
+  source device or any other. Apps keep their own timer from
+  `expires_at` (the source device stops sending positions then) and
+  treat the event as confirmation. Stopping is allowed while the vault
+  is due or held (§3.6.3), as locking is. The receiving
   vault deletes an incoming share **with its positions** when it stops or
   expires; nothing of it is kept.
 - **Requests.** `location.request` sends `location.requested`; the
@@ -9319,6 +9456,15 @@ A app            A vault                          B vault                 B apps
   cap and the ask rate apply; it has no cooldown. A suppressed request
   does not use the one-per-10-minutes allowance (0.23.1): only a request
   that reaches the member does.
+- **A request closes** (0.37.0) when a share of the same connection
+  names it (`request_id`) or at its expiry (24 h, found when the vault
+  next handles a message). Either way the vault sends
+  `sync.event{kind: "location.request.closed", request_id, reason:
+  "answered" | "expired"}` to every owner device, so that a request
+  answered on one device stops being shown as pending on the others.
+  The request's feed item is not changed by the vault (a batched item
+  can stand for several asks, §10.4.1); an app that shows it marks it
+  read with `feed.update` when the request it stands for closes.
 - Removing or blocking a connection drops every share and request with
   it (§7.4).
 - **Audit and feed.** `location.share.started`, `location.share.stopped`
@@ -9326,7 +9472,8 @@ A app            A vault                          B vault                 B apps
   `location.share.ended`, `location.requested` (both sides) (`ref` =
   `share_id` or `request_id`, never a position); feed items
   `location.shared` and `location.request`; `sync.event`
-  `location.share.changed{share_id, state: "active" | "ended"}`.
+  `location.share.changed{share_id, state: "active" | "ended"}` and
+  (0.37.0) `location.request.closed{request_id, reason}`.
 - **Retention is the peer's.** The receiving vault deletes positions as
   above, but the receiving member's devices have seen them, and a vault
   is only trusted for what its own member decides (§2.1): precision,
@@ -9420,13 +9567,24 @@ Presence is on demand (§9.2): no heartbeats.
   refusal is indistinguishable from a locked or offline vault.
   `last_active` is the newest activity of the member's apps and desktops
   (§10.3), rounded down to 5 minutes; it is absent when none is known.
+  (0.37.0, as built) "Activity" is the newest non-ephemeral message the
+  vault received from any of them, whether the member caused it or not:
+  an app's background catch-up (`sync.since`, `feed.list`), a lock or a
+  push registration counts as much as a message the member sent. So
+  `last_active` says when one of the member's devices last talked to the
+  vault, not when the member last used one, and apps SHOULD label it
+  that way ("Last seen").
 - The asking vault accepts a pong only for a pending ping it sent to that
   connection, before its `exp`, with `state` `available`, `busy` or
-  `away` and `last_active` not in the future, and sends the asking device
+  `away` and `last_active` not in the future (0.37.0, as built: at most
+  5 minutes ahead of the asking vault's clock, for skew), and sends the asking device
   `presence.result` from memory (`exp` = now + 60 s). Anything else is
   dropped without an audit entry. Pings are not audited.
 - Removing or blocking a connection removes it from `except` and drops
-  its pings (§7.4). Agents never ask or answer.
+  its pings (§7.4). (0.37.0) Removing it from `except` is a change of the
+  policy: a new `version` and `presence.changed`, so that a
+  `presence.set` with the version before it is a `conflict` (§10.1).
+  Agents never ask or answer.
 
 ### 10.18 Wallet
 
@@ -9460,7 +9618,7 @@ app (chain source)                                   vault
 | `wallet.create` (app) | `{name, network?, address_type?, tags?, credential, utk_id, sealed{password, item?}}`; `item` = `{mnemonic, passphrase?}` to import a phrase | `<wallet>` and `{credential, credential_version, utks}`; `limit`, `bad_request` |
 | `wallet.list` (app, desktop) | `{}` | `{wallets: [<wallet>]}` |
 | `wallet.get` (app, desktop) | `{wallet_id}` | `<wallet>` |
-| `wallet.update` (app, desktop) | `{wallet_id, version, address_type}` | `{version}`; `conflict` |
+| `wallet.update` (app, desktop) | `{wallet_id, version, address_type?, accounts?: [{type, next_receive?, next_change?}]}` (at least one of the two; 0.37.0: `accounts`, app only) | `{version}`; `conflict`, `bad_request`, `forbidden` (`accounts` from a desktop) |
 | `wallet.address.new` (app, desktop) | `{wallet_id, type?, change?, label?}` | `<address>`; `limit` |
 | `wallet.address.list` (app, desktop) | `{wallet_id, type?, change?, after?, limit?}` | `{addresses: [<address>], next?}` |
 | `wallet.address.used` (app, desktop) | `{wallet_id, addresses: [<address string>]}` (1–256) | `{marked, version}` |
@@ -9487,10 +9645,16 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
            "total_in_sats", "sending_sats", "change_sats", "fee_sats", "vsize" }
 ```
 
-- **Networks.** `network` is `mainnet` (the default), `testnet` (testnet3
-  and testnet4), `signet` or `regtest`; coin type 0 on mainnet and 1
-  otherwise. A release accepts `mainnet`, `testnet` and `signet`;
-  `regtest` only development builds. `xpub` is an account key in BIP32
+- **Networks.** `network` is `mainnet` (the default), `testnet`
+  (testnet3), `testnet4` (0.37.0), `signet` or `regtest`; coin type 0 on
+  mainnet and 1 otherwise. A release accepts `mainnet`, `testnet`,
+  `testnet4` and `signet`; `regtest` only development builds. testnet3
+  and testnet4 share their encodings (addresses, `tpub`, coin type 1),
+  so the vault cannot tell them apart: the name is what tells the app
+  which chain a wallet is on. Before 0.37.0 `testnet` covered both, so
+  a `testnet` wallet created before it may be on either; the app asks
+  the member (ANDROID-PLAN §4 "Wallet", question 16). A wallet's
+  `network` never changes. `xpub` is an account key in BIP32
   serialisation (`xpub`/`tpub` versions, for both accounts);
   `fingerprint` is the master key's.
 - **Accounts.** Every wallet holds the BIP86 account m/86'/c'/0' (`type`
@@ -9505,6 +9669,20 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
   `wallet.create{address_type}` or afterwards with `wallet.update`
   (versioned, §10.1). Coins of either account can be spent, together, in
   any PSBT, and change can go to either account.
+- **Moving the next indices** (0.37.0). The vault issues each chain's
+  addresses in order from its `next_receive` / `next_change`. After an
+  import the app moves them past the highest index its chain source
+  shows used, with `wallet.update{accounts: [{type, next_receive?,
+  next_change?}]}` (1–2 entries, one per `type`, each naming at least
+  one index, 0 to 1,048,576), so that the vault never issues a used
+  address again. An index only moves forward: a value below the
+  account's current one is `bad_request`, the same value changes
+  nothing. The update is versioned and applied all or nothing, with or
+  without `address_type`, and sends `wallet.changed`. Only the app moves
+  indices (`forbidden` from a desktop): a moved index cannot be moved
+  back, and one moved to the limit ends that account's addresses. The skipped
+  addresses are not issued: they are not in `wallet.address.list` and
+  do not count against the 2,000.
 - **Create.** One credential operation (§3.5.3). Without `item` the vault
   generates 256 bits of entropy (a 24-word phrase); with it, it imports
   `mnemonic` (12, 15, 18, 21 or 24 BIP39 English words, any case and
@@ -9528,6 +9706,11 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
   most 2,000 addresses per wallet, both accounts together.
   `wallet.address.used` records addresses the app saw funded, so that a
   connection's address is replaced (`wallet.request-address`, §10.14).
+  It marks only addresses the vault issued (0.37.0, as built): another
+  address of the wallet's network, such as one the app derived itself
+  or one skipped by moving the next index, is ignored without an error,
+  and `marked` counts only those marked now. A string that is not an
+  address in the wallet's network's encoding is `bad_request`.
   `wallet.address.list` lists one account and chain (`type` defaults to
   `address_type`); `next` pages by `index`; `limit` 1–500 (default 100).
 - **The signing policy.** The vault signs a PSBT (`psbt`: standard base64
@@ -9552,19 +9735,54 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     these verified outputs; no duplicate inputs, no finalised or
     partially signed inputs; sighash SIGHASH_ALL, or for P2TR
     SIGHASH_DEFAULT (the absent sighash) or SIGHASH_ALL;
-  - every output is a standard address (P2PKH, P2SH, P2WPKH, P2WSH or
-    P2TR) of the wallet's network, of at least 330 sats; an output with
-    one of the accounts' derivations (BIP32 or taproot, as for inputs),
-    re-derived and checked, is **change**;
+  - every output is a standard script (P2PKH, P2SH, P2WPKH, P2WSH or
+    P2TR), of at least 330 sats, which the summary shows as an address
+    **encoded for the wallet's network** (0.37.0, as built). An output
+    is a script, not an address, so the vault cannot tell for which
+    network it was written: a mainnet address pasted into a test
+    wallet's PSBT is shown as the test address of the same script. The
+    app checks the payee's network itself, before it builds the PSBT,
+    and compares the summary's addresses with what the member entered.
+    An output with one of the accounts' derivations (BIP32 or taproot,
+    as for inputs), re-derived and checked, is **change**;
   - the fee (inputs minus outputs) is positive and at most 1,000 sat/vB of
     the signed transaction's virtual size (its stripped size, plus per
     input a P2WPKH witness of 108 weight units or a P2TR one of 66, 67
     with SIGHASH_ALL).
 
   Otherwise the answer is `invalid_psbt` with a short reason as
-  `message` (`malformed`, `foreign_input`, `previous_tx`,
-  `derivation_key`, `internal_key`, `input_script`, `fee_rate`,
-  `other_payee`, …). `wallet.psbt.inspect` applies the same checks
+  `message`. (0.37.0, as built) The reasons, all of them, so that apps
+  can give each a text:
+
+  | Reason | Meaning |
+  |---|---|
+  | `size` | empty, or more than 65,536 bytes |
+  | `malformed` | not a BIP174 PSBT that parses |
+  | `shape` | 0 or more than 64 inputs or outputs, or the PSBT's input and output maps do not match the transaction's |
+  | `version` | transaction version not 1 or 2 |
+  | `duplicate_input` | the same outpoint twice |
+  | `previous_tx` | an input without the full previous transaction, or one whose txid or output index does not match the outpoint |
+  | `witness_utxo` | `witness_utxo` differs from the previous transaction's output |
+  | `sighash` | a sighash other than SIGHASH_ALL (or, for P2TR, absent) |
+  | `input_script` | an input that is finalised, partially signed, or carries a redeem or witness script or taproot script-path data |
+  | `amount` | a previous output's amount is zero, negative or above 21 million BTC |
+  | `foreign_input` | an input with no derivation of the wallet's fingerprint |
+  | `no_account` | the wallet has no account to check against (not expected) |
+  | `derivation_path` | a derivation of the wallet's fingerprint that is not m/84'/c'/0'/{0,1}/i or m/86'/c'/0'/{0,1}/i below the index limit, or a taproot derivation with leaf hashes |
+  | `derivation_key` | the derivation's key is not the key the vault derives for that path |
+  | `derivation_script` | the derived key's script is not the input's (or the change output's) script |
+  | `internal_key` | `tap_internal_key` differs from the derived key |
+  | `output_amount` | an output below 330 sats or above 21 million BTC |
+  | `output_script` | an output that is not a standard script |
+  | `fee` | outputs not below inputs (no positive fee), or inputs above 21 million BTC |
+  | `fee_rate` | the fee is above 1,000 sat/vB |
+  | `wrong_seed` | at `wallet.sign`: the decrypted phrase does not give the stored account keys |
+  | `other_payee` | `wallet.request-payment` (§10.14): an output to an address other than the requested one or the wallet's change |
+  | `amount_mismatch` | `wallet.request-payment`: the outputs to the requested address do not add up to `amount_sats` |
+  | `payee_network` | `wallet.request-payment`: the requested address is not an address of the wallet's network |
+
+  An app shows an unknown reason as a generic refusal: a later release
+  may add one. `wallet.psbt.inspect` applies the same checks
   without the credential and returns the summary that `wallet.sign`
   would sign for; apps MUST show it (the payees, amounts, change and fee)
   to the member before asking for the password.
@@ -9586,7 +9804,7 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
   `next_change` moves past the change the PSBT used.
 - Agents never use wallets: no wallet type is delegable (§10.11).
   Desktops read, issue addresses, choose the receiving account and
-  inspect, but never create or sign.
+  inspect, but never create, sign or (0.37.0) move the next indices.
 - **Change notices.** `sync.event` `wallet.changed{wallet_id, version}`
   (created, receiving account changed, addresses issued or used),
   `wallet.signed{wallet_id, txid}`, `wallet.deleted{wallet_id}`.
@@ -10356,7 +10574,8 @@ the lease: the vault is not left open.
 ### 11.7 Device attestation (REQUIRED for enroll and unlock)
 
 (0.33.0, release R) From release R the app also holds a **phone key**,
-an HMAC key with the same properties as the device attestation key, and
+an HMAC key with the same properties as the device attestation key (on
+an iPhone a Secure Enclave key-agreement key, 0.35.0, §11.14.1), and
 sends the unlock secret it computes with every enrollment, unlock,
 recovery open and transfer `hs.init` (§11.14.1); and the release
 constant `android_min_version_code` is checked against the attestation's
@@ -10555,7 +10774,21 @@ challenge at every unlock.
     the production environment. It then stores the attested public key and
     counter with that app's unlock key in the sealed header.
   - Each unlock carries an assertion over `challenge`. The enclave checks the
-    signature and that the counter increases.
+    signature, the App ID and that the counter increases.
+  - (0.37.0) The App ID is the release constant `ios_app_id`
+    (§11.10.8, "iOS App ID"): the channel's one value,
+    `<team id>.<bundle id>`, compared with the authenticator data's
+    `rpIdHash` at the attestation and at every assertion. A build
+    without complete channel constants accepts none (iOS fails closed,
+    as Android does without a package). The development environment
+    (aaguid `appattestdevelop`) is refused by every release image.
+  - (0.37.0) The development enclave's device policy file (devenclave
+    builds only) may add `apple_app_attest_root` (the pinned Apple root
+    beside the TEST CA), `ios_app_ids` (App IDs accepted besides the
+    TEST App ID, for the debug and dev-stack builds) and
+    `ios_development_environment` (accept `appattestdevelop`), so that
+    a development build on a real iPhone can enroll against a local
+    stack. Release images cannot load the file.
 
 **Rationale.** Both checks are local cryptography against pinned vendor
 roots, so they need no VettID credentials and no third-party API call (Play
@@ -11889,7 +12122,8 @@ A channel file names exactly its channel's value and any other is
 malformed (as for `push_url`), so a production image can never accept
 the staging app's package, nor the reverse. It is one value, not a list.
 The development enclave's further packages (its device policy file) are
-unchanged, and the iOS app ID stays a constant in code.
+unchanged, and the iOS app ID stays a constant in code (until 0.37.0,
+"iOS App ID" below).
 
 What follows the package, each changing with the staging release that
 first pins the new value (S10):
@@ -11946,6 +12180,36 @@ Production has no vault yet and nothing to move: release 1 pins
 `com.vettid.app` through the file instead of the constant. From S10 a
 phone can hold the production app and the staging app side by side.
 
+**iOS App ID (0.37.0; IOS-PLAN §9.1 VA2; team ID confirmed by the
+owner 2026-10-17).** Until 0.37.0 every image accepted the one App ID
+`3X25CJ86MV.com.vettid.app` (a constant in the enclave's code), so a
+staging image would have accepted the production iOS app and the
+reverse. From 0.37.0 the App ID is the release constant `ios_app_id`:
+
+| Channel | `ios_app_id` |
+|---|---|
+| production | `3X25CJ86MV.com.vettid.app` |
+| staging | `3X25CJ86MV.com.vettid.app.staging` |
+
+The rules are the Android package's: a channel file names exactly its
+channel's value and any other (the other channel's, another team's, a
+development bundle id) is malformed; one value, not a list; a
+placeholder fails the release gate. The image compares it with the
+`rpIdHash` of an App Attest attestation (enrollment, a transfer's
+`hs.init`, a recovery's register) and of **every assertion** (unlock,
+recovery open, release approval), since the assertion's authenticator
+data names the App ID too; so, unlike the Android package, an iOS
+binding made under another App ID does not unlock. No iOS app has
+enrolled on any release, so no vault is affected. The first release of
+each channel that pins it says so in its release log entry
+(VAULT-RELEASES §3.4, C6); a later change of the App ID would strand
+every iOS vault of that channel at the release that makes it, and is
+made only with the notice of a retirement, as a removed signer is.
+What follows the App ID outside the vault: the iOS app's bundle id per
+build (IOS-PLAN §5), `apple-app-site-association` on each account host
+(IOS-PLAN §9.2), and the push gateway's APNs topic (PUSH-GATEWAY
+§11.2).
+
 **Tests required** (0.26.0; follow-up implementations).
 
 - `releasecfg`: every refusal of rule 1 for `features`; rule 2 both ways
@@ -11953,7 +12217,14 @@ phone can hold the production app and the staging app side by side.
   from before 0.26.0; `android_package` missing, a placeholder, another
   channel's value; the committed files (staging: seven names and
   `com.vettid.app.staging`; production: none and `com.vettid.app`).
-  (0.27.0) `android_signers` entries: §11.7.1's tests.
+  (0.27.0) `android_signers` entries: §11.7.1's tests. (0.37.0)
+  `ios_app_id` likewise: missing, a placeholder, another channel's
+  value, another team, a development bundle id, a list.
+- (0.37.0) Vault, App Attest: each channel's configuration accepts an
+  attestation and an assertion of its own App ID and refuses the other
+  channel's; a build without channel constants refuses both; a release
+  configuration has no development App ID and refuses the development
+  environment.
 - Vault, per optional feature, in a build without it: each of its types
   is answered `unsupported_type` to an app and to a connection, and a
   response of such a type is dropped; no `features.<name>` entry exists
@@ -13313,8 +13584,8 @@ member's phone can produce to every unlock.
 - A transfer to a new phone needs the password as well as the PIN
   (as before release R), takes a few seconds longer and can be answered
   "busy, try again".
-- No iPhone app can unlock a vault of release R until the phone-held
-  secret is designed for iOS (§15 item 39).
+- On an iPhone the phone-held secret comes from a Secure Enclave key
+  agreement instead of an HMAC key (0.35.0, §11.14.1).
 
 **What this rests on, said once.** The count of attempts is kept in
 Amazon S3 under Object Lock in compliance mode (§11.14.4,
@@ -13413,20 +13684,131 @@ release R"). At enrollment, at a transfer and at a recovery the app
 creates a new non-exportable HMAC-SHA-256 key in the Android Keystore,
 the **phone key**, in StrongBox where the phone has it and in the
 trusted execution environment otherwise, with exactly the properties of
-its device attestation key and its app key. The secret is
+its device attestation key and its app key. `key_vault` is the vault id
+the key was made for, or the empty string for a key made at a transfer
+to this phone (the new phone does not know the vault id when it sends
+`hs.init`), and is fixed for the key's life. (0.36.0) For each **epoch**
+the app makes 32 fresh random bytes `r` and the secret is
 
 ```
-unlock_secret = HMAC-SHA-256(phone key, "vettid/vms/2/unlock-secret" || 0x00 || vault_id || 0x00 || epoch (8, big-endian))
+unlock_secret = HMAC-SHA-256(phone key, "vettid/vms/2/unlock-secret-2" || 0x00 || key_vault || 0x00
+                             || epoch (8, big-endian) || r (32))
 ```
 
 computed by the phone's hardware each time it is needed and held in the
-app's memory only while a request is built.
+app's memory only while a request is built. Nothing changes for the
+vault, which accepts any 32 bytes (above), and the phone key is the same
+HMAC key as before.
 
 - `epoch` is a counter the app keeps: 1 at enrollment, at a transfer and
   at a recovery (each makes a new phone key), and one higher at each
-  `pin.change` and `vault.secret.renew`. The app moves to the new epoch
-  when it has the answer; if the answer was lost, an unlock answered
-  `device_secret` is tried once more with the next epoch.
+  `pin.change` and `vault.secret.renew`. Each epoch has its own `r`,
+  never derived from anything else: a value computed from stored or
+  public inputs could be computed in advance by code that ran as the
+  app.
+- **The record.** The app keeps `(key_vault, epoch, r)` as one record in
+  its encrypted account record, in storage excluded from backups, and
+  writes the epoch and its `r` in the **same atomic write**. `r` is not
+  secret without the phone key; the account record's authenticated
+  encryption makes a damaged record fail to load instead of giving a
+  wrong secret. A lost record is a lost secret.
+
+**Records and lost answers** (0.36.0). The record the app believes the
+vault holds is **current**; a record made for a change whose answer has
+not arrived is a **candidate**; a record that a confirmed later one
+replaced is **replaced**.
+
+1. **Store before send.** The app writes a candidate, and builds the
+   first request that carries its secret only once that write is known
+   to be durable. A write that fails or is dropped (a record that is
+   stale, closed or unreadable) stops the operation: nothing is sent and
+   the member is told to try again. At epoch 1 the order is: create the
+   phone key, then write the record with `key_vault`, epoch 1 and `r`,
+   then send the enrollment, the transfer's `hs.init` or the recovery's
+   register. A phone key that no record names, found at start-up or at
+   the next attempt, was never sent, and the app makes a new key and a
+   new record.
+2. **Reuse on automatic retries.** A retry of the same request (a network
+   retry, the UTK-sealed resend, the app restarting into the same flow)
+   reuses its candidate. At epoch 1 a retry reuses the phone key and `r`
+   when they exist for the same `key_vault`; a new attempt with another
+   `key_vault` makes new ones.
+3. **A new change makes a new candidate and keeps the unconfirmed ones.**
+   A `pin.change` or `vault.secret.renew` the member starts again makes a
+   fresh candidate, so that one made while unwanted code ran is not
+   reused after a clean-up. Earlier unconfirmed candidates stay, **at
+   most four**. While four are unconfirmed the app refuses a new
+   `pin.change` or `vault.secret.renew` before sending anything and asks
+   the member to unlock first (below); it never drops a candidate to make
+   room, since the vault may hold any of them.
+4. **Confirmation.** A candidate becomes current when its operation's
+   answer arrives (`pin.change` `epoch_advanced: true`;
+   `vault.secret.renew` `{credential, version, utks}`), or during an
+   unlock: after `device_secret` with the current record the app tries
+   the candidates, newest first, each at most once, and the first that
+   gets an answer the vault gives only after the secret matched (`ok`,
+   `bad_pin`, `transfer_incomplete`) becomes current. Each try is one
+   more sealed `vault.unlock`; `device_secret` is decided before the PIN
+   and is not a PIN failure. An answer decided before the secret check
+   (`backoff`, `retry`, a refusal) proves nothing and ends the tries with
+   the records unchanged. An unlock answered `ok` with the **current**
+   record shows that the vault holds that record's secret and no
+   candidate's (the vault drops a `next` part at that unlock, §11.14.2),
+   so the candidates are then replaced records.
+5. **Never drop the current record on any other answer.** A change
+   answered `retry`, `busy`, `bad_pin`, `bad_password`, `backoff`,
+   `counter_unavailable`, refused, or not answered leaves the current
+   record current; its candidate stays a candidate.
+6. **Deletion.** When a candidate is confirmed, the record it replaces
+   and every other candidate are replaced records. They are deleted
+   **7 days** after that confirmation, the longest an operator restore of
+   §11.14.2 can come back to the earlier state, or at a wipe, whichever is
+   first. The 7 days count from the confirmation, or from the moment the
+   app notices that its clock is behind it; a clock set back never
+   extends them. After that a replaced epoch's secret cannot be computed
+   on the phone again.
+7. **The earlier secret, only when the member asks.** While a replaced
+   record exists, the "this phone no longer holds the keys" screen
+   offers an explicit step to try it. The app tries the replaced
+   records, newest first, each once, only from that step and never on
+   its own: an automatic try would let a host that serves an old header
+   make the phone open an older state without the member knowing. Only
+   `ok`, or `transfer_incomplete` for a transfer that did not finish,
+   makes that record current again; the record it displaces becomes a
+   replaced record under rule 6. **`bad_pin` moves nothing**: it shows
+   only that the secret matched a header the host served, and nothing
+   opened, so accepting it would let one served old header and a typed
+   PIN make the old record current and get the real one deleted 7 days
+   later. On `bad_pin` the records stay as they are and the member may
+   type the PIN again. After an `ok` the app records it in History (on the phone for
+   now; a vault History event may follow in a later release) and
+   asks the member for a new phone secret (`vault.secret.renew`) at once:
+   the vault is back on an older secret, which unwanted code may have
+   computed. This is the case of §11.14.2 where an operator restored the
+   state from before a PIN change or a new phone secret.
+8. **A failing Keystore.** Only a definite loss counts as "this phone no
+   longer holds the keys": the phone key missing, or reported
+   permanently invalidated; for the account record, the file missing,
+   or a decryption that fails while its Keystore key works. A refusal
+   that may be temporary (a busy Keystore or StrongBox, the record's
+   Keystore key refusing for a moment, any other error) is shown as "try
+   again", sends nothing and changes no record.
+9. **An older app.** The account record carries its format. An app that
+   meets a record whose format it does not know refuses to start on it
+   rather than compute a secret by another rule, which would only give
+   `device_secret`. That refusal writes nothing, wipes nothing and makes
+   no key.
+
+**Form 1 records (staging only).** A record made before 0.36.0 has no
+`r` and uses
+`HMAC-SHA-256(phone key, "vettid/vms/2/unlock-secret" || 0x00 || key_vault || 0x00 || epoch (8, big-endian))`.
+Phones that hold one keep it, with no prompt, and the app computes each
+record with its own rule; the phone's next `pin.change` or
+`vault.secret.renew`, or a new phone key, makes a record of the form
+above. Until then such a phone stays exposed as described under "What
+the secret protects against" below. Production has no vault, so no
+production phone holds a form 1 record.
+
 - The key's security level, as the Keystore reports it, MUST be
   `TrustedEnvironment` or `StrongBox`. The app refuses to enroll, to
   receive a transfer or to recover where it would be `Software`. A phone
@@ -13447,18 +13829,233 @@ app's memory only while a request is built.
   off the vault cannot be brought back (§3.5.6). The app cannot ask the
   vault which applies; the account site shows the backup bit.
 
-**iOS** is not designed: the Secure Enclave holds elliptic-curve keys,
-not HMAC keys, so the construction does not carry over as it stands.
-It must be designed before an iOS app can unlock a vault of release R
-(§15 item 39).
+**On an iPhone** (0.35.0; IOS-PLAN §6.3). The Secure Enclave holds
+elliptic-curve keys, not HMAC keys, so the iPhone app makes the secret
+from a key agreement. Nothing changes for the vault, which accepts any
+32 bytes (above). At enrollment, at a transfer and at a recovery the
+app creates a new Secure Enclave P-256 key-agreement key
+(`SecureEnclave.P256.KeyAgreement.PrivateKey`), the **phone key** `P`:
+
+- its access control is `privateKeyUsage` only, with the protection
+  class `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`: the Secure
+  Enclave uses the key only while the iPhone is unlocked. Every request
+  that carries the secret is started in the app in the foreground (most
+  of them by typing the PIN; a transfer's `hs.init` and the candidate
+  retry below carry it without a new PIN entry), so the iPhone is
+  unlocked whenever the key is needed, and code that runs on a locked
+  iPhone, even after its first unlock, cannot make the Secure Enclave
+  compute the secret (§11.14.12: a broken sealing plus the phone's
+  secret takes the PIN offline);
+- it is not bound to biometry or to the passcode (`biometryCurrentSet`
+  is invalidated when a fingerprint or face is added; `userPresence`
+  would add a prompt to every unlock);
+- its key blob (`dataRepresentation`, usable only by this iPhone's
+  Secure Enclave) is kept in the keychain with the same class,
+  `kSecAttrSynchronizable` false, under a label that names `key_vault`.
+
+**The protection class is stricter than Android's rule, as decided by
+the owner on 2026-10-17.** Android forbids binding the phone key to an unlocked
+screen (above) because Android destroys such keys when certain settings
+change; the reason recorded with that choice (§15 item 39, decision 6)
+is that the three keys are lost together or not at all. iOS deletes
+neither `WhenUnlockedThisDeviceOnly` nor `AfterFirstUnlockThisDeviceOnly`
+items when the passcode is changed or turned off, so the stricter class
+keeps that rule while refusing the key on a locked iPhone. **Not
+chosen**: `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, the app
+key's class, whose residual is the same as Android's today: on a locked
+iPhone after its first unlock, code running as the app can have the
+Secure Enclave compute the current and candidate secrets, and with a
+broken sealing the PIN then falls offline cheaply (§11.14.12).
+
+`key_vault` is the vault id the key was made for, or the empty string
+for a key made at a transfer to this phone (the new phone does not know
+the vault id when it sends `hs.init`), as on Android and in vettid-vault's
+reference client. It is **fixed for the life of the key** and stored
+with it: the app never replaces it with a vault id it learns later,
+which would change every secret. Vault ids are ASCII and contain no
+0x00 byte.
+
+**For each epoch** the app makes a fresh software P-256 key pair `E_e`
+and computes
+
+```
+z_e           = ECDH(priv(E_e), pub(P)): the x-coordinate of the shared point, 32 bytes, big-endian
+info_e        = "vettid/vms/2/unlock-secret-ios" || 0x00 || key_vault || 0x00 || epoch (8, big-endian)
+                || pub(P) (65) || pub(E_e) (65)
+unlock_secret = HKDF-SHA-256(ikm = z_e, salt = empty, info = info_e, L = 32)
+check_e       = the first 16 bytes of HMAC-SHA-256(key = unlock_secret, msg = "vettid/vms/2/unlock-secret-ios-check")
+```
+
+Public keys are SEC1 uncompressed points (`0x04 || x || y`, 65 bytes);
+an empty salt is, by RFC 5869, 32 zero bytes (CryptoKit `salt: Data()`,
+Go `hkdf.Key(sha256.New, z, nil, info, 32)`). `epoch` counts as on
+Android and is always the epoch of the same record as `pub(E_e)`.
+
+- **Key confirmation at creation.** The Secure Enclave also computes
+  `ECDH(priv(P), pub(E_e))`; the app goes on only if it gives the same
+  `z_e`, which proves that the Secure Enclave can produce the secret
+  before the vault holds it. The app then lets `priv(E_e)` go: it is
+  never written, logged or put in a crash or analytics report. A kept
+  `priv(E_e)` would let anyone with the app's files compute the secret
+  without the Secure Enclave.
+- **The record.** The app stores `(key_vault, epoch, pub(E_e), check_e)`
+  as one record, durably (an atomic replace), **before** it builds the
+  first request that carries the secret. Records live in the app's
+  encrypted file store, excluded from backups, or in the keychain under
+  a `ThisDeviceOnly` class, never synchronizable; **never** in Caches or
+  tmp, which iOS may empty. A lost record is a lost secret.
+- **Each later use.** The stored `pub(E_e)` is parsed with full point
+  validation: a point not on the curve, the point at infinity or an
+  encoding other than 65-byte uncompressed counts as keys that no
+  longer work. The Secure Enclave computes `z_e`; the app derives the
+  secret, compares its tag with `check_e`, and builds the request. `z_e`
+  and the secret are held in memory only while a request is built.
+- **The "keys usable" check** (the app tests that its keys work, not
+  only that they exist) recomputes the current record's secret, compares
+  its tag with `check_e` and discards it. `check_e` tests nothing but
+  guesses at the 256-bit secret.
+- **Lost keys, and a locked iPhone.** Only these count as keys this
+  phone no longer holds, and lead to the "this phone no longer holds
+  the keys" path (and from there to a recovery, which replaces `P`): a
+  tag that does not match `check_e`; a stored `pub(E_e)` that does not
+  parse; the keychain item of `P`, or the record, missing; or a key
+  that iOS reports invalid. **Missing** means exactly this:
+  `UIApplication.isProtectedDataAvailable` is true both before and
+  after the lookup, **and** the lookup itself answered
+  `errSecItemNotFound` (keychain) or "no such file" (file store). Any
+  other error, or protected data that went away in between, is the
+  locked case below. A separate probe of whether storage is readable is
+  not enough: an item of class `AfterFirstUnlock` reads fine on a locked
+  iPhone while `P`'s `WhenUnlocked` item does not, so only the answer
+  of the lookup for the item itself counts. **A refusal because the iPhone is locked or has not been
+  unlocked since it started** (the keychain's
+  `errSecInteractionNotAllowed`, a Secure Enclave or file-protection
+  refusal for the same reason; any class refuses before the first
+  unlock) is temporary and never counts as lost keys: the app keeps
+  every key and record, says "Unlock your iPhone, then try again", and
+  retries once it is unlocked. Treating it as a loss would turn a
+  temporary refusal into a real one. A PIN or password typed for the
+  request is not kept in memory while the iPhone is locked: the app
+  drops typed secrets when the screen locks and asks for them again
+  before the retry.
+
+**Retries and lost answers.** On Android the secret of an epoch can be
+computed again at any time; on an iPhone it exists only while its
+record does. So:
+
+- **Candidates.** Besides the current record the app keeps, as
+  candidates, the records of the next epoch that it sent in a
+  `pin.change` or `vault.secret.renew` whose answer it did not get, at
+  most four. While four are unconfirmed the app refuses a new
+  `pin.change` or `vault.secret.renew` before anything is sent and asks
+  the member to unlock first ("Unlock your vault first, then try
+  again. VettID needs to confirm your last change before it can make
+  another."): the unlock confirms one of them or the current record. The
+  oldest candidate is **never** dropped to make room, since it may be
+  the one the vault holds.
+- **Reuse on retry.** A retry of the same request reuses its record. A
+  new `E` is made only for a new operation the member starts, and the
+  earlier unconfirmed record stays a candidate.
+- **Confirmation.** A candidate becomes current when its operation's
+  answer arrives, or when an unlock answered `device_secret` with the
+  current record is tried again with the candidates, newest first, and
+  one of them gets an answer the vault gives only after the secret
+  matched (`ok`, `bad_pin`, `transfer_incomplete`): the epoch rule
+  above. An answer decided before the secret check proves nothing.
+- **Deletion.** When a candidate is confirmed, the record it replaces
+  and every other candidate become **replaced records** (not
+  candidates, and not counted in the four). A replaced record is
+  deleted **7 days** after that confirmation, the longest an operator
+  restore of §11.14.2 can bring back the earlier state, or at a wipe,
+  whichever comes first; the 7 days count from the confirmation, or
+  from the moment the app notices that its clock is behind it, so a
+  clock set back never extends them. Nothing is deleted before a later
+  record is confirmed. After the 7 days a replaced epoch's secret cannot
+  be recomputed on the phone. The old phone of a transfer keeps its
+  current record through the keep period of §11.14.10, until it deletes
+  its keys.
+- **The earlier secret, only when the member asks**, as on Android
+  (0.36.0, §11.14.1 rule 7): while a replaced record exists, the "this
+  phone no longer holds the keys" screen offers an explicit step that
+  tries the replaced records, newest first, each once, never on its
+  own. Only `ok`, or `transfer_incomplete` for a transfer that did not
+  finish, makes that record current again (the record it displaces
+  becomes a replaced record); `bad_pin` changes nothing. After an `ok`
+  the app writes a History entry and asks at once for a new phone
+  secret (`vault.secret.renew`).
+- **Epoch 1.** At enrollment, a transfer or a recovery, a retry whose
+  earlier try may have reached the vault reuses `P` and the epoch-1
+  record when they exist for the same `key_vault` and still work, as
+  Android reuses its phone key; otherwise it makes new ones.
+
+**Removal and deletion.** iOS keeps keychain items when an app is
+removed but deletes the app's files. Removing the app therefore deletes
+the records and leaves `P` unable to compute any epoch's secret. On its
+first run after an install the app deletes every VettID keychain item
+and Secure Enclave key it finds. "First run" is decided by reading the
+content of a marker file in the app's Application Support directory
+(never `UserDefaults`, which reads as empty before the first unlock),
+and the cleanup runs only while protected data is available, so that a
+launch before the first unlock (a background launch, for example)
+deletes nothing. It
+deletes `P` and every record at a wipe and when the keep period of a
+transfer it approved ends (§11.14.10), as Android deletes its phone key.
+
+**Hardware.** The app refuses to enroll, to receive a transfer or to
+recover where `SecureEnclave.isAvailable` is false ("This iPhone can't
+keep your vault's keys in its secure hardware"). iOS gives no report of
+where a key-agreement key lives that the app could check as Android
+checks the Keystore's level, so **release and staging builds contain no
+software phone key**: one exists only in debug and test builds, for the
+simulator. As on Android, the enclave relies on the app being the
+published one, which App Attest shows (§11.7).
+
+**Compared with Android.** On both the long-lived key stays in hardware
+and one leaked secret says nothing about another epoch. From 0.36.0, on
+both, code that ran as the app earlier cannot have computed the secret
+of an epoch created after it stopped running (on Android, except for a
+form 1 record). On both, a replaced record is kept 7 days for the
+earlier-secret step and then deleted, after which its epoch's secret
+cannot be computed on the phone again.
+
+**Not chosen for the iPhone.**
+- A random secret per epoch stored encrypted to a Secure Enclave key
+  (Apple's ECIES): the same security and also one stored record per
+  epoch, but Apple's format (an X9.63 KDF, a variable IV) is harder to
+  specify and to reproduce in vectors; the key agreement with `check_e`
+  gives the same key confirmation.
+- ECDH of `P` with its own public key: one value for every epoch, so a
+  single leak would give every past and future epoch and
+  `vault.secret.renew` would end nothing.
+- A stateless form (each epoch's point hashed to the curve, then ECDH
+  with `P`): Android's behaviour without records, but code that ran as
+  the app could compute future epochs, a key left behind by a removed
+  app could compute every epoch, and neither CryptoKit nor Go's standard
+  library offers hash-to-curve.
+- `priv(E_e)` derived from public inputs so that no record is needed:
+  `pub(P)` is not secret, so anyone could then compute `z_e`.
+- `pub(E_e)` kept by the vault: the phone's Secure Enclave would then
+  compute on points a host could choose, for no gain.
 
 **What the secret protects against, in one sentence:** someone who has
 what VettID stores and has never run code as the member's app on the
-member's phone. One exposure of the secret lasts until the member
-changes the PIN or asks for a new secret (§11.14.9); with the DEK
-replaced then, the old secret opens no later stored state. Malware that
-runs as the app can take the secret while a request is built, as it can
-take the PIN.
+member's phone. One leaked secret says nothing about another epoch: a
+secret that leaked by another route (a request read after a break of
+the ETK) opens no state stored after the member's next `pin.change` or
+`vault.secret.renew` (§11.14.9), which replace the DEK. Code that runs
+as the app is different. It can take the secret while a request is
+built, as it can take the PIN, and it can make the phone key compute the
+secret of every epoch whose record exists while it runs. (0.36.0) It
+cannot compute the secret of an epoch created after it stopped running,
+so a `pin.change` or `vault.secret.renew` made **after such code is
+gone** leaves it no secret for any later stored state. A new secret does
+not undo what else that code reached as the app (the device's seeds and
+keys, and the PIN if it was typed meanwhile); a recovery, or a transfer
+to another phone followed by a rotation, does. On an Android phone
+whose current record is of form 1 (above), and on every Android phone
+before 0.36.0, such code could compute the next epochs' secrets in
+advance, and only a new phone key (a transfer or a recovery) ends the
+exposure.
 
 #### 11.14.2 Replacing the DEK, and the order of writes
 
@@ -13589,7 +14186,9 @@ then needs the old phone (which keeps its keys for up to 7 days,
 §11.14.10), or, with the credential backup on, a recovery with a new
 phone, the PIN and the password after the quiet period. For a PIN or
 password change the member still holds the phone and unlocks with the
-old PIN; a recovery would be answered `closed`, because the change closed
+old PIN (after a PIN change or a new phone secret, an Android phone
+needs the earlier secret for that, which it tries only when the member
+asks and keeps for 7 days, §11.14.1 rule 7, 0.36.0); a recovery would be answered `closed`, because the change closed
 the old generation before step 1. A stranded vault that is not restored
 in time is lost.
 
@@ -14397,7 +14996,14 @@ From release R:
   unchanged: it opens the current wrap with the pair, wraps a replaced
   DEK for the PIN and `new_unlock_secret`, and makes a new `opener`. The
   generation does not change. The app offers it in Settings, and after a
-  member reports a phone that ran code it should not have.
+  member reports a phone that ran code it should not have, to be made
+  after that code is gone (§11.14.1). (0.36.0) It ends exposure to such
+  code only for the secret: it does not undo what else the code reached
+  as the app, which a recovery or a transfer to another phone followed
+  by a rotation does. On Android before 0.36.0, and while the phone's
+  current record is of form 1, the next secret could be computed in
+  advance by code that ran as the app, so there only a new phone key (a
+  transfer or a recovery) ends that exposure.
 - **Turning the credential backup off** closes the generation
   (§11.14.3); with the counter unreachable the setting is refused
   `counter_unavailable`.
@@ -14594,7 +15200,10 @@ dollars per core-hour; a determined attacker pays less):
 
 "The phone's secret" means making the phone's hardware key compute it:
 the phone itself and a way to run code as the VettID app on it, or a
-break of its key store. A broken sealing still gives, in every case,
+break of its key store. (0.36.0) Code that ran as the app for a time
+could compute the secrets of the epochs whose records existed then, not those of
+epochs created after it stopped (§11.14.1); on Android with a form 1
+record, every epoch of that phone key. A broken sealing still gives, in every case,
 who the member is, the vault's size and activity times, the public keys
 in the header and the tag of the last wrong recovery pair, which tests
 guesses at a wrong pair only.
@@ -15256,7 +15865,7 @@ it can read and write only its own objects and use only its own relay key
 | The Bitcoin libraries (btcd) | Parsing PSBTs from the member's own app and deriving keys, in the vault's process only (never the supervisor), so a flaw reaches only that vault (§12.4, §13.3) | A release update |
 | A call's media key `k_call` | That call's media; it exists only on the two devices of the call, whose key-exchange shares are signed by the devices and vouched for by their vaults (§10.10) | Hang up |
 | PIN alone | Nothing without a registered, attested app | `pin.change` |
-| (0.33.0, release R) The phone's unlock secret | With the PIN and a sealed header and state of that time, the vault as stored then; with a broken sealing as well, the PIN offline for a few US dollars (§11.14.12). Nothing written after the member's next `pin.change` or `vault.secret.renew`, which replace the DEK | `vault.secret.renew` or `pin.change` |
+| (0.33.0, release R) The phone's unlock secret | With the PIN and a sealed header and state of that time, the vault as stored then; with a broken sealing as well, the PIN offline for a few US dollars (§11.14.12). Nothing written after the member's next `pin.change` or `vault.secret.renew`, which replace the DEK; if the secret was taken by code that ran as the app, only those made after that code is gone (0.36.0, §11.14.1: each epoch's secret uses new randomness), and on Android with a form 1 record nothing until a new phone key | `vault.secret.renew` or `pin.change`; after code ran as the app, made once the phone is clean, and a recovery or a transfer to another phone followed by a rotation for what else that code reached |
 | (0.33.0, release R) The recovery attempt counter (VettID's AWS account) | Nothing by VettID's permissions alone: compliance-locked records cannot be shortened or deleted by any principal, the root user included. AWS acting for VettID could remove records, which would give further attempts at a pair (§11.14.4, §11.14.12). VettID can always use up a vault's attempts, keep members from being recorded as present, and see the times of attempts and presence | A second record outside AWS (§11.14.13) |
 | (0.33.0, release R) VettID starting a recovery for any vault | At most the attempts of §11.14.6 at the PIN and password together, none tested against a member whose presence was recorded within 72 hours of the attempt's own time, each counted before it is tested, shown in History and mailed (mail VettID can suppress); ten wrong pairs end that vault's recovery until the member changes a secret | The member changes the password (and the PIN) |
 | An app's copy of the Protean Credential | Nothing without the current CEK, which only the vault holds and which rotates at every use; password guesses only online, through the holder's session with a UTK, under the backoff (§3.5.8). Presenting it while it is not the current blob is a clone: refused, the app alerted, the member emailed, credential operations frozen until a forced rotation (§3.5.9) | Any use of the credential (a new CEK; the old blob is dead); the forced rotation |
@@ -15667,12 +16276,21 @@ mailbox:
    and a dead token is found again at the first wake after the next
    unlock (0.24.1);
 4. `credential.alarm` (§3.5.9).
+5. **(C2; CALLS-PLAN V4, decision D24)** `call.offer` (V→D) to the app,
+   for an incoming call that rings the member's devices (§10.10
+   "Ringing"). An offer that rings no device wakes nobody: calls off for
+   the connection, the unanswered-call limit, a held vault, a call
+   answered `busy`, a glare in which the vault's own call wins, a
+   duplicate or an offer whose `exp` has passed. Its wake is a **call
+   wake** (below).
 
-While the vault is held (§3.6.3) only 2, 3 and 4 occur. Nothing else
-wakes: not `message.new` (its feed item does), `sync.event`, responses,
-receipts, the token, address, rotation and handshake messages, items of
-priority `low`, guides, or call signalling (calls are left to the calls
-phase, §15 item 32). Desktops and agents are never woken.
+While the vault is held (§3.6.3) only 2, 3 and 4 occur (a held vault
+rings no device). Nothing else wakes: not `message.new` (its feed item
+does), `sync.event`, responses, receipts, the token, address, rotation and
+handshake messages, items of priority `low`, guides, or call signalling
+other than trigger 5: not `call.answer`, `call.ice`, `call.ringing`,
+`call.keepalive` or `call.end` (a missed call wakes through its feed item,
+trigger 1). Desktops and agents are never woken.
 
 **Debounce and limits** (per registration, in memory, reset at unlock):
 
@@ -15685,6 +16303,14 @@ phase, §15 item 32). Desktops and agents are never woken.
   (they still count toward it and are still debounced), up to **10 per
   hour**. The 10 count every wake that carried an exempt trigger,
   whether or not the hourly cap had been reached (0.24.1);
+- **(C2) a call wake** (trigger 5) is not deferred by the 5 s rule: it is
+  sent as soon as no wake is in flight, and a trigger that arrives while
+  it waits merges into it. It counts toward neither the 30 nor the 10,
+  but toward its own cap of **20 call wakes per rolling hour**; past
+  that, trigger 5 is handled as an ordinary trigger (debounced, under the
+  30). A call wake is sent only while its call is still `ringing`: if the
+  call was answered, declined, ended, timed out or superseded before the
+  wake could go out, it is not sent and is not counted;
 - a retry, including the attempt after a `429`'s wait, is part of its
   wake: it is not counted again toward the 30 or the 10, and the caps do
   not hold it back (0.24.1).
@@ -15697,7 +16323,12 @@ and the gateway sends a fixed payload (PUSH-GATEWAY §6): no item, kind,
 name, count, cursor or priority reaches the gateway, Google or Apple.
 There are no vault-side quiet hours: the phone's Do Not Disturb or Focus
 applies to the notification it builds, and the vault does not learn the
-member's time zone.
+member's time zone. **(C2)** A call wake is the same request with the
+same `class`: the gateway sends the same fixed payload, so neither it nor
+Google or Apple can tell a call wake from any other wake. (The iOS phase
+will need a distinct PushKit wake, which Apple requires to be reported as
+a call; that is a PUSH-GATEWAY change for then, and the vault's call wake
+class is kept separate so that it can carry over, CALLS-PLAN §6.5.)
 
 **Outcomes:**
 
@@ -15723,9 +16354,23 @@ member's time zone.
   the three above (`401`, a `400` other than `token_invalid`, any other
   `4xx`, a `202` whose body does not parse) is handled the same way
   (0.24.1; owner decision 2026-10-10, PUSH-GATEWAY §7).
+- **(C2)** For a call wake, a `429` whose wait ends after the call's
+  `exp`, and the retries after `5xx`, a timeout or no connection that
+  fall after the call's `exp` (with a 45 s ring: the 120 s retry, and the
+  30 s retry of a wake sent late in the ring), are dropped, and so is any
+  retry once the call is no longer `ringing`. `last_result` and
+  `last_wake_at` are set as for any wake.
 
 No wake writes an audit entry or a feed item: wakes are frequent, and a
 log of them would be a timeline of the member's activity.
+
+**(C2) What a call wake shows.** Because it is not debounced, the gateway
+and Google or Apple see a wake within about a second of the moment a call
+starts ringing, and they see a wake each time a caller calls again, up to
+the per-connection limit (§10.10, at most 3 unanswered calls in 10
+minutes). They do not learn that it was a call, from whom, whether it was
+answered, or how long it lasted: the payload is the fixed one, and nothing
+of the call reaches the gateway.
 
 ### 14.3 Egress, attestation and privacy
 
@@ -17181,8 +17826,8 @@ Follow-ups:
        and dead tokens are audited.
     7. **No vault-side quiet hours** (the phone's Do Not Disturb applies;
        the vault would need the member's time zone).
-    8. **Calls** (ringing through push: FCM full-screen intents, iOS
-       PushKit and CallKit) are left to the calls phase.
+    8. **Calls**: (0.38.0, release C2) a ringing call wakes the app
+       (§14.2 trigger 5); the iOS VoIP wake is left to the iOS phase.
     Open points:
     1. **The numbers** of point 4 are first guesses, to be tuned with the
        test phones (N4).
@@ -17681,15 +18326,16 @@ Follow-ups:
       the screen lock.
     - *Specified later:* the outside store (release "R2", §11.14.13), with
       its experiments; the counter group (release "R3"), with its own
-      document; the phone-held secret on iOS.
+      document. The phone-held secret on iOS is specified in 0.35.0
+      (§11.14.1, "On an iPhone"), approved by the owner 2026-10-17.
     Follow-ups: vettid-vault (release R: everything of §11.14, the S3
     adapter and its egress host, the removal of §11.11.5's path, the
     vectors of §16, the adversarial test store, MUST-coverage),
     vettid.org (the counter bucket, the recovery request key, the
     `open` route, the emails and the account site; MEMBER-API 2.7.0,
     VAULT-HOST-PROTOCOL 0.1.10, VAULT-RELEASES 0.1.28), vettid-android
-    (ANDROID-PLAN 0.1.40), then iOS once the phone-held secret is
-    designed for it.
+    (ANDROID-PLAN 0.1.40), then iOS (IOS-PLAN, with the phone-held
+    secret of §11.14.1 as specified in 0.35.0).
 
 ## 16. Test vectors
 
@@ -18067,7 +18713,35 @@ the unlock key, `dek_wrap`, `dek_wrap_next`, `secret_check` and the
 phone's unlock secret, with the Argon2id outputs computed from the
 inputs (the 1 GiB derivation included) where these excerpts start from
 a fixed `x`. The Go and Kotlin implementations reproduce them byte for
-byte. Values computed for this document with Python's `hmac`,
+byte. (0.35.0) For the iPhone's form, `unlock.json` gains a `phone_ios`
+object generated with Go's standard library only (`crypto/ecdh`,
+`crypto/hkdf`, `crypto/hmac`) from the private keys below: every public
+key, `z_e`, `info_e` (in hex, so that an encoding mistake shows),
+`unlock_secret` and `check_e` for epochs 1 and 2, the form with
+`key_vault` `""`, and the same secrets carried through the unlock key,
+`secret_check` and `dek_wrap` of §11.14.1; and refusals the app must
+reproduce: a `pub(E)` off the curve, the point at infinity, compressed
+and truncated encodings, epoch 0 and a `key_vault` with a 0x00 byte.
+The reference function is used by the vectors only; the vault never
+calls it. The Swift implementation reproduces them, computing ECDH in
+both directions with software stand-ins for the Secure Enclave key.
+The iPhone values below, the end-to-end `unlock_key` and
+`secret_check` included, were computed with Go's `crypto/ecdh`,
+`crypto/hkdf` and `crypto/hmac` and checked with Python's
+`cryptography` 50.0.0 (the same code reproduces the `unlock_key` and
+`secret_check` of 32 x 0x42 above); `dek_wrap` under these keys arrives
+with vettid-vault's `unlock.json`. (0.36.0)
+For Android's form 2, `unlock.json` gains a `phone_2` object beside
+`phone`: the phone key, `r` for epochs 1 and 2, the HMAC message of each
+epoch in hex (so that an encoding mistake shows) and `unlock_secret`,
+for `key_vault` = the vector vault id and `""`. The existing `phone`
+object stays as the form 1 vector. The `phone_2` values below, the
+end-to-end `unlock_key` and `secret_check` included, were computed with
+Python's `hmac` and checked with Go's `crypto/hmac` and `crypto/hkdf`
+(the same code reproduces the `unlock_key` and `secret_check` of
+32 x 0x42 above); the
+Kotlin implementation reproduces them, and its form 2 output differs
+from form 1 for the same key and epoch. Values computed for this document with Python's `hmac`,
 `cryptography` 50.0.0 (HKDF) and libsodium (PyNaCl), **to be confirmed
 by those implementations** (TEST ONLY):
 
@@ -18117,10 +18791,65 @@ by those implementations** (TEST ONLY):
                   449ad8681c2613fc6d0b9e6a5225f6117fa90c3aa415d9cacfba8c5824c4e9c973a8c8cb9bb4fcc5afa33d629c9268d1
                   53c83541056969d0c66680c201254038b517b7bb2c294d580f330b536bd4bcc4                     (104 B)
 
-§11.14.1 the phone's unlock secret                              (unlock.json)
+§11.14.1 the phone's unlock secret (form 1)                     (unlock.json, phone)
   phone key : 32 x 0x44   vault_id : test-vault-0001
   epoch 1 : 84ae0b66319d60524f6dcffa6fa3c540669caa0f13a2b1cc01c49305d4af7836
   epoch 2 : 03bbaea3348d1fdb182a3474faf655f7f444c74be38ab84423ec21f3a2587f07
+
+§11.14.1 the phone's unlock secret, form 2 (0.36.0)             (unlock.json, phone_2)
+  phone key : 32 x 0x44   r_1 : 32 x 0x52   r_2 : 32 x 0x53
+  key_vault test-vault-0001 :
+    message_1 : 7665747469642f766d732f322f756e6c6f636b2d7365637265742d3200746573742d
+                7661756c742d30303031000000000000000001
+                5252525252525252525252525252525252525252525252525252525252525252     (85 B)
+    epoch 1 : 6bd1aed825ba3f761b2ecc17d5043d7e46273b64b4a893063efa96585d3b612e
+    epoch 2 : 492d1b50a368746e5a5bc05ea72e11b92b36924979168c3f0cafdf9d130b925f
+  key_vault "" (a transfer's new phone) :
+    message_1 : 7665747469642f766d732f322f756e6c6f636b2d7365637265742d3200
+                000000000000000001
+                5252525252525252525252525252525252525252525252525252525252525252     (70 B)
+    epoch 1 : cf67a31b7a634c6416c8b5894268844c8723afd0481fad7a0e0871d26924410e
+    epoch 2 : e0f83d57321878f2688709ffd8745902163dff5a1aed059666759dec86477c83
+  end to end, through §11.14.1 unlock above (x : 32 x 0x41, pepper : 32 x 0x32, vault_id : test-vault-0001):
+    epoch 1   unlock_key   1f12ddc3c5ac43718679d857d3e8208391c330708ee9e9fe96a6f5b67e91808b
+              secret_check 8d373ee4be5aeb8c94f53762ddeeedd8901732e1080417c69ad5a8b0fc81ef20
+    epoch 2   unlock_key   fbd61972dd7d52b2f9162a98fa56accbc7338150f74920ff7b813c115d478baa
+              secret_check 7ad0db71d82a1535030def5fd4b80e28a346b6430f0a7eee9db86f89b2f7ca11
+    key_vault "", epoch 1 (the vault's own vault_id is still test-vault-0001)
+              unlock_key   8c75fc843e47436dc7d13d7d1324ae641de49a2563b7f8891336e6fcbea1391f
+              secret_check f86ec90414d170f0a0b32346eacf5c6e238e62cb47454a56ed609948318633c8
+
+§11.14.1 the phone's unlock secret on an iPhone (0.35.0)        (unlock.json, phone_ios)
+  priv(P) : 32 x 0x46   priv(E_1) : 32 x 0x47   priv(E_2) : 32 x 0x48   key_vault : test-vault-0001
+  pub(P)   : 041bec1250aa8f78275f99a6663688f31085848d0ed92f1203e447125f927b7486
+             976e19d2eecfd3d40f935f10be09e63bcbc8a24a71efb67848d97725c3a0dc73
+  pub(E_1) : 0472dabf79df448c7a5bfaecb7bc0dbc990a0ffd43b7a52b502c860ac0ab8340ff
+             239d8129976e853067907d98c231e9e349f8aedfc1e1ccb2fa47fe4945de2460
+  pub(E_2) : 0442a51e039eb9e0b5ce58c4f1b8ebcb281fae32b90729711640b0cad4fc5c38c1
+             173c7e7b5be6ea94bb10e09fbee7c7b0838f3f4f88e01e911d30e44f4f3e9b32
+  epoch 1 : z_1           6446035b6d1d9d8c9e9ad89a55f5467c2314c952d343db2598e6d2acd1698d5a
+            unlock_secret f3bdc50cabb32a8a89b614ca518b946b4fe255e31dff4b6ac411a9e62b160edd
+            check_1       264d1e12c9481fc0f7962fcf320303a3
+  epoch 2 : z_2           9a93ac29a6e2ebad209fae69db3d3d5c5134cc0b5492479186c53b476ff27a6d
+            unlock_secret f8829246f449f3289640772dd12afa4812aab9c01d90b89ab4bbd01a88ede5f2
+            check_2       6d2551c0f2bdfdf90c83d0f8e0d19fd0
+  key_vault "" (a transfer's new phone), E_1, epoch 1 :
+            unlock_secret 417e8255ff4d7ffb33120f8b5a70d1878f728f597dd5de8c7606565f0d4895cc
+            check         3a12751cd1b3e2a53728adda53e9d401
+  info_1 (185 B) : 7665747469642f766d732f322f756e6c6f636b2d7365637265742d696f7300746573742d
+                   7661756c742d30303031000000000000000001041bec1250aa8f78275f99a6663688f310
+                   85848d0ed92f1203e447125f927b7486976e19d2eecfd3d40f935f10be09e63bcbc8a24a
+                   71efb67848d97725c3a0dc730472dabf79df448c7a5bfaecb7bc0dbc990a0ffd43b7a52b
+                   502c860ac0ab8340ff239d8129976e853067907d98c231e9e349f8aedfc1e1ccb2fa47fe
+                   4945de2460
+  end to end, through §11.14.1 unlock above (x : 32 x 0x41, pepper : 32 x 0x32, vault_id : test-vault-0001):
+    epoch 1   unlock_key   c62a381da79b90f73004b06e83e5c50102f0c1af6cef9dade936acf71a87a5e0
+              secret_check b25667bbca0901faa080ace5d92f317d46adbb0b0543ae227da0f78367526b69
+    epoch 2   unlock_key   9a179f25ba0cded41d14c6bcb854637df8650645732e7edf2e37ecfca07597ad
+              secret_check 8c1da453b5ab92bf5affdad9c460f0a0b617c8db349bdaade91764f5a89afeac
+    key_vault "" (the vault's own vault_id is still test-vault-0001)
+              unlock_key   bbf1eb9f19ec263d821395609e266d906c7a8aa4a6c573003df116e241cf9e22
+              secret_check 0eed2888668319b2b085f09d8b94de8c65c3e5b2bfd15cb636e63bd511d1acac
 
 VAULT-HOST-PROTOCOL §8.1 counter object names                   (recovery.json)
   counter_key : 32 x 0x51   vault_id : test-vault-0001   generation : 1
