@@ -4,8 +4,8 @@ status: draft
 version: 0.1.42
 date: 2026-10-17
 changelog:
-  - 0.1.42: **wording for the owner's approval** (owner decisions of
-    2026-10-17, D8; VAULT-MESSAGING 0.34.0 §10.16–§10.18; CALLS-PLAN
+  - 0.1.42: approved by the owner 2026-10-17, questions 16–27 as
+    recommended (§9). (Owner decisions of 2026-10-17, D8; VAULT-MESSAGING 0.34.0 §10.16–§10.18; CALLS-PLAN
     0.1.3). New §4 "Wallet, presence, location and video": the app's
     plans for the four features whose vault side is built but never
     used from a phone. **Wallet** (W0 library spike, W1 create,
@@ -3377,6 +3377,8 @@ Each with the recommended answer.
     comparing a Play install's contents with the reproducible build.
 
 ### Open questions for the owner (wallet, presence, location; 0.1.42)
+
+Owner, 2026-10-17: 16–27 as recommended.
 
 Each with the recommended answer first. D8 (2026-10-17) already
 decided the order, the staging networks and that the chain source is
