@@ -1,9 +1,34 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.41
-date: 2026-10-16
+version: 0.1.42
+date: 2026-10-17
 changelog:
+  - 0.1.42: approved by the owner 2026-10-17, questions 16–27 as
+    recommended (§9). (Owner decisions of 2026-10-17, D8; VAULT-MESSAGING 0.34.0 §10.16–§10.18; CALLS-PLAN
+    0.1.3). New §4 "Wallet, presence, location and video": the app's
+    plans for the four features whose vault side is built but never
+    used from a phone. **Wallet** (W0 library spike, W1 create,
+    import, recovery phrase and its check, receive and balance, W2
+    send and transactions): signet and testnet4 on staging, mainnet
+    for production later; the **chain source is the member's**, an
+    Esplora server per network with mempool.space as the default for
+    both test networks, the member's own URL checked against the
+    network's genesis block, Electrum later, and a privacy note; how
+    the app combines it with `wallet.address.list`,
+    `wallet.address.used`, `wallet.psbt.inspect` and `wallet.sign`;
+    phrase screens with `FLAG_SECURE`, nothing of a wallet on disk but
+    three settings. **Presence** (P1): the policy in Settings →
+    Privacy, the avatar sheet and a per-connection switch, asked only
+    when a connection's page opens. **Location** (L1–L3): sharing
+    through a `location` foreground service started by the member,
+    without background location; positions never stored; no map in
+    L1. **Video** (C4): what it adds to voice calls, after C2 and C3.
+    How the app learns that a vault has each feature; screens, local
+    state, permissions, notifications, History, texts, tests and PRs;
+    thirteen questions and vault follow-ups from the vault code; §9
+    questions 16–27 for the owner. §2 D8, §5 modules, §6 order and the
+    feed row follow. The texts are drafts
   - 0.1.41: **approved by the owner 2026-10-16** (owner decisions of
     2026-10-16; VAULT-MESSAGING 0.34.0). §4 "Recovery and unlock from
     release R": **recovery is on by default**; the app learns whether
@@ -511,6 +536,7 @@ related:
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
+  - CALLS-PLAN.md (0.1.3) — calls; video in C4 (§4, 0.1.42)
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -552,6 +578,7 @@ surface than the vettid.dev app and a layout modelled on Proton Mail.
 | D5 | **Message search later** (not in v1). |
 | D6 | **Biometric app lock in v1**: opening the app (and returning to it after a timeout) can require a biometric or device credential via BiometricPrompt (class 3), gating a Keystore key that unlocks the app's local data. 0.1.19: called **App lock**, with the method Biometrics (as described) or Phone screen lock (the device credential only). It is a convenience layer only: it never replaces the vault PIN (unlocking the vault) or the credential password (critical actions). |
 | D7 | **Notification modes** (owner, 2026-10-09; 0.1.23): the member picks how notifications reach the phone: **On-phone service** (recommended, most private; the default), **Google push** (FCM through the VettID push gateway; offered once the gateway and FCM credentials exist) or **Off** (not recommended). Feed items raise notifications through the chosen mode (§4 Notification modes). Supersedes PUSH-GATEWAY 0.2.0 §11's default order (FCM first) for this app (PUSH-GATEWAY 0.3.0 follows it). No UnifiedPush (owner, 2026-10-09; 0.1.24; §9, question 10): the on-phone service is the path for phones without Google services. |
+| D8 | **Wallet, presence, location and video** (owner, 2026-10-17; 0.1.42; §4 "Wallet, presence, location and video"). All four are wanted, in the order **wallet, presence, location**, with **video after the calling service** (CALLS-PLAN C2 and C3). Wallet networks on staging: **signet and testnet4**; mainnet for production later. The wallet's **chain source is the member's choice**: the app reads balances and coins and broadcasts through a server the member can set. |
 
 ## 3. Design language (from Proton Mail)
 
@@ -921,7 +948,7 @@ feed repository and no screen.
    | `owner_check.locked` (urgent) | "Your vault locked after 10 failed checks" | Settings → Security |
    | `owner_check.hold_changed` (high) | "Hold turned off until <date>" / "Hold turned on" / "Hold back on" (`ref`) | Settings → Security (the hold) |
    | `guide` | the item's `title`; `body` in the sheet | Detail sheet |
-   | `leash.*`, `action.request`, `intro.request`, `location.shared`, `location.request`, `wallet.signed` | from the app's strings, as History | Detail sheet: "Not available in this version of the app" (agents, shared actions, introductions, location and wallet come later, §6; their asks expire as their sections say) |
+   | `leash.*`, `action.request`, `intro.request`, `location.shared`, `location.request`, `wallet.signed` | from the app's strings, as History | Detail sheet: "Not available in this version of the app" (agents, shared actions, introductions, location and wallet come later, §6; their asks expire as their sections say). 0.1.42: `wallet.signed` opens the transaction from W1, `location.shared` the connection and `location.request` Approvals from L1 (§4 "Wallet, presence, location and video") |
 
    Names come from the app's caches as in History (§4 History);
    `<item>` is the item's name, never a value; `<tag>` names the rule by
@@ -2074,6 +2101,704 @@ and the old phone's deletion on the notice, a PIN change, the presence
 notice, the "no longer holds the keys" screen after clearing data.
 Manual: both test phones against staging release R.
 
+### Wallet, presence, location and video (0.1.42)
+
+*Wording for the owner's approval. The app's side of VAULT-MESSAGING
+0.34.0 §10.18 Wallet (with §10.7 critical items), §10.17 Presence and
+§10.16 Location, and of CALLS-PLAN 0.1.3 §4, §6.4 and §7 C4 for video.
+The vault side of the first three is built (vettid-vault `main`,
+features `wallet`, `presence` and `location`, on in staging and off in
+production, VAULT-MESSAGING §11.10.8) but has never been used from a
+phone. Nothing here is built in the app. The owner decided on
+2026-10-17 the wallet's networks on staging, that the chain source is
+the member's choice, and the order (D8); the other choices are open
+(§9, questions 16–27), each with a recommendation. The texts are
+drafts for the owner's wording. Vault code read at vettid-vault
+`2c3fe13`.*
+
+**Order** (D8). Wallet (W0–W2), then presence (P1), then location
+(L1–L3), each on staging under STAGING-DEVELOPMENT-PLAN §2 and promoted
+through its §2.4. Video in calls (C4) comes after the calling service
+and ringing (CALLS-PLAN C2 and C3).
+
+**Does this vault have the feature?** As for calls (CALLS-PLAN §12.5)
+and photos: after each unlock the app sends one `wallet.list`, one
+`presence.get` and one `location.share.list`. An answer means the
+feature is there; `unsupported_type` hides its screens, drawer entry
+and buttons for that vault until the next unlock. Nothing is cached
+across releases. Production release 1 lists none of the three
+(VAULT-MESSAGING §11.10.8), so a production build shows none of them
+until a production release lists them.
+
+#### Wallet
+
+**What the member gets.** Bitcoin wallets in the vault: the recovery
+phrase is a critical item in the Protean Credential, so nothing can be
+spent without the credential password; the vault derives addresses
+without it. The app is the wallet's eyes on the chain: it reads
+balances and coins from a server the member chooses, builds the
+transaction, and broadcasts what the vault signed. **The vault never
+talks to a chain** (VAULT-MESSAGING §10.18).
+
+**Networks** (D8; owner decision of 2026-10-17). The staging build
+offers **signet** and **testnet4**. The production build will offer
+mainnet, with its own approval before production; test networks are
+not offered there. The vault's `network` member knows `signet` and
+`testnet`, and `testnet` covers testnet3 and testnet4, whose addresses
+and keys look the same (vettid-vault `vms/btc/account.go`). The app
+must therefore know which test chain a `testnet` wallet is on. The
+options:
+
+| Option | How | For | Against |
+|---|---|---|---|
+| (a) App-side label | The app stores `testnet4` with the `wallet_id` in its own encrypted settings | No vault change; invisible to the member | Lost with the app's data: after a transfer or a recovery the new phone does not know it, and has to ask |
+| (b) A wallet tag | `tags: ["testnet4"]` in `wallet.create`; read back from the item (`item.get`, since `<wallet>` has no tags) | Kept in the vault, on every device; no vault change | Tags are the member's: they drive sharing, show on the Vault screens, and can be removed, renamed or merged (`tag.merge`) by the member, which silently loses the marker |
+| (c) A vault field | The vault accepts `network: "testnet4"` as its own name (testnet encodings and coin type 1), and `testnet` keeps meaning testnet3 | Exact, durable, the same on every device and in desktops later | A vault change and a staging release |
+
+**Recommendation (question 16): (c)**, a small vault fix for the next
+staging release, and **(a) until then**: the app writes the label when
+it creates or imports a testnet4 wallet, and a `testnet` wallet the
+phone has no label for opens on "Which test network is this wallet
+on?" (testnet4, or testnet3 with "VettID's staging app does not
+connect to testnet3"). A wallet whose network the vault names exactly
+never asks.
+
+**The chain source** (D8; owner decision of 2026-10-17: member-chosen).
+
+- **What it is.** An **Esplora** server (the HTTP API of Blockstream's
+  esplora, which mempool.space also serves). The app uses: the tip
+  height, an address's (or script hash's) transactions and unspent
+  outputs, a transaction's raw hex, the fee estimates
+  (`/fee-estimates`), and the broadcast (`POST /tx`).
+- **Defaults per network:** signet `https://mempool.space/signet/api`,
+  testnet4 `https://mempool.space/testnet4/api` (question 17). The
+  mainnet default is chosen with the production approval.
+- **The member's own server.** "Use my own server": an Esplora URL,
+  `https` only, no credentials in the URL, redirects refused. Before it
+  is saved the app tests it: the server must answer and its block 0
+  must be the genesis block of that network (the app has the four
+  genesis hashes built in), so that a testnet3 server is never used for
+  a testnet4 wallet, or a mainnet server for a test one. **Electrum**
+  servers (the protocol of Electrum, Electrs and Fulcrum, which is what
+  most members' own nodes run) come later, after W2, if members ask
+  (question 18); a proxy or Tor setting is out of scope here.
+- **Where it lives.** Wallet → ⋯ → **Chain server**, one setting per
+  network (not per wallet), also reachable from each wallet's details
+  ("Using mempool.space"). Stored in the app's encrypted settings on
+  this phone only (it is not a vault setting: a new phone starts from
+  the defaults). "Reset to default" restores the network's default.
+- **Privacy note** (shown under the setting, and once before a
+  wallet's first look-up): "To show your balance and send, VettID asks
+  this server about your wallet's addresses. The server sees those
+  addresses, and can tell they belong together, and it sees this
+  phone's internet address and when you look. VettID's own servers see
+  none of it. Use your own server to keep this to yourself."
+- **How the app uses it with the vault:**
+  - *Which addresses.* The app derives the wallet's addresses itself
+    from the account descriptors in `<wallet>` (`wallet.get`): both
+    accounts (P2TR and P2WPKH), receive and change chains, up to the
+    higher of the vault's `next_receive`/`next_change` and the last
+    address with history, plus a gap of 20. Before using its own
+    derivation it compares the first addresses of each chain with the
+    vault's (`wallet.address.list`) and stops on any difference ("This
+    wallet's addresses don't match your vault's. Nothing was sent.").
+  - *Balance and coins.* From the server: confirmed and unconfirmed
+    totals and the unspent outputs. `wallet.balance` is not used: it
+    answers `unavailable` in every release.
+  - *Receive.* The address comes from the vault (`wallet.address.new`,
+    the receiving account), so that the vault knows every address it
+    handed out (also to connections, §10.14). The app shows the newest
+    issued receive address that has not been used, and asks for a new
+    one only when that one has received funds or the member taps "New
+    address", to keep the gap small.
+  - *Used.* Addresses the server shows funded are reported with
+    `wallet.address.used` (at most 256 per request) once per look-up,
+    so that a connection's address is replaced (§10.14). The vault
+    marks only addresses it issued (below, vault follow-up 4).
+  - *Imported phrases.* After `wallet.create` with the phrase, the app
+    scans both accounts on the server, sets the receiving account to
+    the one with the newer history (P2TR if neither has any, or both
+    equally) with `wallet.update{address_type}`, and then has the vault
+    issue addresses up to the last used index of each chain (one
+    `wallet.address.new` per index; vault follow-up 5), so that it
+    never hands out an address that was used before.
+  - *Send.* The app builds the PSBT from the server's coins
+    (below), the vault checks it (`wallet.psbt.inspect`) and signs it
+    (`wallet.sign`); the app broadcasts the returned `tx` to the server.
+    `broadcast: true` is never sent (`unavailable` in every release).
+
+**Library** (question 19). The app needs BIP39 words (import and the
+check before sending), BIP32 derivation from account keys, bech32 and
+bech32m addresses, the BIP86 tweak, PSBT version 0 with taproot
+fields, coin selection and an Esplora client. A short spike (W0)
+compares **BDK** (`bdk-android`, a Rust library with Kotlin bindings,
+MIT or Apache-2.0, which takes the vault's descriptors as they are and
+has an Esplora client and coin selection) with ACINQ's
+**bitcoin-kmp** and `secp256k1-kmp` (Kotlin, Apache-2.0). The spike
+must show, against the dev stack's `wallet.psbt.inspect`: a PSBT with
+the **full previous transaction on every input, taproot inputs too**
+(the vault refuses anything else: `previous_tx`), taproot BIP32
+derivations without leaf hashes and with the wallet's fingerprint, a
+change output carrying its derivation (or the vault counts it as a
+payment), one PSBT spending from both accounts, and a reproducible
+`foss` build with the library in it. Recommendation: BDK, if it passes;
+bitcoin-kmp otherwise.
+
+**Screens.**
+
+| Screen | Proton analogue | Notes |
+|---|---|---|
+| Wallet (drawer) | Folder list | The wallets (`wallet.list`), each a row: name, network chip ("Signet", "Testnet4"; gold-ink, never on mainnet), balance in BTC with sats underneath, "Not backed up" in the error colour while the phrase is not confirmed. The floating action button: **New wallet** / **Import a wallet**. Empty state: "No wallets yet". A test network shows a banner: "Test network: these coins have no value." Up to 16 wallets (`limit`: "Your vault holds 16 wallets, the most it can.") |
+| Wallet detail | Message detail | Balance (confirmed; "+ 0.001 incoming" while unconfirmed), the last look-up's time and the server's host, pull to refresh; **Receive** and **Send** in the pill (Send from W2); the transactions (W2, below); ⋯: Show recovery phrase (question 21), Receiving address type (P2TR "Taproot (recommended)" or P2WPKH "Native SegWit"), Chain server, Details (fingerprint, network, account paths, descriptors, each copyable), Delete wallet |
+| New wallet | — | Name (1–128 characters, no control characters), network (signet or testnet4 on staging), then the credential password ("Your password protects this wallet. You will need it for every payment."); `wallet.create` without `item`; then the phrase (below) |
+| Import a wallet | — | Name, network, the words (12, 15, 18, 21 or 24), and an optional passphrase behind "Advanced" ("Only if you set one when the wallet was made. Letters, digits and symbols from a standard keyboard only."; printable ASCII, at most 256 bytes, as the vault requires). Each word is checked against the BIP39 English list as typed, and the checksum before anything is sent ("These words aren't a valid recovery phrase. Check each word and the order."). Then the password and `wallet.create` with `item: {mnemonic, passphrase?}`, then the scan above ("Looking for this wallet's history…") |
+| Recovery phrase | — | After creating (and from ⋯ → Show recovery phrase): `item.reveal` of the wallet's item with a reply key; the words in a numbered grid of two columns, the passphrase (if any) under it; "Write these words on paper, in order, and keep them somewhere safe. Anyone with them can take your coins. VettID never shows them to anyone else." **No copy button**; Continue goes to the check |
+| Check the phrase | — | Three positions chosen at random ("Word 4", "Word 11", "Word 19"), each picked from four candidate words or typed; a wrong one: "That's not word 11. Look at your paper again." with **Show the words again**. When all three are right: "Backed up" |
+| Receive | — | The address as a QR code (a BIP21 `bitcoin:` URI, upper case for a denser code) and as text in groups of four; Copy (the clipboard marked sensitive), Share; an optional amount; "New address"; the account ("Taproot address") and "Only send <network> bitcoin to this address." A wallet whose phrase is not confirmed shows the phrase check instead (question 20) |
+| Send (W2) | Compose | Below |
+| Transaction detail (W2) | Message detail | Below |
+
+**Creating and backing up** (W1).
+
+1. The password is typed once and used for `wallet.create` and, at
+   once after its answer, `item.reveal` of the new item: two credential
+   operations (two UTKs), the password held in memory only between
+   them and zeroized after the second answer.
+2. `item.reveal` answers `values_sealed`; the app opens it with the
+   reply key's private half, which lives only in memory for that
+   request; the two `password` fields are "Recovery phrase" and
+   "Passphrase" (vettid-vault `features/wallet/wallet.go`, `create`).
+3. The phrase screen and the check set `FLAG_SECURE` (no screenshots,
+   no recent-apps snapshot), are excluded from autofill and from
+   Android's content capture (TalkBack still reads them), and hold the
+   words in a `CharArray`
+   that is wiped when the screen leaves. Leaving before the check: the
+   wallet stays, "Not backed up", and the check is offered from its row.
+4. **Confirmed** is a flag the app keeps per `wallet_id` in its
+   encrypted settings (not a secret; the vault has no such flag, vault
+   follow-up 7). An imported wallet starts confirmed (the member typed
+   the words).
+5. Every reveal is a credential operation, audited as `item.revealed`
+   and a feed item (History: "Recovery phrase shown: <wallet>").
+
+**Never** (both phases): the words or the passphrase on disk, in
+`SavedStateHandle`, in logs, crash reports, analytics or the clipboard;
+the import field is a password-class field without suggestions or
+personalized learning (`IME_FLAG_NO_PERSONALIZED_LEARNING`), as the
+typed recovery code (§4, "Recovery: type the code"); no word list
+lookup over the network.
+
+**Sending** (W2).
+
+1. **Who and how much.** Paste, type or scan (QR, a BIP21 URI's
+   address and amount; other URI parameters ignored) the address. The
+   app checks it for the wallet's network first: a mainnet address in a
+   test wallet (or the reverse) is refused, "This is a <network>
+   address. This wallet is on <network>." The amount in BTC or sats,
+   or **Send all**. One payee per send in W2.
+2. **Fee.** From the server's `/fee-estimates`: **Slow** (about a
+   day, 144 blocks), **Normal** (about an hour, 6), **Fast** (about 20
+   minutes, 2), and **Custom** in sat/vB. Never below 1 sat/vB, never
+   above 1,000 sat/vB (the vault's cap, `fee_rate`), and above twice the
+   Fast rate the app asks "This fee is much higher than needed right
+   now. Pay it anyway?". The transaction signals replacement (BIP125,
+   sequence `0xfffffffd`) so that a later version can raise a fee; W2
+   has no fee bump.
+3. **Building.** Coin selection over both accounts' confirmed coins
+   (unconfirmed coins only with "Include unconfirmed coins", off by
+   default), branch and bound and then largest first; change to the
+   next change address of the receiving account (the vault records
+   whatever change index it signs for, `recordSpend`); outputs below
+   330 sats are not made (the vault refuses them, `output_amount`): the
+   remainder goes to the fee and the review says so. Each input gets
+   its full previous transaction (fetched from the server) and its
+   derivation with the wallet's fingerprint; the change output gets
+   its derivation.
+4. **The vault's summary.** `wallet.psbt.inspect`. The review screen
+   shows **the vault's summary, not the app's own figures**: each payee
+   with its amount, the change, the fee (in sats and sat/vB from
+   `vsize`) and the total leaving the wallet. The app compares it with
+   what it built: if a payee's address string differs from the one the
+   member entered (the vault re-encodes an output script for the
+   wallet's network, vettid-vault `vms/btc/psbt.go`, `Inspect`), or any
+   amount differs, it stops: "Your vault saw a different payment from
+   the one you entered. Nothing was signed." An `invalid_psbt` answer
+   shows its text (below) and signs nothing.
+5. **Approve.** "Send 0.0012 tBTC to tb1q…" with **Approve with
+   password**. The password is typed once and used for
+   `credential.unlock` (when the unlock window is closed; spending needs
+   it, `credential_locked` otherwise) and then `wallet.sign` with
+   `sealed{password, item_id: wallet_id, payload_sha256}`, where
+   `payload_sha256` is the SHA-256 of the PSBT's **decoded bytes**, not
+   of the base64 text. A lost or late answer is retried with **the same
+   inner id**, which the vault answers from its cache, never by
+   building again. The new credential and UTKs are stored and
+   acknowledged like any credential response.
+6. **Broadcast.** `POST /tx` with the returned `tx`. Success: "Sent.
+   It will confirm in about <time>." Failure: the signed transaction
+   stays in memory and **Try again** resends it (also after choosing
+   another server); it is dropped at lock, and a later send simply
+   spends the same coins again (only one of two can ever confirm). The
+   app never writes `tx` to disk.
+
+**`invalid_psbt` texts** (the reasons of vettid-vault
+`vms/btc/psbt.go` and `features/wallet/wallet.go`; any other: "Your
+vault would not sign this payment (<reason>)."): `fee_rate` "The fee is
+above the most your vault will sign (1,000 sat/vB)."; `output_amount`
+"One amount is below 330 sats, too small to send."; `previous_tx`,
+`witness_utxo`, `foreign_input`, `derivation_path`, `derivation_key`,
+`derivation_script`, `internal_key`, `input_script`, `duplicate_input`,
+`malformed`, `shape`, `size`, `version`, `sighash`, `amount`, `fee`,
+`no_account`, `output_script`: "VettID built a payment your vault
+won't sign. Nothing was signed. Please report this." with the reason
+under "Details"; `wrong_seed`: "Your vault's recovery phrase for this
+wallet doesn't match its addresses. Nothing was signed. Contact
+VettID." (an alarm-level text: it should never happen).
+
+**Transactions** (W2). The list merges two sources by `txid`:
+`wallet.history` (what this vault signed, with payees, change, fee and
+the connection for a payment request) and the server's transactions
+for the wallet's addresses (received payments, confirmations). A row:
+"Sent to tb1q…" or "Received", the amount, "Confirmed" / "Waiting for
+confirmation" / "Not broadcast" (signed by the vault, unknown to the
+server after 24 hours); detail: amounts, fee, confirmations, block
+time, `txid` (copyable) and "Open in a block explorer" (the chain
+server's site when it has one; a confirmation that this leaves VettID).
+
+**Local state.** The wallets, account keys, descriptors, addresses,
+coins, balances and transactions are in memory only, cleared at lock,
+on entering the hold or the due state, at a wipe and with the process
+(the rule "nothing kept outside an open vault", §4 Notifications, 10);
+an account key reveals every address and payment of the wallet. With
+BDK, its persistence is not used (an in-memory wallet), so each open
+looks the wallet up again. On disk, in the app's encrypted settings:
+the chain server per network, the testnet4 label (option (a)) and the
+backed-up flag per `wallet_id`. Nothing from a wallet goes to logs or
+crash reports (ids at debug level only).
+
+**The wallet's item elsewhere.** It is a critical item, so the
+Credential screen lists it ("Bitcoin wallet: <name>"); tapping it opens
+the wallet. Its edit and sensitivity actions are not offered (`in_use`).
+Deleting it, from the wallet's ⋯ or the item, warns: "Delete
+<name>? Your vault forgets this wallet and its recovery phrase. Coins
+on it are lost unless you have the recovery phrase written down." and
+needs the password (`item.delete` is a credential operation;
+`sync.event{wallet.deleted}` follows).
+
+**Notifications.** `wallet.signed` (Vault activity): "Bitcoin payment
+signed" opens the transaction; `item.revealed` of a wallet as for any
+critical item. No notification for coins received: the app looks at
+the chain only while it is open.
+
+**History** (category Vault). `wallet.created` "Wallet created:
+<name>"; `wallet.deleted` "Wallet deleted"; `wallet.address_issued`
+"Address given to <First Last>" (a connection's request, §10.14);
+`wallet.signed` "Bitcoin payment signed" with the `txid` as `ref`;
+`item.revealed` of a wallet's item "Recovery phrase shown: <name>".
+No address or amount is in the audit log, so none is in History.
+
+**Out of scope here:** mainnet (its own approval), shared actions'
+`wallet.request-address` and `wallet.request-payment` (with shared
+actions), fee bumping, several payees per send, coin control, Electrum,
+labels on addresses, a fiat value.
+
+**Texts (drafts).**
+
+| Where | Text |
+|---|---|
+| Wallet, empty | "No wallets yet" / "Keep bitcoin in your vault. Payments need your password." |
+| Test network banner | "Test network: these coins have no value." |
+| New wallet, password | "Your password protects this wallet. You will need it for every payment." |
+| Recovery phrase | "Write these words on paper, in order, and keep them somewhere safe. Anyone with them can take your coins. VettID never shows them to anyone else." |
+| Recovery phrase, below | "No screenshots: this screen is hidden from screenshots and the app switcher." |
+| Check | "Which is word {n}?"; wrong: "That's not word {n}. Look at your paper again." |
+| Not backed up | "Not backed up. If your vault is lost, these coins are lost too." |
+| Import, invalid | "These words aren't a valid recovery phrase. Check each word and the order." |
+| Import, scanning | "Looking for this wallet's history on {host}…" |
+| Unknown test network | "Which test network is this wallet on?" |
+| Address mismatch (derivation check) | "This wallet's addresses don't match your vault's. Nothing was sent." |
+| Wrong network address | "This is a {network} address. This wallet is on {other network}." |
+| Summary mismatch | "Your vault saw a different payment from the one you entered. Nothing was signed." |
+| Approve | "Send {amount} to {address}? Fee {fee}." Button: "Approve with password" |
+| Broadcast failed | "Signed, but {host} didn't accept it: {reason}. Try again, or choose another server." |
+| Chain server privacy | as above, "To show your balance and send, VettID asks this server…" |
+| Server check failed | "That server isn't on {network}." / "That server didn't answer." |
+| Delete | "Delete {name}? Your vault forgets this wallet and its recovery phrase. Coins on it are lost unless you have the recovery phrase written down." |
+
+**Tests.**
+
+- Unit: address derivation from the vault's descriptors against the
+  BIP84 and BIP86 test vectors and against `wallet.address.list` from
+  the dev stack; BIP39 word and checksum checks and the vault's
+  normalisation (any case and spacing); the passphrase rule; the
+  network check of a pasted address (mainnet, testnet, signet, a
+  BIP21 URI); `payload_sha256` over the decoded bytes; the fee bounds;
+  a PSBT whose change output lacks its derivation shows up as a payee
+  in the vault's summary and is caught by the comparison; a summary
+  with a re-encoded address is caught; the Esplora client against a
+  recorded server (balance, unspent, raw transactions, fee estimates,
+  broadcast errors) and the genesis check (a testnet3 server refused
+  for testnet4); the retry of `wallet.sign` with the same inner id; the
+  testnet4 label kept and asked for.
+- Instrumented, dev stack (`regtest`, a development build of the
+  vault, with a local Esplora): create, back up and check; receive;
+  import a phrase with history on both accounts (the receiving account
+  and the issued indices follow); a send through inspect, sign and
+  broadcast that confirms; every `invalid_psbt` text; the phrase and
+  check screens have `FLAG_SECURE`.
+- **Privacy, data directory scan:** after creating, revealing, checking
+  and importing a wallet and sending from it, lock and scan the app's
+  files, databases, caches and `no_backup`: none of the test phrase's
+  words in sequence, no account key, address, `txid` or signed
+  transaction.
+- Phone test, both test phones on staging: a signet wallet and a
+  testnet4 wallet each created, backed up and checked; coins from a
+  public faucet; the balance; a send to the other wallet confirmed;
+  the member's own server set and refused for the wrong network; an
+  import of a known test phrase.
+
+**PRs.** W0: the library spike, written up (no screens). W1: the chain
+source and its setting, wallet list and detail, create, import,
+recovery phrase and check, receive, balance, `wallet.address.used`,
+History and feed labels. W2: send (building, inspect, approve, sign,
+broadcast) and the transactions. Each against the dev stack first,
+then staging.
+
+#### Presence
+
+**What it is.** Whether a connection is around, on demand
+(VAULT-MESSAGING §10.17): no heartbeats, no list of who is online. The
+member's vault answers a connection's ping only if the member's policy
+shares presence with that connection; otherwise it stays silent, which
+looks the same as a locked or offline vault.
+
+**Screens.**
+
+| Screen | Notes |
+|---|---|
+| Settings → Privacy → **Presence** | The member's status: **Available**, **Busy**, **Away**, **Invisible** ("You appear offline to everyone"); **Who can see it**: "All my connections" (`share: all`) or "No one" (`share: none`), and **Exceptions**: the connections for whom it is the other way round ("Except…" under all, "Only…" under no one), picked from the connection list (at most 1,024). `presence.get`, `presence.set` with the policy's `version`; `conflict` reloads and re-applies the member's change once |
+| Avatar sheet | One row under the name: "Status: Available" opening a short picker of the four states (the same `presence.set`) |
+| Connection detail | A line under the name: "Available", "Busy", "Away", each with "· active {age}" from `last_active` ("active 10 min ago"; "active today" past an hour; nothing without it), or "Status unknown"; a refresh icon; and a switch **Share my status with <First>** (adds or removes the connection in `except`) |
+| Conversation | The same line under the title, smaller |
+
+**When the app asks.** `presence.query{connection_id}` when a
+connection's detail or conversation opens and on refresh, never from a
+list, and at most once a minute per connection (the vault's own rate:
+a second query within the minute returns the first `ping_id` and
+repeats its result). The line shows "Checking…" until a
+`presence.result` with that `ping_id` arrives, or "Status unknown" at
+`exp` (30 s). Nothing is shown on the Connections list (question 22).
+While the vault is due or held, presence is not asked (the hold allows
+no `presence.*` from the app).
+
+**The first time** (question 23). The vault's default is Available,
+shared with all connections, so once the feature is on every
+connection can see "Available" and a last-active time without the
+member having chosen it. The app shows a one-time card on Connections:
+"Let your connections see when you're around? They see Available, Busy
+or Away and roughly when you last used VettID." **Share with
+everyone** / **Not now** (`share: none`), and "Change this in Settings
+→ Privacy → Presence".
+
+**Local state.** Results in memory only, per connection, until the
+screen leaves or one minute passes; the policy in memory, re-read at
+unlock and on `sync.event{presence.changed}`. Nothing on disk.
+
+**Notifications and History.** None: pings and policy changes are not
+audited or put in the feed.
+
+**Texts (drafts).**
+
+| Where | Text |
+|---|---|
+| Unknown | "Status unknown" / detail: "{First}'s vault didn't answer. They may be offline or locked, or not sharing their status with you." |
+| Invisible | "Invisible: you appear offline to everyone." |
+| Share switch, off | "{First} sees 'Status unknown' for you, as if your vault were offline." |
+| Last active | "active {n} min ago" (rounded down to 5 minutes by the vault) |
+| First-time card | as above |
+
+**Tests.** Unit: the policy editor (all/none with exceptions, the
+switch on the connection page, `conflict`), the one-minute reuse, the
+unknown state at `exp`, `last_active` formatting and its absence.
+Instrumented, dev stack: two vaults, each state, a connection
+excepted (unknown), the other vault locked (unknown), held (unknown).
+Phone test: Pixel 10 Pro and Pixel 7 on staging, each other's status
+both ways.
+
+**PR.** P1: one PR (settings, avatar sheet, connection and conversation
+lines, the first-time card).
+
+#### Location
+
+**What it is.** A member shares their location with one connection at
+a time, by an explicit, expiring share, once or continuously, at a
+precision they choose; the vault reduces each position to that
+precision and forwards it from memory (VAULT-MESSAGING §10.16). This
+supersedes the location phase notes of §6, whose three layers (an
+event, a glance, a detail) are kept.
+
+**Screens.**
+
+| Screen | Notes |
+|---|---|
+| Share my location (a sheet from the connection detail, the conversation's ⋯, a request, or Location's button) | **Once** ("Sends one position now; ends after 15 minutes") or **For a while**: 15 min, 1 hour (default), 8 hours, 1 day, 7 days; **Precision**: Approximate (default, owner decision of 2026-10-03: "within about 1 km"), Exact ("within a few metres"), City ("within about 10 km"); **Update every** (for a while): 30 s, 1 min (default), 5 min, 15 min; **Let <First> keep the trail** (off by default: "Without this, <First> sees only your latest position"). Under the precision: "Approximate and City show the centre of a fixed area. If you move across an area's edge, <First> may see that you were near it." **Start sharing** → `location.share.start` |
+| Location (drawer) | **You're sharing with**: each outgoing share (connection, precision, until, "Last sent 2 min ago", **Stop**); **Shared with you**: each incoming share (connection, age of the latest position, until); **Requests**: pending requests from connections (below). From `location.share.list`, kept current by `location.event` and `sync.event{location.share.changed}` |
+| Connection detail | While <First> shares with you: a card with the latest position (below), its age and precision, until when, **Stop receiving** (`location.share.stop` of the incoming share). While you share with <First>: "Sharing your location until 15:30" with **Stop**. **Ask for location** (`location.request`, optional note up to 256 bytes) |
+| Connections list | The glance: a small location icon and the age ("5 min") on the row of a connection that shares with you |
+| A position (the detail) | L1: the coordinates, the accuracy circle as text ("within 1 km"), the age, the distance and direction from this phone when the member has allowed location, and **Open in maps app** (a `geo:` intent, after "This hands the position to another app."). L2: an embedded map (question 25) with the trail when shared |
+| Approvals | A request: "<First> asks where you are" with the note, **Share once**, **Share for a while…** (the sheet, with the request's `request_id`) and **Not now** (no message is sent: the vault has no decline). It expires after 24 hours (question 27) |
+
+**Sending positions** (`:core:location`).
+
+- **Provider.** The platform's `LocationManager` (the `fused` provider
+  of Android 12 and later, GPS otherwise), in both distributions: no
+  Google Play services location API, so the `foss` build and GrapheneOS
+  without Google work the same. Indoors on a phone without a network
+  location provider a first fix can take minutes; the share sheet says
+  "Finding your location…" and a **once** share waits up to 60 s for
+  an accuracy of 100 m or better, then sends the best it has.
+- **A foreground service** of type `location`
+  (`FOREGROUND_SERVICE_LOCATION`), started by the member's tap on
+  **Start sharing**, runs while this phone is the source of at least
+  one active outgoing share. Its ongoing notification on a new
+  **Location sharing** channel (low importance, silent) says "Sharing
+  your location with Sam until 15:30" (several: "with 2 people") with
+  **Stop all** and opens Location. The member's tap starts it while the
+  app is visible, so the while-in-use permission is enough and the
+  service keeps receiving positions with the screen off (question 24).
+- **Cadence.** The provider is asked for the shortest interval among
+  this phone's continuous shares; each fix is sent as an ephemeral
+  `location.update` (`exp` = now + max(2 × interval, 60 s)) with `lat`,
+  `lon`, `accuracy_m`, and `altitude_m`, `speed_mps` and
+  `heading_deg` only when some share is exact (the vault drops them
+  otherwise). `at` is the fix's time; a fix older than 5 minutes is not
+  sent.
+- **Stopping.** At the share's `expires_at` **by the app's own timer**
+  (the vault ends it without telling this phone, vault follow-up 9), on
+  Stop, on `location.event{stopped, direction: out}` (the receiver
+  stopped it), on `sync.event{location.share.changed, ended}`, and when
+  the vault locks. Nothing is sent when no share has this phone as its
+  source (and, before L3, never for the log).
+- **Locked, due, held.** The member's lock stops the service (a
+  locked vault forwards nothing); after the next unlock, a share still
+  active with this phone as source (`location.share.list`, `device_id`)
+  resumes with a notice "Sharing your location with Sam again, until
+  15:30". The app lock does not stop it. While the daily check is due
+  or held, the vault drops this phone's positions and refuses
+  `location.share.stop` (vault follow-up 10): the service pauses with
+  "Paused until your daily check" and **Check now**.
+- **After the process ends** (a reboot, the system killing the app):
+  the share stays active at the vault until its expiry but receives
+  nothing. At the next start with the vault open, the app resumes as
+  after an unlock. Without background location it cannot restart by
+  itself.
+
+**Receiving.** `location.event{started}` (and the feed item
+`location.shared`) adds the incoming share; positions arrive as
+ephemeral `location.update` while the app is connected, and
+`location.get{connection_id, history}` reads the latest (`last`, with
+`received_at`), the trail when shared, and a snapshot when one was
+sent, when the screen opens. A share's `expires_at` ends it on the
+app's side too.
+
+**Local state.** **Positions are never stored** by the app: not the
+member's own fixes (held only until sent), not a connection's (in
+memory while the screen or the vault is open, cleared at lock, hold,
+wipe and with the process); never in Room, files, DataStore,
+`SavedStateHandle`, logs, crash reports or a map's tile cache (if L2
+adds a map, its disk cache is off or holds tiles only, never
+positions). The app keeps on disk, in its encrypted settings, only
+what it needs to resume or stop sending: the outgoing `share_id`s with
+their `connection_id` and `expires_at`, cleared when they end.
+
+**Permissions** (question 24). `ACCESS_COARSE_LOCATION` and
+`ACCESS_FINE_LOCATION`, asked at the first share ("To share your
+location, VettID needs to know where this phone is. It asks only while
+you share, and sends nothing to anyone else."); with only approximate
+access granted, Exact is unavailable ("Exact needs precise location
+in Android settings"), Approximate and City work. `POST_NOTIFICATIONS`
+for the ongoing notification (already asked for notifications).
+**No `ACCESS_BACKGROUND_LOCATION`** in L1 and L2:
+
+- *Play:* background location needs a permission declaration, a
+  prominent in-app disclosure, a video and Google's review, granted
+  only when it is core to the app; a `location` foreground service
+  needs the foreground-service declaration (as `specialUse` did, §4
+  Notification modes) but not that review.
+- *F-Droid:* no rule against it; the listing would show it.
+- *What it costs:* a share is started only from the app (a request
+  opens the app first), it does not restart after a reboot by itself,
+  and the member's own location log (below) is not possible.
+
+**The member's own location log** (L3, question 26). The vault can
+keep the member's own history (`location.history.*`, settings
+`location.history.enabled`, off by default). It needs the phone to send
+positions all the time, so background location, the Play review and a
+second always-on service. Recommendation: not before members ask, and
+then only with the owner's decision on background location. When
+built: Settings → Privacy → **My location history** (on/off with the
+warning that turning it off deletes it, retention, interval), a list
+and day view, delete a range, and **Send to <First>** for an active
+share (`location.history.share`).
+
+**Notifications.** `location.request` (Requests): "<First> asks where
+you are" opens Approvals. `location.shared` (Vault activity): "<First>
+is sharing their location with you" opens the connection. The ongoing
+sharing notification (above). A connection stopping its share: no
+notification; the row updates.
+
+**History** (category Location). `location.share.started` "Started
+sharing your location with <First Last>"; `location.share.stopped`
+out "Stopped sharing your location with <First Last>", in "Stopped
+receiving <First Last>'s location"; `location.share.received` "<First
+Last> started sharing their location"; `location.share.ended` in
+"<First Last>'s location share ended", out "<First Last> stopped
+receiving your location"; `location.requested` out "Asked <First
+Last> for their location", in "<First Last> asked for your location";
+`location.history.deleted` "Location history deleted ({n}
+positions)"; `location.history.shared` / `.received` "Location
+history sent to / received from <First Last>"; `drop.location`,
+`drop.location_rate`, `drop.location_malformed`,
+`drop.location_limit` (category Blocked and dropped) "Location from
+<First Last> dropped". History never shows a position.
+
+**Texts (drafts).**
+
+| Where | Text |
+|---|---|
+| Share sheet, precision note | "Approximate and City show the centre of a fixed area. If you move across an area's edge, {First} may see that you were near it." |
+| Share sheet, trail | "Let {First} keep the trail" / "Without this, {First} sees only your latest position." |
+| Started | "Sharing your location with {First} until {time}." |
+| Ongoing notification | "Sharing your location with {First} until {time}" / "with {n} people"; action "Stop all" |
+| Paused (due or held) | "Paused until your daily check." |
+| Resumed | "Sharing your location with {First} again, until {time}." |
+| Request | "{First} asks where you are"; "Share once", "Share for a while…", "Not now" |
+| Ask, limit | "You asked {First} a few minutes ago. You can ask again in {n} minutes." |
+| Incoming card | "{First}'s location · {age} · within {accuracy}" / "Until {time}" |
+| Open in maps | "This hands the position to another app." |
+| Permission | "To share your location, VettID needs to know where this phone is. It asks only while you share, and sends nothing to anyone else." |
+| Exact unavailable | "Exact needs precise location in Android settings." |
+
+**Tests.**
+
+- Unit: the share sheet's bounds (once has no duration or interval;
+  5 minutes to 7 days; 10 s to 1 hour); the app's timer ends a share at
+  `expires_at`; cadence takes the shortest interval; optional members
+  sent only for exact shares; a fix older than 5 minutes not sent;
+  pause and resume around due, held and lock; resume after a process
+  restart from the stored `share_id`s; no position in any persisted
+  type (a check over the stored settings' schema).
+- **Privacy, data directory scan:** after sharing both ways for some
+  minutes with the trail and a snapshot, lock and scan the app's files,
+  databases, caches and `no_backup`: no coordinate of the test route
+  in text or binary form.
+- Instrumented, dev stack: two vaults; once, continuous, stop from
+  either side, a new share replacing the old, a request answered by a
+  share, `limit` on a second request, the incoming share ended at
+  expiry.
+- Phone test, staging: Pixel 10 Pro (GrapheneOS, no Google location)
+  and Pixel 7 (stock); a continuous share for 30 minutes with the
+  screen off on each; a once share indoors; the approximate position
+  shown at its area's centre; Stop from the notification; permission
+  refused and approximate-only.
+
+**PRs.** L1: sharing (sheet, service, notification), receiving
+without a map, requests in Approvals, Location screen, History and
+feed labels. L2: the map, per question 25. L3: the member's own log,
+only after question 26.
+
+#### Video in calls (C4)
+
+*Short by design: the detail belongs to the calls sections of this
+plan that CALLS-PLAN §6.6 still asks for. C4 depends on the calling
+service (C2) and ringing with the app closed (C3), and needs the vault
+release with `call.update` (V7, not yet in VAULT-MESSAGING §10.10).*
+
+On top of voice calls, C4 adds:
+
+- **The camera**: `call.start{media: "video"}`, the front camera first,
+  VP8 always and H.264 through the phone's hardware codec only, VP9 and
+  AV1 off (CALLS-PLAN §4); frame encryption covers the video track as
+  it does audio; the "one audio section" rule of VAULT-MESSAGING §10.10
+  is replaced by C4's own text before any video SDP is accepted.
+- **Switching** between the front and rear camera, camera off and on,
+  and a small self-view.
+- **Adding or dropping video** in a voice call, and **a network change**
+  (Wi-Fi to mobile data) without dropping the call: both are a new
+  offer and answer inside the call, `call.update` (V7).
+- The `CAMERA` permission at the first video call ("To show your face
+  in a call, VettID needs the camera. It's used only while you're in a
+  video call."), the camera in the call's foreground service, and the
+  in-call screen's video states of CALLS-PLAN §6.4.
+- The exit test of CALLS-PLAN §7: video both ways for 10 minutes, and a
+  walk from Wi-Fi to mobile data without the call dropping.
+
+#### Questions and vault follow-ups (0.1.42)
+
+Read in vettid-vault at `2c3fe13`. None blocks W0, W1 or P1; the app
+works around each as written above until it is answered. None of them
+changes vault code here.
+
+1. **The test network** (question 16). `testnet` covers testnet3 and
+   testnet4 (`vms/btc/account.go:20`), so a wallet does not say which
+   chain it is on. Proposed: accept `testnet4` as a `network` name.
+2. **Every `invalid_psbt` reason.** §10.18 lists eight and "…"; the
+   code has 24 (`vms/btc/psbt.go`, `refuse(…)` calls;
+   `features/wallet/wallet.go:1231` `payee_network`; `psbt.go:339`
+   `wrong_seed`). Proposed: list them all in §10.18, so that apps can
+   give each a text.
+3. **Output addresses and the network.** §10.18 says every output is
+   "a standard address … of the wallet's network", but an output is a
+   script: the vault re-encodes it for the wallet's network
+   (`vms/btc/psbt.go:240-244`), so a mainnet address pasted into a test
+   wallet is shown as a test address. The app checks the network
+   itself and compares; proposed: say so in §10.18.
+4. **`wallet.address.used` marks only issued addresses**
+   (`features/wallet/wallet.go:847-852`); an address the app derived
+   and the vault never issued is ignored without an error. Proposed:
+   say so, or return the addresses not found.
+5. **No way to move an imported wallet's indices.** The vault issues
+   addresses only in order (`wallet.go:675-697`), so after an import the
+   app must call `wallet.address.new` once per used index to avoid
+   handing out a used address again. Proposed: `wallet.update` with
+   `next_receive`/`next_change` per account (only forward).
+6. **`<wallet>` has no tags** (`wallet.go:586-602`): the app reads them
+   from the item. Minor.
+7. **No "backed up" mark.** The vault does not record that the member
+   confirmed the phrase, so another phone (a transfer, a recovery)
+   asks again. Proposed: leave it to the app, or a boolean on the
+   wallet; owner's choice, not needed for W1.
+8. **Presence's `last_active` counts background traffic.** It is the
+   newest non-ephemeral message from any of the member's apps and
+   desktops (`vault/inbound.go:428-430`, `vault/host.go:181-189`), so the
+   on-phone service's catch-ups make a member look active who was not.
+   Proposed: count only messages the member caused (or a foreground
+   flag from the app), or say in §10.17 what it means.
+9. **A share's expiry is not told to the source device**
+   (`features/location/location.go:236-243`: the sweep runs only when a
+   message is handled and sends a `sync.event` then). The app keeps its
+   own timer; proposed: say so in §10.16.
+10. **Stopping a share while due or held.** The hold's allow list has no
+    `location.*` type (`vault/ownercheck.go:503-518`), so the member
+    cannot stop disclosing their location until they pass the check
+    (positions do not flow meanwhile). Proposed: allow
+    `location.share.stop` in the hold, as `vault.lock` is: stopping a
+    disclosure should always be possible.
+11. **Answered location requests stay pending on other devices.** A
+    share that answers a request closes it silently
+    (`location.go:317-319`); there is no event or list of pending
+    requests (`location.go:530-561`). Proposed: a `sync.event` when a
+    request closes, and its feed item marked read.
+12. **Presence `last_active` in the future.** §10.17: the asking vault
+    accepts a pong only with `last_active` not in the future; the code
+    allows 5 minutes (`features/presence/presence.go:412`). Proposed: say
+    the tolerance in §10.17.
+13. **Removing a connection edits the presence policy without a new
+    version** (`presence.go:427-435`): an app holding the old version
+    can still `presence.set` with it. Harmless (an unknown id in
+    `except` does nothing), but §10.1's versioning says otherwise.
+    Proposed: bump the version and send `presence.changed`.
+
 ## 5. Architecture
 
 Multi-module Gradle, Kotlin, Jetpack Compose + Material3, Hilt, coroutines
@@ -2093,7 +2818,9 @@ one (translation-ready), accessibility labels required in review.
 | `:core:data` | Repositories and Room caches per feature |
 | `:core:notify` | 0.1.23: the notification modes: the on-phone service (`VaultConnectionService`), channels, the Mapping and Content rules, the `PushProvider` interface; `:core:push-fcm` the FCM provider (the only module with Firebase; 0.1.34: in the `full` distribution only, `foss` binds a provider that reports "not in this build") |
 | `:core:ui` | Theme (navy + gold, light/dark), components (top bar, drawer, list row, empty state, pill bar, settings cards, sheets) |
-| `:feature:*` | onboarding, messages, connections, approvals, items (the "Vault" screens), credential, settings, history (0.1.11), notifications (0.1.23, the feed) |
+| `:core:chain` | (0.1.42) The wallet's chain source: the Esplora client, the per-network server setting and its genesis check, the Bitcoin library chosen in W0 (descriptors, PSBT building, coin selection); no Google code (§4 "Wallet, presence, location and video") |
+| `:core:location` | (0.1.42) Positions from the platform's `LocationManager` (no Play services), the `location` foreground service and its ongoing notification, the share timers; no storage of positions |
+| `:feature:*` | onboarding, messages, connections, approvals, items (the "Vault" screens), credential, settings, history (0.1.11), notifications (0.1.23, the feed); 0.1.42: wallet, location (presence lives in connections and settings) |
 | `:app` | Navigation (type-safe routes), DI wiring, notifications |
 
 Rules: features depend only on `:core:*`; no feature touches transport or
@@ -2162,7 +2889,10 @@ signer (§7).
 | N1–N4 | 0.1.23, notification modes (§4 Notification modes, 10): N1 app (setting, channels, on-phone service, FCM stubbed); N2 spec (`push.register`); N3 vault (push ops, wakes); N4 gateway with FCM credentials, then FCM on | N1: notifications in the background on both test phones without Google; N4: FCM wakes on the Pixel 7 |
 
 Calls, devices/agents/LEASH, wallet, location and presence follow v1 in
-that order, each as its own phase.
+that order, each as its own phase. 0.1.42 (D8, owner 2026-10-17): of the
+last three, the order is **wallet (W0–W2), presence (P1), location
+(L1–L3)**; video (C4) follows the calling service and ringing (C2, C3).
+Their PRs are listed in §4 "Wallet, presence, location and video".
 
 **Owner check** (VAULT-MESSAGING 0.13.0 §3.6, owner decisions of
 2026-10-05). The vault holds when the member has not given the PIN and
@@ -2645,3 +3375,68 @@ Each with the recommended answer.
     Play's code transparency for app bundles (to verify against
     Google's current documentation); a documented procedure for
     comparing a Play install's contents with the reproducible build.
+
+### Open questions for the owner (wallet, presence, location; 0.1.42)
+
+Owner, 2026-10-17: 16–27 as recommended.
+
+Each with the recommended answer first. D8 (2026-10-17) already
+decided the order, the staging networks and that the chain source is
+the member's; these are the choices it left open (§4 "Wallet,
+presence, location and video").
+
+16. **How the app knows a `testnet` wallet is on testnet4.**
+    **Recommended: a vault field** (the vault accepts `network:
+    "testnet4"`, a small fix in the next staging release), **and an
+    app-side label until then**, with "Which test network is this
+    wallet on?" on a phone that lacks it. Not a wallet tag: the member
+    can remove or merge tags, and they drive sharing.
+17. **Default chain servers.** **Recommended: mempool.space's Esplora**
+    for signet (`https://mempool.space/signet/api`) and testnet4
+    (`https://mempool.space/testnet4/api`); the mainnet default is
+    decided with the production approval.
+18. **The member's own server.** **Recommended: an Esplora URL in W1**
+    (`https` only, checked against the network's genesis block);
+    **Electrum later**, after W2, if members ask; no proxy or Tor
+    setting in these phases.
+19. **The Bitcoin library.** **Recommended: BDK (`bdk-android`)** if
+    the W0 spike shows that its PSBTs pass the vault's policy (the full
+    previous transaction on every input, taproot included; both
+    accounts in one PSBT) and that the `foss` build stays reproducible
+    with it; ACINQ's bitcoin-kmp otherwise.
+20. **Receiving before the phrase is backed up.** **Recommended: no.**
+    A new wallet shows no receive address until its phrase has been
+    written down and checked (three words); the member may leave and
+    come back, and the wallet says "Not backed up" until then. An
+    imported wallet counts as backed up.
+21. **Showing the phrase again.** **Recommended: yes**, from the
+    wallet's ⋯ → Show recovery phrase, with the password each time
+    (`item.reveal`, audited and in the feed).
+22. **Presence on the Connections list.** **Recommended: no**; only on
+    a connection's page and in the conversation, asked when they open.
+    A list would ping every connection each time it is shown.
+23. **Presence the first time.** The vault's default answers every
+    connection with "Available". **Recommended: a one-time card** asking
+    "Let your connections see when you're around?" with **Share with
+    everyone** and **Not now** (which sets "No one").
+24. **Location permissions.** **Recommended: foreground only** in L1
+    and L2: while-in-use location, and a `location` foreground service
+    started by the member's tap, which keeps sharing with the screen
+    off; **no `ACCESS_BACKGROUND_LOCATION`**, so no Play
+    background-location review (the foreground-service declaration
+    only). The cost: shares start only from the app and do not restart
+    by themselves after a reboot. F-Droid has no rule against either.
+    Background location only if L3 (question 26) is wanted, as its own
+    decision.
+25. **A map.** **Recommended: no map in L1** (the position as text,
+    its age and accuracy, the distance from this phone, and "Open in
+    maps app" after a warning); **in L2 an embedded map** (MapLibre,
+    no Google code) whose tile server the member can set, with a
+    default to be chosen then and the same kind of privacy note as the
+    chain server (a tile server learns which area is being looked at).
+26. **The member's own location log.** **Recommended: not now**; L3
+    only when members ask, and only with background location
+    (question 24).
+27. **A connection's location request.** **Recommended: in Approvals**,
+    as the ask it is (VAULT-MESSAGING §10.4.1), with Share once, Share
+    for a while and Not now; no answer is sent for Not now.
