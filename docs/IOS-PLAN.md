@@ -18,7 +18,11 @@ changelog:
     chosen; a locked iPhone never treated as lost keys; a fifth
     unconfirmed change refused, never by dropping a candidate; the
     stricter class stated, with `AfterFirstUnlockThisDeviceOnly` and its
-    residual as the fallback; two §14 texts. The comparison with Android in §6.3 is corrected. §1, §2
+    residual as the fallback; two §14 texts; "missing" decided by the
+    lookup's own answer with protected data available before and after;
+    the first-run marker a file read from Application Support and the
+    cleanup only while protected data is available; typed secrets
+    dropped when the screen locks. The comparison with Android in §6.3 is corrected. §1, §2
     ID9, §6.1, §7 (the `phone_ios` vectors and their plan), I0.7, I1.4,
     "What blocks what" and §9.2 follow
   - 0.1.0: approved by the owner 2026-10-17, with the team ID
@@ -283,10 +287,17 @@ may come back while the Secure Enclave keys and the App Attest key do
 not; the app must test that each key is *usable* (sign or agree once),
 not only present, and show ANDROID-PLAN §4's "this phone no longer
 holds the keys" path. **Keychain items survive removing the app**
-(the app's files do not): on its first run after an install, detected
-by a marker in its own container, the app deletes every VettID keychain
-item and Secure Enclave key it finds before it does anything else, so
-that stale keys are never taken for usable ones. A wipe, and the end of
+(the app's files do not): on its first run after an install the app
+deletes every VettID keychain item and Secure Enclave key it finds
+before it does anything else, so that stale keys are never taken for
+usable ones. "First run" is decided by reading the content of a marker
+file in Application Support (written after the cleanup, by atomic
+replace), never from `UserDefaults`, which comes back empty before the
+first unlock. The cleanup runs only while
+`isProtectedDataAvailable` is true and the marker file's absence is a
+"no such file" answer as in §6.3; a launch before the first unlock
+(a background launch, for example) deletes nothing and leaves the
+check for a later launch. A wipe, and the end of
 a transfer's keep period on the old phone, delete every key and record
 explicitly. The simulator has neither a Secure Enclave nor
 App Attest: tests there use software keys behind the same protocols
@@ -429,17 +440,29 @@ Public keys are SEC1 uncompressed (`x963Representation` in CryptoKit,
 - **Lost keys against a locked iPhone.** Only these lead to the "this
   phone no longer holds the keys" path (and so to a recovery, which
   replaces `P`): a tag mismatch; a stored `pub(E_e)` that does not
-  parse; the keychain item of `P` or the record missing while the
-  keychain and the file store are readable; a key iOS reports invalid
-  (`errSecItemNotFound` for the item; the key blob refused as invalid
-  for a reason other than the lock state). A refusal because the iPhone is locked, or has not
+  parse; the keychain item of `P` or the record missing; a key iOS
+  reports invalid (the key blob refused as invalid for a reason other
+  than the lock state). **Missing** is decided only like this:
+  `UIApplication.shared.isProtectedDataAvailable` is true before the
+  lookup, the lookup itself answers `errSecItemNotFound` (keychain) or
+  `NSFileReadNoSuchFileError` / `ENOENT` (file store), and
+  `isProtectedDataAvailable` is still true after it. Any other error,
+  or protected data that went away in between, is the locked case. Do
+  not replace this with a separate "is storage readable" probe: a
+  sentinel item of class `AfterFirstUnlock` reads fine on a locked
+  iPhone while `P`'s `WhenUnlocked` item does not, so only the answer
+  of the lookup for the item itself counts. A refusal because the iPhone is locked, or has not
   been unlocked since it started (`errSecInteractionNotAllowed`, a
   Secure Enclave or file-protection refusal for that reason; every
   class refuses before the first unlock), is temporary: keep every key
   and record, show "Unlock your iPhone" (§14) and retry once
   `UIApplication.protectedDataDidBecomeAvailableNotification` arrives
   or the member taps again. Treating it as a loss would turn a
-  temporary refusal into a real loss.
+  temporary refusal into a real loss. The retry never keeps a typed PIN
+  or password in memory while the iPhone is locked: typed secrets are
+  dropped on `protectedDataWillBecomeUnavailableNotification` (and when
+  the app leaves the foreground), and the member is asked for them
+  again before the retry.
 - **Why `WhenUnlockedThisDeviceOnly`**, not the app key's
   `AfterFirstUnlockThisDeviceOnly`: the app key must work in the
   background (lock, polling); the phone key is needed only for
@@ -695,7 +718,7 @@ I2 #36, I3 #37, I4/P/later #38.
 | I1.1 | Relay client (HTTP, WebSocket and long-poll collect, ack, blobs, claims) and member API client | RELAY-PROTOCOL §6; MEMBER-API "Vault (alternate channel)" | `core/relay/*`, `core/altchan/MemberApiClient.kt`, `MemberAuth.kt` | Tests against `URLProtocol` fakes for every error of RELAY-PROTOCOL §7 |
 | I1.2 | Vault client: typed §10 calls, dedupe, outbox, sync events; `FakeVault` | §8, §10.1–§10.3 | `core/vault/*`, `core/testing/…/FakeVault.kt` | Unit tests per call; retry and dedupe as §8.2/§8.6 |
 | I1.3 | `VettIDTesting`: the TEST iOS attester (Swift port of vettid-vault `internal/enclavetest/devattest.go`: TEST Apple CA from `TestKey(P-384, 0x51)` (root) and `TestKey(P-384, 0x52)` (intermediate), as Android ports `TestKey` for its TEST CA, App ID `TESTTEAM00.com.vettid.app`; certificates with `swift-certificates`, test targets only), dev stack helpers and a runner script | §11.7 | `core/testing/…/TestAndroidAttester.kt`, `DevStack.kt` | **A2-equivalent**: an XCTest on the simulator enrolls a vault on the dev stack, unlocks, and exchanges a message with the `vaultctl` peer |
-| I1.4 | `VettIDKeys`: Secure Enclave app key, seed wrapping, encrypted file store, the real App Attest attester, the phone key of ID9, the "keys usable" check | §11.7, §11.12.2, §11.14.1; §6.1–§6.3 | `core/keystore/*`, `core/data/…/KeystoreFileStore.kt`, `PhoneSecrets.kt`, `core/altchan/…/Attester.kt` | iPhone tests: the app key and the seed keys sign and agree with the phone locked (after first unlock); the phone key's ECDH fails while the screen is locked and works once it is unlocked; a passcode change, and turning the passcode off, keep the phone key; a deleted key is detected as unusable; after removing and reinstalling the app, the first-run cleanup removes the keychain items and the old phone key is not used; the iPhone locked during a request (and a start before first unlock) gives "Unlock your iPhone" and a retry, never the "no longer holds the keys" path, with every key and record kept; Release and Staging archives contain no software `PhoneSecretSource` (release check). Unit tests (software source) for every lost-answer case of §6.3: a renew's answer lost then an unlock; a renew's answer lost then a retry; two renews with the first answer lost; a crash between storing the record and sending; a fifth change while four candidates are unconfirmed is refused before sending and no candidate is dropped; after each, the vault (the Go reference client's rules, or a fake that follows `vault/opendek.go`) is reachable. App Attest attestation verifies with vettid-vault's `devattest` against Apple's root in a test harness (VA1). **Merges only after VAULT-MESSAGING 0.35.0 (ID9) is approved** |
+| I1.4 | `VettIDKeys`: Secure Enclave app key, seed wrapping, encrypted file store, the real App Attest attester, the phone key of ID9, the "keys usable" check | §11.7, §11.12.2, §11.14.1; §6.1–§6.3 | `core/keystore/*`, `core/data/…/KeystoreFileStore.kt`, `PhoneSecrets.kt`, `core/altchan/…/Attester.kt` | iPhone tests: the app key and the seed keys sign and agree with the phone locked (after first unlock); the phone key's ECDH fails while the screen is locked and works once it is unlocked; a passcode change, and turning the passcode off, keep the phone key; a deleted key is detected as unusable; after removing and reinstalling the app, the first-run cleanup removes the keychain items and the old phone key is not used; the iPhone locked during a request (and a start before first unlock) gives "Unlock your iPhone" and a retry, never the "no longer holds the keys" path, with every key and record kept, and the typed PIN dropped and asked for again; a launch before first unlock (a background launch after a reboot) deletes nothing in the first-run cleanup; a lookup during which protected data goes away is not "missing"; Release and Staging archives contain no software `PhoneSecretSource` (release check). Unit tests (software source) for every lost-answer case of §6.3: a renew's answer lost then an unlock; a renew's answer lost then a retry; two renews with the first answer lost; a crash between storing the record and sending; a fifth change while four candidates are unconfirmed is refused before sending and no candidate is dropped; after each, the vault (the Go reference client's rules, or a fake that follows `vault/opendek.go`) is reachable. App Attest attestation verifies with vettid-vault's `devattest` against Apple's root in a test harness (VA1). **Merges only after VAULT-MESSAGING 0.35.0 (ID9) is approved** |
 | I1.5 | Secure input and capture protection: keypad, secret fields, keyboard refusal, the three protections of §6.4, backup exclusion | §6.4, §6.5 | `core/ui/…/Autofill.kt`, `SecretKeyboard.kt`, `SecureWindow.kt`, `core/data/…/ScreenshotAllowance.kt` | iPhone: no AutoFill bar or save prompt on any secret screen; a third-party keyboard is not offered; switcher shows the cover; recording hides content |
 | I1.6 | Onboarding: setup code by QR, typed or Universal Link; PIN; credential password; enroll; first unlock; Finish setup | §11.3, §11.12.1, §11.14.1, §11.14.7, §3.5.5; ENROLLMENT-CODES §3–§4 | `feature/onboarding/…/OnboardingScreens.kt`, `OnboardingViewModel.kt`, `core/altchan/…/AltChannelFlow.kt`, `SetupCode.kt`, `core/data/…/account/SetupLinkInbox.kt`, `FinishSetupGate.kt` | Screen-catalog entries for every state; ID8's refusal for a pre-R descriptor |
 | I1.7 | Unlock, owner check and held screen, lock (VAULT-LOCK as Android implements it), app lock, local wipe rules | §3.6, §11.4, §11.8, §12, VAULT-LOCK §3–§4 (normative in §11.5 and the "release L" rules) | `feature/onboarding/…/UnlockScreen.kt`, `OwnerCheckScreen.kt`, `core/data/…/vault/OwnerCheck*.kt`, `Lock*.kt`, `HolderWatch.kt`, `RefusalWatch.kt`, `wipe/LocalWipe.kt`, `lock/AppLock.kt` | The owner-check tests of ANDROID-PLAN §6 item 9 with the dev stack's clock; wrong PIN, wrong password, ten-failure lock; lock pending and confirmed |

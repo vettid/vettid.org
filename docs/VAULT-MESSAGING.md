@@ -49,7 +49,11 @@ changelog:
     unconfirmed candidates a new change is refused until an unlock,
     never by dropping one. The protection class is stricter than
     Android's rule, with `AfterFirstUnlockThisDeviceOnly` and its
-    residual named as the fallback. §11.7, §11.14's summary, §15 item 39
+    residual named as the fallback. "Missing" counts only when protected
+    data is available before and after the lookup and the lookup itself
+    answers not found; the first-run cleanup reads a marker file and
+    runs only while protected data is available; typed secrets are
+    dropped when the screen locks. §11.7, §11.14's summary, §15 item 39
     and §16 (the `phone_ios` vectors, with values) follow. Nothing
     changes for Android. IOS-PLAN 0.1.1 follows
   - 0.34.0: release R (0.33.0); **approved by the owner 2026-10-16**
@@ -13565,16 +13569,26 @@ Android and is always the epoch of the same record as `pub(E_e)`.
   phone no longer holds, and lead to the "this phone no longer holds
   the keys" path (and from there to a recovery, which replaces `P`): a
   tag that does not match `check_e`; a stored `pub(E_e)` that does not
-  parse; the keychain item of `P`, or the record, missing while the
-  keychain and the file store are readable; or a key that iOS reports
-  invalid. **A refusal because the iPhone is locked or has not been
+  parse; the keychain item of `P`, or the record, missing; or a key
+  that iOS reports invalid. **Missing** means exactly this:
+  `UIApplication.isProtectedDataAvailable` is true both before and
+  after the lookup, **and** the lookup itself answered
+  `errSecItemNotFound` (keychain) or "no such file" (file store). Any
+  other error, or protected data that went away in between, is the
+  locked case below. A separate probe of whether storage is readable is
+  not enough: an item of class `AfterFirstUnlock` reads fine on a locked
+  iPhone while `P`'s `WhenUnlocked` item does not, so only the answer
+  of the lookup for the item itself counts. **A refusal because the iPhone is locked or has not been
   unlocked since it started** (the keychain's
   `errSecInteractionNotAllowed`, a Secure Enclave or file-protection
   refusal for the same reason; any class refuses before the first
   unlock) is temporary and never counts as lost keys: the app keeps
   every key and record, says "Unlock your iPhone, then try again", and
   retries once it is unlocked. Treating it as a loss would turn a
-  temporary refusal into a real one.
+  temporary refusal into a real one. A PIN or password typed for the
+  request is not kept in memory while the iPhone is locked: the app
+  drops typed secrets when the screen locks and asks for them again
+  before the retry.
 
 **Retries and lost answers.** On Android the secret of an epoch can be
 computed again at any time; on an iPhone it exists only while its
@@ -13612,8 +13626,13 @@ record does. So:
 **Removal and deletion.** iOS keeps keychain items when an app is
 removed but deletes the app's files. Removing the app therefore deletes
 the records and leaves `P` unable to compute any epoch's secret. On its
-first run after an install (no marker in its own container) the app
-deletes every VettID keychain item and Secure Enclave key it finds. It
+first run after an install the app deletes every VettID keychain item
+and Secure Enclave key it finds. "First run" is decided by reading the
+content of a marker file in the app's Application Support directory
+(never `UserDefaults`, which reads as empty before the first unlock),
+and the cleanup runs only while protected data is available, so that a
+launch before the first unlock (a background launch, for example)
+deletes nothing. It
 deletes `P` and every record at a wipe and when the keep period of a
 transfer it approved ends (§11.14.10), as Android deletes its phone key.
 
