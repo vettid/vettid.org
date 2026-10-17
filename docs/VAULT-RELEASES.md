@@ -1,8 +1,8 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.29
-date: 2026-10-15
+version: 0.1.30
+date: 2026-10-16
 owner: Al Liebl (Mesmer)
 changelog:
   - 0.1.0: V5 plan. Release pipeline, keys, infrastructure, release
@@ -245,6 +245,9 @@ changelog:
     release 1 may refuse recovery, never ship the earlier recovery
   - 0.1.29 (editorial, as built; staging release S13, 2026-10-15).
     §8.8: S13's capacity figures, next to S12's
+  - 0.1.30 (editorial, as built; staging releases S14 and S15,
+    2026-10-16). §8.8: S14's and S15's (release R) capacity figures,
+    next to S13's
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.29.3) §11.10 release updates, §12.5 deletion, §13.5, §13.9
@@ -1831,6 +1834,21 @@ vault per minute. S13's enclave runs the 6.6.158 kernel with its hardened
 configuration: unlocks are about 10% slower than S12's on 4.14, as the
 hardware run of vettid-vault #87 and #88 measured, and memory capacity is
 unchanged.
+
+*Measured again (staging S14, 2026-10-16):* the same run on S14's canary
+host (same host and enclave size), PASS: 57 vaults held at the memory floor,
+about 933 idle unlocked vaults projected per host, unlock p50 224 ms /
+459 ms / 944 ms at concurrency 1 / 2 / 4, idle CPU 2.3 ms per vault per
+minute.
+
+*Measured again (staging S15, release R, 2026-10-16):* the same run
+(`-capacity 400`) on S15's canary host, instance `i-0a91921ab7de639a3`
+(m7g.large, 4921.8 MiB of enclave memory as the self-test read it), from
+23:12 to 23:21 UTC, PASS: 57 vaults held at the memory floor, about 938
+idle unlocked vaults projected per host (4.2 MiB marginal), unlock p50
+222 ms / 457 ms / 941 ms at concurrency 1 / 2 / 4, idle CPU 1.8 ms per
+vault per minute. S14 and S15 leave the figures within a few percent of
+S13's.
 
 *Relay connections (0.1.14; VAULT-RELAY-SCALING 0.1.2 §3, §10;
 vettid-vault #66).* Memory, not the relay path, bounds vaults per host:
