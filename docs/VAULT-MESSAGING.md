@@ -25,7 +25,12 @@ related:
   - VAULT-HOST-PROTOCOL.md (0.1.12; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
-  - 0.35.0: normative, additive; **for the owner's approval**; no
+  - 0.35.0: normative, additive; **approved by the owner 2026-10-17**
+    (vettid.org #320; the stricter protection class as decided, the
+    texts "Unlock your iPhone, then try again." and "Unlock your vault
+    first, then try again. VettID needs to confirm your last change
+    before it can make another." as approved, and replaced records kept 7
+    days as on Android); no
     enclave change and no vault release (the vault accepts any 32-byte
     `unlock_secret`). **The phone-held unlock secret on an iPhone**
     (§11.14.1, "On an iPhone"; IOS-PLAN ID9): a Secure Enclave P-256
@@ -40,16 +45,19 @@ changelog:
     `""` for a transfer's new phone, as on Android. The record of each
     epoch is stored before the request that carries its secret, reused
     on a retry, kept as a candidate while its answer is lost and tried
-    after a `device_secret` answer, and deleted only once a later epoch
-    is confirmed; never in purgeable storage. First-run cleanup of the
+    after a `device_secret` answer; replaced records deleted 7 days
+    after a later epoch is confirmed (a clock set back never extends
+    this) or at a wipe, and tried only from an explicit step the member
+    takes, as on Android (0.36.0, §11.14.1 rule 7); never in purgeable
+    storage. First-run cleanup of the
     keychain, deletes at a wipe and at the end of a transfer's keep
     period, no software key in release or staging builds, and why the
     alternatives were not chosen. A locked iPhone is never treated as
     lost keys ("Unlock your iPhone", then a retry); with four
     unconfirmed candidates a new change is refused until an unlock,
     never by dropping one. The protection class is stricter than
-    Android's rule, with `AfterFirstUnlockThisDeviceOnly` and its
-    residual named as the fallback. "Missing" counts only when protected
+    Android's rule, decided by the owner; `AfterFirstUnlockThisDeviceOnly`
+    and its residual are recorded as not chosen. "Missing" counts only when protected
     data is available before and after the lookup and the lookup itself
     answers not found; the first-run cleanup reads a marker file and
     runs only while protected data is available; typed secrets are
@@ -13504,16 +13512,16 @@ app creates a new Secure Enclave P-256 key-agreement key
   Secure Enclave) is kept in the keychain with the same class,
   `kSecAttrSynchronizable` false, under a label that names `key_vault`.
 
-**The protection class is stricter than Android's rule, and is for the
-owner's approval.** Android forbids binding the phone key to an unlocked
+**The protection class is stricter than Android's rule, as decided by
+the owner on 2026-10-17.** Android forbids binding the phone key to an unlocked
 screen (above) because Android destroys such keys when certain settings
 change; the reason recorded with that choice (§15 item 39, decision 6)
 is that the three keys are lost together or not at all. iOS deletes
 neither `WhenUnlockedThisDeviceOnly` nor `AfterFirstUnlockThisDeviceOnly`
 items when the passcode is changed or turned off, so the stricter class
-keeps that rule while refusing the key on a locked iPhone. **The
-fallback** is `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, the
-app key's class. Its residual, the same as Android's today: on a locked
+keeps that rule while refusing the key on a locked iPhone. **Not
+chosen**: `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, the app
+key's class, whose residual is the same as Android's today: on a locked
 iPhone after its first unlock, code running as the app can have the
 Secure Enclave compute the current and candidate secrets, and with a
 broken sealing the PIN then falls offline cheaply (§11.14.12).
@@ -13600,7 +13608,8 @@ record does. So:
   most four. While four are unconfirmed the app refuses a new
   `pin.change` or `vault.secret.renew` before anything is sent and asks
   the member to unlock first ("Unlock your vault first, then try
-  again"): the unlock confirms one of them or the current record. The
+  again. VettID needs to confirm your last change before it can make
+  another."): the unlock confirms one of them or the current record. The
   oldest candidate is **never** dropped to make room, since it may be
   the one the vault holds.
 - **Reuse on retry.** A retry of the same request reuses its record. A
@@ -13612,12 +13621,27 @@ record does. So:
   one of them gets an answer the vault gives only after the secret
   matched (`ok`, `bad_pin`, `transfer_incomplete`): the epoch rule
   above. An answer decided before the secret check proves nothing.
-- **Deletion.** The record a confirmed one replaces, and every other
-  candidate, is deleted once a later record is confirmed, never before.
-  A deleted record cannot be recomputed, so a superseded epoch's secret
-  is gone from the phone as well as from the vault. The old phone of a
-  transfer keeps its current record through the keep period of
-  §11.14.10, until it deletes its keys.
+- **Deletion.** When a candidate is confirmed, the record it replaces
+  and every other candidate become **replaced records** (not
+  candidates, and not counted in the four). A replaced record is
+  deleted **7 days** after that confirmation, the longest an operator
+  restore of §11.14.2 can bring back the earlier state, or at a wipe,
+  whichever comes first; the 7 days count from the confirmation, or
+  from the moment the app notices that its clock is behind it, so a
+  clock set back never extends them. Nothing is deleted before a later
+  record is confirmed. After the 7 days a replaced epoch's secret cannot
+  be recomputed on the phone. The old phone of a transfer keeps its
+  current record through the keep period of §11.14.10, until it deletes
+  its keys.
+- **The earlier secret, only when the member asks**, as on Android
+  (0.36.0, §11.14.1 rule 7): while a replaced record exists, the "this
+  phone no longer holds the keys" screen offers an explicit step that
+  tries the replaced records, newest first, each once, never on its
+  own. Only `ok`, or `transfer_incomplete` for a transfer that did not
+  finish, makes that record current again (the record it displaces
+  becomes a replaced record); `bad_pin` changes nothing. After an `ok`
+  the app writes a History entry and asks at once for a new phone
+  secret (`vault.secret.renew`).
 - **Epoch 1.** At enrollment, a transfer or a recovery, a retry whose
   earlier try may have reached the vault reuses `P` and the epoch-1
   record when they exist for the same `key_vault` and still work, as
@@ -13648,8 +13672,10 @@ published one, which App Attest shows (§11.7).
 **Compared with Android.** On both the long-lived key stays in hardware
 and one leaked secret says nothing about another epoch. Unlike on
 Android, code that ran as the app earlier cannot have computed the
-secret of an epoch created after it stopped running, and a superseded
-epoch's secret cannot be computed on the phone again.
+secret of an epoch created after it stopped running. As on Android, a
+replaced record is kept 7 days for the earlier-secret step and then
+deleted, after which its epoch's secret cannot be computed on the phone
+again.
 
 **Not chosen for the iPhone.**
 - A random secret per epoch stored encrypted to a Secure Enclave key
@@ -17900,7 +17926,7 @@ Follow-ups:
     - *Specified later:* the outside store (release "R2", §11.14.13), with
       its experiments; the counter group (release "R3"), with its own
       document. The phone-held secret on iOS is specified in 0.35.0
-      (§11.14.1, "On an iPhone"), for the owner's approval.
+      (§11.14.1, "On an iPhone"), approved by the owner 2026-10-17.
     Follow-ups: vettid-vault (release R: everything of §11.14, the S3
     adapter and its egress host, the removal of §11.11.5's path, the
     vectors of §16, the adversarial test store, MUST-coverage),
