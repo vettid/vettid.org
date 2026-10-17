@@ -2269,8 +2269,9 @@ bitcoin-kmp otherwise.
    request; the two `password` fields are "Recovery phrase" and
    "Passphrase" (vettid-vault `features/wallet/wallet.go`, `create`).
 3. The phrase screen and the check set `FLAG_SECURE` (no screenshots,
-   no recent-apps snapshot), are excluded from autofill and
-   accessibility "content capture", and hold the words in a `CharArray`
+   no recent-apps snapshot), are excluded from autofill and from
+   Android's content capture (TalkBack still reads them), and hold the
+   words in a `CharArray`
    that is wiped when the screen leaves. Leaving before the check: the
    wallet stays, "Not backed up", and the check is offered from its row.
 4. **Confirmed** is a flag the app keeps per `wallet_id` in its
