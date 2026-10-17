@@ -1,8 +1,8 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.30
-date: 2026-10-16
+version: 0.1.31
+date: 2026-10-17
 owner: Al Liebl (Mesmer)
 changelog:
   - 0.1.0: V5 plan. Release pipeline, keys, infrastructure, release
@@ -248,9 +248,15 @@ changelog:
   - 0.1.30 (editorial, as built; staging releases S14 and S15,
     2026-10-16). §8.8: S14's and S15's (release R) capacity figures,
     next to S13's
+  - 0.1.31 (approved by the owner 2026-10-17, with VAULT-MESSAGING
+    0.37.0; IOS-PLAN §9.1 VA2). §5.2: the release constant
+    `ios_app_id`, `3X25CJ86MV.com.vettid.app` (staging:
+    `3X25CJ86MV.com.vettid.app.staging`), which replaces the App ID
+    constant in code. §3.4 C6: what pinning and changing it does to iOS
+    vaults, and the release log line that says so
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
-  - VAULT-MESSAGING.md (0.29.3) §11.10 release updates, §12.5 deletion, §13.5, §13.9
+  - VAULT-MESSAGING.md (0.37.0) §11.10 release updates, §11.10.8 release constants, §12.5 deletion, §13.5, §13.9
   - RELEASE-UPDATES.md (0.3.3) — member-facing; §3 changes with this plan; §5 the release log
   - ANDROID-PLAN.md (0.1.37) — the app's "What's new" from the log
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2) — staging as the development channel; D1–D11
@@ -412,7 +418,7 @@ the oldest live release is removed.
 | C3 | Storage and tables | S3 keys `vaults/<vault_id>/…` and `users/<hash>/vault`, conditional-write semantics; the attributes a release's parent reads and writes (lease, registry row, response slot, lifecycle events, `alarm`); the queue name prefix. Schema changes additive only. |
 | C4 | Host | Each release runs **its own tag's parent** on its own AMI, so the vsock protocol never crosses versions (the protocol as built: VAULT-HOST-PROTOCOL; what the code does if versions meet all the same: §10 there). Host OS patches rebuild the AMI with the same EIF and parent. |
 | C5 | AWS | The pinned KMS region endpoint, SigV4, IMDS credentials, the pinned Amazon roots (Amazon Root CA 1 runs to 2038) |
-| C6 | Device attestation | The Android signing-certificate digests, package name and iOS app ID pinned in the release; the pinned Google, Apple and GrapheneOS roots. Rotating the app signing key needs every live release to pin the new digest first (two digests pinned). 0.1.12: each vault is bound to the signer of its app (VAULT-MESSAGING 0.27.0 §11.7.1). **Adding** a signer to a release changes nothing for existing vaults. **Removing** one strands the vaults bound to it at that release (`signer_refused`, also at the confirming unlock of a move into it) until the member transfers or recovers to an app with a pinned signer: a release drops a signer only with the notice of a retirement (§3.5), and its log entry says so. A release's log entry also says when it adds a signer. |
+| C6 | Device attestation | The Android signing-certificate digests, package name and iOS app ID pinned in the release; the pinned Google, Apple and GrapheneOS roots. Rotating the app signing key needs every live release to pin the new digest first (two digests pinned). 0.1.12: each vault is bound to the signer of its app (VAULT-MESSAGING 0.27.0 §11.7.1). **Adding** a signer to a release changes nothing for existing vaults. **Removing** one strands the vaults bound to it at that release (`signer_refused`, also at the confirming unlock of a move into it) until the member transfers or recovers to an app with a pinned signer: a release drops a signer only with the notice of a retirement (§3.5), and its log entry says so. A release's log entry also says when it adds a signer. 0.1.31: the **iOS App ID** is the release constant `ios_app_id`, checked at every App Attest attestation and assertion, so an iOS vault unlocks only on releases that pin its App ID: changing it strands every iOS vault of the channel, and is done only with the notice of a retirement. The first release of each channel that pins it (staging: the release with vettid-vault's "iOS App ID per channel" change; production: release 1 or the first that accepts an iOS app) carries a log line such as "iOS: accepts the VettID iOS app (`3X25CJ86MV.com.vettid.app.staging`)". |
 | C7 | Relay | Not needed for a move (a move locks without collecting). Ordinary unlocks collect from the relay: best effort only. The relay stays backward compatible in practice, but a deprecated release may lose messaging. |
 | C8 | Member API vault features | Lock, status, recovery and the host `delete` (account cancellation) keep working for every live release |
 
@@ -800,6 +806,7 @@ whose value is recorded in `measurements.json`):
 | `retirement_principal`, `retirement_window_days` | the retirement role ARN, 30 | §4.1 |
 | `android_signers` | 1 to 4 entries `{"digest": "<SHA-256 of a signing certificate, 64 lowercase hex>", "class": "vettid" \| "google_play" \| "development"}` (0.1.12; a bare list of digests before) | owner decision O8 as amended 2026-10-11 |
 | `android_package` (0.1.11) | `com.vettid.app` (staging: `com.vettid.app.staging`) | VAULT-MESSAGING 0.26.0 §11.10.8, "Android package"; STAGING-DEVELOPMENT-PLAN D5 |
+| `ios_app_id` (0.1.31) | `3X25CJ86MV.com.vettid.app` (staging: `3X25CJ86MV.com.vettid.app.staging`); team ID confirmed by the owner 2026-10-17 | VAULT-MESSAGING 0.37.0 §11.10.8, "iOS App ID"; IOS-PLAN §9.1 VA2 |
 | `features` (0.1.11) | the optional features the image registers: none in release 1 (staging: all seven) | VAULT-MESSAGING 0.26.0 §11.10.8, "Feature allowlist"; STAGING-DEVELOPMENT-PLAN D4 |
 | `relay_url` | `https://relay.vettid.org` | |
 | `calls_url` (0.1.19; planned for staging "release C2"; approved by the owner 2026-10-12) | absent (staging: `https://calls.staging.vettid.org`) | VAULT-MESSAGING 0.28.0 §11.10.8; CALLING-SERVICE 0.2.0 §5; CALLS-PLAN D4 |
