@@ -1,9 +1,14 @@
 ---
 title: AGENT-PLAN
 status: draft
-version: 0.1.0
+version: 0.1.1
 date: 2026-10-17
 changelog:
+  - 0.1.1: owner decisions of 2026-10-17: AG0 agreed (agent first);
+    AG1a decided as the simplest and most secure form: stdio only, one
+    process started by the MCP client, no daemon, no local socket, no
+    network listener and no service files; one pairing per MCP client;
+    AG10 withdrawn; AG2–AG9, AG11 and AG12 accepted as recommended.
   - 0.1.0: first draft, for the owner's approval before any code is
     written. The plan for rebuilding the VettID agent connector in
     `vettid/vettid-agent` (Go) on the current architecture: a paired
@@ -13,7 +18,7 @@ changelog:
     old code is retired); decisions with recommendations (§2); the
     package layout and its use of vettid-vault's reference client (§3);
     connector-specific matters: the agent-facing interface, keys at
-    rest per platform, the daemon, sessions and approvals, offline and
+    rest per platform, the process model, sessions and approvals, offline and
     locked vaults (§4); test vectors (§5); phases A0–A6 as small PRs
     with acceptance tests (§6); the work outside the repository in
     vettid-vault, vettid-android and vettid.org (§7); owner
@@ -122,7 +127,7 @@ connector on a computer; usually the member.
   runs on the Windows job); **#2** closed as not planned (the
   machine-attribute key is dropped, AG3); **#3** adopted in A0.1;
   **#5** kept open as the input to AG4 (Windows signing) and closed
-  when signed builds run under Smart App Control (A5.4); **PR #4**
+  when signed builds run under Smart App Control (A5.3); **PR #4**
   closed, its design carried into A1.1; **PR #6** closed (AG3).
 - **When the old code goes**: PR **A0.1** tags the old `main` as
   `legacy-v1-final`, pushes a branch `legacy/v1`, and removes the old
@@ -171,26 +176,25 @@ connector on a computer; usually the member.
 
 ## 2. Decisions
 
-Each with the recommendation first. Rows marked **owner** need the
-owner's answer before the phase named; the others are recorded so that
+All decided or accepted by the owner on 2026-10-17; recorded so that
 the implementing agent does not reopen them.
 
 | # | Decision | Recommendation | Alternatives | Needed by |
 |---|---|---|---|---|
-| AG0 | **Agent before desktop** (owner; STAGING-DEVELOPMENT-PLAN §5 row 3 "Whether desktop or agent comes first") | **Agent first.** It has no UI of its own, LEASH is the published differentiator, and the Android screens it needs (pairing, SAS, devices list, approvals) are the ones a desktop needs too, so the desktop then reuses them | Desktop first (more Android work before anything is usable: step-up approvals for every desktop type) | A0 |
+| AG0 | **Agent before desktop** | **Decided (owner, 2026-10-17): agent first.** It has no UI of its own, LEASH is the published differentiator, and the Android screens it needs (pairing, SAS, devices list, approvals) are the ones a desktop needs too, so the desktop then reuses them | — | — |
 | AG1 | **Agent-facing interface** | **Decided (owner, 2026-10-17): an MCP server.** The local REST and WebSocket API of the old connector is dropped as the agent interface. This matches the LEASH paper's first binding (§3.3: "In the MCP binding it is an MCP server") and VAULT-MESSAGING §10.11's mapping (`leash.request_secret` → `agent.request{op: "item.get"}`, etc.); the tool set is in §4.1 | — | — |
-| AG1a | **MCP transports** (owner) | **stdio**, the transport every MCP client supports and the one that needs no network listener: `vettid-agent mcp` is what the client launches, a thin bridge to a long-running **daemon** (`vettid-agent run`) over an owner-only local socket (a Unix domain socket; a named pipe on Windows). Reasons: several MCP clients then share one vault session and one state file (a second process on the same state would fight over epochs, tokens and the dedupe record); the daemon keeps tokens, rekeys and status statements fresh between agent sessions (§4.6); and nothing listens on TCP. **No Streamable HTTP in v1**; added later, on `127.0.0.1` with a per-install bearer token and an `Origin` check, only if a client needs it | (a) stdio only, one process per MCP client with an exclusive lock on the state (simplest; a second client fails, and nothing keeps tokens and grants fresh between sessions); (b) Streamable HTTP on `127.0.0.1` from the start (reachable by every local account and exposed to browser DNS rebinding; a token file to protect, the old API's problem in issue #1) | A3 |
-| AG2 | **Language and reuse** (owner) | **Go, importing vettid-vault's packages**: `github.com/vettid/vettid-vault/client` for pairing, the session, tokens and LEASH, and `vms/leashwire` for verification, pinned to a vettid-vault commit. Established for this plan (§3.2): the module is public, AGPL-3.0 like vettid-agent, the packages are outside `internal/` (their own `internal/` imports are allowed transitively), the import graph has no AWS SDK, and a stripped binary importing `client` builds to about 5 MB. What the client lacks for a long-running connector is added **in vettid-vault's `client` package** by small PRs (§7.1 AV1–AV5), not forked | (a) Import only the `vms/*` wire packages and write the session runtime in vettid-agent (about 1,000 lines of protocol code that would drift from the reference); (b) reimplement everything from the spec and the §16 vectors (largest; a second protocol implementation to keep equal); (c) Rust (no shared code with the vault) | A0.2 |
-| AG3 | **Keys and pairing state at rest** (owner; a security path, §9 rule 6) | The device's secrets (its `ik`, `kem` and relay-key seeds, the vault record and session keyring: the client's `Save()` output) in **one state file**, XChaCha20-Poly1305 under a random 256-bit data key, the data key wrapped by a **platform protector**: **Linux**: TPM 2.0 (`/dev/tpmrm0`, a sealed object bound to the TPM) when present, else the passphrase protector; **macOS**: a Keychain item `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` (never synced); **Windows**: DPAPI (user scope) plus the owner-only DACL of A1.1; **headless or containers**: the passphrase protector (Argon2id), from a prompt, a file descriptor or a credential file, with a warning that it is not machine-bound. The **machine-attribute platform key is dropped** (§4.2) | (a) Keep the fingerprint key (hostname, machine id, CPU, disk serial, MAC; 3 of 5): readable by any local process, partly visible on the network, breaks on hardware changes, and failed on Windows (#2); (b) OS secret services only (GNOME Keyring/KWallet): absent on servers; (c) plain 0600 file (what `vaultctl` does; fine for tests only) | A1 |
-| AG4 | **Platforms, distribution and signing** (owner) | **Linux amd64/arm64 first, then macOS arm64 and Windows amd64** (A5). Static, `CGO_ENABLED=0` builds where possible (macOS needs cgo for the Keychain and is built on a macOS runner or the owner's Mac), **reproducible** (`-trimpath`, fixed toolchain from `go.mod`, `SOURCE_DATE_EPOCH`, build ids stripped), with a script that rebuilds a release and compares hashes. **The owner signs**: a release signing key held offline by the owner signs `SHA256SUMS` (Ed25519 now; PQC-MIGRATION §4 row 5 names SLH-DSA-128s for this root in phase 2, so the signature format carries an algorithm id); macOS binaries with the owner's Apple Developer ID and notarized; Windows binaries with an Authenticode certificate whose key is on a hardware token the owner holds. **No third party holds a VettID signing key**: no cloud signing service that keeps the key (for example a CA-hosted or cloud-HSM signing service), no keyless signing that rests on a third party's identity. No auto-update in v1 | Linux only for v1 (most agents run on Linux or macOS; Windows users wait); unsigned Windows builds (Smart App Control may block them outright, #5); Sigstore keyless (trust in a third party's CA and log) | A5 |
-| AG5 | **v1 scope** (owner) | **Pairing** (pasted code, SAS, approval or rejection, unlink); **access sessions** (request, granted, ended, expiry); **grants** (list, updates, suspension, status statements kept fresh); **items through LEASH**: `catalog`, `item.get`, `item.use` (`hmac-sha256`), with referred requests and `leash.check_status`; **connection info**. **v1.1**: the delegable owner types as MCP tools (`connection.list`, `.get`, `message.send`, `.list`, `.get`, `.read`, `profile.get`, `action.list`, `.invoke`; §10.11 scope table). **Later**: presenting delegations to other tool servers with a proof of possession (waits for the LEASH MCP profile, §7.3 Q2), the vault's HTTP action (needs enclave egress, §10.11, §15 item 7), binary attestation (Q1) | All delegable types in v1 (messaging on the member's behalf is the most sensitive delegation and deserves its own review of texts and defaults) | A3 |
-| AG6 | **Vault changes** | **None in the enclave for v1.** Small changes in vettid-vault's **reference client** (`client/`) and **dev stack** docs (§7.1), which need no vault release. One possible enclave change (AV6) only if the owner adds a bound on access-session requests to the spec (§7.3 Q3) | Forking the client into vettid-agent | A2 |
-| AG7 | **Testing** (owner) | Three layers: **unit** tests with fakes (MCP, daemon, state store, protectors, no network); **dev-stack integration** tests behind a build tag, against vettid-vault's `cmd/devstack` with `vaultctl` playing the member's app (§4.8); **staging** tests with **staging test accounts only**, the Android staging app on a test phone, and a written checklist (A6). Never real member data, never a production vault | Integration tests only through the vault's in-process e2e helpers (they are under `internal/`, not importable); staging only (slow, needs the Android work first) | A2 |
-| AG8 | **When the connector asks for an access session** | **On the first tool call that needs one**, the daemon sends `device.session.request{seconds}` (the operator's configured default, 1 h if unset) and answers the tool "Access requested on your phone". At most one request outstanding; after a denial or a request that expired unanswered, no new automatic request for 10 minutes; at most 6 automatic requests an hour. `vettid-agent session request [--for 2h]` asks explicitly. The vault itself does not bound these prompts (§7.3 Q3), so the connector must | Only on the operator's explicit command (safer for the member's attention, but an agent then fails until a human runs a command) | A2.3 |
-| AG9 | **Long approvals and MCP timeouts** | A tool call waits up to 20 s for its response. A request the vault holds (`approval.waiting`, up to 5 minutes) or that is still in flight returns `{status: "pending", request_id}`; `leash.check_status{request_id}` returns `pending`, the result, `denied`, `approval_timeout` or `expired`. The daemon keeps waiting for the response in the background and keeps results for 10 minutes (memory only; a secret's value is dropped once returned) | Blocking the tool call for up to 5 minutes (many MCP clients time out tool calls well before that) | A3.2 |
-| AG10 | **Daemon lifetime and service files** | The daemon is meant to run all the time (it collects, answers vault rekeys and token refreshes, and keeps status statements fresh). A5 ships a systemd **user** unit, a launchd agent and a Windows scheduled task (per user, at log-on); none run as root or SYSTEM. An MCP client's `vettid-agent mcp` starts the daemon if it is not running | Connector only while an MCP client runs (tokens and relay messages can lapse, §4.6) | A5 |
-| AG11 | **What the connector reports about itself** | Its self-asserted name only (the operator chooses it; default "Agent on <host name>", editable before pairing). No machine attributes and no binary hash are sent: the vault does not accept them (§10.11 "out of the vault's scope") | Sending a binary hash in the `hs.init` profile (the vault would ignore or refuse unknown members) | A2.1 |
-| AG12 | **Unlinked or refused** | On `device.unlinked`, the daemon stops, deletes its state file (and the protector's key), and says so. On `token_revoked` for its own vault's mailbox without `device.unlinked`, it stops and tells the operator, and deletes only on the operator's `vettid-agent forget` (as an app offers an erase rather than erasing, §6.7.1, §8.6). A behaviour-changing fix here takes the independent review of §9 rule 6 | Erase on any refusal (a relay mistake would destroy a working pairing) | A2.2 |
+| AG1a | **MCP transport and process model** | **Decided (owner, 2026-10-17): stdio only, one process.** The MCP client starts `vettid-agent mcp` itself and talks to it over its standard input and output; the process holds the state file's lock, talks to the vault directly, and exits when the client closes it. No daemon, no local socket or named pipe, no network listener, no service files: nothing on the computer but the client that started it can reach the tools. **One pairing per MCP client**: each client gets its own state directory (`--state-dir`), so the phone lists each separately with its own grants and can remove one without the others; a second process on the same state exits with "in use by another agent app". The connector reaches the vault only while a client runs it; it catches up on start (§4.6) | Rejected: a shared daemon behind an owner-only socket (more to build, install and protect; every process of the operator's user can reach the socket); Streamable HTTP on `127.0.0.1` (a listener, DNS rebinding exposure, a token file to protect); a plain CLI for agents to shell out to (needs shell access, no tool schema) | — |
+| AG2 | **Language and reuse** | **Accepted (owner, 2026-10-17).** **Go, importing vettid-vault's packages**: `github.com/vettid/vettid-vault/client` for pairing, the session, tokens and LEASH, and `vms/leashwire` for verification, pinned to a vettid-vault commit. Established for this plan (§3.2): the module is public, AGPL-3.0 like vettid-agent, the packages are outside `internal/` (their own `internal/` imports are allowed transitively), the import graph has no AWS SDK, and a stripped binary importing `client` builds to about 5 MB. What the client lacks for a long-running connector is added **in vettid-vault's `client` package** by small PRs (§7.1 AV1–AV5), not forked | (a) Import only the `vms/*` wire packages and write the session runtime in vettid-agent (about 1,000 lines of protocol code that would drift from the reference); (b) reimplement everything from the spec and the §16 vectors (largest; a second protocol implementation to keep equal); (c) Rust (no shared code with the vault) | A0.2 |
+| AG3 | **Keys and pairing state at rest** (a security path, §9 rule 6) | **Accepted (owner, 2026-10-17).** The device's secrets (its `ik`, `kem` and relay-key seeds, the vault record and session keyring: the client's `Save()` output) in **one state file**, XChaCha20-Poly1305 under a random 256-bit data key, the data key wrapped by a **platform protector**: **Linux**: TPM 2.0 (`/dev/tpmrm0`, a sealed object bound to the TPM) when present, else the passphrase protector; **macOS**: a Keychain item `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` (never synced); **Windows**: DPAPI (user scope) plus the owner-only DACL of A1.1; **headless or containers**: the passphrase protector (Argon2id), from a prompt, a file descriptor or a credential file, with a warning that it is not machine-bound. The **machine-attribute platform key is dropped** (§4.2) | (a) Keep the fingerprint key (hostname, machine id, CPU, disk serial, MAC; 3 of 5): readable by any local process, partly visible on the network, breaks on hardware changes, and failed on Windows (#2); (b) OS secret services only (GNOME Keyring/KWallet): absent on servers; (c) plain 0600 file (what `vaultctl` does; fine for tests only) | A1 |
+| AG4 | **Platforms, distribution and signing** | **Accepted (owner, 2026-10-17).** **Linux amd64/arm64 first, then macOS arm64 and Windows amd64** (A5). Static, `CGO_ENABLED=0` builds where possible (macOS needs cgo for the Keychain and is built on a macOS runner or the owner's Mac), **reproducible** (`-trimpath`, fixed toolchain from `go.mod`, `SOURCE_DATE_EPOCH`, build ids stripped), with a script that rebuilds a release and compares hashes. **The owner signs**: a release signing key held offline by the owner signs `SHA256SUMS` (Ed25519 now; PQC-MIGRATION §4 row 5 names SLH-DSA-128s for this root in phase 2, so the signature format carries an algorithm id); macOS binaries with the owner's Apple Developer ID and notarized; Windows binaries with an Authenticode certificate whose key is on a hardware token the owner holds. **No third party holds a VettID signing key**: no cloud signing service that keeps the key (for example a CA-hosted or cloud-HSM signing service), no keyless signing that rests on a third party's identity. No auto-update in v1 | Linux only for v1 (most agents run on Linux or macOS; Windows users wait); unsigned Windows builds (Smart App Control may block them outright, #5); Sigstore keyless (trust in a third party's CA and log) | A5 |
+| AG5 | **v1 scope** | **Accepted (owner, 2026-10-17).** **Pairing** (pasted code, SAS, approval or rejection, unlink); **access sessions** (request, granted, ended, expiry); **grants** (list, updates, suspension, status statements kept fresh); **items through LEASH**: `catalog`, `item.get`, `item.use` (`hmac-sha256`), with referred requests and `leash.check_status`; **connection info**. **v1.1**: the delegable owner types as MCP tools (`connection.list`, `.get`, `message.send`, `.list`, `.get`, `.read`, `profile.get`, `action.list`, `.invoke`; §10.11 scope table). **Later**: presenting delegations to other tool servers with a proof of possession (waits for the LEASH MCP profile, §7.3 Q2), the vault's HTTP action (needs enclave egress, §10.11, §15 item 7), binary attestation (Q1) | All delegable types in v1 (messaging on the member's behalf is the most sensitive delegation and deserves its own review of texts and defaults) | A3 |
+| AG6 | **Vault changes** | **Accepted (owner, 2026-10-17).** **None in the enclave for v1.** Small changes in vettid-vault's **reference client** (`client/`) and **dev stack** docs (§7.1), which need no vault release. One possible enclave change (AV6) only if the owner adds a bound on access-session requests to the spec (§7.3 Q3) | Forking the client into vettid-agent | A2 |
+| AG7 | **Testing** | **Accepted (owner, 2026-10-17).** Three layers: **unit** tests with fakes (MCP, the session runtime, state store, protectors, no network); **dev-stack integration** tests behind a build tag, against vettid-vault's `cmd/devstack` with `vaultctl` playing the member's app (§4.8); **staging** tests with **staging test accounts only**, the Android staging app on a test phone, and a written checklist (A6). Never real member data, never a production vault | Integration tests only through the vault's in-process e2e helpers (they are under `internal/`, not importable); staging only (slow, needs the Android work first) | A2 |
+| AG8 | **When the connector asks for an access session** | **Accepted (owner, 2026-10-17).** **On the first tool call that needs one**, the connector sends `device.session.request{seconds}` (the operator's configured default, 1 h if unset) and answers the tool "Access requested on your phone". At most one request outstanding; after a denial or a request that expired unanswered, no new automatic request for 10 minutes; at most 6 automatic requests an hour. The vault itself does not bound these prompts (§7.3 Q3), so the connector must | Only on the operator's explicit command (safer for the member's attention, but an agent then fails until a human runs a command) | A2.3 |
+| AG9 | **Long approvals and MCP timeouts** | **Accepted (owner, 2026-10-17).** A tool call waits up to 20 s for its response. A request the vault holds (`approval.waiting`, up to 5 minutes) or that is still in flight returns `{status: "pending", request_id}`; `leash.check_status{request_id}` returns `pending`, the result, `denied`, `approval_timeout` or `expired`. The process keeps waiting for the response in the background while it runs and keeps results for 10 minutes (memory only; a secret's value is dropped once returned) | Blocking the tool call for up to 5 minutes (many MCP clients time out tool calls well before that) | A3.2 |
+| AG10 | **Daemon lifetime and service files** | **Withdrawn (owner, 2026-10-17)** with AG1a: there is no daemon and no service file | — | — |
+| AG11 | **What the connector reports about itself** | **Accepted (owner, 2026-10-17).** Its self-asserted name only (the operator chooses it; default "Agent on <host name>", editable before pairing). No machine attributes and no binary hash are sent: the vault does not accept them (§10.11 "out of the vault's scope") | Sending a binary hash in the `hs.init` profile (the vault would ignore or refuse unknown members) | A2.1 |
+| AG12 | **Unlinked or refused** | **Accepted (owner, 2026-10-17).** On `device.unlinked`, the connector stops, deletes its state file (and the protector's key), and says so. On `token_revoked` for its own vault's mailbox without `device.unlinked`, it stops and tells the operator, and deletes only on the operator's `vettid-agent forget` (as an app offers an erase rather than erasing, §6.7.1, §8.6). A behaviour-changing fix here takes the independent review of §9 rule 6 | Erase on any refusal (a relay mistake would destroy a working pairing) | A2.2 |
 
 ## 3. Architecture
 
@@ -201,13 +205,13 @@ One Go module, `github.com/vettid/vettid-agent`, Go at vettid-vault's
 
 | Package | Contents |
 |---|---|
-| `cmd/vettid-agent` | Subcommands: `pair`, `run`, `mcp`, `status`, `session request\|end`, `grants`, `forget`, `version`; flags only, no logic |
+| `cmd/vettid-agent` | Subcommands: `pair`, `mcp`, `status`, `forget`, `version`; flags only, no logic |
 | `internal/state` | The state file (§4.2): format, atomic write, owner-only files (POSIX modes; Windows DACL), an exclusive lock per state directory, wipe |
 | `internal/protect` | Protectors behind one interface: `passphrase`, `tpm` (Linux), `keychain` (macOS, cgo), `dpapi` (Windows); build tags per OS |
 | `internal/vaultconn` | The connector's use of `client.Device`: one goroutine that owns it, collects and dispatches (until AV2 exists in the client), persists before acking (AV1), token and rekey maintenance, `device.unlinked`, `token_revoked` |
 | `internal/access` | Access sessions (§6.8): request policy (AG8), granted, ended, expiry, `session_required`, `owner_check_required` |
 | `internal/leash` | Grants, suspension, status statements (cache and refresh), `agent.request` with referred requests, pending results (AG9) |
-| `internal/mcp` | The MCP server: tool definitions and handlers, the local rate limit, the stdio bridge and the local socket listener |
+| `internal/mcp` | The MCP server: tool definitions and handlers, the local rate limit, the stdio transport |
 | `internal/pairing` | Code parsing (bare payload, `https://…/connect#…`, `vettid://connect#…`, inside surrounding text, §6.4), the pairing flow and its texts |
 | `internal/devstack` (test only, build tag `devstack`) | Starting or finding a dev stack, driving `vaultctl` as the member's app, the dev relay mapping (§4.8) |
 | `testdata/vectors/` | Copies of the vault's vectors used here, with `SOURCE.md` (§5), and the connector's own (`statefile.json`) |
@@ -238,7 +242,7 @@ Established on vettid-vault `1ef2dd9`:
   usable through type inference (`o, err := d.Op(...)`), not nameable.
   The connector uses `Request`/`Send` with its own JSON types where it
   must name them.
-- Limits for a daemon: every waiting call (`Request`, `Op`, `WaitEvent`,
+- Limits for a long-running process: every waiting call (`Request`, `Op`, `WaitEvent`,
   `LeashPresent`) collects from the relay itself; `Poll` acknowledges
   each message right after handling it, before the caller can save the
   state; `approval.waiting` does not extend a wait; no application
@@ -250,19 +254,22 @@ Established on vettid-vault `1ef2dd9`:
 ### 3.3 Runtime
 
 ```
-MCP client ──stdio──> vettid-agent mcp ──local socket──> vettid-agent run (daemon)
-                                                            │ owns the state file (locked)
-                                                            │ one goroutine owns client.Device
-                                                            └──relay (HTTPS)──> vault mailbox
+MCP client ──stdio──> vettid-agent mcp ──relay (HTTPS)──> vault mailbox
+                        │ started and stopped by the MCP client
+                        │ owns the state file (locked) and client.Device (one goroutine)
 ```
 
-The daemon: loads the state (protector), registers nothing new, collects
-by long poll, dispatches responses by `re` to waiting tool calls,
-handles events (`device.session.granted`, `.ended`, `approval.waiting`,
-`leash.grant.updated`, `relay.token.*`, `identity.rotate`,
-`device.unlinked`), saves the state before acknowledging a batch, and
-refreshes status statements. `pair` runs without a daemon and holds the
-same lock.
+`vettid-agent mcp`: loads the state (protector), takes the lock (or
+exits with "in use by another agent app"), collects what arrived while
+it was not running, then collects by long poll, dispatches responses by
+`re` to waiting tool calls, handles events (`device.session.granted`,
+`.ended`, `approval.waiting`, `leash.grant.updated`, `relay.token.*`,
+`identity.rotate`, `device.unlinked`), saves the state before
+acknowledging a batch, and refreshes status statements. It writes only
+MCP messages to standard output and logs to standard error. `pair`,
+`status` and `forget` are run by the operator in a terminal and take the
+same lock (`status` while a client runs says so and shows what the state
+file holds).
 
 ## 4. Connector-specific matters
 
@@ -286,7 +293,7 @@ the mapping. Every tool returns MCP tool errors with a stable `code`
 Tool descriptions say plainly that values come from the member's vault
 and that `leash.execute_action` is preferred where it suffices (the
 value never enters the agent's context). The local rate limit (a token
-bucket, 120 burst, 2 per second, per daemon) answers
+bucket, 120 burst, 2 per second, per process) answers
 `rate_limited_local` before anything reaches the vault. After a
 `forbidden`, the connector does not retry on its own; the vault's
 cooldowns (§10.11) make repeated refusals slower and can suspend the
@@ -384,8 +391,10 @@ The vault's standing token for the connector lasts at most 30 days and
 the relay keeps messages 14 days (RELAY-PROTOCOL `message_ttl_seconds`
 1,209,600). The vault re-mints tokens with under 10 days left at each
 unlock and sends `relay.token.issued` (§7.2); the client also re-issues
-its own token to the vault before it ends. A connector that runs (AG10)
-never lapses. One that stays off for more than about a month can find
+its own token to the vault before it ends. A connector whose MCP client
+runs it at least every two weeks never lapses: on start it collects what
+waited at the relay. One that stays off longer can miss a re-issued
+token (the relay keeps it 14 days), and after about a month can find
 its token expired and the re-issued one gone from the relay; then it
 re-pairs. §7.3 Q4 asks the owner to confirm that this is the intended
 recovery.
@@ -395,7 +404,7 @@ recovery.
 Stores or logs an item value, an SAS or a pairing code; caches a
 secret beyond the one tool result; retries a `forbidden`; sends
 anything to a service other than the vault's relay; runs as root or
-SYSTEM; listens on a network interface.
+SYSTEM; listens on a network interface or a local socket.
 
 ### 4.8 The dev-stack harness (AG7)
 
@@ -471,17 +480,17 @@ as an issue in vettid-agent, opened in A0.1.
 | PR | Contents | Acceptance |
 |---|---|---|
 | A2.1 | `vettid-agent pair`: code parsing, name, `client.New` + `Pair`, SAS, wait for `device.paired` / `device.pair.rejected` / 10 minutes, state saved per step | `invite.json`, `handshake.json`; unit tests with recorded messages for paired, rejected and expired; texts of §11 |
-| A2.2 | `internal/vaultconn` and `vettid-agent run`: one owning goroutine, long-poll collect, dispatch by `re`, save before ack, token and rekey maintenance, identity rotation, `device.unlinked` and `token_revoked` (AG12) | Unit tests: a crash after save and before ack replays without harm; a crash before save does not lose a rekey (the batch is collected again); `device.unlinked` wipes; `token_revoked` alone stops without wiping |
-| A2.3 | `internal/access`: AG8's policy, `device.session.request`, `.granted`, `.ended`, expiry, `session_required`, `owner_check_required`; `status`, `session request\|end` | Unit tests for every branch of AG8 (one outstanding, 10-minute quiet period after a denial, 6 an hour) |
+| A2.2 | `internal/vaultconn`, run inside `vettid-agent mcp`: one owning goroutine, long-poll collect, dispatch by `re`, save before ack, token and rekey maintenance, identity rotation, `device.unlinked` and `token_revoked` (AG12) | Unit tests: a crash after save and before ack replays without harm; a crash before save does not lose a rekey (the batch is collected again); `device.unlinked` wipes; `token_revoked` alone stops without wiping |
+| A2.3 | `internal/access`: AG8's policy, `device.session.request`, `.granted`, `.ended`, expiry, `session_required`, `owner_check_required`; `status` | Unit tests for every branch of AG8 (one outstanding, 10-minute quiet period after a denial, 6 an hour) |
 | A2.4 | `internal/devstack` harness (build tag `devstack`): find or start one dev stack, `vaultctl` as the app (§4.8), the relay mapping; `make devstack-test` running with `-p 1` | **Exit A2 test**: enroll a test vault with `vaultctl`, create and unlock its credential, pair the connector with `session_seconds: 600`, compare the SAS on both sides, see `vault.status` answered, end the session from the app, request a new one and approve it, unlink, see the connector wipe itself. A rejected pairing ends with "Rejected on your phone" |
 
 ### A3 — LEASH and the MCP server
 
 | PR | Contents | Acceptance |
 |---|---|---|
-| A3.1 | `internal/leash`: grants from `leash.grant.updated` and `leash.grant.list` at each session start, `suspended`, status statement cache and refresh, `vettid-agent grants` (lists scope, approval, limits, expiry; with `--present GRANT` prints the presentation bundle) | `leash.json`; unit tests: a revoked grant is never presented; nothing is presented while suspended; refresh at a quarter of the lifetime |
+| A3.1 | `internal/leash`: grants from `leash.grant.updated` and `leash.grant.list` at each session start, `suspended`, status statement cache and refresh; grants shown by `vettid-agent status` and `leash.connection_info` | `leash.json`; unit tests: a revoked grant is never presented; nothing is presented while suspended; refresh at a quarter of the lifetime |
 | A3.2 | `agent.request` (`catalog`, `item.get`, `item.use`) with `approval.waiting`, retries reusing the inner id, pending results kept 10 minutes (AG9), no retry after `forbidden` | Unit tests for allow, refer-then-approve, refer-then-deny, `approval_timeout`, `forbidden`, `owner_check_required`, locked vault |
-| A3.3 | `internal/mcp` and `vettid-agent mcp`: the five LEASH tools, the local socket (owner-only; named pipe on Windows), the stdio bridge, the local rate limit, golden files; README section for configuring MCP clients | Golden files; an MCP client library test drives `tools/list` and every tool against a fake daemon; the socket refuses another user (POSIX test) |
+| A3.3 | `internal/mcp` and `vettid-agent mcp`: the five LEASH tools over stdio, the local rate limit, golden files; README section for configuring MCP clients | Golden files; an MCP client library test drives `tools/list` and every tool against a fake vault connection; a second `mcp` on the same state exits with "in use by another agent app"; nothing is written to standard output but MCP messages |
 | A3.4 | Dev-stack LEASH tests | **Exit A3 test**: with `vaultctl` as the app: a share rule for the agent (`share set -agent`, `ask`) → `leash.list_available` empty until the member approves the item → `leash.request_secret` returns the value; an `auto` rule within limits returns at once; past `per_hour` the request is referred and approved; `leash.execute_action` returns the HMAC the test computes; a critical item is never listed or readable; revoking the rule stops reads at once; a loop of refused requests suspends the connector and `leash.connection_info` shows it; `leash.agent.resume` restores it; the hold (dev stack clock) gives `owner_check_required` |
 
 ### A4 — Delegable owner types (v1.1, after the owner confirms AG5)
@@ -497,9 +506,8 @@ as an issue in vettid-agent, opened in A0.1.
 | PR | Contents | Acceptance |
 |---|---|---|
 | A5.1 | Reproducible release build script and workflow (unsigned artifacts, `SHA256SUMS`), and a `verify-reproducible` script | Two clean builds produce identical hashes on Linux amd64 and arm64 |
-| A5.2 | Service files (systemd user unit, launchd agent, Windows scheduled task) and `vettid-agent install-service` / `uninstall-service` | Daemon starts at log-in on each platform; no root or SYSTEM |
-| A5.3 | Signing procedure for the owner: the release key's signature over `SHA256SUMS` (algorithm id in the format, AG4), verification instructions and the public key's place on vettid.org | The owner signs a release candidate offline; the verification instructions succeed on a clean machine |
-| A5.4 | macOS notarization and Windows Authenticode steps, run by the owner with the owner's own keys | Gatekeeper accepts the notarized binary; a signed Windows binary runs under Smart App Control in enforcement mode (#5 closed) |
+| A5.2 | Signing procedure for the owner: the release key's signature over `SHA256SUMS` (algorithm id in the format, AG4), verification instructions and the public key's place on vettid.org | The owner signs a release candidate offline; the verification instructions succeed on a clean machine |
+| A5.3 | macOS notarization and Windows Authenticode steps, run by the owner with the owner's own keys | Gatekeeper accepts the notarized binary; a signed Windows binary runs under Smart App Control in enforcement mode (#5 closed) |
 
 ### A6 — Staging with the Android app (after AA1–AA5, §7.2)
 
@@ -519,7 +527,7 @@ deny referred requests in Approvals; see the agent's activity in History
 | A2.2 (without the owning-goroutine workaround) | AV1, AV2 (§7.1); not blocking: the workaround of §3.2 |
 | A2.4, A3.4 | a dev stack that runs on the implementing machine (memory, §9 rule 8) |
 | A4 | AG5's v1.1 confirmed |
-| A5.3, A5.4 | AG4 and the owner's keys (§8) |
+| A5.2, A5.3 | AG4 and the owner's keys (§8) |
 | A6 | Android AA1–AA5 on staging (§7.2), ANDROID-PLAN's "Devices & agents" approved |
 | Production | a production release whose channel lists `leash` (§11.10.8, STAGING-DEVELOPMENT-PLAN §2.4) and the Android work in a production app |
 
@@ -585,15 +593,15 @@ Android; nothing here blocks on iOS.
 
 ## 8. Owner prerequisites
 
-1. **Decisions** AG0, AG1a, AG2–AG5 and AG7 (§2; AG1 is decided), and the §7.3 questions.
+1. **Decisions**: all of §2 decided or accepted (2026-10-17); the §7.3 questions remain.
 2. **Release signing key** (AG4): generated and held offline by the
    owner; its public key published on vettid.org. The implementing agent
    never creates, reads or asks for signing material.
 3. **Apple**: a Developer ID Application certificate in the owner's team
    for the connector, and notarization credentials, used on the owner's
-   Mac (A5.4).
+   Mac (A5.3).
 4. **Windows**: an Authenticode code-signing certificate whose key is on
-   a hardware token the owner holds (A5.4).
+   a hardware token the owner holds (A5.3).
 5. **Staging**: a staging test account and the Android staging app on a
    test phone (A6); real member data is never used.
 6. **GitHub**: the phase issues; branch protection on `main` with the
@@ -646,10 +654,12 @@ Android; nothing here blocks on iOS.
 3. **Weak binding in headless mode.** The passphrase protector is not
    machine-bound (§4.2). Mitigation: said in `status` and the docs;
    TPM where present.
-4. **Local socket exposure.** Another local account, or malware running
-   as the operator, can call the tools. Mitigation: owner-only socket;
-   malware as the same user is out of reach of any user-space connector,
-   which is why the vault, not the connector, enforces grants.
+4. **Malware running as the operator.** It could read the state file
+   with the operator's rights (where no hardware protector binds it) or
+   start the connector itself. Mitigation: no listener of any kind, so
+   only a process that starts the connector reaches its tools; the TPM,
+   Keychain or DPAPI protector; and the vault, not the connector,
+   enforces grants, limits and approvals.
 5. **Vault locked or held.** Agents stall; status statements lapse
    (fail closed, as designed). Mitigation: clear tool errors (§11).
 6. **Long-offline connectors** need re-pairing (§4.6, Q4).
