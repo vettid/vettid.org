@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.38.0
+version: 0.39.0
 date: 2026-10-17
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -25,6 +25,12 @@ related:
   - VAULT-HOST-PROTOCOL.md (0.1.12; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.39.0: approved by the owner 2026-10-17, as built in vettid-vault #107 (owner decision of
+    2026-10-17, ANDROID-PLAN 0.1.42 §4 item 6; additive). `<wallet>`
+    carries `tags`: the tags of the wallet's item, set at
+    `wallet.create` under the item rules and changed with `item.tag`;
+    `[]` without any; the wallet's `version` does not change with them
+    (§10.18). As built in vettid-vault #107, open until this is approved
   - 0.38.0: release C2: **the push wake for a ringing call** (CALLS-PLAN
     V4, decision D24); wording approved by the owner 2026-10-17 (the
     wake is the ordinary `notify` wake; no 5 s debounce for it; its own
@@ -9637,7 +9643,7 @@ wallet:  { "wallet_id": "<item_id>", "version": 4, "name": "Savings", "network":
              { "type": "p2wpkh", "path": "m/84'/0'/0'", "xpub": "xpub6…",
                "descriptors": { "receive": "wpkh([73c5da0a/84'/0'/0']xpub6…/0/*)", "change": "wpkh([…]/1/*)" },
                "next_receive": 0, "next_change": 0 } ],
-           "created_at": "<ts>" }
+           "tags": ["Money"], "created_at": "<ts>" }
 address: { "address": "bc1p…", "type": "p2tr", "index": 2, "change": false, "path": "m/86'/0'/0'/0/2",
            "label": "…?", "connection_id": "<id>?", "used": false, "issued_at": "<ts>" }
 summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type", "path"}],
@@ -9693,6 +9699,13 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
   `password` fields, "Recovery phrase" and "Passphrase", and keeps both
   accounts. `wallet_id` is the item's `item_id`. A vault holds at most
   16 wallets.
+- **Tags** (0.39.0). `<wallet>` carries `tags`: the current tags
+  of the wallet's item, in the item's form (§10.7: normalised, at most
+  16), `[]` when it has none. They are set by `wallet.create{tags}`
+  under the item rules and changed only with `item.tag` of the wallet's
+  item (`sync.event{item.changed}`, §10.7); the wallet keeps no copy, so
+  its `version` and `wallet.changed` do not follow them. Apps no longer
+  need `item.get` to show a wallet's tags.
 - **The phrase is the member's.** The member backs it up with
   `item.reveal` of the wallet's item (values sealed to a reply key,
   §10.7). The wallet owns its item: `item.put` and `item.sensitivity` of
