@@ -349,9 +349,9 @@ connector.
   the TPM: the sealed object lives only in the state file. So after
   `forget`, an old copy of the state file recovered from the disk (a
   backup, a snapshot, an SSD's remapped blocks) can still be opened on
-  the same computer until its TPM is cleared. Reaching such a copy
-  needs raw disk access on that computer plus TPM access; DPAPI behaves
-  the same way. Accepted for v1, and said in the README.
+  the same computer until its TPM is cleared. Opening such a copy needs
+  the copy (from a backup, a snapshot or the raw disk) and access to
+  that computer's TPM; DPAPI behaves the same way. Accepted for v1, and said in the README.
 
 ### 4.3 Pairing (§6.7)
 
