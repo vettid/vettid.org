@@ -25,7 +25,7 @@ numbers in the right-hand column refer to VAULT-MESSAGING unless stated.
 | Secret scope | Critical items, VettID's highest sensitivity class, are never reachable by agents (§10.11). |
 | Rate limits and suspension (§3.2) | Per-grant hourly and daily limits, a cooldown after each refusal, at most 20 referrals to the owner per agent per hour, and suspension after 30 refusals within an hour (§10.11). |
 | Audit logging (§3.4) | A hash-chained audit log with `leash.*` entry kinds (§10.9, §10.11). |
-| Platform binding and binary attestation (§3.4) | Left to the agent's connector; outside the vault's scope (§10.11). |
+| Platform binding and binary attestation (§3.4) | Outside the vault's scope (§10.11). **A known difference from the paper:** the connector does not report a hash of its binary to the vault, because a self-reported hash proves little without hardware attestation of the computer. The connector binds its keys to the computer where the platform allows it (a TPM, a this-device-only Keychain item or DPAPI); a passphrase-protected installation on a headless machine is not bound and says so ([AGENT-PLAN](AGENT-PLAN.md) AG3, §7.3 Q1). To be revisited once the connector ships reproducible, signed builds. |
 
 ## Alignment with the paper's §3.5
 

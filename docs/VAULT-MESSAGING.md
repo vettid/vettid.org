@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.39.0
+version: 0.40.0
 date: 2026-10-17
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -16,6 +16,7 @@ related:
   - MEMBER-API.md (2.7.1)
   - ANDROID-PLAN.md (0.1.43)
   - IOS-PLAN.md (0.1.1; §9.1 VA1–VA3)
+  - AGENT-PLAN.md (0.1.1; §7.3 Q3–Q5)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
@@ -25,6 +26,19 @@ related:
   - VAULT-HOST-PROTOCOL.md (0.1.12; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.40.0: approved by the owner 2026-10-17 (the owner's answers to
+    AGENT-PLAN §7.3 Q3–Q5). **A bound on access-session prompts**
+    (Q3): the vault accepts at most one `device.session.request` per
+    desktop or agent every 10 minutes, counted from the last one it
+    accepted, whatever became of it; one within that time is answered
+    `too_soon` (body `{allowed_after}`) and reaches no app (§6.8, §10.3).
+    Clarifications (no change to the protocol): an agent paired without
+    a first access session fetches its initial grants with
+    `leash.grant.list` once a session starts, since the vault sends
+    `leash.grant.updated` only within a session (Q5, §6.7); a desktop or
+    agent offline longer than its standing token and the relay's message
+    retention has no way back but re-pairing (Q4, §7.2). Not built yet
+    in vettid-vault
   - 0.39.0: approved by the owner 2026-10-17, as built in vettid-vault #107 (owner decision of
     2026-10-17, ANDROID-PLAN 0.1.42 §4 item 6; additive). `<wallet>`
     carries `tags`: the tags of the wallet's item, set at
@@ -3825,8 +3839,11 @@ Rules:
   (`device.pair.approve{grants}`, §10.3, §10.11). The member's credential
   key signs them at the approval, so the app opens the unlock window
   first; they take effect in the flush that completes the pairing, and
-  the agent learns them in `leash.grant.updated`. The agent's `ik` is the
-  grantee.
+  the agent learns them in `leash.grant.updated` when the approval also
+  granted a first access session (`session_seconds`). (0.40.0) The vault
+  sends `leash.grant.updated` only within a session (§10.11), so an agent
+  fetches its grants with `leash.grant.list` whenever a session starts.
+  The agent's `ik` is the grantee.
 - **Apps.** An app pairs only by a direct transfer (§6.7.1). Its
   `hs.init` carries the device attestation in `device_attest` (§11.7),
   over the §11.7 challenge with the `hs.init` inner `id` as `request_id`,
@@ -4016,7 +4033,14 @@ its end does not end the E2E session or the pairing.) Apps need none.
    24 h, default 1 h).
 2. The vault asks the owner's apps with `device.session.pending`. A newer
    request from the same device replaces an older one; a request no app
-   decides within 10 minutes is dropped.
+   decides within 10 minutes is dropped. (0.40.0) **At most one request
+   per device every 10 minutes**: a `device.session.request` that comes
+   less than 10 minutes after the last one the vault accepted from that
+   device, whether it was approved, denied, replaced or dropped since, is
+   answered `too_soon` (body `{allowed_after}`, RFC 3339) and reaches no
+   app; it does not replace a pending request. Each one is a
+   high-priority prompt on the member's phone, and a paired device must
+   not be able to flood it.
 3. An app answers `device.session.approve{request_id, seconds?}` (the app
    may change the length) or `device.session.deny`. The device is told
    with `device.session.granted{session_id, expires_at}` or
@@ -4207,6 +4231,14 @@ denylisted when the request or pairing ends without one (§7.4).
 **Unlock exchange.** Unlock requests carry a fresh app token, and unlock
 results carry a fresh vault token (§11.4). An app that has been offline for a
 long time therefore recovers without going through the relay.
+
+(0.40.0) A desktop or agent has no such exchange. Its standing token
+lasts at most 30 days and a re-minted one waits in its mailbox only for
+the relay's message retention (14 days, RELAY-PROTOCOL
+`message_ttl_seconds`). One that stays offline past both can no longer
+deposit to its vault, and its way back is to be paired again (§6.7:
+new keys, the old relay key stays denylisted); the member unlinks the
+old device record.
 
 ### 7.3 Quotas
 
@@ -4933,7 +4965,7 @@ device belongs to the unlock it ends.
 | `device.transfer.pending` (to the holder) | — | `{transfer_id, name, sas, signer?, signer_changed?}`; `name` is the new app's self-asserted `profile.name`; (0.27.0, Android) `signer` is the attested class of the new app's signer and `signer_changed` whether its digest differs from the vault's binding (§11.7.1) |
 | `device.transfer.approve` (the holder) | `{transfer_id, credential, utk_id, sealed{password, pin}, signer?}` | `{}`: the transfer is complete (0.10.3; was `{exp}`); (0.33.0, release R) `{"unlink": "after_new_unlock"}`, and also `busy` and `retry` with nothing but the UTK spent (§11.14.10); `bad_pin`, `backoff`, `bad_password`, `stale_credential`, `credential_frozen`, `utk_invalid`; (0.27.0) `signer`, the new app's class, is REQUIRED when the pending said `signer_changed: true`, else `signer_unconfirmed` (§11.7.1) |
 | `device.transfer.reject` (the holder) | `{transfer_id}` | `{}`; cancels the transfer before or after the scan, until the approval; after the new app's `hs.fin` it gets `device.pair.rejected` (0.10.5) |
-| `device.session.request` (desktop, agent) | `{seconds?}` (60–86,400, default 3,600) | `{request_id, exp}` |
+| `device.session.request` (desktop, agent) | `{seconds?}` (60–86,400, default 3,600) | `{request_id, exp}`; (0.40.0) `too_soon` (body `{allowed_after}`) within 10 minutes of the device's last accepted request (§6.8) |
 | `device.session.pending` (to apps) | — | `{request_id, device_id, role, name, seconds, exp}` |
 | `device.session.approve` (app) | `{request_id, seconds?}` | `{device_id, session_id, expires_at}` |
 | `device.session.deny` (app) | `{request_id}` | `{}` |
