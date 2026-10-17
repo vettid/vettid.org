@@ -1,9 +1,14 @@
 ---
 title: AGENT-PLAN
 status: draft
-version: 0.1.1
+version: 0.1.2
 date: 2026-10-17
 changelog:
+  - 0.1.2: the owner's answers of 2026-10-17 to §7.3: Q1 recorded as a
+    known difference in LEASH-IMPLEMENTATION; Q2 waits; Q3, Q4 and Q5
+    in VAULT-MESSAGING 0.40.0 (a bound on access-session prompts, then
+    AV6; re-pairing after a long absence; grants fetched when a session
+    starts). AV6 is now planned vault work.
   - 0.1.1: owner decisions of 2026-10-17: AG0 agreed (agent first);
     AG1a decided as the simplest and most secure form: stdio only, one
     process started by the MCP client, no daemon, no local socket, no
@@ -28,7 +33,7 @@ changelog:
     AG1a. Nothing in this plan changes a protocol
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.39.0) — §6.7, §6.8, §7, §8, §9.1, §10.3,
+  - VAULT-MESSAGING.md (0.40.0) — §6.7, §6.8, §7, §8, §9.1, §10.3,
     §10.11, §10.12; the connector's contract with the vault
   - LEASH-IMPLEMENTATION.md — "Connector"; the LEASH paper
     (`vettid/LEASH`), §3.3 MCP binding and §3.4
@@ -188,9 +193,9 @@ the implementing agent does not reopen them.
 | AG3 | **Keys and pairing state at rest** (a security path, §9 rule 6) | **Accepted (owner, 2026-10-17).** The device's secrets (its `ik`, `kem` and relay-key seeds, the vault record and session keyring: the client's `Save()` output) in **one state file**, XChaCha20-Poly1305 under a random 256-bit data key, the data key wrapped by a **platform protector**: **Linux**: TPM 2.0 (`/dev/tpmrm0`, a sealed object bound to the TPM) when present, else the passphrase protector; **macOS**: a Keychain item `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` (never synced); **Windows**: DPAPI (user scope) plus the owner-only DACL of A1.1; **headless or containers**: the passphrase protector (Argon2id), from a prompt, a file descriptor or a credential file, with a warning that it is not machine-bound. The **machine-attribute platform key is dropped** (§4.2) | (a) Keep the fingerprint key (hostname, machine id, CPU, disk serial, MAC; 3 of 5): readable by any local process, partly visible on the network, breaks on hardware changes, and failed on Windows (#2); (b) OS secret services only (GNOME Keyring/KWallet): absent on servers; (c) plain 0600 file (what `vaultctl` does; fine for tests only) | A1 |
 | AG4 | **Platforms, distribution and signing** | **Accepted (owner, 2026-10-17).** **Linux amd64/arm64 first, then macOS arm64 and Windows amd64** (A5). Static, `CGO_ENABLED=0` builds where possible (macOS needs cgo for the Keychain and is built on a macOS runner or the owner's Mac), **reproducible** (`-trimpath`, fixed toolchain from `go.mod`, `SOURCE_DATE_EPOCH`, build ids stripped), with a script that rebuilds a release and compares hashes. **The owner signs**: a release signing key held offline by the owner signs `SHA256SUMS` (Ed25519 now; PQC-MIGRATION §4 row 5 names SLH-DSA-128s for this root in phase 2, so the signature format carries an algorithm id); macOS binaries with the owner's Apple Developer ID and notarized; Windows binaries with an Authenticode certificate whose key is on a hardware token the owner holds. **No third party holds a VettID signing key**: no cloud signing service that keeps the key (for example a CA-hosted or cloud-HSM signing service), no keyless signing that rests on a third party's identity. No auto-update in v1 | Linux only for v1 (most agents run on Linux or macOS; Windows users wait); unsigned Windows builds (Smart App Control may block them outright, #5); Sigstore keyless (trust in a third party's CA and log) | A5 |
 | AG5 | **v1 scope** | **Accepted (owner, 2026-10-17).** **Pairing** (pasted code, SAS, approval or rejection, unlink); **access sessions** (request, granted, ended, expiry); **grants** (list, updates, suspension, status statements kept fresh); **items through LEASH**: `catalog`, `item.get`, `item.use` (`hmac-sha256`), with referred requests and `leash.check_status`; **connection info**. **v1.1**: the delegable owner types as MCP tools (`connection.list`, `.get`, `message.send`, `.list`, `.get`, `.read`, `profile.get`, `action.list`, `.invoke`; §10.11 scope table). **Later**: presenting delegations to other tool servers with a proof of possession (waits for the LEASH MCP profile, §7.3 Q2), the vault's HTTP action (needs enclave egress, §10.11, §15 item 7), binary attestation (Q1) | All delegable types in v1 (messaging on the member's behalf is the most sensitive delegation and deserves its own review of texts and defaults) | A3 |
-| AG6 | **Vault changes** | **Accepted (owner, 2026-10-17).** **None in the enclave for v1.** Small changes in vettid-vault's **reference client** (`client/`) and **dev stack** docs (§7.1), which need no vault release. One possible enclave change (AV6) only if the owner adds a bound on access-session requests to the spec (§7.3 Q3) | Forking the client into vettid-agent | A2 |
+| AG6 | **Vault changes** | **Accepted (owner, 2026-10-17).** **One small enclave change for v1**: the bound on access-session prompts (AV6, VAULT-MESSAGING 0.40.0, §7.3 Q3), in a staging release. Otherwise small changes in vettid-vault's **reference client** (`client/`) and **dev stack** docs (§7.1), which need no vault release | Forking the client into vettid-agent | A2 |
 | AG7 | **Testing** | **Accepted (owner, 2026-10-17).** Three layers: **unit** tests with fakes (MCP, the session runtime, state store, protectors, no network); **dev-stack integration** tests behind a build tag, against vettid-vault's `cmd/devstack` with `vaultctl` playing the member's app (§4.8); **staging** tests with **staging test accounts only**, the Android staging app on a test phone, and a written checklist (A6). Never real member data, never a production vault | Integration tests only through the vault's in-process e2e helpers (they are under `internal/`, not importable); staging only (slow, needs the Android work first) | A2 |
-| AG8 | **When the connector asks for an access session** | **Accepted (owner, 2026-10-17).** **On the first tool call that needs one**, the connector sends `device.session.request{seconds}` (the operator's configured default, 1 h if unset) and answers the tool "Access requested on your phone". At most one request outstanding; after a denial or a request that expired unanswered, no new automatic request for 10 minutes; at most 6 automatic requests an hour. The vault itself does not bound these prompts (§7.3 Q3), so the connector must | Only on the operator's explicit command (safer for the member's attention, but an agent then fails until a human runs a command) | A2.3 |
+| AG8 | **When the connector asks for an access session** | **Accepted (owner, 2026-10-17).** **On the first tool call that needs one**, the connector sends `device.session.request{seconds}` (the operator's configured default, 1 h if unset) and answers the tool "Access requested on your phone". At most one request outstanding; after a denial or a request that expired unanswered, no new automatic request for 10 minutes; at most 6 automatic requests an hour. The vault answers a request within 10 minutes of the last accepted one `too_soon` (VAULT-MESSAGING 0.40.0, AV6); the connector keeps its own bound as well and waits for `allowed_after` | Only on the operator's explicit command (safer for the member's attention, but an agent then fails until a human runs a command) | A2.3 |
 | AG9 | **Long approvals and MCP timeouts** | **Accepted (owner, 2026-10-17).** A tool call waits up to 20 s for its response. A request the vault holds (`approval.waiting`, up to 5 minutes) or that is still in flight returns `{status: "pending", request_id}`; `leash.check_status{request_id}` returns `pending`, the result, `denied`, `approval_timeout` or `expired`. The process keeps waiting for the response in the background while it runs and keeps results for 10 minutes (memory only; a secret's value is dropped once returned) | Blocking the tool call for up to 5 minutes (many MCP clients time out tool calls well before that) | A3.2 |
 | AG10 | **Daemon lifetime and service files** | **Withdrawn (owner, 2026-10-17)** with AG1a: there is no daemon and no service file | — | — |
 | AG11 | **What the connector reports about itself** | **Accepted (owner, 2026-10-17).** Its self-asserted name only (the operator chooses it; default "Agent on <host name>", editable before pairing). No machine attributes and no binary hash are sent: the vault does not accept them (§10.11 "out of the vault's scope") | Sending a binary hash in the `hs.init` profile (the vault would ignore or refuse unknown members) | A2.1 |
@@ -533,10 +538,11 @@ deny referred requests in Approvals; see the agent's activity in History
 
 ## 7. Work outside vettid-agent
 
-### 7.1 vettid-vault (reference client and dev stack; no vault release)
+### 7.1 vettid-vault (reference client and dev stack; AV6 in the enclave)
 
 Each its own small vettid-vault PR, by an agent working in that
-repository; none changes the enclave or needs a release.
+repository. AV1–AV5 do not change the enclave or need a release; AV6
+changes the enclave and ships in a staging release.
 
 | # | Task | Spec | Why | Blocks |
 |---|---|---|---|---|
@@ -545,7 +551,7 @@ repository; none changes the enclave or needs a release.
 | AV3 | **Approvals and retries**: `AwaitResponse` extends its wait to `approval.waiting`'s `exp` for its request and exposes the `approval_id`; an optional application retry reusing the inner id, at most twice | §6.8 step 1, §8.1, §8.6 | Today a referred request times out on the caller's deadline and is never retransmitted | — |
 | AV4 | **Wallet out of the import graph**: move `client/wallet.go` (and its `vms/btc` use) to `client/wallet` | — | Importers of `client` compile btcsuite and decred secp256k1 for nothing | — |
 | AV5 | **Dev stack for a non-phone app**: document (README "Local dev stack") how `vaultctl` enrolls a second test vault, creates and unlocks its credential and pairs an agent with grants; add a control endpoint only if a step cannot be done with `vaultctl` | §6.7, §10.11 | The connector's integration tests need a member's app that can sign grants; the dev stack's peer has no credential | A2.4 |
-| AV6 | **Only if the owner adds it to the spec (§7.3 Q3)**: a bound on `device.session.request` prompts per device | §6.8 | `hSessionRequest` (`vault/access.go`) notifies the apps and records a high-priority feed item for every request; only "newest replaces older" bounds them | — |
+| AV6 | **The bound on access-session prompts** (VAULT-MESSAGING 0.40.0, §7.3 Q3): a `device.session.request` within 10 minutes of the device's last accepted one is answered `too_soon` (`{allowed_after}`), notifies no app and records no feed item, and does not replace a pending request; tests for each case. An enclave change: in the next staging release | §6.8, §10.3 | `hSessionRequest` (`vault/access.go`) notifies the apps and records a high-priority feed item for every request; only "newest replaces older" bounded them | — |
 
 ### 7.2 vettid-android (ANDROID-PLAN "Devices & agents", owner approval)
 
@@ -567,15 +573,15 @@ connector's staging phase A6 needs AA1–AA5.
 IOS-PLAN places devices and agents in its "Later" list, following
 Android; nothing here blocks on iOS.
 
-### 7.3 Spec questions for the owner (vettid.org issues, `AGENT-PLAN:`)
+### 7.3 Spec questions (answered by the owner, 2026-10-17)
 
-| # | Question | Where | Recommendation |
+| # | Question | Where | Answer |
 |---|---|---|---|
-| Q1 | LEASH §3.4 says the connector "MUST report a cryptographic hash of its binary to the vault during enrollment and periodically thereafter", while VAULT-MESSAGING §10.11 puts binary attestation "out of the vault's scope", so no message carries it | LEASH §3.4; §10.11 | Record the deviation in LEASH-IMPLEMENTATION ("Platform binding and binary attestation" row) for v1; a self-reported hash proves little without hardware attestation. Revisit with reproducible, signed builds (A5) |
-| Q2 | The proof of possession a relying party asks for (§10.11 verification step 6) has no defined format, and LEASH §3.3 leaves the MCP carriage "to be specified" | §10.11; LEASH §3.3 | Wait: presentation to other tool servers stays out of v1 (AG5) |
-| Q3 | Nothing bounds how often a paired desktop or agent may send `device.session.request`; each one is a high-priority prompt on the member's phone | §6.8 | Add a bound (for example one prompt per device per 10 minutes, further requests answered `too_soon` with `allowed_after`), then AV6. Until then the connector bounds itself (AG8) |
-| Q4 | A device offline longer than its standing token and the relay's message retention cannot deposit to its vault again | §7.1, §7.2 | Confirm re-pairing as the recovery for desktops and agents, and say so in §7.2 |
-| Q5 | §6.7 says an agent "learns [its initial grants] in `leash.grant.updated`", which the vault sends only within an access session (§10.11), so not when the approval carries no `session_seconds` | §6.7, §10.11 | A clarifying sentence in §6.7: the agent fetches its grants with `leash.grant.list` when a session starts |
+| Q1 | LEASH §3.4 says the connector "MUST report a cryptographic hash of its binary to the vault during enrollment and periodically thereafter", while VAULT-MESSAGING §10.11 puts binary attestation "out of the vault's scope", so no message carries it | LEASH §3.4; §10.11 | **Recorded as a known difference** in LEASH-IMPLEMENTATION ("Platform binding and binary attestation"): a self-reported hash proves little without hardware attestation. Revisited with reproducible, signed builds (A5) |
+| Q2 | The proof of possession a relying party asks for (§10.11 verification step 6) has no defined format, and LEASH §3.3 leaves the MCP carriage "to be specified" | §10.11; LEASH §3.3 | **Waits**: presentation to other tool servers stays out of v1 (AG5) |
+| Q3 | Nothing bounded how often a paired desktop or agent may send `device.session.request`; each one is a high-priority prompt on the member's phone | §6.8 | **VAULT-MESSAGING 0.40.0**: at most one accepted request per device every 10 minutes, others answered `too_soon` with `allowed_after` and shown to no app; built in AV6. The connector keeps AG8's own bound and treats `too_soon` as "ask again after `allowed_after`" |
+| Q4 | A device offline longer than its standing token and the relay's message retention cannot deposit to its vault again | §7.1, §7.2 | **VAULT-MESSAGING 0.40.0 §7.2**: re-pairing is the way back (§4.6) |
+| Q5 | §6.7 said an agent "learns [its initial grants] in `leash.grant.updated`", which the vault sends only within an access session (§10.11) | §6.7, §10.11 | **VAULT-MESSAGING 0.40.0 §6.7**: the agent fetches its grants with `leash.grant.list` whenever a session starts (as §4.5 does) |
 
 ### 7.4 vettid.org (owner approval)
 
@@ -669,7 +675,7 @@ Android; nothing here blocks on iOS.
 8. **MCP churn.** Transports and client behaviour change. Mitigation:
    the MCP layer is one package with golden files.
 9. **Member attention.** Session requests and referrals are prompts on
-   the phone. Mitigation: the vault's referral cap; AG8's bound; Q3.
+   the phone. Mitigation: the vault's referral cap and its bound on session prompts (Q3, AV6); AG8's bound.
 
 ## 11. Draft texts
 
