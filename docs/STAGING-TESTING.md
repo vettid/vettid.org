@@ -132,3 +132,10 @@ more run 24 times faster on staging: a day is an hour, the daily owner
 check comes every hour, recovery's quiet period is 3 hours
 (STAGING-TIME-SCALE). The apps show the shortened times and "Staging:
 1 day = 1 hour".
+
+Not everything shrinks. The windows over which failures are counted
+stay real time: on staging the account site's PIN lock lasts 1 hour,
+but wrong PINs are still counted over a day, so one more wrong PIN
+just after a lock ends locks it again for an hour. Recovery's waits
+between wrong attempts already run in minutes on staging (10 minutes,
+then doubling).
