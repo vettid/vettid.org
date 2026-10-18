@@ -551,6 +551,41 @@
         "security": "recommended",
         "security_text": "Before release 15, the limits on guessing a PIN and a credential password during a recovery were kept in data that VettID's hosts store, so a host that replayed stored data could have guessed faster than those limits allow. Release 15 keeps the count of attempts where the host cannot remove it and adds a secret from your phone to every unlock. We know of no use of this against any vault."
       }
+    },
+    {
+      "release": 17,
+      "status": "candidate",
+      "pcr0": "937ccd203cc54a6da405ff9f2a612465befc4c3d77072f1683489b042cde07fad343bd25fb1115a3b6429fd5cf55c248",
+      "pcr1": "985277a497e71af128434e93c3a5860f7bbb6dba7878738c163d80505a195556bff047ab7fbf5790841e9ef75c557618",
+      "pcr2": "116e0a7bd6a10ff3f14f7b1f5308fa34b45914857bee13e253fe102b5b9c902dae47112b7c657f8b308c2606e29a8c05",
+      "seal_key": "",
+      "admitted_pcr0s": [
+        "80a580024d4cf3d1f7955dc010ae12a0626ad4f6d542c385bf9cf5202fa37eab81f37c75a009dbc4212b22960f19d289",
+        "8c26adfd1fe53025c5aea91563129bc4670bffc993531040a4a0e6f530e753bcf5a1be2cafa78bb0373a469adc88f7c8",
+        "e9f9005d31ba54e64aec4db3c7044aa8c290bae8c65246e6a1692fae7ea40d2dae8bf41c3a4b0575c7066d23ac5e3f1a",
+        "c6dd654f6b261f616f9115b215600eb992365943c52177adc86bafdba0fd7138c0dfe6558d8b2052ff1aed4dee50232f",
+        "2303feb157143c5393fe55e8dd880f0ebc82f982c5f0e2a64e0d1c3b53e306d5c36641544185c1dfed7d7834188864e8",
+        "8eebbb1012f55e131ab24a8259d1e714ffc6cc2f9ea090c41e3773702979fd0756134b7035773f8b58ab174f864f5f7d",
+        "8ab041980ae3cd122b9e09f04a165b13aa01cfb5378d31c35830c05f129072b2f0889cbed1f492c0fdfb13f0af8c303e",
+        "a9e3defc8bfa4c3c6f89a87afac67bc245f1ef8ac331de88505d8d4928a4bc0d9e793fb928050ba02c9f3b915ffbfb0e",
+        "398b654dfcd98079fe558e4a2a2c000877fd59b4f9298383dc66ed0d54f6706938e1620f2d1d80b8cb02dca2eef3e72b",
+        "859733fa15df56bfedcb8c3a0a1524e9287aea6a8fa01d798d0f8c8df32cc2cbf32cdc5102bbd89b1f6c6e05e478e4bf",
+        "0f4d7915f5fc56aa7d705e82ddd14ec48e48ce3bb99217792b3e67bee9a6db6bd74dee16971d750f4af3a294e2bccdb2",
+        "082e1380273fd025f934e24941d6d91513e8e9e70d8d28ae3ea1dcc63b82c04bc0ee2ca495598df6355c1042ad90ec7e",
+        "76b9dc48934fde944227d2714fc93278f4527fefcd8152fd5471f7075d906f51a5430d5e2eb5f19a8906e80a0c5c1bba"
+      ],
+      "notes": "https://staging.vettid.org/security/releases/17/",
+      "host": {
+        "tag": "release/staging/17",
+        "source_commit": "9378113ca988db5f7b9774c248f2f2d8680a448f",
+        "measurements_sha256": "738edd18bb9556dce1ee6b0e016a57256d11ba24e1d00bfc6719da0c4be0e4bc",
+        "host_files_sha256": "4f4eea4f88ca7be3edda684a6ae4101ea7d84342e13f5e73ea425afe01d6edc8",
+        "nitro_cli_version": "1.5.0",
+        "base_ami": "ami-04048e843b318bc37",
+        "ami_revision": 0,
+        "min_instances": 0,
+        "max_instances": 2
+      }
     }
   ]
 }
