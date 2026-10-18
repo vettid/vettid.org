@@ -1,6 +1,6 @@
 ---
 title: STAGING-TESTING
-status: draft, for the owner's approval
+status: approved by the owner 2026-10-18
 version: 0.1.0
 date: 2026-10-18
 owner: Al Liebl (Mesmer)
@@ -13,7 +13,7 @@ related:
   - MEMBER-API.md "Enrollment codes" (`/api/vault/enroll-code`)
   - ANDROID-PLAN.md, IOS-PLAN.md: each app's own acceptance tests
 changelog:
-  - 0.1.0: first draft (owner's request of 2026-10-18: "i'd like ios to
+  - 0.1.0: approved by the owner 2026-10-18 (owner's request of 2026-10-18: "i'd like ios to
     be in sync with android in terms of how we test and how the testing
     is done"). One way of testing on staging for both apps: test
     members, enrollment codes, canary releases, results and secrets
