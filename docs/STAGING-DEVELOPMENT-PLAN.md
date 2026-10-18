@@ -1,8 +1,8 @@
 ---
 title: STAGING-DEVELOPMENT-PLAN
 status: approved by the owner 2026-10-11 (D1–D11 as recommended; D3 as in ANDROID-PLAN 0.1.36, which replaced 0.1.34's answer the same day)
-version: 0.1.2
-date: 2026-10-11
+version: 0.1.3
+date: 2026-10-18
 owner: Al Liebl (Mesmer)
 related:
   - VAULT-RELEASES.md (0.1.10) §3 releases, §8.6 scaler, §8.9 cost, §11.1 staging, §15 O2
@@ -24,6 +24,9 @@ changelog:
     application id) and the signer binding are in S10, which is
     published; §4, §5 row 1, §7 and §8 say what is now done. New
     §8.5, the S10 record. Nothing else in the plan changes
+  - 0.1.3: **for the owner's approval** (owner's request of
+    2026-10-18). §2.1 rule 6: staging's waits run on a time scale, 1 day
+    = 1 hour (STAGING-TIME-SCALE 0.1.0); production's scale is 1
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -62,6 +65,14 @@ Each rule is a proposal. Those that need the owner's choice are in §6.
    (`retirement_window_days`, pinned in the image; production's is 30).
 5. Staging vaults are disposable, including the one on the owner's phone.
    Nothing kept only in a staging vault is safe.
+6. (0.1.3, for the owner's approval) **Staging's waits run on a time
+   scale: 1 day = 1 hour** (STAGING-TIME-SCALE). The release constant
+   `time_scale` is 24 on staging and exactly 1 in production; the waits
+   of an hour or more that a tester waits through (the owner check, the
+   idle lock, recovery's delays, the old phone's 7 days) are divided by
+   it, from the vault release that ships it and for timers started
+   after a vault moves into it. AWS windows, such as rule 4's 7 days,
+   are not scaled.
 
 ### 2.2 Production release 1: early and small
 

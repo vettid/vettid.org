@@ -1,8 +1,8 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.31
-date: 2026-10-17
+version: 0.1.32
+date: 2026-10-18
 owner: Al Liebl (Mesmer)
 changelog:
   - 0.1.0: V5 plan. Release pipeline, keys, infrastructure, release
@@ -254,6 +254,12 @@ changelog:
     `3X25CJ86MV.com.vettid.app.staging`), which replaces the App ID
     constant in code. §3.4 C6: what pinning and changing it does to iOS
     vaults, and the release log line that says so
+  - 0.1.32 (**for the owner's approval**, with VAULT-MESSAGING 0.43.0
+    and STAGING-TIME-SCALE 0.1.0). §5.2: the release constant
+    `time_scale` (production exactly 1, staging 1 or 24), ignored by
+    the code outside staging; on staging the quiet period is stated as
+    259,200 / `time_scale`; each release log entry from the release
+    that ships it says the scale in words
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.37.0) §11.10 release updates, §11.10.8 release constants, §12.5 deletion, §13.5, §13.9
@@ -815,6 +821,7 @@ whose value is recorded in `measurements.json`):
 | `recovery_wait_unit_seconds`, `recovery_quiet_seconds` (0.1.28, release R) | 86,400 and 259,200 (staging: 600 and 259,200) | VAULT-MESSAGING 0.33.0 §11.14.6, §11.14.14 |
 | `recovery_offered` (0.1.28, release R) | `true`; `false` only for a production release that ships before the outside store (§12) | VAULT-MESSAGING 0.33.0 §11.14.13 |
 | `android_min_version_code` (0.1.28, release R) | the first app version code that implements release R | VAULT-MESSAGING 0.33.0 §11.14.14 |
+| `time_scale` (0.1.32; for the owner's approval) | **1**, and nothing else (staging: 24, or 1 for a real-time run) | VAULT-MESSAGING 0.43.0 §11.10.8; STAGING-TIME-SCALE |
 
 GrapheneOS verified-boot keys and vendor roots stay in `vms/pins` (code).
 Everything that defines a release is in the tagged tree, so
@@ -879,6 +886,19 @@ compiled out of release images), and MUST refuse a `recovery_counter`
 that names another channel's bucket or account. A test run on the
 production image itself asserts all three, as for `features`. The
 quiet period is the same on staging, so staging tests it in real time.
+
+**The staging time scale (0.1.32; for the owner's approval;
+STAGING-TIME-SCALE).** `time_scale` divides the waits of 1 hour or
+more that STAGING-TIME-SCALE §2.1 lists. The release build MUST refuse a
+`prod.json` whose `time_scale` is not exactly 1 (missing and
+placeholders included), and the image uses the value only in the
+staging channel or a development build, 1 otherwise; a test on the
+production image asserts both. From the release that ships it, the
+staging file states the quiet period as 259,200 / `time_scale` (10,800
+s at 24) instead of the production value, the build refuses any other
+value on staging, and the production rules above are unchanged. Each
+release log entry (§7) from that release says the scale in words:
+"Time scale: 1 day = 1 hour (staging)", or "real time".
 
 **The calling service's issuer (0.1.19; planned; approved by the owner
 2026-10-12).** `calls_url` is optional, and the release build
