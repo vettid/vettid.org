@@ -1,9 +1,17 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.1
-date: 2026-10-17
+version: 0.1.2
+date: 2026-10-18
 changelog:
+  - 0.1.2: **approved by the owner 2026-10-18** (STAGING-TIME-SCALE 0.1.0,
+    VAULT-MESSAGING 0.43.0). §6.6: the staging time scale, as on
+    Android (ANDROID-PLAN 0.1.44 §4 "Staging time scale"): `time_scale`
+    from the descriptor and the transfer bundle, stored per vault, the
+    app's own waits divided by it (early warning, replaced records,
+    the old phone's 7 days), scaled texts with "Staging: 1 day = 1
+    hour" in staging builds, and any value other than 1 refused by
+    Release builds for production
   - 0.1.1: **approved by the owner 2026-10-17** (vettid.org #320),
     with the stricter protection class as decided, the two §14 texts as
     approved, and replaced records kept 7 days as on Android. ID9 as
@@ -627,6 +635,15 @@ leaving the screen.
 - **Owner check early warning**: local notifications scheduled for 1 h
   before the deadline whenever the deadline is learned, cancelled on a
   check (ANDROID-PLAN §6 owner check, item 5). These work without APNs.
+- **Staging time scale** (0.1.2, approved by the owner 2026-10-18;
+  STAGING-TIME-SCALE §5.2): as on Android (ANDROID-PLAN §4 "Staging
+  time scale"). `time_scale` comes from the descriptor and a transfer
+  bundle (VAULT-MESSAGING §11.10.9), is stored per vault, and divides
+  the app's own waits when each starts: the early warning above, the
+  replaced records' 7 days (§6.3) and the old phone's 7 days after a
+  transfer. Staging builds show the scaled times and "Staging: 1 day =
+  1 hour"; a production build refuses any value other than 1 and sends
+  nothing.
 - **Calls, presence, location**: not before push; their phases say how.
 
 ### 6.7 Push: not before APNs

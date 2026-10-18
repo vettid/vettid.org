@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.42.0
+version: 0.43.0
 date: 2026-10-18
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -25,7 +25,25 @@ related:
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
   - VAULT-HOST-PROTOCOL.md (0.1.12; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
+  - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.43.0: **approved by the owner 2026-10-18** (owner's request of
+    2026-10-18: "1 day = 1 hour in staging"); **needs a vault release**
+    (staging; production unchanged, its scale is 1). **Staging time
+    scale** (STAGING-TIME-SCALE): a new release constant `time_scale`
+    (§11.10.8), exactly 1 in production and 1 or 24 on staging, ignored
+    by the code outside staging; the waits of 1 hour or more that
+    STAGING-TIME-SCALE §2.1 lists (the owner check's interval and early
+    warning, the idle lock, the recovery code's delay and validity, the
+    quiet period, the counter's 24 h notice, the pending unlink, the
+    provisional enrollment window, and the app's timers) are divided by
+    it when they start, settings keep real units, and timers started
+    before a vault moves into the release keep their times. The image's
+    descriptor and a transfer bundle carry `time_scale` (§11.10.9), and
+    `vault.status` returns it to the app and desktops (§10.2); a
+    production app refuses any value other than 1. On staging the quiet
+    period is stated in the channel file as 259,200 / `time_scale`
+    (10,800 s); the production build rules are unchanged (§11.14.14)
   - 0.42.0: approved by the owner 2026-10-18 (all four ways,
     AGENT-PLAN 0.1.5 AG13; every reveal asked on the phone; the proxy's
     loopback listener accepted; settings per agent and item; `each:
@@ -4958,7 +4976,7 @@ an answer to an unknown or expired id is dropped.
 |---|---|---|
 | `vault.enrolled` | — | §11.3 |
 | `vault.enroll.confirm` (app) | `{}` | `{}` |
-| `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; 0.29.0, release L: also `unlock_id` (to the app and desktops, not to agents or a recovering app) and, inside `owner_check` for the app and desktops, `idle_lock_at` (RFC 3339: when the vault will lock itself if no check is passed, §3.6.8; absent for a vault without a credential); `owner_check` (0.13.0) is `{state: "ok" \| "due" \| "held", deadline, interval_seconds, failures, hold, hold_off_until?, waiting?}` to apps and desktops and `{state}` to agents (§3.6, §3.6.7). `waiting` (0.19.0) is `{messages, requests, calls, other}`, the counts of `vault.held` since the deadline (§3.6.3), present while the state is `due` or `held` for a device that receives `vault.held` (the app; desktops with an access session while `held`) and absent otherwise. (0.32.0, release A) To the app and desktops also `attachments: {count, bytes, max_count, max_bytes}`: the stored attachments, their bytes counted as for `attachment_storage`, and the two bounds (§10.5.1). A recovering app (§11.11.5) gets only `{vault_id, state_seq, header_seq}` (0.16.0): nothing about the vault's devices, connections or owner check before it has proved the credential password. (0.33.0, release R) To the app also `recovery: {state, attempts, present_recorded_at, counter}`, to desktops `recovery: {state}` (§11.14.11). (0.41.0) To desktops and agents also `session: {session_id, expires_at} \| null`: the calling device's own current access session, never another device's (§6.8) |
+| `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; 0.29.0, release L: also `unlock_id` (to the app and desktops, not to agents or a recovering app) and, inside `owner_check` for the app and desktops, `idle_lock_at` (RFC 3339: when the vault will lock itself if no check is passed, §3.6.8; absent for a vault without a credential); `owner_check` (0.13.0) is `{state: "ok" \| "due" \| "held", deadline, interval_seconds, failures, hold, hold_off_until?, waiting?}` to apps and desktops and `{state}` to agents (§3.6, §3.6.7). `waiting` (0.19.0) is `{messages, requests, calls, other}`, the counts of `vault.held` since the deadline (§3.6.3), present while the state is `due` or `held` for a device that receives `vault.held` (the app; desktops with an access session while `held`) and absent otherwise. (0.32.0, release A) To the app and desktops also `attachments: {count, bytes, max_count, max_bytes}`: the stored attachments, their bytes counted as for `attachment_storage`, and the two bounds (§10.5.1). A recovering app (§11.11.5) gets only `{vault_id, state_seq, header_seq}` (0.16.0): nothing about the vault's devices, connections or owner check before it has proved the credential password. (0.33.0, release R) To the app also `recovery: {state, attempts, present_recorded_at, counter}`, to desktops `recovery: {state}` (§11.14.11). (0.41.0) To desktops and agents also `session: {session_id, expires_at} \| null`: the calling device's own current access session, never another device's (§6.8). (0.43.0, approved by the owner 2026-10-18) To the app and desktops also `time_scale`, the release constant of §11.10.8 (1 in production) |
 | `vault.owner-check` (app: the holder) | `{credential, utk_id, sealed{pin, password, hold?, hold_off_until?}}` | `{credential, version, utks, deadline, interval_seconds, hold, hold_off_until?}` (§3.6.1, §3.6.7); (0.33.0, release R) also `recovery: {state, present_recorded}` (§11.14.5); `bad_pin`, `bad_password`, `backoff` (body `{retry_after}`, §10.1), `utk_invalid`, `stale_credential`, `credential_frozen`, `rotation_required`, `forbidden` (not the holder), `bad_request` (a PIN that is not 6–32 digits) |
 | `vault.held` (V→D, to the app and desktops in an access session) | — | `{deadline, waiting: {messages, requests, calls, other}}` (§3.6.3); 0.29.0, release L: also `idle_lock_at` (§3.6.8) |
 | `vault.lock` (app, desktop) | `{}`; 0.29.0, release L: `{unlock_id}` ("Locks", below) | `{}`; then `vault.locking`. 0.29.0, release L: `stale_lock` when `unlock_id` does not name the current unlock (nothing is done); `bad_request` when it is not 32 lowercase hex characters |
@@ -12274,7 +12292,21 @@ recorded in the build's measurements:
   refuses every recovery, §11.14.13); `android_min_version_code`
   (§11.14.14). The counter's lock period (0.33.2, §11.14.4: one day on
   staging, 100 years in production) is not a member: it follows from the
-  channel the image is built for, so no channel file can express it.
+  channel the image is built for, so no channel file can express it;
+- (0.43.0, approved by the owner 2026-10-18; STAGING-TIME-SCALE) `time_scale`:
+  a positive integer by which the vault divides the waits of 1 hour or
+  more that STAGING-TIME-SCALE §2.1 lists, when each timer starts (24 h
+  becomes 1 h at 24); settings keep their real units, and a timer
+  started before a vault moved into the release keeps its time.
+  **Production: exactly 1**, and `releasecfg check` refuses any other
+  value, a missing one and a placeholder; staging: 1 or 24; the
+  development build: 1 to 86,400. The enclave uses the value only when
+  its measured channel is staging (or in a development build) and 1
+  otherwise, as for the counter's lock period, so no production image
+  scales whatever its file says. What never scales (AWS windows,
+  cryptographic freshness, the relay's lifetimes, timers between
+  vaults, rate limits, backoff ladders, durations the member chooses,
+  retention) is in STAGING-TIME-SCALE §2.2 and §3.
 
 GrapheneOS verified-boot keys and the vendor roots stay in code and are
 the same for every channel. A release build MUST refuse a channel file
@@ -12586,6 +12618,17 @@ A name is added to this table only with the release that implements it,
 and a release that lists a name implements it fully. A release before R
 lists nothing, whatever it implements. Apps ignore names they do not
 know.
+
+**The time scale (0.43.0, approved by the owner 2026-10-18;
+STAGING-TIME-SCALE §5.2).** From the release that ships `time_scale`
+(§11.10.8), the descriptor and a transfer bundle also carry
+`time_scale`, the image's measured value; one without it is a release
+before the scale and means 1. The app reads it where it reads the list
+(below), stores it per vault (§11.10.6), and takes each of its own
+scaled timers from it. **An app built for production refuses a
+descriptor or bundle whose `time_scale` is not 1** as malformed: it
+sends nothing and says "This vault's software is not for this app.
+Contact VettID." A staging app accepts 1 and 24.
 
 **Where the app reads it.**
 
@@ -15598,7 +15641,14 @@ stricter answer winning. Two more are specified later:
   three on the production image, and (0.33.2) that it locks the counter's
   token, success and close records for 100 years. Staging uses a wait unit of 600 seconds
   and the production quiet period; one test runs in real time as far as
-  the 96-hour wait.
+  the 96-hour wait. (0.43.0, approved by the owner 2026-10-18;
+  STAGING-TIME-SCALE §5.4) From the release that ships `time_scale`,
+  the quiet period's lower bound of 259,200 s is a production rule:
+  staging's file states 259,200 / `time_scale` (10,800 s at 24) and the
+  check refuses any other value there; the wait unit stays 600 s and is
+  not divided again. A test asserts on the production image that
+  `time_scale` is 1 and that the enclave's scale is 1 whatever the file
+  says.
 - **Minimum app version.** The release constant `android_min_version_code`
   is checked against the version code in the key attestation at a
   recovery's register (and at enrollment and a transfer's `hs.init`);

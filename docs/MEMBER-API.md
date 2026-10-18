@@ -1,8 +1,18 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.7.1
+version: 2.8.0
 changelog:
+  - 2.8.0 (2026-10-18; **approved by the owner 2026-10-18**, with
+    VAULT-MESSAGING 0.43.0 and STAGING-TIME-SCALE 0.1.0; not built).
+    New "Staging time scale": a staging stack parameter `timeScale` (1
+    or 24) divides the start-over deletion's 24 h, the account site
+    PIN's 24 h lock and the recovery estimates (request + 24 h and
+    + 48 h), and the emails and account site texts say the scaled times
+    with "Staging: 1 day = 1 hour". The production stack has 1 in code
+    and the CDK app refuses another value. The daily jobs (a cancelled
+    account's 7 days, orphaned vaults, the 14- and 30-day removals) and
+    the release notices are not scaled
   - 2.7.1 (2026-10-15; with VAULT-HOST-PROTOCOL 0.1.11, P15, for the
     vault's attachments release "release A"; built in this repository,
     not deployed). No route, request or response changes. "Vault
@@ -1536,6 +1546,24 @@ Not built yet: the email when a release's key has been deleted (D + 30)
 and the deletion of the stored objects of vaults still sealed to a
 deleted key (D + 37), which needs the cleanup role in the data bucket's
 policy (VAULT-RELEASES §3.5, §8.2).
+
+### Staging time scale (2.8.0; approved by the owner 2026-10-18)
+
+*STAGING-TIME-SCALE §5.3; VAULT-MESSAGING 0.43.0 §11.10.8.* The staging
+stack takes a parameter `timeScale`, 1 or 24, which reaches the
+function as `TIME_SCALE`; the function uses it only when its stage is
+`staging`. The production stack is built with 1 in code, and the CDK
+app refuses to synthesise it with any other value. At 24 the API
+divides by it, when each starts: the start-over deletion's 24 hours
+(`deletes_at`, "Vault deletion: start over"), the account site PIN's
+24-hour lock (the day over which failures are counted is unchanged),
+and the recovery estimates of `POST /api/vault/recovery` (request + 1 h
+and + 2 h, still `earliest` until the enclave's own times arrive).
+Emails and account site texts take every scaled duration from the same
+number and, on staging, add "Staging: 1 day = 1 hour". Not scaled: the
+daily jobs ("Retention": a cancelled account's 7 days, orphaned vaults,
+the 14- and 30-day removals), the release notices and the rate limits.
+A timer started before the parameter changed keeps its time.
 
 ### Vault recovery (VAULT-MESSAGING §11.11; from release R also §11.14)
 

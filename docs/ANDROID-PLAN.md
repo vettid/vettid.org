@@ -1,9 +1,17 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.43
-date: 2026-10-17
+version: 0.1.44
+date: 2026-10-18
 changelog:
+  - 0.1.44: **approved by the owner 2026-10-18** (STAGING-TIME-SCALE 0.1.0,
+    VAULT-MESSAGING 0.43.0). New §4 "Staging time scale": the app reads
+    `time_scale` from the descriptor and the transfer bundle, stores it
+    per vault, divides its own waits by it (the owner check's early
+    warning, replaced records' 7 days, the old phone's 7 days, the
+    7-day unreachable screen, the update banner's 24 h), shows the
+    scaled times and "Staging: 1 day = 1 hour" in staging builds, and
+    in production builds refuses any value other than 1
   - 0.1.43: approved by the owner 2026-10-17, texts as drafted (owner decisions of
     2026-10-17; VAULT-MESSAGING 0.36.0). §4 "Recovery and unlock from
     release R": the phone key's secret gets 32 fresh random bytes per
@@ -1619,6 +1627,33 @@ vault without it, part 1 applies unchanged.
   | Notification (Security channel) and the unlock screen, after `vault.locking{reason: "idle"}` | "Your vault locked itself" / "You hadn't checked in for <N> days, so your vault locked. Unlock it with your PIN to carry on. New messages wait for up to 14 days." |
   | History | "Vault locked itself (not checked in)" for `vault.locked` with `ref` `idle` |
   | Settings, under the choice | "If you don't pass the daily check for this long, your vault locks itself and stops receiving until you unlock it." |
+
+### Staging time scale (0.1.44)
+
+*For the owner's approval (STAGING-TIME-SCALE §5.2; VAULT-MESSAGING
+0.43.0 §11.10.8, §11.10.9). Not built.*
+
+- **Learning it.** The app reads `time_scale` from the descriptor of its
+  vault's routed instance, with the capabilities, and from a transfer
+  bundle; absent means 1. It stores it per vault in `account.bin`.
+  **A production build refuses any value other than 1**: it sends
+  nothing to that instance and shows "This vault's software is not for
+  this app. Contact VettID." A staging build accepts 1 and 24.
+- **The app's own waits** are divided by it when each starts, and the
+  absolute time is kept: the owner check's early warning (1 h before
+  the deadline), replaced records' deletion (7 days), the old phone's
+  keys after a transfer (7 days after the approval), the screen for a
+  vault unreachable for 7 days (vettid-android #142), and the update
+  banner's dismissal (24 h). A timer started before the app knew the
+  scale keeps its time. Rate limits and retries (the push registration
+  stop of 24 h) are not scaled.
+- **Texts** compute every such duration from seconds ("in 3 hours",
+  "for at most 7 hours", "You hadn't checked in for 7 hours"); none
+  hard-codes "24 hours" or "7 days" for a scaled wait. Settings keep
+  their real units and show both ("24 hours (staging: 1 hour)").
+  Staging builds add a small "Staging: 1 day = 1 hour" where a scaled
+  wait is shown: the owner check, the idle lock, recovery, the old
+  phone's screen and Settings → Security.
 
 ### Photo attachments (0.1.39)
 
