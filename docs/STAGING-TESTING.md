@@ -61,10 +61,15 @@ used: every account on staging that a test touches is a test member.
      Follow the site's steps and accept the membership terms.
   - Always pass `--match` (and `--subject` when needed) to `link`: one
     address gets several mails in a row (RUNBOOK "Test mail").
-- **Reading the mail** needs the AWS profile `vault-staging-test-mail`
-  (the read-only role on the test mail bucket) and a vettid.org
-  checkout with its packages installed. The owner signs in
-  (`aws sso login --profile vault-staging`) on the machine that runs it.
+- **Reading the mail** needs a vettid.org checkout with its packages
+  installed and the AWS profile `vault-staging-test-mail`. On the owner's
+  Linux machine that profile is the read-only role reached from the
+  owner's staging sign-in. **On any other machine (the Mac)** it is a
+  separate AWS Identity Center user that has only one permission set,
+  which can list and read the test-mail bucket's `inbound/` and nothing
+  else; the owner signs it in there. Never sign another machine in with
+  the owner's staging administrator profile (`vault-staging`): an SSO
+  sign-in can obtain every role its user is assigned.
 - **Record** each test member (address, phone, PIN, password) in a
   private file on that machine only. A test member's PIN and password
   are test data, but they are never posted on GitHub.
