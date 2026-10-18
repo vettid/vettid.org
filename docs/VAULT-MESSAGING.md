@@ -26,9 +26,12 @@ related:
   - VAULT-HOST-PROTOCOL.md (0.1.12; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
-  - 0.42.0: normative once approved; **wording for the owner's
-    approval** (owner decision of 2026-10-18 to support all four ways,
-    AGENT-PLAN 0.1.5 AG13); **needs a vault release** (staging).
+  - 0.42.0: approved by the owner 2026-10-18 (all four ways,
+    AGENT-PLAN 0.1.5 AG13; every reveal asked on the phone; the proxy's
+    loopback listener accepted; settings per agent and item; `each:
+    false` kept, `true` by default and never for a shell or an
+    interpreter; the limits and lists as drafted); **needs a vault
+    release** (staging).
     **Ways to use a secret** (§10.11): per agent and included item the
     member allows a set of ways, `use` always and `run`, `proxy` and
     `reveal` each on its own (`leash.item.set`, `leash.item.list`,
@@ -8269,7 +8272,9 @@ agent (§10.12) is that agent's grant of scope `items.read`:
 - Owner decision (2026-10-03): an **included** item is read without a
   further approval within the rule's `per_hour` and `per_day`; past
   them, requests are referred to an app as for any grant (below), so that
-  `ask` means one prompt per item rather than one per read.
+  `ask` means one prompt per item rather than one per read. (0.42.0)
+  A reveal (`item.get`) is the exception: every one is referred
+  (below, "Ways to use a secret").
 - It never includes a `critical` item: critical items are never
   reachable by agents. `uses` counts the reads (`item.get` and
   `item.use`) of each included item; an item with no use left is no
@@ -8409,7 +8414,8 @@ item's settings allow for its task:
     last path element (the connector finds names only on its fixed
     search path, AGENT-PLAN §4.9). Empty means unbound. `each` (default
     `true`) refers every run to an app; it can be `false` only when
-    `programs` is not empty.
+    `programs` is not empty, and even then a run of a shell or an
+    interpreter is referred (below).
   - `proxy` is present exactly when `ways` holds `proxy`. `hosts` (1–8):
     lowercase DNS names, each with an optional `:port` (default 443);
     no wildcards, no IP literals. `header`: the HTTP field that carries
@@ -8451,9 +8457,14 @@ item's settings allow for its task:
   as refused. Otherwise each is decided as an `items.read` request
   (above: the windows and `uses` of every including rule count it),
   and in addition it is **referred** to an app: an `item.run` when
-  `each` is `true` or `programs` is empty; an `item.proxy` always. An
-  `item.get` is referred as before (past a window), so `ask` still means
-  one prompt per item, not per read (owner decision of 2026-10-03).
+  `each` is `true`, `programs` is empty, or `program` is a shell or an
+  interpreter (its last path element, without `.exe` and in any case,
+  is one of the `shell` names below or starts with `python`, `node`,
+  `perl`, `ruby`, `php` or `osascript`), so `each: false` never covers
+  those (owner decision of 2026-10-18); an `item.proxy` always; an
+  `item.get` always, every reveal asked on its own (owner decision of
+  2026-10-18; it replaces, for agents' reveals, the 2026-10-03 rule
+  that `ask` means one prompt per item, not per read).
 - `item.run{item_id, field_id, program, argv, cwd, how, name?, env?}`:
   `program` is the absolute path the connector resolved for `argv[0]`;
   `argv` 1–64 strings, each at most 4,096 bytes and 32,768 in all;
