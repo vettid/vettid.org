@@ -1,9 +1,22 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.44
+version: 0.1.45
 date: 2026-10-18
 changelog:
+  - 0.1.45: approved by the owner 2026-10-18 (vettid.org #338; VAULT-MESSAGING
+    0.44.0 §11.14.9 "A lost answer"). §4 "Recovery and unlock from release R": **a
+    lost answer to a PIN or password change** is decided, not repeated:
+    an unresolved-change marker in `account.bin` before the send, an
+    `exp` of 10 minutes by the vault's clock, the same request resent
+    while `exp` has not passed, `credential.version` to decide applied
+    (version + 1) or not applied (same version after `exp`), no other
+    change, owner check or credential operation while unresolved, no
+    `stale_credential` retry with typed secrets for these two types, and
+    an unlock that asks for the previous PIN, then for the new one only
+    after `device_secret`. Draft texts, shared with the iPhone app. Tests
+    follow. Today's app (master b54685f) shows a generic failure, and
+    the member's retry spends an owner-check or password attempt
   - 0.1.44: **approved by the owner 2026-10-18** (STAGING-TIME-SCALE 0.1.0,
     VAULT-MESSAGING 0.43.0). New §4 "Staging time scale": the app reads
     `time_scale` from the descriptor and the transfer bundle, stores it
@@ -2147,6 +2160,70 @@ about attempts, the app says first: "Changing only the PIN gives
 whoever is guessing ten new tries at the same password. Change your
 password too."
 
+**A lost answer to a PIN or password change** (0.1.45, for the owner's
+approval; VAULT-MESSAGING 0.44.0 §11.14.9 "A lost answer"). Today
+(master b54685f) `VaultDevice.requestWithId` sends the same id three
+times and then throws "no response", which the screen shows as a
+generic failure; the member's retry is a new request with the old blob,
+`Credential.credOp` turns the vault's `stale_credential` into a fetch
+and a resend with the same typed PIN or password, and after an applied
+change that resend is answered `bad_pin` or `bad_password` and counted.
+From this version:
+
+- **Before the send**, in the same atomic write of `account.bin` as the
+  PIN change's candidate (or alone, for a password change), an
+  `UnresolvedChange(type, innerId, sentVersion, exp)`; a write that is
+  refused stops the operation with the existing "could not save" text.
+  The request carries `exp` 10 minutes after the vault's clock as last
+  seen (the `ts` of the newest sealed answer plus the elapsed
+  `SystemClock.elapsedRealtime()`). The sent request (id and body) stays
+  in the view model's memory only.
+- **No answer** after the three sends: no failure is shown, the new
+  entries stay, and a `ChangeResolver` runs at once, at every
+  reconnection and at start-up: it resends the same request (same id
+  and body) while `exp` has not passed and asks `credential.version`;
+  version + 1 → `credential.get`, UTKs topped up, the candidate made
+  current, the success text; the same version in an answer stamped more
+  than 1 minute after `exp` → "not changed"; earlier → resend or ask
+  again (30 s doubling to 5 min); anything else → the candidate left to
+  the next unlock and that answer's own path. While a change is
+  unresolved, `changePin`, `changePassword`, `renewPhoneSecret`, the
+  owner check and every other `credOp` wait for the resolver first, and
+  are refused with the "still checking" text when it cannot reach the
+  vault.
+- **`stale_credential`** to `pin.change` or `credential.password.change`
+  is not retried by `credOp` with the typed secrets: it fetches the blob
+  and hands over to the resolver.
+- **An answer** decides by itself: success even when the confirmation
+  write fails (the marker then stays and the resolver or the next unlock
+  confirms); `bad_pin` / `bad_password` clear the entry that was wrong
+  and keep the new ones; the other refusals keep their texts.
+- **Unlock while a PIN change is unresolved**: the PIN screen asks for
+  the previous PIN and sends it with the current record; on
+  `device_secret` it asks for the new PIN before it tries the
+  candidate (the typed PIN is not reused). A password change does not
+  change the unlock; the resolver runs after it.
+- **Texts (draft, shared with the iPhone app)**:
+  - checking: "Your vault hasn't answered yet, so VettID is checking
+    whether your PIN was changed. Keep your new PIN at hand." (password:
+    "… whether your password was changed. Keep your new password at
+    hand.")
+  - applied: the usual success text.
+  - not applied: "Your PIN was not changed. You can try again." (password:
+    "Your password was not changed. You can try again.")
+  - unreachable: "VettID can't reach your vault right now, so it doesn't
+    know yet whether your PIN was changed. It will check as soon as it
+    can. Keep both your old and your new PIN at hand." (password: the
+    same with "password")
+  - another action while unresolved and unreachable: "VettID is still
+    checking whether your last change went through. Try again when your
+    vault can be reached."
+  - unlock, first step: "Enter your previous PIN" with "Your last PIN
+    change got no answer. If it went through, VettID will ask for your
+    new PIN next."
+  - unlock, after `device_secret`: "Your PIN change went through. Enter
+    your new PIN."
+
 **Passwords** (enrollment, password change, reset; VAULT-MESSAGING
 §11.14.7). The meter that scored length and character classes, and the
 25-entry list, are replaced:
@@ -2261,7 +2338,14 @@ by a new key and record), the earlier secret moved by `ok` but not by
 `bad_pin`, with its History entry and the new-secret prompt, a temporary
 refusal of `account.bin`'s Keystore key that changes nothing, a renew answer lost then an unlock, two lost renews then an
 unlock (newest first), a lost renew then a PIN change, an unlock with
-the current record that drops the vault's `next` part, every non-`ok`
+the current record that drops the vault's `next` part, (0.1.45) a lost
+PIN change and a lost password change decided by a resend of the same
+request (cached answer, no attempt counted), by `credential.version`
+(applied; not applied after `exp`; undecided before it), a lost answer
+then a restart, `stale_credential` not retried with the typed secrets,
+no owner check or credential operation sent while unresolved, the
+two-step unlock prompt (previous PIN; new PIN only after
+`device_secret`), every non-`ok`
 answer leaving the current record, the fifth change refused, replaced
 records deleted after 7 days and not later with the clock set back, the
 earlier secret tried only from its button, a temporary Keystore error

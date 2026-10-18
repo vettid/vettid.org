@@ -1,9 +1,17 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.2
+version: 0.1.3
 date: 2026-10-18
 changelog:
+  - 0.1.3: approved by the owner 2026-10-18 (vettid.org #338; VAULT-MESSAGING
+    0.44.0 §11.14.9 "A lost answer"). §6.3 gains **a lost answer to a PIN or password
+    change**, as on Android (ANDROID-PLAN 0.1.45): the change is decided
+    by a resend of the same request and `credential.version`, not
+    repeated; it replaces the behaviour iOS chose before a rule existed
+    (#338), whose "lock and unlock with the new PIN" could spend an
+    attempt when the change had not applied. The texts are Android's
+    (§14). I1 tests follow
   - 0.1.2: **approved by the owner 2026-10-18** (STAGING-TIME-SCALE 0.1.0,
     VAULT-MESSAGING 0.43.0). §6.6: the staging time scale, as on
     Android (ANDROID-PLAN 0.1.44 §4 "Staging time scale"): `time_scale`
@@ -427,6 +435,28 @@ Public keys are SEC1 uncompressed (`x963Representation` in CryptoKit,
   2. A **retry** of the same request reuses its record. A new `E` is
      made only for a new operation the member starts; an earlier
      unconfirmed record stays a candidate.
+     (0.1.3) A lost answer to `pin.change` or
+     `credential.password.change` is decided, not repeated, as
+     VAULT-MESSAGING 0.44.0 §11.14.9 "A lost answer" says and as on
+     Android (ANDROID-PLAN 0.1.45, "A lost answer to a PIN or password
+     change"): an unresolved-change marker (type, inner id, blob version,
+     `exp`; no secret) in the same atomic write as the candidate; an
+     `exp` of 10 minutes by the vault's clock; after no answer, no
+     failure shown, the new entries kept, the same request (same id and
+     body, kept in memory only) resent while `exp` has not passed, and
+     `credential.version` asked: version + 1 is applied (blob fetched,
+     candidate made current), the same version after `exp` is not
+     applied; nothing else credential-bearing (no new change, no owner
+     check, no other credential operation) is sent while unresolved; a
+     `stale_credential` to these two types is not retried with the typed
+     secrets; and while the vault is locked the unlock asks for the
+     previous PIN, then for the new PIN only after `device_secret`. This
+     replaces the behaviour chosen before the rule (#338): its "lock and
+     unlock with the new PIN" costs an attempt when the change did not
+     apply, and its other parts (keep the entries, no second send while
+     one may be in flight, `bad_pin` / `bad_password` clear the entry,
+     an `epoch_advanced` whose local write fails is still success) stay.
+     The texts are Android's, not `ios_` drafts (§14).
   3. A candidate becomes current on its operation's answer, or when an
      unlock answered `device_secret` with the current record is tried
      with the candidates, newest first, and one gets `ok`, `bad_pin` or
@@ -757,7 +787,7 @@ I2 #36, I3 #37, I4/P/later #38.
 | I1.1 | Relay client (HTTP, WebSocket and long-poll collect, ack, blobs, claims) and member API client | RELAY-PROTOCOL §6; MEMBER-API "Vault (alternate channel)" | `core/relay/*`, `core/altchan/MemberApiClient.kt`, `MemberAuth.kt` | Tests against `URLProtocol` fakes for every error of RELAY-PROTOCOL §7 |
 | I1.2 | Vault client: typed §10 calls, dedupe, outbox, sync events; `FakeVault` | §8, §10.1–§10.3 | `core/vault/*`, `core/testing/…/FakeVault.kt` | Unit tests per call; retry and dedupe as §8.2/§8.6 |
 | I1.3 | `VettIDTesting`: the TEST iOS attester (Swift port of vettid-vault `internal/enclavetest/devattest.go`: TEST Apple CA from `TestKey(P-384, 0x51)` (root) and `TestKey(P-384, 0x52)` (intermediate), as Android ports `TestKey` for its TEST CA, App ID `TESTTEAM00.com.vettid.app`; certificates with `swift-certificates`, test targets only), dev stack helpers and a runner script | §11.7 | `core/testing/…/TestAndroidAttester.kt`, `DevStack.kt` | **A2-equivalent**: an XCTest on the simulator enrolls a vault on the dev stack, unlocks, and exchanges a message with the `vaultctl` peer |
-| I1.4 | `VettIDKeys`: Secure Enclave app key, seed wrapping, encrypted file store, the real App Attest attester, the phone key of ID9, the "keys usable" check | §11.7, §11.12.2, §11.14.1; §6.1–§6.3 | `core/keystore/*`, `core/data/…/KeystoreFileStore.kt`, `PhoneSecrets.kt`, `core/altchan/…/Attester.kt` | iPhone tests: the app key and the seed keys sign and agree with the phone locked (after first unlock); the phone key's ECDH fails while the screen is locked and works once it is unlocked; a passcode change, and turning the passcode off, keep the phone key; a deleted key is detected as unusable; after removing and reinstalling the app, the first-run cleanup removes the keychain items and the old phone key is not used; the iPhone locked during a request (and a start before first unlock) gives "Unlock your iPhone" and a retry, never the "no longer holds the keys" path, with every key and record kept, and the typed PIN dropped and asked for again; a launch before first unlock (a background launch after a reboot) deletes nothing in the first-run cleanup; a lookup during which protected data goes away is not "missing"; Release and Staging archives contain no software `PhoneSecretSource` (release check). Unit tests (software source) for every lost-answer case of §6.3: a renew's answer lost then an unlock; a renew's answer lost then a retry; two renews with the first answer lost; a crash between storing the record and sending; a fifth change while four candidates are unconfirmed is refused before sending and no candidate is dropped; a replaced record kept 7 days after the confirmation and deleted then (and at a wipe), not extended by a clock set back; the earlier-secret step only from the member's tap, moving back only on `ok` or `transfer_incomplete`, not on `bad_pin`, with the History entry and the new-secret prompt after `ok`; after each, the vault (the Go reference client's rules, or a fake that follows `vault/opendek.go`) is reachable. App Attest attestation verifies with vettid-vault's `devattest` against Apple's root in a test harness (VA1). **Merges only after VAULT-MESSAGING 0.35.0 (ID9, approved 2026-10-17) is on `master`** |
+| I1.4 | `VettIDKeys`: Secure Enclave app key, seed wrapping, encrypted file store, the real App Attest attester, the phone key of ID9, the "keys usable" check | §11.7, §11.12.2, §11.14.1; §6.1–§6.3 | `core/keystore/*`, `core/data/…/KeystoreFileStore.kt`, `PhoneSecrets.kt`, `core/altchan/…/Attester.kt` | iPhone tests: the app key and the seed keys sign and agree with the phone locked (after first unlock); the phone key's ECDH fails while the screen is locked and works once it is unlocked; a passcode change, and turning the passcode off, keep the phone key; a deleted key is detected as unusable; after removing and reinstalling the app, the first-run cleanup removes the keychain items and the old phone key is not used; the iPhone locked during a request (and a start before first unlock) gives "Unlock your iPhone" and a retry, never the "no longer holds the keys" path, with every key and record kept, and the typed PIN dropped and asked for again; a launch before first unlock (a background launch after a reboot) deletes nothing in the first-run cleanup; a lookup during which protected data goes away is not "missing"; Release and Staging archives contain no software `PhoneSecretSource` (release check). Unit tests (software source) for every lost-answer case of §6.3: a renew's answer lost then an unlock; a renew's answer lost then a retry; (0.1.3) a lost `pin.change` and a lost `credential.password.change` decided by a resend of the same request and by `credential.version` (applied; not applied after `exp`; undecided before), then after a restart, with no owner check or credential operation sent while unresolved and the two-step unlock prompt; two renews with the first answer lost; a crash between storing the record and sending; a fifth change while four candidates are unconfirmed is refused before sending and no candidate is dropped; a replaced record kept 7 days after the confirmation and deleted then (and at a wipe), not extended by a clock set back; the earlier-secret step only from the member's tap, moving back only on `ok` or `transfer_incomplete`, not on `bad_pin`, with the History entry and the new-secret prompt after `ok`; after each, the vault (the Go reference client's rules, or a fake that follows `vault/opendek.go`) is reachable. App Attest attestation verifies with vettid-vault's `devattest` against Apple's root in a test harness (VA1). **Merges only after VAULT-MESSAGING 0.35.0 (ID9, approved 2026-10-17) is on `master`** |
 | I1.5 | Secure input and capture protection: keypad, secret fields, keyboard refusal, the three protections of §6.4, backup exclusion | §6.4, §6.5 | `core/ui/…/Autofill.kt`, `SecretKeyboard.kt`, `SecureWindow.kt`, `core/data/…/ScreenshotAllowance.kt` | iPhone: no AutoFill bar or save prompt on any secret screen; a third-party keyboard is not offered; switcher shows the cover; recording hides content |
 | I1.6 | Onboarding: setup code by QR, typed or Universal Link; PIN; credential password; enroll; first unlock; Finish setup | §11.3, §11.12.1, §11.14.1, §11.14.7, §3.5.5; ENROLLMENT-CODES §3–§4 | `feature/onboarding/…/OnboardingScreens.kt`, `OnboardingViewModel.kt`, `core/altchan/…/AltChannelFlow.kt`, `SetupCode.kt`, `core/data/…/account/SetupLinkInbox.kt`, `FinishSetupGate.kt` | Screen-catalog entries for every state; ID8's refusal for a pre-R descriptor |
 | I1.7 | Unlock, owner check and held screen, lock (VAULT-LOCK as Android implements it), app lock, local wipe rules | §3.6, §11.4, §11.8, §12, VAULT-LOCK §3–§4 (normative in §11.5 and the "release L" rules) | `feature/onboarding/…/UnlockScreen.kt`, `OwnerCheckScreen.kt`, `core/data/…/vault/OwnerCheck*.kt`, `Lock*.kt`, `HolderWatch.kt`, `RefusalWatch.kt`, `wipe/LocalWipe.kt`, `lock/AppLock.kt` | The owner-check tests of ANDROID-PLAN §6 item 9 with the dev stack's clock; wrong PIN, wrong password, ten-failure lock; lock pending and confirmed |
@@ -977,6 +1007,9 @@ it may open vettid.org issues when it finds what is needed.
 ## 14. Draft texts (iOS-only)
 
 Every other text is the Android app's.
+(0.1.3) That includes the lost-answer texts of a PIN or password
+change (ANDROID-PLAN 0.1.45); the draft `ios_` texts go once they are
+approved.
 
 - **No secure hardware / App Attest unsupported**: "This iPhone can't
   keep your vault's keys in its secure hardware, so VettID can't set up
