@@ -4,7 +4,7 @@ status: approved (owner, 2026-10-17)
 version: 0.1.4
 date: 2026-10-18
 changelog:
-  - 0.1.4: for the owner's approval (VAULT-MESSAGING 0.45.0
+  - 0.1.4: approved by the owner 2026-10-18 (VAULT-MESSAGING 0.45.0
     §11.14.9 "A lost answer"; ANDROID-PLAN 0.1.46). §6.3's lost-answer
     paragraph follows the corrections: nothing else in flight when a
     change is sent; the gate refuses at once; release updates refused

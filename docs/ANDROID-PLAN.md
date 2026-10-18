@@ -4,7 +4,7 @@ status: draft
 version: 0.1.46
 date: 2026-10-18
 changelog:
-  - 0.1.46: for the owner's approval (VAULT-MESSAGING 0.45.0
+  - 0.1.46: approved by the owner 2026-10-18 (VAULT-MESSAGING 0.45.0
     §11.14.9 "A lost answer"). §4 "A lost answer to a PIN or password
     change", corrected and completed:
     - a change is sent only with no credential operation in the outbox
@@ -2247,7 +2247,7 @@ From this version:
   - unlock, after `device_secret`: "Your PIN change went through. Enter
     your new PIN."
 
-(0.1.46, for the owner's approval; VAULT-MESSAGING 0.45.0) In addition:
+(0.1.46, approved by the owner 2026-10-18; VAULT-MESSAGING 0.45.0) In addition:
 
 - **Nothing else in flight.** Before `UnresolvedChange` is stored, the
   outbox holds no entry of a credential type and no credential request
