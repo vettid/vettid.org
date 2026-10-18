@@ -39,10 +39,10 @@ changelog:
     unlinked agent's numbers are not reused, and a re-paired agent's
     start from the vault's current value. Clarified: an agent takes the
     end of a hold only from a `vault.status` that is not held, never
-    from `leash.grant.updated` (§3.6.3). **Proposed, to be struck if
-    not wanted**: `vault.status` to a desktop or agent also returns
-    `session`, the caller's own current access session or `null`
-    (§10.2, §6.8). Not built yet in vettid-vault
+    from `leash.grant.updated` (§3.6.3). **The device's own session**
+    (owner decision of 2026-10-18): `vault.status` to a desktop or
+    agent also returns `session`, the caller's own current access
+    session or `null` (§10.2, §6.8). Not built yet in vettid-vault
   - 0.40.0: approved by the owner 2026-10-17 (the owner's answers to
     AGENT-PLAN §7.3 Q3–Q5). **A bound on access-session prompts**
     (Q3): the vault accepts at most one `device.session.request` per
@@ -4075,7 +4075,7 @@ its end does not end the E2E session or the pairing.) Apps need none.
 session together with the pairing (§10.3). A grant replaces the device's
 current access session, so a request made within a session renews it.
 
-(0.41.0, proposed) **A device's own session.** `vault.status` to a
+(0.41.0) **A device's own session.** `vault.status` to a
 desktop or agent also returns `session: {session_id, expires_at}` for
 the calling device's own current access session, or `session: null`
 when it has none (§10.2). It never includes another device's session.
@@ -4930,7 +4930,7 @@ an answer to an unknown or expired id is dropped.
 |---|---|---|
 | `vault.enrolled` | — | §11.3 |
 | `vault.enroll.confirm` (app) | `{}` | `{}` |
-| `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; 0.29.0, release L: also `unlock_id` (to the app and desktops, not to agents or a recovering app) and, inside `owner_check` for the app and desktops, `idle_lock_at` (RFC 3339: when the vault will lock itself if no check is passed, §3.6.8; absent for a vault without a credential); `owner_check` (0.13.0) is `{state: "ok" \| "due" \| "held", deadline, interval_seconds, failures, hold, hold_off_until?, waiting?}` to apps and desktops and `{state}` to agents (§3.6, §3.6.7). `waiting` (0.19.0) is `{messages, requests, calls, other}`, the counts of `vault.held` since the deadline (§3.6.3), present while the state is `due` or `held` for a device that receives `vault.held` (the app; desktops with an access session while `held`) and absent otherwise. (0.32.0, release A) To the app and desktops also `attachments: {count, bytes, max_count, max_bytes}`: the stored attachments, their bytes counted as for `attachment_storage`, and the two bounds (§10.5.1). A recovering app (§11.11.5) gets only `{vault_id, state_seq, header_seq}` (0.16.0): nothing about the vault's devices, connections or owner check before it has proved the credential password. (0.33.0, release R) To the app also `recovery: {state, attempts, present_recorded_at, counter}`, to desktops `recovery: {state}` (§11.14.11). (0.41.0, proposed) To desktops and agents also `session: {session_id, expires_at} \| null`: the calling device's own current access session, never another device's (§6.8) |
+| `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; 0.29.0, release L: also `unlock_id` (to the app and desktops, not to agents or a recovering app) and, inside `owner_check` for the app and desktops, `idle_lock_at` (RFC 3339: when the vault will lock itself if no check is passed, §3.6.8; absent for a vault without a credential); `owner_check` (0.13.0) is `{state: "ok" \| "due" \| "held", deadline, interval_seconds, failures, hold, hold_off_until?, waiting?}` to apps and desktops and `{state}` to agents (§3.6, §3.6.7). `waiting` (0.19.0) is `{messages, requests, calls, other}`, the counts of `vault.held` since the deadline (§3.6.3), present while the state is `due` or `held` for a device that receives `vault.held` (the app; desktops with an access session while `held`) and absent otherwise. (0.32.0, release A) To the app and desktops also `attachments: {count, bytes, max_count, max_bytes}`: the stored attachments, their bytes counted as for `attachment_storage`, and the two bounds (§10.5.1). A recovering app (§11.11.5) gets only `{vault_id, state_seq, header_seq}` (0.16.0): nothing about the vault's devices, connections or owner check before it has proved the credential password. (0.33.0, release R) To the app also `recovery: {state, attempts, present_recorded_at, counter}`, to desktops `recovery: {state}` (§11.14.11). (0.41.0) To desktops and agents also `session: {session_id, expires_at} \| null`: the calling device's own current access session, never another device's (§6.8) |
 | `vault.owner-check` (app: the holder) | `{credential, utk_id, sealed{pin, password, hold?, hold_off_until?}}` | `{credential, version, utks, deadline, interval_seconds, hold, hold_off_until?}` (§3.6.1, §3.6.7); (0.33.0, release R) also `recovery: {state, present_recorded}` (§11.14.5); `bad_pin`, `bad_password`, `backoff` (body `{retry_after}`, §10.1), `utk_invalid`, `stale_credential`, `credential_frozen`, `rotation_required`, `forbidden` (not the holder), `bad_request` (a PIN that is not 6–32 digits) |
 | `vault.held` (V→D, to the app and desktops in an access session) | — | `{deadline, waiting: {messages, requests, calls, other}}` (§3.6.3); 0.29.0, release L: also `idle_lock_at` (§3.6.8) |
 | `vault.lock` (app, desktop) | `{}`; 0.29.0, release L: `{unlock_id}` ("Locks", below) | `{}`; then `vault.locking`. 0.29.0, release L: `stale_lock` when `unlock_id` does not name the current unlock (nothing is done); `bad_request` when it is not 32 lowercase hex characters |
