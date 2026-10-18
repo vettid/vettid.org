@@ -1,9 +1,22 @@
 ---
 title: AGENT-PLAN
 status: draft
-version: 0.1.5
+version: 0.1.6
 date: 2026-10-18
 changelog:
+  - 0.1.6: owner decisions of 2026-10-18 on signing. A5.2 and the macOS
+    half of A5.3 resume; Windows Authenticode waits until the business
+    entity exists. Release tags are signed (the owner's SSH key) and the
+    release workflow refuses a tag GitHub cannot verify. A5.2 is one
+    command on the owner's Mac (`scripts/sign-release`): check the tag,
+    rebuild and compare, build, sign, notarize and staple
+    `vettid-agent.app`, sign `SHA256SUMS` (an SSH signature, namespace
+    `vettid-agent-release`, which carries its algorithm id), upload and
+    publish after confirmation; no key ever reaches CI (AG4). The
+    release key and the tag key are on the owner's YubiKey. The Apple
+    account is the owner's individual Developer account. The public key
+    is published on vettid.org when ready (owner OK, 2026-10-18).
+    A5.2, A5.3, "What blocks what", §8 items 2–4.
   - 0.1.5: approved by the owner 2026-10-18, with every reveal asked
     on the phone and `each: false` never covering a shell or an
     interpreter. Owner decision of 2026-10-18: **four ways to use a secret**
@@ -817,8 +830,8 @@ as an issue in vettid-agent, opened in A0.1.
 | PR | Contents | Acceptance |
 |---|---|---|
 | A5.1 | Reproducible release build script and workflow (unsigned artifacts, `SHA256SUMS`), and a `verify-reproducible` script | Two clean builds produce identical hashes on Linux amd64 and arm64 |
-| A5.2 | Signing procedure for the owner: the release key's signature over `SHA256SUMS` (algorithm id in the format, AG4), verification instructions and the public key's place on vettid.org | The owner signs a release candidate offline; the verification instructions succeed on a clean machine |
-| A5.3 | macOS notarization and Windows Authenticode steps, run by the owner with the owner's own keys | Gatekeeper accepts the notarized binary; a signed Windows binary runs under Smart App Control in enforcement mode (#5 closed) |
+| A5.2 | Signing in one command for the owner (owner decision, 2026-10-18): signed `v*` tags, refused by the release workflow unless GitHub verifies them; `scripts/sign-release` on the owner's machine checks the tag, rebuilds the release and compares it with the draft, signs `SHA256SUMS` (which names the tag and commit) with `ssh-keygen -Y sign -n vettid-agent-release` and the release key on the owner's YubiKey, verifies the signature against the repository's `allowed_signers`, uploads and publishes after confirmation; `scripts/verify-release` and instructions for users; a CI check of the signature on publish; the public key in the repository and on vettid.org | The owner signs a release candidate with one command; a published release without a valid signature fails the check; the verification instructions succeed on a clean machine |
+| A5.3 | macOS: `vettid-agent.app` built, signed with the owner's Developer ID (individual account), notarized and stapled by `scripts/sign-release` on the owner's Mac, added to `SHA256SUMS` (not reproducible across machines; vouched for by the Developer ID and the release key). Windows Authenticode **waits until the business entity exists** (owner, 2026-10-18) | Gatekeeper accepts the notarized app; the A1.5 round trip passes on the owner's Mac. Later: a signed Windows binary runs under Smart App Control in enforcement mode (#5 closed) |
 
 ### A6 — Staging with the Android app (after AA1–AA5, §7.2)
 
@@ -841,7 +854,8 @@ deny referred requests in Approvals; see the agent's activity in History
 | A1.5's manual round trip | the signed app bundle of A5 (the owner's App ID and Developer ID provisioning profile, §8 item 3) |
 | A3.5 | AV7 in a staging release |
 | A3.7, A3.8, A3.9 | AV9 (and AV10 for A3.8, AV11 for A3.9) in a staging release; AA7 and AA8 for the staging checklist (A6) |
-| A5.2, A5.3 | AG4 and the owner's keys (§8); deferred by the owner (2026-10-18), still planned as written |
+| A5.2, A5.3 (macOS) | the owner's YubiKey keys and Apple Developer ID (§8 items 2–3) |
+| A5.3 (Windows) | the business entity and its Authenticode certificate (§8 item 4) |
 | A6 | Android AA1–AA5 on staging (§7.2), ANDROID-PLAN's "Devices & agents" approved |
 | Production | a production release whose channel lists `leash` (§11.10.8, STAGING-DEVELOPMENT-PLAN §2.4) and the Android work in a production app |
 
@@ -917,15 +931,19 @@ Android; nothing here blocks on iOS.
 
 1. **Decisions**: all of §2 decided or accepted (2026-10-17); the §7.3 questions answered (2026-10-17).
 2. **Release signing key** (AG4): generated and held offline by the
-   owner; its public key published on vettid.org. The implementing agent
-   never creates, reads or asks for signing material.
+   owner on a YubiKey (owner decision, 2026-10-18; the tag-signing key
+   too); its public key in vettid-agent's `allowed_signers` and published
+   on vettid.org. The implementing agent never creates, reads or asks
+   for signing material.
 3. **Apple**: a Developer ID Application certificate in the owner's team
    for the connector, an App ID and a Developer ID provisioning profile
    that authorises its `keychain-access-groups` entitlement (§4.2), and
-   notarization credentials, used on the owner's Mac (A5.3; deferred by
-   the owner, 2026-10-18).
+   notarization credentials (a `notarytool` keychain profile), used on
+   the owner's Mac (A5.3). The owner's individual Developer account;
+   the team ID is passed to `scripts/sign-release`, not stored in CI.
 4. **Windows**: an Authenticode code-signing certificate whose key is on
-   a hardware token the owner holds (A5.3).
+   a hardware token the owner holds (A5.3), once the business entity
+   exists (owner decision, 2026-10-18).
 5. **Staging**: a staging test account and the Android staging app on a
    test phone (A6); real member data is never used.
 6. **GitHub**: the phase issues; branch protection on `main` with the
