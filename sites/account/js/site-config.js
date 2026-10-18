@@ -62,19 +62,6 @@ export function scaleText(text, scale) {
   return out.replace(/\b1 (hour|minute) are over/g, '1 $1 is over');
 }
 
-/**
- * The site config, or, if /config.json has not answered within `ms`, the
- * defaults (scale 1: the production texts), so that a page never waits on it
- * without a bound.
- */
-export function siteConfigWithin(ms = 2500) {
-  let timer;
-  const fallback = new Promise((resolve) => {
-    timer = setTimeout(() => resolve(normalize(null)), ms);
-  });
-  return Promise.race([siteConfig(), fallback]).finally(() => clearTimeout(timer));
-}
-
 export function siteConfig() {
   pending ??= fetch('/config.json', { credentials: 'same-origin', cache: 'no-cache' })
     .then((r) => (r.ok ? r.json() : null))

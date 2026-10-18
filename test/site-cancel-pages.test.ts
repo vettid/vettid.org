@@ -110,6 +110,17 @@ describe.each(Object.keys(PAGES) as Array<keyof typeof PAGES>)('%s', (file) => {
     expect(cardText()).toContain(p.goneScaled);
   });
 
+  test('staging at 24, but the member clicked before the config arrived: not drawn again', async () => {
+    let answer: (v: unknown) => void = () => {};
+    loadPage(file, () => new Promise((r) => { answer = r; }));
+    publicPost.mockReturnValue(new Promise(() => {})); // the cancel is still on its way
+    void button().on.click();
+    answer({ ok: true, json: () => Promise.resolve({ stage: 'staging', time_scale: 24 }) });
+    await flush();
+    expect(cardText()).toContain(p.prod);
+    expect(cardText()).not.toContain('Staging');
+  });
+
   test('another non-prod stage with 24 is not scaled (staging only)', async () => {
     loadPage(file, () => json({ stage: 'dev', time_scale: 24 }));
     await flush();
@@ -118,26 +129,17 @@ describe.each(Object.keys(PAGES) as Array<keyof typeof PAGES>)('%s', (file) => {
   });
 });
 
-describe('siteConfigWithin (the deletion and recovery pages)', () => {
-  const fresh = () => {
-    let m: any;
-    jest.isolateModules(() => { m = require('../sites/account/js/site-config.js'); });
-    return m;
-  };
-  afterEach(() => jest.useRealTimers());
-
-  test('a config that never answers: the defaults (scale 1) after 2.5 s', async () => {
-    jest.useFakeTimers();
-    (globalThis as any).location = { hostname: 'account.vettid.org' };
-    (globalThis as any).fetch = jest.fn(() => new Promise(() => {}));
-    const p = fresh().siteConfigWithin();
-    jest.advanceTimersByTime(2500);
-    await expect(p).resolves.toMatchObject({ stage: 'prod', timeScale: 1 });
-  });
-
-  test('a config that answers in time is used', async () => {
-    (globalThis as any).location = { hostname: 'account.staging.vettid.org' };
-    (globalThis as any).fetch = jest.fn(() => json({ stage: 'staging', time_scale: 24 }));
-    await expect(fresh().siteConfigWithin()).resolves.toMatchObject({ stage: 'staging', timeScale: 24 });
+describe('the deletion and recovery pages: /config.json never delays the status', () => {
+  const { readFileSync } = require('node:fs');
+  const { join } = require('node:path');
+  test.each(['deletion.js', 'recovery.js'])('%s reads the config (once, not awaited) before its first status fetch', (f) => {
+    const js: string = readFileSync(join(__dirname, '..', 'sites', 'account', 'js', f), 'utf8');
+    const load = js.slice(js.indexOf('async function load'), js.indexOf('\n}\n', js.indexOf('async function load')));
+    expect(load.indexOf('readConfig();')).toBeGreaterThan(0);
+    expect(load.indexOf('readConfig();')).toBeLessThan(load.indexOf("await get('/api/vault/status')"));
+    expect(load).not.toMatch(/await[^;\n]*(siteConfig|configOnce)/);
+    // Only a scale other than the current one (1) draws again: in production nothing changes.
+    expect(js).toContain('if (c.timeScale === scale) return;');
+    expect(js).toContain('configOnce ??= siteConfig()');
   });
 });

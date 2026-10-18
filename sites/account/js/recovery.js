@@ -29,7 +29,7 @@ import * as keys from './recovery-keys.js';
 import { LOCATOR_RE, SealError, cancelGoneOutcome, cancelNotFound, fromBase64, openSealedCode, qrPayload, toBase64, typedForm, typedRows } from './recovery-code.js';
 import { qrModules, qrSvg } from './qr.js';
 import * as ui from './ui.js';
-import { STAGING_NOTE, scaleText, siteConfigWithin } from './site-config.js';
+import { STAGING_NOTE, scaleText, siteConfig } from './site-config.js';
 import { dateTime, timeUntil } from './vault-text.js';
 
 ui.init();
@@ -50,7 +50,25 @@ let pollTimer = null;
 let tickTimer = null;
 let pollWhenVisible = false;
 let scale = 1; // the staging time scale (config.json; 1 in production)
-let configOnce = null; // the page's one bounded read of /config.json
+let configOnce = null; // the page's one read of /config.json
+let drawn = false; // load() has drawn the state at least once
+
+/**
+ * Reads /config.json once, alongside the first status fetch and never in its
+ * way: the page draws at scale 1 (the production texts). On staging at
+ * another scale, when the config answers, the lede is scaled and the state
+ * drawn again, unless the member is typing in it or the code is shown. In
+ * production (scale 1), or when the config fails or never answers, nothing
+ * changes.
+ */
+function readConfig() {
+  configOnce ??= siteConfig().then((c) => {
+    if (c.timeScale === scale) return;
+    scale = c.timeScale;
+    scaleLede();
+    if (drawn && document.activeElement?.tagName !== 'INPUT' && !codeShown) render();
+  });
+}
 
 /** A text with its durations scaled (unchanged at scale 1). */
 const t = (text) => scaleText(text, scale);
@@ -80,9 +98,7 @@ const recoveryVaultId = () => recovery?.vault_id ?? vault?.vault_id;
  */
 async function load({ focus } = {}) {
   clearTimers();
-  // At most 2.5 s for /config.json, once; without it the page shows the production texts.
-  scale = (await (configOnce ??= siteConfigWithin())).timeScale;
-  scaleLede();
+  readConfig();
   let fetched = null;
   try {
     const st = await get('/api/vault/status');
@@ -102,6 +118,7 @@ async function load({ focus } = {}) {
   if (canStore) await keys.prune(needsKey(recovery) ? recovery : null);
   await classify();
   render();
+  drawn = true;
   schedule();
   if (focus) $(focus)?.focus();
   return fetched;

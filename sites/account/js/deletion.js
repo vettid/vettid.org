@@ -16,7 +16,7 @@
 import { get, post } from './api.js';
 import { $, chip, el, fill } from './dom.js';
 import * as ui from './ui.js';
-import { STAGING_NOTE, scaleText, siteConfigWithin } from './site-config.js';
+import { STAGING_NOTE, scaleText, siteConfig } from './site-config.js';
 import { dateTime, servicePaused, timeUntil } from './vault-text.js';
 
 ui.init();
@@ -33,7 +33,25 @@ let tickTimer = null;
 let pollWhenVisible = false;
 let hadDeletion = false;
 let scale = 1; // the staging time scale (config.json; 1 in production)
-let configOnce = null; // the page's one bounded read of /config.json
+let configOnce = null; // the page's one read of /config.json
+let drawn = false; // load() has drawn the state at least once
+
+/**
+ * Reads /config.json once, alongside the first status fetch and never in its
+ * way: the page draws at scale 1 (the production texts). On staging at
+ * another scale, when the config answers, the lede is scaled and the state
+ * drawn again, unless the member is typing in it. In
+ * production (scale 1), or when the config fails or never answers, nothing
+ * changes.
+ */
+function readConfig() {
+  configOnce ??= siteConfig().then((c) => {
+    if (c.timeScale === scale) return;
+    scale = c.timeScale;
+    scaleLede();
+    if (drawn && document.activeElement?.tagName !== 'INPUT') render();
+  });
+}
 
 /** A text with its durations scaled (unchanged at scale 1). */
 const t = (text) => scaleText(text, scale);
@@ -50,9 +68,7 @@ function scaleLede() {
 
 async function load({ focus } = {}) {
   clearTimers();
-  // At most 2.5 s for /config.json, once; without it the page shows the production texts.
-  scale = (await (configOnce ??= siteConfigWithin())).timeScale;
-  scaleLede();
+  readConfig();
   try {
     status = await get('/api/vault/status');
     deletion = status?.vault ? (await get('/api/vault/deletion'))?.deletion ?? null : null;
@@ -62,6 +78,7 @@ async function load({ focus } = {}) {
   }
   if (deletion) hadDeletion = true;
   render();
+  drawn = true;
   schedule();
   if (focus) $(focus)?.focus();
 }
