@@ -4,7 +4,8 @@ status: draft
 version: 0.1.4
 date: 2026-10-18
 changelog:
-  - 0.1.4: owner decisions of 2026-10-18. A1.5: macOS uses the data
+  - 0.1.4: approved by the owner 2026-10-18. Owner decisions of
+    2026-10-18. A1.5: macOS uses the data
     protection keychain only (option A), so only the signed app bundle
     (A5) can use it; a bare or unsigned build uses the passphrase
     protector (AG3, §4.2, A1.5, "What blocks what"). A5.2 and A5.3 are
@@ -461,8 +462,10 @@ keeps its set and takes only fresher status statements from it (the
 vault sends the same set again with fresh statements, for example when
 a hold ends). A re-paired connector starts with new state, and the
 vault's numbers for it start at the vault's current value, not 0.
-Until the vault sends `grant_seq` (AV7), the connector takes each list
-or update as it comes.
+The connector needs a vault that sends `grant_seq` (AV7; owner
+decision of 2026-10-18: no fallback for older vaults): it ignores a
+list or update without one, so A3.5 is released only after AV7 is on
+staging.
 
 **Delegation checks** (owner decision, 2026-10-18; deliberate). Agents
 never get the member's credential key. The connector checks a
@@ -579,7 +582,7 @@ as an issue in vettid-agent, opened in A0.1.
 | A3.2 | `agent.request` (`catalog`, `item.get`, `item.use`) with `approval.waiting`, retries reusing the inner id, pending results kept 10 minutes (AG9), no retry after `forbidden` | Unit tests for allow, refer-then-approve, refer-then-deny, `approval_timeout`, `forbidden`, `owner_check_required`, locked vault |
 | A3.3 | `internal/mcp` and `vettid-agent mcp`: the five LEASH tools over stdio, the local rate limit, golden files; README section for configuring MCP clients | Golden files; an MCP client library test drives `tools/list` and every tool against a fake vault connection; a second `mcp` on the same state exits with "in use by another agent app"; nothing is written to standard output but MCP messages |
 | A3.4 | Dev-stack LEASH tests | **Exit A3 test**: with `vaultctl` as the app: a share rule for the agent (`share set -agent`, `ask`) → `leash.list_available` empty until the member approves the item → `leash.request_secret` returns the value; an `auto` rule within limits returns at once; past `per_hour` the request is referred and approved; `leash.execute_action` returns the HMAC the test computes; a critical item is never listed or readable; revoking the rule stops reads at once; a loop of refused requests suspends the connector and `leash.connection_info` shows it; `leash.agent.resume` restores it. **Hold step** (owner decision, 2026-10-18), against the real clock: set `owner_check.interval_seconds` to 3,600, wait for the deadline (about 65 minutes), see `owner_check_required`; a check and then a `vault.status` that is not held end it. Opt-in (`make devstack-hold-test`), not part of `make devstack-test`; no dev clock is added to the vault |
-| A3.5 | Grant-set sequence numbers (§4.5; after AV7): the highest `grant_seq` kept in the state file; a lower one ignored; an equal one gives only fresher statements | Unit tests: a list sent before a revocation and received after it does not bring the grant back; an equal number keeps the set and refreshes statements; a re-paired state starts with none; without `grant_seq`, each list applies as before |
+| A3.5 | Grant-set sequence numbers (§4.5; after AV7): the highest `grant_seq` kept in the state file; a lower one ignored; an equal one gives only fresher statements | Unit tests: a list sent before a revocation and received after it does not bring the grant back; an equal number keeps the set and refreshes statements; a re-paired state starts with none; a list or update without `grant_seq` is ignored |
 
 ### A4 — Delegable owner types (v1.1, after the owner confirms AG5)
 

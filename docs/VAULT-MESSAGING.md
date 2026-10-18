@@ -26,9 +26,9 @@ related:
   - VAULT-HOST-PROTOCOL.md (0.1.12; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
-  - 0.41.0: normative once approved; **wording for the owner's
-    approval** (owner decision of 2026-10-18 on the idea, AGENT-PLAN
-    0.1.4); **needs a vault release** (staging). **Grant-set sequence
+  - 0.41.0: approved by the owner 2026-10-18 (AGENT-PLAN 0.1.4: one
+    counter for the whole vault; no fallback for older vaults);
+    **needs a vault release** (staging). **Grant-set sequence
     numbers**: every change to an agent's grant set takes a new
     `grant_seq` from one counter in the vault's sealed state, never
     reset or reused; `leash.grant.updated` and an agent's
@@ -37,7 +37,8 @@ changelog:
     before a revocation cannot bring the grant back (§10.11, §8.4,
     §6.7 "Re-pairing"). Suspension and resumption take new numbers; an
     unlinked agent's numbers are not reused, and a re-paired agent's
-    start from the vault's current value. Clarified: an agent takes the
+    start from the vault's current value. An agent ignores a list or
+    update without `grant_seq` (no fallback). Clarified: an agent takes the
     end of a hold only from a `vault.status` that is not held, never
     from `leash.grant.updated` (§3.6.3). **The device's own session**
     (owner decision of 2026-10-18): `vault.status` to a desktop or
@@ -8576,8 +8577,9 @@ grant set carries a `grant_seq`:
   (§6.7): the set its pairing completes with takes the counter's next
   value, so its numbers start from the vault's current value, never
   from 0.
-- **Older vaults.** A vault before 0.41.0 sends no `grant_seq`; an
-  agent then takes each list or update as it comes.
+- **No fallback.** An agent built for 0.41.0 ignores a list or update
+  without `grant_seq`; it needs a vault of 0.41.0 or later (owner
+  decision of 2026-10-18).
 
 | Type | Request body | Response / event body |
 |---|---|---|
