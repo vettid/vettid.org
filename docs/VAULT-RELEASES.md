@@ -254,7 +254,7 @@ changelog:
     `3X25CJ86MV.com.vettid.app.staging`), which replaces the App ID
     constant in code. §3.4 C6: what pinning and changing it does to iOS
     vaults, and the release log line that says so
-  - 0.1.32 (**for the owner's approval**, with VAULT-MESSAGING 0.43.0
+  - 0.1.32 (**approved by the owner 2026-10-18**, with VAULT-MESSAGING 0.43.0
     and STAGING-TIME-SCALE 0.1.0). §5.2: the release constant
     `time_scale` (production exactly 1, staging 1 or 24), ignored by
     the code outside staging; on staging the quiet period is stated as
@@ -821,7 +821,7 @@ whose value is recorded in `measurements.json`):
 | `recovery_wait_unit_seconds`, `recovery_quiet_seconds` (0.1.28, release R) | 86,400 and 259,200 (staging: 600 and 259,200) | VAULT-MESSAGING 0.33.0 §11.14.6, §11.14.14 |
 | `recovery_offered` (0.1.28, release R) | `true`; `false` only for a production release that ships before the outside store (§12) | VAULT-MESSAGING 0.33.0 §11.14.13 |
 | `android_min_version_code` (0.1.28, release R) | the first app version code that implements release R | VAULT-MESSAGING 0.33.0 §11.14.14 |
-| `time_scale` (0.1.32; for the owner's approval) | **1**, and nothing else (staging: 24, or 1 for a real-time run) | VAULT-MESSAGING 0.43.0 §11.10.8; STAGING-TIME-SCALE |
+| `time_scale` (0.1.32; approved by the owner 2026-10-18) | **1**, and nothing else (staging: 24, or 1 for a real-time run) | VAULT-MESSAGING 0.43.0 §11.10.8; STAGING-TIME-SCALE |
 
 GrapheneOS verified-boot keys and vendor roots stay in `vms/pins` (code).
 Everything that defines a release is in the tagged tree, so
@@ -887,7 +887,7 @@ that names another channel's bucket or account. A test run on the
 production image itself asserts all three, as for `features`. The
 quiet period is the same on staging, so staging tests it in real time.
 
-**The staging time scale (0.1.32; for the owner's approval;
+**The staging time scale (0.1.32; approved by the owner 2026-10-18;
 STAGING-TIME-SCALE).** `time_scale` divides the waits of 1 hour or
 more that STAGING-TIME-SCALE §2.1 lists. The release build MUST refuse a
 `prod.json` whose `time_scale` is not exactly 1 (missing and

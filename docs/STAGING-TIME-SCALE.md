@@ -1,6 +1,6 @@
 ---
 title: STAGING-TIME-SCALE
-status: draft, for the owner's approval
+status: draft, approved by the owner 2026-10-18
 version: 0.1.0
 date: 2026-10-18
 owner: Al Liebl (Mesmer)
@@ -17,8 +17,8 @@ changelog:
   - 0.1.0: first draft, after the owner's request of 2026-10-18 ("for
     testing here on out, i'd like to make the testing windows shorter by
     using hours instead of days (e.g. need to wait 1 day = 1 hour in
-    staging)"). For the owner's approval: every choice in §6 is a
-    recommendation. Nothing here is built
+    staging)"). Approved by the owner 2026-10-18, with every choice in
+    §6 as recommended. Nothing here is built yet
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -263,7 +263,7 @@ window, the 120 s parent rule.
 An app or a member API without its row is safe: it uses real time,
 which is only longer than the vault's.
 
-## 6. Choices for the owner
+## 6. Choices (decided by the owner 2026-10-18: every recommendation)
 
 | # | Choice | Options | Recommendation |
 |---|---|---|---|

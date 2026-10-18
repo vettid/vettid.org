@@ -3,7 +3,7 @@ title: MEMBER-API
 status: v1 (Phase 2)
 version: 2.8.0
 changelog:
-  - 2.8.0 (2026-10-18; **for the owner's approval**, with
+  - 2.8.0 (2026-10-18; **approved by the owner 2026-10-18**, with
     VAULT-MESSAGING 0.43.0 and STAGING-TIME-SCALE 0.1.0; not built).
     New "Staging time scale": a staging stack parameter `timeScale` (1
     or 24) divides the start-over deletion's 24 h, the account site
@@ -1547,7 +1547,7 @@ and the deletion of the stored objects of vaults still sealed to a
 deleted key (D + 37), which needs the cleanup role in the data bucket's
 policy (VAULT-RELEASES §3.5, §8.2).
 
-### Staging time scale (2.8.0; for the owner's approval)
+### Staging time scale (2.8.0; approved by the owner 2026-10-18)
 
 *STAGING-TIME-SCALE §5.3; VAULT-MESSAGING 0.43.0 §11.10.8.* The staging
 stack takes a parameter `timeScale`, 1 or 24, which reaches the

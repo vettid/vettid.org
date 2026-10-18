@@ -4,7 +4,7 @@ status: draft
 version: 0.1.44
 date: 2026-10-18
 changelog:
-  - 0.1.44: **for the owner's approval** (STAGING-TIME-SCALE 0.1.0,
+  - 0.1.44: **approved by the owner 2026-10-18** (STAGING-TIME-SCALE 0.1.0,
     VAULT-MESSAGING 0.43.0). New §4 "Staging time scale": the app reads
     `time_scale` from the descriptor and the transfer bundle, stores it
     per vault, divides its own waits by it (the owner check's early

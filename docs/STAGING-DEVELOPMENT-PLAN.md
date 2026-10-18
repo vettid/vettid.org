@@ -24,7 +24,7 @@ changelog:
     application id) and the signer binding are in S10, which is
     published; §4, §5 row 1, §7 and §8 say what is now done. New
     §8.5, the S10 record. Nothing else in the plan changes
-  - 0.1.3: **for the owner's approval** (owner's request of
+  - 0.1.3: **approved by the owner 2026-10-18** (owner's request of
     2026-10-18). §2.1 rule 6: staging's waits run on a time scale, 1 day
     = 1 hour (STAGING-TIME-SCALE 0.1.0); production's scale is 1
 classification: public (no secrets; safe for github.com/vettid)
@@ -65,7 +65,7 @@ Each rule is a proposal. Those that need the owner's choice are in §6.
    (`retirement_window_days`, pinned in the image; production's is 30).
 5. Staging vaults are disposable, including the one on the owner's phone.
    Nothing kept only in a staging vault is safe.
-6. (0.1.3, for the owner's approval) **Staging's waits run on a time
+6. (0.1.3, approved by the owner 2026-10-18) **Staging's waits run on a time
    scale: 1 day = 1 hour** (STAGING-TIME-SCALE). The release constant
    `time_scale` is 24 on staging and exactly 1 in production; the waits
    of an hour or more that a tester waits through (the owner check, the

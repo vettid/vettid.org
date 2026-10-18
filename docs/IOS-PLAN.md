@@ -4,7 +4,7 @@ status: approved (owner, 2026-10-17)
 version: 0.1.2
 date: 2026-10-18
 changelog:
-  - 0.1.2: **for the owner's approval** (STAGING-TIME-SCALE 0.1.0,
+  - 0.1.2: **approved by the owner 2026-10-18** (STAGING-TIME-SCALE 0.1.0,
     VAULT-MESSAGING 0.43.0). §6.6: the staging time scale, as on
     Android (ANDROID-PLAN 0.1.44 §4 "Staging time scale"): `time_scale`
     from the descriptor and the transfer bundle, stored per vault, the
@@ -635,7 +635,7 @@ leaving the screen.
 - **Owner check early warning**: local notifications scheduled for 1 h
   before the deadline whenever the deadline is learned, cancelled on a
   check (ANDROID-PLAN §6 owner check, item 5). These work without APNs.
-- **Staging time scale** (0.1.2, for the owner's approval;
+- **Staging time scale** (0.1.2, approved by the owner 2026-10-18;
   STAGING-TIME-SCALE §5.2): as on Android (ANDROID-PLAN §4 "Staging
   time scale"). `time_scale` comes from the descriptor and a transfer
   bundle (VAULT-MESSAGING §11.10.9), is stored per vault, and divides
