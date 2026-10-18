@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.40.0
-date: 2026-10-17
+version: 0.41.0
+date: 2026-10-18
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -16,7 +16,7 @@ related:
   - MEMBER-API.md (2.7.1)
   - ANDROID-PLAN.md (0.1.43)
   - IOS-PLAN.md (0.1.1; §9.1 VA1–VA3)
-  - AGENT-PLAN.md (0.1.1; §7.3 Q3–Q5)
+  - AGENT-PLAN.md (0.1.4; §7.3 Q3–Q5; §4.5, AV7, AV8)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
@@ -26,6 +26,23 @@ related:
   - VAULT-HOST-PROTOCOL.md (0.1.12; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.41.0: normative once approved; **wording for the owner's
+    approval** (owner decision of 2026-10-18 on the idea, AGENT-PLAN
+    0.1.4); **needs a vault release** (staging). **Grant-set sequence
+    numbers**: every change to an agent's grant set takes a new
+    `grant_seq` from one counter in the vault's sealed state, never
+    reset or reused; `leash.grant.updated` and an agent's
+    `leash.grant.list` answer carry the `grant_seq` of the set they
+    describe, and an agent ignores a lower one, so an answer sent
+    before a revocation cannot bring the grant back (§10.11, §8.4,
+    §6.7 "Re-pairing"). Suspension and resumption take new numbers; an
+    unlinked agent's numbers are not reused, and a re-paired agent's
+    start from the vault's current value. Clarified: an agent takes the
+    end of a hold only from a `vault.status` that is not held, never
+    from `leash.grant.updated` (§3.6.3). **Proposed, to be struck if
+    not wanted**: `vault.status` to a desktop or agent also returns
+    `session`, the caller's own current access session or `null`
+    (§10.2, §6.8). Not built yet in vettid-vault
   - 0.40.0: approved by the owner 2026-10-17 (the owner's answers to
     AGENT-PLAN §7.3 Q3–Q5). **A bound on access-session prompts**
     (Q3): the vault accepts at most one `device.session.request` per
@@ -2562,7 +2579,11 @@ the app show that something arrived:
   response, the other devices from `sync.event{kind: "owner_check",
   deadline}`. Agents with a session receive `leash.grant.updated` with
   fresh status statements (§10.11). Fan-out resumes; nothing missed is
-  replayed as events.
+  replayed as events. (0.41.0) An agent learns that the hold ended only
+  from a `vault.status` whose `owner_check.state` is not `held`. A
+  `leash.grant.updated` or `device.session.granted` does not show it:
+  messages arrive in no order (§8.4), so one sent before the deadline
+  can arrive after it.
 
 #### 3.6.4 Failed checks lock the vault
 
@@ -3858,6 +3879,10 @@ Rules:
   collect `sender` is a relay key it has denylisted as a whole (an unlinked
   device, §7.4), whatever token it arrived on. Removed connections are
   denylisted by `jti` instead and may connect again (§7.4).
+  (0.41.0) A re-paired agent is a new device: its grant set's
+  `grant_seq` starts from the vault's current value, never from 0, and
+  no number of the unlinked agent is reused (§10.11 "Grant-set
+  sequence").
 
 #### 6.7.1 Direct transfer to a new phone
 
@@ -4049,6 +4074,15 @@ its end does not end the E2E session or the pairing.) Apps need none.
 `device.pair.approve` MAY carry `session_seconds` to grant the first access
 session together with the pairing (§10.3). A grant replaces the device's
 current access session, so a request made within a session renews it.
+
+(0.41.0, proposed) **A device's own session.** `vault.status` to a
+desktop or agent also returns `session: {session_id, expires_at}` for
+the calling device's own current access session, or `session: null`
+when it has none (§10.2). It never includes another device's session.
+`vault.status` passes without a session and while the vault is held,
+so a device that restarts, or missed `device.session.granted` or
+`.ended`, reads its session there instead of probing with a request.
+While the vault is held, a session is suspended but still returned.
 
 **What a desktop or agent may do:**
 
@@ -4398,6 +4432,8 @@ same rule to their local storage.
   sender's messages for display.
 - Handlers MUST tolerate reordering. State that can be edited from several
   devices carries explicit versions, defined per feature schema.
+  (0.41.0) An agent's grant set carries `grant_seq` (§10.11), so an
+  agent can tell an older list of its grants from a newer one.
 - Receivers MUST reject `ts` more than 5 minutes in the future. For durable
   types, they MUST also reject `ts` more than 16 days in the past.
 
@@ -4621,7 +4657,7 @@ an answer to an unknown or expired id is dropped.
 | | `approval.pending`, `approval.waiting` / `approval.decide` | V→D / D→V | — / req | A desktop's step-up request or an agent's referred request, held for an app (§6.8) |
 | | `agent.request` | D→V (agent) | req | LEASH: the catalog, an item its share rules include, a use of a field without exposure (§10.11) |
 | LEASH | `leash.grant.issue`, `.revoke`, `.list` | D→V | req | Manage agent grants (§10.11) |
-| | `leash.grant.updated` | V→D (agent) | | The agent's current grants |
+| | `leash.grant.updated` | V→D (agent) | | The agent's current grants, with their `grant_seq` (0.41.0) |
 | Wallet | `wallet.create`, `.list`, `.get`, `.update`, `.address.new`, `.address.list`, `.address.used`, `.psbt.inspect`, `.sign`, `.history`, `.balance` | D→V | req | BIP86 and BIP84 accounts of a phrase that is a critical item; PSBT signing (§10.18). Between connections: the wallet actions (§10.14) |
 | Location | `location.share.start`, `.stop`, `.list`, `location.get`, `location.request` | D→V | req | Share with one connection; ask a connection to share (§10.16) |
 | | `location.update` | D→V, V↔V, V→D | | A position: from the source device; reduced, to the connection (ephemeral) |
@@ -4894,7 +4930,7 @@ an answer to an unknown or expired id is dropped.
 |---|---|---|
 | `vault.enrolled` | — | §11.3 |
 | `vault.enroll.confirm` (app) | `{}` | `{}` |
-| `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; 0.29.0, release L: also `unlock_id` (to the app and desktops, not to agents or a recovering app) and, inside `owner_check` for the app and desktops, `idle_lock_at` (RFC 3339: when the vault will lock itself if no check is passed, §3.6.8; absent for a vault without a credential); `owner_check` (0.13.0) is `{state: "ok" \| "due" \| "held", deadline, interval_seconds, failures, hold, hold_off_until?, waiting?}` to apps and desktops and `{state}` to agents (§3.6, §3.6.7). `waiting` (0.19.0) is `{messages, requests, calls, other}`, the counts of `vault.held` since the deadline (§3.6.3), present while the state is `due` or `held` for a device that receives `vault.held` (the app; desktops with an access session while `held`) and absent otherwise. (0.32.0, release A) To the app and desktops also `attachments: {count, bytes, max_count, max_bytes}`: the stored attachments, their bytes counted as for `attachment_storage`, and the two bounds (§10.5.1). A recovering app (§11.11.5) gets only `{vault_id, state_seq, header_seq}` (0.16.0): nothing about the vault's devices, connections or owner check before it has proved the credential password. (0.33.0, release R) To the app also `recovery: {state, attempts, present_recorded_at, counter}`, to desktops `recovery: {state}` (§11.14.11) |
+| `vault.status` (app, desktop, agent) | `{}` | `{vault_id, state_seq, header_seq, provisional, devices, connections, owner_check}`; 0.29.0, release L: also `unlock_id` (to the app and desktops, not to agents or a recovering app) and, inside `owner_check` for the app and desktops, `idle_lock_at` (RFC 3339: when the vault will lock itself if no check is passed, §3.6.8; absent for a vault without a credential); `owner_check` (0.13.0) is `{state: "ok" \| "due" \| "held", deadline, interval_seconds, failures, hold, hold_off_until?, waiting?}` to apps and desktops and `{state}` to agents (§3.6, §3.6.7). `waiting` (0.19.0) is `{messages, requests, calls, other}`, the counts of `vault.held` since the deadline (§3.6.3), present while the state is `due` or `held` for a device that receives `vault.held` (the app; desktops with an access session while `held`) and absent otherwise. (0.32.0, release A) To the app and desktops also `attachments: {count, bytes, max_count, max_bytes}`: the stored attachments, their bytes counted as for `attachment_storage`, and the two bounds (§10.5.1). A recovering app (§11.11.5) gets only `{vault_id, state_seq, header_seq}` (0.16.0): nothing about the vault's devices, connections or owner check before it has proved the credential password. (0.33.0, release R) To the app also `recovery: {state, attempts, present_recorded_at, counter}`, to desktops `recovery: {state}` (§11.14.11). (0.41.0, proposed) To desktops and agents also `session: {session_id, expires_at} \| null`: the calling device's own current access session, never another device's (§6.8) |
 | `vault.owner-check` (app: the holder) | `{credential, utk_id, sealed{pin, password, hold?, hold_off_until?}}` | `{credential, version, utks, deadline, interval_seconds, hold, hold_off_until?}` (§3.6.1, §3.6.7); (0.33.0, release R) also `recovery: {state, present_recorded}` (§11.14.5); `bad_pin`, `bad_password`, `backoff` (body `{retry_after}`, §10.1), `utk_invalid`, `stale_credential`, `credential_frozen`, `rotation_required`, `forbidden` (not the holder), `bad_request` (a PIN that is not 6–32 digits) |
 | `vault.held` (V→D, to the app and desktops in an access session) | — | `{deadline, waiting: {messages, requests, calls, other}}` (§3.6.3); 0.29.0, release L: also `idle_lock_at` (§3.6.8) |
 | `vault.lock` (app, desktop) | `{}`; 0.29.0, release L: `{unlock_id}` ("Locks", below) | `{}`; then `vault.locking`. 0.29.0, release L: `stale_lock` when `unlock_id` does not name the current unlock (nothing is done); `bad_request` when it is not 32 lowercase hex characters |
@@ -8498,12 +8534,57 @@ connection; otherwise LEASH's trust model, an open question there) is
 outside this document. The §16 vectors (`leash.json`) are two
 delegations and their statements.
 
+**Grant-set sequence** (0.41.0). Messages arrive in no order (§8.4).
+Without a number, a `leash.grant.list` answer sent before a revocation
+could reach the agent after the `leash.grant.updated` that dropped the
+grant, and bring the revoked grant back into its set. So each agent's
+grant set carries a `grant_seq`:
+
+- **The counter.** The vault keeps one counter for its agents in its
+  sealed state: an unsigned 64-bit integer, at least 1 once used, that
+  only grows. Every change to an agent's grant set sets that agent's
+  `grant_seq` to the counter's next value: a grant issued, replaced or
+  revoked; an agent share rule set or deleted (§10.12); a grant revoked
+  because its connection was removed or blocked; suspension; resumption;
+  and the set a pairing completes with (its initial grants, or none).
+  An agent's numbers therefore only grow, though not always by one.
+  The counter is never reset and no number is used twice in a vault.
+- **What is not a change.** Fresh status statements, a grant's use
+  counts and a grant passing its `expires_at` (an expired grant is out
+  of force at both ends by its own `expires_at`). The vault sends the
+  same set again, with the same `grant_seq` and fresh statements, for
+  example when a hold ends (§3.6.3).
+- **On the wire.** `leash.grant.updated` and an agent's
+  `leash.grant.list` answer carry the `grant_seq` of the set they
+  describe:
+
+  ```json
+  { "grants": [<grant>], "suspended": false, "grant_seq": 42 }
+  ```
+
+  Apps' and desktops' `leash.grant.list` answers do not carry it; they
+  follow `sync.event` (§10.1).
+- **The agent.** It keeps the highest `grant_seq` it has seen, with its
+  state. It ignores a list or update with a lower number. One with an
+  equal number describes the set it already has: it keeps that set and
+  may take the newer status statements from it. Only a higher number
+  replaces the set.
+- **Suspension.** Suspension and resumption each take a new number;
+  neither resets it.
+- **Unlink and re-pairing.** Unlinking an agent ends its set; the
+  counter goes on. A re-paired agent is a new device with new keys
+  (§6.7): the set its pairing completes with takes the counter's next
+  value, so its numbers start from the vault's current value, never
+  from 0.
+- **Older vaults.** A vault before 0.41.0 sends no `grant_seq`; an
+  agent then takes each list or update as it comes.
+
 | Type | Request body | Response / event body |
 |---|---|---|
 | `leash.grant.issue` (app, within the unlock window) | `{agent_id, grant_id?, version?, scope, approval?, connections?, per_hour?, per_day?, expires_at?, status_ttl?}` (not `items.read`); without `grant_id` a new grant (`version` absent); with it, a replacement of that grant (`version` required; `conflict`); `credential_locked` outside the window | `<grant>`, with its `delegation` and `sig` |
 | `leash.grant.revoke` (app, desktop) | `{grant_id}` | `{}` |
-| `leash.grant.list` (app, desktop: `{agent_id?}`; agent: `{}`, its own) | as left | apps and desktops: `{grants: [<grant>], suspended: [<agent_id>]}`; an agent: `{grants: [<grant>], suspended}` |
-| `leash.grant.updated` (V→D, to the agent) | — | `{grants: [<grant>], suspended}`: all of its grants, after every change and at suspension and resumption |
+| `leash.grant.list` (app, desktop: `{agent_id?}`; agent: `{}`, its own) | as left | apps and desktops: `{grants: [<grant>], suspended: [<agent_id>]}`; an agent: `{grants: [<grant>], suspended, grant_seq}` (0.41.0, "Grant-set sequence") |
+| `leash.grant.updated` (V→D, to the agent) | — | `{grants: [<grant>], suspended, grant_seq}`: all of its grants, after every change and at suspension and resumption; (0.41.0) `grant_seq` is the set's (above) |
 | `leash.agent.resume` (app) | `{agent_id}` | `{}`; `not_found` unless the agent is suspended |
 | `leash.status.get` (agent) | `{grant_id}` | `{grant_id, status, status_sig, rotations?}`; `not_found`, `forbidden` (suspended), `owner_check_required` (the vault is held, §3.6.3) |
 | `agent.request` (agent) | `{op: "catalog"}`, `{op: "item.get", item_id, fields?}` or `{op: "item.use", item_id, field_id, action: "hmac-sha256", data}` | `{items}`, `{item_id, name, category, fields, notes?}` or `{item_id, field_id, action, result}` |
