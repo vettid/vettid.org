@@ -45,14 +45,41 @@ export function spanWords(seconds: number): string {
 }
 
 /**
- * An email text with its scaled durations divided by the scale ("24 hours"
- * -> "1 hour", "three days" -> "3 hours" at 24) and the staging note at the
- * end. At scale 1 (production) the text is returned unchanged.
+ * The recovery attempt waits W(k) (VAULT-MESSAGING §11.14.6) are not divided
+ * by the scale (STAGING-TIME-SCALE §2.1, T6): on staging their unit is
+ * already 600 s, so the production sentence ("one day ... thirty days")
+ * would read as if scaled. A scaled email states staging's own values.
  */
-export function scaledMail(text: string): string {
-  const scale = timeScale();
+const ATTEMPT_WAITS_PROD = 'which starts at one day and grows to thirty days';
+const ATTEMPT_WAITS_STAGING = "which starts at 10 minutes and grows to 5 hours (staging's own waits, not divided by the time scale)";
+
+/**
+ * An email text with its scaled durations divided by the scale ("24 hours"
+ * -> "1 hour", "three days" -> "3 hours" at 24), the attempt waits stated as
+ * staging's own, and the staging note at the end. At scale 1 (production)
+ * the text is returned unchanged. `scale` defaults to the function's; the
+ * recovery email passes the recovery's own ({@link recoveryScale}).
+ */
+export function scaledMail(text: string, scale: number = timeScale()): string {
   if (scale === 1) return text;
-  let out = text;
+  let out = text.split(ATTEMPT_WAITS_PROD).join(ATTEMPT_WAITS_STAGING);
   for (const [phrase, seconds] of SCALED_PHRASES) out = out.split(phrase).join(spanWords(Math.ceil(seconds / scale)));
+  out = out.replace(/\b1 (hour|minute) then start again/g, '1 $1 then starts again');
   return `${out}\n\n${STAGING_NOTE}.`;
+}
+
+/**
+ * The scale of a recovery's estimates and floors (S5, S6): the function's
+ * scale only when the vault is sealed to a release that ships `time_scale`
+ * (`TIME_SCALE_FROM_RELEASE`, the first such staging release), whose enclave
+ * divides its own recovery times; 1 for an older release, an unknown one, or
+ * when the from-release is not set. Decided once, when the recovery is
+ * requested, and kept on the recovery row.
+ */
+export function recoveryScale(releaseNumber: number | null | undefined): 1 | 24 {
+  const scale = timeScale();
+  if (scale === 1) return 1;
+  const from = Number(process.env.TIME_SCALE_FROM_RELEASE);
+  if (!Number.isInteger(from) || from < 1 || typeof releaseNumber !== 'number' || !Number.isInteger(releaseNumber)) return 1;
+  return releaseNumber >= from ? scale : 1;
 }

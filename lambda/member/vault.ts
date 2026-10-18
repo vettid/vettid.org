@@ -172,7 +172,7 @@ import type { MemberItem } from '../shared/model';
 import { hit } from '../shared/ratelimit';
 import { sendMail } from '../shared/mail';
 import { signRecoveryRequest } from '../shared/recovery-sign';
-import { scaledMail, scaledSeconds } from '../shared/time-scale';
+import { recoveryScale, scaledMail, scaledSeconds, timeScale } from '../shared/time-scale';
 import { vaultService } from '../shared/vault-service';
 import {
   INSTANCE_ID_RE,
@@ -373,6 +373,13 @@ export interface RecoveryRow {
    * kept valid as long as the recovery when its `expires_at` moves.
    */
   cancel_key?: string;
+  /**
+   * 2.8.0 (staging only): the time scale the recovery's estimates and floors
+   * were divided by, decided when it was requested (recoveryScale: only for
+   * a vault on a release that ships `time_scale`). Absent: 1, real time; a
+   * recovery requested before the scale turned on keeps its times.
+   */
+  time_scale?: 24;
 }
 
 /** The clear reasons a refused recovery's slot may carry (2.1.0, 2.7.0). */
@@ -1761,8 +1768,10 @@ async function applyEnclaveTimes(v: VaultRow, r: RecoveryRow, slot: Record<strin
   // Never a time earlier than the enclave's. With a not_before past the cap
   // the recovery can never become available: it is kept pending and ends
   // (expired) at the cap, and the account site shows the enclave's time.
-  const availableAt = Math.max(r.requested_at + scaledSeconds(RECOVERY_DELAY_S), notBefore);
-  const expiresAt = Math.min(r.requested_at + RECOVERY_MAX_SPAN_S, Math.max(expires, availableAt + scaledSeconds(RECOVERY_VALIDITY_S)));
+  // The floors at the recovery's own scale (2.8.0), as its estimates were made.
+  const scale = r.time_scale ?? 1;
+  const availableAt = Math.max(r.requested_at + Math.ceil(RECOVERY_DELAY_S / scale), notBefore);
+  const expiresAt = Math.min(r.requested_at + RECOVERY_MAX_SPAN_S, Math.max(expires, availableAt + Math.ceil(RECOVERY_VALIDITY_S / scale)));
   const earliest = slot.earliest === true;
   const before = r.expires_at;
   try {
@@ -2248,8 +2257,11 @@ router.on('POST', '/api/vault/recovery', async (req) => {
     throw vaultError(409, 'recovery_unavailable', 'This vault cannot be recovered: its credential backup is off. You can delete it and start over.', { reason: 'no_backup' });
   }
   const inst = await recoveryInstance(v, now, isCanaryMember(m));
-  const availableAt = now + scaledSeconds(RECOVERY_DELAY_S);
-  const expiresAt = availableAt + scaledSeconds(RECOVERY_VALIDITY_S);
+  // 2.8.0 (staging): scaled only for a vault on a release that ships `time_scale`, whose enclave scales its own times.
+  // (No read at all at scale 1, production.)
+  const scale = timeScale() === 1 ? 1 : recoveryScale((await releaseRow(v.sealed_release!))?.release_number);
+  const availableAt = now + Math.ceil(RECOVERY_DELAY_S / scale);
+  const expiresAt = availableAt + Math.ceil(RECOVERY_VALIDITY_S / scale);
   // 2.4.0: the typed form's locator, minted with the request. Its row is
   // written first, so the recovery never names a locator without a row; a
   // row whose request then fails names no current recovery (a miss) and expires.
@@ -2259,12 +2271,13 @@ router.on('POST', '/api/vault/recovery', async (req) => {
   // 2.7.0: the times are the earliest possible until the enclave's slot says (`earliest`).
   const r: RecoveryRow = {
     recovery_id: recoveryId, state: 'pending', requested_at: now, available_at: availableAt, expires_at: expiresAt, locator, earliest: true, cancel_key: link.key,
+    ...(scale !== 1 ? { time_scale: scale } : {}),
   };
   await setRecovery(v, r, v.recovery?.recovery_id ?? null, true);
   // The slot keeps the sealed code until the recovery expires.
   await enqueue('recovery', m, v, recoveryId, inst, undefined, { extra: { browser_key: bk as string, ...sig }, ttlS: r.expires_at - now + 3600 });
   await audit(memberActor(m.user_guid), 'vault.recovery_request', m.user_guid, { vault_id: v.vault_id, recovery_id: recoveryId, instance_id: inst.instance_id });
-  await notify(m.email, 'VettID vault recovery requested', scaledMail(requestedMail(cancelUrlOf(link.token), r.available_at)));
+  await notify(m.email, 'VettID vault recovery requested', scaledMail(requestedMail(cancelUrlOf(link.token), r.available_at), scale));
   return new WithStatus(202, { recovery_id: recoveryId, available_at: iso(r.available_at), expires_at: iso(r.expires_at), earliest: true });
 });
 

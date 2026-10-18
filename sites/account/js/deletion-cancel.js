@@ -20,6 +20,7 @@ if (location.hash) history.replaceState(null, '', location.pathname + location.s
 
 const card = $('cancel-card');
 let scale = 1; // the staging time scale (config.json; 1 in production)
+let acted = false; // the member clicked: the page is no longer redrawn for the scale
 const t = (text) => scaleText(text, scale);
 const stagingNote = () => (scale === 1 ? null : el('p', { class: 'muted' }, STAGING_NOTE));
 
@@ -60,6 +61,7 @@ function start() {
   } else {
     const btn = el('button', { type: 'button', class: 'btn btn-primary' }, 'Cancel the deletion');
     btn.addEventListener('click', async () => {
+      acted = true;
       const res = await ui.busy(btn, () => publicPost('/api/vault/deletion/cancel-link', { token }), {
         busyLabel: 'Cancelling…',
         onError: (err) => {
@@ -80,8 +82,13 @@ function start() {
   }
 }
 
-// The texts follow the staging time scale (config.json); the token stays in this closure.
+// Drawn at once with the production texts; on staging, drawn again with the
+// scaled ones when /config.json answers, unless the member has clicked (the
+// texts drawn after a click use the scale by then). A config that fails or
+// never answers leaves the production texts. The token stays in this closure.
+start();
 siteConfig().then((c) => {
+  if (c.timeScale === 1) return;
   scale = c.timeScale;
-  start();
+  if (!acted) start();
 });

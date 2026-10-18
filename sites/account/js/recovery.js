@@ -29,7 +29,7 @@ import * as keys from './recovery-keys.js';
 import { LOCATOR_RE, SealError, cancelGoneOutcome, cancelNotFound, fromBase64, openSealedCode, qrPayload, toBase64, typedForm, typedRows } from './recovery-code.js';
 import { qrModules, qrSvg } from './qr.js';
 import * as ui from './ui.js';
-import { STAGING_NOTE, scaleText, siteConfig } from './site-config.js';
+import { STAGING_NOTE, scaleText, siteConfigWithin } from './site-config.js';
 import { dateTime, timeUntil } from './vault-text.js';
 
 ui.init();
@@ -50,6 +50,7 @@ let pollTimer = null;
 let tickTimer = null;
 let pollWhenVisible = false;
 let scale = 1; // the staging time scale (config.json; 1 in production)
+let configOnce = null; // the page's one bounded read of /config.json
 
 /** A text with its durations scaled (unchanged at scale 1). */
 const t = (text) => scaleText(text, scale);
@@ -79,7 +80,8 @@ const recoveryVaultId = () => recovery?.vault_id ?? vault?.vault_id;
  */
 async function load({ focus } = {}) {
   clearTimers();
-  scale = (await siteConfig()).timeScale;
+  // At most 2.5 s for /config.json, once; without it the page shows the production texts.
+  scale = (await (configOnce ??= siteConfigWithin())).timeScale;
   scaleLede();
   let fetched = null;
   try {

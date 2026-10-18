@@ -24,8 +24,8 @@ export function normalize(raw) {
     releaseLogUrl,
     /** Google Play (or, in staging, the test build) link; null until one exists. */
     androidAppUrl: typeof c.android_app_url === 'string' && HTTPS_URL.test(c.android_app_url) ? c.android_app_url : null,
-    /** 1, or 24 on staging (config.json's `time_scale`, written only there): 1 day = 1 hour. */
-    timeScale: stage !== 'prod' && c.time_scale === 24 ? 24 : 1,
+    /** 1, or 24 on the staging stage only (config.json's `time_scale`, written only there): 1 day = 1 hour. */
+    timeScale: stage === 'staging' && c.time_scale === 24 ? 24 : 1,
   };
 }
 
@@ -60,6 +60,19 @@ export function scaleText(text, scale) {
     out = out.split(phrase).join(spanWords(Math.ceil(seconds / scale), adjective));
   }
   return out.replace(/\b1 (hour|minute) are over/g, '1 $1 is over');
+}
+
+/**
+ * The site config, or, if /config.json has not answered within `ms`, the
+ * defaults (scale 1: the production texts), so that a page never waits on it
+ * without a bound.
+ */
+export function siteConfigWithin(ms = 2500) {
+  let timer;
+  const fallback = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(normalize(null)), ms);
+  });
+  return Promise.race([siteConfig(), fallback]).finally(() => clearTimeout(timer));
 }
 
 export function siteConfig() {

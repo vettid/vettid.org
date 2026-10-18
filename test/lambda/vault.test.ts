@@ -3926,11 +3926,16 @@ describe('2.7.0: recovery from release R', () => {
 
   // MEMBER-API 2.8.0 "Staging time scale" (S5, S6): the estimates of POST
   // /api/vault/recovery and the API's floors are divided by the scale on
-  // staging only; the request email states the scaled durations and the note.
+  // staging only, and only for a vault on a release that ships `time_scale`
+  // (TIME_SCALE_FROM_RELEASE; this block's vault is on release 14). The
+  // request email states the scaled durations, staging's own attempt waits
+  // and the note.
   describe('the staging time scale', () => {
+    const ON = { STAGE: 'staging', TIME_SCALE: '24', TIME_SCALE_FROM_RELEASE: '14' };
     afterEach(() => {
       delete process.env.STAGE;
       delete process.env.TIME_SCALE;
+      delete process.env.TIME_SCALE_FROM_RELEASE;
     });
     const estimates = async () => {
       const r = await call('POST', '/api/vault/recovery', { browser_key: BK });
@@ -3939,35 +3944,55 @@ describe('2.7.0: recovery from release R', () => {
       expect(r.body).toMatchObject({ available_at: isoS(row.available_at), expires_at: isoS(row.expires_at), earliest: true });
       expect(getItem('requests', `rcancel#${row.cancel_key}`).expires_at).toBe(row.expires_at);
       expect(getItem('requests', `recovery-locator#${row.locator}`).expires_at).toBe(row.expires_at);
-      return { rid: r.body.recovery_id as string, available: row.available_at - NOW, expires: row.expires_at - NOW, mail: mails().find((m) => m.subject === 'VettID vault recovery requested')!.text };
+      return { rid: r.body.recovery_id as string, row, available: row.available_at - NOW, expires: row.expires_at - NOW, mail: mails().find((m) => m.subject === 'VettID vault recovery requested')!.text };
     };
+    const PROD_WAITS = 'After the first two, each wrong attempt is followed by a wait, which starts at one day and grows to thirty days.';
 
     test('production (no STAGE): request + 24 h and + 48 h; the email reads as before', async () => {
       const e = await estimates();
       expect([e.available, e.expires]).toEqual([DAY, 2 * DAY]);
+      expect(e.row.time_scale).toBeUndefined();
       expect(e.mail).toContain('at the earliest, for 24 hours. The time can be later: a vault cannot be recovered until three days after');
+      expect(e.mail).toContain(PROD_WAITS);
       expect(e.mail).not.toContain('Staging');
     });
 
     test('staging at 1: request + 24 h and + 48 h, no note', async () => {
-      Object.assign(process.env, { STAGE: 'staging', TIME_SCALE: '1' });
+      Object.assign(process.env, { ...ON, TIME_SCALE: '1' });
       const e = await estimates();
       expect([e.available, e.expires]).toEqual([DAY, 2 * DAY]);
+      expect(e.mail).toContain(PROD_WAITS);
       expect(e.mail).not.toContain('Staging');
     });
 
-    test('staging at 24: request + 1 h and + 2 h, still earliest; the email says 1 hour, 3 hours and the note', async () => {
-      Object.assign(process.env, { STAGE: 'staging', TIME_SCALE: '24' });
+    test('staging at 24, a release that ships time_scale: request + 1 h and + 2 h, still earliest; the email says 1 hour, 3 hours, staging\'s attempt waits and the note', async () => {
+      Object.assign(process.env, ON);
       const e = await estimates();
       expect([e.available, e.expires]).toEqual([H, 2 * H]);
+      expect(e.row.time_scale).toBe(24);
       expect(e.mail).toContain('at the earliest, for 1 hour. The time can be later: a vault cannot be recovered until 3 hours after');
-      // The recovery waits W(k) are not divided by the scale (STAGING-TIME-SCALE §2.1, T6).
-      expect(e.mail).toContain('starts at one day and grows to thirty days');
+      // The attempt waits W(k) are not divided by the scale (STAGING-TIME-SCALE §2.1, T6): staging's own values, never "one day".
+      expect(e.mail).not.toContain('one day');
+      expect(e.mail).toContain("each wrong attempt is followed by a wait, which starts at 10 minutes and grows to 5 hours (staging's own waits, not divided by the time scale).");
       expect(e.mail.endsWith('\n\nStaging: 1 day = 1 hour.')).toBe(true);
     });
 
-    test('staging at 24: the floors are 1 h and 1 h; the enclave\'s later times win', async () => {
+    test('staging at 24, a vault on a release before the one that ships time_scale: real time, the email as in production', async () => {
+      Object.assign(process.env, { ...ON, TIME_SCALE_FROM_RELEASE: '15' });
+      const e = await estimates();
+      expect([e.available, e.expires]).toEqual([DAY, 2 * DAY]);
+      expect(e.row.time_scale).toBeUndefined();
+      expect(e.mail).toContain(PROD_WAITS);
+      expect(e.mail).not.toContain('Staging');
+    });
+
+    test('staging at 24 without TIME_SCALE_FROM_RELEASE: real time', async () => {
       Object.assign(process.env, { STAGE: 'staging', TIME_SCALE: '24' });
+      expect((await estimates()).available).toBe(DAY);
+    });
+
+    test('staging at 24: the floors are 1 h and 1 h; the enclave\'s later times win', async () => {
+      Object.assign(process.env, ON);
       const { rid } = await estimates();
       answer(rid, { not_before: isoS(NOW + 600), expires: isoS(NOW + 1200) });
       await call('GET', '/api/vault/recovery');
@@ -3979,8 +4004,17 @@ describe('2.7.0: recovery from release R', () => {
       expect(getItem('vaults', 'e'.repeat(32)).recovery).toMatchObject({ available_at: NOW + 3 * H, expires_at: NOW + 4 * H });
     });
 
+    test('a recovery requested before the scale turned on keeps its times, its floors included', async () => {
+      const { rid } = await estimates();
+      Object.assign(process.env, ON);
+      expect((await call('GET', '/api/vault/recovery')).body.recovery).toMatchObject({ available_at: isoS(NOW + DAY), expires_at: isoS(NOW + 2 * DAY) });
+      answer(rid, { not_before: isoS(NOW + 600), expires: isoS(NOW + 1200) });
+      await call('GET', '/api/vault/recovery');
+      expect(getItem('vaults', VID).recovery).toMatchObject({ available_at: NOW + DAY, expires_at: NOW + 2 * DAY, enclave_times: true });
+    });
+
     test('TIME_SCALE outside staging is ignored', async () => {
-      Object.assign(process.env, { STAGE: 'prod', TIME_SCALE: '24' });
+      Object.assign(process.env, { ...ON, STAGE: 'prod' });
       const e = await estimates();
       expect([e.available, e.expires]).toEqual([DAY, 2 * DAY]);
       expect(e.mail).not.toContain('Staging');

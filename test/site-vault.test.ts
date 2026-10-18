@@ -515,9 +515,10 @@ describe('site config (config.json)', () => {
       .toEqual({ stage: 'staging', staging: true, releaseLogUrl: log, androidAppUrl: 'https://example.org/app', timeScale: 1 });
   });
 
-  test('the time scale (MEMBER-API 2.8.0): 24 only on staging, 1 otherwise and for anything else', () => {
+  test('the time scale (MEMBER-API 2.8.0): 24 only on the staging stage, 1 otherwise and for anything else', () => {
     expect(sc.normalize({ stage: 'staging', time_scale: 24 }).timeScale).toBe(24);
     expect(sc.normalize({ stage: 'prod', time_scale: 24 }).timeScale).toBe(1);
+    expect(sc.normalize({ stage: 'dev', time_scale: 24 }).timeScale).toBe(1);
     for (const v of [1, '24', 2, 3600, null, undefined]) expect(sc.normalize({ stage: 'staging', time_scale: v }).timeScale).toBe(1);
   });
 
@@ -547,9 +548,13 @@ describe('site config (config.json)', () => {
     const src = (f: string) => readFileSync(join(__dirname, '..', 'sites', 'account', 'js', f), 'utf8');
     for (const f of ['deletion.js', 'deletion-cancel.js', 'recovery.js', 'recovery-cancel.js', 'vault.js']) {
       const js = src(f);
-      // Every string stating 24 or 48 hours, or a 24-hour wait, is wrapped.
-      for (const line of js.split('\n').filter((l) => /'[^']*(24 hours|48 hours|24-hour)|"[^"]*(24 hours|48 hours|24-hour)/.test(l) && !/^\s*\/\//.test(l))) {
-        expect(line).toMatch(/\bt\(|scaleText\(/);
+      // Every string stating 24 or 48 hours, three days or a 24-hour wait, in
+      // quotes or a template literal, is wrapped (comments aside).
+      const stated = js.split('\n').filter((l) => /['"`][^'"`]*(24 hours|48 hours|24-hour|three days)/.test(l) && !/^\s*(\/\/|\*)/.test(l));
+      for (const line of stated) expect(line).toMatch(/\bt\(|scaleText\(/);
+      // ...and no duration is stated in a template literal that spans lines (the check above sees one line at a time).
+      for (const m of js.matchAll(/`[^`]*`/g)) {
+        if (/(24 hours|48 hours|24-hour|three days)/.test(m[0])) expect(js.slice(Math.max(0, m.index! - 12), m.index!)).toMatch(/\bt\($|scaleText\($/);
       }
       expect(js).toContain('STAGING_NOTE');
       expect(js).toMatch(/timeScale/);

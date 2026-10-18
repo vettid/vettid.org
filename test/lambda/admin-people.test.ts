@@ -197,6 +197,25 @@ describe("a member's pending vault deletion", () => {
     ses.restore();
   });
 
+  describe('the staging time scale (MEMBER-API 2.8.0): the cancel email', () => {
+    afterEach(() => {
+      delete process.env.STAGE;
+      delete process.env.TIME_SCALE;
+    });
+    test.each([
+      ['staging at 24', { STAGE: 'staging', TIME_SCALE: '24' }, 'the 1 hour then starts again.', true],
+      ['staging at 1', { STAGE: 'staging', TIME_SCALE: '1' }, 'the 24 hours then start again.', false],
+      ['TIME_SCALE outside staging', { STAGE: 'prod', TIME_SCALE: '24' }, 'the 24 hours then start again.', false],
+    ])('%s', async (_name, envs, says, note) => {
+      Object.assign(process.env, envs);
+      job(answer({ cancelled: [one] }));
+      await handler(event('POST', path));
+      const text = mails()[0].text;
+      expect(text).toContain(`ask again on your account page; ${says}`);
+      expect(text.endsWith(note ? 'looks wrong.\n\nStaging: 1 day = 1 hour.\n\n— VettID\n' : 'looks wrong.\n\n— VettID\n')).toBe(true);
+    });
+  });
+
   test('cancel: the cancel function is asked (synchronously, for this member only); audited with the admin as actor; the member is told', async () => {
     job(answer({ cancelled: [one] }));
     const res = await handler(event('POST', path));
@@ -209,6 +228,9 @@ describe("a member's pending vault deletion", () => {
     expect(audits().filter((a) => !a.action)).toEqual([expect.objectContaining({ email: 'ada@example.org', expires_at: expect.any(Number) })]);
     expect(mails()).toEqual([{ to: 'ada@example.org', subject: 'VettID vault deletion cancelled', text: expect.stringContaining('has been cancelled by VettID support. Your vault and everything in it stay as they are.') }]);
     expect(mails()[0].text).toContain(`requested at ${new Date(one.requested_at * 1000).toISOString()}`);
+    // Production's text, unchanged (MEMBER-API 2.8.0: no scale outside staging).
+    expect(mails()[0].text).toContain('ask again on your account page; the 24 hours then start again.\n\nIf you did not ask for the deletion, secure your email account, and contact support@vettid.org if anything else looks wrong.\n\n— VettID\n');
+    expect(mails()[0].text).not.toContain('Staging');
     // The account itself is not touched.
     expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
     expect(idp.commandCalls(AdminEnableUserCommand)).toHaveLength(0);

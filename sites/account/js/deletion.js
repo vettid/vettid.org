@@ -16,7 +16,7 @@
 import { get, post } from './api.js';
 import { $, chip, el, fill } from './dom.js';
 import * as ui from './ui.js';
-import { STAGING_NOTE, scaleText, siteConfig } from './site-config.js';
+import { STAGING_NOTE, scaleText, siteConfigWithin } from './site-config.js';
 import { dateTime, servicePaused, timeUntil } from './vault-text.js';
 
 ui.init();
@@ -33,6 +33,7 @@ let tickTimer = null;
 let pollWhenVisible = false;
 let hadDeletion = false;
 let scale = 1; // the staging time scale (config.json; 1 in production)
+let configOnce = null; // the page's one bounded read of /config.json
 
 /** A text with its durations scaled (unchanged at scale 1). */
 const t = (text) => scaleText(text, scale);
@@ -49,7 +50,8 @@ function scaleLede() {
 
 async function load({ focus } = {}) {
   clearTimers();
-  scale = (await siteConfig()).timeScale;
+  // At most 2.5 s for /config.json, once; without it the page shows the production texts.
+  scale = (await (configOnce ??= siteConfigWithin())).timeScale;
   scaleLede();
   try {
     status = await get('/api/vault/status');

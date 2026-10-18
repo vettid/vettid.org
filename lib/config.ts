@@ -85,14 +85,26 @@ export interface AppConfig {
   /**
    * The staging time scale (MEMBER-API 2.8.0 "Staging time scale";
    * STAGING-TIME-SCALE §4 item 5, §5.3): the member API divides the
-   * start-over deletion's 24 h and the account site PIN's 24 h lock by it.
-   * **Always 1 in production**, in code: loadConfig never reads it for
-   * prod and refuses any context that tries to set another value, and
-   * {@link timeScaleEnv} refuses a prod config with another value. Other
-   * stages: context `<stage>TimeScale`, 1 or 24, default 1 (cdk.json sets
-   * `stagingTimeScale` 24).
+   * start-over deletion's 24 h, the account site PIN's 24 h lock and the
+   * recovery estimates by it. **Always 1 in production**, in code:
+   * loadConfig never reads it for prod and refuses any context that tries
+   * to set another value, and {@link timeScaleEnv} refuses a prod config
+   * with another value. Only the `staging` stage may have 24 (context
+   * `stagingTimeScale`, 1 or 24, default 1); every other stage is 1.
+   *
+   * Rollout: cdk.json ships `stagingTimeScale` 1, so merging and any
+   * staging deploy change nothing. The switch to 24 goes with publishing the
+   * vault release that carries `time_scale`, together with
+   * {@link timeScaleFromRelease}.
    */
   readonly timeScale: 1 | 24;
+  /**
+   * The first staging vault release number that ships `time_scale`
+   * (context `stagingTimeScaleFromRelease`; required with scale 24). The
+   * recovery estimates are scaled only for a vault sealed to that release
+   * or a later one, whose enclave scales its own recovery times.
+   */
+  readonly timeScaleFromRelease?: number;
 }
 
 export interface VaultConfig {
@@ -513,7 +525,7 @@ export function loadConfig(node: Node): AppConfig {
   if (stage === PROD_STAGE && (node.tryGetContext('vaultLegacySessionAuth') !== undefined || legacyRaw !== undefined)) {
     throw new Error('vault legacy session auth is staging-only: production never accepts cookies on the app routes (MEMBER-API 2.0.0)');
   }
-  const timeScale = loadTimeScale(node, stage);
+  const { timeScale, timeScaleFromRelease } = loadTimeScale(node, stage);
   return {
     stage,
     domainName,
@@ -535,16 +547,18 @@ export function loadConfig(node: Node): AppConfig {
     ...(androidAppUrl ? { androidAppUrl } : {}),
     ...(vaultLegacySessionAuth ? { vaultLegacySessionAuth } : {}),
     timeScale,
+    ...(timeScaleFromRelease !== undefined ? { timeScaleFromRelease } : {}),
   };
 }
 
 /**
  * The stage's time scale ({@link AppConfig.timeScale}). Production is 1 in
  * code; a context `timeScale` or `prodTimeScale` with any other value
- * fails the synth (STAGING-TIME-SCALE §4 item 5).
+ * fails the synth (STAGING-TIME-SCALE §4 item 5). Only `staging` may be 24.
  */
-function loadTimeScale(node: Node, stage: string): 1 | 24 {
+function loadTimeScale(node: Node, stage: string): { timeScale: 1 | 24; timeScaleFromRelease?: number } {
   const key = `${stage}TimeScale`;
+  const fromKey = `${stage}TimeScaleFromRelease`;
   if (stage === PROD_STAGE) {
     for (const k of ['timeScale', key]) {
       const raw = node.tryGetContext(k);
@@ -552,29 +566,54 @@ function loadTimeScale(node: Node, stage: string): 1 | 24 {
         throw new Error(`context ${k}: the production time scale is 1, in code (STAGING-TIME-SCALE §4); got ${JSON.stringify(raw)}`);
       }
     }
-    return 1;
+    for (const k of ['timeScaleFromRelease', fromKey]) {
+      if (node.tryGetContext(k) !== undefined) throw new Error(`context ${k}: the production time scale is 1, in code (STAGING-TIME-SCALE §4)`);
+    }
+    return { timeScale: 1 };
   }
   const raw = node.tryGetContext(key);
-  if (raw === undefined) return 1;
-  if (String(raw) === '1') return 1;
-  if (String(raw) === '24') return 24;
-  throw new Error(`context ${key}: expected 1 or 24, got ${JSON.stringify(raw)}`);
+  const fromRaw = node.tryGetContext(fromKey);
+  if (stage !== 'staging') {
+    if ((raw !== undefined && String(raw) !== '1') || fromRaw !== undefined) {
+      throw new Error(`context ${key}: only the staging stage may have a time scale other than 1 (STAGING-TIME-SCALE §5.3); got ${JSON.stringify(raw ?? fromRaw)}`);
+    }
+    return { timeScale: 1 };
+  }
+  let timeScale: 1 | 24;
+  if (raw === undefined || String(raw) === '1') timeScale = 1;
+  else if (String(raw) === '24') timeScale = 24;
+  else throw new Error(`context ${key}: expected 1 or 24, got ${JSON.stringify(raw)}`);
+  let timeScaleFromRelease: number | undefined;
+  if (fromRaw !== undefined) {
+    timeScaleFromRelease = Number(fromRaw);
+    if (!Number.isInteger(timeScaleFromRelease) || timeScaleFromRelease < 1 || String(fromRaw).trim() === '') {
+      throw new Error(`context ${fromKey}: expected a release number, got ${JSON.stringify(fromRaw)}`);
+    }
+  }
+  if (timeScale !== 1 && timeScaleFromRelease === undefined) {
+    throw new Error(`context ${fromKey}: required with ${key} ${timeScale} (the first vault release that ships time_scale)`);
+  }
+  return { timeScale, ...(timeScaleFromRelease !== undefined ? { timeScaleFromRelease } : {}) };
 }
 
 /**
  * The environment of a function that owns a scaled wait (the vault and
- * account functions, the PIN check of the sign-in trigger): `STAGE` and
- * `TIME_SCALE` only when the scale is not 1, so a production function never
- * has either (lambda/shared/time-scale.ts reads it only on `staging`).
- * Throws for a production config with any scale but 1, whoever built it.
+ * account functions, the PIN check of the sign-in trigger, the admin API's
+ * member routes for their email): `STAGE`, `TIME_SCALE` and
+ * `TIME_SCALE_FROM_RELEASE` only when the scale is not 1, so a production
+ * function never has any of them (lambda/shared/time-scale.ts reads them only
+ * on `staging`). Throws for a production config with any scale but 1, and
+ * for 24 on any stage but `staging`, whoever built the config.
  */
-export function timeScaleEnv(config: Pick<AppConfig, 'stage' | 'timeScale'>): Record<string, string> {
+export function timeScaleEnv(config: Pick<AppConfig, 'stage' | 'timeScale' | 'timeScaleFromRelease'>): Record<string, string> {
   if (config.stage === PROD_STAGE) {
     if (config.timeScale !== 1) throw new Error(`the production time scale is 1 (STAGING-TIME-SCALE §4); got ${JSON.stringify(config.timeScale)}`);
     return {};
   }
-  if (config.timeScale !== 1 && config.timeScale !== 24) throw new Error(`time scale: expected 1 or 24, got ${JSON.stringify(config.timeScale)}`);
-  return config.timeScale === 1 ? {} : { STAGE: config.stage, TIME_SCALE: String(config.timeScale) };
+  if (config.timeScale === 1) return {};
+  if (config.stage !== 'staging' || config.timeScale !== 24) throw new Error(`time scale: only the staging stage may have 24; got ${JSON.stringify(config.timeScale)} on ${config.stage}`);
+  if (!Number.isInteger(config.timeScaleFromRelease) || config.timeScaleFromRelease! < 1) throw new Error('time scale 24 needs timeScaleFromRelease');
+  return { STAGE: config.stage, TIME_SCALE: String(config.timeScale), TIME_SCALE_FROM_RELEASE: String(config.timeScaleFromRelease) };
 }
 
 /**

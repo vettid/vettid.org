@@ -7,7 +7,7 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as route53targets from 'aws-cdk-lib/aws-route53-targets';
 import { Construct } from 'constructs';
-import { AppConfig, accountPushFunctionName, hostName, resourceName, vaultServiceParamName } from '../config';
+import { AppConfig, accountPushFunctionName, hostName, resourceName, timeScaleEnv, vaultServiceParamName } from '../config';
 import { RestRouteGroup } from '../constructs/rest-route-group';
 import { readRef } from '../constructs/ssm-refs';
 import { tableEnv } from '../constructs/table-grants';
@@ -157,6 +157,9 @@ export class VettidOrgAdminApiStack extends cdk.Stack {
     // tables. That function runs only this task; the cleanup job itself
     // (its daily and scheduled runs) is not invocable from here. The ARN
     // comes from SSM, so VettidOrgMemberApiStack is deployed first.
+    // The cancel's email says when a new start-over would run: it follows the
+    // staging time scale (MEMBER-API 2.8.0); nothing in production.
+    for (const [k, v] of Object.entries(timeScaleEnv(config))) people.addEnvironment(k, v);
     const startOverCancelFnArn = readRef(this, config, 'member-api/start-over-cancel-fn-arn');
     people.addEnvironment('START_OVER_CANCEL_FN', startOverCancelFnArn);
     people.addToRolePolicy(new iam.PolicyStatement({ actions: ['lambda:InvokeFunction'], resources: [startOverCancelFnArn] }));
