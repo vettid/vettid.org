@@ -27,8 +27,8 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.44.0: normative, approved by the owner 2026-10-18 (vettid.org #338; the
-    number is settled at merge, after #336's 0.43.0); **no vault
+  - 0.44.0: normative, approved by the owner 2026-10-18 (vettid.org #338);
+    **no vault
     release**: the vault as built already answers every case below
     (vettid-vault main 9378113: `vault/inbound.go` checks `exp`, then
     the inner-id dedupe and its 24-hour response cache, before any
