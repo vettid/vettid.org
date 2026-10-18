@@ -29,6 +29,7 @@ import * as keys from './recovery-keys.js';
 import { LOCATOR_RE, SealError, cancelGoneOutcome, cancelNotFound, fromBase64, openSealedCode, qrPayload, toBase64, typedForm, typedRows } from './recovery-code.js';
 import { qrModules, qrSvg } from './qr.js';
 import * as ui from './ui.js';
+import { STAGING_NOTE, scaleText, siteConfig } from './site-config.js';
 import { dateTime, timeUntil } from './vault-text.js';
 
 ui.init();
@@ -48,6 +49,19 @@ let codeShown = false;
 let pollTimer = null;
 let tickTimer = null;
 let pollWhenVisible = false;
+let scale = 1; // the staging time scale (config.json; 1 in production)
+
+/** A text with its durations scaled (unchanged at scale 1). */
+const t = (text) => scaleText(text, scale);
+
+/** The page's lede (static HTML) follows the scale too; on staging it is followed by "Staging: 1 day = 1 hour". */
+function scaleLede() {
+  const lede = document.getElementById('rec-lede');
+  if (!lede || scale === 1 || lede.dataset.scaled) return;
+  lede.dataset.scaled = '1';
+  lede.textContent = t(lede.textContent);
+  lede.after(el('p', { class: 'muted' }, STAGING_NOTE));
+}
 
 const isActive = (r) => !!r && (r.state === 'pending' || r.state === 'available' || (r.state === 'registered' && Date.parse(r.expires_at) > Date.now()));
 /** The code (or, 2.1.0, the vault's refusal) is still to be opened: its key must be kept. */
@@ -65,6 +79,8 @@ const recoveryVaultId = () => recovery?.vault_id ?? vault?.vault_id;
  */
 async function load({ focus } = {}) {
   clearTimers();
+  scale = (await siteConfig()).timeScale;
+  scaleLede();
   let fetched = null;
   try {
     const st = await get('/api/vault/status');
@@ -273,8 +289,8 @@ function renderRequest() {
     el('ul', { class: 'rec-points' },
       el('li', {}, el('strong', {}, 'Recovery is for a lost phone. '), "It's how a new phone takes over when the phone with your VettID app is gone."),
       el('li', {}, el('strong', {}, 'Your vault locks right away. '), "During the recovery your old app can't open it. Unlocking it there with your vault PIN cancels the recovery."),
-      el('li', {}, el('strong', {}, 'There is a 24-hour wait. '), "We email you a link to cancel, in case it wasn't you."),
-      el('li', {}, el('strong', {}, 'Then a one-time code appears here, '), 'as a QR code, for 24 hours. It opens only in this browser on this computer: use a regular (not private) window, and don\'t clear this site\'s data until you\'re done.'),
+      el('li', {}, el('strong', {}, t('There is a 24-hour wait. ')), "We email you a link to cancel, in case it wasn't you."),
+      el('li', {}, el('strong', {}, 'Then a one-time code appears here, '), t('as a QR code, for 24 hours. It opens only in this browser on this computer: use a regular (not private) window, and don\'t clear this site\'s data until you\'re done.')),
       el('li', {}, el('strong', {}, 'Your new phone needs '), 'the VettID app, the code, your vault PIN and your credential password.'),
       el('li', {}, el('strong', {}, 'The new app replaces the old one, '), 'which is removed and can no longer use your vault. Desktops and agents you paired stay paired.'),
     ),
@@ -289,7 +305,7 @@ function renderRequest() {
     action = el('section', { class: 'card', 'aria-labelledby': 'h-rec-start' },
       sectionHead('h-rec-start', 'Start a recovery'),
       callout('error', "This browser can't keep the recovery key",
-        'Recovery needs a private key that stays in this browser for up to 48 hours (IndexedDB and Web Crypto). Private windows and some privacy settings block that. Open this page in a regular window of an up-to-date browser.'));
+        t('Recovery needs a private key that stays in this browser for up to 48 hours (IndexedDB and Web Crypto). Private windows and some privacy settings block that. Open this page in a regular window of an up-to-date browser.')));
   } else {
     const box = el('input', { type: 'checkbox', id: 'rec-agree' });
     const submit = el('button', { type: 'submit', class: 'btn btn-danger-solid', disabled: true }, 'Lock my vault and start recovery');
@@ -297,7 +313,7 @@ function renderRequest() {
       submit.disabled = !box.checked;
     });
     const form = el('form', {},
-      ui.checkRow(box, "I've lost the phone with my VettID app. I understand that my vault locks now and that the code is ready here in 24 hours."),
+      ui.checkRow(box, t("I've lost the phone with my VettID app. I understand that my vault locks now and that the code is ready here in 24 hours.")),
       el('div', { class: 'actions' }, submit, el('a', { class: 'btn', href: '/account/#vault' }, 'Not now')));
     form.addEventListener('submit', (e) => {
       e.preventDefault();
@@ -336,7 +352,7 @@ async function startRecovery(form) {
   const ok = await ui.confirm({
     title: 'Lock your vault and start a recovery?',
     body: [
-      'Your vault locks now. In 24 hours, a one-time recovery code appears on this page, in this browser.',
+      t('Your vault locks now. In 24 hours, a one-time recovery code appears on this page, in this browser.'),
       "We'll email you a link to cancel. Your old app can also cancel by unlocking the vault.",
     ],
     confirmLabel: 'Start recovery',
@@ -384,7 +400,7 @@ async function cancelRecovery(b) {
     title: 'Cancel the recovery?',
     body: [
       'The recovery code stops working. Your vault stays locked, and your old app can unlock it again with your vault PIN.',
-      'You can start a new recovery afterwards; it starts a new 24-hour wait.',
+      t('You can start a new recovery afterwards; it starts a new 24-hour wait.'),
     ],
     confirmLabel: 'Cancel recovery',
     cancelLabel: 'Keep it',
@@ -439,7 +455,7 @@ async function recoveryGone(id) {
 function noKeyCallout() {
   return callout('error', "This browser can't open the code",
     'The recovery code opens only in the browser where the recovery was started, and only while that browser keeps this site\'s data. This browser doesn\'t have the key: it may be a different browser or computer, a private window, or the site data was cleared.',
-    'If you can, come back here in the browser you started from. Otherwise cancel this recovery and start a new one here; that starts a new 24-hour wait.');
+    t('If you can, come back here in the browser you started from. Otherwise cancel this recovery and start a new one here; that starts a new 24-hour wait.'));
 }
 
 function renderPending() {
@@ -493,7 +509,7 @@ function renderAvailable() {
         ? noKeyCallout()
         : callout('error', "The code couldn't be opened here",
           "This browser's key doesn't open it. Either the recovery was started in another browser, or your vault couldn't prepare a code.",
-          'Cancel this recovery and start a new one here; that starts a new 24-hour wait.'),
+          t('Cancel this recovery and start a new one here; that starts a new 24-hour wait.')),
       times,
       el('div', { class: 'actions' }, cancelButton())));
     return;

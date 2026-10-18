@@ -3400,14 +3400,16 @@ describe('2.1.0: delete my vault and start over (§11.11.9)', () => {
       return row.deletes_at - row.requested_at;
     };
 
-    test('staging at 1: 24 hours', async () => {
+    test('staging at 1: 24 hours; the email has no note', async () => {
       Object.assign(process.env, { STAGE: 'staging', TIME_SCALE: '1' });
       expect(await deletesAt()).toBe(86_400);
+      expect(mails()[0].text).not.toContain('Staging');
     });
 
-    test('staging at 24: 1 hour (deletes_at, the cancel link and the email)', async () => {
+    test('staging at 24: 1 hour (deletes_at, the cancel link and the email, which adds the note)', async () => {
       Object.assign(process.env, { STAGE: 'staging', TIME_SCALE: '24' });
       expect(await deletesAt()).toBe(3_600);
+      expect(mails()[0].text.endsWith('\n\nStaging: 1 day = 1 hour.')).toBe(true);
     });
 
     test('TIME_SCALE outside staging is ignored: 24 hours', async () => {
@@ -3919,6 +3921,69 @@ describe('2.7.0: recovery from release R', () => {
       expect(vault.slotTime('2026-10-05T12:00:00Z')).toBe(Date.UTC(2026, 9, 5, 12) / 1000);
       expect(vault.slotTime('2026-10-05T12:00:00.4Z')).toBe(Date.UTC(2026, 9, 5, 12) / 1000 + 1); // rounded up, never earlier
       for (const bad of ['2026-10-05', '2026-10-05 12:00:00Z', 1_760_000_000, null, '']) expect(vault.slotTime(bad)).toBeNull();
+    });
+  });
+
+  // MEMBER-API 2.8.0 "Staging time scale" (S5, S6): the estimates of POST
+  // /api/vault/recovery and the API's floors are divided by the scale on
+  // staging only; the request email states the scaled durations and the note.
+  describe('the staging time scale', () => {
+    afterEach(() => {
+      delete process.env.STAGE;
+      delete process.env.TIME_SCALE;
+    });
+    const estimates = async () => {
+      const r = await call('POST', '/api/vault/recovery', { browser_key: BK });
+      expect(r.status).toBe(202);
+      const row = getItem('vaults', VID).recovery;
+      expect(r.body).toMatchObject({ available_at: isoS(row.available_at), expires_at: isoS(row.expires_at), earliest: true });
+      expect(getItem('requests', `rcancel#${row.cancel_key}`).expires_at).toBe(row.expires_at);
+      expect(getItem('requests', `recovery-locator#${row.locator}`).expires_at).toBe(row.expires_at);
+      return { rid: r.body.recovery_id as string, available: row.available_at - NOW, expires: row.expires_at - NOW, mail: mails().find((m) => m.subject === 'VettID vault recovery requested')!.text };
+    };
+
+    test('production (no STAGE): request + 24 h and + 48 h; the email reads as before', async () => {
+      const e = await estimates();
+      expect([e.available, e.expires]).toEqual([DAY, 2 * DAY]);
+      expect(e.mail).toContain('at the earliest, for 24 hours. The time can be later: a vault cannot be recovered until three days after');
+      expect(e.mail).not.toContain('Staging');
+    });
+
+    test('staging at 1: request + 24 h and + 48 h, no note', async () => {
+      Object.assign(process.env, { STAGE: 'staging', TIME_SCALE: '1' });
+      const e = await estimates();
+      expect([e.available, e.expires]).toEqual([DAY, 2 * DAY]);
+      expect(e.mail).not.toContain('Staging');
+    });
+
+    test('staging at 24: request + 1 h and + 2 h, still earliest; the email says 1 hour, 3 hours and the note', async () => {
+      Object.assign(process.env, { STAGE: 'staging', TIME_SCALE: '24' });
+      const e = await estimates();
+      expect([e.available, e.expires]).toEqual([H, 2 * H]);
+      expect(e.mail).toContain('at the earliest, for 1 hour. The time can be later: a vault cannot be recovered until 3 hours after');
+      // The recovery waits W(k) are not divided by the scale (STAGING-TIME-SCALE §2.1, T6).
+      expect(e.mail).toContain('starts at one day and grows to thirty days');
+      expect(e.mail.endsWith('\n\nStaging: 1 day = 1 hour.')).toBe(true);
+    });
+
+    test('staging at 24: the floors are 1 h and 1 h; the enclave\'s later times win', async () => {
+      Object.assign(process.env, { STAGE: 'staging', TIME_SCALE: '24' });
+      const { rid } = await estimates();
+      answer(rid, { not_before: isoS(NOW + 600), expires: isoS(NOW + 1200) });
+      await call('GET', '/api/vault/recovery');
+      expect(getItem('vaults', VID).recovery).toMatchObject({ available_at: NOW + H, expires_at: NOW + 2 * H, enclave_times: true });
+      vaultOf('g2', { vault_id: 'e'.repeat(32), state: 'locked', sealed_release: R0 });
+      const r2 = (await call('POST', '/api/vault/recovery', { browser_key: BK }, { guid: 'g2' })).body.recovery_id;
+      answer(r2, { not_before: isoS(NOW + 3 * H), expires: isoS(NOW + 4 * H) });
+      await call('GET', '/api/vault/recovery', undefined, { guid: 'g2' });
+      expect(getItem('vaults', 'e'.repeat(32)).recovery).toMatchObject({ available_at: NOW + 3 * H, expires_at: NOW + 4 * H });
+    });
+
+    test('TIME_SCALE outside staging is ignored', async () => {
+      Object.assign(process.env, { STAGE: 'prod', TIME_SCALE: '24' });
+      const e = await estimates();
+      expect([e.available, e.expires]).toEqual([DAY, 2 * DAY]);
+      expect(e.mail).not.toContain('Staging');
     });
   });
 

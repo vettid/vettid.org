@@ -172,7 +172,7 @@ import type { MemberItem } from '../shared/model';
 import { hit } from '../shared/ratelimit';
 import { sendMail } from '../shared/mail';
 import { signRecoveryRequest } from '../shared/recovery-sign';
-import { scaledSeconds } from '../shared/time-scale';
+import { scaledMail, scaledSeconds } from '../shared/time-scale';
 import { vaultService } from '../shared/vault-service';
 import {
   INSTANCE_ID_RE,
@@ -1530,7 +1530,11 @@ router.on('POST', '/api/vault/enroll/redeem', async (req) => {
 // holds that ciphertext until the recovery expires. The API gates when it is
 // released; the enclave enforces the same times on its own.
 
-/** The code becomes usable 24 h after the request, for 24 h (§11.11.2). */
+/**
+ * The code becomes usable 24 h after the request, for 24 h (§11.11.2). On
+ * staging both are divided by the time scale when used (S5, S6; MEMBER-API
+ * 2.8.0 "Staging time scale"): the estimates and the API's own floors.
+ */
 export const RECOVERY_DELAY_S = 24 * 3600;
 export const RECOVERY_VALIDITY_S = 24 * 3600;
 const CANCEL_LINK_PREFIX = 'rcancel#';
@@ -1744,7 +1748,7 @@ const cancelUrlOf = (token: string) => `https://${env('ACCOUNT_HOST')}/vault/rec
  * become `available_at` and `expires_at` (once, while `pending`), and
  * `earliest` stays only if the enclave set it (it could not read its
  * counter). The API keeps its own floor: never earlier than request + 24 h,
- * never open for less than 24 h, and never longer than RECOVERY_MAX_SPAN_S
+ * never open for less than 24 h (both divided by the staging time scale), and never longer than RECOVERY_MAX_SPAN_S
  * after the request (a `not_before` past that cap is shown as it is, and
  * the recovery expires at the cap without becoming available). A release before R sends none of them: the API's own
  * times stand, marked `earliest`. Returns the recovery as it now is.
@@ -1757,8 +1761,8 @@ async function applyEnclaveTimes(v: VaultRow, r: RecoveryRow, slot: Record<strin
   // Never a time earlier than the enclave's. With a not_before past the cap
   // the recovery can never become available: it is kept pending and ends
   // (expired) at the cap, and the account site shows the enclave's time.
-  const availableAt = Math.max(r.requested_at + RECOVERY_DELAY_S, notBefore);
-  const expiresAt = Math.min(r.requested_at + RECOVERY_MAX_SPAN_S, Math.max(expires, availableAt + RECOVERY_VALIDITY_S));
+  const availableAt = Math.max(r.requested_at + scaledSeconds(RECOVERY_DELAY_S), notBefore);
+  const expiresAt = Math.min(r.requested_at + RECOVERY_MAX_SPAN_S, Math.max(expires, availableAt + scaledSeconds(RECOVERY_VALIDITY_S)));
   const earliest = slot.earliest === true;
   const before = r.expires_at;
   try {
@@ -2244,7 +2248,8 @@ router.on('POST', '/api/vault/recovery', async (req) => {
     throw vaultError(409, 'recovery_unavailable', 'This vault cannot be recovered: its credential backup is off. You can delete it and start over.', { reason: 'no_backup' });
   }
   const inst = await recoveryInstance(v, now, isCanaryMember(m));
-  const expiresAt = now + RECOVERY_DELAY_S + RECOVERY_VALIDITY_S;
+  const availableAt = now + scaledSeconds(RECOVERY_DELAY_S);
+  const expiresAt = availableAt + scaledSeconds(RECOVERY_VALIDITY_S);
   // 2.4.0: the typed form's locator, minted with the request. Its row is
   // written first, so the recovery never names a locator without a row; a
   // row whose request then fails names no current recovery (a miss) and expires.
@@ -2253,13 +2258,13 @@ router.on('POST', '/api/vault/recovery', async (req) => {
   const link = await mintCancelLink(v, m, recoveryId, expiresAt);
   // 2.7.0: the times are the earliest possible until the enclave's slot says (`earliest`).
   const r: RecoveryRow = {
-    recovery_id: recoveryId, state: 'pending', requested_at: now, available_at: now + RECOVERY_DELAY_S, expires_at: expiresAt, locator, earliest: true, cancel_key: link.key,
+    recovery_id: recoveryId, state: 'pending', requested_at: now, available_at: availableAt, expires_at: expiresAt, locator, earliest: true, cancel_key: link.key,
   };
   await setRecovery(v, r, v.recovery?.recovery_id ?? null, true);
   // The slot keeps the sealed code until the recovery expires.
   await enqueue('recovery', m, v, recoveryId, inst, undefined, { extra: { browser_key: bk as string, ...sig }, ttlS: r.expires_at - now + 3600 });
   await audit(memberActor(m.user_guid), 'vault.recovery_request', m.user_guid, { vault_id: v.vault_id, recovery_id: recoveryId, instance_id: inst.instance_id });
-  await notify(m.email, 'VettID vault recovery requested', requestedMail(cancelUrlOf(link.token), r.available_at));
+  await notify(m.email, 'VettID vault recovery requested', scaledMail(requestedMail(cancelUrlOf(link.token), r.available_at)));
   return new WithStatus(202, { recovery_id: recoveryId, available_at: iso(r.available_at), expires_at: iso(r.expires_at), earliest: true });
 });
 
@@ -2690,7 +2695,7 @@ router.on('POST', '/api/vault/deletion', async (req) => {
   );
   await audit(memberActor(m.user_guid), 'vault.deletion_request', m.user_guid, { vault_id: v.vault_id, deletion_id: d.deletion_id, deletes_at: iso(d.deletes_at) });
   await notify(m.email, 'VettID: your vault will be deleted',
-    deletionRequestedMail(`https://${env('ACCOUNT_HOST')}/vault/deletion/cancel#t=${token}`, d.requested_at, d.deletes_at));
+    scaledMail(deletionRequestedMail(`https://${env('ACCOUNT_HOST')}/vault/deletion/cancel#t=${token}`, d.requested_at, d.deletes_at)));
   return new WithStatus(202, { deletion_id: d.deletion_id, requested_at: iso(d.requested_at), deletes_at: iso(d.deletes_at) });
 });
 

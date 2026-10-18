@@ -8,7 +8,7 @@
 
 import { get, post } from './api.js';
 import { newUlid } from './recovery-code.js';
-import { siteConfig } from './site-config.js';
+import { STAGING_NOTE, scaleText, siteConfig } from './site-config.js';
 import { $, chip, date, el, fill, mono } from './dom.js';
 import * as ui from './ui.js';
 import { dateTime, releaseNotice, releaseStatus, servicePaused, vaultState } from './vault-text.js';
@@ -303,6 +303,8 @@ function renderHelp() {
     return;
   }
   sec.hidden = false;
+  // The staging time scale (config.json): 1 in production, where the texts read as written.
+  const scale = config?.timeScale ?? 1;
   fill(sec,
     sectionHead('h-vault-help', 'New phone or lost phone'),
     el('div', { class: 'paths' },
@@ -316,14 +318,15 @@ function renderHelp() {
           el('a', { class: 'btn', href: DELETION_PAGE }, v.deletion ? 'View the deletion' : 'Delete my vault and start over'))
         : el('div', { class: 'path' },
           el('h3', {}, 'Lost it?'),
-          el('p', {}, 'Start a recovery here. Your vault locks at once; after 24 hours your new phone can take over with a one-time code, your vault PIN and your credential password. A recovery works only with the credential backup on.'),
+          el('p', {}, scaleText('Start a recovery here. Your vault locks at once; after 24 hours your new phone can take over with a one-time code, your vault PIN and your credential password. A recovery works only with the credential backup on.', scale)),
           el('a', { class: 'btn', href: RECOVERY_PAGE }, v.recovery ? 'View the recovery' : 'Recover your vault')),
       v.credential_backup === false && !v.recovery
         ? null
         : el('div', { class: 'path' },
           el('h3', {}, 'Start over?'),
-          el('p', {}, 'Delete your vault and set up a new, empty one. It takes 24 hours and can be cancelled until then; everything in the vault is lost. If you can recover your vault, a recovery keeps it instead.'),
+          el('p', {}, scaleText('Delete your vault and set up a new, empty one. It takes 24 hours and can be cancelled until then; everything in the vault is lost. If you can recover your vault, a recovery keeps it instead.', scale)),
           el('a', { class: 'btn', href: DELETION_PAGE }, v.deletion ? 'View the deletion' : 'Delete my vault and start over')),
     ),
+    scale === 1 ? null : el('p', { class: 'muted' }, STAGING_NOTE),
   );
 }
