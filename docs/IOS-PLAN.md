@@ -1,9 +1,13 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.4
+version: 0.1.5
 date: 2026-10-18
 changelog:
+  - 0.1.5: approved by the owner 2026-10-18 (VAULT-MESSAGING 0.46.0;
+    ANDROID-PLAN 0.1.47). §6.3: a renew settled before a PIN change,
+    settled on answers only, "Finish the move" refused while a change is
+    unresolved or a PIN uncertain. The texts are Android's
   - 0.1.4: approved by the owner 2026-10-18 (VAULT-MESSAGING 0.45.0
     §11.14.9 "A lost answer"; ANDROID-PLAN 0.1.46). §6.3's lost-answer
     paragraph follows the corrections: nothing else in flight when a
@@ -485,6 +489,13 @@ Public keys are SEC1 uncompressed (`x963Representation` in CryptoKit,
        secrets, and after a PIN change keeps the PIN uncertain until a
        two-step unlock settles it;
      - the decision is shown once, wherever the member is.
+     (0.1.5) As in VAULT-MESSAGING 0.46.0 and ANDROID-PLAN 0.1.47: an
+     unanswered `vault.secret.renew` is recorded and decided by
+     `credential.version` before a PIN change is sent, with "Lock and
+     unlock now" when the version cannot decide (the PIN is unchanged,
+     so that unlock costs nothing); a pending credential request is
+     settled only by its answer or a vault answer's `ts`; "Finish the
+     move" is refused while a change is unresolved or a PIN uncertain.
   3. A candidate becomes current on its operation's answer, or when an
      unlock answered `device_secret` with the current record is tried
      with the candidates, newest first, and one gets `ok`, `bad_pin` or

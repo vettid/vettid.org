@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.45.0
+version: 0.46.0
 date: 2026-10-18
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.7.1)
-  - ANDROID-PLAN.md (0.1.46)
-  - IOS-PLAN.md (0.1.4; §9.1 VA1–VA3)
+  - ANDROID-PLAN.md (0.1.47)
+  - IOS-PLAN.md (0.1.5; §9.1 VA1–VA3)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,25 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.46.0: normative; **approved by the owner 2026-10-18**; **needs a
+    vault release** (staging) for (1). (1) **Failed checks**: in
+    `credential.password.change` a `bad_pin` and a `bad_password` each
+    count as a failed owner check (§3.6.4), and so in every credential
+    operation that tests the PIN or the password; a request refused
+    before any secret is tested counts nothing (§3.6.1, §11.14.9).
+    (2) **A renew is settled before a PIN change** (§11.14.9 "A lost
+    answer" step 1): an unanswered `vault.secret.renew` is recorded
+    before sending and decided by `credential.version`; while it could
+    still apply a PIN change is refused, and when the version cannot
+    decide, the app offers a lock and unlock, which costs nothing because
+    the PIN has not changed. Step 5's "other candidates first" stays only
+    as the fallback. (3) **Settled on answers only**: a pending
+    credential request is settled by its answer or by the `ts` of a
+    vault answer, not by other vault messages; one `credential.version`
+    may be sent to obtain a vault time. (4) **"Finish the move"** is one
+    of the lock-and-unlock flows refused while a change is unresolved or
+    a PIN uncertain; only step 5's two-step prompts send a PIN with a
+    candidate. ANDROID-PLAN 0.1.47 and IOS-PLAN 0.1.5 follow
   - 0.45.0: normative, approved by the owner 2026-10-18; corrects and completes
     0.44.0's "A lost answer" (§11.14.9). A minor version rather than a
     patch, because it adds app rules and a vault order of checks;
@@ -2446,7 +2465,12 @@ vault:
 
 A `bad_pin` (step 5) or `bad_password` (step 7) is a **failed check**
 (§3.6.4). Other refusals (`backoff`, `utk_invalid`, `stale_credential`,
-a clone) are not: they test no guess.
+a clone) are not: they test no guess. (0.46.0) The same holds for
+**every credential operation that tests the PIN or the password**
+(for example `pin.change`, `credential.password.change`,
+`vault.secret.renew`, `credential.create` and a transfer's approval):
+its `bad_pin` or `bad_password` counts as a failed check, and a request
+refused before any secret is tested counts nothing.
 
 **The record**, in DEK state (§3.3), so it survives locks:
 `owner_check = {last_at, deadline, failures}`. A check sets `last_at`
@@ -15418,7 +15442,11 @@ From release R:
   request with an old blob and a wrong PIN is answered `bad_pin` and
   counted, and a clone's PIN guesses are answered before the alarm is
   raised. A vault release corrects this; an app that follows "A lost
-  answer" below never sends such a request.
+  answer" below never sends such a request. (0.46.0) Its `bad_pin` and
+  its `bad_password` **each count as a failed owner check** (§3.6.4),
+  as in the owner check itself and in `pin.change`; a request refused
+  before any secret is tested (`stale_credential`, a clone) counts
+  nothing (§3.6.1).
 - **`vault.secret.renew`** gives the phone a new secret with the PIN
   unchanged: it opens the current wrap with the pair, wraps a replaced
   DEK for the PIN and `new_unlock_secret`, and makes a new `opener`. The
@@ -15459,6 +15487,23 @@ change instead of repeating it.
      answers, for at most 30 s, and if they do not come it refuses the
      change with nothing sent. This is what makes "version + 1" in step
      3 mean this change and no other.
+   - (0.46.0) **Settled on answers only.** A credential request the app
+     sent is settled by its answer, or by the `ts` of an answer from the
+     vault (to any request) that is more than 1 minute after the
+     request's `exp`, as in step 3. Other messages from the vault
+     (events, notices) settle nothing. When every pending request
+     should have expired by the phone's estimate, the app may send one
+     `credential.version` to obtain a vault time.
+   - (0.46.0) **A renew is settled before a PIN change.** The app records
+     an unresolved `vault.secret.renew` before sending it, as in the
+     next bullet, and decides a lost answer by `credential.version` with
+     step 3's table. A PIN change is sent only once every renew is
+     decided. While a renew could still apply, the PIN change is refused
+     with the "earlier request" text. When the version cannot decide it
+     (step 3's "ends without a decision"), the PIN change is refused and
+     the app offers to lock and unlock the vault: the PIN has not
+     changed, so the unlock costs nothing, and it confirms the renew's
+     candidate or the current record (§11.14.1 rule 4).
    - Besides the candidate record of a PIN change (§11.14.1 rule 1), the
      app durably stores an **unresolved change**: the type, the inner
      `id`, the blob version the request carries, and the request's
@@ -15484,7 +15529,10 @@ change instead of repeating it.
    blob that may be stale. (0.45.0) It also refuses a **release update**
    (§11.10.3: the update locks the vault and carries its approval in an
    unlock) and any other flow that locks and unlocks the vault with a
-   PIN typed outside the unlock of step 5. The member may still lock the
+   PIN typed outside the unlock of step 5, "Finish the move" of a
+   transfer (§11.14.10) included (0.46.0); the same holds while a PIN is
+   uncertain (step 3). Only the unlock's two-step prompts of step 5 send
+   a PIN with a candidate. The member may still lock the
    vault (§3.6.8, §10.2); the next unlock follows step 5. The app
    decides the change first: at once, and again whenever it reconnects
    or starts.
@@ -15564,7 +15612,10 @@ change instead of repeating it.
    - `device_secret` shows that the vault holds another epoch than the
      current record, decided before any PIN is tested. (0.45.0) The app
      asks for the **new PIN** only when the change's candidate is the
-     only unconfirmed candidate left. Otherwise, for example after an
+     only unconfirmed candidate left. (0.46.0) Since a renew is settled
+     before a PIN change is sent (step 1), this arises only as a
+     fallback, for a renew candidate left from before that rule.
+     Otherwise, for example after an
      unanswered `vault.secret.renew`, whose candidate goes with the
      previous PIN, it first tries the other candidates with the previous
      PIN already typed, newest first, each once. `device_secret` from
@@ -15620,8 +15671,9 @@ guess. No step drops a record or a key: the candidate is kept until an
 answer or an unlock decides it, as before.
 
 `vault.secret.renew` has the same shape, but a retry with the same PIN
-and password spends nothing; the app MAY decide it the same way, and
-step 5 covers a renew candidate that is left unconfirmed.
+and password spends nothing. (0.46.0) Its lost answer is recorded and
+decided as step 1 says, before any PIN change; step 5's fallback covers
+a renew candidate left unconfirmed from before that rule.
 `credential.reset` is not covered here.
 
 #### 11.14.10 Transfer from release R
@@ -15986,6 +16038,9 @@ stricter answer winning. Two more are specified later:
   | vettid-vault (0.45.0) | `credential.password.change` checks the blob before the PIN (§11.14.9, the order of checks); e2e: an old blob with a wrong PIN answered `stale_credential` with no `vault.pin_failed`, and a non-holder's blob raising the clone alarm before any PIN test; a handled request resent after its `exp` dropped unanswered | **needs a vault release** (staging) |
   | vettid-android (0.45.0) | ANDROID-PLAN 0.1.46: nothing else in flight, the gate, release updates refused, `stale_credential` as not applied, `ok` not deciding, the candidates tried by the PIN they go with, the uncertain PIN, the one-time notice | app |
   | vettid-ios (0.45.0) | IOS-PLAN 0.1.4 §6.3 | app |
+  | vettid-vault (0.46.0) | `credential.password.change` counts its `bad_pin` and `bad_password` as failed owner checks, and every credential operation that tests the PIN or the password does the same, `credential.create` checked too (§3.6.1); vettid-vault #123 | **needs a vault release** (staging) |
+  | vettid-android (0.46.0) | ANDROID-PLAN 0.1.47: a renew settled before a PIN change, settled on answers only, "Finish the move" refused while a change is unresolved or a PIN uncertain | app |
+  | vettid-ios (0.46.0) | IOS-PLAN 0.1.5 §6.3 | app |
 
 - **Measurements before the numbers are final**, on a staging host: the
   heavy derivation's time and memory with other vaults running; how often

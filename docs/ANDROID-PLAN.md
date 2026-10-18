@@ -1,9 +1,18 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.46
+version: 0.1.47
 date: 2026-10-18
 changelog:
+  - 0.1.47: approved by the owner 2026-10-18 (VAULT-MESSAGING 0.46.0).
+    §4 "A lost answer to a PIN or password change": an unanswered
+    `vault.secret.renew` is recorded and decided by `credential.version`
+    before a PIN change is sent, with "Lock and unlock now" when the
+    version cannot decide (approved text); a pending credential request
+    is settled only by its answer or a vault answer's `ts`, with one
+    `credential.version` allowed to obtain a vault time; "Finish the
+    move" is refused while a change is unresolved or a PIN uncertain.
+    Tests follow
   - 0.1.46: approved by the owner 2026-10-18 (VAULT-MESSAGING 0.45.0
     §11.14.9 "A lost answer"). §4 "A lost answer to a PIN or password
     change", corrected and completed:
@@ -2257,10 +2266,30 @@ From this version:
   again in a minute." The `account.bin` update that stores the marker
   refuses when a marker with another `innerId` exists, so a double
   submit or the PIN and password screens together cannot overwrite it.
+  (0.1.47) A pending request is settled only by its answer, or by the
+  `ts` of a vault answer more than 1 minute after its `exp`; events and
+  other vault messages settle nothing. When every pending request should
+  have expired by the phone's estimate, the app may send one
+  `credential.version` to obtain a vault time.
+- (0.1.47) **A renew is settled before a PIN change.**
+  `renewPhoneSecret` stores an `UnresolvedChange` for
+  `vault.secret.renew` before sending, as for a change, and the resolver
+  decides its lost answer by `credential.version` with the same table.
+  `changePin` is sent only once no renew is unresolved: while one could
+  still apply, it is refused with the "earlier request" text above; when
+  the version cannot decide, it is refused with "VettID couldn't confirm
+  your last new phone secret. Before you change your PIN, lock your
+  vault and unlock it again: your PIN hasn't changed, so this doesn't
+  use an attempt." and a "Lock and unlock now" button. That unlock
+  confirms the renew's candidate or the current record. Trying other
+  candidates with the previous PIN at an unlock stays only as the
+  fallback for a renew candidate left from before this rule.
 - **No lock-and-unlock flow while unresolved.** `ReleaseUpdate` refuses
   to start, retry or abandon an update while a marker exists or a PIN is
   uncertain, with the "still checking" text. Every other flow that would
-  unlock with a PIN typed on its own screen does the same. A PIN typed
+  unlock with a PIN typed on its own screen does the same, (0.1.47) "Finish
+  the move" on a transfer's new phone included. Only the unlock screen's
+  two-step prompts send a PIN with a candidate. A PIN typed
   outside the two-step unlock screen is never sent with a candidate.
   Locking stays possible.
 - **Ended without a decision** (another version, no credential, an
