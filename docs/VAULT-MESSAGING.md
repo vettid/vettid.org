@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.41.0
+version: 0.42.0
 date: 2026-10-18
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -16,7 +16,7 @@ related:
   - MEMBER-API.md (2.7.1)
   - ANDROID-PLAN.md (0.1.43)
   - IOS-PLAN.md (0.1.1; §9.1 VA1–VA3)
-  - AGENT-PLAN.md (0.1.4; §7.3 Q3–Q5; §4.5, AV7, AV8)
+  - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
@@ -26,6 +26,24 @@ related:
   - VAULT-HOST-PROTOCOL.md (0.1.12; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
 changelog:
+  - 0.42.0: normative once approved; **wording for the owner's
+    approval** (owner decision of 2026-10-18 to support all four ways,
+    AGENT-PLAN 0.1.5 AG13); **needs a vault release** (staging).
+    **Ways to use a secret** (§10.11): per agent and included item the
+    member allows a set of ways, `use` always and `run`, `proxy` and
+    `reveal` each on its own (`leash.item.set`, `leash.item.list`,
+    `sync.event{leash.item.changed}`; widening needs the unlock window).
+    New `agent.request` ops `item.run` (the value for one approved
+    command, with programs the item may be bound to) and `item.proxy`
+    (the value for one bound host and a bounded time, always referred).
+    `item.get` now needs `reveal`, off by default; every existing agent
+    item starts without it (nothing shipped uses it). `catalog` gives
+    each item's `ways`, `programs` and `hosts`. New codes
+    `way_not_allowed` (body `{ways}`) and `program_not_allowed` (§10.1);
+    `approval.pending` carries `flags` (`shell`, `inline_code`,
+    `unbound_program`, `history`; §6.8, §10.3); audit and feed kinds
+    `leash.item.run`, `leash.item.proxy`, `leash.item.changed` (§10.9).
+    Not built yet in vettid-vault
   - 0.41.0: approved by the owner 2026-10-18 (AGENT-PLAN 0.1.4: one
     counter for the whole vault; no fallback for older vaults);
     **needs a vault release** (staging). **Grant-set sequence
@@ -4137,7 +4155,8 @@ While the vault is held, a session is suspended but still returned.
 device (`limit` beyond that):
 
 1. The vault sends the owner's apps `approval.pending{approval_id,
-   device_id, role, name, type, body, exp}` and the requester
+   device_id, role, name, type, body, exp, flags?}` (`flags`, 0.42.0:
+   warnings for an agent's way of using a secret, §10.11) and the requester
    `approval.waiting{approval_id, request_id, exp}`; a requester that
    receives it waits up to `exp` for the response instead of the usual
    30 s (§8.1).
@@ -4658,6 +4677,7 @@ an answer to an unknown or expired id is dropped.
 | | `approval.pending`, `approval.waiting` / `approval.decide` | V→D / D→V | — / req | A desktop's step-up request or an agent's referred request, held for an app (§6.8) |
 | | `agent.request` | D→V (agent) | req | LEASH: the catalog, an item its share rules include, a use of a field without exposure (§10.11) |
 | LEASH | `leash.grant.issue`, `.revoke`, `.list` | D→V | req | Manage agent grants (§10.11) |
+| | `leash.item.set`, `.list` | D→V | req | How an agent may use an included item (0.42.0, §10.11) |
 | | `leash.grant.updated` | V→D (agent) | | The agent's current grants, with their `grant_seq` (0.41.0) |
 | Wallet | `wallet.create`, `.list`, `.get`, `.update`, `.address.new`, `.address.list`, `.address.used`, `.psbt.inspect`, `.sign`, `.history`, `.balance` | D→V | req | BIP86 and BIP84 accounts of a phrase that is a critical item; PSBT signing (§10.18). Between connections: the wallet actions (§10.14) |
 | Location | `location.share.start`, `.stop`, `.list`, `location.get`, `location.request` | D→V | req | Share with one connection; ask a connection to share (§10.16) |
@@ -4777,6 +4797,10 @@ an answer to an unknown or expired id is dropped.
     after `quota_exceeded` within 24 hours of the last fresh standing
     token that refreshes gave that connection, and (0.33.1) any other
     refresh within an hour of it (§7.2; 0.32.1);
+  - (0.42.0) `way_not_allowed`: an agent's `item.get`, `item.run` or
+    `item.proxy` for an item whose settings do not allow that way, with
+    body `{ways}`; `program_not_allowed`: an `item.run` whose program
+    the item is not bound to (§10.11 "Ways to use a secret");
   - `bad_password`, `backoff`, `stale_credential`, `utk_invalid`: §3.5.3,
     §3.5.4. Since 0.17.0 a `backoff` error response's body is
     `{retry_after}`: the whole seconds, rounded up and at least 1, until
@@ -5009,7 +5033,7 @@ device belongs to the unlock it ends.
 | `device.session.granted` (to the device) | — | `{session_id, expires_at}` |
 | `device.session.end` (app: `{device_id}`; desktop, agent: `{}`, its own) | as left | `{}` |
 | `device.session.ended` (to the device) | — | `{reason: "denied" \| "ended"}` |
-| `approval.pending` (to apps) | — | `{approval_id, device_id, role, name, type, body, exp}`; `body` is the held request's body |
+| `approval.pending` (to apps) | — | `{approval_id, device_id, role, name, type, body, exp, flags?}`; `body` is the held request's body; (0.42.0) `flags`, for an agent's `item.run` and `item.get`: `shell`, `inline_code`, `unbound_program`, `history` (§10.11) |
 | `approval.waiting` (to the requester) | — | `{approval_id, request_id, exp}` |
 | `approval.decide` (app) | `{approval_id, approve: bool}` | `{result}`: `"ok"` or the error code the held request was answered with |
 
@@ -6975,7 +6999,10 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `leash.referrals_limited`, and, summarised per agent and hour,
   `leash.allowed`, `leash.refused`, `leash.item.read`,
   `leash.item.used` and `leash.throttled` with their `<kind>.summary`
-  entries (`ref` = the count) (§10.11); `grant.requested`,
+  entries (`ref` = the count) (§10.11); (0.42.0) `leash.item.run` and
+  `leash.item.proxy` (`ref` = `item_id`, summarised likewise) and
+  `leash.item.changed` (`ref` = `item_id`, with the agent's
+  `device_id`) (§10.11); `grant.requested`,
   `grant.denied` (`ref` = `request_id`), `grant.issued`,
   `grant.received`, `grant.fetched`, `grant.revoked` (`ref` = `grant_id`)
   (§10.12); `share.rule.created`, `share.rule.updated`,
@@ -7287,7 +7314,8 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
   (`ref` = `approval_id`), `connection.authenticate.requested`
   (`ref` = `request_id`), `call.missed` (`ref` = `call_id`),
   `leash.rate_limited` (`ref` = `grant_id`), `leash.item.read`
-  (`ref` = `item_id`; the first per agent and hour),
+  (`ref` = `item_id`; the first per agent and hour), (0.42.0)
+  `leash.item.run` and `leash.item.proxy` (likewise),
   `leash.agent.suspended`, `leash.referrals_limited`, `grant.request`
   (`ref` = `request_id`),
   `grant.revoked`, `grant.shared` (`ref` = `grant_id`), `share.pending`
@@ -8152,6 +8180,7 @@ LEASH's terms map as follows:
 | Expiry | Per grant (`expires_at`), and the agent's access session (§6.8) |
 | `leash.request_secret` (pattern 1) | `agent.request{op: "item.get"}` |
 | `leash.execute_action` (pattern 2) | `agent.request{op: "item.use"}` |
+| (VettID binding, 0.42.0) `leash.run_with_secret`, `leash.open_proxy` | `agent.request{op: "item.run"}`, `agent.request{op: "item.proxy"}` ("Ways to use a secret", below) |
 | `leash.check_status` | `approval.waiting`, then the held request's response (§6.8) |
 | `leash.list_available` | `agent.request{op: "catalog"}` |
 | `leash.connection_info` | `leash.grant.list` from the agent (its own grants) and `vault.status` |
@@ -8311,8 +8340,9 @@ first event in it), the first event of each kind is written singly;
 later ones are counted, and when the window ends the vault writes one
 `<kind>.summary` entry whose `ref` is the count of events not written
 singly. The kinds are `leash.allowed` (`ref` = `grant_id`),
-`leash.refused` (`ref` = the scope), `leash.item.read` and
-`leash.item.used` (`ref` = `item_id`), and `leash.throttled` (only
+`leash.refused` (`ref` = the scope), `leash.item.read`,
+`leash.item.used` and (0.42.0) `leash.item.run` and `leash.item.proxy`
+(`ref` = `item_id`), and `leash.throttled` (only
 ever summarised). An agent therefore adds at most two entries per kind
 and hour. The vault has no timers: a window's summaries are written when
 the agent's next window starts, at its suspension or resumption, or
@@ -8325,13 +8355,15 @@ whether or not the item exists. Critical items are never reachable by
 agents (§3.5).
 
 - `catalog` lists the included items' metadata: `{items: [{item_id,
-  name, category, labels: [{field_id, label, kind}]}]}`, never tags,
+  name, category, labels: [{field_id, label, kind}], ways, programs?,
+  hosts?}]}` (`ways` and the bindings since 0.42.0, below), never tags,
   rules or values.
 - `item.get{item_id, fields?}` returns `{item_id, name, category,
   fields: [{field_id, label, kind, value}], notes?}` (LEASH pattern 1,
   controlled exposure; `notes` only without `fields`; an unknown field is
   `not_found`), recorded as `leash.item.read` in the audit log and the
-  feed (the first per agent and hour; then summarised).
+  feed (the first per agent and hour; then summarised). (0.42.0) Only
+  for an item whose ways hold `reveal` (below).
 - `item.use{item_id, field_id, action: "hmac-sha256", data}` uses a
   field without exposing it (LEASH pattern 2): HMAC-SHA-256 with the
   value's UTF-8 bytes as the key over `data` (1–16,384 bytes, base64),
@@ -8339,6 +8371,135 @@ agents (§3.5).
   `leash.item.used`. An `address` field cannot be used (`not_found`).
   HTTP requests made by the vault with an injected secret need egress
   beyond the relay and are not offered (§15).
+
+**Ways to use a secret** (0.42.0; owner decision of 2026-10-18,
+AGENT-PLAN AG13). `item.get` hands a value to the agent's app, and many
+MCP clients keep every tool answer in their history or logs on disk,
+where the value can stay indefinitely. So an agent has four ways to use
+a field of an included item, best first, and MUST use the best one the
+item's settings allow for its task:
+
+| # | Way | In `ways` | Op | Who gets the value |
+|---|---|---|---|---|
+| 1 | Use without seeing | `use` | `item.use` (above) | the vault only |
+| 2 | Run a command with the secret | `run` | `item.run` | the connector, for the one process it starts |
+| 3 | Local proxy for an API key | `proxy` | `item.proxy` | the connector, to send to the item's bound host |
+| 4 | Reveal | `reveal` | `item.get` (above) | the agent and its app |
+
+- **Settings per agent and item.** The member sets, for each agent and
+  each item that agent's rules include, the ways it allows, with
+  `leash.item.set` (app):
+
+  ```json
+  item_ways: { "agent_id": "<device id>", "item_id": "<ULID>", "version": 1,
+               "ways": ["use", "run", "proxy"],
+               "run": { "programs": ["/usr/bin/git", "gh"], "each": true },
+               "proxy": { "hosts": ["api.example.com"], "header": "Authorization", "prefix": "Bearer " },
+               "updated_at": "<ts>" }
+  ```
+
+  - `ways` is a **set, not an order**: it always holds `use`, and each of
+    `run`, `proxy` and `reveal` is allowed on its own. Run and proxy fit
+    different secrets (a program's credential, an HTTP API key), and
+    allowing a proxy for an API key must not let any command receive it.
+    Absent settings mean `["use"]`.
+  - `run` is present exactly when `ways` holds `run`. `programs` (0–16)
+    binds the item to programs: an absolute path, matched exactly
+    against the request's `program`, or a bare name, matched against its
+    last path element (the connector finds names only on its fixed
+    search path, AGENT-PLAN §4.9). Empty means unbound. `each` (default
+    `true`) refers every run to an app; it can be `false` only when
+    `programs` is not empty.
+  - `proxy` is present exactly when `ways` holds `proxy`. `hosts` (1–8):
+    lowercase DNS names, each with an optional `:port` (default 443);
+    no wildcards, no IP literals. `header`: the HTTP field that carries
+    the credential, a token of 1–64 characters, not a hop-by-hop field,
+    `Host`, `Content-Length`, `Transfer-Encoding` or `Cookie`.
+    `prefix`: 0–32 printable ASCII characters put before the value
+    (`Bearer `). Otherwise `bad_request`.
+  - `reveal` has no further settings. In the app it is "May be shown to
+    agents", off by default.
+  - Settings exist while at least one rule of the agent includes the
+    item. When the item is withdrawn from all of them (§10.12), its
+    settings are deleted, so a later inclusion starts again at
+    `["use"]`.
+  - **Widening needs the member.** A `leash.item.set` that adds a way or
+    a program or a host, empties `programs`, or sets `each` to `false`
+    needs the credential's unlock window, as issuing a grant does
+    (`credential_locked` outside it). One that only narrows does not.
+  - Settings are per agent and item, not per rule, so the strictest
+    rule logic of §10.12 is not needed for them. They are not part of a
+    delegation (the vault enforces them, and a relying party never gets
+    a value through a delegation), and changing them does not take a
+    new `grant_seq`. Changes are announced as
+    `sync.event{leash.item.changed}` to apps and desktops and audited
+    (`leash.item.changed`, `ref` = `item_id`).
+- **Migration.** When a vault first runs 0.42.0, every included item of
+  every agent has `["use"]`: reveal is off until the member turns it on
+  for an item. No production vault answers agents (§11.10.8) and no
+  released connector reads values from the current vault, so nothing
+  shipped breaks. Staging agents, and tests that read values with the
+  reference client, set `reveal` first.
+- **The catalog** gives, per item, `ways` and, when present,
+  `programs` and `hosts` (never `header` or `prefix`), so the agent can
+  choose a way the item allows.
+- **Decisions.** An `item.get`, `item.run` or `item.proxy` for an item
+  whose settings do not hold that way is answered `way_not_allowed`
+  (body `{ways}`, the item's ways) and counted as *refused* (above,
+  with its cooldown). An `item.run` whose `program` does not match a
+  non-empty `programs` is answered `program_not_allowed`, also counted
+  as refused. Otherwise each is decided as an `items.read` request
+  (above: the windows and `uses` of every including rule count it),
+  and in addition it is **referred** to an app: an `item.run` when
+  `each` is `true` or `programs` is empty; an `item.proxy` always. An
+  `item.get` is referred as before (past a window), so `ask` still means
+  one prompt per item, not per read (owner decision of 2026-10-03).
+- `item.run{item_id, field_id, program, argv, cwd, how, name?, env?}`:
+  `program` is the absolute path the connector resolved for `argv[0]`;
+  `argv` 1–64 strings, each at most 4,096 bytes and 32,768 in all;
+  `cwd` an absolute path; `how` is `env` (the value in the variable
+  `name`), `stdin` (written to standard input) or `file` (an owner-only
+  temporary file whose path is in `name` and in each argument that is
+  exactly `{secret_file}`); `name` matches `^[A-Z_][A-Z0-9_]{0,63}$`,
+  is required for `env` and `file`, and is none of the connector's
+  minimal environment, `PATH`, `TMPDIR`, `TEMP` or `TMP`, nor starts with
+  `LD_` or `DYLD_`; `env` holds 0–32 more variables `{NAME: value}`,
+  names by the same rule, values at most 4,096 bytes. Otherwise
+  `bad_request`. An `address` field cannot be used (`not_found`). The
+  answer is `{item_id, field_id, value}`, for the connector to pass to
+  that one process only. Recorded as `leash.item.run`.
+- `item.proxy{item_id, field_id, host, seconds?}`: `host` one of the
+  item's `hosts`; `seconds` 60–3,600, default 900, cut to the access
+  session's end. A value that is not visible ASCII and spaces cannot
+  go in a header (`bad_request`); an `address` field cannot be used
+  (`not_found`). The answer is `{item_id, field_id, value, header,
+  prefix, host, expires_at}`. Recorded as `leash.item.proxy`.
+- **The connector holds the value** for a run or a proxy. The vault
+  cannot see what it does with it: these ways trust the connector, the
+  member's own program on the agent's computer, and not the agent. A
+  command or an API call chosen by a hijacked agent can still misuse the
+  secret; this is why the approval shows the command or the host, the
+  vault flags shells, and an item can bind programs.
+- **The approval** (`approval.pending`, §6.8) carries the held request's
+  `body` and, since 0.42.0, `flags`, set by the vault:
+  - `shell`: `program`'s last path element, without `.exe` and in any
+    case, is `sh`, `bash`, `zsh`, `dash`, `ksh`, `mksh`, `fish`, `csh`,
+    `tcsh`, `busybox`, `env`, `cmd`, `powershell` or `pwsh`;
+  - `inline_code`: it starts with `python`, `node`, `perl`, `ruby`,
+    `php` or `osascript` and an argument is `-c`, `-e`, `-E`, `-r` or
+    `--eval`;
+  - `unbound_program`: an `item.run` for an item whose `programs` is
+    empty;
+  - `history`: an `item.get`.
+
+  The app shows, for an `item.run`: the agent, the item and field, the
+  program, every argument unabridged (characters that are not printable
+  shown escaped), the directory, how the secret is passed (with the
+  variable's name), the other variables with their values, and a
+  warning for each flag; for an `item.proxy`: the agent, the item and
+  field, the host, the header's name and prefix (never the value) and
+  the length; for an `item.get`: the agent, the item, the fields and
+  that the agent's app may keep the value in its history.
 
 **Every grant is a signed delegation** (LEASH §3.5). The member's
 **credential key** (§3.5.1) signs each grant when it is issued, replaced
@@ -8589,7 +8750,9 @@ grant set carries a `grant_seq`:
 | `leash.grant.updated` (V→D, to the agent) | — | `{grants: [<grant>], suspended, grant_seq}`: all of its grants, after every change and at suspension and resumption; (0.41.0) `grant_seq` is the set's (above) |
 | `leash.agent.resume` (app) | `{agent_id}` | `{}`; `not_found` unless the agent is suspended |
 | `leash.status.get` (agent) | `{grant_id}` | `{grant_id, status, status_sig, rotations?}`; `not_found`, `forbidden` (suspended), `owner_check_required` (the vault is held, §3.6.3) |
-| `agent.request` (agent) | `{op: "catalog"}`, `{op: "item.get", item_id, fields?}` or `{op: "item.use", item_id, field_id, action: "hmac-sha256", data}` | `{items}`, `{item_id, name, category, fields, notes?}` or `{item_id, field_id, action, result}` |
+| `agent.request` (agent) | `{op: "catalog"}`, `{op: "item.get", item_id, fields?}` or `{op: "item.use", item_id, field_id, action: "hmac-sha256", data}`; (0.42.0) `{op: "item.run", item_id, field_id, program, argv, cwd, how, name?, env?}` or `{op: "item.proxy", item_id, field_id, host, seconds?}` | `{items}`, `{item_id, name, category, fields, notes?}` or `{item_id, field_id, action, result}`; (0.42.0) `{item_id, field_id, value}` or `{item_id, field_id, value, header, prefix, host, expires_at}`; `way_not_allowed` (body `{ways}`), `program_not_allowed` |
+| `leash.item.set` (app; widening within the unlock window) | `{agent_id, item_id, version?, ways, run?, proxy?}` (0.42.0); `version` required to replace existing settings (`conflict`) | `<item_ways>`; `not_found` unless a rule of the agent includes the item; `credential_locked` for a widening outside the window; `bad_request` |
+| `leash.item.list` (app, desktop) | `{agent_id, item_id?}` (0.42.0) | `{items: [<item_ways>]}`: the settings of each item the agent's rules include |
 
 - `agent_id` names an active device of role `agent` (`not_found`
   otherwise). A grant replaced or issued for an agent is sent to it in
@@ -8602,8 +8765,8 @@ grant set carries a `grant_seq`:
   names the connection (`scope.connections`) and cannot be re-signed
   without the member.
 - Changes are announced as `sync.event` `leash.grant.changed`,
-  `leash.grant.revoked` or `leash.agent.suspended` (to apps and
-  desktops) and audited (`leash.grant.issued`, `.updated`, `.revoked`,
+  `leash.grant.revoked`, `leash.agent.suspended` or (0.42.0)
+  `leash.item.changed` (to apps and desktops) and audited (`leash.grant.issued`, `.updated`, `.revoked`,
   `leash.agent.suspended`, `.resumed`, `leash.referrals_limited`).
 
 ### 10.12 Share rules and grants: sharing with connections
