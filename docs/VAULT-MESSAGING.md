@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.46.0
+version: 0.46.1
 date: 2026-10-18
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -27,6 +27,18 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.46.1: normative; **approved by the owner 2026-10-18**; corrects
+    0.46.0's scope of failed checks (§3.6.1): only operations that
+    verify the PIN as an owner check does count a wrong PIN or password
+    as a failed check (`credential.create`, `pin.change`,
+    `vault.secret.renew`, `credential.password.change`,
+    `credential.reset`, `device.transfer.approve`, `vault.delete`);
+    operations that test the password alone (unlocking or rotating the
+    credential, item and feature operations, `credential.recover`)
+    count only in the password backoff, and `audit.export`'s PIN only in
+    its own backoff (§10.9). `vault.delete` and
+    `device.transfer.approve` check the blob before the PIN (§6.7.1,
+    §12.5). Implemented in vettid-vault #123 (needs a vault release)
   - 0.46.0: normative; **approved by the owner 2026-10-18**; **needs a
     vault release** (staging) for (1). (1) **Failed checks**: in
     `credential.password.change` a `bad_pin` and a `bad_password` each
@@ -2465,12 +2477,17 @@ vault:
 
 A `bad_pin` (step 5) or `bad_password` (step 7) is a **failed check**
 (§3.6.4). Other refusals (`backoff`, `utk_invalid`, `stale_credential`,
-a clone) are not: they test no guess. (0.46.0) The same holds for
-**every credential operation that tests the PIN or the password**
-(for example `pin.change`, `credential.password.change`,
-`vault.secret.renew`, `credential.create` and a transfer's approval):
-its `bad_pin` or `bad_password` counts as a failed check, and a request
-refused before any secret is tested counts nothing.
+a clone) are not: they test no guess. (0.46.1; owner decisions of
+2026-10-18) The same holds for **every credential operation that
+verifies the PIN as an owner check does**: `credential.create` (its
+PIN), `pin.change`, `vault.secret.renew`, `credential.password.change`,
+`credential.reset`, `device.transfer.approve` and `vault.delete`. Its
+`bad_pin` or `bad_password` counts as a failed check; each checks the
+blob first (§3.5.9), so a request refused before any secret is tested
+counts nothing. Operations that test the password alone (unlocking or
+rotating the credential, item and feature operations,
+`credential.recover`) count only in the password backoff (§3.5.3), and
+`audit.export`'s PIN only in its own backoff (§10.9).
 
 **The record**, in DEK state (§3.3), so it survives locks:
 `owner_check = {last_at, deadline, failures}`. A check sets `last_at`
@@ -4155,7 +4172,7 @@ and the new app's handshake state is dropped. A commitment mismatch at
 | The holder rejects (`device.transfer.reject`), before or after the scan | Aborted. Nothing else changes. After the new app's `hs.fin` the vault tells it with `device.pair.rejected` (0.10.5, §6.7); before that the new app times out. (Since 0.10.3 an approval completes the transfer, so there is nothing to reject after it.) |
 | No scan before the link's `exp` (10 minutes after `device.transfer.create`), or no approval within 10 minutes after the new app's `hs.init` (0.10.4) | Aborted. Nothing else changes. |
 | The new app's attestation fails | Its `hs.init` is dropped; the transfer stays open until its 10 minutes run out. The new app stops waiting for `hs.resp` after 60 seconds (step 2, 0.10.6). |
-| Wrong PIN or password at approval | `bad_pin` / `bad_password`, counted in their backoffs and as a failed owner check (§3.6.4). The transfer stays pending until its 10 minutes run out; the member may retry. |
+| Wrong PIN or password at approval | `bad_pin` / `bad_password`, counted in their backoffs and as a failed owner check (§3.6.4); the blob is checked first, so an approval with an old blob is answered `stale_credential` and counts nothing (0.46.1). The transfer stays pending until its 10 minutes run out; the member may retry. |
 | The vault becomes held (§3.6.3) while a transfer is open | The transfer stays open: the holder may still approve it (a check in itself) or reject it. A new `device.transfer.create` waits for a check. |
 | The new app goes offline before its `hs.fin` | No SAS is shown; the transfer times out after 10 minutes; nothing changes. |
 | The new app goes offline after its `hs.fin` | The approval still completes the transfer. `device.paired` waits in the new app's mailbox (relay TTL); if the new app never returns, the member recovers (§11.11), as when a new app is lost after a transfer. |
@@ -16038,7 +16055,7 @@ stricter answer winning. Two more are specified later:
   | vettid-vault (0.45.0) | `credential.password.change` checks the blob before the PIN (§11.14.9, the order of checks); e2e: an old blob with a wrong PIN answered `stale_credential` with no `vault.pin_failed`, and a non-holder's blob raising the clone alarm before any PIN test; a handled request resent after its `exp` dropped unanswered | **needs a vault release** (staging) |
   | vettid-android (0.45.0) | ANDROID-PLAN 0.1.46: nothing else in flight, the gate, release updates refused, `stale_credential` as not applied, `ok` not deciding, the candidates tried by the PIN they go with, the uncertain PIN, the one-time notice | app |
   | vettid-ios (0.45.0) | IOS-PLAN 0.1.4 §6.3 | app |
-  | vettid-vault (0.46.0) | `credential.password.change` counts its `bad_pin` and `bad_password` as failed owner checks, and every credential operation that tests the PIN or the password does the same, `credential.create` checked too (§3.6.1); vettid-vault #123 | **needs a vault release** (staging) |
+  | vettid-vault (0.46.0) | `credential.password.change` counts its `bad_pin` and `bad_password` as failed owner checks, and so does every operation that verifies the PIN as an owner check does, `vault.delete` and `device.transfer.approve` checking the blob first; password-only operations do not (§3.6.1, 0.46.1); vettid-vault #123 | **needs a vault release** (staging) |
   | vettid-android (0.46.0) | ANDROID-PLAN 0.1.47: a renew settled before a PIN change, settled on answers only, "Finish the move" refused while a change is unresolved or a PIN uncertain | app |
   | vettid-ios (0.46.0) | IOS-PLAN 0.1.5 §6.3 | app |
 
@@ -16266,8 +16283,8 @@ A vault is deleted on one of these authorities:
 
 | Authority | Request | What it needs |
 |---|---|---|
-| The holder (§3.5.9) | `vault.delete` (§10.2) | the phrase `delete my vault`, the PIN and the credential password over the current blob, both UTK-sealed; both backoffs apply; refused (`credential_frozen`, `rotation_required`) while a clone alarm is open |
-| The enrolling app of a vault without a credential (§3.5.7) | `vault.delete` | the phrase and the PIN |
+| The holder (§3.5.9) | `vault.delete` (§10.2) | the phrase `delete my vault`, the PIN and the credential password over the current blob, both UTK-sealed; checked in the order of §11.14.9 (the blob, then the PIN, then the password; 0.46.1); both backoffs apply, and a `bad_pin` or `bad_password` is a failed owner check (§3.6.4); refused (`credential_frozen`, `rotation_required`) while a clone alarm is open |
+| The enrolling app of a vault without a credential (§3.5.7) | `vault.delete` | the phrase and the PIN (a `bad_pin` is a failed owner check, §3.6.4; 0.46.1) |
 | The host | the queue operation `delete` (§11.5): account cancellation (MEMBER-API), or a member's start-over deletion (§11.11.9, 0.16.0) | the member API's own checks; for a start-over, the member's session, the phrase and 24 h without a cancel from the portal, the email link or the app |
 
 0.16.0 removed the recovering app as an authority (it had deleted with
