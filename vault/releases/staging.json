@@ -1,6 +1,6 @@
 {
   "channel": "staging",
-  "signed_serial": 18,
+  "signed_serial": 19,
   "releases": [
     {
       "release": 1,
@@ -503,7 +503,7 @@
     },
     {
       "release": 15,
-      "status": "active",
+      "status": "deprecated",
       "published_at": "2026-10-16T23:40:16Z",
       "pcr0": "76b9dc48934fde944227d2714fc93278f4527fefcd8152fd5471f7075d906f51a5430d5e2eb5f19a8906e80a0c5c1bba",
       "pcr1": "985277a497e71af128434e93c3a5860f7bbb6dba7878738c163d80505a195556bff047ab7fbf5790841e9ef75c557618",
@@ -554,7 +554,8 @@
     },
     {
       "release": 17,
-      "status": "candidate",
+      "status": "active",
+      "published_at": "2026-10-18T19:20:56Z",
       "pcr0": "937ccd203cc54a6da405ff9f2a612465befc4c3d77072f1683489b042cde07fad343bd25fb1115a3b6429fd5cf55c248",
       "pcr1": "985277a497e71af128434e93c3a5860f7bbb6dba7878738c163d80505a195556bff047ab7fbf5790841e9ef75c557618",
       "pcr2": "116e0a7bd6a10ff3f14f7b1f5308fa34b45914857bee13e253fe102b5b9c902dae47112b7c657f8b308c2606e29a8c05",
@@ -585,6 +586,18 @@
         "ami_revision": 0,
         "min_instances": 0,
         "max_instances": 2
+      },
+      "log": {
+        "summary": "Release 17 lets iPhones running the VettID test app enroll, limits how often a desktop or agent can ask for a session, and fixes wallet and location details.",
+        "changes": [
+          "New: your vault accepts the App Attest data that iOS 27 adds, so an iPhone running the VettID test app can enroll and unlock. Each channel now names its own iOS app.",
+          "A desktop or an agent can ask for an access session at most once every 10 minutes, so it cannot flood your phone with prompts.",
+          "Wallet: testnet4 is accepted as a network name, a wallet's next addresses move forward when it is updated, and wallets can carry tags like your other items.",
+          "Location: you can stop sharing your location even while your daily check is due, and your vault now tells you when a location request is closed.",
+          "Release 16 was built but never run; release 17 includes everything it had.",
+          "Built from vettid-vault commit 9378113 (tag release/staging/17) and independently rebuilt on 2026-10-18 with a matching PCR0."
+        ],
+        "security": "none"
       }
     }
   ]
