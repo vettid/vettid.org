@@ -3382,6 +3382,46 @@ describe('2.1.0: delete my vault and start over (§11.11.9)', () => {
     expect((await call('POST', '/api/vault/recovery', { browser_key: BK })).body.error).toBe('deletion_pending');
   });
 
+  // MEMBER-API 2.8.0 "Staging time scale" (S14): the 24 h are divided by
+  // the scale when the request is made, on staging only.
+  describe('the staging time scale', () => {
+    afterEach(() => {
+      delete process.env.STAGE;
+      delete process.env.TIME_SCALE;
+    });
+    const deletesAt = async () => {
+      const r = await call('POST', '/api/vault/deletion', CONFIRM);
+      expect(r.status).toBe(202);
+      const row = getItem('vaults', VID).deletion;
+      const link = [...tbl('requests').values()].find((x) => x.op === 'deletion_cancel_link')!;
+      expect(r.body.deletes_at).toBe(iso(row.deletes_at));
+      expect(link.expires_at).toBe(row.deletes_at);
+      expect(mails()[0].text).toContain(`will be deleted at ${iso(row.deletes_at)}`);
+      return row.deletes_at - row.requested_at;
+    };
+
+    test('staging at 1: 24 hours', async () => {
+      Object.assign(process.env, { STAGE: 'staging', TIME_SCALE: '1' });
+      expect(await deletesAt()).toBe(86_400);
+    });
+
+    test('staging at 24: 1 hour (deletes_at, the cancel link and the email)', async () => {
+      Object.assign(process.env, { STAGE: 'staging', TIME_SCALE: '24' });
+      expect(await deletesAt()).toBe(3_600);
+    });
+
+    test('TIME_SCALE outside staging is ignored: 24 hours', async () => {
+      Object.assign(process.env, { STAGE: 'prod', TIME_SCALE: '24' });
+      expect(await deletesAt()).toBe(86_400);
+    });
+
+    test('a deletion requested before the scale changed keeps its time', async () => {
+      expect(await deletesAt()).toBe(86_400);
+      Object.assign(process.env, { STAGE: 'staging', TIME_SCALE: '24' });
+      expect((await call('GET', '/api/vault/deletion')).body.deletion.deletes_at).toBe(iso(NOW + 86_400));
+    });
+  });
+
   test('refusals: the phrase (400), no confirmed vault (404), an active recovery (409), the terms (403); limit 3 a day', async () => {
     expect((await call('POST', '/api/vault/deletion', { confirm: 'Delete my vault' })).status).toBe(400);
     expect((await call('POST', '/api/vault/deletion', {})).status).toBe(400);

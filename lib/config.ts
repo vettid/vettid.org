@@ -82,6 +82,17 @@ export interface AppConfig {
    * production, where the API never accepts cookies on the app routes.
    */
   readonly vaultLegacySessionAuth?: boolean;
+  /**
+   * The staging time scale (MEMBER-API 2.8.0 "Staging time scale";
+   * STAGING-TIME-SCALE §4 item 5, §5.3): the member API divides the
+   * start-over deletion's 24 h and the account site PIN's 24 h lock by it.
+   * **Always 1 in production**, in code: loadConfig never reads it for
+   * prod and refuses any context that tries to set another value, and
+   * {@link timeScaleEnv} refuses a prod config with another value. Other
+   * stages: context `<stage>TimeScale`, 1 or 24, default 1 (cdk.json sets
+   * `stagingTimeScale` 24).
+   */
+  readonly timeScale: 1 | 24;
 }
 
 export interface VaultConfig {
@@ -502,6 +513,7 @@ export function loadConfig(node: Node): AppConfig {
   if (stage === PROD_STAGE && (node.tryGetContext('vaultLegacySessionAuth') !== undefined || legacyRaw !== undefined)) {
     throw new Error('vault legacy session auth is staging-only: production never accepts cookies on the app routes (MEMBER-API 2.0.0)');
   }
+  const timeScale = loadTimeScale(node, stage);
   return {
     stage,
     domainName,
@@ -522,7 +534,47 @@ export function loadConfig(node: Node): AppConfig {
       : undefined,
     ...(androidAppUrl ? { androidAppUrl } : {}),
     ...(vaultLegacySessionAuth ? { vaultLegacySessionAuth } : {}),
+    timeScale,
   };
+}
+
+/**
+ * The stage's time scale ({@link AppConfig.timeScale}). Production is 1 in
+ * code; a context `timeScale` or `prodTimeScale` with any other value
+ * fails the synth (STAGING-TIME-SCALE §4 item 5).
+ */
+function loadTimeScale(node: Node, stage: string): 1 | 24 {
+  const key = `${stage}TimeScale`;
+  if (stage === PROD_STAGE) {
+    for (const k of ['timeScale', key]) {
+      const raw = node.tryGetContext(k);
+      if (raw !== undefined && String(raw) !== '1') {
+        throw new Error(`context ${k}: the production time scale is 1, in code (STAGING-TIME-SCALE §4); got ${JSON.stringify(raw)}`);
+      }
+    }
+    return 1;
+  }
+  const raw = node.tryGetContext(key);
+  if (raw === undefined) return 1;
+  if (String(raw) === '1') return 1;
+  if (String(raw) === '24') return 24;
+  throw new Error(`context ${key}: expected 1 or 24, got ${JSON.stringify(raw)}`);
+}
+
+/**
+ * The environment of a function that owns a scaled wait (the vault and
+ * account functions, the PIN check of the sign-in trigger): `STAGE` and
+ * `TIME_SCALE` only when the scale is not 1, so a production function never
+ * has either (lambda/shared/time-scale.ts reads it only on `staging`).
+ * Throws for a production config with any scale but 1, whoever built it.
+ */
+export function timeScaleEnv(config: Pick<AppConfig, 'stage' | 'timeScale'>): Record<string, string> {
+  if (config.stage === PROD_STAGE) {
+    if (config.timeScale !== 1) throw new Error(`the production time scale is 1 (STAGING-TIME-SCALE §4); got ${JSON.stringify(config.timeScale)}`);
+    return {};
+  }
+  if (config.timeScale !== 1 && config.timeScale !== 24) throw new Error(`time scale: expected 1 or 24, got ${JSON.stringify(config.timeScale)}`);
+  return config.timeScale === 1 ? {} : { STAGE: config.stage, TIME_SCALE: String(config.timeScale) };
 }
 
 /**

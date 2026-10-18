@@ -387,6 +387,49 @@ describe('PIN', () => {
     expect(await checkPin('g1', h, '4826')).toEqual({ ok: true });
     expect(ddb.commandCalls(DeleteCommand)[0].args[0].input.Key).toEqual({ key: 'pinfail#g1' });
   });
+
+  // MEMBER-API 2.8.0 "Staging time scale" (S15): the long lock after 15
+  // failures in a day is 24 h, divided by the scale on staging only; the day
+  // of counting is not scaled.
+  describe('the long lock and the staging time scale', () => {
+    const NOW_S = 1_800_000_000;
+    afterEach(() => {
+      delete process.env.STAGE;
+      delete process.env.TIME_SCALE;
+      jest.restoreAllMocks();
+    });
+    async function longLock(): Promise<{ until: number; dayWindow: number }> {
+      jest.spyOn(Date, 'now').mockReturnValue(NOW_S * 1000);
+      const h = await hashPin('g1', '4826');
+      ddb.on(UpdateCommand, { TableName: 'rl' }).resolves({ Attributes: { count: 16 } });
+      expect(await checkPin('g1', h, '4827')).toEqual({ ok: false, locked: true, attemptsLeft: 0, justLocked: true });
+      const day = ddb.commandCalls(UpdateCommand, { TableName: 'rl' }).map((c) => c.args[0].input).find((i) => String(i.Key!.key).startsWith('pinfailday#'))!;
+      const put = ddb.commandCalls(PutCommand, { TableName: 'rl' }).map((c) => c.args[0].input.Item!).find((i) => i.key === 'pinfail#g1')!;
+      return { until: put.expires_at, dayWindow: day.ExpressionAttributeValues![':exp'] - 60 - Number(String(day.Key!.key).split('#').pop()) };
+    }
+
+    test('production (no STAGE): 24 hours', async () => {
+      expect(await longLock()).toEqual({ until: NOW_S + 86_400, dayWindow: 86_400 });
+    });
+
+    test('staging at 1: 24 hours', async () => {
+      Object.assign(process.env, { STAGE: 'staging', TIME_SCALE: '1' });
+      expect(await longLock()).toEqual({ until: NOW_S + 86_400, dayWindow: 86_400 });
+    });
+
+    test('staging at 24: 1 hour; failures still counted over a day', async () => {
+      Object.assign(process.env, { STAGE: 'staging', TIME_SCALE: '24' });
+      expect(await longLock()).toEqual({ until: NOW_S + 3_600, dayWindow: 86_400 });
+    });
+
+    test('TIME_SCALE outside staging, or a value other than 1 or 24, is real time', async () => {
+      Object.assign(process.env, { STAGE: 'prod', TIME_SCALE: '24' });
+      expect((await longLock()).until).toBe(NOW_S + 86_400);
+      ddb.reset();
+      Object.assign(process.env, { STAGE: 'staging', TIME_SCALE: '3600' });
+      expect((await longLock()).until).toBe(NOW_S + 86_400);
+    });
+  });
 });
 
 describe('POST /api/account/preferences', () => {

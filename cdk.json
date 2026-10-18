@@ -103,6 +103,7 @@
     "pushStages": "staging",
     "stagingPushImage": "ghcr.io/vettid/vettid-push@sha256:38663ed27b88aa50c6bc6d4162b66d0f894bdea6d527cc0a75a998a69e5cbb11",
     "stagingPushZoneNs": "ns-566.awsdns-06.net,ns-1296.awsdns-34.org,ns-1838.awsdns-37.co.uk,ns-21.awsdns-02.com",
-    "stagingVaultsStreamArn": "arn:aws:dynamodb:us-east-1:347272280361:table/vettid-org-staging-vaults/stream/2026-10-04T16:23:53.360"
+    "stagingVaultsStreamArn": "arn:aws:dynamodb:us-east-1:347272280361:table/vettid-org-staging-vaults/stream/2026-10-04T16:23:53.360",
+    "stagingTimeScale": 24
   }
 }

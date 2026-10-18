@@ -172,6 +172,7 @@ import type { MemberItem } from '../shared/model';
 import { hit } from '../shared/ratelimit';
 import { sendMail } from '../shared/mail';
 import { signRecoveryRequest } from '../shared/recovery-sign';
+import { scaledSeconds } from '../shared/time-scale';
 import { vaultService } from '../shared/vault-service';
 import {
   INSTANCE_ID_RE,
@@ -383,7 +384,7 @@ export interface DeletionRow {
   deletion_id: string;
   state: 'pending' | 'executing';
   requested_at: number; // epoch s
-  deletes_at: number; // requested_at + 24 h
+  deletes_at: number; // requested_at + 24 h (divided by the staging time scale)
   /** The cleanup job: when the host's `delete` was queued (absent until it could be). */
   queued_at?: number;
 }
@@ -2591,7 +2592,11 @@ router.on('POST', '/api/vault/recovery/open', async (req) => {
 // five-minute run then sends the host's `delete` (lambda/jobs/cleanup.ts).
 // Nothing is queued and the vault is not locked or told during the wait.
 
-/** The start-over runs 24 h after the request (§11.11.9). */
+/**
+ * The start-over runs 24 h after the request (§11.11.9); on staging the
+ * 24 h are divided by the time scale when the request is made (S14,
+ * MEMBER-API 2.8.0 "Staging time scale").
+ */
 export const DELETION_DELAY_S = 24 * 3600;
 export const DELETION_PHRASE = 'delete my vault';
 const DELETION_LINK_PREFIX = 'dcancel#';
@@ -2657,7 +2662,7 @@ router.on('POST', '/api/vault/deletion', async (req) => {
   const v = await completeRecovery(m, await recoverableVault(m.user_guid));
   if (recoveryActive(v.recovery, now)) throw vaultError(409, 'recovery_active', 'A recovery is in progress; cancel it first');
   if (deletionOf(v)) throw deletionPending();
-  const d: DeletionRow = { deletion_id: newUlid(), state: 'pending', requested_at: now, deletes_at: now + DELETION_DELAY_S };
+  const d: DeletionRow = { deletion_id: newUlid(), state: 'pending', requested_at: now, deletes_at: now + scaledSeconds(DELETION_DELAY_S) };
   // Conditional on what was read: no start-over yet, and the same (inactive) recovery or none.
   const rid = v.recovery?.recovery_id;
   try {
