@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.46.1
+version: 0.47.0
 date: 2026-10-18
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.7.1)
-  - ANDROID-PLAN.md (0.1.47)
-  - IOS-PLAN.md (0.1.5; §9.1 VA1–VA3)
+  - ANDROID-PLAN.md (0.1.48)
+  - IOS-PLAN.md (0.1.6; §9.1 VA1–VA3)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,21 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.47.0: normative, approved by the owner 2026-10-19 (vettid.org #347); no
+    vault release. §11.14.9 "A lost answer" step 1: (1) **sent with the
+    vault's current blob**: right before a change or a renew, inside the
+    serialization that sends credential operations and once every
+    earlier request is settled, the app asks `credential.version`. When
+    it differs from the blob the request would carry, the app fetches
+    the latest blob and sends with it, or refuses with nothing sent.
+    Without this check, an earlier operation that applied without its
+    answer (an owner check, a name change, `credential.unlock`,
+    `credential.rotate`, a transfer's approval) would make step 3 read
+    its version step as the change. The assumption about the vault (one
+    batch at a time, in mailbox order, nothing while locked) is stated.
+    (2) A renew's own refusal, `stale_credential` included, decides it
+    not applied; only a renew with no answer is decided by
+    `credential.version`. ANDROID-PLAN 0.1.48 and IOS-PLAN 0.1.6 follow
   - 0.46.1: normative; **approved by the owner 2026-10-18**; corrects
     0.46.0's scope of failed checks (§3.6.1): only operations that
     verify the PIN as an owner check does count a wrong PIN or password
@@ -15513,15 +15528,40 @@ change instead of repeating it.
      `credential.version` to obtain a vault time.
    - (0.46.0) **A renew is settled before a PIN change.** The app records
      an unresolved `vault.secret.renew` before sending it, as in the
-     next bullet, and decides a lost answer by `credential.version` with
-     step 3's table. A PIN change is sent only once every renew is
+     next bullet. (0.47.0) An answer to the renew's own request decides
+     it: success is applied, and any refusal, `stale_credential`
+     included, is **not applied**, as step 4 says for a change. Only a
+     renew whose own answer never arrived is decided by
+     `credential.version` with step 3's table. A PIN change is sent only once every renew is
      decided. While a renew could still apply, the PIN change is refused
      with the "earlier request" text. When the version cannot decide it
      (step 3's "ends without a decision"), the PIN change is refused and
      the app offers to lock and unlock the vault: the PIN has not
      changed, so the unlock costs nothing, and it confirms the renew's
      candidate or the current record (§11.14.1 rule 4).
-   - Besides the candidate record of a PIN change (§11.14.1 rule 1), the
+   - (0.47.0) **Sent with the vault's current blob.** Right before it
+     sends a change or a renew, inside the same serialization that sends
+     its credential operations and once every earlier credential request
+     is settled (above), the app asks `credential.version`. When
+     `version` equals the version of the blob the request would carry,
+     it sends. Otherwise an earlier operation applied without its answer
+     reaching the phone: every operation that rotates the CEK moves the
+     version (§3.5.3), an owner check, a name change,
+     `credential.unlock`, `credential.rotate` and a transfer's approval
+     included. The app then fetches the latest blob (`credential.get`)
+     and keeps it, and sends the request with that blob when the fetched
+     version equals the vault's. A fetch that fails or gives another
+     version refuses the request with nothing sent, with the "earlier
+     request" text; no answer to `credential.version` refuses it with the
+     "can't reach" text. This is what makes step 3's "version + 1" mean
+     this request: it carries the vault's current version, and no earlier
+     request can still apply. It rests on the vault handling one batch at
+     a time, the messages of a batch in mailbox order, and nothing while
+     it is locked (vettid-vault `vault/inbound.go` `ProcessBatch`, main
+     07bf770). Since every earlier request is settled, any of them
+     applied before the answer to `credential.version` was produced, or
+     never will, whatever the order of delivery.
+ (§11.14.1 rule 1), the
      app durably stores an **unresolved change**: the type, the inner
      `id`, the blob version the request carries, and the request's
      `exp`. It holds no PIN, password or secret. The store refuses when
@@ -16058,6 +16098,8 @@ stricter answer winning. Two more are specified later:
   | vettid-vault (0.46.0) | `credential.password.change` counts its `bad_pin` and `bad_password` as failed owner checks, and so does every operation that verifies the PIN as an owner check does, `vault.delete` and `device.transfer.approve` checking the blob first; password-only operations do not (§3.6.1, 0.46.1); vettid-vault #123 | **needs a vault release** (staging) |
   | vettid-android (0.46.0) | ANDROID-PLAN 0.1.47: a renew settled before a PIN change, settled on answers only, "Finish the move" refused while a change is unresolved or a PIN uncertain | app |
   | vettid-ios (0.46.0) | IOS-PLAN 0.1.5 §6.3 | app |
+  | vettid-android (0.47.0) | ANDROID-PLAN 0.1.48: `credential.version` before a change or a renew, the blob refreshed when it differs; a renew's own refusal decides it (after vettid-android #144) | app |
+  | vettid-ios (0.47.0) | IOS-PLAN 0.1.6 §6.3 (in progress in vettid-ios) | app |
 
 - **Measurements before the numbers are final**, on a staging host: the
   heavy derivation's time and memory with other vaults running; how often
