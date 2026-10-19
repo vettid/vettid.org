@@ -12,7 +12,7 @@ import { VettidOrgMemberApiStack } from '../lib/stacks/member-api-stack';
  * scale"; STAGING-TIME-SCALE §4 item 5, §5.6): production is 1 in code and
  * refuses any other value; only the staging stage takes 24 (with the first
  * vault release that ships `time_scale`), and passes it only to the
- * functions that own a scaled wait. cdk.json ships staging at 1 (the
+ * functions that own a scaled wait. cdk.json shipped staging at 1 (the
  * rollout). Bundling is skipped: templates only.
  */
 
@@ -56,12 +56,13 @@ describe('production: the time scale is 1, in code', () => {
     expect(scaled(new VettidOrgAdminApiStack(newApp(), 'AdminApi', { config, env }))).toEqual([]);
   });
 
-  test('rollout: cdk.json ships staging at 1 (merging and a staging deploy change nothing), nothing for production', () => {
+  test('rollout: cdk.json has staging at 24 from release 18 (the first vault release with time_scale, published 2026-10-19), nothing for production', () => {
     const ctx = JSON.parse(readFileSync(join(__dirname, '..', 'cdk.json'), 'utf8')).context;
-    expect(ctx.stagingTimeScale).toBe(1);
-    expect(ctx.stagingTimeScaleFromRelease).toBeUndefined();
+    expect(ctx.stagingTimeScale).toBe(24);
+    expect(ctx.stagingTimeScaleFromRelease).toBe(18);
     for (const k of ['timeScale', 'prodTimeScale', 'timeScaleFromRelease', 'prodTimeScaleFromRelease']) expect(ctx[k]).toBeUndefined();
-    expect(loadConfig(newApp({ stage: 'staging', stagingTimeScale: ctx.stagingTimeScale }).node).timeScale).toBe(1);
+    expect(loadConfig(newApp({ stage: 'staging', stagingTimeScale: ctx.stagingTimeScale, stagingTimeScaleFromRelease: ctx.stagingTimeScaleFromRelease }).node).timeScale).toBe(24);
+    expect(loadConfig(newApp({ stage: 'prod', ...ctx }).node).timeScale).toBe(1);
   });
 });
 
