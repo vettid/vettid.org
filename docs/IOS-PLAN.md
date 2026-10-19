@@ -1,9 +1,12 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.6
-date: 2026-10-18
+version: 0.1.7
+date: 2026-10-19
 changelog:
+  - 0.1.7: owner decision 2026-10-19 (STAGING-TIME-SCALE 0.1.1;
+    ANDROID-PLAN 0.1.49). §6.6: the recovery counter's "unavailable for
+    a day" urgency (S8) is scaled too
   - 0.1.6: approved by the owner 2026-10-19 (VAULT-MESSAGING 0.47.0;
     ANDROID-PLAN 0.1.48; vettid.org #347). §6.3: `credential.version`
     before a change or a renew, with the blob refreshed when it differs;
@@ -720,8 +723,9 @@ leaving the screen.
   time scale"). `time_scale` comes from the descriptor and a transfer
   bundle (VAULT-MESSAGING §11.10.9), is stored per vault, and divides
   the app's own waits when each starts: the early warning above, the
-  replaced records' 7 days (§6.3) and the old phone's 7 days after a
-  transfer. Staging builds show the scaled times and "Staging: 1 day =
+  replaced records' 7 days (§6.3), the old phone's 7 days after a
+  transfer and the recovery counter's "unavailable for a day" urgency
+  (S8, 0.1.7). Staging builds show the scaled times and "Staging: 1 day =
   1 hour"; a production build refuses any value other than 1 and sends
   nothing.
 - **Calls, presence, location**: not before push; their phases say how.
