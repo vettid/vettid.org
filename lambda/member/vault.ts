@@ -153,6 +153,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { GetCommand, PutCommand, QueryCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { snapshotFor } from '../shared/account-snapshot';
 import { AppHeader, AppKey, NONCE_TTL_S, TS_WINDOW_S, parseAppHeader, parseAppKey, signingInput, verifyAppSignature } from '../shared/app-auth';
 import { audit, memberActor } from '../shared/audit';
@@ -1770,6 +1771,10 @@ async function extendRecoveryRows(r: RecoveryRow, expiresAt: number): Promise<vo
   const rows: [string, number, boolean][] = [[r.recovery_id, expiresAt + 3600, false]];
   if (typeof r.locator === 'string' && LOCATOR_RE.test(r.locator)) rows.push([LOCATOR_PREFIX + r.locator, expiresAt, true]);
   if (typeof r.cancel_key === 'string' && /^[0-9a-f]{64}$/.test(r.cancel_key)) rows.push([CANCEL_LINK_PREFIX + r.cancel_key, expiresAt, true]);
+  // 2.9.0: the unlock slots queued under it, which live as long as it plus an hour (named by their recovery_id).
+  for (const id of Array.isArray(r.unlock_ids) ? r.unlock_ids.slice(-MAX_UNLOCK_IDS) : []) {
+    if (typeof id === 'string' && ULID_RE.test(id)) rows.push([id, expiresAt + 3600, true]);
+  }
   for (const [key, exp, named] of rows) {
     try {
       await ddb.send(new UpdateCommand({
@@ -2085,6 +2090,18 @@ async function cancelWrite(vaultId: string, recoveryId: string, via: CancelVia, 
  * never a replacement of the recovery.
  */
 async function recordUnlockId(v: VaultRow, r: RecoveryRow, requestId: string): Promise<void> {
+  // Best effort throughout: the unlock is already queued, so nothing here may fail the route.
+  try {
+    if (await appendUnlockId(v, r, requestId)) return;
+  } catch (e) {
+    console.error('unlock id not recorded', JSON.stringify({ vault_id: v.vault_id, error: (e as Error).name }));
+    return;
+  }
+  console.error('unlock id not recorded', JSON.stringify({ vault_id: v.vault_id }));
+}
+
+/** The conditional append (retried on a concurrent append); true when recorded or no longer needed, false when given up. Throws on a read or write failure. */
+async function appendUnlockId(v: VaultRow, r: RecoveryRow, requestId: string): Promise<boolean> {
   let cur = r;
   for (let i = 0; i < 3; i++) {
     const old = Array.isArray(cur.unlock_ids) ? cur.unlock_ids : undefined;
@@ -2097,15 +2114,15 @@ async function recordUnlockId(v: VaultRow, r: RecoveryRow, requestId: string): P
         ConditionExpression: `recovery.recovery_id = :id AND ${old ? 'recovery.unlock_ids = :old' : 'attribute_not_exists(recovery.unlock_ids)'}`,
         ExpressionAttributeValues: { ':ids': ids, ':id': r.recovery_id, ':now': nowIso(), ...(old ? { ':old': old } : {}) },
       }));
-      return;
+      return true;
     } catch (e) {
-      if ((e as Error).name !== 'ConditionalCheckFailedException') break;
+      if ((e as Error).name !== 'ConditionalCheckFailedException') throw e;
       const fresh = await vaultRow(v.vault_id);
-      if (!fresh?.recovery || fresh.recovery.recovery_id !== r.recovery_id) return; // replaced: nothing to remember it on
+      if (!fresh?.recovery || fresh.recovery.recovery_id !== r.recovery_id) return true; // replaced: nothing to remember it on
       cur = fresh.recovery;
     }
   }
-  console.error('unlock id not recorded', JSON.stringify({ vault_id: v.vault_id }));
+  return false;
 }
 
 // Draft for the owner's wording (MEMBER-API 2.9.0 "Email").
@@ -2139,9 +2156,11 @@ async function claimNotice(m: MemberItem, v: VaultRow, recoveryId: string, openT
     return { tries: Number(res.Attributes?.notice_tries ?? 1) };
   } catch (e) {
     if ((e as Error).name !== 'ConditionalCheckFailedException') throw e;
-    const old = (e as { Item?: Record<string, unknown> }).Item;
-    if (!old || Object.keys(old).length === 0) return 'absent';
-    return old.noticed_at !== undefined ? 'noticed' : 'busy';
+    // The item as it was, in DynamoDB's raw form: lib-dynamodb does not unmarshall exception payloads.
+    const raw = (e as { Item?: Parameters<typeof unmarshall>[0] }).Item;
+    const old = raw && Object.keys(raw).length ? unmarshall(raw) : null;
+    if (!old) return 'absent';
+    return typeof old.noticed_at === 'number' ? 'noticed' : 'busy';
   }
 }
 
@@ -2186,23 +2205,22 @@ type CancelSource = { kind: 'slot'; slot: Record<string, unknown> } | { kind: 'r
  *    otherwise the recovery ended meanwhile: `vault.recovery_cancel_seen`;
  *  - the record: `noticed_at`, and the slot's `cancel_noticed_at`.
  * After ATTEMPT_MAX_TRIES the notice is given up, recorded and logged.
- * `peek: false` (the sweep, which may not read the request table): a row
- * source is acted on only for a live recovery. Returns true when it claimed
- * the notice (the vault row may have changed).
+ * A row source is acted on only for a live recovery (a stalled notice is
+ * the sweep's, from the notice row). It never reads the request table, which
+ * the sweep's role may not. Returns true when it claimed the notice (the
+ * vault row may have changed).
  */
-async function noticeAppCancel(m: MemberItem, v: VaultRow, recoveryId: string, src: CancelSource, opts: { peek?: boolean } = {}): Promise<boolean> {
+async function noticeAppCancel(m: MemberItem, v: VaultRow, recoveryId: string, src: CancelSource): Promise<boolean> {
   if (!ULID_RE.test(recoveryId)) return false;
   const slot = src.kind === 'slot' ? src.slot : null;
   if (slot && (!isCancelledSlot(slot) || slot.cancelled_recovery_id !== recoveryId || slot.user_guid !== m.user_guid || slot.vault_id !== v.vault_id || slot.cancel_noticed_at !== undefined)) return false;
   const now = nowS();
   const live = cancellable(v.recovery, recoveryId, now);
-  if (!live && src.kind === 'row') {
-    // Only a stalled notice is taken up from the row; a read first, rather
-    // than a refused conditional write on every status read.
-    if (opts.peek === false) return false;
-    const row = (await ddb.send(new GetCommand({ TableName: table.vaultRequests(), Key: { request_id: NOTICE_PREFIX + recoveryId }, ConsistentRead: true }))).Item;
-    if (!row || row.noticed_at !== undefined || (typeof row.noticing === 'number' && row.noticing >= now - ATTEMPT_RETRY_S)) return false;
-  }
+  // From the row alone, only a live recovery is acted on: a notice that
+  // stalled is taken up by the sweep from the notice row itself, so a status
+  // read costs no request-table read or refused write while the row's
+  // recovery_cancelled (never cleared) names an ended recovery.
+  if (!live && src.kind === 'row') return false;
   const claim = await claimNotice(m, v, recoveryId, live ? Math.max(v.recovery!.expires_at, now) + 86_400 : null, now);
   if (claim === 'busy') return false;
   if (claim === 'absent' || claim === 'noticed') {
@@ -2235,7 +2253,8 @@ async function noticeAppCancel(m: MemberItem, v: VaultRow, recoveryId: string, s
     won = !!r && r.recovery_id === recoveryId && r.state === 'cancelled' && r.cancelled_via === 'app';
   }
   if (won) {
-    const source = slot ? 'slot' : src.kind === 'row' || rowCancelledId(v) === recoveryId ? 'row' : 'slot';
+    // `notice`: the sweep took up a notice row whose claim stalled (its first source is not recorded).
+    const source = src.kind;
     await audit(memberActor(m.user_guid), 'vault.recovery_cancel', m.user_guid, {
       vault_id: v.vault_id, recovery_id: recoveryId, via: 'app', ...(slot ? { request_id: slot.request_id } : {}), source,
     });
@@ -2326,7 +2345,7 @@ export async function sweepAppCancels(): Promise<{ found: number; noticed: numbe
       const [v, m] = await Promise.all([vaultRow(vaultId), memberByGuid(guid)]);
       if (!v || !m || v.user_guid !== m.user_guid) return; // the vault or the member is gone: nobody to tell
       if (src.kind === 'row' && !cancellable(v.recovery, recoveryId, nowS())) return;
-      await noticeAppCancel(m, v, recoveryId, src, { peek: false });
+      await noticeAppCancel(m, v, recoveryId, src);
       noticed++;
     } catch (e) {
       failed++;

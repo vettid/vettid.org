@@ -13,7 +13,7 @@ related:
   - vettid-vault `internal/hostproto`, `enclave/supervisor`, `enclave/egress`, `parent`, docs/V3-NOTES.md "Enclave ↔ parent", docs/SMOKE.md
 changelog:
   - 0.1.13: with VAULT-MESSAGING 0.49.0 (owner decision 2026-10-19;
-    awaiting the owner's approval of this wording); not built. (1) One
+    approved by the owner (2026-10-19)); not built. (1) One
     new host code with one clear member: an `unlock` answer that carries
     `code: "recovery_cancelled"` also carries `cancelled_recovery_id`, the
     id of the recovery the unlock ended. The parent checks that it is a

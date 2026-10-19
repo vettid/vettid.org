@@ -7,6 +7,7 @@ import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import { KMSClient, SignCommand } from '@aws-sdk/client-kms';
 import { KeyObject, createHash, generateKeyPairSync, randomBytes, sign as cryptoSign, verify as cryptoVerify } from 'node:crypto';
 import { keyFromScalar, signDigest } from './ecdsa-prehash';
+import { marshall } from '@aws-sdk/util-dynamodb';
 
 // "tok-<guid>" ID tokens verify as that user; anything else is expired.
 jest.mock('aws-jwt-verify', () => ({
@@ -69,11 +70,16 @@ const ccf = () => Object.assign(new Error('ccf'), { name: 'ConditionalCheckFaile
 /** Tests set these to make a put, or an update of a request row, fail (cleared before each test). */
 let failPut: ((input: any) => boolean) | undefined;
 let failUpdate: ((input: any) => boolean) | undefined;
+/** Tests set this to make a get fail (cleared before each test). */
+let failGet: ((input: any) => boolean) | undefined;
 /** Called before an update is applied: what another request did in between. */
 let onUpdate: ((input: any) => void) | undefined;
 
 function installFakeDdb() {
-  ddb.on(GetCommand).callsFake((i) => ({ Item: tbl(i.TableName).get(i.Key[KEYS[i.TableName]]) }));
+  ddb.on(GetCommand).callsFake((i) => {
+    if (failGet?.(i)) throw Object.assign(new Error('unavailable'), { name: 'InternalServerError' });
+    return { Item: tbl(i.TableName).get(i.Key[KEYS[i.TableName]]) };
+  });
   ddb.on(PutCommand).callsFake((i) => {
     if (failPut?.(i)) throw Object.assign(new Error('unavailable'), { name: 'InternalServerError' });
     const k = i.Item[KEYS[i.TableName]];
@@ -118,7 +124,8 @@ function installFakeDdb() {
       expect(i.ConditionExpression).toBe(`${open ? '' : 'attribute_exists(request_id) AND '}attribute_not_exists(noticed_at) AND (attribute_not_exists(noticing) OR noticing < :stale)`);
       expect(i.ReturnValuesOnConditionCheckFailure).toBe('ALL_OLD');
       if ((!cur && !open) || (cur && (cur.noticed_at !== undefined || (cur.noticing !== undefined && !(cur.noticing < v[':stale']))))) {
-        throw Object.assign(ccf(), cur ? { Item: structuredClone(cur) } : {});
+        // As DynamoDB returns it: the raw attribute-value form (lib-dynamodb does not unmarshall exception payloads).
+        throw Object.assign(ccf(), cur ? { Item: marshall(cur) } : {});
       }
       const row = cur ?? { request_id: k };
       row.noticing = v[':now'];
@@ -439,6 +446,7 @@ beforeEach(() => {
   db = {};
   failPut = undefined;
   failUpdate = undefined;
+  failGet = undefined;
   onUpdate = undefined;
   ddb.reset(); sm.reset(); sqs.reset(); sesMock.reset(); ssm.reset(); kms.reset();
   kmsDown = false;
@@ -4905,6 +4913,64 @@ If you did not do this, someone else may have your phone and know your PIN. Sign
     await sweep();
     expect(rec().state).toBe('pending');
     expect(audits('vault.recovery_cancel_seen')).toHaveLength(0);
+  });
+
+  test('the unlock_ids append is best effort: a failed re-read after a refused append still answers 202 (the unlock is queued)', async () => {
+    await request();
+    onUpdate = (i) => {
+      if (i.TableName === 'vaults' && String(i.UpdateExpression).startsWith('SET recovery.unlock_ids')) {
+        onUpdate = undefined;
+        getItem('vaults', VID).recovery.unlock_ids = ['01JB2Z6V9K3M4N5P6Q7R8S9V07'];
+        failGet = (g) => g.TableName === 'vaults' && g.Key.vault_id === VID;
+      }
+    };
+    await unlock(U1);
+    expect(sent().map((m) => m.msg.op)).toEqual(['recovery', 'unlock']);
+    expect(logs.join('\n')).toContain('unlock id not recorded');
+    // Nor does a failed append itself fail the route.
+    failGet = undefined;
+    failUpdate = undefined;
+    const before = ddb.commandCalls(UpdateCommand).length;
+    onUpdate = (i) => {
+      if (i.TableName === 'vaults' && String(i.UpdateExpression).startsWith('SET recovery.unlock_ids')) {
+        onUpdate = undefined;
+        throw Object.assign(new Error('unavailable'), { name: 'InternalServerError' });
+      }
+    };
+    await unlock(U2);
+    expect(ddb.commandCalls(UpdateCommand).length).toBeGreaterThan(before);
+    expect(sent().map((m) => m.msg.op)).toEqual(['recovery', 'unlock', 'unlock']);
+  });
+
+  test('a stalled notice the sweep takes up from its own row is audited with source `notice`', async () => {
+    const rid = await request();
+    put('requests', { request_id: `rcnotice#${rid}`, vault_id: VID, user_guid: 'g1', recovery_id: rid, notice_tries: 1, noticing: clock - vault.ATTEMPT_RETRY_S - 1, expires_at: clock + 3 * DAY });
+    expect(await sweep()).toEqual({ found: 1, noticed: 1, failed: 0 });
+    expect(rec()).toMatchObject({ state: 'cancelled', cancelled_via: 'app' });
+    expect(audits('vault.recovery_cancel').map((a) => a.detail)).toEqual([{ vault_id: VID, recovery_id: rid, via: 'app', source: 'notice' }]);
+    expect(subjects()).toEqual(['VettID vault recovery requested', 'VettID vault recovery cancelled']);
+  });
+
+  test('a status read whose row names an ended recovery reads nothing from the request table for it', async () => {
+    const rid = await request();
+    expect(await siteCancel(rid)).toEqual({ cancelled: true });
+    getItem('vaults', VID).recovery_cancelled = { recovery_id: rid, at: clock };
+    ddb.resetHistory();
+    await status();
+    await recovery();
+    const reads = ddb.commandCalls(GetCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'requests');
+    expect(reads.filter((i) => String(i.Key!.request_id).startsWith('rcnotice#'))).toHaveLength(0);
+    expect(ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'requests' && String(i.Key!.request_id).startsWith('rcnotice#'))).toHaveLength(0);
+  });
+
+  test('the unlock slots under a recovery are extended with it when its expires_at moves (the enclave\'s times)', async () => {
+    const rid = await request();
+    await unlock(U1);
+    const later = clock + 5 * DAY;
+    Object.assign(getItem('requests', rid), { status: 'done', envelope: Buffer.alloc(5_252, 0x33).toString('base64'), not_before: isoS(clock + DAY), expires: isoS(later) });
+    await recovery();
+    expect(rec().expires_at).toBe(later);
+    expect(getItem('requests', U1).expires_at).toBe(later + 3600);
   });
 
   describe('a cancel names its recovery from RECOVERY_CANCEL_ID_FROM_RELEASE (§11.14.8)', () => {
