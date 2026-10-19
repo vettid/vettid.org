@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.47.1
+version: 0.48.0
 date: 2026-10-19
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.7.1)
-  - ANDROID-PLAN.md (0.1.50)
-  - IOS-PLAN.md (0.1.8; §9.1 VA1–VA3)
+  - ANDROID-PLAN.md (0.1.51)
+  - IOS-PLAN.md (0.1.9; §9.1 VA1–VA3)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,24 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.48.0: normative, owner decision of 2026-10-19 (vettid.org #358
+    part 1); no vault release. §11.14.9 **"A lost answer to
+    `credential.reset`"** replaces "`credential.reset` is not covered
+    here": a reset that applied without its answer reaching the phone
+    left the vault at version 1 under a new key while the phone held
+    blob N, so the phone's next credential operation was taken for a
+    clone. The reset is now sent as a change is: nothing else in flight,
+    the version pre-check (whose `key` the app records), an `exp`, the
+    same request resent while it has not expired; it is decided by
+    `credential.version` (another `key` or a lower `version` is
+    applied: fetch, keep, acknowledge, top up UTKs; the same `key` and
+    `version` after the margin is not applied), and every other
+    credential operation waits for the decision. vettid-vault staging
+    release 18 already has what it needs (`key` in `credential.version`,
+    `exp` checked before the dedupe, every answer of a reset cached under
+    its id). §3.5.5 points to it. ANDROID-PLAN 0.1.51 and IOS-PLAN 0.1.9
+    follow; both apps keep "New credential" hidden until they implement
+    it
   - 0.47.1: clarifications, owner decisions of 2026-10-19 (vettid.org
     #358 part 2); no vault release. §11.14.9 "Sent with the vault's
     current blob": (a) no answer to the `credential.version` pre-check
@@ -2200,6 +2218,9 @@ item's values seals them to a **one-time reply key** instead:
     new credential's. Only the holder sends it: 0.16.0 removed the
     recovering app's form, since there is no recovery with the backup
     off (§11.11.5).
+  - (0.48.0) A reset whose answer is lost is decided as §11.14.9 "A lost
+    answer to `credential.reset`" says, never sent again with a new
+    request.
 - **No deletion on its own** (0.15.2, owner decision of 2026-10-06).
   There is no `credential.delete`: a credential is deleted only as the
   first step of the vault's deletion (`vault.delete`, §12.5). A member
@@ -15801,7 +15822,92 @@ answer or an unlock decides it, as before.
 and password spends nothing. (0.46.0) Its lost answer is recorded and
 decided as step 1 says, before any PIN change; step 5's fallback covers
 a renew candidate left unconfirmed from before that rule.
-`credential.reset` is not covered here.
+(0.48.0) `credential.reset` follows below.
+
+**A lost answer to `credential.reset`** (0.48.0; owner decision of
+2026-10-19; vettid.org #358 part 1). Up to 0.47.x a reset was not
+covered here. But a reset that applied without its answer reaching the
+phone leaves the vault at version 1 of a new credential, under a new
+credential key, while the phone still holds blob N of the old one
+(§3.5.5). The phone's next credential operation presents that dead
+blob, for example a reset sent again after "can't reach", or the daily
+owner check. The blob is neither the current one nor the holder's
+version current − 1, so the vault takes it for a **clone**: it answers
+`credential_frozen`, opens an alarm with presenter `holder`, and the
+member gets the alarm email (§3.5.9). A reset waits for the
+heavy-derivation permit (the table above: `busy`), so a lost answer is
+realistic. The app therefore sends and decides a reset as it does a
+change:
+
+1. **Before the send**, as step 1:
+   - nothing else in flight, and every earlier credential request
+     settled on answers only;
+   - the `credential.version` pre-check ("Sent with the vault's current
+     blob"). The app records the `key` of that answer with the blob it
+     sends, as the **held key**. When the answer gives no `key`, the
+     request is refused with nothing sent, with the "earlier request"
+     text;
+   - an unresolved change of type `credential.reset`, stored durably
+     before the send: the inner `id`, the blob version the request
+     carries, the held key and the request's `exp`. It holds no PIN or
+     password;
+   - the request carries `exp`, 10 minutes after the vault's clock as
+     the app last saw it, and the app keeps the request (the same inner
+     `id` and body) in memory only until the reset is decided.
+2. **While it is unresolved**, the gate of step 2 refuses **every other
+   credential operation** (§3.5.9's types, the owner check,
+   `vault.secret.renew`, the changes, critical items and wallet signing
+   included) at once, with the same texts. A reset changes neither the
+   PIN nor the phone's secret, so the unlock is not affected, as for a
+   password change (step 5, last bullet).
+3. **Deciding.** While `exp` has not passed, the app may resend the same
+   request (the same inner `id` and body, in a new envelope): the vault
+   answers it from its response cache, or handles it once if it never
+   arrived (step 3). It also asks `credential.version`:
+   - a **`key` that differs from the held key, or a `version` lower than
+     the stored version**: the reset **applied**. Of the requests this
+     app could have sent, only a reset or a `credential.rotate` changes
+     the key, and the gate refused the rotation. The app fetches the
+     latest blob (`credential.get`), keeps it (it opens with the new
+     password), acknowledges it (`credential.ack`), tops up its UTKs
+     (`credential.utk.get`; the holder kept the rest of its pool across
+     the reset), treats its critical items as destroyed, as on the
+     reset's own answer, clears the unresolved change and tells the
+     member that the new credential was made;
+   - the **same `key` and `version`**, in an answer whose `ts` is more
+     than 1 minute after the request's `exp`: the reset **did not apply
+     and never will**. The app clears the unresolved change and tells
+     the member that nothing was changed;
+   - the same `key` and `version` in an earlier answer: not decided yet.
+     The app resends the request while it holds it, or asks again after
+     a pause (30 s, doubling up to 5 minutes);
+   - anything else (no credential, the same `key` with another
+     `version`, an answer that shows an alarm): the check **ends without
+     a decision**. The app clears the unresolved change, offers no retry
+     that would send the PIN or a password again, and says that either
+     password may be the current one. An alarm follows its own path
+     (§3.5.9), whose fetch brings the latest blob either way;
+   - no answer at all: the reset stays unresolved, and the app tells the
+     member that it will check when it can reach the vault.
+4. **An answer that arrives** to the request (the first send or a
+   resend) decides it by itself, as step 4 says: the new blob (with its
+   `key`, version 1) is success; `bad_pin`, `bad_password`,
+   `weak_password`, `backoff`, `busy`, `counter_unavailable`, `retry`
+   and the other refusals mean **not applied**; `stale_credential`
+   means not applied, and the app fetches the blob and does not retry
+   with the typed secrets.
+5. **Telling the member** is step 7's.
+
+The vault needs no change for this. vettid-vault staging release 18
+(`release/staging/18`) has the four properties listed above for
+`credential.reset` as for any other request that is not volatile
+(`vault/inbound.go` `dispatch`: `CheckTime` before the dedupe, and every
+answer, errors included, cached under the request's `id`;
+`credential.reset` is not a volatile type). `credential.version`
+answers `{exists, version, key, updated_at, alarm?}`, and the reset's
+own answer is `{credential, version, key, utks}`
+(`features/credential/credential.go` `Handle`, `holderReset`,
+`create`).
 
 #### 11.14.10 Transfer from release R
 
@@ -16172,6 +16278,8 @@ stricter answer winning. Two more are specified later:
   | vettid-ios (0.47.0) | IOS-PLAN 0.1.6 §6.3 (in progress in vettid-ios) | app |
   | vettid-android (0.47.1) | ANDROID-PLAN 0.1.50: no answer to the pre-check shows the plain "could not reach the service" text; an error, a missing version or `exists: false` counts as "differs"; during an alarm, `credential.version` before a rotation and on `rotation_required` / `credential_frozen`, then fetch, keep, acknowledge and retry once (§3.5.9) | app |
   | vettid-ios (0.47.1) | IOS-PLAN 0.1.8 §6.3: the same; the alarm trigger is the one iOS already chose (vettid.org #358) | app |
+  | vettid-android (0.48.0) | ANDROID-PLAN 0.1.51: `newCredential` (`credential.reset`) sent and decided as §11.14.9 "A lost answer to `credential.reset`"; "New credential" hidden until then (owner decision 2026-10-19) | app |
+  | vettid-ios (0.48.0) | IOS-PLAN 0.1.9 §6.3; New credential stays hidden until then | app |
 
 - **Measurements before the numbers are final**, on a staging host: the
   heavy derivation's time and memory with other vaults running; how often
