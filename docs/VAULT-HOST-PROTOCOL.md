@@ -635,7 +635,10 @@ unknown.
   and the supervisor passes it for `unlock` only. From a
   `recovery_cancel` answer it copies the clear code
   `recovery_not_current` (a named cancel that found another recovery or
-  none) into that cancel's slot, and from no other. It writes the lifecycle event `app_key_next`
+  none) into that cancel's slot, and from no other. A cancel's answer
+  has no envelope, so this is the one code the parent copies from an
+  answer without one (today it copies codes only with an envelope, and
+  the enclave's answer check refuses a code without one). It writes the lifecycle event `app_key_next`
   (sent with the first header write of a replacement of the app) as the
   row's `app_key_next`, and clears it when `app_key` reaches its
   `seq`, when an `app_key` event carries `next_cleared: true` (it skips
@@ -778,8 +781,13 @@ Fields, eleven: `event`, `vault_id`, `release`, `vault_version`,
 release R fourteen, with `next`, `header_seq` and `next_cleared`; and
 (0.1.13; VAULT-MESSAGING 0.49.0) fifteen, with
 `cancelled_recovery_id`: the id of the recovery that the unlock behind
-an `unlocked` or `moved` event ended, a ULID, and empty otherwise and on
-every other event. The parent writes a non-empty one to the vault row
+the event ended, a ULID, and empty otherwise and on every other event.
+It is set on that unlock's `unlocked` event whenever it emits one (the
+abandonment of a pending move emits `unlocked` and then `moved`; only
+`unlocked` carries it), and on `moved` only for an unlock that
+completed a move, which emits no `unlocked`. The vault process passes
+it to the supervisor in its own `Lifecycle` notification
+(`internal/vaultipc`, a new field with a channel version step). The parent writes a non-empty one to the vault row
 as `recovery_cancelled: {recovery_id, at}` in the same update as the
 event (`at` is the parent's time), and refuses a frame whose field is
 not empty or a ULID, or is set on another event. Lifecycle events reach

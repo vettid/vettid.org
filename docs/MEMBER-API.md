@@ -2134,13 +2134,34 @@ goes through one notice row in the request table, `rcnotice#<recovery_id>`
 `noticeAttempt`'s claim, work, record:
 
 1. **Claim.** A conditional update of the notice row sets `noticing`
-   and counts `notice_tries`, creating the row if needed, only when it
-   has no `noticed_at` and no `noticing` newer than `ATTEMPT_RETRY_S`
-   (5 minutes). A caller that fails the condition stops: the notice is
-   done or under way. Every path claims first, "already ended"
-   included, so polls, status reads and sweeps never audit twice. After
+   and counts `notice_tries`, only when it has no `noticed_at` and no
+   `noticing` newer than `ATTEMPT_RETRY_S` (5 minutes). A caller that
+   fails the condition stops: the notice is done or under way. After
    `ATTEMPT_MAX_TRIES` the notice is given up, recorded with
    `notice_failed` and logged.
+   - **A new notice row is opened only for a live recovery**: when the
+     named recovery is the vault's current one and still `pending` or
+     `registered` before its `expires_at`. Otherwise a caller may only
+     take up an existing row that has no `noticed_at` (a claim that
+     stopped). Once the cancel write has run, the recovery is
+     `cancelled` for good, so neither the row's `recovery_cancelled`,
+     which the host never clears, nor a later move of `expires_at`, nor
+     the expiry of the notice row can open a second notice or send a
+     second email. The row's TTL is the later of `expires_at` and now,
+     plus one day, so a stalled claim outlives its retries.
+     (Chosen over recording the email on the recovery,
+     `cancel_mailed_at`: the email's state stays in one place, as for
+     `noticeAttempt`, and the check that opens a notice is the same
+     condition as the cancel write.)
+   - **An already ended recovery** opens no notice row. A slot whose
+     marker names the vault's current recovery that has ended (for
+     example, cancelled from the site a moment before), or a recovery
+     that is no longer the vault's, is claimed by its own
+     `cancel_noticed_at` (a conditional update, `attribute_not_exists`).
+     Only that claimer audits `vault.recovery_cancel_seen`. So the audit
+     is written once per slot, whatever polls and sweeps follow, and
+     never for the row's `recovery_cancelled` alone, which can be read
+     again long after the slot is gone.
 2. **Work.**
    - The completion check runs first (2.4.1), as for the cancel routes:
      a recovery that has in fact completed is recorded `completed`.
@@ -2154,11 +2175,12 @@ goes through one notice row in the request table, `rcnotice#<recovery_id>`
      slot | row`) and sends the email with `sendMail`. A failed send
      throws and leaves the claim to be taken up again, unlike
      `notify()`, which would lose it.
-   - Otherwise the recovery had already ended here: replaced,
-     cancelled from the account site, `completed`, `unavailable`, or
-     past its `expires_at`. Nothing changes and nothing is mailed. The
-     claimer audits `vault.recovery_cancel_seen` (`vault_id`,
-     `recovery_id`, `ended`: the state it found, or `replaced`).
+   - Otherwise the recovery ended between the claim and the write
+     (replaced, cancelled from the account site, `completed`,
+     `unavailable`, or past its `expires_at`). Nothing changes and
+     nothing is mailed. The claimer audits `vault.recovery_cancel_seen`
+     (`vault_id`, `recovery_id`, `ended`: the state it found, or
+     `replaced`).
    - No `recovery_cancel` is enqueued: the vault has already ended the
      recovery.
 3. **Record.** `noticed_at` is set and `noticing` removed. The slot, if
@@ -2218,9 +2240,18 @@ least `RECOVERY_CANCEL_ID_FROM_RELEASE` (a stack setting, as
 `recovery_id` and the API signs the eight-line string. Otherwise it
 sends the seven-line form, which older releases verify and which cancels
 whatever is in progress. A named cancel that finds another recovery or
-none comes back with the slot code `recovery_not_current`. The API never
-returns a cancel's slot and needs no action: it ended its own record
-before it queued the cancel. It logs the code when it reads the slot.
+none comes back with the slot code `recovery_not_current`. Nothing in
+the API reads a cancel's slot (`recovery_cancel` is not in
+`POLLED_OPS`, and no job reads it), and no action is needed: the API
+ended its own record before it queued the cancel. The code serves the
+operator's logs and the vault's tests. A named cancel sent to a release
+that is too old fails the signature and is ignored silently: the
+enclave keeps the recovery while the API shows it cancelled. That is
+safe but silent, so the setting is changed only after a staging test of
+both forms at the boundary release. The signer,
+`lambda/shared/recovery-sign.ts` (`recoveryRequestSigningString`),
+gains the optional `recovery_id` and the eight-line form, tested against
+the new `recovery.json` vectors (VAULT-MESSAGING §16).
 
 **Email** (draft for the owner's wording). Subject "VettID vault
 recovery cancelled", the subject of the other cancel emails. Body:
@@ -2277,8 +2308,15 @@ Member API (`test/lambda/vault.test.ts`; the sweep in
   ends the matching recovery once; the slot and the row together end
   it once, with one audit and one email;
 - the "already ended" path (cancelled from the site, completed,
-  unavailable, expired) audits `vault.recovery_cancel_seen` once,
-  across repeated polls, status reads and sweeps, and mails nothing;
+  unavailable, expired) audits `vault.recovery_cancel_seen` once per
+  slot, across repeated polls, status reads and sweeps, and mails
+  nothing; the row's `recovery_cancelled` alone never audits it;
+- after the cancel was mailed, a later `GET /api/vault/recovery` or
+  `/status`, with the row's `recovery_cancelled` still set, opens no
+  notice and mails nothing: after the notice row's TTL, and after
+  `expires_at` was moved by an attempt;
+- the signer's seven- and eight-line strings match the `recovery.json`
+  vectors;
 - a claim that stopped after the cancel write and before the email is
   taken up after `ATTEMPT_RETRY_S` and mails; a failed send is retried;
   after `ATTEMPT_MAX_TRIES` it is given up and logged;
@@ -2307,6 +2345,11 @@ Vault (vettid-vault):
   `recovery_not_current`;
 - a seven-line cancel keeps the old rule;
 - a changed or stripped `recovery_id` fails the signature.
+- `recovery_not_current`, with no envelope, passes `ParseResponse` and
+  reaches the cancel's slot, and on no other operation;
+- the abandon path puts the id on `unlocked` only; a completed move on
+  `moved`; the field crosses `internal/vaultipc`;
+- the seven- and eight-line `recovery.json` vectors.
 
 ### Locks (2.5.0; VAULT-MESSAGING 0.29.0 §11.5, VAULT-LOCK)
 
