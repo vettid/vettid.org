@@ -1,9 +1,14 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.7
+version: 0.1.8
 date: 2026-10-19
 changelog:
+  - 0.1.8: owner decisions 2026-10-19 (VAULT-MESSAGING 0.47.1;
+    ANDROID-PLAN 0.1.50; vettid.org #358 part 2). §6.3: no answer to the
+    pre-check shows the plain "could not reach the service" text; an
+    error, a missing version or `exists: false` counts as "differs";
+    the alarm trigger iOS chose for a rotation is now the specification
   - 0.1.7: owner decision 2026-10-19 (STAGING-TIME-SCALE 0.1.1;
     ANDROID-PLAN 0.1.49). §6.6: the recovery counter's "unavailable for
     a day" urgency (S8) is scaled too
@@ -510,6 +515,16 @@ Public keys are SEC1 uncompressed (`x963Representation` in CryptoKit,
      refuses with nothing sent. The app already did this while a renew
      was unconfirmed, and now does it before every change. A renew's own
      refusal, `stale_credential` included, decides it not applied.
+     (0.1.8) As in VAULT-MESSAGING 0.47.1 and ANDROID-PLAN 0.1.50: no
+     answer to that `credential.version` refuses with the plain "could
+     not reach the service" text, not the "unreachable" text of a
+     pending change, since nothing was sent; an error answer, an answer
+     without a version or `exists: false` counts as "differs" (fetch,
+     and send only with the vault's current blob). During a credential
+     alarm, `credential.version` before a rotation and on
+     `rotation_required` / `credential_frozen`, then fetch, keep,
+     acknowledge and retry once when the version or the key differs, is
+     the trigger iOS chose (#358) and is now the specification (§3.5.9).
   3. A candidate becomes current on its operation's answer, or when an
      unlock answered `device_secret` with the current record is tried
      with the candidates, newest first, and one gets `ok`, `bad_pin` or
