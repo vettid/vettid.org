@@ -1,9 +1,13 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.5
+version: 0.1.6
 date: 2026-10-18
 changelog:
+  - 0.1.6: for the owner's approval (VAULT-MESSAGING 0.47.0;
+    ANDROID-PLAN 0.1.48; vettid.org #347). §6.3: `credential.version`
+    before a change or a renew, with the blob refreshed when it differs;
+    a renew's own refusal decides it. The texts are Android's
   - 0.1.5: approved by the owner 2026-10-18 (VAULT-MESSAGING 0.46.0;
     ANDROID-PLAN 0.1.47). §6.3: a renew settled before a PIN change,
     settled on answers only, "Finish the move" refused while a change is
@@ -496,6 +500,13 @@ Public keys are SEC1 uncompressed (`x963Representation` in CryptoKit,
      so that unlock costs nothing); a pending credential request is
      settled only by its answer or a vault answer's `ts`; "Finish the
      move" is refused while a change is unresolved or a PIN uncertain.
+     (0.1.6) As in VAULT-MESSAGING 0.47.0 and ANDROID-PLAN 0.1.48: right
+     before a change or a renew, inside the serialization of credential
+     operations, the app asks `credential.version`; when it differs from
+     the held blob, the app fetches the blob and sends with it, or
+     refuses with nothing sent. The app already did this while a renew
+     was unconfirmed, and now does it before every change. A renew's own
+     refusal, `stale_credential` included, decides it not applied.
   3. A candidate becomes current on its operation's answer, or when an
      unlock answered `device_secret` with the current record is tried
      with the candidates, newest first, and one gets `ok`, `bad_pin` or

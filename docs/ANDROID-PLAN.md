@@ -1,9 +1,14 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.47
+version: 0.1.48
 date: 2026-10-18
 changelog:
+  - 0.1.48: for the owner's approval (VAULT-MESSAGING 0.47.0;
+    vettid.org #347). §4 "A lost answer to a PIN or password change":
+    `credential.version` before a change or a renew, with the blob
+    refreshed when it differs; a renew's own refusal decides it. No new
+    text. Tests follow
   - 0.1.47: approved by the owner 2026-10-18 (VAULT-MESSAGING 0.46.0).
     §4 "A lost answer to a PIN or password change": an unanswered
     `vault.secret.renew` is recorded and decided by `credential.version`
@@ -2273,8 +2278,11 @@ From this version:
   `credential.version` to obtain a vault time.
 - (0.1.47) **A renew is settled before a PIN change.**
   `renewPhoneSecret` stores an `UnresolvedChange` for
-  `vault.secret.renew` before sending, as for a change, and the resolver
-  decides its lost answer by `credential.version` with the same table.
+  `vault.secret.renew` before sending, as for a change. (0.1.48) An
+  answer to the renew's own request decides it, any refusal
+  (`stale_credential` included) as not applied; only a renew with no
+  answer goes to the resolver, which decides by `credential.version` with
+  the same table.
   `changePin` is sent only once no renew is unresolved: while one could
   still apply, it is refused with the "earlier request" text above; when
   the version cannot decide, it is refused with "VettID couldn't confirm
@@ -2284,6 +2292,16 @@ From this version:
   confirms the renew's candidate or the current record. Trying other
   candidates with the previous PIN at an unlock stays only as the
   fallback for a renew candidate left from before this rule.
+- (0.1.48) **Sent with the vault's current blob.** Under
+  `credentialLock`, after the pending requests are settled and before the
+  marker is stored, `changePin`, `changePassword` and `renewPhoneSecret`
+  ask `credential.version`. When it differs from the held blob's version
+  they run `credential.get`, keep the blob, and continue with it when its
+  version equals the vault's. Otherwise they stop with nothing sent and
+  the "earlier request" text; with no answer, the "unreachable" text.
+  Tests: an owner check, a name change and a `credential.unlock` whose
+  answers are lost, then a PIN change sent with the refreshed blob, and
+  a lost `stale_credential` that is never read as applied.
 - **No lock-and-unlock flow while unresolved.** `ReleaseUpdate` refuses
   to start, retry or abandon an update while a marker exists or a PIN is
   uncertain, with the "still checking" text. Every other flow that would
