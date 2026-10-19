@@ -1,8 +1,8 @@
 ---
 title: VAULT-HOST-PROTOCOL
 status: approved by the owner 2026-10-12 (H1–H9 as recommended)
-version: 0.1.12
-date: 2026-10-16
+version: 0.1.13
+date: 2026-10-19
 owner: Al Liebl (Mesmer)
 component: vault enclave (supervisor), parent (host process)
 related:
@@ -12,6 +12,14 @@ related:
   - VAULT-RELAY-SCALING.md (0.1.2) §6, §10
   - vettid-vault `internal/hostproto`, `enclave/supervisor`, `enclave/egress`, `parent`, docs/V3-NOTES.md "Enclave ↔ parent", docs/SMOKE.md
 changelog:
+  - 0.1.13: with VAULT-MESSAGING 0.49.0 (owner decision 2026-10-19;
+    awaiting the owner's approval of this wording); not built. One new
+    host code: the enclave's answer to an `unlock` whose sealed result
+    is `{ok: true, recovery_cancelled: true}` carries the clear `code:
+    "recovery_cancelled"`, and the parent copies it into the slot of an
+    `unlock` and of no other operation, as it copies
+    `recovery_registered` into a register's. The supervisor drops it on
+    any other operation's answer. §11.2 lists it among what the parent sees
   - 0.1.12: with VAULT-MESSAGING 0.33.2 (owner decision 2026-10-16),
     for release R. No wire change. §8.1 retention: token, success and
     close records are locked for the channel's period, **one day on
@@ -606,7 +614,11 @@ unknown.
   (with `retry_at` and `expires`) from a `recovery_open` answer into its
   slot, `not_before`, `expires` and `earliest` from a `recovery` answer,
   and a `recovery_unavailable`'s clear `reason`, as it copies
-  `recovery_registered`. It writes the lifecycle event `app_key_next`
+  `recovery_registered`. (0.1.13; VAULT-MESSAGING 0.49.0 §11.5) It
+  copies `recovery_cancelled` from the answer to an `unlock` whose
+  sealed result is `{ok: true, recovery_cancelled: true}` into that
+  unlock's slot, and from no other operation's answer; the supervisor
+  passes that code for `unlock` only. It writes the lifecycle event `app_key_next`
   (sent with the first header write of a replacement of the app) as the
   row's `app_key_next`, and clears it when `app_key` reaches its
   `seq`, when an `app_key` event carries `next_cleared: true` (it skips
@@ -1107,7 +1119,8 @@ a vault is above this protocol:
   `recovery_attempt` with `retry_at` and `expires`, the clear
   `not_before`, `expires` and `earliest` of a recovery, the member API's
   signature on `recovery` and `recovery_cancel`, and the `recovery_open`
-  operation;
+  operation; (0.1.13) also `recovery_cancelled` on the answer to an
+  `unlock` that cancelled a recovery;
 - (0.1.10, release R) the recovery counter's connections (§8.1): when
   the enclave opens one and the sizes and times of its ciphertext. They
   are not shared with other hosts' traffic, so each burst marks a

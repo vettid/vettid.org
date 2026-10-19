@@ -1,8 +1,23 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.8.0
+version: 2.9.0
 changelog:
+  - 2.9.0 (2026-10-19; owner decision 2026-10-19, **awaiting the
+    owner's approval of this wording**, with VAULT-MESSAGING 0.49.0 and
+    VAULT-HOST-PROTOCOL 0.1.13; not built). New "A recovery cancelled
+    from the phone": an `unlock` slot that the host returns with the
+    enclave's clear `code: "recovery_cancelled"` ends the recovery the
+    unlock was made under as `cancelled`, once, with an audit
+    (`vault.recovery_cancel`, `via: app`) and a short email (draft
+    text). The unlock route records the active recovery on the slot and
+    the slot on the recovery (`unlock_ids`); the marker is noticed when
+    the app polls the slot, when the account site reads or requests a
+    recovery, and by the 5-minute sweep. Already ended recoveries
+    (cancelled, completed, unavailable, expired, replaced) are left as
+    they are, without an email. No new route; the `Recovery` object
+    gains `cancelled_via`. Until now such a recovery stayed pending on
+    the account site and a new request was `409 recovery_active`
   - 2.8.0 (2026-10-18; **approved by the owner 2026-10-18**, with
     VAULT-MESSAGING 0.43.0 and STAGING-TIME-SCALE 0.1.0; not built).
     New "Staging time scale": a staging stack parameter `timeScale` (1
@@ -1605,6 +1620,7 @@ interface Recovery {
   earliest?: true;                     // 2.7.0: available_at is still the API's own estimate (or the enclave's, when it could not read its counter)
   reason?: 'no_backup' | 'no_credential' | 'not_offered';  // 2.7.0: only with `unavailable`, from the slot's clear reason
   completed_at?: string;               // 2.4.1: only with `completed`; when the API recorded it
+  cancelled_via?: 'session' | 'link' | 'app';  // 2.9.0: only with `cancelled`, for a cancel recorded from 2.9.0; `app`: the phone's unlock (A recovery cancelled from the phone)
   sealed_code?: string;                // b64 of 5,252 bytes, only while `available`
   locator?: string;                    // 2.4.0: 12 Crockford base32 characters, only together with a `sealed_code` that is a code's (never with `unavailable`)
 }
@@ -1918,7 +1934,7 @@ interface Recovery {
   register 10 per member per day; cancel 30 per member per 15 minutes; the cancel link 20 per
   source network per 15 minutes; status 60 per minute.
 - **Audit:** `vault.recovery_request`, `vault.recovery_cancel` (with
-  `via: session | link`), `vault.recovery_code_released` (first release; written before the code is returned, 2.6.1),
+  `via: session | link`, and from 2.9.0 `app`), `vault.recovery_code_released` (first release; written before the code is returned, 2.6.1),
   `vault.recovery_register`, `vault.recovery_registered` (1.1.0),
   `vault.recovery_completed` (2.4.1; `vault_id`, `recovery_id`, the
   key's `kid`),
@@ -2048,6 +2064,110 @@ Everything above holds except where this says otherwise.*
   ready on {date} at {time}" and, while `earliest`, "at the earliest";
   and "The app on your new phone shows how many attempts are left." The
   page cannot show the count.
+
+#### A recovery cancelled from the phone (2.9.0)
+
+*Owner decision of 2026-10-19; this wording awaits the owner's approval,
+with VAULT-MESSAGING 0.49.0 §11.5 and §11.11.4 and VAULT-HOST-PROTOCOL
+0.1.13. Not built. It needs the vault release that sets the marker.*
+
+**Before 2.9.0.** An owner app's unlock with `cancel_recovery` ends a
+recovery inside the vault (VAULT-MESSAGING §11.11.4), and its result is
+sealed to the app. The API never learned of it. The account site kept
+showing the recovery as pending, and a new request was answered `409
+recovery_active` until the recovery's `expires_at`.
+
+**The marker.** From the vault release that sets it, the slot of such
+an unlock comes back `done` with `code: "recovery_cancelled"`, copied by
+the host from the enclave's clear marker. Only an `unlock` whose sealed
+result is `{ok: true, recovery_cancelled: true}` carries it. The API
+reads it only on a slot whose `op` is `unlock`, and ignores it on any
+other slot.
+
+- **Which recovery.** When the unlock route enqueues an `unlock` while
+  the vault's recovery is active (`pending`, `available` or
+  `registered` before `expires_at`), it records that recovery's id on
+  the slot (`recovery_id`), and the request id on the recovery
+  (`unlock_ids`, at most the latest 10, as `register_ids`). A marker
+  ends only the recovery its slot names. An unlock slot without
+  `recovery_id` ends nothing: the queue is not ordered, and only the
+  recovery known when the unlock was sent is certain. The marker is
+  then audited only.
+- **The transition**, in one conditional write on the vault row:
+  `pending`, `available` or `registered` → `cancelled`, with
+  `cancelled_via: "app"`. (The two cancel routes record `session` or
+  `link` from 2.9.0; a recovery cancelled before has none.) The condition is the same `recovery_id`, a
+  state of `pending` or `registered` (the row's states; `available`
+  follows from the clock), and `now < expires_at`. The API first runs
+  the completion check (2.4.1), as the cancel routes do, so a recovery
+  that has in fact completed is recorded `completed` and not cancelled.
+  The API enqueues **no** `recovery_cancel`: the vault has already
+  ended the recovery. From then on the recovery reads `cancelled`, its
+  code is not released, its cancel links answer `{cancelled: false}`,
+  and a new request is accepted.
+- **Already ended, or another recovery.** When the slot's recovery is
+  no longer the vault's (replaced), or has ended (`cancelled` already,
+  for example from the account site at the same moment; `completed`;
+  `unavailable`; past its `expires_at`), the write is not made: the
+  recovery stays as it is, nothing is mailed, and the marker is
+  audited with `ended: true`.
+- **Once.** The conditional write makes the change at most once.
+  After it, the API sets `cancel_noticed_at` on the slot, and readers
+  skip a slot that has it. Only the caller whose write succeeded
+  audits `vault.recovery_cancel` (`via: "app"`, `vault_id`,
+  `recovery_id`, `request_id`) and sends the email. A caller that
+  loses the race does neither. The email uses the system mailer, as
+  the other cancel emails do: a failed send is logged and is not
+  retried.
+- **Where it is noticed.** As `recovery_attempt` is (2.7.0):
+  - when the app polls `GET /api/vault/requests/{id}` for that unlock,
+    which it always does to read its result;
+  - when `GET /api/vault/recovery` or `/api/vault/status` finds an
+    active recovery with `unlock_ids`. It reads their slots before it
+    answers, as it reads `register_ids`;
+  - in `POST /api/vault/recovery`, before a request is refused `409
+    recovery_active`: the active recovery's `unlock_ids` are read first,
+    so that a recovery cancelled from the phone never blocks a new one;
+  - in the 5-minute sweep (`lambda/jobs/vault-attempts.ts`), which also
+    scans for `unlock` slots with `code: "recovery_cancelled"` and no
+    `cancel_noticed_at`. The job's metric gains
+    `RecoveryCancelsUnnoticed`.
+  Unlock slots live 15 minutes (`REQUEST_TTL_S`). A phone that never
+  polls, on a vault whose account site is not opened within that time,
+  is caught by the sweep, which runs well within it.
+- **Email** (draft for the owner's wording). Subject "VettID vault
+  recovery cancelled", the subject of the other cancel emails. Body:
+  "The recovery of your VettID vault requested at {requested_at} was
+  cancelled from your VettID app, which unlocked the vault with your
+  PIN. You can request a new recovery from your account page if you
+  need one. If you did not do this, someone else may have your phone
+  and know your PIN: sign in to your account page."
+- **Account site.** No new text: a cancelled recovery reads as one
+  cancelled from the account site does.
+- **Tests to expect** (`test/lambda/vault.test.ts`; jobs in
+  `test/lambda/jobs.test.ts`):
+  - an unlock enqueued under an active recovery records `recovery_id`
+    on its slot and its id in `unlock_ids` (the latest 10 kept); one
+    enqueued without an active recovery records neither;
+  - polling an unlock slot with the marker cancels the recovery
+    (`cancelled_via: "app"`), audits once and mails once; a second
+    poll, a status read and the sweep change nothing and mail nothing;
+  - no `recovery_cancel` is enqueued for it;
+  - the marker on a slot of a replaced recovery, or on one already
+    cancelled, completed, unavailable or past `expires_at`, changes
+    nothing and mails nothing; a registered recovery whose key is
+    already the vault's app key is recorded `completed`, not
+    `cancelled`;
+  - the marker on a slot whose `op` is not `unlock`, or on an unlock
+    slot without `recovery_id`, ends nothing;
+  - `POST /api/vault/recovery` after a cancel from the phone whose
+    slot nobody polled answers `202`, not `409 recovery_active`;
+  - `GET /api/vault/recovery` and `/status` show `cancelled` (status:
+    `null`) after reading the slot;
+  - the sweep notices an unpolled marker, logs a failure without
+    throwing, and counts `RecoveryCancelsUnnoticed`;
+  - a concurrent cancel from the account site and a marker give one
+    `cancelled` recovery and one email.
 
 ### Locks (2.5.0; VAULT-MESSAGING 0.29.0 §11.5, VAULT-LOCK)
 
