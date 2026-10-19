@@ -1,9 +1,18 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.49
+version: 0.1.50
 date: 2026-10-19
 changelog:
+  - 0.1.50: owner decisions 2026-10-19 (VAULT-MESSAGING 0.47.1;
+    vettid.org #358 part 2). §4 "A lost answer to a PIN or password
+    change", "Sent with the vault's current blob": no answer to the
+    pre-check shows the plain `data_failure_network` text, not the
+    "unreachable" text (nothing was sent); an error answer, an answer
+    without a version or `exists: false` counts as "differs". §4
+    "Transfer": during a credential alarm, `credential.version` before
+    a rotation and on `rotation_required` / `credential_frozen`, then
+    fetch, keep, acknowledge and retry the rotation once. Tests follow
   - 0.1.49: owner decision 2026-10-19 (STAGING-TIME-SCALE 0.1.1). §4
     "Staging time scale": the recovery counter's "unavailable for a
     day" urgency (S8, 24 h) is one of the app's scaled waits, and its
@@ -2303,7 +2312,15 @@ From this version:
   ask `credential.version`. When it differs from the held blob's version
   they run `credential.get`, keep the blob, and continue with it when its
   version equals the vault's. Otherwise they stop with nothing sent and
-  the "earlier request" text; with no answer, the "unreachable" text.
+  the "earlier request" text. (0.1.50) With no answer they stop with
+  the plain network failure text, "VettID could not reach the service.
+  Check your connection and try again." (`data_failure_network`), not
+  the "unreachable" text above, which is for a change that may be
+  pending: here nothing was sent. An error answer, an answer without a
+  `version`, or `exists: false` counts as "differs": they run
+  `credential.get` and continue only with the vault's current blob (the
+  version the answer gave, or, when it gave none, the blob
+  `credential.get` returned); otherwise the "earlier request" text.
   Tests: an owner check, a name change and a `credential.unlock` whose
   answers are lost, then a PIN change sent with the refreshed blob, and
   a lost `stale_credential` that is never read as applied.
@@ -2416,6 +2433,18 @@ From this version:
 - After a transfer, a PIN change or a password change the app offers to
   rotate the vault's keys (`credential.rotate`), which a completed
   recovery does by itself.
+- (0.1.50; VAULT-MESSAGING 0.47.1 §3.5.9) **A rotation during a
+  credential alarm.** Before "Rotate now" while an alarm is open, and
+  when a rotation is answered `rotation_required` or
+  `credential_frozen`, the app asks `credential.version`. When the
+  `version` or the `key` differs from those of the blob it holds, it
+  runs `credential.get`, keeps the blob, sends `credential.ack` and
+  retries the rotation once. While the answer shows the alarm `frozen`,
+  it asks for the member's confirmation first. (The vault answers a
+  superseded blob in `rotation_required` with `rotation_required`, not
+  `stale_credential`, and spends the UTK.) Tests: a clone used first,
+  then the holder's rotation succeeding after one fetch; a second
+  `rotation_required` after the retry is shown, not retried again.
 
 **Other screens.**
 

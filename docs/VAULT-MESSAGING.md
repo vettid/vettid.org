@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.47.0
-date: 2026-10-18
+version: 0.47.1
+date: 2026-10-19
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.7.1)
-  - ANDROID-PLAN.md (0.1.48)
-  - IOS-PLAN.md (0.1.6; §9.1 VA1–VA3)
+  - ANDROID-PLAN.md (0.1.50)
+  - IOS-PLAN.md (0.1.8; §9.1 VA1–VA3)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,25 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.47.1: clarifications, owner decisions of 2026-10-19 (vettid.org
+    #358 part 2); no vault release. §11.14.9 "Sent with the vault's
+    current blob": (a) no answer to the `credential.version` pre-check
+    is shown with the app's plain "can't reach the service" text, not a
+    "change pending" text, since nothing was sent (0.47.0 named the
+    "can't reach" text of an unresolved change); (b) an error answer, an
+    answer without a version, or `exists: false` counts as "differs":
+    the app fetches, and refuses with the "earlier request" text unless
+    the fetched blob is the vault's current one; the head of the next
+    bullet ("Besides the candidate record …"), lost in 0.47.0, is
+    restored. §3.5.9 "Forced rotation": (c) what the vault answers a
+    holder that presents a superseded blob during an alarm (vettid-vault
+    staging release 18), when the holder asks `credential.version`
+    (before a rotation while an alarm is open, and on a rotation
+    answered `rotation_required` or `credential_frozen`), and that it
+    fetches and retries the rotation once when the version or the key
+    differs; a whole-phone copy with the same device id that knows the
+    password can finish the rotation first, and the vault cannot tell
+    the two copies apart. ANDROID-PLAN 0.1.50 and IOS-PLAN 0.1.8 follow
   - 0.47.0: normative, approved by the owner 2026-10-19 (vettid.org #347); no
     vault release. §11.14.9 "A lost answer" step 1: (1) **sent with the
     vault's current blob**: right before a change or a renew, inside the
@@ -2417,6 +2436,40 @@ opens a new alarm.
 - If the holder's own blob is stale, because the clone was used first,
   the holder fetches the latest with `credential.get`, allowed in
   `rotation_required`.
+- (0.47.1; vettid.org #358) **What the vault answers a superseded blob
+  during an alarm, and when the holder fetches.** As vettid-vault
+  staging release 18 does it (`features/credential/credential.go`:
+  `gate`, `holderOnly`, `checkBlob`, `clone`, `freezeErr`):
+  - In state `frozen`, `credential.rotate` and `credential.get` are
+    refused with `credential_frozen` before the UTK is spent. The
+    holder first confirms the alarm (above).
+  - In state `rotation_required`, a `credential.rotate` spends its UTK
+    and then checks the blob. The holder's blob of version current − 1,
+    while the current version is not yet confirmed, is answered
+    `stale_credential`, as at any time. **Any other superseded blob is
+    the clone path:** with the alarm already open, the vault audits
+    `credential.clone_detected` and refuses with `rotation_required`,
+    never `stale_credential`. A holder that fetched only on
+    `stale_credential` would never fetch, and every "rotate now" would
+    spend a UTK and fail again.
+  - So the holder's app asks `credential.version` **before a rotation
+    while an alarm is open**, and **when a rotation is answered
+    `rotation_required` or `credential_frozen`**. When the `version` or
+    the `key` differs from those of the blob it holds, it fetches the
+    latest blob (`credential.get`), keeps it, acknowledges it
+    (`credential.ack`; both allowed in `rotation_required`) and retries
+    the rotation **once**. While the answer shows the alarm in state
+    `frozen`, it takes the member's confirmation first.
+  - **A whole-phone copy with the same device id** (for example a
+    restored phone backup) that knows the password can finish the
+    rotation first. The alarm then closes, and the other copy is cut
+    off: its blob is dead, and once the new version is acknowledged its
+    next use opens a new alarm (before that, the holder's retry rule
+    answers its version current − 1 with `stale_credential`). The vault
+    cannot tell the two copies apart, since they present the same
+    device id and keys. The password, which every rotation needs, is
+    the barrier. A copy under another device id cannot rotate: every
+    blob it presents is a clone.
 - **Residual.** With the backup off and the latest blob already confirmed
   by whoever used the clone, no copy of the latest version exists: the
   credential is lost. There is no recovery with the backup off
@@ -15552,8 +15605,8 @@ change instead of repeating it.
      and keeps it, and sends the request with that blob when the fetched
      version equals the vault's. A fetch that fails or gives another
      version refuses the request with nothing sent, with the "earlier
-     request" text; no answer to `credential.version` refuses it with the
-     "can't reach" text. This is what makes step 3's "version + 1" mean
+     request" text; no answer to `credential.version` refuses it as the
+     second sub-bullet below says. This is what makes step 3's "version + 1" mean
      this request: it carries the vault's current version, and no earlier
      request can still apply. It rests on the vault handling one batch at
      a time, the messages of a batch in mailbox order, and nothing while
@@ -15561,7 +15614,24 @@ change instead of repeating it.
      07bf770). Since every earlier request is settled, any of them
      applied before the answer to `credential.version` was produced, or
      never will, whatever the order of delivery.
- (§11.14.1 rule 1), the
+     - (0.47.1) **An answer that shows no version counts as "differs".**
+       An error answer to `credential.version`, an answer without a
+       `version`, or `exists: false` is handled as a version that
+       differs: the app fetches, and sends only when the fetched blob is
+       the vault's current one. When the answer gave a version, that is
+       a fetched version equal to it. When it gave none, it is a blob
+       that `credential.get` returned: the vault answers `credential.get`
+       with its latest blob or `not_found`, never with an older one
+       (vettid-vault `features/credential/credential.go`, staging release
+       18). Otherwise the request is refused with nothing sent, with the
+       "earlier request" text.
+     - (0.47.1) **No answer** to `credential.version` refuses the request
+       with nothing sent, with the app's plain "can't reach the service"
+       text (ANDROID-PLAN names it). It is not a "change pending" text
+       such as step 2's "can't reach your vault" or ANDROID-PLAN's
+       "unreachable" text: nothing was sent, so nothing is pending.
+       (0.47.0 named the "can't reach" text here.)
+   - Besides the candidate record of a PIN change (§11.14.1 rule 1), the
      app durably stores an **unresolved change**: the type, the inner
      `id`, the blob version the request carries, and the request's
      `exp`. It holds no PIN, password or secret. The store refuses when
@@ -16100,6 +16170,8 @@ stricter answer winning. Two more are specified later:
   | vettid-ios (0.46.0) | IOS-PLAN 0.1.5 §6.3 | app |
   | vettid-android (0.47.0) | ANDROID-PLAN 0.1.48: `credential.version` before a change or a renew, the blob refreshed when it differs; a renew's own refusal decides it (after vettid-android #144) | app |
   | vettid-ios (0.47.0) | IOS-PLAN 0.1.6 §6.3 (in progress in vettid-ios) | app |
+  | vettid-android (0.47.1) | ANDROID-PLAN 0.1.50: no answer to the pre-check shows the plain "could not reach the service" text; an error, a missing version or `exists: false` counts as "differs"; during an alarm, `credential.version` before a rotation and on `rotation_required` / `credential_frozen`, then fetch, keep, acknowledge and retry once (§3.5.9) | app |
+  | vettid-ios (0.47.1) | IOS-PLAN 0.1.8 §6.3: the same; the alarm trigger is the one iOS already chose (vettid.org #358) | app |
 
 - **Measurements before the numbers are final**, on a staging host: the
   heavy derivation's time and memory with other vaults running; how often
