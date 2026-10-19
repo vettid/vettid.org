@@ -1,8 +1,8 @@
 ---
 title: STAGING-TIME-SCALE
 status: draft, approved by the owner 2026-10-18
-version: 0.1.0
-date: 2026-10-18
+version: 0.1.1
+date: 2026-10-19
 owner: Al Liebl (Mesmer)
 component: vault (enclave, release constants), member API, apps (Android, iOS), dev stack
 related:
@@ -14,6 +14,10 @@ related:
   - VAULT-LOCK.md (0.1.2) (the idle lock), AGENT-PLAN.md (0.1.6) (the dev stack's held-vault test)
   - vettid-vault `main` f0976ee (read only: `enclave/releasecfg/*.json`, `releasecfg.go` and the timer constants)
 changelog:
+  - 0.1.1: owner decision 2026-10-19 ("recovery counter should also be
+    scaled in staging"): the app's side of S8 is scaled too, on Android
+    and iOS; added to the app timer lists (§5.2, §5.6, §5.7). Built
+    in follow-ups to vettid-android #145 and the iOS time-scale PR
   - 0.1.0: first draft, after the owner's request of 2026-10-18 ("for
     testing here on out, i'd like to make the testing windows shorter by
     using hours instead of days (e.g. need to wait 1 day = 1 hour in
@@ -185,7 +189,7 @@ window, the 120 s parent rule.
   before the scale (1). `vault.status` also returns `time_scale` to the
   app and to desktops.
 - The app **stores it per vault** with the record of §11.10.6, and each
-  app-side timer (S2, S9, S10, S12, S16) keeps the absolute time it was
+  app-side timer (S2, S8, S9, S10, S12, S16) keeps the absolute time it was
   given when it started.
 - **Production builds** refuse any value other than 1 (§4 item 4). A
   staging build accepts 1 and 24.
@@ -247,7 +251,7 @@ window, the 120 s parent rule.
 - **Member API**: synth of the production stack with `timeScale` 24
   fails; S14 and S15 at 24; estimates at 24.
 - **Apps**: a production build refuses a descriptor with 24; a staging
-  build shows scaled texts and the note; S2, S9, S10, S12, S16 at 24 with
+  build shows scaled texts and the note; S2, S8, S9, S10, S12, S16 at 24 with
   a fake clock; a timer started before the scale was known keeps its
   time.
 
@@ -257,8 +261,8 @@ window, the 120 s parent rule.
 |---|---|---|---|
 | T-V | vettid-vault | `time_scale` in both channel files and `releasecfg check`; `Scale`; S1, S3 to S8, S11, S13; quiet period per §5.4; descriptor and `vault.status` member; dev stack flag; tests | the first staging release after 16 (S17, with AV6), if merged before it is cut; otherwise S18 |
 | T-M | vettid.org | stack parameter, CDK refusal, S14, S15, estimates, texts | deployed to staging when that release is published |
-| T-A | vettid-android | read and store the scale, refuse ≠ 1 in production builds, S2, S9, S10, S12, S16, texts and the note | the next staging app after T-V |
-| T-I | vettid-ios | the same, for the iOS rows (S2, S9, S10) | with the first iOS staging build that unlocks |
+| T-A | vettid-android | read and store the scale, refuse ≠ 1 in production builds, S2, S8, S9, S10, S12, S16, texts and the note | the next staging app after T-V |
+| T-I | vettid-ios | the same, for the iOS rows (S2, S8, S9, S10) | with the first iOS staging build that unlocks |
 
 An app or a member API without its row is safe: it uses real time,
 which is only longer than the vault's.

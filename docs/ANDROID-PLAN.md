@@ -1,9 +1,13 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.48
-date: 2026-10-18
+version: 0.1.49
+date: 2026-10-19
 changelog:
+  - 0.1.49: owner decision 2026-10-19 (STAGING-TIME-SCALE 0.1.1). §4
+    "Staging time scale": the recovery counter's "unavailable for a
+    day" urgency (S8, 24 h) is one of the app's scaled waits, and its
+    text computes both durations
   - 0.1.48: approved by the owner 2026-10-19 (VAULT-MESSAGING 0.47.0;
     vettid.org #347). §4 "A lost answer to a PIN or password change":
     `credential.version` before a change or a renew, with the blob
@@ -1685,7 +1689,8 @@ vault without it, part 1 applies unchanged.
 - **The app's own waits** are divided by it when each starts, and the
   absolute time is kept: the owner check's early warning (1 h before
   the deadline), replaced records' deletion (7 days), the old phone's
-  keys after a transfer (7 days after the approval), the screen for a
+  keys after a transfer (7 days after the approval), the recovery
+  counter's "unavailable for a day" urgency (24 h, S8), the screen for a
   vault unreachable for 7 days (vettid-android #142), and the update
   banner's dismissal (24 h). A timer started before the app knew the
   scale keeps its time. Rate limits and retries (the push registration
