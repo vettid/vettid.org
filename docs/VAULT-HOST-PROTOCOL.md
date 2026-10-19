@@ -1,17 +1,34 @@
 ---
 title: VAULT-HOST-PROTOCOL
 status: approved by the owner 2026-10-12 (H1–H9 as recommended)
-version: 0.1.12
-date: 2026-10-16
+version: 0.1.13
+date: 2026-10-19
 owner: Al Liebl (Mesmer)
 component: vault enclave (supervisor), parent (host process)
 related:
-  - VAULT-MESSAGING.md (0.33.2) §2 (threat model, who sees what), §11.14 (release R: recovery and the attempt counter), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
+  - VAULT-MESSAGING.md (0.49.0) §2 (threat model, who sees what), §11.14 (release R: recovery and the attempt counter), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
   - VAULT-PLAN.md (0.1.8) §5.2 (D5: TLS in the enclave), §5.3 (D4: one process per vault)
-  - VAULT-RELEASES.md (0.1.16) §3.4 (C3, C4), §8.4 (network and egress), §8.7 (observability)
+  - VAULT-RELEASES.md (0.1.32) §3.4 (C3, C4), §8.4 (network and egress), §8.7 (observability)
   - VAULT-RELAY-SCALING.md (0.1.2) §6, §10
   - vettid-vault `internal/hostproto`, `enclave/supervisor`, `enclave/egress`, `parent`, docs/V3-NOTES.md "Enclave ↔ parent", docs/SMOKE.md
 changelog:
+  - 0.1.13: with VAULT-MESSAGING 0.49.0 (owner decision 2026-10-19;
+    awaiting the owner's approval of this wording); not built. (1) One
+    new host code with one clear member: an `unlock` answer that carries
+    `code: "recovery_cancelled"` also carries `cancelled_recovery_id`, the
+    id of the recovery the unlock ended. The parent checks that it is a
+    ULID and copies both into that unlock's slot (`code`,
+    `cancelled_recovery_id`), and from no other operation's answer; the
+    supervisor drops them on any other answer. (2) `Lifecycle` gains a
+    fifteenth field, `cancelled_recovery_id` (a ULID or empty), set on
+    the `unlocked` or `moved` event of such an unlock; the parent writes
+    it to the vault row as `recovery_cancelled: {recovery_id, at}`, the
+    backstop for an answer lost before its slot was written. (3)
+    `recovery_cancel` may carry a signed `recovery_id`; the enclave then
+    cancels only that recovery and otherwise answers the clear code
+    `recovery_not_current`, which the parent copies into the cancel's
+    slot only. §6.1, §7.2, §10, §11.2 and the trust table follow; the
+    `related` versions are brought up to date
   - 0.1.12: with VAULT-MESSAGING 0.33.2 (owner decision 2026-10-16),
     for release R. No wire change. §8.1 retention: token, success and
     close records are locked for the channel's period, **one day on
@@ -602,11 +619,26 @@ unknown.
   (the parent leases nothing for it and treats it as it treats a
   register). `recovery` and `recovery_cancel` carry `signed_at`,
   `key_id` and `sig`, which the enclave verifies before anything else
-  and the parent passes on unread. The parent copies `recovery_attempt`
+  and the parent passes on unread; (0.1.13) a `recovery_cancel` may also
+  carry `recovery_id`, covered by the signature and passed on unread. The parent copies `recovery_attempt`
   (with `retry_at` and `expires`) from a `recovery_open` answer into its
   slot, `not_before`, `expires` and `earliest` from a `recovery` answer,
   and a `recovery_unavailable`'s clear `reason`, as it copies
-  `recovery_registered`. It writes the lifecycle event `app_key_next`
+  `recovery_registered`. (0.1.13; VAULT-MESSAGING 0.49.0 §11.5,
+  §11.14.8) From an `unlock` answer that carries the code
+  `recovery_cancelled`, it copies the code and the clear
+  `cancelled_recovery_id` into that unlock's slot, after checking that
+  the id is a ULID (a malformed id drops both), and it copies them from
+  no other operation's answer. The parent cannot see the sealed result:
+  it relies on the enclave, which sets the code only for an unlock whose
+  result is `ok: true` with `recovery_cancelled` (the cancel stored),
+  and the supervisor passes it for `unlock` only. From a
+  `recovery_cancel` answer it copies the clear code
+  `recovery_not_current` (a named cancel that found another recovery or
+  none) into that cancel's slot, and from no other. A cancel's answer
+  has no envelope, so this is the one code the parent copies from an
+  answer without one (today it copies codes only with an envelope, and
+  the enclave's answer check refuses a code without one). It writes the lifecycle event `app_key_next`
   (sent with the first header write of a replacement of the app) as the
   row's `app_key_next`, and clears it when `app_key` reaches its
   `seq`, when an `app_key` event carries `next_cleared: true` (it skips
@@ -745,7 +777,23 @@ publishes it in the instance's registry row with the next heartbeat.
 
 Fields, eleven: `event`, `vault_id`, `release`, `vault_version`,
 `state_version`, `app_key`, `app_key_seq`, `credential_backup`,
-`name_seq`, `first_name`, `last_name` (VAULT-MESSAGING §11.5).
+`name_seq`, `first_name`, `last_name` (VAULT-MESSAGING §11.5); from
+release R fourteen, with `next`, `header_seq` and `next_cleared`; and
+(0.1.13; VAULT-MESSAGING 0.49.0) fifteen, with
+`cancelled_recovery_id`: the id of the recovery that the unlock behind
+the event ended, a ULID, and empty otherwise and on every other event.
+It is set on that unlock's `unlocked` event whenever it emits one (the
+abandonment of a pending move emits `unlocked` and then `moved`; only
+`unlocked` carries it), and on `moved` only for an unlock that
+completed a move, which emits no `unlocked`. The vault process passes
+it to the supervisor in its own `Lifecycle` notification
+(`internal/vaultipc`, a new field with a channel version step). The parent writes a non-empty one to the vault row
+as `recovery_cancelled: {recovery_id, at}` in the same update as the
+event (`at` is the parent's time), and refuses a frame whose field is
+not empty or a ULID, or is set on another event. Lifecycle events reach
+the parent before the answer on the same connection and are queued for
+their own write, so this one survives a `Queue` call that timed out and
+a slot that was never written.
 
 | Field | Form |
 |---|---|
@@ -1045,7 +1093,7 @@ meant to meet. What the code does if they do:
 | A reply status the caller does not know | a failure |
 | A known request with another number of fields | `invalid`; for the hello, a failed hello (the enclave requires exactly three reply fields, the parent exactly two request fields) |
 | Extra pairs in a `Stats` reply | dropped by the parent |
-| A `Lifecycle` with five, seven or eight fields | accepted by the parent (§7.2) |
+| A `Lifecycle` with five, seven, eight, eleven or fourteen fields | accepted by the parent (§7.2); fifteen from 0.1.13 |
 | An egress header with another version | closed without an answer |
 
 So a new request kind can be added without breaking either side, and
@@ -1107,7 +1155,12 @@ a vault is above this protocol:
   `recovery_attempt` with `retry_at` and `expires`, the clear
   `not_before`, `expires` and `earliest` of a recovery, the member API's
   signature on `recovery` and `recovery_cancel`, and the `recovery_open`
-  operation;
+  operation; (0.1.13) also `recovery_cancelled` with
+  `cancelled_recovery_id` on an `unlock` answer that carries the code,
+  the same id in that unlock's lifecycle event, and
+  `recovery_not_current` on a cancel's answer. Neither id is new to the
+  parent: every recovery id is the `request_id` of the `recovery` queue
+  message that opened it, which the parent already reads;
 - (0.1.10, release R) the recovery counter's connections (§8.1): when
   the enclave opens one and the sizes and times of its ciphertext. They
   are not shared with other hosts' traffic, so each burst marks a
@@ -1169,7 +1222,7 @@ more than "the operation does not happen, or happens late".
 | `Queue`, sealed operations (`enroll`, `unlock`, `recovery_register`) | drop, delay, reorder, replay, send to another instance; change the clear members | Replays and redirected requests are refused (VAULT-MESSAGING §11.6). It cannot make one: it has no ETK and no device key. A changed `account` member reaches the vault (below) |
 | `Queue`, operations without an envelope (`lock`, `delete`, `account`, `recovery`, `recovery_cancel`) | **forge them** for any `vault_id` | `lock`: the vault locks. *From release L (0.1.3, planned):* a `lock` carries `unlock_id` or is ordered by `enqueued_at`, both of which the parent can read and set, and the parent writes the `code` of the answer: it can still lock any vault, drop any lock, and report `locked` for a vault it left open. The members protect an honest path against late delivery, not against the parent. What bounds a parent that keeps a vault open is the idle lock, decided in the enclave by its own clock (VAULT-MESSAGING §3.6.8). `delete`: a running vault deletes itself with the full semantics of VAULT-MESSAGING §12.5, otherwise its stored objects are erased; an operator power stated in §13.5. `account`: a running vault takes the snapshot, so the parent can make a vault show its owner, and put in the core of its shared profile, **names and account details of the parent's choosing**; the snapshot is display only and "not authenticated beyond the host path" (VAULT-MESSAGING §11.13, §10.8). `recovery` (0.1.10, release R: signed by the member API, VAULT-MESSAGING §11.14.8; the parent alone can no longer start or cancel one, and a forged one locks nothing): with a browser key of its own the parent **starts a recovery**: a running vault locks and tells its devices why, unlocks are refused `recovery_pending`, and after the enclave's 24 h the parent can open the code. The devices are told only if the vault was running when the recovery began, and see `recovery_pending` only while the parent serves them the header that records it; a parent that serves an earlier header shows them nothing (§11.4 item 4). A recovery still needs an attested app, the PIN and the credential password, and exists only with the credential backup on (VAULT-MESSAGING §11.11); the two backoffs do not limit a parent that also replays stored objects (§11.4 item 4). `recovery_cancel`: ends a member's recovery |
 | `Queue`, the manifest document | withhold it, or give another | The request fails `manifest`. It cannot make the enclave accept a manifest the app did not verify (VAULT-MESSAGING §11.5) |
-| `Queue` reply (seen by the parent) | drop it, or write another slot | The app gets no result or a result it cannot open; results are sealed. The two host codes can be forged or suppressed with the effects VAULT-MESSAGING §11.5 lists |
+| `Queue` reply (seen by the parent) | drop it, or write another slot | The app gets no result or a result it cannot open; results are sealed. The host codes (`recovery_registered`, `recovery_unavailable`, `recovery_attempt` and, from 0.1.13, `recovery_cancelled` with `cancelled_recovery_id` and `recovery_not_current`) can be forged or suppressed with the effects VAULT-MESSAGING §11.5 lists |
 | `LeaseLost` | send it for any vault, at any time; never send it | The vault locks. Never sending it leaves a vault running without a lease; if a second instance then opens the vault, the two meet at the conditional state write, and the one that finds a newer version is zeroized (the split-brain guard does not depend on leases) |
 | `Ping` | not send it; send it and renew no lease; ignore the answer | Not sending it locks every vault after 120 s (§4.3): **denial of service only**. Sending it proves only that the peer is alive: a parent can ping and renew nothing, and what then stops two instances writing one vault is the conditional state write, as before. It learns the number of running vaults, which it has from the lifecycle events |
 | `Shutdown` | send it at any time | Every vault locks, with its flush |

@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.48.0
+version: 0.49.0
 date: 2026-10-19
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -13,7 +13,7 @@ related:
   - CALLS-PLAN.md (0.1.4) §6.1 V4, §13 (phase C2; decisions D12–D26, decided 2026-10-12)
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.7.1)
+  - MEMBER-API.md (2.9.0)
   - ANDROID-PLAN.md (0.1.51)
   - IOS-PLAN.md (0.1.9; §9.1 VA1–VA3)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
@@ -23,10 +23,32 @@ related:
   - VAULT-RELEASES.md (0.1.31; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
-  - VAULT-HOST-PROTOCOL.md (0.1.12; the enclave ↔ parent protocol as built)
+  - VAULT-HOST-PROTOCOL.md (0.1.13; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.49.0: normative, owner decision of 2026-10-19 (awaiting the
+    owner's approval of this wording); revised after review. §11.5,
+    §11.11.4, §11.14.6, §11.14.8: **a recovery cancelled by an unlock
+    reaches the member API**, and **a cancel names its recovery**.
+    (1) The answer to an `unlock` whose sealed result is `{ok: true,
+    recovery_cancelled: true}` carries the clear marker `code:
+    "recovery_cancelled"` with `cancelled_recovery_id`, the id of the
+    recovery it ended; the parent copies both into the unlock's slot. As
+    a backstop for an answer lost between the enclave and the slot, the
+    `unlocked` lifecycle event of that unlock carries the same id, and
+    the parent writes it to the vault row (`recovery_cancelled`). The
+    member API ends the recovery with that id as `cancelled`, once,
+    from either source, and emails the member (MEMBER-API 2.9.0).
+    Until now the account site kept showing such a recovery as
+    pending, and a new request was answered `409 recovery_active`.
+    (2) Beyond the approved scope, for the owner to accept or refuse: a
+    signed `recovery_cancel` carries the `recovery_id` it means, inside
+    the signature, and the enclave cancels only that recovery; an older
+    release keeps "whatever is in progress". Both need a vault release
+    (the enclave and its parent) as well as the member API: the host
+    cannot read the sealed result, so only the enclave can say what was
+    cancelled. VAULT-HOST-PROTOCOL 0.1.13 follows
   - 0.48.0: normative, owner decision of 2026-10-19 (vettid.org #358
     part 1); no vault release. §11.14.9 **"A lost answer to
     `credential.reset`"** replaces "`credential.reset` is not covered
@@ -10925,7 +10947,7 @@ enclave answers the parent with
 
 ```json
 { "v": 1, "request_id": "<ULID>", "status": "done|etk_unknown", "envelope": "<b64, 5,252 bytes>",
-  "code": "recovery_registered|recovery_unavailable|recovery_attempt|locked|not_running|stale" }
+  "code": "recovery_registered|recovery_unavailable|recovery_attempt|recovery_cancelled|recovery_not_current|locked|not_running|stale" }
 ```
 
 (0.33.0, release R) The answer to a `recovery` also carries, in the
@@ -10941,19 +10963,95 @@ slot of a `recovery_open` too. These say that an attempt was counted and
 when the next is possible, never whether the guess was right; VettID,
 which owns the counter's bucket, sees that already.
 
+(0.49.0) **A recovery cancelled by an unlock.** The answer to an
+`unlock` whose sealed result is `{"ok": true, …, "recovery_cancelled":
+true}` (§11.11.4) carries the clear marker **`code:
+"recovery_cancelled"`** and the clear member **`cancelled_recovery_id`**:
+the id of the recovery that this unlock ended, which is the recovery's
+own id in the header (the `request_id` of the `recovery` that opened it,
+and the member API's `recovery_id`). No other answer carries them: not a
+failed unlock, not an unlock without `cancel_recovery`, and no other
+operation.
+
+- **Only when the cancel was stored.** The vault process sets
+  `recovery_cancelled` in its outcome as soon as the PIN has matched,
+  before the release rules, the resume and the write of the header and
+  state, and a later failure (for example `retry` after a failed write)
+  does not clear it. The enclave therefore sets the marker only when the
+  result is `ok: true` **and** carries `recovery_cancelled`, which is
+  when the write that ended the recovery is stored. (vettid-vault
+  staging release 18: `vault/unlock.go` sets `out.RecoveryCancelled`
+  before `releaseRules` and `persist`; `enclave/core.go` `Core.Open`
+  returns no marker for an `unlock`, so the unlock job must start
+  returning one.)
+- **The parent** copies the code and `cancelled_recovery_id`, after
+  checking that it is a ULID, into the slot of an `unlock` that carries
+  the code, as the slot attributes `code` and `cancelled_recovery_id`,
+  and from no other operation's answer. A malformed id drops both.
+- **Which recovery.** The member API ends the recovery whose
+  `recovery_id` equals `cancelled_recovery_id`, and no other. The queue
+  is not ordered (§11.5), so the recovery that was current when the
+  member API queued the unlock may not be the one the enclave ended:
+  the enclave cancels whatever recovery its header holds when the
+  unlock runs.
+- **A lost answer, and the backstop.** The marker can be lost between
+  the enclave and the slot, and the slot then shows no cancel:
+  - if the parent's call times out after the enclave stored the cancel,
+    the redelivered message meets the replay set and is answered with
+    random bytes and no code (§11.6);
+  - if the parent stops after the answer and before it writes the slot,
+    the redelivery meets the same.
+
+  So a lifecycle event of that unlock also carries
+  `cancelled_recovery_id`: its `unlocked` event whenever it emits one,
+  which includes the abandonment of a pending move (which emits
+  `unlocked` from the resume and then `moved`, and only the `unlocked`
+  carries the id); and its `moved` event only for an unlock that
+  completed a release move, which emits no `unlocked` (§11.10.4). The
+  id travels from the vault process to the supervisor in the
+  `Lifecycle` notification of `internal/vaultipc` (a new field, with a
+  channel version step) and from the enclave to the parent in the
+  `Lifecycle` frame (VAULT-HOST-PROTOCOL §7.2). The parent writes it to the vault row as
+  `recovery_cancelled: {recovery_id, at}`. (A completed move leaves the
+  recovery cancelled under the new release only. An unlock wrongly
+  routed to the old release could meet that release's older header, in
+  which the recovery still exists; routing by `sealed_release` (§11.1)
+  prevents that window. The old release refuses that header as stale
+  only after the move is confirmed.) Lifecycle events reach the
+  parent before the answer on the same connection and are queued for
+  their own table write, so they survive a call that timed out and a
+  slot that was never written (vettid-vault `parent/parent.go`
+  `onLifecycle`, `parent/consumer.go` `flushEvents` before `writeSlot`).
+  The member API ends the matching recovery from either source,
+  idempotently. A parent that stops before it has written the event
+  loses both; the account site then shows the stale recovery until its
+  `expires_at` or until the member cancels it there, as before 0.49.0.
+
+The member API then ends its record of the recovery as `cancelled` and
+emails the member (MEMBER-API "A recovery cancelled from the phone").
+Without this the API never learned of such a cancel: the account site
+kept showing the recovery as pending, and a new request was answered
+`409 recovery_active` until the recovery's `expires_at`.
+
 (`envelope` absent for lock, delete and `etk_unknown`; `code` present
 only for a `recovery_register` whose sealed result is `{"ok": true}`
 (`recovery_registered`, §11.11.3, 0.10.6), or for a `recovery` the
-enclave refused (`recovery_unavailable`, §11.11.2, 0.16.0), or, from
+enclave refused (`recovery_unavailable`, §11.11.2, 0.16.0), or (0.49.0)
+for an `unlock` that cancelled a recovery (`recovery_cancelled`, above),
+or (0.49.0) for a named `recovery_cancel` that cancelled nothing
+(`recovery_not_current`, §11.14.8, with no envelope), or, from
 release L (0.29.0), for a `lock`: `locked`, `not_running` or `stale`,
 below). The parent
 writes the response slot: `status: "done"`, the `envelope` if any, and
 `code: "etk_unknown"` when the enclave reported it, or the enclave's
-`recovery_registered` or `recovery_unavailable` (with the envelope) when
-its answer carries one; or `status: "expired"`
+`recovery_registered`, `recovery_unavailable` or (0.49.0)
+`recovery_cancelled`, the last with `cancelled_recovery_id` (with the
+envelope), when its answer carries one, or (0.49.0) the code
+`recovery_not_current` of a `recovery_cancel`'s answer, which has no
+envelope (the only code copied without one); or `status: "expired"`
 for a request it did not forward (lease held elsewhere, §11.1) or that
 the enclave could not read (no answer). It writes only slots that are
-still `queued`, and no other `code`. `GET /api/vault/requests/{id}`
+still `queued`, and no other `code` (the 0.49.0 codes included, each for its own operation only). `GET /api/vault/requests/{id}`
 returns `{status, envelope?, code?}`; `code` matches `[a-z_][a-z0-9_]*`
 and is a host code. It returns `envelope` and `code` only for the
 slot of an `enroll`, `unlock`, `lock` or recovery `register` request;
@@ -10962,7 +11060,7 @@ slot of a recovery request never returns the sealed code, which
 leaves the member API only through the recovery's status route
 (§11.11.7). An operation added later must be added to that list
 deliberately, or its result is not returned. A `code` never carries a sealed outcome, with two
-exceptions. `recovery_unavailable` (0.16.0) tells the member API that
+exceptions (three from 0.49.0). `recovery_unavailable` (0.16.0) tells the member API that
 the enclave refused a recovery request (§11.11.2), so that it ends the
 recovery at once; it says no more than the backup bit the host already
 has (§11.5), and a forged or suppressed one changes only what the
@@ -10971,8 +11069,29 @@ that a recovery's code is spent, so that the API stops releasing it
 (§11.11.7). That much is no secret from the host, which sees the
 registered app unlock next; a host that forges the marker only hides a
 code it could withhold anyway, and one that suppresses it leaves a spent
-code on the portal, which the enclave refuses (`used`). Apps read the
-envelope as usual and ignore the marker. The parent writes the
+code on the portal, which the enclave refuses (`used`). (0.49.0)
+`recovery_cancelled` with `cancelled_recovery_id` tells the member API
+that an owner app's unlock ended that recovery, so that the API ends its
+own record and tells the member. What it adds for the host is little:
+the parent already learns that an unlock succeeded (the clear `unlocked`
+event, after which it writes `state: "unlocked"` on the vault row,
+vettid-vault `parent/aws.go`), and it already sees every recovery id as
+the `request_id` of a queue message. Without the marker, the API could
+only infer a cancel from an `unlocked` report while a recovery is
+pending. That inference is racy (the queue is not ordered, and the
+report and the slot are written separately) and ambiguous (a registered
+or recovered app's own unlock is not a cancel), which is why the
+enclave says it. A host that **forges** the marker makes the API end
+its record, which the host could already stall by holding the queue
+messages back, and makes the API send the member a false and alarming
+email. The enclave still holds the recovery: the member's app keeps
+meeting `recovery_pending` (and can cancel from there), while the
+account site shows no recovery until a new request replaces the
+enclave's. The vault row's `recovery_cancelled` is a second channel with
+the same power: the host writes it, and can forge it without any unlock
+at all, with the same effects. A host that **suppresses** the marker
+and the event leaves the stale record of before 0.49.0. Apps read
+the envelope as usual and ignore the marker. The parent writes the
 lifecycle events to the vault table and deletes the queue message when
 the enclave reports completion.
 
@@ -10981,6 +11100,10 @@ the enclave reports completion.
   after an abandonment (§11.10.4); `alarm.credential_clone`, since
   0.16.0 `credential_backup`, and since 0.18.0 `account_name` (above;
   since 0.19.0 also with `unlocked` while a request is pending).
+  (0.49.0) The `unlocked` event of an unlock that cancelled a recovery,
+  or its `moved` event after a release move, carries
+  `cancelled_recovery_id`, which the parent writes to the vault row as
+  `recovery_cancelled: {recovery_id, at}` (above).
 
 **Manifest by hash** (0.10.0, owner decision O10). Enroll and unlock
 requests name the manifest by `manifest_sha256` and `manifest_serial`
@@ -13228,10 +13351,17 @@ A request the enclave cannot read or bind is answered with random bytes.
 A recovery is cancelled by any of:
 
 - the portal or the email link: `POST /api/vault/recovery/cancel` and
-  `/cancel-link`, which enqueue `recovery_cancel`;
+  `/cancel-link`, which enqueue `recovery_cancel`. (0.49.0) From the
+  release that implements it, the cancel names the recovery it means
+  (§11.14.8), and the enclave cancels only that one;
 - an owner app's `vault.unlock` with `cancel_recovery: true`. It cancels
   only if the unlock succeeds (PIN, device assertion), and the result says
-  `recovery_cancelled: true`;
+  `recovery_cancelled: true`. (0.49.0) Its answer carries the clear
+  marker `recovery_cancelled` with `cancelled_recovery_id`, and its
+  `unlocked` event the same id (§11.5). The member API ends the
+  recovery with that id as `cancelled` and emails the member. It does
+  not enqueue a `recovery_cancel` for it, since the vault has already
+  ended the recovery;
 - expiry, or the fifth wrong code.
 
 Cancelling removes the record and any registered unlock key. A recovered
@@ -15343,7 +15473,8 @@ attempt is accepted until `W(k)` has passed, in units of
   `recovery_pending` (§11.11.4); a member who still has it cancels.
   After a cancel by unlock (`cancel_recovery`), the app sends an owner
   check at once, which marks the member present (§11.14.5) and restarts
-  the quiet period.
+  the quiet period. (0.49.0) The member API learns of the cancel from
+  the unlock's clear marker `recovery_cancelled` (§11.5, §11.11.4).
 
 **Why a held-back answer gains nothing.** Every byte between the
 enclave and the counter passes through the host, which can hold any
@@ -15482,6 +15613,57 @@ it. This settles §11.11.2's open design question.
   UTC to the second; for a cancel the last line is empty. The queue
   message carries `signed_at`, `key_id` and `sig` (base64 of the DER
   signature) in the clear.
+- (0.49.0; beyond the approved scope, for the owner's decision) **A
+  cancel names its recovery.** A `recovery_cancel` may carry the clear
+  member `recovery_id` (a ULID): the recovery it means, which is the
+  member API's `recovery_id`. When it does, the signed string has an
+  eighth line, that `recovery_id`, after the empty seventh:
+
+  ```
+  … \n signed_at \n "" \n recovery_id
+  ```
+
+  The enclave verifies the signature over the string that matches the
+  message: seven lines without the member, eight with it. A host that
+  adds, removes or changes the member breaks the signature, and the
+  cancel is ignored like any that fails. With the member, the enclave
+  cancels only when its header holds a recovery with that id
+  (`vault.RecoveryCancel` with the id, which already compares it). It
+  answers `done` with no envelope, as for every cancel, and, when it
+  cancelled nothing (another recovery, or none), the clear code
+  `recovery_not_current`. That is the only host code on an answer
+  without an envelope: the enclave's answer check (`enclave/wire.go`
+  `ParseResponse`, which today refuses any code without an envelope)
+  and the parent (`parent/consumer.go`, which today copies codes only
+  from an answer with an envelope) both take it for a `recovery_cancel`
+  only, and the parent copies it into that cancel's slot and nowhere
+  else. Nothing reads a cancel's slot: the member API never polls it
+  (`recovery_cancel` is not among its polled operations) and already
+  ended its own record of the recovery it meant. The code is there for
+  the operator's logs and tests. Without the member, the enclave
+  keeps the earlier rule and cancels whatever recovery is in progress.
+  **Why.** A cancel from the account site that reaches the enclave
+  after a newer `recovery` (the queue is not ordered) would otherwise
+  end the newer recovery in the enclave while the API still shows it
+  pending.
+  **Compatibility.** Releases up to staging 18 ignore the member but
+  verify the seven-line string, so a named cancel fails there and is
+  ignored. The member API therefore names the recovery only when the
+  instance the cancel goes to runs a release at least
+  `RECOVERY_CANCEL_ID_FROM_RELEASE` (a stack setting, unset until the
+  release exists, as `TIME_SCALE_FROM_RELEASE`), and sends the
+  seven-line form otherwise. Cancels already queued in the old form are
+  valid for at most 5 minutes (`signed_at`) and keep the old rule.
+  **A named cancel sent to a release that is too old** (a wrong setting,
+  or an instance that reports another release than it runs) fails the
+  signature and is ignored without an answer code. The enclave then
+  keeps the recovery while the API shows it cancelled: safe, since a
+  pending recovery only keeps the old app out until it cancels or the
+  recovery expires, but silent. So the setting is changed only after a
+  staging test that sends both forms to the boundary release and to the
+  one before it. The member API's signer (`lambda/shared/recovery-sign.ts`
+  `recoveryRequestSigningString`) gains the optional `recovery_id`, and
+  §16 gains the eight-line vector.
 - **What the release pins.** `recovery_request_keys` (§11.10.8): one or
   two public keys with their `key_id`, so that a key can be replaced by
   a release that still accepts the old one.
@@ -16280,6 +16462,8 @@ stricter answer winning. Two more are specified later:
   | vettid-ios (0.47.1) | IOS-PLAN 0.1.8 §6.3: the same; the alarm trigger is the one iOS already chose (vettid.org #358) | app |
   | vettid-android (0.48.0) | ANDROID-PLAN 0.1.51: `newCredential` (`credential.reset`) sent and decided as §11.14.9 "A lost answer to `credential.reset`"; "New credential" hidden until then (owner decision 2026-10-19) | app |
   | vettid-ios (0.48.0) | IOS-PLAN 0.1.9 §6.3; New credential stays hidden until then | app |
+  | vettid-vault (0.49.0) | (1) The unlock job returns the marker `recovery_cancelled` with `cancelled_recovery_id` only for a result that is `ok: true` with `recovery_cancelled` (`Core.Open` / `c.unlock` return a `Marker`; `AltUnlockOutcome` gains the cancelled recovery's id); `enclave/wire.go` accepts the code and the member for `unlock` only (`markerCodes`, the answer's checks) and `enclave/instance.go` passes them for `unlock`; the parent (`parent/consumer.go`) checks the ULID and copies both into an `unlock` slot only. (2) The `unlocked` (or `moved`) lifecycle frame carries `cancelled_recovery_id`, and the parent writes it to the vault row as `recovery_cancelled` (`parent/aws.go`). The id also crosses `internal/vaultipc`: the `Lifecycle` notification gains the field (a channel version step). (3) `recovery_cancel` with `recovery_id`: the eight-line signed string (`vms/recovery` `RequestSigningString`) and its vector in `recovery.json`; the queue parser reads the member; the id carried in the cancel's job body (today `{}`, `enclave/instance.go`) and across `internal/vaultipc` to `vault.RecoveryCancel` (today called with `""`); the clear code `recovery_not_current` as the cancel's marker, with a `markerCodes` entry for `recovery_cancel`, `enclave/instance.go` passing the marker for a cancel, `ParseResponse` accepting that code without an envelope for a cancel, and the parent copying it without one. Tests: a cancel with a persist failure gives no marker and no event field; a marker naming a recovery that is not the slot's; a lost answer with the event still written; a named cancel of another recovery is refused and a seven-line cancel keeps the old rule (§11.5, §11.14.8; VAULT-HOST-PROTOCOL 0.1.13) | **needs a vault release** (staging) |
+  | vettid.org member API (0.49.0) | MEMBER-API 2.9.0 "A recovery cancelled from the phone": the cancelled recovery matched on `cancelled_recovery_id` (slot) or `recovery_cancelled` (vault row); a per-recovery notice claimed before audit and email; conditional field updates for every cancel; unlock slots that live as long as the recovery; the named `recovery_cancel` behind `RECOVERY_CANCEL_ID_FROM_RELEASE` (`lambda/shared/recovery-sign.ts` signs the eight-line form; a staging test of both forms at the boundary release before the setting is changed); the host's new attributes and the jobs' permissions (lib/stacks/vault-stack.ts, lib/vault/access.ts) | member API, host stack |
 
 - **Measurements before the numbers are final**, on a staging host: the
   heavy derivation's time and memory with other vaults running; how often
@@ -19702,6 +19886,14 @@ by those implementations** (TEST ONLY):
    01JB2Z6V9K3M4N5P6Q7R8S9T32\n2026-10-15T12:00:00Z\n" hex(SHA-256(04 || 64 x 0x61))
   hex(SHA-256(browser_key)) : 70df3b62f5b39f1dc6d347b3835fc57a945b689e609500d9ba3f8a6e06cbafa7
   SHA-256(string)           : f2f13d600b7e4f438171e03451a91c0c1bd8d79a18342558a9f60b32297e89a1
+  (0.49.0) recovery_cancel, seven lines (no recovery_id; the last line empty):
+  "vettid/vms/2/recovery-request\nrecovery_cancel\ntest-vault-0001\ntest-user-guid\n
+   01JB2Z6V9K3M4N5P6Q7R8S9T33\n2026-10-15T12:00:00Z\n"
+  SHA-256(string)           : 027c441758559d461017926a1bba3b56cb6fa320ead17987859236a1731ba2c1
+  (0.49.0) recovery_cancel, eight lines (recovery_id 01JB2Z6V9K3M4N5P6Q7R8S9T32):
+  "vettid/vms/2/recovery-request\nrecovery_cancel\ntest-vault-0001\ntest-user-guid\n
+   01JB2Z6V9K3M4N5P6Q7R8S9T33\n2026-10-15T12:00:00Z\n\n01JB2Z6V9K3M4N5P6Q7R8S9T32"
+  SHA-256(string)           : f62e0062d49f9459d738869c16bc04dbc7f65f5235099296384af9ce7a768ec5
 
 §11.14.1 unlock                                                 (unlock.json)
   x (stand-in for Argon2id(PIN), 64 MiB) : 32 x 0x41   unlock_secret : 32 x 0x42   pepper : 32 x 0x32
