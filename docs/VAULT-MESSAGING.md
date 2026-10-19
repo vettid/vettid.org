@@ -27,7 +27,7 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.47.0: normative, for the owner's approval (vettid.org #347); no
+  - 0.47.0: normative, approved by the owner 2026-10-19 (vettid.org #347); no
     vault release. §11.14.9 "A lost answer" step 1: (1) **sent with the
     vault's current blob**: right before a change or a renew, inside the
     serialization that sends credential operations and once every

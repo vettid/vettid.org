@@ -4,7 +4,7 @@ status: draft
 version: 0.1.48
 date: 2026-10-18
 changelog:
-  - 0.1.48: for the owner's approval (VAULT-MESSAGING 0.47.0;
+  - 0.1.48: approved by the owner 2026-10-19 (VAULT-MESSAGING 0.47.0;
     vettid.org #347). §4 "A lost answer to a PIN or password change":
     `credential.version` before a change or a renew, with the blob
     refreshed when it differs; a renew's own refusal decides it. No new
