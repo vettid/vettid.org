@@ -10,7 +10,7 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as sources from 'aws-cdk-lib/aws-lambda-event-sources';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
-import { AppConfig, ORG, accountPushFunctionName, enrollCodeKeyParamName, hostName, releaseLogBaseUrl, resourceName, vaultServiceParamName } from '../config';
+import { AppConfig, ORG, accountPushFunctionName, enrollCodeKeyParamName, hostName, releaseLogBaseUrl, resourceName, timeScaleEnv, vaultServiceParamName } from '../config';
 import { ApiFunction } from '../constructs/api-function';
 import { HttpRouteGroup } from '../constructs/route-group';
 import { publishRef, readRef } from '../constructs/ssm-refs';
@@ -117,6 +117,13 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     const account = group('Account', '/api/account', 'lambda/member/account.ts');
     // Fixed role name: the vault account's resource policies name it.
     const vault = group('Vault', '/api/vault', 'lambda/member/vault.ts', vaultApiRoleName(config, 'vault'));
+    // The staging time scale (MEMBER-API 2.8.0): the account function's PIN
+    // lock (S15) and the vault function's start-over deletion (S14). Nothing
+    // in production (timeScaleEnv refuses a prod scale other than 1).
+    for (const [k, v] of Object.entries(timeScaleEnv(config))) {
+      account.addEnvironment(k, v);
+      vault.addEnvironment(k, v);
+    }
 
     const cognitoActions = (fn: lambda.IFunction, actions: string[]) =>
       fn.addToRolePolicy(new iam.PolicyStatement({ actions: actions.map((a) => `cognito-idp:${a}`), resources: [memberPoolArn] }));

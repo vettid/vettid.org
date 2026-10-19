@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { env } from './aws';
 import { hit, lockout } from './ratelimit';
 import { secret } from './secrets';
+import { scaledSeconds } from './time-scale';
 
 /**
  * Member PINs (optional second sign-in step). Stored as
@@ -34,6 +35,7 @@ export async function hashPin(guid: string, pin: string): Promise<string> {
 }
 
 export const PIN_DAILY_MAX_FAILURES = 15;
+/** The long lock's real length; divided by the staging time scale when it starts (S15). */
 export const PIN_LONG_LOCK_SECONDS = 24 * 3600;
 const dailyKey = (guid: string) => `pinfailday#${guid}`;
 
@@ -44,8 +46,10 @@ export type PinCheck =
 /**
  * Constant-time check with a lockout that holds under concurrency: an attempt
  * is reserved atomically before the comparison (5 per 15 minutes), and 15
- * failures in a day escalate to a 24-hour lock. `justLocked` is true on the
- * attempt that triggered a lock, so callers can notify the member.
+ * failures in a day escalate to a 24-hour lock (1 hour on staging at time
+ * scale 24; the day over which failures are counted is not scaled).
+ * `justLocked` is true on the attempt that triggered a lock, so callers can
+ * notify the member.
  */
 export async function checkPin(guid: string, storedHash: string, pin: string): Promise<PinCheck> {
   const n = await lockout.reserve(lockKey(guid), PIN_MAX_FAILURES, PIN_LOCK_SECONDS);
@@ -58,7 +62,7 @@ export async function checkPin(guid: string, storedHash: string, pin: string): P
   }
   const daily = await hit(dailyKey(guid), PIN_DAILY_MAX_FAILURES, 86400);
   if (!daily.allowed) {
-    await lockout.lockUntil(lockKey(guid), PIN_MAX_FAILURES, Math.floor(Date.now() / 1000) + PIN_LONG_LOCK_SECONDS);
+    await lockout.lockUntil(lockKey(guid), PIN_MAX_FAILURES, Math.floor(Date.now() / 1000) + scaledSeconds(PIN_LONG_LOCK_SECONDS));
     return { ok: false, locked: true, attemptsLeft: 0, justLocked: daily.count === PIN_DAILY_MAX_FAILURES + 1 };
   }
   const locked = n >= PIN_MAX_FAILURES;

@@ -1,7 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import { Construct } from 'constructs';
-import { AppConfig, androidAssetLinks, hostName, releaseLogBaseUrl, resourceName } from '../config';
+import { AppConfig, androidAssetLinks, hostName, releaseLogBaseUrl, resourceName, timeScaleEnv } from '../config';
 import { readRef } from '../constructs/ssm-refs';
 import { stageZone } from '../constructs/stage-zone';
 import { StaticSite } from '../constructs/static-site';
@@ -24,13 +24,18 @@ export const ACCOUNT_RATE_LIMITS = {
  * The account site's /config.json, read by sites/account/js/site-config.js:
  * the stage (staging pages say so), the stage's own public release log
  * (https://<zoneName>/security/releases/, as for the notice emails;
- * VAULT-RELEASES §7) and the Android app link (null until there is one).
+ * VAULT-RELEASES §7), the Android app link (null until there is one) and,
+ * only when it is not 1, the staging time scale `time_scale` (MEMBER-API
+ * 2.8.0 "Staging time scale"): the pages then scale the durations they state
+ * and say "Staging: 1 day = 1 hour". Production's file is unchanged
+ * (timeScaleEnv refuses a production scale other than 1).
  */
 export function accountSiteConfig(config: AppConfig): Record<string, unknown> {
   return {
     stage: config.stage,
     release_log_url: releaseLogBaseUrl(config),
     android_app_url: config.androidAppUrl ?? null,
+    ...(timeScaleEnv(config).TIME_SCALE ? { time_scale: config.timeScale } : {}),
   };
 }
 

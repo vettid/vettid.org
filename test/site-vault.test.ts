@@ -311,7 +311,7 @@ describe('the typed recovery code (VAULT-MESSAGING 0.25.0 §11.11.10, §16)', ()
       expect(page).toContain('This recovery had already ended: it was cancelled before, it was completed on a new phone, or your vault refused it. Nothing changed.');
       expect(page).not.toContain('it was cancelled before, or its 48 hours are over');
       // 404: expired or replaced; a second use of the link is not a 404.
-      expect(page).toContain("if (err.status === 404) invalid('The recovery it belongs to is no longer there: its 48 hours are over, or a newer recovery has replaced it. If neither is the case, copy the whole link from the email again.');");
+      expect(page).toContain("if (err.status === 404) invalid(t('The recovery it belongs to is no longer there: its 48 hours are over, or a newer recovery has replaced it. If neither is the case, copy the whole link from the email again.'));");
       expect(page).not.toContain('It may have been used already');
       expect(page).toContain('if (res) done(res.cancelled !== false);');
     });
@@ -510,9 +510,60 @@ describe('site config (config.json)', () => {
   test('prod and staging, with and without an app link', () => {
     const log = 'https://vettid.org/security/releases/';
     expect(sc.normalize({ stage: 'prod', release_log_url: log, android_app_url: null }))
-      .toEqual({ stage: 'prod', staging: false, releaseLogUrl: log, androidAppUrl: null });
+      .toEqual({ stage: 'prod', staging: false, releaseLogUrl: log, androidAppUrl: null, timeScale: 1 });
     expect(sc.normalize({ stage: 'staging', release_log_url: log, android_app_url: 'https://example.org/app' }))
-      .toEqual({ stage: 'staging', staging: true, releaseLogUrl: log, androidAppUrl: 'https://example.org/app' });
+      .toEqual({ stage: 'staging', staging: true, releaseLogUrl: log, androidAppUrl: 'https://example.org/app', timeScale: 1 });
+  });
+
+  test('the time scale (MEMBER-API 2.8.0): 24 only on the staging stage, 1 otherwise and for anything else', () => {
+    expect(sc.normalize({ stage: 'staging', time_scale: 24 }).timeScale).toBe(24);
+    expect(sc.normalize({ stage: 'prod', time_scale: 24 }).timeScale).toBe(1);
+    expect(sc.normalize({ stage: 'dev', time_scale: 24 }).timeScale).toBe(1);
+    for (const v of [1, '24', 2, 3600, null, undefined]) expect(sc.normalize({ stage: 'staging', time_scale: v }).timeScale).toBe(1);
+  });
+
+  test('scaleText: production texts unchanged; at 24 the stated durations are divided', () => {
+    const texts = [
+      'Deletes your vault and everything in it after 24 hours, so that you can set up a new, empty vault. You can cancel until then.',
+      "For when you've lost the phone with your VettID app: your new phone takes over after a 24-hour wait.",
+      'The recovery it belongs to is no longer there: its 48 hours are over, or a newer recovery has replaced it.',
+      "The 24 hours are over and your vault is being deleted. It can't be cancelled any more.",
+      'This deletion had already been cancelled, or its 24 hours are over and the vault is being deleted. Nothing changed.',
+    ];
+    for (const t of texts) expect(sc.scaleText(t, 1)).toBe(t);
+    expect(texts.map((t) => sc.scaleText(t, 24))).toEqual([
+      'Deletes your vault and everything in it after 1 hour, so that you can set up a new, empty vault. You can cancel until then.',
+      "For when you've lost the phone with your VettID app: your new phone takes over after a 1-hour wait.",
+      'The recovery it belongs to is no longer there: its 2 hours are over, or a newer recovery has replaced it.',
+      "The 1 hour is over and your vault is being deleted. It can't be cancelled any more.",
+      'This deletion had already been cancelled, or its 1 hour is over and the vault is being deleted. Nothing changed.',
+    ]);
+    expect(sc.scaleText('until three days after', 24)).toBe('until 3 hours after');
+    expect(sc.STAGING_NOTE).toBe('Staging: 1 day = 1 hour');
+    expect(sc.spanWords(150)).toBe('3 minutes');
+    expect(sc.spanWords(3600, true)).toBe('1-hour');
+  });
+
+  test('the pages that state a scaled duration take it through scaleText, with the staging note', () => {
+    const src = (f: string) => readFileSync(join(__dirname, '..', 'sites', 'account', 'js', f), 'utf8');
+    for (const f of ['deletion.js', 'deletion-cancel.js', 'recovery.js', 'recovery-cancel.js', 'vault.js']) {
+      const js = src(f);
+      // Every string stating 24 or 48 hours, three days or a 24-hour wait, in
+      // quotes or a template literal, is wrapped (comments aside).
+      const stated = js.split('\n').filter((l) => /['"`][^'"`]*(24 hours|48 hours|24-hour|three days)/.test(l) && !/^\s*(\/\/|\*)/.test(l));
+      for (const line of stated) expect(line).toMatch(/\bt\(|scaleText\(/);
+      // ...and no duration is stated in a template literal that spans lines (the check above sees one line at a time).
+      for (const m of js.matchAll(/`[^`]*`/g)) {
+        if (/(24 hours|48 hours|24-hour|three days)/.test(m[0])) expect(js.slice(Math.max(0, m.index! - 12), m.index!)).toMatch(/\bt\($|scaleText\($/);
+      }
+      expect(js).toContain('STAGING_NOTE');
+      expect(js).toMatch(/timeScale/);
+    }
+    for (const f of ['deletion', 'recovery']) {
+      const html = readFileSync(join(__dirname, '..', 'sites', 'account', 'account', 'vault', f, 'index.html'), 'utf8');
+      expect(html).toContain(`<p id="${f === 'deletion' ? 'del' : 'rec'}-lede">`);
+      expect(src(`${f}.js`)).toContain(`document.getElementById('${f === 'deletion' ? 'del' : 'rec'}-lede')`);
+    }
   });
 
   test('anything but an https link is ignored', () => {

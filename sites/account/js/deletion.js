@@ -16,6 +16,7 @@
 import { get, post } from './api.js';
 import { $, chip, el, fill } from './dom.js';
 import * as ui from './ui.js';
+import { STAGING_NOTE, scaleText, siteConfig } from './site-config.js';
 import { dateTime, servicePaused, timeUntil } from './vault-text.js';
 
 ui.init();
@@ -31,11 +32,43 @@ let pollTimer = null;
 let tickTimer = null;
 let pollWhenVisible = false;
 let hadDeletion = false;
+let scale = 1; // the staging time scale (config.json; 1 in production)
+let configOnce = null; // the page's one read of /config.json
+let drawn = false; // load() has drawn the state at least once
+
+/**
+ * Reads /config.json once, alongside the first status fetch and never in its
+ * way: the page draws at scale 1 (the production texts). On staging at
+ * another scale, when the config answers, the lede is scaled and the state
+ * drawn again, unless the member is typing in it. In
+ * production (scale 1), or when the config fails or never answers, nothing
+ * changes.
+ */
+function readConfig() {
+  configOnce ??= siteConfig().then((c) => {
+    if (c.timeScale === scale) return;
+    scale = c.timeScale;
+    scaleLede();
+    if (drawn && document.activeElement?.tagName !== 'INPUT') render();
+  });
+}
+
+/** A text with its durations scaled (unchanged at scale 1). */
+const t = (text) => scaleText(text, scale);
+/** The page's lede (static HTML) follows the scale too; on staging it is followed by "Staging: 1 day = 1 hour". */
+function scaleLede() {
+  const lede = document.getElementById('del-lede');
+  if (!lede || scale === 1 || lede.dataset.scaled) return;
+  lede.dataset.scaled = '1';
+  lede.textContent = t(lede.textContent);
+  lede.after(el('p', { class: 'muted' }, STAGING_NOTE));
+}
 
 // ── Loading ─────────────────────────────────────────────────────────────
 
 async function load({ focus } = {}) {
   clearTimers();
+  readConfig();
   try {
     status = await get('/api/vault/status');
     deletion = status?.vault ? (await get('/api/vault/deletion'))?.deletion ?? null : null;
@@ -45,6 +78,7 @@ async function load({ focus } = {}) {
   }
   if (deletion) hadDeletion = true;
   render();
+  drawn = true;
   schedule();
   if (focus) $(focus)?.focus();
 }
@@ -158,7 +192,7 @@ function renderRequest(v) {
     el('ul', { class: 'rec-points' },
       el('li', {}, el('strong', {}, 'Everything in your vault is deleted, for good: '), 'your messages, connections, profile, items, Protean Credential and its critical items, the audit log and the feed. Nobody, VettID included, can restore any of it.'),
       el('li', {}, el('strong', {}, 'Your connections '), "are told you're gone only if your vault is running when it is deleted. Their messages to you stop working."),
-      el('li', {}, el('strong', {}, 'There is a 24-hour wait. '), "We email you a link to cancel, in case it wasn't you. You can also cancel here or in the VettID app. Your vault keeps working until then."),
+      el('li', {}, el('strong', {}, t('There is a 24-hour wait. ')), "We email you a link to cancel, in case it wasn't you. You can also cancel here or in the VettID app. Your vault keeps working until then."),
       el('li', {}, el('strong', {}, 'Then you start over: '), 'set up a new, empty vault here with a setup code and the VettID app.'),
     ),
     neverAsk(),
@@ -172,7 +206,7 @@ function renderRequest(v) {
       el('div', { class: 'actions' }, el('a', { class: 'btn', href: RECOVERY_PAGE }, 'View the recovery')));
   } else {
     const input = el('input', { type: 'text', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', inputmode: 'text' });
-    const submit = el('button', { type: 'submit', class: 'btn btn-danger-solid', disabled: true }, 'Delete my vault in 24 hours');
+    const submit = el('button', { type: 'submit', class: 'btn btn-danger-solid', disabled: true }, t('Delete my vault in 24 hours'));
     input.addEventListener('input', () => {
       submit.disabled = input.value.trim() !== PHRASE;
     });
@@ -203,9 +237,9 @@ function deletionErrorText(err) {
 
 async function requestDeletion(form) {
   const ok = await ui.confirm({
-    title: 'Delete your vault in 24 hours?',
+    title: t('Delete your vault in 24 hours?'),
     body: [
-      'Your vault and everything in it will be deleted 24 hours from now. Nothing can be restored afterwards.',
+      t('Your vault and everything in it will be deleted 24 hours from now. Nothing can be restored afterwards.'),
       "We'll email you a link to cancel. Until then you can also cancel here or in the VettID app.",
     ],
     confirmLabel: 'Delete my vault',
@@ -258,7 +292,7 @@ async function cancelDeletion(b) {
 function renderExecuting() {
   fill(root, el('section', { class: 'card', 'aria-labelledby': 'h-del' },
     sectionHead('h-del', 'Your vault is being deleted'),
-    el('p', {}, chip('Deleting', 'warn'), ' ', "The 24 hours are over and your vault is being deleted. It can't be cancelled any more. We'll email you when it is gone; then you can set up a new vault here."),
+    el('p', {}, chip('Deleting', 'warn'), ' ', t("The 24 hours are over and your vault is being deleted. It can't be cancelled any more. We'll email you when it is gone; then you can set up a new vault here.")),
     facts([
       ['Requested', when(deletion.requested_at)],
       ['Deletion started', when(deletion.deletes_at)],

@@ -34,6 +34,7 @@ import { MemberItem, MemberView, SubscriptionItem, toMemberView } from '../share
 import { pushAccountSnapshot } from '../shared/account-snapshot';
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import type { MemberVaults, StartOverCancel } from '../jobs/cleanup';
+import { scaledMail } from '../shared/time-scale';
 
 const PAGE = 50;
 const memberPoolId = () => env('MEMBER_POOL_ID');
@@ -406,10 +407,13 @@ async function cancelVaultDeletion(m: MemberItem, actor: string, on?: 'reinstate
       await sendMail(
         m.email,
         'VettID vault deletion cancelled',
-        `The deletion of your VettID vault${when ? ` requested at ${when}` : ''} has been cancelled by VettID support. ` +
-          'Your vault and everything in it stay as they are.\n\n' +
-          'If you still want to delete your vault and start over, ask again on your account page; the 24 hours then start again.\n\n' +
-          'If you did not ask for the deletion, secure your email account, and contact support@vettid.org if anything else looks wrong.\n\n— VettID\n',
+        // The start-over's 24 hours follow the staging time scale (MEMBER-API 2.8.0); unchanged in production.
+        scaledMail(
+          `The deletion of your VettID vault${when ? ` requested at ${when}` : ''} has been cancelled by VettID support. ` +
+            'Your vault and everything in it stay as they are.\n\n' +
+            'If you still want to delete your vault and start over, ask again on your account page; the 24 hours then start again.\n\n' +
+            'If you did not ask for the deletion, secure your email account, and contact support@vettid.org if anything else looks wrong.',
+        ) + '\n\n— VettID\n',
       );
     } catch (e) {
       console.error('vault deletion cancel notice failed', (e as Error).name);

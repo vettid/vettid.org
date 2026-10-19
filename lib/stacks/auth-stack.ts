@@ -2,7 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
-import { AppConfig, hostName, resourceName } from '../config';
+import { AppConfig, hostName, resourceName, timeScaleEnv } from '../config';
 import { ApiFunction } from '../constructs/api-function';
 import { publishRef } from '../constructs/ssm-refs';
 import { tableEnv, tableGrant } from '../constructs/table-grants';
@@ -198,6 +198,8 @@ export class VettidOrgAuthStack extends cdk.Stack {
     const define = trigger('DefineAuthChallenge', 'define-auth-challenge');
     const create = trigger('CreateAuthChallenge', 'create-auth-challenge');
     const verify = trigger('VerifyAuthChallenge', 'verify-auth-challenge');
+    // The PIN check's long lock follows the staging time scale (MEMBER-API 2.8.0, S15); nothing in production.
+    for (const [k, v] of Object.entries(timeScaleEnv(config))) verify.addEnvironment(k, v);
     this.memberPool.addTrigger(cognito.UserPoolOperation.DEFINE_AUTH_CHALLENGE, define);
     this.memberPool.addTrigger(cognito.UserPoolOperation.CREATE_AUTH_CHALLENGE, create);
     this.memberPool.addTrigger(cognito.UserPoolOperation.VERIFY_AUTH_CHALLENGE_RESPONSE, verify);

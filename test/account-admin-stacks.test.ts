@@ -1176,6 +1176,10 @@ describe('VettidOrgAccountSiteStack', () => {
     expect(accountSiteConfig(config)).toEqual({ stage: 'prod', release_log_url: 'https://vettid.org/security/releases/', android_app_url: null });
     expect(accountSiteConfig(loadConfig(new cdk.App({ context: { stage: 'staging', stagingAndroidAppUrl: 'https://example.org/a' } }).node)))
       .toEqual({ stage: 'staging', release_log_url: 'https://staging.vettid.org/security/releases/', android_app_url: 'https://example.org/a' });
+    // MEMBER-API 2.8.0: the time scale only when it is not 1 (never in production).
+    expect(accountSiteConfig(loadConfig(new cdk.App({ context: { stage: 'staging', stagingTimeScale: 24, stagingTimeScaleFromRelease: 18 } }).node)))
+      .toEqual({ stage: 'staging', release_log_url: 'https://staging.vettid.org/security/releases/', android_app_url: null, time_scale: 24 });
+    expect(accountSiteConfig(loadConfig(new cdk.App({ context: { stage: 'staging', stagingTimeScale: 1 } }).node))).not.toHaveProperty('time_scale');
     // Deployed in the revalidating pass: the site, config.json and assetlinks.json.
     const deps = Object.values<any>(t.findResources('Custom::CDKBucketDeployment')).map((r) => r.Properties);
     const html = deps.find((d) => JSON.stringify(d.Include ?? []).includes('*.json'));

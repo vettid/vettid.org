@@ -2829,6 +2829,22 @@ termination protection off in code first, and the zone (RETAIN) keeps its
 name servers unless it is deleted by hand, after which
 `stagingZoneNs` and the delegation must be updated.
 
+### Staging time scale (MEMBER-API 2.8.0, STAGING-TIME-SCALE)
+
+On staging, 1 day = 1 hour: the member API divides the start-over
+deletion's 24 h, the account site PIN's 24 h lock and the recovery
+estimates by `stagingTimeScale` (cdk.json; 1 or 24, staging only;
+production is 1 in code). It ships at 1. The switch to 24 is a cdk.json
+change that goes with publishing the first vault release that carries
+`time_scale`: `"stagingTimeScale": 24` and `"stagingTimeScaleFromRelease":
+<that release's number>` (the synth refuses 24 without it), then a staging
+deploy. Recovery times are scaled only for vaults on that release or later.
+
+- If a staging release from `stagingTimeScaleFromRelease` on is ever
+  published with `time_scale` 1, set `"stagingTimeScale": 1` for it and
+  deploy staging; otherwise the emails and pages say 1 h / 3 h while the
+  enclave enforces 24 h / 72 h.
+
 ## Cost alerts
 
 All to `vettid-org-security-alerts` → admin@vettid.org. The three budgets

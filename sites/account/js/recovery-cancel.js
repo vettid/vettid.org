@@ -9,6 +9,7 @@
 import { publicPost } from './api.js';
 import { $, el, fill } from './dom.js';
 import { tokenFromHash } from './recovery-code.js';
+import { STAGING_NOTE, scaleText, siteConfig } from './site-config.js';
 import * as ui from './ui.js';
 
 ui.init();
@@ -17,6 +18,10 @@ const token = tokenFromHash(location.hash);
 if (location.hash) history.replaceState(null, '', location.pathname + location.search);
 
 const card = $('cancel-card');
+let scale = 1; // the staging time scale (config.json; 1 in production)
+let acted = false; // the member clicked: the page is no longer redrawn for the scale
+const t = (text) => scaleText(text, scale);
+const stagingNote = () => (scale === 1 ? null : el('p', { class: 'muted' }, STAGING_NOTE));
 
 function head(title) {
   return el('h2', { id: 'h-cancel', tabindex: '-1' }, title);
@@ -49,28 +54,43 @@ function invalid(text) {
   $('h-cancel').focus();
 }
 
-if (!token) {
-  invalid('Open the cancel link from the email we sent you when the recovery was requested. Use the whole link: the part after # is needed.');
-} else {
-  const btn = el('button', { type: 'button', class: 'btn btn-danger-solid' }, 'Cancel the recovery');
-  btn.addEventListener('click', async () => {
-    const res = await ui.busy(btn, () => publicPost('/api/vault/recovery/cancel-link', { token }), {
-      busyLabel: 'Cancelling…',
-      onError: (err) => {
-        if (err.status === 404) invalid('The recovery it belongs to is no longer there: its 48 hours are over, or a newer recovery has replaced it. If neither is the case, copy the whole link from the email again.');
-        else if (err.status === 400) invalid("It looks incomplete. Copy the whole link from the email, including the part after #.");
-        else ui.showError(err);
-      },
+function start() {
+  if (!token) {
+    invalid('Open the cancel link from the email we sent you when the recovery was requested. Use the whole link: the part after # is needed.');
+  } else {
+    const btn = el('button', { type: 'button', class: 'btn btn-danger-solid' }, 'Cancel the recovery');
+    btn.addEventListener('click', async () => {
+      acted = true;
+      const res = await ui.busy(btn, () => publicPost('/api/vault/recovery/cancel-link', { token }), {
+        busyLabel: 'Cancelling…',
+        onError: (err) => {
+          if (err.status === 404) invalid(t('The recovery it belongs to is no longer there: its 48 hours are over, or a newer recovery has replaced it. If neither is the case, copy the whole link from the email again.'));
+          else if (err.status === 400) invalid("It looks incomplete. Copy the whole link from the email, including the part after #.");
+          else ui.showError(err);
+        },
+      });
+      // MEMBER-API 1.1.0: {cancelled: boolean}; an older answer ({}) means it was handled.
+      // 2.6.3: false is a recovery that ended before its 48 hours were over
+      // (cancelled, completed or refused); after them the link answers 404.
+      if (res) done(res.cancelled !== false);
     });
-    // MEMBER-API 1.1.0: {cancelled: boolean}; an older answer ({}) means it was handled.
-    // 2.6.3: false is a recovery that ended before its 48 hours were over
-    // (cancelled, completed or refused); after them the link answers 404.
-    if (res) done(res.cancelled !== false);
-  });
-  fill(card,
-    head('Cancel the recovery of your vault?'),
-    el('p', {}, 'Someone asked to recover your VettID vault from your account. If that was you on a new phone, you can ignore this page.'),
-    el('p', {}, "If it wasn't you, cancel it. Your vault stays locked until your VettID app unlocks it again with your vault PIN."),
-    el('div', { class: 'actions' }, btn),
-  );
+    fill(card,
+      head('Cancel the recovery of your vault?'),
+      el('p', {}, 'Someone asked to recover your VettID vault from your account. If that was you on a new phone, you can ignore this page.'),
+      el('p', {}, "If it wasn't you, cancel it. Your vault stays locked until your VettID app unlocks it again with your vault PIN."),
+      stagingNote(),
+      el('div', { class: 'actions' }, btn),
+    );
+  }
 }
+
+// Drawn at once with the production texts; on staging, drawn again with the
+// scaled ones when /config.json answers, unless the member has clicked (the
+// texts drawn after a click use the scale by then). A config that fails or
+// never answers leaves the production texts. The token stays in this closure.
+start();
+siteConfig().then((c) => {
+  if (c.timeScale === 1) return;
+  scale = c.timeScale;
+  if (!acted) start();
+});
