@@ -1,9 +1,34 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.45
+version: 0.1.47
 date: 2026-10-18
 changelog:
+  - 0.1.47: approved by the owner 2026-10-18 (VAULT-MESSAGING 0.46.0).
+    §4 "A lost answer to a PIN or password change": an unanswered
+    `vault.secret.renew` is recorded and decided by `credential.version`
+    before a PIN change is sent, with "Lock and unlock now" when the
+    version cannot decide (approved text); a pending credential request
+    is settled only by its answer or a vault answer's `ts`, with one
+    `credential.version` allowed to obtain a vault time; "Finish the
+    move" is refused while a change is unresolved or a PIN uncertain.
+    Tests follow
+  - 0.1.46: approved by the owner 2026-10-18 (VAULT-MESSAGING 0.45.0
+    §11.14.9 "A lost answer"). §4 "A lost answer to a PIN or password
+    change", corrected and completed:
+    - a change is sent only with no credential operation in the outbox
+      or awaiting its answer, and the marker refuses a second change;
+    - the gate refuses at once with the right text;
+    - release updates (and every lock-and-unlock flow outside the
+      two-step unlock) are refused while a change is unresolved;
+    - `stale_credential` to a change means not applied;
+    - `ok` with the previous PIN no longer decides;
+    - after `device_secret`, the other candidates are tried with the
+      previous PIN before the new PIN is asked for;
+    - "ended without a decision" offers no retry that sends secrets, and
+      after a PIN change keeps the PIN uncertain until a two-step unlock;
+    - the decision is shown once, app-wide.
+    New draft texts. Tests follow
   - 0.1.45: approved by the owner 2026-10-18 (vettid.org #338; VAULT-MESSAGING
     0.44.0 §11.14.9 "A lost answer"). §4 "Recovery and unlock from release R": **a
     lost answer to a PIN or password change** is decided, not repeated:
@@ -2188,21 +2213,28 @@ From this version:
   again (30 s doubling to 5 min); anything else → the candidate left to
   the next unlock and that answer's own path. While a change is
   unresolved, `changePin`, `changePassword`, `renewPhoneSecret`, the
-  owner check and every other `credOp` wait for the resolver first, and
-  are refused with the "still checking" text when it cannot reach the
-  vault.
+  owner check and every other `credOp` are refused at once (0.1.46: no
+  waiting for the resolver), with the "still checking" text while the
+  vault can be reached and the "unreachable" text while it cannot.
 - **`stale_credential`** to `pin.change` or `credential.password.change`
-  is not retried by `credOp` with the typed secrets: it fetches the blob
-  and hands over to the resolver.
+  is not retried by `credOp` with the typed secrets. (0.1.46) It decides
+  **not applied**: the marker is cleared, the blob fetched, and the
+  "not changed" text shown. The resolver is not asked, because the
+  version moved for the earlier operation that made the blob stale.
 - **An answer** decides by itself: success even when the confirmation
   write fails (the marker then stays and the resolver or the next unlock
   confirms); `bad_pin` / `bad_password` clear the entry that was wrong
   and keep the new ones; the other refusals keep their texts.
-- **Unlock while a PIN change is unresolved**: the PIN screen asks for
-  the previous PIN and sends it with the current record; on
-  `device_secret` it asks for the new PIN before it tries the
-  candidate (the typed PIN is not reused). A password change does not
-  change the unlock; the resolver runs after it.
+- **Unlock while a PIN change is unresolved** (or its PIN uncertain,
+  below): the PIN screen asks for the previous PIN and sends it with the
+  current record. (0.1.46) `ok` does not decide the change: the marker
+  stays and the resolver decides once the vault runs, since a queued
+  copy may still apply until `exp`. On `device_secret`, the other
+  unconfirmed candidates (an unanswered renew's) are tried first with
+  the previous PIN already typed, newest first. Only when they all
+  answer `device_secret` does the screen ask for the new PIN and try the
+  change's candidate (the typed PIN is never reused for it). A password
+  change does not change the unlock; the resolver runs after it.
 - **Texts (draft, shared with the iPhone app)**:
   - checking: "Your vault hasn't answered yet, so VettID is checking
     whether your PIN was changed. Keep your new PIN at hand." (password:
@@ -2223,6 +2255,81 @@ From this version:
     new PIN next."
   - unlock, after `device_secret`: "Your PIN change went through. Enter
     your new PIN."
+
+(0.1.46, approved by the owner 2026-10-18; VAULT-MESSAGING 0.45.0) In addition:
+
+- **Nothing else in flight.** Before `UnresolvedChange` is stored, the
+  outbox holds no entry of a credential type and no credential request
+  is waiting for its answer. Otherwise the app flushes and waits for
+  those answers for up to 30 s, then refuses with "VettID is still
+  finishing an earlier request to your vault. Nothing was changed. Try
+  again in a minute." The `account.bin` update that stores the marker
+  refuses when a marker with another `innerId` exists, so a double
+  submit or the PIN and password screens together cannot overwrite it.
+  (0.1.47) A pending request is settled only by its answer, or by the
+  `ts` of a vault answer more than 1 minute after its `exp`; events and
+  other vault messages settle nothing. When every pending request should
+  have expired by the phone's estimate, the app may send one
+  `credential.version` to obtain a vault time.
+- (0.1.47) **A renew is settled before a PIN change.**
+  `renewPhoneSecret` stores an `UnresolvedChange` for
+  `vault.secret.renew` before sending, as for a change, and the resolver
+  decides its lost answer by `credential.version` with the same table.
+  `changePin` is sent only once no renew is unresolved: while one could
+  still apply, it is refused with the "earlier request" text above; when
+  the version cannot decide, it is refused with "VettID couldn't confirm
+  your last new phone secret. Before you change your PIN, lock your
+  vault and unlock it again: your PIN hasn't changed, so this doesn't
+  use an attempt." and a "Lock and unlock now" button. That unlock
+  confirms the renew's candidate or the current record. Trying other
+  candidates with the previous PIN at an unlock stays only as the
+  fallback for a renew candidate left from before this rule.
+- **No lock-and-unlock flow while unresolved.** `ReleaseUpdate` refuses
+  to start, retry or abandon an update while a marker exists or a PIN is
+  uncertain, with the "still checking" text. Every other flow that would
+  unlock with a PIN typed on its own screen does the same, (0.1.47) "Finish
+  the move" on a transfer's new phone included. Only the unlock screen's
+  two-step prompts send a PIN with a candidate. A PIN typed
+  outside the two-step unlock screen is never sent with a candidate.
+  Locking stays possible.
+- **Ended without a decision** (another version, no credential, an
+  alarm): no "Try again" button. After a PIN change the PIN is marked
+  **uncertain** in `account.bin`: the owner check and the other
+  PIN-carrying operations are refused, and the app offers "Lock and
+  unlock now", which uses the two-step unlock. That unlock's `ok` (the
+  previous PIN) or a candidate's confirmation (the new PIN) settles it.
+- **Telling the member.** The resolver's decision is published
+  app-wide: a notice on the main screen until dismissed, and a
+  notification while the app is in the background. A change screen
+  opened later ignores a decision it did not start.
+- **Any failure after the marker is stored** other than a vault answer
+  (cancellation, an error while opening the answer) is handled as no
+  answer: the request is kept when available, the resolver runs, and the
+  "checking" text is shown. The send runs in the manager's scope, not
+  the screen's.
+- **Texts (draft, shared with the iPhone app)**:
+  - gate, vault reachable: "VettID is still checking whether your last
+    PIN change went through. This can take up to about 10 minutes. Try
+    again then." (password: "… your last password change …")
+  - gate, vault unreachable: the existing "still checking … when your
+    vault can be reached" text.
+  - something else in flight: as above.
+  - ended without a decision, PIN: "VettID couldn't confirm whether your
+    PIN was changed, because something else changed in your vault at the
+    same time. To find out without using an attempt, lock your vault and
+    unlock it again: VettID will ask for each PIN in turn." Button "Lock
+    and unlock now".
+  - ended without a decision, password: "VettID couldn't confirm whether
+    your password was changed, because something else changed in your
+    vault at the same time. Either your previous or your new password
+    may be the current one."
+  - one-time notice, applied: "Your PIN change went through. Use your
+    new PIN from now on." (password: "Your password change went through.
+    Use your new password from now on.")
+  - one-time notice, not applied: "Your PIN change didn't go through.
+    Your previous PIN is still your PIN." (password: "Your password
+    change didn't go through. Your previous password is still your
+    password.")
 
 **Passwords** (enrollment, password change, reset; VAULT-MESSAGING
 §11.14.7). The meter that scored length and character classes, and the
@@ -2345,7 +2452,13 @@ request (cached answer, no attempt counted), by `credential.version`
 then a restart, `stale_credential` not retried with the typed secrets,
 no owner check or credential operation sent while unresolved, the
 two-step unlock prompt (previous PIN; new PIN only after
-`device_secret`), every non-`ok`
+`device_secret`), (0.1.46) a credential operation in the outbox that
+delays or refuses a change, a double submit refused by the marker, an
+update refused while a change is unresolved, `stale_credential` decided
+as not applied, `ok` with the previous PIN leaving the marker, a renew
+candidate tried with the previous PIN before the new PIN is asked for,
+the uncertain PIN after an ended check, the app-wide notice, all on the
+real `VaultManager` paths and not only on the fake, every non-`ok`
 answer leaving the current record, the fifth change refused, replaced
 records deleted after 7 days and not later with the clock set back, the
 earlier secret tried only from its button, a temporary Keystore error
