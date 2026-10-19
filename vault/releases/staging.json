@@ -1,6 +1,6 @@
 {
   "channel": "staging",
-  "signed_serial": 19,
+  "signed_serial": 20,
   "releases": [
     {
       "release": 1,
@@ -554,7 +554,7 @@
     },
     {
       "release": 17,
-      "status": "active",
+      "status": "deprecated",
       "published_at": "2026-10-18T19:20:56Z",
       "pcr0": "937ccd203cc54a6da405ff9f2a612465befc4c3d77072f1683489b042cde07fad343bd25fb1115a3b6429fd5cf55c248",
       "pcr1": "985277a497e71af128434e93c3a5860f7bbb6dba7878738c163d80505a195556bff047ab7fbf5790841e9ef75c557618",
@@ -602,7 +602,8 @@
     },
     {
       "release": 18,
-      "status": "candidate",
+      "status": "active",
+      "published_at": "2026-10-19T01:05:41Z",
       "pcr0": "535e0fb98d08ee0c485c147f5f04c6d9826dfeb1a73210cb8bf2e0ec0f50fb74ffdb1ab3111a66c001c935bb8c967181",
       "pcr1": "985277a497e71af128434e93c3a5860f7bbb6dba7878738c163d80505a195556bff047ab7fbf5790841e9ef75c557618",
       "pcr2": "61145b4ca227bceb03fea34bed4f034a49dad4bc211e68a581e80f8c14f05fa78b9d9e4db858073eec99644027792997",
@@ -634,6 +635,16 @@
         "ami_revision": 0,
         "min_instances": 0,
         "max_instances": 2
+      },
+      "log": {
+        "summary": "Release 18 makes staging's waits 24 times shorter for testing, and counts wrong PINs and passwords consistently in credential changes.",
+        "changes": [
+          "Staging only: waits of an hour or more run 24 times faster, so a day is an hour. The daily check comes every hour and a recovery's quiet period is 3 hours. Production is unchanged.",
+          "A wrong PIN or password while changing your password, setting up your credential or deleting your vault now counts toward your daily check's limit, as it already did at unlock.",
+          "Changing your password, deleting your vault and approving a move check that your phone holds the current credential before they test your PIN, so an outdated copy never uses an attempt.",
+          "Built from vettid-vault commit 07bf770 (tag release/staging/18) and independently rebuilt on 2026-10-19 with a matching PCR0."
+        ],
+        "security": "none"
       }
     }
   ]
