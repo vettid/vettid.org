@@ -138,10 +138,22 @@
  *  - while the host's `app_key_next` is set (a transfer or recovery between
  *    its first and third write), that key is accepted beside `app_key` as
  *    the vault's app key.
+ *
+ * A recovery cancelled from the phone (MEMBER-API 2.9.0, VAULT-MESSAGING
+ * 0.49.0 §11.5): an owner app's unlock that ended a recovery in the vault
+ * comes back with the host's clear `recovery_cancelled` and
+ * `cancelled_recovery_id` on its slot, and the vault row's
+ * `recovery_cancelled` is the backstop. The recovery with that id (and no
+ * other) is ended here as `cancelled` via `app`, once, through a per-recovery
+ * notice row claimed before the audit and the email (noticeAppCancel), from
+ * the app's poll, the status reads, the recovery request and the 5-minute
+ * sweep. Every cancel is one conditional field update (cancelWrite); a
+ * `recovery_cancel` names its recovery from RECOVERY_CANCEL_ID_FROM_RELEASE.
  */
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { GetCommand, PutCommand, QueryCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { snapshotFor } from '../shared/account-snapshot';
 import { AppHeader, AppKey, NONCE_TTL_S, TS_WINDOW_S, parseAppHeader, parseAppKey, signingInput, verifyAppSignature } from '../shared/app-auth';
 import { audit, memberActor } from '../shared/audit';
@@ -323,6 +335,14 @@ export interface VaultRow {
   name_change_pending?: boolean;
   /** Written by the vault-names job (2.2.0): the outcome the next snapshot carries. */
   name_change_result?: { seq: number; status: string; reason?: string };
+  /**
+   * Host-owned (2.9.0, VAULT-HOST-PROTOCOL 0.1.13 §7.2, VAULT-MESSAGING
+   * 0.49.0 §11.5): the recovery the vault's last cancelling unlock ended,
+   * from that unlock's lifecycle event (`at`: the parent's time). The
+   * backstop for an answer lost before its slot was written. Overwritten at
+   * the next such unlock, never cleared; the API only reads it.
+   */
+  recovery_cancelled?: { recovery_id: string; at?: number };
   created_at: string;
   updated_at: string;
 }
@@ -380,7 +400,24 @@ export interface RecoveryRow {
    * recovery requested before the scale turned on keeps its times.
    */
   time_scale?: 24;
+  /**
+   * 2.9.0: with `cancelled` only, for a cancel recorded from 2.9.0: the
+   * session or link route, or `app` (an owner app's unlock ended it in the
+   * vault, "A recovery cancelled from the phone"); and when (epoch s).
+   */
+  cancelled_via?: CancelVia;
+  cancelled_at?: number;
+  /**
+   * 2.9.0: the unlock requests queued while this recovery was active (the
+   * latest MAX_UNLOCK_IDS), so the status reads can find their slots; the
+   * slots live as long as the recovery, plus an hour.
+   */
+  unlock_ids?: string[];
 }
+
+/** 2.9.0: how a recovery was cancelled. */
+export type CancelVia = 'session' | 'link' | 'app';
+const CANCEL_VIAS: ReadonlySet<string> = new Set<CancelVia>(['session', 'link', 'app']);
 
 /** The clear reasons a refused recovery's slot may carry (2.1.0, 2.7.0). */
 export type RecoveryReason = 'no_backup' | 'no_credential' | 'not_offered';
@@ -1114,14 +1151,24 @@ router.on('POST', '/api/vault/unlock', async (req) => {
 
   const vault = c.vault;
   if (!vault || vault.vault_id !== vaultId) throw notFound('No such vault');
-  const inst = await routeCheck(vault, instanceId, nowS());
+  const now = nowS();
+  const inst = await routeCheck(vault, instanceId, now);
   await requireRoutable(inst, isCanaryMember(m));
   // The account snapshot rides in every unlock (§11.13), whenever the member can be read.
   const account = await snapshotFor(m, vault);
+  // 2.9.0 ("A recovery cancelled from the phone"): an unlock queued while a
+  // recovery is active may end it in the vault. Its slot names that
+  // recovery and lives as long as it (plus an hour), as an open's does, and
+  // the recovery remembers the request, so that the status reads and the
+  // sweep can still find the slot's marker. Which recovery ends is decided
+  // by the marker's own id, never by this one.
+  const under = vault.recovery && recoveryActive(vault.recovery, now) ? vault.recovery : null;
   await enqueue('unlock', m, vault, requestId, inst, { etk_kid: etkKid, envelope, manifest_sha256: manifestSha256 }, {
     extra: account ? { account } : {},
-    slot: slotOf(c),
+    slot: { ...slotOf(c), ...(under ? { recovery_id: under.recovery_id } : {}) },
+    ...(under ? { ttlS: Math.max(REQUEST_TTL_S, under.expires_at + 3600 - now) } : {}),
   });
+  if (under) await recordUnlockId(vault, under, requestId);
   await audit(memberActor(m.user_guid), 'vault.unlock_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: instanceId, release: inst.release, ...viaOf(c) });
   return new WithStatus(202, { vault_id: vault.vault_id, request_id: requestId });
 });
@@ -1212,6 +1259,16 @@ router.on('GET', '/api/vault/requests/{id}', async (req) => {
         if (v && v.user_guid === m.user_guid) await noticeAttempt(m, v, v.recovery, item);
       } catch (e) {
         console.error('recovery attempt not noticed', JSON.stringify({ request_id: requestId, error: (e as Error).name }));
+      }
+    }
+    // 2.9.0: the app polls its unlock's result: a recovery the unlock ended
+    // in the vault is ended here too (once). Its failure never hides the result.
+    if (isCancelledSlot(item) && VAULT_ID_RE.test(String(item.vault_id))) {
+      try {
+        const v = await vaultRow(String(item.vault_id));
+        if (v && v.user_guid === m.user_guid) await noticeAppCancel(m, v, String(item.cancelled_recovery_id), { kind: 'slot', slot: item });
+      } catch (e) {
+        console.error('recovery cancel not noticed', JSON.stringify({ request_id: requestId, error: (e as Error).name }));
       }
     }
   }
@@ -1714,6 +1771,10 @@ async function extendRecoveryRows(r: RecoveryRow, expiresAt: number): Promise<vo
   const rows: [string, number, boolean][] = [[r.recovery_id, expiresAt + 3600, false]];
   if (typeof r.locator === 'string' && LOCATOR_RE.test(r.locator)) rows.push([LOCATOR_PREFIX + r.locator, expiresAt, true]);
   if (typeof r.cancel_key === 'string' && /^[0-9a-f]{64}$/.test(r.cancel_key)) rows.push([CANCEL_LINK_PREFIX + r.cancel_key, expiresAt, true]);
+  // 2.9.0: the unlock slots queued under it, which live as long as it plus an hour (named by their recovery_id).
+  for (const id of Array.isArray(r.unlock_ids) ? r.unlock_ids.slice(-MAX_UNLOCK_IDS) : []) {
+    if (typeof id === 'string' && ULID_RE.test(id)) rows.push([id, expiresAt + 3600, true]);
+  }
   for (const [key, exp, named] of rows) {
     try {
       await ddb.send(new UpdateCommand({
@@ -1964,6 +2025,389 @@ export async function sweepAttempts(): Promise<{ found: number; noticed: number;
   return { found, noticed, failed };
 }
 
+// ---- a recovery cancelled from the phone (2.9.0; VAULT-MESSAGING 0.49.0 §11.5, §11.11.4) ----
+//
+// An owner app's unlock with `cancel_recovery` ends a recovery inside the
+// vault. The enclave names the recovery it ended (its own id, the API's
+// `recovery_id`) in two places: the unlock's slot (`code:
+// "recovery_cancelled"` with `cancelled_recovery_id`, copied by the host)
+// and, as the backstop for an answer lost before its slot was written, the
+// vault row (`recovery_cancelled`, from the unlock's lifecycle event). Either
+// ends only the recovery with that id, once: one notice row per recovery
+// (`rcnotice#<recovery_id>`) is claimed before anything is audited or
+// mailed, as noticeAttempt claims a slot. No `recovery_cancel` is enqueued:
+// the vault has already ended the recovery.
+
+/** 2.9.0: the host's copy of the enclave's clear marker of an unlock that cancelled a recovery. */
+export const CANCELLED_CODE = 'recovery_cancelled';
+/** 2.9.0: the unlock requests remembered on a recovery. */
+export const MAX_UNLOCK_IDS = 10;
+const NOTICE_PREFIX = 'rcnotice#';
+
+/** 2.9.0: an unlock slot the host marked with the enclave's `recovery_cancelled` and the id of the recovery it ended. The marker on any other op's slot is ignored. */
+const isCancelledSlot = (item: Record<string, unknown> | undefined): boolean =>
+  !!item && item.op === 'unlock' && item.status === 'done' && item.code === CANCELLED_CODE && typeof item.request_id === 'string'
+  && typeof item.cancelled_recovery_id === 'string' && ULID_RE.test(item.cancelled_recovery_id);
+
+/** The vault row's host-written `recovery_cancelled`, if it names a recovery. */
+const rowCancelledId = (v: Pick<VaultRow, 'recovery_cancelled'>): string | null => {
+  const rc = v.recovery_cancelled;
+  return rc && typeof rc.recovery_id === 'string' && ULID_RE.test(rc.recovery_id) ? rc.recovery_id : null;
+};
+
+/** The recovery `id` is the vault's and can still be cancelled: `pending` or `registered` (the row's states; `available` follows from the clock) before its `expires_at`. */
+const cancellable = (r: RecoveryRow | undefined, id: string, now: number): r is RecoveryRow =>
+  !!r && r.recovery_id === id && (r.state === 'pending' || r.state === 'registered') && now < r.expires_at;
+
+/**
+ * 2.9.0: the cancel write, for every cancel (the session route, the link
+ * route and a cancel from the phone): a conditional field update that never
+ * replaces the `recovery` map (not setRecovery), so concurrent cancels have
+ * exactly one winner, and a concurrent `unlock_ids` append is neither lost
+ * nor undoes it. True: this call cancelled it.
+ */
+async function cancelWrite(vaultId: string, recoveryId: string, via: CancelVia, now: number): Promise<boolean> {
+  try {
+    await ddb.send(new UpdateCommand({
+      TableName: table.vaults(),
+      Key: { vault_id: vaultId },
+      UpdateExpression: 'SET recovery.#st = :cancelled, recovery.cancelled_via = :via, recovery.cancelled_at = :now, updated_at = :nowIso',
+      ConditionExpression: 'recovery.recovery_id = :id AND recovery.#st IN (:pending, :registered) AND recovery.expires_at > :now',
+      ExpressionAttributeNames: { '#st': 'state' },
+      ExpressionAttributeValues: { ':cancelled': 'cancelled', ':via': via, ':now': now, ':nowIso': nowIso(), ':id': recoveryId, ':pending': 'pending', ':registered': 'registered' },
+    }));
+    return true;
+  } catch (e) {
+    if ((e as Error).name === 'ConditionalCheckFailedException') return false; // ended, cancelled or replaced meanwhile
+    throw e;
+  }
+}
+
+/**
+ * Remember an unlock request on its recovery (best effort: the app's poll
+ * and the sweep find the slot anyway). A conditional field update on the
+ * same recovery and on the list read (retried on a concurrent append),
+ * never a replacement of the recovery.
+ */
+async function recordUnlockId(v: VaultRow, r: RecoveryRow, requestId: string): Promise<void> {
+  // Best effort throughout: the unlock is already queued, so nothing here may fail the route.
+  try {
+    if (await appendUnlockId(v, r, requestId)) return;
+  } catch (e) {
+    console.error('unlock id not recorded', JSON.stringify({ vault_id: v.vault_id, error: (e as Error).name }));
+    return;
+  }
+  console.error('unlock id not recorded', JSON.stringify({ vault_id: v.vault_id }));
+}
+
+/** The conditional append (retried on a concurrent append); true when recorded or no longer needed, false when given up. Throws on a read or write failure. */
+async function appendUnlockId(v: VaultRow, r: RecoveryRow, requestId: string): Promise<boolean> {
+  let cur = r;
+  for (let i = 0; i < 3; i++) {
+    const old = Array.isArray(cur.unlock_ids) ? cur.unlock_ids : undefined;
+    const ids = [...(old ?? []), requestId].slice(-MAX_UNLOCK_IDS);
+    try {
+      await ddb.send(new UpdateCommand({
+        TableName: table.vaults(),
+        Key: { vault_id: v.vault_id },
+        UpdateExpression: 'SET recovery.unlock_ids = :ids, updated_at = :now',
+        ConditionExpression: `recovery.recovery_id = :id AND ${old ? 'recovery.unlock_ids = :old' : 'attribute_not_exists(recovery.unlock_ids)'}`,
+        ExpressionAttributeValues: { ':ids': ids, ':id': r.recovery_id, ':now': nowIso(), ...(old ? { ':old': old } : {}) },
+      }));
+      return true;
+    } catch (e) {
+      if ((e as Error).name !== 'ConditionalCheckFailedException') throw e;
+      const fresh = await vaultRow(v.vault_id);
+      if (!fresh?.recovery || fresh.recovery.recovery_id !== r.recovery_id) return true; // replaced: nothing to remember it on
+      cur = fresh.recovery;
+    }
+  }
+  return false;
+}
+
+// Draft for the owner's wording (MEMBER-API 2.9.0 "Email").
+const appCancelMail = (requestedAt: number) => `The recovery of your VettID vault requested at ${iso(requestedAt)} was cancelled from your VettID app, which unlocked the vault with your PIN. Your apps can unlock the vault again.
+
+If you did not do this, someone else may have your phone and know your PIN. Sign in to your account page and request a new recovery, and change your PIN once your vault is back on a phone you hold.`;
+
+type NoticeClaim = { tries: number } | 'absent' | 'noticed' | 'busy';
+
+/**
+ * Claim the recovery's notice row: set `noticing` and count `notice_tries`,
+ * only while it has no `noticed_at` and no `noticing` newer than
+ * ATTEMPT_RETRY_S. `openTtl` (a live recovery only) may create the row, with
+ * that TTL; without it only an existing row is taken up. A refused claim
+ * says why: no row, already noticed, or under way.
+ */
+async function claimNotice(m: MemberItem, v: VaultRow, recoveryId: string, openTtl: number | null, now: number): Promise<NoticeClaim> {
+  try {
+    const res = await ddb.send(new UpdateCommand({
+      TableName: table.vaultRequests(),
+      Key: { request_id: NOTICE_PREFIX + recoveryId },
+      UpdateExpression: `SET noticing = :now, notice_tries = if_not_exists(notice_tries, :zero) + :one${openTtl !== null ? ', vault_id = :v, user_guid = :g, recovery_id = :rid, expires_at = :exp' : ''}`,
+      ConditionExpression: `${openTtl !== null ? '' : 'attribute_exists(request_id) AND '}attribute_not_exists(noticed_at) AND (attribute_not_exists(noticing) OR noticing < :stale)`,
+      ExpressionAttributeValues: {
+        ':now': now, ':zero': 0, ':one': 1, ':stale': now - ATTEMPT_RETRY_S,
+        ...(openTtl !== null ? { ':v': v.vault_id, ':g': m.user_guid, ':rid': recoveryId, ':exp': openTtl } : {}),
+      },
+      ReturnValues: 'UPDATED_NEW',
+      ReturnValuesOnConditionCheckFailure: 'ALL_OLD',
+    }));
+    return { tries: Number(res.Attributes?.notice_tries ?? 1) };
+  } catch (e) {
+    if ((e as Error).name !== 'ConditionalCheckFailedException') throw e;
+    // The item as it was, in DynamoDB's raw form: lib-dynamodb does not unmarshall exception payloads.
+    const raw = (e as { Item?: Parameters<typeof unmarshall>[0] }).Item;
+    const old = raw && Object.keys(raw).length ? unmarshall(raw) : null;
+    if (!old) return 'absent';
+    return typeof old.noticed_at === 'number' ? 'noticed' : 'busy';
+  }
+}
+
+/** The slot's own claim (`cancel_noticed_at`, conditional): true for the one caller that set it. */
+async function markSlotNoticed(requestId: string, recoveryId: string): Promise<boolean> {
+  try {
+    await ddb.send(new UpdateCommand({
+      TableName: table.vaultRequests(),
+      Key: { request_id: requestId },
+      UpdateExpression: 'SET cancel_noticed_at = :now',
+      ConditionExpression: 'attribute_exists(request_id) AND cancelled_recovery_id = :rid AND attribute_not_exists(cancel_noticed_at)', // never creates an item
+      ExpressionAttributeValues: { ':now': nowS(), ':rid': recoveryId },
+    }));
+    return true;
+  } catch (e) {
+    if ((e as Error).name === 'ConditionalCheckFailedException') return false;
+    throw e;
+  }
+}
+
+type CancelSource = { kind: 'slot'; slot: Record<string, unknown> } | { kind: 'row' } | { kind: 'notice' };
+
+/**
+ * 2.9.0: notice the cancel of recovery `recoveryId` by an owner app's unlock,
+ * from an unlock slot's marker, the vault row's `recovery_cancelled`, or (the
+ * sweep) a notice row whose claim stalled.
+ *
+ * Claim, work, record (as noticeAttempt):
+ *  - a new notice row is opened only while the named recovery is the
+ *    vault's and still pending or registered before its `expires_at`;
+ *    otherwise only an existing row without `noticed_at` is taken up. Once
+ *    the cancel write has run the recovery is `cancelled` for good, so
+ *    neither the row's `recovery_cancelled` (never cleared), a moved
+ *    `expires_at` nor the notice row's expiry can open a second notice;
+ *  - an already ended recovery opens no notice: a slot naming it is claimed
+ *    by its own `cancel_noticed_at`, and only that claimer audits
+ *    `vault.recovery_cancel_seen` (never from the vault row alone);
+ *  - the work: the completion check, then the cancel write (`app`); its
+ *    winner (or a taker-up that finds the recovery `cancelled` via `app`)
+ *    audits `vault.recovery_cancel` and mails with sendMail (a failed send
+ *    throws and leaves the claim to be taken up after ATTEMPT_RETRY_S);
+ *    otherwise the recovery ended meanwhile: `vault.recovery_cancel_seen`;
+ *  - the record: `noticed_at`, and the slot's `cancel_noticed_at`.
+ * After ATTEMPT_MAX_TRIES the notice is given up, recorded and logged.
+ * A row source is acted on only for a live recovery (a stalled notice is
+ * the sweep's, from the notice row). It never reads the request table, which
+ * the sweep's role may not. Returns true when it claimed the notice (the
+ * vault row may have changed).
+ */
+async function noticeAppCancel(m: MemberItem, v: VaultRow, recoveryId: string, src: CancelSource): Promise<boolean> {
+  if (!ULID_RE.test(recoveryId)) return false;
+  const slot = src.kind === 'slot' ? src.slot : null;
+  if (slot && (!isCancelledSlot(slot) || slot.cancelled_recovery_id !== recoveryId || slot.user_guid !== m.user_guid || slot.vault_id !== v.vault_id || slot.cancel_noticed_at !== undefined)) return false;
+  const now = nowS();
+  const live = cancellable(v.recovery, recoveryId, now);
+  // From the row alone, only a live recovery is acted on: a notice that
+  // stalled is taken up by the sweep from the notice row itself, so a status
+  // read costs no request-table read or refused write while the row's
+  // recovery_cancelled (never cleared) names an ended recovery.
+  if (!live && src.kind === 'row') return false;
+  const claim = await claimNotice(m, v, recoveryId, live ? Math.max(v.recovery!.expires_at, now) + 86_400 : null, now);
+  if (claim === 'busy') return false;
+  if (claim === 'absent' || claim === 'noticed') {
+    if (slot) await slotOfEndedRecovery(m, v, recoveryId, slot, claim === 'noticed', now);
+    return false;
+  }
+  const record = async (failed = false) => {
+    await ddb.send(new UpdateCommand({
+      TableName: table.vaultRequests(),
+      Key: { request_id: NOTICE_PREFIX + recoveryId },
+      UpdateExpression: `SET noticed_at = :now${failed ? ', notice_failed = :t' : ''} REMOVE noticing`,
+      ConditionExpression: 'attribute_exists(request_id)', // never creates an item
+      ExpressionAttributeValues: { ':now': nowS(), ...(failed ? { ':t': true } : {}) },
+    }));
+    if (slot) await markSlotNoticed(String(slot.request_id), recoveryId);
+  };
+  if (claim.tries > ATTEMPT_MAX_TRIES) {
+    console.error('recovery cancel notice abandoned', JSON.stringify({ vault_id: v.vault_id, recovery_id: recoveryId, tries: claim.tries }));
+    await record(true);
+    return true;
+  }
+  // The completion check first (2.4.1), as for the cancel routes.
+  const cur = await completeRecovery(m, v);
+  let r = cur.recovery;
+  let won = !!r && r.recovery_id === recoveryId && (await cancelWrite(cur.vault_id, recoveryId, 'app', now));
+  if (!won) {
+    const fresh = await vaultRow(v.vault_id);
+    r = fresh && fresh.user_guid === m.user_guid ? fresh.recovery : undefined;
+    // A claim taken up after it stopped between the cancel write and the email.
+    won = !!r && r.recovery_id === recoveryId && r.state === 'cancelled' && r.cancelled_via === 'app';
+  }
+  if (won) {
+    // `notice`: the sweep took up a notice row whose claim stalled (its first source is not recorded).
+    const source = src.kind;
+    await audit(memberActor(m.user_guid), 'vault.recovery_cancel', m.user_guid, {
+      vault_id: v.vault_id, recovery_id: recoveryId, via: 'app', ...(slot ? { request_id: slot.request_id } : {}), source,
+    });
+    // Not notify(): a failed send must leave the notice to be taken up again.
+    await sendMail(m.email, 'VettID vault recovery cancelled', appCancelMail(r!.requested_at));
+  } else {
+    // Ended between the claim and the write: replaced, cancelled from the
+    // account site, completed, unavailable or past its expires_at.
+    const ended = r && r.recovery_id === recoveryId ? (recoveryState(r, nowS()) ?? 'replaced') : 'replaced';
+    await audit(memberActor(m.user_guid), 'vault.recovery_cancel_seen', m.user_guid, { vault_id: v.vault_id, recovery_id: recoveryId, ended });
+  }
+  await record();
+  return true;
+}
+
+/**
+ * A slot whose marker names a recovery that has already ended here (or is
+ * no longer the vault's), with no notice to take up: claimed by its own
+ * `cancel_noticed_at`, and only that claimer audits
+ * `vault.recovery_cancel_seen`, once per slot. Nothing is mailed. When the
+ * recovery's notice exists and is done (`covered`), or the recovery reads
+ * cancelled from the phone already, the slot is only marked.
+ */
+async function slotOfEndedRecovery(m: MemberItem, v: VaultRow, recoveryId: string, slot: Record<string, unknown>, covered: boolean, now: number): Promise<void> {
+  if (!(await markSlotNoticed(String(slot.request_id), recoveryId))) return;
+  if (covered) return;
+  const r = v.recovery && v.recovery.recovery_id === recoveryId ? v.recovery : null;
+  if (r && r.state === 'cancelled' && r.cancelled_via === 'app') return;
+  await audit(memberActor(m.user_guid), 'vault.recovery_cancel_seen', m.user_guid, {
+    vault_id: v.vault_id, recovery_id: recoveryId, ended: r ? (recoveryState(r, now) ?? 'replaced') : 'replaced',
+  });
+}
+
+/**
+ * 2.9.0: the status reads (GET /api/vault/recovery and /status) and the
+ * recovery request (before a 409 recovery_active): the vault row's
+ * `recovery_cancelled`, then the slots of the active recovery's
+ * `unlock_ids`. A notice that fails is logged, not thrown. Returns the
+ * vault row as it now is.
+ */
+async function noticeAppCancels(m: MemberItem, v: VaultRow): Promise<VaultRow> {
+  let cur = v;
+  const reread = async () => {
+    const fresh = await vaultRow(v.vault_id);
+    if (fresh && fresh.user_guid === v.user_guid) cur = fresh;
+  };
+  const rowId = rowCancelledId(cur);
+  if (rowId) {
+    try {
+      if (await noticeAppCancel(m, cur, rowId, { kind: 'row' })) await reread();
+    } catch (e) {
+      console.error('recovery cancel not noticed', JSON.stringify({ vault_id: v.vault_id, error: (e as Error).name }));
+      await reread(); // the cancel write may have run before the failure
+    }
+  }
+  const r = cur.recovery;
+  if (!r || !recoveryActive(r, nowS()) || !Array.isArray(r.unlock_ids)) return cur;
+  for (const id of r.unlock_ids.slice(-MAX_UNLOCK_IDS)) {
+    if (typeof id !== 'string' || !ULID_RE.test(id)) continue;
+    const slot = (await ddb.send(new GetCommand({ TableName: table.vaultRequests(), Key: { request_id: id }, ConsistentRead: true }))).Item;
+    if (!isCancelledSlot(slot) || slot!.cancel_noticed_at !== undefined) continue;
+    try {
+      if (await noticeAppCancel(m, cur, String(slot!.cancelled_recovery_id), { kind: 'slot', slot: slot! })) await reread();
+    } catch (e) {
+      console.error('recovery cancel not noticed', JSON.stringify({ request_id: id, error: (e as Error).name }));
+      await reread();
+    }
+  }
+  return cur;
+}
+
+/**
+ * 2.9.0: the client-independent backstop (lambda/jobs/vault-attempts.ts,
+ * every 5 minutes): unlock slots with `cancelled_recovery_id` and no
+ * `cancel_noticed_at` (they live as long as their recovery, plus an hour),
+ * notice rows whose claim stalled, and vault rows (a Scan projecting only
+ * `vault_id`, `recovery` and `recovery_cancelled`) whose
+ * `recovery_cancelled` names a recovery still pending or registered.
+ * Returns the counts (`found`: RecoveryCancelsUnnoticed).
+ */
+export async function sweepAppCancels(): Promise<{ found: number; noticed: number; failed: number }> {
+  let found = 0;
+  let noticed = 0;
+  let failed = 0;
+  const run = async (vaultId: string, guid: string, recoveryId: string, src: CancelSource, label: string) => {
+    found++;
+    try {
+      const [v, m] = await Promise.all([vaultRow(vaultId), memberByGuid(guid)]);
+      if (!v || !m || v.user_guid !== m.user_guid) return; // the vault or the member is gone: nobody to tell
+      if (src.kind === 'row' && !cancellable(v.recovery, recoveryId, nowS())) return;
+      await noticeAppCancel(m, v, recoveryId, src);
+      noticed++;
+    } catch (e) {
+      failed++;
+      console.error('recovery cancel not noticed', JSON.stringify({ [label]: label === 'vault_id' ? vaultId : src.kind === 'slot' ? src.slot.request_id : NOTICE_PREFIX + recoveryId, error: (e as Error).name }));
+    }
+  };
+  let start: Record<string, unknown> | undefined;
+  do {
+    const now = nowS();
+    const page = await ddb.send(new ScanCommand({
+      TableName: table.vaultRequests(),
+      FilterExpression: '(#op = :unlock AND code = :c AND attribute_exists(cancelled_recovery_id) AND attribute_not_exists(cancel_noticed_at)) OR (begins_with(request_id, :rcn) AND attribute_not_exists(noticed_at) AND noticing < :stale)',
+      ExpressionAttributeNames: { '#op': 'op' },
+      ExpressionAttributeValues: { ':unlock': 'unlock', ':c': CANCELLED_CODE, ':rcn': NOTICE_PREFIX, ':stale': now - ATTEMPT_RETRY_S },
+      ExclusiveStartKey: start,
+    }));
+    for (const item of page.Items ?? []) {
+      if (!VAULT_ID_RE.test(String(item.vault_id)) || typeof item.user_guid !== 'string') continue;
+      if (String(item.request_id).startsWith(NOTICE_PREFIX)) {
+        if (typeof item.recovery_id !== 'string' || NOTICE_PREFIX + item.recovery_id !== item.request_id || item.noticed_at !== undefined) continue;
+        await run(item.vault_id as string, item.user_guid, item.recovery_id, { kind: 'notice' }, 'request_id');
+      } else if (isCancelledSlot(item) && item.cancel_noticed_at === undefined) {
+        await run(item.vault_id as string, item.user_guid, String(item.cancelled_recovery_id), { kind: 'slot', slot: item }, 'request_id');
+      }
+    }
+    start = page.LastEvaluatedKey;
+  } while (start);
+  do {
+    const page: { Items?: Record<string, unknown>[]; LastEvaluatedKey?: Record<string, unknown> } = await ddb.send(new ScanCommand({
+      TableName: table.vaults(),
+      ProjectionExpression: 'vault_id, recovery, recovery_cancelled',
+      FilterExpression: 'attribute_exists(recovery_cancelled)',
+      Select: 'SPECIFIC_ATTRIBUTES',
+      ExclusiveStartKey: start,
+    }));
+    for (const row of (page.Items ?? []) as unknown as Pick<VaultRow, 'vault_id' | 'recovery' | 'recovery_cancelled'>[]) {
+      const rid = rowCancelledId(row);
+      if (!rid || !VAULT_ID_RE.test(String(row.vault_id)) || !cancellable(row.recovery, rid, nowS())) continue;
+      // The member comes from the full row (GetItem); the projection names three attributes only.
+      const full = await vaultRow(row.vault_id);
+      if (!full || typeof full.user_guid !== 'string') continue;
+      await run(row.vault_id, full.user_guid, rid, { kind: 'row' }, 'vault_id');
+    }
+    start = page.LastEvaluatedKey;
+  } while (start);
+  return { found, noticed, failed };
+}
+
+/**
+ * 2.9.0 ("A cancel names its recovery", VAULT-MESSAGING 0.49.0 §11.14.8):
+ * whether a `recovery_cancel` to this instance carries `recovery_id` and the
+ * eight-line signature. Only when the instance's release is at least
+ * RECOVERY_CANCEL_ID_FROM_RELEASE; unset (or malformed), never: an older
+ * release would fail the named form's signature and ignore the cancel.
+ */
+export async function cancelNamesRecovery(inst: Pick<InstanceRow, 'release'>): Promise<boolean> {
+  const raw = process.env.RECOVERY_CANCEL_ID_FROM_RELEASE;
+  if (raw === undefined || !/^[1-9][0-9]{0,8}$/.test(raw)) return false;
+  const rel = await releaseRow(inst.release);
+  return typeof rel?.release_number === 'number' && rel.release_number >= Number(raw);
+}
+
 /**
  * Record that the code of `r` is spent: `pending` -> `registered`, only for
  * the same recovery and never over a cancel (conditional). The register's
@@ -2104,8 +2548,11 @@ async function refreshPending(m: MemberItem, v: VaultRow, r: RecoveryRow, now: n
  */
 async function refreshRecovery(m: MemberItem, found: VaultRow): Promise<VaultRow> {
   if (!found.recovery) return found;
-  const v0 = await completeRecovery(m, found);
-  if (v0 !== found || !v0.recovery) return v0;
+  const vc = await completeRecovery(m, found);
+  if (vc !== found || !vc.recovery) return vc;
+  // 2.9.0: a recovery cancelled from the phone (the row's recovery_cancelled, the unlock slots).
+  const v0 = await noticeAppCancels(m, vc);
+  if (!v0.recovery || v0.recovery.recovery_id !== vc.recovery.recovery_id || v0.recovery.state !== vc.recovery.state) return v0;
   const pending = await refreshPending(m, v0, v0.recovery, nowS());
   if (pending.state !== v0.recovery.state) return { ...v0, recovery: pending };
   const v = pending === v0.recovery ? v0 : { ...v0, recovery: pending };
@@ -2193,20 +2640,27 @@ If you still have your phone, open the VettID app and enter your PIN and passwor
 const signingUnavailable = () =>
   vaultError(503, 'vault_unavailable', 'Recovery requests cannot be signed right now. Try again later.', { retry_after: 60 });
 
-/** Cancel: mark it, tell the enclave, tell the member. False: nothing to cancel (a no-op). */
+/**
+ * Cancel: mark it, tell the enclave, tell the member. False: nothing to
+ * cancel (a no-op), or (2.9.0) another cancel won the conditional write
+ * (another route, or a cancel from the phone): only the winner enqueues,
+ * audits and mails.
+ */
 async function cancelRecovery(m: MemberItem, found: VaultRow, via: 'session' | 'link'): Promise<boolean> {
   const now = nowS();
   // 2.4.1: a completed recovery has ended; there is nothing to cancel.
   const v = await completeRecovery(m, found);
   const r = v.recovery;
   if (!r || !recoveryActive(r, now)) return false;
-  await setRecovery(v, { ...r, state: 'cancelled' }, r.recovery_id);
+  if (!(await cancelWrite(v.vault_id, r.recovery_id, via, now))) return false;
   try {
     const inst = await recoveryInstance(v, now, isCanaryMember(m));
     // 2.7.0 (§11.14.8): signed; an enclave of release R ignores an unsigned cancel.
+    // 2.9.0: from RECOVERY_CANCEL_ID_FROM_RELEASE it names the recovery (inside the signature).
+    const named = await cancelNamesRecovery(inst);
     const cancelId = newUlid();
-    const sig = await signRecoveryRequest('recovery_cancel', v.vault_id, m.user_guid, cancelId);
-    await enqueue('recovery_cancel', m, v, cancelId, inst, undefined, { extra: { ...sig } });
+    const sig = await signRecoveryRequest('recovery_cancel', v.vault_id, m.user_guid, cancelId, undefined, Date.now(), named ? r.recovery_id : undefined);
+    await enqueue('recovery_cancel', m, v, cancelId, inst, undefined, { extra: { ...(named ? { recovery_id: r.recovery_id } : {}), ...sig } });
   } catch (e) {
     // The enclave also refuses the code if the API never releases it, but
     // a cancel that could not be queued is worth knowing about.
@@ -2245,7 +2699,8 @@ router.on('POST', '/api/vault/recovery', async (req) => {
   await limit(`vault-recovery#${m.user_guid}`, 3, 86_400);
   const now = nowS();
   // 2.4.1: a completed recovery is recorded first, so it does not block this one.
-  const v = await completeRecovery(m, await recoverableVault(m.user_guid));
+  // 2.9.0: so is a recovery cancelled from the phone that nobody noticed yet.
+  const v = await noticeAppCancels(m, await completeRecovery(m, await recoverableVault(m.user_guid)));
   // The vault the signature names (it changed in between only if the member enrolled anew).
   if (!sig || v.vault_id !== pre!.vault_id) throw vaultError(409, 'conflict', 'The vault changed; try again');
   if (recoveryActive(v.recovery, now)) throw vaultError(409, 'recovery_active', 'A recovery is already in progress');
@@ -2339,6 +2794,8 @@ router.on('GET', '/api/vault/recovery', async (req) => {
   };
   // 2.4.1: when the API recorded that the new app took the vault over.
   if (state === 'completed' && typeof r.completed_at === 'number') out.completed_at = iso(r.completed_at);
+  // 2.9.0: how a cancel recorded from 2.9.0 was made (`app`: an owner app's unlock).
+  if (state === 'cancelled' && typeof r.cancelled_via === 'string' && CANCEL_VIAS.has(r.cancelled_via)) out.cancelled_via = r.cancelled_via;
   // 2.7.0: available_at is still an estimate ("at the earliest").
   if (r.earliest === true && (state === 'pending' || state === 'available')) out.earliest = true;
   // 2.7.0: why the enclave refused it (`not_offered`: the release does not offer recovery).

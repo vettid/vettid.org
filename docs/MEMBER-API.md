@@ -3,8 +3,8 @@ title: MEMBER-API
 status: v1 (Phase 2)
 version: 2.9.0
 changelog:
-  - 2.9.0 (2026-10-19; owner decision 2026-10-19, **awaiting the
-    owner's approval of this wording**, with VAULT-MESSAGING 0.49.0 and
+  - 2.9.0 (2026-10-19; owner decision 2026-10-19, **approved by the
+    owner (2026-10-19)**, with VAULT-MESSAGING 0.49.0 and
     VAULT-HOST-PROTOCOL 0.1.13; revised after review; not built). New
     "A recovery cancelled from the phone": the recovery that an owner
     app's unlock ended in the vault, named by the enclave
@@ -16,8 +16,8 @@ changelog:
     stalled is taken up again. Every cancel (both routes and this one)
     is a conditional field update of the recovery that never replaces
     it, so exactly one cancel wins, with one audit and one email.
-    Unlock slots made under a recovery live as long as it. Beyond the
-    approved scope, for the owner's decision: a `recovery_cancel` names
+    Unlock slots made under a recovery live as long as it. Approved by
+    the owner (2026-10-19): a `recovery_cancel` names
     its recovery from the release that supports it
     (`RECOVERY_CANCEL_ID_FROM_RELEASE`). New permissions for the host
     and the `vault-attempts` job are listed. The `Recovery` object
@@ -2079,7 +2079,7 @@ Everything above holds except where this says otherwise.*
 
 #### A recovery cancelled from the phone (2.9.0)
 
-*Owner decision of 2026-10-19; this wording awaits the owner's approval,
+*Owner decision of 2026-10-19; approved by the owner (2026-10-19),
 with VAULT-MESSAGING 0.49.0 (§11.5, §11.11.4, §11.14.8) and
 VAULT-HOST-PROTOCOL 0.1.13. Not built. It needs the vault release that
 sets the marker and the event field.*
@@ -2231,7 +2231,7 @@ undo the cancel, since neither write replaces the map.
   job's metric gains `RecoveryCancelsUnnoticed`.
 
 **A cancel names its recovery** (VAULT-MESSAGING 0.49.0 §11.14.8;
-beyond the approved scope, for the owner's decision). A cancel from the
+approved by the owner (2026-10-19)). A cancel from the
 account site that reaches the enclave after a newer recovery's request
 would end the newer one in the vault while this API still shows it
 pending. So, when the instance the cancel goes to runs a release at

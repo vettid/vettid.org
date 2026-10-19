@@ -65,6 +65,7 @@ export const MEMBER_ACTIONS = new Set([
   'vault.lock_request',
   'vault.recovery_attempt',
   'vault.recovery_cancel',
+  'vault.recovery_cancel_seen',
   'vault.recovery_claim',
   'vault.recovery_code_released',
   'vault.recovery_completed',

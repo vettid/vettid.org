@@ -50,6 +50,14 @@ export interface VaultTableGrant {
    * (`ForAllValues:StringLike dynamodb:LeadingKeys`).
    */
   readonly leadingKeys?: string[];
+  /**
+   * A Scan confined to a projection of {@link attributes} (MEMBER-API 2.9.0;
+   * the host's P15 Scan uses the same conditions, lib/stacks/vault-stack.ts):
+   * `dynamodb:Select` must be SPECIFIC_ATTRIBUTES when present, and the
+   * request must name attributes (`Null` false), since ForAllValues alone
+   * passes a request that names none, which returns every attribute.
+   */
+  readonly projectionOnly?: boolean;
 }
 
 export interface VaultApiAccess {
@@ -154,23 +162,46 @@ export const VAULT_API_ACCESS: Record<VaultApiConsumer, VaultApiAccess> = {
   // marks them, writes a cancel link (PutItem), and moves the recovery's
   // `expires_at` (on the vault row, the API's own `recovery` only). It sends
   // nothing to any queue and never touches a host-written attribute.
+  // (2.9.0, "A recovery cancelled from the phone") It also notices the
+  // recoveries an owner app's unlock cancelled: unlock slots with the host's
+  // `cancelled_recovery_id`, stalled notice rows (`rcnotice#<recovery_id>`),
+  // and vault rows whose host-written `recovery_cancelled` names a recovery
+  // still pending or registered (a Scan confined to three attributes). It
+  // ends the recovery with a field update of the API's own `recovery`.
   'vault-attempts': {
     tables: [
       { table: 'vaults', actions: ['GetItem'] },
       { table: 'vaults', actions: ['UpdateItem'], attributes: ['vault_id', 'recovery', 'updated_at'] },
-      // Scan: the unnoticed attempt slots. PutItem: only the cancel links it
-      // mints (`rcancel#<sha256>`). UpdateItem: only the notice's own
-      // attributes on a slot, and `expires_at` on the slot, locator and
-      // link rows (`code` and `recovery_id` because its conditions name
-      // them; dynamodb:Attributes covers every attribute a request names).
-      // Every update the job makes is conditional on attribute_exists, so
-      // none creates an item (lambda/member/vault.ts, tested).
+      // 2.9.0: the rows whose `recovery_cancelled` may still be unnoticed;
+      // it reads `recovery_cancelled` and never writes it.
+      { table: 'vaults', actions: ['Scan'], attributes: ['vault_id', 'recovery', 'recovery_cancelled'], projectionOnly: true },
+      // Scan: the unnoticed attempt slots (2.9.0: and marked unlock slots,
+      // stalled notice rows). PutItem: only the cancel links it mints
+      // (`rcancel#<sha256>`). UpdateItem: only the notice's own attributes
+      // on a slot, and `expires_at` on the slot, locator and link rows
+      // (`code`, `recovery_id` and, 2.9.0, `cancelled_recovery_id` because
+      // its conditions name them; dynamodb:Attributes covers every
+      // attribute a request names). Every one of these updates is
+      // conditional on attribute_exists, so none creates an item
+      // (lambda/member/vault.ts, tested).
       { table: 'vault-requests', actions: ['Scan'] },
       { table: 'vault-requests', actions: ['PutItem'], leadingKeys: ['rcancel#*'] },
       {
         table: 'vault-requests',
         actions: ['UpdateItem'],
-        attributes: ['request_id', 'expires_at', 'recovery_id', 'code', 'attempt_noticing', 'attempt_notice_tries', 'attempt_noticed_at', 'attempt_notice_failed'],
+        attributes: [
+          'request_id', 'expires_at', 'recovery_id', 'code', 'attempt_noticing', 'attempt_notice_tries', 'attempt_noticed_at', 'attempt_notice_failed',
+          'cancel_noticed_at', 'cancelled_recovery_id',
+        ],
+      },
+      // 2.9.0: the per-recovery notice of a cancel from the phone, its
+      // attributes only. The one update of this job that may create an
+      // item (the claim that opens a notice).
+      {
+        table: 'vault-requests',
+        actions: ['UpdateItem'],
+        leadingKeys: ['rcnotice#*'],
+        attributes: ['request_id', 'vault_id', 'user_guid', 'recovery_id', 'noticing', 'notice_tries', 'noticed_at', 'notice_failed', 'expires_at'],
       },
     ],
     sendsToControlQueues: false,
@@ -242,9 +273,15 @@ const attributeCondition = (attrs: string[] | undefined) =>
 const leadingKeyCondition = (keys: string[] | undefined) =>
   keys ? { 'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': keys } } : {};
 
-/** A grant's fine-grained conditions (attributes, leading keys), or undefined. */
+const projectionCondition = (g: VaultTableGrant) => {
+  if (!g.projectionOnly) return {};
+  if (!g.attributes?.length) throw new Error('a projection-only grant needs its attributes');
+  return { StringEqualsIfExists: { 'dynamodb:Select': 'SPECIFIC_ATTRIBUTES' }, Null: { 'dynamodb:Attributes': 'false' } };
+};
+
+/** A grant's fine-grained conditions (attributes, leading keys, projection), or undefined. */
 export function grantConditions(g: VaultTableGrant): Record<string, unknown> | undefined {
-  const c = { ...attributeCondition(g.attributes), ...leadingKeyCondition(g.leadingKeys) };
+  const c = { ...attributeCondition(g.attributes), ...leadingKeyCondition(g.leadingKeys), ...projectionCondition(g) };
   return Object.keys(c).length ? c : undefined;
 }
 
@@ -268,8 +305,7 @@ export function vaultTableResourceStatements(config: AppConfig, vault: VaultConf
         Resource: g.indexes ? vaultGrantResources(config, vault, g) : arn,
         Condition: {
           ArnEquals: { 'aws:PrincipalArn': vaultApiRoleArn(config, vault, consumer) },
-          ...attributeCondition(g.attributes),
-          ...leadingKeyCondition(g.leadingKeys),
+          ...grantConditions(g),
         },
       });
     });

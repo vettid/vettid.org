@@ -368,9 +368,14 @@ export class VettidOrgVaultStack extends cdk.Stack {
     // transfer or recovery is putting in place, written with the header
     // write of step 1 and cleared by the rules there (parent/aws.go
     // appKeyNext); the member API accepts it beside `app_key` while it is set.
+    // `recovery_cancelled` (VAULT-HOST-PROTOCOL 0.1.13 §7.2, VAULT-MESSAGING
+    // 0.49.0 §11.5, MEMBER-API 2.9.0): {recovery_id, at}, written from the
+    // `cancelled_recovery_id` of an unlock's `unlocked` or `moved` event,
+    // the backstop for an answer lost before its slot was written; never
+    // cleared. The member API only reads it.
     h(['dynamodb:UpdateItem'], [t.vaults.tableArn], onlyAttributes([
       'vault_id', 'lease', 'updated_at', 'sealed_release', 'vault_version', 'state_version', 'state', 'alarm', 'alarm_pending', 'app_key', 'credential_backup',
-      'name_change', 'name_change_pending', 'att_sweep_pending', 'app_key_next',
+      'name_change', 'name_change_pending', 'att_sweep_pending', 'app_key_next', 'recovery_cancelled',
     ]));
     // P15's resumption at the parent's start: a Scan filtered on
     // attribute_exists(att_sweep_pending), projecting vault_id (vettid-vault
@@ -392,9 +397,11 @@ export class VettidOrgVaultStack extends cdk.Stack {
     // Response slots. Release R (VAULT-HOST-PROTOCOL 0.1.10 §6.1, parent/aws.go
     // WriteSlot) adds the enclave's clear members, copied beside `code`: a
     // recovery's `not_before`, `expires` and `earliest`; a counted open's
-    // `retry_at` and `expires`; a refusal's `reason`.
+    // `retry_at` and `expires`; a refusal's `reason`. 0.1.13 (VAULT-MESSAGING
+    // 0.49.0 §11.5): an unlock's `cancelled_recovery_id`, copied with the
+    // code `recovery_cancelled` into that unlock's slot only.
     h(['dynamodb:UpdateItem'], [t['vault-requests'].tableArn], onlyAttributes([
-      'request_id', 'status', 'envelope', 'code', 'not_before', 'expires', 'earliest', 'retry_at', 'reason',
+      'request_id', 'status', 'envelope', 'code', 'not_before', 'expires', 'earliest', 'retry_at', 'reason', 'cancelled_recovery_id',
     ]));
     h(['s3:GetObject', 's3:PutObject', 's3:DeleteObject'], ['vaults/*', 'users/*', 'smoke/*'].map((p) => this.dataBucket.arnForObjects(p)));
     h(['s3:GetObject'], [this.dataBucket.arnForObjects('manifests/*')]);

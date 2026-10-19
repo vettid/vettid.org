@@ -27,8 +27,8 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.49.0: normative, owner decision of 2026-10-19 (awaiting the
-    owner's approval of this wording); revised after review. §11.5,
+  - 0.49.0: normative, owner decision of 2026-10-19 (approved by the
+    owner (2026-10-19)); revised after review. §11.5,
     §11.11.4, §11.14.6, §11.14.8: **a recovery cancelled by an unlock
     reaches the member API**, and **a cancel names its recovery**.
     (1) The answer to an `unlock` whose sealed result is `{ok: true,
@@ -42,7 +42,7 @@ changelog:
     from either source, and emails the member (MEMBER-API 2.9.0).
     Until now the account site kept showing such a recovery as
     pending, and a new request was answered `409 recovery_active`.
-    (2) Beyond the approved scope, for the owner to accept or refuse: a
+    (2) Approved by the owner (2026-10-19): a
     signed `recovery_cancel` carries the `recovery_id` it means, inside
     the signature, and the enclave cancels only that recovery; an older
     release keeps "whatever is in progress". Both need a vault release
@@ -15613,7 +15613,7 @@ it. This settles §11.11.2's open design question.
   UTC to the second; for a cancel the last line is empty. The queue
   message carries `signed_at`, `key_id` and `sig` (base64 of the DER
   signature) in the clear.
-- (0.49.0; beyond the approved scope, for the owner's decision) **A
+- (0.49.0; approved by the owner (2026-10-19)) **A
   cancel names its recovery.** A `recovery_cancel` may carry the clear
   member `recovery_id` (a ULID): the recovery it means, which is the
   member API's `recovery_id`. When it does, the signed string has an

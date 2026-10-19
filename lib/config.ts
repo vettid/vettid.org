@@ -105,6 +105,19 @@ export interface AppConfig {
    * or a later one, whose enclave scales its own recovery times.
    */
   readonly timeScaleFromRelease?: number;
+  /**
+   * The first vault release number whose enclave verifies a named
+   * `recovery_cancel` (MEMBER-API 2.9.0 "A cancel names its recovery",
+   * VAULT-MESSAGING 0.49.0 §11.14.8): a cancel to an instance of that
+   * release or a later one carries `recovery_id` and the eight-line
+   * signature; to any other, the seven-line form. Context
+   * `recoveryCancelIdFromRelease` in prod, `<stage>RecoveryCancelIdFromRelease`
+   * elsewhere. Unset (the default): never named. A named cancel sent to a
+   * release that is too old fails its signature and is ignored silently,
+   * so it is set only after a staging test of both forms at the boundary
+   * release.
+   */
+  readonly recoveryCancelIdFromRelease?: number;
 }
 
 export interface VaultConfig {
@@ -526,6 +539,15 @@ export function loadConfig(node: Node): AppConfig {
     throw new Error('vault legacy session auth is staging-only: production never accepts cookies on the app routes (MEMBER-API 2.0.0)');
   }
   const { timeScale, timeScaleFromRelease } = loadTimeScale(node, stage);
+  const cancelIdKey = stage === PROD_STAGE ? 'recoveryCancelIdFromRelease' : `${stage}RecoveryCancelIdFromRelease`;
+  const cancelIdRaw = node.tryGetContext(cancelIdKey);
+  let recoveryCancelIdFromRelease: number | undefined;
+  if (cancelIdRaw !== undefined) {
+    recoveryCancelIdFromRelease = Number(cancelIdRaw);
+    if (!Number.isInteger(recoveryCancelIdFromRelease) || recoveryCancelIdFromRelease < 1 || String(cancelIdRaw).trim() === '') {
+      throw new Error(`context ${cancelIdKey}: expected a release number, got ${JSON.stringify(cancelIdRaw)}`);
+    }
+  }
   return {
     stage,
     domainName,
@@ -548,6 +570,7 @@ export function loadConfig(node: Node): AppConfig {
     ...(vaultLegacySessionAuth ? { vaultLegacySessionAuth } : {}),
     timeScale,
     ...(timeScaleFromRelease !== undefined ? { timeScaleFromRelease } : {}),
+    ...(recoveryCancelIdFromRelease !== undefined ? { recoveryCancelIdFromRelease } : {}),
   };
 }
 

@@ -241,6 +241,12 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     // release pins beside the public key (`recovery_request_keys`).
     vault.addEnvironment('RECOVERY_REQUEST_KEY_ARN', readRef(this, config, 'data/recovery-request-key-arn'));
     vault.addEnvironment('RECOVERY_REQUEST_KEY_ID', readRef(this, config, 'data/recovery-request-key-id'));
+    // MEMBER-API 2.9.0 "A cancel names its recovery": only from the release
+    // set in context (lib/config.ts recoveryCancelIdFromRelease); unset,
+    // every cancel keeps the seven-line form.
+    if (config.recoveryCancelIdFromRelease !== undefined) {
+      vault.addEnvironment('RECOVERY_CANCEL_ID_FROM_RELEASE', String(config.recoveryCancelIdFromRelease));
+    }
     vault.addToRolePolicy(new iam.PolicyStatement({
       actions: ['kms:Sign'],
       resources: [readRef(this, config, 'data/recovery-request-key-arn')],
