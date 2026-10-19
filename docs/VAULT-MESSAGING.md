@@ -11016,8 +11016,8 @@ operation.
   recovery cancelled under the new release only. An unlock wrongly
   routed to the old release could meet that release's older header, in
   which the recovery still exists; routing by `sealed_release` (§11.1)
-  avoids it, and that header is refused as stale once the vault has
-  left the release.) Lifecycle events reach the
+  prevents that window. The old release refuses that header as stale
+  only after the move is confirmed.) Lifecycle events reach the
   parent before the answer on the same connection and are queued for
   their own table write, so they survive a call that timed out and a
   slot that was never written (vettid-vault `parent/parent.go`
