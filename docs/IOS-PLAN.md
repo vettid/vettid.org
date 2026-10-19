@@ -1,9 +1,13 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.8
+version: 0.1.9
 date: 2026-10-19
 changelog:
+  - 0.1.9: owner decisions 2026-10-19 (VAULT-MESSAGING 0.48.0;
+    ANDROID-PLAN 0.1.51; vettid.org #358 part 1). §6.3: New credential
+    (`credential.reset`) is sent and decided as a change is; it stays
+    hidden until then. The texts are Android's
   - 0.1.8: owner decisions 2026-10-19 (VAULT-MESSAGING 0.47.1;
     ANDROID-PLAN 0.1.50; vettid.org #358 part 2). §6.3: no answer to the
     pre-check shows the plain "could not reach the service" text; an
@@ -525,6 +529,16 @@ Public keys are SEC1 uncompressed (`x963Representation` in CryptoKit,
      `rotation_required` / `credential_frozen`, then fetch, keep,
      acknowledge and retry once when the version or the key differs, is
      the trigger iOS chose (#358) and is now the specification (§3.5.9).
+     (0.1.9) As in VAULT-MESSAGING 0.48.0 and ANDROID-PLAN 0.1.51
+     ("A lost answer to New credential"): the holder's
+     `credential.reset` is sent only with nothing else in flight, after
+     the pre-check, whose `key` is stored with the marker; it carries
+     `exp`, the same request is resent while `exp` has not passed, and
+     `credential.version` decides it (another `key` or a lower `version`
+     is applied: fetch, keep, acknowledge, top up UTKs; the same `key`
+     and `version` after `exp` + 1 minute is not applied). Every other
+     credential operation waits for the decision. **New credential
+     stays hidden**, as it is now, until this is implemented and tested.
   3. A candidate becomes current on its operation's answer, or when an
      unlock answered `device_secret` with the current record is tried
      with the candidates, newest first, and one gets `ok`, `bad_pin` or

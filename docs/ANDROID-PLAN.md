@@ -1,9 +1,17 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.50
+version: 0.1.51
 date: 2026-10-19
 changelog:
+  - 0.1.51: owner decisions 2026-10-19 (VAULT-MESSAGING 0.48.0;
+    vettid.org #358 part 1). §4 "A lost answer to New credential": the
+    holder's `credential.reset` is sent and decided as a change is
+    (nothing else in flight, the pre-check with its `key` recorded, an
+    `exp`, the same request resent, decided by `credential.version`);
+    every other credential operation waits for the decision; draft
+    texts. "New credential" is hidden in Settings → Security →
+    Credential until this is implemented and tested. Tests follow
   - 0.1.50: owner decisions 2026-10-19 (VAULT-MESSAGING 0.47.1;
     vettid.org #358 part 2). §4 "A lost answer to a PIN or password
     change", "Sent with the vault's current blob": no answer to the
@@ -743,7 +751,7 @@ rows below say "Vault" for the screens and "item" for the data.
 | Vault | Folder list | Titled "Vault" (0.1.11; was "Items"). Items per VAULT-ITEMS: name, category, typed fields, tags, sensitivity (data / secret / critical); filter by tag (0.1.21: "✕ Clear" ends the filter chips while a filter is on); each tag in its own colour (0.1.21), stored in the vault's tag registry and the same on every device, the least-used of a palette of ten for a new tag, picked by the member on Manage tags (0.1.25; `@profile` always gold); add/edit from templates ("Save item" in the top bar, 0.1.21); share rules by tag, as many per connection as needed (up to 64), each with its own tags, mode (default: ask each time), fetch limit and end (presets or a custom date and time), overlaps shown (0.1.20); one tag per rule, per-hour and per-day limits, `ask` wins, rules named by their tags, "Save rule" in the top bar (0.1.22). Critical items live in the Protean Credential and are never shared by a rule |
 | History | — (VettID-specific) | The member's audit log (0.1.11, `audit.list`, VAULT-MESSAGING 0.20.0 §10.9), read-only: a search field (the vault searches, `q`), filter chips (category, connection, date range), a list of entries newest first with infinite scroll, and an entry detail, each entry's icon in its category's colour (0.1.22); a ⋯ menu with **Export…** (0.1.17: CSV or JSON of what the filters show, with the vault PIN, saved through "Save to…"). Details below |
 | Notifications | — (Proton has none; a bell as in most apps) | 0.1.23 (owner answers of 2026-10-09): the vault's feed (VAULT-MESSAGING §10.9), opened from the bell in the top bar with the unread count; grouped by day, urgent items first, unread and read, swipe to archive or to mark read, an Archived view; each item opens the screen it is about; system notifications through the member's notification mode (D7). Details below |
-| Credential | — | Reached from Settings → Security → Credential (0.1.11; not in the drawer). Critical items inside the Protean Credential; unlock window; password change; the vault-held credential copy (the backup) on/off. Turning it off shows VAULT-MESSAGING §3.5.6's warning and needs a confirmation: "If this phone is lost, broken, reset or replaced without a transfer, your vault **cannot be recovered**. It can only be deleted and replaced by a new one, and **everything in it is lost**." While off, the screen and Settings keep a short "no recovery" notice. Turning it on asks for the password at once (an owner check) so that the copy exists, and says recovery is possible from then on |
+| Credential | — | Reached from Settings → Security → Credential (0.1.11; not in the drawer). Critical items inside the Protean Credential; unlock window; password change; the vault-held credential copy (the backup) on/off. Turning it off shows VAULT-MESSAGING §3.5.6's warning and needs a confirmation: "If this phone is lost, broken, reset or replaced without a transfer, your vault **cannot be recovered**. It can only be deleted and replaced by a new one, and **everything in it is lost**." While off, the screen and Settings keep a short "no recovery" notice. Turning it on asks for the password at once (an owner check) so that the copy exists, and says recovery is possible from then on. (0.1.51) **New credential** (`credential.reset`) is hidden until §4 "A lost answer to New credential" is implemented |
 | Settings | Settings | At the top, an **account card** (0.1.11): the member's first and last name and full email address (`account.get`, VAULT-MESSAGING 0.20.0 §11.13) and the membership state; tapping it opens the avatar sheet. Vault (status, with the "Installed from" line of §7 "Signing and the two distributions" (0.1.36), release, lock, PIN; "Update available" while a newer release can be approved, 0.1.19); Security (credential, recovery, attestation info, the app lock (0.1.19: Biometrics or Phone screen lock) and timeout, the owner-check interval 1–24 h and the hold switch); Privacy (the **Shared profile**, glyph `Badge`, 0.1.12: display name, `@profile` items and the profile photo, **camera only** — "Take a photo" / "Retake photo" opens the app's own camera screen, front camera first with a switch to the rear one, then "Retake" or "Use photo"; no selection of an existing picture and no other camera app; the shot stays in memory, is never saved to the gallery, and is cropped, scaled and re-encoded to a JPEG ≤ 65,536 bytes without EXIF before `profile.set{photo}`; "Remove photo" confirmed; a refused camera permission is explained, with the system settings once Android no longer asks; a phone without a camera is told); App (theme; **Notifications** (0.1.23): the mode, its status, previews and the channels, §4 Notification modes; the local "Vault updates" channel, 0.1.19) |
 | Owner check | — (VettID-specific) | One screen: PIN and credential password together (VAULT-MESSAGING §3.6.5); also the "vault held" screen with the waiting counts and the lock action |
 | Avatar sheet | Account sheet | The member's first and last name and **full email address** (0.1.11, from `account.get`'s snapshot `first_name`, `last_name` and `email`, VAULT-MESSAGING 0.20.0 §11.13; never the masked hint), the email labelled "Only you see this address" and the names "Your connections see this name"; **Lock vault first** (0.1.12), right under the name and email, before Change name, Shared profile and the email; the sheet scrolls; vault status; **Change name** (0.1.10): the two names (the registration rule: letters, spaces, `'’.-`, ≤ 40), then the owner-check screen's PIN and password, sent as `account.name.set`; then "Name change requested" until `account.get`'s `name_request` is `applied` or `refused`; `too_soon` (from the vault or the member API): "You can change your name once every 30 days. You can change it again on <date>" (VAULT-MESSAGING §10.8), membership and subscription (read-only, from the vault, VAULT-MESSAGING §11.13), open account portal (browser) |
@@ -2370,6 +2378,77 @@ From this version:
     Your previous PIN is still your PIN." (password: "Your password
     change didn't go through. Your previous password is still your
     password.")
+
+**A lost answer to New credential** (0.1.51; owner decisions of
+2026-10-19; VAULT-MESSAGING 0.48.0 §11.14.9 "A lost answer to
+`credential.reset`"; vettid.org #358). A reset that applied without its
+answer reaching the phone leaves the vault at version 1 under a new key
+while the phone holds the old blob, and the next credential operation
+would raise a clone alarm.
+
+- **Hidden until done** (owner decision 2026-10-19). Settings →
+  Security → Credential does not show the **New credential** row
+  (`new_credential_row`), and `CredentialNewRoute` cannot be reached,
+  until the rest of this section is implemented and tested. The
+  repository method stays.
+- **Sent as a change is.** `newCredential` runs under `credentialLock`:
+  the pending requests are settled, then `credential.version` as in
+  "Sent with the vault's current blob" above. The `key` of that answer
+  is stored with the marker: `UnresolvedChange` of type
+  `credential.reset` gets a `heldKey` field. An answer without `key`
+  stops with nothing sent and the "earlier request" text. The request
+  carries `exp` (10 minutes, the vault's clock as for a change) and is
+  kept in memory, the same `innerId` and body, until decided.
+- **The gate.** While the marker exists, every other credential
+  operation (owner check, renew, PIN and password changes, rotation,
+  critical items, wallet signing, transfer approval, vault deletion) is
+  refused at once with the gate's texts, reset wording. Unlocking is
+  not affected: a reset changes neither the PIN nor the phone secret.
+- **The resolver** resends the same request while `exp` has not passed
+  and asks `credential.version`:
+  - another `key` than `heldKey`, or a lower `version`: applied. It runs
+    `credential.get`, keeps the blob (opened with the new password),
+    sends `credential.ack`, tops up with `credential.utk.get`, drops
+    the local copies of critical items, clears the marker;
+  - the same `key` and `version` in an answer stamped more than 1
+    minute after `exp`: not applied; clears the marker;
+  - the same in an earlier answer: resend or ask again (30 s, doubling
+    to 5 minutes);
+  - anything else (no credential, the same key with another version,
+    an alarm): ended without a decision, no "Try again" button; an
+    alarm opens the alarm screen.
+- **An answer that arrives** decides by itself: the new blob is
+  success; every refusal, `stale_credential` included, is not applied,
+  and `stale_credential` fetches the blob without retrying the typed
+  secrets.
+- **Tests**: a reset whose answer is dropped and that applied (decided
+  by the new `key`, no alarm, the next owner check sent with the
+  fetched blob); a dropped reset that never reached the vault (decided
+  after `exp` + 1 minute); a reset from a held blob of version 1
+  (decided by the `key` alone); a resend answered from the vault's
+  cache; an owner check refused by the gate while the marker exists;
+  the hidden row.
+- **Texts (draft, shared with the iPhone app)**:
+  - checking: "Your vault hasn't answered yet, so VettID is checking
+    whether your new credential was made. Keep your new password at
+    hand."
+  - unreachable: "VettID can't reach your vault right now, so it
+    doesn't know yet whether your new credential was made. It will
+    check as soon as it can. Keep both your old and your new password
+    at hand."
+  - gate, vault reachable: "VettID is still checking whether your new
+    credential was made. This can take up to about 10 minutes. Try
+    again then."
+  - ended without a decision: "VettID couldn't confirm whether your new
+    credential was made, because something else changed in your vault
+    at the same time. Either your previous or your new password may be
+    the current one."
+  - one-time notice, applied: "Your new credential was made. Use your
+    new password from now on. Your critical items were deleted with the
+    old credential."
+  - one-time notice, not applied: "Your new credential wasn't made.
+    Your credential, its password and your critical items are
+    unchanged."
 
 **Passwords** (enrollment, password change, reset; VAULT-MESSAGING
 §11.14.7). The meter that scored length and character classes, and the
