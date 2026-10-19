@@ -452,11 +452,48 @@ describe('VettidOrgVaultStack: recovery attempt counter bucket (release R, VAULT
     const slotWrites = hostStatements(prod.json).filter((x: any) => x.Action === 'dynamodb:UpdateItem' && str(x.Resource).includes('Tablevaultrequests'));
     expect(slotWrites).toHaveLength(1);
     expect(slotWrites[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(
-      ['request_id', 'status', 'envelope', 'code', 'not_before', 'expires', 'earliest', 'retry_at', 'reason'],
+      ['request_id', 'status', 'envelope', 'code', 'not_before', 'expires', 'earliest', 'retry_at', 'reason', 'cancelled_recovery_id'],
     );
     // The member API never writes app_key_next (only the host does; the API reads it).
     const vaults = resources(prod.json, 'AWS::DynamoDB::GlobalTable').find(([, t]) => t.Properties.TableName === 'vettid-org-vaults')![1];
     expect(str(vaults.Properties.Replicas[0].ResourcePolicy.PolicyDocument)).not.toContain('app_key_next');
+  });
+
+  test('2.9.0 (VAULT-HOST-PROTOCOL 0.1.13): the host writes recovery_cancelled and an unlock slot\'s cancelled_recovery_id; no member API role may write recovery_cancelled', () => {
+    for (const s of [prod, staging]) {
+      const vaultWrites = hostStatements(s.json).filter((x: any) => x.Action === 'dynamodb:UpdateItem' && (x.Condition?.['ForAllValues:StringEquals']?.['dynamodb:Attributes'] ?? []).includes('lease'));
+      expect(vaultWrites).toHaveLength(1);
+      expect(vaultWrites[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toContain('recovery_cancelled');
+      const slotWrites = hostStatements(s.json).filter((x: any) => x.Action === 'dynamodb:UpdateItem' && str(x.Resource).includes('Tablevaultrequests'));
+      expect(slotWrites[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toContain('cancelled_recovery_id');
+      // On the vault table, recovery_cancelled appears for the member API only in the attempts sweep's projection-only Scan.
+      const vaults = resources(s.json, 'AWS::DynamoDB::GlobalTable').find(([, t]) => /^vettid-org-(staging-)?vaults$/.test(t.Properties.TableName))![1];
+      const naming = vaults.Properties.Replicas[0].ResourcePolicy.PolicyDocument.Statement.filter((x: any) => str(x).includes('recovery_cancelled'));
+      expect(naming).toHaveLength(1);
+      expect(naming[0].Action).toBe('dynamodb:Scan');
+      expect(naming[0].Condition).toEqual({
+        ArnEquals: { 'aws:PrincipalArn': expect.stringMatching(/:role\/vettid-org-(staging-)?member-vault-attempts$/) },
+        'ForAllValues:StringEquals': { 'dynamodb:Attributes': ['vault_id', 'recovery', 'recovery_cancelled'] },
+        StringEqualsIfExists: { 'dynamodb:Select': 'SPECIFIC_ATTRIBUTES' },
+        Null: { 'dynamodb:Attributes': 'false' },
+      });
+      for (const w of vaults.Properties.Replicas[0].ResourcePolicy.PolicyDocument.Statement.filter((x: any) => /PutItem|UpdateItem/.test(str(x.Action)))) {
+        expect(w.Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).not.toContain('recovery_cancelled');
+      }
+    }
+  });
+
+  test('2.9.0: the request table admits the attempts sweep\'s notice rows (rcnotice#, their attributes only) and its slot claim', () => {
+    const reqs = resources(prod.json, 'AWS::DynamoDB::GlobalTable').find(([, t]) => t.Properties.TableName === 'vettid-org-vault-requests')![1];
+    const mine = reqs.Properties.Replicas[0].ResourcePolicy.PolicyDocument.Statement.filter((x: any) => str(x.Condition).includes('member-vault-attempts"'));
+    const updates = mine.filter((x: any) => str(x.Action).includes('UpdateItem'));
+    expect(updates).toHaveLength(2);
+    expect(updates[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(expect.arrayContaining(['cancel_noticed_at', 'cancelled_recovery_id']));
+    expect(updates[0].Condition['ForAllValues:StringLike']).toBeUndefined();
+    expect(updates[1].Condition['ForAllValues:StringLike']).toEqual({ 'dynamodb:LeadingKeys': ['rcnotice#*'] });
+    expect(updates[1].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(
+      ['request_id', 'vault_id', 'user_guid', 'recovery_id', 'noticing', 'notice_tries', 'noticed_at', 'notice_failed', 'expires_at'],
+    );
   });
 });
 
@@ -545,7 +582,7 @@ describe('cross-account access (VAULT-RELEASES §8.1)', () => {
     const hostVaultWrites = statements(prod.json).filter((s: any) => s.Action === 'dynamodb:UpdateItem' && (s.Condition?.['ForAllValues:StringEquals']?.['dynamodb:Attributes'] ?? []).includes('lease'));
     expect(hostVaultWrites).toHaveLength(1);
     expect(hostVaultWrites[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(
-      ['vault_id', 'lease', 'updated_at', 'sealed_release', 'vault_version', 'state_version', 'state', 'alarm', 'alarm_pending', 'app_key', 'credential_backup', 'name_change', 'name_change_pending', 'att_sweep_pending', 'app_key_next'],
+      ['vault_id', 'lease', 'updated_at', 'sealed_release', 'vault_version', 'state_version', 'state', 'alarm', 'alarm_pending', 'app_key', 'credential_backup', 'name_change', 'name_change_pending', 'att_sweep_pending', 'app_key_next', 'recovery_cancelled'],
     );
   });
 

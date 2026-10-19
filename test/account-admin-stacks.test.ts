@@ -709,6 +709,22 @@ describe('VettidOrgMemberApiStack', () => {
       expect(params).toEqual(expect.arrayContaining(['/vettid-org/prod/data/recovery-request-key-arn', '/vettid-org/prod/data/recovery-request-key-id']));
     });
 
+    test('2.9.0: RECOVERY_CANCEL_ID_FROM_RELEASE only when the context sets it, on the vault routes only; unset by default (never named)', () => {
+      const fns = (tpl: Template) => Object.values<any>(tpl.findResources('AWS::Lambda::Function')).filter((f) => f.Properties.Environment?.Variables?.RECOVERY_CANCEL_ID_FROM_RELEASE !== undefined);
+      expect(fns(t)).toHaveLength(0);
+      const app = new cdk.App({ context: { headscaleLoginServer: 'https://headscale.example.net', recoveryCancelIdFromRelease: 3 } });
+      const cfg = loadConfig(app.node);
+      expect(cfg.recoveryCancelIdFromRelease).toBe(3);
+      const set = fns(Template.fromStack(new VettidOrgMemberApiStack(app, 'MemberApiCancelId', { config: cfg, env })));
+      expect(set).toHaveLength(1);
+      expect(set[0].Properties.Environment.Variables.RECOVERY_CANCEL_ID_FROM_RELEASE).toBe('3');
+      expect(set[0].Properties.Environment.Variables.RECOVERY_REQUEST_KEY_ID).toBeDefined(); // the vault routes' function
+      // A staging synth reads its own key, never prod's; a bad value fails the synth.
+      expect(loadConfig(new cdk.App({ context: { stage: 'staging', recoveryCancelIdFromRelease: 3 } }).node).recoveryCancelIdFromRelease).toBeUndefined();
+      expect(loadConfig(new cdk.App({ context: { stage: 'staging', stagingRecoveryCancelIdFromRelease: '19' } }).node).recoveryCancelIdFromRelease).toBe(19);
+      for (const bad of [0, -1, 'x', '', 1.5]) expect(() => loadConfig(new cdk.App({ context: { recoveryCancelIdFromRelease: bad } }).node)).toThrow(/recoveryCancelIdFromRelease/);
+    });
+
     test('release R: the recovery attempts sweep runs every 5 minutes under its own role; it scans the request table and writes only the API\'s `recovery`', () => {
       const roleId = Object.entries<any>(t.findResources('AWS::IAM::Role')).find(([, r]) => r.Properties.RoleName === 'vettid-org-member-vault-attempts')![0];
       const fns = Object.entries<any>(t.findResources('AWS::Lambda::Function')).filter(([, f]) => str(f.Properties.Role).includes(roleId));
@@ -721,18 +737,39 @@ describe('VettidOrgMemberApiStack', () => {
       const vaultWrite = pol.find((x: any) => x.Action === 'dynamodb:UpdateItem' && str(x.Resource).includes('table/vettid-org-vaults'));
       expect(vaultWrite.Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(['vault_id', 'recovery', 'updated_at']);
       const scans = pol.filter((x: any) => str(x.Action).includes('dynamodb:Scan'));
-      expect(scans).toHaveLength(1);
-      expect(str(scans[0].Resource)).toContain('table/vettid-org-vault-requests');
-      expect(scans[0].Condition).toBeUndefined();
-      // N1: on the request table it may put only cancel links and update only the notice's attributes.
+      expect(scans).toHaveLength(2);
+      const reqScan = scans.find((x: any) => str(x.Resource).includes('table/vettid-org-vault-requests'));
+      expect(reqScan.Condition).toBeUndefined();
+      // 2.9.0: the vault table only projected to three attributes (the host's P15 conditions); never all of them.
+      const vaultScan = scans.find((x: any) => str(x.Resource).includes('table/vettid-org-vaults'));
+      expect(vaultScan.Condition).toEqual({
+        'ForAllValues:StringEquals': { 'dynamodb:Attributes': ['vault_id', 'recovery', 'recovery_cancelled'] },
+        StringEqualsIfExists: { 'dynamodb:Select': 'SPECIFIC_ATTRIBUTES' },
+        Null: { 'dynamodb:Attributes': 'false' },
+      });
+      expect(str(vaultScan.Resource)).not.toContain('/index/');
+      // N1: on the request table it may put only cancel links and update only the notices' attributes.
       const reqStmts = pol.filter((x: any) => str(x.Resource).includes('table/vettid-org-vault-requests'));
-      expect(reqStmts.map((x: any) => x.Action).sort()).toEqual(['dynamodb:PutItem', 'dynamodb:Scan', 'dynamodb:UpdateItem']);
+      expect(reqStmts.map((x: any) => x.Action).sort()).toEqual(['dynamodb:PutItem', 'dynamodb:Scan', 'dynamodb:UpdateItem', 'dynamodb:UpdateItem']);
       expect(reqStmts.find((x: any) => x.Action === 'dynamodb:PutItem').Condition).toEqual({ 'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['rcancel#*'] } });
-      expect(reqStmts.find((x: any) => x.Action === 'dynamodb:UpdateItem').Condition).toEqual({
+      const [slotUpdate, noticeUpdate] = reqStmts.filter((x: any) => x.Action === 'dynamodb:UpdateItem');
+      expect(slotUpdate.Condition).toEqual({
         'ForAllValues:StringEquals': {
-          'dynamodb:Attributes': ['request_id', 'expires_at', 'recovery_id', 'code', 'attempt_noticing', 'attempt_notice_tries', 'attempt_noticed_at', 'attempt_notice_failed'],
+          'dynamodb:Attributes': [
+            'request_id', 'expires_at', 'recovery_id', 'code', 'attempt_noticing', 'attempt_notice_tries', 'attempt_noticed_at', 'attempt_notice_failed',
+            'cancel_noticed_at', 'cancelled_recovery_id',
+          ],
         },
       });
+      // 2.9.0: the notice of a cancel from the phone, its own rows and attributes only (the one update that may create an item).
+      expect(noticeUpdate.Condition).toEqual({
+        'ForAllValues:StringEquals': {
+          'dynamodb:Attributes': ['request_id', 'vault_id', 'user_guid', 'recovery_id', 'noticing', 'notice_tries', 'noticed_at', 'notice_failed', 'expires_at'],
+        },
+        'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['rcnotice#*'] },
+      });
+      // It never writes recovery_cancelled (the host's), anywhere.
+      for (const w of pol.filter((x: any) => /PutItem|UpdateItem/.test(str(x.Action)))) expect(str(w.Condition ?? {})).not.toContain('recovery_cancelled');
     });
 
     test('sqs:SendMessage only to vettid-org-vault-control-* queues, and nothing else on SQS', () => {

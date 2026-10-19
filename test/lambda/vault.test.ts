@@ -98,7 +98,44 @@ function installFakeDdb() {
       tbl(t).set(k, { key: k, count });
       return { Attributes: { count } };
     }
-    if (t === 'vaults' && i.UpdateExpression === 'SET recovery.#st = :done, recovery.completed_at = :at, updated_at = :now REMOVE recovery.claim_keys, recovery.recovering_key') {
+    if (t === 'vaults' && i.UpdateExpression === 'SET recovery.#st = :cancelled, recovery.cancelled_via = :via, recovery.cancelled_at = :now, updated_at = :nowIso') {
+      // 2.9.0: the one cancel write of every cancel: a field update, never a replacement of the recovery.
+      expect(i.ConditionExpression).toBe('recovery.recovery_id = :id AND recovery.#st IN (:pending, :registered) AND recovery.expires_at > :now');
+      const r = cur?.recovery;
+      if (!r || r.recovery_id !== v[':id'] || ![v[':pending'], v[':registered']].includes(r.state) || !(r.expires_at > v[':now'])) throw ccf();
+      Object.assign(r, { state: v[':cancelled'], cancelled_via: v[':via'], cancelled_at: v[':now'] });
+      cur.updated_at = v[':nowIso'];
+    } else if (t === 'vaults' && i.UpdateExpression === 'SET recovery.unlock_ids = :ids, updated_at = :now') {
+      // 2.9.0: appended on the same recovery and the list read.
+      const r = cur?.recovery;
+      if (!r || r.recovery_id !== v[':id']) throw ccf();
+      if (i.ConditionExpression.includes('attribute_not_exists(recovery.unlock_ids)') ? r.unlock_ids !== undefined : JSON.stringify(r.unlock_ids) !== JSON.stringify(v[':old'])) throw ccf();
+      r.unlock_ids = structuredClone(v[':ids']);
+      cur.updated_at = v[':now'];
+    } else if (t === 'requests' && i.UpdateExpression.startsWith('SET noticing = :now')) {
+      // 2.9.0: the notice row's claim; opening it may create it, a take-up needs it.
+      const open = !i.ConditionExpression.startsWith('attribute_exists(request_id)');
+      expect(i.ConditionExpression).toBe(`${open ? '' : 'attribute_exists(request_id) AND '}attribute_not_exists(noticed_at) AND (attribute_not_exists(noticing) OR noticing < :stale)`);
+      expect(i.ReturnValuesOnConditionCheckFailure).toBe('ALL_OLD');
+      if ((!cur && !open) || (cur && (cur.noticed_at !== undefined || (cur.noticing !== undefined && !(cur.noticing < v[':stale']))))) {
+        throw Object.assign(ccf(), cur ? { Item: structuredClone(cur) } : {});
+      }
+      const row = cur ?? { request_id: k };
+      row.noticing = v[':now'];
+      row.notice_tries = (row.notice_tries ?? v[':zero']) + v[':one'];
+      if (open) Object.assign(row, { vault_id: v[':v'], user_guid: v[':g'], recovery_id: v[':rid'], expires_at: v[':exp'] });
+      tbl(t).set(k, row);
+      return { Attributes: { noticing: row.noticing, notice_tries: row.notice_tries } };
+    } else if (t === 'requests' && i.UpdateExpression.startsWith('SET noticed_at = :now')) {
+      if (!cur) throw ccf();
+      cur.noticed_at = v[':now'];
+      if (v[':t']) cur.notice_failed = true;
+      delete cur.noticing;
+    } else if (t === 'requests' && i.UpdateExpression === 'SET cancel_noticed_at = :now') {
+      expect(i.ConditionExpression).toBe('attribute_exists(request_id) AND cancelled_recovery_id = :rid AND attribute_not_exists(cancel_noticed_at)');
+      if (!cur || cur.cancelled_recovery_id !== v[':rid'] || cur.cancel_noticed_at !== undefined) throw ccf();
+      cur.cancel_noticed_at = v[':now'];
+    } else if (t === 'vaults' && i.UpdateExpression === 'SET recovery.#st = :done, recovery.completed_at = :at, updated_at = :now REMOVE recovery.claim_keys, recovery.recovering_key') {
       // completeRecovery (2.4.1): registered -> completed, same recovery and recovering key. The API's role may
       // not name the host's `app_key` in a write (the table's attribute-level policy), so the condition does not.
       expect(i.ConditionExpression).toBe('recovery.recovery_id = :id AND recovery.#st = :reg AND recovery.recovering_key.kid = :k');
@@ -221,9 +258,25 @@ function installFakeDdb() {
     return {};
   });
   ddb.on(ScanCommand).callsFake((i) => {
-    // 2.7.0 sweepAttempts: the unnoticed counted attempts (or stalled notices).
-    if (i.TableName !== 'requests') throw new Error(`unexpected scan of ${i.TableName}`);
     const v = i.ExpressionAttributeValues;
+    if (i.TableName === 'vaults') {
+      // 2.9.0 sweepAppCancels: three attributes only (the job's grant), rows with recovery_cancelled.
+      expect(i).toMatchObject({ ProjectionExpression: 'vault_id, recovery, recovery_cancelled', FilterExpression: 'attribute_exists(recovery_cancelled)', Select: 'SPECIFIC_ATTRIBUTES' });
+      return {
+        Items: [...tbl('vaults').values()].filter((x) => x.recovery_cancelled !== undefined)
+          .map((x) => structuredClone({ vault_id: x.vault_id, recovery: x.recovery, recovery_cancelled: x.recovery_cancelled })),
+      };
+    }
+    if (i.TableName !== 'requests') throw new Error(`unexpected scan of ${i.TableName}`);
+    if (v[':rcn'] !== undefined) {
+      // 2.9.0 sweepAppCancels: marked unlock slots not noticed, and stalled notice rows.
+      return {
+        Items: [...tbl('requests').values()].filter((x) =>
+          (x.op === v[':unlock'] && x.code === v[':c'] && x.cancelled_recovery_id !== undefined && x.cancel_noticed_at === undefined)
+          || (String(x.request_id).startsWith(v[':rcn']) && x.noticed_at === undefined && x.noticing < v[':stale'])).map((x) => structuredClone(x)),
+      };
+    }
+    // 2.7.0 sweepAttempts: the unnoticed counted attempts (or stalled notices).
     return {
       Items: [...tbl('requests').values()]
         .filter((x) => x.op === v[':op'] && x.code === v[':c'] && x.attempt_noticed_at === undefined && (x.attempt_noticing === undefined || x.attempt_noticing < v[':stale']))
@@ -4272,12 +4325,12 @@ describe('2.7.0: recovery from release R', () => {
       counted({ expires: isoS(NOW + 5 * DAY) });
       at(NOW + 40 * 60); // long after the old 15-minute slot life; nobody polls or reads the status
       const r = await jobHandler();
-      expect(r).toEqual({ found: 1, noticed: 1, failed: 0 });
+      expect(r).toEqual({ found: 1, noticed: 1, failed: 0, cancels: { found: 0, noticed: 0, failed: 0 } });
       expect(audits('vault.recovery_attempt')).toHaveLength(1);
       expect(mails().map((m) => m.subject)).toEqual(['VettID vault recovery: an attempt was made']);
       expect(getItem('vaults', VID).recovery.expires_at).toBe(NOW + 5 * DAY);
       expect(logs.join('\n')).toContain('"RecoveryAttemptsUnnoticed":1');
-      expect(await jobHandler()).toEqual({ found: 0, noticed: 0, failed: 0 });
+      expect(await jobHandler()).toMatchObject({ found: 0, noticed: 0, failed: 0 });
       expect(mails()).toHaveLength(1);
     });
 
@@ -4412,6 +4465,495 @@ describe('2.7.0: recovery from release R', () => {
       expect(getItem('vaults', VID).recovery.state).toBe('completed');
       expect(mails().map((m) => m.subject)).toEqual(['VettID vault recovered']);
       expect(mails()[0].text).toContain('is now on a new phone');
+    });
+  });
+});
+
+describe('2.9.0: a recovery cancelled from the phone (VAULT-MESSAGING 0.49.0 §11.5, §11.11.4)', () => {
+  const BK = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64');
+  const owner = keyOf('rc-owner-phone');
+  const asOwner = { app: { key: owner, vault: VID } };
+  const audits = (action: string) => [...tbl('audit').values()].filter((a) => a.action === action);
+  const mails = () => sesMock.commandCalls(SendEmailCommand).map((c) => ({
+    subject: c.args[0].input.Content!.Simple!.Subject!.Data!, text: c.args[0].input.Content!.Simple!.Body!.Text!.Data!,
+  }));
+  const subjects = () => mails().map((m) => m.subject);
+  const isoS = (s: number) => new Date(s * 1000).toISOString();
+  const DAY = 86_400;
+  let clock = NOW;
+  const at = (s: number) => {
+    clock = s;
+    jest.spyOn(Date, 'now').mockReturnValue(s * 1000);
+    for (const i of tbl('instances').values()) i.heartbeat_at = s - 10;
+  };
+  /** A few seconds on: the poll limit is 2 a second. */
+  const tick = () => at(clock + 2);
+  const result = Buffer.alloc(5_252, 0x55).toString('base64');
+  const U1 = '01JB2Z6V9K3M4N5P6Q7R8S9V01';
+  const U2 = '01JB2Z6V9K3M4N5P6Q7R8S9V02';
+  const sweep = () => vault.sweepAppCancels();
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const jobHandler = () => require('../../lambda/jobs/vault-attempts').handler();
+  const request = async () => {
+    tick();
+    const r = await call('POST', '/api/vault/recovery', { browser_key: BK });
+    expect(r.status).toBe(202);
+    return r.body.recovery_id as string;
+  };
+  const unlock = async (id: string) => {
+    tick();
+    expect((await call('POST', '/api/vault/unlock', { vault_id: VID, request_id: id, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA }, asOwner)).status).toBe(202);
+  };
+  /** The host's copy of the enclave's marker into the unlock's slot. */
+  const answer = (id: string, rid: string, extra: Record<string, unknown> = {}) =>
+    Object.assign(getItem('requests', id), { status: 'done', envelope: result, code: 'recovery_cancelled', cancelled_recovery_id: rid, ...extra });
+  const poll = async (id: string) => {
+    tick();
+    return call('GET', `/api/vault/requests/${id}`, undefined, asOwner);
+  };
+  const siteCancel = async (rid: string) => {
+    tick();
+    return (await call('POST', '/api/vault/recovery/cancel', { recovery_id: rid })).body;
+  };
+  const status = async () => {
+    tick();
+    return call('GET', '/api/vault/status');
+  };
+  const recovery = async () => {
+    tick();
+    return (await call('GET', '/api/vault/recovery')).body.recovery;
+  };
+  const rec = () => getItem('vaults', VID).recovery;
+  /** What the enclave verifies, built here independently: seven lines, or eight with the named recovery. */
+  const verifies = (msg: any, recoveryId?: string) => {
+    const lines = ['vettid/vms/2/recovery-request', msg.op, msg.vault_id, msg.user_guid, msg.request_id, msg.signed_at, ''];
+    if (recoveryId !== undefined) lines.push(recoveryId);
+    return cryptoVerify('sha256', Buffer.from(lines.join('\n')), { key: RRK.pub, dsaEncoding: 'der' }, Buffer.from(msg.sig, 'base64'));
+  };
+  const appCancelText = (requestedAt: number) => `The recovery of your VettID vault requested at ${isoS(requestedAt)} was cancelled from your VettID app, which unlocked the vault with your PIN. Your apps can unlock the vault again.
+
+If you did not do this, someone else may have your phone and know your PIN. Sign in to your account page and request a new recovery, and change your PIN once your vault is back on a phone you hold.`;
+
+  beforeEach(() => {
+    delete process.env.RECOVERY_CANCEL_ID_FROM_RELEASE;
+    release(R0, 14);
+    instance('i-1', R0);
+    vaultOf('g1', { vault_id: VID, state: 'locked', sealed_release: R0, app_key: { key: owner.b64, kid: owner.kid, seq: 1 } });
+    at(NOW);
+  });
+  afterAll(() => {
+    delete process.env.RECOVERY_CANCEL_ID_FROM_RELEASE;
+  });
+
+  test('the app polls its unlock: the named recovery ends `cancelled` via `app`, once, audited and mailed; nothing is enqueued; a new request is possible', async () => {
+    const rid = await request();
+    const requestedAt = rec().requested_at;
+    await unlock(U1);
+    // The slot names the recovery it was queued under and lives as long as it, plus an hour; the recovery remembers it.
+    expect(getItem('requests', U1)).toMatchObject({ op: 'unlock', recovery_id: rid, expires_at: rec().expires_at + 3600 });
+    expect(rec().unlock_ids).toEqual([U1]);
+    answer(U1, rid);
+    const p = await poll(U1);
+    expect(p.body).toEqual({ status: 'done', envelope: result, code: 'recovery_cancelled' });
+    expect(rec()).toMatchObject({ recovery_id: rid, state: 'cancelled', cancelled_via: 'app', cancelled_at: clock });
+    const [a] = audits('vault.recovery_cancel');
+    expect(a.detail).toEqual({ vault_id: VID, recovery_id: rid, via: 'app', request_id: U1, source: 'slot' });
+    expect(subjects()).toEqual(['VettID vault recovery requested', 'VettID vault recovery cancelled']);
+    expect(mails()[1].text).toBe(appCancelText(requestedAt));
+    // The vault has already ended it: no recovery_cancel.
+    expect(sent().map((m) => m.msg.op)).toEqual(['recovery', 'unlock']);
+    // The notice row: recorded; its TTL is the later of expires_at and now, plus one day.
+    expect(getItem('requests', `rcnotice#${rid}`)).toMatchObject({ vault_id: VID, user_guid: 'g1', recovery_id: rid, notice_tries: 1, expires_at: rec().expires_at + DAY, noticed_at: expect.any(Number) });
+    expect(getItem('requests', `rcnotice#${rid}`).noticing).toBeUndefined();
+    expect(getItem('requests', U1).cancel_noticed_at).toEqual(expect.any(Number));
+    // Polled again, read again, swept: nothing more.
+    await poll(U1);
+    expect(await recovery()).toMatchObject({ recovery_id: rid, state: 'cancelled', cancelled_via: 'app' });
+    expect((await status()).body.vault.recovery).toBeNull();
+    expect(await sweep()).toEqual({ found: 0, noticed: 0, failed: 0 });
+    expect(audits('vault.recovery_cancel')).toHaveLength(1);
+    expect(audits('vault.recovery_cancel_seen')).toHaveLength(0);
+    expect(mails()).toHaveLength(2);
+    expect(await request()).not.toBe(rid);
+  });
+
+  test('an unlock while no recovery is active: a 15-minute slot, no recovery_id, nothing remembered', async () => {
+    await unlock(U1);
+    expect(getItem('requests', U1).recovery_id).toBeUndefined();
+    expect(getItem('requests', U1).expires_at).toBe(clock + 900);
+  });
+
+  describe('reordering: the marker\'s own id decides, never the slot\'s recovery_id', () => {
+    test('an unlock queued under R1 that ran after R1\'s cancel and R2\'s request, and ended R2: R2 ends here too', async () => {
+      const r1 = await request();
+      await unlock(U1);
+      expect(getItem('requests', U1).recovery_id).toBe(r1);
+      expect(await siteCancel(r1)).toEqual({ cancelled: true });
+      const r2 = await request();
+      answer(U1, r2);
+      await poll(U1);
+      expect(rec()).toMatchObject({ recovery_id: r2, state: 'cancelled', cancelled_via: 'app' });
+      expect(audits('vault.recovery_cancel').map((a) => [a.detail.recovery_id, a.detail.via])).toEqual([[r1, 'session'], [r2, 'app']]);
+      expect(subjects()).toEqual(['VettID vault recovery requested', 'VettID vault recovery cancelled', 'VettID vault recovery requested', 'VettID vault recovery cancelled']);
+    });
+
+    test('an unlock queued under R2 that ran before R2\'s own request and ended R1: R2 stays; `vault.recovery_cancel_seen` (replaced), once, no mail', async () => {
+      const r1 = await request();
+      expect(await siteCancel(r1)).toEqual({ cancelled: true });
+      const r2 = await request();
+      await unlock(U1);
+      expect(getItem('requests', U1).recovery_id).toBe(r2);
+      answer(U1, r1);
+      const before = mails().length;
+      await poll(U1);
+      await status();
+      await sweep();
+      await sweep();
+      expect(rec()).toMatchObject({ recovery_id: r2, state: 'pending' });
+      expect(rec().cancelled_via).toBeUndefined();
+      expect(audits('vault.recovery_cancel_seen').map((a) => a.detail)).toEqual([{ vault_id: VID, recovery_id: r1, ended: 'replaced' }]);
+      expect(mails()).toHaveLength(before);
+      expect(getItem('requests', `rcnotice#${r1}`)).toBeUndefined();
+    });
+  });
+
+  test('the vault row\'s recovery_cancelled alone (a lost answer) ends the matching recovery once; with the slot too, still once', async () => {
+    const rid = await request();
+    await unlock(U1);
+    getItem('vaults', VID).recovery_cancelled = { recovery_id: rid, at: clock };
+    expect((await status()).body.vault.recovery).toBeNull();
+    expect(rec()).toMatchObject({ state: 'cancelled', cancelled_via: 'app' });
+    expect(audits('vault.recovery_cancel').map((a) => a.detail)).toEqual([{ vault_id: VID, recovery_id: rid, via: 'app', source: 'row' }]);
+    // The slot's marker arrives as well (the answer was not lost after all): marked, nothing more.
+    answer(U1, rid);
+    await poll(U1);
+    await recovery();
+    await status();
+    await sweep();
+    expect(getItem('requests', U1).cancel_noticed_at).toEqual(expect.any(Number));
+    expect(audits('vault.recovery_cancel')).toHaveLength(1);
+    expect(audits('vault.recovery_cancel_seen')).toHaveLength(0);
+    expect(subjects()).toEqual(['VettID vault recovery requested', 'VettID vault recovery cancelled']);
+  });
+
+  test.each<[string, (rid: string) => Promise<void>]>([
+    ['cancelled', async (rid) => void expect(await siteCancel(rid)).toEqual({ cancelled: true })],
+    ['completed', async () => void (rec().state = 'completed')],
+    ['unavailable', async () => void (rec().state = 'unavailable')],
+    ['expired', async () => at(rec().expires_at + 60)],
+  ])('already ended (%s): `vault.recovery_cancel_seen` once per slot across polls, status reads and sweeps; no mail; the row alone never audits it', async (ended, end) => {
+    const rid = await request();
+    await unlock(U1);
+    await end(rid);
+    answer(U1, rid);
+    getItem('vaults', VID).recovery_cancelled = { recovery_id: rid, at: clock };
+    const before = subjects();
+    await poll(U1);
+    await poll(U1);
+    await recovery();
+    await status();
+    await sweep();
+    at(clock + vault.ATTEMPT_RETRY_S + 1);
+    await sweep();
+    await status();
+    expect(audits('vault.recovery_cancel_seen').map((a) => a.detail)).toEqual([{ vault_id: VID, recovery_id: rid, ended }]);
+    expect(audits('vault.recovery_cancel').filter((a) => a.detail.via === 'app')).toHaveLength(0);
+    expect(subjects()).toEqual(before);
+    expect(getItem('requests', `rcnotice#${rid}`)).toBeUndefined();
+    // A second slot naming the same recovery is its own claim: one more audit, still no mail.
+    await unlock(U2);
+    answer(U2, rid);
+    await poll(U2);
+    await sweep();
+    expect(audits('vault.recovery_cancel_seen')).toHaveLength(2);
+    expect(subjects()).toEqual(before);
+  });
+
+  test('the row alone, for a recovery already ended here, never audits and mails nothing', async () => {
+    const rid = await request();
+    expect(await siteCancel(rid)).toEqual({ cancelled: true });
+    getItem('vaults', VID).recovery_cancelled = { recovery_id: rid, at: clock };
+    await recovery();
+    await status();
+    await sweep();
+    expect(audits('vault.recovery_cancel_seen')).toHaveLength(0);
+    expect(subjects()).toEqual(['VettID vault recovery requested', 'VettID vault recovery cancelled']);
+  });
+
+  test('after the mail, the row\'s recovery_cancelled (never cleared) opens no notice: after the notice row\'s TTL, and after expires_at moved', async () => {
+    const rid = await request();
+    getItem('vaults', VID).recovery_cancelled = { recovery_id: rid, at: clock };
+    await recovery();
+    expect(mails()).toHaveLength(2);
+    // The notice row has gone (its TTL), the row still names the recovery.
+    tbl('requests').delete(`rcnotice#${rid}`);
+    at(clock + 3 * DAY);
+    await recovery();
+    await status();
+    await sweep();
+    // An attempt's notice could have moved expires_at later.
+    rec().expires_at = clock + 10 * DAY;
+    await recovery();
+    await status();
+    await sweep();
+    expect(mails()).toHaveLength(2);
+    expect(audits('vault.recovery_cancel')).toHaveLength(1);
+    expect(audits('vault.recovery_cancel_seen')).toHaveLength(0);
+    expect(getItem('requests', `rcnotice#${rid}`)).toBeUndefined();
+  });
+
+  test('a claim that stopped after the cancel write and before the email is taken up after ATTEMPT_RETRY_S, not before, and mails', async () => {
+    const rid = await request();
+    await unlock(U1);
+    answer(U1, rid);
+    // The next send fails once (rejectsOnce would target the stub's first call, the request's mail).
+    let failNext = true;
+    sesMock.on(SendEmailCommand).callsFake(() => {
+      if (!failNext) return {};
+      failNext = false;
+      throw Object.assign(new Error('throttled'), { name: 'TooManyRequestsException' });
+    });
+    const p = await poll(U1);
+    // The failure never hides the result.
+    expect(p.body).toEqual({ status: 'done', envelope: result, code: 'recovery_cancelled' });
+    expect(logs.join('\n')).toContain('recovery cancel not noticed');
+    expect(rec()).toMatchObject({ state: 'cancelled', cancelled_via: 'app' });
+    const claimedAt = clock;
+    expect(getItem('requests', `rcnotice#${rid}`)).toMatchObject({ noticing: claimedAt, notice_tries: 1 });
+    expect(getItem('requests', `rcnotice#${rid}`).noticed_at).toBeUndefined();
+    // Within the retry window: neither a poll, a status read nor the sweep takes it again.
+    at(claimedAt + 60);
+    await poll(U1);
+    await status();
+    expect(await sweep()).toMatchObject({ noticed: 1 }); // the slot: the notice is under way
+    expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(2); // the request and the failed one
+    // After it: taken up (the recovery already reads cancelled via app), mailed and recorded.
+    at(claimedAt + vault.ATTEMPT_RETRY_S + 1);
+    await sweep();
+    expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(3);
+    expect(mails()[2]).toEqual({ subject: 'VettID vault recovery cancelled', text: appCancelText(rec().requested_at) });
+    expect(getItem('requests', `rcnotice#${rid}`)).toMatchObject({ notice_tries: 2, noticed_at: clock });
+    expect(getItem('requests', U1).cancel_noticed_at).toEqual(expect.any(Number));
+    // The stopped claim had audited already: the retry audits again (errs on the side of the record).
+    expect(audits('vault.recovery_cancel')).toHaveLength(2);
+    at(clock + 3 * vault.ATTEMPT_RETRY_S);
+    expect(await sweep()).toEqual({ found: 0, noticed: 0, failed: 0 });
+    expect(sesMock.commandCalls(SendEmailCommand)).toHaveLength(3);
+  });
+
+  test('after ATTEMPT_MAX_TRIES the notice is given up, recorded as failed and logged; nothing is mailed', async () => {
+    const rid = await request();
+    put('requests', { request_id: `rcnotice#${rid}`, vault_id: VID, user_guid: 'g1', recovery_id: rid, notice_tries: vault.ATTEMPT_MAX_TRIES, noticing: clock - vault.ATTEMPT_RETRY_S - 1, expires_at: clock + DAY });
+    expect(await sweep()).toEqual({ found: 1, noticed: 1, failed: 0 });
+    expect(getItem('requests', `rcnotice#${rid}`)).toMatchObject({ notice_failed: true, noticed_at: clock });
+    expect(logs.join('\n')).toContain('recovery cancel notice abandoned');
+    expect(subjects()).toEqual(['VettID vault recovery requested']);
+    expect(rec().state).toBe('pending');
+  });
+
+  test('the sweep (the job) notices a marker on a slot older than 15 minutes, which lives as long as the recovery', async () => {
+    const rid = await request();
+    await unlock(U1);
+    answer(U1, rid);
+    at(clock + 40 * 60); // nobody polls or reads the status
+    expect(Number(getItem('requests', U1).expires_at)).toBeGreaterThan(clock);
+    const r = await jobHandler();
+    expect(r.cancels).toEqual({ found: 1, noticed: 1, failed: 0 });
+    expect(logs.join('\n')).toContain('"RecoveryCancelsUnnoticed":1');
+    expect(rec()).toMatchObject({ state: 'cancelled', cancelled_via: 'app' });
+    expect(subjects()).toEqual(['VettID vault recovery requested', 'VettID vault recovery cancelled']);
+    expect((await jobHandler()).cancels).toEqual({ found: 0, noticed: 0, failed: 0 });
+  });
+
+  test('the sweep notices a row-only cancel; its request-table writes name only the job\'s attributes, and it never reads the request table', async () => {
+    const rid = await request();
+    getItem('vaults', VID).recovery_cancelled = { recovery_id: rid, at: clock };
+    // A marked slot of an already ended recovery as well (the slot claim).
+    const other = '01JB2Z6V9K3M4N5P6Q7R8S9V09';
+    put('requests', { request_id: other, op: 'unlock', status: 'done', code: 'recovery_cancelled', cancelled_recovery_id: RID, vault_id: VID, user_guid: 'g1', created_at: '2026-10-02T12:00:00.000Z', expires_at: clock + DAY });
+    ddb.resetHistory();
+    expect(await sweep()).toEqual({ found: 2, noticed: 2, failed: 0 });
+    expect(rec()).toMatchObject({ state: 'cancelled', cancelled_via: 'app' });
+    expect(audits('vault.recovery_cancel').map((a) => a.detail)).toEqual([{ vault_id: VID, recovery_id: rid, via: 'app', source: 'row' }]);
+    expect(audits('vault.recovery_cancel_seen').map((a) => a.detail)).toEqual([{ vault_id: VID, recovery_id: RID, ended: 'replaced' }]);
+    expect(ddb.commandCalls(GetCommand).filter((c) => c.args[0].input.TableName === 'requests')).toHaveLength(0);
+    expect(ddb.commandCalls(PutCommand).filter((c) => c.args[0].input.TableName === 'requests')).toHaveLength(0);
+    const slotAttrs = ['request_id', 'expires_at', 'recovery_id', 'code', 'attempt_noticing', 'attempt_notice_tries', 'attempt_noticed_at', 'attempt_notice_failed', 'cancel_noticed_at', 'cancelled_recovery_id'];
+    const noticeAttrs = ['request_id', 'vault_id', 'user_guid', 'recovery_id', 'noticing', 'notice_tries', 'noticed_at', 'notice_failed', 'expires_at'];
+    const updates = ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'requests');
+    expect(updates.length).toBeGreaterThan(0);
+    for (const i of updates) {
+      const notice = String(i.Key!.request_id).startsWith('rcnotice#');
+      if (!notice) expect(i.ConditionExpression).toContain('attribute_exists(request_id)');
+      const named = `${i.UpdateExpression} ${i.ConditionExpression}`.replace(/:[a-z_]+/g, '').match(/[a-z_]+/g)!
+        .filter((w) => !['SET', 'REMOVE', 'AND', 'OR', 'if_not_exists', 'attribute_exists', 'attribute_not_exists'].includes(w));
+      for (const a of named) expect({ a, notice, allowed: (notice ? noticeAttrs : slotAttrs).includes(a) }).toEqual({ a, notice, allowed: true });
+    }
+    for (const i of ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input).filter((x) => x.TableName === 'vaults')) {
+      expect(i.UpdateExpression!.replace(/[:#][a-zA-Z_]+/g, '').match(/[a-z_]+/g)!.filter((w) => !['SET', 'REMOVE'].includes(w)).every((w) => ['recovery', 'cancelled_via', 'cancelled_at', 'updated_at', 'completed_at', 'claim_keys', 'recovering_key'].includes(w))).toBe(true);
+    }
+  });
+
+  test('an unlock_ids append concurrent with a site cancel: both land, the recovery reads cancelled, and the next poll changes nothing', async () => {
+    const rid = await request();
+    // The site's cancel write lands between the unlock's read and its append.
+    onUpdate = (i) => {
+      if (i.TableName === 'vaults' && String(i.UpdateExpression).startsWith('SET recovery.unlock_ids')) {
+        onUpdate = undefined;
+        Object.assign(getItem('vaults', VID).recovery, { state: 'cancelled', cancelled_via: 'session', cancelled_at: clock });
+      }
+    };
+    await unlock(U1);
+    expect(rec()).toMatchObject({ recovery_id: rid, state: 'cancelled', cancelled_via: 'session', unlock_ids: [U1] });
+    answer(U1, rid);
+    const before = mails().length;
+    await poll(U1);
+    expect(rec()).toMatchObject({ recovery_id: rid, state: 'cancelled', cancelled_via: 'session', unlock_ids: [U1] });
+    expect(audits('vault.recovery_cancel').filter((a) => a.detail.via === 'app')).toHaveLength(0);
+    expect(mails()).toHaveLength(before);
+  });
+
+  test('two unlocks append concurrently: neither id is lost (the append is retried on the list read)', async () => {
+    await request();
+    await unlock(U1);
+    onUpdate = (i) => {
+      if (i.TableName === 'vaults' && String(i.UpdateExpression).startsWith('SET recovery.unlock_ids')) {
+        onUpdate = undefined;
+        getItem('vaults', VID).recovery.unlock_ids = [U1, '01JB2Z6V9K3M4N5P6Q7R8S9V07'];
+      }
+    };
+    await unlock(U2);
+    expect(rec().unlock_ids).toEqual([U1, '01JB2Z6V9K3M4N5P6Q7R8S9V07', U2]);
+  });
+
+  describe('a site cancel and a phone cancel of the same recovery: one cancel, one `vault.recovery_cancel`, one email', () => {
+    test('the phone first: the route loses and answers {cancelled: false}, enqueues and mails nothing', async () => {
+      const rid = await request();
+      await unlock(U1);
+      answer(U1, rid);
+      await poll(U1);
+      expect(await siteCancel(rid)).toEqual({ cancelled: false });
+      expect(audits('vault.recovery_cancel').map((a) => a.detail.via)).toEqual(['app']);
+      expect(subjects()).toEqual(['VettID vault recovery requested', 'VettID vault recovery cancelled']);
+      expect(sent().map((m) => m.msg.op)).toEqual(['recovery', 'unlock']);
+    });
+
+    test('the site\'s write lands between the notice\'s claim and its write: the notice loses, audits `seen` (cancelled), mails nothing', async () => {
+      const rid = await request();
+      await unlock(U1);
+      answer(U1, rid);
+      onUpdate = (i) => {
+        if (i.TableName === 'vaults' && i.ExpressionAttributeValues?.[':via'] === 'app') {
+          onUpdate = undefined;
+          Object.assign(getItem('vaults', VID).recovery, { state: 'cancelled', cancelled_via: 'session', cancelled_at: clock });
+        }
+      };
+      await poll(U1);
+      expect(rec()).toMatchObject({ state: 'cancelled', cancelled_via: 'session' });
+      expect(audits('vault.recovery_cancel').filter((a) => a.detail.via === 'app')).toHaveLength(0);
+      expect(audits('vault.recovery_cancel_seen').map((a) => a.detail)).toEqual([{ vault_id: VID, recovery_id: rid, ended: 'cancelled' }]);
+      expect(subjects()).toEqual(['VettID vault recovery requested']);
+      expect(getItem('requests', `rcnotice#${rid}`).noticed_at).toEqual(expect.any(Number));
+    });
+
+    test('the site first: the phone\'s marker is the "already ended" path', async () => {
+      const rid = await request();
+      await unlock(U1);
+      expect(await siteCancel(rid)).toEqual({ cancelled: true });
+      answer(U1, rid);
+      await poll(U1);
+      expect(audits('vault.recovery_cancel').map((a) => a.detail.via)).toEqual(['session']);
+      expect(subjects()).toEqual(['VettID vault recovery requested', 'VettID vault recovery cancelled']);
+      expect(rec().cancelled_via).toBe('session');
+    });
+  });
+
+  test.each<[string, () => void]>([
+    ['the row (a lost answer)', () => void (getItem('vaults', VID).recovery_cancelled = { recovery_id: rec().recovery_id, at: clock })],
+    ['an unlock slot nobody polled', () => void answer(U1, rec().recovery_id)],
+  ])('POST /api/vault/recovery after a phone cancel nobody noticed (%s) answers 202, not 409 recovery_active', async (_n, mark) => {
+    const r1 = await request();
+    await unlock(U1);
+    mark();
+    tick();
+    const r = await call('POST', '/api/vault/recovery', { browser_key: BK });
+    expect(r.status).toBe(202);
+    expect(r.body.recovery_id).not.toBe(r1);
+    expect(audits('vault.recovery_cancel').map((a) => [a.detail.recovery_id, a.detail.via])).toEqual([[r1, 'app']]);
+    expect(subjects()).toEqual(['VettID vault recovery requested', 'VettID vault recovery cancelled', 'VettID vault recovery requested']);
+  });
+
+  test('the marker on a slot whose op is not `unlock` is ignored', async () => {
+    const rid = await request();
+    await unlock(U1);
+    answer(U1, rid, { op: 'lock' });
+    expect((await poll(U1)).body.code).toBe('recovery_cancelled');
+    await recovery();
+    await status();
+    expect(await sweep()).toEqual({ found: 0, noticed: 0, failed: 0 });
+    expect(rec().state).toBe('pending');
+    expect(audits('vault.recovery_cancel')).toHaveLength(0);
+    expect(audits('vault.recovery_cancel_seen')).toHaveLength(0);
+    expect(subjects()).toEqual(['VettID vault recovery requested']);
+  });
+
+  test('a malformed cancelled_recovery_id is no marker', async () => {
+    const rid = await request();
+    await unlock(U1);
+    answer(U1, rid.toLowerCase());
+    await poll(U1);
+    await sweep();
+    expect(rec().state).toBe('pending');
+    expect(audits('vault.recovery_cancel_seen')).toHaveLength(0);
+  });
+
+  describe('a cancel names its recovery from RECOVERY_CANCEL_ID_FROM_RELEASE (§11.14.8)', () => {
+    const cancelMsg = () => sent().filter((m) => m.msg.op === 'recovery_cancel').pop()!.msg;
+
+    test('unset: never named; the seven-line form', async () => {
+      const rid = await request();
+      expect(await siteCancel(rid)).toEqual({ cancelled: true });
+      const msg = cancelMsg();
+      expect(msg.recovery_id).toBeUndefined();
+      expect(verifies(msg)).toBe(true);
+      expect(verifies(msg, rid)).toBe(false);
+    });
+
+    test('at the release: recovery_id and the eight-line signature; a stripped or changed id fails it', async () => {
+      process.env.RECOVERY_CANCEL_ID_FROM_RELEASE = '14';
+      const rid = await request();
+      expect(await siteCancel(rid)).toEqual({ cancelled: true });
+      const msg = cancelMsg();
+      expect(msg.recovery_id).toBe(rid);
+      expect(Object.keys(msg)).toEqual(['v', 'op', 'vault_id', 'user_guid', 'request_id', 'recovery_id', 'signed_at', 'key_id', 'sig', 'enqueued_at']);
+      expect(verifies(msg, rid)).toBe(true);
+      // Stripped (the host removes the member): the seven-line string does not verify.
+      expect(verifies(msg)).toBe(false);
+      expect(verifies(msg, RID)).toBe(false);
+      // The link route names it too.
+      const token = /cancel#t=([A-Za-z0-9_-]{43})/.exec(mails().filter((m) => m.subject === 'VettID vault recovery requested').pop()!.text)![1];
+      const rid2 = await request();
+      const token2 = /cancel#t=([A-Za-z0-9_-]{43})/.exec(mails().pop()!.text)![1];
+      expect(token2).not.toBe(token);
+      tick();
+      expect((await call('POST', '/api/vault/recovery/cancel-link', { token: token2 }, { guid: 'nobody' })).body).toEqual({ cancelled: true });
+      expect(cancelMsg().recovery_id).toBe(rid2);
+      expect(verifies(cancelMsg(), rid2)).toBe(true);
+    });
+
+    test.each(['15', 'x', '', '0'])('below the release, or a malformed setting (%j): the seven-line form', async (v) => {
+      process.env.RECOVERY_CANCEL_ID_FROM_RELEASE = v;
+      const rid = await request();
+      expect(await siteCancel(rid)).toEqual({ cancelled: true });
+      const msg = cancelMsg();
+      expect(msg.recovery_id).toBeUndefined();
+      expect(verifies(msg)).toBe(true);
+    });
+
+    test('an instance whose release has no row: the seven-line form', async () => {
+      process.env.RECOVERY_CANCEL_ID_FROM_RELEASE = '1';
+      expect(await vault.cancelNamesRecovery({ release: R1 })).toBe(false);
+      expect(await vault.cancelNamesRecovery({ release: R0 })).toBe(true);
     });
   });
 });

@@ -17,7 +17,21 @@
  *   request_id \n signed_at \n hex(SHA-256(browser_key))
  *
  * `browser_key` is the 65 raw bytes of the browser's P-256 point (not its
- * base64); for a cancel the last line is empty. The signature is ECDSA with
+ * base64); for a cancel the last line is empty.
+ *
+ * (VAULT-MESSAGING 0.49.0, MEMBER-API 2.9.0 "A cancel names its recovery")
+ * A `recovery_cancel` may name the recovery it means: the queue message then
+ * carries `recovery_id` in the clear and the string has an eighth line, that
+ * id, after the empty seventh:
+ *
+ *   … \n signed_at \n "" \n recovery_id
+ *
+ * A release verifies the string that matches the message (seven lines
+ * without the member, eight with it), so a host that adds, removes or
+ * changes the member breaks the signature. Releases before the one that
+ * implements it verify only the seven-line string: the member API names the
+ * recovery only for an instance at or above RECOVERY_CANCEL_ID_FROM_RELEASE
+ * (lambda/member/vault.ts cancelNamesRecovery). The signature is ECDSA with
  * SHA-256 over those bytes (KMS: MessageType DIGEST, the digest computed
  * here), DER-encoded; the queue message carries `signed_at`, `key_id` and
  * `sig` (standard base64 of the DER) in the clear.
@@ -53,7 +67,8 @@ export function signedAtOf(ms: number): string {
 /**
  * The signing string, or a thrown Error for members the enclave's builder
  * would refuse (empty, or holding CR or LF; a `recovery` without its browser
- * key; a cancel with one).
+ * key; a cancel with one; a `recovery_id` on anything but a cancel, or an
+ * empty one).
  */
 export function recoveryRequestSigningString(
   op: RecoveryRequestOp,
@@ -62,6 +77,7 @@ export function recoveryRequestSigningString(
   requestId: string,
   signedAt: string,
   browserKey?: Uint8Array,
+  recoveryId?: string,
 ): string {
   for (const s of [op, vaultId, userGuid, requestId, signedAt]) {
     if (typeof s !== 'string' || s === '' || /[\r\n]/.test(s)) throw new Error('recovery signing: bad member');
@@ -75,7 +91,13 @@ export function recoveryRequestSigningString(
   } else {
     throw new Error('recovery signing: bad op');
   }
-  return [RECOVERY_REQUEST_LABEL, op, vaultId, userGuid, requestId, signedAt, last].join('\n');
+  const lines = [RECOVERY_REQUEST_LABEL, op, vaultId, userGuid, requestId, signedAt, last];
+  if (recoveryId !== undefined) {
+    if (op !== 'recovery_cancel') throw new Error('recovery signing: only a cancel names a recovery');
+    if (typeof recoveryId !== 'string' || recoveryId === '' || /[\r\n]/.test(recoveryId)) throw new Error('recovery signing: bad recovery id');
+    lines.push(recoveryId);
+  }
+  return lines.join('\n');
 }
 
 let kms: KMSClient | undefined;
@@ -84,7 +106,8 @@ const client = () => (kms ??= new KMSClient({}));
 /**
  * Sign one recovery operation with the recovery request key. Throws if the
  * key is not configured, KMS refuses, or the answer is not a signature the
- * enclave would parse; the caller then sends nothing.
+ * enclave would parse; the caller then sends nothing. `recoveryId` (a cancel
+ * only, 0.49.0): the eight-line form; the message must then carry it.
  */
 export async function signRecoveryRequest(
   op: RecoveryRequestOp,
@@ -93,12 +116,13 @@ export async function signRecoveryRequest(
   requestId: string,
   browserKey?: Uint8Array,
   nowMs: number = Date.now(),
+  recoveryId?: string,
 ): Promise<RecoverySignature> {
   const keyArn = env('RECOVERY_REQUEST_KEY_ARN');
   const keyId = env('RECOVERY_REQUEST_KEY_ID');
   if (!KEY_ID_RE.test(keyId)) throw new Error('recovery signing: RECOVERY_REQUEST_KEY_ID is not a key id a release accepts');
   const signedAt = signedAtOf(nowMs);
-  const digest = createHash('sha256').update(recoveryRequestSigningString(op, vaultId, userGuid, requestId, signedAt, browserKey), 'utf8').digest();
+  const digest = createHash('sha256').update(recoveryRequestSigningString(op, vaultId, userGuid, requestId, signedAt, browserKey, recoveryId), 'utf8').digest();
   const out = await client().send(new SignCommand({ KeyId: keyArn, Message: digest, MessageType: 'DIGEST', SigningAlgorithm: 'ECDSA_SHA_256' }));
   const sig = out.Signature ? Buffer.from(out.Signature) : null;
   if (!sig || sig.length < 8 || sig.length > MAX_SIG_BYTES || sig[0] !== 0x30 || out.SigningAlgorithm !== 'ECDSA_SHA_256') {

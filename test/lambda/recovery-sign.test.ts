@@ -49,6 +49,52 @@ describe('the signing string (vettid-vault vms/recovery.RequestSigningString)', 
   });
 });
 
+describe('0.49.0: a cancel names its recovery (VAULT-MESSAGING §11.14.8, §16 recovery.json)', () => {
+  const sha = (x: string) => createHash('sha256').update(x).digest('hex');
+  const CANCEL_ID = '01JB2Z6V9K3M4N5P6Q7R8S9T33';
+  const RECOVERY_ID = '01JB2Z6V9K3M4N5P6Q7R8S9T32';
+
+  test('the seven-line vector (no recovery_id; the last line empty)', () => {
+    const s = recoveryRequestSigningString('recovery_cancel', 'test-vault-0001', 'test-user-guid', CANCEL_ID, '2026-10-15T12:00:00Z');
+    expect(s).toBe('vettid/vms/2/recovery-request\nrecovery_cancel\ntest-vault-0001\ntest-user-guid\n01JB2Z6V9K3M4N5P6Q7R8S9T33\n2026-10-15T12:00:00Z\n');
+    expect(sha(s)).toBe('027c441758559d461017926a1bba3b56cb6fa320ead17987859236a1731ba2c1');
+  });
+
+  test('the eight-line vector: the recovery_id after the empty seventh line', () => {
+    const s = recoveryRequestSigningString('recovery_cancel', 'test-vault-0001', 'test-user-guid', CANCEL_ID, '2026-10-15T12:00:00Z', undefined, RECOVERY_ID);
+    expect(s).toBe('vettid/vms/2/recovery-request\nrecovery_cancel\ntest-vault-0001\ntest-user-guid\n01JB2Z6V9K3M4N5P6Q7R8S9T33\n2026-10-15T12:00:00Z\n\n01JB2Z6V9K3M4N5P6Q7R8S9T32');
+    expect(sha(s)).toBe('f62e0062d49f9459d738869c16bc04dbc7f65f5235099296384af9ce7a768ec5');
+    expect(s.split('\n')).toHaveLength(8);
+  });
+
+  test('a signature over the eight-line string fails over the stripped (seven-line) or a changed id, and the reverse', async () => {
+    const kms = mockClient(KMSClient);
+    process.env.RECOVERY_REQUEST_KEY_ARN = 'arn:aws:kms:us-east-1:449757308783:key/11111111-2222-4333-8444-555555555555';
+    process.env.RECOVERY_REQUEST_KEY_ID = '11111111-2222-4333-8444-555555555555';
+    kms.on(SignCommand).callsFake((i) => ({ SigningAlgorithm: 'ECDSA_SHA_256', Signature: signDigest(D, i.Message) }));
+    const now = Date.UTC(2026, 9, 15, 12, 0, 0);
+    const named = await signRecoveryRequest('recovery_cancel', 'test-vault-0001', 'test-user-guid', CANCEL_ID, undefined, now, RECOVERY_ID);
+    const plain = await signRecoveryRequest('recovery_cancel', 'test-vault-0001', 'test-user-guid', CANCEL_ID, undefined, now);
+    const ok = (sig: string, rid?: string) => cryptoVerify('sha256',
+      Buffer.from(recoveryRequestSigningString('recovery_cancel', 'test-vault-0001', 'test-user-guid', CANCEL_ID, '2026-10-15T12:00:00Z', undefined, rid)),
+      { key: goPub, dsaEncoding: 'der' }, Buffer.from(sig, 'base64'));
+    expect(ok(named.sig, RECOVERY_ID)).toBe(true);
+    expect(ok(named.sig)).toBe(false);
+    expect(ok(named.sig, '01JB2Z6V9K3M4N5P6Q7R8S9T34')).toBe(false);
+    expect(ok(plain.sig)).toBe(true);
+    expect(ok(plain.sig, RECOVERY_ID)).toBe(false);
+    kms.restore();
+  });
+
+  test.each<[string, () => string]>([
+    ['a recovery_id on a recovery request', () => recoveryRequestSigningString('recovery', 'v', 'u', 'r', 't', Buffer.alloc(65, 4), RECOVERY_ID)],
+    ['an empty recovery_id', () => recoveryRequestSigningString('recovery_cancel', 'v', 'u', 'r', 't', undefined, '')],
+    ['a recovery_id with a newline', () => recoveryRequestSigningString('recovery_cancel', 'v', 'u', 'r', 't', undefined, `${RECOVERY_ID}\nx`)],
+  ])('refuses %s', (_n, f) => {
+    expect(f).toThrow();
+  });
+});
+
 describe('signed_at: RFC 3339 in UTC to the second', () => {
   test('whole seconds, Z, no fraction (the enclave re-formats and compares)', () => {
     expect(signedAtOf(Date.UTC(2026, 9, 15, 12, 0, 0, 999))).toBe('2026-10-15T12:00:00Z');
