@@ -1,8 +1,29 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.9.0
+version: 2.10.0
 changelog:
+  - 2.10.0 (2026-10-20; **approved by the owner (2026-10-20)**, with
+    VAULT-MESSAGING 0.51.0 and VAULT-HOST-PROTOCOL 0.1.14, vettid.org
+    #356; for the vault's staging release 20; not built). "Vault
+    deletion": a deletion that the vault marked and that stopped
+    before its `deleted` report is **resumed**. The host writes
+    `deleting_at` on the vault row when the vault's marking flush is
+    stored (`MarkDeleting`), and removes it on `unlocked`. The 5-minute
+    cleanup run sends the queue operation `delete_resume` for each row
+    with `deleting_at` at least 2 minutes old that is not `deleted`,
+    routed as `delete` is, at every run for the first hour and then
+    hourly, and logs one still not finished after 1 hour and daily
+    after 30 days. It never sends `delete` because of `deleting_at`.
+    **The mark stays internal**: `deleting_at` (and
+    `deletion_resumed_at`) are used only by the cleanup run, its log and
+    its metric, and are never shown to the member. `GET
+    /api/vault/status` keeps reporting the row's own `state` (a
+    `deleted` row still reads `{vault: null}`); the account site shows
+    no "being deleted" text and still offers recovery and start-over,
+    because the mark is host-written and the host is not trusted. No new
+    route, no new refusal, no new status value. The host role may write
+    `deleting_at`; the cleanup job only reads it
   - 2.9.0 (2026-10-19; owner decision 2026-10-19, **approved by the
     owner (2026-10-19)**, with VAULT-MESSAGING 0.49.0 and
     VAULT-HOST-PROTOCOL 0.1.13; revised after review; not built). New
@@ -2642,6 +2663,63 @@ Its own audit log goes with it, so the member is told by email.
   deletes nothing for 7 days. An admin's Delete refuses while the
   member has a vault (ADMIN-API "People"), so it does not leave one
   behind.
+- **Resume (2.10.0; VAULT-MESSAGING 0.51.0 §12.5, VAULT-HOST-PROTOCOL
+  0.1.14).** A vault deleting itself (by its app's `vault.delete`, or on
+  the host's `delete`) has the parent write **`deleting_at`** (epoch
+  seconds) on its row once the marking flush is stored, whatever the
+  lease and only once; it tells no device before that write. If the
+  deletion then stops before `deleted` (a crash, a host failure, a
+  store error), the row would otherwise stay as it is: the app sends
+  nothing more, and only the host's `delete` of an account
+  cancellation or a start-over is retried.
+  - **The run.** The 5-minute cleanup run (the one that carries out
+    start-overs) scans the vault rows with `deleting_at` that are not
+    `deleted`. For each whose `deleting_at` is at least **2 minutes**
+    old it sends the queue operation **`delete_resume`** (§11.5 SQS
+    message: `v`, `op`, `vault_id`, `user_guid`, `request_id`,
+    `enqueued_at`; no envelope), routed exactly as `delete` is (the
+    leaseholder, else a live instance of `sealed_release`, requesting
+    a start when none runs; nothing while the vault service is paused
+    or to a `removed` release), and sets `deletion_resumed_at` (epoch
+    seconds) on the row. It sends again at every run while
+    `deleting_at` is less than 1 hour old, and after that when
+    `deletion_resumed_at` is at least 1 hour old. No response slot is
+    written or read: the vault's `deleted` report is the result, and
+    its notice removes the row as above.
+  - **Logged.** A row still not `deleted` 1 hour after `deleting_at` is
+    logged (`vault deletion resume pending`, `vault_id` only) and
+    counted in the metric `DeletionResumesPending` (namespace
+    `VettID/MemberApi`, written at every run), and again daily after
+    30 days (`DELETION_STALE_S`), as for `delete`.
+  - **Never `delete`.** The run never sends the unconditional `delete`
+    because of `deleting_at`, and never sets `deletion_requested_at`
+    for it. `deleting_at` is written by the host, so it is advisory:
+    `delete_resume` makes the enclave erase only a vault whose own
+    sealed header records the deletion (or one already erased), and a
+    forged or stale mark costs at most resumes that do nothing; it is
+    never shown to the member. The parent removes the mark on an
+    `unlocked` report.
+  - **Never shown.** The mark is host-written, and the host is not
+    trusted, so nothing a member sees depends on it: a forged or faulty
+    mark must not be able to tell a member that a healthy vault is being
+    deleted, or hide their recovery options. `deleting_at` and
+    `deletion_resumed_at` are read only by the cleanup run, its log and
+    its metric. `GET /api/vault/status` reports the row's own `state`
+    (`locked`, `unlocked` …) whatever the mark, as before; a `deleted`
+    row reads `{vault: null}`, and once the row is gone the app key is
+    refused `401`. The account site shows no "being deleted" text and
+    offers recovery and start-over as normal. That is safe: a recovery
+    or an unlock that opens a vault whose sealed header or state records
+    `deleting` finishes the deletion instead of running the vault
+    (VAULT-MESSAGING §12.5 "A state that records `deleting` never
+    runs"), and a start-over is the member's own explicit request. The
+    apps show "being deleted" only after the vault's own
+    `device.unlinked{vault_deleted}` (ANDROID-PLAN 0.1.54 §4, IOS-PLAN
+    0.1.12 §4.2); they never derive a deletion from this status. No
+    route refuses anything new because of the mark. A setup code is
+    refused as for any confirmed vault until the row is gone.
+  - **IAM.** The host role may write `deleting_at` (and remove it); the
+    cleanup job reads it and writes `deletion_resumed_at`.
 - **Status.** A `deleted` vault row reads as no vault (`{vault: null}`).
 - **Stored versions.** The data bucket keeps noncurrent versions for 7
   days (VAULT-RELEASES §8.2, §11.4): the erased objects, still sealed,

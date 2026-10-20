@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.50.1
+version: 0.51.0
 date: 2026-10-20
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -13,9 +13,9 @@ related:
   - CALLS-PLAN.md (0.1.4) §6.1 V4, §13 (phase C2; decisions D12–D26, decided 2026-10-12)
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.9.0)
-  - ANDROID-PLAN.md (0.1.52)
-  - IOS-PLAN.md (0.1.11; §9.1 VA1–VA3)
+  - MEMBER-API.md (2.10.0)
+  - ANDROID-PLAN.md (0.1.54)
+  - IOS-PLAN.md (0.1.12; §9.1 VA1–VA3)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -23,10 +23,54 @@ related:
   - VAULT-RELEASES.md (0.1.31; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
-  - VAULT-HOST-PROTOCOL.md (0.1.13; the enclave ↔ parent protocol as built)
+  - VAULT-HOST-PROTOCOL.md (0.1.14; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.51.0: normative; **approved by the owner (2026-10-20)**; with
+    VAULT-HOST-PROTOCOL 0.1.14 and MEMBER-API 2.10.0 (vettid.org #356).
+    **Needs a vault release** (staging release 20: the vault, its
+    supervisor and its parent, all in vettid-vault) **and the member
+    API**. Apps and account site: no change. §12.5: **a deletion that
+    stops between step 1 and step 5 is finished without the app.**
+    Until now only an unlock, a recovery request, a registration or a
+    cancellation that read the `deleting` header finished it; after
+    `device.unlinked{vault_deleted}` the app sends none of them, so a
+    crash, a host failure or a store error during steps 2 to 5 left the
+    vault listed for ever (the app's "Still finishing"). (A) **The host
+    records the deletion before anyone is told** (step 1, new last
+    part): after the marking flush the vault asks its parent to mark
+    the vault row (`MarkDeleting`, VAULT-HOST-PROTOCOL §5.6), which
+    the parent answers only once the row holds `deleting_at`; the
+    vault delivers nothing of step 2 (no notice, no answer, no mailbox
+    deletion) before that answer, and without it within 2 minutes it
+    ends its process locked, with the header marked, so that the
+    member's next unlock finishes the deletion as before. (B) **The
+    member API resumes a marked deletion** with the new queue
+    operation **`delete_resume`** (§11.5): the enclave erases only a
+    vault whose own sealed header records `deleting`, or reports
+    `deleted` for one whose header and state are both already gone;
+    it never erases a vault it can read as live, so the resume is not
+    an authority to delete (the authority is the one recorded by the
+    sealed marker). (C) **A state that records `deleting` never runs**:
+    a crash between the marking flush's state write and its header
+    write left a header without the marker, which an unlock opened as
+    a vault that handled nothing and could not be deleted from the
+    app; such an open now completes the deletion instead. (D) Step 4
+    is retried in the process for up to 60 s before the process ends.
+    (E) An `unlocked` report clears the row's mark (a vault that runs
+    is not being deleted). (F) **The mark stays internal**: it is
+    host-written, and the host is not trusted, so the member API uses
+    `deleting_at` (and `deletion_resumed_at`) only to send
+    `delete_resume`, with its log and metric, and **never shows it**.
+    `GET /api/vault/status` keeps the row's own state (no new status
+    value), the account site shows no "being deleted" text and keeps
+    offering recovery and start-over, and the apps show "being deleted"
+    only after the vault's own `device.unlinked{vault_deleted}`; they
+    never derive a deletion from the member API's status. A forged or
+    stale mark causes at most `delete_resume` requests, which the vault
+    ignores unless its own sealed header records `deleting`. §11.5 and
+    §12.5 "Convergence" follow
   - 0.50.1: normative correction, approved by the owner (2026-10-20); vault
     PR vettid-vault #132, found by the independent review of #131;
     **needs a vault release** (#132). No
@@ -10885,7 +10929,7 @@ Nothing secret is stored:
 
 | Store | Contents | Retention |
 |---|---|---|
-| Vault table | **`app_key`** (0.15.0: `{key, kid, seq}`, the public key of the vault's app key as the enclave last reported it, written by the host; and the API's own `app_key_pending` and recovery claim keys, §11.12; (0.33.0, release R) `app_key_next` `{key, kid, seq}`, the host-written next key of a replacement in progress, §11.14.2), `user_guid`, **`vault_id`** (opaque, 128-bit random, 32 lowercase hex characters, assigned by the API at a member's first enrollment; the routing key for alternate-channel requests), `state` (`enrolling`, `locked`, `unlocked`, `deleted`), **lease** (`instance_id`, `lease_expires_at`), **`sealed_release`** (the PCR0 the vault is sealed to; routing aid, §11.10.5), **`vault_version`** (release that last opened the vault), **`state_version`** (vault-state format version), **`alarm`** (`kind`, `alarm_id`, `at`, `emailed_at`; the last host alarm, below) and `alarm_pending`, **`credential_backup`** (0.16.0: whether the vault keeps a backup copy of its credential, as last reported, below; absent until a release of 0.16.0 reports it), the API's own `deletion` record (§11.11.9), **`name_change`** (0.18.0: `{seq, first_name, last_name, at}`, the vault's latest name request, written by the host) and `name_change_pending`, the API's `name_change_result` (§10.8, below), `created_at`, `updated_at` | account lifetime |
+| Vault table | **`app_key`** (0.15.0: `{key, kid, seq}`, the public key of the vault's app key as the enclave last reported it, written by the host; and the API's own `app_key_pending` and recovery claim keys, §11.12; (0.33.0, release R) `app_key_next` `{key, kid, seq}`, the host-written next key of a replacement in progress, §11.14.2), `user_guid`, **`vault_id`** (opaque, 128-bit random, 32 lowercase hex characters, assigned by the API at a member's first enrollment; the routing key for alternate-channel requests), `state` (`enrolling`, `locked`, `unlocked`, `deleted`), **lease** (`instance_id`, `lease_expires_at`), **`sealed_release`** (the PCR0 the vault is sealed to; routing aid, §11.10.5), **`vault_version`** (release that last opened the vault), **`state_version`** (vault-state format version), **`alarm`** (`kind`, `alarm_id`, `at`, `emailed_at`; the last host alarm, below) and `alarm_pending`, **`credential_backup`** (0.16.0: whether the vault keeps a backup copy of its credential, as last reported, below; absent until a release of 0.16.0 reports it), the API's own `deletion` record (§11.11.9), **`deleting_at`** (0.51.0: when the vault reported its deletion's marking flush, the parent's Unix seconds, written by the host, §12.5), **`name_change`** (0.18.0: `{seq, first_name, last_name, at}`, the vault's latest name request, written by the host) and `name_change_pending`, the API's `name_change_result` (§10.8, below), `created_at`, `updated_at` | account lifetime |
 | Instance registry | `instance_id`, **`release`** (PCR0 from its descriptor), queue URL, descriptor, attestation, `heartbeat_at` | while the instance is live |
 | Request table (response slots) | `request_id`, `vault_id`, `op`, `status` (`queued`, `done`, `expired`), opaque response `envelope` (≤ 8 KiB) and/or a host `code` | TTL 15 min |
 | Audit log | enroll, unlock and lock requests: member, time, `vault_id`, request id, never PINs or envelopes | MEMBER-API audit retention |
@@ -10980,6 +11024,23 @@ Nothing secret is stored:
   `alarm_pending` (MEMBER-API). Alarm kinds other than those listed here
   are rejected by the parent. A dishonest host can suppress the email but
   not the vault's own alert to the app, its freeze or its audit entry.
+- **Deletion mark** (0.51.0, §12.5 "Mark at the host"). Once a
+  deletion's marking flush is stored, the vault asks the parent
+  (`MarkDeleting`, VAULT-HOST-PROTOCOL §5.6) to write `deleting_at`
+  (the parent's Unix seconds) on the vault row, **whatever the lease**,
+  conditional on the row existing, not being `deleted` and having no
+  `deleting_at` yet (a mark is never moved); a refused condition counts
+  as done. The parent answers only after that write, and the vault tells
+  no device before the answer. The row's `state` is not changed by it
+  (the `locked` that follows when the process ends is written as
+  usual). The parent removes `deleting_at` in the update of an
+  `unlocked` event: a vault that runs is not being deleted, so a mark
+  there is stale or forged. The member API uses the mark **only** to
+  resume the deletion (`delete_resume`, below), with its log and
+  metric; it is **never shown to the member** (no status value, no
+  account-site text, nothing in the apps). Like the other host-written
+  values it is advisory: it never makes anything erase a vault that the
+  enclave can read as live.
 - **Deletion notice** (0.9.0). On the lifecycle event `deleted` (§12.5)
   the parent also records `alarm = {kind: "vault_deleted", alarm_id, at}`
   and `alarm_pending = true`, whatever the lease: the vault's own audit
@@ -10994,7 +11055,7 @@ Nothing secret is stored:
 with a DLQ after 3 receives:
 
 ```json
-{ "v": 1, "op": "enroll|unlock|lock|delete|recovery|recovery_cancel|recovery_register|recovery_open|account",
+{ "v": 1, "op": "enroll|unlock|lock|delete|delete_resume|recovery|recovery_cancel|recovery_register|recovery_open|account",
   "vault_id": "...", "user_guid": "...", "request_id": "<ULID>",
   "etk_kid": "<16 hex; enroll, unlock, recovery_register and recovery_open only>",
   "envelope": "<b64; enroll, unlock, recovery_register and recovery_open only>",
@@ -11270,8 +11331,14 @@ requests name the manifest by `manifest_sha256` and `manifest_serial`
   as the host (§13.3). The vault's own word reaches the member's
   devices over the relay (§10.2 "Locks").
 
-`lock`, `delete` and `account` carry no envelope. Locking is harmless, and deletion
-through the API is an operator power the host has anyway (§13.5). The API
+`lock`, `delete`, `delete_resume` and `account` carry no envelope. Locking is harmless, and deletion
+through the API is an operator power the host has anyway (§13.5).
+(0.51.0) `delete_resume` finishes a deletion that the vault itself
+marked and that stopped before its `deleted` report (§12.5 "Without
+the app: the resume"); it erases nothing that the enclave can read as
+live, and the member API sends it only for rows with `deleting_at`. A
+release before 0.51.0 does not know it: its parent drops the message
+as it drops any unknown operation. The API
 sends `delete` for an account cancellation (MEMBER-API) and, since
 0.16.0, for a member's "delete my vault and start over" once its 24 h
 have passed (§11.11.9). The
@@ -16888,6 +16955,21 @@ converges to "deleted", never to a vault that runs again:
    generation at the attempt counter (`Close`, §11.14.3); the deletion
    goes ahead whether or not the close was confirmed, and the answer
    says which.
+   **Mark at the host** (0.51.0): once the marking flush is stored, the
+   vault asks its parent to record the deletion on the vault row
+   (`MarkDeleting`, VAULT-HOST-PROTOCOL §5.6); the parent answers `ok`
+   only after its conditional write of `deleting_at` (§11.5) has
+   succeeded, or when the row is already marked, already `deleted` or
+   missing. **Nothing of step 2 happens before that answer**: no notice,
+   no answer to the requester and no mailbox deletion leave the vault.
+   The vault retries the request (1 s, doubling to 15 s) for up to
+   **2 minutes**; without an `ok` it ends its process locked, reporting
+   `locked`, with the state and header marked and the outbox undelivered
+   (as after a crash between steps 1 and 2). No device has then been
+   told, so the member's app still unlocks, and that unlock finishes the
+   deletion (Convergence, below). This keeps one rule: **no device hears
+   `vault_deleted` before the member API can finish the deletion
+   without it.** It applies to every deletion, whatever its authority.
 2. **Relay mailbox, then drain** (0.9.1): the vault deletes its own relay
    mailbox (RELAY-PROTOCOL 0.5.0 §6.10, `DELETE /v1/mailbox` signed with
    the vault relay key), once. With it go every message waiting there,
@@ -16913,6 +16995,9 @@ converges to "deleted", never to a vault that runs again:
    its own release's header last, since that header is the deletion
    marker; and the enclave's member index object if it still names this
    vault (§11.5).
+   (0.51.0) A store error here is retried in the process (1 s, doubling
+   to 15 s) for up to **60 s**; after that the process ends without
+   reporting, and the member API's resume (below) finishes the erase.
    (0.32.0) An erase without the DEK cannot read the index:
    the host's `delete` of a vault that is not running, and step 4
    finished from a header that records `deleting` (below). There the
@@ -16932,12 +17017,92 @@ an unlock, a recovery request, registration or cancellation that reads
 it finishes step 4 instead (and answers as for a missing vault).
 (0.32.0, release A) Each of those paths then also reports
 `deleted` (step 5), as the vault's own deletion and the host's erase
-do; as built (vettid-vault `vault/unlock.go`, `vault/recovery.go`) they
-erase without reporting, so the parent's attachment sweep would never
-run for exactly the crash it exists for. A crash
+do (as built since release A: vettid-vault `vault/unlock.go`,
+`vault/recovery.go`). A crash
 after step 1 therefore loses at most the best-effort notices, the relay
 mailbox deletion and the revocations, never the deletion of the vault.
 Deletion is idempotent.
+
+- **A state that records `deleting` never runs** (0.51.0). The marking
+  flush writes the state, then the header (§13.2: the state may lead
+  the header by one write). A crash between the two leaves a header
+  without the marker over a state with it; until 0.51.0 an unlock
+  opened such a vault, which then handled nothing and could not be
+  deleted again from the app. Any path that opens the state (an
+  unlock, a recovery's open) and finds `deleting` in it does not start
+  the vault: it completes step 1 (the header records `deleting`, then
+  "Mark at the host") and runs steps 2 to 5 with the keys it holds, so
+  the notices and the mailbox deletion still happen. It answers as for
+  a missing vault and reports no `unlocked`.
+- **Without the app: the resume** (0.51.0). Once told
+  (`device.unlinked{vault_deleted}`), the app sends nothing that reads
+  the header (it shows "Your vault is being
+  deleted", ANDROID-PLAN 0.1.54 §4), so convergence cannot wait for it. The
+  vault row carries `deleting_at` from "Mark at the host" until the row
+  is `deleted` (§11.5). The member API's 5-minute cleanup run sends the
+  queue operation **`delete_resume`** (§11.5) for every row that has
+  `deleting_at` at least 2 minutes old and is not `deleted`, to the
+  leaseholder or else a live instance of its `sealed_release` (a start
+  is requested when none runs), as it sends `delete`; it repeats at
+  every run for the first hour, then hourly (MEMBER-API "Vault
+  deletion"). The enclave, holding the queue message alone, decides
+  from what it can read:
+
+  | What the enclave finds | What it does |
+  |---|---|
+  | A process for this vault runs on this instance | nothing: a vault being deleted finishes its own deletion, and one that is not is not touched |
+  | Its own release's header, sealed and readable, records `deleting` | step 4 as for a header that records `deleting` (above), then step 5 |
+  | Its own release's header records no deletion | nothing |
+  | No header for its release, and no state object | the rest of step 4 (the member index if it still names this vault), then step 5: an erase that ran and was not reported |
+  | No header for its release, but a state object | nothing (the vault may live under another release) |
+  | A header it cannot read | nothing |
+
+  The answer is `done` with no envelope and no code; what happened is
+  seen in the `deleted` report or its absence, and in the enclave's
+  log. The resume takes no lease, and is idempotent like every erase.
+- **The resume is not an authority.** The enclave erases on a
+  `delete_resume` only a vault whose sealed header (DEK-independent,
+  sealed to the release, §11.10.2) says that a deletion was authorised
+  and begun, or one whose state and header are already gone: neither
+  the parent nor the member API can make it erase a vault it can read
+  as live. A forged or stale `deleting_at` (the host writes the row)
+  causes at most `delete_resume` requests, which the enclave ignores
+  unless its own sealed header records `deleting`; it is never shown to
+  the member and never makes the member API send `delete`, and an
+  `unlocked` report clears it. The authorities of the table above are
+  unchanged, and `vault.delete`'s `exp` is untouched: it bounds when a
+  waiting request may first apply, while the resume only finishes a
+  deletion the vault already marked. The host's `delete` (§11.5) stays
+  unconditional and is still sent only for an account cancellation and
+  a start-over; the member API never sends it because of `deleting_at`.
+- **What the member API shows meanwhile: nothing different.** The
+  mark is written by the host, which is not trusted, so it is never
+  shown to members: a forged or faulty mark must not be able to make a
+  member abandon a healthy vault or hide their recovery options. From
+  the mark until the `deleted` report, `GET /api/vault/status` keeps
+  reporting the row's own `state` (`locked`, `unlocked` …), as before;
+  after it, `{vault: null}`, and once the row is removed the app key is
+  refused `401` (MEMBER-API "Vault deletion"). The account site shows
+  no "being deleted" text and offers recovery and start-over as
+  normal. That is safe: a recovery or an unlock that opens a vault whose
+  sealed header or state records `deleting` finishes the deletion
+  instead of running the vault ("A state that records `deleting` never
+  runs", above), and a start-over is the member's own explicit request.
+  The apps show "being deleted" only after the vault's own
+  `device.unlinked{vault_deleted}` (ANDROID-PLAN 0.1.54 §4, IOS-PLAN
+  0.1.12 §4.2), and they never derive a deletion from the member API's
+  status. An app that was not told (no `ok` to "Mark at the host", or a
+  stop before the notices) sees the vault as locked, so the member's
+  unlock finishes the deletion (Convergence, above).
+- **What is still lost.** A vault sealed to a release before 0.51.0
+  sends no `MarkDeleting`, and its stalled deletion stays as before
+  (an operator can finish it with the host's `delete`, case by case,
+  on the owner's decision). A release whose
+  instances can no longer be started (`removed`, §11.10.5) is not
+  resumed; its rows are retried and logged as for `delete`. The DEK-less
+  erase deletes only its own release's header, as in 0.32.0, so a
+  pending move's other header stays: sealed, and with the state object
+  gone it opens nothing.
 
 **The relay mailbox.** The relay key exists only in the running vault
 (§1.1 decision 3), so only step 2 can delete the mailbox; the relay's
