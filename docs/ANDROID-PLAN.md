@@ -1,9 +1,25 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.57
+version: 0.1.58
 date: 2026-10-20
 changelog:
+  - 0.1.58: approved by the owner (2026-10-20)
+    (VAULT-MESSAGING 0.52.0; owner decisions of 2026-10-20; found when a
+    phone whose daily checks were refused before the key was spent ran
+    out of keys for good). New §4 **"One-time keys and a vault without a
+    holder"**: (1) a UTK is spent when it is sent, whatever the answer,
+    as the app already does, and never goes back to the pool;
+    `signer_unconfirmed` now leaves the UTK spent (§7's "goes back to
+    the pool" removed); (2) when `credential.utk.get` returns no UTKs
+    while the app's pool is empty, the app sends `{"resync": true}`
+    once, and if that also fails shows `error_vault_code` with the code
+    (`utk_empty` for an empty list); (3) `credential_required{reason:
+    "no_holder"}` shows "This phone can't use your vault" (§4 "Vault
+    error codes the app does not map", (1)), whose text (3) for
+    `forbidden` is accurate once `forbidden` means only that another
+    live app holds the credential. No new text but the code `utk_empty`.
+    Tests listed
   - 0.1.57: approved by the owner (2026-10-20), with the behaviour and
     texts as written (owner decision of 2026-10-20) (VAULT-MESSAGING 0.51.2;
     found when a phone whose vault was recovered to another phone that
@@ -4655,6 +4671,73 @@ itself in Devices & agents, for instance) keeps its screen's text, or
 - A transport error, a timeout, an HTTP 403 and a `forbidden` from the
   relay or the host keep their texts, never `error_vault_code` or the
   new screens.
+### One-time keys and a vault without a holder (0.1.58)
+
+*The decisions are the owner's, of 2026-10-20 (VAULT-MESSAGING 0.52.0).
+Approved by the owner (2026-10-20).*
+
+**Why.** A phone whose daily checks were refused before the key was
+spent ran out of keys for good. The app drops a one-time key (UTK) from
+its pool when it sends the request that presents it; the vault kept the
+UTK when it refused the request before its spend (the holder check, the
+clone alarm, the checks before the handler). The vault's pool for the
+phone filled with UTKs the phone no longer had, and once it held 20,
+`credential.utk.get` returned none: every credential request failed
+with no UTK. From VAULT-MESSAGING 0.52.0 the vault spends a presented
+UTK before any check (§3.5.4 "Using a UTK").
+
+1. **A UTK is spent when it is sent.** The app removes a UTK from its
+   pool when it sends the request that presents it, as it does now, and
+   never puts it back, whatever the answer: a refusal spends it too. A
+   retransmission of the same request (the same inner id) carries the
+   same UTK; any new attempt, **Try again** included, takes a fresh one.
+   A UTK that never left the phone (the request was not sent) stays in
+   the pool.
+   - **`signer_unconfirmed`** (§7, the transfer confirmation): the UTK
+     of that attempt is spent; the approval is sent again with a fresh
+     one. The text stays as it is ("Nothing was counted…": the PIN and
+     password were not tested). This replaces 0.1.37's "The one-time
+     key of that attempt goes back to the pool"; no other answer puts a
+     UTK back.
+2. **Resync.** When `credential.utk.get` returns no UTKs while the app's
+   own pool is empty, the app sends `credential.utk.get{"resync": true}`
+   **once** and keeps the 20 UTKs it returns. If that also fails, the
+   app does not resync again for that request and shows the failure with
+   its code, `error_vault_code` (§4 "Vault error codes the app does not
+   map", (2)): the vault's code for an error answer (`too_soon` within
+   10 minutes of the last resync, scaled on staging), or `utk_empty`
+   when the answer was again an empty list. A `credential.utk.get` that
+   returns no UTKs while the app still holds some is not a reason to
+   resync.
+3. **`no_holder`.** `credential_required` with body `{"reason":
+   "no_holder"}` (the vault has a credential but no holder) shows the
+   full screen "This phone can't use your vault" (§4 "Vault error codes
+   the app does not map", (1)), with its texts and actions, from any
+   screen; a `credential_required` without a reason is handled as that
+   section says. From 0.52.0 the vault answers `credential_required
+   {no_holder}` to the holder-only types too, and `forbidden` to a
+   holder-only type means only "another live app holds the credential",
+   so that section's text (3), `vault_not_holder`, is accurate as
+   written. Neither is a proof for `HolderPolicy`: nothing is erased.
+
+**Tests.**
+
+- A fake vault that refuses with `forbidden`, `credential_required`,
+  `owner_check_required`, `credential_frozen`, `rotation_required` and
+  `signer_unconfirmed`: the app's pool is one UTK smaller after each,
+  and the next attempt presents another `utk_id`; a retransmission of
+  the same request presents the same one.
+- An empty `credential.utk.get` with an empty pool: exactly one
+  `{"resync": true}`, and the pool holds the 20 returned UTKs. A resync
+  answered `too_soon`, or answered with an empty list: no second
+  resync, and `error_vault_code` with `too_soon` or `utk_empty`. An
+  empty `credential.utk.get` while the pool still holds UTKs: no
+  resync.
+- `credential_required{reason: "no_holder"}` on the daily check, a PIN
+  change and a credential unlock gives "This phone can't use your
+  vault"; `forbidden` on the daily check gives `vault_not_holder`; the
+  keys, `account.bin` and the vault's local data are unchanged after
+  both.
 
 ## 5. Architecture
 
@@ -5001,8 +5084,9 @@ requirement, approved by the owner 2026-10-11):
   - **`signer_unconfirmed`** (the vault asked for a confirmation the
     approval did not carry): "Your vault asked you to confirm the new
     phone's version of VettID first. Nothing was counted; enter your
-    PIN and password again." The one-time key of that attempt goes
-    back to the pool.
+    PIN and password again." The one-time key of that attempt is spent
+    (0.1.58; VAULT-MESSAGING 0.52.0): the next approval takes a fresh
+    one.
   - **`signer_refused` at unlock.** Title "This installation is not
     accepted"; body, VAULT-MESSAGING §11.7.1's message ("This vault no
     longer accepts this installation of VettID. Update the app, or
