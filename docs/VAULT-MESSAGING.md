@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.50.0
+version: 0.50.1
 date: 2026-10-20
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -27,6 +27,29 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.50.1: normative correction, approved by the owner (2026-10-20); vault
+    PR vettid-vault #132, found by the independent review of #131;
+    **needs a vault release** (#132). No
+    change for apps, the member API or the host. §11.14.11: **a
+    `recovery.attempt` entry is not urgent only if it is in the
+    generation of the member's last completed recovery and at or below
+    that recovery's own counted attempt *k***; every later attempt is
+    `urgent`, also in the same generation. Until now every attempt in
+    the recovered generation was taken as the member's, so a later
+    recovery by someone else, in the generation the vault stays armed
+    in, was audited without urgency. The vault keeps that attempt
+    (generation, *k*) in its state; a state from before has only the
+    generation, which is no longer read, so its attempts are `urgent`.
+    §11.14.2 step 1: for a recovery the `next` part also holds its
+    counted attempt (generation, *k*), as the optional sealed field
+    `recovery_attempt`. §11.14.6: a repeat whose step 2 was not stored
+    takes the attempt from there and sends `Succeed` again (the first
+    run's pending success was in the state that was not stored);
+    `Succeed` is create-only, so a resend is harmless. A `next` part
+    from before has no `recovery_attempt`: its attempt stays `urgent`
+    and nothing is resent. §11.14.11: the counter's status read at a
+    completion is bounded to 10 seconds; a failure there still answers
+    `ok`, and the next owner check writes the entries
   - 0.50.0: normative; approved by the owner (2026-10-19, 2026-10-20)
     with the apps' event titles (ANDROID-PLAN 0.1.52 §4 "Event titles",
     IOS-PLAN 0.1.11 §4.1). **Needs a vault release** for (A) and (B);
@@ -14843,7 +14866,9 @@ DEK from `DEK_0` to `DEK_1` is done in three steps:
    `dek_wrap_next`, which holds **both `DEK_0` and `DEK_1`** under the new
    unlock key; `secret_check_next` (as `secret_check`, with the new
    secret); the new phone's unlock key and app key, with the next
-   `app_key_seq`, where there is one; and, for an armed vault, **always** the recovery wrap
+   `app_key_seq`, where there is one; for a recovery, its counted
+   attempt (generation, *k*) as `recovery_attempt` (0.50.1; sealed in
+   the header, not the clear marker of §11.5); and, for an armed vault, **always** the recovery wrap
    and the `opener` for `DEK_1` (§11.14.3 says where the recovery key comes
    from). Read it back from the store. If either fails nothing has
    changed and the request is answered `retry`.
@@ -15380,6 +15405,17 @@ then recorded at the next open that succeeds. The app says "The last
 attempt was right but could not be completed" when an open after an
 `ok`-less run is answered `wait` or `attempt_lost`. Once step 1 is
 stored, repeating costs nothing (the `next` wrap).
+
+(0.50.1) **A repeat whose step 2 was not stored** also sends the
+success again. The first run's pending `Succeed` was in the state that
+was not stored, so the repeat takes the attempt (generation, *k*) from
+the `next` part's `recovery_attempt` (§11.14.2 step 1), records it as
+the recovered attempt (§11.14.11) and sends `Succeed` for it before it
+reads the counter's status; until the counter confirms it, it is sent
+again as in step 6. `Succeed` is create-only, so sending again a success
+that the first run did record changes nothing. A `next` part written by
+an earlier release has no `recovery_attempt`: such a repeat sends
+nothing again, and its attempt is audited as `urgent`.
 
 **What counts as an attempt.** A request that reached step 4 and for
 which the counter answered `spent` or `lost`. Refusals in steps 1 to 3b
@@ -16269,7 +16305,9 @@ after the approval, whichever comes first.**
 - **The record a host cannot drop.** The counter holds, for each
   generation, every attempt with its counter time and which one, if any,
   succeeded. Whenever the vault reads the counter's status while unlocked
-  (each owner check, a completed recovery), it writes one audit entry for
+  (each owner check, a completed recovery; at a completion the read is
+  bounded to 10 seconds, and a failure there still answers `ok` and
+  leaves the entries to the next owner check, 0.50.1), it writes one audit entry for
   each attempt it has not recorded: kind `recovery.attempt`, `at` = the
   counter's time, `ref` = `<generation>/<n>/<outcome>/counter`, where
   `<outcome>` is `success` or `not_success` (a wrong pair and a lost
@@ -16277,9 +16315,19 @@ after the approval, whichever comes first.**
   and `counter` says where it comes from (0.50.0: the outcome and the
   source are in the `ref`; the entry has no other members, §10.9). An
   attempt first seen as `not_success` is written again when the counter
-  later shows it succeeded. Each makes a feed item (`urgent` unless the
-  member completed a recovery in that generation since) and shows in
-  History. When `attempts.used` rises the vault also audits
+  later shows it succeeded. Each makes a feed item and shows in
+  History. The item is **not** urgent only if the attempt is in the
+  generation of the member's last completed recovery and its *n* is at
+  most that recovery's own counted attempt *k*: those attempts are the
+  member's, up to the one that succeeded. Every other attempt is
+  `urgent`, a later one in the same generation included, since the
+  vault stays armed in that generation after a recovery (0.50.1; until
+  then every attempt in that generation was taken as the member's). The
+  vault keeps the recovered attempt (generation, *k*) in its state, set
+  at the completion or, for a repeat whose step 2 was not stored, from
+  the `next` part (§11.14.6). A state or a `next` part from before
+  0.50.1 has no such attempt, so its attempts are `urgent`. When
+  `attempts.used` rises the vault also audits
   `recovery.attempts_used`, `ref` = `<generation>/<used>`.
 - **The details a host can drop.** The header's recovery log (§11.11)
   also notes opens with their outcome as the enclave knew it, and the
