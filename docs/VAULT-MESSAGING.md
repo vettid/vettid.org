@@ -39,8 +39,11 @@ changelog:
     "Using a UTK"): a request spends the UTK it presents as soon as its
     body parses and its `utk_id` reads, before any other check (a
     recovering app's limits, the holder, transfer and alarm rules, the
-    signer confirmation, `credential_required`, `owner_check_required`,
-    `forbidden`); **a refusal still spends the UTK**. A body without a
+    signer confirmation, `unsupported_type`, `credential_required`,
+    `owner_check_required`, `session_required`, `forbidden`, the
+    features' holder and app-only checks); **a refusal still spends the
+    UTK**: a readable `utk_id` in the sender's pool is spent whatever
+    the outcome, so an app never puts one back. A body without a
     readable `utk_id` spends nothing. §3.5.3 step 1, §3.5.9 Freeze,
     §3.6.1 step 1, §6.7.1 step 3 (`signer_unconfirmed` now leaves the
     UTK spent), §10.9 (`audit.export`), §10.18 (`wallet.sign`) and
@@ -2352,7 +2355,10 @@ also carry `hold` and `hold_off_until` (§3.6.7). A History export
 credential operation.
 
 **Using a UTK.** (0.52.0; owner decision of 2026-10-20) A request
-spends the UTK it presents before anything else is checked:
+spends the UTK it presents before anything else is checked. **The
+rule: a request that carries a readable `utk_id` naming a UTK in the
+sender's pool spends that UTK, whatever the outcome**, so there is
+nothing an app must ever put back:
 
 - As soon as the request's body has parsed as a JSON object (§5.3) and
   its `utk_id` member reads as a UTK id (16 lowercase hex characters),
@@ -2360,19 +2366,28 @@ spends the UTK it presents before anything else is checked:
   Only then does it make any other check: a recovering app's limits
   (§11.11.5), the holder, transfer and alarm rules (§3.5.9), a
   transfer's signer confirmation (§6.7.1), and the checks made before
-  the type's handler (`credential_required`, §3.5.7;
-  `owner_check_required`, §3.6.3; `forbidden` for a type the sender may
-  not send).
+  the type's handler (`unsupported_type`, §5.3; `credential_required`,
+  §3.5.7; `owner_check_required`, §3.6.3; `session_required`, §6.8;
+  `forbidden` for a type or form the sender may not send), and every
+  holder, app-only and alarm check of a feature (critical items, §10.7;
+  History export, §10.9; wallet, §10.18).
 - **A refusal still spends the UTK.** The removal is part of the
   batch's flush, so the UTK is spent whatever the answer: a success, a
   `bad_password` or `bad_pin`, and equally a `forbidden`,
-  `credential_required`, `owner_check_required`, `credential_frozen`,
-  `rotation_required`, `signer_unconfirmed`, `credential_locked` or
-  `bad_request` that comes before the payload is opened.
+  `unsupported_type`, `credential_required`, `owner_check_required`,
+  `credential_frozen`, `rotation_required`, `signer_unconfirmed`,
+  `credential_locked`, `not_found` or `bad_request` that comes before
+  the payload is opened. During a clone alarm, every refusal costs the
+  app the UTK it presented, as the app already counts it.
+- `signer_unconfirmed` (§6.7.1) fits the rule: the approval's UTK is
+  spent, the PIN and password are not tested, nothing is counted and
+  the transfer stays open; the holder's app confirms the signer and
+  approves again with a fresh UTK.
 - A body that does not parse, or whose `utk_id` is absent or not a UTK
-  id, spends nothing. Nor does a request that is never handled: a
-  retransmission answered from the cache (§8.2), a message dropped by
-  the rate limit (§7.3), an unsupported type.
+  id, spends nothing. Nor does a request the vault does not take up: a
+  retransmission answered from the cache (§8.2: its first delivery
+  already spent the UTK) or a message dropped by the rate limit (§7.3,
+  which the app sends again unchanged).
 - A `utk_id` that names no UTK of the sender's pool (unknown, spent,
   expired or another device's) removes nothing, and is answered
   `utk_invalid` where the operation opens the payload, unless an earlier
