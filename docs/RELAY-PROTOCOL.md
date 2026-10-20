@@ -1645,7 +1645,7 @@ The push gateway API is specified separately.
 
 ## 10. Changelog
 
-- **0.10.0** — **awaiting the owner's approval**. §6.11: relays serve
+- **0.10.0** — approved by the owner (2026-10-20). §6.11: relays serve
   `/.well-known/apple-app-site-association` (was reserved, `404`), so
   the VettID iOS app opens invitation links as Universal Links
   (IOS-PLAN §6.8, §9.2). `applinks` only, one `details` entry, the exact

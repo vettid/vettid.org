@@ -4,7 +4,7 @@ status: approved (owner, 2026-10-17)
 version: 0.1.10
 date: 2026-10-19
 changelog:
-  - 0.1.10: awaiting the owner's approval (RELAY-PROTOCOL 0.10.0).
+  - 0.1.10: approved by the owner (2026-10-20) (RELAY-PROTOCOL 0.10.0).
     §6.8, §9.2: the relay's `apple-app-site-association` (the
     `/connect` path, the production and staging App IDs) is served by
     the relay software, as specified in RELAY-PROTOCOL §6.11; the
