@@ -21,7 +21,9 @@ public.ecr.aws/docker/library/amazonlinux:2023@sha256:5b29412077a463b4a3a8fbc99a
 # vettid-vault: enclave kernel build container (release/kernel/kernel.lock nix_image)
 docker.io/nixos/nix:2.21.4@sha256:91b689f94a101aa67f95034dffd9a4858e85d0946f67c64dd65ed241644454b9
 
-# vettid-relay, vettid-push: Dockerfile build stage
+# vettid-relay, vettid-push, vettid-calls: Dockerfile build stage (Go 1.26.10, alpine3.24, multi-arch index, as resolved 2026-10-20)
+docker.io/library/golang:1.26.10-alpine@sha256:9ce231b28998b32e116927c61aa5c406183061d4f3f2d61b292c88e7f6bdf7ca public.ecr.aws/docker/library/golang
+# vettid-relay, vettid-push, vettid-calls: the previous build stage (Go 1.26.8) that main uses until the 1.26.10 pull requests merge
 docker.io/library/golang:1.26-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c public.ecr.aws/docker/library/golang
 # vettid-relay, vettid-push: Dockerfile frontend (# syntax=docker/dockerfile:1, as resolved 2026-10-15)
 docker.io/docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
