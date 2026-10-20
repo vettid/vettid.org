@@ -1,9 +1,34 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.10
-date: 2026-10-19
+version: 0.1.11
+date: 2026-10-20
 changelog:
+  - 0.1.11: approved by the owner (2026-10-19, 2026-10-20) (VAULT-MESSAGING 0.50.0;
+    ANDROID-PLAN 0.1.52). §4.1 **Event titles**: the same plain titles,
+    History details, hidden kinds, de-duplication (one notification per
+    recovery; a PIN change in History only), "Daily check" wording and
+    the two renamed titles as on Android, carried here in full; the
+    urgent recovery notifications on Security alarms (approved by the
+    owner 2026-10-19).
+    Approved by the owner on 2026-10-20: the texts first written as
+    drafts (the `leash.item.run` and `leash.item.proxy` detail lines,
+    the `push.unregistered` details, the "Recovery attempts reset"
+    fallback, the titles without a name or a number, and "Later
+    successful."). Owner decisions of 2026-10-20: (1) the vault splits
+    `stale`: `stale` (a next generation only already closed) is hidden;
+    the new reason `rollback` (a next generation with used attempts, a
+    host serving an older copy of the recovery record) is shown as an
+    alarm; (2) the attempting phone's name stays, shown as self-reported
+    ("from a phone that calls itself “<name>”") and never affecting
+    urgency or any decision (VAULT-MESSAGING 0.50.0 §11.14.11).
+    Owner answers of 2026-10-20: `rollback` also notifies (an `urgent`
+    feed item, `recovery.generation_closed` with `ref`
+    `<generation>/rollback`, on Security alarms), and its title, detail
+    and notification title and the phone-name line are approved; no
+    drafts remain. §6.4(3) (owner decision of 2026-10-20): the connect
+    screens keep capture protection (the invitation QR, its link, the
+    pasted link and the safety code)
   - 0.1.10: approved by the owner (2026-10-20) (RELAY-PROTOCOL 0.10.0).
     §6.8, §9.2: the relay's `apple-app-site-association` (the
     `/connect` path, the production and staging App IDs) is served by
@@ -279,6 +304,227 @@ Only these differ on iOS:
 | Profile photo, photo attachments | AVFoundation camera to memory; `PHPickerViewController` (no photo-library permission, like the Android Photo Picker); saving uses the add-only permission and only after the warning. |
 | History export | `fileExporter` ("Save to Files") in place of "Save to…". |
 | Calls (later) | CallKit, and PushKit to ring (needs APNs). |
+
+### 4.1 Event titles (0.1.11)
+
+Approved by the owner (2026-10-19, 2026-10-20). The same as ANDROID-PLAN §4 "Event titles" (0.1.52),
+carried here in full; the two must stay identical, and ANDROID-PLAN §4
+governs. Every event the vault sends has a
+plain title in the Notifications screen, in system notifications and in
+History. "Activity: <kind>" and "Vault event: <kind>" stay only for a
+kind a newer vault adds (ANDROID-PLAN §4 Notifications, 4; History). The kinds, `ref`
+formats and priorities are VAULT-MESSAGING §10.9 and §11.14.11 (0.50.0),
+checked against the vault as built (staging release 19). In the titles,
+`n` is read from `ref`, and 10 is the number of recovery attempts per
+generation (VAULT-MESSAGING §11.14). The titles below take precedence over earlier
+texts for the same kinds; the texts approved before and not listed
+here stay as they are.
+
+**Words.** "Daily check", never "daily owner check" or "owner check",
+in every text the member reads (owner decision 5). The History category
+"Unlocks and owner checks" becomes **"Unlocks and daily checks"** (its
+identifier `unlocks` is unchanged), and the History titles of
+`owner_check.*` say "daily check".
+
+**Notifications** (feed items: the row of the Notifications screen and
+the system notification (from phase P, §6.7); the second line is the row's second line and
+the notification's text when names and text are shown):
+
+| Kind | Title | Second line |
+|---|---|---|
+| `vault.pin_changed` | not listed and no notification: History only (decision 3) | — |
+| `device.secret_renewed` | "Your phone now uses a new secret for your vault" | — |
+| `credential.recovered`, `recovery.device_paired` | not listed and no notification: History only (de-duplication, below) | — |
+| `recovery.completed` | "Recovery finished: your vault is on your new phone" | — |
+| `recovery.attempt`, `urgent`, `not_success` | "Someone tried to recover your vault (attempt n of 10)" (decision 2) | — |
+| `recovery.attempt`, `urgent`, `success` | "Your vault was recovered (attempt n of 10)" | — |
+| `recovery.attempt`, not `urgent` (the member completed a recovery in that generation since) | "Recovery attempt n of 10" | — |
+| `recovery.change_required`, `ref` = `password` | "Choose a stronger password to keep recovery on" | "Your password is too weak for recovery. Recovery stays off until you change it." |
+| `recovery.change_required`, `ref` = a generation | "Change your PIN or password to turn recovery back on" | "Recovery attempts were used. A change gives you 10 new attempts." |
+| `recovery.counter_unavailable` (`urgent`) | "Your vault cannot check its recovery attempts" | none; Settings → Vault status shows the approved "For a day your vault has not been able to check its recovery attempts …" text (ANDROID-PLAN §4 "Owner check and status"), scaled on a vault with a time scale |
+| `recovery.generation_closed`, `ref` `<generation>/rollback` (`urgent`; owner decision of 2026-10-20; needs a vault release) | "Your vault was given an older recovery record" | "A host may have served an older copy of your vault's recovery record, one on which recovery attempts had already been used. Your vault moved past it. If you did not try to recover your vault, change your PIN and your password now, and contact VettID." |
+| `identity.rotation_failed` (`high`) | "Your vault could not update its keys" | "Your connections still know your old keys. VettID will offer the update again." |
+| `identity.rotate_conflict` (`high`) | "<First Last>: verify again" | "This connection's vault announced two different new keys. That can mean someone holds an old copy of their vault. Nothing is sent or received until you check." (ANDROID-PLAN §4 "Other screens") |
+| `leash.item.run`, `leash.item.proxy` | "An agent used <item>" (decision 8); without item names: "An agent used an item" | — |
+
+**Channels** (owner decision of 2026-10-19, approved by the owner):
+the urgent recovery notifications notify on **Security alarms** (on iOS from phase P, §6.7): a
+failed `recovery.attempt` ("Someone tried to recover your vault …",
+`urgent` and `not_success`, or `urgent` with a `ref` that does not
+read), `recovery.counter_unavailable` and `recovery.change_required`
+(both forms); and the `urgent` feed item of a `rollback` closure (owner
+decision of 2026-10-20). Every other kind of this table stays on Vault activity,
+including an `urgent` successful attempt and a not `urgent` one.
+
+**De-duplication** (decision 3). One recovery raises one notification:
+`recovery.completed`, "Recovery finished: your vault is on your new
+phone". The vault also makes feed items for `credential.recovered` and
+`recovery.device_paired`; the app does not list them, does not count
+them in the bell and raises no notification for them. A PIN change
+(`vault.pin_changed`) is History only in the same way. Their audit
+entries show in History as usual. The app leaves these feed items as
+the vault keeps them (it sends no `feed.update` for them), so the rule
+is the app's and needs no vault change.
+
+**History** (audit entries: the row's title, and the detail screen's
+**Details**, one line each):
+
+| Kind | Title | Details |
+|---|---|---|
+| `vault.pin_changed` | "PIN changed" | — |
+| `device.secret_renewed` | "New phone secret set" | — (the vault records it without a device) |
+| `owner_check.passed`, `.held`, `.failed`, `.locked`, `.hold_changed` | "Daily check passed", "Vault held for the daily check", "Daily check failed", "Vault locked after failed daily checks", "Daily check hold changed" (decision 5) | — |
+| `identity.rotated` | "Your vault's keys were renewed" (was "Vault identity key rotated"; decision 7) | — |
+| `credential.rotated` | "Your credential was renewed" (was "Credential rotated"; decision 7) | — |
+| `recovery.attempt` | "Recovery attempt n of 10" | `success`: "Successful." `not_success`: "Not successful. If this was not you, change your PIN or your password now.", then the outcome of the matching `recovery.open` (below), or "Details not available." when none matches |
+| `recovery.attempts_used` (`ref` `<generation>/<used>`) | "Recovery attempts used: n of 10" | "If that was not you, change your password now, and your PIN as well." |
+| `recovery.armed` | "Recovery is set up" | "It works with your current PIN and password, with 10 attempts." |
+| `recovery.generation_closed`, reason `pin` | "Recovery attempts reset after a PIN change" | "Earlier attempts no longer count." |
+| … reason `password` | "Recovery attempts reset after a password change" | "Earlier attempts no longer count." |
+| … reason `reset` | "Recovery attempts reset after a credential reset" | "Earlier attempts no longer count." |
+| … reason `backup_off` | "Recovery turned off" | "You turned off the credential backup." |
+| … reason `exhausted` | "Recovery turned off: all 10 attempts used" | "Change your PIN or your password to turn it back on." |
+| … reason `delete` | "Recovery ended" | "Your vault is being deleted." With the suffix `/unconfirmed`, also "The service could not confirm this step." |
+| … reason `rollback` (owner decision of 2026-10-20; needs a vault release, VAULT-MESSAGING 0.50.0) | "Your vault was given an older recovery record" | "A host may have served an older copy of your vault's recovery record, one on which recovery attempts had already been used. Your vault moved past it. If you did not try to recover your vault, change your PIN and your password now, and contact VettID." |
+| … reason `stale` | hidden (below) | — |
+| … a reason this app does not know | "Recovery attempts reset" | — |
+| `recovery.presence_unrecorded` | "Your vault could not record that you were here" | "If this lasts three days, your vault is no longer protected against a recovery started by someone else." (scaled on a vault with a time scale) |
+| `identity.rotation_failed` | "Key update failed" | "Your connections still know your old keys. VettID will offer the update again." |
+| `identity.rotate_conflict` | "Connection with <First Last> paused" | "This connection's vault announced two different new keys. That can mean someone holds an old copy of their vault. Nothing is sent or received until you check." |
+| `identity.rotate_resolved` | "Connection with <First Last> checked and resumed" | — |
+| `connection.request.approved`, `connection.request.declined` | "You accepted a connection request" / "You declined a connection request" | — |
+| `push.registered` | "Notifications turned on for <device>" | `fcm`: "Through Google."; `apns`: "Through Apple." |
+| `push.unregistered` | "Notifications turned off for <device>" | `app`: "Turned off on that phone."; `transferred`: "Your vault moved to a new phone."; `replaced`: "That phone was replaced after a recovery." |
+| `push.token_gone` | "Notifications stopped reaching <device>" | "Open VettID on that phone to turn them back on." |
+| `call.permission_off`, `call.permission_on` | "Calls from <First Last> turned off" / "Calls from <First Last> turned on" | — |
+| `leash.item.run` | "An agent used <item>" | "The secret went to your VettID connector for one command on your computer. The agent was not given it." |
+| `leash.item.proxy` | "An agent used <item>" | "The secret went to your VettID connector, which added it to the agent's requests to a site you allowed. The agent was not given it." |
+| `leash.item.changed` | "You changed how an agent may use <item>" (approved by the owner 2026-10-19 in place of the draft's "An agent changed <item>": the member makes this change, below) | — |
+| `drop.call_off` | "Call refused: calls are off" | — |
+| `drop.call_rate` | "Call refused: too many calls" | — |
+| `drop.call_share` | "Call refused: it could not be verified" | — |
+| `drop.one_app` | "Refused: a second phone tried to connect" | — |
+| `drop.owner_check` | "Refused: your daily check is due" | — |
+| `drop.profile_ik_mismatch` | "Profile refused: it did not match the connection" | — |
+| `drop.<x>_malformed` without a title of its own | "Message refused: it was malformed" | — |
+| `drop.grant_duplicate` | "Request refused: already asked" | — |
+| `drop.grant_limit` | "Request refused: too many waiting" | — |
+| `drop.critical_signature` | "Request refused: it could not be verified" | — |
+| `drop.rate_limited` | "Message refused: too many messages" | — |
+
+`<First Last>`, `<device>` and `<item>` are the names History already
+resolves for the row (ANDROID-PLAN §4 History; "Removed connection", "Removed
+device", "Deleted item" once gone). Once the connection, device or
+item is gone, or its name is not known, the title drops the name
+("Connection paused", "Connection checked and resumed", "Calls
+turned off", "Calls turned on", "Notifications turned on",
+"Notifications turned off", "Notifications stopped", "An agent used an
+item", "You changed how an agent may use an item"); it never reads
+"Connection with Removed connection paused". The kinds whose
+`ref` is an `item_id` for this purpose also include `leash.item.run`,
+`leash.item.proxy` and `leash.item.changed` (VAULT-MESSAGING §10.9).
+The two `leash.item.run` and `leash.item.proxy` detail lines say only
+what VAULT-MESSAGING §10.11 "Ways to use a secret" states: the value
+goes to the connector, for the one process it starts or for the item's
+bound host, and the agent's answer holds no value. They do not claim
+more: the connector's redaction is not complete, and a command the
+agent chose can still send the secret elsewhere (AGENT-PLAN §4.9).
+`leash.item.changed` records the member's own `leash.item.set` for that
+agent and item (VAULT-MESSAGING §10.11), so its title says "You changed …".
+
+**Hidden in History** (decision 4). The list does not show these
+entries; they stay in the log, in the chain check and in an export,
+whose count the vault authorises:
+
+- `recovery.open`: its outcome becomes the matching attempt's detail
+  (below);
+- `device.unlinked_sent`: an internal step of a move; "Vault moved to a
+  new phone" already covers it;
+- `drop.call_glare`: both people called each other at once;
+- `recovery.generation_closed` with the reason `stale` (owner decision
+  of 2026-10-20): a next generation the counter shows only as already
+  closed, as after a retry of a failed write, and the current generation
+  closed with it. A next generation with used attempts has its own
+  reason, `rollback`, which is shown (above).
+
+**`rollback`** (owner decision of 2026-10-20). Decision 4 hid `stale`
+as an internal tidy-up, but the vault also wrote `stale` when the next
+generation already showed used attempts: a host may have served an
+older copy of the vault's recovery record, and the attempts of that
+generation never become `recovery.attempt` entries, so this entry is
+their only trace. The vault now writes the reason `rollback` for that
+case (VAULT-MESSAGING 0.50.0 §11.14.11; needs a vault release), and
+History shows it with the alarming title and detail above. Until the
+vault writes `rollback`, a `stale` entry is hidden like the harmless
+one. `rollback` also notifies (owner decision of 2026-10-20): the vault
+makes an `urgent` feed item for it (`recovery.generation_closed`, `ref`
+`<generation>/rollback`), which notifies on Security alarms with the
+title "Your vault was given an older recovery record" (Notifications
+table above).
+
+**An attempt's outcome.** As built, the vault writes the details a host
+can drop as their own `recovery.open` entries, `ref` =
+`<recovery_id>/<outcome>`, or `<recovery_id>/<outcome>/<name>` once the
+vault records the phone's name, at the open's time (VAULT-MESSAGING
+§11.14.11, 0.50.0); `recovery.attempt` entries carry no `recovery_id`.
+The app matches them by time: for each `not_success` attempt, taken in
+order of `at`, the nearest `recovery.open` entry within 10 minutes whose
+outcome counted an attempt (`wrong`, `attempt_lost`, `quiet`, `wait`,
+`exhausted`, `closed`), each open entry used once. The detail screen
+reads them with `audit.list{kinds: ["recovery.open",
+"recovery.attempt"], since, until}` over the hour on each side of the
+attempt, and checks kind and time itself. The outcome lines:
+
+| Outcome | Line |
+|---|---|
+| `wrong` | "Wrong PIN or password." |
+| `attempt_lost` | "Counted as an attempt, but it did not finish." |
+| `quiet` | "Refused: you used your vault in the last 3 days." (scaled on a vault with a time scale) |
+| `wait` | "Refused: too soon after the last try." |
+| `exhausted` | "Refused: all 10 attempts used." |
+| `closed` | "Refused: recovery was reset." |
+
+**The attempting phone's name** (owner decision of 2026-10-20). When
+the matched `recovery.open` carries a name (base64url in the `ref`'s
+third part), the detail adds "From a phone that calls itself
+“<name>”." after the outcome line; without one it adds nothing.
+Two rules: (a) the name is self-reported by the attempting phone, and
+anyone can choose it, so it is shown only in that form, never as the
+phone's identity, and never in bold or as a title; (b) it never affects
+urgency, the alarming notification, the channel or any decision.
+**Cleaning for display.** Before showing the decoded name, the app
+removes Unicode format characters (category Cf: the direction controls,
+ALM U+061C, zero-width characters, U+FEFF), U+2028 and U+2029, U+FFFD
+and the quotation marks “ ” " (so that a name cannot close the quote
+and fake a sentence after it), then trims it. It shows at most 64
+characters (code points, never splitting a surrogate pair); a name
+that is empty after cleaning shows nothing.
+
+`busy` and `wrong_again` count no attempt, so no attempt shows them;
+they are hidden with the other `recovery.open` entries. When the read
+fails, the outcome line is left out; "Details not available." is shown
+only when the read found no matching entry.
+
+**An attempt written again.** The vault writes an attempt again when
+the counter later shows it succeeded (§11.14.11), so History has two
+rows for the same `<generation>/<n>`. The older `not_success` row shows
+"Later successful." instead of the not-success detail, and is
+not used in the outcome matching.
+
+**Tests** (vettid-ios, as on Android): every title and detail above from its kind
+and `ref`, including an unreadable `ref`; the hidden kinds absent from
+the list but kept for the chain check and the export; the three
+History-only feed kinds neither listed nor notified; the parsing of
+`recovery.attempt`'s `<generation>/<n>/<outcome>/counter`,
+`recovery.attempts_used`'s `<generation>/<used>`,
+`recovery.generation_closed`'s `<generation>/<reason>[/unconfirmed]`
+and `recovery.open`'s `<recovery_id>/<outcome>`; the matching of
+outcomes to attempts (nearest, within the window, each used once, the
+uncounted outcomes never matched, an attempt later written as
+`success` never matched); `stale` hidden and `rollback` shown and
+routed to Security alarms; the phone's name decoded, shown in its
+self-reported form, absent when the `ref` has none, and never changing
+the title, the priority or the channel; titles without a name.
 
 ## 5. Architecture
 
@@ -708,7 +954,9 @@ iOS has no `FLAG_SECURE`. Three separate protections:
    (Android `core/ui/…/components/SecureWindow.kt` and its call
    sites), with a self-check at launch (the layer exists) that falls
    back to protections 1 and 2 and logs nothing. "Allow screenshots"
-   (§4) turns off only this one.
+   (§4) turns off only this one. (0.1.11, owner decision of 2026-10-20)
+   The connect screens keep it, as on Android: the invitation QR, its
+   link, the pasted link and the safety code.
 
 ### 6.5 Secret input: no autofill, no third-party keyboards
 
