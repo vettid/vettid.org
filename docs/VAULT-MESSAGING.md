@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.51.1
+version: 0.51.2
 date: 2026-10-20
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.10.0)
-  - ANDROID-PLAN.md (0.1.55)
-  - IOS-PLAN.md (0.1.13; §9.1 VA1–VA3)
+  - ANDROID-PLAN.md (0.1.57)
+  - IOS-PLAN.md (0.1.15; §9.1 VA1–VA3)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,18 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.51.2: clarification, owner decision of 2026-10-20, **approved by
+    the owner (2026-10-20)**. No change to what the vault does: no
+    vault release, no change for the member API or the host; apps only
+    (ANDROID-PLAN 0.1.57, IOS-PLAN 0.1.15). Found when a phone failed
+    its daily check with a generic text every time. §10.1: **error
+    codes are not secret**; an app may, and should, show a code it does
+    not map, and nothing else of the response. **`credential_required`**
+    may answer an owner device's request before the type's handler,
+    with no UTK spent and nothing tested or counted. **`forbidden`**
+    also answers a holder-only type (§3.5.9) from an app that is not
+    the holder, and any type outside the recovery path from a
+    recovering app
   - 0.51.1: normative clarification, owner decision of 2026-10-20,
     **approved by the owner (2026-10-20)**; found while implementing
     the reset's lost answer on iOS. No vault release, no change for the
@@ -5097,7 +5109,9 @@ an answer to an unknown or expired id is dropped.
   format; invite and pairing expiries (`exp` in responses) are RFC 3339 in
   whole seconds.
 - Error codes: `bad_request`, `not_found`, `forbidden` (the sender's role may
-  not send this type), `unsupported_type` (§5.3), `internal`, `relay_error`,
+  not send this type; (0.51.2) also a holder-only type of §3.5.9 from an
+  app that is not the holder, and any type but the recovery path's from
+  a recovering app, §11.11.5), `unsupported_type` (§5.3), `internal`, `relay_error`,
   `ttl_not_allowed`, `claim_unavailable`, `accept_failed`, `approve_failed`,
   `connection_unavailable`, and (0.4.0):
   - `conflict`: the request's `version` is not the current one (§8.4);
@@ -5172,7 +5186,10 @@ an answer to an unknown or expired id is dropped.
     (§11.4). The app shows it as a countdown and does not resend
     before it ends;
   - `credential_required`: the vault has no credential (§3.5.7), or a
-    recovery needs one (§11.11.5);
+    recovery needs one (§11.11.5). (0.51.2) It may answer an owner
+    device's request, the daily check and the credential operations
+    included, before the type's handler: then no UTK is spent, no PIN
+    or password is tested and nothing is counted;
   - `bad_pin`: the current PIN given to `pin.change` is wrong;
   - (0.33.0, release R) `weak_password`: a password being set breaks a
     rule of §11.14.7, with body `{reason}` (`short`, `repeated`,
@@ -5245,6 +5262,11 @@ an answer to an unknown or expired id is dropped.
     `challenge_expired`), the gateway refused the code (message
     `challenge_invalid`), or the gateway could not be reached; the app
     registers again (§14.1).
+- (0.51.2) **Error codes are not secret.** An app may show the member a
+  code it does not map (and SHOULD, rather than a text that names no
+  cause), so that the member can report it. It shows the `code` alone,
+  never the response's `message` or body, which may name items, ids or
+  gateway details.
 - A request answered with an error changes no state, except the password
   backoff, the spent UTK and the audit log and feed entries of §3.5.3,
   and, for a failed owner check, the PIN backoff and the check's

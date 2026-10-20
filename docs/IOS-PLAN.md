@@ -1,9 +1,17 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.14
+version: 0.1.15
 date: 2026-10-20
 changelog:
+  - 0.1.15: approved by the owner (2026-10-20), with the behaviour and
+    texts as written (owner decision of 2026-10-20) (VAULT-MESSAGING 0.51.2;
+    ANDROID-PLAN 0.1.57). New §4.4 **"Vault error codes the app does not
+    map"**, as ANDROID-PLAN §4: `credential_required` on an owner-facing
+    request gets its own full screen and erases nothing; `forbidden` on
+    a holder-only request outside an unresolved change means "not the
+    holder" (inside one it keeps 0.1.13); every other unmapped code shows
+    the generic text with the code alone. Same texts, same tests
   - 0.1.14: approved by the owner (2026-10-20) (ANDROID-PLAN 0.1.56;
     owner decisions of 2026-10-20; found while building the
     Notifications screen on iOS). §4.1: the Notifications screen shows
@@ -773,6 +781,61 @@ fetches then N+1 sends the PIN only to N+1; a route naming N for
 every fetch gives the neutral failure with both actions and never
 sends the PIN to N; a route naming an older release that is not the
 marker's `from` gives the rollback text.
+
+### 4.4 Vault error codes the app does not map (0.1.15)
+
+The same as ANDROID-PLAN §4 "Vault error codes the app does not map"
+(0.1.57): the list of codes, their handling, the texts and the tests
+are that section's, by reference; "the app" is the iPhone app, its
+error mapping is the port of `VaultManager.opFailure` in `VettIDData`,
+and "not a proof for `HolderPolicy`" means it is not a proof for the
+holder rules of §6.3 or `HolderWatch`: nothing is erased.
+
+*The decision is the owner's, of 2026-10-20. Approved by the owner
+(2026-10-20), with the behaviour and texts as written; the texts are
+shared with the Android app.*
+
+In short:
+
+1. **`credential_required`** to an owner-facing request (the daily
+   check, a credential operation, a change, `account.name.set`,
+   `device.transfer.*`, `vault.delete`, `settings.set`), outside the
+   resolution of an unresolved change: the full screen
+   `vault_credential_required_*`, with **Try again** (resends; the daily
+   check asks for the PIN and the password again, nothing was counted)
+   and **Lock vault**. Title "This phone can't use your vault"; body
+   "Your vault does not count this phone as the one that holds its
+   credential, so it refused the request. Nothing was disclosed, and
+   your PIN and password were not checked. This usually means a
+   recovery of your vault was started and has not finished. If you
+   recovered your vault on another phone, open VettID on that phone and
+   unlock it to finish. Otherwise, start a recovery on the account site:
+   it takes one to three days, and you need your PIN and your password.
+   If another phone of yours now opens your vault, use 'Move to a new
+   phone' there instead." Nothing is erased.
+2. **Every other code the app does not map**: `error_vault_code`,
+   "Something went wrong (code: {code}). Try again. If it keeps
+   happening, contact VettID and give this code." `{code}` is the error
+   response's `code` alone, shown when it matches `[a-z0-9_]{1,40}`,
+   otherwise `unknown`; never its `message` or body. A screen with its
+   own text for a code keeps it; failures that are not a vault answer
+   keep theirs.
+3. **`forbidden`** during an unresolved change or reset keeps 0.1.13
+   ("Another phone became the holder", §6.3). On any other holder-only
+   request (VAULT-MESSAGING §3.5.9) it means this phone is not the
+   holder: `vault_not_holder`, title "Your vault moved to a new phone",
+   body "Another phone now holds your vault's credential, so this phone
+   can't do this. Nothing was disclosed. Use VettID on the phone that
+   holds it now. If you no longer have that phone, start a recovery on
+   the account site." Only the vault's own answer counts; nothing is
+   erased.
+
+**Tests**: those of the ANDROID-PLAN section, in the iOS test targets
+with the fake vault: one case per code of its table, the code's check
+(`unknown` for a code that does not match; never a `message` or body),
+no erase after `credential_required` or `forbidden`, **Try again** and
+**Lock vault**, and transport, relay and host failures keeping their
+texts.
 
 ## 5. Architecture
 
