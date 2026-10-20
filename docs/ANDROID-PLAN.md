@@ -1,9 +1,25 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.56
+version: 0.1.57
 date: 2026-10-20
 changelog:
+  - 0.1.57: approved by the owner (2026-10-20), with the behaviour and
+    texts as written (owner decision of 2026-10-20) (VAULT-MESSAGING 0.51.2;
+    found when a phone whose vault was recovered to another phone that
+    never finished failed its daily check with the generic text every
+    time). New §4 **"Vault error codes the app does not map"**: the list
+    of codes the vault can answer to the app's owner-facing requests,
+    and how each is handled. `credential_required` gets its own full
+    screen ("This phone can't use your vault": nothing disclosed, PIN and
+    password not checked, finish the recovery on the other phone, or
+    recover on the account site, or "Move to a new phone"), with **Try
+    again** and **Lock vault**, and erases nothing. `forbidden` on a
+    holder-only request outside an unresolved change means "not the
+    holder" (§3.5.9) and shows "Your vault moved to a new phone" with a
+    new body; inside one it keeps 0.1.55. Every other unmapped code shows
+    "Something went wrong (code: {code})…" with the code alone, checked
+    against `[a-z0-9_]{1,40}`. Tests listed
   - 0.1.56: approved by the owner (2026-10-20) (owner decisions of
     2026-10-20; found while building the Notifications screen on iOS).
     §4 Notifications: the detail sheet always shows, under the label,
@@ -4523,6 +4539,123 @@ fetches then N+1 sends the PIN only to N+1; a route naming N for
 every fetch gives the neutral failure with both actions and never
 sends the PIN to N; a route naming an older release that is not the
 marker's `from` gives the rollback text.
+
+### Vault error codes the app does not map (0.1.57)
+
+*The decision (no generic "Something went wrong. Try again." for a
+vault error code the app does not map) is the owner's, of 2026-10-20.
+Approved by the owner (2026-10-20), with the behaviour and texts as
+written.*
+
+**Why.** `VaultManager.opFailure` turns the vault's error codes into a
+`FailureKind`, and every code it does not list becomes `OTHER`, which
+the screens show as "Something went wrong. Try again." A phone whose
+vault was recovered to another phone that never finished failed its
+daily check with that text every time: the vault answered
+`credential_required` (the vault has a credential but no holder,
+VAULT-MESSAGING §3.5.9, 0.51.2), before the PIN was tested, and trying
+again could never help. Neither the member nor VettID could tell what
+had happened.
+
+**The codes.** What the vault can answer to the owner-facing requests
+the app sends (the daily check `vault.owner-check`, `credential.unlock`,
+`.rotate`, `.password.change`, `.reset`, `.get`, `.ack`, `.version`,
+`.utk.get`, `pin.change`, `vault.secret.renew`, `account.name.set`,
+`device.transfer.*`, `vault.delete`, `settings.set`), read from the
+vault's code and checked against VAULT-MESSAGING §10.1:
+
+| Code | Where it comes from | Handling |
+|---|---|---|
+| `bad_pin`, `bad_password`, `backoff`, `credential_frozen`, `rotation_required`, `not_found`, `unsupported_type`, `limit`, `stale_credential`, `utk_invalid`, `owner_check_required`, `busy`, `retry`, `counter_unavailable`, `weak_password` | §10.1 | Mapped already; unchanged |
+| `credential_required` | Every request but §3.5.7's few types, when the vault has no credential or a credential but no holder; answered before any handler, so no PIN or password was tested | **New**: "This phone can't use your vault" (1) |
+| `forbidden` | A holder-only type (§3.5.9: the daily check, `pin.change`, `vault.secret.renew`, `account.name.set`, `credential.get`, `.ack`, `.reset`, `device.transfer.create`, `.reject`, `vault.delete`) from an app that is not the holder; any type but the recovery path from a phone in a recovery | **New** outside an unresolved change: "Your vault is on another phone" (3) |
+| `too_soon` (`account.name.set`), `exists` (`device.transfer.create`), `signer_unconfirmed` (`device.transfer.approve`) | §10.1, §6.7.1, §10.8 | Mapped by their screens already; elsewhere (2) |
+| `bad_request`, `internal`, `relay_error`, `unavailable` | A malformed request (an app fault), a vault fault, a relay failure inside the vault, a missing part | (2) |
+| `session_required`, `denied`, `approval_timeout` | Desktops and agents only | Never sent to the app; (2) if they are |
+| Any code not in this list, including codes of later releases | | (2) |
+
+**(1) `credential_required` on an owner-facing request.** A full screen,
+not a message on the screen that sent the request: while the vault has
+no holder it refuses every request of this phone but §3.5.7's few types,
+so a message on the daily check screen would only move to the next
+screen. The screen is reached from any screen whose request was answered
+`credential_required`, except while an unresolved change is being
+decided (that keeps its own rules). It is a vault answer and **not a
+proof for `HolderPolicy`**: nothing is erased, the keys and local state
+stay, and §11.14.10's proofs for an erase are unchanged. The app keeps
+the vault's session; **Try again** resends the request that failed (the
+daily check asks for the PIN and the password again; nothing was
+counted). **Lock vault** sends `vault.lock` (allowed without a holder)
+and returns to the unlock screen.
+
+| Id | Text (approved by the owner (2026-10-20)) |
+|---|---|
+| `vault_credential_required_title` | "This phone can't use your vault" |
+| `vault_credential_required_body` | "Your vault does not count this phone as the one that holds its credential, so it refused the request. Nothing was disclosed, and your PIN and password were not checked. This usually means a recovery of your vault was started and has not finished. If you recovered your vault on another phone, open VettID on that phone and unlock it to finish. Otherwise, start a recovery on the account site: it takes one to three days, and you need your PIN and your password. If another phone of yours now opens your vault, use 'Move to a new phone' there instead." |
+| Actions | **Try again**, **Lock vault** |
+
+**(2) Every other code the app does not map.** The text names the code:
+
+| Id | Text (approved by the owner (2026-10-20)) |
+|---|---|
+| `error_vault_code` | "Something went wrong (code: {code}). Try again. If it keeps happening, contact VettID and give this code." |
+
+- `{code}` is only the error response's `code`, shown when it matches
+  `[a-z0-9_]{1,40}`; any other value shows as `unknown`. Never the
+  response's `message` or body, an id, a name, a version or anything
+  else. Error codes are not secret (VAULT-MESSAGING §10.1, 0.51.2).
+- It replaces the generic text wherever a vault error response is the
+  failure: `VaultFailure` keeps the code it already carries, and
+  `FailureKind.OTHER` with a code shows this text. A screen with its
+  own text for a code (the name change's `too_soon`, the transfer's
+  `exists`, an item's `bad_request`) keeps it.
+- Failures that are not a vault answer (network, relay, member API,
+  host, an answer that does not open, no answer) keep their own texts;
+  they have no vault code.
+
+**(3) `forbidden` from the vault.** During an unresolved change or reset
+it keeps its 0.1.55 meaning ("Another phone became the holder": the
+change ends, the existing "Your vault moved to a new phone" notice). On
+any other holder-only request it also means "this phone is not the
+holder": the vault refuses those types to every app but the holder
+(§3.5.9), and an app can send every owner type, so for the app there is
+no other cause. The app then shows, on the screen that sent the
+request:
+
+| Id | Text (approved by the owner (2026-10-20)) |
+|---|---|
+| `vault_not_holder` | Title: the existing "Your vault moved to a new phone" (`data_feed_device_replaced`). Body: "Another phone now holds your vault's credential, so this phone can't do this. Nothing was disclosed. Use VettID on the phone that holds it now. If you no longer have that phone, start a recovery on the account site." |
+
+As in 0.1.55, only the vault's own answer counts (an error response
+opened under the device's session with the vault, answering that
+request's id), and it is not a proof for `HolderPolicy`: nothing is
+erased until `device.unlinked{transferred}` or `{replaced}`. A
+`forbidden` to a request that is not holder-only (removing the app
+itself in Devices & agents, for instance) keeps its screen's text, or
+(2).
+
+**Tests.**
+
+- `opFailure`/the screen mapping, one case per code of the table: every
+  mapped code keeps its kind; `credential_required` gives the new
+  screen from the daily check, a PIN change, a name change and a
+  credential unlock; `forbidden` on the daily check and on
+  `pin.change` gives `vault_not_holder`, and during an unresolved change
+  still ends the change with the 0.1.55 notice; `bad_request`,
+  `internal`, `relay_error`, `unavailable`, `session_required` and an
+  invented `some_new_code` give `error_vault_code` with that code.
+- The code's check: `Internal`, a code with a space, a code of 41
+  characters and an empty code show `unknown`; a `message` and a body
+  in the response never appear in the text.
+- No erase: after `credential_required` and after `forbidden` the keys,
+  `account.bin` and the vault's local data are unchanged, and the
+  unlock screen still opens the vault.
+- **Try again** after `credential_required` resends; a fake vault that
+  gains a holder in between answers `ok`. **Lock vault** sends
+  `vault.lock`.
+- A transport error, a timeout, an HTTP 403 and a `forbidden` from the
+  relay or the host keep their texts, never `error_vault_code` or the
+  new screens.
 
 ## 5. Architecture
 
