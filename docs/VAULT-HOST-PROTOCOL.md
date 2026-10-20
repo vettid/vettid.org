@@ -6,7 +6,7 @@ date: 2026-10-19
 owner: Al Liebl (Mesmer)
 component: vault enclave (supervisor), parent (host process)
 related:
-  - VAULT-MESSAGING.md (0.49.0) §2 (threat model, who sees what), §11.14 (release R: recovery and the attempt counter), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
+  - VAULT-MESSAGING.md (0.50.0) §2 (threat model, who sees what), §11.14 (release R: recovery and the attempt counter), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
   - VAULT-PLAN.md (0.1.8) §5.2 (D5: TLS in the enclave), §5.3 (D4: one process per vault)
   - VAULT-RELEASES.md (0.1.32) §3.4 (C3, C4), §8.4 (network and egress), §8.7 (observability)
   - VAULT-RELAY-SCALING.md (0.1.2) §6, §10

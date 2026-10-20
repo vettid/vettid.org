@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.49.0
-date: 2026-10-19
+version: 0.50.0
+date: 2026-10-20
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.9.0)
-  - ANDROID-PLAN.md (0.1.51)
-  - IOS-PLAN.md (0.1.9; §9.1 VA1–VA3)
+  - ANDROID-PLAN.md (0.1.52)
+  - IOS-PLAN.md (0.1.11; §9.1 VA1–VA3)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,46 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.50.0: normative; approved by the owner (2026-10-19, 2026-10-20)
+    with the apps' event titles (ANDROID-PLAN 0.1.52 §4 "Event titles",
+    IOS-PLAN 0.1.11 §4.1). **Needs a vault release** for (A) and (B);
+    the rest states what vettid-vault `main` (staging release 19) does.
+    (A) **`rollback`** (owner decision of 2026-10-20: the vault splits
+    the reason): `recovery.generation_closed` gets the reason `rollback`
+    for a next generation that already shows used attempts when a change
+    is applied, a host serving an older copy of the vault's recovery
+    record; it is shown to the member, and (proposed, a question for the
+    owner) makes an `urgent` feed item. `stale` stays for a next
+    generation that is only already closed (a retry after a failed
+    write), which the apps hide. Today the vault writes `stale` for both.
+    (B) **The attempting phone's name stays** (owner decision of
+    2026-10-20): the vault records, with each open it notes, the name
+    the registering phone gave in `vault.recovery.register`
+    (`app.name`, §11.11.3), as a third part of the `recovery.open`
+    entry's `ref`; it is self-reported, shown as such, and never affects
+    urgency or any decision. Today the vault notes no name, and 0.50.0's
+    draft that dropped the requirement is withdrawn.
+    As built: §10.9 audit kinds: `vault.pin_changed` (a PIN change),
+    which the spec did not name, and `recovery.open`,
+    `identity.rotate_resolved`, `device.unlinked_sent`,
+    `connection.request.approved` and `connection.request.declined`,
+    with their `ref`s. §10.9 feed kinds: the seven kinds the vault
+    creates that no list named, `vault.pin_changed`,
+    `device.secret_renewed`, `credential.recovered`,
+    `recovery.device_paired`, `recovery.completed`,
+    `identity.rotation_failed` and `identity.rotate_conflict`, and the
+    three that only §11.14.11 named, `recovery.attempt`,
+    `recovery.change_required` and `recovery.counter_unavailable`.
+    §11.14.11: `recovery.attempt`'s `ref` is
+    `<generation>/<n>/<outcome>/counter`, the outcome in the `ref` (no
+    `outcome` or `source` members); an attempt is written again when it
+    later succeeds; the details a host can drop are their own
+    `recovery.open` entries (never `ok`), which the apps match to
+    attempts by time, since attempts carry no `recovery_id`;
+    `recovery.generation_closed`'s `/unconfirmed` suffix;
+    `recovery.completed` also has the `ref` `<recovery_id>/resumed`;
+    `recovery.change_required`'s `ref`. The export example's label
+    follows the renamed title
   - 0.49.0: normative, owner decision of 2026-10-19 (approved by the
     owner (2026-10-19)); revised after review. §11.5,
     §11.11.4, §11.14.6, §11.14.8: **a recovery cancelled by an unlock
@@ -7200,7 +7240,20 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `recovery.attempt`, `recovery.attempts_used`, `recovery.armed`,
   `recovery.generation_closed`, `recovery.presence_unrecorded`,
   `identity.rotation_failed`, `identity.rotate_conflict`,
-  `device.secret_renewed` (§11.14.11); `message.sent`,
+  `device.secret_renewed` (§11.14.11, with their `ref`s there); (0.50.0,
+  as built since release R) `recovery.open` (`ref` =
+  `<recovery_id>/<outcome>`, or from 0.50.0 with `/<name>`, the
+  attempting phone's self-reported name; the details a host can drop,
+  §11.14.11), `recovery.generation_closed` with the reasons `stale` and
+  (0.50.0) `rollback` (§11.14.11),
+  `vault.pin_changed` (a `pin.change` applied, §11.14.9; no `ref`),
+  `identity.rotate_resolved` (`connection_id`, `ref` = the accepted
+  key's fingerprint; §3.4, `connection.rotation.resolve`),
+  `device.unlinked_sent` (`ref` = `transfer_id`: a transfer's held
+  `device.unlinked{transferred}` notice was sent, §11.14.10),
+  `connection.request.approved` and `connection.request.declined`
+  (`ref` = `pending_id` or the outgoing request's `connection_id`;
+  the member's `connection.approve` / `.decline`, §10.4); `message.sent`,
   `message.received` (no content; `ref` = `message_id`);
   (0.32.0, release A) `message.attachment_sent` (the
   attachment is stored in this vault and its message sent; `ref` =
@@ -7428,7 +7481,8 @@ stay without an export.
   `format=csv;count=40;seqs=700-790;filters=kinds,dates;since=2026-10-01T04:00:00.000Z;until=2026-10-08T04:00:00.000Z`.
   The summary names no connection, kind prefix or search text: the
   entry fields are fixed by the hash (above), and the log holds no
-  names. Its `count`, `seqs` and times are those the vault answered.
+  names (0.50.0: but for the self-reported phone name of a
+  `recovery.open`, §11.14.11). Its `count`, `seqs` and times are those the vault answered.
 - **The file** is written by the app, never by the vault, and is **not
   encrypted**. The app saves it only where the member chooses, through
   the platform's own "Save to…" dialog (on Android the Storage Access
@@ -7464,7 +7518,7 @@ stay without an export.
     "log_head": { "seq": 812, "hash": "<b64 32>" },
     "entries": [
       { "seq": 790, "entry_id": "<ULID>", "at": "<ts>", "kind": "credential.rotated",
-        "label": "Credential rotated", "category": "security",
+        "label": "Your credential was renewed", "category": "security",
         "direction": "in|out?", "connection_id": "<id>?", "connection_name": "...?",
         "device_id": "<id>?", "device_name": "...?", "ref": "<ref>?", "item_name": "...?",
         "prev": "<b64 32>", "hash": "<b64 32>" } ] }
@@ -7571,6 +7625,17 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
   §10.4.1, 0.23.0), `owner_check.locked` (priority `urgent`)
   (§3.6.4), `owner_check.hold_changed` (priority `high`, `ref` as in the
   audit log) (§3.6.7, 0.13.0),
+  (0.50.0, as built since release R) `vault.pin_changed`,
+  `device.secret_renewed`, `credential.recovered`,
+  `recovery.device_paired` (`device_id` = the new phone),
+  `recovery.completed` (`ref` = `recovery_id`), `recovery.attempt`
+  (`urgent` unless the member completed a recovery in that generation
+  since; `ref` as in the audit log), `recovery.change_required`
+  (priority `high`; `ref` = `password`, or the generation whose
+  attempts were used), `recovery.counter_unavailable` (priority
+  `urgent`), `identity.rotation_failed` (priority `high`, `ref` =
+  `recovery`) and `identity.rotate_conflict` (priority `high`,
+  `connection_id`) (§11.14.11),
   and `guide`. Apps render
   items from `kind` and the references; only `guide` items carry `title`
   and `body`.
@@ -16202,20 +16267,49 @@ after the approval, whichever comes first.**
   generation, every attempt with its counter time and which one, if any,
   succeeded. Whenever the vault reads the counter's status while unlocked
   (each owner check, a completed recovery), it writes one audit entry for
-  each attempt it has not recorded: kind `recovery.attempt`, `ref` =
-  `<generation>/<n>`, `at` = the counter's time, `outcome` = `success` or
-  `not_success` (a wrong pair and a lost attempt look the same to the
-  counter, which records before the test), `source` = `counter`. Each
-  makes a feed item (`urgent` unless the member completed a recovery in
-  that generation since) and shows in History. When `attempts.used`
-  rises the vault also audits `recovery.attempts_used`.
+  each attempt it has not recorded: kind `recovery.attempt`, `at` = the
+  counter's time, `ref` = `<generation>/<n>/<outcome>/counter`, where
+  `<outcome>` is `success` or `not_success` (a wrong pair and a lost
+  attempt look the same to the counter, which records before the test)
+  and `counter` says where it comes from (0.50.0: the outcome and the
+  source are in the `ref`; the entry has no other members, §10.9). An
+  attempt first seen as `not_success` is written again when the counter
+  later shows it succeeded. Each makes a feed item (`urgent` unless the
+  member completed a recovery in that generation since) and shows in
+  History. When `attempts.used` rises the vault also audits
+  `recovery.attempts_used`, `ref` = `<generation>/<used>`.
 - **The details a host can drop.** The header's recovery log (§11.11)
-  also notes each open with its outcome as the enclave knew it (`wrong`,
-  `wrong_again`, `attempt_lost`, `quiet`, `wait`, `busy`, `ok`), the
-  `recovery_id` and the phone's name, and the vault adds them to the
-  matching counter entries. A host that drops header writes removes these
-  details, not the counter's entries; History shows "details not
-  available".
+  also notes opens with their outcome as the enclave knew it, and the
+  vault moves them into the audit log at the next resume (or at the
+  completed recovery, then with `device_id` = the new phone) as their
+  own entries (0.50.0): kind `recovery.open`, `at` = the open's time,
+  `ref` = `<recovery_id>/<outcome>` or `<recovery_id>/<outcome>/<name>`.
+  **The attempting phone's name** (owner decision of 2026-10-20; needs a
+  vault release, the vault as built writes the two-part form):
+  `<name>` is the `app.name` the phone gave in
+  `vault.recovery.register` (§11.11.3), which the enclave keeps in the
+  header's recovery record with the registered key; every open comes
+  from that registered phone, so the enclave adds it to each open it
+  notes. It is the name's UTF-8, with control characters (C0, DEL, C1)
+  removed and cut to at most 64 bytes at a character boundary, encoded
+  as base64url without padding (so a `/` in a name cannot break the
+  `ref`); an empty or absent name writes the two-part form. The name is
+  **self-reported**: the phone, and whoever holds it, chooses it freely,
+  and nothing checks it. Apps show it only as such ("from a phone that
+  calls itself “<name>”", ANDROID-PLAN §4 "Event titles"), never as a
+  verified identity, and **the name never affects** a feed item's
+  priority, a notification, the alarming title or any decision of the
+  vault or an app. It is the one name the audit log holds, and the
+  vault's search (§10.9 Search) does not read it. The outcomes written
+  are `wrong`, `attempt_lost`, and `quiet`, `wait`, `exhausted` or
+  `closed` when the decision after the spend refused (each of these
+  counted an attempt), and `busy` and `wrong_again` (no attempt
+  counted); the other refusals (before the spend, or with the counter
+  unavailable) and a successful open write none. `recovery.attempt`
+  entries carry no `recovery_id`, so the apps match each counted outcome to the
+  nearest `not_success` attempt in time (ANDROID-PLAN §4 "Event
+  titles"). A host that drops header writes removes these details, not
+  the counter's entries; History shows "details not available".
 - **The email trail.** The member API cannot read an open's outcome. For
   an open that was counted (`spent` or `lost`), the enclave's answer to
   the host carries the clear marker **`code: "recovery_attempt"`**, with
@@ -16228,12 +16322,36 @@ after the approval, whichever comes first.**
   device learns of attempts only by email.
 - **New audit kinds** (§10.9): `recovery.attempt`,
   `recovery.attempts_used`, `recovery.armed` (`ref` = the generation),
-  `recovery.generation_closed` (`ref` = the generation, with the reason
-  `pin`, `password`, `reset`, `backup_off`, `exhausted` or `delete`),
-  `recovery.presence_unrecorded`, `identity.rotation_failed`,
-  `identity.rotate_conflict` (§3.4), `device.secret_renewed`. Feed:
-  `recovery.attempt` (as above), `recovery.change_required` (`high`),
-  `recovery.counter_unavailable` (`urgent`, after 24 hours).
+  `recovery.generation_closed` (`ref` = `<generation>/<reason>`, the
+  reason `pin`, `password`, `reset`, `backup_off`, `exhausted` or
+  `delete`; 0.50.0: also `stale` and `rollback`, written when a PIN,
+  password or credential change finds that the next generation is
+  already known to the counter, and the vault moves past it (§11.14.3):
+  **`rollback`** (owner decision of 2026-10-20; needs a vault release)
+  for a next generation that already shows used attempts, which can
+  only come from a host that served an older copy of the vault's
+  recovery record (an older timeline); its attempts are never written as
+  `recovery.attempt`, so this entry is their only trace, and the apps
+  show it as an alarm; **`stale`** for each other generation closed
+  there (one only already closed, as after a retry of a failed write,
+  and the current one), which the apps hide; the vault as built writes
+  `stale` for all of them; and the
+  suffix `/unconfirmed` after `delete` when the counter did not confirm
+  the close, the deletion going ahead), `recovery.presence_unrecorded`,
+  `identity.rotation_failed` (`ref` = `recovery`),
+  `identity.rotate_conflict` (§3.4), `device.secret_renewed`; and, as
+  built (0.50.0), `vault.pin_changed`, `recovery.open` (above) and
+  `recovery.completed` with `ref` = `<recovery_id>/resumed` when a
+  later open finishes a recovery that stopped after its state was
+  stored. Feed: `recovery.attempt` (as above), `recovery.change_required`
+  (`high`; `ref` = `password` when the password is too weak to arm, or
+  the generation whose attempts were used), `recovery.counter_unavailable`
+  (`urgent`, after 24 hours), (0.50.0, proposed, pending the owner's
+  answer) `recovery.generation_closed` with `ref` `<generation>/rollback`
+  (`urgent`; apps notify on Security alarms), and (0.50.0) `vault.pin_changed`,
+  `device.secret_renewed`, `credential.recovered`,
+  `recovery.device_paired`, `recovery.completed`,
+  `identity.rotation_failed` and `identity.rotate_conflict` (§10.9).
 
 #### 11.14.12 What VettID can and cannot do from release R
 
