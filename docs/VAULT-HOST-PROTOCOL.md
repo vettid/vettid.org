@@ -28,8 +28,12 @@ changelog:
     erases only a vault whose own sealed header records `deleting`, or
     reports `deleted` for one whose header and state are already gone,
     and otherwise does nothing. §5, §6.1, §9, §10, §11.3 and new
-    requirements P19 and P20 follow. The host role gains the write of
-    `deleting_at`
+    requirements P19 and P20 follow, with a §11.3 row for a forged or
+    stale `deleting_at`. The host role gains the write of
+    `deleting_at`. (4) **The mark stays internal**: it is host-written,
+    so the member API uses it only to send `delete_resume` (with its log
+    and metric) and never shows it; the vault's status, the account site
+    and the apps do not change because of it
   - 0.1.13: with VAULT-MESSAGING 0.49.0 (owner decision 2026-10-19;
     approved by the owner (2026-10-19)); not built. (1) One
     new host code with one clear member: an `unlock` answer that carries
@@ -1289,6 +1293,7 @@ more than "the operation does not happen, or happens late".
 | `Queue`, the manifest document | withhold it, or give another | The request fails `manifest`. It cannot make the enclave accept a manifest the app did not verify (VAULT-MESSAGING §11.5) |
 | `Queue` reply (seen by the parent) | drop it, or write another slot | The app gets no result or a result it cannot open; results are sealed. The host codes (`recovery_registered`, `recovery_unavailable`, `recovery_attempt` and, from 0.1.13, `recovery_cancelled` with `cancelled_recovery_id` and `recovery_not_current`) can be forged or suppressed with the effects VAULT-MESSAGING §11.5 lists |
 | `MarkDeleting` reply (0.1.14) | say `ok` without writing; say `error`, or nothing | A false `ok`: the devices are told and the row is not marked, so a deletion that then stops is not resumed (the state before 0.1.14). `error` or no answer: the vault ends locked without telling its devices, and the member's next unlock finishes the deletion. Either way nothing is opened or kept; **denial of service only** |
+| The vault row's `deleting_at` (0.1.14) | write it for any vault at any time; never write it; leave it after the vault runs again | The mark is used only by the member API's cleanup run, to send `delete_resume` (MEMBER-API "Vault deletion"). A forged or stale mark causes at most `delete_resume` requests, which the enclave ignores unless its own sealed header records `deleting` (or the header and state are already gone, P20). It never makes the member API send `delete`, and it is **never shown to the member**: the vault's status keeps the row's own state, the account site keeps offering recovery and start-over, and the apps show a deletion only after the vault's own `device.unlinked{vault_deleted}`. The parent's update for `unlocked` clears it. Never writing it: a deletion that then stops is not resumed (the state before 0.1.14). **Denial of service only** |
 | `LeaseLost` | send it for any vault, at any time; never send it | The vault locks. Never sending it leaves a vault running without a lease; if a second instance then opens the vault, the two meet at the conditional state write, and the one that finds a newer version is zeroized (the split-brain guard does not depend on leases) |
 | `Ping` | not send it; send it and renew no lease; ignore the answer | Not sending it locks every vault after 120 s (§4.3): **denial of service only**. Sending it proves only that the peer is alive: a parent can ping and renew nothing, and what then stops two instances writing one vault is the conditional state write, as before. It learns the number of running vaults, which it has from the lifecycle events |
 | `Shutdown` | send it at any time | Every vault locks, with its flush |

@@ -31,11 +31,7 @@ changelog:
     VAULT-HOST-PROTOCOL 0.1.14 and MEMBER-API 2.10.0 (vettid.org #356).
     **Needs a vault release** (staging release 20: the vault, its
     supervisor and its parent, all in vettid-vault) **and the member
-    API**. Apps: no change (an app that received
-    `device.unlinked{vault_deleted}` reads the new status value
-    `deleting` as a vault still listed and keeps waiting; one that was
-    not told currently treats any state other than `unlocked` as locked,
-    so the member's unlock finishes the deletion). §12.5: **a deletion that
+    API**. Apps and account site: no change. §12.5: **a deletion that
     stops between step 1 and step 5 is finished without the app.**
     Until now only an unlock, a recovery request, a registration or a
     cancellation that read the `deleting` header finished it; after
@@ -63,7 +59,18 @@ changelog:
     app; such an open now completes the deletion instead. (D) Step 4
     is retried in the process for up to 60 s before the process ends.
     (E) An `unlocked` report clears the row's mark (a vault that runs
-    is not being deleted). §11.5 and §12.5 "Convergence" follow
+    is not being deleted). (F) **The mark stays internal**: it is
+    host-written, and the host is not trusted, so the member API uses
+    `deleting_at` (and `deletion_resumed_at`) only to send
+    `delete_resume`, with its log and metric, and **never shows it**.
+    `GET /api/vault/status` keeps the row's own state (no new status
+    value), the account site shows no "being deleted" text and keeps
+    offering recovery and start-over, and the apps show "being deleted"
+    only after the vault's own `device.unlinked{vault_deleted}`; they
+    never derive a deletion from the member API's status. A forged or
+    stale mark causes at most `delete_resume` requests, which the vault
+    ignores unless its own sealed header records `deleting`. §11.5 and
+    §12.5 "Convergence" follow
   - 0.50.1: normative correction, approved by the owner (2026-10-20); vault
     PR vettid-vault #132, found by the independent review of #131;
     **needs a vault release** (#132). No
@@ -11028,10 +11035,12 @@ Nothing secret is stored:
   (the `locked` that follows when the process ends is written as
   usual). The parent removes `deleting_at` in the update of an
   `unlocked` event: a vault that runs is not being deleted, so a mark
-  there is stale or forged. The member API reads the mark as "being
-  deleted" and resumes the deletion (`delete_resume`, below). Like the
-  other host-written values it is advisory: it never makes anything
-  erase a vault that the enclave can read as live.
+  there is stale or forged. The member API uses the mark **only** to
+  resume the deletion (`delete_resume`, below), with its log and
+  metric; it is **never shown to the member** (no status value, no
+  account-site text, nothing in the apps). Like the other host-written
+  values it is advisory: it never makes anything erase a vault that the
+  enclave can read as live.
 - **Deletion notice** (0.9.0). On the lifecycle event `deleted` (§12.5)
   the parent also records `alarm = {kind: "vault_deleted", alarm_id, at}`
   and `alarm_pending = true`, whatever the lease: the vault's own audit
@@ -17056,24 +17065,35 @@ Deletion is idempotent.
   sealed to the release, §11.10.2) says that a deletion was authorised
   and begun, or one whose state and header are already gone: neither
   the parent nor the member API can make it erase a vault it can read
-  as live. A forged `deleting_at` (the host writes the row) costs a
-  status that says `deleting` and resumes that do nothing; an
+  as live. A forged or stale `deleting_at` (the host writes the row)
+  causes at most `delete_resume` requests, which the enclave ignores
+  unless its own sealed header records `deleting`; it is never shown to
+  the member and never makes the member API send `delete`, and an
   `unlocked` report clears it. The authorities of the table above are
   unchanged, and `vault.delete`'s `exp` is untouched: it bounds when a
   waiting request may first apply, while the resume only finishes a
   deletion the vault already marked. The host's `delete` (§11.5) stays
   unconditional and is still sent only for an account cancellation and
   a start-over; the member API never sends it because of `deleting_at`.
-- **What the member API shows meanwhile.** From the mark until the
-  `deleted` report, `GET /api/vault/status` returns the vault with
-  `state: "deleting"`; after it, `{vault: null}`, and once the row is
-  removed the app key is refused `401` (MEMBER-API "Vault deletion").
-  An owner app that received `device.unlinked{vault_deleted}` reads
-  only `{vault: null}` and `401` as gone (ANDROID-PLAN 0.1.54 §4,
-  IOS-PLAN 0.1.12 §4.2), so `deleting` keeps it waiting. An app that was
-  not told (no `ok` to "Mark at the host", or a stop before the notices)
-  currently treats any state other than `unlocked` as locked, so the
-  member's unlock finishes the deletion (Convergence, above).
+- **What the member API shows meanwhile: nothing different.** The
+  mark is written by the host, which is not trusted, so it is never
+  shown to members: a forged or faulty mark must not be able to make a
+  member abandon a healthy vault or hide their recovery options. From
+  the mark until the `deleted` report, `GET /api/vault/status` keeps
+  reporting the row's own `state` (`locked`, `unlocked` …), as before;
+  after it, `{vault: null}`, and once the row is removed the app key is
+  refused `401` (MEMBER-API "Vault deletion"). The account site shows
+  no "being deleted" text and offers recovery and start-over as
+  normal. That is safe: a recovery or an unlock that opens a vault whose
+  sealed header or state records `deleting` finishes the deletion
+  instead of running the vault ("A state that records `deleting` never
+  runs", above), and a start-over is the member's own explicit request.
+  The apps show "being deleted" only after the vault's own
+  `device.unlinked{vault_deleted}` (ANDROID-PLAN 0.1.54 §4, IOS-PLAN
+  0.1.12 §4.2), and they never derive a deletion from the member API's
+  status. An app that was not told (no `ok` to "Mark at the host", or a
+  stop before the notices) sees the vault as locked, so the member's
+  unlock finishes the deletion (Convergence, above).
 - **What is still lost.** A vault sealed to a release before 0.51.0
   sends no `MarkDeleting`, and its stalled deletion stays as before
   (an operator can finish it with the host's `delete`, case by case,

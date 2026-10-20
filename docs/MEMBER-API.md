@@ -15,10 +15,15 @@ changelog:
     routed as `delete` is, at every run for the first hour and then
     hourly, and logs one still not finished after 1 hour and daily
     after 30 days. It never sends `delete` because of `deleting_at`.
-    `GET /api/vault/status` answers **`state: "deleting"`** for such a
-    row (a `deleted` row still reads `{vault: null}`). No new route, no
-    new refusal. The host role may write `deleting_at`; the cleanup
-    job only reads it
+    **The mark stays internal**: `deleting_at` (and
+    `deletion_resumed_at`) are used only by the cleanup run, its log and
+    its metric, and are never shown to the member. `GET
+    /api/vault/status` keeps reporting the row's own `state` (a
+    `deleted` row still reads `{vault: null}`); the account site shows
+    no "being deleted" text and still offers recovery and start-over,
+    because the mark is host-written and the host is not trusted. No new
+    route, no new refusal, no new status value. The host role may write
+    `deleting_at`; the cleanup job only reads it
   - 2.9.0 (2026-10-19; owner decision 2026-10-19, **approved by the
     owner (2026-10-19)**, with VAULT-MESSAGING 0.49.0 and
     VAULT-HOST-PROTOCOL 0.1.13; revised after review; not built). New
@@ -1121,7 +1126,7 @@ interface Enclave {
 
 interface VaultStatus {     // advisory: written by the enclave host, never a security signal (§11.5)
   vault_id: string;
-  state: 'enrolling' | 'locked' | 'unlocked' | 'deleting';  // `unlocked` only while `leased` (below); 2.10.0: `deleting` ("Vault deletion", Resume)
+  state: 'enrolling' | 'locked' | 'unlocked';  // `unlocked` only while `leased` (below)
   locked_basis?: 'reported' | 'no_lease';      // 2.5.0 (with release L): only with state 'locked' ("Locks")
   sealed_release: string | null;
   vault_version: string | null;
@@ -2691,21 +2696,28 @@ Its own audit log goes with it, so the member is told by email.
     for it. `deleting_at` is written by the host, so it is advisory:
     `delete_resume` makes the enclave erase only a vault whose own
     sealed header records the deletion (or one already erased), and a
-    forged or stale mark only shows `deleting` and costs resumes that do
-    nothing. The parent removes the mark on an `unlocked` report.
-  - **Status.** `GET /api/vault/status` answers `state: "deleting"` for
-    a row with `deleting_at` that is not `deleted`, whatever the row's
-    `state` and lease. An owner app that received
-    `device.unlinked{vault_deleted}` keeps waiting on it (it reads only
-    `{vault: null}` and `401` to the app key as gone, ANDROID-PLAN 0.1.54
-    §4). An app that was not told (the vault could not mark the row, or
-    stopped before its notices) currently treats any `state` other than
-    `unlocked` as locked, so the member's next unlock finishes the
-    deletion (VAULT-MESSAGING §12.5 "Convergence"). The account site shows "Your vault is being deleted" and offers no
-    recovery or start-over for it. No route refuses anything
-    new because of the mark: a recovery request or a start-over on such
-    a vault would end in the same erase. A setup code is refused as for
-    any confirmed vault until the row is gone.
+    forged or stale mark costs at most resumes that do nothing; it is
+    never shown to the member. The parent removes the mark on an
+    `unlocked` report.
+  - **Never shown.** The mark is host-written, and the host is not
+    trusted, so nothing a member sees depends on it: a forged or faulty
+    mark must not be able to tell a member that a healthy vault is being
+    deleted, or hide their recovery options. `deleting_at` and
+    `deletion_resumed_at` are read only by the cleanup run, its log and
+    its metric. `GET /api/vault/status` reports the row's own `state`
+    (`locked`, `unlocked` …) whatever the mark, as before; a `deleted`
+    row reads `{vault: null}`, and once the row is gone the app key is
+    refused `401`. The account site shows no "being deleted" text and
+    offers recovery and start-over as normal. That is safe: a recovery
+    or an unlock that opens a vault whose sealed header or state records
+    `deleting` finishes the deletion instead of running the vault
+    (VAULT-MESSAGING §12.5 "A state that records `deleting` never
+    runs"), and a start-over is the member's own explicit request. The
+    apps show "being deleted" only after the vault's own
+    `device.unlinked{vault_deleted}` (ANDROID-PLAN 0.1.54 §4, IOS-PLAN
+    0.1.12 §4.2); they never derive a deletion from this status. No
+    route refuses anything new because of the mark. A setup code is
+    refused as for any confirmed vault until the row is gone.
   - **IAM.** The host role may write `deleting_at` (and remove it); the
     cleanup job reads it and writes `deletion_resumed_at`.
 - **Status.** A `deleted` vault row reads as no vault (`{vault: null}`).
