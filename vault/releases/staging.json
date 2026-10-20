@@ -695,6 +695,56 @@
         ],
         "security": "none"
       }
+    },
+    {
+      "release": 20,
+      "status": "candidate",
+      "pcr0": "44f731679d8c0a9aa63a814f9f6eae03798879ee8aa6ed9da7a8fd0dde90613d5650ea0f16abbafac0c85edf4eb63d25",
+      "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
+      "pcr2": "09f08b13d7cfb3e5ee80e49de4bbd58bb17d5992366bbd335fb7fb0d7d9edd21dd7a2f83741233125fcfb0bb20ef6189",
+      "seal_key": "",
+      "admitted_pcr0s": [
+        "2303feb157143c5393fe55e8dd880f0ebc82f982c5f0e2a64e0d1c3b53e306d5c36641544185c1dfed7d7834188864e8",
+        "8eebbb1012f55e131ab24a8259d1e714ffc6cc2f9ea090c41e3773702979fd0756134b7035773f8b58ab174f864f5f7d",
+        "8ab041980ae3cd122b9e09f04a165b13aa01cfb5378d31c35830c05f129072b2f0889cbed1f492c0fdfb13f0af8c303e",
+        "a9e3defc8bfa4c3c6f89a87afac67bc245f1ef8ac331de88505d8d4928a4bc0d9e793fb928050ba02c9f3b915ffbfb0e",
+        "398b654dfcd98079fe558e4a2a2c000877fd59b4f9298383dc66ed0d54f6706938e1620f2d1d80b8cb02dca2eef3e72b",
+        "859733fa15df56bfedcb8c3a0a1524e9287aea6a8fa01d798d0f8c8df32cc2cbf32cdc5102bbd89b1f6c6e05e478e4bf",
+        "0f4d7915f5fc56aa7d705e82ddd14ec48e48ce3bb99217792b3e67bee9a6db6bd74dee16971d750f4af3a294e2bccdb2",
+        "082e1380273fd025f934e24941d6d91513e8e9e70d8d28ae3ea1dcc63b82c04bc0ee2ca495598df6355c1042ad90ec7e",
+        "76b9dc48934fde944227d2714fc93278f4527fefcd8152fd5471f7075d906f51a5430d5e2eb5f19a8906e80a0c5c1bba",
+        "937ccd203cc54a6da405ff9f2a612465befc4c3d77072f1683489b042cde07fad343bd25fb1115a3b6429fd5cf55c248",
+        "535e0fb98d08ee0c485c147f5f04c6d9826dfeb1a73210cb8bf2e0ec0f50fb74ffdb1ab3111a66c001c935bb8c967181",
+        "38daf72e76dcbb5672e69d664b8d5d619edf91ce7d3c523bedd823383b5515cf79c7e2da2100f0aefaca507049a40758"
+      ],
+      "notes": "https://staging.vettid.org/security/releases/20/",
+      "host": {
+        "tag": "release/staging/20",
+        "source_commit": "577275fd3779d89b29c40d1bb32d839bc139ce90",
+        "measurements_sha256": "29158d51a81fdc788dccfc3a0b110f9227e488fa93a58286447168959ca4c677",
+        "host_files_sha256": "4f4eea4f88ca7be3edda684a6ae4101ea7d84342e13f5e73ea425afe01d6edc8",
+        "nitro_cli_version": "1.5.0",
+        "base_ami": "ami-04048e843b318bc37",
+        "ami_revision": 0,
+        "min_instances": 0,
+        "max_instances": 2
+      },
+      "log": {
+        "summary": "Release 20 updates the enclave's certificate checks, marks later recovery attempts urgent again, and finishes a vault deletion that stopped partway.",
+        "changes": [
+          "The enclave and its host are built with Go 1.26.10. Their certificate checks, used for every encrypted connection they make, no longer trust eight intermediate certificates of one certificate authority (CVE-2026-111943).",
+          "Fix: after you complete a recovery yourself, a later attempt to recover your vault is marked urgent again. Before, every later attempt in the same round was recorded without urgency.",
+          "Fix: a completed recovery now writes its attempts to your History at once, not at your next daily check. A lost confirmation of the successful attempt is sent again when the vault resumes.",
+          "When a change of your PIN or password finds recovery attempts it has to close, your vault now records why and tells you with an urgent notice. History also shows the name the recovering phone gave itself.",
+          "A vault deletion that stops partway is now finished. The vault asks VettID's host to mark the deletion before it deletes anything, and VettID's cleanup completes a deletion that stopped after that mark.",
+          "A one-time key your phone sends is used up as soon as the vault reads the request, even if it refuses it, and your phone can ask the vault to send its set of one-time keys again when they get out of step.",
+          "Only one phone holds your credential. Removing a phone clears it, the phone you recover with becomes the only app, and the vault says so when no phone holds it. Copied-vault checks run before a refusal.",
+          "The enclave logs a warning when it cannot start a vault's process, and the developer tools refuse to run where vault processes cannot.",
+          "Built from vettid-vault commit 577275f (tag release/staging/20) and independently rebuilt on 2026-10-20 with a matching PCR0."
+        ],
+        "security": "recommended",
+        "security_text": "Release 20 marks a recovery attempt urgent when it comes after a recovery you completed yourself; earlier releases could record such an attempt without urgency. It also stops trusting eight intermediate certificates that Go now distrusts. We know of no use of either against any vault. Your PIN and credential password were not exposed."
+      }
     }
   ]
 }
