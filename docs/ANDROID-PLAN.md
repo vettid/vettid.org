@@ -1,9 +1,20 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.54
+version: 0.1.55
 date: 2026-10-20
 changelog:
+  - 0.1.55: approved by the owner (2026-10-20) (VAULT-MESSAGING 0.51.1;
+    owner decision of 2026-10-20; found while implementing the reset's
+    lost answer on iOS). §4 **"Another phone became the holder"**, for
+    both "A lost answer to a PIN or password change" and "A lost answer
+    to New credential": a `forbidden` answer from the vault to any
+    request of the resolver ends the unresolved change (the marker and
+    the candidate cleared, the gate open) and shows the existing "Your
+    vault moved to a new phone" (`data_feed_device_replaced`) as the
+    one-time notice. Only the vault's own sealed answer counts; network,
+    relay, member API and host failures and timeouts stay "unreachable".
+    Nothing is erased. No new text. Tests follow
   - 0.1.54: approved by the owner (2026-10-20), with the behaviour and
     texts as written (vettid.org #356, #354). New §4 **"A vault being
     deleted"**: on `device.unlinked{vault_deleted}` the app closes the
@@ -2439,6 +2450,8 @@ From this version:
   app-wide: a notice on the main screen until dismissed, and a
   notification while the app is in the background. A change screen
   opened later ignores a decision it did not start.
+- (0.1.55) A `forbidden` answer from the vault to the resolver ends the
+  change: "Another phone became the holder" below.
 - **Any failure after the marker is stored** other than a vault answer
   (cancellation, an error while opening the answer) is handled as no
   answer: the request is kept when available, the resolver runs, and the
@@ -2538,6 +2551,42 @@ would raise a clone alarm.
   - one-time notice, not applied: "Your new credential wasn't made.
     Your credential, its password and your critical items are
     unchanged."
+
+**Another phone became the holder** (0.1.55, approved by the owner
+(2026-10-20); VAULT-MESSAGING 0.51.1 §11.14.9 "Another phone became the
+holder"; found while implementing the reset's lost answer on iOS). For
+both sections above (`pin.change`, `credential.password.change`,
+`vault.secret.renew` and `credential.reset`):
+
+- **A `forbidden` answer from the vault** to any request the
+  `ChangeResolver` sends (the resend of the same request,
+  `credential.version`, `credential.get`, `credential.ack`,
+  `credential.utk.get`, or any other) ends the unresolved change: the
+  `UnresolvedChange` and the change's candidate are cleared from
+  `account.bin`, the PIN is not left uncertain, and the gate opens. This
+  also holds when `credential.version` had already shown "applied" and a
+  later fetch, acknowledgement or top-up is answered `forbidden`.
+- **The notice** is the one-time notice of "Telling the member", with
+  the existing text "Your vault moved to a new phone"
+  (`data_feed_device_replaced`, the title the app shows for
+  `device.replaced`), not an "applied" or "not applied" text. No "Try
+  again" button.
+- **Only the vault's own answer counts**: an error response with code
+  `forbidden` opened under the device's session with the vault and
+  answering that request's id. Network errors, timeouts, HTTP statuses
+  and errors of the relay, the member API or the host, an answer that
+  does not open, and every other `VaultFailure` are no answer: the
+  marker stays and the "unreachable" text is shown.
+- **Nothing is erased.** This `forbidden` is not a proof for
+  `HolderPolicy`: the keys and local state stay until what it already
+  takes as proof, such as `device.unlinked{transferred}` or
+  `device.unlinked{replaced}`.
+- **Tests**: a change and a reset whose resolver gets `forbidden` from
+  the vault (to the resend, to `credential.version`, and to
+  `credential.get` after "applied"): marker and candidate cleared, the
+  gate open, the notice shown once, no wipe; an HTTP 403, a `forbidden`
+  from the relay, the member API or the host, and a timeout: the marker
+  stays, "unreachable" shown.
 
 **Passwords** (enrollment, password change, reset; VAULT-MESSAGING
 §11.14.7). The meter that scored length and character classes, and the

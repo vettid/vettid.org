@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.51.0
+version: 0.51.1
 date: 2026-10-20
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.10.0)
-  - ANDROID-PLAN.md (0.1.54)
-  - IOS-PLAN.md (0.1.12; §9.1 VA1–VA3)
+  - ANDROID-PLAN.md (0.1.55)
+  - IOS-PLAN.md (0.1.13; §9.1 VA1–VA3)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,24 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.51.1: normative clarification, owner decision of 2026-10-20,
+    **approved by the owner (2026-10-20)**; found while implementing
+    the reset's lost answer on iOS. No vault release, no change for the
+    member API or the host; apps only (ANDROID-PLAN 0.1.55, IOS-PLAN
+    0.1.13). §11.14.9 **"Another phone became the holder"**: deciding
+    an unresolved change or reset ("A lost answer", "A lost answer to
+    `credential.reset`") uses calls that only the holder may make. When
+    another phone has meanwhile become the holder (a recovery elsewhere,
+    a transfer), the vault answers them `forbidden`, which nothing here
+    covered, so the app stayed at "can't reach" with the gate closed
+    for ever. A `forbidden` answer from the vault to any request of the
+    resolution now **ends the unresolved change**: the marker and the
+    candidate are cleared, the gate opens, and the app shows its text
+    for a vault that moved to another phone. **Only the vault's own
+    end-to-end encrypted answer counts**: a transport error, a timeout,
+    an HTTP or host failure, or anything else not from the vault stays
+    "can't reach", so a faulty or hostile host cannot end a change. It
+    is not a proof that this phone was replaced: nothing is erased
   - 0.51.0: normative; **approved by the owner (2026-10-20)**; with
     VAULT-HOST-PROTOCOL 0.1.14 and MEMBER-API 2.10.0 (vettid.org #356).
     **Needs a vault release** (staging release 20: the vault, its
@@ -16072,6 +16090,8 @@ change instead of repeating it.
      the check **ends without a decision**. The app clears the
      unresolved change, leaves the candidate to the next unlock
      (§11.14.1 rule 4) and follows that answer's own path (§3.5.9).
+     (0.51.1) A `forbidden` answer is not this case: it ends the change
+     as "Another phone became the holder" (below) says.
      (0.45.0) It offers no retry that would send the PIN or password
      again. After a PIN change, the PIN stays **uncertain**: until an
      unlock under step 5 settles it, the app refuses the owner check and
@@ -16089,7 +16109,8 @@ change instead of repeating it.
      or unlock confirms them.
    - `bad_pin`, `bad_password`, `weak_password` and the other refusals
      are shown as they are, with the entry that was wrong cleared, and
-     the change did not apply.
+     the change did not apply. (0.51.1) `forbidden` ends the change as
+     "Another phone became the holder" (below) says.
    - (0.45.0) **`stale_credential`** means that **this change did not
      apply**: the vault answers it before running the change and caches
      that answer under the request's `id` (§8.2), so no copy of the
@@ -16239,7 +16260,9 @@ change:
      a decision**. The app clears the unresolved change, offers no retry
      that would send the PIN or a password again, and says that either
      password may be the current one. An alarm follows its own path
-     (§3.5.9), whose fetch brings the latest blob either way;
+     (§3.5.9), whose fetch brings the latest blob either way. (0.51.1)
+     A `forbidden` answer is not this case: it ends the reset as
+     "Another phone became the holder" (below) says;
    - no answer at all: the reset stays unresolved, and the app tells the
      member that it will check when it can reach the vault.
 4. **An answer that arrives** to the request (the first send or a
@@ -16248,7 +16271,8 @@ change:
    `weak_password`, `backoff`, `busy`, `counter_unavailable`, `retry`
    and the other refusals mean **not applied**; `stale_credential`
    means not applied, and the app fetches the blob and does not retry
-   with the typed secrets.
+   with the typed secrets. (0.51.1) `forbidden` ends the reset as
+   "Another phone became the holder" (below) says.
 5. **Telling the member** is step 7's.
 
 The vault needs no change for this. vettid-vault staging release 18
@@ -16261,6 +16285,56 @@ answers `{exists, version, key, updated_at, alarm?}`, and the reset's
 own answer is `{credential, version, key, utks}`
 (`features/credential/credential.go` `Handle`, `holderReset`,
 `create`).
+
+**Another phone became the holder** (0.51.1; owner decision of
+2026-10-20, approved by the owner (2026-10-20); found while
+implementing the reset's lost answer on iOS). Deciding an unresolved
+change or reset ("A lost answer", "A lost answer to
+`credential.reset`") uses requests that only the holder may make
+(§3.5.9): the resend of the request itself, and `credential.get`,
+`credential.ack` and `credential.utk.get` after "applied"; and
+`credential.version`, which needs an owner device. If another phone has meanwhile become the holder
+(a recovery completed elsewhere, §11.14.6, or a transfer, §11.14.10),
+the vault answers them `forbidden`. Up to 0.51.0 nothing here covered
+that answer: the change stayed unresolved, and the app stayed at "can't
+reach" with the gate of step 2 closed, for ever.
+
+- **A `forbidden` answer from the vault** to any request the app sends
+  to decide an unresolved change or reset (those above, or any other
+  request of the resolution) is a **definite outcome**: this phone is
+  no longer the holder, so the change can no longer be decided or
+  completed from it. The app **ends the unresolved change**: it clears
+  the marker and the change's candidate (§11.14.1), leaves no PIN
+  uncertain (step 3), and the gate of step 2 opens. This holds for a
+  PIN change, a password change, a renew and a reset alike, and also
+  when `credential.version` had already shown "applied" and a later
+  `credential.get`, `credential.ack` or `credential.utk.get` is
+  answered `forbidden`.
+- **Telling the member.** The app then shows, as step 7 says, the text
+  it already shows for a vault that moved to another phone (ANDROID-PLAN
+  and IOS-PLAN name it), not a "changed" or "not changed" text: from
+  this phone it cannot be known whether the change applied. It offers
+  no retry that would send the PIN or a password again.
+- **Only the vault's own answer counts**: an error response with code
+  `forbidden` (§10.1) in the inner plaintext (§5.3) of a response to
+  that request (`re` equal to its `id`, §8.1), opened under this
+  device's end-to-end encrypted session with the vault. A transport
+  error, a timeout, an HTTP status, an error of the relay, the member
+  API or the host, an answer that does not open or answers another
+  `id`, and anything else that is not from the vault is **no answer**:
+  the change stays unresolved, and the app shows its "can't reach your
+  vault" text (step 3, "No answer at all"). A faulty or hostile host can
+  therefore delay a decision, as before, but cannot end a change.
+- **Not a proof of replacement.** Ending the change erases nothing: the
+  app keeps its keys and its local state, and erases them only on what
+  already proves that this phone was replaced (the vault's own
+  `device.unlinked{transferred}` or `device.unlinked{replaced}`,
+  §11.14.10, §11.11.5).
+
+The vault needs no change for this: it already answers `forbidden` to
+a request that only the holder may make when it comes from another
+device (§3.5.9), and caches every answer of a request, errors included,
+under the request's `id` (§8.2).
 
 #### 11.14.10 Transfer from release R
 
@@ -16701,6 +16775,8 @@ stricter answer winning. Two more are specified later:
   | vettid-ios (0.48.0) | IOS-PLAN 0.1.9 §6.3; New credential stays hidden until then | app |
   | vettid-vault (0.49.0) | (1) The unlock job returns the marker `recovery_cancelled` with `cancelled_recovery_id` only for a result that is `ok: true` with `recovery_cancelled` (`Core.Open` / `c.unlock` return a `Marker`; `AltUnlockOutcome` gains the cancelled recovery's id); `enclave/wire.go` accepts the code and the member for `unlock` only (`markerCodes`, the answer's checks) and `enclave/instance.go` passes them for `unlock`; the parent (`parent/consumer.go`) checks the ULID and copies both into an `unlock` slot only. (2) The `unlocked` (or `moved`) lifecycle frame carries `cancelled_recovery_id`, and the parent writes it to the vault row as `recovery_cancelled` (`parent/aws.go`). The id also crosses `internal/vaultipc`: the `Lifecycle` notification gains the field (a channel version step). (3) `recovery_cancel` with `recovery_id`: the eight-line signed string (`vms/recovery` `RequestSigningString`) and its vector in `recovery.json`; the queue parser reads the member; the id carried in the cancel's job body (today `{}`, `enclave/instance.go`) and across `internal/vaultipc` to `vault.RecoveryCancel` (today called with `""`); the clear code `recovery_not_current` as the cancel's marker, with a `markerCodes` entry for `recovery_cancel`, `enclave/instance.go` passing the marker for a cancel, `ParseResponse` accepting that code without an envelope for a cancel, and the parent copying it without one. Tests: a cancel with a persist failure gives no marker and no event field; a marker naming a recovery that is not the slot's; a lost answer with the event still written; a named cancel of another recovery is refused and a seven-line cancel keeps the old rule (§11.5, §11.14.8; VAULT-HOST-PROTOCOL 0.1.13) | **needs a vault release** (staging) |
   | vettid.org member API (0.49.0) | MEMBER-API 2.9.0 "A recovery cancelled from the phone": the cancelled recovery matched on `cancelled_recovery_id` (slot) or `recovery_cancelled` (vault row); a per-recovery notice claimed before audit and email; conditional field updates for every cancel; unlock slots that live as long as the recovery; the named `recovery_cancel` behind `RECOVERY_CANCEL_ID_FROM_RELEASE` (`lambda/shared/recovery-sign.ts` signs the eight-line form; a staging test of both forms at the boundary release before the setting is changed); the host's new attributes and the jobs' permissions (lib/stacks/vault-stack.ts, lib/vault/access.ts) | member API, host stack |
+  | vettid-android (0.51.1) | ANDROID-PLAN 0.1.55 "Another phone became the holder": a `forbidden` from the vault during the resolution ends the unresolved change or reset (marker and candidate cleared, gate open, the moved-vault text); transport, host and timeout failures stay "can't reach" | app |
+  | vettid-ios (0.51.1) | IOS-PLAN 0.1.13 §6.3: the same | app |
 
 - **Measurements before the numbers are final**, on a staging host: the
   heavy derivation's time and memory with other vaults running; how often
