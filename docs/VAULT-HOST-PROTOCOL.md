@@ -1,17 +1,35 @@
 ---
 title: VAULT-HOST-PROTOCOL
 status: approved by the owner 2026-10-12 (H1–H9 as recommended)
-version: 0.1.13
-date: 2026-10-19
+version: 0.1.14
+date: 2026-10-20
 owner: Al Liebl (Mesmer)
 component: vault enclave (supervisor), parent (host process)
 related:
-  - VAULT-MESSAGING.md (0.50.0) §2 (threat model, who sees what), §11.14 (release R: recovery and the attempt counter), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
+  - VAULT-MESSAGING.md (0.51.0) §2 (threat model, who sees what), §11.14 (release R: recovery and the attempt counter), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
   - VAULT-PLAN.md (0.1.8) §5.2 (D5: TLS in the enclave), §5.3 (D4: one process per vault)
   - VAULT-RELEASES.md (0.1.32) §3.4 (C3, C4), §8.4 (network and egress), §8.7 (observability)
   - VAULT-RELAY-SCALING.md (0.1.2) §6, §10
   - vettid-vault `internal/hostproto`, `enclave/supervisor`, `enclave/egress`, `parent`, docs/V3-NOTES.md "Enclave ↔ parent", docs/SMOKE.md
 changelog:
+  - 0.1.14: with VAULT-MESSAGING 0.51.0 and MEMBER-API 2.10.0
+    (vettid.org #356); **approved by the owner (2026-10-20)**; for
+    staging release 20, not built. A deletion that stops between
+    VAULT-MESSAGING §12.5 step 1 and step 5 is finished without the
+    app. (1) A new enclave request, **`MarkDeleting` (0x06)**, field
+    `vault_id`: sent once a deletion's marking flush is stored; the
+    parent writes `deleting_at` on the vault row (whatever the lease,
+    once, never on a `deleted` row) and answers `ok` only after that
+    write, or when the condition is refused; `error` otherwise. The
+    vault tells no device before the `ok`. (2) The parent removes
+    `deleting_at` in its update for `unlocked`. (3) A new queue
+    operation, **`delete_resume`**, without an envelope, which the
+    parent routes like `delete` (no lease, no slot code): the enclave
+    erases only a vault whose own sealed header records `deleting`, or
+    reports `deleted` for one whose header and state are already gone,
+    and otherwise does nothing. §5, §6.1, §9, §10, §11.3 and new
+    requirements P19 and P20 follow. The host role gains the write of
+    `deleting_at`
   - 0.1.13: with VAULT-MESSAGING 0.49.0 (owner decision 2026-10-19;
     approved by the owner (2026-10-19)); not built. (1) One
     new host code with one clear member: an `unlock` answer that carries
@@ -572,6 +590,31 @@ requests with them (SigV4) and sends those over TLS that it terminates
 `expiration` and asks again once when KMS says they are expired or
 unknown.
 
+### 5.6 `MarkDeleting` (0x06)
+
+(0.1.14; VAULT-MESSAGING 0.51.0 §11.5, §12.5 "Mark at the host";
+release 20, not built.)
+
+| | Fields |
+|---|---|
+| Request | `vault_id` |
+| Reply `ok` | none |
+| Other replies | `invalid` (not one well-formed `vault_id`); `error` |
+
+Sent by the enclave for a vault process whose deletion's marking flush
+is stored (the supervisor lets a process name only its own vault). The
+parent writes, on the vault row and whatever the lease, `deleting_at`
+= its own Unix seconds, conditional on the row existing, its `state`
+not being `deleted` and no `deleting_at` being there yet, and answers
+`ok` once that write has succeeded **or its condition was refused**
+(the mark exists, the row is deleted or gone: nothing is left to
+record). Any other failure of the write is `error`. It writes nothing
+else in that update (not `state`, not the lease). The enclave retries
+an `error` or a timeout (1 s, doubling to 15 s) for up to 2 minutes
+from the first request; the vault process delivers nothing of
+VAULT-MESSAGING §12.5 step 2 before an `ok`, and ends locked without
+one. The request is idempotent.
+
 ## 6. Requests from the parent to the enclave
 
 ### 6.1 `Queue` (0x10)
@@ -647,6 +690,25 @@ unknown.
   at least the next key's `seq` or a `header_seq` at least that of the
   write that carried it; never on time alone (VAULT-MESSAGING §11.5,
   §11.14.2).
+
+- **`delete_resume` (0.1.14; VAULT-MESSAGING 0.51.0 §11.5, §12.5;
+  release 20, not built).** A new operation without an envelope,
+  which the member API sends only for a vault row with `deleting_at`.
+  The parent routes it as it routes `delete`: it takes no lease, copies
+  no code into a slot and deletes the message when the enclave answers.
+  The enclave does nothing while a process for that vault runs on the
+  instance. Otherwise it reads its own release's header: one that
+  records `deleting` is erased as VAULT-MESSAGING §12.5 step 4 says for
+  that case and `deleted` is reported (§7.2); one that records no
+  deletion, or cannot be read, is left alone; with no header and no
+  state object it erases what is left (the member index, if it still
+  names the vault) and reports `deleted`; with no header but a state
+  object it does nothing. The answer is `done`, with no envelope and no
+  code. A parent before 0.1.14 drops the message as unreadable; each
+  release runs its own parent (§10).
+- **`unlocked` clears the mark (0.1.14).** The parent's update for an
+  `unlocked` event also removes `deleting_at` (a vault whose marking
+  flush is stored never runs again, VAULT-MESSAGING §12.5).
 
 ### 6.2 `LeaseLost` (0x11)
 
@@ -1049,6 +1111,7 @@ time of a record is its `LastModified`.
 | Hello answer | 30 s | enclave |
 | Reconnect | 200 ms, doubling to 5 s | enclave |
 | Any enclave request (store, credentials) | 60 s | enclave |
+| `MarkDeleting` (0.1.14) | 60 s each; retried from 1 s, doubling to 15 s, for 2 minutes in all; then the vault ends locked | enclave |
 | Parent unreachable: lock every vault | 120 s without a `Ping`, checked every 10 s (through 8f2c8bf: without a connection) | enclave |
 | Lock of every vault, then kill | 10 s | enclave |
 | Frame write, enclave → parent | 60 s, then the connection ends | enclave |
@@ -1094,6 +1157,8 @@ meant to meet. What the code does if they do:
 | A known request with another number of fields | `invalid`; for the hello, a failed hello (the enclave requires exactly three reply fields, the parent exactly two request fields) |
 | Extra pairs in a `Stats` reply | dropped by the parent |
 | A `Lifecycle` with five, seven, eight, eleven or fourteen fields | accepted by the parent (§7.2); fifteen from 0.1.13 |
+| `MarkDeleting` to a parent before 0.1.14 | answered `invalid` as an unknown kind; the vault then ends locked without telling its devices (never met: each release runs its own parent) |
+| A queue operation `delete_resume` at a parent before 0.1.14 | dropped as an unreadable message |
 | An egress header with another version | closed without an answer |
 
 So a new request kind can be added without breaking either side, and
@@ -1220,9 +1285,10 @@ more than "the operation does not happen, or happens late".
 | `StoreDelete` reply | keep the object and say `ok`; delete anything it can reach in the bucket at any time | The parent's role can delete stored state anyway (VAULT-MESSAGING §13.5). A kept object cannot be opened without the PIN and a registered device |
 | `Credentials` reply | give no, expired, or another principal's credentials | KMS answers come over the enclave's TLS. Sealing keys release data keys only to the release's attested measurements, and the enclave checks the key's policy itself before sealing. Wrong credentials are failed unlocks |
 | `Queue`, sealed operations (`enroll`, `unlock`, `recovery_register`) | drop, delay, reorder, replay, send to another instance; change the clear members | Replays and redirected requests are refused (VAULT-MESSAGING §11.6). It cannot make one: it has no ETK and no device key. A changed `account` member reaches the vault (below) |
-| `Queue`, operations without an envelope (`lock`, `delete`, `account`, `recovery`, `recovery_cancel`) | **forge them** for any `vault_id` | `lock`: the vault locks. *From release L (0.1.3, planned):* a `lock` carries `unlock_id` or is ordered by `enqueued_at`, both of which the parent can read and set, and the parent writes the `code` of the answer: it can still lock any vault, drop any lock, and report `locked` for a vault it left open. The members protect an honest path against late delivery, not against the parent. What bounds a parent that keeps a vault open is the idle lock, decided in the enclave by its own clock (VAULT-MESSAGING §3.6.8). `delete`: a running vault deletes itself with the full semantics of VAULT-MESSAGING §12.5, otherwise its stored objects are erased; an operator power stated in §13.5. `account`: a running vault takes the snapshot, so the parent can make a vault show its owner, and put in the core of its shared profile, **names and account details of the parent's choosing**; the snapshot is display only and "not authenticated beyond the host path" (VAULT-MESSAGING §11.13, §10.8). `recovery` (0.1.10, release R: signed by the member API, VAULT-MESSAGING §11.14.8; the parent alone can no longer start or cancel one, and a forged one locks nothing): with a browser key of its own the parent **starts a recovery**: a running vault locks and tells its devices why, unlocks are refused `recovery_pending`, and after the enclave's 24 h the parent can open the code. The devices are told only if the vault was running when the recovery began, and see `recovery_pending` only while the parent serves them the header that records it; a parent that serves an earlier header shows them nothing (§11.4 item 4). A recovery still needs an attested app, the PIN and the credential password, and exists only with the credential backup on (VAULT-MESSAGING §11.11); the two backoffs do not limit a parent that also replays stored objects (§11.4 item 4). `recovery_cancel`: ends a member's recovery |
+| `Queue`, operations without an envelope (`lock`, `delete`, `delete_resume`, `account`, `recovery`, `recovery_cancel`) | **forge them** for any `vault_id` | `lock`: the vault locks. *From release L (0.1.3, planned):* a `lock` carries `unlock_id` or is ordered by `enqueued_at`, both of which the parent can read and set, and the parent writes the `code` of the answer: it can still lock any vault, drop any lock, and report `locked` for a vault it left open. The members protect an honest path against late delivery, not against the parent. What bounds a parent that keeps a vault open is the idle lock, decided in the enclave by its own clock (VAULT-MESSAGING §3.6.8). `delete`: a running vault deletes itself with the full semantics of VAULT-MESSAGING §12.5, otherwise its stored objects are erased; an operator power stated in §13.5. `account`: a running vault takes the snapshot, so the parent can make a vault show its owner, and put in the core of its shared profile, **names and account details of the parent's choosing**; the snapshot is display only and "not authenticated beyond the host path" (VAULT-MESSAGING §11.13, §10.8). `recovery` (0.1.10, release R: signed by the member API, VAULT-MESSAGING §11.14.8; the parent alone can no longer start or cancel one, and a forged one locks nothing): with a browser key of its own the parent **starts a recovery**: a running vault locks and tells its devices why, unlocks are refused `recovery_pending`, and after the enclave's 24 h the parent can open the code. The devices are told only if the vault was running when the recovery began, and see `recovery_pending` only while the parent serves them the header that records it; a parent that serves an earlier header shows them nothing (§11.4 item 4). A recovery still needs an attested app, the PIN and the credential password, and exists only with the credential backup on (VAULT-MESSAGING §11.11); the two backoffs do not limit a parent that also replays stored objects (§11.4 item 4). `recovery_cancel`: ends a member's recovery. `delete_resume` (0.1.14): erases only a vault whose sealed header records `deleting`, or one whose header and state are already gone, so a forged one finishes a deletion the vault itself began, or does nothing |
 | `Queue`, the manifest document | withhold it, or give another | The request fails `manifest`. It cannot make the enclave accept a manifest the app did not verify (VAULT-MESSAGING §11.5) |
 | `Queue` reply (seen by the parent) | drop it, or write another slot | The app gets no result or a result it cannot open; results are sealed. The host codes (`recovery_registered`, `recovery_unavailable`, `recovery_attempt` and, from 0.1.13, `recovery_cancelled` with `cancelled_recovery_id` and `recovery_not_current`) can be forged or suppressed with the effects VAULT-MESSAGING §11.5 lists |
+| `MarkDeleting` reply (0.1.14) | say `ok` without writing; say `error`, or nothing | A false `ok`: the devices are told and the row is not marked, so a deletion that then stops is not resumed (the state before 0.1.14). `error` or no answer: the vault ends locked without telling its devices, and the member's next unlock finishes the deletion. Either way nothing is opened or kept; **denial of service only** |
 | `LeaseLost` | send it for any vault, at any time; never send it | The vault locks. Never sending it leaves a vault running without a lease; if a second instance then opens the vault, the two meet at the conditional state write, and the one that finds a newer version is zeroized (the split-brain guard does not depend on leases) |
 | `Ping` | not send it; send it and renew no lease; ignore the answer | Not sending it locks every vault after 120 s (§4.3): **denial of service only**. Sending it proves only that the peer is alive: a parent can ping and renew nothing, and what then stops two instances writing one vault is the conditional state write, as before. It learns the number of running vaults, which it has from the lifecycle events |
 | `Shutdown` | send it at any time | Every vault locks, with its flush |
@@ -1428,6 +1494,20 @@ VAULT-MESSAGING 0.33.0); normative from release R, not built.*
   attempt used.
 - **P18.** The instance role MUST NOT hold a delete, bypass-governance,
   legal-hold or bucket-configuration permission on the counter bucket.
+
+*P19–P20: added in 0.1.14 (approved by the owner (2026-10-20),
+with VAULT-MESSAGING 0.51.0); normative from release 20, not built.*
+
+- **P19.** The enclave MUST NOT deliver any part of VAULT-MESSAGING
+  §12.5 step 2 (a notice, the requester's answer, the mailbox deletion)
+  for a deletion before the parent has answered its `MarkDeleting`
+  with `ok`, and MUST end the vault's process locked when no `ok`
+  comes within 2 minutes.
+- **P20.** On a `delete_resume` the enclave MUST NOT erase any object
+  of a vault unless its own release's header, unsealed by the enclave,
+  records `deleting`, or neither that header nor the vault's state
+  object exists; it MUST NOT act while a process for that vault runs
+  on the instance.
 
 ## 13. Open points
 
