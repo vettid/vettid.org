@@ -1,9 +1,19 @@
 ---
 title: AGENT-PLAN
 status: draft
-version: 0.1.6
-date: 2026-10-18
+version: 0.1.7
+date: 2026-10-20
 changelog:
+  - 0.1.7: §7.2 and §7.4: ANDROID-PLAN 0.1.53 adds the "Devices &
+    agents" section (AA1–AA5), approved by the owner (2026-10-20) with
+    its recommendations as written, with its own decision table and
+    the specification gaps it found (its decision 14). Following its
+    decisions 2, 3 and 17: AA2 approves
+    a pairing without initial grants (an agent's reading permissions
+    are share rules, which `device.pair.approve{grants}` refuses), so
+    A6 tests no LEASH grant of an owner type, only agent share rules;
+    A6's "auto" step waits for AV9 on staging. The connector's code
+    plan is unchanged.
   - 0.1.6: owner decisions of 2026-10-18 on signing. A5.2 and the macOS
     half of A5.3 resume; Windows Authenticode waits until the business
     entity exists. Release tags are signed (the owner's SSH key) and the
@@ -93,7 +103,7 @@ related:
   - RELAY-PROTOCOL.md (0.9.4), RELAY-PLAN.md ("vettid-agent")
   - ARCHITECTURE.md (0.1.4), TECH-PREVIEW.md
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2, §5 row 3)
-  - ANDROID-PLAN.md (0.1.43) — "Devices & agents" (later), the
+  - ANDROID-PLAN.md (0.1.53) — "Devices & agents" (§4, approved), the
     `agents` History category, agent share-rule limits
   - PQC-MIGRATION.md (§4 row 5, release signing root)
   - IOS-PLAN.md (0.1.1) — the model for this plan's form
@@ -837,8 +847,11 @@ as an issue in vettid-agent, opened in A0.1.
 
 Checklist in `docs/STAGING-CHECKLIST.md` in vettid-agent, run with a
 **staging test account** on the Android staging app on a test phone:
-pair by copying the code, compare the SAS, approve with a session and a
-grant; read an item shared with the agent (ask, then auto); approve and
+pair by copying the code, compare the SAS, approve with a session;
+share items with the agent by an agent share rule (its only grant in
+A6, ANDROID-PLAN 0.1.53 decisions 2 and 3), made with the password;
+use an item shared with the agent (ask, then auto: the auto step once
+AV9 is in a staging release, ANDROID-PLAN decision 17); approve and
 deny referred requests in Approvals; see the agent's activity in History
 (`agents`); end the session, revoke, resume after a suspension, unlink.
 **Exit A6** is the owner running the checklist in person.
@@ -856,7 +869,7 @@ deny referred requests in Approvals; see the agent's activity in History
 | A3.7, A3.8, A3.9 | AV9 (and AV10 for A3.8, AV11 for A3.9) in a staging release; AA7 and AA8 for the staging checklist (A6) |
 | A5.2, A5.3 (macOS) | the owner's YubiKey keys and Apple Developer ID (§8 items 2–3) |
 | A5.3 (Windows) | the business entity and its Authenticode certificate (§8 item 4) |
-| A6 | Android AA1–AA5 on staging (§7.2), ANDROID-PLAN's "Devices & agents" approved |
+| A6 | Android AA1–AA5 on staging (§7.2), ANDROID-PLAN's "Devices & agents" approved; its "auto" step: AV9 in a staging release (ANDROID-PLAN 0.1.53 decision 17) |
 | Production | a production release whose channel lists `leash` (§11.10.8, STAGING-DEVELOPMENT-PLAN §2.4) and the Android work in a production app |
 
 ## 7. Work outside vettid-agent
@@ -887,12 +900,17 @@ ANDROID-PLAN lists Devices & agents as a later drawer entry and a later
 phase (§4 "Drawer", §6 "Calls, devices/agents/LEASH, … follow v1").
 Before any of this is built, ANDROID-PLAN needs a "Devices & agents"
 section with screens and texts, approved by the owner (§7.4). The
-connector's staging phase A6 needs AA1–AA5.
+connector's staging phase A6 needs AA1–AA5. (0.1.7) Specified in
+ANDROID-PLAN 0.1.53 §4 "Devices & agents", approved by the owner
+(2026-10-20); its decision 14 lists the VAULT-MESSAGING gaps it found
+(no list of pending pairings, access requests and approvals; no
+`device_id` in `device.pair.approve`'s answer; unnamed codes for ended
+ones).
 
 | # | Work | Spec | Today |
 |---|---|---|---|
 | AA1 | **Devices & agents screen**: `device.list` (name, role, last active, access session and its end), unlink (`device.unlink`, with a confirmation), end an access session (`device.session.end{device_id}`) | §10.3, §6.8 | none |
-| AA2 | **Pair an agent**: `device.pair.create{role: "agent"}`, the QR and the code with Copy and Share (the code expires in 10 minutes), `device.pair.pending` → the SAS comparison screen ("Does the agent show 123 456?"), reject (`device.pair.reject`), approve with a first access session length (`session_seconds`) and optional initial grants; grants need the credential's unlock window (`credential_locked` → ask for the password, then approve) | §6.7, §10.3, §10.11 | QR kinds parsed only |
+| AA2 | **Pair an agent**: `device.pair.create{role: "agent"}`, the QR and the code with Copy and Share (the code expires in 10 minutes), `device.pair.pending` → the SAS comparison screen ("Does the agent show 123 456?"), reject (`device.pair.reject`), approve with a first access session length (`session_seconds`); (0.1.7) no initial grants (ANDROID-PLAN 0.1.53 decision 2: an agent's reading permissions are share rules, AA4, made right after; `device.pair.approve{grants}` refuses `items.read`, and owner-type grants wait for A4), so the approval needs no unlock window | §6.7, §10.3, §10.11 | QR kinds parsed only |
 | AA3 | **An agent's permissions**: list (`leash.grant.list{agent_id}`), add or change (`leash.grant.issue`, within the unlock window: scope, Ask me each time / Allow automatically, connections, per hour / per day for `auto`, ends, status lifetime), revoke (`leash.grant.revoke`), resume after a suspension (`leash.agent.resume`); `sync.event` `leash.grant.changed`, `.revoked`, `leash.agent.suspended` | §10.11 | none |
 | AA4 | **Agent share rules** (`items.read`): the share-rule editor with an agent as subject, including `per_hour` and `per_day` (agent rules only, ANDROID-PLAN §4 rule editor note; VAULT-MESSAGING 0.23.0) | §10.12, §10.11 | model only (`ShareSubject.agentId`) |
 | AA5 | **Approvals for agents**: approve (not only decline) `device.session.pending` with a changeable length, and `approval.pending` for an agent's `agent.request` (say which item, "read" or "use", and which agent) and for delegable owner types; replace "This version of the app does not pair desktops or agents, so it can only decline." | §6.8, §10.3 | decline only |
@@ -916,7 +934,10 @@ Android; nothing here blocks on iOS.
 ### 7.4 vettid.org (owner approval)
 
 - ANDROID-PLAN: the "Devices & agents" section of §7.2 (screens, texts,
-  the History details), as its own version.
+  the History details), as its own version. (0.1.7) AA1–AA5 in
+  ANDROID-PLAN 0.1.53, approved by the owner (2026-10-20); the History
+  details (AA6) and
+  the ways to use a secret (AA7, AA8) follow.
 - STAGING-DEVELOPMENT-PLAN §5 row 3: record AG0 and this plan.
 - LEASH-IMPLEMENTATION "Connector": rewritten when A3 is on staging (an
   MCP server; the platform binding of AG3; Q1's deviation).

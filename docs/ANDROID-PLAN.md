@@ -1,9 +1,28 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.52
+version: 0.1.53
 date: 2026-10-20
 changelog:
+  - 0.1.53: approved by the owner (2026-10-20), with the recommendations
+    as written (AGENT-PLAN 0.1.7 §7.2 AA1–AA5, §7.4; VAULT-MESSAGING
+    0.50.0). New §4 "Devices & agents": the drawer entry (after Vault);
+    the list of devices and a device's page (`device.list`, end access,
+    remove with a confirmation); pairing an agent (the code with Copy
+    and Share, the SAS comparison, a first access length, no initial
+    grants); an agent's permissions (`leash.grant.*`, resume after a
+    pause; owner-type permissions hidden until the connector supports
+    them); the agent share-rule editor; approvals for access requests
+    and agent requests ("see" or "use", which item, which agent),
+    deny-only for what the app cannot show; the credential password
+    before every permission; feed targets and channels (the §4
+    Notification modes mapping changed with decision 16); tests;
+    eighteen decisions, with the specification's gaps. Texts say "use",
+    not "read": a rule lets an agent use an item (`item.use`); seeing a
+    value is a reveal, asked each time, on a vault with VAULT-MESSAGING
+    0.42.0 (decision 17 for a vault without it), and the limit of
+    `item.use` on short values is said plainly. Drawer, feed table and
+    §6 point to it. Not built
   - 0.1.52: approved by the owner (2026-10-19, 2026-10-20) (VAULT-MESSAGING
     0.50.0). §4 **"Event titles"**: a plain title for every event the
     vault sends, in Notifications, system notifications and History,
@@ -669,6 +688,8 @@ related:
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
   - CALLS-PLAN.md (0.1.3) — calls; video in C4 (§4, 0.1.42)
+  - AGENT-PLAN.md (0.1.7) — the agent connector; §7.2 AA1–AA5 (§4
+    "Devices & agents", 0.1.53)
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -762,7 +783,8 @@ patterns:
 **Drawer** (0.1.11, owner decisions of 2026-10-07): Messages ·
 Connections · Approvals (badge) · Vault · History · Settings · Help —
 later: Calls, Devices & agents, Shared actions & introductions, Wallet,
-Location. "Credential" is not in the drawer: it is reached from Settings →
+Location. (0.1.53) Devices & agents is specified in §4 "Devices &
+agents", after Vault (decision 13 there). "Credential" is not in the drawer: it is reached from Settings →
 Security → Credential. "Invite a connection" is not in the drawer either:
 the floating action button invites on Connections and starts a new
 message on Messages (§3). The drawer has **no "create" group** (owner
@@ -1071,7 +1093,7 @@ feed repository and no screen.
    | `share.rate_limited` | "<First> reached the limit of your <tag> rule" (§10.12) | The rule's editor (`ref` = `rule_id`) |
    | `critical-secret.use.request` | "<First> asks to use <item>" | Approvals: the use (credential password there) |
    | `item.revealed` | "<item> was revealed" | The item (a critical item asks for the credential password, as elsewhere) |
-   | `device.pair.pending`, `device.paired`, `device.unlinked`, `device.transferred`, `device.replaced` | "A device asks to pair" / "<device> was paired" / "<device> was removed" / "Your vault moved to this phone" / "Your vault moved to a new phone" | Settings → Vault (devices) |
+   | `device.pair.pending`, `device.paired`, `device.unlinked`, `device.transferred`, `device.replaced` | "A device asks to pair" / "<device> was paired" / "<device> was removed" / "Your vault moved to this phone" / "Your vault moved to a new phone" | Settings → Vault (devices); 0.1.53: the pairing, the device and the list in §4 "Devices & agents" |
    | `device.session.pending`, `approval.pending` | "<device> asks for access" / "<device> asks to approve a request" | Approvals |
    | `credential.alarm` (urgent) | "Your credential was used somewhere else" | The alarm screen (as the shell's banner) |
    | `credential.password_failed` | "Wrong credential password entered" | History, Security |
@@ -1523,9 +1545,9 @@ its process runs; nothing keeps it running in the background).
    | Messages | `message.received` (text from `message.new` only with previews on) |
    | Requests | `connection.request`, `connection.authenticate.requested`, `grant.request` (a batch: one, "Sam asks for 3 things", updated), `share.pending`, `critical-secret.use.request`, `device.pair.pending`, `device.session.pending`, `approval.pending`; `action.request`, `intro.request`, `location.request` with "Open VettID on a newer version" until their phases |
    | Calls | `call.missed` |
-   | Security alarms | `credential.alarm` (urgent; also while held), `owner_check.locked`, `owner_check.failed`, `owner_check.hold_changed`, `credential.password_failed`, `credential.reset`, `device.replaced`, `device.transferred`; (0.1.52, approved by the owner 2026-10-19) a failed `recovery.attempt` (`urgent`, `not_success` or a `ref` that does not read), `recovery.counter_unavailable`, `recovery.change_required`; (owner decision of 2026-10-20) a `rollback` closure's `urgent` item; the event `vault.locking` (Vault locked, 3) |
+   | Security alarms | `credential.alarm` (urgent; also while held), `owner_check.locked`, `owner_check.failed`, `owner_check.hold_changed`, `credential.password_failed`, `credential.reset`, `device.replaced`, `device.transferred`; (0.1.52, approved by the owner 2026-10-19) a failed `recovery.attempt` (`urgent`, `not_success` or a `ref` that does not read), `recovery.counter_unavailable`, `recovery.change_required`; (owner decision of 2026-10-20) a `rollback` closure's `urgent` item; (0.1.53, decision 16 of §4 "Devices & agents") `leash.agent.suspended`, `leash.referrals_limited`; the event `vault.locking` (Vault locked, 3) |
    | Daily check | the events `vault.held` and the early warning (3) |
-   | Vault activity | `connection.added`, `connection.request.peer_declined`, `connection.asks_paused`, `connection.stale`, `connection.removed`, `grant.shared`, `grant.revoked`, `share.rate_limited`, `item.revealed`, `device.paired`, `device.unlinked`, `credential.rotated`, `leash.*`, `location.shared`, `wallet.signed`; (0.1.52) `device.secret_renewed`, `recovery.completed`, any other `recovery.attempt`, `identity.rotation_failed`, `identity.rotate_conflict`; unknown kinds of priority `normal` or above |
+   | Vault activity | `connection.added`, `connection.request.peer_declined`, `connection.asks_paused`, `connection.stale`, `connection.removed`, `grant.shared`, `grant.revoked`, `share.rate_limited`, `item.revealed`, `device.paired`, `device.unlinked`, `credential.rotated`, `leash.*` (0.1.53: except `leash.agent.suspended` and `leash.referrals_limited`), `location.shared`, `wallet.signed`; (0.1.52) `device.secret_renewed`, `recovery.completed`, any other `recovery.attempt`, `identity.rotation_failed`, `identity.rotate_conflict`; unknown kinds of priority `normal` or above |
    | none | priority `low`, `guide`; anything while the app is in the foreground on the Notifications screen or the item's own target (the bell and the screen show it) |
 
    A muted connection's asks create no item (§10.4.1), so they never
@@ -3567,6 +3589,640 @@ changes vault code here.
     `except` does nothing), but §10.1's versioning says otherwise.
     Proposed: bump the version and send `presence.changed`.
 
+### Devices & agents (0.1.53)
+
+*Approved by the owner (2026-10-20), with the recommendations of
+"Decisions" as written (AGENT-PLAN §7.2 AA1–AA5, §7.4).
+Not built. Read against VAULT-MESSAGING 0.50.0 §6.7, §6.8, §10.1, §10.3, §10.9,
+§10.11 and §10.12, AGENT-PLAN 0.1.7 and vettid-android master
+`bfefaab4`. The agent connector's staging phase (AGENT-PLAN A6) waits
+for AA1–AA5 on staging. The ways to use a secret (AA7, AA8) and the
+History and feed details (AA6) are separate sections, later; where an
+AA1–AA5 screen meets them, this section says what it does until then.
+Every question the specification left open is in "Decisions" at the
+end, each decided by the owner on 2026-10-20 as recommended; the text
+marks where one applies, "(decision n)".*
+
+**What it is.** A paired agent (an AI agent's LEASH connector, a
+program on the member's computer) acts on the vault only while the
+member allows access, and only within the permissions the member gives
+it. This section adds the app's side: the list of the member's devices,
+pairing an agent, its permissions, the items it may use, and approving
+what it asks.
+
+**Secure by default.** Every rule below follows from these:
+
+- An agent can use no item unless the member has made a share rule for
+  it (§10.11 "Agent share rules"), and never a critical item (§10.12).
+  The app never offers to share a critical item with an agent.
+- **Using is not seeing.** On a vault that implements VAULT-MESSAGING
+  0.42.0's ways to use a secret, a rule lets the agent *use* an item
+  (`item.use`: the vault works with the value and returns only a
+  result); a *reveal* (`item.get`) is refused (`way_not_allowed`) until
+  the member allows it for that item (AA7), and then every reveal is
+  asked in Approvals (§10.11 "Ways to use a secret"). The texts below
+  say "use", and mention seeing a value only where a reveal applies. A
+  vault without 0.42.0 behaves otherwise (decision 17).
+- Every permission the member gives an agent is signed with the
+  credential key, so it needs the credential's unlock window (§10.11
+  "The member present"; §3.5.3). The app asks for the credential
+  password before each one (decision 4).
+- Approving means the member saw what is approved: an ask whose details
+  the app does not hold (decision 10) or cannot show in full (an
+  `item.run` or `item.proxy` before AA8) is offered only **Deny**.
+- New permissions ask by default: "Ask me each time" (`ask`) is
+  preselected wherever the specification has a mode.
+
+**Staging time scale.** None of this section's waits is scaled: the
+10-minute pairing code and its 10-minute wait, the 5-minute approvals
+and the 10-minute session requests are under an hour, and access
+lengths, permission ends and rule ends are durations the member
+chooses (STAGING-TIME-SCALE §2.2, N11 and the note under it). The app
+shows the vault's own times (`exp`, `expires_at`).
+
+#### The drawer and the list (AA1)
+
+**Drawer.** "Devices & agents" leaves the drawer's "later" list and is
+a destination after Vault: Messages · Connections · Approvals · Vault ·
+Devices & agents · History · Settings · Help (decision
+13). Glyph `Devices` (Material Icons Outlined). No badge: what a device
+asks for waits in Approvals, which keeps its badge. Feed items about
+devices open this screen instead of "Settings → Vault (devices)" (§4
+Notifications, 4).
+
+**The list** (`device.list`, read when the screen opens, on return to
+it, and after a `sync.event` of kind `device.paired`, `device.unlinked`,
+`device.session` or `leash.agent.suspended`, at most one read in flight
+and one queued; `leash.grant.list` is read with it for the paused
+agents). Held
+in memory only and cleared at lock, like the feed (§4 Notifications,
+10).
+
+- **This phone** first: the app's own entry, "This phone", with no
+  actions (the app leaves only by a transfer or a recovery, §6.7).
+- Then **agents**, then **desktops**, each newest `created_at` first.
+  A row: the initial tile (agents orange, desktops purple, the
+  History category colours), the name, the role ("Agent" / "Desktop")
+  and the second line: "Access until 15:40" (`session_expires_at`, in
+  local time; with the date when not today) or "No access", then
+  "Last active 10 min ago" (`last_active_at`) or "Not active yet".
+  A suspended agent (in `leash.grant.list`'s `suspended`, read with the
+  list) shows a "Paused" chip in the error colour.
+- `kind` is read as the role. §10.3 does not list its values; the
+  reference vault writes `app`, `desktop` and `agent`, and an unknown
+  value is listed under desktops with the value as its role (decision
+  14, item d).
+- The floating action button: **Pair an agent** (below). No "Pair a
+  desktop" (decision 9).
+- **Empty** (this phone only): "No agents yet" / "Pair an agent to let
+  an AI assistant on your computer use items you choose. It acts only
+  while you allow it."
+
+**A device's page** (tap a row; agents and desktops).
+
+- Title: the name. Under it "Name given by the agent" ("…by the
+  desktop"): `name` is the device's self-asserted `profile.name`
+  (§10.3); there is no rename (decision 11).
+- Rows: Role; Paired on (`created_at`); Last active; **Key
+  fingerprint** (`ik`, 8 groups of 4 hex digits, as on a connection's
+  page).
+- **Access** card:
+  - with a session: "Access until 15:40" and **End access**;
+  - without: "No access. When the agent needs access, it asks you in
+    Approvals."
+  - Agents only, below it: "Agents act only while you allow access,
+    and only within the permissions you give them."
+- Agents only: **What it may use** (the agent's share rules, AA4) and
+  **Other permissions** (its other grants, AA3), each a list with its
+  own add action.
+- The action bar: **History** (opens History with the search field set
+  to the device's name, since `audit.list` has no device filter and the
+  vault's search matches device names, §10.9; decision 14, item e) and
+  **Remove** (confirmed, below).
+
+**End access** (`device.session.end{device_id}`). A confirmation
+(decision 12): "End access for <name>?" / "It stops at
+once, and any of its requests still waiting for you are declined. It
+can ask for access again; you decide then." Buttons **End access** and
+**Cancel**. On `{}`: the card shows "No access"; the snackbar "Access
+ended". The vault tells the device (`device.session.ended{reason:
+"ended"}`), declines its held requests and drops its pending session
+request (§6.8), so the app removes that device's entries from
+Approvals at once.
+
+**Remove** (`device.unlink{device_id}`). Confirmation, destructive
+style:
+
+- An agent: "Remove <name>?" / "It loses access to your vault at once
+  and cannot connect again. Its permissions and its share rules are
+  deleted. Services it showed a permission to may accept it for up to
+  <the longest status lifetime of its permissions, plus 1 minute>. To
+  use this agent again, pair it again." Buttons **Remove** and
+  **Cancel**.
+- A desktop: "Remove <name>?" / "It loses access to your vault at once
+  and cannot connect again. To use it again, pair it again."
+- On `{}`: back to the list, the snackbar "<name> was removed".
+  `forbidden` (the app itself; not offered) and any other error:
+  "<name> could not be removed. Try again."
+
+The "plus 1 minute" bound is §10.11's revocation latency bound
+(`status_ttl` + 60 s); with no permission left it is not mentioned.
+
+#### Pair an agent (AA2)
+
+**1. The code** (`device.pair.create{role: "agent"}` → `{pairing_id,
+link, exp}`). A full screen, title "Pair an agent":
+
+- Body: "Copy this code to the computer where the agent runs. It works
+  once and expires in 10 minutes." (AGENT-PLAN §11.)
+- The QR of the bare payload (pairing links stay bare, §6.4) and the
+  code itself in a monospace box, wrapped, selectable.
+- **Copy** and **Share** (decision 1). Copy puts the code
+  on the clipboard marked sensitive (`ClipDescription.EXTRA_IS_SENSITIVE`,
+  so Android's clipboard preview hides it). Since Android 10 an app can
+  read the clipboard only while it is in the foreground, so the app
+  clears the clipboard, if the clip is still its own, when the code
+  expires or the pairing ends while it is in the foreground, and
+  otherwise when it next comes to the foreground; it cannot clear it
+  while in the background (decision 1). Share opens the share sheet with the code only, under
+  the line "Send it only to yourself."
+- "Expires in 9:41", counting down to `exp`; at zero: "This code
+  expired." with **New code** (a new `device.pair.create`).
+- **Cancel**: `device.pair.reject{pairing_id}` (before a scan the vault
+  sends nothing, §6.7) and back.
+- The screen is excluded from screenshots and the recent-apps preview
+  (`FLAG_SECURE`): the code is a bearer secret for 10 minutes (decision
+  1).
+- Errors: `owner_check_required` → the owner-check screen; any other:
+  "A pairing code could not be made. Try again."
+
+**2. Compare** (on `device.pair.pending{pairing_id, pending_id, role,
+name, sas}` for this `pairing_id`). The code screen is replaced by:
+
+- Title "Compare the code".
+- Body: "Does the agent show **123 456**? Approve only if the codes
+  match." (The SAS as six digits in two groups of three, as the
+  connector prints it, AGENT-PLAN §11; TalkBack reads it digit by
+  digit.)
+- "It calls itself <name>." Under it, smaller: "The code proves this
+  phone talks to the agent you just gave the code to. The name is
+  only what the agent says about itself."
+- Buttons: **The codes match** (primary) and **They don't match**
+  (`device.pair.reject{pairing_id}`). After a reject: "Pairing
+  rejected" / "The agent is told it was rejected. If you did not
+  expect a code, someone else may have the pairing code; it no longer
+  works." with **Done**.
+- `role` other than `agent` (a desktop that used an agent code): not
+  possible by §6.4 (the bundle's kind must match `t`); if it happens
+  the screen shows only **Reject**.
+- A `device.pair.pending` that arrives while the member is elsewhere
+  is an Approvals entry and a feed item ("<name> asks to pair") that
+  opens this screen. If the app no longer holds the SAS (the process
+  ended since), it can neither compare nor reject: `device.pair.reject`
+  needs the `pairing_id`, and the feed item's `ref` is the `pending_id`
+  (vettid-vault records it so; §10.9 names no `ref` for the kind). The
+  entry then has no buttons: title "A device asks to pair" (the feed
+  item carries no name), body "This pairing can't be checked on this
+  phone any more. Let it expire: it ends by itself within 10 minutes
+  and nothing is paired. If you want to pair, start again." (decision
+  10; decision 14, item a). Once the feed item's `at` is more than 10
+  minutes old the entry is hidden: the vault has dropped the pairing
+  by then (§6.7).
+
+**3. Allow access** (after **The codes match**). A sheet:
+
+- Title "Allow access now?"; body "Agents act only while you allow
+  access, and only within the permissions you give them."
+- Choices (`session_seconds`): **No access yet**, 15 minutes,
+  **1 hour** (preselected), 4 hours, 8 hours, 24 hours (decision 5).
+- **Pair** sends `device.pair.approve{pairing_id, session_seconds?}`,
+  with no `grants` (decision 2): an agent's reading
+  permissions are share rules, which `device.pair.approve{grants}`
+  refuses (§10.11), and owner-type permissions wait for decision 3.
+  Since it carries no grants, it needs no unlock window.
+- Answers: `{}` → step 4. `owner_check_required` → the owner-check
+  screen, then the sheet again. Any error once the pairing may have
+  ended (its 10 minutes after the agent's `hs.init`; the app does not
+  know that time, and §10.3 names no code for it, decision 14, item c):
+  "This pairing has ended. Start again from Devices & agents." With
+  `credential_locked` (only possible with grants): the unlock window
+  prompt (below), then the same request once more.
+
+**4. Paired.** "<name> is paired" / "It can't use any of your items
+yet. Choose the items it may use: you decide per tag, and it never
+gets critical items." Buttons **Choose what it may use** (the
+share-rule editor, AA4) and **Later**. The new agent's `device_id` is
+not in the approval's answer (`{}`, §10.3). The app takes it from the
+`device.paired` feed item that the pairing records (its `device_id` is
+the new device's; vettid-vault records it so, §10.9 names the kind
+only), arriving as `feed.event` after the approval. If that has not
+arrived within 10 seconds, it reads `device.list` and takes the agent
+entry that was not in its previous list, of kind `agent` and with the
+`name` the comparison showed. If none or more than one fits, **Choose
+what it may use** opens the list instead (decision 14, item b).
+
+#### An agent's permissions (AA3)
+
+**The list** (`leash.grant.list{agent_id}` → `{grants, suspended}`;
+again after a `sync.event` `leash.grant.changed`, `leash.grant.revoked`
+or `leash.agent.suspended` whose `agent_id` is this agent, and after
+any `share.rule.changed` or `share.rule.deleted`, which carry only
+`rule_id` (and `version`): the app re-reads when the `rule_id` is one
+of this agent's rules or one it does not know, since a new rule's id
+is not yet known). Grants of scope `items.read` are the agent's share
+rules (`grant_id` = `rule_id`) and are listed under **What it may
+use** (AA4); the others under **Other permissions**. A row:
+
+- the scope's label (below) and, under it, "Asks you each time" or
+  "Allowed automatically, up to 60 an hour and 1,000 a day without
+  asking"; ", until 3 Nov 2026" (`expires_at`); ", only with Sam Lee,
+  Ana Ruiz" (`connections`, as names; "Removed connection" for an id
+  no longer listed);
+- tap: the editor; trailing ⋯: **Remove**.
+
+**Paused agent.** When the agent is in `suspended`: a banner at the top
+of its page, error colour: "Paused by your vault" / "<name> made too
+many refused requests in an hour, so your vault paused all of its
+permissions. Resume it only if you know why this happened." Action
+**Resume** (`leash.agent.resume{agent_id}`, no unlock window: resuming
+signs nothing). `{}`: "Resumed"; `not_found`: "It is no longer paused"
+and the list is read again.
+
+**Other permissions: hidden until the connector supports them**
+(decision 3). The delegable owner types (§10.11: the
+connections, messages, profile and shared-action scopes) are what the
+connector offers only in its v1.1 (AGENT-PLAN A4, AG5). Until the owner
+confirms that, the "Other permissions" heading and its add action are
+not shown; grants another device issued are listed and can be removed.
+When it is shown, the editor is:
+
+- **Scope**: one of the nine delegable types, with labels: "See your
+  list of connections" (`connection.list`), "See a connection's
+  details" (`connection.get`), "Send messages for you"
+  (`message.send`; under it "Text only: it can never send photos or
+  files"), "See your conversations" (`message.list`), "Read your
+  messages" (`message.get`; "It never sees photos or files"), "Mark
+  messages as read" (`message.read`), "See your shared profile"
+  (`profile.get`), "See shared actions" (`action.list`), "Use shared
+  actions" (`action.invoke`). A scope cannot change on a replacement:
+  it is part of the signed delegation, so the editor shows it fixed.
+- **Approval**: **Ask me each time** (preselected; `ask`) or **Allow
+  automatically** (`auto`).
+- **Without asking** (only with Allow automatically): "Up to [60] an
+  hour and [1,000] a day. Past that, it asks you." (`per_hour` 1–3,600,
+  `per_day` 1–86,400; not offered with Ask me each time, where the
+  vault refuses them, §10.11.)
+- **Connections** (only for `connection.get`, `message.send`, `.list`,
+  `.get`, `.read`, `action.invoke`): "All connections" or "Only these
+  connections" (pick 1–64; `connections`). Default: decision 3.
+- **Ends**: Never, 1 day, 1 week, **1 month** (preselected,
+  decision 7), 3 months, 1 year, or "Custom…" (a date and
+  time, future, at most 365 days ahead; `expires_at`).
+- **More options → Status lifetime** (`status_ttl`): 1 minute, 5
+  minutes, **15 minutes** (default), 1 hour, under "If you remove this
+  permission, services the agent showed it to may still accept it for
+  up to this long, plus 1 minute. Shorter is safer; the agent then
+  checks with your vault more often." (decision 8).
+- **Save permission** in the top bar: the unlock window prompt, then
+  `leash.grant.issue{agent_id, scope, approval, connections?, per_hour?,
+  per_day?, expires_at?, status_ttl?}` (new) or with `grant_id` and
+  `version` (replacement).
+
+**Answers to `leash.grant.issue`**: `<grant>` → "Permission saved"
+and back. `credential_locked` → the unlock window prompt, then the same
+request once; a second `credential_locked`: "Your credential locked
+again before the permission was saved. Try again." `conflict` →
+"Another device changed this permission. Here is the current one."
+and the editor reloads it. `limit` (`agent_grants`) → "An agent can
+have at most 32 permissions, its share rules included. Remove one
+first." `not_found` → "This agent is no longer paired." `bad_request` →
+"This permission could not be saved: <the field> is not valid." (the
+app validates first, so this means a mismatch with the vault).
+`owner_check_required` → the owner-check screen. During a credential
+alarm the grant itself is answered `credential_locked` (the window
+cannot open, §3.5.9), and the prompt's `credential.unlock` is refused
+with `credential_frozen` / `rotation_required`: "Permissions can't be
+changed while a credential alarm is open", with a link to the alarm.
+
+**Remove a permission** (`leash.grant.revoke{grant_id}`; no unlock
+window). Confirmation: "Remove this permission?" / "<name> can no
+longer <scope label, lower case> from now on. Services it showed this
+permission to may accept it for up to <status_ttl + 1 min>." Buttons
+**Remove** and **Cancel**. On `{}`: "Permission removed".
+`not_found`: "It was already removed." Requests it had referred and that
+still wait in Approvals fail on approval (§6.8); the app leaves them
+listed and shows the vault's `result` if the member approves.
+
+#### What an agent may use: share rules (AA4)
+
+An agent uses items only through share rules whose subject is the
+agent (`share.rule.set{subject: {agent_id}}`, §10.11, §10.12). The
+editor is the connection rule editor (0.1.20, 0.1.22) with these
+differences:
+
+- **Opened from** the agent's page (**What it may use** → **Add a
+  rule**, or a rule's row) and from "Choose what it may use" after
+  pairing. Title "Share with <name>"; **Save rule** in the top bar.
+- **Tags**: as for connections (one or more, "any" or "all"; none
+  reserved). Under them: "Critical items are never shared with agents,
+  whatever their tags."
+- **Mode** (`mode`, which decides *inclusion*): **Ask me about each
+  item** (preselected; `ask`) — "When an item gets one of these tags,
+  you're asked before the agent can use it." — or **Include tagged
+  items automatically** (`auto`) — "Items with these tags can be used
+  without asking you first. Using an item gives the agent a result
+  worked out from it, not the item itself." The connection editor's
+  "Share automatically" is worded so for agents because an agent's rule
+  is a permission to use on demand. The `auto` choice is offered only
+  as decision 17 says.
+- **Uses without asking** (`per_hour`, `per_day`; always present for an
+  agent rule): "Up to [60] uses an hour and [1,000] a day. Past that,
+  each use asks you." (1–3,600, 1–86,400; defaults 60 and 1,000.)
+- **Uses of each item** (`uses`, optional, 1–10,000): "Stop after
+  [n] uses of each item."
+- **What "use" can reveal** (under the mode, always): "A use returns a
+  code computed from the value and data the agent chooses. For a short
+  or guessable value, such as a PIN or a common password, the agent
+  could find the value from one such code. Share only items whose
+  values are long and random, such as API keys." (decision 14, item g.)
+- **Ends** (`expires_at`): as for permissions, with **1 month**
+  preselected (decision 7); "Custom…" up to 3,650 days ahead.
+- **Include items that already have these tags** (`include_existing`,
+  on by default), with the dry-run preview (`share.rule.set{dry_run:
+  true}`, sent without the unlock prompt: it signs nothing, and
+  vettid-vault answers it before any signing, though §10.12 does not
+  say whether it needs the window, decision 14, item i) as for
+  connections: "<n> items: <k> will be asked about,
+  <m> included now", the `ask_rule_id` explanation ("Asks you first
+  because your *medical* rule for <name> covers it").
+- **More options → Status lifetime** (`status_ttl`), as for
+  permissions.
+- **Saving** signs a delegation, so: the unlock window prompt, then
+  `share.rule.set` (§10.12 table: "an agent subject: app within the
+  unlock window"). Answers: `<share_rule>` → "Rule saved";
+  `credential_locked`, `conflict`, `owner_check_required` and a
+  credential alarm as for permissions; `limit` with
+  `agent_grants` → the 32-permission text above; `share_rules_subject`
+  → "An agent can have at most 64 rules." (never reached before 32);
+  `share_rules` → "Your vault holds at most 512 share rules."; `not_found`
+  → "This agent is no longer paired."
+- **Deleting a rule** (`share.rule.delete{rule_id}`; no unlock window):
+  "Stop sharing your *medical* rule's items with <name>?" / "It can no
+  longer use them from now on. Services it showed this rule to may
+  accept it for up to <status_ttl + 1 min>." Buttons **Stop sharing**
+  and **Cancel**.
+- **The rule's row** on the agent's page: its name by its tags
+  (§10.12 "Naming a rule"), "Asks you about each item" or "Includes
+  tagged items automatically", "Up to 60 uses an hour", the end, and
+  "<n> items" (`included`), "<k> waiting for you" (`pending`).
+- **Pending items** (`share.pending` with an agent subject, and
+  `share.pending.list{agent_id}`) are Approvals entries as for
+  connections, worded "Let <name> use <item>?" with **Allow** and
+  **Don't allow** (`share.decide`, which needs no unlock window); the
+  decline warning for an item already shared: "<name> can use it now
+  through your *id* rule. Not allowing it stops that too."
+- **How the agent may use each item** (the ways of AG13,
+  `leash.item.set`) is AA7: until it is built, a rule's items have
+  `["use"]` only (VAULT-MESSAGING 0.42.0's migration), so, on a vault
+  that implements 0.42.0 (AGENT-PLAN AV9), an agent may use an included
+  item without seeing it and every reveal is refused
+  (`way_not_allowed`). On a vault without it (today's staging vault:
+  AV9 is not started), an `item.get` of an included item within the
+  rule's limits is answered without asking, and the value reaches the
+  agent's app (§10.11 before 0.42.0). The app cannot tell the two
+  apart: §11.10.9 has no capability for the ways (decision 17,
+  decision 14 item h). Until it can, every agent rule's editor and row
+  show: "On this vault, the agent may receive the values of the items
+  it uses, and its app may keep them in its history."
+
+#### Approvals for devices and agents (AA5)
+
+Replaces "This version of the app does not pair desktops or agents,
+so it can only decline." Each entry names the device and its role.
+
+**Access requests** (`device.session.pending{request_id, device_id,
+role, name, seconds, exp}`):
+
+- Entry: "<name> asks for access" / "Agent · for 1 hour" (`seconds`)
+  and "Waiting for 8 more minutes" (to `exp`).
+- Detail: "Allow <name> to act for you for:" with the choices 15
+  minutes, 1 hour, 4 hours, 8 hours, 24 hours and the requested length
+  preselected (added to the list if it is not one of them; decision 6). For an agent: "It can use only the permissions you gave
+  it." Buttons **Allow** (`device.session.approve{request_id,
+  seconds}`) and **Deny** (`device.session.deny{request_id}`).
+- A newer request from the same device replaces the older (§6.8): the
+  app replaces the entry by `device_id`.
+- Answers: `{device_id, session_id, expires_at}` → "Access allowed
+  until 15:40". Any error (the request was replaced, decided on
+  another device or dropped after 10 minutes; §10.3 names no code,
+  decision 14, item c) → "This request is no longer waiting." and the
+  entry goes. `owner_check_required` → the owner-check screen.
+- `sync.event{device.session}` and `{approval.decided}` from another
+  device remove the entry (as today).
+- **Known only from its feed item** (the process ended since the
+  event): the item's `ref` is the `request_id` and its `device_id`
+  names the device (vettid-vault records both; §10.9 names the `ref`).
+  The entry shows "<name> asked for access" (the name from
+  `device.list`) and "The length it asked for isn't known on this phone
+  any more", with the choices above and **1 hour** preselected, and
+  **Allow** and **Deny**. A `device_id` not in `device.list` gives
+  **Deny** only. The request may have been dropped meanwhile (after 10
+  minutes): then "This request is no longer waiting." (decision 14,
+  item a). Once the feed item's `at` is more than 10 minutes old the
+  entry is hidden: the vault drops an undecided request by then (§6.8).
+
+**Requests held for approval** (`approval.pending{approval_id,
+device_id, role, name, type, body, exp, flags?}`), each with "Waiting
+for 4 more minutes" (to `exp`, at most 5 minutes, §6.8), **Approve**
+(`approval.decide{approval_id, approve: true}`) and **Deny**
+(`approve: false`). `<item>` is the item's name from the app's item
+cache, never a value; an item the app cannot resolve is "an item you
+no longer have" and offers only **Deny**.
+
+| `type` and `body` | Title | Body | Buttons |
+|---|---|---|---|
+| `agent.request`, `op: "item.use"` | "<name> wants to use <item> without seeing it" | "Field: <label>. Your vault uses the value for the agent and gives it only the result. For a short or guessable value, such as a PIN or a common password, the agent could work the value out from that result." Then the data the result is computed over (`data`, decoded; shown as text when it is printable UTF-8, else as hex), under "Data from the agent" (decision 18) | Approve, Deny |
+| `agent.request`, `op: "item.get"` | "<name> wants to see <item>" | "Fields: <labels>" (or "All fields and notes"). Then, always (with or without the `history` flag): "The agent's app may keep the value in its history." | Approve, Deny |
+| `agent.request`, `op: "catalog"` | "<name> wants to list the items it may use" | "It sees their names and field labels, never their values." | Approve, Deny |
+| `agent.request`, `op: "item.run"` or `"item.proxy"` | "<name> wants to use <item> in a way this version of VettID can't show" | "Update VettID to see the details. Until then you can only deny it." | Deny |
+| A delegable owner type (after decision 3) | "<name> wants to <scope label, lower case>" | the body's connection as "First Last" where it names one; for `message.send`: "Message to <First Last>:" and the text in full | Approve, Deny |
+| A desktop's step-up request | "<name> asks to approve a request" | "Desktop requests can't be shown in this version of VettID, so you can only deny them." | Deny (decision 9) |
+| Any other `type` or `op` | "<name> asks to approve a request" | "This version of VettID can't show this request, so you can only deny it." | Deny |
+
+AGENT-PLAN AA5's "read" is `item.get` (a reveal, see) and "use" is
+`item.use` (§10.11). The titles follow AGENT-PLAN §11's drafts; for `item.get`,
+its reveal draft, since 0.42.0 every `item.get` is a reveal.
+
+**Answers to `approval.decide`** (`{result}`): `"ok"` → "Approved" or
+"Denied". `"forbidden"` → "Approved, but <name> no longer has a
+permission that covers it, or is paused, so nothing was done." (§6.8:
+the vault checks the grants again when it executes). `"session_required"`
+or `"denied"` → "Approved, but <name>'s access ended first, so nothing
+was done." `"way_not_allowed"` → "Approved, but this item no longer
+allows that, so nothing was done." Any other `result` → "Approved, but
+your vault answered: <result>." An error answer to `approval.decide`
+itself (the approval expired or was decided elsewhere; no code is
+named, decision 14, item c) → "This request is no longer waiting."
+
+**Asks the app cannot show.** `approval.pending` and
+`device.pair.pending` arrive once, as events; their feed items carry
+only `ref` (and `device_id`) (§10.9). After the app's process ends, an
+`approval.pending` known only from its feed item (`ref` = the
+`approval_id`) has no `body`, so it shows "<name> asked for something
+this phone can no longer show. Deny it, or let it expire." with
+**Deny** only (decision 10). A pairing known only so offers nothing
+(AA2, step 2); an access request offers what is said above.
+
+#### The unlock window prompt
+
+Used before `leash.grant.issue` and an agent's `share.rule.set`, and
+after any `credential_locked`:
+
+- A sheet titled "Confirm with your credential password"; body "Giving
+  <name> a permission is signed with your credential, so only you can
+  do it. Enter your credential password." One password field;
+  **Confirm** and **Cancel**.
+- It sends `credential.unlock` (as the Credential screen's "Open the
+  unlock window" does, with its UTK and blob handling), then the
+  waiting request once. Each prompt is a full credential operation
+  (§3.5.3): it spends a UTK, rotates the CEK (a new blob), and a wrong
+  password counts in the password backoff.
+- When the prompt opened the window (it was closed before), the app
+  sends `credential.lock` after the save's answer, so the window does
+  not stay open for its full length (decision 4); a window
+  that was already open is left as it was.
+- Answers to `credential.unlock`: `bad_password` → "That credential
+  password is not correct." (the existing text); `backoff` → the
+  countdown from `retry_after`; `credential_frozen` /
+  `rotation_required` → the credential-alarm text above;
+  `stale_credential`, `utk_invalid` → handled as everywhere else (the
+  blob refreshed, the pool topped up) and retried once without asking
+  again.
+- Asked before every permission and rule save, even while the window
+  is open (decision 4).
+- The password is held only while the request runs, as elsewhere.
+- Removing a permission or a rule, ending access, removing a device and
+  resuming an agent sign nothing and never ask for it.
+
+#### Notifications and the feed
+
+Feed labels and targets (§4 Notifications, 4; the existing strings,
+corrected where they named the wrong thing):
+
+| Kind | Label | Opens |
+|---|---|---|
+| `device.pair.pending` | "A device asks to pair" (the item carries no name; "<name> asks to pair" while the app holds the event) | The compare screen (no action if the SAS is gone, AA2 step 2) |
+| `device.paired` | "<name> was paired" | The device's page |
+| `device.unlinked` | "<name> was removed" | Devices & agents |
+| `device.session.pending` | "<name> asks for access" | Approvals: the request |
+| `approval.pending` | "<name> asks you to approve a request" | Approvals: the request |
+| `leash.rate_limited` | "<name> reached a limit" | The agent's page, the rule or permission `ref` names |
+| `leash.referrals_limited` | "<name> asked too often" | The agent's page |
+| `leash.agent.suspended` | "<name> was paused" | The agent's page (the Resume banner) |
+| `leash.item.read` | as today | The detail sheet until AA6 |
+| `leash.item.run`, `leash.item.proxy` | "An agent used <item>" (§4 "Event titles") | The detail sheet, with §4 "Event titles"' detail lines, until AA6 |
+
+Channels (§4 Notification modes, 7, whose table this version changes
+accordingly): `device.pair.pending`, `device.session.pending` and
+`approval.pending` stay on **Requests**; `leash.agent.suspended` and
+`leash.referrals_limited` move to **Security alarms** (decision 16); the other `leash.*` kinds stay on **Vault activity**. History's "Desktop session granted"
+and "Desktop session ended" become "Access allowed" and "Access ended"
+(`device.session.granted`, `.ended` are for agents too).
+
+#### Spec cross-check
+
+Every type, member and code named above is in VAULT-MESSAGING 0.50.0:
+`device.list`, `device.unlink`, `device.pair.create`, `.pending`,
+`.approve`, `.reject`, `device.session.pending`, `.approve`, `.deny`,
+`.end`, `approval.pending`, `approval.decide` (§10.3);
+`leash.grant.list`, `.issue`, `.revoke`, `leash.agent.resume`,
+`agent.request`'s ops (§10.11); `share.rule.set`, `.list`, `.delete`,
+`share.pending`, `share.pending.list`, `share.decide` (§10.12);
+`credential.unlock` (§3.5.3, §10.6); the `sync.event` kinds of §10.1;
+the feed kinds of §10.9; and the codes of §10.1. Where the
+specification is silent, decision 14 lists it.
+
+#### Tests
+
+- Unit (`DevicesManager`, fake `VaultApi`): the list's order and the
+  role from `kind`; the reads coalesced on `sync.event`; cleared at lock;
+  a suspended agent; `session_expires_at` shown and dropped.
+- Unit (pairing view model): create → code → `device.pair.pending` for
+  this `pairing_id` only (another pairing's is ignored) → approve with
+  each length and "No access yet" (no `session_seconds`) → the new
+  agent found in the next list; the code's expiry and New code; Cancel
+  sends `device.pair.reject`; a lost SAS gives Reject only; the
+  clipboard cleared at expiry.
+- Unit (permissions and rules): the editor never sends `per_hour` or
+  `per_day` with `ask` on a permission, always sends them on an agent
+  rule; `items.read` grants listed as rules; every answer code above
+  gives its text; `credential_locked` → the prompt → exactly one
+  resend; `conflict` reloads; the unlock prompt asked before each save
+  (decision 4) and never for remove, end access, unlink or resume;
+  `credential.lock` sent after the save only when the prompt opened the
+  window; `auto` offered only with `item_ways` and the warning shown on
+  every rule without it (decision 17); the `item.use` limit text on
+  every agent rule.
+- Unit (Approvals): every row of the table, including the deny-only
+  rows (`item.run`, `item.proxy`, desktops' requests, unknown types, an
+  unresolvable item, an entry without its body); `item.use`'s data
+  shown as text and as hex, and its short-value line; an access request
+  known only from its feed item; a pairing known only from its feed
+  item with no action; the history warning on
+  every `item.get`, with and without `flags`; each `result` text; an
+  entry replaced by a newer session request of the same device; entries
+  removed on `device.session.end` and `device.unlink`.
+- Compose UI and screen catalog: the list (empty, agents and desktops,
+  paused), a device's page with and without access, the code screen
+  (counting, expired), compare, rejected, allow access, paired, the
+  permission editor, the rule editor and its preview, each confirmation,
+  the unlock prompt with each error, each Approvals row; TalkBack reads
+  the SAS digit by digit and the countdowns as live regions; both
+  themes, AA; the largest font scale.
+- Privacy: the pairing code never in logs, saved state or crash
+  reports; `FLAG_SECURE` on the code screen; after a lock the app's
+  files hold no device name, `device_id` or grant (the scan used for
+  feed items).
+- Instrumented, dev stack: pair a `vaultctl` agent by its code, compare,
+  approve with 15 minutes; an agent rule with Ask me about each item,
+  the item asked in Approvals and used by the agent (`item.use`);
+  Include automatically (with a vault that lists `item_ways`, decision
+  17), used within the limits and referred past them; a reveal refused
+  with `way_not_allowed`; an
+  `item.use` referred and approved, another denied; end access; a
+  forced suspension and Resume; remove the agent, after which it cannot
+  request.
+- Manual: the AGENT-PLAN A6 checklist with the connector, on staging
+  with a staging test account, on the test phones.
+
+**PRs** (vettid-android, each with its tests): AA1 (list, page, end
+access, remove; drawer); AA2 (pairing); AA5 (Approvals; it only needs
+AA1); AA4 (agent rules); AA3 (permissions list, resume; the owner-type
+editor behind decision 3). AA6–AA8 follow in their own sections.
+
+#### Decisions (approved by the owner 2026-10-20, as recommended)
+
+| # | Question | Options | Decided (the recommendation) |
+|---|---|---|---|
+| 1 | How the pairing code leaves the phone | (a) Copy only; (b) Copy and Share (AGENT-PLAN AA2); either with the clipboard marked sensitive and cleared when the code ends (only while the app is in the foreground, Android 10 and later; otherwise at its next return), and `FLAG_SECURE` on the screen | **(b)**: a connector rarely has a camera, the code works once for 10 minutes, and the SAS catches anyone else who uses it. `FLAG_SECURE` on, as for the typed recovery code |
+| 2 | Initial grants with the pairing approval (`device.pair.approve{grants}`) | (a) none; the member chooses what it may use right after; (b) offer owner-type grants in the pairing flow | **(a)**: reading is by share rules, which the approval cannot carry (§10.11), and an approval without grants needs no password |
+| 3 | Owner-type permissions (messages, connections, profile, shared actions) | (a) hidden until the connector's A4 is confirmed (AG5's v1.1); (b) offered now; (c) offered now for the read-only scopes only. And when shown: "All connections" or a required pick | **(a)**: A6 needs only share rules, and an unused permission is only risk. When shown, **require a pick** of connections for `message.send` and `action.invoke` |
+| 4 | The credential password for every permission and agent rule | (a) use an open unlock window; (b) ask before every save, even with the window open; with either, `credential.lock` after the save when the prompt opened the window | **(b)**, with `credential.lock`: a permission gives a program standing access; one password per change is a fair price. Each prompt is a full credential operation (a UTK spent, the CEK rotated, a wrong password counted in the backoff). Other credential uses keep using the window |
+| 5 | First access at pairing | (a) 1 hour preselected, with "No access yet", 15 min, 4 h, 8 h, 24 h; (b) no access by default | **(a)**, matching the connector's first use right after pairing (AGENT-PLAN §11) |
+| 6 | Length of an approved access request | (a) the requested length preselected, any of 15 min to 24 h allowed; (b) never longer than requested | **(a)**: the member may know the task is long; shortening stays one tap |
+| 7 | Default end of an agent's permissions and rules | (a) Never (the specification's default when absent); (b) 1 month; (c) 3 months | **(b)**: access that lapses unless renewed; the member can choose Never |
+| 8 | Status lifetime (`status_ttl`) | (a) 15 min default under More options; (b) shown in the main form; (c) not shown | **(a)**: rarely changed, but the revocation bound depends on it |
+| 9 | Desktops | (a) listed (end access, remove) and their access requests approvable; no "Pair a desktop"; their held step-up requests deny-only; (b) also pair desktops now | **(a)**: no VettID desktop app is released, and each step-up type would need its own approval screen |
+| 10 | Asks whose details the app no longer holds (after its process ends) | (a) deny-only, plus a spec follow-up (14a); (b) hide them | **(a)**: never approve unseen; never hide an ask |
+| 11 | Renaming a device | (a) no rename, the self-asserted name labelled as such; (b) a local name on this phone; (c) a spec change for a name kept in the vault | **(a)** now; (c) later if wanted, so all devices agree |
+| 12 | Confirm "End access"? | (a) confirm; (b) no confirmation | **(a)**: it declines the device's waiting requests, and the connector waits before asking again (AGENT-PLAN AG8) |
+| 13 | Drawer position | (a) after Vault; (b) after History; (c) in Settings | **(a)**: agents act on the vault's items |
+| 14 | Specification gaps (a VAULT-MESSAGING follow-up) | **a.** No list of pending pairings, access requests or held approvals; feed items carry only `ref`, so a restarted app loses the SAS and the request's `body`. **b.** `device.pair.approve` answers `{}`, so the approving app does not learn the new `device_id`. **c.** No code named for approving or denying an ended pairing, access request or approval. **d.** `device.list`'s `kind` and `state` values are not listed. **e.** `audit.list` has no device filter. **f.** `leash.item.changed` (§10.11) is missing from §10.1's `sync.event` table, and whether resumption sends `leash.agent.suspended{suspended: false}` is not said. **g.** `item.use` returns HMAC-SHA-256 keyed by the value over data the agent chooses, so a short or guessable value (a PIN, a dictionary password) can be found offline from one result; an `auto` rule allows it without asking, within the rate limits. §10.11 does not say so. **h.** §11.10.9 has no capability for the ways to use a secret, so an app cannot tell a vault that refuses reveals from one that answers `item.get` without asking (decision 17). **i.** Whether `share.rule.set{dry_run: true}` for an agent subject needs the unlock window (vettid-vault answers it without) | **One small spec PR** for a–d and f–i: `device.pending.list` (pairings with `sas`, access requests, approvals with `body` and `flags`), and until then the `device.pair.pending` feed item's `ref` = the `pairing_id` (so a lost pairing can be rejected) and its name; `device_id` in the approval's answer (vettid-vault already records it on the `device.paired` feed item, which the app uses meanwhile); `not_found` for an ended one; the `kind` and `state` values; the table fixed; g stated in §10.11 with the advice to share only long random values; the capability `item_ways`; dry runs need no window. e stays (search by name works). The app works as written above until then |
+| 15 | `item.run` and `item.proxy` asks before AA8 | (a) deny-only with "Update VettID"; (b) hide | **(a)**, as 10 |
+| 16 | Channel for an agent paused or asking too often | (a) Security alarms; (b) Vault activity (today) | **(a)**: both mean an agent misbehaves. §4 Notification modes, 7 (the mapping) is changed with it |
+| 17 | The vault without the ways to use a secret (AGENT-PLAN AV9 not started): today's staging vault answers an included item's `item.get` within the rule's limits without asking, so every agent rule hands values to the agent's app once an item is included: an `auto` rule at once, an `ask` rule after the member allows the item; the app cannot tell which vault it has (14h) | (a) the A6 checklist, or only its `auto` step, waits until AV9 is in a staging release; (b) the app hides `auto` until it knows the vault has the ways; (c) the history warning on every agent rule until then; (d) the capability `item_ways` in §11.10.9, listed by the release that ships AV9 | **(d) with (b) and (c), and (a) for the `auto` step**: the app offers **Include tagged items automatically** only when the vault lists `item_ways`; without it, every agent rule is ask-only and its editor and row carry "On this vault, the agent may receive the values of the items it uses, and its app may keep them in its history."; A6's `auto` step runs once AV9 is on staging |
+| 18 | Show `item.use`'s data in the approval | (a) show it, decoded (text when printable, else hex); (b) show only the item and field | **(a)**: the data is what the agent has the vault compute over the secret; seeing it lets the member notice a guessing attempt or a stranger's challenge |
+
 ## 5. Architecture
 
 Multi-module Gradle, Kotlin, Jetpack Compose + Material3, Hilt, coroutines
@@ -3657,7 +4313,9 @@ signer (§7).
 | N1–N4 | 0.1.23, notification modes (§4 Notification modes, 10): N1 app (setting, channels, on-phone service, FCM stubbed); N2 spec (`push.register`); N3 vault (push ops, wakes); N4 gateway with FCM credentials, then FCM on | N1: notifications in the background on both test phones without Google; N4: FCM wakes on the Pixel 7 |
 
 Calls, devices/agents/LEASH, wallet, location and presence follow v1 in
-that order, each as its own phase. 0.1.42 (D8, owner 2026-10-17): of the
+that order, each as its own phase. (0.1.53) Devices & agents is AA1–AA5
+of AGENT-PLAN §7.2, specified in §4 "Devices & agents" with its PRs; the
+connector's staging phase (AGENT-PLAN A6) waits for it. 0.1.42 (D8, owner 2026-10-17): of the
 last three, the order is **wallet (W0–W2), presence (P1), location
 (L1–L3)**; video (C4) follows the calling service and ringing (C2, C3).
 Their PRs are listed in §4 "Wallet, presence, location and video".
