@@ -1,9 +1,19 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.11
+version: 0.1.12
 date: 2026-10-20
 changelog:
+  - 0.1.12: approved by the owner (2026-10-20), with the behaviour and
+    texts as written (vettid.org #356, #354; ANDROID-PLAN 0.1.54).
+    §4.2 **A vault being deleted** and §4.3 **The way back to release N
+    after leaving or a restart**: the same behaviour and texts as on
+    Android, carried here in full. §4.3 point 6, the owner's choice, is
+    what the iPhone app does now for an unlock routed to the old
+    release after `moved` (wait, retry, a neutral failure), now bound
+    to the stored marker and with "Return to release N" next to it. The
+    server side of a deletion that stops between §12.5 steps 1 and 5 is
+    left to a later VAULT-MESSAGING change
   - 0.1.11: approved by the owner (2026-10-19, 2026-10-20) (VAULT-MESSAGING 0.50.0;
     ANDROID-PLAN 0.1.52). §4.1 **Event titles**: the same plain titles,
     History details, hidden kinds, de-duplication (one notification per
@@ -525,6 +535,220 @@ uncounted outcomes never matched, an attempt later written as
 routed to Security alarms; the phone's name decoded, shown in its
 self-reported form, absent when the `ref` has none, and never changing
 the title, the priority or the channel; titles without a name.
+
+### 4.2 A vault being deleted (0.1.12)
+
+The same as ANDROID-PLAN §4 "A vault being deleted" (0.1.54), carried
+here in full; "the app" is the iPhone app.
+
+*Approved by the owner (2026-10-20), with the behaviour and texts as
+written, including the 10-minute bound. The decision (show "being
+deleted" at once) is the owner's, of 2026-10-20 (vettid.org #356).*
+
+**Why.** In a deletion the vault sends `device.unlinked{reason:
+"vault_deleted"}` in step 1 of VAULT-MESSAGING §12.5 "Order", erases
+in step 4 and reports `deleted` in step 5. Only then does the member
+API read the vault as gone: a `deleted` row reads `{vault: null}`, and
+later the row itself is removed (MEMBER-API "Vault deletion"). Until
+step 5 `GET /api/vault/status` still lists the vault, and reads
+`unlocked` while a lease is unexpired (MEMBER-API "`state` and the
+lease"). An app that re-reads the status once at the event can stay on
+the open vault for a vault that can never run again. It shows most
+when a `vault.delete` waited in a locked vault's mailbox and applied at
+the next unlock.
+
+**What the app does on `device.unlinked{vault_deleted}`.** The event
+comes from the vault over its session, so it is trusted as it is: from
+step 1 the vault is marked `deleting` and never opens again.
+
+1. **At once, over every screen**: the app closes the open vault (the
+   shell, the drawer, every vault screen and dialog, a release update
+   or an operation in progress) and shows **"Your vault is being
+   deleted"**. It drops the PIN and anything else of the vault it holds
+   in memory, sends nothing more to the vault, stops reading the vault's
+   messages and removes its posted notifications for this vault. It
+   keeps the app key and the device keys until the vault is gone (point 3): it needs
+   the app key to read `GET /api/vault/status`.
+2. **The marker.** In the same step it stores, with the app's
+   settings, the non-secret marker `deleting {vault_id, since, until}`
+   (`since`: when the event arrived; `until`: the bound below). A new
+   process that finds the marker starts in "being deleted", before it
+   reads anything, never on the unlock screen or the open vault.
+3. **Waiting for the row.** It re-reads `GET /api/vault/status` after
+   5, 10 and 30 s, then every 60 s, and at every start and return to the
+   foreground, until `until`. **The bound** `until` is 10 minutes after
+   `since`, or, when this phone sent the `vault.delete` and its `exp` is
+   later, that `exp` plus 2 minutes (as the app bounds its re-check of
+   an unanswered `vault.delete`). The vault counts as gone when the status
+   answers `{vault: null}`, or `401 unauthorized` to the app key (the
+   row, and with it the app key, is removed). Then the app does what it
+   does today when the vault is gone: it forgets the vault's keys and
+   local data, deletes the marker and moves to "no vault" (onboarding
+   with a setup code), with the one-time notice below. Any other
+   answer (the vault still listed, whatever its `state`; the API not
+   reachable) keeps the state and the marker.
+4. **After the bound.** If the vault is still listed at `until`, the
+   screen changes to the neutral "still finishing" text below, with
+   **Check again** (one re-read; a second tap waits for the first). The
+   app also re-reads at every start and return to the foreground. It
+   stays there, with the marker, until the vault is gone. Nothing in
+   this state starts a new timer or a new bound. A deletion that stops
+   between steps 1 and 5 of §12.5 leaves the vault listed until
+   something else finishes it; a later VAULT-MESSAGING change covers
+   that on the server side, and the app keeps this behaviour.
+
+**What the member can do there.** Nothing that changes the vault or
+this phone's keys: no unlock, no PIN, no update, no daily check, no
+cancel (a deletion that has reached step 1 cannot be cancelled; the
+portal's start-over cancel applies only before it, MEMBER-API "Vault
+deletion: start over"). The screen offers **Open the account site**
+(`https://account.vettid.org`, staging
+`https://account.staging.vettid.org`), where the member gets a setup
+code for a new vault once the deletion is done and finds how to contact
+VettID; and, after the bound, **Check again**. The app lock still
+applies.
+
+**What it is not.** The status's `deletion` (a start-over that is
+`pending` or `executing`) keeps the "Pending deletion" banner (ANDROID-PLAN §4
+table) until the event or the status says otherwise; it does not open
+this state by itself.
+
+**Texts.**
+
+| Where | Id | Text |
+|---|---|---|
+| The state, while waiting | `vault_deleting_title`, `vault_deleting_body` | "Your vault is being deleted" / "VettID is erasing everything in your vault. This usually takes a few minutes. Nothing in it can be opened or restored. You will get an email when it is done." |
+| The state, after the bound | `vault_deleting_slow_title`, `vault_deleting_slow_body` | "Still finishing" / "Your vault can no longer be opened, but VettID has not finished deleting it yet. Check back later." Action: **Check again** |
+| Check again, still listed | `vault_deleting_still` | "Not finished yet. Try again later." |
+| Check again, not reachable | `vault_deleting_unreachable` | "VettID couldn't be reached. Check your connection and try again." |
+| Both | `vault_deleting_account_site` | **Open the account site** |
+| "No vault", once, after this state | `vault_deleted_notice` | "Your vault was deleted. To start again, get a setup code on the account site." |
+
+The progress indicator while waiting has no percentage. The title is a
+polite live region for screen readers.
+
+**Tests.** The event while the vault is open, while a release update
+or an operation runs, and with the app in the background: the open
+vault closes at once, the PIN is dropped, nothing more is sent; the
+status still listing the vault as `unlocked`, then `locked`, then
+`{vault: null}`: "no vault" only after `{vault: null}` (and after a
+`401` to the app key); the bound from `since` and from a later
+`vault.delete` `exp`; the "still finishing" text at the bound, Check
+again, the vault gone later (at a start, a return to the foreground and
+Check again); a process killed in each phase restarts in "being
+deleted" (never on the unlock screen) and continues; the marker deleted
+with "no vault" and at a wipe; the one-time notice shown once.
+
+### 4.3 The way back to release N after leaving or a restart (0.1.12)
+
+The same as ANDROID-PLAN §4 "The way back to release N after leaving
+or a restart" (0.1.54), carried here in full.
+
+*Approved by the owner (2026-10-20), with the behaviour and texts as
+written. The decisions (keep "Return to release N" across leaving the
+update screen and a restart, vettid.org #354; wait, retry, then fail
+neutrally for point 6) are the owner's, of 2026-10-20.*
+
+**Why.** RELEASE-UPDATES §2 says the app can take the member back "as
+long as the move was not yet confirmed", and VAULT-MESSAGING §11.10.4
+keeps the move abandonable until release N+1 first opens the vault.
+Until now the offer lived only on the update screen, in memory: leaving
+the "Release N+1 did not open your vault" screen, or a process killed
+after `update: moved`, lost it, although the vault would still accept
+the abandonment.
+
+1. **The marker.** When the app takes `update: moved`, it stores, in
+   the same write that records the new release (§11.10.6), the
+   non-secret marker `move_unconfirmed {vault_id, from: {release,
+   pcr0}, to: {release, pcr0}, failed}`, with `failed` false. Release
+   numbers and PCR0s are public (the manifest), so the marker is not
+   secret; it is kept with the app's other per-vault release records,
+   and N's `header_seq` is kept with it (§11.10.6: N's release and
+   `header_seq` stay until the move is confirmed or abandoned).
+2. **When the new release keeps failing.** `failed` becomes true, and
+   is stored, at the first unlock after the move that fails to reach or
+   open the vault on N+1 for a reason that is not the member's: N+1 did
+   not start (`release_starting` past its waits, `release_unavailable`),
+   its instance did not verify, the unlock got no answer or an enclave
+   error. A wrong PIN, the backoff and a phone without a connection do
+   not set it.
+3. **The offer on the unlock screen.** While the marker is stored with
+   `failed` true, the unlock screen shows, above the keypad, the notice
+   below and the button **Return to release N**, at every start, until
+   the marker is cleared. It opens the existing confirmation ("Return
+   to release N?"); after **Return**, the unlock screen's PIN is used,
+   or the keypad asks for it first. The way back runs as on the update
+   screen ("Returning to release N…"): `GET /api/vault/enclave?release=`
+   N's PCR0, then the unlock with `release_update.to` = N's PCR0 and
+   `to_release` = N, approved like any update, with N's `header_seq`
+   (VAULT-MESSAGING §11.10.4, §11.10.5). The update screen keeps its own
+   **Return to release N**, now read from the marker, so leaving and
+   reopening it keeps the offer too. Before `failed` is set (for
+   example after a process killed right after `moved`), the unlock
+   screen unlocks as usual; that unlock reaches N+1 and confirms the
+   move.
+4. **Cleared** (the marker deleted, the offer gone) when:
+   - an unlock on N+1 succeeds: N+1 has opened the vault, which
+     confirms the move (§11.10.4);
+   - the vault says the move is confirmed: the `sync.event` kind
+     `vault.release` naming N+1, or N refusing the way back with
+     `wrong_release` (the vault is sealed to N+1 for good);
+   - the vault says the move is abandoned: `update: abandoned` (the app
+     records N as the release it last unlocked into, §11.10.6), or the
+     way back opening the vault on N with `update: refused` and code
+     `downgrade` (no pending move was left: the move had already been
+     abandoned; the app records N as above);
+   - N can no longer be reached for it: `410 release_unavailable` for
+     `?release=` N's PCR0 (the release ended), or N no longer in the
+     trusted manifest;
+   - the vault is gone or this phone is wiped.
+   A wrong PIN, the backoff, `release_starting`, `vault_busy` and a
+   missing connection keep it.
+5. **Not cleared by time.** The vault keeps a move abandonable for as
+   long as N+1 has not opened it, so the marker has no expiry of its
+   own; N's end date (VAULT-RELEASES §3) ends it through point 4.
+6. **The unlock routed to release N after `moved`: wait, retry, then
+   fail neutrally.** For a short while after `moved` the member API can
+   still route the vault to N, until the host records the move
+   (§11.10.5). The app then sees a release older than the one it last
+   unlocked into and does not send the PIN (§11.10.6). The PIN goes to
+   N only when the member chooses **Return to release N**; the rollback
+   check is unchanged. When the routed release is the marker's `from`
+   (number and PCR0 both), the app does not show the rollback text: it
+   keeps the step's progress text, fetches `GET /api/vault/enclave`
+   again after 5, 10, 15, 15 and 15 s (about a minute), and sends the
+   PIN only once the route names N+1. If it still names N, it reports
+   the neutral failure below, sets `failed` (point 2) and offers **Try
+   again** and **Return to release N**: going back stays the member's
+   choice. Any other older release still gets the rollback text, as
+   today.
+
+**Texts.** The confirmation,
+the progress and the outcome texts of the way back are the existing
+`release_update_return*`, `release_update_returning_title`,
+`release_update_step_return` and `release_update_abandoned_*`.
+
+| Where | Id | Text |
+|---|---|---|
+| Unlock screen, while the marker has `failed` | `unlock_move_unconfirmed` | "Your vault moved to release N+1 and has not opened there yet. You can try again with your PIN, or return to release N." Action: **Return to release N** |
+| Update screen and unlock screen, still routed to N after the retries (point 6) | `release_update_route_pending` | "Your vault moved to release N+1, but VettID is not ready to open it there yet. Try again in a minute." Actions: **Try again**, **Return to release N** |
+| The way back, the move was already confirmed (`wrong_release`) | `release_update_return_confirmed` | "Release N+1 has already opened your vault, so it can't go back to release N. Unlock it with your PIN." |
+| The way back, N no longer available (`410`) | `release_update_return_unavailable` | "Release N is no longer available, so your vault can't go back to it. Try again with your PIN, or contact VettID." |
+| The way back, the move had already been abandoned (`refused` `downgrade` on N) | `release_update_abandoned_*` (existing) | "Back on release N" / "Your vault runs release N again and is open. You can update to release N+1 later." |
+
+**Tests.** `moved`, then the process killed before the second unlock:
+the next unlock reaches N+1 and clears the marker; `moved`, then N+1
+failing (each failure of point 2), then leaving the update screen and
+then a restart: the unlock screen offers the way back, which abandons
+(the fake vault's `update: abandoned`), records N and clears the
+marker; a wrong PIN and the backoff on N+1 neither set `failed` nor
+clear it; `wrong_release`, `410` and the `vault.release` sync event
+clear it with their texts; the way back answered `refused`
+`downgrade` with the vault open on N; (point 6) a route naming N for two
+fetches then N+1 sends the PIN only to N+1; a route naming N for
+every fetch gives the neutral failure with both actions and never
+sends the PIN to N; a route naming an older release that is not the
+marker's `from` gives the rollback text.
 
 ## 5. Architecture
 
