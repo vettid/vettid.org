@@ -1,9 +1,20 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.55
+version: 0.1.56
 date: 2026-10-20
 changelog:
+  - 0.1.56: approved by the owner (2026-10-20) (owner decisions of
+    2026-10-20; found while building the Notifications screen on iOS).
+    §4 Notifications: the detail sheet always shows, under the label,
+    the item's full second line (the same text as the row's second
+    line) for every kind that has one; a row of priority `urgent` shows
+    up to 3 lines of its second line in the list, every other row 1
+    line; §4 "Event titles" says so above its Notifications table. No
+    new text. §4 "A vault being deleted", 3: the re-reads come after
+    waits of 5, 10 and 30 s, each counted from the previous read (reads
+    at 5, 15 and 45 s after the event), then every 60 s; what both apps
+    already do, now unambiguous
   - 0.1.55: approved by the owner (2026-10-20) (VAULT-MESSAGING 0.51.1;
     owner decision of 2026-10-20; found while implementing the reset's
     lost answer on iOS). §4 **"Another phone became the holder"**, for
@@ -1059,6 +1070,11 @@ feed repository and no screen.
      rows bold, read rows regular. Priority: `urgent` as above; `high`
      an amber icon tile and "Important" for screen readers; `normal`
      plain; `low` the secondary text colour.
+     **Second line length** (0.1.56): a row of priority `urgent` shows
+     up to 3 lines of its second line, in Needs attention and in its
+     day; every other row shows 1 line. A longer second line is cut
+     with an ellipsis, never reworded; the detail sheet (4) shows it in
+     full.
    - **Filter chip** bottom-left (the design language's floating chip,
      §3): **Unread** (`status: "active"`). The ⋯ menu: **Mark all as
      read**, **Archived**.
@@ -1102,9 +1118,11 @@ feed repository and no screen.
    (a removed connection, a deleted item, an ask already decided or
    expired), a **detail sheet** opens instead: the label, the exact
    time, the connection, device or item as History resolves them, and
-   "This is no longer waiting" for an ask. Unknown kinds (a newer vault)
-   show the kind itself with a generic icon and open the sheet; they are
-   never hidden. Deciding an ask in Approvals also marks its feed item
+   "This is no longer waiting" for an ask. The sheet always shows,
+   under the label, the item's full second line (the same text as the
+   row's second line, never cut) for every kind that has one (0.1.56).
+   Unknown kinds (a newer vault) show the kind itself with a generic
+   icon and open the sheet; they are never hidden. Deciding an ask in Approvals also marks its feed item
    read (matched by kind and `ref`; §9 question 2).
 
    | Kind (§10.9) | Label (en) | Opens |
@@ -2763,7 +2781,10 @@ identifier `unlocks` is unchanged), and the History titles of
 
 **Notifications** (feed items: the row of the Notifications screen and
 the system notification; the second line is the row's second line and
-the notification's text when names and text are shown):
+the notification's text when names and text are shown). The
+Notifications screen shows the second line in full in the detail
+sheet, and up to 3 lines of it on a row of priority `urgent` (§4
+Notifications, 3 and 4; 0.1.56):
 
 | Kind | Title | Second line |
 |---|---|---|
@@ -4329,8 +4350,10 @@ step 1 the vault is marked `deleting` and never opens again.
    process that finds the marker starts in "being deleted", before it
    reads anything, never on the unlock screen or the open vault.
 3. **Waiting for the row.** It re-reads `GET /api/vault/status` after
-   5, 10 and 30 s, then every 60 s, and at every start and return to the
-   foreground, until `until`. **The bound** `until` is 10 minutes after
+   waits of 5, 10 and 30 s, each counted from the previous read (reads
+   at 5, 15 and 45 s after the event), then every 60 s after the
+   previous read, and at every start and return to the foreground,
+   until `until`. **The bound** `until` is 10 minutes after
    `since`, or, when this phone sent the `vault.delete` and its `exp` is
    later, that `exp` plus 2 minutes (as the app bounds its re-check of
    an unanswered `vault.delete`). The vault counts as gone when the status

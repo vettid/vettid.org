@@ -1,9 +1,19 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.13
+version: 0.1.14
 date: 2026-10-20
 changelog:
+  - 0.1.14: approved by the owner (2026-10-20) (ANDROID-PLAN 0.1.56;
+    owner decisions of 2026-10-20; found while building the
+    Notifications screen on iOS). §4.1: the Notifications screen shows
+    the second line in full in the detail sheet, under the title, for
+    every kind that has one, and up to 3 lines of it on a row of
+    priority `urgent` (every other row 1 line), as ANDROID-PLAN §4
+    Notifications, 3 and 4. No new text. §4.2, 3: the re-reads come
+    after waits of 5, 10 and 30 s, each counted from the previous read
+    (reads at 5, 15 and 45 s after the event), then every 60 s; what
+    both apps already do, now unambiguous
   - 0.1.13: approved by the owner (2026-10-20) (VAULT-MESSAGING 0.51.1;
     ANDROID-PLAN 0.1.55; owner decision of 2026-10-20; found while
     implementing the reset's lost answer on iOS). §6.3: a `forbidden`
@@ -347,7 +357,10 @@ identifier `unlocks` is unchanged), and the History titles of
 
 **Notifications** (feed items: the row of the Notifications screen and
 the system notification (from phase P, §6.7); the second line is the row's second line and
-the notification's text when names and text are shown):
+the notification's text when names and text are shown). The
+Notifications screen shows the second line in full in the detail
+sheet, and up to 3 lines of it on a row of priority `urgent`
+(ANDROID-PLAN §4 Notifications, 3 and 4; 0.1.14):
 
 | Kind | Title | Second line |
 |---|---|---|
@@ -584,8 +597,10 @@ step 1 the vault is marked `deleting` and never opens again.
    process that finds the marker starts in "being deleted", before it
    reads anything, never on the unlock screen or the open vault.
 3. **Waiting for the row.** It re-reads `GET /api/vault/status` after
-   5, 10 and 30 s, then every 60 s, and at every start and return to the
-   foreground, until `until`. **The bound** `until` is 10 minutes after
+   waits of 5, 10 and 30 s, each counted from the previous read (reads
+   at 5, 15 and 45 s after the event), then every 60 s after the
+   previous read, and at every start and return to the foreground,
+   until `until`. **The bound** `until` is 10 minutes after
    `since`, or, when this phone sent the `vault.delete` and its `exp` is
    later, that `exp` plus 2 minutes (as the app bounds its re-check of
    an unanswered `vault.delete`). The vault counts as gone when the status
