@@ -8,7 +8,10 @@
  * A start-over is carried out only while its member's account is active: for
  * a suspended or canceled account, and for one whose member row is gone or
  * cannot be read, it stays pending (held), and the run says how many it
- * held and why (EMF, alarmed).
+ * held and why (EMF, alarmed). The same run (MEMBER-API 2.10.0) sends
+ * `delete_resume` for each vault row whose host-written `deleting_at` is at
+ * least 2 minutes old and that is not `deleted` (`resumeDeletions` below);
+ * it never sends `delete` because of that mark.
  *
  * A second function runs this module's `cancelHandler` and nothing else
  * (event `{task: "cancel_start_over", user_guid}`): the admin API, which
@@ -51,7 +54,7 @@ const STALE_DAYS = 14;
 import { deleteOwnSignInUser, leftBehind, ownEmailMarkerDelete, vaultPointerKey } from '../shared/members';
 import type { MemberItem, SubscriptionItem } from '../shared/model';
 import { DECLINED_DAYS, REMOVAL_GIVE_UP_DAYS, ownAddress } from '../shared/requests';
-import { liveLease, newUlid, pickInstance, releaseRow, requestStart, routable } from '../shared/vault-routing';
+import { liveLease, newUlid, pickInstance, releaseRow, requestStart, routable, type InstanceRow } from '../shared/vault-routing';
 import { vaultService } from '../shared/vault-service';
 import { canSignIn } from '../shared/members';
 
@@ -76,8 +79,41 @@ interface VaultRowLite {
   sealed_release?: string;
   lease?: { instance_id?: unknown; lease_expires_at?: unknown };
   deletion_requested_at?: number;
+  /**
+   * MEMBER-API 2.10.0: when the vault reported its deletion's marking flush,
+   * written by the host (advisory; read only by the resume run below).
+   */
+  deleting_at?: number;
+  /** MEMBER-API 2.10.0: when the resume run last sent `delete_resume`, written by this job. */
+  deletion_resumed_at?: number;
   /** MEMBER-API 2.1.0: the member's start-over (§11.11.9), written by the member API. */
   deletion?: { deletion_id?: unknown; state?: unknown; deletes_at?: unknown; queued_at?: unknown };
+}
+
+/**
+ * Where a host operation without an envelope for this vault goes, as for
+ * `delete` (VAULT-MESSAGING §12.5): the leaseholder, else a live instance of
+ * its sealed release (a start is requested when none runs). Null while the
+ * vault service is paused (nothing is queued or start-requested then), for
+ * a release that is not routable, or when no instance runs yet.
+ */
+async function routeAsDelete(v: VaultRowLite, nowS: number): Promise<InstanceRow | null> {
+  const paused = !(await vaultService()).enabled;
+  let inst = paused ? null : await liveLease(v, nowS);
+  if (!inst && v.sealed_release && !paused) {
+    const rel = await releaseRow(v.sealed_release);
+    // A `removed` release (not reopened for a rescue) is never started
+    // (VAULT-MESSAGING 0.10.0 §11.10.5); the stored objects of vaults still
+    // sealed to it go after the key's deletion (VAULT-RELEASES §3.5, D + 37;
+    // not built yet). Until then the row stays, retried and flagged by the
+    // caller.
+    // A canary release is the host's to reach for a canary member's vault.
+    if (routable(rel, { canary: true })) {
+      inst = await pickInstance(v.sealed_release, nowS);
+      if (!inst) await requestStart(v.sealed_release);
+    }
+  }
+  return inst;
 }
 
 /**
@@ -100,20 +136,7 @@ export async function requestVaultDeletion(v: VaultRowLite, nowS: number): Promi
     await ddb.send(new DeleteCommand({ TableName: table.vaults(), Key: { vault_id: v.vault_id } }));
     return false;
   }
-  const paused = !(await vaultService()).enabled;
-  let inst = paused ? null : await liveLease(v, nowS);
-  if (!inst && v.sealed_release && !paused) {
-    const rel = await releaseRow(v.sealed_release);
-    // A `removed` release (not reopened for a rescue) is never started
-    // (VAULT-MESSAGING 0.10.0 §11.10.5); the stored objects of vaults still
-    // sealed to it go after the key's deletion (VAULT-RELEASES §3.5, D + 37;
-    // not built yet). Until then the row stays, retried and flagged below.
-    // A canary release is the host's to reach for a canary member's vault.
-    if (routable(rel, { canary: true })) {
-      inst = await pickInstance(v.sealed_release, nowS);
-      if (!inst) await requestStart(v.sealed_release);
-    }
-  }
+  let inst = await routeAsDelete(v, nowS);
   if (inst) {
     const message = {
       v: 1,
@@ -568,6 +591,135 @@ export function startOverEmf(held: StartOverHeld, now: number): string {
   });
 }
 
+// ---- a deletion the vault marked and that stopped: the resume (MEMBER-API 2.10.0) ----
+
+/** A mark younger than this is left to the vault's own deletion, still running. */
+export const RESUME_AFTER_S = 120;
+/** For this long after the mark the resume is sent at every run; then hourly; and the row is logged. */
+export const RESUME_HOURLY_AFTER_S = 3600;
+/** The 5-minute schedule (lib/stacks/member-api-stack.ts): the window in which a log that is due once is written. */
+export const RESUME_RUN_S = 300;
+
+export interface DeletionResumes {
+  /** `delete_resume` queued. */
+  sent: number;
+  /** Rows not `deleted` 1 hour or more after `deleting_at` (the metric). */
+  pending: number;
+}
+
+/**
+ * Whether a once-due log falls in this run: `at` (or, after 30 days, each
+ * day from `deleting_at + DELETION_STALE_S`) lies within the last run
+ * interval. Neither the job nor the spec keeps a "logged" mark, so the
+ * schedule's own interval decides; the metric counts every run.
+ */
+function resumeLogDue(deletingAt: number, nowS: number): boolean {
+  const age = nowS - deletingAt;
+  if (age >= RESUME_HOURLY_AFTER_S && age < RESUME_HOURLY_AFTER_S + RESUME_RUN_S) return true;
+  return age >= DELETION_STALE_S && (age - DELETION_STALE_S) % 86_400 < RESUME_RUN_S;
+}
+
+/**
+ * A vault deleting itself has the host write `deleting_at` on its row once
+ * the marking flush is stored (VAULT-MESSAGING 0.51.0 §12.5 "Mark at the
+ * host"). If the deletion stops before `deleted`, nothing else would finish
+ * it: the app sends nothing more. So for each row with `deleting_at` at
+ * least 2 minutes old and not `deleted`, this run sends the queue operation
+ * `delete_resume` (§11.5, no envelope), routed exactly as `delete` is
+ * (nothing while the service is paused or to a `removed` release), and sets
+ * `deletion_resumed_at`: at every run while the mark is under 1 hour old,
+ * then when `deletion_resumed_at` is at least 1 hour old. The vault's
+ * `deleted` report is the result; its notice removes the row.
+ *
+ * The mark is written by the host, which is not trusted: the enclave erases
+ * on a `delete_resume` only a vault whose own sealed header records the
+ * deletion (or one already erased). This run NEVER sends `delete` because
+ * of `deleting_at`, never sets `deletion_requested_at` for it, and nothing
+ * a member sees reads the mark.
+ *
+ * `deletion_resumed_at` is set only when the message was queued, so a run
+ * after a pause, or once a requested start has an instance, sends at once.
+ * A row with neither a sealed release nor a lease has nowhere to go and is
+ * left (its rows are the daily run's, never this run's, to delete).
+ */
+export async function resumeDeletions(nowS: number): Promise<DeletionResumes> {
+  let sent = 0;
+  let pending = 0;
+  let start: Record<string, unknown> | undefined;
+  do {
+    const r = await ddb.send(
+      new ScanCommand({
+        TableName: table.vaults(),
+        FilterExpression: 'attribute_exists(deleting_at) AND #s <> :d',
+        ExpressionAttributeNames: { '#s': 'state' },
+        ExpressionAttributeValues: { ':d': 'deleted' },
+        ExclusiveStartKey: start,
+      }),
+    );
+    for (const item of r.Items ?? []) {
+      const v = item as VaultRowLite;
+      if (v.state === 'deleted' || typeof v.deleting_at !== 'number') continue;
+      const age = nowS - v.deleting_at;
+      if (age < RESUME_AFTER_S) continue;
+      if (age >= RESUME_HOURLY_AFTER_S) {
+        pending++;
+        if (resumeLogDue(v.deleting_at, nowS)) console.warn('vault deletion resume pending', JSON.stringify({ vault_id: v.vault_id }));
+        if (typeof v.deletion_resumed_at === 'number' && v.deletion_resumed_at > nowS - RESUME_HOURLY_AFTER_S) continue;
+      }
+      if (await sendDeleteResume(v, nowS)) sent++;
+    }
+    start = r.LastEvaluatedKey;
+  } while (start);
+  return { sent, pending };
+}
+
+/** `delete_resume` to where `delete` would go; on success, `deletion_resumed_at`. Returns whether it was queued. */
+async function sendDeleteResume(v: VaultRowLite, nowS: number): Promise<boolean> {
+  if (!v.sealed_release && !v.lease) return false;
+  const inst = await routeAsDelete(v, nowS);
+  if (!inst) return false;
+  const message = {
+    v: 1,
+    op: 'delete_resume',
+    vault_id: v.vault_id,
+    user_guid: v.user_guid,
+    request_id: newUlid(),
+    enqueued_at: new Date(nowS * 1000).toISOString(),
+  };
+  try {
+    await sqs.send(new SendMessageCommand({ QueueUrl: inst.queue_url, MessageBody: JSON.stringify(message) }));
+  } catch (e) {
+    console.error('vault delete_resume enqueue failed', JSON.stringify({ vault_id: v.vault_id, error: (e as Error).name }));
+    return false;
+  }
+  await ddb.send(
+    new UpdateCommand({
+      TableName: table.vaults(),
+      Key: { vault_id: v.vault_id },
+      UpdateExpression: 'SET deletion_resumed_at = :t',
+      ConditionExpression: 'attribute_exists(vault_id)',
+      ExpressionAttributeValues: { ':t': nowS },
+    }),
+  ).catch((e: Error) => {
+    if (e.name !== 'ConditionalCheckFailedException') throw e; // the row is gone: deleted meanwhile
+  });
+  return true;
+}
+
+/**
+ * One EMF line per 5-minute run (no PutMetricData right), zeros included:
+ * the rows still not `deleted` 1 hour after their mark. Counts only.
+ */
+export function deletionResumeEmf(c: DeletionResumes, now: number): string {
+  return JSON.stringify({
+    _aws: {
+      Timestamp: now,
+      CloudWatchMetrics: [{ Namespace: NAMESPACE, Dimensions: [[]], Metrics: [{ Name: 'DeletionResumesPending', Unit: 'Count' }] }],
+    },
+    DeletionResumesPending: c.pending,
+  });
+}
+
 const USER_GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** What the task `cancel_start_over` answers (the admin API checks `ok` and `task`). */
@@ -960,6 +1112,15 @@ export const handler = async (event?: { task?: string }) => {
     console.log(JSON.stringify({ startOvers: r }));
     // What it held, by reason, on a line of its own (the line above is unchanged).
     console.log(startOverEmf(held, Date.now()));
+    // 2.10.0: deletions the vault marked and that stopped. A failure here
+    // never undoes the start-overs above; the metric line is written anyway.
+    let resumes: DeletionResumes = { sent: 0, pending: 0 };
+    try {
+      resumes = await resumeDeletions(Math.floor(Date.now() / 1000));
+    } catch (e) {
+      console.error('deletion resume sweep failed', (e as Error).name);
+    }
+    console.log(deletionResumeEmf(resumes, Date.now()));
     return r;
   }
   // The fifteen-minute schedule (MEMBER-API 2.6.0): withdrawn requests only.

@@ -612,9 +612,10 @@ describe('VettidOrgMemberApiStack', () => {
       expect([emf.OrphanVaultsSeen, emf.OrphanVaultsWaiting, emf.OrphanVaultDeletions, emf.OrphanVaultsOperatorHeld, emf.OrphanVaultsHeld]).toEqual([3, 4, 2, 5, 2]);
     });
 
-    test('the cleanup job may write orphan_seen_at on a vault row (and still nothing else new)', () => {
+    test('the cleanup job may write orphan_seen_at and (2.10.0) deletion_resumed_at on a vault row, never the host\'s deleting_at (and still nothing else new)', () => {
       const upd = stmtsOf(/vault-cleanup|Cleanup/).filter((x: any) => [].concat(x.Action).includes('dynamodb:UpdateItem' as never) && JSON.stringify(x.Resource).includes('table/vettid-org-vaults'));
-      expect(upd.map((x: any) => x.Condition['ForAllValues:StringEquals']['dynamodb:Attributes'])).toEqual([['vault_id', 'deletion_requested_at', 'deletion', 'orphan_seen_at']]);
+      expect(upd.map((x: any) => x.Condition['ForAllValues:StringEquals']['dynamodb:Attributes'])).toEqual([['vault_id', 'deletion_requested_at', 'deletion', 'orphan_seen_at', 'deletion_resumed_at']]);
+      expect(JSON.stringify(policies)).not.toContain('deleting_at');
     });
 
     test('held start-overs: alarms on a missing member row and on a failed read (three runs in a row), on the metrics the job writes; none on a suspended account', () => {
@@ -859,7 +860,7 @@ describe('VettidOrgMemberApiStack', () => {
       // The cleanup job may only mark a deletion requested.
       const mark = stmts().filter((s: any) => String(str(s.Condition)).includes('deletion_requested_at'));
       expect(mark).toHaveLength(1);
-      expect(mark[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(['vault_id', 'deletion_requested_at', 'deletion', 'orphan_seen_at']); // 2.6.5: the orphan mark
+      expect(mark[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(['vault_id', 'deletion_requested_at', 'deletion', 'orphan_seen_at', 'deletion_resumed_at']); // 2.6.5: the orphan mark; 2.10.0: the resume
     });
 
     test('the queue URL prefix is pinned to the vault account and region', () => {

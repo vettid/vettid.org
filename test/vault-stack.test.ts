@@ -582,7 +582,7 @@ describe('cross-account access (VAULT-RELEASES §8.1)', () => {
     const hostVaultWrites = statements(prod.json).filter((s: any) => s.Action === 'dynamodb:UpdateItem' && (s.Condition?.['ForAllValues:StringEquals']?.['dynamodb:Attributes'] ?? []).includes('lease'));
     expect(hostVaultWrites).toHaveLength(1);
     expect(hostVaultWrites[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(
-      ['vault_id', 'lease', 'updated_at', 'sealed_release', 'vault_version', 'state_version', 'state', 'alarm', 'alarm_pending', 'app_key', 'credential_backup', 'name_change', 'name_change_pending', 'att_sweep_pending', 'app_key_next', 'recovery_cancelled'],
+      ['vault_id', 'lease', 'updated_at', 'sealed_release', 'vault_version', 'state_version', 'state', 'alarm', 'alarm_pending', 'app_key', 'credential_backup', 'name_change', 'name_change_pending', 'att_sweep_pending', 'app_key_next', 'recovery_cancelled', 'deleting_at'],
     );
   });
 
@@ -639,7 +639,24 @@ describe('cross-account access (VAULT-RELEASES §8.1)', () => {
     const attrsOf = (role: string) => writes.filter((s: any) => str(s.Condition).includes(role)).flatMap((s: any) => s.Condition['ForAllValues:StringEquals']?.['dynamodb:Attributes'] ?? []);
     expect(writes.flatMap((s: any) => s.Condition['ForAllValues:StringEquals']?.['dynamodb:Attributes'] ?? [])).not.toContain('credential_backup');
     expect(attrsOf('member-vault"')).toContain('deletion');
-    expect(attrsOf('member-cleanup"')).toEqual(['vault_id', 'deletion_requested_at', 'deletion', 'orphan_seen_at']); // 2.6.5: the orphan mark
+    expect(attrsOf('member-cleanup"')).toEqual(['vault_id', 'deletion_requested_at', 'deletion', 'orphan_seen_at', 'deletion_resumed_at']); // 2.6.5: the orphan mark; 2.10.0: the resume
+  });
+
+  test('2.10.0 (VAULT-HOST-PROTOCOL 0.1.14): only the host writes deleting_at; the cleanup job writes deletion_resumed_at and no other member API role does', () => {
+    const vaults = resources(prod.json, 'AWS::DynamoDB::GlobalTable').find(([, t]) => t.Properties.TableName === 'vettid-org-vaults')![1];
+    const rp = vaults.Properties.Replicas[0].ResourcePolicy.PolicyDocument.Statement;
+    const writes = rp.filter((s: any) => str(s.Action).match(/PutItem|UpdateItem/));
+    const attrs = (s: any) => s.Condition['ForAllValues:StringEquals']?.['dynamodb:Attributes'] ?? [];
+    // No member API role may write the host's mark.
+    expect(writes.flatMap(attrs)).not.toContain('deleting_at');
+    // Only the cleanup job writes deletion_resumed_at.
+    const resumers = writes.filter((s: any) => attrs(s).includes('deletion_resumed_at'));
+    expect(resumers).toHaveLength(1);
+    expect(resumers[0].Condition.ArnEquals['aws:PrincipalArn']).toBe('arn:aws:iam::449757308783:role/vettid-org-member-cleanup');
+    // The host's own vault-row write carries it.
+    const hostVaultWrites = statements(prod.json).filter((s: any) => s.Action === 'dynamodb:UpdateItem' && (s.Condition?.['ForAllValues:StringEquals']?.['dynamodb:Attributes'] ?? []).includes('lease'));
+    expect(hostVaultWrites[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toContain('deleting_at');
+    expect(hostVaultWrites[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).not.toContain('deletion_resumed_at');
   });
 
   test("2.6.5: the admin API's member-vaults check may only Query the vaults table and its user-index, nothing else anywhere", () => {

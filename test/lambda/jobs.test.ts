@@ -330,7 +330,7 @@ describe('cleanup job: start-overs (MEMBER-API 2.1.0, VAULT-MESSAGING 0.16.0 §1
     ] });
     expect(await run()).toEqual({ executed: 0, retried: 0 });
     const lines = log.mock.calls.map((c) => c[0]);
-    expect(lines).toHaveLength(2);
+    expect(lines).toHaveLength(3); // 2.10.0: and the deletion resume's own EMF line after them
     expect(lines[0]).toBe('{"startOvers":{"executed":0,"retried":0}}');
     const emf = JSON.parse(lines[1]);
     expect(emf).toMatchObject({ StartOverHeldNotActive: 2, StartOverHeldNoMember: 1, StartOverHeldReadError: 1 });
@@ -341,7 +341,11 @@ describe('cleanup job: start-overs (MEMBER-API 2.1.0, VAULT-MESSAGING 0.16.0 §1
     log.mockClear();
     ddb.on(ScanCommand).resolves({ Items: [] });
     expect(await run()).toEqual({ executed: 0, retried: 0 });
-    expect(log.mock.calls.map((c) => c[0])).toEqual(['{"startOvers":{"executed":0,"retried":0}}', cleanup.startOverEmf({ not_active: 0, no_member: 0, read_error: 0 }, Date.now())].map((l, i) => (i ? expect.stringContaining('"StartOverHeldNotActive":0,"StartOverHeldNoMember":0,"StartOverHeldReadError":0') : l)));
+    expect(log.mock.calls.map((c) => c[0])).toEqual([
+      '{"startOvers":{"executed":0,"retried":0}}',
+      expect.stringContaining('"StartOverHeldNotActive":0,"StartOverHeldNoMember":0,"StartOverHeldReadError":0'),
+      expect.stringContaining('"DeletionResumesPending":0'),
+    ]);
   });
 
   test('not yet due: the member row is not read; one already executing is not held back by a later suspension', async () => {
@@ -572,6 +576,199 @@ describe('cleanup job: start-overs (MEMBER-API 2.1.0, VAULT-MESSAGING 0.16.0 §1
       await cleanup.handler({ task: 'cancel_start_over', user_guid: G });
       expect(removes().filter((u) => u.UpdateExpression === 'REMOVE deletion')).toHaveLength(0);
     });
+  });
+});
+
+describe('cleanup job: the deletion resume (MEMBER-API 2.10.0, VAULT-MESSAGING 0.51.0 §12.5)', () => {
+  const R = 'c'.repeat(96);
+  const QP = 'https://sqs.us-east-1.amazonaws.com/123456789012/vettid-org-vault-control-';
+  const V = 'a'.repeat(32);
+  const NOW = 1_800_000_000;
+  // A vault that marked its deletion `age` seconds ago and is not `deleted`.
+  const marked = (age: number, extra: Record<string, unknown> = {}) => ({
+    vault_id: V, user_guid: 'g1', state: 'locked', sealed_release: R, lease: { instance_id: 'i1', lease_expires_at: NOW + 60 },
+    deleting_at: NOW - age, ...extra,
+  });
+  const sends = () => sqs.commandCalls(SendMessageCommand).map((c) => ({ url: c.args[0].input.QueueUrl, body: JSON.parse(c.args[0].input.MessageBody!) }));
+  const vaultUpdates = () => ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'vaults');
+  const scanRows = (rows: Record<string, unknown>[]) =>
+    ddb.on(ScanCommand).callsFake((input) => (input.FilterExpression === 'attribute_exists(deleting_at) AND #s <> :d' ? { Items: rows } : { Items: [] }));
+
+  beforeEach(() => {
+    ddb.on(GetCommand, { TableName: 'instances' } as any).resolves({ Item: { instance_id: 'i1', release: R, queue_url: QP + 'i1', descriptor: 'd', attestation: 'a', heartbeat_at: NOW } });
+    ddb.on(GetCommand, { TableName: 'releases' } as any).resolves({ Item: { release: R, release_number: 3, status: 'active' } });
+    ddb.on(UpdateCommand).resolves({});
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  test('scans the rows with deleting_at that are not deleted; one at least 2 minutes old gets delete_resume at the leaseholder and deletion_resumed_at', async () => {
+    scanRows([marked(120)]);
+    expect(await cleanup.resumeDeletions(NOW)).toEqual({ sent: 1, pending: 0 });
+    const scan = ddb.commandCalls(ScanCommand)[0].args[0].input;
+    expect(scan).toMatchObject({ TableName: 'vaults', FilterExpression: 'attribute_exists(deleting_at) AND #s <> :d', ExpressionAttributeNames: { '#s': 'state' }, ExpressionAttributeValues: { ':d': 'deleted' } });
+    const [s] = sends();
+    expect(s.url).toBe(QP + 'i1');
+    expect(Object.keys(s.body).sort()).toEqual(['enqueued_at', 'op', 'request_id', 'user_guid', 'v', 'vault_id']); // no envelope
+    expect(s.body).toMatchObject({ v: 1, op: 'delete_resume', vault_id: V, user_guid: 'g1', enqueued_at: new Date(NOW * 1000).toISOString() });
+    expect(s.body.request_id).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(vaultUpdates()).toEqual([{ TableName: 'vaults', Key: { vault_id: V }, UpdateExpression: 'SET deletion_resumed_at = :t', ConditionExpression: 'attribute_exists(vault_id)', ExpressionAttributeValues: { ':t': NOW } }]);
+  });
+
+  test('a mark younger than 2 minutes, a deleted row, or a row without a numeric mark: nothing', async () => {
+    scanRows([marked(119), marked(600, { vault_id: 'b'.repeat(32), state: 'deleted' }), marked(600, { vault_id: 'd'.repeat(32), deleting_at: 'x' })]);
+    expect(await cleanup.resumeDeletions(NOW)).toEqual({ sent: 0, pending: 0 });
+    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
+    expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
+  });
+
+  test('the first hour: sent at every run, whatever deletion_resumed_at says', async () => {
+    scanRows([marked(3599, { deletion_resumed_at: NOW - 300 })]);
+    expect(await cleanup.resumeDeletions(NOW)).toEqual({ sent: 1, pending: 0 });
+    scanRows([marked(600, { deletion_resumed_at: NOW - 1 })]);
+    expect(await cleanup.resumeDeletions(NOW)).toEqual({ sent: 1, pending: 0 });
+    expect(sends().map((s) => s.body.op)).toEqual(['delete_resume', 'delete_resume']);
+  });
+
+  test('after the first hour: sent only when deletion_resumed_at is at least 1 hour old (or absent)', async () => {
+    scanRows([marked(3600, { deletion_resumed_at: NOW - 300 }), marked(7200, { vault_id: 'b'.repeat(32), deletion_resumed_at: NOW - 3599 })]);
+    expect(await cleanup.resumeDeletions(NOW)).toEqual({ sent: 0, pending: 2 });
+    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
+    expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
+
+    scanRows([marked(7200, { deletion_resumed_at: NOW - 3600 }), marked(5 * 86_400, { vault_id: 'b'.repeat(32) })]);
+    expect(await cleanup.resumeDeletions(NOW)).toEqual({ sent: 2, pending: 2 });
+    expect(vaultUpdates().map((u) => u.UpdateExpression)).toEqual(['SET deletion_resumed_at = :t', 'SET deletion_resumed_at = :t']);
+  });
+
+  test('routed as delete is: no live lease, a live instance of the sealed release; none running, a start is requested and nothing is marked', async () => {
+    ddb.on(QueryCommand, { TableName: 'instances' } as any).resolves({ Items: [{ instance_id: 'i2', release: R, load: 0 }] });
+    ddb.on(GetCommand, { TableName: 'instances', Key: { instance_id: 'i2' } } as any).resolves({ Item: { instance_id: 'i2', release: R, queue_url: QP + 'i2', descriptor: 'd', attestation: 'a', heartbeat_at: NOW } });
+    scanRows([marked(300, { lease: undefined })]);
+    expect(await cleanup.resumeDeletions(NOW)).toEqual({ sent: 1, pending: 0 });
+    expect(sends().map((s) => s.url)).toEqual([QP + 'i2']);
+
+    sqs.resetHistory(); ddb.resetHistory();
+    ddb.on(QueryCommand, { TableName: 'instances' } as any).resolves({ Items: [] });
+    expect(await cleanup.resumeDeletions(NOW)).toEqual({ sent: 0, pending: 0 });
+    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
+    expect(vaultUpdates()).toHaveLength(0); // set only when queued: the next run sends once the instance runs
+    expect(ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input).find((i) => i.TableName === 'releases')).toBeDefined();
+  });
+
+  test('vault service paused: nothing sent, no start, nothing marked; still counted as pending', async () => {
+    ssm.on(GetParameterCommand).resolves({ Parameter: { Value: PAUSED } });
+    scanRows([marked(300), marked(2 * 3600, { vault_id: 'b'.repeat(32) })]);
+    expect(await cleanup.resumeDeletions(NOW)).toEqual({ sent: 0, pending: 1 });
+    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
+    expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
+  });
+
+  test('a removed release and no live leaseholder: nothing sent and no start, as for delete', async () => {
+    ddb.on(GetCommand, { TableName: 'releases' } as any).resolves({ Item: { release: R, release_number: 3, status: 'removed' } });
+    scanRows([marked(300, { lease: undefined })]);
+    expect(await cleanup.resumeDeletions(NOW)).toEqual({ sent: 0, pending: 0 });
+    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
+    expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0);
+  });
+
+  test('a row with neither a sealed release nor a lease: nothing sent, and the row is never deleted here', async () => {
+    scanRows([marked(300, { sealed_release: undefined, lease: undefined })]);
+    expect(await cleanup.resumeDeletions(NOW)).toEqual({ sent: 0, pending: 0 });
+    expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
+    expect(ddb.commandCalls(DeleteCommand)).toHaveLength(0);
+  });
+
+  test('NEVER delete: whatever the mark\'s age or state, only delete_resume is sent, and deletion_requested_at is never set', async () => {
+    const ages = [120, 600, 3599, 3600, 7200, 86_400, 31 * 86_400];
+    scanRows(ages.map((a, i) => marked(a, { vault_id: String(i).repeat(32), state: i % 2 ? 'unlocked' : 'locked' })));
+    await cleanup.resumeDeletions(NOW);
+    expect(sends()).toHaveLength(ages.length);
+    expect(sends().every((s) => s.body.op === 'delete_resume')).toBe(true);
+    for (const u of ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input)) {
+      expect(JSON.stringify(u)).not.toContain('deletion_requested_at');
+      expect(JSON.stringify(u)).not.toContain('deleting_at'); // never written by the job
+    }
+    expect(ddb.commandCalls(DeleteCommand)).toHaveLength(0);
+  });
+
+  test('a send that fails: logged with the vault_id and error name, not marked, the run goes on', async () => {
+    const err = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    sqs.on(SendMessageCommand).rejectsOnce(Object.assign(new Error('x'), { name: 'QueueDoesNotExist' })).resolves({});
+    scanRows([marked(300), marked(300, { vault_id: 'b'.repeat(32) })]);
+    expect(await cleanup.resumeDeletions(NOW)).toEqual({ sent: 1, pending: 0 });
+    expect(err.mock.calls).toEqual([['vault delete_resume enqueue failed', JSON.stringify({ vault_id: V, error: 'QueueDoesNotExist' })]]);
+    expect(vaultUpdates().map((u) => u.Key)).toEqual([{ vault_id: 'b'.repeat(32) }]);
+  });
+
+  test('the row went meanwhile (deleted): the mark\'s write fails its condition and is not an error', async () => {
+    ddb.on(UpdateCommand).rejects(ccf());
+    scanRows([marked(300)]);
+    expect(await cleanup.resumeDeletions(NOW)).toEqual({ sent: 1, pending: 0 });
+  });
+
+  describe('logged: "vault deletion resume pending", vault_id only', () => {
+    const logged = () => (console.warn as jest.Mock).mock.calls.filter((c) => c[0] === 'vault deletion resume pending');
+    test.each([
+      [3599, 0], [3600, 1], [3600 + 299, 1], [3600 + 300, 0], [7200, 0], [29 * 86_400, 0],
+      [30 * 86_400, 1], [30 * 86_400 + 299, 1], [30 * 86_400 + 300, 0], [31 * 86_400, 1], [31 * 86_400 + 3600, 0], [45 * 86_400 + 120, 1],
+    ])('a mark %i seconds old: logged %i time(s) by this run', async (age, n) => {
+      scanRows([marked(age, { deletion_resumed_at: NOW - 60 })]);
+      await cleanup.resumeDeletions(NOW);
+      expect(logged()).toHaveLength(n);
+      for (const c of logged()) expect(c[1]).toBe(JSON.stringify({ vault_id: V }));
+    });
+
+    test('once in the first hour, over a day of 5-minute runs; nothing else of the member in the line', async () => {
+      const deletingAt = NOW;
+      let count = 0;
+      for (let t = deletingAt; t < deletingAt + 86_400; t += 300) {
+        (console.warn as jest.Mock).mockClear();
+        scanRows([marked(t - deletingAt, { deleting_at: deletingAt, deletion_resumed_at: t - 60 })]);
+        await cleanup.resumeDeletions(t);
+        count += logged().length;
+        for (const c of (console.warn as jest.Mock).mock.calls) expect(String(c.join(' '))).not.toMatch(/g1|x\.org/);
+      }
+      expect(count).toBe(1);
+    });
+  });
+
+  test('the 5-minute run: the start-overs first, then the resume; one EMF line DeletionResumesPending (namespace VettID/MemberApi, no dimensions) at every run, zeros too', async () => {
+    const log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    const now = Math.floor(Date.now() / 1000);
+    scanRows([marked(300, { deleting_at: now - 300 }), marked(2 * 3600, { vault_id: 'b'.repeat(32), deleting_at: now - 2 * 3600, deletion_resumed_at: now - 600 })]);
+    expect(await cleanup.handler({ task: 'start_over' })).toEqual({ executed: 0, retried: 0 }); // the run's answer is unchanged
+    expect(ddb.commandCalls(ScanCommand).map((c) => c.args[0].input.FilterExpression)).toEqual(['attribute_exists(deletion) AND #s <> :d', 'attribute_exists(deleting_at) AND #s <> :d']);
+    const lines = log.mock.calls.map((c) => c[0]);
+    expect(lines[0]).toBe('{"startOvers":{"executed":0,"retried":0}}');
+    const emf = JSON.parse(lines[2]);
+    expect(emf._aws.CloudWatchMetrics).toEqual([{ Namespace: 'VettID/MemberApi', Dimensions: [[]], Metrics: [{ Name: 'DeletionResumesPending', Unit: 'Count' }] }]);
+    expect(emf.DeletionResumesPending).toBe(1);
+    expect(lines[2]).not.toMatch(/g1|aaaa|bbbb/); // counts only
+    expect(sends().map((s) => s.body.vault_id)).toEqual([V]);
+
+    log.mockClear();
+    scanRows([]);
+    await cleanup.handler({ task: 'start_over' });
+    expect(JSON.parse(log.mock.calls[2][0]).DeletionResumesPending).toBe(0);
+  });
+
+  test('a resume sweep that fails: logged, the metric line is still written, the start-overs\' answer stands', async () => {
+    const log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    const err = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    ddb.on(ScanCommand).callsFake((input) => {
+      if (input.FilterExpression === 'attribute_exists(deleting_at) AND #s <> :d') throw Object.assign(new Error('x'), { name: 'ProvisionedThroughputExceededException' });
+      return { Items: [] };
+    });
+    expect(await cleanup.handler({ task: 'start_over' })).toEqual({ executed: 0, retried: 0 });
+    expect(err.mock.calls).toEqual([['deletion resume sweep failed', 'ProvisionedThroughputExceededException']]);
+    expect(JSON.parse(log.mock.calls[2][0]).DeletionResumesPending).toBe(0);
+  });
+
+  test('the daily run and the requests run do not resume', async () => {
+    await cleanup.handler();
+    await cleanup.handler({ task: 'requests' });
+    expect(ddb.commandCalls(ScanCommand).map((c) => c.args[0].input.FilterExpression)).not.toContain('attribute_exists(deleting_at) AND #s <> :d');
   });
 });
 
