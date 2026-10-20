@@ -1,9 +1,14 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.9
+version: 0.1.10
 date: 2026-10-19
 changelog:
+  - 0.1.10: approved by the owner (2026-10-20) (RELAY-PROTOCOL 0.10.0).
+    §6.8, §9.2: the relay's `apple-app-site-association` (the
+    `/connect` path, the production and staging App IDs) is served by
+    the relay software, as specified in RELAY-PROTOCOL §6.11; the
+    account hosts' files stay vettid.org work
   - 0.1.9: owner decisions 2026-10-19 (VAULT-MESSAGING 0.48.0;
     ANDROID-PLAN 0.1.51; vettid.org #358 part 1). §6.3: New credential
     (`credential.reset`) is sent and decided as a change is; it stays
@@ -778,7 +783,8 @@ Universal Links for `https://account.vettid.org/vault/enroll/…`
 `https://relay.vettid.org/connect`, and the custom scheme
 `vettid://connect` (as on Android, ANDROID-PLAN §5 "App Link hosts per
 build"). The `apple-app-site-association` files are vettid.org work
-(§9.2). Message links follow VAULT-MESSAGING §10.5: only `https://`
+(§9.2); the relay's is built into the relay software, specified in
+RELAY-PROTOCOL §6.11 (0.10.0). Message links follow VAULT-MESSAGING §10.5: only `https://`
 is tappable, after "Open link to <host>?", handed to the system.
 
 ## 7. Test vectors
@@ -972,7 +978,10 @@ it may open vettid.org issues when it finds what is needed.
   of VAULT-PLAN §7 risk 6 and STAGING-DEVELOPMENT-PLAN §5 row I.
 - `apple-app-site-association` on `account.vettid.org`,
   `account.staging.vettid.org` and `relay.vettid.org` (`applinks` for
-  the enrollment and connect paths, with the team ID).
+  the enrollment and connect paths, with the team ID). The relay's
+  (`/connect` only) is specified in RELAY-PROTOCOL §6.11 (0.10.0) and
+  built into vettid-relay; it reaches `relay.vettid.org` when the owner
+  deploys that relay release.
 - A staging release with VA2–VA5 (VAULT-RELEASES), and later the
   production release that pins the iOS App ID (C6).
 - Phase P: the APNs secrets of PUSH-GATEWAY §14.1.
