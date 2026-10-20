@@ -1,9 +1,18 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.12
+version: 0.1.13
 date: 2026-10-20
 changelog:
+  - 0.1.13: approved by the owner (2026-10-20) (VAULT-MESSAGING 0.51.1;
+    ANDROID-PLAN 0.1.55; owner decision of 2026-10-20; found while
+    implementing the reset's lost answer on iOS). §6.3: a `forbidden`
+    answer from the vault to any request that decides an unresolved
+    change or reset ends it (the marker and the candidate cleared, the
+    gate open) and shows the existing "Your vault moved to a new phone"
+    as the one-time notice; only the vault's own sealed answer counts,
+    every transport, relay, member API or host failure and timeout stays
+    "unreachable"; nothing is erased. The texts are Android's
   - 0.1.12: approved by the owner (2026-10-20), with the behaviour and
     texts as written (vettid.org #356, #354; ANDROID-PLAN 0.1.54).
     §4.2 **A vault being deleted** and §4.3 **The way back to release N
@@ -1014,6 +1023,25 @@ Public keys are SEC1 uncompressed (`x963Representation` in CryptoKit,
      and `version` after `exp` + 1 minute is not applied). Every other
      credential operation waits for the decision. **New credential
      stays hidden**, as it is now, until this is implemented and tested.
+     (0.1.13) As in VAULT-MESSAGING 0.51.1 and ANDROID-PLAN 0.1.55
+     ("Another phone became the holder"), for a change, a renew and a
+     reset alike: a `forbidden` answer from the vault to any request that
+     decides the unresolved change (the resend of the same request,
+     `credential.version`, `credential.get`, `credential.ack`,
+     `credential.utk.get`, or any other) ends it, also after
+     `credential.version` showed "applied": the marker and the change's
+     candidate are cleared, the PIN is not left uncertain, and the gate
+     opens. The one-time notice is the existing "Your vault moved to a
+     new phone" (the title for `device.replaced`, ANDROID-PLAN §4), with no "Try
+     again". Only the vault's own answer counts: an error response with
+     code `forbidden` opened under the device's session with the vault
+     and answering that request's id. A transport error, a timeout, an
+     HTTP status, an error of the relay, the member API or the host, or
+     an answer that does not open, is no answer: the marker stays and
+     the "unreachable" text is shown. Nothing is erased: this answer is
+     not a proof that the phone was replaced, and the keys and local
+     state stay until the vault's own `device.unlinked{transferred}` or
+     `device.unlinked{replaced}`.
   3. A candidate becomes current on its operation's answer, or when an
      unlock answered `device_secret` with the current record is tried
      with the candidates, newest first, and one gets `ok`, `bad_pin` or
