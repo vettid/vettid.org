@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.51.2
+version: 0.52.0
 date: 2026-10-20
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.10.0)
-  - ANDROID-PLAN.md (0.1.57)
-  - IOS-PLAN.md (0.1.15; §9.1 VA1–VA3)
+  - ANDROID-PLAN.md (0.1.58)
+  - IOS-PLAN.md (0.1.16; §9.1 VA1–VA3)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,42 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.52.0: normative; owner decisions of 2026-10-20, **approved by the
+    owner (2026-10-20)**. **Needs a vault
+    release** (staging release 20); apps: ANDROID-PLAN 0.1.58, IOS-PLAN
+    0.1.16; no change for the member API or the host. Found when a
+    phone whose daily checks were refused before the key was spent ran
+    out of keys for good: the apps drop a UTK when they send it, but
+    the vault kept it when it refused the request before the spend, so
+    its pool for the phone filled with UTKs the phone no longer had and
+    `credential.utk.get` returned none. (1) **Spend first** (§3.5.4
+    "Using a UTK"): a request spends the UTK it presents as soon as its
+    body parses and its `utk_id` reads, before any other check (a
+    recovering app's limits, the holder, transfer and alarm rules, the
+    signer confirmation, `credential_required`, `owner_check_required`,
+    `forbidden`); **a refusal still spends the UTK**. A body without a
+    readable `utk_id` spends nothing. §3.5.3 step 1, §3.5.9 Freeze,
+    §3.6.1 step 1, §6.7.1 step 3 (`signer_unconfirmed` now leaves the
+    UTK spent), §10.9 (`audit.export`), §10.18 (`wallet.sign`) and
+    §11.7.1's tests say so; the earlier "the UTK is not spent" texts
+    are replaced. (2) **Resync** (§3.5.4 Pool, §10.6):
+    `credential.utk.get{resync: true}` drops the device's pool and
+    issues a full pool of 20, at most once per 10 minutes per device
+    (divided by `time_scale` on staging, §11.10.8; `too_soon`
+    otherwise), audited `credential.utk_resync`; the app sends it only
+    when `utk.get` returned no UTKs while its own pool is empty. (3)
+    **`no_holder`** (§3.5.7, §3.5.9, §10.1): a vault with a credential
+    but no holder answers `credential_required` with body `{"reason":
+    "no_holder"}`, also to the holder-only types; `forbidden` to a
+    holder-only type now means only that another live app holds the
+    credential. (4) **Holder hardening** (§3.5.9, §6.7.1, §11.14.6):
+    the holder is none or exactly one live app; removing the holder's
+    device clears it; a holder that names no live app is cleared when
+    the state is loaded; a recovered phone's first handshake also
+    removes every other app; `credential.unlock` is holder-only in the
+    vault, as §3.5.9 always said. (5) **No adoption**: the vault still
+    never adopts an app as holder; the `no_holder` answer leads the
+    apps to a recovery on the account site
   - 0.51.2: clarification, owner decision of 2026-10-20, **approved by
     the owner (2026-10-20)**. No change to what the vault does: no
     vault release, no change for the member API or the host; apps only
@@ -2174,7 +2210,9 @@ Every operation that opens the credential comes from the **holder**
 The vault:
 
 1. refuses with `credential_frozen` or `rotation_required` while a clone
-   alarm is open (§3.5.9), before anything else (the UTK is not spent);
+   alarm is open (§3.5.9). (0.52.0) The UTK the request presents is
+   already spent: the spend comes before every check (§3.5.4 "Using a
+   UTK");
 2. **opens `sealed`** with the LTK for `utk_id` and destroys the LTK
    (§3.5.4). A missing, used, expired or foreign UTK is refused with
    `utk_invalid`;
@@ -2268,6 +2306,29 @@ can do:
 - An app whose pool is empty calls `credential.utk.get` first. It is
   allowed even on a restricted vault (§3.5.7) and for a recovering app
   (§11.11.5).
+- (0.52.0; owner decision of 2026-10-20) **Resync.**
+  `credential.utk.get{"resync": true}` drops every UTK of the sender's
+  pool, wiping their private keys, and issues a fresh full pool of 20.
+  Without `resync`, or with `"resync": false`, the call tops the pool
+  up as above.
+  - A resync is allowed **once per 10 minutes per device**, a period
+    divided by the release's `time_scale` like the scaled waits of
+    §11.10.8 (25 s at 24). A resync sooner is answered `too_soon` with
+    body `{allowed_after}` (§10.1) and changes nothing.
+  - Every resync is audited `credential.utk_resync` (`device_id` = the
+    app, `ref` = the count of UTKs dropped, §10.9).
+  - An app sends `"resync": true` only when a `credential.utk.get`
+    returned no UTKs while its own pool is empty: the vault's pool for
+    it is then full of UTKs it no longer holds. It sends it once; if
+    the resync also fails, the app shows the failure and does not
+    repeat it.
+  - **Why a resync is safe.** UTKs are bound to the device they were
+    issued to and reach it only inside that device's session (§6),
+    so a resync gives whoever holds that session nothing new: they
+    could already top the pool up. The old UTKs are wiped, so none of
+    them can be replayed afterwards. A resync touches neither the blob
+    nor the holder, so the defence against a clone, the blob's hash
+    and the one holder (§3.5.9), is unchanged.
 
 ```
 utk    = {"utk_id": "<16 lowercase hex>", "ek": "<b64 1,216 bytes>", "expires_at": "<ts>"}
@@ -2290,10 +2351,41 @@ also carry `hold` and `hold_off_until` (§3.6.7). A History export
 (`audit.export`, §10.9, 0.22.0) carries the `pin` alone and is not a
 credential operation.
 
-**Using a UTK.** The vault looks the UTK up among those issued to the
-sending app and removes it from the pool before anything else is checked.
-The removal is part of the batch's flush, so the UTK is spent even if the
-operation then fails, for example with `bad_password`.
+**Using a UTK.** (0.52.0; owner decision of 2026-10-20) A request
+spends the UTK it presents before anything else is checked:
+
+- As soon as the request's body has parsed as a JSON object (§5.3) and
+  its `utk_id` member reads as a UTK id (16 lowercase hex characters),
+  the vault removes that UTK from the sender's pool, if it is there.
+  Only then does it make any other check: a recovering app's limits
+  (§11.11.5), the holder, transfer and alarm rules (§3.5.9), a
+  transfer's signer confirmation (§6.7.1), and the checks made before
+  the type's handler (`credential_required`, §3.5.7;
+  `owner_check_required`, §3.6.3; `forbidden` for a type the sender may
+  not send).
+- **A refusal still spends the UTK.** The removal is part of the
+  batch's flush, so the UTK is spent whatever the answer: a success, a
+  `bad_password` or `bad_pin`, and equally a `forbidden`,
+  `credential_required`, `owner_check_required`, `credential_frozen`,
+  `rotation_required`, `signer_unconfirmed`, `credential_locked` or
+  `bad_request` that comes before the payload is opened.
+- A body that does not parse, or whose `utk_id` is absent or not a UTK
+  id, spends nothing. Nor does a request that is never handled: a
+  retransmission answered from the cache (§8.2), a message dropped by
+  the rate limit (§7.3), an unsupported type.
+- A `utk_id` that names no UTK of the sender's pool (unknown, spent,
+  expired or another device's) removes nothing, and is answered
+  `utk_invalid` where the operation opens the payload, unless an earlier
+  refusal answers first.
+- So an app removes a UTK from its own pool when it sends the request
+  that presents it, and never puts it back. A retransmission of the same
+  request (§8.2) carries the same UTK; a new attempt takes a fresh one.
+
+(Until 0.52.0 some refusals, among them the clone alarm's and a
+transfer's `signer_unconfirmed`, came before the spend, and the vault's
+checks before the handler did too. An app that had dropped the UTK on
+sending then held fewer UTKs than the vault counted for it, until
+`credential.utk.get` returned none.)
 
 **Critical values in responses.** A response that would carry a critical
 item's values seals them to a **one-time reply key** instead:
@@ -2472,6 +2564,11 @@ is without one only during enrollment (§3.5.5: no standalone deletion).
   so that a recovery of a vault without one is refused (§11.11.1).
 - The owner check does not gate a vault without a credential (§3.6.1,
   0.15.2).
+- (0.52.0; owner decision of 2026-10-20) A vault with a credential but
+  **no holder** (§3.5.9) is restricted in the same way, the recovery
+  path excepted, and its `credential_required` carries the body
+  `{"reason": "no_holder"}`. A vault without a credential answers
+  `credential_required` without a body.
 
 #### 3.5.8 What VettID and the vault can do
 
@@ -2520,13 +2617,39 @@ routine refresh.
 types that carry or return a blob: `credential.get`, `.ack`, `.unlock`,
 `.rotate`, `.password.change`, the holder's `.reset` (§3.5.5), the critical-item, critical-use
 and wallet operations (§10.7, §10.13, §10.18) and `device.transfer.*`
-(§6.7.1). **A vault with a credential but no holder** (a state of an
-earlier draft) never adopts an app that presents a blob: it refuses
-every request with `credential_required` (§3.5.7) except the recovery
-path (§11.11.5: a recovering app's `credential.utk.get` and
-`credential.recover`) and the types a restricted vault always
-accepts. Vaults with several apps from
-earlier drafts are not migrated; none exist outside tests.
+(§6.7.1). (0.52.0) The vault's list of holder-only types includes
+`credential.unlock`, as this sentence says.
+
+(0.52.0; owner decision of 2026-10-20) **The holder is either none or
+exactly one live app**, a device of role `app` that is paired with the
+vault now:
+
+- Whenever the holder's device record is removed, for whatever reason
+  (the replacement of the apps by a recovery, §11.14.6; a removal as by
+  `device.unlink`, §7.4; any other), the vault clears the holder in the
+  same flush. A completed transfer moves the holder to the new app in
+  the flush that removes the old one (§6.7.1).
+- When the vault's state is loaded (an unlock, a resume, a move to
+  another release), a holder that names no live app is cleared. A vault
+  that an earlier release left with a holder naming a removed device is
+  therefore a vault without a holder.
+- A recovered phone becomes the holder at its first handshake
+  (§11.14.6), and the same flush removes every other app
+  (`device.unlinked{reason: "replaced"}`), so that it is the vault's
+  only app.
+
+**A vault with a credential but no holder** never adopts an app as
+holder, whatever the app presents. It answers `credential_required`
+with body `{"reason": "no_holder"}` (§3.5.7, §10.1) to the holder-only
+types above and to every request a restricted vault refuses, except the
+recovery path (§11.11.5: a recovering app's `credential.utk.get` and
+`credential.recover`; from release R the recovery of §11.14.6) and the
+types a restricted vault always accepts. The answer leads the apps to
+the way out: a recovery started on the account site (§11.14.6), or, on
+a phone whose recovery has completed, its first handshake. **`forbidden`
+to a holder-only type means only that another live app holds the
+credential.** Vaults with several apps from earlier drafts are not
+migrated; none exist outside tests.
 
 **Detection.** Whenever a request presents a blob whose SHA-256 differs
 from the current hash:
@@ -2581,7 +2704,8 @@ member:
   `device.transfer.create` and `.approve`, and (0.22.0, owner decision
   of 2026-10-08) `audit.export`, its dry run included, although it is
   not a credential operation (§10.9 History export).
-- These refusals come before the UTK is spent (§3.5.3, step 1).
+- (0.52.0) These refusals come after the UTK is spent (§3.5.4 "Using a
+  UTK"); until 0.52.0 they came before it.
 - Still allowed: `credential.utk.get`, `credential.version` (which shows
   the alarm), `credential.lock`, `credential.alarm.confirm`; in state
   `rotation_required` the holder's `credential.get`, `credential.ack` and
@@ -2622,7 +2746,8 @@ opens a new alarm.
   staging release 18 does it (`features/credential/credential.go`:
   `gate`, `holderOnly`, `checkBlob`, `clone`, `freezeErr`):
   - In state `frozen`, `credential.rotate` and `credential.get` are
-    refused with `credential_frozen` before the UTK is spent. The
+    refused with `credential_frozen` (0.52.0: a presented UTK is spent
+    first, §3.5.4). The
     holder first confirms the alarm (above).
   - In state `rotation_required`, a `credential.rotate` spends its UTK
     and then checks the blob. The holder's blob of version current − 1,
@@ -2691,8 +2816,9 @@ is a credential operation (§3.5.3), so every check rotates the CEK. The
 vault:
 
 1. refuses with `credential_frozen` or `rotation_required` while a clone
-   alarm is open (§3.5.9), before anything else (the UTK is not spent);
-2. spends the UTK and opens `sealed` (§3.5.4; `utk_invalid`);
+   alarm is open (§3.5.9). (0.52.0) The UTK is already spent: the spend
+   comes before every check (§3.5.4 "Using a UTK");
+2. opens `sealed` with the spent UTK (§3.5.4; `utk_invalid`);
 3. checks the blob (§3.5.3 step 3): `stale_credential` for the holder's
    own retry, `credential_frozen` and an alarm for a clone;
 4. refuses with `backoff` while the PIN backoff of §11.8 runs, with
@@ -4342,10 +4468,12 @@ Old app (holder)           Vault                  Relay             New app
    its current blob and, sealed to a UTK (§3.5.4), the `password` and the
    `pin`, and (0.27.0) `signer` when the new app's signer differs. The
    vault:
+   - (0.52.0) spends the UTK, before anything else (§3.5.4);
    - (0.27.0) answers `signer_unconfirmed` if the new app's signer
      differs from the binding and the approval does not name its class
-     (§11.7.1); nothing is spent or counted and the transfer stays open;
-   - spends the UTK;
+     (§11.7.1); nothing is counted and the transfer stays open. (0.52.0)
+     The UTK stays spent; the holder's app approves again with a fresh
+     one;
    - checks the PIN against the vault's DEK derivation (§3.3.1): `bad_pin`
      on a mismatch, counted in the unlock backoff of §11.8 (and audited
      `vault.pin_failed`), and `backoff` while that backoff runs;
@@ -4361,7 +4489,9 @@ Old app (holder)           Vault                  Relay             New app
    becomes active; the new device record (role `app`, attestation
    binding, unlock key), and with it (0.27.0) the vault's signer
    binding, audited `device.signer_changed` when the signer changed
-   (§11.7.1); the holder becomes the new app; the old app is
+   (§11.7.1); the holder becomes the new app (0.52.0: in the same flush
+   that removes the old app, so the holder never names a removed device,
+   §3.5.9); the old app is
    **removed** as by `device.unlink` (§7.4: `device.unlinked{reason:
    "transferred"}` best effort after the response, relay key denylisted,
    unlock key and UTK pool removed). The new app receives
@@ -5111,7 +5241,8 @@ an answer to an unknown or expired id is dropped.
 - Error codes: `bad_request`, `not_found`, `forbidden` (the sender's role may
   not send this type; (0.51.2) also a holder-only type of §3.5.9 from an
   app that is not the holder, and any type but the recovery path's from
-  a recovering app, §11.11.5), `unsupported_type` (§5.3), `internal`, `relay_error`,
+  a recovering app, §11.11.5; (0.52.0) to a holder-only type of §3.5.9
+  it means only that another live app holds the credential), `unsupported_type` (§5.3), `internal`, `relay_error`,
   `ttl_not_allowed`, `claim_unavailable`, `accept_failed`, `approve_failed`,
   `connection_unavailable`, and (0.4.0):
   - `conflict`: the request's `version` is not the current one (§8.4);
@@ -5170,6 +5301,9 @@ an answer to an unknown or expired id is dropped.
     a connection's asks are bounded by §10.4.1's constants;
   - (0.18.0) `too_soon`: `account.name.set` within 30 days of the last
     applied name change, with body `{allowed_after}` (RFC 3339, §10.8);
+    (0.52.0) also a `credential.utk.get{"resync": true}` within 10
+    minutes (scaled, §3.5.4) of the device's last resync, with the same
+    body;
     (0.32.0, release A) also a peer's `relay.token.refresh`
     after `quota_exceeded` within 24 hours of the last fresh standing
     token that refreshes gave that connection, and (0.33.1) any other
@@ -5188,8 +5322,14 @@ an answer to an unknown or expired id is dropped.
   - `credential_required`: the vault has no credential (§3.5.7), or a
     recovery needs one (§11.11.5). (0.51.2) It may answer an owner
     device's request, the daily check and the credential operations
-    included, before the type's handler: then no UTK is spent, no PIN
-    or password is tested and nothing is counted;
+    included, before the type's handler: then no PIN or password is
+    tested and nothing is counted. (0.52.0) A UTK the request presents
+    is spent (§3.5.4), as for every refusal; this replaces 0.51.2's "no
+    UTK is spent". Also a vault with a credential but no holder
+    (§3.5.9), to the holder-only types and to every request a
+    restricted vault refuses, with body `{"reason": "no_holder"}`; a
+    vault without a credential sends no body. An app shows `no_holder`
+    as a vault this phone cannot use, not as a passing fault;
   - `bad_pin`: the current PIN given to `pin.change` is wrong;
   - (0.33.0, release R) `weak_password`: a password being set breaks a
     rule of §11.14.7, with body `{reason}` (`short`, `repeated`,
@@ -6495,7 +6635,7 @@ for `credential`, `utk_id` and `sealed`.
 
 | Type | Request body | Response body |
 |---|---|---|
-| `credential.utk.get` | `{}` | `{utks}` (tops the app's pool up to 20) |
+| `credential.utk.get` | `{}`; (0.52.0) `{resync?: bool}` | `{utks}` (tops the app's pool up to 20). (0.52.0) With `"resync": true`: drops the device's pool and issues 20, once per 10 minutes per device (scaled), otherwise `too_soon`; audited `credential.utk_resync` (§3.5.4) |
 | `credential.create` | `{utk_id, sealed{password}}`; (0.33.0, release R) `{utk_id, sealed{pin, password}}` | `{credential, version, key, utks}`; `exists` if the vault has a credential; (release R) `weak_password`, `bad_pin` (§11.14.9) |
 | `credential.get` | `{}` | `{credential, version, updated_at}`: the latest blob, to the holder only (§3.5.9); `not_found` if the vault holds none (§3.5.6) |
 | `credential.ack` | `{version}` | `{}`: the app holds this version (§3.5.3) |
@@ -7317,7 +7457,9 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `connection.stale`, `connection.reconnected`; `identity.rotated`;
   `credential.created`, `credential.rotated`, `credential.password_changed`,
   `credential.password_failed`, `credential.unlocked`;
-  `credential.recovered`; `credential.clone_detected` (`ref` =
+  `credential.recovered`; (0.52.0) `credential.utk_resync`
+  (`device_id` = the app, `ref` = the count of UTKs dropped, §3.5.4);
+  `credential.clone_detected` (`ref` =
   `alarm_id`, `device_id` = the presenter), `credential.alarm.confirmed`
   (`ref` = `<alarm_id>:mine` or `<alarm_id>:not_mine`),
   `credential.alarm.resolved` (`ref` = `alarm_id`), `credential.reset`
@@ -7459,8 +7601,8 @@ stay without an export.
   (§3.6.3) it is answered `owner_check_required`, as History is gated.
   While a clone alarm is open (§3.5.9) it is refused, the preview
   included, with the alarm's freeze code, `credential_frozen` or
-  `rotation_required`, without spending the UTK, as credential
-  operations are (owner decision of 2026-10-08): after the §3.6.3 gate
+  `rotation_required`, as credential operations are (owner decision
+  of 2026-10-08; 0.52.0: an export's UTK is spent first, §3.5.4): after the §3.6.3 gate
   and the holder check, before the rest (Order of checks, below;
   0.23.0 corrects 0.22.0's "before anything else").
   Desktops keep reading the log with `audit.list` but MUST NOT offer an
@@ -7496,11 +7638,12 @@ stay without an export.
   2. **The export**, with the same filters and `format`, `upto_seq` from
      the preview, `utk_id` and `sealed` = `{pin}` sealed to that UTK
      (§3.5.4; the PIN is 6–32 ASCII digits, §11.3). The vault:
-     1. refuses with `credential_frozen` or `rotation_required` while
-        a clone alarm is open (above; the UTK is not spent), and with
-        `bad_request` a request without a spendable UTK (below; the
-        UTK is not spent), then spends the UTK and opens `sealed`
-        (`utk_invalid`); the payload holds `pin` only;
+     1. (0.52.0) spends the UTK the request presents (§3.5.4), then
+        refuses with `credential_frozen` or `rotation_required` while
+        a clone alarm is open (above), and with `bad_request` a
+        request without a readable `utk_id` or `sealed` (below;
+        without a readable `utk_id` nothing is spent), then opens
+        `sealed` (`utk_invalid`); the payload holds `pin` only;
      2. checks the request: `bad_request` for a bad filter, a
         `format` other than `csv` or `json`, a PIN that is not 6–32
         digits, or an `upto_seq` that is not an integer ≥ 1 and at most
@@ -7529,7 +7672,9 @@ stay without an export.
   the app tops its pool up with `credential.utk.get` (§3.5.4).
 - **Order of checks** (0.23.0, errata to 0.22.0 from its
   implementation, vettid-vault #50; owner decision of 2026-10-09, §15
-  item 31). The vault answers the first that applies:
+  item 31). (0.52.0) Before any of them, a request whose `utk_id` reads
+  spends that UTK (§3.5.4 "Using a UTK"), so every refusal below leaves
+  it spent. The vault answers the first that applies:
   1. the common gates: a vault without a credential
      (`credential_required`, §3.5.7), then the daily owner check
      (`owner_check_required` while the app, or with the hold every owner
@@ -7543,8 +7688,8 @@ stay without an export.
      object, a `dry_run` that is not a boolean, a preview with
      `utk_id`, `sealed` or `upto_seq`, or an export whose `utk_id` or
      `sealed` is absent or malformed: `bad_request` at once. Without a
-     readable `utk_id` and `sealed` there is no UTK to spend, so the
-     answer cannot wait for the spend;
+     readable `utk_id` there is no UTK to spend (0.52.0: a readable
+     `utk_id` with a malformed `sealed` is spent);
   5. a preview: the other shape checks (the filters, a cursor or `limit`, and `format`,
      `bad_request`), then the answer;
   6. an export: the export's steps 1 (the spend, `utk_invalid`) to 6
@@ -10498,8 +10643,8 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
   would sign for; apps MUST show it (the payees, amounts, change and fee)
   to the member before asking for the password.
 - **Spending is a critical action.** `wallet.sign` is app only, needs the
-  credential's unlock window (`credential_locked` otherwise, before the
-  UTK is spent) and is one credential operation: the UTK payload's
+  credential's unlock window (`credential_locked` otherwise; 0.52.0: a
+  presented UTK is spent first, §3.5.4) and is one credential operation: the UTK payload's
   `item_id` MUST be the wallet and `payload_sha256` the SHA-256 of the
   PSBT's bytes (`bad_request` otherwise), so the password authorises this
   PSBT of this wallet only. The vault decrypts the phrase with the item
@@ -11985,7 +12130,7 @@ before iOS; nothing changes for S10 or production release 1.
   `device.signer_changed`. To another pinned signer:
   `device.transfer.pending` shows `signer_changed: true`; an approval
   without `signer`, or with the wrong class, is `signer_unconfirmed`
-  with the UTK unspent and the PIN backoff untouched; with it, the
+  with the PIN backoff untouched (0.52.0: the UTK spent, §3.5.4); with it, the
   transfer completes, the binding is the new signer, and
   `device.signer_changed` is audited with both classes and in the
   feed. To an unpinned signer: dropped as today.
@@ -12821,7 +12966,10 @@ recorded in the build's measurements:
   scales whatever its file says. What never scales (AWS windows,
   cryptographic freshness, the relay's lifetimes, timers between
   vaults, rate limits, backoff ladders, durations the member chooses,
-  retention) is in STAGING-TIME-SCALE §2.2 and §3.
+  retention) is in STAGING-TIME-SCALE §2.2 and §3. (0.52.0; owner
+  decision of 2026-10-20) One rate limit is scaled by exception: the
+  UTK resync's 10 minutes per device (§3.5.4), divided by `time_scale`
+  when the resync is asked for, so that it can be tested on staging.
 
 GrapheneOS verified-boot keys and the vendor roots stay in code and are
 the same for every channel. A release build MUST refuse a channel file
@@ -15593,6 +15741,15 @@ After `ok` the phone sends `hs.init` with purpose `app` and `ctx` =
 `recovery_id`, accepted without approval as for the first app (§11.3),
 and fetches the credential with `credential.get` as the holder (the blob
 does not fit the result).
+
+(0.52.0; owner decision of 2026-10-20) The completion's removal of the
+other apps clears the holder (§3.5.9), so until that handshake
+completes the vault has a credential and no holder, and answers
+`credential_required{reason: "no_holder"}` as §3.5.9 says. When the
+handshake completes, the phone becomes the holder and the same flush
+removes every other app (`device.unlinked{reason: "replaced"}`), so
+that the phone is the vault's only app. The vault adopts no other app
+in between.
 
 **A lost `ok`** (0.34.0; owner decision of 2026-10-16). The vault has
 removed the recovery record when it answers `ok`, so a phone that never

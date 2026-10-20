@@ -1,9 +1,18 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.15
+version: 0.1.16
 date: 2026-10-20
 changelog:
+  - 0.1.16: approved by the owner (2026-10-20)
+    (VAULT-MESSAGING 0.52.0; ANDROID-PLAN 0.1.58; owner decisions of
+    2026-10-20). New §4.5 **"One-time keys and a vault without a
+    holder"**: a UTK is spent when it is sent, whatever the answer
+    (`signer_unconfirmed` included); one `{"resync": true}` when
+    `credential.utk.get` returns no UTKs while the pool is empty, then
+    `error_vault_code` with the code; `credential_required{reason:
+    "no_holder"}` shows "This phone can't use your vault" (§4.4). The
+    texts are Android's
   - 0.1.15: approved by the owner (2026-10-20), with the behaviour and
     texts as written (owner decision of 2026-10-20) (VAULT-MESSAGING 0.51.2;
     ANDROID-PLAN 0.1.57). New §4.4 **"Vault error codes the app does not
@@ -836,6 +845,33 @@ with the fake vault: one case per code of its table, the code's check
 no erase after `credential_required` or `forbidden`, **Try again** and
 **Lock vault**, and transport, relay and host failures keeping their
 texts.
+### 4.5 One-time keys and a vault without a holder (0.1.16)
+
+*Approved by the owner (2026-10-20) (VAULT-MESSAGING 0.52.0;
+ANDROID-PLAN 0.1.58).* The same behaviour as
+ANDROID-PLAN §4 "One-time keys and a vault without a holder", carried
+here in full:
+
+1. **A UTK is spent when it is sent.** The app removes a UTK from its
+   pool when it sends the request that presents it and never puts it
+   back, whatever the answer; the vault spends it before any check
+   (VAULT-MESSAGING §3.5.4 "Using a UTK"). A retransmission of the same
+   request carries the same UTK; a new attempt, **Try again** included,
+   takes a fresh one. `signer_unconfirmed` leaves the UTK spent; the
+   approval is sent again with a fresh one.
+2. **Resync.** When `credential.utk.get` returns no UTKs while the app's
+   own pool is empty, the app sends `credential.utk.get{"resync": true}`
+   once and keeps the 20 UTKs it returns. If that also fails, it does
+   not resync again for that request and shows `error_vault_code` (§4.4)
+   with the vault's code (`too_soon` within 10 minutes of the last
+   resync, scaled on staging), or `utk_empty` for an empty list.
+3. **`no_holder`.** `credential_required` with body `{"reason":
+   "no_holder"}` shows "This phone can't use your vault" (§4.4, (1));
+   `forbidden` to a holder-only type now means only that another live
+   app holds the credential, so §4.4's text (3) is accurate as written.
+   Nothing is erased.
+
+The tests are Android's.
 
 ## 5. Architecture
 
