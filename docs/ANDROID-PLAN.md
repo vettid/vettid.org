@@ -41,7 +41,9 @@ changelog:
     feed item, `recovery.generation_closed` with `ref`
     `<generation>/rollback`, on Security alarms), and its title, detail
     and notification title and the phone-name line are approved; no
-    drafts remain
+    drafts remain. §4 "Recovery and unlock from release R": "Cancelling
+    the recovery…" (`unlock_recovery_cancelling`) while a cancel from the
+    app runs, approved by the owner 2026-10-20
   - 0.1.51: owner decisions 2026-10-19 (VAULT-MESSAGING 0.48.0;
     vettid.org #358 part 1). §4 "A lost answer to New credential": the
     holder's `credential.reset` is sent and decided as a change is
@@ -2833,6 +2835,13 @@ Two rules: (a) the name is self-reported by the attempting phone, and
 anyone can choose it, so it is shown only in that form, never as the
 phone's identity, and never in bold or as a title; (b) it never affects
 urgency, the alarming notification, the channel or any decision.
+**Cleaning for display.** Before showing the decoded name, the app
+removes Unicode format characters (category Cf: the direction controls,
+ALM U+061C, zero-width characters, U+FEFF), U+2028 and U+2029, U+FFFD
+and the quotation marks “ ” " (so that a name cannot close the quote
+and fake a sentence after it), then trims it. It shows at most 64
+characters (code points, never splitting a surrogate pair); a name
+that is empty after cleaning shows nothing.
 
 `busy` and `wrong_again` count no attempt, so no attempt shows them;
 they are hidden with the other `recovery.open` entries. When the read

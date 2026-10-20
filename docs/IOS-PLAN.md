@@ -26,7 +26,9 @@ changelog:
     feed item, `recovery.generation_closed` with `ref`
     `<generation>/rollback`, on Security alarms), and its title, detail
     and notification title and the phone-name line are approved; no
-    drafts remain
+    drafts remain. §6.4(3) (owner decision of 2026-10-20): the connect
+    screens keep capture protection (the invitation QR, its link, the
+    pasted link and the safety code)
   - 0.1.10: approved by the owner (2026-10-20) (RELAY-PROTOCOL 0.10.0).
     §6.8, §9.2: the relay's `apple-app-site-association` (the
     `/connect` path, the production and staging App IDs) is served by
@@ -490,6 +492,13 @@ Two rules: (a) the name is self-reported by the attempting phone, and
 anyone can choose it, so it is shown only in that form, never as the
 phone's identity, and never in bold or as a title; (b) it never affects
 urgency, the alarming notification, the channel or any decision.
+**Cleaning for display.** Before showing the decoded name, the app
+removes Unicode format characters (category Cf: the direction controls,
+ALM U+061C, zero-width characters, U+FEFF), U+2028 and U+2029, U+FFFD
+and the quotation marks “ ” " (so that a name cannot close the quote
+and fake a sentence after it), then trims it. It shows at most 64
+characters (code points, never splitting a surrogate pair); a name
+that is empty after cleaning shows nothing.
 
 `busy` and `wrong_again` count no attempt, so no attempt shows them;
 they are hidden with the other `recovery.open` entries. When the read

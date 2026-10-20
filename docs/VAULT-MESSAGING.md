@@ -45,8 +45,8 @@ changelog:
     the registering phone gave in `vault.recovery.register`
     (`app.name`, §11.11.3), as a third part of the `recovery.open`
     entry's `ref`; it is self-reported, shown as such, and never affects
-    urgency or any decision. Today the vault notes no name, and 0.50.0's
-    draft that dropped the requirement is withdrawn.
+    urgency or any decision. Today the vault notes no name, and the
+    unmerged 0.49.1 draft that dropped the requirement is withdrawn.
     As built: §10.9 audit kinds: `vault.pin_changed` (a PIN change),
     which the spec did not name, and `recovery.open`,
     `identity.rotate_resolved`, `device.unlinked_sent`,
