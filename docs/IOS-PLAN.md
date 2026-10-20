@@ -22,10 +22,11 @@ changelog:
     alarm; (2) the attempting phone's name stays, shown as self-reported
     ("from a phone that calls itself “<name>”") and never affecting
     urgency or any decision (VAULT-MESSAGING 0.50.0 §11.14.11).
-    Drafts for the owner: the `rollback` title, detail and notification
-    title, and the phone-name line. Question for the owner: should
-    `rollback` also notify (proposed: an `urgent` feed item on Security
-    alarms)
+    Owner answers of 2026-10-20: `rollback` also notifies (an `urgent`
+    feed item, `recovery.generation_closed` with `ref`
+    `<generation>/rollback`, on Security alarms), and its title, detail
+    and notification title and the phone-name line are approved; no
+    drafts remain
   - 0.1.10: approved by the owner (2026-10-20) (RELAY-PROTOCOL 0.10.0).
     §6.8, §9.2: the relay's `apple-app-site-association` (the
     `/connect` path, the production and staging App IDs) is served by
@@ -304,8 +305,7 @@ Only these differ on iOS:
 
 ### 4.1 Event titles (0.1.11)
 
-Approved by the owner (2026-10-19, 2026-10-20), except the texts
-marked (draft), which are new on 2026-10-20 and await approval. The same as ANDROID-PLAN §4 "Event titles" (0.1.52),
+Approved by the owner (2026-10-19, 2026-10-20). The same as ANDROID-PLAN §4 "Event titles" (0.1.52),
 carried here in full; the two must stay identical, and ANDROID-PLAN §4
 governs. Every event the vault sends has a
 plain title in the Notifications screen, in system notifications and in
@@ -340,6 +340,7 @@ the notification's text when names and text are shown):
 | `recovery.change_required`, `ref` = `password` | "Choose a stronger password to keep recovery on" | "Your password is too weak for recovery. Recovery stays off until you change it." |
 | `recovery.change_required`, `ref` = a generation | "Change your PIN or password to turn recovery back on" | "Recovery attempts were used. A change gives you 10 new attempts." |
 | `recovery.counter_unavailable` (`urgent`) | "Your vault cannot check its recovery attempts" | none; Settings → Vault status shows the approved "For a day your vault has not been able to check its recovery attempts …" text (ANDROID-PLAN §4 "Owner check and status"), scaled on a vault with a time scale |
+| `recovery.generation_closed`, `ref` `<generation>/rollback` (`urgent`; owner decision of 2026-10-20; needs a vault release) | "Your vault was given an older recovery record" | "A host may have served an older copy of your vault's recovery record, one on which recovery attempts had already been used. Your vault moved past it. If you did not try to recover your vault, change your PIN and your password now, and contact VettID." |
 | `identity.rotation_failed` (`high`) | "Your vault could not update its keys" | "Your connections still know your old keys. VettID will offer the update again." |
 | `identity.rotate_conflict` (`high`) | "<First Last>: verify again" | "This connection's vault announced two different new keys. That can mean someone holds an old copy of their vault. Nothing is sent or received until you check." (ANDROID-PLAN §4 "Other screens") |
 | `leash.item.run`, `leash.item.proxy` | "An agent used <item>" (decision 8); without item names: "An agent used an item" | — |
@@ -349,8 +350,8 @@ the urgent recovery notifications notify on **Security alarms** (on iOS from pha
 failed `recovery.attempt` ("Someone tried to recover your vault …",
 `urgent` and `not_success`, or `urgent` with a `ref` that does not
 read), `recovery.counter_unavailable` and `recovery.change_required`
-(both forms); proposed, pending the owner's answer, the `urgent` feed
-item of a `rollback` closure. Every other kind of this table stays on Vault activity,
+(both forms); and the `urgent` feed item of a `rollback` closure (owner
+decision of 2026-10-20). Every other kind of this table stays on Vault activity,
 including an `urgent` successful attempt and a not `urgent` one.
 
 **De-duplication** (decision 3). One recovery raises one notification:
@@ -382,7 +383,7 @@ is the app's and needs no vault change.
 | … reason `backup_off` | "Recovery turned off" | "You turned off the credential backup." |
 | … reason `exhausted` | "Recovery turned off: all 10 attempts used" | "Change your PIN or your password to turn it back on." |
 | … reason `delete` | "Recovery ended" | "Your vault is being deleted." With the suffix `/unconfirmed`, also "The service could not confirm this step." |
-| … reason `rollback` (owner decision of 2026-10-20; needs a vault release, VAULT-MESSAGING 0.50.0) | "Your vault was given an older recovery record" (draft) | "A host may have served an older copy of your vault's recovery record, one on which recovery attempts had already been used. Your vault moved past it. If you did not try to recover your vault, change your PIN and your password now, and contact VettID." (draft) |
+| … reason `rollback` (owner decision of 2026-10-20; needs a vault release, VAULT-MESSAGING 0.50.0) | "Your vault was given an older recovery record" | "A host may have served an older copy of your vault's recovery record, one on which recovery attempts had already been used. Your vault moved past it. If you did not try to recover your vault, change your PIN and your password now, and contact VettID." |
 | … reason `stale` | hidden (below) | — |
 | … a reason this app does not know | "Recovery attempts reset" | — |
 | `recovery.presence_unrecorded` | "Your vault could not record that you were here" | "If this lasts three days, your vault is no longer protected against a recovery started by someone else." (scaled on a vault with a time scale) |
@@ -453,10 +454,11 @@ their only trace. The vault now writes the reason `rollback` for that
 case (VAULT-MESSAGING 0.50.0 §11.14.11; needs a vault release), and
 History shows it with the alarming title and detail above. Until the
 vault writes `rollback`, a `stale` entry is hidden like the harmless
-one. Question for the owner: should `rollback` also notify? Proposed:
-the vault makes an `urgent` feed item for it (`ref`
+one. `rollback` also notifies (owner decision of 2026-10-20): the vault
+makes an `urgent` feed item for it (`recovery.generation_closed`, `ref`
 `<generation>/rollback`), which notifies on Security alarms with the
-title "Your vault was given an older recovery record" (draft).
+title "Your vault was given an older recovery record" (Notifications
+table above).
 
 **An attempt's outcome.** As built, the vault writes the details a host
 can drop as their own `recovery.open` entries, `ref` =
@@ -483,7 +485,7 @@ attempt, and checks kind and time itself. The outcome lines:
 **The attempting phone's name** (owner decision of 2026-10-20). When
 the matched `recovery.open` carries a name (base64url in the `ref`'s
 third part), the detail adds "From a phone that calls itself
-“<name>”." (draft) after the outcome line; without one it adds nothing.
+“<name>”." after the outcome line; without one it adds nothing.
 Two rules: (a) the name is self-reported by the attempting phone, and
 anyone can choose it, so it is shown only in that form, never as the
 phone's identity, and never in bold or as a title; (b) it never affects

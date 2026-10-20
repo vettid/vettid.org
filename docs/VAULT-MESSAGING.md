@@ -35,8 +35,9 @@ changelog:
     the reason): `recovery.generation_closed` gets the reason `rollback`
     for a next generation that already shows used attempts when a change
     is applied, a host serving an older copy of the vault's recovery
-    record; it is shown to the member, and (proposed, a question for the
-    owner) makes an `urgent` feed item. `stale` stays for a next
+    record; it is shown to the member, and makes an `urgent` feed item
+    (owner decision of 2026-10-20), on which apps notify on Security
+    alarms. `stale` stays for a next
     generation that is only already closed (a retry after a failed
     write), which the apps hide. Today the vault writes `stale` for both.
     (B) **The attempting phone's name stays** (owner decision of
@@ -7635,7 +7636,9 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
   attempts were used), `recovery.counter_unavailable` (priority
   `urgent`), `identity.rotation_failed` (priority `high`, `ref` =
   `recovery`) and `identity.rotate_conflict` (priority `high`,
-  `connection_id`) (§11.14.11),
+  `connection_id`) (§11.14.11), (0.50.0; needs a vault release)
+  `recovery.generation_closed` with `ref` `<generation>/rollback`
+  (priority `urgent`; only for the reason `rollback`, §11.14.11),
   and `guide`. Apps render
   items from `kind` and the references; only `guide` items carry `title`
   and `body`.
@@ -16346,9 +16349,10 @@ after the approval, whichever comes first.**
   stored. Feed: `recovery.attempt` (as above), `recovery.change_required`
   (`high`; `ref` = `password` when the password is too weak to arm, or
   the generation whose attempts were used), `recovery.counter_unavailable`
-  (`urgent`, after 24 hours), (0.50.0, proposed, pending the owner's
-  answer) `recovery.generation_closed` with `ref` `<generation>/rollback`
-  (`urgent`; apps notify on Security alarms), and (0.50.0) `vault.pin_changed`,
+  (`urgent`, after 24 hours), (0.50.0, owner decision of 2026-10-20)
+  `recovery.generation_closed` with `ref` `<generation>/rollback`
+  (`urgent`, written with the audit entry; apps notify on Security
+  alarms), and (0.50.0) `vault.pin_changed`,
   `device.secret_renewed`, `credential.recovered`,
   `recovery.device_paired`, `recovery.completed`,
   `identity.rotation_failed` and `identity.rotate_conflict` (§10.9).
