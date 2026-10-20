@@ -373,9 +373,14 @@ export class VettidOrgVaultStack extends cdk.Stack {
     // `cancelled_recovery_id` of an unlock's `unlocked` or `moved` event,
     // the backstop for an answer lost before its slot was written; never
     // cleared. The member API only reads it.
+    // `deleting_at` (VAULT-HOST-PROTOCOL 0.1.14 §5.6, §6.1, VAULT-MESSAGING
+    // 0.51.0 §11.5, MEMBER-API 2.10.0): written on `MarkDeleting` once a
+    // deletion's marking flush is stored (conditional: the row exists, is
+    // not `deleted`, has no mark yet), removed in the update for
+    // `unlocked`. The member API's cleanup job only reads it.
     h(['dynamodb:UpdateItem'], [t.vaults.tableArn], onlyAttributes([
       'vault_id', 'lease', 'updated_at', 'sealed_release', 'vault_version', 'state_version', 'state', 'alarm', 'alarm_pending', 'app_key', 'credential_backup',
-      'name_change', 'name_change_pending', 'att_sweep_pending', 'app_key_next', 'recovery_cancelled',
+      'name_change', 'name_change_pending', 'att_sweep_pending', 'app_key_next', 'recovery_cancelled', 'deleting_at',
     ]));
     // P15's resumption at the parent's start: a Scan filtered on
     // attribute_exists(att_sweep_pending), projecting vault_id (vettid-vault

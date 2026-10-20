@@ -97,11 +97,14 @@ export const VAULT_API_ACCESS: Record<VaultApiConsumer, VaultApiAccess> = {
   // API's `deletion` (state, queued_at). Daily (MEMBER-API 2.6.5): a vault
   // whose member row is gone gets `orphan_seen_at` at first sight (cleared
   // if the member row is back). `orphan_hold` is an operator's, set by
-  // hand; the job only reads it.
+  // hand; the job only reads it. Every 5 minutes (MEMBER-API 2.10.0): a row
+  // with the host-written `deleting_at` is sent `delete_resume` (on the
+  // control queues, as `delete` is) and gets `deletion_resumed_at`; the job
+  // reads `deleting_at` (its Scan) and never writes it.
   cleanup: {
     tables: [
       { table: 'vaults', actions: ['Query', 'Scan', 'DeleteItem'], indexes: true },
-      { table: 'vaults', actions: ['UpdateItem'], attributes: ['vault_id', 'deletion_requested_at', 'deletion', 'orphan_seen_at'] },
+      { table: 'vaults', actions: ['UpdateItem'], attributes: ['vault_id', 'deletion_requested_at', 'deletion', 'orphan_seen_at', 'deletion_resumed_at'] },
       { table: 'vault-instances', actions: ['GetItem', 'Query'], indexes: true },
       { table: 'vault-releases', actions: ['GetItem'] },
       { table: 'vault-releases', actions: ['UpdateItem'], attributes: ['release', 'start_requested_at', 'start_requests'] },

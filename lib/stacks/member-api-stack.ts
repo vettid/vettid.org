@@ -396,7 +396,9 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     ];
     // "Delete my vault and start over" (MEMBER-API 2.1.0, VAULT-MESSAGING
     // 0.16.0 §11.11.9): the same job, every 5 minutes, sends the host's
-    // `delete` for each start-over past its 24 h.
+    // `delete` for each start-over past its 24 h. 2.10.0: the same run sends
+    // `delete_resume` for a deletion the vault marked (`deleting_at`) and
+    // that stopped, and writes the metric DeletionResumesPending (EMF).
     new events.Rule(this, 'StartOverSchedule', {
       schedule: events.Schedule.rate(cdk.Duration.minutes(5)),
       targets: [new targets.LambdaFunction(cleanup, { event: events.RuleTargetInput.fromObject({ task: 'start_over' }) })],
