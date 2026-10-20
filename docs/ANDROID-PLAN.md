@@ -4551,10 +4551,9 @@ written.*
 `FailureKind`, and every code it does not list becomes `OTHER`, which
 the screens show as "Something went wrong. Try again." A phone whose
 vault was recovered to another phone that never finished failed its
-daily check with that text every time: the vault answered
-`credential_required` (the vault has a credential but no holder,
-VAULT-MESSAGING §3.5.9, 0.51.2), before the PIN was tested, and trying
-again could never help. Neither the member nor VettID could tell what
+daily check with that text every time: the vault most likely answered
+`credential_required` (VAULT-MESSAGING §10.1, 0.51.2) before the PIN
+was tested, and trying again could never help. Neither the member nor VettID could tell what
 had happened.
 
 **The codes.** What the vault can answer to the owner-facing requests
@@ -4568,7 +4567,7 @@ vault's code and checked against VAULT-MESSAGING §10.1:
 |---|---|---|
 | `bad_pin`, `bad_password`, `backoff`, `credential_frozen`, `rotation_required`, `not_found`, `unsupported_type`, `limit`, `stale_credential`, `utk_invalid`, `owner_check_required`, `busy`, `retry`, `counter_unavailable`, `weak_password` | §10.1 | Mapped already; unchanged |
 | `credential_required` | Every request but §3.5.7's few types, when the vault has no credential or a credential but no holder; answered before any handler, so no PIN or password was tested | **New**: "This phone can't use your vault" (1) |
-| `forbidden` | A holder-only type (§3.5.9: the daily check, `pin.change`, `vault.secret.renew`, `account.name.set`, `credential.get`, `.ack`, `.reset`, `device.transfer.create`, `.reject`, `vault.delete`) from an app that is not the holder; any type but the recovery path from a phone in a recovery | **New** outside an unresolved change: "Your vault is on another phone" (3) |
+| `forbidden` | A holder-only type (§3.5.9: the daily check, `pin.change`, `vault.secret.renew`, `account.name.set`, `credential.get`, `.ack`, `.reset`, `device.transfer.create`, `.reject`, `vault.delete`) from an app that is not the holder; any type but the recovery path from a phone in a recovery | **New** outside an unresolved change: "Your vault moved to a new phone" (3) |
 | `too_soon` (`account.name.set`), `exists` (`device.transfer.create`), `signer_unconfirmed` (`device.transfer.approve`) | §10.1, §6.7.1, §10.8 | Mapped by their screens already; elsewhere (2) |
 | `bad_request`, `internal`, `relay_error`, `unavailable` | A malformed request (an app fault), a vault fault, a relay failure inside the vault, a missing part | (2) |
 | `session_required`, `denied`, `approval_timeout` | Desktops and agents only | Never sent to the app; (2) if they are |
