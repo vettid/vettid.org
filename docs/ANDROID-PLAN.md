@@ -1,9 +1,18 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.59
-date: 2026-10-20
+version: 0.1.60
+date: 2026-10-21
 changelog:
+  - 0.1.60: approved by the owner (2026-10-21)
+    (VAULT-MESSAGING 0.52.0 §3.5.4; the audit kind
+    `credential.utk_resync`, written by staging release 20, showed as
+    "Vault event: credential.utk_resync"). §4 "Event titles", History:
+    `credential.utk_resync` gets the title "One-time keys renewed" and
+    the detail "This phone's one-time keys were replaced with a fresh
+    set."; the row names the device from `device_id` as usual. Category
+    Security (its `credential` prefix already maps there); not urgent:
+    History only, no feed item, no notification
   - 0.1.59: approved by the owner (2026-10-20)
     (VAULT-MESSAGING 0.53.0; owner decision of 2026-10-20; found when an
     attestation timestamp about a second behind the enclave's clock made
@@ -2874,6 +2883,7 @@ is the app's and needs no vault change.
 | `owner_check.passed`, `.held`, `.failed`, `.locked`, `.hold_changed` | "Daily check passed", "Vault held for the daily check", "Daily check failed", "Vault locked after failed daily checks", "Daily check hold changed" (decision 5) | — |
 | `identity.rotated` | "Your vault's keys were renewed" (was "Vault identity key rotated"; decision 7) | — |
 | `credential.rotated` | "Your credential was renewed" (was "Credential rotated"; decision 7) | — |
+| `credential.utk_resync` (VAULT-MESSAGING 0.52.0 §3.5.4; approved by the owner 2026-10-21) | "One-time keys renewed" | "This phone's one-time keys were replaced with a fresh set." The row's second line names the device from the entry's `device_id`, as for every entry with one (§4 History). Category Security (`credential`); not urgent: History only, the vault makes no feed item for it |
 | `recovery.attempt` | "Recovery attempt n of 10" | `success`: "Successful." `not_success`: "Not successful. If this was not you, change your PIN or your password now.", then the outcome of the matching `recovery.open` (below), or "Details not available." when none matches |
 | `recovery.attempts_used` (`ref` `<generation>/<used>`) | "Recovery attempts used: n of 10" | "If that was not you, change your password now, and your PIN as well." |
 | `recovery.armed` | "Recovery is set up" | "It works with your current PIN and password, with 10 attempts." |
