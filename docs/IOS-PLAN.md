@@ -1,9 +1,16 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.20
+version: 0.1.21
 date: 2026-10-21
 changelog:
+  - 0.1.21: approved by the owner (2026-10-21)
+    (owner decision of 2026-10-21; ANDROID-PLAN 0.1.63). §4.7, Drafts:
+    the names of a name request already sent are cleared too, at lock
+    and on entering the hold or the due state; while the vault is not
+    open nothing about the request is shown; it comes back with
+    `account.get`'s `name_request` after the unlock, and an
+    `account.name.set` answered after the lock is not kept
   - 0.1.20: approved by the owner (2026-10-21)
     (owner decisions of 2026-10-21; ANDROID-PLAN 0.1.62). §4.7: while
     the vault is not open, the top bar, the avatar sheet and the
@@ -935,9 +942,9 @@ descriptor's clock allowance", carried here in full:
 
 The tests are Android's (`EnclaveVerifierTests`).
 
-### 4.7 The member's own profile (0.1.19, 0.1.20)
+### 4.7 The member's own profile (0.1.19, 0.1.20, 0.1.21)
 
-*Approved by the owner (2026-10-21) (ANDROID-PLAN 0.1.61, 0.1.62).* The same
+*Approved by the owner (2026-10-21) (ANDROID-PLAN 0.1.61, 0.1.62, 0.1.63).* The same
 rule as ANDROID-PLAN §4 "The member's own profile", carried here in
 full:
 
@@ -962,8 +969,14 @@ shows, may stay in the account record.
 name (the two names, the PIN, the password) and in the shared-profile
 editor (an edited display name, a taken photo not yet saved, whose
 bytes are zeroed) is cleared at lock and on entering the hold or the
-due state. The member types it again after the unlock; a name request
-already sent keeps showing its state.
+due state. The member types it again after the unlock. (0.1.21) The
+names of a request already sent are cleared too: while the vault is not
+open, nothing about the request is shown, neither its names nor its
+state. After the unlock, the request comes back from the vault with
+`account.get`'s `name_request` (its `seq`, the requested names, its
+`state` and `reason`, VAULT-MESSAGING §10.8), and an
+`account.name.set` answered after the lock, or while held or due, is
+not kept.
 
 The tests are Android's.
 

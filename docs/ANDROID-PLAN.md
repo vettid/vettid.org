@@ -1,9 +1,18 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.62
+version: 0.1.63
 date: 2026-10-21
 changelog:
+  - 0.1.63: approved by the owner (2026-10-21)
+    (owner decision of 2026-10-21; the app kept the names of a name
+    request already sent while the vault was not open). §4 "The
+    member's own profile", Drafts: the names of a request already sent
+    are cleared too, at lock and on entering the hold or the due state;
+    while the vault is not open nothing about the request is shown; it
+    comes back with `account.get`'s `name_request` after the unlock,
+    and an `account.name.set` answered after the lock is not kept. No
+    new text. Tests listed
   - 0.1.62: approved by the owner (2026-10-21)
     (owner decisions of 2026-10-21). §4 "The member's own profile": while the vault is not
     open, the top bar, the avatar sheet and the Settings account card
@@ -4830,7 +4839,7 @@ until its key rotated.
 - A descriptor whose `not_after` is not after `now` is still refused,
   with no allowance.
 
-### The member's own profile (0.1.61, 0.1.62)
+### The member's own profile (0.1.61, 0.1.62, 0.1.63)
 
 *Approved by the owner (2026-10-21).*
 
@@ -4860,8 +4869,14 @@ written again without them at the next start.
 name (the two names, the PIN, the password) and in the shared-profile
 editor (an edited display name, a taken photo not yet saved, whose
 bytes are zeroed) is cleared at lock and on entering the hold or the
-due state. The member types it again after the unlock; a name request
-already sent keeps showing its state.
+due state. The member types it again after the unlock. (0.1.63) The
+names of a request already sent are cleared too: while the vault is not
+open, nothing about the request is shown, neither its names nor its
+state. After the unlock, the request comes back from the vault with
+`account.get`'s `name_request` (its `seq`, the requested names, its
+`state` and `reason`, VAULT-MESSAGING §10.8), and an
+`account.name.set` answered after the lock, or while held or due, is
+not kept.
 
 **Tests.** The snapshot, the name request and the profile are gone
 after a lock and after entering the hold or the due state, and come
@@ -4873,7 +4888,10 @@ them; (0.1.62) while the vault is not open the top bar, the avatar
 sheet and the Settings card show neither the names nor the masked
 hint; the drafts of Change name and of the shared-profile editor are
 cleared at lock and in the hold or the due state, and the pending
-photo's bytes are zeroed.
+photo's bytes are zeroed; (0.1.63) the requested names of a request
+already sent are cleared at lock and in the hold or the due state, an
+`account.name.set` answered after the lock does not store them again,
+and the request comes back from `account.get` after the unlock.
 
 ## 5. Architecture
 
