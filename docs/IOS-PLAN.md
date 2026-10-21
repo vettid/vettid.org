@@ -1,9 +1,20 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.18
+version: 0.1.19
 date: 2026-10-21
 changelog:
+  - 0.1.19: approved by the owner (2026-10-21)
+    (owner decisions of 2026-10-21; ANDROID-PLAN 0.1.61). §4's table:
+    the profile photo is **camera only** (row I2.5, ANDROID-PLAN §4
+    Settings → Privacy), and `PHPickerViewController` is for photo
+    attachments only; camera access "not yet asked" asks, "denied" and
+    "restricted" show the iOS-only text
+    `ios_settings_photo_capture_permission_blocked` with **Open
+    settings** (§14). New §4.7 **"The member's own profile"**: memory
+    only, wiped at lock, as on Android; while the vault is not open the
+    top bar, the avatar sheet and the Settings account card show the
+    initial tile, and the name and photo return after the unlock
   - 0.1.18: approved by the owner (2026-10-21)
     (VAULT-MESSAGING 0.52.0 §3.5.4; ANDROID-PLAN 0.1.60). §4.1, History:
     `credential.utk_resync` gets the title "One-time keys renewed" and
@@ -359,7 +370,8 @@ Only these differ on iOS:
 | Settings → App → Allow screenshots | Turns off the secure layer of ID10 only; the app-switcher cover and capture hiding stay (they protect against what the member does not see). Same lifetime rules as Android (`core/data/…/lock/ScreenshotAllowance.kt`). |
 | Settings → Notifications | Two modes, **Apple push** and **Off** (PUSH-GATEWAY §11.2); until phase P, Apple push shows "Not available yet" (§14). No on-phone service exists on iOS. |
 | Settings → Vault status | ID15. |
-| Profile photo, photo attachments | AVFoundation camera to memory; `PHPickerViewController` (no photo-library permission, like the Android Photo Picker); saving uses the add-only permission and only after the warning. |
+| Profile photo | **Camera only**, as on Android (ANDROID-PLAN §4 Settings → Privacy; row I2.5): the app's own AVFoundation camera screen, to memory; no photo picker and no other camera app. Camera access "not yet asked" asks; "denied" and "restricted" show `ios_settings_photo_capture_permission_blocked` (§14) with **Open settings**, which opens the app's page in Settings (Android's text names its phone's Permissions screen). |
+| Photo attachments | AVFoundation camera to memory; `PHPickerViewController` (no photo-library permission, like the Android Photo Picker); saving uses the add-only permission and only after the warning. |
 | History export | `fileExporter` ("Save to Files") in place of "Save to…". |
 | Calls (later) | CallKit, and PushKit to ring (needs APNs). |
 
@@ -914,6 +926,30 @@ descriptor's clock allowance", carried here in full:
    after its own clock.
 
 The tests are Android's (`EnclaveVerifierTests`).
+
+### 4.7 The member's own profile (0.1.19)
+
+*Approved by the owner (2026-10-21) (ANDROID-PLAN 0.1.61).* The same
+rule as ANDROID-PLAN §4 "The member's own profile", carried here in
+full:
+
+**Memory only, wiped at lock.** The account snapshot of `account.get`
+(the first and last name, the full email address, the membership, the
+name request) and the shared profile of `profile.get` (the names, the
+display name, the profile photo) live in memory only: never in the
+account record, the Keychain, `UserDefaults`, a file or state
+restoration. They are forgotten at lock, on entering the hold or the
+due state, at sign-out, at a wipe and when the process ends; an answer
+still on its way then is not kept. While the vault is not open, the
+top bar, the avatar sheet and the Settings account card show the
+initial tile, without the name, the full email address or the photo.
+The name and photo return after the unlock (after the passed check, in
+the hold or the due state), when `account.get` and `profile.get` are
+read again. The bytes of the photo decoded for display are zeroed once
+the image is made. The masked email hint, which the unlock screen
+shows, may stay in the account record.
+
+The tests are Android's.
 
 ## 5. Architecture
 
@@ -1786,3 +1822,11 @@ approved.
   make another."
 - **Help → Keyboards (ID11)**: "VettID uses only Apple's keyboard, so
   that other keyboards never see your PIN, password or codes."
+- **Camera blocked for the profile photo (§4; approved 2026-10-21)**,
+  `ios_settings_photo_capture_permission_blocked`: "The camera is
+  turned off for VettID. To take your profile photo, open the app's
+  settings and turn on Camera." with the action **Open settings**
+  (`settings_photo_capture_open_settings`, Android's), which opens the
+  app's page in Settings. Shown when camera access is "denied" or
+  "restricted"; "not yet asked" asks (`settings_photo_capture_permission_title`
+  and `_body`, Android's).
