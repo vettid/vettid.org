@@ -1,9 +1,17 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.61
+version: 0.1.62
 date: 2026-10-21
 changelog:
+  - 0.1.62: approved by the owner (2026-10-21)
+    (owner decisions of 2026-10-21). §4 "The member's own profile": while the vault is not
+    open, the top bar, the avatar sheet and the Settings account card
+    show only the initial tile, with no name, no email address and not
+    even the masked email hint (the unlock screen keeps the hint); the
+    drafts on Change name and in the shared-profile editor are cleared
+    at lock and on entering the hold or the due state. No new text.
+    Tests listed
   - 0.1.61: approved by the owner (2026-10-21)
     (owner decision of 2026-10-21; the app kept the account snapshot
     in its account record until a wipe). New §4 **"The member's own
@@ -4822,7 +4830,7 @@ until its key rotated.
 - A descriptor whose `not_after` is not after `now` is still refused,
   with no allowance.
 
-### The member's own profile (0.1.61)
+### The member's own profile (0.1.61, 0.1.62)
 
 *Approved by the owner (2026-10-21).*
 
@@ -4836,8 +4844,10 @@ memory only: never in the account record, Room, a file, DataStore or
 `SavedStateHandle`. They are forgotten at lock, on entering the hold
 or the due state, at sign-out, at a wipe and when the process ends; an
 answer still on its way then is not kept. While the vault is not open,
-the top bar, the avatar sheet and the Settings account card show the
-initial tile, without the name, the full email address or the photo.
+the top bar, the avatar sheet and the Settings account card show
+only the initial tile: no name, no email address (not even the masked
+email hint) and no photo. Only the unlock screen shows the masked
+hint.
 The name and photo return after the unlock (after the passed check, in
 the hold or the due state), when `account.get` and `profile.get` are
 read again. The bytes of the photo decoded for display are zeroed once
@@ -4846,13 +4856,24 @@ shows, stays in the account record; an account record written by an
 earlier build that still holds the snapshot or the name request is
 written again without them at the next start.
 
+**Drafts.** (0.1.62) What the member has typed or taken on Change
+name (the two names, the PIN, the password) and in the shared-profile
+editor (an edited display name, a taken photo not yet saved, whose
+bytes are zeroed) is cleared at lock and on entering the hold or the
+due state. The member types it again after the unlock; a name request
+already sent keeps showing its state.
+
 **Tests.** The snapshot, the name request and the profile are gone
 after a lock and after entering the hold or the due state, and come
 back with the next read after the unlock; an `account.get` or
 `profile.get` answered after the lock, or while held or due, is not
 kept; the account record has no field for the snapshot or the name
 request, and a record of an earlier build is written again without
-them.
+them; (0.1.62) while the vault is not open the top bar, the avatar
+sheet and the Settings card show neither the names nor the masked
+hint; the drafts of Change name and of the shared-profile editor are
+cleared at lock and in the hold or the due state, and the pending
+photo's bytes are zeroed.
 
 ## 5. Architecture
 
