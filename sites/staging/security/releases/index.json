@@ -1,9 +1,35 @@
 {
-  "serial": 21,
+  "serial": 22,
   "releases": [
     {
-      "release": 19,
+      "release": 20,
       "status": "active",
+      "published_at": "2026-10-20T23:32:10Z",
+      "pcr0": "44f731679d8c0a9aa63a814f9f6eae03798879ee8aa6ed9da7a8fd0dde90613d5650ea0f16abbafac0c85edf4eb63d25",
+      "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
+      "pcr2": "09f08b13d7cfb3e5ee80e49de4bbd58bb17d5992366bbd335fb7fb0d7d9edd21dd7a2f83741233125fcfb0bb20ef6189",
+      "seal_key": "arn:aws:kms:us-east-1:347272280361:key/31d1db19-feaf-490f-ab88-551bbffce6cd",
+      "notes": "https://staging.vettid.org/security/releases/20/",
+      "tag": "release/staging/20",
+      "source_commit": "577275fd3779d89b29c40d1bb32d839bc139ce90",
+      "summary": "Release 20 updates the enclave's certificate checks, marks later recovery attempts urgent again, and finishes a vault deletion that stopped partway.",
+      "changes": [
+        "The enclave and its host are built with Go 1.26.10. Their certificate checks, used for every encrypted connection they make, no longer trust eight intermediate certificates of one certificate authority (CVE-2026-111943).",
+        "Fix: after you complete a recovery yourself, a later attempt to recover your vault is marked urgent again. Before, every later attempt in the same round was recorded without urgency.",
+        "Fix: a completed recovery now writes its attempts to your History at once, not at your next daily check. A lost confirmation of the successful attempt is sent again when the vault resumes.",
+        "When a change of your PIN or password finds recovery attempts it has to close, your vault now records why and tells you with an urgent notice. History also shows the name the recovering phone gave itself.",
+        "A vault deletion that stops partway is now finished. The vault asks VettID's host to mark the deletion before it deletes anything, and VettID's cleanup completes a deletion that stopped after that mark.",
+        "A one-time key your phone sends is used up as soon as the vault reads the request, even if it refuses it, and your phone can ask the vault to send its set of one-time keys again when they get out of step.",
+        "Only one phone holds your credential. Removing a phone clears it, the phone you recover with becomes the only app, and the vault says so when no phone holds it. Copied-vault checks run before a refusal.",
+        "The enclave logs a warning when it cannot start a vault's process, and the developer tools refuse to run where vault processes cannot.",
+        "Built from vettid-vault commit 577275f (tag release/staging/20) and independently rebuilt on 2026-10-20 with a matching PCR0."
+      ],
+      "security": "none",
+      "listed": true
+    },
+    {
+      "release": 19,
+      "status": "deprecated",
       "published_at": "2026-10-19T20:59:03Z",
       "pcr0": "38daf72e76dcbb5672e69d664b8d5d619edf91ce7d3c523bedd823383b5515cf79c7e2da2100f0aefaca507049a40758",
       "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
