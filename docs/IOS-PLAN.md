@@ -1,9 +1,17 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.19
+version: 0.1.20
 date: 2026-10-21
 changelog:
+  - 0.1.20: approved by the owner (2026-10-21)
+    (owner decisions of 2026-10-21; ANDROID-PLAN 0.1.62). §4.7: while
+    the vault is not open, the top bar, the avatar sheet and the
+    Settings account card show only the initial tile, with no name, no
+    email address and not even the masked email hint (the unlock
+    screen keeps the hint); the drafts on Change name and in the
+    shared-profile editor are cleared at lock and on entering the hold
+    or the due state
   - 0.1.19: approved by the owner (2026-10-21)
     (owner decisions of 2026-10-21; ANDROID-PLAN 0.1.61). §4's table:
     the profile photo is **camera only** (row I2.5, ANDROID-PLAN §4
@@ -927,9 +935,9 @@ descriptor's clock allowance", carried here in full:
 
 The tests are Android's (`EnclaveVerifierTests`).
 
-### 4.7 The member's own profile (0.1.19)
+### 4.7 The member's own profile (0.1.19, 0.1.20)
 
-*Approved by the owner (2026-10-21) (ANDROID-PLAN 0.1.61).* The same
+*Approved by the owner (2026-10-21) (ANDROID-PLAN 0.1.61, 0.1.62).* The same
 rule as ANDROID-PLAN §4 "The member's own profile", carried here in
 full:
 
@@ -941,13 +949,21 @@ account record, the Keychain, `UserDefaults`, a file or state
 restoration. They are forgotten at lock, on entering the hold or the
 due state, at sign-out, at a wipe and when the process ends; an answer
 still on its way then is not kept. While the vault is not open, the
-top bar, the avatar sheet and the Settings account card show the
-initial tile, without the name, the full email address or the photo.
+top bar, the avatar sheet and the Settings account card show only the
+initial tile: no name, no email address (not even the masked email
+hint) and no photo. Only the unlock screen shows the masked hint.
 The name and photo return after the unlock (after the passed check, in
 the hold or the due state), when `account.get` and `profile.get` are
 read again. The bytes of the photo decoded for display are zeroed once
 the image is made. The masked email hint, which the unlock screen
 shows, may stay in the account record.
+
+**Drafts.** (0.1.20) What the member has typed or taken on Change
+name (the two names, the PIN, the password) and in the shared-profile
+editor (an edited display name, a taken photo not yet saved, whose
+bytes are zeroed) is cleared at lock and on entering the hold or the
+due state. The member types it again after the unlock; a name request
+already sent keeps showing its state.
 
 The tests are Android's.
 
