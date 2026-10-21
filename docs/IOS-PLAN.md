@@ -1,9 +1,14 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.17
-date: 2026-10-20
+version: 0.1.18
+date: 2026-10-21
 changelog:
+  - 0.1.18: approved by the owner (2026-10-21)
+    (VAULT-MESSAGING 0.52.0 §3.5.4; ANDROID-PLAN 0.1.60). §4.1, History:
+    `credential.utk_resync` gets the title "One-time keys renewed" and
+    the detail "This phone's one-time keys were replaced with a fresh
+    set.", category Security, History only. The texts are Android's
   - 0.1.17: approved by the owner (2026-10-20)
     (VAULT-MESSAGING 0.53.0; ANDROID-PLAN 0.1.59; owner decision of
     2026-10-20). New §4.6 **"The descriptor's clock allowance"**:
@@ -432,6 +437,7 @@ is the app's and needs no vault change.
 | `owner_check.passed`, `.held`, `.failed`, `.locked`, `.hold_changed` | "Daily check passed", "Vault held for the daily check", "Daily check failed", "Vault locked after failed daily checks", "Daily check hold changed" (decision 5) | — |
 | `identity.rotated` | "Your vault's keys were renewed" (was "Vault identity key rotated"; decision 7) | — |
 | `credential.rotated` | "Your credential was renewed" (was "Credential rotated"; decision 7) | — |
+| `credential.utk_resync` (VAULT-MESSAGING 0.52.0 §3.5.4; approved by the owner 2026-10-21) | "One-time keys renewed" | "This phone's one-time keys were replaced with a fresh set." The row's second line names the device from the entry's `device_id`, as for every entry with one (ANDROID-PLAN §4 History). Category Security (`credential`); not urgent: History only, the vault makes no feed item for it |
 | `recovery.attempt` | "Recovery attempt n of 10" | `success`: "Successful." `not_success`: "Not successful. If this was not you, change your PIN or your password now.", then the outcome of the matching `recovery.open` (below), or "Details not available." when none matches |
 | `recovery.attempts_used` (`ref` `<generation>/<used>`) | "Recovery attempts used: n of 10" | "If that was not you, change your password now, and your PIN as well." |
 | `recovery.armed` | "Recovery is set up" | "It works with your current PIN and password, with 10 attempts." |
