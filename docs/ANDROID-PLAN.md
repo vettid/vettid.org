@@ -4,7 +4,7 @@ status: draft
 version: 0.1.59
 date: 2026-10-20
 changelog:
-  - 0.1.59: approved by the owner (2026-10-20); wording to be confirmed
+  - 0.1.59: approved by the owner (2026-10-20)
     (VAULT-MESSAGING 0.53.0; owner decision of 2026-10-20; found when an
     attestation timestamp about a second behind the enclave's clock made
     the app refuse a valid descriptor, so every unlock into that

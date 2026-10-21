@@ -4,7 +4,7 @@ status: approved (owner, 2026-10-17)
 version: 0.1.17
 date: 2026-10-20
 changelog:
-  - 0.1.17: approved by the owner (2026-10-20); wording to be confirmed
+  - 0.1.17: approved by the owner (2026-10-20)
     (VAULT-MESSAGING 0.53.0; ANDROID-PLAN 0.1.59; owner decision of
     2026-10-20). New §4.6 **"The descriptor's clock allowance"**:
     `EnclaveVerifier` accepts a descriptor whose `not_after` is at most
