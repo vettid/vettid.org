@@ -1,9 +1,20 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.63
+version: 0.1.64
 date: 2026-10-21
 changelog:
+  - 0.1.64: approved by the owner (2026-10-21)
+    (VAULT-MESSAGING 0.54.0 §3.5.9, §10.9; the new audit kind
+    `credential.holder_cleared`, written by staging release 21 when
+    the vault clears, at load, a credential holder that names no live
+    app). §4 "Event titles", History: `credential.holder_cleared`
+    gets the title "Credential holder cleared" and the detail "Your
+    vault found its credential holder missing and cleared it. If you
+    didn't remove a phone, contact VettID."; the row names the device
+    from `device_id` as usual ("Removed device"). Category Security
+    (its `credential` prefix already maps there); not urgent: History
+    only, no feed item, no notification
   - 0.1.63: approved by the owner (2026-10-21)
     (owner decision of 2026-10-21; the app kept the names of a name
     request already sent while the vault was not open). §4 "The
@@ -2913,6 +2924,7 @@ is the app's and needs no vault change.
 | `identity.rotated` | "Your vault's keys were renewed" (was "Vault identity key rotated"; decision 7) | — |
 | `credential.rotated` | "Your credential was renewed" (was "Credential rotated"; decision 7) | — |
 | `credential.utk_resync` (VAULT-MESSAGING 0.52.0 §3.5.4; approved by the owner 2026-10-21) | "One-time keys renewed" | "This phone's one-time keys were replaced with a fresh set." The row's second line names the device from the entry's `device_id`, as for every entry with one (§4 History). Category Security (`credential`); not urgent: History only, the vault makes no feed item for it |
+| `credential.holder_cleared` (VAULT-MESSAGING 0.54.0 §3.5.9; staging release 21; approved by the owner 2026-10-21) | "Credential holder cleared" | "Your vault found its credential holder missing and cleared it. If you didn't remove a phone, contact VettID." The row's second line names the device from the entry's `device_id`, the cleared holder, as for every entry with one (§4 History); that device is no longer listed, so it shows as "Removed device". Category Security (`credential`); not urgent: History only, the vault makes no feed item for it |
 | `recovery.attempt` | "Recovery attempt n of 10" | `success`: "Successful." `not_success`: "Not successful. If this was not you, change your PIN or your password now.", then the outcome of the matching `recovery.open` (below), or "Details not available." when none matches |
 | `recovery.attempts_used` (`ref` `<generation>/<used>`) | "Recovery attempts used: n of 10" | "If that was not you, change your password now, and your PIN as well." |
 | `recovery.armed` | "Recovery is set up" | "It works with your current PIN and password, with 10 attempts." |

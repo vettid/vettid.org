@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.53.0
-date: 2026-10-20
+version: 0.54.0
+date: 2026-10-21
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.10.0)
-  - ANDROID-PLAN.md (0.1.59)
-  - IOS-PLAN.md (0.1.17; §9.1 VA1–VA3)
+  - ANDROID-PLAN.md (0.1.64)
+  - IOS-PLAN.md (0.1.22; §9.1 VA1–VA3)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,28 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.54.0: normative; owner decisions of 2026-10-21, **approved by the
+    owner (2026-10-21)**. **Needs a vault release** for part (1)
+    (staging release 21); apps: ANDROID-PLAN 0.1.64, IOS-PLAN 0.1.22
+    (a History title); no change for the member API
+    or the host. (1) **`credential.holder_cleared`** (§3.5.9, §10.9):
+    the pass that clears a holder naming no live app when the state is
+    loaded (0.52.0) is audited, `device_id` = the cleared holder's
+    device id, nothing secret. Since a removal clears the holder with
+    its device, a hit points to a fault or to tampering. History only,
+    no feed item, as for the other defensive entries
+    (`profile.core_missing`, `device.signer_refused`): the member
+    cannot act on it in the feed, and the vault already answers every
+    app `no_holder`, which the apps show, and refuses `feed.list`
+    until a recovery; the recovered phone then finds the entry in
+    History. (2) **`vault.delete` and `no_holder`** (§3.5.7, §3.5.9,
+    §10.1, §10.2), as built since 0.52.0: a vault with a credential
+    but no holder answers `vault.delete` with `credential_required`
+    and body `{"reason": "no_holder"}`. §3.5.9 no longer exempts
+    "the types a restricted vault always accepts" as a whole:
+    `vault.delete` is among them only before a credential exists (the
+    enrolling app's, §12.5, now named in §3.5.7's list), and is the
+    holder's afterwards
   - 0.53.0: normative; owner decision of 2026-10-20, **approved by the
     owner (2026-10-20); wording to be confirmed**. **Needs a vault
     release** for part (2) (staging release 21); apps: ANDROID-PLAN
@@ -2590,7 +2612,8 @@ is without one only during enrollment (§3.5.5: no standalone deletion).
 - The exceptions are the types needed to create the credential and keep
   the session alive: `vault.status`, `vault.lock`, `credential.utk.get`,
   `credential.create`, `credential.version`, `relay.token.issued`,
-  `relay.token.refresh` and `relay.address.update`.
+  `relay.token.refresh` and `relay.address.update`; and (stated in
+  0.54.0, as built) the enrolling app's `vault.delete` (§12.5).
 - In particular there is no pairing, no connection or invitation and no
   feature use, and `vault.enroll.confirm` is refused. The vault therefore
   stays **provisional** (§11.3) until it has a credential.
@@ -2667,6 +2690,12 @@ vault now:
   another release), a holder that names no live app is cleared. A vault
   that an earlier release left with a holder naming a removed device is
   therefore a vault without a holder.
+  (0.54.0) Since the rules above clear the holder with its device, the
+  pass should never find one; a holder it clears points to a fault or
+  to tampering, so the vault audits it as `credential.holder_cleared`
+  (`device_id` = the cleared holder's device id; no `ref`, nothing
+  secret; §10.9) in the flush that clears it. The entry is History
+  only: no feed item, no notice and no alarm.
 - A recovered phone becomes the holder at its first handshake
   (§11.14.6), and the same flush removes every other app
   (`device.unlinked{reason: "replaced"}`), so that it is the vault's
@@ -2675,10 +2704,14 @@ vault now:
 **A vault with a credential but no holder** never adopts an app as
 holder, whatever the app presents. It answers `credential_required`
 with body `{"reason": "no_holder"}` (§3.5.7, §10.1) to the holder-only
-types above and to every request a restricted vault refuses, except the
-recovery path (§11.11.5: a recovering app's `credential.utk.get` and
-`credential.recover`; from release R the recovery of §11.14.6) and the
-types a restricted vault always accepts. The answer leads the apps to
+types above, to `vault.delete` and to every request a restricted vault
+refuses, except the recovery path (§11.11.5: a recovering app's
+`credential.utk.get` and `credential.recover`; from release R the
+recovery of §11.14.6). (0.54.0) The other types a restricted vault
+always accepts (§3.5.7) are handled as on any vault; `vault.delete` is
+not among them here, because once the vault has a credential only the
+holder may delete it (§12.5), so with no holder it answers
+`credential_required{reason: "no_holder"}`. The answer leads the apps to
 the way out: a recovery started on the account site (§11.14.6), or, on
 a phone whose recovery has completed, its first handshake. **`forbidden`
 to a holder-only type means only that another live app holds the
@@ -5360,9 +5393,10 @@ an answer to an unknown or expired id is dropped.
     tested and nothing is counted. (0.52.0) A UTK the request presents
     is spent (§3.5.4), as for every refusal; this replaces 0.51.2's "no
     UTK is spent". Also a vault with a credential but no holder
-    (§3.5.9), to the holder-only types and to every request a
-    restricted vault refuses, with body `{"reason": "no_holder"}`; a
-    vault without a credential sends no body. An app shows `no_holder`
+    (§3.5.9), to the holder-only types, to `vault.delete` (0.54.0) and
+    to every request a restricted vault refuses, with body
+    `{"reason": "no_holder"}`; a vault without a credential sends no
+    body. An app shows `no_holder`
     as a vault this phone cannot use, not as a passing fault;
   - `bad_pin`: the current PIN given to `pin.change` is wrong;
   - (0.33.0, release R) `weak_password`: a password being set breaks a
@@ -5519,7 +5553,7 @@ an answer to an unknown or expired id is dropped.
 | `vault.held` (V→D, to the app and desktops in an access session) | — | `{deadline, waiting: {messages, requests, calls, other}}` (§3.6.3); 0.29.0, release L: also `idle_lock_at` (§3.6.8) |
 | `vault.lock` (app, desktop) | `{}`; 0.29.0, release L: `{unlock_id}` ("Locks", below) | `{}`; then `vault.locking`. 0.29.0, release L: `stale_lock` when `unlock_id` does not name the current unlock (nothing is done); `bad_request` when it is not 32 lowercase hex characters |
 | `account.get` (app, desktop) | `{}` | `{account: <snapshot, §11.13> \| null, version, received_at, name_request?}`; `null` (and `version` 0) before any snapshot arrived (0.15.0); the snapshot carries the member's full `email` (0.20.0), which only this type returns and only to the app and desktops (§11.13); `name_request` (0.18.0) is the latest `account.name.set` request (§10.8). A change of `name_request` alone sends `sync.event{kind: "account.changed"}` with the stored snapshot's `version` repeated, not incremented (0.19.0): `version` counts snapshots only, so a device MUST NOT skip an `account.changed` whose `version` it already holds |
-| `vault.delete` (app: the holder, or the enrolling app before a credential exists) | `{confirm: "delete my vault", credential?, utk_id, sealed{pin, password?}}` | `{}`; then the deletion of §12.5. `bad_request` without the exact phrase or a needed member; `bad_pin`, `backoff`, `bad_password`, `credential_frozen` / `rotation_required` (holder during an alarm), `forbidden` (a recovering app since 0.16.0: it completes the recovery first, then deletes as the holder; a member without the credential uses §11.11.9) |
+| `vault.delete` (app: the holder, or the enrolling app before a credential exists) | `{confirm: "delete my vault", credential?, utk_id, sealed{pin, password?}}` | `{}`; then the deletion of §12.5. `bad_request` without the exact phrase or a needed member; `bad_pin`, `backoff`, `bad_password`, `credential_frozen` / `rotation_required` (holder during an alarm), (0.54.0) `credential_required` with body `{"reason": "no_holder"}` (a vault with a credential but no holder, §3.5.9), `forbidden` (a recovering app since 0.16.0: it completes the recovery first, then deletes as the holder; a member without the credential uses §11.11.9) |
 | `vault.locking` (ephemeral) | — | `{reason?}` (0.29.0, release L: `{reason?, unlock_id}`, the unlock this lock ends), with `exp` = now + 60 s; an app ignores one whose `ts` is not later than its latest successful unlock result's (§11.4, 0.23.3); `reason` is `"recovery"` when a recovery request locked the vault (§11.11.1), `"owner_check"` when ten consecutive failed owner checks did (§3.6.4, 0.13.0), `"idle"` for the idle lock (§3.6.8; 0.29.0, release L) |
 | `relay.token.issued` | — | `{kind: "standing" \| "reconnect", token}` |
 | `relay.token.refresh` (req) | `{}` | `{kind: "standing", token}` |
@@ -7493,6 +7527,9 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `credential.password_failed`, `credential.unlocked`;
   `credential.recovered`; (0.52.0) `credential.utk_resync`
   (`device_id` = the app, `ref` = the count of UTKs dropped, §3.5.4);
+  (0.54.0) `credential.holder_cleared` (`device_id` = the cleared
+  holder's device id, no `ref`: the load pass of §3.5.9 cleared a
+  holder that named no live app; audit only, no feed item);
   `credential.clone_detected` (`ref` =
   `alarm_id`, `device_id` = the presenter), `credential.alarm.confirmed`
   (`ref` = `<alarm_id>:mine` or `<alarm_id>:not_mine`),

@@ -1,9 +1,16 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.21
+version: 0.1.22
 date: 2026-10-21
 changelog:
+  - 0.1.22: approved by the owner (2026-10-21)
+    (VAULT-MESSAGING 0.54.0 §3.5.9; ANDROID-PLAN 0.1.64). §4.1,
+    History: `credential.holder_cleared` gets the title "Credential
+    holder cleared" and the detail "Your vault found its credential
+    holder missing and cleared it. If you didn't remove a phone,
+    contact VettID.", category Security, History only. The texts are
+    Android's
   - 0.1.21: approved by the owner (2026-10-21)
     (owner decision of 2026-10-21; ANDROID-PLAN 0.1.63). §4.7, Drafts:
     the names of a name request already sent are cleared too, at lock
@@ -465,6 +472,7 @@ is the app's and needs no vault change.
 | `identity.rotated` | "Your vault's keys were renewed" (was "Vault identity key rotated"; decision 7) | — |
 | `credential.rotated` | "Your credential was renewed" (was "Credential rotated"; decision 7) | — |
 | `credential.utk_resync` (VAULT-MESSAGING 0.52.0 §3.5.4; approved by the owner 2026-10-21) | "One-time keys renewed" | "This phone's one-time keys were replaced with a fresh set." The row's second line names the device from the entry's `device_id`, as for every entry with one (ANDROID-PLAN §4 History). Category Security (`credential`); not urgent: History only, the vault makes no feed item for it |
+| `credential.holder_cleared` (VAULT-MESSAGING 0.54.0 §3.5.9; staging release 21; approved by the owner 2026-10-21) | "Credential holder cleared" | "Your vault found its credential holder missing and cleared it. If you didn't remove a phone, contact VettID." The row's second line names the device from the entry's `device_id`, the cleared holder, as for every entry with one (ANDROID-PLAN §4 History); that device is no longer listed, so it shows as "Removed device". Category Security (`credential`); not urgent: History only, the vault makes no feed item for it |
 | `recovery.attempt` | "Recovery attempt n of 10" | `success`: "Successful." `not_success`: "Not successful. If this was not you, change your PIN or your password now.", then the outcome of the matching `recovery.open` (below), or "Details not available." when none matches |
 | `recovery.attempts_used` (`ref` `<generation>/<used>`) | "Recovery attempts used: n of 10" | "If that was not you, change your password now, and your PIN as well." |
 | `recovery.armed` | "Recovery is set up" | "It works with your current PIN and password, with 10 attempts." |
