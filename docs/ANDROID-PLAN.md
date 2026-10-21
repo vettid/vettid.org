@@ -5,8 +5,7 @@ version: 0.1.62
 date: 2026-10-21
 changelog:
   - 0.1.62: approved by the owner (2026-10-21)
-    (owner decisions of 2026-10-21, from the review of the app's
-    change). §4 "The member's own profile": while the vault is not
+    (owner decisions of 2026-10-21). §4 "The member's own profile": while the vault is not
     open, the top bar, the avatar sheet and the Settings account card
     show only the initial tile, with no name, no email address and not
     even the masked email hint (the unlock screen keeps the hint); the
