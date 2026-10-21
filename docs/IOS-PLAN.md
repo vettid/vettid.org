@@ -1,9 +1,16 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.16
+version: 0.1.17
 date: 2026-10-20
 changelog:
+  - 0.1.17: approved by the owner (2026-10-20); wording to be confirmed
+    (VAULT-MESSAGING 0.53.0; ANDROID-PLAN 0.1.59; owner decision of
+    2026-10-20). New §4.6 **"The descriptor's clock allowance"**:
+    `EnclaveVerifier` accepts a descriptor whose `not_after` is at most
+    **24 h + 5 min** after the attestation document's timestamp (was
+    24 h + 1 s, `maxDescriptorLife`); every other check is unchanged.
+    Ships without waiting for a vault release. No new text
   - 0.1.16: approved by the owner (2026-10-20)
     (VAULT-MESSAGING 0.52.0; ANDROID-PLAN 0.1.58; owner decisions of
     2026-10-20). New §4.5 **"One-time keys and a vault without a
@@ -872,6 +879,35 @@ here in full:
    Nothing is erased.
 
 The tests are Android's.
+
+### 4.6 The descriptor's clock allowance (0.1.17)
+
+*Approved by the owner (2026-10-20); wording to be confirmed
+(VAULT-MESSAGING 0.53.0 §11.2 "Lifetime and clock allowance";
+ANDROID-PLAN 0.1.59).* The same change as ANDROID-PLAN §4 "The
+descriptor's clock allowance", carried here in full:
+
+1. **The allowance.** `EnclaveVerifier.verifyEnclave` (`VettIDAttestation`)
+   refuses a descriptor whose `not_after` is more than **24 h + 5 min**
+   after the attestation document's timestamp (`maxDescriptorLife` =
+   `24 * 3600 + 300`, was `24 * 3600 + 1`). An attestation timestamp
+   about a second behind the enclave's clock made the 1 s limit refuse
+   a valid descriptor, and every unlock into that instance failed
+   closed until its key rotated. This is the only comparison between
+   the descriptor's times and the attestation's.
+2. **Everything else is unchanged**: `not_after` must still be after the
+   phone's current time; the chain, PCR0–PCR2 against the signed
+   manifest, no debug PCRs, `release` = PCR0, `user_data`, and the
+   attestation's 26 h age with its 5 min skew. The refusal stays
+   `.stale` with the same text.
+3. **Why it is safe.** A few minutes on a key that lives 24 hours adds
+   no meaningful exposure; the signature, chain, PCR and `user_data`
+   checks are untouched, and `not_after` is inside the attested bytes.
+4. **Order.** This ships without waiting for a vault release; from
+   staging release 21 the enclave sets `not_after` at most 24 h − 60 s
+   after its own clock.
+
+The tests are Android's (`EnclaveVerifierTests`).
 
 ## 5. Architecture
 

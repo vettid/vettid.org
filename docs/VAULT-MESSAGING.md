@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.52.0
+version: 0.53.0
 date: 2026-10-20
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.10.0)
-  - ANDROID-PLAN.md (0.1.58)
-  - IOS-PLAN.md (0.1.16; §9.1 VA1–VA3)
+  - ANDROID-PLAN.md (0.1.59)
+  - IOS-PLAN.md (0.1.17; §9.1 VA1–VA3)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,25 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.53.0: normative; owner decision of 2026-10-20, **approved by the
+    owner (2026-10-20); wording to be confirmed**. **Needs a vault
+    release** for part (2) (staging release 21); apps: ANDROID-PLAN
+    0.1.59, IOS-PLAN 0.1.17, which ship part (1) independently of the
+    vault release; no change for the member API or the host. Found when
+    an attestation timestamp about a second behind the enclave's clock
+    made clients refuse a valid descriptor: the enclave set `not_after`
+    to its own clock + 24 h, and the apps (and the reference client)
+    allowed `not_after` at most 24 h + 1 s after the attestation's
+    timestamp, an allowance §11.2 never stated, so every unlock into
+    that instance failed closed until the ETK rotated. New §11.2
+    **"Lifetime and clock allowance"**: (1) **apps** refuse a descriptor
+    whose `not_after` is more than **24 h + 5 min** after the
+    attestation's timestamp (or not after the app's current time);
+    every other check is unchanged; (2) **the enclave** sets `not_after`
+    at most **24 h − 60 s** after its own clock, so a correct vault
+    never sits at the limit; rotation at 23 h is unchanged, and the
+    previous ETK's 1 h grace never runs past its `not_after`. Why this
+    is safe is stated there. The descriptor example and step 3 follow
   - 0.52.0: normative; owner decisions of 2026-10-20, **approved by the
     owner (2026-10-20)**. **Needs a vault
     release** (staging release 20); apps: ANDROID-PLAN 0.1.58, IOS-PLAN
@@ -10821,7 +10840,7 @@ publishes a **descriptor**:
 
 ```json
 { "v": 1, "suite": 2, "instance_id": "<id>", "kid": "<hex>", "etk": "<b64 ek>",
-  "release": "<PCR0 hex>", "not_after": "<RFC 3339, ≤ issue + 24 h>",
+  "release": "<PCR0 hex>", "not_after": "<RFC 3339, ≤ issue + 24 h − 60 s>",
   "capabilities": ["attachments", "recovery_offered", "recovery_r"] }
 ```
 
@@ -10843,8 +10862,9 @@ The app MUST:
 2. match PCR0, PCR1 and PCR2 against an entry of VettID's signed release
    manifest (§11.10.1), rejecting debug (all-zero) PCRs: an `active` entry
    to enroll, any listed entry to unlock;
-3. check `user_data`, check `not_after`, and check that the attestation is
-   less than 26 h old;
+3. check `user_data`, check `not_after` ("Lifetime and clock
+   allowance" below), and check that the attestation is less than 26 h
+   old;
 4. tell the user before sending a PIN if `release` differs from the release
    the app last unlocked into ("vault software was updated"), and never send
    a PIN to an older release than that one (§11.10.6);
@@ -10853,8 +10873,42 @@ The app MUST:
    send nothing to an instance that lacks a capability this vault is
    known to have.
 
-The previous ETK stays valid for 1 h after rotation. ETK private keys never
-leave enclave memory.
+The previous ETK stays valid for 1 h after rotation, and never past its
+own `not_after`. ETK private keys never leave enclave memory.
+
+**Lifetime and clock allowance** (0.53.0; approved by the owner
+(2026-10-20); wording to be confirmed). The descriptor carries the
+enclave's clock, and the attestation document carries the Nitro Secure
+Module's timestamp, taken a moment later by a clock that can differ from
+the enclave's by a second or more in either direction.
+
+- **The enclave** (staging release 21) MUST set `not_after` to at most
+  24 h − 60 s after its own clock at the moment it makes the descriptor
+  (truncated to the second, never rounded up), so that a correct vault
+  never sits at the apps' limit. It rotates the ETK when the current
+  one is 23 h old, as before (the supervisor checks at least every few
+  minutes), so the new descriptor is published close to an hour (59
+  minutes less that check's interval) before the previous one's
+  `not_after`; the previous ETK is then destroyed at the end of its
+  1 h grace or at its `not_after`, whichever comes first.
+- **The app** MUST refuse a descriptor whose `not_after` is not after
+  the app's current time, and MUST refuse one whose `not_after` is more
+  than **24 h + 5 min** after the attestation document's timestamp. The
+  5 min is the only allowance between the descriptor's times and the
+  attestation's; every other check of this section is unchanged.
+- **Why this is safe.** A few minutes on a key that lives 24 hours adds
+  no meaningful exposure: the ETK still rotates every 23 h and its
+  private key never leaves the enclave. What makes a descriptor
+  trustworthy is untouched: the attestation chain to the Nitro root,
+  PCR0–PCR2 against the signed manifest, `user_data` over the exact
+  descriptor bytes, `release` = PCR0, and the attestation's 26 h age
+  limit. A host cannot use the allowance to stretch a key: `not_after`
+  is inside the attested bytes.
+- **Order.** The apps' allowance does not wait for a vault release: an
+  app with it accepts descriptors of every release, those made with
+  24 h and those made with 24 h − 60 s. An app with the earlier 1 s
+  allowance accepts the new descriptors too, unless the attestation
+  timestamp lags the enclave's clock by more than 61 s.
 
 ### 11.3 Enrollment
 

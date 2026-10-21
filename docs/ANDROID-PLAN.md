@@ -1,9 +1,19 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.58
+version: 0.1.59
 date: 2026-10-20
 changelog:
+  - 0.1.59: approved by the owner (2026-10-20); wording to be confirmed
+    (VAULT-MESSAGING 0.53.0; owner decision of 2026-10-20; found when an
+    attestation timestamp about a second behind the enclave's clock made
+    the app refuse a valid descriptor, so every unlock into that
+    instance failed closed until its key rotated). New §4 **"The
+    descriptor's clock allowance"**: `EnclaveVerifier` accepts a
+    descriptor whose `not_after` is at most **24 h + 5 min** after the
+    attestation document's timestamp (was 24 h + 1 s,
+    `MAX_DESCRIPTOR_LIFE`); every other check is unchanged. Ships
+    without waiting for a vault release. No new text. Tests listed
   - 0.1.58: approved by the owner (2026-10-20)
     (VAULT-MESSAGING 0.52.0; owner decisions of 2026-10-20; found when a
     phone whose daily checks were refused before the key was spent ran
@@ -4738,6 +4748,57 @@ UTK before any check (§3.5.4 "Using a UTK").
   vault"; `forbidden` on the daily check gives `vault_not_holder`; the
   keys, `account.bin` and the vault's local data are unchanged after
   both.
+
+### The descriptor's clock allowance (0.1.59)
+
+*The decision is the owner's, of 2026-10-20 (VAULT-MESSAGING 0.53.0
+§11.2 "Lifetime and clock allowance"). Approved by the owner
+(2026-10-20); wording to be confirmed.*
+
+**Why.** The enclave writes its ETK descriptor's `not_after` from its
+own clock (+ 24 h); the attestation document's timestamp comes from the
+Nitro Secure Module a moment later, by a clock that can differ by a
+second or more. The app allowed `not_after` at most 24 h + 1 s after
+that timestamp (`EnclaveVerifier`, `MAX_DESCRIPTOR_LIFE`). An
+attestation timestamp about a second behind the enclave's clock put a
+valid descriptor just past the limit, and the app refused every unlock
+into that instance ("software could not be verified", failing safe)
+until its key rotated.
+
+1. **The allowance.** `EnclaveVerifier.verifyEnclave` refuses a
+   descriptor whose `not_after` is more than **24 h + 5 min** after the
+   attestation document's timestamp (`MAX_DESCRIPTOR_LIFE` =
+   `Duration.ofHours(24).plusMinutes(5)`). This is the only comparison
+   between the descriptor's times and the attestation's; nothing else
+   uses the 1 s.
+2. **Everything else is unchanged**: `not_after` must still be after the
+   phone's current time; the chain to the Nitro root, PCR0–PCR2 against
+   the signed manifest (an `active` entry to enroll), no debug PCRs,
+   `release` = PCR0, `user_data` over the exact descriptor bytes, and
+   the attestation's 26 h age with its 5 min skew
+   (`MAX_ATTESTATION_AGE`, `ATTESTATION_SKEW`); `verifyEnrolled` is
+   untouched. The refusal stays `AttestationException.Stale` with the
+   same text.
+3. **Why it is safe.** A few minutes on a key that lives 24 hours adds
+   no meaningful exposure, and the checks that make a descriptor
+   trustworthy (signature and chain, PCRs, `user_data`) are untouched;
+   `not_after` is inside the attested bytes, so a host cannot stretch
+   it.
+4. **Order.** This ships in the app without waiting for a vault
+   release. From staging release 21 the enclave sets `not_after` at
+   most 24 h − 60 s after its own clock, so a correct vault never sits
+   at the limit; the app accepts descriptors from releases before and
+   after that change.
+
+**Tests.**
+
+- With an attestation timestamp that has milliseconds, a descriptor
+  whose `not_after` (whole seconds) is 24 h + 1.178 s after it (the
+  case that was refused), 24 h + 60 s after it, and exactly 24 h +
+  5 min after it verifies; 24 h + 5 min + 1 ms after it is refused
+  `Stale`; the 25 h descriptor of `ManifestTest` is still refused.
+- A descriptor whose `not_after` is not after `now` is still refused,
+  with no allowance.
 
 ## 5. Architecture
 
