@@ -1,9 +1,16 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.26
+version: 0.1.27
 date: 2026-10-22
 changelog:
+  - 0.1.27: editorial; approved by the owner (2026-10-22)
+    (VAULT-MESSAGING 0.55.4; ANDROID-PLAN 0.1.69). §4.8: no cut to 15
+    digits (the fallback keeps all digits, bounded by the input
+    filter's 32 characters); "Check this number" whenever the number is
+    not valid; the port tracks the current libphonenumber metadata
+    (PhoneNumberKit bundled 9.0.39 against Android's 9.0.41: no pin,
+    validity can change with the metadata)
   - 0.1.26: editorial; found in review (VAULT-MESSAGING 0.55.3;
     ANDROID-PLAN 0.1.68). §4.8, canonical forms: the `date` and `url`
     rules and the `number` input filter (a leading `.5` becomes `0.5`
@@ -1029,15 +1036,20 @@ and the tag preview", VAULT-MESSAGING §10.7 "Phone values": the
 extension is dropped; then E.164 for a number that parses as possible
 (`isPossibleNumberWithReason` returns `IS_POSSIBLE`, not
 `IS_POSSIBLE_LOCAL_ONLY`), else the dialable
-characters only (a `+` typed before the first digit, then at most 15
-digits; no
-digit left: `""`), with the "Check this number" hint and no block;
+characters only (a `+` typed before the first digit, then all its
+digits, none cut; no digit left: `""`); "Check this number" shows
+whenever the number is not valid (`isValidNumber` is false), stored as
+E.164 or not, and never blocks;
 national format in the viewer's region, international elsewhere and
 as-you-type formatting are display only; a value stored in the earlier
 spaced form is shown and stored again only when the member next edits
 and saves that field. The iOS app needs a **libphonenumber port**
 (the owner accepted the dependency). Which port is the app's choice:
-it MUST give Android's results on the shared test cases (Android's
+it follows the current libphonenumber metadata and does not pin it
+(validity can change with the metadata; the bundled 9.0.39 of
+PhoneNumberKit against Android's 9.0.41 is why results are compared on
+the shared cases), and it MUST give Android's results on the shared
+test cases (Android's
 `PhoneInput` tests, as data) and is checked against them. It sits
 behind one `PhoneInput` type with Android's functions (`raw`,
 `stored`, `doubtful`, `display`, the as-you-type mask). The region for

@@ -1,9 +1,15 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.68
+version: 0.1.69
 date: 2026-10-22
 changelog:
+  - 0.1.69: editorial; approved by the owner (2026-10-22)
+    (VAULT-MESSAGING 0.55.4 §10.7). §4 "Items: phone values and the tag
+    preview": `PhoneInput.raw` no longer cuts to 15 digits (`MAX_DIGITS`
+    goes; the input filter's 32 characters bound it); "Check this
+    number" shows whenever `isValidNumber` is false, also for a number
+    stored as E.164; the libphonenumber metadata is not pinned
   - 0.1.68: editorial; found in review (VAULT-MESSAGING 0.55.3 §10.7).
     §4 "Items: phone values and the tag preview", canonical forms:
     `date` keeps the stored value's form and takes the template's
@@ -35,7 +41,7 @@ changelog:
     (VAULT-MESSAGING 0.55.0 §10.7, §10.8). §4 "Items: phone values and
     the tag preview": `PhoneInput.stored` drops an extension, then
     stores E.164 for a possible number and the dialable characters only
-    (`PhoneInput.raw`, at most 15 digits) for any other, instead of the
+    (`PhoneInput.raw`, with all its digits) for any other, instead of the
     spaced international format; `display` and the as-you-type mask are
     unchanged, a value already stored in the spaced form is shown as
     before and stored again only when the member next edits and saves
@@ -4904,8 +4910,12 @@ values" (0.55.0), one form for both apps. Android changes
 parses as a possible number (`isPossibleNumberWithReason` returns
 `IS_POSSIBLE`, not `IS_POSSIBLE_LOCAL_ONLY`) is stored in **E.164** (`+442079460958`); any
 other value is stored as `PhoneInput.raw` (a `+` typed before the first
-digit, then at most 15 digits, `MAX_DIGITS`; no digit left: `""`), with the "Check
-this number" hint and no block. The region is the one `PhoneInput.region`
+digit, then all its digits: no cut to 15, `MAX_DIGITS` goes; the input
+filter's 32 characters bound it; no digit left: `""`). "Check this
+number" (`doubtful`) shows whenever `isValidNumber` is false, whether
+the value is stored as E.164 or as raw, and never blocks. The metadata
+of libphonenumber is not pinned: the app follows the current release,
+since validity can change with it. The region is the one `PhoneInput.region`
 finds (network, then SIM, then locale). `display`, `doubtful` and the
 as-you-type mask are unchanged and are display only. A value stored in
 the spaced international form by 0.1.20 to 0.1.64 is read and shown as
@@ -4913,7 +4923,10 @@ before, and stored in the new form only when the member next edits and
 saves that field (no bulk migration). Tests: E.164 for a possible number
 (with and without a `+`, in the phone's region), the raw form for a
 number that does not parse, a local-only number (`IS_POSSIBLE_LOCAL_ONLY`)
-gets the fallback form, a number longer than 15 digits cut to 15,
+gets the fallback form, DE "+49 12345678901234" (16 digits, no cut)
+stores "+4912345678901234" with the hint, US "555 555 5555" and IL
+"054-123-4567" show the hint (and are stored as E.164 when
+`IS_POSSIBLE`),
 `""` for text without a digit, no stored value contains a space or
 punctuation, and a spaced stored value is shown and is not rewritten
 until the field is edited and saved.
