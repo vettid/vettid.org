@@ -781,11 +781,10 @@
         "max_instances": 2
       },
       "log": {
-        "summary": "Release 21 makes the vault's key expire a minute early so apps accept it, and answers clearly when no phone holds your credential.",
+        "summary": "Release 21 ends the enclave key a minute early so phones accept it, and adds a History entry when the vault clears a credential holder it cannot find.",
         "changes": [
-          "The key your vault uses to prove itself to your phone now lasts 24 hours minus 60 seconds. Before, a small difference between two clocks could make it last a second too long, and your phone then refused to open your vault until the key was replaced.",
-          "History shows a new entry, \"Credential holder cleared\", when the vault removes the phone that held your credential, for example when you remove that phone.",
-          "When no phone holds your credential and you ask to delete your vault, the vault now answers that a credential is required because no phone holds it, instead of a plain refusal, so the app can tell you what to do.",
+          "The key your phone uses to send requests to the vault now expires 24 hours minus 60 seconds after it is made, not 24 hours. Before, the enclave clock and its attestation clock could differ by a second, and phones then refused every unlock until the key was replaced.",
+          "History shows a new entry, \"Credential holder cleared\", if your vault finds that the phone holding your credential is no longer one of its apps and clears it. Removing a phone already clears it, so this should not happen; if you did not remove a phone, contact VettID.",
           "Built from vettid-vault commit aa4501a (tag release/staging/21) and independently rebuilt on 2026-10-22 with a matching PCR0."
         ],
         "security": "none"
