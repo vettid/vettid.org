@@ -6,17 +6,18 @@ date: 2026-10-22
 changelog:
   - 0.1.65: approved by the owner (2026-10-22)
     (VAULT-MESSAGING 0.55.0 §10.7, §10.8). §4 "Items: phone values and
-    the tag preview": `PhoneInput.stored` stores E.164 for a possible
-    number without an extension and the dialable characters only
-    (`PhoneInput.raw`) for any other, instead of the spaced
-    international format; `display` and the as-you-type mask are
+    the tag preview": `PhoneInput.stored` drops an extension, then
+    stores E.164 for a possible number and the dialable characters only
+    (`PhoneInput.raw`, at most 15 digits) for any other, instead of the
+    spaced international format; `display` and the as-you-type mask are
     unchanged, a value already stored in the spaced form is shown as
     before and stored again only when the member next saves that field;
     an extension is dropped (the note `items_phone_extension_note`,
     "Extensions aren't saved; add it to the item's notes."); the other
     kinds get one stored form on save (VAULT-MESSAGING §10.7
-    "Canonical forms"); the tag rename and merge preview no longer counts the shares beyond
-    the listed ones as asked and says "N more may be shared"
+    "Canonical forms", applied only to fields the member edited or
+    created); the tag rename and merge preview no longer counts the
+    shares beyond the listed ones as asked and says "N more may be shared"
     (`items_share_preview_more`)
   - 0.1.64: approved by the owner (2026-10-21)
     (VAULT-MESSAGING 0.54.0 §3.5.9, §10.9; the new audit kind
@@ -4871,48 +4872,69 @@ until its key rotated.
 
 **Phone values.** The stored form is VAULT-MESSAGING §10.7 "Phone
 values" (0.55.0), one form for both apps. Android changes
-`PhoneInput.stored`: a number that parses as a possible number without
-an extension is stored in **E.164** (`+442079460958`); any other value
-is stored as `PhoneInput.raw` (a leading `+` if typed, then the digits),
-with the "Check this number" hint and no block. `display`, `doubtful`
-and the as-you-type mask are unchanged, and are display only. A value
-stored in the spaced international form by 0.1.20 to 0.1.64 is read
-and shown as before, and stored in the new form only when the member
-next saves that field (no bulk migration). Tests: E.164 for a possible
-number (with and without a `+`, in the phone's region), the raw form for
-a number that does not parse and for one with an extension, no stored
-value contains a space or punctuation, and a spaced stored value is
-shown and is not rewritten until the field is saved.
+`PhoneInput.stored`: the extension is dropped; then a number that
+parses as a possible number (`isPossibleNumber` is `IS_POSSIBLE`, not
+`IS_POSSIBLE_LOCAL_ONLY`) is stored in **E.164** (`+442079460958`); any
+other value is stored as `PhoneInput.raw` (a leading `+` if typed, then
+at most 15 digits, `MAX_DIGITS`; no digit left: `""`), with the "Check
+this number" hint and no block. The region is the one `PhoneInput.region`
+finds (network, then SIM, then locale). `display`, `doubtful` and the
+as-you-type mask are unchanged and are display only. A value stored in
+the spaced international form by 0.1.20 to 0.1.64 is read and shown as
+before, and stored in the new form only when the member next edits and
+saves that field (no bulk migration). Tests: E.164 for a possible number
+(with and without a `+`, in the phone's region), the raw form for a
+number that does not parse, a number longer than 15 digits cut to 15,
+`""` for text without a digit, no stored value contains a space or
+punctuation, and a spaced stored value is shown and is not rewritten
+until the field is edited and saved.
 
-**Extensions.** The text from an extension marker (`x`, `ext`,
-`;ext=`, `#`, `,`) is dropped before `stored` parses it or takes the
-fallback, so extension digits are never glued onto the number; while the
-member types, the field shows `items_phone_extension_note`: "Extensions
-aren't saved; add it to the item's notes." Tests: "+44 20 7946 0958
-x123" and "...,123" and "...#123" store `+442079460958`; an unparsed
-"123 ext 4" stores `123`; the note shows only when a marker is present.
+**Extensions.** The markers `x`, `ext` (with an optional `.`), `;ext=`,
+`#` and `,` are found case-insensitively in the text as typed or
+pasted, before `FieldInput.phone` filters characters (which today drops
+`x`, `#`, `,` and `;` per keystroke: the filter keeps the marker and
+what follows in the edit text until save, and `stored` drops them, so
+the note can show). Extension digits are never glued onto the number.
+While a marker is present the field shows `items_phone_extension_note`:
+"Extensions aren't saved; add it to the item's notes." Tests: "+44 20
+7946 0958 x123", "X123", "ext. 123", ";ext=123", ",123" and "#123" store
+`+442079460958`; an unparsed "123 ext 4" stores `123`; the note shows
+only while a marker is present and the marker stays in the edit text
+until save.
 
 **Canonical forms of the other kinds (VAULT-MESSAGING §10.7).** Applied
-on save, by `FieldInput` / `ItemChecks`; a value stored earlier is read
-as before and stored in the new form only when the field is next saved.
-`number`: `1.0` to `1`, `007` to `7`, `-0` to `0`, `+5` to `5`, `5.` to
-`5`, `0.50` to `0.5`. `date`: `YYYY-MM` for a template field with
-`"format": "month"`, else `YYYY-MM-DD`. `email`: trimmed, domain
-lower-cased. `url`: `https://` added without a scheme, scheme and host
-lower-cased, the rest as typed; a text with `://` keeps its scheme
-(`HTTP://Example.com/A` to `http://example.com/A`), `MAILTO:a@b.c`,
-`tel:` and `sms:` keep their form with the scheme lower-cased, anything
-else gets `https://` (`localhost:8080/x` to `https://localhost:8080/x`,
-`Example.com/A` to `https://example.com/A`). `otp`: a bare secret becomes
-`otpauth://totp/<label>?secret=…&algorithm=SHA1&digits=6&period=30`
-with the secret upper-case, without spaces or padding; a URI keeps its
-parameters and has its secret canonical. `address`: `street`,
+on save, by `FieldInput` / `ItemChecks`, only to a field the member
+edited or created: an untouched field is sent exactly as stored, a
+secret value never revealed included, and an older value is stored in
+the new form only when its field is next edited and saved. Case
+mapping is ASCII only; white space is the Unicode `White_Space`
+property. `number`: `1.0` to `1`, `007` to `7`, `-0` to `0`, `+5` to
+`5`, `5.` to `5`, `0.50` to `0.5`. `date`: the template's hint
+(`"format": "month"`: `YYYY-MM`), else the stored value's form, else
+`YYYY-MM-DD` for a new field. `email`: trimmed, domain lower-cased.
+`url`: trimmed; a text matching `^[A-Za-z][A-Za-z0-9+.-]*://` keeps its
+scheme and host lower-cased (the host after `userinfo@`, before
+`:port`), the rest as typed (`HTTP://Example.com/A` to
+`http://example.com/A`); `MAILTO:a@b.c`, `tel:` and `sms:` keep their
+form with the scheme lower-cased; anything else gets `https://`
+(`localhost:8080/x` to `https://localhost:8080/x`, `Example.com/A` to
+`https://example.com/A`). `otp`: a bare secret becomes
+`otpauth://totp/<label>?secret=…&algorithm=SHA1&digits=6&period=30`,
+the label the field's label in UTF-8 with every byte but
+`A-Za-z0-9-._~` as upper-case `%XX` (a label is 1–64 bytes, so never
+empty), the secret upper-case, without spaces or padding; a URI keeps
+its parameters and has its secret canonical. `address`: `street`,
 `street2`, `city`, `region` and `postal_code` trimmed and collapsed,
 `postal_code` upper-case, empty members left out. `text`: trimmed;
 `password` and `multiline` never trimmed; an item's `name` and a
-field's `label` trimmed at both ends, `notes` as typed. Tests: each example above, that every canonical result passes
-the §10.7 check, that canonicalising twice changes nothing, and that an
-older stored value is shown unchanged and not rewritten until saved.
+field's `label` trimmed at both ends, `notes` as typed. Every canonical
+result is checked against the §10.7 table and the item's size limits
+and the save is refused with the existing message if it fails (the
+phone fallback always passes). Tests: each example above, that every
+canonical result passes the §10.7 check, that canonicalising twice
+changes nothing, that an untouched field is sent byte for byte as
+stored, and that an older stored value is shown unchanged and not
+rewritten until edited and saved.
 
 **The tag preview (§10.8).** In the rename and merge preview, the
 shares beyond the entries listed are not counted as asked. The

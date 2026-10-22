@@ -12,8 +12,9 @@ changelog:
     lock. §8 I3.1: the item editor, like the item screen, is inside the
     `SecureContainer`, so a screenshot or a recording of it is blocked
     unless "Allow screenshots" is on. §4.8: `phone` values stored as
-    VAULT-MESSAGING §10.7 says (E.164, else the dialable characters),
-    with a libphonenumber port for iOS (a dependency the owner
+    VAULT-MESSAGING §10.7 says (after the extension is dropped, E.164
+    for a possible number, else the dialable characters, at most 15
+    digits), with a libphonenumber port for iOS (a dependency the owner
     accepted); the tag preview says "N more may be shared"
     (`items_share_preview_more`, Android's); the phone's extension is
     dropped with the note `items_phone_extension_note` (Android's); the
@@ -357,7 +358,7 @@ the Mac agent does not reopen them.
 | ID7 | **v1 scope** | As ANDROID-PLAN D3 plus photo attachments: enrollment, unlock, Protean Credential, owner check, lock, settings, release updates; connections, messaging, approvals, the feed, History; photos; items, share rules; recovery and transfer. Later: calls, devices and agents, wallet, presence, location (§8, "Later") | — | — |
 | ID8 | **Release R only** | The iOS app supports **only** vaults whose release lists `recovery_r` (VAULT-MESSAGING §11.10.9). It never implements the enroll, unlock, transfer or recovery paths from before release R; a descriptor without `recovery_r` gets "This vault's release is too old for the iPhone app" (§14) | Implementing both paths, as Android did during the change | I1 |
 | ID9 | **Phone-held unlock secret on iOS** (owner) | **Approved 2026-10-17.** §6.3, as recorded in VAULT-MESSAGING 0.35.0 §11.14.1: a Secure Enclave P-256 key-agreement key per `key_vault`, `WhenUnlockedThisDeviceOnly`; per epoch, a fresh software key pair whose private half is dropped after a key confirmation, its public key stored before the secret is sent and kept until 7 days after a later epoch is confirmed; `unlock_secret` = HKDF over the ECDH x-coordinate with both public keys in `info`; a 16-byte check tag | (b) a random 32-byte secret stored ECIES-encrypted to a Secure Enclave key (same security, Apple-specific format); (c) ECDH of the enclave key with its own public key (one long-lived value for every epoch: a leak would outlive `vault.secret.renew`); (d) a stateless form with each epoch's point hashed to the curve (code that ran as the app could compute future epochs; no hash-to-curve in CryptoKit or Go's standard library) | I1.4 |
-| ID10 | **Screen capture** (owner) | Always: a cover in the app switcher and content hidden while the screen is recorded, mirrored or shared. On the screens Android holds secure individually (`SecureWindow`: the typed recovery code, and the same list as Android), also the secure-text-field layer that iOS leaves out of screenshots, behind one component with a runtime self-check (§6.4) | Only the cover and capture hiding (screenshots possible everywhere) | I1.5 |
+| ID10 | **Screen capture** (owner) | Always: a cover in the app switcher and content hidden while the screen is recorded, mirrored or shared. On the screens Android holds secure individually (`SecureWindow`: the typed recovery code, and the same list as Android; 0.1.23: the item screen and the item editor, I3.1), also the secure-text-field layer that iOS leaves out of screenshots, behind one component with a runtime self-check (§6.4) | Only the cover and capture hiding (screenshots possible everywhere) | I1.5 |
 | ID11 | **Keyboards and autofill** | Third-party keyboards refused app-wide; the vault PIN on an in-app keypad; no AutoFill and no "Save Password?" on any secret field; no autocorrect, suggestions or learning (§6.5) | System keyboard for the PIN | I1.5 |
 | ID12 | **Notifications before APNs** | None in the background: the app shows activity when open, and schedules **local** notifications for the owner check's early warning (ANDROID-PLAN §6 owner check, item 5). Settings → Notifications says Apple push is not available yet. Apple push (PUSH-GATEWAY §11.2, notification service extension) is phase P, after the owner's APNs actions | Background App Refresh as a stopgap (rare, unpredictable wakes; not worth its code before APNs) | I1 |
 | ID13 | **Distribution** (owner) | TestFlight: an App Store Connect record for **VettID Staging** (`com.vettid.app.staging`, internal testers only, never released) and later **VettID** (`com.vettid.app`). Development installs from Xcode on the test iPhones. No ad-hoc builds unless a tester cannot use TestFlight | Ad-hoc distribution with registered UDIDs | I1 exit |
@@ -1010,31 +1011,43 @@ The tests are Android's.
 *Approved by the owner (2026-10-22) (ANDROID-PLAN 0.1.65).*
 
 **Phone values.** The same rule as ANDROID-PLAN §4 "Items: phone values
-and the tag preview", VAULT-MESSAGING §10.7 "Phone values": E.164 for a
-number that parses as possible without an extension, else the dialable
-characters only (a leading `+` if typed, then the digits), with the
-"Check this number" hint and no block; national format in the viewer's
-region, international elsewhere and as-you-type formatting are display
-only; a value stored in the earlier spaced form is shown and stored
-again only when the member next saves that field. The iOS app adds a
-**libphonenumber port** (a Swift package of Google's metadata, the
-owner accepted the dependency) behind one `PhoneInput` type with
-Android's functions (`raw`, `stored`, `doubtful`, `display`, the
-as-you-type mask) and Android's tests. The region for a number typed
-without a `+` is the device's locale region (`Locale.current.region`):
-iOS has no reliable network or SIM country (`CTTelephonyNetworkInfo`
-is deprecated and returns placeholder values since iOS 16), so the
-app does not use it. An extension (`x`, `ext`, `;ext=`, `#`, `,` and
-what follows) is dropped before parsing, with the note
+and the tag preview", VAULT-MESSAGING §10.7 "Phone values": the
+extension is dropped; then E.164 for a number that parses as possible
+(`IS_POSSIBLE` only, not `IS_POSSIBLE_LOCAL_ONLY`), else the dialable
+characters only (a leading `+` if typed, then at most 15 digits; no
+digit left: `""`), with the "Check this number" hint and no block;
+national format in the viewer's region, international elsewhere and
+as-you-type formatting are display only; a value stored in the earlier
+spaced form is shown and stored again only when the member next edits
+and saves that field. The iOS app needs a **libphonenumber port**
+(the owner accepted the dependency). Which port is the app's choice:
+it MUST give Android's results on the shared test cases (Android's
+`PhoneInput` tests, as data) and is checked against them. It sits
+behind one `PhoneInput` type with Android's functions (`raw`,
+`stored`, `doubtful`, `display`, the as-you-type mask). The region for
+a number typed without a `+` is the device's locale region
+(`Locale.current.region`): iOS has no reliable network or SIM country
+(`CTTelephonyNetworkInfo` is deprecated and returns placeholder values
+since iOS 16), so the app does not use it. When the locale has no
+region (`nil`), the "unknown region" path is taken: a number without a
+`+` does not parse and is stored as its dialable characters. An
+extension marker (`x`, `ext`, `;ext=`, `#`, `,`, any case, with what
+follows) is found in the text as typed, before any character filter,
+and kept in the edit text until save, with the note
 `items_phone_extension_note` (Android's): "Extensions aren't saved; add
 it to the item's notes."
 
 **Canonical forms of the other kinds.** The rules of ANDROID-PLAN §4
 "Items: phone values and the tag preview", VAULT-MESSAGING §10.7
 "Canonical forms", applied on save to `number`, `date`, `email`, `url`,
-`otp`, `address` and `text`; a value stored earlier is read as before
-and stored again only when the field is next saved. The tests are
-Android's.
+`otp`, `address` and `text`, only to a field the member edited or
+created (an untouched field, a secret value never revealed included, is
+sent exactly as stored); a value stored earlier is read as before and
+stored again only when its field is next edited and saved. Case mapping
+is ASCII only; white space is the Unicode `White_Space` property;
+every canonical result is checked against §10.7's table and size limits
+and the save is refused with the existing message if it fails. The
+tests are Android's.
 
 **The tag preview.** As ANDROID-PLAN: the shares beyond the listed
 ones are not counted as asked; the preview adds
@@ -1489,7 +1502,10 @@ iOS has no `FLAG_SECURE`. Three separate protections:
    back to protections 1 and 2 and logs nothing. "Allow screenshots"
    (§4) turns off only this one. (0.1.11, owner decision of 2026-10-20)
    The connect screens keep it, as on Android: the invitation QR, its
-   link, the pasted link and the safety code.
+   link, the pasted link and the safety code. (0.1.23, owner decision
+   of 2026-10-22) The item screen and the item editor (I3.1) use it
+   too, so a screenshot or a recording of them is blocked unless
+   "Allow screenshots" is on.
 
 ### 6.5 Secret input: no autofill, no third-party keyboards
 
@@ -1687,7 +1703,7 @@ exchange messages and photos both ways, and approve each other's asks.
 
 | PR | Contents | Spec | Mirror | Acceptance |
 |---|---|---|---|---|
-| I3.1 | Items: data, secret and critical; templates; tags; TOTP | §10.7, §10.8; VAULT-ITEMS | `feature/items/*`, `core/data/…/items/*` | Critical items need the password; values in the secure container; (0.1.23) the item editor too, inside the `SecureContainer` like the item screen: screenshots and recording of it are blocked unless "Allow screenshots" is on (§6.4) |
+| I3.1 | Items: data, secret and critical; templates; tags; TOTP | §10.7, §10.8; VAULT-ITEMS | `feature/items/*`, `core/data/…/items/*` | Critical items need the password; values in the secure container; (0.1.23) the item editor too, inside the `SecureContainer` like the item screen: screenshots and recording of it are blocked unless "Allow screenshots" is on (§6.4); typing, the keyboard and VoiceOver work inside the container (checked on the iPhone) |
 | I3.2 | Share rules, grants, critical-item use by a connection | §10.12, §10.13 | `feature/items/RuleEditScreen.kt`, `SharingScreens.kt`, `core/data/…/items/Sharing*.kt` | Rules against a second vault |
 | I3.3 | Transfer out and in: QR and pasted code, Finish the move, the old phone keeping its keys until confirmed or 7 days, the signer-class texts across platforms | §6.7.1, §11.7.1 ("Across an iOS app"), §11.14.10 | `feature/settings/TransferOut*.kt`, `feature/onboarding/MoveScreens.kt`, `TransferInViewModel.kt`, `FinishMove.kt`, `core/data/…/FinishMoveRunner.kt` | iPhone → Android → iPhone on staging; the old phone erases itself on confirmation |
 | I3.4 | Recovery: scan or type the code, claim, register, the one screen for PIN and password, the answers, the wait | §11.11, §11.11.10, §11.14.3–§11.14.6, §11.14.11 | `feature/onboarding/RecoverTypeScreen.kt`, `RecoverViewModel.kt`, `RecoveryOpen.kt`, `feature/settings/RecoveryStatusText.kt` | A recovery on staging onto a second iPhone; typed and scanned entries make equal requests |
@@ -1919,7 +1935,7 @@ approved.
   app's page in Settings. Shown when camera access is "denied" or
   "restricted"; "not yet asked" asks (`settings_photo_capture_permission_title`
   and `_body`, Android's).
-- **Items: secret items on an iPhone (§4.8; approved 2026-10-22)**, as
+- **Items: secret items on an iPhone (I3.1; approved 2026-10-22)**, as
   Android's `items_sensitivity_secret_note` and `items_secret_hidden_body`
   with the way of confirming changed:
   `ios_items_sensitivity_secret_note`: "Hidden until you reveal it with
