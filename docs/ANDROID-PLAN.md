@@ -1,14 +1,15 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.65
+version: 0.1.66
 date: 2026-10-22
 changelog:
   - 0.1.66: editorial; approved by the owner (2026-10-22)
     (VAULT-MESSAGING 0.55.1 §10.7, §10.8). §4 "Items: phone values and
     the tag preview": an extension marker counts only when at least
     one digit comes before it ("Fax: +44 20 7946 0958" and "Text 555
-    0100" store the number as normal; both are test cases); the edit
+    0100" are numbers, not extensions; both are test cases, with the
+    `+` defined as one before the first digit); the edit
     text keeps the exact marker text typed (`,123`, `#123`, `ext. 123`)
     until the save; `items_share_preview_more` ends with a full stop,
     "%1$d more may be shared.", as it is joined with the other
@@ -4883,10 +4884,10 @@ until its key rotated.
 **Phone values.** The stored form is VAULT-MESSAGING §10.7 "Phone
 values" (0.55.0), one form for both apps. Android changes
 `PhoneInput.stored`: the extension is dropped; then a number that
-parses as a possible number (`isPossibleNumberWithReason` returns `IS_POSSIBLE`, not
-`IS_POSSIBLE_LOCAL_ONLY`) is stored in **E.164** (`+442079460958`); any
-other value is stored as `PhoneInput.raw` (a leading `+` if typed, then
-at most 15 digits, `MAX_DIGITS`; no digit left: `""`), with the "Check
+parses as a possible number (`isPossibleNumberWithReason` returns
+`IS_POSSIBLE`, not `IS_POSSIBLE_LOCAL_ONLY`) is stored in **E.164** (`+442079460958`); any
+other value is stored as `PhoneInput.raw` (a `+` typed before the first
+digit, then at most 15 digits, `MAX_DIGITS`; no digit left: `""`), with the "Check
 this number" hint and no block. The region is the one `PhoneInput.region`
 finds (network, then SIM, then locale). `display`, `doubtful` and the
 as-you-type mask are unchanged and are display only. A value stored in
@@ -4902,19 +4903,26 @@ until the field is edited and saved.
 
 **Extensions.** The markers `x`, `ext` (with an optional `.`), `;ext=`,
 `#` and `,` are found case-insensitively, and only where at least one
-digit comes before them, in the text as typed or pasted, before `FieldInput.phone` filters characters (which today drops
-`x`, `#`, `,` and `;` per keystroke: the filter keeps the marker and
-what follows in the edit text, exactly as typed, until save, and `stored` drops them, so
+digit comes before them, in the text as typed or pasted, before
+`FieldInput.phone` filters characters (which today drops `x`, `#`, `,`
+and `;` per keystroke: the filter keeps the marker and what follows in
+the edit text, exactly as typed, until save, and `stored` drops them, so
 the note can show). Extension digits are never glued onto the number.
-While a marker is present the field shows `items_phone_extension_note`:
-"Extensions aren't saved; add it to the item's notes." Tests: "+44 20
-7946 0958 x123", "X123", "ext. 123", ";ext=123", ",123" and "#123" store
-`+442079460958`; "Fax: +44 20 7946 0958" and "Text 555 0100" hold no
-extension and store the number as normal (`+442079460958`; and the
-dialable characters or E.164 of 555 0100 as for any such number); an
-unparsed "123 ext 4" stores `123`; the note shows
-only while a marker is present and the marker stays in the edit text
-until save.
+`PhoneInput.raw` keeps a `+` that comes before the first digit, not
+only one that starts the text. While a marker is present the field
+shows `items_phone_extension_note`: "Extensions aren't saved; add it to
+the item's notes." Tests (each the full input, then what is stored):
+- "+44 20 7946 0958 x123", "+44 20 7946 0958 X123", "+44 20 7946 0958
+  ext. 123", "+44 20 7946 0958;ext=123", "+44 20 7946 0958,123" and
+  "+44 20 7946 0958 #123" store `+442079460958`;
+- "Fax: +44 20 7946 0958" holds no extension (no digit comes before the
+  `x`) and stores `+442079460958`;
+- in region US, "Text 555 0100" holds no extension and stores
+  `5550100` (a local-only number, so the fallback form);
+- a bare "#123" holds no extension and stores `123`;
+- an unparsed "123 ext 4" stores `123`;
+- the note shows only while a marker is present, and the marker stays
+  in the edit text, exactly as typed, until save.
 
 **Canonical forms of the other kinds (VAULT-MESSAGING §10.7).** Applied
 on save, by `FieldInput` / `ItemChecks`, only to a field the member

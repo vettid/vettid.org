@@ -1,7 +1,7 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.23
+version: 0.1.24
 date: 2026-10-22
 changelog:
   - 0.1.24: editorial; approved by the owner (2026-10-22)
@@ -1020,7 +1020,8 @@ and the tag preview", VAULT-MESSAGING §10.7 "Phone values": the
 extension is dropped; then E.164 for a number that parses as possible
 (`isPossibleNumberWithReason` returns `IS_POSSIBLE`, not
 `IS_POSSIBLE_LOCAL_ONLY`), else the dialable
-characters only (a leading `+` if typed, then at most 15 digits; no
+characters only (a `+` typed before the first digit, then at most 15
+digits; no
 digit left: `""`), with the "Check this number" hint and no block;
 national format in the viewer's region, international elsewhere and
 as-you-type formatting are display only; a value stored in the earlier
