@@ -41,7 +41,8 @@ changelog:
     "Check this number" hint and never a block. National, international and
     as-you-type formats are display only. Values already stored in the
     spaced international form (staging) are read and shown, and stored
-    again canonically only when the member next saves that field; there
+    again canonically only when the member next edits and saves that
+    field; there
     is no bulk migration. A formatted form is not stored because it
     depends on each library's metadata version, so two apps could store
     one number two ways. **An extension is not stored**: the main number
@@ -6853,8 +6854,8 @@ item: { "item_id": "<ULID>", "version": 3, "name": "Passport", "category": "iden
      them, and while a marker is present the app shows the note
      "Extensions aren't saved; add it to the item's notes."
   2. **E.164.** If the rest parses as a possible number (the library's
-     `isPossibleNumber` result is `IS_POSSIBLE`, not
-     `IS_POSSIBLE_LOCAL_ONLY`), in the phone's region when it has no
+     `isPossibleNumberWithReason` returns
+     `IS_POSSIBLE`, not `IS_POSSIBLE_LOCAL_ONLY`), in the phone's region when it has no
      `+` (each plan says how the app finds the region; with no region a
      number without a `+` does not parse), it is stored in **E.164**:
      `+` and the digits, no space or punctuation (`+442079460958`).
@@ -6869,7 +6870,9 @@ item: { "item_id": "<ULID>", "version": 3, "name": "Passport", "category": "iden
      value. An app reads a value in the earlier spaced international
      form (`+44 20 7946 0958`, written by 0.54.0-era apps on staging)
      and any other value the table allows, and shows it as it shows
-     every phone value.
+     every phone value, and stores it in the form above only when the
+     member next edits and saves that field. A field the member did not
+     touch, of any kind, phone included, is sent exactly as stored.
 - **Canonical forms** (0.55.0, owner decision of 2026-10-22). Every
   writer of `item.put` applies these, per kind, to a field **the member
   edited or created**; a field the member did not touch is sent exactly
@@ -6888,10 +6891,9 @@ item: { "item_id": "<ULID>", "version": 3, "name": "Passport", "category": "iden
     bare trailing point; `-0` and `-0.0` are `0` (`1.0` is `1`, `007`
     is `7`).
   - `date`: `YYYY-MM` when the field's template carries the hint
-    `"format": "month"` (above); `YYYY-MM-DD` when the template says
-    another form; with no hint, the form of the value already stored,
-    and `YYYY-MM-DD` for a new field. The app never invents a day or
-    drops one.
+    `"format": "month"` (above); otherwise the form of the value
+    already stored; a new field is `YYYY-MM-DD`. The app never invents
+    a day.
   - `email`: trimmed, the domain (after the last `@`) lower-cased, the
     local part as typed.
   - `url`: trimmed first. A text starting with `[A-Za-z][A-Za-z0-9+.-]*://`

@@ -1013,7 +1013,8 @@ The tests are Android's.
 **Phone values.** The same rule as ANDROID-PLAN §4 "Items: phone values
 and the tag preview", VAULT-MESSAGING §10.7 "Phone values": the
 extension is dropped; then E.164 for a number that parses as possible
-(`IS_POSSIBLE` only, not `IS_POSSIBLE_LOCAL_ONLY`), else the dialable
+(`isPossibleNumberWithReason` returns `IS_POSSIBLE`, not
+`IS_POSSIBLE_LOCAL_ONLY`), else the dialable
 characters only (a leading `+` if typed, then at most 15 digits; no
 digit left: `""`), with the "Check this number" hint and no block;
 national format in the viewer's region, international elsewhere and

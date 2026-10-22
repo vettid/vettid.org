@@ -11,7 +11,8 @@ changelog:
     (`PhoneInput.raw`, at most 15 digits) for any other, instead of the
     spaced international format; `display` and the as-you-type mask are
     unchanged, a value already stored in the spaced form is shown as
-    before and stored again only when the member next saves that field;
+    before and stored again only when the member next edits and saves
+    that field;
     an extension is dropped (the note `items_phone_extension_note`,
     "Extensions aren't saved; add it to the item's notes."); the other
     kinds get one stored form on save (VAULT-MESSAGING §10.7
@@ -4873,7 +4874,7 @@ until its key rotated.
 **Phone values.** The stored form is VAULT-MESSAGING §10.7 "Phone
 values" (0.55.0), one form for both apps. Android changes
 `PhoneInput.stored`: the extension is dropped; then a number that
-parses as a possible number (`isPossibleNumber` is `IS_POSSIBLE`, not
+parses as a possible number (`isPossibleNumberWithReason` returns `IS_POSSIBLE`, not
 `IS_POSSIBLE_LOCAL_ONLY`) is stored in **E.164** (`+442079460958`); any
 other value is stored as `PhoneInput.raw` (a leading `+` if typed, then
 at most 15 digits, `MAX_DIGITS`; no digit left: `""`), with the "Check
@@ -4884,7 +4885,8 @@ the spaced international form by 0.1.20 to 0.1.64 is read and shown as
 before, and stored in the new form only when the member next edits and
 saves that field (no bulk migration). Tests: E.164 for a possible number
 (with and without a `+`, in the phone's region), the raw form for a
-number that does not parse, a number longer than 15 digits cut to 15,
+number that does not parse, a local-only number (`IS_POSSIBLE_LOCAL_ONLY`)
+gets the fallback form, a number longer than 15 digits cut to 15,
 `""` for text without a digit, no stored value contains a space or
 punctuation, and a spaced stored value is shown and is not rewritten
 until the field is edited and saved.
