@@ -4919,8 +4919,8 @@ the item's notes." Tests (each the full input, then what is stored):
   `x`) and stores `+442079460958`;
 - in region US, "Text 555 0100" holds no extension and stores
   `5550100` (a local-only number, so the fallback form);
-- a bare "#123" holds no extension and stores `123`;
-- an unparsed "123 ext 4" stores `123`;
+- in region US, a bare "#123" holds no extension and stores `123`;
+- in region US, an unparsed "123 ext 4" stores `123`;
 - the note shows only while a marker is present, and the marker stays
   in the edit text, exactly as typed, until save.
 
