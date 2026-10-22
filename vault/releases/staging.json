@@ -1,6 +1,6 @@
 {
   "channel": "staging",
-  "signed_serial": 22,
+  "signed_serial": 23,
   "releases": [
     {
       "release": 1,
@@ -749,7 +749,7 @@
     {
       "release": 21,
       "status": "active",
-      "published_at": "@PUBLISHED_AT@",
+      "published_at": "2026-10-22T19:26:29Z",
       "pcr0": "891a9401d7aa314e843cfc655e494899ed6e230c8a03cf4246f23197779d22a55c929fc22b2649f9d4207d4b1832ad24",
       "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
       "pcr2": "7bdb3a5f57eb51c288e9e80627c4d717d2e495ae3e6e528993194bf400c63afe15019e1c757dc3bfe67d36678b559c3d",
