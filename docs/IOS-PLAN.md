@@ -1,9 +1,14 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.27
+version: 0.1.28
 date: 2026-10-22
 changelog:
+  - 0.1.28: editorial; approved by the owner (2026-10-22)
+    (VAULT-MESSAGING 0.55.5; ANDROID-PLAN 0.1.70). §4.8, canonical
+    forms: a month field refuses any invalid value with
+    `items_rule_month` ("Enter a month and year, such as 2033-05",
+    Android's string); day fields keep `items_rule_date`
   - 0.1.27: editorial; approved by the owner (2026-10-22)
     (VAULT-MESSAGING 0.55.4; ANDROID-PLAN 0.1.69). §4.8: no cut to 15
     digits (the fallback keeps all digits, bounded by the input

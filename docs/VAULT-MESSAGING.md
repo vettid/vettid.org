@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.55.4
+version: 0.55.5
 date: 2026-10-22
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.10.0)
-  - ANDROID-PLAN.md (0.1.69)
-  - IOS-PLAN.md (0.1.27; §9.1 VA1–VA3)
+  - ANDROID-PLAN.md (0.1.70)
+  - IOS-PLAN.md (0.1.28; §9.1 VA1–VA3)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,14 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.55.5: editorial; **approved by the owner (2026-10-22)**
+    (ANDROID-PLAN 0.1.70, IOS-PLAN 0.1.28). §10.7 "Canonical forms",
+    `date`: a month field (a stored `YYYY-MM`, or a new or empty field
+    whose template has `"format": "month"`, such as a card's expiry)
+    refuses any invalid value, a full date typed or pasted there
+    included, with its own message, "Enter a month and year, such as
+    2033-05" (`items_rule_month`), instead of the date message; day
+    fields keep theirs
   - 0.55.4: editorial; **approved by the owner (2026-10-22)**
     (ANDROID-PLAN 0.1.69, IOS-PLAN 0.1.27; from the comparison of
     73,000 inputs between the two apps). §10.7 "Phone values": (1)
@@ -6971,8 +6979,10 @@ item: { "item_id": "<ULID>", "version": 3, "name": "Passport", "category": "iden
     month-only value typed into a day field is accepted as `YYYY-MM`
     (valid under the table). In a month field (a stored `YYYY-MM`, or
     a new or empty field with the hint) the editor takes the year and
-    the month only: a full date typed or pasted there is refused with
-    the app's existing date message, never stored and never truncated.
+    the month only: any invalid value, a full date typed or pasted
+    there included, is refused with the month message "Enter a month
+    and year, such as 2033-05" (the apps' key `items_rule_month`), never
+    stored and never truncated; a day field keeps the date message.
     The app never invents or drops a day.
   - `email`: trimmed, the domain (after the last `@`) lower-cased, the
     local part as typed.
