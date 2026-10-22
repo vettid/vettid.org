@@ -6795,8 +6795,8 @@ it saves).
 any library's formatting: the same value is stored the same way by every
 app, and an app formats only to display (and as the member types), never
 in what it stores. An app MUST read and show a value stored in an
-earlier form, and writes it in the canonical form when the member next
-saves that field; no app rewrites stored values in bulk.
+earlier form, and writes it in the canonical form only when the member
+next edits and saves that field; no app rewrites stored values in bulk.
 
 ```json
 item: { "item_id": "<ULID>", "version": 3, "name": "Passport", "category": "identity_document",
