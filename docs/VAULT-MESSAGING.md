@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.55.3
+version: 0.55.4
 date: 2026-10-22
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.10.0)
-  - ANDROID-PLAN.md (0.1.68)
-  - IOS-PLAN.md (0.1.26; §9.1 VA1–VA3)
+  - ANDROID-PLAN.md (0.1.69)
+  - IOS-PLAN.md (0.1.27; §9.1 VA1–VA3)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,20 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.55.4: editorial; **approved by the owner (2026-10-22)**
+    (ANDROID-PLAN 0.1.69, IOS-PLAN 0.1.27; from the comparison of
+    73,000 inputs between the two apps). §10.7 "Phone values": (1)
+    **no silent digit cut**: digits are not cut to 15 before parsing;
+    the library decides: a number it finds `IS_POSSIBLE` is stored in
+    E.164 whatever its length, and only `TOO_LONG` or another result
+    that is not possible takes the fallback, its dialable characters (a
+    `+` typed before the first digit, then all its digits). Every
+    writer keeps the edit text, extension marker included, to at most
+    32 characters, so the fallback always fits the table; (2) **"Check this number"** shows whenever the number
+    is not valid (`isValidNumber` is false), whether it is stored as
+    E.164 or as dialable characters, and never blocks; both apps track
+    the current libphonenumber metadata (no pin), since validity can
+    change with the metadata
   - 0.55.3: editorial; found in review (the Android review of the
     canonical forms; ANDROID-PLAN 0.1.68, IOS-PLAN 0.1.26). §10.7
     "Canonical forms": (1) `date`: the form of the value already stored;
@@ -75,7 +89,7 @@ changelog:
     **`phone` values** (§10.7): after the extension is dropped, a
     number that parses as a possible number is stored in **E.164**
     (`+442079460958`); any other is stored as its dialable characters
-    only (a `+` typed before the first digit, then at most 15 digits),
+    only (a `+` typed before the first digit, then its digits),
     with the "Check this number" hint and never a block. National,
     international and as-you-type formats are display only. Values already stored in the
     spaced international form (staging) are read and shown, and stored
@@ -6902,11 +6916,21 @@ item: { "item_id": "<ULID>", "version": 3, "name": "Passport", "category": "iden
      number without a `+` does not parse), it is stored in **E.164**:
      `+` and the digits, no space or punctuation (`+442079460958`).
   3. **Otherwise** it is stored as its **dialable characters only**: a
-     `+` if one was typed before the first digit, then its digits, at
-     most **15**
-     digits (the rest are dropped); with no digit left the value is
-     `""`. The app shows "Check this number" and never refuses or
-     blocks the save; this form always satisfies the table.
+     `+` if one was typed before the first digit, then **all** its
+     digits (none are cut; the library decides what is possible, so a
+     number it finds `IS_POSSIBLE` is stored in E.164 in item 2 however
+     many digits it has, and only `TOO_LONG` or another result that is
+     not possible lands here); with no digit left the value is `""`.
+     Every writer of `item.put` (apps and desktops) MUST keep the edit
+     text of a phone field to at most **32 characters**, counting the
+     extension marker text kept in it until the save, so this form
+     always satisfies the table.
+     Whether the value is stored as E.164 or as dialable characters,
+     the app shows "Check this number" whenever the number is **not
+     valid** (the library's `isValidNumber` is false), and never
+     refuses or blocks the save. Both apps follow the current
+     libphonenumber metadata and do not pin it: validity can change
+     with the metadata.
   4. National format in the viewer's region (for a number of that
      region), international format elsewhere and as-you-type
      formatting are **display only**; an app never stores a formatted
