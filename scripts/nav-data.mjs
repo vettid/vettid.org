@@ -47,7 +47,6 @@ export const NAV = [
       { label: 'Contact', href: '/contact' },
     ],
   },
-  { label: 'Donate', href: '/donate' },
 ];
 
 // Footer link line (order preserved). External links get target/rel handling
@@ -62,7 +61,6 @@ export const FOOTER_LINKS = [
   { label: 'Use Cases', href: '/use-cases' },
   { label: 'Security', href: '/security' },
   { label: 'LEASH', href: '/ai/leash' },
-  { label: 'Donate', href: '/donate' },
   { label: 'Open Source', href: '/open-source' },
   { label: 'Privacy', href: '/privacy' },
   { label: 'Terms', href: '/terms' },
