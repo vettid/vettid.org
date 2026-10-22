@@ -1,9 +1,13 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.24
+version: 0.1.25
 date: 2026-10-22
 changelog:
+  - 0.1.25: editorial; approved by the owner (2026-10-22)
+    (VAULT-MESSAGING 0.55.2; ANDROID-PLAN 0.1.67). §4.8, canonical
+    forms: `number` is stored as typed, with white space trimmed and a
+    single leading `+` dropped; the tests are Android's
   - 0.1.24: editorial; approved by the owner (2026-10-22)
     (VAULT-MESSAGING 0.55.1; ANDROID-PLAN 0.1.66). §4.8: an extension
     marker counts only when at least one digit comes before it, and
