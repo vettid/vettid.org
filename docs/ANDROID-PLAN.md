@@ -1,9 +1,19 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.67
+version: 0.1.68
 date: 2026-10-22
 changelog:
+  - 0.1.68: editorial; found in review (VAULT-MESSAGING 0.55.3 §10.7).
+    §4 "Items: phone values and the tag preview", canonical forms:
+    `date` keeps the stored value's form and takes the template's
+    `"format": "month"` (else `YYYY-MM-DD`) only for a field with no
+    stored value at hand; a month-only value typed into a day field is
+    accepted as `YYYY-MM`; `url` keeps a bracketed IPv6 host, keeps a
+    scheme without `//` (`urn:isbn:1`, `bitcoin:bc1qxyz`, `geo:1,2`)
+    and adds `https://` to `localhost:8080/x` and `Example.com:443/A`;
+    the `number` input filter turns `.5` into `0.5` and a decimal comma
+    into a point while typing, the canonical function does not
   - 0.1.67: editorial; approved by the owner (2026-10-22)
     (VAULT-MESSAGING 0.55.2 §10.7). §4 "Items: phone values and the tag
     preview", canonical forms: `number` is stored as typed, with
@@ -4939,16 +4949,29 @@ the new form only when its field is next edited and saved. Case
 mapping is ASCII only; white space is the Unicode `White_Space`
 property. `number`: as typed, trimmed, a single leading `+` dropped (tests:
 "007" stays "007", " 1.0 " becomes "1.0", "+5" becomes "5", "-0" stays
-"-0", "0.50" stays "0.50", "+-5" becomes "-5"; "5.", ".5" and "++5" stay refused by the grammar
-with the existing message). `date`: the template's hint
-(`"format": "month"`: `YYYY-MM`), else the stored value's form, else
-`YYYY-MM-DD` for a new field. `email`: trimmed, domain lower-cased.
-`url`: trimmed; a text matching `^[A-Za-z][A-Za-z0-9+.-]*://` keeps its
+"-0", "0.50" stays "0.50", "+-5" becomes "-5"; "5." and "++5" stay
+refused by the grammar with the existing message). The number input
+filter, not the canonical function, turns a leading ".5" into "0.5" and
+a decimal comma into a point while the member types ("1,5" shows
+"1.5", ".5" shows "0.5"; tests). `date`: the stored value's form; a
+field with no stored value at hand (new, empty or kept) takes `YYYY-MM`
+when its template carries `"format": "month"`, else `YYYY-MM-DD`; a
+month-only value typed into a day field is accepted as `YYYY-MM`; the
+app never invents or drops a day (tests: a stored `2031-04` field with
+no hint stays `YYYY-MM`; a new month field is `YYYY-MM`; a new plain
+date is `YYYY-MM-DD`). `email`: trimmed, domain lower-cased. `url`:
+trimmed; a text matching `^[A-Za-z][A-Za-z0-9+.-]*://` keeps its
 scheme and host lower-cased (the host after `userinfo@`, before
-`:port`), the rest as typed (`HTTP://Example.com/A` to
-`http://example.com/A`); `MAILTO:a@b.c`, `tel:` and `sms:` keep their
-form with the scheme lower-cased; anything else gets `https://`
-(`localhost:8080/x` to `https://localhost:8080/x`, `Example.com/A` to
+`:port`; a bracketed IPv6 literal is the host as a whole, lower-cased,
+the port after the `]`), the rest as typed (`HTTP://Example.com/A` to
+`http://example.com/A`, `HTTP://[2001:DB8::1]:8080/A` to
+`http://[2001:db8::1]:8080/A`); `MAILTO:a@b.c`, `tel:` and `sms:` keep
+their form with the scheme lower-cased; a text with no `/` before its
+first `:`, whose scheme part has no `.` and which is not followed by
+only digits (a port) keeps its scheme with the scheme lower-cased
+(`urn:isbn:1`, `bitcoin:bc1qxyz` and `geo:1,2` are kept); anything else
+gets `https://` (`localhost:8080/x` to `https://localhost:8080/x`,
+`Example.com:443/A` to `https://example.com:443/A`, `Example.com/A` to
 `https://example.com/A`). `otp`: a bare secret becomes
 `otpauth://totp/<label>?secret=…&algorithm=SHA1&digits=6&period=30`,
 the label the field's label in UTF-8 with every byte but
