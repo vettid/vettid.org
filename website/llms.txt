@@ -58,6 +58,5 @@ Status, as the site states it today:
 
 - [Privacy Playbooks](https://vettid.org/playbooks/): What security, privacy, anonymity, identity and trust mean, then step-by-step fixes on your own device; free and available now
 - [Tools We Trust](https://vettid.org/tools-we-trust): Third-party privacy tools VettID recommends; no affiliations, no affiliate links
-- [Donate](https://vettid.org/donate): Supporting the project; donations@vettid.org
 - [zero-knowledge-trust](https://github.com/vettid/zero-knowledge-trust): Paper: the thinking behind VettID's architecture
 - [vettid-healthcare-demo](https://github.com/vettid/vettid-healthcare-demo): Demo: three approaches to patient-record lookup compared side by side

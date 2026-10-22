@@ -287,7 +287,7 @@ function handler(event) {
     // scripts/check-site.mjs fails the build if a website/ directory is
     // missing here, so a new section can't silently count as probe traffic.
     const CONTENT_PREFIXES = [
-      '/why', '/security', '/donate', '/open-source', '/playbooks',
+      '/why', '/security', '/open-source', '/playbooks',
       '/about', '/ai', '/contact', '/tools-we-trust', '/use-cases',
       '/privacy', '/terms',
       '/assets/', '/js/', '/shared/', '/api/', '/.well-known/',
