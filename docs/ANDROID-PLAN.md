@@ -1,9 +1,15 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.69
+version: 0.1.70
 date: 2026-10-22
 changelog:
+  - 0.1.70: editorial; approved by the owner (2026-10-22)
+    (VAULT-MESSAGING 0.55.5 §10.7). §4 "Items: phone values and the tag
+    preview", canonical forms: a month field refuses any invalid value,
+    a full date typed or pasted included, with the new text
+    `items_rule_month` ("Enter a month and year, such as 2033-05"); day
+    fields keep `items_rule_date`
   - 0.1.69: editorial; approved by the owner (2026-10-22)
     (VAULT-MESSAGING 0.55.4 §10.7). §4 "Items: phone values and the tag
     preview": `PhoneInput.raw` no longer cuts to 15 digits (`MAX_DIGITS`
@@ -4980,8 +4986,12 @@ month-only value typed into a day field is accepted as `YYYY-MM`; the
 app never invents or drops a day (tests: a stored `2031-04` field with
 no hint stays `YYYY-MM`; a new month field is `YYYY-MM`; a new plain
 date is `YYYY-MM-DD`; in a month field, a full date typed or pasted is
-refused with the existing date message, never stored and never
-truncated). `email`: trimmed, domain lower-cased. `url`:
+refused with `items_rule_month`, never stored and never truncated, and
+a day field keeps `items_rule_date`). New text, beside the other
+`items_rule_*` strings of `feature/items`: `items_rule_month`, "Enter a
+month and year, such as 2033-05", shown for any invalid value in a
+month field (a stored `YYYY-MM`, or a new or empty field whose template
+has `"format": "month"`). `email`: trimmed, domain lower-cased. `url`:
 trimmed; a text matching `^[A-Za-z][A-Za-z0-9+.-]*://` keeps its
 scheme and host lower-cased (the host after `userinfo@`, before
 `:port`; a bracketed IPv6 literal is the host as a whole, lower-cased,
