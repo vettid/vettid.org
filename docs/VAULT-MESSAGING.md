@@ -31,8 +31,8 @@ changelog:
     (ANDROID-PLAN 0.1.67, IOS-PLAN 0.1.25). §10.7 "Canonical forms",
     `number`: the stored form is the text as typed, except that leading
     and trailing white space is trimmed and a single leading `+` is
-    dropped. Leading zeros, `-0`, trailing fractional zeros and a
-    trailing point are kept as typed (`007` stays `007`, `1.0` stays
+    dropped. Leading zeros, `-0` and trailing fractional zeros are
+    kept as typed (`007` stays `007`, `1.0` stays
     `1.0`, `+5` becomes `5`), because members use Number for codes
     such as PINs and account numbers and nothing compares number
     values, so nothing is silently changed. This replaces the 0.55.0
@@ -6916,8 +6916,8 @@ item: { "item_id": "<ULID>", "version": 3, "name": "Passport", "category": "iden
   typed.
   - `number`: the text as typed, except that leading and trailing
     white space is trimmed and a single leading `+` is dropped.
-    Leading zeros, `-0`, trailing fractional zeros and a trailing
-    point are kept as typed: `007` stays `007`, `1.0` stays `1.0`,
+    Leading zeros, `-0` and trailing fractional zeros are kept as
+    typed: `007` stays `007`, `1.0` stays `1.0`,
     `-0` stays `-0`, `+5` becomes `5` (members use Number for codes
     such as PINs, and nothing compares number values). The result must
     still match the `number` grammar above, which refuses what it

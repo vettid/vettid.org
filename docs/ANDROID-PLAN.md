@@ -8,8 +8,8 @@ changelog:
     (VAULT-MESSAGING 0.55.2 §10.7). §4 "Items: phone values and the tag
     preview", canonical forms: `number` is stored as typed, with
     leading and trailing white space trimmed and a single leading `+`
-    dropped; leading zeros, `-0`, trailing fractional zeros and a
-    trailing point are kept (so a code such as `007` is not changed);
+    dropped; leading zeros, `-0` and trailing fractional zeros
+    are kept (so a code such as `007` is not changed);
     the number test cases follow
   - 0.1.66: editorial; approved by the owner (2026-10-22)
     (VAULT-MESSAGING 0.55.1 §10.7, §10.8). §4 "Items: phone values and
@@ -4939,7 +4939,7 @@ the new form only when its field is next edited and saved. Case
 mapping is ASCII only; white space is the Unicode `White_Space`
 property. `number`: as typed, trimmed, a single leading `+` dropped (tests:
 "007" stays "007", " 1.0 " becomes "1.0", "+5" becomes "5", "-0" stays
-"-0", "0.50" stays "0.50"; "5." and "++5" stay refused by the grammar
+"-0", "0.50" stays "0.50", "+-5" becomes "-5"; "5.", ".5" and "++5" stay refused by the grammar
 with the existing message). `date`: the template's hint
 (`"format": "month"`: `YYYY-MM`), else the stored value's form, else
 `YYYY-MM-DD` for a new field. `email`: trimmed, domain lower-cased.
