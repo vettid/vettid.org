@@ -1,9 +1,21 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.22
-date: 2026-10-21
+version: 0.1.23
+date: 2026-10-22
 changelog:
+  - 0.1.23: approved by the owner (2026-10-22)
+    (VAULT-MESSAGING 0.55.0 §10.7, §10.8; ANDROID-PLAN 0.1.65).
+    §14: iOS variants of two item texts, `ios_items_sensitivity_secret_note`
+    and `ios_items_secret_hidden_body`, which name Face ID, Touch ID or
+    the iPhone passcode where Android's name its fingerprint or screen
+    lock. §8 I3.1: the item editor, like the item screen, is inside the
+    `SecureContainer`, so a screenshot or a recording of it is blocked
+    unless "Allow screenshots" is on. §4.8: `phone` values stored as
+    VAULT-MESSAGING §10.7 says (E.164, else the dialable characters),
+    with a libphonenumber port for iOS (a dependency the owner
+    accepted); the tag preview says "N more may be shared"
+    (`items_share_preview_more`, Android's)
   - 0.1.22: approved by the owner (2026-10-21)
     (VAULT-MESSAGING 0.54.0 §3.5.9; ANDROID-PLAN 0.1.64). §4.1,
     History: `credential.holder_cleared` gets the title "Credential
@@ -988,6 +1000,28 @@ not kept.
 
 The tests are Android's.
 
+### 4.8 Items: phone values and the tag preview (0.1.23)
+
+*Approved by the owner (2026-10-22) (ANDROID-PLAN 0.1.65).*
+
+**Phone values.** The same rule as ANDROID-PLAN §4 "Items: phone values
+and the tag preview", VAULT-MESSAGING §10.7 "Phone values": E.164 for a
+number that parses as possible without an extension, else the dialable
+characters only (a leading `+` if typed, then the digits), with the
+"Check this number" hint and no block; national format in the viewer's
+region, international elsewhere and as-you-type formatting are display
+only; a value stored in the earlier spaced form is shown and stored
+again only when the member next saves that field. The iOS app adds a
+**libphonenumber port** (a Swift package of Google's metadata, the
+owner accepted the dependency) behind one `PhoneInput` type with
+Android's functions (`raw`, `stored`, `doubtful`, `display`, the
+as-you-type mask) and Android's tests; the region without a `+` is the
+iPhone's carrier country (`CTTelephonyNetworkInfo`), then the locale's.
+
+**The tag preview.** As ANDROID-PLAN: the shares beyond the listed
+ones are not counted as asked; the preview adds
+`items_share_preview_more` ("N more may be shared", Android's string).
+
 ## 5. Architecture
 
 One Xcode project (`VettID.xcodeproj`) with the app target and local
@@ -1635,7 +1669,7 @@ exchange messages and photos both ways, and approve each other's asks.
 
 | PR | Contents | Spec | Mirror | Acceptance |
 |---|---|---|---|---|
-| I3.1 | Items: data, secret and critical; templates; tags; TOTP | §10.7, §10.8; VAULT-ITEMS | `feature/items/*`, `core/data/…/items/*` | Critical items need the password; values in the secure container |
+| I3.1 | Items: data, secret and critical; templates; tags; TOTP | §10.7, §10.8; VAULT-ITEMS | `feature/items/*`, `core/data/…/items/*` | Critical items need the password; values in the secure container; (0.1.23) the item editor too, inside the `SecureContainer` like the item screen: screenshots and recording of it are blocked unless "Allow screenshots" is on (§6.4) |
 | I3.2 | Share rules, grants, critical-item use by a connection | §10.12, §10.13 | `feature/items/RuleEditScreen.kt`, `SharingScreens.kt`, `core/data/…/items/Sharing*.kt` | Rules against a second vault |
 | I3.3 | Transfer out and in: QR and pasted code, Finish the move, the old phone keeping its keys until confirmed or 7 days, the signer-class texts across platforms | §6.7.1, §11.7.1 ("Across an iOS app"), §11.14.10 | `feature/settings/TransferOut*.kt`, `feature/onboarding/MoveScreens.kt`, `TransferInViewModel.kt`, `FinishMove.kt`, `core/data/…/FinishMoveRunner.kt` | iPhone → Android → iPhone on staging; the old phone erases itself on confirmation |
 | I3.4 | Recovery: scan or type the code, claim, register, the one screen for PIN and password, the answers, the wait | §11.11, §11.11.10, §11.14.3–§11.14.6, §11.14.11 | `feature/onboarding/RecoverTypeScreen.kt`, `RecoverViewModel.kt`, `RecoveryOpen.kt`, `feature/settings/RecoveryStatusText.kt` | A recovery on staging onto a second iPhone; typed and scanned entries make equal requests |
@@ -1867,3 +1901,11 @@ approved.
   app's page in Settings. Shown when camera access is "denied" or
   "restricted"; "not yet asked" asks (`settings_photo_capture_permission_title`
   and `_body`, Android's).
+- **Items: secret items on an iPhone (§4.8; approved 2026-10-22)**, as
+  Android's `items_sensitivity_secret_note` and `items_secret_hidden_body`
+  with the way of confirming changed:
+  `ios_items_sensitivity_secret_note`: "Hidden until you reveal it with
+  Face ID, Touch ID or your iPhone passcode; every reveal is recorded";
+  `ios_items_secret_hidden_body`: "Its values are hidden. Revealing them
+  asks for Face ID, Touch ID or your iPhone passcode and is recorded in
+  your history."

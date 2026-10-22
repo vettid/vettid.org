@@ -1,9 +1,20 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.64
-date: 2026-10-21
+version: 0.1.65
+date: 2026-10-22
 changelog:
+  - 0.1.65: approved by the owner (2026-10-22)
+    (VAULT-MESSAGING 0.55.0 §10.7, §10.8). §4 "Items: phone values and
+    the tag preview": `PhoneInput.stored` stores E.164 for a possible
+    number without an extension and the dialable characters only
+    (`PhoneInput.raw`) for any other, instead of the spaced
+    international format; `display` and the as-you-type mask are
+    unchanged, a value already stored in the spaced form is shown as
+    before and stored again only when the member next saves that field;
+    the tag rename and merge preview no longer counts the shares beyond
+    the listed ones as asked and says "N more may be shared"
+    (`items_share_preview_more`)
   - 0.1.64: approved by the owner (2026-10-21)
     (VAULT-MESSAGING 0.54.0 §3.5.9, §10.9; the new audit kind
     `credential.holder_cleared`, written by staging release 21 when
@@ -4850,6 +4861,33 @@ until its key rotated.
   `Stale`; the 25 h descriptor of `ManifestTest` is still refused.
 - A descriptor whose `not_after` is not after `now` is still refused,
   with no allowance.
+
+### Items: phone values and the tag preview (0.1.65)
+
+*Approved by the owner (2026-10-22).*
+
+**Phone values.** The stored form is VAULT-MESSAGING §10.7 "Phone
+values" (0.55.0), one form for both apps. Android changes
+`PhoneInput.stored`: a number that parses as a possible number without
+an extension is stored in **E.164** (`+442079460958`); any other value
+is stored as `PhoneInput.raw` (a leading `+` if typed, then the digits),
+with the "Check this number" hint and no block. `display`, `doubtful`
+and the as-you-type mask are unchanged, and are display only. A value
+stored in the spaced international form by 0.1.20 to 0.1.64 is read
+and shown as before, and stored in the new form only when the member
+next saves that field (no bulk migration). Tests: E.164 for a possible
+number (with and without a `+`, in the phone's region), the raw form for
+a number that does not parse and for one with an extension, no stored
+value contains a space or punctuation, and a spaced stored value is
+shown and is not rewritten until the field is saved.
+
+**The tag preview (§10.8).** In the rename and merge preview, the
+shares beyond the entries listed are not counted as asked. The
+preview counts as asked the `ask` entries listed and the `auto` entries
+that carry `ask_rule_id`, and adds "N more may be shared"
+(`items_share_preview_more`, a plural string, when `shares_total`
+exceeds the entries listed): one "%1$d more may be shared", other
+"%1$d more may be shared".
 
 ### The member's own profile (0.1.61, 0.1.62, 0.1.63)
 
