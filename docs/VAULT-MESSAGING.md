@@ -44,7 +44,13 @@ changelog:
     again canonically only when the member next saves that field; there
     is no bulk migration. A formatted form is not stored because it
     depends on each library's metadata version, so two apps could store
-    one number two ways. (3) **A truncated preview** (§10.8, `tag.merge`): `shares`
+    one number two ways. **An extension is not stored**: the main number
+    is, and the app says so while the member types (the extension goes
+    in the item's notes). **The other kinds** (§10.7, "Canonical
+    forms"): `number`, `date`, `email`, `url`, `otp`, `address` and
+    `text` each get one stored form, applied by the apps on save; older
+    values are read as before and stored again only when the field is
+    next saved. (3) **A truncated preview** (§10.8, `tag.merge`): `shares`
     entries beyond the listed ones are no longer counted as asked; the
     apps say "N more may be shared". An `auto` entry that carries
     `ask_rule_id` counts as asked
@@ -6780,7 +6786,9 @@ already allows (below), as for a payment card's expiry. The hint lives
 in the registry and the apps only: it is not a member of the item or
 the field, the vault never sees it, and an app that does not know it
 collects a full date. When editing, an app tells a month from the
-stored value's form.
+stored value's form (0.55.0: and saves the form its template fixes,
+"Canonical forms" below; a stored value of the other form stays as it
+is until the member picks a new date).
 
 **One canonical stored form per kind** (0.55.0, owner decision of
 2026-10-22). The kinds below define what an app stores, independent of
@@ -6836,13 +6844,16 @@ item: { "item_id": "<ULID>", "version": 3, "name": "Passport", "category": "iden
 - **Phone values** (0.55.0, owner decision of 2026-10-22; an app rule,
   the vault does not normalise and accepts anything the table allows).
   An app stores a `phone` value in one form, whatever the library it
-  uses: (a) a number that parses as a possible number **without an
-  extension** (in the phone's region when typed without a `+`, from the
-  network, then the SIM, then the locale) is stored in **E.164**,
-  `+` and the digits, with no space or punctuation (`+442079460958`);
-  (b) any other value is stored as its **dialable characters only**: a
-  leading `+` if it was typed, then the digits, at most what the table
-  allows. It keeps the app's "Check this number" hint and is never
+  uses. **An extension is never stored**: the part of the typed text
+  from an extension marker on (`x`, `ext`, `;ext=`, `#`, `,`) is
+  dropped before anything else, and while the member types the app
+  shows the note "Extensions aren't saved; add it to the item's notes."
+  Then: (a) a number that parses as a possible number (in the phone's
+  region when typed without a `+`) is stored in **E.164**, `+` and the
+  digits, with no space or punctuation (`+442079460958`); (b) any other
+  value is stored as its **dialable characters only**: a leading `+`
+  if it was typed, then the digits, at most what the table allows
+  (digits that followed an extension marker are never among them). It keeps the app's "Check this number" hint and is never
   refused or blocked. National format in the viewer's region (for a
   number of that region), international format elsewhere, and
   as-you-type formatting are **display only**; an app never stores a
@@ -6851,6 +6862,30 @@ item: { "item_id": "<ULID>", "version": 3, "name": "Passport", "category": "iden
   staging) and any other value the table allows, shows it as it shows
   every phone value, and stores it in the form above only when the
   member next saves that field.
+- **Canonical forms** (0.55.0, owner decision of 2026-10-22). The apps
+  apply these on save to the other kinds; each form is itself valid for
+  the table above, and the vault does not normalise.
+  - `number`: a plain decimal with no `+`, no leading zeros (except a
+    single `0` before the point), no trailing fractional zeros and no
+    bare trailing point; `-0` and `-0.0` are `0` (`1.0` is `1`, `007`
+    is `7`).
+  - `date`: the field's template fixes the form: the hint
+    `"format": "month"` (above) gives `YYYY-MM`, any other field
+    `YYYY-MM-DD`.
+  - `email`: trimmed, the domain lower-cased, the local part as typed.
+  - `url`: `https://` added when the text has no scheme; the scheme and,
+    when there is an authority (`//`), the host lower-cased; path,
+    query and fragment as typed.
+  - `otp`: an `otpauth://` URI. A bare secret is wrapped as
+    `otpauth://totp/<label>?secret=<secret>&algorithm=SHA1&digits=6&period=30`
+    (SHA-1, 6 digits, 30 s: the defaults), `<label>` the field's label
+    percent-encoded; in the URI the `secret` is upper-case base32 with
+    no spaces and no `=` padding. Other URI parameters stay as given.
+  - `address`: `region` and `postal_code` trimmed with inner white space
+    collapsed to single spaces, `postal_code` upper-cased; `country` as
+    above; a member that is empty after trimming is left out.
+  - `text`: leading and trailing white space trimmed. `password` and
+    `multiline` are never trimmed.
 - **Size.** An item's **size** is the length in bytes of its content
   encoding: the canonical JSON of `item.get` with every value
   (compact, members in the order of the example above) **without the

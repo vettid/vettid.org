@@ -15,7 +15,12 @@ changelog:
     VAULT-MESSAGING §10.7 says (E.164, else the dialable characters),
     with a libphonenumber port for iOS (a dependency the owner
     accepted); the tag preview says "N more may be shared"
-    (`items_share_preview_more`, Android's)
+    (`items_share_preview_more`, Android's); the phone's extension is
+    dropped with the note `items_phone_extension_note` (Android's); the
+    region for a number typed without `+` is the device's locale region
+    (`Locale.current.region`), as iOS has no reliable network or SIM
+    country; the other kinds get their canonical stored form on save
+    (VAULT-MESSAGING §10.7 "Canonical forms")
   - 0.1.22: approved by the owner (2026-10-21)
     (VAULT-MESSAGING 0.54.0 §3.5.9; ANDROID-PLAN 0.1.64). §4.1,
     History: `credential.holder_cleared` gets the title "Credential
@@ -1015,8 +1020,21 @@ again only when the member next saves that field. The iOS app adds a
 **libphonenumber port** (a Swift package of Google's metadata, the
 owner accepted the dependency) behind one `PhoneInput` type with
 Android's functions (`raw`, `stored`, `doubtful`, `display`, the
-as-you-type mask) and Android's tests; the region without a `+` is the
-iPhone's carrier country (`CTTelephonyNetworkInfo`), then the locale's.
+as-you-type mask) and Android's tests. The region for a number typed
+without a `+` is the device's locale region (`Locale.current.region`):
+iOS has no reliable network or SIM country (`CTTelephonyNetworkInfo`
+is deprecated and returns placeholder values since iOS 16), so the
+app does not use it. An extension (`x`, `ext`, `;ext=`, `#`, `,` and
+what follows) is dropped before parsing, with the note
+`items_phone_extension_note` (Android's): "Extensions aren't saved; add
+it to the item's notes."
+
+**Canonical forms of the other kinds.** The rules of ANDROID-PLAN §4
+"Items: phone values and the tag preview", VAULT-MESSAGING §10.7
+"Canonical forms", applied on save to `number`, `date`, `email`, `url`,
+`otp`, `address` and `text`; a value stored earlier is read as before
+and stored again only when the field is next saved. The tests are
+Android's.
 
 **The tag preview.** As ANDROID-PLAN: the shares beyond the listed
 ones are not counted as asked; the preview adds

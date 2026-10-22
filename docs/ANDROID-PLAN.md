@@ -12,7 +12,10 @@ changelog:
     international format; `display` and the as-you-type mask are
     unchanged, a value already stored in the spaced form is shown as
     before and stored again only when the member next saves that field;
-    the tag rename and merge preview no longer counts the shares beyond
+    an extension is dropped (the note `items_phone_extension_note`,
+    "Extensions aren't saved; add it to the item's notes."); the other
+    kinds get one stored form on save (VAULT-MESSAGING §10.7
+    "Canonical forms"); the tag rename and merge preview no longer counts the shares beyond
     the listed ones as asked and says "N more may be shared"
     (`items_share_preview_more`)
   - 0.1.64: approved by the owner (2026-10-21)
@@ -4880,6 +4883,31 @@ number (with and without a `+`, in the phone's region), the raw form for
 a number that does not parse and for one with an extension, no stored
 value contains a space or punctuation, and a spaced stored value is
 shown and is not rewritten until the field is saved.
+
+**Extensions.** The text from an extension marker (`x`, `ext`,
+`;ext=`, `#`, `,`) is dropped before `stored` parses it or takes the
+fallback, so extension digits are never glued onto the number; while the
+member types, the field shows `items_phone_extension_note`: "Extensions
+aren't saved; add it to the item's notes." Tests: "+44 20 7946 0958
+x123" and "...,123" and "...#123" store `+442079460958`; an unparsed
+"123 ext 4" stores `123`; the note shows only when a marker is present.
+
+**Canonical forms of the other kinds (VAULT-MESSAGING §10.7).** Applied
+on save, by `FieldInput` / `ItemChecks`; a value stored earlier is read
+as before and stored in the new form only when the field is next saved.
+`number`: `1.0` to `1`, `007` to `7`, `-0` to `0`, `+5` to `5`, `5.` to
+`5`, `0.50` to `0.5`. `date`: `YYYY-MM` for a template field with
+`"format": "month"`, else `YYYY-MM-DD`. `email`: trimmed, domain
+lower-cased. `url`: `https://` added without a scheme, scheme and host
+lower-cased, the rest as typed. `otp`: a bare secret becomes
+`otpauth://totp/<label>?secret=…&algorithm=SHA1&digits=6&period=30`
+with the secret upper-case, without spaces or padding; a URI keeps its
+parameters and has its secret canonical. `address`: `region` and
+`postal_code` trimmed and collapsed, `postal_code` upper-case, empty
+members left out. `text`: trimmed; `password`, `multiline` and `notes`
+as typed. Tests: each example above, that every canonical result passes
+the §10.7 check, that canonicalising twice changes nothing, and that an
+older stored value is shown unchanged and not rewritten until saved.
 
 **The tag preview (§10.8).** In the rename and merge preview, the
 shares beyond the entries listed are not counted as asked. The
