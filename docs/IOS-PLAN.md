@@ -1,9 +1,14 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.23
+version: 0.1.24
 date: 2026-10-22
 changelog:
+  - 0.1.24: editorial; approved by the owner (2026-10-22)
+    (VAULT-MESSAGING 0.55.1; ANDROID-PLAN 0.1.66). §4.8: an extension
+    marker counts only when at least one digit comes before it, and
+    the edit text keeps the exact marker text typed until the save;
+    `items_share_preview_more` ends with a full stop (Android's string)
   - 0.1.23: approved by the owner (2026-10-22)
     (VAULT-MESSAGING 0.55.0 §10.7, §10.8; ANDROID-PLAN 0.1.65).
     §14: iOS variants of two item texts, `ios_items_sensitivity_secret_note`
@@ -1015,7 +1020,8 @@ and the tag preview", VAULT-MESSAGING §10.7 "Phone values": the
 extension is dropped; then E.164 for a number that parses as possible
 (`isPossibleNumberWithReason` returns `IS_POSSIBLE`, not
 `IS_POSSIBLE_LOCAL_ONLY`), else the dialable
-characters only (a leading `+` if typed, then at most 15 digits; no
+characters only (a `+` typed before the first digit, then at most 15
+digits; no
 digit left: `""`), with the "Check this number" hint and no block;
 national format in the viewer's region, international elsewhere and
 as-you-type formatting are display only; a value stored in the earlier
@@ -1033,8 +1039,9 @@ since iOS 16), so the app does not use it. When the locale has no
 region (`nil`), the "unknown region" path is taken: a number without a
 `+` does not parse and is stored as its dialable characters. An
 extension marker (`x`, `ext`, `;ext=`, `#`, `,`, any case, with what
-follows) is found in the text as typed, before any character filter,
-and kept in the edit text until save, with the note
+follows), counted only where at least one digit comes before it, is
+found in the text as typed, before any character filter, and kept in
+the edit text exactly as typed until save, with the note
 `items_phone_extension_note` (Android's): "Extensions aren't saved; add
 it to the item's notes."
 
@@ -1052,7 +1059,7 @@ tests are Android's.
 
 **The tag preview.** As ANDROID-PLAN: the shares beyond the listed
 ones are not counted as asked; the preview adds
-`items_share_preview_more` ("N more may be shared", Android's string).
+`items_share_preview_more` ("N more may be shared.", with the full stop, Android's string).
 
 ## 5. Architecture
 
