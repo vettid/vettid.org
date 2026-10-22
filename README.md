@@ -18,7 +18,7 @@ AWS CDK infrastructure and static content for [vettid.org](https://vettid.org).
 
 ## Website
 
-Plain static HTML/CSS/JS in `website/` — no build step. Pages: `/` (landing with mailing-list signup), `/security`, `/donate`, `/open-source`, plus `/404.html`. App routes return when the production backend migrates from vettid.dev.
+Plain static HTML/CSS/JS in `website/` — no build step. Pages: `/` (landing with mailing-list signup), `/security`, `/open-source`, plus `/404.html`. App routes return when the production backend migrates from vettid.dev.
 
 Design system: "Night Watch" — ground `#0b0b12`, indigo bands `#212062`, surfaces `#14142a`/`#1b1b3a`/`#2e2d88`, daylight band `#f4f4f6`, gold `#ffc125` (scarce by policy). Tokens in `website/assets/site.css`. Fonts: Plus Jakarta Sans + Inter + IBM Plex Mono, self-hosted.
 
