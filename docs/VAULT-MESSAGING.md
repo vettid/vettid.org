@@ -27,6 +27,15 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.55.1: editorial; errata to 0.55.0 found in the Android review
+    (ANDROID-PLAN 0.1.66, IOS-PLAN 0.1.24), approved by the owner
+    (2026-10-22). §10.7 "Phone values": an extension marker counts only
+    when at least one digit comes before it, so "Fax: +44 20 7946 0958"
+    and "Text 555 0100" are numbers, not extensions; the edit text keeps
+    the exact marker text the member typed (`,123`, `#123`, `ext. 123`)
+    until the save. §10.8: the text "N more may be shared" ends with a
+    full stop (the apps join it with the other sentences of the change
+    text)
   - 0.55.0: normative for the apps; owner decisions of 2026-10-22,
     **approved by the owner (2026-10-22)**. No vault release, no change
     for the member API or the host (the vault validates shape and size
@@ -6849,9 +6858,11 @@ item: { "item_id": "<ULID>", "version": 3, "name": "Passport", "category": "iden
   1. **An extension is never stored.** The app finds an extension
      marker in the text as typed or pasted, before any character
      filter, case-insensitively: `x`, `ext` (with an optional `.`),
-     `;ext=`, `#` or `,`. The marker and everything after it are
-     dropped when the value is stored; until then the edit text keeps
-     them, and while a marker is present the app shows the note
+     `;ext=`, `#` or `,`, and only where at least one digit comes
+     before it (`Fax: +44 20 7946 0958` and `Text 555 0100` hold no
+     extension). The marker and everything after it are dropped when
+     the value is stored; until then the edit text keeps the exact text
+     the member typed (`,123`, `#123`, `ext. 123`), and while a marker is present the app shows the note
      "Extensions aren't saved; add it to the item's notes."
   2. **E.164.** If the rest parses as a possible number (the library's
      `isPossibleNumberWithReason` returns

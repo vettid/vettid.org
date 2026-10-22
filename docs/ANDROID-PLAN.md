@@ -4,6 +4,15 @@ status: draft
 version: 0.1.65
 date: 2026-10-22
 changelog:
+  - 0.1.66: editorial; approved by the owner (2026-10-22)
+    (VAULT-MESSAGING 0.55.1 §10.7, §10.8). §4 "Items: phone values and
+    the tag preview": an extension marker counts only when at least
+    one digit comes before it ("Fax: +44 20 7946 0958" and "Text 555
+    0100" store the number as normal; both are test cases); the edit
+    text keeps the exact marker text typed (`,123`, `#123`, `ext. 123`)
+    until the save; `items_share_preview_more` ends with a full stop,
+    "%1$d more may be shared.", as it is joined with the other
+    sentences of the change text
   - 0.1.65: approved by the owner (2026-10-22)
     (VAULT-MESSAGING 0.55.0 §10.7, §10.8). §4 "Items: phone values and
     the tag preview": `PhoneInput.stored` drops an extension, then
@@ -4892,15 +4901,18 @@ punctuation, and a spaced stored value is shown and is not rewritten
 until the field is edited and saved.
 
 **Extensions.** The markers `x`, `ext` (with an optional `.`), `;ext=`,
-`#` and `,` are found case-insensitively in the text as typed or
-pasted, before `FieldInput.phone` filters characters (which today drops
+`#` and `,` are found case-insensitively, and only where at least one
+digit comes before them, in the text as typed or pasted, before `FieldInput.phone` filters characters (which today drops
 `x`, `#`, `,` and `;` per keystroke: the filter keeps the marker and
-what follows in the edit text until save, and `stored` drops them, so
+what follows in the edit text, exactly as typed, until save, and `stored` drops them, so
 the note can show). Extension digits are never glued onto the number.
 While a marker is present the field shows `items_phone_extension_note`:
 "Extensions aren't saved; add it to the item's notes." Tests: "+44 20
 7946 0958 x123", "X123", "ext. 123", ";ext=123", ",123" and "#123" store
-`+442079460958`; an unparsed "123 ext 4" stores `123`; the note shows
+`+442079460958`; "Fax: +44 20 7946 0958" and "Text 555 0100" hold no
+extension and store the number as normal (`+442079460958`; and the
+dialable characters or E.164 of 555 0100 as for any such number); an
+unparsed "123 ext 4" stores `123`; the note shows
 only while a marker is present and the marker stays in the edit text
 until save.
 
@@ -4943,8 +4955,8 @@ shares beyond the entries listed are not counted as asked. The
 preview counts as asked the `ask` entries listed and the `auto` entries
 that carry `ask_rule_id`, and adds "N more may be shared"
 (`items_share_preview_more`, a plural string, when `shares_total`
-exceeds the entries listed): one "%1$d more may be shared", other
-"%1$d more may be shared".
+exceeds the entries listed): one "%1$d more may be shared.", other
+"%1$d more may be shared." (with the full stop; 0.1.66).
 
 ### The member's own profile (0.1.61, 0.1.62, 0.1.63)
 
