@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.54.0
-date: 2026-10-21
+version: 0.55.0
+date: 2026-10-22
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.10.0)
-  - ANDROID-PLAN.md (0.1.64)
-  - IOS-PLAN.md (0.1.22; §9.1 VA1–VA3)
+  - ANDROID-PLAN.md (0.1.65)
+  - IOS-PLAN.md (0.1.23; §9.1 VA1–VA3)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,34 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.55.0: normative for the apps; owner decisions of 2026-10-22,
+    **approved by the owner (2026-10-22)**. No vault release, no change
+    for the member API or the host (the vault validates shape and size
+    only); apps: ANDROID-PLAN 0.1.65, IOS-PLAN 0.1.23. (1) **One
+    canonical stored form per value kind** (§10.7): a general rule that
+    the spec defines the stored form of every value, independent of
+    any library's formatting, and apps format only for display. (2)
+    **`phone` values** (§10.7): after the extension is dropped, a
+    number that parses as a possible number is stored in **E.164**
+    (`+442079460958`); any other is stored as its dialable characters
+    only (a leading `+` if typed, then at most 15 digits), with the
+    "Check this number" hint and never a block. National, international and
+    as-you-type formats are display only. Values already stored in the
+    spaced international form (staging) are read and shown, and stored
+    again canonically only when the member next edits and saves that
+    field; there
+    is no bulk migration. A formatted form is not stored because it
+    depends on each library's metadata version, so two apps could store
+    one number two ways. **An extension is not stored**: the main number
+    is, and the app says so while the member types (the extension goes
+    in the item's notes). **The other kinds** (§10.7, "Canonical
+    forms"): `number`, `date`, `email`, `url`, `otp`, `address` and
+    `text` each get one stored form, applied by the apps on save; older
+    values are read as before and stored again only when the field is
+    next saved. (3) **A truncated preview** (§10.8, `tag.merge`): `shares`
+    entries beyond the listed ones are no longer counted as asked; the
+    apps say "N more may be shared". An `auto` entry that carries
+    `ask_rule_id` counts as asked
   - 0.54.0: normative; owner decisions of 2026-10-21, **approved by the
     owner (2026-10-21)**. **Needs a vault release** for part (1)
     (staging release 21); apps: ANDROID-PLAN 0.1.64, IOS-PLAN 0.1.22
@@ -6759,7 +6787,16 @@ already allows (below), as for a payment card's expiry. The hint lives
 in the registry and the apps only: it is not a member of the item or
 the field, the vault never sees it, and an app that does not know it
 collects a full date. When editing, an app tells a month from the
-stored value's form.
+stored value's form (0.55.0: "Canonical forms" below says which form
+it saves).
+
+**One canonical stored form per kind** (0.55.0, owner decision of
+2026-10-22). The kinds below define what an app stores, independent of
+any library's formatting: the same value is stored the same way by every
+app, and an app formats only to display (and as the member types), never
+in what it stores. An app MUST read and show a value stored in an
+earlier form, and writes it in the canonical form only when the member
+next edits and saves that field; no app rewrites stored values in bulk.
 
 ```json
 item: { "item_id": "<ULID>", "version": 3, "name": "Passport", "category": "identity_document",
@@ -6797,13 +6834,91 @@ item: { "item_id": "<ULID>", "version": 3, "name": "Passport", "category": "iden
   | `number` | a decimal: `-?[0-9]{1,32}(\.[0-9]{1,32})?` |
   | `date` | `YYYY-MM-DD` or `YYYY-MM`, a valid calendar date |
   | `email` | at most 254 bytes: one `@` between a non-empty local part and domain, no white space |
-  | `phone` | at most 32 bytes of digits, spaces and `+-().`, with at least one digit |
+  | `phone` | at most 32 bytes of digits, spaces and `+-().`, with at least one digit; the apps store it as "Phone values" below says (0.55.0) |
   | `url` | an absolute URI with a scheme, at most 2,048 bytes, no white space |
   | `password` | a string of at most 16,384 bytes; apps mask it and reveal it on purpose |
   | `otp` | a TOTP seed: an `otpauth://` URI of at most 2,048 bytes, or a base32 secret (RFC 4648 alphabet, case-insensitive, 16–256 characters, optional `=` padding) |
   | `address` | an object `{street?, street2?, city?, region?, postal_code?, country?}` of strings of at most 256 bytes without line breaks; `country` is an ISO 3166-1 alpha-2 code in upper case; other members are refused |
   | `file` | reserved for blob references (owner decision 4: files later); refused with `bad_request`. It stays reserved in 0.21.0: VAULT-ITEMS §3's `file` field shows the later design, not this version, and apps MUST NOT offer it |
 
+- **Phone values** (0.55.0, owner decision of 2026-10-22; an app rule,
+  the vault does not normalise and accepts anything the table allows).
+  Every writer of `item.put` (apps and desktops; the desktop app
+  implements this in its own plan) stores a `phone` value in one form,
+  whatever library it uses.
+  1. **An extension is never stored.** The app finds an extension
+     marker in the text as typed or pasted, before any character
+     filter, case-insensitively: `x`, `ext` (with an optional `.`),
+     `;ext=`, `#` or `,`. The marker and everything after it are
+     dropped when the value is stored; until then the edit text keeps
+     them, and while a marker is present the app shows the note
+     "Extensions aren't saved; add it to the item's notes."
+  2. **E.164.** If the rest parses as a possible number (the library's
+     `isPossibleNumberWithReason` returns
+     `IS_POSSIBLE`, not `IS_POSSIBLE_LOCAL_ONLY`), in the phone's region when it has no
+     `+` (each plan says how the app finds the region; with no region a
+     number without a `+` does not parse), it is stored in **E.164**:
+     `+` and the digits, no space or punctuation (`+442079460958`).
+  3. **Otherwise** it is stored as its **dialable characters only**: a
+     leading `+` if one was typed, then its digits, at most **15**
+     digits (the rest are dropped); with no digit left the value is
+     `""`. The app shows "Check this number" and never refuses or
+     blocks the save; this form always satisfies the table.
+  4. National format in the viewer's region (for a number of that
+     region), international format elsewhere and as-you-type
+     formatting are **display only**; an app never stores a formatted
+     value. An app reads a value in the earlier spaced international
+     form (`+44 20 7946 0958`, written by 0.54.0-era apps on staging)
+     and any other value the table allows, and shows it as it shows
+     every phone value, and stores it in the form above only when the
+     member next edits and saves that field. A field the member did not
+     touch, of any kind, phone included, is sent exactly as stored.
+- **Canonical forms** (0.55.0, owner decision of 2026-10-22). Every
+  writer of `item.put` applies these, per kind, to a field **the member
+  edited or created**; a field the member did not touch is sent exactly
+  as stored (so a secret value never revealed is never rewritten), and
+  an older value is stored in the canonical form only when its field
+  is next edited and saved. There is no bulk migration, and the vault
+  does not normalise. Before saving, the app checks every canonical
+  result against the table above and the size limits (this section,
+  including the item's size) and refuses the save with its existing
+  message if it fails; the phone fallback above always passes. "White
+  space" is the Unicode `White_Space` property; lower- and upper-casing
+  maps ASCII `A`–`Z` and `a`–`z` only and leaves other characters as
+  typed.
+  - `number`: a plain decimal with no `+`, no leading zeros (except a
+    single `0` before the point), no trailing fractional zeros and no
+    bare trailing point; `-0` and `-0.0` are `0` (`1.0` is `1`, `007`
+    is `7`).
+  - `date`: `YYYY-MM` when the field's template carries the hint
+    `"format": "month"` (above); otherwise the form of the value
+    already stored; a new field is `YYYY-MM-DD`. The app never invents
+    a day.
+  - `email`: trimmed, the domain (after the last `@`) lower-cased, the
+    local part as typed.
+  - `url`: trimmed first. A text starting with `[A-Za-z][A-Za-z0-9+.-]*://`
+    keeps its scheme, lower-cased, and its host lower-cased (the host
+    is what follows `userinfo@` if there is one, up to `:port`, `/`,
+    `?` or `#`); a text starting with `mailto:`, `tel:` or `sms:` (any
+    case) is kept as is with its scheme lower-cased; any other text
+    gets `https://` in front (`localhost:8080/x` becomes
+    `https://localhost:8080/x`, `Example.com/A` becomes
+    `https://example.com/A`). Path, query and fragment as typed.
+  - `otp`: an `otpauth://` URI. A bare secret is wrapped as
+    `otpauth://totp/<label>?secret=<secret>&algorithm=SHA1&digits=6&period=30`
+    (SHA-1, 6 digits, 30 s: the defaults), `<label>` the field's label
+    (1–64 bytes, so never empty) as UTF-8 with every byte except the
+    RFC 3986 unreserved characters `A-Za-z0-9-._~` written `%XX` in
+    upper-case hex; in the URI the `secret` is upper-case base32 with
+    no spaces and no `=` padding. Other URI parameters stay as given.
+  - `address`: `street`, `street2`, `city`, `region` and `postal_code`
+    trimmed with inner white space collapsed to single spaces (no case
+    change), `postal_code` also upper-cased; `country` as above; a
+    member empty after trimming is left out.
+  - `text`: leading and trailing white space trimmed. `password` and
+    `multiline` are never trimmed. An item's `name` and a field's
+    `label` are trimmed at both ends and otherwise stored as typed;
+    `notes` are stored as typed.
 - **Size.** An item's **size** is the length in bytes of its content
   encoding: the canonical JSON of `item.get` with every value
   (compact, members in the order of the example above) **without the
@@ -7103,11 +7218,16 @@ names it (§10.12; owner decision 2).
   entry or takes the first `from` tag's. A rename is a merge of one tag.
   Items that then newly match a rule are handled as re-tagged (§10.12);
   `shares` lists them, with the rule's `mode` (`ask`: asked, `auto`:
-  included), within 131,072 bytes, and `shares_total` counts them. As in
+  included), within 131,072 bytes, and `shares_total` counts them (0.55.0:
+  an app counts as asked only the `ask` entries it lists and the `auto`
+  entries that carry `ask_rule_id`, and says of the entries beyond the
+  listed ones, `shares_total` less the listed, only that **they may be
+  shared**: it cannot tell which of them the vault would ask about). As in
   the dry runs of `item.put` and `item.tag` (§10.7), an `auto` entry
   carries `ask_rule_id` when an `ask` rule of the same subject holds the
   item, which then stays pending (§10.12 Overlapping rules; 0.23.1: a
-  merge can leave an `auto` entry pending). A
+  merge can leave an `auto` entry pending); such an entry counts as asked
+  (0.55.0, stated; it was already the meaning of `ask_rule_id`). A
   merge of a tag that an agent's rule names is refused with `in_use`:
   the rule's tags are in its signed delegation (§10.11), which only the
   member can sign again (`share.rule.set`).
