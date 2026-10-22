@@ -1,9 +1,29 @@
 {
-  "serial": 22,
+  "serial": 23,
   "releases": [
     {
-      "release": 20,
+      "release": 21,
       "status": "active",
+      "published_at": "2026-10-22T19:26:29Z",
+      "pcr0": "891a9401d7aa314e843cfc655e494899ed6e230c8a03cf4246f23197779d22a55c929fc22b2649f9d4207d4b1832ad24",
+      "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
+      "pcr2": "7bdb3a5f57eb51c288e9e80627c4d717d2e495ae3e6e528993194bf400c63afe15019e1c757dc3bfe67d36678b559c3d",
+      "seal_key": "arn:aws:kms:us-east-1:347272280361:key/d1fec8cb-7694-4140-9857-6a48e4bd41ff",
+      "notes": "https://staging.vettid.org/security/releases/21/",
+      "tag": "release/staging/21",
+      "source_commit": "aa4501a6a83ce0e89c7ab848b917ad8bc125f411",
+      "summary": "Release 21 ends the enclave key a minute early so phones accept it, and adds a History entry when the vault clears a credential holder it cannot find.",
+      "changes": [
+        "The key your phone uses to send requests to the vault now expires 24 hours minus 60 seconds after it is made, not 24 hours. Before, the enclave clock and its attestation clock could differ by a second, and phones then refused every unlock until the key was replaced.",
+        "History shows a new entry, \"Credential holder cleared\", if your vault finds that the phone holding your credential is no longer one of its apps and clears it. Removing a phone already clears it, so this should not happen; if you did not remove a phone, contact VettID.",
+        "Built from vettid-vault commit aa4501a (tag release/staging/21) and independently rebuilt on 2026-10-22 with a matching PCR0."
+      ],
+      "security": "none",
+      "listed": true
+    },
+    {
+      "release": 20,
+      "status": "deprecated",
       "published_at": "2026-10-20T23:32:10Z",
       "pcr0": "44f731679d8c0a9aa63a814f9f6eae03798879ee8aa6ed9da7a8fd0dde90613d5650ea0f16abbafac0c85edf4eb63d25",
       "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
