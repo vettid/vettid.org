@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.55.1
+version: 0.55.2
 date: 2026-10-22
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.10.0)
-  - ANDROID-PLAN.md (0.1.66)
-  - IOS-PLAN.md (0.1.24; §9.1 VA1–VA3)
+  - ANDROID-PLAN.md (0.1.67)
+  - IOS-PLAN.md (0.1.25; §9.1 VA1–VA3)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,18 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.55.2: editorial; **approved by the owner (2026-10-22)**
+    (ANDROID-PLAN 0.1.67, IOS-PLAN 0.1.25). §10.7 "Canonical forms",
+    `number`: the stored form is the text as typed, except that leading
+    and trailing white space is trimmed and a single leading `+` is
+    dropped. Leading zeros, `-0`, trailing fractional zeros and a
+    trailing point are kept as typed (`007` stays `007`, `1.0` stays
+    `1.0`, `+5` becomes `5`), because members use Number for codes
+    such as PINs and account numbers and nothing compares number
+    values, so nothing is silently changed. This replaces the 0.55.0
+    rule, which dropped leading and trailing zeros. The grammar is
+    unchanged and its refusals stand (`5.` and `.5` are refused as
+    typed today)
   - 0.55.1: editorial; errata to 0.55.0 found in the Android review
     (ANDROID-PLAN 0.1.66, IOS-PLAN 0.1.24), approved by the owner
     (2026-10-22). §10.7 "Phone values": an extension marker counts only
@@ -6902,10 +6914,15 @@ item: { "item_id": "<ULID>", "version": 3, "name": "Passport", "category": "iden
   space" is the Unicode `White_Space` property; lower- and upper-casing
   maps ASCII `A`–`Z` and `a`–`z` only and leaves other characters as
   typed.
-  - `number`: a plain decimal with no `+`, no leading zeros (except a
-    single `0` before the point), no trailing fractional zeros and no
-    bare trailing point; `-0` and `-0.0` are `0` (`1.0` is `1`, `007`
-    is `7`).
+  - `number`: the text as typed, except that leading and trailing
+    white space is trimmed and a single leading `+` is dropped.
+    Leading zeros, `-0`, trailing fractional zeros and a trailing
+    point are kept as typed: `007` stays `007`, `1.0` stays `1.0`,
+    `-0` stays `-0`, `+5` becomes `5` (members use Number for codes
+    such as PINs, and nothing compares number values). The result must
+    still match the `number` grammar above, which refuses what it
+    refused before (`5.`, `.5`, `++5`), with the app's existing
+    message.
   - `date`: `YYYY-MM` when the field's template carries the hint
     `"format": "month"` (above); otherwise the form of the value
     already stored; a new field is `YYYY-MM-DD`. The app never invents
