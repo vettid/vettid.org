@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.55.2
+version: 0.55.3
 date: 2026-10-22
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.10.0)
-  - ANDROID-PLAN.md (0.1.67)
-  - IOS-PLAN.md (0.1.25; §9.1 VA1–VA3)
+  - ANDROID-PLAN.md (0.1.68)
+  - IOS-PLAN.md (0.1.26; §9.1 VA1–VA3)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,21 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.55.3: editorial; found in review (the Android review of the
+    canonical forms; ANDROID-PLAN 0.1.68, IOS-PLAN 0.1.26). §10.7
+    "Canonical forms": (1) `date`: the form of the value already stored;
+    a field with no stored value at hand (a new or empty field) takes
+    `YYYY-MM` when its template carries `"format": "month"`, else
+    `YYYY-MM-DD`; a month-only value typed into a day field is accepted
+    as `YYYY-MM`; the app never invents or drops a day (0.55.0 put the
+    template's hint first). (2) `url`: a bracketed IPv6 literal is the
+    host as a whole, lower-cased, the port after the closing bracket.
+    (3) `url`: a text without `://` also keeps its scheme when it looks
+    like one (`urn:isbn:1`, `bitcoin:bc1qxyz`, `geo:1,2`), and gets
+    `https://` when it looks like a host and port (`localhost:8080/x`,
+    `Example.com:443/A`). (4) `number`: the input filter, not the stored
+    form, turns a leading `.5` into `0.5` and a decimal comma into a
+    point while the member types
   - 0.55.2: editorial; **approved by the owner (2026-10-22)**
     (ANDROID-PLAN 0.1.67, IOS-PLAN 0.1.25). §10.7 "Canonical forms",
     `number`: the stored form is the text as typed, except that leading
@@ -6922,21 +6937,44 @@ item: { "item_id": "<ULID>", "version": 3, "name": "Passport", "category": "iden
     such as PINs, and nothing compares number values). The result must
     still match the `number` grammar above, which refuses what it
     refused before (`5.`, `.5`, `++5`), with the app's existing
-    message.
-  - `date`: `YYYY-MM` when the field's template carries the hint
-    `"format": "month"` (above); otherwise the form of the value
-    already stored; a new field is `YYYY-MM-DD`. The app never invents
-    a day.
+    message. The canonical function itself never turns `.5` into `0.5`
+    or a comma into a point; the **input filter** does that while the
+    member types (a leading `.5` becomes `0.5`, a decimal comma a
+    point), visible to the member, in both apps.
+  - `date`: the form of the value already stored; a field with no
+    stored value at hand (a new or empty field) takes `YYYY-MM` when its
+    template carries `"format": "month"` (above), else `YYYY-MM-DD`. A
+    month-only value typed into a day field is accepted as `YYYY-MM`
+    (valid under the table). In a month field (a stored `YYYY-MM`, or
+    a new or empty field with the hint) the editor takes the year and
+    the month only: a full date typed or pasted there is refused with
+    the app's existing date message, never stored and never truncated.
+    The app never invents or drops a day.
   - `email`: trimmed, the domain (after the last `@`) lower-cased, the
     local part as typed.
-  - `url`: trimmed first. A text starting with `[A-Za-z][A-Za-z0-9+.-]*://`
-    keeps its scheme, lower-cased, and its host lower-cased (the host
-    is what follows `userinfo@` if there is one, up to `:port`, `/`,
-    `?` or `#`); a text starting with `mailto:`, `tel:` or `sms:` (any
-    case) is kept as is with its scheme lower-cased; any other text
-    gets `https://` in front (`localhost:8080/x` becomes
-    `https://localhost:8080/x`, `Example.com/A` becomes
-    `https://example.com/A`). Path, query and fragment as typed.
+  - `url`: trimmed first. The rules apply in this order and the first
+    that matches wins: (a) a text starting with
+    `[A-Za-z][A-Za-z0-9+.-]*://` keeps its scheme, lower-cased, and its
+    host lower-cased (the host is what follows `userinfo@` if there is
+    one, up to `:port`, `/`, `?` or `#`; a bracketed IPv6 literal
+    `[...]` is the host as a whole, lower-cased, and the port follows
+    the closing bracket); (b) a text starting with `mailto:`, `tel:` or
+    `sms:` (any case) is kept as is with its scheme lower-cased; (c) a
+    text with no `/` before its first `:`, whose part before that `:`
+    matches the scheme pattern and holds no `.`, and which is not
+    followed by one or more digits and nothing else up to `/`, `?`, `#`
+    or its end (that would be a port), keeps its scheme the same way
+    (scheme lower-cased, the rest as typed): `urn:isbn:1`,
+    `bitcoin:bc1qxyz`, `geo:1,2`, `foo:` and `tel:5550100` are kept,
+    and `C:\path` becomes `c:\path` (accepted, and deterministic);
+    (d) any other text gets `https://` in front and its host is
+    lower-cased as in (a) (`user@Host:22` becomes
+    `https://user@host:22`, `localhost:8080/x`
+    becomes `https://localhost:8080/x`, `Example.com:443/A` becomes
+    `https://example.com:443/A`, `Example.com/A` becomes
+    `https://example.com/A`). Path, query and fragment as typed. Each
+    of these examples passes the vault's check of the table (an
+    absolute URI with a scheme).
   - `otp`: an `otpauth://` URI. A bare secret is wrapped as
     `otpauth://totp/<label>?secret=<secret>&algorithm=SHA1&digits=6&period=30`
     (SHA-1, 6 digits, 30 s: the defaults), `<label>` the field's label

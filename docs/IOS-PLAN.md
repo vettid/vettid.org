@@ -1,9 +1,14 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.25
+version: 0.1.26
 date: 2026-10-22
 changelog:
+  - 0.1.26: editorial; found in review (VAULT-MESSAGING 0.55.3;
+    ANDROID-PLAN 0.1.68). §4.8, canonical forms: the `date` and `url`
+    rules and the `number` input filter (a leading `.5` becomes `0.5`
+    and a decimal comma a point while typing, as on Android) as in
+    ANDROID-PLAN; the tests are Android's
   - 0.1.25: editorial; approved by the owner (2026-10-22)
     (VAULT-MESSAGING 0.55.2; ANDROID-PLAN 0.1.67). §4.8, canonical
     forms: `number` is stored as typed, with white space trimmed and a
