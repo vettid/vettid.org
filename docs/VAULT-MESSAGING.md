@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.55.0
+version: 0.55.1
 date: 2026-10-22
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.10.0)
-  - ANDROID-PLAN.md (0.1.65)
-  - IOS-PLAN.md (0.1.23; §9.1 VA1–VA3)
+  - ANDROID-PLAN.md (0.1.66)
+  - IOS-PLAN.md (0.1.24; §9.1 VA1–VA3)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
