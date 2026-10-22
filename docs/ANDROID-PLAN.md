@@ -4953,24 +4953,30 @@ property. `number`: as typed, trimmed, a single leading `+` dropped (tests:
 refused by the grammar with the existing message). The number input
 filter, not the canonical function, turns a leading ".5" into "0.5" and
 a decimal comma into a point while the member types ("1,5" shows
-"1.5", ".5" shows "0.5"; tests). `date`: the stored value's form; a
-field with no stored value at hand (new, empty or kept) takes `YYYY-MM`
+"1.5", ".5" shows "0.5", "1,000" shows "1.000", which is visible to the
+member while typing and accepted; tests). `date`: the stored value's form; a
+field with no stored value at hand (a new or empty field) takes `YYYY-MM`
 when its template carries `"format": "month"`, else `YYYY-MM-DD`; a
 month-only value typed into a day field is accepted as `YYYY-MM`; the
 app never invents or drops a day (tests: a stored `2031-04` field with
 no hint stays `YYYY-MM`; a new month field is `YYYY-MM`; a new plain
-date is `YYYY-MM-DD`). `email`: trimmed, domain lower-cased. `url`:
+date is `YYYY-MM-DD`; in a month field, a full date typed or pasted is
+refused with the existing date message, never stored and never
+truncated). `email`: trimmed, domain lower-cased. `url`:
 trimmed; a text matching `^[A-Za-z][A-Za-z0-9+.-]*://` keeps its
 scheme and host lower-cased (the host after `userinfo@`, before
 `:port`; a bracketed IPv6 literal is the host as a whole, lower-cased,
 the port after the `]`), the rest as typed (`HTTP://Example.com/A` to
 `http://example.com/A`, `HTTP://[2001:DB8::1]:8080/A` to
 `http://[2001:db8::1]:8080/A`); `MAILTO:a@b.c`, `tel:` and `sms:` keep
-their form with the scheme lower-cased; a text with no `/` before its
-first `:`, whose scheme part has no `.` and which is not followed by
-only digits (a port) keeps its scheme with the scheme lower-cased
-(`urn:isbn:1`, `bitcoin:bc1qxyz` and `geo:1,2` are kept); anything else
-gets `https://` (`localhost:8080/x` to `https://localhost:8080/x`,
+their form with the scheme lower-cased (`Mailto:a@b.c` to
+`mailto:a@b.c`); a text with no `/` before its first `:`, whose scheme
+part has no `.` and which is not followed by one or more digits and
+nothing else (a port) keeps its scheme with the scheme lower-cased
+(`urn:isbn:1`, `bitcoin:bc1qxyz`, `geo:1,2`, `foo:` and `tel:5550100`
+are kept; `C:\path` becomes `c:\path`); the rules apply in this order,
+first match wins; anything else gets `https://` and a lower-cased host
+(`user@Host:22` to `https://user@host:22`, `localhost:8080/x` to `https://localhost:8080/x`,
 `Example.com:443/A` to `https://example.com:443/A`, `Example.com/A` to
 `https://example.com/A`). `otp`: a bare secret becomes
 `otpauth://totp/<label>?secret=…&algorithm=SHA1&digits=6&period=30`,

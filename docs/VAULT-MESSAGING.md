@@ -30,7 +30,7 @@ changelog:
   - 0.55.3: editorial; found in review (the Android review of the
     canonical forms; ANDROID-PLAN 0.1.68, IOS-PLAN 0.1.26). §10.7
     "Canonical forms": (1) `date`: the form of the value already stored;
-    a field with no stored value at hand (new, empty or kept) takes
+    a field with no stored value at hand (a new or empty field) takes
     `YYYY-MM` when its template carries `"format": "month"`, else
     `YYYY-MM-DD`; a month-only value typed into a day field is accepted
     as `YYYY-MM`; the app never invents or drops a day (0.55.0 put the
@@ -6942,25 +6942,34 @@ item: { "item_id": "<ULID>", "version": 3, "name": "Passport", "category": "iden
     member types (a leading `.5` becomes `0.5`, a decimal comma a
     point), visible to the member, in both apps.
   - `date`: the form of the value already stored; a field with no
-    stored value at hand (new, empty or kept) takes `YYYY-MM` when its
+    stored value at hand (a new or empty field) takes `YYYY-MM` when its
     template carries `"format": "month"` (above), else `YYYY-MM-DD`. A
     month-only value typed into a day field is accepted as `YYYY-MM`
-    (valid under the table). The app never invents or drops a day.
+    (valid under the table). In a month field (a stored `YYYY-MM`, or
+    a new or empty field with the hint) the editor takes the year and
+    the month only: a full date typed or pasted there is refused with
+    the app's existing date message, never stored and never truncated.
+    The app never invents or drops a day.
   - `email`: trimmed, the domain (after the last `@`) lower-cased, the
     local part as typed.
-  - `url`: trimmed first. A text starting with
+  - `url`: trimmed first. The rules apply in this order and the first
+    that matches wins: (a) a text starting with
     `[A-Za-z][A-Za-z0-9+.-]*://` keeps its scheme, lower-cased, and its
     host lower-cased (the host is what follows `userinfo@` if there is
     one, up to `:port`, `/`, `?` or `#`; a bracketed IPv6 literal
     `[...]` is the host as a whole, lower-cased, and the port follows
-    the closing bracket). A text starting with `mailto:`, `tel:` or
-    `sms:` (any case) is kept as is with its scheme lower-cased. A
+    the closing bracket); (b) a text starting with `mailto:`, `tel:` or
+    `sms:` (any case) is kept as is with its scheme lower-cased; (c) a
     text with no `/` before its first `:`, whose part before that `:`
     matches the scheme pattern and holds no `.`, and which is not
-    followed by only digits up to `/`, `?`, `#` or its end (that would
-    be a port), keeps its scheme the same way (scheme lower-cased, the
-    rest as typed): `urn:isbn:1`, `bitcoin:bc1qxyz` and `geo:1,2` are
-    kept. Any other text gets `https://` in front (`localhost:8080/x`
+    followed by one or more digits and nothing else up to `/`, `?`, `#`
+    or its end (that would be a port), keeps its scheme the same way
+    (scheme lower-cased, the rest as typed): `urn:isbn:1`,
+    `bitcoin:bc1qxyz`, `geo:1,2`, `foo:` and `tel:5550100` are kept,
+    and `C:\path` becomes `c:\path` (accepted, and deterministic);
+    (d) any other text gets `https://` in front and its host is
+    lower-cased as in (a) (`user@Host:22` becomes
+    `https://user@host:22`, `localhost:8080/x`
     becomes `https://localhost:8080/x`, `Example.com:443/A` becomes
     `https://example.com:443/A`, `Example.com/A` becomes
     `https://example.com/A`). Path, query and fragment as typed. Each
