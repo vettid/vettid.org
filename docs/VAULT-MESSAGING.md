@@ -31,11 +31,12 @@ changelog:
     (ANDROID-PLAN 0.1.69, IOS-PLAN 0.1.27; from the comparison of
     73,000 inputs between the two apps). §10.7 "Phone values": (1)
     **no silent digit cut**: digits are not cut to 15 before parsing;
-    a number with more than 15 digits cannot be E.164 and takes the
-    fallback, its dialable characters (a `+` typed before the first
-    digit, then all its digits), which the table's limit of 32 bytes
-    already bounds because the input filter keeps at most 32
-    characters; (2) **"Check this number"** shows whenever the number
+    the library decides: a number it finds `IS_POSSIBLE` is stored in
+    E.164 whatever its length, and only `TOO_LONG` or another result
+    that is not possible takes the fallback, its dialable characters (a
+    `+` typed before the first digit, then all its digits). Every
+    writer keeps the edit text, extension marker included, to at most
+    32 characters, so the fallback always fits the table; (2) **"Check this number"** shows whenever the number
     is not valid (`isValidNumber` is false), whether it is stored as
     E.164 or as dialable characters, and never blocks; both apps track
     the current libphonenumber metadata (no pin), since validity can
@@ -6916,10 +6917,14 @@ item: { "item_id": "<ULID>", "version": 3, "name": "Passport", "category": "iden
      `+` and the digits, no space or punctuation (`+442079460958`).
   3. **Otherwise** it is stored as its **dialable characters only**: a
      `+` if one was typed before the first digit, then **all** its
-     digits (none are cut: more than 15 digits cannot be E.164 and
-     land here); with no digit left the value is `""`. The text the
-     member can enter is already limited to the table's 32 bytes by
-     the input filter, so this form always satisfies the table.
+     digits (none are cut; the library decides what is possible, so a
+     number it finds `IS_POSSIBLE` is stored in E.164 in item 2 however
+     many digits it has, and only `TOO_LONG` or another result that is
+     not possible lands here); with no digit left the value is `""`.
+     Every writer of `item.put` (apps and desktops) MUST keep the edit
+     text of a phone field to at most **32 characters**, counting the
+     extension marker text kept in it until the save, so this form
+     always satisfies the table.
      Whether the value is stored as E.164 or as dialable characters,
      the app shows "Check this number" whenever the number is **not
      valid** (the library's `isValidNumber` is false), and never

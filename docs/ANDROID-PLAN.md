@@ -4910,8 +4910,11 @@ values" (0.55.0), one form for both apps. Android changes
 parses as a possible number (`isPossibleNumberWithReason` returns
 `IS_POSSIBLE`, not `IS_POSSIBLE_LOCAL_ONLY`) is stored in **E.164** (`+442079460958`); any
 other value is stored as `PhoneInput.raw` (a `+` typed before the first
-digit, then all its digits: no cut to 15, `MAX_DIGITS` goes; the input
-filter's 32 characters bound it; no digit left: `""`). "Check this
+digit, then all its digits: no cut to 15, `MAX_DIGITS` goes; the library
+decides what is possible, so an `IS_POSSIBLE` number is E.164 however
+long, and only `TOO_LONG` or another non-possible result lands here;
+the edit text, extension marker included, is at most 32 characters (a
+MUST for every writer); no digit left: `""`). "Check this
 number" (`doubtful`) shows whenever `isValidNumber` is false, whether
 the value is stored as E.164 or as raw, and never blocks. The metadata
 of libphonenumber is not pinned: the app follows the current release,
@@ -4923,8 +4926,11 @@ before, and stored in the new form only when the member next edits and
 saves that field (no bulk migration). Tests: E.164 for a possible number
 (with and without a `+`, in the phone's region), the raw form for a
 number that does not parse, a local-only number (`IS_POSSIBLE_LOCAL_ONLY`)
-gets the fallback form, DE "+49 12345678901234" (16 digits, no cut)
-stores "+4912345678901234" with the hint, US "555 555 5555" and IL
+gets the fallback form, in region DE
+"+49 12345678901234" stores "+4912345678901234" (E.164, with the hint:
+not valid), "012345678901234" stores "+4912345678901234" with the hint,
+"+491234567890123456" (`TOO_LONG`) stores "+491234567890123456" (the
+fallback, all its digits) with the hint, US "555 555 5555" and IL
 "054-123-4567" show the hint (and are stored as E.164 when
 `IS_POSSIBLE`),
 `""` for text without a digit, no stored value contains a space or

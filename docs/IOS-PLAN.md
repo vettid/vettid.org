@@ -34,7 +34,7 @@ changelog:
     `SecureContainer`, so a screenshot or a recording of it is blocked
     unless "Allow screenshots" is on. §4.8: `phone` values stored as
     VAULT-MESSAGING §10.7 says (after the extension is dropped, E.164
-    for a possible number, else the dialable characters, at most 15
+    for a possible number, else the dialable characters, with all its
     digits), with a libphonenumber port for iOS (a dependency the owner
     accepted); the tag preview says "N more may be shared"
     (`items_share_preview_more`, Android's); the phone's extension is
