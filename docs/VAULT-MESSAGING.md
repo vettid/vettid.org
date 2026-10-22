@@ -6873,19 +6873,24 @@ item: { "item_id": "<ULID>", "version": 3, "name": "Passport", "category": "iden
     `"format": "month"` (above) gives `YYYY-MM`, any other field
     `YYYY-MM-DD`.
   - `email`: trimmed, the domain lower-cased, the local part as typed.
-  - `url`: `https://` added when the text has no scheme; the scheme and,
-    when there is an authority (`//`), the host lower-cased; path,
-    query and fragment as typed.
+  - `url`: a text containing `://` keeps its scheme, the scheme and
+    host lower-cased; a text starting with `mailto:`, `tel:` or `sms:`
+    (any case) is kept as is, its scheme lower-cased; any other text
+    gets `https://` in front (`localhost:8080/x` becomes
+    `https://localhost:8080/x`, `Example.com/A` becomes
+    `https://example.com/A`). Path, query and fragment as typed.
   - `otp`: an `otpauth://` URI. A bare secret is wrapped as
     `otpauth://totp/<label>?secret=<secret>&algorithm=SHA1&digits=6&period=30`
     (SHA-1, 6 digits, 30 s: the defaults), `<label>` the field's label
     percent-encoded; in the URI the `secret` is upper-case base32 with
     no spaces and no `=` padding. Other URI parameters stay as given.
-  - `address`: `region` and `postal_code` trimmed with inner white space
-    collapsed to single spaces, `postal_code` upper-cased; `country` as
-    above; a member that is empty after trimming is left out.
+  - `address`: `street`, `street2`, `city`, `region` and `postal_code`
+    trimmed with inner white space collapsed to single spaces (no case
+    change), `postal_code` also upper-cased; `country` as above; a member that is empty after trimming is left out.
   - `text`: leading and trailing white space trimmed. `password` and
-    `multiline` are never trimmed.
+    `multiline` are never trimmed. An item's `name` and a field's `label`
+    are trimmed at both ends and otherwise stored as typed; `notes` are
+    stored as typed.
 - **Size.** An item's **size** is the length in bytes of its content
   encoding: the canonical JSON of `item.get` with every value
   (compact, members in the order of the example above) **without the

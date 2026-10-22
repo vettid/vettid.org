@@ -4899,13 +4899,18 @@ as before and stored in the new form only when the field is next saved.
 `5`, `0.50` to `0.5`. `date`: `YYYY-MM` for a template field with
 `"format": "month"`, else `YYYY-MM-DD`. `email`: trimmed, domain
 lower-cased. `url`: `https://` added without a scheme, scheme and host
-lower-cased, the rest as typed. `otp`: a bare secret becomes
+lower-cased, the rest as typed; a text with `://` keeps its scheme
+(`HTTP://Example.com/A` to `http://example.com/A`), `MAILTO:a@b.c`,
+`tel:` and `sms:` keep their form with the scheme lower-cased, anything
+else gets `https://` (`localhost:8080/x` to `https://localhost:8080/x`,
+`Example.com/A` to `https://example.com/A`). `otp`: a bare secret becomes
 `otpauth://totp/<label>?secret=…&algorithm=SHA1&digits=6&period=30`
 with the secret upper-case, without spaces or padding; a URI keeps its
-parameters and has its secret canonical. `address`: `region` and
-`postal_code` trimmed and collapsed, `postal_code` upper-case, empty
-members left out. `text`: trimmed; `password`, `multiline` and `notes`
-as typed. Tests: each example above, that every canonical result passes
+parameters and has its secret canonical. `address`: `street`,
+`street2`, `city`, `region` and `postal_code` trimmed and collapsed,
+`postal_code` upper-case, empty members left out. `text`: trimmed;
+`password` and `multiline` never trimmed; an item's `name` and a
+field's `label` trimmed at both ends, `notes` as typed. Tests: each example above, that every canonical result passes
 the §10.7 check, that canonicalising twice changes nothing, and that an
 older stored value is shown unchanged and not rewritten until saved.
 
