@@ -17161,7 +17161,8 @@ first.**
   an honest host the notice usually arrives within minutes, at "Finish
   the move". The old phone's last screen says: "This phone keeps your
   vault's keys until your new phone has finished the move, and until
-  your vault has confirmed it. Before you give this phone away, remove
+  your vault has confirmed it. Once your new phone works, you can remove
+  VettID from this phone. Before you give this phone away, remove
   VettID from it or reset it."
 - **The day-7 check** (0.55.10; owner decision, 2026-10-23, from the iOS
   review). At the first start, and at every start and foreground after
@@ -17178,7 +17179,8 @@ first.**
      such as `token_revoked`, §8.6): the result is **not known: check
      again later.** The app NEVER erases on it. It keeps its keys, shows
      "Your old phone is waiting to confirm the move with your vault.
-     Unlock your vault on the new phone.", and checks again at each
+     Unlock your vault on the new phone. Once your new phone works, you
+     can remove VettID from this phone.", and checks again at each
      start and foreground, until it gets a definite answer. A check that
      is cancelled or interrupted (the app is stopped, the phone locks,
      the process dies) never erases; the next start runs it again.

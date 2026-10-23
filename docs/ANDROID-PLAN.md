@@ -2884,7 +2884,8 @@ both sections above (`pin.change`, `credential.password.change`,
   means: keep the keys, and record the approval's time. The app shows,
   and keeps showing at every start: "Finish the move on your new phone.
   This phone keeps your vault's keys until your new phone has finished
-  the move, and until your vault has confirmed it. Before you give this
+  the move, and until your vault has confirmed it. Once your new phone
+  works, you can remove VettID from this phone. Before you give this
   phone away, remove VettID from it or reset it." It sends nothing to
   the vault. On `device.unlinked{reason: "transferred"}` it deletes the
   phone key, the device key and the app key and erases its local state,
@@ -2909,7 +2910,8 @@ both sections above (`pin.change`, `credential.password.change`,
   `lock_pending`, a timeout, offline, a `token_revoked`): the result is
   not known; the app erases nothing, keeps its keys and shows "Your old
   phone is waiting to confirm the move with your vault. Unlock your
-  vault on the new phone.", and checks again at each start and
+  vault on the new phone. Once your new phone works, you can remove
+  VettID from this phone.", and checks again at each start and
   foreground, until it gets a definite answer. A check that is
   cancelled or interrupted (the app is stopped, the phone locks) never
   erases. The app re-reads its transfer record after the await and
