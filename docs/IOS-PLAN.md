@@ -1,9 +1,15 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.29
+version: 0.1.30
 date: 2026-10-23
 changelog:
+  - 0.1.30: editorial; VAULT-MESSAGING 0.55.9, two decisions approved
+    by the owner (2026-10-23). §9.1 VA4 is built (vettid-vault #142):
+    the vault keeps the last Android signer in its DEK-encrypted state
+    while the app has none, a return under another signer is
+    `signer_changed`, the same signer is `device.signer_bound`;
+    reaches staging with the next staging release
   - 0.1.29: approved by the owner (2026-10-23) (ANDROID-PLAN 0.1.71
     "Sounds"; PUSH-GATEWAY 0.5.2). §6.7: the four `.caf` sounds are
     bundled; the notification service extension and the app's local
@@ -1835,7 +1841,7 @@ it may open vettid.org issues when it finds what is needed.
 | VA1 | **A real-device check of `verifyIOS` and `verifyIOSAssertion`**: a test like `TestRealAndroidChains` that reads `vms/devattest/testdata/real/*.ios.json` (key id, attestation, a challenge, assertions; ignored by `.gitignore` unless added on purpose) and verifies them with the pinned Apple root and the production App ID. The Mac agent produces the files from the test iPhone with a DevStack-only export (never in Release or Staging) | The verifier has only seen synthetic chains | Production; recommended before I1 exit (b) |
 | VA2 | **The iOS App ID per channel**: a release constant `ios_app_id` in the channel files (`<team>.com.vettid.app` in production, `<team>.com.vettid.app.staging` in staging), replacing the constant `iosAppID` in `enclave/config.go`; exactly one value per channel, the other channel's value malformed (as `android_package`, VAULT-MESSAGING §11.10.8); a C6 line in the release log (VAULT-RELEASES §3.4) | Today staging and production images accept the same App ID; the staging app could not be told apart, and the team ID is not yet confirmed | I1 exit (b), everything on an iPhone against staging |
 | VA3 | **iOS members of the dev device policy** (devenclave builds only, `make check-tcb` proves release builds cannot load them): `apple_app_attest_root: true` (the pinned Apple root beside the TEST CA), `ios_app_ids: ["<team>.com.vettid.app.dev", "<team>.com.vettid.app.devstack"]`, `ios_development_environment: true` (accept the `appattestdevelop` aaguid). Strict parsing as for the Android members | No relaxed iOS attestation exists on the dev stack | Device tests against the dev stack |
-| VA4 | **Signer continuity across an iOS app**: keep the last recorded Android signer when the vault moves to an app without one, so a later move to an Android app of another signer is `signer_changed`, confirmed and audited (VAULT-MESSAGING §11.7.1 "Across an iOS app"; decided 2026-10-11, not implemented) | Decided as a vault change before the first release that accepts an iOS app | I3.3 across platforms; production |
+| VA4 | **Signer continuity across an iOS app**: keep the last recorded Android signer when the vault moves to an app without one, so a later move to an Android app of another signer is `signer_changed`, confirmed and audited (VAULT-MESSAGING §11.7.1 "Across an iOS app"; decided 2026-10-11; **built in vettid-vault #142**, reaches staging with the next staging release; the same signer as the kept one is `device.signer_bound`, the kept signer is in the vault's DEK-encrypted state and not shown by `device.list`) | Decided as a vault change before the first release that accepts an iOS app | I3.3 across platforms; production |
 | VA5 | **e2e coverage of release R with the iOS TEST attester**: enroll, unlock, recovery register and open (with `device_assertion`), a transfer's `hs.init` in both directions between Android and iOS attesters, a release approval with two assertions | The e2e iOS tests predate release R | VA2's release |
 | VA6 | **No minimum app version on iOS, said explicitly**: App Attest carries no app version, so `android_min_version_code` (§11.14.14) has no iOS counterpart in the enclave; a test that an iOS attestation is not refused by it | Prevents a later surprise | — |
 

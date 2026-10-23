@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.55.8
+version: 0.55.9
 date: 2026-10-23
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -15,7 +15,7 @@ related:
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.10.0)
   - ANDROID-PLAN.md (0.1.70)
-  - IOS-PLAN.md (0.1.28; §9.1 VA1–VA3)
+  - IOS-PLAN.md (0.1.30; §9.1 VA1–VA3)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,31 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.55.9: editorial; **two decisions approved by the owner
+    (2026-10-23)**, on the independent review's advice; as built in
+    vettid-vault #142 (IOS-PLAN 0.1.30, VA4). §11.7.1 "Across an iOS
+    app" is no longer "decided, not implemented": the vault keeps the
+    last recorded Android signer (digest and class) while its app has
+    none, including across iOS to iOS moves, and clears it when the
+    binding moves to an Android app. The vault's signer binding is the
+    app's recorded signer, or the kept signer while the app has none;
+    the kept signer counts as recorded for `signer_changed`, so Android
+    S1, iOS, Android S2 is `signer_changed: true` and is confirmed and
+    audited as between two Android apps, in a transfer and in a
+    recovery (release R's open and the recovered phone's pairing, a
+    resumed recovery open included). **(q1) A return to the same signer
+    as the kept one is audited `device.signer_bound`, with no
+    confirmation and no `signer_changed`.** **(q2) The kept signer is
+    stored in the vault's DEK-encrypted state (`kept_signer`), as
+    `recovered_signer` is, not in the sealed header's device
+    bindings;** its freshness is `recovered_signer`'s. A kept signer
+    the running release no longer pins is never checked at unlock; a
+    later return to Android is `signer_changed` with the kept class.
+    `device.list` does not show it; audit and feed carry classes only.
+    Stale text fixed: the "Across platforms" bullet, the `signer_changed`
+    definition, `signer_unconfirmed` spends the UTK (0.52.0), "not yet implemented" in the
+    0.27.1 entries, and the "stranded vaults" paragraph (the kept-signer
+    case). New tests required (VA4)
   - 0.55.8: editorial; one new device rule: `keySize` exactly 128 or
     256 (§10.10 "Media suites"); library facts confirmed on two phones
     (2026-10-23; vettid-android #175; CALLING-SERVICE 0.2.2, CALLS-PLAN
@@ -1181,8 +1206,7 @@ changelog:
     among the ways to move a staging vault. 0.25.0 and 0.26.0 marked
     approved. **Owner decisions (2026-10-11, all as recommended):**
     the vault will keep the last recorded Android signer across an
-    app without one (decided, not yet implemented; a vault change
-    before iOS); a vault attached while its certificates were valid
+    app without one (decided; built in 0.55.9, vettid-vault #142); a vault attached while its certificates were valid
     keeps unlocking; the consequences of `signer_refused`'s order are
     accepted as built; confirmation stays by class (§11.7.1, §15
     item 35) (§10.9, §11.7, §11.7.1, §11.10.8, §15
@@ -12278,7 +12302,15 @@ binding, beside the attested public key and the chain's serial numbers,
 in the sealed header, for every Android key it attests: at enrollment
 (§11.3), at a transfer's `hs.init` (§6.7.1) and at a recovery's
 register (§11.11.3). The vault has one app (§6.7), and **the vault's
-signer binding is the signer recorded for that app's key**.
+signer binding is the signer recorded for that app's key, or the kept
+Android signer while the app has none** (an iOS app; "Across an iOS
+app" below). (0.55.9) **The kept signer is stored in the vault's
+DEK-encrypted state** (`kept_signer`: the digest and the class), as
+`recovered_signer` is, **not in the sealed header's device bindings**.
+Its freshness is `recovered_signer`'s: the state cannot fall behind
+the header, because every flush that sets or clears it rewrites the
+header with the state's sequence. A state without the member loads
+unchanged; no format change.
 
 - **Enrollment** binds the vault to the enrolling app's signer; audit
   `device.signer_bound` (`ref` = the class). (0.27.1) The entry
@@ -12296,12 +12328,15 @@ signer binding is the signer recorded for that app's key**.
   - **Direct transfer** (§6.7.1). The new app's attestation gives its
     signer. `device.transfer.pending` carries `signer` (the new app's
     class) and `signer_changed` (whether its digest differs from the
-    binding; `false` when the vault has no recorded signer, the staging
-    case below, where the transfer simply binds and is audited
-    `device.signer_bound`). When it differs, `device.transfer.approve` MUST carry
+    binding, the kept Android signer counting as recorded (0.55.9);
+    `false` when the vault has no recorded signer and none kept: an
+    unbound vault, the staging case below, or an iOS-first vault, where
+    the transfer simply binds and is audited `device.signer_bound`).
+    When it differs, `device.transfer.approve` MUST carry
     `signer` equal to the new app's class; without it the vault
-    answers `signer_unconfirmed`, before it spends the UTK or tries
-    the PIN, and the transfer stays open. The binding moves to the new
+    answers `signer_unconfirmed`, after it has spent the UTK (0.52.0,
+    §3.5.4) and before it tries the PIN (the backoff untouched), and
+    the transfer stays open. The binding moves to the new
     app's signer in the flush that completes the transfer.
     As implemented (0.27.1):
     - **A `signer` that is not the new app's class is
@@ -12322,18 +12357,24 @@ signer binding is the signer recorded for that app's key**.
       the confirmation by class, on that condition.
     - **Across platforms.** When the new app has no signer (Android to
       iOS), `device.transfer.pending` carries neither `signer` nor
-      `signer_changed`, no confirmation is asked, and the binding ends
-      with the transfer, unaudited: the vault has no recorded signer
-      afterwards. When the old app has none (iOS, or an unbound
-      vault) and the new one is an Android app, `signer_changed` is
-      `false` and the transfer binds, audited `device.signer_bound`.
-      What that means for a later transfer back to Android is decided
-      below ("Across an iOS app").
+      `signer_changed`, no confirmation is asked, and the transfer is
+      unaudited as a signer event; (0.55.9) the vault keeps the Android
+      signer it had ("Across an iOS app" below), and keeps it across
+      a move from one iOS app to another. When the old app has none
+      (iOS) and the new one is an Android app, the kept signer decides:
+      another signer is `signer_changed: true`, confirmed and audited
+      `device.signer_changed`; the same signer is `signer_changed:
+      false` and binds, audited `device.signer_bound`; with nothing
+      kept (an iOS-first or unbound vault), `signer_changed` is `false`
+      and the transfer binds, audited `device.signer_bound`.
   - **Recovery** (§11.11). The registered key records its own signer
     at register; the vault's binding does not move then. It moves when
     `credential.recover` succeeds and the old app is removed
     (§11.11.5). A recovery that is cancelled, expires or is voided
-    leaves the binding as it was.
+    leaves the binding as it was. (0.55.9) The same rules as for a
+    transfer apply, with the kept signer, in release R's recovery open
+    and in the recovered phone's pairing, and in a recovery open that
+    is resumed after a state write failed.
   - In both, when the digest changed, the vault audits
     `device.signer_changed` (`device_id` = the new app, `ref` =
     `<old class>:<new class>`, for example `vettid:google_play`) and
@@ -12417,7 +12458,12 @@ refused as before 0.27.0: its attestation fails (§6.7.1 step 2,
 it: they are refused at the release, including at the confirming
 unlock of a move into it (§11.10.4), until the member transfers or
 recovers to an app with a pinned signer (a release that still pins the
-old signer accepts the unlock as long as it lives). Removing a signer
+old signer accepts the unlock as long as it lives). A **kept** signer
+(0.55.9) that the running release no longer pins strands nothing: it
+is never checked at unlock, so an iOS app is not refused because of
+it, and a later return to Android is `signer_changed` with the kept
+class (the new app's digest must be pinned, so it cannot equal the
+unpinned kept one). Removing a signer
 is therefore a decision of the same weight as retiring a release, with
 the same notice (VAULT-RELEASES §3.4 C6); adding one changes nothing for
 existing vaults.
@@ -12526,26 +12572,39 @@ of it.
 **iOS.** The rule is Android-only for now. An iOS release pins one App
 ID (team and bundle), there is one distribution path, and App Attest
 reports no signing certificate; an iOS binding has no `signer` and
-`device.list` carries none. If a second iOS path were ever pinned (a
+`device.list` carries none (the kept Android signer, below, is not
+shown either). If a second iOS path were ever pinned (a
 second App ID), the release configuration would list the App IDs with
 classes as it lists Android signers, the binding would record the App
 ID attested, and every rule above would apply with "App ID" for
 "signer digest".
 
-(0.27.1) **Across an iOS app.** As implemented, the vault's
-binding is the signer recorded for its one app's key, so a transfer
-(or a recovery) to an iOS app leaves the vault with no recorded
-signer. A later transfer back to an Android app of any pinned signer
-then needs no confirmation and is audited `device.signer_bound`, not
-`device.signer_changed`: the change of signer that §11.7.1 exists to
-show passes unseen if an iOS app was in between. No iOS app exists, so
-nothing can reach this today. **Decided (owner, 2026-10-11, as
-recommended; not yet implemented):** before the first release that
-accepts an iOS app, the vault keeps the last recorded Android signer
-across an app without one, and a transfer or recovery to an Android
-app with another signer is then `signer_changed`, confirmed and
-audited as between two Android apps. It is a vault change to make
-before iOS; nothing changes for S10 or production release 1.
+(0.27.1) **Across an iOS app.** (Owner decision, 2026-10-11; built
+in vettid-vault #142, 0.55.9; (q1) and (q2) approved 2026-10-23.) The
+vault keeps the last recorded Android signer (digest and class) while
+its app has none, also across a move from one iOS app to another, and
+clears it when the binding moves to an Android app. The vault's
+signer binding is the app's recorded signer, or the kept signer while
+the app has none, and the kept signer counts as recorded for
+`signer_changed`.
+
+- Android S1, iOS, Android S2 is `signer_changed: true`: an approval
+  without `signer`, or with the wrong class, is `signer_unconfirmed`
+  (the UTK spent first, the PIN backoff untouched, 0.52.0 §3.5.4);
+  confirmed, it is audited `device.signer_changed` and creates the
+  high-priority feed item, as between two Android apps.
+- **The same signer as the kept one** (q1): `device.signer_bound`,
+  with no confirmation and no `signer_changed`.
+- An iOS-first or unbound vault: its first Android app is
+  `device.signer_bound`, as before.
+- A recovery (release R's open, a `credential.recover`, and the
+  recovered phone's pairing) follows the same rules, a resumed
+  recovery open included.
+- A kept signer the running release no longer pins is never checked
+  at unlock; see "A release that stops pinning a signer".
+- `device.list` does not show the kept signer; the audit entry and
+  the feed item carry classes, never digests.
+- A kept signer of no known class is stored with the class `unknown`.
 
 **Tests required.**
 
@@ -12571,6 +12630,20 @@ before iOS; nothing changes for S10 or production release 1.
   transfer completes, the binding is the new signer, and
   `device.signer_changed` is audited with both classes and in the
   feed. To an unpinned signer: dropped as today.
+- (0.55.9) VA4: Android, then iOS: the signer is kept, nothing is
+  audited, `device.list` shows no `signer` on the iOS entry. Back to
+  another pinned signer: `signer_changed: true`, `signer_unconfirmed`
+  without `signer` and with the wrong class (UTK spent, PIN backoff
+  untouched), then `device.signer_changed` and the feed item. Back to
+  the same signer: `device.signer_bound`, no confirmation, no
+  `signer_changed`. iOS to iOS keeps it. An iOS-first vault: the first
+  Android app is `device.signer_bound`. A kept signer the release does
+  not pin: unlock still succeeds for the iOS app, and the later
+  return is `signer_changed` with the kept class. The same through a
+  recovery (`credential.recover` and the recovered phone's pairing),
+  including a resumed recovery open for Android to another signer,
+  Android to iOS and iOS (kept) to another signer. A state without
+  `kept_signer` loads unchanged; an empty value is not written.
 - Recovery to another pinned signer: the binding is unchanged after
   register, after a cancel and after an expiry; changed, audited and
   in the feed after `credential.recover`; the old app's key no longer
@@ -20189,7 +20262,7 @@ Follow-ups:
     The binding across an iOS app (§11.7.1, "Across an iOS app"): the
     vault will keep the last recorded Android signer when its app has
     none, so that a return to Android under another signer is
-    confirmed and audited as a change; decided, not yet implemented,
+    confirmed and audited as a change; decided, built in 0.55.9 (vettid-vault #142),
     a vault change before the first release that accepts an iOS app,
     nothing for S10 or production release 1. A vault attached while
     its phone's certificates were valid keeps unlocking after they
@@ -21086,7 +21159,7 @@ VAULT-HOST-PROTOCOL §8.1 counter object names                   (recovery.json)
     replaced by what was run at S10 on 2026-10-11.
   - §11.7.1, §15 item 35: owner decisions of 2026-10-11, as
     recommended. The binding across an iOS app: the vault will keep
-    the last recorded Android signer (decided; not yet implemented).
+    the last recorded Android signer (decided; built in 0.55.9).
     Kept as built: unlocking after the certificates expire; the order
     of `signer_refused` with its consequences; confirmation by class.
   - §11.10.8: the release check's rule 2 as built (the highest lower
