@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.55.6
+version: 0.55.8
 date: 2026-10-23
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -27,7 +27,7 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.55.6: editorial; one new device rule: `keySize` exactly 128 or
+  - 0.55.8: editorial; one new device rule: `keySize` exactly 128 or
     256 (§10.10 "Media suites"); library facts confirmed on two phones
     (2026-10-23; vettid-android #175; CALLING-SERVICE 0.2.2, CALLS-PLAN
     0.1.5), awaiting the owner's approval; no protocol change. §10.10

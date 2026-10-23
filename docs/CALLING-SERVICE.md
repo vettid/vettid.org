@@ -51,7 +51,7 @@ changelog:
   - 0.2.2 (2026-10-23): editorial, awaiting the owner's approval. §6
     point 2: the media stack can do suite 2 (AES-256-GCM) since
     150.7871.04, confirmed on two phones; it is offered only once
-    form 1 is retired (VAULT-MESSAGING 0.55.6, §10.10 "Mixed releases")
+    form 1 is retired (VAULT-MESSAGING 0.55.8, §10.10 "Mixed releases")
 classification: public (no secrets; safe for github.com/vettid)
 review-cycle: 6 months or upon WebRTC PQC / AWS milestone, whichever first
 ---

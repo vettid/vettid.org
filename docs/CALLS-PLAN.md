@@ -63,7 +63,7 @@ changelog:
     media stack is `150.7871.04` (it carries the 256-bit key option,
     upstream PR #302; confirmed on two phones 2026-10-23, vettid-android
     #175). §6 (A), §12.2 and §12.3 say so; suite 2 is still not offered
-    in form 1 (VAULT-MESSAGING 0.55.6)
+    in form 1 (VAULT-MESSAGING 0.55.8)
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
