@@ -1,7 +1,7 @@
 ---
 title: CALLS-PLAN
 status: approved by the owner 2026-10-11 (D1–D11 as recommended; D1 with the owner's position of §3.1) and 2026-10-12 (§13, D12–D26 as recommended; D23 as (c))
-version: 0.1.5
+version: 0.1.6
 date: 2026-10-23
 owner: Al Liebl (Mesmer)
 related:
@@ -10,7 +10,7 @@ related:
   - VAULT-MESSAGING.md (0.28.0) §10.10 calls, §7.3, §8.5, §10.4.1, §11.10.8; (0.38.0) §14.2 trigger 5, the call wake (V4)
   - RELAY-PROTOCOL.md (0.7.1) §6.2–§6.4, §7.2 (rewritten in 0.7.0: limits per key)
   - PUSH-GATEWAY.md (0.4.4) §6, §14.2 item 13; (0.5.1) §8
-  - ANDROID-PLAN.md (0.1.37) §4 Notification modes, §5, §6
+  - ANDROID-PLAN.md (0.1.37; 0.1.71 "Sounds") §4 Notification modes, §5, §6
   - VAULT-RELEASES.md (0.1.19) §5.2 `calls_url`, §8.4 egress
   - vettid-android #123 (the C0 spike, not for merge) and its docs/calls/C0-FRAME-FORMAT.md
 changelog:
@@ -64,6 +64,12 @@ changelog:
     upstream PR #302; confirmed on two phones 2026-10-23, vettid-android
     #175). §6 (A), §12.2 and §12.3 say so; suite 2 is still not offered
     in form 1 (VAULT-MESSAGING 0.55.8)
+  - 0.1.6 (2026-10-23): editorial (ANDROID-PLAN 0.1.71 "Sounds",
+    approved by the owner 2026-10-23). §6 (A) Service and ringing: the
+    ringing notification is on the `calls_v2` channel (the id changed
+    once, before production release 1), whose sound is `vettid_ringtone`
+    with `USAGE_NOTIFICATION_RINGTONE`, looped with `FLAG_INSISTENT`
+    while it rings
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -256,7 +262,7 @@ support on the test phones not established).
 | Topic | Proposal |
 |---|---|
 | Permissions | `RECORD_AUDIO`; `CAMERA` (already declared for QR scanning); `BLUETOOTH_CONNECT`; `MODIFY_AUDIO_SETTINGS`; `FOREGROUND_SERVICE_PHONE_CALL` with `MANAGE_OWN_CALLS` (Android requires the latter, or the dialer role, for the `phoneCall` service type); `USE_FULL_SCREEN_INTENT` |
-| Service and ringing | A `CallService` foreground service of type `phoneCall` for the life of a call; ringing as a `CallStyle` notification on the existing `calls` channel, full screen when the phone is locked |
+| Service and ringing | A `CallService` foreground service of type `phoneCall` for the life of a call; ringing as a `CallStyle` notification on the `calls_v2` channel (ANDROID-PLAN 0.1.71 "Sounds"), whose sound is `vettid_ringtone` with `USAGE_NOTIFICATION_RINGTONE`, looping via `FLAG_INSISTENT` while it rings; full screen when the phone is locked |
 | Telecom | **Yes**, as a self-managed call through Jetpack `androidx.core:core-telecom` (part of Android, no Google services): VettID calls then behave beside mobile calls (hold, busy), Bluetooth and car buttons work, and the `phoneCall` rule is met |
 | Audio routing | Earpiece, speaker, wired, Bluetooth through `AudioManager.setCommunicationDevice` (minimum SDK is 31, so only the current API); proximity sensor at the ear |
 | Play | A declaration and a video per foreground service type. Since Android 14 the full-screen intent is granted by default only to apps whose main purpose is calling or alarms, so VettID may have to ask the member for it (to be confirmed at submission); without it the call rings as a banner |
