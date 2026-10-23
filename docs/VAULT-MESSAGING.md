@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.55.5
-date: 2026-10-22
+version: 0.55.7
+date: 2026-10-23
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -27,6 +27,19 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.55.7: editorial; **approved by the owner (2026-10-23)** (from the
+    independent review of the iOS app's share-question handling; the
+    Android app had the same three differences). §10.12 "Listing
+    pending decisions": new "Share questions that change while the app
+    reads the lists" (apps MUST): (1) a decision drops an item of a
+    `share.pending` batch only if it was made after that batch arrived;
+    (2) a question the read covers but does not list keeps only the
+    items of the batches that arrived after the read began, and goes
+    when none are left; (3) a question dropped on `not_found` also
+    loses its logged batches. Recorded as open, not a rule: two
+    overlapping reads that finish out of order. Numbered after 0.55.6
+    (open PR #400), renumbers if that one merges after this;
+    ANDROID-PLAN, IOS-PLAN unchanged
   - 0.55.5: editorial; **approved by the owner (2026-10-22)**
     (ANDROID-PLAN 0.1.70, IOS-PLAN 0.1.28). §10.7 "Canonical forms",
     `date`: a month field (a stored `YYYY-MM`, or a new or empty field
@@ -9841,7 +9854,7 @@ other.
   `reason` is `rule` when a rule was created or replaced, `tagged` when
   items changed. It is also a feed item (`share.pending`, `ref` =
   `rule_id`). `share.decide` decides the listed pending items of the rule
-  (1–500; items not pending are ignored; none pending is `bad_request`).
+  (1–500; items not pending are ignored; none pending is `bad_request`; `not_found` when the rule no longer exists).
 - **Deciding several items at once (0.21.0; owner decision of
   2026-10-08, §15 item 29).** `share.decide{rule_id, include, decline}`
   includes some of the rule's pending items and declines others in
@@ -9870,6 +9883,53 @@ other.
   list, so that a decision another device left open, or whose
   `share.pending` it missed, is still asked; it does not need to
   resolve the `pending` ids of `share.rule.list` itself.
+- **Share questions that change while the app reads the lists (0.55.7;
+  owner decision of 2026-10-23).** The vault answers
+  `share.pending.list` and `share.rule.list` as of when it looked, so
+  during a read the app may decide items or receive a `share.pending`
+  batch that the answer does not show. Both apps MUST handle it the
+  same way. Here a **question** is one rule's pending items
+  (`rule_id`), as `share.pending` batches carry them. A **read** is
+  every page of `share.pending.list` and `share.rule.list` without
+  `rule_id`, `connection_id` or `agent_id`; it begins when the app
+  sends its first request and covers every rule. A read the vault did
+  not answer covers nothing. For a question the read lists, the result
+  is the read's entries, minus the items decided during the read, plus
+  the items of the `share.pending` batches that arrived after the read
+  began (rule 1 says which of those a decision drops). Items the app
+  knew of from before the read began, and that the read does not list,
+  are not kept. While any read is on its way the app notes each
+  decision (its rule, subject and item ids) and each batch (its
+  question and items). A decision counts as made when the app receives
+  the vault's answer to it: its `share.decide` response, or a
+  `sync.event{share.decided}` from another device. Batches and
+  decisions are ordered as the app receives them. An app MAY bound
+  what it notes (iOS: 64 decisions and 64 batches); past the bound, a
+  read on its way may show a decided item again, or miss a batch's
+  item, until the next read. The rules:
+  1. **Decision against batch order.** An item of a `share.pending`
+     batch is dropped by a decision about that item for the same
+     subject (any rule of the subject), as the `included` and
+     `declined` of the response or of `sync.event{share.decided}` name
+     it, made **after** that batch arrived. A batch that asks about an
+     item again after it was decided keeps that item: it is a new
+     question. A withdrawal is not a decision: a withdrawn item asked
+     again by a new batch stays.
+  2. **A question the read covers but does not list.** When the read's
+     lists have no entry for a question (its only item was withdrawn,
+     say) and a batch reached that question during the read, the app
+     keeps only the items of the batches that arrived **after the read
+     began**, minus those a later decision dropped under rule 1, and
+     drops the question if none are left. Items the app had from
+     batches before the read began never come back.
+  3. **`not_found` on a decision.** When the app drops a question
+     because the vault answered `not_found` to its decision, it also
+     forgets that question's noted batches, so that an earlier
+     batch's item does not come back through rule 2. (Only
+     `not_found`: owner decision of 2026-10-23.)
+  - **Open (no owner decision yet; not a rule).** When two reads
+    overlap and the one that began first finishes last, its list
+    replaces the newer one's until the next read.
 - Removing or blocking a connection, or unlinking an agent, deletes its
   rules (§7.4).
 - **Change notices.** `sync.event` `share.rule.changed` (`rule_id`,
