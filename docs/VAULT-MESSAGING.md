@@ -56,8 +56,8 @@ changelog:
     items of the batches that arrived after the read began, and goes
     when none are left; (3) a question dropped on `not_found` also
     loses its logged batches. Recorded as open, not a rule: two
-    overlapping reads that finish out of order. Numbered after 0.55.6
-    (open PR #400), renumbers if that one merges after this;
+    overlapping reads that finish out of order. 0.55.6 was not used:
+    PR #400 became 0.55.8;
     ANDROID-PLAN, IOS-PLAN unchanged
   - 0.55.5: editorial; **approved by the owner (2026-10-22)**
     (ANDROID-PLAN 0.1.70, IOS-PLAN 0.1.28). §10.7 "Canonical forms",
