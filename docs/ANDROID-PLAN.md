@@ -2042,7 +2042,7 @@ vault without it, part 1 applies unchanged.
 
 ### Staging time scale (0.1.44)
 
-*For the owner's approval (STAGING-TIME-SCALE §5.2; VAULT-MESSAGING
+*Approved by the owner 2026-10-18 (0.1.44; STAGING-TIME-SCALE §5.2; VAULT-MESSAGING
 0.43.0 §11.10.8, §11.10.9). Built (status as of 2026-10-23):
 vettid-android #145, #146, #153 and #154.*
 
@@ -5324,7 +5324,7 @@ signer (§7).
 | A4 | Connections, messages, approvals | Invite/QR connect, SAS, messages both ways, approvals | Done: #51 |
 | A5 | Items (data, secret, critical), tags, share rules, grants and critical-item approvals | Flows against the dev stack and a second vault | Done: #78 (A5a items), #79 (A5b tags and sharing), #80 (A5c grants and approvals); later fixes #89 to #96 and #171 to #176 |
 | A6 | Hardening and polish: accessibility pass, notifications (0.1.23: the Notifications screen and N1 below), offline behaviour, error states, Play pre-launch report | Internal testing track build | Partly: the audit (#117) and its fixes (#119 to #122, #127), the privacy settings (#120); the notifications screen (#99); the accessibility pass, offline behaviour and the Play pre-launch report are not recorded as done |
-| N1–N4 | 0.1.23, notification modes (§4 Notification modes, 10): N1 app (setting, channels, on-phone service, FCM stubbed); N2 spec (`push.register`); N3 vault (push ops, wakes); N4 gateway with FCM credentials, then FCM on | N1: notifications in the background on both test phones without Google; N4: FCM wakes on the Pixel 7 | N1 done (#99, #100, #105). N2 is the specification (PUSH-GATEWAY, VAULT-MESSAGING §14). N3 done on the vault (vettid-vault push, merged 2026-10-10; wakes in staging release S9). N4: the app's Google push mode is built (#109, #111, #112, #129) and the staging gateway has been deployed since 2026-10-11, but no platform is enabled yet (it waits for Firebase and APNs credentials) |
+| N1–N4 | 0.1.23, notification modes (§4 Notification modes, 10): N1 app (setting, channels, on-phone service, FCM stubbed); N2 spec (`push.register`); N3 vault (push ops, wakes); N4 gateway with FCM credentials, then FCM on | N1: notifications in the background on both test phones without Google; N4: FCM wakes on the Pixel 7 | N1 done (#99, #100, #105). N2 is the specification (PUSH-GATEWAY, VAULT-MESSAGING §14). N3 done on the vault (vettid-vault #59, merged 2026-10-10; wakes in staging release S9). N4: the app's Google push mode is built (#109, #111, #112, #129) and the staging gateway has been deployed since 2026-10-11, but no platform is enabled yet (it waits for Firebase and APNs credentials) |
 
 Status (2026-10-23), after v1: **calls** C1 is partly built (#124 to
 #126, #175, #178 merged; #128, the call screens, open since

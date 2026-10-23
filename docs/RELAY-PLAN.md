@@ -28,7 +28,7 @@ text itself is kept as written.
 | 1. Protocol specification | Done (RELAY-PROTOCOL; vettid-relay #1, #3, #5, #6, #12, #17 are protocol versions) |
 | 2. Repository and scaffold | Done |
 | 3. Auth middleware | Done (vettid-relay #1, #2: open tokens, claims, sender; `relayauth` and `relayclient` packages) |
-| 4. Handlers and sweeper | Done, with later limits and the blob store (#8 to #14) |
+| 4. Handlers and sweeper | Done, with later limits and the blob store (#8 to #14; the rate limits per key #8, session limits #9, byte budgets #10 and #14, the errata #13) |
 | 5. Changes elsewhere | Notes only; carried out in the repositories named above |
 
 ---

@@ -791,7 +791,7 @@ as an issue in vettid-agent, opened in A0.1.
 **Status (as of 2026-10-23).** A0 to A3 (except A3.5 and A3.7 to A3.9)
 and A5 are built in vettid-agent (pull requests #7 to #40, merged
 2026-10-17 to 2026-10-20). A3.5 and A3.7 to A3.9 wait for the vault
-items AV7 and AV9 to AV11 in a staging release. A4 is v1.1 and not
+items AV7 and AV9 to AV11 (not built in vettid-vault) in a staging release. A4 is v1.1 and not
 started. A6 waits for the Android section "Devices & agents" (AA1 to
 AA5), which is specified and approved but not built in the app
 (ANDROID-PLAN §6). The plan's header status stays "draft": the plan does not say

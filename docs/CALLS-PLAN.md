@@ -74,7 +74,7 @@ changelog:
     notification on `calls_v2` is silent
   - 0.1.7 (2026-10-23): editorial (status as of 2026-10-23); no rule
     changes. §1 table, §7 phase table (new status column) and §13 say
-    what is built (vettid-calls #1 to #3; C1 partly in vettid-android) and
+    what is built (vettid-calls `main`; C1 partly in vettid-android) and
     what is not
 classification: public (no secrets; safe for github.com/vettid)
 ---
@@ -94,10 +94,10 @@ listed in §6.6. The owner's choices are in §9.
 | Signalling spec | Written: seven `call.*` types, signed key shares, vault-signed ICE configuration | VAULT-MESSAGING §10.10 |
 | Vault signalling | **Built and tested**, in every staging image (`calls` is on in S10, off in `prod.json`) | vettid-vault `features/calls`, `vms/callwire`, `features/all/all.go`, `enclave/releasecfg/*.json` |
 | TURN credentials in the vault | The coturn issuer exists but **is not wired**: release builds pass no issuer, so every ICE configuration has an empty server list (no TURN, no STUN) | `cmd/vault-enclave/release.go:102`; `calls.NoServers` |
-| Calling service (TURN) | **Specified. The code is built (status 2026-10-23): vettid-calls (the issuer, the coturn image with `turn-agent`, `callsctl`; PRs #1 to #3, 2026-10-17 to 2026-10-20). No stack is deployed** | CALLING-SERVICE 0.1.1 |
+| Calling service (TURN) | **Specified. The code is built (status 2026-10-23): vettid-calls `main` (the issuer, the coturn image with `turn-agent`, `callsctl`; committed 2026-10-17, follow-ups #1 to #3 to 2026-10-20). No stack is deployed** | CALLING-SERVICE 0.1.1 |
 | Relay | Nothing call-specific, and none needed (§6.2) | vettid-relay |
 | Push wake for a ringing call | **Not built** (status 2026-10-23: no vault pull request since #67 touches it): call signalling wakes nothing | VAULT-MESSAGING §14.2; `vault/push.go` `wakeClass` |
-| Android app | **(Written 2026-10-12; status 2026-10-23: C1's signalling, media engine, state machine, audio and controller are merged, vettid-android #124 to #126, #175, #178; the call screens, #128, are open and conflict with master.)** Only the `calls_v2` and `missed_calls_v2` notification channels and the "Missed call from …" text exist | ANDROID-PLAN §4; `:core:notify` |
+| Android app | **(Status 2026-10-23: C1's signalling, media engine, state machine, audio and controller are merged, vettid-android #124 to #126, #175, #178; the call screens, #128, are open and conflict with master.)** On 2026-10-12, only the `calls_v2` and `missed_calls_v2` notification channels and the "Missed call from …" text exist | ANDROID-PLAN §4; `:core:notify` |
 | Old implementations (reference only) | Old Android app (tag `legacy-v1-final`): `features/calling/*` on the prebuilt `io.getstream:stream-webrtc-android:1.3.10`, frame encryption through its `FrameCryptor`. Old iOS: `Features/Calling` with CallKit and PushKit. Old desktop: Rust `webrtc` 0.17 behind a feature flag. Old backend (vettid-dev): coturn on EC2 with Elastic IPs (`cdk/lib/turn-stack.ts`). None works with today's vault | the archived repositories |
 
 Two facts shape everything below. **A locked vault cannot be called**: it
@@ -496,7 +496,7 @@ days of implementation and review, as ranges; owner testing is extra.
 |---|---|---|---|---|---|
 | C0 | Spike (§4): library in the `foss` flavour, audio between two phones on one Wi-Fi with hard-coded signalling, frame encryption, Telecom (0.1.2: done except Telecom, which moves to C3; results in §12.1) | The five proofs of §4, written up; the owner confirms D2 | Nothing deployed | 5–8 | Partly: the spike and its results are written up (§12.1; vettid-android #123, not for merge). The F-Droid (`foss`) scanner and build check and the build on a second machine have never run |
 | C1 | Voice calls through two staging vaults, app open, same network (the vault gives no servers yet) | Pixel 10 Pro ↔ Pixel 7 on S10: call, ring-back, answer, hang up, decline, busy, no answer; time from tap to ring measured 20 times | **No vault release** (S10 as it is) | 12–18 | Partly: #124 to #126 (signalling, engine, state machine, audio, controller), #175 (media stack 150.7871.04, suite 2 in the engine) and #178 (a refused `setKeys` ends the call) are merged. #128 (the call screens) has been open since 2026-10-12 and has 6 conflicts with master. The two-phone exit test has not been run |
-| C2 | The calling service on staging; vault fixes V1–V3, V5, V6, V8; 0.1.3: also the media suites as signed members and key confirmation (§12.3), detailed in §13 | The same calls with one phone on mobile data and one on Wi-Fi; app killed mid-call frees both vaults within 2 minutes; glare connects one call (0.1.3: in measurable steps, §13.4) | New service and stack; **a vault release**; host stack deploy (egress) | 12–20 (0.1.3: 14–22, for the added scope, §13.6) | The service only: vettid-calls #1 to #3 (issuer, coturn image, `turn-agent`, `callsctl`). No stack deployed; no vault work (V1 to V8, signed suites, release C2) and no app work (§13.2) |
+| C2 | The calling service on staging; vault fixes V1–V3, V5, V6, V8; 0.1.3: also the media suites as signed members and key confirmation (§12.3), detailed in §13 | The same calls with one phone on mobile data and one on Wi-Fi; app killed mid-call frees both vaults within 2 minutes; glare connects one call (0.1.3: in measurable steps, §13.4) | New service and stack; **a vault release**; host stack deploy (egress) | 12–20 (0.1.3: 14–22, for the added scope, §13.6) | The service only: vettid-calls `main` (the issuer, the coturn image with `turn-agent`, `callsctl`; committed 2026-10-17, follow-ups #1 to #3 to 2026-10-20). No stack deployed; no vault work (V1 to V8, signed suites, release C2) and no app work (§13.2) |
 | C3 | Ringing with the app closed; 0.1.2: Telecom (`core-telecom`, the `phoneCall` service, `CallStyle`, answering from a notification) and its proof on GrapheneOS and stock, moved here from C0 and C1 (§12.6) | On-phone service: rings within 2 s on both kinds of phone, screen off, including after a reboot; behaviour in Doze recorded. Google push on the Pixel 7 once Firebase exists (does not block the phase); *0.1.4:* including a call that rings within 2 s of another wake of the same phone (the gateway answers that wake without a second push, PUSH-GATEWAY §5.2 step 4; the app woken by the first push must still find the offer) | **A vault release** for V4 (can ride with C2's) | 6–10 | Not started |
 | C4 | Video: camera, switching cameras, adding video to a voice call, network change (V7) | Video both ways for 10 minutes; walk from Wi-Fi to mobile data without the call dropping | A vault release (V7) | 8–14 | Not started |
 | C5 | The TURN fallback and hostile networks | A call from a network allowing only TCP 443; a call with relay forced on one side and on both (debug option; both on one TURN server: the old backend ran two servers because this case failed there); **the share of calls that needed TURN, counted over at least 50 real calls on mobile data and home networks** (the app records direct or relayed per call, locally) and written into this plan | App only (0.1.3: and a stack deploy for TURN over TLS on 443, which D18 puts here) | 4–7 | Not started |
@@ -746,9 +746,9 @@ so that C2 can begin as soon as C1's two-phone test passes. This
 section is that design at the level of the plan. The specifications are
 CALLING-SERVICE 0.2.0 and VAULT-MESSAGING 0.28.0 §10.10. The owner
 approved it on 2026-10-12 with the decisions of §13.5. Status as of
-2026-10-23: of the work in §13.2 only the vettid-calls repository (the
-issuer, the coturn image with `turn-agent`, `callsctl`; its pull
-requests #1 to #3, 2026-10-17 to 2026-10-20) is built. No stack is
+2026-10-23: of the work in §13.2 only the vettid-calls repository (`main`: the
+issuer, the coturn image with `turn-agent`, `callsctl`; committed
+2026-10-17, follow-ups #1 to #3 to 2026-10-20) is built. No stack is
 deployed, and there is no vault work and no app work for C2.
 
 State when written: C1's first three pull requests are merged
