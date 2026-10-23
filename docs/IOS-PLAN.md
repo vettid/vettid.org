@@ -11,7 +11,9 @@ changelog:
     the app re-reads its transfer record after the check's await and
     records "kept, not done" only if the write succeeded; the new
     iPhone waits 11 minutes for the approval. §14: the text
-    `data_transfer_signer_body_iphone`
+    `data_transfer_signer_body_iphone`; before it sends the approval the
+    old iPhone renews the vault's standing token for its own mailbox
+    (`relay.token.issued`, VAULT-MESSAGING §11.14.10)
   - 0.1.30: editorial; VAULT-MESSAGING 0.55.9, two decisions approved
     by the owner (2026-10-23). §9.1 VA4 is built (vettid-vault #142):
     the vault keeps the last Android signer in its DEK-encrypted state
@@ -1792,7 +1794,7 @@ exchange messages and photos both ways, and approve each other's asks.
 |---|---|---|---|---|
 | I3.1 | Items: data, secret and critical; templates; tags; TOTP | §10.7, §10.8; VAULT-ITEMS | `feature/items/*`, `core/data/…/items/*` | Critical items need the password; values in the secure container; (0.1.23) the item editor too, inside the `SecureContainer` like the item screen: screenshots and recording of it are blocked unless "Allow screenshots" is on (§6.4); typing, the keyboard and VoiceOver work inside the container (checked on the iPhone) |
 | I3.2 | Share rules, grants, critical-item use by a connection | §10.12, §10.13 | `feature/items/RuleEditScreen.kt`, `SharingScreens.kt`, `core/data/…/items/Sharing*.kt` | Rules against a second vault |
-| I3.3 | Transfer out and in: QR and pasted code, Finish the move, the old phone keeping its keys until confirmed (after 7 days, until its vault answers), the new phone's 11 minutes, the signer-class texts across platforms | §6.7.1, §11.7.1 ("Across an iOS app"), §11.14.10 | `feature/settings/TransferOut*.kt`, `feature/onboarding/MoveScreens.kt`, `TransferInViewModel.kt`, `FinishMove.kt`, `core/data/…/FinishMoveRunner.kt` | iPhone → Android → iPhone on staging; the old phone erases itself on confirmation |
+| I3.3 | Transfer out and in: QR and pasted code, Finish the move, the old phone keeping its keys until confirmed (after 7 days, until its vault answers), the new phone's 11 minutes, the old phone's token renewal before the approval, the signer-class texts across platforms | §6.7.1, §11.7.1 ("Across an iOS app"), §11.14.10 | `feature/settings/TransferOut*.kt`, `feature/onboarding/MoveScreens.kt`, `TransferInViewModel.kt`, `FinishMove.kt`, `core/data/…/FinishMoveRunner.kt` | iPhone → Android → iPhone on staging; the old phone erases itself on confirmation |
 | I3.4 | Recovery: scan or type the code, claim, register, the one screen for PIN and password, the answers, the wait | §11.11, §11.11.10, §11.14.3–§11.14.6, §11.14.11 | `feature/onboarding/RecoverTypeScreen.kt`, `RecoverViewModel.kt`, `RecoveryOpen.kt`, `feature/settings/RecoveryStatusText.kt` | A recovery on staging onto a second iPhone; typed and scanned entries make equal requests |
 
 **Exit I3**: the flows above on staging, with History entries equal to

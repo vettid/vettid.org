@@ -27,7 +27,7 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.55.10: normative once approved; **decisions approved by the owner
+  - 0.55.10: **decisions approved by the owner
     (2026-10-23)** (five: the three below, the notice's reliability and
     the waiting notice's text), found in the iOS review (claude-mac) and
     the independent review; ANDROID-PLAN 0.1.72, IOS-PLAN 0.1.31,
@@ -17133,9 +17133,16 @@ first.**
   transfer's `dek_version` and (0.55.10) the old session's sending key,
   so that it can seal the notice when it delivers it. **Before it sends
   the approval the old app renews the standing token it issued to the
-  vault for its own mailbox** (the existing re-mint, §6.6 and §7.1; no
-  new token class), so that the token has its full 30 days from the
-  approval; the pending unlink keeps the newest token.
+  vault for its own mailbox** (`relay.token.issued{kind: "standing", token}`, §7.1, §7.2; no new
+  token class and no new message). It deposits that message to the
+  vault's mailbox and waits for the relay's `201` before it deposits the
+  approval, so that the vault, which takes its mailbox in arrival order
+  (§8, §8.3), stores the fresh token before it processes the approval;
+  it SHOULD NOT denylist the previous token's `jti` before the approval
+  is answered. It renews again before each approval it sends (after
+  `busy` or `retry` too). The token then has its full lifetime, at most
+  30 days, from the approval; the pending unlink keeps the newest
+  token.
 - **`device.unlinked{reason: "transferred", transfer_id}`** is deposited
   to the old app only after the vault's then current app has completed
   its **first successful unlock from the stored objects under that
@@ -17148,8 +17155,11 @@ first.**
   30 days after the approval, whatever the pending unlink's age. The
   notice is sealed **at delivery**, with the old session's sending key
   the vault kept, and not at the approval, so that §8.4's 16-day `ts`
-  rule does not cut it short. So the notice is deliverable for 30 days
-  after the move, and normally goes out minutes after it ("Finish the
+  rule does not cut it short. So the vault can deposit the notice for up
+  to 30 days after the move; once deposited it waits in the old phone's
+  mailbox for the relay's 14 days (`message_ttl_seconds`), and an old
+  phone that does not collect it in that time keeps its keys until the
+  member removes VettID, and normally goes out minutes after it ("Finish the
   move"). These are vault changes of release L (staging release 23),
   together with the old app's renewal of the token at the approval.
 - The old app, once its approval was answered `{"unlink":

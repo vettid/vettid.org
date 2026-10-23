@@ -2880,7 +2880,7 @@ both sections above (`pin.change`, `credential.password.change`,
   `busy`: "The service is busy right now. Nothing was moved. Try again
   in a minute." (the transfer stays open). (0.1.72) Before it sends
   the approval the app renews the standing token it issued to the vault
-  for its own mailbox (the existing re-mint), so that the vault's
+  for its own mailbox (`relay.token.issued{kind: "standing"}`, deposited and answered `201` by the relay before the approval is deposited), so that the vault's
   deposit token has its full 30 days from the approval and the vault can
   deliver `device.unlinked{transferred}` for that long (VAULT-MESSAGING
   0.55.10 §11.14.10; vault change of release L, staging release 23).
@@ -2943,7 +2943,8 @@ both sections above (`pin.change`, `credential.password.change`,
   the vault, and past the 30 days the member removes VettID from the old
   phone. Tests: the vault locked on day 7 (no erase, notice shown,
   checked again at the next start); a timeout; a cancelled check; a
-  failed conditional write or a changed generation (nothing recorded, the
+  the renewal is deposited before the approval, and the vault's pending
+  unlink holds the renewed token; a failed conditional write or a changed generation (nothing recorded, the
   check runs again); a `device.list` response with another `re` (no
   answer); a `token_revoked` (one `device.list` per start); a definite
   "no longer the vault's app" (erase); `device.unlinked{transferred}`
