@@ -69,7 +69,9 @@ changelog:
     ringing notification is on the `calls_v2` channel (the id changed
     once, before production release 1), whose sound is `vettid_ringtone`
     with `USAGE_NOTIFICATION_RINGTONE`, looped with `FLAG_INSISTENT`
-    while it rings
+    while it rings; missed calls have their own channel,
+    `missed_calls_v2` (D7; owner decision of 2026-10-23), and every other
+    notification on `calls_v2` is silent
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -91,7 +93,7 @@ listed in §6.6. The owner's choices are in §9.
 | Calling service (TURN) | **Specified, not built.** No repository, no stack | CALLING-SERVICE 0.1.1 |
 | Relay | Nothing call-specific, and none needed (§6.2) | vettid-relay |
 | Push wake for a ringing call | **Not built**: call signalling wakes nothing | VAULT-MESSAGING §14.2; `vault/push.go` `wakeClass` |
-| Android app | **No call code.** Only the `calls` notification channel and the "Missed call from …" text exist | ANDROID-PLAN §4; `:core:notify` |
+| Android app | **No call code.** Only the `calls_v2` and `missed_calls_v2` notification channels and the "Missed call from …" text exist | ANDROID-PLAN §4; `:core:notify` |
 | Old implementations (reference only) | Old Android app (tag `legacy-v1-final`): `features/calling/*` on the prebuilt `io.getstream:stream-webrtc-android:1.3.10`, frame encryption through its `FrameCryptor`. Old iOS: `Features/Calling` with CallKit and PushKit. Old desktop: Rust `webrtc` 0.17 behind a feature flag. Old backend (vettid-dev): coturn on EC2 with Elastic IPs (`cdk/lib/turn-stack.ts`). None works with today's vault | the archived repositories |
 
 Two facts shape everything below. **A locked vault cannot be called**: it
@@ -262,7 +264,7 @@ support on the test phones not established).
 | Topic | Proposal |
 |---|---|
 | Permissions | `RECORD_AUDIO`; `CAMERA` (already declared for QR scanning); `BLUETOOTH_CONNECT`; `MODIFY_AUDIO_SETTINGS`; `FOREGROUND_SERVICE_PHONE_CALL` with `MANAGE_OWN_CALLS` (Android requires the latter, or the dialer role, for the `phoneCall` service type); `USE_FULL_SCREEN_INTENT` |
-| Service and ringing | A `CallService` foreground service of type `phoneCall` for the life of a call; ringing as a `CallStyle` notification on the `calls_v2` channel (ANDROID-PLAN 0.1.71 "Sounds"), whose sound is `vettid_ringtone` with `USAGE_NOTIFICATION_RINGTONE`, looping via `FLAG_INSISTENT` while it rings; full screen when the phone is locked |
+| Service and ringing | A `CallService` foreground service of type `phoneCall` for the life of a call; ringing as a `CallStyle` notification on the `calls_v2` channel (ANDROID-PLAN 0.1.71 "Sounds"), whose sound is `vettid_ringtone` with `USAGE_NOTIFICATION_RINGTONE`, looping via `FLAG_INSISTENT` while it rings (every other notification on `calls_v2`, the ongoing and outgoing call, is posted with `setSilent(true)`, so only ringing plays the ringtone); full screen when the phone is locked |
 | Telecom | **Yes**, as a self-managed call through Jetpack `androidx.core:core-telecom` (part of Android, no Google services): VettID calls then behave beside mobile calls (hold, busy), Bluetooth and car buttons work, and the `phoneCall` rule is met |
 | Audio routing | Earpiece, speaker, wired, Bluetooth through `AudioManager.setCommunicationDevice` (minimum SDK is 31, so only the current API); proximity sensor at the ear |
 | Play | A declaration and a video per foreground service type. Since Android 14 the full-screen intent is granted by default only to apps whose main purpose is calling or alarms, so VettID may have to ask the member for it (to be confirmed at submission); without it the call rings as a banner |
@@ -532,7 +534,7 @@ connections (§3.1).
 | D4 | Who issues TURN credentials | **The calling service, to attested vaults only**; the shared secret never enters a vault. This adds one host name to the vaults' egress list. |
 | D5 | Voice before video | **Yes**: voice is usable from C1–C3; video follows in C4 on the same plumbing. |
 | D6 | Call permission for a new connection | **Allowed**, with "Calls: off" per connection and the limit on unanswered calls. "Ask each time" adds nothing: ringing is the ask. |
-| D7 | Missed calls in the feed with the caller's name | **Yes**, as the app already does ("Missed call from <First Last>"), following the member's "Show in notifications" choice; repeated ones merge into one item with a count. |
+| D7 | Missed calls in the feed with the caller's name | **Yes**, as the app already does ("Missed call from <First Last>"), following the member's "Show in notifications" choice, posted on the `missed_calls_v2` channel with `vettid_message` (owner decision of 2026-10-23); repeated ones merge into one item with a count. |
 | D8 | Ring timeout, and the TURN cost ceiling on staging | **45 s** (as built; the spec allows up to 90). **$30 a month**, with a billing alarm. |
 | D9 | Telecom integration and the full-screen ringing permission | **Yes to both**: calls behave like calls beside mobile calls; if Android does not grant the full-screen permission the call rings as a banner. |
 | D10 | "Busy" tells a connection that the member is on another call | **Keep** (it is what callers expect); the alternative is to answer nothing, as a held vault does. |

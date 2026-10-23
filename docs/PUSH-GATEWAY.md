@@ -900,8 +900,8 @@ The extension, in its ~30 s:
 3. builds the notification with the same Content rules as Android
    (previews: Names by default; Names and message text; Nothing): for
    several new items, one summary ("3 new messages from Sam Lee");
-4. sets locally the sound by category (IOS-PLAN §6.7: `vettid_message.caf`;
-   `vettid_urgent.caf` for approvals, security alarms and the daily
+4. sets locally the sound by category (IOS-PLAN §6.7: `vettid_message.caf`
+   for messages and missed calls; `vettid_urgent.caf` for approvals, security alarms and the daily
    check; `vettid_general.caf` for release and vault notices; none for
    vault activity), `interruptionLevel` (`timeSensitive` for security alarms
    and the daily check, which needs the Time Sensitive Notifications
