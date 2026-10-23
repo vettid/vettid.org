@@ -1,9 +1,17 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.72
+version: 0.1.73
 date: 2026-10-23
 changelog:
+  - 0.1.73: editorial (status as of 2026-10-23); no rule changes. §4
+    "Staging time scale" and "Photo attachments" marked built, "Recovery
+    and unlock from release R" and "Wallet, presence, location and
+    video" marked approved (release R's app side built); §6 gets a status
+    column (A0 to A5, N1 to N4) and a status paragraph, and the order
+    line quotes D8 (wallet, presence, location); §7 and risk 4: the
+    staging gateway is deployed, no platform enabled. "Locking the
+    vault" is not touched
   - 0.1.72: approved by the owner (2026-10-23) (VAULT-MESSAGING 0.55.10,
     §11.14.10). §4 Transfer: the old phone's day-7 check with the vault
     (`device.list`) before it erases; no answer means "not known: check
@@ -2035,7 +2043,8 @@ vault without it, part 1 applies unchanged.
 ### Staging time scale (0.1.44)
 
 *For the owner's approval (STAGING-TIME-SCALE §5.2; VAULT-MESSAGING
-0.43.0 §11.10.8, §11.10.9). Not built.*
+0.43.0 §11.10.8, §11.10.9). Built (status as of 2026-10-23):
+vettid-android #145, #146, #153 and #154.*
 
 - **Learning it.** The app reads `time_scale` from the descriptor of its
   vault's routed instance, with the capabilities, and from a transfer
@@ -2064,7 +2073,8 @@ vault without it, part 1 applies unchanged.
 
 *Approved by the owner 2026-10-15 (vettid.org #288); the app's side
 of VAULT-MESSAGING 0.32.0 §10.5.1, which needs the vault's "release
-A". Not built. The texts are drafts, open to the owner's rewording.*
+A". Built (status as of 2026-10-23): vettid-android #131, #132 and #133.
+The texts are drafts, open to the owner's rewording.*
 
 **Availability.** After each unlock the app sends
 `message.attachment.get{}` once: `unsupported_type` means the vault has
@@ -2264,9 +2274,10 @@ already has the blob calls.
 
 ### Recovery and unlock from release R (0.1.40)
 
-*Wording for the owner's approval, with VAULT-MESSAGING 0.33.0 §11.14.
-For vaults of release R, which is not built; nothing changes for a vault
-of an earlier release. The texts are drafts for the owner's wording.
+*Approved by the owner (2026-10-16 and 2026-10-17, 0.1.40 to 0.1.43),
+with VAULT-MESSAGING 0.33.0 §11.14. The app's side of release R is
+built (status as of 2026-10-23: vettid-android #134 to #143); nothing
+changes for a vault of an earlier release. The texts are drafts for the owner's wording.
 The old phone's keys after a transfer were decided by the owner on
 2026-10-15.*
 
@@ -3270,7 +3281,8 @@ the title, the priority or the channel; titles without a name.
 
 ### Wallet, presence, location and video (0.1.42)
 
-*Wording for the owner's approval. The app's side of VAULT-MESSAGING
+*Approved by the owner (2026-10-17, 0.1.42; the wording stays open to
+the owner's rewording). The app's side of VAULT-MESSAGING
 0.34.0 §10.18 Wallet (with §10.7 critical items), §10.17 Presence and
 §10.16 Location, and of CALLS-PLAN 0.1.3 §4, §6.4 and §7 C4 for video.
 The vault side of the first three is built (vettid-vault `main`,
@@ -5303,23 +5315,32 @@ signer (§7).
 
 ## 6. Phases
 
-| Phase | Contents | Exit |
-|---|---|---|
-| A0 | Spec + this plan approved; old code tagged and moved off `main`; empty multi-module skeleton, CI (build, unit tests, lint, detekt), theme and component gallery screen | CI green; component gallery matches the design language on a phone |
-| A1 | `:core:crypto` + vectors; `:core:keystore`; `:core:attestation` port | All vettid-vault vectors pass (incl. MLKEM768X25519 HPKE interop) |
-| A2 | `:core:relay` + `:core:altchan` + `:core:vault` against a local dev stack (vettid-vault integration stack: relay + parent + dev enclave + member-API stand-in) | Instrumented test enrolls, unlocks, exchanges a message with a `vaultctl` peer |
-| A3 | Onboarding, unlock, credential, settings screens (with the account card, 0.1.11), biometric app lock; History (0.1.11), once the vault release with VAULT-MESSAGING 0.20.0's search is in staging; History export (0.1.17), once a release with 0.22.0's `audit.export` is | Fresh install → enrolled vault with credential on a real phone (dev stack) |
-| A4 | Connections, messages, approvals | Invite/QR connect, SAS, messages both ways, approvals |
-| A5 | Items (data, secret, critical), tags, share rules, grants and critical-item approvals | Flows against the dev stack and a second vault |
-| A6 | Hardening and polish: accessibility pass, notifications (0.1.23: the Notifications screen and N1 below), offline behaviour, error states, Play pre-launch report | Internal testing track build |
-| N1–N4 | 0.1.23, notification modes (§4 Notification modes, 10): N1 app (setting, channels, on-phone service, FCM stubbed); N2 spec (`push.register`); N3 vault (push ops, wakes); N4 gateway with FCM credentials, then FCM on | N1: notifications in the background on both test phones without Google; N4: FCM wakes on the Pixel 7 |
+| Phase | Contents | Exit | Status (2026-10-23) |
+|---|---|---|---|
+| A0 | Spec + this plan approved; old code tagged and moved off `main`; empty multi-module skeleton, CI (build, unit tests, lint, detekt), theme and component gallery screen | CI green; component gallery matches the design language on a phone | Done: vettid-android #46 |
+| A1 | `:core:crypto` + vectors; `:core:keystore`; `:core:attestation` port | All vettid-vault vectors pass (incl. MLKEM768X25519 HPKE interop) | Done: #47 |
+| A2 | `:core:relay` + `:core:altchan` + `:core:vault` against a local dev stack (vettid-vault integration stack: relay + parent + dev enclave + member-API stand-in) | Instrumented test enrolls, unlocks, exchanges a message with a `vaultctl` peer | Done: #48 |
+| A3 | Onboarding, unlock, credential, settings screens (with the account card, 0.1.11), biometric app lock; History (0.1.11), once the vault release with VAULT-MESSAGING 0.20.0's search is in staging; History export (0.1.17), once a release with 0.22.0's `audit.export` is | Fresh install → enrolled vault with credential on a real phone (dev stack) | Done: #49, with the account card, History and the export (#77, #88, #92, #97, #98) |
+| A4 | Connections, messages, approvals | Invite/QR connect, SAS, messages both ways, approvals | Done: #51 |
+| A5 | Items (data, secret, critical), tags, share rules, grants and critical-item approvals | Flows against the dev stack and a second vault | Done: #78 (A5a items), #79 (A5b tags and sharing), #80 (A5c grants and approvals); later fixes #89 to #96 and #171 to #176 |
+| A6 | Hardening and polish: accessibility pass, notifications (0.1.23: the Notifications screen and N1 below), offline behaviour, error states, Play pre-launch report | Internal testing track build | Partly: the audit (#117) and its fixes (#119 to #122, #127), the privacy settings (#120); the notifications screen (#99); the accessibility pass, offline behaviour and the Play pre-launch report are not recorded as done |
+| N1–N4 | 0.1.23, notification modes (§4 Notification modes, 10): N1 app (setting, channels, on-phone service, FCM stubbed); N2 spec (`push.register`); N3 vault (push ops, wakes); N4 gateway with FCM credentials, then FCM on | N1: notifications in the background on both test phones without Google; N4: FCM wakes on the Pixel 7 | N1 done (#99, #100, #105). N2 is the specification (PUSH-GATEWAY, VAULT-MESSAGING §14). N3 done on the vault (vettid-vault push, merged 2026-10-10; wakes in staging release S9). N4: the app's Google push mode is built (#109, #111, #112, #129) and the staging gateway has been deployed since 2026-10-11, but no platform is enabled yet (it waits for Firebase and APNs credentials) |
 
-Calls, devices/agents/LEASH, wallet, location and presence follow v1 in
-that order, each as its own phase. (0.1.53) Devices & agents is AA1–AA5
+Status (2026-10-23), after v1: **calls** C1 is partly built (#124 to
+#126, #175, #178 merged; #128, the call screens, open since
+2026-10-12); **release R** (recovery and unlock) is built (#134 to
+#143); the **staging time scale** (#145, #146, #153, #154), **photo
+attachments** (#131 to #133) and the **notification sounds** (#180) are
+built; **devices and agents** (AA1 to AA5), **wallet, presence and
+location** are not started in the app.
+
+Calls, devices/agents/LEASH, wallet, presence and location follow v1 in
+that order (D8 puts presence before location), each as its own phase. (0.1.53) Devices & agents is AA1–AA5
 of AGENT-PLAN §7.2, specified in §4 "Devices & agents" with its PRs; the
 connector's staging phase (AGENT-PLAN A6) waits for it. 0.1.42 (D8, owner 2026-10-17): of the
 last three, the order is **wallet (W0–W2), presence (P1), location
-(L1–L3)**; video (C4) follows the calling service and ringing (C2, C3).
+(L1–L3)** (D8: "in the order **wallet, presence, location**, with
+**video after the calling service**"); video (C4) follows the calling service and ringing (C2, C3).
 Their PRs are listed in §4 "Wallet, presence, location and video".
 
 **Owner check** (VAULT-MESSAGING 0.13.0 §3.6, owner decisions of
@@ -5390,8 +5411,10 @@ schema for the cache and the request verb belong to the location batch.
   through the VettID push gateway) once the gateway, FCM credentials and
   VAULT-MESSAGING's `push.register` exist; and Off. No UnifiedPush
   (owner, 2026-10-09; replaces the "both paths" decision of 2026-10-03).
-  Until the gateway is deployed (FCM needs credentials), v1 collects
-  while the app is open and through the on-phone service.
+  Until a platform is enabled on the gateway (status 2026-10-23: the
+  staging gateway has been deployed since 2026-10-11, but FCM needs
+  Firebase credentials and APNs needs Apple's, so neither is enabled),
+  v1 collects while the app is open and through the on-phone service.
 - **Release notes** (0.1.31): What's new needs the release log on the
   build's channel: production's exists; staging's, and `log` text for
   every staging release, come with VAULT-RELEASES 0.1.10 (W11). Until
@@ -5696,8 +5719,9 @@ versions do not.
    porting screens without a v1 need.
 3. **Device attestation in the field**: key attestation varies by vendor;
    test on several devices before release.
-4. **Background delivery without push**: until the gateway exists,
-   messages arrive while the app is open or through the foreground
+4. **Background delivery without push**: until a platform is enabled on
+   the gateway (deployed on staging since 2026-10-11; no platform
+   enabled, blocked on Firebase and APNs credentials), messages arrive while the app is open or through the foreground
    service; set expectations in the UI. 0.1.23: the service's
    `specialUse` type needs Play's approval of the declaration, and
    some vendors' battery managers stop foreground services regardless;

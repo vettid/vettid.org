@@ -1,9 +1,12 @@
 ---
 title: AGENT-PLAN
 status: draft
-version: 0.1.7
-date: 2026-10-20
+version: 0.1.8
+date: 2026-10-23
 changelog:
+  - 0.1.8: editorial (status as of 2026-10-23): status notes for A0 to A6
+    in §6 (A0 to A3 and A5 are built, vettid-agent #7 to #40). The
+    header status stays "draft", see the note at the start of §6
   - 0.1.7: §7.2 and §7.4: ANDROID-PLAN 0.1.53 adds the "Devices &
     agents" section (AA1–AA5), approved by the owner (2026-10-20) with
     its recommendations as written, with its own decision table and
@@ -785,7 +788,19 @@ Small PRs on `vettid-agent`, one row each, every one with its tests.
 Spec sections are VAULT-MESSAGING unless named. Each phase is tracked
 as an issue in vettid-agent, opened in A0.1.
 
+**Status (as of 2026-10-23).** A0 to A3 (except A3.5 and A3.7 to A3.9)
+and A5 are built in vettid-agent (pull requests #7 to #40, merged
+2026-10-17 to 2026-10-20). A3.5 and A3.7 to A3.9 wait for the vault
+items AV7 and AV9 to AV11 in a staging release. A4 is v1.1 and not
+started. A6 waits for the Android section "Devices & agents" (AA1 to
+AA5), which is specified and approved but not built in the app
+(ANDROID-PLAN §6). The plan's header status stays "draft": the plan does not say
+what its approval requires beyond the owner's decisions of §2, which are
+recorded as decided in the table and the changelog (0.1.4, 0.1.5).
+
 ### A0 — Retire the old code, skeleton, CI
+
+*Status: done (vettid-agent #7, #8).*
 
 | PR | Contents | Acceptance |
 |---|---|---|
@@ -795,6 +810,8 @@ as an issue in vettid-agent, opened in A0.1.
 **Exit A0**: CI green on `main` on three platforms.
 
 ### A1 — State and protectors (a §9 rule 6 path)
+
+*Status: done (A1.1 #16, #18; A1.2 #17, #20; A1.3 #19; A1.4 #21; A1.5 #35).*
 
 | PR | Contents | Acceptance |
 |---|---|---|
@@ -806,6 +823,8 @@ as an issue in vettid-agent, opened in A0.1.
 
 ### A2 — Pairing, the vault session, access sessions
 
+*Status: done (A2.1 #22; A2.2 #23; A2.3 #24; A2.4 #32; follow-ups #25, #33).*
+
 | PR | Contents | Acceptance |
 |---|---|---|
 | A2.1 | `vettid-agent pair`: code parsing, name, `client.New` + `Pair`, SAS, wait for `device.paired` / `device.pair.rejected` / 10 minutes, state saved per step | `invite.json`, `handshake.json`; unit tests with recorded messages for paired, rejected and expired; texts of §11 |
@@ -814,6 +833,8 @@ as an issue in vettid-agent, opened in A0.1.
 | A2.4 | `internal/devstack` harness (build tag `devstack`): find or start one dev stack, `vaultctl` as the app (§4.8), the relay mapping; `make devstack-test` running with `-p 1` | **Exit A2 test**: enroll a test vault with `vaultctl`, create and unlock its credential, pair the connector with `session_seconds: 600`, compare the SAS on both sides, see `vault.status` answered, end the session from the app, request a new one and approve it, unlink, see the connector wipe itself. A rejected pairing ends with "Rejected on your phone" |
 
 ### A3 — LEASH and the MCP server
+
+*Status: A3.1 #26, A3.2 #27, A3.3 #28, A3.4 #32 and A3.6 #36 are done (follow-ups #30, #34). A3.5 and A3.7 to A3.9 are not built.*
 
 | PR | Contents | Acceptance |
 |---|---|---|
@@ -829,6 +850,8 @@ as an issue in vettid-agent, opened in A0.1.
 
 ### A4 — Delegable owner types (v1.1, after the owner confirms AG5)
 
+*Status: not started.*
+
 | PR | Contents | Acceptance |
 |---|---|---|
 | A4.1 | `vettid.connections.*`, `vettid.profile.get` | Dev stack: grants with and without `connections` restrictions; a request outside them refused |
@@ -837,6 +860,8 @@ as an issue in vettid-agent, opened in A0.1.
 
 ### A5 — Platforms, packaging, signing
 
+*Status: A5.1 #29, #31 and the scripts of A5.2 and A5.3 #37 are merged. Whether the owner has run `scripts/sign-release` to publish a signed release was not established.*
+
 | PR | Contents | Acceptance |
 |---|---|---|
 | A5.1 | Reproducible release build script and workflow (unsigned artifacts, `SHA256SUMS`), and a `verify-reproducible` script | Two clean builds produce identical hashes on Linux amd64 and arm64 |
@@ -844,6 +869,8 @@ as an issue in vettid-agent, opened in A0.1.
 | A5.3 | macOS: `vettid-agent.app` built, signed with the owner's Developer ID (individual account), notarized and stapled by `scripts/sign-release` on the owner's Mac, added to `SHA256SUMS` (not reproducible across machines; vouched for by the Developer ID and the release key). Windows Authenticode **waits until the business entity exists** (owner, 2026-10-18) | Gatekeeper accepts the notarized app; the A1.5 round trip passes on the owner's Mac. Later: a signed Windows binary runs under Smart App Control in enforcement mode (#5 closed) |
 
 ### A6 — Staging with the Android app (after AA1–AA5, §7.2)
+
+*Status: not started; it waits for AA1 to AA5 in the Android app.*
 
 Checklist in `docs/STAGING-CHECKLIST.md` in vettid-agent, run with a
 **staging test account** on the Android staging app on a test phone:

@@ -7,6 +7,29 @@ opaque ciphertext; all trust remains end-to-end between vaults, apps, and agents
 **Non-goals (explicitly out of scope for v1):** clustering, replication, relay-to-relay
 federation, message search/history APIs, push notification delivery (FCM/APNs hook is a
 v1.1 candidate), payloads > 256 KB (claim-check convention instead).
+*(Status 2026-10-23: push is not in the relay; a separate push gateway
+does it, PUSH-GATEWAY. Blob storage now exists in the relay, so the
+claim-check convention has a place to store the blob: vettid-relay #10 to
+#12, RELAY-PROTOCOL §6.8.)*
+
+---
+
+**Status (editorial, as of 2026-10-23).** Phases 1 to 4 are done:
+`RELAY-PROTOCOL.md` is at 0.10.x and `vettid-relay` implements it (18
+merged pull requests; protocol 0.3.0 to 0.10.0, vettid-relay #1 to
+#18). Phase 5 was a list of notes for a build that has since been done
+in other repositories (vettid-vault, vettid-android, vettid-ios,
+vettid-agent), not in vettid-dev, which is retired. Where the text
+below no longer describes what exists, a status line says so; the plan
+text itself is kept as written.
+
+| Phase | Status |
+|---|---|
+| 1. Protocol specification | Done (RELAY-PROTOCOL; vettid-relay #1, #3, #5, #6, #12, #17 are protocol versions) |
+| 2. Repository and scaffold | Done |
+| 3. Auth middleware | Done (vettid-relay #1, #2: open tokens, claims, sender; `relayauth` and `relayclient` packages) |
+| 4. Handlers and sweeper | Done, with later limits and the blob store (#8 to #14) |
+| 5. Changes elsewhere | Notes only; carried out in the repositories named above |
 
 ---
 
@@ -86,6 +109,8 @@ DELETE /v1/mailbox/{msg_id}                # ack (idempotent)
 
 - **Payloads are opaque** — relay never parses, max 256 KB. Larger content uses
   claim-check: deposit a small pointer envelope; blob storage is out of relay scope.
+  *(Status 2026-10-23: the relay now offers an optional blob transfer and
+  shared blob storage, RELAY-PROTOCOL §6.8; vettid-relay #10 to #12.)*
 - **Delivery semantics: at-least-once.** Messages have ULID ids (sortable = arrival
   order per mailbox). Collect returns up to N oldest unacked messages. Unacked
   messages reappear after a visibility timeout (default 60 s). Receivers dedupe by
@@ -136,6 +161,10 @@ vettid-relay/
 - Go stdlib `net/http` (1.22+ mux is sufficient — no framework dependency).
 - **SQLite driver: `modernc.org/sqlite`** (pure Go, no CGO) → trivial
   cross-compilation for future appliance targets (arm64). WAL mode on.
+  *(Status 2026-10-23: SQLite is the default store of one process. The
+  production relay runs a shared DynamoDB store (with S3 and Valkey)
+  behind one URL, several processes at once: vettid-relay #4, #10, #14;
+  both stores pass the same conformance suite.)*
 - `nhooyr.io/websocket` for the WS collect path; `oklog/ulid/v2` for message ids.
 - Config: env vars with a single optional config file; NO secrets in config —
   the relay holds no long-term secrets beyond its TLS key (or runs behind a
@@ -239,6 +268,12 @@ ack → revoke → rejected deposit — against a relay instance in CI.
 
 ## Phase 5 — Required Changes Elsewhere (notes only; not in this build)
 
+*Status 2026-10-23: this phase targeted `vettid-dev`, which is retired.
+The vault side was done in vettid-vault (the relay client, tokens), the app side in vettid-android and vettid-ios,
+and the agent side in vettid-agent. Read "vettid-dev" below as
+"vettid-vault and vettid.org" (the CDK stacks, including the relay's
+Fargate service and DynamoDB tables).*
+
 ### vettid-dev (infra + enclave vault-manager)
 
 - **Remove:** NATS/JetStream cluster resources from CDK; NATS client, NKey seed
@@ -274,6 +309,8 @@ ack → revoke → rejected deposit — against a relay instance in CI.
   changes is the pipe underneath it (relay mailbox instead of NATS subject).
 - **Push wake (v1.1):** relay-side FCM/APNs webhook so mobile apps don't poll in
   background; not required for cutover since desktop/agent can long-poll.
+  *(Status 2026-10-23: replaced by the push gateway, `vettid-push`
+  (PUSH-GATEWAY); the relay has no push hook and no FCM/APNs credentials.)*
 
 ### Docs/positioning
 
