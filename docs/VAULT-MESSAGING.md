@@ -17155,12 +17155,12 @@ first.**
   30 days after the approval, whatever the pending unlink's age. The
   notice is sealed **at delivery**, with the old session's sending key
   the vault kept, and not at the approval, so that §8.4's 16-day `ts`
-  rule does not cut it short. So the vault can deposit the notice for up
-  to 30 days after the move; once deposited it waits in the old phone's
+  rule does not cut it short. The notice normally goes out minutes after
+  the move ("Finish the move"). The vault can deposit it for up to 30
+  days after the move; once deposited it waits in the old phone's
   mailbox for the relay's 14 days (`message_ttl_seconds`), and an old
   phone that does not collect it in that time keeps its keys until the
-  member removes VettID, and normally goes out minutes after it ("Finish the
-  move"). These are vault changes of release L (staging release 23),
+  member removes VettID. These are vault changes of release L (staging release 23),
   together with the old app's renewal of the token at the approval.
 - The old app, once its approval was answered `{"unlink":
   "after_new_unlock"}`, keeps its phone key, device key, app key and local
