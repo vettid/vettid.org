@@ -2015,7 +2015,7 @@ approved.
   version of VettID". Body `data_transfer_signer_body_iphone`: "The new
   phone's VettID *A*. That is not the version your vault used on Android
   before. Continue only if you installed it yourself." with *A* as
-  Android's in ANDROID-PLAN §6.7.1 ("What members are told"): "was
+  Android's, in ANDROID-PLAN "Signing and the two distributions", "As built", "The transfer confirmation": "was
   installed from Google Play (signed by Google)", "was installed from
   F-Droid or direct (signed by VettID)", "is a development build" or
   "has a different signer". Continue and Cancel as there.

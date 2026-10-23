@@ -2878,7 +2878,12 @@ both sections above (`pin.change`, `credential.password.change`,
   30 seconds is accepted; nothing is dropped before 11 minutes.
 - *Old phone, approving.* As before, the PIN and the password together.
   `busy`: "The service is busy right now. Nothing was moved. Try again
-  in a minute." (the transfer stays open).
+  in a minute." (the transfer stays open). (0.1.72) Before it sends
+  the approval the app renews the standing token it issued to the vault
+  for its own mailbox (the existing re-mint), so that the vault's
+  deposit token has its full 30 days from the approval and the vault can
+  deliver `device.unlinked{transferred}` for that long (VAULT-MESSAGING
+  0.55.10 §11.14.10; vault change of release L, staging release 23).
 - *Old phone, after the approval* (decided by the owner on
   2026-10-15). The approval answer `{"unlink": "after_new_unlock"}`
   means: keep the keys, and record the approval's time. The app shows,
@@ -2887,7 +2892,7 @@ both sections above (`pin.change`, `credential.password.change`,
   the move, and until your vault has confirmed it. Once your new phone
   works, you can remove VettID from this phone. Before you give this
   phone away, remove VettID from it or reset it." It sends nothing to
-  the vault. On `device.unlinked{reason: "transferred"}` it deletes the
+  the vault until the day-7 check below. On `device.unlinked{reason: "transferred"}` it deletes the
   phone key, the device key and the app key and erases its local state,
   then shows "Your vault has moved to your new phone. VettID has removed
   its keys from this phone." Until then it offers **The move didn't
@@ -2906,23 +2911,41 @@ both sections above (`pin.change`, `credential.password.change`,
   app: it erases as for the notice and shows "Your vault has moved to
   your new phone. VettID has removed its keys from this phone." A
   definite answer that this phone is still the vault's app: it erases
-  nothing and ends the keep. **No answer** (the vault locked, 
-  `lock_pending`, a timeout, offline, a `token_revoked`): the result is
-  not known; the app erases nothing, keeps its keys and shows "Your old
-  phone is waiting to confirm the move with your vault. Unlock your
-  vault on the new phone. Once your new phone works, you can remove
-  VettID from this phone.", and checks again at each start and
+  nothing and ends the keep. **No answer** (the vault locked,
+  `lock_pending`, a timeout, offline, a `token_revoked`, which is read
+  as no answer and still gets one `device.list` at each start and
+  foreground): the result is not known; the app erases nothing, keeps
+  its keys and shows "Your vault has not confirmed the move to this phone. Once your new phone opens your vault, remove VettID from this phone.", and checks again at each start and
   foreground, until it gets a definite answer. A check that is
   cancelled or interrupted (the app is stopped, the phone locks) never
-  erases. The app re-reads its transfer record after the await and
-  records "kept, not done" only if that write succeeded; a failed
-  conditional write (a lock raised the generation) means the check runs
-  again. A vault that never answers keeps the old keys on the phone
-  indefinitely; if the move took effect they are useless to anyone at
-  the vault, since the old app is removed and its relay key
-  denylisted. Tests: the vault locked on day 7 (no erase, notice shown,
+  erases. **A definite answer** is only the response to this check's own
+  request: a `device.list` response opened under this phone's session
+  with its vault whose `re` is the check's request `id` and whose
+  `status` is ok; any other message (an earlier `device.list` response
+  among them) and any error status is no answer. The phone is still the
+  vault's app only if the list holds its own device `id` with kind
+  `app`; it is no longer the vault's app only if the list does not hold
+  that `id`. **Recording:** the app keeps, with its transfer record, a
+  generation that every change of the record raises. Before it asks it
+  reads the record and notes the generation; after the await it
+  re-reads the record. If the record is gone or its generation changed
+  meanwhile (the notice erased it, "The move didn't finish" ended the
+  keep, a lock or another check changed it) it acts on nothing and
+  records nothing; the next start or foreground checks again while a
+  keep remains. Otherwise it writes the result conditionally on the
+  noted generation, and records "kept, not done", or acts on a
+  definite answer, only if that write succeeds; a failed write records
+  nothing and the check runs again. A removed phone gets no answer at
+  every check (the relay refuses its deposits), so it erases on the
+  notice or when the member removes VettID; the notice is kept for the
+  deposit token's 30 days. A vault that never answers keeps the old keys
+  on the phone indefinitely; with an honest host they are useless at
+  the vault, and past the 30 days the member removes VettID from the old
+  phone. Tests: the vault locked on day 7 (no erase, notice shown,
   checked again at the next start); a timeout; a cancelled check; a
-  failed conditional write (the check runs again); a definite
+  failed conditional write or a changed generation (nothing recorded, the
+  check runs again); a `device.list` response with another `re` (no
+  answer); a `token_revoked` (one `device.list` per start); a definite
   "no longer the vault's app" (erase); `device.unlinked{transferred}`
   (erase).
 - After a transfer, a PIN change or a password change the app offers to

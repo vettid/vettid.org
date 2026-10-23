@@ -1282,7 +1282,8 @@ Act within 24 hours:
 1. Confirm with the member which change failed and when. Afterwards the
    member needs, for a PIN or password change, the phone that made it
    (with the old PIN); for a transfer, the **old** phone (which keeps its
-   keys until the new phone has unlocked, for at most 7 days), or, with
+   keys until the new phone has unlocked and the vault's notice reaches
+   it, or from day 7 until its vault answers), or, with
    the credential backup on, a recovery after the restore (a new phone,
    the PIN and the password, after the quiet period).
 2. Make sure no instance holds the vault unlocked: send the host's

@@ -1,7 +1,7 @@
 ---
 title: STAGING-TIME-SCALE
 status: draft, approved by the owner 2026-10-18
-version: 0.1.2
+version: 0.1.3
 date: 2026-10-23
 owner: Al Liebl (Mesmer)
 component: vault (enclave, release constants), member API, apps (Android, iOS), dev stack
@@ -14,6 +14,12 @@ related:
   - VAULT-LOCK.md (0.1.2) (the idle lock), AGENT-PLAN.md (0.1.6) (the dev stack's held-vault test)
   - vettid-vault `main` f0976ee (read only: `enclave/releasecfg/*.json`, `releasecfg.go` and the timer constants)
 changelog:
+  - 0.1.3: editorial; VAULT-MESSAGING 0.55.10 (owner decisions
+    2026-10-23). S11 is no longer a 7-day timer: the vault keeps a
+    transfer's pending unlink for the life of its deposit token (at most
+    30 days, N7, not scaled), so S11 leaves the lists of the vault's
+    scaled timers. S10: the old phone erases only on
+    `device.unlinked{transferred}` or the vault's definite answer
   - 0.1.2: editorial; VAULT-MESSAGING 0.55.10 (owner decision
     2026-10-23). S10: on staging the old phone's check with the vault
     starts at 7 hours; it erases only on the vault's definite answer or
@@ -79,8 +85,8 @@ value at `time_scale` 24.
 | S7 | Recovery quiet period (`recovery_quiet_seconds`) | vault, release constant | §11.14.5, §11.14.14 | 72 h, both channels | 3 h (§6 T6) |
 | S8 | Counter unavailable for 24 h: shown as urgent | vault, app | §11.14.5, §11.14.11 | 24 h | 1 h |
 | S9 | Replaced phone-secret records deleted | app (Android, iOS) | §11.14.1 rule 6; ANDROID-PLAN §4; IOS-PLAN §6.3 | 7 days after confirmation | 7 h |
-| S10 | Old phone keeps its keys after a transfer | app | §11.14.10 "The old phone's keys after a transfer" | 7 days after the approval; from then on the old phone checks with its vault and erases only on a definite answer (0.1.2) | the check starts 7 h after the approval |
-| S11 | Pending unlink deleted | vault (`PendingUnlinkTTL`) | same | 7 days | 7 h |
+| S10 | Old phone keeps its keys after a transfer | app | §11.14.10 "The old phone's keys after a transfer" | 7 days after the approval; from then on the old phone checks with its vault and erases only on `device.unlinked{transferred}` or the vault's definite answer (0.1.2) | the check starts 7 h after the approval |
+| S11 | Pending unlink deleted | vault | same | when its deposit token expires, at most 30 days after the approval (VAULT-MESSAGING 0.55.10; was 7 days, `PendingUnlinkTTL`) | not scaled: the token's life is the relay's (N7); S11 leaves the vault's scaled timers |
 | S12 | Vault unreachable for 7 days: the recover-first screen | Android (vettid-android #142; not yet in the spec text) | (ANDROID-PLAN, with #142) | 7 days | 7 h |
 | S13 | Enrollment's provisional window (no `vault.enroll.confirm`) | vault (`EnrollWindow`) | §11.3 | 24 h | 1 h |
 | S14 | Start-over deletion (`deletes_at`) | member API | §11.11.9; MEMBER-API "Vault deletion: start over" | 24 h | 1 h |
@@ -175,7 +181,7 @@ window, the 120 s parent rule.
   exactly 1; staging 1 or 24; the development build any value from 1 to
   86,400 (the dev stack's flag, below).
 - One function in the enclave, `Scale(d)`, used by every timer of §2.1
-  that the vault runs (S1, S3 to S8, S11, S13) and by nothing else.
+  that the vault runs (S1, S3 to S8, S13) and by nothing else.
 - The vault's settings, `vault.status` and the feed keep real units for
   settings and absolute times for deadlines; `vault.status` adds
   `time_scale` (§5.2).
@@ -248,7 +254,7 @@ window, the 120 s parent rule.
   `time_scale` ≠ 1 and a missing value; the accessor returns 1 for any
   channel but staging whatever the file says; on staging,
   `recovery_quiet_seconds` ≠ 259,200 / `time_scale` is refused; per
-  timer at scale 24 (S1, S3 to S8, S11, S13): the absolute time is the
+  timer at scale 24 (S1, S3 to S8, S13): the absolute time is the
   start plus the scaled duration; a timer started under scale 1 keeps
   its time after a move into a scaled release; settings report real
   units.
@@ -263,7 +269,7 @@ window, the 120 s parent rule.
 
 | Row | Repository | What | Ships in |
 |---|---|---|---|
-| T-V | vettid-vault | `time_scale` in both channel files and `releasecfg check`; `Scale`; S1, S3 to S8, S11, S13; quiet period per §5.4; descriptor and `vault.status` member; dev stack flag; tests | the first staging release after 16 (S17, with AV6), if merged before it is cut; otherwise S18 |
+| T-V | vettid-vault | `time_scale` in both channel files and `releasecfg check`; `Scale`; S1, S3 to S8, S13; quiet period per §5.4; descriptor and `vault.status` member; dev stack flag; tests | the first staging release after 16 (S17, with AV6), if merged before it is cut; otherwise S18 |
 | T-M | vettid.org | stack parameter, CDK refusal, S14, S15, estimates, texts | deployed to staging when that release is published |
 | T-A | vettid-android | read and store the scale, refuse ≠ 1 in production builds, S2, S8, S9, S10, S12, S16, texts and the note | the next staging app after T-V |
 | T-I | vettid-ios | the same, for the iOS rows (S2, S8, S9, S10) | with the first iOS staging build that unlocks |
