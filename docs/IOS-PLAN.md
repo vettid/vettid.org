@@ -1,9 +1,17 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.30
+version: 0.1.31
 date: 2026-10-23
 changelog:
+  - 0.1.31: approved by the owner (2026-10-23) (VAULT-MESSAGING
+    0.55.10, ANDROID-PLAN 0.1.72), from the iOS review. The old iPhone
+    of a transfer asks its vault before it erases at day 7, and a vault
+    that does not answer means "check again later", never an erase;
+    the app re-reads its transfer record after the check's await and
+    records "kept, not done" only if the write succeeded; the new
+    iPhone waits 11 minutes for the approval. §14: the text
+    `data_transfer_signer_body_iphone`
   - 0.1.30: editorial; VAULT-MESSAGING 0.55.9, two decisions approved
     by the owner (2026-10-23). §9.1 VA4 is built (vettid-vault #142):
     the vault keeps the last Android signer in its DEK-encrypted state
@@ -1175,8 +1183,9 @@ first unlock. The cleanup runs only while
 "no such file" answer as in §6.3; a launch before the first unlock
 (a background launch, for example) deletes nothing and leaves the
 check for a later launch. A wipe, and the end of
-a transfer's keep period on the old phone, delete every key and record
-explicitly. The simulator has neither a Secure Enclave nor
+a transfer's keep period on the old phone (which at or after 7 days
+ends only when the vault answers, VAULT-MESSAGING §11.14.10), delete
+every key and record explicitly. The simulator has neither a Secure Enclave nor
 App Attest: tests there use software keys behind the same protocols
 (`PhoneSecretSource`, `Attester`), as Android's tests do; the software
 phone key is compiled only into Debug, DevStack and test targets, never
@@ -1783,7 +1792,7 @@ exchange messages and photos both ways, and approve each other's asks.
 |---|---|---|---|---|
 | I3.1 | Items: data, secret and critical; templates; tags; TOTP | §10.7, §10.8; VAULT-ITEMS | `feature/items/*`, `core/data/…/items/*` | Critical items need the password; values in the secure container; (0.1.23) the item editor too, inside the `SecureContainer` like the item screen: screenshots and recording of it are blocked unless "Allow screenshots" is on (§6.4); typing, the keyboard and VoiceOver work inside the container (checked on the iPhone) |
 | I3.2 | Share rules, grants, critical-item use by a connection | §10.12, §10.13 | `feature/items/RuleEditScreen.kt`, `SharingScreens.kt`, `core/data/…/items/Sharing*.kt` | Rules against a second vault |
-| I3.3 | Transfer out and in: QR and pasted code, Finish the move, the old phone keeping its keys until confirmed or 7 days, the signer-class texts across platforms | §6.7.1, §11.7.1 ("Across an iOS app"), §11.14.10 | `feature/settings/TransferOut*.kt`, `feature/onboarding/MoveScreens.kt`, `TransferInViewModel.kt`, `FinishMove.kt`, `core/data/…/FinishMoveRunner.kt` | iPhone → Android → iPhone on staging; the old phone erases itself on confirmation |
+| I3.3 | Transfer out and in: QR and pasted code, Finish the move, the old phone keeping its keys until confirmed (after 7 days, until its vault answers), the new phone's 11 minutes, the signer-class texts across platforms | §6.7.1, §11.7.1 ("Across an iOS app"), §11.14.10 | `feature/settings/TransferOut*.kt`, `feature/onboarding/MoveScreens.kt`, `TransferInViewModel.kt`, `FinishMove.kt`, `core/data/…/FinishMoveRunner.kt` | iPhone → Android → iPhone on staging; the old phone erases itself on confirmation |
 | I3.4 | Recovery: scan or type the code, claim, register, the one screen for PIN and password, the answers, the wait | §11.11, §11.11.10, §11.14.3–§11.14.6, §11.14.11 | `feature/onboarding/RecoverTypeScreen.kt`, `RecoverViewModel.kt`, `RecoveryOpen.kt`, `feature/settings/RecoveryStatusText.kt` | A recovery on staging onto a second iPhone; typed and scanned entries make equal requests |
 
 **Exit I3**: the flows above on staging, with History entries equal to
@@ -1998,6 +2007,18 @@ approved.
 - **Help → Privacy (ID18)**: "When you set up, move or recover a vault,
   your iPhone asks Apple to vouch for the VettID app. Apple learns that
   VettID was set up on an iPhone, nothing about your vault."
+- **A signer change on a move from an iPhone to Android (§11.7.1 "Across
+  an iOS app", VA4; approved 2026-10-23)**, shown on the iPhone before
+  the PIN when `device.transfer.pending.signer_changed` is true because
+  the vault's kept Android signer differs from the new phone's. Title
+  the same as Android's: "The new phone has another
+  version of VettID". Body `data_transfer_signer_body_iphone`: "The new
+  phone's VettID *A*. That is not the version your vault used on Android
+  before. Continue only if you installed it yourself." with *A* as
+  Android's in ANDROID-PLAN §6.7.1 ("What members are told"): "was
+  installed from Google Play (signed by Google)", "was installed from
+  F-Droid or direct (signed by VettID)", "is a development build" or
+  "has a different signer". Continue and Cancel as there.
 - **Phone locked during a request (§6.3; approved 2026-10-17)**:
   "Unlock your iPhone, then try again."
 - **Four unconfirmed changes (§6.3; approved 2026-10-17)**: "Unlock your vault first, then

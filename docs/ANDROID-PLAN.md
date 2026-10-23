@@ -1,9 +1,16 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.71
+version: 0.1.72
 date: 2026-10-23
 changelog:
+  - 0.1.72: approved by the owner (2026-10-23) (VAULT-MESSAGING 0.55.10,
+    §11.14.10). §4 Transfer: the old phone's day-7 check with the vault
+    (`device.list`) before it erases; no answer means "not known: check
+    again later" and never an erase, with a plain notice and a new
+    check at every start and foreground; the check's result is recorded
+    only if the re-read transfer record's write succeeded; the new
+    phone waits 11 minutes for the approval, not 10
   - 0.1.71: approved by the owner (2026-10-23): VettID's notification
     sounds. §4 Notification modes, 6: four sounds (`vettid_general`,
     `vettid_message`, `vettid_urgent`, `vettid_ringtone`) and a sound
@@ -1028,7 +1035,7 @@ rows below say "Vault" for the screens and "item" for the data.
 | Pending deletion | — | When `GET /api/vault/status` shows `deletion` (a start-over requested on the portal, VAULT-MESSAGING §11.11.9): an urgent banner with the time left and **Cancel deletion** (`POST /api/vault/deletion/cancel {deletion_id}`, signed by the app key, with the `deletion_id` from the status's `deletion: {deletion_id, state, deletes_at}`, MEMBER-API 2.1.1) |
 | Vault update | — (VettID-specific) | 0.1.19 (owner decision of 2026-10-09). **Banner** at the top of the shell while the trusted manifest lists an `active` release newer than the vault's: "A new vault release is available (release N)" with Update now and a close button (back after 24 h; a newer release or a change to the end-date warning shows at once), or, for a `retired` release or a `deprecated` one with an `ends_at`, the urgent "Your vault's release ends on <date>. Update now to keep your vault" (also back after 24 h). The offer is read from the manifest at app start, on return to the foreground and after every unlock (no other polling). **Notification**: one local notification per release on the "Vault updates" channel, its tap opens the update screen; the POST_NOTIFICATIONS permission is asked once, when the first banner shows. **Update screen** (banner, notification, Settings → Vault → "Update available"): the release number, the PCR0 fingerprint, "Anyone can rebuild it and compare the fingerprint", the release notes, the vault PIN and **Approve and update** (no credential password: the owner check, when due, comes first through the shell's gate). Then, over every screen: lock → the unlock with the approved `release_update` (built as at the unlock screen) → `update: moved` → the unlock that reaches N+1 with the same PIN ("Updating your vault…", three steps; "Release N is starting. This can take a few minutes." while the API answers `503 release_starting`). Outcomes: done; refused (`target`, `downgrade`, `approval`, `seal_key`, `pending`, `write`, each explained; the vault stays on its release and is open); a wrong PIN or the backoff (the vault is locked, nothing moved; "Approve and update" again or "Unlock without updating"); N+1 does not open (try again, or **Return to release N**, confirmed, only while the move is unconfirmed). The PIN is held only while a step runs. The unlock screen's "Approve the update with this unlock" stays. 0.1.54: the way back is kept across leaving the screen and a restart, and offered on the unlock screen (§4 "The way back to release N after leaving or a restart"). 0.1.31: the update screen and the unlock offer open with **What's new in release N** (next row), above the fingerprint and the PIN; the bare "Release notes" link becomes that section's "Full release notes" |
 | What's new | — (VettID-specific) | 0.1.31 (owner request 2026-10-10; RELEASE-UPDATES 0.3.0 §2, §5). **Where:** at the top of the update screen (reached from the banner's Update now, the notification and Settings → Vault → "Update available": every path to an update passes through it before **Approve and update**) and in the unlock screen's release offer, before "Approve the update with this unlock". There is no update path that skips it. **What:** the heading "What's new in release N"; the log entry's `summary`; its `changes` as a bulleted list; the security line ("No security fix", "Security fix: update recommended" or "Security fix: update urgently", the latter two followed by `security_text`); the label "From <host>" (vettid.org; staging builds staging.vettid.org) with "Release notes are information. What keeps your vault safe is the signed release list and the fingerprint below."; and **Full release notes**, which opens the manifest's `notes` URL in the browser. When the vault is more than one release behind, the summaries of the releases in between follow under "Also in earlier releases" (one line each, from the same `index.json`). **Source:** the channel's log `index.json` (VAULT-RELEASES §7), public and unsigned. The app fetches it only when the trusted manifest's (published or loaded canary) `notes` for release N is exactly `https://<host>/security/releases/<N>/` and `<host>` is the host of the build's pinned manifest URL (vettid.org; staging.vettid.org; the dev stack's manifest host); it then fetches `https://<host>/security/releases/index.json` and no other URL. Any other `notes` (staging S1–S8 still carry GitHub URLs until the backfill is published) means no fetch. GET without cookies or credentials, redirects refused, 10 s timeout, at most 1 MiB, JSON only. The entry used is the one whose `release` is N **and** whose `pcr0` equals the manifest's PCR0 for N; otherwise none. Shown as plain text only (no markup, no tappable links), each field cut with "…" past the RELEASE-UPDATES §5 limits (summary 160 characters, 20 changes of 280, `security_text` 1,000). Kept in memory per host, release and PCR0 until the process ends; nothing is stored on disk or in the vault. **Information only:** nothing in it is used for a decision: which release is offered, its status, `ends_at`, the fingerprint and the approval come from the signed manifest alone. **Fallback:** while loading, a progress line, and **Approve and update** stays enabled; if the fetch fails, the entry is missing or does not match, or `notes` is not a log URL: "Release notes unavailable" with **Full release notes** (when `notes` is an `https` URL, as the manifest parser already requires), and updating stays possible. Opening the screen again retries. **Notification** ("Vault updates"): before posting it the app tries the same fetch (same rules, 10 s); with an entry its text is the summary ("Release N: <summary>"), otherwise the current text; it is not updated afterwards |
-| Transfer (new phone) | — (VettID-specific) | (0.1.40, release R: the phone key and its secret in `hs.init`, then **Finish the move**; the old phone keeps its keys until then, for at most 7 days; §4 "Recovery and unlock from release R".) Scan the old phone's transfer QR → compare the SAS → wait for the approval → `device.paired{transfer}`: the app stores its `vault_id` and the member's `user_guid` (VAULT-MESSAGING 0.17.0 §6.7.1) like an enrolled phone, so that it unlocks later with the PIN. Without `user_guid` (a vault release before 0.17.0) the transfer still completes and the app warns: "This phone cannot unlock your vault after it locks until your vault is updated" |
+| Transfer (new phone) | — (VettID-specific) | (0.1.40, release R: the phone key and its secret in `hs.init`, then **Finish the move**; the old phone keeps its keys until then, and after 7 days until its vault answers (0.1.72); the new phone waits 11 minutes for the approval; §4 "Recovery and unlock from release R".) Scan the old phone's transfer QR → compare the SAS → wait for the approval → `device.paired{transfer}`: the app stores its `vault_id` and the member's `user_guid` (VAULT-MESSAGING 0.17.0 §6.7.1) like an enrolled phone, so that it unlocks later with the PIN. Without `user_guid` (a vault release before 0.17.0) the transfer still completes and the app warns: "This phone cannot unlock your vault after it locks until your vault is updated" |
 | Onboarding | Sign-in flow | Scan the setup QR from the account portal, or type its short code with the account's email (no sign-in in the app, VAULT-MESSAGING 0.15.0 §11.12) → confirm the account (`email_hint`) → enroll vault (PIN, credential password) → first connection guide |
 
 **History** (0.1.11, owner decision of 2026-10-07). The member's audit
@@ -2039,7 +2046,7 @@ vault without it, part 1 applies unchanged.
 - **The app's own waits** are divided by it when each starts, and the
   absolute time is kept: the owner check's early warning (1 h before
   the deadline), replaced records' deletion (7 days), the old phone's
-  keys after a transfer (7 days after the approval), the recovery
+  keys after a transfer (the check with the vault from 7 days after the approval), the recovery
   counter's "unavailable for a day" urgency (24 h, S8), the screen for a
   vault unreachable for 7 days (vettid-android #142), and the update
   banner's dismissal (24 h). A timer started before the app knew the
@@ -2861,7 +2868,14 @@ both sections above (`pin.change`, `credential.password.change`,
   unlock is answered `transfer_incomplete`: "The move to this phone did
   not finish. Approve it again on your old phone." The step can be
   postponed ("Later"); the app asks again at its next start until it is
-  done.
+  done. (0.1.72, VAULT-MESSAGING 0.55.10 §11.14.10 rule 5.) The new
+  phone waits **11 minutes** after it started its `hs.init` for
+  `device.paired` or `device.pair.rejected`, not 10: the vault counts
+  its 10 minutes from the `hs.init` it receives, so an approval near the
+  end could otherwise reach a phone that had dropped its handshake,
+  attested key and epoch-1 secret. Only after the 11 minutes does it
+  drop them and offer a new code. Tests: a `device.paired` at 10 minutes
+  30 seconds is accepted; nothing is dropped before 11 minutes.
 - *Old phone, approving.* As before, the PIN and the password together.
   `busy`: "The service is busy right now. Nothing was moved. Try again
   in a minute." (the transfer stays open).
@@ -2870,10 +2884,9 @@ both sections above (`pin.change`, `credential.password.change`,
   means: keep the keys, and record the approval's time. The app shows,
   and keeps showing at every start: "Finish the move on your new phone.
   This phone keeps your vault's keys until your new phone has finished
-  the move, for at most 7 days. Before you give this phone away, remove
-  VettID from it or reset it." It sends nothing to the vault. On
-  `device.unlinked{reason: "transferred"}`, or at its first start 7 days
-  or more after the approval, whichever comes first, it deletes the
+  the move, and until your vault has confirmed it. Before you give this
+  phone away, remove VettID from it or reset it." It sends nothing to
+  the vault. On `device.unlinked{reason: "transferred"}` it deletes the
   phone key, the device key and the app key and erases its local state,
   then shows "Your vault has moved to your new phone. VettID has removed
   its keys from this phone." Until then it offers **The move didn't
@@ -2884,6 +2897,32 @@ both sections above (`pin.change`, `credential.password.change`,
   ready."; otherwise: "Your vault could not be opened from this phone.
   Contact VettID within a day of the failed move: it may be repairable."
   There is no "Delete now" button.
+- *Old phone, the day-7 check* (0.1.72; VAULT-MESSAGING 0.55.10
+  §11.14.10, owner decision of 2026-10-23). At its first start 7 days
+  or more after the approval, and at every start and foreground after
+  that, the app asks the vault (`device.list`) before it erases
+  anything. A definite answer that this phone is no longer the vault's
+  app: it erases as for the notice and shows "Your vault has moved to
+  your new phone. VettID has removed its keys from this phone." A
+  definite answer that this phone is still the vault's app: it erases
+  nothing and ends the keep. **No answer** (the vault locked, 
+  `lock_pending`, a timeout, offline, a `token_revoked`): the result is
+  not known; the app erases nothing, keeps its keys and shows "Your old
+  phone is waiting to confirm the move with your vault. Unlock your
+  vault on the new phone.", and checks again at each start and
+  foreground, until it gets a definite answer. A check that is
+  cancelled or interrupted (the app is stopped, the phone locks) never
+  erases. The app re-reads its transfer record after the await and
+  records "kept, not done" only if that write succeeded; a failed
+  conditional write (a lock raised the generation) means the check runs
+  again. A vault that never answers keeps the old keys on the phone
+  indefinitely; if the move took effect they are useless to anyone at
+  the vault, since the old app is removed and its relay key
+  denylisted. Tests: the vault locked on day 7 (no erase, notice shown,
+  checked again at the next start); a timeout; a cancelled check; a
+  failed conditional write (the check runs again); a definite
+  "no longer the vault's app" (erase); `device.unlinked{transferred}`
+  (erase).
 - After a transfer, a PIN change or a password change the app offers to
   rotate the vault's keys (`credential.rotate`), which a completed
   recovery does by itself.
