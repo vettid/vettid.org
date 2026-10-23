@@ -1,6 +1,6 @@
 # VettID Push Gateway Protocol
 
-**Version:** 0.5.1 (draft)
+**Version:** 0.5.2 (draft)
 **Status:** Draft for review (N2; owner request of 2026-10-10: "we can
 start to design the push service for google play and apple ios").
 Implemented by `vettid/vettid-push` (the gateway) and vettid-android #109
@@ -13,7 +13,8 @@ replay records of one key (vettid-push #2), approved by the owner
 push token (a challenge push the app must return) and gives wake blobs
 a maximum age of 90 days (vettid-push #4), approved by the owner
 2026-10-14; 0.5.1 notes the vault's wake for a ringing call (no change
-to the gateway)
+to the gateway); 0.5.2 names the sound of the APNs fallback (approved
+by the owner 2026-10-23)
 **Companion to:** VettID Relay Protocol (Appendix A), VAULT-MESSAGING
 0.24.1 §14 (`push.register`, the vault's wake rules), ANDROID-PLAN D7
 
@@ -371,8 +372,16 @@ apns-priority: 10
 apns-topic: <app_id>
 apns-expiration: <now + 86400>
 { "aps": { "alert": { "loc-key": "WAKE_FALLBACK" },
-           "mutable-content": 1, "sound": "default" } }
+           "mutable-content": 1, "sound": "vettid_general.caf" } }
 ```
+
+The sound is the constant `vettid_general.caf` (0.5.2; bundled in the
+app, IOS-PLAN §6.7): it reveals nothing, and there is no `category` and
+no `interruption-level`, so Apple never learns which notifications are
+messages or security alarms. The sound of every notification is chosen
+on the phone from what the phone decrypts (the extension below,
+ANDROID-PLAN §4 Notification modes, 6, "Sounds"), never in a push; FCM
+wakes stay data-only.
 
 `WAKE_FALLBACK` is localised in the app as **"New activity in VettID"**
 (0.3.0: "New message"): it is what shows if the app's notification
@@ -891,10 +900,13 @@ The extension, in its ~30 s:
 3. builds the notification with the same Content rules as Android
    (previews: Names by default; Names and message text; Nothing): for
    several new items, one summary ("3 new messages from Sam Lee");
-4. sets locally `interruptionLevel` (`timeSensitive` for security alarms
+4. sets locally the sound by category (IOS-PLAN §6.7: `vettid_message.caf`;
+   `vettid_urgent.caf` for approvals, security alarms and the daily
+   check; `vettid_general.caf` for release and vault notices; none for
+   vault activity), `interruptionLevel` (`timeSensitive` for security alarms
    and the daily check, which needs the Time Sensitive Notifications
    capability; `passive` and no sound for vault activity; `active`
-   otherwise), `threadIdentifier` per category, and the sound;
+   otherwise), and `threadIdentifier` per category;
 5. remembers what it notified as HMACs of the item ids (keyed by a device
    key, 7 days, in the app group) so a later wake does not repeat it.
    Nothing else is written.
@@ -1168,6 +1180,11 @@ again computes another digest and refuses a good signature.
 
 ## 17. Changelog
 
+- **0.5.2** — the APNs fallback payload's `"sound": "default"` becomes
+  `"sound": "vettid_general.caf"` (a constant; approved by the owner
+  2026-10-23). The extension names the sounds it sets locally. No
+  change to what a push carries: still no category, no interruption
+  level and no sound choice in FCM; the sound is chosen on the phone.
 - **0.5.1** — the vault's wake for a ringing call (VAULT-MESSAGING
   0.38.0 §14.2 trigger 5, release C2; CALLS-PLAN V4). No change to the
   gateway: the call wake is the ordinary `notify` wake. §8 says how the

@@ -1,9 +1,16 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.28
-date: 2026-10-22
+version: 0.1.29
+date: 2026-10-23
 changelog:
+  - 0.1.29: approved by the owner (2026-10-23) (ANDROID-PLAN 0.1.71
+    "Sounds"; PUSH-GATEWAY 0.5.2). §6.7: the four `.caf` sounds are
+    bundled; the notification service extension and the app's local
+    notifications set `UNNotificationSound(named:)` per category (same
+    mapping as Android); `timeSensitive` needs the Time Sensitive
+    Notifications capability on the app ID (§10, 2); no `critical`; the
+    call ringtone through CallKit comes with iOS calls
   - 0.1.28: editorial; approved by the owner (2026-10-22)
     (VAULT-MESSAGING 0.55.5; ANDROID-PLAN 0.1.70). §4.8, canonical
     forms: a month field refuses any invalid value with
@@ -1606,6 +1613,34 @@ from a keychain access group shared with the app; the content rules
 of `core/notify/…/NotificationContent.kt`; removal of named
 notifications on `vault.locking` and `vault.held`; the filtering
 entitlement when Apple grants it.
+
+**Sounds** (0.1.29, owner decision of 2026-10-23; the files, their
+licence (AGPL-3.0) and the channel mapping are in ANDROID-PLAN §4
+Notification modes, 6, "Sounds"). The app bundles `vettid_general.caf`,
+`vettid_message.caf`, `vettid_urgent.caf` and `vettid_ringtone.caf`
+(CAF, IMA4; target membership of the app and of the extension). The
+notification service extension (PUSH-GATEWAY §11.2) and the app's own
+local notifications (the owner check's early warning, release notices)
+set `content.sound = UNNotificationSound(named:)` locally, by the
+notification's category, never from the payload:
+
+| Category | Sound | Level |
+|---|---|---|
+| Messages | `vettid_message.caf` | `active` |
+| Requests (approvals) | `vettid_urgent.caf` | `active` |
+| Security alarms, daily check | `vettid_urgent.caf` | `timeSensitive` |
+| Releases and vault notices | `vettid_general.caf` | `active` |
+| Vault activity | none | `passive` |
+
+`timeSensitive` needs the Time Sensitive Notifications capability on the
+app ID and in the entitlements (self-service in the developer portal;
+Apple does not grant it, §10, 2). `critical` is not used. A sound name
+with no bundled file plays the default sound, so a test checks the
+files are in the built `.app`. The fallback notification a push shows
+when the extension cannot finish uses `vettid_general.caf` (the
+gateway's constant). The ringtone is for CallKit's
+`CXProviderConfiguration.ringtoneSound`, with iOS calls (later; PushKit
+needs APNs and the owner's Apple Team ID); it is bundled now.
 
 ### 6.8 Links
 
