@@ -14,7 +14,7 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.10.0)
-  - ANDROID-PLAN.md (0.1.70)
+  - ANDROID-PLAN.md (0.1.71)
   - IOS-PLAN.md (0.1.30; §9.1 VA1–VA3)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
@@ -51,7 +51,8 @@ changelog:
     Stale text fixed: the "Across platforms" bullet, the `signer_changed`
     definition, `signer_unconfirmed` spends the UTK (0.52.0), "not yet implemented" in the
     0.27.1 entries, and the "stranded vaults" paragraph (the kept-signer
-    case). New tests required (VA4)
+    case). New tests required (VA4). Header reference to ANDROID-PLAN
+    brought up to 0.1.71
   - 0.55.8: editorial; one new device rule: `keySize` exactly 128 or
     256 (§10.10 "Media suites"); library facts confirmed on two phones
     (2026-10-23; vettid-android #175; CALLING-SERVICE 0.2.2, CALLS-PLAN
