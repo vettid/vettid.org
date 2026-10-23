@@ -1,9 +1,26 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.70
-date: 2026-10-22
+version: 0.1.71
+date: 2026-10-23
 changelog:
+  - 0.1.71: approved by the owner (2026-10-23): VettID's notification
+    sounds. §4 Notification modes, 6: four sounds (`vettid_general`,
+    `vettid_message`, `vettid_urgent`, `vettid_ringtone`) and a sound
+    per channel; every channel whose sound changes gets a new id
+    (`messages_v2`, `requests_v2`, `calls_v2`, `security_v2`,
+    `owner_check_v2`, `vault_updates_v2`) and missed calls get their own
+    channel, `missed_calls_v2` (owner decision of 2026-10-23: High,
+    `vettid_message`; `call.missed` is posted there, `calls_v2` carries
+    ringing and later the ongoing and outgoing call) and the old ids are deleted at
+    start, once, before production release 1 (no production member
+    exists, so nobody loses settings); `activity` and `connection` stay
+    silent. The ids are no longer "stable": a later change of a
+    channel's sound or importance bumps its suffix. The sound is chosen
+    on the phone, never in a push (PUSH-GATEWAY 0.5.2). The calls
+    channel carries the ringtone (CALLS-PLAN: CallStyle ringing); the
+    0.1.19 "Vault updates" channel is now `vault_updates_v2`. Files and
+    licence: AGPL-3.0, `tools/sounds/` and `res/raw/`
   - 0.1.70: editorial; approved by the owner (2026-10-22)
     (VAULT-MESSAGING 0.55.5 §10.7). §4 "Items: phone values and the tag
     preview", canonical forms: a month field refuses any invalid value,
@@ -1327,7 +1344,8 @@ feed repository and no screen.
    feed items (§10.9's kinds; the app learns of a release from the
    manifest and `sync.event{vault.release}`, §11.10.6), so the
    Notifications screen does not list them, and the "Vault updates"
-   channel keeps its one notification per release (§9 question 6).
+   channel (`vault_updates_v2`) keeps its one notification per release
+   (§9 question 6).
    The credential-alarm and pending-deletion banners stay as they are.
 9. **System notifications** (0.1.23, owner answer to question 3):
    feed items raise Android notifications through the member's
@@ -1712,19 +1730,74 @@ its process runs; nothing keeps it running in the background).
    always; the release notification (0.1.19) is still posted when the
    app learns of a release, since it is local. Settings shows the
    warning of 1 under the choice.
-6. **Channels** (created at first start; ids are stable, names
-   translated; the member can change each in Android settings):
+6. **Channels** (created at first start; names translated; the member
+   can change each in Android settings). Android fixes a channel's sound
+   and importance when it is created, so a change of either gives the
+   channel a new id (the suffix goes up: `_v3`, and so on) and the old
+   id is deleted with `deleteNotificationChannel`; every start deletes
+   the ids of earlier versions first (0.1.71). Android keeps a record of
+   deleted ids (Settings shows "N categories deleted", and recreating a
+   deleted id brings back its old settings), so an earlier suffix is
+   never reused; only staging installs will show the count:
 
-   | Channel (id) | Importance | Carries |
-   |---|---|---|
-   | Messages (`messages`) | High | New messages |
-   | Requests (`requests`) | High | Asks waiting for a decision (Approvals) |
-   | Calls (`calls`) | High | Missed calls now; ringing later (full-screen intent with the calls phase) |
-   | Security alarms (`security`) | High, alarms marked urgent | The clone alarm, the ten-failure lock, failed checks, the vault locked, the vault moved |
-   | Daily check (`owner_check`) | High | The early warning and "check due" with the held counts |
-   | Vault activity (`activity`) | Low (silent, in the shade) | Other feed items |
-   | Vault updates (`vault_updates`, 0.1.19) | Default | One per release; its text is the release's log summary when the log has it (0.1.31) |
-   | Connection (`connection`) | Min | The service's own notification |
+   | Channel (id) | Importance | Sound | Carries |
+   |---|---|---|---|
+   | Messages (`messages_v2`) | High | `vettid_message` | New messages |
+   | Requests (`requests_v2`) | High | `vettid_urgent` | Asks waiting for a decision (Approvals) |
+   | Calls (`calls_v2`) | High | `vettid_ringtone` (looping, below) | Ringing (full-screen intent with the calls phase) and, later, the ongoing and outgoing call |
+   | Missed calls (`missed_calls_v2`) | High | `vettid_message` | `call.missed` |
+   | Security alarms (`security_v2`) | High, alarms marked urgent | `vettid_urgent` | The clone alarm, the ten-failure lock, failed checks, the vault locked, the vault moved |
+   | Daily check (`owner_check_v2`) | High | `vettid_urgent` | The early warning and "check due" with the held counts |
+   | Vault activity (`activity`) | Low (silent, in the shade) | none | Other feed items |
+   | Vault updates (`vault_updates_v2`, 0.1.19) | Default | `vettid_general` | One per release; its text is the release's log summary when the log has it (0.1.31) |
+   | Connection (`connection`) | Min | none | The service's own notification |
+
+   **Sounds** (0.1.71, owner decision of 2026-10-23; the one home of
+   this text, IOS-PLAN §6.7 and PUSH-GATEWAY refer to it). Four sounds,
+   one motif (a rising fourth) in one glassy tone:
+   `vettid_general` (1.36 s, D, soft, peak -3 dBFS), `vettid_message`
+   (1.66 s, G, -2 dBFS), `vettid_urgent` (2.16 s, C, the motif twice,
+   -1 dBFS) and `vettid_ringtone` (8.0 s, D, a seamless loop, -3 dBFS).
+   The masters are 44.1 kHz 16-bit mono WAV, generated deterministically
+   by `synth_family.py` (regenerating gives byte-identical files with
+   numpy 2.5.4 and scipy 1.18.1, checked 2026-10-23); the masters and
+   the script are the source of truth. The exports are committed as
+   files: Android OGG Vorbis at about 96 kbps in
+   `app/src/main/res/raw/*.ogg`, iOS CAF IMA4 bundled in the app. They
+   live in vettid-android `tools/sounds/` (masters, script, a README
+   with the export commands) and `res/raw/`; vettid-ios bundles the
+   `.caf` files. **Licence: AGPL-3.0, the repositories' own licence**
+   (this matters for the F-Droid build: no other terms). Channels
+   other than `calls_v2` set their sound with `AudioAttributes`
+   `USAGE_NOTIFICATION` and `CONTENT_TYPE_SONIFICATION`. The ringing
+   notification of a call (CALLS-PLAN, a `CallStyle` notification on
+   the `calls_v2` channel, self-managed through core-telecom) uses
+   `vettid_ringtone` as that channel's sound with `AudioAttributes`
+   `USAGE_NOTIFICATION_RINGTONE`, and loops it with `FLAG_INSISTENT`
+   while it rings. Opening the notification shade also stops the sound
+   (Android's rule for `FLAG_INSISTENT`); on answer the ringing
+   notification is cancelled and the ongoing call is a new, silent
+   notification. Every other notification on `calls_v2` (the ongoing and
+   outgoing call) is posted with `setSilent(true)`, so only ringing
+   plays the ringtone. The ringtone stops on answer, decline or timeout, and the
+   system honours the ring volume and the ringer mode (silent: no
+   sound; vibrate: vibration only; the channel enables vibration). The
+   ringing notification sets `CATEGORY_CALL`. Under Do Not Disturb it
+   rings only if the member allows calls from anyone, or allows VettID
+   or the Calls channel as an exception; VettID callers are not phone
+   contacts, so "starred contacts" and "contacts" do not let them
+   through (to be checked in C3 on both test phones). Without the
+   full-screen permission it rings, and loops, as a heads-up. A missed
+   call is posted on `missed_calls_v2` (owner decision of 2026-10-23),
+   which plays `vettid_message` once. The sound is chosen on the phone
+   from the notification's kind, never by the push (PUSH-GATEWAY §6,
+   §11.1: the push carries no kind). Tests: each channel plays its sound
+   on a physical phone; the ringtone loops and stops on answer and
+   decline; with the ringer on vibrate a call only vibrates, and on
+   silent it neither rings nor vibrates; `vettid_general` is audibly
+   softer than `vettid_urgent`; after an upgrade from a build with the
+   old ids, only the `_v2` channels, `activity` and `connection` are
+   listed (Settings may show "6 categories deleted").
 
 7. **Mapping** (feed kinds of VAULT-MESSAGING §10.9 and events; this
    replaces the earlier answer to question 3). Feed items are the one
@@ -1740,7 +1813,7 @@ its process runs; nothing keeps it running in the background).
    |---|---|
    | Messages | `message.received` (text from `message.new` only with previews on) |
    | Requests | `connection.request`, `connection.authenticate.requested`, `grant.request` (a batch: one, "Sam asks for 3 things", updated), `share.pending`, `critical-secret.use.request`, `device.pair.pending`, `device.session.pending`, `approval.pending`; `action.request`, `intro.request`, `location.request` with "Open VettID on a newer version" until their phases |
-   | Calls | `call.missed` |
+   | Missed calls | `call.missed` |
    | Security alarms | `credential.alarm` (urgent; also while held), `owner_check.locked`, `owner_check.failed`, `owner_check.hold_changed`, `credential.password_failed`, `credential.reset`, `device.replaced`, `device.transferred`; (0.1.52, approved by the owner 2026-10-19) a failed `recovery.attempt` (`urgent`, `not_success` or a `ref` that does not read), `recovery.counter_unavailable`, `recovery.change_required`; (owner decision of 2026-10-20) a `rollback` closure's `urgent` item; (0.1.53, decision 16 of §4 "Devices & agents") `leash.agent.suspended`, `leash.referrals_limited`; the event `vault.locking` (Vault locked, 3) |
    | Daily check | the events `vault.held` and the early warning (3) |
    | Vault activity | `connection.added`, `connection.request.peer_declined`, `connection.asks_paused`, `connection.stale`, `connection.removed`, `grant.shared`, `grant.revoked`, `share.rate_limited`, `item.revealed`, `device.paired`, `device.unlinked`, `credential.rotated`, `leash.*` (0.1.53: except `leash.agent.suspended` and `leash.referrals_limited`), `location.shared`, `wallet.signed`; (0.1.52) `device.secret_renewed`, `recovery.completed`, any other `recovery.attempt`, `identity.rotation_failed`, `identity.rotate_conflict`; unknown kinds of priority `normal` or above |
