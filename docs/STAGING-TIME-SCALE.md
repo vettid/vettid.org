@@ -1,7 +1,7 @@
 ---
 title: STAGING-TIME-SCALE
 status: draft, approved by the owner 2026-10-18
-version: 0.1.3
+version: 0.1.4
 date: 2026-10-23
 owner: Al Liebl (Mesmer)
 component: vault (enclave, release constants), member API, apps (Android, iOS), dev stack
@@ -14,6 +14,11 @@ related:
   - VAULT-LOCK.md (0.1.2) (the idle lock), AGENT-PLAN.md (0.1.6) (the dev stack's held-vault test)
   - vettid-vault `main` f0976ee (read only: `enclave/releasecfg/*.json`, `releasecfg.go` and the timer constants)
 changelog:
+  - 0.1.4: draft, proposed for the owner's approval (VAULT-MESSAGING
+    0.56.0). S17: the wallet spend cap's period (a rolling 24 hours,
+    §10.18 "Spend caps") is a wait of 24 h and is divided by
+    `time_scale` (1 h at 24), so it can be tested on staging; the
+    ledger holds absolute times, so a change of scale moves no entry
   - 0.1.3: editorial; VAULT-MESSAGING 0.55.10 (owner decisions
     2026-10-23). S11 is no longer a 7-day timer: the vault keeps a
     transfer's pending unlink for the life of its deposit token (at most
@@ -92,6 +97,7 @@ value at `time_scale` 24.
 | S14 | Start-over deletion (`deletes_at`) | member API | §11.11.9; MEMBER-API "Vault deletion: start over" | 24 h | 1 h |
 | S15 | Account site PIN locked after 15 failures in a day | member API | MEMBER-API rate limits | 24 h lock (the day of counting unchanged) | 1 h lock |
 | S16 | Vault update banner dismissed | app | ANDROID-PLAN 0.1.19 | at most 24 h | at most 1 h |
+| S17 | Wallet spend cap period (VAULT-MESSAGING 0.56.0; proposed, for the owner's approval) | vault | §10.18 "Spend caps" | rolling 24 h | rolling 1 h; the ledger keeps absolute times |
 
 Already short on staging and left as is: the **recovery waits** `W(k)`
 (§11.14.6), whose unit `recovery_wait_unit_seconds` is 86,400 in

@@ -1,9 +1,18 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.73
+version: 0.1.74
 date: 2026-10-23
 changelog:
+  - 0.1.74: draft, proposed; **for the owner's approval** (VAULT-MESSAGING
+    0.56.0, §10.18 "Spend caps"; the owner decided on 2026-10-23 to build
+    caps before W1 and W2). §4 "Wallet": a **Spending limits** screen
+    (wallet detail, ⋯), a prompt at creation, the review screen's
+    "left today" line, the `cap_exceeded` refusal text, raising a limit
+    with the PIN and the password, History and notification texts for
+    `wallet.cap_refused`, `wallet.caps_lowered`, `wallet.caps_raised`,
+    texts and tests. Numbered 0.1.74 on the assumption that vettid.org
+    #405 merges as 0.1.73; renumber if it does not
   - 0.1.73: editorial (status as of 2026-10-23); no rule changes. §4
     "Staging time scale" and "Photo attachments" marked built, "Recovery
     and unlock from release R" and "Wallet, presence, location and
@@ -3428,7 +3437,7 @@ bitcoin-kmp otherwise.
 | Screen | Proton analogue | Notes |
 |---|---|---|
 | Wallet (drawer) | Folder list | The wallets (`wallet.list`), each a row: name, network chip ("Signet", "Testnet4"; gold-ink, never on mainnet), balance in BTC with sats underneath, "Not backed up" in the error colour while the phrase is not confirmed. The floating action button: **New wallet** / **Import a wallet**. Empty state: "No wallets yet". A test network shows a banner: "Test network: these coins have no value." Up to 16 wallets (`limit`: "Your vault holds 16 wallets, the most it can.") |
-| Wallet detail | Message detail | Balance (confirmed; "+ 0.001 incoming" while unconfirmed), the last look-up's time and the server's host, pull to refresh; **Receive** and **Send** in the pill (Send from W2); the transactions (W2, below); ⋯: Show recovery phrase (question 21), Receiving address type (P2TR "Taproot (recommended)" or P2WPKH "Native SegWit"), Chain server, Details (fingerprint, network, account paths, descriptors, each copyable), Delete wallet |
+| Wallet detail | Message detail | Balance (confirmed; "+ 0.001 incoming" while unconfirmed), the last look-up's time and the server's host, pull to refresh; **Receive** and **Send** in the pill (Send from W2); the transactions (W2, below); ⋯: Show recovery phrase (question 21), Receiving address type (P2TR "Taproot (recommended)" or P2WPKH "Native SegWit"), Spending limits (0.1.74), Chain server, Details (fingerprint, network, account paths, descriptors, each copyable), Delete wallet |
 | New wallet | — | Name (1–128 characters, no control characters), network (signet or testnet4 on staging), then the credential password ("Your password protects this wallet. You will need it for every payment."); `wallet.create` without `item`; then the phrase (below) |
 | Import a wallet | — | Name, network, the words (12, 15, 18, 21 or 24), and an optional passphrase behind "Advanced" ("Only if you set one when the wallet was made. Letters, digits and symbols from a standard keyboard only."; printable ASCII, at most 256 bytes, as the vault requires). Each word is checked against the BIP39 English list as typed, and the checksum before anything is sent ("These words aren't a valid recovery phrase. Check each word and the order."). Then the password and `wallet.create` with `item: {mnemonic, passphrase?}`, then the scan above ("Looking for this wallet's history…") |
 | Recovery phrase | — | After creating (and from ⋯ → Show recovery phrase): `item.reveal` of the wallet's item with a reply key; the words in a numbered grid of two columns, the passphrase (if any) under it; "Write these words on paper, in order, and keep them somewhere safe. Anyone with them can take your coins. VettID never shows them to anyone else." **No copy button**; Continue goes to the check |
@@ -3466,6 +3475,33 @@ the import field is a password-class field without suggestions or
 personalized learning (`IME_FLAG_NO_PERSONALIZED_LEARNING`), as the
 typed recovery code (§4, "Recovery: type the code"); no word list
 lookup over the network.
+
+**Spending limits** (0.1.74; VAULT-MESSAGING 0.56.0 §10.18; **for the
+owner's approval**). Built in W1, before sending, because W2 must show
+and respect them.
+
+- **At creation and import.** After the name and network, a step
+  "Set a spending limit?" with two optional fields, **Most per payment**
+  and **Most per day**, in sats (a toggle shows BTC), and "No limit" as
+  the default choice. The values go in `wallet.create{caps}`. Nothing is
+  suggested for a test network; for mainnet (its own approval later) the
+  step cannot be skipped without choosing "No limit".
+- **The screen** (wallet ⋯, **Spending limits**): the two limits as
+  they stand, "Used in the last 24 hours: {spent} of {limit}" (on staging
+  "last hour"), and the buttons **Lower a limit** and **Raise or remove
+  a limit**. Lowering is a form with the new number (`wallet.caps.set`),
+  confirmed with no password. Raising or removing asks for the PIN and
+  the credential password (`wallet.caps.raise`, one credential
+  operation, `payload_sha256` as the vault's §10.18 says) and says what
+  changes: "From {old} to {new}" or "Remove the limit". A form that
+  would lower sends `set`; one that raises sends `raise`; a form that
+  does both is sent as `raise` with the lowered value in it.
+- **On the review screen** of a send (W2), under the vault's summary: "Counts
+  toward your daily limit: {outflow}. Left today after this: {left}",
+  when `per_period_sats` is set, from `<wallet>.caps.spent_sats`. The
+  app does not refuse by itself: the vault decides.
+- **Units.** Sats everywhere in this screen, whole numbers, with a
+  thousands separator; no fiat value.
 
 **Sending** (W2).
 
@@ -3520,6 +3556,19 @@ lookup over the network.
    spends the same coins again (only one of two can ever confirm). The
    app never writes `tx` to disk.
 
+**`cap_exceeded` texts** (0.1.74; for the owner's approval; the vault
+refuses before it opens the password, so nothing was signed and nothing
+is lost): `per_tx` "This payment is more than the {limit} you allow per
+payment. Nothing was signed." with the buttons **Change the amount**
+and **Spending limits**; `per_period` "This payment would take you over
+your daily limit of {limit}. You can still send {remaining} today."
+(no `remaining_sats`, or 0: "You can't send anything more today.");
+with `allowed_after`: "You can send this at {time}." (the earliest
+time the vault gives); without it: "This is more than your daily limit
+allows at any time." A payment request from a connection that is refused
+shows the same text on the request, which stays open. The app never
+shows the refusal to the connection.
+
 **`invalid_psbt` texts** (the reasons of vettid-vault
 `vms/btc/psbt.go` and `features/wallet/wallet.go`; any other: "Your
 vault would not sign this payment (<reason>)."): `fee_rate` "The fee is
@@ -3565,7 +3614,10 @@ needs the password (`item.delete` is a credential operation;
 `sync.event{wallet.deleted}` follows).
 
 **Notifications.** `wallet.signed` (Vault activity): "Bitcoin payment
-signed" opens the transaction; `item.revealed` of a wallet as for any
+signed" opens the transaction; (0.1.74) `wallet.cap_refused` and
+`wallet.caps_raised` (priority `high`, Vault activity): "A payment was
+refused by your spending limit" and "A spending limit was raised or
+removed on <name>", each opening the wallet's Spending limits; `item.revealed` of a wallet as for any
 critical item. No notification for coins received: the app looks at
 the chain only while it is open.
 
@@ -3573,8 +3625,12 @@ the chain only while it is open.
 <name>"; `wallet.deleted` "Wallet deleted"; `wallet.address_issued`
 "Address given to <First Last>" (a connection's request, §10.14);
 `wallet.signed` "Bitcoin payment signed" with the `txid` as `ref`;
-`item.revealed` of a wallet's item "Recovery phrase shown: <name>".
-No address or amount is in the audit log, so none is in History.
+`item.revealed` of a wallet's item "Recovery phrase shown: <name>";
+(0.1.74) `wallet.cap_refused` "Payment refused by a spending limit: <name>"
+(with the connection's name for a request), `wallet.caps_lowered`
+"Spending limit lowered: <name>", `wallet.caps_raised` "Spending limit
+raised or removed: <name>". No address or amount is in the audit log, so
+none is in History.
 
 **Out of scope here:** mainnet (its own approval), shared actions'
 `wallet.request-address` and `wallet.request-payment` (with shared
@@ -3602,6 +3658,12 @@ labels on addresses, a fiat value.
 | Broadcast failed | "Signed, but {host} didn't accept it: {reason}. Try again, or choose another server." |
 | Chain server privacy | as above, "To show your balance and send, VettID asks this server…" |
 | Server check failed | "That server isn't on {network}." / "That server didn't answer." |
+| Limits, at creation (0.1.74) | "Set a spending limit?" / "Your vault will refuse any payment above it. You can lower it any time; raising it needs your PIN and password." / "No limit" |
+| Limits, screen | "Most per payment" / "Most per day" / "Used in the last 24 hours: {spent} of {limit}" |
+| Limits, lower | "Lower the limit to {new}?" |
+| Limits, raise | "Raise the limit from {old} to {new}?" or "Remove the limit?" / "Enter your PIN and password." |
+| Limit, review | "Counts toward your daily limit: {outflow}. Left today after this: {left}" |
+| Limit, refused | as the `cap_exceeded` texts above |
 | Delete | "Delete {name}? Your vault forgets this wallet and its recovery phrase. Coins on it are lost unless you have the recovery phrase written down." |
 
 **Tests.**
@@ -3619,12 +3681,21 @@ labels on addresses, a fiat value.
   broadcast errors) and the genesis check (a testnet3 server refused
   for testnet4); the retry of `wallet.sign` with the same inner id; the
   testnet4 label kept and asked for.
+- (0.1.74) Spending limits: the lower and raise forms choose `set` or
+  `raise` correctly (a form that raises one and lowers another sends
+  `raise`); the `payload_sha256` of `wallet.caps.raise` against the
+  vault's vectors; every `cap_exceeded` text for each combination of
+  `reason`, `remaining_sats` and `allowed_after`; the creation step's
+  "No limit" default; sats formatting; no amount, limit or PIN in logs,
+  crash reports or files (the data directory scan).
 - Instrumented, dev stack (`regtest`, a development build of the
   vault, with a local Esplora): create, back up and check; receive;
   import a phrase with history on both accounts (the receiving account
   and the issued indices follow); a send through inspect, sign and
   broadcast that confirms; every `invalid_psbt` text; the phrase and
-  check screens have `FLAG_SECURE`.
+  check screens have `FLAG_SECURE`; (0.1.74) a limit set at creation, a
+  payment over it refused with the right text and nothing signed, a
+  raise with a wrong PIN refused, a raise with the right ones applied.
 - **Privacy, data directory scan:** after creating, revealing, checking
   and importing a wallet and sending from it, lock and scan the app's
   files, databases, caches and `no_backup`: none of the test phrase's
@@ -3639,7 +3710,8 @@ labels on addresses, a fiat value.
 **PRs.** W0: the library spike, written up (no screens). W1: the chain
 source and its setting, wallet list and detail, create, import,
 recovery phrase and check, receive, balance, `wallet.address.used`,
-History and feed labels. W2: send (building, inspect, approve, sign,
+History and feed labels, and (0.1.74) the Spending limits screen and the
+creation step (the vault's caps come first). W2: send (building, inspect, approve, sign,
 broadcast) and the transactions. Each against the dev stack first,
 then staging.
 
