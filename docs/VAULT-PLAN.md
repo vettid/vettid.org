@@ -1,9 +1,13 @@
 ---
 title: VAULT-PLAN
 status: draft
-version: 0.1.8
-date: 2026-10-12
+version: 0.1.9
+date: 2026-10-23
 changelog:
+  - 0.1.9: editorial (status as of 2026-10-23); no rule changes. V6 and
+    Later status notes, risk 2 (push wakes exist, no platform enabled),
+    follow-up 2 (`one-app` merged, vettid-vault #12), risk 6 (iOS) and the
+    calling service's media encryption (CALLS-PLAN D11)
   - 0.1.8: errata (VAULT-HOST-PROTOCOL decision H5, 2026-10-12): §5.2
     "Connection pooling" no longer says per-vault timing is blurred
     without saying where: the shared connections hide a vault among the
@@ -217,12 +221,24 @@ transport, enrollment, unlock, key attestation already exists in
 `HardwareAttestationManager`), then iOS, then desktop (pairs; never unlocks).
 **Exit:** each client passes a scripted run against the staging vault.
 
+*Status (2026-10-23).* `vaultctl` and the Go agent: `vettid-agent` A0
+to A3 and A5 are built (vettid-agent #7 to #40, 2026-10-17 to
+2026-10-20). Android: built and in daily use on staging (ANDROID-PLAN
+§6). iOS: under way (vettid-ios I0 to I3.2d and I3.3a merged; IOS-PLAN).
+Desktop: not done; vettid-desktop #8 (the Windows build) and #10 (the
+machine-bound storage key) are open since 2026-10-13, and only #5 and #7
+(CI and icons) are merged.
+
 ### Later
 
 Push gateway wakes through FCM/APNs when credentials exist (no
 UnifiedPush, owner 2026-10-09: phones without Google services use the
 app's on-phone service; PUSH-GATEWAY 0.3.0),
-calling service (TURN, SFrame), PQC Phase 2 (ML-DSA, Go 1.27).
+calling service (TURN; media frames encrypted with the media library's
+AES-GCM frame cryptor, CALLS-PLAN D11, not SFrame), PQC Phase 2 (ML-DSA,
+Go 1.27). Status (2026-10-23): the push gateway is deployed for staging
+without a platform enabled, and the calling service's code is built
+(vettid-calls) but not deployed.
 
 - **No backup or export of vault data outside the service** (owner
   decision, 2026-10-03). Recovery after losing the app is specified
@@ -514,7 +530,11 @@ secrets behind in memory. Inside the enclave:
    area by area with `vaultctl` scripts, not in bulk.
 2. **Locked-vault UX.** Locked vaults don't collect, and there are no push
    wakes yet, so mobile delivery depends on the app being open. Acceptable for
-   the preview.
+   the preview. *Status (2026-10-23): the vault's push operations and wakes
+   exist (N3, in staging release S9) and the staging gateway is deployed,
+   but no platform is enabled (no Firebase or APNs credentials), so
+   delivery still depends on the app being open or on the app's on-phone
+   service.*
 3. **Members who never approve updates** stay on old code, including
    unfixed vulnerabilities, until their release ends (at least 12 months
    after it was superseded, with 90 days' notice and emails); then they
@@ -525,7 +545,10 @@ secrets behind in memory. Inside the enclave:
 5. **Client effort** across Kotlin, Swift, Rust and Go. Mitigation: a small
    spec with vectors, and `vaultctl` as the reference client.
 6. **iOS App Attest inside the enclave** needs Apple's root pinned and CBOR/
-   COSE parsing in the TCB; budgeted in V3.
+   COSE parsing in the TCB; budgeted in V3. *Status (2026-10-23): the
+   enclave pins Apple's App Attest root and the iOS app id per release
+   (`enclave/config.go`; vettid-vault #104, #118, #119); VA4, signer continuity
+   across an iOS app, is #142.*
 
 ## 8. Follow-ups
 
@@ -542,4 +565,4 @@ From the vettid.dev archive review (2026-10-03):
    credential operations until a forced rotation; direct transfer between
    phones; recovery replaces the old app. Specified in VAULT-MESSAGING
    0.9.0 (§3.5.9, §6.7.1, §11.11.5) and implemented in vettid-vault
-   (branch `one-app`), with GrapheneOS attestation (§11.7).
+   (branch `one-app`, merged as vettid-vault #12, 2026-10-04), with GrapheneOS attestation (§11.7).

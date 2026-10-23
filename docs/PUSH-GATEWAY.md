@@ -1,8 +1,12 @@
 # VettID Push Gateway Protocol
 
-**Version:** 0.5.2 (draft)
-**Status:** Draft for review (N2; owner request of 2026-10-10: "we can
-start to design the push service for google play and apple ios").
+**Version:** 0.5.3
+**Status:** Approved by the owner (N2; the owner asked on 2026-10-10: "we can
+start to design the push service for google play and apple ios", reviewed
+the design the same day, and approved 0.4.2 on 2026-10-11; each later
+version below was approved as it came). Status of the deployment as of
+2026-10-23: deployed for staging without a platform enabled (no Firebase or
+APNs credentials).
 Implemented by `vettid/vettid-push` (the gateway) and vettid-android #109
 (the app's Google push mode), N4; 0.4.2 carries their errata. 0.4.2
 and 0.4.3 approved by the owner 2026-10-11. Deployed for staging since
@@ -1179,6 +1183,11 @@ again computes another digest and refuses a good signature.
 ```
 
 ## 17. Changelog
+
+- **0.5.3** — editorial (status as of 2026-10-23). The header no longer
+  says "Draft for review": the design was approved by the owner (0.4.2,
+  2026-10-11, see below) and every later version carries its own approval.
+  The header states the deployment status. No rule changes.
 
 - **0.5.2** — the APNs fallback payload's `"sound": "default"` becomes
   `"sound": "vettid_general.caf"` (a constant; approved by the owner
