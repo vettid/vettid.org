@@ -15,7 +15,7 @@ related:
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.10.0)
   - ANDROID-PLAN.md (0.1.71)
-  - IOS-PLAN.md (0.1.30; §9.1 VA1–VA3)
+  - IOS-PLAN.md (0.1.30; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -52,7 +52,11 @@ changelog:
     definition, `signer_unconfirmed` spends the UTK (0.52.0), "not yet implemented" in the
     0.27.1 entries, and the "stranded vaults" paragraph (the kept-signer
     case). New tests required (VA4). Header reference to ANDROID-PLAN
-    brought up to 0.1.71
+    brought up to 0.1.71. Corrections found in review: recovery is
+    release R's open and the recovered phone's first handshake
+    (`credential.recover` is removed), and the open records
+    `recovered_signer` rather than moving the binding (§11.7.1,
+    §11.14.6)
   - 0.55.8: editorial; one new device rule: `keySize` exactly 128 or
     256 (§10.10 "Media suites"); library facts confirmed on two phones
     (2026-10-23; vettid-android #175; CALLING-SERVICE 0.2.2, CALLS-PLAN
@@ -1207,8 +1211,8 @@ changelog:
     among the ways to move a staging vault. 0.25.0 and 0.26.0 marked
     approved. **Owner decisions (2026-10-11, all as recommended):**
     the vault will keep the last recorded Android signer across an
-    app without one (decided; built in 0.55.9, vettid-vault #142); a vault attached while its certificates were valid
-    keeps unlocking; the consequences of `signer_refused`'s order are
+    app without one (decided; built in 0.55.9, vettid-vault #142); a
+    vault attached while its certificates were valid keeps unlocking; the consequences of `signer_refused`'s order are
     accepted as built; confirmation stays by class (§11.7.1, §15
     item 35) (§10.9, §11.7, §11.7.1, §11.10.8, §15
     item 35; ANDROID-PLAN 0.1.37)
@@ -12308,9 +12312,12 @@ Android signer while the app has none** (an iOS app; "Across an iOS
 app" below). (0.55.9) **The kept signer is stored in the vault's
 DEK-encrypted state** (`kept_signer`: the digest and the class), as
 `recovered_signer` is, **not in the sealed header's device bindings**.
-Its freshness is `recovered_signer`'s: the state cannot fall behind
-the header, because every flush that sets or clears it rewrites the
-header with the state's sequence. A state without the member loads
+Its freshness is `recovered_signer`'s: the enclave refuses a
+state whose `state_seq` is below the header's (§13.2), and every flush
+that sets or clears it also rewrites the header (the app's unlock key
+changes in that flush); a host that serves an older header and state
+together is the header rollback the unlock refuses, and such a pair
+has the old Android app as the vault's app. A state without the member loads
 unchanged; no format change.
 
 - **Enrollment** binds the vault to the enrolling app's signer; audit
@@ -12369,9 +12376,9 @@ unchanged; no format change.
       kept (an iOS-first or unbound vault), `signer_changed` is `false`
       and the transfer binds, audited `device.signer_bound`.
   - **Recovery** (§11.11). The registered key records its own signer
-    at register; the vault's binding does not move then. It moves when
-    `credential.recover` succeeds and the old app is removed
-    (§11.11.5). A recovery that is cancelled, expires or is voided
+    at register; the vault's binding does not move then. In release R it
+    moves at the recovered phone's first handshake (§11.14.6); the open
+    only records the binding as `recovered_signer`. A recovery that is cancelled, expires or is voided
     leaves the binding as it was. (0.55.9) The same rules as for a
     transfer apply, with the kept signer, in release R's recovery open
     and in the recovered phone's pairing, and in a recovery open that
@@ -12598,9 +12605,12 @@ the app has none, and the kept signer counts as recorded for
   with no confirmation and no `signer_changed`.
 - An iOS-first or unbound vault: its first Android app is
   `device.signer_bound`, as before.
-- A recovery (release R's open, a `credential.recover`, and the
-  recovered phone's pairing) follows the same rules, a resumed
-  recovery open included.
+- A recovery follows the same rules: release R's open records the
+  binding (the old app's signer, or the kept one) as
+  `recovered_signer` before it removes the apps, also when the open is
+  resumed after a state write failed, and the binding moves at the
+  recovered phone's first handshake. (`credential.recover`, removed in
+  release R, did the same.)
 - A kept signer the running release no longer pins is never checked
   at unlock; see "A release that stops pinning a signer".
 - `device.list` does not show the kept signer; the audit entry and
@@ -12641,7 +12651,7 @@ the app has none, and the kept signer counts as recorded for
   Android app is `device.signer_bound`. A kept signer the release does
   not pin: unlock still succeeds for the iOS app, and the later
   return is `signer_changed` with the kept class. The same through a
-  recovery (`credential.recover` and the recovered phone's pairing),
+  recovery (release R's open and the recovered phone's pairing),
   including a resumed recovery open for Android to another signer,
   Android to iOS and iOS (kept) to another signer. A state without
   `kept_signer` loads unchanged; an empty value is not written.
@@ -16141,7 +16151,7 @@ binding and replay rules of §11.3 and §11.6 and then, **in this order**:
    credential with the same password (§3.5.6); and then, in the order of
    writes of §11.14.2: rotates the CEK and re-keys every critical item
    (§10.7); makes the phone the vault's app and the credential's holder;
-   moves the signer binding (§11.7.1); makes its app key the vault's app
+   records the vault's signer binding as `recovered_signer` (§11.7.1; it moves at the recovered phone's first handshake, §11.14.6); makes its app key the vault's app
    key; removes every other device of role `app` (`device.unlinked{reason:
    "replaced"}`); keeps desktops and agents; **rotates the vault's relay
    key, identity and KEM keys and wake key** (§3.4, §14; a rotation that
@@ -20263,8 +20273,9 @@ Follow-ups:
     The binding across an iOS app (§11.7.1, "Across an iOS app"): the
     vault will keep the last recorded Android signer when its app has
     none, so that a return to Android under another signer is
-    confirmed and audited as a change; decided, built in 0.55.9 (vettid-vault #142),
-    a vault change before the first release that accepts an iOS app,
+    confirmed and audited as a change; decided, built in 0.55.9
+    (vettid-vault #142), a vault change before the first release that
+    accepts an iOS app,
     nothing for S10 or production release 1. A vault attached while
     its phone's certificates were valid keeps unlocking after they
     expire (§11.7). The order of `signer_refused` and what follows
