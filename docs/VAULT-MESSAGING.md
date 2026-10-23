@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.55.9
+version: 0.55.10
 date: 2026-10-23
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.10.0)
-  - ANDROID-PLAN.md (0.1.71)
-  - IOS-PLAN.md (0.1.30; §9.1 VA1–VA4)
+  - ANDROID-PLAN.md (0.1.72)
+  - IOS-PLAN.md (0.1.31; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,38 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.55.10: **decisions approved by the owner
+    (2026-10-23)** (five: the three below, the notice's reliability and
+    the waiting notice's text), found in the iOS review (claude-mac) and
+    the independent review; ANDROID-PLAN 0.1.72, IOS-PLAN 0.1.31,
+    STAGING-TIME-SCALE 0.1.3, RUNBOOK. No change to the wire format;
+    **vault changes for release L (staging release 23)**, plus the old
+    app renewing the vault's deposit token at the approval. §11.14.10:
+    (1) the old phone no longer erases at its first start 7 days after
+    the approval; at or after day 7 it asks its vault (`device.list`)
+    first, and a vault that does not answer (locked, `lock_pending`, a
+    timeout, offline) is "not known: check again later", never an
+    erase; it erases only on `device.unlinked{transferred}` or on a
+    definite answer that it is no longer the vault's app, and a
+    cancelled or interrupted check never erases; the residual (a vault
+    that never answers keeps the old keys on the phone) is stated;
+    (2) the app re-reads its transfer record after the check's await and
+    records "kept, not done" only if that write succeeded, else the
+    check runs again; (3) the new phone waits 11 minutes, not 10, for
+    the approval (§6.7, §6.7.1); (4) the notice is reliable: the old app
+    renews the vault's standing deposit token when it approves, so the
+    token has its full 30 days; the vault keeps the pending unlink for
+    that token's life (no 7-day expiry), keeps the old session's sending
+    key and seals `device.unlinked{transferred}` at delivery (so §8.4's
+    16 days do not cut it short), at the vault's current app's first
+    unlock from storage; (5) the waiting notice reads "Your vault has not
+    confirmed the move to this phone. Once your new phone opens your
+    vault, remove VettID from this phone." Also: result 2 (the vault
+    answers and the phone is still its app: no erase, the keep ends);
+    `token_revoked` is read as no answer (§8.6); what a removed phone
+    hears; what counts as a definite answer; the generation rule for
+    recording the check. IOS-PLAN §14: the text for a signer change on
+    an iPhone to Android move.
   - 0.55.9: editorial; **two decisions approved by the owner
     (2026-10-23)**, on the independent review's advice; as built in
     vettid-vault #142 (IOS-PLAN 0.1.30, VA4). §11.7.1 "Across an iOS
@@ -4535,7 +4567,8 @@ Rules:
   token's and the request token's `jti`. The new device shows only the
   code; its user compares it on the app, and it waits for `device.paired`
   or (0.10.5) `device.pair.rejected` until 10 minutes after its
-  `hs.init`.
+  `hs.init` (0.55.10: a new phone of a transfer waits 11 minutes,
+  §11.14.10 rule 5).
 - **The rejection is sent** (0.10.5; owner decision of 2026-10-05,
   "include `device.pair.rejected`"). The new device is the member's own,
   in their hand, so there is nothing to hide, and without it the device
@@ -4623,8 +4656,9 @@ Rules:
 phone's unlock secret, makes a new recovery `opener` with the approval's
 PIN and password (so it can be answered `busy`), replaces the DEK in
 three writes, and the old app keeps its keys until the new phone's first
-unlock or for at most 7 days: §11.14.10, which takes precedence over this section where they
-differ.
+unlock, or until, 7 days or more after the approval, its vault answers
+that the move happened (0.55.10): §11.14.10, which takes precedence over this section where they
+differ. The new phone waits 11 minutes for `device.paired`, not 10.
 
 A member who still holds the old phone moves the app, and with it the
 credential, to a new phone without the 24 h wait of a recovery (owner
@@ -4769,8 +4803,8 @@ and the new app's handshake state is dropped. A commitment mismatch at
 | The new app's attestation fails | Its `hs.init` is dropped; the transfer stays open until its 10 minutes run out. The new app stops waiting for `hs.resp` after 60 seconds (step 2, 0.10.6). |
 | Wrong PIN or password at approval | `bad_pin` / `bad_password`, counted in their backoffs and as a failed owner check (§3.6.4); the blob is checked first, so an approval with an old blob is answered `stale_credential` and counts nothing (0.46.1). The transfer stays pending until its 10 minutes run out; the member may retry. |
 | The vault becomes held (§3.6.3) while a transfer is open | The transfer stays open: the holder may still approve it (a check in itself) or reject it. A new `device.transfer.create` waits for a check. |
-| The new app goes offline before its `hs.fin` | No SAS is shown; the transfer times out after 10 minutes; nothing changes. |
-| The new app goes offline after its `hs.fin` | The approval still completes the transfer. `device.paired` waits in the new app's mailbox (relay TTL); if the new app never returns, the member recovers (§11.11), as when a new app is lost after a transfer. |
+| The new app goes offline before its `hs.fin` | No SAS is shown; the transfer times out after 10 minutes; nothing changes. (0.55.10) The new app of a transfer drops its handshake, attested key and epoch-1 secret after 11 minutes (§11.14.10 rule 5). |
+| The new app goes offline after its `hs.fin` | The approval still completes the transfer. `device.paired` waits in the new app's mailbox (relay TTL); if the new app never returns, the member recovers (§11.11), as when a new app is lost after a transfer. (0.55.10) A new app that returns after its 11 minutes has dropped its handshake, attested key and epoch-1 secret and cannot use it: the member recovers (§11.11). |
 | The old app goes offline before approving | The transfer times out; nothing changes. |
 | The old app goes offline after approving | Nothing is needed from it: the approval completed the transfer. The old app learns of its removal from `device.unlinked` (best effort), and then erases its local state (owner decision, 2026-10-05); (0.33.0, release R) that notice is sent only after the new phone's first unlock from storage (§11.14.10). A refused relay key alone is not proof of removal: the app offers the member an erase instead of erasing by itself. The refused relay key is a `403 token_revoked` (RELAY-PROTOCOL §5.3 step 6, §7.1) on a deposit to the device's own vault mailbox: the vault has put the device's relay key on its denylist as a `sub` (§7.4). The same holds for the old app of a recovery (§11.11.5). What the device does on that answer: §8.6. |
 | A clone alarm opens (§3.5.9) | An open transfer is aborted. |
@@ -5232,7 +5266,11 @@ refused relay key of §6.7.1: it counts toward offering the member an
 erase. It MUST NOT erase its local state on that answer alone: only
 `device.unlinked` (or the member's choice in the erase offer) erases it.
 It keeps collecting its own mailbox, where a `device.unlinked` may still
-be waiting.
+be waiting. (0.55.10) The one exception is the old phone of a transfer
+in its day-7 check (§11.14.10): after a `token_revoked` it still sends
+one `device.list` at each start and foreground, and it shows that
+section's waiting notice instead of the erase offer (there is no "Delete
+now", owner decision 2026-10-15).
 
 **A refused answer does not block the mailbox.** A device SHOULD ack a
 vault message (§8.3) once it has processed it, even when the deposit of
@@ -15728,8 +15766,8 @@ help**, whether the credential backup is on or off: the header's
 `opener` is for the earlier DEK and the state is under the later one
 (§11.14.6 answers `stored_mismatch`). **After the restore** the vault is
 the complete vault from before the event. For a transfer, the member
-then needs the old phone (which keeps its keys for up to 7 days,
-§11.14.10), or, with the credential backup on, a recovery with a new
+then needs the old phone (which keeps its keys until the notice or, from
+day 7, until its vault answers, §11.14.10), or, with the credential backup on, a recovery with a new
 phone, the PIN and the password after the quiet period. For a PIN or
 password change the member still holds the phone and unlocks with the
 old PIN (after a PIN change or a new phone secret, an Android phone
@@ -17064,35 +17102,75 @@ under the request's `id` (§8.2).
    `vault.lock` and then `vault.unlock` with its own secret ("Finish the
    move"). That unlock reads the stored header and state, so it proves
    that both writes of the transfer are durable.
+5. **The new phone waits 11 minutes** (owner decision, 2026-10-23). The
+   vault's 10 minutes (§6.7.1, failures) count from the `hs.init` it
+   receives; the new app counts from the moment it started its
+   `hs.init`, which is earlier. The new app of a transfer therefore
+   waits for `device.paired` or `device.pair.rejected` for **11
+   minutes** after it started its `hs.init` (the vault's 10 minutes
+   plus about a minute of grace), and only then drops its handshake, its
+   attested key and its epoch-1 secret. With 10 on both sides an
+   approval near the end could complete at the vault after the new phone
+   had already dropped them, and the vault's app would be a phone that
+   cannot open it. A `device.paired` that arrives within the 11 minutes
+   is accepted. The vault's 10 minutes are unchanged, and so are those
+   of a pairing of a desktop or an agent (§6.7).
 
 **The old phone's keys after a transfer** (decided by the owner on
 2026-10-15). *This replaces the earlier rule that the old app erases
 itself on `device.unlinked{reason: "transferred"}` sent at the
 approval.* The old app deletes its keys **when it receives that notice,
-sent only after the new phone's first unlock from storage, or 7 days
-after the approval, whichever comes first.**
+sent only after the new phone's first unlock from storage, or, from 7
+days after the approval, when its vault answers that this phone is no
+longer its app (0.55.10, owner decision 2026-10-23), whichever comes
+first.**
 
 - At the approval the old app is removed from the vault exactly as
   before (its relay key denylisted, its unlock key and UTK pool removed;
   §7.4), but the vault **does not** send `device.unlinked` then. It
   keeps, in its state, a **pending unlink**: the old device's mailbox,
   the deposit token it issued to the vault, the `transfer_id` and the
-  transfer's `dek_version`.
+  transfer's `dek_version` and (0.55.10) the old session's sending key,
+  so that it can seal the notice when it delivers it. **Before it sends
+  the approval the old app renews the standing token it issued to the
+  vault for its own mailbox** (`relay.token.issued{kind: "standing", token}`, §7.1, §7.2; no new
+  token class and no new message). It deposits that message to the
+  vault's mailbox and waits for the relay's `201` before it deposits the
+  approval, so that the vault, which takes its mailbox in arrival order
+  (§8, §8.3), stores the fresh token before it processes the approval;
+  it SHOULD NOT denylist the previous token's `jti` before the approval
+  is answered. It renews again before each approval it sends (after
+  `busy` or `retry` too). The token then has its full lifetime, at most
+  30 days, from the approval; the pending unlink keeps the newest
+  token.
 - **`device.unlinked{reason: "transferred", transfer_id}`** is deposited
   to the old app only after the vault's then current app has completed
   its **first successful unlock from the stored objects under that
   `dek_version` or a later one** (the "Finish the move" unlock, or any
   later one; a completed recovery's open counts the same, and sends it
   before its relay key switches, §11.14.6). The vault then deletes the
-  pending unlink. A pending unlink whose token has expired is deleted
-  unsent; one older than 7 days is deleted too.
+  pending unlink. (0.55.10, owner decision 2026-10-23.) **The vault
+  keeps the pending unlink for the life of that token, not for 7
+  days:** it is deleted unsent only when the token has expired, at most
+  30 days after the approval, whatever the pending unlink's age. The
+  notice is sealed **at delivery**, with the old session's sending key
+  the vault kept, and not at the approval, so that §8.4's 16-day `ts`
+  rule does not cut it short. The notice normally goes out minutes after
+  the move ("Finish the move"). The vault can deposit it for up to 30
+  days after the move; once deposited it waits in the old phone's
+  mailbox for the relay's 14 days (`message_ttl_seconds`), and an old
+  phone that does not collect it in that time keeps its keys until the
+  member removes VettID. These are vault changes of release L (staging release 23),
+  together with the old app's renewal of the token at the approval.
 - The old app, once its approval was answered `{"unlink":
   "after_new_unlock"}`, keeps its phone key, device key, app key and local
   state, records the approval's time, and does nothing with the vault: it
   shows "Finish the move on your new phone". On
-  `device.unlinked{transferred}`, **or at its first start 7 days or more
-  after the approval**, it deletes the phone key, the device key and the
-  app key and erases its local state. Until then it offers **"The move
+  `device.unlinked{transferred}` it deletes the phone key, the device
+  key and the app key and erases its local state. **At or after 7 days
+  after the approval it first checks with the vault** (see "The day-7
+  check" below), and erases only on a definite answer. Until then it
+  offers **"The move
   didn't finish"**: an unlock with its own keys and the PIN, which
   succeeds only if the transfer's state write was not stored, or after
   an operator restored the earlier state (§11.14.2, RUNBOOK); the old
@@ -17104,8 +17182,13 @@ after the approval, whichever comes first.**
   state is not durable the new phone cannot unlock, and the earlier
   header and state, restored in time, open with the old phone and the
   PIN. Once the new phone has unlocked from storage that case no longer
-  exists. After 7 days no restore is possible in any case, so the old
-  keys serve nothing.
+  exists. After 7 days no operator restore of §11.14.2 is possible, so
+  the old keys serve nothing **once the vault has answered**; until it
+  answers, the 7 days prove nothing about the move (0.55.10: a vault
+  that was locked on day 7 used to erase the old phone even when the
+  approval never took effect, or after the §11.14.2 restore, which
+  would strand the vault), so the keys are kept until the vault
+  answers.
 - **The residual until then.** With an honest host the old phone opens
   nothing after step 3: its unlock key is gone, its secret opens no
   current wrap and the DEK was replaced. With a host that replays, the
@@ -17115,13 +17198,73 @@ after the approval, whichever comes first.**
   keys**. The notice cannot shorten that against such a host: the host
   also carries the relay traffic and can withhold `device.unlinked`, and
   a pending unlink whose standing token has expired is deleted unsent.
-  So the bound against it is the 7 days, and only if the old app runs
-  after them; a phone that is off, or never opens the app again, keeps
-  the keys until it is wiped. Against an honest host the notice usually
-  arrives within minutes, at "Finish the move". The old phone's last
-  screen says: "This phone keeps your vault's keys until your new phone
-  has finished the move, for at most 7 days. Before you give this phone
-  away, remove VettID from it or reset it."
+  A host that replays can withhold both the day-7 answer and the
+  notice, so the bound against it is the member removing or resetting
+  VettID on the old phone, which the last screen and the waiting notice
+  ask for; a phone that is off, or never opens the app again, keeps the
+  keys until it is wiped. Against an honest host the notice usually arrives within minutes, at "Finish
+  the move". The old phone's last screen says: "This phone keeps your
+  vault's keys until your new phone has finished the move, and until
+  your vault has confirmed it. Once your new phone works, you can remove
+  VettID from this phone. Before you give this phone away, remove
+  VettID from it or reset it."
+- **The day-7 check** (0.55.10; owner decision, 2026-10-23, from the iOS
+  review). At the first start, and at every start and foreground after
+  that, 7 days or more after the approval, the old app sends the vault
+  `device.list` before it erases anything. There are three results.
+  1. **The vault answers, and this phone is no longer its app** (a
+     definite answer): the app erases as for the notice.
+  2. **The vault answers, and this phone is still its app** (the
+     approval never took effect, or an operator restored the earlier
+     state): the app erases nothing, ends the keep, and is the vault's
+     app again, as after "The move didn't finish".
+  3. **The vault does not answer** (locked, `lock_pending`, a timeout,
+     offline, or a refusal that is not an answer of the vault itself,
+     such as `token_revoked`, §8.6): the result is **not known: check
+     again later.** The app NEVER erases on it. It keeps its keys, shows
+     "Your vault has not confirmed the move to this phone. Once your new phone opens your vault, remove VettID from this phone.", and checks again at each
+     start and foreground, until it gets a definite answer. A check that
+     is cancelled or interrupted (the app is stopped, the phone locks,
+     the process dies) never erases; the next start runs it again.
+  A definite answer (results 1 and 2) is only the response to this
+  check's own request: a `device.list` response opened under this
+  phone's session with its vault whose `re` is the check's request `id`
+  and whose `status` is ok. Any other message, an earlier `device.list`
+  response among them, and any error status, is result 3. The phone is
+  still the vault's app only if the list holds this phone's own device
+  `id` with kind `app`; it is no longer the vault's app only if the list
+  does not hold that `id`.
+  The app erases only on `device.unlinked{transferred}`, or on result 1.
+- **What a removed phone hears** (0.55.10). Once the approval took
+  effect the old app is removed (§7.4): the relay refuses its deposits
+  (`token_revoked`), the vault drops its messages, and an unlock gives
+  unreadable bytes (§11.4). So a removed phone gets result 3 at every
+  check, and erases on `device.unlinked{transferred}` (reliable for the
+  life of the deposit token, above) or when the member removes VettID.
+  Result 1 needs a vault that answers a removed device, which no release
+  does yet; it is specified for forward compatibility. Result 2 occurs
+  only while the relay still accepts the old key (for example when the
+  approval's writes were not stored, §11.14.2).
+- **Recording the check** (0.55.10). The app keeps, with its transfer
+  record, a generation that every change of the record raises. Before it
+  asks, it reads the record and notes the generation; after the await it
+  re-reads the record. If the record is gone or its generation changed
+  meanwhile (the notice erased it, "The move didn't finish" ended the
+  keep, a lock or another check changed it), it acts on nothing and
+  records nothing; the next start or foreground checks again while a
+  keep remains. Otherwise it writes the result conditionally on the
+  noted generation, and records "kept, not done", or acts on result 1 or
+  2, only if that write succeeds. A failed write records nothing, and
+  the check runs again.
+- **The residual of the day-7 check** (0.55.10). A vault that never
+  answers keeps the old keys on the phone indefinitely. With an honest
+  host they are useless at the vault (the old app is removed, its relay
+  key is on the denylist (§7.4) and its unlock key is gone) and, since
+  the notice is kept for its token's 30 days, the notice erases them
+  once the new phone has unlocked; past those 30 days, or with a host
+  that withholds the notice, they stay on the phone until the member
+  removes VettID or resets it, which the last screen and the waiting
+  notice say. With a host that replays they stay the residual above.
 - A vault stranded by that fault and restored in time (§11.14.2) needs
   the old phone or, with the credential backup on, a recovery after the
   restore. One that is not restored in time is lost, with or without the
