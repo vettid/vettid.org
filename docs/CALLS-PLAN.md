@@ -1,12 +1,12 @@
 ---
 title: CALLS-PLAN
 status: approved by the owner 2026-10-11 (D1–D11 as recommended; D1 with the owner's position of §3.1) and 2026-10-12 (§13, D12–D26 as recommended; D23 as (c))
-version: 0.1.4
-date: 2026-10-17
+version: 0.1.5
+date: 2026-10-23
 owner: Al Liebl (Mesmer)
 related:
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2) §2 rules, §2.4 promotion, §5 phase 2
-  - CALLING-SERVICE.md (0.2.0, approved by the owner 2026-10-12; 0.1.1 is what §5.1 describes)
+  - CALLING-SERVICE.md (0.2.0 approved 2026-10-12; 0.2.2 current; 0.1.1 is what §5.1 describes)
   - VAULT-MESSAGING.md (0.28.0) §10.10 calls, §7.3, §8.5, §10.4.1, §11.10.8; (0.38.0) §14.2 trigger 5, the call wake (V4)
   - RELAY-PROTOCOL.md (0.7.1) §6.2–§6.4, §7.2 (rewritten in 0.7.0: limits per key)
   - PUSH-GATEWAY.md (0.4.4) §6, §14.2 item 13; (0.5.1) §8
@@ -59,6 +59,11 @@ changelog:
     §6.6, §7 (C3's exit test: a call within 2 s of another wake), §13.2,
     §13.3 step 1 and D24 say so, each marked "0.1.4". The plan is
     otherwise unchanged and stays approved
+  - 0.1.5 (2026-10-23): editorial, awaiting the owner's approval. The
+    media stack is `150.7871.04` (it carries the 256-bit key option,
+    upstream PR #302; confirmed on two phones 2026-10-23, vettid-android
+    #175). §6 (A), §12.2 and §12.3 say so; suite 2 is still not offered
+    in form 1 (VAULT-MESSAGING 0.55.8)
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -224,7 +229,7 @@ Central on 2026-10-11.
 
 | Option | What it is | Frame encryption | F-Droid and reproducibility |
 |---|---|---|---|
-| **A. `io.github.webrtc-sdk:android` 150.7871.01** (2026-09-05; BSD-3-Clause; arm64 library 12.3 MB) | libwebrtc with the webrtc-sdk patches (the webrtc-sdk project; 0.1.2: it also publishes iOS/macOS, desktop C++ and Rust builds with the frame cryptor, §12.1) | **Built in**: `org.webrtc.FrameCryptor` (AES-GCM; 0.1.2: AES-128-GCM only, §12.3), the same API the old app used | A pinned Maven Central artifact is a fixed input, so the APK stays reproducible. F-Droid's policy admits free-licensed binaries from Maven Central; whether its reviewers accept this one is **not established** |
+| **A. `io.github.webrtc-sdk:android` 150.7871.04** (0.1.5; 150.7871.01 of 2026-09-05 was the first pinned; BSD-3-Clause; arm64 library 12.3 MB) | libwebrtc with the webrtc-sdk patches (the webrtc-sdk project; 0.1.2: it also publishes iOS/macOS, desktop C++ and Rust builds with the frame cryptor, §12.1) | **Built in**: `org.webrtc.FrameCryptor` (AES-GCM; 0.1.2: AES-128-GCM only in .01; .04 also has AES-256-GCM, §12.3), the same API the old app used | A pinned Maven Central artifact is a fixed input, so the APK stays reproducible. F-Droid's policy admits free-licensed binaries from Maven Central; whether its reviewers accept this one is **not established** |
 | B. `im.conversations.webrtc:webrtc-android` 149.0.0 (2026-09-09; Apache-2.0/MIT packaging; arm64 9.0 MB) | Unpatched libwebrtc, built for the Conversations app | Only the bare `FrameEncryptor`/`FrameDecryptor` hooks: VettID would write and maintain the cipher in C++ (NDK, JNI) | Same input rule. Conversations is distributed on F-Droid, so there is precedent; our own C++ would have to build reproducibly too |
 | C. `io.getstream:stream-webrtc-android` 1.3.10 | What the old app used | `FrameCryptor` present | Last published 2025-09-11: stale, not proposed |
 | D. Build libwebrtc ourselves | Google's source, our own artifact | As B, or carry patches | Over 20 GB of downloads and about an hour per build (F-Droid admin issue 364); the toolchain itself is downloaded prebuilt. Bit-for-bit reproducibility **not established**. Much work for little gain while A and B exist |
@@ -629,18 +634,21 @@ Also found:
 
 ### 12.2 D2: the media stack is confirmed
 
-`io.github.webrtc-sdk:android` 150.7871.01, pinned by SHA-256 in the
-build. The spike's conditions: the two-phone test passes (it did, with
-the one direction to repeat); the owner accepts AES-128 for media
+`io.github.webrtc-sdk:android` 150.7871.04 (0.1.5; 150.7871.01 at
+the spike), pinned by SHA-256 in the build (AAR
+`1872dda4e3bf7d6ea6f7c6e11861332081c57081a1e62fc82fab72415c69c84c`).
+The spike's conditions: the two-phone test passes (it did, with the one
+direction to repeat); the owner accepts AES-128 for media
 frames (§12.3); `fdroid scanner` and `fdroid build` are run on the
 recipe before C1 ends (open; risk 1 of §10 stays until then).
 
 ### 12.3 D11: AES-128-GCM for now; cipher agility as a goal
 
 - **Frames are encrypted with AES-128-GCM.** The library's key provider
-  cannot reach 256-bit keys today. The app moves to 256 bits when the
-  upstream option ships (webrtc-sdk/webrtc pull request 302; its state
-  was not re-read for this document).
+  could not reach 256-bit keys in 150.7871.01. 0.1.5: 150.7871.04
+  carries the option (webrtc-sdk/webrtc pull request 302) and it works
+  on two phones; the app moves to 256 bits when a second suite may be
+  offered: once form 1 is retired (VAULT-MESSAGING §10.10 "Mixed releases").
 - **128 bits is acceptable for a first production calls release**
   (decision recorded 2026-10-12). It is said plainly where the cipher is
   specified: the frame cipher is then the weakest part of a call, below
@@ -765,7 +773,8 @@ across networks, and makes the vault look after a call by itself.
    cipher (§12.3).
 
 What does not change: direct media by default (D1); AES-128-GCM frames
-(suite 1) until the media stack has the 256-bit option; calls off in
+(suite 1) until form 1 is retired (the stack has the 256-bit option
+since 150.7871.04); calls off in
 production; the staging vaults use the production relay; no Google
 code or key is involved anywhere in this.
 
@@ -944,7 +953,7 @@ Found while writing this, by reading vettid-vault `origin/main`
   written here. They are not done; the specifications are corrected
   if they do.
 - The state of the media stack's 256-bit option (webrtc-sdk/webrtc pull
-  request 302) was not re-read.
+  request 302) was re-read 2026-10-23: it is in 150.7871.04 (0.1.5).
 - The vectors for the key confirmation in VAULT-MESSAGING §16 were
   computed by one script only; the vault's and the app's
   implementations must reproduce them.

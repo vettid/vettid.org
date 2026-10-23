@@ -1,8 +1,8 @@
 ---
 title: CALLING-SERVICE
 status: approved by the owner 2026-10-12 (D12–D26 of CALLS-PLAN §13.5; D23 as (c))
-version: 0.2.1
-date: 2026-10-17
+version: 0.2.2
+date: 2026-10-23
 owner: Al Liebl (Mesmer)
 component: calling-service (optional, media plane only): a STUN/TURN server and a credential issuer
 related:
@@ -48,6 +48,10 @@ changelog:
     coturn's verbose log through a pipe, counts the refusal lines in
     memory and drops every line (owner approval of 2026-10-17). As built
     in vettid-calls
+  - 0.2.2 (2026-10-23): editorial, awaiting the owner's approval. §6
+    point 2: the media stack can do suite 2 (AES-256-GCM) since
+    150.7871.04, confirmed on two phones; it is offered only once
+    form 1 is retired (VAULT-MESSAGING 0.55.8, §10.10 "Mixed releases")
 classification: public (no secrets; safe for github.com/vettid)
 review-cycle: 6 months or upon WebRTC PQC / AWS milestone, whichever first
 ---
@@ -313,8 +317,10 @@ The service forwards media it cannot read:
 2. From `k_call` each device derives two direction keys, bound to the
    negotiated **media suite**, to the caller's whole list of suites and
    to the `call_id`. Suite 1 is AES-128-GCM in the media stack's frame
-   format; suite 2 (AES-256-GCM) is registered and offered by no build
-   until the media stack can do it (owner decisions of 2026-10-12,
+   format; suite 2 (AES-256-GCM) is registered; the media stack can do it
+   (150.7871.04, confirmed on two phones 2026-10-23) and it is offered
+   only once form 1 is retired (VAULT-MESSAGING §10.10 "Mixed
+   releases") (owner decisions of 2026-10-12,
    CALLS-PLAN §12.3: 128 bits accepted for now, cipher agility as a
    goal). **With suite 1 the frame cipher is the weakest part of a
    call**, below the key agreement.
