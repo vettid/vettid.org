@@ -1779,7 +1779,7 @@ its process runs; nothing keeps it running in the background).
    notification is cancelled and the ongoing call is a new, silent
    notification. Every other notification on `calls_v2` (the ongoing and
    outgoing call) is posted with `setSilent(true)`, so only ringing
-   plays the ringtone. It stops on answer, decline or timeout, and the
+   plays the ringtone. The ringtone stops on answer, decline or timeout, and the
    system honours the ring volume and the ringer mode (silent: no
    sound; vibrate: vibration only; the channel enables vibration). The
    ringing notification sets `CATEGORY_CALL`. Under Do Not Disturb it
@@ -1796,8 +1796,8 @@ its process runs; nothing keeps it running in the background).
    decline; with the ringer on vibrate a call only vibrates, and on
    silent it neither rings nor vibrates; `vettid_general` is audibly
    softer than `vettid_urgent`; after an upgrade from a build with the
-   old ids, only the `_v2` channels are listed (Settings may show "6
-   categories deleted").
+   old ids, only the `_v2` channels, `activity` and `connection` are
+   listed (Settings may show "6 categories deleted").
 
 7. **Mapping** (feed kinds of VAULT-MESSAGING §10.9 and events; this
    replaces the earlier answer to question 3). Feed items are the one
