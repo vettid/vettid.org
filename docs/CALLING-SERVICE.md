@@ -14,10 +14,6 @@ related:
   - VAULT-HOST-PROTOCOL.md (0.1.2) §8 egress, §11.2 what the parent sees
   - PQC-MIGRATION.md
 changelog:
-  - 0.2.2 (2026-10-23): editorial, awaiting the owner's approval. §6
-    point 2: the media stack can do suite 2 (AES-256-GCM) since
-    150.7871.04, confirmed on two phones; it is offered from form 2
-    (C2), not in form 1 (VAULT-MESSAGING 0.55.6)
   - 0.1.1 (2026-10-03): first draft, written before the push gateway,
     the release channels and the egress controls existed: coturn with a
     sidecar in one container, the shared secret inside the vault,
@@ -52,6 +48,10 @@ changelog:
     coturn's verbose log through a pipe, counts the refusal lines in
     memory and drops every line (owner approval of 2026-10-17). As built
     in vettid-calls
+  - 0.2.2 (2026-10-23): editorial, awaiting the owner's approval. §6
+    point 2: the media stack can do suite 2 (AES-256-GCM) since
+    150.7871.04, confirmed on two phones; it is offered only once
+    form 1 is retired (VAULT-MESSAGING 0.55.6, §10.10 "Mixed releases")
 classification: public (no secrets; safe for github.com/vettid)
 review-cycle: 6 months or upon WebRTC PQC / AWS milestone, whichever first
 ---
@@ -319,7 +319,8 @@ The service forwards media it cannot read:
    to the `call_id`. Suite 1 is AES-128-GCM in the media stack's frame
    format; suite 2 (AES-256-GCM) is registered; the media stack can do it
    (150.7871.04, confirmed on two phones 2026-10-23) and it is offered
-   from form 2 (C2), never in form 1 (owner decisions of 2026-10-12,
+   only once form 1 is retired (VAULT-MESSAGING §10.10 "Mixed
+   releases") (owner decisions of 2026-10-12,
    CALLS-PLAN §12.3: 128 bits accepted for now, cipher agility as a
    goal). **With suite 1 the frame cipher is the weakest part of a
    call**, below the key agreement.

@@ -27,7 +27,8 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.55.6: editorial; library facts confirmed on two phones
+  - 0.55.6: editorial; one new device rule: `keySize` exactly 128 or
+    256 (§10.10 "Media suites"); library facts confirmed on two phones
     (2026-10-23; vettid-android #175; CALLING-SERVICE 0.2.2, CALLS-PLAN
     0.1.5), awaiting the owner's approval; no protocol change. §10.10
     "Media suites": the media stack in use is now
@@ -39,7 +40,7 @@ changelog:
     frame format are confirmed against that release **[D]**, and its
     frame key in the vectors is no longer provisional. Suite 2 is
     still **not offered or chosen in form 1** ("Call forms", rules 1
-    and 3), only with form 2. Also written down: the sizes must match
+    and 3), only once form 1 is retired. Also written down: the sizes must match
     or the frame fails (`DECRYPTION_FAILED`); for one `k_dir` the
     16-byte key is the first half of the 32-byte one, which is
     harmless; the ratchet's output length (unused: window 0); the
@@ -8746,7 +8747,8 @@ vettid-android `docs/calls/CALL-MEDIA.md` for phase C1 and is lifted
 here; the numbers, labels and formulas are those, unchanged, because an
 iOS or desktop client has to match them byte for byte. Marks, as there:
 **[S]** read from the media stack's source, **[I]** inferred, **[D]**
-confirmed on two phones in the C0 test (2026-10-12).
+confirmed on two phones in the C0 test (2026-10-12) or, for
+150.7871.04, in vettid-android `FrameFormatDeviceTest` (2026-10-23).
 
 A media suite fixes everything two devices must agree on to encrypt a
 call's media frames. The registry is closed and versioned: a number is
@@ -8756,14 +8758,15 @@ its own copy.
 | id | Frame cipher | Frame key | KDF | Label of the direction keys | Label of the frame key | Transport | State |
 |---|---|---|---|---|---|---|---|
 | 1 | AES-GCM, the media stack's frame-cryptor format ("The encrypted frame") | 128 bits | HKDF-SHA-256 | `vettid/vms/2/call-media` | `vettid/vms/2/call-frame` | DTLS-SRTP as the stack negotiates it; no post-quantum DTLS required | **in use** |
-| 2 | the same format | 256 bits | HKDF-SHA-256 | `vettid/vms/2/call-media` | `vettid/vms/2/call-frame` | the same | **the stack can do it** since 150.7871.04 (upstream PR #302); the derivation (L = 32) and the frame format were confirmed against that release on two phones (2026-10-23) **[D]**. Not offered or chosen in form 1 ("Call forms", rules 1 and 3); offered with form 2 |
+| 2 | the same format | 256 bits | HKDF-SHA-256 | `vettid/vms/2/call-media` | `vettid/vms/2/call-frame` | the same | **the stack can do it** since 150.7871.04 (upstream PR #302); the derivation (L = 32) and the frame format were confirmed against that release on two phones (2026-10-23) **[D]**. Not offered or chosen in form 1 ("Call forms", rules 1 and 3); offered only once form 1 is retired ("Mixed releases"), so only in form 2 calls |
 
 What a device **offers** is the registry cut down to what its media
 engine can do, in the registry's order of preference (2 before 1), and
 further by rule 3 of "Call forms". The Android engine can do suites 1
-and 2 (since 150.7871.04), but form 1 offers only suite 1 and form 2
-offers both. Adding a suite is a registry entry and the engine's capability;
-the negotiation, the derivation and the signalling do not change.
+and 2 (since 150.7871.04), but no device offers suite 2 while a
+`call.start` carries form 1 (rule 3); it is offered from the release
+that retires form 1 ("Mixed releases"). Adding a suite is a registry
+entry and the engine's capability; the negotiation, the derivation and the signalling do not change.
 "Transport" is part of the suite so that a later suite can require, for
 example, a post-quantum DTLS key exchange: an engine whose transport
 cannot meet a suite's expectation does not offer it. No suite requires
@@ -8899,7 +8902,7 @@ frame_key = HKDF-SHA-256(ikm = k_dir, salt = the suite's frame-key label, info =
 The key provider has a `keySize` option in bits (upstream PR #302,
 in 150.7871.04); the key length is L = keySize / 8, so 128 is suite 1
 and 256 is suite 2 **[S]**, **[D]**. **Any `keySize` other than 256 is
-silently treated as 128 **[S]**: an engine MUST pass exactly 128 or
+silently treated as 128** **[S]**. **An engine MUST pass exactly 128 or
 256.** The AES-GCM variant follows the key length (16 bytes:
 AES-128-GCM; 32 bytes: AES-256-GCM) **[S]**.
 
@@ -8907,8 +8910,8 @@ The frame format is the same for suite 2: the same header (one clear
 byte for Opus), the same IV, a 16-byte tag, the trailer
 `0x0C || key_index`, 30 bytes of overhead **[D]**. The IV is
 `BE32(ssrc) || BE32(ts) || BE32(ts − (n mod 65535))` with n = 0, 1, 2, …
-**[D]**: the library's random start for the counter is overwritten
-before use. Native frames made under the vector's `k_dir` open under
+**[S]** (observed on two phones **[D]**): the library's random start
+for the counter is overwritten before use **[S]**. Native frames made under the vector's `k_dir` open under
 HKDF with L = 32 and not under L = 16; suite 1 frames open under L = 16
 only; a mismatch gives `DECRYPTION_FAILED` **[D]**.
 
@@ -8919,7 +8922,7 @@ into `k_dir`'s derivation, so the two suites never share a `k_dir`.
 The ratchet is not used (window 0). If it were, the new key material
 would be HKDF(material, the frame label, 128 bytes of 0x00, L = 32)
 whatever the suite, and the frame key after it would have the suite's
-length **[D]**.
+length **[S]**, **[D]**.
 
 *The encrypted frame* **[S]** **[D]**.
 
@@ -8946,7 +8949,7 @@ out      = header || sealed || iv || 0x0C || key_index                          
   frame cipher is the weakest part of a call's confidentiality**. The
   owner accepted it for a first production release of calls
   (2026-10-12); suite 2 follows when the media stack can do it, which
-  it now can (150.7871.04); it is offered with form 2 only.
+  it now can (150.7871.04); it is offered only once form 1 is retired.
 - **The IV is deterministic.** It is unique under a key while (SSRC,
   RTP timestamp) does not repeat with the same counter value: within
   one RTP stream until the timestamp wraps (about 24.8 hours of Opus at
