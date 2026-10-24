@@ -2272,6 +2272,32 @@ update that changes nothing makes no stream record). Like the alarm mailer, it h
 the vaults stream ARN is in context. No admin route edits names; if one
 is ever added, it must push the snapshot as the job does.
 
+### The vault row's app key: parent log lines (VAULT-HOST-PROTOCOL 0.1.15)
+
+The parent writes the vault row's `app_key` and `app_key_next` durably
+(VAULT-MESSAGING 0.58.0 §11.5). **Deploy the parent before an enclave
+release that uses `AppKeyNext`** (VAULT-HOST-PROTOCOL §10, "Deployment
+order"): a parent before 0.1.15 answers it `invalid`, and every
+enrollment, transfer and recovery then fails closed.
+
+| Log line | Level | Meaning |
+|---|---|---|
+| `app key confirmed` (`vault_id`, `mode`) | info | An `AppKeyNext` was written (or the row already named the key) and answered `ok` |
+| `app key refused` | warn | Answered `conflict`: the row names another key at that `seq` or higher, a newer replacement's key is there, or the row is gone. The transfer or recovery fails with `retry` |
+| `app key not confirmed` (`error`) | warn | Answered `error`: the table failed, the vault's confirmation lock or earlier writes did not clear in 8 s. The enclave retries for 10 s |
+| `app key write failed; trying again` | warn | An `app_key` write or a clear failed and is queued; it is retried from 1 s up to 30 s, per vault |
+| `app key written after a retry` | info | The queued write succeeded |
+| `app key write refused; not tried again` | error | The service refused the write as malformed or not allowed; it is given up (check the host role's grant on the vault table) |
+| `lifecycle` with `event=app_key_assert` | debug only | The enclave's assertion after a hello; not logged at info |
+| `lifecycle` with `event=app_key_next_clear` | info | The enclave clears the next key a failed step 1 left on the row |
+
+A burst of `app key write failed; trying again` for one vault that ends
+with `app key written after a retry` is a table outage that healed.
+Repeated `app key refused` for one vault after a prior transfer or
+recovery is residual 3 of VAULT-HOST-PROTOCOL §5.7 (a stale
+`app_key_next`); it clears at the vault's next unlock that reports
+`next: false`.
+
 ### No recovery with the backup off; start over (MEMBER-API 2.1.0)
 
 VAULT-MESSAGING 0.16.0, owner decisions of 2026-10-06: a vault whose
