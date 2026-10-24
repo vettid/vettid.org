@@ -11,7 +11,7 @@ import { newUlid } from './recovery-code.js';
 import { STAGING_NOTE, scaleText, siteConfig } from './site-config.js';
 import { $, chip, date, el, fill, mono } from './dom.js';
 import * as ui from './ui.js';
-import { dateTime, releaseNotice, releaseStatus, servicePaused, vaultState } from './vault-text.js';
+import { dateTime, lockNotice, releaseNotice, releaseStatus, servicePaused, vaultState } from './vault-text.js';
 
 const RECOVERY_PAGE = '/account/vault/recovery/';
 const SETUP_PAGE = '/account/vault/setup/';
@@ -208,23 +208,34 @@ function lockButton(v) {
       tone: 'danger',
     });
     if (!ok) return;
-    const requestId = newUlid();
-    const res = await ui.busy(b, () => post('/api/vault/lock', { vault_id: v.vault_id, request_id: requestId }), { busyLabel: 'Locking…' });
-    if (!res) return;
-    const outcome = await ui.busy(b, () => waitForRequest(requestId), { busyLabel: 'Locking…' });
+    // MEMBER-API 2.5.0 ("Locks"): the site's lock is unconditional (no
+    // unlock_id) and says what the slot says. A `stale` lock (the vault was
+    // opened again after the request was queued) is asked once more.
+    let outcome = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const requestId = newUlid();
+      const res = await ui.busy(b, () => post('/api/vault/lock', { vault_id: v.vault_id, request_id: requestId }), { busyLabel: 'Locking…' });
+      if (!res) return;
+      outcome = await ui.busy(b, () => waitForRequest(requestId), { busyLabel: 'Locking…' });
+      if (outcome !== 'stale') break;
+    }
     await loadVault({ focus: 'h-vault' });
-    if (outcome === 'done') ui.showNotice('Your vault is locked.');
-    else ui.showNotice("We asked your vault to lock but couldn't confirm it yet. Check the status in a minute.", 'warn');
+    ui.showNotice(...lockNotice(outcome));
   });
   return b;
 }
 
-/** Poll the lock's response slot (≤ 2/s allowed; we use one per 1.5 s, ≤ 30 s). */
+/**
+ * Poll the lock's response slot (≤ 2/s allowed; we use one per 1.5 s, ≤ 30 s).
+ * Returns the slot's code for a `done` with one (`locked`, `not_running`,
+ * `stale`), 'done' for a `done` without, 'expired', or 'unknown'.
+ */
 async function waitForRequest(requestId) {
   for (let i = 0; i < 20; i += 1) {
     try {
       const r = await get(`/api/vault/requests/${encodeURIComponent(requestId)}`);
-      if (r.status === 'done' || r.status === 'expired') return r.status;
+      if (r.status === 'done') return typeof r.code === 'string' ? r.code : 'done';
+      if (r.status === 'expired') return 'expired';
     } catch (err) {
       if (err.status !== 429) return 'unknown';
     }

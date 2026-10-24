@@ -235,6 +235,15 @@ const KID_RE = /^[0-9a-f]{16}$/;
 const PCR0_RE = /^[0-9a-f]{96}$/;
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const CODE_RE_HOST = /^[a-z_][a-z0-9_]{0,63}$/;
+/** 2.5.0 (release L, "Locks"): an unlock_id, 32 lowercase hex. */
+const UNLOCK_ID_RE = /^[0-9a-f]{32}$/;
+/**
+ * 2.5.0 (release L, "Locks"; VAULT-MESSAGING 0.29.0 §11.5): what a lock
+ * did, written beside `done` by the vault's host after the lock (or by the
+ * API itself, `not_running`, when no instance holds the vault). Passed on
+ * for a `lock` slot and for no other operation.
+ */
+const LOCK_CODES: ReadonlySet<string> = new Set(['locked', 'not_running', 'stale']);
 const B64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 
 function field(body: Record<string, unknown>, key: string, re: RegExp, what: string): string {
@@ -1023,6 +1032,10 @@ router.on('GET', '/api/vault/status', async (req) => {
     vault: {
       vault_id: v.vault_id,
       state: v.state === 'unlocked' && !leased ? 'locked' : v.state,
+      // 2.5.0 (release L, "Locks"): what `locked` rests on: the host
+      // recorded a lock or a stop (`reported`), or no instance holds a
+      // live lease (`no_lease`). Both are the host's view.
+      ...(v.state === 'locked' ? { locked_basis: 'reported' } : v.state === 'unlocked' && !leased ? { locked_basis: 'no_lease' } : {}),
       sealed_release: v.sealed_release ?? null,
       // The sealed release's number, status, end date and notice (W8).
       release,
@@ -1183,20 +1196,27 @@ router.on('POST', '/api/vault/lock', async (req) => {
   const m = c.m;
   const vaultId = field(req.body, 'vault_id', VAULT_ID_RE, '32 lowercase hex');
   const requestId = field(req.body, 'request_id', ULID_RE, 'a ULID');
+  // 2.5.0 (release L, "Locks"): with unlock_id a bound lock (the vault
+  // locks only the unlock it names); without, an unconditional one (the
+  // account site, an app without the value), which the enclave carries
+  // out only if it was queued after the vault's current unlock. The API
+  // does not know whether the value is right; it copies it.
+  const unlockId = req.body.unlock_id === undefined ? undefined : field(req.body, 'unlock_id', UNLOCK_ID_RE, '32 lowercase hex');
   await limit(`vault-lock#${m.user_guid}`, 30, 15 * 60);
 
   const vault = c.via === 'app' ? c.vault : activeVault((await currentVault(m.user_guid)).vault);
   if (!vault || vault.vault_id !== vaultId) throw notFound('No such vault');
   const holder = await liveLease(vault, nowS());
   if (holder) {
-    await enqueue('lock', m, vault, requestId, holder, undefined, { slot: slotOf(c) });
+    await enqueue('lock', m, vault, requestId, holder, undefined, { slot: slotOf(c), extra: unlockId ? { unlock_id: unlockId } : undefined });
   } else {
     // Nobody holds the vault, so it is not running: nothing to lock.
+    // 2.5.0: said as `not_running`, the code an enclave gives for the same.
     try {
       await ddb.send(
         new PutCommand({
           TableName: table.vaultRequests(),
-          Item: { request_id: requestId, vault_id: vault.vault_id, user_guid: m.user_guid, op: 'lock', status: 'done', created_at: nowIso(), expires_at: nowS() + REQUEST_TTL_S, ...slotOf(c) },
+          Item: { request_id: requestId, vault_id: vault.vault_id, user_guid: m.user_guid, op: 'lock', status: 'done', code: 'not_running', created_at: nowIso(), expires_at: nowS() + REQUEST_TTL_S, ...slotOf(c) },
           ConditionExpression: 'attribute_not_exists(request_id)',
         }),
       );
@@ -1205,7 +1225,8 @@ router.on('POST', '/api/vault/lock', async (req) => {
       throw e;
     }
   }
-  await audit(memberActor(m.user_guid), 'vault.lock_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: holder?.instance_id ?? null, ...viaOf(c) });
+  // 2.5.0: whether the lock was bound, never the value.
+  await audit(memberActor(m.user_guid), 'vault.lock_request', m.user_guid, { vault_id: vault.vault_id, request_id: requestId, instance_id: holder?.instance_id ?? null, bound: unlockId !== undefined, ...viaOf(c) });
   return new WithStatus(202, { vault_id: vault.vault_id, request_id: requestId });
 });
 
@@ -1245,7 +1266,9 @@ router.on('GET', '/api/vault/requests/{id}', async (req) => {
   if (status === 'done') {
     const env = typeof item.envelope === 'string' ? decodeCanonicalB64(item.envelope) : null;
     if (env && env.length === RESULT_ENVELOPE_BYTES) out.envelope = item.envelope;
-    if (typeof item.code === 'string' && CODE_RE_HOST.test(item.code)) out.code = item.code;
+    // 2.5.0: a lock's three codes for a lock's slot only, beside the codes
+    // already passed (§11.5).
+    if (typeof item.code === 'string' && CODE_RE_HOST.test(item.code) && (item.op === 'lock' || !LOCK_CODES.has(item.code))) out.code = item.code;
     // The app polls its register result: the moment to retire the code.
     if (isRegisteredSlot(item) && VAULT_ID_RE.test(String(item.vault_id))) {
       const v = await vaultRow(String(item.vault_id));
