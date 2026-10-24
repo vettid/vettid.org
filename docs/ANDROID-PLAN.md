@@ -10,6 +10,15 @@ changelog:
     handshake, attested key and epoch-1 secret, and applies a waiting
     `device.paired{transfer}`; the deadline is one, measured from the
     `hs.init`; tests.
+  - 0.1.75: editorial; the release L plan and the **owner's answers of
+    2026-10-23** (VAULT-LOCK 0.1.3). §4 "Locking the vault": part 1 is
+    as merged (vettid-android #127, 7a250bcd, with #140, #150, #164 and
+    #181), no longer a draft pending a merge. The retry that survives
+    the app's process is part of release L's app work (Q4: fail secure,
+    durable retry until the vault confirms, a plain notice meanwhile).
+    Part 2: an app without the value of a vault that announced one
+    locks as part 1 plus the unconditional API lock (Q3); release L is
+    staging release 23. No rule changes
   - 0.1.74: draft; the owner answered the choices on 2026-10-23, the
     text awaits approval (VAULT-MESSAGING 0.56.0, §10.18 "Spend caps";
     the owner decided on 2026-10-23 to build caps before W1 and W2). §4 "Wallet": a **Spending limits** screen
