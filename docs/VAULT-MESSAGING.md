@@ -18460,13 +18460,13 @@ Deletion is idempotent.
   | The phone has | It does |
   |---|---|
   | (a) and (b) | erases at once, then "no vault" with the one-time notice |
-  | (b) alone | shows **"Your vault was deleted"**, keeps reading the status and its own relay mailbox (where the vault's `device.unlinked` lands, step 2) for (a), and from the same bound of 10 minutes (counted from the first `410`) offers a confirmed **Remove from this phone** |
+  | (b) alone | shows **"Your vault was deleted"**, keeps reading the status and its own relay mailbox (where the vault's `device.unlinked`, sent in step 1, lands) for (a), and from the same bound of 10 minutes (counted from the first `410`) offers a confirmed **Remove from this phone** |
   | (a) alone | shows "being deleted" and keeps reading the status for (b); at the bound (ANDROID-PLAN §4 "A vault being deleted") it adds a confirmed **Remove from this phone** |
+  | neither | nothing: "could not tell" |
 
   **Owner decision (2026-10-24):** with one signal only, both cases wait
   the same bound before the confirmed Remove; nothing is offered
   earlier.
-  | neither | nothing: "could not tell" |
 
   **"Could not tell"** is everything else: `401` (whatever the reason:
   a key the API no longer knows, a missing member row, a record gone

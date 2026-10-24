@@ -814,7 +814,7 @@ answer to this phone's own `vault.delete` counts the same (VAULT-MESSAGING
    device session, and **tries to reach its vault**: it keeps collecting
    its own relay mailbox, where the vault delivers
    `device.unlinked{vault_deleted}` to every owner device (VAULT-MESSAGING
-   §12.5 step 2), so the vault's word can still arrive there. It reads the
+   §12.5 step 1), so the vault's word can still arrive there. It reads the
    status and collects the mailbox on point 3's schedule (5, 15, 45 and
    105 s after `since`, then every 60 s until `until`; after it, at a
    start, a return to the foreground and Check again). **Owner decision
