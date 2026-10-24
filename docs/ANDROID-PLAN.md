@@ -3493,7 +3493,9 @@ and respect them.
   of a wallet that has no cap needs the password only), and only then
   sends `wallet.caps.set` with the chosen values, so that the phrase
   step never needs the PIN. (`wallet.create` also accepts `caps`; the app
-  does not use it.)
+  does not use it.) Until the chosen caps are set, the app offers no
+  Receive for the new wallet; after a restart it sends the pending
+  `wallet.caps.set` before anything else for that wallet.
 - **Recovery phrase of a capped wallet.** ⋯ → Show recovery phrase asks
   for the PIN as well as the password ("To protect your spending limit,
   enter your PIN too."); the vault answers `pin_required` otherwise.

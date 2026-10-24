@@ -7253,7 +7253,7 @@ decision 1):
 | | dry run (0.21.0): `{dry_run: true, item_id?, version?, sensitivity?, tags?}` (Dry run, below) | `{version?, shares, withdrawals}` |
 | `item.get` (app, desktop) | `{item_id}` | `<item>`: a `data` item with its values; a `secret` or `critical` item without `value`s and `notes`, with `has_notes`; with `size` (0.21.0, below) |
 | `item.reveal` (app; desktop: step-up) | `secret`: `{item_id, fields?: [<field_id>]}` (a `data` item: `{item_id}`, as `item.get`) | `<item>` with its values (only those `fields`, without `notes`, if given) |
-| | `critical` (app): `{item_id, credential, utk_id, sealed{password, item_id, reply_key, pin?}}` (0.56.0: `pin` required for the item of a wallet that has a cap, `pin_required`, §10.18) | `{item_id, version, values_sealed, credential, credential_version, utks}` |
+| | `critical` (app): `{item_id, credential, utk_id, sealed{password, item_id, reply_key, pin?}}` (0.56.0: `pin` required for the item of a wallet that has a cap, `pin_required`; a `pin` that is present is checked as above whatever the wallet's caps, §10.18) | `{item_id, version, values_sealed, credential, credential_version, utks}` |
 | `item.list` (app, desktop) | `{tags?, match?, category?, sensitivity?, after?, limit?}` | `{items: [<item without values and notes>], next?}` |
 | `item.tag` (app; desktop: step-up) | `{item_id, version, tags, dry_run?}` | `{version}`; with `dry_run` (0.21.0): `{version, shares, withdrawals}` |
 | `item.sensitivity` (app; desktop: step-up, `data` ↔ `secret` only) | `{item_id, version, sensitivity}`; to or from `critical` (app) also `credential, utk_id, sealed{password, item_id}` | `{version}`; with the credential also `{credential, credential_version, utks}` |
@@ -10987,7 +10987,7 @@ app (chain source)                                   vault
 | `wallet.address.new` (app, desktop) | `{wallet_id, type?, change?, label?}` | `<address>`; `limit` |
 | `wallet.address.list` (app, desktop) | `{wallet_id, type?, change?, after?, limit?}` | `{addresses: [<address>], next?}` |
 | `wallet.address.used` (app, desktop) | `{wallet_id, addresses: [<address string>]}` (1–256) | `{marked, version}` |
-| `wallet.psbt.inspect` (app, desktop) | `{wallet_id, psbt}` | `<summary>`; `invalid_psbt` |
+| `wallet.psbt.inspect` (app, desktop) | `{wallet_id, psbt}` | `<summary>` and (0.56.0) `cap`; `invalid_psbt` |
 | `wallet.sign` (app) | `{wallet_id, psbt, broadcast?, credential, utk_id, sealed{password, item_id, payload_sha256}}` | `<summary>` and `{tx, credential, credential_version, utks}`; `credential_locked`, `invalid_psbt`, `cap_exceeded` (0.56.0), `unavailable` (`broadcast` without a chain source) |
 | `wallet.caps.set` (app; 0.56.0) | `{wallet_id, version, per_tx_sats?, per_period_sats?}`; each member an integer 1–2,100,000,000,000,000; a member absent is unchanged | `{version}`; `conflict`, `bad_request` (a value that is not lower than the current one, or `null`: message `use_wallet_caps_raise`; also `per_tx_sats` above `per_period_sats`), `forbidden` (a desktop) |
 | `wallet.caps.raise` (app, the holder; a credential operation; 0.56.0) | `{wallet_id, version, per_tx_sats?, per_period_sats?, credential, utk_id, sealed{pin, password, item_id, payload_sha256}}`; each member an integer or `null` (no limit); a member absent is unchanged | `{version, credential, credential_version, utks}`; `bad_pin`, `bad_password`, `backoff`, `conflict`, `bad_request` (nothing is raised), `forbidden` |
@@ -11305,8 +11305,9 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     is refused under §3.5.9. `credential.reset` deletes the wallets and
     so their caps.
   - **The limit of a cap.** It limits what **the vault signs**. A member
-    who reveals the phrase (`item.reveal`, a credential operation with
-    the password only) holds the keys and can spend outside the vault;
+    who reveals the phrase (`item.reveal`, a credential operation: with
+    the password alone for a wallet without caps, and with the PIN as
+    well for one that has a cap, below) holds the keys and can spend outside the vault;
     that is the member's backup right, audited and in the feed
     (`item.revealed`), and caps do not claim to stop it. That is why
     the reveal of a capped wallet's phrase takes the PIN as well (below).
@@ -11321,7 +11322,8 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     owner check checks them (§3.6.1; a wrong one is a failed check) and
     not itself an owner check; without `pin` it is `bad_request`
     (message `pin_required`). A wallet without caps reveals with the
-    password alone.
+    password alone. A `pin` that is present is checked as above whatever
+    the wallet's caps.
   - **A second wallet with the same keys.** `wallet.create` refuses an
     import whose account keys equal those of an existing wallet (code
     `exists`), so a wallet without caps cannot be made from a capped
@@ -17250,8 +17252,8 @@ change:
      `id` and body) in memory only until the reset is decided.
 2. **While it is unresolved**, the gate of step 2 refuses **every other
    credential operation** (§3.5.9's types, the owner check,
-   `vault.secret.renew`, the changes, critical items and wallet signing
-   included) at once, with the same texts. A reset changes neither the
+   `vault.secret.renew`, the changes, critical items, wallet signing and
+   (0.56.0) `wallet.caps.raise` included) at once, with the same texts. A reset changes neither the
    PIN nor the phone's secret, so the unlock is not affected, as for a
    password change (step 5, last bullet).
 3. **Deciding.** While `exp` has not passed, the app may resend the same
