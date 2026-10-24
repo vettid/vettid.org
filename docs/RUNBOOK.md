@@ -2275,10 +2275,13 @@ is ever added, it must push the snapshot as the job does.
 ### The vault row's app key: parent log lines (VAULT-HOST-PROTOCOL 0.1.15)
 
 The parent writes the vault row's `app_key` and `app_key_next` durably
-(VAULT-MESSAGING 0.58.0 §11.5). **Deploy the parent before an enclave
-release that uses `AppKeyNext`** (VAULT-HOST-PROTOCOL §10, "Deployment
-order"): a parent before 0.1.15 answers it `invalid`, and every
-enrollment, transfer and recovery then fails closed.
+(VAULT-MESSAGING 0.58.0 §11.5). **The parent and the
+enclave of a release go out together, from the same tag; neither mixed
+pairing is supported** (VAULT-HOST-PROTOCOL §10, "Deployment order"). Do
+not upgrade the parent in place under an older enclave: the `app_key_next`
+report is then not written and the step-1 admission is lost. A parent
+before 0.1.15 under a new enclave answers `AppKeyNext` `invalid`, and every
+enrollment, transfer and recovery fails closed.
 
 | Log line | Level | Meaning |
 |---|---|---|
@@ -2295,8 +2298,9 @@ A burst of `app key write failed; trying again` for one vault that ends
 with `app key written after a retry` is a table outage that healed.
 Repeated `app key refused` for one vault after a prior transfer or
 recovery is residual 3 of VAULT-HOST-PROTOCOL §5.7 (a stale
-`app_key_next`); it clears at the vault's next unlock that reports
-`next: false`.
+`app_key_next`); it clears only when an unlock of the vault reports `next: false` with
+an `app_key_seq` or `header_seq` that reaches the stale key's, or when
+`app_key` reaches its `seq` (not at any unlock).
 
 ### No recovery with the backup off; start over (MEMBER-API 2.1.0)
 

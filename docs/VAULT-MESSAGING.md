@@ -12067,8 +12067,10 @@ Nothing secret is stored:
   has a `next` part (§11.14.2). The parent writes `app_key = {key,
   kid, seq}` on the vault row **whatever the lease**, conditional only on
   `seq` being higher than the row's (a stale instance can only report an
-  older one), except that `enrolled` always replaces it (a replaced
-  provisional vault starts again at 1, §11.3); it never takes the key
+  older one), except that `enrolled` writes it also when the row is still
+  `enrolling`, has no key, or already names the same key (0.58.0; a
+  replaced provisional vault starts again at 1 by the unconditional
+  enroll-mode request of VAULT-HOST-PROTOCOL §5.7, §11.3); it never takes the key
   from anywhere else. (0.58.0) The writes of `app_key` and
   `app_key_next` are conditional on `seq` and `header_seq`
   (VAULT-HOST-PROTOCOL §7.2) and are repeated until they are written; a
