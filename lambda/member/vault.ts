@@ -422,6 +422,27 @@ export interface RecoveryRow {
    * slots live as long as the recovery, plus an hour.
    */
   unlock_ids?: string[];
+  /**
+   * 2.11.0 ("A recovery that ended without the phone"): the recovering keys
+   * of this vault's earlier recoveries that ended without the vault
+   * adopting them, carried over by each new request from the recovery it
+   * replaces (at most MAX_ENDED_KEYS, each for RECOVERY_ENDED_KEEP_S after
+   * it ended). Only so that such a phone can be told so (`410
+   * recovery_ended`); never returned, logged, audited or mailed.
+   */
+  ended_keys?: EndedKey[];
+}
+
+/**
+ * 2.11.0: a recovering key whose recovery ended without the vault adopting
+ * it: its public key and kid (as `recovering_key` held them), when the
+ * recovery ended (epoch s) and how (cancelled, or the code's time ran out).
+ */
+export interface EndedKey {
+  kid: string;
+  key: string;
+  ended_at: number;
+  reason: 'cancelled' | 'expired';
 }
 
 /** 2.9.0: how a recovery was cancelled. */
@@ -691,6 +712,80 @@ function keysFor(v: VaultRow, role: KeyRole, now: number): StoredKey[] {
   }
 }
 
+/**
+ * 2.11.0 ("A recovery that ended without the phone"): how long after its
+ * recovery ended a recovering key is still told `410 recovery_ended`, and
+ * how long it is not told yet. The grace covers an open or a cancel still
+ * on its way to the vault (a queue message can arrive minutes late) and
+ * the host's write of `app_key` after an open that the vault completed:
+ * until it has passed, such a phone gets `401` as before and tries again.
+ */
+export const RECOVERY_ENDED_KEEP_S = 30 * 86_400;
+export const RECOVERY_ENDED_GRACE_S = 3600;
+/** 2.11.0: the ended recovering keys a recovery carries over (the latest). */
+export const MAX_ENDED_KEYS = 5;
+
+const isEndedKey = (e: unknown): e is EndedKey =>
+  !!e && typeof (e as EndedKey).kid === 'string' && typeof (e as EndedKey).key === 'string' && typeof (e as EndedKey).ended_at === 'number';
+
+/**
+ * The recovery's own recovering key once the recovery has ended without
+ * the vault adopting it: `cancelled`, or `registered` past its
+ * `expires_at`. Never a `completed` one (its key was adopted, and is
+ * cleared), and never while it is active. A cancel recorded before 2.9.0
+ * has no `cancelled_at`; its `expires_at` stands in (later, never sooner).
+ */
+export function endedOf(r: RecoveryRow | undefined, now: number): EndedKey | null {
+  if (!r || recoveryActive(r, now) || !isStoredKey(r.recovering_key)) return null;
+  if (r.state === 'cancelled') {
+    const at = typeof r.cancelled_at === 'number' && r.cancelled_at < r.expires_at ? r.cancelled_at : r.expires_at;
+    return { kid: r.recovering_key.kid, key: r.recovering_key.key, ended_at: at, reason: 'cancelled' };
+  }
+  if (r.state === 'registered') return { kid: r.recovering_key.kid, key: r.recovering_key.key, ended_at: r.expires_at, reason: 'expired' };
+  return null;
+}
+
+/**
+ * What a new recovery carries over from the one it replaces (2.11.0): that
+ * one's own ended key and the ones it carried, each kept for
+ * RECOVERY_ENDED_KEEP_S after it ended, one per kid, the latest
+ * MAX_ENDED_KEYS.
+ */
+export function carriedEndedKeys(prev: RecoveryRow | undefined, now: number): EndedKey[] {
+  const own = endedOf(prev, now);
+  const all = [...(prev?.ended_keys ?? []).filter(isEndedKey), ...(own ? [own] : [])]
+    .filter((e) => now < e.ended_at + RECOVERY_ENDED_KEEP_S)
+    .map(({ kid, key, ended_at, reason }) => ({ kid, key, ended_at, reason }));
+  const byKid = new Map<string, EndedKey>();
+  for (const e of all) byKid.set(e.kid, e);
+  return [...byKid.values()].sort((a, b) => a.ended_at - b.ended_at).slice(-MAX_ENDED_KEYS);
+}
+
+/**
+ * The ended recovering key with this kid that may be told `410
+ * recovery_ended` now (2.11.0): one of the row's ended keys, past its
+ * grace and within its 30 days, and not a key the row admits in any role
+ * or may soon: the host's `app_key` or `app_key_next` (whatever their
+ * `seq`; adopted), the redeem's `app_key_pending`, or a claim or
+ * recovering key of the current recovery while it is active.
+ */
+function endedKeyFor(v: VaultRow, kid: string, now: number): EndedKey | null {
+  const live = new Set<string>();
+  for (const k of [v.app_key, v.app_key_next, v.app_key_pending]) if (isStoredKey(k)) live.add(k.kid);
+  const r = v.recovery;
+  if (r && recoveryActive(r, now)) {
+    for (const k of [...(r.claim_keys ?? []), r.recovering_key]) if (isStoredKey(k)) live.add(k.kid);
+  }
+  if (live.has(kid)) return null;
+  const own = endedOf(r, now);
+  const all = [...(r?.ended_keys ?? []).filter(isEndedKey), ...(own ? [own] : [])];
+  return all.find((e) => e.kid === kid && now >= e.ended_at + RECOVERY_ENDED_GRACE_S && now < e.ended_at + RECOVERY_ENDED_KEEP_S) ?? null;
+}
+
+/** 2.11.0: the distinct answer to a recovering key whose recovery ended without the vault adopting it. */
+const recoveryEnded = () =>
+  vaultError(410, 'recovery_ended', 'The recovery this phone registered for has ended, and the vault did not take this phone as its app. Start a new recovery to use this phone.');
+
 /** Header syntax and `ts`; any failure is 401 with no detail. */
 function appHeader(req: MemberRequest): AppHeader {
   const h = parseAppHeader(req.appHeader);
@@ -728,6 +823,13 @@ function signatureOk(req: MemberRequest, h: AppHeader, key: AppKey): boolean {
  * tried in order). Checks, in order: the header's syntax, `ts`, the nonce,
  * that the key is allowed, and the signature. The vault must be the
  * member's current one and not deleted.
+ *
+ * 2.11.0: on a route that admits the recovering key, a key the row does
+ * not allow that is one of its ended recovering keys (endedKeyFor) is
+ * answered `410 recovery_ended`, only after the same checks: its
+ * signature verifies, the vault is the member's current one, and the
+ * member exists; limited as the status read is. Any other failure stays
+ * `401` with no detail.
  */
 async function appCaller(req: MemberRequest, roles: KeyRole[]): Promise<Caller & { vault: VaultRow; key: StoredKey; role: KeyRole }> {
   const h = appHeader(req);
@@ -743,6 +845,15 @@ async function appCaller(req: MemberRequest, roles: KeyRole[]): Promise<Caller &
       match = { key: k, role };
       break;
     }
+  }
+  if (!match && roles.includes('recovering')) {
+    const ended = endedKeyFor(v, h.kid, now);
+    const ek = ended ? parseAppKey(ended.key) : null;
+    if (!ek || ek.kid !== h.kid || !signatureOk(req, h, ek)) throw unauthorized();
+    const [pointer, m] = await Promise.all([readPointer(v.user_guid), memberByGuid(v.user_guid)]);
+    if (!m || pointer?.current_vault_id !== v.vault_id) throw unauthorized();
+    await limit(`vault-status#${m.user_guid}`, 60, 60);
+    throw recoveryEnded();
   }
   const key = match ? parseAppKey(match.key.key) : null;
   if (!match || !key || key.kid !== h.kid || !signatureOk(req, h, key)) throw unauthorized();
@@ -2747,9 +2858,12 @@ router.on('POST', '/api/vault/recovery', async (req) => {
   // The cancel link's row, before the recovery that names it (a row whose request fails names no current recovery).
   const link = await mintCancelLink(v, m, recoveryId, expiresAt);
   // 2.7.0: the times are the earliest possible until the enclave's slot says (`earliest`).
+  // 2.11.0: the ended recovering keys are carried over from the recovery this one replaces.
+  const ended = carriedEndedKeys(v.recovery, now);
   const r: RecoveryRow = {
     recovery_id: recoveryId, state: 'pending', requested_at: now, available_at: availableAt, expires_at: expiresAt, locator, earliest: true, cancel_key: link.key,
     ...(scale !== 1 ? { time_scale: scale } : {}),
+    ...(ended.length ? { ended_keys: ended } : {}),
   };
   await setRecovery(v, r, v.recovery?.recovery_id ?? null, true);
   // The slot keeps the sealed code until the recovery expires.

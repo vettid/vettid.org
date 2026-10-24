@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.56.4
-date: 2026-10-23
+version: 0.57.0
+date: 2026-10-24
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -13,7 +13,7 @@ related:
   - CALLS-PLAN.md (0.1.5) §6.1 V4, §13 (phase C2; decisions D12–D26, decided 2026-10-12)
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.10.0)
+  - MEMBER-API.md (2.11.0)
   - ANDROID-PLAN.md (0.1.76)
   - IOS-PLAN.md (0.1.31; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
@@ -27,6 +27,20 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.57.0: **owner decision of 2026-10-24**; the code and the times are
+    proposed for the owner's approval (MEMBER-API 2.11.0, built in
+    vettid.org, not deployed). §11.14.6, new "A recovery that ended
+    without the phone": the member API answers a request signed by a
+    recovering key whose recovery ended without the vault adopting the
+    phone with **`410 recovery_ended`** (from one hour to 30 days after
+    the end), and still `401` for every other failure. **The rule for
+    apps**: on `recovery_ended` the phone may forget its pending
+    (recovering) key and offer to start over; on `401` it must not, and
+    tries again. A `200` (admitted as the app) means the vault adopted
+    it ("A lost `ok`"). §11.11.7 "Claim" points there, and no longer
+    says the recovering key may `unlock` and `lock` (refused since
+    0.33.0, MEMBER-API 2.7.0/2.10.1). No vault change, no wire change
+    in the enclave
   - 0.56.4: editorial (aligns §10.2 with VAULT-LOCK §3.5/§3.7, MEMBER-API
     "Locks" and ANDROID-PLAN part 2; found in the review of
     vettid-android #190). §10.2 "Locks": `stale_lock` was listed among
@@ -14823,9 +14837,12 @@ signed by its app key (§11.12.2) and needing no session:
   register only if it is signed by a claim key, and puts that key in the
   queue message's `app_key`. When a register's slot carries
   `recovery_registered`, that register's key becomes the recovery's
-  **recovering key**, which may also `unlock`, `lock` and read `status`
-  until the recovery ends or the vault reports the key as its app key
-  (§11.11.5 step 3). Knowing `vault_id` and `recovery_id` (both in the
+  **recovering key**, which may also read `status` (and, from release R,
+  `open`; `unlock` and `lock` are refused, §11.14.6) until the recovery
+  ends or the vault reports the key as its app key (§11.11.5 step 3).
+  After a recovery that ended without adopting it, the key is told `410
+  recovery_ended` (0.57.0, §11.14.6 "A recovery that ended without the
+  phone"). Knowing `vault_id` and `recovery_id` (both in the
   QR) lets a stranger claim, which gains nothing: the enclave still
   needs the code and an attestation.
 - **Claim by locator** (0.25.0, §11.11.10). The app that was given
@@ -16729,6 +16746,31 @@ open again. It resumes with an ordinary `vault.unlock` (§11.4):
   needs a paired holder and so cannot start before the pairing. A cancel
   concerns an open recovery, and there is none after `ok`. Deleting the
   vault (§11.11.9) removes everything.
+
+**A recovery that ended without the phone** (0.57.0; owner decision of
+2026-10-24; MEMBER-API 2.11.0). A phone that registered (it holds the
+recovering key) and lost track of its open, or was away, learns where
+it stands from any signed request, normally `GET /api/vault/status`:
+
+- **`200`, admitted as the app** (the vault's `app_key` or
+  `app_key_next` is its key): the vault adopted it. It resumes as "A
+  lost `ok`" above.
+- **`200` with the recovery still `registered`**: the recovery is open;
+  it may open again (§11.14.6).
+- **`410 recovery_ended`**: the recovery ended (cancelled, or its time
+  ran out) and the vault did not adopt this phone. The API answers it
+  only after the header, `ts`, nonce, vault and signature checks have
+  passed under that key, from one hour after the end to 30 days after
+  it, and never to a key that is the vault's app key or pending app key.
+  The phone **may forget its pending (recovering) key** and its
+  recovery state, and offer to start over (a new recovery from the
+  account site). It says nothing more: the answer carries no reason or
+  time.
+- **`401`**: anything else, including the first hour after the end, a
+  clock or nonce problem, a deleted vault or a vault that is no longer
+  the member's. The phone **must not** forget its key on a `401`: it
+  may be the adopted app whose `app_key` the host has not written yet.
+  It tries again later (and checks its clock).
 
 **The schedule of waits.** The ten attempts of a generation are numbered
 1 to 10. After attempt *k* was used and was not a success, no further

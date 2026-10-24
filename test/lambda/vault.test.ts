@@ -4251,6 +4251,140 @@ describe('2.7.0: recovery from release R', () => {
     });
   });
 
+  describe('2.11.0: a recovery that ended without the phone (410 recovery_ended)', () => {
+    const ENDED = { error: 'recovery_ended', code: 'recovery_ended', message: expect.any(String) };
+    const status = (opts: EvOpts = signed) => call('GET', '/api/vault/status', undefined, opts);
+    const UNLOCK = { vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA };
+    /** Registered to newApp, then cancelled two hours ago (past the grace). */
+    const cancelled = (extra: Record<string, unknown> = {}) => registered({ state: 'cancelled', cancelled_via: 'session', cancelled_at: NOW - 2 * H, ...extra });
+
+    test('adopted: the recovering key is the app key (or the pending app key) → 200, never recovery_ended, whatever the recovery', async () => {
+      for (const patch of [{}, { state: 'cancelled', cancelled_at: NOW - 2 * H }, { expires_at: NOW - 2 * H }]) {
+        registered(patch);
+        getItem('vaults', VID).app_key = { key: newApp.b64, kid: newApp.kid, seq: 2 };
+        expect({ patch, status: (await status()).status }).toEqual({ patch, status: 200 });
+      }
+      // The pending app key of the host's three writes (§11.14.2).
+      cancelled();
+      Object.assign(getItem('vaults', VID), { app_key: { key: oldApp.b64, kid: oldApp.kid, seq: 1 }, app_key_next: { key: newApp.b64, kid: newApp.kid, seq: 2 } });
+      expect((await status()).status).toBe(200);
+      // A stale app_key_next is not accepted, and is still never answered recovery_ended (401).
+      Object.assign(getItem('vaults', VID), { app_key: { key: oldApp.b64, kid: oldApp.kid, seq: 3 } });
+      expect((await status()).body).toEqual({ error: 'unauthorized', message: 'Unauthorized' });
+      // Nor the redeem's pending key.
+      delete getItem('vaults', VID).app_key_next;
+      getItem('vaults', VID).app_key_pending = { key: newApp.b64, kid: newApp.kid, until: NOW - 1 };
+      expect((await status()).status).toBe(401);
+    });
+
+    test('active: 200 with the recovery', async () => {
+      registered();
+      const r = await status();
+      expect(r.status).toBe(200);
+      expect(r.body.vault.recovery).toMatchObject({ state: 'registered' });
+    });
+
+    test('ended (cancelled, or registered past expires_at): 410 recovery_ended on every route that admits the recovering key; nothing queued or written', async () => {
+      for (const end of [() => cancelled(), () => registered({ expires_at: NOW - 2 * H }), () => registered({ state: 'cancelled', expires_at: NOW - 2 * H })]) {
+        end();
+        const before = structuredClone(getItem('vaults', VID));
+        expect(await status()).toEqual({ status: 410, body: ENDED });
+        expect(await open()).toEqual({ status: 410, body: ENDED });
+        expect(await call('GET', `/api/vault/requests/${RID2}`, undefined, signed)).toEqual({ status: 410, body: ENDED });
+        expect(await call('POST', '/api/vault/unlock', UNLOCK, signed)).toEqual({ status: 410, body: ENDED });
+        expect(await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID }, signed)).toEqual({ status: 410, body: ENDED });
+        expect((await call('GET', '/api/vault/enclave', undefined, signed)).status).toBe(410);
+        expect(getItem('vaults', VID)).toEqual(before);
+      }
+      expect(sent()).toHaveLength(0);
+      expect(tbl('audit').size).toBe(0);
+      // Limited as the status read is (60 a minute per member).
+      expect(getItem('rl', `vault-status#g1#${NOW - (NOW % 60)}`).count).toBe(18);
+    });
+
+    test('a recovery cancelled before 2.9.0 (no cancelled_at): its expires_at stands in', async () => {
+      cancelled({ cancelled_at: undefined, expires_at: NOW + DAY });
+      delete getItem('vaults', VID).recovery.cancelled_at;
+      expect((await status()).status).toBe(401);
+      at(NOW + DAY + H);
+      expect((await status()).status).toBe(410);
+    });
+
+    test('the grace: within an hour of the end it is 401 (an open or the host\'s app_key may still be on its way); after 30 days 401 again', async () => {
+      cancelled({ cancelled_at: NOW - H + 1 });
+      expect((await status()).status).toBe(401);
+      at(NOW + 1);
+      expect((await status()).status).toBe(410);
+      at(NOW - H + 1 + vault.RECOVERY_ENDED_KEEP_S - 1);
+      expect((await status()).status).toBe(410);
+      at(NOW - H + 1 + vault.RECOVERY_ENDED_KEEP_S);
+      expect((await status()).status).toBe(401);
+      expect([vault.RECOVERY_ENDED_GRACE_S, vault.RECOVERY_ENDED_KEEP_S]).toEqual([3600, 30 * 86_400]);
+    });
+
+    test('with an ended key: a bad signature, a ts outside the window or a reused nonce → 401', async () => {
+      cancelled();
+      expect((await status({ app: { key: newApp, vault: VID, tamper: (x) => x.replace('\nGET\n', '\nPOST\n') } })).body).toEqual({ error: 'unauthorized', message: 'Unauthorized' });
+      expect((await status({ app: { key: newApp, vault: VID, ts: NOW - 301 } })).status).toBe(401);
+      const nonce = randomBytes(16).toString('base64url');
+      expect((await status({ app: { key: newApp, vault: VID, nonce } })).status).toBe(410);
+      expect((await status({ app: { key: newApp, vault: VID, nonce } })).status).toBe(401);
+      // Another key signing for the ended kid (its header names newApp's kid).
+      const other = keyOf('r-ended-other');
+      expect((await status({ app: { key: { ...other, kid: newApp.kid }, vault: VID } })).status).toBe(401);
+    });
+
+    test('with an ended key: a deleted vault, a vault that is not the member\'s current one, or a member gone → 401', async () => {
+      cancelled();
+      getItem('vaults', VID).state = 'deleted';
+      expect((await status()).status).toBe(401);
+      getItem('vaults', VID).state = 'locked';
+      put('vaults', { vault_id: 'user#g1', current_vault_id: 'e'.repeat(32) });
+      expect((await status()).status).toBe(401);
+      put('vaults', { vault_id: 'user#g1', current_vault_id: VID });
+      expect((await status()).status).toBe(410);
+      tbl('members').delete('g1');
+      expect((await status()).status).toBe(401);
+    });
+
+    test('a new request carries the ended key over (kid, key, ended_at, reason only); a completed recovery carries nothing', async () => {
+      cancelled();
+      const rid = await request();
+      const r = getItem('vaults', VID).recovery;
+      expect(r.recovery_id).toBe(rid);
+      expect(r.ended_keys).toEqual([{ kid: newApp.kid, key: newApp.b64, ended_at: NOW - 2 * H, reason: 'cancelled' }]);
+      expect(r.recovering_key).toBeUndefined();
+      expect(await status()).toEqual({ status: 410, body: ENDED });
+      // Never shown on the account site's recovery.
+      expect(JSON.stringify((await call('GET', '/api/vault/recovery')).body)).not.toContain(newApp.kid);
+      // The same phone claiming the new recovery is a live key of it while it is active: 401, not recovery_ended.
+      r.claim_keys = [{ key: newApp.b64, kid: newApp.kid }];
+      expect((await status()).status).toBe(401);
+      // Carried again by the next request once that one has ended (cancelled), with the next phone's key.
+      const next = keyOf('r-next-phone');
+      Object.assign(r, { state: 'cancelled', cancelled_at: NOW, recovering_key: { key: next.b64, kid: next.kid } });
+      at(NOW + 2 * H);
+      await request();
+      expect(getItem('vaults', VID).recovery.ended_keys.map((e: any) => [e.kid, e.reason])).toEqual([[newApp.kid, 'cancelled'], [next.kid, 'cancelled']]);
+      // A completed recovery's key was adopted: nothing is carried for it.
+      registered({ state: 'completed', ended_keys: undefined });
+      delete getItem('vaults', VID).recovery.recovering_key;
+      delete getItem('vaults', VID).recovery.ended_keys;
+      at(NOW + 4 * H);
+      await request();
+      expect(getItem('vaults', VID).recovery.ended_keys).toBeUndefined();
+    });
+
+    test('carriedEndedKeys: at most MAX_ENDED_KEYS, the latest, one per kid, within 30 days', () => {
+      const e = (kid: string, at: number) => ({ kid, key: 'k', ended_at: at, reason: 'expired' as const });
+      const prev = { recovery_id: RID, state: 'pending', requested_at: 0, available_at: 0, expires_at: NOW - 1,
+        ended_keys: [e('a', NOW - 31 * DAY), e('b', NOW - 6 * H), e('c', NOW - 5 * H), e('b', NOW - 4 * H), e('d', NOW - 3 * H), e('e', NOW - 2 * H), e('f', NOW - H), e('g', NOW - 1)] };
+      expect(vault.MAX_ENDED_KEYS).toBe(5);
+      expect(vault.carriedEndedKeys(prev, NOW).map((x: any) => x.kid)).toEqual(['b', 'd', 'e', 'f', 'g']);
+      expect(vault.carriedEndedKeys(undefined, NOW)).toEqual([]);
+    });
+  });
+
   describe('a counted attempt (`recovery_attempt`, §11.14.11)', () => {
     const result = Buffer.alloc(5_252, 0x44).toString('base64');
     const counted = (extra: Record<string, unknown> = {}) =>
