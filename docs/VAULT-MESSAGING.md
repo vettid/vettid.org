@@ -33,7 +33,9 @@ changelog:
     what a device may take as confirmation that the vault is locked,
     against the bullet that says it means the vault is open under a
     newer unlock. It ends the device's lock without confirming it; the
-    device reads the status. A device with no current `unlock_id`
+    device does not repeat it on its own, but the member's own new lock
+    (the "Lock it now" button, owner decision 2026-10-24) is allowed;
+    the device reads the status. A device with no current `unlock_id`
     handles a `vault.locking` by the time rule. No wire change
   - 0.56.3: editorial; from the independent review of vettid-vault #147
     (release L, V2), as built there. §11.5 "The `lock` operation": an
@@ -5877,7 +5879,9 @@ device belongs to the unlock it ends.
     `vault.locking {unlock_id}`.
   - Different: it answers `stale_lock` and does nothing. The device's
     unlock is over; the vault is open under a newer one. The device
-    treats its own lock as finished and does not repeat it.
+    treats its own lock as finished and does not repeat it on its own
+    (a new lock the member asks for is a new lock, "What ends a
+    device's lock" below).
 - **Without `unlock_id`** (a device from before release L): the lock
   is carried out as before 0.29.0, while such devices are supported;
   after that it is answered `bad_request` (VAULT-LOCK L2). Devices
@@ -5898,13 +5902,18 @@ device belongs to the unlock it ends.
   and a `vault.locking` naming its unlock confirm that the vault is
   locked; these are the vault's word. `stale_lock` ends the device's
   lock without confirming it: the unlock the lock was for is over and
-  the vault is open under a newer one. The device does not repeat the
-  lock, reads the status (MEMBER-API `GET /api/vault/status`), and says
-  the vault is locked only if that status is not `unlocked`. The member
-  API's answers (§11.5), `stale` included, are the host's (§13.3) and
-  are read the same way. A device that holds no current `unlock_id` (a
-  new process before its first status read) handles a `vault.locking`
-  by the time rule of §11.4: `ts` after its last unlock here.
+  the vault is open under a newer one. The device does not repeat that lock
+  on its own; a new lock the member asks for (bound to the current
+  opening when the device knows its `unlock_id`, otherwise
+  unconditional, §8.6) is a new lock. The device reads the status
+  (MEMBER-API `GET /api/vault/status`), and says the vault is locked
+  only if that status was read and is not `unlocked`. The member API's
+  answers (§11.5) are the host's (§13.3): for a bound lock its `locked`
+  and `not_running` confirm it (VAULT-LOCK L6), and its `stale` is read
+  as `stale_lock` is. A device that holds no current `unlock_id` (a new
+  process before its first status read) handles a `vault.locking` by
+  the time rule of §11.4: its `ts` later than that of its latest
+  successful unlock result (§11.4).
 - **Other owner devices.** A desktop locks with the value from
   `vault.status`. Agents cannot lock.
 
