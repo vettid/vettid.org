@@ -1,8 +1,38 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.11.1
+version: 2.12.0
 changelog:
+  - 2.12.0 (2026-10-24; **owner decisions of 2026-10-24**: option A,
+    and a key in use is `app_key` or a live `app_key_pending`, never
+    `app_key_next`; with VAULT-MESSAGING 0.59.0 §11.14.6 "A phone that
+    could not tell", ANDROID-PLAN 0.1.78 and IOS-PLAN 0.1.33; built in
+    this repository, not deployed; no vault release). A recovering
+    phone whose open was never answered readably, whose recovery has
+    ended, may claim a **new** recovery of the same vault with the same
+    app key. So that such a key can never complete the new recovery
+    falsely: (1) `POST /api/vault/recovery/claim` refuses a **key in
+    use**, one whose `kid` is the vault's `app_key` or the redeem's
+    `app_key_pending` before its `until`, with **`409 key_in_use`**,
+    after the account checks and before the recovery's state is looked
+    at, and writes nothing (no claim key, no audit); (2) the `claim`
+    role leaves such a key out, because the app key can land between a
+    claim and its register, so a register signed by it is `401`; and (3)
+    a register's answer (`recovery_registered`) records no recovering
+    key for such a key, judged again on a consistent read just before
+    the write: the recovery is then `registered` without one, which is
+    never taken as completed (as before). The host's `app_key_next` is
+    **not** a key in use: a phone whose key is only that (a recovery
+    stopped between its first and third write) may claim a new
+    recovery, whose open then resumes the stopped one, and the
+    completion that follows is true. The `recovering` role is
+    unchanged: it leaves out only a recovering key equal to `app_key`,
+    so a recovering key that is the pending `app_key_next` can still
+    open again (VAULT-MESSAGING §11.14.2, the repeat through the `next`
+    wrap). Until now a claim with a key the vault had adopted could
+    lead to the new recovery being recorded as `completed` and the
+    "Your VettID vault was recovered" email being sent. No log, audit
+    or email changes; the one new answer is `409 key_in_use`
   - 2.11.1 (2026-10-24; editorial, with VAULT-MESSAGING 0.58.0 and
     VAULT-HOST-PROTOCOL 0.1.15). "The pending app key": the host writes
     `app_key_next` before the vault stores the first header that names it,
@@ -1025,7 +1055,9 @@ policy adds `X-VettID-App` to its allowlist.
   hour; cleared once `app_key` names the same `kid`.
 - On the recovery: `claim_keys [{key, kid}]` (at most 10) and
   `recovering_key {key, kid}` (from the register whose slot came back
-  `recovery_registered`).
+  `recovery_registered`). (2.12.0) A key in use (the vault's `app_key`,
+  or a live `app_key_pending`) is never admitted as a claim key and
+  never recorded as the recovering key ("Vault recovery", Claim).
 - On each response slot: the signing `kid` (`app_kid`), so that only that
   key can poll it.
 
@@ -1288,6 +1320,7 @@ value), and `retry_after` seconds where given:
 | 409 | `instance_moved` | The named instance is gone or no longer holds the vault: refetch `/api/vault/enclave` and re-seal |
 | 409 | `vault_busy` | `?release=` asked for a release while another release's instance holds the vault (`retry_after`: until the lease ends) |
 | 409 | `duplicate_request` | `request_id` already used |
+| 409 | `key_in_use` | (2.12.0) A recovery claim with a key that is the vault's `app_key`, or a live `app_key_pending`; nothing written ("Vault recovery", Claim) |
 | 410 | `release_unavailable` | The vault's release (or the one `?release=` asked for) is unknown, `removed` (its end date has passed, VAULT-MESSAGING 0.10.0 §11.10.5), or its image can no longer be started |
 | 410 | `vault_deleted` | 2.11.0: the vault is deleted (its row is `deleted`, or its record `vdeleted#<vault_id>` is kept). Only to a request signed by the vault's app key that passed every check of "App request signing", on any signed route that reads the vault row. Body also has `deleted_at` (RFC 3339, or `null` when the host recorded no time). "Vault deletion", What a phone is told |
 | 410 | `account_deleted` | 2.11.0: the account deletion has asked this vault to delete itself (`account_deleted_at` on its row). As for `vault_deleted`; `deleted_at` is when the account deletion asked |
@@ -1687,7 +1720,7 @@ the expiry itself.
 | GET | `/api/vault/recovery` | — | `{recovery: Recovery \| null}` |
 | POST | `/api/vault/recovery/cancel` | `{recovery_id}` | `200 {cancelled: boolean}`; `404 not_found` when `recovery_id` is not the current recovery of the member's vault (Cancel, below) |
 | POST | `/api/vault/recovery/cancel-link` | `{token}` (no session) | `200 {cancelled: boolean}`; `404 not_found` for a token that is unknown, past the recovery's `expires_at` or of a replaced recovery (Cancel, below) |
-| POST | `/api/vault/recovery/claim` | `{vault_id, recovery_id, app_key}` (scanned; 2.0.0) or `{locator, app_key}` (typed; 2.4.0); app, signed by `app_key` | `200 {user_guid, email_hint, vault_id, recovery_id}` (the two identifiers since 2.4.0) |
+| POST | `/api/vault/recovery/claim` | `{vault_id, recovery_id, app_key}` (scanned; 2.0.0) or `{locator, app_key}` (typed; 2.4.0); app, signed by `app_key` | `200 {user_guid, email_hint, vault_id, recovery_id}` (the two identifiers since 2.4.0); `409 key_in_use` when `app_key` is a key in use (2.12.0, Claim, below) |
 | POST | `/api/vault/recovery/register` | `{vault_id, request_id, instance_id, etk_kid, envelope}` (app, signed by a claim key; 2.0.0) | `202 {vault_id, request_id}`; poll `GET /api/vault/requests/{id}` |
 | POST | `/api/vault/recovery/open` | `{vault_id, request_id, instance_id, etk_kid, envelope}` (2.7.0, release R; app, signed by the recovering key) | `202 {vault_id, request_id}`; poll `GET /api/vault/requests/{id}` (Recovery from release R, below) |
 
@@ -1737,6 +1770,22 @@ interface Recovery {
   network per 15 minutes, hits and misses alike, counted before the
   lookup; then the lookup; then, only when the pair names the vault's
   recovery, 10 per vault per day.
+  - **A key in use** (2.12.0; VAULT-MESSAGING §11.14.6 "A phone that
+    could not tell"). After the account checks, and before the
+    recovery's state is looked at: a key whose `kid` is the vault's
+    `app_key`, or the redeem's `app_key_pending` before its `until`, is
+    refused with **`409 key_in_use`**. Nothing is written on the vault,
+    recovery or request rows and nothing is audited (the rate-limit
+    table holds the nonce and the two counts, as for any hit). A key
+    that is the vault's `app_key` must never become a claim or
+    recovering key: the API takes a recovery whose recovering key is
+    the app key as completed (2.4.1), and would record the new
+    recovery as completed and mail "recovered" for it. The phone that
+    holds the vault's `app_key` is its app: it unlocks with it
+    (VAULT-MESSAGING §11.14.6 "A lost `ok`"). The host's `app_key_next`
+    is **not** a key in use: such a key claims as any other, and the
+    new recovery's open then resumes the stopped one (VAULT-MESSAGING
+    §11.14.2).
   - **The pair names the vault's recovery** when the vault exists and
     is not deleted, its recovery has that `recovery_id`, and the
     member's pointer names that vault. The recovery's state does not
@@ -1828,7 +1877,20 @@ interface Recovery {
   `lock` are refused `403`, "Vault recovery"; 2.10.1). When
   the host writes the vault's `app_key` with the same `kid` (the recovery
   completed), the recovery's keys are cleared and, since 2.4.1, the
-  recovery is recorded as `completed` (below).
+  recovery is recorded as `completed` (below). (2.12.0) A register key
+  that is a key in use (Claim, above) is not recorded: the recovery
+  becomes `registered` without a recovering key. This is judged on the
+  slot's read and again on a consistent read of the vault row just
+  before the write. The write cannot name the host's `app_key` in its
+  condition (the table's attribute-level policy), so an `app_key`
+  written after that read can still meet the recorded key; the vault
+  has then adopted that key, and the completion is true. The `claim`
+  role admits only the claim keys that are not in use; a key in use is
+  admitted as what it is where a route allows that (the app key, the
+  setup-code key), and otherwise refused `401`. The `recovering` role
+  is unchanged: it admits the recovering key while the recovery is
+  active and the key is not `app_key`, also while it is the pending
+  `app_key_next`, so that the phone can open again.
 - **Completed** (2.4.1; owner decision of 2026-10-11). A recovery has
   completed when the new app holds the credential and is the vault's
   app (VAULT-MESSAGING §11.11.5 step 3). The API's sign of it is the
@@ -2015,7 +2077,11 @@ interface Recovery {
   `request_id` once), and only while the recovery is `available`
   (`409 recovery_not_available`), signed by one of its claim keys, which
   goes into the queue message as `app_key` (2.0.0). The enclave re-checks the delay, the
-  expiry, the code and the device attestation.
+  expiry, the code and the device attestation. (2.12.0) A claim key that
+  has since become a key in use (Claim, above) is no claim key: the
+  register is `401`, nothing is queued, and a slot that comes back
+  `recovery_registered` for it records no recovering key
+  (VAULT-MESSAGING §11.14.6 "A phone that could not tell").
 - **`GET /api/vault/status`** includes `recovery: {state,
   available_at} | null` in `VaultStatus` (above): the active recovery
   (`pending`, `available` or `registered` before `expires_at`), so the
