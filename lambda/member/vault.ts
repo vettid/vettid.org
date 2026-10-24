@@ -652,11 +652,35 @@ const isStoredKey = (k: unknown): k is StoredKey =>
   !!k && typeof (k as StoredKey).key === 'string' && typeof (k as StoredKey).kid === 'string';
 
 /**
+ * 2.12.0 (owner decisions of 2026-10-24; VAULT-MESSAGING §11.14.6 "A phone
+ * that could not tell"): whether `kid` is a key in use as an app key: the
+ * host's `app_key`, or the redeem's `app_key_pending` while it is live
+ * (before its `until`). Such a key is never a recovery's claim key and is
+ * never recorded as its recovering key: a recovery whose recovering key is
+ * the app key is taken as completed (completeRecovery()), so a phone
+ * reusing its key after the vault adopted it would otherwise complete the
+ * new recovery and mail a false "recovered". The host's `app_key_next` is
+ * not a key in use: a phone whose key is only that (a recovery stopped
+ * between its first and third write, §11.14.2) may claim a new recovery,
+ * whose open then resumes the stopped one, and a completion that follows
+ * is true.
+ */
+export function keyInUse(v: Pick<VaultRow, 'app_key' | 'app_key_pending'>, kid: string, now: number): boolean {
+  if (isStoredKey(v.app_key) && v.app_key.kid === kid) return true;
+  const p = v.app_key_pending;
+  return isStoredKey(p) && typeof p.until === 'number' && p.until > now && p.kid === kid;
+}
+
+/**
  * The keys a vault row allows in `role` now. The pending key ends after an
  * hour, or once the host's `app_key` names it; a recovery's keys only while
  * the recovery is active and the vault's app key is not yet the recovering
  * key (then the recovery has completed, §11.11.5). The vault's app key is
- * the host's `app_key` and (2.7.0) its pending `app_key_next`.
+ * the host's `app_key` and (2.7.0) its pending `app_key_next`. (2.12.0) A
+ * claim key is never one that keyInUse() names: the app key can land
+ * between a claim and its register. The recovering key stays admitted while
+ * it is the pending `app_key_next`, so that the phone can open again
+ * (VAULT-MESSAGING §11.14.2: the repeat through the `next` wrap).
  */
 function keysFor(v: VaultRow, role: KeyRole, now: number): StoredKey[] {
   const appKid = isStoredKey(v.app_key) ? v.app_key.kid : null;
@@ -673,7 +697,8 @@ function keysFor(v: VaultRow, role: KeyRole, now: number): StoredKey[] {
       if (!r || !recoveryActive(r, now)) return [];
       if (isStoredKey(r.recovering_key) && r.recovering_key.kid === appKid) return [];
       if (role === 'recovering') return isStoredKey(r.recovering_key) ? [r.recovering_key] : [];
-      return (r.claim_keys ?? []).filter(isStoredKey);
+      // 2.12.0: never a key in use as an app key (keyInUse).
+      return (r.claim_keys ?? []).filter((k) => isStoredKey(k) && !keyInUse(v, k.kid, now));
     }
   }
 }
@@ -2479,7 +2504,17 @@ export async function cancelNamesRecovery(inst: Pick<InstanceRow, 'release'>): P
  */
 async function markRegistered(m: MemberItem, v: VaultRow, r: RecoveryRow, slot: Record<string, unknown>): Promise<RecoveryRow> {
   if (r.state !== 'pending') return r;
-  const recovering = (r.claim_keys ?? []).find((k) => isStoredKey(k) && k.kid === slot.app_kid);
+  // 2.12.0: a key in use as an app key never becomes the recovering key
+  // (keyInUse), judged again on a fresh consistent read just before the
+  // write. The write cannot name the host's `app_key` in its condition (the
+  // table's attribute-level policy), so an `app_key` written after this
+  // read can still meet the recovering key; the vault then did adopt that
+  // key, and the completion that follows is true.
+  let recovering = (r.claim_keys ?? []).find((k) => isStoredKey(k) && k.kid === slot.app_kid);
+  if (recovering) {
+    const fresh = await vaultRow(v.vault_id);
+    if (!fresh || keyInUse(fresh, recovering.kid, nowS())) recovering = undefined;
+  }
   try {
     await ddb.send(
       new UpdateCommand({
@@ -2968,6 +3003,9 @@ async function claimRecovery(key: AppKey, vaultId: string, recoveryId: string, v
   const pointer = m ? await readPointer(m.user_guid) : null;
   if (!m || pointer?.current_vault_id !== v.vault_id) throw notFound('No such recovery');
   requireActive(m);
+  // 2.12.0 (VAULT-MESSAGING §11.14.6 "A phone that could not tell"): a key in
+  // use as an app key (keyInUse) is refused, and nothing is written.
+  if (keyInUse(v, key.kid, now)) throw vaultError(409, 'key_in_use', 'This key is already the vault\'s app key, or is being set up as one; it cannot claim a recovery');
   // 2.1.0: a recovery the enclave refused is `unavailable`, never claimable.
   if (recoveryState(await refreshPending(m, v, r, now), now) !== 'available') throw vaultError(409, 'recovery_not_available', 'No recovery code is valid now');
   const keys = [...(r.claim_keys ?? []).filter((k) => isStoredKey(k) && k.kid !== key.kid), { key: key.b64, kid: key.kid }].slice(-MAX_CLAIM_KEYS);

@@ -2994,6 +2994,168 @@ describe('recovery claim and the recovering key', () => {
   });
 });
 
+// ---- a phone that could not tell: its key in use (MEMBER-API 2.12.0, VAULT-MESSAGING §11.14.6) ----
+
+describe('2.12.0: a claim key is never a key in use (409 key_in_use)', () => {
+  const BK = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64');
+  /** The reusing phone's recovering (app) key K. */
+  const K = keyOf('reusing-phone');
+  const signedK = { app: { key: K, vault: VID } };
+  const claim = (key = K) => call('POST', '/api/vault/recovery/claim', { vault_id: VID, recovery_id: rid, app_key: key.b64 }, { app: { key, vault: VID }, guid: 'nobody' });
+  const at = (s: number) => {
+    jest.spyOn(Date, 'now').mockReturnValue(s * 1000);
+    for (const i of tbl('instances').values()) i.heartbeat_at = s - 10;
+  };
+  const AVAILABLE = NOW + 86_400 + 5;
+  const REG = { vault_id: VID, request_id: RID2, instance_id: 'i-1', etk_kid: KID, envelope: ENV };
+  const audits = (action: string) => [...tbl('audit').values()].filter((a) => a.action === action);
+  const subjects = () => sesMock.commandCalls(SendEmailCommand).map((c) => c.args[0].input.Content!.Simple!.Subject!.Data);
+  const row = () => getItem('vaults', VID);
+  const asStored = (key: TestKey) => ({ key: key.b64, kid: key.kid });
+  /** The enclave's register answer, then the app's poll of it. */
+  const registeredSlot = async () => {
+    Object.assign(getItem('requests', RID2), { status: 'done', envelope: Buffer.alloc(5_252, 4).toString('base64'), code: 'recovery_registered' });
+    expect((await call('GET', `/api/vault/requests/${RID2}`, undefined, signedK)).body.code).toBe('recovery_registered');
+  };
+  let rid: string;
+
+  /** A key in use: the vault's app key, or a live setup-code key. */
+  const IN_USE: [string, () => void][] = [
+    ['app_key', () => void (row().app_key = { ...asStored(K), seq: 2 })],
+    ['app_key_pending (live)', () => void (row().app_key_pending = { ...asStored(K), until: AVAILABLE + 600 })],
+  ];
+  /** Not in use: the host's pending app key (accepted or stale), a setup-code key past its `until`. */
+  const NOT_IN_USE: [string, () => void][] = [
+    ['app_key_next (accepted)', () => void (row().app_key_next = { ...asStored(K), seq: 2, header_seq: 9 })],
+    ['app_key_next (stale seq)', () => void (row().app_key_next = { ...asStored(K), seq: 1 })],
+    ['app_key_pending (past until)', () => void (row().app_key_pending = { ...asStored(K), until: AVAILABLE - 1 })],
+  ];
+
+  beforeEach(async () => {
+    release(R0, 4);
+    instance('i-1', R0);
+    vaultOf('g1', { vault_id: VID, state: 'locked', sealed_release: R0, app_key: { key: keyOf('old-phone').b64, kid: keyOf('old-phone').kid, seq: 1 } });
+    rid = (await call('POST', '/api/vault/recovery', { browser_key: BK })).body.recovery_id;
+    Object.assign(getItem('requests', rid), { status: 'done', envelope: Buffer.alloc(5_252, 3).toString('base64') });
+    at(AVAILABLE);
+  });
+
+  test.each(IN_USE)('a claim with a key that is the vault\'s %s: 409 key_in_use; nothing written, audited or mailed', async (_name, enter) => {
+    enter();
+    const before = structuredClone(row());
+    const mails = subjects().length;
+    const queued = sent().length;
+    const r = await claim();
+    expect(r).toMatchObject({ status: 409, body: { error: 'key_in_use', code: 'key_in_use' } });
+    expect(row()).toEqual(before);
+    expect(audits('vault.recovery_claim')).toHaveLength(0);
+    expect(subjects()).toHaveLength(mails);
+    expect(sent()).toHaveLength(queued);
+    // Another key claims the same recovery as before.
+    const other = keyOf('another-phone');
+    expect((await claim(other)).status).toBe(200);
+    expect(row().recovery.claim_keys).toEqual([asStored(other)]);
+  });
+
+  test.each(NOT_IN_USE)('a key that is only the vault\'s %s claims as any key', async (_name, enter) => {
+    enter();
+    expect((await claim()).status).toBe(200);
+    expect(row().recovery.claim_keys).toEqual([asStored(K)]);
+    expect((await call('POST', '/api/vault/recovery/register', REG, signedK)).status).toBe(202);
+  });
+
+  test('a normal claim still works, beside pending keys of other phones', async () => {
+    row().app_key_next = { ...asStored(keyOf('transfer-phone')), seq: 2 };
+    row().app_key_pending = { ...asStored(keyOf('setup-phone')), until: AVAILABLE + 600 };
+    const r = await claim();
+    expect(r).toEqual({ status: 200, body: { user_guid: 'g1', email_hint: 'g***@x.org', vault_id: VID, recovery_id: rid } });
+    expect(row().recovery.claim_keys).toEqual([asStored(K)]);
+    expect((await call('POST', '/api/vault/recovery/register', REG, signedK)).status).toBe(202);
+  });
+
+  test.each(IN_USE)('a claim key that became the vault\'s %s before the register is no claim key (401); nothing queued', async (_name, enter) => {
+    expect((await claim()).status).toBe(200);
+    enter();
+    const before = sent().length;
+    expect((await call('POST', '/api/vault/recovery/register', REG, signedK)).status).toBe(401);
+    expect(sent()).toHaveLength(before);
+    // The key is still admitted as what it now is (the app key, or the setup-code key) where a route allows that.
+    expect((await call('GET', '/api/vault/enclave', undefined, signedK)).status).toBe(200);
+  });
+
+  test('no false completion: the app key lands between the register and its answer; K never becomes the recovering key', async () => {
+    expect((await claim()).status).toBe(200);
+    expect((await call('POST', '/api/vault/recovery/register', REG, signedK)).status).toBe(202);
+    // The host reports that the vault took K as its app key (the earlier recovery's open, reported late).
+    row().app_key = { ...asStored(K), seq: 2 };
+    const mails = subjects().length;
+    await registeredSlot();
+    await call('GET', '/api/vault/recovery');
+    expect((await call('GET', '/api/vault/status', undefined, signedK)).status).toBe(200);
+    expect(row().recovery.state).toBe('registered');
+    expect(row().recovery.recovering_key).toBeUndefined();
+    expect(audits('vault.recovery_completed')).toHaveLength(0);
+    expect(subjects().slice(mails)).not.toContain('VettID vault recovered');
+  });
+
+  test('the recheck before the write: an app key that lands after the poll\'s read is still not recorded', async () => {
+    expect((await claim()).status).toBe(200);
+    expect((await call('POST', '/api/vault/recovery/register', REG, signedK)).status).toBe(202);
+    Object.assign(getItem('requests', RID2), { status: 'done', envelope: Buffer.alloc(5_252, 4).toString('base64'), code: 'recovery_registered' });
+    // The poll's reads of the vault row still have the old app key; the host writes K just before the recheck's read
+    // (a new row object, so the rows already read keep the old key).
+    const reads: number[] = [];
+    failGet = (g) => {
+      if (g.TableName !== 'vaults' || g.Key.vault_id !== VID) return false;
+      reads.push(reads.length + 1);
+      if (reads.length === 3) tbl('vaults').set(VID, { ...structuredClone(row()), app_key: { ...asStored(K), seq: 2 } });
+      return false;
+    };
+    expect((await call('GET', `/api/vault/requests/${RID2}`, undefined, signedK)).body.code).toBe('recovery_registered');
+    failGet = undefined;
+    expect(reads).toHaveLength(3);
+    expect(row().recovery.state).toBe('registered');
+    expect(row().recovery.recovering_key).toBeUndefined();
+    expect(audits('vault.recovery_completed')).toHaveLength(0);
+  });
+
+  test('no false completion: a claim with the adopted key is refused, and a planted claim key with it is never recorded', async () => {
+    row().app_key = { ...asStored(K), seq: 2 };
+    expect((await claim()).body.error).toBe('key_in_use');
+    // Even a claim key planted with K (a row written before 2.12.0) is never a claim key or the recovering key.
+    row().recovery.claim_keys = [asStored(K)];
+    expect((await call('POST', '/api/vault/recovery/register', REG, signedK)).status).toBe(401);
+    put('requests', { request_id: RID2, user_guid: 'g1', vault_id: VID, recovery_id: rid, app_kid: K.kid, op: 'recovery_register', status: 'done', code: 'recovery_registered', envelope: Buffer.alloc(5_252, 4).toString('base64'), created_at: new Date(NOW * 1000).toISOString(), expires_at: NOW + 3 * 86_400 });
+    row().recovery.register_ids = [RID2];
+    const mails = subjects().length;
+    await call('GET', '/api/vault/recovery');
+    expect((await call('GET', '/api/vault/status', undefined, signedK)).status).toBe(200);
+    expect(row().recovery.recovering_key).toBeUndefined();
+    expect(row().recovery.state).not.toBe('completed');
+    expect(audits('vault.recovery_completed')).toHaveLength(0);
+    expect(subjects().slice(mails)).not.toContain('VettID vault recovered');
+  });
+
+  test('owner decision D2: a key that is only app_key_next claims the new recovery, registers and opens; the completion that follows is true', async () => {
+    // The earlier recovery stopped between its first and third write: the host holds K as app_key_next.
+    row().app_key_next = { ...asStored(K), seq: 2, header_seq: 9 };
+    expect((await claim()).status).toBe(200);
+    expect((await call('POST', '/api/vault/recovery/register', REG, signedK)).status).toBe(202);
+    await registeredSlot();
+    expect(row().recovery).toMatchObject({ recovery_id: rid, state: 'registered', recovering_key: asStored(K) });
+    // The open is admitted with K: the vault repeats the stopped recovery through the `next` wrap.
+    const OPEN = { vault_id: VID, request_id: '01JB2Z6V9K3M4N5P6Q7R8S9T0Z', instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA };
+    expect((await call('POST', '/api/vault/recovery/open', OPEN, signedK)).status).toBe(202);
+    expect(sent().pop()!.msg).toMatchObject({ op: 'recovery_open', app_key: K.b64 });
+    // The host's step 3: app_key is K. The recovery completes, and its email is true.
+    row().app_key = { ...asStored(K), seq: 2 };
+    await call('GET', '/api/vault/recovery');
+    expect(row().recovery.state).toBe('completed');
+    expect(audits('vault.recovery_completed')).toHaveLength(1);
+    expect(subjects()).toContain('VettID vault recovered');
+  });
+});
+
 // ---- the typed recovery code (MEMBER-API 2.4.0, VAULT-MESSAGING 0.25.0 §11.11.10) ---------
 
 describe('2.4.0: the recovery locator and the claim by locator', () => {
@@ -4648,7 +4810,19 @@ describe('2.7.0: recovery from release R', () => {
       expect((await call('GET', '/api/vault/status', undefined, as(next))).status).toBe(401);
     });
 
-    test('a recovery between its first and third write: the recovering key is the pending app key, so it may unlock (the vault decides)', async () => {
+    test('D1 (2.12.0): between the first and third write the recovering key stays the recovering key: the open is forwarded (202), so the vault can repeat it through the next wrap', async () => {
+      registered();
+      for (const next of [{ seq: 2, header_seq: 7 }, { seq: 1 }]) {
+        getItem('vaults', VID).app_key_next = { key: newApp.b64, kid: newApp.kid, ...next };
+        const id = next.seq === 2 ? '01JB2Z6V9K3M4N5P6Q7R8S9T1A' : '01JB2Z6V9K3M4N5P6Q7R8S9T1B';
+        const r = await open({ ...OPEN, request_id: id });
+        expect([next, r.status]).toEqual([next, 202]);
+        expect(sent().pop()!.msg).toMatchObject({ op: 'recovery_open', request_id: id, app_key: newApp.b64 });
+      }
+      expect(getItem('vaults', VID).recovery.state).toBe('registered');
+    });
+
+    test('a recovery between its first and third write: the recovering key is the pending app key, so the API forwards its unlock (the vault decides: transfer_incomplete while the state is under DEK_0, then the phone opens again; ok under DEK_1)', async () => {
       registered();
       getItem('vaults', VID).app_key_next = { key: newApp.b64, kid: newApp.kid, seq: 2, header_seq: 7 };
       expect((await call('POST', '/api/vault/unlock', UNLOCK, signed)).status).toBe(202);

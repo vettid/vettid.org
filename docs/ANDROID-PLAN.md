@@ -1,9 +1,22 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.77
+version: 0.1.78
 date: 2026-10-24
 changelog:
+  - 0.1.78: owner decisions of 2026-10-24 (option A; a key in use is
+    `app_key` or a live `app_key_pending`); the user-facing texts are
+    DRAFTS for the owner's approval (VAULT-MESSAGING 0.59.0 §11.14.6 "A
+    phone that could not tell", MEMBER-API 2.12.0). §4 "Recovery and
+    unlock from release R", step 5: a registered phone whose open was
+    sent and never answered readably, whose recovery has ended, reads
+    status with K: on `200` (not proof of adoption) the lost-ok unlock,
+    and on `transfer_incomplete` it opens again or uses a new recovery;
+    on `401` (or `410 recovery_ended`) it may be used for a new
+    recovery with the same K and a new device identity, keeping
+    everything, including each identity's `recovery_id` as its
+    handshake context, until `ok` and the pairing; `409 key_in_use` at
+    the claim means the lost-ok unlock
   - 0.1.77: **owner decisions of 2026-10-24** (VAULT-MESSAGING 0.57.0
     §12.5 "What a phone does", MEMBER-API 2.11.0, IOS-PLAN 0.1.32). §4 "A vault being deleted":
     a phone erases its local vault data because of a deletion only on a
@@ -2561,6 +2574,70 @@ step of the "Recovery (new phone)" row).
    a token, and means the app **must send `hs.init` again**: the unlock
    dropped any handshake in progress, so a pending `hs.fin` is refused.
    The unlock can be repeated until the handshake completes.
+
+   **A phone that could not tell** (0.1.78; owner decisions of
+   2026-10-24; VAULT-MESSAGING §11.14.6 "A phone that could not tell").
+   **When:** only after an open was accepted by the member API (`onSent`)
+   and its answer was never readable, and its recovery has ended. The
+   phone reads `GET /api/vault/status` signed with K, twice at least 5
+   minutes apart with the clock checked:
+   - `200`: **not proof of adoption** (K may be only the pending
+     `app_key_next` of an open that stopped). The phone sends the lost-ok
+     unlock ("A lost `ok`"). `ok`: it pairs as there. `transfer_incomplete`:
+     it opens again while its recovery shows `registered`; otherwise the
+     rule below applies. Any other refusal: it keeps everything and reads
+     the status again later.
+   - `401`, or `410 recovery_ended` (once the member API gives it,
+     vettid.org #415): the rule below applies.
+   Never while the recovery shows `registered` (then the phone opens
+   again).
+
+   **What it may do:** show (**DRAFT text, for the owner's approval**)
+   "We could not tell whether your last attempt recovered the vault. You
+   can start a new recovery on the account site and use this phone for it;
+   nothing on this phone is deleted." Then: claim the new code with K;
+   poll the earlier open's `request_id` once, since a readable answer
+   decides it; register with a **new device identity** (new `device_ik`,
+   `kem` and relay key) and the same K; and open with the **earlier
+   open's `unlock_secret`**.
+   - On `409 key_in_use` at the claim (K is a key in use, normally the vault's `app_key`), or a
+     `401` at the register followed by `409 key_in_use` on a new claim:
+     the lost-ok unlock, first with the new identity if it registered,
+     then with the earlier one. If neither unlock succeeds, keep
+     everything, read the status again later, and after a day of refusals
+     show (**DRAFT**) "Your vault took this phone, but it cannot be
+     unlocked right now. Contact VettID."
+   - After the new open's `ok`: `hs.init` with the new identity and `ctx`
+     = the new `recovery_id`; if no `hs.resp` arrives within the pairing
+     timeout (the vault answers a handshake it does not accept with
+     nothing; it never sends `invite_invalid`), the
+     lost-ok unlock with the earlier identity and `hs.init` with `ctx` =
+     the earlier `recovery_id`.
+   - Each identity pairs only with `ctx` = the `recovery_id` it registered
+     for: the vault stores the invitation under that id and looks
+     `hs.init` up by `ctx`.
+
+   **What it keeps:** K and the earlier identity, its phone-secret record,
+   the earlier `recovery_id` (its handshake context), open `request_id`s
+   and `min_header_seq` / `min_state_seq`, until the vault answers `ok` and
+   the handshake completes; then the earlier identity and its records may
+   be deleted.
+
+   **Never:** start over or forget K while undecided (also on `410
+   recovery_ended`); never take a `200` alone as adoption; never forget
+   either identity or its `recovery_id` before the handshake completes.
+
+   Tests: the rule starts only after `onSent` with no readable answer
+   and an ended recovery; `200` leads to the lost-ok unlock, never to
+   "adopted" by itself, and `transfer_incomplete` to a new open; `401`
+   or `410` on two reads 5 minutes apart allow the new recovery;
+   nothing is deleted; the register carries the new identity and K,
+   the open the earlier `unlock_secret`; `409 key_in_use` leads to the
+   lost-ok unlock, and refusals for a day to the contact text; after
+   `ok`, `hs.init` with the new `recovery_id`, and with no `hs.resp`
+   within the pairing timeout (no `invite_invalid` is ever received)
+   the earlier identity with the earlier `recovery_id`; the earlier
+   records go only after the pairing.
 
    While a wait runs the screen shows the date and time of the next
    possible attempt with a countdown, and the app keeps the registered
