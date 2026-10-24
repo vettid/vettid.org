@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.56.0
+version: 0.56.1
 date: 2026-10-23
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -27,6 +27,19 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.56.1: editorial; **owner answers of 2026-10-23** on the
+    release L plan (VAULT-LOCK 0.1.3 Q1, Q3), as built in vettid-vault
+    #145. §10.2 "Locks", §11.5 "The `lock` operation": a **recovery
+    open is an opening of the vault**: it makes an `unlock_id` (already
+    a member of `vault.recovery.open.result`, §11.14.6, which releases
+    from R to L sent empty), and an unconditional lock is compared with
+    the `enqueued_at` of the `recovery_open` message as with an enroll's
+    or an unlock's. §8.6: a device that implements 0.29.0 but does not
+    hold the value of a vault that announced one (an install from before
+    that version, a lost record) locks as for a vault before L over the
+    relay (once, the wait before its next unlock), and through the
+    member API without the value (an unconditional lock). No other rule
+    changes
   - 0.56.0: **draft; the owner answered the proposed choices on 2026-10-23, the
     text awaits approval** (the owner decided on 2026-10-23 to specify and build wallet spend caps before
     the Android wallet work, W1 and W2); ANDROID-PLAN 0.1.74,
@@ -5295,6 +5308,12 @@ sends it once, and before its next unlock waits until that request's
 `exp` plus a margin; the vault accepts a `ts` up to 5 minutes ahead,
 §8.4, so a phone whose clock runs ahead leaves a window it cannot
 close).
+(0.56.1, owner answer of 2026-10-23, VAULT-LOCK Q3) A device that does
+not hold the value of a vault that announced one (an install from
+before the version that implements 0.29.0, a lost record) locks as for
+a vault before L: `vault.lock {}` over the relay once, and the same wait
+before its next unlock; and through the member API without the value
+(an unconditional lock, MEMBER-API "Locks").
 
 **An owner device refused by its own vault.** When a deposit by an owner
 device to its own vault's mailbox answers `token_revoked`, the device
@@ -5793,13 +5812,15 @@ VAULT-LOCK §3).** A lock from a
 device belongs to the unlock it ends.
 
 - **`unlock_id`.** Each time a vault opens (a successful
-  `vault.enroll` or `vault.unlock`, §11.3, §11.4) its process makes 16
+  `vault.enroll` or `vault.unlock`, §11.3, §11.4, or (0.56.1) a
+  successful recovery open, §11.14.6) its process makes 16
   random bytes, written as 32 lowercase hex characters. The value is
   kept in memory only: it is in neither the state nor the header, and
   it ends with the process, so every earlier value is stale after any
   lock, restart or move. It is not a secret and authorizes nothing by
-  itself. The app has it from the unlock or enroll result; any app or
-  desktop can read it in `vault.status`.
+  itself. The app has it from the enroll, unlock or (0.56.1)
+  recovery-open result; any app or desktop can read it in
+  `vault.status`.
 - **A bound lock.** `vault.lock {unlock_id}`: the vault compares the
   value with its current unlock's.
   - Equal: it answers `{}` and locks after the batch (§12.3), sending
@@ -12277,8 +12298,8 @@ requests name the manifest by `manifest_sha256` and `manifest_serial`
 - **Bound** (with `unlock_id`): the enclave hands it to the vault's
   process, which locks only if the value names its current unlock.
 - **Unconditional** (without): the enclave keeps, with each running
-  vault, the `enqueued_at` of the enroll or unlock message that opened
-  it, and carries the lock out only if the lock's `enqueued_at` is
+  vault, the `enqueued_at` of the enroll, unlock or (0.56.1)
+  `recovery_open` message that opened it, and carries the lock out only if the lock's `enqueued_at` is
   later. An equal or earlier time is stale. Both times are the member
   API's; no clock of the enclave or of a device is compared. (The
   queue is not ordered and a message can be delivered up to 5 minutes

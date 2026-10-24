@@ -1,8 +1,18 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.10.0
+version: 2.10.1
 changelog:
+  - 2.10.1 (2026-10-23; editorial; **owner answer of 2026-10-23** on
+    the release L plan, VAULT-LOCK 0.1.3 Q2). "Locks" (2.5.0) said the
+    lock route's callers were "the account session, the app key or a
+    recovering key" and that "a recovering app" locks unconditionally;
+    2.7.0 (release R) refuses the recovering key `403` on `unlock` and
+    `lock`, and the owner keeps that: a recovering key does not lock.
+    The two sentences and the "Signed requests" table's `unlock` and
+    `lock` rows now say so (the table had not followed 2.7.0). "Locks"
+    is implemented in vettid.org #407 (staging; production with the
+    promotion of release L). No rule changes
   - 2.10.0 (2026-10-20; **approved by the owner (2026-10-20)**, with
     VAULT-MESSAGING 0.51.0 and VAULT-HOST-PROTOCOL 0.1.14, vettid.org
     #356; for the vault's staging release 20; not built). "Vault
@@ -928,8 +938,8 @@ device identifiers, and never logs envelopes.
 | `POST /api/vault/enroll/redeem` | — | the key being registered (`vault=` empty) |
 | `GET /api/vault/enclave` | — | `app_key`, pending key, claim or recovering key |
 | `POST /api/vault/enroll` | — | pending key |
-| `POST /api/vault/unlock` | — | `app_key`, recovering key |
-| `POST /api/vault/lock` | yes | `app_key`, recovering key |
+| `POST /api/vault/unlock` | — | `app_key` (2.7.0: a recovering key is refused `403`) |
+| `POST /api/vault/lock` | yes | `app_key` (2.7.0: a recovering key is refused `403`) |
 | `GET /api/vault/status` | yes | `app_key`, recovering key |
 | `GET /api/vault/requests/{id}` | yes (the member's slots; the result only for enroll, unlock, lock and recovery register, 2.6.1) | the key that made the request |
 | `POST /api/vault/recovery`, `GET`, `/cancel` | yes | — |
@@ -2374,13 +2384,16 @@ Vault (vettid-vault):
 
 ### Locks (2.5.0; VAULT-MESSAGING 0.29.0 §11.5, VAULT-LOCK)
 
-*Approved by the owner 2026-10-12; not implemented yet. It describes
-the routes as they are from the deploy that accompanies the vault's
-release L; until then they behave as 2.4.2 describes.*
+*Approved by the owner 2026-10-12; implemented in vettid.org #407
+(2.10.1). It describes the routes as they are from that deploy, which
+needs no vault release: an enclave before release L ignores
+`unlock_id` and writes no code, so its lock slots read `done` without
+one (the account site then says it could not confirm the lock).*
 
 - **`POST /api/vault/lock`** `{vault_id, request_id, unlock_id?}`.
-  Callers and limits are unchanged: the account session, the app key
-  or a recovering key, whatever the account's state; 30 in 15 minutes
+  Callers and limits are unchanged: the account session or the app
+  key, whatever the account's state (2.10.1: not a recovering key,
+  which is refused `403` since 2.7.0, "Vault recovery"); 30 in 15 minutes
   per member. `unlock_id`, when present, MUST be 32 lowercase hex
   characters (`400 bad_request` otherwise). The API does not know
   whether it is right; it copies it into the queue message.
@@ -2388,8 +2401,7 @@ release L; until then they behave as 2.4.2 describes.*
     value names its current unlock (VAULT-MESSAGING §10.2 "Locks").
     Only the app has the value, from its unlock result.
   - **Without: an unconditional lock.** This is what the account site
-    sends, what a recovering app sends, and what an app sends when it
-    does not hold the value. The enclave carries it out only if the
+    sends, and what an app sends when it does not hold the value. The enclave carries it out only if the
     message's `enqueued_at` is later than that of the unlock that
     opened the vault (§11.5), so a lock that waited in the queue cannot
     lock a vault opened since.

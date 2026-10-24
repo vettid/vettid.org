@@ -1,8 +1,8 @@
 ---
 title: VAULT-LOCK
 status: approved by the owner 2026-10-12 (L1–L16 as recommended); design note; the normative text is in VAULT-MESSAGING 0.29.0, MEMBER-API 2.5.0 and VAULT-HOST-PROTOCOL 0.1.3, each rule marked "release L" (not released, not built)
-version: 0.1.2
-date: 2026-10-13
+version: 0.1.3
+date: 2026-10-23
 owner: Al Liebl (Mesmer)
 component: vault (enclave), member API, account site, apps
 related:
@@ -13,6 +13,20 @@ related:
   - VAULT-RELEASES.md (0.1.19) §3.4 (C2, C4)
   - vettid-android #127 (open, not merged at the time of writing; read at 78f741a0), vettid-vault `main` 079cde7
 changelog:
+  - 0.1.3: editorial; the release L plan (2026-10-23) and the **owner's
+    answers of 2026-10-23** to its three questions. **Q1:** a recovery
+    open is an opening of the vault: it makes an `unlock_id` (§3.1),
+    and an unconditional lock is ordered against its `enqueued_at`
+    (VAULT-MESSAGING 0.56.1). **Q2:** a recovering key does not lock
+    (MEMBER-API 2.7.0 refuses it `403`; MEMBER-API 2.10.1): "a
+    recovering app" leaves §3.2 and L4's wording. **Q3:** an app that
+    does not hold the value of a vault that announced one locks exactly
+    as #127 does (one relay lock, the wait) plus the unconditional API
+    lock (§3.6). Also: release L is staging release 23 (S12 in 0.1.2:
+    staging moved on to S22 before it was built), so the older
+    behaviour stays until S22 is removed; and the app's retry that
+    survives the process is part of the Android work (owner, Q4). No
+    decision changes
   - 0.1.2: §8, the point about `no_lease`, following
     VAULT-HOST-PROTOCOL 0.1.5 §4.3 and VAULT-MESSAGING 0.29.2 §12.3
     (as built at vettid-vault `main` a852e36, for S11): the 140 s are
@@ -109,8 +123,10 @@ lowercase hex characters.
   compared across clocks. Two unlocks never share a value in practice
   (128 bits).
 - **Where a device gets it:** in the sealed `vault.unlock.result` and
-  `vault.enroll.result` (the app), and in `vault.status` (the app, and
-  a desktop, which locks but does not unlock).
+  `vault.enroll.result` (the app), (0.1.3, Q1) in the sealed
+  `vault.recovery.open.result` (a recovery open is an opening too), and
+  in `vault.status` (the app, and a desktop, which locks but does not
+  unlock).
 
 ### 3.2 Two kinds of lock
 
@@ -119,7 +135,7 @@ lowercase hex characters.
 | Carries | `unlock_id` | no `unlock_id` |
 | The vault acts if | the value is its current unlock's | the request is newer than its current unlock (§3.3) |
 | Otherwise | answers `stale_lock` and does nothing | answers `stale` and does nothing |
-| Used by | the app and a desktop over the relay (`vault.lock`); the app through the member API | the account site's "Lock my vault"; a recovering app; an app that does not hold the value; the member API for a cancelled account; apps from before release L |
+| Used by | the app and a desktop over the relay (`vault.lock`); the app through the member API | the account site's "Lock my vault"; an app that does not hold the value (0.1.3: a recovering key does not lock, MEMBER-API 2.7.0); the member API for a cancelled account; apps from before release L |
 | Why it exists | the device that opened the vault ends exactly that opening | a member without the phone must be able to lock: that is the lost-phone case, and it must work |
 
 Locks that do not come from a request are unchanged and are neither
@@ -213,7 +229,14 @@ live lease; nothing was reported). Both are the host's view.
 | L or later | L or later | Bound locks; retries over the relay; no wait before an unlock; codes read |
 
 The app keeps the older behaviour until no release without `unlock_id`
-can hold a member's vault (staging: when S11 is removed).
+can hold a member's vault (staging: when S22, the last release before
+L, is removed; 0.1.2 said S11).
+
+(0.1.3, Q3) An app that does not hold the value of a vault that
+announced one (an install from before the app version that implements
+L, a lost record) locks exactly as for a vault before L over the relay
+(one relay lock with a short `exp`, the wait before its next unlock)
+and sends the member API lock without the value (unconditional).
 
 ### 3.7 What the app may drop
 
@@ -338,8 +361,9 @@ password.
 - **Not in S11** (L15). S11 is being cut with the scaling work and the
   silent-parent fix. This needs a vault change, a member API change
   and review first.
-- **Release L = the staging release after S11 (S12), with both
-  decisions.** They touch the same code (the lock path, `vault.status`,
+- **Release L = staging release 23 (S23), with both decisions**
+  (0.1.2 said S12, the release after S11; staging reached S22 before L
+  was built, and S22 carries VA4 only). They touch the same code (the lock path, `vault.status`,
   `vault.locking`), and the idle lock is small once the owner check's
   clock is there.
 - **Before calls C2, and not coupled to it.** A lock that can land on a
@@ -401,7 +425,7 @@ with your recommendations"): every decision as recommended.
 | L1 | What names an unlock | (a) a random `unlock_id`, in memory only; (b) a counter in the vault's state; (c) the unlock result's time | **(a).** Nothing to store; every earlier value dies with the process; no clocks | (a) |
 | L2 | A `vault.lock` over the relay without `unlock_id` (apps before L) | (a) carried out as today, until no supported app sends it, then `bad_request`; (b) refused from release L | **(a).** (b) would stop older apps locking over the relay the day the release lands | (a) |
 | L3 | How an unconditional lock is kept from landing after a newer unlock | (a) compare `enqueued_at` with the unlock's (the member API's clock for both); (b) a per-vault counter kept by the member API; (c) no rule | **(a).** No new state; the residue is milliseconds between two member API processes | (a) |
-| L4 | Who may lock unconditionally | (a) the account site's session, a recovering app, the app when it does not hold the value, the member API for a cancelled account; (b) the account site only | **(a).** Locking only reduces exposure, and the lost-phone lock from the web must not depend on a value only the phone had | (a) |
+| L4 | Who may lock unconditionally | (a) the account site's session, a recovering app (0.1.3: not a recovering key, refused `403` since MEMBER-API 2.7.0; owner, Q2), the app when it does not hold the value, the member API for a cancelled account; (b) the account site only | **(a).** Locking only reduces exposure, and the lost-phone lock from the web must not depend on a value only the phone had | (a) |
 | L5 | How the true result is reported | (a) a `code` beside `done`: `locked`, `not_running`, `stale`; (b) new slot statuses | **(a).** The slot's statuses are frozen for live releases; older apps ignore a code | (a) |
 | L6 | What ends "may still be open" on the phone | (a) the vault's word, or the host's (`locked`, `not_running`, a status that is not `unlocked`); (b) the vault's word only | **(a).** A locked vault cannot speak, so (b) could never be confirmed after any lock not made over the relay. The idle lock is what bounds a host that lies | (a) |
 | L7 | The status route | (a) add `locked_basis`: `reported` or `no_lease`; (b) leave it | **(a).** It costs one member and makes the answer honest about what it rests on | (a) |
