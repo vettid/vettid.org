@@ -831,10 +831,19 @@
         "changes": [
           "When your vault moves to an iPhone, it now remembers its Android version of VettID (F-Droid or direct, Google Play, or a development build).",
           "Moving it back to an Android phone with a different version is then a change, as between two Android phones: your old phone is told, your approval names the new version, and History shows \"Vault moved to another version of VettID\".",
-          "Fix: a recovery resumed after a failed save now also records which version of VettID recovered the vault, so a later change of version is noticed.",
+          "Fix: if a recovery had to be resumed after a failed save, the vault forgot which version of VettID it had before, so recovering to a different version was not shown as a change, also between two Android phones.",
           "Built from vettid-vault commit 2550675 (tag release/staging/22) and independently rebuilt on 2026-10-24 with a matching PCR0."
         ],
-        "security": "none"
+        "security": "recommended",
+        "security_text": "Before release 22, if a recovery of your vault had to be resumed because a save on VettID's host failed, the vault forgot which version of VettID it was on before. A recovery to a different version was then not shown as a change: no \"Vault moved to another version of VettID\" in History and no notice, also between two Android phones. Only a host that failed that one save could cause this. It did not bypass the PIN, the credential password or the recovery code. We know of no use of this against any vault. Vaults on releases 15 to 21 are affected.",
+        "affects": [
+          15,
+          17,
+          18,
+          19,
+          20,
+          21
+        ]
       }
     }
   ]
