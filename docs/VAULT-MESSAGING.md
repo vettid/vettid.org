@@ -27,8 +27,8 @@ related:
   - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.56.0: **draft; proposed, for the owner's approval** (the owner
-    decided on 2026-10-23 to specify and build wallet spend caps before
+  - 0.56.0: **draft; the owner answered the proposed choices on 2026-10-23, the
+    text awaits approval** (the owner decided on 2026-10-23 to specify and build wallet spend caps before
     the Android wallet work, W1 and W2); ANDROID-PLAN 0.1.74,
     STAGING-TIME-SCALE 0.1.4. **A vault change** (vettid-vault
     `features/wallet`), with a release, and new app screens. The
@@ -44,7 +44,15 @@ changelog:
     excluded); checked after the PSBT checks and before the password is
     tried; `cap_exceeded` with `{reason, limit_sats, ...}`; audit kinds
     `wallet.cap_refused`, `wallet.caps_lowered`, `wallet.caps_raised`,
-    never an amount. New messages: `wallet.caps.set` (a normal change,
+    never an amount. **Owner decisions of 2026-10-23:** no caps by default,
+    the app asks at creation and a mainnet wallet cannot skip the question; raising or removing a cap takes the
+    PIN and the password; so does revealing the phrase of a wallet that
+    has caps (`item.reveal`, `pin_required`); a rolling 24 hours only
+    (VAULT-PLAN V4 said "per day, per week"). Review fixes: the check's
+    place in §3.5.3, the clock rule, atomic check-and-append, fee bumps
+    counted in full, rollback, `exists` for a duplicate import,
+    `cap` in `wallet.psbt.inspect`, the `payload_sha256` encoding and a
+    vector. New messages: `wallet.caps.set` (a normal change,
     lowering only) and `wallet.caps.raise` (a credential operation with
     the PIN and the password, bound to the new values). `wallet.create`
     may carry `caps`; `<wallet>` carries `caps`. The period is divided
@@ -3131,7 +3139,7 @@ a clone) are not: they test no guess. (0.46.1; owner decisions of
 verifies the PIN as an owner check does**: `credential.create` (its
 PIN), `pin.change`, `vault.secret.renew`, `credential.password.change`,
 `credential.reset`, `device.transfer.approve`, `vault.delete` and
-(0.56.0) `wallet.caps.raise`. Its
+(0.56.0) `wallet.caps.raise` and `item.reveal` of a wallet that has a cap. Its
 `bad_pin` or `bad_password` counts as a failed check; each checks the
 blob first (§3.5.9), so a request refused before any secret is tested
 counts nothing. Operations that test the password alone (unlocking or
@@ -3179,8 +3187,9 @@ credential. `vault.status` reports `owner_check.state: "ok"`. Its first
 the vault a new credential (`credential.reset`) starts it fresh.
 
 **Nothing else resets it.** An unlock (the PIN only), `credential.unlock`
-or any other credential operation (the password only), `pin.change` and
-`credential.password.change` do not; nor, from release R, does
+or any other credential operation (the password only), `pin.change`,
+`credential.password.change` and (0.56.0) `wallet.caps.raise` and
+`item.reveal` of a capped wallet do not; nor, from release R, does
 `vault.secret.renew` (§11.14.9). *Rationale for one dedicated
 operation:*
 
@@ -4905,7 +4914,8 @@ While the vault is held, a session is suspended but still returned.
   `location.share.start`, `location.history.list`, `.delete` and
   `.share`, and `presence.set`. Apps are never held. (Types that use the credential,
   such as `critical-secret-use.approve`, signed `leash.grant.issue`,
-  `wallet.create` and `wallet.sign`, are app-only. A step-up type's app-only form, such as a critical
+  `wallet.create`, `wallet.sign` and (0.56.0) `wallet.caps.set` and
+  `wallet.caps.raise`, are app-only. A step-up type's app-only form, such as a critical
   item's `item.put` or an agent's `share.rule.set`, is answered
   `forbidden` to a desktop at once, never held, §10.7, §10.12. Creating
   or accepting a connection is app-only too: `connection.invite.create`,
@@ -5653,7 +5663,7 @@ an answer to an unknown or expired id is dropped.
       short reason (§10.18);
     - `unavailable`: the operation needs something this release does not
       have, such as a vault-side chain source (§10.18);
-    - (0.56.0) `cap_exceeded`: `wallet.sign`, or the approval of
+  - and (0.56.0) `cap_exceeded`: `wallet.sign`, or the approval of
       `wallet.request-payment`, would take more out of the wallet than
       its spend caps allow; body `{reason, limit_sats, remaining_sats?,
       allowed_after?}` (§10.18 "Spend caps");
@@ -5753,7 +5763,7 @@ an answer to an unknown or expired id is dropped.
   | `location.share.changed` | `share_id`, `state` (`active`, `ended`): an outgoing share (§10.16) |
   | `location.history.changed` | `count`: positions were deleted from the location log (§10.16) |
   | `presence.changed` | `version` (§10.17) |
-  | `wallet.changed` | `wallet_id`, `version` (§10.18) |
+  | `wallet.changed` | `wallet_id`, `version` (§10.18; 0.56.0: also when caps are set or raised) |
   | `wallet.signed` | `wallet_id`, `txid` (§10.18) |
   | `wallet.deleted` | `wallet_id` (§10.18) |
 
@@ -7243,7 +7253,7 @@ decision 1):
 | | dry run (0.21.0): `{dry_run: true, item_id?, version?, sensitivity?, tags?}` (Dry run, below) | `{version?, shares, withdrawals}` |
 | `item.get` (app, desktop) | `{item_id}` | `<item>`: a `data` item with its values; a `secret` or `critical` item without `value`s and `notes`, with `has_notes`; with `size` (0.21.0, below) |
 | `item.reveal` (app; desktop: step-up) | `secret`: `{item_id, fields?: [<field_id>]}` (a `data` item: `{item_id}`, as `item.get`) | `<item>` with its values (only those `fields`, without `notes`, if given) |
-| | `critical` (app): `{item_id, credential, utk_id, sealed{password, item_id, reply_key}}` | `{item_id, version, values_sealed, credential, credential_version, utks}` |
+| | `critical` (app): `{item_id, credential, utk_id, sealed{password, item_id, reply_key, pin?}}` (0.56.0: `pin` required for the item of a wallet that has a cap, `pin_required`, §10.18) | `{item_id, version, values_sealed, credential, credential_version, utks}` |
 | `item.list` (app, desktop) | `{tags?, match?, category?, sensitivity?, after?, limit?}` | `{items: [<item without values and notes>], next?}` |
 | `item.tag` (app; desktop: step-up) | `{item_id, version, tags, dry_run?}` | `{version}`; with `dry_run` (0.21.0): `{version, shares, withdrawals}` |
 | `item.sensitivity` (app; desktop: step-up, `data` ↔ `secret` only) | `{item_id, version, sensitivity}`; to or from `critical` (app) also `credential, utk_id, sealed{password, item_id}` | `{version}`; with the credential also `{credential, credential_version, utks}` |
@@ -10970,7 +10980,7 @@ app (chain source)                                   vault
 
 | Type | Request body | Response body |
 |---|---|---|
-| `wallet.create` (app) | `{name, network?, address_type?, caps?, tags?, credential, utk_id, sealed{password, item?}}`; `item` = `{mnemonic, passphrase?}` to import a phrase | `<wallet>` and `{credential, credential_version, utks}`; `limit`, `bad_request` (0.56.0: `caps` as in `wallet.caps.set`) |
+| `wallet.create` (app) | `{name, network?, address_type?, caps?, tags?, credential, utk_id, sealed{password, item?}}`; `item` = `{mnemonic, passphrase?}` to import a phrase | `<wallet>` and `{credential, credential_version, utks}`; `limit`, `bad_request` (0.56.0: `caps` as in `wallet.caps.set`), `exists` (0.56.0: an import whose account keys equal an existing wallet's) |
 | `wallet.list` (app, desktop) | `{}` | `{wallets: [<wallet>]}` |
 | `wallet.get` (app, desktop) | `{wallet_id}` | `<wallet>` |
 | `wallet.update` (app, desktop) | `{wallet_id, version, address_type?, accounts?: [{type, next_receive?, next_change?}]}` (at least one of the two; 0.37.0: `accounts`, app only) | `{version}`; `conflict`, `bad_request`, `forbidden` (`accounts` from a desktop) |
@@ -11152,7 +11162,7 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
   without the credential and returns the summary that `wallet.sign`
   would sign for; apps MUST show it (the payees, amounts, change and fee)
   to the member before asking for the password.
-- **Spend caps** (0.56.0; **proposed, for the owner's approval**; the
+- **Spend caps** (0.56.0; owner decisions of 2026-10-23, text awaiting approval; the
   requirement of VAULT-PLAN V4 and PROTEAN-CREDENTIAL §5). A wallet has
   two optional limits on what leaves it, set by its owner:
   - **The cap model.** `per_tx_sats`: the most one signed transaction
@@ -11166,9 +11176,13 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     record in DEK state (`<wallet>.caps`), with the period's ledger
     (below); there is no vault-wide cap and no fiat amount (the vault
     has no price source).
-  - **Defaults.** A wallet has no caps until its owner sets them
-    (`wallet.create{caps}` or `wallet.caps.set`). The vault
-    never invents a number; the app asks at creation (ANDROID-PLAN).
+  - **Defaults** (owner decision of 2026-10-23). A wallet has no caps
+    until its owner sets them (`wallet.create{caps}` or
+    `wallet.caps.set`). The vault never invents a number; the app asks at
+    creation, and a mainnet wallet cannot skip the question
+    (ANDROID-PLAN). `<wallet>.caps` is always present: `per_tx_sats` and
+    `per_period_sats` are absent when unlimited, and `period_seconds` and
+    `spent_sats` are always there.
   - **Setting and lowering.** `wallet.caps.set` is app only and a normal
     versioned change (`conflict` on a stale `version`, §10.1). It may
     only **lower**: a member is accepted if it sets a cap where there
@@ -11186,11 +11200,16 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     not move the deadline). It needs no unlock window. The UTK payload's
     `item_id` MUST be the wallet and `payload_sha256` the SHA-256 of
     `"vettid/wallet.caps/1" || 0x00 || wallet_id || 0x00 || version ||
-    0x00 || per_tx || 0x00 || per_period`, where `version` is the
-    request's, and `per_tx` and `per_period` are the values the wallet
-    will have after the request, in decimal or `none` (`bad_request`
-    otherwise), so the password and PIN authorise these numbers on this
-    wallet only. It must raise or remove at least one cap (`bad_request`
+    0x00 || per_tx || 0x00 || per_period` (bytes: the label in ASCII,
+    each field in UTF-8, `0x00` between them, none after the last), where
+    `wallet_id` is the item's ULID string (26 characters), `version` is
+    the request's in decimal ASCII without leading zeros, and `per_tx`
+    and `per_period` are the values the wallet will have after the
+    request: decimal ASCII without leading zeros, or the literal `none`
+    (`bad_request` otherwise; a vector is in §16), so the password and
+    PIN authorise these numbers on this wallet only. The values the
+    wallet will have obey the model's rule: `per_tx_sats` above
+    `per_period_sats` is `bad_request`. It must raise or remove at least one cap (`bad_request`
     otherwise); a member it does not name is unchanged, and it may
     lower another in the same request. It audits `wallet.caps_raised`
     (`ref` = `wallet_id`), makes a feed item of priority `high` and
@@ -11199,9 +11218,12 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
   - **Enforcement at signing.** `wallet.sign` and the approval of
     `wallet.request-payment` (§10.14) both pass through the same check,
     so a connection's request is capped like the member's own spend,
-    and so would any future caller. After every check of the signing
-    policy has passed (so `invalid_psbt`, including `fee_rate`, comes
-    first) and **before the password is tried**, the vault computes the
+    and so would any future caller. The check runs after §3.5.3
+    steps 1–4 (frozen check, UTK opened and spent, `item_id` and
+    `payload_sha256` checked, blob checked, backoff) and after the
+    signing policy (so `invalid_psbt`, including `fee_rate`, comes
+    first), and **before step 5**, where the password is tried. The
+    vault computes the
     **outflow** of the PSBT: `sending_sats + fee_sats` of its summary,
     that is, the inputs minus the outputs that are change. An output
     to an address of the wallet's own accounts that carries the
@@ -11215,7 +11237,14 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
       `per_tx`); or
     - `per_period_sats` is set and the outflow plus the ledger's
       total of the period is above it (`reason` `per_period`).
-    Equal is allowed. `per_tx` is tested first. Because the check comes
+    Equal is allowed. `per_tx` is tested first. The check and the append
+    to the ledger (below) are **atomic per wallet**: two signing
+    requests for one wallet, even in one batch and before any flush,
+    see each other's entries, so they cannot both pass on the same
+    allowance. An RBF fee bump, a re-sign of a PSBT and the same PSBT
+    sent under a new inner id are each a new signing and **count in
+    full** (only a retry with the same inner id, answered from the
+    response cache, counts once). Because the check comes
     before the password is opened, a refusal tests no password guess,
     counts nothing in the backoff and rotates no CEK; the UTK it
     presented is spent as any (§3.5.4 "Using a UTK"), and the app asks
@@ -11234,7 +11263,8 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     refused spend is seen on every device. **No amount or cap value is
     in the audit log, the feed, a `sync.event` or a log line** (the
     existing rule: "No address, amount or key is in the audit log").
-  - **What counts, and when.** The period's **ledger** is a list of
+  - **What counts, and when.** The period's **ledger** (kept whether or not caps are set, so setting
+    a cap counts what was already spent) is a list of
     `{at_ms, sats}`: one entry per transaction **signed**, with the
     outflow, written in the flush that records the signing (so a crash
     cannot sign without counting). The vault cannot see a broadcast
@@ -11242,15 +11272,18 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     hands, so **signed** counts, whether or not the app broadcasts it
     (a signed transaction the app drops uses the allowance until the
     period passes). A retried `wallet.sign` is answered from the
-    response cache and counts once. Entries older than the period are
-    dropped when the wallet is next read or signed; at most 200 are
+    response cache and counts once. The total is computed on read; entries older than the period are
+    dropped at the next write; at most 200 are
     kept, and a 201st merges the two oldest into one with the later
     time (the allowance is never given back early). `<wallet>.caps`
     reports `spent_sats` (the ledger's total within the period) and
     `period_seconds`; the refusal's `allowed_after` is the vault's own
     computation from the ledger.
-  - **Time.** The vault's clock decides. If the clock steps back, an
-    entry dated in the future is counted as if made now. On staging the
+  - **Time.** The vault's clock decides: the enclave's clock comes
+    from the hypervisor, not from the parent (VAULT-HOST-PROTOCOL, trust
+    table). An entry counts while now < `at_ms` + period. The vault never
+    rewrites `at_ms`, so after a clock step back a future entry counts
+    for longer, never shorter. On staging the
     period is `86,400 / time_scale` seconds, divided when the check runs
     (the ledger holds absolute times), so a change of scale moves no
     entry. In production the scale is 1.
@@ -11263,19 +11296,41 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     the wallet's state in DEK state: they move with the vault through a
     lock, an unlock, a phone transfer (§6.7.1) and a recovery (§11.11)
     unchanged, and a new phone has the same remaining allowance. The
-    vault has no snapshots or export (VAULT-PLAN); a host that put back
-    an older stored state would also put back its ledger, the same
-    exposure as the password backoff count (§3.5.3). `credential.reset`
-    deletes the wallets and so their caps.
+    vault has no snapshots or export (VAULT-PLAN). A host that serves an
+    older state erases the ledger entries written since the app's last
+    unlock; §13.2 detects a rollback only at unlock and only below the
+    app's last-seen `state_seq`. Because each signing rotates the CEK
+    (§3.5.3 step 7), which the vault keeps in DEK state, the app's blob
+    then no longer matches the state, and the next credential operation
+    is refused under §3.5.9. `credential.reset` deletes the wallets and
+    so their caps.
   - **The limit of a cap.** It limits what **the vault signs**. A member
     who reveals the phrase (`item.reveal`, a credential operation with
     the password only) holds the keys and can spend outside the vault;
     that is the member's backup right, audited and in the feed
-    (`item.revealed`), and caps do not claim to stop it. A thief with
-    only the unlocked phone cannot reveal or sign without the password.
-    What a cap bounds is a spend made with the password but not the
-    PIN, such as a connection's payment request approved in a hurry,
-    a compromised app or a coerced sign.
+    (`item.revealed`), and caps do not claim to stop it. That is why
+    the reveal of a capped wallet's phrase takes the PIN as well (below).
+    What a cap bounds is a spend by someone who has the password but not
+    the PIN: a leaked or watched password, a connection's payment request
+    approved in a hurry, or a fault in the app's payment building. It
+    does not bound someone who has both, nor an app compromised for long
+    enough to see the PIN at an owner check.
+  - **Revealing a capped wallet's phrase** (owner decision of
+    2026-10-23). (0.56.0) `item.reveal` of the item of a wallet that has
+    a cap carries `pin` with the password in `sealed`, checked as an
+    owner check checks them (§3.6.1; a wrong one is a failed check) and
+    not itself an owner check; without `pin` it is `bad_request`
+    (message `pin_required`). A wallet without caps reveals with the
+    password alone.
+  - **A second wallet with the same keys.** `wallet.create` refuses an
+    import whose account keys equal those of an existing wallet (code
+    `exists`), so a wallet without caps cannot be made from a capped
+    wallet's phrase inside the same vault.
+  - **`wallet.psbt.inspect`** (without the credential) also returns
+    `cap: {ok, reason?, remaining_sats?, allowed_after?}`: whether
+    `wallet.sign` would pass the caps now, and if not why, with the
+    fields of `cap_exceeded`; the app shows it before it asks for the
+    password. It changes nothing and writes no audit entry.
 - **Spending is a critical action.** `wallet.sign` is app only, needs the
   credential's unlock window (`credential_locked` otherwise; 0.52.0: a
   presented UTK is spent first, §3.5.4) and is one credential operation: the UTK payload's
@@ -11296,7 +11351,7 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
   Desktops read, issue addresses, choose the receiving account and
   inspect, but never create, sign or (0.37.0) move the next indices.
 - **Change notices.** `sync.event` `wallet.changed{wallet_id, version}`
-  (created, receiving account changed, addresses issued or used),
+  (created, receiving account changed, addresses issued or used, caps set or raised),
   `wallet.signed{wallet_id, txid}`, `wallet.deleted{wallet_id}`.
 - **Audit and feed.** `wallet.created`, `wallet.deleted`
   (`ref` = `wallet_id`), `wallet.address_issued` (to a connection;
@@ -11343,6 +11398,21 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     now; on a scaled build the period is `86,400 / time_scale` and an
     entry made before a change of scale keeps its time; 201 entries in
     a period merge the two oldest and never lower the total.
+  - Reveal (owner decision): `item.reveal` of a capped wallet's item
+    without `pin` is `bad_request` `pin_required`, with a wrong PIN is
+    `bad_pin` and a failed check, with the right PIN works and is not an
+    owner check; a wallet without caps reveals with the password alone.
+  - Two signing requests for one wallet in one batch cannot both pass on
+    the same allowance. An RBF re-sign and the same PSBT under a new
+    inner id are each counted in full; a retry with the same inner id
+    once.
+  - A clock stepped back: a future entry keeps counting until its
+    `at_ms` + period and is not rewritten.
+  - `wallet.caps.raise` that leaves `per_tx_sats` above
+    `per_period_sats` is `bad_request`; the `payload_sha256` vector of
+    §16; `wallet.psbt.inspect` returns `cap` and writes nothing.
+  - A duplicate import (same account keys) is `exists`; the ledger is
+    kept with no caps set and counts after a cap is set.
   - State: caps and ledger survive lock and unlock, a phone transfer
     and a recovery; `credential.reset` and a wallet's deletion remove
     them; a wallet created before this release has no caps and signs as
@@ -21445,6 +21515,21 @@ VAULT-HOST-PROTOCOL §8.1 counter object names                   (recovery.json)
   wait 2    : recovery/v1/486f02bad2b24e6b020d1211ab3bb070/g0000000000000001/w02-b270c8be143728446662bd950cba5128
   success 1 : recovery/v1/486f02bad2b24e6b020d1211ab3bb070/g0000000000000001/s01-a6137b69bdad29e9324bb5a311cbbb8a
   close     : recovery/v1/486f02bad2b24e6b020d1211ab3bb070/g0000000000000001/c-9959b12f3b2e807bac9851cd64d3fd9c
+```
+
+**§10.18 `wallet.caps.raise` binding (0.56.0).** Computed with SHA-256
+here; vettid-vault generates the same values in
+`testdata/vectors/` with the implementation (the file is then
+authoritative). The preimage is the ASCII label `vettid/wallet.caps/1`,
+`0x00`, `wallet_id`, `0x00`, `version`, `0x00`, `per_tx`, `0x00`,
+`per_period`.
+
+```
+wallet_id                    : 01HXZ3N5Q8R2T4V6W9Y0B1C2D3
+version 7, per_tx 500000, per_period 2000000
+  payload_sha256 (hex)       : 9479e8f7e06134aab2e7fcfec8dc1ba7fd2ed5cde4be3553ccaf4e6cf9aa1259
+version 7, per_tx none, per_period 2000000
+  payload_sha256 (hex)       : 7bcbbf3d027952bb1a7cbafba930b385732185b8f61d4b15218a8ee7a32d58ae
 ```
 
 ## 17. Changelog

@@ -4,15 +4,18 @@ status: draft
 version: 0.1.74
 date: 2026-10-23
 changelog:
-  - 0.1.74: draft, proposed; **for the owner's approval** (VAULT-MESSAGING
-    0.56.0, §10.18 "Spend caps"; the owner decided on 2026-10-23 to build
-    caps before W1 and W2). §4 "Wallet": a **Spending limits** screen
+  - 0.1.74: draft; the owner answered the choices on 2026-10-23, the
+    text awaits approval (VAULT-MESSAGING 0.56.0, §10.18 "Spend caps";
+    the owner decided on 2026-10-23 to build caps before W1 and W2). §4 "Wallet": a **Spending limits** screen
     (wallet detail, ⋯), a prompt at creation, the review screen's
-    "left today" line, the `cap_exceeded` refusal text, raising a limit
+    "left" line, the `cap_exceeded` refusal text, raising a limit
     with the PIN and the password, History and notification texts for
     `wallet.cap_refused`, `wallet.caps_lowered`, `wallet.caps_raised`,
     texts and tests. Numbered 0.1.74 on the assumption that vettid.org
-    #405 merges as 0.1.73; renumber if it does not
+    #405 merged as 0.1.73; renumber if another change takes 0.1.74.
+    Also: "Show recovery phrase" on a capped wallet asks for the PIN too;
+    at creation the app creates without caps, reveals and checks the
+    phrase, then sets the caps; a fee bump counts again toward the limit
   - 0.1.73: editorial (status as of 2026-10-23); no rule changes. §4
     "Staging time scale" and "Photo attachments" marked built, "Recovery
     and unlock from release R" and "Wallet, presence, location and
@@ -3476,16 +3479,24 @@ personalized learning (`IME_FLAG_NO_PERSONALIZED_LEARNING`), as the
 typed recovery code (§4, "Recovery: type the code"); no word list
 lookup over the network.
 
-**Spending limits** (0.1.74; VAULT-MESSAGING 0.56.0 §10.18; **for the
-owner's approval**). Built in W1, before sending, because W2 must show
+**Spending limits** (0.1.74; VAULT-MESSAGING 0.56.0 §10.18; owner
+decisions of 2026-10-23, text **for the owner's approval**). Built in W1, before sending, because W2 must show
 and respect them.
 
 - **At creation and import.** After the name and network, a step
   "Set a spending limit?" with two optional fields, **Most per payment**
-  and **Most per day**, in sats (a toggle shows BTC), and "No limit" as
-  the default choice. The values go in `wallet.create{caps}`. Nothing is
-  suggested for a test network; for mainnet (its own approval later) the
-  step cannot be skipped without choosing "No limit".
+  and **Most in any 24 hours**, in sats (a toggle shows BTC), and "No
+  limit" as the default choice. Nothing is suggested for a test network;
+  for mainnet (its own approval later) the step cannot be skipped
+  without choosing "No limit". The wallet is **created without caps**;
+  the app then shows and checks the recovery phrase as usual (the reveal
+  of a wallet that has no cap needs the password only), and only then
+  sends `wallet.caps.set` with the chosen values, so that the phrase
+  step never needs the PIN. (`wallet.create` also accepts `caps`; the app
+  does not use it.)
+- **Recovery phrase of a capped wallet.** ⋯ → Show recovery phrase asks
+  for the PIN as well as the password ("To protect your spending limit,
+  enter your PIN too."); the vault answers `pin_required` otherwise.
 - **The screen** (wallet ⋯, **Spending limits**): the two limits as
   they stand, "Used in the last 24 hours: {spent} of {limit}" (on staging
   "last hour"), and the buttons **Lower a limit** and **Raise or remove
@@ -3497,9 +3508,12 @@ and respect them.
   would lower sends `set`; one that raises sends `raise`; a form that
   does both is sent as `raise` with the lowered value in it.
 - **On the review screen** of a send (W2), under the vault's summary: "Counts
-  toward your daily limit: {outflow}. Left today after this: {left}",
-  when `per_period_sats` is set, from `<wallet>.caps.spent_sats`. The
-  app does not refuse by itself: the vault decides.
+  toward your limit for the last 24 hours: {outflow}. Left after this:
+  {left}", when `per_period_sats` is set, from `<wallet>.caps.spent_sats`;
+  and, from `wallet.psbt.inspect`'s `cap`, the refusal text below before
+  the password is asked, if it says `ok: false`. A **fee bump** (a
+  new PSBT that replaces a payment) says: "A fee bump counts again
+  toward your limit for the last 24 hours." The vault decides.
 - **Units.** Sats everywhere in this screen, whole numbers, with a
   thousands separator; no fiat value.
 
@@ -3561,10 +3575,11 @@ refuses before it opens the password, so nothing was signed and nothing
 is lost): `per_tx` "This payment is more than the {limit} you allow per
 payment. Nothing was signed." with the buttons **Change the amount**
 and **Spending limits**; `per_period` "This payment would take you over
-your daily limit of {limit}. You can still send {remaining} today."
-(no `remaining_sats`, or 0: "You can't send anything more today.");
+your limit of {limit} in any 24 hours. You can send up to {remaining}
+now." (no `remaining_sats`, or 0: "You can't send anything more right
+now.");
 with `allowed_after`: "You can send this at {time}." (the earliest
-time the vault gives); without it: "This is more than your daily limit
+time the vault gives); without it: "This is more than your 24-hour limit
 allows at any time." A payment request from a connection that is refused
 shows the same text on the request, which stays open. The app never
 shows the refusal to the connection.
@@ -3659,10 +3674,12 @@ labels on addresses, a fiat value.
 | Chain server privacy | as above, "To show your balance and send, VettID asks this server…" |
 | Server check failed | "That server isn't on {network}." / "That server didn't answer." |
 | Limits, at creation (0.1.74) | "Set a spending limit?" / "Your vault will refuse any payment above it. You can lower it any time; raising it needs your PIN and password." / "No limit" |
-| Limits, screen | "Most per payment" / "Most per day" / "Used in the last 24 hours: {spent} of {limit}" |
+| Limits, screen | "Most per payment" / "Most in any 24 hours" / "Used in the last 24 hours: {spent} of {limit}" |
 | Limits, lower | "Lower the limit to {new}?" |
 | Limits, raise | "Raise the limit from {old} to {new}?" or "Remove the limit?" / "Enter your PIN and password." |
-| Limit, review | "Counts toward your daily limit: {outflow}. Left today after this: {left}" |
+| Limit, review | "Counts toward your limit for the last 24 hours: {outflow}. Left after this: {left}" |
+| Limit, fee bump | "A fee bump counts again toward your limit for the last 24 hours." |
+| Phrase of a capped wallet | "To protect your spending limit, enter your PIN too." |
 | Limit, refused | as the `cap_exceeded` texts above |
 | Delete | "Delete {name}? Your vault forgets this wallet and its recovery phrase. Coins on it are lost unless you have the recovery phrase written down." |
 
@@ -3687,7 +3704,11 @@ labels on addresses, a fiat value.
   vault's vectors; every `cap_exceeded` text for each combination of
   `reason`, `remaining_sats` and `allowed_after`; the creation step's
   "No limit" default; sats formatting; no amount, limit or PIN in logs,
-  crash reports or files (the data directory scan).
+  crash reports or files (the data directory scan); "Show recovery phrase"
+  on a capped wallet asks for the PIN and handles `pin_required` and a
+  wrong PIN (a failed check); a wallet created with a limit is created
+  without caps, then set; `wallet.psbt.inspect`'s `cap` shown before the
+  password; the fee-bump text.
 - Instrumented, dev stack (`regtest`, a development build of the
   vault, with a local Esplora): create, back up and check; receive;
   import a phrase with history on both accounts (the receiving account
