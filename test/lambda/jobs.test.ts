@@ -8,7 +8,7 @@ import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 
 Object.assign(process.env, {
   TABLE_MEMBERS: 'members', TABLE_SUBSCRIPTIONS: 'subs', TABLE_AUDIT: 'audit', TABLE_MAILING_LIST: 'list', TABLE_VAULTS: 'vaults', TABLE_RATELIMITS: 'rl',
-  TABLE_VAULT_INSTANCES: 'instances', TABLE_VAULT_RELEASES: 'releases',
+  TABLE_VAULT_INSTANCES: 'instances', TABLE_VAULT_RELEASES: 'releases', TABLE_VAULT_REQUESTS: 'requests',
   VAULT_QUEUE_URL_PREFIX: 'https://sqs.us-east-1.amazonaws.com/123456789012/vettid-org-vault-control-',
   MEMBER_POOL_ID: 'pool', SENDER_EMAIL: 'no-reply@vettid.org', ACCOUNT_HOST: 'account.vettid.org',
   VAULT_SERVICE_PARAM: '/vettid-org/prod/switch/vault-service',
@@ -28,6 +28,8 @@ const sqs = mockClient(SQSClient);
 const ssm = mockClient(SSMClient);
 const PAUSED = JSON.stringify({ enabled: false, reason: 'incident', set_by: 'ops@vettid.org', set_at: '2026-10-05T20:00:00.000Z' });
 const ccf = () => Object.assign(new Error('c'), { name: 'ConditionalCheckFailedException' });
+/** MEMBER-API 2.11.0: the account deletion's mark on each vault row it asks. */
+const MARK_ACCOUNT = 'SET account_deleted_at = if_not_exists(account_deleted_at, :t)';
 
 beforeEach(() => {
   ddb.reset(); idp.reset(); ses.reset(); sqs.reset(); ssm.reset();
@@ -88,8 +90,18 @@ describe('cleanup job', () => {
     expect(Object.keys(msg)).toEqual(['v', 'op', 'vault_id', 'user_guid', 'request_id', 'enqueued_at']);
     expect(msg).toMatchObject({ v: 1, op: 'delete', vault_id: 'a'.repeat(32), user_guid: 'g1' });
     expect(msg.request_id).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
-    const mark = ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input).find((i) => i.TableName === 'vaults')!;
-    expect(mark).toMatchObject({ Key: { vault_id: 'a'.repeat(32) }, UpdateExpression: 'SET deletion_requested_at = :t' });
+    const vaultUpdates = ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'vaults');
+    // MEMBER-API 2.11.0: account_deleted_at first, on the sealed vault only (not the never-sealed or the deleted one).
+    expect(vaultUpdates.map((i) => [i.Key!.vault_id, i.UpdateExpression])).toEqual([
+      ['a'.repeat(32), 'SET account_deleted_at = if_not_exists(account_deleted_at, :t)'],
+      ['a'.repeat(32), 'SET deletion_requested_at = :t'],
+    ]);
+    expect(vaultUpdates[0]).toMatchObject({ ConditionExpression: 'attribute_exists(vault_id)', ExpressionAttributeValues: { ':t': expect.any(Number) } });
+    const calls = ddb.calls().map((c) => c.args[0]);
+    const markAt = calls.findIndex((c) => c instanceof UpdateCommand && (c.input as any).UpdateExpression.startsWith('SET account_deleted_at'));
+    expect(markAt).toBeGreaterThanOrEqual(0);
+    // Before the ask (which writes deletion_requested_at).
+    expect(markAt).toBeLessThan(calls.findIndex((c) => c instanceof UpdateCommand && (c.input as any).UpdateExpression === 'SET deletion_requested_at = :t'));
     const vaultDeletes = ddb.commandCalls(DeleteCommand).filter((c) => c.args[0].input.TableName === 'vaults').map((c) => c.args[0].input.Key);
     expect(vaultDeletes).toEqual([{ vault_id: 'b'.repeat(32) }, { vault_id: 'user#g1' }]);
     // Row and its own marker went first, together; then the account's own sign-in user.
@@ -108,7 +120,7 @@ describe('cleanup job', () => {
     expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
     const ups = ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input);
     expect(ups.find((i) => i.TableName === 'releases')).toMatchObject({ Key: { release: R } });
-    expect(ups.find((i) => i.TableName === 'vaults')).toMatchObject({ UpdateExpression: 'SET deletion_requested_at = :t' });
+    expect(ups.find((i) => i.TableName === 'vaults' && i.UpdateExpression !== MARK_ACCOUNT)).toMatchObject({ UpdateExpression: 'SET deletion_requested_at = :t' });
   });
 
   test('a removed release (0.10.0) is never asked to start, unless reopened for a rescue', async () => {
@@ -120,7 +132,7 @@ describe('cleanup job', () => {
     await cleanup.handler();
     let ups = ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input);
     expect(ups.find((i) => i.TableName === 'releases')).toBeUndefined();
-    expect(ups.find((i) => i.TableName === 'vaults')).toMatchObject({ UpdateExpression: 'SET deletion_requested_at = :t' });
+    expect(ups.find((i) => i.TableName === 'vaults' && i.UpdateExpression !== MARK_ACCOUNT)).toMatchObject({ UpdateExpression: 'SET deletion_requested_at = :t' });
     expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
 
     ddb.resetHistory();
@@ -143,7 +155,7 @@ describe('cleanup job', () => {
     expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(0);
     const ups = ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input);
     expect(ups.find((i) => i.TableName === 'releases')).toBeUndefined();
-    expect(ups.find((i) => i.TableName === 'vaults')).toMatchObject({ Key: { vault_id: 'a'.repeat(32) }, UpdateExpression: 'SET deletion_requested_at = :t' });
+    expect(ups.find((i) => i.TableName === 'vaults' && i.UpdateExpression !== MARK_ACCOUNT)).toMatchObject({ Key: { vault_id: 'a'.repeat(32) }, UpdateExpression: 'SET deletion_requested_at = :t' });
   });
 
   test('unreported deletions are retried; after 30 days they are flagged with the vault_id only', async () => {
@@ -390,7 +402,7 @@ describe('cleanup job: start-overs (MEMBER-API 2.1.0, VAULT-MESSAGING 0.16.0 §1
     expect(idp.commandCalls(AdminDeleteUserCommand).map((c) => c.args[0].input.Username)).toEqual(['gone@x.org']);
     const [send] = sqs.commandCalls(SendMessageCommand);
     expect(JSON.parse(send.args[0].input.MessageBody!)).toMatchObject({ op: 'delete', vault_id: 'a'.repeat(32), user_guid: 'g1' });
-    expect(vaultUpdates().map((u) => u.UpdateExpression)).toEqual(['SET deletion_requested_at = :t']);
+    expect(vaultUpdates().map((u) => u.UpdateExpression)).toEqual([MARK_ACCOUNT, 'SET deletion_requested_at = :t']);
     expect(audits()).toEqual([expect.objectContaining({ action: 'member.delete_after_cancel', detail: { vault_ids: ['a'.repeat(32)], identity: 'deleted' } })]);
   });
 
@@ -864,7 +876,11 @@ describe('cleanup job: vaults whose member row is gone (daily run)', () => {
     expect(sqs.commandCalls(SendMessageCommand)).toHaveLength(1);
     expect(send.args[0].input.QueueUrl).toBe(QP + 'i1');
     expect(JSON.parse(send.args[0].input.MessageBody!)).toMatchObject({ v: 1, op: 'delete', vault_id: A, user_guid: 'g7' });
-    expect(vaultWrites()).toEqual([expect.objectContaining({ Key: { vault_id: A }, UpdateExpression: 'SET deletion_requested_at = :t' })]);
+    // MEMBER-API 2.11.0: marked as an account deletion (A only: B was never sealed), then asked.
+    expect(vaultWrites()).toEqual([
+      expect.objectContaining({ Key: { vault_id: A }, UpdateExpression: MARK_ACCOUNT }),
+      expect.objectContaining({ Key: { vault_id: A }, UpdateExpression: 'SET deletion_requested_at = :t' }),
+    ]);
     expect(vaultDeletes()).toEqual([{ vault_id: B }, { vault_id: 'user#g7' }]);
     expect(audits()).toEqual([expect.objectContaining({ actor: 'system', action: 'vault.orphan_deletion_requested', subject: 'g7', detail: { vault_ids: [A, B], orphan_seen_at: seen } })]);
     expect(emf()).toMatchObject({ OrphanVaultsSeen: 0, OrphanVaultDeletions: 1, OrphanVaultsHeld: 0 });
@@ -1222,6 +1238,64 @@ describe('vault alarm mailer (VAULT-MESSAGING 0.9.0 §11.5)', () => {
       err.mockRestore();
     });
 
+    describe('2.11.0: the record kept after the row is removed (vdeleted#<vault_id>, 90 days)', () => {
+      const KEY = { key: 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE' + 'A'.repeat(88), kid: '0123456789abcdef0123456789abcdef' };
+      const NEXT = { key: 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE' + 'B'.repeat(88), kid: 'fedcba9876543210fedcba9876543210' };
+      const tombstones = () => ddb.commandCalls(PutCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'requests');
+
+      test('put before the row is deleted: the public keys, deleted_at, cause and expires_at = now + 90 days, nothing else', async () => {
+        ddb.on(DeleteCommand).resolves({});
+        const before = Math.floor(Date.now() / 1000);
+        expect(await alarms.processRecord(rec(del({ app_key: { ...KEY, seq: 1 }, app_key_next: { ...NEXT, seq: 2 } })))).toBe('mailed');
+        const [t] = tombstones();
+        expect(tombstones()).toHaveLength(1);
+        expect(Object.keys(t.Item!).sort()).toEqual(['cause', 'deleted_at', 'expires_at', 'keys', 'request_id', 'user_guid', 'vault_id']);
+        expect(t.Item).toMatchObject({ request_id: `vdeleted#${VID}`, vault_id: VID, user_guid: 'g1', keys: [KEY, NEXT], deleted_at: 1_790_000_000, cause: 'vault' });
+        expect(t.Item!.expires_at - before).toBeGreaterThanOrEqual(90 * 86_400);
+        expect(t.Item!.expires_at - before).toBeLessThanOrEqual(90 * 86_400 + 5);
+        expect(t.ConditionExpression).toBeUndefined();
+        const calls = ddb.calls().map((c) => c.args[0]);
+        const putAt = calls.findIndex((c) => c instanceof PutCommand && c.input.TableName === 'requests');
+        const delAt = calls.findIndex((c) => c instanceof DeleteCommand && (c.input as any).Key.vault_id === VID);
+        expect(putAt).toBeGreaterThanOrEqual(0);
+        expect(putAt).toBeLessThan(delAt);
+      });
+
+      test('the cause: account (account_deleted_at, or an older ask without a start-over), start_over, vault', async () => {
+        ddb.on(DeleteCommand).resolves({});
+        await alarms.processRecord(rec(del({ app_key: KEY, account_deleted_at: 1_789_000_000 })));
+        await alarms.processRecord(rec(del({ app_key: KEY, deletion_requested_at: 1_789_000_000 })));
+        await alarms.processRecord(rec(del({ app_key: KEY, deletion_requested_at: 1_789_000_000, deletion: { deletion_id: 'x', state: 'executing' } })));
+        await alarms.processRecord(rec(del({ app_key: KEY, user_guid: undefined, alarm: { kind: 'vault_deleted', alarm_id: AID, at: 'n/a' } })));
+        expect(tombstones().map((t) => t.Item!.cause)).toEqual(['account', 'account', 'start_over', 'vault']);
+        expect(tombstones()[3].Item).not.toHaveProperty('user_guid');
+        expect(tombstones()[3].Item!.deleted_at).toBeNull();
+        // A stale app_key_next (not ahead of app_key) is not the vault's key.
+        ddb.resetHistory();
+        await alarms.processRecord(rec(del({ app_key: { ...KEY, seq: 3 }, app_key_next: { ...NEXT, seq: 3 } })));
+        expect(tombstones()[0].Item!.keys).toEqual([KEY]);
+      });
+
+      test('the follow-up writes it too, before its delete', async () => {
+        ddb.on(DeleteCommand).resolves({});
+        const swept = { vault_id: VID, user_guid: 'g1', state: 'deleted', app_key: KEY, alarm: { kind: 'vault_deleted', alarm_id: AID, at: 1_790_000_000, handled_at: 1_790_000_100 } };
+        expect(await alarms.processRecord(rec(swept))).toBe('removed');
+        expect(tombstones()).toHaveLength(1);
+        expect(tombstones()[0].Item).toMatchObject({ keys: [KEY], deleted_at: 1_790_000_000 });
+      });
+
+      test('a record that cannot be written keeps the row (still deleted), stamped handled for the follow-up, and logs vault_id only', async () => {
+        ddb.on(DeleteCommand).resolves({});
+        ddb.on(PutCommand, { TableName: 'requests' } as any).rejects(Object.assign(new Error('x'), { name: 'ProvisionedThroughputExceededException' }));
+        const err = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        expect(await alarms.processRecord(rec(del({ app_key: KEY })))).toBe('mailed');
+        expect(deletes().map((d) => d.Key!.vault_id)).toEqual(['user#g1']);
+        expect(updates().filter((u) => u.UpdateExpression === 'SET alarm.handled_at = :now')).toHaveLength(1);
+        expect(err.mock.calls).toEqual([['vault tombstone not written', JSON.stringify({ vault_id: VID, error: 'ProvisionedThroughputExceededException' })]]);
+        err.mockRestore();
+      });
+    });
+
     describe('2.7.1: the row is kept while the attachment sweep is pending (VAULT-HOST-PROTOCOL P15)', () => {
       const swept = (extra: Record<string, unknown> = {}) =>
         ({ vault_id: VID, user_guid: 'g1', state: 'deleted', alarm: { kind: 'vault_deleted', alarm_id: AID, at: 1_790_000_000, handled_at: 1_790_000_100 }, ...extra });
@@ -1231,7 +1305,8 @@ describe('vault alarm mailer (VAULT-MESSAGING 0.9.0 §11.5)', () => {
         ddb.on(DeleteCommand, { Key: { vault_id: 'user#g1' } } as any).resolves({});
         expect(await alarms.processRecord(rec(del({ att_sweep_pending: true })))).toBe('mailed');
         expect(ses.commandCalls(SendEmailCommand)).toHaveLength(1);
-        expect(deletes().map((d) => d.Key!.vault_id)).toEqual([VID, 'user#g1']);
+        // 2.11.0: the image shows the sweep pending, so the row's delete (and its record) wait for the follow-up.
+        expect(deletes().map((d) => d.Key!.vault_id)).toEqual(['user#g1']);
         const stamp = updates().find((u) => u.UpdateExpression === 'SET alarm.handled_at = :now')!;
         expect(stamp).toMatchObject({ Key: { vault_id: VID }, ConditionExpression: 'alarm.alarm_id = :id', ExpressionAttributeValues: { ':id': AID } });
         expect(typeof stamp.ExpressionAttributeValues![':now']).toBe('number');

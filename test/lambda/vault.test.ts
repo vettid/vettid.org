@@ -1052,8 +1052,10 @@ describe('POST /api/vault/unlock', () => {
     expect((await call('POST', '/api/vault/unlock', body(), { app: { key: keyOf('g1'), vault: VID } })).status).toBe(401); // g1 has no vault
     vaultOf('g1', { vault_id: 'e'.repeat(32) });
     expect((await call('POST', '/api/vault/unlock', body())).status).toBe(404);
+    // 2.11.0: a deleted vault answers its own app key 410 (below), another key 401.
     vaultOf('g1', { vault_id: VID, state: 'deleted', app_key: { key: keyOf('g1').b64, kid: keyOf('g1').kid, seq: 1 } });
-    expect((await call('POST', '/api/vault/unlock', body(), { app: { key: keyOf('g1'), vault: VID } })).status).toBe(401);
+    expect((await call('POST', '/api/vault/unlock', body(), { app: { key: keyOf('g2'), vault: VID } })).status).toBe(401);
+    expect((await call('POST', '/api/vault/unlock', body(), { app: { key: keyOf('g1'), vault: VID } })).body).toMatchObject({ error: 'vault_deleted' });
     expect(sqs.calls()).toHaveLength(0);
   });
 
@@ -1309,6 +1311,119 @@ describe('GET /api/vault/status', () => {
     const r = await call('GET', '/api/vault/status');
     expect(r.body.vault.alarm).toEqual({ kind: 'credential_clone', at: new Date((NOW - 60) * 1000).toISOString() });
     expect(JSON.stringify(r.body)).not.toContain('01JABCDEFGHJKMNPQRSTVWXYZ0');
+  });
+});
+
+describe('2.11.0: a deleted vault is told to its own app key (410), and to nobody else', () => {
+  const A = () => keyOf('g1');
+  const deletedRow = (extra: Record<string, unknown> = {}) =>
+    vaultOf('g1', {
+      vault_id: VID, state: 'deleted', sealed_release: R0,
+      app_key: { key: A().b64, kid: A().kid, seq: 1 },
+      alarm: { kind: 'vault_deleted', alarm_id: '01JABCDEFGHJKMNPQRSTVWXYZ0', at: NOW - 60 },
+      ...extra,
+    });
+  const tombstone = (extra: Record<string, unknown> = {}) =>
+    put('requests', {
+      request_id: `vdeleted#${VID}`, vault_id: VID, user_guid: 'g1', keys: [{ key: A().b64, kid: A().kid }],
+      deleted_at: NOW - 3600, cause: 'vault', expires_at: NOW + 86_400, ...extra,
+    });
+  const status = (app: Partial<AppSig> = {}) => call('GET', '/api/vault/status', undefined, { app: { key: A(), vault: VID, ...app } });
+  const DELETED = { error: 'vault_deleted', code: 'vault_deleted', deleted_at: new Date((NOW - 60) * 1000).toISOString() };
+
+  test('a deleted row, authenticated by the app key → 410 vault_deleted with deleted_at, on any signed route', async () => {
+    deletedRow();
+    const r = await status();
+    expect(r.status).toBe(410);
+    expect(r.body).toMatchObject(DELETED);
+    // The pending app_key_next (2.7.0) is the vault's app key too.
+    const next = makeKey();
+    put('vaults', { ...getItem('vaults', VID), app_key_next: { key: next.b64, kid: next.kid, seq: 2 } });
+    expect((await status({ key: next })).status).toBe(410);
+    expect((await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID }, { app: { key: A(), vault: VID } })).body).toMatchObject(DELETED);
+    // A deleted row without the host's notice time: deleted_at null.
+    put('vaults', { ...getItem('vaults', VID), alarm: undefined });
+    expect((await status()).body).toMatchObject({ code: 'vault_deleted', deleted_at: null });
+    expect(sqs.calls()).toHaveLength(0);
+  });
+
+  test('a deleted row with a bad signature, a stale ts, a spent nonce or another key → the bare 401', async () => {
+    deletedRow();
+    const bare = { error: 'unauthorized' };
+    let r = await status({ tamper: (i) => i.replace('GET', 'PUT') });
+    expect(r).toEqual({ status: 401, body: expect.objectContaining(bare) });
+    expect(r.body).not.toHaveProperty('code');
+    expect((await status({ ts: NOW - 301 })).status).toBe(401);
+    const nonce = randomBytes(16).toString('base64url');
+    expect((await status({ nonce })).status).toBe(410);
+    expect((await status({ nonce })).status).toBe(401);
+    expect((await status({ key: keyOf('g2') })).status).toBe(401);
+    // A recovery's claim key is not the vault's app key.
+    const claim = makeKey();
+    put('vaults', { ...getItem('vaults', VID), recovery: { recovery_id: RID, state: 'pending', requested_at: NOW, available_at: NOW + 86_400, expires_at: NOW + 7 * 86_400, claim_keys: [{ key: claim.b64, kid: claim.kid }] } });
+    expect((await status({ key: claim })).status).toBe(401);
+    // None of the failures counted against the 410's own limit.
+    expect([...tbl('rl').keys()].filter((k) => k.startsWith('vault-gone#'))).toEqual([`vault-gone#${VID}#${NOW - (NOW % 60)}`]);
+  });
+
+  test('the row removed: the record (vdeleted#) → 410 vault_deleted; expired, absent or another key → 401', async () => {
+    tombstone();
+    expect(await status()).toEqual({ status: 410, body: expect.objectContaining({ code: 'vault_deleted', deleted_at: new Date((NOW - 3600) * 1000).toISOString() }) });
+    expect((await status({ key: keyOf('g2') })).status).toBe(401);
+    expect((await status({ tamper: (i) => i + 'x' })).status).toBe(401);
+    // The TTL removes a row late: the API checks expires_at itself.
+    tombstone({ expires_at: NOW });
+    expect((await status()).status).toBe(401);
+    tbl('requests').delete(`vdeleted#${VID}`);
+    expect((await status()).status).toBe(401);
+    // A record that names another vault under this key is not this vault's.
+    tombstone({ vault_id: 'e'.repeat(32) });
+    expect((await status()).status).toBe(401);
+    // A damaged key list is no key (and no crash).
+    tombstone({ keys: [null, { kid: A().kid }, 'x'] });
+    expect((await status()).status).toBe(401);
+    tombstone({ keys: [null, { key: A().b64, kid: A().kid }] });
+    expect((await status()).status).toBe(410);
+  });
+
+  test('account deletion: account_deleted_at → 410 account_deleted after the signature, with or without the member row', async () => {
+    vaultOf('g1', { vault_id: VID, state: 'locked', sealed_release: R0, app_key: { key: A().b64, kid: A().kid, seq: 1 }, account_deleted_at: NOW - 30 });
+    expect(await status()).toEqual({ status: 410, body: expect.objectContaining({ error: 'account_deleted', code: 'account_deleted', deleted_at: new Date((NOW - 30) * 1000).toISOString() }) });
+    tbl('members').delete('g1');
+    tbl('vaults').delete('user#g1');
+    expect((await status()).body).toMatchObject({ code: 'account_deleted' });
+    expect((await status({ tamper: (i) => i + 'x' })).status).toBe(401);
+    expect((await status({ key: keyOf('g2') })).status).toBe(401);
+    // Then the vault reports `deleted`: vault_deleted.
+    put('vaults', { ...getItem('vaults', VID), state: 'deleted' });
+    expect((await status()).body).toMatchObject({ code: 'vault_deleted' });
+  });
+
+  test('a missing member row alone (no account_deleted_at) stays 401', async () => {
+    vaultOf('g1', { vault_id: VID, state: 'locked', sealed_release: R0, app_key: { key: A().b64, kid: A().kid, seq: 1 } });
+    expect((await status()).status).toBe(200);
+    tbl('members').delete('g1');
+    expect(await status()).toEqual({ status: 401, body: expect.not.objectContaining({ code: expect.anything() }) });
+  });
+
+  test("the 410 has its own rate limit (vault-gone#<vault_id>, 60 a minute), not the member's status budget", async () => {
+    deletedRow();
+    for (let i = 0; i < 60; i++) expect((await status()).status).toBe(410);
+    const r = await status();
+    expect(r.status).toBe(429);
+    expect(r.body).toMatchObject({ error: 'rate_limited' });
+    const keys = [...tbl('rl').keys()];
+    expect(keys).toContain(`vault-gone#${VID}#${NOW - (NOW % 60)}`);
+    expect(keys.some((k) => k.startsWith('vault-status#'))).toBe(false);
+    // The record's 410 counts against the same key.
+    tbl('vaults').delete(VID);
+    tombstone();
+    expect((await status()).status).toBe(429);
+  });
+
+  test("the portal's session still reads a deleted vault as no vault", async () => {
+    deletedRow();
+    expect((await call('GET', '/api/vault/status')).body).toEqual({ vault: null, service: 'available' });
   });
 });
 

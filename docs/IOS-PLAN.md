@@ -1,9 +1,30 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.31
-date: 2026-10-23
+version: 0.1.32
+date: 2026-10-24
 changelog:
+  - 0.1.32: **owner decisions of 2026-10-24** (VAULT-MESSAGING 0.57.0
+    §12.5 "What a phone does", MEMBER-API 2.11.0, ANDROID-PLAN 0.1.77). §4.2 "A vault being deleted":
+    a phone erases its local vault data because of a deletion only on a
+    definite answer, never on a `401`. Point 3: the vault counts as
+    gone only on `410 vault_deleted` or `410 account_deleted` to the
+    app key, and with the vault's own word (the event, or the `{}` to
+    this phone's own `vault.delete`, which now enters the state too)
+    the app erases at once; `401` and `{vault: null}` are no longer
+    gone signals but "could not tell", like `403`, `429`, `5xx` and
+    timeouts. Point 4: from the bound, a confirmed **Remove from this
+    phone**. New point 5: a `410` without the vault's word shows "Your
+    vault was deleted" and erases only on the member's confirmation.
+    "Could not tell" is shown as **unconfirmed** (`{vault: null}`, any
+    `401`, `403`) or **unreachable** (network, `5xx`, `429`, timeouts);
+    the reads at 5, 15, 45 and 105 s, then every 60 s until the bound
+    (not staging-scaled), then at a start, the foreground and Check
+    again; Check again described anew. This follows the stop-gap in
+    Android #192 (in review), which already holds "being deleted" and
+    offers the confirmed Remove; the texts are Android #192's (draft,
+    pending owner approval) and are not copied here. Tests follow.
+    Not built
   - 0.1.31: approved by the owner (2026-10-23) (VAULT-MESSAGING
     0.55.10, ANDROID-PLAN 0.1.72), from the iOS review. The old iPhone
     of a transfer asks its vault before it erases at day 7, and a vault
@@ -704,8 +725,11 @@ deleted" at once) is the owner's, of 2026-10-20 (vettid.org #356).*
 **Why.** In a deletion the vault sends `device.unlinked{reason:
 "vault_deleted"}` in step 1 of VAULT-MESSAGING §12.5 "Order", erases
 in step 4 and reports `deleted` in step 5. Only then does the member
-API read the vault as gone: a `deleted` row reads `{vault: null}`, and
-later the row itself is removed (MEMBER-API "Vault deletion"). Until
+API read the vault as gone: from MEMBER-API 2.11.0 a `deleted` row
+answers the app key `410 vault_deleted`, and later the row itself is
+removed, with a record that answers the same for 90 days (MEMBER-API
+"Vault deletion", What a phone is told; `{vault: null}` is the
+portal's answer, never the app's). Until
 step 5 `GET /api/vault/status` still lists the vault, and reads
 `unlocked` while a lease is unexpired (MEMBER-API "`state` and the
 lease"). An app that re-reads the status once at the event can stay on
@@ -715,7 +739,10 @@ the next unlock.
 
 **What the app does on `device.unlinked{vault_deleted}`.** The event
 comes from the vault over its session, so it is trusted as it is: from
-step 1 the vault is marked `deleting` and never opens again.
+step 1 the vault is marked `deleting` and never opens again. The `{}`
+answer to this phone's own `vault.delete` counts the same (VAULT-MESSAGING
+0.57.0 §12.5 "What a phone does": the vault's own sealed word, signal
+(a)); the app enters this state on whichever comes first.
 
 1. **At once, over every screen**: the app closes the open vault (the
    shell, the drawer, every vault screen and dialog, a release update
@@ -730,30 +757,58 @@ step 1 the vault is marked `deleting` and never opens again.
    (`since`: when the event arrived; `until`: the bound below). A new
    process that finds the marker starts in "being deleted", before it
    reads anything, never on the unlock screen or the open vault.
-3. **Waiting for the row.** It re-reads `GET /api/vault/status` after
-   waits of 5, 10 and 30 s, each counted from the previous read (reads
-   at 5, 15 and 45 s after the event), then every 60 s after the
-   previous read, and at every start and return to the foreground,
-   until `until`. **The bound** `until` is 10 minutes after
+3. **Waiting for the row.** It re-reads `GET /api/vault/status` at 5,
+   15, 45 and 105 s after the event, then every 60 s after the previous
+   read, and at every start and return to the foreground, until
+   `until`; after `until` only at a start, a return to the foreground
+   and **Check again** (0.1.32, as Android #192). **The bound** `until` is 10 minutes after
    `since`, or, when this phone sent the `vault.delete` and its `exp` is
    later, that `exp` plus 2 minutes (as the app bounds its re-check of
-   an unanswered `vault.delete`). The vault counts as gone when the status
-   answers `{vault: null}`, or `401 unauthorized` to the app key (the
-   row, and with it the app key, is removed). Then the app does what it
-   does today when the vault is gone: it forgets the vault's keys and
+   an unanswered `vault.delete`); it is not divided by the staging time
+   scale. **The rule** (owner decisions of
+   2026-10-24, VAULT-MESSAGING 0.57.0 §12.5 "What a phone does"): the
+   vault counts as gone only when the status answers **`410
+   vault_deleted`** or **`410 account_deleted`** to the app key
+   (signal (b), MEMBER-API 2.11.0). With the event (signal (a)) and that
+   answer, the app erases at once: it forgets the vault's keys and
    local data, deletes the marker and moves to "no vault" (onboarding
-   with a setup code), with the one-time notice below. Any other
-   answer (the vault still listed, whatever its `state`; the API not
-   reachable) keeps the state and the marker.
+   with a setup code), with the one-time notice below. Everything else
+   is **"could not tell"**, erases nothing and keeps the state and the
+   marker: **unconfirmed** for the vault still listed (whatever its
+   `state`), `{vault: null}`, any `401` and a `403`; **unreachable** for
+   a network fault, a `5xx`, a `429` and a timeout (0.1.32, as Android #192,
+   which shows the two apart). A `401` and `{vault: null}` are **no
+   longer** signs that the vault is gone (until 0.1.32 they were).
 4. **After the bound.** If the vault is still listed at `until`, the
    screen changes to the neutral "still finishing" text below, with
-   **Check again** (one re-read; a second tap waits for the first). The
+   **Check again** (a re-read now, whose result is shown as
+   unconfirmed, unreachable or gone; behaviour and texts as Android
+   #192). The
    app also re-reads at every start and return to the foreground. It
    stays there, with the marker, until the vault is gone. Nothing in
    this state starts a new timer or a new bound. A deletion that stops
    between steps 1 and 5 of §12.5 leaves the vault listed until
-   something else finishes it; a later VAULT-MESSAGING change covers
-   that on the server side, and the app keeps this behaviour.
+   something else finishes it (the member API's resume, VAULT-MESSAGING
+   0.51.0), and the app keeps this behaviour. (0.1.32) From the bound on,
+   the screen also offers **Remove from this phone**, behind a
+   confirmation the member gives (texts: Android #192); confirmed, the app erases as in point 3,
+   with the same one-time notice. Without the confirmation nothing is
+   erased, however long the state lasts.
+5. **(0.1.32) The member API's answer alone.** A `410 vault_deleted` or
+   `410 account_deleted` to any request the app signs, without the
+   vault's own word (no event, no `{}` to this phone's `vault.delete`),
+   is signal (b) alone. It rests on the vault row's `state`, which the
+   host writes and which the app does not trust by itself (or, for
+   `account_deleted`, on the account deletion). The app closes the open
+   vault as in point 1 and shows **"Your vault was deleted"** (texts
+   below, Android #192), with **Remove from this phone** behind the same
+   confirmation, **Check again** and **Open the account site**; it
+   stores the marker `deleted_api {vault_id, since, code}` so that a
+   restart reopens there. It erases only when the member confirms. If
+   the event then arrives (signal (a)), it erases at once as in point 3.
+   A later status that lists the vault again (a `200` with the vault)
+   removes the marker and returns to the unlock screen; any other
+   answer keeps the screen.
 
 **What the member can do there.** Nothing that changes the vault or
 this phone's keys: no unlock, no PIN, no update, no daily check, no
@@ -763,8 +818,9 @@ deletion: start over"). The screen offers **Open the account site**
 (`https://account.vettid.org`, staging
 `https://account.staging.vettid.org`), where the member gets a setup
 code for a new vault once the deletion is done and finds how to contact
-VettID; and, after the bound, **Check again**. The app lock still
-applies.
+VettID; and, after the bound, **Check again** and (0.1.32) **Remove
+from this phone**, confirmed. The app lock still applies, and also
+guards the confirmation.
 
 **What it is not.** The status's `deletion` (a start-over that is
 `pending` or `executing`) keeps the "Pending deletion" banner (ANDROID-PLAN §4
@@ -781,6 +837,7 @@ this state by itself.
 | Check again, not reachable | `vault_deleting_unreachable` | "VettID couldn't be reached. Check your connection and try again." |
 | Both | `vault_deleting_account_site` | **Open the account site** |
 | "No vault", once, after this state | `vault_deleted_notice` | "Your vault was deleted. To start again, get a setup code on the account site." |
+| 0.1.32: Remove from this phone and its confirmation, "Your vault was deleted" (point 5), the unconfirmed and unreachable results, and Check again | — | See Android #192 (draft texts pending owner approval); the ids and wording are taken from there once the owner approves them, and the Check again rows above may change with it |
 
 The progress indicator while waiting has no percentage. The title is a
 polite live region for screen readers.
@@ -789,13 +846,27 @@ polite live region for screen readers.
 or an operation runs, and with the app in the background: the open
 vault closes at once, the PIN is dropped, nothing more is sent; the
 status still listing the vault as `unlocked`, then `locked`, then
-`{vault: null}`: "no vault" only after `{vault: null}` (and after a
-`401` to the app key); the bound from `since` and from a later
-`vault.delete` `exp`; the "still finishing" text at the bound, Check
-again, the vault gone later (at a start, a return to the foreground and
-Check again); a process killed in each phase restarts in "being
-deleted" (never on the unlock screen) and continues; the marker deleted
-with "no vault" and at a wipe; the one-time notice shown once.
+`410 vault_deleted`: "no vault" (the erase) only after the `410`, and
+only with the event or the `{}` (0.1.32:
+`410 account_deleted` the same); `401`, `{vault: null}`,
+`403`, `429`, `5xx` and a timeout in this state erase nothing and keep
+the state and the marker, shown as unconfirmed (`{vault: null}`,
+`401`, `403`) or unreachable (network, `5xx`, `429`, timeout); the reads
+at 5, 15, 45 and 105 s and then every 60 s until the bound, none after
+it but at a start, a return to the foreground and Check again, and the
+bound not scaled on staging; the `{}` to this phone's own `vault.delete`
+enters the state as the event does; the bound from `since` and from a
+later `vault.delete` `exp`; the "still finishing" text at the bound,
+Check again, the vault gone later (at a start, a return to the
+foreground and Check again); Remove from this phone offered only from
+the bound, cancelled (nothing erased) and confirmed (erased, the
+notice); a `410` with no event: "Your vault was deleted", nothing
+erased until confirmed, the event arriving then erases, the vault
+listed again returns to the unlock screen, a restart reopens there;
+a `401` with no event changes nothing; a process killed in each phase
+restarts in "being deleted" (never on the unlock screen) and continues;
+the marker deleted with "no vault" and at a wipe; the one-time notice
+shown once.
 
 ### 4.3 The way back to release N after leaving or a restart (0.1.12)
 

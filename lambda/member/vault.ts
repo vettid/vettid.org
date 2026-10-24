@@ -186,6 +186,7 @@ import { sendMail } from '../shared/mail';
 import { signRecoveryRequest } from '../shared/recovery-sign';
 import { recoveryScale, scaledMail, scaledSeconds, timeScale } from '../shared/time-scale';
 import { vaultService } from '../shared/vault-service';
+import { type VaultTombstone, pendingAppKey, tombstoneKey, vaultAppKeys } from '../shared/vault-tombstone';
 import {
   INSTANCE_ID_RE,
   type InstanceRow,
@@ -202,7 +203,7 @@ import {
   routable,
 } from '../shared/vault-routing';
 
-export { INSTANCE_ID_RE, LIVE_HEARTBEAT_S, expectedQueueUrl };
+export { INSTANCE_ID_RE, LIVE_HEARTBEAT_S, expectedQueueUrl, pendingAppKey };
 export type { InstanceRow };
 
 const sqs = new SQSClient({});
@@ -352,6 +353,13 @@ export interface VaultRow {
    * the next such unlock, never cleared; the API only reads it.
    */
   recovery_cancelled?: { recovery_id: string; at?: number };
+  /**
+   * Cleanup-owned (2.11.0, "Vault deletion"): when the account deletion
+   * asked this vault to delete itself (epoch s), written before the ask.
+   * A request signed by the vault's app key is then answered `410
+   * account_deleted`.
+   */
+  account_deleted_at?: number;
   created_at: string;
   updated_at: string;
 }
@@ -644,25 +652,6 @@ const isStoredKey = (k: unknown): k is StoredKey =>
   !!k && typeof (k as StoredKey).key === 'string' && typeof (k as StoredKey).kid === 'string';
 
 /**
- * The host's pending app key (2.7.0, release R), while it counts: set, a
- * key with a `seq`, not the current key, and with a `seq` above
- * `app_key`'s (an `app_key` without `seq` admits no pending key). The
- * host clears it by the rules of VAULT-MESSAGING §11.14.2; one it failed
- * to clear after `app_key` reached its `seq` is not accepted here. There
- * is no time limit.
- */
-export function pendingAppKey(v: Pick<VaultRow, 'app_key' | 'app_key_next'>): StoredKey | null {
-  const n = v.app_key_next;
-  if (!isStoredKey(n) || typeof n.seq !== 'number') return null;
-  const cur = isStoredKey(v.app_key) ? v.app_key : null;
-  if (cur && cur.kid === n.kid) return null;
-  // Staleness is judged by seq only: an app_key without one cannot be
-  // compared, so a pending key beside it is not accepted.
-  if (cur && !(typeof cur.seq === 'number' && n.seq > cur.seq)) return null;
-  return n;
-}
-
-/**
  * The keys a vault row allows in `role` now. The pending key ends after an
  * hour, or once the host's `app_key` names it; a recovery's keys only while
  * the recovery is active and the vault's app key is not yet the recovering
@@ -672,10 +661,8 @@ export function pendingAppKey(v: Pick<VaultRow, 'app_key' | 'app_key_next'>): St
 function keysFor(v: VaultRow, role: KeyRole, now: number): StoredKey[] {
   const appKid = isStoredKey(v.app_key) ? v.app_key.kid : null;
   switch (role) {
-    case 'app': {
-      const next = pendingAppKey(v);
-      return [...(isStoredKey(v.app_key) ? [v.app_key] : []), ...(next ? [next] : [])];
-    }
+    case 'app':
+      return vaultAppKeys(v);
     case 'pending': {
       const p = v.app_key_pending;
       return isStoredKey(p) && typeof p.until === 'number' && p.until > now && p.kid !== appKid ? [p] : [];
@@ -723,11 +710,53 @@ function signatureOk(req: MemberRequest, h: AppHeader, key: AppKey): boolean {
   return verifyAppSignature(key.key, signingInput(req.method, req.path, query, h, req.rawBody), h.sig);
 }
 
+/** Whether `h` is signed by one of `keys`: the key is among them by its kid, then the signature. */
+function signedBy(req: MemberRequest, h: AppHeader, keys: StoredKey[]): boolean {
+  const k = keys.find((x) => x.kid === h.kid);
+  const key = k ? parseAppKey(k.key) : null;
+  return !!key && key.kid === h.kid && signatureOk(req, h, key);
+}
+
+/**
+ * 2.11.0 ("Vault deletion", What a phone is told): the definite answer to
+ * the vault's own app key, given only after its signature. Rate-limited per
+ * vault (`vault-gone#<vault_id>`, 60 a minute, as status is), not from the
+ * member's status budget: the member row may be gone.
+ */
+async function vaultGone(h: AppHeader, code: 'vault_deleted' | 'account_deleted', at: number | null): Promise<never> {
+  await limit(`vault-gone#${h.vault}`, 60, 60);
+  const message = code === 'vault_deleted' ? 'This vault was deleted.' : 'The account this vault belonged to was deleted; the vault is being deleted.';
+  throw vaultError(410, code, message, { deleted_at: at === null ? null : iso(at) });
+}
+
+/** The deletion time a `deleted` row carries: its host-recorded `vault_deleted` notice, if any. */
+function deletedAt(v: { alarm?: VaultRow['alarm'] }): number | null {
+  const a = v.alarm;
+  return a && a.kind === 'vault_deleted' && typeof a.at === 'number' && Number.isFinite(a.at) ? a.at : null;
+}
+
+/** 2.11.0: the record of a removed deleted vault (lambda/shared/vault-tombstone.ts), while unexpired. */
+async function readTombstone(vaultId: string, now: number): Promise<VaultTombstone | null> {
+  const r = await ddb.send(new GetCommand({ TableName: table.vaultRequests(), Key: { request_id: tombstoneKey(vaultId) }, ConsistentRead: true }));
+  const t = r.Item as VaultTombstone | undefined;
+  if (!t || t.vault_id !== vaultId || !(typeof t.expires_at === 'number' && t.expires_at > now) || !Array.isArray(t.keys)) return null;
+  return t;
+}
+
 /**
  * A request signed by a key the vault row allows for the route (`roles`,
  * tried in order). Checks, in order: the header's syntax, `ts`, the nonce,
  * that the key is allowed, and the signature. The vault must be the
  * member's current one and not deleted.
+ *
+ * 2.11.0: a vault that is deleted is answered `410 vault_deleted`, and one
+ * whose account deletion has asked it to delete itself `410
+ * account_deleted`, only to a request that passed every one of those
+ * checks with the vault's app key (`app_key` or the pending
+ * `app_key_next`). A `deleted` row, and once the row is removed its
+ * record (`vdeleted#<vault_id>`, 90 days), are checked before the member
+ * row and the pointer, which may be gone. Every other failure, and a
+ * missing member row by itself, stays the bare 401.
  */
 async function appCaller(req: MemberRequest, roles: KeyRole[]): Promise<Caller & { vault: VaultRow; key: StoredKey; role: KeyRole }> {
   const h = appHeader(req);
@@ -735,7 +764,18 @@ async function appCaller(req: MemberRequest, roles: KeyRole[]): Promise<Caller &
   await spendNonce(h);
   const now = nowS();
   const v = await vaultRow(h.vault);
-  if (!v || typeof v.user_guid !== 'string' || v.state === 'deleted') throw unauthorized();
+  if (!v) {
+    const t = await readTombstone(h.vault, now);
+    if (t && signedBy(req, h, t.keys.filter(isStoredKey))) await vaultGone(h, 'vault_deleted', typeof t.deleted_at === 'number' ? t.deleted_at : null);
+    throw unauthorized();
+  }
+  if (v.state === 'deleted') {
+    if (signedBy(req, h, keysFor(v, 'app', now))) await vaultGone(h, 'vault_deleted', deletedAt(v));
+    throw unauthorized();
+  }
+  if (typeof v.user_guid !== 'string') throw unauthorized();
+  // Whatever the route's roles, as for a deleted row; any other key goes on to the checks below.
+  if (typeof v.account_deleted_at === 'number' && signedBy(req, h, keysFor(v, 'app', now))) await vaultGone(h, 'account_deleted', v.account_deleted_at);
   let match: { key: StoredKey; role: KeyRole } | null = null;
   for (const role of roles) {
     const k = keysFor(v, role, now).find((x) => x.kid === h.kid);

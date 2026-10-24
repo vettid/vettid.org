@@ -100,11 +100,13 @@ export const VAULT_API_ACCESS: Record<VaultApiConsumer, VaultApiAccess> = {
   // hand; the job only reads it. Every 5 minutes (MEMBER-API 2.10.0): a row
   // with the host-written `deleting_at` is sent `delete_resume` (on the
   // control queues, as `delete` is) and gets `deletion_resumed_at`; the job
-  // reads `deleting_at` (its Scan) and never writes it.
+  // reads `deleting_at` (its Scan) and never writes it. MEMBER-API 2.11.0:
+  // the account deletion writes `account_deleted_at` on each vault row it
+  // asks, before it asks.
   cleanup: {
     tables: [
       { table: 'vaults', actions: ['Query', 'Scan', 'DeleteItem'], indexes: true },
-      { table: 'vaults', actions: ['UpdateItem'], attributes: ['vault_id', 'deletion_requested_at', 'deletion', 'orphan_seen_at', 'deletion_resumed_at'] },
+      { table: 'vaults', actions: ['UpdateItem'], attributes: ['vault_id', 'deletion_requested_at', 'deletion', 'orphan_seen_at', 'deletion_resumed_at', 'account_deleted_at'] },
       { table: 'vault-instances', actions: ['GetItem', 'Query'], indexes: true },
       { table: 'vault-releases', actions: ['GetItem'] },
       { table: 'vault-releases', actions: ['UpdateItem'], attributes: ['release', 'start_requested_at', 'start_requests'] },
@@ -114,11 +116,14 @@ export const VAULT_API_ACCESS: Record<VaultApiConsumer, VaultApiAccess> = {
   },
   // Credential-clone alarms and deletion notices (§11.5, §12.5), fed by the
   // vaults stream; may only clear the alarm flag and delete a deleted
-  // vault's rows.
+  // vault's rows. MEMBER-API 2.11.0: before it deletes a deleted vault's
+  // row it puts the record kept for 90 days (`vdeleted#<vault_id>`, the
+  // vault's app public keys), and no other item of the request table.
   'vault-alarms': {
     tables: [
       { table: 'vaults', actions: ['UpdateItem'], attributes: ['vault_id', 'alarm', 'alarm_pending'] },
       { table: 'vaults', actions: ['DeleteItem'] },
+      { table: 'vault-requests', actions: ['PutItem'], leadingKeys: ['vdeleted#*'] },
     ],
     sendsToControlQueues: false,
     readsVaultsStream: true,

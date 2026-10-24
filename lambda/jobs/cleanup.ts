@@ -86,6 +86,8 @@ interface VaultRowLite {
   deleting_at?: number;
   /** MEMBER-API 2.10.0: when the resume run last sent `delete_resume`, written by this job. */
   deletion_resumed_at?: number;
+  /** MEMBER-API 2.11.0: when the account deletion asked this vault (written by this job, deleteVaults). */
+  account_deleted_at?: number;
   /** MEMBER-API 2.1.0: the member's start-over (§11.11.9), written by the member API. */
   deletion?: { deletion_id?: unknown; state?: unknown; deletes_at?: unknown; queued_at?: unknown };
 }
@@ -132,7 +134,11 @@ async function routeAsDelete(v: VaultRowLite, nowS: number): Promise<InstanceRow
 export async function requestVaultDeletion(v: VaultRowLite, nowS: number): Promise<boolean> {
   if (v.state === 'deleted') return false;
   if (!v.sealed_release && !v.lease) {
-    // Never sealed: nothing is stored for it; the row is all there is.
+    // Never sealed: nothing is stored for it; the row is all there is. No
+    // record is kept (MEMBER-API 2.11.0): the host writes `app_key` only
+    // from the vault's own lifecycle reports, and the first (`enrolled`)
+    // records `sealed_release`. So no enrollment of it completed: an app
+    // holds at most a redeem's pending key, and nothing to erase.
     await ddb.send(new DeleteCommand({ TableName: table.vaults(), Key: { vault_id: v.vault_id } }));
     return false;
   }
@@ -172,8 +178,35 @@ export async function requestVaultDeletion(v: VaultRowLite, nowS: number): Promi
 }
 
 /**
- * A canceled member's vaults: each is asked to delete itself; the pointer
- * row goes now (the member is gone). Response slots are not used.
+ * MEMBER-API 2.11.0: the account deletion's mark on a vault row it asks,
+ * written before the ask (an existing mark is kept). From then on a request
+ * signed by the vault's app key is answered `410 account_deleted`, so the
+ * phone has a definite answer between the member row's removal and the
+ * vault's `deleted` report. A row that is gone, or a never-sealed one that
+ * is deleted at once, needs none.
+ */
+async function markAccountDeleted(v: VaultRowLite, nowS: number): Promise<void> {
+  if (v.state === 'deleted' || typeof v.account_deleted_at === 'number') return;
+  if (!v.sealed_release && !v.lease) return;
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: table.vaults(),
+        Key: { vault_id: v.vault_id },
+        UpdateExpression: 'SET account_deleted_at = if_not_exists(account_deleted_at, :t)',
+        ConditionExpression: 'attribute_exists(vault_id)',
+        ExpressionAttributeValues: { ':t': nowS },
+      }),
+    );
+  } catch (e) {
+    if ((e as Error).name !== 'ConditionalCheckFailedException') throw e;
+  }
+}
+
+/**
+ * A canceled member's vaults: each is marked (2.11.0) and asked to delete
+ * itself; the pointer row goes now (the member is gone). Response slots are
+ * not used.
  */
 async function deleteVaults(guid: string, nowS: number): Promise<string[]> {
   const ids: string[] = [];
@@ -184,6 +217,7 @@ async function deleteVaults(guid: string, nowS: number): Promise<string[]> {
     ExpressionAttributeValues: { ':g': guid },
   })) {
     const v = item as VaultRowLite;
+    await markAccountDeleted(v, nowS);
     await requestVaultDeletion(v, nowS);
     ids.push(String(v.vault_id));
   }
