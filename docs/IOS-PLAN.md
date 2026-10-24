@@ -1,9 +1,15 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.33
+version: 0.1.34
 date: 2026-10-24
 changelog:
+  - 0.1.34: **owner decision of 2026-10-24**, wording proposed
+    (VAULT-MESSAGING 0.60.0 §11.14.6, MEMBER-API 2.13.0, ANDROID-PLAN
+    0.1.79). New §4.10 "A recovery that ended without the phone": the
+    same rule as Android (a `410 recovery_ended` lets a phone forget its
+    pending key only if it was never admitted and has no unanswered
+    open)
   - 0.1.33: owner decisions of 2026-10-24 (option A); the user-facing
     texts are DRAFTS for the owner's approval (VAULT-MESSAGING 0.59.0
     §11.14.6, MEMBER-API 2.12.0, ANDROID-PLAN 0.1.78). New §4.9 "A phone
@@ -1226,8 +1232,7 @@ minutes apart with the clock checked:
   it opens again while its recovery shows `registered`; otherwise the
   rule below applies. Any other refusal: it keeps everything and reads
   the status again later.
-- `401`, or `410 recovery_ended` (once the member API gives it,
-  vettid.org #415): the rule below applies.
+- `401`, or `410 recovery_ended` (MEMBER-API 2.13.0): the rule below applies.
 Never while the recovery shows `registered` (then the phone opens
 again).
 
@@ -1267,6 +1272,18 @@ recovery_ended`); never take a `200` alone as adoption; never forget
 either identity or its `recovery_id` before the handshake completes.
 
 The tests are Android's.
+
+### 4.10 A recovery that ended without the phone (0.1.34)
+
+*Owner decision of 2026-10-24; wording proposed (ANDROID-PLAN 0.1.79,
+VAULT-MESSAGING §11.14.6, MEMBER-API 2.13.0).* The same rule as
+ANDROID-PLAN §4, carried here in full. On `410 recovery_ended` to a
+signed request a phone may forget its pending (recovering) key and offer
+to start over **only if it was never admitted as the app (it holds no
+`ok`, token or vault bundle for this vault) and has no unanswered
+open**. A phone that was ever admitted treats the `410` as a `401`. A
+phone with an unanswered open keeps K and follows §4.9: it never forgets
+K on a `410`. On `401` it never forgets. The tests are Android's.
 
 ## 5. Architecture
 

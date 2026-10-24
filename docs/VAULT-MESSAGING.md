@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.59.0
+version: 0.60.0
 date: 2026-10-24
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -13,9 +13,9 @@ related:
   - CALLS-PLAN.md (0.1.5) §6.1 V4, §13 (phase C2; decisions D12–D26, decided 2026-10-12)
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.12.0)
-  - ANDROID-PLAN.md (0.1.78)
-  - IOS-PLAN.md (0.1.33; §9.1 VA1–VA4)
+  - MEMBER-API.md (2.13.0)
+  - ANDROID-PLAN.md (0.1.79)
+  - IOS-PLAN.md (0.1.34; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,31 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.60.0: **owner decision of 2026-10-24**; the code and the times are
+    proposed for the owner's approval (MEMBER-API 2.13.0, built in
+    vettid.org, not deployed; ANDROID-PLAN 0.1.79, IOS-PLAN 0.1.34). It
+    rests on vettid-vault #148 (main 276a23a; 0.58.0 above,
+    VAULT-HOST-PROTOCOL 0.1.15 §5.7): the row names every key the vault
+    adopted, as `app_key` or `app_key_next`, before the vault stores a
+    header that names it. §11.14.6, new "A recovery that ended without
+    the phone": the member API answers a request signed by a recovering
+    key whose recovery ended without the vault adopting the phone with
+    **`410 recovery_ended`** (from one hour to 30 days after the end,
+    judged by the key's latest end), and still `401` for every other
+    failure. **The rule for apps**: on `recovery_ended` the phone may
+    forget its pending (recovering) key and offer to start over **only
+    if it has never been admitted as the app (no `ok`, token or vault
+    bundle) and has no unanswered open**; a phone that has ever been
+    admitted treats it as a `401`, and one with an unanswered open keeps
+    K and follows "A phone that could not tell" (the exact orphan clear
+    of #148 can remove `app_key_next` while the vault's header still
+    names K). On `401` it never forgets. The 410-versus-401 difference
+    is an accepted leak; the residuals (split brain, a dishonest parent)
+    are named. A `200` (admitted as the app) is not proof of adoption
+    ("A phone that could not tell"). §11.11.7 "Claim" points there, and
+    no longer says the recovering key may `unlock` and `lock` (refused
+    since 0.33.0, MEMBER-API 2.7.0/2.10.1). No vault change, no wire
+    change in the enclave
   - 0.59.0: **owner decisions of 2026-10-24** (option A; a key in use
     is `app_key` or a live `app_key_pending`, never `app_key_next`);
     with MEMBER-API 2.12.0 (built in vettid.org, not deployed),
@@ -14904,9 +14929,12 @@ signed by its app key (§11.12.2) and needing no session:
   register only if it is signed by a claim key, and puts that key in the
   queue message's `app_key`. When a register's slot carries
   `recovery_registered`, that register's key becomes the recovery's
-  **recovering key**, which may also `unlock`, `lock` and read `status`
-  until the recovery ends or the vault reports the key as its app key
-  (§11.11.5 step 3). Knowing `vault_id` and `recovery_id` (both in the
+  **recovering key**, which may also read `status` (and, from release R,
+  `open`; `unlock` and `lock` are refused, §11.14.6) until the recovery
+  ends or the vault reports the key as its app key (§11.11.5 step 3).
+  After a recovery that ended without adopting it, the key is told `410
+  recovery_ended` (0.60.0, §11.14.6 "A recovery that ended without the
+  phone"). Knowing `vault_id` and `recovery_id` (both in the
   QR) lets a stranger claim, which gains nothing: the enclave still
   needs the code and an attestation.
 - **Claim by locator** (0.25.0, §11.11.10). The app that was given
@@ -16830,6 +16858,62 @@ open again. It resumes with an ordinary `vault.unlock` (§11.4):
   concerns an open recovery, and there is none after `ok`. Deleting the
   vault (§11.11.9) removes everything.
 
+**A recovery that ended without the phone** (0.60.0; owner decision of
+2026-10-24; MEMBER-API 2.13.0). A phone that registered (it holds the
+recovering key K) and lost track of its open, or was away, learns where
+it stands from any signed request, normally `GET /api/vault/status`:
+
+- **`200`, admitted as the app** (the vault's `app_key` or
+  `app_key_next` is its key): the vault may have adopted it. A `200`
+  alone is not proof ("A phone that could not tell", below). It resumes
+  as "A lost `ok`" above.
+- **`200` with the recovery still `registered`**: the recovery is open;
+  it may open again (§11.14.6).
+- **`410 recovery_ended`**: the recovery ended (cancelled, or its time
+  ran out) and the vault did not adopt this phone, as far as the vault
+  row shows. The API answers it only after the header, `ts`, nonce,
+  vault and signature checks have passed under that key and the vault is
+  the member's current one, from one hour after the end to 30 days after
+  it (judged by the key's latest end, so a key used again does not skip
+  the hour), and never to a key that is the vault's `app_key`,
+  `app_key_next` or `app_key_pending`. It carries no reason or time. The
+  rule for the phone:
+  - A phone that has **ever been admitted as the app** (it holds an
+    `ok`, a token or a vault bundle for this vault) treats the `410` as a
+    `401`. It keeps everything and tries again.
+  - A phone with an **unanswered open** (an open the member API accepted
+    and whose answer it never read) **keeps K** and follows "A phone
+    that could not tell" below: the host's exact clear of an orphan
+    `app_key_next` (VAULT-HOST-PROTOCOL §5.7) can remove it while the
+    vault's header still names K, and a repeated or resumed open can then
+    still complete the recovery. Such a phone **must never forget K** on
+    a `410`.
+  - Only a phone that was never admitted and has no unanswered open
+    (it registered and never opened, or every open it sent was answered
+    and refused) **may forget its pending (recovering) key** and its
+    recovery state, and offer to start over (a new recovery from the
+    account site).
+- **`401`**: anything else, including the first hour after the end, a
+  clock or nonce problem, a deleted vault or a vault that is no longer
+  the member's. The phone **must not** forget its key on a `401`; it
+  tries again later (and checks its clock).
+
+**Why the row is enough, and what remains.** The `410` follows the vault
+row (MEMBER-API "A recovery that ended without the phone"). Since #148 a
+key the vault adopted is on the row as `app_key` or `app_key_next`
+before the vault stores any header that names it, and `app_key`
+replaces it in one write; so an adopted key is admitted (`200`) or `401`,
+never `410`. The row can also name a key that was not adopted (an
+orphan `app_key_next`); that is a `200`, not a `410`. The grace is kept
+(one hour): it covers an open or cancel in flight, and costs only a
+delay for a phone that would never be adopted. Residuals, accepted: the
+row is the host's, so instances of one vault in split brain, or a
+dishonest parent (it can answer `ok` without writing, or rewrite the
+row), can make it miss an adopted key; the phone's rule above keeps this
+to a refusal, never a lost key. And a `410` tells the holder of the
+signing key, only, that its recovery ended and that the vault is the
+member's current one (the difference from `401`); the owner accepts it.
+
 **A phone that could not tell** (0.59.0; owner decisions of 2026-10-24,
 option A; MEMBER-API 2.12.0). An open the phone sent was accepted by the
 member API and its answer was never readable (no answer, or random
@@ -16856,10 +16940,11 @@ with its recovering (app) key K:
   opens again while its recovery shows `registered`, and otherwise uses
   a new recovery as below. Any other refusal: it keeps everything and
   reads the status again later.
-- **`401`** (or **`410 recovery_ended`**, once the member API gives
-  that answer, proposed with "A recovery that ended without the phone",
-  vettid.org #415): the phone **MAY** be used for a new recovery of the
-  same vault, reusing K, as below.
+- **`401`** (or **`410 recovery_ended`**, MEMBER-API 2.13.0, "A
+  recovery that ended without the phone", above): the phone **MAY** be
+  used for a new recovery of the same vault, reusing K, as below. This
+  phone has an unanswered open by definition, so a `410` is never a
+  reason to forget K.
 
 **Using the phone for a new recovery.**
 
@@ -16880,7 +16965,7 @@ with its recovering (app) key K:
   `recovery_id`. "Start over" (forgetting
   K) stays refused while the answer is unknown; this holds also on a
   `410 recovery_ended`, which allows forgetting K only to a phone that
-  has no such open.
+  was never admitted as the app and has no such open (above).
 - **The new recovery.** After the member starts a new recovery on the
   account site, the phone claims its code with K (§11.11.7), registers
   (§11.11.3) a **new identity** (a new `device_ik`, `kem` and relay

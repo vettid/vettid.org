@@ -1,9 +1,16 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.78
+version: 0.1.79
 date: 2026-10-24
 changelog:
+  - 0.1.79: **owner decision of 2026-10-24**, wording proposed
+    (VAULT-MESSAGING 0.60.0 §11.14.6, MEMBER-API 2.13.0). §4 "Recovery
+    and unlock from release R": new "A recovery that ended without the
+    phone". On `410 recovery_ended` a phone forgets its pending key only
+    if it was never admitted as the app and has no unanswered open; one
+    that was admitted treats it as a `401`, and one with an unanswered
+    open keeps K and follows "A phone that could not tell". Not built
   - 0.1.78: owner decisions of 2026-10-24 (option A; a key in use is
     `app_key` or a live `app_key_pending`); the user-facing texts are
     DRAFTS for the owner's approval (VAULT-MESSAGING 0.59.0 §11.14.6 "A
@@ -2575,6 +2582,20 @@ step of the "Recovery (new phone)" row).
    dropped any handshake in progress, so a pending `hs.fin` is refused.
    The unlock can be repeated until the handshake completes.
 
+   **A recovery that ended without the phone** (0.1.79; VAULT-MESSAGING
+   §11.14.6, MEMBER-API 2.13.0). On `410 recovery_ended` to a signed
+   request a phone may forget its pending (recovering) key and offer to
+   start over **only if it was never admitted as the app (it holds no
+   `ok`, token or vault bundle for this vault) and has no unanswered
+   open**. A phone that was ever admitted treats the `410` as a `401`. A
+   phone with an unanswered open keeps K and follows "A phone that could
+   not tell": it never forgets K on a `410`, because the host's exact
+   orphan clear can remove `app_key_next` while the vault's header still
+   names K. On `401` it never forgets. Tests: a `410` after `ok` or a
+   token is handled as `401`; a `410` with an unanswered open keeps K
+   and starts "could not tell"; only a never-admitted phone with no
+   open forgets K, and offers a new recovery.
+
    **A phone that could not tell** (0.1.78; owner decisions of
    2026-10-24; VAULT-MESSAGING §11.14.6 "A phone that could not tell").
    **When:** only after an open was accepted by the member API (`onSent`)
@@ -2587,8 +2608,7 @@ step of the "Recovery (new phone)" row).
      it opens again while its recovery shows `registered`; otherwise the
      rule below applies. Any other refusal: it keeps everything and reads
      the status again later.
-   - `401`, or `410 recovery_ended` (once the member API gives it,
-     vettid.org #415): the rule below applies.
+   - `401`, or `410 recovery_ended` (MEMBER-API 2.13.0): the rule below applies.
    Never while the recovery shows `registered` (then the phone opens
    again).
 
