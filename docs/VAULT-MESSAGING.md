@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.56.2
+version: 0.56.3
 date: 2026-10-23
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -27,6 +27,15 @@ related:
   - VAULT-LOCK.md (0.1.3, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.56.3: editorial; from the independent review of vettid-vault #147
+    (release L, V2), as built there. §11.5 "The `lock` operation": an
+    unconditional lock against a vault whose opening has no known
+    `enqueued_at` is carried out (locking only reduces exposure); and a
+    known residual: an unlock queued before an unconditional lock (the
+    account site's) but delivered after it still opens the vault, since
+    the queue is not ordered and a message can arrive up to 5 minutes
+    late. The opening needs the PIN, and the idle lock (§3.6.8) bounds
+    how long it stays open. No rule changes
   - 0.56.2: approved by the owner 2026-10-23. §11.14.10 rule 5 and §6.7.1
     (failure row "The new app goes offline after its `hs.fin`"): at its
     11-minute deadline the new app of a transfer **collects its mailbox
@@ -12337,7 +12346,17 @@ requests name the manifest by `manifest_sha256` and `manifest_serial`
   later. An equal or earlier time is stale. Both times are the member
   API's; no clock of the enclave or of a device is compared. (The
   queue is not ordered and a message can be delivered up to 5 minutes
-  late, after an unlock queued later.)
+  late, after an unlock queued later.) (0.56.3) A vault whose opening
+  has no known `enqueued_at` is locked by an unconditional lock: locking
+  only reduces exposure.
+  - *Residual (0.56.3).* The rule orders a lock against the unlock that
+    opened the vault, not the other way round: an unlock queued
+    **before** an unconditional lock (the account site's "Lock my
+    vault") but delivered **after** it still opens the vault, because
+    the lock, carried out first, found the vault locked or locked it
+    under an earlier opening. The opening needs the PIN, and the idle
+    lock (§3.6.8) bounds how long a vault opened so stays open; the
+    member who wants it closed locks again.
 - **The answer is given after the lock**, with a `code`, and the
   status `done`:
 
