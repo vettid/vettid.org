@@ -42,7 +42,14 @@ changelog:
     member API without the value (an unconditional lock). §11.14.10:
     if the old app's renewal of its token before an approval fails, it
     still sends the approval, and the notice has what the previous token
-    has left (as built in vettid-vault #144). No other rule changes
+    has left (as built in vettid-vault #144). §3.6.8: (owner decision
+    2026-10-23, "keep the shorter") the lowest idle-lock value set since
+    the last check stays in force until the next one, and a call in
+    progress delays the idle lock at most 12 hours past its time (a
+    call ends within 12 hours, §10.10), as built in vettid-vault #146;
+    an editorial note that "shortening may lock the vault at once" has
+    no effect (the setting cannot change past the deadline). No other
+    rule changes
   - 0.56.0: **draft; the owner answered the proposed choices on 2026-10-23, the
     text awaits approval** (the owner decided on 2026-10-23 to specify and build wallet spend caps before
     the Android wallet work, W1 and W2); ANDROID-PLAN 0.1.74,
@@ -3573,9 +3580,16 @@ it. The idle lock ends that.
   - *Owner only.* Only the app sets it; a desktop's `settings.set`
     naming it is `forbidden`.
   - *Shortening* takes effect at once, and may lock the vault at once.
+    (0.56.1, editorial: this has no effect in practice. Past the
+    deadline the app may send only the check, §3.6.3, with the hold on
+    or off, so the setting can change only before the deadline, while
+    the time of the rule is still ahead.)
   - *Lengthening* takes effect at the next successful check: until
-    then the vault uses the value it had at the last one. Someone
-    holding an unlocked app cannot buy time with a setting.
+    then the vault uses the value it had at the last one, or (0.56.1,
+    owner decision 2026-10-23, "keep the shorter") the lowest value set
+    since then, if lower. Someone holding an unlocked app cannot buy
+    time with a setting: shortening and then lengthening before a check
+    leaves the shortened value in force.
   - While held, `settings.*` is refused (§3.6.3), this key included.
 - **Whatever the hold says.** The idle lock applies with the hold on
   or off (§3.6.7). With the hold off it is what ends desktops' sessions
@@ -3587,7 +3601,8 @@ it. The idle lock ends that.
   without a check gives one hour of a held vault and needs the PIN
   each time.
 - **A call in progress** (§10.10) delays the idle lock until the call
-  ends.
+  ends (0.56.1: at most 12 hours past the time of the rule, the longest
+  a call lasts, however calls follow one another).
 - **A vault without a credential** has no deadline (§3.6.1) and no
   idle lock.
 - **Telling the member.** `vault.status`'s `owner_check` and
