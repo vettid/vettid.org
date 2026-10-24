@@ -1,7 +1,7 @@
 ---
 title: VAULT-LOCK
 status: approved by the owner 2026-10-12 (L1–L16 as recommended); design note; the normative text is in VAULT-MESSAGING 0.29.0, MEMBER-API 2.5.0 and VAULT-HOST-PROTOCOL 0.1.3, each rule marked "release L" (not released; the member API part built in vettid.org #407, the vault part in progress)
-version: 0.1.3
+version: 0.1.4
 date: 2026-10-23
 owner: Al Liebl (Mesmer)
 component: vault (enclave), member API, account site, apps
@@ -13,6 +13,10 @@ related:
   - VAULT-RELEASES.md (0.1.19) §3.4 (C2, C4)
   - vettid-android #127 (merged as 7a250bcd; read at 78f741a0 for 0.1.0), vettid-vault `main` 079cde7
 changelog:
+  - 0.1.4: editorial (aligns §10.2 with VAULT-LOCK §3.5/§3.7, MEMBER-API
+    "Locks" and ANDROID-PLAN part 2; found in the review of
+    vettid-android #190). §3.5, the `stale_lock` row: it is not evidence
+    that the vault is locked (VAULT-MESSAGING 0.56.4)
   - 0.1.3: editorial; the release L plan (2026-10-23) and the **owner's
     answers of 2026-10-23** to its three questions, and a note (Q4). **Q1:** a recovery
     open is an opening of the vault: it makes an `unlock_id` (§3.1),
@@ -205,7 +209,7 @@ a release before L and still proves nothing.
 |---|---|---|
 | The vault's `{}` to `vault.lock` | the vault, in the device's session | the vault is locking this unlock |
 | `vault.locking {unlock_id}` naming this device's unlock | the vault | the same, for a lock from anywhere |
-| `stale_lock` | the vault | the device's unlock is over (a newer one exists); nothing of this device's is open |
+| `stale_lock` | the vault | the device's unlock is over; the vault is open under a newer one, so this is not evidence that it is locked |
 | Slot `code: locked` or `not_running` | the host and the member API | that they say so. A host that lies can keep a vault open whatever it reports (F11) |
 | `GET /api/vault/status` not `unlocked` | the member API | the same |
 
