@@ -24,12 +24,13 @@ related:
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
   - VAULT-HOST-PROTOCOL.md (0.1.14; the enclave ↔ parent protocol as built)
-  - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
+  - VAULT-LOCK.md (0.1.3, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
   - 0.56.1: editorial; **owner answers of 2026-10-23** on the
-    release L plan (VAULT-LOCK 0.1.3 Q1, Q3), as built in vettid-vault
-    #145. §10.2 "Locks", §11.5 "The `lock` operation": a **recovery
+    release L plan (VAULT-LOCK 0.1.3 Q1, Q3); the unlock_id part as
+    in vettid-vault #145 (open); the enqueued_at ordering is not built
+    yet (V2). §10.2 "Locks", §11.5 "The `lock` operation": a **recovery
     open is an opening of the vault**: it makes an `unlock_id` (already
     a member of `vault.recovery.open.result`, §11.14.6, which releases
     from R to L sent empty), and an unconditional lock is compared with
@@ -12062,6 +12063,7 @@ with a DLQ after 3 receives:
   "signed_at": "<RFC 3339; recovery and recovery_cancel only, 0.33.0, release R>",
   "key_id": "<recovery and recovery_cancel only, 0.33.0, release R>",
   "sig": "<b64 DER; recovery and recovery_cancel only, 0.33.0, release R>",
+  "unlock_id": "<32 hex; lock only, optional; 0.29.0, release L>",
   "enqueued_at": "<RFC 3339>" }
 ```
 

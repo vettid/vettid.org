@@ -2012,7 +2012,8 @@ release L work merge.*
   through the member API, within the route's limit, while the app's
   process lives. (0.1.75, owner Q4, 2026-10-23) A retry that survives
   the process (a durable job, fail secure, until the vault confirms,
-  with the plain notice meanwhile) is part of release L's app work.
+  with the plain notice meanwhile) is part of release L's app work
+  (A1).
 - **No late lock, as far as the app can see to it:** `vault.lock` goes
   over the relay once, with `exp` 30 s, never through the outbox; and
   every unlock first waits out an unanswered relay lock (up to 40 s).

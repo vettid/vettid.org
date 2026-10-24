@@ -9,8 +9,11 @@ changelog:
     recovering key" and that "a recovering app" locks unconditionally;
     2.7.0 (release R) refuses the recovering key `403` on `unlock` and
     `lock`, and the owner keeps that: a recovering key does not lock.
-    The two sentences and the "Signed requests" table's `unlock` and
-    `lock` rows now say so (the table had not followed 2.7.0). "Locks"
+    Three sentences now say so: those two, and "Recovering key" (2.0.0),
+    which still said it may `unlock` and `lock`; and the "Signed
+    requests" table's `unlock` and `lock` rows (the table had not
+    followed 2.7.0). "Vault recovery"'s 2.7.0 list of what the
+    recovering key may call adds `status`, which it may read "Locks"
     is implemented in vettid.org #407 (staging; production with the
     promotion of release L). No rule changes
   - 2.10.0 (2026-10-20; **approved by the owner (2026-10-20)**, with
@@ -1777,7 +1780,8 @@ interface Recovery {
 - **Recovering key** (2.0.0). When a register slot comes back
   `recovery_registered`, the API records that register's key (the slot's
   `app_kid`) as `recovering_key`, with the `registered` state. It may
-  `unlock`, `lock` and read `status` while the recovery is active. When
+  read `status` while the recovery is active (2.7.0: `unlock` and
+  `lock` are refused `403`, "Vault recovery"; 2.10.1). When
   the host writes the vault's `app_key` with the same `kid` (the recovery
   completed), the recovery's keys are cleared and, since 2.4.1, the
   recovery is recorded as `completed` (below).
@@ -2040,8 +2044,8 @@ Everything above holds except where this says otherwise.*
   emails the member (below). It learns that an attempt was counted and
   when the next is possible, never whether it was right, and never the
   number of attempts used, which the vault reports to its owner only.
-- **The recovering key** may call `enclave`, `open` and poll its own
-  requests; `unlock` and `lock` are refused `403` (a registered phone
+- **The recovering key** may call `enclave`, `open`, read `status`
+  and poll its own requests; `unlock` and `lock` are refused `403` (a registered phone
   does not unlock from release R).
 - **The pending app key.** A transfer or a recovery replaces the app in
   three writes (VAULT-MESSAGING §11.14.2). The host writes
@@ -2385,7 +2389,7 @@ Vault (vettid-vault):
 ### Locks (2.5.0; VAULT-MESSAGING 0.29.0 §11.5, VAULT-LOCK)
 
 *Approved by the owner 2026-10-12; implemented in vettid.org #407
-(2.10.1). It describes the routes as they are from that deploy, which
+(staging; 2.10.1). It describes the routes as they are from that deploy, which
 needs no vault release: an enclave before release L ignores
 `unlock_id` and writes no code, so its lock slots read `done` without
 one (the account site then says it could not confirm the lock).*

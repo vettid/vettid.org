@@ -1,6 +1,6 @@
 ---
 title: VAULT-LOCK
-status: approved by the owner 2026-10-12 (L1–L16 as recommended); design note; the normative text is in VAULT-MESSAGING 0.29.0, MEMBER-API 2.5.0 and VAULT-HOST-PROTOCOL 0.1.3, each rule marked "release L" (not released, not built)
+status: approved by the owner 2026-10-12 (L1–L16 as recommended); design note; the normative text is in VAULT-MESSAGING 0.29.0, MEMBER-API 2.5.0 and VAULT-HOST-PROTOCOL 0.1.3, each rule marked "release L" (not released; the member API part built in vettid.org #407, the vault part in progress)
 version: 0.1.3
 date: 2026-10-23
 owner: Al Liebl (Mesmer)
@@ -11,10 +11,10 @@ related:
   - VAULT-HOST-PROTOCOL.md (0.1.5) §6.1, §11.3
   - ANDROID-PLAN.md (0.1.38) §4 "Locking the vault"
   - VAULT-RELEASES.md (0.1.19) §3.4 (C2, C4)
-  - vettid-android #127 (open, not merged at the time of writing; read at 78f741a0), vettid-vault `main` 079cde7
+  - vettid-android #127 (merged as 7a250bcd; read at 78f741a0 for 0.1.0), vettid-vault `main` 079cde7
 changelog:
   - 0.1.3: editorial; the release L plan (2026-10-23) and the **owner's
-    answers of 2026-10-23** to its three questions. **Q1:** a recovery
+    answers of 2026-10-23** to its three questions, and a note (Q4). **Q1:** a recovery
     open is an opening of the vault: it makes an `unlock_id` (§3.1),
     and an unconditional lock is ordered against its `enqueued_at`
     (VAULT-MESSAGING 0.56.1). **Q2:** a recovering key does not lock
@@ -53,8 +53,8 @@ classification: public (no secrets; safe for github.com/vettid)
 Two decisions, taken by the owner on 2026-10-12 (§7), with the
 specification text each needs. The text is written into the documents
 themselves and marked **release L**, a placeholder for the vault
-release that will carry it (as "release C2" is for calls): the
-staging release after S11. Nothing changes for a vault or an app until
+release that will carry it (as "release C2" is for calls): staging
+release 23 (S23; 0.1.2 said the staging release after S11). Nothing changes for a vault or an app until
 that release is built and running.
 
 1. **A lock belongs to the unlock it ends, and says truthfully whether
@@ -150,7 +150,7 @@ queue message already carries `enqueued_at`, the member API's time when
 it queued the request (§11.5). The rule:
 
 > The enclave keeps, with the running vault, the `enqueued_at` of the
-> enroll or unlock that opened it. An unconditional `lock` is carried
+> enroll, unlock or (0.1.3, Q1) recovery open that opened it. An unconditional `lock` is carried
 > out only if its own `enqueued_at` is **later**. Otherwise it is
 > answered `stale` and nothing is locked.
 
@@ -225,7 +225,7 @@ live lease; nothing was reported). Both are the host's view.
 | App | Vault release | What happens |
 |---|---|---|
 | before L | L or later | The unlock result has a member the app ignores. Its `vault.lock {}` and its API lock carry no value: the relay one is carried out as today (decision L2); the API one is unconditional, so it can no longer land after a newer unlock |
-| L or later | before L (S10, S11) | The unlock result has no `unlock_id`: that is how the app knows. It behaves as vettid-android #127 does: one relay lock with a short `exp`, the wait before an unlock, no trust in `done` |
+| L or later | before L (S10 to S22) | The unlock result has no `unlock_id`: that is how the app knows. It behaves as vettid-android #127 does: one relay lock with a short `exp`, the wait before an unlock, no trust in `done` |
 | L or later | L or later | Bound locks; retries over the relay; no wait before an unlock; codes read |
 
 The app keeps the older behaviour until no release without `unlock_id`
@@ -411,7 +411,7 @@ staging release L): lock in the app, airplane mode on before the lock
 and off after a new unlock (the vault stays open); lock from the
 account site with the phone off (the site says locked; the phone, back
 on, shows it); unlock immediately after a lock (no wait); an app from
-before L against release L, and the new app against S11; the idle lock
+before L against release L, and the new app against S22; the idle lock
 with the setting at its minimum (1 h) and the interval at 1 h: the
 notice, the unlock and the check on one screen, History.
 
