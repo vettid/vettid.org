@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.56.0
+version: 0.56.1
 date: 2026-10-23
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,7 +14,7 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.10.0)
-  - ANDROID-PLAN.md (0.1.74)
+  - ANDROID-PLAN.md (0.1.75)
   - IOS-PLAN.md (0.1.31; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
@@ -24,9 +24,36 @@ related:
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
   - VAULT-HOST-PROTOCOL.md (0.1.14; the enclave ↔ parent protocol as built)
-  - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
+  - VAULT-LOCK.md (0.1.3, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.56.1: **owner decisions of 2026-10-23** (§3.6.8: keep the
+    shorter; a call delays the idle lock at most 12 hours; no extra hour
+    for an unlock before the idle lock's time) and editorial errata
+    (owner answers on the release L plan, VAULT-LOCK 0.1.3 Q1, Q3; the
+    unlock_id part as in vettid-vault #145 (open); the enqueued_at
+    ordering is not built yet (V2)). §10.2 "Locks", §11.5 "The `lock` operation": a **recovery
+    open is an opening of the vault**: it makes an `unlock_id` (already
+    a member of `vault.recovery.open.result`, §11.14.6, which releases
+    from R to L sent empty), and an unconditional lock is compared with
+    the `enqueued_at` of the `recovery_open` message as with an enroll's
+    or an unlock's. §8.6: a device that implements 0.29.0 but does not
+    hold the value of a vault that announced one (an install from before
+    that version, a lost record) locks as for a vault before L over the
+    relay (once, the wait before its next unlock), and through the
+    member API without the value (an unconditional lock). §11.14.10:
+    if the old app's renewal of its token before an approval fails, it
+    still sends the approval, and the notice has what the previous token
+    has left (as in vettid-vault #144, open). §3.6.8: (owner decision
+    2026-10-23, "keep the shorter") the lowest idle-lock value set since
+    the last check stays in force until the next one, and a call in
+    progress delays the idle lock at most 12 hours past its time (a
+    call ends within 12 hours, §10.10), and an unlock before the idle
+    lock's time gets no extra hour, as in vettid-vault #146 (open,
+    97d309f);
+    an editorial note that "shortening may lock the vault at once" has
+    no effect (the setting cannot change past the deadline). No other
+    rule changes
   - 0.56.0: **draft; the owner answered the proposed choices on 2026-10-23, the
     text awaits approval** (the owner decided on 2026-10-23 to specify and build wallet spend caps before
     the Android wallet work, W1 and W2); ANDROID-PLAN 0.1.74,
@@ -3547,8 +3574,9 @@ authorizations the member gave (§3.6.3), for as long as its host keeps
 it. The idle lock ends that.
 
 - **The rule.** A vault locks itself (§12.3, as for an owner request)
-  when the time is later than `owner_check.deadline` +
-  `idle_lock.after_seconds`. It compares at every request and every
+  when the time is at or after `owner_check.deadline` +
+  `idle_lock.after_seconds` (0.56.1: "at or after", as built; 0.29.0
+  said "later than"). It compares at every request and every
   collect cycle, as for the hold (§3.6.3), with the enclave's own
   clock (§3.6.1).
 - **The setting** `idle_lock.after_seconds` (§10.8) is 3,600–2,592,000
@@ -3557,21 +3585,34 @@ it. The idle lock ends that.
   - *Owner only.* Only the app sets it; a desktop's `settings.set`
     naming it is `forbidden`.
   - *Shortening* takes effect at once, and may lock the vault at once.
+    (0.56.1, editorial: this has no effect in practice. Past the
+    deadline the app gate refuses `settings.set` (§3.6.3), with the hold
+    on or off, so the setting changes only before the deadline, when the
+    time of the rule is at least an hour ahead.)
   - *Lengthening* takes effect at the next successful check: until
-    then the vault uses the value it had at the last one. Someone
-    holding an unlocked app cannot buy time with a setting.
+    then the vault uses the value it had at the last one, or (0.56.1,
+    owner decision 2026-10-23, "keep the shorter") the lowest value set
+    since then, if lower. Someone holding an unlocked app cannot buy
+    time with a setting: shortening and then lengthening before a check
+    leaves the shortened value in force.
   - While held, `settings.*` is refused (§3.6.3), this key included.
 - **Whatever the hold says.** The idle lock applies with the hold on
   or off (§3.6.7). With the hold off it is what ends desktops' sessions
   and agents' running when the member does not return.
 - **After an unlock.** A vault that is unlocked when the time of the
   rule has already passed does not lock again at once: the idle lock
-  then applies from one hour after that unlock. A successful check in
+  then applies from one hour after that unlock. (0.56.1, owner
+  decision 2026-10-23) The hour is given only to an unlock at or after
+  the time of the rule. An unlock before it, even in the hour before,
+  gets no extra time: the vault locks at the time of the rule unless a
+  check is passed first. A successful check in
   that hour moves the deadline, and with it the idle lock. An unlock
   without a check gives one hour of a held vault and needs the PIN
   each time.
 - **A call in progress** (§10.10) delays the idle lock until the call
-  ends.
+  ends (0.56.1: at most 12 hours past the time of the rule, the hour
+  after an unlock included, the longest a call lasts, however calls
+  follow one another; not scaled on staging).
 - **A vault without a credential** has no deadline (§3.6.1) and no
   idle lock.
 - **Telling the member.** `vault.status`'s `owner_check` and
@@ -5295,6 +5336,12 @@ sends it once, and before its next unlock waits until that request's
 `exp` plus a margin; the vault accepts a `ts` up to 5 minutes ahead,
 §8.4, so a phone whose clock runs ahead leaves a window it cannot
 close).
+(0.56.1, owner answer of 2026-10-23, VAULT-LOCK Q3) A device that does
+not hold the value of a vault that announced one (an install from
+before the version that implements 0.29.0, a lost record) locks as for
+a vault before L: `vault.lock {}` over the relay once, and the same wait
+before its next unlock; and through the member API without the value
+(an unconditional lock, MEMBER-API "Locks").
 
 **An owner device refused by its own vault.** When a deposit by an owner
 device to its own vault's mailbox answers `token_revoked`, the device
@@ -5793,13 +5840,15 @@ VAULT-LOCK §3).** A lock from a
 device belongs to the unlock it ends.
 
 - **`unlock_id`.** Each time a vault opens (a successful
-  `vault.enroll` or `vault.unlock`, §11.3, §11.4) its process makes 16
+  `vault.enroll` or `vault.unlock`, §11.3, §11.4, or (0.56.1) a
+  successful recovery open, §11.14.6) its process makes 16
   random bytes, written as 32 lowercase hex characters. The value is
   kept in memory only: it is in neither the state nor the header, and
   it ends with the process, so every earlier value is stale after any
   lock, restart or move. It is not a secret and authorizes nothing by
-  itself. The app has it from the unlock or enroll result; any app or
-  desktop can read it in `vault.status`.
+  itself. The app has it from the enroll, unlock or (0.56.1)
+  recovery-open result; any app or desktop can read it in
+  `vault.status`.
 - **A bound lock.** `vault.lock {unlock_id}`: the vault compares the
   value with its current unlock's.
   - Equal: it answers `{}` and locks after the batch (§12.3), sending
@@ -12039,6 +12088,7 @@ with a DLQ after 3 receives:
   "signed_at": "<RFC 3339; recovery and recovery_cancel only, 0.33.0, release R>",
   "key_id": "<recovery and recovery_cancel only, 0.33.0, release R>",
   "sig": "<b64 DER; recovery and recovery_cancel only, 0.33.0, release R>",
+  "unlock_id": "<32 hex; lock only, optional; 0.29.0, release L>",
   "enqueued_at": "<RFC 3339>" }
 ```
 
@@ -12277,8 +12327,8 @@ requests name the manifest by `manifest_sha256` and `manifest_serial`
 - **Bound** (with `unlock_id`): the enclave hands it to the vault's
   process, which locks only if the value names its current unlock.
 - **Unconditional** (without): the enclave keeps, with each running
-  vault, the `enqueued_at` of the enroll or unlock message that opened
-  it, and carries the lock out only if the lock's `enqueued_at` is
+  vault, the `enqueued_at` of the enroll, unlock or (0.56.1)
+  `recovery_open` message that opened it, and carries the lock out only if the lock's `enqueued_at` is
   later. An equal or earlier time is stale. Both times are the member
   API's; no clock of the enclave or of a device is compared. (The
   queue is not ordered and a message can be delivered up to 5 minutes
@@ -17424,9 +17474,12 @@ first.**
   (§8, §8.3), stores the fresh token before it processes the approval;
   it SHOULD NOT denylist the previous token's `jti` before the approval
   is answered. It renews again before each approval it sends (after
-  `busy` or `retry` too). The token then has its full lifetime, at most
-  30 days, from the approval; the pending unlink keeps the newest
-  token.
+  `busy`, `retry` or (0.56.1) `stale_credential` too). The renewed
+  token then has its full lifetime, at most 30 days, from the approval;
+  the pending unlink keeps the newest token. (0.56.1) If the renewal
+  fails, the old app still sends the approval, and the pending unlink
+  keeps the previous token: the notice can then be delivered only while
+  that token lives.
 - **`device.unlinked{reason: "transferred", transfer_id}`** is deposited
   to the old app only after the vault's then current app has completed
   its **first successful unlock from the stored objects under that

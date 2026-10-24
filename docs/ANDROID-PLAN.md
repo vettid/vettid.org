@@ -1,9 +1,18 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.74
+version: 0.1.75
 date: 2026-10-23
 changelog:
+  - 0.1.75: editorial; the release L plan and the **owner's answers of
+    2026-10-23** (VAULT-LOCK 0.1.3). §4 "Locking the vault": part 1 is
+    as merged (vettid-android #127, 7a250bcd, with #140, #150, #164 and
+    #181), no longer a draft pending a merge. The retry that survives
+    the app's process is part of release L's app work (Q4: fail secure,
+    durable retry until the vault confirms, a plain notice meanwhile).
+    Part 2: an app without the value of a vault that announced one
+    locks as part 1 plus the unconditional API lock (Q3); release L is
+    staging release 23. No rule changes
   - 0.1.74: draft; the owner answered the choices on 2026-10-23, the
     text awaits approval (VAULT-MESSAGING 0.56.0, §10.18 "Spend caps";
     the owner decided on 2026-10-23 to build caps before W1 and W2). §4 "Wallet": a **Spending limits** screen
@@ -1975,15 +1984,14 @@ it).
 ### Locking the vault (0.1.38)
 
 *Two parts. Part 1 describes vettid-android #127 ("The member's lock
-fails secure"), read from its description at 78f741a0. It is open, not
-merged at the time of writing: part 1 is a draft until it merges, and
-follows whatever its review changes. Part 2 is the app's side of
+fails secure"), merged as 7a250bcd and hardened since (#140, #150,
+#164, #181; 0.1.75). Part 2 is the app's side of
 VAULT-MESSAGING 0.29.0 (approved by the owner 2026-10-12), for the
-vault's release L, which is not built. The texts of both parts are
+vault's release L (staging release 23), which is being built. The texts of both parts are
 approved as drafts (VAULT-LOCK L16) and become final when #127 and the
 release L work merge.*
 
-**1. As built by #127 (pending its merge).**
+**1. As built by #127.**
 
 - **The phone locks at once, in every outcome.** Lock vault (avatar
   sheet, Settings, the held screen, the release update's lock step,
@@ -2002,7 +2010,10 @@ release L work merge.*
   and, when it succeeds, ends the pending lock.
 - **Retries:** after 1, 2, 5, 10 s, four times 30 s, then every 60 s,
   through the member API, within the route's limit, while the app's
-  process lives (a job that survives the process is the follow-up PR).
+  process lives. (0.1.75, owner Q4, 2026-10-23) A retry that survives
+  the process (a durable job, fail secure, until the vault confirms,
+  with the plain notice meanwhile) is part of release L's app work
+  (A1).
 - **No late lock, as far as the app can see to it:** `vault.lock` goes
   over the relay once, with `exp` 30 s, never through the outbox; and
   every unlock first waits out an unanswered relay lock (up to 40 s).
@@ -2030,7 +2041,9 @@ vault without it, part 1 applies unchanged.
 - The app keeps `unlock_id` with the pending-lock record and sends
   `vault.lock {unlock_id}` and `POST /api/vault/lock {…, unlock_id}`.
   If it does not hold the value (an install from before this version,
-  a lost record) it sends the member API lock without it.
+  a lost record) it sends the member API lock without it, and (0.1.75,
+  owner Q3) over the relay it locks exactly as part 1 does: one relay
+  lock with a short `exp`, and the wait before its next unlock.
 - **Dropped:** the wait before an unlock; "send the relay lock once"
   (it may be retried, never through the outbox, `exp` at most 60 s).
 - **Confirms as well:** the slot's `locked` and `not_running`; the
