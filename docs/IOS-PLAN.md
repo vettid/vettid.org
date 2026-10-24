@@ -1281,7 +1281,7 @@ ANDROID-PLAN §4, carried here in full. On `410 recovery_ended` to a
 signed request a phone may forget its pending (recovering) key and offer
 to start over **only if it was never admitted as the app (it holds no
 `ok`, token or vault bundle for this vault) and has no unanswered
-open**. A phone that was ever admitted treats the `410` as a `401`. A
+open**. An open is answered and refused only by the vault's refusals before step 1 (wrong, closed, expired, busy, attempt lost, the waits); `retry`, `transfer_incomplete` and any error count as unanswered. A phone that was ever admitted treats the `410` as a `401`. A
 phone with an unanswered open keeps K and follows §4.9: it never forgets
 K on a `410`. On `401` it never forgets. The tests are Android's.
 

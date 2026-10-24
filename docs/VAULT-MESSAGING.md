@@ -16890,7 +16890,12 @@ it stands from any signed request, normally `GET /api/vault/status`:
     a `410`.
   - Only a phone that was never admitted and has no unanswered open
     (it registered and never opened, or every open it sent was answered
-    and refused) **may forget its pending (recovering) key** and its
+    and refused before step 1 of the order of writes: wrong, closed,
+    expired, busy, attempt lost, the waits; `retry`, `transfer_incomplete`
+    and any error are **unanswered**, because of a split-brain path in
+    which the loser's exact orphan clear also removes the winner's entry,
+    the winner stores step 2 and dies before step 3, and the row names
+    neither key while only K unlocks the vault) **may forget its pending (recovering) key** and its
     recovery state, and offer to start over (a new recovery from the
     account site).
 - **`401`**: anything else, including the first hour after the end, a

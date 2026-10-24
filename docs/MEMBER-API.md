@@ -2349,8 +2349,12 @@ writes `app_key_next` on the row, in a request the vault waits for,
 **before the vault stores the first header that names the key** (step 1
 of the order of writes, VAULT-MESSAGING §11.14.2), and `app_key`
 replaces it in one write when the vault adopts it (step 3); both writes
-are conditional on `seq` and `header_seq` and a failed one is written
-again until it is. So a key the vault adopted is, from before its first
+are conditional on `seq` and `header_seq`. The acknowledged confirm of
+`app_key_next` is the durable write: the vault stores nothing until the
+parent has answered `ok`. A failed write of `app_key` or of a clear is
+written again with backoff, but an error that trying again cannot cure
+is given up on, and the `app_key_next` lifecycle report is not written
+at all. So a key the vault adopted is, from before its first
 header, on the row as `app_key` or `app_key_next`, and is admitted
 (`200`) or `401`, never `410` (step 4 above; the tests below). The row
 can therefore name a key the vault did not adopt (an `app_key_next`
@@ -2373,7 +2377,11 @@ admitted as the app treats the `410` as a `401`. A phone with an
 unanswered open keeps K and follows "A phone that could not tell": the
 exact clear of #148 can remove `app_key_next` while the vault's header
 still names K, and the row then does not show a key the vault may still
-adopt. On `401` it never forgets the key, and tries again later.
+adopt. "Answered and refused" means only the vault's refusals made
+before step 1 of the order of writes (wrong, closed, expired, busy,
+attempt lost, the waits); `retry`, `transfer_incomplete` and any error
+count as an unanswered open (see the split-brain residual). On `401` it
+never forgets the key, and tries again later.
 
 **Logs.** No log, audit or email changes. The access log shows the
 status `410` on these routes where it showed `401`.
@@ -2391,8 +2399,15 @@ status `410` on these routes where it showed `401`.
   (VAULT-HOST-PROTOCOL §5.7 residual 2), a parent that answers `ok`
   without writing, or one that rewrites the row, can make the row miss a
   key the vault adopted. The phones' rule contains it: such a phone has
-  been admitted or has an unanswered open, and does not forget its key
-  on a `410`. This is an availability case at most (a refusal to
+  been admitted or has an unanswered open (including any `retry` or
+  error), and does not forget its key on a `410`. One traced path: two
+  instances confirm (K, N+1); the loser's exact orphan clear also removes
+  the winner's entry; the winner stores step 2 and dies before step 3;
+  the row names neither key and the phone's only answer was `retry`.
+  Until the vettid-vault fix ships that binds the orphan clear to the
+  parent's own attempt stamp (so a loser on another instance cannot
+  remove the winner's entry), the unanswered-open rule is what protects
+  that phone. This is an availability case at most (a refusal to
   the phone), not a loss of the key.
 - **A phone the vault adopted** and that later handed the vault to
   another phone by a transfer is no longer `app_key` and gets
@@ -2404,10 +2419,11 @@ status `410` on these routes where it showed `401`.
   `410`.
 
 **Tests** (test/lambda/vault.test.ts): an adopted key (`app_key` =
-K, or `app_key_next` = K, or K as the pending `app_key_pending`) with
+K, or `app_key_next` = K) with
 a cancelled or expired recovery, in the state of both, and past the
 grace, gets `200` or `401` and never `410` on all six routes, including
-`recovery/open`; a stale `app_key_next` or a pending key `401`; active
+`recovery/open`; a stale `app_key_next` `401` on all six routes; an expired
+`app_key_pending` `401` on `status` only; active
 `200` with the recovery; cancelled, expired and both `410` on all six
 routes, nothing queued, written or audited, counted on the vault's own
 `vault-ended#` limit and not on the member's `vault-status` budget; a

@@ -4538,7 +4538,7 @@ describe('2.7.0: recovery from release R', () => {
     });
   });
 
-  describe('2.11.0: a recovery that ended without the phone (410 recovery_ended)', () => {
+  describe('2.13.0: a recovery that ended without the phone (410 recovery_ended)', () => {
     const ENDED = { error: 'recovery_ended', code: 'recovery_ended', message: expect.any(String) };
     const status = (opts: EvOpts = signed) => call('GET', '/api/vault/status', undefined, opts);
     const UNLOCK = { vault_id: VID, request_id: RID, instance_id: 'i-1', etk_kid: KID, envelope: ENV, manifest_sha256: MSHA };
