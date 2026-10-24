@@ -1,9 +1,36 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.73
+version: 0.1.76
 date: 2026-10-23
 changelog:
+  - 0.1.76: approved by the owner 2026-10-23 (VAULT-MESSAGING 0.56.2,
+    §11.14.10 rule 5). §4 "Transfer (new phone)": at its 11-minute
+    deadline the new phone collects its mailbox once before it drops its
+    handshake, attested key and epoch-1 secret, and applies a waiting
+    `device.paired{transfer}`; the deadline is one, measured from the
+    `hs.init`; tests.
+  - 0.1.75: editorial; the release L plan and the **owner's answers of
+    2026-10-23** (VAULT-LOCK 0.1.3). §4 "Locking the vault": part 1 is
+    as merged (vettid-android #127, 7a250bcd, with #140, #150, #164 and
+    #181), no longer a draft pending a merge. The retry that survives
+    the app's process is part of release L's app work (Q4: fail secure,
+    durable retry until the vault confirms, a plain notice meanwhile).
+    Part 2: an app without the value of a vault that announced one
+    locks as part 1 plus the unconditional API lock (Q3); release L is
+    staging release 23. No rule changes
+  - 0.1.74: draft; the owner answered the choices on 2026-10-23, the
+    text awaits approval (VAULT-MESSAGING 0.56.0, §10.18 "Spend caps";
+    the owner decided on 2026-10-23 to build caps before W1 and W2). §4 "Wallet": a **Spending limits** screen
+    (wallet detail, ⋯), a prompt at creation, the review screen's
+    "left" line, the `cap_exceeded` refusal text, raising a limit
+    with the PIN and the password, History and notification texts for
+    `wallet.cap_refused`, `wallet.caps_lowered`, `wallet.caps_raised`,
+    texts and tests. Numbered 0.1.74 on the assumption that vettid.org
+    #405 merged as 0.1.73; renumber if another change takes 0.1.74.
+    Also: "Show recovery phrase" on a capped wallet asks for the PIN too;
+    at creation the app creates without caps, reveals and checks the
+    phrase, then sets the caps; a fee bump counts again toward the limit
   - 0.1.73: editorial (status as of 2026-10-23); no rule changes. §4
     "Staging time scale" and "Photo attachments" marked built, "Recovery
     and unlock from release R" and "Wallet, presence, location and
@@ -1043,7 +1070,7 @@ rows below say "Vault" for the screens and "item" for the data.
 | Pending deletion | — | When `GET /api/vault/status` shows `deletion` (a start-over requested on the portal, VAULT-MESSAGING §11.11.9): an urgent banner with the time left and **Cancel deletion** (`POST /api/vault/deletion/cancel {deletion_id}`, signed by the app key, with the `deletion_id` from the status's `deletion: {deletion_id, state, deletes_at}`, MEMBER-API 2.1.1) |
 | Vault update | — (VettID-specific) | 0.1.19 (owner decision of 2026-10-09). **Banner** at the top of the shell while the trusted manifest lists an `active` release newer than the vault's: "A new vault release is available (release N)" with Update now and a close button (back after 24 h; a newer release or a change to the end-date warning shows at once), or, for a `retired` release or a `deprecated` one with an `ends_at`, the urgent "Your vault's release ends on <date>. Update now to keep your vault" (also back after 24 h). The offer is read from the manifest at app start, on return to the foreground and after every unlock (no other polling). **Notification**: one local notification per release on the "Vault updates" channel, its tap opens the update screen; the POST_NOTIFICATIONS permission is asked once, when the first banner shows. **Update screen** (banner, notification, Settings → Vault → "Update available"): the release number, the PCR0 fingerprint, "Anyone can rebuild it and compare the fingerprint", the release notes, the vault PIN and **Approve and update** (no credential password: the owner check, when due, comes first through the shell's gate). Then, over every screen: lock → the unlock with the approved `release_update` (built as at the unlock screen) → `update: moved` → the unlock that reaches N+1 with the same PIN ("Updating your vault…", three steps; "Release N is starting. This can take a few minutes." while the API answers `503 release_starting`). Outcomes: done; refused (`target`, `downgrade`, `approval`, `seal_key`, `pending`, `write`, each explained; the vault stays on its release and is open); a wrong PIN or the backoff (the vault is locked, nothing moved; "Approve and update" again or "Unlock without updating"); N+1 does not open (try again, or **Return to release N**, confirmed, only while the move is unconfirmed). The PIN is held only while a step runs. The unlock screen's "Approve the update with this unlock" stays. 0.1.54: the way back is kept across leaving the screen and a restart, and offered on the unlock screen (§4 "The way back to release N after leaving or a restart"). 0.1.31: the update screen and the unlock offer open with **What's new in release N** (next row), above the fingerprint and the PIN; the bare "Release notes" link becomes that section's "Full release notes" |
 | What's new | — (VettID-specific) | 0.1.31 (owner request 2026-10-10; RELEASE-UPDATES 0.3.0 §2, §5). **Where:** at the top of the update screen (reached from the banner's Update now, the notification and Settings → Vault → "Update available": every path to an update passes through it before **Approve and update**) and in the unlock screen's release offer, before "Approve the update with this unlock". There is no update path that skips it. **What:** the heading "What's new in release N"; the log entry's `summary`; its `changes` as a bulleted list; the security line ("No security fix", "Security fix: update recommended" or "Security fix: update urgently", the latter two followed by `security_text`); the label "From <host>" (vettid.org; staging builds staging.vettid.org) with "Release notes are information. What keeps your vault safe is the signed release list and the fingerprint below."; and **Full release notes**, which opens the manifest's `notes` URL in the browser. When the vault is more than one release behind, the summaries of the releases in between follow under "Also in earlier releases" (one line each, from the same `index.json`). **Source:** the channel's log `index.json` (VAULT-RELEASES §7), public and unsigned. The app fetches it only when the trusted manifest's (published or loaded canary) `notes` for release N is exactly `https://<host>/security/releases/<N>/` and `<host>` is the host of the build's pinned manifest URL (vettid.org; staging.vettid.org; the dev stack's manifest host); it then fetches `https://<host>/security/releases/index.json` and no other URL. Any other `notes` (staging S1–S8 still carry GitHub URLs until the backfill is published) means no fetch. GET without cookies or credentials, redirects refused, 10 s timeout, at most 1 MiB, JSON only. The entry used is the one whose `release` is N **and** whose `pcr0` equals the manifest's PCR0 for N; otherwise none. Shown as plain text only (no markup, no tappable links), each field cut with "…" past the RELEASE-UPDATES §5 limits (summary 160 characters, 20 changes of 280, `security_text` 1,000). Kept in memory per host, release and PCR0 until the process ends; nothing is stored on disk or in the vault. **Information only:** nothing in it is used for a decision: which release is offered, its status, `ends_at`, the fingerprint and the approval come from the signed manifest alone. **Fallback:** while loading, a progress line, and **Approve and update** stays enabled; if the fetch fails, the entry is missing or does not match, or `notes` is not a log URL: "Release notes unavailable" with **Full release notes** (when `notes` is an `https` URL, as the manifest parser already requires), and updating stays possible. Opening the screen again retries. **Notification** ("Vault updates"): before posting it the app tries the same fetch (same rules, 10 s); with an entry its text is the summary ("Release N: <summary>"), otherwise the current text; it is not updated afterwards |
-| Transfer (new phone) | — (VettID-specific) | (0.1.40, release R: the phone key and its secret in `hs.init`, then **Finish the move**; the old phone keeps its keys until then, and after 7 days until its vault answers (0.1.72); the new phone waits 11 minutes for the approval; §4 "Recovery and unlock from release R".) Scan the old phone's transfer QR → compare the SAS → wait for the approval → `device.paired{transfer}`: the app stores its `vault_id` and the member's `user_guid` (VAULT-MESSAGING 0.17.0 §6.7.1) like an enrolled phone, so that it unlocks later with the PIN. Without `user_guid` (a vault release before 0.17.0) the transfer still completes and the app warns: "This phone cannot unlock your vault after it locks until your vault is updated" |
+| Transfer (new phone) | — (VettID-specific) | (0.1.40, release R: the phone key and its secret in `hs.init`, then **Finish the move**; the old phone keeps its keys until then, and after 7 days until its vault answers (0.1.72); the new phone waits 11 minutes for the approval, then collects its mailbox once before it drops its keys (0.1.76); §4 "Recovery and unlock from release R".) Scan the old phone's transfer QR → compare the SAS → wait for the approval → `device.paired{transfer}`: the app stores its `vault_id` and the member's `user_guid` (VAULT-MESSAGING 0.17.0 §6.7.1) like an enrolled phone, so that it unlocks later with the PIN. Without `user_guid` (a vault release before 0.17.0) the transfer still completes and the app warns: "This phone cannot unlock your vault after it locks until your vault is updated" |
 | Onboarding | Sign-in flow | Scan the setup QR from the account portal, or type its short code with the account's email (no sign-in in the app, VAULT-MESSAGING 0.15.0 §11.12) → confirm the account (`email_hint`) → enroll vault (PIN, credential password) → first connection guide |
 
 **History** (0.1.11, owner decision of 2026-10-07). The member's audit
@@ -1963,15 +1990,14 @@ it).
 ### Locking the vault (0.1.38)
 
 *Two parts. Part 1 describes vettid-android #127 ("The member's lock
-fails secure"), read from its description at 78f741a0. It is open, not
-merged at the time of writing: part 1 is a draft until it merges, and
-follows whatever its review changes. Part 2 is the app's side of
+fails secure"), merged as 7a250bcd and hardened since (#140, #150,
+#164, #181; 0.1.75). Part 2 is the app's side of
 VAULT-MESSAGING 0.29.0 (approved by the owner 2026-10-12), for the
-vault's release L, which is not built. The texts of both parts are
+vault's release L (staging release 23), which is being built. The texts of both parts are
 approved as drafts (VAULT-LOCK L16) and become final when #127 and the
 release L work merge.*
 
-**1. As built by #127 (pending its merge).**
+**1. As built by #127.**
 
 - **The phone locks at once, in every outcome.** Lock vault (avatar
   sheet, Settings, the held screen, the release update's lock step,
@@ -1990,7 +2016,10 @@ release L work merge.*
   and, when it succeeds, ends the pending lock.
 - **Retries:** after 1, 2, 5, 10 s, four times 30 s, then every 60 s,
   through the member API, within the route's limit, while the app's
-  process lives (a job that survives the process is the follow-up PR).
+  process lives. (0.1.75, owner Q4, 2026-10-23) A retry that survives
+  the process (a durable job, fail secure, until the vault confirms,
+  with the plain notice meanwhile) is part of release L's app work
+  (A1).
 - **No late lock, as far as the app can see to it:** `vault.lock` goes
   over the relay once, with `exp` 30 s, never through the outbox; and
   every unlock first waits out an unanswered relay lock (up to 40 s).
@@ -2018,7 +2047,9 @@ vault without it, part 1 applies unchanged.
 - The app keeps `unlock_id` with the pending-lock record and sends
   `vault.lock {unlock_id}` and `POST /api/vault/lock {…, unlock_id}`.
   If it does not hold the value (an install from before this version,
-  a lost record) it sends the member API lock without it.
+  a lost record) it sends the member API lock without it, and (0.1.75,
+  owner Q3) over the relay it locks exactly as part 1 does: one relay
+  lock with a short `exp`, and the wait before its next unlock.
 - **Dropped:** the wait before an unlock; "send the relay lock once"
   (it may be retried, never through the outbox, `exp` at most 60 s).
 - **Confirms as well:** the slot's `locked` and `not_running`; the
@@ -2885,8 +2916,22 @@ both sections above (`pin.change`, `credential.password.change`,
   its 10 minutes from the `hs.init` it receives, so an approval near the
   end could otherwise reach a phone that had dropped its handshake,
   attested key and epoch-1 secret. Only after the 11 minutes does it
-  drop them and offer a new code. Tests: a `device.paired` at 10 minutes
-  30 seconds is accepted; nothing is dropped before 11 minutes.
+  drop them and offer a new code. (0.1.76, owner decision 2026-10-23.)
+  The 11 minutes are one deadline, measured from the moment the app
+  started its `hs.init`; no user action extends it. At the deadline the
+  app **collects its mailbox once** before it drops anything: a
+  `device.paired{transfer}` for this transfer, opened under the
+  transfer's session, is applied and the move completes (credential
+  take-over) instead of dropping. Otherwise, or if the collect fails or
+  times out, it drops the keys as above and offers a new code. The
+  collect is bounded (one collect with `wait=0` and `max` at its cap (RELAY-PROTOCOL §6.3), bounded by the app's request timeout and by 30 seconds in all, its transport retries included)
+  and is not a reason to keep the keys longer when the relay cannot be
+  reached. A paired transfer completes at any later start, whatever its
+  age. Tests: a `device.paired` at 10 minutes 30 seconds is accepted;
+  nothing is dropped before 11 minutes; at the deadline a waiting
+  `device.paired` is applied; nothing waits: dropped and a new code
+  offered; a failed or timed-out collect: dropped; no user action
+  extends the deadline; a paired transfer completes at a later start; killed before the deadline, started after it: one collect at the start, then applied or dropped.
 - *Old phone, approving.* As before, the PIN and the password together.
   `busy`: "The service is busy right now. Nothing was moved. Try again
   in a minute." (the transfer stays open). (0.1.72) Before it sends
@@ -3428,7 +3473,7 @@ bitcoin-kmp otherwise.
 | Screen | Proton analogue | Notes |
 |---|---|---|
 | Wallet (drawer) | Folder list | The wallets (`wallet.list`), each a row: name, network chip ("Signet", "Testnet4"; gold-ink, never on mainnet), balance in BTC with sats underneath, "Not backed up" in the error colour while the phrase is not confirmed. The floating action button: **New wallet** / **Import a wallet**. Empty state: "No wallets yet". A test network shows a banner: "Test network: these coins have no value." Up to 16 wallets (`limit`: "Your vault holds 16 wallets, the most it can.") |
-| Wallet detail | Message detail | Balance (confirmed; "+ 0.001 incoming" while unconfirmed), the last look-up's time and the server's host, pull to refresh; **Receive** and **Send** in the pill (Send from W2); the transactions (W2, below); ⋯: Show recovery phrase (question 21), Receiving address type (P2TR "Taproot (recommended)" or P2WPKH "Native SegWit"), Chain server, Details (fingerprint, network, account paths, descriptors, each copyable), Delete wallet |
+| Wallet detail | Message detail | Balance (confirmed; "+ 0.001 incoming" while unconfirmed), the last look-up's time and the server's host, pull to refresh; **Receive** and **Send** in the pill (Send from W2); the transactions (W2, below); ⋯: Show recovery phrase (question 21), Receiving address type (P2TR "Taproot (recommended)" or P2WPKH "Native SegWit"), Spending limits (0.1.74), Chain server, Details (fingerprint, network, account paths, descriptors, each copyable), Delete wallet |
 | New wallet | — | Name (1–128 characters, no control characters), network (signet or testnet4 on staging), then the credential password ("Your password protects this wallet. You will need it for every payment."); `wallet.create` without `item`; then the phrase (below) |
 | Import a wallet | — | Name, network, the words (12, 15, 18, 21 or 24), and an optional passphrase behind "Advanced" ("Only if you set one when the wallet was made. Letters, digits and symbols from a standard keyboard only."; printable ASCII, at most 256 bytes, as the vault requires). Each word is checked against the BIP39 English list as typed, and the checksum before anything is sent ("These words aren't a valid recovery phrase. Check each word and the order."). Then the password and `wallet.create` with `item: {mnemonic, passphrase?}`, then the scan above ("Looking for this wallet's history…") |
 | Recovery phrase | — | After creating (and from ⋯ → Show recovery phrase): `item.reveal` of the wallet's item with a reply key; the words in a numbered grid of two columns, the passphrase (if any) under it; "Write these words on paper, in order, and keep them somewhere safe. Anyone with them can take your coins. VettID never shows them to anyone else." **No copy button**; Continue goes to the check |
@@ -3466,6 +3511,46 @@ the import field is a password-class field without suggestions or
 personalized learning (`IME_FLAG_NO_PERSONALIZED_LEARNING`), as the
 typed recovery code (§4, "Recovery: type the code"); no word list
 lookup over the network.
+
+**Spending limits** (0.1.74; VAULT-MESSAGING 0.56.0 §10.18; owner
+decisions of 2026-10-23, text **for the owner's approval**). Built in W1, before sending, because W2 must show
+and respect them.
+
+- **At creation and import.** After the name and network, a step
+  "Set a spending limit?" with two optional fields, **Most per payment**
+  and **Most in any 24 hours**, in sats (a toggle shows BTC), and "No
+  limit" as the default choice. Nothing is suggested for a test network;
+  for mainnet (its own approval later) the step cannot be skipped
+  without choosing "No limit". The wallet is **created without caps**;
+  the app then shows and checks the recovery phrase as usual (the reveal
+  of a wallet that has no cap needs the password only), and only then
+  sends `wallet.caps.set` with the chosen values, so that the phrase
+  step never needs the PIN. (`wallet.create` also accepts `caps`; the app
+  does not use it.) Until the chosen caps are set, the app offers no
+  Receive for the new wallet; after a restart it sends the pending
+  `wallet.caps.set` before anything else for that wallet.
+- **Recovery phrase of a capped wallet.** ⋯ → Show recovery phrase asks
+  for the PIN as well as the password ("To protect your spending limit,
+  enter your PIN too."); the vault answers `pin_required` otherwise.
+- **The screen** (wallet ⋯, **Spending limits**): the two limits as
+  they stand, "Used in the last 24 hours: {spent} of {limit}" (on staging
+  "last hour"), and the buttons **Lower a limit** and **Raise or remove
+  a limit**. Lowering is a form with the new number (`wallet.caps.set`),
+  confirmed with no password. Raising or removing asks for the PIN and
+  the credential password (`wallet.caps.raise`, one credential
+  operation, `payload_sha256` as the vault's §10.18 says) and says what
+  changes: "From {old} to {new}" or "Remove the limit". A form that
+  would lower sends `set`; one that raises sends `raise`; a form that
+  does both is sent as `raise` with the lowered value in it.
+- **On the review screen** of a send (W2), under the vault's summary: "Counts
+  toward your limit for the last 24 hours: {outflow}. Left after this:
+  {left}", when `per_period_sats` is set, from `<wallet>.caps.spent_sats`;
+  and, from `wallet.psbt.inspect`'s `cap`, the refusal text below before
+  the password is asked, if it says `ok: false`. A **fee bump** (a
+  new PSBT that replaces a payment) says: "A fee bump counts again
+  toward your limit for the last 24 hours." The vault decides.
+- **Units.** Sats everywhere in this screen, whole numbers, with a
+  thousands separator; no fiat value.
 
 **Sending** (W2).
 
@@ -3520,6 +3605,20 @@ lookup over the network.
    spends the same coins again (only one of two can ever confirm). The
    app never writes `tx` to disk.
 
+**`cap_exceeded` texts** (0.1.74; for the owner's approval; the vault
+refuses before it opens the password, so nothing was signed and nothing
+is lost): `per_tx` "This payment is more than the {limit} you allow per
+payment. Nothing was signed." with the buttons **Change the amount**
+and **Spending limits**; `per_period` "This payment would take you over
+your limit of {limit} in any 24 hours. You can send up to {remaining}
+now." (no `remaining_sats`, or 0: "You can't send anything more right
+now.");
+with `allowed_after`: "You can send this at {time}." (the earliest
+time the vault gives); without it: "This is more than your 24-hour limit
+allows at any time." A payment request from a connection that is refused
+shows the same text on the request, which stays open. The app never
+shows the refusal to the connection.
+
 **`invalid_psbt` texts** (the reasons of vettid-vault
 `vms/btc/psbt.go` and `features/wallet/wallet.go`; any other: "Your
 vault would not sign this payment (<reason>)."): `fee_rate` "The fee is
@@ -3565,7 +3664,10 @@ needs the password (`item.delete` is a credential operation;
 `sync.event{wallet.deleted}` follows).
 
 **Notifications.** `wallet.signed` (Vault activity): "Bitcoin payment
-signed" opens the transaction; `item.revealed` of a wallet as for any
+signed" opens the transaction; (0.1.74) `wallet.cap_refused` and
+`wallet.caps_raised` (priority `high`, Vault activity): "A payment was
+refused by your spending limit" and "A spending limit was raised or
+removed on <name>", each opening the wallet's Spending limits; `item.revealed` of a wallet as for any
 critical item. No notification for coins received: the app looks at
 the chain only while it is open.
 
@@ -3573,8 +3675,12 @@ the chain only while it is open.
 <name>"; `wallet.deleted` "Wallet deleted"; `wallet.address_issued`
 "Address given to <First Last>" (a connection's request, §10.14);
 `wallet.signed` "Bitcoin payment signed" with the `txid` as `ref`;
-`item.revealed` of a wallet's item "Recovery phrase shown: <name>".
-No address or amount is in the audit log, so none is in History.
+`item.revealed` of a wallet's item "Recovery phrase shown: <name>";
+(0.1.74) `wallet.cap_refused` "Payment refused by a spending limit: <name>"
+(with the connection's name for a request), `wallet.caps_lowered`
+"Spending limit lowered: <name>", `wallet.caps_raised` "Spending limit
+raised or removed: <name>". No address or amount is in the audit log, so
+none is in History.
 
 **Out of scope here:** mainnet (its own approval), shared actions'
 `wallet.request-address` and `wallet.request-payment` (with shared
@@ -3602,6 +3708,14 @@ labels on addresses, a fiat value.
 | Broadcast failed | "Signed, but {host} didn't accept it: {reason}. Try again, or choose another server." |
 | Chain server privacy | as above, "To show your balance and send, VettID asks this server…" |
 | Server check failed | "That server isn't on {network}." / "That server didn't answer." |
+| Limits, at creation (0.1.74) | "Set a spending limit?" / "Your vault will refuse any payment above it. You can lower it any time; raising it needs your PIN and password." / "No limit" |
+| Limits, screen | "Most per payment" / "Most in any 24 hours" / "Used in the last 24 hours: {spent} of {limit}" |
+| Limits, lower | "Lower the limit to {new}?" |
+| Limits, raise | "Raise the limit from {old} to {new}?" or "Remove the limit?" / "Enter your PIN and password." |
+| Limit, review | "Counts toward your limit for the last 24 hours: {outflow}. Left after this: {left}" |
+| Limit, fee bump | "A fee bump counts again toward your limit for the last 24 hours." |
+| Phrase of a capped wallet | "To protect your spending limit, enter your PIN too." |
+| Limit, refused | as the `cap_exceeded` texts above |
 | Delete | "Delete {name}? Your vault forgets this wallet and its recovery phrase. Coins on it are lost unless you have the recovery phrase written down." |
 
 **Tests.**
@@ -3619,12 +3733,25 @@ labels on addresses, a fiat value.
   broadcast errors) and the genesis check (a testnet3 server refused
   for testnet4); the retry of `wallet.sign` with the same inner id; the
   testnet4 label kept and asked for.
+- (0.1.74) Spending limits: the lower and raise forms choose `set` or
+  `raise` correctly (a form that raises one and lowers another sends
+  `raise`); the `payload_sha256` of `wallet.caps.raise` against the
+  vault's vectors; every `cap_exceeded` text for each combination of
+  `reason`, `remaining_sats` and `allowed_after`; the creation step's
+  "No limit" default; sats formatting; no amount, limit or PIN in logs,
+  crash reports or files (the data directory scan); "Show recovery phrase"
+  on a capped wallet asks for the PIN and handles `pin_required` and a
+  wrong PIN (a failed check); a wallet created with a limit is created
+  without caps, then set; `wallet.psbt.inspect`'s `cap` shown before the
+  password; the fee-bump text.
 - Instrumented, dev stack (`regtest`, a development build of the
   vault, with a local Esplora): create, back up and check; receive;
   import a phrase with history on both accounts (the receiving account
   and the issued indices follow); a send through inspect, sign and
   broadcast that confirms; every `invalid_psbt` text; the phrase and
-  check screens have `FLAG_SECURE`.
+  check screens have `FLAG_SECURE`; (0.1.74) a limit set at creation, a
+  payment over it refused with the right text and nothing signed, a
+  raise with a wrong PIN refused, a raise with the right ones applied.
 - **Privacy, data directory scan:** after creating, revealing, checking
   and importing a wallet and sending from it, lock and scan the app's
   files, databases, caches and `no_backup`: none of the test phrase's
@@ -3639,7 +3766,8 @@ labels on addresses, a fiat value.
 **PRs.** W0: the library spike, written up (no screens). W1: the chain
 source and its setting, wallet list and detail, create, import,
 recovery phrase and check, receive, balance, `wallet.address.used`,
-History and feed labels. W2: send (building, inspect, approve, sign,
+History and feed labels, and (0.1.74) the Spending limits screen and the
+creation step (the vault's caps come first). W2: send (building, inspect, approve, sign,
 broadcast) and the transactions. Each against the dev stack first,
 then staging.
 

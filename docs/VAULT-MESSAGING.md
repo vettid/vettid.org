@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.55.10
+version: 0.56.2
 date: 2026-10-23
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,7 +14,7 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.10.0)
-  - ANDROID-PLAN.md (0.1.72)
+  - ANDROID-PLAN.md (0.1.76)
   - IOS-PLAN.md (0.1.31; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
@@ -24,9 +24,74 @@ related:
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
   - VAULT-HOST-PROTOCOL.md (0.1.14; the enclave ↔ parent protocol as built)
-  - VAULT-LOCK.md (0.1.2, design note for 0.29.0: options, owner decisions L1–L16, rollout)
-  - STAGING-TIME-SCALE.md (0.1.0, design note for 0.43.0: the inventory of waits, choices T1–T9)
+  - VAULT-LOCK.md (0.1.3, design note for 0.29.0: options, owner decisions L1–L16, rollout)
+  - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.56.2: approved by the owner 2026-10-23. §11.14.10 rule 5 and §6.7.1
+    (failure row "The new app goes offline after its `hs.fin`"): at its
+    11-minute deadline the new app of a transfer **collects its mailbox
+    once** before it drops its handshake, attested key and epoch-1 secret;
+    a `device.paired{transfer}` for this transfer, opened under its
+    session, is applied and the move completes. ANDROID-PLAN 0.1.76.
+  - 0.56.1: **owner decisions of 2026-10-23** (§3.6.8: keep the
+    shorter; a call delays the idle lock at most 12 hours; no extra hour
+    for an unlock before the idle lock's time) and editorial errata
+    (owner answers on the release L plan, VAULT-LOCK 0.1.3 Q1, Q3; the
+    unlock_id part as in vettid-vault #145 (open); the enqueued_at
+    ordering is not built yet (V2)). §10.2 "Locks", §11.5 "The `lock` operation": a **recovery
+    open is an opening of the vault**: it makes an `unlock_id` (already
+    a member of `vault.recovery.open.result`, §11.14.6, which releases
+    from R to L sent empty), and an unconditional lock is compared with
+    the `enqueued_at` of the `recovery_open` message as with an enroll's
+    or an unlock's. §8.6: a device that implements 0.29.0 but does not
+    hold the value of a vault that announced one (an install from before
+    that version, a lost record) locks as for a vault before L over the
+    relay (once, the wait before its next unlock), and through the
+    member API without the value (an unconditional lock). §11.14.10:
+    if the old app's renewal of its token before an approval fails, it
+    still sends the approval, and the notice has what the previous token
+    has left (as in vettid-vault #144, open). §3.6.8: (owner decision
+    2026-10-23, "keep the shorter") the lowest idle-lock value set since
+    the last check stays in force until the next one, and a call in
+    progress delays the idle lock at most 12 hours past its time (a
+    call ends within 12 hours, §10.10), and an unlock before the idle
+    lock's time gets no extra hour, as in vettid-vault #146 (open,
+    97d309f);
+    an editorial note that "shortening may lock the vault at once" has
+    no effect (the setting cannot change past the deadline). No other
+    rule changes
+  - 0.56.0: **draft; the owner answered the proposed choices on 2026-10-23, the
+    text awaits approval** (the owner decided on 2026-10-23 to specify and build wallet spend caps before
+    the Android wallet work, W1 and W2); ANDROID-PLAN 0.1.74,
+    STAGING-TIME-SCALE 0.1.4. **A vault change** (vettid-vault
+    `features/wallet`), with a release, and new app screens. The
+    requirement is VAULT-PLAN V4 "Wallet note" and PROTEAN-CREDENTIAL §5
+    ("member-set **spend caps** per transaction and per period ... enforced
+    by the vault before it signs, with raising a cap a credential
+    operation (password, CEK rotation) and every refusal audited";
+    "**spend caps** (`max_amount`) are a requirement for the wallet
+    batch"). §10.18 "Spend caps": per wallet, in sats, a maximum per
+    transaction and a maximum per rolling 24 hours (the period); none
+    by default, which the app asks about at creation; what counts is
+    what leaves the wallet in a signed PSBT (payees and fee, change
+    excluded); checked after the PSBT checks and before the password is
+    tried; `cap_exceeded` with `{reason, limit_sats, ...}`; audit kinds
+    `wallet.cap_refused`, `wallet.caps_lowered`, `wallet.caps_raised`,
+    never an amount. **Owner decisions of 2026-10-23:** no caps by default,
+    the app asks at creation and a mainnet wallet cannot skip the question; raising or removing a cap takes the
+    PIN and the password; so does revealing the phrase of a wallet that
+    has caps (`item.reveal`, `pin_required`); a rolling 24 hours only
+    (VAULT-PLAN V4 said "per day, per week"). Review fixes: the check's
+    place in §3.5.3, the clock rule, atomic check-and-append, fee bumps
+    counted in full, rollback, `exists` for a duplicate import,
+    `cap` in `wallet.psbt.inspect`, the `payload_sha256` encoding and a
+    vector. New messages: `wallet.caps.set` (a normal change,
+    lowering only) and `wallet.caps.raise` (a credential operation with
+    the PIN and the password, bound to the new values). `wallet.create`
+    may carry `caps`; `<wallet>` carries `caps`. The period is divided
+    by `time_scale` on staging (STAGING-TIME-SCALE S17). Stated plainly:
+    a cap limits what the vault signs, not what `item.reveal` of the
+    phrase lets a person do elsewhere (§10.18). Tests required.
   - 0.55.10: **decisions approved by the owner
     (2026-10-23)** (five: the three below, the notice's reliability and
     the waiting notice's text), found in the iOS review (claude-mac) and
@@ -2570,7 +2635,9 @@ critical-item use (§10.13), `request_id` and `payload_sha256`, which bind
 the member's consent to one request and one payload. A wallet spend
 (§10.18) binds it with `item_id` (the wallet) and `payload_sha256` (the
 PSBT's hash), and `wallet.create` may carry an imported phrase as `item`.
-A transfer's approval (§6.7.1) and an owner check (§3.6.1) carry the
+(0.56.0) `wallet.caps.raise` (§10.18) binds the new caps the same way
+(`item_id` = the wallet, `payload_sha256` over the values) and carries
+the `pin` with the password. A transfer's approval (§6.7.1) and an owner check (§3.6.1) carry the
 `pin` (6–32 ASCII digits, §11.3) with the password; an owner check may
 also carry `hold` and `hold_off_until` (§3.6.7). A History export
 (`audit.export`, §10.9, 0.22.0) carries the `pin` alone and is not a
@@ -3104,7 +3171,8 @@ a clone) are not: they test no guess. (0.46.1; owner decisions of
 2026-10-18) The same holds for **every credential operation that
 verifies the PIN as an owner check does**: `credential.create` (its
 PIN), `pin.change`, `vault.secret.renew`, `credential.password.change`,
-`credential.reset`, `device.transfer.approve` and `vault.delete`. Its
+`credential.reset`, `device.transfer.approve`, `vault.delete` and
+(0.56.0) `wallet.caps.raise` and `item.reveal` of a wallet that has a cap. Its
 `bad_pin` or `bad_password` counts as a failed check; each checks the
 blob first (§3.5.9), so a request refused before any secret is tested
 counts nothing. Operations that test the password alone (unlocking or
@@ -3152,8 +3220,9 @@ credential. `vault.status` reports `owner_check.state: "ok"`. Its first
 the vault a new credential (`credential.reset`) starts it fresh.
 
 **Nothing else resets it.** An unlock (the PIN only), `credential.unlock`
-or any other credential operation (the password only), `pin.change` and
-`credential.password.change` do not; nor, from release R, does
+or any other credential operation (the password only), `pin.change`,
+`credential.password.change` and (0.56.0) `wallet.caps.raise` and
+`item.reveal` of a capped wallet do not; nor, from release R, does
 `vault.secret.renew` (§11.14.9). *Rationale for one dedicated
 operation:*
 
@@ -3511,8 +3580,9 @@ authorizations the member gave (§3.6.3), for as long as its host keeps
 it. The idle lock ends that.
 
 - **The rule.** A vault locks itself (§12.3, as for an owner request)
-  when the time is later than `owner_check.deadline` +
-  `idle_lock.after_seconds`. It compares at every request and every
+  when the time is at or after `owner_check.deadline` +
+  `idle_lock.after_seconds` (0.56.1: "at or after", as built; 0.29.0
+  said "later than"). It compares at every request and every
   collect cycle, as for the hold (§3.6.3), with the enclave's own
   clock (§3.6.1).
 - **The setting** `idle_lock.after_seconds` (§10.8) is 3,600–2,592,000
@@ -3521,21 +3591,34 @@ it. The idle lock ends that.
   - *Owner only.* Only the app sets it; a desktop's `settings.set`
     naming it is `forbidden`.
   - *Shortening* takes effect at once, and may lock the vault at once.
+    (0.56.1, editorial: this has no effect in practice. Past the
+    deadline the app gate refuses `settings.set` (§3.6.3), with the hold
+    on or off, so the setting changes only before the deadline, when the
+    time of the rule is at least an hour ahead.)
   - *Lengthening* takes effect at the next successful check: until
-    then the vault uses the value it had at the last one. Someone
-    holding an unlocked app cannot buy time with a setting.
+    then the vault uses the value it had at the last one, or (0.56.1,
+    owner decision 2026-10-23, "keep the shorter") the lowest value set
+    since then, if lower. Someone holding an unlocked app cannot buy
+    time with a setting: shortening and then lengthening before a check
+    leaves the shortened value in force.
   - While held, `settings.*` is refused (§3.6.3), this key included.
 - **Whatever the hold says.** The idle lock applies with the hold on
   or off (§3.6.7). With the hold off it is what ends desktops' sessions
   and agents' running when the member does not return.
 - **After an unlock.** A vault that is unlocked when the time of the
   rule has already passed does not lock again at once: the idle lock
-  then applies from one hour after that unlock. A successful check in
+  then applies from one hour after that unlock. (0.56.1, owner
+  decision 2026-10-23) The hour is given only to an unlock at or after
+  the time of the rule. An unlock before it, even in the hour before,
+  gets no extra time: the vault locks at the time of the rule unless a
+  check is passed first. A successful check in
   that hour moves the deadline, and with it the idle lock. An unlock
   without a check gives one hour of a held vault and needs the PIN
   each time.
 - **A call in progress** (§10.10) delays the idle lock until the call
-  ends.
+  ends (0.56.1: at most 12 hours past the time of the rule, the hour
+  after an unlock included, the longest a call lasts, however calls
+  follow one another; not scaled on staging).
 - **A vault without a credential** has no deadline (§3.6.1) and no
   idle lock.
 - **Telling the member.** `vault.status`'s `owner_check` and
@@ -4567,8 +4650,7 @@ Rules:
   token's and the request token's `jti`. The new device shows only the
   code; its user compares it on the app, and it waits for `device.paired`
   or (0.10.5) `device.pair.rejected` until 10 minutes after its
-  `hs.init` (0.55.10: a new phone of a transfer waits 11 minutes,
-  §11.14.10 rule 5).
+  `hs.init` (0.55.10, 0.56.2: a new phone of a transfer waits 11 minutes and collects its mailbox once at that deadline, §11.14.10 rule 5).
 - **The rejection is sent** (0.10.5; owner decision of 2026-10-05,
   "include `device.pair.rejected`"). The new device is the member's own,
   in their hand, so there is nothing to hide, and without it the device
@@ -4658,7 +4740,7 @@ PIN and password (so it can be answered `busy`), replaces the DEK in
 three writes, and the old app keeps its keys until the new phone's first
 unlock, or until, 7 days or more after the approval, its vault answers
 that the move happened (0.55.10): §11.14.10, which takes precedence over this section where they
-differ. The new phone waits 11 minutes for `device.paired`, not 10.
+differ. The new phone waits 11 minutes for `device.paired`, not 10, and collects its mailbox once before it drops its keys (0.56.2).
 
 A member who still holds the old phone moves the app, and with it the
 credential, to a new phone without the 24 h wait of a recovery (owner
@@ -4804,7 +4886,7 @@ and the new app's handshake state is dropped. A commitment mismatch at
 | Wrong PIN or password at approval | `bad_pin` / `bad_password`, counted in their backoffs and as a failed owner check (§3.6.4); the blob is checked first, so an approval with an old blob is answered `stale_credential` and counts nothing (0.46.1). The transfer stays pending until its 10 minutes run out; the member may retry. |
 | The vault becomes held (§3.6.3) while a transfer is open | The transfer stays open: the holder may still approve it (a check in itself) or reject it. A new `device.transfer.create` waits for a check. |
 | The new app goes offline before its `hs.fin` | No SAS is shown; the transfer times out after 10 minutes; nothing changes. (0.55.10) The new app of a transfer drops its handshake, attested key and epoch-1 secret after 11 minutes (§11.14.10 rule 5). |
-| The new app goes offline after its `hs.fin` | The approval still completes the transfer. `device.paired` waits in the new app's mailbox (relay TTL); if the new app never returns, the member recovers (§11.11), as when a new app is lost after a transfer. (0.55.10) A new app that returns after its 11 minutes has dropped its handshake, attested key and epoch-1 secret and cannot use it: the member recovers (§11.11). |
+| The new app goes offline after its `hs.fin` | The approval still completes the transfer. `device.paired` waits in the new app's mailbox (relay TTL); if the new app never returns, the member recovers (§11.11), as when a new app is lost after a transfer. (0.55.10, 0.56.2) A new app that returns after its 11 minutes, without a `device.paired` applied, first collects its mailbox once (§11.14.10 rule 5); if that brings no `device.paired{transfer}` for this transfer, it drops its handshake, attested key and epoch-1 secret and cannot use them: the member recovers (§11.11). (0.56.2) At its 11-minute deadline the new app collects its mailbox once before it drops them: a `device.paired{transfer}` for this transfer, opened under its session, is applied and the move completes; otherwise, or if the collect fails or times out, it drops them and offers a new code (§11.14.10 rule 5). A transfer already paired completes at any later start, whatever its age. |
 | The old app goes offline before approving | The transfer times out; nothing changes. |
 | The old app goes offline after approving | Nothing is needed from it: the approval completed the transfer. The old app learns of its removal from `device.unlinked` (best effort), and then erases its local state (owner decision, 2026-10-05); (0.33.0, release R) that notice is sent only after the new phone's first unlock from storage (§11.14.10). A refused relay key alone is not proof of removal: the app offers the member an erase instead of erasing by itself. The refused relay key is a `403 token_revoked` (RELAY-PROTOCOL §5.3 step 6, §7.1) on a deposit to the device's own vault mailbox: the vault has put the device's relay key on its denylist as a `sub` (§7.4). The same holds for the old app of a recovery (§11.11.5). What the device does on that answer: §8.6. |
 | A clone alarm opens (§3.5.9) | An open transfer is aborted. |
@@ -4878,7 +4960,8 @@ While the vault is held, a session is suspended but still returned.
   `location.share.start`, `location.history.list`, `.delete` and
   `.share`, and `presence.set`. Apps are never held. (Types that use the credential,
   such as `critical-secret-use.approve`, signed `leash.grant.issue`,
-  `wallet.create` and `wallet.sign`, are app-only. A step-up type's app-only form, such as a critical
+  `wallet.create`, `wallet.sign` and (0.56.0) `wallet.caps.set` and
+  `wallet.caps.raise`, are app-only. A step-up type's app-only form, such as a critical
   item's `item.put` or an agent's `share.rule.set`, is answered
   `forbidden` to a desktop at once, never held, §10.7, §10.12. Creating
   or accepting a connection is app-only too: `connection.invite.create`,
@@ -5258,6 +5341,12 @@ sends it once, and before its next unlock waits until that request's
 `exp` plus a margin; the vault accepts a `ts` up to 5 minutes ahead,
 §8.4, so a phone whose clock runs ahead leaves a window it cannot
 close).
+(0.56.1, owner answer of 2026-10-23, VAULT-LOCK Q3) A device that does
+not hold the value of a vault that announced one (an install from
+before the version that implements 0.29.0, a lost record) locks as for
+a vault before L: `vault.lock {}` over the relay once, and the same wait
+before its next unlock; and through the member API without the value
+(an unconditional lock, MEMBER-API "Locks").
 
 **An owner device refused by its own vault.** When a deposit by an owner
 device to its own vault's mailbox answers `token_revoked`, the device
@@ -5626,6 +5715,10 @@ an answer to an unknown or expired id is dropped.
       short reason (§10.18);
     - `unavailable`: the operation needs something this release does not
       have, such as a vault-side chain source (§10.18);
+  - and (0.56.0) `cap_exceeded`: `wallet.sign`, or the approval of
+      `wallet.request-payment`, would take more out of the wallet than
+      its spend caps allow; body `{reason, limit_sats, remaining_sats?,
+      allowed_after?}` (§10.18 "Spend caps");
   - and (0.9.0):
     - `one_app`: `device.pair.create{role: "app"}`; the vault already has
       its app (§6.7);
@@ -5722,7 +5815,7 @@ an answer to an unknown or expired id is dropped.
   | `location.share.changed` | `share_id`, `state` (`active`, `ended`): an outgoing share (§10.16) |
   | `location.history.changed` | `count`: positions were deleted from the location log (§10.16) |
   | `presence.changed` | `version` (§10.17) |
-  | `wallet.changed` | `wallet_id`, `version` (§10.18) |
+  | `wallet.changed` | `wallet_id`, `version` (§10.18; 0.56.0: also when caps are set or raised) |
   | `wallet.signed` | `wallet_id`, `txid` (§10.18) |
   | `wallet.deleted` | `wallet_id` (§10.18) |
 
@@ -5752,13 +5845,15 @@ VAULT-LOCK §3).** A lock from a
 device belongs to the unlock it ends.
 
 - **`unlock_id`.** Each time a vault opens (a successful
-  `vault.enroll` or `vault.unlock`, §11.3, §11.4) its process makes 16
+  `vault.enroll` or `vault.unlock`, §11.3, §11.4, or (0.56.1) a
+  successful recovery open, §11.14.6) its process makes 16
   random bytes, written as 32 lowercase hex characters. The value is
   kept in memory only: it is in neither the state nor the header, and
   it ends with the process, so every earlier value is stale after any
   lock, restart or move. It is not a secret and authorizes nothing by
-  itself. The app has it from the unlock or enroll result; any app or
-  desktop can read it in `vault.status`.
+  itself. The app has it from the enroll, unlock or (0.56.1)
+  recovery-open result; any app or desktop can read it in
+  `vault.status`.
 - **A bound lock.** `vault.lock {unlock_id}`: the vault compares the
   value with its current unlock's.
   - Equal: it answers `{}` and locks after the batch (§12.3), sending
@@ -7212,7 +7307,7 @@ decision 1):
 | | dry run (0.21.0): `{dry_run: true, item_id?, version?, sensitivity?, tags?}` (Dry run, below) | `{version?, shares, withdrawals}` |
 | `item.get` (app, desktop) | `{item_id}` | `<item>`: a `data` item with its values; a `secret` or `critical` item without `value`s and `notes`, with `has_notes`; with `size` (0.21.0, below) |
 | `item.reveal` (app; desktop: step-up) | `secret`: `{item_id, fields?: [<field_id>]}` (a `data` item: `{item_id}`, as `item.get`) | `<item>` with its values (only those `fields`, without `notes`, if given) |
-| | `critical` (app): `{item_id, credential, utk_id, sealed{password, item_id, reply_key}}` | `{item_id, version, values_sealed, credential, credential_version, utks}` |
+| | `critical` (app): `{item_id, credential, utk_id, sealed{password, item_id, reply_key, pin?}}` (0.56.0: `pin` required for the item of a wallet that has a cap, `pin_required`; a `pin` that is present is checked as above whatever the wallet's caps, §10.18) | `{item_id, version, values_sealed, credential, credential_version, utks}` |
 | `item.list` (app, desktop) | `{tags?, match?, category?, sensitivity?, after?, limit?}` | `{items: [<item without values and notes>], next?}` |
 | `item.tag` (app; desktop: step-up) | `{item_id, version, tags, dry_run?}` | `{version}`; with `dry_run` (0.21.0): `{version, shares, withdrawals}` |
 | `item.sensitivity` (app; desktop: step-up, `data` ↔ `secret` only) | `{item_id, version, sensitivity}`; to or from `critical` (app) also `credential, utk_id, sealed{password, item_id}` | `{version}`; with the credential also `{credential, credential_version, utks}` |
@@ -7763,8 +7858,10 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
     4. for an entry whose `ref` is an `item_id` (`item.added`,
        `item.updated`, `item.deleted`, `item.sensitivity_changed`,
        `item.revealed`, `share.included`, `share.declined`,
-       `share.withdrawn`, and `wallet.created`, `wallet.deleted` and
-       `wallet.address_issued`, whose `wallet_id` is the item's), that
+       `share.withdrawn`, and `wallet.created`, `wallet.deleted`,
+       `wallet.address_issued` and (0.56.0) `wallet.cap_refused`,
+       `wallet.caps_lowered` and `wallet.caps_raised`, whose
+       `wallet_id` is the item's), that
        item's current `name` (§10.7), also for a critical item, whose
        name is DEK-state metadata.
     Names are those the vault holds **when it answers**: a connection,
@@ -7958,7 +8055,9 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   deleted), `location.history.shared`, `location.history.received`
   (`ref` = `share_id`) (§10.16); `wallet.created`, `wallet.deleted`,
   `wallet.address_issued` (`ref` = `wallet_id`), `wallet.signed`
-  (`ref` = `txid`) (§10.18); `audit.exported` (`device_id` = the app,
+  (`ref` = `txid`), (0.56.0) `wallet.cap_refused`, `wallet.caps_lowered`,
+  `wallet.caps_raised` (`ref` = `wallet_id`; `connection_id` on a refusal
+  of a connection's payment request; never an amount) (§10.18); `audit.exported` (`device_id` = the app,
   `ref` = the export summary; History export, below, 0.22.0);
   `push.registered` (`device_id` = the app, `ref` = `fcm` or `apns`),
   `push.unregistered` (`device_id` = the app, `ref` = `app`,
@@ -8263,7 +8362,9 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
   (`ref` = `request_id`), `action.request` (`ref` = `invocation_id`),
   `intro.request` (`ref` = `intro_id`), `location.shared`
   (`ref` = `share_id`), `location.request` (`ref` = `request_id`),
-  `wallet.signed` (`ref` = `txid`), `credential.alarm` (priority
+  `wallet.signed` (`ref` = `txid`), (0.56.0) `wallet.cap_refused` and
+  `wallet.caps_raised` (priority `high`, `ref` = `wallet_id`; no
+  amount), `credential.alarm` (priority
   `urgent`, `ref` = `alarm_id`), `device.transferred` (`ref` =
   `transfer_id`), `device.replaced` (`device_id` = the old app),
   `device.signer_changed` (priority `high`, `ref` as in the audit log;
@@ -10933,15 +11034,17 @@ app (chain source)                                   vault
 
 | Type | Request body | Response body |
 |---|---|---|
-| `wallet.create` (app) | `{name, network?, address_type?, tags?, credential, utk_id, sealed{password, item?}}`; `item` = `{mnemonic, passphrase?}` to import a phrase | `<wallet>` and `{credential, credential_version, utks}`; `limit`, `bad_request` |
+| `wallet.create` (app) | `{name, network?, address_type?, caps?, tags?, credential, utk_id, sealed{password, item?}}`; `item` = `{mnemonic, passphrase?}` to import a phrase | `<wallet>` and `{credential, credential_version, utks}`; `limit`, `bad_request` (0.56.0: `caps` as in `wallet.caps.set`), `exists` (0.56.0: an import whose account keys equal an existing wallet's) |
 | `wallet.list` (app, desktop) | `{}` | `{wallets: [<wallet>]}` |
 | `wallet.get` (app, desktop) | `{wallet_id}` | `<wallet>` |
 | `wallet.update` (app, desktop) | `{wallet_id, version, address_type?, accounts?: [{type, next_receive?, next_change?}]}` (at least one of the two; 0.37.0: `accounts`, app only) | `{version}`; `conflict`, `bad_request`, `forbidden` (`accounts` from a desktop) |
 | `wallet.address.new` (app, desktop) | `{wallet_id, type?, change?, label?}` | `<address>`; `limit` |
 | `wallet.address.list` (app, desktop) | `{wallet_id, type?, change?, after?, limit?}` | `{addresses: [<address>], next?}` |
 | `wallet.address.used` (app, desktop) | `{wallet_id, addresses: [<address string>]}` (1–256) | `{marked, version}` |
-| `wallet.psbt.inspect` (app, desktop) | `{wallet_id, psbt}` | `<summary>`; `invalid_psbt` |
-| `wallet.sign` (app) | `{wallet_id, psbt, broadcast?, credential, utk_id, sealed{password, item_id, payload_sha256}}` | `<summary>` and `{tx, credential, credential_version, utks}`; `credential_locked`, `invalid_psbt`, `unavailable` (`broadcast` without a chain source) |
+| `wallet.psbt.inspect` (app, desktop) | `{wallet_id, psbt}` | `<summary>` and (0.56.0) `cap`; `invalid_psbt` |
+| `wallet.sign` (app) | `{wallet_id, psbt, broadcast?, credential, utk_id, sealed{password, item_id, payload_sha256}}` | `<summary>` and `{tx, credential, credential_version, utks}`; `credential_locked`, `invalid_psbt`, `cap_exceeded` (0.56.0), `unavailable` (`broadcast` without a chain source) |
+| `wallet.caps.set` (app; 0.56.0) | `{wallet_id, version, per_tx_sats?, per_period_sats?}`; each member an integer 1–2,100,000,000,000,000; a member absent is unchanged | `{version}`; `conflict`, `bad_request` (a value that is not lower than the current one, or `null`: message `use_wallet_caps_raise`; also `per_tx_sats` above `per_period_sats`), `forbidden` (a desktop) |
+| `wallet.caps.raise` (app, the holder; a credential operation; 0.56.0) | `{wallet_id, version, per_tx_sats?, per_period_sats?, credential, utk_id, sealed{pin, password, item_id, payload_sha256}}`; each member an integer or `null` (no limit); a member absent is unchanged | `{version, credential, credential_version, utks}`; `bad_pin`, `bad_password`, `backoff`, `conflict`, `bad_request` (nothing is raised), `forbidden` |
 | `wallet.history` (app, desktop) | `{wallet_id, limit?}` (1–200, default 50) | `{transactions: [{txid, at, sending_sats, change_sats, fee_sats, payees: [{address, amount_sats}], connection_id?, invocation_id?}]}`, newest first |
 | `wallet.balance` (app, desktop) | `{wallet_id}` | `{confirmed_sats, unconfirmed_sats}`; `unavailable` without a vault-side chain source (every release) |
 
@@ -10955,6 +11058,8 @@ wallet:  { "wallet_id": "<item_id>", "version": 4, "name": "Savings", "network":
              { "type": "p2wpkh", "path": "m/84'/0'/0'", "xpub": "xpub6…",
                "descriptors": { "receive": "wpkh([73c5da0a/84'/0'/0']xpub6…/0/*)", "change": "wpkh([…]/1/*)" },
                "next_receive": 0, "next_change": 0 } ],
+           "caps": { "per_tx_sats": 500000, "per_period_sats": 2000000, "period_seconds": 86400,
+                     "spent_sats": 750000 },
            "tags": ["Money"], "created_at": "<ts>" }
 address: { "address": "bc1p…", "type": "p2tr", "index": 2, "change": false, "path": "m/86'/0'/0'/0/2",
            "label": "…?", "connection_id": "<id>?", "used": false, "issued_at": "<ts>" }
@@ -11111,6 +11216,177 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
   without the credential and returns the summary that `wallet.sign`
   would sign for; apps MUST show it (the payees, amounts, change and fee)
   to the member before asking for the password.
+- **Spend caps** (0.56.0; owner decisions of 2026-10-23, text awaiting approval; the
+  requirement of VAULT-PLAN V4 and PROTEAN-CREDENTIAL §5). A wallet has
+  two optional limits on what leaves it, set by its owner:
+  - **The cap model.** `per_tx_sats`: the most one signed transaction
+    may take out of the wallet. `per_period_sats`: the most the wallet's
+    signed transactions may take out within the **period**, a rolling
+    24 hours (`period_seconds` 86,400; divided by `time_scale` on
+    staging, so 3,600 at 24, STAGING-TIME-SCALE S17). Both are integers
+    of **satoshis**, 1–2,100,000,000,000,000, or absent (no limit);
+    when both are set `per_tx_sats` MUST NOT exceed `per_period_sats`.
+    The caps belong to **one wallet** and are kept in the wallet's
+    record in DEK state (`<wallet>.caps`), with the period's ledger
+    (below); there is no vault-wide cap and no fiat amount (the vault
+    has no price source).
+  - **Defaults** (owner decision of 2026-10-23). A wallet has no caps
+    until its owner sets them (`wallet.create{caps}` or
+    `wallet.caps.set`). The vault never invents a number; the app asks at
+    creation, and a mainnet wallet cannot skip the question
+    (ANDROID-PLAN). `<wallet>.caps` is always present: `per_tx_sats` and
+    `per_period_sats` are absent when unlimited, and `period_seconds` and
+    `spent_sats` are always there.
+  - **Setting and lowering.** `wallet.caps.set` is app only and a normal
+    versioned change (`conflict` on a stale `version`, §10.1). It may
+    only **lower**: a member is accepted if it sets a cap where there
+    was none or sets a smaller value; a value equal to the current one
+    changes nothing. A `null`, a larger value or `per_tx_sats` above
+    `per_period_sats` is `bad_request` (message `use_wallet_caps_raise`
+    for the first two). It audits
+    `wallet.caps_lowered` (`ref` = `wallet_id`) and sends
+    `wallet.changed`. A lower cap applies at once, and counts what the
+    period already holds (the ledger is not forgiven).
+  - **Raising and removing.** `wallet.caps.raise` is a **credential
+    operation** (§3.5.3) of the holder, with the **PIN and the password**
+    (checked as an owner check checks them: a wrong one is a failed
+    check, §3.6.4; the operation is not itself an owner check and does
+    not move the deadline). It needs no unlock window. The UTK payload's
+    `item_id` MUST be the wallet and `payload_sha256` the SHA-256 of
+    `"vettid/wallet.caps/1" || 0x00 || wallet_id || 0x00 || version ||
+    0x00 || per_tx || 0x00 || per_period` (bytes: the label in ASCII,
+    each field in UTF-8, `0x00` between them, none after the last), where
+    `wallet_id` is the item's ULID string (26 characters), `version` is
+    the request's in decimal ASCII without leading zeros, and `per_tx`
+    and `per_period` are the values the wallet will have after the
+    request: decimal ASCII without leading zeros, or the literal `none`
+    (`bad_request` otherwise; a vector is in §16), so the password and
+    PIN authorise these numbers on this wallet only. The values the
+    wallet will have obey the model's rule: `per_tx_sats` above
+    `per_period_sats` is `bad_request`. It must raise or remove at least one cap (`bad_request`
+    otherwise); a member it does not name is unchanged, and it may
+    lower another in the same request. It audits `wallet.caps_raised`
+    (`ref` = `wallet_id`), makes a feed item of priority `high` and
+    sends `wallet.changed`. It does not clear the period's ledger. A
+    desktop and an agent never send either message.
+  - **Enforcement at signing.** `wallet.sign` and the approval of
+    `wallet.request-payment` (§10.14) both pass through the same check,
+    so a connection's request is capped like the member's own spend,
+    and so would any future caller. The check runs after §3.5.3
+    steps 1–4 (frozen check, UTK opened and spent, `item_id` and
+    `payload_sha256` checked, blob checked, backoff) and after the
+    signing policy (so `invalid_psbt`, including `fee_rate`, comes
+    first), and **before step 5**, where the password is tried. The
+    vault computes the
+    **outflow** of the PSBT: `sending_sats + fee_sats` of its summary,
+    that is, the inputs minus the outputs that are change. An output
+    to an address of the wallet's own accounts that carries the
+    account derivation is change and is not counted, so moving coins
+    between the wallet's own two accounts costs only its fee. An output
+    to **another** wallet of the same vault is a payee like any other
+    and is counted. The fee is counted because it leaves the wallet too
+    (at the fee limit of 1,000 sat/vB it could be large). The vault
+    refuses with `cap_exceeded` if:
+    - `per_tx_sats` is set and the outflow is above it (`reason`
+      `per_tx`); or
+    - `per_period_sats` is set and the outflow plus the ledger's
+      total of the period is above it (`reason` `per_period`).
+    Equal is allowed. `per_tx` is tested first. The check and the append
+    to the ledger (below) are **atomic per wallet**: two signing
+    requests for one wallet, even in one batch and before any flush,
+    see each other's entries, so they cannot both pass on the same
+    allowance. An RBF fee bump, a re-sign of a PSBT and the same PSBT
+    sent under a new inner id are each a new signing and **count in
+    full** (only a retry with the same inner id, answered from the
+    response cache, counts once). Because the check comes
+    before the password is opened, a refusal tests no password guess,
+    counts nothing in the backoff and rotates no CEK; the UTK it
+    presented is spent as any (§3.5.4 "Using a UTK"), and the app asks
+    for a new one. A refusal of a connection's payment request leaves
+    the invocation pending, as `invalid_psbt` does (§10.14).
+  - **The refusal.** `cap_exceeded`, `message` the reason, and the body
+    `{reason: "per_tx" | "per_period", limit_sats, remaining_sats?,
+    allowed_after?}`: `limit_sats` is the cap that stopped it;
+    `remaining_sats` (`per_period` only) is what the period still
+    allows; `allowed_after` (RFC 3339, `per_period` only) is the earliest
+    time at which this transaction would fit, absent when it would not
+    fit even in an empty period. Everything in the body is for the
+    member's app, in the sealed response. The vault audits
+    `wallet.cap_refused` (`ref` = `wallet_id`; `connection_id` for a
+    payment request) and makes a feed item of priority `high`, so a
+    refused spend is seen on every device. **No amount or cap value is
+    in the audit log, the feed, a `sync.event` or a log line** (the
+    existing rule: "No address, amount or key is in the audit log").
+  - **What counts, and when.** The period's **ledger** (kept whether or not caps are set, so setting
+    a cap counts what was already spent) is a list of
+    `{at_ms, sats}`: one entry per transaction **signed**, with the
+    outflow, written in the flush that records the signing (so a crash
+    cannot sign without counting). The vault cannot see a broadcast
+    (it has no chain source), and a signed transaction is out of its
+    hands, so **signed** counts, whether or not the app broadcasts it
+    (a signed transaction the app drops uses the allowance until the
+    period passes). A retried `wallet.sign` is answered from the
+    response cache and counts once. The total is computed on read; entries older than the period are
+    dropped at the next write; at most 200 are
+    kept, and a 201st merges the two oldest into one with the later
+    time (the allowance is never given back early). `<wallet>.caps`
+    reports `spent_sats` (the ledger's total within the period) and
+    `period_seconds`; the refusal's `allowed_after` is the vault's own
+    computation from the ledger.
+  - **Time.** The vault's clock decides: the enclave's clock comes
+    from the hypervisor, not from the parent (VAULT-HOST-PROTOCOL, trust
+    table). An entry counts while now < `at_ms` + period. The vault never
+    rewrites `at_ms`, so after a clock step back a future entry counts
+    for longer, never shorter. On staging the
+    period is `86,400 / time_scale` seconds, divided when the check runs
+    (the ledger holds absolute times), so a change of scale moves no
+    entry. In production the scale is 1.
+  - **Other wallets.** Each wallet has its own caps and ledger. The most
+    a vault can send out in a period is the sum of its wallets' caps
+    (a wallet without a cap is unlimited). Deleting a wallet deletes
+    them; a new wallet has none, but it has no coins either: coins move
+    to it only through the old wallet's caps.
+  - **Restore, transfer, recovery.** The caps and the ledger are part of
+    the wallet's state in DEK state: they move with the vault through a
+    lock, an unlock, a phone transfer (§6.7.1) and a recovery (§11.11)
+    unchanged, and a new phone has the same remaining allowance. The
+    vault has no snapshots or export (VAULT-PLAN). A host that serves an
+    older state erases the ledger entries written since the app's last
+    unlock; §13.2 detects a rollback only at unlock and only below the
+    app's last-seen `state_seq`. Because each signing rotates the CEK
+    (§3.5.3 step 7), which the vault keeps in DEK state, the app's blob
+    then no longer matches the state, and the next credential operation
+    is refused under §3.5.9. `credential.reset` deletes the wallets and
+    so their caps.
+  - **The limit of a cap.** It limits what **the vault signs**. A member
+    who reveals the phrase (`item.reveal`, a credential operation: with
+    the password alone for a wallet without caps, and with the PIN as
+    well for one that has a cap, below) holds the keys and can spend outside the vault;
+    that is the member's backup right, audited and in the feed
+    (`item.revealed`), and caps do not claim to stop it. That is why
+    the reveal of a capped wallet's phrase takes the PIN as well (below).
+    What a cap bounds is a spend by someone who has the password but not
+    the PIN: a leaked or watched password, a connection's payment request
+    approved in a hurry, or a fault in the app's payment building. It
+    does not bound someone who has both, nor an app compromised for long
+    enough to see the PIN at an owner check.
+  - **Revealing a capped wallet's phrase** (owner decision of
+    2026-10-23). (0.56.0) `item.reveal` of the item of a wallet that has
+    a cap carries `pin` with the password in `sealed`, checked as an
+    owner check checks them (§3.6.1; a wrong one is a failed check) and
+    not itself an owner check; without `pin` it is `bad_request`
+    (message `pin_required`). A wallet without caps reveals with the
+    password alone. A `pin` that is present is checked as above whatever
+    the wallet's caps.
+  - **A second wallet with the same keys.** `wallet.create` refuses an
+    import whose account keys equal those of an existing wallet (code
+    `exists`), so a wallet without caps cannot be made from a capped
+    wallet's phrase inside the same vault.
+  - **`wallet.psbt.inspect`** (without the credential) also returns
+    `cap: {ok, reason?, remaining_sats?, allowed_after?}`: whether
+    `wallet.sign` would pass the caps now, and if not why, with the
+    fields of `cap_exceeded`; the app shows it before it asks for the
+    password. It changes nothing and writes no audit entry.
 - **Spending is a critical action.** `wallet.sign` is app only, needs the
   credential's unlock window (`credential_locked` otherwise; 0.52.0: a
   presented UTK is spent first, §3.5.4) and is one credential operation: the UTK payload's
@@ -11131,12 +11407,74 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
   Desktops read, issue addresses, choose the receiving account and
   inspect, but never create, sign or (0.37.0) move the next indices.
 - **Change notices.** `sync.event` `wallet.changed{wallet_id, version}`
-  (created, receiving account changed, addresses issued or used),
+  (created, receiving account changed, addresses issued or used, caps set or raised),
   `wallet.signed{wallet_id, txid}`, `wallet.deleted{wallet_id}`.
 - **Audit and feed.** `wallet.created`, `wallet.deleted`
   (`ref` = `wallet_id`), `wallet.address_issued` (to a connection;
   `ref` = `wallet_id`), `wallet.signed` (`ref` = `txid`, also a feed
-  item). No address, amount or key is in the audit log.
+  item); (0.56.0) `wallet.cap_refused` (also a feed item, priority
+  `high`), `wallet.caps_lowered`, `wallet.caps_raised` (also a feed item,
+  priority `high`), `ref` = `wallet_id`. No address, amount, cap or
+  key is in the audit log.
+- **Tests required** (0.56.0; spend caps; follow-up implementation in
+  vettid-vault `features/wallet`):
+  - Per transaction: an outflow equal to `per_tx_sats` signs; one sat
+    more is `cap_exceeded` `per_tx` with `limit_sats`; nothing is
+    signed, no CEK rotated, the password backoff untouched, the UTK
+    spent; `wallet.cap_refused` audited and in the feed, with no amount
+    in either.
+  - Per period: two signs that together reach `per_period_sats`, then
+    one more sat refused `per_period` with `remaining_sats` 0 and an
+    `allowed_after` that is exact; the same sign succeeds when the
+    clock passes it. Equal to the cap signs. A transaction larger than
+    `per_period_sats` alone has no `allowed_after`.
+  - What counts: change to either of the wallet's own accounts is not
+    counted; an output to another wallet of the vault is; the fee is;
+    a PSBT that `invalid_psbt` refuses (including `fee_rate`) is
+    refused with that reason first and counts nothing; a retried
+    `wallet.sign` with the same inner id counts once; a refused sign
+    counts nothing.
+  - `wallet.request-payment`: the same refusal, the invocation stays
+    pending, `wallet.cap_refused` carries the `connection_id`; the
+    connection learns nothing of the cap.
+  - Setting: `wallet.caps.set` sets a cap where there was none and
+    lowers one; a larger value, `null` and `per_tx_sats` above
+    `per_period_sats` are `bad_request` (the first two `use_wallet_caps_raise`); a
+    desktop is `forbidden`; a stale `version` is `conflict`; a lower
+    cap applies at once against what the period holds.
+  - Raising: `wallet.caps.raise` with a wrong PIN or password is
+    `bad_pin` or `bad_password`, counts as a failed check, changes
+    nothing; a `payload_sha256` over other values or another wallet is
+    `bad_request`; a request that raises nothing is `bad_request`; a
+    success rotates the CEK, audits `wallet.caps_raised`, makes the
+    feed item and leaves the ledger as it was; `null` removes a cap; it
+    works with the unlock window closed.
+  - Time: the period is a rolling window (an entry falls out exactly at
+    `at_ms` + period); a clock that steps back counts future entries as
+    now; on a scaled build the period is `86,400 / time_scale` and an
+    entry made before a change of scale keeps its time; 201 entries in
+    a period merge the two oldest and never lower the total.
+  - Reveal (owner decision): `item.reveal` of a capped wallet's item
+    without `pin` is `bad_request` `pin_required`, with a wrong PIN is
+    `bad_pin` and a failed check, with the right PIN works and is not an
+    owner check; a wallet without caps reveals with the password alone.
+  - Two signing requests for one wallet in one batch cannot both pass on
+    the same allowance. An RBF re-sign and the same PSBT under a new
+    inner id are each counted in full; a retry with the same inner id
+    once.
+  - A clock stepped back: a future entry keeps counting until its
+    `at_ms` + period and is not rewritten.
+  - `wallet.caps.raise` that leaves `per_tx_sats` above
+    `per_period_sats` is `bad_request`; the `payload_sha256` vector of
+    §16; `wallet.psbt.inspect` returns `cap` and writes nothing.
+  - A duplicate import (same account keys) is `exists`; the ledger is
+    kept with no caps set and counts after a cap is set.
+  - State: caps and ledger survive lock and unlock, a phone transfer
+    and a recovery; `credential.reset` and a wallet's deletion remove
+    them; a wallet created before this release has no caps and signs as
+    before.
+  - Logs: a scan of the vault's logs after the above finds no amount
+    or cap value.
 - **Chain access (§12.2).** The enclave reaches only the relay, KMS and
   the attestation status list. A vault-side chain source (an allowlisted
   chain API) is not part of this version; the reference implementation
@@ -11755,6 +12093,7 @@ with a DLQ after 3 receives:
   "signed_at": "<RFC 3339; recovery and recovery_cancel only, 0.33.0, release R>",
   "key_id": "<recovery and recovery_cancel only, 0.33.0, release R>",
   "sig": "<b64 DER; recovery and recovery_cancel only, 0.33.0, release R>",
+  "unlock_id": "<32 hex; lock only, optional; 0.29.0, release L>",
   "enqueued_at": "<RFC 3339>" }
 ```
 
@@ -11993,8 +12332,8 @@ requests name the manifest by `manifest_sha256` and `manifest_serial`
 - **Bound** (with `unlock_id`): the enclave hands it to the vault's
   process, which locks only if the value names its current unlock.
 - **Unconditional** (without): the enclave keeps, with each running
-  vault, the `enqueued_at` of the enroll or unlock message that opened
-  it, and carries the lock out only if the lock's `enqueued_at` is
+  vault, the `enqueued_at` of the enroll, unlock or (0.56.1)
+  `recovery_open` message that opened it, and carries the lock out only if the lock's `enqueued_at` is
   later. An equal or earlier time is stale. Both times are the member
   API's; no clock of the enclave or of a device is compared. (The
   queue is not ordered and a message can be delivered up to 5 minutes
@@ -16968,8 +17307,8 @@ change:
      `id` and body) in memory only until the reset is decided.
 2. **While it is unresolved**, the gate of step 2 refuses **every other
    credential operation** (§3.5.9's types, the owner check,
-   `vault.secret.renew`, the changes, critical items and wallet signing
-   included) at once, with the same texts. A reset changes neither the
+   `vault.secret.renew`, the changes, critical items, wallet signing and
+   (0.56.0) `wallet.caps.raise` included) at once, with the same texts. A reset changes neither the
    PIN nor the phone's secret, so the unlock is not affected, as for a
    password change (step 5, last bullet).
 3. **Deciding.** While `exp` has not passed, the app may resend the same
@@ -17116,6 +17455,22 @@ under the request's `id` (§8.2).
    is accepted. The vault's 10 minutes are unchanged, and so are those
    of a pairing of a desktop or an agent (§6.7).
 
+   **Collect before drop** (owner decision, 2026-10-23). The 11 minutes
+   are measured from the moment the app started its `hs.init`; it is one
+   deadline, and no user action extends it. The app stores that moment with the transfer, so a restart keeps the same deadline. An app that is not running at the deadline (stopped, killed, the phone off) does this at its next start, before anything else: one collect, then the drop. At the deadline the new app
+   **collects its mailbox once** before it drops anything. If that
+   collect brings a `device.paired{transfer}` for this transfer, opened
+   under the transfer's session, the app applies it and completes the
+   move (it takes over the credential, as for an approval within the 11
+   minutes) instead of dropping. Otherwise, or if the collect fails or
+   times out, it drops its handshake, its attested key and its epoch-1
+   secret as before and offers a new code. The collect is bounded: one collect with `wait=0` and `max` at its cap (RELAY-PROTOCOL §6.3), bounded by the app's request timeout and by 30 seconds in all, its transport retries included; if the app cannot
+   reach the relay, that is no reason to keep the keys longer, and it
+   drops them at once. A transfer whose `device.paired` has arrived
+   (the move is paired) completes at any later start of the app,
+   whatever its age; the deadline applies only to a transfer still
+   waiting.
+
 **The old phone's keys after a transfer** (decided by the owner on
 2026-10-15). *This replaces the earlier rule that the old app erases
 itself on `device.unlinked{reason: "transferred"}` sent at the
@@ -17140,9 +17495,12 @@ first.**
   (§8, §8.3), stores the fresh token before it processes the approval;
   it SHOULD NOT denylist the previous token's `jti` before the approval
   is answered. It renews again before each approval it sends (after
-  `busy` or `retry` too). The token then has its full lifetime, at most
-  30 days, from the approval; the pending unlink keeps the newest
-  token.
+  `busy`, `retry` or (0.56.1) `stale_credential` too). The renewed
+  token then has its full lifetime, at most 30 days, from the approval;
+  the pending unlink keeps the newest token. (0.56.1) If the renewal
+  fails, the old app still sends the approval, and the pending unlink
+  keeps the previous token: the notice can then be delivered only while
+  that token lives.
 - **`device.unlinked{reason: "transferred", transfer_id}`** is deposited
   to the old app only after the vault's then current app has completed
   its **first successful unlock from the stored objects under that
@@ -21233,6 +21591,21 @@ VAULT-HOST-PROTOCOL §8.1 counter object names                   (recovery.json)
   wait 2    : recovery/v1/486f02bad2b24e6b020d1211ab3bb070/g0000000000000001/w02-b270c8be143728446662bd950cba5128
   success 1 : recovery/v1/486f02bad2b24e6b020d1211ab3bb070/g0000000000000001/s01-a6137b69bdad29e9324bb5a311cbbb8a
   close     : recovery/v1/486f02bad2b24e6b020d1211ab3bb070/g0000000000000001/c-9959b12f3b2e807bac9851cd64d3fd9c
+```
+
+**§10.18 `wallet.caps.raise` binding (0.56.0).** Computed with SHA-256
+here; vettid-vault generates the same values in
+`testdata/vectors/` with the implementation (the file is then
+authoritative). The preimage is the ASCII label `vettid/wallet.caps/1`,
+`0x00`, `wallet_id`, `0x00`, `version`, `0x00`, `per_tx`, `0x00`,
+`per_period`.
+
+```
+wallet_id                    : 01HXZ3N5Q8R2T4V6W9Y0B1C2D3
+version 7, per_tx 500000, per_period 2000000
+  payload_sha256 (hex)       : 9479e8f7e06134aab2e7fcfec8dc1ba7fd2ed5cde4be3553ccaf4e6cf9aa1259
+version 7, per_tx none, per_period 2000000
+  payload_sha256 (hex)       : 7bcbbf3d027952bb1a7cbafba930b385732185b8f61d4b15218a8ee7a32d58ae
 ```
 
 ## 17. Changelog
