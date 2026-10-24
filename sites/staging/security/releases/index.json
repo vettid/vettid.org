@@ -1,9 +1,39 @@
 {
-  "serial": 23,
+  "serial": 24,
   "releases": [
     {
-      "release": 21,
+      "release": 22,
       "status": "active",
+      "published_at": "2026-10-24T15:08:20Z",
+      "pcr0": "d4e759beb13b906d063e1ee084bfd94dd441c82c8a101da8b02c2852a2b32a4ed89dcf372854c240a615fc37a964fe90",
+      "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
+      "pcr2": "443441a644cf4291f8aa796830c24ae2bc5f2cf97e79989bc3964c7b273eb2860ba4d56d68b9ac96f6c117b3ae357339",
+      "seal_key": "arn:aws:kms:us-east-1:347272280361:key/016d6c35-c24c-49b4-b0b3-20fe71798aac",
+      "notes": "https://staging.vettid.org/security/releases/22/",
+      "tag": "release/staging/22",
+      "source_commit": "255067505bb6292a498fe0d5018e3f98fcb7b381",
+      "summary": "Release 22 remembers your vault's Android version of VettID when it moves to an iPhone, so moving back to a different version asks you to confirm.",
+      "changes": [
+        "When your vault moves to an iPhone, it now remembers its Android version of VettID (F-Droid or direct, Google Play, or a development build).",
+        "Moving it back to an Android phone with a different version is then a change, as between two Android phones: your old phone is told, your approval names the new version, and History shows \"Vault moved to another version of VettID\".",
+        "Fix: if a recovery had to be resumed after a failed save, the vault forgot which version of VettID it had before, so recovering to a different version was not shown as a change, also between two Android phones.",
+        "Built from vettid-vault commit 2550675 (tag release/staging/22) and independently rebuilt on 2026-10-24 with a matching PCR0."
+      ],
+      "security": "recommended",
+      "security_text": "Before release 22, if a recovery of your vault had to be resumed because a save on VettID's host failed, the vault forgot which version of VettID it was on before. A recovery to a different version was then not shown as a change: no \"Vault moved to another version of VettID\" in History and no notice, also between two Android phones. Only a host that failed that one save could cause this. It did not bypass the PIN, the credential password or the recovery code. We know of no use of this against any vault. Vaults on releases 15 to 21 are affected.",
+      "affects": [
+        15,
+        17,
+        18,
+        19,
+        20,
+        21
+      ],
+      "listed": true
+    },
+    {
+      "release": 21,
+      "status": "deprecated",
       "published_at": "2026-10-22T19:26:29Z",
       "pcr0": "891a9401d7aa314e843cfc655e494899ed6e230c8a03cf4246f23197779d22a55c929fc22b2649f9d4207d4b1832ad24",
       "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
