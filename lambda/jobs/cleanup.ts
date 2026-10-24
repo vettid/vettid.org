@@ -86,6 +86,8 @@ interface VaultRowLite {
   deleting_at?: number;
   /** MEMBER-API 2.10.0: when the resume run last sent `delete_resume`, written by this job. */
   deletion_resumed_at?: number;
+  /** MEMBER-API 2.11.0: when the account deletion asked this vault (written by this job, deleteVaults). */
+  account_deleted_at?: number;
   /** MEMBER-API 2.1.0: the member's start-over (§11.11.9), written by the member API. */
   deletion?: { deletion_id?: unknown; state?: unknown; deletes_at?: unknown; queued_at?: unknown };
 }
@@ -132,7 +134,11 @@ async function routeAsDelete(v: VaultRowLite, nowS: number): Promise<InstanceRow
 export async function requestVaultDeletion(v: VaultRowLite, nowS: number): Promise<boolean> {
   if (v.state === 'deleted') return false;
   if (!v.sealed_release && !v.lease) {
-    // Never sealed: nothing is stored for it; the row is all there is.
+    // Never sealed: nothing is stored for it; the row is all there is. No
+    // record is kept (MEMBER-API 2.11.0): the host writes `app_key` only
+    // from the vault's own lifecycle reports, and the first (`enrolled`)
+    // records `sealed_release`. So no enrollment of it completed: an app
+    // holds at most a redeem's pending key, and nothing to erase.
     await ddb.send(new DeleteCommand({ TableName: table.vaults(), Key: { vault_id: v.vault_id } }));
     return false;
   }
@@ -172,8 +178,48 @@ export async function requestVaultDeletion(v: VaultRowLite, nowS: number): Promi
 }
 
 /**
- * A canceled member's vaults: each is asked to delete itself; the pointer
- * row goes now (the member is gone). Response slots are not used.
+ * MEMBER-API 2.11.0: the account deletion's mark on a vault row it asks,
+ * written before the ask (an existing mark is kept). From then on a request
+ * signed by the vault's app key is answered `410 account_deleted`, so the
+ * phone has a definite answer between the member row's removal and the
+ * vault's `deleted` report. A row that is gone, or a never-sealed one that
+ * is deleted at once, needs none.
+ */
+async function markAccountDeleted(v: VaultRowLite, nowS: number): Promise<void> {
+  if (v.state === 'deleted' || typeof v.account_deleted_at === 'number') return;
+  if (!v.sealed_release && !v.lease) return;
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: table.vaults(),
+        Key: { vault_id: v.vault_id },
+        UpdateExpression: 'SET account_deleted_at = if_not_exists(account_deleted_at, :t)',
+        ConditionExpression: 'attribute_exists(vault_id)',
+        ExpressionAttributeValues: { ':t': nowS },
+      }),
+    );
+  } catch (e) {
+    if ((e as Error).name !== 'ConditionalCheckFailedException') throw e;
+  }
+}
+
+/**
+ * The mark, best effort: a failure is logged (vault_id and the error name)
+ * and the vault is still asked; only the phone's definite answer waits for
+ * the vault's own `deleted` report then.
+ */
+async function markAccountDeletedOrLog(v: VaultRowLite, nowS: number): Promise<void> {
+  try {
+    await markAccountDeleted(v, nowS);
+  } catch (e) {
+    console.error('vault account deletion mark not written', JSON.stringify({ vault_id: v.vault_id, error: (e as Error).name }));
+  }
+}
+
+/**
+ * A canceled member's vaults: each is marked (2.11.0) and asked to delete
+ * itself; the pointer row goes now (the member is gone). Response slots are
+ * not used.
  */
 async function deleteVaults(guid: string, nowS: number): Promise<string[]> {
   const ids: string[] = [];
@@ -184,11 +230,32 @@ async function deleteVaults(guid: string, nowS: number): Promise<string[]> {
     ExpressionAttributeValues: { ':g': guid },
   })) {
     const v = item as VaultRowLite;
+    await markAccountDeletedOrLog(v, nowS);
     await requestVaultDeletion(v, nowS);
     ids.push(String(v.vault_id));
   }
   await ddb.send(new DeleteCommand({ TableName: table.vaults(), Key: { vault_id: vaultPointerKey(guid) } }));
   return ids;
+}
+
+/**
+ * MEMBER-API 2.11.0: a vault asked before 2.11.0 (or whose mark failed)
+ * has no `account_deleted_at`. The retry marks it when its member row is
+ * gone (a consistent read) and it is not a start-over; a start-over's
+ * member may still be there, and a member row that cannot be read leaves
+ * the mark for the next run. Best effort: the vault is asked either way.
+ */
+async function markRetried(v: VaultRowLite, nowS: number): Promise<void> {
+  if (typeof v.account_deleted_at === 'number' || v.state === 'deleted' || v.deletion?.state === 'executing') return;
+  if (typeof v.user_guid !== 'string' || !v.user_guid) return;
+  try {
+    const m = await ddb.send(new GetCommand({ TableName: table.members(), Key: { user_guid: v.user_guid }, ConsistentRead: true }));
+    if (m.Item) return;
+  } catch (e) {
+    console.error('vault account deletion mark not written', JSON.stringify({ vault_id: v.vault_id, error: (e as Error).name }));
+    return;
+  }
+  await markAccountDeletedOrLog(v, nowS);
 }
 
 /** Retry deletions not yet reported (the member row is already gone). */
@@ -206,6 +273,7 @@ async function retryVaultDeletions(nowS: number): Promise<number> {
       }),
     );
     for (const item of r.Items ?? []) {
+      await markRetried(item as VaultRowLite, nowS);
       await requestVaultDeletion(item as VaultRowLite, nowS);
       n++;
     }

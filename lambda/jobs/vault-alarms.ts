@@ -39,16 +39,27 @@
  * event source; the parent's removal of `att_sweep_pending` is that record).
  * The stamp is what tells the follow-up that the notice was handled, so a
  * row is never removed while its notice could still need a retry.
+ *
+ * The record kept (MEMBER-API 2.11.0, "Vault deletion"): before the row
+ * goes, `vdeleted#<vault_id>` is put in the vault-requests table with the
+ * vault's app public keys, `deleted_at`, the cause and `expires_at` (90
+ * days, lambda/shared/vault-tombstone.ts), so that the vault's own app is
+ * still told `410 vault_deleted` after the row is gone. A row whose record
+ * could not be written is kept (still `deleted`, which answers the same)
+ * and stamped handled, so the follow-up tries again; a follow-up whose
+ * record fails throws, so the stream retries it (retryAttempts 3).
+ * `user_guid` is not kept: nothing reads it.
  */
 import type { DynamoDBRecord, DynamoDBStreamHandler } from 'aws-lambda';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
-import { DeleteCommand, GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DeleteCommand, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { audit } from '../shared/audit';
 import { ddb, env, table } from '../shared/aws';
 import { sendMail } from '../shared/mail';
 import { vaultPointerKey } from '../shared/members';
 import { hit } from '../shared/ratelimit';
 import type { MemberItem } from '../shared/model';
+import { VAULT_TOMBSTONE_TTL_S, type VaultTombstone, tombstoneCause, tombstoneKey, vaultAppKeys } from '../shared/vault-tombstone';
 
 export const MAX_MAILS_PER_DAY = 4;
 
@@ -99,6 +110,12 @@ interface AlarmRow {
   alarm?: { kind?: unknown; alarm_id?: unknown; at?: unknown; handled_at?: unknown };
   alarm_pending?: unknown;
   att_sweep_pending?: unknown;
+  /** 2.11.0: what the record kept after the row is removed is made of. */
+  app_key?: { key: string; kid: string; seq?: number };
+  app_key_next?: { key: string; kid: string; seq?: number };
+  account_deleted_at?: unknown;
+  deletion_requested_at?: unknown;
+  deletion?: { state?: unknown } | null;
 }
 
 const isCcf = (e: unknown) => (e as Error).name === 'ConditionalCheckFailedException';
@@ -156,11 +173,42 @@ async function markEmailed(vaultId: string, alarmId: string, now: number): Promi
 }
 
 /**
+ * 2.11.0: the record of the deleted vault, put before its row is removed
+ * (an earlier record of the same vault is replaced, which only moves its
+ * expiry). Public keys, times and the cause only.
+ */
+async function putTombstone(row: AlarmRow, nowS: number): Promise<void> {
+  const a = row.alarm;
+  const item: VaultTombstone = {
+    request_id: tombstoneKey(row.vault_id),
+    vault_id: row.vault_id,
+    keys: vaultAppKeys(row).map((k) => ({ key: k.key, kid: k.kid })),
+    deleted_at: a && a.kind === 'vault_deleted' && typeof a.at === 'number' && Number.isFinite(a.at) ? a.at : null,
+    cause: tombstoneCause(row),
+    expires_at: nowS + VAULT_TOMBSTONE_TTL_S,
+  };
+  await ddb.send(new PutCommand({ TableName: table.vaultRequests(), Item: item }));
+}
+
+/**
  * Remove a deleted vault's row, unless the parent's attachment sweep is
  * still pending on it (P15). Returns whether the row went; false also when
- * it is gone already or no longer `deleted`.
+ * it is gone already or no longer `deleted`, and (2.11.0) when its record
+ * could not be written first (the row is kept). With `rethrow` (the
+ * follow-up, which has no later record of its own to retry from) that
+ * failure is thrown instead, so the stream retries the record.
  */
-async function removeVaultRow(vaultId: string): Promise<boolean> {
+async function removeVaultRow(row: AlarmRow, rethrow = false): Promise<boolean> {
+  const vaultId = row.vault_id;
+  // The image's own view: a row still sweeping fails the delete below anyway.
+  if (row.state !== 'deleted' || row.att_sweep_pending !== undefined) return false;
+  try {
+    await putTombstone(row, Math.floor(Date.now() / 1000));
+  } catch (e) {
+    console.error('vault tombstone not written', JSON.stringify({ vault_id: vaultId, error: (e as Error).name }));
+    if (rethrow) throw e;
+    return false;
+  }
   try {
     await ddb.send(
       new DeleteCommand({
@@ -200,8 +248,10 @@ async function markHandled(vaultId: string, alarmId: string, now: number): Promi
  * attachment sweep is pending, is stamped handled and kept for the
  * follow-up), and the member's pointer row goes if it still names it.
  */
-async function removeRows(vaultId: string, guid: string | undefined, alarmId: string): Promise<void> {
-  if (!(await removeVaultRow(vaultId))) await markHandled(vaultId, alarmId, Math.floor(Date.now() / 1000));
+async function removeRows(row: AlarmRow, alarmId: string): Promise<void> {
+  const vaultId = row.vault_id;
+  const guid = row.user_guid;
+  if (!(await removeVaultRow(row))) await markHandled(vaultId, alarmId, Math.floor(Date.now() / 1000));
   if (!guid) return;
   try {
     await ddb.send(
@@ -231,7 +281,7 @@ export async function processRecord(rec: DynamoDBRecord): Promise<'ignored' | 'c
   const row = unmarshall(rec.dynamodb.NewImage as Parameters<typeof unmarshall>[0]) as AlarmRow;
   if (sweptAndHandled(row)) {
     if (typeof row.vault_id !== 'string' || !VAULT_ID_RE.test(row.vault_id)) return 'ignored';
-    return (await removeVaultRow(row.vault_id)) ? 'removed' : 'ignored';
+    return (await removeVaultRow(row, true)) ? 'removed' : 'ignored';
   }
   const a = row.alarm;
   if (row.alarm_pending !== true || !a || typeof a.alarm_id !== 'string' || !ALARM_ID_RE.test(a.alarm_id)) return 'ignored';
@@ -246,7 +296,7 @@ export async function processRecord(rec: DynamoDBRecord): Promise<'ignored' | 'c
   const deletion = kind === 'vault_deleted';
   const notMailed = async (reason: string) => {
     await audit('system', 'vault.alarm_email', subject, { ...detail, mailed: false, reason });
-    if (deletion) await removeRows(vaultId, row.user_guid, alarmId);
+    if (deletion) await removeRows(row, alarmId);
     return 'not_mailed' as const;
   };
 
@@ -269,7 +319,7 @@ export async function processRecord(rec: DynamoDBRecord): Promise<'ignored' | 'c
     throw e;
   }
   await audit('system', 'vault.alarm_email', subject, { ...detail, mailed: true });
-  if (deletion) await removeRows(vaultId, row.user_guid, alarmId);
+  if (deletion) await removeRows(row, alarmId);
   else await markEmailed(vaultId, alarmId, Math.floor(Date.now() / 1000));
   return 'mailed';
 }

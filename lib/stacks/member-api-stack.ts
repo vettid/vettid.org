@@ -486,7 +486,8 @@ export class VettidOrgMemberApiStack extends cdk.Stack {
     g(alarms, 'members', ['GetItem']);
     g(alarms, 'ratelimits', ['UpdateItem']);
     g(alarms, 'audit', ['PutItem']);
-    // May only clear the alarm flag and delete a deleted vault's rows (§12.5).
+    // May only clear the alarm flag and delete a deleted vault's rows (§12.5),
+    // after putting the record kept for 90 days (MEMBER-API 2.11.0).
     vaultGrants(alarms, 'vault-alarms');
     alarms.addToRolePolicy(sesSend);
     // Name changes from the vault (MEMBER-API 2.2.0, VAULT-MESSAGING 0.18.0

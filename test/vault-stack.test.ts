@@ -433,6 +433,17 @@ describe('VettidOrgVaultStack: recovery attempt counter bucket (release R, VAULT
     }
   });
 
+  test('2.11.0: the alarm mailer may put only the record of a deleted vault (vdeleted#) in the request table, nothing else there', () => {
+    const reqs = resources(prod.json, 'AWS::DynamoDB::GlobalTable').find(([, t]) => t.Properties.TableName === 'vettid-org-vault-requests')![1];
+    const mine = reqs.Properties.Replicas[0].ResourcePolicy.PolicyDocument.Statement.filter((x: any) => str(x.Condition).includes('member-vault-alarms"'));
+    expect(mine.map((x: any) => x.Action)).toEqual(['dynamodb:PutItem']);
+    expect(mine[0].Condition['ForAllValues:StringLike']).toEqual({ 'dynamodb:LeadingKeys': ['vdeleted#*'] });
+    // And the cleanup job may write account_deleted_at on a vault row.
+    const vaults = resources(prod.json, 'AWS::DynamoDB::GlobalTable').find(([, t]) => t.Properties.TableName === 'vettid-org-vaults')![1];
+    const w = vaults.Properties.Replicas[0].ResourcePolicy.PolicyDocument.Statement.filter((x: any) => str(x.Condition).includes('member-cleanup"') && str(x.Action).includes('UpdateItem'));
+    expect(w.map((x: any) => x.Condition['ForAllValues:StringEquals']['dynamodb:Attributes'])).toEqual([expect.arrayContaining(['account_deleted_at'])]);
+  });
+
   test('release R: the request table admits the attempts sweep (Scan) and no other member API role to Scan', () => {
     const reqs = resources(prod.json, 'AWS::DynamoDB::GlobalTable').find(([, t]) => t.Properties.TableName === 'vettid-org-vault-requests')![1];
     const st = reqs.Properties.Replicas[0].ResourcePolicy.PolicyDocument.Statement;
@@ -639,7 +650,7 @@ describe('cross-account access (VAULT-RELEASES §8.1)', () => {
     const attrsOf = (role: string) => writes.filter((s: any) => str(s.Condition).includes(role)).flatMap((s: any) => s.Condition['ForAllValues:StringEquals']?.['dynamodb:Attributes'] ?? []);
     expect(writes.flatMap((s: any) => s.Condition['ForAllValues:StringEquals']?.['dynamodb:Attributes'] ?? [])).not.toContain('credential_backup');
     expect(attrsOf('member-vault"')).toContain('deletion');
-    expect(attrsOf('member-cleanup"')).toEqual(['vault_id', 'deletion_requested_at', 'deletion', 'orphan_seen_at', 'deletion_resumed_at']); // 2.6.5: the orphan mark; 2.10.0: the resume
+    expect(attrsOf('member-cleanup"')).toEqual(['vault_id', 'deletion_requested_at', 'deletion', 'orphan_seen_at', 'deletion_resumed_at', 'account_deleted_at']); // 2.6.5: the orphan mark; 2.10.0: the resume; 2.11.0: the account deletion's mark
   });
 
   test('2.10.0 (VAULT-HOST-PROTOCOL 0.1.14): only the host writes deleting_at; the cleanup job writes deletion_resumed_at and no other member API role does', () => {

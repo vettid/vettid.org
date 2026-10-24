@@ -1,8 +1,41 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.10.1
+version: 2.11.0
 changelog:
+  - 2.11.0 (2026-10-24; **owner decisions of 2026-10-24**; vettid.org
+    PR "member-api/vault-deleted"; not deployed). "Vault deletion",
+    **What a phone is told**: a phone erases its local vault data
+    because of a deletion only on a definite answer, never on a `401`.
+    The member API's definite answer is new: a request signed by the
+    vault's **app key** (`app_key`, or the host's pending
+    `app_key_next`) for a vault whose row is `deleted` is answered
+    **`410 vault_deleted`** (with `deleted_at`) after the full check
+    (`ts`, the nonce spent, the key, the signature), on every signed
+    route; until now the `deleted` check came before the signature and
+    answered `401`. When the alarm mailer removes the row it first puts
+    the **record** `vdeleted#<vault_id>` in the request table (the app
+    public keys, `deleted_at`, the cause; not the `user_guid`), kept **90
+    days** (TTL `expires_at`; not scaled on staging); a request signed
+    by one of its keys is answered the same `410`. The account deletion
+    writes **`account_deleted_at`** on each vault row it asks (before
+    the ask); the vault's app key is then answered **`410
+    account_deleted`** after the signature, before the member row and
+    the pointer are read, so a vault whose account is gone gets a
+    definite answer. A missing member row by itself, a bad signature,
+    `ts` or nonce, another key, and an expired or absent record stay
+    the bare `401` (no oracle). The `410`s are rate-limited per vault
+    (`vault-gone#<vault_id>`, 60 a minute), not from the member's
+    status budget. The alarm mailer may put `vdeleted#*` items in the
+    request table (IAM, both accounts); the cleanup job may write
+    `account_deleted_at`. Text fixed: a `deleted` row reads `{vault:
+    null}` for the portal's session only; apps were answered `401`
+    (the 2.10.0 entry and "Vault deletion" said `{vault: null}`). A
+    never-sealed row is still deleted without a record: no app holds a
+    vault of it. The phones' rule is VAULT-MESSAGING 0.57.0 §12.5
+    "What a phone does", ANDROID-PLAN 0.1.77, IOS-PLAN 0.1.32. The
+    vault-sealed per-device deletion proof is later, not in this
+    version
   - 2.10.1 (2026-10-23; editorial; **owner answer of 2026-10-23** on
     the release L plan, VAULT-LOCK 0.1.3 Q2). "Locks" (2.5.0) said the
     lock route's callers were "the account session, the app key or a
@@ -32,7 +65,8 @@ changelog:
     `deletion_resumed_at`) are used only by the cleanup run, its log and
     its metric, and are never shown to the member. `GET
     /api/vault/status` keeps reporting the row's own `state` (a
-    `deleted` row still reads `{vault: null}`); the account site shows
+    `deleted` row still reads `{vault: null}` [to the portal's session;
+    an app was answered `401`, and from 2.11.0 `410 vault_deleted`]); the account site shows
     no "being deleted" text and still offers recovery and start-over,
     because the mark is host-written and the host is not trusted. No new
     route, no new refusal, no new status value. The host role may write
@@ -943,7 +977,7 @@ device identifiers, and never logs envelopes.
 | `POST /api/vault/enroll` | — | pending key |
 | `POST /api/vault/unlock` | — | `app_key` (2.7.0: a recovering key is refused `403`) |
 | `POST /api/vault/lock` | yes | `app_key` (2.7.0: a recovering key is refused `403`) |
-| `GET /api/vault/status` | yes | `app_key`, recovering key |
+| `GET /api/vault/status` | yes | `app_key`, recovering key (2.11.0: a deleted vault, or one whose account was deleted, answers its app key `410`, "Vault deletion") |
 | `GET /api/vault/requests/{id}` | yes (the member's slots; the result only for enroll, unlock, lock and recovery register, 2.6.1) | the key that made the request |
 | `POST /api/vault/recovery`, `GET`, `/cancel` | yes | — |
 | `POST /api/vault/recovery/cancel-link` | its token | — |
@@ -969,7 +1003,11 @@ in order: the header's syntax, `ts` within 300 s, the nonce unused for
 this `akid` within 600 s (a conditional put of `appnonce#<akid>#<nonce>`
 in the rate-limit table, TTL 600 s), that the key is allowed for the
 route on that vault (table above), and the signature. Any failure is
-`401 unauthorized` with no detail. The header, not `Authorization`,
+`401 unauthorized` with no detail. (2.11.0) A request that passed every
+one of these checks with the vault's app key, for a vault that is
+deleted or whose account was deleted, is answered `410 vault_deleted`
+or `410 account_deleted` instead of being served ("Vault deletion",
+What a phone is told). The header, not `Authorization`,
 because CloudFront forwards `Authorization` only through a cache policy
 and `/api/*` disables caching: the account site's `/api/*` origin request
 policy adds `X-VettID-App` to its allowlist.
@@ -1122,7 +1160,7 @@ The vault does not depend on subscription or voting rights.
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| GET | `/api/vault/status` | — | `{vault: VaultStatus \| null, service: 'available' \| 'paused'}` (`service`: 1.2.0, "Vault service pause"; app: the signing key's vault) |
+| GET | `/api/vault/status` | — | `{vault: VaultStatus \| null, service: 'available' \| 'paused'}` (`service`: 1.2.0, "Vault service pause"; app: the signing key's vault). A deleted vault reads `{vault: null}` to the portal's session; to the vault's app key it is `410 vault_deleted`, and a vault whose account was deleted `410 account_deleted` (2.11.0, "Vault deletion") |
 | GET | `/api/vault/enclave` | — (`?release=<pcr0>` only to abandon an unconfirmed move, §11.10.4) | `Enclave`: the instance to seal to (below) |
 | POST | `/api/vault/enroll` | `{vault_id, request_id, instance_id, etk_kid, envelope, manifest_sha256}` (signed by the pending key; 2.0.0 adds `vault_id`, the redeem's) | `202 {vault_id, request_id}`; the queue message carries the pending key as `app_key` |
 | POST | `/api/vault/unlock` | `{vault_id, request_id, instance_id, etk_kid, envelope, manifest_sha256}` | `202 {vault_id, request_id}` |
@@ -1247,6 +1285,8 @@ value), and `retry_after` seconds where given:
 | 409 | `vault_busy` | `?release=` asked for a release while another release's instance holds the vault (`retry_after`: until the lease ends) |
 | 409 | `duplicate_request` | `request_id` already used |
 | 410 | `release_unavailable` | The vault's release (or the one `?release=` asked for) is unknown, `removed` (its end date has passed, VAULT-MESSAGING 0.10.0 §11.10.5), or its image can no longer be started |
+| 410 | `vault_deleted` | 2.11.0: the vault is deleted (its row is `deleted`, or its record `vdeleted#<vault_id>` is kept). Only to a request signed by the vault's app key that passed every check of "App request signing", on any signed route that reads the vault row. Body also has `deleted_at` (RFC 3339, or `null` when the host recorded no time). "Vault deletion", What a phone is told |
+| 410 | `account_deleted` | 2.11.0: the account deletion has asked this vault to delete itself (`account_deleted_at` on its row). As for `vault_deleted`; `deleted_at` is when the account deletion asked |
 | 503 | `release_starting` | No instance of the release is running; one has been requested. Body also has `release` and `retry_after` (30) |
 | 503 | `vault_unavailable` | No `active` release is deployed yet, or the operator has paused the vault service (body `service: "paused"`, below); `retry_after` 300 |
 
@@ -2607,7 +2647,19 @@ Its own audit log goes with it, so the member is told by email.
   deletes the vault row (condition: `state = deleted` and, 2.7.1, no
   `att_sweep_pending`) and the pointer row `user#<guid>` if it still
   names this vault, so the member's next enrollment is a fresh one with
-  a new `vault_id`.
+  a new `vault_id`. (2.11.0) Before it deletes the vault row it puts
+  the vault's record in the request table (What a phone is told,
+  below); when that put fails, the row is kept (still `deleted`, which
+  answers the same) and stamped `alarm.handled_at`; that stamp is a
+  record for the follow-up below, which tries once more. When the
+  follow-up's own put fails it throws, so the stream retries the record
+  (`retryAttempts` 3, with bisection); after those the row stays
+  `deleted` (it answers `410` from the row) until a later record of it
+  reaches the follow-up (an operator can re-stamp `alarm.handled_at`).
+  Each failure is logged: `vault tombstone not written`, `vault_id`
+  and the error name only. A row whose image shows
+  `att_sweep_pending` is not tried (its delete would fail): it is
+  stamped and left to the follow-up.
 - **Rows kept for the attachment sweep** (2.7.1; VAULT-HOST-PROTOCOL
   P15, from the vault's release A). The parent's update that marks the
   row `deleted` also sets `att_sweep_pending = true`, and the parent
@@ -2629,7 +2681,16 @@ Its own audit log goes with it, so the member is told by email.
   enqueues the operation `delete` (§11.5 SQS message, no envelope) for
   each of the member's vaults not yet `deleted`, to the leaseholder or
   else a live instance of the vault's `sealed_release` (requesting a
-  start as the enclave route does when none runs). It sets
+  start as the enclave route does when none runs). (2.11.0) Before
+  that it writes `account_deleted_at` (epoch seconds; an existing value
+  is kept; not on a `deleted` or never-sealed row) on the row, so the
+  vault's app is told `410 account_deleted` (below). The mark is best
+  effort: a write that fails is logged (`vault account deletion mark
+  not written`, `vault_id` and the error name) and the vault is still
+  asked. The daily retry marks a vault it retries that has no mark when
+  its member row is gone (a consistent read) and it is not a
+  start-over, so vaults asked before 2.11.0 are marked too; a member row
+  that cannot be read leaves the mark for the next run. It sets
   `deletion_requested_at` on the row; a later run retries until the vault
   reports `deleted`, whose notice removes the rows. A vault that is
   running deletes itself with the full semantics; otherwise the
@@ -2722,8 +2783,9 @@ Its own audit log goes with it, so the member is told by email.
     `deletion_resumed_at` are read only by the cleanup run, its log and
     its metric. `GET /api/vault/status` reports the row's own `state`
     (`locked`, `unlocked` …) whatever the mark, as before; a `deleted`
-    row reads `{vault: null}`, and once the row is gone the app key is
-    refused `401`. The account site shows no "being deleted" text and
+    row reads `{vault: null}` to the portal's session and (2.11.0) `410
+    vault_deleted` to the vault's app key, and so does its record once
+    the row is gone (below). The account site shows no "being deleted" text and
     offers recovery and start-over as normal. That is safe: a recovery
     or an unlock that opens a vault whose sealed header or state records
     `deleting` finishes the deletion instead of running the vault
@@ -2736,13 +2798,81 @@ Its own audit log goes with it, so the member is told by email.
     refused as for any confirmed vault until the row is gone.
   - **IAM.** The host role may write `deleting_at` (and remove it); the
     cleanup job reads it and writes `deletion_resumed_at`.
-- **Status.** A `deleted` vault row reads as no vault (`{vault: null}`).
+- **Status.** A `deleted` vault row reads as no vault (`{vault: null}`)
+  to the portal's session. To the vault's app key it is `410
+  vault_deleted` (2.11.0, below); before 2.11.0 it was `401`, never
+  `{vault: null}`.
+- **What a phone is told (2.11.0; owner decisions of 2026-10-24).** A
+  phone erases its local vault data because of a deletion only on a
+  definite answer, never on a `401` (VAULT-MESSAGING §12.5 "What a
+  phone does"). The member API's definite answers, on every signed
+  route that reads the vault row (all but the setup-code redeem and the
+  recovery claim, which name no row: status, enclave, enroll, unlock,
+  lock, polling, recovery register and open, the start-over's cancel),
+  and only after the whole check of
+  "App request signing" (`ts`, the nonce spent, the key, the
+  signature) with the vault's **app key** (`app_key`, or the host's
+  pending `app_key_next`; never a pending setup-code key, a claim key or
+  a recovering key). "Authenticated" here means the **request** is
+  authenticated (the app key's signature, checked before any `410`);
+  the `410` answer itself is not signed and is protected by TLS only
+  (CloudFront to the API), like every other answer of the member API.
+  - **`410 vault_deleted`** `{error, code: "vault_deleted", message,
+    deleted_at}`: the row is `deleted`; `deleted_at` is the host's
+    `vault_deleted` notice time (`alarm.at`), RFC 3339, or `null`.
+  - **The record kept after the row is removed.** Before the alarm
+    Lambda deletes the row it puts **`vdeleted#<vault_id>`** in the
+    vault-requests table: `{request_id: "vdeleted#<vault_id>",
+    vault_id, keys: [{key, kid}], deleted_at, cause, expires_at}`
+    (not the member's `user_guid`: nothing needs it). `keys` are the vault's app public keys from the row
+    (`app_key` and a pending `app_key_next`, SPKI DER base64 and
+    `kid`); `deleted_at` as above (epoch seconds or `null`); `cause`
+    (advisory, never shown): `account` (the row has
+    `account_deleted_at`, or `deletion_requested_at` without a
+    start-over), `start_over` (an executing start-over) or `vault` (the
+    vault reported its own deletion: its holder's `vault.delete`).
+    Nothing else: no envelope, address, name or secret. **Kept 90
+    days**: `expires_at` is the removal plus 90 days, the table's TTL;
+    real time on staging too (STAGING-TIME-SCALE never scales
+    retention). A later removal of the same vault replaces it. When the
+    row is missing, a request signed by one of `keys` is answered the
+    same `410 vault_deleted` while `expires_at` is in the future (the
+    TTL removes items up to two days late, so the API checks it).
+  - **`410 account_deleted`** `{error, code: "account_deleted",
+    message, deleted_at}`: the row is not `deleted` but carries
+    `account_deleted_at` (the account deletion asked it to delete
+    itself); `deleted_at` is that time. Checked after the signature and
+    before the member row and the pointer, which are gone by then.
+  - **Still the bare `401`**, with no detail: a bad signature, a `ts`
+    out of the window, a spent nonce, a key that is not the vault's
+    app key, a missing row without a record, an expired record, and a
+    **missing member row by itself** (the window between the member
+    row's removal and `account_deleted_at`, a few seconds of the daily
+    run, or a member row missing for another reason). A `410` is never
+    given before the signature has been checked, so it tells nobody
+    without the key whether a `vault_id` existed.
+  - **Rate limit.** Each `410` counts against its own fixed window,
+    `vault-gone#<vault_id>`, 60 a minute (as status is), not the
+    member's `vault-status#` budget; over it, `429 rate_limited`.
+  - **Never-sealed rows** (no `sealed_release`, no lease), which the
+    cleanup job deletes at once, get no record and no
+    `account_deleted_at`: the host writes `app_key` only from the
+    vault's lifecycle reports, the first of which records
+    `sealed_release`, so no enrollment of such a vault completed and an
+    app holds at most a redeem's pending key, with nothing to erase.
+  - **Later, not in 2.11.0:** a per-device deletion proof sealed by the
+    vault.
+  - **Access logs** gain the status `410` on these routes; no log,
+    audit or output format changes otherwise.
 - **Stored versions.** The data bucket keeps noncurrent versions for 7
   days (VAULT-RELEASES §8.2, §11.4): the erased objects, still sealed,
   are gone 7 days after the deletion (VAULT-MESSAGING §12.5).
 - **IAM.** The alarm Lambda may delete vault rows and pointer rows
-  (conditional) in addition to its alarm updates; the cleanup job may
-  send to the vault-control queues as the API does.
+  (conditional) in addition to its alarm updates, and (2.11.0) put
+  items keyed `vdeleted#*` in the vault-requests table, no other item
+  (`dynamodb:LeadingKeys`, in its own role and the table's resource
+  policy); the cleanup job may send to the vault-control queues as the
+  API does, and (2.11.0) write `account_deleted_at` on a vault row.
 
 ### Vault deletion: start over (2.1.0, VAULT-MESSAGING 0.16.0 §11.11.9)
 

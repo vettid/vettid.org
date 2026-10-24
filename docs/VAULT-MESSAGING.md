@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.56.4
-date: 2026-10-23
+version: 0.57.0
+date: 2026-10-24
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -13,9 +13,9 @@ related:
   - CALLS-PLAN.md (0.1.5) §6.1 V4, §13 (phase C2; decisions D12–D26, decided 2026-10-12)
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.10.0)
-  - ANDROID-PLAN.md (0.1.76)
-  - IOS-PLAN.md (0.1.31; §9.1 VA1–VA4)
+  - MEMBER-API.md (2.11.0)
+  - ANDROID-PLAN.md (0.1.77)
+  - IOS-PLAN.md (0.1.32; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,29 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.57.0: **owner decisions of 2026-10-24** (with MEMBER-API 2.11.0,
+    ANDROID-PLAN 0.1.77, IOS-PLAN 0.1.32). §12.5 new **"What a phone
+    does"**: a phone erases its local vault data because of a deletion
+    only on a definite answer, never on a `401`. Automatic erase only
+    with **both** (a) the vault's own sealed word
+    (`device.unlinked{vault_deleted}`, or the `{}` answer to this
+    phone's own `vault.delete`) **and** (b) the member API's
+    authenticated `410 vault_deleted` or `410 account_deleted`. With
+    one of them alone the phone keeps checking (the status, and with
+    (b) alone also its own relay mailbox for the vault's event) and, in
+    both cases after the same 10-minute bound, offers a confirmed
+    **Remove from this phone** (with (b) alone it shows "Your vault was
+    deleted"). The `410` answers an authenticated request; the answer
+    itself is protected by TLS only. Everything else (`401`, `{vault: null}`, `403`, `5xx`,
+    timeouts) is "could not tell" and erases nothing. The member API
+    keeps the record of a removed deleted vault 90 days (MEMBER-API
+    "Vault deletion", What a phone is told), so (b) stays available
+    after the row is gone. §12.5 "What the member API shows meanwhile"
+    and §11.5 corrected: a `deleted` row read `{vault: null}` to the
+    portal's session only; apps were answered `401`, and from MEMBER-API
+    2.11.0 `410`. §11.5's table lists the record and the vault row's
+    `account_deleted_at`. The vault-sealed per-device deletion proof is
+    later. No wire change in the vault
   - 0.56.4: editorial (aligns §10.2 with VAULT-LOCK §3.5/§3.7, MEMBER-API
     "Locks" and ANDROID-PLAN part 2; found in the review of
     vettid-android #190). §10.2 "Locks": `stale_lock` was listed among
@@ -11989,9 +12012,10 @@ Nothing secret is stored:
 
 | Store | Contents | Retention |
 |---|---|---|
-| Vault table | **`app_key`** (0.15.0: `{key, kid, seq}`, the public key of the vault's app key as the enclave last reported it, written by the host; and the API's own `app_key_pending` and recovery claim keys, §11.12; (0.33.0, release R) `app_key_next` `{key, kid, seq}`, the host-written next key of a replacement in progress, §11.14.2), `user_guid`, **`vault_id`** (opaque, 128-bit random, 32 lowercase hex characters, assigned by the API at a member's first enrollment; the routing key for alternate-channel requests), `state` (`enrolling`, `locked`, `unlocked`, `deleted`), **lease** (`instance_id`, `lease_expires_at`), **`sealed_release`** (the PCR0 the vault is sealed to; routing aid, §11.10.5), **`vault_version`** (release that last opened the vault), **`state_version`** (vault-state format version), **`alarm`** (`kind`, `alarm_id`, `at`, `emailed_at`; the last host alarm, below) and `alarm_pending`, **`credential_backup`** (0.16.0: whether the vault keeps a backup copy of its credential, as last reported, below; absent until a release of 0.16.0 reports it), the API's own `deletion` record (§11.11.9), **`deleting_at`** (0.51.0: when the vault reported its deletion's marking flush, the parent's Unix seconds, written by the host, §12.5), **`name_change`** (0.18.0: `{seq, first_name, last_name, at}`, the vault's latest name request, written by the host) and `name_change_pending`, the API's `name_change_result` (§10.8, below), `created_at`, `updated_at` | account lifetime |
+| Vault table | **`app_key`** (0.15.0: `{key, kid, seq}`, the public key of the vault's app key as the enclave last reported it, written by the host; and the API's own `app_key_pending` and recovery claim keys, §11.12; (0.33.0, release R) `app_key_next` `{key, kid, seq}`, the host-written next key of a replacement in progress, §11.14.2), `user_guid`, **`vault_id`** (opaque, 128-bit random, 32 lowercase hex characters, assigned by the API at a member's first enrollment; the routing key for alternate-channel requests), `state` (`enrolling`, `locked`, `unlocked`, `deleted`), **lease** (`instance_id`, `lease_expires_at`), **`sealed_release`** (the PCR0 the vault is sealed to; routing aid, §11.10.5), **`vault_version`** (release that last opened the vault), **`state_version`** (vault-state format version), **`alarm`** (`kind`, `alarm_id`, `at`, `emailed_at`; the last host alarm, below) and `alarm_pending`, **`credential_backup`** (0.16.0: whether the vault keeps a backup copy of its credential, as last reported, below; absent until a release of 0.16.0 reports it), the API's own `deletion` record (§11.11.9), **`deleting_at`** (0.51.0: when the vault reported its deletion's marking flush, the parent's Unix seconds, written by the host, §12.5), **`name_change`** (0.18.0: `{seq, first_name, last_name, at}`, the vault's latest name request, written by the host) and `name_change_pending`, the API's `name_change_result` (§10.8, below), (0.57.0) the cleanup job's `account_deleted_at` (when the account deletion asked the vault to delete itself, MEMBER-API 2.11.0), `created_at`, `updated_at` | account lifetime |
 | Instance registry | `instance_id`, **`release`** (PCR0 from its descriptor), queue URL, descriptor, attestation, `heartbeat_at` | while the instance is live |
 | Request table (response slots) | `request_id`, `vault_id`, `op`, `status` (`queued`, `done`, `expired`), opaque response `envelope` (≤ 8 KiB) and/or a host `code` | TTL 15 min |
+| Request table (0.57.0, the record of a removed deleted vault) | `vdeleted#<vault_id>`: `vault_id`, the vault's app public keys (`key`, `kid`), `deleted_at`, `cause` (MEMBER-API 2.11.0 "Vault deletion") | 90 days (TTL `expires_at`) |
 | Audit log | enroll, unlock and lock requests: member, time, `vault_id`, request id, never PINs or envelopes | MEMBER-API audit retention |
 
 - **Not stored:** mailbox ids, relay keys, device identifiers, and request
@@ -18401,8 +18425,11 @@ Deletion is idempotent.
   member abandon a healthy vault or hide their recovery options. From
   the mark until the `deleted` report, `GET /api/vault/status` keeps
   reporting the row's own `state` (`locked`, `unlocked` …), as before;
-  after it, `{vault: null}`, and once the row is removed the app key is
-  refused `401` (MEMBER-API "Vault deletion"). The account site shows
+  after it, `{vault: null}` to the portal's session, and (0.57.0,
+  MEMBER-API 2.11.0) `410 vault_deleted` to the vault's app key, also
+  for 90 days after the row is removed (before 0.57.0 the app key was
+  refused `401` from the `deleted` report on; MEMBER-API "Vault
+  deletion"). The account site shows
   no "being deleted" text and offers recovery and start-over as
   normal. That is safe: a recovery or an unlock that opens a vault whose
   sealed header or state records `deleting` finishes the deletion
@@ -18414,6 +18441,43 @@ Deletion is idempotent.
   status. An app that was not told (no `ok` to "Mark at the host", or a
   stop before the notices) sees the vault as locked, so the member's
   unlock finishes the deletion (Convergence, above).
+- **What a phone does (0.57.0; owner decisions of 2026-10-24).** A
+  phone erases its local vault data (keys, the local state, the
+  marker) because of a deletion only on a **definite** answer, never
+  on a `401`. Two signals count:
+  - **(a) the vault's own sealed word**: `device.unlinked{reason:
+    "vault_deleted"}` (step 1 above), or the `{}` answer to this
+    phone's own `vault.delete`, opened under its session;
+  - **(b) the member API's answer to an authenticated request**: `410
+    vault_deleted` or `410 account_deleted` to a request signed by
+    this phone's app key (MEMBER-API "Vault deletion", What a phone is
+    told). The member API gives it only after the full signature check
+    of the request, and keeps it for 90 days after it removes the row.
+    The answer itself is not signed: it is protected by TLS only, and it
+    rests on the host-written `state` (or the account deletion's mark),
+    which is why (b) alone never erases without the member.
+
+  | The phone has | It does |
+  |---|---|
+  | (a) and (b) | erases at once, then "no vault" with the one-time notice |
+  | (b) alone | shows **"Your vault was deleted"**, keeps reading the status and its own relay mailbox (where the vault's `device.unlinked`, sent in step 1, lands) for (a), and from the same bound of 10 minutes (counted from the first `410`) offers a confirmed **Remove from this phone** |
+  | (a) alone | shows "being deleted" and keeps reading the status for (b); at the bound (ANDROID-PLAN §4 "A vault being deleted") it adds a confirmed **Remove from this phone** |
+  | neither | nothing: "could not tell" |
+
+  **Owner decision (2026-10-24):** with one signal only, both cases wait
+  the same bound before the confirmed Remove; nothing is offered
+  earlier.
+
+  **"Could not tell"** is everything else: `401` (whatever the reason:
+  a key the API no longer knows, a missing member row, a record gone
+  after 90 days), `{vault: null}` (the portal's answer, never the
+  app's), `403`, `5xx`, a `429`, a timeout, no network. It erases
+  nothing and changes no state; the phone tries again as before. A
+  confirmed Remove from this phone erases only this phone's copy; it
+  cannot delete or harm a vault that still runs, which the member can
+  enroll again on this phone. **Later**, not in 0.57.0: a per-device
+  deletion proof sealed by the vault, which would let (a) be fetched
+  again after it was lost.
 - **What is still lost.** A vault sealed to a release before 0.51.0
   sends no `MarkDeleting`, and its stalled deletion stays as before
   (an operator can finish it with the host's `delete`, case by case,

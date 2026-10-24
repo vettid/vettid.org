@@ -614,7 +614,7 @@ describe('VettidOrgMemberApiStack', () => {
 
     test('the cleanup job may write orphan_seen_at and (2.10.0) deletion_resumed_at on a vault row, never the host\'s deleting_at (and still nothing else new)', () => {
       const upd = stmtsOf(/vault-cleanup|Cleanup/).filter((x: any) => [].concat(x.Action).includes('dynamodb:UpdateItem' as never) && JSON.stringify(x.Resource).includes('table/vettid-org-vaults'));
-      expect(upd.map((x: any) => x.Condition['ForAllValues:StringEquals']['dynamodb:Attributes'])).toEqual([['vault_id', 'deletion_requested_at', 'deletion', 'orphan_seen_at', 'deletion_resumed_at']]);
+      expect(upd.map((x: any) => x.Condition['ForAllValues:StringEquals']['dynamodb:Attributes'])).toEqual([['vault_id', 'deletion_requested_at', 'deletion', 'orphan_seen_at', 'deletion_resumed_at', 'account_deleted_at']]); // 2.11.0: the account deletion's mark
       expect(JSON.stringify(policies)).not.toContain('deleting_at');
     });
 
@@ -860,7 +860,7 @@ describe('VettidOrgMemberApiStack', () => {
       // The cleanup job may only mark a deletion requested.
       const mark = stmts().filter((s: any) => String(str(s.Condition)).includes('deletion_requested_at'));
       expect(mark).toHaveLength(1);
-      expect(mark[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(['vault_id', 'deletion_requested_at', 'deletion', 'orphan_seen_at', 'deletion_resumed_at']); // 2.6.5: the orphan mark; 2.10.0: the resume
+      expect(mark[0].Condition['ForAllValues:StringEquals']['dynamodb:Attributes']).toEqual(['vault_id', 'deletion_requested_at', 'deletion', 'orphan_seen_at', 'deletion_resumed_at', 'account_deleted_at']); // 2.6.5: the orphan mark; 2.10.0: the resume; 2.11.0: the account deletion's mark
     });
 
     test('the queue URL prefix is pinned to the vault account and region', () => {
