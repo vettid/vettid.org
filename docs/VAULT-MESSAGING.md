@@ -14,7 +14,7 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.10.0)
-  - ANDROID-PLAN.md (0.1.74)
+  - ANDROID-PLAN.md (0.1.75)
   - IOS-PLAN.md (0.1.31; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
@@ -27,10 +27,12 @@ related:
   - VAULT-LOCK.md (0.1.3, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.56.1: editorial; **owner answers of 2026-10-23** on the
-    release L plan (VAULT-LOCK 0.1.3 Q1, Q3); the unlock_id part as
-    in vettid-vault #145 (open); the enqueued_at ordering is not built
-    yet (V2). §10.2 "Locks", §11.5 "The `lock` operation": a **recovery
+  - 0.56.1: **owner decisions of 2026-10-23** (§3.6.8: keep the
+    shorter; a call delays the idle lock at most 12 hours; no extra hour
+    for an unlock before the idle lock's time) and editorial errata
+    (owner answers on the release L plan, VAULT-LOCK 0.1.3 Q1, Q3; the
+    unlock_id part as in vettid-vault #145 (open); the enqueued_at
+    ordering is not built yet (V2)). §10.2 "Locks", §11.5 "The `lock` operation": a **recovery
     open is an opening of the vault**: it makes an `unlock_id` (already
     a member of `vault.recovery.open.result`, §11.14.6, which releases
     from R to L sent empty), and an unconditional lock is compared with
@@ -42,11 +44,13 @@ changelog:
     member API without the value (an unconditional lock). §11.14.10:
     if the old app's renewal of its token before an approval fails, it
     still sends the approval, and the notice has what the previous token
-    has left (as built in vettid-vault #144). §3.6.8: (owner decision
+    has left (as in vettid-vault #144, open). §3.6.8: (owner decision
     2026-10-23, "keep the shorter") the lowest idle-lock value set since
     the last check stays in force until the next one, and a call in
     progress delays the idle lock at most 12 hours past its time (a
-    call ends within 12 hours, §10.10), as built in vettid-vault #146;
+    call ends within 12 hours, §10.10), and an unlock before the idle
+    lock's time gets no extra hour, as in vettid-vault #146 (open,
+    97d309f);
     an editorial note that "shortening may lock the vault at once" has
     no effect (the setting cannot change past the deadline). No other
     rule changes
@@ -3570,8 +3574,9 @@ authorizations the member gave (§3.6.3), for as long as its host keeps
 it. The idle lock ends that.
 
 - **The rule.** A vault locks itself (§12.3, as for an owner request)
-  when the time is later than `owner_check.deadline` +
-  `idle_lock.after_seconds`. It compares at every request and every
+  when the time is at or after `owner_check.deadline` +
+  `idle_lock.after_seconds` (0.56.1: "at or after", as built; 0.29.0
+  said "later than"). It compares at every request and every
   collect cycle, as for the hold (§3.6.3), with the enclave's own
   clock (§3.6.1).
 - **The setting** `idle_lock.after_seconds` (§10.8) is 3,600–2,592,000
@@ -3581,9 +3586,9 @@ it. The idle lock ends that.
     naming it is `forbidden`.
   - *Shortening* takes effect at once, and may lock the vault at once.
     (0.56.1, editorial: this has no effect in practice. Past the
-    deadline the app may send only the check, §3.6.3, with the hold on
-    or off, so the setting can change only before the deadline, while
-    the time of the rule is still ahead.)
+    deadline the app gate refuses `settings.set` (§3.6.3), with the hold
+    on or off, so the setting changes only before the deadline, when the
+    time of the rule is at least an hour ahead.)
   - *Lengthening* takes effect at the next successful check: until
     then the vault uses the value it had at the last one, or (0.56.1,
     owner decision 2026-10-23, "keep the shorter") the lowest value set
@@ -3596,13 +3601,18 @@ it. The idle lock ends that.
   and agents' running when the member does not return.
 - **After an unlock.** A vault that is unlocked when the time of the
   rule has already passed does not lock again at once: the idle lock
-  then applies from one hour after that unlock. A successful check in
+  then applies from one hour after that unlock. (0.56.1, owner
+  decision 2026-10-23) The hour is given only to an unlock at or after
+  the time of the rule. An unlock before it, even in the hour before,
+  gets no extra time: the vault locks at the time of the rule unless a
+  check is passed first. A successful check in
   that hour moves the deadline, and with it the idle lock. An unlock
   without a check gives one hour of a held vault and needs the PIN
   each time.
 - **A call in progress** (§10.10) delays the idle lock until the call
-  ends (0.56.1: at most 12 hours past the time of the rule, the longest
-  a call lasts, however calls follow one another).
+  ends (0.56.1: at most 12 hours past the time of the rule, the hour
+  after an unlock included, the longest a call lasts, however calls
+  follow one another; not scaled on staging).
 - **A vault without a credential** has no deadline (§3.6.1) and no
   idle lock.
 - **Telling the member.** `vault.status`'s `owner_check` and
@@ -17464,11 +17474,12 @@ first.**
   (§8, §8.3), stores the fresh token before it processes the approval;
   it SHOULD NOT denylist the previous token's `jti` before the approval
   is answered. It renews again before each approval it sends (after
-  `busy` or `retry` too). (0.56.1) If the renewal fails, the old app
-  still sends the approval; the notice then has whatever the previous
-  token has left. The token then has its full lifetime, at most
-  30 days, from the approval; the pending unlink keeps the newest
-  token.
+  `busy`, `retry` or (0.56.1) `stale_credential` too). The renewed
+  token then has its full lifetime, at most 30 days, from the approval;
+  the pending unlink keeps the newest token. (0.56.1) If the renewal
+  fails, the old app still sends the approval, and the pending unlink
+  keeps the previous token: the notice can then be delivered only while
+  that token lives.
 - **`device.unlinked{reason: "transferred", transfer_id}`** is deposited
   to the old app only after the vault's then current app has completed
   its **first successful unlock from the stored objects under that

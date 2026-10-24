@@ -13,7 +13,7 @@ changelog:
     which still said it may `unlock` and `lock`; and the "Signed
     requests" table's `unlock` and `lock` rows (the table had not
     followed 2.7.0). "Vault recovery"'s 2.7.0 list of what the
-    recovering key may call adds `status`, which it may read "Locks"
+    recovering key may call adds `status`, which it may read. "Locks"
     is implemented in vettid.org #407 (staging; production with the
     promotion of release L). No rule changes
   - 2.10.0 (2026-10-20; **approved by the owner (2026-10-20)**, with
