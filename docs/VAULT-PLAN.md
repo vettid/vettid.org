@@ -1,9 +1,16 @@
 ---
 title: VAULT-PLAN
 status: draft
-version: 0.1.9
+version: 0.1.10
 date: 2026-10-23
 changelog:
+  - 0.1.10: owner decision of 2026-10-23 (VAULT-MESSAGING 0.56.0, §10.18
+    "Spend caps"): V4 wallet note. The spend caps are per wallet, per
+    transaction and per **rolling 24 hours only** (the note said "per
+    day, per week"; the owner chose the one period), raising or removing
+    one is a credential operation with the **PIN and the password**
+    (the note said password, CEK rotation), and revealing a capped
+    wallet's phrase takes the PIN too
   - 0.1.9: editorial (status as of 2026-10-23); no rule changes. V6 and
     Later status notes, risk 2 (push wakes exist, no platform enabled),
     follow-up 2 (`one-app` merged, vettid-vault #12), risk 6 (iOS) and the
@@ -183,6 +190,10 @@ per-operation policies on critical keys; the spend part is a requirement
 here: member-set **spend caps** per transaction and per period (per day,
 per week), enforced by the vault before it signs, with raising a cap a
 credential operation (password, CEK rotation) and every refusal audited.
+(Owner decision of 2026-10-23, VAULT-MESSAGING 0.56.0 §10.18: one period,
+a **rolling 24 hours**, not a day and a week; raising or removing a cap
+takes the **PIN and the password**; revealing a capped wallet's phrase
+takes the PIN too.)
 Caps apply to every caller, including connections' critical-item uses and
 any future agent path. (vettid-dev `protean_credential_system_design.md`,
 "Policy-Based Authorization"; PROTEAN-CREDENTIAL §5.)
