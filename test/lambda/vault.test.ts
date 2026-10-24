@@ -1141,12 +1141,39 @@ describe('POST /api/vault/lock', () => {
     expect(item).toMatchObject({ action: 'vault.lock_request', detail: { vault_id: VID, request_id: RID, instance_id: 'i-1' } });
   });
 
-  test('no live lease: nothing to lock, the slot is done at once', async () => {
+  test('no live lease: nothing to lock, the slot is done at once, as not_running (2.5.0)', async () => {
     vaultOf('g1', { vault_id: VID });
     expect((await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID })).status).toBe(202);
     expect(sqs.calls()).toHaveLength(0);
-    expect((await call('GET', `/api/vault/requests/${RID}`)).body).toEqual({ status: 'done' });
+    expect((await call('GET', `/api/vault/requests/${RID}`)).body).toEqual({ status: 'done', code: 'not_running' });
   });
+
+  // 2.5.0 (release L, "Locks"): unlock_id makes the lock bound; the API
+  // checks its form only and copies it into the queue message; the audit
+  // says whether the lock was bound, never the value.
+  test('a bound lock carries unlock_id in the queue message; the audit records bound', async () => {
+    const UID = '0123456789abcdef0123456789abcdef';
+    vaultOf('g1', { vault_id: VID, state: 'unlocked', lease: { instance_id: 'i-1', lease_expires_at: NOW + 60 } });
+    expect((await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID, unlock_id: UID })).status).toBe(202);
+    const [m] = sent();
+    expect(Object.keys(m.msg)).toEqual(['v', 'op', 'vault_id', 'user_guid', 'request_id', 'unlock_id', 'enqueued_at']);
+    expect(m.msg.unlock_id).toBe(UID);
+    const audits = () => ddb.commandCalls(PutCommand).filter((c) => c.args[0].input.TableName === 'audit').map((c) => c.args[0].input.Item!);
+    expect(audits()[0]).toMatchObject({ action: 'vault.lock_request', detail: { bound: true } });
+    expect(JSON.stringify(audits())).not.toContain(UID);
+    // Unconditional: no member in the message, bound false.
+    expect((await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID2 })).status).toBe(202);
+    expect(Object.keys(sent()[1].msg)).not.toContain('unlock_id');
+    expect(audits()[1]).toMatchObject({ action: 'vault.lock_request', detail: { bound: false } });
+  });
+
+  test.each([['upper case', '0123456789ABCDEF0123456789ABCDEF'], ['short', '0123'], ['a number', 7], ['null', null], ['empty', '']])(
+    'a malformed unlock_id (%s) is 400 and nothing is queued', async (_name, uid) => {
+      vaultOf('g1', { vault_id: VID, state: 'unlocked', lease: { instance_id: 'i-1', lease_expires_at: NOW + 60 } });
+      const r = await call('POST', '/api/vault/lock', { vault_id: VID, request_id: RID, unlock_id: uid });
+      expect(r.status).toBe(400);
+      expect(sqs.calls()).toHaveLength(0);
+    });
 });
 
 // ---- GET /api/vault/requests/{id} ------------------------------------------------
@@ -1170,6 +1197,23 @@ describe('GET /api/vault/requests/{id}', () => {
       slot({ status: 'done', envelope: Buffer.alloc(bytes).toString('base64'), code: 'Bad Code' });
       expect((await call('GET', `/api/vault/requests/${RID}`)).body).toEqual({ status: 'done' });
     }
+  });
+
+  // 2.5.0 (release L): a lock's slot passes its three codes, beside the
+  // codes already passed; no other operation's slot passes them.
+  test("a lock's codes for a lock's slot only", async () => {
+    let i = 0;
+    const poll = async (extra: Record<string, unknown>) => {
+      jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + (i += 1) * 1000);
+      slot(extra);
+      return (await call('GET', `/api/vault/requests/${RID}`)).body;
+    };
+    for (const code of ['locked', 'not_running', 'stale']) {
+      expect(await poll({ op: 'lock', status: 'done', code })).toEqual({ status: 'done', code });
+      expect(await poll({ op: 'unlock', status: 'done', envelope: RESULT, code })).toEqual({ status: 'done', envelope: RESULT });
+    }
+    expect(await poll({ op: 'lock', status: 'done', code: 'etk_unknown' })).toEqual({ status: 'done', code: 'etk_unknown' });
+    expect(await poll({ op: 'lock', status: 'done' })).toEqual({ status: 'done' }); // a release before L
   });
 
   test('still queued after queue retention → expired', async () => {
@@ -1236,6 +1280,23 @@ describe('GET /api/vault/status', () => {
     expect((await call('GET', '/api/vault/status')).body.vault.state).toBe('enrolling');
     // The row itself is not rewritten (the host owns `state`).
     expect(getItem('vaults', VID).state).toBe('enrolling');
+  });
+
+  // 2.5.0 (release L, "Locks"): what `locked` rests on.
+  test('locked_basis: reported, no_lease, or absent', async () => {
+    vaultOf('g1', { vault_id: VID, state: 'locked', sealed_release: R0 });
+    expect((await call('GET', '/api/vault/status')).body.vault).toMatchObject({ state: 'locked', locked_basis: 'reported' });
+    put('vaults', { ...getItem('vaults', VID), state: 'unlocked' });
+    jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + 1000);
+    expect((await call('GET', '/api/vault/status')).body.vault).toMatchObject({ state: 'locked', locked_basis: 'no_lease' });
+    put('vaults', { ...getItem('vaults', VID), lease: { instance_id: 'i-1', lease_expires_at: NOW + 60 } });
+    jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + 2000);
+    const v = (await call('GET', '/api/vault/status')).body.vault;
+    expect(v.state).toBe('unlocked');
+    expect(v).not.toHaveProperty('locked_basis');
+    put('vaults', { ...getItem('vaults', VID), state: 'enrolling', lease: undefined });
+    jest.spyOn(Date, 'now').mockReturnValue(NOW_MS + 3000);
+    expect((await call('GET', '/api/vault/status')).body.vault).not.toHaveProperty('locked_basis');
   });
 
   test('a deleted vault (§12.5) reads as no vault', async () => {

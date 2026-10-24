@@ -432,6 +432,23 @@ describe('vault wording', () => {
     expect(src.match(/pausedNotice\(\),/g)).toHaveLength(3); // enrolling, a vault, no vault
   });
 
+  // MEMBER-API 2.5.0 ("Locks", "The account site's vault pages"): only
+  // `locked` and `not_running` say the vault is locked; `stale` is asked
+  // once more and then said plainly; anything else cannot confirm.
+  test('the lock outcome notices', () => {
+    expect(vt.lockNotice('locked')).toEqual(['Your vault is locked.']);
+    expect(vt.lockNotice('not_running')).toEqual(['Your vault is locked.']);
+    expect(vt.lockNotice('stale')).toEqual(['Your vault was opened again just now. Lock it again if you want it closed.', 'warn']);
+    for (const o of ['done', 'expired', 'unknown', null, undefined, 'etk_unknown']) {
+      expect(vt.lockNotice(o)).toEqual(["We asked your vault to lock but couldn't confirm it yet. Check the status in a minute.", 'warn']);
+    }
+    const src = readFileSync(join(__dirname, '..', 'sites', 'account', 'js', 'vault.js'), 'utf8');
+    expect(src).toMatch(/if \(outcome !== 'stale'\) break;/); // one more ask on stale
+    expect(src).toMatch(/attempt < 2/);
+    // The site's lock is unconditional: vault_id and request_id only.
+    expect(src).toContain("post('/api/vault/lock', { vault_id: v.vault_id, request_id: requestId })");
+  });
+
   test('the states the API returns all have labels', () => {
     for (const s of ['enrolling', 'locked', 'unlocked']) expect(vt.vaultState(s)[0]).not.toBe(s);
     for (const s of ['active', 'deprecated', 'retired', 'removed', 'canary', 'unknown']) expect(vt.releaseStatus(s)[0]).not.toBe(s);

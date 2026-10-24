@@ -114,3 +114,15 @@ export function servicePaused(status) {
     text: "Setting up, unlocking and recovering a vault aren't available right now. Your vault and its data are not affected, and locking still works. Try again later.",
   };
 }
+
+/**
+ * The notice for a lock's outcome (MEMBER-API 2.5.0, "The account site's
+ * vault pages"): only `locked` and `not_running` say the vault is locked;
+ * a `done` without a code (a release before L), `expired` or no answer
+ * cannot say so.
+ */
+export function lockNotice(outcome) {
+  if (outcome === 'locked' || outcome === 'not_running') return ['Your vault is locked.'];
+  if (outcome === 'stale') return ['Your vault was opened again just now. Lock it again if you want it closed.', 'warn'];
+  return ["We asked your vault to lock but couldn't confirm it yet. Check the status in a minute.", 'warn'];
+}
