@@ -1,8 +1,32 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.10.1
+version: 2.11.0
 changelog:
+  - 2.11.0 (2026-10-24; **owner decision of 2026-10-24**; the code,
+    status, grace and record are **proposed** for the owner's approval;
+    with VAULT-MESSAGING 0.57.0; built in this repository, not
+    deployed). New "A recovery that ended without the phone" (under
+    "Vault recovery"): a request signed by a recovering key whose
+    recovery has **ended without the vault adopting that phone**
+    (cancelled, or registered past its `expires_at`) gets **`410
+    recovery_ended`** instead of the bare `401`, on every app route that
+    admits the recovering key (`enclave`, `unlock`, `lock`, `status`,
+    `requests/{id}`, `recovery/open`), only after every check that does
+    not depend on the key's role has passed and the signature verifies
+    under that key; from one hour after the end (the grace) to 30 days
+    after it. Never for a key that is the vault's `app_key`,
+    `app_key_next` or `app_key_pending`, or a claim or recovering key of
+    an active recovery. Any other failure stays `401` with no detail.
+    The recovery keeps its own recovering key when it ends without
+    adoption (unchanged), and a new request carries the replaced
+    recovery's ended key over in `recovery.ended_keys` (kid, public key,
+    `ended_at`, `reason`; at most 5, each for 30 days). No new IAM: the
+    record is inside `recovery`. No log, audit or email changes; the
+    access log gains the status `410` on these routes. Until now such a
+    phone could not tell "the recovery ended without you" from "try
+    again", and deleting its key on a `401` could delete an adopted
+    phone's key
   - 2.10.1 (2026-10-23; editorial; **owner answer of 2026-10-23** on
     the release L plan, VAULT-LOCK 0.1.3 Q2). "Locks" (2.5.0) said the
     lock route's callers were "the account session, the app key or a
@@ -943,7 +967,7 @@ device identifiers, and never logs envelopes.
 | `POST /api/vault/enroll` | — | pending key |
 | `POST /api/vault/unlock` | — | `app_key` (2.7.0: a recovering key is refused `403`) |
 | `POST /api/vault/lock` | yes | `app_key` (2.7.0: a recovering key is refused `403`) |
-| `GET /api/vault/status` | yes | `app_key`, recovering key |
+| `GET /api/vault/status` | yes | `app_key`, recovering key (2.11.0: an ended recovering key gets `410 recovery_ended` here and on every route that admits the recovering key) |
 | `GET /api/vault/requests/{id}` | yes (the member's slots; the result only for enroll, unlock, lock and recovery register, 2.6.1) | the key that made the request |
 | `POST /api/vault/recovery`, `GET`, `/cancel` | yes | — |
 | `POST /api/vault/recovery/cancel-link` | its token | — |
@@ -969,7 +993,11 @@ in order: the header's syntax, `ts` within 300 s, the nonce unused for
 this `akid` within 600 s (a conditional put of `appnonce#<akid>#<nonce>`
 in the rate-limit table, TTL 600 s), that the key is allowed for the
 route on that vault (table above), and the signature. Any failure is
-`401 unauthorized` with no detail. The header, not `Authorization`,
+`401 unauthorized` with no detail, with one exception (2.11.0): a
+recovering key whose recovery ended without the vault adopting it gets
+`410 recovery_ended` on the routes that admit the recovering key, once
+everything else has passed ("A recovery that ended without the phone").
+The header, not `Authorization`,
 because CloudFront forwards `Authorization` only through a cache policy
 and `/api/*` disables caching: the account site's `/api/*` origin request
 policy adds `X-VettID-App` to its allowlist.
@@ -983,7 +1011,10 @@ policy adds `X-VettID-App` to its allowlist.
   hour; cleared once `app_key` names the same `kid`.
 - On the recovery: `claim_keys [{key, kid}]` (at most 10) and
   `recovering_key {key, kid}` (from the register whose slot came back
-  `recovery_registered`).
+  `recovery_registered`). 2.11.0: `ended_keys [{kid, key, ended_at,
+  reason}]`, the recovering keys of earlier recoveries that ended without
+  adoption, carried over by each new request (at most 5, each for 30
+  days; "A recovery that ended without the phone").
 - On each response slot: the signing `kid` (`app_kid`), so that only that
   key can poll it.
 
@@ -1247,6 +1278,7 @@ value), and `retry_after` seconds where given:
 | 409 | `vault_busy` | `?release=` asked for a release while another release's instance holds the vault (`retry_after`: until the lease ends) |
 | 409 | `duplicate_request` | `request_id` already used |
 | 410 | `release_unavailable` | The vault's release (or the one `?release=` asked for) is unknown, `removed` (its end date has passed, VAULT-MESSAGING 0.10.0 §11.10.5), or its image can no longer be started |
+| 410 | `recovery_ended` | (2.11.0) The request is signed by a recovering key whose recovery ended without the vault adopting this phone; only on the routes that admit the recovering key, and only after every other check passed ("A recovery that ended without the phone") |
 | 503 | `release_starting` | No instance of the release is running; one has been requested. Body also has `release` and `retry_after` (30) |
 | 503 | `vault_unavailable` | No `active` release is deployed yet, or the operator has paused the vault service (body `service: "paused"`, below); `retry_after` 300 |
 
@@ -2046,7 +2078,9 @@ Everything above holds except where this says otherwise.*
   number of attempts used, which the vault reports to its owner only.
 - **The recovering key** may call `enclave`, `open`, read `status`
   and poll its own requests; `unlock` and `lock` are refused `403` (a registered phone
-  does not unlock from release R).
+  does not unlock from release R). Once its recovery has ended without
+  adopting it, all of these answer `410 recovery_ended` (2.11.0, "A
+  recovery that ended without the phone").
 - **The pending app key.** A transfer or a recovery replaces the app in
   three writes (VAULT-MESSAGING §11.14.2). The host writes
   `app_key_next` (`{key, kid, seq}`, `seq` one above `app_key`'s) with
@@ -2111,6 +2145,105 @@ Everything above holds except where this says otherwise.*
   ready on {date} at {time}" and, while `earliest`, "at the earliest";
   and "The app on your new phone shows how many attempts are left." The
   page cannot show the count.
+
+#### A recovery that ended without the phone (2.11.0)
+
+*Owner decision of 2026-10-24. The status and code, the grace, the 30
+days and the record are proposed for the owner's approval. Built in
+vettid.org (this change); not deployed. With VAULT-MESSAGING 0.57.0
+§11.14.6.*
+
+**Before 2.11.0.** A request signed by a recovering key is admitted as
+the vault's app once the vault adopted it (`app_key` or `app_key_next`),
+or as the recovering key while its recovery is active. Otherwise it got
+the bare `401`, the same answer as a `ts` outside the window, a reused
+nonce, a bad signature, a deleted vault, or a vault that is not the
+member's current one. A phone whose open answer was lost could not tell
+"the recovery ended without me" from "try again", and deleting its key
+on a `401` could delete the key of a phone the vault had adopted.
+
+**The answer.** `410 recovery_ended` (`{error, code: "recovery_ended",
+message}`), on every app route that admits the recovering key:
+`GET /api/vault/enclave`, `POST /api/vault/unlock`, `POST
+/api/vault/lock`, `GET /api/vault/status`, `GET /api/vault/requests/{id}`
+and `POST /api/vault/recovery/open`. Only when all of these hold, in
+this order:
+1. the header's syntax, `ts` within 300 s and the nonce unspent (it is
+   spent by this request);
+2. the vault row exists and is not `deleted`;
+3. the key is not one the row admits for the route, and its `kid` is
+   one of the row's **ended recovering keys** (below), past its grace;
+4. the key is **not** the host's `app_key` or `app_key_next` (whatever
+   their `seq`), not the redeem's `app_key_pending`, and not a claim or
+   recovering key of the vault's current recovery while that is active.
+   An adopted phone is admitted as the app (`200`), never told
+   `recovery_ended`;
+5. the signature verifies under that ended key;
+6. the vault is the member's current one and the member row exists;
+7. the member's `vault-status` limit (60 a minute, the status read's) is
+   not exceeded (`429` otherwise).
+
+Any other failure is `401 unauthorized` with no detail, as before. The
+answer is given whatever the account's state (the routes' own account
+checks come after the caller is known). It says only "your recovery
+ended without you": nothing about how it ended, when, or whether
+another recovery exists. The key's holder already knows it registered.
+
+**Ended recovering keys.**
+- **The recovery's own.** A recovery that ended without adoption keeps
+  its `recovering_key` (as before): `cancelled`, or `registered` past
+  its `expires_at`. It ended at `cancelled_at` (a cancel recorded
+  before 2.9.0 has none: its `expires_at` stands in, later and never
+  sooner), or at `expires_at`. A `completed` recovery's key was adopted
+  and is cleared (2.4.1), and never counts. A `pending` or
+  `unavailable` recovery has no recovering key.
+- **Carried over** (`recovery.ended_keys`). A new `POST
+  /api/vault/recovery` replaces the recovery, so it copies the replaced
+  one's ended key, and the ones that one carried, into its own
+  `ended_keys`: `{kid, key, ended_at, reason}`, `key` the public key
+  (SPKI, base64) as `recovering_key` held it, `reason` `cancelled` or
+  `expired`; one per `kid`, the latest 5, each dropped 30 days after
+  `ended_at`. Nothing else is kept (no claim keys, no ids). It is inside
+  the `recovery` attribute, which the API already writes: no new IAM.
+  Never returned (the `Recovery` object does not change), logged,
+  audited or mailed. A deleted vault, or a new vault, keeps none.
+- **The window.** From **1 hour** after `ended_at` (the grace) to **30
+  days** after it. During the grace the answer stays `401`: an open or a
+  cancel may still be on its way to the vault (a queue message can
+  arrive minutes late), and after an open that the vault completed, the
+  host writes `app_key` only once the flush is stored. After 30 days
+  the key gets `401` again.
+
+**What an app does** (VAULT-MESSAGING §11.14.6 "A recovery that ended
+without the phone"): on `410 recovery_ended` the phone may forget its
+pending (recovering) key and offer to start over; on `401` it must
+not, and tries again later.
+
+**Logs.** No log, audit or email changes. The access log shows the
+status `410` on these routes where it showed `401`.
+
+**Residual.** A phone that the vault adopted after its recovery was
+recorded as cancelled (an open that won the race in the vault), and
+that later handed the vault over to another phone by a transfer, is
+no longer `app_key` and gets `recovery_ended`. It is not the vault's
+app any more, so forgetting the key loses nothing.
+And the grace bounds, but does not close, the gap after an open that
+the vault completed: if the host writes `app_key` more than an hour
+after the recovery ended (a host that stopped between the vault's flush
+and its report), the adopted phone is told `recovery_ended` until the
+write. The host writes `app_key` with every lifecycle report, so the
+gap is as long as the host's outage.
+
+**Tests** (test/lambda/vault.test.ts): adopted (`app_key`,
+`app_key_next`) `200` whatever the recovery; a stale `app_key_next` or
+a pending key `401`; active `200` with the recovery; cancelled, expired
+and both `410` on all six routes, nothing queued, written or audited,
+counted on the status limit; a pre-2.9.0 cancel; the grace and the 30
+days; a bad signature, a stale `ts`, a reused nonce or another key
+under the ended kid `401`; a deleted vault, a vault that is not current,
+a member gone `401`; the carry-over (fields, never shown on the
+recovery, a claim of the new recovery by the same key `401`, carried
+again, nothing for a completed recovery); the bound of 5.
 
 #### A recovery cancelled from the phone (2.9.0)
 
