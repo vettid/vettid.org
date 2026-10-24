@@ -1,17 +1,31 @@
 ---
 title: VAULT-HOST-PROTOCOL
 status: approved by the owner 2026-10-12 (H1–H9 as recommended)
-version: 0.1.14
-date: 2026-10-20
+version: 0.1.15
+date: 2026-10-24
 owner: Al Liebl (Mesmer)
 component: vault enclave (supervisor), parent (host process)
 related:
-  - VAULT-MESSAGING.md (0.51.0) §2 (threat model, who sees what), §11.14 (release R: recovery and the attempt counter), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
+  - VAULT-MESSAGING.md (0.58.0) §2 (threat model, who sees what), §11.14 (release R: recovery and the attempt counter), §11.1, §11.5, §11.6, §12 (collect manager, shared connections, lock triggers, process isolation), §13.2, §13.3, §13.5
   - VAULT-PLAN.md (0.1.8) §5.2 (D5: TLS in the enclave), §5.3 (D4: one process per vault)
   - VAULT-RELEASES.md (0.1.32) §3.4 (C3, C4), §8.4 (network and egress), §8.7 (observability)
   - VAULT-RELAY-SCALING.md (0.1.2) §6, §10
   - vettid-vault `internal/hostproto`, `enclave/supervisor`, `enclave/egress`, `parent`, docs/V3-NOTES.md "Enclave ↔ parent", docs/SMOKE.md
 changelog:
+  - 0.1.15: with VAULT-MESSAGING 0.58.0; as built in vettid-vault #148
+    (main 276a23a); for the owner's approval. **Durable app key writes**:
+    whenever the vault has adopted an app key, the vault row names it as
+    `app_key` or `app_key_next`. (1) A new enclave request,
+    **`AppKeyNext` (0x07)**, the acknowledged app key (§5.7); the
+    enclave stores no header that names an app key before the parent has
+    answered `ok` for it. (2) §7.2: the events `app_key_assert` and
+    `app_key_next_clear`; the writes of `app_key` and `app_key_next` are
+    conditional on `seq` and `header_seq`; the parent writes failed app key
+    writes again until they are written; the `app_key_next` event is
+    only a report. (3) §4.2: the enclave asserts its current app keys
+    after every hello. (4) §6.1, §9, §10 (**deployment order**: the
+    parent before an enclave that sends `AppKeyNext`), §11.3, §11.4, §12
+    (P21, P22). The RUNBOOK lists the new log lines
   - 0.1.14: with VAULT-MESSAGING 0.51.0 and MEMBER-API 2.10.0
     (vettid.org #356); **approved by the owner (2026-10-20)**; for
     staging release 20, not built. A deletion that stops between
@@ -415,12 +429,18 @@ request but `Selftest` with `error`.
 The parent forwards queue messages only while an enclave is connected
 and has sent a descriptor.
 
+(0.1.15) After every hello, whether `fresh` or `resume`, the enclave
+tells the parent the app key of each vault whose current app key it
+relayed (§7.2, "Assertions"); a parent that restarted has lost its queue
+of failed app key writes and learns the keys again.
+
 ### 4.3 Loss
 
 - **The connection ends.** The enclave notes the time and dials again
   (200 ms, doubling to 5 s, for as long as it runs). Calls to the
   parent fail at once while there is no connection. After each
-  successful hello it sends its current descriptor again. The parent
+  successful hello it sends its current descriptor again, and (0.1.15)
+  asserts its vaults' current app keys (§7.2). The parent
   deletes the instance's registry row at once, so the member API stops
   routing to it.
 - **No `Ping` for 120 s: the parent is unreachable** (93f32ca;
@@ -619,6 +639,40 @@ from the first request; the vault process delivers nothing of
 VAULT-MESSAGING §12.5 step 2 before an `ok`, and ends locked without
 one. The request is idempotent.
 
+### 5.7 `AppKeyNext` (0x07)
+
+(0.1.15; VAULT-MESSAGING 0.58.0 §11.5, §11.14.2; vettid-vault #148.)
+
+| | Fields |
+|---|---|
+| Request | `vault_id`, `mode`, `app_key`, `app_key_seq`, `header_seq` |
+| Reply `ok` | none |
+| Other replies | `conflict`; `invalid` (a malformed request; nothing is written); `error` |
+
+- `vault_id`: as in §7.2. `mode`: `next` or `enroll`. `app_key`: the key's public key (SPKI DER, 1 to 256 bytes). `app_key_seq`, `header_seq`: canonical decimals (`app_key_seq` from 1; at most 2^53).
+- **Mode `next`** (a transfer, a recovery, any change of the app key after enrollment): the parent makes the row name the key as `app_key_next = {key, kid, seq, header_seq}`, whatever the lease, under these conditions, all in one conditional update:
+  1. the row exists and its `app_key` is absent or has a `seq` below `app_key_seq`;
+  2. the row has no `app_key_next`, or its `app_key_next` has no `header_seq`, or that `header_seq` is below this request's, or (this request only) the `header_seq` is equal and the stored attempt stamp is absent or below this request's (the live-confirm rule, below). A report or retry never replaces an `app_key_next` of an equal `header_seq`.
+
+  **The live-confirm rule.** This request is the vault's live attempt, so it is the one write that may replace an `app_key_next` whose `header_seq` equals this request's whatever its `kid` (an earlier attempt's confirmation landed on the row, but its header was never stored, and the next attempt reuses that `header_seq`), and then only if the stored attempt stamp is absent or smaller than this request's. The write stores `att` (the attempt stamp, a number) in `app_key_next` beside `key`, `kid`, `seq` and `header_seq`; the member API reads only `key`, `kid` and `seq` and ignores the field, and reports never write it. The `seq` of an existing `app_key_next` is not considered; an `app_key_next` with a higher `header_seq` is never replaced (there is no exception for a next key left by an earlier vault: see residual 3). Reports, retries and assertions never replace an equal `header_seq`.
+
+  The parent answers `ok` only after that write, or when it finds the row already names the key: as `app_key_next` with a `seq` not below this request's, or as `app_key` with a `seq` not below it (it reads the row, consistently, to tell these cases). It answers `conflict` when neither holds and the write was refused (the row names another key at that `seq` or higher, a newer replacement's key is there, or there is no row). It answers `error` for any other failure; the enclave retries.
+- **Mode `enroll`** (the vault's first header): the parent writes `app_key = {key, kid, seq}` and removes `app_key_next`, whatever the row has (a replaced provisional vault starts again at `seq` 1), and answers `ok` after the write, `conflict` if there is no row.
+- The parent serializes these requests per vault. It takes the vault's confirmation lock (giving up with `error` if the request's 8-second deadline runs out first). Under the lock it writes the vault's earlier lifecycle events (as for §5.6) and waits for the vault's app key writes that failed before (§7.2, "Retry") to be written or given up; if the deadline runs out in these waits it writes nothing. Then it stamps the request with an attempt number (the parent's time in nanoseconds, increasing per request at this parent) and writes. **The table write and its read-back run to their outcome** under their own bound of 30 seconds, not under the request's deadline, and the lock is released only when they return. If the deadline runs out first the vault is answered `error` (it has given up; the lock stays with the write), so a write sent before the deadline can never land behind a newer attempt's: the newer attempt waits for it, unless the table applies it after the 30-second bound has given up.
+- The supervisor forwards it only for the vault process's own `vault_id` and one request per call (anything else is refused to the vault process). It passes `ok` and `conflict` through and answers `error` to the vault process for any other reply, so a parent's `invalid` reaches the vault process as `error`.
+
+**The gate (enclave).** The enclave stores no header that names an app key the stored header does not name (an enrollment, a transfer, a recovery, a rotation, a replacement resumed at an unlock) before the parent has answered `ok` for that key. The gate sits before the first write that carries the key:
+- for a replacement of the app (VAULT-MESSAGING §11.14.2), before step 1: the request is made, with the `header_seq` of the step-1 write, and only then is the header with the `next` part written;
+- for any other change, before the flush that stores the state, and again before the header write (the second is a no-op after the first);
+- for a resumed replacement (an unlock or recovery open that finds `next` with an app key), before the state is written under DEK_1 again and before the header with the key.
+
+The enclave retries `error` and a missing answer with backoff (500 ms, doubling to 2 s) for at most 10 seconds in all (a phone waits 30 seconds for an answer, and a recovery open also spends its derivation and a status read of up to 10 seconds); it does not retry `conflict`. If the key is not confirmed the operation fails as a failed state or header write does (`retry`, or the enrollment's failure), and nothing of it is stored. An `app_key_next` that the parent wrote before the answer was lost, or whose step 1 then failed, is cleared at once by the enclave, best effort: it sends the event `app_key_next_clear` with the attempted key (`app_key`, `app_key_seq`) and the `header_seq` of the attempted step-1 write, and again at the next flush (a link to the parent that is down drops the first). The parent removes `app_key_next` only if it is that key (`kid`) at that `header_seq` (`app_key_next.kid = kid AND app_key_next.header_seq = header_seq`), so it never removes an older pending key at a lower `header_seq` or another vault's key at the same one, and writes the event again until it has (§7.2). It no longer waits for a later header write. The clear also goes out when step 1 may actually have stored (a `Put` that failed ambiguously, or a failed read-back): it then removes the key of a stored step-1 `next` from the row, which is safe because the vault confirms a key again before it adopts it (the gate, above). A key confirmed again (the same attempt repeated) cancels the earlier attempt's pending second send. If the event is lost too (the enclave or the parent ends first), the orphan stays on the row until a later `next_cleared` or an unlock with `next: false` clears it, and that can be indefinitely when no unlock follows. A missing confirmation function in the enclave fails closed (the header is not written).
+
+**Residuals.**
+1. The orphan `app_key_next` above, if its best-effort clear is lost (the enclave's link to the parent is down when it is sent; it is sent again at the next flush of a vault that still runs, but a vault that is zeroized by then sends nothing more): it admits the key of the phone that began the replacement (in a recovery, the recovering phone's key; in a transfer, the new phone's), as the `app` role of the member API, and it can last indefinitely when no unlock follows. The same holds for a change of the app key outside a replacement whose flush then fails: no clear is sent there.
+2. Split brain across instances. The lock serializes one parent's handlers only. A vault process that is stale on another instance after a move can still confirm after the current instance's: a lower `header_seq` is refused (`conflict`); at an equal `header_seq` the larger attempt stamp wins, and stamps of two parents are ordered by their clocks (nanoseconds since the epoch), so the case that remains is two instances whose clocks differ by more than the gap between the two requests. With the exact orphan clear a stale instance can remove only its own key (the `kid` and `header_seq` it attempted), never the real vault's entry. It is bounded: both instances' vaults cannot both store a header (the store's conditional writes make one of them lose with split brain and lock), and the key left on the row is one that a phone of this member sent.
+3. A stale `app_key_next` of an earlier vault of the same `vault_id` (a provisional vault that was enrolled over, whose late live `AppKeyNext`, applied by the table after the 30-second bound of its write, landed after the new enrollment's own confirmation, which removes `app_key_next`; reports no longer write `app_key_next`, so this is the only source) has a higher `header_seq` than the new vault's first replacement, so that replacement's confirmation is refused (`conflict`, the transfer or recovery fails with `retry`) until the next is cleared (the new vault's unlock reports `next: false` only when its `seq` or `header_seq` reaches the stale one's, and `app_key` reaching its `seq` removes it). Availability only, and rare: it needs a late write of a vault that no longer exists. No exception is made for it, because the row cannot tell it from a newer attempt's key of a lagging `app_key` (a late older confirmation would otherwise replace a newer one).
+
 ## 6. Requests from the parent to the enclave
 
 ### 6.1 `Queue` (0x10)
@@ -685,15 +739,17 @@ one. The request is idempotent.
   none) into that cancel's slot, and from no other. A cancel's answer
   has no envelope, so this is the one code the parent copies from an
   answer without one (today it copies codes only with an envelope, and
-  the enclave's answer check refuses a code without one). It writes the lifecycle event `app_key_next`
-  (sent with the first header write of a replacement of the app) as the
-  row's `app_key_next`, and clears it when `app_key` reaches its
+  the enclave's answer check refuses a code without one). (0.1.15) The row's `app_key_next` is written
+  by the acknowledged request of §5.7 before the vault stores the header
+  that names it; the lifecycle event `app_key_next` (sent with the
+  first header write of a replacement of the app) is only a report, which
+  the parent logs and does not write. The parent clears `app_key_next` when `app_key` reaches its
   `seq`, when an `app_key` event carries `next_cleared: true` (it skips
   the `app_key` write itself, whose `seq` is unchanged), or when an
   `unlocked` or `locked` report says `next: false` with an `app_key_seq`
   at least the next key's `seq` or a `header_seq` at least that of the
-  write that carried it; never on time alone (VAULT-MESSAGING §11.5,
-  §11.14.2).
+  write that carried it, or when the event `app_key_next_clear` names it
+  (§7.2); never on time alone (VAULT-MESSAGING §11.5, §11.14.2).
 
 - **`delete_resume` (0.1.14; VAULT-MESSAGING 0.51.0 §11.5, §12.5;
   release 20, not built).** A new operation without an envelope,
@@ -863,7 +919,7 @@ a slot that was never written.
 
 | Field | Form |
 |---|---|
-| `event` | `enrolled`, `unlocked`, `locked`, `moved`, `deleted`, `app_key`, `credential_backup`, `account_name`, `alarm.credential_clone` |
+| `event` | `enrolled`, `unlocked`, `locked`, `moved`, `deleted`, `app_key`, `app_key_next` (0.1.10), `app_key_assert`, `app_key_next_clear` (the last two from 0.1.15; these four `app_key` events carry a key), `credential_backup`, `account_name`, `alarm.credential_clone` |
 | `vault_id` | 1 to 128 characters of `a-z`, `0-9`, `-`, `_`, `.` |
 | `release`, `vault_version` | 96 lowercase hex characters |
 | `state_version` | decimal |
@@ -878,7 +934,19 @@ them.
 The parent keeps its set of running vaults from these (`unlocked` adds
 a vault; `locked` and `deleted` remove it), renews the leases of that
 set, and writes each event to the vault table in the order received
-(VAULT-MESSAGING §11.5).
+(VAULT-MESSAGING §11.5). (0.1.15: `app_key_assert` is the exception, below.)
+
+**Events added in 0.1.15.** `app_key_next_clear` carries `app_key`, `app_key_seq` and the attempted step-1 `header_seq`; the parent writes it as the exact clear below and nothing else. `app_key_assert` carries `app_key` and `app_key_seq`; the parent writes it as an `app_key` event and changes nothing else on the row. Either with no `app_key`, or with `next_cleared` set, is refused as a malformed frame; any other new event name is refused as before.
+
+**Ordering of the app key writes.** (An `app_key_next` is on the row before the vault stores anything that names it, §5.7, so no later report or assertion has to repair it; there is no assertion of `app_key_next`.) Every write of `app_key` and `app_key_next` is conditional, so that a write that is late, repeated or stale never undoes a newer one:
+- `app_key`: only when its `seq` is above the row's (`enrolled`: also when the row is still `enrolling`, or already names the same key; it never rolls an `app_key` back to a lower `seq`). The same update removes `app_key_next` when that key's `seq` is not above this one; `app_key` and the removal are ONE update (a failure leaves the row naming the key). If a next key above this `seq` must stay, the key is written alone, in its own single update.
+- `app_key_next`: ordered by `header_seq` as in §5.7 (a stale key never replaces a newer one; a report or retry never replaces an `app_key_next` of an equal `header_seq`, only a lower one; a live confirmation, serialized per vault at the parent and stamped, also replaces an equal `header_seq` of another key if its stamp is later, and never one with a higher `header_seq`).
+- `app_key_next_clear` (the orphan clear of a failed step 1): removes `app_key_next` only if its `kid` is the event key's and its `header_seq` equals the event's; nothing else.
+- `next_cleared`: removes `app_key_next` only if its `header_seq` is not above the event's `header_seq` (the header write that dropped the replacement), so a late clear never removes a newer replacement's key.
+
+**Retry.** The `app_key_next` report is not written to the table at all (the parent logs it and does nothing else: the acknowledged request wrote the key, and a second write would only replace the live entry and drop its attempt stamp), so it is neither written nor retried. A write of `app_key` that fails, or of a clear (`next_cleared`, `app_key_next_clear`, or the `next: false` of an `unlocked` or `locked`), or of an assertion, is not dropped: the parent writes it again with backoff (1 s up to 30 s, each try bounded by 30 s) until it succeeds, per vault, in the order received, with the rest of the event written once as before. At most 256 failed writes are held for a vault (past that the oldest goes; a dropped `app_key` write is superseded by a later one, since every such write is conditional on `seq`, but a dropped clear (`next_cleared`, `app_key_next_clear`, `next: false`) is not, and becomes the orphan of §5.7 residual 1). It logs the failure (`lifecycle write failed`, as an unwritten event always was, and `app key write failed; trying again`; a failed assertion logs only the second). An error that trying again cannot cure (a request the service refuses as malformed, a role not allowed it) is logged (`app key write refused; not tried again`) and given up.
+
+**Assertions.** After every hello (§4.1), whether `fresh` or `resume`, the enclave sends, for each vault whose current app key it relayed, an `app_key_assert` with the last `app_key` and `app_key_seq` it reported, 2 ms apart. It keeps that book for at most 4096 vaults (past that, the vault reported least recently is dropped), until `deleted` or `moved`, and for a vault whose last report was `locked` for at most 24 hours. The parent handles them on a queue of its own, one vault at a time with 5 ms between vaults, never on the queue of lifecycle events and never ahead of a reply or a confirmation, and keeps only the latest per vault. They write under the `app_key` condition above, so they only fill in what the row lacks: an assertion that is late or stale (a vault that moved to another instance since; an earlier report) never replaces a newer `app_key` and never touches `app_key_next`. The parent logs them at debug, not info.
 
 ### 7.3 `Stopped` (0x22)
 
@@ -1116,6 +1184,9 @@ time of a record is its `LastModified`.
 | Reconnect | 200 ms, doubling to 5 s | enclave |
 | Any enclave request (store, credentials) | 60 s | enclave |
 | `MarkDeleting` (0.1.14) | 60 s each; retried from 1 s, doubling to 15 s, for 2 minutes in all; then the vault ends locked | enclave |
+| `AppKeyNext` (0.1.15) | at the parent: 8 s for the lock and the waits before the write, then 30 s for the write and its read-back; at the enclave: 10 s in all for one confirmation (retried from 500 ms, doubling to 2 s) | each |
+| A failed app key write (0.1.15) | tried again at the parent, backoff 1 s up to 30 s, without end except for a permanent error (§7.2), which is given up | parent |
+| App key assertions (0.1.15) | 2 ms apart from the enclave; 5 ms apart at the parent | each |
 | Parent unreachable: lock every vault | 120 s without a `Ping`, checked every 10 s (through 8f2c8bf: without a connection) | enclave |
 | Lock of every vault, then kill | 10 s | enclave |
 | Frame write, enclave → parent | 60 s, then the connection ends | enclave |
@@ -1162,11 +1233,34 @@ meant to meet. What the code does if they do:
 | Extra pairs in a `Stats` reply | dropped by the parent |
 | A `Lifecycle` with five, seven, eight, eleven or fourteen fields | accepted by the parent (§7.2); fifteen from 0.1.13 |
 | `MarkDeleting` to a parent before 0.1.14 | answered `invalid` as an unknown kind; the vault then ends locked without telling its devices (never met: each release runs its own parent) |
+| `app_key_next` from an enclave before 0.1.15 at a 0.1.15 parent | logged, not written; release R's step-1 admission is lost (see "Deployment order" below) |
+| `AppKeyNext` to a parent before 0.1.15 | answered `invalid` as an unknown kind; the vault process sees `error` (§5.7), retries for 10 s and fails closed: nothing that names an app key is stored (see "Deployment order" below) |
+| `app_key_assert` and `app_key_next_clear` at a parent before 0.1.15 | dropped as an unknown event (the frame is refused) |
 | A queue operation `delete_resume` at a parent before 0.1.14 | dropped as an unreadable message |
 | An egress header with another version | closed without an answer |
 
 So a new request kind can be added without breaking either side, and
 a change to the hello's fields cannot.
+
+**Deployment order (0.1.15).** The parent and the enclave change
+together: each release runs the parent built from its own tag
+(VAULT-RELEASES §3.4, C4), and **neither mixed pairing is supported**.
+- *A parent before 0.1.15 with an enclave that sends `AppKeyNext`.* The
+  parent answers `0x07` with `invalid`, which the vault process sees as
+  `error` and retries for 10 seconds; the gate (§5.7) then refuses to
+  store the header, so every enrollment, transfer and recovery fails
+  closed (with `retry`, or the enrollment's failure) and nothing is
+  stored. That parent also drops `app_key_assert` and
+  `app_key_next_clear`, so a lost write is not repaired. Nothing is lost
+  or weakened in this pairing; the operations only fail.
+- *A 0.1.15 parent with an enclave before 0.1.15.* The enclave never
+  sends `AppKeyNext`, and the parent no longer writes the `app_key_next`
+  report (it logs it), so `app_key_next` is never written and release R's
+  admission of the new phone's key during step 1 is lost (the member API
+  refuses that phone until `app_key` is written at step 3). Operations
+  still run; this is a loss of a protection, not a fail-closed stop.
+
+Roll a release out as one unit, enclave image and parent from the same tag.
 
 ## 11. Trust
 
@@ -1293,6 +1387,7 @@ more than "the operation does not happen, or happens late".
 | `Queue`, the manifest document | withhold it, or give another | The request fails `manifest`. It cannot make the enclave accept a manifest the app did not verify (VAULT-MESSAGING §11.5) |
 | `Queue` reply (seen by the parent) | drop it, or write another slot | The app gets no result or a result it cannot open; results are sealed. The host codes (`recovery_registered`, `recovery_unavailable`, `recovery_attempt` and, from 0.1.13, `recovery_cancelled` with `cancelled_recovery_id` and `recovery_not_current`) can be forged or suppressed with the effects VAULT-MESSAGING §11.5 lists |
 | `MarkDeleting` reply (0.1.14) | say `ok` without writing; say `error`, or nothing | A false `ok`: the devices are told and the row is not marked, so a deletion that then stops is not resumed (the state before 0.1.14). `error` or no answer: the vault ends locked without telling its devices, and the member's next unlock finishes the deletion. Either way nothing is opened or kept; **denial of service only** |
+| `AppKeyNext` reply (0.1.15) | refuse or delay it; say `conflict`, `error` or nothing; say `ok` without writing | Refusing or delaying: the operation fails and the phone retries. A false `ok`: the vault stores the header, the row lacks the key, and the member API refuses the phone until the next report. Availability only (§11.4) |
 | The vault row's `deleting_at` (0.1.14) | write it for any vault at any time; never write it; leave it after the vault runs again | The mark is used only by the member API's cleanup run, to send `delete_resume` (MEMBER-API "Vault deletion"). A forged or stale mark causes at most `delete_resume` requests, which the enclave ignores unless its own sealed header records `deleting` (or the header and state are already gone, P20). It never makes the member API send `delete`, and it is **never shown to the member**: the vault's status keeps the row's own state, the account site keeps offering recovery and start-over, and the apps show a deletion only after the vault's own `device.unlinked{vault_deleted}`. The parent's update for `unlocked` clears it. Never writing it: a deletion that then stops is not resumed (the state before 0.1.14). **Denial of service only** |
 | `LeaseLost` | send it for any vault, at any time; never send it | The vault locks. Never sending it leaves a vault running without a lease; if a second instance then opens the vault, the two meet at the conditional state write, and the one that finds a newer version is zeroized (the split-brain guard does not depend on leases) |
 | `Ping` | not send it; send it and renew no lease; ignore the answer | Not sending it locks every vault after 120 s (§4.3): **denial of service only**. Sending it proves only that the peer is alive: a parent can ping and renew nothing, and what then stops two instances writing one vault is the conditional state write, as before. It learns the number of running vaults, which it has from the lifecycle events |
@@ -1347,7 +1442,12 @@ more than "the operation does not happen, or happens late".
    those names anyway (VAULT-MESSAGING §10.8 "Trust").
 6. **Misreport** to the tables what the enclave reported: leases,
    lifecycle values, app keys, the backup bit, name requests, alarms.
-   Routing and the account site only.
+   Routing and the account site only. (0.1.15) A dishonest parent can
+   refuse or delay an `AppKeyNext` (the operation then fails and is
+   retried by the phone) or answer `ok` without writing (the phone is
+   then refused by the member API until the next report): availability
+   only, as before: a parent can already rewrite `app_key` on the row
+   at will.
 7. **Observe** what §11.2 lists: per vault, who the member is and when
    the vault is enrolled, unlocked, locked and written; per instance,
    the timing and volume of encrypted traffic to each host. With the
@@ -1513,6 +1613,19 @@ with VAULT-MESSAGING 0.51.0); normative from release 20, not built.*
   records `deleting`, or neither that header nor the vault's state
   object exists; it MUST NOT act while a process for that vault runs
   on the instance.
+
+*P21–P22: added in 0.1.15 (for the owner's approval, with VAULT-MESSAGING
+0.58.0); as built in vettid-vault #148.*
+
+- **P21.** The enclave MUST NOT store a header that names an app key the
+  stored header does not name before the parent has answered `ok` for
+  that key (§5.7), and MUST fail the operation, storing nothing, when no
+  `ok` comes within 10 seconds or the parent answers `conflict`.
+- **P22.** The parent MUST write `app_key` and `app_key_next` only
+  conditionally on `seq` and `header_seq` as §7.2 says, so that a write
+  that is late, repeated or stale never undoes a newer one, and MUST write
+  again a failed write of `app_key` or of a clear until it is written
+  (or is permanently refused).
 
 ## 13. Open points
 

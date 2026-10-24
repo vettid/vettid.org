@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.57.0
+version: 0.58.0
 date: 2026-10-24
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -23,10 +23,32 @@ related:
   - VAULT-RELEASES.md (0.1.31; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
-  - VAULT-HOST-PROTOCOL.md (0.1.14; the enclave ↔ parent protocol as built)
+  - VAULT-HOST-PROTOCOL.md (0.1.15; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.58.0: **durable app key writes** (with VAULT-HOST-PROTOCOL 0.1.15;
+    as built in vettid-vault #148, main 276a23a; for the owner's
+    approval). Whenever the vault has adopted an app key, the vault row
+    names it as `app_key` or `app_key_next`, durably. §11.5: the parent
+    writes `app_key_next` on the row **before the vault stores the
+    header that names it**, in an acknowledged request
+    (VAULT-HOST-PROTOCOL §5.7); the lifecycle event `app_key_next` is only
+    a report. The writes of `app_key` and `app_key_next` are conditional on
+    `seq` and `header_seq`, and a failed one is written again until it is
+    written; `app_key` and the removal of `app_key_next` are one write; the
+    enclave tells the parent its app key state again after every hello.
+    §11.14.2: the confirmation comes before step 1 (a replacement does
+    not begin without the parent's `ok`), and before any other header that
+    names an app key the stored header does not (a replacement resumed at
+    an unlock, the first header at enrollment, a change outside a
+    replacement); the next key a failed step 1 left on the row is cleared
+    at once (`app_key_next_clear`); `next_cleared` removes `app_key_next`
+    only if its `header_seq` is not above the event's. The release R list
+    of chosen names adds `AppKeyNext` and the assertion of the current
+    key. A dishonest parent can still cause a refusal of the phone (by
+    answering `ok` without writing or by rewriting the row): availability
+    only. No change for the apps
   - 0.57.0: **owner decisions of 2026-10-24** (with MEMBER-API 2.11.0,
     ANDROID-PLAN 0.1.77, IOS-PLAN 0.1.32). §12.5 new **"What a phone
     does"**: a phone erases its local vault data because of a deletion
@@ -12030,11 +12052,14 @@ Nothing secret is stored:
   replaces the app. The enclave hands the `app_key` event to the parent
   together with the header write that made the change, and the parent
   writes it after that store succeeds. (0.33.0, release R) A
-  replacement of the app is written in three steps (§11.14.2): the event
+  replacement of the app is written in three steps (§11.14.2): the parent
+  writes `app_key_next` on the row (conditional on its `seq` being higher
+  than `app_key`'s) **before the vault stores the header that names it**,
+  in an acknowledged request (0.58.0, VAULT-HOST-PROTOCOL §5.7); the event
   **`app_key_next`** (the same two values) goes with the first header
-  write and the parent writes it as `app_key_next` on the row
-  (conditional on its `seq` being higher than `app_key`'s); `app_key`
-  goes with the third, and the parent then clears `app_key_next`. An
+  write and remains as a report (the parent logs it and does not write
+  it); `app_key` goes with the third, and the parent then clears
+  `app_key_next`. An
   `app_key` event with `next_cleared: true` repeats the current key with
   the same `seq`: the parent skips the `app_key` write and applies the
   clear (§11.14.2).
@@ -12042,9 +12067,17 @@ Nothing secret is stored:
   has a `next` part (§11.14.2). The parent writes `app_key = {key,
   kid, seq}` on the vault row **whatever the lease**, conditional only on
   `seq` being higher than the row's (a stale instance can only report an
-  older one), except that `enrolled` always replaces it (a replaced
-  provisional vault starts again at 1, §11.3); it never takes the key
-  from anywhere else.
+  older one), except that `enrolled` writes it also when the row is still
+  `enrolling`, has no key, or already names the same key (0.58.0; a
+  replaced provisional vault starts again at 1 by the unconditional
+  enroll-mode request of VAULT-HOST-PROTOCOL §5.7, §11.3); it never takes the key
+  from anywhere else. (0.58.0) The writes of `app_key` and
+  `app_key_next` are conditional on `seq` and `header_seq`
+  (VAULT-HOST-PROTOCOL §7.2) and are repeated until they are written; a
+  failed one is not dropped. `app_key` and the removal of `app_key_next`
+  are one write. The enclave tells the parent its app key state again
+  after every hello (the event `app_key_assert`: the current key and its
+  `seq`; it fills in what the row lacks and never replaces a newer key).
 - **The backup bit** (0.16.0, owner decision of 2026-10-06, §15 item
   24). `enrolled`, `unlocked` and `locked` also carry
   `credential_backup` (bool): whether the vault keeps a backup copy of
@@ -16106,10 +16139,27 @@ DEK from `DEK_0` to `DEK_1` is done in three steps:
    removed.
 
 **The app key during the three steps.** Where the event replaces the
-app (a transfer, a recovery), the vault hands the parent the lifecycle
-event **`app_key_next`** (the next key and its `app_key_seq`) with the
-header write of step 1, and the event `app_key` with the header write of
-step 3 (§11.5). The member API accepts requests signed by the current
+app (a transfer, a recovery), the vault asks the parent to make the row
+name the next key as `app_key_next` (the acknowledged request, with the
+`header_seq` of the step-1 write) **before step 1**; the header of step 1
+is written only after the parent's `ok`. If the parent does not answer
+`ok` the replacement does not begin (`retry`): nothing is stored. The
+lifecycle event `app_key_next` still goes with the header write of step 1
+as a report, and the event `app_key` goes with the header write of step 3
+as before (§11.5). Whenever a header that names an app key the stored
+header does not is about to be written (also a replacement resumed at an
+unlock, the first header at enrollment, and a change of the app key
+outside a replacement), the same confirmation comes first. So the row
+names every key the vault has adopted, as `app_key` or `app_key_next`,
+even if a crash, a lost report or a restart of the parent follows; and,
+while the parent is honest and the table available, the member API does
+not refuse the phone whose key the vault holds. (A dishonest parent can
+still cause that refusal, by answering `ok` without writing or by
+rewriting the row; that is availability only, VAULT-HOST-PROTOCOL §11.4.)
+If a step 1 then fails, the vault has the parent remove the key it just
+had written (the event `app_key_next_clear`, VAULT-HOST-PROTOCOL §5.7,
+§7.2); if that clear is lost, the orphan is removed by a later
+`next_cleared` or an unlock with `next: false`. The member API accepts requests signed by the current
 key and by the next one from `app_key_next` until `app_key` makes
 it current (MEMBER-API "Recovery from release R"). A dropped step 3
 therefore never locks the new phone out of the member API, and a
@@ -16121,7 +16171,9 @@ vault drops a `next` part (the old phone unlocked first; a transfer's
 the parent, with that header write, the event `app_key` repeating the
 current key with `next_cleared: true`, and the parent removes
 `app_key_next`; the repeated key has the same `seq`, so the parent skips
-the `app_key` write itself and applies only the clear. The parent also
+the `app_key` write itself and applies only the clear (0.58.0: it removes
+`app_key_next` only if its `header_seq` is not above the event's, so a
+late clear never removes a newer replacement's key). The parent also
 removes it when an `unlocked` or `locked` report shows a header without
 a `next` part (those reports carry `next: false`), but only if that
 report's `app_key_seq` is at least the next key's `seq` or its
@@ -21135,7 +21187,9 @@ Follow-ups:
       verify again (`identity.rotate_conflict`); `stored_mismatch`,
       checked before an attempt is spent, with the state's clear
       `dek_version` (format `0x02`); `app_key_next` at the first header
-      write; the new phone's "Finish the move"
+      write (0.58.0: acknowledged by the parent before the header, the
+      host request `AppKeyNext`, with the assertion of the current app key
+      after every hello, VAULT-HOST-PROTOCOL 0.1.15 §5.7, §7.2); the new phone's "Finish the move"
       unlock right after a transfer, so that the old phone's keys are
       normally deleted within minutes; a pending unlink kept in the
       state with the old device's token; `Stats` telling whether a

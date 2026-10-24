@@ -1,8 +1,12 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.11.0
+version: 2.11.1
 changelog:
+  - 2.11.1 (2026-10-24; editorial, with VAULT-MESSAGING 0.58.0 and
+    VAULT-HOST-PROTOCOL 0.1.15). "The pending app key": the host writes
+    `app_key_next` before the vault stores the first header that names it,
+    not with it. No change to what the API accepts.
   - 2.11.0 (2026-10-24; **owner decisions of 2026-10-24**; vettid.org
     PR "member-api/vault-deleted"; not deployed). "Vault deletion",
     **What a phone is told**: a phone erases its local vault data
@@ -2089,8 +2093,9 @@ Everything above holds except where this says otherwise.*
   does not unlock from release R).
 - **The pending app key.** A transfer or a recovery replaces the app in
   three writes (VAULT-MESSAGING §11.14.2). The host writes
-  `app_key_next` (`{key, kid, seq}`, `seq` one above `app_key`'s) with
-  the first and `app_key` with the third. While `app_key_next` is set,
+  `app_key_next` (`{key, kid, seq}`, `seq` one above `app_key`'s)
+  before the first (0.1.15: in an acknowledged request, before the vault
+  stores the header that names it) and `app_key` with the third. While `app_key_next` is set,
   with no time limit, the API accepts requests signed by either key as
   the vault's app key; when `app_key` reaches its `seq` it is cleared and
   the old key is refused. It is also cleared when the vault abandons the
