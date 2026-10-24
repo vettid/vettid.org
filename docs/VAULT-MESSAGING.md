@@ -38,8 +38,10 @@ changelog:
     hold the value of a vault that announced one (an install from before
     that version, a lost record) locks as for a vault before L over the
     relay (once, the wait before its next unlock), and through the
-    member API without the value (an unconditional lock). No other rule
-    changes
+    member API without the value (an unconditional lock). §11.14.10:
+    if the old app's renewal of its token before an approval fails, it
+    still sends the approval, and the notice has what the previous token
+    has left (as built in vettid-vault #144). No other rule changes
   - 0.56.0: **draft; the owner answered the proposed choices on 2026-10-23, the
     text awaits approval** (the owner decided on 2026-10-23 to specify and build wallet spend caps before
     the Android wallet work, W1 and W2); ANDROID-PLAN 0.1.74,
@@ -17445,7 +17447,9 @@ first.**
   (§8, §8.3), stores the fresh token before it processes the approval;
   it SHOULD NOT denylist the previous token's `jti` before the approval
   is answered. It renews again before each approval it sends (after
-  `busy` or `retry` too). The token then has its full lifetime, at most
+  `busy` or `retry` too). (0.56.1) If the renewal fails, the old app
+  still sends the approval; the notice then has whatever the previous
+  token has left. The token then has its full lifetime, at most
   30 days, from the approval; the pending unlink keeps the newest
   token.
 - **`device.unlinked{reason: "transferred", transfer_id}`** is deposited
