@@ -1,18 +1,15 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.75
+version: 0.1.76
 date: 2026-10-23
 changelog:
-  - 0.1.75: editorial; the release L plan and the **owner's answers of
-    2026-10-23** (VAULT-LOCK 0.1.3). §4 "Locking the vault": part 1 is
-    as merged (vettid-android #127, 7a250bcd, with #140, #150, #164 and
-    #181), no longer a draft pending a merge. The retry that survives
-    the app's process is part of release L's app work (Q4: fail secure,
-    durable retry until the vault confirms, a plain notice meanwhile).
-    Part 2: an app without the value of a vault that announced one
-    locks as part 1 plus the unconditional API lock (Q3); release L is
-    staging release 23. No rule changes
+  - 0.1.76: approved by the owner 2026-10-23 (VAULT-MESSAGING 0.56.2,
+    §11.14.10 rule 5). §4 "Transfer (new phone)": at its 11-minute
+    deadline the new phone collects its mailbox once before it drops its
+    handshake, attested key and epoch-1 secret, and applies a waiting
+    `device.paired{transfer}`; the deadline is one, measured from the
+    `hs.init`; tests.
   - 0.1.74: draft; the owner answered the choices on 2026-10-23, the
     text awaits approval (VAULT-MESSAGING 0.56.0, §10.18 "Spend caps";
     the owner decided on 2026-10-23 to build caps before W1 and W2). §4 "Wallet": a **Spending limits** screen
@@ -2910,8 +2907,22 @@ both sections above (`pin.change`, `credential.password.change`,
   its 10 minutes from the `hs.init` it receives, so an approval near the
   end could otherwise reach a phone that had dropped its handshake,
   attested key and epoch-1 secret. Only after the 11 minutes does it
-  drop them and offer a new code. Tests: a `device.paired` at 10 minutes
-  30 seconds is accepted; nothing is dropped before 11 minutes.
+  drop them and offer a new code. (0.1.76, owner decision 2026-10-23.)
+  The 11 minutes are one deadline, measured from the moment the app
+  started its `hs.init`; no user action extends it. At the deadline the
+  app **collects its mailbox once** before it drops anything: a
+  `device.paired{transfer}` for this transfer, opened under the
+  transfer's session, is applied and the move completes (credential
+  take-over) instead of dropping. Otherwise, or if the collect fails or
+  times out, it drops the keys as above and offers a new code. The
+  collect is bounded (one collect, at most the relay's normal timeout)
+  and is not a reason to keep the keys longer when the relay cannot be
+  reached. A paired transfer completes at any later start, whatever its
+  age. Tests: a `device.paired` at 10 minutes 30 seconds is accepted;
+  nothing is dropped before 11 minutes; at the deadline a waiting
+  `device.paired` is applied; nothing waits: dropped and a new code
+  offered; a failed or timed-out collect: dropped; no user action
+  extends the deadline; a paired transfer completes at a later start.
 - *Old phone, approving.* As before, the PIN and the password together.
   `busy`: "The service is busy right now. Nothing was moved. Try again
   in a minute." (the transfer stays open). (0.1.72) Before it sends

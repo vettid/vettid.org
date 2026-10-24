@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.56.1
+version: 0.56.2
 date: 2026-10-23
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,7 +14,7 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.10.0)
-  - ANDROID-PLAN.md (0.1.75)
+  - ANDROID-PLAN.md (0.1.76)
   - IOS-PLAN.md (0.1.31; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
@@ -27,6 +27,12 @@ related:
   - VAULT-LOCK.md (0.1.3, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.56.2: approved by the owner 2026-10-23. §11.14.10 rule 5 and §6.7.1
+    (failure row "The new app goes offline after its `hs.fin`"): at its
+    11-minute deadline the new app of a transfer **collects its mailbox
+    once** before it drops its handshake, attested key and epoch-1 secret;
+    a `device.paired{transfer}` for this transfer, opened under its
+    session, is applied and the move completes. ANDROID-PLAN 0.1.76.
   - 0.56.1: **owner decisions of 2026-10-23** (§3.6.8: keep the
     shorter; a call delays the idle lock at most 12 hours; no extra hour
     for an unlock before the idle lock's time) and editorial errata
@@ -4881,7 +4887,7 @@ and the new app's handshake state is dropped. A commitment mismatch at
 | Wrong PIN or password at approval | `bad_pin` / `bad_password`, counted in their backoffs and as a failed owner check (§3.6.4); the blob is checked first, so an approval with an old blob is answered `stale_credential` and counts nothing (0.46.1). The transfer stays pending until its 10 minutes run out; the member may retry. |
 | The vault becomes held (§3.6.3) while a transfer is open | The transfer stays open: the holder may still approve it (a check in itself) or reject it. A new `device.transfer.create` waits for a check. |
 | The new app goes offline before its `hs.fin` | No SAS is shown; the transfer times out after 10 minutes; nothing changes. (0.55.10) The new app of a transfer drops its handshake, attested key and epoch-1 secret after 11 minutes (§11.14.10 rule 5). |
-| The new app goes offline after its `hs.fin` | The approval still completes the transfer. `device.paired` waits in the new app's mailbox (relay TTL); if the new app never returns, the member recovers (§11.11), as when a new app is lost after a transfer. (0.55.10) A new app that returns after its 11 minutes has dropped its handshake, attested key and epoch-1 secret and cannot use it: the member recovers (§11.11). |
+| The new app goes offline after its `hs.fin` | The approval still completes the transfer. `device.paired` waits in the new app's mailbox (relay TTL); if the new app never returns, the member recovers (§11.11), as when a new app is lost after a transfer. (0.55.10) A new app that returns after its 11 minutes has dropped its handshake, attested key and epoch-1 secret and cannot use it: the member recovers (§11.11). (0.56.2) At its 11-minute deadline the new app collects its mailbox once before it drops them: a `device.paired{transfer}` for this transfer, opened under its session, is applied and the move completes; otherwise, or if the collect fails or times out, it drops them and offers a new code (§11.14.10 rule 5). A transfer already paired completes at any later start, whatever its age. |
 | The old app goes offline before approving | The transfer times out; nothing changes. |
 | The old app goes offline after approving | Nothing is needed from it: the approval completed the transfer. The old app learns of its removal from `device.unlinked` (best effort), and then erases its local state (owner decision, 2026-10-05); (0.33.0, release R) that notice is sent only after the new phone's first unlock from storage (§11.14.10). A refused relay key alone is not proof of removal: the app offers the member an erase instead of erasing by itself. The refused relay key is a `403 token_revoked` (RELAY-PROTOCOL §5.3 step 6, §7.1) on a deposit to the device's own vault mailbox: the vault has put the device's relay key on its denylist as a `sub` (§7.4). The same holds for the old app of a recovery (§11.11.5). What the device does on that answer: §8.6. |
 | A clone alarm opens (§3.5.9) | An open transfer is aborted. |
@@ -17449,6 +17455,23 @@ under the request's `id` (§8.2).
    cannot open it. A `device.paired` that arrives within the 11 minutes
    is accepted. The vault's 10 minutes are unchanged, and so are those
    of a pairing of a desktop or an agent (§6.7).
+
+   **Collect before drop** (owner decision, 2026-10-23). The 11 minutes
+   are measured from the moment the app started its `hs.init`; it is one
+   deadline, and no user action extends it. At the deadline the new app
+   **collects its mailbox once** before it drops anything. If that
+   collect brings a `device.paired{transfer}` for this transfer, opened
+   under the transfer's session, the app applies it and completes the
+   move (it takes over the credential, as for an approval within the 11
+   minutes) instead of dropping. Otherwise, or if the collect fails or
+   times out, it drops its handshake, its attested key and its epoch-1
+   secret as before and offers a new code. The collect is bounded: one
+   collect, taking at most the relay's normal timeout; if the app cannot
+   reach the relay, that is no reason to keep the keys longer, and it
+   drops them at once. A transfer whose `device.paired` has arrived
+   (the move is paired) completes at any later start of the app,
+   whatever its age; the deadline applies only to a transfer still
+   waiting.
 
 **The old phone's keys after a transfer** (decided by the owner on
 2026-10-15). *This replaces the earlier rule that the old app erases
