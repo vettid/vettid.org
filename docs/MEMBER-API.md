@@ -15,7 +15,7 @@ changelog:
     route; until now the `deleted` check came before the signature and
     answered `401`. When the alarm mailer removes the row it first puts
     the **record** `vdeleted#<vault_id>` in the request table (the app
-    public keys, `deleted_at`, the cause, `user_guid`), kept **90
+    public keys, `deleted_at`, the cause; not the `user_guid`), kept **90
     days** (TTL `expires_at`; not scaled on staging); a request signed
     by one of its keys is answered the same `410`. The account deletion
     writes **`account_deleted_at`** on each vault row it asks (before
@@ -2650,9 +2650,14 @@ Its own audit log goes with it, so the member is told by email.
   a new `vault_id`. (2.11.0) Before it deletes the vault row it puts
   the vault's record in the request table (What a phone is told,
   below); when that put fails, the row is kept (still `deleted`, which
-  answers the same), stamped `alarm.handled_at`, and the follow-up
-  below tries again (logged: `vault tombstone not written`, `vault_id`
-  and the error name only). A row whose image shows
+  answers the same) and stamped `alarm.handled_at`; that stamp is a
+  record for the follow-up below, which tries once more. When the
+  follow-up's own put fails it throws, so the stream retries the record
+  (`retryAttempts` 3, with bisection); after those the row stays
+  `deleted` (it answers `410` from the row) until a later record of it
+  reaches the follow-up (an operator can re-stamp `alarm.handled_at`).
+  Each failure is logged: `vault tombstone not written`, `vault_id`
+  and the error name only. A row whose image shows
   `att_sweep_pending` is not tried (its delete would fail): it is
   stamped and left to the follow-up.
 - **Rows kept for the attachment sweep** (2.7.1; VAULT-HOST-PROTOCOL
@@ -2679,7 +2684,13 @@ Its own audit log goes with it, so the member is told by email.
   start as the enclave route does when none runs). (2.11.0) Before
   that it writes `account_deleted_at` (epoch seconds; an existing value
   is kept; not on a `deleted` or never-sealed row) on the row, so the
-  vault's app is told `410 account_deleted` (below). It sets
+  vault's app is told `410 account_deleted` (below). The mark is best
+  effort: a write that fails is logged (`vault account deletion mark
+  not written`, `vault_id` and the error name) and the vault is still
+  asked. The daily retry marks a vault it retries that has no mark when
+  its member row is gone (a consistent read) and it is not a
+  start-over, so vaults asked before 2.11.0 are marked too; a member row
+  that cannot be read leaves the mark for the next run. It sets
   `deletion_requested_at` on the row; a later run retries until the vault
   reports `deleted`, whose notice removes the rows. A vault that is
   running deletes itself with the full semantics; otherwise the
@@ -2802,15 +2813,18 @@ Its own audit log goes with it, so the member is told by email.
   "App request signing" (`ts`, the nonce spent, the key, the
   signature) with the vault's **app key** (`app_key`, or the host's
   pending `app_key_next`; never a pending setup-code key, a claim key or
-  a recovering key):
+  a recovering key). "Authenticated" here means the **request** is
+  authenticated (the app key's signature, checked before any `410`);
+  the `410` answer itself is not signed and is protected by TLS only
+  (CloudFront to the API), like every other answer of the member API.
   - **`410 vault_deleted`** `{error, code: "vault_deleted", message,
     deleted_at}`: the row is `deleted`; `deleted_at` is the host's
     `vault_deleted` notice time (`alarm.at`), RFC 3339, or `null`.
   - **The record kept after the row is removed.** Before the alarm
     Lambda deletes the row it puts **`vdeleted#<vault_id>`** in the
     vault-requests table: `{request_id: "vdeleted#<vault_id>",
-    vault_id, user_guid, keys: [{key, kid}], deleted_at, cause,
-    expires_at}`. `keys` are the vault's app public keys from the row
+    vault_id, keys: [{key, kid}], deleted_at, cause, expires_at}`
+    (not the member's `user_guid`: nothing needs it). `keys` are the vault's app public keys from the row
     (`app_key` and a pending `app_key_next`, SPKI DER base64 and
     `kid`); `deleted_at` as above (epoch seconds or `null`); `cause`
     (advisory, never shown): `account` (the row has

@@ -204,6 +204,19 @@ async function markAccountDeleted(v: VaultRowLite, nowS: number): Promise<void> 
 }
 
 /**
+ * The mark, best effort: a failure is logged (vault_id and the error name)
+ * and the vault is still asked; only the phone's definite answer waits for
+ * the vault's own `deleted` report then.
+ */
+async function markAccountDeletedOrLog(v: VaultRowLite, nowS: number): Promise<void> {
+  try {
+    await markAccountDeleted(v, nowS);
+  } catch (e) {
+    console.error('vault account deletion mark not written', JSON.stringify({ vault_id: v.vault_id, error: (e as Error).name }));
+  }
+}
+
+/**
  * A canceled member's vaults: each is marked (2.11.0) and asked to delete
  * itself; the pointer row goes now (the member is gone). Response slots are
  * not used.
@@ -217,12 +230,32 @@ async function deleteVaults(guid: string, nowS: number): Promise<string[]> {
     ExpressionAttributeValues: { ':g': guid },
   })) {
     const v = item as VaultRowLite;
-    await markAccountDeleted(v, nowS);
+    await markAccountDeletedOrLog(v, nowS);
     await requestVaultDeletion(v, nowS);
     ids.push(String(v.vault_id));
   }
   await ddb.send(new DeleteCommand({ TableName: table.vaults(), Key: { vault_id: vaultPointerKey(guid) } }));
   return ids;
+}
+
+/**
+ * MEMBER-API 2.11.0: a vault asked before 2.11.0 (or whose mark failed)
+ * has no `account_deleted_at`. The retry marks it when its member row is
+ * gone (a consistent read) and it is not a start-over; a start-over's
+ * member may still be there, and a member row that cannot be read leaves
+ * the mark for the next run. Best effort: the vault is asked either way.
+ */
+async function markRetried(v: VaultRowLite, nowS: number): Promise<void> {
+  if (typeof v.account_deleted_at === 'number' || v.state === 'deleted' || v.deletion?.state === 'executing') return;
+  if (typeof v.user_guid !== 'string' || !v.user_guid) return;
+  try {
+    const m = await ddb.send(new GetCommand({ TableName: table.members(), Key: { user_guid: v.user_guid }, ConsistentRead: true }));
+    if (m.Item) return;
+  } catch (e) {
+    console.error('vault account deletion mark not written', JSON.stringify({ vault_id: v.vault_id, error: (e as Error).name }));
+    return;
+  }
+  await markAccountDeletedOrLog(v, nowS);
 }
 
 /** Retry deletions not yet reported (the member row is already gone). */
@@ -240,6 +273,7 @@ async function retryVaultDeletions(nowS: number): Promise<number> {
       }),
     );
     for (const item of r.Items ?? []) {
+      await markRetried(item as VaultRowLite, nowS);
       await requestVaultDeletion(item as VaultRowLite, nowS);
       n++;
     }

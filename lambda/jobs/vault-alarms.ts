@@ -46,7 +46,9 @@
  * days, lambda/shared/vault-tombstone.ts), so that the vault's own app is
  * still told `410 vault_deleted` after the row is gone. A row whose record
  * could not be written is kept (still `deleted`, which answers the same)
- * and stamped handled, so the follow-up tries again.
+ * and stamped handled, so the follow-up tries again; a follow-up whose
+ * record fails throws, so the stream retries it (retryAttempts 3).
+ * `user_guid` is not kept: nothing reads it.
  */
 import type { DynamoDBRecord, DynamoDBStreamHandler } from 'aws-lambda';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
@@ -180,7 +182,6 @@ async function putTombstone(row: AlarmRow, nowS: number): Promise<void> {
   const item: VaultTombstone = {
     request_id: tombstoneKey(row.vault_id),
     vault_id: row.vault_id,
-    ...(typeof row.user_guid === 'string' ? { user_guid: row.user_guid } : {}),
     keys: vaultAppKeys(row).map((k) => ({ key: k.key, kid: k.kid })),
     deleted_at: a && a.kind === 'vault_deleted' && typeof a.at === 'number' && Number.isFinite(a.at) ? a.at : null,
     cause: tombstoneCause(row),
@@ -193,9 +194,11 @@ async function putTombstone(row: AlarmRow, nowS: number): Promise<void> {
  * Remove a deleted vault's row, unless the parent's attachment sweep is
  * still pending on it (P15). Returns whether the row went; false also when
  * it is gone already or no longer `deleted`, and (2.11.0) when its record
- * could not be written first (the row is kept).
+ * could not be written first (the row is kept). With `rethrow` (the
+ * follow-up, which has no later record of its own to retry from) that
+ * failure is thrown instead, so the stream retries the record.
  */
-async function removeVaultRow(row: AlarmRow): Promise<boolean> {
+async function removeVaultRow(row: AlarmRow, rethrow = false): Promise<boolean> {
   const vaultId = row.vault_id;
   // The image's own view: a row still sweeping fails the delete below anyway.
   if (row.state !== 'deleted' || row.att_sweep_pending !== undefined) return false;
@@ -203,6 +206,7 @@ async function removeVaultRow(row: AlarmRow): Promise<boolean> {
     await putTombstone(row, Math.floor(Date.now() / 1000));
   } catch (e) {
     console.error('vault tombstone not written', JSON.stringify({ vault_id: vaultId, error: (e as Error).name }));
+    if (rethrow) throw e;
     return false;
   }
   try {
@@ -277,7 +281,7 @@ export async function processRecord(rec: DynamoDBRecord): Promise<'ignored' | 'c
   const row = unmarshall(rec.dynamodb.NewImage as Parameters<typeof unmarshall>[0]) as AlarmRow;
   if (sweptAndHandled(row)) {
     if (typeof row.vault_id !== 'string' || !VAULT_ID_RE.test(row.vault_id)) return 'ignored';
-    return (await removeVaultRow(row)) ? 'removed' : 'ignored';
+    return (await removeVaultRow(row, true)) ? 'removed' : 'ignored';
   }
   const a = row.alarm;
   if (row.alarm_pending !== true || !a || typeof a.alarm_id !== 'string' || !ALARM_ID_RE.test(a.alarm_id)) return 'ignored';

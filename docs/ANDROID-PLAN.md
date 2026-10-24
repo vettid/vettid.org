@@ -15,7 +15,11 @@ changelog:
     gone signals but "could not tell", like `403`, `429`, `5xx` and
     timeouts. Point 4: from the bound, a confirmed **Remove from this
     phone**. New point 5: a `410` without the vault's word shows "Your
-    vault was deleted" and erases only on the member's confirmation.
+    vault was deleted", keeps reading the status and its own relay
+    mailbox (where the vault's event can still arrive), and (owner
+    decision 2026-10-24) offers the confirmed Remove only after the same
+    10-minute bound; erased only on the member's confirmation, or at
+    once if the event arrives.
     "Could not tell" is shown as **unconfirmed** (`{vault: null}`, any
     `401`, `403`) or **unreachable** (network, `5xx`, `429`, timeouts);
     the reads at 5, 15, 45 and 105 s, then every 60 s until the bound
@@ -4844,16 +4848,28 @@ answer to this phone's own `vault.delete` counts the same (VAULT-MESSAGING
    vault's own word (no event, no `{}` to this phone's `vault.delete`),
    is signal (b) alone. It rests on the vault row's `state`, which the
    host writes and which the app does not trust by itself (or, for
-   `account_deleted`, on the account deletion). The app closes the open
-   vault as in point 1 and shows **"Your vault was deleted"** (texts
-   below, Android #192), with **Remove from this phone** behind the same
-   confirmation, **Check again** and **Open the account site**; it
-   stores the marker `deleted_api {vault_id, since, code}` so that a
-   restart reopens there. It erases only when the member confirms. If
-   the event then arrives (signal (a)), it erases at once as in point 3.
-   A later status that lists the vault again (a `200` with the vault)
-   removes the marker and returns to the unlock screen; any other
-   answer keeps the screen.
+   `account_deleted`, on the account deletion), and the answer is
+   protected by TLS only (the request is what the app key authenticates).
+   The app closes the vault's screens and shows **"Your vault was
+   deleted"** (texts: Android #192), with **Check again** and **Open the
+   account site**; it stores the marker `deleted_api {vault_id, since,
+   until, code}` (`since`: the first `410`; `until`: `since` + 10
+   minutes, not divided by the staging time scale) so that a restart
+   reopens there. Unlike point 1 it keeps the vault's keys and its
+   device session, and **tries to reach its vault**: it keeps collecting
+   its own relay mailbox, where the vault delivers
+   `device.unlinked{vault_deleted}` to every owner device (VAULT-MESSAGING
+   §12.5 step 2), so the vault's word can still arrive there. It reads the
+   status and collects the mailbox on point 3's schedule (5, 15, 45 and
+   105 s after `since`, then every 60 s until `until`; after it, at a
+   start, a return to the foreground and Check again). **Owner decision
+   (2026-10-24): the same bound as point 4.** Before `until` nothing
+   erases and **Remove from this phone** is not offered; from `until` it
+   is offered behind the same confirmation, and confirmed erases as in
+   point 3. If the event arrives (signal (a)) while a `410` stands, the
+   app erases at once as in point 3. A later status that lists the vault
+   again (a `200` with the vault) removes the marker and returns to the
+   unlock screen; any other answer keeps the screen.
 
 **What the member can do there.** Nothing that changes the vault or
 this phone's keys: no unlock, no PIN, no update, no daily check, no
@@ -4905,8 +4921,10 @@ later `vault.delete` `exp`; the "still finishing" text at the bound,
 Check again, the vault gone later (at a start, a return to the
 foreground and Check again); Remove from this phone offered only from
 the bound, cancelled (nothing erased) and confirmed (erased, the
-notice); a `410` with no event: "Your vault was deleted", nothing
-erased until confirmed, the event arriving then erases, the vault
+notice); a `410` with no event: "Your vault was deleted", the status
+and the mailbox read on the schedule, Remove not offered before
+`since` + 10 minutes and offered (confirmed) from then, nothing erased
+until confirmed, the event arriving through the mailbox then erases, the vault
 listed again returns to the unlock screen, a restart reopens there;
 a `401` with no event changes nothing; a process killed in each phase
 restarts in "being deleted" (never on the unlock screen) and continues;

@@ -1325,7 +1325,7 @@ describe('2.11.0: a deleted vault is told to its own app key (410), and to nobod
     });
   const tombstone = (extra: Record<string, unknown> = {}) =>
     put('requests', {
-      request_id: `vdeleted#${VID}`, vault_id: VID, user_guid: 'g1', keys: [{ key: A().b64, kid: A().kid }],
+      request_id: `vdeleted#${VID}`, vault_id: VID, keys: [{ key: A().b64, kid: A().kid }],
       deleted_at: NOW - 3600, cause: 'vault', expires_at: NOW + 86_400, ...extra,
     });
   const status = (app: Partial<AppSig> = {}) => call('GET', '/api/vault/status', undefined, { app: { key: A(), vault: VID, ...app } });
@@ -1379,6 +1379,11 @@ describe('2.11.0: a deleted vault is told to its own app key (410), and to nobod
     // A record that names another vault under this key is not this vault's.
     tombstone({ vault_id: 'e'.repeat(32) });
     expect((await status()).status).toBe(401);
+    // A spent nonce on the record's path is the bare 401 (the nonce is spent before any row is read).
+    tombstone();
+    const nonce = randomBytes(16).toString('base64url');
+    expect((await status({ nonce })).status).toBe(410);
+    expect(await status({ nonce })).toEqual({ status: 401, body: expect.not.objectContaining({ code: expect.anything() }) });
     // A damaged key list is no key (and no crash).
     tombstone({ keys: [null, { kid: A().kid }, 'x'] });
     expect((await status()).status).toBe(401);
@@ -1394,6 +1399,11 @@ describe('2.11.0: a deleted vault is told to its own app key (410), and to nobod
     expect((await status()).body).toMatchObject({ code: 'account_deleted' });
     expect((await status({ tamper: (i) => i + 'x' })).status).toBe(401);
     expect((await status({ key: keyOf('g2') })).status).toBe(401);
+    expect((await status({ ts: NOW - 301 })).status).toBe(401);
+    // A spent nonce is the bare 401 here too.
+    const nonce = randomBytes(16).toString('base64url');
+    expect((await status({ nonce })).status).toBe(410);
+    expect(await status({ nonce })).toEqual({ status: 401, body: expect.not.objectContaining({ code: expect.anything() }) });
     // Then the vault reports `deleted`: vault_deleted.
     put('vaults', { ...getItem('vaults', VID), state: 'deleted' });
     expect((await status()).body).toMatchObject({ code: 'vault_deleted' });

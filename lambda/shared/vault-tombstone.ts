@@ -5,7 +5,7 @@
  * When the alarm mailer removes a `deleted` vault row (lambda/jobs/
  * vault-alarms.ts), it first writes `vdeleted#<vault_id>` in the
  * vault-requests table: the vault's app public keys, when it was deleted
- * and why, nothing else. For 90 days (`expires_at`, the table's TTL; not
+ * and why, nothing else (not the member's user_guid: nothing needs it). For 90 days (`expires_at`, the table's TTL; not
  * divided by the staging time scale, which never scales retention) a
  * request signed by one of those keys is answered `410 vault_deleted`
  * (lambda/member/vault.ts, appCaller). The TTL removes a row up to two days
@@ -60,7 +60,6 @@ export type TombstoneCause = 'account' | 'start_over' | 'vault';
 export interface VaultTombstone {
   request_id: string; // vdeleted#<vault_id>
   vault_id: string;
-  user_guid?: string;
   /** The vault's app keys (public): the host's `app_key` and its pending `app_key_next`. */
   keys: TombstoneKey[];
   /** Epoch s: the host's `vault_deleted` notice time, or null when it had none. */

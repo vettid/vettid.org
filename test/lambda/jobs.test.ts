@@ -172,6 +172,61 @@ describe('cleanup job', () => {
     warn.mockRestore();
   });
 
+  describe('MEMBER-API 2.11.0: the account deletion mark is best effort and reaches vaults asked before it', () => {
+    const retryScan = (items: Record<string, unknown>[]) =>
+      ddb.on(ScanCommand).callsFake((i) => (String(i.FilterExpression).includes('deletion_requested_at < :recent') ? { Items: items } : { Items: [] }));
+    const marks = () => ddb.commandCalls(UpdateCommand).map((c) => c.args[0].input).filter((i) => i.UpdateExpression === MARK_ACCOUNT);
+
+    test('a mark that fails (not a condition) is logged and the vault, and every later one, is still asked', async () => {
+      withVaults([
+        { vault_id: 'a'.repeat(32), user_guid: 'g1', state: 'locked', sealed_release: R, lease: { instance_id: 'i1', lease_expires_at: nowS() + 60 } },
+        { vault_id: 'b'.repeat(32), user_guid: 'g1', state: 'locked', sealed_release: R, lease: { instance_id: 'i1', lease_expires_at: nowS() + 60 } },
+      ]);
+      ddb.on(GetCommand, { TableName: 'instances' } as any).resolves({ Item: liveInst('i1') });
+      ddb.on(DeleteCommand).resolves({});
+      ddb.on(UpdateCommand).resolves({});
+      ddb.on(UpdateCommand, { UpdateExpression: MARK_ACCOUNT } as any).rejects(Object.assign(new Error('x'), { name: 'ProvisionedThroughputExceededException' }));
+      idp.on(AdminDeleteUserCommand).resolves({});
+      const err = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      await cleanup.handler();
+      expect(sqs.commandCalls(SendMessageCommand).map((c) => JSON.parse(c.args[0].input.MessageBody!).vault_id)).toEqual(['a'.repeat(32), 'b'.repeat(32)]);
+      const lines = err.mock.calls.filter((c) => c[0] === 'vault account deletion mark not written');
+      expect(lines.map((c) => JSON.parse(c[1] as string))).toEqual([
+        { vault_id: 'a'.repeat(32), error: 'ProvisionedThroughputExceededException' },
+        { vault_id: 'b'.repeat(32), error: 'ProvisionedThroughputExceededException' },
+      ]);
+      err.mockRestore();
+    });
+
+    test('the retry marks a vault asked before 2.11.0 whose member row is gone; not with the member there, a start-over, a marked row or a read error', async () => {
+      const base = { user_guid: 'g9', state: 'locked', sealed_release: R, deletion_requested_at: nowS() - 7200 };
+      retryScan([
+        { ...base, vault_id: 'a'.repeat(32) },
+        { ...base, vault_id: 'b'.repeat(32), user_guid: 'g8' },
+        { ...base, vault_id: 'c'.repeat(32), deletion: { deletion_id: 'x', state: 'executing' } },
+        { ...base, vault_id: 'd'.repeat(32), account_deleted_at: nowS() - 7200 },
+        { ...base, vault_id: 'e'.repeat(32), user_guid: 'g7' },
+      ]);
+      ddb.on(GetCommand, { TableName: 'releases' } as any).resolves({ Item: { release: R, release_number: 3, status: 'active' } });
+      ddb.on(GetCommand, { TableName: 'members' } as any).callsFake((i) => {
+        if (i.Key.user_guid === 'g8') return { Item: { user_guid: 'g8' } };
+        if (i.Key.user_guid === 'g7') throw Object.assign(new Error('x'), { name: 'InternalServerError' });
+        return {};
+      });
+      ddb.on(UpdateCommand).resolves({});
+      const err = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const r = await cleanup.handler();
+      expect(r.vaultRetries).toBe(5);
+      expect(marks().map((m) => m.Key!.vault_id)).toEqual(['a'.repeat(32)]);
+      const reads = ddb.commandCalls(GetCommand).map((c) => c.args[0].input).filter((i) => i.TableName === 'members' && ['g9', 'g8', 'g7'].includes(i.Key!.user_guid));
+      expect(reads.every((i) => i.ConsistentRead === true)).toBe(true);
+      expect(err.mock.calls.filter((c) => c[0] === 'vault account deletion mark not written').map((c) => JSON.parse(c[1] as string))).toEqual([{ vault_id: 'e'.repeat(32), error: 'InternalServerError' }]);
+      err.mockRestore();
+      warn.mockRestore();
+    });
+  });
+
   test('stale unverified request: row + marker removed; SES identity kept if the mailing list uses it', async () => {
     const stale = { user_guid: 'g2', email: 'list@x.org', state: 'requested', email_verified: false };
     ddb.on(QueryCommand).callsFake((input) => (input.ExpressionAttributeValues?.[':r'] === 'requested' ? { Items: [stale] } : { Items: [] }));
@@ -1249,8 +1304,9 @@ describe('vault alarm mailer (VAULT-MESSAGING 0.9.0 §11.5)', () => {
         expect(await alarms.processRecord(rec(del({ app_key: { ...KEY, seq: 1 }, app_key_next: { ...NEXT, seq: 2 } })))).toBe('mailed');
         const [t] = tombstones();
         expect(tombstones()).toHaveLength(1);
-        expect(Object.keys(t.Item!).sort()).toEqual(['cause', 'deleted_at', 'expires_at', 'keys', 'request_id', 'user_guid', 'vault_id']);
-        expect(t.Item).toMatchObject({ request_id: `vdeleted#${VID}`, vault_id: VID, user_guid: 'g1', keys: [KEY, NEXT], deleted_at: 1_790_000_000, cause: 'vault' });
+        // Not the member's user_guid: nothing needs it.
+        expect(Object.keys(t.Item!).sort()).toEqual(['cause', 'deleted_at', 'expires_at', 'keys', 'request_id', 'vault_id']);
+        expect(t.Item).toMatchObject({ request_id: `vdeleted#${VID}`, vault_id: VID, keys: [KEY, NEXT], deleted_at: 1_790_000_000, cause: 'vault' });
         expect(t.Item!.expires_at - before).toBeGreaterThanOrEqual(90 * 86_400);
         expect(t.Item!.expires_at - before).toBeLessThanOrEqual(90 * 86_400 + 5);
         expect(t.ConditionExpression).toBeUndefined();
@@ -1268,7 +1324,6 @@ describe('vault alarm mailer (VAULT-MESSAGING 0.9.0 §11.5)', () => {
         await alarms.processRecord(rec(del({ app_key: KEY, deletion_requested_at: 1_789_000_000, deletion: { deletion_id: 'x', state: 'executing' } })));
         await alarms.processRecord(rec(del({ app_key: KEY, user_guid: undefined, alarm: { kind: 'vault_deleted', alarm_id: AID, at: 'n/a' } })));
         expect(tombstones().map((t) => t.Item!.cause)).toEqual(['account', 'account', 'start_over', 'vault']);
-        expect(tombstones()[3].Item).not.toHaveProperty('user_guid');
         expect(tombstones()[3].Item!.deleted_at).toBeNull();
         // A stale app_key_next (not ahead of app_key) is not the vault's key.
         ddb.resetHistory();
@@ -1282,6 +1337,17 @@ describe('vault alarm mailer (VAULT-MESSAGING 0.9.0 §11.5)', () => {
         expect(await alarms.processRecord(rec(swept))).toBe('removed');
         expect(tombstones()).toHaveLength(1);
         expect(tombstones()[0].Item).toMatchObject({ keys: [KEY], deleted_at: 1_790_000_000 });
+      });
+
+      test('in the follow-up, a record that cannot be written keeps the row and throws, so the stream retries the record', async () => {
+        ddb.on(DeleteCommand).resolves({});
+        ddb.on(PutCommand, { TableName: 'requests' } as any).rejects(Object.assign(new Error('x'), { name: 'ProvisionedThroughputExceededException' }));
+        const err = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        const swept = { vault_id: VID, user_guid: 'g1', state: 'deleted', app_key: KEY, alarm: { kind: 'vault_deleted', alarm_id: AID, at: 1_790_000_000, handled_at: 1_790_000_100 } };
+        await expect(alarms.handler({ Records: [rec(swept)] } as any, {} as any, () => undefined)).rejects.toThrow('x');
+        expect(deletes()).toHaveLength(0);
+        expect(err.mock.calls).toEqual([['vault tombstone not written', JSON.stringify({ vault_id: VID, error: 'ProvisionedThroughputExceededException' })]]);
+        err.mockRestore();
       });
 
       test('a record that cannot be written keeps the row (still deleted), stamped handled for the follow-up, and logs vault_id only', async () => {
