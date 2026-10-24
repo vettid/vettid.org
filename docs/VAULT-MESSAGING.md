@@ -4650,8 +4650,7 @@ Rules:
   token's and the request token's `jti`. The new device shows only the
   code; its user compares it on the app, and it waits for `device.paired`
   or (0.10.5) `device.pair.rejected` until 10 minutes after its
-  `hs.init` (0.55.10: a new phone of a transfer waits 11 minutes,
-  §11.14.10 rule 5).
+  `hs.init` (0.55.10, 0.56.2: a new phone of a transfer waits 11 minutes and collects its mailbox once at that deadline, §11.14.10 rule 5).
 - **The rejection is sent** (0.10.5; owner decision of 2026-10-05,
   "include `device.pair.rejected`"). The new device is the member's own,
   in their hand, so there is nothing to hide, and without it the device
@@ -4741,7 +4740,7 @@ PIN and password (so it can be answered `busy`), replaces the DEK in
 three writes, and the old app keeps its keys until the new phone's first
 unlock, or until, 7 days or more after the approval, its vault answers
 that the move happened (0.55.10): §11.14.10, which takes precedence over this section where they
-differ. The new phone waits 11 minutes for `device.paired`, not 10.
+differ. The new phone waits 11 minutes for `device.paired`, not 10, and collects its mailbox once before it drops its keys (0.56.2).
 
 A member who still holds the old phone moves the app, and with it the
 credential, to a new phone without the 24 h wait of a recovery (owner
@@ -4887,7 +4886,7 @@ and the new app's handshake state is dropped. A commitment mismatch at
 | Wrong PIN or password at approval | `bad_pin` / `bad_password`, counted in their backoffs and as a failed owner check (§3.6.4); the blob is checked first, so an approval with an old blob is answered `stale_credential` and counts nothing (0.46.1). The transfer stays pending until its 10 minutes run out; the member may retry. |
 | The vault becomes held (§3.6.3) while a transfer is open | The transfer stays open: the holder may still approve it (a check in itself) or reject it. A new `device.transfer.create` waits for a check. |
 | The new app goes offline before its `hs.fin` | No SAS is shown; the transfer times out after 10 minutes; nothing changes. (0.55.10) The new app of a transfer drops its handshake, attested key and epoch-1 secret after 11 minutes (§11.14.10 rule 5). |
-| The new app goes offline after its `hs.fin` | The approval still completes the transfer. `device.paired` waits in the new app's mailbox (relay TTL); if the new app never returns, the member recovers (§11.11), as when a new app is lost after a transfer. (0.55.10) A new app that returns after its 11 minutes has dropped its handshake, attested key and epoch-1 secret and cannot use it: the member recovers (§11.11). (0.56.2) At its 11-minute deadline the new app collects its mailbox once before it drops them: a `device.paired{transfer}` for this transfer, opened under its session, is applied and the move completes; otherwise, or if the collect fails or times out, it drops them and offers a new code (§11.14.10 rule 5). A transfer already paired completes at any later start, whatever its age. |
+| The new app goes offline after its `hs.fin` | The approval still completes the transfer. `device.paired` waits in the new app's mailbox (relay TTL); if the new app never returns, the member recovers (§11.11), as when a new app is lost after a transfer. (0.55.10, 0.56.2) A new app that returns after its 11 minutes, without a `device.paired` applied, first collects its mailbox once (§11.14.10 rule 5); if that brings no `device.paired{transfer}` for this transfer, it drops its handshake, attested key and epoch-1 secret and cannot use them: the member recovers (§11.11). (0.56.2) At its 11-minute deadline the new app collects its mailbox once before it drops them: a `device.paired{transfer}` for this transfer, opened under its session, is applied and the move completes; otherwise, or if the collect fails or times out, it drops them and offers a new code (§11.14.10 rule 5). A transfer already paired completes at any later start, whatever its age. |
 | The old app goes offline before approving | The transfer times out; nothing changes. |
 | The old app goes offline after approving | Nothing is needed from it: the approval completed the transfer. The old app learns of its removal from `device.unlinked` (best effort), and then erases its local state (owner decision, 2026-10-05); (0.33.0, release R) that notice is sent only after the new phone's first unlock from storage (§11.14.10). A refused relay key alone is not proof of removal: the app offers the member an erase instead of erasing by itself. The refused relay key is a `403 token_revoked` (RELAY-PROTOCOL §5.3 step 6, §7.1) on a deposit to the device's own vault mailbox: the vault has put the device's relay key on its denylist as a `sub` (§7.4). The same holds for the old app of a recovery (§11.11.5). What the device does on that answer: §8.6. |
 | A clone alarm opens (§3.5.9) | An open transfer is aborted. |
@@ -17458,15 +17457,14 @@ under the request's `id` (§8.2).
 
    **Collect before drop** (owner decision, 2026-10-23). The 11 minutes
    are measured from the moment the app started its `hs.init`; it is one
-   deadline, and no user action extends it. At the deadline the new app
+   deadline, and no user action extends it. The app stores that moment with the transfer, so a restart keeps the same deadline. An app that is not running at the deadline (stopped, killed, the phone off) does this at its next start, before anything else: one collect, then the drop. At the deadline the new app
    **collects its mailbox once** before it drops anything. If that
    collect brings a `device.paired{transfer}` for this transfer, opened
    under the transfer's session, the app applies it and completes the
    move (it takes over the credential, as for an approval within the 11
    minutes) instead of dropping. Otherwise, or if the collect fails or
    times out, it drops its handshake, its attested key and its epoch-1
-   secret as before and offers a new code. The collect is bounded: one
-   collect, taking at most the relay's normal timeout; if the app cannot
+   secret as before and offers a new code. The collect is bounded: one collect with `wait=0` and `max` at its cap (RELAY-PROTOCOL §6.3), bounded by the app's request timeout and by 30 seconds in all, its transport retries included; if the app cannot
    reach the relay, that is no reason to keep the keys longer, and it
    drops them at once. A transfer whose `device.paired` has arrived
    (the move is paired) completes at any later start of the app,
