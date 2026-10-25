@@ -1,8 +1,11 @@
 ---
 title: MEMBER-API
 status: v1 (Phase 2)
-version: 2.13.0
+version: 2.13.1
 changelog:
+  - 2.13.1 (2026-10-25; editorial, with VAULT-MESSAGING 0.62.0): the list
+    of readable codes that prove no step 1 was stored now also names
+    `exhausted` and `not_armed`. No API change
   - 2.13.0 (2026-10-24; **owner decision of 2026-10-24**; the code,
     status, grace and record are **proposed** for the owner's approval;
     with VAULT-MESSAGING 0.60.0, ANDROID-PLAN 0.1.79 and IOS-PLAN
@@ -2379,7 +2382,7 @@ exact clear of #148 can remove `app_key_next` while the vault's header
 still names K, and the row then does not show a key the vault may still
 adopt. "Answered and refused" means only a code read from the vault's own
 readable (sealed) answer, and then only
-`busy`, `wrong_again`, `attempt_lost`, `closed` (which comes only from a fresh open), the counter-down answer and the wait verdicts prove on their own that no step 1 was stored; `wrong` and
+`busy`, `wrong_again`, `attempt_lost`, `exhausted`, `not_armed`, `closed` (which comes only from a fresh open), the counter-down answer and the wait verdicts prove on their own that no step 1 was stored; `wrong` and
 `expired` count as refusals only for a phone with no earlier
 unanswered open (the sticky rule below). An unsealed slot status `expired` (written by the parent when
 the lease is held elsewhere or the answer is unreadable, or by the member

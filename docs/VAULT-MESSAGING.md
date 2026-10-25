@@ -13,7 +13,7 @@ related:
   - CALLS-PLAN.md (0.1.5) §6.1 V4, §13 (phase C2; decisions D12–D26, decided 2026-10-12)
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
-  - MEMBER-API.md (2.13.0)
+  - MEMBER-API.md (2.13.1)
   - ANDROID-PLAN.md (0.1.80)
   - IOS-PLAN.md (0.1.35; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
