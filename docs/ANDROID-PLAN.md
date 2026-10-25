@@ -4,7 +4,10 @@ status: draft
 version: 0.1.79
 date: 2026-10-24
 changelog:
-  - 0.1.79: **owner decision of 2026-10-24**, wording proposed
+  - 0.1.79: **owner decision of 2026-10-24**, wording proposed; the owner
+    approved the texts `recover_could_not_tell` and
+    `onboarding_open_took_phone` of 0.1.78 on 2026-10-24 (in #418), so
+    they are no longer drafts
     (VAULT-MESSAGING 0.60.0 §11.14.6, MEMBER-API 2.13.0). §4 "Recovery
     and unlock from release R": new "A recovery that ended without the
     phone". On `410 recovery_ended` a phone forgets its pending key only
@@ -12,8 +15,8 @@ changelog:
     that was admitted treats it as a `401`, and one with an unanswered
     open keeps K and follows "A phone that could not tell". Not built
   - 0.1.78: owner decisions of 2026-10-24 (option A; a key in use is
-    `app_key` or a live `app_key_pending`); the user-facing texts
-    (`recover_could_not_tell`, `onboarding_open_took_phone`) were approved by the owner on 2026-10-24 in #418 (VAULT-MESSAGING 0.59.0 §11.14.6 "A
+    `app_key` or a live `app_key_pending`); the user-facing texts are
+    DRAFTS for the owner's approval (VAULT-MESSAGING 0.59.0 §11.14.6 "A
     phone that could not tell", MEMBER-API 2.12.0). §4 "Recovery and
     unlock from release R", step 5: a registered phone whose open was
     sent and never answered readably, whose recovery has ended, reads
@@ -2587,7 +2590,7 @@ step of the "Recovery (new phone)" row).
    request a phone may forget its pending (recovering) key and offer to
    start over **only if it was never admitted as the app (it holds no
    `ok`, token or vault bundle for this vault) and has no unanswered
-   open**. Only a code read from the vault's own readable (sealed) answer counts as a refusal (wrong, closed, expired, busy, attempt lost, the waits). Only `busy`, `wrong_again`, `attempt_lost`, the counter-down answer and the wait verdicts prove on their own that no step 1 was stored; `wrong` and `expired` count as refusals only for a phone with no earlier unanswered open (the sticky rule below). An unsealed slot status `expired` (written by the parent when the lease is held elsewhere or the answer is unreadable, or by the member API after 5.5 minutes queued), a 404, 410 or 5xx on the poll, no answer, `retry`, `transfer_incomplete` and any error count as unanswered. The rule looks at every open the phone ever sent, not the last one: once an open is unanswered, a later refusal never clears it (a `wrong` on a repeated open proves nothing about adoption). The phone keeps the per-open history; a "last answer" is not enough. A phone that was ever admitted treats the `410` as a `401`. A
+   open**. Only a code read from the vault's own readable (sealed) answer counts as a refusal, and then only `busy`, `wrong_again`, `attempt_lost`, `closed` (which comes only from a fresh open), the counter-down answer and the wait verdicts prove on their own that no step 1 was stored; `wrong` and `expired` count as refusals only for a phone with no earlier unanswered open (the sticky rule below). An unsealed slot status `expired` (written by the parent when the lease is held elsewhere or the answer is unreadable, or by the member API after 5.5 minutes queued), a 404, 410 or 5xx on the poll, no answer, `retry`, `transfer_incomplete` and any error count as unanswered. The rule looks at every open the phone ever sent, not the last one: once an open is unanswered, a later refusal never clears it (a `wrong` on a repeated open proves nothing about adoption). The phone keeps the per-open history; a "last answer" is not enough. A phone that was ever admitted treats the `410` as a `401`. A
    phone with an unanswered open keeps K and follows "A phone that could
    not tell": it never forgets K on a `410`, because the host's exact
    orphan clear can remove `app_key_next` while the vault's header still

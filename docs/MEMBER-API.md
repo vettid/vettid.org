@@ -2378,11 +2378,9 @@ unanswered open keeps K and follows "A phone that could not tell": the
 exact clear of #148 can remove `app_key_next` while the vault's header
 still names K, and the row then does not show a key the vault may still
 adopt. "Answered and refused" means only a code read from the vault's own
-readable (sealed) answer (wrong, closed, expired, busy, attempt lost,
-the waits).
-Only `busy`, `wrong_again`, `attempt_lost`, the counter-down answer
-and the wait verdicts prove on their own that no step 1 was stored;
-`wrong` and `expired` count as refusals only for a phone with no earlier
+readable (sealed) answer, and then only
+`busy`, `wrong_again`, `attempt_lost`, `closed` (which comes only from a fresh open), the counter-down answer and the wait verdicts prove on their own that no step 1 was stored; `wrong` and
+`expired` count as refusals only for a phone with no earlier
 unanswered open (the sticky rule below). An unsealed slot status `expired` (written by the parent when
 the lease is held elsewhere or the answer is unreadable, or by the member
 API after 5.5 minutes queued), a 404, 410 or 5xx on the poll, no answer,
