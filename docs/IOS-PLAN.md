@@ -11,7 +11,7 @@ changelog:
     pending key only if it was never admitted and has no unanswered
     open)
   - 0.1.33: owner decisions of 2026-10-24 (option A); the user-facing
-    texts are DRAFTS for the owner's approval (VAULT-MESSAGING 0.59.0
+    texts (`recover_could_not_tell`, `onboarding_open_took_phone`) were approved by the owner on 2026-10-24 in #418 (VAULT-MESSAGING 0.59.0
     §11.14.6, MEMBER-API 2.12.0, ANDROID-PLAN 0.1.78). New §4.9 "A phone
     that could not tell": the same rule as Android, including each
     identity's `recovery_id` as its handshake context
@@ -1214,8 +1214,8 @@ ones are not counted as asked; the preview adds
 
 ### 4.9 A phone that could not tell (0.1.33)
 
-*Owner decisions of 2026-10-24 (option A); the user-facing texts are
-DRAFTS for the owner's approval (ANDROID-PLAN 0.1.78, VAULT-MESSAGING
+*Owner decisions of 2026-10-24 (option A); the user-facing texts were
+approved by the owner on 2026-10-24 (ANDROID-PLAN 0.1.78, VAULT-MESSAGING
 §11.14.6 "A phone that could not tell", MEMBER-API 2.12.0).* The same
 rule as ANDROID-PLAN §4 "Recovery and unlock from release R", step 5,
 carried here in full. K is the iPhone's recovering (app) key in the
@@ -1236,7 +1236,7 @@ minutes apart with the clock checked:
 Never while the recovery shows `registered` (then the phone opens
 again).
 
-**What it may do:** show (**DRAFT text, for the owner's approval**)
+**What it may do:** show (**approved by the owner 2026-10-24, `recover_could_not_tell`**)
 "We could not tell whether your last attempt recovered the vault. You
 can start a new recovery on the account site and use this phone for it;
 nothing on this phone is deleted." Then: claim the new code with K;
@@ -1249,7 +1249,7 @@ open's `unlock_secret`**.
   the lost-ok unlock, first with the new identity if it registered,
   then with the earlier one. If neither unlock succeeds, keep
   everything, read the status again later, and after a day of refusals
-  show (**DRAFT**) "Your vault took this phone, but it cannot be
+  show (**approved by the owner 2026-10-24, `onboarding_open_took_phone`**) "Your vault took this phone, but it cannot be
   unlocked right now. Contact VettID."
 - After the new open's `ok`: `hs.init` with the new identity and `ctx`
   = the new `recovery_id`; if no `hs.resp` arrives within the pairing
@@ -1281,7 +1281,7 @@ ANDROID-PLAN §4, carried here in full. On `410 recovery_ended` to a
 signed request a phone may forget its pending (recovering) key and offer
 to start over **only if it was never admitted as the app (it holds no
 `ok`, token or vault bundle for this vault) and has no unanswered
-open**. Only a code read from the vault's own readable (sealed) answer counts as a refusal (wrong, closed, expired, busy, attempt lost, the waits). An unsealed slot status `expired` (written by the parent when the lease is held elsewhere or the answer is unreadable, or by the member API after 5.5 minutes queued), a 404, 410 or 5xx on the poll, no answer, `retry`, `transfer_incomplete` and any error count as unanswered. The rule looks at every open the phone ever sent, not the last one: once an open is unanswered, a later refusal never clears it (a `wrong` on a repeated open proves nothing about adoption). The phone keeps the per-open history; a "last answer" is not enough. A phone that was ever admitted treats the `410` as a `401`. A
+open**. Only a code read from the vault's own readable (sealed) answer counts as a refusal (wrong, closed, expired, busy, attempt lost, the waits). Only `busy`, `wrong_again`, `attempt_lost`, the counter-down answer and the wait verdicts prove on their own that no step 1 was stored; `wrong` and `expired` count as refusals only for a phone with no earlier unanswered open (the sticky rule below). An unsealed slot status `expired` (written by the parent when the lease is held elsewhere or the answer is unreadable, or by the member API after 5.5 minutes queued), a 404, 410 or 5xx on the poll, no answer, `retry`, `transfer_incomplete` and any error count as unanswered. The rule looks at every open the phone ever sent, not the last one: once an open is unanswered, a later refusal never clears it (a `wrong` on a repeated open proves nothing about adoption). The phone keeps the per-open history; a "last answer" is not enough. A phone that was ever admitted treats the `410` as a `401`. A
 phone with an unanswered open keeps K and follows §4.9: it never forgets
 K on a `410`. On `401` it never forgets. The tests are Android's.
 
