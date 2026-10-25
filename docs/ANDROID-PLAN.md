@@ -1,9 +1,20 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.79
-date: 2026-10-24
+version: 0.1.80
+date: 2026-10-25
 changelog:
+  - 0.1.80: **owner decisions of 2026-10-25**; the contact text is a DRAFT
+    for the owner's approval (VAULT-MESSAGING 0.62.0 §11.14.6 "Two
+    identities at most", MEMBER-API 2.13.0 unchanged). §4 step 5 "A phone
+    that could not tell": at most two device identities, never a third;
+    if the new identity's recovery also ends, both are kept for good and
+    the lost-ok unlock is tried (newest, then earlier), with a contact
+    text after a day of refusals; a code for another vault is refused; the
+    status reads are checked on two clocks; a day of refusals counts from
+    the first refusal; a `401` at the register drops only the new
+    identity; the no-step-1 codes settle only their own open; each open's
+    history is saved before it is posted. Not built
   - 0.1.79: **owner decision of 2026-10-24**, wording proposed; the owner
     approved the texts `recover_could_not_tell` and
     `onboarding_open_took_phone` of 0.1.78 on 2026-10-24 (in #418), so
@@ -2661,6 +2672,20 @@ step of the "Recovery (new phone)" row).
    within the pairing timeout (no `invite_invalid` is ever received)
    the earlier identity with the earlier `recovery_id`; the earlier
    records go only after the pairing.
+
+   **Two identities at most, and what makes the phone decide** (0.62.0; owner decisions of 2026-10-25).
+   - **At most two device identities**: the earlier one (E) and one new one (N). A phone never registers a third. If N's recovery also ends (its open is unanswered, or every answer was a readable refusal), the phone **keeps both identities indefinitely and forgets neither**, does not start another recovery, and keeps trying the lost-ok unlock ("A lost `ok`"), with N first, then E, whenever it reads the status again. After **a day of refusals** it shows the contact text (below), not "Your vault took this phone, but it cannot be unlocked right now. Contact VettID.", which is false here; that text stays only for the `409 key_in_use` outcome, where K is the vault's `app_key`.
+   - **DRAFT text for the owner** (`recover_could_not_recover`): "This phone could not recover your vault. Nothing on this phone is deleted. Contact VettID at support@vettid.org." with an action **Email support** that opens a mail to `support@vettid.org`. Not approved.
+   - **A recovery code for another vault.** The phone refuses the code as soon as the claim or register answer names a vault other than the one of the earlier open (the member API's `vault_id`, no API change), registers nothing, and ignores status reads that belong to that recovery. It keeps E and K as they are.
+   - **App Attest (iOS).** One App Attest key per identity, attested and bound at that identity's own register. E's key is kept until the handshake completes.
+   - **The two status reads.** Both the wall clock and the monotonic clock show at least 5 minutes between the two reads, and the two measures agree within 2 minutes; a clock that was set, or a reboot, between them restarts the pair. The same pair is required before the phone acts on a `200`.
+   - **A day of refusals** counts from the first refusal and is staging-scaled (STAGING-TIME-SCALE). `bad_pin`, a backoff, and network or service failures (timeouts, `5xx`, `429`) are not refusals and do not count.
+   - **A `401` at the register** drops only N's registration (N's identity and relay key); E and K stay. Any other failure at the register keeps N as unknown (it may have registered), and the phone does not register again.
+   - **The codes that prove no step 1 on their own** (`busy`, `wrong_again`, `attempt_lost`, `closed`, the counter-down answer, the wait verdicts) settle **only the open they answer**, never an earlier unanswered open; the sticky rule above is unchanged.
+   - **The history is saved before the open is posted.** Each open's entry in the per-open history is written durably first; if that save fails, the open is not posted.
+   - **Pairing.** Each identity pairs only with its own `recovery_id` as `ctx`, and N falls back to E (and E's `recovery_id`) when no `hs.resp` arrives.
+
+      Tests: a third identity is never registered; with both identities and refusals the unlock is tried N then E and nothing is deleted; the contact text appears only after a day from the first refusal (not for `bad_pin`, backoff or network failures) and its action opens a mail to `support@vettid.org`; a code or register answer naming another vault is refused with E and K untouched; two reads count only with both clocks 5 minutes apart and agreeing within 2, and a set clock or reboot restarts the pair; a `401` at the register drops only N; a `wrong_again` for the second open does not settle the first; a failed history save means the open is not posted.
 
    While a wait runs the screen shows the date and time of the next
    possible attempt with a countdown, and the app keeps the registered

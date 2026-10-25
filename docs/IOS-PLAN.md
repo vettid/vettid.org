@@ -1,9 +1,15 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.34
-date: 2026-10-24
+version: 0.1.35
+date: 2026-10-25
 changelog:
+  - 0.1.35: **owner decisions of 2026-10-25**; the contact text is a DRAFT
+    for the owner's approval (VAULT-MESSAGING 0.62.0 §11.14.6, ANDROID-PLAN
+    0.1.80, MEMBER-API 2.13.0 unchanged). §4.9 "A phone that could not
+    tell": the same additions as Android, including one App Attest key
+    per identity, bound at its own register and the earlier key kept
+    until the handshake completes
   - 0.1.34: **owner decision of 2026-10-24**, wording proposed; the owner
     approved the texts `recover_could_not_tell` and
     `onboarding_open_took_phone` of 0.1.33 on 2026-10-24 (in #418), so
@@ -1275,6 +1281,20 @@ recovery_ended`); never take a `200` alone as adoption; never forget
 either identity or its `recovery_id` before the handshake completes.
 
 The tests are Android's.
+
+**Two identities at most, and what makes the phone decide** (0.62.0; owner decisions of 2026-10-25).
+- **At most two device identities**: the earlier one (E) and one new one (N). A phone never registers a third. If N's recovery also ends (its open is unanswered, or every answer was a readable refusal), the phone **keeps both identities indefinitely and forgets neither**, does not start another recovery, and keeps trying the lost-ok unlock ("A lost `ok`"), with N first, then E, whenever it reads the status again. After **a day of refusals** it shows the contact text (below), not "Your vault took this phone, but it cannot be unlocked right now. Contact VettID.", which is false here; that text stays only for the `409 key_in_use` outcome, where K is the vault's `app_key`.
+- **DRAFT text for the owner** (`recover_could_not_recover`): "This phone could not recover your vault. Nothing on this phone is deleted. Contact VettID at support@vettid.org." with an action **Email support** that opens a mail to `support@vettid.org`. Not approved.
+- **A recovery code for another vault.** The phone refuses the code as soon as the claim or register answer names a vault other than the one of the earlier open (the member API's `vault_id`, no API change), registers nothing, and ignores status reads that belong to that recovery. It keeps E and K as they are.
+- **App Attest (iOS).** One App Attest key per identity, attested and bound at that identity's own register. E's key is kept until the handshake completes.
+- **The two status reads.** Both the wall clock and the monotonic clock show at least 5 minutes between the two reads, and the two measures agree within 2 minutes; a clock that was set, or a reboot, between them restarts the pair. The same pair is required before the phone acts on a `200`.
+- **A day of refusals** counts from the first refusal and is staging-scaled (STAGING-TIME-SCALE). `bad_pin`, a backoff, and network or service failures (timeouts, `5xx`, `429`) are not refusals and do not count.
+- **A `401` at the register** drops only N's registration (N's identity and relay key); E and K stay. Any other failure at the register keeps N as unknown (it may have registered), and the phone does not register again.
+- **The codes that prove no step 1 on their own** (`busy`, `wrong_again`, `attempt_lost`, `closed`, the counter-down answer, the wait verdicts) settle **only the open they answer**, never an earlier unanswered open; the sticky rule above is unchanged.
+- **The history is saved before the open is posted.** Each open's entry in the per-open history is written durably first; if that save fails, the open is not posted.
+- **Pairing.** Each identity pairs only with its own `recovery_id` as `ctx`, and N falls back to E (and E's `recovery_id`) when no `hs.resp` arrives.
+
+The tests are Android's, with one more: the earlier App Attest key is still present until the handshake completes.
 
 ### 4.10 A recovery that ended without the phone (0.1.34)
 
