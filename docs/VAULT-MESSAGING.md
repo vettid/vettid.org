@@ -16890,9 +16890,18 @@ it stands from any signed request, normally `GET /api/vault/status`:
     a `410`.
   - Only a phone that was never admitted and has no unanswered open
     (it registered and never opened, or every open it sent was answered
-    and refused before step 1 of the order of writes: wrong, closed,
-    expired, busy, attempt lost, the waits; `retry`, `transfer_incomplete`
-    and any error are **unanswered**, because of a split-brain path in
+    and refused, and only by a code read from the vault's own readable
+    (sealed) answer: wrong, closed, expired, busy, attempt lost, the
+    waits. An unsealed slot status `expired` (written by the parent when
+    the lease is held elsewhere or the answer is unreadable, or by the
+    member API after 5.5 minutes queued), a 404, 410 or 5xx on the poll,
+    no answer at all, `retry`, `transfer_incomplete` and any error are
+    **unanswered**; so is every open once any open was, since the rule
+    looks at every open the phone ever sent and a later `wrong` on a
+    repeated open proves nothing about adoption (the vault answers
+    `wrong` after step 1 is stored when an earlier open by this K stored
+    it); the phone keeps the per-open history, not a last answer.
+    The reason for treating `retry` and errors so is a split-brain path in
     which the loser's exact orphan clear also removes the winner's entry,
     the winner stores step 2 and dies before step 3, and the row names
     neither key while only K unlocks the vault) **may forget its pending (recovering) key** and its

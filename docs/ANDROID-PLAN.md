@@ -2587,7 +2587,7 @@ step of the "Recovery (new phone)" row).
    request a phone may forget its pending (recovering) key and offer to
    start over **only if it was never admitted as the app (it holds no
    `ok`, token or vault bundle for this vault) and has no unanswered
-   open**. An open is answered and refused only by the vault's refusals before step 1 (wrong, closed, expired, busy, attempt lost, the waits); `retry`, `transfer_incomplete` and any error count as unanswered. A phone that was ever admitted treats the `410` as a `401`. A
+   open**. Only a code read from the vault's own readable (sealed) answer counts as a refusal (wrong, closed, expired, busy, attempt lost, the waits). An unsealed slot status `expired` (written by the parent when the lease is held elsewhere or the answer is unreadable, or by the member API after 5.5 minutes queued), a 404, 410 or 5xx on the poll, no answer, `retry`, `transfer_incomplete` and any error count as unanswered. The rule looks at every open the phone ever sent, not the last one: once an open is unanswered, a later refusal never clears it (a `wrong` on a repeated open proves nothing about adoption). The phone keeps the per-open history; a "last answer" is not enough. A phone that was ever admitted treats the `410` as a `401`. A
    phone with an unanswered open keeps K and follows "A phone that could
    not tell": it never forgets K on a `410`, because the host's exact
    orphan clear can remove `app_key_next` while the vault's header still

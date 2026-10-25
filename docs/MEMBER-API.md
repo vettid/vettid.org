@@ -2377,10 +2377,18 @@ admitted as the app treats the `410` as a `401`. A phone with an
 unanswered open keeps K and follows "A phone that could not tell": the
 exact clear of #148 can remove `app_key_next` while the vault's header
 still names K, and the row then does not show a key the vault may still
-adopt. "Answered and refused" means only the vault's refusals made
-before step 1 of the order of writes (wrong, closed, expired, busy,
-attempt lost, the waits); `retry`, `transfer_incomplete` and any error
-count as an unanswered open (see the split-brain residual). On `401` it
+adopt. "Answered and refused" means only a code read from the vault's own
+readable (sealed) answer (wrong, closed, expired, busy, attempt lost,
+the waits). An unsealed slot status `expired` (written by the parent when
+the lease is held elsewhere or the answer is unreadable, or by the member
+API after 5.5 minutes queued), a 404, 410 or 5xx on the poll, no answer,
+`retry`, `transfer_incomplete` and any error count as an unanswered open
+(see the split-brain residual). The rule looks at every open the phone
+ever sent, not the last: once an open is unanswered, a later refusal
+never clears it (a `wrong` on a repeated open proves nothing about
+adoption, since the vault can answer `wrong` after step 1 is stored when
+an earlier open by this K stored it), so phones keep the per-open
+history. On `401` it
 never forgets the key, and tries again later.
 
 **Logs.** No log, audit or email changes. The access log shows the
