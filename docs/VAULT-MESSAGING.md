@@ -31,14 +31,14 @@ changelog:
     for the owner's approval (MEMBER-API 2.13.0 unchanged, ANDROID-PLAN
     0.1.80, IOS-PLAN 0.1.35). §11.14.6 "A phone that could not tell",
     new "Two identities at most": at most two device identities (the
-    earlier and one new), never a third; if the new identity's recovery
-    also ends, the phone keeps both for good and keeps trying the lost-ok
+    earlier and one new), never a third; further recoveries reuse the
+    new one (owner D1); if its recovery also ends, the phone keeps both and keeps trying the lost-ok
     unlock (newest, then earlier), and after a day of refusals shows a
     contact text (not "Your vault took this phone"); a recovery code for
     another vault is refused as soon as the claim or register names it;
     one App Attest key per identity; the two status reads (wall and
     monotonic clock, 5 minutes, agreeing within 2); what a day of refusals
-    counts; a `401` at the register drops only the new identity; the
+    counts; a failed register is retried with the same new identity, and a `401` drops it; the
     codes that prove no step 1 settle only their own open; each open's
     history is saved before it is posted; pairing by each identity's own
     `recovery_id`. No wire change, no API change
@@ -16918,7 +16918,7 @@ it stands from any signed request, normally `GET /api/vault/status`:
   - Only a phone that was never admitted and has no unanswered open
     (it registered and never opened, or every open it sent was answered
     and refused, and only by a code read from the vault's own readable
-    (sealed) answer, and then only `busy`, `wrong_again`, `attempt_lost`, `closed` (which comes only from a fresh open), the counter-down answer and the wait verdicts prove on their own that no step 1 was
+    (sealed) answer, and then only `busy`, `wrong_again`, `attempt_lost`, `exhausted`, `not_armed`, `closed` (which comes only from a fresh open), the counter-down answer and the wait verdicts prove on their own that no step 1 was
     stored (`wrong` and `expired` count as refusals only for a phone with
     no earlier unanswered open, the sticky rule below). An unsealed slot status `expired` (written by the parent when
     the lease is held elsewhere or the answer is unreadable, or by the
@@ -17062,14 +17062,14 @@ with its recovering (app) key K:
   other records may be deleted.
 
 **Two identities at most, and what makes the phone decide** (0.62.0; owner decisions of 2026-10-25).
-- **At most two device identities**: the earlier one (E) and one new one (N). A phone never registers a third. If N's recovery also ends (its open is unanswered, or every answer was a readable refusal), the phone **keeps both identities indefinitely and forgets neither**, does not start another recovery, and keeps trying the lost-ok unlock ("A lost `ok`"), with N first, then E, whenever it reads the status again. After **a day of refusals** it shows the contact text (below), not "Your vault took this phone, but it cannot be unlocked right now. Contact VettID.", which is false here; that text stays only for the `409 key_in_use` outcome, where K is the vault's `app_key`.
+- **At most two device identities**: the earlier one (E) and one new one (N). A phone never registers a third. **Further recoveries reuse N** (owner decision of 2026-10-25): for each new recovery the phone claims its code with K, registers N again (the same K, the same N keys, the new recovery's code) and opens with the earlier open's `unlock_secret`. This is needed because once E's open stored step 1, every later open is a resumed recovery that requires E's secret (§11.14.2), so only this phone can finish it. If N's recovery ends (its open is unanswered, or every answer was a readable refusal), the phone keeps both identities indefinitely, forgets neither, and keeps trying the lost-ok unlock ("A lost `ok`"), N first, then E, whenever it reads the status again, and uses the next recovery the member starts as above. It shows the contact text (below) only when even that is impossible: the vault's answers rule it out (for example `exhausted`, or `closed` with no recovery left to use), or the member gives up. This agrees with the `transfer_incomplete` rule above (open again while the recovery shows `registered`, otherwise a new recovery). The text "Your vault took this phone, but it cannot be unlocked right now. Contact VettID." stays only for the `409 key_in_use` outcome, where K is the vault's `app_key`; there, after a day of refusals, it is shown as before.
 - **DRAFT text for the owner** (`recover_could_not_recover`): "This phone could not recover your vault. Nothing on this phone is deleted. Contact VettID at support@vettid.org." with an action **Email support** that opens a mail to `support@vettid.org`. Not approved.
-- **A recovery code for another vault.** The phone refuses the code as soon as the claim or register answer names a vault other than the one of the earlier open (the member API's `vault_id`, no API change), registers nothing, and ignores status reads that belong to that recovery. It keeps E and K as they are.
+- **A recovery code for another vault.** A scanned code names its `vault_id`, so the phone refuses it before the claim when that vault is not the one of the earlier open. A typed locator names none, so the phone refuses it as soon as the claim answer's `vault_id` differs. Nothing is registered; E, N and K stay. (No API change; status with K is always for K's own vault, so there is nothing to ignore.)
 - **App Attest (iOS).** One App Attest key per identity, attested and bound at that identity's own register. E's key is kept until the handshake completes.
 - **The two status reads.** Both the wall clock and the monotonic clock show at least 5 minutes between the two reads, and the two measures agree within 2 minutes; a clock that was set, or a reboot, between them restarts the pair. The same pair is required before the phone acts on a `200`.
 - **A day of refusals** counts from the first refusal and is staging-scaled (STAGING-TIME-SCALE). `bad_pin`, a backoff, and network or service failures (timeouts, `5xx`, `429`) are not refusals and do not count.
-- **A `401` at the register** drops only N's registration (N's identity and relay key); E and K stay. Any other failure at the register keeps N as unknown (it may have registered), and the phone does not register again.
-- **The codes that prove no step 1 on their own** (`busy`, `wrong_again`, `attempt_lost`, `closed`, the counter-down answer, the wait verdicts) settle **only the open they answer**, never an earlier unanswered open; the sticky rule above is unchanged.
+- **A failed register.** A register that failed before reaching the vault (`503 release_starting` or `vault_unavailable`, `429`, `409 recovery_not_available`, a network failure) may be **retried with the same N, the same K and the recovery's code**; a repeat that did reach the vault is refused as `used`, which is harmless. Only a new identity is forbidden. A `401` at the register drops N's registration (N's identity and relay key; E and K stay), and an N dropped so no longer counts as one of the two. Any other failure keeps N as unknown (it may have registered).
+- **The codes that prove no step 1 on their own** (`busy`, `wrong_again`, `attempt_lost`, `exhausted`, `not_armed`, `closed`, the counter-down answer, the wait verdicts) settle **only the open they answer**, never an earlier unanswered open; the sticky rule above is unchanged.
 - **The history is saved before the open is posted.** Each open's entry in the per-open history is written durably first; if that save fails, the open is not posted.
 - **Pairing.** Each identity pairs only with its own `recovery_id` as `ctx`, and N falls back to E (and E's `recovery_id`) when no `hs.resp` arrives.
 
