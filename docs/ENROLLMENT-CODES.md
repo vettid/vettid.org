@@ -1,9 +1,12 @@
 ---
 title: ENROLLMENT-CODES
 status: draft (design note; normative text in VAULT-MESSAGING 0.15.0 §11.12–§11.13 and MEMBER-API 2.0.0)
-version: 0.2.4
-date: 2026-10-24
+version: 0.2.5
+date: 2026-10-25
 changelog:
+  - 0.2.5: editorial, with VAULT-MESSAGING 0.61.0: the enroll-mode
+    `AppKeyNext` that resets a replaced provisional vault's key is made
+    only by the instance that holds the vault's lease
   - 0.2.4: editorial, with VAULT-MESSAGING 0.58.0: `enrolled` no longer
     always replaces the row's app key (see Ordering and loss)
   - 0.2.3: VAULT-MESSAGING 0.16.0 (owner decisions of 2026-10-06): a
@@ -364,7 +367,7 @@ then decides.
   (`app_key_seq`, 1 at enrollment). Every report carries the key and its
   `app_key_seq`, and the parent writes it only if the sequence is higher
   than the row's, whatever the lease (a stale instance can only report an
-  older sequence, which changes nothing). `enrolled` writes the key only when the row is still `enrolling`, has no key, has a lower sequence or names the same key; a replaced provisional vault starts again at 1 by the vault's unconditional enroll-mode `AppKeyNext` (VAULT-HOST-PROTOCOL 0.1.15 §5.7), before its first header.
+  older sequence, which changes nothing). `enrolled` writes the key only when the row is still `enrolling`, has no key, has a lower sequence or names the same key; a replaced provisional vault starts again at 1 by the vault's enroll-mode `AppKeyNext`, whatever the row has but only for the instance that holds the vault's lease (VAULT-HOST-PROTOCOL 0.1.16 §5.7), before its first header.
 - **The report travels with the header write.** A change of app key is
   a header write (the new unlock key). The `app_key` event is handed to
   the parent in the same exchange as that header's store request, and the

@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.60.0
-date: 2026-10-24
+version: 0.61.0
+date: 2026-10-25
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -23,10 +23,20 @@ related:
   - VAULT-RELEASES.md (0.1.31; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
-  - VAULT-HOST-PROTOCOL.md (0.1.15; the enclave ↔ parent protocol as built)
+  - VAULT-HOST-PROTOCOL.md (0.1.16; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.61.0: editorial (with VAULT-HOST-PROTOCOL 0.1.16; as built in
+    vettid-vault #149, main 1347c87; owner decision of 2026-10-25). The
+    parent's confirmations of the app key (the acknowledged request of
+    §11.5, §11.14.2, including the enrollment's) are made only by the
+    instance that holds the vault's unexpired lease, and the enclave
+    confirms the next key again once step 1 is stored; the clear of a key
+    a failed step 1 left on the row is bound to the clearing parent's own
+    confirmation and to the lease, and none is sent when step 1 loses to
+    another instance. §11.5's enrollment wording is corrected to say so.
+    No wire change, no change for the apps
   - 0.60.0: **owner decision of 2026-10-24**; the code and the times are
     proposed for the owner's approval (MEMBER-API 2.13.0, built in
     vettid.org, not deployed; ANDROID-PLAN 0.1.79, IOS-PLAN 0.1.34). It
@@ -12118,8 +12128,10 @@ Nothing secret is stored:
   `seq` being higher than the row's (a stale instance can only report an
   older one), except that `enrolled` writes it also when the row is still
   `enrolling`, has no key, or already names the same key (0.58.0; a
-  replaced provisional vault starts again at 1 by the unconditional
-  enroll-mode request of VAULT-HOST-PROTOCOL §5.7, §11.3); it never takes the key
+  replaced provisional vault starts again at 1 by the enroll-mode
+  request of VAULT-HOST-PROTOCOL §5.7, which replaces the row's key
+  whatever it has but only for the instance that holds the vault's
+  lease, §11.3); it never takes the key
   from anywhere else. (0.58.0) The writes of `app_key` and
   `app_key_next` are conditional on `seq` and `header_seq`
   (VAULT-HOST-PROTOCOL §7.2) and are repeated until they are written; a

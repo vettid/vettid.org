@@ -2292,7 +2292,10 @@ enrollment, transfer and recovery fails closed.
 | `app key written after a retry` | info | The queued write succeeded |
 | `app key write refused; not tried again` | error | The service refused the write as malformed or not allowed; it is given up (check the host role's grant on the vault table) |
 | `lifecycle` with `event=app_key_assert` | debug only | The enclave's assertion after a hello; not logged at info |
-| `lifecycle` with `event=app_key_next_clear` | info | The enclave clears the next key a failed step 1 left on the row |
+| `lifecycle` with `event=app_key_next_clear` | info | The enclave clears the next key a failed step 1 left on the row. The clear is made only by the parent that holds the vault's lease and made that key's confirmation (0.1.16) |
+| `orphan clear skipped; stamp unknown` (`vault_id`, `header_seq`) | debug | The parent has no stamp for that clear (it restarted, or never confirmed that key) and wrote nothing; the orphan stays until a later `next_cleared` or an unlock with `next: false` |
+
+`app key refused` is also logged when a parent that does not hold the vault's unexpired lease is asked to confirm a key (0.1.16); expect it at a move, at a late lease renewal, and in a split brain.
 
 A burst of `app key write failed; trying again` for one vault that ends
 with `app key written after a retry` is a table outage that healed.
