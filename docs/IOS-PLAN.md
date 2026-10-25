@@ -1294,7 +1294,7 @@ The tests are Android's.
 - **The history is saved before the open is posted.** Each open's entry in the per-open history is written durably first; if that save fails, the open is not posted.
 - **Pairing.** Each identity pairs only with its own `recovery_id` as `ctx`; for a re-registered N that is the `recovery_id` it **last** registered for. After a resume in which step 2 was not stored, the invitation is under the current recovery's id; after one in which step 2 was stored, E's invitation stays under E's `recovery_id` (R1) and E pairs with that. N falls back to E (and E's `recovery_id`) when no `hs.resp` arrives.
 
-The tests are Android's, with one more: the earlier App Attest key is still present until the handshake completes.
+The tests are Android's, with one more: E's key and N's earlier App Attest keys are still present until the handshake completes; each re-register of N uses a new App Attest key.
 
 ### 4.10 A recovery that ended without the phone (0.1.34)
 
