@@ -40,7 +40,7 @@
     "@types/aws-lambda": "^8.10.164",
     "@types/jest": "^30.0.0",
     "@types/node": "^26.6.4",
-    "aws-cdk": "^2.1144.0",
+    "aws-cdk": "^2.1146.1",
     "aws-jwt-verify": "^5.2.1",
     "aws-sdk-client-mock": "^4.1.0",
     "esbuild": "^0.28.2",
@@ -52,7 +52,7 @@
     "typescript": "~5.9.3"
   },
   "dependencies": {
-    "aws-cdk-lib": "^2.272.0",
+    "aws-cdk-lib": "^2.274.0",
     "constructs": "^10.0.0"
   },
   "description": "Infrastructure (AWS CDK) and static website for vettid.org",
