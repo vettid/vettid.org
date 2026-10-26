@@ -1,9 +1,12 @@
 ---
 title: VAULT-PLAN
 status: draft
-version: 0.1.10
-date: 2026-10-23
+version: 0.1.11
+date: 2026-10-26
 changelog:
+  - 0.1.11: editorial (status as of 2026-10-26); no rule changes. V6
+    status note: the iOS app's progress (I3.3 and I3.4a, release L's L1
+    and L2) and Android's release L, deletion and recovery work
   - 0.1.10: owner decision of 2026-10-23 (VAULT-MESSAGING 0.56.0, §10.18
     "Spend caps"): V4 wallet note. The spend caps are per wallet, per
     transaction and per **rolling 24 hours only** (the note said "per
@@ -235,7 +238,12 @@ transport, enrollment, unlock, key attestation already exists in
 *Status (2026-10-23).* `vaultctl` and the Go agent: `vettid-agent` A0
 to A3 and A5 are built (vettid-agent #7 to #40, 2026-10-17 to
 2026-10-20). Android: built and in daily use on staging (ANDROID-PLAN
-§6). iOS: under way (vettid-ios I0 to I3.2d and I3.3a merged; IOS-PLAN).
+§6). iOS: under way (vettid-ios I0 to I3.3 and I3.4a merged, with release
+L's L1 and L2 and the no-erase rule, #138 to #140; IOS-PLAN; status
+2026-10-26). Android has also merged release L's app side (#190, #191,
+#193), the transfer keep-check (#187, #189), the deletion rules (#192,
+#194) and "a phone that could not tell" (#195); the vault's side of
+release L is merged and ships as staging release 23 (not yet cut).
 Desktop: not done; vettid-desktop #8 (the Windows build) and #10 (the
 machine-bound storage key) are open since 2026-10-13, and only #5 and #7
 (CI and icons) are merged.
