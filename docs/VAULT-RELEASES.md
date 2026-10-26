@@ -1,8 +1,8 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.32
-date: 2026-10-18
+version: 0.1.33
+date: 2026-10-26
 owner: Al Liebl (Mesmer)
 changelog:
   - 0.1.0: V5 plan. Release pipeline, keys, infrastructure, release
@@ -260,6 +260,10 @@ changelog:
     the code outside staging; on staging the quiet period is stated as
     259,200 / `time_scale`; each release log entry from the release
     that ships it says the scale in words
+  - 0.1.33: as built (vettid.org #429, W10-READINESS B12): §3.5
+    `check:manifest` now requires `ends_after_days: 90` on production
+    release 1, as a candidate and in every later status. No other
+    change
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.37.0) §11.10 release updates, §11.10.8 release constants, §12.5 deletion, §13.5, §13.9
@@ -545,8 +549,8 @@ the default of 12 months.
   release entry PR on (§10.1 step 5). It is a member of the release list
   only, like `host` and `log`: it is not in the manifest or the image,
   and no enclave or app reads it. An entry without it has the default.
-  `check:manifest` accepts the member only on production release 1 and
-  only with the value 90, and then refuses an `ends_at` on that entry
+  `check:manifest` requires the member on production release 1,
+  accepts it only there and only with the value 90, and then refuses an `ends_at` on that entry
   earlier than 90 days after release 2's `published_at`. (No check knew
   W before: `ends_at` is set by hand, §7, §10.3.)
 - *The check, as built* (0.1.13; `lib/vault/release-list.ts`).
@@ -558,17 +562,10 @@ the default of 12 months.
   - The member is kept out of the manifest and out of the log's
     `index.json`; only the release log page's "End date" line reads
     it.
-  - **Nothing requires the member.** A production release 1 entry
-    without it passes every check, and then has no checked window at
-    all: no check knows the default of 12 months either, so its
-    `ends_at` would be whatever is typed (after `published_at`), and
-    its log page would promise "at least 12 months". The 90 days of D2
-    then rest on the release entry PR's review alone (W10-READINESS §3
-    step 5). **Decided (owner, 2026-10-11, as recommended; not yet
-    implemented):** `check:manifest` must refuse a production release
-    1 entry without `ends_after_days: 90`. A small change to the
-    validation, to make before the release entry PR (W10-READINESS
-    B12).
+  - **The member is required** (0.1.33, W10-READINESS B12, vettid.org
+    #429): a production release 1 entry without `ends_after_days: 90`
+    is refused, as a candidate and in every later status, so release 1
+    always has its checked 90-day window.
 - *The timeline.* W equals the notice period, so release 1 is never
   `deprecated`: the manifest that makes release 2 `active` (T0) sets
   release 1 `retired` with `ends_at` = T0 + 90 days. `active` to
