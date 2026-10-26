@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.63.1
+version: 0.64.0
 date: 2026-10-26
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -27,6 +27,14 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.64.0: **owner decision 2026-10-26** (ARCHITECTURE 0.1.5,
+    VAULT-PLAN 0.1.13, ACCOUNT-ADMIN-PLAN 0.2.2). §1.1 item 2: votes and
+    B2C service vaults are no longer out of scope but planned, not yet
+    specified: services reached as an ordinary `connection`, with
+    contracts (acceptance, completions), and votes (blind-signed
+    eligibility, ballots deposited unlinkably), each in a later
+    revision. Org vaults and transport-credential minting stay out of
+    scope. A scope change only: no wire, vault or app change
   - 0.63.1: **owner decision of 2026-10-26** (MEMBER-API 2.13.2,
     ANDROID-PLAN 0.1.84, IOS-PLAN 0.1.38). §11.14.6: a readable
     `attestation` answer to a recovery open proves no step 1 for the open
@@ -2147,8 +2155,15 @@ described in RFC 2119.
      - shared actions;
      - grants and critical-item use;
      - presence, as an on-demand ping.
-   - Out of scope: votes, B2C service vaults, org vaults and
-     transport-credential minting.
+   - Planned, not yet specified (owner decision 2026-10-26; 0.64.0).
+     Each is specified in a later revision; until then this document
+     defines none of their messages, and a vault offers neither:
+     - services: a service, with its own service vault, is reached as
+       an ordinary `connection` (PUSH-GATEWAY §12, item 5); contracts
+       with a service (acceptance, completions);
+     - votes: eligibility by blind signature, and ballots deposited
+       unlinkably.
+   - Out of scope: org vaults and transport-credential minting.
 3. **The vault relay key exists only in PIN-protected vault state.** The
    enclave generates the key at enrollment. It is stored only in vault state
    encrypted under the PIN-derived DEK; there is no KMS-sealed or otherwise

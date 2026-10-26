@@ -1,10 +1,13 @@
 ---
 title: ARCHITECTURE
 status: overview (as built and planned, 2026-10-03)
-version: 0.1.4
-date: 2026-10-09
+version: 0.1.5
+date: 2026-10-26
 owner: Al Liebl (Mesmer)
 changelog:
+  - 0.1.5: owner decision 2026-10-26 (VAULT-MESSAGING 0.64.0 §1.1):
+    votes and B2C service vaults are planned, no longer excluded; §7 and
+    the governance voting row in §8 follow
   - 0.1.4: no UnifiedPush (owner decision, 2026-10-09): platform push
     (FCM/APNs) through the push gateway, which stays, and the app's
     on-phone service for phones without Google services; future
@@ -245,8 +248,9 @@ PQC-MIGRATION is the plan. In short:
   activity metadata (owner decisions of 2026-10-08, VAULT-MESSAGING
   0.22.0 §10.9), which is no backup. Losing the stored state itself is out of scope
   (VAULT-MESSAGING §2.2).
-- No votes, B2C service vaults, org vaults or group primitives in the
-  vault (VAULT-MESSAGING §1.1).
+- No org vaults or group primitives in the vault (VAULT-MESSAGING
+  §1.1). Votes, and services reached through their own service vaults,
+  are planned and specified later (owner decision 2026-10-26).
 - No parsing of envelopes outside the enclave, and no transport
   credentials minted for clients.
 
@@ -259,7 +263,7 @@ PQC-MIGRATION is the plan. In short:
 | GrapheneOS enrollment: accept its verified-boot key in device attestation (it reports `SelfSigned`, which VAULT-MESSAGING §11.7 refuses today) | Follow-up | VAULT-MESSAGING §11.7 |
 | One app per vault, holding the credential; a second or stale copy is refused, alerted, emailed and freezes credential operations until a forced rotation; direct transfer to a new phone (owner decision, 2026-10-03) | Spec change after V4 batch 4 | PROTEAN-CREDENTIAL §4 |
 | Calling service (TURN, SFrame end-to-end media) | Planned | CALLING-SERVICE |
-| Governance voting for paid members (outside the vault; paid members are the voting members) | Coming soon | ACCOUNT-ADMIN-PLAN §5.1, §9 |
+| Governance voting for paid members (paid members are the voting members; owner decision 2026-10-26: in the member vault with a service vault, specified later) | Coming soon | ACCOUNT-ADMIN-PLAN §5.1, §9; VAULT-MESSAGING §1.1 |
 | Payments for paid subscriptions | Later | ACCOUNT-ADMIN-PLAN §10 |
 | Vault-to-vault transfer within the service (move a member's data from an old vault to a new one) | Future | VAULT-PLAN "Later" |
 | Self-hosted vaults / a home appliance (verified against the published release measurements) | Future direction, not a current design | this section |
