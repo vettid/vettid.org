@@ -59,7 +59,7 @@ changelog:
     §6.6, §7 (C3's exit test: a call within 2 s of another wake), §13.2,
     §13.3 step 1 and D24 say so, each marked "0.1.4". The plan is
     otherwise unchanged and stays approved
-  - 0.1.5 (2026-10-23): editorial (merged in vettid.org #400). The
+  - 0.1.5 (2026-10-23): editorial (approved by the owner and merged 2026-10-23, vettid.org #400). The
     media stack is `150.7871.04` (it carries the 256-bit key option,
     upstream PR #302; confirmed on two phones 2026-10-23, vettid-android
     #175). §6 (A), §12.2 and §12.3 say so; suite 2 is still not offered

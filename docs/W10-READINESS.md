@@ -193,7 +193,7 @@ This section was added in 0.1.9 and records what the other rows do not.
 - **Answers of the member API to a phone** (since 2026-10-24):
   `410 vault_deleted` and `410 account_deleted` (MEMBER-API 2.11.0),
   `409 key_in_use` (2.12.0) and `410 recovery_ended` (2.13.0), with the
-  apps' rules for them (vettid-android #192, #194, #195). They are in
+  apps' rules for them (vettid-android #194 and #195; #192 is the earlier no-erase-on-401 stop-gap). They are in
   the member API's staging deployment; production's backend is behind
   master (B11), so they reach it with the deploy of B11.
 - **Other work since**: photo attachments (vettid-android #131 to #133),

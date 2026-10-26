@@ -2054,7 +2054,7 @@ fails secure"), merged as 7a250bcd and hardened since (#140, #150,
 VAULT-MESSAGING 0.29.0 (approved by the owner 2026-10-12), for the
 vault's release L (staging release 23, not yet cut). (0.1.80) Part 2 is built in
 vettid-android #190, #191 and #193 (merged 2026-10-24); its texts were
-approved by the owner on 2026-10-24. The texts of part 1 were approved
+approved by the owner on 2026-10-24, except the **Lock it now** label (a draft, #190). The texts of part 1 were approved
 as drafts (VAULT-LOCK L16) and are final with #127 merged.*
 
 **1. As built by #127.**
@@ -2088,7 +2088,7 @@ as drafts (VAULT-LOCK L16) and are final with #127 merged.*
   still in the member API's queue, leave a window the app cannot close
   (VAULT-LOCK F6, F7).
 
-**Texts (drafts; catalog ids as in #127).**
+**Texts (final, VAULT-LOCK L16; catalog ids as in #127).**
 
 | Where | Id | Text |
 |---|---|---|
@@ -2117,10 +2117,10 @@ vault without it, part 1 applies unchanged.
   vault's `stale_lock` and the slot's `stale` end the pending lock
   without confirming it (VAULT-MESSAGING 0.56.4 §10.2 "Locks"): this
   phone's unlock is over and the vault is open under a newer one, so the app reads the
-  status and says the vault is locked only if the status is not
-  `unlocked`. The app does not repeat that lock on its own; the member's
+  status and says the vault is locked only if that status was read
+  and is not `unlocked`. The app does not repeat that lock on its own; the member's
   own new lock is allowed (0.1.80: the **Lock it now** button on "Your
-  vault was opened again", approved by the owner 2026-10-24).
+  vault was opened again", owner decision 2026-10-24; its label is a draft).
 - A `vault.locking` is taken only if its `unlock_id` is the current
   one (VAULT-MESSAGING §10.2 "Locks").
 - **The idle lock** (VAULT-MESSAGING §3.6.8). Settings → Security,
@@ -5659,7 +5659,7 @@ signer (§7).
 | A3 | Onboarding, unlock, credential, settings screens (with the account card, 0.1.11), biometric app lock; History (0.1.11), once the vault release with VAULT-MESSAGING 0.20.0's search is in staging; History export (0.1.17), once a release with 0.22.0's `audit.export` is | Fresh install → enrolled vault with credential on a real phone (dev stack) | Done: #49, with the account card, History and the export (#77, #88, #92, #97, #98) |
 | A4 | Connections, messages, approvals | Invite/QR connect, SAS, messages both ways, approvals | Done: #51 |
 | A5 | Items (data, secret, critical), tags, share rules, grants and critical-item approvals | Flows against the dev stack and a second vault | Done: #78 (A5a items), #79 (A5b tags and sharing), #80 (A5c grants and approvals); later fixes #89 to #96 and #171 to #176 |
-| A6 | Hardening and polish: accessibility pass, notifications (0.1.23: the Notifications screen and N1 below), offline behaviour, error states, Play pre-launch report | Internal testing track build | Partly: the audit (#117) and its fixes (#119 to #122, #127), the privacy settings (#120); the notifications screen (#99); (0.1.80, 2026-10-24) the A6 audit's findings N1 to N3 (#185 to #187, with #184 and #188) are merged; the accessibility pass, offline behaviour and the Play pre-launch report are not recorded as done |
+| A6 | Hardening and polish: accessibility pass, notifications (0.1.23: the Notifications screen and N1 below), offline behaviour, error states, Play pre-launch report | Internal testing track build | Partly: the audit (#117) and its fixes (#119 to #122, #127), the privacy settings (#120); the notifications screen (#99); (0.1.80, 2026-10-24) the A6 audit's findings N1 to N3 are merged (#185 to #187; the audit document #188), and #184 scrubs crash messages; the accessibility pass, offline behaviour and the Play pre-launch report are not recorded as done |
 | N1–N4 | 0.1.23, notification modes (§4 Notification modes, 10): N1 app (setting, channels, on-phone service, FCM stubbed); N2 spec (`push.register`); N3 vault (push ops, wakes); N4 gateway with FCM credentials, then FCM on | N1: notifications in the background on both test phones without Google; N4: FCM wakes on the Pixel 7 | N1 done (#99, #100, #105). N2 is the specification (PUSH-GATEWAY, VAULT-MESSAGING §14). N3 done on the vault (vettid-vault #59, merged 2026-10-10; wakes in staging release S9). N4: the app's Google push mode is built (#109, #111, #112, #129) and the staging gateway has been deployed since 2026-10-11, but no platform is enabled yet (it waits for Firebase and APNs credentials) |
 
 Status (2026-10-23, with additions of 2026-10-26), after v1: **calls**

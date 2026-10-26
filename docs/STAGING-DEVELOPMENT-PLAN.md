@@ -256,10 +256,10 @@ Phases 2–6 run on staging under §2; each reaches production through
 | 2 | Lock the vault still unlocked on S3 after the drill, or accept its host until 2026-10-13 15:30 UTC | owner |
 | 3 | Confirm the S1 (2026-10-12) and S2 (2026-10-13) key deletions; record in W9-REPORT §8 | owner runs, assistant records |
 | 4 | After 2026-10-13: one PR setting S3–S6 `removed` and deleting their stacks, leaving S7–S9; the key list for the owner's batch | assistant, then owner |
-| 5 | Remove the legacy session auth switch (§4) | assistant |
+| 5 | Remove the legacy session auth switch (§4) | assistant (2026-10-26: **not done**; the switch is still in `lib/config.ts`, `lambda/member/vault.ts` and `lib/stacks/member-api-stack.ts`) |
 | 6 | Create `/vettid-org/prod/member/enroll-code-key`; first weekly production deploy | owner, then assistant |
 | 7 | If D4 or D5 is accepted: spec changes in VAULT-MESSAGING / VAULT-RELEASES and vettid-vault, on a staging release. **Done (0.1.2):** VAULT-MESSAGING 0.26.0 and 0.27.0, VAULT-RELEASES 0.1.11 and 0.1.12; vettid-vault #62–#64; staging release S10, published 2026-10-11 (§8.5); the app's `.staging` build (vettid-android #116) | assistant |
-| 8 | Amend the stale text below in one docs PR once §6 is answered | assistant |
+| 8 | Amend the stale text below in one docs PR once §6 is answered | assistant (2026-10-26: partly done, #405 and #422; W10-READINESS §3's "S4" text remains) |
 | 9 | Play account and the Play certificate's digest (after release 1, D3); Firebase project; Apple account when iOS is scheduled | owner |
 | 10 | (0.1.2) Move the remaining staging vaults to the `com.vettid.app.staging` app while S10 is the newest release: the staging release after S10 refuses a vault with no recorded signer (VAULT-MESSAGING §11.7.1). Done on 2026-10-11 for test member 4's vault and the owner's (§8.5); the others by transfer, recovery or a new enrollment | owner, on the phones |
 
@@ -391,7 +391,7 @@ mailboxes; the HTTP action that needs enclave egress is not offered
 
 ### 8.5 After S10 (0.1.2)
 
-*Status note (2026-10-23): this section is the record of 2026-10-11 and
+*Status note (2026-10-23; updated 2026-10-26): this section is the record of 2026-10-11 and
 its counts are not current. Staging release S22 was published on 2026-10-24 (manifest serial 24,
 vettid.org #416; S21 and earlier deprecated; staging is at S22), and
 S23 is the release that carries release L (vettid-vault #144 to #147;
