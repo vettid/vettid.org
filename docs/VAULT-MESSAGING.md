@@ -2,7 +2,7 @@
 title: VAULT-MESSAGING
 status: draft
 version: 0.65.0
-date: 2026-10-27
+date: 2026-10-26
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -27,7 +27,7 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.65.0: **owner decision 2026-10-27** (proposed; wire-additive and
+  - 0.65.0: **owner decision 2026-10-26** (wire-additive and
     backward compatible). §10.4: `connection.authenticate.challenge`
     (and `.request`, `.pending`, a signed `.response`, `.result`) gains
     an optional `purpose`, `"signin"` or `"approval"`; absent (or any
@@ -47,6 +47,14 @@ changelog:
     the peer wire, member authentication and the ask gate) and app
     work, later; a vault without it answers a challenge with a purpose
     as before, signed without it
+  - 0.64.0: **owner decision 2026-10-26** (ARCHITECTURE 0.1.5,
+    VAULT-PLAN 0.1.13, ACCOUNT-ADMIN-PLAN 0.2.2). §1.1 item 2: votes and
+    B2C service vaults are no longer out of scope but planned, not yet
+    specified: services reached as an ordinary `connection`, with
+    contracts (acceptance, completions), and votes (blind-signed
+    eligibility, ballots deposited unlinkably), each in a later
+    revision. Org vaults and transport-credential minting stay out of
+    scope. A scope change only: no wire, vault or app change
   - 0.63.2: **owner decision of 2026-10-26** (a correction; ANDROID-PLAN
     0.1.85, IOS-PLAN 0.1.39). §11.14.2, §11.14.6 "A lost `ok`" and
     "Pairing": an unlock that finishes a recovery's step 3 removes the
@@ -2185,8 +2193,15 @@ described in RFC 2119.
      - shared actions;
      - grants and critical-item use;
      - presence, as an on-demand ping.
-   - Out of scope: votes, B2C service vaults, org vaults and
-     transport-credential minting.
+   - Planned, not yet specified (owner decision 2026-10-26; 0.64.0).
+     Each is specified in a later revision; until then this document
+     defines none of their messages, and a vault offers neither:
+     - services: a service, with its own service vault, is reached as
+       an ordinary `connection` (PUSH-GATEWAY §12, item 5); contracts
+       with a service (acceptance, completions);
+     - votes: eligibility by blind signature, and ballots deposited
+       unlinkably.
+   - Out of scope: org vaults and transport-credential minting.
 3. **The vault relay key exists only in PIN-protected vault state.** The
    enclave generates the key at enrollment. It is stored only in vault state
    encrypted under the PIN-derived DEK; there is no KMS-sealed or otherwise
@@ -6295,7 +6310,7 @@ vault signs a fresh challenge with the member's **credential key**
   where `challenger_ik` is the requesting vault's `ik` and `responder_ik`
   the signing vault's, each as the other side has it on record. `key` is
   the credential key's public key.
-- **Purpose** (0.65.0; owner decision 2026-10-27). A challenge MAY
+- **Purpose** (0.65.0; owner decision 2026-10-26). A challenge MAY
   carry `purpose`, which says why the member is asked:
   - `"signin"`: someone is signing in, as the member, to something the
     challenger runs (a service's website, §1.1). Whoever starts a
@@ -6443,7 +6458,7 @@ These are not `limit` errors (§10.1): the requester is another vault,
 which never gets an error response for them.
 
 **Sign-in and approval challenges** (0.65.0; owner decision
-2026-10-27). A service (§1.1) challenges a member (§10.4) for two
+2026-10-26). A service (§1.1) challenges a member (§10.4) for two
 different things: a sign-in to its website, which whoever types the
 member's email address starts, and an approval its admins need. Before
 0.65.0 every challenge from a connection was the same ask, so an
@@ -21722,11 +21737,11 @@ Follow-ups:
     secret of §11.14.1 as specified in 0.35.0).
 
 40. **Sign-in and approval challenges (0.65.0; owner decision
-    2026-10-27, proposed).** A service (§1.1) uses member
+    2026-10-26).** A service (§1.1) uses member
     authentication (§10.4) for website sign-in and for its admins'
     approvals; one gate for both let an outsider who starts sign-ins
     with a member's address block the member's sign-ins and approvals
-    from that service for 7 days (§10.4.1). Proposed:
+    from that service for 7 days (§10.4.1). Decided:
     1. an optional `purpose` (`signin`, `approval`) in the challenge,
        absent meaning the behaviour before 0.65.0, an unknown value
        treated as absent;
@@ -21748,16 +21763,15 @@ Follow-ups:
       (`context` is the challenger's free text, so a new wording would
       dodge it); no cooldown at all for sign-ins (a connection could
       then re-prompt at once after every "Not me").
-    - *Open:* (a) whether `approval` should share the general bucket's
-      5 a day instead of having its own (its own bucket lets a
-      connection reach the member with up to 20 prompts a day in all,
-      against 5 before; sharing lets other asks use up the approvals);
-      (b) whether "Not me" should be a separate message from a deny,
-      for example to tell the service, which today cannot tell any
-      refusal from another (§10.4.1); (c) whether the member should be
-      able to mute only a connection's sign-ins; (d) whether a single
-      `approval` decline should cool down all approvals for 7 days, as
-      proposed, when each approval is about a different decision.
+    - *Settled with the decision:* `approval` has its own bucket of 5
+      a day rather than sharing the general one (other asks cannot use
+      up the approvals; a connection can reach the member with up to 20
+      prompts a day in all, against 5 before); "Not me" stays the
+      existing deny, so the service still cannot tell one refusal from
+      another (§10.4.1); muting only a connection's sign-ins is left for
+      later app work; a single `approval` decline cools down all
+      approvals for 7 days, since a cooldown scoped to one decision
+      would rest on the challenger's own wording.
     Follow-ups: vettid-vault (the peer wire: `purpose` in the challenge
     and the signed response, the new label; member authentication: the
     ask identity and bucket per purpose; the ask gate: per-bucket
