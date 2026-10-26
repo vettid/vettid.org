@@ -1,8 +1,8 @@
 ---
 title: W10-READINESS
 status: living checklist (update as items close; not a plan)
-version: 0.1.9
-date: 2026-10-23
+version: 0.1.10
+date: 2026-10-26
 owner: Al Liebl (Mesmer)
 related:
   - VAULT-RELEASES.md (0.1.7) §8.8 capacity, §10.1 release steps, §12 first deployment, §13 W9/W10, §15 O1–O10
@@ -12,6 +12,11 @@ related:
   - W9-REPORT.md (PR #136) — the W9 staging record (B9)
   - vettid-vault docs/RELEASING.md, docs/SMOKE.md
 changelog:
+  - 0.1.10: editorial (status as of 2026-10-26). §1.6: staging release
+    S22 is published (2026-10-24), S23 carries release L and the
+    durable app key writes; a new bullet for release L and the app
+    changes since 2026-10-23. P28b and B12 checked again: still open.
+    No requirement changes
   - 0.1.9: editorial (status as of 2026-10-23). Rows P19a, P26, P28a,
     P28b, P31, P32, B1, B2, B6, B9, B12 and I13 to I17 marked with what
     has happened since 2026-10-11; new §1.6 (staging releases S11 to
@@ -148,15 +153,30 @@ dependency), **on hold** (deliberately paused by the owner).
 | P31 | App support for an unpublished canary manifest | **done** (2026-10-06; not yet run on a phone) | vettid-android #63 (`da72029`): the tester shares the signed `served-<s>.json` to the app, which verifies it under the build's pinned keys, shows serial, key and releases and installs it on confirmation; it is used while newer than the published manifest, also on a 404 (release 1), and dropped on publication. Spec: VAULT-RELEASES 0.1.6 §10.1, VAULT-MESSAGING 0.14.0 §11.10.1, §13.9 (accepted risk). Procedure: RUNBOOK "Canary manifest on the test phone". First end-to-end run is B6. *0.1.9 (status 2026-10-23): run on a phone: the signed canary manifest is loaded on the Pixel 10 Pro for each staging release (S19 to S21 recorded), see P28a.*|
 | P32 | Push gateway (FCM) | **deferred, not blocking** | No FCM credentials (on hold with Play). No UnifiedPush (owner, 2026-10-09; PUSH-GATEWAY 0.3.0). ANDROID-PLAN §7: v1 collects while the app is open and through the on-phone service. *0.1.9 (status 2026-10-23): the push gateway (vettid-push) has been deployed for staging since 2026-10-11 (PUSH-GATEWAY §10.4); no platform is enabled (Firebase and APNs credentials). The app side (vettid-android #109, #129) and the vault side (vettid-vault push N3) are built. Still not blocking release 1.*|
 
-### 1.6 Since 2026-10-11 (status as of 2026-10-23)
+### 1.6 Since 2026-10-11 (status as of 2026-10-23; staging releases and release L 2026-10-26)
 
 This section was added in 0.1.9 and records what the other rows do not.
 
 - **Staging releases.** S11 to S15 and S17 to S21 were published (2026-10-13
-  to 2026-10-22; S16 was not published); staging is at S21, S22 is being cut (vettid-vault
-  #143) and S23 is the release that carries release L. Release 1 will
+  to 2026-10-22; S16 was not published); S22 was published on
+  2026-10-24 (vettid-vault #143, manifest serial 24, vettid.org #414
+  and #416) and staging is at S22. S23 is the release that carries
+  release L (below) and the durable app key writes (vettid-vault #148,
+  #149); it is not yet cut (2026-10-26). Release 1 will
   be cut from the newest staging release that passed
   STAGING-DEVELOPMENT-PLAN §2.4 (§3), not from S10.
+- **Release L** (VAULT-LOCK 0.1.4; VAULT-MESSAGING 0.29.0 §3.6.8,
+  §10.2 "Locks") is built and merged: the vault side in vettid-vault
+  #144 to #147 (the transfer's pending unlink, the lock bound to its
+  unlock, the lock queue, the idle lock), the member API's side in
+  MEMBER-API 2.5.0 (vettid.org #407), the Android app in #190, #191 and
+  #193. It ships as staging release 23, with vettid-vault #148 and #149
+  (the app key's writes and confirmations bound to the vault's lease;
+  VAULT-HOST-PROTOCOL 0.1.15 and 0.1.16: the parent and the enclave of a
+  release are built from the same tag and change together). It changes
+  what a vault does when it locks and when it holds, as release R did
+  for unlock and recovery, so release 1 is a different candidate again.
+  The iOS app's L1 and L2 (vettid-ios #138, #140) are merged.
 - **Release R** (recovery and unlock, VAULT-MESSAGING 0.33.0 §11.14) is
   built: the vault side in vettid-vault #96, #97 and #101 (in S15) and the
   app side in vettid-android #134 to #143. It changes what a production
@@ -170,6 +190,12 @@ This section was added in 0.1.9 and records what the other rows do not.
   Check that `prod.json` says `1` when the release commit is made.
 - **Calls, wallet, presence, location, LEASH** are not in the
   production feature list (`features: []`, P9a); staging lists them.
+- **Answers of the member API to a phone** (since 2026-10-24):
+  `410 vault_deleted` and `410 account_deleted` (MEMBER-API 2.11.0),
+  `409 key_in_use` (2.12.0) and `410 recovery_ended` (2.13.0), with the
+  apps' rules for them (vettid-android #194 and #195; #192 is the earlier no-erase-on-401 stop-gap). They are in
+  the member API's staging deployment; production's backend is behind
+  master (B11), so they reach it with the deploy of B11.
 - **Other work since**: photo attachments (vettid-android #131 to #133),
   the notification sounds (#180, channel ids change once before release
   1), and the iOS app's progress (IOS-PLAN). None changes a row above.

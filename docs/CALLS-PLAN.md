@@ -1,8 +1,8 @@
 ---
 title: CALLS-PLAN
 status: approved by the owner 2026-10-11 (D1–D11 as recommended; D1 with the owner's position of §3.1) and 2026-10-12 (§13, D12–D26 as recommended; D23 as (c))
-version: 0.1.7
-date: 2026-10-23
+version: 0.1.8
+date: 2026-10-26
 owner: Al Liebl (Mesmer)
 related:
   - STAGING-DEVELOPMENT-PLAN.md (0.1.2) §2 rules, §2.4 promotion, §5 phase 2
@@ -59,7 +59,7 @@ changelog:
     §6.6, §7 (C3's exit test: a call within 2 s of another wake), §13.2,
     §13.3 step 1 and D24 say so, each marked "0.1.4". The plan is
     otherwise unchanged and stays approved
-  - 0.1.5 (2026-10-23): editorial, awaiting the owner's approval. The
+  - 0.1.5 (2026-10-23): editorial (approved by the owner and merged 2026-10-23, vettid.org #400). The
     media stack is `150.7871.04` (it carries the 256-bit key option,
     upstream PR #302; confirmed on two phones 2026-10-23, vettid-android
     #175). §6 (A), §12.2 and §12.3 say so; suite 2 is still not offered
@@ -76,6 +76,12 @@ changelog:
     changes. §1 table, §7 phase table (new status column) and §13 say
     what is built (vettid-calls `main`; C1 partly in vettid-android) and
     what is not
+  - 0.1.8 (2026-10-26): editorial (status as of 2026-10-26); no rule
+    changes. The 0.1.5 entry above was merged (vettid.org #400), so it
+    is no longer "awaiting approval". §1 and §13 say that nothing
+    of calls has merged since 2026-10-23 (vettid-android #128 is still
+    open and conflicting; vettid-calls has no pull request since
+    2026-10-20, and the vault has none for calls since #67)
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -97,7 +103,7 @@ listed in §6.6. The owner's choices are in §9.
 | Calling service (TURN) | **Specified. The code is built (status 2026-10-23): vettid-calls `main` (the issuer, the coturn image with `turn-agent`, `callsctl`; committed 2026-10-17, follow-ups #1 to #3 to 2026-10-20). No stack is deployed** | CALLING-SERVICE 0.1.1 |
 | Relay | Nothing call-specific, and none needed (§6.2) | vettid-relay |
 | Push wake for a ringing call | **Not built** (status 2026-10-23: no vault pull request since #67 touches it): call signalling wakes nothing | VAULT-MESSAGING §14.2; `vault/push.go` `wakeClass` |
-| Android app | **(Status 2026-10-23: C1's signalling, media engine, state machine, audio and controller are merged, vettid-android #124 to #126, #175, #178; the call screens, #128, are open and conflict with master.)** On 2026-10-12, only the `calls_v2` and `missed_calls_v2` notification channels and the "Missed call from …" text exist | ANDROID-PLAN §4; `:core:notify` |
+| Android app | **(Status 2026-10-23: C1's signalling, media engine, state machine, audio and controller are merged, vettid-android #124 to #126, #175, #178; the call screens, #128, are open and conflict with master; unchanged on 2026-10-26.)** On 2026-10-12, only the `calls_v2` and `missed_calls_v2` notification channels and the "Missed call from …" text exist | ANDROID-PLAN §4; `:core:notify` |
 | Old implementations (reference only) | Old Android app (tag `legacy-v1-final`): `features/calling/*` on the prebuilt `io.getstream:stream-webrtc-android:1.3.10`, frame encryption through its `FrameCryptor`. Old iOS: `Features/Calling` with CallKit and PushKit. Old desktop: Rust `webrtc` 0.17 behind a feature flag. Old backend (vettid-dev): coturn on EC2 with Elastic IPs (`cdk/lib/turn-stack.ts`). None works with today's vault | the archived repositories |
 
 Two facts shape everything below. **A locked vault cannot be called**: it
@@ -746,7 +752,7 @@ so that C2 can begin as soon as C1's two-phone test passes. This
 section is that design at the level of the plan. The specifications are
 CALLING-SERVICE 0.2.0 and VAULT-MESSAGING 0.28.0 §10.10. The owner
 approved it on 2026-10-12 with the decisions of §13.5. Status as of
-2026-10-23: of the work in §13.2 only the vettid-calls repository (`main`: the
+2026-10-23 (unchanged on 2026-10-26): of the work in §13.2 only the vettid-calls repository (`main`: the
 issuer, the coturn image with `turn-agent`, `callsctl`; committed
 2026-10-17, follow-ups #1 to #3 to 2026-10-20) is built. No stack is
 deployed, and there is no vault work and no app work for C2.
