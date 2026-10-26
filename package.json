@@ -33,7 +33,7 @@
     "@aws-sdk/client-ses": "^3.1148.0",
     "@aws-sdk/client-sesv2": "^3.1144.0",
     "@aws-sdk/client-sqs": "^3.1145.0",
-    "@aws-sdk/client-ssm": "^3.1146.0",
+    "@aws-sdk/client-ssm": "^3.1156.0",
     "@aws-sdk/lib-dynamodb": "^3.1144.0",
     "@aws-sdk/s3-request-presigner": "^3.1144.0",
     "@aws-sdk/util-dynamodb": "^3.996.9",
