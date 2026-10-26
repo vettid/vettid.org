@@ -1,7 +1,7 @@
 ---
 title: VAULT-RELEASES
 status: approved (owner, 2026-10-04)
-version: 0.1.33
+version: 0.1.34
 date: 2026-10-26
 owner: Al Liebl (Mesmer)
 changelog:
@@ -264,6 +264,12 @@ changelog:
     `check:manifest` now requires `ends_after_days: 90` on production
     release 1, as a candidate and in every later status. No other
     change
+  - 0.1.34: **owner decision 2026-10-26** (VAULT-MESSAGING 0.66.0). §3.1:
+    staging's "test CA" is the staging automation attestation CA, the
+    staging channel file's `automation_attestation` with its own signer
+    class `automation` (VAULT-MESSAGING §11.7.1, §11.10.8), with an end
+    date (first: 2027-06-30); production refuses both. Not live until a
+    staging release carries the member
 related:
   - VAULT-PLAN.md (§4 V5 points here; D1–D5)
   - VAULT-MESSAGING.md (0.37.0) §11.10 release updates, §11.10.8 release constants, §12.5 deletion, §13.5, §13.9
@@ -365,7 +371,7 @@ promises to run a release for a bounded time, not forever.
 | Manifest URL | none (passed by vaultctl) | `https://staging.vettid.org/.well-known/vettid/pcr-manifest.json` | `https://vettid.org/.well-known/vettid/pcr-manifest.json` |
 | Sealing-key account | none | staging account | production account |
 | Release keys | dev sealer | §11.10.7 shape, retirement window 7 days, deleted when the release is removed (at most three staging releases are live, STAGING-DEVELOPMENT-PLAN §2.1, §2.5) | §11.10.7 shape, window 30 days, deleted only at retirement |
-| Device attestation | test CA | test CA **and** the real vendor roots | real vendor roots only |
+| Device attestation | test CA | test CA **and** the real vendor roots (0.1.34: the test CA is the staging automation attestation CA, the channel file's `automation_attestation` with signer class `automation`, VAULT-MESSAGING 0.66.0 §11.7.1, §11.10.8; it has an end date, first 2027-06-30) | real vendor roots only (a production file with `automation_attestation` or the `automation` signer is malformed) |
 | Release numbers | 0 | its own sequence | 1, 2, 3, … |
 
 Why a staging image can never be mistaken for production: its PCR0
