@@ -107,7 +107,7 @@ export interface ReleaseEntry {
    * only on production release 1, and only as 90 (FIRST_RELEASE_WINDOW).
    * A member of the release list only, like `host` and `log`: never in the
    * manifest or the image, and no enclave or app reads it. Absent: the
-   * default.
+   * default. Required on production release 1 (B12).
    */
   readonly ends_after_days?: number;
 }
@@ -400,6 +400,9 @@ export function validateReleaseFile(raw: unknown, channel: Channel, account: str
     }
     if (e.log !== undefined) validateLog(e.log, at);
     else if (!candidate) at('log is required once the release leaves candidate (its release log entry, RELEASE-UPDATES §5)');
+    if (e.ends_after_days === undefined && channel === FIRST_RELEASE_WINDOW.channel && n === FIRST_RELEASE_WINDOW.release) {
+      at(`production release ${n} needs ends_after_days: ${FIRST_RELEASE_WINDOW.days} (VAULT-RELEASES §3.5, owner decision 2026-10-11; W10-READINESS B12)`);
+    }
     if (e.ends_after_days !== undefined) {
       const w = FIRST_RELEASE_WINDOW;
       if (channel !== w.channel || n !== w.release) at(`ends_after_days is allowed only on production release ${w.release} (VAULT-RELEASES §3.5); every other release has the default window`);

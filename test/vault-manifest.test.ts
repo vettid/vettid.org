@@ -55,7 +55,8 @@ function sample(): any {
     signed_serial: 3,
     releases: [
       { release: 1, status: 'deprecated', pcr0: pcr('a'), pcr1: pcr('1'), pcr2: pcr('2'), seal_key: keyArn(1), admitted_pcr0s: [],
-        published_at: '2027-01-15T12:00:00Z', ends_at: '2028-02-15T00:00:00Z', notes: releaseLogUrl('prod', 1), host: host(1), log: log('First release.') },
+        published_at: '2027-01-15T12:00:00Z', ends_at: '2028-02-15T00:00:00Z', notes: releaseLogUrl('prod', 1), host: host(1), log: log('First release.'),
+        ends_after_days: 90 },
       { release: 2, status: 'active', pcr0: pcr('b'), pcr1: pcr('3'), pcr2: pcr('4'), seal_key: keyArn(2), admitted_pcr0s: [pcr('a')],
         published_at: '2027-02-15T12:00:00Z', notes: releaseLogUrl('prod', 2), host: host(2), log: log('Second release.', { security: 'urgent', security_text: 'Fixes X.', affects: [1] }) },
       { release: 3, status: 'candidate', pcr0: pcr('c'), pcr1: pcr('5'), pcr2: pcr('6'), seal_key: '', admitted_pcr0s: [pcr('a'), pcr('b')],
@@ -195,8 +196,20 @@ describe('ends_after_days: production release 1 is kept for 90 days (VAULT-RELEA
 
   test('an entry without it has the default: nothing is checked about its ends_at', () => {
     const f = sample();
-    f.releases[0].ends_at = '2027-02-16T00:00:00Z'; // a day after release 2: no check knows the default W (§7)
+    f.releases[1].status = 'deprecated';
+    f.releases[1].ends_at = '2027-02-16T00:00:00Z'; // release 2: no check knows the default W (§7)
     expect(check(f)).not.toThrow();
+  });
+
+  test('required on production release 1 (B12): refused without it, as a candidate, while active and when retired', () => {
+    const candidate = { channel: 'prod', signed_serial: 0, releases: [{ ...sample().releases[2], release: 1, admitted_pcr0s: [], notes: releaseLogUrl('prod', 1) }] };
+    expect(check(candidate)).toThrow(/production release 1 needs ends_after_days: 90/);
+    const f = sample();
+    delete f.releases[0].ends_after_days;
+    expect(check(f)).toThrow(/production release 1 needs ends_after_days: 90/);
+    const r = windowed();
+    delete r.releases[0].ends_after_days;
+    expect(check(r)).toThrow(/production release 1 needs ends_after_days: 90/);
   });
 
   test.each([
@@ -212,6 +225,7 @@ describe('ends_after_days: production release 1 is kept for 90 days (VAULT-RELEA
     const f = sample();
     f.channel = 'staging';
     for (const e of f.releases) {
+      delete e.ends_after_days;
       e.notes = releaseLogUrl('staging', e.release);
       if (e.seal_key) e.seal_key = e.seal_key.replace(ACCOUNT, STAGING_ACCOUNT);
       if (e.host) e.host.tag = `release/staging/${e.release}`;
@@ -261,9 +275,8 @@ describe('ends_after_days: production release 1 is kept for 90 days (VAULT-RELEA
 
   test('never copied into the signed manifest: the same bytes with and without it', () => {
     const withIt = validateReleaseFile(windowed(), 'prod', ACCOUNT);
-    const plain = windowed();
-    delete plain.releases[0].ends_after_days;
-    const without = validateReleaseFile(plain, 'prod', ACCOUNT);
+    // Production release 1 without the member is refused (B12), so compare against the validated file with it stripped.
+    const without = { ...withIt, releases: withIt.releases.map(({ ends_after_days: _dropped, ...e }) => e) } as ReleaseFile;
     for (const e of manifestEntries(withIt)) expect(Object.keys(e)).not.toContain('ends_after_days');
     const bytes = renderManifest(4, '2027-03-01T00:00:00Z', manifestEntries(withIt));
     expect(bytes.equals(renderManifest(4, '2027-03-01T00:00:00Z', manifestEntries(without)))).toBe(true);
@@ -321,10 +334,8 @@ describe('ends_after_days: production release 1 is kept for 90 days (VAULT-RELEA
     expect(out2.get('website/security/releases/2/index.html')).toContain('<dt>End date</dt><dd>Not set (at least 12 months after a newer release replaces it)</dd>');
     expect(out2.get('website/security/releases/index.json')).not.toContain('ends_after');
 
-    // An entry without the member: the default, as before.
-    const f3 = validateReleaseFile({ ...one, releases: [{ ...one.releases[0], ends_after_days: undefined }] }, 'prod', ACCOUNT);
-    expect(renderLog(buildIndex(EMPTY_INDEX, { serial: 1, releases: manifestEntries(f3) }, f3), 'prod', f3).get('website/security/releases/1/index.html'))
-      .toContain('Not set (at least 12 months after a newer release replaces it)');
+    // An entry without the member has the default wording (release 2 above); production release 1 without it is refused (B12).
+    expect(check({ ...one, releases: [{ ...one.releases[0], ends_after_days: undefined }] })).toThrow(/production release 1 needs ends_after_days: 90/);
 
     // The index says which release is the exception.
     expect(out1.get('website/security/releases/index.html')).toContain('at least 12 months after a newer one replaces it');
@@ -487,11 +498,11 @@ describe('check:manifest (VAULT-RELEASES §7)', () => {
 
   test('every PCR0 a key admits stays listed', () => {
     const f = sample();
-    Object.assign(f.releases[0], { status: 'removed', ends_at: '2027-02-20T00:00:00Z' }); // ended before the manifest's issued_at (0.1.24)
+    Object.assign(f.releases[0], { status: 'removed', ends_at: '2027-05-20T00:00:00Z' }); // ended before the manifest's issued_at (0.1.24), after its 90 days
     delete f.releases[0].host;
-    const now = new Date('2027-03-01T00:00:00Z');
+    const now = new Date('2027-06-01T00:00:00Z');
     const ok = validateReleaseFile(f, 'prod', ACCOUNT, now);
-    expect(checkChannel({ channel: 'prod', file: ok, served: publish(ok, 3), pinnedKeys: [SPKI], history: [], now })).toEqual([]);
+    expect(checkChannel({ channel: 'prod', file: ok, served: publish(ok, 3, '2027-06-01T00:00:00Z'), pinnedKeys: [SPKI], history: [], now })).toEqual([]);
   });
 });
 
@@ -571,6 +582,7 @@ describe('release log (RELEASE-UPDATES §5)', () => {
     const f = sample();
     f.channel = 'staging';
     for (const r of f.releases) {
+      delete r.ends_after_days;
       r.seal_key = r.seal_key && r.seal_key.replace(ACCOUNT, SA);
       r.notes = releaseLogUrl('staging', r.release);
       if (r.host) r.host.tag = `release/staging/${r.release}`;
@@ -766,9 +778,13 @@ describe('a rescue always has a target (VAULT-RELEASES 0.1.24 §3.5, §6.2, §10
     }
     rel(prod, 10).status = 'deprecated';
     Object.assign(rel(prod, 11), { status: 'active', published_at: '2026-10-13T18:35:58Z' });
+    // Staging's release 1 ended long before a production release 1 may (90 days after release 2, B12): leave it out here.
+    const one = rel(prod, 1).pcr0;
+    prod.releases = prod.releases.filter((e: any) => e.release !== 1);
+    for (const e of prod.releases) e.admitted_pcr0s = e.admitted_pcr0s.filter((x: string) => x !== one);
     const p = validateReleaseFile(prod, 'prod', ACCOUNT, OCT14);
-    // In production the window is 30 days, so 1 and 2 (ended 2026-10-05 and -06) count too.
-    expect(rescueTargetProblems(p, '2026-10-13T18:35:58Z').map((x) => x.match(/^release (\d+) is removed and can be rescued until .* the key of release 11/)![1])).toEqual(['1', '2', '3', '4', '5', '6']);
+    // In production the window is 30 days, so 2 (ended 2026-10-06) counts too.
+    expect(rescueTargetProblems(p, '2026-10-13T18:35:58Z').map((x) => x.match(/^release (\d+) is removed and can be rescued until .* the key of release 11/)![1])).toEqual(['2', '3', '4', '5', '6']);
     // And from staging release 12 on it is checked: a release 12 that leaves 3 to 6 out, active on 2026-10-14.
     const s12 = frozen();
     rel(s12, 10).status = 'deprecated';
