@@ -1030,8 +1030,9 @@ release list alone: it is never in the manifest, the image or the log's
 `index.json`. What follows from it:
 
 - The validation (CDK synth, `npm test`, `check:manifest`,
-  `vault:manifest`) accepts the member only on production release 1 and
-  only as 90, and then refuses an `ends_at` on release 1 earlier than 90
+  `vault:manifest`) refuses a production release 1 entry without it
+  (W10-READINESS B12), accepts the member only on production release 1
+  and only as 90, and then refuses an `ends_at` on release 1 earlier than 90
   days after release 2's `published_at`. A later date passes.
 - Release 1 is never `deprecated`: in the same edit that makes release 2
   `active` (T0), set release 1 `retired` with `ends_at` = release 2's
