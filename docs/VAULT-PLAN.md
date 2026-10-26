@@ -1,12 +1,16 @@
 ---
 title: VAULT-PLAN
 status: draft
-version: 0.1.13
+version: 0.1.14
 date: 2026-10-26
 changelog:
-  - 0.1.13: owner decision 2026-10-26 (VAULT-MESSAGING 0.64.0 §1.1): a
+  - 0.1.14: owner decision 2026-10-26 (VAULT-MESSAGING 0.64.0 §1.1): a
     note under the port table: services (B2C) and votes, removed in the
     port, are reopened for later work against new designs
+  - 0.1.13: editorial (status as of 2026-10-26); no rule changes. V6
+    status note: staging release 23 also carries vettid-vault #151 (an
+    unlock that finishes a recovery's step 3 ends the recovery record,
+    VAULT-MESSAGING 0.63.2)
   - 0.1.12: editorial (status as of 2026-10-26); no rule changes. V6
     status note: staging release 23 also carries vettid-vault #150 (a
     repeated recovery open rebinds the same identity's invitation,
@@ -257,7 +261,8 @@ L's L1 and L2 and the no-erase rule, #138 to #140; IOS-PLAN; status
 #194) and "a phone that could not tell" (#195); the vault's side of
 release L is merged and ships as staging release 23 (not yet cut), with
 vettid-vault #150 (a repeated recovery open rebinds the same identity's
-invitation, VAULT-MESSAGING 0.63.0).
+invitation, VAULT-MESSAGING 0.63.0) and #151 (an unlock that finishes a
+recovery's step 3 ends the recovery record, VAULT-MESSAGING 0.63.2).
 Desktop: not done; vettid-desktop #8 (the Windows build) and #10 (the
 machine-bound storage key) are open since 2026-10-13, and only #5 and #7
 (CI and icons) are merged.

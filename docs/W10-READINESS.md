@@ -1,7 +1,7 @@
 ---
 title: W10-READINESS
 status: living checklist (update as items close; not a plan)
-version: 0.1.11
+version: 0.1.13
 date: 2026-10-26
 owner: Al Liebl (Mesmer)
 related:
@@ -12,6 +12,13 @@ related:
   - W9-REPORT.md (PR #136) — the W9 staging record (B9)
   - vettid-vault docs/RELEASING.md, docs/SMOKE.md
 changelog:
+  - 0.1.13: B12 implemented (vettid.org #429): `lib/vault/release-list.ts` now
+    refuses a production release 1 entry without `ends_after_days: 90`,
+    as a candidate and in every later status. No requirement changes
+  - 0.1.12: editorial (status as of 2026-10-26). §1.6: staging release
+    23 also carries vettid-vault #151 (an unlock that finishes a
+    recovery's step 3 ends the recovery record; VAULT-MESSAGING 0.63.2).
+    No requirement changes
   - 0.1.11: editorial (status as of 2026-10-26). §1.6: staging release
     23 also carries vettid-vault #150 (a repeated recovery open rebinds
     the same identity's invitation; VAULT-MESSAGING 0.63.0 §11.14.6
@@ -179,7 +186,9 @@ This section was added in 0.1.9 and records what the other rows do not.
   VAULT-HOST-PROTOCOL 0.1.15 and 0.1.16: the parent and the enclave of a
   release are built from the same tag and change together) and #150 (a
   repeated recovery open rebinds the same identity's invitation, enclave
-  only; VAULT-MESSAGING 0.63.0 §11.14.6 "Pairing"). It changes
+  only; VAULT-MESSAGING 0.63.0 §11.14.6 "Pairing") and #151 (an unlock
+  that finishes a recovery's step 3 ends the recovery record, enclave
+  only; VAULT-MESSAGING 0.63.2). It changes
   what a vault does when it locks and when it holds, as release R did
   for unlock and recovery, so release 1 is a different candidate again.
   The iOS app's L1 and L2 (vettid-ios #138, #140) are merged.
@@ -225,12 +234,12 @@ unblocked.
 | B9 | W9 results written up (enrollment, moves, messaging, recovery, drill, capacity) as the V5 exit-test record (VAULT-RELEASES §12.1 step 5) | **drafted**: [W9-REPORT](W9-REPORT.md), PR #136 (ready for review); its open sections are the S1/S2 key-deletion confirmations and the drill with a vault at S4 | engineering *0.1.9 (status 2026-10-23): merged: W9-REPORT is docs/W9-REPORT.md (vettid.org #136). Its sections on the S1 and S2 key confirmations and the drill have since been done (P26); the report text was not updated.*|
 | B10 | ~~Signer binding (P9a), in release 1 by the owner's decision of 2026-10-11~~ **done** 2026-10-11 | VAULT-MESSAGING 0.27.0 §11.7.1 approved (2026-10-11); implemented in vettid-vault #63 with the chain rules of #64, and run on staging release S10 with real phones (VAULT-MESSAGING 0.27.1 §11.7.1 "Tests required") | — |
 | B11 | The production backend is behind master and cannot issue setup codes: the SSM parameter `/vettid-org/prod/member/enroll-code-key` does not exist (STAGING-DEVELOPMENT-PLAN §2.3, §8.3; RUNBOOK "Setup codes and app keys") | The owner creates the parameter and lifts "the prod deploy waits"; then the member API, portal and admin stacks are deployed from master and the drift check is green | owner, then engineering |
-| B12 | (0.1.8) `check:manifest` must refuse a production release 1 entry without `ends_after_days: 90` (owner decision 2026-10-11). Today nothing requires the member: an entry without it passes and has no checked window (VAULT-RELEASES 0.1.13 §3.5) | The validation change in `lib/vault/release-list.ts` with its test, before the release entry PR (§3 step 5). Not yet implemented | engineering *0.1.9 (status 2026-10-23): still open on 2026-10-23: `lib/vault/release-list.ts` checks `ends_after_days` only when it is present (value 90, production release 1 only) and nothing requires it on production release 1.*|
+| B12 | (0.1.8) `check:manifest` must refuse a production release 1 entry without `ends_after_days: 90` (owner decision 2026-10-11). ~~Today nothing requires the member: an entry without it passes and has no checked window~~ **done** 2026-10-26 (vettid.org #429; VAULT-RELEASES 0.1.33 §3.5) | The validation change in `lib/vault/release-list.ts` with its test, before the release entry PR (§3 step 5). **Done (0.1.13):** `validateReleaseFile` refuses a production release 1 entry without it, as a candidate and in every later status (test/vault-manifest.test.ts) | engineering |
 
 **What still blocks release 1 after S10** (0.1.8): B11 (the production
 backend rollout, with the missing enroll-code key), B8 (a release
-build of the app signed with the owner's key, for the canary phone),
-B12 (the validation change above), and whatever of the older rows (B1, B2, B6,
+build of the app signed with the owner's key, for the canary phone)
+(0.1.13: B12 done), and whatever of the older rows (B1, B2, B6,
 B9) is still open, which this revision did not check again. **Not**
 the Google Play account (P9, P30), and nothing of S10's scope: the
 feature allowlist, the per-channel package, the signer binding and the
