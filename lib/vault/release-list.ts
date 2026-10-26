@@ -106,8 +106,8 @@ export interface ReleaseEntry {
    * of 12 months (VAULT-RELEASES 0.1.11 §3.5, owner decision D2): allowed
    * only on production release 1, and only as 90 (FIRST_RELEASE_WINDOW).
    * A member of the release list only, like `host` and `log`: never in the
-   * manifest or the image, and no enclave or app reads it. Absent: the
-   * default. Required on production release 1 (B12).
+   * manifest or the image, and no enclave or app reads it. Absent (every
+   * other release): the default. Required on production release 1 (B12).
    */
   readonly ends_after_days?: number;
 }

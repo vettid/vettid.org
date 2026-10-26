@@ -201,7 +201,7 @@ describe('ends_after_days: production release 1 is kept for 90 days (VAULT-RELEA
     expect(check(f)).not.toThrow();
   });
 
-  test('required on production release 1 (B12): refused without it, as a candidate, while active and when retired', () => {
+  test('required on production release 1 (B12): refused without it as a candidate, active, deprecated, retired, removed and during a rescue', () => {
     const candidate = { channel: 'prod', signed_serial: 0, releases: [{ ...sample().releases[2], release: 1, admitted_pcr0s: [], notes: releaseLogUrl('prod', 1) }] };
     expect(check(candidate)).toThrow(/production release 1 needs ends_after_days: 90/);
     const f = sample();
@@ -210,6 +210,16 @@ describe('ends_after_days: production release 1 is kept for 90 days (VAULT-RELEA
     const r = windowed();
     delete r.releases[0].ends_after_days;
     expect(check(r)).toThrow(/production release 1 needs ends_after_days: 90/);
+    const active = { channel: 'prod', signed_serial: 1, releases: [{ ...sample().releases[1], release: 1, seal_key: keyArn(1), admitted_pcr0s: [], notes: releaseLogUrl('prod', 1), host: host(1), log: log('First release.') }] };
+    expect(check(active)).toThrow(/production release 1 needs ends_after_days: 90/);
+    const removed = windowed(T0_PLUS_90, 'removed');
+    delete removed.releases[0].host;
+    delete removed.releases[0].ends_after_days;
+    expect(check(removed)).toThrow(/production release 1 needs ends_after_days: 90/);
+    const rescue = windowed(T0_PLUS_90, 'removed');
+    rescue.releases[0].rescue = true;
+    delete rescue.releases[0].ends_after_days;
+    expect(check(rescue)).toThrow(/production release 1 needs ends_after_days: 90/);
   });
 
   test.each([
