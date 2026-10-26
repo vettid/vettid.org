@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.63.2
-date: 2026-10-26
+version: 0.65.0
+date: 2026-10-27
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -27,6 +27,26 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.65.0: **owner decision 2026-10-27** (proposed; wire-additive and
+    backward compatible). §10.4: `connection.authenticate.challenge`
+    (and `.request`, `.pending`, a signed `.response`, `.result`) gains
+    an optional `purpose`, `"signin"` or `"approval"`; absent (or any
+    other value) is the behaviour before 0.65.0. A challenge with a
+    purpose is signed over it under the new label
+    `"vettid/vms/2/conn-auth-purpose"`, and the signed response echoes
+    it, so a sign-in's signature can never stand for an approval. The
+    app's screens per purpose: "Only approve if you are signing in
+    right now", with "Approve" and "Not me". §10.4.1 "Sign-in and
+    approval challenges": a rate bucket and a cooldown identity per
+    purpose, so that a decline of a sign-in that someone else started
+    cools down only further `signin` challenges from that connection,
+    for 1 hour, never `approval` challenges or other asks; `signin` 10
+    per 24 hours and at most 2 waiting, `approval` 5 per 24 hours with
+    the 7-day cooldown; a `signin` decline does not count toward a
+    pause. §15 item 40 (new). **Needs a vault release** (vettid-vault:
+    the peer wire, member authentication and the ask gate) and app
+    work, later; a vault without it answers a challenge with a purpose
+    as before, signed without it
   - 0.63.2: **owner decision of 2026-10-26** (a correction; ANDROID-PLAN
     0.1.85, IOS-PLAN 0.1.39). §11.14.2, §11.14.6 "A lost `ok`" and
     "Pairing": an unlock that finishes a recovery's step 3 removes the
@@ -6246,22 +6266,23 @@ vault signs a fresh challenge with the member's **credential key**
 
 | Type | Request body | Response / event body |
 |---|---|---|
-| `connection.authenticate.request` (app, desktop) | `{connection_id, context?}` | `{request_id, exp}` |
-| `connection.authenticate.challenge` (V↔V) | — | `{request_id, nonce, context?}`, with `exp` |
-| `connection.authenticate.pending` (V→D, apps and desktops) | — | `{connection_id, request_id, context?, exp}` |
+| `connection.authenticate.request` (app, desktop) | `{connection_id, context?, purpose?}` | `{request_id, exp}` |
+| `connection.authenticate.challenge` (V↔V) | — | `{request_id, nonce, context?, purpose?}`, with `exp` |
+| `connection.authenticate.pending` (V→D, apps and desktops) | — | `{connection_id, request_id, context?, purpose?, exp}` |
 | `connection.authenticate.approve` (app) | `{request_id}` | `{}`; `credential_locked` outside the unlock window |
 | `connection.authenticate.deny` (app, desktop) | `{request_id}` | `{}` |
-| `connection.authenticate.response` (V↔V) | — | `{request_id, status: "signed", key, sig, signed_at, rotations?}` or `{request_id, status: "denied"}` |
+| `connection.authenticate.response` (V↔V) | — | `{request_id, status: "signed", key, sig, signed_at, purpose?, rotations?}` or `{request_id, status: "denied"}` |
 | `connection.authenticate.rotated` (V↔V) | — | `{rotations: [<statement>, ...]}` (1–32 credential-key rotation statements, §3.5.5) |
 | `connection.authenticate.key` (V→D, every owner app and desktop) | — | `{connection_id, key}`: the pinned key followed a rotation |
-| `connection.authenticate.result` (V→D, every owner app and desktop) | — | `{connection_id, request_id, authenticated, key?, key_changed?, reason?}` |
+| `connection.authenticate.result` (V→D, every owner app and desktop) | — | `{connection_id, request_id, authenticated, key?, key_changed?, purpose?, reason?}` |
 | `connection.authenticate.list` (app, desktop) | `{}` | `{states: [{connection_id, key?, verified_at?, last_result?, last_at?}]}` |
 
 - `nonce` is 32 random bytes; `context` is at most 256 bytes and shown to
   the member. A challenge lives 10 minutes (`exp`). A vault keeps at most
   8 outstanding challenges it sent per connection (`limit`) and 4 it
   received (more are dropped and audited). Since 0.23.0 a received
-  challenge is an ask (§10.4.1).
+  challenge is an ask (§10.4.1), gated by its `purpose` since 0.65.0
+  (below).
 - To approve, the app opens the credential's unlock window
   (`credential.unlock`, §3.5.3) and sends `connection.authenticate.approve`;
   the use extends the window. The vault signs
@@ -6274,10 +6295,65 @@ vault signs a fresh challenge with the member's **credential key**
   where `challenger_ik` is the requesting vault's `ik` and `responder_ik`
   the signing vault's, each as the other side has it on record. `key` is
   the credential key's public key.
+- **Purpose** (0.65.0; owner decision 2026-10-27). A challenge MAY
+  carry `purpose`, which says why the member is asked:
+  - `"signin"`: someone is signing in, as the member, to something the
+    challenger runs (a service's website, §1.1). Whoever starts a
+    sign-in chooses whom it challenges, typically by typing the
+    member's email address, so a member can get sign-in challenges
+    they did not start, and should refuse them. §10.4.1 ("Sign-in and
+    approval challenges") gates them apart from every other ask.
+  - `"approval"`: the challenger asks the member to approve what
+    `context` names (for a service, a decision its admins take
+    together).
+  - Absent: a challenge as before 0.65.0. A receiver treats any other
+    value as absent: it shows, gates and signs the challenge as one
+    without a purpose, so a value added later never gets a laxer gate
+    from a vault that does not know it.
+
+  `context` stays what the member is shown. For `signin` the challenger
+  SHOULD name in it what is being signed in to and, when it knows, from
+  where (for example "example.org, Firefox on Linux, near Lyon"); the app
+  shows it as the challenger's claim. An owner device sets `purpose` in
+  `connection.authenticate.request`; `connection.authenticate.pending`
+  carries it (only `signin` or `approval`) to the apps and desktops.
+- **Signed with the purpose** (0.65.0). For a challenge with `purpose`
+  `signin` or `approval` the vault signs instead
+
+  ```
+  m_p = len(purpose) (1) || purpose || m
+  sig = Ed25519(credential key, "vettid/vms/2/conn-auth-purpose" || m_p)
+  ```
+
+  (`purpose` in UTF-8, `m` as above), and its signed response carries
+  `purpose` with the same value. Without a purpose it signs `m` under
+  `"vettid/vms/2/conn-auth"` as before, and the response has no
+  `purpose`. The purpose is signed although it changes only the
+  receiver's gate and screens, because the signature is the
+  challenger's evidence of what the member approved: signed, a
+  signature given to a sign-in can never be presented (to a service's
+  other admins, or to anyone who checks its record of a decision) as
+  an approval; and a challenger that labels an approval `signin` to
+  reach the member past the `approval` cooldown gets only sign-in
+  evidence for it. The member is protected from such a label by the
+  screen, which says "signing in", not by the signature. A label of its
+  own, rather than a member added to `m`, keeps every signature made
+  before 0.65.0 valid and keeps a signature under one label from
+  verifying under the other; the length prefix keeps `m_p`
+  unambiguous.
 - The requesting vault checks that the response answers an outstanding
   challenge it sent to that connection, verifies `sig` under `key` over
-  `m`, and tells every owner device the verdict: `reason` is `denied` or
-  `bad_signature`. It pins `key` at the first success. A later success
+  `m` (or, since 0.65.0, over `m_p` under its label when the response
+  carries `purpose`), and tells every owner device the verdict: `reason`
+  is `denied` or `bad_signature`. A response whose `purpose` is not the
+  challenge's, or that carries `purpose` for a challenge without one, is
+  `bad_signature`. A response without `purpose` to a challenge with one
+  (from a vault before 0.65.0, which ignores the member, §10.1) is
+  verified over `m` as before. `result` carries `purpose` exactly when
+  the verified signature commits to it, so the challenger decides
+  whether a signature without it is enough: for a sign-in it normally
+  is (the member was present and saw `context`); for an approval a
+  challenger SHOULD NOT count it. It pins `key` at the first success. A later success
   under another key sets `key_changed: true` and re-pins, unless the
   pinned key leads to it through valid rotation statements (below); apps
   MUST show a key change.
@@ -6301,6 +6377,18 @@ vault signs a fresh challenge with the member's **credential key**
     (`connection.authenticate.rotation_rejected`), and the next
     authentication under the new key reports `key_changed: true`. A
     receiver with no pinned key ignores `rotated`.
+- **The screens per purpose** (0.65.0; app work, later). For `signin`
+  the app titles the approval "Sign in to <name>?", shows `context`,
+  and says "Only approve if you are signing in right now."; its
+  actions are "Approve" and "**Not me**", which sends
+  `connection.authenticate.deny` (a `signin` decline cools down only
+  sign-ins, briefly, and never counts toward a pause, §10.4.1). Its
+  notification says the same and is not presented as urgent. For
+  `approval` the app says "<name> asks you to approve", shows `context`
+  in full, and offers "Approve" and "Deny". Without a purpose, as
+  before. A desktop's deny of a `signin` challenge is labelled "Not me"
+  too. On the requesting side, apps show a refusal neutrally, as
+  §10.4.1 says, whatever the purpose.
 - Approvals, denials and verdicts are audited
   (`connection.authenticate.requested`, `.signed`, `.denied`,
   `connection.authenticated`, `connection.authenticate_failed`,
@@ -6341,8 +6429,11 @@ version may make them settings):
 | Constant | Value |
 |---|---|
 | Decline cooldown | 7 days |
-| Ask rate | 5 asks per connection per 24 hours |
+| Ask rate | 5 asks per connection per 24 hours (since 0.65.0 per rate bucket: the general bucket and the `approval` bucket each) |
 | Pending asks | 8 per connection, all kinds together |
+| Sign-in decline cooldown (0.65.0) | 1 hour |
+| Sign-in ask rate (0.65.0) | 10 `signin` challenges per connection per 24 hours |
+| Sign-in pending (0.65.0) | 2 `signin` challenges per connection, within the 8 |
 | Pause | after 3 declines from one connection within 30 days |
 | Batch | 10 minutes |
 | Neutral answer delay | 1–20 minutes, uniformly random (below) |
@@ -6350,6 +6441,38 @@ version may make them settings):
 
 These are not `limit` errors (§10.1): the requester is another vault,
 which never gets an error response for them.
+
+**Sign-in and approval challenges** (0.65.0; owner decision
+2026-10-27). A service (§1.1) challenges a member (§10.4) for two
+different things: a sign-in to its website, which whoever types the
+member's email address starts, and an approval its admins need. Before
+0.65.0 every challenge from a connection was the same ask, so an
+outsider who started sign-ins with a member's address, and the
+member's correct decline, blocked the member's own sign-ins and every
+approval from that service for 7 days, and three such declines paused
+all of the connection's asks. Since 0.65.0 a challenge's `purpose`
+(§10.4) selects its **rate bucket** and its cooldown identity:
+
+| Challenge | Cooldown identity, after a decline | Rate bucket | Counts toward a pause |
+|---|---|---|---|
+| `purpose: "signin"` | `signin` challenges, 1 hour | its own: 10 per 24 hours, at most 2 waiting | no |
+| `purpose: "approval"` | `approval` challenges, 7 days | its own: 5 per 24 hours | yes |
+| no purpose (or an unknown one) | challenges without a purpose, 7 days | the general bucket, 5 per 24 hours | yes |
+| every other ask | as point 3 below | the general bucket | yes |
+
+So a decline of a sign-in cools down only further sign-ins from that
+connection, and only for an hour; it never touches approvals or other
+asks. Mute and pause still cover every ask of the connection, and the
+8 pending asks are still counted all kinds together. A connection that
+labels its challenges `signin` gains at most the sign-in bucket's 10
+prompts a day, each saying "Only approve if you are signing in right
+now", and only sign-in evidence (§10.4, "Signed with the purpose").
+What remains: someone who can start sign-ins can use up the sign-in
+bucket, or keep it in its 1-hour cooldown, and so delay the member's
+own sign-in by that service (never its approvals). A service SHOULD
+therefore limit the sign-ins it starts per member address and per
+source, before it sends a challenge, and SHOULD offer another way to
+sign in when a challenge is not accepted.
 
 **Checks.** For each ask that passes the checks its type already makes
 at once (malformed, a duplicate id, an item that is not usable or a
@@ -6365,21 +6488,27 @@ field that is not suitable, an action not offered, the per-type caps;
    whatever its `fields`, or the same category); for a critical-item
    use, the same `item_id` and `field_id`, whatever the operation and
    payload; for an action, the same `action_id`; for authentication, any
-   challenge; for an introduction, any offer from that introducer. A
+   challenge with the same `purpose` (since 0.65.0; `signin`,
+   `approval`, or none; a `signin` cooldown lasts 1 hour, not 7 days);
+   for an introduction, any offer from that introducer. A
    grant request in which only some entries are in cooldown reaches the
    member without those entries (the member's decision, and so the
    answer, covers only the others); one in which all are is suppressed.
    Location requests have no decline and no cooldown.
 4. **Pending.** This connection already has 8 asks waiting for the
-   member, all kinds together. The per-type caps of §10.12–§10.16 stay
-   as a backstop.
-5. **Rate.** 5 asks of this connection have reached the member in the
-   current window. The window is a fixed 24-hour window that starts at
-   the first ask that reaches the member, as §10.12's rate limits are
-   (Rate limits for connections); suppressed asks do not count.
+   member, all kinds together, or (0.65.0) the ask is a `signin`
+   challenge and 2 of its `signin` challenges are waiting. The
+   per-type caps of §10.12–§10.16 stay as a backstop.
+5. **Rate.** The ask's rate bucket (0.65.0, above: `signin`,
+   `approval`, or the general bucket of every other ask) is full: 10
+   `signin` challenges, or 5 asks of the other two buckets, of this
+   connection have reached the member in that bucket's current window.
+   Each bucket's window is a fixed 24-hour window that starts at the
+   first of its asks that reaches the member, as §10.12's rate limits
+   are (Rate limits for connections); suppressed asks do not count.
 
-An ask that passes reaches the member as before and counts in the
-window.
+An ask that passes reaches the member as before and counts in its
+bucket's window.
 
 **Declines.** A **decline** is the member's explicit refusal of a whole
 ask: `grant.decide{approve: false}`, `critical-secret-use.deny`,
@@ -6387,9 +6516,13 @@ ask: `grant.decide{approve: false}`, `critical-secret-use.deny`,
 `intro.decline`. An expiry, an approval of only some entries, a
 suppressed ask and a desktop's request that an app denied are not
 declines. Each decline starts the cooldown of that ask (point 3).
+(0.65.0) A decline of a `signin` challenge ("Not me", §10.4) starts
+only the 1-hour cooldown of `signin` challenges and is **not counted**
+toward a pause: a member is expected to refuse sign-ins they did not
+start, and anyone who knows the member's address can start them.
 
-**Pause.** When a connection's third decline falls within 30 days of
-the first of those three (the vault keeps the times of its last three
+**Pause.** When a connection's third decline (not counting `signin`
+declines, 0.65.0) falls within 30 days of the first of those three (the vault keeps the times of its last three
 declines; this is a count of events, not of throughput, so it is a
 sliding 30 days), its asks are **paused**: later asks are suppressed
 until the member resumes them. The member gets **one** high-priority
@@ -6420,9 +6553,11 @@ on.
   changed nothing there). Unmuting does not resume a pause. Neither type
   is delegable (§10.11).
 - **State.** Per connection, in DEK state: `muted`, `paused_at`, the
-  times of the last three declines, the cooldowns (one per ask
+  times of the last three counted declines, the cooldowns (one per ask
   identity, at most 64 per connection, the oldest dropped first, each
-  with its end), the current window's start and count, the open batch
+  with its end), each rate bucket's current window start and count
+  (0.65.0; a state from before 0.65.0 has only the general bucket's),
+  the open batch
   and the held neutral answers. It goes with the connection (§7.4).
 - **Shown on the connection.** `<connection>` carries
   `asks: {muted, paused, paused_at?, cooldowns}` (`cooldowns` the number
@@ -21585,6 +21720,50 @@ Follow-ups:
     VAULT-HOST-PROTOCOL 0.1.10, VAULT-RELEASES 0.1.28), vettid-android
     (ANDROID-PLAN 0.1.40), then iOS (IOS-PLAN, with the phone-held
     secret of §11.14.1 as specified in 0.35.0).
+
+40. **Sign-in and approval challenges (0.65.0; owner decision
+    2026-10-27, proposed).** A service (§1.1) uses member
+    authentication (§10.4) for website sign-in and for its admins'
+    approvals; one gate for both let an outsider who starts sign-ins
+    with a member's address block the member's sign-ins and approvals
+    from that service for 7 days (§10.4.1). Proposed:
+    1. an optional `purpose` (`signin`, `approval`) in the challenge,
+       absent meaning the behaviour before 0.65.0, an unknown value
+       treated as absent;
+    2. the purpose signed, under a label of its own and with a length
+       prefix, and echoed in the signed response, so that sign-in
+       evidence never stands for an approval;
+    3. a rate bucket and a cooldown identity per purpose: `signin` 10
+       per 24 hours, at most 2 waiting, a 1-hour cooldown, its declines
+       not counted toward a pause; `approval` 5 per 24 hours with the
+       7-day cooldown; everything else unchanged;
+    4. the app's screens: "Only approve if you are signing in right
+       now", with "Approve" and "Not me".
+    - *Not chosen:* leaving `purpose` unsigned (it changes only the
+      receiver's gate and screens, but the challenger could then
+      present a sign-in's signature as an approval); a member added to
+      `m` under the old label (a signature before 0.65.0 and one after
+      would share a label, and `m` has no room for an unambiguous
+      addition after `context`); a cooldown per `context` for approvals
+      (`context` is the challenger's free text, so a new wording would
+      dodge it); no cooldown at all for sign-ins (a connection could
+      then re-prompt at once after every "Not me").
+    - *Open:* (a) whether `approval` should share the general bucket's
+      5 a day instead of having its own (its own bucket lets a
+      connection reach the member with up to 20 prompts a day in all,
+      against 5 before; sharing lets other asks use up the approvals);
+      (b) whether "Not me" should be a separate message from a deny,
+      for example to tell the service, which today cannot tell any
+      refusal from another (§10.4.1); (c) whether the member should be
+      able to mute only a connection's sign-ins; (d) whether a single
+      `approval` decline should cool down all approvals for 7 days, as
+      proposed, when each approval is about a different decision.
+    Follow-ups: vettid-vault (the peer wire: `purpose` in the challenge
+    and the signed response, the new label; member authentication: the
+    ask identity and bucket per purpose; the ask gate: per-bucket
+    windows, the sign-in cooldown and pending cap, uncounted declines;
+    vectors for `m_p`), the service vault (sets `purpose`, limits the
+    sign-ins it starts), the apps (the screens, later).
 
 ## 16. Test vectors
 
