@@ -1,8 +1,11 @@
 ---
 title: ACCOUNT-ADMIN-PLAN
 status: accepted — decisions recorded in §9
-version: 0.2.1
+version: 0.2.2
 changelog:
+  - 0.2.2: owner decision 2026-10-26 (VAULT-MESSAGING 0.64.0 §1.1):
+    governance voting is planned in the member vault with a service
+    vault, specified later; §1 and §9 3a note it
   - 0.2.1: owner decisions of 2026-10-03: invite codes are now called
     registration codes, good for 2 uses by default (API names unchanged);
     paid members are the voting members and governance voting is upcoming
@@ -10,7 +13,7 @@ changelog:
   - 0.2.0: decisions recorded; simplified membership lifecycle; magic link + PIN
     kept and fixed; subscriptions kept (free trial); SES sandbox opt-in
   - 0.1.0: initial draft
-date: 2026-10-01
+date: 2026-10-26
 owner: Al Liebl (Mesmer)
 component: vettid.org CDK — auth, account site, admin site
 related:
@@ -41,7 +44,8 @@ subscription types, admins, audit; the private-access network path.
 (waits on the relay per RELAY-PLAN Phase 5), NATS (deleted, never ported),
 governance voting/proposals (the *voting-rights* rule is modeled now, §5.1:
 paid members are the voting members; governance voting for them is coming
-soon, outside the vault), payments, services registry, vault
+soon; owner decision 2026-10-26: in the member vault with a service
+vault, specified later in VAULT-MESSAGING), payments, services registry, vault
 broadcasts/metrics, help offers, bulk email. Fresh users — no data migration from the archive.
 
 ## 2. What the review found
@@ -355,6 +359,9 @@ Data & logic
    - 3a. *Decided 2026-10-03:* paid members are the voting members; a free
      trial does not grant voting rights. Votes are not a vault feature;
      governance voting for paid members is upcoming.
+     *Owner decision 2026-10-26:* votes become a vault feature after all,
+     in the member vault with a service vault, specified later
+     (VAULT-MESSAGING §1.1).
 4. **Subscriptions:** kept, starting with free-trial types; payments later.
 5. **SES:** stay in the sandbox; verification-as-opt-in (§5.2).
 6. **Docs:** design docs and this plan are committed to the public repo.

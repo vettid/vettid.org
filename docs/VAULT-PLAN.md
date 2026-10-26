@@ -1,9 +1,12 @@
 ---
 title: VAULT-PLAN
 status: draft
-version: 0.1.13
+version: 0.1.14
 date: 2026-10-26
 changelog:
+  - 0.1.14: owner decision 2026-10-26 (VAULT-MESSAGING 0.64.0 §1.1): a
+    note under the port table: services (B2C) and votes, removed in the
+    port, are reopened for later work against new designs
   - 0.1.13: editorial (status as of 2026-10-26); no rule changes. V6
     status note: staging release 23 also carries vettid-vault #151 (an
     unlock that finishes a recovery's step 3 ends the recovery record,
@@ -110,6 +113,11 @@ feature handlers into it one area at a time behind a small handler interface.
 | Parent | **rewrite small** (~1.5k) | vsock mux, SQS consumer, TCP forwarder to an allowlist (relay, KMS, Google), S3 conditional get/put, instance-role credentials for the enclave's own KMS calls, lease writes, health. No parsing. |
 | Feature handlers | **port** from vault-manager | Re-homed behind `Handler(ctx, Session, Inner) (Inner, error)`; their storage and logic move mostly unchanged, the publish calls change. |
 | Removed | — | NATS creds/proxy, service/B2C, combined datastore, votes, org vault, WASM handler registry, `unseal`/`sign` stubs, legacy aliases. |
+
+(0.1.13, owner decision 2026-10-26.) Services (B2C) and votes are
+reopened for later work: a service reached as an ordinary connection,
+with contracts, and votes are planned in VAULT-MESSAGING §1.1 and will be
+specified there first.
 
 Estimated size: core 8–10k lines new, feature port ~25–30k carried over,
 parent ~1.5k. Roughly half of vettid.dev's vault-manager does not come over.
