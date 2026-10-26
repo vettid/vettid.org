@@ -1,9 +1,14 @@
 ---
 title: AGENT-PLAN
 status: draft
-version: 0.1.8
-date: 2026-10-23
+version: 0.1.9
+date: 2026-10-26
 changelog:
+  - 0.1.9: editorial (status as of 2026-10-26); no rule changes. §6
+    status paragraph: nothing has merged in vettid-agent since
+    2026-10-20 (#40) and the vault items and the Android work it waits
+    for are still not built. §7.1: AV1, AV2, AV4, AV5 and AV6 carry a
+    "Built" note with their vettid-vault pull requests
   - 0.1.8: editorial (status as of 2026-10-23): status notes for A0 to A6
     in §6 (A0 to A3 and A5 are built, vettid-agent #7 to #40). The
     header status stays "draft", see the note at the start of §6
@@ -788,7 +793,7 @@ Small PRs on `vettid-agent`, one row each, every one with its tests.
 Spec sections are VAULT-MESSAGING unless named. Each phase is tracked
 as an issue in vettid-agent, opened in A0.1.
 
-**Status (as of 2026-10-23).** A0 to A3 (except A3.5 and A3.7 to A3.9)
+**Status (as of 2026-10-26; unchanged since 2026-10-23).** A0 to A3 (except A3.5 and A3.7 to A3.9)
 and A5 are built in vettid-agent (pull requests #7 to #40, merged
 2026-10-17 to 2026-10-20). A3.5 and A3.7 to A3.9 wait for the vault
 items AV7 and AV9 to AV11 (not built in vettid-vault) in a staging release. A4 is v1.1 and not
@@ -909,12 +914,12 @@ AV7 and AV8 change the enclave and ship in a staging release.
 
 | # | Task | Spec | Why | Blocks |
 |---|---|---|---|---|
-| AV1 | **Save before acknowledging**: a `Config.Persist func(state []byte) error` called after a collected batch is handled and before its acks (an error leaves the batch unacknowledged, to be collected again) | §8.3 (the vault's rule; the same reasoning for a device) | `client.Poll` acks each message right after handling it; a crash before the caller's `Save` loses a rekey, a token or `device.paired` that the relay will not deliver again | — (workaround in A2.2) |
-| AV2 | **One collecting loop**: `(*Device).Run(ctx)` collects (long poll or WebSocket) and dispatches; `Request`, `Op`, `WaitEvent` and `LeashPresent` wait on it when it runs, instead of collecting themselves | §8.1 | Concurrent tool calls in a daemon each collect today, and whichever collects first consumes the others' messages into the shared buffer | — (workaround in A2.2) |
+| AV1 | **Save before acknowledging**: a `Config.Persist func(state []byte) error` called after a collected batch is handled and before its acks (an error leaves the batch unacknowledged, to be collected again) (0.1.9) **Built:** vettid-vault #111 and #112 (merged 2026-10-18). | §8.3 (the vault's rule; the same reasoning for a device) | `client.Poll` acks each message right after handling it; a crash before the caller's `Save` loses a rekey, a token or `device.paired` that the relay will not deliver again | — (workaround in A2.2) |
+| AV2 | **One collecting loop**: `(*Device).Run(ctx)` collects (long poll or WebSocket) and dispatches; `Request`, `Op`, `WaitEvent` and `LeashPresent` wait on it when it runs, instead of collecting themselves (0.1.9) **Built:** vettid-vault #114 (merged 2026-10-18). | §8.1 | Concurrent tool calls in a daemon each collect today, and whichever collects first consumes the others' messages into the shared buffer | — (workaround in A2.2) |
 | AV3 | **Approvals and retries**: `AwaitResponse` extends its wait to `approval.waiting`'s `exp` for its request and exposes the `approval_id`; an optional application retry reusing the inner id, at most twice | §6.8 step 1, §8.1, §8.6 | Today a referred request times out on the caller's deadline and is never retransmitted | — |
-| AV4 | **Wallet out of the import graph**: move `client/wallet.go` (and its `vms/btc` use) to `client/wallet` | — | Importers of `client` compile btcsuite and decred secp256k1 for nothing | — |
-| AV5 | **Dev stack for a non-phone app**: document (README "Local dev stack") how `vaultctl` enrolls a second test vault, creates and unlocks its credential and pairs an agent with grants; add a control endpoint only if a step cannot be done with `vaultctl` | §6.7, §10.11 | The connector's integration tests need a member's app that can sign grants; the dev stack's peer has no credential | A2.4 |
-| AV6 | **The bound on access-session prompts** (VAULT-MESSAGING 0.40.0, §7.3 Q3): a `device.session.request` within 10 minutes of the device's last accepted one is answered `too_soon` (`{allowed_after}`), notifies no app and records no feed item, and does not replace a pending request; tests for each case. An enclave change: in the next staging release | §6.8, §10.3 | `hSessionRequest` (`vault/access.go`) notifies the apps and records a high-priority feed item for every request; only "newest replaces older" bounded them | — |
+| AV4 | **Wallet out of the import graph**: move `client/wallet.go` (and its `vms/btc` use) to `client/wallet` (0.1.9) **Built:** vettid-vault #110 (merged 2026-10-18). | — | Importers of `client` compile btcsuite and decred secp256k1 for nothing | — |
+| AV5 | **Dev stack for a non-phone app**: document (README "Local dev stack") how `vaultctl` enrolls a second test vault, creates and unlocks its credential and pairs an agent with grants; add a control endpoint only if a step cannot be done with `vaultctl` (0.1.9) **Built:** vettid-vault #116 (merged 2026-10-18). | §6.7, §10.11 | The connector's integration tests need a member's app that can sign grants; the dev stack's peer has no credential | A2.4 |
+| AV6 | **The bound on access-session prompts** (VAULT-MESSAGING 0.40.0, §7.3 Q3): a `device.session.request` within 10 minutes of the device's last accepted one is answered `too_soon` (`{allowed_after}`), notifies no app and records no feed item, and does not replace a pending request; tests for each case. An enclave change: in the next staging release (0.1.9) **Built:** vettid-vault #109 (merged 2026-10-17); it ships in the staging releases from S17 on (S16 was not published). | §6.8, §10.3 | `hSessionRequest` (`vault/access.go`) notifies the apps and records a high-priority feed item for every request; only "newest replaces older" bounded them | — |
 | AV7 | **Grant-set sequence numbers** (VAULT-MESSAGING 0.41.0 §10.11). **Not started.** One counter in the vault's sealed state; every change to an agent's grant set (a grant issued, replaced or revoked, a share rule of the agent set or deleted, a grant revoked with its connection, suspension, resumption, the set a pairing completes with) takes its next value; `leash.grant.updated` and the agent's `leash.grant.list` answer carry it as `grant_seq`; never reset, never reused; tests for each change and for a re-paired agent | §10.11, §8.4 | Without it, a `leash.grant.list` answer sent before a revocation can arrive after it and bring the grant back | A3.5 |
 | AV8 | **The device's own session in `vault.status`** (VAULT-MESSAGING 0.41.0 §10.2). **Not started.** `vault.status` to a desktop or agent also returns `session: {session_id, expires_at}` for the caller's own current access session, or `null`; never another device's | §10.2, §6.8 | An agent has no message that returns its own session; the connector probes with `leash.grant.list` (§4.3 step 4) | — |
 | AV9 | **Ways to use a secret: settings, catalog, reveal off** (VAULT-MESSAGING 0.42.0 §10.11). **Not started.** `leash.item.set` and `.list`, the settings per agent and item, the unlock window to widen, deletion when the item is no longer included, `sync.event{leash.item.changed}`; `ways`, `programs` and `hosts` in `catalog`; `item.get` only with `reveal` (`way_not_allowed`, counted as refused) and always referred; `approval.pending{flags}`; every existing agent item starts with `["use"]` | §10.11, §10.12, §6.8 | `item.get` hands every included item's value to the agent's app, which may keep it in its history | A3.7 |

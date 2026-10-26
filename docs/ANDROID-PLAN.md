@@ -1,11 +1,11 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.80
-date: 2026-10-25
+version: 0.1.81
+date: 2026-10-26
 changelog:
-  - 0.1.80: **owner decisions of 2026-10-25**; the contact text is a DRAFT
-    for the owner's approval (VAULT-MESSAGING 0.62.0 §11.14.6 "Two
+  - 0.1.81: **owner decisions of 2026-10-25**; the contact text was approved
+    by the owner on 2026-10-26 (VAULT-MESSAGING 0.62.0 §11.14.6 "Two
     identities at most", MEMBER-API 2.13.0 unchanged). §4 step 5 "A phone
     that could not tell": at most two device identities, never a third;
     if the new identity's recovery also ends, both are kept for good and
@@ -15,6 +15,17 @@ changelog:
     the first refusal; a `401` at the register drops the new
     identity; the no-step-1 codes settle only their own open; each open's
     history is saved before it is posted. Not built
+  - 0.1.80: editorial (status as of 2026-10-26); no rule changes. §4
+    "Locking the vault": part 2 and the retry that survives the process
+    are built (vettid-android #190, #191, #193; they ship in staging
+    release 23), and its `stale_lock` bullet follows VAULT-MESSAGING
+    0.56.4 (`stale_lock` ends a lock without confirming it); the idle
+    lock texts were approved by the owner on 2026-10-24. §4 "A vault
+    being deleted": the rules of 0.1.77 are built (#192, #194) and their
+    texts approved (2026-10-24, 2026-10-25). §4 "Wallet": the spending
+    limits text was approved (2026-10-24, vettid.org #406). §6: status
+    of 2026-10-26 (release L, the transfer keep-check, the A6 audit
+    findings N1 to N3, "a phone that could not tell" in #195)
   - 0.1.79: **owner decision of 2026-10-24**, wording proposed; the owner
     approved the texts `recover_could_not_tell` and
     `onboarding_open_took_phone` of 0.1.78 on 2026-10-24 (in #418), so
@@ -2052,9 +2063,10 @@ it).
 fails secure"), merged as 7a250bcd and hardened since (#140, #150,
 #164, #181; 0.1.75). Part 2 is the app's side of
 VAULT-MESSAGING 0.29.0 (approved by the owner 2026-10-12), for the
-vault's release L (staging release 23), which is being built. The texts of both parts are
-approved as drafts (VAULT-LOCK L16) and become final when #127 and the
-release L work merge.*
+vault's release L (staging release 23, not yet cut). (0.1.80) Part 2 is built in
+vettid-android #190, #191 and #193 (merged 2026-10-24); its texts were
+approved by the owner on 2026-10-24, except the **Lock it now** label (a draft, #190). The texts of part 1 were approved
+as drafts (VAULT-LOCK L16) and are final with #127 merged.*
 
 **1. As built by #127.**
 
@@ -2078,7 +2090,8 @@ release L work merge.*
   process lives. (0.1.75, owner Q4, 2026-10-23) A retry that survives
   the process (a durable job, fail secure, until the vault confirms,
   with the plain notice meanwhile) is part of release L's app work
-  (A1).
+  (A1). (0.1.80) Built in #190: a persisted job (`PendingLockJob`) that
+  brings the process back and resumes the pending lock.
 - **No late lock, as far as the app can see to it:** `vault.lock` goes
   over the relay once, with `exp` 30 s, never through the outbox; and
   every unlock first waits out an unanswered relay lock (up to 40 s).
@@ -2086,7 +2099,7 @@ release L work merge.*
   still in the member API's queue, leave a window the app cannot close
   (VAULT-LOCK F6, F7).
 
-**Texts (drafts; catalog ids as in #127).**
+**Texts (final, VAULT-LOCK L16; catalog ids as in #127).**
 
 | Where | Id | Text |
 |---|---|---|
@@ -2099,8 +2112,8 @@ A lock the first try confirms shows no warning and no "confirmed".
 All three unlock-screen texts are live regions for screen readers (the
 warning assertive, the others polite).
 
-**2. With a vault that supports bound locks (release L; decided, not
-built).** The app knows from `unlock_id` in the unlock result; for a
+**2. With a vault that supports bound locks (release L; built in #190,
+#191 and #193, 0.1.80).** The app knows from `unlock_id` in the unlock result; for a
 vault without it, part 1 applies unchanged.
 
 - The app keeps `unlock_id` with the pending-lock record and sends
@@ -2111,17 +2124,22 @@ vault without it, part 1 applies unchanged.
   lock with a short `exp`, and the wait before its next unlock.
 - **Dropped:** the wait before an unlock; "send the relay lock once"
   (it may be retried, never through the outbox, `exp` at most 60 s).
-- **Confirms as well:** the slot's `locked` and `not_running`; the
+- **Confirms as well:** the slot's `locked` and `not_running`. The
   vault's `stale_lock` and the slot's `stale` end the pending lock
-  too: this phone's unlock is over, and the app reads the status to
-  show what is true now.
+  without confirming it (VAULT-MESSAGING 0.56.4 §10.2 "Locks"): this
+  phone's unlock is over and the vault is open under a newer one, so the app reads the
+  status and says the vault is locked only if that status was read
+  and is not `unlocked`. The app does not repeat that lock on its own; the member's
+  own new lock is allowed (0.1.80: the **Lock it now** button on "Your
+  vault was opened again", owner decision 2026-10-24; its label is a draft).
 - A `vault.locking` is taken only if its `unlock_id` is the current
   one (VAULT-MESSAGING §10.2 "Locks").
 - **The idle lock** (VAULT-MESSAGING §3.6.8). Settings → Security,
   beside the check's interval: "Lock my vault by itself after" with
   1 hour, 1 day, 7 days (default), 14 days, 30 days; a longer choice
   says "This takes effect after your next check." The held screen says
-  when (from `idle_lock_at`). Texts, drafts:
+  when (from `idle_lock_at`). Texts (approved by the owner 2026-10-24;
+  built in #191):
 
   | Where | Text |
   |---|---|
@@ -2675,7 +2693,7 @@ step of the "Recovery (new phone)" row).
 
    **Two identities at most, and what makes the phone decide** (0.62.0; owner decisions of 2026-10-25).
    - **At most two device identities**: the earlier one (E) and one new one (N). A phone never registers a third. **Further recoveries reuse N** (owner decision of 2026-10-25): for each new recovery the phone claims its code with K, registers N again (the same K, the same N keys, the new recovery's code) and opens with the earlier open's `unlock_secret`. This is needed because once E's open stored step 1, every later open is a resumed recovery that requires E's secret (§11.14.2), so only this phone can finish it. If N's recovery ends (its open is unanswered, or every answer was a readable refusal), the phone keeps both identities indefinitely, forgets neither, and keeps trying the lost-ok unlock ("A lost `ok`"), N first, then E, whenever it reads the status again, and uses the next recovery the member starts as above. It shows the contact text (below) only when even that is impossible: the vault's answers rule it out (`exhausted`, `closed` or `not_armed` answered to a fresh open; none of them can follow a stored step 1, and they rule out recovery of this vault from any phone until its owner's app arms a new generation, which needs the owner's PIN or password change, or backup turned off, and then an owner unlock), or the member gives up. The contact state is **not terminal**: the phone keeps both identities and still uses a later recovery the member starts, even after showing the text. This agrees with the `transfer_incomplete` rule above (open again while the recovery shows `registered`, otherwise a new recovery). The text "Your vault took this phone, but it cannot be unlocked right now. Contact VettID." stays only for the `409 key_in_use` outcome, where K is the vault's `app_key`; there, after a day of refusals, it is shown as before.
-- **DRAFT text for the owner** (`recover_could_not_recover`): "This phone could not recover your vault. Nothing on this phone is deleted. Contact VettID at support@vettid.org." with an action **Email support** that opens a mail to `support@vettid.org`. Not approved.
+- **Contact text** (`recover_could_not_recover`, approved by the owner on 2026-10-26): "This phone could not recover your vault. Nothing on this phone is deleted. Contact VettID at support@vettid.org." with an action **Email support** that opens a mail to `support@vettid.org`.
    - **A recovery code for another vault.** A scanned code names its `vault_id`, so the phone refuses it before the claim when that vault is not the one of the earlier open. A typed locator names none, so the phone refuses it as soon as the claim answer's `vault_id` differs. Nothing is registered; E, N and K stay. (No API change; status with K is always for K's own vault, so there is nothing to ignore.)
    - **App Attest (iOS).** One App Attest key per identity, attested and bound at that identity's own register; iOS registers N with a new App Attest key each time (a rule of the app, not a limit of App Attest; N's identity, KEM and relay keys stay), so each registration's binding stays tied to its own key, and E's key and N's earlier ones are kept until the handshake completes (IOS-PLAN §4.9).
    - **The two status reads.** Both the wall clock and the monotonic clock show at least 5 minutes between the two reads, and the two measures agree within 2 minutes; a clock that was set, or a reboot, between them restarts the pair. The same pair is required before the phone acts on a `200`.
@@ -3663,7 +3681,8 @@ typed recovery code (§4, "Recovery: type the code"); no word list
 lookup over the network.
 
 **Spending limits** (0.1.74; VAULT-MESSAGING 0.56.0 §10.18; owner
-decisions of 2026-10-23, text **for the owner's approval**). Built in W1, before sending, because W2 must show
+decisions of 2026-10-23; the owner approved the text on 2026-10-24,
+vettid.org #406). Built in W1, before sending, because W2 must show
 and respect them.
 
 - **At creation and import.** After the name and network, a step
@@ -5023,7 +5042,7 @@ this state by itself.
 | Check again, not reachable | `vault_deleting_unreachable` | "VettID couldn't be reached. Check your connection and try again." |
 | Both | `vault_deleting_account_site` | **Open the account site** |
 | "No vault", once, after this state | `vault_deleted_notice` | "Your vault was deleted. To start again, get a setup code on the account site." |
-| 0.1.77: Remove from this phone and its confirmation, "Your vault was deleted" (point 5), the unconfirmed and unreachable results, and Check again | — | See Android #192 (draft texts pending owner approval); the ids and wording are taken from there once the owner approves them, and the Check again rows above may change with it |
+| 0.1.77: Remove from this phone and its confirmation, "Your vault was deleted" (point 5), the unconfirmed and unreachable results, and Check again | — | See Android #192 (merged 2026-10-24; texts approved by the owner 2026-10-24) and #194 (merged 2026-10-25; texts approved by the owner 2026-10-25); the ids and wording are those of the app's string catalog, and the Check again rows above are superseded by them where they differ |
 
 The progress indicator while waiting has no percentage. The title is a
 polite live region for screen readers.
@@ -5657,7 +5676,7 @@ signer (§7).
 
 ## 6. Phases
 
-| Phase | Contents | Exit | Status (2026-10-23) |
+| Phase | Contents | Exit | Status (2026-10-23; A6 row 2026-10-26) |
 |---|---|---|---|
 | A0 | Spec + this plan approved; old code tagged and moved off `main`; empty multi-module skeleton, CI (build, unit tests, lint, detekt), theme and component gallery screen | CI green; component gallery matches the design language on a phone | Done: vettid-android #46 |
 | A1 | `:core:crypto` + vectors; `:core:keystore`; `:core:attestation` port | All vettid-vault vectors pass (incl. MLKEM768X25519 HPKE interop) | Done: #47 |
@@ -5665,16 +5684,25 @@ signer (§7).
 | A3 | Onboarding, unlock, credential, settings screens (with the account card, 0.1.11), biometric app lock; History (0.1.11), once the vault release with VAULT-MESSAGING 0.20.0's search is in staging; History export (0.1.17), once a release with 0.22.0's `audit.export` is | Fresh install → enrolled vault with credential on a real phone (dev stack) | Done: #49, with the account card, History and the export (#77, #88, #92, #97, #98) |
 | A4 | Connections, messages, approvals | Invite/QR connect, SAS, messages both ways, approvals | Done: #51 |
 | A5 | Items (data, secret, critical), tags, share rules, grants and critical-item approvals | Flows against the dev stack and a second vault | Done: #78 (A5a items), #79 (A5b tags and sharing), #80 (A5c grants and approvals); later fixes #89 to #96 and #171 to #176 |
-| A6 | Hardening and polish: accessibility pass, notifications (0.1.23: the Notifications screen and N1 below), offline behaviour, error states, Play pre-launch report | Internal testing track build | Partly: the audit (#117) and its fixes (#119 to #122, #127), the privacy settings (#120); the notifications screen (#99); the accessibility pass, offline behaviour and the Play pre-launch report are not recorded as done |
+| A6 | Hardening and polish: accessibility pass, notifications (0.1.23: the Notifications screen and N1 below), offline behaviour, error states, Play pre-launch report | Internal testing track build | Partly: the audit (#117) and its fixes (#119 to #122, #127), the privacy settings (#120); the notifications screen (#99); (0.1.80, 2026-10-24) the A6 audit's findings N1 to N3 are merged (#185 to #187; the audit document #188), and #184 scrubs crash messages; the accessibility pass, offline behaviour and the Play pre-launch report are not recorded as done |
 | N1–N4 | 0.1.23, notification modes (§4 Notification modes, 10): N1 app (setting, channels, on-phone service, FCM stubbed); N2 spec (`push.register`); N3 vault (push ops, wakes); N4 gateway with FCM credentials, then FCM on | N1: notifications in the background on both test phones without Google; N4: FCM wakes on the Pixel 7 | N1 done (#99, #100, #105). N2 is the specification (PUSH-GATEWAY, VAULT-MESSAGING §14). N3 done on the vault (vettid-vault #59, merged 2026-10-10; wakes in staging release S9). N4: the app's Google push mode is built (#109, #111, #112, #129) and the staging gateway has been deployed since 2026-10-11, but no platform is enabled yet (it waits for Firebase and APNs credentials) |
 
-Status (2026-10-23), after v1: **calls** C1 is partly built (#124 to
-#126, #175, #178 merged; #128, the call screens, open since
-2026-10-12); **release R** (recovery and unlock) is built (#134 to
+Status (2026-10-23, with additions of 2026-10-26), after v1: **calls**
+C1 is partly built (#124 to #126, #175, #178 merged; #128, the call
+screens, open since 2026-10-12 and conflicting with master on
+2026-10-26); **release R** (recovery and unlock) is built (#134 to
 #143); the **staging time scale** (#145, #146, #153, #154), **photo
 attachments** (#131 to #133) and the **notification sounds** (#180) are
 built; **devices and agents** (AA1 to AA5), **wallet, presence and
-location** are not started in the app.
+location** are not started in the app. (2026-10-26) Merged since
+2026-10-23: **release L** in the app (#190 the lock bound to its
+unlock and the pending lock that survives the process, #191 the idle
+lock, #193 the lock-again rebind; they ship in staging release 23, with
+vettid-vault V1 to V3, V5 and the durable app key writes, #148 and
+#149); the **transfer keep-check** (#187, #189: the old phone never
+erases on no answer, the 11-minute wait, the token renewal before the
+approval); the **deletion rules** of 0.1.77 and 0.1.78 (#192, #194);
+and **a phone that could not tell** (#195, merged 2026-10-26).
 
 Calls, devices/agents/LEASH, wallet, presence and location follow v1 in
 that order (D8 puts presence before location), each as its own phase. (0.1.53) Devices & agents is AA1–AA5

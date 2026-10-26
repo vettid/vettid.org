@@ -14,7 +14,7 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.13.1)
-  - ANDROID-PLAN.md (0.1.80)
+  - ANDROID-PLAN.md (0.1.81)
   - IOS-PLAN.md (0.1.35; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
@@ -27,9 +27,9 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.62.0: **owner decisions of 2026-10-25**; the contact text is a DRAFT
-    for the owner's approval (MEMBER-API 2.13.0 unchanged, ANDROID-PLAN
-    0.1.80, IOS-PLAN 0.1.35). §11.14.6 "A phone that could not tell",
+  - 0.62.0: **owner decisions of 2026-10-25**; the contact text was approved
+    by the owner on 2026-10-26 (MEMBER-API 2.13.0 unchanged, ANDROID-PLAN
+    0.1.81, IOS-PLAN 0.1.35). §11.14.6 "A phone that could not tell",
     new "Two identities at most": at most two device identities (the
     earlier and one new), never a third; further recoveries reuse the
     new one (owner D1); if its recovery also ends, the phone keeps both and keeps trying the lost-ok
@@ -17063,7 +17063,7 @@ with its recovering (app) key K:
 
 **Two identities at most, and what makes the phone decide** (0.62.0; owner decisions of 2026-10-25).
 - **At most two device identities**: the earlier one (E) and one new one (N). A phone never registers a third. **Further recoveries reuse N** (owner decision of 2026-10-25): for each new recovery the phone claims its code with K, registers N again (the same K, the same N keys, the new recovery's code) and opens with the earlier open's `unlock_secret`. This is needed because once E's open stored step 1, every later open is a resumed recovery that requires E's secret (§11.14.2), so only this phone can finish it. If N's recovery ends (its open is unanswered, or every answer was a readable refusal), the phone keeps both identities indefinitely, forgets neither, and keeps trying the lost-ok unlock ("A lost `ok`"), N first, then E, whenever it reads the status again, and uses the next recovery the member starts as above. It shows the contact text (below) only when even that is impossible: the vault's answers rule it out (`exhausted`, `closed` or `not_armed` answered to a fresh open; none of them can follow a stored step 1, and they rule out recovery of this vault from any phone until its owner's app arms a new generation, which needs the owner's PIN or password change, or backup turned off, and then an owner unlock), or the member gives up. The contact state is **not terminal**: the phone keeps both identities and still uses a later recovery the member starts, even after showing the text. This agrees with the `transfer_incomplete` rule above (open again while the recovery shows `registered`, otherwise a new recovery). The text "Your vault took this phone, but it cannot be unlocked right now. Contact VettID." stays only for the `409 key_in_use` outcome, where K is the vault's `app_key`; there, after a day of refusals, it is shown as before.
-- **DRAFT text for the owner** (`recover_could_not_recover`): "This phone could not recover your vault. Nothing on this phone is deleted. Contact VettID at support@vettid.org." with an action **Email support** that opens a mail to `support@vettid.org`. Not approved.
+- **Contact text** (`recover_could_not_recover`, approved by the owner on 2026-10-26): "This phone could not recover your vault. Nothing on this phone is deleted. Contact VettID at support@vettid.org." with an action **Email support** that opens a mail to `support@vettid.org`.
 - **A recovery code for another vault.** A scanned code names its `vault_id`, so the phone refuses it before the claim when that vault is not the one of the earlier open. A typed locator names none, so the phone refuses it as soon as the claim answer's `vault_id` differs. Nothing is registered; E, N and K stay. (No API change; status with K is always for K's own vault, so there is nothing to ignore.)
 - **App Attest (iOS).** One App Attest key per identity, attested and bound at that identity's own register; iOS registers N with a new App Attest key each time (a rule of the app, not a limit of App Attest; N's identity, KEM and relay keys stay), so each registration's binding stays tied to its own key, and E's key and N's earlier ones are kept until the handshake completes (IOS-PLAN §4.9).
 - **The two status reads.** Both the wall clock and the monotonic clock show at least 5 minutes between the two reads, and the two measures agree within 2 minutes; a clock that was set, or a reboot, between them restarts the pair. The same pair is required before the phone acts on a `200`.
