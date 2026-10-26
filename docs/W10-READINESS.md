@@ -1,7 +1,7 @@
 ---
 title: W10-READINESS
 status: living checklist (update as items close; not a plan)
-version: 0.1.11
+version: 0.1.12
 date: 2026-10-26
 owner: Al Liebl (Mesmer)
 related:
@@ -12,6 +12,10 @@ related:
   - W9-REPORT.md (PR #136) — the W9 staging record (B9)
   - vettid-vault docs/RELEASING.md, docs/SMOKE.md
 changelog:
+  - 0.1.12: editorial (status as of 2026-10-26). §1.6: staging release
+    23 also carries vettid-vault #151 (an unlock that finishes a
+    recovery's step 3 ends the recovery record; VAULT-MESSAGING 0.63.2).
+    No requirement changes
   - 0.1.11: editorial (status as of 2026-10-26). §1.6: staging release
     23 also carries vettid-vault #150 (a repeated recovery open rebinds
     the same identity's invitation; VAULT-MESSAGING 0.63.0 §11.14.6
@@ -179,7 +183,9 @@ This section was added in 0.1.9 and records what the other rows do not.
   VAULT-HOST-PROTOCOL 0.1.15 and 0.1.16: the parent and the enclave of a
   release are built from the same tag and change together) and #150 (a
   repeated recovery open rebinds the same identity's invitation, enclave
-  only; VAULT-MESSAGING 0.63.0 §11.14.6 "Pairing"). It changes
+  only; VAULT-MESSAGING 0.63.0 §11.14.6 "Pairing") and #151 (an unlock
+  that finishes a recovery's step 3 ends the recovery record, enclave
+  only; VAULT-MESSAGING 0.63.2). It changes
   what a vault does when it locks and when it holds, as release R did
   for unlock and recovery, so release 1 is a different candidate again.
   The iOS app's L1 and L2 (vettid-ios #138, #140) are merged.
