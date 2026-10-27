@@ -22074,7 +22074,7 @@ Follow-ups:
     - *After a PIN change or a password change the app asks once, on that
       change's success screen*; a "no" is final, and the rotation stays
       in Settings → Security → Credential. The banner goes. Texts are
-      DRAFT (ANDROID-PLAN 0.1.88).
+      approved by the owner 2026-10-27 (ANDROID-PLAN 0.1.88).
     - *Why:* after a transfer the old phone is exactly the old copy, so
       there is nothing to choose. After a PIN or password change the
       member may be changing it for routine reasons, and a rotation sends
