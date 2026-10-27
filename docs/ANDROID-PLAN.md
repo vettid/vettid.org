@@ -8,13 +8,16 @@ changelog:
     approvals indicator": a separate indicator in the top bar, left of
     the bell and on detail screens too, shown only while a request
     waits for the member's decision (pending, not decided, not expired),
-    with its count; it turns into a pill with the time left (`M:SS`,
-    clock glyph, urgency colour) in the last 2 minutes; a tap always
-    opens the Approvals list; the drawer badge uses the same count.
-    The request's notification opens that request (a request screen
-    showing another one is replaced, not reused) and is removed at the
-    request's expiry as well as when decided. DRAFT texts. Android work
-    follows later.
+    with its count; urgent (a pill with the time left, `M:SS`, clock
+    glyph, urgency colour) from arrival for sign-in and approval
+    challenges and session requests and in the last 2 minutes for other
+    asks with a deadline; a tap always opens the Approvals list; a
+    snackbar with View for a new time-critical request; the drawer
+    badge uses the same count. The request's notification opens that
+    request (a non-exported entry, a unique data URI, a request screen
+    showing another one replaced, the back stack and the locked cases
+    stated), counts down and is removed at the deadline as well as when
+    decided. DRAFT texts. Android work follows later.
   - 0.1.87: owner decision of 2026-10-27 (VAULT-MESSAGING 0.67.0, §15 item
     41). §4 step 5 "Pairing": when the unlock's `ok` carries `invitation_recovery_id`, the
     phone sends one `hs.init` with that `recovery_id` as `ctx`, the
@@ -1127,7 +1130,7 @@ surface than the vettid.dev app and a layout modelled on Proton Mail.
 | D6 | **Biometric app lock in v1**: opening the app (and returning to it after a timeout) can require a biometric or device credential via BiometricPrompt (class 3), gating a Keystore key that unlocks the app's local data. 0.1.19: called **App lock**, with the method Biometrics (as described) or Phone screen lock (the device credential only). It is a convenience layer only: it never replaces the vault PIN (unlocking the vault) or the credential password (critical actions). |
 | D7 | **Notification modes** (owner, 2026-10-09; 0.1.23): the member picks how notifications reach the phone: **On-phone service** (recommended, most private; the default), **Google push** (FCM through the VettID push gateway; offered once the gateway and FCM credentials exist) or **Off** (not recommended). Feed items raise notifications through the chosen mode (§4 Notification modes). Supersedes PUSH-GATEWAY 0.2.0 §11's default order (FCM first) for this app (PUSH-GATEWAY 0.3.0 follows it). No UnifiedPush (owner, 2026-10-09; 0.1.24; §9, question 10): the on-phone service is the path for phones without Google services. |
 | D8 | **Wallet, presence, location and video** (owner, 2026-10-17; 0.1.42; §4 "Wallet, presence, location and video"). All four are wanted, in the order **wallet, presence, location**, with **video after the calling service** (CALLS-PLAN C2 and C3). Wallet networks on staging: **signet and testnet4**; mainnet for production later. The wallet's **chain source is the member's choice**: the app reads balances and coins and broadcasts through a server the member can set. |
-| D9 | **A separate approvals indicator** (owner, 2026-10-27; 0.1.88; §4 "The approvals indicator"). What waits for the member's decision (sign-in and admin approvals, connection requests, share and ask approvals, transfer confirmations, device and agent approvals) has its own indicator in the top bar, apart from the bell (the record of what happened), shown only while something is open, with its count; the last 2 minutes of a request show the time left, highlighted, in the indicator and the row; the tap opens the Approvals list; a request's notification opens that request and goes when it is decided or expires. Why: a sign-in lives minutes and was missed while a conversation was open |
+| D9 | **A separate approvals indicator** (owner, 2026-10-27; 0.1.88; §4 "The approvals indicator"). What waits for the member's decision (sign-in and admin approvals, connection requests, share and ask approvals, transfer confirmations, device and agent approvals) has its own indicator in the top bar, apart from the bell (the record of what happened), shown only while something is open, with its count; urgent entries (sign-in and approval challenges and session requests from arrival, other asks with a deadline in their last 2 minutes) show the time left, highlighted, in the indicator and the row; the tap opens the Approvals list; a snackbar with View announces a new time-critical request while the app is open; a request's notification opens that request, counts down and goes when it is decided or expires; icon and badge on crowded or large screens. Why: a sign-in lives minutes and was missed while a conversation was open |
 
 ## 3. Design language (from Proton Mail)
 
@@ -2139,7 +2142,7 @@ it).
 
 ### The approvals indicator (0.1.88)
 
-*Owner decision of 2026-10-27. The texts marked DRAFT wait for the
+*Owner decisions of 2026-10-27. The texts marked DRAFT wait for the
 owner's approval.* A request that needs the member's decision (a
 sign-in or admin approval, a connection request, a share or ask
 approval, a transfer confirmation, a device or agent approval) used to
@@ -2151,108 +2154,178 @@ gets its own indicator, apart from the bell.
 1. **What counts.** An **open approval** is an Approvals entry that is
    pending, not decided (on this phone or another device) and not
    expired. The count is the number of **entries** (a connection's
-   asks within 10 minutes are one entry, 0.1.22; a batch is one). A
-   notice (a paused connection's, a rate limit) is not an approval and
-   does not count. An entry that has an expiry (`exp` or `expires_at`;
-   the challenge's 10 minutes, a pairing's, a location request's 24
-   hours) stops counting at that time, by the app's own timer and not
-   only when a list is read; the vault's times are used as everywhere
-   else in the app (the 5-minute approvals are under an hour and not
-   scaled, §4 "Staging time scale"). An
-   entry with no expiry counts until it is decided. An expired entry
-   never counts (the list and the resume read already drop it).
+   asks within 10 minutes are one entry, 0.1.22; a batch is one).
+   Never counted: a notice (a paused connection's, a rate limit), the
+   member's own outgoing requests, a row that waits for the other side
+   (an approved connection awaiting its peer), and a location request
+   the member answered **Not now** (the vault has no decline, §4
+   "Wallet, presence, location and video", Location: the app keeps the answer in memory until the request
+   expires or the vault locks, and it counts again if the app restarts
+   within its 24 hours). An entry stops counting at its deadline (3).
+   An entry with no deadline counts until it is decided.
 2. **Where.** In the top bar, **left of the bell**, on every screen
    inside the unlocked shell that has a top bar: the drawer screens
    **and the detail screens** (a conversation, a connection, an item),
    which have no bell, since that is where the missed sign-in was. Not
-   on Approvals itself or on a request's screen opened from it (the
-   list is the destination), and not on the full-screen flows (camera,
-   photo viewer, a call, the unlock and the gate). It is **shown only
-   while the count is above 0** and leaves no gap when hidden.
-3. **Look.** The glyph of the drawer's Approvals entry with the
+   on Approvals and **not on any request's screen** (the list and the
+   request are the destination), and not on the full-screen flows
+   (camera, photo viewer, a call, the unlock and the gate). It is
+   **shown only while the count is above 0** and leaves no gap when
+   hidden.
+3. **Deadlines.** The deadline of an entry is the **earliest** of the
+   asking side's own and this vault's: for `connection.authenticate`
+   the challenge's `exp` (VAULT-MESSAGING §10.4, the table row for
+   `connection.authenticate.challenge`: set by the asking vault, so a
+   service can ask for 2 minutes; the request screen already shows it,
+   "Expires … 2:50 PM") and the receiving vault's 10 minutes
+   (`connection.authenticate.pending.exp`); for connection requests
+   the `exp` of `connection.request.list`; for `device.session.pending`
+   its 10 minutes (§6.8); otherwise the entry's `expires_at` (a
+   location request: 24 hours). Asks therefore live from about 2
+   minutes (a service sign-in) to 24 hours. **The count uses the
+   `ExpiryClock` of vettid-android #202** (one sleep to the next
+   deadline, a re-read on resume, expired entries dropped), not a
+   second clock; a one-second tick runs only for the pill while it is
+   visible. Times are the vault's, as everywhere (§4 "Staging time
+   scale": these waits are under an hour and not scaled); the phone's
+   clock is corrected by the offset the app already keeps against the
+   vault's `now`, and without one it is used as is (a skew only moves
+   a notification's removal, never what the screen decides).
+4. **Look.** The glyph of the drawer's Approvals entry with the
    existing `CountBadge` (gold; "99+" above 99). The bell's red stays
    the bell's: it means an urgent alarm, and this badge is never red.
-   **Soon to expire** (below): the indicator becomes a pill with a
-   clock glyph and the time left of the soonest entry as `M:SS`
-   ("1:20"), in the design tokens' urgency colours (the error container
-   and its on-colour, contrast 4.5:1 in both themes), bold. The cues
-   that do not rely on colour are the clock glyph, the digits and the
-   wider shape. The countdown ticks once a second only while it is
-   on screen, with no flashing or movement.
-4. **Soon to expire: the last 2 minutes** (`APPROVAL_URGENT_SECONDS =
-   120`), a fixed time and not a share of the request's life. Asks live
-   from 2 minutes to 24 hours; a share of life (a third) would call a
-   24-hour location request urgent for eight hours and a 2-minute
-   sign-in only for its last 40 seconds. Two minutes is about what the
-   member needs to open the app, unlock and approve. A request that
-   lives 2 minutes or less is urgent from its arrival. The window is not
-   scaled by the staging time scale. In Approvals the entries are
-   ordered **soonest expiry first inside the window**, then as today;
-   a row inside the window shows a clock glyph and "Expires in 1:20"
-   in bold in the urgency colour; a row outside it shows no countdown.
-5. **Tapping the indicator always opens the Approvals list**, never
-   the single waiting request, even when the count is 1. One
-   destination that always agrees with the number; no request opened
-   on top of the screen the member was in (and its back stack); and the
-   urgent entry is first in the list, one tap away. (Open question 1
-   in the PR for the owner.)
-6. **Held, due, locked.** The indicator is derived from the in-memory
-   list, so it follows the existing rules: **not shown** while the vault
-   is held or the daily check is due (the gate comes first, and the
-   cached feed MUST NOT be shown, §4 Notifications, 7), at the app lock
-   and the unlock screen, and after a lock or a wipe. After the check
-   the open read decides what shows (expired entries are gone). On
-   the phone's lock screen the indicator does not exist: only the
-   notification, by the rules of "Content" (§4 Notification modes).
-7. **The drawer badge uses the same count** (one source, the open
-   approvals of 1), so the two always agree. The drawer badge does not
-   count down and has no urgent state.
-8. **The request's notification opens that request.** Fix of a flaw:
-   tapping a new request's notification while another request's screen
-   was open showed the old request, because the navigation reused the
-   open entry (`launchSingleTop` keeps an entry of the same route and
-   its old arguments). The rule: the notification's `PendingIntent`
-   carries the entry's `ref` and is unique per entry (a request code or
-   data URI from the `item_id`; `FLAG_UPDATE_CURRENT`, immutable); the
-   route of a request's screen carries its `ref`; on arrival the app
-   **replaces** a request screen that shows another `ref` (pop it, then
-   navigate; no `launchSingleTop` for it) and keeps one that shows the
-   same `ref`; back goes to the Approvals list. When the entry is gone
-   (decided or expired) the Approvals list opens with the existing text
-   "This is no longer waiting" (§4 Notifications, 4). A batch opens its
-   one entry.
-9. **The notification goes when the request does.** Already specified:
-   it is cancelled when its feed item is read, archived or deleted on
-   any device (§4 Notification modes, 7), and deciding an ask marks the
-   item read (question 2). Added here: it is also removed **at the
-   entry's expiry**, which marks nothing. A notification for an entry
-   with an expiry is posted with `setTimeoutAfter` (the time left), so
-   it goes in every mode, with the app closed too, and the app cancels
-   it at the same time by its timer and on resume.
-10. **Texts (DRAFT; string resources).**
+   **Urgent** (5): the indicator becomes a pill with a clock glyph and
+   the time left of the soonest urgent entry as `M:SS` ("1:20"; the
+   clock alone while no deadline is known), in the design tokens'
+   urgency colours (the error container and its on-colour, contrast
+   4.5:1 in both themes), bold. The cues that do not rely on colour
+   are the clock glyph, the digits and the shape. No flashing or
+   movement. **Narrow or large:** on detail screens that carry their
+   own actions the indicator is the icon with its badge; at large font
+   scales or narrow widths the urgent state is the icon with a **clock
+   badge**, never the full pill. The indicator never pushes the
+   screen's own primary actions into the overflow menu (they win the
+   space).
+5. **Urgent: when.** An entry is urgent (a) **from arrival**, when it
+   is a `connection.authenticate` challenge of any `purpose` (`signin`,
+   `approval`, or none) or a `device.session.pending` request, and (b)
+   for every other entry that has a deadline, **in its last 2
+   minutes** (`APPROVAL_URGENT_SECONDS = 120`, a fixed time: a share of
+   a request's life would flag a 24-hour location request for eight
+   hours). In Approvals the entries are ordered **urgent first, soonest
+   deadline first**, then as today; an urgent row with a deadline shows
+   a clock glyph and "Expires in 1:20" in bold in the urgency colour;
+   other rows show no countdown. (This is how the app shows urgency; it
+   does not change a notification's channel or how the vault presents
+   it, VAULT-MESSAGING §10.4 "The screens per purpose".)
+6. **Tapping the indicator always opens the Approvals list**, never
+   the single waiting request, even when the count is 1. (A
+   notification tap, below, opens the request.)
+7. **A new time-critical request while the app is open.** When a new
+   entry of 5 (a) arrives while the app is open and the member is on
+   another screen (not Approvals, not a request, not a full-screen
+   flow, not while held or due), a **snackbar** shows once for that
+   entry with **View**, which opens that request (as a notification
+   tap, 9). It is announced politely (a live region), stays 10 seconds
+   (longer with the system's accessibility timeout), never covers the
+   screen's primary action, and is not shown again for the same entry.
+8. **Held, due, locked.** The indicator and the snackbar come from the
+   in-memory list, so they follow the existing rules: **not shown**
+   while the vault is held or the daily check is due (the gate comes
+   first, and cached feed content MUST NOT be shown, §4 Notifications,
+   7), at the app lock and the unlock screen, and after a lock or a
+   wipe. After the check the open read decides what shows (expired
+   entries are gone). On the phone's lock screen only the notification
+   exists, by the rules of "Content" (§4 Notification modes). **The
+   drawer badge uses the same count** (one source), with no countdown.
+9. **The request's notification opens that request.** Fix of a flaw
+   (the review finding L4 of vettid-android #202): tapping a new
+   request's notification while another request's screen was open
+   showed the old request, because the navigation reused the open entry
+   (`launchSingleTop` keeps an entry of the same route and its old
+   arguments).
+   - *Intent.* Each notification's `PendingIntent` is unique per entry:
+     its data is `vettid://approval/<item_id>` (no hashed request
+     code), with `FLAG_UPDATE_CURRENT | FLAG_IMMUTABLE`, and targets a
+     **non-exported** activity (`exported="false"`, no intent filter,
+     so no link or other app can send it). The `ref` is looked up in
+     the in-memory open list; an intent that is not the app's own, or a
+     `ref` that is not there, is ignored and opens the list. A request
+     screen never acts by itself: it shows the request and waits for
+     the member's Approve, Deny or Not me.
+   - *Navigation.* The route of a request's screen carries its `ref`;
+     on arrival the app **replaces** a request screen that shows
+     another `ref` (pop it, then navigate; no `launchSingleTop` for it)
+     and keeps one that shows the same `ref`. If the member has
+     answered request A and A's answer is still in flight when B's
+     notification is tapped, B opens after A settles (A's result is
+     kept and shown in the list). The back stack is, from the top, the
+     request, the **Approvals list**, then the screen the member was on
+     (app warm) or the start destination (cold start), through #202's
+     `leaveApprovalDetail`, so that back never leaves a blank NavHost.
+   - *Locked.* A tap while the app lock, the unlock, the gate or the
+     daily check stands goes through them first (app lock, unlock,
+     gate, daily check), then to that request if it is still open,
+     otherwise to the list with the existing "This is no longer
+     waiting" (§4 Notifications, 4). The request is never shown from a
+     cache before that. A batch opens its one entry.
+10. **The notification goes when the request does, and shows the
+    time.** Already specified: it is cancelled when its feed item is
+    read, archived or deleted on any device (§4 Notification modes, 7),
+    and deciding an ask marks it read (question 2). Added: it is also
+    removed **at the entry's deadline**, which marks nothing, and for
+    an entry with a deadline it counts down: the notification is posted
+    with `setWhen(deadline)`, `setUsesChronometer(true)`,
+    `setChronometerCountDown(true)` and `setTimeoutAfter(time left)`, so
+    it shows the time left and goes in every mode, with the app closed
+    too; the app also cancels it at the same moment by its timer and
+    on resume.
+    - *Where the time comes from.* The service or the app looks the
+      entry up by `ref` in the kind's pending event or list: the
+      challenge's `exp` (`connection.authenticate.pending`), the
+      request's `exp` (`connection.request.list`), the session request's
+      10 minutes, the item's `expires_at`.
+    - *Not yet known.* The notification is posted without a timeout or
+      chronometer; once the deadline is known the same notification id
+      is posted again with them and `setOnlyAlertOnce(true)` (no second
+      sound).
+    - *A batch.* A later ask of a batch re-posts its notification and
+      recomputes the deadline (the earliest of the batch).
+11. **Texts (DRAFT; string resources, plurals through Android
+    `plurals` and `MeasureFormat`, never built from pieces).**
 
     | Id | Text |
     |---|---|
     | `approvals_indicator_description` | "Approvals, %d waiting" |
-    | `approvals_indicator_description_urgent` | "Approvals, %d waiting. One expires in %s" (%s: "1 minute 20 seconds", "45 seconds") |
+    | `approvals_indicator_description_urgent` | "Approvals, %d waiting. %s expires in %s" (%s: the soonest entry's label, then "1 minute 20 seconds", "45 seconds") |
     | `approvals_indicator_time` | "%d:%02d" (the pill, M:SS) |
     | `approval_expires_in` | "Expires in %s" (the row, M:SS; read as "Expires in 1 minute 20 seconds") |
-    | `approval_expires_announce` | "An approval expires in 2 minutes" (announced once, polite, when an entry enters the window; and "in 1 minute" at one minute) |
+    | `approval_expires_announce` | "%s expires in %s" (announced politely, for the **soonest** entry only, at most once per entry at 2 minutes and once at 1 minute left; an entry that arrives under a threshold is announced once, at arrival) |
+    | `approval_arrived_signin` | "%s asks you to confirm it is you" (snackbar, with **View**) |
+    | `approval_arrived_session` | "%s asks for access" (snackbar, with **View**) |
 
     The glyph is hidden from TalkBack; the indicator is one control
-    with the description above, a 48 dp target; it announces nothing on
-    each tick.
-11. **Tests.** Unit: the count over pending, decided, expired and
-    batched entries; an entry that expires while the app is open stops
-    counting without a read; the window at 120 s, at 121 s and for a
-    request that lives 90 s; the order inside the window; the
-    indicator hidden when held, due, locked and on Approvals. UI: the
-    pill and row in both themes and at the largest font scale, the
-    description at 1 and 3 waiting, the 48 dp target, the detail screen
-    top bar. Navigation: a notification for request B with request A's
-    screen open shows B; the same `ref` keeps the screen; a gone entry
-    shows the list and the text. Notification: removed at expiry with
-    the app closed (`setTimeoutAfter` set from the time left).
+    with the description above, a 48 dp target; the second-by-second
+    tick announces nothing.
+12. **Tests.** Unit: the count over pending, decided, expired, batched,
+    outgoing, awaiting-peer and "Not now" entries; the earliest of the
+    two deadlines; `ExpiryClock` drops an entry without a read; the
+    window at 120 s and 121 s; urgent from arrival for signin, approval
+    and no-purpose challenges and session requests; the order; the
+    indicator hidden when held, due, locked, on Approvals and on every
+    request screen; one snackbar per entry; the announcement for the
+    soonest entry only and once per threshold. UI: the pill and row in
+    both themes; at the largest font scale and narrow widths the clock
+    badge and no pill; a detail screen with actions keeps them out of
+    the overflow; the 48 dp target. Navigation: B's notification with
+    A's screen open shows B; the same `ref` keeps the screen; the back
+    stack of a warm and a cold tap; a tap while locked, held and due
+    ends at the request or "This is no longer waiting"; an intent from
+    another app or with an unknown `ref` opens the list and acts on
+    nothing; A in flight, B tapped. Notification: unique data URI;
+    chronometer and timeout set; re-post when the deadline becomes
+    known without a second sound; removed at expiry with the app
+    closed.
 
 ### Locking the vault (0.1.38)
 
