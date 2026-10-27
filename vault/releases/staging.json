@@ -793,7 +793,7 @@
     },
     {
       "release": 22,
-      "status": "active",
+      "status": "deprecated",
       "published_at": "2026-10-24T15:08:20Z",
       "pcr0": "d4e759beb13b906d063e1ee084bfd94dd441c82c8a101da8b02c2852a2b32a4ed89dcf372854c240a615fc37a964fe90",
       "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
@@ -849,7 +849,8 @@
     },
     {
       "release": 23,
-      "status": "candidate",
+      "status": "active",
+      "published_at": "@PUBLISHED_AT@",
       "pcr0": "ed22773fa50f0507e06db63baffd4c64802e9c3bcd946706b2935a610d1ddf1f80baa779f20bb07bad4c34bd915fc32e",
       "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
       "pcr2": "5d8e9b0d066d88b5bd72063ff40b75fb48994fe1887c682501cb6e147e0dd94aae6efa9286ac5c4ab9aa2c19cf441b4b",
