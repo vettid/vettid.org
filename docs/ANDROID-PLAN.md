@@ -1,9 +1,27 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.90
+version: 0.1.91
 date: 2026-10-27
 changelog:
+  - 0.1.91: owner decisions of 2026-10-27, after an audit of what the app
+    keeps on the phone. New §5 "What the phone keeps (0.1.91)", where vault
+    content is in memory only (no database, no content, photo or HTTP
+    cache), and the table lists exactly what is kept, where, how it is
+    protected, when it is cleared and its backup status. Pending approval
+    events and recent connection-request names are memory only like the
+    rest (the app persisted them encrypted across a lock; being fixed); a
+    copied secret item value is local to the phone, cleared after 60
+    seconds and at the vault lock, only if still the app's clip (mirrors
+    IOS-PLAN §6.5; being fixed); a notification never outlives the vault
+    being open, including after the process was killed (the app cancels
+    them at start when the vault is not open; being fixed); every state
+    file is encrypted (the lock record being fixed) under a hardware-backed
+    key. Stale text removed (D6) no longer says the app lock gates a
+    Keystore key that unlocks local data (it is a UI gate only and protects
+    no data at rest; the unused app-lock data key is being removed); §5 no
+    longer says local caches use Room encrypted with a Keystore key (there
+    is no Room), and the `:core:keystore` row loses the app-data key.
   - 0.1.90: owner decision of 2026-10-27 (VAULT-MESSAGING 0.69.0, §15
     item 43). New §4 "Service connections (0.1.90)": the connection
     request says "This is a service, not a person." (a claim, not
@@ -1121,7 +1139,7 @@ related:
   - CALLS-PLAN.md (0.1.3) — calls; video in C4 (§4, 0.1.42)
   - AGENT-PLAN.md (0.1.7) — the agent connector; §7.2 AA1–AA5 (§4
     "Devices & agents", 0.1.53)
-  - IOS-PLAN.md (0.1.42) — the iPhone app; §4.12 carries the approvals
+  - IOS-PLAN.md (0.1.44) — the iPhone app; §4.12 carries the approvals
     indicator (0.1.89)
 classification: public (no secrets; safe for github.com/vettid)
 ---
@@ -1162,7 +1180,7 @@ surface than the vettid.dev app and a layout modelled on Proton Mail.
 | D3 | **v1 scope**: enrollment, unlock, Protean Credential, settings (always), plus **connections + messaging** and **items** (data, secret and critical items per VAULT-ITEMS; originally "secrets + critical secrets"). Calls, desktop/agent pairing and LEASH, wallet, location and presence come later. |
 | D4 | **Minimum Android 12 (API 31)**; target the current API level. |
 | D5 | **Message search later** (not in v1). |
-| D6 | **Biometric app lock in v1**: opening the app (and returning to it after a timeout) can require a biometric or device credential via BiometricPrompt (class 3), gating a Keystore key that unlocks the app's local data. 0.1.19: called **App lock**, with the method Biometrics (as described) or Phone screen lock (the device credential only). It is a convenience layer only: it never replaces the vault PIN (unlocking the vault) or the credential password (critical actions). |
+| D6 | **Biometric app lock in v1**: opening the app (and returning to it after a timeout) can require a biometric or device credential via BiometricPrompt (class 3). 0.1.91: it is a UI gate only and protects no data at rest (the app keeps no vault content on the phone, §5 "What the phone keeps"; there is no Keystore key behind it). 0.1.19: called **App lock**, with the method Biometrics (as described) or Phone screen lock (the device credential only). It is a convenience layer only: it never replaces the vault PIN (unlocking the vault) or the credential password (critical actions). |
 | D7 | **Notification modes** (owner, 2026-10-09; 0.1.23): the member picks how notifications reach the phone: **On-phone service** (recommended, most private; the default), **Google push** (FCM through the VettID push gateway; offered once the gateway and FCM credentials exist) or **Off** (not recommended). Feed items raise notifications through the chosen mode (§4 Notification modes). Supersedes PUSH-GATEWAY 0.2.0 §11's default order (FCM first) for this app (PUSH-GATEWAY 0.3.0 follows it). No UnifiedPush (owner, 2026-10-09; 0.1.24; §9, question 10): the on-phone service is the path for phones without Google services. |
 | D8 | **Wallet, presence, location and video** (owner, 2026-10-17; 0.1.42; §4 "Wallet, presence, location and video"). All four are wanted, in the order **wallet, presence, location**, with **video after the calling service** (CALLS-PLAN C2 and C3). Wallet networks on staging: **signet and testnet4**; mainnet for production later. The wallet's **chain source is the member's choice**: the app reads balances and coins and broadcasts through a server the member can set. |
 | D9 | **A separate approvals indicator** (owner, 2026-10-27; 0.1.89; §4 "The approvals indicator"). What waits for the member's decision (sign-in and admin approvals, connection requests, share and ask approvals, transfer confirmations, device and agent approvals) has its own indicator in the top bar, apart from the bell (the record of what happened), shown only while something is open, with its count; time-critical entries (sign-in and approval challenges, session requests and `approval.pending` from arrival, sign-ins shown neutral; other asks with a deadline in their last 2 minutes) show the time left, highlighted, in the indicator and the row; the tap opens the Approvals list; a snackbar with View announces a new time-critical request while the app is open; a request's notification opens that request, counts down and goes when it is decided or expires; icon and badge on crowded or large screens; sign-ins show the time left in the neutral treatment (no error colour), the Requests channel stays unchanged, `approval.pending` is time-critical from arrival, and a location "Not now" is kept in the encrypted local store. Why: a sign-in lives minutes and was missed while a conversation was open |
@@ -6071,20 +6089,20 @@ and the request comes back from `account.get` after the unlock.
 ## 5. Architecture
 
 Multi-module Gradle, Kotlin, Jetpack Compose + Material3, Hilt, coroutines
-and Flow, Room (encrypted with a Keystore-held key) for local caches,
-DataStore for preferences, OkHttp for HTTP, strings in resources from day
+and Flow, DataStore for non-secret preferences (0.1.91: no Room and no
+cache of vault content; see "What the phone keeps" below), OkHttp for HTTP, strings in resources from day
 one (translation-ready), accessibility labels required in review.
 
 | Module | Contents |
 |---|---|
 | `:core:crypto` | Suite 2 (HPKE MLKEM768X25519 / HKDF-SHA256 / ChaCha20-Poly1305), XChaCha20 sessions, Ed25519, Argon2id; envelope v2; handshake and epochs; credential UTK/reply-key sealing; (0.1.39) the §5.5 blob seal and open. **Must pass the vettid-vault test vectors byte for byte.** |
 | `:core:media` | (0.1.39) Photos in memory: picker and camera input, bounds, orientation, downscale, JPEG without metadata, thumbnails, type sniffing, bounded decoding (§4 "Photo attachments") |
-| `:core:keystore` | Android Keystore keys (device identity, relay key wrapping, device attestation key with StrongBox/TEE, the biometric-gated app-data key; 0.1.40, release R: the phone key, an HMAC key that computes the unlock secret) |
+| `:core:keystore` | Android Keystore keys (device identity, relay key wrapping, device attestation key with StrongBox/TEE, the key that encrypts the state files (0.1.91: the unused biometric-gated app-data key is removed); 0.1.40, release R: the phone key, an HMAC key that computes the unlock secret) |
 | `:core:attestation` | Ported Nitro attestation + PCR manifest verification; Android key attestation for enrollment/unlock (§11.7) |
 | `:core:relay` | Relay client (RELAY-PROTOCOL 0.6): register, signed requests, tokens, deposit, collect (long-poll / WebSocket), ack, claims, blobs |
 | `:core:altchan` | Member-API alternate channel: code redeem and recovery claim, requests signed by the app key (no member session), descriptors, sealed enroll/unlock/lock, result polling, release-update approval |
 | `:core:vault` | Typed vault client: one function per §10 type, sessions with the vault, dedupe, outbox, sync events → repositories |
-| `:core:data` | Repositories and Room caches per feature |
+| `:core:data` | Repositories per feature, in memory (0.1.91: no Room caches) |
 | `:core:notify` | 0.1.23: the notification modes: the on-phone service (`VaultConnectionService`), channels, the Mapping and Content rules, the `PushProvider` interface; `:core:push-fcm` the FCM provider (the only module with Firebase; 0.1.34: in the `full` distribution only, `foss` binds a provider that reports "not in this build") |
 | `:core:ui` | Theme (navy + gold, light/dark), components (top bar, drawer, list row, empty state, pill bar, settings cards, sheets) |
 | `:core:chain` | (0.1.42) The wallet's chain source: the Esplora client, the per-network server setting and its genesis check, the Bitcoin library chosen in W0 (descriptors, PSBT building, coin selection); no Google code (§4 "Wallet, presence, location and video") |
@@ -6143,6 +6161,67 @@ credential password. Done by the owner on 2026-10-11; it is the
 simplest of the paths in VAULT-MESSAGING §11.10.8 ("Moving the
 existing staging vaults"), and it binds the vault to the new app's
 signer (§7).
+
+### What the phone keeps (0.1.91)
+
+**The rule: vault content is in memory only.** Items and their values,
+messages, photos, connections, the feed, History and the profile are
+read from the vault when the vault is open and are held in the app's
+memory. They are cleared at the vault lock, at a hold, at a wipe and when
+the process ends. There is no database, no content cache, no photo cache
+and no HTTP cache, and nothing of the content goes to a file, DataStore,
+`SavedStateHandle`, a log or a backup. This includes pending approval
+events and the names on recent connection requests: they are shown while
+the vault is open and read again from the vault after the next unlock.
+(The app persisted these two, encrypted, across a lock; that is being
+removed.) The app lock (D6) is a UI gate only and protects no data at
+rest, because there is none to protect.
+
+What the phone does keep, and why:
+
+| Item | Where | Protection | Cleared when | Backup |
+|---|---|---|---|---|
+| Device identity, app key, attestation key, phone key | Android Keystore (StrongBox where present, else TEE) | Hardware-backed, non-exportable, per vault | Wipe; the end of a transfer's keep period on the old phone | None |
+| Key that encrypts the state files | Android Keystore | Hardware-backed; not bound to user authentication, because collecting from the relay in the background needs it after the first unlock (VAULT-MESSAGING §3.2, §3.5 residual) | Wipe | None |
+| Transport state: session keys, relay token, the sealed credential blob, one-time keys, the outbox | Encrypted state file (AES-GCM) in no-backup storage | The Keystore key above | Wipe; each part when it is used up or replaced | None |
+| Account ids and flags; "Not now" entries `{request_id, exp}` | Encrypted state file in no-backup storage | The same | Wipe; an entry at its `exp` | None |
+| Owner-check state, the lock record, the canary manifest | Encrypted state file in no-backup storage | The same (0.1.91: the lock record is encrypted as the others are; being fixed) | Wipe; the lock record when the vault unlocks | None |
+| Settings (theme, notification mode, app lock on/off, chain server) | DataStore | None needed: no secrets, no vault content | Uninstall | None |
+| A copied secret item value | The system clipboard | Local to the phone (the clip is marked sensitive and not synced); see the clipboard rule | 60 seconds after the copy, at the vault lock, and only if the clip is still the app's | None |
+| Notifications | The system | Texts follow the Content rules | When the vault stops being open | None |
+
+**Backups are off.** `allowBackup=false` and `data_extraction_rules`
+exclude everything from cloud backup and device-to-device transfer; the
+state files are in no-backup storage. A restored phone starts with no
+vault, and keys that did not come with it are not missed.
+
+**The state files' key** is hardware-backed and is not bound to user
+authentication. That is the residual risk stated in VAULT-MESSAGING §3.2
+and §3.5: a person who has the unlocked, rooted phone could use the key,
+but the files hold transport state only, never vault content, and the
+vault does not accept a phone's request without the credential.
+
+**The clipboard rule** (mirrors IOS-PLAN §6.5). Secrets are not copied
+except where the plan says so (the pairing code, §4 "Devices & agents";
+a bitcoin address; a secret item value). A copy of a secret item value:
+the clip is marked sensitive (`ClipDescription.EXTRA_IS_SENSITIVE`) so
+that the preview hides it, and the app clears it 60 seconds after the
+copy and at the vault lock, but only if the clipboard still holds the
+app's own clip (a clip the member copied since is never touched). Since
+Android 10 an app can clear the clipboard only while it is in the
+foreground: if the 60 seconds or the lock pass in the background, the
+app clears it at its next return to the foreground. Tests: the clip is
+cleared after 60 seconds; it is cleared at the lock; a foreign clip is
+left alone.
+
+**Notifications never outlive the vault being open.** Every notification
+the app shows is cancelled when the vault locks, is held, is wiped or
+closes. A process that was killed while a notification was showing cannot
+cancel it, so at its start the app cancels all of its notifications when
+the vault is not open (before the first screen, and from the service's
+and the receivers' start-up as well). A notification posted while the
+vault is open follows the Content rules; none carries more than they
+allow.
 
 ## 6. Phases
 
