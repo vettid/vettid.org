@@ -1,9 +1,19 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.41
+version: 0.1.42
 date: 2026-10-27
 changelog:
+  - 0.1.42: owner decision of 2026-10-27 (ANDROID-PLAN 0.1.89, D9). New
+    §4.12 "The approvals indicator": the same indicator, count,
+    time-critical entries (from arrival for sign-in and approval
+    challenges, session requests and `approval.pending`, sign-ins shown
+    neutral; else the last 2 minutes), banner, tap target and
+    notification rules as ANDROID-PLAN §4 "The approvals indicator",
+    with the iOS differences (toolbar item, SF Symbols, VoiceOver,
+    Dynamic Type collapse, no request notification before phase P, what
+    a delivered notification can and cannot do); decision ID19; DRAFT
+    texts in §14. iOS work follows later.
   - 0.1.41: owner decisions of 2026-10-27 (VAULT-MESSAGING 0.68.0, §15
     item 42; ANDROID-PLAN 0.1.88). §4.11: a transfer rotates the vault's
     keys by itself (the vault; no app step); after a PIN change or a
@@ -384,7 +394,7 @@ changelog:
     in §14 are drafts
 owner: Al Liebl (Mesmer)
 related:
-  - ANDROID-PLAN.md (0.1.88) — the Android app; this plan mirrors it
+  - ANDROID-PLAN.md (0.1.89) — the Android app; this plan mirrors it
   - VAULT-MESSAGING.md (0.68.0) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
@@ -517,6 +527,7 @@ the Mac agent does not reopen them.
 | ID16 | **Real iPhone on staging before VA2** | Wait for VA2 (a staging release that pins `<team>.com.vettid.app.staging`). Not recommended: pointing a `com.vettid.app` build at staging, which today's staging images would accept | — | I1 exit |
 | ID17 | **App lock** | ANDROID-PLAN D6 on iOS: **Face ID / Touch ID** or **iPhone passcode** (`LAPolicy.deviceOwnerAuthentication`), gating a Secure Enclave key that unwraps the app's local data key; a convenience layer, never in place of the PIN or the password | — | I1.6 |
 | ID18 | **Contact with Apple at attestation** | Say it in Help → Privacy: "When you set up, move or recover a vault, your iPhone asks Apple to vouch for the VettID app. Apple learns that VettID was set up on an iPhone, nothing about your vault." (`attestKey` reaches Apple's servers; assertions do not.) | Silence | I1.5 |
+| ID19 | **A separate approvals indicator** (owner, 2026-10-27) | ANDROID-PLAN D9 on iOS (§4.12): a toolbar item beside the bell while something waits for the member's decision, with its count; time-critical from arrival (sign-ins shown neutral) for sign-in and approval challenges, session requests and `approval.pending`, else in the last 2 minutes, with the time left; a tap opens the Approvals list; a short banner with View for a new time-critical request while the app is open; from phase P a request's notification opens that request, `.timeSensitive` for approval challenges and session requests but not for sign-ins; a sign-in's countdown is neutral. Before APNs (ID12) the indicator and the banner are the only cues | — | I2.3 |
 
 ## 3. Design language
 
@@ -1396,6 +1407,80 @@ Owner decisions of 2026-10-27 (VAULT-MESSAGING 0.68.0 §11.14.10,
   the next time you unlock it."
 - Phase: I1.8 (Change PIN, credential screen) and I3.3 (transfer). Tests
   as ANDROID-PLAN 0.1.88's. Vault: a staging release after 23.
+
+### 4.12 The approvals indicator (0.1.42)
+
+*Owner decisions of 2026-10-27; ANDROID-PLAN 0.1.89 §4 "The approvals
+indicator" governs and is carried here by reference: what counts (open
+approvals: pending, not decided, not expired; one entry per batch;
+notices, outgoing requests, rows awaiting the peer and a "Not now"
+location request do not), the deadlines (each event's `exp`,
+`pending.exp` for a challenge; `ExpiryClock`), where it shows (every screen
+of the unlocked shell with a navigation bar, detail screens included;
+not on Approvals or any request screen; not in full-screen flows),
+when (only above 0; never while held, due, locked or at the app lock),
+urgency (from arrival for `connection.authenticate` challenges of any
+purpose and session requests, otherwise the last 2 minutes,
+`approvalUrgentSeconds = 120`; `approval.pending` from arrival; a sign-in
+gets the neutral treatment, clock and digits without the error colour;
+a "Not now" location request is kept as `{request_id, exp}` in the
+encrypted local store), the tap (always the Approvals list),
+the in-app banner for a new time-critical request, the drawer badge
+(the same count), the list order, the notification's target, locked
+and back-stack rules.* Only these differ on iOS:
+
+- **Toolbar.** A `ToolbarItem(placement: .topBarTrailing)` before the
+  bell: the SF Symbol of the drawer's Approvals entry with the count
+  badge (gold; "99+"). When time-critical it becomes a capsule with the
+  `clock` symbol and `M:SS` in the urgency colour tokens, bold; a capsule that
+  only sign-ins cause is **neutral** (clock and digits, no urgency
+  colours); the clock and the digits are the cues that do not rely on colour (also
+  for "Differentiate Without Color"). The countdown is a
+  `TimelineView(.periodic(from:by: 1))` that runs only while the view
+  is on screen. At accessibility Dynamic Type sizes or narrow widths it
+  **collapses to the icon with a clock badge** (never the full capsule),
+  and it never pushes the screen's own primary actions into the
+  overflow.
+- **VoiceOver.** One element, label from the texts in §14, trait
+  `updatesFrequently` while urgent, a 44 pt target. The announcement
+  (`UIAccessibility.post(.announcement)`) is for the soonest entry
+  only, at most once per entry at 2 minutes and at 1 minute, with
+  plurals from `DateComponentsFormatter` and a stringsdict.
+- **The in-app banner** is a short banner at the top of the screen with
+  **View** (a `UIAccessibility` announcement; shown once per entry,
+  10 seconds, longer with VoiceOver or Switch Control running).
+- **Before phase P there is no request notification** (ID12: nothing
+  arrives in the background, and the app posts local notifications only
+  for the owner check and releases), so the indicator and the banner
+  are the member's only cues, and only while the app is open.
+- **From phase P: the notification opens that request.** The
+  notification's `userInfo` carries the entry's `ref`;
+  `userNotificationCenter(_:didReceive:)` looks it up in the open list
+  (an unknown `ref` opens the list; a request screen never acts by
+  itself), goes through the app lock, unlock, gate and daily check
+  first, and sets the `NavigationStack` path to the list and that
+  request (the list under it, under it the screen the member was on),
+  **replacing** a request screen that shows another `ref`; if a
+  decision on A is in flight, B opens after it settles. A gone entry
+  opens the list with "This is no longer waiting".
+- **Removal and time sensitivity (phase P).** A **delivered** push
+  notification cannot be given a timeout or a countdown (the extension
+  runs once, on delivery): one for an expired request stays until the
+  app next runs and removes it (`removeDeliveredNotifications`, on
+  every return to the foreground and at each deadline while running),
+  and a tap on it shows "This is no longer waiting". For `approval`
+  challenges, session requests and `approval.pending`, phase P sets
+  `interruptionLevel = .timeSensitive` (it needs the capability of §6.7;
+  owner decision of 2026-10-27) so that a Focus mode does not hide a
+  request that lives minutes. Sign-in challenges
+  and challenges with no purpose stay `.active`, since anyone who knows
+  the member's email can start one (and the origin of a challenge with
+  no purpose is equally open).
+  The Requests category is otherwise unchanged.
+- **Tests.** Android's, with: the toolbar item in the large and
+  accessibility Dynamic Type sizes (icon and clock badge); the
+  VoiceOver label; B's notification with A's screen open shows B;
+  a delivered notification removed on return after an expiry.
 
 ## 5. Architecture
 
@@ -2288,6 +2373,14 @@ approved.
   body "Notifications on iPhone need Apple push, which VettID hasn't
   turned on yet. Until then, VettID shows new activity when you open
   it, and reminds you before your daily check is due."
+- **Approvals indicator (ID19; DRAFT)**. Accessibility label "Approvals,
+  3 waiting" (1: "Approvals, 1 waiting"); in the window "Approvals, 3
+  waiting. <Name> expires in 1 minute 20 seconds"; the capsule shows
+  "1:20"; the row "Expires in 1:20"; the announcement "<Name> expires
+  in 2 minutes"; the banner "Sign in to <Name>?", "<Name> asks you
+  to approve", "<Name> asks you to confirm it is you" (no purpose) or
+  "<Name> asks for access", with **View**. The Android strings,
+  unchanged.
 - **Installed from (ID15)**: "Installed from: Apple (App Store or
   TestFlight)" / "Installed from: Xcode (development)"; secondary
   "Apple App Attest confirms this is the VettID app."
