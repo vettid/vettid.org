@@ -8,9 +8,10 @@ changelog:
     approvals indicator": a separate indicator in the top bar, left of
     the bell and on detail screens too, shown only while a request
     waits for the member's decision (pending, not decided, not expired),
-    with its count; urgent (a pill with the time left, `M:SS`, clock
-    glyph, urgency colour) from arrival for sign-in and approval
-    challenges and session requests and in the last 2 minutes for other
+    with its count; time-critical (a pill with the time left, `M:SS`,
+    clock glyph; urgency colours, except that sign-ins are shown
+    neutral) from arrival for sign-in and approval challenges, session
+    requests and `approval.pending`, and in the last 2 minutes for other
     asks with a deadline; a tap always opens the Approvals list; a
     snackbar with View for a new time-critical request; the drawer
     badge uses the same count. The request's notification opens that
@@ -1154,7 +1155,7 @@ surface than the vettid.dev app and a layout modelled on Proton Mail.
 | D6 | **Biometric app lock in v1**: opening the app (and returning to it after a timeout) can require a biometric or device credential via BiometricPrompt (class 3), gating a Keystore key that unlocks the app's local data. 0.1.19: called **App lock**, with the method Biometrics (as described) or Phone screen lock (the device credential only). It is a convenience layer only: it never replaces the vault PIN (unlocking the vault) or the credential password (critical actions). |
 | D7 | **Notification modes** (owner, 2026-10-09; 0.1.23): the member picks how notifications reach the phone: **On-phone service** (recommended, most private; the default), **Google push** (FCM through the VettID push gateway; offered once the gateway and FCM credentials exist) or **Off** (not recommended). Feed items raise notifications through the chosen mode (§4 Notification modes). Supersedes PUSH-GATEWAY 0.2.0 §11's default order (FCM first) for this app (PUSH-GATEWAY 0.3.0 follows it). No UnifiedPush (owner, 2026-10-09; 0.1.24; §9, question 10): the on-phone service is the path for phones without Google services. |
 | D8 | **Wallet, presence, location and video** (owner, 2026-10-17; 0.1.42; §4 "Wallet, presence, location and video"). All four are wanted, in the order **wallet, presence, location**, with **video after the calling service** (CALLS-PLAN C2 and C3). Wallet networks on staging: **signet and testnet4**; mainnet for production later. The wallet's **chain source is the member's choice**: the app reads balances and coins and broadcasts through a server the member can set. |
-| D9 | **A separate approvals indicator** (owner, 2026-10-27; 0.1.89; §4 "The approvals indicator"). What waits for the member's decision (sign-in and admin approvals, connection requests, share and ask approvals, transfer confirmations, device and agent approvals) has its own indicator in the top bar, apart from the bell (the record of what happened), shown only while something is open, with its count; urgent entries (sign-in and approval challenges and session requests from arrival, other asks with a deadline in their last 2 minutes) show the time left, highlighted, in the indicator and the row; the tap opens the Approvals list; a snackbar with View announces a new time-critical request while the app is open; a request's notification opens that request, counts down and goes when it is decided or expires; icon and badge on crowded or large screens; sign-ins show the time left in the neutral treatment (no error colour), the Requests channel stays unchanged, `approval.pending` is urgent from arrival, and a location "Not now" is kept in the encrypted local store. Why: a sign-in lives minutes and was missed while a conversation was open |
+| D9 | **A separate approvals indicator** (owner, 2026-10-27; 0.1.89; §4 "The approvals indicator"). What waits for the member's decision (sign-in and admin approvals, connection requests, share and ask approvals, transfer confirmations, device and agent approvals) has its own indicator in the top bar, apart from the bell (the record of what happened), shown only while something is open, with its count; time-critical entries (sign-in and approval challenges, session requests and `approval.pending` from arrival, sign-ins shown neutral; other asks with a deadline in their last 2 minutes) show the time left, highlighted, in the indicator and the row; the tap opens the Approvals list; a snackbar with View announces a new time-critical request while the app is open; a request's notification opens that request, counts down and goes when it is decided or expires; icon and badge on crowded or large screens; sign-ins show the time left in the neutral treatment (no error colour), the Requests channel stays unchanged, `approval.pending` is time-critical from arrival, and a location "Not now" is kept in the encrypted local store. Why: a sign-in lives minutes and was missed while a conversation was open |
 
 ## 3. Design language (from Proton Mail)
 
@@ -2329,9 +2330,9 @@ gets its own indicator, apart from the bell.
     on resume.
     - *Where the time comes from.* The service or the app looks the
       entry up by `ref` in the kind's pending event or list: the
-      challenge's `exp` (`connection.authenticate.pending`), the
-      request's `exp` (`connection.request.list`), the session request's
-      10 minutes, the item's `expires_at`.
+      challenge's `connection.authenticate.pending.exp`, the request's
+      `exp` (`connection.request.list`), `device.session.pending.exp`,
+      `approval.pending.exp`, the item's `expires_at`.
     - *Not yet known.* The notification is posted without a timeout or
       chronometer; once the deadline is known the same notification id
       is posted again with them and `setOnlyAlertOnce(true)` (no second
@@ -2358,8 +2359,8 @@ gets its own indicator, apart from the bell.
     tick announces nothing.
 12. **Tests.** Unit: the count over pending, decided, expired, batched,
     outgoing, awaiting-peer and "Not now" entries (the stored set
-    dropped at `exp` and on a wipe); the earliest of the
-    two deadlines; `ExpiryClock` drops an entry without a read; the
+    dropped at `exp` and on a wipe); `pending.exp` used alone for a
+    challenge; `ExpiryClock` drops an entry without a read; the
     window at 120 s and 121 s; time-critical from arrival for signin, approval
     and no-purpose challenges, session requests and `approval.pending`, the
     neutral treatment for signin only; the order; the

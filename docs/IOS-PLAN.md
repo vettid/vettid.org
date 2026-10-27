@@ -6,8 +6,9 @@ date: 2026-10-27
 changelog:
   - 0.1.42: owner decision of 2026-10-27 (ANDROID-PLAN 0.1.89, D9). New
     §4.12 "The approvals indicator": the same indicator, count,
-    urgency (from arrival for sign-in and approval challenges and
-    session requests, else the last 2 minutes), banner, tap target and
+    time-critical entries (from arrival for sign-in and approval
+    challenges, session requests and `approval.pending`, sign-ins shown
+    neutral; else the last 2 minutes), banner, tap target and
     notification rules as ANDROID-PLAN §4 "The approvals indicator",
     with the iOS differences (toolbar item, SF Symbols, VoiceOver,
     Dynamic Type collapse, no request notification before phase P, what
@@ -526,7 +527,7 @@ the Mac agent does not reopen them.
 | ID16 | **Real iPhone on staging before VA2** | Wait for VA2 (a staging release that pins `<team>.com.vettid.app.staging`). Not recommended: pointing a `com.vettid.app` build at staging, which today's staging images would accept | — | I1 exit |
 | ID17 | **App lock** | ANDROID-PLAN D6 on iOS: **Face ID / Touch ID** or **iPhone passcode** (`LAPolicy.deviceOwnerAuthentication`), gating a Secure Enclave key that unwraps the app's local data key; a convenience layer, never in place of the PIN or the password | — | I1.6 |
 | ID18 | **Contact with Apple at attestation** | Say it in Help → Privacy: "When you set up, move or recover a vault, your iPhone asks Apple to vouch for the VettID app. Apple learns that VettID was set up on an iPhone, nothing about your vault." (`attestKey` reaches Apple's servers; assertions do not.) | Silence | I1.5 |
-| ID19 | **A separate approvals indicator** (owner, 2026-10-27) | ANDROID-PLAN D9 on iOS (§4.12): a toolbar item beside the bell while something waits for the member's decision, with its count; urgent from arrival for sign-in and approval challenges and session requests, else in the last 2 minutes, with the time left; a tap opens the Approvals list; a short banner with View for a new time-critical request while the app is open; from phase P a request's notification opens that request, `.timeSensitive` for approval challenges and session requests but not for sign-ins; a sign-in's countdown is neutral. Before APNs (ID12) the indicator and the banner are the only cues | — | I2.3 |
+| ID19 | **A separate approvals indicator** (owner, 2026-10-27) | ANDROID-PLAN D9 on iOS (§4.12): a toolbar item beside the bell while something waits for the member's decision, with its count; time-critical from arrival (sign-ins shown neutral) for sign-in and approval challenges, session requests and `approval.pending`, else in the last 2 minutes, with the time left; a tap opens the Approvals list; a short banner with View for a new time-critical request while the app is open; from phase P a request's notification opens that request, `.timeSensitive` for approval challenges and session requests but not for sign-ins; a sign-in's countdown is neutral. Before APNs (ID12) the indicator and the banner are the only cues | — | I2.3 |
 
 ## 3. Design language
 
@@ -1413,8 +1414,8 @@ Owner decisions of 2026-10-27 (VAULT-MESSAGING 0.68.0 §11.14.10,
 indicator" governs and is carried here by reference: what counts (open
 approvals: pending, not decided, not expired; one entry per batch;
 notices, outgoing requests, rows awaiting the peer and a "Not now"
-location request do not), the deadlines (the earliest of the asking
-side's and this vault's; `ExpiryClock`), where it shows (every screen
+location request do not), the deadlines (each event's `exp`,
+`pending.exp` for a challenge; `ExpiryClock`), where it shows (every screen
 of the unlocked shell with a navigation bar, detail screens included;
 not on Approvals or any request screen; not in full-screen flows),
 when (only above 0; never while held, due, locked or at the app lock),
@@ -1430,9 +1431,10 @@ and back-stack rules.* Only these differ on iOS:
 
 - **Toolbar.** A `ToolbarItem(placement: .topBarTrailing)` before the
   bell: the SF Symbol of the drawer's Approvals entry with the count
-  badge (gold; "99+"). When urgent it becomes a capsule with the
-  `clock` symbol and `M:SS` in the urgency colour tokens, bold; the
-  clock and the digits are the cues that do not rely on colour (also
+  badge (gold; "99+"). When time-critical it becomes a capsule with the
+  `clock` symbol and `M:SS` in the urgency colour tokens, bold; a capsule that
+  only sign-ins cause is **neutral** (clock and digits, no urgency
+  colours); the clock and the digits are the cues that do not rely on colour (also
   for "Differentiate Without Color"). The countdown is a
   `TimelineView(.periodic(from:by: 1))` that runs only while the view
   is on screen. At accessibility Dynamic Type sizes or narrow widths it
@@ -1466,12 +1468,14 @@ and back-stack rules.* Only these differ on iOS:
   runs once, on delivery): one for an expired request stays until the
   app next runs and removes it (`removeDeliveredNotifications`, on
   every return to the foreground and at each deadline while running),
-  and a tap on it shows "This is no longer waiting". For sign-in and
-  approval challenges and session requests, phase P sets
+  and a tap on it shows "This is no longer waiting". For `approval`
+  challenges, session requests and `approval.pending`, phase P sets
   `interruptionLevel = .timeSensitive` (it needs the capability of §6.7;
   owner decision of 2026-10-27) so that a Focus mode does not hide a
-  request that lives minutes. **Not for sign-in challenges**: they stay
-  `.active`, since anyone who knows the member's email can start one.
+  request that lives minutes. Sign-in challenges
+  and challenges with no purpose stay `.active`, since anyone who knows
+  the member's email can start one (and the origin of a challenge with
+  no purpose is equally open).
   The Requests category is otherwise unchanged.
 - **Tests.** Android's, with: the toolbar item in the large and
   accessibility Dynamic Type sizes (icon and clock badge); the
