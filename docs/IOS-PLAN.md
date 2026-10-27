@@ -1,9 +1,24 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.43
+version: 0.1.44
 date: 2026-10-27
 changelog:
+  - 0.1.44: owner decisions of 2026-10-27, after an audit of what the apps
+    keep on the phone (ANDROID-PLAN 0.1.91). New §6.9 "What the phone
+    keeps", where vault content is in memory only (no database, no content,
+    photo or HTTP cache), with the table of exactly what is kept. Pending
+    approval events and recent connection-request names are memory only
+    like the rest (the apps persisted them encrypted across a lock; being
+    fixed). A copied secret item value stays local-only and expiring (the
+    60 second and vault-lock clear, only if still the app's item; §6.5
+    names both). Notifications never outlive the vault being open, also
+    after the process was killed (removed at launch when the vault is not
+    open). Stale text removed (ID17 and §6.1 no longer say the app lock
+    gates a Secure Enclave key that unwraps local data (it is a UI gate
+    only and protects no data at rest; the unused app-lock data key is
+    removed), and §6.1's "Local data (caches, records)" row is replaced by
+    the state files, which hold transport state only.
   - 0.1.43: owner decision of 2026-10-27 (VAULT-MESSAGING 0.69.0, §15
     item 43; ANDROID-PLAN 0.1.90). New §4.13 "Service connections":
     the same as ANDROID-PLAN §4 "Service connections (0.1.90)" (a "This
@@ -401,7 +416,7 @@ changelog:
     in §14 are drafts
 owner: Al Liebl (Mesmer)
 related:
-  - ANDROID-PLAN.md (0.1.90) — the Android app; this plan mirrors it
+  - ANDROID-PLAN.md (0.1.91) — the Android app; this plan mirrors it
   - VAULT-MESSAGING.md (0.69.0) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
@@ -532,7 +547,7 @@ the Mac agent does not reopen them.
 | ID14 | **Navigation** | The Android drawer (Proton Mail's iOS app also uses a side menu), the same destinations and order (ANDROID-PLAN §4 "Drawer"); the system back gesture | A tab bar (diverges from Android and the texts) | I0.2 |
 | ID15 | **"Installed from" on iOS** | App Attest reports no signer and an iOS binding has none (VAULT-MESSAGING §11.7.1 "iOS"). Settings → Vault status shows "Installed from: Apple (App Store or TestFlight)" for the release and staging builds and "Installed from: Xcode (development)" for the others, from the build configuration, with the line "Apple App Attest confirms this is the VettID app" | No line | I1.7 |
 | ID16 | **Real iPhone on staging before VA2** | Wait for VA2 (a staging release that pins `<team>.com.vettid.app.staging`). Not recommended: pointing a `com.vettid.app` build at staging, which today's staging images would accept | — | I1 exit |
-| ID17 | **App lock** | ANDROID-PLAN D6 on iOS: **Face ID / Touch ID** or **iPhone passcode** (`LAPolicy.deviceOwnerAuthentication`), gating a Secure Enclave key that unwraps the app's local data key; a convenience layer, never in place of the PIN or the password | — | I1.6 |
+| ID17 | **App lock** | ANDROID-PLAN D6 on iOS: **Face ID / Touch ID** or **iPhone passcode** (`LAPolicy.deviceOwnerAuthentication`); a UI gate only that protects no data at rest (0.1.44: no key stands behind it; the app keeps no vault content on the phone, §6.9), never in place of the PIN or the password | — | I1.6 |
 | ID18 | **Contact with Apple at attestation** | Say it in Help → Privacy: "When you set up, move or recover a vault, your iPhone asks Apple to vouch for the VettID app. Apple learns that VettID was set up on an iPhone, nothing about your vault." (`attestKey` reaches Apple's servers; assertions do not.) | Silence | I1.5 |
 | ID19 | **A separate approvals indicator** (owner, 2026-10-27) | ANDROID-PLAN D9 on iOS (§4.12): a toolbar item beside the bell while something waits for the member's decision, with its count; time-critical from arrival (sign-ins shown neutral) for sign-in and approval challenges, session requests and `approval.pending`, else in the last 2 minutes, with the time left; a tap opens the Approvals list; a short banner with View for a new time-critical request while the app is open; from phase P a request's notification opens that request, `.timeSensitive` for approval challenges and session requests but not for sign-ins; a sign-in's countdown is neutral. Before APNs (ID12) the indicator and the banner are the only cues | — | I2.3 |
 
@@ -1558,8 +1573,7 @@ keys, the dev stack's hosts, or any `VettIDTesting` symbol fails CI
 | App key (§11.12.2) | Keystore P-256 signing key, no user authentication | **Secure Enclave P-256 signing key** (`SecureEnclave.P256.Signing.PrivateKey`), access control `.privateKeyUsage` only, `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, so that lock and polling work in the background; SPKI from `publicKey.derRepresentation`; `akid` = first 16 bytes of SHA-256(SPKI) |
 | Phone key (§11.14.1, release R) | Keystore HMAC-SHA-256 key, not bound to authentication | **Secure Enclave P-256 key-agreement key** (`SecureEnclave.P256.KeyAgreement.PrivateKey`), access control `.privateKeyUsage` only, **`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`** (stricter than the app key's class and than Android's rule, as the owner decided; `AfterFirstUnlockThisDeviceOnly` not chosen: it is used only in requests started in the app in the foreground, so never while the iPhone is locked; a refusal while locked is never lost keys); its key blob in the keychain with the same class, not synchronizable, labelled with its `key_vault`; plus one record per epoch in the encrypted file store; §6.3 |
 | Identity, relay and session keys (Ed25519, X25519, ML-KEM seeds) | Seeds wrapped by a Keystore AES key (`SeedWrapper.kt`) | Seeds wrapped (AES-GCM) under a key derived from a Secure Enclave key agreement, stored in the keychain `AfterFirstUnlockThisDeviceOnly`; plaintext seeds only in memory, zeroized after use |
-| Local data (caches, records) | Files under a Keystore AES-GCM key (`KeystoreFileStore.kt`, format `0x01 ‖ iv ‖ AES-GCM`) | The same file format under a keychain-held key; files `NSFileProtectionCompleteUntilFirstUserAuthentication`, the app's data directory excluded from backups (`isExcludedFromBackup`); atomic replace on write |
-| App-lock key (D6/ID17) | Keystore key bound to BiometricPrompt class 3 | Secure Enclave key with `.biometryCurrentSet` or `.devicePasscode` per the member's choice |
+| State files (transport state, account ids and flags, owner-check and lock records; 0.1.44: no caches, no vault content) | Files under a Keystore AES-GCM key (`KeystoreFileStore.kt`, format `0x01 ‖ iv ‖ AES-GCM`), in no-backup storage | The same file format under a random 32-byte key held in the keychain (`AfterFirstUnlockThisDeviceOnly`, not synchronizable; keychain items are protected by the device's hardware key hierarchy; not Secure Enclave-derived); files `NSFileProtectionCompleteUntilFirstUserAuthentication`, the app's data directory excluded from backups (`isExcludedFromBackup`); atomic replace on write. §6.9 |
 
 Rules, as on Android: every key is per vault and `ThisDeviceOnly`;
 none is synchronizable; nothing is in iCloud Keychain or a backup. The
@@ -1986,7 +2000,10 @@ Mirrors Android `core/ui/…/components/Autofill.kt` and
 - Autocorrection, spell checking, smart quotes, dashes and inserts,
   inline predictions off on every secret field; no clipboard copy of
   secrets except where Android allows it, and then local-only and
-  expiring (`UIPasteboard` with `.localOnly` and `.expirationDate`).
+  expiring (`UIPasteboard` with `.localOnly` and `.expirationDate`). A
+  copied secret item value expires after 60 seconds and is cleared at
+  the vault lock, only if the pasteboard still holds the app's item
+  (0.1.44; ANDROID-PLAN "What the phone keeps").
 
 ### 6.6 Background limits
 
@@ -2068,6 +2085,52 @@ build"). The `apple-app-site-association` files are vettid.org work
 (§9.2); the relay's is built into the relay software, specified in
 RELAY-PROTOCOL §6.11 (0.10.0). Message links follow VAULT-MESSAGING §10.5: only `https://`
 is tappable, after "Open link to <host>?", handed to the system.
+
+### 6.9 What the phone keeps (0.1.44)
+
+**The rule: vault content is in memory only.** Items and their values,
+messages, photos, connections, the feed, History and the profile are
+read from the vault when it is open and held in the app's memory. They
+are cleared at the vault lock, at a hold, at a wipe and when the process
+ends. There is no database, no content cache, no photo cache and no
+HTTP cache (every URLSession is `.ephemeral`: no disk cache and no persistent cookies; the release-notes fetch also sets `urlCache = nil`), and nothing of
+the content goes to a file, `UserDefaults`, scene state restoration, a
+log or a backup. Pending approval events and the names on recent
+connection requests are included: they are shown while the vault is open
+and read again from the vault after the next unlock (the app persisted
+them, encrypted, across a lock; that is being removed). The app lock
+(ID17) is a UI gate only and protects no data at rest.
+
+| Item | Where | Protection | Cleared when | Backup |
+|---|---|---|---|---|
+| App key, phone key | Secure Enclave, key blob in the keychain `ThisDeviceOnly`, not synchronizable (§6.1) | Hardware-held, per vault | Wipe; end of a transfer's keep period | None |
+| App Attest key | Secure Enclave via App Attest, `keyId` in the keychain | Hardware-held | Wipe | None |
+| Seed-wrap key | Secure Enclave P-256 key agreement, AfterFirstUnlockThisDeviceOnly | Hardware-held | Wipe | None |
+| Seeds (identity, relay, KEM) | Keychain AfterFirstUnlockThisDeviceOnly, wrapped under the seed-wrap key | Hardware-backed wrap | Wipe | None |
+| State files' key | Keychain AfterFirstUnlockThisDeviceOnly, not synchronizable: a random 32-byte key (keychain items are protected by the device's hardware key hierarchy) | Not bound to user authentication (background collection needs it after the first unlock; VAULT-MESSAGING §3.2, §3.5 residual) | Wipe | None |
+| Phone-secret records | Encrypted state file phone-secrets | Per epoch: key_vault, epoch, pub(E_e), check; the unlock secret is never stored | Wipe; replaced records 7 days after confirmation | Excluded |
+| Transport state: session keys, relay token, sealed credential blob, one-time keys, outbox | Encrypted state file (AES-GCM) in Application Support | The state files' key | Wipe; each part when used up or replaced | Excluded |
+| Account ids and flags; with location (not built yet), the "Not now" entries | Encrypted state file | The same | Wipe; an entry at its `exp` | Excluded |
+| Owner-check state, lock record, canary manifest | Encrypted state file | The same | Wipe | Excluded |
+| Theme only (`vettid.theme`) | UserDefaults | — | Wipe; uninstall | Included in backups (the theme only) |
+| App lock | Secure Enclave key (.biometryCurrentSet or .devicePasscode), its "made" record in the keychain WhenUnlockedThisDeviceOnly, encrypted settings file | Hardware; protects no data at rest | Turned off; wipe | None |
+| A copied secret item value | `UIPasteboard`, `.localOnly`, `.expirationDate` 60 s | Local to the phone, not shared with other devices | After 60 seconds, at the vault lock (only if still the app's item) | None |
+| Notifications | The system | Content rules | None are posted before phase P; from then, when the vault stops being open | None |
+
+**Backups:** the state files carry `isExcludedFromBackup`, keychain items
+are `ThisDeviceOnly` and none is synchronizable (§6.1); only the theme
+setting is in a backup. **The state files' key** is the same residual as
+on Android: not bound to user authentication, and the files hold
+transport state only.
+
+**Notifications never outlive the vault being open.** Every notification
+is removed when the vault locks, is held, is wiped or closes. (Today the
+app posts none before phase P, has no extension, and only the wipe
+removes notifications.) A process
+that was killed cannot remove one, so (from phase P; to be built) at
+launch, and in a notification
+service extension's start, the app removes its delivered
+and pending notifications when the vault is not open.
 
 ## 7. Test vectors
 
