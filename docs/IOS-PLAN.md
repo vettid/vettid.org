@@ -1,9 +1,16 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.40
+version: 0.1.41
 date: 2026-10-27
 changelog:
+  - 0.1.41: owner decision of 2026-10-27 (ANDROID-PLAN 0.1.88, D9). New
+    §4.11 "The approvals indicator": the same indicator, count, 2-minute
+    window, tap target and notification rules as ANDROID-PLAN §4 "The
+    approvals indicator", with the iOS differences (toolbar item, SF
+    Symbols, VoiceOver, Dynamic Type, what a delivered notification can
+    and cannot do); decision ID19; DRAFT texts in §14. iOS work follows
+    later.
   - 0.1.40: owner decision of 2026-10-27 (VAULT-MESSAGING 0.67.0, §15 item
     41). §4.9 "Pairing": when the unlock's `ok` carries `invitation_recovery_id`, the
     phone sends one `hs.init` with that `recovery_id` as `ctx`, the
@@ -373,7 +380,7 @@ changelog:
     in §14 are drafts
 owner: Al Liebl (Mesmer)
 related:
-  - ANDROID-PLAN.md (0.1.41) — the Android app; this plan mirrors it
+  - ANDROID-PLAN.md (0.1.88) — the Android app; this plan mirrors it
   - VAULT-MESSAGING.md (0.35.0) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
@@ -506,6 +513,7 @@ the Mac agent does not reopen them.
 | ID16 | **Real iPhone on staging before VA2** | Wait for VA2 (a staging release that pins `<team>.com.vettid.app.staging`). Not recommended: pointing a `com.vettid.app` build at staging, which today's staging images would accept | — | I1 exit |
 | ID17 | **App lock** | ANDROID-PLAN D6 on iOS: **Face ID / Touch ID** or **iPhone passcode** (`LAPolicy.deviceOwnerAuthentication`), gating a Secure Enclave key that unwraps the app's local data key; a convenience layer, never in place of the PIN or the password | — | I1.6 |
 | ID18 | **Contact with Apple at attestation** | Say it in Help → Privacy: "When you set up, move or recover a vault, your iPhone asks Apple to vouch for the VettID app. Apple learns that VettID was set up on an iPhone, nothing about your vault." (`attestKey` reaches Apple's servers; assertions do not.) | Silence | I1.5 |
+| ID19 | **A separate approvals indicator** (owner, 2026-10-27) | ANDROID-PLAN D9 on iOS (§4.11): a toolbar item beside the bell while something waits for the member's decision, with its count; the last 2 minutes show the time left; a tap opens the Approvals list; a request's notification opens that request. Before APNs (ID12) it is the only cue, since nothing arrives in the background | — | I2.3 |
 
 ## 3. Design language
 
@@ -1352,6 +1360,54 @@ to start over **only if it was never admitted as the app (it holds no
 open**. Only a code read from the vault's own readable (sealed) answer counts as a refusal, and then only `busy`, `wrong_again`, `attempt_lost`, `exhausted`, `not_armed`, `closed` (which comes only from a fresh open), `attestation` (decided at step 1, before anything is written), the counter-down answer and the wait verdicts prove on their own that no step 1 was stored; `wrong` and `expired` count as refusals only for a phone with no earlier unanswered open (the sticky rule below). An unsealed slot status `expired` (written by the parent when the lease is held elsewhere or the answer is unreadable, or by the member API after 5.5 minutes queued), a 404, 410 or 5xx on the poll, no answer, `retry`, `transfer_incomplete` and any error count as unanswered. The rule looks at every open the phone ever sent, not the last one: once an open is unanswered, a later refusal never clears it (a `wrong` on a repeated open proves nothing about adoption). The phone keeps the per-open history; a "last answer" is not enough. A phone that was ever admitted treats the `410` as a `401`. A
 phone with an unanswered open keeps K and follows §4.9: it never forgets
 K on a `410`. On `401` it never forgets. The tests are Android's.
+
+### 4.11 The approvals indicator (0.1.41)
+
+*Owner decision of 2026-10-27; ANDROID-PLAN 0.1.88 §4 "The approvals
+indicator" governs and is carried here by reference: what counts (open
+approvals: pending, not decided, not expired; one entry per batch;
+notices do not count), where it shows (every screen of the unlocked
+shell with a navigation bar, detail screens included; not on Approvals;
+not in full-screen flows), when (only above 0; never while held, due,
+locked or at the app lock), the last-2-minutes window
+(`approvalUrgentSeconds = 120`, a fixed time), the tap (always the
+Approvals list), the drawer badge (the same count) and the order of
+the list.* Only these differ on iOS:
+
+- **Toolbar.** A `ToolbarItem(placement: .topBarTrailing)` before the
+  bell: the SF Symbol of the drawer's Approvals entry with the count
+  badge (gold; "99+"). In the window it becomes a capsule with the
+  `clock` symbol and `M:SS` in the urgency colour tokens, bold; the
+  clock and the digits are the cues that do not rely on colour (also
+  for "Differentiate Without Color"). The countdown is a
+  `TimelineView(.periodic(from:by: 1))` that runs only while the view
+  is on screen; with Reduce Motion nothing animates in any case.
+- **VoiceOver and Dynamic Type.** One element, label from the texts in
+  §14, trait `updatesFrequently` in the window, a 44 pt target; the
+  capsule grows with Dynamic Type up to the accessibility sizes and
+  moves to a second line of the bar rather than clip. The announcement
+  of an entry entering the window is a `UIAccessibility.post(.announcement)`
+  (once; again at one minute).
+- **Notification opens that request.** The notification's `userInfo`
+  carries the entry's `ref`; `userNotificationCenter(_:didReceive:)`
+  sets the `NavigationStack` path to Approvals and that request, and
+  **replaces** a request screen that shows another `ref` instead of
+  keeping it. A gone entry opens the list with "This is no longer
+  waiting".
+- **Removed when decided or expired.** Local notifications (the app
+  running) are removed with `removeDeliveredNotifications` and
+  `removePendingNotificationRequests` when the entry is decided on any
+  device or reaches its expiry (the app's timer; also on every return to
+  the foreground). From phase P a **delivered** push notification cannot
+  be given a timeout (the extension runs once, on delivery): one for an
+  expired request stays until the app next runs and removes it, and a tap
+  on it shows "This is no longer waiting". Until phase P no request
+  notification exists (ID12), so the indicator is the member's only
+  cue while the app is open.
+- **Tests.** Android's, with: the toolbar item in the large and
+  accessibility Dynamic Type sizes; the VoiceOver label; a notification
+  for B with A's screen open shows B; a delivered notification removed
+  on return after an expiry.
 
 ## 5. Architecture
 
@@ -2244,6 +2300,11 @@ approved.
   body "Notifications on iPhone need Apple push, which VettID hasn't
   turned on yet. Until then, VettID shows new activity when you open
   it, and reminds you before your daily check is due."
+- **Approvals indicator (ID19; DRAFT)**. Accessibility label "Approvals,
+  3 waiting" (1: "Approvals, 1 waiting"); in the window "Approvals, 3
+  waiting. One expires in 1 minute 20 seconds"; the capsule shows
+  "1:20"; the row "Expires in 1:20"; the announcement "An approval
+  expires in 2 minutes". The Android strings, unchanged.
 - **Installed from (ID15)**: "Installed from: Apple (App Store or
   TestFlight)" / "Installed from: Xcode (development)"; secondary
   "Apple App Attest confirms this is the VettID app."
