@@ -1,9 +1,31 @@
 {
-  "serial": 24,
+  "serial": 25,
   "releases": [
     {
-      "release": 22,
+      "release": 23,
       "status": "active",
+      "published_at": "2026-10-27T19:25:32Z",
+      "pcr0": "ed22773fa50f0507e06db63baffd4c64802e9c3bcd946706b2935a610d1ddf1f80baa779f20bb07bad4c34bd915fc32e",
+      "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
+      "pcr2": "5d8e9b0d066d88b5bd72063ff40b75fb48994fe1887c682501cb6e147e0dd94aae6efa9286ac5c4ab9aa2c19cf441b4b",
+      "seal_key": "arn:aws:kms:us-east-1:347272280361:key/602b5b74-2f13-4cc8-b72f-166f5a697274",
+      "notes": "https://staging.vettid.org/security/releases/23/",
+      "tag": "release/staging/23",
+      "source_commit": "acb007e6680ee8edd6dad734e6ff1e135da68dbe",
+      "summary": "Release 23 locks a vault whose owner check is overdue, saves its app keys durably, and fixes two recovery edge cases.",
+      "changes": [
+        "A vault whose daily owner check is overdue now locks itself 7 days (by default) after the check was due, and waits for an answered call to end first. A lock your phone sends is tied to the unlock it follows, so a late lock cannot undo a newer unlock.",
+        "The vault now saves a new app key only after the host has confirmed the save, and retries a failed save, so a failed save on the host no longer leaves the vault and the phone with different keys.",
+        "Fix: repeating a recovery after its second step could leave it stuck; the vault now renews the recovered invitation for the same identity. An unlock that finishes a recovery's last step now also ends the recovery record.",
+        "After a transfer, the vault keeps your old phone's pending unlink until it has been delivered. Staging only: support for a staging test certificate is included but switched off.",
+        "Built from vettid-vault commit acb007e (tag release/staging/23) and independently rebuilt on 2026-10-27 with a matching PCR0."
+      ],
+      "security": "none",
+      "listed": true
+    },
+    {
+      "release": 22,
+      "status": "deprecated",
       "published_at": "2026-10-24T15:08:20Z",
       "pcr0": "d4e759beb13b906d063e1ee084bfd94dd441c82c8a101da8b02c2852a2b32a4ed89dcf372854c240a615fc37a964fe90",
       "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
