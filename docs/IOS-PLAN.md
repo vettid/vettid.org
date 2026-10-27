@@ -14,6 +14,7 @@ changelog:
     state); a transfer offers nothing; add the one-time prompt; keep the
     rotation in Settings → Security → Credential. The texts are
     Android's, DRAFT for the owner. Vault: a staging release after 23.
+    (Review, same day: as ANDROID-PLAN 0.1.88's review note.)
   - 0.1.40: owner decision of 2026-10-27 (VAULT-MESSAGING 0.67.0, §15 item
     41). §4.9 "Pairing": when the unlock's `ok` carries `invitation_recovery_id`, the
     phone sends one `hs.init` with that `recovery_id` as `ctx`, the
@@ -605,7 +606,7 @@ sheet, and up to 3 lines of it on a row of priority `urgent`
 | `recovery.change_required`, `ref` = a generation | "Change your PIN or password to turn recovery back on" | "Recovery attempts were used. A change gives you 10 new attempts." |
 | `recovery.counter_unavailable` (`urgent`) | "Your vault cannot check its recovery attempts" | none; Settings → Vault status shows the approved "For a day your vault has not been able to check its recovery attempts …" text (ANDROID-PLAN §4 "Owner check and status"), scaled on a vault with a time scale |
 | `recovery.generation_closed`, `ref` `<generation>/rollback` (`urgent`; owner decision of 2026-10-20; needs a vault release) | "Your vault was given an older recovery record" | "A host may have served an older copy of your vault's recovery record, one on which recovery attempts had already been used. Your vault moved past it. If you did not try to recover your vault, change your PIN and your password now, and contact VettID." |
-| `identity.rotation_failed` (`high`) | "Your vault could not update its keys" | "Your connections still know your old keys. VettID will offer the update again." |
+| `identity.rotation_failed` (`high`) | "Your vault could not update its keys" | "Your connections still know your old keys. Your vault will try again the next time you unlock it." (**DRAFT**, owner decision 2026-10-27) |
 | `identity.rotate_conflict` (`high`) | "<First Last>: verify again" | "This connection's vault announced two different new keys. That can mean someone holds an old copy of their vault. Nothing is sent or received until you check." (ANDROID-PLAN §4 "Other screens") |
 | `leash.item.run`, `leash.item.proxy` | "An agent used <item>" (decision 8); without item names: "An agent used an item" | — |
 
@@ -653,7 +654,7 @@ is the app's and needs no vault change.
 | … reason `stale` | hidden (below) | — |
 | … a reason this app does not know | "Recovery attempts reset" | — |
 | `recovery.presence_unrecorded` | "Your vault could not record that you were here" | "If this lasts three days, your vault is no longer protected against a recovery started by someone else." (scaled on a vault with a time scale) |
-| `identity.rotation_failed` | "Key update failed" | "Your connections still know your old keys. VettID will offer the update again." |
+| `identity.rotation_failed` | "Key update failed" | "Your connections still know your old keys. Your vault will try again the next time you unlock it." (**DRAFT**, owner decision 2026-10-27) |
 | `identity.rotate_conflict` | "Connection with <First Last> paused" | "This connection's vault announced two different new keys. That can mean someone holds an old copy of their vault. Nothing is sent or received until you check." |
 | `identity.rotate_resolved` | "Connection with <First Last> checked and resumed" | — |
 | `connection.request.approved`, `connection.request.declined` | "You accepted a connection request" / "You declined a connection request" | — |
@@ -1370,24 +1371,29 @@ Owner decisions of 2026-10-27 (VAULT-MESSAGING 0.68.0 §11.14.10,
 ("Replacing the vault's keys, once"), mirrored on iOS.
 
 - **A transfer rotates the vault's keys by itself**, as a recovery does:
-  the vault, in the state write of the new iPhone's first unlock
-  ("Finish the move"), after it delivers `device.unlinked{transferred}`.
+  the credential key at the approval; the relay key, identity and KEM
+  keys and wake key after the new iPhone's first unlock ("Finish the
+  move") and after the relay accepted `device.unlinked{transferred}`.
   Neither phone has a step for it, and the app no longer offers a
-  rotation after a transfer. The transfer screens are unchanged;
-  History shows `identity.rotated` (with the DRAFT detail in §4.1's
-  table) or `identity.rotation_failed`, which the vault tries again at
-  the next unlock. The old iPhone sees nothing new.
+  rotation after a transfer. The transfer screens are unchanged
+  (History only); History shows `identity.rotated` (with the DRAFT
+  detail in §4.1's table) or `identity.rotation_failed`, which the vault
+  tries again at the next unlock. The old iPhone sees nothing new.
 - **After a PIN change or a password change** the success screen asks
-  once (a sheet over that screen, not a banner): title "Also replace your
-  vault's keys?", body "So an old copy of your vault — on an old phone
-  or with your old PIN — can't be used. Your connections are told about
-  the new keys.", buttons "Replace keys" / "Not now" (all **DRAFT**, for
-  the owner). "Replace keys" opens the rotation of Settings → Security →
-  Credential ("Rotate the credential key", `credential.rotate`, which
-  asks the password). "Not now", or leaving the sheet any other way,
-  means no: nothing is stored, nothing is shown later, and the member
-  can still rotate from the credential screen. The prompt follows an
-  applied change only, never a lost answer settled "didn't go through".
+  once (a sheet over that screen, not a banner), the same for both:
+  title "Also replace your vault's keys?", body "So an older copy of your vault, opened with your old PIN or password, can't be used to reach your connections. Your connections are told about your new keys.", buttons
+  "Replace keys" / "Not now" (all **DRAFT**, for the owner). "Replace
+  keys" opens Settings → Security → Credential, "Replace your vault's
+  keys" (DRAFT title; `credential.rotate`, which now replaces the whole
+  set and asks the password). "Not now", or leaving the sheet any other
+  way, means no: nothing is stored, nothing is shown later, and the
+  member can still do it from the credential screen. The prompt follows
+  an applied change and a lost answer settled "went through" while the
+  member is still on the change screen; not a settlement in the
+  background or at a later start, and never "didn't go through".
+- `identity.rotation_failed` has the DRAFT text of ANDROID-PLAN 0.1.88:
+  "Your connections still know your old keys. Your vault will try again
+  the next time you unlock it."
 - Phase: I1.8 (Change PIN, credential screen) and I3.3 (transfer). Tests
   as ANDROID-PLAN 0.1.88's. Vault: a staging release after 23.
 

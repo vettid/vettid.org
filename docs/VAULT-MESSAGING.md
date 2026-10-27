@@ -29,20 +29,21 @@ related:
 changelog:
   - 0.68.0: **owner decisions 2026-10-27** (ANDROID-PLAN 0.1.88, IOS-PLAN
     0.1.41; §15 item 42). **A transfer rotates the vault's keys by
-    itself**, as a completed recovery does: §11.14.10 "The vault's keys
-    after a transfer" (the vault rotates its relay key, `ik`, `kem` and
-    wake key in the state write of the new phone's first unlock from
-    storage, the same event that delivers `device.unlinked{transferred}`;
-    a rotation owed is kept in the state beside the pending unlink;
-    `identity.rotation_failed` with `ref` = the `transfer_id`, retried at
-    the next unlock; never fails the unlock). §11.14.2 "What an old copy
-    still holds", §3.4 and §11.14.9 follow. **A PIN change or a password
+    itself**, as a completed recovery does (§11.14.10 "The vault's keys
+    after a transfer"): the credential key at the approval (step-2
+    write, its statement held back), and the relay key, `ik`, `kem` and
+    wake key after the new phone's first unlock and after the relay
+    accepted the old phone's notice (rotating anyway from day 7); an
+    owed mark in the state, also for a recovery (§11.14.6 step 6).
+    **`credential.rotate` now also rotates the relay key and tokens and
+    the wake key** (§3.4, §3.5.5, §3.2 table, forced rotation, §10.6
+    row), so it ends the whole old copy. **A PIN change or a password
     change does not rotate by itself**: the app asks once, on that
     change's success screen, whether to replace the vault's keys
     (`credential.rotate`); "Not now" ends it, with no banner and no
-    repeat, and the member can rotate later from Settings → Security →
-    Credential. No wire change for the apps' side: the offer is the
-    apps' alone. **Vault: a staging release after 23.**
+    repeat. "Apps SHOULD offer it at least yearly" is dropped (the
+    banner that carried the offer is gone; the Settings path stays).
+    Vault: a staging release after 23.
   - 0.67.0: **owner decision 2026-10-27** (relayed by the iOS agent;
     ANDROID-PLAN 0.1.87, IOS-PLAN 0.1.40; §15 item 41). §11.4 unlock
     result: a new member `invitation_recovery_id`, the `ctx` of the invitation
@@ -2444,7 +2445,7 @@ key `ek` is 1,216 bytes. The decapsulation (private) key is stored as its
 | Key | Holder | Purpose | Lifetime | Stored |
 |---|---|---|---|---|
 | Relay key (Ed25519) | every mailbox owner | Signing relay requests and minting tokens | Rotated per §3.4 (SHOULD be ≤ 1 year) | Vault: DEK state only. Device: platform keystore. |
-| Identity key `ik` (Ed25519) | vault, each device | Signing handshakes, bundles, ICE configs and rotation statements | Vault: rotates with the Protean Credential. Device: life of the pairing. | DEK state / keystore |
+| Identity key `ik` (Ed25519) | vault, each device | Signing handshakes, bundles, ICE configs and rotation statements | Vault: rotates at a completed recovery, a transfer and `credential.rotate` (§3.4). Device: life of the pairing. | DEK state / keystore |
 | Static KEM key `kem` | vault, each device | Receiving sealed messages and handshake initiations | Same as `ik`. Retired vault keys are kept 400 days for reconnects (§6.6). | DEK state / keystore-wrapped |
 | Session epoch keys | both ends | Session-mode envelopes | One epoch (§6.5) | DEK state / device storage |
 | Ephemeral KEM key | handshake initiator | Forward secrecy | One handshake | Memory |
@@ -2606,9 +2607,11 @@ create-only.
   The vault MUST rotate after any suspected exposure of its state.
 - **Device relay key.** The device sends `relay.address.update`, and the vault
   denylists the old `sub` after the grace period.
-- **Vault `ik` and `kem`** rotate with the Protean Credential (PQC-MIGRATION
-  §7). A `credential.rotate` (§3.5.5) MUST rotate them, in the same flush
-  as the new credential; the vault MAY also rotate them alone, after a
+- **Vault `ik` and `kem`** rotate at a completed recovery, at a transfer
+  (§11.14.10) and with the Protean Credential (PQC-MIGRATION §7). (0.68.0)
+  A `credential.rotate` (§3.5.5) MUST rotate them, **and the vault relay
+  key** (new mailbox, new tokens, `relay.address.update`, as above)
+  **and the wake key**, in the same flush as the new credential; the vault MAY also rotate them alone, after a
   suspected exposure of its state:
   1. The vault sends an `identity.rotate` statement, signed by both the old
      and the new `ik`, to every device and peer.
@@ -3026,7 +3029,11 @@ item's values seals them to a **one-time reply key** instead:
   (0.33.0, release R) It also carries the PIN, closes the recovery
   generation and arms the next, and replaces the DEK (§11.14.9).
 - **Rotate.** `credential.rotate` generates a new credential key.
-  - It rotates the vault's `ik` and `kem` in the same flush (§3.4).
+  - (0.68.0, owner decision 2026-10-27) It rotates the whole set the
+    vault holds, in the same flush (§3.4): the relay key (a new mailbox
+    and new tokens, `relay.address.update`), `ik`, `kem` and the wake
+    key, so that after a PIN or password change it ends the whole old
+    copy (§11.14.2). It clears every owed rotation mark (§11.14.10).
   - The vault signs a **credential-key rotation statement** with the old
     and the new credential key, while it holds both, and delivers it to
     the connections that pinned the member's key (§10.4):
@@ -3045,7 +3052,7 @@ item's values seals them to a **one-time reply key** instead:
     A vault keeps its latest 32 statements. A new credential from
     `credential.reset` has no statement.
   - It is the PQC Phase 2 vehicle; the CEK rotates as with every use.
-  - Apps SHOULD offer it at least yearly.
+  - Apps offer it in Settings; there is no yearly prompt (0.68.0).
   - The vault MUST NOT rotate the credential key without the member.
 - **Reset: a new credential** (0.15.2, owner decision of 2026-10-06).
   `credential.reset` deletes the credential and creates a new one in a
@@ -3338,7 +3345,7 @@ suggest changing the password and the PIN. The vault audits
 operation is `credential.rotate` (§3.5.5) by the holder, with the current
 blob and the password: a new credential key (with its rotation statement
 to the connections that pinned it, §10.4), a new CEK, every critical item
-re-keyed (§10.7), and the vault's `ik` and `kem` rotated (§3.4). On
+re-keyed (§10.7), and the vault's relay key, `ik`, `kem` and wake key rotated (§3.4). On
 success the alarm closes (`state: "resolved"`, audit
 `credential.alarm.resolved`, `sync.event`) and credential operations
 resume. Every older blob, the clone included, is dead; presenting it later
@@ -7412,7 +7419,7 @@ for `credential`, `utk_id` and `sealed`.
 | `credential.version` | `{}` | `{exists, version?, key?, updated_at?, alarm?}`; `alarm` = `{alarm_id, state, at}` while a clone alarm is open (§3.5.9) |
 | `credential.unlock` | `{credential, utk_id, sealed{password}}` | `{credential, version, expires_at, utks}` (§3.5.3 unlock window) |
 | `credential.lock` | `{}` | `{}` |
-| `credential.rotate` | `{credential, utk_id, sealed{password}}` | `{credential, version, key, utks}`; the vault also rotates `ik` and `kem` (§3.4) |
+| `credential.rotate` | `{credential, utk_id, sealed{password}}` | `{credential, version, key, utks}`; the vault also rotates its relay key, `ik`, `kem` and wake key (§3.4, §3.5.5) |
 | `credential.password.change` | `{credential, utk_id, sealed{password, new_password}}`; (0.33.0, release R) `sealed{pin, password, new_password}` | `{credential, version, utks}`; (release R) `bad_pin`, `weak_password`, `busy`, `counter_unavailable`, `retry` (§11.14.9) |
 | `credential.recover` | `{utk_id, sealed{password}}` | `{credential, version, utks}` (§11.11.5). (0.33.0, release R) Removed: `forbidden`; a recovery completes in the open (§11.14.6). 0.9.0 removed the member-supplied `credential`; 0.16.0 removed `credential_lost`: a vault without a backup copy never gets this far (§11.11.1) |
 | `credential.reset` | the holder (0.15.2): `{credential, utk_id, sealed{pin, password, new_password}}` | `{credential, version, key, utks}`: a new credential; the old credential and every critical item are destroyed (§3.5.5). Answers as an owner check does (§3.6.1: `bad_pin`, `bad_password`, `backoff`, `credential_frozen`, `rotation_required`, …) and is refused while the vault is held (§3.6.3). 0.16.0 removed the recovering app's form `{utk_id, sealed{password}}`: `forbidden` |
@@ -7710,7 +7717,7 @@ decision 1):
   one item costs one AEAD pass of at most 12 KiB. Re-keying every item at
   every credential use would also cover items not used since, at a cost
   that grows with the number of items; `credential.rotate`, which apps
-  SHOULD offer at least yearly (§3.5.5), does that on demand.
+  offer in Settings (§3.5.5), does that on demand.
 - `item.sensitivity` changes it. `data` ↔ `secret` is a metadata change.
   Moving to or from `critical` is a credential operation: the vault moves
   the values between DEK state and the credential itself, without them
@@ -16498,12 +16505,14 @@ member gains nothing by choosing. A PIN change and a password change do
 not: they cost every connection a notice for a change that may be
 routine, so the member decides, and the app asks once on the change's
 success screen whether to replace the vault's keys (`credential.rotate`,
-§3.5.5); the member can also do it later from the credential screen. A rotation is written in the event's state write and its notices
+§3.5.5, which rotates the whole set: relay key and tokens, `ik`, `kem`,
+wake key and the credential key); the member can also do it later from
+the credential screen. A rotation is written in the event's state write and its notices
 go out afterwards; a connection that cannot be reached delays its own
 notice only, and a rotation that cannot be made at all is audited
 (`identity.rotation_failed`) and tried again (a recovery's or a transfer's at the next
-unlock; after a PIN or password change the app asks again only if the
-member asks): **it never fails the event**. The holder of an old copy also holds the old identity key and
+unlock, from an owed mark, §11.14.10; a `credential.rotate` that failed
+is the member's to ask again): **it never fails the event**. The holder of an old copy also holds the old identity key and
 can announce a rotation of its own; a connection keeps the first
 successor it accepted (§3.4), and the relay and the host that carry the
 notices are VettID's. So the rotation ends the old keys against someone
@@ -17078,7 +17087,7 @@ binding and replay rules of §11.3 and §11.6 and then, **in this order**:
    key; removes every other device of role `app` (`device.unlinked{reason:
    "replaced"}`); keeps desktops and agents; **rotates the vault's relay
    key, identity and KEM keys and wake key** (§3.4, §14; a rotation that
-   cannot be made never fails the recovery, §11.14.2). The notices to
+   cannot be made never fails the recovery, §11.14.2: the state holds a rotation owed with `ref` = the `recovery_id`, which a failed rotation leaves and the next unlock retries, audited `identity.rotation_failed`; one rotation clears every owed mark, §11.14.10). The notices to
    removed devices, `device.unlinked{replaced}` and any pending unlink's
    `device.unlinked{transferred}` (§11.14.10), are deposited only after
    step 2 of the order of writes is confirmed (like every notice of an
@@ -17723,8 +17732,9 @@ From release R:
   or a password change by itself.** The vault's keys are the same
   before and after; an old copy is the second running copy of §11.14.2.
   The change's success screen asks the member once whether to replace
-  the vault's keys (`credential.rotate`, §3.5.5); a "no" is final for
-  that change.
+  the vault's keys (`credential.rotate`, §3.5.5, which ends the whole old
+  copy: relay key and tokens, `ik`, `kem`, wake key and credential key);
+  a "no" is final for that change.
 - **`pin.change`** verifies the PIN and the password as an owner check
   does (§3.6.1 steps 1–7, its `bad_pin` and `bad_password` counting as
   failed checks), takes the permit and computes the new generation's wrap
@@ -18374,72 +18384,100 @@ first.**
   that withholds the notice, they stay on the phone until the member
   removes VettID or resets it, which the last screen and the waiting
   notice say. With a host that replays they stay the residual above.
-**The vault's keys after a transfer** (0.68.0; owner decision
-2026-10-27). A transfer rotates the vault's relay key, identity and KEM
-keys and wake key by itself, as a completed recovery does (§11.14.6
-step 6, §3.4, §14). The old phone is exactly the old copy of §11.14.2,
-and the member gains nothing by choosing.
+- A vault stranded by that fault and restored in time (§11.14.2) needs
+  the old phone or, with the credential backup on, a recovery after the
+  restore. One that is not restored in time is lost, with or without the
+  backup.
 
-- **When.** Not at the approval: until the new phone has unlocked from
-  storage the old phone is the way back from the one write fault no
-  order can fix (above), and a rotation announced to the connections
-  could not be taken back. The vault rotates in the state write of the
-  **same event that delivers `device.unlinked{transferred}`**: the
-  then-current app's first successful unlock from the stored objects
-  under the transfer's `dek_version` or a later one ("Finish the move").
-  That unlock proves that both writes of the transfer are durable.
-- **What is owed.** At the approval the vault records in its state, with
-  the pending unlink, that a rotation is owed for this `transfer_id`.
-  The mark outlives the pending unlink: a pending unlink deleted unsent
-  because its token expired (above) does not cancel the rotation, which
-  happens at the first such unlock whatever the move's age. The mark is
-  deleted when the rotation is made, when the old phone is the vault's
-  app again (the unlock of "The move didn't finish", or the day-7
-  check's result 2: nothing was transferred), and at a completed
-  recovery (which rotates itself).
-- **How.** As in §11.14.6 step 6 and the rules of §3.4 and §11.14.2: the
-  rotation is written in the unlock's state write and its notices go out
-  afterwards. `device.unlinked{transferred}` is deposited **first**,
-  signed with the old relay key, which the vault keeps in memory for it
-  during the rotation's grace period, with the token the old app issued
-  for it; then the vault sends `identity.rotate` and
-  `relay.address.update` (§3.4) to every connection and device. A
+**The vault's keys after a transfer** (0.68.0; owner decisions
+2026-10-27). A transfer rotates the vault's keys by itself, as a
+completed recovery does (§11.14.6 step 6, §3.4, §14): the credential key
+at the approval, and the relay key (new mailbox and tokens), `ik`, `kem`
+and wake key after the new phone's first unlock. The old phone is exactly
+the old copy of §11.14.2, and the member gains nothing by choosing.
+
+- **The credential key, at the approval.** The approval carries the
+  password, and already opens the credential to hand the holder to the
+  new phone and rotate the CEK. In the **step-2 state write** (the new
+  device record, the old app's removal), atomic with the move, the vault
+  also generates a new credential key and re-seals the credential and
+  its critical items under it (§3.5.5, §10.7); the new phone takes that
+  blob over. The **rotation statement** (§10.4) is made in the same
+  write but **held back in the state**, and sent to the connections that
+  pinned the member's key only with the rest of the rotation, after the
+  first unlock (below). *The residual this closes:* the old phone, the
+  PIN, the password and a replaying host, which could otherwise open an
+  old header, state and credential blob and sign as the member under the
+  current credential key. *"The move didn't finish"* is possible only
+  when the step-2 write was not stored (or an operator restored the
+  earlier state, §11.14.2); then the new credential key and its held
+  statement were never stored either, the old phone's blob is still the
+  credential, and **nothing needs undoing**. Nothing leaves the vault
+  before the statement is sent.
+- **The rest, after the new phone's first unlock.** The relay key,
+  identity and KEM keys and wake key rotate (§3.4) in the state write of
+  the then-current app's first successful unlock from the stored objects
+  under the transfer's `dek_version` or a later one ("Finish the move"),
+  **after the relay has accepted the old phone's
+  `device.unlinked{transferred}` notice** (its `201`). The vault first
+  deposits the notice, signed with the old relay key and sealed as above,
+  and waits for the `201`; only then does it rotate. The notice is the
+  old phone's way to erase its keys, and the old relay key, which the
+  vault keeps in memory for it during the rotation's grace period, is
+  what signs it. Not at the approval: until the new phone has unlocked
+  the old phone is the way back from the one write fault no order can
+  fix (above), and a rotation announced to the connections could not be
+  taken back. After the state write the notices go out (§3.4 notices,
+  the held credential-key statement, `relay.address.update`); a
   connection that cannot be reached delays its own notice only. The new
-  phone's session follows the rotation as a recovered phone's does. A
-  rotation that cannot be made at all is audited
+  phone's session follows the rotation as a recovered phone's does.
+- **If the notice is not accepted.** The vault keeps the mark and tries
+  again at each unlock: nothing rotates while the notice can still be
+  delivered. **From 7 days after the approval** (the old app's day-7
+  check), at the next unlock the vault rotates anyway, with or without
+  the notice. The result is stated, not left open: the pending unlink may
+  live as long as its token (at most 30 days), but a rotation made on
+  day 7 or later ends the old key's signing after its grace period, so a
+  notice still undelivered then is deposited only during that grace
+  period and then deleted unsent. The old phone then erases at its
+  day-7 check (result 1) or when the member removes VettID, as for a
+  notice withheld by a host (above). The cost of rotating anyway is that
+  such an old phone may not hear of the move; the benefit is that an old
+  copy cannot stay current against everyone else for a month.
+- **The owed mark.** At the approval the vault records, in the step-2
+  state, that a rotation is owed (`ref` = the `transfer_id`). It lives in
+  that state: a state that was not stored, or was restored to an earlier
+  one, never holds it, so "The move didn't finish" needs no step to clear
+  it. The mark outlives the pending unlink (a pending unlink deleted
+  unsent because its token expired does not cancel the rotation). **One
+  rotation clears every owed mark**: the transfer's, a recovery's
+  (below), and a `credential.rotate`, which rotates the same full set
+  (§3.5.5). A pending unlink written by a release before the mark
+  existed is treated as owing a rotation.
+- **Failure.** A rotation that cannot be made is audited
   (`identity.rotation_failed`, `ref` = the `transfer_id`), the mark is
   kept, and it is tried again at the next unlock: **it never fails the
-  unlock, and never delays the notice or the move.** A successful
-  rotation is audited `identity.rotated` with `ref` = the `transfer_id`
-  and appears in History (and in the feed as it does after a
-  recovery).
+  unlock, never delays the notice and never fails the move.** A
+  successful rotation is audited `identity.rotated` with `ref` = the
+  `transfer_id` and appears in History.
 - **What the old phone sees.** Nothing new. It was removed at the
   approval (§7.4), so it receives neither the rotation notices nor the
   new address; it learns of the move from `device.unlinked{transferred}`
   as above, or at the day-7 check, and erases. Until it does, its copy
   of the vault is the residual of "The residual until then": a replaying
-  host can still run it, and the rotation is what ends that against
-  everyone but the carrier (§11.14.2, last sentences). The old phone's
-  last screen and the notice do not change. An old phone that was not
-  yet erased and unlocks "The move didn't finish" after the rotation
-  finds itself refused like any removed app (the rotation is made only
-  after the new phone's unlock, so this cannot happen against an honest
-  host).
-- **An unfinished transfer** never rotates: with no unlock by the new
-  phone, no rotation and no notice, and the old phone keeps its way
-  back.
+  host can still run it against the connections, and the rotation is
+  what ends that against everyone but the carrier (§11.14.2, last
+  sentences). The old phone's last screen and the notice do not change.
+- **An unfinished transfer** never rotates the relay key, identity keys
+  or wake key: with no unlock by the new phone there is no rotation and
+  no notice, and the old phone keeps its way back.
 - **What the new phone shows.** The move's screens are unchanged ("Your
-  vault is on this phone now."): the rotation may follow the unlock by a
+  vault is on this phone now."): the rotation follows the unlock by a
   moment and can fail without the move failing, so the screen does not
   promise it. History shows `identity.rotated` ("Your vault's keys were
   renewed") with a line saying the keys were replaced for the move, and
   `identity.rotation_failed` shows its existing text.
 - **Vault:** a staging release after 23 (not release L's 23).
-
-- A vault stranded by that fault and restored in time (§11.14.2) needs
-  the old phone or, with the credential backup on, a recovery after the
-  restore. One that is not restored in time is lost, with or without the
-  backup.
 
 #### 11.14.11 What the member sees: status, audit, feed and emails
 
@@ -21983,33 +22021,50 @@ Follow-ups:
     Follow-ups: vettid-vault (the member; the next staging release after
     23), the apps (the single `hs.init`, the fallback).
 42. **Keys after a transfer, a PIN change and a password change (0.68.0;
-    owner decision 2026-10-27).** Until now a completed recovery rotated
+    owner decisions 2026-10-27).** Until now a completed recovery rotated
     the vault's relay, identity and KEM keys and wake key by itself, and
     the app offered `credential.rotate` after a transfer, a PIN change
-    or a password change through a banner over every screen. Decided:
-    *a transfer rotates automatically* (§11.14.10), in the state write
-    of the new phone's first unlock; *after a PIN change or a password
-    change the app asks once, on that change's success screen*, whether
-    to replace the vault's keys, and a "no" is final, with the rotation
-    still available from Settings → Security → Credential; the banner
-    goes. Texts are DRAFT (ANDROID-PLAN 0.1.88).
+    or a password change through a banner over every screen, although
+    that rotation did not touch the relay key, tokens or wake key.
+    Decided:
+    - *D1.* `credential.rotate` also rotates the relay key (new mailbox,
+      new tokens, `relay.address.update`) and the wake key, so "Replace
+      keys" after a PIN or password change ends the whole old copy.
+    - *D2.* *A transfer rotates automatically*: the credential key at the
+      approval (step-2 state write, atomic with the move; its statement
+      held back until the first unlock), the rest in the state write of
+      the new phone's first unlock, after the relay accepted the old
+      phone's notice, and anyway from day 7. An owed mark in the state
+      (also for a recovery) makes a failed rotation retry at the next
+      unlock.
+    - *After a PIN change or a password change the app asks once, on that
+      change's success screen*; a "no" is final, and the rotation stays
+      in Settings → Security → Credential. The banner goes. Texts are
+      DRAFT (ANDROID-PLAN 0.1.88).
     - *Why:* after a transfer the old phone is exactly the old copy, so
-      there is nothing to choose and the offer was a risk left to
-      attention. After a PIN or password change the member may be
-      changing it for routine reasons (or because a guess was seen),
-      and a rotation sends every connection a notice, so the member
-      decides, once, at the moment they are looking at the result.
-    - *Not chosen:* keeping the banner (it sits over every screen until
-      dismissed, and nags a member who already said no); rotating
-      automatically after a PIN or password change too (costs every
-      connection a notice for a change that may be routine, and the old
-      copy there is the member's own old PIN, which the member can judge);
-      rotating at the transfer's approval (the old phone must stay the
-      way back until the new phone has unlocked, §11.14.2).
+      there is nothing to choose. After a PIN or password change the
+      member may be changing it for routine reasons, and a rotation sends
+      every connection a notice, so the member decides, once, while
+      looking at the result. The credential key moves at the approval
+      because the approval carries the password, and a replaying host
+      with the old phone, PIN and password would otherwise hold the
+      current credential key.
+    - *Not chosen:* keeping the banner (over every screen, nags a member
+      who said no); rotating automatically after a PIN or password change
+      too (a notice to every connection for a change that may be
+      routine); rotating the relay and identity keys at the approval (the
+      old phone must stay the way back until the new phone has unlocked,
+      §11.14.2); rotating before the relay accepts the old phone's
+      notice (the old phone could then never hear of the move, and the
+      old key that signs the notice would be gone); waiting for the
+      notice for the pending unlink's whole life (30 days of a current
+      old copy); leaving the credential key to the member's later
+      choice (the residual of D2); a yearly prompt (dropped with the
+      banner).
     - *Safety:* a rotation that fails never fails the move; the mark is
-      kept and retried at the next unlock. A host that replays can
-      still withhold the notices (§11.14.2); the rotation ends the old
-      keys against everyone else.
+      kept and retried. A host that replays can still withhold the
+      notices (§11.14.2); the rotation ends the old keys against
+      everyone else.
     Follow-ups: vettid-vault (a staging release after 23), the apps
     (remove the banner, add the prompt).
 

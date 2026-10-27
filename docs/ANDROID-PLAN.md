@@ -16,7 +16,11 @@ changelog:
     offers anything; add the one-time prompt (§4 "Replacing the vault's
     keys, once"); keep Settings → Security → Credential → "Rotate the
     credential key". Texts are DRAFT for the owner. Vault: a staging
-    release after 23.
+    release after 23. (Review, same day: `credential.rotate` now
+    replaces the whole set; the prompt also follows a lost answer
+    settled "went through" on the change screen; one prompt text for
+    both changes; the Credential row and screen are titled "Replace your
+    vault's keys"; `identity.rotation_failed` DRAFT text reworded.)
   - 0.1.87: owner decision of 2026-10-27 (VAULT-MESSAGING 0.67.0, §15 item
     41). §4 step 5 "Pairing": when the unlock's `ok` carries `invitation_recovery_id`, the
     phone sends one `hs.init` with that `recovery_id` as `ctx`, the
@@ -1208,7 +1212,7 @@ rows below say "Vault" for the screens and "item" for the data.
 | Vault | Folder list | Titled "Vault" (0.1.11; was "Items"). Items per VAULT-ITEMS: name, category, typed fields, tags, sensitivity (data / secret / critical); filter by tag (0.1.21: "✕ Clear" ends the filter chips while a filter is on); each tag in its own colour (0.1.21), stored in the vault's tag registry and the same on every device, the least-used of a palette of ten for a new tag, picked by the member on Manage tags (0.1.25; `@profile` always gold); add/edit from templates ("Save item" in the top bar, 0.1.21); share rules by tag, as many per connection as needed (up to 64), each with its own tags, mode (default: ask each time), fetch limit and end (presets or a custom date and time), overlaps shown (0.1.20); one tag per rule, per-hour and per-day limits, `ask` wins, rules named by their tags, "Save rule" in the top bar (0.1.22). Critical items live in the Protean Credential and are never shared by a rule |
 | History | — (VettID-specific) | The member's audit log (0.1.11, `audit.list`, VAULT-MESSAGING 0.20.0 §10.9), read-only: a search field (the vault searches, `q`), filter chips (category, connection, date range), a list of entries newest first with infinite scroll, and an entry detail, each entry's icon in its category's colour (0.1.22); a ⋯ menu with **Export…** (0.1.17: CSV or JSON of what the filters show, with the vault PIN, saved through "Save to…"). Details below |
 | Notifications | — (Proton has none; a bell as in most apps) | 0.1.23 (owner answers of 2026-10-09): the vault's feed (VAULT-MESSAGING §10.9), opened from the bell in the top bar with the unread count; grouped by day, urgent items first, unread and read, swipe to archive or to mark read, an Archived view; each item opens the screen it is about; system notifications through the member's notification mode (D7). Details below |
-| Credential | — | Reached from Settings → Security → Credential (0.1.11; not in the drawer). Critical items inside the Protean Credential; unlock window; password change; the vault-held credential copy (the backup) on/off. Turning it off shows VAULT-MESSAGING §3.5.6's warning and needs a confirmation: "If this phone is lost, broken, reset or replaced without a transfer, your vault **cannot be recovered**. It can only be deleted and replaced by a new one, and **everything in it is lost**." While off, the screen and Settings keep a short "no recovery" notice. Turning it on asks for the password at once (an owner check) so that the copy exists, and says recovery is possible from then on. (0.1.51) **New credential** (`credential.reset`) is hidden until §4 "A lost answer to New credential" is implemented. (0.1.88) **Rotate the credential key** (`credential.rotate`) stays here; the one-time prompt after a PIN or password change (§4 "Replacing the vault's keys, once") opens it |
+| Credential | — | Reached from Settings → Security → Credential (0.1.11; not in the drawer). Critical items inside the Protean Credential; unlock window; password change; the vault-held credential copy (the backup) on/off. Turning it off shows VAULT-MESSAGING §3.5.6's warning and needs a confirmation: "If this phone is lost, broken, reset or replaced without a transfer, your vault **cannot be recovered**. It can only be deleted and replaced by a new one, and **everything in it is lost**." While off, the screen and Settings keep a short "no recovery" notice. Turning it on asks for the password at once (an owner check) so that the copy exists, and says recovery is possible from then on. (0.1.51) **New credential** (`credential.reset`) is hidden until §4 "A lost answer to New credential" is implemented. (0.1.88) **Replace your vault's keys** (DRAFT title, was "Rotate the credential key"; `credential.rotate`, now the whole set) stays here; the one-time prompt after a PIN or password change (§4 "Replacing the vault's keys, once") opens it |
 | Settings | Settings | At the top, an **account card** (0.1.11): the member's first and last name and full email address (`account.get`, VAULT-MESSAGING 0.20.0 §11.13) and the membership state, memory only, wiped at lock (0.1.61, §4 "The member's own profile"); tapping it opens the avatar sheet. Vault (status, with the "Installed from" line of §7 "Signing and the two distributions" (0.1.36), release, lock, PIN; "Update available" while a newer release can be approved, 0.1.19); Security (credential, recovery, attestation info, the app lock (0.1.19: Biometrics or Phone screen lock) and timeout, the owner-check interval 1–24 h and the hold switch); Privacy (the **Shared profile**, glyph `Badge`, 0.1.12: display name, `@profile` items and the profile photo, **camera only** — "Take a photo" / "Retake photo" opens the app's own camera screen, front camera first with a switch to the rear one, then "Retake" or "Use photo"; no selection of an existing picture and no other camera app; the shot stays in memory, is never saved to the gallery, and is cropped, scaled and re-encoded to a JPEG ≤ 65,536 bytes without EXIF before `profile.set{photo}`; "Remove photo" confirmed; a refused camera permission is explained, with the system settings once Android no longer asks; a phone without a camera is told); App (theme; **Notifications** (0.1.23): the mode, its status, previews and the channels, §4 Notification modes; the local "Vault updates" channel, 0.1.19) |
 | Owner check | — (VettID-specific) | One screen: PIN and credential password together (VAULT-MESSAGING §3.6.5); also the "vault held" screen with the waiting counts and the lock action |
 | Avatar sheet | Account sheet | The member's first and last name and **full email address** (0.1.11, from `account.get`'s snapshot `first_name`, `last_name` and `email`, VAULT-MESSAGING 0.20.0 §11.13; never the masked hint; memory only, wiped at lock, 0.1.61, §4 "The member's own profile"), the email labelled "Only you see this address" and the names "Your connections see this name"; **Lock vault first** (0.1.12), right under the name and email, before Change name, Shared profile and the email; the sheet scrolls; vault status; **Change name** (0.1.10): the two names (the registration rule: letters, spaces, `'’.-`, ≤ 40), then the owner-check screen's PIN and password, sent as `account.name.set`; then "Name change requested" until `account.get`'s `name_request` is `applied` or `refused`; `too_soon` (from the vault or the member API): "You can change your name once every 30 days. You can change it again on <date>" (VAULT-MESSAGING §10.8), membership and subscription (read-only, from the vault, VAULT-MESSAGING §11.13), open account portal (browser) |
@@ -2853,40 +2857,43 @@ about attempts, the app says first: "Changing only the PIN gives
 whoever is guessing ten new tries at the same password. Change your
 password too."
 
-**Replacing the vault's keys, once** (0.1.88; owner decision
-2026-10-27; VAULT-MESSAGING 0.68.0 §11.14.9, §15 item 42). A PIN change
-or a password change leaves the vault's relay, identity and KEM keys as
-they were, so an older copy of the vault (an old phone with the old PIN,
-an old header and state a replaying host presents) still runs. The
-member decides whether to end that, because the rotation sends every
-connection a notice.
+**Replacing the vault's keys, once** (0.1.88; owner decisions
+2026-10-27; VAULT-MESSAGING 0.68.0 §3.5.5, §11.14.9, §15 item 42). A PIN
+change or a password change leaves the vault's keys as they were, so an
+older copy of the vault (an old phone with the old PIN, an old header
+and state a replaying host presents) still runs. The member decides
+whether to end that, because the rotation sends every connection a
+notice. `credential.rotate` now replaces the whole set: the relay key
+and tokens, the identity and KEM keys, the wake key and the credential
+key (vault: a staging release after 23).
 
-- *When.* On the success screen of a PIN change or a password change,
-  after the answer that decided it applied (not after a "went through"
-  one-time notice of a lost answer, and not when the change was not
-  applied). A prompt, not a banner: it is shown once for that change,
-  over that screen only.
+- *When.* On the success screen of a PIN change or a password change:
+  after the answer that decided it applied, and after a lost answer
+  settled "went through" **while the member is still on the change
+  screen**. Not when a lost answer resolves in the background or at a
+  later start, and never after "didn't go through". A prompt, not a
+  banner: shown once for that change, over that screen only. One prompt
+  for both kinds of change.
 - *Texts (all DRAFT, for the owner).* Title: "Also replace your vault's
-  keys?" Body: "So an old copy of your vault — on an old phone or with
-  your old PIN — can't be used. Your connections are told about the new
-  keys." Buttons: **Replace keys** and **Not now**.
+  keys?" Body: "So an older copy of your vault, opened with your old PIN or password, can't be used to reach your connections. Your connections are told about your new keys." Buttons: **Replace keys** and **Not now**.
 - **Replace keys** opens the rotation of Settings → Security →
-  Credential → "Rotate the credential key" (`credential.rotate`, which
-  asks the password as it does there). **Not now**, a back press or any
-  other way out means no: nothing is stored, no banner follows, and the
-  app does not ask again for that change. The member can still rotate
-  from the credential screen at any time. A member who declines is not
-  reminded.
+  Credential, whose row and screen title become (DRAFT) "Replace your
+  vault's keys" (they were "Rotate the credential key" and "Rotate your
+  credential key"), with the password asked there as before. **Not now**,
+  a back press or any other way out means no: nothing is stored, no
+  banner follows, and the app does not ask again for that change. The
+  member can still replace the keys from the credential screen at any
+  time; nobody is reminded.
 - *Removed.* The persistent banner over every screen (release R,
   `rotate_offer`, "You can now rotate your vault's keys: every older
-  copy of your credential stops working.", "Rotate now") and the
-  offer after a transfer. The screen's own text, "Your vault makes a
-  new credential key, re-keys every critical item …", is unchanged.
-- Tests: the prompt after an applied PIN change and after an applied
-  password change; none after a failed one, a lost answer settled
-  "didn't go through", or a transfer; "Not now" and back store nothing
-  and show nothing at the next start; "Replace keys" opens the rotation;
-  no banner anywhere.
+  copy of your credential stops working.", "Rotate now") and the offer
+  after a transfer.
+- Tests: the prompt after an applied PIN change and an applied password
+  change; after a lost answer settled "went through" on the change
+  screen; none after "didn't go through", after a settlement in the
+  background or at a later start, or after a transfer; "Not now" and back
+  store nothing and show nothing at the next start; "Replace keys" opens
+  the rotation; no banner anywhere.
 
 **A lost answer to a PIN or password change** (0.1.45, for the owner's
 approval; VAULT-MESSAGING 0.44.0 §11.14.9 "A lost answer"). Today
@@ -3296,16 +3303,17 @@ both sections above (`pin.change`, `credential.password.change`,
   "no longer the vault's app" (erase); `device.unlinked{transferred}`
   (erase).
 - (0.1.88, VAULT-MESSAGING 0.68.0 §11.14.10) **A transfer rotates the
-  vault's keys by itself**, as a completed recovery does: the vault does
-  it in the state write of the new phone's first unlock ("Finish the
-  move"), after delivering `device.unlinked{transferred}`. The apps have
-  no step for it and no longer offer a rotation after a transfer (the
-  shell banner of release R is removed). The new phone's screens do not
-  change; History shows `identity.rotated` with the DRAFT detail below,
-  or `identity.rotation_failed`, which the vault tries again at the next
-  unlock. The old phone sees nothing new. A PIN change and a password
-  change are asked once: §4 "Replacing the vault's keys, once". Vault: a
-  staging release after 23.
+  vault's keys by itself**, as a completed recovery does: the credential
+  key at the approval, and the relay key, identity and KEM keys and wake
+  key after the new phone's first unlock ("Finish the move") and after
+  the relay accepted `device.unlinked{transferred}` (anyway from day 7).
+  The apps have no step for it and no longer offer a rotation after a
+  transfer (the shell banner of release R is removed). The new phone's
+  screens do not change (History only); History shows `identity.rotated`
+  with the DRAFT detail below, or `identity.rotation_failed`, which the
+  vault tries again at the next unlock. The old phone sees nothing new.
+  A PIN change and a password change are asked once: §4 "Replacing the
+  vault's keys, once". Vault: a staging release after 23.
 - (0.1.50; VAULT-MESSAGING 0.47.1 §3.5.9) **A rotation during a
   credential alarm.** Before "Rotate now" while an alarm is open, and
   when a rotation is answered `rotation_required` or
@@ -3437,7 +3445,7 @@ Notifications, 3 and 4; 0.1.56):
 | `recovery.change_required`, `ref` = a generation | "Change your PIN or password to turn recovery back on" | "Recovery attempts were used. A change gives you 10 new attempts." |
 | `recovery.counter_unavailable` (`urgent`) | "Your vault cannot check its recovery attempts" | none; Settings → Vault status shows the approved "For a day your vault has not been able to check its recovery attempts …" text (§4 "Owner check and status"), scaled on a vault with a time scale |
 | `recovery.generation_closed`, `ref` `<generation>/rollback` (`urgent`; owner decision of 2026-10-20; needs a vault release) | "Your vault was given an older recovery record" | "A host may have served an older copy of your vault's recovery record, one on which recovery attempts had already been used. Your vault moved past it. If you did not try to recover your vault, change your PIN and your password now, and contact VettID." |
-| `identity.rotation_failed` (`high`) | "Your vault could not update its keys" | "Your connections still know your old keys. VettID will offer the update again." |
+| `identity.rotation_failed` (`high`) | "Your vault could not update its keys" | "Your connections still know your old keys. Your vault will try again the next time you unlock it." (**DRAFT**, owner decision 2026-10-27) |
 | `identity.rotate_conflict` (`high`) | "<First Last>: verify again" | "This connection's vault announced two different new keys. That can mean someone holds an old copy of their vault. Nothing is sent or received until you check." (§4 "Other screens") |
 | `leash.item.run`, `leash.item.proxy` | "An agent used <item>" (decision 8); without item names: "An agent used an item" | — |
 
@@ -3485,7 +3493,7 @@ is the app's and needs no vault change.
 | … reason `stale` | hidden (below) | — |
 | … a reason this app does not know | "Recovery attempts reset" | — |
 | `recovery.presence_unrecorded` | "Your vault could not record that you were here" | "If this lasts three days, your vault is no longer protected against a recovery started by someone else." (scaled on a vault with a time scale) |
-| `identity.rotation_failed` | "Key update failed" | "Your connections still know your old keys. VettID will offer the update again." |
+| `identity.rotation_failed` | "Key update failed" | "Your connections still know your old keys. Your vault will try again the next time you unlock it." (**DRAFT**, owner decision 2026-10-27) |
 | `identity.rotate_conflict` | "Connection with <First Last> paused" | "This connection's vault announced two different new keys. That can mean someone holds an old copy of their vault. Nothing is sent or received until you check." |
 | `identity.rotate_resolved` | "Connection with <First Last> checked and resumed" | — |
 | `connection.request.approved`, `connection.request.declined` | "You accepted a connection request" / "You declined a connection request" | — |
