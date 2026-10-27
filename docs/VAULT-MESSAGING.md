@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.69.0
+version: 0.69.1
 date: 2026-10-27
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -27,6 +27,25 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.69.1: erratum, 2026-10-27; matches vettid-vault #158 (behaviour as
+    built). A rotation chain is resolved against what the receiver has
+    already followed. §3.4 "identity.rotate statement" and §6.6
+    "Authentication" said that a chain's first link starts at the stored
+    `ik`, but a peer that has followed `identity.rotate` between epochs
+    (as §3.4 requires) has already moved its stored `ik`, so a reconnect
+    after a followed rotation and a lost rekey was refused for good. Now:
+    links the receiver has already accepted are skipped (the last skipped
+    link must end at the stored `ik`, so a receiver never returns to an
+    earlier key); the first link not skipped starts at the stored `ik`;
+    only the links not skipped are appended. The one-successor rule
+    covers the `rotations` of a reconnect `hs.init` and `hs.resp` too (a
+    second successor there is not answered and suspends the connection),
+    and after `connection.rotation.resolve` the dropped statement is
+    remembered, so a later copy of it is refused rather than treated as
+    a new conflict. §6.6 "Initiating": `rotations` includes statements
+    the responder may already have followed, and a suspended connection
+    neither initiates nor answers a reconnect. The 32-link cap is
+    unchanged
   - 0.69.0: **owner decision 2026-10-27** (ANDROID-PLAN 0.1.90, IOS-PLAN
     0.1.43; §15 item 43). Members can tell service connections from
     personal ones. §6.4: the invitation bundle carries an optional
@@ -2729,8 +2748,15 @@ sig_new = Ed25519(new_ik, "vettid/vms/2/rotate" || m)
 
 - Both signatures MUST verify, and `old_ik` MUST differ from `new_ik`.
 - A chain is an ordered array of statements. Each link's `old_ik` MUST equal
-  the previous link's `new_ik` (the first link's MUST equal the stored `ik`).
-  A receiver MUST reject chains longer than 32 links.
+  the previous link's `new_ik`. A receiver MUST reject chains longer than 32
+  links. (0.69.1) A receiver resolves a chain against what it has already
+  followed: leading links it has already accepted (same `old_ik`, `new_ik`
+  and `new_kem`) are skipped, and the last skipped link's `new_ik` MUST
+  equal the stored `ik` (otherwise the chain is rejected: a receiver never
+  returns to an earlier key). The first link not skipped MUST have `old_ik`
+  equal to the stored `ik`, and only the links not skipped are appended to
+  the stored chain. With no skipped link, the first link's `old_ik` MUST
+  equal the stored `ik`.
 - The chain resolves to the last link's `new_ik` and `new_kem`; an empty
   chain resolves to the stored keys.
 - (0.33.0, release R) **One successor per key.** A receiver that has
@@ -2749,7 +2775,13 @@ sig_new = Ed25519(new_ik, "vettid/vms/2/rotate" || m)
   (answered `{}`, or `not_found` when the connection has no conflict or
   `new_ik` is neither candidate), which keeps that successor and drops the
   other; or they reconnect with a new invitation and safety code (§6.4).
-  A desktop or an agent is answered `forbidden`. *Residual:* the carrier, or a
+  A desktop or an agent is answered `forbidden`. (0.69.1) The rule applies
+  to every statement a receiver checks, whether it arrives in
+  `identity.rotate` or in the `rotations` of a reconnect `hs.init` or
+  `hs.resp` (§6.6); a reconnect that carries a second successor is not
+  answered and suspends the connection. After `connection.rotation.resolve`,
+  the dropped statement is remembered and a later copy of it is refused, not
+  treated as a new conflict. *Residual:* the carrier, or a
   replaying host that holds an old copy of a vault, can after any
   rotation of that vault send a second successor to each of its
   connections and so suspend all of them until each is verified again
@@ -5068,7 +5100,10 @@ the peer. It carries:
 
 - fresh standing and reconnect tokens;
 - `ctx` = the stored `epoch_id` of the last epoch;
-- `rotations`: the initiator's rotation statements since the last epoch.
+- `rotations`: the initiator's rotation statements since the last epoch,
+  including any the responder may already have followed through
+  `identity.rotate` (0.69.1). A suspended connection (§3.4) neither
+  initiates nor answers a reconnect.
 
 **Authentication.** No SAS or approval is needed when the identities match.
 The responder MUST accept the reconnect only if all of these hold:
@@ -5076,7 +5111,8 @@ The responder MUST accept the reconnect only if all of these hold:
 - the collect `sender` equals the relay key on record for that connection,
   which is also the reconnect token's `sub`;
 - `from.ik` equals the stored `ik`, or is reached from it through a valid
-  `rotations` chain;
+  `rotations` chain, resolved as in §3.4 (links already followed are
+  skipped; the last of them must end at the stored `ik`) (0.69.1);
 - `sig_I` verifies under that key.
 
 Each link in a rotation chain is an `identity.rotate` statement (§3.4). When
@@ -6455,7 +6491,7 @@ device belongs to the unlock it ends.
 | `connection.get` | `{connection_id}` | `<connection>` |
 | `connection.update` | `{connection_id, version, alias?, note?, tags?, favorite?, archived?}` (at least one) | `{version}` |
 | `connection.remove` | `{connection_id}` | `{}` |
-| `connection.rotation.resolve` (0.33.0, release R; the holder only) | `{connection_id, new_ik}` | `{}`: keeps that successor of the connection's identity key and drops the other (§3.4); `not_found` when the connection has no conflict or `new_ik` is neither candidate; `forbidden` to a desktop or an agent |
+| `connection.rotation.resolve` (0.33.0, release R; the holder only) | `{connection_id, new_ik}` | `{}`: keeps that successor of the connection's identity key and drops the other, which is remembered (§3.4); `not_found` when the connection has no conflict or `new_ik` is neither candidate; `forbidden` to a desktop or an agent |
 | `connection.removed` (V↔V) | — | `{}` |
 | `connection.event` | — | `{connection_id, event: "added" \| "removed" \| "stale" \| "rekeyed" \| "reconnected" \| "failed" \| "profile", pending_id?, reason?}`; `profile`: the connection's shared profile changed (§10.8); `failed`: an outgoing request ended without a connection other than by its member's decline (§6.4, 0.10.4); `reason`, only with `failed`: `declined` when the peer declined (0.10.5), absent for an expiry or an aborted handshake; `pending_id` with `added` on the inviter's side names the request it came from (on the accepter's side `connection_id` is the accept's) |
 | `block.add` | `{connection_id \| pending_id, note?}` (exactly one of the ids) | `{block_id}` |
