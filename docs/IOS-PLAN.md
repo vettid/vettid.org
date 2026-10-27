@@ -515,7 +515,7 @@ the Mac agent does not reopen them.
 | ID16 | **Real iPhone on staging before VA2** | Wait for VA2 (a staging release that pins `<team>.com.vettid.app.staging`). Not recommended: pointing a `com.vettid.app` build at staging, which today's staging images would accept | — | I1 exit |
 | ID17 | **App lock** | ANDROID-PLAN D6 on iOS: **Face ID / Touch ID** or **iPhone passcode** (`LAPolicy.deviceOwnerAuthentication`), gating a Secure Enclave key that unwraps the app's local data key; a convenience layer, never in place of the PIN or the password | — | I1.6 |
 | ID18 | **Contact with Apple at attestation** | Say it in Help → Privacy: "When you set up, move or recover a vault, your iPhone asks Apple to vouch for the VettID app. Apple learns that VettID was set up on an iPhone, nothing about your vault." (`attestKey` reaches Apple's servers; assertions do not.) | Silence | I1.5 |
-| ID19 | **A separate approvals indicator** (owner, 2026-10-27) | ANDROID-PLAN D9 on iOS (§4.11): a toolbar item beside the bell while something waits for the member's decision, with its count; urgent from arrival for sign-in and approval challenges and session requests, else in the last 2 minutes, with the time left; a tap opens the Approvals list; a short banner with View for a new time-critical request while the app is open; from phase P a request's notification opens that request. Before APNs (ID12) the indicator and the banner are the only cues | — | I2.3 |
+| ID19 | **A separate approvals indicator** (owner, 2026-10-27) | ANDROID-PLAN D9 on iOS (§4.11): a toolbar item beside the bell while something waits for the member's decision, with its count; urgent from arrival for sign-in and approval challenges and session requests, else in the last 2 minutes, with the time left; a tap opens the Approvals list; a short banner with View for a new time-critical request while the app is open; from phase P a request's notification opens that request, `.timeSensitive` for approval challenges and session requests but not for sign-ins; a sign-in's countdown is neutral. Before APNs (ID12) the indicator and the banner are the only cues | — | I2.3 |
 
 ## 3. Design language
 
@@ -1376,7 +1376,10 @@ not on Approvals or any request screen; not in full-screen flows),
 when (only above 0; never while held, due, locked or at the app lock),
 urgency (from arrival for `connection.authenticate` challenges of any
 purpose and session requests, otherwise the last 2 minutes,
-`approvalUrgentSeconds = 120`), the tap (always the Approvals list),
+`approvalUrgentSeconds = 120`; `approval.pending` from arrival; a sign-in
+gets the neutral treatment, clock and digits without the error colour;
+a "Not now" location request is kept as `{request_id, exp}` in the
+encrypted local store), the tap (always the Approvals list),
 the in-app banner for a new time-critical request, the drawer badge
 (the same count), the list order, the notification's target, locked
 and back-stack rules.* Only these differ on iOS:
@@ -1420,10 +1423,12 @@ and back-stack rules.* Only these differ on iOS:
   app next runs and removes it (`removeDeliveredNotifications`, on
   every return to the foreground and at each deadline while running),
   and a tap on it shows "This is no longer waiting". For sign-in and
-  approval challenges and session requests, phase P considers
+  approval challenges and session requests, phase P sets
   `interruptionLevel = .timeSensitive` (it needs the capability of §6.7;
-  the Requests category is `active` today) so that a Focus mode does not
-  hide a request that lives minutes; an open point for the owner.
+  owner decision of 2026-10-27) so that a Focus mode does not hide a
+  request that lives minutes. **Not for sign-in challenges**: they stay
+  `.active`, since anyone who knows the member's email can start one.
+  The Requests category is otherwise unchanged.
 - **Tests.** Android's, with: the toolbar item in the large and
   accessibility Dynamic Type sizes (icon and clock badge); the
   VoiceOver label; B's notification with A's screen open shows B;
@@ -2324,7 +2329,8 @@ approved.
   3 waiting" (1: "Approvals, 1 waiting"); in the window "Approvals, 3
   waiting. <Name> expires in 1 minute 20 seconds"; the capsule shows
   "1:20"; the row "Expires in 1:20"; the announcement "<Name> expires
-  in 2 minutes"; the banner "<Name> asks you to confirm it is you" or
+  in 2 minutes"; the banner "Sign in to <Name>?", "<Name> asks you
+  to approve", "<Name> asks you to confirm it is you" (no purpose) or
   "<Name> asks for access", with **View**. The Android strings,
   unchanged.
 - **Installed from (ID15)**: "Installed from: Apple (App Store or
