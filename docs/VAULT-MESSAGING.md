@@ -2624,7 +2624,8 @@ create-only.
     relay-key rotation the vault keeps the **old relay key in the DEK
     state**, used **only to deposit** to recipients: never to collect,
     rotate, delete or mint tokens on any mailbox, and never for an owner
-    operation. A deposit needs the recipient's token for the old `sub`
+    operation; the vault **never registers the old key again**
+    (RELAY-PROTOCOL §6.10 would allow it). A deposit needs the recipient's token for the old `sub`
     and `X-VettID-Key` = the old key (RELAY-PROTOCOL §5.3 steps 2–7); it
     does not need the vault's own old mailbox to exist.
   - **The signal.** A recipient (each connection's vault, and each of
@@ -2635,7 +2636,13 @@ create-only.
   - **When the old key is deleted.** When every recipient has
     acknowledged, or when every standing token the recipients issued to
     the old `sub` has expired (at most 30 days after the last renewal),
-    whichever is first. This is the one place the old key is kept, and it
+    whichever is first, **and not while a notice to a removed device is
+    undelivered**: a pending unlink (`device.unlinked{transferred}`,
+    §11.14.10) or a recovery's `device.unlinked{replaced}` (§11.14.6
+    step 6) that still holds a valid token for the old `sub`. A removed
+    phone is not a recipient and never acknowledges, so the key is kept
+    until that notice is delivered, definitively refused, or its token
+    expires. This is the one place the old key is kept, and it
     replaces "in memory for the rotation's grace period" wherever that
     stood (§11.14.6 step 6, §11.14.10). The notices to removed devices
     (`device.unlinked`) are deposited with it too.
@@ -18531,10 +18538,9 @@ the old copy of §11.14.2, and the member gains nothing by choosing.
   does not wait for it. **The old relay key is kept in the state
   (encrypted under the DEK) as §3.4 "Resending the new address" says**,
   not in memory only, so a notice still undelivered can be deposited
-  after a day-7 rotation, at each unlock while the key is kept; when the
-  key is deleted (all acknowledged, or the tokens issued to the old
-  `sub` have expired) the pending unlink is deleted with it, and the
-  notice unsent. The old phone then erases when the member removes
+  after a day-7 rotation, at each unlock while the key is kept. The
+  pending unlink is deleted when the notice is delivered, definitively
+  refused, or its token expires; the key is kept until then (§3.4). The old phone then erases when the member removes
   VettID, as for a notice withheld by a host (above) (the day-7 check's
   result 1 needs a vault that answers a removed device, which no release
   does yet). The cost of rotating anyway is that such an old phone may
