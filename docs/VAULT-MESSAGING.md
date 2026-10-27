@@ -43,6 +43,10 @@ changelog:
     (`credential.rotate`); "Not now" ends it, with no banner and no
     repeat. "Apps SHOULD offer it at least yearly" is dropped (the
     banner that carried the offer is gone; the Settings path stays).
+    Review 3: resend path (§3.4 "Resending the new address": the old
+    relay key kept in the state for deposits only; `relay.address.update`
+    resent with it at each unlock to parties that have not
+    acknowledged; §6.6 exceptions stated).
     Review 2: the transfer's held credential-key statement is sent at
     the first unlock; the rest waits for the notice unless none is
     pending or the relay definitively refuses; the old relay key is kept
@@ -2609,6 +2613,51 @@ create-only.
   4. Each recipient answers with `relay.token.issued` for the new `sub`.
 
   The vault MUST rotate after any suspected exposure of its state.
+
+  **Resending the new address** (0.68.0; owner decision 2026-10-27). A
+  recipient that is offline, locked or unreachable when the vault rotates
+  its relay key (at a transfer, a `credential.rotate` or a recovery)
+  would otherwise miss `relay.address.update` and, past the rotation
+  grace (RELAY-PROTOCOL §6.7, one relay-wide setting) and its tokens'
+  life, lose the connection (§6.6 "Limits"). So:
+  - **(a) The old relay key stays, for deposits only.** After any
+    relay-key rotation the vault keeps the **old relay key in the DEK
+    state**, used **only to deposit** to recipients: never to collect,
+    rotate, delete or mint tokens on any mailbox, and never for an owner
+    operation. A deposit needs the recipient's token for the old `sub`
+    and `X-VettID-Key` = the old key (RELAY-PROTOCOL §5.3 steps 2–7); it
+    does not need the vault's own old mailbox to exist.
+  - **The signal.** A recipient (each connection's vault, and each of
+    the member's own devices and agents) has **acknowledged** the new
+    address when the vault has received from it `relay.token.issued` for
+    the new `sub` (step 4), or any message deposited with a token the
+    vault issued for the new `sub` (its `jti` is recorded, §7.1).
+  - **When the old key is deleted.** When every recipient has
+    acknowledged, or when every standing token the recipients issued to
+    the old `sub` has expired (at most 30 days after the last renewal),
+    whichever is first. This is the one place the old key is kept, and it
+    replaces "in memory for the rotation's grace period" wherever that
+    stood (§11.14.6 step 6, §11.14.10). The notices to removed devices
+    (`device.unlinked`) are deposited with it too.
+  - **(b) Resend at each unlock.** At each unlock, for each recipient
+    that has not acknowledged and whose standing token for the old `sub`
+    is still valid, the vault deposits `relay.address.update` again with
+    the old key and that **standing** token (the same address, the same
+    new tokens; a receiver that has it ignores the duplicate). A
+    **reconnect token cannot carry it**: it may deposit only an `hs.init`
+    with purpose `reconnect` (§6.6), so a party whose standing token has
+    expired is not reached this way (see (c) below). Bounded: **at most
+    one resend per recipient per unlock, and at most one per recipient
+    per hour**; a deposit refused with a definite answer (token expired
+    or revoked, mailbox gone) ends the resends to that recipient. A
+    resend is not audited unless it is refused for a reason other than
+    those.
+  - **Security.** Keeping the old key adds nothing for a holder of an
+    old copy, who already has it. The vault's old mailbox still ends at
+    the relay's grace, so the window in which a peer holds a stale
+    address or an old `kem` does not grow.
+  - **Limit.** A party that misses the update beyond the life of its
+    tokens needs a new invite or pairing (§6.6 "Limits").
 - **Device relay key.** The device sends `relay.address.update`, and the vault
   denylists the old `sub` after the grace period.
 - **Vault `ik` and `kem`** rotate at a completed recovery, at a transfer
@@ -3040,7 +3089,12 @@ item's values seals them to a **one-time reply key** instead:
     copy (§11.14.2). It clears every owed rotation mark (§11.14.10); if a
     transfer's credential-key statement is still held, it sends that
     first, and it first deposits a waiting
-    `device.unlinked{transferred}` with the old relay key.
+    `device.unlinked{transferred}` with the old relay key. The relay-key
+    rotation uses the resend path of §3.4, and the §6.6 limit applies
+    (a party that misses the update beyond its tokens' life needs a new
+    invite or pairing). It rotates the relay key anyway (§6.6's
+    "SHOULD defer" yields: the reason is the old copy's control of the
+    mailbox), relying on that path.
     The wake key rotates by erasing the registration and sending
     `push.token-needed` (§14.1, §14.2).
   - The vault signs a **credential-key rotation statement** with the old
@@ -4905,6 +4959,12 @@ so that they can still open reconnect `hs.init`s sealed to an older key.
   then fails with `mailbox_unknown`, and the connection becomes `stale`. A new
   invite is required. Vaults SHOULD defer relay-key rotation, except after a
   suspected compromise, while any connection's standing token is expired.
+  (0.68.0) **Exceptions:** a transfer, a `credential.rotate` and a
+  completed recovery rotate the relay key anyway, because the old copy
+  controls the old mailbox, and rely on the resend path of §3.4. A party
+  whose standing token expired before it got the update is not reached
+  by the resend (a reconnect token cannot carry `relay.address.update`)
+  and needs a new invite or pairing.
 
 ### 6.7 Owner device and agent pairing
 
@@ -17101,8 +17161,9 @@ binding and replay rules of §11.3 and §11.6 and then, **in this order**:
    `device.unlinked{transferred}` (§11.14.10), are deposited only after
    step 2 of the order of writes is confirmed (like every notice of an
    event, they follow its durable state write), and are signed with the
-   **old relay key**, which the vault keeps in memory for them during the
-   rotation's grace period, with the tokens those devices issued for it,
+   **old relay key**, which the vault keeps in its state for them (and for
+   the resend of the new address) as §3.4 "Resending the new address"
+   says, with the tokens those devices issued for it,
    which the new key could not use; records "attempt
    *k* succeeded" in the state; removes the recovery record; and replaces
    the DEK for the request's PIN and the phone's secret. `MarkPresent` is
@@ -18445,8 +18506,15 @@ the old copy of §11.14.2, and the member gains nothing by choosing.
   write fault no order can fix (above), and a rotation announced to the
   connections could not be taken back. After the state write the
   notices go out (§3.4 notices, `relay.address.update`); a connection
-  that cannot be reached delays its own notice only. The new phone's
-  session follows the rotation as a recovered phone's does.
+  that cannot be reached delays its own notice only, and
+  **`relay.address.update` is resent at each unlock** to a party that
+  has not acknowledged (§3.4 "Resending the new address"). The new
+  phone's session follows the rotation as a recovered phone's does.
+  **The §6.6 limit** applies: a connection that misses the update beyond
+  the life of its standing token needs a new invite (§6.6 "Limits").
+  §6.6's "SHOULD defer relay-key rotation while a standing token is
+  expired" yields here: a transfer rotates the relay key anyway, because
+  the old copy controls the old mailbox, and relies on the resend path.
 - **What settles the notice.** The rotation does not wait for a notice
   that cannot be delivered. It goes ahead at once when the unlock finds
   **no pending unlink** (for example, a token the old app never renewed
@@ -18461,11 +18529,12 @@ the old copy of §11.14.2, and the member gains nothing by choosing.
   the notice. The result is stated: the pending unlink may live as long
   as its token (at most 30 days), but a rotation made on day 7 or later
   does not wait for it. **The old relay key is kept in the state
-  (encrypted under the DEK, with the pending unlink) until the rotation's
-  grace period ends**, not in memory only, so a notice still undelivered
-  can be deposited after a day-7 rotation, at each unlock during that
-  grace period; then the old key and the pending unlink are deleted, and
-  the notice unsent. The old phone then erases when the member removes
+  (encrypted under the DEK) as §3.4 "Resending the new address" says**,
+  not in memory only, so a notice still undelivered can be deposited
+  after a day-7 rotation, at each unlock while the key is kept; when the
+  key is deleted (all acknowledged, or the tokens issued to the old
+  `sub` have expired) the pending unlink is deleted with it, and the
+  notice unsent. The old phone then erases when the member removes
   VettID, as for a notice withheld by a host (above) (the day-7 check's
   result 1 needs a vault that answers a removed device, which no release
   does yet). The cost of rotating anyway is that such an old phone may
@@ -22099,6 +22168,17 @@ Follow-ups:
       kept and retried. A host that replays can still withhold the
       notices (§11.14.2); the rotation ends the old keys against
       everyone else.
+    - *Resend path (review 3).* After a relay-key rotation the vault
+      keeps the old relay key in the state for deposits only and resends
+      `relay.address.update` with it at each unlock, once per recipient
+      per unlock and per hour, until acknowledged or the tokens issued
+      to the old `sub` have expired. *Not chosen:* a longer rotation
+      grace (one relay-wide setting); resending on a reconnect token
+      (it may carry only a reconnect `hs.init`).
+    Open item (follow-up, not in this change): a reconnect `hs.init`
+    signed with the old sender key, carrying the rotation chain and the
+    new relay address, deposited with the peer's reconnect token (up to
+    365 days), for a party whose standing token has expired.
     Follow-ups: vettid-vault (a staging release after 23), the apps
     (remove the banner, add the prompt).
 
