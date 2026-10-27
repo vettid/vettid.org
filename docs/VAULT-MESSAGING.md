@@ -48,7 +48,7 @@ changelog:
     §10.4.1, §10.10, §10.12, §10.15: pointers. §1.1: services are marked.
     Verifying a service's identity (a domain, a VettID-signed
     certificate) is not specified (§15 item 42, open). Wire-additive.
-    **Vault: a staging release after 23** (vettid-vault), and the
+    **Vault: a staging release after 24** (vettid-vault, after the one with 0.65.0), and the
     service vault must send the marker (vettid/service-vault
     docs/SERVICE-VAULT.md §5). A connection made before the release
     stays personal; a service is reconnected to be marked.
@@ -2256,15 +2256,16 @@ described in RFC 2119.
      - wallet and location;
      - shared actions;
      - grants and critical-item use;
-     - presence, as an on-demand ping.
+     - presence, as an on-demand ping;
+     - (0.69.0) service connections, marked and limited (§6.4 "Service
+       connections"): a connection that declares itself a service.
    - Planned, not yet specified (owner decision 2026-10-26; 0.64.0).
      Each is specified in a later revision; until then this document
      defines none of their messages, and a vault offers neither:
      - services: a service, with its own service vault, is reached as
-       a `connection` (PUSH-GATEWAY §12, item 5) that declares itself a
-       service (0.69.0, §6.4 "Service connections"): the member sees it
-       as a service and the vault limits what it may do; contracts
-       with a service (acceptance, completions);
+       a `connection` (PUSH-GATEWAY §12, item 5; marked and limited
+       from 0.69.0, above); contracts with a service (acceptance,
+       completions);
      - votes: eligibility by blind signature, and ballots deposited
        unlinkably.
    - Out of scope: org vaults and transport-credential minting.
@@ -4820,9 +4821,11 @@ keeps a service to the few things a service does today.
   `hs.init`'s profile (a vault that accepts an invitation declares
   nothing, so the inviter's view of an accepter is always a person), not
   `profile.update`, not any later message.
-- **When it is fixed.** At connect time. The accepting vault stores the
-  value in the connection when the request becomes active and never
-  changes it: the member's vault does not take a kind from a later
+- **When it is fixed.** At connect time. The accepting vault reads the
+  value at `connection.invite.accept`, keeps it with the outgoing
+  request and copies it into the connection when that becomes active;
+  it never changes it afterwards (a request accepted by an older vault
+  that updates before activation has no value and stays personal): the member's vault does not take a kind from a later
   message, a rekey, a reconnect or an identity rotation (§3.4, §6.6), so
   a peer that later claims to be a service, or stops claiming it, changes
   nothing about how the member sees it. A change of kind is a new
@@ -4859,8 +4862,8 @@ unnoticed. Apps word it as a claim by the other side, not a fact
 |---|---|---|
 | Upkeep, both ways | `hs.*` for `rekey` and `reconnect`, `relay.token.issued`, `relay.token.refresh`, `relay.address.update`, `identity.rotate`, `connection.approved`, `.declined`, `.removed` | |
 | Profile | `profile.update` both ways, reduced (§10.8) | |
-| From the service | `connection.authenticate.challenge` (§10.4: `purpose` `signin` or `approval`, with all of §10.4.1's limits) | **Dropped and audited** `drop.service_type` (`ref` = the `connection_id`, with the type); nothing is sent back (§9.2), and no ask is created |
-| To the service | `connection.authenticate.response`, `.rotated` | A request of a device that names the connection (`message.send`, `call.start`, `location.*`, `presence.query`, `grant.request`, `grant.fetch`, `share.rule.set`, `critical-secret-use.request`, `action.invoke`, `intro.create`, `connection.authenticate.request`, and any other that sends the connection something) is answered `forbidden`, and nothing is sent |
+| From the service | `connection.authenticate.challenge` **with a known `purpose`** (`signin` or `approval`, §10.4, with all of §10.4.1's limits): a challenge from a service without a `purpose`, or with an unknown one, is dropped like any other type | **Dropped and audited** `drop.service_type` (`ref` = the `connection_id`, with the type); nothing is sent back (§9.2), and no ask is created |
+| To the service | `connection.authenticate.response`, `.rotated`, and the upkeep and profile rows above. **The vault itself sends a service nothing else, whatever triggers it** (for example `action.offered` after `action.configure` or at activation, §10.14, `presence.ping`, `message.receipt`, `location.*`, `data.*`, `intro.*`) | A request of a device that names the connection for `message.send`, `message.attachment.*`, `call.start`, `call.permission.set`, `location.share.start`, `location.request`, `presence.query`, `grant.request`, `grant.fetch`, `grant.catalog`, `share.rule.set`, `critical-secret-use.request`, `action.invoke`, `intro.create` or `connection.authenticate.request` is answered `forbidden`, and nothing is sent. `action.configure` naming a service connection is `forbidden`, and the vault sends it no `action.offered` |
 
 In words:
 
@@ -4887,7 +4890,9 @@ In words:
 
 **Other cases.** An introduction cannot name a service as introducer,
 introduced or target (`intro.create` is `forbidden`; an `intro.offer`
-from a service is dropped, above). The marker is not a capability a
+from a service is dropped, above), and a `peer_kind` in the bundle of a
+link accepted through an introduction (`intro.link`, §10.15) is
+ignored: that connection is personal. The marker is not a capability a
 release must list (§11.10.9): an app learns it from `peer_kind` in the
 connection and request bodies, which an older vault never sends.
 
@@ -22062,8 +22067,8 @@ Follow-ups:
     Decided:
     1. the invitation bundle carries an optional `peer_kind:
        "service"` (§6.4); absent or any other value is a person;
-    2. it is **fixed at connect**: stored in the connection at
-       activation, never changed by a later message, rekey, reconnect
+    2. it is **fixed at connect**: read at accept, kept with the
+       request, copied into the connection at activation, never changed by a later message, rekey, reconnect
        or rotation; a different kind needs a new connection;
     3. the app shows "a service" on the connection request before the
        member approves, worded as the other side's claim;
@@ -22097,20 +22102,29 @@ Follow-ups:
       person, and its operator is expected to send it; a connection
       made before 0.69.0 stays personal, and a service is reconnected
       to be marked (staging: the owner reconnects "VettID Member
-      Service" once).
-    - *Open:* how a member can trust that a service is who it says:
-      a domain the service proves, or a service certificate signed by
-      VettID (MEMBER-SERVICE-PLAN §5, Phase 3 item 3.1); a service that
-      accepts a member's invitation (it declares nothing today, so the
-      member's vault sees it as a person); whether a service may send
-      notices (messages), and in what place, with the contract;
-      whether a member may turn off a service's sign-in prompts apart
-      (§15 item 40).
-    Follow-ups: vettid-vault (the staging release after 23: the field,
+      Service" once; the operator first runs the service vault's
+      `admin bootstrap -email E` or adds a second admin, since removing
+      the only admin connection empties the admin set, SERVICE-VAULT
+      §7); a challenge from a service must carry a known `purpose`, so
+      the service vault sends it before this release (the service vault
+      first, against member vaults with 0.65.0).
+    - *Open, with the recommendations:* how a member can trust that a
+      service is who it says (a domain it proves, or a service
+      certificate signed by VettID; MEMBER-SERVICE-PLAN §5, Phase 3
+      item 3.1): later, and until then no "verified" look (optionally
+      the apps pin the identity keys of VettID's own services); a
+      service that accepts a member's invitation stays unsupported (it
+      would be seen as a person; the service vault never accepts);
+      service notices are their own type with the contract, never
+      `message.*`; muting only a service's sign-in prompts is left for
+      later (§15 item 40); a "Services" section, not a filter, is chosen.
+    Follow-ups: vettid-vault (the staging release after 24: the field,
     the stored kind, the gate, the reduced profile, `forbidden` and
     `drop.service_type`, vectors), the service vault (sends
-    `peer_kind` in its bundle; vettid/service-vault docs/SERVICE-VAULT.md
-    §5), the apps (ANDROID-PLAN 0.1.90, IOS-PLAN 0.1.43),
+    `peer_kind` in its bundle and `purpose` in every challenge, with
+    the purpose-signed verification (m_p); vettid/service-vault
+    docs/SERVICE-VAULT.md §5; it ships first, against member vaults
+    with 0.65.0, which is staging release 24), the apps (ANDROID-PLAN 0.1.90, IOS-PLAN 0.1.43),
     MEMBER-SERVICE-PLAN (Phase 3 item 3.1 now refers to this marker).
 
 ## 16. Test vectors

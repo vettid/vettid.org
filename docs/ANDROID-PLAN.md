@@ -11,7 +11,7 @@ changelog:
     Connections and never in Messages; a service's detail has no Call,
     message or share rows and says what it can ask; its sign-in and
     approval requests carry a "Service" label. Draft texts for the owner.
-    Vault: a staging release after 23; the service vault must send
+    Vault: a staging release after 24; the service vault must send
     the marker. The Messages and Connections rows of the screens table
     point to it.
   - 0.1.87: owner decision of 2026-10-27 (VAULT-MESSAGING 0.67.0, §15 item
@@ -4363,7 +4363,7 @@ changes vault code here.
 
 *Owner decision of 2026-10-27 (VAULT-MESSAGING 0.69.0 §6.4 "Service
 connections", §15 item 42). The texts are drafts for the owner. Not
-built. Vault: a staging release after 23; until a vault sends
+built. Vault: a staging release after 24; until a vault sends
 `peer_kind`, nothing here shows.*
 
 A service (VAULT-MESSAGING §1.1) is a connection that declared itself a
@@ -4379,24 +4379,27 @@ today. The app keeps no kind of its own and never infers one from a name.
 **The connection request** (the "Compare the code" screen, before the
 member approves). When `peer_kind` is `"service"`, under the name and
 above the code: the line **"This is a service, not a person."** with
-the small print **"The invitation says so. VettID has not checked it."**
-The member compares the code and approves as before. A request without
-the marker shows nothing new.
+the small print **"The invitation says so. VettID has not checked who runs it."**
+The member compares the code and approves as before. Beside the
+service's name the request says **"Name given by the service"**, never
+"the name on their VettID account", and shows the fingerprint of the
+service's `ik` (§10.8), which a member can compare with one the service
+publishes. A request without the marker shows nothing new.
 
 **Lists.**
 
 | Where | Services |
 |---|---|
 | Messages | Never listed, no conversation; the new-message picker does not offer a service |
-| Connections | A separate section **"Services"** below the people (shown only when there is one); each row the name, a small **"Service"** label and a service icon instead of the initial tile; services are not starred or sorted among people |
+| Connections | A separate section **"Services"** below the people (shown only when there is one); each row the name, a small **"Service"** label and a service icon instead of the initial tile; a service may be starred (the vault allows `favorite`) and then shows in the Services section first |
 | Approvals | A sign-in or approval a service asks for names the service and carries the label **"Service"** beside the name; the screens' other texts are unchanged ("Only approve if you are signing in right now") |
 | Notifications and History | The name as always; the "Service" label where a row names the connection |
 
 **Connection detail** (a service). The title is the service's name with
-the label **"Service"**. Shown: the profile it shared (names, `ik`
-fingerprint, its logo if any), **"What this service can ask"**, its
+the label **"Service"**. Shown: the profile it shared (the names labelled **"Name given by the service"**, not
+the name on a VettID account; the `ik` fingerprint; its logo if any), **"What this service can ask"**, its
 requests (mute, resume), History, remove. Hidden: message, **Call**,
-"You share with…" and "Add a rule", authenticate (the member does not
+"<First> shares with you", "Ask for something", "You share with…" and "Add a rule", authenticate (the member does not
 challenge a service), location and presence actions, introductions.
 The Call button is simply absent. **"What this service can ask"**:
 **"It can ask you to confirm a sign-in or approve an action. It can't
@@ -4414,7 +4417,8 @@ else; the app removes the action.
 | `service_label` | Service |
 | `services_section_title` | Services |
 | `service_request_line` | This is a service, not a person. |
-| `service_request_caveat` | The invitation says so. VettID has not checked it. |
+| `service_request_caveat` | The invitation says so. VettID has not checked who runs it. |
+| `service_name_label` | Name given by the service |
 | `service_detail_can_ask_title` | What this service can ask |
 | `service_detail_can_ask_body` | It can ask you to confirm a sign-in or approve an action. It can't message or call you, and it can't ask for your data. |
 | `service_no_calls` | Services can't be called. |

@@ -10,7 +10,7 @@ changelog:
     is a service, not a person." line on the connection request,
     a "Services" section, no Call, message or share rows, a "Service"
     label on a service's requests), draft texts the same. Vault: a
-    staging release after 23.
+    staging release after 24.
   - 0.1.40: owner decision of 2026-10-27 (VAULT-MESSAGING 0.67.0, §15 item
     41). §4.9 "Pairing": when the unlock's `ok` carries `invitation_recovery_id`, the
     phone sends one `hs.init` with that `recovery_id` as `ctx`, the
@@ -1367,11 +1367,11 @@ K on a `410`. On `401` it never forgets. The tests are Android's.
 "Service connections (0.1.90)", carried here by reference and not to be
 changed on one platform alone: the connection request's line "This is a
 service, not a person." with "The invitation says so. VettID has not
-checked it."; a "Services" section of Connections and never in
+checked who runs it."; a "Services" section of Connections and never in
 Messages; no Call, message or share rows on a service's detail, which
 says what the service can ask; the label "Service" on a service's
 sign-in and approval requests; the texts `service_label`,
-`services_section_title`, `service_request_line`, `service_request_caveat`,
+`services_section_title`, `service_request_line`, `service_request_caveat`, `service_name_label`,
 `service_detail_can_ask_title`, `service_detail_can_ask_body`,
 `service_no_calls`, `service_forbidden` and `services_empty` are
 Android's. Only the platform differs: the section is a `List` section
