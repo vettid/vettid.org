@@ -1180,7 +1180,7 @@ surface than the vettid.dev app and a layout modelled on Proton Mail.
 | D3 | **v1 scope**: enrollment, unlock, Protean Credential, settings (always), plus **connections + messaging** and **items** (data, secret and critical items per VAULT-ITEMS; originally "secrets + critical secrets"). Calls, desktop/agent pairing and LEASH, wallet, location and presence come later. |
 | D4 | **Minimum Android 12 (API 31)**; target the current API level. |
 | D5 | **Message search later** (not in v1). |
-| D6 | **Biometric app lock in v1**: opening the app (and returning to it after a timeout) can require a biometric or device credential via BiometricPrompt (class 3). 0.1.91: it is a UI gate only and protects no data at rest (the app keeps no vault content on the phone, §5 "What the phone keeps"; there is no Keystore key behind it). 0.1.19: called **App lock**, with the method Biometrics (as described) or Phone screen lock (the device credential only). It is a convenience layer only: it never replaces the vault PIN (unlocking the vault) or the credential password (critical actions). |
+| D6 | **Biometric app lock in v1**: opening the app (and returning to it after a timeout) can require a biometric or device credential via BiometricPrompt (class 3). 0.1.91: it is a UI gate only and protects no data at rest (the app keeps no vault content on the phone, §5 "What the phone keeps"). The app lock may use a user-authentication-bound Keystore key for BiometricPrompt, but no data is encrypted under it. 0.1.19: called **App lock**, with the method Biometrics (as described) or Phone screen lock (the device credential only). It is a convenience layer only: it never replaces the vault PIN (unlocking the vault) or the credential password (critical actions). |
 | D7 | **Notification modes** (owner, 2026-10-09; 0.1.23): the member picks how notifications reach the phone: **On-phone service** (recommended, most private; the default), **Google push** (FCM through the VettID push gateway; offered once the gateway and FCM credentials exist) or **Off** (not recommended). Feed items raise notifications through the chosen mode (§4 Notification modes). Supersedes PUSH-GATEWAY 0.2.0 §11's default order (FCM first) for this app (PUSH-GATEWAY 0.3.0 follows it). No UnifiedPush (owner, 2026-10-09; 0.1.24; §9, question 10): the on-phone service is the path for phones without Google services. |
 | D8 | **Wallet, presence, location and video** (owner, 2026-10-17; 0.1.42; §4 "Wallet, presence, location and video"). All four are wanted, in the order **wallet, presence, location**, with **video after the calling service** (CALLS-PLAN C2 and C3). Wallet networks on staging: **signet and testnet4**; mainnet for production later. The wallet's **chain source is the member's choice**: the app reads balances and coins and broadcasts through a server the member can set. |
 | D9 | **A separate approvals indicator** (owner, 2026-10-27; 0.1.89; §4 "The approvals indicator"). What waits for the member's decision (sign-in and admin approvals, connection requests, share and ask approvals, transfer confirmations, device and agent approvals) has its own indicator in the top bar, apart from the bell (the record of what happened), shown only while something is open, with its count; time-critical entries (sign-in and approval challenges, session requests and `approval.pending` from arrival, sign-ins shown neutral; other asks with a deadline in their last 2 minutes) show the time left, highlighted, in the indicator and the row; the tap opens the Approvals list; a snackbar with View announces a new time-critical request while the app is open; a request's notification opens that request, counts down and goes when it is decided or expires; icon and badge on crowded or large screens; sign-ins show the time left in the neutral treatment (no error colour), the Requests channel stays unchanged, `approval.pending` is time-critical from arrival, and a location "Not now" is kept in the encrypted local store. Why: a sign-in lives minutes and was missed while a conversation was open |
@@ -6170,7 +6170,10 @@ read from the vault when the vault is open and are held in the app's
 memory. They are cleared at the vault lock, at a hold, at a wipe and when
 the process ends. There is no database, no content cache, no photo cache
 and no HTTP cache, and nothing of the content goes to a file, DataStore,
-`SavedStateHandle`, a log or a backup. This includes pending approval
+`SavedStateHandle`, a log or a backup, except where the member asks:
+**Save to phone** of a photo (MediaStore, Pictures/VettID, §4 "Photo
+attachments") and the History export (Storage Access Framework); both
+leave VettID by design. This includes pending approval
 events and the names on recent connection requests: they are shown while
 the vault is open and read again from the vault after the next unlock.
 (The app persisted these two, encrypted, across a lock; that is being
@@ -6181,13 +6184,15 @@ What the phone does keep, and why:
 
 | Item | Where | Protection | Cleared when | Backup |
 |---|---|---|---|---|
-| Device identity, app key, attestation key, phone key | Android Keystore (StrongBox where present, else TEE) | Hardware-backed, non-exportable, per vault | Wipe; the end of a transfer's keep period on the old phone | None |
-| Key that encrypts the state files | Android Keystore | Hardware-backed; not bound to user authentication, because collecting from the relay in the background needs it after the first unlock (VAULT-MESSAGING §3.2, §3.5 residual) | Wipe | None |
+| App key, device attestation keys, phone key | Android Keystore (StrongBox where present, else TEE) | Hardware-backed, non-exportable; the app key and phone key per vault, a new attestation key per attestation | Wipe; the end of a transfer's keep period | None |
+| Device identity seeds (relay, identity, KEM) | SharedPreferences, wrapped (AES-GCM) under the Keystore key vettid.seed_wrap.v1 (TEE) | Ciphertext only; the key is not bound to user authentication (background collection) | Wipe; sign-out; a transfer away | None |
+| Key that encrypts the state files | Android Keystore | Hardware-backed; not bound to user authentication, because collecting from the relay in the background needs it after the first unlock (VAULT-MESSAGING §3.2, §3.5 residual) (0.1.91: the app refuses a key the Keystore does not report in the TEE or StrongBox; being fixed) | Wipe | None |
 | Transport state: session keys, relay token, the sealed credential blob, one-time keys, the outbox | Encrypted state file (AES-GCM) in no-backup storage | The Keystore key above | Wipe; each part when it is used up or replaced | None |
-| Account ids and flags; "Not now" entries `{request_id, exp}` | Encrypted state file in no-backup storage | The same | Wipe; an entry at its `exp` | None |
-| Owner-check state, the lock record, the canary manifest | Encrypted state file in no-backup storage | The same (0.1.91: the lock record is encrypted as the others are; being fixed) | Wipe; the lock record when the vault unlocks | None |
-| Settings (theme, notification mode, app lock on/off, chain server) | DataStore | None needed: no secrets, no vault content | Uninstall | None |
-| A copied secret item value | The system clipboard | Local to the phone (the clip is marked sensitive and not synced); see the clipboard rule | 60 seconds after the copy, at the vault lock, and only if the clip is still the app's | None |
+| Account ids and flags (user_guid, vault_id, the masked email hint, markers); with location (not built yet), its "Not now" entries {request_id, exp} | Encrypted state file in no-backup storage | The same | Wipe; an entry at its `exp` | None |
+| Owner-check state, the lock record, the canary manifest | Encrypted state file in no-backup storage | The same (0.1.91: the lock record is encrypted as the others are; being fixed) | Wipe (the lock record is rewritten, never deleted otherwise) | None |
+| Settings and non-secret state: theme, app lock (on/off, method, timeout), notification mode, previews, push-registration flags, release-notice state (DataStore); the identity slot in use, the attestation-key list, the last served (public) release manifest, the pending-lock notice (SharedPreferences); with the wallet (not built yet), the chain server | DataStore / SharedPreferences | None needed: no secrets, no vault content | Wipe; uninstall | None |
+| App lock key | Android Keystore, bound to user authentication (class 3 biometric or the device credential) | Hardware | Turned off; a new biometric (Biometrics method); wipe | None |
+| A copied secret item value | The system clipboard | Marked sensitive (`EXTRA_IS_SENSITIVE`), so the clipboard preview hides it; see the clipboard rule | 60 seconds after the copy, at the vault lock, and only if the clip is still the app's | None |
 | Notifications | The system | Texts follow the Content rules | When the vault stops being open | None |
 
 **Backups are off.** `allowBackup=false` and `data_extraction_rules`
@@ -6198,8 +6203,11 @@ vault, and keys that did not come with it are not missed.
 **The state files' key** is hardware-backed and is not bound to user
 authentication. That is the residual risk stated in VAULT-MESSAGING §3.2
 and §3.5: a person who has the unlocked, rooted phone could use the key,
-but the files hold transport state only, never vault content, and the
-vault does not accept a phone's request without the credential.
+but the files hold transport state only, never readable vault content
+(the credential blob is sealed to the vault's CEK and the password), and
+they cannot open the vault: an unlock also needs the PIN and the phone
+key's unlock secret, and every use of the credential needs the member's
+password and the vault's CEK, which changes at every use.
 
 **The clipboard rule** (mirrors IOS-PLAN §6.5). Secrets are not copied
 except where the plan says so (the pairing code, §4 "Devices & agents";

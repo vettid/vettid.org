@@ -1573,7 +1573,7 @@ keys, the dev stack's hosts, or any `VettIDTesting` symbol fails CI
 | App key (§11.12.2) | Keystore P-256 signing key, no user authentication | **Secure Enclave P-256 signing key** (`SecureEnclave.P256.Signing.PrivateKey`), access control `.privateKeyUsage` only, `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, so that lock and polling work in the background; SPKI from `publicKey.derRepresentation`; `akid` = first 16 bytes of SHA-256(SPKI) |
 | Phone key (§11.14.1, release R) | Keystore HMAC-SHA-256 key, not bound to authentication | **Secure Enclave P-256 key-agreement key** (`SecureEnclave.P256.KeyAgreement.PrivateKey`), access control `.privateKeyUsage` only, **`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`** (stricter than the app key's class and than Android's rule, as the owner decided; `AfterFirstUnlockThisDeviceOnly` not chosen: it is used only in requests started in the app in the foreground, so never while the iPhone is locked; a refusal while locked is never lost keys); its key blob in the keychain with the same class, not synchronizable, labelled with its `key_vault`; plus one record per epoch in the encrypted file store; §6.3 |
 | Identity, relay and session keys (Ed25519, X25519, ML-KEM seeds) | Seeds wrapped by a Keystore AES key (`SeedWrapper.kt`) | Seeds wrapped (AES-GCM) under a key derived from a Secure Enclave key agreement, stored in the keychain `AfterFirstUnlockThisDeviceOnly`; plaintext seeds only in memory, zeroized after use |
-| State files (transport state, account ids and flags, owner-check and lock records; 0.1.44: no caches, no vault content) | Files under a Keystore AES-GCM key (`KeystoreFileStore.kt`, format `0x01 ‖ iv ‖ AES-GCM`), in no-backup storage | The same file format under a hardware-backed key (Secure Enclave-derived, as for the seeds); files `NSFileProtectionCompleteUntilFirstUserAuthentication`, the app's data directory excluded from backups (`isExcludedFromBackup`); atomic replace on write. §6.9 |
+| State files (transport state, account ids and flags, owner-check and lock records; 0.1.44: no caches, no vault content) | Files under a Keystore AES-GCM key (`KeystoreFileStore.kt`, format `0x01 ‖ iv ‖ AES-GCM`), in no-backup storage | The same file format under a random 32-byte key held in the keychain (`AfterFirstUnlockThisDeviceOnly`, not synchronizable; keychain items are protected by the device's hardware key hierarchy; not Secure Enclave-derived); files `NSFileProtectionCompleteUntilFirstUserAuthentication`, the app's data directory excluded from backups (`isExcludedFromBackup`); atomic replace on write. §6.9 |
 
 Rules, as on Android: every key is per vault and `ThisDeviceOnly`;
 none is synchronizable; nothing is in iCloud Keychain or a backup. The
@@ -2093,7 +2093,7 @@ messages, photos, connections, the feed, History and the profile are
 read from the vault when it is open and held in the app's memory. They
 are cleared at the vault lock, at a hold, at a wipe and when the process
 ends. There is no database, no content cache, no photo cache and no
-HTTP cache (`URLCache` is disabled for vault requests), and nothing of
+HTTP cache (every URLSession is `.ephemeral`: no disk cache and no persistent cookies; the release-notes fetch also sets `urlCache = nil`), and nothing of
 the content goes to a file, `UserDefaults`, scene state restoration, a
 log or a backup. Pending approval events and the names on recent
 connection requests are included: they are shown while the vault is open
@@ -2105,24 +2105,31 @@ them, encrypted, across a lock; that is being removed). The app lock
 |---|---|---|---|---|
 | App key, phone key | Secure Enclave, key blob in the keychain `ThisDeviceOnly`, not synchronizable (§6.1) | Hardware-held, per vault | Wipe; end of a transfer's keep period | None |
 | App Attest key | Secure Enclave via App Attest, `keyId` in the keychain | Hardware-held | Wipe | None |
-| Seeds (identity, relay, session) and the key that encrypts the state files | Keychain `AfterFirstUnlockThisDeviceOnly`, wrapped under a Secure Enclave-derived key | Hardware-backed; not bound to user authentication, because collecting in the background needs it after the first unlock (VAULT-MESSAGING §3.2, §3.5 residual) | Wipe | None |
+| Seed-wrap key | Secure Enclave P-256 key agreement, AfterFirstUnlockThisDeviceOnly | Hardware-held | Wipe | None |
+| Seeds (identity, relay, KEM) | Keychain AfterFirstUnlockThisDeviceOnly, wrapped under the seed-wrap key | Hardware-backed wrap | Wipe | None |
+| State files' key | Keychain AfterFirstUnlockThisDeviceOnly, not synchronizable: a random 32-byte key (keychain items are protected by the device's hardware key hierarchy) | Not bound to user authentication (background collection needs it after the first unlock; VAULT-MESSAGING §3.2, §3.5 residual) | Wipe | None |
+| Phone-secret records | Encrypted state file phone-secrets | Per epoch: key_vault, epoch, pub(E_e), check; the unlock secret is never stored | Wipe; replaced records 7 days after confirmation | Excluded |
 | Transport state: session keys, relay token, sealed credential blob, one-time keys, outbox | Encrypted state file (AES-GCM) in Application Support | The state files' key | Wipe; each part when used up or replaced | Excluded |
-| Account ids and flags; "Not now" entries | Encrypted state file | The same | Wipe; an entry at its `exp` | Excluded |
-| Owner-check state, lock record, canary manifest | Encrypted state file | The same | Wipe; the lock record at unlock | Excluded |
-| Settings | `UserDefaults` | None needed: no secrets, no vault content | Uninstall | Per iOS defaults; holds nothing sensitive |
+| Account ids and flags; with location (not built yet), the "Not now" entries | Encrypted state file | The same | Wipe; an entry at its `exp` | Excluded |
+| Owner-check state, lock record, canary manifest | Encrypted state file | The same | Wipe | Excluded |
+| Theme only (`vettid.theme`) | UserDefaults | — | Wipe; uninstall | Included in backups (the theme only) |
+| App lock | Secure Enclave key (.biometryCurrentSet or .devicePasscode), its "made" record in the keychain WhenUnlockedThisDeviceOnly, encrypted settings file | Hardware; protects no data at rest | Turned off; wipe | None |
 | A copied secret item value | `UIPasteboard`, `.localOnly`, `.expirationDate` 60 s | Local to the phone, not shared with other devices | After 60 seconds, at the vault lock (only if still the app's item) | None |
-| Notifications (local, and from phase P pushed) | The system | Content rules | When the vault stops being open | None |
+| Notifications | The system | Content rules | None are posted before phase P; from then, when the vault stops being open | None |
 
-**Backups are off:** the data directory and the state files carry
-`isExcludedFromBackup`, keychain items are `ThisDeviceOnly` and none is
-synchronizable (§6.1). **The state files' key** is the same residual as
-on Android: hardware-backed, not user-authentication bound, and the
-files hold transport state only.
+**Backups:** the state files carry `isExcludedFromBackup`, keychain items
+are `ThisDeviceOnly` and none is synchronizable (§6.1); only the theme
+setting is in a backup. **The state files' key** is the same residual as
+on Android: not bound to user authentication, and the files hold
+transport state only.
 
 **Notifications never outlive the vault being open.** Every notification
-is removed when the vault locks, is held, is wiped or closes. A process
-that was killed cannot remove one, so at launch, and in a notification
-service extension's start from phase P, the app removes its delivered
+is removed when the vault locks, is held, is wiped or closes. (Today the
+app posts none before phase P, has no extension, and only the wipe
+removes notifications.) A process
+that was killed cannot remove one, so (from phase P; to be built) at
+launch, and in a notification
+service extension's start, the app removes its delivered
 and pending notifications when the vault is not open.
 
 ## 7. Test vectors
