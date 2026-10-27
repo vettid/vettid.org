@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.66.0
-date: 2026-10-26
+version: 0.67.0
+date: 2026-10-27
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.13.2)
-  - ANDROID-PLAN.md (0.1.85)
-  - IOS-PLAN.md (0.1.39; §9.1 VA1–VA4)
+  - ANDROID-PLAN.md (0.1.87)
+  - IOS-PLAN.md (0.1.40; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,17 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.67.0: **owner decision 2026-10-27** (relayed by the iOS agent;
+    ANDROID-PLAN 0.1.87, IOS-PLAN 0.1.40; §15 item 41). §11.4 unlock
+    result: a new member `recovery_completed`, present when the unlock
+    completed a recovery's step 3, the `recovery_id` of that
+    registration, inside the sealed result, absent otherwise and from an
+    older vault. §11.14.6 "Pairing": with it the phone sends one
+    `hs.init` with that `recovery_id` as `ctx`, and if that handshake
+    fails or times out it falls back to the walk of 0.63.2; without it
+    (an older vault) the walk is unchanged. Wire-additive; no MEMBER-API
+    change (the result is vault to app). **Vault: the next staging
+    release after 23**, not release 23.
   - 0.66.0: **owner decision 2026-10-26** (staging only; wire-additive
     for one enum). The staging automation attestation CA that
     VAULT-RELEASES §3.1 already listed for staging ("test CA **and** the
@@ -12289,6 +12300,12 @@ one of:
   exception is `vault_bundle` in the result of the **recovered** phone's
   own unlock before its first handshake, which resumes a lost `ok`
   (§11.14.6, "A lost `ok`"); `credential_backup` stays absent.
+  — `recovery_completed` (0.67.0; string, a `recovery_id`) is present only
+  when this unlock completed a recovery's step 3 (§11.14.2, §11.14.6
+  "A lost `ok`"): the `recovery_id` of the registration it completed. It is
+  in the sealed result and so cannot be read or changed on the way. Its
+  absence means that no recovery was completed or that the vault is older
+  (§11.14.6 "Pairing" says what the phone then does).
 - `{"ok": false, "code": "bad_pin|backoff|unknown_device|attestation|signer_refused|state_rollback|vault_missing|manifest|wrong_release|release_key|retry|recovery_pending|no_backup|device_secret|transfer_incomplete",
   "header_seq": m, "retry_after": <s>}` — `signer_refused` (0.27.0):
   the device key's recorded signer is not pinned by this release, or
@@ -17388,7 +17405,7 @@ with its recovering (app) key K:
 - **A failed register.** Each register POST is judged **on its own**, not once per register flow, and is recorded durably before it is posted. A POST **got no `202`** when it was answered `503 release_starting` or `vault_unavailable`, `429` or `409 recovery_not_available`, or got no answer at all (a network failure or timeout before any answer); any other answer without a `202`, except a `401` (below), keeps N as unknown (it may have registered). Only the **first** POST for a recovery's code that got no `202` counts as not registered. A POST answered `202` was queued and may have reached the vault: a failure after it (the poll fails, times out, answers `retry`, or shows the unsealed slot status `expired`) means **maybe registered**, and the phone confirms it with the status signed with K. A readable refusal (`bad_code`, `too_early`, `attestation`, `no_recovery`, `no_backup`, sealed `expired`) settles that POST as not registered. Every later POST for the same code is a **repeat**, whatever the earlier one's outcome and whether or not it is in the same register flow; a re-post of the same code after a request whose slot showed `expired` is one. To a repeat, `409 recovery_not_available` (the member API's answer to any repeat once the first is recorded) and `used` mean **maybe registered**: the phone keeps the new registration and confirms it with the status signed with K (`registered` = registered for this recovery). Further retries with the same N, the same K and the recovery's code are always allowed; only a new identity is forbidden. A `401` at the register drops N's registration (N's identity and relay key; E and K stay) **only for an N that never had a registration answered `ok`, left maybe registered, or unknown**; a re-registered N may be the identity the vault adopted, so there a `401` drops nothing. An N dropped so no longer counts as one of the two.
 - **The codes that prove no step 1 on their own** (`busy`, `wrong_again`, `attempt_lost`, `exhausted`, `not_armed`, `closed`, `attestation`, the counter-down answer, the wait verdicts) settle **only the open they answer**, never an earlier unanswered open; the sticky rule above is unchanged. (`attestation`: owner decision of 2026-10-26.) For example, when a register's answer is lost after its `202` and the repeat with a new App Attest key is answered `used` (the vault keeps the first attestation), the open with the new key is refused `attestation` and the phone opens with the other key; that refused open counts as answered, so a recovery that ends later does not enter "could not tell" because of it.
 - **The history is saved before the open is posted.** Each open's entry in the per-open history is written durably first; if that save fails, the open is not posted. A post failure of any kind keeps the open's entry (a re-sent POST can be queued), and nothing after the post is accepted may remove an entry.
-- **Pairing** (0.63.0; owner decision of 2026-10-26). Each identity pairs only with its own `recovery_id` as `ctx`; for a re-registered N that is the `recovery_id` it **last** registered for. (0.63.2) After an `ok` to an unlock (a lost ok), N sends `hs.init` with each `recovery_id` it registered for, newest first (the invitation may be the earlier one's: an unlock that finishes an earlier N open's step 3 ends a later registration of N whose open stored nothing, §11.14.2), then falls back to E. The binding after the handshake is the attested key of the registration whose `recovery_id` was the `ctx` of the handshake that completed (the invitation's registration). **The invitation at a repeat.** A repeated open whose step 2 was not stored sets the invitation from the current registration. A repeated open whose step 2 was stored (by an earlier open of this recovery or of an earlier one) looks at the stored invitation: if it is for the **same identity** (the same `ik`: N registered again, on iOS with a new App Attest key), the vault sets it again from the current registration (the current `recovery_id` as `ctx`, its attestation binding, KEM and relay key), and the earlier recovery's invitation goes; if it is **another identity's** (E's, stored by E's open), it is kept, E pairs with E's `recovery_id`, and N falls back to E (and E's `recovery_id`) when no `hs.resp` arrives. So for N the binding after pairing is that of the registration whose open answered `ok`; when E's invitation was kept, it is E's. **Either way the repeat renews the invitation** (usable again, for 24 hours from the open) and drops a first handshake begun with it and not completed, also E's when N opens, as the unlock of "A lost `ok`" does. **The header's binding.** For a recovered phone's unlock key the header keeps an earlier binding (and the iOS counter advanced there) only when it is for the same attested key as the invitation's (the platform, the public key and the App Attest key id); otherwise the invitation's binding is used, and a binding that cannot be read never matches. (A guard: in the flows above, a new recovery's request has already removed the earlier registration's unlock key from the header.) **Accepted gap.** Until step 3 is stored the header's `next` part names the phone with the binding of the run that stored step 1. If a repeat stores the state and its header write then fails, and the registration's attested key changed (iOS), the new key's lost-ok unlock is refused (`attestation`, decided before the PIN and not counted) until the phone opens again while the recovery is still registered and before any unlock of this phone has succeeded; that open repeats through the `next` wrap and uses no attempt. After an unlock answered `ok` (for example with the earlier key, below) the phone pairs and does not open again: (0.63.2) that unlock completed step 3 and, in the same header write, removed the recovery record (whichever is current, §11.14.2), so an open then is answered `no_recovery` (refused at step 1, which may answer with random bytes), nothing used. An unlock with the earlier key in that state succeeds, and its header write binds the new key. **Deployment:** the vault release that carries vettid-vault #150 (staging release 23). Before it, a repeat after step 2 kept the stored invitation whatever its identity, without renewing it. N is reused for a later recovery only against a vault of staging release 23 or later (vettid-vault #150): before it, a repeat after an earlier N open stored step 2 leaves N's invitation under that earlier `recovery_id` with that registration's key, so N's `hs.init` with its latest `recovery_id` gets no `hs.resp`; the apps ship it only once staging release 23 is the vaults' release.
+- **Pairing** (0.63.0; owner decision of 2026-10-26). Each identity pairs only with its own `recovery_id` as `ctx`; for a re-registered N that is the `recovery_id` it **last** registered for. (0.63.2) After an `ok` to an unlock (a lost ok), N sends `hs.init` with each `recovery_id` it registered for, newest first (the invitation may be the earlier one's: an unlock that finishes an earlier N open's step 3 ends a later registration of N whose open stored nothing, §11.14.2), then falls back to E. The binding after the handshake is the attested key of the registration whose `recovery_id` was the `ctx` of the handshake that completed (the invitation's registration). (0.67.0; owner decision of 2026-10-27) **The vault names the completed recovery.** When an unlock completes a recovery's step 3 (a lost `ok`, §11.14.2), the `ok` body of `vault.unlock.result` carries `recovery_completed`: the `recovery_id` (the string the registration was made under) of the registration the unlock completed, which is the `ctx` the vault accepts for that registration's invitation. The result is sealed to the device's `kem` (§11.14.6 "Pairing"), so a relay or the network can neither read nor change it. The phone sends a single `hs.init` with that `recovery_id` as `ctx`, and the binding after the handshake is that registration's attested key, checked as before; the phone uses the id only if it is one it registered for, and a wrong or forged id at worst fails that one handshake. If the single `hs.init` gets no `hs.resp` within the pairing timeout, or fails, the phone falls back to the walk (the remaining `recovery_id`s newest first, then E): never less safe than before. The member is absent when the unlock completed no recovery, and from a vault older than the one that carries it: an absent member means the phone keeps the walk. Vault: the next staging release after 23 (not release 23, whose slow path needs a lost answer and N reused several times). **The invitation at a repeat.** A repeated open whose step 2 was not stored sets the invitation from the current registration. A repeated open whose step 2 was stored (by an earlier open of this recovery or of an earlier one) looks at the stored invitation: if it is for the **same identity** (the same `ik`: N registered again, on iOS with a new App Attest key), the vault sets it again from the current registration (the current `recovery_id` as `ctx`, its attestation binding, KEM and relay key), and the earlier recovery's invitation goes; if it is **another identity's** (E's, stored by E's open), it is kept, E pairs with E's `recovery_id`, and N falls back to E (and E's `recovery_id`) when no `hs.resp` arrives. So for N the binding after pairing is that of the registration whose open answered `ok`; when E's invitation was kept, it is E's. **Either way the repeat renews the invitation** (usable again, for 24 hours from the open) and drops a first handshake begun with it and not completed, also E's when N opens, as the unlock of "A lost `ok`" does. **The header's binding.** For a recovered phone's unlock key the header keeps an earlier binding (and the iOS counter advanced there) only when it is for the same attested key as the invitation's (the platform, the public key and the App Attest key id); otherwise the invitation's binding is used, and a binding that cannot be read never matches. (A guard: in the flows above, a new recovery's request has already removed the earlier registration's unlock key from the header.) **Accepted gap.** Until step 3 is stored the header's `next` part names the phone with the binding of the run that stored step 1. If a repeat stores the state and its header write then fails, and the registration's attested key changed (iOS), the new key's lost-ok unlock is refused (`attestation`, decided before the PIN and not counted) until the phone opens again while the recovery is still registered and before any unlock of this phone has succeeded; that open repeats through the `next` wrap and uses no attempt. After an unlock answered `ok` (for example with the earlier key, below) the phone pairs and does not open again: (0.63.2) that unlock completed step 3 and, in the same header write, removed the recovery record (whichever is current, §11.14.2), so an open then is answered `no_recovery` (refused at step 1, which may answer with random bytes), nothing used. An unlock with the earlier key in that state succeeds, and its header write binds the new key. **Deployment:** the vault release that carries vettid-vault #150 (staging release 23). Before it, a repeat after step 2 kept the stored invitation whatever its identity, without renewing it. N is reused for a later recovery only against a vault of staging release 23 or later (vettid-vault #150): before it, a repeat after an earlier N open stored step 2 leaves N's invitation under that earlier `recovery_id` with that registration's key, so N's `hs.init` with its latest `recovery_id` gets no `hs.resp`; the apps ship it only once staging release 23 is the vaults' release.
 
 **The schedule of waits.** The ten attempts of a generation are numbered
 1 to 10. After attempt *k* was used and was not a success, no further
@@ -21848,6 +21865,25 @@ Follow-ups:
     windows, the sign-in cooldown and pending cap, uncounted declines;
     vectors for `m_p`), the service vault (sets `purpose`, limits the
     sign-ins it starts), the apps (the screens, later).
+
+41. **The vault names the completed recovery (0.67.0; owner decision
+    2026-10-27).** A phone that reused N could try up to k `recovery_id`s
+    at 90 s each (the vault answers a wrong `ctx` with nothing), so
+    pairing took up to k times 90 s. Decided: the unlock result carries
+    `recovery_completed` (§10.2) and the phone sends one `hs.init` with
+    it, binding to that registration's key as before; without it (an
+    older vault) or when that handshake fails, the walk of 0.63.2.
+    - *Why:* it removes the wait (one handshake, no guessing).
+    - *Not chosen:* bounding the list (it could skip the right
+      registration); a fast refusal for a wrong `ctx` (the phone would
+      still walk the list); trying the registration of the unlock's key
+      first (it works only if the vault accepts the unlock solely with
+      that registration's key, which this document does not guarantee).
+    - *Safety:* the member is inside the sealed result; the phone still
+      verifies the binding, so a wrong or forged id at worst fails the
+      handshake and falls back to the walk.
+    Follow-ups: vettid-vault (the member; the next staging release after
+    23), the apps (the single `hs.init`, the fallback).
 
 ## 16. Test vectors
 
