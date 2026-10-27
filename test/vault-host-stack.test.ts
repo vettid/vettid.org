@@ -112,6 +112,16 @@ describe('VettidOrgVaultHostStack: network and egress (§8.4)', () => {
     for (const g of resources(H.json, 'AWS::Logs::LogGroup')) expect(g.Properties.RetentionInDays).toBe(30);
   });
 
+  // CloudWatch Logs, from 2027-04-26: log-group actions need the log-group ARN (no `:*`).
+  test('flow log role: DescribeLogStreams also on the plain log-group ARN, same role', () => {
+    const st = resources(H.json, 'AWS::IAM::Policy').flatMap((p) => p.Properties.PolicyDocument.Statement)
+      .filter((x: any) => x.Action === 'logs:DescribeLogStreams');
+    expect(st).toHaveLength(1);
+    expect(str(st[0].Resource)).toContain(':log-group:/vettid-org/');
+    expect(str(st[0].Resource)).toMatch(/vault-flow-logs"\]/);
+    expect(resources(H.json, 'AWS::EC2::FlowLog')).toHaveLength(1);
+  });
+
   // A change to this list is a security review item (VAULT-RELEASES §8.4).
   test('DNS Firewall allowlist (snapshot)', () => {
     const lists = resources(H.json, 'AWS::Route53Resolver::FirewallDomainList');

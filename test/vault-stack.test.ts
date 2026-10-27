@@ -396,6 +396,20 @@ describe('VettidOrgVaultStack: recovery attempt counter bucket (release R, VAULT
     expect([...VAULT_RECOVERY_HOST_OBJECT_ACTIONS, ...VAULT_RECOVERY_HOST_BUCKET_ACTIONS]).toHaveLength(5);
   });
 
+  // CloudWatch Logs, from 2027-04-26: DescribeLogStreams needs the log-group ARN (no `:*`);
+  // the stream actions stay on `:*`.
+  test('the host role: log-group ARN for DescribeLogStreams, stream ARN for the stream actions', () => {
+    for (const s of [prod, staging]) {
+      const st = hostStatements(s.json).filter((x: any) => str(x.Action).includes('logs:'));
+      const group = `log-group:/vettid-org/${s === prod ? 'prod' : 'staging'}/vault-host`;
+      expect(st.map((x: any) => [x.Action, x.Resource.endsWith(':*')])).toEqual([
+        [['logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams'], true],
+        ['logs:DescribeLogStreams', false],
+      ]);
+      expect(st[1].Resource.endsWith(group)).toBe(true);
+    }
+  });
+
   // P18 (VAULT-HOST-PROTOCOL §12): the instance role MUST NOT hold a delete,
   // bypass-governance, legal-hold or bucket-configuration permission on the
   // counter bucket. Checked over every statement of the role (its inline
