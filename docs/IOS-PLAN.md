@@ -5,12 +5,33 @@ version: 0.1.43
 date: 2026-10-27
 changelog:
   - 0.1.43: owner decision of 2026-10-27 (VAULT-MESSAGING 0.69.0, §15
-    item 42; ANDROID-PLAN 0.1.90). New §4.11 "Service connections":
+    item 43; ANDROID-PLAN 0.1.90). New §4.13 "Service connections":
     the same as ANDROID-PLAN §4 "Service connections (0.1.90)" (a "This
     is a service, not a person." line on the connection request,
     a "Services" section, no Call, message or share rows, a "Service"
     label on a service's requests), draft texts the same. Vault: a
     staging release after 24.
+  - 0.1.42: owner decision of 2026-10-27 (ANDROID-PLAN 0.1.89, D9). New
+    §4.12 "The approvals indicator": the same indicator, count,
+    time-critical entries (from arrival for sign-in and approval
+    challenges, session requests and `approval.pending`, sign-ins shown
+    neutral; else the last 2 minutes), banner, tap target and
+    notification rules as ANDROID-PLAN §4 "The approvals indicator",
+    with the iOS differences (toolbar item, SF Symbols, VoiceOver,
+    Dynamic Type collapse, no request notification before phase P, what
+    a delivered notification can and cannot do); decision ID19; DRAFT
+    texts in §14. iOS work follows later.
+  - 0.1.41: owner decisions of 2026-10-27 (VAULT-MESSAGING 0.68.0, §15
+    item 42; ANDROID-PLAN 0.1.88). §4.11: a transfer rotates the vault's
+    keys by itself (the vault; no app step); after a PIN change or a
+    password change the app asks once, on the success screen, whether to
+    replace the vault's keys, and "Not now" ends it. What changes in the
+    app: the iPhone app has no rotate banner to remove (it was not built
+    on iOS; if a banner exists in the code by then, remove it, with its
+    state); a transfer offers nothing; add the one-time prompt; keep the
+    rotation in Settings → Security → Credential. The texts are
+    Android's, approved by the owner 2026-10-27. Vault: a staging release after 23.
+    (Review, same day: as ANDROID-PLAN 0.1.88's review note.)
   - 0.1.40: owner decision of 2026-10-27 (VAULT-MESSAGING 0.67.0, §15 item
     41). §4.9 "Pairing": when the unlock's `ok` carries `invitation_recovery_id`, the
     phone sends one `hs.init` with that `recovery_id` as `ctx`, the
@@ -513,6 +534,7 @@ the Mac agent does not reopen them.
 | ID16 | **Real iPhone on staging before VA2** | Wait for VA2 (a staging release that pins `<team>.com.vettid.app.staging`). Not recommended: pointing a `com.vettid.app` build at staging, which today's staging images would accept | — | I1 exit |
 | ID17 | **App lock** | ANDROID-PLAN D6 on iOS: **Face ID / Touch ID** or **iPhone passcode** (`LAPolicy.deviceOwnerAuthentication`), gating a Secure Enclave key that unwraps the app's local data key; a convenience layer, never in place of the PIN or the password | — | I1.6 |
 | ID18 | **Contact with Apple at attestation** | Say it in Help → Privacy: "When you set up, move or recover a vault, your iPhone asks Apple to vouch for the VettID app. Apple learns that VettID was set up on an iPhone, nothing about your vault." (`attestKey` reaches Apple's servers; assertions do not.) | Silence | I1.5 |
+| ID19 | **A separate approvals indicator** (owner, 2026-10-27) | ANDROID-PLAN D9 on iOS (§4.12): a toolbar item beside the bell while something waits for the member's decision, with its count; time-critical from arrival (sign-ins shown neutral) for sign-in and approval challenges, session requests and `approval.pending`, else in the last 2 minutes, with the time left; a tap opens the Approvals list; a short banner with View for a new time-critical request while the app is open; from phase P a request's notification opens that request, `.timeSensitive` for approval challenges and session requests but not for sign-ins; a sign-in's countdown is neutral. Before APNs (ID12) the indicator and the banner are the only cues | — | I2.3 |
 
 ## 3. Design language
 
@@ -602,7 +624,7 @@ sheet, and up to 3 lines of it on a row of priority `urgent`
 | `recovery.change_required`, `ref` = a generation | "Change your PIN or password to turn recovery back on" | "Recovery attempts were used. A change gives you 10 new attempts." |
 | `recovery.counter_unavailable` (`urgent`) | "Your vault cannot check its recovery attempts" | none; Settings → Vault status shows the approved "For a day your vault has not been able to check its recovery attempts …" text (ANDROID-PLAN §4 "Owner check and status"), scaled on a vault with a time scale |
 | `recovery.generation_closed`, `ref` `<generation>/rollback` (`urgent`; owner decision of 2026-10-20; needs a vault release) | "Your vault was given an older recovery record" | "A host may have served an older copy of your vault's recovery record, one on which recovery attempts had already been used. Your vault moved past it. If you did not try to recover your vault, change your PIN and your password now, and contact VettID." |
-| `identity.rotation_failed` (`high`) | "Your vault could not update its keys" | "Your connections still know your old keys. VettID will offer the update again." |
+| `identity.rotation_failed` (`high`) | "Your vault could not update its keys" | "Your connections still know your old keys. Your vault will try again the next time you unlock it." (**approved**, owner 2026-10-27) |
 | `identity.rotate_conflict` (`high`) | "<First Last>: verify again" | "This connection's vault announced two different new keys. That can mean someone holds an old copy of their vault. Nothing is sent or received until you check." (ANDROID-PLAN §4 "Other screens") |
 | `leash.item.run`, `leash.item.proxy` | "An agent used <item>" (decision 8); without item names: "An agent used an item" | — |
 
@@ -633,7 +655,7 @@ is the app's and needs no vault change.
 | `vault.pin_changed` | "PIN changed" | — |
 | `device.secret_renewed` | "New phone secret set" | — (the vault records it without a device) |
 | `owner_check.passed`, `.held`, `.failed`, `.locked`, `.hold_changed` | "Daily check passed", "Vault held for the daily check", "Daily check failed", "Vault locked after failed daily checks", "Daily check hold changed" (decision 5) | — |
-| `identity.rotated` | "Your vault's keys were renewed" (was "Vault identity key rotated"; decision 7) | — |
+| `identity.rotated` | "Your vault's keys were renewed" (was "Vault identity key rotated"; decision 7) | With `ref` = a `transfer_id` (VAULT-MESSAGING 0.68.0 §11.14.10; **approved**, owner 2026-10-27): "Replaced when you moved your vault to a new phone." Otherwise — |
 | `credential.rotated` | "Your credential was renewed" (was "Credential rotated"; decision 7) | — |
 | `credential.utk_resync` (VAULT-MESSAGING 0.52.0 §3.5.4; approved by the owner 2026-10-21) | "One-time keys renewed" | "This phone's one-time keys were replaced with a fresh set." The row's second line names the device from the entry's `device_id`, as for every entry with one (ANDROID-PLAN §4 History). Category Security (`credential`); not urgent: History only, the vault makes no feed item for it |
 | `credential.holder_cleared` (VAULT-MESSAGING 0.54.0 §3.5.9; staging release 21; approved by the owner 2026-10-21) | "Credential holder cleared" | "Your vault found its credential holder missing and cleared it. If you didn't remove a phone, contact VettID." The row's second line names the device from the entry's `device_id`, the cleared holder, as for every entry with one (ANDROID-PLAN §4 History); that device is no longer listed, so it shows as "Removed device". Category Security (`credential`); not urgent: History only, the vault makes no feed item for it |
@@ -650,7 +672,7 @@ is the app's and needs no vault change.
 | … reason `stale` | hidden (below) | — |
 | … a reason this app does not know | "Recovery attempts reset" | — |
 | `recovery.presence_unrecorded` | "Your vault could not record that you were here" | "If this lasts three days, your vault is no longer protected against a recovery started by someone else." (scaled on a vault with a time scale) |
-| `identity.rotation_failed` | "Key update failed" | "Your connections still know your old keys. VettID will offer the update again." |
+| `identity.rotation_failed` | "Key update failed" | "Your connections still know your old keys. Your vault will try again the next time you unlock it." (**approved**, owner 2026-10-27) |
 | `identity.rotate_conflict` | "Connection with <First Last> paused" | "This connection's vault announced two different new keys. That can mean someone holds an old copy of their vault. Nothing is sent or received until you check." |
 | `identity.rotate_resolved` | "Connection with <First Last> checked and resumed" | — |
 | `connection.request.approved`, `connection.request.declined` | "You accepted a connection request" / "You declined a connection request" | — |
@@ -1360,10 +1382,117 @@ open**. Only a code read from the vault's own readable (sealed) answer counts as
 phone with an unanswered open keeps K and follows §4.9: it never forgets
 K on a `410`. On `401` it never forgets. The tests are Android's.
 
-### 4.11 Service connections (0.1.43)
+### 4.11 Keys after a transfer, a PIN change and a password change (0.1.41)
+
+Owner decisions of 2026-10-27 (VAULT-MESSAGING 0.68.0 §11.14.10,
+§11.14.9, §15 item 42); the screens and texts are ANDROID-PLAN 0.1.88's
+("Replacing the vault's keys, once"), mirrored on iOS.
+
+- **A transfer rotates the vault's keys by itself**, as a recovery does:
+  the credential key at the approval; the relay key, identity and KEM
+  keys and wake key after the new iPhone's first unlock ("Finish the
+  move") and after the relay accepted `device.unlinked{transferred}`.
+  Neither phone has a step for it, and the app no longer offers a
+  rotation after a transfer. The transfer screens are unchanged
+  (History only); History shows `identity.rotated` (with the approved
+  detail in §4.1's table) or `identity.rotation_failed`, which the vault
+  tries again at the next unlock. The old iPhone sees nothing new.
+- **After a PIN change or a password change** the success screen asks
+  once (a sheet over that screen, not a banner), the same for both:
+  title "Also replace your vault's keys?", body "So an older copy of your vault, opened with your old PIN or password, can't be used to reach your connections. Your connections are told about your new keys.", buttons
+  "Replace keys" / "Not now" (all **approved**, owner 2026-10-27). "Replace
+  keys" opens Settings → Security → Credential, "Replace your vault's
+  keys" (approved title; `credential.rotate`, which now replaces the whole
+  set and asks the password). "Not now", or leaving the sheet any other
+  way, means no: nothing is stored, nothing is shown later, and the
+  member can still do it from the credential screen. The prompt follows
+  an applied change and a lost answer settled "went through" while the
+  member is still on the change screen; not a settlement in the
+  background or at a later start, and never "didn't go through".
+- `identity.rotation_failed` has the approved text of ANDROID-PLAN 0.1.88:
+  "Your connections still know your old keys. Your vault will try again
+  the next time you unlock it."
+- Phase: I1.8 (Change PIN, credential screen) and I3.3 (transfer). Tests
+  as ANDROID-PLAN 0.1.88's. Vault: a staging release after 23.
+
+### 4.12 The approvals indicator (0.1.42)
+
+*Owner decisions of 2026-10-27; ANDROID-PLAN 0.1.89 §4 "The approvals
+indicator" governs and is carried here by reference: what counts (open
+approvals: pending, not decided, not expired; one entry per batch;
+notices, outgoing requests, rows awaiting the peer and a "Not now"
+location request do not), the deadlines (each event's `exp`,
+`pending.exp` for a challenge; `ExpiryClock`), where it shows (every screen
+of the unlocked shell with a navigation bar, detail screens included;
+not on Approvals or any request screen; not in full-screen flows),
+when (only above 0; never while held, due, locked or at the app lock),
+urgency (from arrival for `connection.authenticate` challenges of any
+purpose and session requests, otherwise the last 2 minutes,
+`approvalUrgentSeconds = 120`; `approval.pending` from arrival; a sign-in
+gets the neutral treatment, clock and digits without the error colour;
+a "Not now" location request is kept as `{request_id, exp}` in the
+encrypted local store), the tap (always the Approvals list),
+the in-app banner for a new time-critical request, the drawer badge
+(the same count), the list order, the notification's target, locked
+and back-stack rules.* Only these differ on iOS:
+
+- **Toolbar.** A `ToolbarItem(placement: .topBarTrailing)` before the
+  bell: the SF Symbol of the drawer's Approvals entry with the count
+  badge (gold; "99+"). When time-critical it becomes a capsule with the
+  `clock` symbol and `M:SS` in the urgency colour tokens, bold; a capsule that
+  only sign-ins cause is **neutral** (clock and digits, no urgency
+  colours); the clock and the digits are the cues that do not rely on colour (also
+  for "Differentiate Without Color"). The countdown is a
+  `TimelineView(.periodic(from:by: 1))` that runs only while the view
+  is on screen. At accessibility Dynamic Type sizes or narrow widths it
+  **collapses to the icon with a clock badge** (never the full capsule),
+  and it never pushes the screen's own primary actions into the
+  overflow.
+- **VoiceOver.** One element, label from the texts in §14, trait
+  `updatesFrequently` while urgent, a 44 pt target. The announcement
+  (`UIAccessibility.post(.announcement)`) is for the soonest entry
+  only, at most once per entry at 2 minutes and at 1 minute, with
+  plurals from `DateComponentsFormatter` and a stringsdict.
+- **The in-app banner** is a short banner at the top of the screen with
+  **View** (a `UIAccessibility` announcement; shown once per entry,
+  10 seconds, longer with VoiceOver or Switch Control running).
+- **Before phase P there is no request notification** (ID12: nothing
+  arrives in the background, and the app posts local notifications only
+  for the owner check and releases), so the indicator and the banner
+  are the member's only cues, and only while the app is open.
+- **From phase P: the notification opens that request.** The
+  notification's `userInfo` carries the entry's `ref`;
+  `userNotificationCenter(_:didReceive:)` looks it up in the open list
+  (an unknown `ref` opens the list; a request screen never acts by
+  itself), goes through the app lock, unlock, gate and daily check
+  first, and sets the `NavigationStack` path to the list and that
+  request (the list under it, under it the screen the member was on),
+  **replacing** a request screen that shows another `ref`; if a
+  decision on A is in flight, B opens after it settles. A gone entry
+  opens the list with "This is no longer waiting".
+- **Removal and time sensitivity (phase P).** A **delivered** push
+  notification cannot be given a timeout or a countdown (the extension
+  runs once, on delivery): one for an expired request stays until the
+  app next runs and removes it (`removeDeliveredNotifications`, on
+  every return to the foreground and at each deadline while running),
+  and a tap on it shows "This is no longer waiting". For `approval`
+  challenges, session requests and `approval.pending`, phase P sets
+  `interruptionLevel = .timeSensitive` (it needs the capability of §6.7;
+  owner decision of 2026-10-27) so that a Focus mode does not hide a
+  request that lives minutes. Sign-in challenges
+  and challenges with no purpose stay `.active`, since anyone who knows
+  the member's email can start one (and the origin of a challenge with
+  no purpose is equally open).
+  The Requests category is otherwise unchanged.
+- **Tests.** Android's, with: the toolbar item in the large and
+  accessibility Dynamic Type sizes (icon and clock badge); the
+  VoiceOver label; B's notification with A's screen open shows B;
+  a delivered notification removed on return after an expiry.
+
+### 4.13 Service connections (0.1.43)
 
 *Owner decision of 2026-10-27 (VAULT-MESSAGING 0.69.0 §6.4, §15 item
-42). Draft texts for the owner. Not built.* The same as ANDROID-PLAN §4
+43). Draft texts for the owner. Not built.* The same as ANDROID-PLAN §4
 "Service connections (0.1.90)", carried here by reference and not to be
 changed on one platform alone: the connection request's line "This is a
 service, not a person." with "The invitation says so. VettID has not
@@ -2270,6 +2399,14 @@ approved.
   body "Notifications on iPhone need Apple push, which VettID hasn't
   turned on yet. Until then, VettID shows new activity when you open
   it, and reminds you before your daily check is due."
+- **Approvals indicator (ID19; DRAFT)**. Accessibility label "Approvals,
+  3 waiting" (1: "Approvals, 1 waiting"); in the window "Approvals, 3
+  waiting. <Name> expires in 1 minute 20 seconds"; the capsule shows
+  "1:20"; the row "Expires in 1:20"; the announcement "<Name> expires
+  in 2 minutes"; the banner "Sign in to <Name>?", "<Name> asks you
+  to approve", "<Name> asks you to confirm it is you" (no purpose) or
+  "<Name> asks for access", with **View**. The Android strings,
+  unchanged.
 - **Installed from (ID15)**: "Installed from: Apple (App Store or
   TestFlight)" / "Installed from: Xcode (development)"; secondary
   "Apple App Attest confirms this is the VettID app."

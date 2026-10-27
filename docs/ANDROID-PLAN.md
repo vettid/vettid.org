@@ -5,7 +5,7 @@ version: 0.1.90
 date: 2026-10-27
 changelog:
   - 0.1.90: owner decision of 2026-10-27 (VAULT-MESSAGING 0.69.0, §15
-    item 42). New §4 "Service connections (0.1.90)": the connection
+    item 43). New §4 "Service connections (0.1.90)": the connection
     request says "This is a service, not a person." (a claim, not
     checked); services are listed apart in a "Services" section of
     Connections and never in Messages; a service's detail has no Call,
@@ -14,6 +14,45 @@ changelog:
     Vault: a staging release after 24; the service vault must send
     the marker. The Messages and Connections rows of the screens table
     point to it.
+  - 0.1.89: owner decision of 2026-10-27 (decision D9). New §4 "The
+    approvals indicator": a separate indicator in the top bar, left of
+    the bell and on detail screens too, shown only while a request
+    waits for the member's decision (pending, not decided, not expired),
+    with its count; time-critical (a pill with the time left, `M:SS`,
+    clock glyph; urgency colours, except that sign-ins are shown
+    neutral) from arrival for sign-in and approval challenges, session
+    requests and `approval.pending`, and in the last 2 minutes for other
+    asks with a deadline; a tap always opens the Approvals list; a
+    snackbar with View for a new time-critical request; the drawer
+    badge uses the same count. The request's notification opens that
+    request (a non-exported entry, a unique data URI, a request screen
+    showing another one replaced, the back stack and the locked cases
+    stated), counts down and is removed at the deadline as well as when
+    decided. Also owner decisions of 2026-10-27: sign-ins get the
+    neutral countdown (clock and digits, no error colour), approval
+    challenges, session requests and `approval.pending` the urgent
+    colours, and the Requests channel is unchanged; snackbar texts by
+    purpose; a location "Not now" is kept as `{request_id, exp}` in the
+    encrypted local store (other devices still count it); the deadline
+    is each event's `exp` (`pending.exp` for a challenge). DRAFT texts.
+    Android work follows later.
+  - 0.1.88: owner decisions of 2026-10-27 (VAULT-MESSAGING 0.68.0, §15
+    item 42). **A transfer rotates the vault's keys by itself**, as a
+    recovery does (the vault, in the state write of the new phone's first
+    unlock; no app step). **After a PIN change or a password change the
+    app asks once, on that change's success screen, whether to replace
+    the vault's keys;** "Not now" ends it. What changes in the app:
+    remove the shell's rotate banner (`RotateOffer.kt`, `rotate_offer`,
+    `rotate_offer_action`, `VaultRepository.rotateOffered` and its
+    dismiss, the banner's slot in `AppShell`); a transfer no longer
+    offers anything; add the one-time prompt (§4 "Replacing the vault's
+    keys, once"); keep Settings → Security → Credential → "Rotate the
+    credential key". Texts are approved by the owner 2026-10-27. Vault: a staging
+    release after 23. (Review, same day: `credential.rotate` now
+    replaces the whole set; the prompt also follows a lost answer
+    settled "went through" on the change screen; one prompt text for
+    both changes; the Credential row and screen are titled "Replace your
+    vault's keys"; `identity.rotation_failed` text reworded; all new texts approved by the owner 2026-10-27.)
   - 0.1.87: owner decision of 2026-10-27 (VAULT-MESSAGING 0.67.0, §15 item
     41). §4 step 5 "Pairing": when the unlock's `ok` carries `invitation_recovery_id`, the
     phone sends one `hs.init` with that `recovery_id` as `ctx`, the
@@ -1082,6 +1121,8 @@ related:
   - CALLS-PLAN.md (0.1.3) — calls; video in C4 (§4, 0.1.42)
   - AGENT-PLAN.md (0.1.7) — the agent connector; §7.2 AA1–AA5 (§4
     "Devices & agents", 0.1.53)
+  - IOS-PLAN.md (0.1.42) — the iPhone app; §4.12 carries the approvals
+    indicator (0.1.89)
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -1124,6 +1165,7 @@ surface than the vettid.dev app and a layout modelled on Proton Mail.
 | D6 | **Biometric app lock in v1**: opening the app (and returning to it after a timeout) can require a biometric or device credential via BiometricPrompt (class 3), gating a Keystore key that unlocks the app's local data. 0.1.19: called **App lock**, with the method Biometrics (as described) or Phone screen lock (the device credential only). It is a convenience layer only: it never replaces the vault PIN (unlocking the vault) or the credential password (critical actions). |
 | D7 | **Notification modes** (owner, 2026-10-09; 0.1.23): the member picks how notifications reach the phone: **On-phone service** (recommended, most private; the default), **Google push** (FCM through the VettID push gateway; offered once the gateway and FCM credentials exist) or **Off** (not recommended). Feed items raise notifications through the chosen mode (§4 Notification modes). Supersedes PUSH-GATEWAY 0.2.0 §11's default order (FCM first) for this app (PUSH-GATEWAY 0.3.0 follows it). No UnifiedPush (owner, 2026-10-09; 0.1.24; §9, question 10): the on-phone service is the path for phones without Google services. |
 | D8 | **Wallet, presence, location and video** (owner, 2026-10-17; 0.1.42; §4 "Wallet, presence, location and video"). All four are wanted, in the order **wallet, presence, location**, with **video after the calling service** (CALLS-PLAN C2 and C3). Wallet networks on staging: **signet and testnet4**; mainnet for production later. The wallet's **chain source is the member's choice**: the app reads balances and coins and broadcasts through a server the member can set. |
+| D9 | **A separate approvals indicator** (owner, 2026-10-27; 0.1.89; §4 "The approvals indicator"). What waits for the member's decision (sign-in and admin approvals, connection requests, share and ask approvals, transfer confirmations, device and agent approvals) has its own indicator in the top bar, apart from the bell (the record of what happened), shown only while something is open, with its count; time-critical entries (sign-in and approval challenges, session requests and `approval.pending` from arrival, sign-ins shown neutral; other asks with a deadline in their last 2 minutes) show the time left, highlighted, in the indicator and the row; the tap opens the Approvals list; a snackbar with View announces a new time-critical request while the app is open; a request's notification opens that request, counts down and goes when it is decided or expires; icon and badge on crowded or large screens; sign-ins show the time left in the neutral treatment (no error colour), the Requests channel stays unchanged, `approval.pending` is time-critical from arrival, and a location "Not now" is kept in the encrypted local store. Why: a sign-in lives minutes and was missed while a conversation was open |
 
 ## 3. Design language (from Proton Mail)
 
@@ -1205,7 +1247,7 @@ rows below say "Vault" for the screens and "item" for the data.
 | Vault | Folder list | Titled "Vault" (0.1.11; was "Items"). Items per VAULT-ITEMS: name, category, typed fields, tags, sensitivity (data / secret / critical); filter by tag (0.1.21: "✕ Clear" ends the filter chips while a filter is on); each tag in its own colour (0.1.21), stored in the vault's tag registry and the same on every device, the least-used of a palette of ten for a new tag, picked by the member on Manage tags (0.1.25; `@profile` always gold); add/edit from templates ("Save item" in the top bar, 0.1.21); share rules by tag, as many per connection as needed (up to 64), each with its own tags, mode (default: ask each time), fetch limit and end (presets or a custom date and time), overlaps shown (0.1.20); one tag per rule, per-hour and per-day limits, `ask` wins, rules named by their tags, "Save rule" in the top bar (0.1.22). Critical items live in the Protean Credential and are never shared by a rule |
 | History | — (VettID-specific) | The member's audit log (0.1.11, `audit.list`, VAULT-MESSAGING 0.20.0 §10.9), read-only: a search field (the vault searches, `q`), filter chips (category, connection, date range), a list of entries newest first with infinite scroll, and an entry detail, each entry's icon in its category's colour (0.1.22); a ⋯ menu with **Export…** (0.1.17: CSV or JSON of what the filters show, with the vault PIN, saved through "Save to…"). Details below |
 | Notifications | — (Proton has none; a bell as in most apps) | 0.1.23 (owner answers of 2026-10-09): the vault's feed (VAULT-MESSAGING §10.9), opened from the bell in the top bar with the unread count; grouped by day, urgent items first, unread and read, swipe to archive or to mark read, an Archived view; each item opens the screen it is about; system notifications through the member's notification mode (D7). Details below |
-| Credential | — | Reached from Settings → Security → Credential (0.1.11; not in the drawer). Critical items inside the Protean Credential; unlock window; password change; the vault-held credential copy (the backup) on/off. Turning it off shows VAULT-MESSAGING §3.5.6's warning and needs a confirmation: "If this phone is lost, broken, reset or replaced without a transfer, your vault **cannot be recovered**. It can only be deleted and replaced by a new one, and **everything in it is lost**." While off, the screen and Settings keep a short "no recovery" notice. Turning it on asks for the password at once (an owner check) so that the copy exists, and says recovery is possible from then on. (0.1.51) **New credential** (`credential.reset`) is hidden until §4 "A lost answer to New credential" is implemented |
+| Credential | — | Reached from Settings → Security → Credential (0.1.11; not in the drawer). Critical items inside the Protean Credential; unlock window; password change; the vault-held credential copy (the backup) on/off. Turning it off shows VAULT-MESSAGING §3.5.6's warning and needs a confirmation: "If this phone is lost, broken, reset or replaced without a transfer, your vault **cannot be recovered**. It can only be deleted and replaced by a new one, and **everything in it is lost**." While off, the screen and Settings keep a short "no recovery" notice. Turning it on asks for the password at once (an owner check) so that the copy exists, and says recovery is possible from then on. (0.1.51) **New credential** (`credential.reset`) is hidden until §4 "A lost answer to New credential" is implemented. (0.1.88) **Replace your vault's keys** (approved title, was "Rotate the credential key"; `credential.rotate`, now the whole set) stays here; the one-time prompt after a PIN or password change (§4 "Replacing the vault's keys, once") opens it |
 | Settings | Settings | At the top, an **account card** (0.1.11): the member's first and last name and full email address (`account.get`, VAULT-MESSAGING 0.20.0 §11.13) and the membership state, memory only, wiped at lock (0.1.61, §4 "The member's own profile"); tapping it opens the avatar sheet. Vault (status, with the "Installed from" line of §7 "Signing and the two distributions" (0.1.36), release, lock, PIN; "Update available" while a newer release can be approved, 0.1.19); Security (credential, recovery, attestation info, the app lock (0.1.19: Biometrics or Phone screen lock) and timeout, the owner-check interval 1–24 h and the hold switch); Privacy (the **Shared profile**, glyph `Badge`, 0.1.12: display name, `@profile` items and the profile photo, **camera only** — "Take a photo" / "Retake photo" opens the app's own camera screen, front camera first with a switch to the rear one, then "Retake" or "Use photo"; no selection of an existing picture and no other camera app; the shot stays in memory, is never saved to the gallery, and is cropped, scaled and re-encoded to a JPEG ≤ 65,536 bytes without EXIF before `profile.set{photo}`; "Remove photo" confirmed; a refused camera permission is explained, with the system settings once Android no longer asks; a phone without a camera is told); App (theme; **Notifications** (0.1.23): the mode, its status, previews and the channels, §4 Notification modes; the local "Vault updates" channel, 0.1.19) |
 | Owner check | — (VettID-specific) | One screen: PIN and credential password together (VAULT-MESSAGING §3.6.5); also the "vault held" screen with the waiting counts and the lock action |
 | Avatar sheet | Account sheet | The member's first and last name and **full email address** (0.1.11, from `account.get`'s snapshot `first_name`, `last_name` and `email`, VAULT-MESSAGING 0.20.0 §11.13; never the masked hint; memory only, wiped at lock, 0.1.61, §4 "The member's own profile"), the email labelled "Only you see this address" and the names "Your connections see this name"; **Lock vault first** (0.1.12), right under the name and email, before Change name, Shared profile and the email; the sheet scrolls; vault status; **Change name** (0.1.10): the two names (the registration rule: letters, spaces, `'’.-`, ≤ 40), then the owner-check screen's PIN and password, sent as `account.name.set`; then "Name change requested" until `account.get`'s `name_request` is `applied` or `refused`; `too_soon` (from the vault or the member API): "You can change your name once every 30 days. You can change it again on <date>" (VAULT-MESSAGING §10.8), membership and subscription (read-only, from the vault, VAULT-MESSAGING §11.13), open account portal (browser) |
@@ -1377,7 +1419,9 @@ feed repository and no screen.
      no badge at 0. Detail screens have no bell.
    - An urgent unread item (`credential.alarm`, `owner_check.locked`)
      turns the badge red (the error colour); otherwise it is gold.
-   - No drawer entry (§9 question 1). Approvals keeps its own badge:
+   - No drawer entry (§9 question 1). (0.1.89) What waits for a decision
+     has a separate indicator beside the bell (§4 "The approvals
+     indicator"). Approvals keeps its own badge:
      Approvals is the to-do list (what waits for a decision), Notifications
      the record of what happened, so an ask is in both.
 2. **Repository** (`:core:data`, `FeedManager`, the pattern of
@@ -1929,7 +1973,7 @@ its process runs; nothing keeps it running in the background).
    | Channel (id) | Importance | Sound | Carries |
    |---|---|---|---|
    | Messages (`messages_v2`) | High | `vettid_message` | New messages |
-   | Requests (`requests_v2`) | High | `vettid_urgent` | Asks waiting for a decision (Approvals) |
+   | Requests (`requests_v2`) | High | `vettid_urgent` | Asks waiting for a decision (Approvals); removed when decided and at expiry (0.1.89, §4 "The approvals indicator", 9) |
    | Calls (`calls_v2`) | High | `vettid_ringtone` (looping, below) | Ringing (full-screen intent with the calls phase) and, later, the ongoing and outgoing call |
    | Missed calls (`missed_calls_v2`) | High | `vettid_message` | `call.missed` |
    | Security alarms (`security_v2`) | High, alarms marked urgent | `vettid_urgent` | The clone alarm, the ten-failure lock, failed checks, the vault locked, the vault moved |
@@ -2130,6 +2174,220 @@ History's export of activity metadata (0.1.17, owner decisions of
 2026-10-08, above): it never holds item values, secrets, message text,
 credential material or the email, and is no backup (nothing imports
 it).
+
+### The approvals indicator (0.1.89)
+
+*Owner decisions of 2026-10-27. The texts marked DRAFT wait for the
+owner's approval.* A request that needs the member's decision (a
+sign-in or admin approval, a connection request, a share or ask
+approval, a transfer confirmation, a device or agent approval) used to
+sit among ordinary information: in Approvals, which is in the drawer,
+and in the bell. A sign-in request lives only minutes, and one landed
+unseen while a conversation was open. So what waits for a decision
+gets its own indicator, apart from the bell.
+
+1. **What counts.** An **open approval** is an Approvals entry that is
+   pending, not decided (on this phone or another device) and not
+   expired. The count is the number of **entries** (a connection's
+   asks within 10 minutes are one entry, 0.1.22; a batch is one).
+   Never counted: a notice (a paused connection's, a rate limit), the
+   member's own outgoing requests, a row that waits for the other side
+   (an approved connection awaiting its peer), and a location request
+   the member answered **Not now**. The vault has no decline (§4
+   "Wallet, presence, location and video", Location), so the app keeps
+   a small `{request_id, exp}` set in its encrypted local store
+   (owner decision of 2026-10-27): an answered request is dropped from
+   the count and the list on this phone, the record is dropped at its
+   `exp`, and it is cleared on a wipe. **Other devices still count it**
+   until a vault-side dismissal exists (a later VAULT-MESSAGING item,
+   listed in the PR). An entry stops counting at its deadline (3).
+   An entry with no deadline counts until it is decided.
+2. **Where.** In the top bar, **left of the bell**, on every screen
+   inside the unlocked shell that has a top bar: the drawer screens
+   **and the detail screens** (a conversation, a connection, an item),
+   which have no bell, since that is where the missed sign-in was. Not
+   on Approvals and **not on any request's screen** (the list and the
+   request are the destination), and not on the full-screen flows
+   (camera, photo viewer, a call, the unlock and the gate). It is
+   **shown only while the count is above 0** and leaves no gap when
+   hidden.
+3. **Deadlines.** The deadline of an entry is the `exp` the vault
+   sends with it: `connection.authenticate.pending.exp` for a
+   challenge; `device.session.pending.exp` for a session request;
+   `approval.pending.exp` for a request an agent or desktop holds for
+   an app (up to 5 minutes); the `exp` of `connection.request.list` for
+   a connection request; otherwise the entry's `expires_at` (a
+   location request: 24 hours). For a challenge the receiving vault
+   already sets `pending.exp` to the earlier of 10 minutes after it
+   arrived and the challenge's own `exp` (the envelope's `exp`, §4;
+   vettid-vault `features/connauth/connauth.go`), so **the app uses
+   `pending.exp` alone**. A service vault may ask for a shorter
+   deadline (the request screen shows it, "Expires … 2:50 PM"), so
+   asks live from about 2 minutes (a service sign-in) to 24 hours.
+   VAULT-MESSAGING §10.4 does not yet write the receiver's rule down; a
+   follow-up lists it (PR body). **The count uses the `ExpiryClock` of
+   vettid-android #202** (one sleep to the next deadline, a re-read
+   on resume, expired entries dropped), not a second clock; a
+   one-second tick runs only for the pill while it is visible. Times are
+   the vault's, as everywhere (§4 "Staging time scale": these waits
+   are under an hour and not scaled). The phone's clock is corrected
+   by the offset against the vault's `now`, if the app holds one (the
+   one it uses for the other expiries, #202), and used as is without
+   one; a skew only moves a notification's removal, never what the
+   screen decides.
+4. **Look.** The glyph of the drawer's Approvals entry with the
+   existing `CountBadge` (gold; "99+" above 99). The bell's red stays
+   the bell's: it means an urgent alarm, and this badge is never red.
+   **Time-critical** (5): the indicator becomes a pill with a clock
+   glyph and the time left of the soonest time-critical entry as `M:SS`
+   ("1:20"; the clock alone while no deadline is known), bold. The
+   pill takes the design tokens' urgency colours (the error container
+   and its on-colour, contrast 4.5:1 in both themes) while any entry
+   is **urgent**, and the **neutral** treatment (the normal surface
+   colours, clock and digits only, no error colour) while the only
+   time-critical entries are sign-ins. The cues that do not rely on
+   colour are the clock glyph, the digits and the shape. No flashing or
+   movement. **Narrow or large:** on detail screens that carry their
+   own actions the indicator is the icon with its badge; at large font
+   scales or narrow widths the urgent state is the icon with a **clock
+   badge**, never the full pill. The indicator never pushes the
+   screen's own primary actions into the overflow menu (they win the
+   space).
+5. **Time-critical, and urgent: when.** An entry is **time-critical**
+   (a) **from arrival**, when it is a `connection.authenticate`
+   challenge of any `purpose` (`signin`, `approval`, or none), a
+   `device.session.pending` request or an `approval.pending` request
+   (an agent or desktop waiting, up to 5 minutes), and (b) for every
+   other entry that has a deadline, **in its last 2 minutes**
+   (`APPROVAL_URGENT_SECONDS = 120`, a fixed time: a share of a
+   request's life would flag a 24-hour location request for eight
+   hours). Among them, a **sign-in** challenge (`purpose: "signin"`)
+   gets the **neutral** countdown (clock glyph and digits, no error
+   colour); every other time-critical entry is **urgent** and gets the
+   urgency colours (owner decision of 2026-10-27). Reason: VAULT-MESSAGING
+   0.65.0 says a sign-in's notification "is not presented as urgent",
+   read as "no alarm treatment and no pressure wording", not "no
+   deadline": the time left is information. The **Requests channel is
+   unchanged** (High importance, `vettid_urgent`, never Security
+   alarms, never red, no full-screen intent). VAULT-MESSAGING is not
+   changed here; a follow-up states this reading (PR body). In
+   Approvals the entries are ordered **time-critical first, soonest
+   deadline first**, then as today; a time-critical row with a deadline
+   shows a clock glyph and "Expires in 1:20" in bold, in the urgency
+   colour for an urgent row and in the normal text colour for a
+   sign-in; other rows show no countdown.
+6. **Tapping the indicator always opens the Approvals list**, never
+   the single waiting request, even when the count is 1. (A
+   notification tap, below, opens the request.)
+7. **A new time-critical request while the app is open.** When a new
+   entry of 5 (a) arrives while the app is open and the member is on
+   another screen (not Approvals, not a request, not a full-screen
+   flow, not while held or due), a **snackbar** shows once for that
+   entry with **View**, which opens that request (as a notification
+   tap, 9). It is announced politely (a live region), stays 10 seconds
+   (longer with the system's accessibility timeout), never covers the
+   screen's primary action, and is not shown again for the same entry.
+8. **Held, due, locked.** The indicator and the snackbar come from the
+   in-memory list, so they follow the existing rules: **not shown**
+   while the vault is held or the daily check is due (the gate comes
+   first, and cached feed content MUST NOT be shown, §4 Notifications,
+   7), at the app lock and the unlock screen, and after a lock or a
+   wipe. After the check the open read decides what shows (expired
+   entries are gone). On the phone's lock screen only the notification
+   exists, by the rules of "Content" (§4 Notification modes). **The
+   drawer badge uses the same count** (one source), with no countdown.
+9. **The request's notification opens that request.** Fix of a flaw
+   (the review finding L4 of vettid-android #202): tapping a new
+   request's notification while another request's screen was open
+   showed the old request, because the navigation reused the open entry
+   (`launchSingleTop` keeps an entry of the same route and its old
+   arguments).
+   - *Intent.* Each notification's `PendingIntent` is unique per entry:
+     its data is `vettid://approval/<item_id>` (no hashed request
+     code), with `FLAG_UPDATE_CURRENT | FLAG_IMMUTABLE`, and targets a
+     **non-exported** activity (`exported="false"`, no intent filter,
+     so no link or other app can send it). The `ref` is looked up in
+     the in-memory open list; an intent that is not the app's own, or a
+     `ref` that is not there, is ignored and opens the list. A request
+     screen never acts by itself: it shows the request and waits for
+     the member's Approve, Deny or Not me.
+   - *Navigation.* The route of a request's screen carries its `ref`;
+     on arrival the app **replaces** a request screen that shows
+     another `ref` (pop it, then navigate; no `launchSingleTop` for it)
+     and keeps one that shows the same `ref`. If the member has
+     answered request A and A's answer is still in flight when B's
+     notification is tapped, B opens after A settles (A's result is
+     kept and shown in the list). The back stack is, from the top, the
+     request, the **Approvals list**, then the screen the member was on
+     (app warm) or the start destination (cold start), through #202's
+     `leaveApprovalDetail`, so that back never leaves a blank NavHost.
+   - *Locked.* A tap while the app lock, the unlock, the gate or the
+     daily check stands goes through them first (app lock, unlock,
+     gate, daily check), then to that request if it is still open,
+     otherwise to the list with the existing "This is no longer
+     waiting" (§4 Notifications, 4). The request is never shown from a
+     cache before that. A batch opens its one entry.
+10. **The notification goes when the request does, and shows the
+    time.** Already specified: it is cancelled when its feed item is
+    read, archived or deleted on any device (§4 Notification modes, 7),
+    and deciding an ask marks it read (question 2). Added: it is also
+    removed **at the entry's deadline**, which marks nothing, and for
+    an entry with a deadline it counts down: the notification is posted
+    with `setWhen(deadline)`, `setUsesChronometer(true)`,
+    `setChronometerCountDown(true)` and `setTimeoutAfter(time left)`, so
+    it shows the time left and goes in every mode, with the app closed
+    too; the app also cancels it at the same moment by its timer and
+    on resume.
+    - *Where the time comes from.* The service or the app looks the
+      entry up by `ref` in the kind's pending event or list: the
+      challenge's `connection.authenticate.pending.exp`, the request's
+      `exp` (`connection.request.list`), `device.session.pending.exp`,
+      `approval.pending.exp`, the item's `expires_at`.
+    - *Not yet known.* The notification is posted without a timeout or
+      chronometer; once the deadline is known the same notification id
+      is posted again with them and `setOnlyAlertOnce(true)` (no second
+      sound).
+    - *A batch.* A later ask of a batch re-posts its notification and
+      recomputes the deadline (the earliest of the batch).
+11. **Texts (DRAFT; string resources, plurals through Android
+    `plurals` and `MeasureFormat`, never built from pieces).**
+
+    | Id | Text |
+    |---|---|
+    | `approvals_indicator_description` | "Approvals, %d waiting" |
+    | `approvals_indicator_description_urgent` | "Approvals, %d waiting. %s expires in %s" (%s: the soonest entry's label, then "1 minute 20 seconds", "45 seconds") |
+    | `approvals_indicator_time` | "%d:%02d" (the pill, M:SS) |
+    | `approval_expires_in` | "Expires in %s" (the row, M:SS; read as "Expires in 1 minute 20 seconds") |
+    | `approval_expires_announce` | "%s expires in %s" (announced politely, for the **soonest** entry only, at most once per entry at 2 minutes and once at 1 minute left; an entry that arrives under a threshold is announced once, at arrival) |
+    | `approval_arrived_signin` | "Sign in to %s?" (snackbar, `purpose: "signin"`, with **View**) |
+    | `approval_arrived_approval` | "%s asks you to approve" (snackbar, `purpose: "approval"` and an `approval.pending` request, with **View**) |
+    | `approval_arrived_confirm` | "%s asks you to confirm it is you" (snackbar, a challenge with no purpose, with **View**) |
+    | `approval_arrived_session` | "%s asks for access" (snackbar, with **View**) |
+
+    The glyph is hidden from TalkBack; the indicator is one control
+    with the description above, a 48 dp target; the second-by-second
+    tick announces nothing.
+12. **Tests.** Unit: the count over pending, decided, expired, batched,
+    outgoing, awaiting-peer and "Not now" entries (the stored set
+    dropped at `exp` and on a wipe); `pending.exp` used alone for a
+    challenge; `ExpiryClock` drops an entry without a read; the
+    window at 120 s and 121 s; time-critical from arrival for signin, approval
+    and no-purpose challenges, session requests and `approval.pending`, the
+    neutral treatment for signin only; the order; the
+    indicator hidden when held, due, locked, on Approvals and on every
+    request screen; one snackbar per entry; the announcement for the
+    soonest entry only and once per threshold. UI: the pill and row in
+    both themes; at the largest font scale and narrow widths the clock
+    badge and no pill; a detail screen with actions keeps them out of
+    the overflow; the 48 dp target. Navigation: B's notification with
+    A's screen open shows B; the same `ref` keeps the screen; the back
+    stack of a warm and a cold tap; a tap while locked, held and due
+    ends at the request or "This is no longer waiting"; an intent from
+    another app or with an unknown `ref` opens the list and acts on
+    nothing; A in flight, B tapped. Notification: unique data URI;
+    chronometer and timeout set; re-post when the deadline becomes
+    known without a second sound; removed at expiry with the app
+    closed.
 
 ### Locking the vault (0.1.38)
 
@@ -2850,6 +3108,44 @@ about attempts, the app says first: "Changing only the PIN gives
 whoever is guessing ten new tries at the same password. Change your
 password too."
 
+**Replacing the vault's keys, once** (0.1.88; owner decisions
+2026-10-27; VAULT-MESSAGING 0.68.0 §3.5.5, §11.14.9, §15 item 42). A PIN
+change or a password change leaves the vault's keys as they were, so an
+older copy of the vault (an old phone with the old PIN, an old header
+and state a replaying host presents) still runs. The member decides
+whether to end that, because the rotation sends every connection a
+notice. `credential.rotate` now replaces the whole set: the relay key
+and tokens, the identity and KEM keys, the wake key and the credential
+key (vault: a staging release after 23).
+
+- *When.* On the success screen of a PIN change or a password change:
+  after the answer that decided it applied, and after a lost answer
+  settled "went through" **while the member is still on the change
+  screen**. Not when a lost answer resolves in the background or at a
+  later start, and never after "didn't go through". A prompt, not a
+  banner: shown once for that change, over that screen only. One prompt
+  for both kinds of change.
+- *Texts (all approved by the owner, 2026-10-27).* Title: "Also replace your vault's
+  keys?" Body: "So an older copy of your vault, opened with your old PIN or password, can't be used to reach your connections. Your connections are told about your new keys." Buttons: **Replace keys** and **Not now**.
+- **Replace keys** opens the rotation of Settings → Security →
+  Credential, whose row and screen title become (approved, owner 2026-10-27) "Replace your
+  vault's keys" (they were "Rotate the credential key" and "Rotate your
+  credential key"), with the password asked there as before. **Not now**,
+  a back press or any other way out means no: nothing is stored, no
+  banner follows, and the app does not ask again for that change. The
+  member can still replace the keys from the credential screen at any
+  time; nobody is reminded.
+- *Removed.* The persistent banner over every screen (release R,
+  `rotate_offer`, "You can now rotate your vault's keys: every older
+  copy of your credential stops working.", "Rotate now") and the offer
+  after a transfer.
+- Tests: the prompt after an applied PIN change and an applied password
+  change; after a lost answer settled "went through" on the change
+  screen; none after "didn't go through", after a settlement in the
+  background or at a later start, or after a transfer; "Not now" and back
+  store nothing and show nothing at the next start; "Replace keys" opens
+  the rotation; no banner anywhere.
+
 **A lost answer to a PIN or password change** (0.1.45, for the owner's
 approval; VAULT-MESSAGING 0.44.0 §11.14.9 "A lost answer"). Today
 (master b54685f) `VaultDevice.requestWithId` sends the same id three
@@ -3257,9 +3553,18 @@ both sections above (`pin.change`, `credential.password.change`,
   answer); a `token_revoked` (one `device.list` per start); a definite
   "no longer the vault's app" (erase); `device.unlinked{transferred}`
   (erase).
-- After a transfer, a PIN change or a password change the app offers to
-  rotate the vault's keys (`credential.rotate`), which a completed
-  recovery does by itself.
+- (0.1.88, VAULT-MESSAGING 0.68.0 §11.14.10) **A transfer rotates the
+  vault's keys by itself**, as a completed recovery does: the credential
+  key at the approval, and the relay key, identity and KEM keys and wake
+  key after the new phone's first unlock ("Finish the move") and after
+  the relay accepted `device.unlinked{transferred}` (anyway from day 7).
+  The apps have no step for it and no longer offer a rotation after a
+  transfer (the shell banner of release R is removed). The new phone's
+  screens do not change (History only); History shows `identity.rotated`
+  with the approved detail below, or `identity.rotation_failed`, which the
+  vault tries again at the next unlock. The old phone sees nothing new.
+  A PIN change and a password change are asked once: §4 "Replacing the
+  vault's keys, once". Vault: a staging release after 23.
 - (0.1.50; VAULT-MESSAGING 0.47.1 §3.5.9) **A rotation during a
   credential alarm.** Before "Rotate now" while an alarm is open, and
   when a rotation is answered `rotation_required` or
@@ -3391,7 +3696,7 @@ Notifications, 3 and 4; 0.1.56):
 | `recovery.change_required`, `ref` = a generation | "Change your PIN or password to turn recovery back on" | "Recovery attempts were used. A change gives you 10 new attempts." |
 | `recovery.counter_unavailable` (`urgent`) | "Your vault cannot check its recovery attempts" | none; Settings → Vault status shows the approved "For a day your vault has not been able to check its recovery attempts …" text (§4 "Owner check and status"), scaled on a vault with a time scale |
 | `recovery.generation_closed`, `ref` `<generation>/rollback` (`urgent`; owner decision of 2026-10-20; needs a vault release) | "Your vault was given an older recovery record" | "A host may have served an older copy of your vault's recovery record, one on which recovery attempts had already been used. Your vault moved past it. If you did not try to recover your vault, change your PIN and your password now, and contact VettID." |
-| `identity.rotation_failed` (`high`) | "Your vault could not update its keys" | "Your connections still know your old keys. VettID will offer the update again." |
+| `identity.rotation_failed` (`high`) | "Your vault could not update its keys" | "Your connections still know your old keys. Your vault will try again the next time you unlock it." (**approved**, owner 2026-10-27) |
 | `identity.rotate_conflict` (`high`) | "<First Last>: verify again" | "This connection's vault announced two different new keys. That can mean someone holds an old copy of their vault. Nothing is sent or received until you check." (§4 "Other screens") |
 | `leash.item.run`, `leash.item.proxy` | "An agent used <item>" (decision 8); without item names: "An agent used an item" | — |
 
@@ -3422,7 +3727,7 @@ is the app's and needs no vault change.
 | `vault.pin_changed` | "PIN changed" | — |
 | `device.secret_renewed` | "New phone secret set" | — (the vault records it without a device) |
 | `owner_check.passed`, `.held`, `.failed`, `.locked`, `.hold_changed` | "Daily check passed", "Vault held for the daily check", "Daily check failed", "Vault locked after failed daily checks", "Daily check hold changed" (decision 5) | — |
-| `identity.rotated` | "Your vault's keys were renewed" (was "Vault identity key rotated"; decision 7) | — |
+| `identity.rotated` | "Your vault's keys were renewed" (was "Vault identity key rotated"; decision 7) | With `ref` = a `transfer_id` (VAULT-MESSAGING 0.68.0 §11.14.10; **approved**, owner 2026-10-27): "Replaced when you moved your vault to a new phone." Otherwise — |
 | `credential.rotated` | "Your credential was renewed" (was "Credential rotated"; decision 7) | — |
 | `credential.utk_resync` (VAULT-MESSAGING 0.52.0 §3.5.4; approved by the owner 2026-10-21) | "One-time keys renewed" | "This phone's one-time keys were replaced with a fresh set." The row's second line names the device from the entry's `device_id`, as for every entry with one (§4 History). Category Security (`credential`); not urgent: History only, the vault makes no feed item for it |
 | `credential.holder_cleared` (VAULT-MESSAGING 0.54.0 §3.5.9; staging release 21; approved by the owner 2026-10-21) | "Credential holder cleared" | "Your vault found its credential holder missing and cleared it. If you didn't remove a phone, contact VettID." The row's second line names the device from the entry's `device_id`, the cleared holder, as for every entry with one (§4 History); that device is no longer listed, so it shows as "Removed device". Category Security (`credential`); not urgent: History only, the vault makes no feed item for it |
@@ -3439,7 +3744,7 @@ is the app's and needs no vault change.
 | … reason `stale` | hidden (below) | — |
 | … a reason this app does not know | "Recovery attempts reset" | — |
 | `recovery.presence_unrecorded` | "Your vault could not record that you were here" | "If this lasts three days, your vault is no longer protected against a recovery started by someone else." (scaled on a vault with a time scale) |
-| `identity.rotation_failed` | "Key update failed" | "Your connections still know your old keys. VettID will offer the update again." |
+| `identity.rotation_failed` | "Key update failed" | "Your connections still know your old keys. Your vault will try again the next time you unlock it." (**approved**, owner 2026-10-27) |
 | `identity.rotate_conflict` | "Connection with <First Last> paused" | "This connection's vault announced two different new keys. That can mean someone holds an old copy of their vault. Nothing is sent or received until you check." |
 | `identity.rotate_resolved` | "Connection with <First Last> checked and resumed" | — |
 | `connection.request.approved`, `connection.request.declined` | "You accepted a connection request" / "You declined a connection request" | — |
@@ -4362,7 +4667,7 @@ changes vault code here.
 ### Service connections (0.1.90)
 
 *Owner decision of 2026-10-27 (VAULT-MESSAGING 0.69.0 §6.4 "Service
-connections", §15 item 42). The texts are drafts for the owner. Not
+connections", §15 item 43). The texts are drafts for the owner. Not
 built. Vault: a staging release after 24; until a vault sends
 `peer_kind`, nothing here shows.*
 
@@ -4430,7 +4735,7 @@ missing (an accessibility description, a long-press on a service's row);
 the owner may choose to leave it unused.
 
 **Not built, on purpose.** No "verified service" badge: nothing proves
-who runs a service yet (VAULT-MESSAGING §15 item 42, open). A connection
+who runs a service yet (VAULT-MESSAGING §15 item 43, open). A connection
 made before the vault release stays a person; the member reconnects a
 service to have it marked.
 
