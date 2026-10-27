@@ -426,6 +426,9 @@ export class VettidOrgVaultStack extends cdk.Stack {
     h([...VAULT_RECOVERY_HOST_BUCKET_ACTIONS], [recoveryBucket.bucketArn]);
     h(['ssm:GetParameter', 'ssm:GetParameters', 'ssm:GetParametersByPath'], [`arn:aws:ssm:${config.region}:${vault.account}:parameter/vettid-org/${config.stage}/vault/*`]);
     h(['logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams'], [`arn:aws:logs:${config.region}:${vault.account}:log-group:/vettid-org/${config.stage}/vault-host:*`]);
+    // From 2027-04-26 DescribeLogStreams (a log-group action) is authorized
+    // only on the log-group ARN, without `:*`; the statement above stays.
+    h(['logs:DescribeLogStreams'], [`arn:aws:logs:${config.region}:${vault.account}:log-group:/vettid-org/${config.stage}/vault-host`]);
     h(['cloudwatch:PutMetricData'], ['*'], { StringEquals: { 'cloudwatch:namespace': 'VettID/Vault' } });
     h(
       ['autoscaling:CompleteLifecycleAction', 'autoscaling:RecordLifecycleActionHeartbeat'],

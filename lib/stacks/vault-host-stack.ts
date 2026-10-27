@@ -163,6 +163,15 @@ export class VettidOrgVaultHostStack extends cdk.Stack {
       subnetConfiguration: [{ name: 'public', subnetType: ec2.SubnetType.PUBLIC, cidrMask: 26 }],
       flowLogs: { all: { destination: ec2.FlowLogDestination.toCloudWatchLogs(flowLogs), trafficType: ec2.FlowLogTrafficType.ALL } },
     });
+    // From 2027-04-26 DescribeLogStreams (a log-group action) is authorized only
+    // on the log-group ARN, without `:*`. CDK made the flow log's role itself
+    // (child `all`) and granted on `:*`, which stays; add the group's own ARN
+    // to that same role (no new resource, no logical id change).
+    const flowLog = this.vpc.node.findChild('all') as ec2.FlowLog;
+    flowLog.iamRole!.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['logs:DescribeLogStreams'],
+      resources: [this.formatArn({ service: 'logs', resource: 'log-group', resourceName: `${stagePath}/vault-flow-logs`, arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME })],
+    }));
     // Gateway endpoints (free) carry S3 and DynamoDB; their policies admit
     // only this account's buckets and tables, so they cannot be used to
     // reach another account's bucket.

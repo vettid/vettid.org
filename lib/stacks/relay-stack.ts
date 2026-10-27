@@ -311,6 +311,12 @@ export class VettidOrgRelayStack extends cdk.Stack {
         },
       }),
     });
+    // From 2027-04-26 DescribeLogStreams (a log-group action) is authorized only
+    // on the log-group ARN, without `:*`; the grant CDK adds on `:*` stays.
+    flowLogRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['logs:DescribeLogStreams'],
+      resources: [this.formatArn({ service: 'logs', resource: 'log-group', resourceName: flowLogGroup.logGroupName, arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME })],
+    }));
     vpc.addFlowLog('FlowLog', {
       destination: ec2.FlowLogDestination.toCloudWatchLogs(flowLogGroup, flowLogRole),
       trafficType: ec2.FlowLogTrafficType.REJECT,

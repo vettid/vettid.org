@@ -121,6 +121,12 @@ export class VettidOrgAdminAccessStack extends cdk.Stack {
       actions: ['logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams'],
       resources: [sessionLogs.logGroupArn],
     }));
+    // From 2027-04-26 CloudWatch Logs authorizes log-group actions only on the
+    // log-group ARN (no `:*`); the statement above stays for the stream actions.
+    role.addToPolicy(new iam.PolicyStatement({
+      actions: ['logs:DescribeLogStreams'],
+      resources: [cdk.Stack.of(this).formatArn({ service: 'logs', resource: 'log-group', resourceName: ssmSessionLogGroupName(config), arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME })],
+    }));
     // The SSM agent checks the group exists before streaming; DescribeLogGroups
     // has no resource-level scoping (read-only metadata).
     role.addToPolicy(new iam.PolicyStatement({ actions: ['logs:DescribeLogGroups'], resources: ['*'] }));

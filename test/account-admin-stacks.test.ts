@@ -251,6 +251,20 @@ describe('VettidOrgAdminAccessStack', () => {
     });
   });
 
+  // CloudWatch Logs, from 2027-04-26: log-group actions need the log-group ARN (no `:*`).
+  test('exit node role: DescribeLogStreams also on the plain log-group ARN', () => {
+    t.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: 'logs:DescribeLogStreams',
+            Resource: Match.stringLikeRegexp(':logs:[a-z0-9-]+:\\d+:log-group:/vettid-org/ssm-sessions$'),
+          }),
+        ]),
+      },
+    });
+  });
+
   test('admin site WAF logs to CloudWatch with cookie/authorization redacted', () => {
     t.hasResourceProperties('AWS::Logs::LogGroup', { LogGroupName: 'aws-waf-logs-vettid-org-admin', RetentionInDays: 90 });
     t.hasResourceProperties('AWS::WAFv2::LoggingConfiguration', {

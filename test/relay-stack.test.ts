@@ -442,6 +442,17 @@ describe('edge: WAF, deletion protection, no access log, flow log', () => {
     t.resourceCountIs('AWS::S3::Bucket', 0);
   });
 
+  // CloudWatch Logs, from 2027-04-26: log-group actions need the log-group ARN (no `:*`).
+  test('flow log role: DescribeLogStreams also on the plain log-group ARN', () => {
+    const st = Object.values<any>(t.findResources('AWS::IAM::Policy')).flatMap((p) => p.Properties.PolicyDocument.Statement)
+      .filter((x: any) => x.Action === 'logs:DescribeLogStreams');
+    expect(st).toHaveLength(1);
+    const arn = JSON.stringify(st[0].Resource);
+    expect(arn).toContain(':log-group:');
+    expect(arn).toContain('{"Ref":"FlowLogs');
+    expect(arn).not.toMatch(/:\*"/);
+  });
+
   test('VPC flow log: rejected traffic only, to CloudWatch Logs kept 30 days', () => {
     const logs = Object.values<any>(t.findResources('AWS::EC2::FlowLog')).map((f) => f.Properties);
     expect(logs).toHaveLength(1);
