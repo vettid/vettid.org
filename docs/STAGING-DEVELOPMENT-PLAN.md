@@ -1,7 +1,7 @@
 ---
 title: STAGING-DEVELOPMENT-PLAN
 status: approved by the owner 2026-10-11 (D1–D11 as recommended; D3 as in ANDROID-PLAN 0.1.36, which replaced 0.1.34's answer the same day)
-version: 0.1.5
+version: 0.1.6
 date: 2026-10-26
 owner: Al Liebl (Mesmer)
 related:
@@ -34,6 +34,13 @@ changelog:
   - 0.1.5: editorial (status as of 2026-10-26); no rule changes. §5
     status column brought forward from 2026-10-23 (rows 0, I and the
     A6 note); §8.5's note says S22 is published and what S23 carries
+  - 0.1.6: **owner decision 2026-10-26** (VAULT-MESSAGING 0.66.0,
+    VAULT-RELEASES 0.1.34). §4: the row "test CA accepted beside the
+    vendor roots on staging" was marked "As built" but no staging image
+    had it; it is now specified as the staging automation attestation
+    CA (`automation_attestation`, signer class `automation`), with the
+    end date 2027-06-30 that rule §2.5.5 asks for, and is not built
+    until a staging release carries the member
 classification: public (no secrets; safe for github.com/vettid)
 ---
 
@@ -205,7 +212,7 @@ other open work fits.
 | Staging app has the production application id `com.vettid.app` (the vault pins one package for both channels, `enclave/config.go`) | Staging and production builds cannot be on one phone; switching means uninstalling, which removes the app's keys, so the vault must be recovered (24 h wait) or re-enrolled. **Ended at S10 (0.1.2):** the staging build is `com.vettid.app.staging` and S10 accepts only that package in key attestation | **Time-box**: decision D5 (done) |
 | Staging SES in the sandbox | Every recipient is a verified identity | **Keep** (RUNBOOK: never request production access for staging) |
 | No admin site on staging; test data by `npm run staging:seed` and the CLI | As built | **Keep**; consequence: the admin site's vault pages are only ever exercised in production (risk 2) |
-| Device attestation: test CA accepted beside the vendor roots on staging | As built (VAULT-RELEASES §3.1) | **Keep** |
+| Device attestation: test CA accepted beside the vendor roots on staging: the **staging automation attestation CA** (`automation_attestation` in the staging channel file, signer class `automation`; VAULT-MESSAGING 0.66.0 §11.7.1, §11.10.8; VAULT-RELEASES §3.1) | **Not built** (0.1.6): until 0.1.5 this row said "As built", but no staging image accepted anything but Google's roots. Code in vettid-vault #153, #154; live from the first staging release whose channel file carries the member, after the owner creates the KMS key and the CA certificate. The CA key is a KMS key in the staging account that only the operator's workstation can use | **Keep until 2027-06-30** (the member's `until`; rule §2.5.5): from the next day the release check refuses the staging file and the CA's certificate has expired; renew by a reviewed change or remove the member and the signer. Never in production (the production file is malformed with either) |
 
 ## 5. Feature order
 

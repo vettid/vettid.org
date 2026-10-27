@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.65.0
+version: 0.66.0
 date: 2026-10-26
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -20,13 +20,41 @@ related:
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
-  - VAULT-RELEASES.md (0.1.31; 0.1.6 approved 2026-10-04)
+  - VAULT-RELEASES.md (0.1.34; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
-  - STAGING-DEVELOPMENT-PLAN.md (0.1.2; D3, D4, D5)
+  - STAGING-DEVELOPMENT-PLAN.md (0.1.6; D3, D4, D5; §4 the automation CA)
   - VAULT-HOST-PROTOCOL.md (0.1.16; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.66.0: **owner decision 2026-10-26** (staging only; wire-additive
+    for one enum). The staging automation attestation CA that
+    VAULT-RELEASES §3.1 already listed for staging ("test CA **and** the
+    real vendor roots") is specified and given its own signer class, so
+    that an automated test can enroll a staging app device without a
+    phone and act as the app. §11.10.8: a new **optional, staging-only**
+    channel file member `automation_attestation` `{android_roots,
+    until}`: one or two self-signed CA certificates accepted beside the
+    vendor roots, and the switch's **end date** (STAGING-DEVELOPMENT-PLAN
+    §2.5.5; first value 2027-06-30); no root is valid after it, and the
+    release check refuses the file from the next day; a production file
+    with the member is malformed, and an image uses the roots only when
+    its measured channel is staging. §11.7.1: a new signer class
+    `automation`, whose digest is SHA-256 of the fixed string
+    `vettid-staging-automation-signer-v1`
+    (`1c9f3b0e19767df0f9e9833de5bd47c7f6f62092623199c7260a817ef1164e00`;
+    no APK can report it, and it survives a renewal of the CA); it is
+    pinned only in the staging file and only together with
+    `automation_attestation` (and the reverse); a chain ending at an
+    automation root MUST report the `automation` signer, and a chain
+    ending at a vendor root MUST NOT. §10.3: `device.list`'s
+    `signer.class` may be `automation` (staging). §11.7 Android: the
+    chain verifies up to a vendor root or, on staging, an automation
+    root; every other check is unchanged. The CA key is a KMS key in the
+    staging account that only the operator's workstation can use
+    (vettid-vault docs/RELEASING.md "Staging automation attestation").
+    Production is unchanged. **Needs a staging vault release**
+    (vettid-vault #153, #154) and, in the apps, a label for the class
   - 0.65.0: **owner decision 2026-10-26** (wire-additive and
     backward compatible). §10.4: `connection.authenticate.challenge`
     (and `.request`, `.pending`, a signed `.response`, `.result`) gains
@@ -6143,7 +6171,7 @@ device belongs to the unlock it ends.
 | `device.pair.reject` (app) | `{pairing_id}` | `{}` |
 | `device.pair.rejected` (to the new device) | — | `{}`: the owner rejected the pairing or transfer after its `hs.fin` (0.10.5); sealed under the handshake's epoch, on the device's token from `hs.init`, as `device.paired`; the device stops waiting (§6.7) |
 | `device.paired` (to the new device) | — | `{device_id, role, vault_id, release, release_number, token, session_expires_at?, transfer?, credential_version?, user_guid?}` (the release the vault runs under); `token`: the device's standing token (§7.1); it replaces the request token of a pairing's or transfer's `hs.resp` (0.10.3), and after enrollment or recovery, whose `hs.resp` already carries one, it is a fresh one (0.10.4); `transfer: true`, the credential's `credential_version` and (0.17.0) the member's `user_guid`, which its unlocks need, for a transferred app only (§6.7.1) |
-| `device.list` (app, desktop) | `{}` | `{devices: [{id, kind, state, name, ik, profile?, created_at?, last_active_at?, session_expires_at?, push?, signer?}]}`; `push` (0.24.0) only on the app's entry while it has a registration: the push state of §14.1; `signer` (0.27.0) only on an Android app's entry with a recorded signer: `{class: "vettid" \| "google_play" \| "development", digest: "<64 hex>"}`, the vault's signer binding (§11.7.1) |
+| `device.list` (app, desktop) | `{}` | `{devices: [{id, kind, state, name, ik, profile?, created_at?, last_active_at?, session_expires_at?, push?, signer?}]}`; `push` (0.24.0) only on the app's entry while it has a registration: the push state of §14.1; `signer` (0.27.0) only on an Android app's entry with a recorded signer: `{class: "vettid" \| "google_play" \| "development" \| "automation", digest: "<64 hex>"}` (`automation`: staging only, 0.66.0), the vault's signer binding (§11.7.1) |
 | `device.unlink` (app) | `{device_id}` | `{}`; `forbidden` for the app itself (0.9.0: it leaves by a transfer or a recovery) |
 | `device.unlinked` (to the unlinked device, best effort) | — | `{reason?}`: `"transferred"` for the old app of a transfer (§6.7.1), `"replaced"` for the old app of a recovery (§11.11.5); (0.33.0, release R) a transfer's also carries `transfer_id`, and is sent only after the new phone's first unlock from storage (§11.14.10) |
 | `device.transfer.create` (the holder) | `{}` | `{transfer_id, link, exp}`; `exists` while a transfer is open; `credential_frozen` or `rotation_required` during an alarm (§6.7.1) |
@@ -12842,7 +12870,10 @@ challenge at every unlock.
     in StrongBox if the device has it and in the TEE otherwise, and sends the
     key's certificate chain.
   - The enclave verifies the chain up to a Google hardware attestation root
-    pinned in the image (0.27.1: under the **chain rules** below), then
+    pinned in the image (0.66.0: or, in a staging image only, a root of
+    the staging automation attestation CA, §11.10.8
+    `automation_attestation`; such a chain must report the `automation`
+    signer, §11.7.1) (0.27.1: under the **chain rules** below), then
     checks the attestation extension of the leaf: the
     challenge; attestation and key security level `TrustedEnvironment` or
     `StrongBox` (never `Software`); `RootOfTrust` with `deviceLocked` true and
@@ -13062,7 +13093,8 @@ has a **class**, set in the release configuration (§11.10.8):
 |---|---|---|
 | `vettid` | Signed with a key only VettID holds: the F-Droid and direct builds | "F-Droid or direct (signed by VettID)" |
 | `google_play` | Signed with the Play app-signing key, which Google holds | "Google Play (signed by Google)" |
-| `development` | A development or automation key; refused in a production release's configuration | "Development build" |
+| `development` | A development key; refused in a production release's configuration | "Development build" |
+| `automation` (0.66.0) | The staging automation (§11.10.8, `automation_attestation`): no APK signing key; its digest is SHA-256 of the fixed string `vettid-staging-automation-signer-v1`. Staging only, pinned only with `automation_attestation`; a chain ending at an automation root MUST report it and a chain ending at a vendor root MUST NOT, so an automation vault is always labelled as one | "Automated test (staging)" |
 
 The class is an identifier from this table, not free text: the vault
 never supplies member-facing wording.
@@ -13439,7 +13471,11 @@ the app has none, and the kept signer counts as recorded for
 - Release configuration (§11.10.8): entries without a class, an
   unknown class, a duplicate digest, `development` in the production
   file, and the bare-string form are each refused by the release
-  build.
+  build. (0.66.0) So are `automation` in the production file, with
+  another digest or without `automation_attestation`, and the member
+  without the signer or in the production file; an automation chain
+  with another signer and a vendor chain with the `automation` signer
+  are refused (`attestation`).
 - On real phones (staging): a Pixel on stock Android and one on
   GrapheneOS enroll and show the expected class; ~~a vault enrolled on
   the previous staging release binds by `chain` at its first unlock~~
@@ -14209,7 +14245,13 @@ recorded in the build's measurements:
   `development` in the production file. Production release 1: one
   entry, VettID's own certificate, class `vettid`; staging: the
   staging certificate (`vettid`) and the automation certificate
-  (`development`);
+  (`development`). (0.66.0) The class may also be `automation`, only in
+  the staging file, only with the digest
+  `1c9f3b0e19767df0f9e9833de5bd47c7f6f62092623199c7260a817ef1164e00`
+  (SHA-256 of `vettid-staging-automation-signer-v1`, never a
+  placeholder), and only when the file has `automation_attestation`;
+  `automation` in the production file, with another digest, or without
+  the member is malformed;
 - the relay URL (§11.3);
 - (0.24.0) the push gateway URL (`https://push.vettid.org` in
   production, `https://push.staging.vettid.org` in staging; optional in
@@ -14256,9 +14298,37 @@ recorded in the build's measurements:
   decision of 2026-10-20) One rate limit is scaled by exception: the
   UTK resync's 10 minutes per device (§3.5.4), divided by `time_scale`
   when the resync is asked for, so that it can be tested on staging.
+- (0.66.0, owner decision 2026-10-26; VAULT-RELEASES §3.1)
+  `automation_attestation`, **optional and staging only**:
+  `{"android_roots": ["<b64 DER certificate>", ...], "until":
+  "YYYY-MM-DD"}`. The roots of the staging automation attestation CA,
+  accepted in Android key attestation beside the vendor roots, so that
+  an automated test can enroll a staging app device without a phone.
+  One or two roots (a rotation), each a self-signed CA certificate
+  (`cA`, `keyCertSign`) with an ECDSA P-256 or P-384 key, distinct
+  keys; a placeholder root is missing. `until` is the switch's **end
+  date** (STAGING-DEVELOPMENT-PLAN §2.5.5), UTC, at most 400 days after
+  the newest root's `notBefore`, and **no root is valid after that
+  day**, so an image stops accepting the CA then by chain rule 7
+  (§11.7) without a new release. The release check refuses the file
+  from the day after `until`, judged at the build's source date when
+  one is set (so a rebuild of a tagged release is reproducible) and at
+  the current date otherwise. The member requires the `automation`
+  signer and the reverse (`android_signers` above). **A production
+  file with the member is malformed**, and an image uses the roots only
+  when its measured channel is staging, as for `time_scale`. A chain
+  ending at an automation root passes every other check of §11.7 as a
+  phone's chain does (package, signer, version code, security levels,
+  root of trust, key properties); the CA asserts the security levels and
+  the root of trust, no hardware stands behind them, so whoever can sign
+  with the CA's key can act as a staging device. The key is an AWS KMS
+  key in the staging account; the file holds only the certificate. The
+  first value: one root, `until` 2027-06-30.
 
 GrapheneOS verified-boot keys and the vendor roots stay in code and are
-the same for every channel. A release build MUST refuse a channel file
+the same for every channel (0.66.0: staging's automation roots, above,
+are the one exception: in the staging file, and used only by a staging
+image). A release build MUST refuse a channel file
 with a placeholder or a missing value, and an image whose configuration
 is incomplete refuses every enrollment and unlock (fail closed).
 
