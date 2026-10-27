@@ -1,9 +1,19 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.40
+version: 0.1.41
 date: 2026-10-27
 changelog:
+  - 0.1.41: owner decisions of 2026-10-27 (VAULT-MESSAGING 0.68.0, §15
+    item 42; ANDROID-PLAN 0.1.88). §4.11: a transfer rotates the vault's
+    keys by itself (the vault; no app step); after a PIN change or a
+    password change the app asks once, on the success screen, whether to
+    replace the vault's keys, and "Not now" ends it. What changes in the
+    app: the iPhone app has no rotate banner to remove (it was not built
+    on iOS; if a banner exists in the code by then, remove it, with its
+    state); a transfer offers nothing; add the one-time prompt; keep the
+    rotation in Settings → Security → Credential. The texts are
+    Android's, DRAFT for the owner. Vault: a staging release after 23.
   - 0.1.40: owner decision of 2026-10-27 (VAULT-MESSAGING 0.67.0, §15 item
     41). §4.9 "Pairing": when the unlock's `ok` carries `invitation_recovery_id`, the
     phone sends one `hs.init` with that `recovery_id` as `ctx`, the
@@ -373,8 +383,8 @@ changelog:
     in §14 are drafts
 owner: Al Liebl (Mesmer)
 related:
-  - ANDROID-PLAN.md (0.1.41) — the Android app; this plan mirrors it
-  - VAULT-MESSAGING.md (0.35.0) — the app's contract with the vault
+  - ANDROID-PLAN.md (0.1.88) — the Android app; this plan mirrors it
+  - VAULT-MESSAGING.md (0.68.0) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
   - RELAY-PROTOCOL.md (0.9.4), MEMBER-API.md (2.7.1)
@@ -626,7 +636,7 @@ is the app's and needs no vault change.
 | `vault.pin_changed` | "PIN changed" | — |
 | `device.secret_renewed` | "New phone secret set" | — (the vault records it without a device) |
 | `owner_check.passed`, `.held`, `.failed`, `.locked`, `.hold_changed` | "Daily check passed", "Vault held for the daily check", "Daily check failed", "Vault locked after failed daily checks", "Daily check hold changed" (decision 5) | — |
-| `identity.rotated` | "Your vault's keys were renewed" (was "Vault identity key rotated"; decision 7) | — |
+| `identity.rotated` | "Your vault's keys were renewed" (was "Vault identity key rotated"; decision 7) | With `ref` = a `transfer_id` (VAULT-MESSAGING 0.68.0 §11.14.10; **DRAFT**, for the owner): "Replaced when you moved your vault to a new phone." Otherwise — |
 | `credential.rotated` | "Your credential was renewed" (was "Credential rotated"; decision 7) | — |
 | `credential.utk_resync` (VAULT-MESSAGING 0.52.0 §3.5.4; approved by the owner 2026-10-21) | "One-time keys renewed" | "This phone's one-time keys were replaced with a fresh set." The row's second line names the device from the entry's `device_id`, as for every entry with one (ANDROID-PLAN §4 History). Category Security (`credential`); not urgent: History only, the vault makes no feed item for it |
 | `credential.holder_cleared` (VAULT-MESSAGING 0.54.0 §3.5.9; staging release 21; approved by the owner 2026-10-21) | "Credential holder cleared" | "Your vault found its credential holder missing and cleared it. If you didn't remove a phone, contact VettID." The row's second line names the device from the entry's `device_id`, the cleared holder, as for every entry with one (ANDROID-PLAN §4 History); that device is no longer listed, so it shows as "Removed device". Category Security (`credential`); not urgent: History only, the vault makes no feed item for it |
@@ -1352,6 +1362,34 @@ to start over **only if it was never admitted as the app (it holds no
 open**. Only a code read from the vault's own readable (sealed) answer counts as a refusal, and then only `busy`, `wrong_again`, `attempt_lost`, `exhausted`, `not_armed`, `closed` (which comes only from a fresh open), `attestation` (decided at step 1, before anything is written), the counter-down answer and the wait verdicts prove on their own that no step 1 was stored; `wrong` and `expired` count as refusals only for a phone with no earlier unanswered open (the sticky rule below). An unsealed slot status `expired` (written by the parent when the lease is held elsewhere or the answer is unreadable, or by the member API after 5.5 minutes queued), a 404, 410 or 5xx on the poll, no answer, `retry`, `transfer_incomplete` and any error count as unanswered. The rule looks at every open the phone ever sent, not the last one: once an open is unanswered, a later refusal never clears it (a `wrong` on a repeated open proves nothing about adoption). The phone keeps the per-open history; a "last answer" is not enough. A phone that was ever admitted treats the `410` as a `401`. A
 phone with an unanswered open keeps K and follows §4.9: it never forgets
 K on a `410`. On `401` it never forgets. The tests are Android's.
+
+### 4.11 Keys after a transfer, a PIN change and a password change (0.1.41)
+
+Owner decisions of 2026-10-27 (VAULT-MESSAGING 0.68.0 §11.14.10,
+§11.14.9, §15 item 42); the screens and texts are ANDROID-PLAN 0.1.88's
+("Replacing the vault's keys, once"), mirrored on iOS.
+
+- **A transfer rotates the vault's keys by itself**, as a recovery does:
+  the vault, in the state write of the new iPhone's first unlock
+  ("Finish the move"), after it delivers `device.unlinked{transferred}`.
+  Neither phone has a step for it, and the app no longer offers a
+  rotation after a transfer. The transfer screens are unchanged;
+  History shows `identity.rotated` (with the DRAFT detail in §4.1's
+  table) or `identity.rotation_failed`, which the vault tries again at
+  the next unlock. The old iPhone sees nothing new.
+- **After a PIN change or a password change** the success screen asks
+  once (a sheet over that screen, not a banner): title "Also replace your
+  vault's keys?", body "So an old copy of your vault — on an old phone
+  or with your old PIN — can't be used. Your connections are told about
+  the new keys.", buttons "Replace keys" / "Not now" (all **DRAFT**, for
+  the owner). "Replace keys" opens the rotation of Settings → Security →
+  Credential ("Rotate the credential key", `credential.rotate`, which
+  asks the password). "Not now", or leaving the sheet any other way,
+  means no: nothing is stored, nothing is shown later, and the member
+  can still rotate from the credential screen. The prompt follows an
+  applied change only, never a lost answer settled "didn't go through".
+- Phase: I1.8 (Change PIN, credential screen) and I3.3 (transfer). Tests
+  as ANDROID-PLAN 0.1.88's. Vault: a staging release after 23.
 
 ## 5. Architecture
 
