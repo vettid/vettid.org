@@ -884,12 +884,12 @@
         "max_instances": 2
       },
       "log": {
-        "summary": "Release 23 locks an idle vault after an overdue owner check, saves its app keys durably, and fixes two recovery edge cases.",
+        "summary": "Release 23 locks a vault whose owner check is overdue, saves its app keys durably, and fixes two recovery edge cases.",
         "changes": [
-          "A vault whose daily owner check is overdue now locks itself after it has been idle for 7 days, and waits for an answered call to end first. A lock your phone sends is tied to the unlock it follows, so a late lock cannot undo a newer unlock.",
+          "A vault whose daily owner check is overdue now locks itself 7 days (by default) after the check was due, and waits for an answered call to end first. A lock your phone sends is tied to the unlock it follows, so a late lock cannot undo a newer unlock.",
           "The vault now saves a new app key only after the host has confirmed the save, and retries a failed save, so a failed save on the host no longer leaves the vault and the phone with different keys.",
-          "Fix: a recovery that was repeated after its second step now binds the recovered invite to the same identity and the invite's own attested key, and an unlock that finishes a recovery's last step now ends the recovery record.",
-          "A pending unlink after a transfer is kept until it is delivered. Staging only: the vault can accept a staging automation attestation root with an end date; none is configured, so it has no effect.",
+          "Fix: repeating a recovery after its second step could leave it stuck; the vault now renews the recovered invitation for the same identity. An unlock that finishes a recovery's last step now also ends the recovery record.",
+          "After a transfer, the vault keeps your old phone's pending unlink until it has been delivered. Staging only: support for a staging test certificate is included but switched off.",
           "Built from vettid-vault commit acb007e (tag release/staging/23) and independently rebuilt on 2026-10-27 with a matching PCR0."
         ],
         "security": "none"
