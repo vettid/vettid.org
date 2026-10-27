@@ -1,9 +1,16 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.40
+version: 0.1.43
 date: 2026-10-27
 changelog:
+  - 0.1.43: owner decision of 2026-10-27 (VAULT-MESSAGING 0.69.0, §15
+    item 42; ANDROID-PLAN 0.1.90). New §4.11 "Service connections":
+    the same as ANDROID-PLAN §4 "Service connections (0.1.90)" (a "This
+    is a service, not a person." line on the connection request,
+    a "Services" section, no Call, message or share rows, a "Service"
+    label on a service's requests), draft texts the same. Vault: a
+    staging release after 23.
   - 0.1.40: owner decision of 2026-10-27 (VAULT-MESSAGING 0.67.0, §15 item
     41). §4.9 "Pairing": when the unlock's `ok` carries `invitation_recovery_id`, the
     phone sends one `hs.init` with that `recovery_id` as `ctx`, the
@@ -373,8 +380,8 @@ changelog:
     in §14 are drafts
 owner: Al Liebl (Mesmer)
 related:
-  - ANDROID-PLAN.md (0.1.41) — the Android app; this plan mirrors it
-  - VAULT-MESSAGING.md (0.35.0) — the app's contract with the vault
+  - ANDROID-PLAN.md (0.1.90) — the Android app; this plan mirrors it
+  - VAULT-MESSAGING.md (0.69.0) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
   - RELAY-PROTOCOL.md (0.9.4), MEMBER-API.md (2.7.1)
@@ -1352,6 +1359,25 @@ to start over **only if it was never admitted as the app (it holds no
 open**. Only a code read from the vault's own readable (sealed) answer counts as a refusal, and then only `busy`, `wrong_again`, `attempt_lost`, `exhausted`, `not_armed`, `closed` (which comes only from a fresh open), `attestation` (decided at step 1, before anything is written), the counter-down answer and the wait verdicts prove on their own that no step 1 was stored; `wrong` and `expired` count as refusals only for a phone with no earlier unanswered open (the sticky rule below). An unsealed slot status `expired` (written by the parent when the lease is held elsewhere or the answer is unreadable, or by the member API after 5.5 minutes queued), a 404, 410 or 5xx on the poll, no answer, `retry`, `transfer_incomplete` and any error count as unanswered. The rule looks at every open the phone ever sent, not the last one: once an open is unanswered, a later refusal never clears it (a `wrong` on a repeated open proves nothing about adoption). The phone keeps the per-open history; a "last answer" is not enough. A phone that was ever admitted treats the `410` as a `401`. A
 phone with an unanswered open keeps K and follows §4.9: it never forgets
 K on a `410`. On `401` it never forgets. The tests are Android's.
+
+### 4.11 Service connections (0.1.43)
+
+*Owner decision of 2026-10-27 (VAULT-MESSAGING 0.69.0 §6.4, §15 item
+42). Draft texts for the owner. Not built.* The same as ANDROID-PLAN §4
+"Service connections (0.1.90)", carried here by reference and not to be
+changed on one platform alone: the connection request's line "This is a
+service, not a person." with "The invitation says so. VettID has not
+checked it."; a "Services" section of Connections and never in
+Messages; no Call, message or share rows on a service's detail, which
+says what the service can ask; the label "Service" on a service's
+sign-in and approval requests; the texts `service_label`,
+`services_section_title`, `service_request_line`, `service_request_caveat`,
+`service_detail_can_ask_title`, `service_detail_can_ask_body`,
+`service_no_calls`, `service_forbidden` and `services_empty` are
+Android's. Only the platform differs: the section is a `List` section
+with the label in the row's trailing view, the icon an SF Symbol
+(`building.2`, outline). Nothing in this section is iOS-specific
+protocol.
 
 ## 5. Architecture
 

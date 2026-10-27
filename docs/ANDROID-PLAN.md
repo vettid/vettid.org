@@ -1,9 +1,19 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.87
+version: 0.1.90
 date: 2026-10-27
 changelog:
+  - 0.1.90: owner decision of 2026-10-27 (VAULT-MESSAGING 0.69.0, §15
+    item 42). New §4 "Service connections (0.1.90)": the connection
+    request says "This is a service, not a person." (a claim, not
+    checked); services are listed apart in a "Services" section of
+    Connections and never in Messages; a service's detail has no Call,
+    message or share rows and says what it can ask; its sign-in and
+    approval requests carry a "Service" label. Draft texts for the owner.
+    Vault: a staging release after 23; the service vault must send
+    the marker. The Messages and Connections rows of the screens table
+    point to it.
   - 0.1.87: owner decision of 2026-10-27 (VAULT-MESSAGING 0.67.0, §15 item
     41). §4 step 5 "Pairing": when the unlock's `ok` carries `invitation_recovery_id`, the
     phone sends one `hs.init` with that `recovery_id` as `ctx`, the
@@ -1065,7 +1075,7 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.23.1) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.69.0) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
@@ -1187,9 +1197,9 @@ rows below say "Vault" for the screens and "item" for the data.
 
 | Screen | Proton analogue | Notes |
 |---|---|---|
-| Messages | Inbox | Conversations by connection; Unread chip; the floating action button starts a new message (pick a connection, then the conversation) |
+| Messages | Inbox | Conversations by connection (people only; services never, 0.1.90, §4 "Service connections"); Unread chip; the floating action button starts a new message (pick a connection, then the conversation) |
 | Conversation | Message detail | Bubbles in a card list; pill actions (reply, more). Links in a message (0.1.29, VAULT-MESSAGING 0.24.0 §10.5): only `https://` URLs are tappable; a tap asks "Open link to <host>?" and then hands the URL to Android, so a verified App Link opens its app and any other link the browser; every other scheme, custom app schemes included, stays plain text. (0.1.39) Photos: a photo button in the composer, thumbnails in bubbles, a viewer (§4 "Photo attachments") |
-| Connections | Contacts | Initial tiles, status (pending / active / stale / blocked); a star marks favourites (the owner's `favorite` flag, `connection.update`), whose tiles are teal; the floating action button invites a connection (0.1.11: QR or link, or scan the other's QR), the only invite entry point besides empty states. Each is titled "First Last" from the profile's core (VAULT-MESSAGING 0.18.0 §10.8), the display name, if any, as secondary text. Incoming requests show the requester's names the same way. Only between activation and the first `profile.update`, when the request's names are not at hand: "Name not shared yet"; never "Unnamed connection" |
+| Connections | Contacts | (0.1.90) Services are a separate "Services" section below the people, §4 "Service connections". Initial tiles, status (pending / active / stale / blocked); a star marks favourites (the owner's `favorite` flag, `connection.update`), whose tiles are teal; the floating action button invites a connection (0.1.11: QR or link, or scan the other's QR), the only invite entry point besides empty states. Each is titled "First Last" from the profile's core (VAULT-MESSAGING 0.18.0 §10.8), the display name, if any, as secondary text. Incoming requests show the requester's names the same way. Only between activation and the first `profile.update`, when the request's names are not at hand: "Name not shared yet"; never "Unnamed connection" |
 | Connection detail | — | Titled "First Last" (never an alias), the display name secondary. Profile shared with you (the names labelled as the name on their VettID account, never "verified"; display name, photo and items labelled as shared by them), sharing both ways ("You share with <First>": every share rule a row with its own settings, opening its editor or deleted after a confirmation, "Add a rule" up to 64, 0.1.20), a connection's requests (0.1.22, VAULT-MESSAGING 0.23.0 §10.4.1: muted, paused after several declines, declined ones in cooldown, with Mute/Unmute, Resume and "Allow declined requests again"), authenticate, the vault key fingerprint (`ik`, 8 groups of 4 hex digits, §10.8: the lasting identity check). The action bar: message, favourite, History, remove (confirmed). No safety code (it belongs to connecting: the invite and request screens), no alias or notes, no edit or block (0.1.13; blocking stays on an incoming request) |
 | Approvals | — (VettID-specific) | Pending connection requests, grant requests, critical-item uses, share-rule decisions; approve/deny; critical items need the credential password. 0.1.22: a connection's asks within 10 minutes are one entry ("Sam asks for 3 things"), a connection whose asks are paused is a notice (resume, or remove the connection), a share question names the rule that asks first and warns when declining stops an item already shared, one question per item and connection |
 | Vault | Folder list | Titled "Vault" (0.1.11; was "Items"). Items per VAULT-ITEMS: name, category, typed fields, tags, sensitivity (data / secret / critical); filter by tag (0.1.21: "✕ Clear" ends the filter chips while a filter is on); each tag in its own colour (0.1.21), stored in the vault's tag registry and the same on every device, the least-used of a palette of ten for a new tag, picked by the member on Manage tags (0.1.25; `@profile` always gold); add/edit from templates ("Save item" in the top bar, 0.1.21); share rules by tag, as many per connection as needed (up to 64), each with its own tags, mode (default: ask each time), fetch limit and end (presets or a custom date and time), overlaps shown (0.1.20); one tag per rule, per-hour and per-day limits, `ask` wins, rules named by their tags, "Save rule" in the top bar (0.1.22). Critical items live in the Protean Credential and are never shared by a rule |
@@ -4348,6 +4358,83 @@ changes vault code here.
     can still `presence.set` with it. Harmless (an unknown id in
     `except` does nothing), but §10.1's versioning says otherwise.
     Proposed: bump the version and send `presence.changed`.
+
+### Service connections (0.1.90)
+
+*Owner decision of 2026-10-27 (VAULT-MESSAGING 0.69.0 §6.4 "Service
+connections", §15 item 42). The texts are drafts for the owner. Not
+built. Vault: a staging release after 23; until a vault sends
+`peer_kind`, nothing here shows.*
+
+A service (VAULT-MESSAGING §1.1) is a connection that declared itself a
+service in its invitation. The vault enforces what a service may do; the
+app shows the difference and offers only what is allowed.
+
+**Where the app reads it.** `peer_kind` (`"service"`, absent for a
+person) in `connection.get` and `.list`, `connection.invite.accept`'s
+answer, `connection.request.outgoing` and the outgoing entries of
+`connection.request.list`. Absent or any other value: a person, as
+today. The app keeps no kind of its own and never infers one from a name.
+
+**The connection request** (the "Compare the code" screen, before the
+member approves). When `peer_kind` is `"service"`, under the name and
+above the code: the line **"This is a service, not a person."** with
+the small print **"The invitation says so. VettID has not checked it."**
+The member compares the code and approves as before. A request without
+the marker shows nothing new.
+
+**Lists.**
+
+| Where | Services |
+|---|---|
+| Messages | Never listed, no conversation; the new-message picker does not offer a service |
+| Connections | A separate section **"Services"** below the people (shown only when there is one); each row the name, a small **"Service"** label and a service icon instead of the initial tile; services are not starred or sorted among people |
+| Approvals | A sign-in or approval a service asks for names the service and carries the label **"Service"** beside the name; the screens' other texts are unchanged ("Only approve if you are signing in right now") |
+| Notifications and History | The name as always; the "Service" label where a row names the connection |
+
+**Connection detail** (a service). The title is the service's name with
+the label **"Service"**. Shown: the profile it shared (names, `ik`
+fingerprint, its logo if any), **"What this service can ask"**, its
+requests (mute, resume), History, remove. Hidden: message, **Call**,
+"You share with…" and "Add a rule", authenticate (the member does not
+challenge a service), location and presence actions, introductions.
+The Call button is simply absent. **"What this service can ask"**:
+**"It can ask you to confirm a sign-in or approve an action. It can't
+message or call you, and it can't ask for your data."** The line is the
+vault's rule for this release; it is revised with any contract.
+
+**If the vault says `forbidden`** to something sent to a service (an
+old build that still offers it): "Services can't do that." and nothing
+else; the app removes the action.
+
+**Draft texts** (all English; translations follow the usual way):
+
+| Key | Text |
+|---|---|
+| `service_label` | Service |
+| `services_section_title` | Services |
+| `service_request_line` | This is a service, not a person. |
+| `service_request_caveat` | The invitation says so. VettID has not checked it. |
+| `service_detail_can_ask_title` | What this service can ask |
+| `service_detail_can_ask_body` | It can ask you to confirm a sign-in or approve an action. It can't message or call you, and it can't ask for your data. |
+| `service_no_calls` | Services can't be called. |
+| `service_forbidden` | Services can't do that. |
+| `services_empty` | No services yet |
+
+`service_no_calls` is for the places that must say why a Call is
+missing (an accessibility description, a long-press on a service's row);
+the owner may choose to leave it unused.
+
+**Not built, on purpose.** No "verified service" badge: nothing proves
+who runs a service yet (VAULT-MESSAGING §15 item 42, open). A connection
+made before the vault release stays a person; the member reconnects a
+service to have it marked.
+
+**Tests.** A request with `peer_kind` shows the line and the caveat; one
+without shows neither; the Services section appears only with a service;
+a service is absent from Messages and the new-message picker; its detail
+has no Call, message or share rows; an unknown `peer_kind` is a person; a
+`forbidden` shows the text once and removes the action.
 
 ### Devices & agents (0.1.53)
 
