@@ -5250,7 +5250,9 @@ rekey `hs.init` or message sealed under it arriving after the switch,
 means two copies of the peer exist. The vault then **suspends the
 connection** under the rules of §3.4 (it sends nothing to and accepts
 nothing from the peer), audits `connection.fork_suspected` and makes a
-feed item of priority `high`. The connection resumes only with a new
+feed item of priority `high` with the text "<connection name> may be
+running from two copies of its data. The connection is paused; connect
+again with a new invitation." *(text pending owner approval)*. The connection resumes only with a new
 invitation (§6.4). A single genuine restore never triggers it: after the
 switch the peer sends only in the restored line. Records of a replaced
 line are kept for the 35-day window.
@@ -8907,7 +8909,10 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `ref` = `idle`, §3.6.8), ten failed owner checks, a recovery,
   memory pressure, a lease loss, a restart, 0.23.2); `device.paired`,
   `device.unlinked`; `connection.added`, `connection.removed`,
-  `connection.stale`, `connection.reconnected`; `identity.rotated`;
+  `connection.stale`, `connection.reconnected`; (0.72.0)
+  `connection.restored_reconnect` (`connection_id`, `ref` = the named
+  epoch's activation time, §6.6) and `connection.fork_suspected`
+  (`connection_id`, §6.6); `identity.rotated`;
   `credential.created`, `credential.rotated`, `credential.password_changed`,
   `credential.password_failed`, `credential.unlocked`;
   `credential.recovered`; (0.52.0) `credential.utk_resync`
@@ -9348,7 +9353,9 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
   attempts were used), `recovery.counter_unavailable` (priority
   `urgent`), `identity.rotation_failed` (priority `high`, `ref` =
   `recovery`, or the `transfer_id` after a transfer) and `identity.rotate_conflict` (priority `high`,
-  `connection_id`) (§11.14.11), (0.50.0; needs a vault release)
+  `connection_id`) (§11.14.11), (0.72.0) `connection.fork_suspected`
+  (priority `high`, `connection_id`; §6.6; no feed item for
+  `connection.restored_reconnect`), (0.50.0; needs a vault release)
   `recovery.generation_closed` with `ref` `<generation>/rollback`
   (priority `urgent`; only for the reason `rollback`, §11.14.11),
   and `guide`. Apps render
