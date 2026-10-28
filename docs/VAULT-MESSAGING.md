@@ -32,8 +32,9 @@ changelog:
     password-only retry on the held screen is a check, and the apps as
     reviewed and tested keep the PIN across it. It is now forgotten at
     a later check's answer unless that answer again leaves the retry
-    useful (a wrong password with tries left, `backoff`, or no answer
-    from the vault or the way to it); tries left estimated at 0 still
+    useful (a wrong password with tries left, `backoff`, or a check the
+    vault did not answer, including rate limited or service paused);
+    tries left estimated at 0 still
     forget it. ANDROID-PLAN 0.1.96
   - 0.73.0: owner decision 2026-10-28 (raised by the Opus review of
     vettid-android #213). §3.6.5: when a failed check's tries left are
@@ -3993,10 +3994,11 @@ There is no host alarm and no email (§13.7; §15 item 22).
   when the app leaves the foreground, at a lock or a wipe, and at the
   answer to each later check unless that answer again leaves the
   password-only retry useful (0.73.1): a wrong password with tries
-  left, `backoff`, or no answer because the vault or the way to it did
-  not respond or was unavailable; any other answer, or tries left
-  estimated at 0 (below), forgets it (then both are asked again, as for
-  any check).
+  left, `backoff`, or a check the vault did not answer (no answer, the
+  vault unavailable, or the way to it refusing it for now: rate limited
+  or the service paused); any other answer, or tries left estimated at
+  0 (below), forgets it (then both are asked again, as for any
+  check).
 - It **SHOULD** show the check at the **first app open** (or return to
   the foreground) after the deadline, before any screen that needs the
   vault. It **MUST NOT** interrupt an action in progress (composing a

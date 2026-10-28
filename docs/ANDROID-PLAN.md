@@ -6352,9 +6352,10 @@ interval). Follow-ups, in A3 unless noted:
      the foreground, at a lock or a wipe, and at the answer to a later
      check unless that answer again leaves the password-only retry
      useful (0.1.96, VAULT-MESSAGING 0.73.1: a wrong password with tries
-     left, a backoff, or no answer because the vault or the way to it
-     did not respond or was unavailable; tries left estimated at 0
-     forget it); then the held screen asks for both. The failure is never shown later on a screen
+     left, a backoff, or a check the vault did not answer: no answer,
+     the vault unavailable, rate limited or the service paused; tries
+     left estimated at 0 forget it); then the held screen asks for
+     both. The failure is never shown later on a screen
      the member did not see it happen on.
    - Backoff on the held screen (approved): **"Your vault is unlocked.
      Enter your credential password to check in."** with the existing
