@@ -1,9 +1,13 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.91
-date: 2026-10-27
+version: 0.1.92
+date: 2026-10-28
 changelog:
+  - 0.1.92: History's `identity.rotated` row follows VAULT-MESSAGING
+    0.69.2: the move's line shows only for a `ref` other than
+    `"recovery"` (a recovery's rotation carries `"recovery"`, a plain
+    key replacement no `ref`)
   - 0.1.91: owner decisions of 2026-10-27, after an audit of what the app
     keeps on the phone. New §5 "What the phone keeps (0.1.91)", where vault
     content is in memory only (no database, no content, photo or HTTP
@@ -3745,7 +3749,7 @@ is the app's and needs no vault change.
 | `vault.pin_changed` | "PIN changed" | — |
 | `device.secret_renewed` | "New phone secret set" | — (the vault records it without a device) |
 | `owner_check.passed`, `.held`, `.failed`, `.locked`, `.hold_changed` | "Daily check passed", "Vault held for the daily check", "Daily check failed", "Vault locked after failed daily checks", "Daily check hold changed" (decision 5) | — |
-| `identity.rotated` | "Your vault's keys were renewed" (was "Vault identity key rotated"; decision 7) | With `ref` = a `transfer_id` (VAULT-MESSAGING 0.68.0 §11.14.10; **approved**, owner 2026-10-27): "Replaced when you moved your vault to a new phone." Otherwise — |
+| `identity.rotated` | "Your vault's keys were renewed" (was "Vault identity key rotated"; decision 7) | With a `ref` other than `"recovery"`, i.e. a `transfer_id` (VAULT-MESSAGING 0.69.2 §11.14.10; **approved**, owner 2026-10-27): "Replaced when you moved your vault to a new phone." Otherwise — |
 | `credential.rotated` | "Your credential was renewed" (was "Credential rotated"; decision 7) | — |
 | `credential.utk_resync` (VAULT-MESSAGING 0.52.0 §3.5.4; approved by the owner 2026-10-21) | "One-time keys renewed" | "This phone's one-time keys were replaced with a fresh set." The row's second line names the device from the entry's `device_id`, as for every entry with one (§4 History). Category Security (`credential`); not urgent: History only, the vault makes no feed item for it |
 | `credential.holder_cleared` (VAULT-MESSAGING 0.54.0 §3.5.9; staging release 21; approved by the owner 2026-10-21) | "Credential holder cleared" | "Your vault found its credential holder missing and cleared it. If you didn't remove a phone, contact VettID." The row's second line names the device from the entry's `device_id`, the cleared holder, as for every entry with one (§4 History); that device is no longer listed, so it shows as "Removed device". Category Security (`credential`); not urgent: History only, the vault makes no feed item for it |
