@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.73.0
+version: 0.73.1
 date: 2026-10-28
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,7 +14,7 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.13.2)
-  - ANDROID-PLAN.md (0.1.95)
+  - ANDROID-PLAN.md (0.1.96)
   - IOS-PLAN.md (0.1.49; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
@@ -27,6 +27,14 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.73.1: erratum, owner decision 2026-10-28. §3.6.5 first bullet:
+    the kept PIN was said to be forgotten at "the next check", but the
+    password-only retry on the held screen is a check, and the apps as
+    reviewed and tested keep the PIN across it. It is now forgotten at
+    a later check's answer unless that answer again leaves the retry
+    useful (a wrong password with tries left, `backoff`, or no answer
+    from the vault or the way to it); tries left estimated at 0 still
+    forget it. ANDROID-PLAN 0.1.96
   - 0.73.0: owner decision 2026-10-28 (raised by the Opus review of
     vettid-android #213). §3.6.5: when a failed check's tries left are
     only estimated (the `vault.status` read after the answer did not
@@ -3982,8 +3990,13 @@ There is no host alarm and no email (§13.7; §15 item 22).
   left, or was answered `backoff` (0.71.1), it keeps the
   accepted PIN in memory only while the app is in front, for the
   password-only retry on the held screen below (0.71.1), and forgets it
-  when the app leaves the foreground, at a lock, a wipe or the next
-  check (then both are asked again, as for any check).
+  when the app leaves the foreground, at a lock or a wipe, and at the
+  answer to each later check unless that answer again leaves the
+  password-only retry useful (0.73.1): a wrong password with tries
+  left, `backoff`, or no answer because the vault or the way to it did
+  not respond or was unavailable; any other answer, or tries left
+  estimated at 0 (below), forgets it (then both are asked again, as for
+  any check).
 - It **SHOULD** show the check at the **first app open** (or return to
   the foreground) after the deadline, before any screen that needs the
   vault. It **MUST NOT** interrupt an action in progress (composing a
