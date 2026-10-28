@@ -6325,13 +6325,16 @@ interval). Follow-ups, in A3 unless noted:
      The PIN field goes; only the password field stays, with **"Check
      in"**. No separate "Daily check" screen follows with a failure the
      member did not see. When the vault was not yet due, the member may
-     leave it ("Not now") and the app carries on.
+     leave it (**"Not now"**, approved) and the app carries on.
    - Every wrong try shows the tries left, never "Wrong credential
      password" alone. A wrong PIN shows only the PIN error; no check is
      sent and no check try is used.
-   - The idle-lock texts ("…Unlock it with your PIN to carry on…") say
-     "with your PIN and your credential password" when the screen asks
-     for both (owner text approval pending).
+   - The idle-lock texts (approved 2026-10-28), when the screen asks for
+     both: **"You hadn't checked in for <N>, so your vault locked.
+     Unlock it with your PIN and your credential password to carry on.
+     New messages wait for up to 14 days."** (and the same without
+     "for <N>" when the time is unknown); the notification keeps "with
+     your PIN", since the screen it opens decides what it asks.
 7. **Settings**: the interval (1–24 h); shortening may hold the vault at
    once, so the app offers a check with the change.
    **Hold switch** (owner decision of 2026-10-06, §3.6.7): turning the
