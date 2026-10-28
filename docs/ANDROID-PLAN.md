@@ -1,9 +1,13 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.95
+version: 0.1.96
 date: 2026-10-28
 changelog:
+  - 0.1.96: erratum (VAULT-MESSAGING 0.73.1, owner 2026-10-28): §6
+    owner check item 6: the kept PIN survives a held-screen retry whose
+    answer again leaves the password-only retry useful, as built
+    (android #212, #213), instead of going at "the next check"
   - 0.1.95: owner decision of 2026-10-28 (VAULT-MESSAGING 0.73.0
     §3.6.5): §6 owner check item 6: an estimated 0 tries left (the
     status read after the failure did not come) shows "probably locked,
@@ -1158,7 +1162,7 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.73.0) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.73.1) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
@@ -6345,8 +6349,13 @@ interval). Follow-ups, in A3 unless noted:
      field goes; only the password field stays, with **"Check in"** and
      **"Lock vault"**. The accepted PIN is kept in memory only while the
      app is in front (app-wide foreground), and forgotten when it leaves
-     the foreground, at a lock, a wipe or the next check; then the held
-     screen asks for both. The failure is never shown later on a screen
+     the foreground, at a lock or a wipe, and at the answer to a later
+     check unless that answer again leaves the password-only retry
+     useful (0.1.96, VAULT-MESSAGING 0.73.1: a wrong password with tries
+     left, a backoff, or a check the vault did not answer: no answer,
+     the vault unavailable, rate limited or the service paused; tries
+     left estimated at 0 forget it); then the held screen asks for
+     both. The failure is never shown later on a screen
      the member did not see it happen on.
    - Backoff on the held screen (approved): **"Your vault is unlocked.
      Enter your credential password to check in."** with the existing
