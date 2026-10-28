@@ -28,13 +28,14 @@ related:
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
   - 0.70.0: **owner decision 2026-10-28** (§15 item 44; coordination
-    #4, from the iOS storage audit, vettid-ios #157). New §10.4.2 and type `pending.list` (app): the open asks that
+    #4, from the iOS storage audit, vettid-ios #157). New §10.4.2 and type `pending.list` (app, desktop): the open asks that
     arrived only as events (`connection.authenticate.pending`,
     `device.session.pending`, `approval.pending`, `action.pending`,
     `location.request.pending`), each as `{kind, body}` with the event's
     body, so apps that keep vault content in memory only can read them
     back after an unlock or a passed owner check. Refused while held,
-    like the other lists; desktops and agents `forbidden`; an older
+    like the other lists; desktops get the three kinds they receive,
+    agents `forbidden`; an older
     vault answers `unsupported_type`. Paged by size (`after`, `limit`,
     `next`); the app merges by id and applies only later events. Vault:
     a staging release after 24
@@ -6980,7 +6981,7 @@ which are not asks). Five kinds arrived only as events and were lost;
 
 | Type | Request body | Response body |
 |---|---|---|
-| `pending.list` (app) | `{after?, limit?}` (`limit` 1–100, default 50) | `{asks: [{kind, body}], next?}`; at most 131,072 bytes (below) |
+| `pending.list` (app, desktop) | `{after?, limit?}` (`limit` 1–100, default 50) | `{asks: [{kind, body}], next?}`; at most 131,072 bytes (below) |
 
 | `kind` | `body`: exactly the body of the event it repeats | Section |
 |---|---|---|
@@ -7008,9 +7009,12 @@ which are not asks). Five kinds arrived only as events and were lost;
   `next` is an opaque cursor for `after`, present while entries remain;
   a cursor that no longer names a position starts again from the
   beginning.
-- **Who may ask.** Apps, which receive and decide all five kinds.
-  Agents: `forbidden`. Desktops: see §15 item 44 (open: whether a
-  desktop gets the three kinds it receives); until decided, `forbidden`.
+- **Who may ask.** Apps, which receive and decide all five kinds, and
+  (owner decision 2026-10-28) desktops, within their access session
+  (§6.8), which get only the three kinds they receive and may decline:
+  `authenticate`, `action` and `location` (never `session` or
+  `approval`), as every other ask list is (app, desktop). Agents:
+  `forbidden`.
 - **When.** It is an owner-device request like the other lists: while
   the vault is held (§3.6) it is refused like them (`owner_check_required`),
   so the app reads it after the unlock and again after a passed owner
@@ -22577,11 +22581,9 @@ Follow-ups:
     session requests, held approvals, `prompt-each-time` invocations and
     location requests, each as the body of its event; the app reads it
     after the unlock and after a passed owner check. Vault in a staging
-    release after 24; then Android and iOS. **Open:** (a) whether a
-    desktop may read the three kinds it receives (`authenticate`,
-    `action`, `location`; it never receives `session` or `approval`),
-    as every other ask list is (app, desktop); until decided, desktops
-    are `forbidden`. (b) Pairing and transfer confirmations
+    release after 24; then Android and iOS. Desktops read the three
+    kinds they receive (`authenticate`, `action`, `location`), within
+    their access session (owner, 2026-10-28). **Open:** pairing and transfer confirmations
     (`device.pair.pending`, `device.transfer.pending`, §6.7) are not
     listed: each is a short flow on its own screen with a SAS, which
     the new device starts again, and a transfer is approved even while
