@@ -5,8 +5,9 @@ version: 0.1.47
 date: 2026-10-28
 changelog:
   - 0.1.47: owner decision of 2026-10-28 (VAULT-MESSAGING 0.71.0
-    §3.6.5): "Unlock and check in", as ANDROID-PLAN 0.1.93 §6 owner
-    check item 6, with the same approved texts
+    §3.6.5 "Ask only for what is used"): "Unlock and check in", as
+    ANDROID-PLAN 0.1.93 §6 owner check item 6, with the same approved
+    texts, including the idle-lock body
   - 0.1.46: owner decisions of 2026-10-28 (coordination #4). ID17 and
     §6.9: the app lock has **no data key**, but a Secure Enclave key
     (`.biometryCurrentSet` or `.devicePasscode`) gates the prompt with a
@@ -2043,11 +2044,11 @@ leaving the screen.
   locks (VAULT-LOCK, owner check) are the vault's and need nothing from
   the app in the background.
 - **Unlock and check in** (0.1.47; owner decision 2026-10-28,
-  VAULT-MESSAGING 0.71.0 §3.6.5): as ANDROID-PLAN §6 owner check item
-  6, with the same approved texts: the unlock asks for the password when
-  the check is due or falls due within a third of the interval, checks
-  in after the unlock, and shows a failed check at once on the same
-  screen with the tries left.
+  VAULT-MESSAGING 0.71.0 §3.6.5 "Ask only for what is used"): as
+  ANDROID-PLAN §6 owner check item 6, with the same approved texts
+  (also the idle-lock body): the password only when the vault is past
+  its deadline, never ahead of it; a failed check after a successful
+  unlock is shown at once on the same screen with the tries left.
 - **Owner check early warning**: local notifications scheduled for 1 h
   before the deadline whenever the deadline is learned, cancelled on a
   check (ANDROID-PLAN §6 owner check, item 5). These work without APNs.

@@ -5,10 +5,10 @@ version: 0.1.93
 date: 2026-10-28
 changelog:
   - 0.1.93: owner decision of 2026-10-28 (VAULT-MESSAGING 0.71.0
-    §3.6.5): "Unlock and check in", §6 owner check item 6. The unlock
-    also asks for the password when the deadline falls within a third
-    of the interval and checks in after the unlock; the approved texts;
-    a failed check after a successful unlock is shown on the same
+    §3.6.5 "Ask only for what is used"): §6 owner check item 6, "Unlock
+    and check in": the password only when the vault is past its
+    deadline, never ahead of it; the approved texts (also the idle-lock
+    body); a failed check after a successful unlock is shown on the same
     screen with the tries left, never as a later check screen
   - 0.1.92: History's `identity.rotated` row follows VAULT-MESSAGING
     0.69.2: the move's line shows only for a `ref` other than
@@ -6308,38 +6308,32 @@ interval). Follow-ups, in A3 unless noted:
 6. **Locked and past the deadline**: one screen for PIN and password;
    unlock, read `vault.status`, then send the check without asking again.
    (0.1.93; owner decision 2026-10-28, VAULT-MESSAGING 0.71.0 §3.6.5
-   "One prompt, not two") **Unlock and check in:**
-   - The unlock screen asks for the password when the vault is past its
-     deadline and also when, by the saved owner-check state (§5 table:
-     deadline and interval, not vault content), the deadline falls
-     within a third of the interval (`interval_seconds / time_scale /
-     3`: 8 h at 24 h; 20 min on staging's 1 h; it follows from S1 of
-     STAGING-TIME-SCALE); then it checks in right after the unlock. With
-     no saved state (new install, transfer, recovery) it asks for the
-     PIN only, and if the vault is then due the ordinary check screen
-     follows. Due or not ("is due" / "is due soon", and whether "Not
-     now" is offered) follows `vault.status` after the unlock.
+   "Ask only for what is used") **Unlock and check in:**
+   - The app asks only for what it uses. Unlock with the check not due:
+     the PIN only. Unlock with the vault past its deadline (held, due,
+     idle-locked or locked by failed checks, by the saved owner-check
+     state of the §5 table): the PIN and the password on one screen.
+     Never the password ahead of the deadline ("check now" stays the way
+     to check in early, item 5). With no saved state (new install,
+     transfer, recovery): the PIN only, and the ordinary check screen if
+     `vault.status` then shows the vault due.
    - Texts (approved): title **"Unlock and check in"**; body **"Your
      daily check is due, so your vault needs your PIN and your
-     credential password."**, or, when not yet due, **"Your daily check
-     is due soon, so your vault needs your PIN and your credential
-     password."**
+     credential password."**
    - PIN right, password wrong: on the same screen, **"Your vault is
      unlocked, but the credential password was wrong, so your daily
      check didn't pass. <N> tries left before your vault locks again."**
      The PIN field goes; only the password field stays, with **"Check
      in"** (the accepted PIN is kept in memory only while this screen is
      in front, as on the pairing screen, and forgotten when the app
-     leaves the foreground; then both are asked again). No separate "Daily check" screen follows with a failure the
-     member did not see. When the vault was not yet due, the member may
-     leave it (**"Not now"**, approved) and the app carries on.
+     leaves the foreground; then both are asked again). No separate
+     "Daily check" screen follows with a failure the member did not see.
    - When that failure locks the vault (the tenth, or any once
      `failures` ≥ 10; item 8), the locked screen with the existing
      owner-check lock texts follows, not a retry. A `backoff` answer
      used no try: the screen says the vault is open and shows the
      existing backoff countdown of item 2, with "Check in" off until it
-     ends. An early check is a real check: a wrong password counts (and
-     stays counted after "Not now"), a passing one resets the deadline.
+     ends.
    - Every wrong try shows the tries left, never "Wrong credential
      password" alone. A wrong PIN shows only the PIN error; no check is
      sent and no check try is used.

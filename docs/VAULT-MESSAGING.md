@@ -25,19 +25,19 @@ related:
   - STAGING-DEVELOPMENT-PLAN.md (0.1.6; D3, D4, D5; §4 the automation CA)
   - VAULT-HOST-PROTOCOL.md (0.1.16; the enclave ↔ parent protocol as built)
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
-  - STAGING-TIME-SCALE.md (0.1.5, design note for 0.43.0: the inventory of waits, choices T1–T9)
+  - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.71.0: **owner decision 2026-10-28.** §3.6.5 "One prompt, not
-    two": the unlock asks for the password also when the deadline falls
-    within a third of the interval, and checks in right after the
-    unlock; the screen says why the password is asked, and a check that
-    fails after a successful unlock is shown at once on the same screen,
-    with the checks left, never as a later separate check screen. Found
-    on staging: a wrong password at the unlock spent a check unseen, so
-    each visible try cost two. The PIN is kept for the password-only
-    retry while that screen is in front; a failure that locks, and a
-    `backoff`, are shown as such; due-ness follows `vault.status` after
-    the unlock. Apps only; the vault is unchanged
+  - 0.71.0: **owner decision 2026-10-28.** §3.6.5 "Ask only for what
+    is used": the unlock asks for the PIN only, and for the PIN and the
+    password on one screen only when the vault is past its deadline;
+    never the password ahead of the deadline. The screen says why the
+    password is asked; a check that fails after a successful unlock is
+    shown at once on the same screen with the checks left (the PIN kept
+    in memory only while that screen is in front, for the retry), never
+    as a later separate check screen; a failure that locks, and a
+    `backoff`, are shown as such. Found on staging: a wrong password at
+    the unlock spent a check unseen, so each visible try cost two. Apps
+    only; the vault is unchanged
   - 0.70.0: **owner decision 2026-10-28** (§15 item 44; coordination
     #4, from the iOS storage audit, vettid-ios #157). New §10.4.2 and type `pending.list` (app, desktop): the open asks that
     arrived only as events (`connection.authenticate.pending`,
@@ -3956,31 +3956,26 @@ There is no host alarm and no email (§13.7; §15 item 22).
 - For a **locked** vault past its deadline, one screen asks for the PIN
   and the password; the app unlocks (§11.4), reads `vault.status`, and
   sends the check if the vault is held.
-- (0.71.0; owner decision 2026-10-28) **One prompt, not two.** The
-  unlock screen asks for the password whenever the check would otherwise
-  follow soon: when the vault is past its deadline (as above), and also
-  when, by the owner-check state the app keeps (its saved deadline and
-  interval; not vault content, so it survives a restart), the deadline
-  falls within a third of the interval: `interval_seconds / time_scale
-  / 3` (8 hours at the default 24; 20 minutes on staging's 1 hour). The
-  app then sends the check right after the unlock even if the vault is
-  not held (a check is allowed at any time, above). When it knows no
-  deadline (a new install, a transfer or a recovery) it asks for the
-  PIN only; if the vault then turns out due, the ordinary check screen
-  follows, which hides no failure.
+- (0.71.0; owner decision 2026-10-28) **Ask only for what is used.**
+  The unlock screen asks for the PIN only, unless the vault is past its
+  deadline (held, due, or locked by the idle lock or by failed checks):
+  then, and only then, it asks for the PIN and the password on one
+  screen, because both are used (the PIN unlocks, the password does the
+  check that follows). The app never asks for the password ahead of
+  the deadline; a member who wants to check in early uses "check now"
+  (the early warning, above). Whether the vault is past its deadline
+  follows the app's saved owner-check state (its deadline and interval;
+  not vault content, so it survives a restart); with none (a new
+  install, a transfer or a recovery) it asks for the PIN only, and if
+  `vault.status` after the unlock shows the vault due, the ordinary
+  check screen follows, which hides no failure.
   - It **MUST** say on that screen why the password is asked.
-  - Whether the vault is due, and so the wording and whether the member
-    may leave the check for later, follow the `vault.status` read after
-    the unlock, not the saved deadline (the deadline may pass between
-    the screen and the submit; past it the check is never dismissible,
-    §3.6.3, §3.6.7).
   - It **MUST NOT** spend a check silently: when the unlock succeeds and
     the check fails on the password, the same screen says so at once
     (the vault is open, the check did not pass, the checks left) and
     keeps only the password field for another try (the PIN kept as in
     the first bullet); it never moves on to a separate check screen that
-    shows a failure the member did not see happen. When the vault was
-    not yet due, the member may leave that try for later.
+    shows a failure the member did not see happen.
   - When that failure locks the vault (§3.6.4: the tenth, or any failure
     once `failures` ≥ 10), the app shows the locked screen with the
     owner-check lock text, not a retry.
@@ -3988,13 +3983,6 @@ There is no host alarm and no email (§13.7; §15 item 22).
     says the vault is open and when the check can be tried
     (`retry_after`), with the send button off until then.
   - A wrong PIN ends the unlock (§11.8), and no check is sent.
-  - An early check is a check: a wrong password counts toward the
-    failures and the password backoff and is an `owner_check.failed`
-    feed item, and stays counted after the member leaves it for later,
-    until a check passes; a passing one rotates the CEK (§3.6.6), sets
-    the deadline from now, and applies a lengthened interval or
-    idle-lock setting (§3.6.2, §3.6.8). Before 0.71.0 an unlock in that
-    window cost no check.
 - Settings offer the interval (1–24 h, §3.6.2) and the hold (§3.6.7).
   Turning the hold off is part of a check: the app asks for the PIN and
   the password on the same screen as any check, with an optional end
