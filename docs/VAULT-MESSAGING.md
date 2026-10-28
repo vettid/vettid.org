@@ -43,7 +43,7 @@ changelog:
     be refused by `th1` first (marks kept 16 days + 5 minutes), and
     changes no state before `sig_I` verifies at `hs.fin`. A restored
     service reconnects each connection at its next start, nothing else
-    sent meanwhile, 3 tries, 24 h bound, then stale. Residual old-copy
+    sent meanwhile, 3 tries, 7-day bound, then stale. Residual old-copy
     risk added to §6.6, §11.14.2 and §13. Authentication, the
     suspended-connection rule and the Limits are unchanged. §6.2 `ctx`
     and §6.5 key retention updated. Vault: a staging release after 24;
@@ -5265,8 +5265,9 @@ two copies of the peer exist, and the vault **suspends the connection**
 under the rules of §3.4 (it sends nothing to and accepts nothing from the
 peer), audits `connection.fork_suspected` and makes a feed item of
 priority `high` with the text "<connection name> may be running from two
-copies of its data. The connection is paused; connect again with a new
-invitation." (text approved by the owner 2026-10-28). A single genuine
+copies of its data. The connection is paused. Contact <connection
+name> before you connect again." (text approved by the owner
+2026-10-28). A single genuine
 restore never triggers it. *Corner case:* a second restore from a backup
 newer than the first named epoch is reported as two copies (an operator
 mistake, and valid behaviour). **Exit:** `connection.rotation.resolve`
@@ -5308,7 +5309,7 @@ connection sends **nothing**: no messages, rekeys, token refreshes or
 re-mints. At most 3 tries per restore (the reconnect token allows 4
 messages); a reconnect resumed after a restart sends a **new** `hs.init`
 (a new `th1`), since the stored bytes would be refused as a replay. A
-reconnect not completed within **24 hours** fails: the connection becomes
+reconnect not completed within **7 days** (the idle lock's) fails: the connection becomes
 `stale`, the operator is alarmed, and a new invitation is needed. A
 restore taken before the restored side's own identity rotation is refused
 (`from.ik` older than the one on record): the connection goes `stale` and
@@ -22818,7 +22819,7 @@ Follow-ups:
     reconnect `hs.init` already answered is refused by `th1` first (marks
     kept 16 days + 5 minutes), and changes no state before `sig_I`
     verifies at `hs.fin`; a restored service reconnects at its next start
-    (3 tries, nothing else sent meanwhile, 24 h bound, then stale and an
+    (3 tries, nothing else sent meanwhile, 7-day bound, then stale and an
     operator alarm). Authentication, the suspended-connection rule and
     the Limits are unchanged. Rejected: option B (an empty or marked
     `ctx`), which weakens what `ctx` binds, and option A for person
@@ -22827,7 +22828,7 @@ Follow-ups:
     change: exact-match `ctx` when it answers a member (drop the
     history), the 35-day window and 512 cap on what it still keeps,
     `th1` marks kept 16 days + 5 minutes, the replay check first and no
-    effects before `hs.fin`, a new `hs.init` after a restart, the 24 h
+    effects before `hs.fin`, a new `hs.init` after a restart, the 7-day
     bound with the stale connection and the alarm, and the chain count
     that signed each epoch. Follow-ups: ANDROID-PLAN and IOS-PLAN must
     render `connection.fork_suspected` (a paused connection with no
