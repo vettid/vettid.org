@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.72.0
+version: 0.72.1
 date: 2026-10-28
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -27,6 +27,13 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.72.1: erratum, owner decisions 2026-10-28 (raised by the service
+    vault agent while implementing 0.72.0). §6.6 "Replay": a §3.4
+    rotation conflict in a reconnect `hs.init`'s `rotations` suspends at
+    once, before `hs.fin` (self-verifying evidence). New "Crossing
+    reconnects": the member's reconnect wins; the service abandons its
+    own, the member vault keeps its own, so both end on the member's
+    epoch
   - 0.72.0: **owner decision 2026-10-28, "option A for services only"**
     (§15 item 45; coordination #9, from the service vault's restore
     work; changed after a security review). §6.6: a MEMBER vault accepts
@@ -5292,7 +5299,24 @@ days in the past plus 5 minutes in the future). A reconnect `hs.init`
 changes **no state** (tokens, rotation chain, active or stale) until
 `sig_I` verifies at `hs.fin`; the answer `hs.resp` is the only thing sent
 before. A restored responder loses its marks with the state it
-restores, which is why the deferral to `hs.fin` matters.
+restores, which is why the deferral to `hs.fin` matters. (0.72.1, owner
+decision 2026-10-28) **One exception:** when the `hs.init`'s `rotations`
+give a key the receiver knows a second successor, the receiver suspends
+the connection at once under §3.4, before `hs.fin`: the conflicting
+statement is signed by that key, so it is evidence on its own and needs
+no handshake to be believed.
+
+**Crossing reconnects** (0.72.1, owner decision 2026-10-28). After a
+restore, the member's vault may send its own reconnect (for example after
+`token_expired`) while the service's is open, and each names an epoch the
+other accepts. **The member's reconnect wins:** the service vault
+abandons its own (it sends no `hs.fin` for it and revokes the tokens it
+issued in it) and completes the member's; a member vault whose own
+reconnect is open does not complete the service's (it answers no
+`hs.resp` to it, or, if it already answered, sends no `hs.fin`-dependent
+change for it) and keeps its own. Both sides then end on the epoch of the
+member's reconnect, so the next rekey is not refused
+(`rekey_not_current_epoch`).
 
 **Responder `rotations`** (0.72.0). The responder's `rotations` are its
 own rotation statements since the epoch `ctx` names (the own chain count
