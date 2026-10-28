@@ -4070,10 +4070,14 @@ There is no host alarm and no email (§13.7; §15 item 22).
     action.
   - (0.73.0; owner decision 2026-10-28) A check that got no answer while
     the estimate is still above 0 may have counted, and the app **MUST**
-    say so: it re-reads `vault.status` (no try is used) and shows the
-    count from its answer; with no answer it says the check may have
-    counted and shows the estimate as "up to" that many tries left, with
-    the check offered again.
+    say so: it re-reads `vault.status` (no try is used), and the member
+    API's `GET /api/vault/status`; a `vault.locking` or a member API
+    `locked` shows the locked screen (not the owner-check lock text: at
+    an estimate above 0 the cause is not known), and an answer to
+    `vault.status` shows the count from it. With no answer it says the
+    check may have counted and shows the estimate (the fewest tries that
+    may remain) as "up to" that many, with the check offered again (the
+    PIN field shown again unless the PIN is still kept).
   - When the check is answered `backoff`, no check was used: the screen
     says the vault is open and when the check can be tried
     (`retry_after`), with only the password field (the PIN kept as in

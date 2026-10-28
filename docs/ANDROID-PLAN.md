@@ -6381,8 +6381,11 @@ interval). Follow-ups, in A3 unless noted:
      after ten wrong daily checks in a row."** (approved 2026-10-28),
      with **"Check again"** (the same reads) and **"Lock vault"**.
    - (0.1.95) A check with no answer while the estimate is above 0: the
-     app re-reads `vault.status` (no try used). An answer: the usual
-     tries-left line with the real count. None: **"Your vault didn't
+     app re-reads `vault.status` and the member API's status (no try
+     used). `vault.locking` or the API's `locked`: the locked screen
+     (not the owner-check lock text; the cause is not known). A
+     `vault.status` answer: the usual tries-left line with the real
+     count. None: **"Your vault didn't
      answer, so that check may have counted. Up to <N> tries left before
      your vault locks."** (singular **"Up to 1 try left…"**; approved
      2026-10-28), with "Check in" offered again.
