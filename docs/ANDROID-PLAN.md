@@ -2504,7 +2504,7 @@ vault without it, part 1 applies unchanged.
   | Where | Text |
   |---|---|
   | Held screen | "Your vault locks itself on <date> if you don't check in." |
-  | Notification (Security channel) and the unlock screen, after `vault.locking{reason: "idle"}` | "Your vault locked itself" / "You hadn't checked in for <N> days, so your vault locked. Unlock it with your PIN to carry on. New messages wait for up to 14 days." |
+  | Notification (Security channel) and the unlock screen, after `vault.locking{reason: "idle"}` | "Your vault locked itself" / (0.1.93, approved 2026-10-28; §6 owner check item 6) "You hadn't checked in for <N>, so your vault locked. Unlock it with your PIN and your credential password to carry on. New messages wait for up to 14 days." (<N> as "3 days" in production, "7 hours" on staging; without "for <N>" when the time is unknown) |
   | History | "Vault locked itself (not checked in)" for `vault.locked` with `ref` `idle` |
   | Settings, under the choice | "If you don't pass the daily check for this long, your vault locks itself and stops receiving until you unlock it." |
 
@@ -6343,12 +6343,13 @@ interval). Follow-ups, in A3 unless noted:
    - Every wrong try shows the tries left, never "Wrong credential
      password" alone. A wrong PIN shows only the PIN error; no check is
      sent and no check try is used.
-   - The idle-lock texts (approved 2026-10-28), when the screen asks for
-     both: **"You hadn't checked in for <N>, so your vault locked.
-     Unlock it with your PIN and your credential password to carry on.
-     New messages wait for up to 14 days."** (and the same without
-     "for <N>" when the time is unknown). After an idle lock the check
-     is always overdue, so the screen always asks for both; the Security
+   - The idle-lock texts (approved 2026-10-28; the row in the texts
+     table above): **"You hadn't checked in for <N>, so your vault
+     locked. Unlock it with your PIN and your credential password to
+     carry on. New messages wait for up to 14 days."**, <N> written as
+     "3 days" in production and "7 hours" on staging, and without "for
+     <N>" when the time is unknown. After an idle lock the check is
+     always overdue, so the screen always asks for both; the Security
      notification uses the same body.
 7. **Settings**: the interval (1–24 h); shortening may hold the vault at
    once, so the app offers a check with the change.

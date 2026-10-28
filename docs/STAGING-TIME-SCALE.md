@@ -1,8 +1,8 @@
 ---
 title: STAGING-TIME-SCALE
 status: draft, approved by the owner 2026-10-18
-version: 0.1.4
-date: 2026-10-23
+version: 0.1.5
+date: 2026-10-28
 owner: Al Liebl (Mesmer)
 component: vault (enclave, release constants), member API, apps (Android, iOS), dev stack
 related:
@@ -14,6 +14,8 @@ related:
   - VAULT-LOCK.md (0.1.2) (the idle lock), AGENT-PLAN.md (0.1.6) (the dev stack's held-vault test)
   - vettid-vault `main` f0976ee (read only: `enclave/releasecfg/*.json`, `releasecfg.go` and the timer constants)
 changelog:
+  - 0.1.5: S2a, the window in which the unlock also asks for the
+    password (VAULT-MESSAGING 0.71.0 §3.6.5); follows from S1
   - 0.1.4: draft, proposed for the owner's approval (VAULT-MESSAGING
     0.56.0). S17: the wallet spend cap's period (a rolling 24 hours,
     §10.18 "Spend caps") is a wait of 24 h and is divided by
@@ -83,6 +85,7 @@ value at `time_scale` 24.
 |---|---|---|---|---|---|
 | S1 | Owner check interval (`owner_check.interval_seconds`, a setting) | vault | VAULT-MESSAGING §3.6.2 | default and max 24 h, min 1 h | default 1 h; 2.5 to 60 min (§6 T5) |
 | S2 | Owner check early warning | app (Android, iOS) | §3.6.5; ANDROID-PLAN §6 "Owner check" item 5; IOS-PLAN §6.6 | from 1 h before the deadline | 2.5 min before |
+| S2a | (0.1.5) Unlock and check in: the unlock asks for the password too | app (Android, iOS) | VAULT-MESSAGING 0.71.0 §3.6.5; ANDROID-PLAN §6 "Owner check" item 6 | a third of the interval before the deadline (8 h at 24 h) | `interval_seconds / time_scale / 3` (20 min at 1 h); follows from S1 |
 | S3 | Idle lock after an overdue check (`idle_lock.after_seconds`, a setting) | vault | §3.6.8; VAULT-LOCK L11 | default 7 days, 1 h to 30 days | default 7 h; 2.5 min to 30 h |
 | S4 | Idle lock after an unlock past its time | vault | §3.6.8 "After an unlock" | 1 h | 2.5 min |
 | S5 | Recovery code delay (`not_before` at least request + 24 h) | vault (`RecoveryDelay`); member API estimate | §11.11.2, §11.14.5; MEMBER-API "Vault recovery" | 24 h | 1 h |
