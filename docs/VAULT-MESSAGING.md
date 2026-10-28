@@ -7011,7 +7011,7 @@ which are not asks). Five kinds arrived only as events and were lost;
   beginning.
 - **Who may ask.** Apps, which receive and decide all five kinds, and
   (owner decision 2026-10-28) desktops, within their access session
-  (§6.8), which get only the three kinds they receive and may decline:
+  (§6.8), which get only the three kinds they receive and may answer:
   `authenticate`, `action` and `location` (never `session` or
   `approval`), as every other ask list is (app, desktop). Agents:
   `forbidden`.
@@ -7037,6 +7037,8 @@ which are not asks). Five kinds arrived only as events and were lost;
   `device.session.approve`, `approval.decide`, `action.respond`, or
   `location.share.start` with the `request_id`, §10.16), with the same errors when another device decided
   first.
+- **A desktop** reads the list when its access session starts and
+  again after a passed owner check, and merges it the same way.
 - **Older vaults.** A vault before the release that carries it answers
   `unsupported_type` (§5.3); the app then keeps today's behaviour (an
   ask lost at a lock shows "No longer on this phone") and does not ask
