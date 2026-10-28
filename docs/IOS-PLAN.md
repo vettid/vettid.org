@@ -2064,7 +2064,9 @@ leaving the screen.
   ANDROID-PLAN 0.1.95, "probably locked, checking", the state re-read
   without a check, then the lock text, the check with the real count,
   or "isn't answering" with "Check again" and "Lock vault", with the
-  same approved texts and reads ("Lock vault" offered throughout).
+  same approved texts and reads ("Lock vault" offered throughout); a
+  check with no answer while tries remain says it may have counted
+  ("Up to <N> tries left…", as ANDROID-PLAN 0.1.95).
 - **Owner check early warning**: local notifications scheduled for 1 h
   before the deadline whenever the deadline is learned, cancelled on a
   check (ANDROID-PLAN §6 owner check, item 5). These work without APNs.

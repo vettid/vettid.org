@@ -10,7 +10,8 @@ changelog:
     checking", re-reads the vault's state without a check, and then the
     lock text, the check with the real count, or "isn't answering" with
     "Check again" and "Lock vault" (texts approved 2026-10-28); a check
-    with no answer counts in the estimate; the idle-lock example is now
+    with no answer counts in the estimate and says so ("Up to <N> tries
+    left…", approved); the idle-lock example is now
     e.g. "8 days" in production (the default 24 h interval plus the
     default 7 days after the deadline)
   - 0.1.94: owner decisions of 2026-10-28 (VAULT-MESSAGING 0.71.1): §6
@@ -6379,6 +6380,12 @@ interval). Follow-ups, in A3 unless noted:
      end: **"Your vault isn't answering. It has probably locked itself
      after ten wrong daily checks in a row."** (approved 2026-10-28),
      with **"Check again"** (the same reads) and **"Lock vault"**.
+   - (0.1.95) A check with no answer while the estimate is above 0: the
+     app re-reads `vault.status` (no try used). An answer: the usual
+     tries-left line with the real count. None: **"Your vault didn't
+     answer, so that check may have counted. Up to <N> tries left before
+     your vault locks."** (singular **"Up to 1 try left…"**; approved
+     2026-10-28), with "Check in" offered again.
    - Every wrong try shows the tries left, never "Wrong credential
      password" alone. A wrong PIN shows only the PIN error; no check is
      sent and no check try is used.

@@ -36,7 +36,7 @@ changelog:
     and the member API's `GET /api/vault/status`), and shows the lock
     text, the check with the real count, or "isn't answering" with
     "Check again" and the lock action. A check sent with no answer
-    counts in the estimate (it may have counted). ANDROID-PLAN 0.1.95,
+    counts in the estimate and the app says it may have counted. ANDROID-PLAN 0.1.95,
     IOS-PLAN 0.1.49 (texts approved)
   - 0.72.1: erratum, owner decisions 2026-10-28 (raised by the service
     vault agent while implementing 0.72.0; two Opus reviews). §6.6
@@ -4068,6 +4068,12 @@ There is no host alarm and no email (§13.7; §15 item 22).
     reads end, it says the vault cannot be reached and has probably
     locked, with a "check again" action (the same reads) and the lock
     action.
+  - (0.73.0; owner decision 2026-10-28) A check that got no answer while
+    the estimate is still above 0 may have counted, and the app **MUST**
+    say so: it re-reads `vault.status` (no try is used) and shows the
+    count from its answer; with no answer it says the check may have
+    counted and shows the estimate as "up to" that many tries left, with
+    the check offered again.
   - When the check is answered `backoff`, no check was used: the screen
     says the vault is open and when the check can be tried
     (`retry_after`), with only the password field (the PIN kept as in
