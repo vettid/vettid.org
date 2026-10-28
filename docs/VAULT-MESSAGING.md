@@ -28,14 +28,16 @@ related:
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
   - 0.70.0: **owner decision 2026-10-28** (§15 item 44; coordination
-    #4). New §10.4.2 and type `pending.list` (app): the open asks that
+    #4, from the iOS storage audit, vettid-ios #157). New §10.4.2 and type `pending.list` (app): the open asks that
     arrived only as events (`connection.authenticate.pending`,
     `device.session.pending`, `approval.pending`, `action.pending`,
     `location.request.pending`), each as `{kind, body}` with the event's
     body, so apps that keep vault content in memory only can read them
     back after an unlock or a passed owner check. Refused while held,
     like the other lists; desktops and agents `forbidden`; an older
-    vault answers `unsupported_type`. Vault: a staging release after 24
+    vault answers `unsupported_type`. Paged by size (`after`, `limit`,
+    `next`); the app merges by id and applies only later events. Vault:
+    a staging release after 24
   - 0.69.2: erratum, owner 2026-10-28; found in the review of
     vettid-android #206. §11.14.10 said a successful rotation is
     audited `identity.rotated` with `ref` = the `transfer_id`, but did
@@ -6972,12 +6974,13 @@ item.
 content in memory only (ANDROID-PLAN §5, IOS-PLAN §6.9), so what they
 hold is gone after a lock, a hold or a restart. Most asks can be read
 back (`grant.list` `pending`, `critical-secret-use.list` `incoming`,
-`intro.list` `received`, `share.pending.list`). Five kinds arrived only
-as events and were lost; `pending.list` returns them:
+`intro.list` `received`; the open decisions of `share.pending.list`,
+which are not asks). Five kinds arrived only as events and were lost;
+`pending.list` returns them:
 
 | Type | Request body | Response body |
 |---|---|---|
-| `pending.list` (app) | `{}` | `{asks: [{kind, body}]}` |
+| `pending.list` (app) | `{after?, limit?}` (`limit` 1–100, default 50) | `{asks: [{kind, body}], next?}`; at most 131,072 bytes (below) |
 
 | `kind` | `body`: exactly the body of the event it repeats | Section |
 |---|---|---|
@@ -6989,28 +6992,41 @@ as events and were lost; `pending.list` returns them:
 
 - **What is listed.** Every ask of these kinds that the vault would
   still accept a decision on: received, not yet decided by any device,
-  not expired, not withdrawn and not dropped (§10.4.1). The `body` is
-  the event's body as the vault sent it, including any member a later
-  release adds to that event (for example `purpose`, or the match code
-  of a sign-in); an app parses it as it parses the event. An entry
-  carries no member the event did not. Sorted by `exp`, soonest first.
-  No paging: the existing limits bound the list (4 received challenges
-  per connection, one session request per device per 10 minutes, the
-  held requests of §6.8, the outstanding invocations and location
-  requests of §10.14 and §10.16).
-- **Who may ask.** Apps only: they decide these asks. Desktops keep
-  receiving the events they receive today; a desktop's request is
-  answered `forbidden`. Agents: `forbidden`.
+  not expired and not withdrawn (a suppressed ask, §10.4.1, was never
+  sent and is never listed). The `body` is the event's body as the
+  vault sent it, including any member a later release adds to that
+  event; an app parses it as it parses the event. An entry carries no
+  member the event did not.
+- **Pages.** Sorted by `exp`, then by the ask's id (`request_id`,
+  `approval_id` or `invocation_id`), soonest first. The limits are per
+  connection or per device (4 received challenges and 8 open
+  invocations per connection, one session request and 8 held approvals
+  per device, 16 location requests), so the list is paged like
+  `message.list` (§8.1, §10.5.2): a page holds at most `limit` entries
+  and at most 131,072 bytes, and always at least one entry (an entry is
+  never split or dropped; a single entry fits, as its event did).
+  `next` is an opaque cursor for `after`, present while entries remain;
+  a cursor that no longer names a position starts again from the
+  beginning.
+- **Who may ask.** Apps, which receive and decide all five kinds.
+  Agents: `forbidden`. Desktops: see §15 item 44 (open: whether a
+  desktop gets the three kinds it receives); until decided, `forbidden`.
 - **When.** It is an owner-device request like the other lists: while
   the vault is held (§3.6) it is refused like them (`owner_check_required`),
   so the app reads it after the unlock and again after a passed owner
   check, where it already reads `grant.list`. It changes nothing in the
   vault: reading the list neither extends nor ends an ask, writes no
   audit entry and sends nothing to the asker.
-- **The app.** It replaces its in-memory entries of these kinds with
-  the list (an entry not in it is gone: decided elsewhere, expired or
-  withdrawn), then applies events that arrive after the request was
-  sent, as for `grant.list`. A decision on a listed ask is the same
+- **The app.** It reads every page, then replaces its in-memory
+  entries of these kinds with the list (an entry not in it is gone:
+  decided elsewhere, expired or withdrawn), merging by the ask's id.
+  Since events arrive in no particular order (§8.4), it then applies
+  only events whose inner `ts` is later than the first page's response
+  `ts`: a creation event as old as that or older is ignored (the list
+  already says whether the ask is open), and a closing event
+  (`sync.event` of a decision, `location.request.closed`,
+  `device.session.*`, `action.result`, `connection.authenticate.result`)
+  for an id not in the list does nothing. A decision on a listed ask is the same
   request as on the event (`connection.authenticate.approve`,
   `device.session.approve`, `approval.decide`, `action.respond`, or
   `location.share.start` with the `request_id`, §10.16), with the same errors when another device decided
@@ -22559,7 +22575,16 @@ Follow-ups:
     session requests, held approvals, `prompt-each-time` invocations and
     location requests, each as the body of its event; the app reads it
     after the unlock and after a passed owner check. Vault in a staging
-    release after 24; then Android and iOS.
+    release after 24; then Android and iOS. **Open:** (a) whether a
+    desktop may read the three kinds it receives (`authenticate`,
+    `action`, `location`; it never receives `session` or `approval`),
+    as every other ask list is (app, desktop); until decided, desktops
+    are `forbidden`. (b) Pairing and transfer confirmations
+    (`device.pair.pending`, `device.transfer.pending`, §6.7) are not
+    listed: each is a short flow on its own screen with a SAS, which
+    the new device starts again, and a transfer is approved even while
+    held (§3.6.3), which this list is not; whether a restarted old phone
+    should get a pending transfer back is a separate decision.
 
 ## 16. Test vectors
 
