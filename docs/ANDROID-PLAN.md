@@ -1,9 +1,15 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.92
+version: 0.1.93
 date: 2026-10-28
 changelog:
+  - 0.1.93: owner decision of 2026-10-28 (VAULT-MESSAGING 0.71.0
+    §3.6.5): "Unlock and check in", §6 owner check item 6. The unlock
+    also asks for the password when the deadline falls within a third
+    of the interval and checks in after the unlock; the approved texts;
+    a failed check after a successful unlock is shown on the same
+    screen with the tries left, never as a later check screen
   - 0.1.92: History's `identity.rotated` row follows VAULT-MESSAGING
     0.69.2: the move's line shows only for a `ref` other than
     `"recovery"` (a recovery's rotation carries `"recovery"`, a plain
@@ -6301,6 +6307,31 @@ interval). Follow-ups, in A3 unless noted:
    deadline, a banner and a local notification with "check now".
 6. **Locked and past the deadline**: one screen for PIN and password;
    unlock, read `vault.status`, then send the check without asking again.
+   (0.1.93; owner decision 2026-10-28, VAULT-MESSAGING 0.71.0 §3.6.5
+   "One prompt, not two") **Unlock and check in:**
+   - The unlock screen asks for the password when the vault is past its
+     deadline and also when, by the last `owner_check` known, the
+     deadline falls within a third of the interval (8 h at 24 h; 20 min
+     on staging's 1 h); then it checks in right after the unlock. With
+     no known deadline it asks for the PIN only.
+   - Texts (approved): title **"Unlock and check in"**; body **"Your
+     daily check is due, so your vault needs your PIN and your
+     credential password."**, or, when not yet due, **"Your daily check
+     is due soon, so your vault needs your PIN and your credential
+     password."**
+   - PIN right, password wrong: on the same screen, **"Your vault is
+     unlocked, but the credential password was wrong, so your daily
+     check didn't pass. <N> tries left before your vault locks again."**
+     The PIN field goes; only the password field stays, with **"Check
+     in"**. No separate "Daily check" screen follows with a failure the
+     member did not see. When the vault was not yet due, the member may
+     leave it ("Not now") and the app carries on.
+   - Every wrong try shows the tries left, never "Wrong credential
+     password" alone. A wrong PIN shows only the PIN error; no check is
+     sent and no check try is used.
+   - The idle-lock texts ("…Unlock it with your PIN to carry on…") say
+     "with your PIN and your credential password" when the screen asks
+     for both (owner text approval pending).
 7. **Settings**: the interval (1–24 h); shortening may hold the vault at
    once, so the app offers a check with the change.
    **Hold switch** (owner decision of 2026-10-06, §3.6.7): turning the

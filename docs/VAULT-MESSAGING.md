@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.70.0
+version: 0.71.0
 date: 2026-10-28
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.13.2)
-  - ANDROID-PLAN.md (0.1.92)
-  - IOS-PLAN.md (0.1.46; §9.1 VA1–VA4)
+  - ANDROID-PLAN.md (0.1.93)
+  - IOS-PLAN.md (0.1.47; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,14 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.71.0: **owner decision 2026-10-28.** §3.6.5 "One prompt, not
+    two": the unlock asks for the password also when the deadline falls
+    within a third of the interval, and checks in right after the
+    unlock; the screen says why the password is asked, and a check that
+    fails after a successful unlock is shown at once on the same screen,
+    with the checks left, never as a later separate check screen. Found
+    on staging: a wrong password at the unlock spent a check unseen, so
+    each visible try cost two. Apps only; the vault is unchanged
   - 0.70.0: **owner decision 2026-10-28** (§15 item 44; coordination
     #4, from the iOS storage audit, vettid-ios #157). New §10.4.2 and type `pending.list` (app, desktop): the open asks that
     arrived only as events (`connection.authenticate.pending`,
@@ -3941,6 +3949,22 @@ There is no host alarm and no email (§13.7; §15 item 22).
 - For a **locked** vault past its deadline, one screen asks for the PIN
   and the password; the app unlocks (§11.4), reads `vault.status`, and
   sends the check if the vault is held.
+- (0.71.0; owner decision 2026-10-28) **One prompt, not two.** The
+  unlock screen asks for the password whenever the check would otherwise
+  follow soon: when the vault is past its deadline (as above), and also
+  when, by the last `owner_check` the app knows, the deadline falls
+  within a third of the interval (8 hours at the default 24; scaled by
+  `time_scale` on staging). The app then sends the check right after
+  the unlock even if the vault is not held (a check is allowed at any
+  time, above). When it knows no deadline it asks for the PIN only. It
+  **MUST** say on that screen why the password is asked, and **MUST
+  NOT** spend a check silently: when the unlock succeeds and that check
+  fails, the same screen says so at once (the vault is open, the check
+  did not pass, which entry was wrong and the checks left) and keeps
+  only the password field for another try; it never moves on to a
+  separate check screen that shows a failure the member did not see
+  happen. When the vault was not yet due, the member may leave that try
+  for later. A wrong PIN ends the unlock, and no check is sent.
 - Settings offer the interval (1–24 h, §3.6.2) and the hold (§3.6.7).
   Turning the hold off is part of a check: the app asks for the PIN and
   the password on the same screen as any check, with an optional end
