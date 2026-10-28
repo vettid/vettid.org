@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.69.1
-date: 2026-10-27
+version: 0.70.0
+date: 2026-10-28
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.13.2)
-  - ANDROID-PLAN.md (0.1.90)
-  - IOS-PLAN.md (0.1.43; §9.1 VA1–VA4)
+  - ANDROID-PLAN.md (0.1.92)
+  - IOS-PLAN.md (0.1.45; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,23 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.70.0: **owner decision 2026-10-28** (ANDROID-PLAN 0.1.92, IOS-PLAN
+    0.1.45; §15 item 44; wire-additive and backward compatible). The
+    sign-in match code is shown prominently on the phone. §10.4:
+    `connection.authenticate.challenge` (and `.request`, `.pending`, a
+    signed `.response`, `.result`) gains an optional `match_code`:
+    exactly 2 or 3 ASCII digits, meaningful only with `purpose:
+    "signin"`. A receiver ignores a malformed value, and any value on
+    an approval or on a challenge without a purpose (the challenge is
+    still handled, as without it), so the apps never read a code out
+    of `context`. A challenge with a valid code is signed under a new
+    label, `"vettid/vms/2/conn-auth-code"`, over the purpose and the
+    code; the 0.65.0 label and its vectors are unchanged. The app shows
+    the code in large digits at the top of the sign-in screen. The
+    service vault keeps the code in `context` until the apps have
+    shipped. §15 item 44 (new). **Needs a staging vault release after
+    24** (vettid-vault: parse, pass through, sign, vectors), a service
+    vault change (vettid/service-vault: send `match_code`) and app work
   - 0.69.1: erratum, 2026-10-27; matches vettid-vault #158 (behaviour as
     built). A rotation chain is resolved against what the receiver has
     already followed. §3.4 "identity.rotate statement" and §6.6
@@ -6592,15 +6609,15 @@ vault signs a fresh challenge with the member's **credential key**
 
 | Type | Request body | Response / event body |
 |---|---|---|
-| `connection.authenticate.request` (app, desktop) | `{connection_id, context?, purpose?}` | `{request_id, exp}` |
-| `connection.authenticate.challenge` (V↔V) | — | `{request_id, nonce, context?, purpose?}`, with `exp` |
-| `connection.authenticate.pending` (V→D, apps and desktops) | — | `{connection_id, request_id, context?, purpose?, exp}` |
+| `connection.authenticate.request` (app, desktop) | `{connection_id, context?, purpose?, match_code?}` | `{request_id, exp}` |
+| `connection.authenticate.challenge` (V↔V) | — | `{request_id, nonce, context?, purpose?, match_code?}`, with `exp` |
+| `connection.authenticate.pending` (V→D, apps and desktops) | — | `{connection_id, request_id, context?, purpose?, match_code?, exp}` |
 | `connection.authenticate.approve` (app) | `{request_id}` | `{}`; `credential_locked` outside the unlock window |
 | `connection.authenticate.deny` (app, desktop) | `{request_id}` | `{}` |
-| `connection.authenticate.response` (V↔V) | — | `{request_id, status: "signed", key, sig, signed_at, purpose?, rotations?}` or `{request_id, status: "denied"}` |
+| `connection.authenticate.response` (V↔V) | — | `{request_id, status: "signed", key, sig, signed_at, purpose?, match_code?, rotations?}` or `{request_id, status: "denied"}` |
 | `connection.authenticate.rotated` (V↔V) | — | `{rotations: [<statement>, ...]}` (1–32 credential-key rotation statements, §3.5.5) |
 | `connection.authenticate.key` (V→D, every owner app and desktop) | — | `{connection_id, key}`: the pinned key followed a rotation |
-| `connection.authenticate.result` (V→D, every owner app and desktop) | — | `{connection_id, request_id, authenticated, key?, key_changed?, purpose?, reason?}` |
+| `connection.authenticate.result` (V→D, every owner app and desktop) | — | `{connection_id, request_id, authenticated, key?, key_changed?, purpose?, match_code?, reason?}` |
 | `connection.authenticate.list` (app, desktop) | `{}` | `{states: [{connection_id, key?, verified_at?, last_result?, last_at?}]}` |
 
 - `nonce` is 32 random bytes; `context` is at most 256 bytes and shown to
@@ -6667,6 +6684,89 @@ vault signs a fresh challenge with the member's **credential key**
   before 0.65.0 valid and keeps a signature under one label from
   verifying under the other; the length prefix keeps `m_p`
   unambiguous.
+- **Match code** (0.70.0; owner decision 2026-10-28). A challenge with
+  `purpose: "signin"` MAY carry `match_code`, a short number the
+  challenger also shows to whoever is signing in (a service's website
+  shows the same number), so that the member can check that the prompt
+  on the phone belongs to the sign-in in front of them. Before 0.70.0
+  a service put it in `context` ("Sign in to VettID Member Service,
+  match code 42"), where an app can neither show it large nor safely
+  pick it out: `context` is the challenger's free text, and a
+  challenger could write a code-looking string of its own.
+  - Format: exactly 2 or 3 ASCII digits, `[0-9]{2,3}` (the service
+    vault uses 2 today; 3 leaves room for more sign-ins at once). It is
+    a string, so "07" is not "7". Nothing else (no sign, space or
+    other script's digits) is valid.
+  - Only with `purpose: "signin"`. On an `approval`, or a challenge
+    without a purpose (or with an unknown one, treated as absent), a
+    receiver ignores it: it does not pass it to the apps, does not
+    sign it and does not echo it. An approval is a decision the
+    member takes on `context`; a number to compare adds nothing, and a
+    challenger could not be trusted to use it only where it means a
+    sign-in.
+  - A malformed value is **ignored**, not refused: the challenge is
+    handled as if it had no `match_code` (screen, gate, signature).
+    Refusing would make a challenger's formatting slip a failed
+    sign-in for a member who cannot tell why, and ignoring is the
+    behaviour a vault before 0.70.0 already has (unknown members are
+    ignored, §10.1). The member then sees today's screen, with no
+    number, and the sign-in still needs the member's approval, so
+    nothing is weaker than before.
+  - An owner device MAY set `match_code` in
+    `connection.authenticate.request` (the same rules);
+    `connection.authenticate.pending` carries a valid one to the apps
+    and desktops. The vault checks the value; the apps check it again
+    and ignore a value that fails (the screen of a challenge without
+    one). An app MUST NOT take a code from `context`, whatever it
+    looks like.
+  - The code is a convenience for the member, not an authenticator:
+    it travels in the same sealed message as the challenge, and a
+    challenger that wants to mislead can show any number. What it
+    defends is a member who is asked to sign in by someone else's
+    attempt: a website that shows a different number from the phone's
+    is not the sign-in the member started.
+- **Signed with the match code** (0.70.0). For a challenge with
+  `purpose: "signin"` and a valid `match_code` the vault signs instead
+
+  ```
+  m_c = len(purpose) (1) || purpose || len(match_code) (1) || match_code || m
+  sig = Ed25519(credential key, "vettid/vms/2/conn-auth-code" || m_c)
+  ```
+
+  (`purpose` and `match_code` in ASCII, `m` as above), and its signed
+  response carries `purpose` and `match_code` with the same values.
+  Every other challenge is signed exactly as before (with a purpose
+  under `"vettid/vms/2/conn-auth-purpose"`, without one under
+  `"vettid/vms/2/conn-auth"`). The code is signed because the
+  signature is the challenger's evidence of what the member saw: with
+  it, the service can show that the member approved *that* sign-in,
+  and a vault, desktop or relay in between cannot swap the number.
+  **A new label, not a changed old one**: adding a field to `m_p`
+  under the 0.65.0 label would make one signature mean two things
+  (with and without a code), would make a 0.65.0 requester that
+  verifies `m_p` reject every response from a newer vault, and would
+  change the vectors of 0.65.0 (vettid-vault #157), which stay valid
+  byte for byte. A label of its own keeps every earlier signature
+  valid and a signature under one label from verifying under another;
+  both lengths are prefixed so that `m_c` is unambiguous.
+  - The requesting vault verifies a response that carries
+    `match_code` over `m_c` under the new label, and only if the
+    challenge it sent had the same `match_code`; a response whose
+    `match_code` is not the challenge's, or that carries one for a
+    challenge without one, is `bad_signature`. A response without
+    `match_code` to a challenge with one (from a vault before 0.70.0,
+    which ignores the member, §10.1) is verified as before, over `m_p`.
+    `result` carries `match_code` exactly when the verified signature
+    commits to it, so the challenger decides whether a sign-in
+    without it is enough: the member approved it but may not have been
+    shown the number. A service that wants the check MUST count only
+    a result with `match_code`.
+  - Vectors: the vectors of 0.65.0 are unchanged. New vectors (a
+    sign-in with a 2-digit code, one with a 3-digit code with a
+    leading zero, and the same challenge without a code, whose
+    signature differs) are added to vettid-vault
+    `testdata/vectors/` with the vault release; §16 lists them when
+    they exist.
 - The requesting vault checks that the response answers an outstanding
   challenge it sent to that connection, verifies `sig` under `key` over
   `m` (or, since 0.65.0, over `m_p` under its label when the response
@@ -6705,7 +6805,12 @@ vault signs a fresh challenge with the member's **credential key**
     receiver with no pinned key ignores `rotated`.
 - **The screens per purpose** (0.65.0; app work, later). For `signin`
   the app titles the approval "Sign in to <name>?", shows `context`,
-  and says "Only approve if you are signing in right now."; its
+  and says "Only approve if you are signing in right now."; with a
+  valid `match_code` it shows it first (0.70.0): large digits near the
+  top, headed "Match code", with "Check that the website shows the same
+  number" (ANDROID-PLAN and IOS-PLAN give the texts and the
+  accessibility labels); without one, as before. `context` is still
+  shown, as the challenger's note. Its
   actions are "Approve" and "**Not me**", which sends
   `connection.authenticate.deny` (a `signin` decline cools down only
   sign-ins, briefly, and never counts toward a pause, §10.4.1). Its
@@ -22460,6 +22565,45 @@ Follow-ups:
     docs/SERVICE-VAULT.md §5; it ships first, against member vaults
     with 0.65.0, which is staging release 24), the apps (ANDROID-PLAN 0.1.90, IOS-PLAN 0.1.43),
     MEMBER-SERVICE-PLAN (Phase 3 item 3.1 now refers to this marker).
+
+44. **The sign-in match code is shown prominently (0.70.0; owner
+    decision 2026-10-28).** A service's sign-in challenge carried the
+    number the member should compare with its website only inside the
+    free-text `context`, so the app could not show it large and must
+    not parse it out. Decided:
+    1. an optional `match_code` on the challenge, `.request`,
+       `.pending`, the signed `.response` and `.result`: 2 or 3 ASCII
+       digits, only with `purpose: "signin"`;
+    2. a receiver ignores a malformed code, and any code on an
+       approval or on a challenge without a purpose; it does not
+       refuse the challenge;
+    3. signed under a new label, `"vettid/vms/2/conn-auth-code"`, over
+       the purpose and the code; the 0.65.0 label, forms and vectors
+       are unchanged;
+    4. the app shows the code in large digits at the top of the
+       sign-in screen, never taken from `context`; without a code,
+       today's screen;
+    5. the service vault sends `match_code` and, until the apps have
+       shipped, keeps the number in `context` as well for older apps.
+    - *Not chosen:* parsing the code from `context` (a challenger
+      controls the text and could fake it); extending `m_p` under the
+      0.65.0 label (ambiguity, breaks verifiers and vectors of
+      0.65.0); refusing a malformed code (a failed sign-in the member
+      cannot explain, and a vault before 0.70.0 would accept it
+      anyway); a code on approvals (a decision on `context` that a
+      number does not help).
+    - *Settled with the decision:* 2 digits stays what the service
+      vault sends, 3 is allowed; the code does not stop a service
+      from showing a false number (it is a check of the member's
+      own sign-in, §10.4); a service that needs the proof counts only
+      a `result` with `match_code`.
+    Follow-ups: vettid-vault (a staging release after 24: parse and
+    validate, pass through `.pending`, sign under the new label, verify
+    and echo, vectors), the service vault (vettid/service-vault: send
+    `match_code`; keep the context line until the apps ship, then drop
+    it; verify the new form; count only a result with the code),
+    MEMBER-SERVICE-PLAN §4.2 (the website shows the same number), the
+    apps (ANDROID-PLAN 0.1.92, IOS-PLAN 0.1.45).
 
 ## 16. Test vectors
 

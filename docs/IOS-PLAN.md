@@ -1,9 +1,17 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.44
-date: 2026-10-27
+version: 0.1.45
+date: 2026-10-28
 changelog:
+  - 0.1.45: owner decision of 2026-10-28 (VAULT-MESSAGING 0.70.0, §15
+    item 44; ANDROID-PLAN 0.1.92). New §4.14 "Sign-in match code": the
+    same as ANDROID-PLAN §4 "Sign-in match code (0.1.92)" (a valid
+    `match_code` shown in large digits near the top of the sign-in
+    approval screen, "Match code" and "Check that the website shows the
+    same number: 42", with an accessibility label; `context` stays under
+    "Their note"; no code, today's screen; never taken from `context`),
+    draft texts the same. Vault: a staging release after 24.
   - 0.1.44: owner decisions of 2026-10-27, after an audit of what the apps
     keep on the phone (ANDROID-PLAN 0.1.91). New §6.9 "What the phone
     keeps", where vault content is in memory only (no database, no content,
@@ -416,8 +424,8 @@ changelog:
     in §14 are drafts
 owner: Al Liebl (Mesmer)
 related:
-  - ANDROID-PLAN.md (0.1.91) — the Android app; this plan mirrors it
-  - VAULT-MESSAGING.md (0.69.0) — the app's contract with the vault
+  - ANDROID-PLAN.md (0.1.92) — the Android app; this plan mirrors it
+  - VAULT-MESSAGING.md (0.70.0) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
   - RELAY-PROTOCOL.md (0.9.4), MEMBER-API.md (2.7.1)
@@ -1522,6 +1530,22 @@ Android's. Only the platform differs: the section is a `List` section
 with the label in the row's trailing view, the icon an SF Symbol
 (`building.2`, outline). Nothing in this section is iOS-specific
 protocol.
+
+### 4.14 Sign-in match code (0.1.45)
+
+*Owner decision of 2026-10-28 (VAULT-MESSAGING 0.70.0 §10.4, §15 item
+44). Draft texts for the owner. Not built.* The same as ANDROID-PLAN §4
+"Sign-in match code (0.1.92)", carried here by reference and not to be
+changed on one platform alone. On iOS: the "Match code" block sits under
+the title of the sign-in approval screen, the digits in a large
+monospaced-digit Dynamic Type style (scaling, never truncated), the
+VoiceOver label "Match code 4 2. Check that the website shows the same
+number." (one element, digits read singly), and no code in the
+notification text. A challenge without a valid `match_code` shows today's
+screen; the app never reads digits from `context`. Draft texts as
+ANDROID-PLAN's table: "Match code", "Check that the website shows the
+same number: %@", "Match code %@. Check that the website shows the same
+number.", "Their note".
 
 ## 5. Architecture
 

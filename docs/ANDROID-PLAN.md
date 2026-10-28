@@ -1,9 +1,17 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.91
-date: 2026-10-27
+version: 0.1.92
+date: 2026-10-28
 changelog:
+  - 0.1.92: owner decision of 2026-10-28 (VAULT-MESSAGING 0.70.0, §15
+    item 44). New §4 "Sign-in match code (0.1.92)": a sign-in challenge
+    with a valid `match_code` shows it in large digits near the top of
+    the approval screen, headed "Match code", with "Check that the
+    website shows the same number: 42" and an accessibility label;
+    `context` stays under "Their note". No code, today's screen. The app
+    never takes a code from `context`. Draft texts for the owner. Vault:
+    a staging release after 24.
   - 0.1.91: owner decisions of 2026-10-27, after an audit of what the app
     keeps on the phone. New §5 "What the phone keeps (0.1.91)", where vault
     content is in memory only (no database, no content, photo or HTTP
@@ -1132,14 +1140,14 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.69.0) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.70.0) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
   - CALLS-PLAN.md (0.1.3) — calls; video in C4 (§4, 0.1.42)
   - AGENT-PLAN.md (0.1.7) — the agent connector; §7.2 AA1–AA5 (§4
     "Devices & agents", 0.1.53)
-  - IOS-PLAN.md (0.1.44) — the iPhone app; §4.12 carries the approvals
+  - IOS-PLAN.md (0.1.45) — the iPhone app; §4.12 carries the approvals
     indicator (0.1.89)
 classification: public (no secrets; safe for github.com/vettid)
 ---
@@ -4762,6 +4770,50 @@ without shows neither; the Services section appears only with a service;
 a service is absent from Messages and the new-message picker; its detail
 has no Call, message or share rows; an unknown `peer_kind` is a person; a
 `forbidden` shows the text once and removes the action.
+
+### Sign-in match code (0.1.92)
+
+*Owner decision of 2026-10-28 (VAULT-MESSAGING 0.70.0 §10.4, §15 item
+44). Draft texts for the owner. Not built; needs the vault release.*
+A sign-in challenge (`purpose: "signin"`) may carry `match_code`, 2 or
+3 digits that the service's website shows too.
+
+- **With a valid `match_code`** the sign-in approval screen (the
+  notification's target and the Approvals row) shows, directly under
+  the title "Sign in to <name>?": the label **"Match code"**, the code
+  in large digits (display size, bold, tabular figures, spaced so that
+  each digit reads alone; never truncated, scaling with the system font
+  size), and under it **"Check that the website shows the same number:
+  42"**. Then "Their note" with `context` (still the challenger's
+  words), "Only approve if you are signing in right now.", **Approve**
+  and **Not me**. The notification text does not carry the number (a
+  notification can be read on a locked phone; the number is for the
+  member who opened the prompt).
+- **Without `match_code`**, or when the app finds it malformed (not 2 or
+  3 ASCII digits) or the challenge is not a sign-in: today's screen,
+  with no Match code block and no empty space.
+- **Never from `context`.** The app does not look for digits in
+  `context`, whatever it says ("match code 42" there is only text under
+  "Their note"). Until the service vault stops repeating the number in
+  `context` the member may see it twice; that is accepted.
+- Accessibility: the block is one element read as "Match code, 4 2.
+  Check that the website shows the same number." (digits separated so
+  a screen reader does not say "forty-two").
+
+**Draft texts**
+
+| Key | Text |
+|---|---|
+| `match_code_label` | Match code |
+| `match_code_instruction` | Check that the website shows the same number: %s |
+| `match_code_a11y` | Match code %1$s. Check that the website shows the same number. |
+| `signin_their_note` | Their note |
+
+**Tests.** A code shows large above the note; no code shows today's
+screen; a 1-digit, 4-digit, non-digit, spaced or empty code shows
+today's screen; a code on an approval is not shown; a note that says
+"match code 42" without a field shows no block; font scale 200%;
+the notification text carries no code.
 
 ### Devices & agents (0.1.53)
 
