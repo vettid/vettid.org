@@ -1,9 +1,15 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.92
+version: 0.1.93
 date: 2026-10-28
 changelog:
+  - 0.1.93: owner decision of 2026-10-28 (VAULT-MESSAGING 0.71.0
+    §3.6.5 "Ask only for what is used"): §6 owner check item 6, "Unlock
+    and check in": the password only when the vault is past its
+    deadline, never ahead of it; the approved texts (also the idle-lock
+    body); a failed check after a successful unlock is shown on the same
+    screen with the tries left, never as a later check screen
   - 0.1.92: History's `identity.rotated` row follows VAULT-MESSAGING
     0.69.2: the move's line shows only for a `ref` other than
     `"recovery"` (a recovery's rotation carries `"recovery"`, a plain
@@ -1136,7 +1142,7 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.69.0) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.71.0) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
@@ -2498,7 +2504,7 @@ vault without it, part 1 applies unchanged.
   | Where | Text |
   |---|---|
   | Held screen | "Your vault locks itself on <date> if you don't check in." |
-  | Notification (Security channel) and the unlock screen, after `vault.locking{reason: "idle"}` | "Your vault locked itself" / "You hadn't checked in for <N> days, so your vault locked. Unlock it with your PIN to carry on. New messages wait for up to 14 days." |
+  | Notification (Security channel) and the unlock screen, after `vault.locking{reason: "idle"}` | "Your vault locked itself" / (0.1.93, approved 2026-10-28; §6 owner check item 6) "You hadn't checked in for <N>, so your vault locked. Unlock it with your PIN and your credential password to carry on. New messages wait for up to 14 days." (<N> as "3 days" in production, "7 hours" on staging; without "for <N>" when the time is unknown) |
   | History | "Vault locked itself (not checked in)" for `vault.locked` with `ref` `idle` |
   | Settings, under the choice | "If you don't pass the daily check for this long, your vault locks itself and stops receiving until you unlock it." |
 
@@ -6301,6 +6307,44 @@ interval). Follow-ups, in A3 unless noted:
    deadline, a banner and a local notification with "check now".
 6. **Locked and past the deadline**: one screen for PIN and password;
    unlock, read `vault.status`, then send the check without asking again.
+   (0.1.93; owner decision 2026-10-28, VAULT-MESSAGING 0.71.0 §3.6.5
+   "Ask only for what is used") **Unlock and check in:**
+   - The app asks only for what it uses. Unlock with the check not due:
+     the PIN only. Unlock with the vault past its deadline (held, due,
+     idle-locked or locked by failed checks, by the saved owner-check
+     state of the §5 table): the PIN and the password on one screen.
+     Never the password ahead of the deadline ("check now" stays the way
+     to check in early, item 5). With no saved state (new install,
+     transfer, recovery): the PIN only, and the ordinary check screen if
+     `vault.status` then shows the vault due.
+   - Texts (approved): title **"Unlock and check in"**; body **"Your
+     daily check is due, so your vault needs your PIN and your
+     credential password."**
+   - PIN right, password wrong: on the same screen, **"Your vault is
+     unlocked, but the credential password was wrong, so your daily
+     check didn't pass. <N> tries left before your vault locks again."**
+     The PIN field goes; only the password field stays, with **"Check
+     in"** (the accepted PIN is kept in memory only while this screen is
+     in front, as on the pairing screen, and forgotten when the app
+     leaves the foreground; then both are asked again). No separate
+     "Daily check" screen follows with a failure the member did not see.
+   - When that failure locks the vault (the tenth, or any once
+     `failures` ≥ 10; item 8), the locked screen with the existing
+     owner-check lock texts follows, not a retry. A `backoff` answer
+     used no try: the screen says the vault is open and shows the
+     existing backoff countdown of item 2, with "Check in" off until it
+     ends.
+   - Every wrong try shows the tries left, never "Wrong credential
+     password" alone. A wrong PIN shows only the PIN error; no check is
+     sent and no check try is used.
+   - The idle-lock texts (approved 2026-10-28; the row in the texts
+     table above): **"You hadn't checked in for <N>, so your vault
+     locked. Unlock it with your PIN and your credential password to
+     carry on. New messages wait for up to 14 days."**, <N> written as
+     "3 days" in production and "7 hours" on staging, and without "for
+     <N>" when the time is unknown. After an idle lock the check is
+     always overdue, so the screen always asks for both; the Security
+     notification uses the same body.
 7. **Settings**: the interval (1–24 h); shortening may hold the vault at
    once, so the app offers a check with the change.
    **Hold switch** (owner decision of 2026-10-06, §3.6.7): turning the
