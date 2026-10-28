@@ -1,9 +1,13 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.48
+version: 0.1.49
 date: 2026-10-28
 changelog:
+  - 0.1.49: VAULT-MESSAGING 0.73.0, ANDROID-PLAN 0.1.95 (owner
+    2026-10-28): an estimated 0 tries left shows "probably locked,
+    checking", re-reads the vault's state without a check, then the
+    lock text, the check with the real count, or "isn't answering"
   - 0.1.48: VAULT-MESSAGING 0.71.1, ANDROID-PLAN 0.1.94 (owner
     2026-10-28): the held screen after a failed check at the unlock, the
     approved backoff line, "1 try left", and the ten-failure lock body
@@ -437,7 +441,7 @@ changelog:
     in §14 are drafts
 owner: Al Liebl (Mesmer)
 related:
-  - ANDROID-PLAN.md (0.1.94) — the Android app; this plan mirrors it
+  - ANDROID-PLAN.md (0.1.95) — the Android app; this plan mirrors it
   - VAULT-MESSAGING.md (0.71.1) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
@@ -2055,7 +2059,12 @@ leaving the screen.
   title and body): the password only when the vault is past its
   deadline, never ahead of it; a failed check after a successful
   unlock is shown at once on the held screen with the tries left
-  (password only, "Check in", "Lock vault").
+  (password only, "Check in", "Lock vault"). (0.1.49) An estimated 0
+  tries left (the status read after the failure did not come): as
+  ANDROID-PLAN 0.1.95, "probably locked, checking", the state re-read
+  without a check, then the lock text, the check with the real count,
+  or "isn't answering" with "Check again" and "Lock vault", with the
+  same texts.
 - **Owner check early warning**: local notifications scheduled for 1 h
   before the deadline whenever the deadline is learned, cancelled on a
   check (ANDROID-PLAN §6 owner check, item 5). These work without APNs.
