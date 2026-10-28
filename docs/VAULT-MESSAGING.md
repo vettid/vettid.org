@@ -38,7 +38,8 @@ changelog:
     epoch's handshake; the responder's `rotations` run from it. Accepting
     an older `ctx` is audited `connection.restored_reconnect` and shown
     in History; a later sign of the replaced epoch line (two copies)
-    suspends the connection. A reconnect `hs.init` already answered MUST
+    suspends the connection (authenticated evidence with a later `ts`
+    only). A reconnect `hs.init` already answered MUST
     be refused by `th1` first (marks kept 16 days + 5 minutes), and
     changes no state before `sig_I` verifies at `hs.fin`. A restored
     service reconnects each connection at its next start, nothing else
@@ -5215,11 +5216,14 @@ the peer. It carries:
 **Epoch history** (0.72.0; owner decision 2026-10-28, "option A for
 services only"). A member vault keeps, **only for a connection whose
 stored `peer_kind` is `"service"`** (§6.4, fixed at connect), the id of
-every epoch it activated in the last **35 days** (the service's backup
-and point-in-time-recovery retention), each with its activation time and
-the own rotation-chain count whose key signed that epoch's handshake
-(not the count at activation, so a rotation between `hs.resp` and
-`hs.fin` is not lost). Entries older than 35 days are pruned; at most 512
+every epoch it activated whose successor took over less than **35
+days** ago (the service's backup and point-in-time-recovery retention),
+each with the time it was **superseded** (stopped being current; the
+current epoch has none and is always accepted) and the own
+rotation-chain count whose key signed that epoch's handshake (not the
+count at activation, so a rotation between `hs.resp` and `hs.fin` is
+not lost). The window runs from the superseding, not from the
+activation, and entries are pruned by it; at most 512
 ids per connection, the oldest dropped first. The cap costs availability
 only: a busy connection that rekeys every 10,000 messages could push out
 entries still inside the window, and a reconnect naming one is refused.
@@ -5244,18 +5248,34 @@ nothing is asked of the member, and §10.9's feed kinds are for items that
 need attention. (The fork case below does need it.)
 
 **Fork detection** (0.72.0). When an older `ctx` is accepted, the member
-vault records the epoch line it replaced (the epochs after the named one).
-A later reconnect `hs.init` naming an epoch of that replaced line, or a
-rekey `hs.init` or message sealed under it arriving after the switch,
-means two copies of the peer exist. The vault then **suspends the
-connection** under the rules of §3.4 (it sends nothing to and accepts
-nothing from the peer), audits `connection.fork_suspected` and makes a
-feed item of priority `high` with the text "<connection name> may be
-running from two copies of its data. The connection is paused; connect
-again with a new invitation." (text approved by the owner 2026-10-28). The connection resumes only with a new
-invitation (§6.4). A single genuine restore never triggers it: after the
-switch the peer sends only in the restored line. Records of a replaced
-line are kept for the 35-day window.
+vault records the epoch line it replaced (the epochs after the named
+one) and the inner `ts` of the accepted reconnect `hs.init`. It counts
+only **authenticated** evidence of that replaced line, and only when its
+inner `ts` is later than the recorded one (the same sender's clock): a
+message or rekey in session mode under a replaced-line epoch, or a
+reconnect `hs.init` naming a replaced-line epoch whose `sig_I` verified
+at `hs.fin`. Traffic the restored peer sent before its crash and that
+arrives late (the relay holds up to 14 days, unordered and redelivered)
+has an earlier `ts` and is processed normally. A reconnect is judged at
+`hs.fin`: the vault answers the `hs.init`, and when `hs.fin` verifies it
+suspends instead of activating (no state changes before `sig_I`, below).
+**Precedence:** a `ctx` naming a replaced-line epoch is never accepted as
+a restore; it is a fork sign, subject to the `ts` rule. Evidence means
+two copies of the peer exist, and the vault **suspends the connection**
+under the rules of §3.4 (it sends nothing to and accepts nothing from the
+peer), audits `connection.fork_suspected` and makes a feed item of
+priority `high` with the text "<connection name> may be running from two
+copies of its data. The connection is paused; connect again with a new
+invitation." (text approved by the owner 2026-10-28). A single genuine
+restore never triggers it. *Corner case:* a second restore from a backup
+newer than the first named epoch is reported as two copies (an operator
+mistake, and valid behaviour). **Exit:** `connection.rotation.resolve`
+answers `not_found` for a fork suspension (there are no candidates); the
+connection resumes only with a new invitation (§6.4). *Residual:* a new
+invitation can be answered by either copy (same `ik` and relay key), so
+it is safe only after the service has ended the other copy or replaced
+its keys; the service learns of the suspension only from the member or
+out of band. Records of a replaced line are kept for the 35-day window.
 
 **Replay** (0.72.0). An older `ctx` no longer stops a replay once the
 epoch moves on, so the responder MUST refuse a reconnect `hs.init` it has
@@ -5280,9 +5300,10 @@ restored from a restore marker, which the restore tool writes into the
 restored table and which is deleted after the next start's reconnects
 have been sent. At that start it reconnects every active or stale
 connection; it initiates, because it cannot recognise the member's newer
-epoch, while the member still holds the older one in its history. (A
-member vault does not restore from table backups: a transfer or a
-recovery rotates its keys instead, §11.14.) While a reconnect is open the
+epoch, while the member still holds the older one in its history. (An
+operator restore of a *member* vault, §11.14.2, up to 7 days, RUNBOOK,
+is not covered here: its connections whose epoch moved on are refused at
+reconnect, the `ctx` being exact, and need a new invitation.) While a reconnect is open the
 connection sends **nothing**: no messages, rekeys, token refreshes or
 re-mints. At most 3 tries per restore (the reconnect token allows 4
 messages); a reconnect resumed after a restart sends a **new** `hs.init`
@@ -5295,11 +5316,13 @@ needs a new invitation, and a restored side MUST NOT issue a new
 `identity.rotate` until its reconnects are settled. An initiator SHOULD
 keep the responder's chain it has learnt across a restart.
 
-**Residual: an old copy.** A member vault within the window accepts an
-older `ctx` from whoever holds the service's reconnect token and
-identity key, which an old copy of the service also holds; the exposure
-is bounded by the 35 days and by the authentication below, and a second
-copy is caught by the fork detection above (§11.14.2).
+**Residual: an old copy.** A member vault accepts an older `ctx`, until 35
+days after that epoch was superseded, from whoever holds the service's
+relay key (deposits are sender-bound), its `ik` and the reconnect token
+the member issued to the service, which an old copy of the service also
+holds; the exposure is bounded by that window and by the authentication
+below, and a second copy is caught by the fork detection above
+(§11.14.2).
 
 **Authentication.** No SAS or approval is needed when the identities match.
 The responder MUST accept the reconnect only if all of these hold:
@@ -17078,7 +17101,7 @@ successor it accepted (§3.4), and the relay and the host that carry the
 notices are VettID's. So the rotation ends the old keys against someone
 who is not on the message path, and against VettID only once the
 connections have accepted the member's rotation. (0.72.0) A service
-connection adds one narrow path: for 35 days a member vault accepts a
+connection adds one narrow path: for 35 days after an epoch was superseded a member vault accepts a
 reconnect naming an older epoch (§6.6), so an old copy of the *service*
 vault, with its identity key and reconnect token, could reconnect
 without being the current one; the window, the unchanged authentication
@@ -17225,7 +17248,10 @@ written fewer than 5 times since. **Before a restore, recovery cannot
 help**, whether the credential backup is on or off: the header's
 `opener` is for the earlier DEK and the state is under the later one
 (§11.14.6 answers `stored_mismatch`). **After the restore** the vault is
-the complete vault from before the event. For a transfer, the member
+the complete vault from before the event. (0.72.0) Its connections
+whose epoch moved on meanwhile are refused at reconnect (the `ctx` is
+exact, §6.6) and need a new invitation; the history of §6.6 is for a
+restored *service*, not for a restored member vault. For a transfer, the member
 then needs the old phone (which keeps its keys until the notice or, from
 day 7, until its vault answers, §11.14.10), or, with the credential backup on, a recovery with a new
 phone, the PIN and the password after the quiet period. For a PIN or
@@ -20095,7 +20121,7 @@ it can read and write only its own objects and use only its own relay key
 | A thief with the app's session and the PIN, without the password | No deletion: the holder's `vault.delete` needs the password too (§12.5) | — |
 | The member's account, email and PIN, for 24 h unnoticed, with the backup off | No recovery and nothing of the vault (0.16.0: the request is refused, §11.11.1, §11.11.7). Through a start-over (§11.11.9), the vault's deletion: availability only, never its contents | Cancel the start-over within the 24 h (portal, email link, app) |
 | VettID (operator) | Deleting a vault (the host's `delete`, an operator power it had anyway, §13.5 list), never reading it; the member is emailed | — |
-| (0.72.0) An old copy of a service vault, with its identity key and reconnect token | Within 35 days, a reconnect naming an older epoch of that connection, accepted by the member's vault; the member is told (History). Not a person connection, not after the window | `connection.restored_reconnect`; a second copy suspends the connection (`connection.fork_suspected`, §6.6) |
+| (0.72.0) An old copy of a service vault, with its identity key and reconnect token | Until 35 days after that epoch was superseded, a reconnect naming an older epoch of that connection, accepted by the member's vault; the member is told (History). Not a person connection, not after the window | `connection.restored_reconnect`; a second copy suspends the connection (`connection.fork_suspected`, §6.6) |
 | A byte-identical copy of the current blob, used before the member's next use | Undetectable at that moment; a use still needs the password and the holder's session. The member's next use then presents a stale copy and raises the alarm (§3.5.9). The daily owner check is such a use, so the window is at most one interval (§3.6.6) | The alarm and the forced rotation |
 | A dishonest host, about clone alarms | Suppressing or delaying the member's email; not the vault's alert to the app, its freeze or its audit entry (§11.5) | — |
 | A transfer (§6.7.1) | Moving the app needs the holder's session, the PIN and the password; the new phone must pass device attestation; the old app is removed and its copy dead | Recovery, if the member lost the phone to it |
@@ -22781,10 +22807,10 @@ Follow-ups:
     reconnect. Decided: (a) only a member vault accepts an older epoch,
     only on a connection whose `peer_kind` is `"service"`; person
     connections and a service vault keep the exact match, and only
-    service connections keep the history; (b) the window is 35 days, the
+    service connections keep the history; (b) the window is 35 days from when an epoch was superseded, the
     service's backup retention, at most 512 ids (the cap costs
     availability only); (c) accepting an older epoch records the line it
-    replaced, and a later sign of that line (a reconnect, rekey or
+    replaced, and a later authenticated sign of that line (a reconnect, rekey or
     message) means two copies and suspends the connection; (d) the member
     is told: audit `connection.restored_reconnect` and a History line
     ("<name> reconnected after restoring its data."), no feed item. The
@@ -22803,7 +22829,10 @@ Follow-ups:
     `th1` marks kept 16 days + 5 minutes, the replay check first and no
     effects before `hs.fin`, a new `hs.init` after a restart, the 24 h
     bound with the stale connection and the alarm, and the chain count
-    that signed each epoch. **Open:** none.
+    that signed each epoch. Follow-ups: ANDROID-PLAN and IOS-PLAN must
+    render `connection.fork_suspected` (a paused connection with no
+    candidates and no resolve; a new invitation is the way out) and the
+    History line of `connection.restored_reconnect`. **Open:** none.
 
 ## 16. Test vectors
 
