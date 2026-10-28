@@ -6333,8 +6333,9 @@ interval). Follow-ups, in A3 unless noted:
      both: **"You hadn't checked in for <N>, so your vault locked.
      Unlock it with your PIN and your credential password to carry on.
      New messages wait for up to 14 days."** (and the same without
-     "for <N>" when the time is unknown); the notification keeps "with
-     your PIN", since the screen it opens decides what it asks.
+     "for <N>" when the time is unknown). After an idle lock the check
+     is always overdue, so the screen always asks for both; the Security
+     notification uses the same body.
 7. **Settings**: the interval (1–24 h); shortening may hold the vault at
    once, so the app offers a check with the change.
    **Hold switch** (owner decision of 2026-10-06, §3.6.7): turning the
