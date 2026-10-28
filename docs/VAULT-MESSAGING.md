@@ -28,12 +28,18 @@ related:
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
   - 0.72.1: erratum, owner decisions 2026-10-28 (raised by the service
-    vault agent while implementing 0.72.0). §6.6 "Replay": a §3.4
-    rotation conflict in a reconnect `hs.init`'s `rotations` suspends at
-    once, before `hs.fin` (self-verifying evidence). New "Crossing
-    reconnects": the member's reconnect wins; the service abandons its
-    own, the member vault keeps its own, so both end on the member's
-    epoch
+    vault agent while implementing 0.72.0; two Opus reviews). §6.6
+    "Replay": a valid §3.4 rotation conflict in a reconnect `hs.init`'s
+    `rotations` suspends at once, before `hs.fin`, and is not answered
+    (self-verifying evidence; after the replay and sender checks; a
+    statement dropped by `connection.rotation.resolve` is refused, not a
+    new conflict). New "Crossing reconnects": a service's own reconnect
+    yields to a member's that verifies; the member always answers the
+    service's; each side completes at most one; both end on one epoch
+    (the member's if the service saw it first, else the service's). A
+    reconnect open at a restart keeps its stored initiator state (no new
+    `hs.init`, no try used; an unconfirmed deposit is resent with the
+    same bytes); 0.72.0 sent a new one each time
   - 0.72.0: **owner decision 2026-10-28, "option A for services only"**
     (§15 item 45; coordination #9, from the service vault's restore
     work; changed after a security review). §6.6: a MEMBER vault accepts
@@ -5300,23 +5306,48 @@ changes **no state** (tokens, rotation chain, active or stale) until
 `sig_I` verifies at `hs.fin`; the answer `hs.resp` is the only thing sent
 before. A restored responder loses its marks with the state it
 restores, which is why the deferral to `hs.fin` matters. (0.72.1, owner
-decision 2026-10-28) **One exception:** when the `hs.init`'s `rotations`
-give a key the receiver knows a second successor, the receiver suspends
-the connection at once under §3.4, before `hs.fin`: the conflicting
-statement is signed by that key, so it is evidence on its own and needs
-no handshake to be believed.
+decision 2026-10-28) **One exception:** a statement in the `hs.init`'s
+`rotations` that is valid (§3.4, both signatures verify) and whose
+`old_ik` already has an accepted successor in the receiver's stored
+chain, with a different `new_ik`, suspends the connection at once under
+§3.4, before `hs.fin`, and the `hs.init` is not answered. The check
+comes after the replay check above and the collect `sender` check, and
+does not depend on `ctx`. The statement is signed by the predecessor key
+itself, so it is evidence without a handshake; a replayed `hs.init` can
+carry one only if two successors of that key were really signed. A
+statement remembered as dropped by `connection.rotation.resolve` (§3.4)
+is refused, and the `hs.init` with it (`reconnect_refused`); it is not a
+new conflict.
 
 **Crossing reconnects** (0.72.1, owner decision 2026-10-28). After a
-restore, the member's vault may send its own reconnect (for example after
-`token_expired`) while the service's is open, and each names an epoch the
-other accepts. **The member's reconnect wins:** the service vault
-abandons its own (it sends no `hs.fin` for it and revokes the tokens it
-issued in it) and completes the member's; a member vault whose own
-reconnect is open does not complete the service's (it answers no
-`hs.resp` to it, or, if it already answered, sends no `hs.fin`-dependent
-change for it) and keeps its own. Both sides then end on the epoch of the
-member's reconnect, so the next rekey is not refused
-(`rekey_not_current_epoch`).
+restore, the member's vault may start its own reconnect (for example
+after `token_expired`) while the service's is open. In the service's
+reconnect the service vault is the initiator and the member's vault the
+responder; in the member's, the roles are reversed. **A service's own
+reconnect yields to a member's that verifies**, and each side completes
+at most one of the two:
+- The service vault, receiving a member's reconnect `hs.init` that it
+  accepts (`ctx` its last epoch) before it has processed an `hs.resp` to
+  its own, abandons its own. It sends no `hs.fin` for it, drops a later
+  `hs.resp` to it, and revokes the tokens it issued in its `hs.init`. It
+  answers the member's and establishes that epoch at the member's
+  `hs.fin`, and starts no new reconnect while it awaits that `hs.fin`.
+  Once it has sent `hs.fin` for its own, its last epoch has moved on, and
+  a member `hs.init` naming the earlier one is refused
+  (`reconnect_refused`).
+- The member's vault answers a service's reconnect `hs.init` as usual,
+  even while its own is open.
+  - If a verified `hs.fin` establishes the service's reconnect first, the
+    member abandons its own: it drops a later `hs.resp` to it (audited)
+    and revokes the tokens its `hs.init` carried.
+  - If its own completes first (it has verified `sig_R` and sent
+    `hs.fin`), it drops its pending answer to the service's `hs.init`,
+    revokes the tokens in that `hs.resp`, and acks and drops a later
+    `hs.fin` for it. That `hs.fin` is not evidence for fork detection.
+
+Both sides end on the same epoch: the member's when the service saw the
+member's `hs.init` first, the service's otherwise. So the next rekey is
+not refused (`rekey_not_current_epoch`).
 
 **Responder `rotations`** (0.72.0). The responder's `rotations` are its
 own rotation statements since the epoch `ctx` names (the own chain count
@@ -5335,8 +5366,16 @@ is not covered here: its connections whose epoch moved on are refused at
 reconnect, the `ctx` being exact, and need a new invitation.) While a reconnect is open the
 connection sends **nothing**: no messages, rekeys, token refreshes or
 re-mints. At most 3 tries per restore (the reconnect token allows 4
-messages); a reconnect resumed after a restart sends a **new** `hs.init`
-(a new `th1`), since the stored bytes would be refused as a replay. A
+messages). (0.72.1, owner decision 2026-10-28) A reconnect open at a
+restart keeps its stored initiator state and goes on waiting for its
+`hs.resp`. It sends no new `hs.init` and uses no try. An `hs.init` whose
+deposit was not confirmed is deposited again with the same bytes: a
+member vault that has already answered it drops the copy (replay, by
+`th1`), and its one `hs.resp` still reaches the stored ephemeral key. A
+new `hs.init` (a new `th1`, one try) is sent only when the initiator
+state was lost or the handshake was abandoned. The initiator state is
+part of the vault's state; a restore's marker starts every reconnect
+afresh, as above. A
 reconnect not completed within **7 days** (the idle lock's; the member
 vault judges the named epoch's 35-day window when the `hs.init` arrives,
 so a backup near the window's end may be refused before then) fails: the connection becomes
