@@ -1,9 +1,19 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.94
+version: 0.1.95
 date: 2026-10-28
 changelog:
+  - 0.1.95: owner decision of 2026-10-28 (VAULT-MESSAGING 0.73.0
+    §3.6.5): §6 owner check item 6: an estimated 0 tries left (the
+    status read after the failure did not come) shows "probably locked,
+    checking", re-reads the vault's state without a check, and then the
+    lock text, the check with the real count, or "isn't answering" with
+    "Check again" and "Lock vault" (texts approved 2026-10-28); a check
+    with no answer counts in the estimate and says so ("Up to <N> tries
+    left…", approved); the idle-lock example is now
+    e.g. "8 days" in production (the default 24 h interval plus the
+    default 7 days after the deadline)
   - 0.1.94: owner decisions of 2026-10-28 (VAULT-MESSAGING 0.71.1): §6
     owner check item 6: a failed check after the unlock opens to the
     held screen with the failure line, the password only, "Check in"
@@ -1148,14 +1158,14 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.71.1) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.73.0) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
   - CALLS-PLAN.md (0.1.3) — calls; video in C4 (§4, 0.1.42)
   - AGENT-PLAN.md (0.1.7) — the agent connector; §7.2 AA1–AA5 (§4
     "Devices & agents", 0.1.53)
-  - IOS-PLAN.md (0.1.48) — the iPhone app; §4.12 carries the approvals
+  - IOS-PLAN.md (0.1.49) — the iPhone app; §4.12 carries the approvals
     indicator (0.1.89)
 classification: public (no secrets; safe for github.com/vettid)
 ---
@@ -2510,7 +2520,7 @@ vault without it, part 1 applies unchanged.
   | Where | Text |
   |---|---|
   | Held screen | "Your vault locks itself on <date> if you don't check in." |
-  | Notification (Security channel) and the unlock screen, after `vault.locking{reason: "idle"}` | "Your vault locked itself" / (0.1.93, approved 2026-10-28; §6 owner check item 6) "You hadn't checked in for <N>, so your vault locked. Unlock it with your PIN and your credential password to carry on. New messages wait for up to 14 days." (<N> as "3 days" in production, "7 hours" on staging; without "for <N>" when the time is unknown) |
+  | Notification (Security channel) and the unlock screen, after `vault.locking{reason: "idle"}` | "Your vault locked itself" / (0.1.93, approved 2026-10-28; §6 owner check item 6) "You hadn't checked in for <N>, so your vault locked. Unlock it with your PIN and your credential password to carry on. New messages wait for up to 14 days." (<N> e.g. "8 days" in production, "7 hours" on staging; without "for <N>" when the time is unknown) |
   | History | "Vault locked itself (not checked in)" for `vault.locked` with `ref` `idle` |
   | Settings, under the choice | "If you don't pass the daily check for this long, your vault locks itself and stops receiving until you unlock it." |
 
@@ -6350,6 +6360,35 @@ interval). Follow-ups, in A3 unless noted:
      daily checks in a row. Unlock it with your PIN and your credential
      password."** (was "…Unlock it with your PIN; it then asks for the
      check again."), since that unlock asks for both.
+   - (0.1.95, VAULT-MESSAGING 0.73.0) The tries left only estimated
+     (the `vault.status` read after the failure, or the check's own
+     answer, did not come) and the estimate at 0 (the last count read, less one for each failed check
+     answered since and each check sent since with no answer; 0 with no
+     count read since the unlock or since the app started): the lock flag still comes only from
+     `vault.locking` or the member API's `GET /api/vault/status`
+     `state: locked`; an answer to `vault.status` means the vault is
+     open. The held screen shows neither the lock text nor the fields.
+     It drops the kept PIN, turns "Check in" off, keeps **"Lock vault"**,
+     and shows **"Your daily check didn't pass, and your vault has
+     probably locked itself. Checking with your vault…"** (approved
+     2026-10-28). It re-reads both states at once, after about 5 s,
+     15 s, 1 min and 3 min, on a relay reconnect and on a return to the
+     foreground, one read at a time; no try is used. Locked: the lock
+     text above. A `vault.status` answer: the ordinary check (PIN and
+     password) with the count from it. The member API's `unlocked` is
+     not an answer (the checking text stays). No answer when the reads
+     end: **"Your vault isn't answering. It has probably locked itself
+     after ten wrong daily checks in a row."** (approved 2026-10-28),
+     with **"Check again"** (the same reads) and **"Lock vault"**.
+   - (0.1.95) A check with no answer while the estimate is above 0: the
+     app re-reads `vault.status` and the member API's status (no try
+     used). `vault.locking` or the API's `locked`: the locked screen
+     (not the owner-check lock text; the cause is not known). A
+     `vault.status` answer: the usual tries-left line with the real
+     count. None: **"Your vault didn't
+     answer, so that check may have counted. Up to <N> tries left before
+     your vault locks."** (singular **"Up to 1 try left…"**; approved
+     2026-10-28), with "Check in" offered again.
    - Every wrong try shows the tries left, never "Wrong credential
      password" alone. A wrong PIN shows only the PIN error; no check is
      sent and no check try is used.
@@ -6357,7 +6396,7 @@ interval). Follow-ups, in A3 unless noted:
      table above): **"You hadn't checked in for <N>, so your vault
      locked. Unlock it with your PIN and your credential password to
      carry on. New messages wait for up to 14 days."**, <N> written as
-     "3 days" in production and "7 hours" on staging, and without "for
+     e.g. "8 days" in production and "7 hours" on staging, and without "for
      <N>" when the time is unknown. After an idle lock the check is
      always overdue, so the screen always asks for both; the Security
      notification uses the same body.

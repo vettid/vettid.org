@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.72.1
+version: 0.73.0
 date: 2026-10-28
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.13.2)
-  - ANDROID-PLAN.md (0.1.94)
-  - IOS-PLAN.md (0.1.48; §9.1 VA1–VA4)
+  - ANDROID-PLAN.md (0.1.95)
+  - IOS-PLAN.md (0.1.49; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,17 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.73.0: owner decision 2026-10-28 (raised by the Opus review of
+    vettid-android #213). §3.6.5: when a failed check's tries left are
+    only estimated (the `vault.status` read after the answer did not
+    come) and the estimate reaches 0, the app neither shows the vault
+    as locked nor offers the check: it says the vault has probably
+    locked, re-reads its state without sending a check (`vault.status`,
+    and the member API's `GET /api/vault/status`), and shows the lock
+    text, the check with the real count, or "isn't answering" with
+    "Check again" and the lock action. A check sent with no answer
+    counts in the estimate and the app says it may have counted. ANDROID-PLAN 0.1.95,
+    IOS-PLAN 0.1.49 (texts approved)
   - 0.72.1: erratum, owner decisions 2026-10-28 (raised by the service
     vault agent while implementing 0.72.0; two Opus reviews). §6.6
     "Replay": a valid §3.4 rotation conflict in a reconnect `hs.init`'s
@@ -4027,6 +4038,46 @@ There is no host alarm and no email (§13.7; §15 item 22).
     once `failures` ≥ 10), the app shows the owner-check lock text at
     once, with the check button off, not a retry (0.71.1: on the held
     screen until `vault.locking` moves the app to the locked screen).
+  - (0.73.0; owner decision 2026-10-28) When the app could not read the
+    tries left after a failed check, or after a check that got no
+    answer (the `vault.status` read that follows did not come, or the
+    check itself was not answered), and its own estimate is 0 or less,
+    the failure has probably locked the vault, but the app does not
+    know. The estimate is the tries left from the last `vault.status`
+    it read, less one for each failed check answered since and for each
+    check sent since that got no answer (it may have counted); with no
+    count read since the unlock or since the app started, it is 0.
+    It **MUST NOT** show the vault as locked and **MUST NOT** offer the
+    check (no PIN or password field, the check button off, the kept PIN
+    forgotten): it says the vault has probably locked and that it is
+    checking, and re-reads the vault's state without sending a check
+    (no try is used): `vault.status`, and the member API's
+    `GET /api/vault/status` (whose `state` reads `locked` once the host
+    saw the lock, even when the enclave no longer answers; §11.5 "A
+    stopped vault is locked"), at once, again after about 5 and 15
+    seconds, 1 minute and 3 minutes (past the lease expiry, when the
+    parent is gone), and whenever the relay reconnects or the app
+    returns to the foreground, one read at a time. The lock action
+    stays offered throughout. A `vault.locking` or a member API `locked`
+    shows the owner-check lock text (the bullet above; the host gives no
+    reason, and at an estimate of 0 the app's own count names it); an
+    answer to `vault.status` means the vault is open and shows the check
+    again with the count from that answer. The member API's `unlocked`
+    is not an answer: the app keeps the checking text until
+    `vault.status` answers or the reads end. With no answer when the
+    reads end, it says the vault cannot be reached and has probably
+    locked, with a "check again" action (the same reads) and the lock
+    action.
+  - (0.73.0; owner decision 2026-10-28) A check that got no answer while
+    the estimate is still above 0 may have counted, and the app **MUST**
+    say so: it re-reads `vault.status` (no try is used), and the member
+    API's `GET /api/vault/status`; a `vault.locking` or a member API
+    `locked` shows the locked screen (not the owner-check lock text: at
+    an estimate above 0 the cause is not known), and an answer to
+    `vault.status` shows the count from it. With no answer it says the
+    check may have counted and shows the estimate (the fewest tries that
+    may remain) as "up to" that many, with the check offered again (the
+    PIN field shown again unless the PIN is still kept).
   - When the check is answered `backoff`, no check was used: the screen
     says the vault is open and when the check can be tried
     (`retry_after`), with only the password field (the PIN kept as in
