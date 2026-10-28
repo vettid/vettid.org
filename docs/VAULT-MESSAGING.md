@@ -5252,7 +5252,7 @@ connection** under the rules of §3.4 (it sends nothing to and accepts
 nothing from the peer), audits `connection.fork_suspected` and makes a
 feed item of priority `high` with the text "<connection name> may be
 running from two copies of its data. The connection is paused; connect
-again with a new invitation." *(text pending owner approval)*. The connection resumes only with a new
+again with a new invitation." (text approved by the owner 2026-10-28). The connection resumes only with a new
 invitation (§6.4). A single genuine restore never triggers it: after the
 switch the peer sends only in the restored line. Records of a replaced
 line are kept for the 35-day window.
