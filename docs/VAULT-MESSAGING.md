@@ -5373,7 +5373,8 @@ deposit was not confirmed is deposited again with the same bytes: a
 member vault that has already answered it drops the copy (replay, by
 `th1`), and its one `hs.resp` still reaches the stored ephemeral key. A
 new `hs.init` (a new `th1`, one try) is sent only when the initiator
-state was lost or the handshake was abandoned. The initiator state is
+state was lost, or when a member's reconnect the service yielded to
+expired without `hs.fin`; never while that `hs.fin` is awaited. The initiator state is
 part of the vault's state; a restore's marker starts every reconnect
 afresh, as above. A
 reconnect not completed within **7 days** (the idle lock's; the member
@@ -22904,7 +22905,12 @@ Follow-ups:
     render `connection.fork_suspected` (a paused connection with no
     candidates and no resolve; a new invitation, after contacting the
     service, is the way out) and the
-    History line of `connection.restored_reconnect`. **Open:** none.
+    History line of `connection.restored_reconnect`. (0.72.1) Amended: a valid rotation conflict in a reconnect `hs.init`
+    suspends at once (§6.6 "Replay"); crossing reconnects: a service's
+    own reconnect yields to a member's that verifies, the member always
+    answers; a reconnect open at a restart keeps its stored initiator
+    state. Follow-up: vettid-vault (member vault) implements the member
+    side of "Crossing reconnects". **Open:** none.
 
 ## 16. Test vectors
 
