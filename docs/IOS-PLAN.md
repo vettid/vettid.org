@@ -441,8 +441,8 @@ changelog:
     in §14 are drafts
 owner: Al Liebl (Mesmer)
 related:
-  - ANDROID-PLAN.md (0.1.96) — the Android app; this plan mirrors it
-  - VAULT-MESSAGING.md (0.73.1) — the app's contract with the vault
+  - ANDROID-PLAN.md (0.1.97) — the Android app; this plan mirrors it
+  - VAULT-MESSAGING.md (0.73.2) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
   - RELAY-PROTOCOL.md (0.9.4), MEMBER-API.md (2.7.1)
@@ -2066,7 +2066,7 @@ leaving the screen.
   or "isn't answering" with "Check again" and "Lock vault", with the
   same approved texts and reads ("Lock vault" offered throughout); a
   check with no answer while tries remain says it may have counted
-  ("Up to <N> tries left…", as ANDROID-PLAN 0.1.95).
+  ("At least <N> tries left…", as ANDROID-PLAN 0.1.97).
 - **Owner check early warning**: local notifications scheduled for 1 h
   before the deadline whenever the deadline is learned, cancelled on a
   check (ANDROID-PLAN §6 owner check, item 5). These work without APNs.
