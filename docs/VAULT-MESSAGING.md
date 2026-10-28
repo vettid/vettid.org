@@ -3966,9 +3966,10 @@ There is no host alarm and no email (§13.7; §15 item 22).
   (the early warning, above). Whether the vault is past its deadline
   follows the app's saved owner-check state (its deadline and interval;
   not vault content, so it survives a restart); with none (a new
-  install, a transfer or a recovery) it asks for the PIN only, and if
-  `vault.status` after the unlock shows the vault due, the ordinary
-  check screen follows, which hides no failure.
+  install, a transfer or a recovery) it asks for the PIN only. Whenever
+  a PIN-only unlock finds the vault due by `vault.status` (no saved
+  state, the deadline passed while the screen was open, or the clocks
+  differ), the ordinary check screen follows, which hides no failure.
   - It **MUST** say on that screen why the password is asked.
   - It **MUST NOT** spend a check silently: when the unlock succeeds and
     the check fails on the password, the same screen says so at once
