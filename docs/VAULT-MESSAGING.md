@@ -7024,9 +7024,11 @@ which are not asks). Five kinds arrived only as events and were lost;
   only events whose inner `ts` is later than the first page's response
   `ts`: a creation event as old as that or older is ignored (the list
   already says whether the ask is open), and a closing event
-  (`sync.event` of a decision, `location.request.closed`,
-  `device.session.*`, `action.result`, `connection.authenticate.result`)
-  for an id not in the list does nothing. A decision on a listed ask is the same
+  (`sync.event` `connection.authenticate.decided`, `approval.decided`,
+  `action.decided`, each by its id; `device.session`, by `device_id`,
+  since a device has at most one session request; and
+  `location.request.closed`) for an ask not in the list does nothing. A
+  decision on a listed ask is the same
   request as on the event (`connection.authenticate.approve`,
   `device.session.approve`, `approval.decide`, `action.respond`, or
   `location.share.start` with the `request_id`, §10.16), with the same errors when another device decided
