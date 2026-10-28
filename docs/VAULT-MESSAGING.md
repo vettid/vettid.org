@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.69.1
-date: 2026-10-27
+version: 0.69.2
+date: 2026-10-28
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.13.2)
-  - ANDROID-PLAN.md (0.1.90)
-  - IOS-PLAN.md (0.1.43; §9.1 VA1–VA4)
+  - ANDROID-PLAN.md (0.1.92)
+  - IOS-PLAN.md (0.1.45; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,21 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.69.2: erratum, owner 2026-10-28; found in the review of
+    vettid-android #206. §11.14.10 said a successful rotation is
+    audited `identity.rotated` with `ref` = the `transfer_id`, but did
+    not say what a rotation that clears a recovery's mark, or a
+    `credential.rotate` with no mark owed, carries; a recovery's
+    `recovery_id` is a ULID like a `transfer_id`, so an app would label
+    a recovery's rotation as a move. Now: `ref` = the `transfer_id` only
+    when the rotation clears a transfer's mark (it wins when one
+    rotation clears both); `"recovery"` when it clears a recovery's
+    mark; absent otherwise. `identity.rotation_failed` carries the same
+    `ref` (§10.9 and §11.14.11 already said `recovery` for a recovery's;
+    §11.14.10 "Failure" said only the `transfer_id`). The vault writes no
+    `identity.rotated` `ref` yet, so no vault
+    or app built today changes; the vault follows in its next release
+    with §11.14.10
   - 0.69.1: erratum, 2026-10-27; matches vettid-vault #158 (behaviour as
     built). A rotation chain is resolved against what the receiver has
     already followed. §3.4 "identity.rotate statement" and §6.6
@@ -18770,11 +18785,20 @@ the old copy of §11.14.2, and the member gains nothing by choosing.
   step 6 does, and then rotates; the old key is kept as above. A pending unlink written by a release before the mark
   existed is treated as owing a rotation.
 - **Failure.** A rotation that cannot be made is audited
-  (`identity.rotation_failed`, `ref` = the `transfer_id`), the mark is
+  (`identity.rotation_failed`, with the `ref` a success would carry,
+  below; 0.69.2), the mark is
   kept, and it is tried again at the next unlock: **it never fails the
   unlock, never delays the notice and never fails the move.** A
-  successful rotation is audited `identity.rotated` with `ref` = the
-  `transfer_id` and appears in History.
+  successful rotation is audited `identity.rotated` and appears in
+  History. (0.69.2) Its `ref` says which owed mark it cleared: the
+  `transfer_id` **only** when it clears a transfer's mark; otherwise the
+  literal `"recovery"` when it clears a recovery's mark (never the
+  `recovery_id`, which is not told apart from a `transfer_id`); otherwise
+  (a `credential.rotate` with no mark owed) no `ref`. When one rotation
+  clears both a transfer's and a recovery's mark, the `transfer_id`
+  wins. Apps show the move's line only for a `ref` other than
+  `"recovery"`; the owed mark itself keeps its own `ref` (the
+  `recovery_id` of §11.14.6 step 6).
 - **What the old phone sees.** Nothing new. It was removed at the
   approval (§7.4), so it receives neither the rotation notices nor the
   new address; it learns of the move from `device.unlinked{transferred}`
