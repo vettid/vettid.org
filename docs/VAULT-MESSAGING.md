@@ -3989,7 +3989,7 @@ There is no host alarm and no email (§13.7; §15 item 22).
     (`retry_after`), with the send button off until then.
   - A wrong PIN ends the unlock (§11.8), and no check is sent.
   - An early check is a check: a wrong password counts toward the
-    failures and the password backoff and is a `owner_check.failed`
+    failures and the password backoff and is an `owner_check.failed`
     feed item, and stays counted after the member leaves it for later,
     until a check passes; a passing one rotates the CEK (§3.6.6), sets
     the deadline from now, and applies a lengthened interval or
