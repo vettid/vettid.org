@@ -3933,7 +3933,8 @@ There is no host alarm and no email (§13.7; §15 item 22).
   together, and send them in one `vault.owner-check`. It MUST NOT keep
   either beyond the check's answer (for a locked vault, beyond the unlock
   and the check that follows it), and zeroizes both; (0.71.0) except
-  that after an unlock whose check failed on the password, it keeps the
+  that after an unlock whose check failed on the password with tries
+  left, or was answered `backoff` (0.71.1), it keeps the
   accepted PIN in memory only while the app is in front, for the
   password-only retry on the held screen below (0.71.1), and forgets it
   when the app leaves the foreground, at a lock, a wipe or the next
@@ -3989,11 +3990,13 @@ There is no host alarm and no email (§13.7; §15 item 22).
     2026-10-28). It never shows a failure the member did not see happen,
     nor presents an open vault as locked.
   - When that failure locks the vault (§3.6.4: the tenth, or any failure
-    once `failures` ≥ 10), the app shows the locked screen with the
-    owner-check lock text, not a retry.
+    once `failures` ≥ 10), the app shows the owner-check lock text at
+    once, with the check button off, not a retry (0.71.1: on the held
+    screen until `vault.locking` moves the app to the locked screen).
   - When the check is answered `backoff`, no check was used: the screen
     says the vault is open and when the check can be tried
-    (`retry_after`), with the send button off until then.
+    (`retry_after`), with only the password field (the PIN kept as in
+    the first bullet) and the send button off until then.
   - A wrong PIN ends the unlock (§11.8), and no check is sent.
 - Settings offer the interval (1–24 h, §3.6.2) and the hold (§3.6.7).
   Turning the hold off is part of a check: the app asks for the PIN and

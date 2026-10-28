@@ -2051,9 +2051,11 @@ leaving the screen.
   VAULT-MESSAGING 0.71.0 §3.6.5 "Ask only for what is used"): as
   ANDROID-PLAN §6 owner check item 6, with the same approved texts
   (also the idle-lock body; 0.1.48: the held screen after a failed
-  check, the backoff line, "1 try left" and the ten-failure lock body): the password only when the vault is past
-  its deadline, never ahead of it; a failed check after a successful
-  unlock is shown at once on the same screen with the tries left.
+  check, the backoff line, "1 try left" and the ten-failure lock
+  title and body): the password only when the vault is past its
+  deadline, never ahead of it; a failed check after a successful
+  unlock is shown at once on the held screen with the tries left
+  (password only, "Check in", "Lock vault").
 - **Owner check early warning**: local notifications scheduled for 1 h
   before the deadline whenever the deadline is learned, cancelled on a
   check (ANDROID-PLAN §6 owner check, item 5). These work without APNs.

@@ -1155,7 +1155,7 @@ related:
   - CALLS-PLAN.md (0.1.3) — calls; video in C4 (§4, 0.1.42)
   - AGENT-PLAN.md (0.1.7) — the agent connector; §7.2 AA1–AA5 (§4
     "Devices & agents", 0.1.53)
-  - IOS-PLAN.md (0.1.44) — the iPhone app; §4.12 carries the approvals
+  - IOS-PLAN.md (0.1.48) — the iPhone app; §4.12 carries the approvals
     indicator (0.1.89)
 classification: public (no secrets; safe for github.com/vettid)
 ---
@@ -6344,8 +6344,9 @@ interval). Follow-ups, in A3 unless noted:
    - When that failure locks the vault (the tenth, or any once
      `failures` ≥ 10; item 8), the owner-check lock text shows at once
      (on the held screen until `vault.locking` moves the app to the
-     locked screen), with "Check in" off; not a retry. Its body
-     (approved 2026-10-28): **"Your vault locked itself after ten wrong
+     locked screen), with "Check in" off; not a retry. Its title
+     **"Locked after ten wrong checks"** (existing) and body (approved
+     2026-10-28): **"Your vault locked itself after ten wrong
      daily checks in a row. Unlock it with your PIN and your credential
      password."** (was "…Unlock it with your PIN; it then asks for the
      check again."), since that unlock asks for both.
