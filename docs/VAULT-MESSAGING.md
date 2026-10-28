@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.69.1
-date: 2026-10-27
+version: 0.69.2
+date: 2026-10-28
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -27,6 +27,18 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.69.2: erratum, 2026-10-28 (owner OK; found in the review of
+    vettid-android #206). §11.14.10 said a successful rotation is
+    audited `identity.rotated` with `ref` = the `transfer_id`, but did
+    not say what a rotation that clears a recovery's mark, or a
+    `credential.rotate` with no mark owed, carries; a recovery's
+    `recovery_id` is a ULID like a `transfer_id`, so an app would label
+    a recovery's rotation as a move. Now: `ref` = the `transfer_id` only
+    when the rotation clears a transfer's mark (it wins when one
+    rotation clears both); `"recovery"` when it clears a recovery's
+    mark; absent otherwise. The vault writes no `ref` yet, so no vault
+    or app built today changes; the vault follows in its next release
+    with §11.14.10
   - 0.69.1: erratum, 2026-10-27; matches vettid-vault #158 (behaviour as
     built). A rotation chain is resolved against what the receiver has
     already followed. §3.4 "identity.rotate statement" and §6.6
@@ -18773,8 +18785,16 @@ the old copy of §11.14.2, and the member gains nothing by choosing.
   (`identity.rotation_failed`, `ref` = the `transfer_id`), the mark is
   kept, and it is tried again at the next unlock: **it never fails the
   unlock, never delays the notice and never fails the move.** A
-  successful rotation is audited `identity.rotated` with `ref` = the
-  `transfer_id` and appears in History.
+  successful rotation is audited `identity.rotated` and appears in
+  History. (0.69.2) Its `ref` says which owed mark it cleared: the
+  `transfer_id` **only** when it clears a transfer's mark; otherwise the
+  literal `"recovery"` when it clears a recovery's mark (never the
+  `recovery_id`, which is not told apart from a `transfer_id`); otherwise
+  (a `credential.rotate` with no mark owed) no `ref`. When one rotation
+  clears both a transfer's and a recovery's mark, the `transfer_id`
+  wins. Apps show the move's line only for a `ref` other than
+  `"recovery"`; the owed mark itself keeps its own `ref` (the
+  `recovery_id` of §11.14.6 step 6).
 - **What the old phone sees.** Nothing new. It was removed at the
   approval (§7.4), so it receives neither the rotation notices nor the
   new address; it learns of the move from `device.unlinked{transferred}`
