@@ -1499,8 +1499,12 @@ and back-stack rules.* Only these differ on iOS:
   decision on A is in flight, B opens after it settles. A gone entry
   opens the list with "This is no longer waiting". (0.1.46) The
   notification is built only after the app has kept the request's
-  `.pending` entry in the open list, so a notification never names an
-  entry the list does not have.
+  `.pending` entry in the open list, so a notification is never built
+  for an entry the list does not have (a delivered one can outlive the
+  entry; a tap then shows "This is no longer waiting", above). This
+  binds what the app process posts; the notification service
+  extension's path, which cannot see the in-memory list, is settled in
+  phase P.
 - **Removal and time sensitivity (phase P).** A **delivered** push
   notification cannot be given a timeout or a countdown (the extension
   runs once, on delivery): one for an expired request stays until the
