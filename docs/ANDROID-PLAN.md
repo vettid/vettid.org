@@ -8,7 +8,8 @@ changelog:
     item 44). New §4 "Sign-in match code (0.1.92)": a sign-in challenge
     with a valid `match_code` shows it in large digits near the top of
     the approval screen, headed "Match code", with "Check that the
-    website shows the same number: 42" and an accessibility label;
+    sign-in screen shows the same number: 42" and an accessibility label
+    (the digits are spoken one by one);
     `context` stays under "Their note". No code, today's screen. The app
     never takes a code from `context`. Draft texts for the owner. Vault:
     a staging release after 24.
@@ -4776,15 +4777,15 @@ has no Call, message or share rows; an unknown `peer_kind` is a person; a
 *Owner decision of 2026-10-28 (VAULT-MESSAGING 0.70.0 §10.4, §15 item
 44). Draft texts for the owner. Not built; needs the vault release.*
 A sign-in challenge (`purpose: "signin"`) may carry `match_code`, 2 or
-3 digits that the service's website shows too.
+3 digits that the service's sign-in screen shows too.
 
 - **With a valid `match_code`** the sign-in approval screen (the
   notification's target and the Approvals row) shows, directly under
   the title "Sign in to <name>?": the label **"Match code"**, the code
   in large digits (display size, bold, tabular figures, spaced so that
   each digit reads alone; never truncated, scaling with the system font
-  size), and under it **"Check that the website shows the same number:
-  42"**. Then "Their note" with `context` (still the challenger's
+  size), and under it **"Check that the sign-in screen shows the same
+  number: 42"**. Then "Their note" with `context` (still the challenger's
   words), "Only approve if you are signing in right now.", **Approve**
   and **Not me**. The notification text does not carry the number (a
   notification can be read on a locked phone; the number is for the
@@ -4796,17 +4797,20 @@ A sign-in challenge (`purpose: "signin"`) may carry `match_code`, 2 or
   `context`, whatever it says ("match code 42" there is only text under
   "Their note"). Until the service vault stops repeating the number in
   `context` the member may see it twice; that is accepted.
-- Accessibility: the block is one element read as "Match code, 4 2.
-  Check that the website shows the same number." (digits separated so
-  a screen reader does not say "forty-two").
+- Accessibility: the block is one element read as "Match code 4 2":
+  the digits are spoken one by one, not as "forty-two" (a
+  `TtsSpan.DigitsBuilder` or `VerbatimBuilder` span, or the digits
+  separated by spaces). The instruction line is its own text, read as
+  written. It says nothing about `context`: the app does not claim
+  the note was checked.
 
 **Draft texts**
 
 | Key | Text |
 |---|---|
 | `match_code_label` | Match code |
-| `match_code_instruction` | Check that the website shows the same number: %s |
-| `match_code_a11y` | Match code %1$s. Check that the website shows the same number. |
+| `match_code_instruction` | Check that the sign-in screen shows the same number: %s |
+| `match_code_a11y` | Match code %s (the digits spoken one by one) |
 | `signin_their_note` | Their note |
 
 **Tests.** A code shows large above the note; no code shows today's

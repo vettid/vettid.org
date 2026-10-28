@@ -8,8 +8,9 @@ changelog:
     item 44; ANDROID-PLAN 0.1.92). New §4.14 "Sign-in match code": the
     same as ANDROID-PLAN §4 "Sign-in match code (0.1.92)" (a valid
     `match_code` shown in large digits near the top of the sign-in
-    approval screen, "Match code" and "Check that the website shows the
-    same number: 42", with an accessibility label; `context` stays under
+    approval screen, "Match code" and "Check that the sign-in
+    screen shows the same number: 42", with an accessibility label (the
+    digits spoken one by one); `context` stays under
     "Their note"; no code, today's screen; never taken from `context`),
     draft texts the same. Vault: a staging release after 24.
   - 0.1.44: owner decisions of 2026-10-27, after an audit of what the apps
@@ -1539,13 +1540,14 @@ protocol.
 changed on one platform alone. On iOS: the "Match code" block sits under
 the title of the sign-in approval screen, the digits in a large
 monospaced-digit Dynamic Type style (scaling, never truncated), the
-VoiceOver label "Match code 4 2. Check that the website shows the same
-number." (one element, digits read singly), and no code in the
-notification text. A challenge without a valid `match_code` shows today's
-screen; the app never reads digits from `context`. Draft texts as
-ANDROID-PLAN's table: "Match code", "Check that the website shows the
-same number: %@", "Match code %@. Check that the website shows the same
-number.", "Their note".
+VoiceOver label "Match code 4 2", the digits spoken one by one
+(`accessibilitySpeechSpellOut` on the digits, as the Android plan's
+`TtsSpan` digits), and no code in the notification text. The
+instruction line is its own text. A challenge without a valid
+`match_code` shows today's screen; the app never reads digits from
+`context`. Draft texts as ANDROID-PLAN's table: "Match code", "Check
+that the sign-in screen shows the same number: %@", "Match code %@"
+(spoken digit by digit), "Their note".
 
 ## 5. Architecture
 
