@@ -4039,13 +4039,14 @@ There is no host alarm and no email (§13.7; §15 item 22).
     once, with the check button off, not a retry (0.71.1: on the held
     screen until `vault.locking` moves the app to the locked screen).
   - (0.73.0; owner decision 2026-10-28) When the app could not read the
-    tries left after a failed check (the `vault.status` read that
-    follows the answer did not come) and its own estimate is 0 or less,
+    tries left after a failed check, or after a check that got no
+    answer (the `vault.status` read that follows did not come, or the
+    check itself was not answered), and its own estimate is 0 or less,
     the failure has probably locked the vault, but the app does not
     know. The estimate is the tries left from the last `vault.status`
     it read, less one for each failed check answered since and for each
     check sent since that got no answer (it may have counted); with no
-    count read since the unlock, it is 0.
+    count read since the unlock or since the app started, it is 0.
     It **MUST NOT** show the vault as locked and **MUST NOT** offer the
     check (no PIN or password field, the check button off, the kept PIN
     forgotten): it says the vault has probably locked and that it is

@@ -6360,10 +6360,10 @@ interval). Follow-ups, in A3 unless noted:
      password."** (was "…Unlock it with your PIN; it then asks for the
      check again."), since that unlock asks for both.
    - (0.1.95, VAULT-MESSAGING 0.73.0) The tries left only estimated
-     (the `vault.status` read after the failure did not come) and the
-     estimate at 0 (the last count read, less one for each failed check
+     (the `vault.status` read after the failure, or the check's own
+     answer, did not come) and the estimate at 0 (the last count read, less one for each failed check
      answered since and each check sent since with no answer; 0 with no
-     count read since the unlock): the lock flag still comes only from
+     count read since the unlock or since the app started): the lock flag still comes only from
      `vault.locking` or the member API's `GET /api/vault/status`
      `state: locked`; an answer to `vault.status` means the vault is
      open. The held screen shows neither the lock text nor the fields.
