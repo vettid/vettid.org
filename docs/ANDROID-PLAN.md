@@ -1,9 +1,15 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.93
+version: 0.1.94
 date: 2026-10-28
 changelog:
+  - 0.1.94: owner decisions of 2026-10-28 (VAULT-MESSAGING 0.71.1): §6
+    owner check item 6: a failed check after the unlock opens to the
+    held screen with the failure line, the password only, "Check in"
+    and "Lock vault"; the kept PIN follows the app-wide foreground; the
+    approved backoff line and singular "1 try left"; the ten-failure
+    lock body now says "with your PIN and your credential password"
   - 0.1.93: owner decision of 2026-10-28 (VAULT-MESSAGING 0.71.0
     §3.6.5 "Ask only for what is used"): §6 owner check item 6, "Unlock
     and check in": the password only when the vault is past its
@@ -1142,14 +1148,14 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.71.0) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.71.1) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
   - CALLS-PLAN.md (0.1.3) — calls; video in C4 (§4, 0.1.42)
   - AGENT-PLAN.md (0.1.7) — the agent connector; §7.2 AA1–AA5 (§4
     "Devices & agents", 0.1.53)
-  - IOS-PLAN.md (0.1.44) — the iPhone app; §4.12 carries the approvals
+  - IOS-PLAN.md (0.1.48) — the iPhone app; §4.12 carries the approvals
     indicator (0.1.89)
 classification: public (no secrets; safe for github.com/vettid)
 ---
@@ -6320,20 +6326,30 @@ interval). Follow-ups, in A3 unless noted:
    - Texts (approved): title **"Unlock and check in"**; body **"Your
      daily check is due, so your vault needs your PIN and your
      credential password."**
-   - PIN right, password wrong: on the same screen, **"Your vault is
-     unlocked, but the credential password was wrong, so your daily
-     check didn't pass. <N> tries left before your vault locks again."**
-     The PIN field goes; only the password field stays, with **"Check
-     in"** (the accepted PIN is kept in memory only while this screen is
-     in front, as on the pairing screen, and forgotten when the app
-     leaves the foreground; then both are asked again). No separate
-     "Daily check" screen follows with a failure the member did not see.
+   - PIN right, password wrong (0.1.94, owner decision 2026-10-28): the
+     app opens at once to the **held screen** (the vault is open and
+     held; no cached content), and directly under the waiting counts
+     shows **"Your vault is unlocked, but the credential password was
+     wrong, so your daily check didn't pass. <N> tries left before your
+     vault locks again."** (singular **"1 try left"**, approved). The PIN
+     field goes; only the password field stays, with **"Check in"** and
+     **"Lock vault"**. The accepted PIN is kept in memory only while the
+     app is in front (app-wide foreground), and forgotten when it leaves
+     the foreground, at a lock, a wipe or the next check; then the held
+     screen asks for both. The failure is never shown later on a screen
+     the member did not see it happen on.
+   - Backoff on the held screen (approved): **"Your vault is unlocked.
+     Enter your credential password to check in."** with the existing
+     countdown, "Check in" off until it ends.
    - When that failure locks the vault (the tenth, or any once
-     `failures` ≥ 10; item 8), the locked screen with the existing
-     owner-check lock texts follows, not a retry. A `backoff` answer
-     used no try: the screen says the vault is open and shows the
-     existing backoff countdown of item 2, with "Check in" off until it
-     ends.
+     `failures` ≥ 10; item 8), the owner-check lock text shows at once
+     (on the held screen until `vault.locking` moves the app to the
+     locked screen), with "Check in" off; not a retry. Its title
+     **"Locked after ten wrong checks"** (existing) and body (approved
+     2026-10-28): **"Your vault locked itself after ten wrong
+     daily checks in a row. Unlock it with your PIN and your credential
+     password."** (was "…Unlock it with your PIN; it then asks for the
+     check again."), since that unlock asks for both.
    - Every wrong try shows the tries left, never "Wrong credential
      password" alone. A wrong PIN shows only the PIN error; no check is
      sent and no check try is used.

@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.71.0
+version: 0.71.1
 date: 2026-10-28
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.13.2)
-  - ANDROID-PLAN.md (0.1.93)
-  - IOS-PLAN.md (0.1.47; §9.1 VA1–VA4)
+  - ANDROID-PLAN.md (0.1.94)
+  - IOS-PLAN.md (0.1.48; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,6 +27,13 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.71.1: erratum, owner 2026-10-28 (asked by the iOS agent). §3.6.5:
+    a check that fails on the password after the unlock is shown at
+    once on the held screen (the vault's real state: open, held), with
+    the failure line, the password only, the check button and the lock
+    action, as the owner decided while vettid-android #209 was built;
+    0.71.0 said "the same screen". The kept PIN lives while the app is
+    in front and goes at a lock, a wipe or the next check
   - 0.71.0: **owner decision 2026-10-28.** §3.6.5 "Ask only for what
     is used": the unlock asks for the PIN only, and for the PIN and the
     password on one screen only when the vault is past its deadline;
@@ -3926,10 +3933,12 @@ There is no host alarm and no email (§13.7; §15 item 22).
   together, and send them in one `vault.owner-check`. It MUST NOT keep
   either beyond the check's answer (for a locked vault, beyond the unlock
   and the check that follows it), and zeroizes both; (0.71.0) except
-  that after an unlock whose check failed on the password, it keeps the
-  accepted PIN in memory only while that screen is in front, for the
-  password-only retry below, and forgets it when the app leaves the
-  foreground (then both are asked again, as for any check).
+  that after an unlock whose check failed on the password with tries
+  left, or was answered `backoff` (0.71.1), it keeps the
+  accepted PIN in memory only while the app is in front, for the
+  password-only retry on the held screen below (0.71.1), and forgets it
+  when the app leaves the foreground, at a lock, a wipe or the next
+  check (then both are asked again, as for any check).
 - It **SHOULD** show the check at the **first app open** (or return to
   the foreground) after the deadline, before any screen that needs the
   vault. It **MUST NOT** interrupt an action in progress (composing a
@@ -3972,17 +3981,22 @@ There is no host alarm and no email (§13.7; §15 item 22).
   differ), the ordinary check screen follows, which hides no failure.
   - It **MUST** say on that screen why the password is asked.
   - It **MUST NOT** spend a check silently: when the unlock succeeds and
-    the check fails on the password, the same screen says so at once
-    (the vault is open, the check did not pass, the checks left) and
-    keeps only the password field for another try (the PIN kept as in
-    the first bullet); it never moves on to a separate check screen that
-    shows a failure the member did not see happen.
+    the check fails on the password, the app opens at once to the
+    **held screen**, which is the vault's real state (open, held until
+    the check passes; no cached content), and shows the failure there
+    with the waiting counts (the check did not pass, the checks left),
+    only the password field (the PIN kept as in the first bullet), the
+    check button and the lock action (0.71.1, owner decision
+    2026-10-28). It never shows a failure the member did not see happen,
+    nor presents an open vault as locked.
   - When that failure locks the vault (§3.6.4: the tenth, or any failure
-    once `failures` ≥ 10), the app shows the locked screen with the
-    owner-check lock text, not a retry.
+    once `failures` ≥ 10), the app shows the owner-check lock text at
+    once, with the check button off, not a retry (0.71.1: on the held
+    screen until `vault.locking` moves the app to the locked screen).
   - When the check is answered `backoff`, no check was used: the screen
     says the vault is open and when the check can be tried
-    (`retry_after`), with the send button off until then.
+    (`retry_after`), with only the password field (the PIN kept as in
+    the first bullet) and the send button off until then.
   - A wrong PIN ends the unlock (§11.8), and no check is sent.
 - Settings offer the interval (1–24 h, §3.6.2) and the hold (§3.6.7).
   Turning the hold off is part of a check: the app asks for the PIN and

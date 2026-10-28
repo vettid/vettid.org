@@ -1,9 +1,13 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.47
+version: 0.1.48
 date: 2026-10-28
 changelog:
+  - 0.1.48: VAULT-MESSAGING 0.71.1, ANDROID-PLAN 0.1.94 (owner
+    2026-10-28): the held screen after a failed check at the unlock, the
+    approved backoff line, "1 try left", and the ten-failure lock body
+    "…Unlock it with your PIN and your credential password."
   - 0.1.47: owner decision of 2026-10-28 (VAULT-MESSAGING 0.71.0
     §3.6.5 "Ask only for what is used"): "Unlock and check in", as
     ANDROID-PLAN 0.1.93 §6 owner check item 6, with the same approved
@@ -433,8 +437,8 @@ changelog:
     in §14 are drafts
 owner: Al Liebl (Mesmer)
 related:
-  - ANDROID-PLAN.md (0.1.93) — the Android app; this plan mirrors it
-  - VAULT-MESSAGING.md (0.71.0) — the app's contract with the vault
+  - ANDROID-PLAN.md (0.1.94) — the Android app; this plan mirrors it
+  - VAULT-MESSAGING.md (0.71.1) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
   - RELAY-PROTOCOL.md (0.9.4), MEMBER-API.md (2.7.1)
@@ -2046,9 +2050,12 @@ leaving the screen.
 - **Unlock and check in** (0.1.47; owner decision 2026-10-28,
   VAULT-MESSAGING 0.71.0 §3.6.5 "Ask only for what is used"): as
   ANDROID-PLAN §6 owner check item 6, with the same approved texts
-  (also the idle-lock body): the password only when the vault is past
-  its deadline, never ahead of it; a failed check after a successful
-  unlock is shown at once on the same screen with the tries left.
+  (also the idle-lock body; 0.1.48: the held screen after a failed
+  check, the backoff line, "1 try left" and the ten-failure lock
+  title and body): the password only when the vault is past its
+  deadline, never ahead of it; a failed check after a successful
+  unlock is shown at once on the held screen with the tries left
+  (password only, "Check in", "Lock vault").
 - **Owner check early warning**: local notifications scheduled for 1 h
   before the deadline whenever the deadline is learned, cancelled on a
   check (ANDROID-PLAN §6 owner check, item 5). These work without APNs.
