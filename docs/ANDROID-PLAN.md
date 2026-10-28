@@ -1,9 +1,12 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.96
+version: 0.1.97
 date: 2026-10-28
 changelog:
+  - 0.1.97: owner decision 2026-10-28 (VAULT-MESSAGING 0.73.2): §6
+    owner check item 6: "At least <N> tries left…" (was "Up to"; the
+    estimate after an unanswered check is the fewest that may remain)
   - 0.1.96: erratum (VAULT-MESSAGING 0.73.1, owner 2026-10-28): §6
     owner check item 6: the kept PIN survives a held-screen retry whose
     answer again leaves the password-only retry useful, as built
@@ -1162,7 +1165,7 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.73.1) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.73.2) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
@@ -6395,8 +6398,9 @@ interval). Follow-ups, in A3 unless noted:
      (not the owner-check lock text; the cause is not known). A
      `vault.status` answer: the usual tries-left line with the real
      count. None: **"Your vault didn't
-     answer, so that check may have counted. Up to <N> tries left before
-     your vault locks."** (singular **"Up to 1 try left…"**; approved
+     answer, so that check may have counted. At least <N> tries left
+     before your vault locks."** (singular **"At least 1 try left…"**;
+     0.1.97, was "Up to", which read as a most; approved
      2026-10-28), with "Check in" offered again.
    - Every wrong try shows the tries left, never "Wrong credential
      password" alone. A wrong PIN shows only the PIN error; no check is

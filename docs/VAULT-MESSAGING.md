@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.73.1
+version: 0.73.2
 date: 2026-10-28
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,7 +14,7 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.13.2)
-  - ANDROID-PLAN.md (0.1.96)
+  - ANDROID-PLAN.md (0.1.97)
   - IOS-PLAN.md (0.1.49; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
@@ -27,6 +27,10 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.73.2: owner decision 2026-10-28. §3.6.5: after a check with no
+    answer the estimate is the fewest tries that may remain, so the app
+    shows it as "at least", not "up to" (which read as a most).
+    ANDROID-PLAN 0.1.97
   - 0.73.1: erratum, owner decision 2026-10-28. §3.6.5 first bullet:
     the kept PIN was said to be forgotten at "the next check", but the
     password-only retry on the held screen is a check, and the apps as
@@ -4091,7 +4095,7 @@ There is no host alarm and no email (§13.7; §15 item 22).
     an estimate above 0 the cause is not known), and an answer to
     `vault.status` shows the count from it. With no answer it says the
     check may have counted and shows the estimate (the fewest tries that
-    may remain) as "up to" that many, with the check offered again (the
+    may remain) as "at least" that many (0.73.2), with the check offered again (the
     PIN field shown again unless the PIN is still kept).
   - When the check is answered `backoff`, no check was used: the screen
     says the vault is open and when the check can be tried
