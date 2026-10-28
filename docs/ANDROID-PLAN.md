@@ -1142,7 +1142,7 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.69.0) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.71.0) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
@@ -6310,10 +6310,15 @@ interval). Follow-ups, in A3 unless noted:
    (0.1.93; owner decision 2026-10-28, VAULT-MESSAGING 0.71.0 §3.6.5
    "One prompt, not two") **Unlock and check in:**
    - The unlock screen asks for the password when the vault is past its
-     deadline and also when, by the last `owner_check` known, the
-     deadline falls within a third of the interval (8 h at 24 h; 20 min
-     on staging's 1 h); then it checks in right after the unlock. With
-     no known deadline it asks for the PIN only.
+     deadline and also when, by the saved owner-check state (§5 table:
+     deadline and interval, not vault content), the deadline falls
+     within a third of the interval (`interval_seconds / time_scale /
+     3`: 8 h at 24 h; 20 min on staging's 1 h; it follows from S1 of
+     STAGING-TIME-SCALE); then it checks in right after the unlock. With
+     no saved state (new install, transfer, recovery) it asks for the
+     PIN only, and if the vault is then due the ordinary check screen
+     follows. Due or not ("is due" / "is due soon", and whether "Not
+     now" is offered) follows `vault.status` after the unlock.
    - Texts (approved): title **"Unlock and check in"**; body **"Your
      daily check is due, so your vault needs your PIN and your
      credential password."**, or, when not yet due, **"Your daily check
@@ -6323,9 +6328,18 @@ interval). Follow-ups, in A3 unless noted:
      unlocked, but the credential password was wrong, so your daily
      check didn't pass. <N> tries left before your vault locks again."**
      The PIN field goes; only the password field stays, with **"Check
-     in"**. No separate "Daily check" screen follows with a failure the
+     in"** (the accepted PIN is kept in memory only while this screen is
+     in front, as on the pairing screen, and forgotten when the app
+     leaves the foreground; then both are asked again). No separate "Daily check" screen follows with a failure the
      member did not see. When the vault was not yet due, the member may
      leave it (**"Not now"**, approved) and the app carries on.
+   - When that failure locks the vault (the tenth, or any once
+     `failures` ≥ 10; item 8), the locked screen with the existing
+     owner-check lock texts follows, not a retry. A `backoff` answer
+     used no try: the screen says the vault is open and shows the
+     existing backoff countdown of item 2, with "Check in" off until it
+     ends. An early check is a real check: a wrong password counts (and
+     stays counted after "Not now"), a passing one resets the deadline.
    - Every wrong try shows the tries left, never "Wrong credential
      password" alone. A wrong PIN shows only the PIN error; no check is
      sent and no check try is used.
