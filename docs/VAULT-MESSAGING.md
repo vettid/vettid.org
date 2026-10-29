@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.74.0
-date: 2026-10-28
+version: 0.75.0
+date: 2026-10-29
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -27,6 +27,17 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.75.0: owner decision 2026-10-29. §13.6 "Device details": a
+    device's name or model may be kept in the member's own vault, but
+    no VettID server (member API, host and parent, relay, push gateway,
+    calls issuer and TURN, logs) and no service (member service,
+    service vault) receives it. It travels only sealed to the enclave
+    or end to end between the member's devices. VettID's own clients send a fixed
+    User-Agent (`VettID-Android`, `VettID-iOS`, `VettID-Desktop`,
+    `VettID-Agent`) with no version, model or OS details. Out of scope by owner
+    decision: browsers opening VettID web pages, and Google or Apple
+    crash reports and statistics. §11.3 and §11.11.3: a pointer from
+    `app.name`. No vault change; the apps set the header (Android, iOS)
   - 0.74.0: owner decision 2026-10-29 (from the review of vettid-vault
     #162). §6.6 "Crossing reconnects": between two persons (neither
     connection a service) the reconnect whose `hs.init` has the lower
@@ -12897,6 +12908,9 @@ enclave makes a random DEK and writes `dek_wrap` and `secret_check`
 (§11.14.1), and `recovery.counter_key`; a request without it is
 `bad_request`.
 
+`app.name` is the device's name for the member's own lists. It exists
+only inside the sealed request (0.75.0, §13.6 "Device details").
+
 `device_attest` is REQUIRED (§11.7). `app.api_key` (0.15.0) is REQUIRED:
 the app key that signs the app's member API requests (§11.12); the vault
 keeps it with the app's unlock key in the sealed header (`app_key_seq`
@@ -15814,6 +15828,8 @@ bytes:
            "name": "<device name>", "device_attest": { },
            "api_key": "<b64 SPKI DER, P-256>" } }
 ```
+
+`app.name` exists only inside the sealed request, as in §11.3 (0.75.0).
 
 `app.api_key` (0.15.0) is REQUIRED: the new app's app key (§11.12),
 which the enclave binds to the queue message's `app_key` like
@@ -20371,6 +20387,24 @@ documented.
   time.
 - **Logging.** Keys, PINs, tokens, signatures, attestation tokens and
   plaintext MUST NOT appear in logs, metrics or errors.
+- **Device details** (0.75.0, owner decision 2026-10-29). A device's
+  name or model MAY be kept in the member's own vault: it is the
+  member's data. It MUST NOT reach a VettID server (member API, host
+  and parent, relay, push gateway, calls issuer and TURN, their logs)
+  or a service (member service, service vault) except sealed to the
+  enclave (`app.name` in §11.3 and §11.11.3, the `hs.init` profile) or
+  end to end between the member's own devices. A vault MUST NOT share
+  it with a service connection.
+  - **User-Agent.** Every HTTP request a VettID client makes itself
+    carries a fixed `User-Agent`: `VettID-Android`, `VettID-iOS`,
+    `VettID-Desktop` or `VettID-Agent`, with no version, model or OS
+    details, replacing the library default (`okhttp/x`,
+    `CFNetwork/x Darwin/y`). No other header carries device details,
+    and a VettID site MUST NOT send `Accept-CH` for them.
+  - **Out of scope** (owner decision): a browser the member uses to open
+    a VettID web page sends its own User-Agent, and CloudFront and WAF
+    logs keep it; Google and Apple add the model to the crash reports
+    and statistics their consoles show. Both are accepted.
 - **Process isolation.** Each unlocked vault MUST run in its own process,
   and the supervisor MUST NOT hold a vault's DEK, pepper or keys (§12.4).
   The channel between them MUST be parsed strictly and fuzzed.
