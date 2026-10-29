@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.76.0
+version: 0.77.0
 date: 2026-10-29
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -27,6 +27,20 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.77.0: owner decision 2026-10-29 (vettid-vault #165, found by the
+    iOS agent). §6.8 "Every grant, end and decision": what the vault
+    audits and tells the owner's other devices, spelled out. A denied
+    session request is audited as the new kind `device.session.denied`
+    (`device_id`, `ref` = `request_id`) and sends `sync.event{kind:
+    "device.session", device_id}`. At an end, each held request answered
+    `denied` is audited `approval.denied` and sends `sync.event{kind:
+    "approval.decided", approval_id, approved: false}`, and
+    `device.session` is sent when the device had a session or a pending
+    request was dropped. Before, a vault sent neither event and left the
+    deny unaudited, so other apps showed the ask until their next
+    `pending.list` read. Vault: a later staging release. Apps: a
+    History label for the new kind ("Session request from <device>
+    denied")
   - 0.76.0: owner decision 2026-10-29 (from the review of vettid-android
     #221). §10.8 "Showing received text": the one cleaning step both
     apps apply to names, written down and widened to every string from
@@ -5987,7 +6001,21 @@ device (`limit` beyond that):
 the device knows `expires_at`.
 
 Every grant, end and decision is audited (§10.9), and the owner's other
-devices learn of it as `sync.event` (§10.1).
+devices learn of it as `sync.event` (§10.1) (0.77.0, spelled out):
+
+- **Grant:** `device.session.granted`; `sync.event{kind:
+  "device.session", device_id, expires_at}`.
+- **Deny of a session request:** `device.session.denied` (`device_id`,
+  `ref` = `request_id`); `sync.event{kind: "device.session",
+  device_id}`.
+- **Decision on a held request:** `approval.granted` or
+  `approval.denied`; `sync.event{kind: "approval.decided", approval_id,
+  approved}`.
+- **End:** `device.session.ended`. Each held request answered `denied`
+  is also audited `approval.denied` and sends `sync.event{kind:
+  "approval.decided", approval_id, approved: false}`. `sync.event{kind:
+  "device.session", device_id}` is sent when the device had a session or
+  its pending request was dropped.
 
 **While the vault is held** (§3.6.3), access sessions are suspended: a
 desktop or agent may send only `vault.status`, `device.session.end{}`
@@ -9298,8 +9326,9 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `connection.authenticate.requested`, `connection.authenticate.signed`,
   `connection.authenticate.denied`, `connection.authenticated`,
   `connection.authenticate_failed` (`ref` = `request_id`);
-  `device.session.granted`, `device.session.ended`, `approval.granted`,
-  `approval.denied` (`ref` = `approval_id`) (§6.8);
+  `device.session.granted`, `device.session.ended`,
+  `device.session.denied` (`device_id`, `ref` = `request_id`; 0.77.0),
+  `approval.granted`, `approval.denied` (`ref` = `approval_id`) (§6.8);
   `connection.authenticate.key_rotated`,
   `connection.authenticate.rotation_rejected` (§10.4);
   `connection.asks_paused`, `connection.asks_resumed`,

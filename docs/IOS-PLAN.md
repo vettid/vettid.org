@@ -442,7 +442,7 @@ changelog:
 owner: Al Liebl (Mesmer)
 related:
   - ANDROID-PLAN.md (0.1.97) — the Android app; this plan mirrors it
-  - VAULT-MESSAGING.md (0.76.0) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.77.0) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
   - RELAY-PROTOCOL.md (0.9.4), MEMBER-API.md (2.7.1)
