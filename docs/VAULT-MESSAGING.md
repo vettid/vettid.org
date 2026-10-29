@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.77.0
+version: 0.78.0
 date: 2026-10-29
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -27,6 +27,13 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.78.0: owner decision 2026-10-29 (texts approved). §6.8 step 3: on
+    a renewal request (the device has a live session), an app tells the
+    member that a deny keeps the current access until its `expires_at`,
+    and offers "Deny and end access now" (`device.session.deny`, then
+    `device.session.end{device_id}` after the app's end-access
+    confirmation). Before, a member who denied a renewal could believe
+    the device was cut off. Apps only; no vault change
   - 0.77.0: owner decision 2026-10-29 (vettid-vault #165, found by the
     iOS agent). §6.8 "Every grant, end and decision": what the vault
     audits and tells the owner's other devices, spelled out. A denied
@@ -5922,7 +5929,16 @@ its end does not end the E2E session or the pairing.) Apps need none.
    `device.session.ended{reason: "denied"}`. A device whose renewal is
    denied keeps its current session until its `expires_at` (0.77.0,
    owner decision 2026-10-29); `device.session.ended{reason: "denied"}`
-   then means only that the request was refused.
+   then means only that the request was refused. (0.78.0, owner
+   decision 2026-10-29, texts approved.) On a renewal request (the
+   device has a live session), an app shows above its choices
+   "Denying refuses only the extra time. <device> keeps its current
+   access until <expires_at, local time>." and offers three choices:
+   **Approve**, **Deny** and **Deny and end access now**. The third
+   asks the app's end-access confirmation ("End access for
+   <device>?"), then sends `device.session.deny{request_id}` and
+   `device.session.end{device_id}`; if the end fails, the app says so
+   plainly and offers it again, as its end-access action does.
 
 `device.pair.approve` MAY carry `session_seconds` to grant the first access
 session together with the pairing (§10.3). A grant replaces the device's
