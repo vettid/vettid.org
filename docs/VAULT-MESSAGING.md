@@ -29,15 +29,18 @@ related:
 changelog:
   - 0.75.0: owner decision 2026-10-29. §13.6 "Device details": a
     device's name or model may be kept in the member's own vault, but
-    no VettID server (member API, host and parent, relay, push gateway,
-    calls issuer and TURN, logs) and no service (member service,
-    service vault) receives it. It travels only sealed to the enclave
-    or end to end between the member's devices. VettID's own clients send a fixed
+    no VettID server (member API, host and parent, relay, push
+    gateway, calls issuer and TURN, their logs) and no service receives
+    it; it travels only sealed to the member's vault or end to end
+    between the member's devices. VettID clients send a fixed
     User-Agent (`VettID-Android`, `VettID-iOS`, `VettID-Desktop`,
-    `VettID-Agent`) with no version, model or OS details. Out of scope by owner
-    decision: browsers opening VettID web pages, and Google or Apple
-    crash reports and statistics. §11.3 and §11.11.3: a pointer from
-    `app.name`. No vault change; the apps set the header (Android, iOS)
+    `VettID-Agent`) with nothing appended, and VettID sites send no
+    `Accept-CH` for device details. Out of scope by owner decision:
+    browsers opening VettID web pages, and the crash reports and
+    statistics Google and Apple collect. §2.2: servers learn the
+    client kind from the User-Agent. §11.3 and §11.11.3: a pointer
+    from `app.name`. No vault change; the clients set the header
+    (Android, iOS; desktop and agent when built)
   - 0.74.0: owner decision 2026-10-29 (from the review of vettid-vault
     #162). §6.6 "Crossing reconnects": between two persons (neither
     connection a service) the reconnect whose `hs.init` has the lower
@@ -2537,9 +2540,9 @@ the relay at vettid.org allows:
 
 | Party | Learns | Does not learn |
 |---|---|---|
-| Relay | Mailbox ids, depositor relay keys, timing, padded sizes, blob and claim sizes | Message types, content, or which identity, device or connection a relay key belongs to |
+| Relay | Mailbox ids, depositor relay keys, timing, padded sizes, blob and claim sizes; the client kind (Android, iOS, desktop, agent) from the fixed User-Agent (§13.6) | Message types, content, or which identity, device or connection a relay key belongs to |
 | Parent / host | **Per instance:** relay host names; TLS byte counts and timing (connections are shared by all vaults, §12.2); how many connections there are (1 to 16 per host, up to 32 for 30 s at most once in 5 minutes, §12.2.1) and the HTTP/2 pings on quiet ones; the enclave's own counts of relay requests for the whole instance, no finer than once a second (in flight, waiting, failed, connections, vault processes at their own limit; §12.2.1), nothing per vault. **Per vault, by `vault_id`, in the clear** (0.27.4; it always did, VAULT-HOST-PROTOCOL §11.2): `vault_id` ↔ instance; the member's `user_guid`; every alternate-channel operation and when (enroll, unlock, lock, delete, recovery and its cancel and register, `account`); the **account snapshot** in enroll, unlock and `account` messages (the member's email address, first and last name, membership, terms and subscription state, §11.13); the app key's public key and a recovery's browser key; the lifecycle events of §11.5, among them name-change requests with both names and the backup bit; and **the key, the size and the time of every read and write of the vault's stored state and header** (below) | Relay requests (TLS terminates in the enclave, §12.2), mailbox ids, which peers a vault talks to, PINs, keys other than the public keys named here, vault contents |
-| Member API | Which member enrolled, unlocked or locked, and when; `vault_id`, instance lease, `vault_version`, `state_version` (§11.5); the public key of the vault's app key and when it changes, so when a transfer or recovery completed (0.15.0, §11.12); whether the vault keeps a backup copy of its credential (`credential_backup`, one bit, 0.16.0, §11.5), so whether it can be recovered; the member's name change requests (`account_name`, 0.18.0, §11.5), whose names it holds anyway | PINs; why an unlock failed (§11.4); mailbox ids; keys other than app public keys; any stable device identifier (§11.7) |
+| Member API | The client kind from the fixed User-Agent (§13.6); which member enrolled, unlocked or locked, and when; `vault_id`, instance lease, `vault_version`, `state_version` (§11.5); the public key of the vault's app key and when it changes, so when a transfer or recovery completed (0.15.0, §11.12); whether the vault keeps a backup copy of its credential (`credential_backup`, one bit, 0.16.0, §11.5), so whether it can be recovered; the member's name change requests (`account_name`, 0.18.0, §11.5), whose names it holds anyway | PINs; why an unlock failed (§11.4); mailbox ids; keys other than app public keys; any stable device identifier (§11.7) |
 | Network | Endpoints and timing | Everything else |
 
 The owner check (§3.6) adds nothing to this table. The hold is not
@@ -20388,26 +20391,41 @@ documented.
 - **Logging.** Keys, PINs, tokens, signatures, attestation tokens and
   plaintext MUST NOT appear in logs, metrics or errors.
 - **Device details** (0.75.0, owner decision 2026-10-29). A device's
-  name or model MAY be kept in the member's own vault: it is the
-  member's data. It MUST NOT reach a VettID server (member API, host
-  and parent, relay, push gateway, calls issuer and TURN, their logs)
-  or a service (member service, service vault) except sealed to the
-  enclave (`app.name` in §11.3 and §11.11.3, the `hs.init` profile) or
-  end to end between the member's own devices. A vault MUST NOT share
-  it with a service connection.
-  - **User-Agent.** Every HTTP request a VettID client makes itself
-    carries a fixed `User-Agent`: `VettID-Android`, `VettID-iOS`,
-    `VettID-Desktop` or `VettID-Agent`, with no version, model or OS
-    details, replacing the library default (`okhttp/x`,
-    `CFNetwork/x Darwin/y`). No other header carries device details,
-    and a VettID site MUST NOT send `Accept-CH` for them.
+  name or model (`app.name` in §11.3 and §11.11.3, a device's `profile`
+  in its pairing `hs.init`, §6.7, and the `name` and `profile` of
+  `device.list`) MAY be kept in the member's own vault: it is the
+  member's data. It travels only sealed to the member's own vault (those
+  requests and handshakes) or end to end between the member's own
+  devices. It MUST NOT reach any VettID server (for example the member
+  API, the host and parent, the relay, the push gateway, the calls
+  issuer and TURN, or their logs) or any service. A vault MUST NOT send
+  a device's name or model from its device records to a service
+  connection (a service vault, VettID's Member Service among them);
+  what the member writes in a message or an item is not a device record.
+  - **User-Agent.** Every HTTP request that a VettID client's own code
+    sends, to a VettID server or any other host, carries a fixed
+    `User-Agent` that is exactly one of `VettID-Android`, `VettID-iOS`,
+    `VettID-Desktop` or `VettID-Agent`, with nothing appended (no app or
+    OS version, model or build), replacing the library default
+    (`okhttp/x`, `CFNetwork/x Darwin/y`). This includes WebSocket
+    upgrades and long-polls to the relay, blob uploads and downloads,
+    the member API, the calls issuer and the wallet's chain source. No
+    other header the client sets carries device details. A client MUST
+    NOT reach a VettID server through a component that adds the model
+    and whose header it cannot set (a WebView with its default
+    User-Agent, Android's DownloadManager). Not covered: requests made
+    by the platform or its push SDK (Play services and the Firebase
+    Messaging SDK for Google push, §14; APNs registration), and pages
+    the member opens in a browser, a Custom Tab or
+    SFSafariViewController (below). A VettID site MUST NOT ask for
+    device details with `Accept-CH` or `Critical-CH` (as a header or
+    a `<meta http-equiv>`).
   - **Out of scope** (owner decision): a browser the member uses to open
     a VettID web page sends its own User-Agent, and CloudFront and WAF
     logs keep it; Google and Apple add the model to the crash reports
-    and statistics their consoles show. Both are accepted.
-- **Process isolation.** Each unlocked vault MUST run in its own process,
-  and the supervisor MUST NOT hold a vault's DEK, pepper or keys (§12.4).
-  The channel between them MUST be parsed strictly and fuzzed.
+    and statistics the platforms collect themselves (Play Console,
+    App Store Connect). Both are accepted. An in-app crash or analytics
+    SDK is not covered by this exception.
 
 ### 13.7 A vault reports only to its owner
 
