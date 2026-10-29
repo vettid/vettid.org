@@ -4091,9 +4091,9 @@ library sits behind `:core:chain`, and no bitcoin-kmp type leaves the
 module, so BDK can replace it. **W1** (vettid-android #223) proves it:
 the app-side inspector and builder agree with the vault's own
 `wallet.psbt.inspect` and `BuildPSBT` on 135 vectors generated from the
-vault's code, byte for byte, with 5 declared differences where the app
-is stricter than the vault's parser or does not copy one of its
-quirks. The artifacts and the four native libraries are pinned by
+vault's code (summaries and built PSBTs byte for byte, refusals with
+the same reason), with 5 declared differences where the app is
+stricter than the vault's parser or does not copy one of its quirks. The artifacts and the four native libraries are pinned by
 SHA-256, and the wallet stays out of production builds until it is
 promoted.
 
@@ -4279,7 +4279,8 @@ on entering the hold or the due state, at a wipe and with the process
 (the rule "nothing kept outside an open vault", §4 Notifications, 10);
 an account key reveals every address and payment of the wallet. With
 bitcoin-kmp, the wallet is held in memory only (the library has no
-persistence of its own), so each open looks the wallet up again. On disk, in the app's encrypted settings:
+persistence of its own), so each open looks the wallet up again. On
+disk, in the app's encrypted settings:
 the chain server per network, the testnet4 label (option (a)) and the
 backed-up flag per `wallet_id`. Nothing from a wallet goes to logs or
 crash reports (ids at debug level only).
@@ -6159,7 +6160,7 @@ one (translation-ready), accessibility labels required in review.
 | `:core:data` | Repositories per feature, in memory (0.1.91: no Room caches) |
 | `:core:notify` | 0.1.23: the notification modes: the on-phone service (`VaultConnectionService`), channels, the Mapping and Content rules, the `PushProvider` interface; `:core:push-fcm` the FCM provider (the only module with Firebase; 0.1.34: in the `full` distribution only, `foss` binds a provider that reports "not in this build") |
 | `:core:ui` | Theme (navy + gold, light/dark), components (top bar, drawer, list row, empty state, pill bar, settings cards, sheets) |
-| `:core:chain` | (0.1.42) The wallet's chain source: the Esplora client, the per-network server setting and its genesis check, the Bitcoin library chosen in W0 (descriptors, PSBT building, coin selection); no Google code (§4 "Wallet, presence, location and video") |
+| `:core:chain` | (0.1.42) The wallet's chain source: the Esplora client, the per-network server setting and its genesis check, the Bitcoin library (bitcoin-kmp, question 19) and the app's own PSBT builder, inspector and coin selection; no Google code (§4 "Wallet, presence, location and video") |
 | `:core:location` | (0.1.42) Positions from the platform's `LocationManager` (no Play services), the `location` foreground service and its ongoing notification, the share timers; no storage of positions |
 | `:feature:*` | onboarding, messages, connections, approvals, items (the "Vault" screens), credential, settings, history (0.1.11), notifications (0.1.23, the feed); 0.1.42: wallet, location (presence lives in connections and settings) |
 | `:app` | Navigation (type-safe routes), DI wiring, notifications |
