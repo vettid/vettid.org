@@ -43,6 +43,12 @@ export interface AppConfig {
    * one.
    */
   readonly push: { readonly gateways: readonly PushGatewayConfig[] };
+  /**
+   * The calling service (CALLING-SERVICE §8; CALLS-PLAN §13), staging app
+   * only: set when context `callsStages` names the stage. Undefined: no
+   * calling-service stack exists.
+   */
+  readonly calls: CallsConfig | undefined;
   readonly adminAccess: {
     /**
      * Headscale control server the AWS exit node joins (tailscale
@@ -326,6 +332,78 @@ function loadPush(node: Node, stage: string): PushGatewayConfig[] {
 }
 
 /**
+ * What stands behind the issuer's front (`calls.<stage>.vettid.org`):
+ *  - `stub`: a fixed-answer function for the handshake test (CALLS-PLAN
+ *    §13.3 step 2). Context `callsIssuerStub=true`. It holds no secret, no
+ *    key and no attestation code, and refuses to coexist with the real one.
+ *  - `archive`: the issuer's function archive from vettid-calls, pinned by
+ *    SHA-256 (CALLING-SERVICE §8.2). Context `stagingCallsIssuer`
+ *    (`<release URL>@sha256:<64 hex>`) and `stagingCallsIssuerFile` (the
+ *    downloaded archive's local path; the synth fails unless its SHA-256
+ *    is the pinned one).
+ *  - `none`: the front is not built (nothing to put behind it).
+ */
+export type CallsIssuer =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'stub' }
+  | { readonly kind: 'archive'; readonly url: string; readonly sha256: string; readonly file: string };
+
+/** The calling service of a non-prod stage (CALLING-SERVICE §8). */
+export interface CallsConfig {
+  /** The issuer's name (`calls.<stage>.vettid.org`); the vault's `calls_url` host (steps 5 and 6). */
+  readonly host: string;
+  /** The TURN server's name (`turn.<stage>.vettid.org`), put into the credentials' URLs. */
+  readonly turnHost: string;
+  readonly issuer: CallsIssuer;
+}
+
+/**
+ * The calling service from context (the staging app only; the prod app
+ * ignores these keys, which cdk.json will carry for both):
+ *
+ *   -c callsStages=staging -c callsIssuerStub=true          (the handshake test)
+ *   -c callsStages=staging -c stagingCallsIssuer=<url>@sha256:<hex> -c stagingCallsIssuerFile=<path>
+ *
+ * There is no production calling service (CALLS-PLAN D25: production's DNS
+ * Firewall does not admit its name, and production has no `calls_url`), so
+ * `callsStages` naming `prod` fails the synth; so does a calls setting
+ * without `callsStages` naming the stage, so a typo never silently builds
+ * nothing.
+ */
+function loadCalls(node: Node, stage: string, zoneName: string): CallsConfig | undefined {
+  const listed = csv(node.tryGetContext('callsStages'));
+  for (const c of listed) {
+    if (c === PROD_STAGE) throw new Error('context callsStages: there is no production calling service (CALLS-PLAN D25)');
+    if (c !== 'staging') throw new Error(`context callsStages: expected "staging", got ${JSON.stringify(c)}`);
+  }
+  if (stage !== 'staging') return undefined;
+  const stub = node.tryGetContext('callsIssuerStub');
+  const stubOn = stub === true || stub === 'true';
+  if (stub !== undefined && !stubOn && stub !== false && stub !== 'false') {
+    throw new Error(`context callsIssuerStub: expected true or false, got ${JSON.stringify(stub)}`);
+  }
+  const archive = String(node.tryGetContext('stagingCallsIssuer') ?? '');
+  const file = String(node.tryGetContext('stagingCallsIssuerFile') ?? '');
+  if (!listed.includes(stage)) {
+    for (const [k, v] of [['callsIssuerStub', stubOn ? 'true' : ''], ['stagingCallsIssuer', archive], ['stagingCallsIssuerFile', file]]) {
+      if (v) throw new Error(`context ${k} is set but callsStages does not name "${stage}"`);
+    }
+    return undefined;
+  }
+  let issuer: CallsIssuer = { kind: 'none' };
+  if (stubOn) {
+    if (archive || file) throw new Error('context callsIssuerStub with stagingCallsIssuer: the stub never runs beside the real issuer (CALLS-PLAN §13.3)');
+    issuer = { kind: 'stub' };
+  } else if (archive || file) {
+    const m = /^(https:\/\/[^\s@#]+)@sha256:([0-9a-f]{64})$/.exec(archive);
+    if (!m) throw new Error(`context stagingCallsIssuer: expected <https URL>@sha256:<64 hex>, got ${JSON.stringify(archive)}`);
+    if (!file) throw new Error('context stagingCallsIssuerFile: the downloaded archive is needed with stagingCallsIssuer');
+    issuer = { kind: 'archive', url: m[1], sha256: m[2], file };
+  }
+  return { host: `calls.${zoneName}`, turnHost: `turn.${zoneName}`, issuer };
+}
+
+/**
  * A channel's vault configuration and stage, for tools outside the CDK app
  * (scripts/vault/*): the channel `prod` is stage `prod`, `staging` is stage
  * `staging`.
@@ -559,6 +637,7 @@ export function loadConfig(node: Node): AppConfig {
       image: String(node.tryGetContext('relayImage') ?? ''),
     },
     push: { gateways: loadPush(node, stage) },
+    calls: loadCalls(node, stage, zoneName),
     adminAccess: {
       headscaleLoginServer: String(node.tryGetContext('headscaleLoginServer') ?? ''),
     },
