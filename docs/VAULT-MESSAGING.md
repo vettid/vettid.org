@@ -20426,6 +20426,9 @@ documented.
     and statistics the platforms collect themselves (Play Console,
     App Store Connect). Both are accepted. An in-app crash or analytics
     SDK is not covered by this exception.
+- **Process isolation.** Each unlocked vault MUST run in its own process,
+  and the supervisor MUST NOT hold a vault's DEK, pepper or keys (§12.4).
+  The channel between them MUST be parsed strictly and fuzzed.
 
 ### 13.7 A vault reports only to its owner
 
