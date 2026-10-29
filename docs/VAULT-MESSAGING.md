@@ -32,13 +32,19 @@ changelog:
     audits and tells the owner's other devices, spelled out. A denied
     session request is audited as the new kind `device.session.denied`
     (`device_id`, `ref` = `request_id`) and sends `sync.event{kind:
-    "device.session", device_id}`. At an end, each held request answered
-    `denied` is audited `approval.denied` and sends `sync.event{kind:
-    "approval.decided", approval_id, approved: false}`, and
-    `device.session` is sent when the device had a session or a pending
-    request was dropped. Before, a vault sent neither event and left the
-    deny unaudited, so other apps showed the ask until their next
-    `pending.list` read. Vault: a later staging release. Apps: a
+    "device.session", device_id, expires_at?}`; a deny of a renewal
+    keeps the current session and its `expires_at`. At an end, each held
+    request answered `denied` is audited `approval.denied` and sends
+    `approval.decided{approved: false}`, and `device.session` is sent
+    when the device had a session or a pending request was dropped;
+    unlinking sends the same. A grant at pairing (`session_seconds`) is
+    audited and sent like any grant. Expiry and the hold's answers are
+    neither audited nor sent (stated). §10.1: `device.session` without
+    `expires_at` means no session. §10.9: the `ref` of each §6.8 kind.
+    Before, a deny sent no event and was not audited, and an end sent no
+    `approval.decided` and no `device.session` for a device with only a
+    pending request, so other apps showed the ask until their next
+    `pending.list` read. Vault: a staging release after 24. Apps: a
     History label for the new kind ("Session request from <device>
     denied")
   - 0.76.0: owner decision 2026-10-29 (from the review of vettid-android
@@ -6003,19 +6009,32 @@ the device knows `expires_at`.
 Every grant, end and decision is audited (§10.9), and the owner's other
 devices learn of it as `sync.event` (§10.1) (0.77.0, spelled out):
 
-- **Grant:** `device.session.granted`; `sync.event{kind:
-  "device.session", device_id, expires_at}`.
+- **Grant** (`device.session.approve`, and `device.pair.approve` with
+  `session_seconds`, §10.3): `device.session.granted`;
+  `sync.event{kind: "device.session", device_id, expires_at}`.
 - **Deny of a session request:** `device.session.denied` (`device_id`,
-  `ref` = `request_id`); `sync.event{kind: "device.session",
-  device_id}`.
+  `ref` = `request_id`); `sync.event{kind: "device.session", device_id,
+  expires_at?}`, with the `expires_at` of the device's current session,
+  absent when it has none. A deny does not end a current session.
 - **Decision on a held request:** `approval.granted` or
   `approval.denied`; `sync.event{kind: "approval.decided", approval_id,
   approved}`.
-- **End:** `device.session.ended`. Each held request answered `denied`
-  is also audited `approval.denied` and sends `sync.event{kind:
-  "approval.decided", approval_id, approved: false}`. `sync.event{kind:
-  "device.session", device_id}` is sent when the device had a session or
-  its pending request was dropped.
+- **End** (`device.session.end`): `device.session.ended` (`device_id`).
+  Each held request answered `denied` is also audited `approval.denied`
+  and sends `sync.event{kind: "approval.decided", approval_id, approved:
+  false}`. `sync.event{kind: "device.session", device_id}` is sent when
+  the device had a session or its pending request was dropped. The app
+  that ended it gets none of these (§10.1) and drops that device's asks
+  itself. **Unlinking** (§7.4) sends the same events and `approval.denied`
+  records, and is audited `device.unlinked` instead of
+  `device.session.ended`.
+
+Expiry is neither audited nor sent: a session ends at its `expires_at`,
+a pending request is dropped and a held request answered
+`approval_timeout` at its `exp`, all known to every device that saw
+them, and an app drops the ask then. Requests answered
+`owner_check_required` when a hold begins (below) are not sent either;
+apps re-read `pending.list` after the check (§10.4.2).
 
 **While the vault is held** (§3.6.3), access sessions are suspended: a
 desktop or agent may send only `vault.status`, `device.session.end{}`
@@ -6801,7 +6820,7 @@ an answer to an unknown or expired id is dropped.
   | `connection.request` | `pending_id` (incoming) or `connection_id` (outgoing), `state` (`approved`, `peer_approved`, `declined`, `peer_declined`, `expired`) (§6.4); `peer_approved`: the peer's `connection.approved` arrived (0.10.3); `declined`: the member declined; `peer_declined`: the peer's `connection.declined` arrived and ended the request (0.10.5) |
   | `block.added`, `block.removed` | `block_id` (§10.4) |
   | `connection.authenticate.decided` | `request_id`, `approved` (§10.4) |
-  | `device.session` | `device_id`, `expires_at` (absent when the session ended) (§6.8) |
+  | `device.session` | `device_id`, `expires_at` (absent when the device has no session) (§6.8) |
   | `approval.decided` | `approval_id`, `approved` (§6.8) |
   | `leash.grant.changed` | `grant_id`, `agent_id`, `version` (§10.11) |
   | `leash.grant.revoked` | `grant_id`, `agent_id` (§10.11) |
@@ -9326,9 +9345,11 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `connection.authenticate.requested`, `connection.authenticate.signed`,
   `connection.authenticate.denied`, `connection.authenticated`,
   `connection.authenticate_failed` (`ref` = `request_id`);
-  `device.session.granted`, `device.session.ended`,
-  `device.session.denied` (`device_id`, `ref` = `request_id`; 0.77.0),
-  `approval.granted`, `approval.denied` (`ref` = `approval_id`) (§6.8);
+  `device.session.granted` (`device_id`, `ref` = `session_id`),
+  `device.session.ended` (`device_id`), `device.session.denied`
+  (`device_id`, `ref` = `request_id`; 0.77.0), `approval.granted`,
+  `approval.denied` (`device_id` = the requester, `ref` =
+  `approval_id`) (§6.8);
   `connection.authenticate.key_rotated`,
   `connection.authenticate.rotation_rejected` (§10.4);
   `connection.asks_paused`, `connection.asks_resumed`,
