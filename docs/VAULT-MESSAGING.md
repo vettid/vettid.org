@@ -33,7 +33,9 @@ changelog:
     session request is audited as the new kind `device.session.denied`
     (`device_id`, `ref` = `request_id`) and sends `sync.event{kind:
     "device.session", device_id, expires_at?}`; a deny of a renewal
-    keeps the current session and its `expires_at`. At an end, each held
+    keeps the current session and its `expires_at` (the device is still
+    told `device.session.ended{reason: "denied"}`, which then refuses
+    only the request). At an end, each held
     request answered `denied` is audited `approval.denied` and sends
     `approval.decided{approved: false}`, and `device.session` is sent
     when the device had a session or a pending request was dropped;
@@ -5917,7 +5919,10 @@ its end does not end the E2E session or the pairing.) Apps need none.
 3. An app answers `device.session.approve{request_id, seconds?}` (the app
    may change the length) or `device.session.deny`. The device is told
    with `device.session.granted{session_id, expires_at}` or
-   `device.session.ended{reason: "denied"}`.
+   `device.session.ended{reason: "denied"}`. A device whose renewal is
+   denied keeps its current session until its `expires_at` (0.77.0,
+   owner decision 2026-10-29); `device.session.ended{reason: "denied"}`
+   then means only that the request was refused.
 
 `device.pair.approve` MAY carry `session_seconds` to grant the first access
 session together with the pairing (§10.3). A grant replaces the device's
