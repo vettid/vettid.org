@@ -6024,8 +6024,8 @@ devices learn of it as `sync.event` (§10.1) (0.77.0, spelled out):
   and sends `sync.event{kind: "approval.decided", approval_id, approved:
   false}`. `sync.event{kind: "device.session", device_id}` is sent when
   the device had a session or its pending request was dropped. The app
-  that ended it gets none of these (§10.1) and drops that device's asks
-  itself. **Unlinking** (§7.4) sends the same events and `approval.denied`
+  that ended or unlinked it gets none of these (§10.1) and drops that
+  device's asks itself. **Unlinking** (§7.4) sends the same events and `approval.denied`
   records, and is audited `device.unlinked` instead of
   `device.session.ended`.
 
