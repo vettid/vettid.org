@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.73.2
+version: 0.74.0
 date: 2026-10-28
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -27,6 +27,14 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.74.0: owner decision 2026-10-29 (from the review of vettid-vault
+    #162). §6.6 "Crossing reconnects": between two persons (neither
+    connection a service) the reconnect whose `hs.init` has the lower
+    `th1` wins, as crossing rekeys do (§6.5); each side completes at
+    most one of the two, and both end on the winner's epoch. Before,
+    the rule covered a service connection only, and two persons who
+    reconnected at once could end on different epochs. Vault: staging
+    release 24 (with 0.72.x)
   - 0.73.2: owner decision 2026-10-28. §3.6.5: after a check with no
     answer the estimate is the fewest tries that may remain, so the app
     shows it as "at least", not "up to" (which read as a most).
@@ -5418,6 +5426,31 @@ at most one of the two:
 Both sides end on the same epoch: the member's when the service saw the
 member's `hs.init` first, the service's otherwise. So the next rekey is
 not refused (`rekey_not_current_epoch`).
+
+**Between two persons** (0.74.0, owner decision 2026-10-29). When neither
+side of the connection is a service, both vaults may have a reconnect
+open at once (for example both unlocking with expired standing tokens).
+As for crossing rekeys (§6.5), **the `hs.init` with the lower `th1` wins**
+(compared as big-endian byte strings), and each side completes at most
+one of the two:
+- Each side answers the peer's reconnect `hs.init` as usual while its own
+  is open, and compares the two `th1`.
+- The side whose own `hs.init` has the **higher** `th1` abandons its own:
+  it sends no `hs.fin` for it, drops a later `hs.resp` to it (audited),
+  revokes the tokens its `hs.init` carried, and establishes the peer's
+  reconnect at the peer's `hs.fin`.
+- The side whose own `hs.init` has the **lower** `th1` completes its own
+  at the peer's `hs.resp`, drops its pending answer to the peer's
+  `hs.init`, revokes the tokens in that `hs.resp`, and acks and drops a
+  later `hs.fin` for it. That `hs.fin` is not evidence for fork
+  detection.
+- A reconnect already completed (`hs.fin` sent or verified) before the
+  other `hs.init` is seen stands; a later `hs.init` that names the
+  superseded epoch is refused as before (`reconnect_refused`), and its
+  sender establishes the completed epoch from the peer's `hs.fin`.
+
+Both sides end on the winner's epoch, whatever order the four messages
+arrive in.
 
 **Responder `rotations`** (0.72.0). The responder's `rotations` are its
 own rotation statements since the epoch `ctx` names (the own chain count
