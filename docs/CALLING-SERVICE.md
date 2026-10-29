@@ -1,8 +1,8 @@
 ---
 title: CALLING-SERVICE
 status: approved by the owner 2026-10-12 (D12–D26 of CALLS-PLAN §13.5; D23 as (c))
-version: 0.2.2
-date: 2026-10-23
+version: 0.2.3
+date: 2026-10-29
 owner: Al Liebl (Mesmer)
 component: calling-service (optional, media plane only): a STUN/TURN server and a credential issuer
 related:
@@ -52,6 +52,9 @@ changelog:
     point 2: the media stack can do suite 2 (AES-256-GCM) since
     150.7871.04, confirmed on two phones; it is offered only once
     form 1 is retired (VAULT-MESSAGING 0.55.8, §10.10 "Mixed releases")
+  - 0.2.3 (2026-10-29): editorial, from the review of vettid.org #454.
+    §8.2 records the decision that the issuer's function URL is not
+    IAM-authenticated, and that the front is TLS 1.3 only
 classification: public (no secrets; safe for github.com/vettid)
 review-cycle: 6 months or upon WebRTC PQC / AWS milestone, whichever first
 ---
@@ -469,6 +472,20 @@ registry, Secrets Manager, CloudWatch, Systems Manager).
   enclave's TLS 1.3 and HTTP/2 requirement was not established, so it
   is not relied on. **The first implementation step is a handshake from
   a development enclave against the deployed name** (§13);
+- **The function URL is open (auth type NONE); decided 2026-10-29.**
+  CloudFront's origin access control signs requests with SigV4 and, for a
+  POST, needs the caller's `x-amz-content-sha256` (it cannot sign an
+  unsigned payload); a vault cannot supply that. The issuer authenticates
+  every request itself (the request signature, then the attestation), so
+  a request that reaches the function URL directly gets exactly what one
+  through the front gets. A secret header from CloudFront would not stop a
+  flood, which is the only thing an open URL adds. Reserved concurrency
+  (4) caps parallel runs, not volume, so the cost of a flood is bounded by
+  an alarm on invocations, not by the limit (§10), and the stub is removed
+  right after the handshake test;
+- the front's security policy is TLS 1.3 only (`TLSv1.3_2025`), as the
+  enclave's egress, so a handshake test cannot pass on a version the
+  enclave would refuse;
 - it costs nothing while idle and needs no load balancer (about $16 a
   month, as much as the server);
 - it is **a stated exception** to the repository's convention that
@@ -596,6 +613,7 @@ address, a username or a single request is kept anywhere.
 | `relay-capacity` | allocations at 80 % of the total, or any refusal for `quota_total` or `capacity`, for 10 minutes |
 | `turn-auth-failures` | more than a baseline in an hour; a public TURN server is probed constantly, so the baseline is set from the first week's numbers |
 | `issuer-errors` | any `internal`; more than 25 refused attestations in an hour |
+| `issuer-invocations` | more than 1,000 invocations of the issuer's function in 5 minutes (a flood costs money; also on the stub) |
 | `issuer-manifest` | manifest refresh failing for an hour |
 | the cost budget | this service's tagged cost forecast above $30 for the month |
 

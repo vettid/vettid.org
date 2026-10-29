@@ -25,6 +25,8 @@ export interface VettidOrgCallsStackProps extends cdk.StackProps {
 
 /** §8.2: "at most 4 at once"; the issuer's own limit (`CALLS_MAX_INFLIGHT`, §7.5) is the same number. */
 export const CALLS_ISSUER_CONCURRENCY = 4;
+/** The invocation alarm: a vault asks for credentials rarely (§5.4); 1,000 in 5 minutes is not a vault. */
+export const CALLS_INVOCATIONS_PER_5_MIN = 1000;
 /** §10: more refused attestations than this in an hour fire `issuer-errors`. */
 export const CALLS_ATTESTATION_REFUSALS_PER_HOUR = 25;
 
@@ -62,8 +64,8 @@ export const CALLS_STUB_CODE = `exports.handler = async (event) => {
  *
  *  - **The issuer's front**: a CloudFront distribution named
  *    `calls.<stage>.vettid.org` with an ACM certificate (validated in the
- *    stage's zone), HTTPS only, HTTP/2, TLS 1.2+ (CloudFront negotiates TLS
- *    1.3, which the enclave's egress requires), no cache, no access log,
+ *    stage's zone), HTTPS only, HTTP/2, TLS 1.3 only (TLSv1.3_2025, as
+ *    the enclave's egress), no cache, no access log,
  *    every viewer header but `Host` forwarded (the `X-VettID-*` headers).
  *    Port 443 only: it is what the enclave's egress allows.
  *  - **The origin**: a Lambda function (arm64, `provided.al2023`,
@@ -78,7 +80,8 @@ export const CALLS_STUB_CODE = `exports.handler = async (event) => {
  *    its concurrency is capped, so a direct call to the URL gets what a
  *    call through the front gets.
  *  - **DNS**: A and AAAA aliases in the stage's zone.
- *  - **Alarms** of the issuer (real issuer only; the stub emits no metric):
+ *  - **Alarms**: `issuer-invocations` (also for the stub: a flood costs
+ *    money), and of the real issuer only (the stub emits no metric):
  *    `issuer-errors`, `issuer-attestation-refusals`, `issuer-manifest`.
  *
  * Not yet here: the VPC, security group, Auto Scaling group and instance of
@@ -131,6 +134,10 @@ export class VettidOrgCallsStack extends cdk.Stack {
       environment = {
         CALLS_CHANNEL: config.stage,
         CALLS_TURN_HOST: calls.turnHost,
+        // Each function instance handles one request at a time, so this is
+        // never reached; the limit that acts is Lambda's reserved concurrency
+        // (4): a fifth request gets Lambda's own 429, without the issuer's
+        // JSON error body (RELAY-PROTOCOL §7.1).
         CALLS_MAX_INFLIGHT: String(CALLS_ISSUER_CONCURRENCY),
         CALLS_SECRETS: 'aws',
         CALLS_SECRET_ID: callsSecretName(config),
@@ -193,7 +200,7 @@ export class VettidOrgCallsStack extends cdk.Stack {
       domainNames: [calls.host],
       certificate,
       httpVersion: cloudfront.HttpVersion.HTTP2, // not HTTP/3: the enclave's egress is TCP, h2
-      minimumProtocolVersion: cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021, // TLS 1.3 is negotiated; SNI only
+      minimumProtocolVersion: cloudfront.SecurityPolicyProtocol.TLS_V1_3_2025, // TLS 1.3 only, as the enclave's egress; SNI only
       priceClass: cloudfront.PriceClass.PRICE_CLASS_100,
       enableIpv6: true,
       enableLogging: false, // §10: CloudFront's access log stays off for this name
@@ -211,10 +218,28 @@ export class VettidOrgCallsStack extends cdk.Stack {
     new route53.AaaaRecord(this, 'AliasAaaa', { zone, recordName: calls.host, target });
 
     // ---- Alarms (§10) → vettid-org-calls-alerts → admin@ ---------------------
+    const topicArn = `arn:${this.partition}:sns:${this.region}:${this.account}:${CALLS_ALERTS_TOPIC_NAME}`;
+    const action = { bind: () => ({ alarmActionArn: topicArn }) };
+
+    // Cost: reserved concurrency caps parallel runs, not request volume, and
+    // the function URL is open (the issuer authenticates each request
+    // itself), so a flood is paid for per invocation. This alarm is on the
+    // stub too. The tag is for the cost budget of §10 (step 4: the budget
+    // needs the tag activated as a cost allocation tag by the owner).
+    cdk.Tags.of(this).add('vettid-service', 'calls');
+    const invocations = new cloudwatch.Alarm(this, 'IssuerInvocations', {
+      alarmName: `${callsName(config)}-issuer-invocations`,
+      alarmDescription: `Calling service issuer: more than ${CALLS_INVOCATIONS_PER_5_MIN} invocations in 5 minutes (a flood; each costs money). Look at CloudFront's request count; consider destroying VettidOrgCallsStack (RUNBOOK "Calling service").`,
+      metric: fn.metricInvocations({ period: cdk.Duration.minutes(5), statistic: 'Sum' }),
+      threshold: CALLS_INVOCATIONS_PER_5_MIN,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      evaluationPeriods: 1,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    invocations.addAlarmAction(action);
+
     // The real issuer's metrics only (the stub emits none).
     if (issuer.kind === 'archive') {
-      const topicArn = `arn:${this.partition}:sns:${this.region}:${this.account}:${CALLS_ALERTS_TOPIC_NAME}`;
-      const action = { bind: () => ({ alarmActionArn: topicArn }) };
       const five = cdk.Duration.minutes(5);
       const quarter = cdk.Duration.minutes(15);
       const own = (metricName: string, dimensionsMap?: Record<string, string>, period = five) =>

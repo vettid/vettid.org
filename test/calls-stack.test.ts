@@ -59,12 +59,12 @@ describe('the stub (handshake test)', () => {
     for (const [name, json] of without) expect(JSON.stringify(t.get(name))).toBe(JSON.stringify(json));
   });
 
-  test('the front: CloudFront, HTTP/2, TLS 1.2+ (1.3 negotiated), https only, no access log, no cache', () => {
+  test('the front: CloudFront, HTTP/2, TLS 1.3 only, https only, no access log, no cache', () => {
     const [d] = of(front, 'AWS::CloudFront::Distribution');
     const c = d.Properties.DistributionConfig;
     expect(c.Aliases).toEqual(['calls.staging.vettid.org']);
     expect(c.HttpVersion).toBe('http2');
-    expect(c.ViewerCertificate.MinimumProtocolVersion).toBe('TLSv1.2_2021');
+    expect(c.ViewerCertificate.MinimumProtocolVersion).toBe('TLSv1.3_2025');
     expect(c.ViewerCertificate.SslSupportMethod).toBe('sni-only');
     expect(c.Logging).toBeUndefined();
     expect(c.DefaultCacheBehavior.ViewerProtocolPolicy).toBe('https-only');
@@ -82,7 +82,8 @@ describe('the stub (handshake test)', () => {
     expect(f.Properties.LoggingConfig).toMatchObject({ LogFormat: 'JSON', SystemLogLevel: 'WARN', LogGroup: '/vettid-org/staging/calls-issuer' });
     const doc = JSON.stringify(of(front, 'AWS::IAM::Policy'));
     expect(doc).not.toMatch(/secretsmanager|kms:|PutMetricData/);
-    expect(of(front, 'AWS::CloudWatch::Alarm')).toEqual([]);
+    expect(of(front, 'AWS::CloudWatch::Alarm').map((a) => a.Properties.AlarmName)).toEqual(['vettid-org-staging-calls-issuer-invocations']);
+    expect(of(front, 'AWS::CloudWatch::Alarm')[0].Properties).toMatchObject({ Threshold: 1000, Period: 300, MetricName: 'Invocations' });
     expect(front.Outputs.IssuerKind.Value).toBe('stub');
     expect(CALLS_STUB_CODE).not.toMatch(/event\.(body|headers)/);
   });
@@ -100,6 +101,8 @@ describe('the data stack', () => {
     expect(g.map((x) => x.Properties.LogGroupName).sort()).toEqual(['/vettid-org/staging/calls-issuer', '/vettid-org/staging/calls-server']);
     for (const x of g) expect([x.Properties.RetentionInDays, x.DeletionPolicy]).toEqual([14, 'RetainExceptOnCreate']);
     expect(of(data, 'AWS::SNS::Topic')[0].Properties.TopicName).toBe('vettid-org-calls-alerts');
+    // everything in the data stack is retained
+    for (const type of ['AWS::SNS::Topic', 'AWS::KMS::Key']) expect(of(data, type)[0].DeletionPolicy).toBe('Retain');
     expect(of(data, 'AWS::SSM::Parameter').map((p) => p.Properties.Name)).toEqual(['/vettid-org/staging/calls/key-arn']);
   });
   test('only the issuer, the server and the owner may decrypt; no CreateGrant', () => {
@@ -131,7 +134,7 @@ describe('the real issuer archive', () => {
     expect(doc).toContain('secret:vettid-org/staging/calls/turn-secret-??????');
     expect(doc).toContain('"cloudwatch:namespace":"vettid-org/staging/calls"');
     expect(of(svc, 'AWS::CloudWatch::Alarm').map((a) => a.Properties.AlarmName).sort()).toEqual([
-      'vettid-org-staging-calls-issuer-attestation-refusals', 'vettid-org-staging-calls-issuer-errors', 'vettid-org-staging-calls-issuer-manifest',
+      'vettid-org-staging-calls-issuer-attestation-refusals', 'vettid-org-staging-calls-issuer-errors', 'vettid-org-staging-calls-issuer-invocations', 'vettid-org-staging-calls-issuer-manifest',
     ]);
     expect(svc.Outputs.IssuerKind.Value).toBe('archive');
   });

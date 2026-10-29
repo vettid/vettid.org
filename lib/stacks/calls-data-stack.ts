@@ -133,6 +133,7 @@ export class VettidOrgCallsDataStack extends cdk.Stack {
     }
 
     const alerts = new sns.Topic(this, 'Alerts', { topicName: CALLS_ALERTS_TOPIC_NAME, displayName: 'VettID calling service alarms' });
+    alerts.applyRemovalPolicy(retain); // a deleted topic would silence every alarm that names it by ARN
     alerts.addSubscription(new subs.EmailSubscription(config.adminEmail));
 
     new cdk.CfnOutput(this, 'KeyArn', { value: key.keyArn });
