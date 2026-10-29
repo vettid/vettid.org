@@ -1,9 +1,32 @@
 {
-  "serial": 25,
+  "serial": 26,
   "releases": [
     {
-      "release": 23,
+      "release": 24,
       "status": "active",
+      "published_at": "2026-10-29T17:44:32Z",
+      "pcr0": "108dc95d6bc310e39c8cfcd18c20ad5fc40c252e6e562ddcd1752b29f1a701c2790f5727cf401e4ddab51dd2cef6ff1a",
+      "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
+      "pcr2": "2ba52568e3ba6cd3a14ea83b4ed267b3161091ac23a82b7ad953b6f1f3881b2be561eb68f4e349a651deaa84bf87833c",
+      "seal_key": "arn:aws:kms:us-east-1:347272280361:key/b0992eab-793b-4d06-abc9-a48458758a51",
+      "notes": "https://staging.vettid.org/security/releases/24/",
+      "tag": "release/staging/24",
+      "source_commit": "214b88f531e60cedc22614cd714a1babc27004b0",
+      "summary": "Release 24 makes reconnecting after a restore or a key change more reliable, and lets your phone list requests still waiting.",
+      "changes": [
+        "A connection that could not reconnect after the other side changed its keys now reconnects. Before, every retry was refused and the connection was lost for good.",
+        "Reconnecting after a restore, and two people reconnecting at the same moment, now end with one working connection. If a connection shows signs of being restored from an older copy, the vault pauses it and tells you.",
+        "If the new keys after a recovery could not be made, the vault now remembers that and tries again at your next unlock, instead of dropping it.",
+        "Your phone can now ask the vault for the sign-in, approval and other requests still waiting. They are kept through a lock, a hold or a restart.",
+        "Sign-in and approval requests now say what they are for, and the vault keeps the two kinds apart.",
+        "Built from vettid-vault commit 214b88f (tag release/staging/24) and independently rebuilt on 2026-10-29 with a matching PCR0."
+      ],
+      "security": "none",
+      "listed": true
+    },
+    {
+      "release": 23,
+      "status": "deprecated",
       "published_at": "2026-10-27T19:25:32Z",
       "pcr0": "ed22773fa50f0507e06db63baffd4c64802e9c3bcd946706b2935a610d1ddf1f80baa779f20bb07bad4c34bd915fc32e",
       "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
