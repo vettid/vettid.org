@@ -1,6 +1,6 @@
 {
   "channel": "staging",
-  "signed_serial": 25,
+  "signed_serial": 26,
   "releases": [
     {
       "release": 1,
@@ -849,7 +849,7 @@
     },
     {
       "release": 23,
-      "status": "active",
+      "status": "deprecated",
       "published_at": "2026-10-27T19:25:32Z",
       "pcr0": "ed22773fa50f0507e06db63baffd4c64802e9c3bcd946706b2935a610d1ddf1f80baa779f20bb07bad4c34bd915fc32e",
       "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
@@ -898,7 +898,8 @@
     },
     {
       "release": 24,
-      "status": "candidate",
+      "status": "active",
+      "published_at": "2026-10-29T17:44:32Z",
       "pcr0": "108dc95d6bc310e39c8cfcd18c20ad5fc40c252e6e562ddcd1752b29f1a701c2790f5727cf401e4ddab51dd2cef6ff1a",
       "pcr1": "33a04aad12d3f804c4adbad0a593f4702ea1f9e2bc30b66988a7eec331aa7f649b23ec557be1a23a1df2d5a64145d91b",
       "pcr2": "2ba52568e3ba6cd3a14ea83b4ed267b3161091ac23a82b7ad953b6f1f3881b2be561eb68f4e349a651deaa84bf87833c",
