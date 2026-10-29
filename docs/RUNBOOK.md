@@ -558,6 +558,139 @@ aws logs delete-log-group --log-group-name /vettid-org/prod/relay
 (Before this step a rollback to the SQLite relay can still restore from the
 replica; after it, it cannot.)
 
+## Calling service (calls.staging.vettid.org) - handshake test
+
+Docs: CALLING-SERVICE §8, CALLS-PLAN §13. **Staging app only**
+(`-c stage=staging --profile vault-staging`), two stacks, built only when
+context `callsStages=staging` names the stage. Nothing here is deployed
+without the owner's go. This section covers C2 step 2, the handshake test;
+the server stack, the secret and the checks of §11 are steps 4 and 5 and
+will extend it.
+
+| Stack | Holds |
+|---|---|
+| `VettidOrgCallsDataStack` (stateful) | the key `alias/vettid-org-calls`, the log groups `/vettid-org/staging/calls-issuer` and `calls-server` (14 days), the topic `vettid-org-calls-alerts`. No secret (the operator creates it, step 4), no address yet (step 4). |
+| `VettidOrgCallsStack` | the issuer's front: ACM certificate, CloudFront (HTTP/2, TLS 1.2+ so TLS 1.3 is negotiated, https only, no cache, no access log), the origin function (reserved concurrency 4) behind a function URL, the A/AAAA aliases. |
+
+| Context | Meaning |
+|---|---|
+| `callsStages` | `staging`. Without it the staging app has no calls stack. `prod` fails the synth (D25). |
+| `callsIssuerStub` | `true`: the origin is the **stub**, for the handshake test only. |
+| `stagingCallsIssuer`, `stagingCallsIssuerFile` | The real issuer: `<release URL>@sha256:<hex>` and the downloaded archive's path; the synth fails unless the file has that SHA-256. Never with the stub. |
+
+**The stub** answers `GET /v1/health` with `200 {}` and everything else with
+`403 attestation_invalid`, with header `x-vettid-calls-stub: 1`. It reads
+nothing from a request, holds no secret and no key (its role may only write
+its log stream), emits no metric and runs only when `callsIssuerStub=true`
+is on the deploy command (never in cdk.json). Before step 5 (the DNS Firewall
+entry) the real archive replaces it and `curl -sI https://calls.staging.vettid.org/v1/health`
+must show no `x-vettid-calls-stub` header; stack output `IssuerKind` says
+`stub` or `archive`.
+
+### Deploy for the test (on the owner's go)
+
+```bash
+npx cdk diff   VettidOrgCallsDataStack VettidOrgCallsStack -c stage=staging -c callsStages=staging -c callsIssuerStub=true --profile vault-staging
+npx cdk deploy VettidOrgCallsDataStack VettidOrgCallsStack -c stage=staging -c callsStages=staging -c callsIssuerStub=true --profile vault-staging
+```
+
+The certificate validates in the staging zone; first deploy waits a few
+minutes for it and for CloudFront. Reserved concurrency 4 needs the account's
+Lambda concurrency limit to be at least 14 (`aws lambda get-account-settings`);
+a new account's 10 would fail the deploy: ask for a raise, do not change the 4.
+
+### The handshake test
+
+"A development enclave" has no tool of its own for this: `devstack` replaces
+the pinned roots with a test root. What exists is the enclave's real egress
+transport (`enclave/egress`: TLS 1.3 only, pinned roots, ALPN `h2` required,
+no redirects) and the pinned Amazon roots (`vms/pins`). A 60-line program
+runs exactly that code over a direct TCP dial (the parent's forwarder only
+relays bytes). It is not committed to vettid-vault (no vault code in C2 step 2);
+its source is below.
+
+```go
+// Command egresscheck: the enclave's egress transport (TLS 1.3 only, pinned
+// Amazon roots, ALPN h2 required) against one host, over a direct TCP dial.
+// Development check only; not committed to vettid-vault.
+//
+//	go run ./cmd/egresscheck calls.staging.vettid.org [attestation-header-bytes]
+package main
+
+import (
+	"context"
+	"fmt"
+	"net"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/vettid/vettid-vault/enclave/egress"
+	"github.com/vettid/vettid-vault/vms/pins"
+)
+
+func main() {
+	host := os.Args[1]
+	size := 0
+	if len(os.Args) > 2 {
+		size, _ = strconv.Atoi(os.Args[2])
+	}
+	tr, err := egress.New(egress.Config{
+		Dialer: egress.DialerFunc(func(ctx context.Context, h string, p uint16) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "tcp", net.JoinHostPort(h, strconv.Itoa(int(p))))
+		}),
+		Hosts: []egress.Host{{Name: host, Roots: pins.Pool(pins.AmazonTLSRoots()), HTTP2: true}},
+	})
+	if err != nil {
+		panic(err)
+	}
+	c := tr.Client(15 * time.Second)
+	show := func(req *http.Request) {
+		resp, err := c.Do(req)
+		if err != nil {
+			fmt.Println(req.Method, req.URL.Path, "FAILED:", err)
+			os.Exit(1)
+		}
+		defer resp.Body.Close()
+		fmt.Printf("%s %s -> %d %s (stub header: %q)\n", req.Method, req.URL.Path, resp.StatusCode, resp.Proto, resp.Header.Get("x-vettid-calls-stub"))
+	}
+	g, _ := http.NewRequest("GET", "https://"+host+"/v1/health", nil)
+	show(g)
+	if size > 0 {
+		p, _ := http.NewRequest("POST", "https://"+host+"/v1/credentials", strings.NewReader(`{"count":1}`))
+		p.Header.Set("X-VettID-Attestation", strings.Repeat("A", size))
+		p.Header.Set("X-VettID-Key", strings.Repeat("A", 44))
+		show(p)
+	}
+	fmt.Printf("stats: %+v\n", tr.Stats(host))
+}
+```
+
+1. Put it in a clean checkout of vettid-vault `origin/main` as
+   `cmd/egresscheck/main.go`.
+2. `openssl s_client -connect calls.staging.vettid.org:443 -tls1_3 -alpn h2 -servername calls.staging.vettid.org </dev/null`
+   : expect `TLSv1.3`, `ALPN protocol: h2`, chain leaf → Amazon RSA 2048 M0x → Amazon Root CA 1.
+3. `go run ./cmd/egresscheck calls.staging.vettid.org 7000`: expect
+   `GET /v1/health -> 200 HTTP/2.0` with the stub header, and
+   `POST /v1/credentials -> 403` (a 7000-byte `X-VettID-Attestation` header,
+   the size of a real one, passes CloudFront and the function URL), then the
+   stats line with `Streams` (CloudFront's announced limit; egress needs 32 or
+   more before it opens a second connection).
+4. Record the results in CALLS-PLAN §13.7. Pass: C2 goes on (step 3 onward).
+   Fail: CALLING-SERVICE §13 (the issuer moves behind a load balancer) before
+   anything is built on it. A real enclave run (the smoke stack's host, over
+   vsock through the parent) adds nothing to the TLS question and is not required.
+
+Control run, 2026-10-29, against `push.staging.vettid.org` (ALB): the same
+program gives `200 HTTP/2.0`, a 7000-byte header accepted, `Streams: 128`.
+
+### Tear down
+
+`cdk destroy VettidOrgCallsStack` removes the front and the stub; the data
+stack is retained.
+
 ## Push gateway (push.vettid.org, push.staging.vettid.org)
 
 The wake-up push service (docs/PUSH-GATEWAY.md §10; code and runtime
