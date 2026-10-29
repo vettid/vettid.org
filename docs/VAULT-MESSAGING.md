@@ -31,7 +31,8 @@ changelog:
     #162). §6.6 "Crossing reconnects": between two persons (neither
     connection a service) the reconnect whose `hs.init` has the lower
     `th1` wins, as crossing rekeys do (§6.5); each side completes at
-    most one of the two, and both end on the winner's epoch. Before,
+    most one of the two, and both end on one epoch (a completed
+    reconnect stands). Before,
     the rule covered a service connection only, and two persons who
     reconnected at once could end on different epochs. Vault: staging
     release 24 (with 0.72.x)
@@ -5433,24 +5434,33 @@ open at once (for example both unlocking with expired standing tokens).
 As for crossing rekeys (§6.5), **the `hs.init` with the lower `th1` wins**
 (compared as big-endian byte strings), and each side completes at most
 one of the two:
-- Each side answers the peer's reconnect `hs.init` as usual while its own
-  is open, and compares the two `th1`.
-- The side whose own `hs.init` has the **higher** `th1` abandons its own:
-  it sends no `hs.fin` for it, drops a later `hs.resp` to it (audited),
-  revokes the tokens its `hs.init` carried, and establishes the peer's
-  reconnect at the peer's `hs.fin`.
-- The side whose own `hs.init` has the **lower** `th1` completes its own
-  at the peer's `hs.resp`, drops its pending answer to the peer's
-  `hs.init`, revokes the tokens in that `hs.resp`, and acks and drops a
-  later `hs.fin` for it. That `hs.fin` is not evidence for fork
-  detection.
-- A reconnect already completed (`hs.fin` sent or verified) before the
-  other `hs.init` is seen stands; a later `hs.init` that names the
-  superseded epoch is refused as before (`reconnect_refused`), and its
-  sender establishes the completed epoch from the peer's `hs.fin`.
+- Each side answers the peer's reconnect `hs.init` as usual, even while
+  its own is open, and starts no reconnect of its own while an answer of
+  its awaits `hs.fin`. Whenever a side has both its own reconnect open and
+  an answer to the peer's awaiting `hs.fin`, it compares the two `th1`.
+- **Own `th1` higher:** it abandons its own. It sends no `hs.fin` for it,
+  drops an `hs.resp` to it (audited) without taking that response's
+  tokens or rotations, revokes the tokens its `hs.init` carried, and
+  establishes the peer's reconnect at the peer's `hs.fin`.
+- **Own `th1` lower:** at the peer's `hs.resp` it completes its own and
+  drops its answer to the peer's (not sent if not yet deposited),
+  revoking the tokens in that answer. It acks and drops a later `hs.fin`
+  for that answer, which only a release-23 peer sends. That `hs.fin` is
+  not evidence for fork detection.
+- **A verified `hs.fin` comes first.** A verified `hs.fin` for an answer
+  still awaiting it is established, whatever the `th1`, and the side's
+  own open reconnect is abandoned as above. The peer completed before it
+  saw this side's `hs.init`, which now names a superseded epoch and is
+  refused (`reconnect_refused`). Only a side that has itself sent
+  `hs.fin` drops the peer's.
 
-Both sides end on the winner's epoch, whatever order the four messages
-arrive in.
+At most one side sends `hs.fin`, and both end on one epoch: the lower
+`th1`'s when each side saw the other's `hs.init` before completing,
+otherwise the one completed first. With a peer on release 23, which
+completes its own and establishes every verified `hs.fin`, the two may
+still end on different epochs, or the release-23 side may take a dropped
+answer's revoked tokens and go `stale`. Either way the failure is visible
+and needs a new invitation, as before 0.74.0.
 
 **Responder `rotations`** (0.72.0). The responder's `rotations` are its
 own rotation statements since the epoch `ctx` names (the own chain count
