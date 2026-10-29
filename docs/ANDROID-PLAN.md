@@ -1,9 +1,18 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.97
-date: 2026-10-28
+version: 0.1.98
+date: 2026-10-29
 changelog:
+  - 0.1.98: owner decision 2026-10-29: question 19 decided, **ACINQ
+    bitcoin-kmp** (with secp256k1-kmp) behind `:core:chain`, BDK only as
+    the fallback if bitcoin-kmp fails conformance. §4 Wallet "Library"
+    and "Local state" follow. W1 (vettid-android #223, merged 8a5c607f):
+    the app-side `wallet.psbt.inspect` and PSBT builder agree with the
+    vault on 135 vectors generated from its own code (5 declared
+    differences where the app is stricter or does not copy a parser
+    quirk); pinned artifacts and native libraries; the wallet stays out
+    of production builds until it is promoted
   - 0.1.97: owner decision 2026-10-28 (VAULT-MESSAGING 0.73.2): §6
     owner check item 6: "At least <N> tries left…" (was "Up to"; the
     estimate after an unanswered check is the fewest that may remain)
@@ -4059,22 +4068,34 @@ never asks.
     (`wallet.sign`); the app broadcasts the returned `tx` to the server.
     `broadcast: true` is never sent (`unavailable` in every release).
 
-**Library** (question 19). The app needs BIP39 words (import and the
-check before sending), BIP32 derivation from account keys, bech32 and
-bech32m addresses, the BIP86 tweak, PSBT version 0 with taproot
-fields, coin selection and an Esplora client. A short spike (W0)
-compares **BDK** (`bdk-android`, a Rust library with Kotlin bindings,
-MIT or Apache-2.0, which takes the vault's descriptors as they are and
-has an Esplora client and coin selection) with ACINQ's
-**bitcoin-kmp** and `secp256k1-kmp` (Kotlin, Apache-2.0). The spike
-must show, against the dev stack's `wallet.psbt.inspect`: a PSBT with
-the **full previous transaction on every input, taproot inputs too**
-(the vault refuses anything else: `previous_tx`), taproot BIP32
-derivations without leaf hashes and with the wallet's fingerprint, a
-change output carrying its derivation (or the vault counts it as a
-payment), one PSBT spending from both accounts, and a reproducible
-`foss` build with the library in it. Recommendation: BDK, if it passes;
-bitcoin-kmp otherwise.
+**Library** (question 19; **decided by the owner 2026-10-29: ACINQ
+bitcoin-kmp** with `secp256k1-kmp`, Kotlin, Apache-2.0; **BDK only as
+the fallback if bitcoin-kmp fails conformance**). The app needs BIP39
+words (import and the check before sending), BIP32 derivation from
+account keys, bech32 and bech32m addresses, the BIP86 tweak, PSBT
+version 0 with taproot fields, coin selection and an Esplora client.
+The W0 spikes (vettid-android #217 BDK, #219 bitcoin-kmp; not merged)
+built the same PSBTs with both: the **full previous transaction on
+every input, taproot inputs too** (the vault refuses anything else:
+`previous_tx`), taproot BIP32 derivations without leaf hashes and with
+the wallet's fingerprint, a change output carrying its derivation, and
+one PSBT spending from both accounts. bitcoin-kmp was chosen for **APK
+size** (+5.9 MB against +42.9 MB on the `full` staging APK), a
+**simpler F-Droid recipe** (one C library, `libsecp256k1-jni.so`,
+which F-Droid already builds from source, against a Rust and NDK
+recipe for every BDK release), and because **the vault fails closed**:
+it re-derives and checks every PSBT (`wallet.psbt.inspect`), so a bug
+in the wallet code the app writes itself (coin selection, fees, PSBT
+building) makes the vault refuse a PSBT, never sign a wrong one. The
+library sits behind `:core:chain`, and no bitcoin-kmp type leaves the
+module, so BDK can replace it. **W1** (vettid-android #223) proves it:
+the app-side inspector and builder agree with the vault's own
+`wallet.psbt.inspect` and `BuildPSBT` on 135 vectors generated from the
+vault's code, byte for byte, with 5 declared differences where the app
+is stricter than the vault's parser or does not copy one of its
+quirks. The artifacts and the four native libraries are pinned by
+SHA-256, and the wallet stays out of production builds until it is
+promoted.
 
 **Screens.**
 
@@ -4257,8 +4278,8 @@ coins, balances and transactions are in memory only, cleared at lock,
 on entering the hold or the due state, at a wipe and with the process
 (the rule "nothing kept outside an open vault", §4 Notifications, 10);
 an account key reveals every address and payment of the wallet. With
-BDK, its persistence is not used (an in-memory wallet), so each open
-looks the wallet up again. On disk, in the app's encrypted settings:
+bitcoin-kmp, the wallet is held in memory only (the library has no
+persistence of its own), so each open looks the wallet up again. On disk, in the app's encrypted settings:
 the chain server per network, the testnet4 label (option (a)) and the
 backed-up flag per `wallet_id`. Nothing from a wallet goes to logs or
 crash reports (ids at debug level only).
@@ -6895,11 +6916,16 @@ presence, location and video").
     (`https` only, checked against the network's genesis block);
     **Electrum later**, after W2, if members ask; no proxy or Tor
     setting in these phases.
-19. **The Bitcoin library.** **Recommended: BDK (`bdk-android`)** if
-    the W0 spike shows that its PSBTs pass the vault's policy (the full
-    previous transaction on every input, taproot included; both
-    accounts in one PSBT) and that the `foss` build stays reproducible
-    with it; ACINQ's bitcoin-kmp otherwise.
+19. **The Bitcoin library.** **Decided (owner, 2026-10-29): ACINQ
+    bitcoin-kmp** (with secp256k1-kmp), behind `:core:chain`; **BDK
+    (`bdk-android`) is the fallback only if bitcoin-kmp fails
+    conformance** with the vault. Reasons: +5.9 MB against +42.9 MB of
+    APK, a simpler F-Droid recipe (one C library that F-Droid already
+    builds, no Rust), and the vault fails closed (it re-derives and
+    checks every PSBT). The price: the app writes its own coin
+    selection, fee and PSBT-building code (W2). W0 spikes:
+    vettid-android #217 (BDK) and #219 (bitcoin-kmp), not merged; W1:
+    vettid-android #223 (conformance against the vault, 135 vectors).
 20. **Receiving before the phrase is backed up.** **Recommended: no.**
     A new wallet shows no receive address until its phrase has been
     written down and checked (three words); the member may leave and

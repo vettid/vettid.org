@@ -14,7 +14,7 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.13.2)
-  - ANDROID-PLAN.md (0.1.97)
+  - ANDROID-PLAN.md (0.1.98)
   - IOS-PLAN.md (0.1.49; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
