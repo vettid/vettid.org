@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.77.0
+version: 0.78.0
 date: 2026-10-29
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -27,6 +27,17 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.78.0: owner decision 2026-10-29 (texts approved). §6.8 step 3: a
+    renewal request (the device has an unexpired session, known from
+    `device.list`'s `session_expires_at` or a later `sync.event
+    device.session`) tells the member that a deny keeps the current
+    access until its `expires_at`, and offers "Deny and end access now",
+    which sends `device.session.end{device_id}` alone after the app's
+    end-access confirmation (an end drops the request and is audited
+    and synced once). The expiry while shown, a decision elsewhere and
+    the hold are stated. §10.8 step 4: "A desktop", "An agent" to start a
+    sentence. Before, a member who denied a renewal could believe the
+    device was cut off. Apps only; no vault change
   - 0.77.0: owner decision 2026-10-29 (vettid-vault #165, found by the
     iOS agent). §6.8 "Every grant, end and decision": what the vault
     audits and tells the owner's other devices, spelled out. A denied
@@ -5924,6 +5935,29 @@ its end does not end the E2E session or the pairing.) Apps need none.
    owner decision 2026-10-29); `device.session.ended{reason: "denied"}`
    then means only that the request was refused.
 
+   (0.78.0, owner decision 2026-10-29, texts approved.) **A renewal
+   request.** A request is a renewal when the device has a session that
+   has not expired. The app takes its `expires_at` from the device's
+   `session_expires_at` in `device.list` (§10.3), which it reads when it
+   shows the request, or from a later `sync.event{kind:
+   "device.session"}` (§10.1); `device.session.pending` does not carry
+   it. On a renewal request an app shows above its choices "Denying
+   refuses only the extra time. <device> keeps its current access until
+   <expires_at, local time>." and offers three choices: **Approve**,
+   **Deny** and **Deny and end access now**. The third asks the app's
+   end-access confirmation ("End access for <device>?"), then sends
+   `device.session.end{device_id}` alone: an end drops the pending
+   request ("Ending", below) and is audited and synced once, as an end.
+   If the end fails, the app says so plainly and offers it again, as its
+   end-access action does; the request stays open. <device> is the
+   request's `name`, shown as §10.8 "Showing received text" says ("A
+   desktop", "An agent" when empty). When `expires_at` passes while the
+   request is shown, the app shows it as a first request (no notice;
+   Approve and Deny). The request leaves the screen at its `exp`, when
+   another device decides it or ends the session, and when the vault is
+   held (the hold drops it, §3.6.3). A confirmation already open stays
+   and ends access when confirmed, except while held.
+
 `device.pair.approve` MAY carry `session_seconds` to grant the first access
 session together with the pairing (§10.3). A grant replaces the device's
 current access session, so a request made within a session renews it.
@@ -8970,7 +9004,8 @@ The **profile object** holds the extras' display name and photo. Sent by
      inside a sentence or after a label shows "a connection" ("A
      connection" to start a sentence); a new phone in a transfer without
      a name shows "The other phone"; a desktop or agent without a name
-     shows its kind ("a desktop", "an agent"); an absent or empty
+     shows its kind ("a desktop", "an agent"; "A desktop", "An agent" to
+     start a sentence); an absent or empty
      `context` of a challenge that has a `purpose` (§10.4) shows the
      fixed line "No details were given. Only approve if you know what
      this is for.", and a challenge without a purpose shows no context
