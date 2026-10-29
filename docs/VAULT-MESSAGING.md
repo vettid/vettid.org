@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.75.0
+version: 0.76.0
 date: 2026-10-29
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -27,6 +27,24 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.76.0: owner decision 2026-10-29 (from the review of vettid-android
+    #221). §10.8 "Showing received text": the one cleaning step both
+    apps apply to names, written down and widened to every string from
+    another party that an app shows (names, a desktop's, agent's or new
+    phone's name, challenge and critical-use contexts, grant reasons and
+    labels, memos, introduction and location notes, previews, attachment
+    file names): line breaks, control and format characters removed
+    except ZWJ/ZWNJ, trimming, then bidirectional isolation. New for
+    both apps: text that is only default-ignorable characters (ZWJ/ZWNJ,
+    fillers such as U+3164) counts as empty and shows its placeholder;
+    VT and FF are line breaks (both apps deleted them); text whose
+    lines are kept is trimmed per line (neither app trimmed a context);
+    a summary takes the first line that is not empty after cleaning;
+    search matches the cleaned text without isolates; iOS shows the
+    fixed no-details line as Android does. A message's full text in its
+    bubble keeps the directional marks LRM, RLM and ALM (other controls
+    and format characters removed) and is isolated per line. Apps only;
+    no vault change
   - 0.75.0: owner decision 2026-10-29. §13.6 "Device details": a
     device's name or model may be kept in the member's own vault, but
     no VettID server (member API, host and parent, relay, push
@@ -8857,7 +8875,83 @@ The **profile object** holds the extras' display name and photo. Sent by
   rotates; apps show the new one without a warning when the rotation
   chain verified (§3.4), as they do for a credential-key rotation
   (§10.4). Names use Unicode bidirectional isolation wherever an app
-  shows them next to other text.
+  shows them next to other text ("Showing received text", below).
+- **Showing received text** (0.76.0, owner decision 2026-10-29). Every
+  string that reaches an app from another party (another member's vault,
+  a service, an introducer, a paired desktop or agent, a phone being
+  moved to) and that the app shows can carry characters that hide or
+  reverse the words around it. That includes, and is not limited to: a
+  connection's or requester's names and display name and an invitation's
+  `hint.name` (§6.4); the name a desktop, agent or new phone gives itself
+  and an agent's request shown for approval (§10.3, §10.11); the
+  `context` of a member-authentication challenge (§10.4) and of a
+  critical-item use (§10.13); a grant's reason and labels, and the names
+  and labels of received grants and `@profile` items (§10.8, §10.12); a
+  payment request's `memo` (§10.14); an introduction's name and note
+  (§10.15); a location request's note (§10.16); and a message's text in a
+  preview and an attachment's file name (§10.5, §10.5.1). Before an app
+  shows such text, it applies one cleaning step:
+  1. **Breaks.** In the text as received, CR immediately followed by LF is
+     one break (CR, ZWSP, LF is two); LF, CR, VT (U+000B), FF (U+000C),
+     NEL (U+0085), U+2028 and U+2029 are each a break. Text shown on one
+     line (a name, a label, a list row) turns each break and each tab
+     into a space; text whose lines are kept (a context, a note) turns
+     each break into one LF (U+000A) and each tab into a space.
+  2. **Removal.** Every other code point of general category Cc or Cf is
+     removed (by the platform's Unicode data: bidirectional controls,
+     zero-width characters, BOM, tag characters), except ZWNJ (U+200C)
+     and ZWJ (U+200D), which emoji sequences and Persian and Indic
+     shaping need. An isolate the text carries is removed with the rest,
+     so it cannot close the app's own. Code points of other categories,
+     including private-use (Co) and unassigned (Cn) ones, are kept; a
+     lone surrogate (Cs), which some platforms cannot hold, is shown as
+     U+FFFD.
+  3. **Trim.** Code points with the Unicode White_Space property (after
+     steps 1–2, LF and the space separators, Zs) are removed at both ends
+     of the text and, for text whose lines are kept, at both ends of each
+     line, so no empty line is left at either end.
+  4. **Empty.** The result is empty when nothing is left once every
+     Default_Ignorable_Code_Point (ZWJ and ZWNJ included, and fillers
+     such as U+3164) and White_Space code point is also set aside (they
+     stay in the text that is shown). Empty text is never shown as a
+     blank: a connection's title shows "Name not shared yet"; a name
+     inside a sentence or after a label shows "a connection" ("A
+     connection" to start a sentence); a new phone in a transfer without
+     a name shows "The other phone"; a desktop or agent without a name
+     shows its kind ("a desktop", "an agent"); an absent or empty
+     `context` of a challenge that has a `purpose` (§10.4) shows the
+     fixed line "No details were given. Only approve if you know what
+     this is for.", and a challenge without a purpose shows no context
+     line, as before 0.65.0; any other empty text (a display name, a
+     reason, a label, a note, a memo, a caption) is left out together
+     with the label that introduces it.
+  5. **Isolation.** Wherever the result sits next to other text or inside
+     a sentence (a row's second line, "Calls from <name> turned off"), it
+     is wrapped in FSI (U+2068) … PDI (U+2069). Text whose lines are kept
+     is never put inside a sentence: it is shown as its own block, and
+     where it sits next to other text, each line is wrapped in FSI … PDI
+     (an isolate ends at a line break).
+  6. **Summaries.** A one-line summary of a multi-line text (a list row,
+     an unread preview) takes the first line that is not empty (as step
+     4 defines it) after steps 1–4, cleaned as one-line text and
+     isolated as step 5 says.
+  7. **Search.** A local search matches against the cleaned text without
+     the isolates, so a query that spans a name and the fixed words
+     around it finds the entry.
+  A message's full text in its own bubble is cleaned more lightly,
+  since right-to-left writers use directional marks in it: step 1
+  applies as for text whose lines are kept; step 2 also keeps LRM
+  (U+200E), RLM (U+200F) and ALM (U+061C), which set no direction for
+  the text around them, while embeddings, overrides, isolates,
+  zero-width spaces, tag characters and other controls are removed as
+  for any text; step 3 trims only the ends of the whole text, so a
+  line's indentation stays. It is shown as its own block, each line in
+  FSI … PDI. Cleaning cannot stop text
+  that imitates the app's own wording or uses lookalike letters: screens
+  show received text in its own block, under a label that says whose
+  words they are, wherever it could be mistaken for the app's. The step
+  is for display only: what a vault accepts is unchanged ("Receiving",
+  above; §10.3, §10.4).
 - **What the names are.** `first_name` and `last_name` are the names the
   peer's member gave VettID at registration or later changed from the
   app (`account.name.set`), passed on by the peer's vault from VettID's
