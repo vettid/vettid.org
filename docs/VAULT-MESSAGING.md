@@ -42,8 +42,9 @@ changelog:
     a summary takes the first line that is not empty after cleaning;
     search matches the cleaned text without isolates; iOS shows the
     fixed no-details line as Android does. A message's full text in its
-    bubble keeps its marks and is isolated per line. Apps only; no
-    vault change
+    bubble keeps the directional marks LRM, RLM and ALM (other controls
+    and format characters removed) and is isolated per line. Apps only;
+    no vault change
   - 0.75.0: owner decision 2026-10-29. §13.6 "Device details": a
     device's name or model may be kept in the member's own vault, but
     no VettID server (member API, host and parent, relay, push
@@ -8937,9 +8938,15 @@ The **profile object** holds the extras' display name and photo. Sent by
   7. **Search.** A local search matches against the cleaned text without
      the isolates, so a query that spans a name and the fixed words
      around it finds the entry.
-  A message's full text in its own bubble is not cleaned by steps 1–4
-  (right-to-left writers use marks such as U+200F in it); it is shown
-  as its own block, each line in FSI … PDI. Cleaning cannot stop text
+  A message's full text in its own bubble is cleaned more lightly,
+  since right-to-left writers use directional marks in it: step 1
+  applies as for text whose lines are kept; step 2 also keeps LRM
+  (U+200E), RLM (U+200F) and ALM (U+061C), which set no direction for
+  the text around them, while embeddings, overrides, isolates,
+  zero-width spaces, tag characters and other controls are removed as
+  for any text; step 3 trims only the ends of the whole text, so a
+  line's indentation stays. It is shown as its own block, each line in
+  FSI … PDI. Cleaning cannot stop text
   that imitates the app's own wording or uses lookalike letters: screens
   show received text in its own block, under a label that says whose
   words they are, wherever it could be mistaken for the app's. The step
