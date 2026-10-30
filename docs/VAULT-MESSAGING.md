@@ -36,20 +36,28 @@ changelog:
     text that is not standard base64 and text over 87,384 characters
     are `bad_request`; `size` is only a PSBT that decodes to more than
     65,536 bytes (an empty one is never `size`); `shape` is only an
-    input or output count outside 1-64, and a PSBT with fewer or more
-    maps than the transaction has inputs or outputs is `malformed`.
-    (2) Bytes after the last output map are `malformed` (the vault
-    accepts them today). (3) Global xpub entries are checked: a
-    version that is not one of the four registered, a version of the
-    other key kind than the key, depth 0 with a non-zero parent
-    fingerprint, and the same xpub twice are `malformed` (the vault
-    accepts all four today). (4) Sighash: an absent sighash type is
-    accepted on either kind of input and means SIGHASH_ALL for P2WPKH
-    (SIGHASH_DEFAULT for P2TR, as before); the table no longer reads as
-    if only P2TR may omit it (owner decision 2026-10-30). (5) `cap`: a vault
-    without spend caps omits it, and an app reads an absent `cap` as no
-    information, never as "no limit" (the vault at release 24 has no
-    caps). §10.8 "Showing received text" step 4: U+2800 BRAILLE
+    input or output count outside 1-64, and a PSBT with fewer maps than
+    the transaction has inputs or outputs does not parse (`malformed`;
+    more maps are read as the following maps, and the rest is bytes
+    after the last output map). (2) Bytes after the last output map
+    are `malformed` (the vault accepts them today). (3) Global xpub
+    entries are checked: a version that is not one of the four
+    registered, a version of the other key kind than the key, depth 0
+    with a non-zero parent fingerprint or child number, and the same
+    xpub twice are `malformed` (the vault accepts all four today).
+    Also `malformed` and accepted by the vault today: a repeated
+    sighash key (0 then 1; 0 twice), the same unknown key twice with
+    different values, and a `witness_utxo` whose script length byte is
+    0. (4) Sighash: a sighash type of 0, present or absent, counts as
+    absent and is accepted on either kind of input; it means
+    SIGHASH_ALL for P2WPKH and SIGHASH_DEFAULT for P2TR (as before);
+    any value other than 0 or 1 (SIGHASH_ALL) is `sighash`; the table
+    no longer reads as if only P2TR may omit it (owner decision
+    2026-10-30, matching the vault). (5) `cap`: a vault that does not
+    implement spend caps (release 24 does not) omits `cap` and
+    `<wallet>.caps`; one that implements them always returns `cap`
+    (`{ok: true}` for a wallet without caps). With no `cap` the app
+    shows nothing about limits, neither a limit nor "No limit". §10.8 "Showing received text" step 4: U+2800 BRAILLE
     PATTERN BLANK counts as blank (it is not a
     Default_Ignorable_Code_Point, so a name made of it passed).
     ANDROID-PLAN 0.1.99
@@ -12567,14 +12575,18 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
   of BIP174 version 0, at most 65,536 bytes) only if:
   - it has 1–64 inputs and 1–64 outputs, transaction version 1 or 2
     (0.78.1: a PSBT that does not parse is `malformed`, including one
-    with fewer or more input or output maps than the transaction has
-    inputs or outputs, one with bytes after the last output map, and
+    with fewer input or output maps than the transaction has inputs or
+    outputs, one with bytes after the last output map (more maps are
+    read as the following maps, so they are bytes after the last), and
     one with a bad global xpub entry: a version that is not one of the
     four registered (`xpub`, `xprv`, `tpub`, `tprv`), a version of the
     other kind than the key (a private version on a public key, or
-    the reverse), depth 0 with a non-zero parent fingerprint, or the
-    same xpub twice; the vault accepts trailing bytes and each of the
-    four xpub cases today, vault follow-up);
+    the reverse), depth 0 with a non-zero parent fingerprint or child
+    number, or the same xpub twice; also a repeated sighash key (0
+    then 1; 0 twice), the same unknown key twice with different
+    values, and a `witness_utxo` whose script length byte is 0. The
+    vault accepts trailing bytes and each of these cases today, vault
+    follow-up);
   - every input spends an output of **one of the wallet's accounts**,
     shown by a derivation with the wallet's fingerprint, which the vault
     re-derives and checks with the output script:
@@ -12592,10 +12604,11 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     CVE-2020-14199). Taproot signature hashes commit to every input's
     amount and script (BIP341), so the vault computes them only from
     these verified outputs; no duplicate inputs, no finalised or
-    partially signed inputs; sighash SIGHASH_ALL (0.78.1: the sighash
-    type may be absent on either kind of input; absent means
-    SIGHASH_ALL for P2WPKH, as built, and SIGHASH_DEFAULT for P2TR;
-    any type present other than SIGHASH_ALL is refused);
+    partially signed inputs; sighash SIGHASH_ALL (0.78.1: a sighash
+    type of 0, present or absent, counts as absent and is accepted on
+    either kind of input; it means SIGHASH_ALL for P2WPKH, as built,
+    and SIGHASH_DEFAULT for P2TR; any value other than 0 or 1
+    (SIGHASH_ALL) is refused);
   - every output is a standard script (P2PKH, P2SH, P2WPKH, P2WSH or
     P2TR), of at least 330 sats, which the summary shows as an address
     **encoded for the wallet's network** (0.37.0, as built). An output
@@ -12618,13 +12631,13 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
   | Reason | Meaning |
   |---|---|
   | `size` | decoded to more than 65,536 bytes (0.78.1: an empty `psbt`, text that is not standard base64 and text over 87,384 characters are `bad_request` before any PSBT is read) |
-  | `malformed` | not a BIP174 PSBT that parses (0.78.1: also fewer or more input or output maps than the transaction has inputs or outputs, bytes after the last output map, and a bad global xpub entry, as above) |
-  | `shape` | a parsed PSBT with no inputs, more than 64 inputs, no outputs or more than 64 outputs (0.78.1: not a mismatch of the maps, which is `malformed`) |
+  | `malformed` | not a BIP174 PSBT that parses (0.78.1: also fewer input or output maps than the transaction has inputs or outputs, bytes after the last output map, a bad global xpub entry, a repeated sighash key, the same unknown key twice with different values, and a `witness_utxo` with script length byte 0, as above) |
+  | `shape` | a parsed PSBT with no inputs, more than 64 inputs, no outputs or more than 64 outputs (0.78.1: not a mismatch of the maps, which does not parse: `malformed`) |
   | `version` | transaction version not 1 or 2 |
   | `duplicate_input` | the same outpoint twice |
   | `previous_tx` | an input without the full previous transaction, or one whose txid or output index does not match the outpoint |
   | `witness_utxo` | `witness_utxo` differs from the previous transaction's output |
-  | `sighash` | a sighash type that is present and not SIGHASH_ALL (0.78.1: absent is accepted for P2WPKH and P2TR) |
+  | `sighash` | a sighash type other than 0 and 1 (SIGHASH_ALL) (0.78.1: 0, present or absent, counts as absent and is accepted for P2WPKH and P2TR) |
   | `input_script` | an input that is finalised, partially signed, or carries a redeem or witness script or taproot script-path data |
   | `amount` | a previous output's amount is zero, negative or above 21 million BTC |
   | `foreign_input` | an input with no derivation of the wallet's fingerprint |
@@ -12818,9 +12831,12 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     `wallet.sign` would pass the caps now, and if not why, with the
     fields of `cap_exceeded`; the app shows it before it asks for the
     password. It changes nothing and writes no audit entry. (0.78.1) A
-    vault that has no spend caps (release 24) omits `cap`; an app reads
-    an absent `cap` as no information, never as "no limit applies",
-    and shows no limit text.
+    vault that does not implement spend caps (release 24 does not)
+    omits `cap`. A vault that implements them always returns it,
+    `{ok: true}` for a wallet without caps. With no `cap`, the app
+    shows nothing about limits, neither a limit nor "No limit"; the
+    same for `<wallet>.caps`, which a vault without caps does not
+    have.
 - **Spending is a critical action.** `wallet.sign` is app only, needs the
   credential's unlock window (`credential_locked` otherwise; 0.52.0: a
   presented UTK is spent first, §3.5.4) and is one credential operation: the UTK payload's

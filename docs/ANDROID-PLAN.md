@@ -10,7 +10,11 @@ changelog:
     xpubs (the app refuses what the spec refuses, the vault accepts four
     cases); the app accepts bytes after the last PSBT map, as the vault
     does, until the vault refuses them (0.78.1), then it refuses them
-    too; an absent `cap` is no information, not "no limit"
+    too (the same for a repeated sighash key, a repeated unknown key
+    with different values and a `witness_utxo` with script length byte
+    0); an absent `cap` or `<wallet>.caps` shows nothing about limits,
+    not "No limit"; §4 Wallet "Library" and the send review screen
+    follow
   - 0.1.98: owner decision 2026-10-29: question 19 decided, **ACINQ
     bitcoin-kmp** (with secp256k1-kmp) behind `:core:chain`, BDK only as
     the fallback if bitcoin-kmp fails conformance. §4 Wallet "Library"
@@ -4100,7 +4104,14 @@ the app-side inspector and builder agree with the vault's own
 `wallet.psbt.inspect` and `BuildPSBT` on 135 vectors generated from the
 vault's code (summaries and built PSBTs byte for byte, refusals with
 the same reason), with 5 declared differences where the app is
-stricter than the vault's parser or does not copy one of its quirks. The artifacts and the four native libraries are pinned by
+stricter than the vault's parser or does not copy one of its quirks
+(0.1.99: four are the spec's global xpub rules, VAULT-MESSAGING 0.78.1,
+which the vault does not yet enforce; the fifth is a btcd bug the app
+does not copy). Where the spec is stricter than the vault and the app
+copies the vault on purpose until it follows, the app accepts bytes
+after the last PSBT map, a repeated sighash key, the same unknown key
+twice with different values, and a `witness_utxo` whose script length
+byte is 0; each flips to a refusal when the vault's does. The artifacts and the four native libraries are pinned by
 SHA-256, and the wallet stays out of production builds until it is
 promoted.
 
@@ -4183,7 +4194,10 @@ and respect them.
   toward your limit for the last 24 hours: {outflow}. Left after this:
   {left}", when `per_period_sats` is set, from `<wallet>.caps.spent_sats`;
   and, from `wallet.psbt.inspect`'s `cap`, the refusal text below before
-  the password is asked, if it says `ok: false`. A **fee bump** (a
+  the password is asked, if it says `ok: false`. (0.1.99) A vault that
+  does not implement spend caps (release 24) has no `<wallet>.caps` and
+  returns no `cap`: the screen then shows nothing about limits, neither
+  a limit nor "No limit". A **fee bump** (a
   new PSBT that replaces a payment) says: "A fee bump counts again
   toward your limit for the last 24 hours." The vault decides.
 - **Units.** Sats everywhere in this screen, whole numbers, with a
