@@ -1,9 +1,17 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.103
+version: 0.1.105
 date: 2026-10-30
 changelog:
+  - 0.1.105: erratum (VAULT-MESSAGING 0.81.1, §15 item 48). New text
+    `vote_checking_clock` for the vault's new checking reason `clock` (a
+    timestamp the vault cannot yet verify only because of its own clock):
+    the vote screen says the phone's date and time may be wrong, not that
+    VettID is out of date. **Draft text, for the owner's approval.** The
+    other vote texts are unchanged. Tests: a `checking` vote with reason
+    `clock` shows `vote_checking_clock`, offers no cast, and shows the
+    existing states once the vault reports another reason or `open`.
   - 0.1.103: owner decision of 2026-10-30: the "Their note" heading over
     `context` stays on every sign-in and approval screen, as both apps
     show it today, not only with a match code (§4 "Sign-in match code").
@@ -5144,6 +5152,7 @@ The History category is "Connections" (with the service's name); no entry shows 
 | `vote_save_proof_warning` | The file shows how you voted. Keep it private, and share it only with the organisation. | a confirmation before saving |
 | `vote_rejected_title` | VettID set this vote aside | `rejected`; the reason follows (signature, anchor, record) and **Save the proof** |
 | `vote_checking_trust` | VettID can't finish checking this vote yet: its list of trusted logs may be out of date. Update VettID if this lasts. | `checking`, `trust_root` |
+| `vote_checking_clock` | VettID can't finish checking this vote because the date or time on this phone may be wrong. Check that they are right. | `checking`, `clock`; **draft, for the owner's approval (0.1.105)**; no voting |
 | `vote_checking_restore` | VettID is asking %s what it recorded for you before you can vote. | `checking`, `restore` |
 | `vote_not_published` | This vote is not on the public site yet. You can still vote: VettID will compare it with the public copy when it appears. | warning only, `site` `not_listed` |
 | `vote_site_unreachable` | VettID could not reach the votes site to compare this vote with the public copy. You can still vote: VettID will compare it later. | warning only, `site` `unreachable`; shown above **Cast your vote** |
