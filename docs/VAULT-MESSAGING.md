@@ -1,8 +1,8 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.70.0
-date: 2026-10-28
+version: 0.79.0
+date: 2026-10-30
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
 related:
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.13.2)
-  - ANDROID-PLAN.md (0.1.92)
-  - IOS-PLAN.md (0.1.45; §9.1 VA1–VA4)
+  - ANDROID-PLAN.md (0.1.100)
+  - IOS-PLAN.md (0.1.50; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -27,15 +27,16 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.70.0: **owner decision 2026-10-28** (ANDROID-PLAN 0.1.92, IOS-PLAN
-    0.1.45; §15 item 44; wire-additive and backward compatible). The
+  - 0.79.0: **owner decision 2026-10-28** (ANDROID-PLAN 0.1.100, IOS-PLAN
+    0.1.50; §15 item 46; wire-additive and backward compatible). The
     sign-in match code is shown prominently on the phone. §10.4:
     `connection.authenticate.challenge`, `.request` and `.pending` gain
     an optional `match_code`: exactly 2 or 3 ASCII digits, meaningful
     only with `purpose: "signin"`. A receiver ignores a malformed value,
     and any value on an approval or on a challenge without a purpose
     (the challenge is still handled, as without it), so the apps never
-    read a code out of `context`. **Display only**: the code is not
+    read a code out of `context`. `pending.list` (§10.4.2) repeats the `.pending` body, so its
+    `authenticate` row carries `match_code` too. **Display only**: the code is not
     signed, and is not in `.response` or `.result`; signing and its
     vectors are exactly as 0.65.0. The app shows the code in large
     digits at the top of the sign-in screen. The service vault keeps the
@@ -44,6 +45,218 @@ changelog:
     a staging vault release after 24** (vettid-vault: parse, validate,
     pass through `.pending`), a service vault change
     (vettid/service-vault: send `match_code`) and app work
+  - 0.78.1: erratum, from the reviews of vettid-android #223 (wallet W1,
+    conformance with the vault's `wallet.psbt.inspect`) and #224
+    (received text, 0.76.0), 2026-10-29. No message is added; where the
+    vault (release 24, `214b88f`) differs from this text, the text
+    stays and the vault change is a follow-up. §10.18 signing policy:
+    (1) the `psbt` limits, by where each is checked: an empty `psbt`,
+    text that is not standard base64 and text over 87,384 characters
+    are `bad_request`; `size` is only a PSBT that decodes to more than
+    65,536 bytes (an empty one is never `size`); `shape` is only an
+    input or output count outside 1-64, and a PSBT with fewer maps than
+    the transaction has inputs or outputs does not parse (`malformed`;
+    more maps are read as the following maps, and the rest is bytes
+    after the last output map). (2) Bytes after the last output map
+    are `malformed` (the vault accepts them today). (3) Global xpub
+    entries are checked: a version that is not one of the four
+    registered, a version of the other key kind than the key, depth 0
+    with a non-zero parent fingerprint or child number, and the same
+    xpub twice are `malformed` (the vault accepts all four today).
+    Also `malformed` and accepted by the vault today: a repeated
+    sighash key (0 then 1; 0 twice), the same unknown key twice with
+    different values, and a `witness_utxo` whose script length does not
+    match the script that follows (the vault reads the script as
+    everything after the first 9 bytes). (4) Sighash: a sighash type of
+    0, present or absent, counts as absent and is accepted on either
+    kind of input; it means SIGHASH_ALL for P2WPKH and SIGHASH_DEFAULT for P2TR (as before);
+    any value other than 0 or 1 (SIGHASH_ALL) is `sighash`; the table
+    no longer reads as if only P2TR may omit it (owner decision
+    2026-10-30, matching the vault). (5) `cap`: a vault that does not
+    implement spend caps (release 24 does not) omits `cap` and
+    `<wallet>.caps`; one that implements them always returns `cap`
+    (`{ok: true}` for a wallet without caps). With no `cap` the app
+    shows nothing about limits, neither a limit nor "No limit". §10.8 "Showing received text" step 4: U+2800 BRAILLE
+    PATTERN BLANK counts as blank (it is not a
+    Default_Ignorable_Code_Point, so a name made of it passed).
+    ANDROID-PLAN 0.1.99
+  - 0.78.0: owner decision 2026-10-29 (texts approved). §6.8 step 3: a
+    renewal request (the device has an unexpired session, known from
+    `device.list`'s `session_expires_at` or a later `sync.event
+    device.session`) tells the member that a deny keeps the current
+    access until its `expires_at`, and offers "Deny and end access now",
+    which sends `device.session.end{device_id}` alone after the app's
+    end-access confirmation (an end drops the request and is audited
+    and synced once). The expiry while shown, a decision elsewhere and
+    the hold are stated. §10.8 step 4: "A desktop", "An agent" to start a
+    sentence. Before, a member who denied a renewal could believe the
+    device was cut off. Apps only; no vault change
+  - 0.77.0: owner decision 2026-10-29 (vettid-vault #165, found by the
+    iOS agent). §6.8 "Every grant, end and decision": what the vault
+    audits and tells the owner's other devices, spelled out. A denied
+    session request is audited as the new kind `device.session.denied`
+    (`device_id`, `ref` = `request_id`) and sends `sync.event{kind:
+    "device.session", device_id, expires_at?}`; a deny of a renewal
+    keeps the current session and its `expires_at` (the device is still
+    told `device.session.ended{reason: "denied"}`, which then refuses
+    only the request). At an end, each held
+    request answered `denied` is audited `approval.denied` and sends
+    `approval.decided{approved: false}`, and `device.session` is sent
+    when the device had a session or a pending request was dropped;
+    unlinking sends the same. A grant at pairing (`session_seconds`) is
+    audited and sent like any grant. Expiry and the hold's answers are
+    neither audited nor sent (stated). §10.1: `device.session` without
+    `expires_at` means no session. §10.9: the `ref` of each §6.8 kind.
+    Before, a deny sent no event and was not audited, and an end sent no
+    `approval.decided` and no `device.session` for a device with only a
+    pending request, so other apps showed the ask until their next
+    `pending.list` read. Vault: a staging release after 24. Apps: a
+    History label for the new kind ("Session request from <device>
+    denied")
+  - 0.76.0: owner decision 2026-10-29 (from the review of vettid-android
+    #221). §10.8 "Showing received text": the one cleaning step both
+    apps apply to names, written down and widened to every string from
+    another party that an app shows (names, a desktop's, agent's or new
+    phone's name, challenge and critical-use contexts, grant reasons and
+    labels, memos, introduction and location notes, previews, attachment
+    file names): line breaks, control and format characters removed
+    except ZWJ/ZWNJ, trimming, then bidirectional isolation. New for
+    both apps: text that is only default-ignorable characters (ZWJ/ZWNJ,
+    fillers such as U+3164) counts as empty and shows its placeholder;
+    VT and FF are line breaks (both apps deleted them); text whose
+    lines are kept is trimmed per line (neither app trimmed a context);
+    a summary takes the first line that is not empty after cleaning;
+    search matches the cleaned text without isolates; iOS shows the
+    fixed no-details line as Android does. A message's full text in its
+    bubble keeps the directional marks LRM, RLM and ALM (other controls
+    and format characters removed) and is isolated per line. Apps only;
+    no vault change
+  - 0.75.0: owner decision 2026-10-29. §13.6 "Device details": a
+    device's name or model may be kept in the member's own vault, but
+    no VettID server (member API, host and parent, relay, push
+    gateway, calls issuer and TURN, their logs) and no service receives
+    it; it travels only sealed to the member's vault or end to end
+    between the member's devices. VettID clients send a fixed
+    User-Agent (`VettID-Android`, `VettID-iOS`, `VettID-Desktop`,
+    `VettID-Agent`) with nothing appended, and VettID sites send no
+    `Accept-CH` for device details. Out of scope by owner decision:
+    browsers opening VettID web pages, and the crash reports and
+    statistics Google and Apple collect. §2.2: servers learn the
+    client kind from the User-Agent. §11.3 and §11.11.3: a pointer
+    from `app.name`. No vault change; the clients set the header
+    (Android, iOS; desktop and agent when built)
+  - 0.74.0: owner decision 2026-10-29 (from the review of vettid-vault
+    #162). §6.6 "Crossing reconnects": between two persons (neither
+    connection a service) the reconnect whose `hs.init` has the lower
+    `th1` wins, as crossing rekeys do (§6.5); each side completes at
+    most one of the two, and both end on one epoch (a completed
+    reconnect stands). Before,
+    the rule covered a service connection only, and two persons who
+    reconnected at once could end on different epochs. Vault: staging
+    release 24 (with 0.72.x)
+  - 0.73.2: owner decision 2026-10-28. §3.6.5: after a check with no
+    answer the estimate is the fewest tries that may remain, so the app
+    shows it as "at least", not "up to" (which read as a most).
+    ANDROID-PLAN 0.1.97
+  - 0.73.1: erratum, owner decision 2026-10-28. §3.6.5 first bullet:
+    the kept PIN was said to be forgotten at "the next check", but the
+    password-only retry on the held screen is a check, and the apps as
+    reviewed and tested keep the PIN across it. It is now forgotten at
+    a later check's answer unless that answer again leaves the retry
+    useful (a wrong password with tries left, `backoff`, or a check the
+    vault did not answer, including rate limited or service paused);
+    tries left estimated at 0 still
+    forget it. ANDROID-PLAN 0.1.96
+  - 0.73.0: owner decision 2026-10-28 (raised by the Opus review of
+    vettid-android #213). §3.6.5: when a failed check's tries left are
+    only estimated (the `vault.status` read after the answer did not
+    come) and the estimate reaches 0, the app neither shows the vault
+    as locked nor offers the check: it says the vault has probably
+    locked, re-reads its state without sending a check (`vault.status`,
+    and the member API's `GET /api/vault/status`), and shows the lock
+    text, the check with the real count, or "isn't answering" with
+    "Check again" and the lock action. A check sent with no answer
+    counts in the estimate and the app says it may have counted. ANDROID-PLAN 0.1.95,
+    IOS-PLAN 0.1.49 (texts approved)
+  - 0.72.1: erratum, owner decisions 2026-10-28 (raised by the service
+    vault agent while implementing 0.72.0; two Opus reviews). §6.6
+    "Replay": a valid §3.4 rotation conflict in a reconnect `hs.init`'s
+    `rotations` suspends at once, before `hs.fin`, and is not answered
+    (self-verifying evidence; after the replay and sender checks; a
+    statement dropped by `connection.rotation.resolve` is refused, not a
+    new conflict). New "Crossing reconnects": a service's own reconnect
+    yields to a member's that verifies; the member always answers the
+    service's; each side completes at most one; both end on one epoch
+    (the member's if the service saw it first, else the service's). A
+    reconnect open at a restart keeps its stored initiator state (no new
+    `hs.init`, no try used; an unconfirmed deposit is resent with the
+    same bytes); 0.72.0 sent a new one each time
+  - 0.72.0: **owner decision 2026-10-28, "option A for services only"**
+    (§15 item 45; coordination #9, from the service vault's restore
+    work; changed after a security review). §6.6: a MEMBER vault accepts
+    a reconnect `hs.init` whose `ctx` names an older epoch of its epoch
+    history, only on a connection whose `peer_kind` is `"service"`
+    (§6.4), within 35 days (the service's backup retention), at most
+    512 ids; person connections and a service vault keep the exact
+    match. The history records the own chain count whose key signed each
+    epoch's handshake; the responder's `rotations` run from it. Accepting
+    an older `ctx` is audited `connection.restored_reconnect` and shown
+    in History; a later sign of the replaced epoch line (two copies)
+    suspends the connection (authenticated evidence with a later `ts`
+    only). A reconnect `hs.init` already answered MUST
+    be refused by `th1` first (marks kept 16 days + 5 minutes), and
+    changes no state before `sig_I` verifies at `hs.fin`. A restored
+    service reconnects each connection at its next start, nothing else
+    sent meanwhile, 3 tries, 7-day bound, then stale. Residual old-copy
+    risk added to §6.6, §11.14.2 and §13. Authentication, the
+    suspended-connection rule and the Limits are unchanged. §6.2 `ctx`
+    and §6.5 key retention updated. Vault: a staging release after 24;
+    the service vault (8d1e9d3) must follow (see item 45)
+  - 0.71.1: erratum, owner 2026-10-28 (asked by the iOS agent). §3.6.5:
+    a check that fails on the password after the unlock is shown at
+    once on the held screen (the vault's real state: open, held), with
+    the failure line, the password only, the check button and the lock
+    action, as the owner decided while vettid-android #209 was built;
+    0.71.0 said "the same screen". The kept PIN lives while the app is
+    in front and goes at a lock, a wipe or the next check
+  - 0.71.0: **owner decision 2026-10-28.** §3.6.5 "Ask only for what
+    is used": the unlock asks for the PIN only, and for the PIN and the
+    password on one screen only when the vault is past its deadline;
+    never the password ahead of the deadline. The screen says why the
+    password is asked; a check that fails after a successful unlock is
+    shown at once on the same screen with the checks left (the PIN kept
+    in memory only while that screen is in front, for the retry), never
+    as a later separate check screen; a failure that locks, and a
+    `backoff`, are shown as such. Found on staging: a wrong password at
+    the unlock spent a check unseen, so each visible try cost two. Apps
+    only; the vault is unchanged
+  - 0.70.0: **owner decision 2026-10-28** (§15 item 44; coordination
+    #4, from the iOS storage audit, vettid-ios #157). New §10.4.2 and type `pending.list` (app, desktop): the open asks that
+    arrived only as events (`connection.authenticate.pending`,
+    `device.session.pending`, `approval.pending`, `action.pending`,
+    `location.request.pending`), each as `{kind, body}` with the event's
+    body, so apps that keep vault content in memory only can read them
+    back after an unlock or a passed owner check. Refused while held,
+    like the other lists; desktops get the three kinds they receive,
+    agents `forbidden`; an older
+    vault answers `unsupported_type`. Paged by size (`after`, `limit`,
+    `next`); the app merges by id and applies only later events. Vault:
+    a staging release after 24
+  - 0.69.2: erratum, owner 2026-10-28; found in the review of
+    vettid-android #206. §11.14.10 said a successful rotation is
+    audited `identity.rotated` with `ref` = the `transfer_id`, but did
+    not say what a rotation that clears a recovery's mark, or a
+    `credential.rotate` with no mark owed, carries; a recovery's
+    `recovery_id` is a ULID like a `transfer_id`, so an app would label
+    a recovery's rotation as a move. Now: `ref` = the `transfer_id` only
+    when the rotation clears a transfer's mark (it wins when one
+    rotation clears both); `"recovery"` when it clears a recovery's
+    mark; absent otherwise. `identity.rotation_failed` carries the same
+    `ref` (§10.9 and §11.14.11 already said `recovery` for a recovery's;
+    §11.14.10 "Failure" said only the `transfer_id`). The vault writes no
+    `identity.rotated` `ref` yet, so no vault
+    or app built today changes; the vault follows in its next release
+    with §11.14.10
   - 0.69.1: erratum, 2026-10-27; matches vettid-vault #158 (behaviour as
     built). A rotation chain is resolved against what the receiver has
     already followed. §3.4 "identity.rotate statement" and §6.6
@@ -2431,9 +2644,9 @@ the relay at vettid.org allows:
 
 | Party | Learns | Does not learn |
 |---|---|---|
-| Relay | Mailbox ids, depositor relay keys, timing, padded sizes, blob and claim sizes | Message types, content, or which identity, device or connection a relay key belongs to |
+| Relay | Mailbox ids, depositor relay keys, timing, padded sizes, blob and claim sizes; the client kind (Android, iOS, desktop, agent) from the fixed User-Agent (§13.6) | Message types, content, or which identity, device or connection a relay key belongs to |
 | Parent / host | **Per instance:** relay host names; TLS byte counts and timing (connections are shared by all vaults, §12.2); how many connections there are (1 to 16 per host, up to 32 for 30 s at most once in 5 minutes, §12.2.1) and the HTTP/2 pings on quiet ones; the enclave's own counts of relay requests for the whole instance, no finer than once a second (in flight, waiting, failed, connections, vault processes at their own limit; §12.2.1), nothing per vault. **Per vault, by `vault_id`, in the clear** (0.27.4; it always did, VAULT-HOST-PROTOCOL §11.2): `vault_id` ↔ instance; the member's `user_guid`; every alternate-channel operation and when (enroll, unlock, lock, delete, recovery and its cancel and register, `account`); the **account snapshot** in enroll, unlock and `account` messages (the member's email address, first and last name, membership, terms and subscription state, §11.13); the app key's public key and a recovery's browser key; the lifecycle events of §11.5, among them name-change requests with both names and the backup bit; and **the key, the size and the time of every read and write of the vault's stored state and header** (below) | Relay requests (TLS terminates in the enclave, §12.2), mailbox ids, which peers a vault talks to, PINs, keys other than the public keys named here, vault contents |
-| Member API | Which member enrolled, unlocked or locked, and when; `vault_id`, instance lease, `vault_version`, `state_version` (§11.5); the public key of the vault's app key and when it changes, so when a transfer or recovery completed (0.15.0, §11.12); whether the vault keeps a backup copy of its credential (`credential_backup`, one bit, 0.16.0, §11.5), so whether it can be recovered; the member's name change requests (`account_name`, 0.18.0, §11.5), whose names it holds anyway | PINs; why an unlock failed (§11.4); mailbox ids; keys other than app public keys; any stable device identifier (§11.7) |
+| Member API | The client kind from the fixed User-Agent (§13.6); which member enrolled, unlocked or locked, and when; `vault_id`, instance lease, `vault_version`, `state_version` (§11.5); the public key of the vault's app key and when it changes, so when a transfer or recovery completed (0.15.0, §11.12); whether the vault keeps a backup copy of its credential (`credential_backup`, one bit, 0.16.0, §11.5), so whether it can be recovered; the member's name change requests (`account_name`, 0.18.0, §11.5), whose names it holds anyway | PINs; why an unlock failed (§11.4); mailbox ids; keys other than app public keys; any stable device identifier (§11.7) |
 | Network | Endpoints and timing | Everything else |
 
 The owner check (§3.6) adds nothing to this table. The hold is not
@@ -3904,7 +4117,19 @@ There is no host alarm and no email (§13.7; §15 item 22).
 - The app **MUST** ask for the PIN and the password **on one screen**,
   together, and send them in one `vault.owner-check`. It MUST NOT keep
   either beyond the check's answer (for a locked vault, beyond the unlock
-  and the check that follows it), and zeroizes both.
+  and the check that follows it), and zeroizes both; (0.71.0) except
+  that after an unlock whose check failed on the password with tries
+  left, or was answered `backoff` (0.71.1), it keeps the
+  accepted PIN in memory only while the app is in front, for the
+  password-only retry on the held screen below (0.71.1), and forgets it
+  when the app leaves the foreground, at a lock or a wipe, and at the
+  answer to each later check unless that answer again leaves the
+  password-only retry useful (0.73.1): a wrong password with tries
+  left, `backoff`, or a check the vault did not answer (no answer, the
+  vault unavailable, or the way to it refusing it for now: rate limited
+  or the service paused); any other answer, or tries left estimated at
+  0 (below), forgets it (then both are asked again, as for any
+  check).
 - It **SHOULD** show the check at the **first app open** (or return to
   the foreground) after the deadline, before any screen that needs the
   vault. It **MUST NOT** interrupt an action in progress (composing a
@@ -3931,6 +4156,79 @@ There is no host alarm and no email (§13.7; §15 item 22).
 - For a **locked** vault past its deadline, one screen asks for the PIN
   and the password; the app unlocks (§11.4), reads `vault.status`, and
   sends the check if the vault is held.
+- (0.71.0; owner decision 2026-10-28) **Ask only for what is used.**
+  The unlock screen asks for the PIN only, unless the vault is past its
+  deadline (held, due, or locked by the idle lock or by failed checks):
+  then, and only then, it asks for the PIN and the password on one
+  screen, because both are used (the PIN unlocks, the password does the
+  check that follows). The app never asks for the password ahead of
+  the deadline; a member who wants to check in early uses "check now"
+  (the early warning, above). Whether the vault is past its deadline
+  follows the app's saved owner-check state (its deadline and interval;
+  not vault content, so it survives a restart); with none (a new
+  install, a transfer or a recovery) it asks for the PIN only. Whenever
+  a PIN-only unlock finds the vault due by `vault.status` (no saved
+  state, the deadline passed while the screen was open, or the clocks
+  differ), the ordinary check screen follows, which hides no failure.
+  - It **MUST** say on that screen why the password is asked.
+  - It **MUST NOT** spend a check silently: when the unlock succeeds and
+    the check fails on the password, the app opens at once to the
+    **held screen**, which is the vault's real state (open, held until
+    the check passes; no cached content), and shows the failure there
+    with the waiting counts (the check did not pass, the checks left),
+    only the password field (the PIN kept as in the first bullet), the
+    check button and the lock action (0.71.1, owner decision
+    2026-10-28). It never shows a failure the member did not see happen,
+    nor presents an open vault as locked.
+  - When that failure locks the vault (§3.6.4: the tenth, or any failure
+    once `failures` ≥ 10), the app shows the owner-check lock text at
+    once, with the check button off, not a retry (0.71.1: on the held
+    screen until `vault.locking` moves the app to the locked screen).
+  - (0.73.0; owner decision 2026-10-28) When the app could not read the
+    tries left after a failed check, or after a check that got no
+    answer (the `vault.status` read that follows did not come, or the
+    check itself was not answered), and its own estimate is 0 or less,
+    the failure has probably locked the vault, but the app does not
+    know. The estimate is the tries left from the last `vault.status`
+    it read, less one for each failed check answered since and for each
+    check sent since that got no answer (it may have counted); with no
+    count read since the unlock or since the app started, it is 0.
+    It **MUST NOT** show the vault as locked and **MUST NOT** offer the
+    check (no PIN or password field, the check button off, the kept PIN
+    forgotten): it says the vault has probably locked and that it is
+    checking, and re-reads the vault's state without sending a check
+    (no try is used): `vault.status`, and the member API's
+    `GET /api/vault/status` (whose `state` reads `locked` once the host
+    saw the lock, even when the enclave no longer answers; §11.5 "A
+    stopped vault is locked"), at once, again after about 5 and 15
+    seconds, 1 minute and 3 minutes (past the lease expiry, when the
+    parent is gone), and whenever the relay reconnects or the app
+    returns to the foreground, one read at a time. The lock action
+    stays offered throughout. A `vault.locking` or a member API `locked`
+    shows the owner-check lock text (the bullet above; the host gives no
+    reason, and at an estimate of 0 the app's own count names it); an
+    answer to `vault.status` means the vault is open and shows the check
+    again with the count from that answer. The member API's `unlocked`
+    is not an answer: the app keeps the checking text until
+    `vault.status` answers or the reads end. With no answer when the
+    reads end, it says the vault cannot be reached and has probably
+    locked, with a "check again" action (the same reads) and the lock
+    action.
+  - (0.73.0; owner decision 2026-10-28) A check that got no answer while
+    the estimate is still above 0 may have counted, and the app **MUST**
+    say so: it re-reads `vault.status` (no try is used), and the member
+    API's `GET /api/vault/status`; a `vault.locking` or a member API
+    `locked` shows the locked screen (not the owner-check lock text: at
+    an estimate above 0 the cause is not known), and an answer to
+    `vault.status` shows the count from it. With no answer it says the
+    check may have counted and shows the estimate (the fewest tries that
+    may remain) as "at least" that many (0.73.2), with the check offered again (the
+    PIN field shown again unless the PIN is still kept).
+  - When the check is answered `backoff`, no check was used: the screen
+    says the vault is open and when the check can be tried
+    (`retry_after`), with only the password field (the PIN kept as in
+    the first bullet) and the send button off until then.
+  - A wrong PIN ends the unlock (§11.8), and no check is sent.
 - Settings offer the interval (1–24 h, §3.6.2) and the hold (§3.6.7).
   Turning the hold off is part of a check: the app asks for the PIN and
   the password on the same screen as any check, with an optional end
@@ -4424,8 +4722,10 @@ Field rules:
     id (the bundle's `invite_id`, §6.4);
   - `rekey`: the standard base64 of the 16-byte `epoch_id` of the current
     epoch; the responder MUST reject any other value;
-  - `reconnect`: the standard base64 of the stored `epoch_id` of the last
-    epoch (§6.6).
+  - `reconnect`: the standard base64 of the stored `epoch_id` of the
+    initiator's last epoch; the responder requires its own last epoch,
+    except a member vault on a `peer_kind` `"service"` connection, which
+    also accepts an epoch of its 35-day history (§6.6, 0.72.0).
 
   `ctx` is 1–128 bytes of printable ASCII (`0x21`–`0x7e`).
 - Tokens, per purpose, in both `hs.init` and `hs.resp`:
@@ -5066,7 +5366,8 @@ until the epoch is established (§6.3, 0.23.0).
   margin).
 - Send keys of previous epochs, and their `rk`, are deleted when the new
   epoch activates. A rekey is therefore possible only from the current
-  epoch.
+  epoch. Only the epoch *ids* of a service connection are kept longer,
+  35 days, for the reconnect of §6.6 (0.72.0).
 
 **Rationale for epochs rather than a per-message ratchet:**
 
@@ -5116,11 +5417,214 @@ is unlocked and either:
 the peer. It carries:
 
 - fresh standing and reconnect tokens;
-- `ctx` = the stored `epoch_id` of the last epoch;
+- `ctx` = the stored `epoch_id` of the initiator's last epoch;
 - `rotations`: the initiator's rotation statements since the last epoch,
   including any the responder may already have followed through
   `identity.rotate` (0.69.1). A suspended connection (§3.4) neither
   initiates nor answers a reconnect.
+
+**Epoch history** (0.72.0; owner decision 2026-10-28, "option A for
+services only"). A member vault keeps, **only for a connection whose
+stored `peer_kind` is `"service"`** (§6.4, fixed at connect), the id of
+every epoch it activated whose successor took over less than **35
+days** ago (the service's backup and point-in-time-recovery retention),
+each with the time it was **superseded** (stopped being current; the
+current epoch has none and is always accepted) and the own
+rotation-chain count whose key signed that epoch's handshake (not the
+count at activation, so a rotation between `hs.resp` and `hs.fin` is
+not lost). The window runs from the superseding, not from the
+activation, and entries are pruned by it; at most 512
+ids per connection, the oldest dropped first. The cap costs availability
+only: a busy connection that rekeys every 10,000 messages could push out
+entries still inside the window, and a reconnect naming one is refused.
+The history is part of the vault's state, so a backup holds it. Person
+connections and a service vault keep no history.
+
+**Accepting `ctx`** (0.72.0). A **member vault** accepts a reconnect
+`hs.init` on a `peer_kind` `"service"` connection whose `ctx` names its
+current epoch or any epoch in that history. On every other connection
+(person-to-person, and a service vault answering a member) the `ctx` must
+equal the responder's last epoch, as before. Any other `ctx` is refused
+(`reconnect_refused`). The binding stays: `ctx` must name an epoch of
+this connection that the responder itself recorded, and the
+authentication below is unchanged.
+
+**Told to the member** (0.72.0). Accepting an older `ctx` is audited
+`connection.restored_reconnect` (`connection_id`, `ref` = the named
+epoch's activation time) and shown in History as "<connection name>
+reconnected after restoring its data." (for example "VettID Member
+Service reconnected after restoring its data."). It makes no feed item:
+nothing is asked of the member, and §10.9's feed kinds are for items that
+need attention. (The fork case below does need it.)
+
+**Fork detection** (0.72.0). When an older `ctx` is accepted, the member
+vault records the epoch line it replaced (the epochs after the named
+one) and the inner `ts` of the accepted reconnect `hs.init`. It counts
+only **authenticated** evidence of that replaced line, and only when its
+inner `ts` is later than the recorded one (the same sender's clock): a
+message or rekey in session mode under a replaced-line epoch, or a
+reconnect `hs.init` naming a replaced-line epoch whose `sig_I` verified
+at `hs.fin`. Traffic the restored peer sent before its crash and that
+arrives late (the relay holds up to 14 days, unordered and redelivered)
+has an earlier `ts` and is processed normally. A reconnect is judged at
+`hs.fin`: the vault answers the `hs.init`, and when `hs.fin` verifies it
+suspends instead of activating (no state changes before `sig_I`, below).
+**Precedence:** a `ctx` naming a replaced-line epoch is never accepted as
+a restore; it is a fork sign, subject to the `ts` rule (one whose inner
+`ts` is not later than the accepted reconnect's is refused,
+`reconnect_refused`, decided from the `hs.init` without answering it).
+Evidence means
+two copies of the peer exist, and the vault **suspends the connection**
+under the rules of §3.4 (it sends nothing to and accepts nothing from the
+peer), audits `connection.fork_suspected` and makes a feed item of
+priority `high` with the text "<connection name> may be running from two
+copies of its data. The connection is paused. Contact <connection
+name> before you connect again." (text approved by the owner
+2026-10-28). A single genuine
+restore never triggers it. *Corner case:* a second restore from a backup
+newer than the first named epoch is reported as two copies (an operator
+mistake, and valid behaviour). **Exit:** `connection.rotation.resolve`
+answers `not_found` for a fork suspension (there are no candidates); the
+connection resumes only with a new invitation (§6.4), after the member
+has contacted the service (see the residual). *Residual:* a new
+invitation can be answered by either copy (same `ik` and relay key), so
+it is safe only after the service has ended the other copy or replaced
+its keys; the service learns of the suspension only from the member or
+out of band. Records of a replaced line are kept for the 35-day window.
+
+**Replay** (0.72.0). An older `ctx` no longer stops a replay once the
+epoch moves on, so the responder MUST refuse a reconnect `hs.init` it has
+already answered, identified by its transcript hash `th1` (§6.3). This
+check comes **first**, before anything is done with the message: it is
+dropped without an answer and audited (`reconnect_refused`). The marks of
+answered `th1`s are kept at least for the durable `ts` window of §8.4 (16
+days in the past plus 5 minutes in the future). A reconnect `hs.init`
+changes **no state** (tokens, rotation chain, active or stale) until
+`sig_I` verifies at `hs.fin`; the answer `hs.resp` is the only thing sent
+before. A restored responder loses its marks with the state it
+restores, which is why the deferral to `hs.fin` matters. (0.72.1, owner
+decision 2026-10-28) **One exception:** a statement in the `hs.init`'s
+`rotations` that is valid (§3.4, both signatures verify) and whose
+`old_ik` already has an accepted successor in the receiver's stored
+chain, with a different `new_ik`, suspends the connection at once under
+§3.4, before `hs.fin`, and the `hs.init` is not answered. The check
+comes after the replay check above and the collect `sender` check, and
+does not depend on `ctx`. The statement is signed by the predecessor key
+itself, so it is evidence without a handshake; a replayed `hs.init` can
+carry one only if two successors of that key were really signed. A
+statement remembered as dropped by `connection.rotation.resolve` (§3.4)
+is refused, and the `hs.init` with it (`reconnect_refused`); it is not a
+new conflict.
+
+**Crossing reconnects** (0.72.1, owner decision 2026-10-28). After a
+restore, the member's vault may start its own reconnect (for example
+after `token_expired`) while the service's is open. In the service's
+reconnect the service vault is the initiator and the member's vault the
+responder; in the member's, the roles are reversed. **A service's own
+reconnect yields to a member's that verifies**, and each side completes
+at most one of the two:
+- The service vault, receiving a member's reconnect `hs.init` that it
+  accepts (`ctx` its last epoch) before it has processed an `hs.resp` to
+  its own, abandons its own. It sends no `hs.fin` for it, drops a later
+  `hs.resp` to it, and revokes the tokens it issued in its `hs.init`. It
+  answers the member's and establishes that epoch at the member's
+  `hs.fin`, and starts no new reconnect while it awaits that `hs.fin`.
+  Once it has sent `hs.fin` for its own, its last epoch has moved on, and
+  a member `hs.init` naming the earlier one is refused
+  (`reconnect_refused`).
+- The member's vault answers a service's reconnect `hs.init` as usual,
+  even while its own is open.
+  - If a verified `hs.fin` establishes the service's reconnect first, the
+    member abandons its own: it drops a later `hs.resp` to it (audited)
+    and revokes the tokens its `hs.init` carried.
+  - If its own completes first (it has verified `sig_R` and sent
+    `hs.fin`), it drops its pending answer to the service's `hs.init`,
+    revokes the tokens in that `hs.resp`, and acks and drops a later
+    `hs.fin` for it. That `hs.fin` is not evidence for fork detection.
+
+Both sides end on the same epoch: the member's when the service saw the
+member's `hs.init` first, the service's otherwise. So the next rekey is
+not refused (`rekey_not_current_epoch`).
+
+**Between two persons** (0.74.0, owner decision 2026-10-29). When neither
+side of the connection is a service, both vaults may have a reconnect
+open at once (for example both unlocking with expired standing tokens).
+As for crossing rekeys (§6.5), **the `hs.init` with the lower `th1` wins**
+(compared as big-endian byte strings), and each side completes at most
+one of the two:
+- Each side answers the peer's reconnect `hs.init` as usual, even while
+  its own is open, and starts no reconnect of its own while an answer of
+  its awaits `hs.fin`. Whenever a side has both its own reconnect open and
+  an answer to the peer's awaiting `hs.fin`, it compares the two `th1`.
+- **Own `th1` higher:** it abandons its own. It sends no `hs.fin` for it,
+  drops an `hs.resp` to it (audited) without taking that response's
+  tokens or rotations, revokes the tokens its `hs.init` carried, and
+  establishes the peer's reconnect at the peer's `hs.fin`.
+- **Own `th1` lower:** at the peer's `hs.resp` it completes its own and
+  drops its answer to the peer's (not sent if not yet deposited),
+  revoking the tokens in that answer. It acks and drops a later `hs.fin`
+  for that answer, which only a release-23 peer sends. That `hs.fin` is
+  not evidence for fork detection.
+- **A verified `hs.fin` comes first.** A verified `hs.fin` for an answer
+  still awaiting it is established, whatever the `th1`, and the side's
+  own open reconnect is abandoned as above. The peer completed before it
+  saw this side's `hs.init`, which now names a superseded epoch and is
+  refused (`reconnect_refused`). Only a side that has itself sent
+  `hs.fin` drops the peer's.
+
+At most one side sends `hs.fin`, and both end on one epoch: the lower
+`th1`'s when each side saw the other's `hs.init` before completing,
+otherwise the one completed first. With a peer on release 23, which
+completes its own and establishes every verified `hs.fin`, the two may
+still end on different epochs, or the release-23 side may take a dropped
+answer's revoked tokens and go `stale`. Either way the failure is visible
+and needs a new invitation, as before 0.74.0.
+
+**Responder `rotations`** (0.72.0). The responder's `rotations` are its
+own rotation statements since the epoch `ctx` names (the own chain count
+recorded with that epoch), not since its last epoch, so a peer restored
+past one of its rotations receives the links it lacks. The initiator's
+`rotations` stay since its own last epoch.
+
+**After a restore** (0.72.0). A service vault knows that its data was
+restored from a restore marker, which the restore tool writes into the
+restored table and which is deleted after the next start's reconnects
+have been sent. At that start it reconnects every active or stale
+connection; it initiates, because it cannot recognise the member's newer
+epoch, while the member still holds the older one in its history. (An
+operator restore of a *member* vault, §11.14.2, up to 7 days, RUNBOOK,
+is not covered here: its connections whose epoch moved on are refused at
+reconnect, the `ctx` being exact, and need a new invitation.) While a reconnect is open the
+connection sends **nothing**: no messages, rekeys, token refreshes or
+re-mints. At most 3 tries per restore (the reconnect token allows 4
+messages). (0.72.1, owner decision 2026-10-28) A reconnect open at a
+restart keeps its stored initiator state and goes on waiting for its
+`hs.resp`. It sends no new `hs.init` and uses no try. An `hs.init` whose
+deposit was not confirmed is deposited again with the same bytes: a
+member vault that has already answered it drops the copy (replay, by
+`th1`), and its one `hs.resp` still reaches the stored ephemeral key. A
+new `hs.init` (a new `th1`, one try) is sent only when the initiator
+state was lost, or when a member's reconnect the service yielded to
+expired without `hs.fin`; never while that `hs.fin` is awaited. The initiator state is
+part of the vault's state; a restore's marker starts every reconnect
+afresh, as above. A
+reconnect not completed within **7 days** (the idle lock's; the member
+vault judges the named epoch's 35-day window when the `hs.init` arrives,
+so a backup near the window's end may be refused before then) fails: the connection becomes
+`stale`, the operator is alarmed, and a new invitation is needed. A
+restore taken before the restored side's own identity rotation is refused
+(`from.ik` older than the one on record): the connection goes `stale` and
+needs a new invitation, and a restored side MUST NOT issue a new
+`identity.rotate` until its reconnects are settled. An initiator SHOULD
+keep the responder's chain it has learnt across a restart.
+
+**Residual: an old copy.** A member vault accepts an older `ctx`, until 35
+days after that epoch was superseded, from whoever holds the service's
+relay key (deposits are sender-bound), its `ik` and the reconnect token
+the member issued to the service, which an old copy of the service also
+holds; the exposure is bounded by that window and by the authentication
+below, and a second copy is caught by the fork detection above
+(§11.14.2).
 
 **Authentication.** No SAS or approval is needed when the identities match.
 The responder MUST accept the reconnect only if all of these hold:
@@ -5479,7 +5983,33 @@ its end does not end the E2E session or the pairing.) Apps need none.
 3. An app answers `device.session.approve{request_id, seconds?}` (the app
    may change the length) or `device.session.deny`. The device is told
    with `device.session.granted{session_id, expires_at}` or
-   `device.session.ended{reason: "denied"}`.
+   `device.session.ended{reason: "denied"}`. A device whose renewal is
+   denied keeps its current session until its `expires_at` (0.77.0,
+   owner decision 2026-10-29); `device.session.ended{reason: "denied"}`
+   then means only that the request was refused.
+
+   (0.78.0, owner decision 2026-10-29, texts approved.) **A renewal
+   request.** A request is a renewal when the device has a session that
+   has not expired. The app takes its `expires_at` from the device's
+   `session_expires_at` in `device.list` (§10.3), which it reads when it
+   shows the request, or from a later `sync.event{kind:
+   "device.session"}` (§10.1); `device.session.pending` does not carry
+   it. On a renewal request an app shows above its choices "Denying
+   refuses only the extra time. <device> keeps its current access until
+   <expires_at, local time>." and offers three choices: **Approve**,
+   **Deny** and **Deny and end access now**. The third asks the app's
+   end-access confirmation ("End access for <device>?"), then sends
+   `device.session.end{device_id}` alone: an end drops the pending
+   request ("Ending", below) and is audited and synced once, as an end.
+   If the end fails, the app says so plainly and offers it again, as its
+   end-access action does; the request stays open. <device> is the
+   request's `name`, shown as §10.8 "Showing received text" says ("A
+   desktop", "An agent" when empty). When `expires_at` passes while the
+   request is shown, the app shows it as a first request (no notice;
+   Approve and Deny). The request leaves the screen at its `exp`, when
+   another device decides it or ends the session, and when the vault is
+   held (the hold drops it, §3.6.3). A confirmation already open stays
+   and ends access when confirmed, except while held.
 
 `device.pair.approve` MAY carry `session_seconds` to grant the first access
 session together with the pairing (§10.3). A grant replaces the device's
@@ -5569,7 +6099,34 @@ device (`limit` beyond that):
 the device knows `expires_at`.
 
 Every grant, end and decision is audited (§10.9), and the owner's other
-devices learn of it as `sync.event` (§10.1).
+devices learn of it as `sync.event` (§10.1) (0.77.0, spelled out):
+
+- **Grant** (`device.session.approve`, and `device.pair.approve` with
+  `session_seconds`, §10.3): `device.session.granted`;
+  `sync.event{kind: "device.session", device_id, expires_at}`.
+- **Deny of a session request:** `device.session.denied` (`device_id`,
+  `ref` = `request_id`); `sync.event{kind: "device.session", device_id,
+  expires_at?}`, with the `expires_at` of the device's current session,
+  absent when it has none. A deny does not end a current session.
+- **Decision on a held request:** `approval.granted` or
+  `approval.denied`; `sync.event{kind: "approval.decided", approval_id,
+  approved}`.
+- **End** (`device.session.end`): `device.session.ended` (`device_id`).
+  Each held request answered `denied` is also audited `approval.denied`
+  and sends `sync.event{kind: "approval.decided", approval_id, approved:
+  false}`. `sync.event{kind: "device.session", device_id}` is sent when
+  the device had a session or its pending request was dropped. The app
+  that ended or unlinked it gets none of these (§10.1) and drops that
+  device's asks itself. **Unlinking** (§7.4) sends the same events and `approval.denied`
+  records, and is audited `device.unlinked` instead of
+  `device.session.ended`.
+
+Expiry is neither audited nor sent: a session ends at its `expires_at`,
+a pending request is dropped and a held request answered
+`approval_timeout` at its `exp`, all known to every device that saw
+them, and an app drops the ask then. Requests answered
+`owner_check_required` when a hold begins (below) are not sent either;
+apps re-read `pending.list` after the check (§10.4.2).
 
 **While the vault is held** (§3.6.3), access sessions are suspended: a
 desktop or agent may send only `vault.status`, `device.session.end{}`
@@ -6058,6 +6615,7 @@ an answer to an unknown or expired id is dropped.
 | | `connection.asks.mute`, `connection.asks.resume` | D→V | req | Mute or resume a connection's asks (§10.4.1, 0.23.0) |
 | | `connection.authenticate.challenge`, `.response`, `.rotated` | V↔V | | Challenge; the member's signature or refusal; credential-key rotation statements |
 | | `connection.authenticate.pending` / `.result` / `.key` | V→D | | Asked to authenticate; the verdict; the pinned key followed a rotation |
+| | `pending.list` | D→V | req | (0.70.0) The open asks that otherwise arrive only as events (§10.4.2) |
 | Messaging | `message.send` | D→V | req | Send to a connection |
 | | `message.deliver`, `message.receipt` | V↔V | | Message; delivered or read receipt |
 | | `message.new` | V→D | | Incoming message |
@@ -6354,7 +6912,7 @@ an answer to an unknown or expired id is dropped.
   | `connection.request` | `pending_id` (incoming) or `connection_id` (outgoing), `state` (`approved`, `peer_approved`, `declined`, `peer_declined`, `expired`) (§6.4); `peer_approved`: the peer's `connection.approved` arrived (0.10.3); `declined`: the member declined; `peer_declined`: the peer's `connection.declined` arrived and ended the request (0.10.5) |
   | `block.added`, `block.removed` | `block_id` (§10.4) |
   | `connection.authenticate.decided` | `request_id`, `approved` (§10.4) |
-  | `device.session` | `device_id`, `expires_at` (absent when the session ended) (§6.8) |
+  | `device.session` | `device_id`, `expires_at` (absent when the device has no session) (§6.8) |
   | `approval.decided` | `approval_id`, `approved` (§6.8) |
   | `leash.grant.changed` | `grant_id`, `agent_id`, `version` (§10.11) |
   | `leash.grant.revoked` | `grant_id`, `agent_id` (§10.11) |
@@ -6684,11 +7242,11 @@ vault signs a fresh challenge with the member's **credential key**
   before 0.65.0 valid and keeps a signature under one label from
   verifying under the other; the length prefix keeps `m_p`
   unambiguous.
-- **Match code** (0.70.0; owner decision 2026-10-28). A challenge with
+- **Match code** (0.79.0; owner decision 2026-10-28). A challenge with
   `purpose: "signin"` MAY carry `match_code`, a short number the
   challenger also shows to whoever is signing in (a service's website
   shows the same number), so that the member can check that the prompt
-  on the phone belongs to the sign-in in front of them. Before 0.70.0
+  on the phone belongs to the sign-in in front of them. Before 0.79.0
   a service put it in `context` ("Sign in to VettID Member Service,
   match code 42"), where an app can neither show it large nor safely
   pick it out: `context` is the challenger's free text, and a
@@ -6708,7 +7266,7 @@ vault signs a fresh challenge with the member's **credential key**
     handled as if it had no `match_code` (screen and gate).
     Refusing would make a challenger's formatting slip a failed
     sign-in for a member who cannot tell why, and ignoring is the
-    behaviour a vault before 0.70.0 already has (unknown members are
+    behaviour a vault before 0.79.0 already has (unknown members are
     ignored, §10.1). The member then sees today's screen, with no
     number, and the sign-in still needs the member's approval, so
     nothing is weaker than before.
@@ -6781,7 +7339,7 @@ vault signs a fresh challenge with the member's **credential key**
 - **The screens per purpose** (0.65.0; app work, later). For `signin`
   the app titles the approval "Sign in to <name>?", shows `context`,
   and says "Only approve if you are signing in right now."; with a
-  valid `match_code` it shows it first (0.70.0): large digits near the
+  valid `match_code` it shows it first (0.79.0): large digits near the
   top, headed "Match code", with "Check that the sign-in screen shows the
   same number" (ANDROID-PLAN and IOS-PLAN give the texts and the
   accessibility labels); without one, as before. `context` is still
@@ -7020,6 +7578,82 @@ on the connection. The changes are audited `connection.asks_paused`,
 `connection.asks_resumed`, `connection.asks_muted` and
 `connection.asks_unmuted` (`connection_id`). Only a pause is a feed
 item.
+
+#### 10.4.2 Open asks that arrive only as events: `pending.list`
+
+(0.70.0; owner decision 2026-10-28, §15 item 44.) Apps keep vault
+content in memory only (ANDROID-PLAN §5, IOS-PLAN §6.9), so what they
+hold is gone after a lock, a hold or a restart. Most asks can be read
+back (`grant.list` `pending`, `critical-secret-use.list` `incoming`,
+`intro.list` `received`; the open decisions of `share.pending.list`,
+which are not asks). Five kinds arrived only as events and were lost;
+`pending.list` returns them:
+
+| Type | Request body | Response body |
+|---|---|---|
+| `pending.list` (app, desktop) | `{after?, limit?}` (`limit` 1–100, default 50) | `{asks: [{kind, body}], next?}`; at most 131,072 bytes (below) |
+
+| `kind` | `body`: exactly the body of the event it repeats | Section |
+|---|---|---|
+| `authenticate` | `connection.authenticate.pending`: `{connection_id, request_id, context?, purpose?, match_code?, exp}` (a valid `match_code`, 0.79.0) | §10.4 |
+| `session` | `device.session.pending`: `{request_id, device_id, role, name, seconds, exp}` | §6.8 |
+| `approval` | `approval.pending`: `{approval_id, device_id, role, name, type, body, exp, flags?}` | §6.8 |
+| `action` | `action.pending`: `{invocation_id, connection_id, action_id, sensitivity, params, exp}` | §10.14 |
+| `location` | `location.request.pending`: `{request_id, connection_id, note?, exp}` | §10.16 |
+
+- **What is listed.** Every ask of these kinds that the vault would
+  still accept a decision on: received, not yet decided by any device,
+  not expired and not withdrawn (a suppressed ask, §10.4.1, was never
+  sent and is never listed). The `body` is the event's body as the
+  vault sent it, including any member a later release adds to that
+  event; an app parses it as it parses the event. An entry carries no
+  member the event did not.
+- **Pages.** Sorted by `exp`, then by the ask's id (`request_id`,
+  `approval_id` or `invocation_id`), soonest first. The limits are per
+  connection or per device (4 received challenges and 8 open
+  invocations per connection, one session request and 8 held approvals
+  per device, 16 location requests), so the list is paged like
+  `message.list` (§8.1, §10.5.2): a page holds at most `limit` entries
+  and at most 131,072 bytes, and always at least one entry (an entry is
+  never split or dropped; a single entry fits, as its event did).
+  `next` is an opaque cursor for `after`, present while entries remain;
+  a cursor that no longer names a position starts again from the
+  beginning.
+- **Who may ask.** Apps, which receive and decide all five kinds, and
+  (owner decision 2026-10-28) desktops, within their access session
+  (§6.8), which get only the three kinds they receive and may answer:
+  `authenticate`, `action` and `location` (never `session` or
+  `approval`), as every other ask list is (app, desktop). Agents:
+  `forbidden`.
+- **When.** It is an owner-device request like the other lists: while
+  the vault is held (§3.6) it is refused like them (`owner_check_required`),
+  so the app reads it after the unlock and again after a passed owner
+  check, where it already reads `grant.list`. It changes nothing in the
+  vault: reading the list neither extends nor ends an ask, writes no
+  audit entry and sends nothing to the asker.
+- **The app.** It reads every page, then replaces its in-memory
+  entries of these kinds with the list (an entry not in it is gone:
+  decided elsewhere, expired or withdrawn), merging by the ask's id.
+  Since events arrive in no particular order (§8.4), it then applies
+  only events whose inner `ts` is later than the first page's response
+  `ts`: a creation event as old as that or older is ignored (the list
+  already says whether the ask is open), and a closing event
+  (`sync.event` `connection.authenticate.decided`, `approval.decided`,
+  `action.decided`, each by its id; `device.session`, by `device_id`,
+  since a device has at most one session request; and
+  `location.request.closed`) for an ask not in the list does nothing. A
+  decision on a listed ask is the same
+  request as on the event (`connection.authenticate.approve`,
+  `device.session.approve`, `approval.decide`, `action.respond`, or
+  `location.share.start` with the `request_id`, §10.16), with the same errors when another device decided
+  first.
+- **A desktop** reads the list when its access session starts and
+  again after a passed owner check, and merges it the same way.
+- **Older vaults.** A vault before the release that carries it answers
+  `unsupported_type` (§5.3); the app then keeps today's behaviour (an
+  ask lost at a lock shows "No longer on this phone") and does not ask
+  again until the next unlock.
+- **Vault:** a staging release after 24.
 
 ### 10.5 Messaging
 
@@ -8443,7 +9077,86 @@ The **profile object** holds the extras' display name and photo. Sent by
   rotates; apps show the new one without a warning when the rotation
   chain verified (§3.4), as they do for a credential-key rotation
   (§10.4). Names use Unicode bidirectional isolation wherever an app
-  shows them next to other text.
+  shows them next to other text ("Showing received text", below).
+- **Showing received text** (0.76.0, owner decision 2026-10-29). Every
+  string that reaches an app from another party (another member's vault,
+  a service, an introducer, a paired desktop or agent, a phone being
+  moved to) and that the app shows can carry characters that hide or
+  reverse the words around it. That includes, and is not limited to: a
+  connection's or requester's names and display name and an invitation's
+  `hint.name` (§6.4); the name a desktop, agent or new phone gives itself
+  and an agent's request shown for approval (§10.3, §10.11); the
+  `context` of a member-authentication challenge (§10.4) and of a
+  critical-item use (§10.13); a grant's reason and labels, and the names
+  and labels of received grants and `@profile` items (§10.8, §10.12); a
+  payment request's `memo` (§10.14); an introduction's name and note
+  (§10.15); a location request's note (§10.16); and a message's text in a
+  preview and an attachment's file name (§10.5, §10.5.1). Before an app
+  shows such text, it applies one cleaning step:
+  1. **Breaks.** In the text as received, CR immediately followed by LF is
+     one break (CR, ZWSP, LF is two); LF, CR, VT (U+000B), FF (U+000C),
+     NEL (U+0085), U+2028 and U+2029 are each a break. Text shown on one
+     line (a name, a label, a list row) turns each break and each tab
+     into a space; text whose lines are kept (a context, a note) turns
+     each break into one LF (U+000A) and each tab into a space.
+  2. **Removal.** Every other code point of general category Cc or Cf is
+     removed (by the platform's Unicode data: bidirectional controls,
+     zero-width characters, BOM, tag characters), except ZWNJ (U+200C)
+     and ZWJ (U+200D), which emoji sequences and Persian and Indic
+     shaping need. An isolate the text carries is removed with the rest,
+     so it cannot close the app's own. Code points of other categories,
+     including private-use (Co) and unassigned (Cn) ones, are kept; a
+     lone surrogate (Cs), which some platforms cannot hold, is shown as
+     U+FFFD.
+  3. **Trim.** Code points with the Unicode White_Space property (after
+     steps 1–2, LF and the space separators, Zs) are removed at both ends
+     of the text and, for text whose lines are kept, at both ends of each
+     line, so no empty line is left at either end.
+  4. **Empty.** The result is empty when nothing is left once every
+     Default_Ignorable_Code_Point (ZWJ and ZWNJ included, and fillers
+     such as U+3164), White_Space code point and U+2800 BRAILLE PATTERN
+     BLANK (0.78.1; a symbol that draws as a blank but is not a
+     default ignorable) is also set aside (they stay in the text that
+     is shown). Empty text is never shown as a
+     blank: a connection's title shows "Name not shared yet"; a name
+     inside a sentence or after a label shows "a connection" ("A
+     connection" to start a sentence); a new phone in a transfer without
+     a name shows "The other phone"; a desktop or agent without a name
+     shows its kind ("a desktop", "an agent"; "A desktop", "An agent" to
+     start a sentence); an absent or empty
+     `context` of a challenge that has a `purpose` (§10.4) shows the
+     fixed line "No details were given. Only approve if you know what
+     this is for.", and a challenge without a purpose shows no context
+     line, as before 0.65.0; any other empty text (a display name, a
+     reason, a label, a note, a memo, a caption) is left out together
+     with the label that introduces it.
+  5. **Isolation.** Wherever the result sits next to other text or inside
+     a sentence (a row's second line, "Calls from <name> turned off"), it
+     is wrapped in FSI (U+2068) … PDI (U+2069). Text whose lines are kept
+     is never put inside a sentence: it is shown as its own block, and
+     where it sits next to other text, each line is wrapped in FSI … PDI
+     (an isolate ends at a line break).
+  6. **Summaries.** A one-line summary of a multi-line text (a list row,
+     an unread preview) takes the first line that is not empty (as step
+     4 defines it) after steps 1–4, cleaned as one-line text and
+     isolated as step 5 says.
+  7. **Search.** A local search matches against the cleaned text without
+     the isolates, so a query that spans a name and the fixed words
+     around it finds the entry.
+  A message's full text in its own bubble is cleaned more lightly,
+  since right-to-left writers use directional marks in it: step 1
+  applies as for text whose lines are kept; step 2 also keeps LRM
+  (U+200E), RLM (U+200F) and ALM (U+061C), which set no direction for
+  the text around them, while embeddings, overrides, isolates,
+  zero-width spaces, tag characters and other controls are removed as
+  for any text; step 3 trims only the ends of the whole text, so a
+  line's indentation stays. It is shown as its own block, each line in
+  FSI … PDI. Cleaning cannot stop text
+  that imitates the app's own wording or uses lookalike letters: screens
+  show received text in its own block, under a label that says whose
+  words they are, wherever it could be mistaken for the app's. The step
+  is for display only: what a vault accepts is unchanged ("Receiving",
+  above; §10.3, §10.4).
 - **What the names are.** `first_name` and `last_name` are the names the
   peer's member gave VettID at registration or later changed from the
   app (`account.name.set`), passed on by the peer's vault from VettID's
@@ -8716,7 +9429,10 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `ref` = `idle`, §3.6.8), ten failed owner checks, a recovery,
   memory pressure, a lease loss, a restart, 0.23.2); `device.paired`,
   `device.unlinked`; `connection.added`, `connection.removed`,
-  `connection.stale`, `connection.reconnected`; `identity.rotated`;
+  `connection.stale`, `connection.reconnected`; (0.72.0)
+  `connection.restored_reconnect` (`connection_id`, `ref` = the named
+  epoch's activation time, §6.6) and `connection.fork_suspected`
+  (`connection_id`, §6.6); `identity.rotated`;
   `credential.created`, `credential.rotated`, `credential.password_changed`,
   `credential.password_failed`, `credential.unlocked`;
   `credential.recovered`; (0.52.0) `credential.utk_resync`
@@ -8787,8 +9503,11 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `connection.authenticate.requested`, `connection.authenticate.signed`,
   `connection.authenticate.denied`, `connection.authenticated`,
   `connection.authenticate_failed` (`ref` = `request_id`);
-  `device.session.granted`, `device.session.ended`, `approval.granted`,
-  `approval.denied` (`ref` = `approval_id`) (§6.8);
+  `device.session.granted` (`device_id`, `ref` = `session_id`),
+  `device.session.ended` (`device_id`), `device.session.denied`
+  (`device_id`, `ref` = `request_id`; 0.77.0), `approval.granted`,
+  `approval.denied` (`device_id` = the requester, `ref` =
+  `approval_id`) (§6.8);
   `connection.authenticate.key_rotated`,
   `connection.authenticate.rotation_rejected` (§10.4);
   `connection.asks_paused`, `connection.asks_resumed`,
@@ -9157,7 +9876,9 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
   attempts were used), `recovery.counter_unavailable` (priority
   `urgent`), `identity.rotation_failed` (priority `high`, `ref` =
   `recovery`, or the `transfer_id` after a transfer) and `identity.rotate_conflict` (priority `high`,
-  `connection_id`) (§11.14.11), (0.50.0; needs a vault release)
+  `connection_id`) (§11.14.11), (0.72.0) `connection.fork_suspected`
+  (priority `high`, `connection_id`; §6.6; no feed item for
+  `connection.restored_reconnect`), (0.50.0; needs a vault release)
   `recovery.generation_closed` with `ref` `<generation>/rollback`
   (priority `urgent`; only for the reason `rollback`, §11.14.11),
   and `guide`. Apps render
@@ -11934,7 +12655,24 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
   `address_type`); `next` pages by `index`; `limit` 1–500 (default 100).
 - **The signing policy.** The vault signs a PSBT (`psbt`: standard base64
   of BIP174 version 0, at most 65,536 bytes) only if:
-  - it has 1–64 inputs and 1–64 outputs, transaction version 1 or 2;
+  - it has 1–64 inputs and 1–64 outputs, transaction version 1 or 2
+    (0.78.1: a PSBT that does not parse is `malformed`, including one
+    with fewer input or output maps than the transaction has inputs or
+    outputs, one with bytes after the last output map (more maps are
+    read as the following maps, so they are bytes after the last), and
+    one with a bad global xpub entry: a version that is not one of the
+    four registered (`xpub`, `xprv`, `tpub`, `tprv`), a version of the
+    other kind than the key (a private version on a public key, or
+    the reverse), depth 0 with a non-zero parent fingerprint or child
+    number, or the same xpub twice; also a repeated sighash key (0
+    then 1; 0 twice), the same unknown key twice with different
+    values, and a `witness_utxo` whose script length does not match the
+    script that follows (the vault reads the script as everything after
+    the first 9 bytes). The
+    vault accepts trailing bytes and each of these cases today, vault
+    follow-up (once the vault parses `witness_utxo` strictly, the vector
+    `probe_witness_utxo_trailing_byte` changes from `witness_utxo` to
+    `malformed`);
   - every input spends an output of **one of the wallet's accounts**,
     shown by a derivation with the wallet's fingerprint, which the vault
     re-derives and checks with the output script:
@@ -11952,8 +12690,11 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     CVE-2020-14199). Taproot signature hashes commit to every input's
     amount and script (BIP341), so the vault computes them only from
     these verified outputs; no duplicate inputs, no finalised or
-    partially signed inputs; sighash SIGHASH_ALL, or for P2TR
-    SIGHASH_DEFAULT (the absent sighash) or SIGHASH_ALL;
+    partially signed inputs; sighash SIGHASH_ALL (0.78.1: a sighash
+    type of 0, present or absent, counts as absent and is accepted on
+    either kind of input; it means SIGHASH_ALL for P2WPKH, as built,
+    and SIGHASH_DEFAULT for P2TR; any value other than 0 or 1
+    (SIGHASH_ALL) is refused);
   - every output is a standard script (P2PKH, P2SH, P2WPKH, P2WSH or
     P2TR), of at least 330 sats, which the summary shows as an address
     **encoded for the wallet's network** (0.37.0, as built). An output
@@ -11975,14 +12716,14 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
 
   | Reason | Meaning |
   |---|---|
-  | `size` | empty, or more than 65,536 bytes |
-  | `malformed` | not a BIP174 PSBT that parses |
-  | `shape` | 0 or more than 64 inputs or outputs, or the PSBT's input and output maps do not match the transaction's |
+  | `size` | decoded to more than 65,536 bytes (0.78.1: an empty `psbt`, text that is not standard base64 and text over 87,384 characters are `bad_request` before any PSBT is read) |
+  | `malformed` | not a BIP174 PSBT that parses (0.78.1: also fewer input or output maps than the transaction has inputs or outputs, bytes after the last output map, a bad global xpub entry, a repeated sighash key, the same unknown key twice with different values, and a `witness_utxo` whose script length does not match its script, as above) |
+  | `shape` | a parsed PSBT with no inputs, more than 64 inputs, no outputs or more than 64 outputs (0.78.1: not a mismatch of the maps, which does not parse: `malformed`) |
   | `version` | transaction version not 1 or 2 |
   | `duplicate_input` | the same outpoint twice |
   | `previous_tx` | an input without the full previous transaction, or one whose txid or output index does not match the outpoint |
   | `witness_utxo` | `witness_utxo` differs from the previous transaction's output |
-  | `sighash` | a sighash other than SIGHASH_ALL (or, for P2TR, absent) |
+  | `sighash` | a sighash type other than 0 and 1 (SIGHASH_ALL) (0.78.1: 0, present or absent, counts as absent and is accepted for P2WPKH and P2TR) |
   | `input_script` | an input that is finalised, partially signed, or carries a redeem or witness script or taproot script-path data |
   | `amount` | a previous output's amount is zero, negative or above 21 million BTC |
   | `foreign_input` | an input with no derivation of the wallet's fingerprint |
@@ -12023,7 +12764,8 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     until its owner sets them (`wallet.create{caps}` or
     `wallet.caps.set`). The vault never invents a number; the app asks at
     creation, and a mainnet wallet cannot skip the question
-    (ANDROID-PLAN). `<wallet>.caps` is always present: `per_tx_sats` and
+    (ANDROID-PLAN). `<wallet>.caps` (in a vault that implements caps) is
+    always present: `per_tx_sats` and
     `per_period_sats` are absent when unlimited, and `period_seconds` and
     `spent_sats` are always there.
   - **Setting and lowering.** `wallet.caps.set` is app only and a normal
@@ -12175,7 +12917,13 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     `cap: {ok, reason?, remaining_sats?, allowed_after?}`: whether
     `wallet.sign` would pass the caps now, and if not why, with the
     fields of `cap_exceeded`; the app shows it before it asks for the
-    password. It changes nothing and writes no audit entry.
+    password. It changes nothing and writes no audit entry. (0.78.1) A
+    vault that does not implement spend caps (release 24 does not)
+    omits `cap`. A vault that implements them always returns it,
+    `{ok: true}` for a wallet without caps. With no `cap`, the app
+    shows nothing about limits, neither a limit nor "No limit"; the
+    same for `<wallet>.caps`, which a vault without caps does not
+    have.
 - **Spending is a critical action.** `wallet.sign` is app only, needs the
   credential's unlock window (`credential_locked` otherwise; 0.52.0: a
   presented UTK is spent first, §3.5.4) and is one credential operation: the UTK payload's
@@ -12491,6 +13239,9 @@ the enclave's by a second or more in either direction.
 enclave makes a random DEK and writes `dek_wrap` and `secret_check`
 (§11.14.1), and `recovery.counter_key`; a request without it is
 `bad_request`.
+
+`app.name` is the device's name for the member's own lists. It exists
+only inside the sealed request (0.75.0, §13.6 "Device details").
 
 `device_attest` is REQUIRED (§11.7). `app.api_key` (0.15.0) is REQUIRED:
 the app key that signs the app's member API requests (§11.12); the vault
@@ -15410,6 +16161,8 @@ bytes:
            "api_key": "<b64 SPKI DER, P-256>" } }
 ```
 
+`app.name` exists only inside the sealed request, as in §11.3 (0.75.0).
+
 `app.api_key` (0.15.0) is REQUIRED: the new app's app key (§11.12),
 which the enclave binds to the queue message's `app_key` like
 `user_guid`. The app takes `user_guid` from the claim (§11.11.7).
@@ -16879,7 +17632,14 @@ can announce a rotation of its own; a connection keeps the first
 successor it accepted (§3.4), and the relay and the host that carry the
 notices are VettID's. So the rotation ends the old keys against someone
 who is not on the message path, and against VettID only once the
-connections have accepted the member's rotation.
+connections have accepted the member's rotation. (0.72.0) A service
+connection adds one narrow path: for 35 days after an epoch was superseded a member vault accepts a
+reconnect naming an older epoch (§6.6), so an old copy of the *service*
+vault, with its relay key, identity key and the reconnect token the
+member issued to it, could reconnect
+without being the current one; the window, the unchanged authentication
+and the fork detection (two copies suspend the connection, audited) bound
+it.
 
 **The order of writes.** The vault stores the state and the header as
 two objects, state first, and the header may lag by one write (§13.2).
@@ -17021,7 +17781,10 @@ written fewer than 5 times since. **Before a restore, recovery cannot
 help**, whether the credential backup is on or off: the header's
 `opener` is for the earlier DEK and the state is under the later one
 (§11.14.6 answers `stored_mismatch`). **After the restore** the vault is
-the complete vault from before the event. For a transfer, the member
+the complete vault from before the event. (0.72.0) Its connections
+whose epoch moved on meanwhile are refused at reconnect (the `ctx` is
+exact, §6.6) and need a new invitation; the history of §6.6 is for a
+restored *service*, not for a restored member vault. For a transfer, the member
 then needs the old phone (which keeps its keys until the notice or, from
 day 7, until its vault answers, §11.14.10), or, with the credential backup on, a recovery with a new
 phone, the PIN and the password after the quiet period. For a PIN or
@@ -18850,11 +19613,20 @@ the old copy of §11.14.2, and the member gains nothing by choosing.
   step 6 does, and then rotates; the old key is kept as above. A pending unlink written by a release before the mark
   existed is treated as owing a rotation.
 - **Failure.** A rotation that cannot be made is audited
-  (`identity.rotation_failed`, `ref` = the `transfer_id`), the mark is
+  (`identity.rotation_failed`, with the `ref` a success would carry,
+  below; 0.69.2), the mark is
   kept, and it is tried again at the next unlock: **it never fails the
   unlock, never delays the notice and never fails the move.** A
-  successful rotation is audited `identity.rotated` with `ref` = the
-  `transfer_id` and appears in History.
+  successful rotation is audited `identity.rotated` and appears in
+  History. (0.69.2) Its `ref` says which owed mark it cleared: the
+  `transfer_id` **only** when it clears a transfer's mark; otherwise the
+  literal `"recovery"` when it clears a recovery's mark (never the
+  `recovery_id`, which is not told apart from a `transfer_id`); otherwise
+  (a `credential.rotate` with no mark owed) no `ref`. When one rotation
+  clears both a transfer's and a recovery's mark, the `transfer_id`
+  wins. Apps show the move's line only for a `ref` other than
+  `"recovery"`; the owed mark itself keeps its own `ref` (the
+  `recovery_id` of §11.14.6 step 6).
 - **What the old phone sees.** Nothing new. It was removed at the
   approval (§7.4), so it receives neither the rotation notices nor the
   new address; it learns of the move from `device.unlinked{transferred}`
@@ -19882,6 +20654,7 @@ it can read and write only its own objects and use only its own relay key
 | A thief with the app's session and the PIN, without the password | No deletion: the holder's `vault.delete` needs the password too (§12.5) | — |
 | The member's account, email and PIN, for 24 h unnoticed, with the backup off | No recovery and nothing of the vault (0.16.0: the request is refused, §11.11.1, §11.11.7). Through a start-over (§11.11.9), the vault's deletion: availability only, never its contents | Cancel the start-over within the 24 h (portal, email link, app) |
 | VettID (operator) | Deleting a vault (the host's `delete`, an operator power it had anyway, §13.5 list), never reading it; the member is emailed | — |
+| (0.72.0) An old copy of a service vault, with its relay key, identity key and the reconnect token the member issued to it | Until 35 days after that epoch was superseded, a reconnect naming an older epoch of that connection, accepted by the member's vault; the member is told (History). Not a person connection, not after the window | `connection.restored_reconnect`; a second copy suspends the connection (`connection.fork_suspected`, §6.6) |
 | A byte-identical copy of the current blob, used before the member's next use | Undetectable at that moment; a use still needs the password and the holder's session. The member's next use then presents a stale copy and raises the alarm (§3.5.9). The daily owner check is such a use, so the window is at most one interval (§3.6.6) | The alarm and the forced rotation |
 | A dishonest host, about clone alarms | Suppressing or delaying the member's email; not the vault's alert to the app, its freeze or its audit entry (§11.5) | — |
 | A transfer (§6.7.1) | Moving the app needs the holder's session, the PIN and the password; the new phone must pass device attestation; the old app is removed and its copy dead | Recovery, if the member lost the phone to it |
@@ -19946,6 +20719,42 @@ documented.
   time.
 - **Logging.** Keys, PINs, tokens, signatures, attestation tokens and
   plaintext MUST NOT appear in logs, metrics or errors.
+- **Device details** (0.75.0, owner decision 2026-10-29). A device's
+  name or model (`app.name` in §11.3 and §11.11.3, a device's `profile`
+  in its pairing `hs.init`, §6.7, and the `name` and `profile` of
+  `device.list`) MAY be kept in the member's own vault: it is the
+  member's data. It travels only sealed to the member's own vault (those
+  requests and handshakes) or end to end between the member's own
+  devices. It MUST NOT reach any VettID server (for example the member
+  API, the host and parent, the relay, the push gateway, the calls
+  issuer and TURN, or their logs) or any service. A vault MUST NOT send
+  a device's name or model from its device records to a service
+  connection (a service vault, VettID's Member Service among them);
+  what the member writes in a message or an item is not a device record.
+  - **User-Agent.** Every HTTP request that a VettID client's own code
+    sends, to a VettID server or any other host, carries a fixed
+    `User-Agent` that is exactly one of `VettID-Android`, `VettID-iOS`,
+    `VettID-Desktop` or `VettID-Agent`, with nothing appended (no app or
+    OS version, model or build), replacing the library default
+    (`okhttp/x`, `CFNetwork/x Darwin/y`). This includes WebSocket
+    upgrades and long-polls to the relay, blob uploads and downloads,
+    the member API, the calls issuer and the wallet's chain source. No
+    other header the client sets carries device details. A client MUST
+    NOT reach a VettID server through a component that adds the model
+    and whose header it cannot set (a WebView with its default
+    User-Agent, Android's DownloadManager). Not covered: requests made
+    by the platform or its push SDK (Play services and the Firebase
+    Messaging SDK for Google push, §14; APNs registration), and pages
+    the member opens in a browser, a Custom Tab or
+    SFSafariViewController (below). A VettID site MUST NOT ask for
+    device details with `Accept-CH` or `Critical-CH` (as a header or
+    a `<meta http-equiv>`).
+  - **Out of scope** (owner decision): a browser the member uses to open
+    a VettID web page sends its own User-Agent, and CloudFront and WAF
+    logs keep it; Google and Apple add the model to the crash reports
+    and statistics the platforms collect themselves (Play Console,
+    App Store Connect). Both are accepted. An in-app crash or analytics
+    SDK is not covered by this exception.
 - **Process isolation.** Each unlocked vault MUST run in its own process,
   and the supervisor MUST NOT hold a vault's DEK, pepper or keys (§12.4).
   The channel between them MUST be parsed strictly and fuzzed.
@@ -22541,7 +23350,66 @@ Follow-ups:
     with 0.65.0, which is staging release 24), the apps (ANDROID-PLAN 0.1.90, IOS-PLAN 0.1.43),
     MEMBER-SERVICE-PLAN (Phase 3 item 3.1 now refers to this marker).
 
-44. **The sign-in match code is shown prominently (0.70.0; owner
+44. **Open asks survive a lock, a hold and a restart (0.70.0; owner
+    decision 2026-10-28, from the iOS storage audit, vettid-ios #157).**
+    Apps keep vault content in memory only, and five kinds of ask had
+    no list call, so a lock, hold or restart lost them and the asker had
+    to ask again. Decided: the vault lists them (`pending.list`,
+    §10.4.2): member-authentication challenges, desktop and agent
+    session requests, held approvals, `prompt-each-time` invocations and
+    location requests, each as the body of its event; the app reads it
+    after the unlock and after a passed owner check. Vault in a staging
+    release after 24; then Android and iOS. Desktops read the three
+    kinds they receive (`authenticate`, `action`, `location`), within
+    their access session (owner, 2026-10-28). **Open:** pairing and transfer confirmations
+    (`device.pair.pending`, `device.transfer.pending`, §6.7) are not
+    listed: each is a short flow on its own screen with a SAS, which
+    the new device starts again, and a transfer is approved even while
+    held (§3.6.3), which this list is not; whether a restarted old phone
+    should get a pending transfer back is a separate decision.
+
+45. **Reconnect after a restore (0.72.0; owner decision 2026-10-28,
+    "option A for services only", coordination #9; changed after a
+    security review).** A vault-to-vault epoch ends after 24 h, so a
+    service restored from a backup older than a day is behind the
+    member vault's last epoch, and the exact-match `ctx` refused its
+    reconnect. Decided: (a) only a member vault accepts an older epoch,
+    only on a connection whose `peer_kind` is `"service"`; person
+    connections and a service vault keep the exact match, and only
+    service connections keep the history; (b) the window is 35 days from when an epoch was superseded, the
+    service's backup retention, at most 512 ids (the cap costs
+    availability only); (c) accepting an older epoch records the line it
+    replaced, and a later authenticated sign of that line (a reconnect, rekey or
+    message) means two copies and suspends the connection; (d) the member
+    is told: audit `connection.restored_reconnect` and a History line
+    ("<name> reconnected after restoring its data."), no feed item. The
+    responder answers with its `rotations` since the named epoch; a
+    reconnect `hs.init` already answered is refused by `th1` first (marks
+    kept 16 days + 5 minutes), and changes no state before `sig_I`
+    verifies at `hs.fin`; a restored service reconnects at its next start
+    (3 tries, nothing else sent meanwhile, 7-day bound, then stale and an
+    operator alarm). Authentication, the suspended-connection rule and
+    the Limits are unchanged. Rejected: option B (an empty or marked
+    `ctx`), which weakens what `ctx` binds, and option A for person
+    connections. Vault: a staging release after 24. Service vault
+    (vettid/service-vault 8d1e9d3 implements the 365-day version) must
+    change: exact-match `ctx` when it answers a member (drop the
+    history),
+    `th1` marks kept 16 days + 5 minutes, the replay check first and no
+    effects before `hs.fin`, a new `hs.init` after a restart, the 7-day
+    bound with the stale connection and the alarm, and the chain count
+    that signed each epoch. Follow-ups: ANDROID-PLAN and IOS-PLAN must
+    render `connection.fork_suspected` (a paused connection with no
+    candidates and no resolve; a new invitation, after contacting the
+    service, is the way out) and the
+    History line of `connection.restored_reconnect`. (0.72.1) Amended: a valid rotation conflict in a reconnect `hs.init`
+    suspends at once (§6.6 "Replay"); crossing reconnects: a service's
+    own reconnect yields to a member's that verifies, the member always
+    answers; a reconnect open at a restart keeps its stored initiator
+    state. Follow-up: vettid-vault (member vault) implements the member
+    side of "Crossing reconnects". **Open:** none.
+
+46. **The sign-in match code is shown prominently (0.79.0; owner
     decision 2026-10-28).** A service's sign-in challenge carried the
     number the member should compare with the sign-in screen only inside
     the free-text `context`, so the app could not show it large and
@@ -22581,7 +23449,7 @@ Follow-ups:
     code), the service vault (vettid/service-vault: send `match_code`;
     keep the context line until the apps ship, then drop it),
     MEMBER-SERVICE-PLAN §4.2 (the page shows the same number), the
-    apps (ANDROID-PLAN 0.1.92, IOS-PLAN 0.1.45).
+    apps (ANDROID-PLAN 0.1.100, IOS-PLAN 0.1.50).
 
 ## 16. Test vectors
 

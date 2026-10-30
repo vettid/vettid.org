@@ -1,11 +1,11 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.92
-date: 2026-10-28
+version: 0.1.100
+date: 2026-10-30
 changelog:
-  - 0.1.92: owner decision of 2026-10-28 (VAULT-MESSAGING 0.70.0, §15
-    item 44). New §4 "Sign-in match code (0.1.92)": a sign-in challenge
+  - 0.1.100: owner decision of 2026-10-28 (VAULT-MESSAGING 0.79.0, §15
+    item 46). New §4 "Sign-in match code (0.1.100)": a sign-in challenge
     with a valid `match_code` shows it in large digits near the top of
     the approval screen, headed "Match code", with "Check that the
     sign-in screen shows the same number: 42" and an accessibility label
@@ -13,6 +13,59 @@ changelog:
     `context` stays under "Their note". No code, today's screen. The app
     never takes a code from `context`. Draft texts for the owner. Vault:
     a staging release after 24.
+  - 0.1.99: erratum (VAULT-MESSAGING 0.78.1, from the reviews of
+    vettid-android #223 and #224): §4 Wallet "Library": the declared
+    differences with the vault are now the spec's rules for global
+    xpubs (the app refuses what the spec refuses, the vault accepts four
+    cases); the app accepts bytes after the last PSBT map, as the vault
+    does, until the vault refuses them (0.78.1), then it refuses them
+    too (the same for a repeated sighash key, a repeated unknown key
+    with different values and a `witness_utxo` whose script length
+    does not match its script); an absent `cap` or `<wallet>.caps`
+    shows nothing about limits, not "No limit"; §4 Wallet "Library" and
+    the send review screen follow
+  - 0.1.98: owner decision 2026-10-29: question 19 decided, **ACINQ
+    bitcoin-kmp** (with secp256k1-kmp) behind `:core:chain`, BDK only as
+    the fallback if bitcoin-kmp fails conformance. §4 Wallet "Library"
+    and "Local state" follow. W1 (vettid-android #223, merged 8a5c607f):
+    the app-side `wallet.psbt.inspect` and PSBT builder agree with the
+    vault on 135 vectors generated from its own code (5 declared
+    differences where the app is stricter or does not copy a parser
+    quirk); pinned artifacts and native libraries; the wallet stays out
+    of production builds until it is promoted
+  - 0.1.97: owner decision 2026-10-28 (VAULT-MESSAGING 0.73.2): §6
+    owner check item 6: "At least <N> tries left…" (was "Up to"; the
+    estimate after an unanswered check is the fewest that may remain)
+  - 0.1.96: erratum (VAULT-MESSAGING 0.73.1, owner 2026-10-28): §6
+    owner check item 6: the kept PIN survives a held-screen retry whose
+    answer again leaves the password-only retry useful, as built
+    (android #212, #213), instead of going at "the next check"
+  - 0.1.95: owner decision of 2026-10-28 (VAULT-MESSAGING 0.73.0
+    §3.6.5): §6 owner check item 6: an estimated 0 tries left (the
+    status read after the failure did not come) shows "probably locked,
+    checking", re-reads the vault's state without a check, and then the
+    lock text, the check with the real count, or "isn't answering" with
+    "Check again" and "Lock vault" (texts approved 2026-10-28); a check
+    with no answer counts in the estimate and says so ("Up to <N> tries
+    left…", approved); the idle-lock example is now
+    e.g. "8 days" in production (the default 24 h interval plus the
+    default 7 days after the deadline)
+  - 0.1.94: owner decisions of 2026-10-28 (VAULT-MESSAGING 0.71.1): §6
+    owner check item 6: a failed check after the unlock opens to the
+    held screen with the failure line, the password only, "Check in"
+    and "Lock vault"; the kept PIN follows the app-wide foreground; the
+    approved backoff line and singular "1 try left"; the ten-failure
+    lock body now says "with your PIN and your credential password"
+  - 0.1.93: owner decision of 2026-10-28 (VAULT-MESSAGING 0.71.0
+    §3.6.5 "Ask only for what is used"): §6 owner check item 6, "Unlock
+    and check in": the password only when the vault is past its
+    deadline, never ahead of it; the approved texts (also the idle-lock
+    body); a failed check after a successful unlock is shown on the same
+    screen with the tries left, never as a later check screen
+  - 0.1.92: History's `identity.rotated` row follows VAULT-MESSAGING
+    0.69.2: the move's line shows only for a `ref` other than
+    `"recovery"` (a recovery's rotation carries `"recovery"`, a plain
+    key replacement no `ref`)
   - 0.1.91: owner decisions of 2026-10-27, after an audit of what the app
     keeps on the phone. New §5 "What the phone keeps (0.1.91)", where vault
     content is in memory only (no database, no content, photo or HTTP
@@ -1141,14 +1194,14 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.70.0) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.79.0) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
   - CALLS-PLAN.md (0.1.3) — calls; video in C4 (§4, 0.1.42)
   - AGENT-PLAN.md (0.1.7) — the agent connector; §7.2 AA1–AA5 (§4
     "Devices & agents", 0.1.53)
-  - IOS-PLAN.md (0.1.45) — the iPhone app; §4.12 carries the approvals
+  - IOS-PLAN.md (0.1.50) — the iPhone app; §4.12 carries the approvals
     indicator (0.1.89)
 classification: public (no secrets; safe for github.com/vettid)
 ---
@@ -2503,7 +2556,7 @@ vault without it, part 1 applies unchanged.
   | Where | Text |
   |---|---|
   | Held screen | "Your vault locks itself on <date> if you don't check in." |
-  | Notification (Security channel) and the unlock screen, after `vault.locking{reason: "idle"}` | "Your vault locked itself" / "You hadn't checked in for <N> days, so your vault locked. Unlock it with your PIN to carry on. New messages wait for up to 14 days." |
+  | Notification (Security channel) and the unlock screen, after `vault.locking{reason: "idle"}` | "Your vault locked itself" / (0.1.93, approved 2026-10-28; §6 owner check item 6) "You hadn't checked in for <N>, so your vault locked. Unlock it with your PIN and your credential password to carry on. New messages wait for up to 14 days." (<N> e.g. "8 days" in production, "7 hours" on staging; without "for <N>" when the time is unknown) |
   | History | "Vault locked itself (not checked in)" for `vault.locked` with `ref` `idle` |
   | Settings, under the choice | "If you don't pass the daily check for this long, your vault locks itself and stops receiving until you unlock it." |
 
@@ -3754,7 +3807,7 @@ is the app's and needs no vault change.
 | `vault.pin_changed` | "PIN changed" | — |
 | `device.secret_renewed` | "New phone secret set" | — (the vault records it without a device) |
 | `owner_check.passed`, `.held`, `.failed`, `.locked`, `.hold_changed` | "Daily check passed", "Vault held for the daily check", "Daily check failed", "Vault locked after failed daily checks", "Daily check hold changed" (decision 5) | — |
-| `identity.rotated` | "Your vault's keys were renewed" (was "Vault identity key rotated"; decision 7) | With `ref` = a `transfer_id` (VAULT-MESSAGING 0.68.0 §11.14.10; **approved**, owner 2026-10-27): "Replaced when you moved your vault to a new phone." Otherwise — |
+| `identity.rotated` | "Your vault's keys were renewed" (was "Vault identity key rotated"; decision 7) | With a `ref` other than `"recovery"`, i.e. a `transfer_id` (VAULT-MESSAGING 0.69.2 §11.14.10; **approved**, owner 2026-10-27): "Replaced when you moved your vault to a new phone." Otherwise — |
 | `credential.rotated` | "Your credential was renewed" (was "Credential rotated"; decision 7) | — |
 | `credential.utk_resync` (VAULT-MESSAGING 0.52.0 §3.5.4; approved by the owner 2026-10-21) | "One-time keys renewed" | "This phone's one-time keys were replaced with a fresh set." The row's second line names the device from the entry's `device_id`, as for every entry with one (§4 History). Category Security (`credential`); not urgent: History only, the vault makes no feed item for it |
 | `credential.holder_cleared` (VAULT-MESSAGING 0.54.0 §3.5.9; staging release 21; approved by the owner 2026-10-21) | "Credential holder cleared" | "Your vault found its credential holder missing and cleared it. If you didn't remove a phone, contact VettID." The row's second line names the device from the entry's `device_id`, the cleared holder, as for every entry with one (§4 History); that device is no longer listed, so it shows as "Removed device". Category Security (`credential`); not urgent: History only, the vault makes no feed item for it |
@@ -4035,22 +4088,42 @@ never asks.
     (`wallet.sign`); the app broadcasts the returned `tx` to the server.
     `broadcast: true` is never sent (`unavailable` in every release).
 
-**Library** (question 19). The app needs BIP39 words (import and the
-check before sending), BIP32 derivation from account keys, bech32 and
-bech32m addresses, the BIP86 tweak, PSBT version 0 with taproot
-fields, coin selection and an Esplora client. A short spike (W0)
-compares **BDK** (`bdk-android`, a Rust library with Kotlin bindings,
-MIT or Apache-2.0, which takes the vault's descriptors as they are and
-has an Esplora client and coin selection) with ACINQ's
-**bitcoin-kmp** and `secp256k1-kmp` (Kotlin, Apache-2.0). The spike
-must show, against the dev stack's `wallet.psbt.inspect`: a PSBT with
-the **full previous transaction on every input, taproot inputs too**
-(the vault refuses anything else: `previous_tx`), taproot BIP32
-derivations without leaf hashes and with the wallet's fingerprint, a
-change output carrying its derivation (or the vault counts it as a
-payment), one PSBT spending from both accounts, and a reproducible
-`foss` build with the library in it. Recommendation: BDK, if it passes;
-bitcoin-kmp otherwise.
+**Library** (question 19; **decided by the owner 2026-10-29: ACINQ
+bitcoin-kmp** with `secp256k1-kmp`, Kotlin, Apache-2.0; **BDK only as
+the fallback if bitcoin-kmp fails conformance**). The app needs BIP39
+words (import and the check before sending), BIP32 derivation from
+account keys, bech32 and bech32m addresses, the BIP86 tweak, PSBT
+version 0 with taproot fields, coin selection and an Esplora client.
+The W0 spikes (vettid-android #217 BDK, #219 bitcoin-kmp; not merged)
+built the same PSBTs with both: the **full previous transaction on
+every input, taproot inputs too** (the vault refuses anything else:
+`previous_tx`), taproot BIP32 derivations without leaf hashes and with
+the wallet's fingerprint, a change output carrying its derivation, and
+one PSBT spending from both accounts. bitcoin-kmp was chosen for **APK
+size** (+5.9 MB against +42.9 MB on the `full` staging APK), a
+**simpler F-Droid recipe** (one C library, `libsecp256k1-jni.so`,
+which F-Droid already builds from source, against a Rust and NDK
+recipe for every BDK release), and because **the vault fails closed**:
+it re-derives and checks every PSBT (`wallet.psbt.inspect`), so a bug
+in the wallet code the app writes itself (coin selection, fees, PSBT
+building) makes the vault refuse a PSBT, never sign a wrong one. The
+library sits behind `:core:chain`, and no bitcoin-kmp type leaves the
+module, so BDK can replace it. **W1** (vettid-android #223) proves it:
+the app-side inspector and builder agree with the vault's own
+`wallet.psbt.inspect` and `BuildPSBT` on 135 vectors generated from the
+vault's code (summaries and built PSBTs byte for byte, refusals with
+the same reason), with 5 declared differences where the app is
+stricter than the vault's parser or does not copy one of its quirks
+(0.1.99: four are the spec's global xpub rules, VAULT-MESSAGING 0.78.1,
+which the vault does not yet enforce; the fifth is a btcd bug the app
+does not copy). Where the spec is stricter than the vault and the app
+copies the vault on purpose until it follows, the app accepts bytes
+after the last PSBT map, a repeated sighash key, the same unknown key
+twice with different values, and a `witness_utxo` whose script length
+does not match its script; each flips to a refusal when the vault's
+does. The artifacts and the four native libraries are pinned by
+SHA-256, and the wallet stays out of production builds until it is
+promoted.
 
 **Screens.**
 
@@ -4131,7 +4204,10 @@ and respect them.
   toward your limit for the last 24 hours: {outflow}. Left after this:
   {left}", when `per_period_sats` is set, from `<wallet>.caps.spent_sats`;
   and, from `wallet.psbt.inspect`'s `cap`, the refusal text below before
-  the password is asked, if it says `ok: false`. A **fee bump** (a
+  the password is asked, if it says `ok: false`. (0.1.99) A vault that
+  does not implement spend caps (release 24) has no `<wallet>.caps` and
+  returns no `cap`: the screen then shows nothing about limits, neither
+  a limit nor "No limit". A **fee bump** (a
   new PSBT that replaces a payment) says: "A fee bump counts again
   toward your limit for the last 24 hours." The vault decides.
 - **Units.** Sats everywhere in this screen, whole numbers, with a
@@ -4233,8 +4309,9 @@ coins, balances and transactions are in memory only, cleared at lock,
 on entering the hold or the due state, at a wipe and with the process
 (the rule "nothing kept outside an open vault", §4 Notifications, 10);
 an account key reveals every address and payment of the wallet. With
-BDK, its persistence is not used (an in-memory wallet), so each open
-looks the wallet up again. On disk, in the app's encrypted settings:
+bitcoin-kmp, the wallet is held in memory only (the library has no
+persistence of its own), so each open looks the wallet up again. On
+disk, in the app's encrypted settings:
 the chain server per network, the testnet4 label (option (a)) and the
 backed-up flag per `wallet_id`. Nothing from a wallet goes to logs or
 crash reports (ids at debug level only).
@@ -4772,10 +4849,10 @@ a service is absent from Messages and the new-message picker; its detail
 has no Call, message or share rows; an unknown `peer_kind` is a person; a
 `forbidden` shows the text once and removes the action.
 
-### Sign-in match code (0.1.92)
+### Sign-in match code (0.1.100)
 
-*Owner decision of 2026-10-28 (VAULT-MESSAGING 0.70.0 §10.4, §15 item
-44). Draft texts for the owner. Not built; needs the vault release.*
+*Owner decision of 2026-10-28 (VAULT-MESSAGING 0.79.0 §10.4, §15 item
+46). Draft texts for the owner. Not built; needs the vault release.*
 A sign-in challenge (`purpose: "signin"`) may carry `match_code`, 2 or
 3 digits that the service's sign-in screen shows too.
 
@@ -6161,7 +6238,7 @@ one (translation-ready), accessibility labels required in review.
 | `:core:data` | Repositories per feature, in memory (0.1.91: no Room caches) |
 | `:core:notify` | 0.1.23: the notification modes: the on-phone service (`VaultConnectionService`), channels, the Mapping and Content rules, the `PushProvider` interface; `:core:push-fcm` the FCM provider (the only module with Firebase; 0.1.34: in the `full` distribution only, `foss` binds a provider that reports "not in this build") |
 | `:core:ui` | Theme (navy + gold, light/dark), components (top bar, drawer, list row, empty state, pill bar, settings cards, sheets) |
-| `:core:chain` | (0.1.42) The wallet's chain source: the Esplora client, the per-network server setting and its genesis check, the Bitcoin library chosen in W0 (descriptors, PSBT building, coin selection); no Google code (§4 "Wallet, presence, location and video") |
+| `:core:chain` | (0.1.42) The wallet's chain source: the Esplora client, the per-network server setting and its genesis check, the Bitcoin library (bitcoin-kmp, question 19) and the app's own PSBT builder, inspector and coin selection; no Google code (§4 "Wallet, presence, location and video") |
 | `:core:location` | (0.1.42) Positions from the platform's `LocationManager` (no Play services), the `location` foreground service and its ongoing notification, the share timers; no storage of positions |
 | `:feature:*` | onboarding, messages, connections, approvals, items (the "Vault" screens), credential, settings, history (0.1.11), notifications (0.1.23, the feed); 0.1.42: wallet, location (presence lives in connections and settings) |
 | `:app` | Navigation (type-safe routes), DI wiring, notifications |
@@ -6353,6 +6430,89 @@ interval). Follow-ups, in A3 unless noted:
    deadline, a banner and a local notification with "check now".
 6. **Locked and past the deadline**: one screen for PIN and password;
    unlock, read `vault.status`, then send the check without asking again.
+   (0.1.93; owner decision 2026-10-28, VAULT-MESSAGING 0.71.0 §3.6.5
+   "Ask only for what is used") **Unlock and check in:**
+   - The app asks only for what it uses. Unlock with the check not due:
+     the PIN only. Unlock with the vault past its deadline (held, due,
+     idle-locked or locked by failed checks, by the saved owner-check
+     state of the §5 table): the PIN and the password on one screen.
+     Never the password ahead of the deadline ("check now" stays the way
+     to check in early, item 5). With no saved state (new install,
+     transfer, recovery): the PIN only, and the ordinary check screen if
+     `vault.status` then shows the vault due.
+   - Texts (approved): title **"Unlock and check in"**; body **"Your
+     daily check is due, so your vault needs your PIN and your
+     credential password."**
+   - PIN right, password wrong (0.1.94, owner decision 2026-10-28): the
+     app opens at once to the **held screen** (the vault is open and
+     held; no cached content), and directly under the waiting counts
+     shows **"Your vault is unlocked, but the credential password was
+     wrong, so your daily check didn't pass. <N> tries left before your
+     vault locks again."** (singular **"1 try left"**, approved). The PIN
+     field goes; only the password field stays, with **"Check in"** and
+     **"Lock vault"**. The accepted PIN is kept in memory only while the
+     app is in front (app-wide foreground), and forgotten when it leaves
+     the foreground, at a lock or a wipe, and at the answer to a later
+     check unless that answer again leaves the password-only retry
+     useful (0.1.96, VAULT-MESSAGING 0.73.1: a wrong password with tries
+     left, a backoff, or a check the vault did not answer: no answer,
+     the vault unavailable, rate limited or the service paused; tries
+     left estimated at 0 forget it); then the held screen asks for
+     both. The failure is never shown later on a screen
+     the member did not see it happen on.
+   - Backoff on the held screen (approved): **"Your vault is unlocked.
+     Enter your credential password to check in."** with the existing
+     countdown, "Check in" off until it ends.
+   - When that failure locks the vault (the tenth, or any once
+     `failures` ≥ 10; item 8), the owner-check lock text shows at once
+     (on the held screen until `vault.locking` moves the app to the
+     locked screen), with "Check in" off; not a retry. Its title
+     **"Locked after ten wrong checks"** (existing) and body (approved
+     2026-10-28): **"Your vault locked itself after ten wrong
+     daily checks in a row. Unlock it with your PIN and your credential
+     password."** (was "…Unlock it with your PIN; it then asks for the
+     check again."), since that unlock asks for both.
+   - (0.1.95, VAULT-MESSAGING 0.73.0) The tries left only estimated
+     (the `vault.status` read after the failure, or the check's own
+     answer, did not come) and the estimate at 0 (the last count read, less one for each failed check
+     answered since and each check sent since with no answer; 0 with no
+     count read since the unlock or since the app started): the lock flag still comes only from
+     `vault.locking` or the member API's `GET /api/vault/status`
+     `state: locked`; an answer to `vault.status` means the vault is
+     open. The held screen shows neither the lock text nor the fields.
+     It drops the kept PIN, turns "Check in" off, keeps **"Lock vault"**,
+     and shows **"Your daily check didn't pass, and your vault has
+     probably locked itself. Checking with your vault…"** (approved
+     2026-10-28). It re-reads both states at once, after about 5 s,
+     15 s, 1 min and 3 min, on a relay reconnect and on a return to the
+     foreground, one read at a time; no try is used. Locked: the lock
+     text above. A `vault.status` answer: the ordinary check (PIN and
+     password) with the count from it. The member API's `unlocked` is
+     not an answer (the checking text stays). No answer when the reads
+     end: **"Your vault isn't answering. It has probably locked itself
+     after ten wrong daily checks in a row."** (approved 2026-10-28),
+     with **"Check again"** (the same reads) and **"Lock vault"**.
+   - (0.1.95) A check with no answer while the estimate is above 0: the
+     app re-reads `vault.status` and the member API's status (no try
+     used). `vault.locking` or the API's `locked`: the locked screen
+     (not the owner-check lock text; the cause is not known). A
+     `vault.status` answer: the usual tries-left line with the real
+     count. None: **"Your vault didn't
+     answer, so that check may have counted. At least <N> tries left
+     before your vault locks."** (singular **"At least 1 try left…"**;
+     0.1.97, was "Up to", which read as a most; approved
+     2026-10-28), with "Check in" offered again.
+   - Every wrong try shows the tries left, never "Wrong credential
+     password" alone. A wrong PIN shows only the PIN error; no check is
+     sent and no check try is used.
+   - The idle-lock texts (approved 2026-10-28; the row in the texts
+     table above): **"You hadn't checked in for <N>, so your vault
+     locked. Unlock it with your PIN and your credential password to
+     carry on. New messages wait for up to 14 days."**, <N> written as
+     e.g. "8 days" in production and "7 hours" on staging, and without "for
+     <N>" when the time is unknown. After an idle lock the check is
+     always overdue, so the screen always asks for both; the Security
+     notification uses the same body.
 7. **Settings**: the interval (1–24 h); shortening may hold the vault at
    once, so the app offers a check with the change.
    **Hold switch** (owner decision of 2026-10-06, §3.6.7): turning the
@@ -6835,11 +6995,16 @@ presence, location and video").
     (`https` only, checked against the network's genesis block);
     **Electrum later**, after W2, if members ask; no proxy or Tor
     setting in these phases.
-19. **The Bitcoin library.** **Recommended: BDK (`bdk-android`)** if
-    the W0 spike shows that its PSBTs pass the vault's policy (the full
-    previous transaction on every input, taproot included; both
-    accounts in one PSBT) and that the `foss` build stays reproducible
-    with it; ACINQ's bitcoin-kmp otherwise.
+19. **The Bitcoin library.** **Decided (owner, 2026-10-29): ACINQ
+    bitcoin-kmp** (with secp256k1-kmp), behind `:core:chain`; **BDK
+    (`bdk-android`) is the fallback only if bitcoin-kmp fails
+    conformance** with the vault. Reasons: +5.9 MB against +42.9 MB of
+    APK, a simpler F-Droid recipe (one C library that F-Droid already
+    builds, no Rust), and the vault fails closed (it re-derives and
+    checks every PSBT). The price: the app writes its own coin
+    selection, fee and PSBT-building code (W2). W0 spikes:
+    vettid-android #217 (BDK) and #219 (bitcoin-kmp), not merged; W1:
+    vettid-android #223 (conformance against the vault, 135 vectors).
 20. **Receiving before the phrase is backed up.** **Recommended: no.**
     A new wallet shows no receive address until its phrase has been
     written down and checked (three words); the member may leave and

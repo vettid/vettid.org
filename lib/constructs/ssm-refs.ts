@@ -45,6 +45,8 @@ export type SsmRefKey =
   // Push gateway (VettidOrgPushDataStack), read by VettidOrgPushStack.
   | 'push/key-arn'
   | 'push/staging-zone-id'
+  // Calling service (VettidOrgCallsDataStack, staging account), read by VettidOrgCallsStack.
+  | 'calls/key-arn'
   | 'member-api/domain'
   // The member API's function that cancels a member's pending vault
   // deletion and does nothing else; the admin API invokes it (it runs under

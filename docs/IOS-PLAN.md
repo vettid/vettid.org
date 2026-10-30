@@ -1,18 +1,43 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.45
-date: 2026-10-28
+version: 0.1.50
+date: 2026-10-30
 changelog:
-  - 0.1.45: owner decision of 2026-10-28 (VAULT-MESSAGING 0.70.0, §15
-    item 44; ANDROID-PLAN 0.1.92). New §4.14 "Sign-in match code": the
-    same as ANDROID-PLAN §4 "Sign-in match code (0.1.92)" (a valid
+  - 0.1.50: owner decision of 2026-10-28 (VAULT-MESSAGING 0.79.0, §15
+    item 46; ANDROID-PLAN 0.1.100). New §4.14 "Sign-in match code": the
+    same as ANDROID-PLAN §4 "Sign-in match code (0.1.100)" (a valid
     `match_code` shown in large digits near the top of the sign-in
     approval screen, "Match code" and "Check that the sign-in
     screen shows the same number: 42", with an accessibility label (the
     digits spoken one by one); `context` stays under
     "Their note"; no code, today's screen; never taken from `context`),
     draft texts the same. Vault: a staging release after 24.
+  - 0.1.49: VAULT-MESSAGING 0.73.0, ANDROID-PLAN 0.1.95 (owner
+    2026-10-28): an estimated 0 tries left shows "probably locked,
+    checking", re-reads the vault's state without a check, then the
+    lock text, the check with the real count, or "isn't answering"
+  - 0.1.48: VAULT-MESSAGING 0.71.1, ANDROID-PLAN 0.1.94 (owner
+    2026-10-28): the held screen after a failed check at the unlock, the
+    approved backoff line, "1 try left", and the ten-failure lock body
+    "…Unlock it with your PIN and your credential password."
+  - 0.1.47: owner decision of 2026-10-28 (VAULT-MESSAGING 0.71.0
+    §3.6.5 "Ask only for what is used"): "Unlock and check in", as
+    ANDROID-PLAN 0.1.93 §6 owner check item 6, with the same approved
+    texts, including the idle-lock body
+  - 0.1.46: owner decisions of 2026-10-28 (coordination #4). ID17 and
+    §6.9: the app lock has **no data key**, but a Secure Enclave key
+    (`.biometryCurrentSet` or `.devicePasscode`) gates the prompt with a
+    fresh challenge, as Android's prompt key does (0.1.44's "no key
+    stands behind it" read as "no data key"; §6.9's table unchanged).
+    §4.12 phase P: the notification is built only after the request's
+    `.pending` entry is kept (from the check of vettid-ios #154). §4.9
+    "Pairing": "two in all" is counted per pairing call; a kill starts
+    the count again (vettid-ios #155)
+  - 0.1.45: History's `identity.rotated` row follows VAULT-MESSAGING
+    0.69.2: the move's line shows only for a `ref` other than
+    `"recovery"` (a recovery's rotation carries `"recovery"`, a plain
+    key replacement no `ref`)
   - 0.1.44: owner decisions of 2026-10-27, after an audit of what the apps
     keep on the phone (ANDROID-PLAN 0.1.91). New §6.9 "What the phone
     keeps", where vault content is in memory only (no database, no content,
@@ -425,8 +450,8 @@ changelog:
     in §14 are drafts
 owner: Al Liebl (Mesmer)
 related:
-  - ANDROID-PLAN.md (0.1.92) — the Android app; this plan mirrors it
-  - VAULT-MESSAGING.md (0.70.0) — the app's contract with the vault
+  - ANDROID-PLAN.md (0.1.100) — the Android app; this plan mirrors it
+  - VAULT-MESSAGING.md (0.79.0) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
   - RELAY-PROTOCOL.md (0.9.4), MEMBER-API.md (2.7.1)
@@ -556,7 +581,7 @@ the Mac agent does not reopen them.
 | ID14 | **Navigation** | The Android drawer (Proton Mail's iOS app also uses a side menu), the same destinations and order (ANDROID-PLAN §4 "Drawer"); the system back gesture | A tab bar (diverges from Android and the texts) | I0.2 |
 | ID15 | **"Installed from" on iOS** | App Attest reports no signer and an iOS binding has none (VAULT-MESSAGING §11.7.1 "iOS"). Settings → Vault status shows "Installed from: Apple (App Store or TestFlight)" for the release and staging builds and "Installed from: Xcode (development)" for the others, from the build configuration, with the line "Apple App Attest confirms this is the VettID app" | No line | I1.7 |
 | ID16 | **Real iPhone on staging before VA2** | Wait for VA2 (a staging release that pins `<team>.com.vettid.app.staging`). Not recommended: pointing a `com.vettid.app` build at staging, which today's staging images would accept | — | I1 exit |
-| ID17 | **App lock** | ANDROID-PLAN D6 on iOS: **Face ID / Touch ID** or **iPhone passcode** (`LAPolicy.deviceOwnerAuthentication`); a UI gate only that protects no data at rest (0.1.44: no key stands behind it; the app keeps no vault content on the phone, §6.9), never in place of the PIN or the password | — | I1.6 |
+| ID17 | **App lock** | ANDROID-PLAN D6 on iOS: **Face ID / Touch ID** or **iPhone passcode** (`LAPolicy.deviceOwnerAuthentication`); a UI gate only that protects no data at rest (0.1.44; 0.1.46, owner decision of 2026-10-28: **no data key**; a Secure Enclave key (`.biometryCurrentSet` or `.devicePasscode`) gates the prompt with a fresh challenge each time, as Android's prompt key does, so a new face or finger is noticed; the app keeps no vault content on the phone, §6.9), never in place of the PIN or the password | — | I1.6 |
 | ID18 | **Contact with Apple at attestation** | Say it in Help → Privacy: "When you set up, move or recover a vault, your iPhone asks Apple to vouch for the VettID app. Apple learns that VettID was set up on an iPhone, nothing about your vault." (`attestKey` reaches Apple's servers; assertions do not.) | Silence | I1.5 |
 | ID19 | **A separate approvals indicator** (owner, 2026-10-27) | ANDROID-PLAN D9 on iOS (§4.12): a toolbar item beside the bell while something waits for the member's decision, with its count; time-critical from arrival (sign-ins shown neutral) for sign-in and approval challenges, session requests and `approval.pending`, else in the last 2 minutes, with the time left; a tap opens the Approvals list; a short banner with View for a new time-critical request while the app is open; from phase P a request's notification opens that request, `.timeSensitive` for approval challenges and session requests but not for sign-ins; a sign-in's countdown is neutral. Before APNs (ID12) the indicator and the banner are the only cues | — | I2.3 |
 
@@ -679,7 +704,7 @@ is the app's and needs no vault change.
 | `vault.pin_changed` | "PIN changed" | — |
 | `device.secret_renewed` | "New phone secret set" | — (the vault records it without a device) |
 | `owner_check.passed`, `.held`, `.failed`, `.locked`, `.hold_changed` | "Daily check passed", "Vault held for the daily check", "Daily check failed", "Vault locked after failed daily checks", "Daily check hold changed" (decision 5) | — |
-| `identity.rotated` | "Your vault's keys were renewed" (was "Vault identity key rotated"; decision 7) | With `ref` = a `transfer_id` (VAULT-MESSAGING 0.68.0 §11.14.10; **approved**, owner 2026-10-27): "Replaced when you moved your vault to a new phone." Otherwise — |
+| `identity.rotated` | "Your vault's keys were renewed" (was "Vault identity key rotated"; decision 7) | With a `ref` other than `"recovery"`, i.e. a `transfer_id` (VAULT-MESSAGING 0.69.2 §11.14.10; **approved**, owner 2026-10-27): "Replaced when you moved your vault to a new phone." Otherwise — |
 | `credential.rotated` | "Your credential was renewed" (was "Credential rotated"; decision 7) | — |
 | `credential.utk_resync` (VAULT-MESSAGING 0.52.0 §3.5.4; approved by the owner 2026-10-21) | "One-time keys renewed" | "This phone's one-time keys were replaced with a fresh set." The row's second line names the device from the entry's `device_id`, as for every entry with one (ANDROID-PLAN §4 History). Category Security (`credential`); not urgent: History only, the vault makes no feed item for it |
 | `credential.holder_cleared` (VAULT-MESSAGING 0.54.0 §3.5.9; staging release 21; approved by the owner 2026-10-21) | "Credential holder cleared" | "Your vault found its credential holder missing and cleared it. If you didn't remove a phone, contact VettID." The row's second line names the device from the entry's `device_id`, the cleared holder, as for every entry with one (ANDROID-PLAN §4 History); that device is no longer listed, so it shows as "Removed device". Category Security (`credential`); not urgent: History only, the vault makes no feed item for it |
@@ -1390,7 +1415,7 @@ The tests are Android's.
 - **A failed register.** Each register POST is judged **on its own**, not once per register flow, and is recorded durably before it is posted. A POST **got no `202`** when it was answered `503 release_starting` or `vault_unavailable`, `429` or `409 recovery_not_available`, or got no answer at all (a network failure or timeout before any answer); any other answer without a `202`, except a `401` (below), keeps N as unknown (it may have registered). Only the **first** POST for a recovery's code that got no `202` counts as not registered. A POST answered `202` was queued and may have reached the vault: a failure after it (the poll fails, times out, answers `retry`, or shows the unsealed slot status `expired`) means **maybe registered**, and the phone confirms it with the status signed with K. A readable refusal (`bad_code`, `too_early`, `attestation`, `no_recovery`, `no_backup`, sealed `expired`) settles that POST as not registered. Every later POST for the same code is a **repeat**, whatever the earlier one's outcome and whether or not it is in the same register flow; a re-post of the same code after a request whose slot showed `expired` is one. To a repeat, `409 recovery_not_available` (the member API's answer to any repeat once the first is recorded) and `used` mean **maybe registered**: the phone keeps the new registration and confirms it with the status signed with K (`registered` = registered for this recovery). Further retries with the same N, the same K and the recovery's code are always allowed; only a new identity is forbidden. A `401` at the register drops N's registration (N's identity and relay key; E and K stay) **only for an N that never had a registration answered `ok`, left maybe registered, or unknown**; a re-registered N may be the identity the vault adopted, so there a `401` drops nothing. An N dropped so no longer counts as one of the two.
 - **The codes that prove no step 1 on their own** (`busy`, `wrong_again`, `attempt_lost`, `exhausted`, `not_armed`, `closed`, `attestation`, the counter-down answer, the wait verdicts) settle **only the open they answer**, never an earlier unanswered open; the sticky rule above is unchanged. (`attestation`: owner decision of 2026-10-26.) For example, when a register's answer is lost after its `202` and the repeat with a new App Attest key is answered `used` (the vault keeps the first attestation), the open with the new key is refused `attestation` and the phone opens with the other key; that refused open counts as answered, so a recovery that ends later does not enter "could not tell" because of it.
 - **The history is saved before the open is posted.** Each open's entry in the per-open history is written durably first; if that save fails, the open is not posted. A post failure of any kind keeps the open's entry (a re-sent POST can be queued), and nothing after the post is accepted may remove an entry.
-- **Pairing** (0.63.0; owner decision of 2026-10-26). Each identity pairs only with its own `recovery_id` as `ctx`; for a re-registered N that is the `recovery_id` it **last** registered for. (0.63.2) **Pairing with the named invitation** (0.67.0; owner decision of 2026-10-27, VAULT-MESSAGING 0.67.0 §11.14.6 "Pairing"). When the `ok` body carries `invitation_recovery_id`, and one of the phone's identities registered that `recovery_id`, that identity sends a single `hs.init` with it as `ctx` (with its own `ik`, relay key and `kem`), and the binding is that registration's attested key, verified as before. An id that none of the phone's identities registered is ignored (the walk). If that `hs.init` gets no `hs.resp` within the pairing timeout, or fails, the phone sends the lost-ok unlock again (it renews the invitation, uses no attempt and returns the id again) and then one `hs.init` with that id; that is the bound, two in all; the `hs.init` of the second try uses the `invitation_recovery_id` that the re-sent unlock's result returns, and when that result has no such member (for example the invitation was replaced, so there is no `vault_bundle` either) the phone goes straight to the walk. The re-sent unlock needs the PIN: the phone keeps the just-accepted PIN in memory only while the pairing screen is in front and forgets it when the app leaves the foreground, as secrets already are; if it was forgotten it asks for the PIN again, and a wrong one is an ordinary `bad_pin`. It never sends the same `hs.init` again on its own. Only after that does it walk the remaining `recovery_id`s newest first, then E. Without the member (a vault older than the next staging release after 23) the walk is unchanged: after an `ok` to an unlock (a lost ok), N sends `hs.init` with each `recovery_id` it registered for, newest first (the invitation may be the earlier one's: an unlock that finishes an earlier N open's step 3 ends a later registration of N whose open stored nothing, §11.14.2), then falls back to E. The binding after the handshake is the attested key of the registration whose `recovery_id` was the `ctx` of the handshake that completed (the invitation's registration). **The invitation at a repeat.** A repeated open whose step 2 was not stored sets the invitation from the current registration. A repeated open whose step 2 was stored (by an earlier open of this recovery or of an earlier one) looks at the stored invitation: if it is for the **same identity** (the same `ik`: N registered again, on iOS with a new App Attest key), the vault sets it again from the current registration (the current `recovery_id` as `ctx`, its attestation binding, KEM and relay key), and the earlier recovery's invitation goes; if it is **another identity's** (E's, stored by E's open), it is kept, E pairs with E's `recovery_id`, and N falls back to E (and E's `recovery_id`) when no `hs.resp` arrives. So for N the binding after pairing is that of the registration whose open answered `ok`; when E's invitation was kept, it is E's. **Either way the repeat renews the invitation** (usable again, for 24 hours from the open) and drops a first handshake begun with it and not completed, also E's when N opens, as the unlock of "A lost `ok`" does. **The header's binding.** For a recovered phone's unlock key the header keeps an earlier binding (and the iOS counter advanced there) only when it is for the same attested key as the invitation's (the platform, the public key and the App Attest key id); otherwise the invitation's binding is used, and a binding that cannot be read never matches. (A guard: in the flows above, a new recovery's request has already removed the earlier registration's unlock key from the header.) **Accepted gap.** Until step 3 is stored the header's `next` part names the phone with the binding of the run that stored step 1. If a repeat stores the state and its header write then fails, and the registration's attested key changed (iOS), the new key's lost-ok unlock is refused (`attestation`, decided before the PIN and not counted) until the phone opens again while the recovery is still registered and before any unlock of this phone has succeeded; that open repeats through the `next` wrap and uses no attempt. After an unlock answered `ok` (for example with the earlier key, below) the phone pairs and does not open again: (0.63.2) that unlock completed step 3 and, in the same header write, removed the recovery record (whichever is current, §11.14.2), so an open then is answered `no_recovery` (refused at step 1, which may answer with random bytes), nothing used. An unlock with the earlier key in that state succeeds, and its header write binds the new key. **Deployment:** the vault release that carries vettid-vault #150 (staging release 23). Before it, a repeat after step 2 kept the stored invitation whatever its identity, without renewing it. N is reused for a later recovery only against a vault of staging release 23 or later (vettid-vault #150): before it, a repeat after an earlier N open stored step 2 leaves N's invitation under that earlier `recovery_id` with that registration's key, so N's `hs.init` with its latest `recovery_id` gets no `hs.resp`; the apps ship it only once staging release 23 is the vaults' release.
+- **Pairing** (0.63.0; owner decision of 2026-10-26). Each identity pairs only with its own `recovery_id` as `ctx`; for a re-registered N that is the `recovery_id` it **last** registered for. (0.63.2) **Pairing with the named invitation** (0.67.0; owner decision of 2026-10-27, VAULT-MESSAGING 0.67.0 §11.14.6 "Pairing"). When the `ok` body carries `invitation_recovery_id`, and one of the phone's identities registered that `recovery_id`, that identity sends a single `hs.init` with it as `ctx` (with its own `ik`, relay key and `kem`), and the binding is that registration's attested key, verified as before. An id that none of the phone's identities registered is ignored (the walk). If that `hs.init` gets no `hs.resp` within the pairing timeout, or fails, the phone sends the lost-ok unlock again (it renews the invitation, uses no attempt and returns the id again) and then one `hs.init` with that id; that is the bound, two in all (0.1.46, owner 2026-10-28: counted per pairing call, so a kill starts the count again; safe, because every further try follows a lost-ok unlock that renews the invitation, uses no attempt and needs the PIN again); the `hs.init` of the second try uses the `invitation_recovery_id` that the re-sent unlock's result returns, and when that result has no such member (for example the invitation was replaced, so there is no `vault_bundle` either) the phone goes straight to the walk. The re-sent unlock needs the PIN: the phone keeps the just-accepted PIN in memory only while the pairing screen is in front and forgets it when the app leaves the foreground, as secrets already are; if it was forgotten it asks for the PIN again, and a wrong one is an ordinary `bad_pin`. It never sends the same `hs.init` again on its own. Only after that does it walk the remaining `recovery_id`s newest first, then E. Without the member (a vault older than the next staging release after 23) the walk is unchanged: after an `ok` to an unlock (a lost ok), N sends `hs.init` with each `recovery_id` it registered for, newest first (the invitation may be the earlier one's: an unlock that finishes an earlier N open's step 3 ends a later registration of N whose open stored nothing, §11.14.2), then falls back to E. The binding after the handshake is the attested key of the registration whose `recovery_id` was the `ctx` of the handshake that completed (the invitation's registration). **The invitation at a repeat.** A repeated open whose step 2 was not stored sets the invitation from the current registration. A repeated open whose step 2 was stored (by an earlier open of this recovery or of an earlier one) looks at the stored invitation: if it is for the **same identity** (the same `ik`: N registered again, on iOS with a new App Attest key), the vault sets it again from the current registration (the current `recovery_id` as `ctx`, its attestation binding, KEM and relay key), and the earlier recovery's invitation goes; if it is **another identity's** (E's, stored by E's open), it is kept, E pairs with E's `recovery_id`, and N falls back to E (and E's `recovery_id`) when no `hs.resp` arrives. So for N the binding after pairing is that of the registration whose open answered `ok`; when E's invitation was kept, it is E's. **Either way the repeat renews the invitation** (usable again, for 24 hours from the open) and drops a first handshake begun with it and not completed, also E's when N opens, as the unlock of "A lost `ok`" does. **The header's binding.** For a recovered phone's unlock key the header keeps an earlier binding (and the iOS counter advanced there) only when it is for the same attested key as the invitation's (the platform, the public key and the App Attest key id); otherwise the invitation's binding is used, and a binding that cannot be read never matches. (A guard: in the flows above, a new recovery's request has already removed the earlier registration's unlock key from the header.) **Accepted gap.** Until step 3 is stored the header's `next` part names the phone with the binding of the run that stored step 1. If a repeat stores the state and its header write then fails, and the registration's attested key changed (iOS), the new key's lost-ok unlock is refused (`attestation`, decided before the PIN and not counted) until the phone opens again while the recovery is still registered and before any unlock of this phone has succeeded; that open repeats through the `next` wrap and uses no attempt. After an unlock answered `ok` (for example with the earlier key, below) the phone pairs and does not open again: (0.63.2) that unlock completed step 3 and, in the same header write, removed the recovery record (whichever is current, §11.14.2), so an open then is answered `no_recovery` (refused at step 1, which may answer with random bytes), nothing used. An unlock with the earlier key in that state succeeds, and its header write binds the new key. **Deployment:** the vault release that carries vettid-vault #150 (staging release 23). Before it, a repeat after step 2 kept the stored invitation whatever its identity, without renewing it. N is reused for a later recovery only against a vault of staging release 23 or later (vettid-vault #150): before it, a repeat after an earlier N open stored step 2 leaves N's invitation under that earlier `recovery_id` with that registration's key, so N's `hs.init` with its latest `recovery_id` gets no `hs.resp`; the apps ship it only once staging release 23 is the vaults' release.
 
 The tests are Android's, with one more: E's key and N's earlier App Attest keys are still present until the handshake completes; each re-register of N uses a new App Attest key.
 
@@ -1493,7 +1518,14 @@ and back-stack rules.* Only these differ on iOS:
   request (the list under it, under it the screen the member was on),
   **replacing** a request screen that shows another `ref`; if a
   decision on A is in flight, B opens after it settles. A gone entry
-  opens the list with "This is no longer waiting".
+  opens the list with "This is no longer waiting". (0.1.46) The
+  notification is built only after the app has kept the request's
+  `.pending` entry in the open list, so a notification is never built
+  for an entry the list does not have (a delivered one can outlive the
+  entry; a tap then shows "This is no longer waiting", above). This
+  binds what the app process posts; the notification service
+  extension's path, which cannot see the in-memory list, is settled in
+  phase P.
 - **Removal and time sensitivity (phase P).** A **delivered** push
   notification cannot be given a timeout or a countdown (the extension
   runs once, on delivery): one for an expired request stays until the
@@ -1532,11 +1564,11 @@ with the label in the row's trailing view, the icon an SF Symbol
 (`building.2`, outline). Nothing in this section is iOS-specific
 protocol.
 
-### 4.14 Sign-in match code (0.1.45)
+### 4.14 Sign-in match code (0.1.50)
 
-*Owner decision of 2026-10-28 (VAULT-MESSAGING 0.70.0 §10.4, §15 item
-44). Draft texts for the owner. Not built.* The same as ANDROID-PLAN §4
-"Sign-in match code (0.1.92)", carried here by reference and not to be
+*Owner decision of 2026-10-28 (VAULT-MESSAGING 0.79.0 §10.4, §15 item
+46). Draft texts for the owner. Not built.* The same as ANDROID-PLAN §4
+"Sign-in match code (0.1.100)", carried here by reference and not to be
 changed on one platform alone. On iOS: the "Match code" block sits under
 the title of the sign-in approval screen, the digits in a large
 monospaced-digit Dynamic Type style (scaling, never truncated), the
@@ -2045,6 +2077,22 @@ leaving the screen.
   the scene went to the background, read on return; the vault's own
   locks (VAULT-LOCK, owner check) are the vault's and need nothing from
   the app in the background.
+- **Unlock and check in** (0.1.47; owner decision 2026-10-28,
+  VAULT-MESSAGING 0.71.0 §3.6.5 "Ask only for what is used"): as
+  ANDROID-PLAN §6 owner check item 6, with the same approved texts
+  (also the idle-lock body; 0.1.48: the held screen after a failed
+  check, the backoff line, "1 try left" and the ten-failure lock
+  title and body): the password only when the vault is past its
+  deadline, never ahead of it; a failed check after a successful
+  unlock is shown at once on the held screen with the tries left
+  (password only, "Check in", "Lock vault"). (0.1.49) An estimated 0
+  tries left (the status read after the failure did not come): as
+  ANDROID-PLAN 0.1.95, "probably locked, checking", the state re-read
+  without a check, then the lock text, the check with the real count,
+  or "isn't answering" with "Check again" and "Lock vault", with the
+  same approved texts and reads ("Lock vault" offered throughout); a
+  check with no answer while tries remain says it may have counted
+  ("At least <N> tries left…", as ANDROID-PLAN 0.1.97).
 - **Owner check early warning**: local notifications scheduled for 1 h
   before the deadline whenever the deadline is learned, cancelled on a
   check (ANDROID-PLAN §6 owner check, item 5). These work without APNs.
@@ -2125,7 +2173,8 @@ log or a backup. Pending approval events and the names on recent
 connection requests are included: they are shown while the vault is open
 and read again from the vault after the next unlock (the app persisted
 them, encrypted, across a lock; that is being removed). The app lock
-(ID17) is a UI gate only and protects no data at rest.
+(ID17) is a UI gate only and protects no data at rest: no data key; its
+Secure Enclave key only gates the prompt (0.1.46).
 
 | Item | Where | Protection | Cleared when | Backup |
 |---|---|---|---|---|

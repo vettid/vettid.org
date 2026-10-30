@@ -19,6 +19,8 @@ import { VettidOrgRelayStack } from './stacks/relay-stack';
 import { VettidOrgRelayDataStack } from './stacks/relay-data-stack';
 import { VettidOrgPushStack } from './stacks/push-stack';
 import { VettidOrgPushDataStack } from './stacks/push-data-stack';
+import { VettidOrgCallsStack } from './stacks/calls-stack';
+import { VettidOrgCallsDataStack } from './stacks/calls-data-stack';
 import { VettidOrgStagePushDelegationStack } from './stacks/stage-push-delegation-stack';
 import { VettidOrgVaultSmokeStack } from './stacks/vault-smoke-stack';
 import { VettidOrgVaultStack, vaultEnv } from './stacks/vault-stack';
@@ -152,6 +154,20 @@ export function buildApp(app: cdk.App): void {
     if (pushNs.length) {
       const pushDelegation = new VettidOrgStagePushDelegationStack(app, 'VettidOrgStagePushDelegationStack', { config, nameServers: pushNs, env });
       pushDelegation.addStackDependency(dnsStack);
+    }
+    // The calling service (CALLING-SERVICE §8.2; CALLS-PLAN §13), only with
+    // context callsStages=staging. Data (key, log groups, alarm topic;
+    // stateful) first; the service stack only once it has an issuer to put
+    // behind its front (the handshake test's stub, or the real archive).
+    if (config.calls) {
+      const callsData = new VettidOrgCallsDataStack(app, 'VettidOrgCallsDataStack', { config, ...stateful });
+      if (config.calls.issuer.kind !== 'none') {
+        const callsStack = new VettidOrgCallsStack(app, 'VettidOrgCallsStack', { config, env });
+        callsStack.addStackDependency(callsData);
+        callsStack.addStackDependency(dnsStack); // the zone the certificate validates in
+      } else {
+        cdk.Annotations.of(app).addInfoV2('vettid:calls-no-issuer', 'VettidOrgCallsStack skipped: set context callsIssuerStub=true (handshake test) or stagingCallsIssuer');
+      }
     }
     // TEMPORARY vault hardware smoke test, as in the prod app below: only with
     // `-c vaultSmoke=true`, in this stage's own account (staging: the vault
