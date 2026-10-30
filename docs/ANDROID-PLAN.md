@@ -1,11 +1,11 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.101
+version: 0.1.102
 date: 2026-10-30
 changelog:
-  - 0.1.101: owner decision of 2026-10-30 (VAULT-MESSAGING 0.80.0, §15
-    item 47; BALLOT-PROTOCOL 0.11.1). New §4 "Votes (0.1.101)": a Votes
+  - 0.1.102: owner decision of 2026-10-30 (VAULT-MESSAGING 0.81.0, §15
+    item 48; BALLOT-PROTOCOL 0.11.1). New §4 "Votes (0.1.102)": a Votes
     drawer entry (shown only when the vault answers `vote.list` and holds
     a vote or a `reconnect` connection; not in Messages, not in Approvals
     or its indicator), the vote screen (the service's words as plain
@@ -1211,14 +1211,14 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.80.0) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.81.0) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
   - CALLS-PLAN.md (0.1.3) — calls; video in C4 (§4, 0.1.42)
   - AGENT-PLAN.md (0.1.7) — the agent connector; §7.2 AA1–AA5 (§4
     "Devices & agents", 0.1.53)
-  - IOS-PLAN.md (0.1.51) — the iPhone app; §4.12 carries the approvals
+  - IOS-PLAN.md (0.1.52) — the iPhone app; §4.12 carries the approvals
     indicator (0.1.89)
 classification: public (no secrets; safe for github.com/vettid)
 ---
@@ -1312,7 +1312,7 @@ patterns:
 ## 4. Screens (v1)
 
 **Drawer** (0.1.11, owner decisions of 2026-10-07): Messages ·
-Connections · Approvals (badge) · Votes (0.1.101, only when there is
+Connections · Approvals (badge) · Votes (0.1.102, only when there is
 one, §4 "Votes") · Vault · History · Settings · Help —
 later: Calls, Devices & agents, Shared actions & introductions, Wallet,
 Location. (0.1.53) Devices & agents is specified in §4 "Devices &
@@ -1342,7 +1342,7 @@ rows below say "Vault" for the screens and "item" for the data.
 | Connections | Contacts | (0.1.90) Services are a separate "Services" section below the people, §4 "Service connections". Initial tiles, status (pending / active / stale / blocked); a star marks favourites (the owner's `favorite` flag, `connection.update`), whose tiles are teal; the floating action button invites a connection (0.1.11: QR or link, or scan the other's QR), the only invite entry point besides empty states. Each is titled "First Last" from the profile's core (VAULT-MESSAGING 0.18.0 §10.8), the display name, if any, as secondary text. Incoming requests show the requester's names the same way. Only between activation and the first `profile.update`, when the request's names are not at hand: "Name not shared yet"; never "Unnamed connection" |
 | Connection detail | — | Titled "First Last" (never an alias), the display name secondary. Profile shared with you (the names labelled as the name on their VettID account, never "verified"; display name, photo and items labelled as shared by them), sharing both ways ("You share with <First>": every share rule a row with its own settings, opening its editor or deleted after a confirmation, "Add a rule" up to 64, 0.1.20), a connection's requests (0.1.22, VAULT-MESSAGING 0.23.0 §10.4.1: muted, paused after several declines, declined ones in cooldown, with Mute/Unmute, Resume and "Allow declined requests again"), authenticate, the vault key fingerprint (`ik`, 8 groups of 4 hex digits, §10.8: the lasting identity check). The action bar: message, favourite, History, remove (confirmed). No safety code (it belongs to connecting: the invite and request screens), no alias or notes, no edit or block (0.1.13; blocking stays on an incoming request) |
 | Approvals | — (VettID-specific) | Pending connection requests, grant requests, critical-item uses, share-rule decisions; approve/deny; critical items need the credential password. 0.1.22: a connection's asks within 10 minutes are one entry ("Sam asks for 3 things"), a connection whose asks are paused is a notice (resume, or remove the connection), a share question names the rule that asks first and warns when declining stops an item already shared, one question per item and connection |
-| Votes | — (VettID-specific) | (0.1.101, owner decision of 2026-10-30; VAULT-MESSAGING 0.80.0 §10.19.) A service's proposals: open, upcoming, being checked and closed, with the member's own ballot and the checked results; one vote screen with the choices, the fixed disclosure and the cast; shown in the drawer only when the vault has a vote or a service to reconnect (§4 "Votes"). Not in Messages or Approvals |
+| Votes | — (VettID-specific) | (0.1.102, owner decision of 2026-10-30; VAULT-MESSAGING 0.81.0 §10.19.) A service's proposals: open, upcoming, being checked and closed, with the member's own ballot and the checked results; one vote screen with the choices, the fixed disclosure and the cast; shown in the drawer only when the vault has a vote or a service to reconnect (§4 "Votes"). Not in Messages or Approvals |
 | Vault | Folder list | Titled "Vault" (0.1.11; was "Items"). Items per VAULT-ITEMS: name, category, typed fields, tags, sensitivity (data / secret / critical); filter by tag (0.1.21: "✕ Clear" ends the filter chips while a filter is on); each tag in its own colour (0.1.21), stored in the vault's tag registry and the same on every device, the least-used of a palette of ten for a new tag, picked by the member on Manage tags (0.1.25; `@profile` always gold); add/edit from templates ("Save item" in the top bar, 0.1.21); share rules by tag, as many per connection as needed (up to 64), each with its own tags, mode (default: ask each time), fetch limit and end (presets or a custom date and time), overlaps shown (0.1.20); one tag per rule, per-hour and per-day limits, `ask` wins, rules named by their tags, "Save rule" in the top bar (0.1.22). Critical items live in the Protean Credential and are never shared by a rule |
 | History | — (VettID-specific) | The member's audit log (0.1.11, `audit.list`, VAULT-MESSAGING 0.20.0 §10.9), read-only: a search field (the vault searches, `q`), filter chips (category, connection, date range), a list of entries newest first with infinite scroll, and an entry detail, each entry's icon in its category's colour (0.1.22); a ⋯ menu with **Export…** (0.1.17: CSV or JSON of what the filters show, with the vault PIN, saved through "Save to…"). Details below |
 | Notifications | — (Proton has none; a bell as in most apps) | 0.1.23 (owner answers of 2026-10-09): the vault's feed (VAULT-MESSAGING §10.9), opened from the bell in the top bar with the unread count; grouped by day, urgent items first, unread and read, swipe to archive or to mark read, an Archived view; each item opens the screen it is about; system notifications through the member's notification mode (D7). Details below |
@@ -2290,7 +2290,7 @@ gets its own indicator, apart from the bell.
    expired. The count is the number of **entries** (a connection's
    asks within 10 minutes are one entry, 0.1.22; a batch is one).
    Never counted: a notice (a paused connection's, a rate limit), a vote
-   (0.1.101, §4 "Votes": it lives days and has its own count), the
+   (0.1.102, §4 "Votes": it lives days and has its own count), the
    member's own outgoing requests, a row that waits for the other side
    (an approved connection awaiting its peer), and a location request
    the member answered **Not now**. The vault has no decline (§4
@@ -4834,7 +4834,7 @@ The Call button is simply absent. **"What this service can ask"**:
 **"It can ask you to confirm a sign-in or approve an action. It can't
 message or call you, and it can't ask for your data."** The line is the
 vault's rule for this release; it is revised with any contract.
-(0.1.101) Where the vault has the vote feature the line is
+(0.1.102) Where the vault has the vote feature the line is
 `service_detail_can_ask_body_votes` of §4 "Votes".
 
 **If the vault says `forbidden`** to something sent to a service (an
@@ -4924,9 +4924,9 @@ today's screen; a JSON number (42) or `null` shows today's screen; "07" is shown
 "match code 42" without a field shows no block; font scale 200%;
 the notification text carries no code; the block has no check mark or success styling.
 
-### Votes (0.1.101)
+### Votes (0.1.102)
 
-*Owner decision of 2026-10-30 (VAULT-MESSAGING 0.80.0 §6.4 "Votes", §10.19, §15 item 47; BALLOT-PROTOCOL 0.11.1). Every member-facing text below is a **draft for owner approval**. Not built. Vault: staging release 25 (`features/vote`); until the vault answers `vote.list`, nothing here shows.*
+*Owner decision of 2026-10-30 (VAULT-MESSAGING 0.81.0 §6.4 "Votes", §10.19, §15 item 48; BALLOT-PROTOCOL 0.11.1). Every member-facing text below is a **draft for owner approval**. Not built. Vault: staging release 25 (`features/vote`); until the vault answers `vote.list`, nothing here shows.*
 
 A service (VAULT-MESSAGING §1.1) can put a **proposal** to its members. The member chooses once; the vault signs and sends the vote; the service records it and later publishes the results; the vault checks them. The vault does every check and signature (§10.19.4 to §10.19.6); the app shows, asks and hands over public documents.
 
@@ -5089,7 +5089,7 @@ The History category is "Connections" (with the service's name); no entry shows 
 
 **Screen privacy** (open point for the owner, decision A): the vote screen, the confirm sheet and a vote's evidence screen are excluded from screenshots and the recent-apps preview (`FLAG_SECURE`, as §4 "Recovery: type the code" already proposes), because a vote's choice is shown on them. Recommended: yes. Without it a screenshot can capture a choice.
 
-**Not built, on purpose.** No "secret ballot" language; no change of vote; no share or copy of a choice; no verification badge for a service; no reminder of the app's own (the vault's `vote.closing` is the one); no widget; no desktop view (VAULT-MESSAGING §15 item 47, decision 4).
+**Not built, on purpose.** No "secret ballot" language; no change of vote; no share or copy of a choice; no verification badge for a service; no reminder of the app's own (the vault's `vote.closing` is the one); no widget; no desktop view (VAULT-MESSAGING §15 item 48, decision 4).
 
 **Tests.** The list shows only with a vault that answers `vote.list` and a vote or a `reconnect` entry, and never an empty screen; the badge counts open, not yet voted votes only; the vote screen shows the text as plain text (a text with markup, a link, control characters and a bidirectional override renders as clean text); the choices in order, `abstain` as sent; **Cast** disabled with the reason written for each `cannot_cast` code; the confirm sheet shows the fixed sentence with the service's name, and a proposal whose text contains the sentence or a different one changes nothing; the unlock prompt appears only without an open window and the request is sent once; each ballot state, refusal and check outcome shows its text (a table test over `ballot.state`, `code` and `check.state`); a `waiting` ballot never shows "failed"; "counted"/"include" appears only for a verified check; the choice appears in no list, notification, feed item, History entry or log (a scan of the app's logs after a cast); `Save the proof` writes the vault's evidence unchanged; restore confirm; the reconnect card from a `reconnect` entry and no change to the connection; removing a service with an unfinished vote asks; the hourly sync only while unlocked and no request without a session; offline: nothing shown unless a vote is `checking` or a check is pending; TalkBack reading order and focus on the disclosure; font scale 200%; a held vault shows the owner check, not the Votes list; the texts of the table above in the screen catalog.
 
@@ -5579,7 +5579,7 @@ this phone can no longer show. Deny it, or let it expire." with
 
 #### The unlock window prompt
 
-Used before `leash.grant.issue`, an agent's `share.rule.set` and (0.1.101)
+Used before `leash.grant.issue`, an agent's `share.rule.set` and (0.1.102)
 `vote.cast`, and after any `credential_locked`:
 
 - A sheet titled "Confirm with your credential password"; body "Giving

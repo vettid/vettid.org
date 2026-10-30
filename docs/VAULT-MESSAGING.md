@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.80.0
+version: 0.81.0
 date: 2026-10-30
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,8 +14,8 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.13.2)
-  - ANDROID-PLAN.md (0.1.101)
-  - IOS-PLAN.md (0.1.51; §9.1 VA1–VA4)
+  - ANDROID-PLAN.md (0.1.102)
+  - IOS-PLAN.md (0.1.52; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
@@ -28,8 +28,8 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
-  - 0.80.0: **owner decision 2026-10-30** (ANDROID-PLAN 0.1.101, IOS-PLAN
-    0.1.51; §15 item 47; BALLOT-PROTOCOL 0.11.1, MEMBER-SERVICE-PLAN §10
+  - 0.81.0: **owner decision 2026-10-30** (ANDROID-PLAN 0.1.102, IOS-PLAN
+    0.1.52; §15 item 48; BALLOT-PROTOCOL 0.11.1, MEMBER-SERVICE-PLAN §10
     item 5.1). A member's vault takes part in the ballot protocol of a
     service, which the staging service vault already runs. §6.4
     "Service connections": the vault allows `vote.proposal`,
@@ -70,7 +70,7 @@ changelog:
     the audit kinds and the feed kinds of votes. §10.1: the `votes`
     limit. §3.5.1: the credential key also signs a ballot's `cast_sig`.
     §16: the vote vectors of BALLOT-PROTOCOL 0.11.1, copied from
-    service-vault `dc6a4d2`. §15 item 47 (new): the owner decisions and
+    service-vault `dc6a4d2`. §15 item 48 (new): the owner decisions and
     the questions for the service vault's author. **Needs a staging
     vault release 25**, the service vault reading `features`, and app
     work
@@ -2581,7 +2581,7 @@ described in RFC 2119.
      - presence, as an on-demand ping;
      - (0.69.0) service connections, marked and limited (§6.4 "Service
        connections"): a connection that declares itself a service;
-     - (0.80.0) votes of a service, by pseudonymous signed ballots over
+     - (0.81.0) votes of a service, by pseudonymous signed ballots over
        the service connection (§10.19; BALLOT-PROTOCOL).
    - Planned, not yet specified (owner decision 2026-10-26; 0.64.0).
      Each is specified in a later revision; until then this document
@@ -2590,7 +2590,7 @@ described in RFC 2119.
        a `connection` (PUSH-GATEWAY §12, item 5; marked and limited
        from 0.69.0, above); contracts with a service (acceptance,
        completions);
-     - (votes: specified in 0.80.0, above; the blind-signature design is
+     - (votes: specified in 0.81.0, above; the blind-signature design is
        superseded.)
    - Out of scope: org vaults and transport-credential minting.
 3. **The vault relay key exists only in PIN-protected vault state.** The
@@ -3127,7 +3127,7 @@ transport. Its three rotating mechanisms map as follows:
     is distinct from the relay, identity and KEM keys (§3.2).
   - It signs what the member approves; the operations that use it are
     defined with the features that need it: member authentication
-    (§10.4), signed LEASH delegations (§10.11) and (0.80.0) a ballot's
+    (§10.4), signed LEASH delegations (§10.11) and (0.81.0) a ballot's
     `cast_sig` (§10.19.5).
 - **UTK/LTK pairs.** One-time transaction keys, each an MLKEM768X25519 key pair.
   - The vault keeps the private halves (LTKs) in DEK state.
@@ -5357,8 +5357,8 @@ unnoticed. Apps word it as a claim by the other side, not a fact
 | Upkeep, both ways | `hs.*` for `rekey` and `reconnect`, `relay.token.issued`, `relay.token.refresh`, `relay.address.update`, `identity.rotate`, `connection.approved`, `.declined`, `.removed` | |
 | Profile | `profile.update` both ways, reduced (§10.8) | |
 | From the service | `connection.authenticate.challenge` **with a known `purpose`** (`signin` or `approval`, §10.4, with all of §10.4.1's limits): a challenge from a service without a `purpose`, or with an unknown one, is dropped like any other type | **Dropped and audited** `drop.service_type` (`ref` = the `connection_id`, with the type); nothing is sent back (§9.2), and no ask is created |
-| Votes, from the service (0.80.0) | `vote.proposal`, `vote.extended`, `vote.closed`, in a vault whose image registers `vote` (§11.10.8; the table "Votes" below) | Without the feature: answered `unsupported_type` and audited `drop.service_type` (the transition rule below). Any other `vote.*`: dropped and audited like any other type |
-| To the service | `connection.authenticate.response`, `.rotated`, and the upkeep and profile rows above, and (0.80.0, with the feature) `vote.cast`, `vote.status` and the answers to the three requests above (§10.19). **The vault itself sends a service nothing else, whatever triggers it** (for example `action.offered` after `action.configure` or at activation, §10.14, `presence.ping`, `message.receipt`, `location.*`, `data.*`, `intro.*`) | A request of a device that names the connection for `message.send`, `message.attachment.*`, `call.start`, `call.permission.set`, `location.share.start`, `location.request`, `presence.query`, `grant.request`, `grant.fetch`, `grant.catalog`, `share.rule.set`, `critical-secret-use.request`, `action.invoke`, `intro.create` or `connection.authenticate.request` is answered `forbidden`, and nothing is sent. `action.configure` naming a service connection is `forbidden`, and the vault sends it no `action.offered` |
+| Votes, from the service (0.81.0) | `vote.proposal`, `vote.extended`, `vote.closed`, in a vault whose image registers `vote` (§11.10.8; the table "Votes" below) | Without the feature: answered `unsupported_type` and audited `drop.service_type` (the transition rule below). Any other `vote.*`: dropped and audited like any other type |
+| To the service | `connection.authenticate.response`, `.rotated`, and the upkeep and profile rows above, and (0.81.0, with the feature) `vote.cast`, `vote.status` and the answers to the three requests above (§10.19). **The vault itself sends a service nothing else, whatever triggers it** (for example `action.offered` after `action.configure` or at activation, §10.14, `presence.ping`, `message.receipt`, `location.*`, `data.*`, `intro.*`) | A request of a device that names the connection for `message.send`, `message.attachment.*`, `call.start`, `call.permission.set`, `location.share.start`, `location.request`, `presence.query`, `grant.request`, `grant.fetch`, `grant.catalog`, `share.rule.set`, `critical-secret-use.request`, `action.invoke`, `intro.create` or `connection.authenticate.request` is answered `forbidden`, and nothing is sent. `action.configure` naming a service connection is `forbidden`, and the vault sends it no `action.offered` |
 
 In words:
 
@@ -5371,7 +5371,7 @@ In words:
   would look like a person's message and is not needed for either. If a
   service later needs to send notices, they are specified with the
   contract (§1.1), in a place of their own.
-- **Nothing shared and no asks, except member authentication and (0.80.0)
+- **Nothing shared and no asks, except member authentication and (0.81.0)
   votes.** No
   share rules, grants, shared actions, location, presence, critical-item
   use or introductions with a service, neither way: the asks of
@@ -5384,7 +5384,7 @@ In words:
   archive), mute and resume the connection's asks, read its audit,
   `connection.remove` and `block.add` it.
 
-**Votes (0.80.0; owner decision 2026-10-30, §15 item 47).** A vault whose
+**Votes (0.81.0; owner decision 2026-10-30, §15 item 48).** A vault whose
 image registers the `vote` feature (§11.10.8) allows these types on a
 connection whose stored `peer_kind` is `"service"`, in both directions,
 in addition to the table above. They are BALLOT-PROTOCOL 0.11.1 §4;
@@ -6694,10 +6694,10 @@ devices and access sessions, connections (with blocks and member
 authentication), messaging, the credential, items, tags, profile,
 settings, audit, feed, calls, LEASH, share rules and grants,
 critical-item use, shared actions, introductions, location, presence and
-the wallet are in §10.1–§10.18, votes in §10.19 (0.80.0), and push in §14 (0.24.0).
+the wallet are in §10.1–§10.18, votes in §10.19 (0.81.0), and push in §14 (0.24.0).
 
 (0.26.0) The types of the optional features (`actions`, `calls`,
-`intro`, `leash`, `location`, `presence`, `vote` (0.80.0), `wallet`) exist only in a
+`intro`, `leash`, `location`, `presence`, `vote` (0.81.0), `wallet`) exist only in a
 release whose channel lists the feature (§11.10.8, "Feature allowlist");
 in any other release they are unknown types (§5.3).
 
@@ -6802,7 +6802,7 @@ an answer to an unknown or expired id is dropped.
 | | `audit.export` | D→V | req | The member's History export: count, PIN, audit entry; the app then reads the entries with `audit.list` (§10.9, 0.22.0) |
 | | `feed.list`, `.get`, `.update`, `.delete`, `guide.sync` | D→V | req | Activity feed; app guides as feed items (§10.9) |
 | | `feed.event` | V→D | | New feed item |
-| Votes (0.80.0) | `vote.list`, `.get`, `.cast`, `.check`, `.confirm`, `.site.sync`, `.results.submit`, `.evidence` | D→V (app) | req | A service's votes: list and read, cast one ballot, ask the service, confirm a recovered ballot, hand over the public site's documents and the results (§10.19.8) |
+| Votes (0.81.0) | `vote.list`, `.get`, `.cast`, `.check`, `.confirm`, `.site.sync`, `.results.submit`, `.evidence` | D→V (app) | req | A service's votes: list and read, cast one ballot, ask the service, confirm a recovered ballot, hand over the public site's documents and the results (§10.19.8) |
 | | `vote.event` | V→D (app) | | A proposal, extension, close, ballot state or check changed (§10.19.8) |
 | | `vote.proposal`, `vote.extended`, `vote.closed` / `vote.cast`, `vote.status` | V↔V (service connections only) | req | The service's proposal, extension and close; the member's ballot and status request, with signed receipts and refusals (§6.4 "Votes", BALLOT-PROTOCOL §4) |
 | Push | `push.register`, `push.confirm`, `push.unregister` | D→V | req | Register, confirm (with the code the gateway pushed to the token, 0.30.0) or drop the app's FCM or APNs token for contentless wakes (§14, 0.24.0) |
@@ -6881,7 +6881,7 @@ an answer to an unknown or expired id is dropped.
     | `location_requests` | 1 per connection per 10 minutes | `location.request` (§10.16) |
     | `wallets` | 16 wallets | `wallet.create` (§10.18) |
     | `wallet_addresses` | 2,000 addresses per wallet | `wallet.address.new` (§10.18) |
-    | `votes` (0.80.0) | 128 kept proposals, 16 not yet closed per connection | `vote.proposal` from a service (answered to the service, §10.19.2) |
+    | `votes` (0.81.0) | 128 kept proposals, 16 not yet closed per connection | `vote.proposal` from a service (answered to the service, §10.19.2) |
     | `push_registrations` | 20 registrations that reach the gateway per 24 hours (0.24.0); every registration the gateway answered over HTTP counts, refusals included (0.24.1); (0.30.0) a `push.confirm` does not count | `push.register` (§14.1) |
     | `attachment_storage` (0.32.0, release A) | 1,073,741,824 bytes of stored attachments, content and thumbnails, sent and received | `message.send` with an attachment (§10.5.1) |
     | `attachments` (0.32.0, release A) | 4,096 stored attachments | `message.send` with an attachment |
@@ -7524,7 +7524,7 @@ waits for the member's decision:
 
 (0.69.0) From a connection whose `peer_kind` is `"service"` (§6.4
 "Service connections") only the member-authentication challenge arrives
-as an ask; the other kinds are dropped (`drop.service_type`). (0.80.0) A
+as an ask; the other kinds are dropped (`drop.service_type`). (0.81.0) A
 service's vote messages (§6.4 "Votes") are not asks: they never wait for
 the member in the sense of this section, have no cooldown, rate bucket
 or pause, and a vote is cast by the member's own request (§10.19.5).
@@ -9102,7 +9102,7 @@ The **profile object** holds the extras' display name and photo. Sent by
 |---|---|---|
 | `profile.get` | `{}` | `{version, name?, photo?, first_name, last_name, ik}` |
 | `profile.set` | `{version, name?, photo?}` | `{version}` |
-| `profile.update` (V↔V) | — | `{version, first_name, last_name, ik, name?, photo?, items: [{item_id, name, category, fields: [{field_id, label, kind, value}]}], features?}` (`features`, 0.80.0, only to a service connection) |
+| `profile.update` (V↔V) | — | `{version, first_name, last_name, ik, name?, photo?, items: [{item_id, name, category, fields: [{field_id, label, kind, value}]}], features?}` (`features`, 0.81.0, only to a service connection) |
 
 - `name`, the display name, is optional: at most 128 bytes, absent when
   the member has none (the default). `photo` is base64 of a JPEG or PNG
@@ -9158,7 +9158,7 @@ The **profile object** holds the extras' display name and photo. Sent by
      the account's names); a newer snapshot with the same names changes
      nothing;
   3. `ik` rotates (§3.4), in the order below;
-  4. (0.80.0) the **features advertised to a service** change (below):
+  4. (0.81.0) the **features advertised to a service** change (below):
      only the service connections get an update, and `version` still
      counts the change.
 - **After an `ik` rotation** the vault sends each peer the new
@@ -9181,7 +9181,7 @@ The **profile object** holds the extras' display name and photo. Sent by
   `photo`, a logo, are kept), and a `peer_kind` in the body is an
   unknown member and ignored. A profile change that only concerns the
   photo or `@profile` items sends a service nothing new.
-- **`features`** (0.80.0; owner decision 2026-10-30, §15 item 47, decision
+- **`features`** (0.81.0; owner decision 2026-10-30, §15 item 48, decision
   1). The `profile.update` a vault sends to a connection whose
   `peer_kind` is `"service"` carries `features`: an array of the names of
   the optional features its image registers (§11.10.8) that a service can
@@ -9679,7 +9679,7 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `approval.denied` (`device_id` = the requester, `ref` =
   `approval_id`) (§6.8);
   `connection.authenticate.key_rotated`,
-  `connection.authenticate.rotation_rejected` (§10.4); (0.80.0, votes,
+  `connection.authenticate.rotation_rejected` (§10.4); (0.81.0, votes,
   §10.19; each with the service's `connection_id`; **never a choice**)
   `vote.cast` (the member cast; `ref` = `proposal_id`), `vote.released` (a problem record released; `ref` = `proposal_id`), `vote.recorded`
   (the receipt was verified; `ref` = `proposal_id`), `vote.refused`
@@ -10039,7 +10039,7 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
   (`ref` = `request_id`), `action.request` (`ref` = `invocation_id`),
   `intro.request` (`ref` = `intro_id`), `location.shared`
   (`ref` = `share_id`), `location.request` (`ref` = `request_id`),
-  (0.80.0, §10.19.7; `ref` = `proposal_id`, never a title or a choice)
+  (0.81.0, §10.19.7; `ref` = `proposal_id`, never a title or a choice)
   `vote.open`, `vote.closing`, `vote.result` (priority `normal`) and
   `vote.problem` (priority `high`; also for a `rejected` proposal and a site mismatch),
   `wallet.signed` (`ref` = `txid`), (0.56.0) `wallet.cap_refused` and
@@ -13207,9 +13207,9 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
 - `crypto_keys` in the credential (§3.5.2) stays reserved and empty:
   wallets are critical items.
 
-### 10.19 Votes (0.80.0)
+### 10.19 Votes (0.81.0)
 
-*Owner decision 2026-10-30 (the staging service vault can publish proposals and count ballots, vettid-vault has no vote code, and staging vault release 25 waits for it). §15 item 47. The protocol itself (encodings, signatures, the service's side) is BALLOT-PROTOCOL 0.11.1 (vettid/service-vault `docs/BALLOT-PROTOCOL.md`), which this section does not repeat; where the two differ, BALLOT-PROTOCOL wins for the service and this section for the vault and the app. Marks "(chosen)" are this section's own choices where BALLOT-PROTOCOL is silent; §15 item 47 lists them.*
+*Owner decision 2026-10-30 (the staging service vault can publish proposals and count ballots, vettid-vault has no vote code, and staging vault release 25 waits for it). §15 item 48. The protocol itself (encodings, signatures, the service's side) is BALLOT-PROTOCOL 0.11.1 (vettid/service-vault `docs/BALLOT-PROTOCOL.md`), which this section does not repeat; where the two differ, BALLOT-PROTOCOL wins for the service and this section for the vault and the app. Marks "(chosen)" are this section's own choices where BALLOT-PROTOCOL is silent; §15 item 48 lists them.*
 
 A **vote** is a proposal that a service (§1.1, §6.4 "Service connections") puts to its members. The member's vault receives it over the service connection, checks the service's signature and its public anchor, lets the member choose once, and sends a signed ballot. The service answers with a signed receipt; after the close it publishes the results, and the vault checks that its own row is what it sent.
 
@@ -13222,7 +13222,7 @@ A **vote** is a proposal that a service (§1.1, §6.4 "Service connections") put
 
 #### 10.19.1 The feature and how a vault advertises it
 
-- **The feature.** `vote` is an optional feature (§11.10.8, `features/vote`): an image registers the types of this section only if its channel file lists it. Staging lists it from release 25; production release 1 does not (§15 item 47, decisions 2 and 3).
+- **The feature.** `vote` is an optional feature (§11.10.8, `features/vote`): an image registers the types of this section only if its channel file lists it. Staging lists it from release 25; production release 1 does not (§15 item 48, decisions 2 and 3).
 - **Advertising** (chosen; decision 1). The vault's `profile.update` to a connection whose `peer_kind` is `"service"` carries `features`, an array of the names of the optional peer-facing features its image registers: `["vote"]`, and absent when there is none (§10.8). This is **the existing profile mechanism, not a second capability list**: the profile is the one message a vault already sends a connection about itself, the service keeps the last one whatever the vault's lock state, and an older vault or service ignores the member (§10.1). §11.10.8's "no list in the protocol" is about asking a peer; this is a statement the vault makes about itself, to a service only. The service counts a connection as having the vote feature if and only if the last `profile.update` it holds from it at `record_at` carries `"vote"` and the connection is active (BALLOT-PROTOCOL §3.2). A person connection is sent no `features`.
 - **A vault without the feature** (any release before 25, or an image whose channel file does not list `vote`) advertises nothing, so it is never eligible. Its handling of a `vote.*` it nevertheless receives from a service is §6.4's: with this release's rules, `unsupported_type`; before them, dropped and audited `drop.service_type`.
 - **A connection made before the service sent `peer_kind`** (vettid/service-vault #79: only new invitations carry it) is a person connection to the vault and stays one (§6.4: the kind is fixed at connect). The vault sends it no `features`, so the service never counts it, and answers any `vote.*` from it `unsupported_type`, as for an unknown type (`drop.vote_not_service`, §6.4). The member must **connect again** from a fresh invitation to vote. §10.19.8 "Reconnecting for votes" says how the app finds out.
@@ -13241,7 +13241,7 @@ Per proposal, in DEK state (`features.vote`), encrypted like all vault state and
 
 The vault also keeps the latest verified **service list** (§10.19.4) and the time it last saw it confirmed.
 
-Bounds (chosen): a `vote.proposal` body is at most 196,608 bytes, its `proposal` at most 65,536 bytes decoded and its `bundle` at most 65,536 bytes; the vault keeps at most **128 proposals**, at most **32 per connection** in all states and 16 per connection not yet closed, so that one service cannot fill the vault. **Making room** (a busy organisation must not run out): when a connection is at its cap, the vault evicts that connection's **oldest records whose check is final and clean** (`verified`, `unconfirmed` or `gave_up`) or that closed without a ballot, keeping for each a **compact evidence record** outside the cap. The compact record holds what cannot be fetched again: `proposal_id`, `proposal_hash`, `record_tag`, the service's `ik`, the ballot `{vk, choice_id, ballot_sig}`, `msg_ms` and `receipt_sig`, every signed refusal verbatim, and the outcome (about 250 bytes plus refusals). The proposal and the results are public and write-once on the site and are fetched again when needed. At most 512 compact records per connection, each deleted **365 days** after its close, oldest first. **The problem set** is explicit: a proposal that is `rejected`; whose check is `failed`; whose ballot is in `conflict` or `disputed`; whose `site` is `mismatch` or `unpublished`; or that holds a refusal which raised a `vote.problem`. A problem record is **never evicted**, is **counted apart** (it does not count toward the 32 or the 16 not closed), and is deleted **365 days after its close** or when the member releases it. **In-progress records** (`checking`, `upcoming`, `open`, check `pending`, ballot not final) stay under the 32 and the 16 and are never evicted. The cap on problem records is **16 per connection and applies only to keeping new proposals**: a record can turn into a problem after it is kept, so the count may pass 16; at 16 or more the vault keeps no new proposal from that connection, answers it `limit`, and tells the member with the `problems` notice below, deleting nothing. This cap is chosen (§15 item 47): a misbehaving service can block its own members this way, which BALLOT-PROTOCOL §1 and §9.2 already allow, and the notice names the service as its cause. **Releasing** a problem record (`vote.release`, §10.19.8) replaces it by a compact record that still holds **every signed item that is not on the public site**: the held proposal bytes, `proposal_sig` and `bundle` when `site` is not `matches`; the site's copy for a `mismatch`; every `vote.status` answer verbatim; the other ballot in a `conflict` or `disputed`; a `rejected` proposal with its reason. A release frees only what can be fetched again. A proposal that still cannot be kept (the cap is full of proposals that cannot be evicted, or the vault is at 128) is answered `limit` (`{limit: "votes", max}`, §10.1), audited `drop.vote_limit` and **shown to the member**: a `vote.problem` feed item (`ref` = the `connection_id`, at most one per connection per 24 hours) and a `dropped` entry in `vote.list` (`{connection_id, count, last_at}`) until the member opens it. For the problem cap the entry is `problems` (`{connection_id, count}`) and stays until a record is released.
+Bounds (chosen): a `vote.proposal` body is at most 196,608 bytes, its `proposal` at most 65,536 bytes decoded and its `bundle` at most 65,536 bytes; the vault keeps at most **128 proposals**, at most **32 per connection** in all states and 16 per connection not yet closed, so that one service cannot fill the vault. **Making room** (a busy organisation must not run out): when a connection is at its cap, the vault evicts that connection's **oldest records whose check is final and clean** (`verified`, `unconfirmed` or `gave_up`) or that closed without a ballot, keeping for each a **compact evidence record** outside the cap. The compact record holds what cannot be fetched again: `proposal_id`, `proposal_hash`, `record_tag`, the service's `ik`, the ballot `{vk, choice_id, ballot_sig}`, `msg_ms` and `receipt_sig`, every signed refusal verbatim, and the outcome (about 250 bytes plus refusals). The proposal and the results are public and write-once on the site and are fetched again when needed. At most 512 compact records per connection, each deleted **365 days** after its close, oldest first. **The problem set** is explicit: a proposal that is `rejected`; whose check is `failed`; whose ballot is in `conflict` or `disputed`; whose `site` is `mismatch` or `unpublished`; or that holds a refusal which raised a `vote.problem`. A problem record is **never evicted**, is **counted apart** (it does not count toward the 32 or the 16 not closed), and is deleted **365 days after its close** or when the member releases it. **In-progress records** (`checking`, `upcoming`, `open`, check `pending`, ballot not final) stay under the 32 and the 16 and are never evicted. The cap on problem records is **16 per connection and applies only to keeping new proposals**: a record can turn into a problem after it is kept, so the count may pass 16; at 16 or more the vault keeps no new proposal from that connection, answers it `limit`, and tells the member with the `problems` notice below, deleting nothing. This cap is chosen (§15 item 48): a misbehaving service can block its own members this way, which BALLOT-PROTOCOL §1 and §9.2 already allow, and the notice names the service as its cause. **Releasing** a problem record (`vote.release`, §10.19.8) replaces it by a compact record that still holds **every signed item that is not on the public site**: the held proposal bytes, `proposal_sig` and `bundle` when `site` is not `matches`; the site's copy for a `mismatch`; every `vote.status` answer verbatim; the other ballot in a `conflict` or `disputed`; a `rejected` proposal with its reason. A release frees only what can be fetched again. A proposal that still cannot be kept (the cap is full of proposals that cannot be evicted, or the vault is at 128) is answered `limit` (`{limit: "votes", max}`, §10.1), audited `drop.vote_limit` and **shown to the member**: a `vote.problem` feed item (`ref` = the `connection_id`, at most one per connection per 24 hours) and a `dropped` entry in `vote.list` (`{connection_id, count, last_at}`) until the member opens it. For the problem cap the entry is `problems` (`{connection_id, count}`) and stays until a record is released.
 
 The records survive a lock, a hold, a restart, a release move, a transfer to a new phone and a recovery (they are vault state, §3.3), and the removal of the connection (they are the member's evidence); they go with the vault (§12.5). **Nothing is synced to the owner's desktops and agents**: they have no vote access (decision 4), so no `sync.event` kind is added. A desktop sees the vault's audit entries `vote.cast` and `vote.recorded` through `audit.list` like all entries (that the member took part, the proposal id and the time; never the choice). A vault has one app (§1.1 item 8); a new phone reads `vote.list`.
 
@@ -13453,7 +13453,7 @@ row_proof: { "index": 1, "tree_size": 3, "path": ["<b64 32 bytes>"] }
 | **Clock skew** | The vault's clock decides what the app offers; the relay's time decides at the service; `not_open` is sent again. |
 | **Service identity rotated** | An earlier `ik` of the connection's chain verifies a proposal. The service starts no rotation between a proposal and its results (BALLOT-PROTOCOL §2). |
 
-#### 10.19.10 Tests required (0.80.0; follow-up implementations)
+#### 10.19.10 Tests required (0.81.0; follow-up implementations)
 
 - **Vectors (§16):** `record_tag`, `ballot_msg`, `ballot_sig`, `ballot_leaf`, `cast_sig`, the receipt, status and refusal messages and signatures; the Merkle trees and the 5-leaf proofs; the proposal, extension, rows and results documents and their signatures; the twelve Ed25519 cases in the vault's verifier, and in the app's if it verifies. A copied vector that stops matching is a stop-and-report item (BALLOT-PROTOCOL §11).
 - **Feature:** a build without `vote`: `vote.*` from a service is answered `unsupported_type` and audited, a `vote.*` request of the app is `unsupported_type`, no `features.vote` entry exists and `profile.update` carries no `features`. With it, existing vectors are unchanged. `profile.update` to a service carries `["vote"]`, to a person nothing; a vault that gains the feature in a release sends it once to each active service connection with the next `version`.
@@ -15861,7 +15861,7 @@ recorded in the build's measurements:
   it `push.register` is answered `unavailable` (§14.1);
 - (0.26.0) `features`, the optional features the image registers
   ("Feature allowlist" below);
-- (0.80.0, §10.19; item 5.4 of MEMBER-SERVICE-PLAN fixes the values)
+- (0.81.0, §10.19; item 5.4 of MEMBER-SERVICE-PLAN fixes the values)
   `vote_site_key` and `vote_trust_roots`, **present exactly when
   `features` lists `vote`** and a placeholder in neither: the Ed25519
   public key (base64 of 32 bytes) with which votes.vettid.org signs its
@@ -15957,7 +15957,7 @@ production manifest keys and URL.
 0.26.0 every image registered every feature of §10, whether an app used
 it or not. From 0.26.0 a channel file carries `features`, the list of
 the **optional** features its images register. The names are the
-feature packages' own (vettid-vault `features/<name>`); (0.80.0) there
+feature packages' own (vettid-vault `features/<name>`); (0.81.0) there
 are **eight**:
 
 | Feature | Its types | Section | A connection can send it |
@@ -15968,7 +15968,7 @@ are **eight**:
 | `leash` | `leash.*`, `agent.request` | §10.11 | nothing (apps, desktops and agents only) |
 | `location` | `location.*` | §10.16 | `location.update`, `.shared`, `.stopped`, `.requested`, `.snapshot` |
 | `presence` | `presence.*` | §10.17 | `presence.ping`, `.pong` |
-| `vote` (0.80.0) | `vote.*` | §10.19, §6.4 | from a connection of kind `service` only: `vote.proposal`, `.extended`, `.closed` |
+| `vote` (0.81.0) | `vote.*` | §10.19, §6.4 | from a connection of kind `service` only: `vote.proposal`, `.extended`, `.closed` |
 | `wallet` | `wallet.*` | §10.18 | nothing directly (only through `actions`) |
 
 The last column is what a connection may send today to a vault whose
@@ -16007,7 +16007,7 @@ account, push). The v1 app uses all of them.
     `settings.get` is unchanged.
 - **No list in the protocol.** No message carries a list of features or
   types today, and 0.26.0 adds none: an app or a peer learns that a
-  feature is absent from `unsupported_type`. (0.80.0) The one exception
+  feature is absent from `unsupported_type`. (0.81.0) The one exception
   is a vault's own statement to a **service**: its `profile.update`
   names the peer-facing features it registers (today `vote`, §10.8).
   It answers no question; a service needs it before any message can
@@ -16067,13 +16067,13 @@ The initial lists:
 | `wallet` | on | **off** | No app code. Phase 4 |
 | `location` | on | **off** | No app code. Phase 5 |
 | `presence` | on | **off** | No app code. Phase 6 |
-| `vote` (0.80.0) | on, from release 25 | **off** | The staging service vault runs ballots (BALLOT-PROTOCOL); production has no service vault and no site or Rekor pins yet (item 5.4). Production adds it only after STAGING-DEVELOPMENT-PLAN §2.4 |
+| `vote` (0.81.0) | on, from release 25 | **off** | The staging service vault runs ballots (BALLOT-PROTOCOL); production has no service vault and no site or Rekor pins yet (item 5.4). Production adds it only after STAGING-DEVELOPMENT-PLAN §2.4 |
 | `actions`, `intro` | on | **off** | ANDROID-PLAN §4 lists shared actions and introductions among the later screens; the app sends no `action.*` or `intro.*`, and shows what arrives as "Not available in this version of the app" |
 
 So `staging.json` has `"features": ["actions", "calls", "intro",
 "leash", "location", "presence", "wallet"]`, which is what S1–S9
 registered (S10 changes no behaviour), and `prod.json` has
-`"features": []`. (0.80.0) Staging release 25 adds `vote` (in order,
+`"features": []`. (0.81.0) Staging release 25 adds `vote` (in order,
 after `presence`), with `vote_site_key` and `vote_trust_roots`.
 
 Not switched by this list: pairing a desktop and its access sessions
@@ -16188,7 +16188,7 @@ build (IOS-PLAN §5), `apple-app-site-association` on each account host
 - `releasecfg`: every refusal of rule 1 for `features`; rule 2 both ways
   (a name dropped is refused, a name added passes), with a previous file
   from before 0.26.0; `android_package` missing, a placeholder, another
-  channel's value; (0.80.0) `vote_site_key` and `vote_trust_roots` present
+  channel's value; (0.81.0) `vote_site_key` and `vote_trust_roots` present
   exactly with `vote`, and a placeholder or an unparseable value refused;
   the committed files (staging: eight names from release 25, seven before, and
   `com.vettid.app.staging`; production: none and `com.vettid.app`).
@@ -23921,8 +23921,8 @@ Follow-ups:
     MEMBER-SERVICE-PLAN §4.2 (the page shows the same number), the
     apps (ANDROID-PLAN 0.1.100, IOS-PLAN 0.1.50).
 
-47. **Votes: a member's vault takes part in the ballot protocol (0.80.0;
-    owner decision 2026-10-30, ANDROID-PLAN 0.1.101, IOS-PLAN 0.1.51;
+48. **Votes: a member's vault takes part in the ballot protocol (0.81.0;
+    owner decision 2026-10-30, ANDROID-PLAN 0.1.102, IOS-PLAN 0.1.52;
     BALLOT-PROTOCOL 0.11.1, vettid/service-vault `dc6a4d2`, MEMBER-SERVICE-PLAN
     §10 item 5.1).** The staging service vault publishes proposals,
     counts ballots and publishes results; this is the member side.
@@ -24011,8 +24011,8 @@ Follow-ups:
     `features` member of `profile.update`, the release constants
     `vote_site_key` and `vote_trust_roots`), the service vault reading
     `features` (its roster now counts every active connection), the site
-    pins of item 5.4, and the apps (ANDROID-PLAN 0.1.101, IOS-PLAN
-    0.1.51).
+    pins of item 5.4, and the apps (ANDROID-PLAN 0.1.102, IOS-PLAN
+    0.1.52).
 
 ## 16. Test vectors
 
@@ -24561,7 +24561,7 @@ version 7, per_tx none, per_period 2000000
   payload_sha256 (hex)       : 7bcbbf3d027952bb1a7cbafba930b385732185b8f61d4b15218a8ee7a32d58ae
 ```
 
-**§10.19 votes (0.80.0).** Copied from vettid/service-vault `vote/testdata/vectors.json` at `dc6a4d2` (main, 2026-10-30; BALLOT-PROTOCOL 0.11.1 §11), where the reference implementation generates them and the file is authoritative. The values are for test use only. All signatures are Ed25519 over `label ‖ message`, the label ending in its own `0x00` byte (`suite.Sign`, §4.1); `lp(x)` is a 16-bit big-endian length and `x`; values shown as hex are raw bytes, and on the wire (§6.4) they are standard base64. A vector that stops matching is a stop-and-report item (BALLOT-PROTOCOL §11). Checked independently against this text when it was copied: every line of the first block reproduces from its inputs.
+**§10.19 votes (0.81.0).** Copied from vettid/service-vault `vote/testdata/vectors.json` at `dc6a4d2` (main, 2026-10-30; BALLOT-PROTOCOL 0.11.1 §11), where the reference implementation generates them and the file is authoritative. The values are for test use only. All signatures are Ed25519 over `label ‖ message`, the label ending in its own `0x00` byte (`suite.Sign`, §4.1); `lp(x)` is a 16-bit big-endian length and `x`; values shown as hex are raw bytes, and on the wire (§6.4) they are standard base64. A vector that stops matching is a stop-and-report item (BALLOT-PROTOCOL §11). Checked independently against this text when it was copied: every line of the first block reproduces from its inputs.
 
 ```
 ballot, receipt, status answer, refusal                       (vectors.json, top level)
@@ -24669,7 +24669,7 @@ documents (JCS bytes, as the exact strings)                       (vectors.json,
       = Sign(service ik, "vettid/vote/1/results\x00", proposal_hash || SHA-256(results))
 ```
 
-The document vectors carry their own `proposal_hash` (the SHA-256 of `proposal`, which differs from the ballot vectors' value above); the vectors file has no anchor bundle yet (§15 item 47, question (i)). The `features` member of §10.8 is the JSON `"features": ["vote"]`.
+The document vectors carry their own `proposal_hash` (the SHA-256 of `proposal`, which differs from the ballot vectors' value above); the vectors file has no anchor bundle yet (§15 item 48, question (i)). The `features` member of §10.8 is the JSON `"features": ["vote"]`.
 
 
 ## 17. Changelog

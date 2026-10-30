@@ -1,17 +1,17 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.51
+version: 0.1.52
 date: 2026-10-30
 changelog:
-  - 0.1.51: owner decision of 2026-10-30 (VAULT-MESSAGING 0.80.0, §15
-    item 47; ANDROID-PLAN 0.1.101). New §4.15 "Votes": the same as
-    ANDROID-PLAN §4 "Votes (0.1.101)" (the Votes entry only when there
+  - 0.1.52: owner decision of 2026-10-30 (VAULT-MESSAGING 0.81.0, §15
+    item 48; ANDROID-PLAN 0.1.102). New §4.16 "Votes": the same as
+    ANDROID-PLAN §4 "Votes (0.1.102)" (the Votes entry only when there
     is a vote or a service to reconnect; the vote screen with the service's
     words as plain text, the fixed disclosure, no "secret", no "counted"
     before the vault's results check; states in words; the unlock prompt;
     "Save the proof"; "Connect again to vote"), with the iOS differences
-    in §4.15 (VoiceOver, Dynamic Type, no push until the gateway has
+    in §4.16 (VoiceOver, Dynamic Type, no push until the gateway has
     APNs, the app-switcher snapshot). Draft texts as ANDROID-PLAN's.
     Vault: staging release 25
   - 0.1.50: owner decision of 2026-10-28 (VAULT-MESSAGING 0.79.0, §15
@@ -460,8 +460,8 @@ changelog:
     in §14 are drafts
 owner: Al Liebl (Mesmer)
 related:
-  - ANDROID-PLAN.md (0.1.101) — the Android app; this plan mirrors it
-  - VAULT-MESSAGING.md (0.80.0) — the app's contract with the vault
+  - ANDROID-PLAN.md (0.1.102) — the Android app; this plan mirrors it
+  - VAULT-MESSAGING.md (0.81.0) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
   - RELAY-PROTOCOL.md (0.9.4), MEMBER-API.md (2.7.1)
@@ -1593,11 +1593,11 @@ the real service (ANDROID-PLAN, "No 'verified' look"). A challenge without a val
 that the sign-in screen shows the same number: %@", "Match code %@"
 (spoken digit by digit), "Their note".
 
-### 4.15 Votes (0.1.51)
+### 4.16 Votes (0.1.52)
 
-*Owner decision of 2026-10-30 (VAULT-MESSAGING 0.80.0 §10.19, §15 item
+*Owner decision of 2026-10-30 (VAULT-MESSAGING 0.81.0 §10.19, §15 item
 47). Draft texts for the owner. Not built.* The same as ANDROID-PLAN §4
-"Votes (0.1.101)": its screens, states, rules for what the app may say
+"Votes (0.1.102)": its screens, states, rules for what the app may say
 (**never "secret"**, never "counted" or "verified" before the vault's
 results check, the fixed disclosure "<service> will see how you vote and
 keep that record. The published results show only an anonymous code for
