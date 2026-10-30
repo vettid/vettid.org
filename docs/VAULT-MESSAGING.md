@@ -47,8 +47,7 @@ changelog:
     xpub twice are `malformed` (the vault accepts all four today).
     Also `malformed` and accepted by the vault today: a repeated
     sighash key (0 then 1; 0 twice), the same unknown key twice with
-    different values, and a `witness_utxo` whose script length byte is
-    0. (4) Sighash: a sighash type of 0, present or absent, counts as
+    different values, and a `witness_utxo` whose script length does not match the script that follows (the vault reads the script as everything after byte 9). (4) Sighash: a sighash type of 0, present or absent, counts as
     absent and is accepted on either kind of input; it means
     SIGHASH_ALL for P2WPKH and SIGHASH_DEFAULT for P2TR (as before);
     any value other than 0 or 1 (SIGHASH_ALL) is `sighash`; the table
@@ -12584,9 +12583,11 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     the reverse), depth 0 with a non-zero parent fingerprint or child
     number, or the same xpub twice; also a repeated sighash key (0
     then 1; 0 twice), the same unknown key twice with different
-    values, and a `witness_utxo` whose script length byte is 0. The
+    values, and a `witness_utxo` whose script length does not match the script that follows (the vault reads the script as everything after byte 9). The
     vault accepts trailing bytes and each of these cases today, vault
-    follow-up);
+    follow-up (once the vault parses `witness_utxo` strictly, the vector
+    `probe_witness_utxo_trailing_byte` changes from `witness_utxo` to
+    `malformed`);
   - every input spends an output of **one of the wallet's accounts**,
     shown by a derivation with the wallet's fingerprint, which the vault
     re-derives and checks with the output script:
@@ -12631,7 +12632,7 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
   | Reason | Meaning |
   |---|---|
   | `size` | decoded to more than 65,536 bytes (0.78.1: an empty `psbt`, text that is not standard base64 and text over 87,384 characters are `bad_request` before any PSBT is read) |
-  | `malformed` | not a BIP174 PSBT that parses (0.78.1: also fewer input or output maps than the transaction has inputs or outputs, bytes after the last output map, a bad global xpub entry, a repeated sighash key, the same unknown key twice with different values, and a `witness_utxo` with script length byte 0, as above) |
+  | `malformed` | not a BIP174 PSBT that parses (0.78.1: also fewer input or output maps than the transaction has inputs or outputs, bytes after the last output map, a bad global xpub entry, a repeated sighash key, the same unknown key twice with different values, and a `witness_utxo` whose script length does not match its script, as above) |
   | `shape` | a parsed PSBT with no inputs, more than 64 inputs, no outputs or more than 64 outputs (0.78.1: not a mismatch of the maps, which does not parse: `malformed`) |
   | `version` | transaction version not 1 or 2 |
   | `duplicate_input` | the same outpoint twice |
@@ -12678,7 +12679,7 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     until its owner sets them (`wallet.create{caps}` or
     `wallet.caps.set`). The vault never invents a number; the app asks at
     creation, and a mainnet wallet cannot skip the question
-    (ANDROID-PLAN). `<wallet>.caps` is always present: `per_tx_sats` and
+    (ANDROID-PLAN). `<wallet>.caps` (in a vault that implements caps) is always present: `per_tx_sats` and
     `per_period_sats` are absent when unlimited, and `period_seconds` and
     `spent_sats` are always there.
   - **Setting and lowering.** `wallet.caps.set` is app only and a normal
