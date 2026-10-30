@@ -6611,7 +6611,7 @@ with `pending.list` (VAULT-MESSAGING §10.4.2) after an unlock and after
 a passed daily check. A vault that answers `unsupported_type` loses them
 at a lock or a process death, like any ask the app no longer holds. A
 `pending-asks.bin` left by a build that kept them is deleted at the next
-start; if the delete fails, the lock's clears fail closed and retry. The app lock (D6) is a UI gate only and protects no data at
+start and tried again at each lock; it is never read. The app lock (D6) is a UI gate only and protects no data at
 rest, because there is none to protect.
 
 What the phone does keep, and why:
