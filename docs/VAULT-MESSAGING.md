@@ -46,7 +46,7 @@ changelog:
     accepts all four today). (4) Sighash: an absent sighash type is
     accepted on either kind of input and means SIGHASH_ALL for P2WPKH
     (SIGHASH_DEFAULT for P2TR, as before); the table no longer reads as
-    if only P2TR may omit it (owner to confirm). (5) `cap`: a vault
+    if only P2TR may omit it (owner decision 2026-10-30). (5) `cap`: a vault
     without spend caps omits it, and an app reads an absent `cap` as no
     information, never as "no limit" (the vault at release 24 has no
     caps). §10.8 "Showing received text" step 4: U+2800 BRAILLE
