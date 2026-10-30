@@ -12,7 +12,7 @@ changelog:
     Approvals list and its notification; if its screen is showing it
     replaces the buttons with a plain notice that the request was
     withdrawn (never an error, never "declined"); History labels
-    `connection.authenticate.withdrawn` "Withdrawn". An app that sees
+    `connection.authenticate.withdrawn` "Request withdrawn". An app that sees
     `approved: false` without the flag closes the ask as for a decision
     elsewhere. Draft texts for the owner. Vault: a staging release after
     24.
@@ -4927,23 +4927,29 @@ silently vanishes or fails.
 - **On `sync.event{kind: "connection.authenticate.decided", request_id,
   approved: false, withdrawn: true}`** the app treats the ask as closed,
   as for a decision on another device, and in addition:
-  - removes the row from Approvals, lowers the approvals indicator's
-    count (§4 "The approvals indicator") and cancels the request's
-    notification;
+  - removes the row from Approvals and lowers the approvals indicator's
+    count (§4 "The approvals indicator"). **A batch** (VAULT-MESSAGING
+    §10.4.1) loses only that ask: the notification is cancelled, and the
+    feed item marked read with `feed.update`, only when no ask of the
+    batch is still open; otherwise the app keeps the entry and re-posts
+    the notification with the remaining count and deadline;
   - **if the ask's screen is showing**, keeps the screen, replaces
     Approve / Not me (or Approve / Deny) with the notice below and a
     **Close** button, and stops the countdown; it does not close the
     screen under the member's finger. A `credential.unlock` or
     `connection.authenticate.approve` already in flight ends as the vault
-    answers (an expired-request answer shows the same notice, never a
-    different error);
+    answers `not_found` (unknown, decided, expired or withdrawn, no
+    difference on the wire): the app shows the withdrawn notice only if
+    a withdrawn flag for that id has been seen (it waits about 2 seconds
+    for the sync event), and otherwise the existing "This request is no
+    longer waiting.";
   - shows nothing else: no snackbar, no error colour, and never
     "declined" or "denied" (the member declined nothing).
 - **Without the flag** (`approved: false` only, from a vault or sync
   that does not send it) the app closes the ask as it does today.
 - **History.** The vault audits `connection.authenticate.withdrawn`
   (`ref` = `request_id`, with the connection); History shows it as
-  **"Withdrawn"** under the connection's "First Last", with the detail
+  **"Request withdrawn"** under the connection's "First Last", with the detail
   below. The kind is in the connection category's prefixes.
 - **After a lock, hold or restart** the ask is simply not in
   `pending.list` (VAULT-MESSAGING §10.4.2): nothing to show.
@@ -4954,17 +4960,20 @@ silently vanishes or fails.
 
 | Key | Text | Note |
 |---|---|---|
-| `authn_withdrawn_notice` | %s withdrew this request. You don't need to do anything. | on the open ask's screen; %s = "First Last" |
+| `authn_withdrawn_notice` | %s withdrew this request. You don't need to answer it. | on the open ask's screen; %s = "First Last"; a newer request may be waiting |
+| `authn_withdrawn_mute` | Mute requests from %s | on the notice and the History detail: the existing mute (`connection.asks.mute`); owner decision 2026-10-30 |
 | `authn_withdrawn_close` | Close | |
-| `history_authn_withdrawn_title` | Withdrawn | History row title; the row names the connection as for every entry |
+| `history_authn_withdrawn_title` | Request withdrawn | History row title; the row names the connection as for every entry |
 | `history_authn_withdrawn_detail` | %s withdrew this request before it was answered. | History detail |
 
 **Tests.** The flagged event removes the Approvals row, count and
 notification; with the screen showing, the notice and Close replace the
-buttons and the countdown stops; an approve in flight answered as
-expired shows the same notice; the unflagged `approved: false` closes
+buttons and the countdown stops; an approve in flight answered
+`not_found` shows the notice only after the flag was seen, else "This
+request is no longer waiting."; one withdrawn ask of a batch leaves the
+others and their notification; the notice offers the mute; the unflagged `approved: false` closes
 the ask as before; a flag for an unknown `request_id` does nothing;
-History shows "Withdrawn" and nothing about declined; the notice has no
+History shows "Request withdrawn" and nothing about declined; the notice has no
 error colour.
 
 ### Devices & agents (0.1.53)

@@ -10,7 +10,7 @@ changelog:
     `connection.authenticate.decided` with `withdrawn: true` removes the
     ask from Approvals and its notification, replaces the buttons of a
     showing screen with a plain notice, and History labels
-    `connection.authenticate.withdrawn` "Withdrawn"; never "declined" or
+    `connection.authenticate.withdrawn` "Request withdrawn"; never "declined" or
     an error). Draft texts the same. Vault: a staging release after 24.
   - 0.1.50: owner decision of 2026-10-28 (VAULT-MESSAGING 0.79.0, §15
     item 46; ANDROID-PLAN 0.1.100). New §4.14 "Sign-in match code": the
@@ -1601,11 +1601,11 @@ changed on one platform alone. On iOS: a
 withdrawn: true}` removes the ask from Approvals, updates the approvals
 indicator and removes the delivered notification; a showing screen keeps
 its place, with the notice "%@ withdrew this request. You don't need to
-do anything." and a **Close** button in place of the actions, in a
+answer it." and a **Close** button in place of the actions, in a
 neutral style (no error colour, never "declined"); History shows
-`connection.authenticate.withdrawn` as "Withdrawn" with "%@ withdrew
+`connection.authenticate.withdrawn` as "Request withdrawn" with "%@ withdrew
 this request before it was answered." Without the flag, the ask closes
-as today. Draft texts as ANDROID-PLAN's table.
+as today. Batches, the `not_found` rule and the "Mute requests from %@" offer are as ANDROID-PLAN's. Draft texts as ANDROID-PLAN's table.
 
 ## 5. Architecture
 
