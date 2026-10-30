@@ -1,9 +1,18 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.99
+version: 0.1.100
 date: 2026-10-30
 changelog:
+  - 0.1.100: owner decision of 2026-10-28 (VAULT-MESSAGING 0.79.0, §15
+    item 46). New §4 "Sign-in match code (0.1.100)": a sign-in challenge
+    with a valid `match_code` shows it in large digits near the top of
+    the approval screen, headed "Match code", with "Check that the
+    sign-in screen shows the same number: 42" and an accessibility label
+    (the digits are spoken one by one);
+    `context` stays under "Their note". No code, today's screen. The app
+    never takes a code from `context`. Draft texts for the owner. Vault:
+    a staging release after 24.
   - 0.1.99: erratum (VAULT-MESSAGING 0.78.1, from the reviews of
     vettid-android #223 and #224): §4 Wallet "Library": the declared
     differences with the vault are now the spec's rules for global
@@ -1185,14 +1194,14 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.78.1) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.79.0) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
   - CALLS-PLAN.md (0.1.3) — calls; video in C4 (§4, 0.1.42)
   - AGENT-PLAN.md (0.1.7) — the agent connector; §7.2 AA1–AA5 (§4
     "Devices & agents", 0.1.53)
-  - IOS-PLAN.md (0.1.49) — the iPhone app; §4.12 carries the approvals
+  - IOS-PLAN.md (0.1.50) — the iPhone app; §4.12 carries the approvals
     indicator (0.1.89)
 classification: public (no secrets; safe for github.com/vettid)
 ---
@@ -4839,6 +4848,59 @@ without shows neither; the Services section appears only with a service;
 a service is absent from Messages and the new-message picker; its detail
 has no Call, message or share rows; an unknown `peer_kind` is a person; a
 `forbidden` shows the text once and removes the action.
+
+### Sign-in match code (0.1.100)
+
+*Owner decision of 2026-10-28 (VAULT-MESSAGING 0.79.0 §10.4, §15 item
+46). Draft texts for the owner. Not built; needs the vault release.*
+A sign-in challenge (`purpose: "signin"`) may carry `match_code`, 2 or
+3 digits that the service's sign-in screen shows too.
+
+- **With a valid `match_code`** the sign-in approval screen (the
+  notification's target and the Approvals row) shows, directly under
+  the title "Sign in to <name>?": the label **"Match code"**, the code
+  in large digits (display size, bold, tabular figures, spaced so that
+  each digit reads alone; never truncated, scaling with the system font
+  size), and under it **"Check that the sign-in screen shows the same
+  number: 42"**. Then "Their note" with `context` (still the challenger's
+  words; the heading "Their note" appears only on this screen, with a
+  code, and without a code `context` is shown as it is today), "Only approve if you are signing in right now.", **Approve**
+  and **Not me**. The notification text does not carry the number (a
+  notification can be read on a locked phone; the number is for the
+  member who opened the prompt).
+- **Without `match_code`**, or when the app finds it malformed (not 2 or
+  3 ASCII digits) or the challenge is not a sign-in: today's screen,
+  with no Match code block and no empty space.
+- **Never from `context`.** The app does not look for digits in
+  `context`, whatever it says ("match code 42" there is only text under
+  "Their note"). Until the service vault stops repeating the number in
+  `context` the member may see it twice; that is accepted.
+- Accessibility: the block is one element read as "Match code 4 2":
+  the digits are spoken one by one, not as "forty-two" (a
+  `TtsSpan.DigitsBuilder` or `VerbatimBuilder` span, or the digits
+  separated by spaces). The instruction line is its own text, read as
+  written. It says nothing about `context`: the app does not claim
+  the note was checked.
+- **No "verified" look.** A match proves only that the prompt and the
+  sign-in screen belong to the same sign-in; a site that relays the
+  real page shows the same number. The block gets no check mark, shield,
+  success colour or "verified" word, and nothing in the texts says the
+  sign-in is safe (VAULT-MESSAGING §10.4, "Display only").
+
+**Draft texts**
+
+| Key | Text | Note |
+|---|---|---|
+| `match_code_label` | Match code | |
+| `match_code_instruction` | Check that the sign-in screen shows the same number: %s | |
+| `match_code_a11y` | Match code %s | the digits are spoken one by one |
+| `signin_their_note` | Their note | only with a code |
+
+**Tests.** A code shows large above the note; no code shows today's
+screen; a 1-digit, 4-digit, non-digit, spaced or empty code shows
+today's screen; a JSON number (42) or `null` shows today's screen; "07" is shown as 07; no "Their note" heading without a code; a code on an approval is not shown; a note that says
+"match code 42" without a field shows no block; font scale 200%;
+the notification text carries no code; the block has no check mark or success styling.
 
 ### Devices & agents (0.1.53)
 
