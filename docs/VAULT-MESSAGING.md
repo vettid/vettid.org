@@ -47,9 +47,11 @@ changelog:
     xpub twice are `malformed` (the vault accepts all four today).
     Also `malformed` and accepted by the vault today: a repeated
     sighash key (0 then 1; 0 twice), the same unknown key twice with
-    different values, and a `witness_utxo` whose script length does not match the script that follows (the vault reads the script as everything after byte 9). (4) Sighash: a sighash type of 0, present or absent, counts as
-    absent and is accepted on either kind of input; it means
-    SIGHASH_ALL for P2WPKH and SIGHASH_DEFAULT for P2TR (as before);
+    different values, and a `witness_utxo` whose script length does not
+    match the script that follows (the vault reads the script as
+    everything after the first 9 bytes). (4) Sighash: a sighash type of
+    0, present or absent, counts as absent and is accepted on either
+    kind of input; it means SIGHASH_ALL for P2WPKH and SIGHASH_DEFAULT for P2TR (as before);
     any value other than 0 or 1 (SIGHASH_ALL) is `sighash`; the table
     no longer reads as if only P2TR may omit it (owner decision
     2026-10-30, matching the vault). (5) `cap`: a vault that does not
@@ -12583,7 +12585,9 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     the reverse), depth 0 with a non-zero parent fingerprint or child
     number, or the same xpub twice; also a repeated sighash key (0
     then 1; 0 twice), the same unknown key twice with different
-    values, and a `witness_utxo` whose script length does not match the script that follows (the vault reads the script as everything after byte 9). The
+    values, and a `witness_utxo` whose script length does not match the
+    script that follows (the vault reads the script as everything after
+    the first 9 bytes). The
     vault accepts trailing bytes and each of these cases today, vault
     follow-up (once the vault parses `witness_utxo` strictly, the vector
     `probe_witness_utxo_trailing_byte` changes from `witness_utxo` to
@@ -12679,7 +12683,8 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
     until its owner sets them (`wallet.create{caps}` or
     `wallet.caps.set`). The vault never invents a number; the app asks at
     creation, and a mainnet wallet cannot skip the question
-    (ANDROID-PLAN). `<wallet>.caps` (in a vault that implements caps) is always present: `per_tx_sats` and
+    (ANDROID-PLAN). `<wallet>.caps` (in a vault that implements caps) is
+    always present: `per_tx_sats` and
     `per_period_sats` are absent when unlimited, and `period_seconds` and
     `spent_sats` are always there.
   - **Setting and lowering.** `wallet.caps.set` is app only and a normal

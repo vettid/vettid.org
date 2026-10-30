@@ -12,9 +12,9 @@ changelog:
     does, until the vault refuses them (0.78.1), then it refuses them
     too (the same for a repeated sighash key, a repeated unknown key
     with different values and a `witness_utxo` whose script length
-    does not match its script); an absent `cap` or `<wallet>.caps` shows nothing about limits,
-    not "No limit"; §4 Wallet "Library" and the send review screen
-    follow
+    does not match its script); an absent `cap` or `<wallet>.caps`
+    shows nothing about limits, not "No limit"; §4 Wallet "Library" and
+    the send review screen follow
   - 0.1.98: owner decision 2026-10-29: question 19 decided, **ACINQ
     bitcoin-kmp** (with secp256k1-kmp) behind `:core:chain`, BDK only as
     the fallback if bitcoin-kmp fails conformance. §4 Wallet "Library"
@@ -4111,7 +4111,8 @@ does not copy). Where the spec is stricter than the vault and the app
 copies the vault on purpose until it follows, the app accepts bytes
 after the last PSBT map, a repeated sighash key, the same unknown key
 twice with different values, and a `witness_utxo` whose script length
-does not match its script; each flips to a refusal when the vault's does. The artifacts and the four native libraries are pinned by
+does not match its script; each flips to a refusal when the vault's
+does. The artifacts and the four native libraries are pinned by
 SHA-256, and the wallet stays out of production builds until it is
 promoted.
 
