@@ -1,7 +1,7 @@
 ---
 title: VAULT-MESSAGING
 status: draft
-version: 0.80.0
+version: 0.81.0
 date: 2026-10-30
 owner: Al Liebl (Mesmer)
 component: vault manager (enclave), parent forwarder, apps, desktops, agents, member API vault routes
@@ -14,11 +14,12 @@ related:
   - PUSH-GATEWAY.md (0.5.1)
   - ACCOUNT-ADMIN-PLAN.md
   - MEMBER-API.md (2.13.2)
-  - ANDROID-PLAN.md (0.1.101)
-  - IOS-PLAN.md (0.1.51; §9.1 VA1–VA4)
+  - ANDROID-PLAN.md (0.1.102)
+  - IOS-PLAN.md (0.1.52; §9.1 VA1–VA4)
   - AGENT-PLAN.md (0.1.5; §7.3 Q3–Q5; §4.5, AV7, AV8; AG13, §4.9, AV9–AV11)
   - ENROLLMENT-CODES.md (0.2.3, design note for 0.15.0)
   - PROTEAN-CREDENTIAL.md (0.1.2)
+  - BALLOT-PROTOCOL.md (0.11.1; vettid/service-vault `docs/BALLOT-PROTOCOL.md` at dc6a4d2, not in this repository: the vote protocol §10.19 follows)
   - VAULT-ITEMS.md (0.1.2; 0.1.0 approved 2026-10-03)
   - VAULT-RELEASES.md (0.1.34; 0.1.6 approved 2026-10-04)
   - RELEASE-UPDATES.md (0.2.0)
@@ -27,6 +28,52 @@ related:
   - VAULT-LOCK.md (0.1.4, design note for 0.29.0: options, owner decisions L1–L16, rollout)
   - STAGING-TIME-SCALE.md (0.1.4, design note for 0.43.0: the inventory of waits, choices T1–T9)
 changelog:
+  - 0.81.0: **owner decision 2026-10-30** (ANDROID-PLAN 0.1.102, IOS-PLAN
+    0.1.52; §15 item 48; BALLOT-PROTOCOL 0.11.1, MEMBER-SERVICE-PLAN §10
+    item 5.1). A member's vault takes part in the ballot protocol of a
+    service, which the staging service vault already runs. §6.4
+    "Service connections": the vault allows `vote.proposal`,
+    `vote.extended` and `vote.closed` from a service and sends
+    `vote.cast` and `vote.status` to it, with their exact bodies, answers
+    and refusals; the **transition rule**: a vault of this release
+    without the feature answers those three requests `unsupported_type`
+    (and audits `drop.service_type`) instead of dropping them silently;
+    a `vote.*` from a person connection is answered `unsupported_type`
+    like an unknown type and audited `drop.vote_not_service` (nothing to
+    probe). An unsigned `vote.closed` never closes a vote early; a
+    `checking` proposal stays so, with a reason, until something
+    positively fails; a cast is blocked only by a positive mismatch with the public site
+    (an unreachable or silent site gets a warning and a later comparison),
+    and a pending credential-rotation statement is queued ahead of the
+    ballot; a
+    refusal `closed` is not final while an earlier send is unanswered and
+    a verified receipt always wins. §10.8: `profile.update` to a service
+    connection carries `features` (`["vote"]`): **how a vault advertises
+    the feature**, using the existing profile statement and no second
+    capability list; the service counts a connection with `"vote"` in the
+    last profile it holds at `record_at`. §10.19 (new): what the vault
+    checks before it shows a proposal (the JCS bytes, the service's
+    signature with the strict Ed25519 rules, the tag and its Merkle
+    proof, duplicates, the Rekor anchor under the service list, times),
+    an extension and a result; what it stores (and that it syncs nothing
+    to desktops and agents); the cast (the per-proposal key, the
+    credential-key signature, the unlock window, no choice in any audit
+    entry), sending again, the signed receipt and refusals,
+    `vote.status`, a restore; the results check; the feed reminders; the
+    app API (`vote.list`, `.get`, `.cast`, `.check`, `.confirm`,
+    `.site.sync`, `.results.submit`, `.evidence`, `vote.event`); the
+    edge cases; the list of person connections that are really services
+    (made before the service sent `peer_kind`), so that the app can ask
+    for a new connection. §11.10.8: `vote` is an eighth optional
+    feature (staging from release 25, production release 1 off) with the
+    release constants `vote_site_key` and `vote_trust_roots`. §10.9:
+    the audit kinds and the feed kinds of votes. §10.1: the `votes`
+    limit. §3.5.1: the credential key also signs a ballot's `cast_sig`.
+    §16: the vote vectors of BALLOT-PROTOCOL 0.11.1, copied from
+    service-vault `dc6a4d2`. §15 item 48 (new): the owner decisions and
+    the questions for the service vault's author. **Needs a staging
+    vault release 25**, the service vault reading `features`, and app
+    work
   - 0.80.0: **owner decision 2026-10-30** (vettid.org #465; ANDROID-PLAN
     0.1.101, IOS-PLAN 0.1.51; §15 item 47; wire-additive and backward
     compatible). A challenger can withdraw a challenge it sent. New V↔V
@@ -2577,7 +2624,9 @@ described in RFC 2119.
      - grants and critical-item use;
      - presence, as an on-demand ping;
      - (0.69.0) service connections, marked and limited (§6.4 "Service
-       connections"): a connection that declares itself a service.
+       connections"): a connection that declares itself a service;
+     - (0.81.0) votes of a service, by pseudonymous signed ballots over
+       the service connection (§10.19; BALLOT-PROTOCOL).
    - Planned, not yet specified (owner decision 2026-10-26; 0.64.0).
      Each is specified in a later revision; until then this document
      defines none of their messages, and a vault offers neither:
@@ -2585,8 +2634,8 @@ described in RFC 2119.
        a `connection` (PUSH-GATEWAY §12, item 5; marked and limited
        from 0.69.0, above); contracts with a service (acceptance,
        completions);
-     - votes: eligibility by blind signature, and ballots deposited
-       unlinkably.
+     - (votes: specified in 0.81.0, above; the blind-signature design is
+       superseded.)
    - Out of scope: org vaults and transport-credential minting.
 3. **The vault relay key exists only in PIN-protected vault state.** The
    enclave generates the key at enrollment. It is stored only in vault state
@@ -3122,7 +3171,8 @@ transport. Its three rotating mechanisms map as follows:
     is distinct from the relay, identity and KEM keys (§3.2).
   - It signs what the member approves; the operations that use it are
     defined with the features that need it: member authentication
-    (§10.4) and signed LEASH delegations (§10.11).
+    (§10.4), signed LEASH delegations (§10.11) and (0.81.0) a ballot's
+    `cast_sig` (§10.19.5).
 - **UTK/LTK pairs.** One-time transaction keys, each an MLKEM768X25519 key pair.
   - The vault keeps the private halves (LTKs) in DEK state.
   - It gives the public halves (UTKs) to one app (§3.5.4).
@@ -5351,7 +5401,8 @@ unnoticed. Apps word it as a claim by the other side, not a fact
 | Upkeep, both ways | `hs.*` for `rekey` and `reconnect`, `relay.token.issued`, `relay.token.refresh`, `relay.address.update`, `identity.rotate`, `connection.approved`, `.declined`, `.removed` | |
 | Profile | `profile.update` both ways, reduced (§10.8) | |
 | From the service | `connection.authenticate.challenge` **with a known `purpose`** (`signin` or `approval`, §10.4, with all of §10.4.1's limits): a challenge from a service without a `purpose`, or with an unknown one, is dropped like any other type. **`connection.authenticate.withdraw`** (0.80.0, §10.4 "Withdrawing a challenge"): it names a challenge by `request_id` and needs no `purpose` | **Dropped and audited** `drop.service_type` (`ref` = the `connection_id`, with the type); nothing is sent back (§9.2), and no ask is created |
-| To the service | `connection.authenticate.response`, `.rotated`, and the upkeep and profile rows above. **The vault itself sends a service nothing else, whatever triggers it** (for example `action.offered` after `action.configure` or at activation, §10.14, `presence.ping`, `message.receipt`, `location.*`, `data.*`, `intro.*`) | A request of a device that names the connection for `message.send`, `message.attachment.*`, `call.start`, `call.permission.set`, `location.share.start`, `location.request`, `presence.query`, `grant.request`, `grant.fetch`, `grant.catalog`, `share.rule.set`, `critical-secret-use.request`, `action.invoke`, `intro.create` or `connection.authenticate.request` is answered `forbidden`, and nothing is sent. `action.configure` naming a service connection is `forbidden`, and the vault sends it no `action.offered` |
+| Votes, from the service (0.81.0) | `vote.proposal`, `vote.extended`, `vote.closed`, in a vault whose image registers `vote` (§11.10.8; the table "Votes" below) | Without the feature: answered `unsupported_type` and audited `drop.service_type` (the transition rule below). Any other `vote.*`: dropped and audited like any other type |
+| To the service | `connection.authenticate.response`, `.rotated`, and the upkeep and profile rows above, and (0.81.0, with the feature) `vote.cast`, `vote.status` and the answers to the three requests above (§10.19). **The vault itself sends a service nothing else, whatever triggers it** (for example `action.offered` after `action.configure` or at activation, §10.14, `presence.ping`, `message.receipt`, `location.*`, `data.*`, `intro.*`) | A request of a device that names the connection for `message.send`, `message.attachment.*`, `call.start`, `call.permission.set`, `location.share.start`, `location.request`, `presence.query`, `grant.request`, `grant.fetch`, `grant.catalog`, `share.rule.set`, `critical-secret-use.request`, `action.invoke`, `intro.create` or `connection.authenticate.request` is answered `forbidden`, and nothing is sent. `action.configure` naming a service connection is `forbidden`, and the vault sends it no `action.offered` |
 
 In words:
 
@@ -5364,17 +5415,98 @@ In words:
   would look like a person's message and is not needed for either. If a
   service later needs to send notices, they are specified with the
   contract (§1.1), in a place of their own.
-- **Nothing shared and no asks, except member authentication.** No
+- **Nothing shared and no asks, except member authentication and (0.81.0)
+  votes.** No
   share rules, grants, shared actions, location, presence, critical-item
   use or introductions with a service, neither way: the asks of
   §10.4.1 other than `connection.authenticate.challenge` do not arrive
-  from a service, and the member cannot start the share kinds toward
-  one. A later contract (§1.1) may allow more, kind by kind.
+  from a service (a vote is not an ask: §10.19.5), and the member cannot
+  start the share kinds toward one. A later contract (§1.1) may allow more, kind by kind.
 - **What the service gets of the member** is the core and the display
   name only (§10.8); no photo and no `@profile` items.
 - The member can still `connection.update` (alias, note, tags, favourite,
   archive), mute and resume the connection's asks, read its audit,
   `connection.remove` and `block.add` it.
+
+**Votes (0.81.0; owner decision 2026-10-30, §15 item 48).** A vault whose
+image registers the `vote` feature (§11.10.8) allows these types on a
+connection whose stored `peer_kind` is `"service"`, in both directions,
+in addition to the table above. They are BALLOT-PROTOCOL 0.11.1 §4;
+the checks, states and app screens are §10.19. They are session-mode
+requests answered with a response that names them (`re`, §5.3). Unlike
+the other flows between vaults (§10), an answer does not wait for a
+member's decision, so a request and a response is right here. `_sig`
+members are the standard base64 of 64 bytes, `record_secret`,
+`record_tag`, `results_hash` and `connection` of 32 bytes, `vk` of 32
+bytes, `proposal` and `extension` of the exact JCS bytes of the document
+(BALLOT-PROTOCOL §2); `bundle` is a Sigstore bundle as a JSON object;
+`msg_ms` is a JSON integer (Unix milliseconds); `choice_id` and
+`proposal_id` are strings.
+
+| Dir | Type | Body | Answer |
+|---|---|---|---|
+| service → vault | `vote.proposal` | `{proposal, proposal_sig, bundle, record_secret, record_proof}`; `record_proof` is `{index, tree_size, path: [b64 32 bytes]}` | `{proposal_id}`, or `bad_request`, `limit`, `unsupported_type` |
+| service → vault | `vote.extended` | `{proposal_id, extension, extension_sig, bundle}` | `{proposal_id}`, or `not_found`, `bad_request`, `unsupported_type` |
+| service → vault | `vote.closed` | `{proposal_id, results_hash}` | `{proposal_id}`, or `not_found`, `bad_request`, `unsupported_type` |
+| vault → service | `vote.cast` | `{proposal_id, record_tag, vk, choice_id, ballot_sig, cast_sig}` | `{proposal_id, msg_ms, receipt_sig}`, or a refusal |
+| vault → service | `vote.status` | `{proposal_id}` | `{proposal_id, proposal, proposal_sig, bundle?, record_secret, record_proof, ballot?, msg_ms?, receipt_sig?, status_sig}` (as the deployed service vault sends it, service-vault `dc6a4d2` `statusBody`: `bundle` is absent until the proposal is anchored; `ballot` is `{vk, choice_id, ballot_sig}`, with `msg_ms` and `receipt_sig` when a receipt exists), or a refusal |
+
+A refusal from the service is an `error` response whose `error.code` is
+one of `not_eligible`, `not_open`, `closed`, `not_active`,
+`not_signed_in`, `already_voted`, `bad_ballot`, `late` (for
+`vote.cast`) or `not_eligible`, `unknown_proposal` (for `vote.status`),
+with the body `{refusal_sig, msg_ms, connection, record_tag}` (and, for
+`already_voted`, `ballot` `{vk, choice_id, ballot_sig}`, `ballot_msg_ms`
+and `receipt_sig`), signed as BALLOT-PROTOCOL §4.2 says. The vault
+treats an unsigned refusal as no answer (§10.19.5).
+
+What the vault does with each:
+
+- **`vote.proposal`, `vote.extended`, `vote.closed` from the service:**
+  the checks of §10.19.4. Accepted: stored, answered ok. Refused with
+  the code in the table. A refusal of the request itself (`bad_request`)
+  is also audited: `vote.proposal_rejected`, `vote.extension_rejected`
+  or `drop.vote_malformed` (§10.9). A re-sent proposal is answered ok
+  and changes nothing.
+- **`vote.cast` and `vote.status` to the service:** only for a proposal
+  the vault holds from this connection, started by the member's cast,
+  the vault's own schedule or an app's `vote.check` (§10.19.5). No app
+  request names a connection and a vote type together.
+- **A `vote.cast` or `vote.status` from the service, a response that
+  matches no request, and any other `vote.*` type:** dropped and
+  audited `drop.service_type`, as any other type.
+- **From a connection that is not a service** (`peer_kind` absent): a
+  `vote.*` request is answered **`unsupported_type`, exactly as an unknown
+  type is (§5.3)**, whether or not the vault has the feature, and audited
+  `drop.vote_not_service` (`ref` = the `connection_id`). Nothing about
+  the answer differs between the two kinds of vault, so a person's
+  connection cannot probe whether the feature exists.
+
+**The transition rule.** Today (0.69.0) a vault drops and audits every
+type from a service connection that the table does not list, and says
+nothing. For the three requests a service sends, `vote.proposal`,
+`vote.extended` and `vote.closed`, a vault of this release **whose image
+does not register `vote`** answers `unsupported_type` (§5.3) **and**
+audits `drop.service_type`. It is the answer §5.3 gives for an unknown
+type, and costs nothing; today's service vault ignores the answers of
+vaults (service-vault `dc6a4d2` handles only the responses it expects)
+and decides by `features` (§10.8). Every other unlisted type is still
+dropped silently. A vault of an earlier release
+keeps dropping them without an answer. A service therefore treats
+silence, `unsupported_type` and an absent `features` member alike: not
+eligible. The service decides eligibility from the profile (§10.8), not
+from an answer, because eligibility is fixed at `record_at`, before any
+message is sent (BALLOT-PROTOCOL §3.2, §4).
+
+**A connection that is a service to the service but a person to the
+vault.** A connection made before the service sent `peer_kind` (the
+service vault sends it in new invitations only, vettid/service-vault
+#79) is a person connection, and §6.4 fixes the kind at connect. The
+vault sends it no `features` (§10.8), the service does not count it, and
+the member never sees a vote from it. Nothing changes the kind. The
+vault tells the app which person connections are listed services, so
+that the app can tell the member to connect again (§10.19.8 "Reconnecting
+for votes").
 
 **Other cases.** An introduction cannot name a service as introducer,
 introduced or target (`intro.create` is `forbidden`; an `intro.offer`
@@ -6606,10 +6738,10 @@ devices and access sessions, connections (with blocks and member
 authentication), messaging, the credential, items, tags, profile,
 settings, audit, feed, calls, LEASH, share rules and grants,
 critical-item use, shared actions, introductions, location, presence and
-the wallet are in §10.1–§10.18, and push in §14 (0.24.0).
+the wallet are in §10.1–§10.18, votes in §10.19 (0.81.0), and push in §14 (0.24.0).
 
 (0.26.0) The types of the optional features (`actions`, `calls`,
-`intro`, `leash`, `location`, `presence`, `wallet`) exist only in a
+`intro`, `leash`, `location`, `presence`, `vote` (0.81.0), `wallet`) exist only in a
 release whose channel lists the feature (§11.10.8, "Feature allowlist");
 in any other release they are unknown types (§5.3).
 
@@ -6714,6 +6846,9 @@ an answer to an unknown or expired id is dropped.
 | | `audit.export` | D→V | req | The member's History export: count, PIN, audit entry; the app then reads the entries with `audit.list` (§10.9, 0.22.0) |
 | | `feed.list`, `.get`, `.update`, `.delete`, `guide.sync` | D→V | req | Activity feed; app guides as feed items (§10.9) |
 | | `feed.event` | V→D | | New feed item |
+| Votes (0.81.0) | `vote.list`, `.get`, `.cast`, `.check`, `.confirm`, `.site.sync`, `.results.submit`, `.evidence` | D→V (app) | req | A service's votes: list and read, cast one ballot, ask the service, confirm a recovered ballot, hand over the public site's documents and the results (§10.19.8) |
+| | `vote.event` | V→D (app) | | A proposal, extension, close, ballot state or check changed (§10.19.8) |
+| | `vote.proposal`, `vote.extended`, `vote.closed` / `vote.cast`, `vote.status` | V↔V (service connections only) | req | The service's proposal, extension and close; the member's ballot and status request, with signed receipts and refusals (§6.4 "Votes", BALLOT-PROTOCOL §4) |
 | Push | `push.register`, `push.confirm`, `push.unregister` | D→V | req | Register, confirm (with the code the gateway pushed to the token, 0.30.0) or drop the app's FCM or APNs token for contentless wakes (§14, 0.24.0) |
 | | `push.token-needed` | V→D | | The registration ended (the token is gone); send a fresh one (§14.2; spelled `push.token_needed` in 0.24.0) |
 
@@ -6790,6 +6925,7 @@ an answer to an unknown or expired id is dropped.
     | `location_requests` | 1 per connection per 10 minutes | `location.request` (§10.16) |
     | `wallets` | 16 wallets | `wallet.create` (§10.18) |
     | `wallet_addresses` | 2,000 addresses per wallet | `wallet.address.new` (§10.18) |
+    | `votes` (0.81.0) | 128 kept proposals, 16 not yet closed per connection | `vote.proposal` from a service (answered to the service, §10.19.2) |
     | `push_registrations` | 20 registrations that reach the gateway per 24 hours (0.24.0); every registration the gateway answered over HTTP counts, refusals included (0.24.1); (0.30.0) a `push.confirm` does not count | `push.register` (§14.1) |
     | `attachment_storage` (0.32.0, release A) | 1,073,741,824 bytes of stored attachments, content and thumbnails, sent and received | `message.send` with an attachment (§10.5.1) |
     | `attachments` (0.32.0, release A) | 4,096 stored attachments | `message.send` with an attachment |
@@ -7558,6 +7694,10 @@ waits for the member's decision:
 as an ask; the other kinds are dropped (`drop.service_type`). (0.80.0)
 `connection.authenticate.withdraw` (§10.4) is not an ask: it asks the
 member nothing and closes one.
+(0.81.0) A
+service's vote messages (§6.4 "Votes") are not asks: they never wait for
+the member in the sense of this section, have no cooldown, rate bucket
+or pause, and a vote is cast by the member's own request (§10.19.5).
 
 Nothing else a connection sends waits for the member. Share-rule
 questions (`share.pending`, §10.12) come from the member's own rules,
@@ -9155,7 +9295,7 @@ The **profile object** holds the extras' display name and photo. Sent by
 |---|---|---|
 | `profile.get` | `{}` | `{version, name?, photo?, first_name, last_name, ik}` |
 | `profile.set` | `{version, name?, photo?}` | `{version}` |
-| `profile.update` (V↔V) | — | `{version, first_name, last_name, ik, name?, photo?, items: [{item_id, name, category, fields: [{field_id, label, kind, value}]}]}` |
+| `profile.update` (V↔V) | — | `{version, first_name, last_name, ik, name?, photo?, items: [{item_id, name, category, fields: [{field_id, label, kind, value}]}], features?}` (`features`, 0.81.0, only to a service connection) |
 
 - `name`, the display name, is optional: at most 128 bytes, absent when
   the member has none (the default). `photo` is base64 of a JPEG or PNG
@@ -9210,7 +9350,10 @@ The **profile object** holds the extras' display name and photo. Sent by
      an `account.name.set` the member API applied, or any other change of
      the account's names); a newer snapshot with the same names changes
      nothing;
-  3. `ik` rotates (§3.4), in the order below.
+  3. `ik` rotates (§3.4), in the order below;
+  4. (0.81.0) the **features advertised to a service** change (below):
+     only the service connections get an update, and `version` still
+     counts the change.
 - **After an `ik` rotation** the vault sends each peer the new
   `profile.update`, carrying the new `ik`, only after it has sent that
   peer the `identity.rotate` statement and the epoch it established with
@@ -9231,6 +9374,28 @@ The **profile object** holds the extras' display name and photo. Sent by
   `photo`, a logo, are kept), and a `peer_kind` in the body is an
   unknown member and ignored. A profile change that only concerns the
   photo or `@profile` items sends a service nothing new.
+- **`features`** (0.81.0; owner decision 2026-10-30, §15 item 48, decision
+  1). The `profile.update` a vault sends to a connection whose
+  `peer_kind` is `"service"` carries `features`: an array of the names of
+  the optional features its image registers (§11.10.8) that a service can
+  use, sorted in ascending byte order, each once, each `[a-z0-9_]{1,32}`.
+  The only name today is `vote`, present exactly when the image
+  registers the `vote` feature. **Without one, the member is absent**
+  (never an empty array). This is how a service learns that a member's
+  vault can vote (§10.19.1); the service holds the last `features` it
+  received from each connection, and a later update that leaves a name
+  out removes it. It is **never sent to a person connection** and the
+  vault ignores `features` in any update it receives (a service's
+  included). A receiver that does not know the member ignores it (§10.1).
+  The vault sends the update (a) when the connection becomes active
+  (§9.3) and (b) once, to every active service connection, at the first
+  unlock under a release whose image advertises a name the vault has not
+  advertised to that connection (a feature is only ever added,
+  §11.10.8), with the next `version`; if the send fails it is retried
+  with the connection's other messages (§8.6). The set it last
+  advertised to each service connection is vault state. It does not
+  depend on the vault being unlocked when the service chooses its
+  roster, because the service keeps the last statement.
 - **Receiving.** A receiver parses `profile.update` strictly (the field
   rules of §10.7; `first_name` and `last_name` strings of 1–160 bytes
   without control characters (C0, DEL, C1, U+2028, U+2029; DEL since
@@ -9710,7 +9875,22 @@ entry: { "entry_id": "<ULID>", "seq": 812, "at": "<ts>", "kind": "connection.add
   `approval.denied` (`device_id` = the requester, `ref` =
   `approval_id`) (§6.8);
   `connection.authenticate.key_rotated`,
-  `connection.authenticate.rotation_rejected` (§10.4);
+  `connection.authenticate.rotation_rejected` (§10.4); (0.81.0, votes,
+  §10.19; each with the service's `connection_id`; **never a choice**)
+  `vote.cast` (the member cast; `ref` = `proposal_id`), `vote.released` (a problem record released; `ref` = `proposal_id`), `vote.recorded`
+  (the receipt was verified; `ref` = `proposal_id`), `vote.refused`
+  (`ref` = `<proposal_id>:<code>`), `vote.conflict` (`ref` =
+  `proposal_id`), `vote.receipt_rejected` (`ref` = `proposal_id`),
+  `vote.extended` (`ref` = `<proposal_id>:<n>`), `vote.extension_rejected`
+  (`ref` = `<proposal_id>:<reason>`), `vote.proposal_rejected` (`ref` =
+  `<proposal_id>:<reason>`, reason `malformed`, `service`, `signature`,
+  `record` or `anchor`), `vote.proposal_conflict` (`ref` =
+  `proposal_id`), `vote.list_rejected` (no connection), `vote.check_ok`,
+  `vote.check_unconfirmed`, `vote.check_gave_up` (`ref` =
+  `proposal_id`), `vote.check_failed` (`ref` = `<proposal_id>:<reason>`,
+  reason `row_mismatch`, `row_unexpected`, `results`, `disputed` or
+  `conflict`), and the drops `drop.vote_malformed`, `drop.vote_limit`
+  and `drop.vote_not_service` (`ref` = the `connection_id`);
   `connection.asks_paused`, `connection.asks_resumed`,
   `connection.asks_muted`, `connection.asks_unmuted` (`connection_id`;
   §10.4.1, 0.23.0); `call.outgoing`,
@@ -10055,6 +10235,9 @@ item: { "item_id": "<ULID>", "seq": 41, "kind": "connection.request", "at": "<ts
   (`ref` = `request_id`), `action.request` (`ref` = `invocation_id`),
   `intro.request` (`ref` = `intro_id`), `location.shared`
   (`ref` = `share_id`), `location.request` (`ref` = `request_id`),
+  (0.81.0, §10.19.7; `ref` = `proposal_id`, never a title or a choice)
+  `vote.open`, `vote.closing`, `vote.result` (priority `normal`) and
+  `vote.problem` (priority `high`; also for a `rejected` proposal and a site mismatch),
   `wallet.signed` (`ref` = `txid`), (0.56.0) `wallet.cap_refused` and
   `wallet.caps_raised` (priority `high`, `ref` = `wallet_id`; no
   amount), `credential.alarm` (priority
@@ -13220,6 +13403,264 @@ summary: { "txid": "<64 hex>", "inputs": [{"txid", "vout", "amount_sats", "type"
 - `crypto_keys` in the credential (§3.5.2) stays reserved and empty:
   wallets are critical items.
 
+### 10.19 Votes (0.81.0)
+
+*Owner decision 2026-10-30 (the staging service vault can publish proposals and count ballots, vettid-vault has no vote code, and staging vault release 25 waits for it). §15 item 48. The protocol itself (encodings, signatures, the service's side) is BALLOT-PROTOCOL 0.11.1 (vettid/service-vault `docs/BALLOT-PROTOCOL.md`), which this section does not repeat; where the two differ, BALLOT-PROTOCOL wins for the service and this section for the vault and the app. Marks "(chosen)" are this section's own choices where BALLOT-PROTOCOL is silent; §15 item 48 lists them.*
+
+A **vote** is a proposal that a service (§1.1, §6.4 "Service connections") puts to its members. The member's vault receives it over the service connection, checks the service's signature and its public anchor, lets the member choose once, and sends a signed ballot. The service answers with a signed receipt; after the close it publishes the results, and the vault checks that its own row is what it sent.
+
+**What a member can rely on** (and what the apps may say, nothing more; ANDROID-PLAN "Votes"):
+
+- A ballot counts for one proposal and one anonymous code only. The code is new for every proposal, so the published results link nothing across proposals.
+- The published results show a code and a per-proposal key, never a name, email or connection. **The service sees how each member voted and keeps that record** for the organisation, and in a small electorate who voted can reveal how. The vote is pseudonymous, **not secret** (BALLOT-PROTOCOL §1).
+- A vote is **final** once the service's receipt is held; the vault offers no change.
+- After the close the vault checks that the results hold what it sent, or nothing if it did not vote. A failure is shown with the signed evidence. A service that stays silent is detected, not prevented.
+
+#### 10.19.1 The feature and how a vault advertises it
+
+- **The feature.** `vote` is an optional feature (§11.10.8, `features/vote`): an image registers the types of this section only if its channel file lists it. Staging lists it from release 25; production release 1 does not (§15 item 48, decisions 2 and 3).
+- **Advertising** (chosen; decision 1). The vault's `profile.update` to a connection whose `peer_kind` is `"service"` carries `features`, an array of the names of the optional peer-facing features its image registers: `["vote"]`, and absent when there is none (§10.8). This is **the existing profile mechanism, not a second capability list**: the profile is the one message a vault already sends a connection about itself, the service keeps the last one whatever the vault's lock state, and an older vault or service ignores the member (§10.1). §11.10.8's "no list in the protocol" is about asking a peer; this is a statement the vault makes about itself, to a service only. The service counts a connection as having the vote feature if and only if the last `profile.update` it holds from it at `record_at` carries `"vote"` and the connection is active (BALLOT-PROTOCOL §3.2). A person connection is sent no `features`.
+- **A vault without the feature** (any release before 25, or an image whose channel file does not list `vote`) advertises nothing, so it is never eligible. Its handling of a `vote.*` it nevertheless receives from a service is §6.4's: with this release's rules, `unsupported_type`; before them, dropped and audited `drop.service_type`.
+- **A connection made before the service sent `peer_kind`** (vettid/service-vault #79: only new invitations carry it) is a person connection to the vault and stays one (§6.4: the kind is fixed at connect). The vault sends it no `features`, so the service never counts it, and answers any `vote.*` from it `unsupported_type`, as for an unknown type (`drop.vote_not_service`, §6.4). The member must **connect again** from a fresh invitation to vote. §10.19.8 "Reconnecting for votes" says how the app finds out.
+
+#### 10.19.2 What the vault stores
+
+Per proposal, in DEK state (`features.vote`), encrypted like all vault state and never in the audit log, a feed item or a notification, apart from the ids named in §10.9:
+
+- `connection_id`, and the service's `ik` in force when the proposal was kept;
+- the proposal's exact bytes, `proposal_sig` and `bundle`; `proposal_hash`; `record_secret`, `record_tag` and `record_proof`; the relay's time of the message that carried it (`received_ms`);
+- the extensions (bytes, signature, bundle) and the `closes_at` in force;
+- the voting key: the seed of `vk` until the vote is final (the receipt) or, for a proposal never cast, until it closes; then only its public half;
+- the ballot: `choice_id`, `ballot_sig`, `cast_sig`, the exact `vote.cast` body, the times and count of sends, and the receipt (`msg_ms`, `receipt_sig`) once held;
+- the signed refusals received (the last 8) and, when a different proposal arrived under the same `proposal_id`, its bytes (one copy) as evidence (BALLOT-PROTOCOL §4.1);
+- after the close: the results, their signature and bundle, the vault's row and proof, and the outcome of §10.19.6.
+
+The vault also keeps the latest verified **service list** (§10.19.4) and the time it last saw it confirmed.
+
+Bounds (chosen): a `vote.proposal` body is at most 196,608 bytes, its `proposal` at most 65,536 bytes decoded and its `bundle` at most 65,536 bytes; the vault keeps at most **128 proposals**, at most **32 per connection** in all states and 16 per connection not yet closed, so that one service cannot fill the vault. **Making room** (a busy organisation must not run out): when a connection is at its cap, the vault evicts that connection's **oldest records whose check is final and clean** (`verified`, `unconfirmed` or `gave_up`) or that closed without a ballot, keeping for each a **compact evidence record** outside the cap. The compact record holds what cannot be fetched again: `proposal_id`, `proposal_hash`, `record_tag`, the service's `ik`, the ballot `{vk, choice_id, ballot_sig}`, `msg_ms` and `receipt_sig`, every signed refusal verbatim, and the outcome (about 250 bytes plus refusals). The proposal and the results are public and write-once on the site and are fetched again when needed. At most 512 compact records per connection, each deleted **365 days** after its close, oldest first. **The problem set** is explicit: a proposal that is `rejected`; whose check is `failed`; whose ballot is in `conflict` or `disputed`; whose `site` is `mismatch` or `unpublished`; or that holds a refusal which raised a `vote.problem`. A problem record is **never evicted**, is **counted apart** (it does not count toward the 32 or the 16 not closed), and is deleted **365 days after its close** or when the member releases it. **In-progress records** (`checking`, `upcoming`, `open`, check `pending`, ballot not final) stay under the 32 and the 16 and are never evicted. The cap on problem records is **16 per connection and applies only to keeping new proposals**: a record can turn into a problem after it is kept, so the count may pass 16; at 16 or more the vault keeps no new proposal from that connection, answers it `limit`, and tells the member with the `problems` notice below, deleting nothing. This cap is chosen (§15 item 48): a misbehaving service can block its own members this way, which BALLOT-PROTOCOL §1 and §9.2 already allow, and the notice names the service as its cause. **Releasing** a problem record (`vote.release`, §10.19.8) replaces it by a compact record that still holds **every signed item that is not on the public site**: the held proposal bytes, `proposal_sig` and `bundle` when `site` is not `matches`; the site's copy for a `mismatch`; every `vote.status` answer verbatim; the other ballot in a `conflict` or `disputed`; a `rejected` proposal with its reason. A release frees only what can be fetched again. A proposal that still cannot be kept (the cap is full of proposals that cannot be evicted, or the vault is at 128) is answered `limit` (`{limit: "votes", max}`, §10.1), audited `drop.vote_limit` and **shown to the member**: a `vote.problem` feed item (`ref` = the `connection_id`, at most one per connection per 24 hours) and a `dropped` entry in `vote.list` (`{connection_id, count, last_at}`) until the member opens it. For the problem cap the entry is `problems` (`{connection_id, count}`) and stays until a record is released.
+
+The records survive a lock, a hold, a restart, a release move, a transfer to a new phone and a recovery (they are vault state, §3.3), and the removal of the connection (they are the member's evidence); they go with the vault (§12.5). **Nothing is synced to the owner's desktops and agents**: they have no vote access (decision 4), so no `sync.event` kind is added. A desktop sees the vault's audit entries `vote.cast` and `vote.recorded` through `audit.list` like all entries (that the member took part, the proposal id and the time; never the choice). A vault has one app (§1.1 item 8); a new phone reads `vote.list`.
+
+**Timers are not scaled.** The retries, the 24-hour wait, the 2-hour check, the 7-day bound and the reminder are timers between a vault and a service and are not divided by `time_scale` (STAGING-TIME-SCALE T4): the service and the relay count real time. A staging test uses a short voting window.
+
+#### 10.19.3 States
+
+A proposal's **state** in the vault:
+
+| State | Meaning |
+|---|---|
+| `checking` | Kept, but not yet checked to the end, with a stated `reason`: `service_list` (no verified service list names this service's anchor key, including one that was only re-confirmed), `trust_root` (the bundle's log or timestamp does not verify against the roots pinned in this release, which may be out of date: a Sigstore root rotation), `site` (the proposal's documents have not arrived), `restore` (the vault is asking the service what it recorded, §10.19.5). Shown to the member as "being checked" with the reason (decision 6); not castable. A `checking` proposal never becomes `rejected` for want of information, only when something positively fails. |
+| `upcoming` | Verified; the vault's clock is before `opens_at`. |
+| `open` | Verified; `opens_at` ≤ now < the `closes_at` in force. Castable until two minutes before `closes_at` (§10.19.5). |
+| `closed` | The vault's clock has reached the `closes_at` in force. (`vote.closed` is unsigned and does not close a vote, §10.19.4.) |
+| `rejected` | A check that positively failed (§10.19.4: malformed, the service, the signature, the tag, or an anchor that contradicts the document). Kept as evidence and **listed** by `vote.list` with its `reason`; it makes a `vote.problem` feed item; never castable. |
+
+The **ballot** has its own state, absent until the member casts:
+
+| Ballot state | Meaning | Final |
+|---|---|---|
+| `sending` | Stored and signed; no verified answer yet. The vault sends it again (§10.19.5). | no |
+| `waiting` | The service refused with `not_open` or `not_signed_in` (`reason`); sent again. | no |
+| `recorded` | The receipt is held and verified. | yes |
+| `refused` | A signed refusal that ends it: `closed`, `late`, `not_active`, `not_eligible`, `bad_ballot` (`code`), or `connection_ended`. | yes |
+| `conflict` | The service holds a different ballot under this code. Evidence is kept. | yes |
+| `disputed` | After a restore the service named a ballot and the member said it is not theirs. | yes |
+
+The **check** of the results (§10.19.6) is `pending`, `verified`, `unconfirmed`, `failed` or `gave_up`.
+
+#### 10.19.4 What the vault checks before it shows a proposal, an extension or a result
+
+Every check is the vault's own; the app never decides one. **Every signature in this section** (`proposal_sig`, `extension_sig`, `receipt_sig`, `status_sig`, `refusal_sig`, `results_sig`, an `anchor_cert`, the service list's signature, and the signatures of a ballot an `already_voted` answer carries) **is verified by the four steps of BALLOT-PROTOCOL §2**, with the checks a library's `Verify` omits. A message is handled in this order and stops at the first failure.
+
+**On `vote.proposal`** (from an active connection of kind `service`, by a vault that registers `vote`):
+
+1. **Shape.** The body parses strictly (§5.3, no duplicate names), has the members of §6.4 with their types, and is at most 196,608 bytes. Failure: `bad_request`, audit `drop.vote_malformed` (`ref` = `connection_id`).
+2. **The document.** `proposal` is a JCS (RFC 8785) document: parsed strictly, re-serialised, and **refused unless the bytes are identical** (BALLOT-PROTOCOL §2). It has exactly the members of BALLOT-PROTOCOL §8.5 with their types, `v` is `1`, `proposal_id` is a canonical ULID, `title` is 1 to 200 bytes and `text` at most 16,384, `choices` are 3 to 17 entries (at most 16 besides `abstain`) with `id` matching `[a-z0-9-]{1,32}`, unique, and `abstain` present once, each `label` 1 to 200 bytes; `quorum.text` is 0 to 1,024 bytes and `quorum.min_ballots` an integer of at least 0 (the 2026-10-30 test vote used 0); `outage_rule` is at most 1,024 bytes; the decoded `proposal` is at most 65,536 bytes; `opens_at` < `closes_at` and `closes_at - opens_at` is at most 604,800 s (7 days); `eligible` is an integer of at least 1. These bounds are the same on both sides: the **service enforces them before it signs, from release 25** (chosen with the service vault's author), so that the vault never refuses what the service sends and the site accepts. Failure: `bad_request`, audit `vote.proposal_rejected` (`ref` = `<proposal_id>:malformed`, or `<connection_id>:malformed` without a valid id).
+3. **The service.** `service` equals this connection's pinned `ik` or an earlier one in its rotation chain (§3.4, §6.6), and `proposal_sig` verifies as `Sign(service IK, "vettid/vote/1/proposal\x00", H(proposal bytes))`, by the Ed25519 rules of BALLOT-PROTOCOL §2 (**all four steps, including the small-order and `y < p` checks that a library's `Verify` often omits**). Failure: `bad_request`, `vote.proposal_rejected` `…:service` or `…:signature`.
+4. **The tag.** `record_secret` is 32 bytes; `record_tag = H("vettid/vote/1/record\x00" ‖ proposal_id ‖ record_secret)`; `record_proof` has `tree_size` equal to `eligible`, `index` below it, at most 32 path entries of 32 bytes, and verifies the tag to `record_root` (RFC 9162 §2.1.3.2). Failure: `bad_request`, `…:record`.
+5. **Duplicates.** If the vault holds this `proposal_id`: the same `proposal` bytes, `proposal_sig`, `record_secret` and proof are a re-send, answered ok with nothing changed (no new voting key, feed item or notification). Anything different (another proposal or another secret) is kept as evidence (one copy), audited `vote.proposal_conflict` (`ref` = `proposal_id`), answered `bad_request`, and the first stays in use.
+6. **The anchor.** The vault holds a verified service list (below) whose entry for this service (an `ik` of the connection) names `anchor_keys`. An anchor key is accepted only if its `anchor_cert` verifies under that `ik` over `H(SPKI DER)` with `"vettid/vote/1/anchor-key\x00"`. The `bundle` is checked as BALLOT-PROTOCOL §8.5 "Rekor profile" says: a `hashedrekord` entry whose digest is `H(proposal bytes)` and whose key is an accepted anchor key, the ECDSA P-256 signature, the inclusion proof and checkpoint, and the RFC 3161 timestamp, against the Sigstore trusted roots pinned in the release (§11.10.8). The timestamp must be **at or before the relay's time of this message plus 5 minutes** (chosen: the service anchors before it sends, BALLOT-PROTOCOL §3.3). Outcomes: **no verified list, none naming an anchor key of this service, or a bundle whose key is not among the accepted keys:** kept `checking` (`service_list`), answer ok (the list may be behind). **The digest or the signature contradicts the document under a key the list names, or the timestamp is late:** a positive failure, `rejected`, `bad_request`, `…:anchor`. **The inclusion proof, checkpoint or timestamp does not verify against the pinned roots:** kept `checking` (`trust_root`), answer ok, and shown with that reason, because the roots may be out of date (a root rotation) and the proposal itself is not at fault.
+7. **The state.** `closes_at` already past by the vault's clock: kept `closed`, a record with no feed item or notification ("a vote is open" would be false). Otherwise `upcoming` or `open`.
+8. **Keeping.** The vault generates the voting key `vk` (a fresh random Ed25519 key, BALLOT-PROTOCOL §5), stores the record, flushes, and answers `{proposal_id}`. An `upcoming` or `open` proposal makes the feed item `vote.open` (§10.9) and a `vote.event`.
+
+**The service list.** The app fetches `services.json` and `services.json.sig` from votes.vettid.org and sends them in `vote.site.sync`. The vault verifies the signature `Sign(site key, "vettid/vote/1/service-list\x00", H(bytes))` under the **site key pinned in the release constants** (§11.10.8), checks the document strictly (JCS, BALLOT-PROTOCOL §8.5), and keeps it only if its `version` is higher than the held one, its `previous` is the hash of the held one and every earlier entry is still there (the first list: `previous` all-zero). A list that does not chain is ignored and audited `vote.list_rejected`. The same version again only refreshes the time the list was last confirmed. When the vault keeps a newer list, or a confirmation, it re-checks its `checking` proposals. One whose anchor key is still not named stays `checking` (`service_list`): a list that is cached for 5 minutes and merely confirmed is no proof that the key does not exist (VOTES-SITE §3), so only information, never a lack of it, ends the state.
+
+**On `vote.extended`** (`{proposal_id, extension, extension_sig, bundle}`): the proposal is held and not `rejected` (else `not_found`). `extension` is a JCS document (BALLOT-PROTOCOL §8.5) with the same `proposal_id`. Its `n` is the count of extensions held plus 1 (the same bytes again are a re-send, answered ok; a higher `n` is kept aside, one only, until its predecessors arrive). `extension_sig` verifies as `Sign(IK, "vettid/vote/1/extended\x00", proposal_hash ‖ H(bytes))`; its `closes_at` is above the one in force and **at most 86,400 s above the proposal's original**; `outage.from` < `outage.to`; and the bundle verifies as above with a timestamp **before the `closes_at` it extends**. On success the vault stores it, moves the `closes_at` in force, audits `vote.extended` (`ref` = `<proposal_id>:<n>`), sends a `vote.event` and answers `{proposal_id}`; a `closed` proposal is open again if its clock is still before the new time. On failure the old `closes_at` stands: audit `vote.extension_rejected` (`ref` = `<proposal_id>:<reason>` with reason `malformed`, `signature`, `order`, `total`, `anchor` or `late`), answer `bad_request`. Extensions are also learned from the site's entries (`vote.site.sync`), checked the same way.
+
+**On `vote.closed`** (`{proposal_id, results_hash}`): the proposal is held (else `not_found`). The message is **unsigned**, so it never closes a vote. The vault keeps `results_hash` and the arrival time as evidence and answers `{proposal_id}`. Before the `closes_at` in force by the vault's clock it changes only the check schedule: the check becomes due at that `closes_at` instead of two hours later (§10.19.6); the state stays `open` and casting stays open until the close. After the `closes_at` it marks the check due at once. `results_hash` is the standard base64 of `H(results.json bytes)` (the service sends `sum(results)`); it is compared with the results the vault is later handed and a difference is recorded as evidence, **not** a failure (only `results_sig` decides).
+
+**Locked and held.** A locked vault does nothing (§12.1): the relay keeps the message (14 days) and the vault handles it at the next unlock with that moment's clock. A **held** vault (§3.6.3) handles all three as above, because nothing in them waits for the member: the proposal is kept and checked, the feed item is made (counted in `vault.held`'s `other`, with no wake: §14.2 does not wake a held vault for it), and the member sees it after the check.
+
+**A proposal the vault was never sent.** For each site index entry (`vote.site.sync`) of a service the vault has a `service`-kind connection with, whose proposal it does not hold, the vault asks `vote.status` (at most once an hour per proposal). The answer carries the proposal, `proposal_sig`, `bundle`, `record_secret` and `record_proof` (§6.4); they are checked as in steps 2 to 6, with `status_sig` (§10.19.5), and the proposal's bytes must equal the site's. A status answer without a `bundle` leaves it `checking` (`site`) until the site's bundle arrives. A signed `not_eligible` or `unknown_proposal` is kept as evidence and shown (decision 7).
+
+**Comparing with the public site** (BALLOT-PROTOCOL §9.2, a split view; chosen). The vault keeps, per proposal, the site's proposal bytes and a `site` state, **decided from the document itself**, `p/<proposal_id>/proposal.json` (VOTES-SITE §3: immutable and kept for good), and not from the index: `index.json` lists only the last 30 days and its write can lag the document (VOTES-SITE §3, §4), so the index and `archive/<YYYY-MM>.json` serve for discovery only. The states: `matches` (the document's bytes equal the held bytes), `mismatch` (the document exists with other bytes), `not_listed` (a site that **answered** has no document: a `404`), `unreachable` (no answer) or `unpublished` (below). **Only a positive `mismatch` blocks a cast** (`site_mismatch`): VettID's own site must not stop a member from voting (BALLOT-PROTOCOL §1, §10.1). `not_listed` and `unreachable` allow the cast with a plain warning, and the vault compares as soon as the site answers. **A service can show one member a private variant**, anchored in Rekor and never uploaded, even under its own `proposal_id`; the site is write-once and takes uploads only before the close (BALLOT-PROTOCOL §3.3, VOTES-SITE §4), so absence is a positive signal after a while:
+- a `404` for the document from an answering site **more than 10 minutes after the proposal arrived** makes a `vote.problem` feed item with a plain warning, and an audit entry `vote.proposal_conflict` (`ref` = `<proposal_id>:not_listed`); the member can still vote;
+- a `404` for the document from an answering site **after the `closes_at` in force** is `unpublished`: a positive problem, kept as evidence, with the audit entry `vote.proposal_conflict` (`ref` = `<proposal_id>:unpublished`) and a `vote.problem` feed item. A cast is not blocked (it is already closed), and a ballot already cast keeps its state; the app tells the member their vote may not count. A proposal that is merely absent from the index (older than 30 days, or the index not yet written) is neither;
+- a `mismatch` (the same `proposal_id` with other bytes on the site), found before or after a cast, is kept as evidence (the site's bytes, `.sig` and bundle), audited `vote.proposal_conflict` (`ref` = `<proposal_id>:mismatch`) and makes a `vote.problem` feed item; before a cast it blocks it, after a cast it changes no ballot state, and the app says the vote may not count.
+The app fetches the document when it opens a vote screen (and for a proposal older than the index, directly by its id). The format is vettid/votes `docs/VOTES-SITE.md` 0.2.2 §3.
+
+#### 10.19.5 Casting, sending and the receipt
+
+**The app's request** is `vote.cast {proposal_id, choice_id}`, inside the credential's unlock window (§3.5.3; `credential.unlock` first, as for `connection.authenticate.approve`). The member's decision in the app is the approval; it is **not an ask** (§10.4.1) and has no cooldown. The vault checks in this order and refuses with the code on the right:
+
+| Check | Refusal |
+|---|---|
+| the proposal is held and not `rejected` | `not_found` |
+| the state is `open` | `checking`, `not_open` (`{opens_at}`), `closed` (`{closes_at}`) |
+| the vault's clock is before the `closes_at` in force **minus 120 s** | `closing` (`{closes_at}`) |
+| `choice_id` is one of the proposal's | `bad_request` |
+| no ballot yet. The **same** `choice_id` as the stored ballot is a repeat, answered ok with the ballot's state and nothing changed; another one | `already_voted` (`{ballot: {state}}`) |
+| the site, if it has answered, does not contradict the held bytes (§10.19.4; an unreachable or silent site does not block) | `site_mismatch` |
+| the connection is active | `connection_unavailable` |
+| the vault has recorded a credential key for this connection, from a signed `connection.authenticate.response` it sent it (§10.4; the key the service pinned, BALLOT-PROTOCOL §5) | `not_signed_in` (`{connection_id}`), before anything is signed |
+| the proposal is not waiting for a status answer after a restore (below) | `checking` |
+| the unlock window is open | `credential_locked` |
+
+While the vault is held every owner request is `owner_check_required` (§3.6.3). When all pass, the vault:
+
+1. builds `ballot_msg = proposal_hash ‖ record_tag ‖ lp(choice_id)`; signs `ballot_sig = Sign(vk, "vettid/vote/1/ballot\x00", ballot_msg)`; builds `ballot_leaf = record_tag ‖ lp(vk) ‖ lp(choice_id) ‖ lp(ballot_sig)`; and signs `cast_sig = Sign(credential key, "vettid/vote/1/cast\x00", proposal_hash ‖ H(ballot_leaf))` with the credential key (the use extends the window, §3.5.3). `lp(x)` is a 16-bit big-endian length and `x`. §16 pins every byte. The credential key signs for votes only these bytes under this label; the label is not a prefix of any other (§10.4 "Labels").
+2. stores the ballot and the exact `vote.cast` body, and **flushes before it sends**; a `connection.authenticate.rotated` statement still unsent to this connection (§10.4: a credential rotation tells each connection that pinned a key) is queued **first in the same outbox**, so the service follows the chain before it meets `cast_sig` (deposits to one mailbox stay in order, RELAY-PROTOCOL §6.2); audits `vote.cast` (`connection_id`, `ref` = `proposal_id`; **never the choice**);
+3. answers the app `{proposal_id, ballot: {state: "sending"}}` and sends `vote.cast` (§6.4).
+
+**Sending again.** The vault sends **the stored body** until it holds a receipt or a final refusal. Each send is a new request with a new inner `id` (not §8.6's reuse of the `id`: the service caches the response to an `id` for 24 hours, which would hide a `not_open` that has become ok). The schedule (chosen): 1, 5 and 30 minutes after the first send, then hourly, **until the vault's clock reaches the `closes_at` in force**; then it stops sending and asks `vote.status` instead (once an hour until an answer or until the results check settles it). **A verified extension that moves the `closes_at` restarts sending** from the schedule's first step. It runs whenever the vault is unlocked, **held included** (the decision was the member's, made before the check; §3.6.3 "What keeps running"); a locked vault sends at its next unlock. `not_open`, no answer, a network error, an unsigned or failing refusal and a receipt that fails are all "no verified answer" and are sent again. After **24 hours** without a verified answer the vault also asks `vote.status`, then hourly.
+
+**The answer** to `vote.cast` counts only if it verifies:
+
+- **ok** `{proposal_id, msg_ms, receipt_sig}`: `receipt_sig` verifies over `proposal_hash ‖ H(ballot_leaf) ‖ u64(msg_ms)` under `"vettid/vote/1/receipt\x00"`, and `msg_ms` is not before `opens_at` and before the `closes_at` in force. The vault stores the receipt, **erases the seed of `vk`** (the public half stays for comparing with the service's ballot after a restore), sets `recorded`, audits `vote.recorded` (`ref` = `proposal_id`) and sends a `vote.event`. A receipt that fails: audit `vote.receipt_rejected`, treated as no answer.
+- **error:** the body is `{refusal_sig, msg_ms, connection, record_tag}`. It verifies if `connection` is `H` of this vault's own identity key on that connection (current or earlier, §3.4), `record_tag` is the vault's tag or empty, and `refusal_sig` verifies over `lp(proposal_id) ‖ lp(connection) ‖ lp(record_tag) ‖ lp(type) ‖ lp(code) ‖ u64(msg_ms) ‖ request_hash` under `"vettid/vote/1/refusal\x00"`, with `request_hash = H(ballot_leaf)`. An unsigned or failing refusal is no answer. A verified one is stored and handled by its code:
+
+| Code | The vault |
+|---|---|
+| `not_open` | `waiting` (`not_open`); sends again by the schedule. |
+| `not_signed_in` | `waiting` (`not_signed_in`); sends hourly and at once after the vault's next signed authentication response for the connection. The ballot already holds its `cast_sig`. |
+| `closed`, `late` | **With no earlier send unanswered** (every earlier send got a verified answer) the refusal is **final at once**: `refused`. **Otherwise** an earlier send may have arrived in time and its answer been lost, or may still be unacked at the service (a message left unacked holds the service's count up to 24 hours, BALLOT-PROTOCOL §7): `waiting` (`closed`), the vault asks `vote.status` at once and hourly. An answer carrying the ballot is the receipt (`recorded`). A signed answer **without** a ballot is final (`refused`) only if received **after `closes_at` + 24 hours** (as extended); until then the state stays `waiting` (`closed`) and the results check settles it (§10.19.6). A verified receipt for any send **always wins** over a refusal, whenever it arrives. Audit `vote.refused` (`ref` = `<proposal_id>:<code>`) when it is final. |
+| `not_active`, `not_eligible` | `refused`; the signed refusal is evidence. Audit `vote.refused`; feed item `vote.problem`. |
+| `bad_ballot` | If a rotation statement was **sent to this connection since the vault's last signed response to it**: `waiting` (`bad_ballot`); the vault asks `vote.status` and **sends the stored ballot once more** if the service holds none. A second `bad_ballot`, or any other case: `refused`, evidence, `vote.refused` and a `vote.problem` feed item. |
+| `already_voted` | The body's `ballot` `{vk, choice_id, ballot_sig}`, `ballot_msg_ms` and `receipt_sig` are checked. Exactly this vault's ballot: it is the receipt. Any other: `conflict`, audit `vote.conflict`, feed item `vote.problem`. |
+
+A code the vault does not know is no answer.
+
+**`vote.status`** (`{proposal_id}`) is asked (a) for a proposal on the site's index it does not hold, (b) after a restore, (c) when a cast has had no verified answer for 24 hours, and (d) when the app asks (`vote.check`, at most once per proposal per 10 minutes, else `limit` with `{retry_after}`). The answer counts if `status_sig` verifies over `lp(proposal_id) ‖ lp(record_tag) ‖ H(ballot_leaf)` under `"vettid/vote/1/status\x00"` (the leaf of the ballot the answer carries; for an answer **without** a ballot, `H("")`, the SHA-256 of the empty string, `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`) and, if it carries a receipt, the receipt verifies as above. A **refusal** to `vote.status` verifies as a refusal to `vote.cast` does, with `type` `vote.status` and `request_hash = H(proposal_id)` (the ASCII bytes of the id). Then:
+
+- it carries this vault's own ballot with a receipt: as an ok to `vote.cast` (a lost answer is recovered);
+- it carries a ballot and the vault has none (after a restore), or a different one: the **app shows the recorded choice and asks the member to confirm** (`vote.confirm`). "Yes" stores the service's ballot and receipt as `recorded`; "no" sets `disputed` and keeps everything as evidence (BALLOT-PROTOCOL §5). Where the vault has a ballot of its own with a different `vk`, it is `conflict` at once;
+- it carries no ballot while the vault holds a receipt: the signed answer is evidence against the service (`vote.problem`), and the vault keeps its exact ballot;
+- a signed `not_eligible` or `unknown_proposal`: stored as evidence and shown.
+
+**A restore.** Vault state is not snapshotted or exported, and an unlock of state older than the rollback counter is refused (§13.2), so the cases in which the vault's records may be behind the service's are: **a recovery** (§11.14), and **a transfer to a new phone** (§6.7.1) when the old phone's last cast had not reached the vault. (An operator restore to a counter-consistent earlier state is not a trigger: the vault cannot detect it, a residual risk of §13.2.) At the first unlock after either, the vault marks every proposal it holds that has no receipt `checking` (`restore`), asks `vote.status` for each, and **allows no cast until the answer arrives** (`cannot_cast: checking`): a second ballot under the same `vk` would be a `conflict`. `checking` (`restore`) lasts as long as the service does not answer; that is accepted, because a service that stays silent can stop a member's vote anyway (BALLOT-PROTOCOL §9.2). With the app's next `vote.site.sync` it also asks for every proposal on the index it does not hold. A re-enrolled vault has no records and no connections (§6.6, §11.11): a vault restored past an epoch change needs a new invitation (§6.6) and has no tag in older proposals (BALLOT-PROTOCOL §5); the app shows those as "You can't vote in this one", from `not_eligible`.
+
+**Removal.** If the service removes the connection, or the member does, proposals and ballots stay as records. A ballot still `sending` or `waiting` can no longer be sent: it becomes `refused` with `code` `connection_ended`. The app warns before the member removes a service with an open vote or an unrecorded ballot. A member removed from the roster who is **still connected** gets `not_active` (unless the proposal's `removed_may_vote`).
+
+#### 10.19.6 After the close: checking the results
+
+At `vote.closed`, and in any case at **`closes_at` (as extended) + 2 hours**, the vault marks the check `pending` and tells the app (`vote.event{event: "check_due"}`; `check.due_at` in `vote.list`). The app runs pending checks whenever it opens and retries with backoff; the vault gives up (`gave_up`) **7 days** after the check was due (BALLOT-PROTOCOL §8.3). The app knows why it could not finish (the site could not be reached, or `results.json` was not there) and says so (ANDROID-PLAN); the vault records only `gave_up`.
+
+1. The **app** fetches `results.json`, `rows.json`, the bundle and `results_sig` from votes.vettid.org with no session, verifies them as an observer does (BALLOT-PROTOCOL §8.4), and sends `vote.results.submit`: `results.json`, the signature, the bundle, **its own row** (the vault's tag is in `vote.get`) and the row's inclusion proof to `rows_root`. An observer check that fails in the app is shown to the member as a problem with the published results; the vault never relies on the app's verdict.
+2. The **vault** checks the strict JCS bytes and schema (BALLOT-PROTOCOL §8.5); `results_sig` over `proposal_hash ‖ H(results bytes)` under the service key and `"vettid/vote/1/results\x00"`; the bundle against an accepted anchor key (§10.19.4 step 6); that the `proposal` in the results is, byte for byte, the one it holds with its signature, and that the extensions are the ones it holds, in order (an extension in the results that it lacks is checked as in `vote.extended` and adopted; a held one missing from the results is a failure); that `tally` names every choice and `counts.eligible` equals the proposal's; and its row.
+3. **The row.** Its leaf is `ballot_leaf` for a row with a ballot, or the 32-byte tag for an empty one. The proof must verify to `rows_root`, with `tree_size` equal to `counts.eligible` and to the `record_proof`'s `tree_size`, and with `row_proof.index` equal to `record_proof.index` (the rows and the tags are both sorted by tag, so a member's row is at its tag's index); any difference is `failed` (`results`). Then:
+
+| The vault holds | The row must be | Outcome |
+|---|---|---|
+| a receipt | exactly that ballot | `verified`; otherwise `failed` (`row_mismatch`): a receipt for a ballot the results lack or change proves the service at fault |
+| no ballot | empty | `verified`; a ballot there is `failed` (`row_unexpected`): a ballot under the member's code that they did not cast |
+| a ballot with neither receipt nor refusal | the ballot, or empty | `unconfirmed` either way (shown as unconfirmed, not as a failure) |
+| a ballot and only a verified refusal (a final `closed`, `late`, `not_active`, `not_eligible` or `bad_ballot`) | empty, or exactly the ballot | `verified`; another ballot `failed`. A receipt, when there is one, is always the first row |
+| `disputed` or `conflict` | whatever | `failed` (`disputed` or `conflict`) |
+
+4. `failed` audits `vote.check_failed` (`ref` = `<proposal_id>:<reason>`) and makes the `high` feed item `vote.problem`. `verified` and `unconfirmed` audit `vote.check_ok` or `vote.check_unconfirmed` and make the `normal` item `vote.result`. `gave_up` audits `vote.check_gave_up`. The vault keeps the results with its row.
+5. **`vote.evidence {proposal_id}`** returns what a member can show the organisation or an auditor, as base64 of the exact signed bytes: the proposal, its signature and bundle, the extensions, the receipt or signed refusals (verbatim), the status answers kept, the results with the row and proof, **and the site's copy of the proposal (bytes, `.sig` and bundle) when it differs from the held one**, with the `site` state. For a record that was **evicted clean** (§10.19.2) it returns everything its compact record holds (the service `ik`, `proposal_hash`, `record_tag`, the ballot with `msg_ms` and `receipt_sig`, the refusals, the outcome) with `evicted: true`; the app fetches the proposal and results from the site and adds them to the export. For a **released problem record** it returns everything the compact record holds, which is more: the held proposal bytes, signature and bundle, the site's copy, every `vote.status` answer, the other ballot of a `conflict` or `disputed`, and a rejected proposal with its reason, with `released: true`. The app exports them as they are.
+
+#### 10.19.7 Reminders and the feed
+
+The vault makes the feed items of §10.9, so that notifications follow the member's mode (ANDROID-PLAN D7):
+
+- `vote.open` (`ref` = `proposal_id`, `normal`) when a proposal is kept `upcoming` or `open`, or **becomes** so from `checking` (once);
+- `vote.closing` (`ref` = `proposal_id`, `normal`) at **`closes_at` in force minus the lesser of 24 hours and half the voting window** (BALLOT-PROTOCOL §10.1 asks a day before; a window under 48 hours gets its half), if the vote is `open` and the member has not voted. A proposal kept after that moment gets none. A vault that is **locked** at the moment makes it at the next unlock if more than one hour remains; a **held** vault makes it without a wake. An extension makes no second one;
+- `vote.result` (`normal`) and `vote.problem` (`high`) as in §10.19.5 and §10.19.6.
+
+A held vault makes them without a wake. **Votes do not count in the approvals indicator** (ANDROID-PLAN "The approvals indicator"): a vote lasts days and has its own count (decision 5).
+
+#### 10.19.8 The app's API
+
+All are requests from the **app only**: a desktop or an agent is answered `forbidden` (decision 4). While the vault is held they are `owner_check_required` (§3.6.3), so the app reads them after the unlock and after a check. A vault whose image lacks `vote` answers `unsupported_type`; the app then shows no Votes and asks again only after the next unlock.
+
+| Type | Request body | Response / event body |
+|---|---|---|
+| `vote.list` | `{state?: "open" \| "closed" \| "all", after?, limit?}` (`limit` 1–100, default 50) | `{votes: [<summary>], next?, dropped: [{connection_id, count, last_at}], problems: [{connection_id, count}], reconnect: [{connection_id, service_id, name}], list_version?}` |
+| `vote.get` | `{proposal_id}` | `<vote>` |
+| `vote.cast` | `{proposal_id, choice_id}` | `{proposal_id, ballot: {state}}` (§10.19.5) |
+| `vote.check` | `{proposal_id}` | `{}`: asks the service `vote.status` now |
+| `vote.confirm` | `{proposal_id, mine: boolean}` | `{ballot: {state}}`: the member's answer after a restore |
+| `vote.release` | `{proposal_id, utk_id, sealed}`; `sealed` is UTK-sealed `{pin}` (§3.5.4), as for `audit.export` | `{}`: releases a problem record (§10.19.2) into its compact record, which stops counting toward the cap of 16. `bad_request` unless the record is a problem record **and its proposal is `closed` or `rejected`**; `evidence_not_exported` unless `vote.evidence` was called for the proposal **after the record's last change**; `bad_pin`, `backoff`, `utk_invalid`, `credential_frozen`, `rotation_required` (as `audit.export`); `not_found`. Audited `vote.released` (`ref` = `proposal_id`; never the choice) |
+| `vote.site.sync` | `{services?: {doc, sig}, entries?: [<entry>]}`, at most 8 entries and 200,000 bytes | `{services?: "kept" \| "confirmed" \| "ignored" \| "rejected", entries: [{proposal_id, result: "kept" \| "known" \| "ignored" \| "rejected", reason?}]}` |
+| `vote.results.submit` | `{proposal_id, results, results_sig, bundle, row, row_proof}` | `{proposal_id, check: {state, reason?}}` |
+| `vote.evidence` | `{proposal_id}` | `{evidence: {…}}` (§10.19.6) |
+| `vote.event` (V→D, the app) | — | `{proposal_id, connection_id, event, state}`, `event` one of `proposal`, `extended`, `closed`, `ballot`, `check_due`, `check`, `problem` |
+
+```json
+summary: { "proposal_id": "<ULID>", "connection_id": "<id>", "title": "...",
+           "state": "checking|upcoming|open|closed|rejected", "reason": "...?",
+           "opens_at": "<ts>", "closes_at": "<ts>",
+           "ballot": { "state": "sending|waiting|recorded|refused|conflict|disputed",
+                       "code": "...?", "reason": "...?" },
+           "check": { "state": "pending|verified|unconfirmed|failed|gave_up",
+                      "reason": "...?", "due_at": "<ts>?" },
+           "can_cast": true, "cannot_cast": "<error code>?",
+           "site": "matches|mismatch|not_listed|unreachable|unpublished" }
+vote:    summary + { "text": "...", "choices": [{"id": "yes", "label": "Yes"}],
+                     "quorum": {"text": "...", "min_ballots": 1}, "binding": false,
+                     "record_tag": "<b64>", "choice_id": "yes?", "extensions": 0,
+                     "tally": {"yes": 1}?, "counts": {"eligible": 3, "ballots": 2,
+                     "removed": 1, "unhandled": 0}?, "ik_fingerprint": "..." }
+entry:   { "index": { "proposal_id": "<ULID>", "service_id": "...", "proposal_hash": "<b64>",
+                       "opens_at": 0, "closes_at": 0, "extended": 0, "published": false, "unhandled": 0 (optional) },
+           "proposal": "<b64>", "proposal_sig": "<b64 of the raw 64 bytes>", "bundle": {…},
+           "extensions": [{ "extension": "<b64>", "extension_sig": "<b64>", "bundle": {…} }] }
+row:     { "ballot": { "vk": "<b64>", "choice_id": "...", "ballot_sig": "<b64>" } | null }
+row_proof: { "index": 1, "tree_size": 3, "path": ["<b64 32 bytes>"] }
+```
+
+- Times are RFC 3339 with milliseconds (§10.1). `ballot` and `check` are absent until they exist; `tally` and `counts` come only from verified results. **`choice_id` is only in `vote.get`, and only after the member cast.** It is in no list, event, feed item, audit entry, notification or log line.
+- `title`, `text` and the labels are the service's words: the app shows them as plain text, as the service's.
+- `can_cast` is true when `vote.cast` would pass every check except the unlock window; `cannot_cast` is the code it would give (`checking`, `not_open`, `closed`, `closing`, `already_voted`, `site_mismatch`, `connection_unavailable`, `not_signed_in`).
+- `vote.list` order: `open`, `upcoming`, `checking` and `rejected` first (by `closes_at`), then `closed` by `closes_at` descending. `list_version` is the service list the vault holds.
+- **`vote.site.sync`** is what the app does with the public site for the vault: it fetches `services.json` and `services.json.sig` and the index of proposals open or closed in the last 30 days, with their extensions, **on a fixed hourly schedule and whenever it opens**, with no session (BALLOT-PROTOCOL §3.3), and sends them. An `entry` is one element of the site's `index.json` (vettid/votes `docs/VOTES-SITE.md` 0.2.2 §3: `{proposal_id, service_id, proposal_hash, opens_at, closes_at, extended, published, unhandled?}`, `proposal_hash` base64) with, for a proposal the member's services have, the documents under `p/<proposal_id>/`: `proposal.json`, `proposal.json.sig` (raw 64 bytes; the app sends its base64), `proposal.json.sigstore.json`, and for each extension `extension-<n>.json`, `extension-<n>.json.sig` and `extension-<n>.json.sigstore.json`. (The results are `results.json`, `results.json.sig`, `results.json.sigstore.json` and `rows.json`.) The vault uses the `index` part to compare with what it holds and to learn which proposals it lacks (§10.19.4). The vault checks everything itself and answers `ignored` for an entry that matches none of its service connections. The site sees the phone's address, the hour and which proposal documents are fetched (an interest in a proposal, as any reader's), and nothing of the vault, the connections, whether the member voted or how.
+- **`vote.results.submit`**: `results` and `bundle` as the site serves them (`results` the standard base64 of the exact bytes). A repeat for a final check is answered with that state.
+- **Reconnecting for votes** (chosen; decision 9). The vault keeps the verified service list. A connection of kind **person** whose pinned `ik` is an `ik` of a listed service is a service the member connected to before the invitation said so: the vault lists it in `reconnect` and **changes nothing about it**. The kind stays fixed at connect (§6.4); the list is information only, and is VettID's list, not a proof of who runs the service. The app tells the member to remove the connection and accept a fresh invitation. Nothing is listed until the vault holds a verified service list.
+- **Errors** (besides §10.1's): `evidence_not_exported` and, for `vote.release` as for `audit.export`, `bad_pin`, `backoff` (body `{retry_after}`) and `utk_invalid` (with `credential_frozen` and `rotation_required` below); `checking`, `not_open` `{opens_at}`, `closed` `{closes_at}`, `closing` `{closes_at}`, `already_voted`, `site_mismatch`, `not_signed_in`, `connection_unavailable`, `credential_locked`, `credential_frozen` and `rotation_required` (§3.5.9), `owner_check_required`, `not_found`, `bad_request`, `limit`, `forbidden`, `unsupported_type`. The app never retries `vote.cast` after any of these except `credential_locked` (open the window and send it again) and a timeout (send it again: a repeat is safe).
+
+#### 10.19.9 Edge cases
+
+| Case | What happens |
+|---|---|
+| Proposal arrives while the vault is **locked** | It waits in the relay (14 days) and is handled at the next unlock with that moment's clock; one past its close is kept `closed`. |
+| Proposal arrives while **held** | Kept and checked; the feed item is made and no wake. The member sees it after the check and cannot vote until then; a vote that closes meanwhile is `closed`. |
+| **Re-sent** proposal | The same bytes: ok, nothing changes. A different one under the same id: evidence, `bad_request`, the first stays. |
+| **Closed** vote | `vote.cast` is `closed`; the record, receipt and results stay. An unsigned `vote.closed` never closes a vote early. |
+| **Extended** vote | `closes_at` moves only for a verified extension; the app shows the new time. A cast is refused two minutes before the close by the vault's clock. |
+| Relay **outage** | A ballot queued at the relay counts by the relay's time (BALLOT-PROTOCOL §6). The vault sends again by the schedule. |
+| **Member removed** from the roster | `not_active` unless `removed_may_vote`: `refused`. The connection ended: `connection_unavailable` for a cast; a stored ballot becomes `refused` `connection_ended`. |
+| **One person, several accounts** | Each account's vault is a separate member with its own code and may vote (BALLOT-PROTOCOL §3.2, §9.2); the vault and apps say nothing about it (decision 8). |
+| Ballot **not acknowledged** | Sent again; after 24 h `vote.status`; the app says "Waiting for the service", never "failed"; after the close the results settle it, or it stays "unconfirmed". |
+| Cast **twice** (a second tap) | The same choice is a repeat and answers with the state; another choice is `already_voted`. |
+| `vote.*` from a **person** connection | Answered `unsupported_type` as an unknown type, and audited `drop.vote_not_service`. |
+| A service connection **from before** `peer_kind` | A person: never counted; "Reconnecting for votes". |
+| **Credential key rotated** after the member signed in to the service | The vault queues any unsent rotation statement ahead of the ballot (§10.19.5). A `bad_ballot` after a statement sent since the last signed response is tried once more after a status check. |
+| **Clock skew** | The vault's clock decides what the app offers; the relay's time decides at the service; `not_open` is sent again. |
+| **Service identity rotated** | An earlier `ik` of the connection's chain verifies a proposal. The service starts no rotation between a proposal and its results (BALLOT-PROTOCOL §2). |
+
+#### 10.19.10 Tests required (0.81.0; follow-up implementations)
+
+- **Vectors (§16):** `record_tag`, `ballot_msg`, `ballot_sig`, `ballot_leaf`, `cast_sig`, the receipt, status and refusal messages and signatures; the Merkle trees and the 5-leaf proofs; the proposal, extension, rows and results documents and their signatures; the twelve Ed25519 cases in the vault's verifier, and in the app's if it verifies. A copied vector that stops matching is a stop-and-report item (BALLOT-PROTOCOL §11).
+- **Feature:** a build without `vote`: `vote.*` from a service is answered `unsupported_type` and audited, a `vote.*` request of the app is `unsupported_type`, no `features.vote` entry exists and `profile.update` carries no `features`. With it, existing vectors are unchanged. `profile.update` to a service carries `["vote"]`, to a person nothing; a vault that gains the feature in a release sends it once to each active service connection with the next `version`.
+- **Proposal:** every refusal of §10.19.4 steps 1 to 8 (malformed, non-canonical bytes, duplicate names, a `service` that is not the connection's, a bad signature, a small-order key, a bad tag or proof, a repeated and a different proposal, no service list, a bundle that fails, a timestamp after the message, a closed and an upcoming proposal); a person connection; the limits.
+- **Extension and close:** an extension in order and out of order, a total over 24 h, an anchor after the close it extends, a repeat; `vote.closed` for an unknown proposal, and one before `closes_at` (the vote stays open, casting works, the check is due at the close).
+- **State liveness:** a key missing from a merely re-confirmed service list and a bundle failing only against the pinned roots stay `checking` with the right `reason`; a positive anchor failure is `rejected` and listed with a feed item; a person connection's `vote.*` is `unsupported_type`; `cannot_cast` for a site mismatch and a pending restore status, but **not** for an unreachable or silent site (a cast goes through with `site` `unreachable` or `not_listed` and is compared later); a pending rotation statement is sent before the ballot; eviction keeps the compact record (ballot, receipt, refusals, `ik`) and never evicts an open, `checking`, `failed`, `conflict`, `disputed`, `rejected`, mismatched or `unpublished` proposal; `vote.evidence` of an evicted proposal; a private variant never uploaded: `not_listed` from an answering site after 10 minutes raises `vote.problem`, after the close it is `unpublished`; a same-id variant on the site after a cast changes no ballot state and raises the post-cast text.
+- **Cast:** each refusal of §10.19.5 in order; a repeat; `already_voted`; the ballot flushed before it is sent (a crash between them sends the stored bytes after the restart); a new inner `id` with an identical body; each verified refusal code (a `closed` refusal with an unanswered earlier send is not final; a later receipt wins; sending stops at the close and `vote.status` takes over); `bad_ballot` after a rotation tried once more; an unsigned refusal as no answer; a `vote.status` refusal with `request_hash = H(proposal_id)` and a status answer without a ballot (`H("")`); a failing receipt; `already_voted` with the vault's own ballot and with another; a lost answer recovered by `vote.status`; held and locked; the seed of `vk` gone after the receipt; no audit entry, feed item, event or log line contains a `choice_id`.
+- **Results:** every row of §10.19.6's table, a wrong `rows_root`, a changed proposal, a missing extension, a results bundle by an unlisted key, a `results_hash` mismatch (evidence only), `row_proof.index` or `tree_size` unlike the `record_proof`'s, `gave_up`.
+- **App API:** `forbidden` to a desktop and an agent; `owner_check_required` while held; `unsupported_type` without the feature; paging; `reconnect` for a person connection that is a listed service, and nothing before a list; the state after a transfer; **`vote.release`:** refused (`bad_request`) for a non-problem record, an in-progress record and an open proposal; `evidence_not_exported` before an export and again after a later change to the record; `bad_pin`, `backoff` and `utk_invalid` as `audit.export`; the `vote.released` audit entry (and no choice in it); an export after the release still holds the variant, the site copy, every status answer and the other ballot (`released: true`); the problem count goes down and new proposals are kept again.
+- **End to end on staging:** a test proposal reaches an eligible member and not a vault that has not advertised; a ballot is recorded and its receipt held; the results check passes; a member with a connection from before `peer_kind` is told to reconnect.
+
 ## 11. Enrollment and unlock (alternate channel)
 
 ### 11.1 Path and routing
@@ -15616,6 +16057,16 @@ recorded in the build's measurements:
   it `push.register` is answered `unavailable` (§14.1);
 - (0.26.0) `features`, the optional features the image registers
   ("Feature allowlist" below);
+- (0.81.0, §10.19; item 5.4 of MEMBER-SERVICE-PLAN fixes the values)
+  `vote_site_key` and `vote_trust_roots`, **present exactly when
+  `features` lists `vote`** and a placeholder in neither: the Ed25519
+  public key (base64 of 32 bytes) with which votes.vettid.org signs its
+  service list (BALLOT-PROTOCOL §3.3), and the Sigstore trusted roots
+  (the Rekor log and timestamp authority of BALLOT-PROTOCOL §8.5
+  "Rekor profile") against which a vote's anchors verify, as an array,
+  newest last: earlier roots are kept so that older bundles still
+  verify. They are in the tagged channel file, in the reproducible
+  build and in PCR0, and a channel has its own;
 - (0.28.0, release C2; approved by the owner 2026-10-12) `calls_url`,
   the calling service's credential issuer (§10.10 "Servers and
   credentials"; CALLING-SERVICE §5): `https://calls.staging.vettid.org`
@@ -15702,7 +16153,8 @@ production manifest keys and URL.
 0.26.0 every image registered every feature of §10, whether an app used
 it or not. From 0.26.0 a channel file carries `features`, the list of
 the **optional** features its images register. The names are the
-feature packages' own (vettid-vault `features/<name>`):
+feature packages' own (vettid-vault `features/<name>`); (0.81.0) there
+are **eight**:
 
 | Feature | Its types | Section | A connection can send it |
 |---|---|---|---|
@@ -15712,6 +16164,7 @@ feature packages' own (vettid-vault `features/<name>`):
 | `leash` | `leash.*`, `agent.request` | §10.11 | nothing (apps, desktops and agents only) |
 | `location` | `location.*` | §10.16 | `location.update`, `.shared`, `.stopped`, `.requested`, `.snapshot` |
 | `presence` | `presence.*` | §10.17 | `presence.ping`, `.pong` |
+| `vote` (0.81.0) | `vote.*` | §10.19, §6.4 | from a connection of kind `service` only: `vote.proposal`, `.extended`, `.closed` |
 | `wallet` | `wallet.*` | §10.18 | nothing directly (only through `actions`) |
 
 The last column is what a connection may send today to a vault whose
@@ -15723,7 +16176,7 @@ list**: `audit`, `feed`, `messaging`, `credential`, `items`, `grants`,
 itself (lifecycle, sessions, devices, connections, settings, the
 account, push). The v1 app uses all of them.
 
-- **The file.** `features` is an array of zero or more of the seven
+- **The file.** `features` is an array of zero or more of the eight
   names, each at most once, in ascending byte order, so that one set has
   one file. It is embedded with the rest of the channel file: the list
   is in the tagged tree, in the reproducible build and in PCR0.
@@ -15750,7 +16203,11 @@ account, push). The v1 app uses all of them.
     `settings.get` is unchanged.
 - **No list in the protocol.** No message carries a list of features or
   types today, and 0.26.0 adds none: an app or a peer learns that a
-  feature is absent from `unsupported_type`. (0.28.0) For calls that is
+  feature is absent from `unsupported_type`. (0.81.0) The one exception
+  is a vault's own statement to a **service**: its `profile.update`
+  names the peer-facing features it registers (today `vote`, §10.8).
+  It answers no question; a service needs it before any message can
+  be sent (§10.19.1). (0.28.0) For calls that is
   the intended probe: a build with calls code sends one `call.list`
   after each unlock (CALLS-PLAN §12.5), and from release C2 the answer's
   `v` also tells it which call rules its vault has (§10.10 "Mixed
@@ -15772,13 +16229,13 @@ account, push). The v1 app uses all of them.
   every flush and move, and MUST NOT read, migrate or delete it.
 - **The release check** (`releasecfg check`, the release build's gate):
   1. `features` missing, not an array of strings, a placeholder, a name
-     that is not one of the seven (an always-registered feature's name
+     that is not one of the eight (an always-registered feature's name
      included), a repeated name or names out of order: malformed.
   2. Given the channel file of the channel's previous release (the
      release workflow reads it from the tag
      `release/<channel>/<N-1>`), a list that lacks one of that file's
      names: refused. A previous file from before 0.26.0 counts as
-     listing all seven. Production release 1 has no previous release. A
+     listing all seven that existed then (`vote` is not among them). Production release 1 has no previous release. A
      rebuild from the tag alone runs rule 1 only.
      (0.27.1, as built) "The previous release" is the **highest
      existing tag `release/<channel>/<m>` with m below N**, not
@@ -15806,12 +16263,14 @@ The initial lists:
 | `wallet` | on | **off** | No app code. Phase 4 |
 | `location` | on | **off** | No app code. Phase 5 |
 | `presence` | on | **off** | No app code. Phase 6 |
+| `vote` (0.81.0) | on, from release 25 | **off** | The staging service vault runs ballots (BALLOT-PROTOCOL); production has no service vault and no site or Rekor pins yet (item 5.4). Production adds it only after STAGING-DEVELOPMENT-PLAN §2.4 |
 | `actions`, `intro` | on | **off** | ANDROID-PLAN §4 lists shared actions and introductions among the later screens; the app sends no `action.*` or `intro.*`, and shows what arrives as "Not available in this version of the app" |
 
 So `staging.json` has `"features": ["actions", "calls", "intro",
 "leash", "location", "presence", "wallet"]`, which is what S1–S9
 registered (S10 changes no behaviour), and `prod.json` has
-`"features": []`.
+`"features": []`. (0.81.0) Staging release 25 adds `vote` (in order,
+after `presence`), with `vote_site_key` and `vote_trust_roots`.
 
 Not switched by this list: pairing a desktop and its access sessions
 (§6.7, §6.8) are core operations with no feature package. They stay
@@ -15925,7 +16384,9 @@ build (IOS-PLAN §5), `apple-app-site-association` on each account host
 - `releasecfg`: every refusal of rule 1 for `features`; rule 2 both ways
   (a name dropped is refused, a name added passes), with a previous file
   from before 0.26.0; `android_package` missing, a placeholder, another
-  channel's value; the committed files (staging: seven names and
+  channel's value; (0.81.0) `vote_site_key` and `vote_trust_roots` present
+  exactly with `vote`, and a placeholder or an unparseable value refused;
+  the committed files (staging: eight names from release 25, seven before, and
   `com.vettid.app.staging`; production: none and `com.vettid.app`).
   (0.27.0) `android_signers` entries: §11.7.1's tests. (0.37.0)
   `ios_app_id` likewise: missing, a placeholder, another channel's
@@ -23738,6 +24199,99 @@ Follow-ups:
     the supersede path once vettid-vault supports it), and the apps
     (ANDROID-PLAN 0.1.101, IOS-PLAN 0.1.51).
 
+48. **Votes: a member's vault takes part in the ballot protocol (0.81.0;
+    owner decision 2026-10-30, ANDROID-PLAN 0.1.102, IOS-PLAN 0.1.52;
+    BALLOT-PROTOCOL 0.11.1, vettid/service-vault `dc6a4d2`, MEMBER-SERVICE-PLAN
+    §10 item 5.1).** The staging service vault publishes proposals,
+    counts ballots and publishes results; this is the member side.
+    Staging vault release 25 waits for it. What is specified: §6.4
+    registers the five vote types on a service connection, both ways,
+    with their bodies, answers and refusals, and the transition rule
+    (`unsupported_type` instead of a silent drop for a vault without the
+    feature); §10.8 the `features` member of `profile.update`; §10.19 the
+    checks before a proposal, extension or result is shown, the vote
+    record, the cast, sending again and the receipt, `vote.status`, the
+    results check, the reminders and the app API; §11.10.8 the `vote`
+    feature and its release constants; §16 the vectors. *Decisions
+    for the owner* (each with a recommendation; they take effect on
+    the owner's approval of this revision):
+    1. **How a vault advertises the feature: `features` in `profile.update`
+       to a service connection.** Recommended. The profile is the one
+       existing statement a vault makes to a connection about itself, the
+       service holds the last one whatever the vault's lock state, and
+       eligibility must be known at `record_at`, before any message.
+       *Not chosen:* a probe by `unsupported_type` (a locked vault cannot
+       answer, so a locked member would be left off the roster, and it
+       needs a new probe message); a release capability (§11.10.9, which
+       the app reads, never a peer); a `peer_kind` value (the kind is
+       fixed at connect and means a limit, not a feature).
+    2. **`vote` is an eighth optional feature** (§11.10.8) with its own
+       allowlist entry, on staging from release 25.
+    3. **Production release 1 does not list `vote`.** Recommended: it
+       lists nothing today; a production vote waits for the staging
+       rehearsal of STAGING-DEVELOPMENT-PLAN §2.4 and the site and Rekor
+       pins (item 5.4).
+    4. **Desktops and agents get no vote access** (`forbidden`), and so
+       no `sync.event` kind is added. Recommended: a vote is the
+       member's own act on the phone that holds the credential; "ask only
+       for what is used now".
+    5. **A vote does not count in the approvals indicator.** Recommended: it
+       lives days; it has its own count on its screen and the vault's
+       `vote.open`, `vote.closing` reminders.
+    6. **A proposal the vault cannot yet check is shown, as "being
+       checked" with its reason,** and cannot be voted on. Recommended
+       over hiding it (no silent failure).
+    7. **A signed `not_eligible` is shown to the member** as "The service
+       says you are not on the list for this vote", with the evidence
+       exportable.
+    8. **One person with several accounts: nothing is said.** The vault
+       cannot know; the organisation sees it in its roster.
+    9. **Connections made before the service sent `peer_kind`:** the vault
+       lists, from the VettID service list, which person connections are
+       services (`reconnect`), so the app can tell the member to connect
+       again. The kind is not changed. Recommended; the alternative (the
+       service vault upgrades the old connections) is refused by
+       decision 43.
+    10. **Retention and bounds** (§10.19.2): records kept 365 days after
+        the close, 128 proposals per vault and 32 per connection (16 not
+        closed), deleted by age only; the seed of the voting key erased
+        at the receipt, or at the close for a proposal never cast.
+        The cap of 16 unreleased problem records per connection is a
+        choice: a misbehaving service can block its own members from
+        receiving new votes (within BALLOT-PROTOCOL §1 and §9.2), and the
+        app names the service as the cause; the member releases a
+        record after saving its proof (`vote.release`).
+        (Decisions 1 to 10 and A to E were accepted by the owner on
+        2026-10-30, as recommended.)
+    *Choices of this section where BALLOT-PROTOCOL is silent* (questions
+    for claude-services, the service vault's author; **(a), (d), (e)
+    and (g) are answered by the service code**): (a) the answer to
+    `vote.proposal`, `vote.extended` and `vote.closed` is `{proposal_id}`
+    (answered: today's service ignores vault answers to them);
+    (b) the proposal's bounds: title 1-200 bytes, text at most 16,384,
+    label 1-200, `quorum.text` 0-1,024, `outage_rule` at most 1,024, 3 to
+    17 choices, `min_ballots` at least 0, decoded proposal at most 64
+    KiB (the service enforces the same bounds before it signs, from
+    release 25); (c) the anchor timestamp is at most 5 minutes after the
+    relay's time of the proposal; (d) `results_hash` is `H(results.json
+    bytes)` (answered: the service sends `sum(results)`); (e) the
+    `vote.status` answer carries `proposal_sig` and `bundle` as well as
+    the proposal, `record_secret` and `record_proof` (answered by
+    service-vault `statusBody`; BALLOT-PROTOCOL §4.2 is to be corrected
+    to say so), and the site's index and documents are VOTES-SITE 0.2.2
+    §3; (f) a `bad_ballot` after a credential-key rotation is tried once
+    more after a status check (this section; the service need not
+    change); (g) the retry schedule (answered: the service needs none,
+    it is idempotent); (h) the service reads `features` from the last
+    `profile.update` it holds at `record_at`; (i) §16 has no anchor
+    bundle vector though BALLOT-PROTOCOL §11 item 3 promises one.
+    **Needs:** a staging vault release (25: `features/vote`, the
+    `features` member of `profile.update`, the release constants
+    `vote_site_key` and `vote_trust_roots`), the service vault reading
+    `features` (its roster now counts every active connection), the site
+    pins of item 5.4, and the apps (ANDROID-PLAN 0.1.102, IOS-PLAN
+    0.1.52).
+
 ## 16. Test vectors
 
 These vectors use fixed seeds and are for **test use only**. The complete
@@ -24284,6 +24838,117 @@ version 7, per_tx 500000, per_period 2000000
 version 7, per_tx none, per_period 2000000
   payload_sha256 (hex)       : 7bcbbf3d027952bb1a7cbafba930b385732185b8f61d4b15218a8ee7a32d58ae
 ```
+
+**§10.19 votes (0.81.0).** Copied from vettid/service-vault `vote/testdata/vectors.json` at `dc6a4d2` (main, 2026-10-30; BALLOT-PROTOCOL 0.11.1 §11), where the reference implementation generates them and the file is authoritative. The values are for test use only. All signatures are Ed25519 over `label ‖ message`, the label ending in its own `0x00` byte (`suite.Sign`, §4.1); `lp(x)` is a 16-bit big-endian length and `x`; values shown as hex are raw bytes, and on the wire (§6.4) they are standard base64. A vector that stops matching is a stop-and-report item (BALLOT-PROTOCOL §11). Checked independently against this text when it was copied: every line of the first block reproduces from its inputs.
+
+```
+ballot, receipt, status answer, refusal                       (vectors.json, top level)
+  proposal_id        : 01JBQZ0000000000000000000A
+  proposal_hash      : 92112ce9ce0bf9707bffe672958ccf5e039e66b6b93d2697078f98283a44af81
+  record_secret      : 9aa9db2fd2ea84364e930cd5d4e2543ab312bfdca4cc98d413b3300b3954557c
+  record_tag         : dca5778748aa1ef9d0aa9c87d93e4e6a4e4391c620136dbfe22485aa55eb0c18
+      = SHA-256("vettid/vote/1/record\x00" || proposal_id || record_secret)
+  vk seed / vk       : 8c1e30135eb232fe567368944b7f5c2b667dc31fbea28f64217b4f45f1c01625
+                       05bcc4b66fad3a6fb7cd5b3e6567a56d4962d7680e1cba87bee0dc3aa2f85462
+  choice_id          : yes
+  ballot_msg         : 92112ce9ce0bf9707bffe672958ccf5e039e66b6b93d2697078f98283a44af81dca5778748aa1ef9d0aa9c87d93e4e6a4e4391c620136dbfe22485aa55eb0c180003796573
+      = proposal_hash || record_tag || lp(choice_id)
+  ballot_sig         : 05023182471e3b618bc145ebee16a6ac36ade9ac58d5dc7fef861ec05b561d17042e3939f29f099326a36898c4462e37d0af7f9c0be908478a24003db49ea209
+      = Sign(vk, "vettid/vote/1/ballot\x00", ballot_msg)
+  ballot_leaf        : dca5778748aa1ef9d0aa9c87d93e4e6a4e4391c620136dbfe22485aa55eb0c18002005bcc4b66fad3a6fb7cd5b3e6567a56d4962d7680e1cba87bee0dc3aa2f854620003796573004005023182471e3b618bc145ebee16a6ac36ade9ac58d5dc7fef861ec05b561d17042e3939f29f099326a36898c4462e37d0af7f9c0be908478a24003db49ea209
+      = record_tag || lp(vk) || lp(choice_id) || lp(ballot_sig)
+  credential seed    : 89f45a3990ae6049dd118147f85d0bd1fedf130a952db27048169b6a496b93c7
+  credential key     : 884b9988fa4ac36b9cbacf96c62fa3222ffc95e199f3ab3f49d4191687d0c9d1
+  cast_msg           : 92112ce9ce0bf9707bffe672958ccf5e039e66b6b93d2697078f98283a44af81ed563109bc754bda5910da94c4f3b0eabd3e02b2eff3feda11323c4b967ee7a1
+      = proposal_hash || SHA-256(ballot_leaf)
+  cast_sig           : 090e6e0c7bcfe1c1489d23348ada5b96bcee323a13e5db0fe70218bc01e11ffb8094fec94aba2d6b42bc161215279d263f59db3bb962df6659b1c65efe4a8f07
+      = Sign(credential key, "vettid/vote/1/cast\x00", cast_msg)
+  service seed / ik  : b3b71664ed7a8617e543f40a1330cc69739d978a9dc3f4f8f6c52367cdce0112
+                       0efc3ad47760ffb7935aad39d3e86288e939ff51bf44eea8cebc1dc27c62507d
+  msg_ms             : 1793606400123
+  receipt_msg        : 92112ce9ce0bf9707bffe672958ccf5e039e66b6b93d2697078f98283a44af81ed563109bc754bda5910da94c4f3b0eabd3e02b2eff3feda11323c4b967ee7a1000001a19b45b87b
+      = proposal_hash || SHA-256(ballot_leaf) || u64(msg_ms)
+  receipt_sig        : 55dacbc0edfcaac33183cff6485b148a3e8ec2091a4fa01d33a2a49d1650bea05777c8cb7edee1931782eb5dc56f193c7aaacd5da575a317d1a4f2475da51302
+      = Sign(service ik, "vettid/vote/1/receipt\x00", receipt_msg)
+  status_msg         : 001a30314a42515a30303030303030303030303030303030303030410020dca5778748aa1ef9d0aa9c87d93e4e6a4e4391c620136dbfe22485aa55eb0c18ed563109bc754bda5910da94c4f3b0eabd3e02b2eff3feda11323c4b967ee7a1
+      = lp(proposal_id) || lp(record_tag) || SHA-256(ballot_leaf)
+  status_sig         : 98cfc141d7bfc59b2a60649204a28d46c65af06793b122700291760964e4748648fd6693c45a36f4380185ba6aadeebc4f9653f15f42377231452c7c48be1b0c
+      = Sign(service ik, "vettid/vote/1/status\x00", status_msg)
+  refusal (vote.cast, bad_ballot):
+    connection       : e7e7f6c3b8c4136035989a5d9406ecdacf3d7de70cecbca7e2800570769304f6   (SHA-256 of the member vault's ik on the connection)
+    request_hash     : ed563109bc754bda5910da94c4f3b0eabd3e02b2eff3feda11323c4b967ee7a1   (= SHA-256(ballot_leaf))
+    msg              : 001a30314a42515a30303030303030303030303030303030303030410020e7e7f6c3b8c4136035989a5d9406ecdacf3d7de70cecbca7e2800570769304f60020dca5778748aa1ef9d0aa9c87d93e4e6a4e4391c620136dbfe22485aa55eb0c180009766f74652e63617374000a6261645f62616c6c6f74000001a19b45b87bed563109bc754bda5910da94c4f3b0eabd3e02b2eff3feda11323c4b967ee7a1
+      = lp(proposal_id) || lp(connection) || lp(record_tag) || lp(type) || lp(code) || u64(msg_ms) || request_hash
+    sig              : 9480698e22ff68dab36fd6f1a1ff70527e75ceb79236325dbfa3c31d8d4562c962e00aaa703369adb1ee95963ff4c20f1de25029da532f5956f246799be50602
+      = Sign(service ik, "vettid/vote/1/refusal\x00", msg)
+
+Merkle trees (RFC 6962 §2.1, SHA-256; leaves are the bytes shown)  (vectors.json, merkle)
+  0 leaves []: root e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+  1 leaves [61]: root 022a6979e6dab7aa5ae4c3e5e45f7e977112a7e63593820dbec1ec738a24f93c
+  2 leaves [61 62]: root b137985ff484fb600db93107c77b0365c80d78f5b429ded0fd97361d077999eb
+  3 leaves [61 62 63]: root 36642e73c2540ab121e3a6bf9545b0a24982cd830eb13d3cd19de3ce6c021ec1
+  5 leaves [61 62 63 64 65]: root fe14a5426fbd70c0fa73f52342afed0da0bd23c4838662ccf6b88a3070ead97b
+    proof for leaf 0: [57eb35615d47f34ec714cacdf5fd74608a5e8e102724e80b24b287c0c27b6a31, dbbd68c325614a73dacb4e7a87a2b7b4ae9724b489e5629ee83151fe8f0eafd7, 2824a7ccda2caa720c85c9fba1e8b5b735eecfdb03878e4f8dfe6c3625030bc4]
+    proof for leaf 1: [022a6979e6dab7aa5ae4c3e5e45f7e977112a7e63593820dbec1ec738a24f93c, dbbd68c325614a73dacb4e7a87a2b7b4ae9724b489e5629ee83151fe8f0eafd7, 2824a7ccda2caa720c85c9fba1e8b5b735eecfdb03878e4f8dfe6c3625030bc4]
+    proof for leaf 2: [d070dc5b8da9aea7dc0f5ad4c29d89965200059c9a0ceca3abd5da2492dcb71d, b137985ff484fb600db93107c77b0365c80d78f5b429ded0fd97361d077999eb, 2824a7ccda2caa720c85c9fba1e8b5b735eecfdb03878e4f8dfe6c3625030bc4]
+    proof for leaf 3: [597fcb31282d34654c200d3418fca5705c648ebf326ec73d8ddef11841f876d8, b137985ff484fb600db93107c77b0365c80d78f5b429ded0fd97361d077999eb, 2824a7ccda2caa720c85c9fba1e8b5b735eecfdb03878e4f8dfe6c3625030bc4]
+    proof for leaf 4: [33376a3bd63e9993708a84ddfe6c28ae58b83505dd1fed711bd924ec5a6239f0]
+  8 leaves [61 62 63 64 65 66 67 68]: root a5dac6b1ff1dca13dcf9423dcbf1bbb4dbce7e8cbf7f4c014cf40c6c8171a2bd
+
+Ed25519 verification, BALLOT-PROTOCOL §2 steps 1 to 4              (vectors.json, ed25519)
+  valid                          valid=true  key 05bcc4b66fad3a6fb7cd5b3e6567a56d4962d7680e1cba87bee0dc3aa2f85462
+      msg 92112ce9ce0bf9707bffe672958ccf5e039e66b6b93d2697078f98283a44af81dca5778748aa1ef9d0aa9c87d93e4e6a4e4391c620136dbfe22485aa55eb0c180003796573
+      sig 05023182471e3b618bc145ebee16a6ac36ade9ac58d5dc7fef861ec05b561d17042e3939f29f099326a36898c4462e37d0af7f9c0be908478a24003db49ea209
+  small-order key and R 0        valid=false key 0000000000000000000000000000000000000000000000000000000000000000
+      msg 92112ce9ce0bf9707bffe672958ccf5e039e66b6b93d2697078f98283a44af81dca5778748aa1ef9d0aa9c87d93e4e6a4e4391c620136dbfe22485aa55eb0c18000379657305
+      sig 01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+  small-order key and R 1        valid=false key 0000000000000000000000000000000000000000000000000000000000000080
+      msg 92112ce9ce0bf9707bffe672958ccf5e039e66b6b93d2697078f98283a44af81dca5778748aa1ef9d0aa9c87d93e4e6a4e4391c620136dbfe22485aa55eb0c18000379657300
+      sig 01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+  small-order key and R 2        valid=false key 0100000000000000000000000000000000000000000000000000000000000000
+      msg 92112ce9ce0bf9707bffe672958ccf5e039e66b6b93d2697078f98283a44af81dca5778748aa1ef9d0aa9c87d93e4e6a4e4391c620136dbfe22485aa55eb0c18000379657300
+      sig 01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+  small-order key and R 3        valid=false key 26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05
+      msg 92112ce9ce0bf9707bffe672958ccf5e039e66b6b93d2697078f98283a44af81dca5778748aa1ef9d0aa9c87d93e4e6a4e4391c620136dbfe22485aa55eb0c18000379657311
+      sig 01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+  small-order key and R 4        valid=false key 26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85
+      msg 92112ce9ce0bf9707bffe672958ccf5e039e66b6b93d2697078f98283a44af81dca5778748aa1ef9d0aa9c87d93e4e6a4e4391c620136dbfe22485aa55eb0c18000379657306
+      sig 01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+  small-order key and R 5        valid=false key c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a
+      msg 92112ce9ce0bf9707bffe672958ccf5e039e66b6b93d2697078f98283a44af81dca5778748aa1ef9d0aa9c87d93e4e6a4e4391c620136dbfe22485aa55eb0c1800037965730a
+      sig 01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+  small-order key and R 6        valid=false key c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa
+      msg 92112ce9ce0bf9707bffe672958ccf5e039e66b6b93d2697078f98283a44af81dca5778748aa1ef9d0aa9c87d93e4e6a4e4391c620136dbfe22485aa55eb0c1800037965730f
+      sig 01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+  small-order key and R 7        valid=false key ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f
+      msg 92112ce9ce0bf9707bffe672958ccf5e039e66b6b93d2697078f98283a44af81dca5778748aa1ef9d0aa9c87d93e4e6a4e4391c620136dbfe22485aa55eb0c18000379657300
+      sig 01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+  key with y not below p         valid=false key eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f
+      msg 92112ce9ce0bf9707bffe672958ccf5e039e66b6b93d2697078f98283a44af81dca5778748aa1ef9d0aa9c87d93e4e6a4e4391c620136dbfe22485aa55eb0c18000379657300
+      sig 01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+  key with x = 0 and the sign bit valid=false key 0100000000000000000000000000000000000000000000000000000000000080
+      msg 92112ce9ce0bf9707bffe672958ccf5e039e66b6b93d2697078f98283a44af81dca5778748aa1ef9d0aa9c87d93e4e6a4e4391c620136dbfe22485aa55eb0c18000379657300
+      sig 01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+  S not below L                  valid=false key 05bcc4b66fad3a6fb7cd5b3e6567a56d4962d7680e1cba87bee0dc3aa2f85462
+      msg 92112ce9ce0bf9707bffe672958ccf5e039e66b6b93d2697078f98283a44af81dca5778748aa1ef9d0aa9c87d93e4e6a4e4391c620136dbfe22485aa55eb0c180003796573
+      sig 05023182471e3b618bc145ebee16a6ac36ade9ac58d5dc7fef861ec05b561d17f1012f960c031cebfc3f603ba3400d4cd0af7f9c0be908478a24003db49ea219
+
+documents (JCS bytes, as the exact strings)                       (vectors.json, documents)
+  service seed       : 9c0db9489030b1b49576f698ed3c78d3408ac66601225c2c06e3c8822a6cb7c5
+  proposal           : {"binding":false,"choices":[{"id":"yes","label":"Yes"},{"id":"no","label":"No"},{"id":"abstain","label":"Abstain"}],"closes_at":1793779200,"eligible":3,"opens_at":1793520000,"outage_rule":"Extended by a relay outage over 1 hour, 24 h at most.","proposal_id":"01JBQZ0000000000000000000A","quorum":{"min_ballots":1,"text":"A third of the members"},"record_at":1793500000,"record_root":"qQUTrr2AV0249g+RVK3BoG1+fKW7liXjAALQFgd7FSQ=","removed_may_vote":false,"service":"B9RIoRPFY3i/sbHrc4RKnQKnNAsEJtLcgP3isU6gUPQ=","text":"The budget as circulated on 1 November.","title":"Adopt the 2027 budget","v":1}
+  proposal_sig       : aae5643d744353b11bf53c41ffd53faca97c202209dcb7265b45f93037acda226609d5f9d9ce722e08e3d048da8c82b650e4469478e51cf78cb291e1719a5609
+      = Sign(service ik, "vettid/vote/1/proposal\x00", SHA-256(proposal))
+  extension          : {"closes_at":1793786400,"n":1,"outage":{"from":1793773800,"source":"https://status.vettid.org/","to":1793777400},"proposal_id":"01JBQZ0000000000000000000A","v":1}
+  extension_sig      : 5d4fbf40e9d38b0ba71a3628f83073596a8ba928c0cfbc3f40458825bf59c02170ce7055ca8b2caaea35aa69447483308eac04ff300cf879f17bbc743f571408
+      = Sign(service ik, "vettid/vote/1/extended\x00", proposal_hash || SHA-256(extension))
+  rows               : {"proposal_id":"01JBQZ0000000000000000000A","rows":[{"ballot":{"ballot_sig":"yas9XYEWebUW7C1brIQtCIlx6IOgSJo8y9V9oVE7NRHKPgH5VOgTaQahyi1vLm3L/Vv18oKdPIa3HK65uDMoBg==","choice_id":"yes","vk":"82xjoLAtd++pcsOhsIZdOSR9vYTf/C9GapTbrkT3Z+c="},"record_tag":"C84TLypIjROQ7K7jeg59uszFWPoHMA6Ca0fm5tso1ZI="},{"ballot":{"ballot_sig":"HyA6dID5GhQgnEnw4K+N4US69K5a/Yesh42t0G9HzYiMA7YK7Dss0sC2zWcMy7TI/tyUq+9WTo3UUW3gZRFyBw==","choice_id":"no","vk":"jGPIqZHfFrsWJcNx3mWiUF2DTlHgcayRWlLj6WfYf64="},"record_tag":"ZkN1QHDa7CqSiRoXxL6qMTdrpGSJh5n2a42bAx9WDlg="},{"ballot":null,"record_tag":"psIVT5ZQNTitKklxk2O7kOsVpMprH29lq7Jnm3SE3mk="}],"v":1}
+  results            : {"counts":{"ballots":2,"eligible":3,"removed":1,"unhandled":0},"extensions":[{"doc":"eyJjbG9zZXNfYXQiOjE3OTM3ODY0MDAsIm4iOjEsIm91dGFnZSI6eyJmcm9tIjoxNzkzNzczODAwLCJzb3VyY2UiOiJodHRwczovL3N0YXR1cy52ZXR0aWQub3JnLyIsInRvIjoxNzkzNzc3NDAwfSwicHJvcG9zYWxfaWQiOiIwMUpCUVowMDAwMDAwMDAwMDAwMDAwMDAwQSIsInYiOjF9","sig":"XU+/QOnTiwunGjYo+DBzWWqLqSjAz7w/QEWIJb9ZwCFwznBVyossquo1qmlEdIMwjqwE/zAM+Hnxe7x0P1cUCA=="}],"proposal":{"doc":"eyJiaW5kaW5nIjpmYWxzZSwiY2hvaWNlcyI6W3siaWQiOiJ5ZXMiLCJsYWJlbCI6IlllcyJ9LHsiaWQiOiJubyIsImxhYmVsIjoiTm8ifSx7ImlkIjoiYWJzdGFpbiIsImxhYmVsIjoiQWJzdGFpbiJ9XSwiY2xvc2VzX2F0IjoxNzkzNzc5MjAwLCJlbGlnaWJsZSI6Mywib3BlbnNfYXQiOjE3OTM1MjAwMDAsIm91dGFnZV9ydWxlIjoiRXh0ZW5kZWQgYnkgYSByZWxheSBvdXRhZ2Ugb3ZlciAxIGhvdXIsIDI0IGggYXQgbW9zdC4iLCJwcm9wb3NhbF9pZCI6IjAxSkJRWjAwMDAwMDAwMDAwMDAwMDAwMDBBIiwicXVvcnVtIjp7Im1pbl9iYWxsb3RzIjoxLCJ0ZXh0IjoiQSB0aGlyZCBvZiB0aGUgbWVtYmVycyJ9LCJyZWNvcmRfYXQiOjE3OTM1MDAwMDAsInJlY29yZF9yb290IjoicVFVVHJyMkFWMDI0OWcrUlZLM0JvRzErZktXN2xpWGpBQUxRRmdkN0ZTUT0iLCJyZW1vdmVkX21heV92b3RlIjpmYWxzZSwic2VydmljZSI6IkI5UklvUlBGWTNpL3NiSHJjNFJLblFLbk5Bc0VKdExjZ1AzaXNVNmdVUFE9IiwidGV4dCI6IlRoZSBidWRnZXQgYXMgY2lyY3VsYXRlZCBvbiAxIE5vdmVtYmVyLiIsInRpdGxlIjoiQWRvcHQgdGhlIDIwMjcgYnVkZ2V0IiwidiI6MX0=","sig":"quVkPXRDU7Eb9TxB/9U/rKl8ICIJ3LcmW0X5MDes2iJmCdX52c5yLgjj0EjajIK2UORGlHjlHPeMspHhcZpWCQ=="},"proposal_id":"01JBQZ0000000000000000000A","rows_hash":"R9qL4LcUTjt9PkVMOmjstcLyi0yzRPgGSELRMgo2D9o=","rows_root":"/1tuE6hryKBgwRbmgURaOPynjZ+fHGydyGSP2N1rnzg=","tally":{"abstain":0,"no":1,"yes":1},"v":1}
+  results_sig        : 7bae65bbfe0b4f7147e2c0ce80b2c892ed0e15966bfc7c7e2e232f3624c1e560c489ea51a074ca0c8f66d6f30d5b6157d109301a5c8f2a5bb17b5e7a16aa2e04
+      = Sign(service ik, "vettid/vote/1/results\x00", proposal_hash || SHA-256(results))
+```
+
+The document vectors carry their own `proposal_hash` (the SHA-256 of `proposal`, which differs from the ballot vectors' value above); the vectors file has no anchor bundle yet (§15 item 48, question (i)). The `features` member of §10.8 is the JSON `"features": ["vote"]`.
+
 
 ## 17. Changelog
 

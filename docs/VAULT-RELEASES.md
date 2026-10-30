@@ -816,7 +816,7 @@ whose value is recorded in `measurements.json`):
 | `android_signers` | 1 to 4 entries `{"digest": "<SHA-256 of a signing certificate, 64 lowercase hex>", "class": "vettid" \| "google_play" \| "development"}` (0.1.12; a bare list of digests before) | owner decision O8 as amended 2026-10-11 |
 | `android_package` (0.1.11) | `com.vettid.app` (staging: `com.vettid.app.staging`) | VAULT-MESSAGING 0.26.0 §11.10.8, "Android package"; STAGING-DEVELOPMENT-PLAN D5 |
 | `ios_app_id` (0.1.31) | `3X25CJ86MV.com.vettid.app` (staging: `3X25CJ86MV.com.vettid.app.staging`); team ID confirmed by the owner 2026-10-17 | VAULT-MESSAGING 0.37.0 §11.10.8, "iOS App ID"; IOS-PLAN §9.1 VA2 |
-| `features` (0.1.11) | the optional features the image registers: none in release 1 (staging: all seven) | VAULT-MESSAGING 0.26.0 §11.10.8, "Feature allowlist"; STAGING-DEVELOPMENT-PLAN D4 |
+| `features` (0.1.11) | the optional features the image registers: none in release 1 (staging: all eight from release 25, seven before) | VAULT-MESSAGING 0.26.0 §11.10.8, "Feature allowlist"; STAGING-DEVELOPMENT-PLAN D4 |
 | `relay_url` | `https://relay.vettid.org` | |
 | `calls_url` (0.1.19; planned for staging "release C2"; approved by the owner 2026-10-12) | absent (staging: `https://calls.staging.vettid.org`) | VAULT-MESSAGING 0.28.0 §11.10.8; CALLING-SERVICE 0.2.0 §5; CALLS-PLAN D4 |
 | `recovery_counter` (0.1.28, release R) | `{bucket, account, region}` of production's counter bucket (§8.2); staging: its own bucket in the staging account | VAULT-MESSAGING 0.33.0 §11.14.4; VAULT-HOST-PROTOCOL §8.1 |

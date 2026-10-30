@@ -1,9 +1,19 @@
 ---
 title: IOS-PLAN
 status: approved (owner, 2026-10-17)
-version: 0.1.51
+version: 0.1.52
 date: 2026-10-30
 changelog:
+  - 0.1.52: owner decision of 2026-10-30 (VAULT-MESSAGING 0.81.0, §15
+    item 48; ANDROID-PLAN 0.1.102). New §4.16 "Votes": the same as
+    ANDROID-PLAN §4 "Votes (0.1.102)" (the Votes entry only when there
+    is a vote or a service to reconnect; the vote screen with the service's
+    words as plain text, the fixed disclosure, no "secret", no "counted"
+    before the vault's results check; states in words; the unlock prompt;
+    "Save the proof"; "Connect again to vote"), with the iOS differences
+    in §4.16 (VoiceOver, Dynamic Type, no push until the gateway has
+    APNs, the app-switcher snapshot). Texts as ANDROID-PLAN's
+    (approved by the owner, 2026-10-30). Vault: staging release 25
   - 0.1.51: owner decision of 2026-10-30 (VAULT-MESSAGING 0.80.0, §15
     item 47; ANDROID-PLAN 0.1.101). New §4.15 "Withdrawn requests": the
     same as ANDROID-PLAN §4 "Withdrawn requests (0.1.101)" (a
@@ -458,8 +468,8 @@ changelog:
     in §14 are drafts
 owner: Al Liebl (Mesmer)
 related:
-  - ANDROID-PLAN.md (0.1.101) — the Android app; this plan mirrors it
-  - VAULT-MESSAGING.md (0.80.0) — the app's contract with the vault
+  - ANDROID-PLAN.md (0.1.102) — the Android app; this plan mirrors it
+  - VAULT-MESSAGING.md (0.81.0) — the app's contract with the vault
   - PROTEAN-CREDENTIAL.md (0.1.3), VAULT-LOCK.md (0.1.2),
     ENROLLMENT-CODES.md (0.2.3), VAULT-ITEMS.md (0.1.2)
   - RELAY-PROTOCOL.md (0.9.4), MEMBER-API.md (2.7.1)
@@ -1606,6 +1616,48 @@ neutral style (no error colour, never "declined"); History shows
 `connection.authenticate.withdrawn` as "Request withdrawn" with "%@ withdrew
 this request before it was answered." Without the flag, the ask closes
 as today. Batches, the `not_found` rule and the "Mute requests from %@" offer (a secondary action, confirmed on a service connection), the late-flag switch and the progress wait are as ANDROID-PLAN's. Texts as ANDROID-PLAN's table (approved by the owner, 2026-10-30).
+
+### 4.16 Votes (0.1.52)
+
+*Owner decision of 2026-10-30 (VAULT-MESSAGING 0.81.0 §10.19, §15 item
+48). Texts approved by the owner, 2026-10-30. Not built.* The same as ANDROID-PLAN §4
+"Votes (0.1.102)": its screens, states, rules for what the app may say
+(**never "secret"**, never "counted" or "verified" before the vault's
+results check, the fixed disclosure "<service> will see how you vote and
+keep that record. The published results show only an anonymous code for
+you." before every cast), History titles, notification titles, tests and
+**texts** (its table, keys and wording, approved by the owner on 2026-10-30) are carried here by
+reference and are not to be changed on one platform alone. The Votes entry
+is shown in the sidebar only when the vault has a vote or a service to
+reconnect, and a vote is not in Messages, in the approvals indicator
+(§4.12) or in Approvals. On iOS:
+
+- The vote screen is a `List` with the choices as a single-selection
+  group (`.accessibilityAddTraits(.isSelected)`, the group labelled
+  "Choose one"); the proposal text is plain text (`Text(verbatim:)`),
+  with control and bidirectional-override characters removed; Dynamic
+  Type up to the accessibility sizes without clipping; the confirm
+  sheet takes VoiceOver focus on the fixed disclosure first.
+- The credential password prompt is the existing one (§4, the unlock
+  window), used before `vote.cast`.
+- **Notifications:** the feed items appear in the Notifications screen
+  and as local notifications while the app runs. System notifications
+  while the app is closed wait for the push gateway's APNs support
+  (PUSH-GATEWAY §11.2); until then a vote is seen when the member opens
+  the app, and the reminder `vote.closing` shows then (stated to the
+  owner in the PR).
+- **The site:** `URLSession` with an ephemeral configuration (no cookies,
+  no cache, no identifier), the same schedule as Android (at unlock, at
+  open, hourly while open and unlocked; no background refresh, because
+  a locked vault cannot be handed anything).
+- **Screen privacy** (ANDROID-PLAN decision A): iOS already covers the
+  app switcher and hides content while the screen is recorded
+  (ID10, §6.4). The vote screen, its confirm sheet and the evidence
+  screen join the `SecureWindow` list (the secure-text-field layer that
+  screenshots leave out) if the owner approves decision A; otherwise
+  only the cover and capture hiding apply.
+- "Save the proof" uses the share sheet with a file (`.json`), not a
+  copy to the pasteboard.
 
 ## 5. Architecture
 

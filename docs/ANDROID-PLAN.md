@@ -1,9 +1,26 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.101
+version: 0.1.102
 date: 2026-10-30
 changelog:
+  - 0.1.102: owner decision of 2026-10-30 (VAULT-MESSAGING 0.81.0, §15
+    item 48; BALLOT-PROTOCOL 0.11.1). New §4 "Votes (0.1.102)": a Votes
+    drawer entry (shown only when the vault answers `vote.list` and holds
+    a vote or a `reconnect` connection; not in Messages, not in Approvals
+    or its indicator), the vote screen (the service's words as plain
+    text, the choices in order, the fixed disclosure "<service> will see
+    how you vote and keep that record. The published results show only an
+    anonymous code for you.", "Your vote can't be changed", the existing
+    unlock prompt), states in words (sending, waiting, recorded, in the
+    results, unconfirmed, refused, conflict), results only after the
+    vault's check, "Save the proof", the restore confirmation, "Connect
+    again to vote" for service connections made before `peer_kind`,
+    notifications and History titles, accessibility and tests. The app
+    never says secret, counted before the check, or verified. The hourly
+    fetch of votes.vettid.org (no session) runs only while the app is
+    open and unlocked. Texts approved by the owner, 2026-10-30 (with decisions
+    A to E). Vault: staging release 25
   - 0.1.101: owner decision of 2026-10-30 (VAULT-MESSAGING 0.80.0, §15
     item 47; vettid.org #465). New §4 "Withdrawn requests (0.1.101)":
     when the challenger withdraws a sign-in or approval challenge, the
@@ -1206,14 +1223,14 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.80.0) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.81.0) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
   - CALLS-PLAN.md (0.1.3) — calls; video in C4 (§4, 0.1.42)
   - AGENT-PLAN.md (0.1.7) — the agent connector; §7.2 AA1–AA5 (§4
     "Devices & agents", 0.1.53)
-  - IOS-PLAN.md (0.1.51) — the iPhone app; §4.12 carries the approvals
+  - IOS-PLAN.md (0.1.52) — the iPhone app; §4.12 carries the approvals
     indicator (0.1.89)
 classification: public (no secrets; safe for github.com/vettid)
 ---
@@ -1307,7 +1324,8 @@ patterns:
 ## 4. Screens (v1)
 
 **Drawer** (0.1.11, owner decisions of 2026-10-07): Messages ·
-Connections · Approvals (badge) · Vault · History · Settings · Help —
+Connections · Approvals (badge) · Votes (0.1.102, only when there is
+one, §4 "Votes") · Vault · History · Settings · Help —
 later: Calls, Devices & agents, Shared actions & introductions, Wallet,
 Location. (0.1.53) Devices & agents is specified in §4 "Devices &
 agents", after Vault (decision 13 there). "Credential" is not in the drawer: it is reached from Settings →
@@ -1336,6 +1354,7 @@ rows below say "Vault" for the screens and "item" for the data.
 | Connections | Contacts | (0.1.90) Services are a separate "Services" section below the people, §4 "Service connections". Initial tiles, status (pending / active / stale / blocked); a star marks favourites (the owner's `favorite` flag, `connection.update`), whose tiles are teal; the floating action button invites a connection (0.1.11: QR or link, or scan the other's QR), the only invite entry point besides empty states. Each is titled "First Last" from the profile's core (VAULT-MESSAGING 0.18.0 §10.8), the display name, if any, as secondary text. Incoming requests show the requester's names the same way. Only between activation and the first `profile.update`, when the request's names are not at hand: "Name not shared yet"; never "Unnamed connection" |
 | Connection detail | — | Titled "First Last" (never an alias), the display name secondary. Profile shared with you (the names labelled as the name on their VettID account, never "verified"; display name, photo and items labelled as shared by them), sharing both ways ("You share with <First>": every share rule a row with its own settings, opening its editor or deleted after a confirmation, "Add a rule" up to 64, 0.1.20), a connection's requests (0.1.22, VAULT-MESSAGING 0.23.0 §10.4.1: muted, paused after several declines, declined ones in cooldown, with Mute/Unmute, Resume and "Allow declined requests again"), authenticate, the vault key fingerprint (`ik`, 8 groups of 4 hex digits, §10.8: the lasting identity check). The action bar: message, favourite, History, remove (confirmed). No safety code (it belongs to connecting: the invite and request screens), no alias or notes, no edit or block (0.1.13; blocking stays on an incoming request) |
 | Approvals | — (VettID-specific) | Pending connection requests, grant requests, critical-item uses, share-rule decisions; approve/deny; critical items need the credential password. 0.1.22: a connection's asks within 10 minutes are one entry ("Sam asks for 3 things"), a connection whose asks are paused is a notice (resume, or remove the connection), a share question names the rule that asks first and warns when declining stops an item already shared, one question per item and connection |
+| Votes | — (VettID-specific) | (0.1.102, owner decision of 2026-10-30; VAULT-MESSAGING 0.81.0 §10.19.) A service's proposals: open, upcoming, being checked and closed, with the member's own ballot and the checked results; one vote screen with the choices, the fixed disclosure and the cast; shown in the drawer only when the vault has a vote or a service to reconnect (§4 "Votes"). Not in Messages or Approvals |
 | Vault | Folder list | Titled "Vault" (0.1.11; was "Items"). Items per VAULT-ITEMS: name, category, typed fields, tags, sensitivity (data / secret / critical); filter by tag (0.1.21: "✕ Clear" ends the filter chips while a filter is on); each tag in its own colour (0.1.21), stored in the vault's tag registry and the same on every device, the least-used of a palette of ten for a new tag, picked by the member on Manage tags (0.1.25; `@profile` always gold); add/edit from templates ("Save item" in the top bar, 0.1.21); share rules by tag, as many per connection as needed (up to 64), each with its own tags, mode (default: ask each time), fetch limit and end (presets or a custom date and time), overlaps shown (0.1.20); one tag per rule, per-hour and per-day limits, `ask` wins, rules named by their tags, "Save rule" in the top bar (0.1.22). Critical items live in the Protean Credential and are never shared by a rule |
 | History | — (VettID-specific) | The member's audit log (0.1.11, `audit.list`, VAULT-MESSAGING 0.20.0 §10.9), read-only: a search field (the vault searches, `q`), filter chips (category, connection, date range), a list of entries newest first with infinite scroll, and an entry detail, each entry's icon in its category's colour (0.1.22); a ⋯ menu with **Export…** (0.1.17: CSV or JSON of what the filters show, with the vault PIN, saved through "Save to…"). Details below |
 | Notifications | — (Proton has none; a bell as in most apps) | 0.1.23 (owner answers of 2026-10-09): the vault's feed (VAULT-MESSAGING §10.9), opened from the bell in the top bar with the unread count; grouped by day, urgent items first, unread and read, swipe to archive or to mark read, an Archived view; each item opens the screen it is about; system notifications through the member's notification mode (D7). Details below |
@@ -2282,7 +2301,8 @@ gets its own indicator, apart from the bell.
    pending, not decided (on this phone or another device) and not
    expired. The count is the number of **entries** (a connection's
    asks within 10 minutes are one entry, 0.1.22; a batch is one).
-   Never counted: a notice (a paused connection's, a rate limit), the
+   Never counted: a notice (a paused connection's, a rate limit), a vote
+   (0.1.102, §4 "Votes": it lives days and has its own count), the
    member's own outgoing requests, a row that waits for the other side
    (an approved connection awaiting its peer), and a location request
    the member answered **Not now**. The vault has no decline (§4
@@ -4830,6 +4850,8 @@ The Call button is simply absent. **"What this service can ask"**:
 **"It can ask you to confirm a sign-in or approve an action. It can't
 message or call you, and it can't ask for your data."** The line is the
 vault's rule for this release; it is revised with any contract.
+(0.1.102) Where the vault has the vote feature the line is
+`service_detail_can_ask_body_votes` of §4 "Votes".
 
 **If the vault says `forbidden`** to something sent to a service (an
 old build that still offers it): "Services can't do that." and nothing
@@ -4984,6 +5006,175 @@ others and their notification; the notice offers the mute; the unflagged `approv
 the ask as before; a flag for an unknown `request_id` does nothing;
 History shows "Request withdrawn" and nothing about declined; the notice has no
 error colour.
+
+### Votes (0.1.102)
+
+*Owner decision of 2026-10-30 (VAULT-MESSAGING 0.81.0 §6.4 "Votes", §10.19, §15 item 48; BALLOT-PROTOCOL 0.11.1). Every member-facing text below was **approved by the owner on 2026-10-30**. Not built. Vault: staging release 25 (`features/vote`); until the vault answers `vote.list`, nothing here shows.*
+
+A service (VAULT-MESSAGING §1.1) can put a **proposal** to its members. The member chooses once; the vault signs and sends the vote; the service records it and later publishes the results; the vault checks them. The vault does every check and signature (§10.19.4 to §10.19.6); the app shows, asks and hands over public documents.
+
+**What the app may say, and what it must not.** The protocol guarantees, and the app says, only this:
+
+| Say | Why it is true |
+|---|---|
+| The service **sees how you vote and keeps that record**; the published results show only an **anonymous code** for you | BALLOT-PROTOCOL §1, §5: the vote is pseudonymous, not secret. The sentence is the app's own, fixed, shown before every cast, and no proposal can change or leave it out |
+| Your vote **can't be changed** once cast | One ballot per code, final at the receipt (§10.19.5) |
+| The service **recorded** your vote (a receipt is held) | The signed receipt (§10.19.5) |
+| The published results **include** your vote | Only after the vault's results check passes (§10.19.6) |
+
+The app **never** says: that the vote is "secret" or "anonymous" without "the published results" (the service knows), that a vote "is counted" before the results check, or that anything is "verified", "safe" or "trusted" about the service. A vote not yet checked is "recorded", not "counted". If the results do not match, it says so and shows the proof.
+
+**Where a proposal appears.** A new **Votes** entry in the drawer, after Approvals. It is shown **only when the vault answers `vote.list` and holds at least one vote, or lists a `reconnect` connection** (§10.19.8): a member with no service that votes sees nothing (owner rule: ask only for what is used now; no empty screen). A vote is never in Messages (services are not), and **not in Approvals** and not in the approvals indicator: it lives days and has its own count, a small badge on the drawer entry equal to the votes that are `open` and not yet voted on (not `upcoming`, `checking` or `closed`). The Notifications screen lists the feed items `vote.open`, `vote.closing`, `vote.result` and `vote.problem`, and each opens its vote. The service's connection detail has a row **"Votes from <name>"** (the list for that connection) and the line "What this service can ask" gains votes.
+
+**Screens.**
+
+1. **Votes** (the list): a section **Open** (open, upcoming, being checked) and a section **Closed**, newest close first within each as the vault orders them. A row: the title (the service's words, one line, ellipsized), the service's name with the **"Service"** label, a time line ("Closes Fri 6 Nov, 5:00 PM", "Opens …", "Closed …") and a status chip: *Not voted yet*, *You voted*, *Waiting for the service*, *Being checked*, *Results are out*, *Needs your attention* (any ballot or check problem), *You didn't vote* (a closed vote without a ballot). The state is words, never colour alone. If `reconnect` is not empty, the top of the list is the **"Connect again to vote"** notice (below).
+2. **A vote:**
+   - title, the service's name with "Service" and "Name given by the service" (as in "Service connections"), and the proposal `text` as **plain text in the service's words** (control and bidirectional-override characters removed; no links, no markup; the whole text scrolls; never truncated), captioned "Written by <service>";
+   - the quorum as the service states it, and whether it says the vote is binding (both as the service's claim); the closing time (and "The closing time was extended to …" after an extension);
+   - **Choose one:** the choices in the order sent, each with its label as sent (the reserved `abstain` too, whatever its label says), as a radio group. **Cast your vote** is enabled once a choice is selected and `can_cast` is true; otherwise the reason is written where the button would be (`cannot_cast`, the table below), never only a disabled button.
+3. **Confirm sheet** ("Vote “<label>”?"): the fixed disclosure sentence, "Your vote can't be changed after you cast it.", **Cast vote** and **Back**. Then, unless the credential's unlock window is open, the existing **unlock window prompt** (§4 "The unlock window prompt", also used before `vote.cast`): "Confirm with your credential password", "Your vote is signed with your credential. Enter your credential password."; then `vote.cast`.
+4. **After the cast:** the vote screen shows the state in words: *Sending your vote to <service>…* (`sending`), *Waiting for <service> to confirm* with the line "Your vote is saved on your vault and is sent again until <service> answers" (`waiting` or a slow `sending`; never "failed"), *<service> recorded your vote. It can't be changed.* (`recorded`), and after the results check *The published results include your vote.* The member's own choice is shown (from `vote.get`, which alone carries it) beside the state. A `Check with the service` text button (`vote.check`) appears while the ballot is not recorded.
+5. **Results** (after `closed` and a passed check): "Results", each choice with its count, "<ballots> of <eligible> eligible members voted", the quorum line computed from the published numbers, and, if `counts.unhandled` is above 0, the line about messages that could not be read. Every number is from the verified results; before then, none is shown.
+6. **A problem:** `failed`, `conflict`, `disputed`, `rejected`, `refused` (except a plain final `closed`/`late`) and a signed `not_eligible` show their text and **Save the proof**: after the warning `vote_save_proof_warning`, the app calls `vote.evidence` and offers the JSON through "Save to…" as History's export does. On a problem record, after the proof is saved, the screen offers **Release** (`vote.release`, with the vault PIN as History's export does; the vault refuses it until the proof has been exported, `evidence_not_exported`, and only for a closed or set-aside vote). Release frees the vault to keep new votes from that service (`vote_problems`) and keeps every signed item that is not on the public site. Nothing is sent anywhere by the app.
+7. **After a restore** (`vote.confirm`): a dialog names the service, the recorded choice and the title, and asks whether it is the member's vote.
+8. **Connect again to vote** (the `reconnect` list): a card on Votes, and on that person connection's detail: "<name> is registered with VettID as a service. This connection was made before it said it was a service, so it can't take part in votes. Remove it and connect again from a new invitation from <name>." with **Open the connection**. The app does not change the connection's kind or call it a service on its own (§6.4); the card says only what VettID's service list says.
+9. **Removing a service connection** that has an open vote or an unrecorded ballot first asks: "You have a vote with <name> that isn't finished. If you remove this connection you can't vote in it."
+
+**The app's work with the public site.** At unlock, whenever it opens, and then **every hour while it is open and unlocked** (the vault can be reached only then), the app fetches `services.json`, `services.json.sig` and the site's proposal index from votes.vettid.org with no session, no cookies and no identifier, and sends them in `vote.site.sync` (§10.19.8); a pending results check is fetched the same way and sent in `vote.results.submit` after the app's own observer check (BALLOT-PROTOCOL §8.4). The app also fetches the vote's own documents (`p/<proposal_id>/…`) and the index when the member opens a vote screen, so that the vault can compare the proposal with the public copy before and after a cast; only a positive difference stops a cast, a site that cannot be reached or does not list the proposal yet only shows a warning (VAULT-MESSAGING §10.19.4). There is no background job: a locked vault cannot be handed anything, and the vault checks all of it again. The site sees the phone's address and the hour. If the site cannot be reached, the app says nothing unless a vote is waiting on it (`checking`, or a pending check), and then says so on that vote (below).
+
+**Notifications** (the member's mode, D7; the text shows names only where names and text are shown). The vault makes the feed items (§10.19.7); a held vault makes them and wakes nobody. A held or locked phone shows them after the unlock or check, with the Notifications badge. The notification never contains the member's choice (the vault never has it in a feed item).
+
+| Kind | Title | Second line |
+|---|---|---|
+| `vote.open` | A new vote | <service>: <proposal title> |
+| `vote.closing` | A vote closes soon | <service>: <proposal title> |
+| `vote.result` | Vote results are out | <service>: <proposal title> |
+| `vote.problem` (`high`) | Check your vote | Something about your vote needs your attention. |
+
+Tapping one opens that vote after the unlock, as the other notifications open theirs. The title is cut at 80 characters and cleaned like the vote's text. The channel is "Vault activity"; no new channel.
+
+**History** (VAULT-MESSAGING §10.9; the app maps `ref` to the title from `vote.list` in memory, and says "a vote" without it):
+
+| Kind | History title |
+|---|---|
+| `vote.cast` | You cast a vote: “<title>” |
+| `vote.recorded` | <service> recorded your vote: “<title>” |
+| `vote.refused` | <service> did not accept your vote: “<title>” (<reason>) |
+| `vote.conflict` | <service> holds a different vote under your code: “<title>” |
+| `vote.receipt_rejected` | A receipt for your vote could not be checked: “<title>” |
+| `vote.extended` | The closing time of “<title>” was extended |
+| `vote.extension_rejected` | A change of closing time was not accepted: “<title>” |
+| `vote.proposal_rejected` | A vote from <service> could not be checked and was set aside |
+| `vote.proposal_conflict`, `ref` ending `:mismatch` | The vote from <service> differs from the one published on the public site |
+| `vote.proposal_conflict`, `ref` ending `:not_listed` | A vote from <service> is not on the public site yet |
+| `vote.proposal_conflict`, `ref` ending `:unpublished` | A vote from <service> was never published on the public site |
+| `vote.proposal_conflict`, no suffix | <service> sent two different versions of one vote |
+| `vote.list_rejected` | The list of services was not accepted |
+| `vote.check_ok` | The published results include your vote: “<title>” |
+| `vote.check_unconfirmed` | Your vote could not be confirmed in the published results: “<title>” |
+| `vote.check_failed` | The published results do not match your vote: “<title>” |
+| `vote.check_gave_up` | The results of “<title>” could not be checked |
+| `vote.released` | Vote record released: “<title>” |
+| `drop.vote_malformed`, `drop.vote_limit`, `drop.vote_not_service` | A vote message was ignored |
+
+The History category is "Connections" (with the service's name); no entry shows a choice.
+
+**Texts (approved by the owner, 2026-10-30)** (all English; `%s` is the service's name unless noted):
+
+| Key | Text | Note |
+|---|---|---|
+| `votes_title` | Votes | drawer, screen |
+| `votes_section_open` / `votes_section_closed` | Open / Closed | |
+| `vote_row_closes` / `vote_row_opens` / `vote_row_closed` | Closes %s / Opens %s / Closed %s | a date and time |
+| `vote_chip_not_voted` | Not voted yet | |
+| `vote_chip_recorded` | You voted | |
+| `vote_chip_waiting` | Waiting for the service | |
+| `vote_chip_checking` | Being checked | |
+| `vote_chip_results` | Results are out | |
+| `vote_chip_problem` | Needs your attention | |
+| `vote_chip_missed` | You didn't vote | closed, no ballot |
+| `vote_written_by` | Written by %s | under the proposal text |
+| `vote_quorum_line` | Quorum, as the service states it: %s | |
+| `vote_binding_yes` / `vote_binding_no` | The service says this vote is binding. / The service says this vote is not binding. | the service's claim |
+| `vote_extended` | The closing time was extended to %s. | |
+| `vote_choose` | Choose one | |
+| `vote_cast_button` | Cast your vote | |
+| `vote_disclosure` | %s will see how you vote and keep that record. The published results show only an anonymous code for you. | **fixed**; the app's words, never the proposal's (BALLOT-PROTOCOL §5) |
+| `vote_final` | Your vote can't be changed after you cast it. | |
+| `vote_confirm_title` | Vote “%s”? | the choice's label |
+| `vote_confirm_yes` / `vote_confirm_back` | Cast vote / Back | |
+| `vote_password_title` / `vote_password_body` | Confirm with your credential password / Your vote is signed with your credential. Enter your credential password. | the existing sheet |
+| `vote_state_sending` | Sending your vote to %s… | |
+| `vote_state_waiting` | Waiting for %s to confirm. Your vote is saved on your vault and is sent again until %s answers. | never "failed" |
+| `vote_state_recorded` | %s recorded your vote. It can't be changed. | |
+| `vote_state_in_results` | The published results include your vote. | only after the check |
+| `vote_state_unconfirmed` | Not confirmed. %s sent no receipt for your vote, and the published results don't settle whether it counted. | |
+| `vote_state_didnt_vote` | You didn't vote in this one. | verified: no ballot under your code |
+| `vote_check_with_service` | Check with the service | |
+| `vote_check_pending` | VettID will check the published results against your vote. | |
+| `vote_check_gave_up_site` | VettID could not reach the votes site for 7 days, so your vote has not been checked. | the app's last attempt failed to connect; with **Check again** |
+| `vote_check_gave_up_unpublished` | The results of this vote were not published within 7 days, so your vote has not been checked. | the site answered but had no results; with **Check again** |
+| `vote_check_again` | Check again | |
+| `vote_failed_title` | The published results don't match your vote | |
+| `vote_failed_body` | You can save the proof and show it to the organisation. | |
+| `vote_conflict_body` | %s holds a different vote under your code than the one you cast. Save the proof and show it to the organisation. | |
+| `vote_state_late_pending` | %s says the vote had closed. VettID is asking whether an earlier send arrived in time. | `closed`/`late` while not final; never "not counted" yet |
+| `vote_refused_late` | The vote had closed when your vote arrived, so it was not counted. | only when final: a signed status answer holds no ballot |
+| `vote_refused_not_active` | %s says you are no longer a member for this vote, so your vote was not counted. | |
+| `vote_refused_not_eligible` | %s says you were not on the list for this vote. You can save the proof and show it to the organisation. | also a signed `not_eligible` from `vote.status` |
+| `vote_refused_bad_ballot` | %s did not accept your vote. You can save the proof and show it to the organisation. | |
+| `vote_refused_ended` | Your connection to %s ended before your vote was recorded. | |
+| `vote_not_signed_in` | Before you can vote, sign in to %s once with VettID. This lets %s check that your vote is yours. | `not_signed_in`; also the reason on a `waiting` ballot |
+| `vote_closing_soon` | This vote closes in less than 2 minutes. It is too late to cast your vote from this phone. | `closing` |
+| `vote_not_open` | This vote opens %s. | `not_open` |
+| `vote_closed_banner` | This vote has closed. | |
+| `vote_checking_list` | VettID is checking this vote. It needs the list of services from votes.vettid.org. Check that this phone is online. | `checking`; no voting |
+| `vote_checking_site` | VettID is checking this vote. It is waiting for the vote's documents from votes.vettid.org. | |
+| `vote_no_connection` | You are no longer connected to %s, so you can't vote. | `connection_unavailable` |
+| `vote_results_title` | Results | |
+| `vote_results_turnout` | %1$d of %2$d eligible members voted. | |
+| `vote_results_row` | %1$s: %2$d | label, count |
+| `vote_results_unhandled` | %1$d messages sent to %2$s during the vote were not handled; any vote among them was not counted. | only if above 0 |
+| `vote_quorum_met` / `vote_quorum_not_met` | Enough votes were cast: %1$d, and the service asked for at least %2$d. / Not enough votes were cast: %1$d, and the service asked for at least %2$d. | computed from the published numbers; abstentions count |
+| `vote_save_proof` | Save the proof | |
+| `vote_save_proof_warning` | The file shows how you voted. Keep it private, and share it only with the organisation. | a confirmation before saving |
+| `vote_rejected_title` | VettID set this vote aside | `rejected`; the reason follows (signature, anchor, record) and **Save the proof** |
+| `vote_checking_trust` | VettID can't finish checking this vote yet: its list of trusted logs may be out of date. Update VettID if this lasts. | `checking`, `trust_root` |
+| `vote_checking_restore` | VettID is asking %s what it recorded for you before you can vote. | `checking`, `restore` |
+| `vote_not_published` | This vote is not on the public site yet. You can still vote: VettID will compare it with the public copy when it appears. | warning only, `site` `not_listed` |
+| `vote_site_unreachable` | VettID could not reach the votes site to compare this vote with the public copy. You can still vote: VettID will compare it later. | warning only, `site` `unreachable`; shown above **Cast your vote** |
+| `vote_dropped` | %1$s has more votes under way than your vault can keep, so %2$d were not kept. | `dropped` in `vote.list`; also a feed item |
+| `vote_problems` | %1$s has %2$d unresolved vote problems. Save the proof of each and release them to receive new votes from %1$s. | `problems` in `vote.list`; **Release** on each evidence screen after **Save the proof** (`vote.release`) |
+| `vote_site_mismatch` | The vote you received differs from the one published on the public site, so you can't vote in it. You can save the proof. | `site_mismatch`, **before a cast** only; also a feed item |
+| `vote_site_mismatch_after` | The vote you voted on differs from the one published on the public site, so your vote may not count. Save the proof and show it to the organisation. | a `mismatch` found after a cast |
+| `vote_unpublished` | This vote was never published on the public site. Your vote may not count. Save the proof. | `site` `unpublished`; also a feed item |
+| `vote_not_listed_late` | This vote is still not on the public site, which is unusual. You can vote, but keep the proof. | `not_listed` after 10 minutes; also a feed item |
+| `vote_restore_title` | Is this your vote? | |
+| `vote_restore_body` | %1$s says it recorded this vote for you: “%2$s” on “%3$s”. | |
+| `vote_restore_yes` / `vote_restore_no` | Yes, it's mine / No, it isn't mine | |
+| `vote_reconnect_title` | Connect again to vote | |
+| `vote_reconnect_body` | %s is registered with VettID as a service. This connection was made before it said it was a service, so it can't take part in votes. Remove it and connect again from a new invitation from %s. | |
+| `vote_reconnect_open` | Open the connection | |
+| `vote_connection_row` | Votes from %s | connection detail |
+| `vote_remove_warning` | You have a vote with %s that isn't finished. If you remove this connection you can't vote in it. | |
+| `service_detail_can_ask_body_votes` | It can ask you to confirm a sign-in, approve an action or vote. It can't message or call you, and it can't ask for your data. | replaces `service_detail_can_ask_body` where the vault has the feature |
+| `notif_vote_open` / `notif_vote_closing` / `notif_vote_result` / `notif_vote_problem` | A new vote / A vote closes soon / Vote results are out / Check your vote | titles |
+| `notif_vote_problem_text` | Something about your vote needs your attention. | |
+
+**Accessibility.**
+
+- The choices are one radio group, each option's accessible name its label and, for the selected one, "selected"; the group is named "Choose one". Focus order: the text, the quorum, the choices, **Cast your vote**. The proposal text is a single scrolling region; a TalkBack user can read it by paragraph, and reading it is not required to vote.
+- The fixed disclosure is its own text element in the confirm sheet and is **read first** when the sheet opens (the sheet takes accessibility focus on it); it is not placed in a collapsed or secondary area. The sheet's default focus is never on **Cast vote**.
+- Times are written ("Closes Friday 6 November at 5:00 PM"), not only shown as countdowns; a time left is announced on request, not every second. A state is never shown by colour or icon alone: every chip has its words, and a chip is read with the row ("Adopt the budget, from the service Example, you voted").
+- All text scales to 200% without clipping or horizontal scrolling; targets are at least 48 dp; the confirm sheet and the list work with a hardware keyboard and with switch access.
+- A failure or refusal is announced as a live region when it arrives while the screen is open.
+
+**Screen privacy** (open point for the owner, decision A): the vote screen, the confirm sheet and a vote's evidence screen are excluded from screenshots and the recent-apps preview (`FLAG_SECURE`, as §4 "Recovery: type the code" already proposes), because a vote's choice is shown on them. Recommended: yes. Without it a screenshot can capture a choice.
+
+**Not built, on purpose.** No "secret ballot" language; no change of vote; no share or copy of a choice; no verification badge for a service; no reminder of the app's own (the vault's `vote.closing` is the one); no widget; no desktop view (VAULT-MESSAGING §15 item 48, decision 4).
+
+**Tests.** The list shows only with a vault that answers `vote.list` and a vote or a `reconnect` entry, and never an empty screen; the badge counts open, not yet voted votes only; the vote screen shows the text as plain text (a text with markup, a link, control characters and a bidirectional override renders as clean text); the choices in order, `abstain` as sent; **Cast** disabled with the reason written for each `cannot_cast` code; the confirm sheet shows the fixed sentence with the service's name, and a proposal whose text contains the sentence or a different one changes nothing; the unlock prompt appears only without an open window and the request is sent once; each ballot state, refusal and check outcome shows its text (a table test over `ballot.state`, `code` and `check.state`); a `waiting` ballot never shows "failed"; "counted"/"include" appears only for a verified check; the choice appears in no list, notification, feed item, History entry or log (a scan of the app's logs after a cast); `Save the proof` writes the vault's evidence unchanged; restore confirm; the reconnect card from a `reconnect` entry and no change to the connection; removing a service with an unfinished vote asks; the hourly sync only while unlocked and no request without a session; offline: nothing shown unless a vote is `checking` or a check is pending; TalkBack reading order and focus on the disclosure; font scale 200%; a held vault shows the owner check, not the Votes list; the texts of the table above in the screen catalog.
 
 ### Devices & agents (0.1.53)
 
@@ -5471,8 +5662,8 @@ this phone can no longer show. Deny it, or let it expire." with
 
 #### The unlock window prompt
 
-Used before `leash.grant.issue` and an agent's `share.rule.set`, and
-after any `credential_locked`:
+Used before `leash.grant.issue`, an agent's `share.rule.set` and (0.1.102)
+`vote.cast`, and after any `credential_locked`:
 
 - A sheet titled "Confirm with your credential password"; body "Giving
   <name> a permission is signed with your credential, so only you can
