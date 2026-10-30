@@ -35,13 +35,14 @@ changelog:
     only with `purpose: "signin"`. A receiver ignores a malformed value,
     and any value on an approval or on a challenge without a purpose
     (the challenge is still handled, as without it), so the apps never
-    read a code out of `context`. `pending.list` (§10.4.2) repeats the `.pending` body, so its
-    `authenticate` row carries `match_code` too. **Display only**: the code is not
-    signed, and is not in `.response` or `.result`; signing and its
-    vectors are exactly as 0.65.0. The app shows the code in large
+    read a code out of `context`. `pending.list` (§10.4.2) repeats the
+    `.pending` body, so its `authenticate` row carries `match_code`
+    too. **Display only**: the code is not signed, and is not in
+    `.response` or `.result`; signing and its vectors are exactly as
+    0.65.0. The app shows the code in large
     digits at the top of the sign-in screen. The service vault keeps the
     code in `context` until the apps have shipped. §10.4 also notes that
-    the signature labels are not prefix-free. §15 item 44 (new). **Needs
+    the signature labels are not prefix-free. §15 item 46 (new). **Needs
     a staging vault release after 24** (vettid-vault: parse, validate,
     pass through `.pending`), a service vault change
     (vettid/service-vault: send `match_code`) and app work
@@ -7253,8 +7254,9 @@ vault signs a fresh challenge with the member's **credential key**
   challenger could write a code-looking string of its own.
   - Format: exactly 2 or 3 ASCII digits, `[0-9]{2,3}` (the service
     vault uses 2 today; 3 leaves room for more sign-ins at once). It is
-    a string, so "07" is not "7". Nothing else (no sign, space or
-    other script's digits) is valid.
+    a string, so "07" is not "7"; a JSON number (42) or `null` is
+    malformed. Nothing else (no sign, space or other script's digits)
+    is valid.
   - Only with `purpose: "signin"`. On an `approval`, or a challenge
     without a purpose (or with an unknown one, treated as absent), a
     receiver ignores it: it does not pass it to the apps, does not
@@ -7288,6 +7290,10 @@ vault signs a fresh challenge with the member's **credential key**
     else's attempt, can tell which is theirs by comparing the number
     with the sign-in screen in front of them. A challenger that wants
     to mislead can show any number; the code is not an authenticator.
+    In particular, a site that relays the real sign-in page in real
+    time shows the matching number: a match says that the prompt and
+    the screen belong to the same sign-in, not that the screen is the
+    real service. The apps MUST NOT present a match as verification.
     The vault MAY audit a malformed code it ignored.
   - A vault ignores a `match_code` in a response or result, and a
     challenger sends none.
@@ -7298,7 +7304,7 @@ vault signs a fresh challenge with the member's **credential key**
     and `"vettid/vms/2/conn-auth-purpose"` are not prefix-free (the
     first is a prefix of the second). Safety rests on the fixed
     structure of `m` (its first 96 bytes and the 26-byte `request_id`
-    are fixed) and on the length prefix of `m_p`, so a new label MUST
+    are fixed-length) and on the length prefix of `m_p`, so a new label MUST
     be checked against both before it is added.
 - The requesting vault checks that the response answers an outstanding
   challenge it sent to that connection, verifies `sig` under `key` over
@@ -23443,10 +23449,14 @@ Follow-ups:
       that a number does not help).
     - *Settled with the decision:* 2 digits stays what the service
       vault sends, 3 is allowed; the code does not stop a service
-      from showing a false number.
+      from showing a false number, and a site that relays the real
+      sign-in page in real time shows the matching number: a match says
+      that the prompt and the screen belong to the same sign-in, not
+      that the screen is the real service.
     Follow-ups: vettid-vault (a staging release after 24: parse and
-    validate, pass through `.pending`, optionally audit a malformed
-    code), the service vault (vettid/service-vault: send `match_code`;
+    validate, store the validated `match_code` with the received
+    challenge so that `pending.list` repeats it, pass through
+    `.pending`, optionally audit a malformed code), the service vault (vettid/service-vault: send `match_code`;
     keep the context line until the apps ship, then drop it),
     MEMBER-SERVICE-PLAN §4.2 (the page shows the same number), the
     apps (ANDROID-PLAN 0.1.100, IOS-PLAN 0.1.50).

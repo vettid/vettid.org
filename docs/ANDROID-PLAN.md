@@ -4863,7 +4863,8 @@ A sign-in challenge (`purpose: "signin"`) may carry `match_code`, 2 or
   each digit reads alone; never truncated, scaling with the system font
   size), and under it **"Check that the sign-in screen shows the same
   number: 42"**. Then "Their note" with `context` (still the challenger's
-  words), "Only approve if you are signing in right now.", **Approve**
+  words; the heading "Their note" appears only on this screen, with a
+  code, and without a code `context` is shown as it is today), "Only approve if you are signing in right now.", **Approve**
   and **Not me**. The notification text does not carry the number (a
   notification can be read on a locked phone; the number is for the
   member who opened the prompt).
@@ -4880,21 +4881,26 @@ A sign-in challenge (`purpose: "signin"`) may carry `match_code`, 2 or
   separated by spaces). The instruction line is its own text, read as
   written. It says nothing about `context`: the app does not claim
   the note was checked.
+- **No "verified" look.** A match proves only that the prompt and the
+  sign-in screen belong to the same sign-in; a site that relays the
+  real page shows the same number. The block gets no check mark, shield,
+  success colour or "verified" word, and nothing in the texts says the
+  sign-in is safe (VAULT-MESSAGING §10.4, "Display only").
 
 **Draft texts**
 
-| Key | Text |
-|---|---|
-| `match_code_label` | Match code |
-| `match_code_instruction` | Check that the sign-in screen shows the same number: %s |
-| `match_code_a11y` | Match code %s (the digits spoken one by one) |
-| `signin_their_note` | Their note |
+| Key | Text | Note |
+|---|---|---|
+| `match_code_label` | Match code | |
+| `match_code_instruction` | Check that the sign-in screen shows the same number: %s | |
+| `match_code_a11y` | Match code %s | the digits are spoken one by one |
+| `signin_their_note` | Their note | only with a code |
 
 **Tests.** A code shows large above the note; no code shows today's
 screen; a 1-digit, 4-digit, non-digit, spaced or empty code shows
-today's screen; a code on an approval is not shown; a note that says
+today's screen; a JSON number (42) or `null` shows today's screen; "07" is shown as 07; no "Their note" heading without a code; a code on an approval is not shown; a note that says
 "match code 42" without a field shows no block; font scale 200%;
-the notification text carries no code.
+the notification text carries no code; the block has no check mark or success styling.
 
 ### Devices & agents (0.1.53)
 

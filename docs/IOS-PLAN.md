@@ -1575,7 +1575,9 @@ monospaced-digit Dynamic Type style (scaling, never truncated), the
 VoiceOver label "Match code 4 2", the digits spoken one by one
 (`accessibilitySpeechSpellOut` on the digits, as the Android plan's
 `TtsSpan` digits), and no code in the notification text. The
-instruction line is its own text. A challenge without a valid
+instruction line is its own text. The block has no check mark, success
+colour or "verified" wording: a match does not show that the screen is
+the real service (ANDROID-PLAN, "No 'verified' look"). A challenge without a valid
 `match_code` shows today's screen; the app never reads digits from
 `context`. Draft texts as ANDROID-PLAN's table: "Match code", "Check
 that the sign-in screen shows the same number: %@", "Match code %@"
