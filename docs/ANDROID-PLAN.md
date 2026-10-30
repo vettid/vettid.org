@@ -4,8 +4,8 @@ status: draft
 version: 0.1.101
 date: 2026-10-30
 changelog:
-  - 0.1.101: owner decision of 2026-10-30 (VAULT-MESSAGING 0.81.0, §15
-    item 48; vettid.org #465). New §4 "Withdrawn requests (0.1.101)":
+  - 0.1.101: owner decision of 2026-10-30 (VAULT-MESSAGING 0.80.0, §15
+    item 47; vettid.org #465). New §4 "Withdrawn requests (0.1.101)":
     when the challenger withdraws a sign-in or approval challenge, the
     vault sends `sync.event{connection.authenticate.decided,
     approved: false, withdrawn: true}`. The app removes the ask from the
@@ -14,8 +14,8 @@ changelog:
     withdrawn (never an error, never "declined"); History labels
     `connection.authenticate.withdrawn` "Request withdrawn". An app that sees
     `approved: false` without the flag closes the ask as for a decision
-    elsewhere. Draft texts for the owner. Vault: a staging release after
-    24.
+    elsewhere. Texts approved by the owner (2026-10-30). Vault: a staging
+    release after 24.
   - 0.1.100: owner decision of 2026-10-28 (VAULT-MESSAGING 0.79.0, §15
     item 46). New §4 "Sign-in match code (0.1.100)": a sign-in challenge
     with a valid `match_code` shows it in large digits near the top of
@@ -1206,7 +1206,7 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.81.0) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.80.0) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
@@ -4920,9 +4920,9 @@ the notification text carries no code; the block has no check mark or success st
 
 ### Withdrawn requests (0.1.101)
 
-*Owner decision of 2026-10-30 (VAULT-MESSAGING 0.81.0 §10.4
-"Withdrawing a challenge", §15 item 48; vettid.org #465). Draft texts for
-the owner. Not built; needs the vault release.* A service that no longer
+*Owner decision of 2026-10-30 (VAULT-MESSAGING 0.80.0 §10.4
+"Withdrawing a challenge", §15 item 47; vettid.org #465). Texts approved by
+the owner, 2026-10-30. Not built; needs the vault release.* A service that no longer
 accepts a sign-in or approval challenge (a sign-in superseded by a newer
 one, an approval decided or cancelled) tells the member's vault, which
 closes the ask. The member must see that it closed, not a request that
@@ -4962,7 +4962,7 @@ silently vanishes or fails.
 - **Never** presented as a failed sign-in or a warning: a service
   withdraws a sign-in routinely (a reload or a second tab).
 
-**Draft texts** (draft for owner approval)
+**Texts** (approved by the owner, 2026-10-30)
 
 | Key | Text | Note |
 |---|---|---|
