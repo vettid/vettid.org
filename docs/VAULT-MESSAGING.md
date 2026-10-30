@@ -61,7 +61,7 @@ changelog:
     `drop.service_type` has `ref` = `<connection_id> <type>` (one space),
     as vettid-vault #170 implements it. §15 item 48: the questions
     answered by the service are marked. ANDROID-PLAN 0.1.105 (the text
-    for `clock`, a draft for the owner). Nothing new is needed of the
+    for `clock`, approved by the owner 2026-10-30). Nothing new is needed of the
     service; vettid-vault, the apps and staging release 25 follow the
     corrected text
   - 0.81.0: **owner decision 2026-10-30** (ANDROID-PLAN 0.1.102, IOS-PLAN
@@ -24384,8 +24384,8 @@ Follow-ups:
        else `rejected` (`anchor`); `max(t_tsa, t_int) ≤ now + 300 s` else
        `checking` (`clock`); `t_tsa ≤ t_relay + 300 s` stays a positive
        failure; certificates are judged at `t_tsa` and `t_int`. The app
-       text `vote_checking_clock` (ANDROID-PLAN 0.1.105) is a **draft for
-       the owner's approval**; an operator alarm note is in step 6.
+       text `vote_checking_clock` (ANDROID-PLAN 0.1.105) was **approved by
+       the owner on 2026-10-30**; an operator alarm note is in step 6.
     7. §10.19.4 "The Sigstore profile", §11.10.8: Rekor v1 `hashedrekord`
        0.0.1 in a v0.3 bundle, an RFC 3161 timestamp checked against the
        chain in the trust root (no embedded certificates),
