@@ -4274,7 +4274,7 @@ is a fault of the TSA, Rekor or the anchorer, not of the vault.
 
 `services.json` has no limit on services or keys but a cap of 4,194,304
 bytes in this release; a vault given a larger list ignores it and keeps
-its last verified list (`vote.list_ignored`, `ref` = `<version>:size`).
+its last verified list (`vote.list_ignored`, `ref` = `size:<hash>`).
 Alarm when the published `services.json` reaches 80 percent of the
 smallest cap of any live release (3,355,443 bytes against 4,194,304
 today), and release a vault with a higher cap before the list passes it:
