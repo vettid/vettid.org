@@ -1,10 +1,10 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.104
+version: 0.1.106
 date: 2026-10-30
 changelog:
-  - 0.1.104: owner decision of 2026-10-30: no exception to "memory only".
+  - 0.1.106: owner decision of 2026-10-30: no exception to "memory only".
     The three event-only kinds (`connection.authenticate.pending`,
     `device.session.pending`, `approval.pending`) are no longer kept
     encrypted in `pending-asks.bin` until their `exp`; the exception is
@@ -16,6 +16,16 @@ changelog:
     the app restarted could not be kept" banner is gone with the file; a
     leftover `pending-asks.bin` is deleted at the next start (§5 "What
     the phone keeps").
+  - 0.1.105: erratum (VAULT-MESSAGING 0.81.1, §15 item 48). New text
+    `vote_checking_clock` for the vault's new checking reason `clock` (a
+    timestamp the vault cannot yet verify only because of its own clock):
+    the vote screen says VettID has a time check to retry on its own
+    side, not that this phone or VettID is out of date. **Text approved by the owner, 2026-10-30.** The
+    other vote texts are unchanged. The app also hands the vault the
+    missing versions of the service list in order in `vote.site.sync`
+    once the site serves them (VAULT-MESSAGING §10.19.4 "Catch-up"). Tests: a `checking` vote with reason
+    `clock` shows `vote_checking_clock`, offers no cast, and shows the
+    existing states once the vault reports another reason or `open`.
   - 0.1.103: owner decision of 2026-10-30: the "Their note" heading over
     `context` stays on every sign-in and approval screen, as both apps
     show it today, not only with a match code (§4 "Sign-in match code").
@@ -5156,6 +5166,7 @@ The History category is "Connections" (with the service's name); no entry shows 
 | `vote_save_proof_warning` | The file shows how you voted. Keep it private, and share it only with the organisation. | a confirmation before saving |
 | `vote_rejected_title` | VettID set this vote aside | `rejected`; the reason follows (signature, anchor, record) and **Save the proof** |
 | `vote_checking_trust` | VettID can't finish checking this vote yet: its list of trusted logs may be out of date. Update VettID if this lasts. | `checking`, `trust_root` |
+| `vote_checking_clock` | VettID can't finish checking this vote yet because of a time check on VettID's side. It will try again. | `checking`, `clock`; **approved by the owner 2026-10-30 (0.1.105)**; no voting |
 | `vote_checking_restore` | VettID is asking %s what it recorded for you before you can vote. | `checking`, `restore` |
 | `vote_not_published` | This vote is not on the public site yet. You can still vote: VettID will compare it with the public copy when it appears. | warning only, `site` `not_listed` |
 | `vote_site_unreachable` | VettID could not reach the votes site to compare this vote with the public copy. You can still vote: VettID will compare it later. | warning only, `site` `unreachable`; shown above **Cast your vote** |
@@ -6604,7 +6615,7 @@ attachments") and the History export (Storage Access Framework); both
 leave VettID by design. This includes pending approval
 events and the names on recent connection requests: they are shown while
 the vault is open and read again from the vault after the next unlock.
-(0.1.104) There is no exception: the three event-only kinds
+(0.1.106) There is no exception: the three event-only kinds
 (`connection.authenticate.pending`, `device.session.pending`,
 `approval.pending`) are memory only too, and come back from the vault
 with `pending.list` (VAULT-MESSAGING §10.4.2) after an unlock and after

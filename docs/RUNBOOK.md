@@ -4248,3 +4248,24 @@ key $1, DNS Firewall, query and flow logs, Lambda within the free tier).
 Each running m7g.large host adds ~$60 plus ~$5 for its public IPv4 and
 disk; an AMI build costs a few cents of builder time; each release's AMI
 snapshot is well under $1/month.
+
+## Vote checks: `checking (clock)` (VAULT-MESSAGING 0.81.1, §10.19.4 step 6)
+
+A vault shows a proposal as `checking` with reason `clock` when
+`max(t_tsa, t_int) > now + 300 s`: the RFC 3161 time or Rekor's
+`integratedTime` is more than 5 minutes ahead of the enclave's clock.
+Every vault on the host shows it at once and no member can fix it, so
+alarm on it (the fleet count of `checking (clock)` above zero for more
+than 15 minutes) and look at, in this order:
+
+1. The enclave host's time source (chrony or the Nitro clock) against the
+   relay's time: a clock more than 300 s behind real time.
+2. The timestamp authority's clock running ahead (a staging Sigstore TSA
+   fault); compare `genTime` of a fresh timestamp with real time.
+3. Rekor's clock running ahead (`integratedTime` of a fresh entry).
+4. The service vault's anchorer clock running ahead, if the other two are
+   right.
+
+A related positive failure, `rejected` (`anchor`), is a `t_int - t_tsa`
+outside -60 s to 600 s: the two servers disagree by more than that, which
+is a fault of the TSA, Rekor or the anchorer, not of the vault.
