@@ -1,9 +1,16 @@
 ---
 title: ANDROID-PLAN
 status: draft
-version: 0.1.98
-date: 2026-10-29
+version: 0.1.99
+date: 2026-10-30
 changelog:
+  - 0.1.99: erratum (VAULT-MESSAGING 0.78.1, from the reviews of
+    vettid-android #223 and #224): §4 Wallet "Library": the declared
+    differences with the vault are now the spec's rules for global
+    xpubs (the app refuses what the spec refuses, the vault accepts four
+    cases); the app accepts bytes after the last PSBT map, as the vault
+    does, until the vault refuses them (0.78.1), then it refuses them
+    too; an absent `cap` is no information, not "no limit"
   - 0.1.98: owner decision 2026-10-29: question 19 decided, **ACINQ
     bitcoin-kmp** (with secp256k1-kmp) behind `:core:chain`, BDK only as
     the fallback if bitcoin-kmp fails conformance. §4 Wallet "Library"
@@ -1174,7 +1181,7 @@ changelog:
     location phase (§6)
 owner: Al Liebl (Mesmer)
 related:
-  - VAULT-MESSAGING.md (0.78.0) — the app's contract with the vault
+  - VAULT-MESSAGING.md (0.78.1) — the app's contract with the vault
   - VAULT-ITEMS.md — items, tags and share rules (the Vault screens)
   - VAULT-PLAN.md (V6 clients)
   - RELAY-PROTOCOL.md (0.6.0), MEMBER-API.md
